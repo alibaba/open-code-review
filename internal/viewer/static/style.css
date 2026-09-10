@@ -680,6 +680,38 @@ h3 {
     word-break: break-word;
 }
 
+/* Grouping view: model-proposed file groups, indices resolved to paths */
+.grouping-view {
+    padding: 0.75rem 1.25rem;
+    background: var(--response-bg);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    max-height: 450px;
+    overflow-y: auto;
+}
+.grouping-group {
+    border-left: 3px solid var(--task-grouping);
+    padding-left: 0.75rem;
+}
+.grouping-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-strong);
+    margin-bottom: 0.25rem;
+}
+.grouping-files {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    color: var(--text-strong);
+    font-family: var(--mono);
+    word-break: break-word;
+}
+.grouping-unresolved { color: var(--text-faint); }
+
 /* Scrollbar styling */
 .response-text::-webkit-scrollbar { width: 6px; }
 .response-text::-webkit-scrollbar-track { background: transparent; }

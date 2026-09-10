@@ -322,6 +322,8 @@ func parseTemplate(name string) (*template.Template, error) {
 				return fp
 			}
 		},
+		"isGrouping":   func(tt TaskType) bool { return tt == GroupingTask },
+		"groupingView": groupingView,
 		"orderedTasks": func(tasks map[TaskType][]*TaskCard) []struct {
 			Type  TaskType
 			Cards []*TaskCard

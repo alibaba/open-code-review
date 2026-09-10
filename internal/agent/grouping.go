@@ -38,9 +38,14 @@ type FileGroupInfo struct {
 	Files []string `json:"files"`
 }
 
+// groupingResponse is one group as returned by the LLM. Files holds the integer
+// indices printed beside each file in buildFileList, not paths: an index costs a
+// few output tokens where a path costs its full length, so the response stays
+// well inside the completion limit even for large change sets and no longer
+// truncates into a whole-set per-file fallback.
 type groupingResponse struct {
-	Label string   `json:"label"`
-	Files []string `json:"files"`
+	Label string `json:"label"`
+	Files []int  `json:"files"`
 }
 
 // groupDiffsResult holds the grouping output and any LLM usage to record.
@@ -241,11 +246,16 @@ func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClie
 	return groups, usage, err
 }
 
+// buildFileList renders the change set for the grouping prompt, one file per
+// line, each prefixed with its zero-based index. The index is what the model
+// groups by (see groupingResponse): it maps back to diffs[i] in
+// parseGroupingResponse, so the two must agree on ordering — both walk diffs in
+// slice order. formatDiffEntry is left untouched because it is shared with the
+// other-changed-files block, which has no index to show.
 func buildFileList(diffs []model.Diff) string {
 	var sb strings.Builder
-	for _, d := range diffs {
-		sb.WriteString(formatDiffEntry(d))
-		sb.WriteString("\n")
+	for i, d := range diffs {
+		fmt.Fprintf(&sb, "[%d] %s\n", i, formatDiffEntry(d))
 	}
 	return sb.String()
 }
@@ -266,31 +276,30 @@ func parseGroupingResponse(content string, diffs []model.Diff) ([]FileGroup, err
 
 	var resp []groupingResponse
 	if err := json.Unmarshal([]byte(content), &resp); err != nil {
+		// A parse failure (including a response truncated by the completion limit)
+		// returns an error; the caller falls back to per-file dispatch. Indices
+		// keep this output an order of magnitude smaller than paths did, so a
+		// truncation that reaches this point is far rarer than before.
 		return nil, fmt.Errorf("parse grouping JSON: %w", err)
 	}
 
-	diffByPath := make(map[string]model.Diff, len(diffs))
-	for _, d := range diffs {
-		diffByPath[d.NewPath] = d
-	}
-
-	seen := make(map[string]bool, len(diffs))
+	seen := make([]bool, len(diffs))
 	var groups []FileGroup
 
 	for _, g := range resp {
 		var gDiffs []model.Diff
-		for _, f := range g.Files {
-			if seen[f] {
-				// Skip duplicate — file already assigned to an earlier group
+		for _, idx := range g.Files {
+			if idx < 0 || idx >= len(diffs) {
+				// Skip an index that names no file — the index equivalent of the
+				// unknown-path case the path-based version skipped.
 				continue
 			}
-			d, ok := diffByPath[f]
-			if !ok {
-				// Skip unknown file path
+			if seen[idx] {
+				// Skip duplicate — file already assigned to an earlier group.
 				continue
 			}
-			seen[f] = true
-			gDiffs = append(gDiffs, d)
+			seen[idx] = true
+			gDiffs = append(gDiffs, diffs[idx])
 		}
 		if len(gDiffs) > 0 {
 			groups = append(groups, FileGroup{Label: g.Label, Diffs: gDiffs})
@@ -298,8 +307,8 @@ func parseGroupingResponse(content string, diffs []model.Diff) ([]FileGroup, err
 	}
 
 	// Files not covered by any group get their own single-file group
-	for _, d := range diffs {
-		if !seen[d.NewPath] {
+	for i, d := range diffs {
+		if !seen[i] {
 			groups = append(groups, FileGroup{Label: d.NewPath, Diffs: []model.Diff{d}})
 		}
 	}

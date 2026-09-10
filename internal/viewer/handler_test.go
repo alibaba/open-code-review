@@ -4,6 +4,7 @@
 package viewer
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -176,6 +177,58 @@ func TestHandleSession_Success(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "proj") {
 		t.Errorf("response does not contain derived display name")
+	}
+}
+
+func TestHandleSession_GroupingRendersPaths(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// json.Marshal each record so the embedded newlines in the file list and the
+	// quotes in the response JSON are escaped correctly, instead of hand-writing
+	// the escapes into a raw JSONL literal.
+	mustJSON := func(v any) string {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	fileList := "[0] MODIFIED   internal/agent/grouping.go (+66/-24)\n" +
+		"[1] ADDED   internal/viewer/store.go (+120/-0)\n"
+	writeJSONL(t, filepath.Join(repoDir, "grp.jsonl"),
+		`{"type":"session_start","timestamp":"2025-06-01T10:00:00Z","cwd":"/my/proj","model":"claude"}`,
+		mustJSON(map[string]any{
+			"type": "llm_request", "filePath": "__grouping__", "taskType": "grouping_task", "request_no": 1,
+			"messages": []any{map[string]any{"role": "user", "content": fileList}},
+		}),
+		mustJSON(map[string]any{
+			"type": "llm_response", "filePath": "__grouping__", "taskType": "grouping_task",
+			"content": `[{"label":"grouping index switch","files":[0,1]}]`,
+		}),
+		`{"type":"session_end","duration_seconds":30}`)
+
+	req := httptest.NewRequest("GET", "/r/repo/grp", nil)
+	rr := httptest.NewRecorder()
+	handleSession(rr, req, root, "repo", "grp")
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	body := rr.Body.String()
+	// The resolved paths and label must appear in the grouping-view markup.
+	for _, want := range []string{"grouping-view", "internal/agent/grouping.go", "internal/viewer/store.go", "grouping index switch"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered session missing %q", want)
+		}
+	}
+	// The raw index JSON is still available (collapsed) for audit, but the
+	// primary view is the path list, not a bare "files":[0,1].
+	if !strings.Contains(body, "Raw LLM response") {
+		t.Error("raw LLM response fallback should still be present for audit")
 	}
 }
 

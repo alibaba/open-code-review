@@ -261,6 +261,7 @@
                 {{$tg.Type}}
             </h4>
             {{range $tg.Cards}}
+            {{$card := .}}
             <div class="card">
                 <div class="card-header">
                     <span class="request-label">Request #{{.RequestNo}}</span>
@@ -291,10 +292,36 @@
                     </div>
                 </details>
                 {{end}}
-                {{with .ResponseContent}}
-                <div class="card-body response-content">
-                    <div class="response-text">{{.}}</div>
-                </div>
+                {{if isGrouping $tg.Type}}
+                    {{with groupingView $card}}
+                    <div class="card-body grouping-view">
+                        {{range .}}
+                        <div class="grouping-group">
+                            <span class="grouping-label">{{.Label}}</span>
+                            <ul class="grouping-files">
+                                {{range .Files}}
+                                {{if .Resolved}}<li>{{.Path}}</li>{{else}}<li class="grouping-unresolved">#{{.Index}}</li>{{end}}
+                                {{end}}
+                            </ul>
+                        </div>
+                        {{end}}
+                    </div>
+                    {{with $card.ResponseContent}}
+                    <details class="tool-detail">
+                        <summary class="tool-detail-toggle">
+                            <span class="chevron-sm"></span>
+                            <span>Raw LLM response</span>
+                        </summary>
+                        <div class="tool-detail-body">
+                            <div class="response-text">{{.}}</div>
+                        </div>
+                    </details>
+                    {{end}}
+                    {{else}}
+                    {{template "responseBody" $card.ResponseContent}}
+                    {{end}}
+                {{else}}
+                {{template "responseBody" .ResponseContent}}
                 {{end}}
                 {{if .ToolCalls}}
                 <div class="tool-calls-section">
@@ -335,4 +362,12 @@
         {{end}}
     </div>
 </details>
+{{end}}
+
+{{define "responseBody"}}
+{{with .}}
+<div class="card-body response-content">
+    <div class="response-text">{{.}}</div>
+</div>
+{{end}}
 {{end}}
