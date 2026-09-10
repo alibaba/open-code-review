@@ -3,6 +3,8 @@
 
 package llm
 
+//go:generate go run ./gen -output ../../extensions/vscode/src/shared/providers.generated.ts
+
 import (
 	"sort"
 	"strings"
