@@ -24,7 +24,14 @@ ocr config model
 ocr llm test
 ```
 
-## Install globally
+Check your OpenCode version (`opencode --version` vs `opencode2 --version`)
+and follow the matching section below. The single-file plugin
+(`open-code-review.ts`) only works on OpenCode 1.x. OpenCode 2.x removed
+plugin-defined tools, so the same features ship as native
+[custom tools](https://opencode.ai/docs/custom-tools/) plus
+[commands](https://opencode.ai/docs/commands/).
+
+## Install globally (OpenCode 1.x)
 
 ```bash
 mkdir -p ~/.config/opencode/plugins
@@ -33,7 +40,43 @@ curl -fsSL \
   -o ~/.config/opencode/plugins/open-code-review.ts
 ```
 
+The plugin imports `@opencode-ai/plugin`, so the config directory needs
+that dependency (otherwise the server log shows
+`Cannot find package '@opencode-ai/plugin'` and the plugin fails to load):
+
+```bash
+cd ~/.config/opencode
+npm init -y # skip if package.json already exists
+npm install @opencode-ai/plugin
+```
+
 Restart OpenCode after installation.
+
+## Install globally (OpenCode 2.x)
+
+Copy the `tools/` and `commands/` directories from here into your OpenCode
+config:
+
+```bash
+mkdir -p ~/.config/opencode/tools ~/.config/opencode/commands
+cp tools/ocr_review.ts tools/ocr_health.ts ~/.config/opencode/tools/
+cp commands/ocr-review.md commands/ocr-health.md ~/.config/opencode/commands/
+```
+
+The tools import `@opencode-ai/plugin`, so the config directory needs that
+dependency:
+
+```bash
+cd ~/.config/opencode
+npm init -y # skip if package.json already exists
+npm install @opencode-ai/plugin
+```
+
+Restart OpenCode after installation. Do **not** copy `open-code-review.ts`
+on 2.x — the 2.x loader requires plugins to default-export
+`{ id, effect | setup }` and does not support plugin-defined tools, so the
+1.x plugin file can never load there (`Plugin must export a default
+definition with an id and an effect or setup function`).
 
 ## Install for one project
 
@@ -46,7 +89,13 @@ curl -fsSL \
   -o .opencode/plugins/open-code-review.ts
 ```
 
-Commit the plugin file if the integration should be shared with the project.
+Then add `@opencode-ai/plugin` to the project's `.opencode/package.json`
+as above. Commit the plugin file if the integration should be shared with
+the project.
+
+On OpenCode 2.x, copy `tools/` and `commands/` into the project's
+`.opencode/` directory instead (see above) and commit them if the
+integration should be shared with the project.
 
 ## Usage
 
