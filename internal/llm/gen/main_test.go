@@ -80,6 +80,16 @@ func TestRenderPreservesMetadataAndModelOrder(t *testing.T) {
 	}
 }
 
+func TestGenerateRequiresOutput(t *testing.T) {
+	err := generate("")
+	if err == nil {
+		t.Fatal("expected an error for a missing output path")
+	}
+	if !strings.Contains(err.Error(), "-output") || !strings.Contains(err.Error(), "go generate ./internal/llm") {
+		t.Fatalf("expected the required flag and regeneration command in the error, got %v", err)
+	}
+}
+
 func TestGenerate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "providers.ts")
 	if err := generate(path); err != nil {

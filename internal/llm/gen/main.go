@@ -46,6 +46,9 @@ func main() {
 }
 
 func generate(output string) error {
+	if output == "" {
+		return fmt.Errorf("-output path is required; run go generate ./internal/llm from the repository root")
+	}
 	data, err := render(llm.ListProviders())
 	if err != nil {
 		return err
