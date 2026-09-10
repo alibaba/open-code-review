@@ -126,7 +126,14 @@ async function withShortOverallTimeout(timeoutMs, callback) {
 
 test("module exposes only one OpenCode plugin entry point", async () => {
   const module = await import("../dist/open-code-review.js")
-  assert.deepEqual(Object.keys(module), ["OpenCodeReviewPlugin"])
+  assert.deepEqual(Object.keys(module).sort(), ["OpenCodeReviewPlugin", "default"])
+})
+
+test("default export serves both plugin APIs", async () => {
+  const module = await import("../dist/open-code-review.js")
+  assert.equal(module.default.id, "open-code-review")
+  assert.equal(typeof module.default.setup, "function")
+  assert.equal(module.default.server, module.OpenCodeReviewPlugin)
 })
 
 test("plugin registers tools and preserves existing user commands", async () => {
