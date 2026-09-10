@@ -407,16 +407,18 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
         )}
       </FormItem>
 
-      <FormItem
-        label={t('view.config.apiKey')}
-        hint={`${t('view.config.apiKeyEnvHint')} ${preset.envVar}`}
-      >
-        <PasswordInput
-          value={apiKey}
-          onInput={(v) => { setApiKey(v); setApiKeyTouched(true); }}
-          placeholder={hasStoredKey && !apiKeyTouched ? t('view.config.apiKeySaved') : 'sk-...'}
-        />
-      </FormItem>
+      {!preset.ambientAuth && (
+        <FormItem
+          label={t('view.config.apiKey')}
+          hint={`${t('view.config.apiKeyEnvHint')} ${preset.envVar}`}
+        >
+          <PasswordInput
+            value={apiKey}
+            onInput={(v) => { setApiKey(v); setApiKeyTouched(true); }}
+            placeholder={hasStoredKey && !apiKeyTouched ? t('view.config.apiKeySaved') : 'sk-...'}
+          />
+        </FormItem>
+      )}
 
       <ConnActions wide={wide} connTest={connTest} canSave={canSave} onBack={onBack} onTest={test} onSave={save} />
     </FormSection>
