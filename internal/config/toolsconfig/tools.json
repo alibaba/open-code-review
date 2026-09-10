@@ -168,7 +168,7 @@
     "main_task": true,
     "definition": {
       "name": "file_read_diff",
-      "description": "The tool is used to view the changes made to other files in the list of modifications. Call this tool when you discover suspected code issues but need to check changes in other files to confirm whether the problem actually exists. This tool will respond in git diff format.\n\nOutput example:\n==== FILE: path/to/file1.txt ====\n--- a/path/to/file1.txt\n+++ b/path/to/file1.txt\n@@ -10,1 +10,1 @@\n- old content\n+ new content\n\n==== FILE: path/to/file2.txt ====\n@@ -5,1 +5,2 @@\n  - old content\n  + new content1\n  + new content2",
+      "description": "The tool is used to view the changes made to other files in the list of modifications. Call this tool when you discover suspected code issues but need to check changes in other files to confirm whether the problem actually exists. This tool will respond in git diff format.\n\nOutput example:\nIS_TRUNCATED: false\n==== FILE: path/to/file1.txt ====\n--- a/path/to/file1.txt\n+++ b/path/to/file1.txt\n@@ -10,1 +10,1 @@\n- old content\n+ new content\n\n==== FILE: path/to/file2.txt ====\n@@ -5,1 +5,2 @@\n  - old content\n  + new content1\n  + new content2\n\n**Limitations:**\n- At most 500 diff lines are returned per call, counted across all requested files. When more remain, IS_TRUNCATED is true and a closing note gives the start_line value to pass, with the same path_array, to read the next page.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -178,6 +178,10 @@
               "type": "string"
             },
             "description": "List of file paths to view diff content."
+          },
+          "start_line": {
+            "type": "integer",
+            "description": "1-based diff line to start from, counted across path_array in order (file headers not counted). Defaults to 1. Use the value given in the truncation note to continue."
           }
         },
         "required": [
