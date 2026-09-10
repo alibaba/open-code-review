@@ -50,6 +50,7 @@ type reviewOptions struct {
 	maxTokensBudget       int
 	effort                string
 	noFilter              bool
+	diffOnly              bool
 	preview               bool
 }
 
@@ -206,12 +207,14 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
-	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
-	defer closeReviewMCPClients(mcpClients)
+	if !opts.diffOnly {
+		mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
+		defer closeReviewMCPClients(mcpClients)
 
-	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
-	rt.PlanToolDefs = append(rt.PlanToolDefs, mcpToolDefs...)
-	rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
+		mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
+		rt.PlanToolDefs = append(rt.PlanToolDefs, mcpToolDefs...)
+		rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
+	}
 
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
@@ -238,6 +241,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		SealedInput:           sealedInput,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		SkipFilter:            opts.noFilter,
+		DiffOnly:              opts.diffOnly,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
 

@@ -333,6 +333,111 @@ func (s MainLoopStop) Reason() string {
 	}
 }
 
+// RunDiffOnlyTask performs exactly one MAIN_TASK request using only the two
+// structured-output tools. It never retries, compresses context, runs a grace
+// round, or invokes LLM-based comment re-location.
+func (r *Runner) RunDiffOnlyTask(ctx context.Context, messages []llm.Message, taskKey string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	toolDefs, err := diffOnlyToolDefs(r.deps.MainToolDefs)
+	if err != nil {
+		return err
+	}
+
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(r.deps.Session.SessionID, string(session.MainTask), taskKey))
+	fs := r.deps.Session.GetOrCreateFileSession(taskKey)
+	rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
+	startTime := time.Now()
+	reqCtx := r.requestCtx(ctx, taskKey, session.MainTask, rec.RequestNo)
+
+	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
+		Model:      r.deps.Model,
+		Messages:   messages,
+		Tools:      toolDefs,
+		ToolChoice: "required",
+		MaxTokens:  r.deps.Template.CompletionTokenLimit(),
+		SessionID:  uuid.NewString(),
+	})
+	duration := time.Since(startTime)
+	if err != nil {
+		rec.SetError(err, duration)
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
+		return fmt.Errorf("LLM completion error: %w", err)
+	}
+
+	rec.SetResponse(resp, duration)
+	r.RecordUsage(resp.Usage)
+	totalTokens := int64(0)
+	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
+	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
+
+	calls := resp.ToolCalls()
+	if len(calls) == 0 {
+		return fmt.Errorf("diff-only response did not call code_comment or task_done")
+	}
+
+	thinking := resp.ReasoningContent()
+	for _, call := range calls {
+		name := call.Function.Name
+		if name != tool.CodeComment.Name() && name != tool.TaskDone.Name() {
+			return fmt.Errorf("diff-only response called unavailable tool %q", name)
+		}
+
+		cp := r.executeToolCallWithOptions(ctx, taskKey, call, rec, thinking, false)
+		switch name {
+		case tool.TaskDone.Name():
+			if cp.Failed {
+				return fmt.Errorf("task failed: %s", cp.Data)
+			}
+			if !cp.Completed {
+				return fmt.Errorf("diff-only task_done call was invalid: %s", cp.Data)
+			}
+		case tool.CodeComment.Name():
+			if cp.Data != tool.CommentSucceed {
+				return fmt.Errorf("diff-only code_comment call was invalid: %s", cp.Data)
+			}
+		}
+	}
+	return nil
+}
+
+// diffOnlyToolDefs selects and validates the complete structured-output
+// contract for diff-only mode, preserving the configured definitions.
+func diffOnlyToolDefs(defs []llm.ToolDef) ([]llm.ToolDef, error) {
+	wanted := map[string]bool{
+		tool.CodeComment.Name(): false,
+		tool.TaskDone.Name():    false,
+	}
+	out := make([]llm.ToolDef, 0, len(wanted))
+	for _, def := range defs {
+		name := def.Function.Name
+		seen, ok := wanted[name]
+		if !ok || seen {
+			continue
+		}
+		wanted[name] = true
+		out = append(out, def)
+	}
+	for _, name := range []string{tool.CodeComment.Name(), tool.TaskDone.Name()} {
+		if !wanted[name] {
+			return nil, fmt.Errorf("diff-only mode requires the %s tool definition", name)
+		}
+	}
+	return out, nil
+}
+
 // RunMainTask drives one MAIN_TASK conversation loop to its end. It sends
 // messages with the configured tool definitions, executes any tool calls
 // returned by the model, and collects review comments until task_done is
@@ -586,6 +691,10 @@ func graceRoundToolDefs(defs []llm.ToolDef) []llm.ToolDef {
 // session/telemetry records and the worker-pool submission, and stands in as a
 // code_comment's path when the model omitted one.
 func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.ToolCall, rec *session.TaskRecord, thinking string) tool.TaskCheckpoint {
+	return r.executeToolCallWithOptions(ctx, taskKey, call, rec, thinking, true)
+}
+
+func (r *Runner) executeToolCallWithOptions(ctx context.Context, taskKey string, call llm.ToolCall, rec *session.TaskRecord, thinking string, allowLLMRelocation bool) tool.TaskCheckpoint {
 	t := tool.OfName(call.Function.Name)
 
 	if t == tool.TaskDone {
@@ -687,7 +796,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 					}
 				}
 				if d != nil {
-					if !located && r.deps.Template.ReLocationTask != nil {
+					if !located && allowLLMRelocation && r.deps.Template.ReLocationTask != nil {
 						// rlStart stays ahead of prompt construction, which is
 						// where it sat when ReLocateComment built the messages
 						// itself — moving it would silently change what

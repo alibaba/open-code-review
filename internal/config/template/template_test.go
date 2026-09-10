@@ -241,6 +241,52 @@ func TestApplyLanguage_DefaultEnglish(t *testing.T) {
 	}
 }
 
+func TestApplyDiffOnly(t *testing.T) {
+	tpl, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault() error: %v", err)
+	}
+
+	original := tpl
+	originalContent := original.MainTask.Messages[0].Content
+	copyOfTpl := *tpl
+	copyOfTpl.ApplyDiffOnly()
+	tpl = &copyOfTpl
+	if tpl.MaxReviewRounds != 1 {
+		t.Errorf("MaxReviewRounds = %d, want 1", tpl.MaxReviewRounds)
+	}
+	if tpl.PlanTask != nil || tpl.ReLocationTask != nil || tpl.ReviewFilterTask != nil || tpl.GroupingTask != nil {
+		t.Fatal("ApplyDiffOnly did not disable every optional review task")
+	}
+	if len(tpl.MemoryCompressionTask.Messages) != 0 {
+		t.Fatal("ApplyDiffOnly did not disable memory compression")
+	}
+	if !strings.Contains(tpl.MainTask.Messages[0].Content, "## Diff-only review mode") {
+		t.Fatal("main task system prompt is missing the diff-only instruction")
+	}
+	if original.MainTask.Messages[0].Content != originalContent {
+		t.Fatal("ApplyDiffOnly mutated the caller's shared message slice")
+	}
+
+	first := tpl.MainTask.Messages[0].Content
+	tpl.ApplyDiffOnly()
+	if tpl.MainTask.Messages[0].Content != first {
+		t.Fatal("ApplyDiffOnly appended its instruction more than once")
+	}
+}
+
+func TestApplyDiffOnlyPrependsSystemMessage(t *testing.T) {
+	tpl := Template{MainTask: LlmConversation{Messages: []ChatMessage{{Role: "user", Content: "Review {{diffs}}"}}}}
+
+	tpl.ApplyDiffOnly()
+	if len(tpl.MainTask.Messages) != 2 || tpl.MainTask.Messages[0].Role != "system" {
+		t.Fatalf("MainTask.Messages = %+v, want a prepended system message", tpl.MainTask.Messages)
+	}
+	if !strings.Contains(tpl.MainTask.Messages[0].Content, "Diff-only review mode") {
+		t.Fatal("prepended system message is missing the diff-only instruction")
+	}
+}
+
 func TestValidate_Template_Errors(t *testing.T) {
 	cases := []struct {
 		name    string

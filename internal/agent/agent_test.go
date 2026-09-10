@@ -25,6 +25,16 @@ type fakeAgentClient struct {
 	calls     int
 }
 
+type diffOnlyAgentClient struct {
+	response *llm.ChatResponse
+	requests []llm.ChatRequest
+}
+
+func (f *diffOnlyAgentClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	f.requests = append(f.requests, req)
+	return f.response, nil
+}
+
 func (f *fakeAgentClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
 	if f.calls >= len(f.responses) {
 		content := ""
@@ -992,6 +1002,69 @@ func TestDispatchSubtasks_WithFakeLLM(t *testing.T) {
 	}
 	if !strings.Contains(comments[0].Content, "null pointer") {
 		t.Errorf("Content = %q", comments[0].Content)
+	}
+}
+
+func TestDispatchSubtasks_DiffOnlyUsesOneMainRequest(t *testing.T) {
+	client := &diffOnlyAgentClient{response: agentTaskDoneResponse()}
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	optional := &template.LlmConversation{Messages: []template.ChatMessage{{Role: "system", Content: "auxiliary"}}}
+
+	a := New(Args{
+		DiffOnly:         true,
+		LLMClient:        client,
+		Model:            "fake",
+		CommentCollector: collector,
+		Tools:            reg,
+		Template: template.Template{
+			MaxTokens:             100000,
+			MaxToolRequestTimes:   10,
+			MaxReviewRounds:       3,
+			PlanTask:              optional,
+			GroupingTask:          optional,
+			ReviewFilterTask:      optional,
+			ReLocationTask:        optional,
+			MemoryCompressionTask: *optional,
+			MainTask: template.LlmConversation{Messages: []template.ChatMessage{
+				{Role: "system", Content: "Review carefully."},
+				{Role: "user", Content: "Review {{diffs}}"},
+			}},
+		},
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: tool.FileRead.Name()}},
+			{Type: "function", Function: llm.FunctionDef{Name: tool.CodeComment.Name()}},
+			{Type: "function", Function: llm.FunctionDef{Name: tool.TaskDone.Name()}},
+		},
+	})
+	a.diffs = []model.Diff{{NewPath: "main.go", OldPath: "main.go", Diff: "+new line", Insertions: 1}}
+	a.currentDate = "2025-06-26 10:00"
+
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if len(client.requests) != 1 {
+		t.Fatalf("LLM requests = %d, want exactly 1", len(client.requests))
+	}
+	req := client.requests[0]
+	if req.ToolChoice != "required" {
+		t.Errorf("ToolChoice = %q, want required", req.ToolChoice)
+	}
+	if len(req.Tools) != 2 || req.Tools[0].Function.Name != tool.CodeComment.Name() || req.Tools[1].Function.Name != tool.TaskDone.Name() {
+		t.Errorf("Tools = %+v, want only code_comment and task_done", req.Tools)
+	}
+	foundInstruction := false
+	for _, message := range req.Messages {
+		if message.Role == "system" && strings.Contains(message.Content.(string), "## Diff-only review mode") {
+			foundInstruction = true
+		}
+	}
+	if !foundInstruction {
+		t.Fatal("main request is missing the diff-only system instruction")
+	}
+	if a.args.Template.PlanTask != nil || a.args.Template.GroupingTask != nil || a.args.Template.ReviewFilterTask != nil || a.args.Template.ReLocationTask != nil {
+		t.Fatal("diff-only agent retained an auxiliary LLM task")
 	}
 }
 

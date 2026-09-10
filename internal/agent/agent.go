@@ -154,6 +154,10 @@ type Args struct {
 	// defines one. Set via the --no-filter CLI flag.
 	SkipFilter bool
 
+	// DiffOnly restricts each locally determined group to one main-model
+	// request over the supplied diff, with no auxiliary LLM passes.
+	DiffOnly bool
+
 	// RuntimeConfig carries the non-secret, allowlisted runtime settings that
 	// identify how this run was configured, for the manifest's
 	// runtime_config_sha256. It is populated by the cmd layer from the resolved
@@ -205,6 +209,9 @@ type ResumeInfo = session.ResumeInfo
 
 // New creates a new Agent from the given arguments.
 func New(args Args) *Agent {
+	if args.DiffOnly {
+		args.Template.ApplyDiffOnly()
+	}
 	if args.Tools == nil {
 		args.Tools = tool.NewRegistry()
 	}
@@ -1043,7 +1050,7 @@ func (a *Agent) ruleConfigSHA256() string {
 
 // runtimeConfigSHA256 is the deterministic identity of the allowlisted, non-secret
 // runtime settings: protocol, model, sanitized endpoint host, language, per-request
-// timeout, configured concurrency and the aggregate token budget. Every field is
+// timeout, configured concurrency, aggregate token budget and diff-only mode. Every field is
 // tagged so structurally different configs cannot collide once length-prefixed. No
 // secret ever reaches this hash — RuntimeConfig carries only the credential-free
 // host, never the token or full URL.
@@ -1061,6 +1068,7 @@ func (a *Agent) runtimeConfigSHA256() string {
 		"timeout", r.Timeout.String(),
 		"concurrency", strconv.Itoa(a.args.MaxConcurrency),
 		"max_tokens_budget", strconv.FormatInt(a.args.MaxTokensBudget, 10),
+		"diff_only", strconv.FormatBool(a.args.DiffOnly),
 	)
 }
 
@@ -1446,6 +1454,15 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 			defer mainSpan.End()
 			telemetry.SetAttr(mainSpan, "group.label", groupKey)
 			telemetry.SetAttr(mainSpan, "round", round)
+			if a.args.DiffOnly {
+				err := a.runner.RunDiffOnlyTask(ctx, messages, groupKey)
+				if err != nil {
+					mainSpan.SetStatus(codes.Error, err.Error())
+					mainSpan.RecordError(err)
+					return false, llmloop.StopNone, err
+				}
+				return true, llmloop.StopNone, nil
+			}
 			completed, stop, err := a.runner.RunMainTask(ctx, messages, groupKey)
 			if err != nil {
 				mainSpan.SetStatus(codes.Error, err.Error())

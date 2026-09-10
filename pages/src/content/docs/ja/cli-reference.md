@@ -107,6 +107,7 @@ ocr r      [flags]   (alias)
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、ファイルごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。 |
+| `--diff-only` | — | `false` | 渡された diff のみをレビューし、ローカルで決定したグループごとに main model を正確に 1 回呼び出します。リポジトリおよび MCP のコンテキストツール、plan、LLM grouping、review filter、LLM re-location、memory compression、追加レビューラウンドを無効化し、構造化出力用の `code_comment` と `task_done` のみを残します。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |
 | `--output <path>` | `-o` | 標準出力 | レビュー結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
@@ -129,6 +130,10 @@ ocr r      [flags]   (alias)
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
 > `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
+
+> `--diff-only` は `--effort` と `--max-tools` の実行上の意味を上書きします。
+> リポジトリコンテキストとレビューの深さを抑え、ローカルグループごとに 1 回のモデル推論に固定しますが、
+> その 1 回の所要時間は選択したモデルと provider に依存します。
 
 ### 実行単位の LLM 選択
 

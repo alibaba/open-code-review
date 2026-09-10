@@ -11,6 +11,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
@@ -103,6 +104,156 @@ func newTestDeps(client llm.LLMClient) Deps {
 		Tools:            reg,
 		CommentCollector: tool.NewCommentCollector(),
 		Session:          session.New("/tmp/test-repo", "main", "fake", session.SessionOptions{}),
+	}
+}
+
+func diffOnlyTestDeps(client llm.LLMClient) Deps {
+	deps := newTestDeps(client)
+	deps.Tools.Register(&tool.CodeCommentProvider{Collector: deps.CommentCollector})
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: tool.FileRead.Name()}},
+		{Type: "function", Function: llm.FunctionDef{Name: tool.CodeComment.Name()}},
+		{Type: "function", Function: llm.FunctionDef{Name: tool.TaskDone.Name()}},
+	}
+	return deps
+}
+
+func toolCallResponse(calls ...llm.ToolCall) *llm.ChatResponse {
+	content := ""
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content, ToolCalls: calls}}},
+		Model:   "fake",
+		Usage:   &llm.UsageInfo{PromptTokens: 13, CompletionTokens: 8},
+	}
+}
+
+func TestRunDiffOnlyTask_UsesOneRequiredOutputOnlyRequest(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
+	deps := diffOnlyTestDeps(client)
+	deps.Template.MaxCompletionTokens = 4321
+	runner := NewRunner(deps)
+
+	err := runner.RunDiffOnlyTask(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "main.go")
+	if err != nil {
+		t.Fatalf("RunDiffOnlyTask: %v", err)
+	}
+	if client.calls != 1 || len(client.requests) != 1 {
+		t.Fatalf("LLM requests = %d, want exactly 1", len(client.requests))
+	}
+	req := client.requests[0]
+	if req.ToolChoice != "required" {
+		t.Errorf("ToolChoice = %q, want required", req.ToolChoice)
+	}
+	if req.MaxTokens != 4321 {
+		t.Errorf("MaxTokens = %d, want 4321", req.MaxTokens)
+	}
+	if len(req.Tools) != 2 || req.Tools[0].Function.Name != tool.CodeComment.Name() || req.Tools[1].Function.Name != tool.TaskDone.Name() {
+		t.Errorf("Tools = %+v, want only code_comment and task_done", req.Tools)
+	}
+	if runner.TotalInputTokens() != 10 || runner.TotalOutputTokens() != 5 {
+		t.Errorf("token totals = (%d, %d), want (10, 5)", runner.TotalInputTokens(), runner.TotalOutputTokens())
+	}
+}
+
+func TestRunDiffOnlyTask_ReportsMissingDefinitionsDeterministically(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
+	deps := diffOnlyTestDeps(client)
+	deps.MainToolDefs = nil
+	runner := NewRunner(deps)
+
+	err := runner.RunDiffOnlyTask(context.Background(), nil, "main.go")
+	if err == nil || err.Error() != "diff-only mode requires the code_comment tool definition" {
+		t.Fatalf("RunDiffOnlyTask error = %v", err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("LLM calls = %d, want 0 for invalid configuration", client.calls)
+	}
+}
+
+func TestRunDiffOnlyTask_AcceptsBatchedCommentsWithoutTaskDone(t *testing.T) {
+	comments := `{"comments":[` +
+		`{"content":"first issue","existing_code":"first()","path":"main.go"},` +
+		`{"content":"second issue","existing_code":"second()","path":"main.go"}]}`
+	client := &fakeClient{responses: []*llm.ChatResponse{toolCallResponse(llm.ToolCall{
+		ID: "comments", Type: "function",
+		Function: llm.FunctionCall{Name: tool.CodeComment.Name(), Arguments: comments},
+	})}}
+	deps := diffOnlyTestDeps(client)
+	runner := NewRunner(deps)
+
+	if err := runner.RunDiffOnlyTask(context.Background(), nil, "main.go"); err != nil {
+		t.Fatalf("RunDiffOnlyTask: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("LLM calls = %d, want 1", client.calls)
+	}
+	if got := len(deps.CommentCollector.Comments()); got != 2 {
+		t.Fatalf("comments = %d, want 2", got)
+	}
+}
+
+func TestRunDiffOnlyTask_DoesNotRetryInvalidResponses(t *testing.T) {
+	empty := ""
+	tests := []struct {
+		name     string
+		response *llm.ChatResponse
+	}{
+		{
+			name: "no tool calls",
+			response: &llm.ChatResponse{
+				Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &empty}}},
+			},
+		},
+		{
+			name: "unavailable tool",
+			response: toolCallResponse(llm.ToolCall{
+				ID: "read", Type: "function",
+				Function: llm.FunctionCall{Name: tool.FileRead.Name(), Arguments: `{}`},
+			}),
+		},
+		{
+			name: "malformed comment",
+			response: toolCallResponse(llm.ToolCall{
+				ID: "comment", Type: "function",
+				Function: llm.FunctionCall{Name: tool.CodeComment.Name(), Arguments: `{"comments":`},
+			}),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &fakeClient{responses: []*llm.ChatResponse{tt.response, taskDoneResponse()}}
+			runner := NewRunner(diffOnlyTestDeps(client))
+			if err := runner.RunDiffOnlyTask(context.Background(), nil, "main.go"); err == nil {
+				t.Fatal("RunDiffOnlyTask error = nil, want invalid-response error")
+			}
+			if client.calls != 1 {
+				t.Fatalf("LLM calls = %d, want no retry after the first call", client.calls)
+			}
+		})
+	}
+}
+
+func TestRunDiffOnlyTask_DisablesLLMRelocation(t *testing.T) {
+	response := toolCallResponse(llm.ToolCall{
+		ID: "comment", Type: "function",
+		Function: llm.FunctionCall{
+			Name:      tool.CodeComment.Name(),
+			Arguments: `{"comments":[{"content":"issue","existing_code":"missing()","path":"main.go"}]}`,
+		},
+	})
+	client := &fakeClient{responses: []*llm.ChatResponse{response, taskDoneResponse()}}
+	deps := diffOnlyTestDeps(client)
+	deps.Template.ReLocationTask = &template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "relocate"}}}
+	deps.DiffLookup = func(string) *model.Diff {
+		return &model.Diff{NewPath: "main.go", Diff: "+present()", NewFileContent: "present()"}
+	}
+	runner := NewRunner(deps)
+
+	if err := runner.RunDiffOnlyTask(context.Background(), nil, "main.go"); err != nil {
+		t.Fatalf("RunDiffOnlyTask: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("LLM calls = %d, want 1 with re-location suppressed", client.calls)
 	}
 }
 

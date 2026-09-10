@@ -291,6 +291,46 @@ func (t *Template) ApplyLanguage(lang string) {
 	applyLanguage(&t.MemoryCompressionTask, instruction)
 }
 
+// ApplyDiffOnly restricts review execution to the supplied diff and a single
+// main-model pass. Structured output tools remain available, but every
+// auxiliary conversation is disabled.
+func (t *Template) ApplyDiffOnly() {
+	t.MaxReviewRounds = 1
+	t.PlanTask = nil
+	t.MemoryCompressionTask = LlmConversation{}
+	t.ReLocationTask = nil
+	t.ReviewFilterTask = nil
+	t.GroupingTask = nil
+
+	const instruction = `
+
+## Diff-only review mode
+Review solely from the code contained in <review_files>.
+Repository context tools and auxiliary model passes are intentionally unavailable.
+Do not speculate about behavior that cannot be established from the provided diff.
+Report all confirmed findings in this single response.
+Use code_comment to submit all findings in one batch.
+If no actionable issue can be established from the diff alone, call task_done.
+No follow-up analysis round will be available.`
+
+	t.MainTask.Messages = append([]ChatMessage(nil), t.MainTask.Messages...)
+	hasSystemMessage := false
+	for i := range t.MainTask.Messages {
+		if t.MainTask.Messages[i].Role == "system" {
+			if !strings.Contains(t.MainTask.Messages[i].Content, "## Diff-only review mode") {
+				t.MainTask.Messages[i].Content += instruction
+			}
+			hasSystemMessage = true
+		}
+	}
+	if !hasSystemMessage {
+		t.MainTask.Messages = append([]ChatMessage{{
+			Role:    "system",
+			Content: strings.TrimSpace(instruction),
+		}}, t.MainTask.Messages...)
+	}
+}
+
 // ApplyLanguage injects a language directive into all system-role messages
 // of the scan template (MAIN_TASK, PLAN_TASK if set, DEDUP_TASK if set,
 // and MEMORY_COMPRESSION_TASK).

@@ -48,6 +48,24 @@ func TestParseReviewFlagsProviderAndModelOverrides(t *testing.T) {
 	}
 }
 
+func TestParseReviewFlagsDiffOnly(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--diff-only"})
+	if err != nil {
+		t.Fatalf("parseReviewFlags: %v", err)
+	}
+	if !opts.diffOnly {
+		t.Fatal("diffOnly = false, want true")
+	}
+
+	defaults, err := parseReviewFlags(nil)
+	if err != nil {
+		t.Fatalf("parseReviewFlags defaults: %v", err)
+	}
+	if defaults.diffOnly {
+		t.Fatal("diffOnly default = true, want false")
+	}
+}
+
 func TestParseReviewFlagsResume(t *testing.T) {
 	opts, err := parseReviewFlags([]string{"--from", "main", "--to", "feature", "--resume", "session-123"})
 	if err != nil {

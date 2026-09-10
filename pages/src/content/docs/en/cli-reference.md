@@ -113,6 +113,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
 | `--no-filter` | — | `false` | Keep all review comments and skip the per-group `REVIEW_FILTER_TASK` LLM post-processing call. |
+| `--diff-only` | — | `false` | Review only the supplied diff with exactly one main-model request per locally determined group. Disables repository and MCP context tools, planning, LLM grouping, review filtering, LLM re-location, memory compression, and extra review rounds; keeps only `code_comment` and `task_done` for structured output. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
 | `--output <path>` | `-o` | stdout | Write review results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
@@ -136,6 +137,11 @@ staged + unstaged + untracked changes in the current directory's repo.
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
 > `--resume` supports only range or commit reviews and cannot be combined
 > with `--preview`.
+
+> `--diff-only` overrides `--effort` and `--max-tools` execution semantics.
+> It trades repository context and review depth for a predictable single model
+> inference per local group; the duration of that inference still depends on
+> the selected model and provider.
 
 ### Per-run LLM selection
 
