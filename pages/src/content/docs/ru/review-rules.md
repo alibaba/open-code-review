@@ -166,13 +166,14 @@ UTF-8 текстом, а не сырыми байтами. Причина `delet
 | `**/*.java` | `java.md` |
 | `**/*.go` | `go.md` — исходный код Go. |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md` — шаблоны FreeMarker (SSTI / XSS / обработка null). |
+| `**/*.{hbs,mustache}` | `handlebars_mustache.md` — шаблоны Handlebars и Mustache. |
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — компоненты и islands Astro. |
-| `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,hpp}` | `cpp.md` |
+| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
 | `**/*.c` | `c.md` |
 | `**/*.{py,ipynb}` | `python.md` — исходный код Python. |
 | `**/*.{php,phtml}` | `php.md` — исходный код PHP и шаблоны PHP. |
@@ -188,7 +189,13 @@ UTF-8 текстом, а не сырыми байтами. Причина `delet
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet. |
 | `**/*.thrift` | `thrift.md` — совместимость Apache Thrift IDL на уровне wire. |
 | `**/*.capnp` | `capnp.md` — совместимость схем Cap'n Proto на уровне wire. |
+| `**/*.{v,sv,vh}` | `verilog.md` — RTL на Verilog и SystemVerilog. |
+| `**/*.{vhd,vhdl}` | `vhdl.md` — RTL на VHDL. |
 | `**/*.m` | `matlab.md` (или `objc.md` через [определение содержимого](#content-sniffing-for-m-files)) |
+| `**/*.mm` | `objc.md` — исходный код Objective-C++. |
+| `**/*.sol` | `solidity.md` — смарт-контракты Solidity. |
+| `**/*.vy` | `vyper.md` — смарт-контракты Vyper. |
+| `**/*.rego` | `rego.md` — политики Rego (OPA). |
 | *(fallback)* | `default.md` |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

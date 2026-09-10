@@ -1,0 +1,84 @@
+name: plugin-contract
+
+# Distribution-contract guardrails, kept out of ci.yml (which is build/test/lint)
+# for the same reason translation-sync.yml is: a slow container pull here should
+# never delay core CI feedback.
+#
+#   - blocking: every in-repo path link in the docs/READMEs resolves to a real
+#     file (these URLs are served from the default branch, so a stale path is a
+#     404 for every reader). blob/tree kind mismatches are warnings only.
+#   - blocking: every path a plugin or marketplace manifest declares resolves to
+#     a real, non-empty directory, and every SKILL.md / command prompt carries
+#     the frontmatter its loader requires.
+#
+# Scoped with paths: so it only runs when a manifest, a skill, a command prompt,
+# a doc, or the checker itself changes.
+#
+# Both checks read the whole work tree, so they are also run on push to main:
+# two PRs can each pass alone and break the invariant once merged (one renames a
+# file, the other adds a reference to the old path). Without the push trigger
+# nothing would ever re-evaluate the merged result. Same shape as
+# action-contract.yml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".claude-plugin/**"
+      - ".agents/**"
+      - "plugins/**"
+      - "skills/**"
+      - "pages/src/content/docs/**"
+      - "README*.md"
+      - "CONTRIBUTING*.md"
+      - "AGENTS.md"
+      - "scripts/github-actions/check-plugin-contract.*"
+      - ".github/workflows/plugin-contract.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".claude-plugin/**"
+      - ".agents/**"
+      - "plugins/**"
+      - "skills/**"
+      - "pages/src/content/docs/**"
+      - "README*.md"
+      - "CONTRIBUTING*.md"
+      - "AGENTS.md"
+      - "scripts/github-actions/check-plugin-contract.*"
+      - ".github/workflows/plugin-contract.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plugin-contract:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    container:
+      # Pinned to an exact 24.x for reproducible builds, matching the pin used
+      # by translation-sync.yml (avoids the mutable node:24 tag).
+      image: node:24.18.0
+    steps:
+      # The checks read the working tree only — no git history needed.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+
+      # Validate the guardrail script itself (plain Node, no deps).
+      - name: Test plugin-contract guardrail
+        run: node scripts/github-actions/check-plugin-contract.test.js
+
+      # BLOCKING: no doc or README may link to a path that no longer exists.
+      - name: Check in-repo path links
+        run: node scripts/github-actions/check-plugin-contract.js links
+
+      # BLOCKING: plugin/marketplace manifests must resolve to real targets and
+      # every skill/command must carry loadable frontmatter.
+      - name: Check plugin manifest contract
+        run: node scripts/github-actions/check-plugin-contract.js manifests

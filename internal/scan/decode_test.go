@@ -391,13 +391,19 @@ func TestFilterScanItemsEncodingReporting(t *testing.T) {
 	a := NewAgent(Args{
 		Template: makeTemplateWithFullScan(),
 	})
+	// The same selection sequence Run performs.
+	filter := func(items []model.ScanItem) []model.ScanItem {
+		decisions := a.selectScanItems(items)
+		a.logSelection(decisions)
+		return selectedScanItems(decisions)
+	}
 
 	t.Run("D8_marked_but_still_reviewed", func(t *testing.T) {
 		var out bytes.Buffer
 		var kept []model.ScanItem
 		restore := stdout.Swap(&out)
 		warn := captureStderr(t, func() {
-			kept = a.filterScanItems([]model.ScanItem{
+			kept = filter([]model.ScanItem{
 				{Path: "token.go", Content: "package auth\n", UndecodedCharset: "windows-1252"},
 				{Path: "clean.go", Content: "package auth\n"},
 			})
@@ -431,7 +437,7 @@ func TestFilterScanItemsEncodingReporting(t *testing.T) {
 	t.Run("D10_excluded_message_names_the_encoding", func(t *testing.T) {
 		var out bytes.Buffer
 		restore := stdout.Swap(&out)
-		kept := a.filterScanItems([]model.ScanItem{
+		kept := filter([]model.ScanItem{
 			{Path: "blob.go", Content: "x", UndecodedCharset: "Big5", Unreviewable: true},
 			{Path: "clean.go", Content: "package auth\n"},
 		})

@@ -123,13 +123,14 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.java` | `java.md` |
 | `**/*.go` | `go.md`: Go ソースコード。 |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md`: FreeMarker テンプレート（SSTI / XSS / null 処理）。 |
+| `**/*.{hbs,mustache}` | `handlebars_mustache.md`: Handlebars / Mustache テンプレート。 |
 | `**/*.ets` | `arkts.md`: ArkTS / HarmonyOS。 |
 | `**/*.astro` | `astro.md`: Astro コンポーネントと islands。 |
-| `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,hpp}` | `cpp.md` |
+| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
 | `**/*.c` | `c.md` |
 | `**/*.{py,ipynb}` | `python.md`: Python ソースコード。 |
 | `**/*.{php,phtml}` | `php.md`: PHP ソースと PHP テンプレート。 |
@@ -145,7 +146,13 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。 |
 | `**/*.thrift` | `thrift.md`: Apache Thrift IDL のワイヤ互換性。 |
 | `**/*.capnp` | `capnp.md`: Cap'n Proto スキーマのワイヤ互換性。 |
+| `**/*.{v,sv,vh}` | `verilog.md`: Verilog および SystemVerilog の RTL。 |
+| `**/*.{vhd,vhdl}` | `vhdl.md`: VHDL の RTL。 |
 | `**/*.m` | `matlab.md`（または[コンテンツスニッフィング](#content-sniffing-for-m-files)により `objc.md`） |
+| `**/*.mm` | `objc.md`: Objective-C++ ソースコード。 |
+| `**/*.sol` | `solidity.md`: Solidity スマートコントラクト。 |
+| `**/*.vy` | `vyper.md`: Vyper スマートコントラクト。 |
+| `**/*.rego` | `rego.md`: Rego ポリシー（OPA）。 |
 | *(fallback)* | `default.md` |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。

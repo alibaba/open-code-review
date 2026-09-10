@@ -51,7 +51,7 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 
 	result, err := p.gitGrep(ctx, searchText, caseSensitive, usePerlRegexp, patterns)
 	if err != nil {
-		return "", fmt.Errorf("code_search failed: %w", err)
+		return "", err
 	}
 	return result, nil
 }
@@ -153,16 +153,25 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return "code_search timed out. Try narrowing file_patterns to a more specific path.", nil
+			return "", fmt.Errorf("git grep timed out; try narrowing file_patterns to a more specific path: %w", err)
 		}
 		if errors.Is(err, context.Canceled) {
 			return "", err
 		}
 		if outStr == "" {
-			if errStr == "" {
+			var exitErr *exec.ExitError
+			exitCode := -1
+			if errors.As(err, &exitErr) {
+				exitCode = exitErr.ExitCode()
+			}
+			if errStr == "" && exitCode == 1 {
 				return "No matches found", nil
 			}
-			return fmt.Sprintf("Error: %s", strings.TrimSpace(errStr)), nil
+			trimmedErr := trimGitUsage(errStr, exitCode)
+			if trimmedErr == "" {
+				return "", fmt.Errorf("git grep failed: %w", err)
+			}
+			return "", fmt.Errorf("git grep failed: %w: %s", err, trimmedErr)
 		}
 	}
 
@@ -282,6 +291,16 @@ func (p *CodeSearchProvider) decodeMatches(ctx context.Context, path string, mat
 			matches[i].content = lines[n-1]
 		}
 	}
+}
+
+func trimGitUsage(stderr string, exitCode int) string {
+	stderr = strings.TrimSpace(stderr)
+	if exitCode == 129 {
+		if idx := strings.IndexByte(stderr, '\n'); idx >= 0 {
+			stderr = stderr[:idx]
+		}
+	}
+	return strings.TrimSpace(stderr)
 }
 
 func isNotGitRepoError(err error, stderr string) bool {

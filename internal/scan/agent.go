@@ -225,6 +225,9 @@ func (a *Agent) Warnings() []llmloop.AgentWarning { return a.runner.Warnings() }
 // ToolCalls returns per-tool call counts accumulated during scan.
 func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 
+// ToolFailures returns failed registered-tool calls accumulated during scan.
+func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.ToolFailures() }
+
 // BudgetExceeded reports whether the aggregate token budget gate stopped
 // dispatch before every file was reviewed. Diagnostic only: scan still returns
 // its partial comments and a nil error, and the value reaches output solely as
@@ -327,8 +330,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	a.args.Tools.Freeze()
 
 	totalDiscovered := len(a.items)
-	a.items = a.filterScanItems(a.items)
-	a.items = a.filterLargeScans(a.items)
+	decisions := a.selectScanItems(a.items)
+	a.logSelection(decisions)
+	a.items = selectedScanItems(decisions)
 
 	reviewable := len(a.items)
 	fmt.Fprintf(stdout.Writer(), "[ocr] full-scan: %d file(s) discovered, reviewing %d in %s\n",
@@ -423,64 +427,85 @@ func (a *Agent) injectScanContentMap() {
 	}
 }
 
-// filterScanItems drops items that should not be reviewed under the standard
-// reviewability rules (binary, extension allowlist, user include/exclude,
-// default excluded paths).
-func (a *Agent) filterScanItems(items []model.ScanItem) []model.ScanItem {
-	var kept []model.ScanItem
-	skipped := 0
+type scanSelection struct {
+	item   model.ScanItem
+	reason model.ExcludeReason
+	tokens int
+}
+
+// selectScanItems is the single pre-dispatch selection pass shared by Run and
+// Preview. Keep the size check after the normal reviewability rules so an item
+// has one stable exclusion reason and the two paths cannot drift.
+func (a *Agent) selectScanItems(items []model.ScanItem) []scanSelection {
+	limit := llmloop.PromptTokenLimit(a.args.Template.MaxTokens)
+	decisions := make([]scanSelection, 0, len(items))
 	for _, it := range items {
-		switch reason := a.whyExcluded(it); reason {
-		case model.ExcludeNone:
-			// The file IS reviewed. The undecoded warning lives at this
-			// filter site for the reason spelled out in filterDiffs in
-			// internal/agent/agent.go.
-			if it.UndecodedCharset != "" {
-				fmt.Fprintf(os.Stderr,
-					"[ocr] WARNING: %s left undecoded (detected %s); review text may contain replacement characters\n",
-					it.Path, it.UndecodedCharset)
-			}
-			kept = append(kept, it)
-		case model.ExcludeBinary:
-			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", it.Path)
-			skipped++
-		case model.ExcludeUndecodable:
-			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — undecodable encoding (detected %s)\n",
-				it.Path, it.UndecodedCharset)
-			skipped++
-		default:
-			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", it.Path)
-			skipped++
+		decision := scanSelection{
+			item:   it,
+			reason: a.whyExcluded(it),
 		}
+		if decision.reason == model.ExcludeNone && limit > 0 {
+			decision.tokens = llm.CountTokens(it.Content)
+			if decision.tokens > limit {
+				decision.reason = model.ExcludeTooLarge
+			}
+		}
+		decisions = append(decisions, decision)
 	}
-	if skipped > 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Filtered %d file(s) by include/exclude rules\n", skipped)
+	return decisions
+}
+
+func selectedScanItems(decisions []scanSelection) []model.ScanItem {
+	kept := make([]model.ScanItem, 0, len(decisions))
+	for _, decision := range decisions {
+		if decision.reason == model.ExcludeNone {
+			kept = append(kept, decision.item)
+		}
 	}
 	return kept
 }
 
-// filterLargeScans drops items whose content exceeds 80% of MaxTokens.
-func (a *Agent) filterLargeScans(items []model.ScanItem) []model.ScanItem {
-	limit := llmloop.PromptTokenLimit(a.args.Template.MaxTokens)
-	if limit <= 0 {
-		return items
-	}
-	var kept []model.ScanItem
-	skipped := 0
-	for _, it := range items {
-		tokens := llm.CountTokens(it.Content)
-		if tokens > limit {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 80%% of max_tokens(%d))\n",
-				it.Path, tokens, a.args.Template.MaxTokens)
-			skipped++
+func (a *Agent) logSelection(decisions []scanSelection) {
+	staticSkipped := 0
+	for _, decision := range decisions {
+		// The file IS reviewed. The undecoded warning lives at this selection
+		// site for the reason spelled out in filterDiffs in
+		// internal/agent/agent.go.
+		if decision.reason == model.ExcludeNone && decision.item.UndecodedCharset != "" {
+			fmt.Fprintf(os.Stderr,
+				"[ocr] WARNING: %s left undecoded (detected %s); review text may contain replacement characters\n",
+				decision.item.Path, decision.item.UndecodedCharset)
+		}
+		if decision.reason == model.ExcludeNone || decision.reason == model.ExcludeTooLarge {
 			continue
 		}
-		kept = append(kept, it)
+		switch decision.reason {
+		case model.ExcludeBinary:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", decision.item.Path)
+		case model.ExcludeUndecodable:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — undecodable encoding (detected %s)\n",
+				decision.item.Path, decision.item.UndecodedCharset)
+		default:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", decision.item.Path)
+		}
+		staticSkipped++
 	}
-	if skipped > 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 80%% of max_tokens\n", skipped)
+	if staticSkipped > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Filtered %d file(s) by include/exclude rules\n", staticSkipped)
 	}
-	return kept
+
+	largeSkipped := 0
+	for _, decision := range decisions {
+		if decision.reason != model.ExcludeTooLarge {
+			continue
+		}
+		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 80%% of max_tokens(%d))\n",
+			decision.item.Path, decision.tokens, a.args.Template.MaxTokens)
+		largeSkipped++
+	}
+	if largeSkipped > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 80%% of max_tokens\n", largeSkipped)
+	}
 }
 
 // whyExcluded mirrors agent.whyExcluded but for ScanItem inputs.
@@ -805,7 +830,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 		return false, "", nil
 	}
 
-	completed, stop, err := a.runner.RunPerFile(ctx, messages, it.Path)
+	completed, stop, err := a.runner.RunMainTask(ctx, messages, it.Path)
 	if err != nil {
 		return false, "", err
 	}

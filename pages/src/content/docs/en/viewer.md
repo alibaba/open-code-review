@@ -12,9 +12,11 @@ review.
 ## Launching
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
+ocr viewer                       # start and open the browser
+ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer --open=never          # just print the URL
+ocr viewer --open=always         # force it when auto declines (piped output, WSL)
 ```
 
 The default address is `localhost:5483`. The server holds the foreground
@@ -30,6 +32,39 @@ another terminal shows up the moment its JSONL file appears.
 > `forbidden host`. To expose a wildcard bind, set
 > `OCR_VIEWER_ALLOWED_HOSTS` to a comma-separated list of allowed
 > hostnames (e.g. `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`).
+
+## Opening the browser
+
+`ocr viewer` opens the URL in your default browser as soon as the server is
+listening. `--open` controls this and takes the same three values as the global
+`--color`:
+
+| Value | Behavior |
+|---|---|
+| `auto` (default) | Open only where it is likely to work — see below. |
+| `always` | Open unconditionally. Use this where `auto` declines but a browser is in fact reachable — piped output, or WSL with no display. |
+| `never` | Print the URL and do nothing else. |
+
+In `auto` mode the browser is **not** opened when:
+
+- stdout is not a terminal — output is piped or redirected;
+- `SSH_CONNECTION` is set **and** no display is forwarded — a remote host with
+  nothing to open into. `ssh -X` and `ssh -Y` set `DISPLAY`, so they are not
+  suppressed;
+- on Linux, `DISPLAY` and `WAYLAND_DISPLAY` are both empty — no display server.
+
+The reason is appended to the ready line, so a deliberately suppressed
+auto-open never looks like a broken one:
+
+```
+Viewer ready: http://localhost:5483 (browser not opened: no DISPLAY or WAYLAND_DISPLAY)
+```
+
+On Unix, `$BROWSER` is tried first: a colon-separated list of commands, each
+either containing a `%s` placeholder for the URL or receiving it as a trailing
+argument. Otherwise the platform default runs — `open` on macOS, `xdg-open` on
+Linux and the BSDs, `rundll32` on Windows. Failing to open a browser is a
+warning on stderr and never fatal; the server keeps serving either way.
 
 ## Three pages
 
@@ -96,6 +131,39 @@ definitions are **not** rendered in the card UI; if you need them,
 inspect the JSONL transcript directly (the `messages` field on each
 `llm_request` record).
 
+## Review comments
+
+Below the task lanes, the session page lists every finding the review
+produced as **comment cards**, grouped by file, showing the comment
+text, its existing/suggested code where present, and severity/category
+badges. Chips on the filter bar narrow the list by severity or category.
+
+### Marking findings as you fix them
+
+Each card carries three buttons — **Fixed** / **Ignored** /
+**Clear** — that set a per-comment mark:
+
+- Marks are mutually exclusive: setting one replaces another, and
+  **Clear** removes it. The current state shows as a colored chip on
+  the card.
+- **Hide marked** (on by default, remembered per browser) keeps marked
+  cards out of the way while you work through what is left. The toolbar
+  counts how many are marked and hidden; switch the toggle off any time
+  to see everything again.
+- **Clear all marks** resets the whole session at once.
+
+Marks are viewer state, not review data — the viewer itself stays
+read-only:
+
+- They are stored in your browser's `localStorage`, scoped to the
+  session page. Nothing is ever written next to the session JSONL, and
+  the viewer exposes no write API at all.
+- Marks belong to one session **and one browser**: another browser or
+  machine sees the session unmarked, and clearing the browser's storage
+  for the site starts it over.
+- Re-running a review of the same change produces a new session, which
+  starts unmarked.
+
 ## Use cases
 
 The viewer is designed around three workflows:
@@ -151,8 +219,8 @@ reviewed together.
 Lines are append-only — a partial JSONL means a session was killed
 mid-run, and the viewer renders what it has.
 
-To free disk space, delete entire session files; the viewer regenerates
-its index on the next request.
+To free disk space, delete entire session files; the viewer
+regenerates its index on the next request.
 
 ## Privacy
 

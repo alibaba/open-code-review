@@ -19,6 +19,7 @@ const (
 	// merely imperfect — a stray smart quote, a handful of Latin-1 accents — is
 	// NOT excluded: it keeps the review it gets today and is only marked.
 	ExcludeUndecodable ExcludeReason = "undecodable_encoding"
+	ExcludeTooLarge    ExcludeReason = "too_large"
 )
 
 // PreviewEntry is one file's preview record (mode-agnostic).
