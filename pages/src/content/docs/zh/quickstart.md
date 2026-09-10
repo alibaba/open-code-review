@@ -66,7 +66,7 @@ cd path/to/your-repo
 # 工作区模式 —— 评审 staged + unstaged + untracked 变更（默认）
 ocr review
 
-# 分支区间 —— 评审 feature-branch 自与 main 分叉以来的变更（合并基准模式）
+# 分支区间 —— 评审 feature-branch 与 main 分叉后的变更（合并基准模式）
 ocr review --from main --to feature-branch
 
 # 单个 commit —— 评审该 commit 引入的 diff

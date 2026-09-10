@@ -83,7 +83,7 @@ func runLLMTest() error {
 
 	// No retry collector: llm test is a connectivity probe, not a review, and the
 	// retry report only describes ocr review.
-	llmClient := llm.NewLLMClient(ep, nil)
+	llmClient := llm.NewLLMClient(ep, nil, nil)
 
 	messages := make([]llm.Message, 0, len(task.Messages))
 	for _, m := range task.Messages {

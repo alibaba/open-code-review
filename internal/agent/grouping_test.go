@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -16,14 +17,19 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/stdout"
 )
 
 type fakeGroupingClient struct {
 	response string
 	err      error
+	gotReq   llm.ChatRequest
+	called   bool
 }
 
-func (f *fakeGroupingClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+func (f *fakeGroupingClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	f.gotReq = req
+	f.called = true
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -222,7 +228,7 @@ func TestFileGroupKey_Multiple(t *testing.T) {
 
 func TestGroupDiffs_SingleFile(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "a.go"}}
-	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0)
+	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0, nil)
 	if len(result.groups) != 1 {
 		t.Fatalf("got %d groups, want 1", len(result.groups))
 	}
@@ -230,7 +236,7 @@ func TestGroupDiffs_SingleFile(t *testing.T) {
 
 func TestGroupDiffs_NoGroupingTask(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}}
-	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0)
+	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0, nil)
 	if len(result.groups) != 2 {
 		t.Fatalf("got %d groups, want 2 (fallback to per-file)", len(result.groups))
 	}
@@ -244,7 +250,7 @@ func TestGroupDiffs_LLMError_Fallback(t *testing.T) {
 			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 		},
 	}
-	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0)
+	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0, nil)
 	if len(result.groups) != 2 {
 		t.Fatalf("got %d groups, want 2 (fallback on error)", len(result.groups))
 	}
@@ -260,7 +266,7 @@ func TestGroupDiffs_LLMSuccess(t *testing.T) {
 			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 		},
 	}
-	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0)
+	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0, nil)
 	if len(result.groups) != 2 {
 		t.Fatalf("got %d groups, want 2", len(result.groups))
 	}
@@ -272,29 +278,284 @@ func TestGroupDiffs_LLMSuccess(t *testing.T) {
 	}
 }
 
+// groupingSkipTemplate is a template whose GROUPING_TASK is configured, so that
+// a test asserting client.called == false proves the fast path skipped the call
+// rather than the nil-task fallback having short-circuited it.
+func groupingSkipTemplate(minFiles, bundleLines int) template.Template {
+	return template.Template{
+		GroupingMinFiles:            minFiles,
+		GroupingBundleLineThreshold: bundleLines,
+		GroupingTask: &template.LlmConversation{
+			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
+		},
+	}
+}
+
+func TestGroupDiffs_SmallLowChurnBundles(t *testing.T) {
+	diffs := []model.Diff{
+		{NewPath: "a.go", Insertions: 10, Deletions: 5, Diff: "diff a"},
+		{NewPath: "b.go", Insertions: 8, Deletions: 2, Diff: "diff b"},
+		{NewPath: "c.go", Insertions: 4, Deletions: 1, Diff: "diff c"},
+	}
+	client := &fakeGroupingClient{response: `[{"label":"x","files":["a.go"]}]`}
+	result := groupDiffs(context.Background(), diffs, client, "fake", groupingSkipTemplate(4, 200), 0, nil)
+	if client.called {
+		t.Error("grouping LLM was called for a below-threshold change set")
+	}
+	if len(result.groups) != 1 {
+		t.Fatalf("got %d groups, want 1 bundled group", len(result.groups))
+	}
+	if len(result.groups[0].Diffs) != 3 {
+		t.Errorf("bundled group has %d diffs, want 3", len(result.groups[0].Diffs))
+	}
+	if result.groups[0].Label != smallChangeSetLabel {
+		t.Errorf("label = %q, want %q", result.groups[0].Label, smallChangeSetLabel)
+	}
+	if result.usage != nil {
+		t.Errorf("usage = %v, want nil (no LLM call was made)", result.usage)
+	}
+}
+
+func TestGroupDiffs_SmallHighChurnPerFile(t *testing.T) {
+	// Few enough files to skip the LLM, but too much churn for the three to
+	// share one group's review rounds.
+	diffs := []model.Diff{
+		{NewPath: "a.go", Insertions: 100, Deletions: 50, Diff: "diff a"},
+		{NewPath: "b.go", Insertions: 40, Deletions: 20, Diff: "diff b"},
+		{NewPath: "c.go", Insertions: 10, Deletions: 5, Diff: "diff c"},
+	}
+	client := &fakeGroupingClient{response: `[{"label":"x","files":["a.go"]}]`}
+	result := groupDiffs(context.Background(), diffs, client, "fake", groupingSkipTemplate(4, 200), 0, nil)
+	if client.called {
+		t.Error("grouping LLM was called for a below-threshold change set")
+	}
+	if len(result.groups) != 3 {
+		t.Fatalf("got %d groups, want 3 (per-file)", len(result.groups))
+	}
+	for i, g := range result.groups {
+		if len(g.Diffs) != 1 {
+			t.Errorf("group %d has %d diffs, want 1", i, len(g.Diffs))
+		}
+	}
+}
+
+func TestGroupDiffs_BundleTokenBudgetSplit(t *testing.T) {
+	// Low churn admits the bundle, but a tiny prompt limit makes it unusable, so
+	// the token valve degrades it to the per-file shape.
+	diffs := []model.Diff{
+		{NewPath: "a.go", Insertions: 3, Deletions: 1, Diff: "some diff content for a"},
+		{NewPath: "b.go", Insertions: 2, Deletions: 1, Diff: "some diff content for b"},
+	}
+	client := &fakeGroupingClient{response: `[{"label":"x","files":["a.go"]}]`}
+	result := groupDiffs(context.Background(), diffs, client, "fake", groupingSkipTemplate(4, 200), 1, nil)
+	if client.called {
+		t.Error("grouping LLM was called for a below-threshold change set")
+	}
+	if len(result.groups) != 2 {
+		t.Fatalf("got %d groups, want 2 (bundle split by token budget)", len(result.groups))
+	}
+	for i, g := range result.groups {
+		if len(g.Diffs) != 1 {
+			t.Errorf("group %d has %d diffs, want 1", i, len(g.Diffs))
+		}
+		if !strings.Contains(g.Label, "split:") {
+			t.Errorf("group %d label = %q, want a split marker", i, g.Label)
+		}
+	}
+}
+
+func TestGroupDiffs_SkipLogReportsActualShape(t *testing.T) {
+	// The log line names the partition that came out, so a bundle degraded by
+	// the token valve must not still be announced as one group.
+	diffs := []model.Diff{
+		{NewPath: "a.go", Insertions: 3, Deletions: 1, Diff: "some diff content for a"},
+		{NewPath: "b.go", Insertions: 2, Deletions: 1, Diff: "some diff content for b"},
+	}
+	tests := []struct {
+		name       string
+		tpl        template.Template
+		tokenLimit int
+		want       string
+	}{
+		{"bundle survives", groupingSkipTemplate(4, 200), 0, "reviewing as one group"},
+		{"bundle split by token budget", groupingSkipTemplate(4, 200), 1, "reviewing per file"},
+		{"bundle disabled", groupingSkipTemplate(4, 0), 0, "reviewing per file"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			restore := stdout.Swap(&buf)
+			groupDiffs(context.Background(), diffs, &fakeGroupingClient{}, "fake", tt.tpl, tt.tokenLimit, nil)
+			restore()
+			if got := buf.String(); !strings.Contains(got, tt.want) {
+				t.Errorf("log = %q, want it to mention %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGroupDiffs_AtFileThresholdCallsLLM(t *testing.T) {
+	// Exactly at GroupingMinFiles: the LLM decides, and churn is not consulted.
+	diffs := []model.Diff{
+		{NewPath: "a.go", Insertions: 1},
+		{NewPath: "b.go", Insertions: 1},
+		{NewPath: "c.go", Insertions: 1},
+		{NewPath: "d.go", Insertions: 1},
+	}
+	client := &fakeGroupingClient{
+		response: `[{"label":"ab","files":["a.go","b.go"]},{"label":"cd","files":["c.go","d.go"]}]`,
+	}
+	result := groupDiffs(context.Background(), diffs, client, "fake", groupingSkipTemplate(4, 200), 0, nil)
+	if !client.called {
+		t.Fatal("grouping LLM was not called at the file threshold")
+	}
+	if len(result.groups) != 2 {
+		t.Fatalf("got %d groups, want 2", len(result.groups))
+	}
+}
+
+func TestGroupDiffs_BundleDisabledFallsToPerFile(t *testing.T) {
+	// GroupingBundleLineThreshold of 0 turns the second step off: small change
+	// sets still skip the LLM, but never bundle.
+	diffs := []model.Diff{
+		{NewPath: "a.go", Insertions: 1, Diff: "diff a"},
+		{NewPath: "b.go", Insertions: 1, Diff: "diff b"},
+	}
+	client := &fakeGroupingClient{response: `[{"label":"x","files":["a.go"]}]`}
+	result := groupDiffs(context.Background(), diffs, client, "fake", groupingSkipTemplate(4, 0), 0, nil)
+	if client.called {
+		t.Error("grouping LLM was called for a below-threshold change set")
+	}
+	if len(result.groups) != 2 {
+		t.Fatalf("got %d groups, want 2 (per-file)", len(result.groups))
+	}
+}
+
+func TestGroupDiffs_SingleFileSkipsQuietly(t *testing.T) {
+	// A single file reports the skip through telemetry but prints nothing: the
+	// terminal reader gains nothing from being told that one file needs no
+	// partition. The group keeps the file path as its label, not
+	// smallChangeSetLabel — this path must not fall through to the bundle shape.
+	diffs := []model.Diff{{NewPath: "a.go", Insertions: 3, Deletions: 1, Diff: "diff a"}}
+	client := &fakeGroupingClient{response: `[{"label":"x","files":["a.go"]}]`}
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	result := groupDiffs(context.Background(), diffs, client, "fake", groupingSkipTemplate(4, 200), 0, nil)
+	restore()
+
+	if client.called {
+		t.Error("grouping LLM was called for a single-file change set")
+	}
+	if len(result.groups) != 1 {
+		t.Fatalf("got %d groups, want 1", len(result.groups))
+	}
+	if result.groups[0].Label != "a.go" {
+		t.Errorf("label = %q, want the file path", result.groups[0].Label)
+	}
+	if got := buf.String(); got != "" {
+		t.Errorf("single-file skip printed %q, want no output", got)
+	}
+}
+
+func TestGroupDiffs_SingleFileSkipsWithGroupingDisabled(t *testing.T) {
+	// GroupingMinFiles of 0 makes GroupingPlan return GroupingViaLLM, so only the
+	// unconditional single-file short-circuit stops a pointless grouping call for
+	// one file. Guards the ordering of that check against GroupingPlan.
+	diffs := []model.Diff{{NewPath: "a.go", Insertions: 3, Diff: "diff a"}}
+	client := &fakeGroupingClient{response: `[{"label":"x","files":["a.go"]}]`}
+	result := groupDiffs(context.Background(), diffs, client, "fake", groupingSkipTemplate(0, 200), 0, nil)
+	if client.called {
+		t.Error("grouping LLM was called for a single file with GroupingMinFiles disabled")
+	}
+	if len(result.groups) != 1 {
+		t.Fatalf("got %d groups, want 1", len(result.groups))
+	}
+}
+
+func TestGroupDiffs_BundleSplitByMaxFilesPerGroup(t *testing.T) {
+	// GroupingMinFiles raised past maxFilesPerGroup, which is the case the bundle's
+	// enforceMaxFilesPerGroup call exists to guard: the bundle is chopped into
+	// 10-file chunks, so the shape is neither one group nor one per file.
+	diffs := make([]model.Diff, 12)
+	for i := range diffs {
+		diffs[i] = model.Diff{NewPath: fmt.Sprintf("f%d.go", i), Insertions: 1, Diff: "d"}
+	}
+	client := &fakeGroupingClient{response: `[{"label":"x","files":["f0.go"]}]`}
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	result := groupDiffs(context.Background(), diffs, client, "fake", groupingSkipTemplate(13, 200), 0, nil)
+	restore()
+
+	if client.called {
+		t.Error("grouping LLM was called for a below-threshold change set")
+	}
+	if len(result.groups) != 2 {
+		t.Fatalf("got %d groups, want 2 (10 + 2)", len(result.groups))
+	}
+	if !strings.Contains(buf.String(), "reviewing as 2 groups") {
+		t.Errorf("log = %q, want it to name the 2-group shape", buf.String())
+	}
+}
+
 func TestCallGroupingLLM_EmptyResponse(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "a.go"}}
 	client := &fakeGroupingClient{response: ""}
 	task := &template.LlmConversation{
 		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 	}
-	_, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task)
+	_, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 4096, nil)
 	if err == nil {
 		t.Fatal("expected error for empty response")
 	}
 }
 
+// TestCallGroupingLLM_UsesTemplateMaxTokens guards against reintroducing the
+// hardcoded MaxTokens: 4096 this replaced: a small, task-specific cap left no
+// room for a provider config that enables Anthropic extended thinking via
+// extra_body.thinking with a larger budget_tokens, so the grouping call
+// failed with "max_tokens must be greater than thinking.budget_tokens" even
+// though the main review loop's own MAX_TOKENS was large enough.
+func TestCallGroupingLLM_UsesTemplateMaxTokens(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}}
+	task := &template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
+	}
+
+	client := &fakeGroupingClient{response: `[{"label":"a","files":["a.go"]}]`}
+	if _, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 32000, nil); err != nil {
+		t.Fatalf("callGroupingLLM: %v", err)
+	}
+	if client.gotReq.MaxTokens != 32000 {
+		t.Errorf("MaxTokens = %d, want 32000 (the template's own limit)", client.gotReq.MaxTokens)
+	}
+
+	client = &fakeGroupingClient{response: `[{"label":"a","files":["a.go"]}]`}
+	if _, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 0, nil); err != nil {
+		t.Fatalf("callGroupingLLM: %v", err)
+	}
+	if client.gotReq.MaxTokens != 4096 {
+		t.Errorf("MaxTokens = %d, want fallback 4096 when the template leaves MAX_TOKENS unset", client.gotReq.MaxTokens)
+	}
+}
+
 func TestBuildFileMetadataTable(t *testing.T) {
 	diffs := []model.Diff{
-		{NewPath: "a.go", IsNew: true, Insertions: 10, Deletions: 0},
-		{NewPath: "b.go", IsDeleted: true, Insertions: 0, Deletions: 5},
+		{NewPath: "a.go", IsNew: true, Insertions: 10},
+		{NewPath: "b.go", IsDeleted: true, Deletions: 5},
+		{NewPath: "c.go", OldPath: "old_c.go", IsRenamed: true, Insertions: 2, Deletions: 1},
+		{NewPath: "d.go", OldPath: "d.go", Insertions: 3, Deletions: 4},
 	}
-	table := buildFileList(diffs)
-	if !contains(table, "ADDED") || !contains(table, "DELETED") {
-		t.Errorf("table missing status:\n%s", table)
-	}
-	if !contains(table, "a.go") || !contains(table, "b.go") {
-		t.Errorf("table missing paths:\n%s", table)
+	// The grouping file list shares formatDiffEntry with the other-changed-files
+	// block, so both prompts enumerate files the same way. Pin the exact shape,
+	// including the per-entry trailing newline the grouping template relies on.
+	want := "ADDED   a.go (+10/-0)\n" +
+		"DELETED   b.go (+0/-5)\n" +
+		"RENAMED   c.go (+2/-1)\n" +
+		"MODIFIED   d.go (+3/-4)\n"
+	if got := buildFileList(diffs); got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
@@ -439,19 +700,6 @@ func TestResolveGroupSystemRule(t *testing.T) {
 	})
 }
 
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsSubstring(s, sub))
-}
-
-func containsSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
-
 func TestGroupChurn(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -493,7 +741,7 @@ func TestGroupChurn(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			total, maxFile := groupChurn(tt.group)
+			total, maxFile := diffsChurn(tt.group.Diffs)
 			if total != tt.total {
 				t.Errorf("total = %d, want %d", total, tt.total)
 			}
