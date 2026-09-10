@@ -20,7 +20,7 @@
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
     "**/*.{ts,js,tsx,jsx,mjs,cjs}": "ts_js_tsx_jsx.md",
-    "**/*.{kt}": "kotlin.md",
+    "**/*.{kt,kts}": "kotlin.md",
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,cxx,hpp,hxx}": "cpp.md",
     "**/*.c": "c.md",
@@ -44,11 +44,14 @@
     "**/*.zig": "zig.md",
     "**/*.thrift": "thrift.md",
     "**/*.capnp": "capnp.md",
+    "**/*.{ml,mli}": "ocaml.md",
+    "**/*.{re,rei}": "ocaml.md",
     "**/*.{v,sv,vh}": "verilog.md",
     "**/*.{vhd,vhdl}": "vhdl.md",
     "**/*.m": "matlab.md",
     "**/*.mm": "objc.md",
     "**/*.sol": "solidity.md",
-    "**/*.vy": "vyper.md"
+    "**/*.vy": "vyper.md",
+    "**/*.rego": "rego.md"
   }
 }

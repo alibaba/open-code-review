@@ -50,11 +50,11 @@ func addExcludeFlag(cmd *cobra.Command, target *string) {
 }
 
 func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, maxGitProcs, maxTokens, maxTokensBudget *int) {
-	cmd.Flags().IntVar(concurrency, "concurrency", 8, "max concurrent file reviews")
+	cmd.Flags().IntVar(concurrency, "concurrency", 8, "max concurrent file-group reviews")
 	cmd.Flags().IntVar(timeout, "timeout", 15, "concurrent task timeout in minutes")
 	cmd.Flags().IntVar(maxTools, "max-tools", 0, "max tool call rounds per subtask (0 = template default; min 50)")
 	cmd.Flags().IntVar(maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
-	cmd.Flags().IntVar(maxTokens, "max-tokens", 0, "per-file prompt token ceiling (0 = configured or template default)")
+	cmd.Flags().IntVar(maxTokens, "max-tokens", 0, "per-group prompt token ceiling (0 = configured or template default)")
 	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; dispatch stops once exceeded and skipped files are reported as failed(budget). Partial results are published and review exits 0; it exits non-zero only if every selected item failed (0 = unlimited)")
 }
 
@@ -209,7 +209,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
 	addOutputPathFlag(cmd, &opts.outputPath)
-	addConcurrencyFlags(cmd, &opts.concurrency, &opts.perFileTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokens, &opts.maxTokensBudget)
+	addConcurrencyFlags(cmd, &opts.concurrency, &opts.concurrentTaskTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokens, &opts.maxTokensBudget)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	addProviderFlag(cmd, &opts.provider)
 	addModelFlag(cmd, &opts.model)
@@ -229,7 +229,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
 	addOutputPathFlag(cmd, &opts.outputPath)
 	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file scans")
-	cmd.Flags().IntVar(&opts.perFileTimeout, "timeout", 15, "concurrent task timeout in minutes")
+	cmd.Flags().IntVar(&opts.concurrentTaskTimeout, "timeout", 15, "concurrent task timeout in minutes")
 	cmd.Flags().IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")
 	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(&opts.maxTokens, "max-tokens", 0, "per-file prompt token ceiling (0 = configured or template default)")

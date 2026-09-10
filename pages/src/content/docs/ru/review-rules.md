@@ -166,7 +166,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — компоненты и islands Astro. |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
@@ -191,6 +191,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.mm` | `objc.md` — исходный код Objective-C++. |
 | `**/*.sol` | `solidity.md` — смарт-контракты Solidity. |
 | `**/*.vy` | `vyper.md` — смарт-контракты Vyper. |
+| `**/*.rego` | `rego.md` — политики Rego (OPA). |
 | *(fallback)* | `default.md` |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -225,5 +226,119 @@ func TestCategoryCounts_NormalizesUnknownCategories(t *testing.T) {
 	})
 	if counts.Bug != 1 || counts.Maintainability != 1 || counts.Other != 2 {
 		t.Fatalf("unexpected category counts: %+v", counts)
+	}
+}
+
+// TestNumberedCodeLines pins the numbering contract for the Existing Code
+// gutter. The interesting half of the table is the cases where the reported
+// range and the snippet disagree: internal/diff/resolver.go drops blank lines
+// while matching, so the span can be wider or narrower than the snippet, and
+// numbering it anyway would print wrong file line numbers.
+func TestNumberedCodeLines(t *testing.T) {
+	tests := []struct {
+		name  string
+		code  string
+		start int
+		end   int
+		want  []codeLine
+	}{
+		{"single line", "foo()", 10, 10, []codeLine{{10, "foo()"}}},
+		{"multi line contiguous", "a\nb\nc", 10, 12, []codeLine{{10, "a"}, {11, "b"}, {12, "c"}}},
+		{"trailing newline is not a line", "a\nb\n", 10, 11, []codeLine{{10, "a"}, {11, "b"}}},
+		{"end line zero means single line", "foo()", 7, 0, []codeLine{{7, "foo()"}}},
+		{"inverted range yields no numbers", "foo()", 12, 10, []codeLine{{0, "foo()"}}},
+		{"unresolved range yields no numbers", "a\nb", 0, 0, []codeLine{{0, "a"}, {0, "b"}}},
+		{"negative start yields no numbers", "a", -3, -1, []codeLine{{0, "a"}}},
+		{"span wider than snippet yields no numbers", "a\nb", 10, 14, []codeLine{{0, "a"}, {0, "b"}}},
+		{"span narrower than snippet yields no numbers", "a\nb\nc\nd", 10, 11, []codeLine{{0, "a"}, {0, "b"}, {0, "c"}, {0, "d"}}},
+		{"internal blank line counted", "a\n\nb", 10, 12, []codeLine{{10, "a"}, {11, ""}, {12, "b"}}},
+		{"leading blank line breaks consistency", "\na\nb", 10, 11, []codeLine{{0, ""}, {0, "a"}, {0, "b"}}},
+		{"empty code has no lines", "", 10, 10, nil},
+		{"crlf line endings", "a\r\nb", 10, 11, []codeLine{{10, "a"}, {11, "b"}}},
+		{"html metacharacters are returned verbatim", "if a < b && c > d {", 5, 5, []codeLine{{5, "if a < b && c > d {"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := numberedCodeLines(tt.code, tt.start, tt.end)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("numberedCodeLines(%q, %d, %d) = %#v, want %#v", tt.code, tt.start, tt.end, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseTemplate_ExistingCodeLineNumbers asserts the rendered session page,
+// not which helper ran: a trustworthy range gets a per-line gutter, anything
+// else keeps the plain block it has today.
+func TestParseTemplate_ExistingCodeLineNumbers(t *testing.T) {
+	tmpl, err := parseTemplate("session.html")
+	if err != nil {
+		t.Fatalf("parseTemplate: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		comment    *ReviewComment
+		wantHas    []string
+		wantHasNot []string
+	}{
+		{
+			name:    "resolved range is numbered",
+			comment: &ReviewComment{FilePath: "a.go", Content: "c", ExistingCode: "a\nb\nc", StartLine: 10, EndLine: 12},
+			wantHas: []string{
+				`<span class="line-no" aria-hidden="true">10</span><span class="line-text">a</span>`,
+				`<span class="line-no" aria-hidden="true">11</span><span class="line-text">b</span>`,
+				`<span class="line-no" aria-hidden="true">12</span><span class="line-text">c</span>`,
+				`<span class="comment-lines sr-only">L10-L12</span>`,
+			},
+		},
+		{
+			name:       "unresolved range is not numbered",
+			comment:    &ReviewComment{FilePath: "a.go", Content: "c", ExistingCode: "a\nb"},
+			wantHas:    []string{"<pre><code>a\nb</code></pre>"},
+			wantHasNot: []string{`class="line-no"`},
+		},
+		{
+			name:       "inconsistent span is not numbered",
+			comment:    &ReviewComment{FilePath: "a.go", Content: "c", ExistingCode: "a\nb", StartLine: 10, EndLine: 14},
+			wantHas:    []string{"<pre><code>a\nb</code></pre>", `<span class="comment-lines">L10-L14</span>`},
+			wantHasNot: []string{`class="line-no"`},
+		},
+		{
+			name:       "suggestion block is never numbered",
+			comment:    &ReviewComment{FilePath: "a.go", Content: "c", SuggestionCode: "x\ny", StartLine: 10, EndLine: 11},
+			wantHas:    []string{`<div class="code-panel-label">Suggested Change</div>`, "<pre><code>x\ny</code></pre>"},
+			wantHasNot: []string{`class="line-no"`},
+		},
+		{
+			name:       "html in numbered code is escaped",
+			comment:    &ReviewComment{FilePath: "a.go", Content: "c", ExistingCode: "<script>alert(1)</script>", StartLine: 3, EndLine: 3},
+			wantHas:    []string{`<span class="line-text">&lt;script&gt;alert(1)&lt;/script&gt;</span>`},
+			wantHasNot: []string{"<script>alert(1)</script>"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vs := &ViewSession{
+				Summary:  SessionSummary{SessionID: "s", CWD: "/p"},
+				Comments: []*ReviewComment{tt.comment},
+			}
+			rr := httptest.NewRecorder()
+			if err := tmpl.Execute(rr, sessionPageData{EncodedRepo: "r", RepoName: "R", Session: vs}); err != nil {
+				t.Fatalf("execute session.html: %v", err)
+			}
+			body := rr.Body.String()
+			for _, want := range tt.wantHas {
+				if !strings.Contains(body, want) {
+					t.Errorf("rendered page missing %q", want)
+				}
+			}
+			for _, unwanted := range tt.wantHasNot {
+				if strings.Contains(body, unwanted) {
+					t.Errorf("rendered page unexpectedly contains %q", unwanted)
+				}
+			}
+		})
 	}
 }

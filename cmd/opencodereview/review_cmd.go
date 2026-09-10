@@ -9,11 +9,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
@@ -29,30 +27,30 @@ import (
 )
 
 type reviewOptions struct {
-	toolConfigPath  string
-	rulePath        string
-	repoDir         string
-	from            string
-	to              string
-	commit          string
-	resume          string
-	excludes        string
-	outputFormat    string
-	audience        string
-	outputPath      string
-	background      string
-	backgroundFile  string
-	provider        string
-	model           string
-	concurrency     int
-	perFileTimeout  int
-	maxTools        int
-	maxGitProcs     int
-	maxTokens       int
-	maxTokensBudget int
-	effort          string
-	noFilter        bool
-	preview         bool
+	toolConfigPath        string
+	rulePath              string
+	repoDir               string
+	from                  string
+	to                    string
+	commit                string
+	resume                string
+	excludes              string
+	outputFormat          string
+	audience              string
+	outputPath            string
+	background            string
+	backgroundFile        string
+	provider              string
+	model                 string
+	concurrency           int
+	concurrentTaskTimeout int
+	maxTools              int
+	maxGitProcs           int
+	maxTokens             int
+	maxTokensBudget       int
+	effort                string
+	noFilter              bool
+	preview               bool
 }
 
 var reviewOpts reviewOptions
@@ -100,7 +98,10 @@ var reviewCmd = &cobra.Command{
 		if err := validateReviewOptions(&reviewOpts); err != nil {
 			return err
 		}
-		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		// First signal cancels the context so the defer chain shuts down
+		// gracefully; a second signal force-exits instead of being dropped
+		// for the whole shutdown window (see interrupt.go).
+		ctx, stop := interruptContextWithForcedExit(cmd.Context())
 		defer stop()
 		return executeReviewContext(ctx, reviewOpts)
 	},
@@ -115,9 +116,20 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err != nil {
 		return err
 	}
-	defer func() {
+	closeOutPending := true
+	finishOutput := func() error {
+		if !closeOutPending {
+			return nil
+		}
+		closeOutPending = false
 		if cerr := closeOut(); cerr != nil {
-			retErr = errors.Join(retErr, fmt.Errorf("close output file: %w", cerr))
+			return fmt.Errorf("close output file: %w", cerr)
+		}
+		return nil
+	}
+	defer func() {
+		if cerr := finishOutput(); cerr != nil {
+			retErr = errors.Join(retErr, cerr)
 		}
 	}()
 
@@ -195,13 +207,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
 	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
-	defer func() {
-		for _, mc := range mcpClients {
-			if err := mc.Close(); err != nil {
-				fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to close MCP server %q: %v\n", mc.Name(), err)
-			}
-		}
-	}()
+	defer closeReviewMCPClients(mcpClients)
 
 	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
 	rt.PlanToolDefs = append(rt.PlanToolDefs, mcpToolDefs...)
@@ -223,7 +229,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		CommentCollector:      rt.Collector,
 		CommentWorkerPool:     agent.NewCommentWorkerPool(opts.concurrency),
 		MaxConcurrency:        opts.concurrency,
-		ConcurrentTaskTimeout: opts.perFileTimeout,
+		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
 		Provider:              rt.Provider,
 		Background:            opts.background,
@@ -291,6 +297,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
+		} else {
+			// Commit the report before potentially slow MCP shutdown. The deferred
+			// close remains a fallback for every earlier return and emit failure.
+			emitErr = finishOutput()
 		}
 	}
 	if resultErr != nil {
@@ -373,8 +383,9 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 // It must run before agent.New: agent.New creates the session, and session.New
 // writes session_start immediately, so validating any later would leave an orphan
 // session on disk behind every rejection. It must also run after max-tokens is
-// resolved, because the per-file token ceiling decides which large diffs are
-// dropped and therefore which files the input identity covers.
+// resolved, because agent.filterLargeDiffs measures each file's diff against
+// that ceiling on its own — grouping never enters this decision — and what it
+// drops is what the input identity stops covering.
 //
 // provider and model are explicit exactly when their flag was passed on this
 // command line: both default to the empty string and nothing else can set them,
@@ -575,6 +586,16 @@ func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repo
 		mcp.RegisterAll(tools, mc, serverCfg.Tools)
 	}
 	return clients
+}
+
+// closeReviewMCPClients is a variable so tests can observe the shutdown
+// boundary without starting an intentionally unresponsive subprocess.
+var closeReviewMCPClients = func(clients []*mcp.Client) {
+	closeCtx, cancel := context.WithTimeout(context.Background(), mcp.CloseAllTimeout)
+	defer cancel()
+	if err := mcp.CloseAll(closeCtx, clients); err != nil {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: %v\n", err)
+	}
 }
 
 func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *tool.Registry {

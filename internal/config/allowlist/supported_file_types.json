@@ -98,11 +98,16 @@
   ".zig",
   ".thrift",
   ".capnp",
+  ".ml",
+  ".mli",
+  ".re",
+  ".rei",
   ".v",
   ".sv",
   ".vh",
   ".vhd",
   ".vhdl",
   ".sol",
-  ".vy"
+  ".vy",
+  ".rego"
 ]

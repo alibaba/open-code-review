@@ -147,7 +147,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.ets` | `arkts.md`——ArkTS / HarmonyOS。 |
 | `**/*.astro` | `astro.md`——Astro 组件与 islands。 |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
@@ -172,6 +172,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.mm` | `objc.md`——Objective-C++ 源代码。 |
 | `**/*.sol` | `solidity.md`——Solidity 智能合约。 |
 | `**/*.vy` | `vyper.md`——Vyper 智能合约。 |
+| `**/*.rego` | `rego.md`——Rego 策略（OPA）。 |
 | *(fallback)* | `default.md` |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。
