@@ -6,6 +6,7 @@ package llmloop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -357,12 +358,13 @@ func (r *Runner) RunDiffOnlyTask(ctx context.Context, messages []llm.Message, ta
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-		Model:      r.deps.Model,
-		Messages:   messages,
-		Tools:      toolDefs,
-		ToolChoice: "required",
-		MaxTokens:  r.deps.Template.CompletionTokenLimit(),
-		SessionID:  uuid.NewString(),
+		Model:    r.deps.Model,
+		Messages: messages,
+		Tools:    toolDefs,
+		// Keep ToolChoice unset: providers such as DeepSeek reject the
+		// parameter in thinking mode even though they support tool calls.
+		MaxTokens: r.deps.Template.CompletionTokenLimit(),
+		SessionID: uuid.NewString(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {
@@ -389,28 +391,29 @@ func (r *Runner) RunDiffOnlyTask(ctx context.Context, messages []llm.Message, ta
 	}
 
 	thinking := resp.ReasoningContent()
+	var callErrors []error
 	for _, call := range calls {
 		name := call.Function.Name
 		if name != tool.CodeComment.Name() && name != tool.TaskDone.Name() {
-			return fmt.Errorf("diff-only response called unavailable tool %q", name)
+			callErrors = append(callErrors, fmt.Errorf("diff-only response called unavailable tool %q", name))
+			continue
 		}
 
 		cp := r.executeToolCallWithOptions(ctx, taskKey, call, rec, thinking, false)
 		switch name {
 		case tool.TaskDone.Name():
 			if cp.Failed {
-				return fmt.Errorf("task failed: %s", cp.Data)
-			}
-			if !cp.Completed {
-				return fmt.Errorf("diff-only task_done call was invalid: %s", cp.Data)
+				callErrors = append(callErrors, fmt.Errorf("task failed: %s", cp.Data))
+			} else if !cp.Completed {
+				callErrors = append(callErrors, fmt.Errorf("diff-only task_done call was invalid: %s", cp.Data))
 			}
 		case tool.CodeComment.Name():
 			if cp.Data != tool.CommentSucceed {
-				return fmt.Errorf("diff-only code_comment call was invalid: %s", cp.Data)
+				callErrors = append(callErrors, fmt.Errorf("diff-only code_comment call was invalid: %s", cp.Data))
 			}
 		}
 	}
-	return nil
+	return errors.Join(callErrors...)
 }
 
 // diffOnlyToolDefs selects and validates the complete structured-output

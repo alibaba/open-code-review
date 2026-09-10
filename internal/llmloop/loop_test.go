@@ -127,7 +127,7 @@ func toolCallResponse(calls ...llm.ToolCall) *llm.ChatResponse {
 	}
 }
 
-func TestRunDiffOnlyTask_UsesOneRequiredOutputOnlyRequest(t *testing.T) {
+func TestRunDiffOnlyTask_UsesOneOutputOnlyRequest(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
 	deps := diffOnlyTestDeps(client)
 	deps.Template.MaxCompletionTokens = 4321
@@ -141,8 +141,8 @@ func TestRunDiffOnlyTask_UsesOneRequiredOutputOnlyRequest(t *testing.T) {
 		t.Fatalf("LLM requests = %d, want exactly 1", len(client.requests))
 	}
 	req := client.requests[0]
-	if req.ToolChoice != "required" {
-		t.Errorf("ToolChoice = %q, want required", req.ToolChoice)
+	if req.ToolChoice != "" {
+		t.Errorf("ToolChoice = %q, want provider default", req.ToolChoice)
 	}
 	if req.MaxTokens != 4321 {
 		t.Errorf("MaxTokens = %d, want 4321", req.MaxTokens)
@@ -230,6 +230,40 @@ func TestRunDiffOnlyTask_DoesNotRetryInvalidResponses(t *testing.T) {
 				t.Fatalf("LLM calls = %d, want no retry after the first call", client.calls)
 			}
 		})
+	}
+}
+
+func TestRunDiffOnlyTask_PreservesValidCallsAfterInvalidCall(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{toolCallResponse(
+		llm.ToolCall{
+			ID: "invalid", Type: "function",
+			Function: llm.FunctionCall{Name: tool.CodeComment.Name(), Arguments: `{"comments":`},
+		},
+		llm.ToolCall{
+			ID: "valid", Type: "function",
+			Function: llm.FunctionCall{
+				Name:      tool.CodeComment.Name(),
+				Arguments: `{"comments":[{"content":"valid issue","existing_code":"broken()","path":"main.go"}]}`,
+			},
+		},
+		llm.ToolCall{
+			ID: "done", Type: "function",
+			Function: llm.FunctionCall{Name: tool.TaskDone.Name(), Arguments: `{}`},
+		},
+	)}}
+	deps := diffOnlyTestDeps(client)
+	runner := NewRunner(deps)
+
+	err := runner.RunDiffOnlyTask(context.Background(), nil, "main.go")
+	if err == nil || !strings.Contains(err.Error(), "diff-only code_comment call was invalid") {
+		t.Fatalf("RunDiffOnlyTask error = %v, want malformed-comment error", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("LLM calls = %d, want 1", client.calls)
+	}
+	comments := deps.CommentCollector.Comments()
+	if len(comments) != 1 || comments[0].Content != "valid issue" {
+		t.Fatalf("comments = %+v, want the valid trailing comment", comments)
 	}
 }
 

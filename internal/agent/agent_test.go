@@ -1048,8 +1048,8 @@ func TestDispatchSubtasks_DiffOnlyUsesOneMainRequest(t *testing.T) {
 		t.Fatalf("LLM requests = %d, want exactly 1", len(client.requests))
 	}
 	req := client.requests[0]
-	if req.ToolChoice != "required" {
-		t.Errorf("ToolChoice = %q, want required", req.ToolChoice)
+	if req.ToolChoice != "" {
+		t.Errorf("ToolChoice = %q, want provider default", req.ToolChoice)
 	}
 	if len(req.Tools) != 2 || req.Tools[0].Function.Name != tool.CodeComment.Name() || req.Tools[1].Function.Name != tool.TaskDone.Name() {
 		t.Errorf("Tools = %+v, want only code_comment and task_done", req.Tools)
