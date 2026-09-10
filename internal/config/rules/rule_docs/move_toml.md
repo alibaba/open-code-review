@@ -1,13 +1,12 @@
 #### Move Package Manifest Hygiene
-- Git dependencies pinned to a branch or moving tag rather than a full commit hash: `rev = "main"`, `rev = "mainnet"`, and `rev = "framework/testnet"` all resolve differently over time, so the bytecode published today may not be the bytecode published tomorrow
+- Git dependency resolution that is not fixed. On Sui a branch or tag `rev` is pinned to a commit in `Move.lock`, so flag a `Move.lock` that is missing, ignored by git, or repinned in the same change without a stated reason, not the branch itself. The Aptos CLI refetches branch tips on every build unless `--skip-fetch-latest-git-deps` is passed, so on Aptos flag a third-party dependency on a branch rather than a commit. A framework dependency on its release branch (`framework/mainnet` on Sui, `mainnet` on Aptos) is the documented convention and is not a finding by itself
 - Framework dependencies that should share one revision pinned to different revisions, mixing incompatible versions of the same source tree
 - `local =` paths that are absolute or reach outside the repository, which do not resolve on another machine or in CI
 - Dependencies added to `[dependencies]` when they are only used by tests, which publishes them as part of the package
 
 #### Addresses and Publication
-- `[addresses]` entries left as the `"_"` placeholder in a package that is meant to be published, which fails or resolves to an unintended address
+- Do not flag an `[addresses]` entry of `"_"` by itself: it is a documented placeholder that a dependent package or `--named-addresses` fills in. Flag it only when the build or publish inputs in the change leave it unset or set it to the wrong address
 - Named addresses changed in place for an already-published package, silently retargeting every reference
-- `[dev-dependencies]` or `[dev-addresses]` that override a production address or dependency in a way that can leak into a non-test build
 
 #### Dependency Replacement Consistency (Sui)
 - `published-at` or `original-id` drifting between `[dep-replacements.testnet]` and `[dep-replacements.mainnet]`, or between two packages that must link against the same on-chain package

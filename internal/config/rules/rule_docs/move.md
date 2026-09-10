@@ -3,7 +3,6 @@
 #### Ability Grants and Resource Discipline
 - Abilities granted more widely than the type needs: `copy` on a value whose uniqueness is the invariant, `drop` on a value with a required settle, repay, or destroy path, `store` letting third-party modules nest and move the value out of this module's control
 - A struct that gains `drop` where a previously enforced hot-potato or receipt pattern silently becomes a no-op when the value is discarded
-- `key` structs whose destruction path does not delete the underlying id, leaking storage that can never be reclaimed
 - `phantom` type parameters dropped or added where the change alters which instantiations are legal for callers
 - Do not report ability grants that match the surrounding module's established pattern without evidence that the wider grant is reachable and harmful
 
@@ -15,15 +14,15 @@
 - Aborts raised with a bare integer where the module otherwise uses categorized `error::` constructors, losing the client-visible error category
 
 #### Object Model and Sharing (Sui)
-- `transfer::share_object` on a value that was owned, which is irreversible and permanently widens who can mutate it (`share_owned`)
+- `transfer::share_object` or `public_share_object` reachable with an object passed in by the caller rather than created in the same transaction: sharing an already-owned object aborts with `ESharedNonNewObject`, so the path is a reachable abort (`share_owned`)
 - `transfer::transfer` versus `transfer::public_transfer` chosen inconsistently with the type's `store` ability and the custody the caller expects
 - A value sent to `ctx.sender()` where returning it to the caller would compose better and keeps the PTB in control of its destination (`self_transfer`)
 - Wrapping a shared or frozen object inside another object, which strands it (`freeze_wrapped`)
 - `&TxContext` on a public function that will need mutation later, forcing a breaking signature change (`prefer_mut_tx_context`)
-- A `key` struct whose first field is not `id: UID`, or a destroy path that does not call `id.delete()`
+- A parent object's `UID` deleted before its dynamic fields, dynamic object fields, or received children are removed: they are not deleted with the parent and become permanently inaccessible, with no storage rebate
 
 #### Visibility and Authorization
-- `public entry` on a privileged path, which widens the callable surface beyond what the module intends and cannot be narrowed without a breaking change (`public_entry`)
+- `entry fun` widened to `public entry fun` on a privileged path (Aptos): other modules can then call it directly, and the compatible upgrade policy freezes it as public. On Sui, `public` is already transaction-callable and `entry` adds nothing to it, so do not report `public entry` by itself
 - Visibility widened from `public(package)` (Sui, Move 2024) or `public(friend)` (Aptos and legacy editions) to `public` without a stated reason
 - Authorization decided from an `address` argument rather than proven authority: require `&signer` and compare `signer::address_of` on Aptos, or `ctx.sender()` or a capability object on Sui
 - Capability objects or `&signer` values passed to functions that do not need them, widening the blast radius of a compromised call path
@@ -46,4 +45,4 @@
 - Named `const E*` abort code values changed or renumbered: clients and indexers match on them, so a renumbering is a breaking change even though the code still compiles
 - State changes that indexers depend on made without emitting the corresponding event, or an event's fields changed in place
 - Struct fields or public function signatures changed in ways that violate Sui upgrade compatibility or Aptos `upgrade_policy = "compatible"`
-- `#[test_only]` mint, admin, or fixture functions reachable from a non-test build, or test-only imports leaking into published bytecode
+- Mint, admin, or fixture helpers written for tests (`mint_for_testing`, `create_for_testing`) declared without `#[test_only]`, which ships them in published bytecode

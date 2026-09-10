@@ -1041,7 +1041,7 @@ func TestResolveDetail_SystemMoveTomlPatternPrecedesMove(t *testing.T) {
 			}
 			for _, required := range []string{
 				"Move Package Manifest Hygiene",
-				"rev = \"main\"",
+				"`Move.lock`",
 			} {
 				if !strings.Contains(detail.Rule, required) {
 					t.Errorf("expected rule to contain %q for %s", required, path)
