@@ -1,0 +1,7 @@
+# Compiled mock binary from the manual build in README.md.
+# Anchored to this exact path: a bare "mock-ocr" pattern would also match the
+# testdata/mock-ocr/ SOURCE directory, silently ignoring any new scenario file
+# added there.
+/testdata/mock-ocr/mock-ocr
+
+/coverage.out
