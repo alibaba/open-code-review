@@ -296,6 +296,8 @@ func TestMux_HasNoWriteRoutes(t *testing.T) {
 		{"PUT repo route", http.MethodPut, "/r/repo", http.StatusMethodNotAllowed},
 		{"DELETE repo route", http.MethodDelete, "/r/repo", http.StatusMethodNotAllowed},
 		{"PATCH repo route", http.MethodPatch, "/r/repo", http.StatusMethodNotAllowed},
+		{"POST compare route", http.MethodPost, "/r/repo/compare", http.StatusMethodNotAllowed},
+		{"DELETE compare route", http.MethodDelete, "/r/repo/compare", http.StatusMethodNotAllowed},
 		{"POST root", http.MethodPost, "/", http.StatusMethodNotAllowed},
 		{"PUT root", http.MethodPut, "/", http.StatusMethodNotAllowed},
 		{"DELETE root", http.MethodDelete, "/", http.StatusMethodNotAllowed},

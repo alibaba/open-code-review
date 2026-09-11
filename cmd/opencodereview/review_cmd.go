@@ -383,9 +383,9 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 // It must run before agent.New: agent.New creates the session, and session.New
 // writes session_start immediately, so validating any later would leave an orphan
 // session on disk behind every rejection. It must also run after max-tokens is
-// resolved, because agent.filterLargeDiffs measures each file's diff against
-// that ceiling on its own — grouping never enters this decision — and what it
-// drops is what the input identity stops covering.
+// resolved, because the selection's size gate measures each file's diff
+// against that ceiling on its own — grouping never enters this decision — and
+// what it drops is what the input identity stops covering.
 //
 // provider and model are explicit exactly when their flag was passed on this
 // command line: both default to the empty string and nothing else can set them,
@@ -501,11 +501,21 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 }
 
 func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer) error {
+	maxTokens, err := previewMaxTokens(cc.Template.MaxTokens, opts.maxTokens)
+	if err != nil {
+		return err
+	}
+	// A copy, so resolving the preview's limit cannot leak into the caller's
+	// template. Selection reads MaxTokens and nothing else.
+	tpl := *cc.Template
+	tpl.MaxTokens = maxTokens
+
 	preview, err := agent.Preview(ctx, agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,
 		To:         opts.to,
 		Commit:     opts.commit,
+		Template:   tpl,
 		FileFilter: cc.FileFilter,
 		GitRunner:  cc.GitRunner,
 	})

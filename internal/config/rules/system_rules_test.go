@@ -163,6 +163,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
 		{"contracts/token.vy", "Language Restrictions"},
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
+		{"policies/authz.rego", "Default Posture"},
+		{"policies/authz.REGO", "Default Posture"},
 	}
 
 	for _, tt := range tests {

@@ -292,3 +292,73 @@ func TestCompare_SortBreaksTiesOnSnippet(t *testing.T) {
 		}
 	}
 }
+
+// TestReviewedPaths pins the partition choice the CLI and the web viewer share.
+// The nil-vs-empty distinction is asserted explicitly: reflect.DeepEqual(nil,
+// map[string]bool{}) is false, and the two mean different things to Compare - a
+// nil map sends every unmatched before-finding to Resolved, an empty one sends
+// them all to NotReviewed.
+func TestReviewedPaths(t *testing.T) {
+	t.Parallel() // pure function: no shared state, no t.Setenv, no temp dirs
+	item := func(path string) CoverageItem { return CoverageItem{ItemID: path, Path: path} }
+	tests := []struct {
+		name     string
+		manifest *RunManifest
+		want     map[string]bool
+		wantNil  bool
+	}{
+		{name: "nil manifest is nil not empty", manifest: nil, wantNil: true},
+		{name: "empty coverage is empty non-nil", manifest: &RunManifest{}, want: map[string]bool{}},
+		{
+			name:     "completed only",
+			manifest: &RunManifest{Coverage: Coverage{Completed: []CoverageItem{item("a.go")}}},
+			want:     map[string]bool{"a.go": true},
+		},
+		{
+			name:     "reused only",
+			manifest: &RunManifest{Coverage: Coverage{Reused: []CoverageItem{item("b.go")}}},
+			want:     map[string]bool{"b.go": true},
+		},
+		{
+			name: "completed and reused union",
+			manifest: &RunManifest{Coverage: Coverage{
+				Completed: []CoverageItem{item("a.go")},
+				Reused:    []CoverageItem{item("b.go")},
+			}},
+			want: map[string]bool{"a.go": true, "b.go": true},
+		},
+		{
+			name: "selected failed waived are excluded",
+			manifest: &RunManifest{Coverage: Coverage{
+				Selected:  []CoverageItem{item("a.go"), item("s.go"), item("f.go"), item("w.go")},
+				Completed: []CoverageItem{item("a.go")},
+				Failed:    []CoverageItem{item("f.go")},
+				Waived:    []CoverageItem{item("w.go")},
+			}},
+			want: map[string]bool{"a.go": true},
+		},
+		{
+			name: "duplicate path across completed and reused collapses",
+			manifest: &RunManifest{Coverage: Coverage{
+				Completed: []CoverageItem{item("a.go")},
+				Reused:    []CoverageItem{item("a.go")},
+			}},
+			want: map[string]bool{"a.go": true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ReviewedPaths(tt.manifest)
+			if tt.wantNil {
+				if got != nil {
+					t.Fatalf("ReviewedPaths = %v, want nil", got)
+				}
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("ReviewedPaths = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

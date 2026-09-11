@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Session Compare - Open Code Review Viewer</title>
+
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a><span class="sep">/</span><a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a><span class="sep">/</span><span class="current">compare</span></nav>
+<main>
+<div class="session-header">
+    <h2>Compare sessions</h2>
+    <div class="meta">
+        <span><strong>Before:</strong> <a href="/r/{{.EncodedRepo}}/{{.Before.SessionID}}"><code>{{truncate 12 .Before.SessionID}}</code></a></span>
+        <span><strong>After:</strong> <a href="/r/{{.EncodedRepo}}/{{.After.SessionID}}"><code>{{truncate 12 .After.SessionID}}</code></a></span>
+        <span><strong>Mode:</strong> {{if .Before.ReviewMode}}{{.Before.ReviewMode}}{{else}}-{{end}} to {{if .After.ReviewMode}}{{.After.ReviewMode}}{{else}}-{{end}}</span>
+    </div>
+    {{if .Warning}}
+    <div class="meta"><span><span class="badge badge-error">warning</span> {{.Warning}}</span></div>
+    {{end}}
+</div>
+
+{{/* The range variable below is a model.LlmComment: .Path, not the viewer's .FilePath. */}}
+{{range .Buckets}}
+<section class="comment-file-group">
+    <h3 class="section-title">{{.Title}} ({{len .Findings}})</h3>
+    {{range .Findings}}
+    <div class="comment-card">
+        <div class="comment-meta">
+            {{if .Category}}<span class="comment-badge {{categoryClass .Category}}">{{.Category}}</span>{{end}}
+            {{if .Severity}}<span class="comment-badge {{severityClass .Severity}}">{{.Severity}}</span>{{end}}
+            <span class="comment-lines">{{.Path}}{{if .StartLine}}:L{{.StartLine}}{{if and .EndLine (ne .EndLine .StartLine)}}-L{{.EndLine}}{{end}}{{end}}</span>
+        </div>
+        <div class="comment-content">{{.Content}}</div>
+        {{if or .ExistingCode .SuggestionCode}}
+        <div class="comment-code-diff">
+            {{if .ExistingCode}}
+            <div class="code-panel code-existing">
+                <div class="code-panel-label">Existing Code</div>
+                <pre><code>{{.ExistingCode}}</code></pre>
+            </div>
+            {{end}}
+            {{if .SuggestionCode}}
+            <div class="code-panel code-suggestion">
+                <div class="code-panel-label">Suggested Change</div>
+                <pre><code>{{.SuggestionCode}}</code></pre>
+            </div>
+            {{end}}
+        </div>
+        {{end}}
+    </div>
+    {{else}}
+    <p class="empty-state-text">none</p>
+    {{end}}
+</section>
+{{end}}
+</main>
+</body>
+</html>

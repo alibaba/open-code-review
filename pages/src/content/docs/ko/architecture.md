@@ -15,7 +15,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -26,8 +26,8 @@ flowchart TD
 전체 흐름을 지휘하는 코드는
 [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
 패키지에 있습니다. 주요 파일은 `agent.go`(디스패치와 그룹별 오케스트레이션),
-`grouping.go`(의미 기반 파일 그룹화), `preview.go`(파일 필터),
-`util.go`(헬퍼)입니다. 도구 호출 루프와 메모리 압축은 그 옆의
+`grouping.go`(의미 기반 파일 그룹화), `selection.go`(파일 필터),
+`preview.go`(`--preview` 보고서), `util.go`(헬퍼)입니다. 도구 호출 루프와 메모리 압축은 그 옆의
 [`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)에
 있습니다. 진입점은 두 개가 중요합니다. `Agent.Run`(파이프라인 최상단)과
 `Agent.dispatchSubtasks`(그룹별 팬아웃)입니다.
@@ -54,7 +54,7 @@ diff마다 옛/새 경로, 옛/새 hunk, 추가·삭제 줄 수, 바이너리 �
 ## 다섯 관문 파일 필터 {#the-five-gate-file-filter}
 
 diff를 다 읽고 나면 모든 파일이
-[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go)를
+[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go)를
 지나갑니다. 이 함수는 다음 중 하나를 반환합니다.
 
 ```
@@ -64,9 +64,10 @@ unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
 ```
 
-파일을 남기기로 했다면 빈 문자열을 반환합니다. `deleted`는 `whyExcluded`가
-반환하지 **않습니다**. 남긴 파일의 diff가 `IsDeleted`로 표시되면 그다음에
-`Preview()`가 계산합니다. 관문은 이 순서로 돕니다.
+파일을 남기기로 했다면 빈 문자열을 반환합니다. `deleted`와 `too_large`는
+`whyExcluded`가 반환하지 **않습니다**. 관문을 지난 뒤 `selectFiles`가
+적용합니다. 남긴 파일의 diff가 `IsDeleted`로 표시되면 `deleted`, 원본 diff만으로
+`max_tokens`의 80%를 넘으면 `too_large`입니다. 관문은 이 순서로 돕니다.
 
 1. `binary` — 바이너리 파일을 가장 먼저 버립니다.
 2. `user_exclude` — 프로젝트의 `exclude`가 언제나 이깁니다.
@@ -301,9 +302,10 @@ OCR은 이 검사로 괴물 같은 diff(자동 생성된 lock 파일, 수천 줄
 리팩터링)를 요청 비용이 들기 전에 걸러 냅니다. 건너뛴 그룹은 치명적이지 않은
 경고로 stdout에 보고되고 JSON `warnings` 배열에도 들어갑니다.
 
-두 번째 검사는 `filterLargeDiffs`에서 돕니다. diff만으로 `MAX_TOKENS`의 80%를
-넘으면 그룹화와 디스패치가 시작되기도 전에 걸러 냅니다. 세 번째 방어선은
-그룹화 안에 있습니다. 앞의 `enforceGroupTokenBudget`를 참고하세요.
+두 번째 검사는 `selectFiles`에서 돕니다. diff만으로 `MAX_TOKENS`의 80%를
+넘으면 그룹화와 디스패치가 시작되기도 전에 걸러 내고 `too_large`로 보고합니다.
+세 번째 방어선은 그룹화 안에 있습니다. 앞의 `enforceGroupTokenBudget`를
+참고하세요.
 
 ## 템플릿과 플레이스홀더 {#the-template-placeholders}
 
@@ -414,7 +416,7 @@ OCR은 이 검사로 괴물 같은 diff(자동 생성된 lock 파일, 수천 줄
 | 의미 기반 파일 그룹화 | `internal/agent/grouping.go` |
 | 도구 호출 루프와 메모리 압축 | `internal/llmloop/`(loop.go, compression.go) |
 | effort 프리셋 | `internal/config/template/effort.go` |
-| 파일 필터 / 미리 보기 | `internal/agent/preview.go` |
+| 파일 필터 / 미리 보기 | `internal/agent/selection.go`, `internal/agent/preview.go` |
 | diff 로딩(Git 모드) | `internal/diff/git.go` |
 | 규칙 해석 체인 | `internal/config/rules/system_rules.go` |
 | 도구 레지스트리와 구현 | `internal/tool/` |
