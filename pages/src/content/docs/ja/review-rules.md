@@ -114,6 +114,8 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/build.gradle` | `build_gradle.md`: Gradle 依存関係。 |
 | `**/package.json` | `package_json.md`: NPM 依存関係 / スクリプト。 |
 | `**/Cargo.toml` | `cargo_toml.md`: Rust manifest。 |
+| `**/Move.toml` | `move_toml.md`: Move package manifest。 |
+| `**/*.move` | `move.md`: Move ソースコード。 |
 | `**/composer.json` | `composer_json.md`: Composer の依存関係、自動読み込み、スクリプト、プラグイン、パッケージ設定。 |
 | `**/*.{json,json5}` | `json.md`: 汎用 JSON（`.json5` にも一致）。 |
 | `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md`: GitHub Actions ワークフロー YAML。 |

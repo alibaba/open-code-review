@@ -98,6 +98,7 @@
   ".zig",
   ".thrift",
   ".capnp",
+  ".move",
   ".ml",
   ".mli",
   ".re",

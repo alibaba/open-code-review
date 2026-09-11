@@ -7,6 +7,8 @@
     "**/build.gradle": "build_gradle.md",
     "**/package.json": "package_json.md",
     "**/Cargo.toml": "cargo_toml.md",
+    "**/Move.toml": "move_toml.md",
+    "**/*.move": "move.md",
     "**/composer.json": "composer_json.md",
     "**/*.{json,json5}": "json.md",
     ".github/workflows/**/*.{yaml,yml}": "github_workflows.md",
