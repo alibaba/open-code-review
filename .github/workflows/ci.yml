@@ -36,7 +36,7 @@ jobs:
 
       - name: Verify generated provider presets
         run: |
-          go generate ./...
+          go generate ./internal/llm
           git diff --exit-code -- extensions/vscode/src/shared/providers.generated.ts
 
       - name: Verify license headers
