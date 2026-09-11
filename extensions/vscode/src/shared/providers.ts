@@ -27,6 +27,12 @@ export function isPresetProvider(name: string): boolean {
   return presetMap.has(name.trim().toLowerCase());
 }
 
+export function usesAmbientAuth(preset: OcrProviderPreset, protocolOverride?: string): boolean {
+  const protocol = protocolOverride?.trim().toLowerCase();
+  if (protocol) return protocol === 'anthropic-bedrock';
+  return preset.protocol === 'anthropic-bedrock' || preset.ambientAuth === true;
+}
+
 export function mergeModelLists(...lists: string[][]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
