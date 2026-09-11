@@ -325,11 +325,11 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
 
 | 码 | 含义 |
 |---|---|
-| `0` | 评审完成（可能零评论，可能有非致命警告）。 |
-| `1` | 致命错误——参数错误、无法解析 LLM 端点、所有 per-file 子 agent 失败等。错误文本打印到 stderr。 |
+| `0` | 评审完成或跳过（可能零评论或有非致命警告）。仅由已配置预算限制导致的部分评审也以 `0` 退出。 |
+| `1` | 致命错误，或 timeout、provider 错误、配置错误等 per-group 操作性失败。返回错误前仍会发布部分结果。 |
 
-非致命警告（单个子 agent 失败、某文件超过 token 阈值等）内联打印；JSON 模式下
-会加入 `warnings` 数组。
+警告会内联打印；JSON 模式下会加入 `warnings` 数组。可查看
+`manifest.coverage.failed` 了解受影响文件及其失败分类。
 
 ## `ocr scan`
 

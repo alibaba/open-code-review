@@ -58,10 +58,11 @@ func TestReviewE2E_RecoveredAndFailedReachesJSONExit(t *testing.T) {
 	startFakeLLM(t, srv)
 
 	out, errOut, err := runReviewCapturingBoth(t, repoDir, "json")
-	// One file failed and one succeeded, so coverage is partial and the run
-	// exits 0.
-	if err != nil {
-		t.Fatalf("partial coverage must exit 0: %v\nstderr: %s", err, errOut)
+	// One provider failure makes the review operationally incomplete even though
+	// the sibling succeeded. The partial JSON result must still be published
+	// before the command returns its non-zero status.
+	if err == nil || !strings.Contains(err.Error(), "1 of 2 selected item(s) failed") {
+		t.Fatalf("partial provider failure must exit non-zero with item counts: %v\nstderr: %s", err, errOut)
 	}
 
 	var got jsonOutput
@@ -138,8 +139,8 @@ func TestReviewE2E_RetryReportReachesTextExit(t *testing.T) {
 	startFakeLLM(t, srv)
 
 	out, errOut, err := runReviewCapturingBoth(t, repoDir, "text")
-	if err != nil {
-		t.Fatalf("partial coverage must exit 0: %v\nstderr: %s", err, errOut)
+	if err == nil || !strings.Contains(err.Error(), "1 of 2 selected item(s) failed") {
+		t.Fatalf("partial provider failure must exit non-zero with item counts: %v\nstderr: %s", err, errOut)
 	}
 	// This test attributes a 429 and a 402 to named files, which only holds while
 	// each file is its own request — i.e. while the fake still answers the
