@@ -202,14 +202,18 @@ useful when a comment hinges on whether a related file was updated.
 {
   "name": "file_read_diff",
   "input": {
-    "path_array": ["src/api/handler.go", "src/db/queries.go"]
+    "path_array": ["src/api/handler.go", "src/db/queries.go"],
+    "start_line": 1
   }
 }
 ```
 
+`start_line` is optional and defaults to 1.
+
 ### Output
 
 ```
+IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -228,6 +232,12 @@ If a path isn't in the change set, that entry is silently omitted. If
 **none** of the requested paths are in the change set the tool returns
 `Error: diff not found for the requested paths`; an empty `path_array`
 returns `Error: no files found`.
+
+At most 500 diff lines come back per call, counted across all requested
+files in order (file headers don't count). When more remain,
+`IS_TRUNCATED` is `true` and a closing note gives the `start_line` to
+pass, with the same `path_array`, for the next page. A `start_line`
+beyond the last diff line returns an error naming the total.
 
 ## `file_find`
 
