@@ -50,9 +50,9 @@ GitHub: https://github.com/alibaba/open-code-review
 すべてのコマンドで利用でき、サブコマンドの前後どちらでも指定できます
 (`ocr --color=never review` と `ocr review --color=never` は同じ意味です)。
 
-| フラグ | デフォルト | 説明 |
-|---|---|---|
-| `--color <auto\|always\|never>` | `auto` | ANSI カラーを出力する条件。`auto` は stdout が端末のときだけ着色するため、パイプやリダイレクトではプレーンテキストになります。`always` はパイプ越しでも着色を維持します (`\| less -R` などに便利)。 |
+| フラグ                          | デフォルト | 説明                                                                                                                                                                                                |
+| ------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--color <auto\|always\|never>` | `auto`     | ANSI カラーを出力する条件。`auto` は stdout が端末のときだけ着色するため、パイプやリダイレクトではプレーンテキストになります。`always` はパイプ越しでも着色を維持します (`\| less -R` などに便利)。 |
 
 stdout が端末でない場合、テキスト出力は常にプレーンになるため、安全にパイプできます:
 
@@ -64,23 +64,23 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 ## コマンド一覧
 
-| コマンド | エイリアス | 役割 |
-|---|---|---|
-| `ocr review` | `ocr r` | コードレビューを実行してコメントを出力します。 |
-| `ocr scan` | `ocr s` | Git diff を必要とせず、ファイル全体をスキャンします。 |
-| `ocr rules check <file>` | — | あるファイルパスにどのルールが適用され、その出所はどこかを表示します。 |
-| `ocr config set <key> <value>` | — | 設定値を `~/.opencodereview/config.json` に永続化します。 |
-| `ocr config unset <key>` | — | 保存済みの設定値をクリアします（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
-| `ocr config provider` | — | 対話的なプロバイダー設定 TUI。 |
-| `ocr config model` | — | 対話的な model 選択 TUI。 |
-| `ocr llm test` | — | 短い chat リクエストを送信し、設定されたエンドポイントを検証します。 |
-| `ocr llm providers` | — | 組み込みの LLM プロバイダーをすべて一覧表示します。 |
-| `ocr session list` | `ocr sessions list`, `ocr session ls` | 保存されたレビューセッションを一覧表示します。 |
-| `ocr session show <id>` | `ocr sessions show <id>` | 1つのセッションとファイル単位のチェックポイントを表示します。 |
-| `ocr session comments <id>` | `ocr sessions comments <id>` | 1つのセッションに記録されたレビューコメントを表示します。 |
-| `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 2つのセッションの指摘を比較します：新規・継続・解決済み・未レビュー。 |
-| `ocr viewer` | — | 過去のレビューセッション用のローカル Web UI を起動します（`localhost:5483`）。 |
-| `ocr version` | — | バージョン、commit、プラットフォーム、ビルド日、GitHub URL を出力します。 |
+| コマンド                               | エイリアス                            | 役割                                                                                                                    |
+| -------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `ocr review`                           | `ocr r`                               | コードレビューを実行してコメントを出力します。                                                                          |
+| `ocr scan`                             | `ocr s`                               | Git diff を必要とせず、ファイル全体をスキャンします。                                                                   |
+| `ocr rules check <file>`               | —                                     | あるファイルパスにどのルールが適用され、その出所はどこかを表示します。                                                  |
+| `ocr config set <key> <value>`         | —                                     | 設定値を `~/.opencodereview/config.json` に永続化します。                                                               |
+| `ocr config unset <key>`               | —                                     | 保存済みの設定値をクリアします（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
+| `ocr config provider`                  | —                                     | 対話的なプロバイダー設定 TUI。                                                                                          |
+| `ocr config model`                     | —                                     | 対話的な model 選択 TUI。                                                                                               |
+| `ocr llm test`                         | —                                     | 短い chat リクエストを送信し、設定されたエンドポイントを検証します。                                                    |
+| `ocr llm providers`                    | —                                     | 組み込みの LLM プロバイダーをすべて一覧表示します。                                                                     |
+| `ocr session list`                     | `ocr sessions list`, `ocr session ls` | 保存されたレビューセッションを一覧表示します。                                                                          |
+| `ocr session show <id>`                | `ocr sessions show <id>`              | 1つのセッションとファイル単位のチェックポイントを表示します。                                                           |
+| `ocr session comments <id>`            | `ocr sessions comments <id>`          | 1つのセッションに記録されたレビューコメントを表示します。                                                               |
+| `ocr session compare <before> <after>` | `ocr session diff <before> <after>`   | 2つのセッションの指摘を比較します：新規・継続・解決済み・未レビュー。                                                   |
+| `ocr viewer`                           | —                                     | 過去のレビューセッション用のローカル Web UI を起動します（`localhost:5483`）。                                          |
+| `ocr version`                          | —                                     | バージョン、commit、プラットフォーム、ビルド日、GitHub URL を出力します。                                               |
 
 `ocr` および `ocr -h` はトップレベルの使い方を出力します。各サブコマンドも `-h` / `--help` を受け付けます。
 
@@ -99,32 +99,33 @@ ocr r      [flags]   (alias)
 
 ### 引数
 
-| 引数 | 短縮形 | デフォルト | 説明 |
-|---|---|---|---|
-| `--repo <path>` | — | カレントディレクトリ | Git リポジトリのルート。 |
-| `--from <ref>` | — | — | diff の開始 ref（例: `main`）。 |
-| `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
-| `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
-| `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
-| `--no-filter` | — | `false` | すべてのレビューコメントを保持し、ファイルごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。 |
-| `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
-| `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |
-| `--output <path>` | `-o` | 標準出力 | レビュー結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
-| `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します（`--format` が `json`/`sarif` の場合は stderr に出力し、stdout は解析可能な単一ドキュメントのままになります）。`agent` は進捗行を完全に抑制し、最終サマリー / JSON のみを出力します。 |
-| `--background <text>` | `-b` | — | plan + main prompt に注入する、任意の要件 / 業務コンテキスト。 |
-| `--background-file <path>` | `-B` | — | レビューの背景として使用する Markdown ファイルのパス。`--background` も指定した場合は両方を結合します。 |
-| `--exclude <patterns>` | — | — | 除外する gitignore 形式のパターン（カンマ区切り）。`rule.json` の excludes とマージされます。 |
-| `--concurrency <n>` | — | `8` | 並行してレビューするファイルの最大数。 |
-| `--timeout <minutes>` | — | `15` | ファイルごとの締め切り時間。`0` でタイムアウトを無効化します。effort ラウンド数に応じて線形にスケールします（例: low/medium/high で 15/30/45 分）。 |
-| `--rule <path>` | — | — | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。 |
-| `--max-tools <n>` | — | テンプレートのデフォルト | ファイルごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`100`）を使用します。1〜49 は `50` に引き上げられます。解決後の値はテンプレートのデフォルトを**上回る場合にのみ**適用されます（引き上げのみ可能で、引き下げはできません）。 |
-| `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | ファイルごとの**プロンプト**トークン上限（review のデフォルトは `200000`）。この実行で保存済みの `max_tokens` 設定を上書きします。出力の上限には影響しません。そちらは `MAX_COMPLETION_TOKENS`（`16384`）が個別に制御します。 |
-| `--max-tokens-budget <n>` | — | `0`（無制限） | レビュー全体の入力 + 出力トークン使用量を制限します。予算を超えると処理の割り当てを停止し、部分的な結果は引き続き公開されます。 |
-| `--effort <level>` | — | 設定または `medium` | レビューの労力プリセット: `low` = main ループ 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド。ラウンドが多いほど recall は上がりますが、時間とトークンも増えます。`ocr config set effort <level>` で永続化できます。 |
-| `--provider <name>` | — | — | 今回の実行で設定済み provider を選択します。`providers` と `custom_providers` の両方の名前を使用できます。 |
-| `--model <name>` | — | — | 今回の実行で解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
-| `--max-git-procs <n>` | — | `16` | 並行 git サブプロセスの最大数。 |
-| `--tools <path>` | — | 埋め込み | カスタム JSON ツール設定ファイルのパス。埋め込みのツール定義を上書きします。 |
+| 引数                                        | 短縮形 | デフォルト                         | 説明                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------- | ------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--repo <path>`                             | —      | カレントディレクトリ               | Git リポジトリのルート。                                                                                                                                                                                                                                                              |
+| `--from <ref>`                              | —      | —                                  | diff の開始 ref（例: `main`）。                                                                                                                                                                                                                                                       |
+| `--to <ref>`                                | —      | —                                  | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。                                                                                                                                                                                  |
+| `--commit <sha>`                            | `-c`   | —                                  | 単一の commit をレビューします（その親との差分）。                                                                                                                                                                                                                                    |
+| `--preview`                                 | `-p`   | `false`                            | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。                                                  |
+| `--no-filter`                               | —      | `false`                            | すべてのレビューコメントを保持し、ファイルごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。                                                                                                                                                                            |
+| `--resume <session-id>`                     | —      | —                                  | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。                                                                                                                                                                                                            |
+| `--format <fmt>`                            | `-f`   | `text`                             | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。                                                                                                                                                    |
+| `--output <path>`                           | `-o`   | 標準出力                           | レビュー結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。                                                               |
+| `--audience <who>`                          | —      | `human`                            | `human` は進捗行をストリーム出力します（`--format` が `json`/`sarif` の場合は stderr に出力し、stdout は解析可能な単一ドキュメントのままになります）。`agent` は進捗行を完全に抑制し、最終サマリー / JSON のみを出力します。                                                          |
+| `--background <text>`                       | `-b`   | —                                  | plan + main prompt に注入する、任意の要件 / 業務コンテキスト。                                                                                                                                                                                                                        |
+| `--background-file <path>`                  | `-B`   | —                                  | レビューの背景として使用する Markdown ファイルのパス。`--background` も指定した場合は両方を結合します。                                                                                                                                                                               |
+| `--exclude <patterns>`                      | —      | —                                  | 除外する gitignore 形式のパターン（カンマ区切り）。`rule.json` の excludes とマージされます。                                                                                                                                                                                         |
+| `--concurrency <n>`                         | —      | `8`                                | 並行してレビューするファイルの最大数。                                                                                                                                                                                                                                                |
+| `--timeout <minutes>`                       | —      | `15`                               | ファイルごとの締め切り時間。`0` でタイムアウトを無効化します。effort ラウンド数に応じて線形にスケールします（例: low/medium/high で 15/30/45 分）。                                                                                                                                   |
+| `--rule <path>`                             | —      | —                                  | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。                                                                                                                                                                         |
+| `--max-tools <n>`                           | —      | テンプレートのデフォルト           | ファイルごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`100`）を使用します。1〜49 は `50` に引き上げられます。解決後の値はテンプレートのデフォルトを**上回る場合にのみ**適用されます（引き上げのみ可能で、引き下げはできません）。                                     |
+| `--max-tokens <n>`                          | —      | 設定またはテンプレートのデフォルト | ファイルごとの**プロンプト**トークン上限（review のデフォルトは `200000`）。この実行で保存済みの `max_tokens` 設定を上書きします。出力の上限には影響しません。そちらは `MAX_COMPLETION_TOKENS`（`16384`）が個別に制御します。                                                         |
+| `--max-tokens-budget <n>`                   | —      | `0`（無制限）                      | レビュー全体の入力 + 出力トークン使用量を制限します。予算を超えると処理の割り当てを停止し、部分的な結果は引き続き公開されます。                                                                                                                                                       |
+| `--budget-preflight <warn\|confirm\|abort>` | —      | `warn`                             | 推定トークン使用量が予算を超えた場合の動作を選択します。`warn` は従来の非ブロッキング動作を維持します。`confirm` は開始前に確認を求め、対話型ターミナルがない場合は失敗します（fail-closed）。`abort` はセッションの作成や LLM 呼び出しの前に終了します。正のトークン予算が必要です。 |
+| `--effort <level>`                          | —      | 設定または `medium`                | レビューの労力プリセット: `low` = main ループ 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド。ラウンドが多いほど recall は上がりますが、時間とトークンも増えます。`ocr config set effort <level>` で永続化できます。                                            |
+| `--provider <name>`                         | —      | —                                  | 今回の実行で設定済み provider を選択します。`providers` と `custom_providers` の両方の名前を使用できます。                                                                                                                                                                            |
+| `--model <name>`                            | —      | —                                  | 今回の実行で解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。                                                                                                                                                                                                            |
+| `--max-git-procs <n>`                       | —      | `16`                               | 並行 git サブプロセスの最大数。                                                                                                                                                                                                                                                       |
+| `--tools <path>`                            | —      | 埋め込み                           | カスタム JSON ツール設定ファイルのパス。埋め込みのツール定義を上書きします。                                                                                                                                                                                                          |
 
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
@@ -296,16 +297,16 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
 
 トップレベルのフィールド:
 
-| フィールド | 説明 |
-|---|---|
-| `status` | `success`、`completed_with_warnings`、`completed_with_errors`、または `skipped`。 |
-| `llm` | 解決された LLM の識別情報。正規化済みの `model` は常に含まれ、`provider` は名前付きの設定済み provider の場合だけ含まれます。 |
-| `message` | 任意。人間が読みやすいサマリー（例: `"No comments generated. Looks good to me."`）。 |
-| `summary` | 任意。実行の集計: `files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` の実行時は省略されます。 |
-| `comments` | 常に存在しますが、空の場合があります。各コメントのフィールドは上記の例のとおりです。 |
-| `warnings` | 任意。1 つ以上のサブエージェントが失敗した場合に存在します。各項目は影響を受けたファイルとエラーを記述します。 |
-| `session_id` | 任意。永続化されたレビュー実行に含まれます。互換性のある範囲または単一 commit レビューを再試行する際に `ocr review --resume <session-id>` へ渡せます。 |
-| `resume` | 任意。再開した実行で存在し、`resumed_from`、`reused_files`、`rerun_files`、`previous_model`、`current_model` を含みます。 |
+| フィールド   | 説明                                                                                                                                                                                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`     | `success`、`completed_with_warnings`、`completed_with_errors`、または `skipped`。                                                                                                                                   |
+| `llm`        | 解決された LLM の識別情報。正規化済みの `model` は常に含まれ、`provider` は名前付きの設定済み provider の場合だけ含まれます。                                                                                       |
+| `message`    | 任意。人間が読みやすいサマリー（例: `"No comments generated. Looks good to me."`）。                                                                                                                                |
+| `summary`    | 任意。実行の集計: `files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` の実行時は省略されます。 |
+| `comments`   | 常に存在しますが、空の場合があります。各コメントのフィールドは上記の例のとおりです。                                                                                                                                |
+| `warnings`   | 任意。1 つ以上のサブエージェントが失敗した場合に存在します。各項目は影響を受けたファイルとエラーを記述します。                                                                                                      |
+| `session_id` | 任意。永続化されたレビュー実行に含まれます。互換性のある範囲または単一 commit レビューを再試行する際に `ocr review --resume <session-id>` へ渡せます。                                                              |
+| `resume`     | 任意。再開した実行で存在し、`resumed_from`、`reused_files`、`rerun_files`、`previous_model`、`current_model` を含みます。                                                                                           |
 
 レビュー対象のファイルがない場合、JSON モードは `skipped` の外殻を発行し、呼び出し側が「変更なし」と「発見なし」を区別できるようにします:
 
@@ -323,10 +324,10 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
 
 ### 終了コード
 
-| コード | 意味 |
-|---|---|
-| `0` | レビューが完了しました（コメントがゼロの場合や、致命的でない警告がある場合もあります）。 |
-| `1` | 致命的エラー。引数の誤り、LLM エンドポイントを解決できない、すべてのファイルごとのサブエージェントが失敗した、などです。エラーテキストは stderr に出力されます。 |
+| コード | 意味                                                                                                                                                             |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`    | レビューが完了しました（コメントがゼロの場合や、致命的でない警告がある場合もあります）。                                                                         |
+| `1`    | 致命的エラー。引数の誤り、LLM エンドポイントを解決できない、すべてのファイルごとのサブエージェントが失敗した、などです。エラーテキストは stderr に出力されます。 |
 
 致命的でない警告（個々のサブエージェントの失敗、あるファイルが token しきい値を超過、など）はインラインで出力されます。JSON モードでは `warnings` 配列に追加されます。
 
@@ -343,12 +344,12 @@ ocr s      [flags]   (alias)
 
 ### 引数
 
-| 引数 | 短縮形 | デフォルト | 説明 |
-|---|---|---|---|
-| `--path <list>` | - | リポジトリ全体 | スキャン対象のリポジトリ相対ディレクトリまたはファイル（カンマ区切り、例: `internal/agent`、`internal/llm/client.go`）。 |
-| `--exclude <patterns>` | - | - | 除外する gitignore 形式のパターン（カンマ区切り、例: `**/generated/*,*.pb.go`）。`rule.json` の excludes とマージされます。 |
-| `--output <path>` | `-o` | 標準出力 | スキャン結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
-| `--preview` | `-p` | `false` | LLM を呼び出さずにファイルを列挙・フィルタリングします。ファイルリスト、レビュー対象/除外数、総行数、ファイルごとの除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません。 |
+| 引数                   | 短縮形 | デフォルト     | 説明                                                                                                                                                                                                                    |
+| ---------------------- | ------ | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--path <list>`        | -      | リポジトリ全体 | スキャン対象のリポジトリ相対ディレクトリまたはファイル（カンマ区切り、例: `internal/agent`、`internal/llm/client.go`）。                                                                                                |
+| `--exclude <patterns>` | -      | -              | 除外する gitignore 形式のパターン（カンマ区切り、例: `**/generated/*,*.pb.go`）。`rule.json` の excludes とマージされます。                                                                                             |
+| `--output <path>`      | `-o`   | 標準出力       | スキャン結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
+| `--preview`            | `-p`   | `false`        | LLM を呼び出さずにファイルを列挙・フィルタリングします。ファイルリスト、レビュー対象/除外数、総行数、ファイルごとの除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません。  |
 
 ```bash
 ocr scan --preview                              # スキャン対象を確認
@@ -356,6 +357,14 @@ ocr scan --path internal/agent                  # 単一ディレクトリをス
 ocr scan --path internal/agent,internal/llm/client.go
 ocr scan --exclude '**/generated/*,*.pb.go'
 ```
+
+`ocr scan` は `--max-tokens-budget` と `--budget-preflight <warn|confirm|abort>` も受け付けます。
+`warn` は従来の非ブロッキング動作を維持し、追加の admission preflight は実行しません。
+`confirm` と `abort` では、除外、サイズによるフィルタ、再利用可能な再開チェックポイントを
+適用した後に、新たな LLM dispatch が必要な残りの作業だけを事前に見積もります。その見積もりが
+予算を超えた場合、`confirm` は開始前に確認を求め、`abort` はセッションの作成や LLM 呼び出しの
+前に終了します。この見積もりはおおよそのトークン使用量であり、プロバイダー固有の課金
+クレジットではありません。
 
 完全なフラグリストは `ocr scan -h` を参照してください。
 
@@ -383,11 +392,11 @@ ocr session list --limit 50
 ocr session list --json
 ```
 
-| 引数 | デフォルト | 説明 |
-|---|---|---|
-| `--repo <path>` | カレントディレクトリ | セッションを一覧表示するリポジトリ。 |
-| `--json` | `false` | セッションサマリーを JSON として出力します。 |
-| `--limit <n>` | `20` | 一覧表示するセッション数を制限します。`0` は無制限です。 |
+| 引数            | デフォルト           | 説明                                                     |
+| --------------- | -------------------- | -------------------------------------------------------- |
+| `--repo <path>` | カレントディレクトリ | セッションを一覧表示するリポジトリ。                     |
+| `--json`        | `false`              | セッションサマリーを JSON として出力します。             |
+| `--limit <n>`   | `20`                 | 一覧表示するセッション数を制限します。`0` は無制限です。 |
 
 ### `ocr session show`
 
@@ -400,10 +409,10 @@ ocr session show --json <session-id>
 ocr session show --repo /path/to/repo <session-id>
 ```
 
-| 引数 | デフォルト | 説明 |
-|---|---|---|
-| `--repo <path>` | カレントディレクトリ | セッションを確認するリポジトリ。 |
-| `--json` | `false` | セッションのメタデータとファイル単位の項目を JSON として出力します。 |
+| 引数            | デフォルト           | 説明                                                                 |
+| --------------- | -------------------- | -------------------------------------------------------------------- |
+| `--repo <path>` | カレントディレクトリ | セッションを確認するリポジトリ。                                     |
+| `--json`        | `false`              | セッションのメタデータとファイル単位の項目を JSON として出力します。 |
 
 ### `ocr session comments`
 
@@ -417,12 +426,12 @@ ocr session comments --severity high <session-id>
 ocr session comments --severity critical,high --category bug,security <session-id>
 ```
 
-| 引数 | デフォルト | 説明 |
-|---|---|---|
-| `--repo <path>` | カレントディレクトリ | セッションを確認するリポジトリ。 |
-| `--json` | `false` | コメントを JSON 配列として出力します。 |
-| `--severity <list>` | すべて | 含める重要度をカンマ区切りで指定します（`critical`、`high`、`medium`、`low`）。 |
-| `--category <list>` | すべて | 含めるカテゴリをカンマ区切りで指定します（例: `bug`、`security`）。 |
+| 引数                | デフォルト           | 説明                                                                            |
+| ------------------- | -------------------- | ------------------------------------------------------------------------------- |
+| `--repo <path>`     | カレントディレクトリ | セッションを確認するリポジトリ。                                                |
+| `--json`            | `false`              | コメントを JSON 配列として出力します。                                          |
+| `--severity <list>` | すべて               | 含める重要度をカンマ区切りで指定します（`critical`、`high`、`medium`、`low`）。 |
+| `--category <list>` | すべて               | 含めるカテゴリをカンマ区切りで指定します（例: `bug`、`security`）。             |
 
 ### `ocr session compare`
 
@@ -444,10 +453,10 @@ ocr session compare --json <before-session-id> <after-session-id>
 になります。レビューモードが異なる場合は stderr に警告を出すだけなので、
 `--json` の出力はそのままパイプできます。
 
-| フラグ | デフォルト | 説明 |
-|---|---|---|
-| `--repo <path>` | カレントディレクトリ | 比較するセッションが属するリポジトリ。 |
-| `--json` | `false` | 比較結果を JSON で出力します（`new`、`persisting`、`resolved`、`not_reviewed`）。 |
+| フラグ          | デフォルト           | 説明                                                                              |
+| --------------- | -------------------- | --------------------------------------------------------------------------------- |
+| `--repo <path>` | カレントディレクトリ | 比較するセッションが属するリポジトリ。                                            |
+| `--json`        | `false`              | 比較結果を JSON で出力します（`new`、`persisting`、`resolved`、`not_reviewed`）。 |
 
 ## `ocr rules`
 
