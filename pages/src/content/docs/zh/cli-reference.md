@@ -108,6 +108,7 @@ unstaged + untracked 变更。
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个文件的 `REVIEW_FILTER_TASK` LLM 后处理调用。 |
+| `--diff-only` | — | `false` | 仅评审传入的 diff，每个本地确定的分组只发起一次主模型请求。禁用仓库与 MCP 上下文工具、计划、LLM 分组、评论过滤、LLM 重定位、记忆压缩和额外评审轮次；仅保留 `code_comment` 与 `task_done` 用于结构化输出。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
 | `--output <path>` | `-o` | 标准输出 | 将评审结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
@@ -130,6 +131,9 @@ unstaged + untracked 变更。
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
 > `--resume` 仅支持区间或单 commit 评审，不能与 `--preview` 同时使用。
+
+> `--diff-only` 会覆盖 `--effort` 与 `--max-tools` 的执行语义。它用仓库上下文和
+> 评审深度换取每个本地分组固定一次模型推理；单次推理的实际耗时仍取决于所选模型与 provider。
 
 ### 单次运行的 LLM 选择
 

@@ -142,6 +142,7 @@ func TestRuntimeConfigSHA256(t *testing.T) {
 		// The aggregate budget changes what coverage a run can even attempt, so two
 		// otherwise-identical runs with different caps must not share an identity.
 		{"max_tokens_budget", func(x *Args) { x.MaxTokensBudget = 100_000 }},
+		{"diff_only", func(x *Args) { x.DiffOnly = true }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
