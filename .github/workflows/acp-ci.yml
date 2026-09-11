@@ -1,0 +1,87 @@
+name: ACP CI
+
+# acp/ is a nested Go module. The root CI resolves its package list with
+# `go list ./...`, which does not descend into a nested module, so nothing in
+# acp/ is built or tested by ci.yml. This workflow is the counterpart to
+# pages-ci.yml, which exists for the same reason.
+#
+# No `branches:` filter on pull_request on purpose: development lands on an
+# integration branch first and only reaches main at the end, so filtering to
+# main would mean the integration PRs run no CI at all.
+on:
+  pull_request:
+    paths:
+      - 'acp/**'
+      - '.github/workflows/acp-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'acp/**'
+      - '.github/workflows/acp-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acp-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: self-hosted
+    timeout-minutes: 15
+    container:
+      image: golang:1.26.6
+      options: --cpus=2
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+
+      - name: Check line endings
+        run: |
+          git add --renormalize .
+          if ! git diff --cached --quiet; then
+            echo "::error::Line endings must be LF. Run 'git add --renormalize .' and commit the diff below."
+            git diff --cached --stat
+            exit 1
+          fi
+
+      # `git status --porcelain` rather than `git diff`: a newly created go.sum
+      # is untracked, and `git diff` would not report it.
+      - name: Check go.mod is tidy
+        working-directory: acp
+        run: |
+          go mod tidy
+          if [ -n "$(git status --porcelain -- go.mod go.sum)" ]; then
+            echo "::error::go.mod/go.sum are not tidy. Run 'go mod tidy' in acp/ and commit the diff below."
+            git status --porcelain -- go.mod go.sum
+            git --no-pager diff -- go.mod go.sum
+            exit 1
+          fi
+
+      # Pinned to v0.8.1, whose go.mod requires Go 1.26.0. The container ships
+      # 1.26.6, so this builds without downloading another toolchain.
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
+
+      # `make check` reports a missing staticcheck and carries on, so assert it
+      # resolved first. Without this step the workflow could go green having
+      # never run the analyser.
+      - name: Verify staticcheck is on PATH
+        run: staticcheck -version
+
+      - name: License headers, formatting, vet, staticcheck
+        working-directory: acp
+        run: make check
+
+      - name: Test with coverage
+        working-directory: acp
+        run: make coverage
+
+      - name: Govulncheck
+        working-directory: acp
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          govulncheck ./...
