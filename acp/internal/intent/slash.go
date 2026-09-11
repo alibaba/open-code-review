@@ -26,12 +26,11 @@ func (p *Parser) parseSlash(ctx context.Context, text string, st *State) (Result
 			"Supported commands are /review and /scan. Describe anything else in natural language."), nil
 	}
 
-	s := newSlots(action)
-	if prev := slotsFromState(st); prev != nil && prev.action == action {
-		s = prev
-	}
-
 	rest := fields[1:]
+	s := newSlots(action)
+	if canResumeSlash(st.Pending(), action, rest) {
+		s = slotsFromState(st)
+	}
 	for _, tok := range rest {
 		if strings.Contains(tok, "..") && !strings.HasPrefix(tok, "-") {
 			p.clearPending(st)
@@ -57,10 +56,25 @@ func (p *Parser) parseSlash(ctx context.Context, text string, st *State) (Result
 			}
 			switch name {
 			case "--from":
+				if s.reviewType == reviewCommit || s.commit != "" {
+					p.clearPending(st)
+					return RejectResult("--commit cannot be combined with --from or --to",
+						"Use either /review --commit <ref> or /review --from <base> --to <head>."), nil
+				}
 				s.from, s.reviewType = value, reviewRange
 			case "--to":
+				if s.reviewType == reviewCommit || s.commit != "" {
+					p.clearPending(st)
+					return RejectResult("--commit cannot be combined with --from or --to",
+						"Use either /review --commit <ref> or /review --from <base> --to <head>."), nil
+				}
 				s.to, s.reviewType = value, reviewRange
 			case "--commit":
+				if s.reviewType == reviewRange || s.from != "" || s.to != "" {
+					p.clearPending(st)
+					return RejectResult("--commit cannot be combined with --from or --to",
+						"Use either /review --commit <ref> or /review --from <base> --to <head>."), nil
+				}
 				s.commit, s.reviewType = value, reviewCommit
 			}
 			continue
@@ -106,6 +120,33 @@ func (p *Parser) parseSlash(ctx context.Context, text string, st *State) (Result
 		return p.finalizeReview(ctx, st, s)
 	}
 	return p.finalizeScan(ctx, st, s)
+}
+
+// canResumeSlash permits only a direct answer to a pending range
+// clarification. Every other slash command begins a new request so stale
+// values cannot change its target.
+func canResumeSlash(p *Pending, action string, rest []string) bool {
+	if p == nil || p.Action != action || action != actionReview || p.ReviewType != reviewRange {
+		return false
+	}
+	missing := make(map[string]bool, len(p.Missing))
+	for _, name := range p.Missing {
+		missing[name] = true
+	}
+	if len(missing) == 0 {
+		return false
+	}
+	if len(rest) == 0 || len(rest) > 2 {
+		return false
+	}
+	name, inline, hasInline := splitFlag(rest[0])
+	if (name != "--from" && name != "--to") || !missing[strings.TrimPrefix(name, "--")] {
+		return false
+	}
+	if hasInline {
+		return len(rest) == 1 && inline != "" && !strings.HasPrefix(inline, "-")
+	}
+	return len(rest) == 2 && !strings.HasPrefix(rest[1], "-")
 }
 
 // splitFlag separates an inline --flag=value form. Non-flags return the token

@@ -81,6 +81,35 @@ func TestSlashClarifyMissingFrom(t *testing.T) {
 	requireClarify(t, r, "from")
 }
 
+func TestSlashNewCommandDoesNotInheritPendingSlots(t *testing.T) {
+	p := newTestParser(&fakeLLM{}, nil)
+	st := NewState()
+	if _, err := p.Parse(context.Background(), "/review --from main", st); err != nil {
+		t.Fatalf("initial Parse: %v", err)
+	}
+
+	r, err := p.Parse(context.Background(), "/review --commit abc1234", st)
+	if err != nil {
+		t.Fatalf("commit Parse: %v", err)
+	}
+	want := []string{"review", "--commit", "abc1234", "--format", "json", "--audience", "human", "--color", "never"}
+	if got := requireIntent(t, r); !equalArgs(got, want) {
+		t.Fatalf("argv = %v, want %v", got, want)
+	}
+	if st.Pending() != nil {
+		t.Fatalf("pending not cleared after new command: %+v", st.Pending())
+	}
+}
+
+func TestSlashRejectsConflictingReviewSelectors(t *testing.T) {
+	p := newTestParser(&fakeLLM{}, nil)
+	r, err := p.Parse(context.Background(), "/review --from main --to feature --commit abc1234", NewState())
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	requireReject(t, r)
+}
+
 func TestSlashRejects(t *testing.T) {
 	tests := []struct {
 		name string
