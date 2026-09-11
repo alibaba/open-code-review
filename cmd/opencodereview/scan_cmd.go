@@ -152,7 +152,13 @@ func executeScan(opts scanOptions) (retErr error) {
 	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
+		maxTokens, err := previewMaxTokens(scanTpl.MaxTokens, opts.maxTokens)
+		if err != nil {
+			return err
+		}
+		scanTpl.MaxTokens = maxTokens
 		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat, out)
+
 	}
 
 	resumeState, err := loadScanResumeState(cc.RepoDir, opts, scanPaths)

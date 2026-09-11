@@ -60,7 +60,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 ## ファイルがどのようにフィルタリングされるか
 
-フィルタリングは 5 段階のゲートアルゴリズムで、[`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go) にあります。各 diff について、OCR は順に次を問います:
+フィルタリングは 5 段階のゲートアルゴリズムで、[`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go) にあります。各 diff について、OCR は順に次を問います:
 
 1. **`binary`**: ファイルはバイナリか？ 除外します。
 2. **`user_exclude`**: パスがいずれかのユーザー `exclude` パターンに一致するか？ 除外します。
@@ -68,7 +68,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 4. **`unsupported_ext`**: ファイルの拡張子は[ホワイトリスト](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)にあるか？ なければ除外します。
 5. **`default_path`**: パスがいずれかの組み込みテストファイル除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）に一致するか？ 除外します。
 
-5 つのゲートをすべて通過したファイルだけが LLM に送られます。`deleted` の理由（これはゲートではなく、`Preview()` の中で個別に計算されます）は、新しいパスが `/dev/null` であるファイルを示します。レビューすべき新しい内容がありません。`ocr review --preview` を使えば、token を消費せずにこのフィルタリング結果を出力できます。
+5 つのゲートをすべて通過したファイルだけが LLM に送られます。ただし diff だけで `max_tokens` の 80% を超える場合は例外で、`selectFiles` がゲートのあとにその上限を適用し、そのファイルを `too_large` として除外します。同じく、新しいパスが `/dev/null` であるファイルは `deleted` と記されます。レビューすべき新しい内容がありません。`ocr review --preview` を使えば、token を消費せずにこのフィルタリング結果を出力できます。
 
 ### デフォルトパスの除外
 

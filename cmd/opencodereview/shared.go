@@ -77,6 +77,23 @@ func resolveEffort(cfg *Config, cliOverride string) (template.Effort, error) {
 	return template.EffortDefault, nil
 }
 
+// previewMaxTokens resolves the per-file prompt ceiling the way a real run
+// resolves it, but without building an LLM runtime: resolveMaxTokens needs only
+// the app config, which loads independently of endpoint resolution. A preview
+// therefore reports the limit its run would actually apply while keeping its
+// property of requiring no API key.
+func previewMaxTokens(templateDefault, cliOverride int) (int, error) {
+	cfgPath, err := defaultConfigPath()
+	if err != nil {
+		return 0, err
+	}
+	appCfg, err := LoadAppConfig(cfgPath)
+	if err != nil {
+		return 0, fmt.Errorf("load app config: %w", err)
+	}
+	return resolveMaxTokens(templateDefault, appCfg, cliOverride)
+}
+
 // loadCommonContext validates the working directory, loads the embedded
 // template, raises MaxToolRequestTimes when maxTools exceeds the default,
 // resolves the absolute repo path, loads system review rules, and creates

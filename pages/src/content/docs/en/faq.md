@@ -103,7 +103,7 @@ node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
 ```
 
-The five exclusion reasons map to gates in the
+The exclusion reasons map to gates in the
 [file filter](../review-rules/#how-files-are-filtered):
 
 | Reason | Fix |
@@ -113,6 +113,7 @@ The five exclusion reasons map to gates in the
 | `unsupported_ext` | Add the extension to your `include` list to bypass the allowlist gate. |
 | `default_path` | Add the file to `include` — that overrides built-in test-file exclude patterns. |
 | `deleted` | Nothing to do — there's no new content to review. |
+| `too_large` | The diff alone exceeds 80% of `max_tokens`. Raise `--max-tokens` (or the saved `max_tokens`), or split the change into smaller commits. |
 
 ### My custom rule isn't firing
 

@@ -74,7 +74,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 ## 파일을 걸러내는 방식 {#how-files-are-filtered}
 
 필터는
-[`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go)에
+[`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go)에
 있는 다섯 관문 알고리즘입니다. diff마다 OCR이 다음을 묻습니다.
 
 1. **`binary`** — 바이너리 파일인가? 그렇다면 제외.
@@ -88,10 +88,11 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 5. **`default_path`** — 경로가 내장 테스트 파일 제외 패턴(`**/*_test.go`,
    `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb` 등)에 걸리는가? 그렇다면 제외.
 
-다섯 관문을 모두 통과한 파일이 LLM으로 갑니다. `deleted` 사유는 관문이 아니라
-`Preview()`에서 따로 계산하며, 새 경로가 `/dev/null`인 파일을 가리킵니다. 리뷰할 새
-내용이 없다는 뜻입니다. 토큰을 쓰지 않고 이 필터의 결과만 보려면
-`ocr review --preview`를 쓰세요.
+다섯 관문을 모두 통과한 파일이 LLM으로 갑니다. 다만 diff만으로 `max_tokens`의
+80%를 넘으면 `selectFiles`가 관문 뒤에서 그 상한을 적용해 `too_large`로
+제외합니다. `selectFiles`는 새 경로가 `/dev/null`인 파일도 `deleted`로
+표시합니다. 리뷰할 새 내용이 없다는 뜻입니다. 토큰을 쓰지 않고 이 필터의 결과만
+보려면 `ocr review --preview`를 쓰세요.
 
 ### 기본 경로 제외 목록 {#default-path-exclusions}
 

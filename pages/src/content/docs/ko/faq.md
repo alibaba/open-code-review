@@ -102,7 +102,7 @@ node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
 ```
 
-제외 사유 다섯 가지는
+제외 사유는
 [파일 필터](../review-rules/#how-files-are-filtered)의 관문과 짝을 이룹니다.
 
 | 사유 | 해결 |
@@ -112,6 +112,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `unsupported_ext` | 확장자를 `include` 목록에 넣어 허용 목록 관문을 건너뛰세요. |
 | `default_path` | 파일을 `include`에 넣으세요. 내장 테스트 파일 제외 패턴을 덮어씁니다. |
 | `deleted` | 할 일이 없습니다. 리뷰할 새 내용이 없습니다. |
+| `too_large` | diff만으로 `max_tokens`의 80%를 넘습니다. `--max-tokens`(또는 저장된 `max_tokens`)를 올리거나 변경을 더 작은 커밋으로 나누세요. |
 
 ### 제가 만든 규칙이 안 걸립니다 {#my-custom-rule-isn-t-firing}
 

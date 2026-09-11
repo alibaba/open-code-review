@@ -14,7 +14,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -25,7 +25,8 @@ flowchart TD
 编排逻辑位于
 [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
 包，主要文件有：`agent.go`（分发与按组编排）、`grouping.go`（语义文件分组）、
-`preview.go`（文件过滤）和 `util.go`（辅助）；工具调用循环与记忆压缩位于相邻的
+`selection.go`（文件过滤）、`preview.go`（`--preview` 报告）和 `util.go`（辅助）；
+工具调用循环与记忆压缩位于相邻的
 [`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)。
 两个入口点值得关注：`Agent.Run`（流水线顶部）和 `Agent.dispatchSubtasks`
 （per-group 扇出）。
@@ -49,7 +50,7 @@ untracked 文件从磁盘读取并作为整文件新增处理，以便 commit �
 ## 五重门文件过滤
 
 diff 加载后，每个文件经过
-[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go)。
+[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go)。
 该函数返回以下之一：
 
 ```
@@ -59,8 +60,9 @@ unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
 ```
 
-……或文件被保留时返回空。`deleted` **不**由 `whyExcluded` 返回；它在 `Preview()`
-中随后计算——当一个被保留文件的 diff 报告 `IsDeleted` 时。各门按以下顺序执行：
+……或文件被保留时返回空。`deleted` 和 `too_large` **不**由 `whyExcluded` 返回；
+它们由 `selectFiles` 在各门之后施加——`deleted` 用于 diff 报告 `IsDeleted` 的被保留
+文件，`too_large` 用于仅 diff 本身就超过 `max_tokens` 80% 的文件。各门按以下顺序执行：
 
 1. `binary`——二进制文件先被丢弃。
 2. `user_exclude`——你项目的 `exclude` 总是优先。
@@ -74,8 +76,7 @@ default_path    — matched a built-in test-file exclude pattern
 
 噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，
 位于 diff-provider 层，通过 `internal/diff/git.go` 中的 `providerDirIgnoreDirs`
-列表——这些目录的 diff 被解析后由 `filterDiffs` 剔除，永远不会到达 per-file
-过滤器。
+列表——这些目录的 diff 被解析后即被剔除，永远不会到达 per-file 过滤器。
 
 运行 `ocr review --preview` 可不花 token 查看完整过滤结果。完整算法见
 [评审规则](../review-rules/#how-files-are-filtered)。
@@ -250,9 +251,9 @@ if countMessagesTokens(messages) > tokenLimit {
 这会在巨大 diff（自动生成的 lock 文件、触及数千行的重构）耗费请求之前把它们拦截下来。
 被跳过的那一组作为非致命警告在 stdout 报告，并加入 JSON `warnings` 数组。
 
-第二个检查在 `filterLargeDiffs` 中运行：若 diff 单独超过 `MAX_TOKENS` 的 80 %，
-它在分组与分发发生之前就被过滤掉。第三道守卫在分组内部运行——见上文的
-`enforceGroupTokenBudget`。
+第二个检查在 `selectFiles` 中运行：若 diff 单独超过 `MAX_TOKENS` 的 80 %，
+它在分组与分发发生之前就被过滤掉，并报告为 `too_large`。第三道守卫在分组内部
+运行——见上文的 `enforceGroupTokenBudget`。
 
 ## 模板与占位符
 
@@ -353,7 +354,7 @@ metrics 记录——不作为 span。prompt 与响应内容**绝不**附加到�
 | 语义文件分组 | `internal/agent/grouping.go` |
 | 工具调用循环与记忆压缩 | `internal/llmloop/`（loop.go、compression.go） |
 | effort 档位 | `internal/config/template/effort.go` |
-| 文件过滤 / 预览 | `internal/agent/preview.go` |
+| 文件过滤 / 预览 | `internal/agent/selection.go`、`internal/agent/preview.go` |
 | diff 加载（Git 模式） | `internal/diff/git.go` |
 | 规则解析链 | `internal/config/rules/system_rules.go` |
 | 工具注册表与实现 | `internal/tool/` |
