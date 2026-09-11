@@ -6,18 +6,21 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
 )
 
 var (
-	scenario = flag.String("scenario", "success-review", "Test scenario to simulate")
-	delay    = flag.Duration("delay", 0, "Delay before producing output")
+	scenario     = flag.String("scenario", "success-review", "Test scenario to simulate")
+	delay        = flag.Duration("delay", 0, "Delay before producing output")
+	childPIDFile = flag.String("child-pid-file", "", "Write the spawned child PID for process-tree tests")
 )
 
 // The structs below mirror the real OCR CLI JSON envelope (cmd/opencodereview
@@ -85,7 +88,13 @@ func emit(result runResult) {
 }
 
 func main() {
-	flag.Parse()
+	if len(os.Args) > 1 && (os.Args[1] == "review" || os.Args[1] == "scan") {
+		if err := flag.CommandLine.Parse(os.Args[2:]); err != nil {
+			os.Exit(2)
+		}
+	} else {
+		flag.Parse()
+	}
 
 	// Set up signal handling for cancellation tests.
 	sigCh := make(chan os.Signal, 1)
@@ -118,7 +127,9 @@ func main() {
 	case "block-for-cancel":
 		blockForCancel(sigCh)
 	case "spawn-child":
-		spawnChild()
+		spawnChild(sigCh)
+	case "child-block":
+		childBlock(sigCh)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown scenario: %s\n", *scenario)
 		os.Exit(1)
@@ -274,15 +285,46 @@ func blockForCancel(sigCh chan os.Signal) {
 	os.Exit(1)
 }
 
-func spawnChild() {
-	// Placeholder: this does not actually fork a child process yet. Descendant
-	// process cleanup is verified in phase 5.
+func spawnChild(sigCh chan os.Signal) {
 	fmt.Fprintln(os.Stderr, "[ocr] running with child process...")
-	time.Sleep(50 * time.Millisecond)
+	child := exec.Command(os.Args[0], "-scenario", "child-block")
+	child.Stdout = os.Stdout
+	childStderr, err := child.StderrPipe()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mock-ocr: child stderr pipe: %v\n", err)
+		os.Exit(1)
+	}
+	if err := child.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "mock-ocr: start child: %v\n", err)
+		os.Exit(1)
+	}
+	if *childPIDFile != "" {
+		if err := os.WriteFile(*childPIDFile, []byte(fmt.Sprintf("%d\n", child.Process.Pid)), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "mock-ocr: write child PID: %v\n", err)
+			_ = child.Process.Kill()
+			os.Exit(1)
+		}
+	}
+	scanner := bufio.NewScanner(childStderr)
+	if !scanner.Scan() || scanner.Text() != "CHILD_READY" {
+		fmt.Fprintf(os.Stderr, "mock-ocr: child did not become ready: %v\n", scanner.Err())
+		_ = child.Process.Kill()
+		os.Exit(1)
+	}
+	fmt.Fprintln(os.Stderr, "READY")
+	<-sigCh
+	_ = child.Wait()
 
 	emit(runResult{
-		Status:   "complete",
-		Message:  "Review complete: 0 finding(s).",
+		Status:   "failed",
+		Message:  "Review cancelled with child process.",
 		Comments: []comment{},
 	})
+	os.Exit(1)
+}
+
+func childBlock(sigCh chan os.Signal) {
+	fmt.Fprintln(os.Stderr, "CHILD_READY")
+	<-sigCh
+	os.Exit(130)
 }

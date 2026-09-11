@@ -4,13 +4,14 @@ Independent ACP (Agent Client Protocol) adapter for OpenCodeReview CLI.
 
 ## Status
 
-**Phase 4 complete**: command parsing and clarification implemented and tested.
+**Phase 5 core complete**: OCR process orchestration implemented and tested on
+macOS; Linux runtime evidence and Windows Job Object support remain pending.
 
 - ✓ Phase 1: CLI investigation and contract definition
 - ✓ Phase 2: Overall design and architecture
 - ✓ Phase 3: CLI Contract and mock OCR
 - ✓ Phase 4: Command parsing and clarification
-- ⏳ Phase 5: OCR process orchestration
+- ◐ Phase 5: OCR process orchestration (core implementation complete; platform evidence pending)
 - ⏳ Phase 6: ACP protocol implementation
 - ⏳ Phase 7: Testing and quality verification
 - ⏳ Phase 8: Client integration and release
@@ -23,16 +24,17 @@ acp/
 ├── internal/
 │   ├── contract/         # CLI contract and intent structures (phase 3)
 │   ├── intent/           # prompt -> intent / clarify / reject (phase 4)
-│   └── llmresolve/       # OCR LLM config resolution + protocol client (phase 4)
+│   ├── llmresolve/       # OCR LLM config resolution + protocol client (phase 4)
+│   └── orchestrator/     # OCR process lifecycle and result decoding (phase 5)
 ├── testdata/
 │   └── mock-ocr/         # Test double for OCR CLI (phase 3)
 ├── Makefile              # Build, test, and quality checks
 └── go.mod                # Independent Go module
 ```
 
-Placeholder directories remain for `cmd/ocr-acp/` (phase 6),
-`internal/orchestrator/` (phase 5) and `internal/adapter/` (phase 6). Git does
-not track empty directories, so they are not part of a commit.
+Placeholder directories remain for `cmd/ocr-acp/` and `internal/adapter/`
+(phase 6). Git does not track empty directories, so they are not part of a
+commit.
 
 ## Quick Start
 
@@ -204,9 +206,9 @@ adapter's DTO.
   emits a failed document whose `manifest.run_failure.classification` and
   `coverage.failed[].classification` are `cancelled`, and exits 1 to mirror the
   real CLI (which has no dedicated cancellation exit code)
-- `spawn-child`: **Placeholder.** It does not actually fork a child process;
-  the name overstates what it does and it is not yet usable for testing
-  signal propagation to grandchildren
+- `spawn-child`: forks a blocking child in the same process group, writes its
+  PID to `-child-pid-file`, and waits until that child is ready. It is used to
+  verify cancellation reaps managed descendants without timing-based tests
 
 `-delay` pauses before producing output. If a signal arrives during the delay
 the mock exits 130 without writing a result.

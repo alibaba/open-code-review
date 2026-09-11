@@ -45,3 +45,6 @@ bin/opencodereview
 # Python
 __pycache__/
 *.py[cod]
+
+# Local oh-my-codex runtime state.
+/.omx/
