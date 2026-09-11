@@ -227,7 +227,7 @@ var registry = []Provider{
 		},
 	},
 	{
-		Name:        "tokensmarket",
+		Name:        "tokenmarket",
 		DisplayName: "Token Market",
 		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.tokensmarket.ai/v1",

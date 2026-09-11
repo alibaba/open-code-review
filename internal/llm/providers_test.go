@@ -76,7 +76,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "tokensmarket", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "tokenmarket", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -157,10 +157,10 @@ func TestLookupProvider_AnthropicDetails(t *testing.T) {
 	}
 }
 
-func TestLookupProvider_TokensMarketDetails(t *testing.T) {
-	p, ok := LookupProvider("tokensmarket")
+func TestLookupProvider_TokenMarketDetails(t *testing.T) {
+	p, ok := LookupProvider("tokenmarket")
 	if !ok {
-		t.Fatal("tokensmarket not found")
+		t.Fatal("tokenmarket not found")
 	}
 	if p.DisplayName != "Token Market" {
 		t.Errorf("DisplayName = %q, want %q", p.DisplayName, "Token Market")
