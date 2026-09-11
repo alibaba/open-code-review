@@ -16,6 +16,7 @@ type streamResult struct {
 	stdoutExceeded bool
 	stderrTail     string
 	stderrCut      bool
+	warnings       []Event
 	err            error
 }
 
@@ -69,10 +70,11 @@ func readStdout(r io.Reader, limit int) ([]byte, bool, error) {
 	}
 }
 
-func readStderr(r io.Reader, byteLimit, lineLimit int, emit func(Event)) (string, bool, error) {
+func readStderr(r io.Reader, byteLimit, lineLimit int, emit func(Event)) (string, bool, []Event, error) {
 	reader := bufio.NewReaderSize(r, 32<<10)
 	tail := tailBuffer{limit: byteLimit}
 	warned := false
+	var warnings []Event
 	for {
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {
@@ -85,14 +87,16 @@ func readStderr(r io.Reader, byteLimit, lineLimit int, emit func(Event)) (string
 			emit(Event{Kind: kind, Message: message, Truncated: truncated, OccurredAt: time.Now()})
 			if (truncated || tail.cut) && !warned {
 				warned = true
-				emit(Event{Kind: EventWarning, Message: "OCR stderr was truncated", Truncated: true, OccurredAt: time.Now()})
+				warning := Event{Kind: EventWarning, Message: "OCR stderr was truncated", Truncated: true, OccurredAt: time.Now()}
+				warnings = append(warnings, warning)
+				emit(warning)
 			}
 		}
 		if err == io.EOF {
-			return tail.String(), tail.cut, nil
+			return tail.String(), tail.cut, warnings, nil
 		}
 		if err != nil {
-			return tail.String(), tail.cut, err
+			return tail.String(), tail.cut, warnings, err
 		}
 	}
 }
@@ -113,6 +117,7 @@ func consumeStreams(stdout, stderr io.Reader, limits Limits, emit func(Event)) <
 	var stdoutExceeded bool
 	var stderrTail string
 	var stderrCut bool
+	var warnings []Event
 	var stdoutErr error
 	var stderrErr error
 	go func() {
@@ -121,16 +126,16 @@ func consumeStreams(stdout, stderr io.Reader, limits Limits, emit func(Event)) <
 	}()
 	go func() {
 		defer func() { done <- struct{}{} }()
-		stderrTail, stderrCut, stderrErr = readStderr(stderr, limits.StderrBytes, limits.StderrLine, emit)
+		stderrTail, stderrCut, warnings, stderrErr = readStderr(stderr, limits.StderrBytes, limits.StderrLine, emit)
 	}()
 	go func() {
 		<-done
 		<-done
 		if stdoutErr != nil {
-			result <- streamResult{stdout: stdoutData, stdoutExceeded: stdoutExceeded, stderrTail: stderrTail, stderrCut: stderrCut, err: stdoutErr}
+			result <- streamResult{stdout: stdoutData, stdoutExceeded: stdoutExceeded, stderrTail: stderrTail, stderrCut: stderrCut, warnings: warnings, err: stdoutErr}
 			return
 		}
-		result <- streamResult{stdout: stdoutData, stdoutExceeded: stdoutExceeded, stderrTail: stderrTail, stderrCut: stderrCut, err: stderrErr}
+		result <- streamResult{stdout: stdoutData, stdoutExceeded: stdoutExceeded, stderrTail: stderrTail, stderrCut: stderrCut, warnings: warnings, err: stderrErr}
 	}()
 	return result
 }

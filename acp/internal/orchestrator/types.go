@@ -32,7 +32,8 @@ const (
 )
 
 // Event is a bounded, best-effort progress or diagnostic message. The runner
-// may drop events when its consumer is slow; Outcome is never dropped.
+// may drop an event when its consumer is slow. Critical stream warnings are
+// also retained in Outcome.Warnings, which is the authoritative record.
 type Event struct {
 	Kind       EventKind
 	Message    string
@@ -65,6 +66,7 @@ type Outcome struct {
 	Result      *Result
 	ExitCode    int
 	Diagnostics string
+	Warnings    []Event
 	Err         error
 }
 
@@ -115,6 +117,7 @@ const (
 	ErrorDecode         ErrorKind = "decode"
 	ErrorResult         ErrorKind = "result"
 	ErrorCleanup        ErrorKind = "cleanup"
+	ErrorPlatform       ErrorKind = "platform_unsupported"
 )
 
 // Error describes a local orchestration failure.
@@ -156,8 +159,11 @@ func NewRunner(binary string) *ProcessRunner {
 	return &ProcessRunner{Binary: binary}
 }
 
-// Run starts asynchronous execution. It never writes child output to this
-// process's stdout or stderr.
+// Run starts asynchronous execution and returns immediately. The events
+// channel closes after stream readers finish; it may drop best-effort events
+// when full. The outcomes channel has one buffered slot and receives exactly
+// one Outcome before it closes, even for failures before process startup.
+// It never writes child output to this process's stdout or stderr.
 func (r *ProcessRunner) Run(ctx context.Context, request Request) (<-chan Event, <-chan Outcome) {
 	limits := r.Limits.normalized()
 	events := make(chan Event, limits.EventQueue)

@@ -8,10 +8,29 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 )
 
-func (r *ProcessRunner) run(ctx context.Context, request Request, limits Limits, events chan<- Event, outcomes chan<- Outcome) {
+type terminationCause struct {
+	kind OutcomeKind
+	at   time.Time
+}
+
+type causeRecorder struct {
+	once sync.Once
+	ch   chan terminationCause
+}
+
+func newCauseRecorder() *causeRecorder {
+	return &causeRecorder{ch: make(chan terminationCause, 1)}
+}
+
+func (r *causeRecorder) record(kind OutcomeKind, at time.Time) {
+	r.once.Do(func() { r.ch <- terminationCause{kind: kind, at: at} })
+}
+
+func (r *ProcessRunner) run(ctx context.Context, request Request, limits Limits, events chan Event, outcomes chan<- Outcome) {
 	defer close(events)
 	defer close(outcomes)
 	now := time.Now
@@ -22,11 +41,24 @@ func (r *ProcessRunner) run(ctx context.Context, request Request, limits Limits,
 		if event.OccurredAt.IsZero() {
 			event.OccurredAt = now()
 		}
+		critical := event.Kind == EventWarning || event.Truncated
 		select {
 		case events <- event:
 		default:
-			// Diagnostic/progress messages are explicitly best effort. Blocking
-			// here could keep a child alive forever through pipe backpressure.
+			if !critical {
+				return
+			}
+			// Preserve critical events by evicting one queued best-effort event.
+			// Outcome.Warnings remains the authoritative fallback if a consumer
+			// races this replacement.
+			select {
+			case <-events:
+			default:
+			}
+			select {
+			case events <- event:
+			default:
+			}
 		}
 	}
 	finish := func(outcome Outcome) { outcomes <- outcome }
@@ -46,7 +78,10 @@ func (r *ProcessRunner) run(ctx context.Context, request Request, limits Limits,
 	cmd := exec.Command(r.Binary, request.Args...)
 	cmd.Dir = request.CWD
 	cmd.Stdin = stdin
-	configureProcessGroup(cmd)
+	if err := configureProcessGroup(cmd); err != nil {
+		finish(Outcome{Kind: OutcomeFailed, ExitCode: -1, Err: newError(ErrorPlatform, "%v", err)})
+		return
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		finish(Outcome{Kind: OutcomeFailed, ExitCode: -1, Err: newError(ErrorStart, "create stdout pipe: %v", err)})
@@ -66,7 +101,7 @@ func (r *ProcessRunner) run(ctx context.Context, request Request, limits Limits,
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()
 
-	cause, waitErr := r.await(ctx, request.Deadline, cmd, waited)
+	cause, waitErr, cleanupErr := r.await(ctx, request.Deadline, cmd, waited)
 	stream, cleanErr := awaitStreams(streams)
 	exitCode := commandExitCode(waitErr)
 	result, decodeErr := decodeResult(request.Args, stream.stdout)
@@ -75,34 +110,34 @@ func (r *ProcessRunner) run(ctx context.Context, request Request, limits Limits,
 	// document, but inability to decode it must not turn cancellation into an
 	// ordinary command failure.
 	if cause == OutcomeTimedOut {
-		finish(Outcome{Kind: OutcomeTimedOut, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Err: context.DeadlineExceeded})
+		finish(Outcome{Kind: OutcomeTimedOut, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Warnings: stream.warnings, Err: localOutcomeError(context.DeadlineExceeded, cleanupErr, cleanErr)})
 		return
 	}
 	if cause == OutcomeCancelled {
-		finish(Outcome{Kind: OutcomeCancelled, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Err: context.Canceled})
+		finish(Outcome{Kind: OutcomeCancelled, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Warnings: stream.warnings, Err: localOutcomeError(context.Canceled, cleanupErr, cleanErr)})
 		return
 	}
 	if cleanErr != nil {
-		finish(Outcome{Kind: OutcomeFailed, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Err: cleanErr})
+		finish(Outcome{Kind: OutcomeFailed, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Warnings: stream.warnings, Err: cleanErr})
 		return
 	}
 	if stream.err != nil {
-		finish(Outcome{Kind: OutcomeFailed, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Err: newError(ErrorStream, "read OCR output: %v", stream.err)})
+		finish(Outcome{Kind: OutcomeFailed, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Warnings: stream.warnings, Err: newError(ErrorStream, "read OCR output: %v", stream.err)})
 		return
 	}
 	if stream.stdoutExceeded {
-		finish(Outcome{Kind: OutcomeFailed, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Err: newError(ErrorStdoutLimit, "OCR stdout exceeded %d byte limit", limits.StdoutBytes)})
+		finish(Outcome{Kind: OutcomeFailed, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Warnings: stream.warnings, Err: newError(ErrorStdoutLimit, "OCR stdout exceeded %d byte limit", limits.StdoutBytes)})
 		return
 	}
 	if waitErr != nil {
-		finish(Outcome{Kind: OutcomeFailed, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Err: newError(ErrorExit, "OCR exited with code %d: %v", exitCode, waitErr)})
+		finish(Outcome{Kind: OutcomeFailed, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Warnings: stream.warnings, Err: newError(ErrorExit, "OCR exited with code %d: %v", exitCode, waitErr)})
 		return
 	}
 	if decodeErr != nil {
-		finish(Outcome{Kind: OutcomeFailed, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Err: decodeErr})
+		finish(Outcome{Kind: OutcomeFailed, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Warnings: stream.warnings, Err: decodeErr})
 		return
 	}
-	finish(Outcome{Kind: OutcomeCompleted, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail})
+	finish(Outcome{Kind: OutcomeCompleted, Result: result, ExitCode: exitCode, Diagnostics: stream.stderrTail, Warnings: stream.warnings})
 }
 
 func validateRequest(binary string, request Request) error {
@@ -125,51 +160,78 @@ func validateRequest(binary string, request Request) error {
 	return nil
 }
 
-func (r *ProcessRunner) await(ctx context.Context, deadline time.Time, cmd *exec.Cmd, waited <-chan error) (OutcomeKind, error) {
-	var deadlineTimer *time.Timer
-	var deadlineCh <-chan time.Time
+func (r *ProcessRunner) await(ctx context.Context, deadline time.Time, cmd *exec.Cmd, waited <-chan error) (OutcomeKind, error, error) {
+	recorder := newCauseRecorder()
+	watchDone := make(chan struct{})
 	if !deadline.IsZero() {
-		d := time.Until(deadline)
-		if d < 0 {
-			d = 0
-		}
-		deadlineTimer = time.NewTimer(d)
-		deadlineCh = deadlineTimer.C
-		defer deadlineTimer.Stop()
+		go func() {
+			timer := time.NewTimer(time.Until(deadline))
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				recorder.record(OutcomeTimedOut, deadline)
+			case <-watchDone:
+			}
+		}()
 	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				recorder.record(OutcomeTimedOut, time.Now())
+			} else {
+				recorder.record(OutcomeCancelled, time.Now())
+			}
+		case <-watchDone:
+		}
+	}()
 	select {
 	case err := <-waited:
-		return "", err
-	case <-deadlineCh:
-		return OutcomeTimedOut, r.stop(cmd, waited)
-	case <-ctx.Done():
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) || (!deadline.IsZero() && !time.Now().Before(deadline)) {
-			return OutcomeTimedOut, r.stop(cmd, waited)
-		}
-		return OutcomeCancelled, r.stop(cmd, waited)
+		close(watchDone)
+		return "", err, nil
+	case cause := <-recorder.ch:
+		waitErr, cleanupErr := r.stop(cmd, waited)
+		close(watchDone)
+		return cause.kind, waitErr, cleanupErr
 	}
 }
 
-func (r *ProcessRunner) stop(cmd *exec.Cmd, waited <-chan error) error {
+func (r *ProcessRunner) stop(cmd *exec.Cmd, waited <-chan error) (error, error) {
 	// SIGINT gives OCR a chance to emit its cancellation document before the
 	// bounded grace period expires.
-	_ = interruptProcessGroup(cmd)
+	var cleanupErrs []error
+	if err := interruptProcessGroup(cmd); err != nil {
+		cleanupErrs = append(cleanupErrs, newError(ErrorCleanup, "interrupt OCR process group: %v", err))
+	}
 	grace := r.GracePeriod
 	if grace <= 0 {
 		grace = defaultGracePeriod
 	}
 	select {
 	case err := <-waited:
-		return err
+		return err, errors.Join(cleanupErrs...)
 	case <-time.After(grace):
-		_ = killProcessGroup(cmd)
+		if err := killProcessGroup(cmd); err != nil {
+			cleanupErrs = append(cleanupErrs, newError(ErrorCleanup, "kill OCR process group: %v", err))
+		}
 		select {
 		case err := <-waited:
-			return err
+			return err, errors.Join(cleanupErrs...)
 		case <-time.After(grace):
-			return newError(ErrorCleanup, "OCR process did not exit after forced termination")
+			cleanupErrs = append(cleanupErrs, newError(ErrorCleanup, "OCR process did not exit after forced termination"))
+			return nil, errors.Join(cleanupErrs...)
 		}
 	}
+}
+
+func localOutcomeError(cause error, cleanupErrs ...error) error {
+	errs := []error{cause}
+	for _, err := range cleanupErrs {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func awaitStreams(streams <-chan streamResult) (streamResult, error) {

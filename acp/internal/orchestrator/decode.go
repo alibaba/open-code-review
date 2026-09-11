@@ -59,16 +59,16 @@ func decodeOne(data []byte, destination any) error {
 }
 
 func successfulReview(result contract.ReviewResult) bool {
-	if result.Status != contract.StatusSuccess && result.Status != contract.StatusComplete && result.Status != contract.StatusCompletedWithWarnings {
+	if result.Status != contract.StatusSuccess && result.Status != contract.StatusComplete && result.Status != contract.StatusPartial && result.Status != contract.StatusSkipped && result.Status != contract.StatusCompletedWithWarnings && result.Status != contract.StatusCompletedWithErrors {
 		return false
 	}
 	if result.Manifest == nil || result.Manifest.TerminalState == "" {
 		return true
 	}
 	state := result.Manifest.TerminalState
-	return state == contract.StatusComplete || state == contract.StatusSuccess || state == contract.StatusCompletedWithWarnings
+	return state == contract.StatusComplete || state == contract.StatusSuccess || state == contract.StatusPartial || state == contract.StatusSkipped || state == contract.StatusCompletedWithWarnings || state == contract.StatusCompletedWithErrors
 }
 
 func successfulScan(result contract.ScanResult) bool {
-	return result.Status == contract.StatusSuccess || result.Status == contract.StatusComplete || result.Status == contract.StatusCompletedWithWarnings
+	return result.Status == contract.StatusSuccess || result.Status == contract.StatusComplete || result.Status == contract.StatusSkipped || result.Status == contract.StatusCompletedWithWarnings || result.Status == contract.StatusCompletedWithErrors
 }

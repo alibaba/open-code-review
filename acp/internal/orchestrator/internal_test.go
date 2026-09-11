@@ -31,6 +31,31 @@ func TestDecodeResultValidationAndStatuses(t *testing.T) {
 	}
 }
 
+func TestDecodeResultAcceptsContractSuccessStatuses(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		data string
+	}{
+		{name: "review partial", args: []string{"review"}, data: " \n{\"status\":\"partial\",\"comments\":[]}\n "},
+		{name: "review skipped", args: []string{"review"}, data: `{"status":"skipped","comments":[]}`},
+		{name: "scan completed with errors", args: []string{"scan"}, data: `{"status":"completed_with_errors","comments":[]}`},
+		{name: "scan skipped", args: []string{"scan"}, data: `{"status":"skipped","comments":[]}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := decodeResult(test.args, []byte(test.data)); err != nil {
+				t.Fatalf("decodeResult: %v", err)
+			}
+		})
+	}
+
+	for _, args := range [][]string{{"review"}, {"scan"}} {
+		if _, err := decodeResult(args, []byte(`{"status":"unknown","comments":[]}`)); err == nil {
+			t.Fatalf("decodeResult(%q) accepted an unknown status", args[0])
+		}
+	}
+}
+
 func TestValidateRequestAdditionalFailures(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "file")
@@ -77,9 +102,33 @@ func TestTypedErrorWithoutCause(t *testing.T) {
 	}
 }
 
+func TestCauseRecorderKeepsFirstRecordedCause(t *testing.T) {
+	now := time.Now()
+	for _, test := range []struct {
+		name   string
+		first  OutcomeKind
+		second OutcomeKind
+	}{
+		{name: "cancellation first", first: OutcomeCancelled, second: OutcomeTimedOut},
+		{name: "timeout first", first: OutcomeTimedOut, second: OutcomeCancelled},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := newCauseRecorder()
+			recorder.record(test.first, now)
+			recorder.record(test.second, now.Add(time.Nanosecond))
+			cause := <-recorder.ch
+			if cause.kind != test.first || !cause.at.Equal(now) {
+				t.Fatalf("cause = %+v, want kind %s at %s", cause, test.first, now)
+			}
+		})
+	}
+}
+
 func TestKillProcessGroup(t *testing.T) {
 	cmd := exec.Command("sh", "-c", "while :; do sleep 1; done")
-	configureProcessGroup(cmd)
+	if err := configureProcessGroup(cmd); err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

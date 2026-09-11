@@ -143,6 +143,35 @@ func TestRunnerBoundsOutputAndStderrTail(t *testing.T) {
 	}
 }
 
+func TestRunnerRetainsTruncationWarningWithoutEventConsumer(t *testing.T) {
+	runner := NewRunner(writeOCRScript(t))
+	runner.Limits = Limits{StdoutBytes: 100, StderrBytes: 100, StderrLine: 16, EventQueue: 1}
+	events, outcomes := runner.Run(context.Background(), Request{CWD: t.TempDir(), Args: []string{"review", "large"}})
+	outcome := <-outcomes
+	if outcome.Kind != OutcomeFailed {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+	if len(outcome.Warnings) != 1 || outcome.Warnings[0].Kind != EventWarning || !outcome.Warnings[0].Truncated {
+		t.Fatalf("warnings = %+v", outcome.Warnings)
+	}
+	for range events {
+	}
+}
+
+func TestRunnerChannelsCloseAfterSingleOutcome(t *testing.T) {
+	runner := NewRunner(writeOCRScript(t))
+	events, outcomes := runner.Run(context.Background(), Request{CWD: t.TempDir(), Args: []string{"review"}})
+	outcome, ok := <-outcomes
+	if !ok || outcome.Kind != OutcomeCompleted {
+		t.Fatalf("outcome = %+v, open=%v", outcome, ok)
+	}
+	if _, ok := <-outcomes; ok {
+		t.Fatal("outcomes channel remained open after terminal outcome")
+	}
+	for range events {
+	}
+}
+
 func TestRunnerRejectsInvalidCWDAndArgs(t *testing.T) {
 	runner := NewRunner(writeOCRScript(t))
 	for _, request := range []Request{

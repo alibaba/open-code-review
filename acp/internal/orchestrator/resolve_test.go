@@ -87,6 +87,28 @@ func TestProbeVersionRejectsOutputLimitAndTimeout(t *testing.T) {
 	}
 }
 
+func TestResolveBinaryContinuesAfterVersionProbeFailure(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		content string
+	}{
+		{name: "nonzero", content: "#!/bin/sh\necho unsupported >&2\nexit 7\n"},
+		{name: "output limit", content: "#!/bin/sh\nawk 'BEGIN { for (i = 0; i < 2048; i++) printf \"x\" }'\n"},
+		{name: "timeout", content: "#!/bin/sh\nsleep 10\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			binary := writeExecutable(t, t.TempDir(), "ocr", test.content)
+			resolved, err := ResolveBinary(ResolveOptions{Explicit: binary, Version: true, VersionTimeout: 20 * time.Millisecond})
+			if err != nil {
+				t.Fatalf("ResolveBinary: %v", err)
+			}
+			if resolved.Path != binary || resolved.Version != "unknown" || resolved.VersionWarning == "" {
+				t.Fatalf("resolved = %+v", resolved)
+			}
+		})
+	}
+}
+
 func writeExecutable(t *testing.T, directory, name, content string) string {
 	t.Helper()
 	path := filepath.Join(directory, name)

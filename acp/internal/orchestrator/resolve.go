@@ -27,11 +27,14 @@ type ResolveOptions struct {
 }
 
 // ResolvedBinary is a fixed absolute executable path and its optional version
-// probe output. Source identifies which configuration won discovery.
+// probe output. Source identifies which configuration won discovery. A probe
+// failure records VersionWarning but does not make an otherwise runnable OCR
+// binary unavailable.
 type ResolvedBinary struct {
-	Path    string
-	Source  string
-	Version string
+	Path           string
+	Source         string
+	Version        string
+	VersionWarning string
 }
 
 // ResolveBinary discovers and validates OCR exactly once. An invalid explicit
@@ -89,7 +92,9 @@ func ResolveBinary(opts ResolveOptions) (ResolvedBinary, error) {
 		}
 		version, err := probeVersion(path, timeout)
 		if err != nil {
-			return ResolvedBinary{}, newError(ErrorStart, "probe OCR version for %s (%q): %v", source, path, err)
+			resolved.Version = "unknown"
+			resolved.VersionWarning = fmt.Sprintf("OCR version probe for %s failed: %v", source, err)
+			return resolved, nil
 		}
 		resolved.Version = version
 	}
