@@ -79,16 +79,9 @@ func (p *Parser) applyRaw(ctx context.Context, st *State, raw *rawIntent) (Resul
 			return RejectResult("the LLM returned action review without a review object",
 				"Try again, or use /review."), nil
 		}
-		s := &pendingSlots{action: actionReview, extra: append([]string(nil), raw.Extra...)}
+		s := mergeReviewSlots(slotsFromState(st), raw)
 		switch raw.Review.Type {
-		case reviewWorkspace:
-			s.reviewType = reviewWorkspace
-		case reviewRange:
-			s.reviewType = reviewRange
-			s.from, s.to = raw.Review.From, raw.Review.To
-		case reviewCommit:
-			s.reviewType = reviewCommit
-			s.commit = raw.Review.Commit
+		case reviewWorkspace, reviewRange, reviewCommit:
 		default:
 			p.clearPending(st)
 			return RejectResult("the LLM returned an unknown review type: "+raw.Review.Type,
@@ -117,6 +110,8 @@ func (p *Parser) applyRaw(ctx context.Context, st *State, raw *rawIntent) (Resul
 		}
 		if partial := slotsFromRaw(raw); partial != nil {
 			p.storePending(st, partial, raw.Missing)
+		} else {
+			p.clearPending(st)
 		}
 		return ClarifyResult(raw.Question, raw.Missing...), nil
 
@@ -134,6 +129,35 @@ func (p *Parser) applyRaw(ctx context.Context, st *State, raw *rawIntent) (Resul
 		return RejectResult("the LLM returned an unknown action: "+raw.Action,
 			"Try again, or use /review or /scan."), nil
 	}
+}
+
+func mergeReviewSlots(prev *pendingSlots, raw *rawIntent) *pendingSlots {
+	s := &pendingSlots{action: actionReview, extra: append([]string(nil), raw.Extra...)}
+	if raw.Review.Type == reviewRange {
+		s.reviewType = reviewRange
+		s.from, s.to = raw.Review.From, raw.Review.To
+	} else if raw.Review.Type == reviewCommit {
+		s.reviewType = raw.Review.Type
+		s.commit = raw.Review.Commit
+	} else {
+		s.reviewType = raw.Review.Type
+	}
+	if prev == nil || prev.action != actionReview || prev.reviewType != s.reviewType || s.reviewType == reviewWorkspace {
+		return s
+	}
+	if s.from == "" {
+		s.from = prev.from
+	}
+	if s.to == "" {
+		s.to = prev.to
+	}
+	if s.commit == "" {
+		s.commit = prev.commit
+	}
+	if raw.Extra == nil {
+		s.extra = append([]string(nil), prev.extra...)
+	}
+	return s
 }
 
 // slotsFromRaw preserves whatever partial slots a clarify call carried so the

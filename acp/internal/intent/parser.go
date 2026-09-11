@@ -165,7 +165,13 @@ func (p *Parser) finalizeReview(ctx context.Context, st *State, s *pendingSlots)
 	}
 
 	if len(missing) > 0 {
-		s.reviewType = reviewRange
+		if s.reviewType == "" {
+			if missing[0] == "commit" {
+				s.reviewType = reviewCommit
+			} else {
+				s.reviewType = reviewRange
+			}
+		}
 		p.storePending(st, s, missing)
 		return ClarifyResult(reviewClarifyQuestion(missing), missing...), nil
 	}
@@ -214,6 +220,9 @@ func reviewClarifyQuestion(missing []string) string {
 	}
 	if missing[0] == "from" {
 		return "Which base ref should I compare from? Add --from <ref>."
+	}
+	if missing[0] == "commit" {
+		return "Which commit should I review? Add --commit <sha>."
 	}
 	return "Which head ref should I compare to? Add --to <ref>."
 }

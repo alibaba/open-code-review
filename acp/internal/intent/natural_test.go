@@ -93,13 +93,60 @@ func TestNaturalClarifyWithoutPartialSlots(t *testing.T) {
 	reply := `{"action":"clarify","question":"What should I review?"}`
 	p := newTestParser(&fakeLLM{call: intentCall(t, reply)}, nil)
 	st := NewState()
+	st.setPending(&Pending{Action: actionReview, ReviewType: reviewRange, From: "main", Missing: []string{"to"}})
 	r, err := p.Parse(context.Background(), "do the thing", st)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	requireClarify(t, r)
 	if st.Pending() != nil {
-		t.Fatalf("pending should stay nil, got %+v", st.Pending())
+		t.Fatalf("pending should be cleared, got %+v", st.Pending())
+	}
+}
+
+func TestNaturalFollowUpMergesPendingSlots(t *testing.T) {
+	llm := &fakeLLM{call: intentCall(t, `{"action":"clarify","question":"Which head ref?","missing":["to"],"review":{"type":"range","from":"main"}}`)}
+	p := newTestParser(llm, nil)
+	st := NewState()
+	if r, _ := p.Parse(context.Background(), "compare branches", st); r.Kind != KindClarify {
+		t.Fatalf("first parse = %+v", r)
+	}
+	llm.call = intentCall(t, `{"action":"review","review":{"type":"range","to":"feature"}}`)
+	r, err := p.Parse(context.Background(), "feature", st)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"review", "--from", "main", "--to", "feature", "--format", "json", "--audience", "human", "--color", "never"}
+	if got := requireIntent(t, r); !equalArgs(got, want) {
+		t.Fatalf("argv = %v, want %v", got, want)
+	}
+	if st.Pending() != nil {
+		t.Fatalf("pending not cleared after completion: %+v", st.Pending())
+	}
+}
+
+func TestNaturalCommitClarificationPreservesTypeAndQuestion(t *testing.T) {
+	llm := &fakeLLM{call: intentCall(t, `{"action":"review","review":{"type":"commit"}}`)}
+	p := newTestParser(llm, nil)
+	st := NewState()
+	r, err := p.Parse(context.Background(), "review a commit", st)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	c := requireClarify(t, r, "commit")
+	if c.Question != "Which commit should I review? Add --commit <sha>." {
+		t.Fatalf("question = %q", c.Question)
+	}
+	if pending := st.Pending(); pending == nil || pending.ReviewType != reviewCommit {
+		t.Fatalf("pending = %+v", pending)
+	}
+	llm.call = intentCall(t, `{"action":"review","review":{"type":"commit","commit":"abc1234"}}`)
+	r, err = p.Parse(context.Background(), "abc1234", st)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if r.Review == nil || r.Review.Commit != "abc1234" || st.Pending() != nil {
+		t.Fatalf("unexpected result or pending: %+v / %+v", r.Review, st.Pending())
 	}
 }
 
