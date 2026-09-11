@@ -33,6 +33,12 @@ OpenCodeReview currently provides:
   PyCharm, and other JetBrains IDEs with the same capabilities as the
   existing VSCode extension.
 
+### Agent Client Protocol (ACP)
+
+- **ACP server adapter** — Expose OpenCodeReview as a specialized review
+  agent for Paseo and other ACP-compatible clients, while keeping the
+  protocol integration decoupled from the core review engine.
+
 ### Delegate Mode
 
 - **Subscription-friendly review** — An opt-in mode where `ocr` no longer
