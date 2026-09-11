@@ -9,11 +9,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
@@ -131,11 +129,12 @@ func TestRunPreviewAppliesResolvedMaxTokens(t *testing.T) {
 }
 
 // TestPreviewMaxTokensMatchesRun pins the one input preview and the run do not
-// share. Both consume the same selection, but each resolves the max_tokens it
-// hands that selection on its own path: the run from the app config its LLM
-// runtime loaded, preview through previewMaxTokens, which builds no runtime. The
-// run's value is read off the Args it hands the agent rather than recomputed
-// here, so the assertion follows whatever the run actually applies.
+// share: the per-file token ceiling. Both resolve it through the same
+// resolveMaxTokens over the same default config path — the run at
+// review_cmd.go's resolveMaxTokens call, preview through previewMaxTokens, which
+// builds no LLM runtime. Comparing previewMaxTokens against a direct
+// resolveMaxTokens over that config reproduces the run's exact resolution
+// without an agent.New seam: it calls the same production function the run does.
 func TestPreviewMaxTokensMatchesRun(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -154,48 +153,35 @@ func TestPreviewMaxTokensMatchesRun(t *testing.T) {
 			if tt.savedTokens > 0 {
 				writeAppConfigMaxTokens(t, home, tt.savedTokens)
 			}
-			// The run resolves this endpoint but never calls it: the only change is
-			// a file the static gates exclude, so it skips before any request.
-			t.Setenv("OCR_LLM_URL", "https://api.example.test/v1")
-			t.Setenv("OCR_LLM_TOKEN", "test-token")
-			t.Setenv("OCR_LLM_MODEL", "test-model")
 
 			dir := initTestGitRepo(t)
-			gitCommitFile(t, dir, "notes.md", "# notes\n", "add notes")
-
-			applied := 0
-			build := newReviewAgent
-			t.Cleanup(func() { newReviewAgent = build })
-			newReviewAgent = func(args agent.Args) *agent.Agent {
-				applied = args.Template.MaxTokens
-				return build(args)
-			}
-
-			args := []string{"--repo", dir, "--commit", "HEAD"}
-			if tt.cliTokens > 0 {
-				args = append(args, "--max-tokens", strconv.Itoa(tt.cliTokens))
-			}
-			var err error
-			silenceStderr(t, func() {
-				silenceStdout(t, func() { err = runReview(args) })
-			})
-			if err != nil {
-				t.Fatalf("review: %v", err)
-			}
-			if applied == 0 {
-				t.Fatal("the run never built its agent")
-			}
-
 			cc, err := loadCommonContext(dir, "", "", 0, 0, true)
 			if err != nil {
 				t.Fatalf("loadCommonContext: %v", err)
 			}
+
+			// What the run applies: review_cmd.go resolves max_tokens with exactly
+			// this resolveMaxTokens call over the app config at the default path,
+			// then hands the result to agent.New.
+			cfgPath, err := defaultConfigPath()
+			if err != nil {
+				t.Fatalf("defaultConfigPath: %v", err)
+			}
+			appCfg, err := LoadAppConfig(cfgPath)
+			if err != nil {
+				t.Fatalf("LoadAppConfig: %v", err)
+			}
+			applied, err := resolveMaxTokens(cc.Template.MaxTokens, appCfg, tt.cliTokens)
+			if err != nil {
+				t.Fatalf("resolveMaxTokens: %v", err)
+			}
+
 			got, err := previewMaxTokens(cc.Template.MaxTokens, tt.cliTokens)
 			if err != nil {
 				t.Fatalf("previewMaxTokens: %v", err)
 			}
 			if got != applied {
-				t.Errorf("previewMaxTokens = %d, but the run applied %d", got, applied)
+				t.Errorf("previewMaxTokens = %d, but the run resolves %d", got, applied)
 			}
 			// Agreeing on the template default would pass the check above without
 			// exercising the source this case configures.

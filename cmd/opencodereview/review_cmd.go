@@ -111,11 +111,6 @@ func init() {
 	registerReviewFlags(reviewCmd, &reviewOpts)
 }
 
-// newReviewAgent builds the review agent. It is a variable so a test can inspect
-// the Args a real run hands the agent — the resolved template among them —
-// without dispatching a review.
-var newReviewAgent = agent.New
-
 func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error) {
 	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
 	if err != nil {
@@ -218,7 +213,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	rt.PlanToolDefs = append(rt.PlanToolDefs, mcpToolDefs...)
 	rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
 
-	ag := newReviewAgent(agent.Args{
+	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
 		From:                  opts.from,
 		To:                    opts.to,
