@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +19,11 @@ const (
 	ReviewTypeRange     ReviewType = "range"
 	ReviewTypeCommit    ReviewType = "commit"
 )
+
+// fixedArgs are the integration flags the adapter owns. They are appended last
+// because flag parsing is last-wins, so a flag that slipped past the whitelist
+// still could not override them.
+var fixedArgs = []string{"--format", "json", "--audience", "human", "--color", "never"}
 
 // ReviewIntent represents a structured review request.
 type ReviewIntent struct {
@@ -79,12 +85,24 @@ var scanExtraFlags = map[string]extraFlagSpec{
 // Returns error if intent is invalid, required fields are missing, or Extra
 // contains a flag outside reviewExtraFlags.
 func BuildReviewArgs(intent *ReviewIntent) ([]string, error) {
+	if intent == nil {
+		return nil, fmt.Errorf("review intent is nil")
+	}
+
 	args := []string{"review"}
 
 	switch intent.Type {
 	case ReviewTypeWorkspace:
-		// No additional arguments for workspace review
+		// Workspace is the default mode; the range and commit fields are
+		// mutually exclusive with it, so a caller that sets them has a bug
+		// rather than a request to silently widen the scope.
+		if intent.From != "" || intent.To != "" || intent.Commit != "" {
+			return nil, fmt.Errorf("workspace review must not set from, to or commit")
+		}
 	case ReviewTypeRange:
+		if intent.Commit != "" {
+			return nil, fmt.Errorf("range review must not set commit")
+		}
 		if intent.From == "" && intent.To == "" {
 			return nil, fmt.Errorf("range review requires both --from and --to")
 		} else if intent.From == "" {
@@ -94,6 +112,9 @@ func BuildReviewArgs(intent *ReviewIntent) ([]string, error) {
 		}
 		args = append(args, "--from", intent.From, "--to", intent.To)
 	case ReviewTypeCommit:
+		if intent.From != "" || intent.To != "" {
+			return nil, fmt.Errorf("commit review must not set from or to")
+		}
 		if intent.Commit == "" {
 			return nil, fmt.Errorf("commit review requires --commit")
 		}
@@ -106,11 +127,7 @@ func BuildReviewArgs(intent *ReviewIntent) ([]string, error) {
 		return nil, err
 	}
 	args = append(args, intent.Extra...)
-
-	// Fixed flags for ACP integration, appended last. Flag parsing is
-	// last-wins, so even a flag that slipped past the whitelist could not
-	// override these.
-	args = append(args, "--format", "json", "--audience", "human", "--color", "never")
+	args = append(args, fixedArgs...)
 
 	return args, nil
 }
@@ -119,26 +136,35 @@ func BuildReviewArgs(intent *ReviewIntent) ([]string, error) {
 // Returns error if a path escapes the scan root or Extra contains a flag
 // outside scanExtraFlags.
 func BuildScanArgs(intent *ScanIntent) ([]string, error) {
+	if intent == nil {
+		return nil, fmt.Errorf("scan intent is nil")
+	}
+
 	args := []string{"scan"}
 
-	// Add paths if specified
-	for _, p := range intent.Paths {
-		cleaned, err := normalizePath(p)
-		if err != nil {
-			return nil, err
+	if len(intent.Paths) > 0 {
+		cleaned := make([]string, 0, len(intent.Paths))
+		for _, p := range intent.Paths {
+			c, err := normalizePath(p)
+			if err != nil {
+				return nil, err
+			}
+			cleaned = append(cleaned, c)
 		}
-		args = append(args, "--path", cleaned)
+		// The OCR CLI's --path is a single comma-separated string, not a
+		// repeatable flag: pflag keeps only the last occurrence of a scalar
+		// flag, so one --path per element would silently drop every path
+		// except the last. Joining is safe only because normalizePath
+		// rejects any element containing a comma; removing that check would
+		// let two paths merge into one.
+		args = append(args, "--path", strings.Join(cleaned, ","))
 	}
 
 	if err := validateExtra(intent.Extra, scanExtraFlags); err != nil {
 		return nil, err
 	}
 	args = append(args, intent.Extra...)
-
-	// Fixed flags for ACP integration, appended last. Flag parsing is
-	// last-wins, so even a flag that slipped past the whitelist could not
-	// override these.
-	args = append(args, "--format", "json", "--audience", "human", "--color", "never")
+	args = append(args, fixedArgs...)
 
 	return args, nil
 }
@@ -172,7 +198,15 @@ func validateExtra(extra []string, allowed map[string]extraFlagSpec) error {
 		}
 
 		if !spec.takesValue {
-			// Boolean flags accept a bare form or an explicit --flag=true.
+			// Boolean flags accept a bare form or an explicit --flag=<value>.
+			// pflag parses that value with strconv.ParseBool (see pflag's
+			// boolConv), so validate with the same function to match the CLI
+			// exactly rather than guessing a narrower grammar.
+			if hasInlineValue {
+				if _, err := strconv.ParseBool(value); err != nil {
+					return fmt.Errorf("flag %s: invalid boolean value %q", name, value)
+				}
+			}
 			continue
 		}
 
@@ -209,6 +243,9 @@ func normalizePath(p string) (string, error) {
 	// filepath.IsAbs does not recognise Windows drive letters on Unix.
 	if len(p) >= 2 && p[1] == ':' && isASCIILetter(p[0]) {
 		return "", fmt.Errorf("absolute path not allowed: %s", p)
+	}
+	if strings.Contains(p, ",") {
+		return "", fmt.Errorf("path must not contain a comma (--path is comma-separated): %s", p)
 	}
 
 	unified := strings.ReplaceAll(p, `\`, "/")

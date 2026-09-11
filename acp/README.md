@@ -58,6 +58,12 @@ make english-check
 found without editing `PATH`. When the binary is genuinely absent it prints a
 notice and skips it — it never reports a pass for a check it did not run.
 
+A present-but-useless `staticcheck` is also a failure, not a pass: if it
+reports `matched no packages` it analyzed nothing, which usually happens when
+the binary is newer than the active Go toolchain. `staticcheck` 0.8.x needs a
+Go >= 1.26 toolchain while this module declares `go 1.23`, so CI pins a
+`golang:1.26.6` container for exactly that reason.
+
 ### CI
 
 `acp/` is a nested Go module, and the root `ci.yml` resolves its package list
@@ -71,8 +77,8 @@ Its `pull_request` trigger deliberately has no `branches:` filter, so it also
 runs for pull requests into an integration branch rather than only `main`.
 
 Because `make check` skips a missing staticcheck, the workflow asserts
-`staticcheck -version` succeeds before calling it; otherwise the job could go
-green having never run the analyser.
+`staticcheck -version` succeeds before calling it, and `make check` itself now
+fails if the analyser reports `matched no packages`.
 
 ### Build
 
@@ -112,9 +118,13 @@ Everything else is rejected, including the integration flags the adapter owns
 
 ### Result types
 
-`ReviewResult` and `ScanResult` model the JSON documents. `Comment.Severity`
-is an open set: only `error`, `warning` and `info` have been observed, but
-consumers must tolerate unknown values rather than fail on them.
+`ReviewResult`, `ScanResult`, `Summary`, `Comment` and `Manifest` mirror the
+real `ocr --format json` envelope (`jsonOutput` plus `model.LlmComment`):
+`summary` is an object, a finding carries `content`/`start_line`/`end_line`,
+and `start_line == end_line == 0` means a file-level comment. Per-comment
+`thinking` is deliberately not modeled, so reasoning cannot leak by accident.
+`Comment.Severity` and the `status` string are open sets: the observed values
+are declared as `Status*` constants, but consumers must tolerate unknown ones.
 
 ## Mock OCR
 
@@ -131,15 +141,23 @@ go build -o testdata/mock-ocr/mock-ocr ./testdata/mock-ocr/
 
 `-scenario` defaults to `success-review`, so running the binary bare works.
 
+All scenarios emit the real CLI JSON envelope (`status`, `message`, `summary`
+object, `comments` with `content`/`start_line`/`end_line`, `manifest`), not the
+adapter's DTO.
+
 - `success-review`: Normal review with findings (default)
-- `success-scan`: Normal scan with findings
-- `partial`: Partial results (timeout simulation)
-- `empty-comments`: No findings
-- `stderr-pollution`: Noise on stderr alongside a valid stdout document
+- `success-scan`: Normal scan with findings (status `success`, no manifest)
+- `partial`: Partial results with a failed coverage entry (timeout simulation)
+- `empty-comments`: No findings; emits `"comments":[]`
+- `stderr-pollution`: Noise and a second JSON document on stderr alongside a
+  valid stdout document
 - `invalid-json`: Malformed JSON output
-- `non-zero-exit`: Failure reported in the document with a non-zero exit code
-- `block-for-cancel`: Prints `READY` to stderr, blocks, then emits a partial
-  result on SIGINT/SIGTERM
+- `non-zero-exit`: `status: failed`, `"comments":null`, a failed manifest and
+  exit code 1
+- `block-for-cancel`: Prints `READY` to stderr, blocks, then on SIGINT/SIGTERM
+  emits a failed document whose `manifest.run_failure.classification` and
+  `coverage.failed[].classification` are `cancelled`, and exits 1 to mirror the
+  real CLI (which has no dedicated cancellation exit code)
 - `spawn-child`: **Placeholder.** It does not actually fork a child process;
   the name overstates what it does and it is not yet usable for testing
   signal propagation to grandchildren
@@ -163,13 +181,22 @@ the mock exits 130 without writing a result.
 ### Contract tests
 
 `internal/contract/mock_contract_test.go` builds the mock and decodes its real
-stdout into the contract types, so the test double and the contract cannot
-drift apart silently. It also covers the cancellation path by signalling the
-mock and asserting on the result.
+stdout into the contract types, asserting the decoded field values (content,
+line numbers, summary, manifest classifications) rather than just counts.
+
+`internal/contract/real_cli_test.go` adds two more layers:
+
+- deterministic fixtures of the real CLI shape (summary object, unknown
+  fields, `thinking`) that fail if the DTO drifts from the documented output;
+- `TestRealOCRBinaryScanMultiplePaths`, an opt-in integration test. Set
+  `OCR_BINARY` to run the adapter's own argv against a real binary:
+  `OCR_BINARY=../dist/opencodereview go test ./internal/contract/`. It pins the
+  `--path` comma-joining rule end to end (a repeated `--path` would silently
+  scan only the last path).
 
 ## Design Documents
 
-All phase documents are in `temp/` (git-ignored):
+All phase documents are under `temp/archive/` (git-ignored):
 
 - `OpenCodeReview ACP 阶段一调研文档.md`
 - `OpenCodeReview ACP 阶段二总体设计.md`
@@ -179,8 +206,11 @@ All phase documents are in `temp/` (git-ignored):
 
 ## Dependencies
 
-- Go 1.23+ (this module). Note the parent OCR module declares `go 1.25.5`;
-  the divergence is intentional for now but is scheduled to be revisited.
+- Go 1.23+ to build this module (its `go` directive), but the `staticcheck`
+  version CI pins (0.8.x) needs a Go >= 1.26 toolchain, so run `make check` on
+  Go 1.26+ or expect its staticcheck step to fail fast rather than pass
+  vacuously. The parent OCR module declares `go 1.25.5`; aligning the three is
+  still pending.
 - OCR CLI (external dependency, not imported as library)
 - ACP Go SDK v0.13.5 (to be added in phase 6)
 

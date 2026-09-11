@@ -2,9 +2,9 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 // These tests run the mock OCR binary and decode its real stdout into the
-// contract types. They exist to stop the test double and the contract from
-// drifting apart: a struct tag typo or a renamed JSON field on either side
-// fails here instead of silently producing empty results at runtime.
+// contract types. The mock mirrors the real OCR CLI JSON envelope, so a DTO
+// that drifts from the CLI fails here. Assertions cover the field values that
+// matter (content/start_line/end_line/summary/manifest), not just counts.
 package contract_test
 
 import (
@@ -80,34 +80,89 @@ func decodeReview(t *testing.T, stdout string) contract.ReviewResult {
 	return result
 }
 
-func TestMockReviewScenariosMatchContract(t *testing.T) {
-	tests := []struct {
-		scenario     string
-		wantStatus   string
-		wantComments int
-	}{
-		{"success-review", "completed", 2},
-		{"partial", "partial", 1},
-		{"empty-comments", "completed", 0},
-		// stderr pollution must not leak into the stdout JSON document.
-		{"stderr-pollution", "completed", 1},
+func TestMockSuccessReviewDecodesEveryField(t *testing.T) {
+	stdout, code := runMock(t, "-scenario", "success-review")
+	if code != 0 {
+		t.Fatalf("mock-ocr -scenario success-review exited %d, want 0", code)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.scenario, func(t *testing.T) {
-			stdout, code := runMock(t, "-scenario", tt.scenario)
-			if code != 0 {
-				t.Fatalf("mock-ocr -scenario %s exited %d, want 0", tt.scenario, code)
-			}
+	result := decodeReview(t, stdout)
+	if result.Status != contract.StatusComplete {
+		t.Errorf("Status = %q, want %q", result.Status, contract.StatusComplete)
+	}
+	if result.Summary == nil {
+		t.Fatal("Summary = nil, want the decoded summary object")
+	}
+	if result.Summary.FilesReviewed != 1 || result.Summary.Comments != 2 || result.Summary.TotalTokens != 18746 {
+		t.Errorf("Summary = %+v, want files_reviewed=1 comments=2 total_tokens=18746", *result.Summary)
+	}
+	if len(result.Comments) != 2 {
+		t.Fatalf("len(Comments) = %d, want 2", len(result.Comments))
+	}
 
-			result := decodeReview(t, stdout)
-			if result.Status != tt.wantStatus {
-				t.Errorf("Status = %q, want %q", result.Status, tt.wantStatus)
-			}
-			if len(result.Comments) != tt.wantComments {
-				t.Errorf("len(Comments) = %d, want %d", len(result.Comments), tt.wantComments)
-			}
-		})
+	first := result.Comments[0]
+	if first.Path != "internal/agent/agent.go" || first.Content != "Potential nil dereference on the error path." {
+		t.Errorf("first comment = %+v", first)
+	}
+	if first.StartLine != 42 || first.EndLine != 42 {
+		t.Errorf("first comment lines = %d-%d, want 42-42", first.StartLine, first.EndLine)
+	}
+	if first.Category != "bug" || first.Severity != "warning" {
+		t.Errorf("first comment category/severity = %q/%q", first.Category, first.Severity)
+	}
+
+	second := result.Comments[1]
+	if second.StartLine != 0 || second.EndLine != 0 {
+		t.Errorf("file-level comment lines = %d-%d, want 0-0", second.StartLine, second.EndLine)
+	}
+	if second.SuggestionCode != "+return err" || second.ExistingCode != "return nil" {
+		t.Errorf("second comment suggestion/existing = %q/%q", second.SuggestionCode, second.ExistingCode)
+	}
+
+	if result.Manifest == nil || result.Manifest.TerminalState != "complete" {
+		t.Errorf("Manifest = %+v, want terminal_state=complete", result.Manifest)
+	}
+}
+
+func TestMockPartialCarriesCoverageFailure(t *testing.T) {
+	stdout, code := runMock(t, "-scenario", "partial")
+	if code != 0 {
+		t.Fatalf("mock-ocr -scenario partial exited %d, want 0", code)
+	}
+	result := decodeReview(t, stdout)
+	if result.Status != contract.StatusPartial {
+		t.Errorf("Status = %q, want %q", result.Status, contract.StatusPartial)
+	}
+	if result.Manifest == nil || result.Manifest.Coverage == nil || len(result.Manifest.Coverage.Failed) != 1 {
+		t.Fatalf("Manifest = %+v, want one failed coverage item", result.Manifest)
+	}
+	if got := result.Manifest.Coverage.Failed[0].Classification; got != "timeout" {
+		t.Errorf("coverage failure classification = %q, want timeout", got)
+	}
+}
+
+func TestMockEmptyCommentsEmitsArray(t *testing.T) {
+	stdout, code := runMock(t, "-scenario", "empty-comments")
+	if code != 0 {
+		t.Fatalf("mock-ocr -scenario empty-comments exited %d, want 0", code)
+	}
+	if !strings.Contains(stdout, `"comments":[]`) {
+		t.Errorf("stdout should contain an empty comments array, got %q", stdout)
+	}
+	result := decodeReview(t, stdout)
+	if result.Status != contract.StatusComplete || len(result.Comments) != 0 {
+		t.Errorf("result = %+v, want complete with no comments", result)
+	}
+}
+
+func TestMockStderrPollutionDoesNotLeak(t *testing.T) {
+	stdout, code := runMock(t, "-scenario", "stderr-pollution")
+	if code != 0 {
+		t.Fatalf("mock-ocr -scenario stderr-pollution exited %d, want 0", code)
+	}
+	result := decodeReview(t, stdout)
+	if result.Status != contract.StatusComplete || len(result.Comments) != 1 {
+		t.Errorf("result = %+v, want complete with 1 comment", result)
 	}
 }
 
@@ -121,11 +176,17 @@ func TestMockScanScenarioMatchesContract(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("mock stdout does not decode into contract.ScanResult: %v\nstdout: %q", err, stdout)
 	}
-	if result.Status != "completed" {
-		t.Errorf("Status = %q, want %q", result.Status, "completed")
+	if result.Status != contract.StatusSuccess {
+		t.Errorf("Status = %q, want %q", result.Status, contract.StatusSuccess)
+	}
+	if result.Summary == nil || result.Summary.FilesReviewed != 2 {
+		t.Errorf("Summary = %+v, want files_reviewed=2", result.Summary)
 	}
 	if len(result.Comments) != 1 {
-		t.Errorf("len(Comments) = %d, want 1", len(result.Comments))
+		t.Fatalf("len(Comments) = %d, want 1", len(result.Comments))
+	}
+	if c := result.Comments[0]; c.Path != "cmd/main.go" || c.Content != "Unused import." || c.StartLine != 10 || c.Severity != "info" {
+		t.Errorf("comment = %+v", c)
 	}
 }
 
@@ -136,10 +197,8 @@ func TestMockDefaultScenarioSucceeds(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("mock-ocr with no arguments exited %d, want 0", code)
 	}
-
-	result := decodeReview(t, stdout)
-	if result.Status != "completed" {
-		t.Errorf("Status = %q, want %q", result.Status, "completed")
+	if result := decodeReview(t, stdout); result.Status != contract.StatusComplete {
+		t.Errorf("Status = %q, want %q", result.Status, contract.StatusComplete)
 	}
 }
 
@@ -150,10 +209,12 @@ func TestMockNonZeroExitStillDecodes(t *testing.T) {
 	if code == 0 {
 		t.Fatal("mock-ocr -scenario non-zero-exit exited 0, want non-zero")
 	}
-
 	result := decodeReview(t, stdout)
-	if result.Status != "failed" {
-		t.Errorf("Status = %q, want %q", result.Status, "failed")
+	if result.Status != contract.StatusFailed {
+		t.Errorf("Status = %q, want %q", result.Status, contract.StatusFailed)
+	}
+	if result.Comments != nil {
+		t.Errorf("Comments = %v, want nil (null in JSON)", result.Comments)
 	}
 }
 
@@ -171,10 +232,11 @@ func TestMockInvalidJSONDoesNotDecode(t *testing.T) {
 	}
 }
 
-// TestMockCancelEmitsPartialResult drives the cancellation path: wait for the
-// READY marker on stderr, send SIGINT, then check the contract the adapter
-// will rely on when a review is cancelled.
-func TestMockCancelEmitsPartialResult(t *testing.T) {
+// TestMockCancelReportsCancelledManifest drives the cancellation path: wait for
+// the READY marker on stderr, send SIGINT, then check the real cancellation
+// contract. The real CLI has no dedicated cancel exit code, so the adapter
+// must rely on the manifest classifications rather than the exit status.
+func TestMockCancelReportsCancelledManifest(t *testing.T) {
 	cmd := exec.Command(mockBin, "-scenario", "block-for-cancel")
 
 	stderr, err := cmd.StderrPipe()
@@ -220,12 +282,26 @@ func TestMockCancelEmitsPartialResult(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("reading stdout: %v", readErr)
 	}
-	if waitErr != nil {
-		t.Fatalf("mock-ocr exited non-zero after cancellation: %v", waitErr)
+	// Cancellation exits non-zero in the real CLI; the adapter must not treat
+	// that alone as failure, which is why the manifest is asserted below.
+	if waitErr == nil {
+		t.Error("cancelled mock exited 0, want non-zero (mirrors the real CLI)")
 	}
 
 	result := decodeReview(t, string(out))
-	if result.Status != "partial" {
-		t.Errorf("Status after cancellation = %q, want %q", result.Status, "partial")
+	if result.Status != contract.StatusFailed {
+		t.Errorf("Status after cancel = %q, want %q", result.Status, contract.StatusFailed)
+	}
+	if result.Manifest == nil || result.Manifest.RunFailure == nil {
+		t.Fatalf("Manifest = %+v, want a run_failure", result.Manifest)
+	}
+	if got := result.Manifest.RunFailure.Classification; got != "cancelled" {
+		t.Errorf("run_failure.classification = %q, want cancelled", got)
+	}
+	if result.Manifest.Coverage == nil || len(result.Manifest.Coverage.Failed) != 1 {
+		t.Fatalf("coverage = %+v, want one failed item", result.Manifest.Coverage)
+	}
+	if got := result.Manifest.Coverage.Failed[0].Classification; got != "cancelled" {
+		t.Errorf("coverage.failed[0].classification = %q, want cancelled", got)
 	}
 }

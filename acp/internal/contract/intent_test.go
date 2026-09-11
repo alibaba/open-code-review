@@ -119,11 +119,11 @@ func TestBuildScanArgs(t *testing.T) {
 			want: []string{"scan", "--path", "internal/agent", "--format", "json", "--audience", "human", "--color", "never"},
 		},
 		{
-			name: "scan multiple paths",
+			name: "scan multiple paths are comma-joined into one --path",
 			intent: ScanIntent{
 				Paths: []string{"cmd", "internal"},
 			},
-			want: []string{"scan", "--path", "cmd", "--path", "internal", "--format", "json", "--audience", "human", "--color", "never"},
+			want: []string{"scan", "--path", "cmd,internal", "--format", "json", "--audience", "human", "--color", "never"},
 		},
 		{
 			name: "reject absolute path",
@@ -182,6 +182,13 @@ func TestBuildScanArgs(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "reject comma in path",
+			intent: ScanIntent{
+				Paths: []string{"a,b"},
+			},
+			wantErr: true,
+		},
+		{
 			name: "scan with extra flags",
 			intent: ScanIntent{
 				Extra: []string{"--batch", "by-language"},
@@ -218,6 +225,7 @@ func TestBuildReviewArgsExtraWhitelist(t *testing.T) {
 		{"effort missing value", []string{"--effort"}, true},
 		{"boolean no-filter", []string{"--no-filter"}, false},
 		{"boolean no-filter inline", []string{"--no-filter=true"}, false},
+		{"boolean no-filter invalid inline", []string{"--no-filter=maybe"}, true},
 		{"background with value", []string{"--background", "review the auth path"}, false},
 		{"background-file with value", []string{"--background-file", "spec.md"}, false},
 		// A value that looks like a flag is rejected rather than consumed, so a
@@ -307,5 +315,53 @@ func TestBuildScanArgsExtraWhitelist(t *testing.T) {
 				t.Errorf("BuildScanArgs(Extra=%v) error = %v, wantErr %v", tt.extra, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestBuildReviewArgsRejectsNilAndContradictory pins the mode exclusivity: a
+// workspace intent must not carry range/commit fields, and vice versa. Silent
+// tolerance here would hide a caller bug that changes the review scope.
+func TestBuildReviewArgsRejectsNilAndContradictory(t *testing.T) {
+	if _, err := BuildReviewArgs(nil); err == nil {
+		t.Error("BuildReviewArgs(nil) = nil error, want error")
+	}
+
+	tests := []struct {
+		name   string
+		intent ReviewIntent
+	}{
+		{"workspace with commit", ReviewIntent{Type: ReviewTypeWorkspace, Commit: "abc"}},
+		{"workspace with from", ReviewIntent{Type: ReviewTypeWorkspace, From: "main"}},
+		{"range with commit", ReviewIntent{Type: ReviewTypeRange, From: "main", To: "feature", Commit: "abc"}},
+		{"commit with from", ReviewIntent{Type: ReviewTypeCommit, Commit: "abc", From: "main"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := BuildReviewArgs(&tt.intent); err == nil {
+				t.Errorf("BuildReviewArgs(%+v) = nil error, want error", tt.intent)
+			}
+		})
+	}
+}
+
+func TestBuildScanArgsRejectsNil(t *testing.T) {
+	if _, err := BuildScanArgs(nil); err == nil {
+		t.Error("BuildScanArgs(nil) = nil error, want error")
+	}
+}
+
+// TestValidateExtraRejectsInvalidBooleanValues checks that an inline boolean
+// value is only accepted when strconv.ParseBool accepts it, mirroring pflag.
+func TestValidateExtraRejectsInvalidBooleanValues(t *testing.T) {
+	if _, err := BuildReviewArgs(&ReviewIntent{Type: ReviewTypeWorkspace, Extra: []string{"--no-filter=not-a-bool"}}); err == nil {
+		t.Error("review --no-filter=not-a-bool accepted, want error")
+	}
+	if _, err := BuildScanArgs(&ScanIntent{Extra: []string{"--no-plan=maybe"}}); err == nil {
+		t.Error("scan --no-plan=maybe accepted, want error")
+	}
+	for _, ok := range []string{"--no-filter=true", "--no-filter=false", "--no-filter=1", "--no-filter=0"} {
+		if _, err := BuildReviewArgs(&ReviewIntent{Type: ReviewTypeWorkspace, Extra: []string{ok}}); err != nil {
+			t.Errorf("review %s rejected: %v", ok, err)
+		}
 	}
 }

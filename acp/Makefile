@@ -23,11 +23,19 @@ check: license-check english-check
 	fi
 	LC_ALL=C go vet ./...
 	@sc=$$(command -v staticcheck || echo "$$(go env GOPATH)/bin/staticcheck"); \
-	if [ -x "$$sc" ]; then \
-		"$$sc" ./...; \
-	else \
+	if [ ! -x "$$sc" ]; then \
 		echo "staticcheck: not installed, SKIPPED (CI installs it; see .github/workflows/acp-ci.yml)"; \
-	fi
+		exit 0; \
+	fi; \
+	out=$$("$$sc" ./... 2>&1); \
+	status=$$?; \
+	printf '%s\n' "$$out"; \
+	if printf '%s' "$$out" | grep -q 'matched no packages'; then \
+		echo "staticcheck: analyzed no packages; refusing to report a pass."; \
+		echo "staticcheck 0.8.x requires a Go >= 1.26 toolchain, but this module declares go 1.23."; \
+		exit 1; \
+	fi; \
+	exit $$status
 
 coverage:
 	LC_ALL=C go test -race -count=1 -coverprofile=coverage.out ./...
