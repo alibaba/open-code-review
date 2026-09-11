@@ -227,6 +227,18 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:        "tokensmarket",
+		DisplayName: "Token Market",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.tokensmarket.ai/v1",
+		EnvVar:      "TOKEN_MARKET_API_KEY",
+		Models: []string{
+			"deepseek-v4-flash",
+			"kimi-k3",
+			"glm-5.3",
+		},
+	},
+	{
 		Name:        "hy-tokenplan",
 		DisplayName: "Tencent Hunyuan Token Plan API",
 		Protocol:    ProtocolOpenAIChatCompletions,

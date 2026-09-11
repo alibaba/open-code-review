@@ -76,7 +76,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "tokensmarket", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -154,6 +154,41 @@ func TestLookupProvider_AnthropicDetails(t *testing.T) {
 	}
 	if p.EnvVar != "ANTHROPIC_API_KEY" {
 		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "ANTHROPIC_API_KEY")
+	}
+}
+
+func TestLookupProvider_TokensMarketDetails(t *testing.T) {
+	p, ok := LookupProvider("tokensmarket")
+	if !ok {
+		t.Fatal("tokensmarket not found")
+	}
+	if p.DisplayName != "Token Market" {
+		t.Errorf("DisplayName = %q, want %q", p.DisplayName, "Token Market")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://api.tokensmarket.ai/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://api.tokensmarket.ai/v1")
+	}
+	if p.EnvVar != "TOKEN_MARKET_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "TOKEN_MARKET_API_KEY")
+	}
+	if p.AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
+	}
+	expectedModels := []string{
+		"deepseek-v4-flash",
+		"kimi-k3",
+		"glm-5.3",
+	}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
 	}
 }
 
