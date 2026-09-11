@@ -56,20 +56,31 @@ Pass the reviewable file paths from Step 1. Output is grouped by rule content â€
 
 Use git directly based on the mode/ref info from Step 1:
 
+Always pass `--no-pager` when reading diffs or file content through Git. Otherwise, in an agent environment that allocates a pseudo-terminal (PTY), Git may launch an interactive pager that waits for input.
+
+`--no-pager` does not bound the amount of output captured by the host. For a potentially large diff, inspect the `--stat` output first, redirect the full diff to a temporary file, and read it in bounded chunks:
+
+```bash
+git --no-pager diff --stat <merge_base>..<to> -- <path>
+diff_file=$(mktemp)
+git --no-pager diff <merge_base>..<to> -- <path> > "$diff_file"
+# Read "$diff_file" with a file-reading tool in bounded chunks, then remove it.
+```
+
 **Range mode** (merge_base provided in preview output):
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff <merge_base>..<to> -- <path>
 ```
 
 **Commit mode**:
 ```bash
-git show <commit> -- <path>
+git --no-pager show <commit> -- <path>
 ```
 
 **Workspace mode**:
 ```bash
 # Tracked files
-git diff HEAD -- <path>
+git --no-pager diff HEAD -- <path>
 # New untracked files â€” read directly (entire file is new code)
 cat <path>
 ```
