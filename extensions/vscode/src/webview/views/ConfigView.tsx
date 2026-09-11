@@ -385,7 +385,9 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
             setApiKey('');
             setApiKeyTouched(false);
           }}
-          options={PROVIDER_PRESETS.map((p) => ({ value: p.name, label: p.displayName }))}
+          options={PROVIDER_PRESETS
+            .map((p) => ({ value: p.name, label: p.displayName }))
+            .sort((a, b) => a.label.localeCompare(b.label))}
         />
       </FormItem>
 
