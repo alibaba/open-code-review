@@ -1,0 +1,54 @@
+# Natural-language cases supported in phase 4.
+#
+# Format:
+#   -- <case name>
+#   input: <human phrasing>
+#   reply: <the single submit_intent tool call the model is expected to produce>
+#   argv:  <expected final OCR argv>   (intent case)
+#   kind:  clarify | reject            (non-intent case)
+#
+# The input lines carry non-English phrasing on purpose. This file is .txt, which
+# scripts/verify-english-only.go does not scan, and testdata/ is ignored by the
+# license check, so no SPDX header is needed here. The test feeds each reply to a
+# scripted fake LLM and asserts the deterministic layer produces the same result,
+# which keeps this catalog honest.
+
+-- review workspace
+input: 评审当前改动
+reply: {"action":"review","review":{"type":"workspace"}}
+argv: review --format json --audience human --color never
+
+-- review range
+input: 以 main 为基线评审 feature 分支
+reply: {"action":"review","review":{"type":"range","from":"main","to":"feature"}}
+argv: review --from main --to feature --format json --audience human --color never
+
+-- review commit
+input: 评审提交 abc1234
+reply: {"action":"review","review":{"type":"commit","commit":"abc1234"}}
+argv: review --commit abc1234 --format json --audience human --color never
+
+-- scan path
+input: 扫描 internal/agent
+reply: {"action":"scan","scan":{"paths":["internal/agent"]}}
+argv: scan --path internal/agent --format json --audience human --color never
+
+-- scan root
+input: 扫描整个仓库
+reply: {"action":"scan","scan":{}}
+argv: scan --format json --audience human --color never
+
+-- clarify missing refs
+input: 比较两个分支
+reply: {"action":"clarify","question":"Which two refs should I compare?","missing":["from","to"],"review":{"type":"range"}}
+kind: clarify
+
+-- reject staged only
+input: 只评审暂存区
+reply: {"action":"reject","reason":"the CLI cannot review only the staged area","hint":"Use /review for the whole change set, or stage nothing."}
+kind: reject
+
+-- reject auto fix
+input: 帮我修复这些问题
+reply: {"action":"reject","reason":"this adapter only reviews; it does not edit code","hint":"Ask for a review instead."}
+kind: reject

@@ -4,12 +4,12 @@ Independent ACP (Agent Client Protocol) adapter for OpenCodeReview CLI.
 
 ## Status
 
-**Phase 3 complete**: CLI contract and mock OCR implemented and tested.
+**Phase 4 complete**: command parsing and clarification implemented and tested.
 
 - ✓ Phase 1: CLI investigation and contract definition
 - ✓ Phase 2: Overall design and architecture
 - ✓ Phase 3: CLI Contract and mock OCR
-- ⏳ Phase 4: Command parsing and intent mapping
+- ✓ Phase 4: Command parsing and clarification
 - ⏳ Phase 5: OCR process orchestration
 - ⏳ Phase 6: ACP protocol implementation
 - ⏳ Phase 7: Testing and quality verification
@@ -21,17 +21,18 @@ Independent ACP (Agent Client Protocol) adapter for OpenCodeReview CLI.
 ```
 acp/
 ├── internal/
-│   └── contract/         # CLI contract and intent structures (phase 3)
+│   ├── contract/         # CLI contract and intent structures (phase 3)
+│   ├── intent/           # prompt -> intent / clarify / reject (phase 4)
+│   └── llmresolve/       # OCR LLM config resolution + protocol client (phase 4)
 ├── testdata/
 │   └── mock-ocr/         # Test double for OCR CLI (phase 3)
 ├── Makefile              # Build, test, and quality checks
 └── go.mod                # Independent Go module
 ```
 
-Empty placeholder directories exist for `cmd/ocr-acp/` (phase 4),
-`internal/intent/` (phase 4), `internal/orchestrator/` (phase 5) and
-`internal/adapter/` (phase 6). Git does not track empty directories, so they
-are not part of this commit.
+Placeholder directories remain for `cmd/ocr-acp/` (phase 6),
+`internal/orchestrator/` (phase 5) and `internal/adapter/` (phase 6). Git does
+not track empty directories, so they are not part of a commit.
 
 ## Quick Start
 
@@ -83,7 +84,7 @@ fails if the analyser reports `matched no packages`.
 ### Build
 
 Not available yet. The `build` target is commented out until `cmd/ocr-acp`
-exists in phase 4.
+exists in phase 6.
 
 ## CLI Contract
 
@@ -125,6 +126,51 @@ and `start_line == end_line == 0` means a file-level comment. Per-comment
 `thinking` is deliberately not modeled, so reasoning cannot leak by accident.
 `Comment.Severity` and the `status` string are open sets: the observed values
 are declared as `Status*` constants, but consumers must tolerate unknown ones.
+
+## Parsing and Clarification
+
+`internal/intent` turns one `session/prompt` text into exactly one of three
+outcomes, and never starts a process:
+
+- a runnable `contract.ReviewIntent` / `contract.ScanIntent`;
+- a clarification question (one pending slot, no conversation memory);
+- a rejection with an actionable hint.
+
+Routing is deliberate:
+
+- A leading `/` selects the deterministic parser. `/review`, `/scan` and
+  their flags are an exact grammar, so they keep working while the parsing LLM
+  is down. Unknown commands (`/foo`) and out-of-scope flags (`--staged`,
+  `--repo`, `--format`, `--ocr-binary`) are rejected, never forwarded to
+  the model.
+- Everything else goes to the LLM through a single `submit_intent` tool call.
+  There is no keyword table, regex or template for natural language, and no
+  deterministic fallback: a failed, timed-out or unsupported call becomes a
+  clarification or a rejection.
+- Every proposed value is validated before it becomes argv. Refs are checked
+  with `git rev-parse --verify <ref>^{commit}`; paths and extra flags go through
+  the phase 3 `BuildReviewArgs` / `BuildScanArgs`, which own the whitelist.
+  Adapter-owned flags are absent from the tool schema, so prompt injection
+  cannot reach them.
+
+The parsing timeout defaults to 15s and is cancellable through the context.
+
+### Parsing LLM configuration
+
+The parsing LLM is configured independently from the review LLM, through
+`--parser-provider`, `--parser-model` and `--parser-base-url` (or
+`OCR_ACP_PARSER_PROVIDER`, `OCR_ACP_PARSER_MODEL`, `OCR_ACP_PARSER_BASE_URL`);
+the API key is environment-only (`OCR_ACP_PARSER_API_KEY`). Flags win over
+the environment.
+
+`internal/llmresolve` deliberately does not read the OCR config file,
+`OCR_LLM_*`/`ANTHROPIC_*`, shell rc files or `api_key_cmd`. The review LLM
+stays owned by the OCR CLI, so an OCR upgrade never forces the adapter to copy
+or drift with OCR's provider system. Only `anthropic` and `openai` are
+supported; `openai-responses` and `anthropic-bedrock` fail with an
+actionable error instead of silently degrading. `Endpoint.Summary()` names
+the source, protocol, model and URL for reproducible logs, and never prints the
+token.
 
 ## Mock OCR
 
@@ -201,6 +247,8 @@ All phase documents are under `temp/archive/` (git-ignored):
 - `OpenCodeReview ACP 阶段一调研文档.md`
 - `OpenCodeReview ACP 阶段二总体设计.md`
 - `OpenCodeReview ACP 阶段三验证文档.md`
+- `OpenCodeReview ACP 阶段四命令解析与澄清.md`
+- `OpenCodeReview ACP 阶段四自然语言解析设计.md`
 - `OpenCodeReview ACP CLI Contract.md`
 - `OpenCodeReview ACP 服务端分阶段开发文档.md`
 

@@ -4,7 +4,7 @@
 # Mirrors COVERAGE_THRESHOLD in the repository root Makefile.
 COVERAGE_MIN ?= 90
 
-# build target disabled until cmd/ocr-acp is implemented in phase 4
+# build target disabled until cmd/ocr-acp is implemented in phase 6
 # build:
 # 	go build -o ../dist/ocr-acp ./cmd/ocr-acp
 
