@@ -25,35 +25,14 @@ ocr llm test
 ```
 
 Check your OpenCode version (`opencode --version` vs `opencode2 --version`)
-and follow the matching section below. The single plugin file
+and install the matching dependencies below. The single plugin file
 (`open-code-review.ts`) serves both versions: V1 reads its `server`
 entrypoint, V2 reads its `id` + `setup` entrypoint
 ([dual plugin form](https://opencode.ai/v2/docs/build/plugins#support-v1)).
+The V2 API is imported as types only, so OpenCode 1.x needs just
+`@opencode-ai/plugin` at runtime, while OpenCode 2.x needs both packages.
 
-## Install globally (OpenCode 1.x)
-
-```bash
-mkdir -p ~/.config/opencode/plugins
-curl -fsSL \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/opencode/open-code-review.ts \
-  -o ~/.config/opencode/plugins/open-code-review.ts
-```
-
-The plugin imports `@opencode-ai/plugin`, so the config directory needs
-that dependency (otherwise the server log shows
-`Cannot find package '@opencode-ai/plugin'` and the plugin fails to load):
-
-```bash
-cd ~/.config/opencode
-npm init -y # skip if package.json already exists
-npm install @opencode-ai/plugin
-```
-
-Restart OpenCode after installation.
-
-## Install globally (OpenCode 2.x)
-
-Copy the same plugin file into your OpenCode config:
+## Install globally
 
 ```bash
 mkdir -p ~/.config/opencode/plugins
@@ -62,15 +41,14 @@ curl -fsSL \
   -o ~/.config/opencode/plugins/open-code-review.ts
 ```
 
-The file imports both `@opencode-ai/plugin` (V1 API) and
-`@opencode/plugin` (V2 API), so the config directory needs both
-dependencies (otherwise the server log shows
-`Cannot find package ...` and the plugin fails to load):
+Then install the runtime dependencies for your version (otherwise the
+server log shows `Cannot find package ...` and the plugin fails to load):
 
 ```bash
 cd ~/.config/opencode
 npm init -y # skip if package.json already exists
-npm install @opencode-ai/plugin @opencode/plugin@beta
+npm install @opencode-ai/plugin # OpenCode 1.x
+npm install @opencode-ai/plugin @opencode/plugin@beta # OpenCode 2.x
 ```
 
 Restart OpenCode after installation.
@@ -86,14 +64,9 @@ curl -fsSL \
   -o .opencode/plugins/open-code-review.ts
 ```
 
-Then add `@opencode-ai/plugin` to the project's `.opencode/package.json`
-as above. Commit the plugin file if the integration should be shared with
-the project.
-
-On OpenCode 2.x, copy the same plugin file into the project's
-`.opencode/plugins/` directory instead and add both `@opencode-ai/plugin`
-and `@opencode/plugin@beta` to the project's `.opencode/package.json`.
-Commit the plugin file if the integration should be shared with the project.
+Then add the runtime dependencies for your version to the project's
+`.opencode/package.json` as above. Commit the plugin file if the
+integration should be shared with the project.
 
 ## Usage
 
@@ -119,7 +92,7 @@ an LLM request.
 
 - Reviews use `--audience agent` and JSON output.
 - The process is launched with an argument array and `shell: false`.
-- Reviews have a 15-minute overall timeout and a 10 MiB output limit.
+- Tool-driven reviews default to a 30-minute overall timeout and a 10 MiB output limit.
 - Cancelling the OpenCode tool terminates the OCR process (1.x; on 2.x
   the tool API has no abort signal, so cancellation relies on the overall
   timeout).

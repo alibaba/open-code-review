@@ -4,7 +4,7 @@
 import { spawn } from "node:child_process"
 import { join } from "node:path"
 import { type Plugin, tool } from "@opencode-ai/plugin"
-import { Plugin as PluginV2 } from "@opencode/plugin"
+import type { Plugin as PluginV2 } from "@opencode/plugin"
 
 interface ReviewInput {
   commit?: string
@@ -398,6 +398,10 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
 // The default export at the bottom of this file serves both versions: V2
 // reads `id` + `setup`, V1 reads `server`. All OCR logic above is shared.
 //
+// The V2 API is imported as types only (`import type`), and the definition
+// below is a plain object literal: `Plugin.define` is an identity function,
+// so V1 never needs the `@opencode/plugin` package at runtime.
+//
 // V2 limitations (no equivalent in the V2 tool API): tool execution has no
 // abort signal, so cancellation relies on the overall timeout, and the
 // per-session working directory is resolved from the session location.
@@ -412,10 +416,10 @@ const OCR_HEALTH_DESCRIPTION =
 
 const OCR_REVIEW_COMMAND_TEMPLATE =
   "Use the ocr_review tool to review the requested target. " +
-  "Treat the following text as review intent, target details, and business context: "
+  "Treat the following text as review intent, target details, and business context:"
 
 const OCR_REVIEW_COMMAND_SUFFIX =
-  " If no target is specified, review the current workspace changes. " +
+  ". If no target is specified, review the current workspace changes. " +
   "Report findings by severity with exact file and line references."
 
 const OCR_HEALTH_COMMAND_TEMPLATE =
@@ -431,11 +435,11 @@ const reviewInputSchema = {
     background: { type: "string", description: "Business or requirement context that the implementation should satisfy." },
     exclude: { type: "string", description: "Comma-separated gitignore-style exclusion patterns." },
     model: { type: "string", description: "Override the model configured in OpenCodeReview." },
-    concurrency: { type: "number", description: "Maximum concurrent file reviews." },
-    timeoutMinutes: { type: "number", description: "Per-file OCR timeout in minutes." },
-    overallTimeoutMinutes: { type: "number", description: "Optional wall-clock timeout for the complete OCR process in minutes." },
-    maxTools: { type: "number", description: "Maximum tool-call rounds per subtask; OCR enforces a minimum of 50." },
-    maxGitProcesses: { type: "number", description: "Maximum concurrent Git subprocesses." },
+    concurrency: { type: "integer", minimum: 1, description: "Maximum concurrent file reviews." },
+    timeoutMinutes: { type: "integer", minimum: 1, description: "Per-file OCR timeout in minutes." },
+    overallTimeoutMinutes: { type: "integer", minimum: 1, description: "Optional wall-clock timeout for the complete OCR process in minutes." },
+    maxTools: { type: "integer", minimum: 1, description: "Maximum tool-call rounds per subtask; OCR enforces a minimum of 50." },
+    maxGitProcesses: { type: "integer", minimum: 1, description: "Maximum concurrent Git subprocesses." },
     preview: { type: "boolean", description: "List the files that would be reviewed without calling an LLM." },
   },
   required: [],
@@ -443,10 +447,14 @@ const reviewInputSchema = {
 }
 
 async function resolveSessionCwd(ctx: PluginV2.Context, sessionID: string): Promise<string> {
-  const session = await ctx.session.get({ sessionID })
-  const directory = session.location.directory as string
-  const subpath = session.subpath as string | undefined
-  return subpath === undefined || subpath === "" ? directory : join(directory, subpath)
+  try {
+    const session = await ctx.session.get({ sessionID })
+    const directory = session.location.directory
+    const subpath = session.subpath
+    return subpath === undefined || subpath === "" ? directory : join(directory, subpath)
+  } catch {
+    return ctx.location.directory
+  }
 }
 
 async function setupV2(ctx: PluginV2.Context): Promise<void> {
@@ -493,39 +501,46 @@ async function setupV2(ctx: PluginV2.Context): Promise<void> {
     })
   })
 
+  // Like the V1 `??=` guards above, never override commands the user
+  // already defined under the same names.
+  const registeredCommands = await ctx.command.list()
+  const commandNames = new Set(registeredCommands.data.map((command) => command.name))
+
   await ctx.command.transform((editor) => {
     // Text-only prompts, matching the V1 $ARGUMENTS templates: spreading the
     // incoming prompt attachments would violate exactOptionalPropertyTypes
     // and risk stale attachment offsets after the text rewrite.
-    editor.add({
-      name: "ocr-review",
-      description: "Review code changes with OpenCodeReview",
-      execute: async ({ sessionID, prompt, delivery }) => {
-        await ctx.session.prompt({
-          sessionID,
-          text: `${OCR_REVIEW_COMMAND_TEMPLATE}${prompt.text ?? ""}${OCR_REVIEW_COMMAND_SUFFIX}`,
-          delivery,
-        })
-      },
-    })
-    editor.add({
-      name: "ocr-health",
-      description: "Check OpenCodeReview and its LLM connection",
-      execute: async ({ sessionID, delivery }) => {
-        await ctx.session.prompt({
-          sessionID,
-          text: OCR_HEALTH_COMMAND_TEMPLATE,
-          delivery,
-        })
-      },
-    })
+    if (!commandNames.has("ocr-review")) {
+      editor.add({
+        name: "ocr-review",
+        description: "Review code changes with OpenCodeReview",
+        execute: async ({ sessionID, prompt, delivery }) => {
+          await ctx.session.prompt({
+            sessionID,
+            text: `${OCR_REVIEW_COMMAND_TEMPLATE}${prompt.text ?? ""}${OCR_REVIEW_COMMAND_SUFFIX}`,
+            delivery,
+          })
+        },
+      })
+    }
+    if (!commandNames.has("ocr-health")) {
+      editor.add({
+        name: "ocr-health",
+        description: "Check OpenCodeReview and its LLM connection",
+        execute: async ({ sessionID, delivery }) => {
+          await ctx.session.prompt({
+            sessionID,
+            text: OCR_HEALTH_COMMAND_TEMPLATE,
+            delivery,
+          })
+        },
+      })
+    }
   })
 }
 
 export default {
-  ...PluginV2.define({
-    id: "open-code-review",
-    setup: setupV2,
-  }),
+  id: "open-code-review",
+  setup: setupV2,
   server: OpenCodeReviewPlugin,
 }
