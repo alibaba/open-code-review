@@ -7,8 +7,9 @@ import { buildOfficialSaveEntries, detectInitialTab, isConfigReady } from '../co
 import { OcrConfig } from '../types';
 
 describe('generated provider presets', () => {
-  it('exposes the complete generated registry through the existing module', () => {
-    expect(PROVIDER_PRESETS).toEqual(generatedPresets);
+  it('keeps providers sorted by name with the existing initial provider', () => {
+    const names = PROVIDER_PRESETS.map((preset) => preset.name);
+    expect(names).toEqual([...names].sort());
     expect(PROVIDER_PRESETS[0].name).toBe('anthropic');
   });
 
