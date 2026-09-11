@@ -82,24 +82,36 @@ func (r *ProcessRunner) run(ctx context.Context, request Request, limits Limits,
 		finish(Outcome{Kind: OutcomeFailed, ExitCode: -1, Err: newError(ErrorPlatform, "%v", err)})
 		return
 	}
-	stdout, err := cmd.StdoutPipe()
+	stdoutRead, stdoutWrite, err := os.Pipe()
 	if err != nil {
 		finish(Outcome{Kind: OutcomeFailed, ExitCode: -1, Err: newError(ErrorStart, "create stdout pipe: %v", err)})
 		return
 	}
-	stderr, err := cmd.StderrPipe()
+	defer stdoutRead.Close()
+	cmd.Stdout = stdoutWrite
+	stderrRead, stderrWrite, err := os.Pipe()
 	if err != nil {
+		stdoutWrite.Close()
 		finish(Outcome{Kind: OutcomeFailed, ExitCode: -1, Err: newError(ErrorStart, "create stderr pipe: %v", err)})
 		return
 	}
+	defer stderrRead.Close()
+	cmd.Stderr = stderrWrite
 	if err := cmd.Start(); err != nil {
+		stdoutWrite.Close()
+		stderrWrite.Close()
 		finish(Outcome{Kind: OutcomeFailed, ExitCode: -1, Err: newError(ErrorStart, "start OCR: %v", err)})
 		return
 	}
 
-	streams := consumeStreams(stdout, stderr, limits, emit)
+	streams := consumeStreams(stdoutRead, stderrRead, limits, emit)
 	waited := make(chan error, 1)
-	go func() { waited <- cmd.Wait() }()
+	go func() {
+		err := cmd.Wait()
+		_ = stdoutWrite.Close()
+		_ = stderrWrite.Close()
+		waited <- err
+	}()
 
 	cause, waitErr, cleanupErr := r.await(ctx, request.Deadline, cmd, waited)
 	stream, cleanErr := awaitStreams(streams)
