@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/alibaba/open-code-review/internal/llm"
 )
@@ -53,8 +54,38 @@ func generate(output string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(output, data, 0o644); err != nil {
+	if err := writeFileAtomically(output, data, 0o644); err != nil {
 		return fmt.Errorf("write provider presets: %w", err)
+	}
+	return nil
+}
+
+func writeFileAtomically(output string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(output)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(output)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, output); err != nil {
+		return err
 	}
 	return nil
 }

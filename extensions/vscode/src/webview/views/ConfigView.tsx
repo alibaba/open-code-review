@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { ConfigEntry, ConfigPanelFocus, ProviderTab, buildCustomCreateSaveEntries, buildCustomUpdateSaveEntries, buildOfficialSaveEntries, describeActiveProvider, detectInitialTab, isConfigReady, listCustomProviderNames } from '../../shared/configUtils';
-import { mergeModelLists, PROVIDER_PRESETS } from '../../shared/providers';
+import { mergeModelLists, PROVIDER_PRESETS, usesAmbientAuth } from '../../shared/providers';
 import { EnvCheckResult, LogLine, OcrConfig } from '../../shared/types';
 import { CliStatus, ConnTest } from '../configStore';
 import { CustomProviderManager } from '../components/CustomProviderManager';
@@ -331,6 +331,7 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
   const [providerName, setProviderName] = useState(initialProvider);
   const preset = PROVIDER_PRESETS.find((p) => p.name === providerName) ?? PROVIDER_PRESETS[0];
   const savedEntry = config?.providers[providerName];
+  const ambientAuth = usesAmbientAuth(preset, savedEntry?.protocol);
 
   const modelOptions = useMemo(
     () => mergeModelLists(preset.models, savedEntry?.models ?? []),
@@ -407,7 +408,7 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
         )}
       </FormItem>
 
-      {!preset.ambientAuth && (
+      {!ambientAuth && (
         <FormItem
           label={t('view.config.apiKey')}
           hint={`${t('view.config.apiKeyEnvHint')} ${preset.envVar}`}
