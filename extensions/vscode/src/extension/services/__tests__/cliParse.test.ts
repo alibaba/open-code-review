@@ -2,7 +2,7 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from '../cliParse';
-import { ReviewMode } from '../../../shared/types';
+import { ReviewMode } from '@shared/types';
 
 describe('buildReviewArgs', () => {
   it('workspace 模式加 --format json', () => {

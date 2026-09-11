@@ -79,7 +79,7 @@ yarn package      # 生成可分发的 .vsix 安装包（见下文「构建发�
 ### 调试要点
 
 - **双端通信**：WebView 与 Extension Host 通过 `postMessage` 通信，消息类型定义在
-  `src/shared/messages.ts`。两端发收都走 `dispatch` / `handle`，定位问题先看这里。
+  `extensions/frontend/src/shared/messages.ts`。两端发收都走 `dispatch` / `handle`，定位问题先看这里。
 - **CLI 调用**：所有 `ocr` 子命令由 `src/extension/services/CliService.ts` 通过 `child_process.spawn` 执行。
   `runRaw` 会在 CLI 退出码非 0 时 reject 并带上 stderr 中的 `Error:` 文本，便于排查“审查失败/连接失败”。
 - **配置读写**：`ConfigService` 读取 `~/.opencodereview/config.json`，写入则委托 `ocr config set`。
@@ -131,16 +131,17 @@ code --install-extension open-code-review-vscode-<version>.vsix
 
 采用 **Monolithic WebView + Thin Extension Host** 方案：
 
-- **WebView** 是独立构建的 Preact SPA，还原原型的全部视觉与交互。
+- **WebView** 是独立构建的 Preact SPA，由共享前端 `extensions/frontend/` 构建而来（与 IntelliJ IDEA
+  插件共用）。
 - **Extension Host** 层轻薄，只负责 CLI 调用、文件系统、Git 操作、编辑器评论。
-- 两者通过 `postMessage` 通信，用 `src/shared/` 中的 TypeScript 共享类型保证类型安全。
+- 两者通过 `postMessage` 通信，用 `extensions/frontend/src/shared/` 中的 TypeScript 共享类型保证类型安全。
 
 ```
 src/
-├── extension/      Extension Host（Node.js）：services / providers / commands
-├── webview/        WebView SPA（Preact）：views / components / store / bridge
-└── shared/         双端共享类型与 postMessage 协议（不依赖 vscode）
+└── extension/          Extension Host（Node.js）：services / providers / commands
 ```
+
+WebView 与共享类型位于 `extensions/frontend/`（与 IntelliJ IDEA 插件共用）。
 
 ---
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { CliResult, CliRunOptions, LogLine, ReviewState } from '../../shared/types';
+import { CliResult, CliRunOptions, LogLine, ReviewState } from '@shared/types';
 import { CliService } from './CliService';
 
 export function resultToState(result: CliResult): ReviewState {

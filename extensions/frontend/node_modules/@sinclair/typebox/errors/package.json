@@ -1,0 +1,4 @@
+{
+  "main": "../build/cjs/errors/index.js",
+  "types": "../build/cjs/errors/index.d.ts"
+}

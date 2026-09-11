@@ -1,0 +1,110 @@
+{
+  "name": "ts-loader",
+  "version": "9.6.2",
+  "description": "TypeScript loader for webpack",
+  "main": "index.js",
+  "types": "dist",
+  "scripts": {
+    "build": "tsc --version && tsc --project \"./src\"",
+    "lint": "tsc --project \"./src\" --noEmit && eslint --ext .ts ./src",
+    "comparison-tests": "git clean -xfd test/comparison-tests && npm link --legacy-peer-deps ./test/comparison-tests/testLib && node test/comparison-tests/run-tests.js",
+    "execution-tests": "git clean -xfd test/execution-tests && node test/execution-tests/run-tests.js",
+    "test": "git clean -xfd test/comparison-tests && git clean -xfd test/execution-tests && node test/run-tests.js",
+    "clean": "git clean -xfd test/comparison-tests && git clean -xfd test/execution-tests",
+    "docker:build": "docker build -t ts-loader .",
+    "postdocker:build": "docker run -it ts-loader yarn test",
+    "generate-toc": "markdown-toc -i ./README.md && git add README.md && git commit -m \"chore: update docs\""
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged"
+    }
+  },
+  "lint-staged": {
+    "src/**/*.{ts,md}": [
+      "prettier --write",
+      "yarn lint",
+      "git add"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TypeStrong/ts-loader.git"
+  },
+  "keywords": [
+    "ts-loader",
+    "typescript-loader",
+    "webpack",
+    "loader",
+    "typescript",
+    "ts"
+  ],
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "author": "John Reilly <johnny_reilly@hotmail.com> (https://johnnyreilly.com)",
+  "contributors": [
+    "John Reilly <johnny_reilly@hotmail.com> (https://johnnyreilly.com)",
+    "James Brantly <james@jbrantly.com> (http://www.jbrantly.com/)"
+  ],
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/TypeStrong/ts-loader/issues"
+  },
+  "homepage": "https://github.com/TypeStrong/ts-loader",
+  "dependencies": {
+    "chalk": "^4.1.0",
+    "picomatch": "^4.0.0",
+    "source-map": "^0.7.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.0.0",
+    "@types/picomatch": "^4.0.0",
+    "babel": "^6.0.0",
+    "babel-core": "^6.0.0",
+    "babel-loader": "^7.0.0",
+    "babel-polyfill": "^6.16.0",
+    "babel-preset-es2015": "^6.0.0",
+    "babel-preset-es2016": "^6.16.0",
+    "babel-preset-react": "^6.0.0",
+    "escape-string-regexp": "^2.0.0",
+    "eslint": "^10.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "fs-extra": "^11.0.0",
+    "glob": "^7.1.1",
+    "husky": "^8.0.0",
+    "jasmine-core": "^4.0.0",
+    "karma": "^6.0.0",
+    "karma-chrome-launcher": "^3.1.0",
+    "karma-jasmine": "^4.0.0",
+    "karma-mocha-reporter": "^2.0.0",
+    "karma-sourcemap-loader": "^0.4.0",
+    "karma-webpack": "^5.0.0",
+    "lint-staged": "^8.0.0",
+    "loader-utils": "^1.4.2",
+    "markdown-toc": "^1.2.0",
+    "mkdirp": "^0.5.1",
+    "mocha": "^6.0.0",
+    "prettier": "^2.0.5",
+    "rimraf": "^2.6.2",
+    "semver": "^7.8.5",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.59.4",
+    "webpack": "^5.74.0",
+    "webpack-cli": "^4.10.0"
+  },
+  "peerDependencies": {
+    "loader-utils": "*",
+    "typescript": "*",
+    "webpack": "^4.0.0 || ^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "loader-utils": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "provenance": true
+  }
+}

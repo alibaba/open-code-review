@@ -1,0 +1,41 @@
+{
+  "name": "exit-x",
+  "description": "A replacement for process.exit that ensures stdio are fully drained before exiting.",
+  "version": "0.2.2",
+  "homepage": "https://github.com/gruntjs/node-exit-x",
+  "author": "Grunt Development Team (https://gruntjs.com/development-team)",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/gruntjs/node-exit-x.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gruntjs/node-exit-x/issues"
+  },
+  "license": "MIT",
+  "main": "lib/exit.js",
+  "types": "lib/exit.d.ts",
+  "engines": {
+    "node": ">= 0.8.0"
+  },
+  "scripts": {
+    "test": "grunt nodeunit"
+  },
+  "devDependencies": {
+    "grunt": "~0.4.1",
+    "grunt-cli": "^1.5.0",
+    "grunt-contrib-jshint": "~0.6.4",
+    "grunt-contrib-nodeunit": "~0.2.0",
+    "grunt-contrib-watch": "~0.5.3",
+    "which": "~1.0.5"
+  },
+  "keywords": [
+    "exit",
+    "process",
+    "stdio",
+    "stdout",
+    "stderr",
+    "drain",
+    "flush",
+    "3584"
+  ]
+}

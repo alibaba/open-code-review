@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { t, resolveLocale } from '../../shared/i18n';
+import { t, resolveLocale } from '@shared/i18n';
 import * as vscode from 'vscode';
 import { readFile } from 'fs/promises';
 import { execFile } from 'child_process';
-import { GitState, FileChange, ReviewMode, ReviewContext } from '../../shared/types';
+import { GitState, FileChange, ReviewMode, ReviewContext } from '@shared/types';
 import { buildWorkspaceFiles, branchRefCandidates, parseNameStatus, pickRepoRoot } from './gitMap';
 
 const WORKSPACE_REFRESH_DEBOUNCE_MS = 300;

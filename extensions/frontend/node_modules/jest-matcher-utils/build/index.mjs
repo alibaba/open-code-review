@@ -1,0 +1,26 @@
+import cjsModule from './index.js';
+
+export const BOLD_WEIGHT = cjsModule.BOLD_WEIGHT;
+export const DIM_COLOR = cjsModule.DIM_COLOR;
+export const EXPECTED_COLOR = cjsModule.EXPECTED_COLOR;
+export const INVERTED_COLOR = cjsModule.INVERTED_COLOR;
+export const RECEIVED_COLOR = cjsModule.RECEIVED_COLOR;
+export const SERIALIZABLE_PROPERTIES = cjsModule.SERIALIZABLE_PROPERTIES;
+export const SUGGEST_TO_CONTAIN_EQUAL = cjsModule.SUGGEST_TO_CONTAIN_EQUAL;
+export const diff = cjsModule.diff;
+export const ensureActualIsNumber = cjsModule.ensureActualIsNumber;
+export const ensureExpectedIsNonNegativeInteger = cjsModule.ensureExpectedIsNonNegativeInteger;
+export const ensureExpectedIsNumber = cjsModule.ensureExpectedIsNumber;
+export const ensureNoExpected = cjsModule.ensureNoExpected;
+export const ensureNumbers = cjsModule.ensureNumbers;
+export const getLabelPrinter = cjsModule.getLabelPrinter;
+export const highlightTrailingWhitespace = cjsModule.highlightTrailingWhitespace;
+export const matcherErrorMessage = cjsModule.matcherErrorMessage;
+export const matcherHint = cjsModule.matcherHint;
+export const pluralize = cjsModule.pluralize;
+export const printDiffOrStringify = cjsModule.printDiffOrStringify;
+export const printExpected = cjsModule.printExpected;
+export const printReceived = cjsModule.printReceived;
+export const printWithType = cjsModule.printWithType;
+export const replaceMatchedToAsymmetricMatcher = cjsModule.replaceMatchedToAsymmetricMatcher;
+export const stringify = cjsModule.stringify;

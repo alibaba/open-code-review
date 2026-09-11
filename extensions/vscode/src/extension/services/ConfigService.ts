@@ -4,8 +4,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { dirname, join } from 'path';
-import { ConfigEntry } from '../../shared/configUtils';
-import { OcrConfig } from '../../shared/types';
+import { ConfigEntry } from '@shared/configUtils';
+import { OcrConfig } from '@shared/types';
 import { CliService } from './CliService';
 import { applyConfigEntries, RawConfig } from './configDraft';
 import { parseConfig, toConfigSetArgs } from './configParse';

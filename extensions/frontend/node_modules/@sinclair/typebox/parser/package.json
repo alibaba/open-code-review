@@ -1,0 +1,4 @@
+{
+  "main": "../build/cjs/parser/index.js",
+  "types": "../build/cjs/parser/index.d.ts"
+}

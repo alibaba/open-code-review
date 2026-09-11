@@ -1,0 +1,48 @@
+{
+  "name": "pretty-format",
+  "version": "30.4.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jestjs/jest.git",
+    "directory": "packages/pretty-format"
+  },
+  "license": "MIT",
+  "description": "Stringify any JavaScript value.",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "require": "./build/index.js",
+      "import": "./build/index.mjs",
+      "default": "./build/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "author": "James Kyle <me@thejameskyle.com>",
+  "dependencies": {
+    "@jest/schemas": "30.4.1",
+    "ansi-styles": "^5.2.0",
+    "react-is-18": "npm:react-is@^18.3.1",
+    "react-is-19": "npm:react-is@^19.2.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.23",
+    "@types/react-is": "^19.0.0",
+    "@types/react-test-renderer": "^18.3.1",
+    "immutable": "^5.1.2",
+    "jest-util": "30.4.1",
+    "react": "18.3.1",
+    "react-17": "npm:react@^17.0.2",
+    "react-18": "npm:react@^18.3.1",
+    "react-19": "npm:react@^19.2.5",
+    "react-test-renderer": "18.3.1"
+  },
+  "engines": {
+    "node": "^18.14.0 || ^20.0.0 || ^22.0.0 || >=24.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "gitHead": "b3b4a09ed3005369dacc7466d1d2122797283785"
+}

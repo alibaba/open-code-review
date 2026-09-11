@@ -2,7 +2,7 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import * as vscode from 'vscode';
-import { ReviewComment, ReviewContext, ReviewMode } from '../../shared/types';
+import { ReviewComment, ReviewContext, ReviewMode } from '@shared/types';
 
 export type CommentMountSide = 'left' | 'right' | 'workspace';
 

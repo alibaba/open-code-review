@@ -1,0 +1,1145 @@
+/*
+	MIT License http://www.opensource.org/licenses/mit-license.php
+	Author Tobias Koppers @sokra
+*/
+
+"use strict";
+
+const asyncLib = require("neo-async");
+const ChunkGraph = require("../ChunkGraph");
+const Dependency = require("../Dependency");
+const Module = require("../Module");
+const ModuleGraph = require("../ModuleGraph");
+const { JAVASCRIPT_TYPE } = require("../ModuleSourceTypeConstants");
+const { STAGE_DEFAULT } = require("../OptimizationStages");
+const CommonJsSelfReferenceDependency = require("../dependencies/CommonJsSelfReferenceDependency");
+const HarmonyImportDependency = require("../dependencies/HarmonyImportDependency");
+const { ImportPhaseUtils } = require("../dependencies/ImportPhase");
+const { compareModulesByIdentifier } = require("../util/comparators");
+const {
+	filterRuntime,
+	intersectRuntime,
+	mergeRuntime,
+	mergeRuntimeOwned,
+	runtimeToString
+} = require("../util/runtime");
+const ConcatenatedModule = require("./ConcatenatedModule");
+
+/** @typedef {import("../Chunk")} Chunk */
+/** @typedef {import("../Compilation")} Compilation */
+/** @typedef {import("../Compiler")} Compiler */
+/** @typedef {import("../Module").BuildInfo} BuildInfo */
+/** @typedef {import("../Module").BuildMeta} BuildMeta */
+/** @typedef {import("../RequestShortener")} RequestShortener */
+/** @typedef {import("../util/runtime").RuntimeSpec} RuntimeSpec */
+
+/** @typedef {Module | ((requestShortener: RequestShortener) => string)} Problem */
+
+/**
+ * Merged runtime of all chunks a module is in, memoized for the whole pass.
+ * Safe: the chunk graph is not mutated while configurations are built.
+ * @param {ChunkGraph} chunkGraph the chunk graph
+ * @param {Map<Module, RuntimeSpec>} cache memoization cache
+ * @param {Module} module the module
+ * @returns {RuntimeSpec} the merged runtime
+ */
+const getMergedModuleRuntime = (chunkGraph, cache, module) => {
+	const cached = cache.get(module);
+	if (cached !== undefined || cache.has(module)) return cached;
+	/** @type {RuntimeSpec} */
+	let runtime;
+	for (const r of chunkGraph.getModuleRuntimes(module)) {
+		runtime = mergeRuntimeOwned(runtime, r);
+	}
+	cache.set(module, runtime);
+	return runtime;
+};
+
+/**
+ * Defines the statistics type used by this module.
+ * @typedef {object} Statistics
+ * @property {number} cached
+ * @property {number} alreadyInConfig
+ * @property {number} invalidModule
+ * @property {number} incorrectChunks
+ * @property {number} incorrectDependency
+ * @property {number} incorrectModuleDependency
+ * @property {number} incorrectChunksOfImporter
+ * @property {number} incorrectRuntimeCondition
+ * @property {number} importerFailed
+ * @property {number} added
+ */
+
+/**
+ * Record why `module` can't be added (so retried lookups hit the cache), bump
+ * the matching statistic, and return the problem to bubble up the recursion.
+ * Only reached on failure, so it stays off the hot success path.
+ * @param {Map<Module, Problem>} failureCache per-module failure cache
+ * @param {Statistics} statistics running statistics
+ * @param {keyof Statistics} statKey statistic to increment
+ * @param {Module} module the module that couldn't be added
+ * @param {Problem} problem the failure to cache and return
+ * @returns {Problem} the same problem
+ */
+const cacheFailure = (failureCache, statistics, statKey, module, problem) => {
+	statistics[statKey]++;
+	failureCache.set(module, problem);
+	return problem;
+};
+
+/**
+ * Format bailout reason.
+ * @param {string} msg message
+ * @returns {string} formatted message
+ */
+const formatBailoutReason = (msg) => `ModuleConcatenation bailout: ${msg}`;
+
+const PLUGIN_NAME = "ModuleConcatenationPlugin";
+
+class ModuleConcatenationPlugin {
+	/**
+	 * Applies the plugin by registering its hooks on the compiler.
+	 * @param {Compiler} compiler the compiler instance
+	 * @returns {void}
+	 */
+	apply(compiler) {
+		const { _backCompat: backCompat } = compiler;
+		compiler.hooks.compilation.tap(PLUGIN_NAME, (compilation) => {
+			if (compilation.moduleMemCaches) {
+				throw new Error(
+					"optimization.concatenateModules can't be used with cacheUnaffected as module concatenation is a global effect"
+				);
+			}
+			const moduleGraph = compilation.moduleGraph;
+			/** @type {Map<Module, string | ((requestShortener: RequestShortener) => string)>} */
+			const bailoutReasonMap = new Map();
+
+			/**
+			 * Sets bailout reason.
+			 * @param {Module} module the module
+			 * @param {string | ((requestShortener: RequestShortener) => string)} reason the reason
+			 */
+			const setBailoutReason = (module, reason) => {
+				setInnerBailoutReason(module, reason);
+				moduleGraph
+					.getOptimizationBailout(module)
+					.push(
+						typeof reason === "function"
+							? (rs) => formatBailoutReason(reason(rs))
+							: formatBailoutReason(reason)
+					);
+			};
+
+			/**
+			 * Sets inner bailout reason.
+			 * @param {Module} module the module
+			 * @param {string | ((requestShortener: RequestShortener) => string)} reason the reason
+			 */
+			const setInnerBailoutReason = (module, reason) => {
+				bailoutReasonMap.set(module, reason);
+			};
+
+			/**
+			 * Gets inner bailout reason.
+			 * @param {Module} module the module
+			 * @param {RequestShortener} requestShortener the request shortener
+			 * @returns {string | ((requestShortener: RequestShortener) => string) | undefined} the reason
+			 */
+			const getInnerBailoutReason = (module, requestShortener) => {
+				const reason = bailoutReasonMap.get(module);
+				if (typeof reason === "function") return reason(requestShortener);
+				return reason;
+			};
+
+			/**
+			 * Format bailout warning.
+			 * @param {Module} module the module
+			 * @param {Problem} problem the problem
+			 * @returns {(requestShortener: RequestShortener) => string} the reason
+			 */
+			const formatBailoutWarning = (module, problem) => (requestShortener) => {
+				if (typeof problem === "function") {
+					return formatBailoutReason(
+						`Cannot concat with ${module.readableIdentifier(
+							requestShortener
+						)}: ${problem(requestShortener)}`
+					);
+				}
+				const reason = getInnerBailoutReason(module, requestShortener);
+				const reasonWithPrefix = reason ? `: ${reason}` : "";
+				if (module === problem) {
+					return formatBailoutReason(
+						`Cannot concat with ${module.readableIdentifier(
+							requestShortener
+						)}${reasonWithPrefix}`
+					);
+				}
+				return formatBailoutReason(
+					`Cannot concat with ${module.readableIdentifier(
+						requestShortener
+					)} because of ${problem.readableIdentifier(
+						requestShortener
+					)}${reasonWithPrefix}`
+				);
+			};
+
+			compilation.hooks.optimizeChunkModules.tapAsync(
+				{
+					name: PLUGIN_NAME,
+					stage: STAGE_DEFAULT
+				},
+				(allChunks, modules, callback) => {
+					const logger = compilation.getLogger(
+						"webpack.ModuleConcatenationPlugin"
+					);
+					const { chunkGraph, moduleGraph } = compilation;
+					/** @type {Module[]} */
+					const relevantModules = [];
+					/** @type {Set<Module>} */
+					const possibleInners = new Set();
+					const concatenateModules =
+						compilation.options.optimization.concatenateModules;
+					const context = {
+						chunkGraph,
+						moduleGraph,
+						// commonjs concatenation defaults to on; { commonjs: false } opts out
+						concatenateCommonJsModules:
+							typeof concatenateModules === "object"
+								? concatenateModules.commonjs !== false
+								: concatenateModules === true
+					};
+					const deferEnabled = compilation.options.experiments.deferImport;
+					logger.time("select relevant modules");
+					for (const module of modules) {
+						let canBeRoot = true;
+						let canBeInner = true;
+
+						const bailoutReason = module.getConcatenationBailoutReason(context);
+						if (bailoutReason) {
+							setBailoutReason(module, bailoutReason);
+							continue;
+						}
+
+						// Must not be an async module
+						if (moduleGraph.isAsync(module)) {
+							setBailoutReason(module, "Module is async");
+							continue;
+						}
+						// Must be in strict mode
+						if (!(/** @type {BuildInfo} */ (module.buildInfo).strict)) {
+							setBailoutReason(module, "Module is not in strict mode");
+							continue;
+						}
+
+						// Module must be in any chunk (we don't want to do useless work)
+						if (chunkGraph.getNumberOfModuleChunks(module) === 0) {
+							setBailoutReason(module, "Module is not in any chunk");
+							continue;
+						}
+
+						// Exports must be known (and not dynamic)
+						const exportsInfo = moduleGraph.getExportsInfo(module);
+						const relevantExports = exportsInfo.getRelevantExports(undefined);
+						const unknownReexports = relevantExports.filter(
+							(exportInfo) =>
+								exportInfo.isReexport() && !exportInfo.getTarget(moduleGraph)
+						);
+						if (unknownReexports.length > 0) {
+							setBailoutReason(
+								module,
+								`Reexports in this module do not have a static target (${Array.from(
+									unknownReexports,
+									(exportInfo) =>
+										`${
+											exportInfo.name || "other exports"
+										}: ${exportInfo.getUsedInfo()}`
+								).join(", ")})`
+							);
+							continue;
+						}
+
+						// Root modules must have a static list of exports
+						const unknownProvidedExports = relevantExports.filter(
+							(exportInfo) => exportInfo.provided !== true
+						);
+						if (unknownProvidedExports.length > 0) {
+							setBailoutReason(
+								module,
+								`List of module exports is dynamic (${Array.from(
+									unknownProvidedExports,
+									(exportInfo) =>
+										`${
+											exportInfo.name || "other exports"
+										}: ${exportInfo.getProvidedInfo()} and ${exportInfo.getUsedInfo()}`
+								).join(", ")})`
+							);
+							canBeRoot = false;
+						}
+
+						// TODO: ConcatenatedModule.getSourceTypes only javascript now
+						const basicTypes = Module.getSourceBasicTypes(module);
+						if (basicTypes.size !== 1 || !basicTypes.has(JAVASCRIPT_TYPE)) {
+							canBeRoot = false;
+						}
+
+						// A concatenated CommonJS module relies on the root's ESM export
+						// rendering, so it can only be an inner module
+						if (
+							module.type.startsWith("javascript/") &&
+							/** @type {BuildMeta} */
+							(module.buildMeta).exportsType !== "namespace"
+						) {
+							canBeRoot = false;
+						}
+
+						// Module must not be an entry point
+						if (chunkGraph.isEntryModule(module)) {
+							setInnerBailoutReason(module, "Module is an entry point");
+							canBeInner = false;
+						}
+
+						if (deferEnabled && moduleGraph.isDeferred(module)) {
+							setInnerBailoutReason(module, "Module is deferred");
+							canBeInner = false;
+						}
+
+						if (canBeRoot) relevantModules.push(module);
+						if (canBeInner) possibleInners.add(module);
+					}
+					logger.timeEnd("select relevant modules");
+					logger.debug(
+						`${relevantModules.length} potential root modules, ${possibleInners.size} potential inner modules`
+					);
+					// sort by depth
+					// modules with lower depth are more likely suited as roots
+					// this improves performance, because modules already selected as inner are skipped
+					logger.time("sort relevant modules");
+					relevantModules.sort(
+						(a, b) =>
+							/** @type {number} */ (moduleGraph.getDepth(a)) -
+							/** @type {number} */ (moduleGraph.getDepth(b))
+					);
+					logger.timeEnd("sort relevant modules");
+
+					/** @type {Statistics} */
+					const stats = {
+						cached: 0,
+						alreadyInConfig: 0,
+						invalidModule: 0,
+						incorrectChunks: 0,
+						incorrectDependency: 0,
+						incorrectModuleDependency: 0,
+						incorrectChunksOfImporter: 0,
+						incorrectRuntimeCondition: 0,
+						importerFailed: 0,
+						added: 0
+					};
+					let statsCandidates = 0;
+					let statsSizeSum = 0;
+					let statsEmptyConfigurations = 0;
+
+					logger.time("find modules to concatenate");
+					/** @type {ConcatConfiguration[]} */
+					const concatConfigurations = [];
+					/** @type {Set<Module>} */
+					const usedAsInner = new Set();
+					// module -> merged runtime of its chunks, shared across all roots
+					/** @type {Map<Module, RuntimeSpec>} */
+					const moduleRuntimeCache = new Map();
+					for (const currentRoot of relevantModules) {
+						// when used by another configuration as inner:
+						// the other configuration is better and we can skip this one
+						// TODO reconsider that when it's only used in a different runtime
+						if (usedAsInner.has(currentRoot)) continue;
+
+						const chunkRuntime = getMergedModuleRuntime(
+							chunkGraph,
+							moduleRuntimeCache,
+							currentRoot
+						);
+						const exportsInfo = moduleGraph.getExportsInfo(currentRoot);
+						const filteredRuntime = filterRuntime(chunkRuntime, (r) =>
+							exportsInfo.isModuleUsed(r)
+						);
+						const activeRuntime =
+							filteredRuntime === true
+								? chunkRuntime
+								: filteredRuntime === false
+									? undefined
+									: filteredRuntime;
+
+						// create a configuration with the root; cache the root's chunks once
+						// so every candidate check reuses them instead of re-materializing
+						const currentConfiguration = new ConcatConfiguration(
+							currentRoot,
+							activeRuntime,
+							[...chunkGraph.getModuleChunksIterable(currentRoot)]
+						);
+
+						// cache failures to add modules
+						/** @type {Map<Module, Problem>} */
+						const failureCache = new Map();
+
+						// potential optional import candidates
+						/** @type {Set<Module>} */
+						const candidates = new Set();
+
+						// try to add all imports
+						for (const imp of this._getImports(
+							compilation,
+							currentRoot,
+							activeRuntime
+						)) {
+							candidates.add(imp);
+						}
+
+						for (const imp of candidates) {
+							/** @type {Set<Module>} */
+							const impCandidates = new Set();
+							const problem = this._tryToAdd(
+								compilation,
+								currentConfiguration,
+								imp,
+								chunkRuntime,
+								activeRuntime,
+								possibleInners,
+								impCandidates,
+								failureCache,
+								moduleRuntimeCache,
+								chunkGraph,
+								true,
+								stats
+							);
+							if (problem) {
+								failureCache.set(imp, problem);
+								currentConfiguration.addWarning(imp, problem);
+							} else {
+								for (const c of impCandidates) {
+									candidates.add(c);
+								}
+							}
+						}
+						statsCandidates += candidates.size;
+						if (!currentConfiguration.isEmpty()) {
+							const modules = currentConfiguration.getModules();
+							statsSizeSum += modules.size;
+							concatConfigurations.push(currentConfiguration);
+							for (const module of modules) {
+								if (module !== currentConfiguration.rootModule) {
+									usedAsInner.add(module);
+								}
+							}
+						} else {
+							statsEmptyConfigurations++;
+							const optimizationBailouts =
+								moduleGraph.getOptimizationBailout(currentRoot);
+							for (const warning of currentConfiguration.getWarningsSorted()) {
+								optimizationBailouts.push(
+									formatBailoutWarning(warning[0], warning[1])
+								);
+							}
+						}
+					}
+					logger.timeEnd("find modules to concatenate");
+					logger.debug(
+						`${
+							concatConfigurations.length
+						} successful concat configurations (avg size: ${
+							statsSizeSum / concatConfigurations.length
+						}), ${statsEmptyConfigurations} bailed out completely`
+					);
+					logger.debug(
+						`${statsCandidates} candidates were considered for adding (${stats.cached} cached failure, ${stats.alreadyInConfig} already in config, ${stats.invalidModule} invalid module, ${stats.incorrectChunks} incorrect chunks, ${stats.incorrectDependency} incorrect dependency, ${stats.incorrectChunksOfImporter} incorrect chunks of importer, ${stats.incorrectModuleDependency} incorrect module dependency, ${stats.incorrectRuntimeCondition} incorrect runtime condition, ${stats.importerFailed} importer failed, ${stats.added} added)`
+					);
+					// Create the largest configurations first: if a root also ended up inside
+					// a bigger configuration, the bigger one wins (smaller skipped below).
+					// Configurations can't be reused across roots: a module shared by several
+					// chunks is concatenated into each consumer (module duplication).
+					logger.time("sort concat configurations");
+					concatConfigurations.sort((a, b) => b.modules.size - a.modules.size);
+					logger.timeEnd("sort concat configurations");
+					/** @type {Set<Module>} */
+					const usedModules = new Set();
+
+					logger.time("create concatenated modules");
+					asyncLib.each(
+						concatConfigurations,
+						(concatConfiguration, callback) => {
+							const rootModule = concatConfiguration.rootModule;
+
+							// Root already concatenated into a larger configuration: skip.
+							// (Inner modules may still be shared, e.g. duplicated across entries.)
+							if (usedModules.has(rootModule)) return callback();
+							const modules = concatConfiguration.getModules();
+							for (const m of modules) {
+								usedModules.add(m);
+							}
+
+							// Create a new ConcatenatedModule
+							const newModule = ConcatenatedModule.create(
+								rootModule,
+								modules,
+								concatConfiguration.runtime,
+								compilation,
+								compiler.root,
+								compilation.outputOptions.hashFunction
+							);
+
+							const build = () => {
+								newModule.build(
+									compilation.options,
+									compilation,
+									/** @type {EXPECTED_ANY} */
+									(null),
+									/** @type {EXPECTED_ANY} */
+									(null),
+									(err) => {
+										if (err) {
+											if (!err.module) {
+												err.module = newModule;
+											}
+											return callback(err);
+										}
+										integrate();
+									}
+								);
+							};
+
+							const integrate = () => {
+								if (backCompat) {
+									ChunkGraph.setChunkGraphForModule(newModule, chunkGraph);
+									ModuleGraph.setModuleGraphForModule(newModule, moduleGraph);
+								}
+
+								for (const warning of concatConfiguration.getWarningsSorted()) {
+									moduleGraph
+										.getOptimizationBailout(newModule)
+										.push(formatBailoutWarning(warning[0], warning[1]));
+								}
+								moduleGraph.cloneModuleAttributes(rootModule, newModule);
+								for (const m of modules) {
+									// add to builtModules when one of the included modules was built
+									if (compilation.builtModules.has(m)) {
+										compilation.builtModules.add(newModule);
+									}
+									if (m !== rootModule) {
+										// attach external references to the concatenated module too
+										moduleGraph.copyOutgoingModuleConnections(
+											m,
+											newModule,
+											(c) =>
+												c.originModule === m &&
+												!(
+													c.dependency &&
+													Dependency.canConcatenate(c.dependency) &&
+													modules.has(c.module)
+												)
+										);
+										// remove module from chunk
+										for (const chunk of chunkGraph.getModuleChunksIterable(
+											rootModule
+										)) {
+											const sourceTypes = chunkGraph.getChunkModuleSourceTypes(
+												chunk,
+												m
+											);
+											if (
+												sourceTypes.size === 1 &&
+												sourceTypes.has(JAVASCRIPT_TYPE)
+											) {
+												chunkGraph.disconnectChunkAndModule(chunk, m);
+											} else {
+												const newSourceTypes = new Set(sourceTypes);
+												newSourceTypes.delete(JAVASCRIPT_TYPE);
+												chunkGraph.setChunkModuleSourceTypes(
+													chunk,
+													m,
+													newSourceTypes
+												);
+											}
+										}
+									}
+								}
+								compilation.modules.delete(rootModule);
+								ChunkGraph.clearChunkGraphForModule(rootModule);
+								ModuleGraph.clearModuleGraphForModule(rootModule);
+
+								// remove module from chunk
+								chunkGraph.replaceModule(rootModule, newModule);
+								// replace module references with the concatenated module
+								moduleGraph.moveModuleConnections(
+									rootModule,
+									newModule,
+									(c) => {
+										const otherModule =
+											c.module === rootModule ? c.originModule : c.module;
+										const innerConnection =
+											c.dependency &&
+											Dependency.canConcatenate(c.dependency) &&
+											modules.has(/** @type {Module} */ (otherModule));
+										return !innerConnection;
+									}
+								);
+								// add concatenated module to the compilation
+								compilation.modules.add(newModule);
+
+								callback();
+							};
+
+							build();
+						},
+						(err) => {
+							logger.timeEnd("create concatenated modules");
+							process.nextTick(callback.bind(null, err));
+						}
+					);
+				}
+			);
+		});
+	}
+
+	/**
+	 * Checks whether the module `import defer`s a module already in the config.
+	 * @param {ModuleGraph} moduleGraph the module graph
+	 * @param {Module} module the candidate module
+	 * @param {ConcatConfiguration} config the concat configuration
+	 * @returns {boolean} true when a deferred import targets a module in the config
+	 */
+	_defersModuleIn(moduleGraph, module, config) {
+		for (const dep of module.dependencies) {
+			if (
+				dep instanceof HarmonyImportDependency &&
+				ImportPhaseUtils.isDefer(dep.phase)
+			) {
+				const target = moduleGraph.getModule(dep);
+				if (target && config.has(target)) return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Returns the imported modules.
+	 * @param {Compilation} compilation the compilation
+	 * @param {Module} module the module to be added
+	 * @param {RuntimeSpec} runtime the runtime scope
+	 * @returns {Set<Module>} the imported modules
+	 */
+	_getImports(compilation, module, runtime) {
+		const moduleGraph = compilation.moduleGraph;
+		/** @type {Set<Module>} */
+		const set = new Set();
+		for (const dep of module.dependencies) {
+			// Get reference info only for dependencies that support concatenation
+			if (!Dependency.canConcatenate(dep)) continue;
+
+			const connection = moduleGraph.getConnection(dep);
+			// Reference is valid and has a module
+			if (
+				!connection ||
+				!connection.module ||
+				!connection.isTargetActive(runtime)
+			) {
+				continue;
+			}
+
+			const importedNames = compilation.getDependencyReferencedExports(
+				dep,
+				undefined
+			);
+
+			if (
+				importedNames.every((i) =>
+					Array.isArray(i) ? i.length > 0 : i.name.length > 0
+				) ||
+				Array.isArray(moduleGraph.getProvidedExports(module))
+			) {
+				set.add(connection.module);
+			}
+		}
+		return set;
+	}
+
+	/**
+	 * Returns the problematic module.
+	 * @param {Compilation} compilation webpack compilation
+	 * @param {ConcatConfiguration} config concat configuration (will be modified when added)
+	 * @param {Module} module the module to be added
+	 * @param {RuntimeSpec} runtime the runtime scope of the generated code
+	 * @param {RuntimeSpec} activeRuntime the runtime scope of the root module
+	 * @param {Set<Module>} possibleModules modules that are candidates
+	 * @param {Set<Module>} candidates list of potential candidates (will be added to)
+	 * @param {Map<Module, Problem>} failureCache cache for problematic modules to be more performant
+	 * @param {Map<Module, RuntimeSpec>} moduleRuntimeCache memoized merged runtime per module, shared across roots
+	 * @param {ChunkGraph} chunkGraph the chunk graph
+	 * @param {boolean} avoidMutateOnFailure avoid mutating the config when adding fails
+	 * @param {Statistics} statistics gathering metrics
+	 * @returns {null | Problem} the problematic module
+	 */
+	_tryToAdd(
+		compilation,
+		config,
+		module,
+		runtime,
+		activeRuntime,
+		possibleModules,
+		candidates,
+		failureCache,
+		moduleRuntimeCache,
+		chunkGraph,
+		avoidMutateOnFailure,
+		statistics
+	) {
+		const cacheEntry = failureCache.get(module);
+		if (cacheEntry) {
+			statistics.cached++;
+			return cacheEntry;
+		}
+
+		// Already added?
+		if (config.has(module)) {
+			statistics.alreadyInConfig++;
+			return null;
+		}
+
+		// Not possible to add?
+		if (!possibleModules.has(module)) {
+			return cacheFailure(
+				failureCache,
+				statistics,
+				"invalidModule",
+				module,
+				module
+			);
+		}
+
+		// A deferred import must stay a concatenation boundary: concatenating a
+		// module with a module it `import defer`s (a cycle) would erase the
+		// deferred namespace's lazy-evaluation and exotic-object semantics.
+		if (
+			compilation.options.experiments.deferImport &&
+			this._defersModuleIn(compilation.moduleGraph, module, config)
+		) {
+			/**
+			 * @param {RequestShortener} requestShortener request shortener
+			 * @returns {string} problem description
+			 */
+			const problem = (requestShortener) =>
+				`Module ${module.readableIdentifier(
+					requestShortener
+				)} imports a module in this configuration via import defer`;
+			return cacheFailure(
+				failureCache,
+				statistics,
+				"incorrectDependency",
+				module,
+				problem
+			);
+		}
+
+		// Module must be in the correct chunks
+		const missingChunks = config.rootChunks.filter(
+			(chunk) => !chunkGraph.isModuleInChunk(module, chunk)
+		);
+		if (missingChunks.length > 0) {
+			/**
+			 * Returns problem description.
+			 * @param {RequestShortener} requestShortener request shortener
+			 * @returns {string} problem description
+			 */
+			const problem = (requestShortener) => {
+				const missingChunksList = [
+					...new Set(
+						missingChunks.map((chunk) => chunk.name || "unnamed chunk(s)")
+					)
+				].sort();
+				const chunks = [
+					...new Set(
+						[...chunkGraph.getModuleChunksIterable(module)].map(
+							(chunk) => chunk.name || "unnamed chunk(s)"
+						)
+					)
+				].sort();
+				return `Module ${module.readableIdentifier(
+					requestShortener
+				)} is not in the same chunk(s) (expected in chunk(s) ${missingChunksList.join(
+					", "
+				)}, module is in chunk(s) ${chunks.join(", ")})`;
+			};
+			return cacheFailure(
+				failureCache,
+				statistics,
+				"incorrectChunks",
+				module,
+				problem
+			);
+		}
+
+		const moduleGraph = compilation.moduleGraph;
+
+		const incomingConnections =
+			moduleGraph.getIncomingConnectionsByOriginModule(module);
+
+		const incomingConnectionsFromNonModules =
+			incomingConnections.get(null) || incomingConnections.get(undefined);
+		if (incomingConnectionsFromNonModules) {
+			const activeNonModulesConnections =
+				incomingConnectionsFromNonModules.filter((connection) =>
+					// We are not interested in inactive connections
+					// or connections without dependency
+					connection.isActive(runtime)
+				);
+			if (activeNonModulesConnections.length > 0) {
+				/**
+				 * Returns problem description.
+				 * @param {RequestShortener} requestShortener request shortener
+				 * @returns {string} problem description
+				 */
+				const problem = (requestShortener) => {
+					/** @type {Set<string>} */
+					const importingExplanations = new Set(
+						activeNonModulesConnections
+							.map((c) => c.explanation)
+							.filter(Boolean)
+					);
+					const explanations = [...importingExplanations].sort();
+					return `Module ${module.readableIdentifier(
+						requestShortener
+					)} is referenced ${
+						explanations.length > 0
+							? `by: ${explanations.join(", ")}`
+							: "in an unsupported way"
+					}`;
+				};
+				return cacheFailure(
+					failureCache,
+					statistics,
+					"incorrectDependency",
+					module,
+					problem
+				);
+			}
+		}
+
+		/** @type {Map<Module, ReadonlyArray<ModuleGraph.ModuleGraphConnection>>} */
+		const incomingConnectionsFromModules = new Map();
+		for (const [originModule, connections] of incomingConnections) {
+			if (originModule) {
+				// Ignore connection from orphan modules
+				if (chunkGraph.getNumberOfModuleChunks(originModule) === 0) continue;
+
+				// We don't care for connections from other runtimes
+				const originRuntime = getMergedModuleRuntime(
+					chunkGraph,
+					moduleRuntimeCache,
+					originModule
+				);
+
+				if (!intersectRuntime(runtime, originRuntime)) continue;
+
+				// We are not interested in inactive connections
+				const activeConnections = connections.filter((connection) =>
+					connection.isActive(runtime)
+				);
+				if (activeConnections.length > 0) {
+					incomingConnectionsFromModules.set(originModule, activeConnections);
+				}
+			}
+		}
+
+		const incomingModules = [...incomingConnectionsFromModules.keys()];
+
+		// Module must be in the same chunks like the referencing module
+		const otherChunkModules = incomingModules.filter((originModule) => {
+			for (const chunk of config.rootChunks) {
+				if (!chunkGraph.isModuleInChunk(originModule, chunk)) {
+					return true;
+				}
+			}
+			return false;
+		});
+		if (otherChunkModules.length > 0) {
+			/**
+			 * Returns problem description.
+			 * @param {RequestShortener} requestShortener request shortener
+			 * @returns {string} problem description
+			 */
+			const problem = (requestShortener) => {
+				const names = otherChunkModules
+					.map((m) => m.readableIdentifier(requestShortener))
+					.sort();
+				return `Module ${module.readableIdentifier(
+					requestShortener
+				)} is referenced from different chunks by these modules: ${names.join(
+					", "
+				)}`;
+			};
+			return cacheFailure(
+				failureCache,
+				statistics,
+				"incorrectChunksOfImporter",
+				module,
+				problem
+			);
+		}
+
+		/** @type {Map<Module, ReadonlyArray<ModuleGraph.ModuleGraphConnection>>} */
+		const nonHarmonyConnections = new Map();
+		for (const [originModule, connections] of incomingConnectionsFromModules) {
+			const selected = connections.filter(
+				(connection) =>
+					!connection.dependency ||
+					(!Dependency.canConcatenate(connection.dependency) &&
+						// exports self-references of a concatenated CommonJS module
+						// are rewritten in place, so they don't block concatenation
+						!(
+							originModule === module &&
+							connection.dependency instanceof CommonJsSelfReferenceDependency
+						))
+			);
+			if (selected.length > 0) {
+				nonHarmonyConnections.set(originModule, connections);
+			}
+		}
+		if (nonHarmonyConnections.size > 0) {
+			/**
+			 * Returns problem description.
+			 * @param {RequestShortener} requestShortener request shortener
+			 * @returns {string} problem description
+			 */
+			const problem = (requestShortener) => {
+				const names = [...nonHarmonyConnections]
+					.map(
+						([originModule, connections]) =>
+							`${originModule.readableIdentifier(
+								requestShortener
+							)} (referenced with ${[
+								...new Set(
+									connections
+										.map((c) => c.dependency && c.dependency.type)
+										.filter(Boolean)
+								)
+							]
+								.sort()
+								.join(", ")})`
+					)
+					.sort();
+				return `Module ${module.readableIdentifier(
+					requestShortener
+				)} is referenced from these modules with unsupported syntax: ${names.join(
+					", "
+				)}`;
+			};
+			return cacheFailure(
+				failureCache,
+				statistics,
+				"incorrectModuleDependency",
+				module,
+				problem
+			);
+		}
+
+		if (runtime !== undefined && typeof runtime !== "string") {
+			// Module must be consistently referenced in the same runtimes
+			/** @type {{ originModule: Module, runtimeCondition: RuntimeSpec }[]} */
+			const otherRuntimeConnections = [];
+			outer: for (const [
+				originModule,
+				connections
+			] of incomingConnectionsFromModules) {
+				/** @type {false | RuntimeSpec} */
+				let currentRuntimeCondition = false;
+				for (const connection of connections) {
+					const runtimeCondition = filterRuntime(runtime, (runtime) =>
+						connection.isTargetActive(runtime)
+					);
+					if (runtimeCondition === false) continue;
+					if (runtimeCondition === true) continue outer;
+					currentRuntimeCondition =
+						currentRuntimeCondition !== false
+							? mergeRuntime(currentRuntimeCondition, runtimeCondition)
+							: runtimeCondition;
+				}
+				if (currentRuntimeCondition !== false) {
+					otherRuntimeConnections.push({
+						originModule,
+						runtimeCondition: currentRuntimeCondition
+					});
+				}
+			}
+			if (otherRuntimeConnections.length > 0) {
+				/**
+				 * Returns problem description.
+				 * @param {RequestShortener} requestShortener request shortener
+				 * @returns {string} problem description
+				 */
+				const problem = (requestShortener) =>
+					`Module ${module.readableIdentifier(
+						requestShortener
+					)} is runtime-dependent referenced by these modules: ${Array.from(
+						otherRuntimeConnections,
+						({ originModule, runtimeCondition }) =>
+							`${originModule.readableIdentifier(
+								requestShortener
+							)} (expected runtime ${runtimeToString(
+								runtime
+							)}, module is only referenced in ${runtimeToString(
+								/** @type {RuntimeSpec} */ (runtimeCondition)
+							)})`
+					).join(", ")}`;
+				return cacheFailure(
+					failureCache,
+					statistics,
+					"incorrectRuntimeCondition",
+					module,
+					problem
+				);
+			}
+		}
+
+		/** @type {undefined | number} */
+		let backup;
+		if (avoidMutateOnFailure) {
+			backup = config.snapshot();
+		}
+
+		// Add the module
+		config.add(module);
+
+		incomingModules.sort(compareModulesByIdentifier);
+
+		// Every module which depends on the added module must be in the configuration too.
+		for (const originModule of incomingModules) {
+			const problem = this._tryToAdd(
+				compilation,
+				config,
+				originModule,
+				runtime,
+				activeRuntime,
+				possibleModules,
+				candidates,
+				failureCache,
+				moduleRuntimeCache,
+				chunkGraph,
+				false,
+				statistics
+			);
+			if (problem) {
+				if (backup !== undefined) config.rollback(backup);
+				return cacheFailure(
+					failureCache,
+					statistics,
+					"importerFailed",
+					module,
+					problem
+				);
+			}
+		}
+
+		// Add imports to possible candidates list
+		for (const imp of this._getImports(compilation, module, runtime)) {
+			candidates.add(imp);
+		}
+		statistics.added++;
+		return null;
+	}
+}
+
+/** @typedef {Map<Module, Problem>} Warnings */
+
+class ConcatConfiguration {
+	/**
+	 * Creates an instance of ConcatConfiguration.
+	 * @param {Module} rootModule the root module
+	 * @param {RuntimeSpec} runtime the runtime
+	 * @param {Chunk[]} rootChunks the chunks the root module is in
+	 */
+	constructor(rootModule, runtime, rootChunks) {
+		/** @type {Module} */
+		this.rootModule = rootModule;
+		/** @type {RuntimeSpec} */
+		this.runtime = runtime;
+		/** @type {Chunk[]} the root's chunks, reused for every candidate's chunk check */
+		this.rootChunks = rootChunks;
+		/** @type {Set<Module>} */
+		this.modules = new Set();
+		this.modules.add(rootModule);
+		/** @type {Warnings} */
+		this.warnings = new Map();
+	}
+
+	/**
+	 * Processes the provided module.
+	 * @param {Module} module the module
+	 */
+	add(module) {
+		this.modules.add(module);
+	}
+
+	/**
+	 * Returns true, when the module is in the module set.
+	 * @param {Module} module the module
+	 * @returns {boolean} true, when the module is in the module set
+	 */
+	has(module) {
+		return this.modules.has(module);
+	}
+
+	isEmpty() {
+		return this.modules.size === 1;
+	}
+
+	/**
+	 * Adds the provided module to the concat configuration.
+	 * @param {Module} module the module
+	 * @param {Problem} problem the problem
+	 */
+	addWarning(module, problem) {
+		this.warnings.set(module, problem);
+	}
+
+	/**
+	 * Gets warnings sorted.
+	 * @returns {Warnings} warnings
+	 */
+	getWarningsSorted() {
+		return new Map(
+			[...this.warnings].sort((a, b) => {
+				const ai = a[0].identifier();
+				const bi = b[0].identifier();
+				if (ai < bi) return -1;
+				if (ai > bi) return 1;
+				return 0;
+			})
+		);
+	}
+
+	/**
+	 * Returns modules as set.
+	 * @returns {Set<Module>} modules as set
+	 */
+	getModules() {
+		return this.modules;
+	}
+
+	snapshot() {
+		return this.modules.size;
+	}
+
+	/**
+	 * Processes the provided snapshot.
+	 * @param {number} snapshot snapshot
+	 */
+	rollback(snapshot) {
+		const modules = this.modules;
+		for (const m of modules) {
+			if (snapshot === 0) {
+				modules.delete(m);
+			} else {
+				snapshot--;
+			}
+		}
+	}
+}
+
+module.exports = ModuleConcatenationPlugin;

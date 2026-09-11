@@ -1,0 +1,26 @@
+{
+	"name": "@istanbuljs/schema",
+	"version": "0.1.6",
+	"description": "Schemas describing various structures used by nyc and istanbuljs",
+	"main": "index.js",
+	"scripts": {
+		"test": "nyc node --test test/test.js",
+		"test:update-snapshots": "nyc node --test --test-update-snapshots test/test.js"
+	},
+	"engines": {
+		"node": ">=8"
+	},
+	"author": "Corey Farrell",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/istanbuljs/schema.git"
+	},
+	"bugs": {
+		"url": "https://github.com/istanbuljs/schema/issues"
+	},
+	"homepage": "https://github.com/istanbuljs/schema#readme",
+	"devDependencies": {
+		"nyc": "^18.0.0"
+	}
+}

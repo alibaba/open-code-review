@@ -1,0 +1,141 @@
+/*
+	MIT License http://www.opensource.org/licenses/mit-license.php
+	Author Tobias Koppers @sokra
+*/
+
+"use strict";
+
+const makeSerializable = require("../util/makeSerializable");
+const WebpackError = require("./WebpackError");
+
+/** @typedef {import("../Dependency").DependencyLocation} DependencyLocation */
+/** @typedef {import("../Dependency").SourcePosition} SourcePosition */
+/** @typedef {import("../serialization/ObjectMiddleware").ObjectDeserializerContext<[Error]>} ObjectDeserializerContext */
+/** @typedef {import("../serialization/ObjectMiddleware").ObjectSerializerContext<[Error]>} ObjectSerializerContext */
+
+const WASM_HEADER = Buffer.from([0x00, 0x61, 0x73, 0x6d]);
+
+class ModuleParseError extends WebpackError {
+	/**
+	 * Creates an instance of ModuleParseError.
+	 * @param {string | Buffer} source source code
+	 * @param {Error & { loc?: SourcePosition }} err the parse error
+	 * @param {string[]} loaders the loaders used
+	 * @param {string} type module type
+	 */
+	constructor(source, err, loaders, type) {
+		let message = `Module parse failed: ${err && err.message}`;
+		/** @type {undefined | DependencyLocation} */
+		let loc;
+
+		if (
+			((Buffer.isBuffer(source) && source.subarray(0, 4).equals(WASM_HEADER)) ||
+				(typeof source === "string" && /^\0asm/.test(source))) &&
+			!type.startsWith("webassembly")
+		) {
+			message +=
+				"\nThe module seem to be a WebAssembly module, but module is not flagged as WebAssembly module for webpack.";
+			message +=
+				"\nBREAKING CHANGE: Since webpack 5 WebAssembly is not enabled by default and flagged as experimental feature.";
+			message +=
+				"\nYou need to enable one of the WebAssembly experiments via 'experiments.asyncWebAssembly: true' (based on async modules) or 'experiments.syncWebAssembly: true' (like webpack 4, deprecated).";
+			message +=
+				"\nFor files that transpile to WebAssembly, make sure to set the module type in the 'module.rules' section of the config (e. g. 'type: \"webassembly/async\"').";
+		} else {
+			message += `\nFile was parsed as module type '${type}'.`;
+			// `loaders` is undefined when the serializer re-runs this constructor
+			// during cache deserialization — keep that branch so it never throws.
+			if (!loaders) {
+				message +=
+					"\nYou may need an appropriate loader to handle this file type. " +
+					"See https://webpack.js.org/concepts/loaders";
+			} else if (loaders.length >= 1) {
+				message += `\nFile was processed with these loaders:${loaders
+					.map((loader) => `\n * ${loader}`)
+					.join("")}`;
+				message +=
+					"\nYou may need an additional loader to handle the result of these loaders.";
+			} else {
+				message +=
+					"\nYou may need an appropriate loader to handle this file type, currently no loaders are configured to process this file. See https://webpack.js.org/concepts#loaders";
+			}
+		}
+
+		if (
+			err &&
+			err.loc &&
+			typeof err.loc === "object" &&
+			typeof err.loc.line === "number"
+		) {
+			const lineNumber = err.loc.line;
+
+			if (
+				Buffer.isBuffer(source) ||
+				// eslint-disable-next-line no-control-regex
+				/[\0\u0001\u0002\u0003\u0004\u0005\u0006\u0007]/.test(source)
+			) {
+				// binary file
+				message += "\n(Source code omitted for this binary file)";
+			} else {
+				const sourceLines = source.split(/\r?\n/);
+				if (lineNumber >= 1 && lineNumber <= sourceLines.length) {
+					// babel-like code frame: numbered gutter, `>` on the error line
+					// and a `^` caret at the error column
+					const column =
+						typeof err.loc.column === "number" ? err.loc.column : undefined;
+					const start = Math.max(1, lineNumber - 1);
+					const end = Math.min(sourceLines.length, lineNumber + 1);
+					const width = `${end}`.length;
+					for (let n = start; n <= end; n++) {
+						const line = sourceLines[n - 1];
+						const gutter = `${n}`.padStart(width);
+						message +=
+							n === lineNumber
+								? `\n> ${gutter} | ${line}`
+								: `\n  ${gutter} | ${line}`;
+						if (n === lineNumber && column !== undefined) {
+							// keep tabs so the caret stays aligned under tab-indented code
+							const align = line.slice(0, column).replace(/[^\t]/g, " ");
+							message += `\n  ${" ".repeat(width)} | ${align}^`;
+						}
+					}
+				}
+			}
+
+			loc = { start: err.loc };
+		} else if (err && err.stack) {
+			message += `\n${err.stack}`;
+		}
+
+		super(message);
+
+		/** @type {string} */
+		this.name = "ModuleParseError";
+		/** @type {undefined | DependencyLocation} */
+		this.loc = loc;
+		/** @type {Error} */
+		this.error = err;
+	}
+
+	/**
+	 * Serializes this instance into the provided serializer context.
+	 * @param {ObjectSerializerContext} context context
+	 */
+	serialize(context) {
+		context.write(this.error);
+		super.serialize(context);
+	}
+
+	/**
+	 * Restores this instance from the provided deserializer context.
+	 * @param {ObjectDeserializerContext} context context
+	 */
+	deserialize(context) {
+		this.error = context.read();
+		super.deserialize(context.rest);
+	}
+}
+
+makeSerializable(ModuleParseError, "webpack/lib/errors/ModuleParseError");
+
+module.exports = ModuleParseError;

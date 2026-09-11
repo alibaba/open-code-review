@@ -1,0 +1,14 @@
+.gradle/
+.idea/
+.intellijPlatform/
+.kotlin/
+.run/
+local.properties
+build/
+out/
+frontend/node_modules/
+src/main/resources/webview/*.js
+src/main/resources/webview/*.js.map
+
+# macOS
+.DS_Store

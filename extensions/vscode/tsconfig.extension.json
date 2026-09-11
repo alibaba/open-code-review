@@ -8,6 +8,6 @@
     "outDir": "out",
     "types": ["node", "vscode", "jest"]
   },
-  "include": ["src/extension/**/*", "src/shared/**/*"],
+  "include": ["src/extension/**/*", "../frontend/src/shared/**/*"],
   "exclude": ["node_modules", "out", "reference", "**/__tests__/**", "**/*.test.ts"]
 }

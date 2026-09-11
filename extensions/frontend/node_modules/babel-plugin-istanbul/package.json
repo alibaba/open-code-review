@@ -1,0 +1,75 @@
+{
+  "name": "babel-plugin-istanbul",
+  "version": "7.0.1",
+  "author": "Thai Pangsakulyanont @dtinth",
+  "license": "BSD-3-Clause",
+  "description": "A babel plugin that adds istanbul instrumentation to ES6 code",
+  "main": "lib/index.js",
+  "files": [
+    "lib"
+  ],
+  "dependencies": {
+    "@babel/helper-plugin-utils": "^7.0.0",
+    "@istanbuljs/load-nyc-config": "^1.0.0",
+    "@istanbuljs/schema": "^0.1.3",
+    "istanbul-lib-instrument": "^6.0.2",
+    "test-exclude": "^6.0.0"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.24.1",
+    "@babel/core": "^7.24.1",
+    "@babel/plugin-transform-block-scoping": "^7.24.1",
+    "@babel/plugin-transform-modules-commonjs": "^7.24.1",
+    "@babel/register": "^7.23.7",
+    "chai": "^4.2.0",
+    "coveralls": "^3.1.1",
+    "cross-env": "^7.0.3",
+    "mocha": "^6.2.2",
+    "nyc": "^15.0.0",
+    "pmock": "^0.2.3",
+    "standard": "^14.3.1"
+  },
+  "workspaces": [
+    "test/babel-8"
+  ],
+  "scripts": {
+    "coverage": "nyc report --reporter=text-lcov | coveralls",
+    "release": "babel src --out-dir lib",
+    "pretest": "standard && npm run release",
+    "test": "cross-env NODE_ENV=test nyc --reporter=lcov --reporter=text mocha --timeout 5000 test/*.js",
+    "prepublishOnly": "npm test && npm run release"
+  },
+  "standard": {
+    "ignore": [
+      "fixtures/*.js"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/istanbuljs/babel-plugin-istanbul.git"
+  },
+  "keywords": [
+    "istanbul",
+    "babel",
+    "plugin",
+    "instrumentation"
+  ],
+  "nyc": {
+    "include": [
+      "src/*.js",
+      "fixtures/should-cover.js"
+    ],
+    "require": [
+      "@babel/register"
+    ],
+    "sourceMap": false,
+    "instrument": false
+  },
+  "bugs": {
+    "url": "https://github.com/istanbuljs/babel-plugin-istanbul/issues"
+  },
+  "homepage": "https://github.com/istanbuljs/babel-plugin-istanbul#readme",
+  "engines": {
+    "node": ">=12"
+  }
+}

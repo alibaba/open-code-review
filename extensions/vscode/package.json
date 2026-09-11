@@ -84,11 +84,13 @@
   "scripts": {
     "compile": "webpack --mode development",
     "watch": "webpack --mode development --watch",
-    "build": "webpack --mode production",
+    "build": "npm run build:extension && npm run build:webview",
     "test": "jest",
     "lint": "eslint src --ext ts,tsx",
     "package": "vsce package --no-yarn",
-    "vscode:prepublish": "yarn build"
+    "vscode:prepublish": "npm run build",
+    "build:extension": "webpack --mode production",
+    "build:webview": "cd ../frontend && OCR_TARGET=vscode npm run build"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
