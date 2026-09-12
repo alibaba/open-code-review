@@ -188,6 +188,36 @@ func TestRunnerRejectsInvalidCWDAndArgs(t *testing.T) {
 	}
 }
 
+func TestConsumeStreamsCanCancelBlockedReaders(t *testing.T) {
+	stdoutRead, stdoutWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdoutWrite.Close()
+	stderrRead, stderrWrite, err := os.Pipe()
+	if err != nil {
+		stdoutRead.Close()
+		t.Fatal(err)
+	}
+	defer stderrWrite.Close()
+
+	streams := consumeStreams(stdoutRead, stderrRead, Limits{}, func(Event) {})
+	streams.cancel()
+	select {
+	case <-streams.done:
+	case <-time.After(time.Second):
+		t.Fatal("stream readers did not stop after cancellation")
+	}
+	select {
+	case result := <-streams.result:
+		if result.err == nil {
+			t.Fatal("expected reader error after cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream result was not reported after cancellation")
+	}
+}
+
 func runRequest(t *testing.T, runner Runner, ctx context.Context, request Request) (Outcome, []Event) {
 	t.Helper()
 	events, outcomes := runner.Run(ctx, request)

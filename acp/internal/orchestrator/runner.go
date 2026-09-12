@@ -32,6 +32,8 @@ func (r *causeRecorder) record(kind OutcomeKind, at time.Time) {
 
 func (r *ProcessRunner) run(ctx context.Context, request Request, limits Limits, events chan Event, outcomes chan<- Outcome) {
 	defer close(outcomes)
+	var closeEvents sync.Once
+	defer func() { closeEvents.Do(func() { close(events) }) }()
 	now := time.Now
 	if r.Now != nil {
 		now = r.Now
@@ -104,7 +106,7 @@ func (r *ProcessRunner) run(ctx context.Context, request Request, limits Limits,
 	}
 
 	streams := consumeStreams(stdoutRead, stderrRead, limits, emit)
-	defer func() { <-streams.done; close(events) }()
+	defer func() { <-streams.done; closeEvents.Do(func() { close(events) }) }()
 	waited := make(chan error, 1)
 	go func() {
 		err := cmd.Wait()
