@@ -52,6 +52,19 @@ func TestArgCountErrors_AreActionable(t *testing.T) {
 			},
 		},
 		{
+			// maximumArgs: `session export` takes an optional session id, so
+			// only the too-many case is an error.
+			name: "session export with too many args",
+			args: []string{"session", "export", "one", "two"},
+			want: []string{
+				`"ocr session export" accepts at most 1 argument(s)`,
+				"Usage:\n  ocr session export [flags] [session-id]",
+				"Example:",
+				"ocr session export -o review.html",
+				"Run 'ocr session export --help' for more information.",
+			},
+		},
+		{
 			name: "config unset with no args",
 			args: []string{"config", "unset"},
 			want: []string{
@@ -230,6 +243,8 @@ func TestValidInvocationsStillResolve(t *testing.T) {
 		{"exact 2 with 2", exactArgs(2), []string{"a", "b"}},
 		{"minimum 1 with 1", minimumArgs(1), []string{"a"}},
 		{"minimum 1 with 3", minimumArgs(1), []string{"a", "b", "c"}},
+		{"maximum 1 with 0", maximumArgs(1), nil},
+		{"maximum 1 with 1", maximumArgs(1), []string{"a"}},
 	}
 
 	cmd := &cobra.Command{Use: "demo <x>"}

@@ -6,6 +6,8 @@ package viewer
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -302,5 +304,43 @@ func TestTemplateFuncTaskTypeClass(t *testing.T) {
 	})
 	if err != nil {
 		t.Errorf("template execution with all task types: %v", err)
+	}
+}
+
+// TestHandleSession_ServedPageKeepsStaticRefs guards the other half of the
+// export gates in session.html. sessionPageData.Static is false for every HTTP
+// render, so the served page must still link the two /static/ assets and keep
+// its breadcrumb anchors — inlining them over HTTP would defeat the browser
+// cache, and the {{else}} branches are otherwise untested.
+func TestHandleSession_ServedPageKeepsStaticRefs(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, filepath.Join(repoDir, "srv1.jsonl"),
+		`{"type":"session_start","timestamp":"2025-06-01T10:00:00Z","cwd":"/my/proj","model":"claude"}`,
+		`{"type":"session_end","duration_seconds":30,"files_reviewed":["main.go"]}`)
+
+	req := httptest.NewRequest("GET", "/r/repo/srv1", nil)
+	rr := httptest.NewRecorder()
+	handleSession(rr, req, root, "repo", "srv1")
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`href="/static/style.css"`,
+		`src="/static/session.js"`,
+		`<a href="/" class="nav-brand"`,
+		`<a href="/r/repo">`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("served page missing %q", want)
+		}
+	}
+	if strings.Contains(body, `<span class="crumb">`) {
+		t.Error("served page de-linked the repo crumb; that is export-only")
 	}
 }
