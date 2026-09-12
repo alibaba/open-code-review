@@ -703,6 +703,23 @@ ocr completion powershell > ocr.ps1
 Add a line to your PowerShell profile that dot-sources `ocr.ps1`.
 
 
+## Man page
+
+`ocr` ships a UNIX manual page. After installing, read it with:
+
+```sh
+man ocr
+```
+
+The `install.sh` installer installs the page automatically. Other install
+methods (npm, source builds) do not, so generate the pages yourself and install
+them on your `MANPATH`:
+
+```sh
+ocr man <directory>
+```
+
+
 ## Tips & gotchas
 
 - `--audience agent` does **not** imply `--format json`, and `--format json`
