@@ -77,6 +77,12 @@ const (
 type ResolveOptions struct {
 	Provider string
 	Model    string
+	// TaskTimeout is the caller's concurrent-task timeout (e.g. the
+	// --timeout flag, in minutes). When set above zero it raises the
+	// per-request HTTP deadline so a slow request can use the whole task
+	// budget instead of hitting the client's independent 5-minute default.
+	// Env (OCR_LLM_TIMEOUT) and config-file timeout_sec keep precedence.
+	TaskTimeout time.Duration
 }
 
 // ResolveEndpoint resolves an endpoint without per-run overrides.
@@ -120,7 +126,7 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 			}
 			return ResolvedEndpoint{}, fmt.Errorf("resolve OCR config file: provider %q is not configured in %s section because the config file does not exist", opts.Provider, section)
 		}
-		return finalizeResolvedEndpoint("OCR config file", ep, env), nil
+		return finalizeResolvedEndpoint("OCR config file", ep, env, opts), nil
 	}
 
 	strategies := []struct {
@@ -142,7 +148,7 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 		// transport supplies both. Everything else still needs all three.
 		complete := ep.Model != "" && (ep.AmbientAuth || (ep.URL != "" && ep.Token != ""))
 		if ok && complete {
-			return finalizeResolvedEndpoint(strategy.name, ep, env), nil
+			return finalizeResolvedEndpoint(strategy.name, ep, env, opts), nil
 		}
 	}
 
@@ -176,13 +182,17 @@ func parseEnvOverrides() (envOverrides, error) {
 
 // finalizeResolvedEndpoint stamps the source label, strips the model suffix and
 // applies the global env overrides, which win over config-file values.
-func finalizeResolvedEndpoint(source string, ep ResolvedEndpoint, env envOverrides) ResolvedEndpoint {
+func finalizeResolvedEndpoint(source string, ep ResolvedEndpoint, env envOverrides, opts ResolveOptions) ResolvedEndpoint {
 	if ep.Source == "" {
 		ep.Source = source
 	}
 	ep.Model = stripModelSuffix(ep.Model)
 	if env.hasTimeout {
 		ep.Timeout = env.timeout
+	} else if ep.Timeout <= 0 && opts.TaskTimeout > 0 {
+		// No env or config-file request timeout: let the caller's task
+		// budget raise the per-request deadline above the client default.
+		ep.Timeout = opts.TaskTimeout
 	}
 	if env.headers != nil {
 		if ep.ExtraHeaders == nil {
