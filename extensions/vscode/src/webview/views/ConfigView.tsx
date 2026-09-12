@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { ConfigEntry, ConfigPanelFocus, ProviderTab, buildCustomCreateSaveEntries, buildCustomUpdateSaveEntries, buildOfficialSaveEntries, describeActiveProvider, detectInitialTab, isConfigReady, listCustomProviderNames } from '../../shared/configUtils';
-import { mergeModelLists, PROVIDER_PRESETS } from '../../shared/providers';
+import { mergeModelLists, PROVIDER_PRESETS, usesAmbientAuth } from '../../shared/providers';
 import { EnvCheckResult, LogLine, OcrConfig } from '../../shared/types';
 import { CliStatus, ConnTest } from '../configStore';
 import { CustomProviderManager } from '../components/CustomProviderManager';
@@ -331,6 +331,7 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
   const [providerName, setProviderName] = useState(initialProvider);
   const preset = PROVIDER_PRESETS.find((p) => p.name === providerName) ?? PROVIDER_PRESETS[0];
   const savedEntry = config?.providers[providerName];
+  const ambientAuth = usesAmbientAuth(preset, savedEntry?.protocol);
 
   const modelOptions = useMemo(
     () => mergeModelLists(preset.models, savedEntry?.models ?? []),
@@ -384,7 +385,9 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
             setApiKey('');
             setApiKeyTouched(false);
           }}
-          options={PROVIDER_PRESETS.map((p) => ({ value: p.name, label: p.displayName }))}
+          options={PROVIDER_PRESETS
+            .map((p) => ({ value: p.name, label: p.displayName }))
+            .sort((a, b) => a.label.localeCompare(b.label))}
         />
       </FormItem>
 
@@ -407,16 +410,18 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
         )}
       </FormItem>
 
-      <FormItem
-        label={t('view.config.apiKey')}
-        hint={`${t('view.config.apiKeyEnvHint')} ${preset.envVar}`}
-      >
-        <PasswordInput
-          value={apiKey}
-          onInput={(v) => { setApiKey(v); setApiKeyTouched(true); }}
-          placeholder={hasStoredKey && !apiKeyTouched ? t('view.config.apiKeySaved') : 'sk-...'}
-        />
-      </FormItem>
+      {!ambientAuth && (
+        <FormItem
+          label={t('view.config.apiKey')}
+          hint={`${t('view.config.apiKeyEnvHint')} ${preset.envVar}`}
+        >
+          <PasswordInput
+            value={apiKey}
+            onInput={(v) => { setApiKey(v); setApiKeyTouched(true); }}
+            placeholder={hasStoredKey && !apiKeyTouched ? t('view.config.apiKeySaved') : 'sk-...'}
+          />
+        </FormItem>
+      )}
 
       <ConnActions wide={wide} connTest={connTest} canSave={canSave} onBack={onBack} onTest={test} onSave={save} />
     </FormSection>
