@@ -147,6 +147,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"if/common.thrift", "Field IDs and Wire Compatibility"},
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
+		{"src/matmul.mojo", "Ownership, Borrowing, and Lifetimes"},
+		{"src/matmul.🔥", "Ownership, Borrowing, and Lifetimes"},
 		{"src/parser.ml", "Pattern Matching"},
 		{"lib/parser.mli", "Pattern Matching"},
 		{"src/Component.re", "Pattern Matching"},
