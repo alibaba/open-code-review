@@ -37,6 +37,9 @@ interface Props {
 
 const CUSTOM_NEW = '__new__';
 const MODEL_CUSTOM = '__custom__';
+const SORTED_PROVIDER_OPTIONS = PROVIDER_PRESETS
+  .map((p) => ({ value: p.name, label: p.displayName }))
+  .sort((a, b) => a.label.localeCompare(b.label));
 
 function resolvePanelState(config: OcrConfig | null, panelFocus?: ConfigPanelFocus | null) {
   const tab = panelFocus?.tab ?? detectInitialTab(config);
@@ -385,9 +388,7 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
             setApiKey('');
             setApiKeyTouched(false);
           }}
-          options={PROVIDER_PRESETS
-            .map((p) => ({ value: p.name, label: p.displayName }))
-            .sort((a, b) => a.label.localeCompare(b.label))}
+          options={SORTED_PROVIDER_OPTIONS}
         />
       </FormItem>
 
