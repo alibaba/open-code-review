@@ -31,7 +31,6 @@ func (r *causeRecorder) record(kind OutcomeKind, at time.Time) {
 }
 
 func (r *ProcessRunner) run(ctx context.Context, request Request, limits Limits, events chan Event, outcomes chan<- Outcome) {
-	defer close(events)
 	defer close(outcomes)
 	now := time.Now
 	if r.Now != nil {
@@ -105,6 +104,7 @@ func (r *ProcessRunner) run(ctx context.Context, request Request, limits Limits,
 	}
 
 	streams := consumeStreams(stdoutRead, stderrRead, limits, emit)
+	defer func() { <-streams.done; close(events) }()
 	waited := make(chan error, 1)
 	go func() {
 		err := cmd.Wait()
@@ -221,6 +221,11 @@ func (r *ProcessRunner) stop(cmd *exec.Cmd, waited <-chan error) (error, error) 
 	}
 	select {
 	case err := <-waited:
+		// The leader may exit while descendants remain alive; always perform
+		// the bounded process-group cleanup before returning.
+		if cleanupErr := killProcessGroup(cmd); cleanupErr != nil {
+			return err, newError(ErrorCleanup, "clean process group: %v", cleanupErr)
+		}
 		return err, errors.Join(cleanupErrs...)
 	case <-time.After(grace):
 		if err := killProcessGroup(cmd); err != nil {
@@ -246,14 +251,15 @@ func localOutcomeError(cause error, cleanupErrs ...error) error {
 	return errors.Join(errs...)
 }
 
-func awaitStreams(streams <-chan streamResult) (streamResult, error) {
+func awaitStreams(streams streamHandle) (streamResult, error) {
 	select {
-	case stream := <-streams:
+	case stream := <-streams.result:
 		return stream, nil
 	case <-time.After(drainGracePeriod):
 		// Do not wait forever for a descendant retaining a pipe. The process
 		// group was already killed on local abort; report a bounded cleanup
 		// failure on an otherwise completed invocation.
+		streams.cancel()
 		return streamResult{}, newError(ErrorCleanup, "OCR stream readers did not exit within %s", drainGracePeriod)
 	}
 }

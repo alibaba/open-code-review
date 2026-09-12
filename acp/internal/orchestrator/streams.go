@@ -20,6 +20,12 @@ type streamResult struct {
 	err            error
 }
 
+type streamHandle struct {
+	result <-chan streamResult
+	done   <-chan struct{}
+	cancel func()
+}
+
 type tailBuffer struct {
 	limit int
 	data  []byte
@@ -76,41 +82,55 @@ func readStderr(r io.Reader, byteLimit, lineLimit int, emit func(Event)) (string
 	warned := false
 	var warnings []Event
 	for {
-		line, err := reader.ReadString('\n')
-		if len(line) > 0 {
-			tail.Write([]byte(line))
-			message, truncated := truncateLine(line, lineLimit)
-			kind := EventDiagnostic
-			if strings.HasPrefix(strings.TrimSpace(message), "[ocr]") {
-				kind = EventProgress
+		var line []byte
+		truncated := false
+		for {
+			part, err := reader.ReadSlice('\n')
+			if len(part) > 0 {
+				tail.Write(part)
+				if len(line) < lineLimit+1 {
+					remaining := lineLimit + 1 - len(line)
+					if len(part) > remaining {
+						part = part[:remaining]
+						truncated = true
+					}
+					line = append(line, part...)
+				}
 			}
-			emit(Event{Kind: kind, Message: message, Truncated: truncated, OccurredAt: time.Now()})
-			if (truncated || tail.cut) && !warned {
-				warned = true
-				warning := Event{Kind: EventWarning, Message: "OCR stderr was truncated", Truncated: true, OccurredAt: time.Now()}
-				warnings = append(warnings, warning)
-				emit(warning)
+			if err == bufio.ErrBufferFull {
+				truncated = true
+				continue
 			}
-		}
-		if err == io.EOF {
-			return tail.String(), tail.cut, warnings, nil
-		}
-		if err != nil {
-			return tail.String(), tail.cut, warnings, err
+			if err != nil && err != io.EOF {
+				return tail.String(), tail.cut, warnings, err
+			}
+			if len(line) > 0 {
+				message := strings.TrimSuffix(strings.TrimSuffix(string(line), "\n"), "\r")
+				if len(message) > lineLimit {
+					message = message[:lineLimit]
+					truncated = true
+				}
+				kind := EventDiagnostic
+				if strings.HasPrefix(strings.TrimSpace(message), "[ocr]") {
+					kind = EventProgress
+				}
+				emit(Event{Kind: kind, Message: message, Truncated: truncated, OccurredAt: time.Now()})
+				if (truncated || tail.cut) && !warned {
+					warned = true
+					warning := Event{Kind: EventWarning, Message: "OCR stderr was truncated", Truncated: true, OccurredAt: time.Now()}
+					warnings = append(warnings, warning)
+					emit(warning)
+				}
+			}
+			if err == io.EOF {
+				return tail.String(), tail.cut, warnings, nil
+			}
+			break
 		}
 	}
 }
 
-func truncateLine(line string, limit int) (string, bool) {
-	line = strings.TrimSuffix(line, "\n")
-	line = strings.TrimSuffix(line, "\r")
-	if len(line) <= limit {
-		return line, false
-	}
-	return line[:limit], true
-}
-
-func consumeStreams(stdout, stderr io.Reader, limits Limits, emit func(Event)) <-chan streamResult {
+func consumeStreams(stdout, stderr io.Reader, limits Limits, emit func(Event)) streamHandle {
 	result := make(chan streamResult, 1)
 	done := make(chan struct{}, 2)
 	var stdoutData []byte
@@ -128,14 +148,23 @@ func consumeStreams(stdout, stderr io.Reader, limits Limits, emit func(Event)) <
 		defer func() { done <- struct{}{} }()
 		stderrTail, stderrCut, warnings, stderrErr = readStderr(stderr, limits.StderrBytes, limits.StderrLine, emit)
 	}()
+	allDone := make(chan struct{})
 	go func() {
 		<-done
 		<-done
+		close(allDone)
 		if stdoutErr != nil {
 			result <- streamResult{stdout: stdoutData, stdoutExceeded: stdoutExceeded, stderrTail: stderrTail, stderrCut: stderrCut, warnings: warnings, err: stdoutErr}
 			return
 		}
 		result <- streamResult{stdout: stdoutData, stdoutExceeded: stdoutExceeded, stderrTail: stderrTail, stderrCut: stderrCut, warnings: warnings, err: stderrErr}
 	}()
-	return result
+	return streamHandle{result: result, done: allDone, cancel: func() {
+		if c, ok := stdout.(io.Closer); ok {
+			_ = c.Close()
+		}
+		if c, ok := stderr.(io.Closer); ok {
+			_ = c.Close()
+		}
+	}}
 }
