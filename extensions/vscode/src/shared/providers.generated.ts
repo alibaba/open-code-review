@@ -418,6 +418,7 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
     "envVar": "Z_AI_API_KEY",
     "models": [
+      "glm-5.3",
       "glm-5.2",
       "glm-5.1",
       "glm-5",
