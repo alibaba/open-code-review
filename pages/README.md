@@ -58,6 +58,11 @@ npm run build
 
 Build output is generated in `pages/dist/`.
 
+`npm run build` regenerates `public/sitemap.xml` from the doc and blog slug
+registries (`src/content/docs/index.ts` and `src/content/blog/index.ts`) before
+bundling, so the sitemap cannot drift from the routes the site serves. Run
+`npm run sitemap` to regenerate it on its own.
+
 Use the project script or webpack-cli's `--node-env` option rather than calling
 Webpack without setting the Node environment. `webpack.config.cjs` derives
 `isProduction` from `NODE_ENV` alone, and that one flag decides both Webpack
@@ -91,8 +96,9 @@ Pages CI runs the following sequence for every PR that touches `pages/**`:
 2. `npm test`
 3. `npm run typecheck`
 4. `npm run build`
-5. Smoke-test the built `dist/`
-6. `npm run size`
+5. Validate `public/sitemap.xml`
+6. Smoke-test the built `dist/`
+7. `npm run size`
 
 For local pre-PR validation, run the npm-script checks in the same order. If the
 npm script shell does not support POSIX inline environment assignments, use
@@ -101,7 +107,9 @@ npm script shell does not support POSIX inline environment assignments, use
 `npm run lint` runs ESLint over `src/`; `npm test` runs the Vitest suite once
 (`vitest run`) in a `jsdom` environment; and `npm run size` measures the
 combined brotli-compressed size of the files matched by `dist/*.bundle.js`
-against the 150 kB budget declared in `package.json`.
+against the 150 kB budget declared in `package.json`. The sitemap step runs
+`node scripts/validate-sitemap.cjs public/sitemap.xml`, which checks the file is
+well-formed and that its URLs match the site's routes exactly.
 
 ## Project Structure
 
@@ -117,9 +125,10 @@ pages/
 │   ├── utils/           # Shared helpers
 │   ├── assets/          # Imported icons and images
 │   └── index.tsx        # Frontend entry point
-├── public/              # Static files copied verbatim into dist/
+├── public/              # Static assets copied verbatim into dist/ (robots.txt, sitemap.xml, CNAME, images/, og-image.png)
 ├── dist/                # Production build artifacts (generated, gitignored)
 ├── index.html           # HTML template used by HtmlWebpackPlugin
+├── scripts/             # Node build helpers (sitemap generation, slug extraction, sitemap validation)
 ├── webpack.config.cjs   # Bundling + dev server config
 ├── tailwind.config.cjs  # Tailwind theme/content configuration
 ├── postcss.config.cjs   # PostCSS pipeline (Tailwind + Autoprefixer)

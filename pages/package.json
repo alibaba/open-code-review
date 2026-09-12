@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "webpack serve",
+    "prebuild": "node scripts/generate-sitemap.cjs",
     "build": "NODE_ENV=production webpack --mode production",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src/",
+    "sitemap": "node scripts/generate-sitemap.cjs",
     "size": "size-limit"
   },
   "dependencies": {
@@ -51,6 +53,7 @@
     "css-loader": "^6.8.1",
     "eslint": "^10.8.0",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "fast-xml-parser": "^5.11.0",
     "html-webpack-plugin": "^5.5.3",
     "jsdom": "^30.0.0",
     "postcss": "^8.5.15",
