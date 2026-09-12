@@ -2,7 +2,9 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import { spawn } from "node:child_process"
+import { join } from "node:path"
 import { type Plugin, tool } from "@opencode-ai/plugin"
+import type { Plugin as PluginV2 } from "@opencode/plugin"
 
 interface ReviewInput {
   commit?: string
@@ -389,4 +391,156 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
       }),
     },
   }
+}
+
+// ---------------------------------------------------------------------------
+// OpenCode 2.x entrypoint (https://opencode.ai/v2/docs/build/plugins).
+// The default export at the bottom of this file serves both versions: V2
+// reads `id` + `setup`, V1 reads `server`. All OCR logic above is shared.
+//
+// The V2 API is imported as types only (`import type`), and the definition
+// below is a plain object literal: `Plugin.define` is an identity function,
+// so V1 never needs the `@opencode/plugin` package at runtime.
+//
+// V2 limitations (no equivalent in the V2 tool API): tool execution has no
+// abort signal, so cancellation relies on the overall timeout, and the
+// per-session working directory is resolved from the session location.
+// ---------------------------------------------------------------------------
+
+const OCR_REVIEW_DESCRIPTION =
+  "Run OpenCodeReview on workspace changes, one commit, or a ref range. " +
+  "Returns structured line-level findings as JSON. Use preview=true to inspect scope without LLM usage."
+
+const OCR_HEALTH_DESCRIPTION =
+  "Check the installed OpenCodeReview version and verify its configured LLM connection."
+
+const OCR_REVIEW_COMMAND_TEMPLATE =
+  "Use the ocr_review tool to review the requested target. " +
+  "Treat the following text as review intent, target details, and business context:"
+
+const OCR_REVIEW_COMMAND_SUFFIX =
+  ". If no target is specified, review the current workspace changes. " +
+  "Report findings by severity with exact file and line references."
+
+const OCR_HEALTH_COMMAND_TEMPLATE =
+  "Use the ocr_health tool and explain any configuration problem concisely."
+
+const reviewInputSchema = {
+  type: "object",
+  properties: {
+    commit: { type: "string", description: "Review one commit against its parent." },
+    from: { type: "string", description: "Base ref for a branch/range comparison. Must be paired with 'to'." },
+    to: { type: "string", description: "Target ref for a branch/range comparison. Must be paired with 'from'." },
+    resume: { type: "string", description: "Resume a previous OCR review session by ID." },
+    background: { type: "string", description: "Business or requirement context that the implementation should satisfy." },
+    exclude: { type: "string", description: "Comma-separated gitignore-style exclusion patterns." },
+    model: { type: "string", description: "Override the model configured in OpenCodeReview." },
+    concurrency: { type: "integer", minimum: 1, description: "Maximum concurrent file reviews." },
+    timeoutMinutes: { type: "integer", minimum: 1, description: "Per-file OCR timeout in minutes." },
+    overallTimeoutMinutes: { type: "integer", minimum: 1, description: "Optional wall-clock timeout for the complete OCR process in minutes." },
+    maxTools: { type: "integer", minimum: 1, description: "Maximum tool-call rounds per subtask; OCR enforces a minimum of 50." },
+    maxGitProcesses: { type: "integer", minimum: 1, description: "Maximum concurrent Git subprocesses." },
+    preview: { type: "boolean", description: "List the files that would be reviewed without calling an LLM." },
+  },
+  required: [],
+  additionalProperties: false,
+}
+
+async function resolveSessionCwd(ctx: PluginV2.Context, sessionID: string): Promise<string> {
+  try {
+    const session = await ctx.session.get({ sessionID })
+    const directory = session.location.directory
+    const subpath = session.subpath
+    return subpath === undefined || subpath === "" ? directory : join(directory, subpath)
+  } catch {
+    return ctx.location.directory
+  }
+}
+
+async function setupV2(ctx: PluginV2.Context): Promise<void> {
+  await ctx.tool.transform((editor) => {
+    editor.add({
+      name: "ocr_review",
+      description: OCR_REVIEW_DESCRIPTION,
+      input: reviewInputSchema,
+      execute: async (input, toolCtx) => {
+        const review = input as ReviewInput
+        const cwd = await resolveSessionCwd(ctx, toolCtx.sessionID)
+        const result = await runOcr(buildReviewArgs(review, cwd), {
+          cwd,
+          timeoutMs: review.overallTimeoutMinutes !== undefined
+            ? review.overallTimeoutMinutes * 60 * 1000
+            : 30 * 60 * 1000,
+        })
+        return { content: formatReviewResult(result, review.preview === true) }
+      },
+    })
+    editor.add({
+      name: "ocr_health",
+      description: OCR_HEALTH_DESCRIPTION,
+      input: { type: "object", properties: {}, additionalProperties: false },
+      execute: async (_input, toolCtx) => {
+        const cwd = await resolveSessionCwd(ctx, toolCtx.sessionID)
+        const [version, llm] = await Promise.allSettled([
+          runOcr(["version"], { cwd, timeoutMs: 30_000 }),
+          runOcr(["llm", "test"], { cwd, timeoutMs: 60_000 }),
+        ])
+        const parts: string[] = []
+        if (version.status === "fulfilled") {
+          parts.push(version.value.stdout)
+        } else {
+          parts.push(`Version check failed: ${version.reason?.message ?? "unknown error"}`)
+        }
+        if (llm.status === "fulfilled") {
+          parts.push(llm.value.stdout, llm.value.stderr)
+        } else {
+          parts.push(`LLM connection check failed: ${llm.reason?.message ?? "unknown error"}`)
+        }
+        return { content: parts.filter(Boolean).join("\n") }
+      },
+    })
+  })
+
+  // Like the V1 `??=` guards above, never override commands the user
+  // already defined under the same names.
+  const registeredCommands = await ctx.command.list()
+  const commandNames = new Set(registeredCommands.data.map((command) => command.name))
+
+  await ctx.command.transform((editor) => {
+    // Text-only prompts, matching the V1 $ARGUMENTS templates: spreading the
+    // incoming prompt attachments would violate exactOptionalPropertyTypes
+    // and risk stale attachment offsets after the text rewrite.
+    if (!commandNames.has("ocr-review")) {
+      editor.add({
+        name: "ocr-review",
+        description: "Review code changes with OpenCodeReview",
+        execute: async ({ sessionID, prompt, delivery }) => {
+          await ctx.session.prompt({
+            sessionID,
+            text: `${OCR_REVIEW_COMMAND_TEMPLATE}${prompt.text ?? ""}${OCR_REVIEW_COMMAND_SUFFIX}`,
+            delivery,
+          })
+        },
+      })
+    }
+    if (!commandNames.has("ocr-health")) {
+      editor.add({
+        name: "ocr-health",
+        description: "Check OpenCodeReview and its LLM connection",
+        execute: async ({ sessionID, delivery }) => {
+          await ctx.session.prompt({
+            sessionID,
+            text: OCR_HEALTH_COMMAND_TEMPLATE,
+            delivery,
+          })
+        },
+      })
+    }
+  })
+}
+
+export default {
+  id: "open-code-review",
+  setup: setupV2,
+  server: OpenCodeReviewPlugin,
 }
