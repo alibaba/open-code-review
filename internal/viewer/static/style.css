@@ -210,6 +210,50 @@ h2 {
     letter-spacing: -0.03em;
 }
 
+/* Keep the back link reachable beside long repository and session titles. */
+.page-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+    margin-bottom: 1.25rem;
+}
+.page-heading > h2 {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-bottom: 0;
+    overflow-wrap: anywhere;
+}
+.back-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0.5rem 0.65rem;
+    gap: 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-alt);
+    color: var(--link);
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.2;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+.back-link:hover {
+    color: var(--accent-hover);
+    background: var(--accent-soft);
+    border-color: var(--link);
+}
+.back-link:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+
 h3 {
     margin: 2rem 0 1rem;
     color: var(--text-strong);
@@ -317,6 +361,12 @@ h3 {
     margin-bottom: 0.75rem;
     word-break: break-all;
     font-size: 1.25rem;
+}
+.session-header .page-heading {
+    margin-bottom: 0.75rem;
+}
+.session-header .page-heading > h2 {
+    margin-bottom: 0;
 }
 .meta {
     display: flex;
@@ -1200,6 +1250,7 @@ p {
     main { padding: 0 1rem; margin: 1.25rem auto; }
     nav.breadcrumb { padding: 0 1rem; }
     .session-header { padding: 1.25rem; }
+    .page-heading { gap: 0.5rem; }
     .token-stats { grid-template-columns: repeat(2, 1fr); }
     .meta { gap: 0.5rem 1rem; font-size: 0.8rem; }
     .table th, .table td { padding: 0.6rem 0.75rem; font-size: 0.82rem; }

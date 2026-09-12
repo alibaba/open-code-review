@@ -105,18 +105,36 @@ func TestRenderTemplate_BadTemplate(t *testing.T) {
 }
 
 func TestRenderTemplate_Sessions(t *testing.T) {
-	rr := httptest.NewRecorder()
-	renderTemplate(rr, "sessions.html", sessionsData{
-		EncodedRepo: "test-repo",
-		RepoName:    "MyProject",
-		Sessions:    []SessionSummary{},
-	})
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
+	tests := []struct {
+		name     string
+		sessions []SessionSummary
+	}{
+		{name: "empty", sessions: []SessionSummary{}},
+		{name: "populated", sessions: []SessionSummary{{SessionID: "session-123", GitBranch: "main"}}},
 	}
-	if !strings.Contains(rr.Body.String(), "MyProject") {
-		t.Errorf("expected repo name in sessions template")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			renderTemplate(rr, "sessions.html", sessionsData{
+				EncodedRepo: "test-repo",
+				RepoName:    "MyProject",
+				Sessions:    tt.sessions,
+			})
+
+			if rr.Code != http.StatusOK {
+				t.Errorf("status = %d, want 200", rr.Code)
+			}
+			body := rr.Body.String()
+			if !strings.Contains(body, "MyProject") {
+				t.Errorf("expected repo name in sessions template")
+			}
+			if !strings.Contains(body, `<a class="back-link" href="/" aria-label="Back to repositories">`) {
+				t.Errorf("expected back link to repositories in sessions template")
+			}
+			if !strings.Contains(body, `<a href="/" class="nav-brand">`) {
+				t.Errorf("expected breadcrumb navigation to remain in sessions template")
+			}
+		})
 	}
 }
 
@@ -153,6 +171,13 @@ func TestRenderTemplate_SessionPage(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `<a class="back-link" href="/r/repo" aria-label="Back to sessions">`) {
+		t.Errorf("expected back link to repository sessions in session template")
+	}
+	if !strings.Contains(body, `<a href="/r/repo">MyRepo</a>`) {
+		t.Errorf("expected breadcrumb navigation to remain in session template")
 	}
 }
 
