@@ -68,6 +68,44 @@ func initRepoWithChange(t *testing.T) string {
 	return repo
 }
 
+func TestGetDiffSetRetainsBuiltInDirectoryExclusionsForReporting(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+
+	relPath := "vendor/example/keep.go"
+	path := filepath.Join(repo, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create vendor directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("package example\n\nconst Version = 1\n"), 0o644); err != nil {
+		t.Fatalf("write vendor file: %v", err)
+	}
+	runGitTest(t, repo, "add", relPath)
+	runGitTest(t, repo, "commit", "-q", "-m", "add tracked vendor file")
+	if err := os.WriteFile(path, []byte("package example\n\nconst Version = 2\n"), 0o644); err != nil {
+		t.Fatalf("modify vendor file: %v", err)
+	}
+
+	provider := NewWorkspaceProvider(repo, gitcmd.New(0))
+	set, err := provider.GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet returned error: %v", err)
+	}
+	if len(set.Included) != 0 || len(set.Excluded) != 1 || set.Excluded[0].NewPath != relPath {
+		t.Fatalf("GetDiffSet = %+v, want no included diff and %q excluded", set, relPath)
+	}
+
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff returned error: %v", err)
+	}
+	if len(diffs) != 0 {
+		t.Fatalf("GetDiff = %+v, want no reviewable vendor diff", diffs)
+	}
+}
+
 // initRepoWithNonASCIIChange creates a repository whose changed file path
 // contains both non-ASCII characters and Next.js-style route groups. It forces
 // Git's default path quoting so tests do not depend on the user's global config.

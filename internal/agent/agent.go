@@ -179,16 +179,17 @@ type RuntimeConfig struct {
 // compression / token aggregation now live in internal/llmloop.Runner; this
 // struct holds the diff-side state and orchestrates per-group subtasks.
 type Agent struct {
-	args            Args
-	diffs           []model.Diff // parsed diffs
-	totalInsertions int64
-	totalDeletions  int64
-	currentDate     string
-	session         *session.SessionHistory
-	subtaskFailed   int64 // count of failed subtasks, accessed atomically
-	runner          *llmloop.Runner
-	resumeInfo      *ResumeInfo
-	budgetExceeded  atomic.Bool // set when a token/tool-call budget gate stopped dispatch
+	args             Args
+	diffs            []model.Diff // parsed diffs
+	providerExcluded []model.Diff // diffs excluded by provider built-in directory rules
+	totalInsertions  int64
+	totalDeletions   int64
+	currentDate      string
+	session          *session.SessionHistory
+	subtaskFailed    int64 // count of failed subtasks, accessed atomically
+	runner           *llmloop.Runner
+	resumeInfo       *ResumeInfo
+	budgetExceeded   atomic.Bool // set when a token/tool-call budget gate stopped dispatch
 
 	fileGroups []FileGroup // semantic grouping result, stored for JSON output
 
@@ -576,12 +577,13 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 		provider = diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
 	}
 
-	parsed, err := provider.GetDiff(ctx)
+	set, err := provider.GetDiffSet(ctx)
 	if err != nil {
 		return fmt.Errorf("get diffs: %w", err)
 	}
 
-	a.diffs = parsed
+	a.diffs = set.Included
+	a.providerExcluded = set.Excluded
 
 	// Freeze this run's real commit endpoints and repository identity while the
 	// git-backed provider and a live context are in hand; finalizeManifest reads
@@ -590,8 +592,8 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 	a.inputResolution = provider.ResolveInput(ctx)
 	a.repoRemoteIdentity = provider.RemoteIdentity(ctx)
 
-	for i := range parsed {
-		d := &parsed[i]
+	for i := range a.diffs {
+		d := &a.diffs[i]
 		a.totalInsertions += d.Insertions
 		a.totalDeletions += d.Deletions
 	}
