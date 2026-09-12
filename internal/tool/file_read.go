@@ -37,11 +37,14 @@ func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (st
 
 	maxLines := fileReadMaxLines
 	if endLine > 0 {
-		requested := int(endLine) - int(startLine) + 1
-		if requested <= 0 {
-			return "", fmt.Errorf("invalid line range: start_line %d is greater than end_line %d", int(startLine), int(endLine))
+		if int(endLine) < int(startLine) {
+			// Models sometimes derive start_line from the old side of a diff
+			// hunk while end_line comes from the new file, or simply swap the
+			// two. Serve the swapped range instead of failing the call; the
+			// total-line count in the response lets the caller recover.
+			startLine, endLine = endLine, startLine
 		}
-		if requested < maxLines {
+		if requested := int(endLine) - int(startLine) + 1; requested < maxLines {
 			maxLines = requested
 		}
 	}
