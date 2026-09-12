@@ -36,6 +36,7 @@ Standard library only (json, urllib) so it runs on any stock python3 image.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -270,8 +271,10 @@ def format_comment(comment, comment_id=None):
     suggestion = comment.get("suggestion_code", "")
     existing = comment.get("existing_code", "")
     if suggestion and existing:
+        span = comment_span(comment)
+        suggestion_offset = span["end"] - span["start"] if span is not None and span["multiline"] else 0
         body += "\n\n**Suggestion:**\n"
-        body += "```suggestion:-0+0\n%s\n```" % suggestion
+        body += "```suggestion:-%d+0\n%s\n```" % (suggestion_offset, suggestion)
     return body
 
 
@@ -1250,6 +1253,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         comment = it["comment"]
         path = comment.get("path", "")
         end_line = comment.get("end_line", 0)
+        span = comment_span(comment)
         if not path or not end_line:
             failed_comments.append({"comment": comment, "reason": NO_LINE_REASON})
             continue
@@ -1268,6 +1272,22 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
                 "head_sha": diff_refs["head_sha"],
             },
         }
+        if span is not None and span["multiline"]:
+            path_sha1 = hashlib.sha1(path.encode("utf-8")).hexdigest()
+            discussion["position"]["line_range"] = {
+                "start": {
+                    "line_code": f"{path_sha1}_0_{span['start']}",
+                    "type": "new",
+                    "old_line": None,
+                    "new_line": span["start"],
+                },
+                "end": {
+                    "line_code": f"{path_sha1}_0_{span['end']}",
+                    "type": "new",
+                    "old_line": None,
+                    "new_line": span["end"],
+                },
+            }
         resp = poster.post_discussion(discussion, comment_id=it["id"])
         if resp.get("success"):
             stats["inline"] += 1
