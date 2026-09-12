@@ -79,6 +79,51 @@ func TestPreview(t *testing.T) {
 	}
 }
 
+// TestPreviewShowsProviderExcludedVendorDiff pins issue #1197: a tracked file
+// under vendor/ is intentionally not reviewable, but Preview must still show
+// it so its totals and exclusion reasons agree with the Git diff.
+func TestPreviewShowsProviderExcludedVendorDiff(t *testing.T) {
+	dir := initPreviewRepo(t)
+
+	path := filepath.Join(dir, "vendor", "pkg", "keep.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create vendor directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("package pkg\n\nconst Version = 1\n"), 0o644); err != nil {
+		t.Fatalf("write vendor file: %v", err)
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("add", "vendor/pkg/keep.go")
+	run("commit", "-m", "add tracked vendor file")
+	if err := os.WriteFile(path, []byte("package pkg\n\nconst Version = 2\n"), 0o644); err != nil {
+		t.Fatalf("modify vendor file: %v", err)
+	}
+
+	preview, err := Preview(context.Background(), Args{RepoDir: dir})
+	if err != nil {
+		t.Fatalf("Preview error: %v", err)
+	}
+	if preview.TotalFiles != 1 {
+		t.Fatalf("total_files = %d, want 1; entries = %+v", preview.TotalFiles, preview.Entries)
+	}
+	if preview.ExcludedCount != 1 || preview.ReviewableCount != 0 {
+		t.Fatalf("counts = excluded:%d reviewable:%d, want excluded:1 reviewable:0", preview.ExcludedCount, preview.ReviewableCount)
+	}
+	if len(preview.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(preview.Entries))
+	}
+	entry := preview.Entries[0]
+	if entry.Path != "vendor/pkg/keep.go" || entry.WillReview || entry.ExcludeReason != ExcludeDefaultPath {
+		t.Errorf("entry = %+v, want vendor/pkg/keep.go excluded as default_path", entry)
+	}
+}
+
 // TestPreviewMarksOversizedDiffTooLarge pins that preview applies the per-file
 // diff-size ceiling the real run applies before dispatch, and reports it under
 // its own reason rather than silently listing the file as reviewable.

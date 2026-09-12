@@ -51,9 +51,25 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 	result := &DiffPreview{
 		TotalInsertions: a.totalInsertions,
 		TotalDeletions:  a.totalDeletions,
-		TotalFiles:      len(a.diffs),
+		TotalFiles:      len(a.diffs) + len(a.providerExcluded),
 		// Non-nil so an empty diff marshals as `"files":[]`, not `"files":null`.
-		Entries: make([]DiffPreviewEntry, 0, len(a.diffs)),
+		Entries: make([]DiffPreviewEntry, 0, len(a.diffs)+len(a.providerExcluded)),
+	}
+
+	// Built-in directory exclusions happen before the agent receives a diff, so
+	// selectFiles cannot report them. Preview still lists them as default-path
+	// exclusions to make its file and line totals match the Git changeset.
+	for _, d := range a.providerExcluded {
+		result.TotalInsertions += d.Insertions
+		result.TotalDeletions += d.Deletions
+		result.ExcludedCount++
+		result.Entries = append(result.Entries, DiffPreviewEntry{
+			Path:          effectivePath(d),
+			Insertions:    d.Insertions,
+			Deletions:     d.Deletions,
+			Status:        diffStatus(d),
+			ExcludeReason: ExcludeDefaultPath,
+		})
 	}
 
 	for _, dec := range a.selectFiles(a.diffs) {
