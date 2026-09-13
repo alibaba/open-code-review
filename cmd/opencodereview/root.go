@@ -70,8 +70,12 @@ func commandNeedsGit(cmd *cobra.Command) bool {
 	if v, _ := cmd.Flags().GetBool("version"); v {
 		return false
 	}
-	switch cmd.Name() {
-	case "review", "scan", "delegate", "rules":
+	topLevel := cmd
+	for topLevel.Parent() != nil && topLevel.Parent().Parent() != nil {
+		topLevel = topLevel.Parent()
+	}
+	switch topLevel.Name() {
+	case "review", "scan", "delegate":
 		return true
 	default:
 		return false
