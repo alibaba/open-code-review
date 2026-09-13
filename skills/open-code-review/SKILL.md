@@ -183,7 +183,7 @@ Beyond the common flags above, `ocr review` exposes a few groups of controls. Ru
 **Model**
 
 - `--provider <name>` / `--model <name>` — override the configured provider/model for this run only.
-- `--effort low|medium|high` — default `medium`; sets review rounds to 1/2/3, which scales the effective per-group timeout (`--timeout` × rounds).
+- `--effort low|medium|high` — defaults to the configured effort, or `medium` when unset; sets review rounds to 1/2/3, which scales the effective per-group timeout (`--timeout` × rounds).
 
 **Budget**
 
@@ -210,7 +210,7 @@ OCR persists each review under `~/.opencodereview/sessions/`, so a failed or int
 - **LLM must be configured first** — `ocr review` will fail loudly if no LLM is reachable. See the Troubleshooting section below if this happens.
 - **Working directory matters** — `ocr review` operates on the Git repo at the current directory. Use `--repo /path/to/repo` to run from elsewhere.
 - **Untracked files are reviewed in workspace mode** — running bare `ocr review` includes staged, unstaged, *and* untracked changes. Stage selectively if you want narrower scope.
-- **Large diffs may hit token limits** — `MAX_TOKENS` sets the prompt budget (`200000` in the review template; `ocr scan` uses `58888`), and prompt tokens are compressed once they reach ~80% of it. Model output is capped separately by `MAX_COMPLETION_TOKENS` (`16384`). A file whose diff alone exceeds ~80% of `MAX_TOKENS` is skipped before the LLM is called.
+- **Large diffs may hit token limits** — `MAX_TOKENS` sets the prompt budget (`200000` in the review template; `ocr scan` uses `58888`); conversation context is compressed to stay within this prompt budget. Model output is capped separately by `MAX_COMPLETION_TOKENS` (`16384`). A file whose diff alone exceeds ~80% of `MAX_TOKENS` is skipped before the LLM is called.
 - **Plan phase triggers on either of two thresholds** — a group runs an extra risk-analysis phase before main review when its largest changed file reaches `PLAN_MODE_LINE_THRESHOLD` (default `50`) **or** it holds 2+ files whose combined changed lines reach `PLAN_MODE_GROUP_LINE_THRESHOLD` (default `100`). This adds latency but improves quality.
 - **Don't pass `--audience human`** — it streams progress UI that pollutes output. Always use `--audience agent`.
 - **Comment language follows config** — the `language` config controls review comment language, defaults to `English`, and accepts any language name (for example `English` or `中文`).
