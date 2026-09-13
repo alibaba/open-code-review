@@ -60,13 +60,7 @@ Pass the reviewable file paths from Step 1. Output is grouped by rule content â€
 ### Step 3: Get Diffs
 
 Use git directly based on the mode/ref info from Step 1. Always pass
-`--no-pager` on the git command itself. Some Agent Bash environments
-allocate a pseudo-terminal (PTY); without `--no-pager`, Git may start an
-interactive pager such as `less`, which waits for input the agent cannot
-provide. A host-side timeout can then terminate the command and report
-exit code 137. This is a pager and PTY interaction, not a Git diff size
-limitation. Environment-level alternatives such as `GIT_PAGER=cat` or
-`core.pager=cat` can be overridden by user configuration.
+`--no-pager` on the git command itself.
 
 **Range mode** (merge_base provided in preview output):
 ```bash

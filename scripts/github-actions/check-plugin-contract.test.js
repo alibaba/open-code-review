@@ -525,13 +525,6 @@ function testDeclarationTargetsAreCoveredByTheTreesWeValidate() {
   }
 }
 
-// --- shipped delegate skill: Step 3 git examples ---------------------------
-//
-// Issue #1059: Agent Bash PTYs can make Git start `less`, which hangs until
-// the host kills the command (exit 137). The shipped skills must tell the
-// agent to pass `--no-pager` on the git command itself. This reads the real
-// SKILL.md files rather than a fixture so a reverted example fails CI.
-
 const REPO_ROOT = path.join(__dirname, "..", "..");
 
 const DELEGATE_SKILL_PATHS = [
@@ -589,17 +582,6 @@ function testDelegateSkillsRequireNoPagerOnStep3GitExamples() {
       bare,
       [],
       `${rel}: Step 3 still instructs a bare git diff/show: ${JSON.stringify(bare)}`
-    );
-
-    assert.ok(
-      /pseudo-terminal|\bPTY\b/.test(step3),
-      `${rel}: Step 3 must mention a PTY / pseudo-terminal`
-    );
-    assert.ok(/\bless\b/.test(step3), `${rel}: Step 3 must mention less`);
-    assert.ok(/137/.test(step3), `${rel}: Step 3 must mention exit 137`);
-    assert.ok(
-      /GIT_PAGER/.test(step3) && /core\.pager/.test(step3),
-      `${rel}: Step 3 must warn that GIT_PAGER / core.pager can be overridden`
     );
 
     sections.push(step3);
