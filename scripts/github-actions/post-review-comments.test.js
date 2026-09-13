@@ -2326,6 +2326,9 @@ async function main() {
   // Cross-push checkpoints (#476) — write path
   await testCheckpointAdvanceGateTable();
   await testCheckpointAdvanceRequiresFullSha();
+  await testManifestHeadPinsEveryReviewPost();
+  await testLegacyPullRequestEventUsesSnapshotHead();
+  await testIssueCommentRejectsMissingOrMalformedManifestHead();
   await testCheckpointCarryForwardOnEveryBodyPath();
   await testCheckpointAdvancesOnZeroFindings();
   await testCheckpointNeverAdvancesWithoutSticky();
@@ -3816,6 +3819,98 @@ async function testCheckpointAdvanceRequiresFullSha() {
       false,
       `resolved_head ${JSON.stringify(head)} must not advance the checkpoint`
     );
+  }
+}
+
+async function testManifestHeadPinsEveryReviewPost() {
+  const reviewedHead = "a".repeat(40);
+  const eventHead = "b".repeat(40);
+  const currentHead = "c".repeat(40);
+  const result = {
+    comments: [{ path: "src/a.js", content: "finding from reviewed head", start_line: 1, end_line: 1 }],
+    manifest: ckManifest({ input: { resolved_head: reviewedHead } }),
+  };
+
+  for (const [eventName, payload] of [
+    ["issue_comment", {}],
+    ["pull_request_target", { pull_request: { head: { sha: eventHead } } }],
+  ]) {
+    const gh = makeGithub({ headSha: currentHead, bulkError: "validation failed", bulkErrorStatus: 400 });
+    await runPostReviewComments({
+      github: gh,
+      context: {
+        repo: { owner: "owner", repo: "repo" },
+        issue: { number: 123 },
+        eventName,
+        payload,
+      },
+      core: { setOutput() {} },
+      fs: mockFs(JSON.stringify(result), ""),
+    });
+
+    assert.strictEqual(gh.createReviewCalls.length, 2, `${eventName}: batch and fallback both attempted`);
+    assert.deepStrictEqual(
+      gh.createReviewCalls.map((call) => call.commit_id),
+      [reviewedHead, reviewedHead],
+      `${eventName}: every posting path uses the reviewed manifest head`
+    );
+    assert.strictEqual(gh.getPullCalls.length, 0, `${eventName}: posting never refetches a moving PR head`);
+  }
+}
+
+async function testLegacyPullRequestEventUsesSnapshotHead() {
+  const eventHead = "d".repeat(40);
+  const gh = makeGithub({ headSha: "e".repeat(40) });
+  const result = {
+    comments: [{ path: "src/a.js", content: "legacy finding", start_line: 1, end_line: 1 }],
+  };
+
+  await runPostReviewComments({
+    github: gh,
+    context: {
+      repo: { owner: "owner", repo: "repo" },
+      issue: { number: 123 },
+      eventName: "pull_request_target",
+      payload: { pull_request: { head: { sha: eventHead } } },
+    },
+    core: { setOutput() {} },
+    fs: mockFs(JSON.stringify(result), ""),
+  });
+
+  assert.strictEqual(gh.createReviewCalls[0].commit_id, eventHead);
+  assert.strictEqual(gh.getPullCalls.length, 0, "legacy PR events use their immutable payload snapshot");
+}
+
+async function testIssueCommentRejectsMissingOrMalformedManifestHead() {
+  for (const [label, manifest] of [
+    ["missing", undefined],
+    ["malformed", ckManifest({ input: { resolved_head: "not-a-sha" } })],
+  ]) {
+    const gh = makeGithub({ headSha: "f".repeat(40) });
+    const result = {
+      comments: [{ path: "src/a.js", content: "unbound finding", start_line: 1, end_line: 1 }],
+      manifest,
+    };
+
+    await assert.rejects(
+      runPostReviewComments({
+        github: gh,
+        context: {
+          repo: { owner: "owner", repo: "repo" },
+          issue: { number: 123 },
+          eventName: "issue_comment",
+          payload: {},
+        },
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify(result), ""),
+      }),
+      /resolved_head/,
+      `${label} manifest head must be rejected`
+    );
+    assert.strictEqual(gh.getPullCalls.length, 0, `${label}: rejection must not fetch the current PR head`);
+    assert.strictEqual(gh.createReviewCalls.length, 0, `${label}: rejection must happen before review writes`);
+    assert.strictEqual(gh.issueComments.length, 0, `${label}: rejection must happen before summary writes`);
+    assert.strictEqual(gh.updatedComments.length, 0, `${label}: rejection must happen before summary updates`);
   }
 }
 
