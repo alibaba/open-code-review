@@ -59,22 +59,29 @@ Pass the reviewable file paths from Step 1. Output is grouped by rule content â€
 
 ### Step 3: Get Diffs
 
-Use git directly based on the mode/ref info from Step 1:
+Use git directly based on the mode/ref info from Step 1. Always pass
+`--no-pager` on the git command itself. Some Agent Bash environments
+allocate a pseudo-terminal (PTY); without `--no-pager`, Git may start an
+interactive pager such as `less`, which waits for input the agent cannot
+provide. A host-side timeout can then terminate the command and report
+exit code 137. This is a pager and PTY interaction, not a Git diff size
+limitation. Environment-level alternatives such as `GIT_PAGER=cat` or
+`core.pager=cat` can be overridden by user configuration.
 
 **Range mode** (merge_base provided in preview output):
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff <merge_base>..<to> -- <path>
 ```
 
 **Commit mode**:
 ```bash
-git show <commit> -- <path>
+git --no-pager show <commit> -- <path>
 ```
 
 **Workspace mode**:
 ```bash
 # Tracked files
-git diff HEAD -- <path>
+git --no-pager diff HEAD -- <path>
 # New untracked files â€” read directly (entire file is new code)
 cat <path>
 ```
