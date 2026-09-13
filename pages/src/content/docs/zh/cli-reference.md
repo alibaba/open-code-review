@@ -78,6 +78,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | 列出已保存的评审会话。 |
 | `ocr session show <id>` | `ocr sessions show <id>` | 查看单个会话及其逐文件检查点。 |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | 输出单个会话中记录的评审评论。 |
+| `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 对比两个会话的问题：新增、仍存在、已解决、未评审。 |
 | `ocr viewer` | — | 启动用于历史评审会话的本地 Web UI（`localhost:5483`）。 |
 | `ocr version` | — | 打印版本、commit、平台、构建日期与 GitHub URL。 |
 
@@ -115,7 +116,7 @@ unstaged + untracked 变更。
 | `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。 |
 | `--exclude <patterns>` | — | — | 逗号分隔的 gitignore 风格排除模式；与 `rule.json` 的 excludes 合并。 |
 | `--concurrency <n>` | — | `8` | 并行评审的最大文件数。 |
-| `--timeout <minutes>` | — | `10` | 每文件截止时间。`0` 关闭超时。 |
+| `--timeout <minutes>` | — | `15` | 每文件截止时间。`0` 关闭超时。按 effort 轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
 | `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。 |
 | `--max-tokens <n>` | — | 配置或模板默认 | 每文件**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。 |
@@ -423,6 +424,29 @@ ocr session comments --severity critical,high --category bug,security <session-i
 | `--severity <list>` | 全部 | 逗号分隔的要包含的严重程度（`critical`、`high`、`medium`、`low`）。 |
 | `--category <list>` | 全部 | 逗号分隔的要包含的类别（如 `bug`、`security`）。 |
 
+### `ocr session compare`
+
+将两个会话的问题分为四类：**new**（仅出现在 after 会话）、**persisting**
+（两个会话都有）、**resolved**（仅出现在 before 会话）、**not reviewed**
+（出现在 before 会话，但 after 会话没有评审该文件，因此不计为已解决）。
+
+匹配依据是文件路径、类别和问题代码片段，而不是行号，所以仅仅是行号发生偏移
+的问题仍然算作 persisting。
+
+```bash
+ocr session compare <before-session-id> <after-session-id>
+ocr session diff <before-session-id> <after-session-id>
+ocr session compare --json <before-session-id> <after-session-id>
+```
+
+两个会话必须属于同一个仓库，否则命令报错。评审模式不同只会在 stderr 输出
+警告，因此 `--json` 输出仍可直接用于管道。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--repo <path>` | 当前目录 | 要对比会话的仓库。 |
+| `--json` | `false` | 以 JSON 输出对比结果（`new`、`persisting`、`resolved`、`not_reviewed`）。 |
+
 ## `ocr rules`
 
 规则自查。只有一个子命令：
@@ -540,13 +564,21 @@ ocr viewer [flags]
 
 Flags:
   --addr <address>   listen address (default: localhost:5483)
+  --open <mode>      when to open the browser: auto, always, never (default: auto)
 
 Examples:
-  ocr viewer                     # start on default port
+  ocr viewer                     # start and open the browser
   ocr viewer --addr :3000        # bind to all interfaces on port 3000
+  ocr viewer --open=never        # just print the URL
+  ocr viewer --open=always       # force it when auto declines (piped output, WSL)
 ```
 
 启动一个内嵌 HTTP 服务器，读取 `~/.opencodereview/sessions/...`，并以浏览器友好的 UI 渲染历史评审会话。见[会话查看器](../viewer/)。
+
+`--open=auto` 在以下情况跳过打开浏览器：stdout 不是终端、设置了
+`SSH_CONNECTION` 且没有转发显示环境、或 Linux 上 `DISPLAY` 与 `WAYLAND_DISPLAY`
+均为空；跳过的原因会与 URL 一并打印。若 auto 拒绝但其实有可用浏览器，用
+`--open=always`。
 
 ## `ocr version`
 

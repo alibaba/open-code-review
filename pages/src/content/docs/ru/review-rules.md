@@ -29,7 +29,7 @@ OCR разрешает правила через **четырёхуровнев�
 Системный уровень **всегда** присутствует (он вшит в бинарник), поэтому всегда
 разрешается *какое-то* правило.
 
-## Формат файла правил (уровни 1–3)
+## Формат файла правил (уровни 1–3) {#rule-file-format-layers-1-3}
 
 ```json
 {
@@ -80,7 +80,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 ## Как фильтруются файлы
 
 Фильтр — пятношаговый алгоритм в
-[`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go).
+[`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
 Для каждого diff OCR спрашивает:
 
 1. **`binary`** — Файл бинарный? Исключается.
@@ -96,10 +96,12 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
    тестовых файлов (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`,
    `**/*_spec.rb`, …)? Исключается.
 
-Файлы, прошедшие все пять проверок, отправляются в LLM. Причина `deleted`
-(не этап — она вычисляется отдельно в `Preview()`) помечает файлы, чей новый
-путь — `/dev/null`; нового содержимого для ревью нет. Используйте `ocr review
---preview`, чтобы вывести результат этого фильтра, не тратя ни одного токена.
+Файлы, прошедшие все пять проверок, отправляются в LLM, если только сам diff
+не превышает 80% от `max_tokens`: `selectFiles` применяет этот предел после
+проверок и исключает файл как `too_large`. Он же помечает файл, чей новый
+путь — `/dev/null`, причиной `deleted`; нового содержимого для ревью нет.
+Используйте `ocr review --preview`, чтобы вывести результат этого фильтра, не
+тратя ни одного токена.
 
 ### Стандартные исключения путей
 
@@ -162,13 +164,14 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.java` | `java.md` |
 | `**/*.go` | `go.md` — исходный код Go. |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md` — шаблоны FreeMarker (SSTI / XSS / обработка null). |
+| `**/*.{hbs,mustache}` | `handlebars_mustache.md` — шаблоны Handlebars и Mustache. |
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — компоненты и islands Astro. |
-| `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,hpp}` | `cpp.md` |
+| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
 | `**/*.c` | `c.md` |
 | `**/*.{py,ipynb}` | `python.md` — исходный код Python. |
 | `**/*.{php,phtml}` | `php.md` — исходный код PHP и шаблоны PHP. |
@@ -184,10 +187,30 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet. |
 | `**/*.thrift` | `thrift.md` — совместимость Apache Thrift IDL на уровне wire. |
 | `**/*.capnp` | `capnp.md` — совместимость схем Cap'n Proto на уровне wire. |
+| `**/*.{v,sv,vh}` | `verilog.md` — RTL на Verilog и SystemVerilog. |
+| `**/*.{vhd,vhdl}` | `vhdl.md` — RTL на VHDL. |
+| `**/*.m` | `matlab.md` (или `objc.md` через [определение содержимого](#content-sniffing-for-m-files)) |
+| `**/*.mm` | `objc.md` — исходный код Objective-C++. |
+| `**/*.sol` | `solidity.md` — смарт-контракты Solidity. |
+| `**/*.vy` | `vyper.md` — смарт-контракты Vyper. |
+| `**/*.rego` | `rego.md` — политики Rego (OPA). |
 | *(fallback)* | `default.md` |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`
 в промптах plan и main task.
+
+### Определение содержимого для файлов `.m` {#content-sniffing-for-m-files}
+
+Расширение `.m` используется и MATLAB, и Objective-C. OCR заглядывает в первую
+непустую строку файла для различения: если она выглядит как Objective-C
+(например, `#import`, `@implementation`, комментарий в стиле C), вместо
+`matlab.md` используется `objc.md`. Если содержимое прочитать не удаётся,
+разрешение откатывается к `matlab.md`.
+
+> **Примечание о стабильности.** Эвристика определения может изменяться между
+> версиями OCR. Если вам нужна детерминированная маршрутизация `.m`, задайте
+> для `.m`-путей явное правило на уровне проекта — правила проекта всегда
+> имеют приоритет над системным уровнем.
 
 ## Проверка, какое правило выиграло: `ocr rules check`
 

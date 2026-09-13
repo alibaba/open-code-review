@@ -87,6 +87,38 @@ curl -o .github/workflows/ocr-review.yml \
 > 为不支持该字段的 LLM provider 关闭 thinking-mode 请求。若你的 provider 需保留
 > thinking-mode，删除该行。
 
+### Action 参数
+
+上游工作流通过 `uses: alibaba/open-code-review@main` 把评审委托给可复用的
+composite action
+（[`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)）。
+除上述凭据外，以下 input 用于调节评审本身——在 action 步骤的 `with:` 下传入：
+
+| Input | 默认值 | 说明 |
+|---|---|---|
+| `effort` | `''` | 传给 `ocr review --effort` 的评审强度预设：`low`、`medium` 或 `high`（不区分大小写）。留空则沿用 CLI 默认值（已配置的值，否则为 medium）。需要 OCR v1.10.0 或更新版本；在更旧版本上 action 会提前以明确报错失败。 |
+| `max_tokens_budget` | `''` | 传给 `ocr review --max-tokens-budget` 的 token 总量上限（输入 + 输出）。留空或 `'0'` 表示不限。超过上限后停止派发，被跳过的文件记为 `failed(budget)`，已产生的部分结果仍会发布，评审以 0 退出。 |
+| `llm_reasoning_effort` | `''` | 面向支持 `reasoning_effort` 请求字段的模型（如 GLM-5.x、OpenAI reasoning 模型）的推理深度：`minimal`、`low`、`medium`、`high`、`max`（不区分大小写）。经 `llm_extra_body` 合并进请求体，因此所有已发布的 CLI 版本均可使用；`llm_extra_body` 中显式的 `reasoning_effort` 键优先于此 input。留空（默认）则不发送。仅适用于 OpenAI 兼容协议——Anthropic API 会拒绝未知请求体字段，action 在该协议下会快速失败；Anthropic 的 thinking 控制请改用 `llm_extra_body` 中的显式键。 |
+| `stream_progress` | `'false'` | 设为 `'true'` 时，把 `[ocr]` 实时进度行流入工作流日志（stderr 上的 human audience），而不是在评审结束前保持静默。仅影响展示：stderr 仍会写入文件，供产物上传与评论张贴使用。 |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+    effort: high
+    max_tokens_budget: '10000000'
+    llm_reasoning_effort: low
+    stream_progress: 'true'
+```
+
+完整 input 列表见
+[`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)——
+包括张贴模式（`sticky_summary`、`incremental`）、severity/类别路由与跨 push
+检查点等。
+
 ### 定制
 
 以下都是对你刚复制的工作流文件

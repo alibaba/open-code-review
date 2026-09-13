@@ -182,7 +182,7 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
   - [Default (OCR-managed)](https://open-codereview.ai/docs/configuration) — OCR runs the review using its configured LLM
   - [Delegation Mode](https://open-codereview.ai/docs/delegate) — your coding agent runs the review using its own LLM; no OCR API key required
 - [CI/CD Integration](https://open-codereview.ai/docs/cicd) — GitHub Actions, GitLab CI, GitFlic CI, and Gerrit integration
-- [Session Viewer](https://open-codereview.ai/docs/viewer) — browse and replay review sessions in browser
+- [Session Viewer](https://open-codereview.ai/docs/viewer) — browse and replay review sessions in browser, mark comments as fixed or ignored and hide them while you work through the findings
 - [Telemetry](https://open-codereview.ai/docs/telemetry) — OpenTelemetry integration for observability
 - [FAQ](https://open-codereview.ai/docs/faq) — common questions and troubleshooting
 

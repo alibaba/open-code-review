@@ -75,12 +75,12 @@ export const ko: TranslationKeys = {
   'features.feat2Desc': '독립적인 라인 단위 코멘트 위치 지정 모듈이 3단계 점진적 LLM 전략으로 각 코멘트를 정확한 라인 번호에 고정합니다. 별도의 리플렉션 모듈은 환각과 지식 드리프트를 초기에 걸러냅니다.',
   'features.feat3Title': '멀티 모델 프로토콜 지원',
   'features.feat3Desc': 'Anthropic Messages API, OpenAI Chat Completions API, OpenAI Responses API를 지원합니다. Anthropic, OpenAI, DashScope, DeepSeek, Z.AI 등 프리셋 프로바이더를 기본 제공해 바로 사용할 수 있고 자체 배포를 위한 커스텀 모델 엔드포인트도 연결할 수 있습니다.',
-  'features.feat4Title': '동적 병렬 처리',
-  'features.feat4Desc': '하위 작업을 동적으로 분할해 설정 가능한 goroutine 워커(기본값 8개)로 병렬 리뷰합니다. 변경 규모가 커도 빠르게 끝납니다.',
+  'features.feat4Title': 'Effort 기반 다단계 점진 리뷰',
+  'features.feat4Desc': '제어할 수 있는 Agent 리뷰 심도: low는 빠른 피드백, medium은 품질과 비용의 균형, high는 놓쳐서는 안 되는 핵심 변경에 적합합니다. 등급이 높아질수록 이미 찾아낸 문제를 발판으로 더 깊이 파고들며, 새로운 리스크가 나오지 않는 시점에 스스로 수렴해 심도에 불필요한 비용을 쓰지 않습니다.',
   'features.feat5Title': '스마트 메모리 압축',
   'features.feat5Desc': '코드 리뷰에 맞춰 설계한 메모리 압축 방식입니다. 컨텍스트를 3단계(동결/압축/활성)로 나눠 관리하며 토큰 한계를 넘어 깊이 있게 리뷰합니다.',
   'features.feat6Title': '내장 리뷰 규칙',
-  'features.feat6Desc': '대규모 실제 시나리오에서 검증한 리뷰 규칙을 제공합니다. Java, TypeScript, Go, Python, Kotlin, Rust, C++, C 등 10개 이상의 언어를 지원하며 NPE, 스레드 안전성, XSS, SQL 인젝션 등에 특화된 규칙을 포함합니다.',
+  'features.feat6Desc': '대규모 실제 시나리오에서 검증한 리뷰 규칙을 제공합니다. Java, TypeScript, Go, Python, Kotlin, Rust, C/C++, Swift, Solidity, Verilog 등 40개 이상의 언어와 파일 유형을 지원하며 NPE, 스레드 안전성, XSS, SQL 인젝션 등에 특화된 검사를 기본 제공합니다.',
 
   // Benchmark
   'benchmark.sectionLabel': '오픈 벤치마크',

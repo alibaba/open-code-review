@@ -232,11 +232,11 @@ func TestBuildResponsesParams_Tools(t *testing.T) {
 	}
 }
 
-// TestBuildResponsesParams_ToolChoice locks the tool_choice mapping the
-// review-filter task depends on. ChatRequest.ToolChoice="required" must become
-// responses.ToolChoiceOptionsRequired on the wire, and only when tools are
-// attached. Any other value (including "auto") is intentionally left
-// untranslated, matching the Anthropic client's behavior.
+// TestBuildResponsesParams_ToolChoice locks the explicit tool_choice mapping.
+// ChatRequest.ToolChoice="required" must become responses.ToolChoiceOptionsRequired
+// on the wire, and only when tools are attached. Any other value (including
+// "auto") is intentionally left untranslated, matching the Anthropic client's
+// behavior.
 func TestBuildResponsesParams_ToolChoice(t *testing.T) {
 	client := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
 	tool := ToolDef{Function: FunctionDef{Name: "f", Description: "d", Parameters: map[string]any{"type": "object"}}}
@@ -758,7 +758,7 @@ func TestOpenAIResponsesClient_SessionKeyExpandedInHeadersAndBody(t *testing.T) 
 			"x-session-affinity": "{ocr_session_key}",
 		},
 		ExtraBody: map[string]any{"prompt_cache_key": "{ocr_session_key}"},
-	}, nil)
+	}, nil, nil)
 
 	ctx := ContextWithSessionKey(context.Background(), "real-task-key")
 	if _, err := client.CompletionsWithCtx(ctx, ChatRequest{
@@ -800,7 +800,7 @@ func TestOpenAIResponsesClient_ExtraBodyPromptCacheKeyOverridesSessionID(t *test
 		Model:     "gpt-5.4",
 		Protocol:  ProtocolOpenAIResponses,
 		ExtraBody: map[string]any{"prompt_cache_key": "{ocr_session_key}"},
-	}, nil)
+	}, nil, nil)
 
 	ctx := ContextWithSessionKey(context.Background(), "task-scoped-key")
 	if _, err := withOverride.CompletionsWithCtx(ctx, ChatRequest{
@@ -819,7 +819,7 @@ func TestOpenAIResponsesClient_ExtraBodyPromptCacheKeyOverridesSessionID(t *test
 		Token:    "test-key",
 		Model:    "gpt-5.4",
 		Protocol: ProtocolOpenAIResponses,
-	}, nil)
+	}, nil, nil)
 	if _, err := plain.CompletionsWithCtx(ctx, ChatRequest{
 		Messages:  []Message{{Role: "user", Content: "ping"}},
 		SessionID: "file-session-uuid",

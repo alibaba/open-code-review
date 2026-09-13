@@ -101,7 +101,7 @@ type Args struct {
 	// executeToolCall instead of via a separate worker pool.
 	CommentWorkerPool *CommentWorkerPool
 
-	// Concurrency limit for per-file subtasks. MaxConcurrency <= 0 defaults to 8.
+	// Concurrency limit for per-group subtasks. MaxConcurrency <= 0 defaults to 8.
 	MaxConcurrency int
 
 	// Concurrent task timeout in minutes. 0 means no timeout.
@@ -146,7 +146,7 @@ type Args struct {
 	SealedInput *diff.InputResolution
 
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
-	// whole run; dispatch stops once the running total + a per-file look-ahead
+	// whole run; dispatch stops once the running total + a per-group look-ahead
 	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
 	MaxTokensBudget int64
 
@@ -177,7 +177,7 @@ type RuntimeConfig struct {
 
 // Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
 // compression / token aggregation now live in internal/llmloop.Runner; this
-// struct holds the diff-side state and orchestrates per-file subtasks.
+// struct holds the diff-side state and orchestrates per-group subtasks.
 type Agent struct {
 	args            Args
 	diffs           []model.Diff // parsed diffs
@@ -274,10 +274,10 @@ func (a *Agent) newRequestMeta(filePath string, taskType session.TaskType, reque
 	}
 }
 
-// Run executes the full review pipeline: parse diffs -> plan per file -> LLM tool-loop -> collect comments.
+// Run executes the full review pipeline: parse diffs -> group -> plan per group -> LLM tool-loop -> collect comments.
 func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// Base prompt-cache affinity key for any LLM request in this run that a task doesn't re-scope.
-	// Each task conversation (plan, per-file main loop, compression, ...) refines it with llm.SessionTaskKey where it starts,
+	// Each task conversation (plan, per-group main loop, compression, ...) refines it with llm.SessionTaskKey where it starts,
 	// so affinity keys stay per-conversation, the granularity provider prompt caches actually reuse prefixes at.
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
@@ -315,15 +315,47 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	a.injectDiffMap()
 	a.args.Tools.Freeze()
 
+	// Apply the one pre-dispatch selection — the same call `--preview` makes —
+	// so the set reported here is the set registerCoverage seals below.
+	decisions := a.selectFiles(a.diffs)
+	kept, counts := summarizeSelection(decisions)
 	totalChanged := len(a.diffs)
-	reviewCount := a.countReviewable(a.diffs)
+	reviewCount := counts.Selected
 	fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) changed, reviewing %d in %s\n", totalChanged, reviewCount, a.args.RepoDir)
 
-	a.diffs = a.filterDiffs(a.diffs)
+	a.logExclusions(decisions)
+	a.diffs = kept
+
+	// One run-level skip signal, keyed on the selected set rather than on what
+	// the run keeps: deletions are retained for prompt context but never
+	// reviewed, so a deletion-only changeset is skipped too. The cause goes in an
+	// attribute because no event name is accurate on its own — a size-gated skip
+	// can coexist with statically filtered files — and the reasons are ordered
+	// most-actionable first.
+	if counts.Selected == 0 {
+		skipReason := "no_supported_files"
+		switch {
+		case counts.TooLarge > 0:
+			skipReason = "too_large"
+		case len(kept) > 0:
+			skipReason = "deleted"
+		}
+		telemetry.Event(ctx, "review.skipped",
+			telemetry.AnyToAttr("reason", skipReason),
+			telemetry.AnyToAttr("file.count", totalChanged),
+			telemetry.AnyToAttr("too_large.count", counts.TooLarge))
+	}
 
 	if len(a.diffs) == 0 {
-		fmt.Fprintln(stdout.Writer(), "[ocr] No supported files changed. Skipping review.")
-		telemetry.Event(ctx, "no.files.changed")
+		// no.files.changed keeps firing for the case it always covered, so existing
+		// consumers are unaffected; it stayed silent when the size gate emptied the
+		// set, which is the reading review.skipped adds.
+		if counts.TooLarge > 0 {
+			fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) exceeded the token size limit; nothing left to review. Skipping review.\n", counts.TooLarge)
+		} else {
+			fmt.Fprintln(stdout.Writer(), "[ocr] No supported files changed. Skipping review.")
+			telemetry.Event(ctx, "no.files.changed")
+		}
 		// No item was ever selected: finalize yields a skipped manifest (no
 		// run_failure), which is the correct terminal state for "nothing to do".
 		// A persistence failure here is still a delivery error — a clean skip
@@ -373,7 +405,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	a.session.RecordResumeLineage(session.NewResumeLineage(
 		a.args.Resume, a.session.SessionID, a.args.Provider, a.args.Model))
 
-	// Step 2: Dispatch per-file subtasks concurrently
+	// Step 2: Dispatch per-group subtasks concurrently
 	comments, err := a.dispatchSubtasks(ctx)
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
@@ -491,6 +523,9 @@ func (a *Agent) Warnings() []AgentWarning { return a.runner.Warnings() }
 // ToolCalls returns per-tool call counts accumulated during review.
 func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 
+// ToolFailures returns failed registered-tool calls accumulated during review.
+func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.ToolFailures() }
+
 // BudgetExceeded reports whether the aggregate token budget gate stopped
 // dispatch before all files were reviewed. The run still returns the partial
 // comments collected up to that point (and a nil error), so those results are
@@ -583,21 +618,12 @@ func (a *Agent) injectDiffMap() {
 	}
 }
 
-// dispatchSubtasks runs the Plan + Main phases for each changed file concurrently.
+// dispatchSubtasks runs the Plan + Main phases for each file group concurrently.
 func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error) {
 	startTime := time.Now()
 	defer func() {
 		telemetry.RecordReviewDuration(ctx, time.Since(startTime))
 	}()
-
-	// Pre-filter: discard diffs whose diff content alone exceeds 80% of the token threshold.
-	a.diffs = a.filterLargeDiffs(a.diffs)
-	if len(a.diffs) == 0 {
-		// Everything oversized: nothing is selected, so this is a skipped run
-		// (empty coverage → terminal_state=skipped), not a hard error.
-		fmt.Fprintln(stdout.Writer(), "[ocr] All changed files exceeded the token size limit. Skipping review.")
-		return nil, nil
-	}
 
 	// Pre-dispatch pass: freeze the coverage denominator before any reuse or
 	// concurrent dispatch. Register every non-deleted planned item (reused and
@@ -625,7 +651,8 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 
 	// Group files semantically via LLM.
 	groupResult := groupDiffs(ctx, nonDeleted, a.args.LLMClient, a.args.Model,
-		a.args.Template, llmloop.PromptTokenLimit(a.args.Template.MaxTokens))
+		a.args.Template, llmloop.PromptTokenLimit(a.args.Template.MaxTokens),
+		&groupingSessionOpts{session: a.session, provider: a.args.Provider, model: a.args.Model})
 	groups := groupResult.groups
 	a.fileGroups = groups
 	if groupResult.usage != nil {
@@ -640,10 +667,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	sem := make(chan struct{}, concurrency)
-	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute
-	if timeout > 0 && a.args.Template.ReviewRounds() > 1 {
-		timeout = timeout + timeout/2
-	}
+	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute * time.Duration(a.args.Template.ReviewRounds())
 
 	var dispatched int64
 dispatchLoop:
@@ -1160,7 +1184,7 @@ var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 // safe, generic reason. It never returns the raw error text (which may embed a
 // provider payload, credentials or absolute paths); the full error is persisted
 // separately in the session checkpoint. Context deadline/cancel are recognized
-// via errors.Is (the per-file timeout is the only deadline in play), and the
+// via errors.Is (the per-group subtask timeout is the only deadline in play), and the
 // empty-template precondition is a configuration failure.
 func classifyItemError(err error) (session.FailureClass, string) {
 	switch {
@@ -1322,10 +1346,12 @@ func (a *Agent) groupHasComments(g FileGroup) bool {
 	return false
 }
 
-// groupChurn returns the group's aggregate churn and its largest single-file
-// churn. Both feed Template.PlanRequired.
-func groupChurn(g FileGroup) (total, maxFile int64) {
-	for _, d := range g.Diffs {
+// diffsChurn returns the set's aggregate churn and its largest single-file
+// churn. Both feed Template.PlanRequired; the aggregate alone feeds
+// Template.GroupingPlan, which runs before any FileGroup exists and so takes
+// the diffs directly.
+func diffsChurn(diffs []model.Diff) (total, maxFile int64) {
+	for _, d := range diffs {
 		changed := d.Insertions + d.Deletions
 		total += changed
 		if changed > maxFile {
@@ -1345,7 +1371,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 	ctx, span := telemetry.StartSpan(ctx, "subtask.execute.group."+groupKey)
 	defer span.End()
 
-	totalChanged, maxFileChanged := groupChurn(g)
+	totalChanged, maxFileChanged := diffsChurn(g.Diffs)
 	telemetry.SetAttr(span, "group.label", groupKey)
 	telemetry.SetAttr(span, "group.file_count", len(g.Diffs))
 	telemetry.SetAttr(span, "lines.changed", totalChanged)
@@ -1443,7 +1469,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 			defer mainSpan.End()
 			telemetry.SetAttr(mainSpan, "group.label", groupKey)
 			telemetry.SetAttr(mainSpan, "round", round)
-			completed, stop, err := a.runner.RunPerFile(ctx, messages, groupKey)
+			completed, stop, err := a.runner.RunMainTask(ctx, messages, groupKey)
 			if err != nil {
 				mainSpan.SetStatus(codes.Error, err.Error())
 				mainSpan.RecordError(err)
@@ -1577,6 +1603,22 @@ func buildConcatenatedDiffs(diffs []model.Diff) string {
 	return sb.String()
 }
 
+// formatDiffEntry renders one changed file as STATUS   path (+N/-M). It is the
+// shared shape for both the grouping file list and the other-changed-files
+// block, so every prompt that enumerates files presents them identically.
+func formatDiffEntry(d model.Diff) string {
+	status := "MODIFIED"
+	switch {
+	case d.IsNew:
+		status = "ADDED"
+	case d.IsDeleted:
+		status = "DELETED"
+	case d.IsRenamed:
+		status = "RENAMED"
+	}
+	return fmt.Sprintf("%s   %s (+%d/-%d)", status, d.NewPath, d.Insertions, d.Deletions)
+}
+
 // buildChangeFilesExceptGroup returns a formatted list of changed files excluding all group members.
 func (a *Agent) buildChangeFilesExceptGroup(groupDiffs []model.Diff) string {
 	exclude := make(map[string]bool, len(groupDiffs))
@@ -1589,15 +1631,6 @@ func (a *Agent) buildChangeFilesExceptGroup(groupDiffs []model.Diff) string {
 		if d.IsBinary || exclude[d.NewPath] || exclude[d.OldPath] {
 			continue
 		}
-		status := "MODIFIED"
-		switch {
-		case d.IsNew:
-			status = "ADDED"
-		case d.IsDeleted:
-			status = "DELETED"
-		case d.OldPath != d.NewPath:
-			status = "RENAMED"
-		}
 		// Separator before the entry, conditional on something already being
 		// written, rather than after it conditional on the a.diffs index: the loop
 		// skips binaries and group members, so an index-based test emits a trailing
@@ -1606,7 +1639,7 @@ func (a *Agent) buildChangeFilesExceptGroup(groupDiffs []model.Diff) string {
 		if sb.Len() > 0 {
 			sb.WriteString("\n")
 		}
-		sb.WriteString(status + "   " + d.NewPath)
+		sb.WriteString(formatDiffEntry(d))
 	}
 	return sb.String()
 }
@@ -1646,7 +1679,7 @@ func (a *Agent) resolveGroupSystemRule(diffs []model.Diff) string {
 	var blocks []ruleBlock
 	index := make(map[string]int, len(sorted))
 	for _, d := range sorted {
-		r := a.args.SystemRule.Resolve(strings.ToLower(d.NewPath))
+		r := a.args.SystemRule.Resolve(d.NewPath)
 		if r == "" {
 			continue
 		}
@@ -1804,11 +1837,10 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-		Model:      a.args.Model,
-		Messages:   messages,
-		Tools:      filterTools,
-		ToolChoice: "required",
-		MaxTokens:  a.args.Template.CompletionTokenLimit(),
+		Model:     a.args.Model,
+		Messages:  messages,
+		Tools:     filterTools,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {
@@ -1942,76 +1974,41 @@ func parseFilterResponse(raw string, total int) map[int]struct{} {
 	return indices
 }
 
-// filterLargeDiffs drops diffs whose diff content alone consumes more than 80% of MaxTokens.
-func (a *Agent) filterLargeDiffs(diffs []model.Diff) []model.Diff {
-	limit := llmloop.PromptTokenLimit(a.args.Template.MaxTokens)
-	if limit <= 0 {
-		return diffs
-	}
-	var kept []model.Diff
-	skipped := 0
-
-	for _, d := range diffs {
-		tokens := llm.CountTokens(d.Diff)
-		if tokens > limit {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 80%% of max_tokens(%d))\n",
-				d.NewPath, tokens, a.args.Template.MaxTokens)
-			skipped++
+// logExclusions reports the files the selection dropped: the static gates
+// first with their rollup, then the size gate with its own, so the two groups
+// stay distinguishable in the log. Deletions are not reported — they are
+// excluded from review but not dropped from the run, as before.
+func (a *Agent) logExclusions(decisions []fileDecision) {
+	staticSkipped := 0
+	for _, dec := range decisions {
+		// Listed exhaustively rather than defaulted, so a reason added later
+		// cannot silently inherit the path/extension wording.
+		switch dec.Reason {
+		case ExcludeBinary:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", effectivePath(dec.Diff))
+		case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", effectivePath(dec.Diff))
+		default:
 			continue
 		}
-		kept = append(kept, d)
+		staticSkipped++
+	}
+	if staticSkipped > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Filtered %d file(s) by include/exclude rules\n", staticSkipped)
 	}
 
-	if skipped > 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 80%% of max_tokens\n", skipped)
-	}
-	return kept
-}
-
-// countReviewable counts diffs that will survive all filters and are not pure deletions.
-func (a *Agent) countReviewable(diffs []model.Diff) int {
-	count := 0
-	for _, d := range diffs {
-		if !a.shouldReview(d) {
+	tooLarge := 0
+	for _, dec := range decisions {
+		if dec.Reason != ExcludeTooLarge {
 			continue
 		}
-		if d.IsDeleted {
-			continue
-		}
-		count++
+		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 80%% of max_tokens(%d))\n",
+			dec.Diff.NewPath, dec.DiffTokens, a.args.Template.MaxTokens)
+		tooLarge++
 	}
-	return count
-}
-
-// shouldReview applies the filter algorithm via whyExcluded.
-func (a *Agent) shouldReview(d model.Diff) bool {
-	return a.whyExcluded(d) == ExcludeNone
-}
-
-// filterDiffs drops diffs that should not be reviewed based on user-configured
-// include/exclude patterns and default extension/path filters.
-func (a *Agent) filterDiffs(diffs []model.Diff) []model.Diff {
-	var kept []model.Diff
-	skipped := 0
-
-	for _, d := range diffs {
-		path := effectivePath(d)
-		if !a.shouldReview(d) {
-			if d.IsBinary {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", path)
-			} else {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", path)
-			}
-			skipped++
-			continue
-		}
-		kept = append(kept, d)
+	if tooLarge > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 80%% of max_tokens\n", tooLarge)
 	}
-
-	if skipped > 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Filtered %d file(s) by include/exclude rules\n", skipped)
-	}
-	return kept
 }
 
 // extFromPath returns the file extension with leading dot, lowercased.
@@ -2145,8 +2142,8 @@ func orderedToolParameters(raw json.RawMessage) ([]orderedToolParameter, bool) {
 }
 
 // allDiffs exposes the reviewed diff set for cross-file comment re-filing.
-// It is read-only and safe to call from the per-file subtask goroutines: every
-// mutation of a.diffs (filterDiffs, filterLargeDiffs) completes before dispatch
+// It is read-only and safe to call from the per-group subtask goroutines: every
+// mutation of a.diffs (the selection Run applies) completes before dispatch
 // begins, so the slice is stable for the rest of the run.
 func (a *Agent) allDiffs() []model.Diff {
 	return a.diffs

@@ -48,7 +48,7 @@ func TestComposedResolverCanonicalConfig(t *testing.T) {
 		t.Fatalf("write rule.json: %v", err)
 	}
 
-	resolver, _, err := NewResolver(dir, "")
+	resolver, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestComposedResolverCanonicalConfig_ProjectRuleChangeChangesOutput(t *testi
 		if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
 			t.Fatalf("write rule.json: %v", err)
 		}
-		resolver, _, err := NewResolver(dir, "")
+		resolver, _, err := NewResolver(dir, "", ResolverOptions{})
 		if err != nil {
 			t.Fatalf("NewResolver: %v", err)
 		}

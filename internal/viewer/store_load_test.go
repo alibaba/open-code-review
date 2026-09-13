@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/session"
@@ -70,7 +71,7 @@ func TestLoadSession_FullParse(t *testing.T) {
 	writeJSONL(t, filepath.Join(repoDir, "sess1.jsonl"),
 		`{"type":"session_start","timestamp":"2025-06-10T08:00:00Z","cwd":"/home/dev/proj","gitBranch":"feat","model":"claude-3","reviewMode":"commit","diffFrom":"aaa","diffTo":"bbb","diffCommit":"ccc"}`,
 		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":1,"messages":[{"role":"user","content":"review this"}]}`,
-		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","content":"Code looks good","duration_ms":1500,"model":"claude-3","usage":{"prompt_tokens":100,"completion_tokens":50,"cache_read_tokens":10,"cache_write_tokens":5},"tool_calls":[{"name":"search","arguments":"query"}]}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","content":"Code looks good","reasoning_content":"checked for auth issues first","duration_ms":1500,"model":"claude-3","usage":{"prompt_tokens":100,"completion_tokens":50,"cache_read_tokens":10,"cache_write_tokens":5},"tool_calls":[{"name":"search","arguments":"query"}]}`,
 		`{"type":"tool_call","filePath":"main.go","taskType":"main_task","result":"found 3 results","ok":true,"duration_ms":20}`,
 		`{"type":"llm_request","filePath":"util.go","taskType":"plan_task","request_no":1,"messages":[]}`,
 		`{"type":"llm_response","filePath":"util.go","taskType":"plan_task","content":"planning","duration_ms":800,"model":"claude-3","usage":{"prompt_tokens":200,"completion_tokens":80,"cache_read_tokens":0,"cache_write_tokens":0}}`,
@@ -139,6 +140,9 @@ func TestLoadSession_FullParse(t *testing.T) {
 	}
 	if card.ResponseContent != "Code looks good" {
 		t.Errorf("ResponseContent = %q", card.ResponseContent)
+	}
+	if card.ReasoningContent != "checked for auth issues first" {
+		t.Errorf("ReasoningContent = %q", card.ReasoningContent)
 	}
 	if card.DurationMs != 1500 {
 		t.Errorf("DurationMs = %d", card.DurationMs)
@@ -277,7 +281,7 @@ func TestLoadSessionReadsV1Manifest(t *testing.T) {
 	}
 	writeJSONL(t, filepath.Join(repoDir, "manifest.jsonl"),
 		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`,
-		`{"type":"session_end","duration_seconds":1,"run_manifest":{"schema_version":"ocr.run-manifest/v1","run_id":"run-1","operation":"review","terminal_state":"complete","repository":{},"input":{"mode":"workspace"},"execution":{},"coverage":{"selected":[{"item_id":"a","path":"a.go"},{"item_id":"b","path":"b.go"}],"completed":[{"item_id":"a","path":"a.go"}],"reused":[{"item_id":"b","path":"b.go"}],"failed":[],"waived":[]},"elapsed_ms":1000}}`)
+		`{"type":"session_end","duration_seconds":1,"files_reviewed":["__grouping__","a.go,b.go","a.go"],"run_manifest":{"schema_version":"ocr.run-manifest/v1","run_id":"run-1","operation":"review","terminal_state":"complete","repository":{},"input":{"mode":"workspace"},"execution":{},"coverage":{"selected":[{"item_id":"a","path":"a.go"},{"item_id":"b","path":"b.go"}],"completed":[{"item_id":"a","path":"a.go"}],"reused":[{"item_id":"b","path":"b.go"}],"failed":[],"waived":[]},"elapsed_ms":1000}}`)
 
 	vs, err := LoadSession(root, "repo", "manifest")
 	if err != nil {
@@ -288,6 +292,9 @@ func TestLoadSessionReadsV1Manifest(t *testing.T) {
 	}
 	if vs.Summary.CompletedCount != 1 || vs.Summary.ReusedCount != 1 || vs.Summary.FailedCount != 0 || vs.Summary.WaivedCount != 0 {
 		t.Fatalf("coverage counts = %+v", vs.Summary)
+	}
+	if got := vs.Summary.FilesReviewed; len(got) != 2 || got[0] != "a.go" || got[1] != "b.go" {
+		t.Fatalf("files reviewed = %v, want [a.go b.go]", got)
 	}
 }
 
@@ -743,5 +750,77 @@ func TestLoadSession_ReviewComments(t *testing.T) {
 	}
 	if reused.Content != "reused finding" {
 		t.Errorf("reused Content = %q", reused.Content)
+	}
+}
+
+func TestLoadSession_MarkIDStableAndDistinct(t *testing.T) {
+	root := t.TempDir()
+	writeMarkIdentityFixture(t, root, "repo", "s1")
+
+	first, err := LoadSession(root, "repo", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := LoadSession(root, "repo", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(first.Comments) != 4 || len(second.Comments) != 4 {
+		t.Fatalf("comments = %d/%d, want 4/4", len(first.Comments), len(second.Comments))
+	}
+	for i := range first.Comments {
+		if first.Comments[i].MarkID == "" {
+			t.Fatalf("comment %d has empty MarkID", i)
+		}
+		if first.Comments[i].MarkID != second.Comments[i].MarkID {
+			t.Errorf("comment %d MarkID unstable: %q vs %q", i, first.Comments[i].MarkID, second.Comments[i].MarkID)
+		}
+	}
+
+	// uuid-bearing record: identity is uuid#index — duplicates in one record
+	// stay distinct by construction.
+	if first.Comments[0].MarkID == first.Comments[1].MarkID {
+		t.Errorf("duplicate comments in one record share MarkID %q", first.Comments[0].MarkID)
+	}
+	if first.Comments[0].MarkID != "11111111-2222-3333-4444-555555555555#0" ||
+		first.Comments[1].MarkID != "11111111-2222-3333-4444-555555555555#1" {
+		t.Errorf("uuid record MarkIDs = %q, %q; want #0 and #1", first.Comments[0].MarkID, first.Comments[1].MarkID)
+	}
+
+	// legacy uuid-less record: fallback hash + occurrence counter keeps exact
+	// duplicates distinct and stable.
+	if first.Comments[2].MarkID == first.Comments[3].MarkID {
+		t.Errorf("legacy duplicate comments share MarkID %q", first.Comments[2].MarkID)
+	}
+	if !strings.Contains(first.Comments[2].MarkID, "#") {
+		t.Errorf("legacy MarkID = %q, want hash#occurrence form", first.Comments[2].MarkID)
+	}
+}
+
+func TestLoadSession_MarkIDUnicodeFields(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, filepath.Join(repoDir, "s.jsonl"),
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`,
+		`{"type":"review_item_done","filePath":"main.go","comments":[`+
+			`{"content":"emoji \u00e9\u4e2d\u6587 finding","path":"main.go","category":"bug","severity":"high"}]}`,
+		`{"type":"session_end","duration_seconds":5}`,
+	)
+
+	first, err := LoadSession(root, "repo", "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := LoadSession(root, "repo", "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Comments[0].MarkID == "" || first.Comments[0].MarkID != second.Comments[0].MarkID {
+		t.Fatalf("unicode fallback MarkID = %q / %q, want non-empty and stable",
+			first.Comments[0].MarkID, second.Comments[0].MarkID)
 	}
 }

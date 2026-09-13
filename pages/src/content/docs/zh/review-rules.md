@@ -69,7 +69,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 ## 文件如何被过滤
 
 过滤是一个五重门算法，位于
-[`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go)。
+[`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go)。
 对每个 diff，OCR 依次问：
 
 1. **`binary`**——文件是二进制吗？排除。
@@ -82,9 +82,10 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 5. **`default_path`**——路径匹配某个内置测试文件排除模式
    （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）吗？排除。
 
-通过全部五重门的文件才发给 LLM。`deleted` 原因（不是门——它在 `Preview()` 中
-单独计算）标记新路径为 `/dev/null` 的文件；没有新内容可评审。用
-`ocr review --preview` 可在不花 token 的情况下打印此过滤结果。
+通过全部五重门的文件才发给 LLM，除非仅 diff 本身就超过 `max_tokens` 的 80%：
+`selectFiles` 在各门之后施加该上限，并把文件排除为 `too_large`。它同样把新路径
+为 `/dev/null` 的文件标记为 `deleted`；没有新内容可评审。用 `ocr review
+--preview` 可在不花 token 的情况下打印此过滤结果。
 
 ### 默认路径排除
 
@@ -143,13 +144,14 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.java` | `java.md` |
 | `**/*.go` | `go.md`——Go 源代码。 |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。 |
+| `**/*.{hbs,mustache}` | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。 |
 | `**/*.ets` | `arkts.md`——ArkTS / HarmonyOS。 |
 | `**/*.astro` | `astro.md`——Astro 组件与 islands。 |
-| `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,hpp}` | `cpp.md` |
+| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
 | `**/*.c` | `c.md` |
 | `**/*.{py,ipynb}` | `python.md`——Python 源代码。 |
 | `**/*.{php,phtml}` | `php.md`——PHP 源代码和 PHP 模板。 |
@@ -165,9 +167,25 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`——Jsonnet 配置模板与库。 |
 | `**/*.thrift` | `thrift.md`——Apache Thrift IDL 线协议兼容性。 |
 | `**/*.capnp` | `capnp.md`——Cap'n Proto schema 线协议兼容性。 |
+| `**/*.{v,sv,vh}` | `verilog.md`——Verilog 与 SystemVerilog RTL。 |
+| `**/*.{vhd,vhdl}` | `vhdl.md`——VHDL RTL。 |
+| `**/*.m` | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
+| `**/*.mm` | `objc.md`——Objective-C++ 源代码。 |
+| `**/*.sol` | `solidity.md`——Solidity 智能合约。 |
+| `**/*.vy` | `vyper.md`——Vyper 智能合约。 |
+| `**/*.rego` | `rego.md`——Rego 策略（OPA）。 |
 | *(fallback)* | `default.md` |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。
+
+### 针对 `.m` 文件的内容嗅探
+
+`.m` 被 MATLAB 和 Objective-C 共用。OCR 会窥探文件首个非空行来区分：如果
+看起来像 Objective-C（如 `#import`、`@implementation`、C 风格注释），则使用
+`objc.md` 而非 `matlab.md`。无法读取内容时回退到 `matlab.md`。
+
+> **稳定性说明。** 嗅探启发式可能在 OCR 版本之间变化。如果你需要确定性的 `.m`
+> 路由，请为 `.m` 路径设置显式的项目级规则——项目规则始终优先于系统层。
 
 ## 查看哪条规则生效：`ocr rules check`
 

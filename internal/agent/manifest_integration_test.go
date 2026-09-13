@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -431,14 +433,29 @@ func TestManifestFlowBudgetAndSkipped(t *testing.T) {
 		}
 	})
 
+	// Driven through Run, not dispatchSubtasks: Run is where the size gate is
+	// applied, so only this path shows that an all-oversized changeset really
+	// reaches a skipped manifest rather than being dispatched.
 	t.Run("all oversized is skipped", func(t *testing.T) {
-		a := newManifestFlowAgent(t, []model.Diff{{OldPath: "large.go", NewPath: "large.go", Diff: strings.Repeat("word ", 500), Insertions: 1}}, nil)
-		a.args.Template.MaxTokens = 10
-		if _, err := a.dispatchSubtasks(context.Background()); err != nil {
-			t.Fatalf("dispatch: %v", err)
+		dir := initPreviewRepo(t)
+		if err := os.WriteFile(filepath.Join(dir, "large.go"), []byte(strings.Repeat("word ", 500)), 0o644); err != nil {
+			t.Fatalf("write large.go: %v", err)
 		}
-		manifest := finishManifestFlow(t, a)
-		if manifest.TerminalState != session.StateSkipped || len(manifest.Coverage.Selected) != 0 {
+		a := New(Args{
+			RepoDir:   dir,
+			LLMClient: manifestFlowClient{},
+			Model:     "fake",
+			Template:  template.Template{MaxTokens: 10},
+		})
+		comments, err := a.Run(context.Background())
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if len(comments) != 0 {
+			t.Fatalf("comments = %d, want 0", len(comments))
+		}
+		manifest := a.RunManifest()
+		if manifest == nil || manifest.TerminalState != session.StateSkipped || len(manifest.Coverage.Selected) != 0 {
 			t.Fatalf("manifest = %+v", manifest)
 		}
 	})
@@ -456,7 +473,7 @@ type groupedBudgetPartialClient struct {
 
 func (c *groupedBudgetPartialClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	if len(req.Tools) == 0 {
-		content := `[{"label":"pair","files":["a.go","b.go"]}]`
+		content := `[{"label":"pair","files":[0,1]}]`
 		return &llm.ChatResponse{
 			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
 			Model:   "fake",
@@ -528,7 +545,7 @@ func TestManifestFlowGroupBudgetStopIsPartialWhenSomeFilesHaveComments(t *testin
 	// llmloop.Runner snapshots Template by value at construction time — mutating
 	// a.args.Template afterward (as other tests in this file do for MaxTokens,
 	// which executeGroupSubtask re-reads from a.args.Template directly) would
-	// not reach the runner's copy that RunPerFile actually consumes.
+	// not reach the runner's copy that RunMainTask actually consumes.
 	a := New(Args{
 		RepoDir:          repoDir,
 		From:             "main",

@@ -620,8 +620,11 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 }
 
 func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
-	out, err := p.runGit(ctx, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")
-	if err != nil || out == "" {
+	out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, gitFailure("git ls-files", stderr, err)
+	}
+	if out == "" {
 		return nil, nil
 	}
 	patterns := p.loadGitignorePatterns()

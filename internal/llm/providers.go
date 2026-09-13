@@ -204,6 +204,7 @@ var registry = []Provider{
 		Models: []string{
 			"deepseek-v4-pro",
 			"deepseek-v4-flash",
+			"deepseek-flash",
 		},
 	},
 	{
@@ -286,6 +287,7 @@ var registry = []Provider{
 		BaseURL:     "https://open.bigmodel.cn/api/paas/v4",
 		EnvVar:      "Z_AI_API_KEY",
 		Models: []string{
+			"glm-5.3",
 			"glm-5.2",
 			"glm-5.1",
 			"glm-5",

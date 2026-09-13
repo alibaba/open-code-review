@@ -16,7 +16,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -27,9 +27,9 @@ flowchart TD
 The orchestration lives in the
 [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
 package, whose main files are `agent.go` (dispatch & per-group
-orchestration), `grouping.go` (semantic file grouping), `preview.go`
-(the file filter), and `util.go` (helpers); the tool-use loop and memory
-compression live alongside it in
+orchestration), `grouping.go` (semantic file grouping), `selection.go`
+(the file filter), `preview.go` (the `--preview` report), and `util.go`
+(helpers); the tool-use loop and memory compression live alongside it in
 [`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/).
 Two entry points matter: `Agent.Run` (top of pipeline) and
 `Agent.dispatchSubtasks` (per-group fan-out).
@@ -56,7 +56,7 @@ they're reviewed pre-commit.
 ## The five-gate file filter
 
 Once diffs are loaded, every file passes through
-[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go).
+[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
 The function returns one of:
 
 ```
@@ -66,9 +66,11 @@ unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
 ```
 
-…or empty if the file is kept. `deleted` is **not** returned by
-`whyExcluded`; it's computed afterwards in `Preview()` when a kept
-file's diff reports `IsDeleted`. The gates run in this order:
+…or empty if the file is kept. `deleted` and `too_large` are **not**
+returned by `whyExcluded`; `selectFiles` applies them after the gates —
+`deleted` when a kept file's diff reports `IsDeleted`, `too_large` when
+its raw diff alone exceeds 80% of `max_tokens`. The gates run in this
+order:
 
 1. `binary` — binary files are dropped first.
 2. `user_exclude` — your project's `exclude` always wins.
@@ -84,8 +86,8 @@ file's diff reports `IsDeleted`. The gates run in this order:
 The noisy-directory filtering (`vendor/`, `node_modules/`, `target/`, …)
 happens earlier, at the diff-provider level, via the
 `providerDirIgnoreDirs` list in `internal/diff/git.go` — diffs for those
-directories are parsed and then stripped out by `filterDiffs` before
-they ever reach the per-file filter.
+directories are parsed and then stripped out before they ever reach the
+per-file filter.
 
 Run `ocr review --preview` to see the full filter result without spending
 a token. See [Review Rules](../review-rules/#how-files-are-filtered) for
@@ -315,10 +317,10 @@ touching thousands of lines) before they cost a request. The skipped
 group is reported as a non-fatal warning in stdout and added to the JSON
 `warnings` array.
 
-A second check runs in `filterLargeDiffs`: if the diff alone exceeds
+A second check runs in `selectFiles`: if the diff alone exceeds
 80 % of `MAX_TOKENS` it's filtered out before grouping and dispatch even
-happen. A third guard runs inside grouping — see
-`enforceGroupTokenBudget` above.
+happen, and reported as `too_large`. A third guard runs inside
+grouping — see `enforceGroupTokenBudget` above.
 
 ## The template & placeholders
 
@@ -432,7 +434,7 @@ If you want to read along:
 | Semantic file grouping | `internal/agent/grouping.go` |
 | Tool-use loop & memory compression | `internal/llmloop/` (loop.go, compression.go) |
 | Effort presets | `internal/config/template/effort.go` |
-| File filter / preview | `internal/agent/preview.go` |
+| File filter / preview | `internal/agent/selection.go`, `internal/agent/preview.go` |
 | Diff loading (Git modes) | `internal/diff/git.go` |
 | Rule resolution chain | `internal/config/rules/system_rules.go` |
 | Tool registry & impls | `internal/tool/` |

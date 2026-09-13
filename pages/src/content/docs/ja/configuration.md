@@ -199,8 +199,7 @@ Ollama は API key を無視しますが、カスタム provider は空でない
 - `OCR_LLM_TIMEOUT` 環境変数——整数（秒単位）。すべての解決パスで設定ファイルの
   値を上書きします。
 
-`timeout_sec` key は `ocr config set` ではサポートされていません——
-`~/.opencodereview/config.json` を直接編集してください。
+どちらの `timeout_sec` key も `ocr config set` で設定できます：
 
 ```json
 {

@@ -70,9 +70,8 @@ func TestBuildOpenAIParams_Minimal(t *testing.T) {
 	}
 }
 
-// TestBuildOpenAIParams_ToolChoice locks the tool_choice mapping the review-filter
-// task depends on (agent.go sets ChatRequest.ToolChoice="required" so the model
-// cannot silently skip both filterTools). openai.ChatCompletionToolChoiceOptionUnionParam
+// TestBuildOpenAIParams_ToolChoice locks the explicit tool_choice mapping for
+// callers that request it. openai.ChatCompletionToolChoiceOptionUnionParam
 // serializes OfAuto inline as a bare string, so this is the field that must carry
 // "required" onto the wire — and only when tools are actually attached.
 func TestBuildOpenAIParams_ToolChoice(t *testing.T) {
@@ -200,9 +199,9 @@ func TestBuildAnthropicParams_DefaultMaxTokens(t *testing.T) {
 	}
 }
 
-// TestBuildAnthropicParams_ToolChoice locks the tool_choice mapping the
-// review-filter task depends on. Anthropic has no bare "required" mode — the
-// client must translate ChatRequest.ToolChoice="required" into
+// TestBuildAnthropicParams_ToolChoice locks the explicit tool_choice mapping.
+// Anthropic has no bare "required" mode — the client must translate
+// ChatRequest.ToolChoice="required" into
 // ToolChoiceAnyParam ({"type":"any"}), and only when tools are attached.
 // Any other value (including "auto") is intentionally left untranslated,
 // since Anthropic's own default already behaves like "auto".
