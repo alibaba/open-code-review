@@ -260,11 +260,16 @@ async function runPostReviewComments({
   // Resolve the PR head commit sha to attach the review to.
   let commitSha;
   if (result.manifest != null) {
-    commitSha = result.manifest.input && result.manifest.input.resolved_head;
+    commitSha = result.manifest.input?.resolved_head;
   } else if (context.eventName === "pull_request_target") {
-    commitSha = context.payload.pull_request && context.payload.pull_request.head && context.payload.pull_request.head.sha;
+    commitSha = context.payload?.pull_request?.head?.sha;
   } else {
     throw new Error("OCR result manifest input.resolved_head is required to post inline comments for this event");
+  }
+  if (commitSha == null) {
+    throw new Error(result.manifest != null
+      ? "OCR result manifest input.resolved_head is missing; cannot post inline comments"
+      : "pull_request_target event payload.pull_request.head.sha is missing; cannot post inline comments");
   }
   if (typeof commitSha !== "string" || !/^[0-9a-f]{40}$/.test(commitSha)) {
     throw new Error(

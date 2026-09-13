@@ -3885,10 +3885,13 @@ async function testLegacyPullRequestEventUsesSnapshotHead() {
 }
 
 async function testIssueCommentRejectsMissingOrMalformedManifestHead() {
-  for (const [label, manifest] of [
-    ["missing", undefined],
-    ["malformed", ckManifest({ input: { resolved_head: "not-a-sha" } })],
-    ["array", ckManifest({ input: { resolved_head: ["a".repeat(40)] } })],
+  for (const [label, manifest, expectedError] of [
+    ["missing manifest", undefined, /resolved_head is required/],
+    ["missing input", {}, /resolved_head is missing/],
+    ["missing head", { input: {} }, /resolved_head is missing/],
+    ["null head", { input: { resolved_head: null } }, /resolved_head is missing/],
+    ["malformed", ckManifest({ input: { resolved_head: "not-a-sha" } }), /40-character lowercase string/],
+    ["array", ckManifest({ input: { resolved_head: ["a".repeat(40)] } }), /40-character lowercase string/],
   ]) {
     const gh = makeGithub({ headSha: "f".repeat(40) });
     const result = {
@@ -3908,7 +3911,7 @@ async function testIssueCommentRejectsMissingOrMalformedManifestHead() {
         core: { setOutput() {} },
         fs: mockFs(JSON.stringify(result), ""),
       }),
-      /resolved_head/,
+      expectedError,
       `${label} manifest head must be rejected`
     );
     assert.strictEqual(gh.getPullCalls.length, 0, `${label}: rejection must not fetch the current PR head`);
@@ -3919,28 +3922,30 @@ async function testIssueCommentRejectsMissingOrMalformedManifestHead() {
 }
 
 async function testLegacyPullRequestEventRejectsMissingSnapshotHead() {
-  const gh = makeGithub({});
-  const result = {
-    comments: [{ path: "src/a.js", content: "unbound legacy finding", start_line: 1, end_line: 1 }],
-  };
+  for (const payload of [undefined, null, {}, { pull_request: {} }, { pull_request: { head: {} } }]) {
+    const gh = makeGithub({});
+    const result = {
+      comments: [{ path: "src/a.js", content: "unbound legacy finding", start_line: 1, end_line: 1 }],
+    };
 
-  await assert.rejects(
-    runPostReviewComments({
-      github: gh,
-      context: {
-        repo: { owner: "owner", repo: "repo" },
-        issue: { number: 123 },
-        eventName: "pull_request_target",
-        payload: {},
-      },
-      core: { setOutput() {} },
-      fs: mockFs(JSON.stringify(result), ""),
-    }),
-    /commit SHA/
-  );
-  assert.strictEqual(gh.createReviewCalls.length, 0, "a missing event snapshot must fail before review writes");
-  assert.strictEqual(gh.issueComments.length, 0, "a missing event snapshot must fail before summary writes");
-  assert.strictEqual(gh.updatedComments.length, 0, "a missing event snapshot must fail before summary updates");
+    await assert.rejects(
+      runPostReviewComments({
+        github: gh,
+        context: {
+          repo: { owner: "owner", repo: "repo" },
+          issue: { number: 123 },
+          eventName: "pull_request_target",
+          payload,
+        },
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify(result), ""),
+      }),
+      /event payload\.pull_request\.head\.sha is missing/
+    );
+    assert.strictEqual(gh.createReviewCalls.length, 0, "a missing event snapshot must fail before review writes");
+    assert.strictEqual(gh.issueComments.length, 0, "a missing event snapshot must fail before summary writes");
+    assert.strictEqual(gh.updatedComments.length, 0, "a missing event snapshot must fail before summary updates");
+  }
 }
 
 // C6/K7: every body-composition path re-emits the carried marker byte for byte
