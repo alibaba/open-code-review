@@ -41,11 +41,12 @@ process.env.OCR_RETRY_BASE_DELAY = "1";
 process.env.OCR_READ_SUCCESS_DELAY = "0";
 process.env.OCR_READ_LOW_REMAINING_SPACING = "0";
 
+const DEFAULT_HEAD_SHA = "1".repeat(40);
 const context = {
   repo: { owner: "owner", repo: "repo" },
   issue: { number: 123 },
   eventName: "pull_request_target",
-  payload: { pull_request: { head: { sha: "head-sha" } } },
+  payload: { pull_request: { head: { sha: DEFAULT_HEAD_SHA } } },
 };
 
 function mockFs(resultText, stderrText) {
@@ -174,7 +175,7 @@ function makeGithub(opts = {}) {
       pulls: {
         get: async (params) => {
           getPullCalls.push(params);
-          return { data: { head: { sha: opts.headSha || "head-sha" } } };
+          return { data: { head: { sha: opts.headSha || DEFAULT_HEAD_SHA } } };
         },
         createReview: async (params) => {
           createReviewCalls.push(params);
@@ -2329,6 +2330,7 @@ async function main() {
   await testManifestHeadPinsEveryReviewPost();
   await testLegacyPullRequestEventUsesSnapshotHead();
   await testIssueCommentRejectsMissingOrMalformedManifestHead();
+  await testLegacyPullRequestEventRejectsMissingSnapshotHead();
   await testCheckpointCarryForwardOnEveryBodyPath();
   await testCheckpointAdvancesOnZeroFindings();
   await testCheckpointNeverAdvancesWithoutSticky();
@@ -2653,7 +2655,7 @@ async function testRunnerHeadDriftPreservesComments() {
 
   await runPostReviewComments({
     github: gh,
-    context, // context head is "head-sha"; mocked current head is "new-head"
+    context,
     core: { setOutput() {} },
     fs: mockFs(JSON.stringify(result), ""),
     out: {},
@@ -3748,10 +3750,11 @@ async function testCheckpointAdvanceGateTable() {
         const gh = makeGithub(
           failed === 1
             ? {
+                headSha: terminal === null ? context.payload.pull_request.head.sha : CK_RESOLVED,
                 files: [{ filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" }],
                 batchErrorSpec: [{ message: "Line could not be resolved", status: 422 }],
               }
-            : {}
+            : { headSha: terminal === null ? context.payload.pull_request.head.sha : CK_RESOLVED }
         );
         // published=false: the summary cannot be written at all (the issue
         // comment API is down), so summaryUrl stays empty.
@@ -3885,6 +3888,7 @@ async function testIssueCommentRejectsMissingOrMalformedManifestHead() {
   for (const [label, manifest] of [
     ["missing", undefined],
     ["malformed", ckManifest({ input: { resolved_head: "not-a-sha" } })],
+    ["array", ckManifest({ input: { resolved_head: ["a".repeat(40)] } })],
   ]) {
     const gh = makeGithub({ headSha: "f".repeat(40) });
     const result = {
@@ -3912,6 +3916,31 @@ async function testIssueCommentRejectsMissingOrMalformedManifestHead() {
     assert.strictEqual(gh.issueComments.length, 0, `${label}: rejection must happen before summary writes`);
     assert.strictEqual(gh.updatedComments.length, 0, `${label}: rejection must happen before summary updates`);
   }
+}
+
+async function testLegacyPullRequestEventRejectsMissingSnapshotHead() {
+  const gh = makeGithub({});
+  const result = {
+    comments: [{ path: "src/a.js", content: "unbound legacy finding", start_line: 1, end_line: 1 }],
+  };
+
+  await assert.rejects(
+    runPostReviewComments({
+      github: gh,
+      context: {
+        repo: { owner: "owner", repo: "repo" },
+        issue: { number: 123 },
+        eventName: "pull_request_target",
+        payload: {},
+      },
+      core: { setOutput() {} },
+      fs: mockFs(JSON.stringify(result), ""),
+    }),
+    /commit SHA/
+  );
+  assert.strictEqual(gh.createReviewCalls.length, 0, "a missing event snapshot must fail before review writes");
+  assert.strictEqual(gh.issueComments.length, 0, "a missing event snapshot must fail before summary writes");
+  assert.strictEqual(gh.updatedComments.length, 0, "a missing event snapshot must fail before summary updates");
 }
 
 // C6/K7: every body-composition path re-emits the carried marker byte for byte
