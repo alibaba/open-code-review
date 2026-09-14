@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -145,7 +146,7 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 			cm.Severity = normalizeCodeCommentSeverity(severity)
 		}
 		if path, ok := obj["path"].(string); ok && path != "" {
-			cm.Path = path
+			cm.Path = normalizeCommentPath(path)
 		}
 		if cm.Path == "" {
 			cm.Path = defaultPath
@@ -158,6 +159,14 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 		comments = append(comments, cm)
 	}
 	return comments, repair, ""
+}
+
+// normalizeCommentPath converts model-provided paths to the canonical
+// repository-relative form used by diffs and CommentCollector lookups. Git
+// paths always use '/', while models running on Windows commonly emit '\\'.
+// path.Clean also removes redundant './' prefixes and duplicate separators.
+func normalizeCommentPath(commentPath string) string {
+	return path.Clean(strings.ReplaceAll(commentPath, "\\", "/"))
 }
 
 func normalizeCodeCommentCategory(category string) string {

@@ -136,6 +136,28 @@ func TestParseComments_Fields(t *testing.T) {
 	}
 }
 
+func TestParseComments_NormalizesRepositoryPaths(t *testing.T) {
+	args := map[string]any{
+		"comments": []any{
+			map[string]any{"content": "backslash", "path": `pkg\util.go`},
+			map[string]any{"content": "dot prefix", "path": `./pkg/util.go`},
+			map[string]any{"content": "duplicate separator", "path": `pkg//util.go`},
+		},
+	}
+	comments, errMsg := ParseComments(args)
+	if errMsg != "" {
+		t.Fatal(errMsg)
+	}
+	if len(comments) != 3 {
+		t.Fatalf("expected 3 comments, got %d", len(comments))
+	}
+	for _, comment := range comments {
+		if comment.Path != "pkg/util.go" {
+			t.Errorf("Path = %q, want pkg/util.go", comment.Path)
+		}
+	}
+}
+
 // TestParseComments_CategorySeverity verifies the structured category and severity
 // fields are read off each comment object when present, and left zero-valued when
 // absent (older/less-capable models that omit them still produce valid comments).

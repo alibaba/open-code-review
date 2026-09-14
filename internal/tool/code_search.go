@@ -37,6 +37,10 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 	var patterns []string
 	for _, item := range filePatternsIface {
 		if s, ok := item.(string); ok && s != "" {
+			// Git pathspecs use forward slashes on every platform. Normalize
+			// before validation as well, otherwise a Windows-style `..\\foo`
+			// bypasses the traversal check and is passed to git unchanged.
+			s = normalizePathspec(s)
 			if hasTraversalPathComponent(s) {
 				return "Error: file_patterns must not contain ..", nil
 			}
@@ -99,12 +103,19 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 }
 
 func hasTraversalPathComponent(pathspec string) bool {
-	for _, part := range strings.Split(pathspec, "/") {
+	for _, part := range strings.Split(normalizePathspec(pathspec), "/") {
 		if part == ".." {
 			return true
 		}
 	}
 	return false
+}
+
+// normalizePathspec converts platform-native separators to the forward-slash
+// form understood by Git pathspecs. Keeping this as a separator-only rewrite
+// preserves glob syntax such as **/*.go and pkg/**.
+func normalizePathspec(pathspec string) string {
+	return strings.ReplaceAll(pathspec, "\\", "/")
 }
 
 func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []string) (string, string, error) {
