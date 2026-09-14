@@ -180,6 +180,10 @@ Beyond the common flags above, `ocr review` exposes a few groups of controls. Ru
 
 - `--format text|json|sarif` — `text` (default) for humans; `json` for machine-readable findings; `sarif` for code-scanning integrations such as GitHub Code Scanning.
 
+**Model**
+
+- `--provider <name>` / `--model <name>` — override the configured provider/model for this run only (for example, to recheck a diff with a different model; the user names the model, `ocr llm providers` lists the built-ins).
+
 **Budget**
 
 - `--max-tokens <n>` — per-group prompt ceiling; defaults to the configured value or the template default (`200000`).
