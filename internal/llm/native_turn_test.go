@@ -348,3 +348,105 @@ func TestBuildAnthropicParams_NativeReuseDoesNotAliasOriginalSlice(t *testing.T)
 		t.Fatalf("original payload's tool_use block was mutated: %+v", original.Content[1])
 	}
 }
+
+// TestOpenAIChatCompletions_ReplaysOpaqueToolCallFieldsAcrossTurns is the
+// end-to-end adapter regression for #947: Vertex AI's OpenAI-compatible Gemini
+// endpoint returns a thought signature under tool_calls[].extra_content and
+// rejects the next request with HTTP 400 when it is missing. The opaque value is
+// nested, so this also pins that the whole subtree survives rather than just a
+// top-level key.
+func TestOpenAIChatCompletions_ReplaysOpaqueToolCallFieldsAcrossTurns(t *testing.T) {
+	client := NewOpenAIClient(ClientConfig{URL: "https://api.openai.com/v1"})
+	body := `{
+		"id":"chatcmpl_1",
+		"object":"chat.completion",
+		"model":"gemini-3",
+		"choices":[{
+			"index":0,
+			"message":{
+				"role":"assistant",
+				"content":null,
+				"tool_calls":[{
+					"id":"call_1",
+					"type":"function",
+					"function":{"name":"file_read","arguments":"{}"},
+					"extra_content":{"google":{"thought_signature":"opaque-signature"}}
+				}]
+			},
+			"finish_reason":"tool_calls"
+		}]
+	}`
+	sdkResp := unmarshalChatCompletionBody(t, body)
+	resp := client.mapOpenAIResponse(sdkResp)
+
+	historyMsg := NewToolCallMessage(resp.Content(), resp.ToolCalls(), resp.Native(), resp.ReasoningContent())
+
+	params := client.buildOpenAIParams("gemini-3", ChatRequest{Messages: []Message{historyMsg}})
+	if len(params.Messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(params.Messages))
+	}
+	payload, err := json.Marshal(params.Messages[0])
+	if err != nil {
+		t.Fatalf("marshal assistant message: %v", err)
+	}
+	if !bytes.Contains(payload, []byte(`"extra_content":{"google":{"thought_signature":"opaque-signature"}}`)) {
+		t.Fatalf("assistant tool-call history dropped extra_content: %s", payload)
+	}
+	// The fields OCR owns must still be the ones OCR wrote.
+	if !bytes.Contains(payload, []byte(`"id":"call_1"`)) || !bytes.Contains(payload, []byte(`"name":"file_read"`)) {
+		t.Fatalf("assistant tool-call history lost its own fields: %s", payload)
+	}
+}
+
+// TestOpaqueToolCallFields_ReservedFieldsStayOurs proves a provider cannot use
+// the opaque channel to rewrite the identity of a tool call: SetExtraFields
+// overrides same-key fields, so id, type and function must never be captured.
+func TestOpaqueToolCallFields_ReservedFieldsStayOurs(t *testing.T) {
+	raw := `{"id":"theirs","type":"custom","function":{"name":"theirs"},"extra_content":{"k":"v"}}`
+	got := opaqueToolCallFields(raw)
+
+	for _, k := range []string{"id", "type", "function"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("reserved field %q was captured as an opaque field", k)
+		}
+	}
+	if string(got["extra_content"]) != `{"k":"v"}` {
+		t.Errorf("extra_content = %s, want {\"k\":\"v\"}", got["extra_content"])
+	}
+}
+
+// TestOpaqueToolCallFields_MalformedNotForwarded pins that nothing is forwarded
+// when the payload cannot be parsed, rather than a partial map.
+func TestOpaqueToolCallFields_MalformedNotForwarded(t *testing.T) {
+	for name, raw := range map[string]string{
+		"empty":         "",
+		"not json":      "{not json",
+		"truncated":     `{"extra_content":{"google":`,
+		"not an object": `["extra_content"]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := opaqueToolCallFields(raw); got != nil {
+				t.Errorf("opaqueToolCallFields(%q) = %v, want nil", raw, got)
+			}
+		})
+	}
+}
+
+// TestToolCall_OpaqueFieldsStayOutOfSerializedOutput guards the logging half of
+// the contract in #947: the opaque payload is request state and must not reach
+// review or session output.
+func TestToolCall_OpaqueFieldsStayOutOfSerializedOutput(t *testing.T) {
+	tc := ToolCall{
+		ID:          "call_1",
+		Type:        "function",
+		Function:    FunctionCall{Name: "file_read", Arguments: "{}"},
+		ExtraFields: map[string]json.RawMessage{"extra_content": json.RawMessage(`{"google":{"thought_signature":"opaque-signature"}}`)},
+	}
+	payload, err := json.Marshal(tc)
+	if err != nil {
+		t.Fatalf("marshal tool call: %v", err)
+	}
+	if bytes.Contains(payload, []byte("opaque-signature")) || bytes.Contains(payload, []byte("extra_content")) {
+		t.Fatalf("opaque tool-call fields leaked into serialized output: %s", payload)
+	}
+}
