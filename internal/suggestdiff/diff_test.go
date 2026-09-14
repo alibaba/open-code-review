@@ -140,6 +140,37 @@ func TestComputeLineDiff_FuzzyMatchPreservesRawChanges(t *testing.T) {
 		})
 	}
 }
+
+func TestComputeLineDiff_FuzzyMatchPreservesRawChangesWithContext(t *testing.T) {
+	old := []string{
+		"func validate() error {",
+		"\treturn nil",
+		"}",
+	}
+	new := []string{
+		"func validate() error {",
+		"\t\treturn nil",
+		"}",
+	}
+
+	got := ComputeLineDiff(old, new)
+	want := []DiffLine{
+		{Type: DiffContext, Content: "func validate() error {"},
+		{Type: DiffDeleted, Content: "\treturn nil"},
+		{Type: DiffAdded, Content: "\t\treturn nil"},
+		{Type: DiffContext, Content: "}"},
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("diff = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("diff[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestComputeLineDiff_ContextContent(t *testing.T) {
 	old := []string{"a", "b", "c"}
 	new := []string{"a", "x", "c"}
