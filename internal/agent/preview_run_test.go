@@ -124,6 +124,40 @@ func TestPreviewShowsProviderExcludedVendorDiff(t *testing.T) {
 	}
 }
 
+// TestPreviewOmitsUntrackedProviderDirFile pins the tracked-only scope of
+// issue #1235: an untracked file under a provider directory is dropped before a
+// diff exists for it, so preview neither lists nor counts it. The run skips it
+// too, so the preview still describes what a review covers.
+func TestPreviewOmitsUntrackedProviderDirFile(t *testing.T) {
+	dir := initPreviewRepo(t)
+
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+	// target/ is a provider directory but, unlike vendor/, is not in this
+	// fixture's .gitignore — so git reports it as untracked rather than ignored.
+	if err := os.MkdirAll(filepath.Join(dir, "target"), 0o755); err != nil {
+		t.Fatalf("create target directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "target", "demo.go"), []byte("package main\n\nfunc demo() {}\n"), 0o644); err != nil {
+		t.Fatalf("write target/demo.go: %v", err)
+	}
+
+	preview, err := Preview(context.Background(), Args{RepoDir: dir})
+	if err != nil {
+		t.Fatalf("Preview error: %v", err)
+	}
+	for _, e := range preview.Entries {
+		if strings.HasPrefix(e.Path, "target/") {
+			t.Fatalf("entry %+v: untracked provider-directory files are not previewed", e)
+		}
+	}
+	if preview.TotalFiles != 1 || preview.TotalInsertions != 1 {
+		t.Fatalf("totals = %d file(s) +%d, want 1 file +1 (main.go only); entries = %+v",
+			preview.TotalFiles, preview.TotalInsertions, preview.Entries)
+	}
+}
+
 // TestPreviewMarksOversizedDiffTooLarge pins that preview applies the per-file
 // diff-size ceiling the real run applies before dispatch, and reports it under
 // its own reason rather than silently listing the file as reviewable.

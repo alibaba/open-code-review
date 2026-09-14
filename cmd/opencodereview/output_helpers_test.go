@@ -646,7 +646,7 @@ func TestOutputPreviewText_WithExcludedFiles(t *testing.T) {
 	p := &agent.DiffPreview{
 		Entries: []agent.DiffPreviewEntry{
 			{Path: "src.go", Status: "modified", Insertions: 5, Deletions: 1, WillReview: true},
-			{Path: "vendor/lib.go", Status: "added", Insertions: 100, Deletions: 0, WillReview: false, ExcludeReason: model.ExcludeDefaultPath},
+			{Path: "vendor/lib.go", Status: "added", Insertions: 100, Deletions: 0, WillReview: false, ExcludeReason: model.ExcludeProviderDirectory},
 		},
 		TotalInsertions: 105,
 		TotalDeletions:  1,
@@ -666,7 +666,7 @@ func TestOutputPreviewText_WithExcludedFiles(t *testing.T) {
 	if !strings.Contains(got, "vendor/lib.go") {
 		t.Errorf("expected excluded file path, got %q", got)
 	}
-	if !strings.Contains(got, "default_path") {
+	if !strings.Contains(got, "provider_directory") {
 		t.Errorf("expected exclude reason, got %q", got)
 	}
 }
