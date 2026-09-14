@@ -385,15 +385,17 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 }
 
 // filterDiffs removes diffs whose file paths are excluded.
+//
+// .gitignore governs untracked files only; untrackedFilesList
+// already screens those before they become diffs.
 func (p *Provider) filterDiffs(diffs []model.Diff) []model.Diff {
-	patterns := p.loadGitignorePatterns()
 	var result []model.Diff
 	for _, d := range diffs {
 		path := d.NewPath
 		if path == "/dev/null" {
 			path = d.OldPath
 		}
-		if !p.isPathExcluded(path, patterns) {
+		if !p.isPathExcluded(path, nil) {
 			result = append(result, d)
 		}
 	}
