@@ -37,7 +37,10 @@ jobs:
       - name: Verify generated provider presets
         run: |
           go generate ./internal/llm
-          git diff --exit-code -- extensions/vscode/src/shared/providers.generated.ts
+          if ! git diff --exit-code -- extensions/vscode/src/shared/providers.generated.ts; then
+            echo "::error::Provider presets are stale. After editing internal/llm/providers.go, run 'go generate ./internal/llm' and commit extensions/vscode/src/shared/providers.generated.ts."
+            exit 1
+          fi
 
       - name: Verify license headers
         run: bash scripts/verify-license.sh
