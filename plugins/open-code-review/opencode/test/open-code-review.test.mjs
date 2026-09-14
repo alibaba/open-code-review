@@ -748,3 +748,14 @@ test("ocr_review reports the terminating signal rather than a fabricated exit co
     },
   )
 })
+
+test("v2 exposes backgroundFile in the tool input schema", async () => {
+  const module = await import("../dist/open-code-review.js")
+  const { ctx, tools } = stubV2Context({ directory: "/tmp/project" })
+  await module.default.setup(ctx)
+  const review = tools.find((definition) => definition.name === "ocr_review")
+  // additionalProperties is false, so an undeclared input is unreachable on 2.x
+  // even though buildReviewArgs would forward it.
+  assert.equal(review.input.additionalProperties, false)
+  assert.equal(review.input.properties.backgroundFile?.type, "string")
+})

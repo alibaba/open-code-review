@@ -83,8 +83,10 @@ function buildReviewArgs(input: ReviewInput, repo: string): string[] {
   if (input.preview && input.resume) {
     throw new Error("'preview' and 'resume' cannot be used together.")
   }
-  // OCR would accept both and silently let the file win; rejecting here keeps
-  // the caller from believing the inline text was used.
+  // OCR warns on stderr and lets the file win (selectBackground). On exit 0
+  // formatReviewResult returns stdout only, so that warning never reaches the
+  // caller: the silence is this plugin's, not OCR's. Rejecting here is what
+  // stops the inline text from being dropped without anyone noticing.
   if (input.background && input.backgroundFile) {
     throw new Error("Use either 'background' or 'backgroundFile', not both.")
   }
@@ -227,9 +229,11 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
         }
         // A signal kill reports a null exit code. Naming the signal keeps it
         // distinguishable from a genuine exit 1 when OCR wrote no output.
+        // `?? 1` keeps the message numeric: close always reports one of the
+        // two, but neither is typed as non-null.
         const cause = signal
           ? `was terminated by signal ${signal}`
-          : `exited with code ${exitCode}`
+          : `exited with code ${exitCode ?? 1}`
         reject(new OcrExecutionError(
           stderr || stdout || `OpenCodeReview ${cause}.`,
           { exitCode, signal, stdout, stderr },
@@ -450,6 +454,7 @@ const reviewInputSchema = {
     to: { type: "string", description: "Target ref for a branch/range comparison. Must be paired with 'from'." },
     resume: { type: "string", description: "Resume a previous OCR review session by ID." },
     background: { type: "string", description: "Business or requirement context that the implementation should satisfy." },
+    backgroundFile: { type: "string", description: "Path to a Markdown file holding the review background, for context too long to pass inline. A relative path resolves against the repository root; an absolute path is used as given. Cannot be combined with 'background'." },
     exclude: { type: "string", description: "Comma-separated gitignore-style exclusion patterns." },
     model: { type: "string", description: "Override the model configured in OpenCodeReview." },
     concurrency: { type: "integer", minimum: 1, description: "Maximum concurrent file reviews." },
