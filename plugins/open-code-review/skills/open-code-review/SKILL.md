@@ -196,20 +196,6 @@ Beyond the common flags above, `ocr review` exposes a few groups of controls. Ru
 - `--max-tokens-budget <n>` — cap total input + output tokens for the run. Once exceeded, dispatch stops, partial results are still published, and skipped files are reported as `failed(budget)`.
 - `--no-filter` — keep all review comments and skip the LLM post-filtering call.
 
-**Advanced tuning**
-
-- `--tools <path>` — custom JSON tools-config file (default: embedded).
-- `--max-tools <n>` — max tool-call rounds per subtask (`0` = template default; values 1–49 are clamped up to `50`).
-- `--max-git-procs <n>` — max concurrent git subprocesses (default `16`).
-
-## Resume and Sessions
-
-OCR persists each review under `~/.opencodereview/sessions/`, so a failed or interrupted run can reuse its completed work. Use `ocr session list` to find a session id.
-
-- `ocr review --resume <id>` — resume a **range or commit** review. Supply the same target as the original run (`--from`/`--to` or `--commit`); the resolved input identity and rules must still match the parent, and provider/model must match unless changed explicitly via `--provider`/`--model` on this run. **Workspace resume is not supported** — resume requires a range or commit, and cannot be combined with `--preview`.
-- `ocr session show <id>` / `ocr session comments <id>` — inspect a session's metadata and findings. Both accept `--json`; `comments` also accepts `--severity` and `--category` filters.
-- `ocr session compare <before> <after>` (alias `diff`) — group two sessions' findings into new, persisting, resolved, and not-reviewed.
-
 ## Gotchas
 
 - **LLM must be configured first** — `ocr review` will fail loudly if no LLM is reachable. See the Troubleshooting section below if this happens.
@@ -220,6 +206,7 @@ OCR persists each review under `~/.opencodereview/sessions/`, so a failed or int
 - **Don't pass `--audience human`** — it streams progress UI that pollutes output. Always use `--audience agent`.
 - **Comment language follows config** — the `language` config controls review comment language, defaults to `English`, and accepts any language name (for example `English` or `中文`).
 - **Avoid output truncation** — Large review runs produce verbose output. Never pipe command output to `tail` or `head` as it drops review comments from earlier sections. Use `--output <path>` and read it in full; on older CLIs, follow the **Output file** guidance above.
+- **Resume an interrupted review** — a failed or interrupted range/commit review can be continued with `ocr review --resume <id>` using the same `--from`/`--to` or `--commit` target (the id is printed as `retry with: --resume <id>` on failure, or find it with `ocr session list`). Workspace resume is not supported.
 
 ## Validation
 
