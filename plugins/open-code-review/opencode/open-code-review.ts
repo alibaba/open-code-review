@@ -83,10 +83,8 @@ function buildReviewArgs(input: ReviewInput, repo: string): string[] {
   if (input.preview && input.resume) {
     throw new Error("'preview' and 'resume' cannot be used together.")
   }
-  // OCR warns on stderr and lets the file win (selectBackground). On exit 0
-  // formatReviewResult returns stdout only, so that warning never reaches the
-  // caller: the silence is this plugin's, not OCR's. Rejecting here is what
-  // stops the inline text from being dropped without anyone noticing.
+  // OCR warns on stderr and lets the file win, but formatReviewResult drops
+  // stderr on exit 0, so the caller would never see it.
   if (input.background && input.backgroundFile) {
     throw new Error("Use either 'background' or 'backgroundFile', not both.")
   }
