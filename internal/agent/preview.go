@@ -66,10 +66,10 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 	}
 
 	// Provider directory exclusions happen before the per-file gates, so
-	// selectFiles cannot report them. Preview lists them in changeset order
-	// so file and line totals match the tracked Git changeset without implying
-	// that include rules can make them reviewable, and without listing them
-	// first.
+	// selectFiles cannot report them. Preview lists them as well, so its file
+	// and line totals match the tracked Git changeset without implying that
+	// include rules can make them reviewable. ForEachInOrder keeps them in
+	// changeset order instead of listing them first.
 	decisions := a.selectFiles(a.diffs)
 	next := 0
 	set.ForEachInOrder(func(d model.Diff, providerExcluded bool) {

@@ -84,8 +84,8 @@ curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/js
 
 ### 我的文件没被评审
 
-运行 `ocr review --preview`（无 LLM 成本）。输出列出每个候选文件及其被保留或
-丢弃的**原因**。`vendor/`、`node_modules/` 等 provider 目录下的文件在终端里收成
+运行 `ocr review --preview`（无 LLM 成本）。输出会给出每个候选文件被保留或
+丢弃的**原因**。`vendor/`、`node_modules/` 等 provider 目录下的文件在终端里折叠为
 一行汇总；`ocr review --preview --format json` 仍会列出每一条：
 
 ```

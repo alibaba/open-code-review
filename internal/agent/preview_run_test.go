@@ -162,7 +162,7 @@ func TestPreviewOmitsUntrackedProviderDirFile(t *testing.T) {
 
 // TestPreviewKeepsChangesetOrder pins issue #1236: provider-directory entries
 // sit where Git lists them rather than ahead of every other file, so the
-// preview and --output json's files array read against `git diff --name-only`.
+// preview and --format json's files array read against `git diff --name-only`.
 func TestPreviewKeepsChangesetOrder(t *testing.T) {
 	dir := initPreviewRepo(t)
 	paths := []string{"a.go", "target/mid.go", "z.go"}

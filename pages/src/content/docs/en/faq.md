@@ -93,8 +93,8 @@ hardware, raise the LLM timeout instead — see
 
 ### My file isn't being reviewed
 
-Run `ocr review --preview` (no LLM cost). The output lists each candidate
-with the **reason** it was kept or dropped. Files under provider directories
+Run `ocr review --preview` (no LLM cost). The output shows the **reason**
+each candidate file was kept or dropped. Files under provider directories
 such as `vendor/` and `node_modules/` collapse into one summary line in the
 terminal; `ocr review --preview --format json` still lists every entry:
 
