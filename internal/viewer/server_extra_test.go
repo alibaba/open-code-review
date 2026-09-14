@@ -125,6 +125,9 @@ func TestRenderTemplate_Sessions(t *testing.T) {
 				t.Errorf("status = %d, want 200", rr.Code)
 			}
 			body := rr.Body.String()
+			if len(tt.sessions) > 0 && !strings.Contains(body, `href="/r/test-repo/session-123"`) {
+				t.Errorf("expected populated session link in rendered output")
+			}
 			if !strings.Contains(body, "MyProject") {
 				t.Errorf("expected repo name in sessions template")
 			}
