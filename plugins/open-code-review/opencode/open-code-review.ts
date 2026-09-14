@@ -44,17 +44,20 @@ interface RunResult {
 
 class OcrExecutionError extends Error {
   readonly exitCode: number | null
+  readonly signal: NodeJS.Signals | null
   readonly stderr: string
   readonly stdout: string
 
   constructor(message: string, result: {
     exitCode: number | null
+    signal?: NodeJS.Signals | null
     stderr?: string
     stdout?: string
   }) {
     super(message)
     this.name = "OcrExecutionError"
     this.exitCode = result.exitCode
+    this.signal = result.signal ?? null
     this.stderr = result.stderr ?? ""
     this.stdout = result.stdout ?? ""
   }
@@ -212,23 +215,25 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
       finish(() => reject(new OcrExecutionError(message, { exitCode: null })))
     })
 
-    child.on("close", (exitCode) => {
+    child.on("close", (exitCode, signal) => {
       closed = true
       clearTimeout(forceKillTimer)
       finish(() => {
-        const result = {
-          stdout: Buffer.concat(stdoutChunks).toString("utf8").trim(),
-          stderr: Buffer.concat(stderrChunks).toString("utf8").trim(),
-          exitCode: exitCode ?? 1,
-        }
-        if (exitCode !== 0) {
-          reject(new OcrExecutionError(
-            result.stderr || result.stdout || `OpenCodeReview exited with code ${result.exitCode}.`,
-            result,
-          ))
+        const stdout = Buffer.concat(stdoutChunks).toString("utf8").trim()
+        const stderr = Buffer.concat(stderrChunks).toString("utf8").trim()
+        if (exitCode === 0) {
+          resolve({ stdout, stderr, exitCode })
           return
         }
-        resolve(result)
+        // A signal kill reports a null exit code. Naming the signal keeps it
+        // distinguishable from a genuine exit 1 when OCR wrote no output.
+        const cause = signal
+          ? `was terminated by signal ${signal}`
+          : `exited with code ${exitCode}`
+        reject(new OcrExecutionError(
+          stderr || stdout || `OpenCodeReview ${cause}.`,
+          { exitCode, signal, stdout, stderr },
+        ))
       })
     })
 

@@ -729,3 +729,22 @@ test("ocr_review rejects background combined with backgroundFile", async () => {
     )
   })
 })
+
+test("ocr_review reports the terminating signal rather than a fabricated exit code", { skip: process.platform === "win32" }, async () => {
+  await withFakeOcr(
+    "process.kill(process.pid, 'SIGKILL')",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      await assert.rejects(
+        hooks.tool.ocr_review.execute({}, toolContext(worktree)),
+        (error) => {
+          assert.equal(error.name, "OcrExecutionError")
+          assert.equal(error.exitCode, null)
+          assert.equal(error.signal, "SIGKILL")
+          assert.match(error.message, /terminated by signal SIGKILL/)
+          return true
+        },
+      )
+    },
+  )
+})
