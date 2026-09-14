@@ -170,7 +170,7 @@ matching order:
 | `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.{py,ipynb}` | `python.md` — Python source. |
+| `**/*.{py,pyi,ipynb}` | `python.md` — Python source. |
 | `**/*.{php,phtml}` | `php.md` — PHP source and PHP templates. |
 | `**/*.proto` | `protobuf.md` — Protocol Buffers wire compatibility. |
 | `**/*.po` | `po.md` — gettext translation source catalogs. |

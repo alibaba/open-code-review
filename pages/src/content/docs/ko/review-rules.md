@@ -161,7 +161,7 @@ diff 단계에서 일어납니다.
 | `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.{py,ipynb}` | `python.md` — Python 소스. |
+| `**/*.{py,pyi,ipynb}` | `python.md` — Python 소스. |
 | `**/*.{php,phtml}` | `php.md` — PHP 소스와 PHP 템플릿. |
 | `**/*.proto` | `protobuf.md` — Protocol Buffers 통신 호환성. |
 | `**/*.po` | `po.md` — gettext 번역 원본 카탈로그. |
