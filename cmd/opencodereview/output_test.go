@@ -4,6 +4,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -64,7 +65,7 @@ func TestRenderComment_BadgeInline(t *testing.T) {
 			Content:   "Potential environment variable leak.",
 			Category:  "security",
 			Severity:  "high",
-		})
+		}, os.Stdout)
 	})
 	if !strings.Contains(out, "[security · high]") {
 		t.Errorf("expected badge in output, got:\n%s", out)

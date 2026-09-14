@@ -120,7 +120,7 @@ func TestParseReviewFlagsRejectsFromWithoutTo(t *testing.T) {
 // so nothing is persisted under $HOME/.opencodereview (scenario 5: no artifacts).
 func TestRunReviewFlagValidationWritesNoArtifacts(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 
 	// --to without --from is rejected in parseReviewFlags, before loadCommonContext,
 	// git resolution, session.New, or any manifest work.

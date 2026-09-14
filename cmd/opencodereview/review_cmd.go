@@ -7,8 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -27,28 +27,30 @@ import (
 )
 
 type reviewOptions struct {
-	toolConfigPath  string
-	rulePath        string
-	repoDir         string
-	from            string
-	to              string
-	commit          string
-	resume          string
-	excludes        string
-	outputFormat    string
-	audience        string
-	background      string
-	backgroundFile  string
-	provider        string
-	model           string
-	concurrency     int
-	perFileTimeout  int
-	maxTools        int
-	maxGitProcs     int
-	maxTokens       int
-	maxTokensBudget int
-	noFilter        bool
-	preview         bool
+	toolConfigPath        string
+	rulePath              string
+	repoDir               string
+	from                  string
+	to                    string
+	commit                string
+	resume                string
+	excludes              string
+	outputFormat          string
+	audience              string
+	outputPath            string
+	background            string
+	backgroundFile        string
+	provider              string
+	model                 string
+	concurrency           int
+	concurrentTaskTimeout int
+	maxTools              int
+	maxGitProcs           int
+	maxTokens             int
+	maxTokensBudget       int
+	effort                string
+	noFilter              bool
+	preview               bool
 }
 
 var reviewOpts reviewOptions
@@ -96,7 +98,10 @@ var reviewCmd = &cobra.Command{
 		if err := validateReviewOptions(&reviewOpts); err != nil {
 			return err
 		}
-		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
+		// First signal cancels the context so the defer chain shuts down
+		// gracefully; a second signal force-exits instead of being dropped
+		// for the whole shutdown window (see interrupt.go).
+		ctx, stop := interruptContextWithForcedExit(cmd.Context())
 		defer stop()
 		return executeReviewContext(ctx, reviewOpts)
 	},
@@ -106,8 +111,30 @@ func init() {
 	registerReviewFlags(reviewCmd, &reviewOpts)
 }
 
-func executeReviewContext(ctx context.Context, opts reviewOptions) error {
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
+func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error) {
+	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	closeOutPending := true
+	finishOutput := func() error {
+		if !closeOutPending {
+			return nil
+		}
+		closeOutPending = false
+		if cerr := closeOut(); cerr != nil {
+			return fmt.Errorf("close output file: %w", cerr)
+		}
+		return nil
+	}
+	defer func() {
+		if cerr := finishOutput(); cerr != nil {
+			retErr = errors.Join(retErr, cerr)
+		}
+	}()
+
+	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err
 	}
@@ -125,7 +152,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	opts.background = bg
 
 	if opts.preview {
-		return runPreviewContext(ctx, cc, opts)
+		return runPreviewContext(ctx, cc, opts, out)
 	}
 
 	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
@@ -140,12 +167,17 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	if err != nil {
 		return err
 	}
-	cc.Template.MaxCompletionTokens = cc.Template.MaxTokens
 	maxTokens, err := resolveMaxTokens(cc.Template.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
 	}
 	cc.Template.MaxTokens = maxTokens
+
+	effort, err := resolveEffort(rt.AppCfg, opts.effort)
+	if err != nil {
+		return err
+	}
+	cc.Template.ApplyEffort(effort)
 
 	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
 	// input it returns pins the run to the very commits this check passed on, so
@@ -175,13 +207,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
 	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
-	defer func() {
-		for _, mc := range mcpClients {
-			if err := mc.Close(); err != nil {
-				fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to close MCP server %q: %v\n", mc.Name(), err)
-			}
-		}
-	}()
+	defer closeReviewMCPClients(mcpClients)
 
 	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
 	rt.PlanToolDefs = append(rt.PlanToolDefs, mcpToolDefs...)
@@ -203,7 +229,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 		CommentCollector:      rt.Collector,
 		CommentWorkerPool:     agent.NewCommentWorkerPool(opts.concurrency),
 		MaxConcurrency:        opts.concurrency,
-		ConcurrentTaskTimeout: opts.perFileTimeout,
+		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
 		Provider:              rt.Provider,
 		Background:            opts.background,
@@ -214,6 +240,9 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
+
+	closeRaw := bindRawWriter(rt.RawHolder, cc.RepoDir, ag.Session())
+	defer closeRaw()
 
 	// Silence progress output during execution; restored before the trace
 	// summary in agent-text mode (and on function exit otherwise).
@@ -265,9 +294,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	var emitErr error
 	emitted := manifest != nil || runErr == nil
 	if emitted {
-		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, retryReport)
+		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
+		} else {
+			// Commit the report before potentially slow MCP shutdown. The deferred
+			// close remains a fallback for every earlier return and emit failure.
+			emitErr = finishOutput()
 		}
 	}
 	if resultErr != nil {
@@ -350,8 +383,9 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 // It must run before agent.New: agent.New creates the session, and session.New
 // writes session_start immediately, so validating any later would leave an orphan
 // session on disk behind every rejection. It must also run after max-tokens is
-// resolved, because the per-file token ceiling decides which large diffs are
-// dropped and therefore which files the input identity covers.
+// resolved, because the selection's size gate measures each file's diff
+// against that ceiling on its own — grouping never enters this decision — and
+// what it drops is what the input identity stops covering.
 //
 // provider and model are explicit exactly when their flag was passed on this
 // command line: both default to the empty string and nothing else can set them,
@@ -466,12 +500,22 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 	return nil
 }
 
-func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions) error {
+func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer) error {
+	maxTokens, err := previewMaxTokens(cc.Template.MaxTokens, opts.maxTokens)
+	if err != nil {
+		return err
+	}
+	// A copy, so resolving the preview's limit cannot leak into the caller's
+	// template. Selection reads MaxTokens and nothing else.
+	tpl := *cc.Template
+	tpl.MaxTokens = maxTokens
+
 	preview, err := agent.Preview(ctx, agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,
 		To:         opts.to,
 		Commit:     opts.commit,
+		Template:   tpl,
 		FileFilter: cc.FileFilter,
 		GitRunner:  cc.GitRunner,
 	})
@@ -479,7 +523,7 @@ func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOption
 		return fmt.Errorf("preview failed: %w", err)
 	}
 
-	return outputPreview(preview, opts.outputFormat)
+	return outputPreview(preview, opts.outputFormat, out)
 }
 
 func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {
@@ -552,6 +596,16 @@ func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repo
 		mcp.RegisterAll(tools, mc, serverCfg.Tools)
 	}
 	return clients
+}
+
+// closeReviewMCPClients is a variable so tests can observe the shutdown
+// boundary without starting an intentionally unresponsive subprocess.
+var closeReviewMCPClients = func(clients []*mcp.Client) {
+	closeCtx, cancel := context.WithTimeout(context.Background(), mcp.CloseAllTimeout)
+	defer cancel()
+	if err := mcp.CloseAll(closeCtx, clients); err != nil {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: %v\n", err)
+	}
 }
 
 func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *tool.Registry {

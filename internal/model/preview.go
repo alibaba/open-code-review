@@ -12,8 +12,13 @@ const (
 	ExcludeUserRule    ExcludeReason = "user_exclude"
 	ExcludeExtension   ExcludeReason = "unsupported_ext"
 	ExcludeDefaultPath ExcludeReason = "default_path"
-	ExcludeDeleted     ExcludeReason = "deleted"
-	ExcludeBinary      ExcludeReason = "binary"
+	// ExcludeProviderDirectory is an unconditional diff-provider directory
+	// exclusion (for example vendor/ or node_modules/). Unlike default_path,
+	// an include rule cannot make the file reviewable.
+	ExcludeProviderDirectory ExcludeReason = "provider_directory"
+	ExcludeDeleted           ExcludeReason = "deleted"
+	ExcludeBinary            ExcludeReason = "binary"
+	ExcludeTooLarge          ExcludeReason = "too_large"
 )
 
 // PreviewEntry is one file's preview record (mode-agnostic).

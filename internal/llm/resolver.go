@@ -209,16 +209,16 @@ func parseTimeoutEnv() (time.Duration, bool, error) {
 	if err != nil {
 		return 0, false, fmt.Errorf("OCR_LLM_TIMEOUT must be an integer (seconds): %w", err)
 	}
-	d, err := validateTimeoutSec(sec)
+	d, err := ValidateTimeoutSec(sec)
 	if err != nil {
 		return 0, false, fmt.Errorf("OCR_LLM_TIMEOUT: %w", err)
 	}
 	return d, true, nil
 }
 
-// validateTimeoutSec converts a config-file timeout (in seconds) to time.Duration.
+// ValidateTimeoutSec converts a config-file timeout (in seconds) to time.Duration.
 // Returns 0 for zero input (use default). Rejects negative values and overflow.
-func validateTimeoutSec(sec int) (time.Duration, error) {
+func ValidateTimeoutSec(sec int) (time.Duration, error) {
 	if sec == 0 {
 		return 0, nil
 	}
@@ -231,6 +231,10 @@ func validateTimeoutSec(sec int) (time.Duration, error) {
 		return 0, fmt.Errorf("timeout_sec %d overflows time.Duration (max %d)", sec, maxSec)
 	}
 	return time.Duration(sec) * time.Second, nil
+}
+
+func validateTimeoutSec(sec int) (time.Duration, error) {
+	return ValidateTimeoutSec(sec)
 }
 
 // errBedrockNotConfigurable explains why the two url+token strategies reject the
@@ -546,7 +550,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	extraBody = entry.ExtraBody
 	extraHeaders := entry.ExtraHeaders
 
-	timeout, err := validateTimeoutSec(entry.TimeoutSec)
+	timeout, err := ValidateTimeoutSec(entry.TimeoutSec)
 	if err != nil {
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
 	}
@@ -658,7 +662,7 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		}
 	}
 
-	timeout, err := validateTimeoutSec(cfg.Llm.TimeoutSec)
+	timeout, err := ValidateTimeoutSec(cfg.Llm.TimeoutSec)
 	if err != nil {
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
 	}

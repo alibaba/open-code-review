@@ -71,12 +71,12 @@ export const en = {
   'features.feat2Desc': 'An independent line-level comment positioning module with a 3-tier progressive LLM strategy pinpoints each comment to exact line numbers. A separate reflection module intercepts hallucinations and knowledge drift early.',
   'features.feat3Title': 'Multi-Model Protocol Support',
   'features.feat3Desc': 'Supports Anthropic Messages API, OpenAI Chat Completions API, and OpenAI Responses API. Ships with preset providers including Anthropic, OpenAI, DashScope, DeepSeek, and Z.AI for out-of-the-box use, while also supporting custom model endpoints for private deployments.',
-  'features.feat4Title': 'Dynamic Concurrent Processing',
-  'features.feat4Desc': 'Dynamically splits sub-tasks for parallel review with configurable goroutine workers (default 8). Even large changesets complete quickly.',
+  'features.feat4Title': 'Effort-Driven Progressive Review',
+  'features.feat4Desc': "Agent review depth you control: low for fast feedback, medium for a balance of quality and cost, high for critical changes where nothing may slip. The higher the level, the further the Agent presses past what it has already found — and it converges on its own once a pass surfaces no new risk, so depth never costs more than it's worth.",
   'features.feat5Title': 'Smart Memory Compression',
   'features.feat5Desc': 'Purpose-built memory compression for code review with 3-tier partitioning (frozen/compress/active) context management, breaking token limits for deep review.',
   'features.feat6Title': 'Built-in Review Rules',
-  'features.feat6Desc': 'Review rules validated through massive real-world scenarios, covering 10+ languages including Java, TypeScript, Go, Python, Kotlin, Rust, C++, C, with specialized rules for NPE, thread safety, XSS, SQL injection, and more.',
+  'features.feat6Desc': 'Review rules validated through massive real-world scenarios, covering 40+ languages and file types — Java, TypeScript, Go, Python, Kotlin, Rust, C/C++, Swift, Solidity, Verilog, and more — with built-in checks for NPE, thread safety, XSS, SQL injection, and beyond.',
 
   // Benchmark
   'benchmark.sectionLabel': 'OPEN BENCHMARK',

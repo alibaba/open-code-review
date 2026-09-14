@@ -24,7 +24,7 @@ func TestSessionFilePath_EmptyID(t *testing.T) {
 
 func TestSessionFilePath_ValidID(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	path, err := SessionFilePath("/some/repo", "abc-123")
 	if err != nil {
@@ -473,7 +473,7 @@ func TestCopyLlmComments_DeepCopy(t *testing.T) {
 
 func TestLoadResumeState_NonexistentFile(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	_, err := LoadResumeState("/some/repo", "nonexistent-session")
 	if err == nil {
@@ -483,7 +483,7 @@ func TestLoadResumeState_NonexistentFile(t *testing.T) {
 
 func TestLoadResumeState_EmptyFile(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	repoDir := "/test/repo"
 	sessionID := "empty-session"
@@ -509,7 +509,7 @@ func TestLoadResumeState_EmptyFile(t *testing.T) {
 
 func TestLoadResumeState_MultipleRecords(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	repoDir := "/test/multi"
 	sessionID := "multi-session"
@@ -586,7 +586,7 @@ func TestLoadResumeState_MultipleRecords(t *testing.T) {
 // truncated write cost every other file its checkpoint — the opposite of what a
 // checkpoint is for.
 func TestLoadReviewResumeState_CorruptLineDoesNotAbortLoad(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	repoDir := "/test/corrupt"
 	sessionID := "corrupt-session"
@@ -635,7 +635,7 @@ func TestLoadReviewResumeState_CorruptLineDoesNotAbortLoad(t *testing.T) {
 // damage is the only honest answer, and silently reusing — or silently discarding
 // — every other checkpoint is not.
 func TestLoadResumeState_CorruptLineIsFatal(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	repoDir := "/test/corrupt-strict"
 	sessionID := "strict-session"
@@ -661,7 +661,7 @@ func TestLoadResumeState_CorruptLineIsFatal(t *testing.T) {
 // regression this split exists to prevent: an undamaged session must keep every
 // checkpoint it recorded, with no manifest involved.
 func TestLoadResumeState_IntactSessionStillReusable(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	repoDir := "/test/intact-scan"
 	sessionID := "intact-session"
@@ -688,7 +688,7 @@ func TestLoadResumeState_IntactSessionStillReusable(t *testing.T) {
 
 func TestLoadResumeState_FailThenRedone(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	repoDir := "/test/redo"
 	sessionID := "redo-session"

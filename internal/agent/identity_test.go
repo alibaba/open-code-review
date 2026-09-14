@@ -40,12 +40,12 @@ func identityArgs(dir string, maxTokens int) Args {
 // on: the digest resolved before a run must equal the digest that run records.
 //
 // source_artifact_sha256 is computed from the sealed selected set, which is what
-// survives filterDiffs and filterLargeDiffs — not every parsed diff. A pre-flight
-// that skipped either pass would produce a value no run ever writes, and every
-// resume comparison would then fail against a parent manifest for a reason that
-// has nothing to do with the input having changed. The subtests below prove both
-// filters really do move the digest, so this equality is load-bearing rather than
-// coincidental.
+// selectFiles retains — not every parsed diff. A pre-flight that skipped either
+// of its gates, static or size, would produce a value no run ever writes, and
+// every resume comparison would then fail against a parent manifest for a reason
+// that has nothing to do with the input having changed. The checks below prove
+// both gates really do move the digest, so this equality is load-bearing rather
+// than coincidental.
 func TestResolveIdentityMatchesRunPath(t *testing.T) {
 	dir := initIdentityRepo(t)
 	args := identityArgs(dir, 4000)
@@ -56,22 +56,25 @@ func TestResolveIdentityMatchesRunPath(t *testing.T) {
 	if err := run.loadDiffs(context.Background()); err != nil {
 		t.Fatalf("loadDiffs: %v", err)
 	}
+	raw := run.diffs
 	rawDigest := run.sourceArtifactSHA256()
-	rawCount := len(run.diffs)
 
-	run.diffs = run.filterDiffs(run.diffs)
+	// A zero ceiling disables the size gate, isolating the static gates' share.
+	run.args.Template.MaxTokens = 0
+	run.diffs, _ = summarizeSelection(run.selectFiles(raw))
 	afterExtDigest := run.sourceArtifactSHA256()
 	afterExtCount := len(run.diffs)
 
-	run.diffs = run.filterLargeDiffs(run.diffs)
+	run.args.Template.MaxTokens = args.Template.MaxTokens
+	run.diffs, _ = summarizeSelection(run.selectFiles(raw))
 	want := run.sourceArtifactSHA256()
 
-	if afterExtCount >= rawCount || len(run.diffs) >= afterExtCount {
-		t.Fatalf("fixture must exercise both filters, got raw=%d ext=%d large=%d",
-			rawCount, afterExtCount, len(run.diffs))
+	if afterExtCount >= len(raw) || len(run.diffs) >= afterExtCount {
+		t.Fatalf("fixture must exercise both gates, got raw=%d ext=%d large=%d",
+			len(raw), afterExtCount, len(run.diffs))
 	}
 	if rawDigest == afterExtDigest || afterExtDigest == want {
-		t.Fatal("both filters must move the digest, otherwise this test proves nothing")
+		t.Fatal("both gates must move the digest, otherwise this test proves nothing")
 	}
 
 	sealed, err := ResolveIdentity(context.Background(), args)
@@ -148,7 +151,7 @@ func TestResolveIdentityTracksConfigChanges(t *testing.T) {
 	})
 
 	t.Run("max tokens moves the input identity", func(t *testing.T) {
-		// max_tokens feeds filterLargeDiffs, so raising it admits files the parent
+		// max_tokens feeds the size gate, so raising it admits files the parent
 		// run had dropped. The input identity changes even though no file did, and
 		// the resume is rejected as an input change.
 		sealed, err := ResolveIdentity(context.Background(), identityArgs(dir, 4_000_000))

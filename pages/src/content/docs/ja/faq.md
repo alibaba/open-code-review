@@ -96,11 +96,11 @@ LLM タイムアウトを引き上げてください——[タイムアウト](.
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
+node_modules/lib.js     added     (excluded: provider_directory)
 imgs/logo.png           binary    (excluded: unsupported_ext)
 ```
 
-5 種類の除外理由は、[ファイルフィルタリング](../review-rules/#how-files-are-filtered)のゲートに対応します。
+これらの除外理由は、[ファイルフィルタリング](../review-rules/#how-files-are-filtered)のゲートに対応します。
 
 | 理由 | 修正方法 |
 |---|---|
@@ -108,7 +108,9 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | あなたの `exclude` リストからそのパターンを削除してください。 |
 | `unsupported_ext` | ホワイトリストゲートを回避するため、拡張子を `include` リストに追加してください。 |
 | `default_path` | ファイルを `include` に追加してください——組み込みのテストファイル除外パターンを上書きします。 |
+| `provider_directory` | 対応は不要です。`vendor/` や `node_modules/` などの provider ディレクトリは、`include` に一致してもレビュー対象にはなりません。 |
 | `deleted` | 対処不要——レビュー対象の新しい内容がありません。 |
+| `too_large` | diff だけで `max_tokens` の 80% を超えています。`--max-tokens`（または保存された `max_tokens`）を引き上げるか、変更をより小さな commit に分割してください。 |
 
 ### カスタムルールが発火しない
 
@@ -157,12 +159,17 @@ OCR はコメントを diff 内の正確な行にアンカーできませんで�
 ### Token threshold exceeded
 
 ```
-[ocr] WARNING: prompt tokens (94000) exceed 80% of max_tokens(58888) for src/big.sql
+[ocr] WARNING: prompt tokens (94000) exceed 80% of max_tokens(200000) for src/big.sql
 ```
 
 そのファイルの初期 prompt（ルール + diff + change-files リスト）が、モデルが応答できる前に
-すでに `MAX_TOKENS = 58888` の 80 % を超えました。OCR はそのファイルをスキップして続行します——
+すでに `MAX_TOKENS` の 80 % を超えました（review のデフォルトは `200000`。`ocr scan` は
+より小さい `58888` を使います）。OCR はそのファイルをスキップして続行します——
 JSON モードでは `warnings` にも表示されます。
+
+なお `MAX_TOKENS` が制限するのは**プロンプト**だけです。モデルの出力上限は別の
+`MAX_COMPLETION_TOKENS = 16384` が制御するため、`--max-tokens` を上げても出力予算は
+広がりません。
 
 緩和策:
 
@@ -173,9 +180,11 @@ JSON モードでは `warnings` にも表示されます。
 
 ### ファイルが小さいのに plan フェーズに時間がかかる
 
-まず `ocr review --preview` を実行してください。ファイルの `lines.changed` が
-`PLAN_MODE_LINE_THRESHOLD`（デフォルト **50**）を超えると、plan フェーズが実行されます。これは
-意図的なものです——大きな diff は plan の恩恵を受けます。単一のレビューでスキップするには、
+まず `ocr review --preview` を実行してください。plan フェーズは次のいずれかが成り立つときに
+実行されます: グループ内のいずれかのファイルの `lines.changed` が
+`PLAN_MODE_LINE_THRESHOLD`（デフォルト **50**）に達する、またはグループに 2 つ以上の
+ファイルが含まれ、合計変更行数が `PLAN_MODE_GROUP_LINE_THRESHOLD`（デフォルト **100**）に
+達する。これは意図的なものです——大きな diff は plan の恩恵を受けます。単一のレビューでスキップするには、
 より小さな diff で実行するか、埋め込みテンプレートを一時的に編集してください（上級者向け。
 `--tools` の上書きが必要）。
 
@@ -185,7 +194,7 @@ JSON モードでは `warnings` にも表示されます。
 [ocr] Max tool requests reached for src/foo.go.
 ```
 
-モデルが 30（`MAX_TOOL_REQUEST_TIMES`）回のツール呼び出しを費やしたのに `task_done` を
+モデルが 100 回（`MAX_TOOL_REQUEST_TIMES`）のツール呼び出しを使い切ったのに `task_done` を
 呼びませんでした。その時点までに発せられたコメントは、依然として収集されレンダリングされます。
 ほとんどのファイルでこうなる場合、原因は通常次のとおりです。
 
@@ -193,9 +202,10 @@ JSON モードでは `warnings` にも表示されます。
   （Claude Opus など）に切り替えてください。
 - あるツールがエラーを出し続け、モデルがリトライし続けている。セッション JSONL を確認してください——
   同じツール結果が繰り返されていれば、それが原因です。
-- ファイルが本当に大きい、あるいはコンテキストが重く、30 回では足りない。`--max-tools <n>` で
-  上げるか下げるか調整してください（例: `--max-tools 40` でより多く、`--max-tools 15` でより少なく）。
-  1〜9 は 10 に引き上げられます。`0`（デフォルト）はテンプレートのデフォルト 30 を使います。
+- ファイルが本当に大きい、あるいはコンテキストが重く、100 回では足りない。`--max-tools <n>` で
+  引き上げてください（例: `--max-tools 150`）。`--max-tools` は**引き上げ専用**です。
+  テンプレートのデフォルト（`100`）より小さい値は効果がなく、1〜49 はさらに `50` に
+  引き上げられます。`0`（デフォルト）はテンプレートのデフォルト `100` を使います。
 - モデルがネイティブなツール呼び出しを全くサポートしていない（ローカルモデルでよくある）——
   ["No tool calls parsed"（ローカルモデル / Ollama）](#no-tool-calls-parsed-ollama)を
   参照してください。
@@ -226,9 +236,25 @@ JSON モードでは `warnings` にも表示されます。
 
 ### JSON 出力が `{ "files_reviewed": 0, "comments": [] }`
 
-ワークスペースに対象ファイルがありません。これは意図的なものです——明示的な形により、呼び出し側は
-「レビュー対象がない」ことと「レビューしたファイルに指摘がない」ことを区別できます。コメントが
-ゼロの正常なレビューは、通常の空配列 `[]` を返します。
+レビュー対象のファイルがありません。`files_reviewed` はトップレベルのフィールドではなく `summary` の
+下にあり、この経路では `0` になります。トップレベルの `[]` は `comments` のほうです。同じオブジェクトは
+`"status": "skipped"` と `"message": "Review skipped: no items were selected."`、および
+`terminal_state` が `"skipped"` で `coverage` の各配列が空の `manifest` も含みます。
+
+ファイルをレビューして指摘がなかった場合も、**`comments: []` を持つ JSON オブジェクト**が返ります。
+`summary.files_reviewed` は実際にレビューしたファイル数になり、`status` は `"complete"`、
+`message` は `"Review complete: 0 finding(s) across N selected item(s)."` です。実行によって
+省略可能なトップレベルフィールドは異なり得るため、オブジェクト形状や特定の省略可能フィールドの有無で
+両者を判別しないでください。manifest を持つ review 出力では `summary.files_reviewed` または
+`manifest.terminal_state` を使ってください。ただし、呼び出し側は後述の manifest-less 経路で
+`summary` と `manifest` の両方が存在しない場合も扱う必要があります。`review --format json` は
+stdout に必ず JSON オブジェクトを 1 つだけ書き出し、裸の配列にはなりません。
+
+manifest-less の no-files 経路はより簡素で、`summary` と `manifest` の両方を省略しますが、
+`"status": "skipped"`、`"message": "No supported files changed."`、`"comments": []` は
+引き続き含まれ、`tool_calls` も常に含まれます。`ocr scan` は常に manifest-less で、no-files 条件を
+満たすとこの経路を使います。`ocr review` も manifest の構築に失敗し、no-files 条件を満たした場合は
+同じ経路に入ることがあります。`llm`、`trace_id` などの省略可能なメタデータが含まれる場合もあります。
 
 ### セッション JSONL はどこにある？
 
@@ -262,9 +288,17 @@ OTLP exporter に切り替えて metrics 基盤に送ってください——[�
 
 よくある要因:
 
-- ファイルが 50 行以上のとき plan フェーズが起動します。これはファイルごとに LLM 呼び出しを
-  1 回追加します。閾値を下げるとコストを削減でき、上げると小さな PR の速度を向上できます。
-- `MAX_TOOL_REQUEST_TIMES = 30` はかなり緩やかです。ラウンドを使い切るモデルは、3 ラウンドで
+- ファイルが 50 行以上（または複数ファイルのグループで合計 100 行以上）のとき plan フェーズが
+  起動します。これはグループごとに LLM 呼び出しを 1 回追加するので、コストを下げられるのは閾値を
+  **上げた**ほうです。下げるとより多くのグループが plan を通り、かえって高くなります。2 つの閾値は
+  `0` で挙動が異なります。`PLAN_MODE_LINE_THRESHOLD` が `0` 以下なら*常に plan* となり、これが最も
+  高い設定です。一方 `PLAN_MODE_GROUP_LINE_THRESHOLD` が `0` だとグループ側のゲートが無効になります。
+  この設定で plan 呼び出しを省けるのは、そのグループ側ゲートだけが本来の発火条件だった場合です。
+  起動条件は上の「ファイルが小さいのに plan フェーズに時間がかかる」を参照してください。
+- main ループはデフォルトで 2 ラウンド実行されます（`medium` プリセット）。`--effort low` で
+  1 ラウンドにすればレビューコストはおよそ半分になります。`--effort high`（3 ラウンド）は
+  recall が上がりますがより高価です。
+- `MAX_TOOL_REQUEST_TIMES = 100` はかなり緩やかです。ラウンドを使い切るモデルは、3 ラウンドで
   終わるモデルより長い（トークンの多い）対話を生みます。より強力なモデルはより速く終える傾向が
   あります。逆に、"max tool requests reached" に対処するため `--max-tools` を上げると、ファイルごとの
   コストはおおむね線形に増加すると考えてください。
@@ -274,6 +308,7 @@ OTLP exporter に切り替えて metrics 基盤に送ってください——[�
 ### LLM 呼び出しを減らすには？
 
 - `include` リストを追加して、OCR が気にしないファイルをレビューしないようにします。
+- `--effort low` で main ループを 1 ラウンドに減らします。
 - アカウントに burst-mode の課金がある場合は、`--concurrency` を下げます。
 - `--background` を渡します——十分な事前コンテキストがあれば、モデルが `file_read` /
   `code_search` の往復なしに完了できることがあります。

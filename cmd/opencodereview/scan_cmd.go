@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -23,28 +25,29 @@ import (
 )
 
 type scanOptions struct {
-	toolConfigPath  string
-	rulePath        string
-	repoDir         string
-	paths           string
-	excludes        string
-	outputFormat    string
-	audience        string
-	background      string
-	concurrency     int
-	perFileTimeout  int
-	maxTools        int
-	maxGitProcs     int
-	preview         bool
-	noPlan          bool
-	noDedup         bool
-	noSummary       bool
-	batch           string
-	maxTokens       int
-	maxTokensBudget int
-	provider        string
-	model           string
-	resume          string
+	toolConfigPath        string
+	rulePath              string
+	repoDir               string
+	paths                 string
+	excludes              string
+	outputFormat          string
+	audience              string
+	outputPath            string
+	background            string
+	concurrency           int
+	concurrentTaskTimeout int
+	maxTools              int
+	maxGitProcs           int
+	preview               bool
+	noPlan                bool
+	noDedup               bool
+	noSummary             bool
+	batch                 string
+	maxTokens             int
+	maxTokensBudget       int
+	provider              string
+	model                 string
+	resume                string
 }
 
 var scanOpts scanOptions
@@ -105,8 +108,18 @@ func splitPaths(raw string) []string {
 	return out
 }
 
-func executeScan(opts scanOptions) error {
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, false)
+func executeScan(opts scanOptions) (retErr error) {
+	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := closeOut(); cerr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close output file: %w", cerr))
+		}
+	}()
+
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, "", opts.maxTools, opts.maxGitProcs, false)
 	if err != nil {
 		return err
 	}
@@ -139,7 +152,13 @@ func executeScan(opts scanOptions) error {
 	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
-		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat)
+		maxTokens, err := previewMaxTokens(scanTpl.MaxTokens, opts.maxTokens)
+		if err != nil {
+			return err
+		}
+		scanTpl.MaxTokens = maxTokens
+		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat, out)
+
 	}
 
 	resumeState, err := loadScanResumeState(cc.RepoDir, opts, scanPaths)
@@ -154,7 +173,6 @@ func executeScan(opts scanOptions) error {
 	if err != nil {
 		return err
 	}
-	scanTpl.MaxCompletionTokens = scanTpl.MaxTokens
 	maxTokens, err := resolveMaxTokens(scanTpl.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
@@ -195,7 +213,7 @@ func executeScan(opts scanOptions) error {
 		CommentCollector:      rt.Collector,
 		CommentWorkerPool:     llmloop.NewCommentWorkerPool(opts.concurrency),
 		MaxConcurrency:        opts.concurrency,
-		ConcurrentTaskTimeout: opts.perFileTimeout,
+		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
@@ -206,6 +224,9 @@ func executeScan(opts scanOptions) error {
 		SkipSummary:           opts.noSummary,
 		Resume:                resumeState,
 	})
+
+	closeRaw := bindRawWriter(rt.RawHolder, cc.RepoDir, ag.Session())
+	defer closeRaw()
 
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
@@ -231,7 +252,7 @@ func executeScan(opts scanOptions) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, nil)
+	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, nil)
 }
 
 func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (*session.ResumeState, error) {
@@ -251,7 +272,7 @@ func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (
 	return state, nil
 }
 
-func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string, outputFormat string) error {
+func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string, outputFormat string, out io.Writer) error {
 	preview, err := scan.Preview(context.Background(), scan.Args{
 		RepoDir:          cc.RepoDir,
 		Paths:            scanPaths,
@@ -265,5 +286,5 @@ func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths
 	if err != nil {
 		return fmt.Errorf("scan preview failed: %w", err)
 	}
-	return outputPreview(preview, outputFormat)
+	return outputPreview(preview, outputFormat, out)
 }

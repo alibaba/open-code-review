@@ -27,6 +27,9 @@
 - [ ] New and existing unit tests pass locally with my changes
 - [ ] I have updated the documentation accordingly (if applicable)
 - [ ] I have signed the CLA
+- [ ] I did not use AI/LLM to create this PR, or I disclosed the tool/model below and reviewed its output; I did not attribute commits to AI and will answer maintainer questions and review comments myself without AI/LLM.
+
+<!-- Please disclose the model used here if AI was used. -->
 
 ## Related Issues
 

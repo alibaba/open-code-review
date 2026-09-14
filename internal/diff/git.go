@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/bmatcuk/doublestar/v4"
 
@@ -60,6 +61,14 @@ type Provider struct {
 	commit string // single commit hash/ref
 
 	mergeBase string // cached common ancestor for range mode
+}
+
+// DiffSet separates the diffs a review may process from files excluded by the
+// provider's built-in directory rules. The latter remain unavailable to a
+// review, but callers such as Preview can account for them.
+type DiffSet struct {
+	Included []model.Diff
+	Excluded []model.Diff
 }
 
 // NewProvider creates a Provider for range mode: from..to (via merge-base).
@@ -169,19 +178,30 @@ func (p *Provider) MergeBase(ctx context.Context) string {
 	return p.mergeBase
 }
 
-// GetDiff returns all changes as parsed model.Diff structs.
+// GetDiff returns the changes available to a review as parsed model.Diff structs.
 func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
+	set, err := p.GetDiffSet(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return set.Included, nil
+}
+
+// GetDiffSet returns both reviewable diffs and those excluded by the provider's
+// built-in directory rules. It preserves GetDiff's filtering behavior while
+// allowing callers that report the whole Git changeset to show those exclusions.
+func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 	var combined strings.Builder
 
 	switch p.mode {
 	case ModeRange:
 		base := p.MergeBase(ctx)
 		if base == "" {
-			return nil, fmt.Errorf("cannot find merge-base between %s and %s", p.from, p.to)
+			return DiffSet{}, fmt.Errorf("cannot find merge-base between %s and %s", p.from, p.to)
 		}
-		out, err := p.runGit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, p.to, "--")
+		out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, p.to, "--")
 		if err != nil {
-			return nil, fmt.Errorf("git diff failed: %w", err)
+			return DiffSet{}, gitFailure("git diff", stderr, err)
 		}
 		combined.WriteString(out)
 
@@ -190,22 +210,28 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 		// emits a combined diff ("diff --cc"), which ParseDiffText cannot
 		// parse — the commit would silently yield zero reviewable diffs.
 		// Diffs against the first parent instead, in regular unified format.
-		out, err := p.runGit(ctx, "-c", "core.quotepath=false", "show", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "--diff-merges=first-parent", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", p.commit)
+		out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "show", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "--diff-merges=first-parent", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", p.commit)
 		if err != nil {
-			return nil, fmt.Errorf("git show failed: %w", err)
+			return DiffSet{}, gitFailure("git show", stderr, err)
 		}
 		combined.WriteString(out)
 
 	case ModeWorkspace:
-		tracked, err := p.workspaceTrackedDiff(ctx)
+		// The stderr returned here is the fallback's (`git diff --staged`), and
+		// that is the one worth surfacing. Reaching the fallback at all means
+		// `git diff HEAD` already failed, and in the case the fallback exists
+		// for — a repository with no commits — it failed with "bad revision
+		// 'HEAD'", which is expected rather than diagnostic. Only the second
+		// failure describes what actually blocked the review.
+		tracked, stderr, err := p.workspaceTrackedDiff(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("workspace tracked diff failed: %w", err)
+			return DiffSet{}, gitFailure("workspace tracked diff", stderr, err)
 		}
 		combined.WriteString(tracked)
 
 		untracked, err := p.untrackedFileDiffs(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("untracked file diff failed: %w", err)
+			return DiffSet{}, fmt.Errorf("untracked file diff failed: %w", err)
 		}
 		for _, ud := range untracked {
 			combined.WriteString(ud)
@@ -223,9 +249,9 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 
 	diffs, err := ParseDiffText(ctx, combined.String(), p.repoDir, ref, p.runner)
 	if err != nil {
-		return nil, err
+		return DiffSet{}, err
 	}
-	return p.filterDiffs(diffs), nil
+	return p.partitionDiffs(diffs), nil
 }
 
 // loadGitignorePatterns reads and parses .gitignore patterns from the repo root.
@@ -255,13 +281,8 @@ func (p *Provider) loadGitignorePatterns() []string {
 // correct under last-match-wins. Treating negations as unmatchable made every
 // file in such a repository look excluded, so a review silently covered nothing.
 func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bool {
-	// Hardcoded directory prefix checks. These are an unconditional blocklist:
-	// a .gitignore negation cannot re-admit .git/ or node_modules/.
-	for _, prefix := range providerDirIgnoreDirs {
-		dirPart := strings.TrimSuffix(prefix, "/")
-		if relPath == dirPart || strings.HasPrefix(relPath, prefix) {
-			return true
-		}
+	if isProviderDirExcluded(relPath) {
+		return true
 	}
 
 	excluded := false
@@ -284,6 +305,19 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 		}
 	}
 	return excluded
+}
+
+// isProviderDirExcluded reports whether relPath matches the provider's
+// unconditional directory blocklist. A .gitignore negation cannot re-admit
+// one of these paths.
+func isProviderDirExcluded(relPath string) bool {
+	for _, prefix := range providerDirIgnoreDirs {
+		dirPart := strings.TrimSuffix(prefix, "/")
+		if relPath == dirPart || strings.HasPrefix(relPath, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchGitignorePattern checks if relPath matches a single .gitignore pattern.
@@ -377,17 +411,23 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 	return false
 }
 
-// filterDiffs removes diffs whose file paths are excluded.
-func (p *Provider) filterDiffs(diffs []model.Diff) []model.Diff {
+// partitionDiffs keeps diffs filtered by built-in directory rules available
+// for reporting while preserving the review input as the Included slice.
+func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 	patterns := p.loadGitignorePatterns()
-	var result []model.Diff
+	result := DiffSet{
+		Included: make([]model.Diff, 0, len(diffs)),
+		Excluded: make([]model.Diff, 0),
+	}
 	for _, d := range diffs {
 		path := d.NewPath
 		if path == "/dev/null" {
 			path = d.OldPath
 		}
-		if !p.isPathExcluded(path, patterns) {
-			result = append(result, d)
+		if isProviderDirExcluded(path) {
+			result.Excluded = append(result.Excluded, d)
+		} else if !p.isPathExcluded(path, patterns) {
+			result.Included = append(result.Included, d)
 		}
 	}
 	return result
@@ -555,20 +595,23 @@ func firstLine(out string) string {
 	return ""
 }
 
-func (p *Provider) workspaceTrackedDiff(ctx context.Context) (string, error) {
-	out, err := p.runGit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", "HEAD", "--")
+// workspaceTrackedDiff returns the tracked-file diff, git's stderr, and the
+// failure if there was one. Stderr is returned separately so the caller can
+// quote it without risking diff content in the error; see runGitSplit.
+func (p *Provider) workspaceTrackedDiff(ctx context.Context) (string, string, error) {
+	out, _, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", "HEAD", "--")
 	if err == nil && out != "" {
-		return out, nil
+		return out, "", nil
 	}
 	if ctx.Err() != nil {
-		return "", ctx.Err()
+		return "", "", ctx.Err()
 	}
 	// Fall back to the staged diff when `git diff HEAD` errored or was empty. This is
 	// not redundant with the call above: in a repository with no commits yet there is no
 	// HEAD, so `git diff HEAD` fails with "bad revision 'HEAD'", but `git diff --staged`
 	// still surfaces staged changes by diffing the index against the empty tree — the only
 	// way to review a workspace before its first commit.
-	return p.runGit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--staged", "--")
+	return p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--staged", "--")
 }
 
 func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
@@ -610,8 +653,11 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 }
 
 func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
-	out, err := p.runGit(ctx, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")
-	if err != nil || out == "" {
+	out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, gitFailure("git ls-files", stderr, err)
+	}
+	if out == "" {
 		return nil, nil
 	}
 	patterns := p.loadGitignorePatterns()
@@ -636,4 +682,80 @@ func (p *Provider) runGit(ctx context.Context, args ...string) (string, error) {
 	cmd.Dir = p.repoDir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// runGitSplit runs git with stdout and stderr kept apart, for the callers that
+// quote the failure back to the user.
+//
+// runGit's combined output cannot be quoted safely. Git writes the diff to
+// stdout and its diagnosis to stderr, so a command killed mid-write leaves a
+// tail made entirely of diff content — repository source, and whatever that
+// source happens to contain — with no diagnosis anywhere in it. That string
+// does not stay local: reviewResultError hands it to span.RecordError, so it
+// reaches whatever telemetry backend is configured. classifyItemError guards
+// the run manifest against raw error text for the same reason.
+//
+// Stderr carries the diagnosis by construction, since die() writes there, so
+// quoting it alone loses nothing a reader wants and cannot carry diff.
+//
+// Mirrors runGitGrep in internal/tool/code_search.go, cancellation guard
+// included: a killed process reports the signal rather than the reason, and
+// the reason is what the caller needs.
+func (p *Provider) runGitSplit(ctx context.Context, args ...string) (string, string, error) {
+	if p.runner != nil {
+		stdout, stderr, err := p.runner.RunSplit(ctx, p.repoDir, args...)
+		if ctx.Err() != nil && err != nil {
+			return "", "", ctx.Err()
+		}
+		return stdout, stderr, err
+	}
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = p.repoDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if ctx.Err() != nil && err != nil && cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == -1 {
+		return "", "", ctx.Err()
+	}
+	return stdout.String(), stderr.String(), err
+}
+
+// gitDiagLimit bounds how much of git's stderr is quoted back in an error.
+// Git's own diagnosis is a line or two, so the ceiling is a backstop for the
+// pathological case — a flood of warnings ahead of the fatal — rather than the
+// common one.
+const gitDiagLimit = 2000
+
+// gitFailure builds an error that carries git's own message.
+//
+// Every diff-producing caller used to drop git's output on the floor, so a
+// failure surfaced as a bare "git show failed: exit status 129" — true, and
+// useless. Diagnosing one then meant asking the reporter to re-run the command
+// by hand to see what git actually said (#972). The exit status alone cannot
+// distinguish an unsupported option from a bad revision or a permission error.
+//
+// Callers pass stderr, never runGit's combined output; see runGitSplit for why.
+func gitFailure(op, stderr string, err error) error {
+	diag := strings.TrimSpace(stderr)
+	if diag == "" {
+		return fmt.Errorf("%s failed: %w", op, err)
+	}
+	if len(diag) > gitDiagLimit {
+		// Keep the tail: die() exits the process, so the fatal git ends on is
+		// the last thing it writes, behind any warnings that preceded it.
+		diag = diag[len(diag)-gitDiagLimit:]
+		// Cutting by bytes can land mid-rune. Git speaks the user's locale,
+		// so this is not hypothetical — #972 came from a Japanese-language
+		// Windows install. Drop the partial leading rune rather than emit
+		// invalid UTF-8.
+		for len(diag) > 0 && !utf8.RuneStart(diag[0]) {
+			diag = diag[1:]
+		}
+		diag = "..." + diag
+	}
+	return fmt.Errorf("%s failed: %w: %s", op, err, diag)
 }

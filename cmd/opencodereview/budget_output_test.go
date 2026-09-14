@@ -6,11 +6,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 )
@@ -45,7 +47,7 @@ func TestEmitRunResult_JSONBudgetStopIsPartial(t *testing.T) {
 		},
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, nil)
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -96,7 +98,7 @@ func TestEmitRunResult_JSONBudgetDoesNotOverrideLegacyStatus(t *testing.T) {
 		budgetExceeded: true,
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, nil)
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -124,7 +126,7 @@ func TestEmitRunResult_JSONNoBudgetIsSuccess(t *testing.T) {
 		totalTokens:   15,
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, nil)
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -151,15 +153,32 @@ func TestEmitFailureUsage_TextEmitsStructuredRecord(t *testing.T) {
 		outputTokens:  500,
 		totalTokens:   1500,
 		toolCalls:     map[string]int64{"file_read": 3, "code_comment": 2},
-		sessionID:     "sess-fail-1",
+		toolFailures: []llmloop.ToolFailureDetail{
+			{ToolName: "file_read"},
+			{ToolName: "code_comment"},
+		},
+		sessionID: "sess-fail-1",
 	}
 	got := captureStderr(t, func() {
 		emitFailureUsage(ag, 42*time.Second, "text", nil, nil)
 	})
-	for _, want := range []string{"usage on failure", "1500 total tokens", "5 tool calls", "budget_exceeded=false", "sess-fail-1"} {
+	for _, want := range []string{"usage on failure", "1500 total tokens", "5 tool calls, 2 failed", "budget_exceeded=false", "sess-fail-1"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("stderr missing %q; got %q", want, got)
 		}
+	}
+}
+
+func TestEmitFailureUsage_TextOmitsZeroToolFailures(t *testing.T) {
+	ag := &mockResultProvider{toolCalls: map[string]int64{"file_read": 2}}
+	got := captureStderr(t, func() {
+		emitFailureUsage(ag, time.Second, "text", nil, nil)
+	})
+	if !strings.Contains(got, "2 tool calls, elapsed") {
+		t.Errorf("stderr missing unchanged zero-failure summary; got %q", got)
+	}
+	if strings.Contains(got, "0 failed") {
+		t.Errorf("stderr should omit zero tool failures; got %q", got)
 	}
 }
 
@@ -172,6 +191,13 @@ func TestEmitFailureUsage_JSONEmitsStructuredRecord(t *testing.T) {
 		outputTokens:  80,
 		totalTokens:   280,
 		toolCalls:     map[string]int64{"file_read": 1},
+		toolFailures: []llmloop.ToolFailureDetail{{
+			ToolCallNumber: 1,
+			ToolName:       "file_read",
+			FilePath:       "missing.go",
+			Arguments:      `{"file_path":"missing.go"}`,
+			Error:          "file not found",
+		}},
 	}
 	identity := &jsonLLMIdentity{Provider: "openai", Model: "gpt-5.4"}
 	got := captureStderr(t, func() {
@@ -195,6 +221,15 @@ func TestEmitFailureUsage_JSONEmitsStructuredRecord(t *testing.T) {
 	}
 	if out.ToolCalls == nil || out.ToolCalls.Total != 1 {
 		t.Errorf("tool_calls.total = %v, want 1", out.ToolCalls)
+	}
+	if out.ToolCalls.Failure != 1 || len(out.ToolCalls.FailureDetails) != 1 {
+		t.Errorf("tool call failures = %+v, want one", out.ToolCalls)
+	}
+	if out.ToolCalls.FailureByTool["file_read"] != 1 {
+		t.Errorf("failure_by_tool = %+v, want file_read=1", out.ToolCalls.FailureByTool)
+	}
+	if got := out.ToolCalls.FailureDetails[0].Arguments; got != `{"file_path":"missing.go"}` {
+		t.Errorf("failure arguments = %q, want raw tool arguments", got)
 	}
 	if out.LLM == nil || out.LLM.Provider != "openai" || out.LLM.Model != "gpt-5.4" {
 		t.Fatalf("llm = %+v", out.LLM)
@@ -249,7 +284,7 @@ func TestEmitRunResult_BudgetExceededFalseOmittedFromJSON(t *testing.T) {
 		totalTokens:   10,
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, []model.LlmComment{}, time.Now(), "json", "developer", nil, nil, nil)
+		err := emitRunResult(context.Background(), ag, []model.LlmComment{}, time.Now(), "json", "developer", nil, nil, os.Stdout, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

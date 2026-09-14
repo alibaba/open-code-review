@@ -75,12 +75,12 @@ export const ja: TranslationKeys = {
   'features.feat2Desc': '独立した行レベルのコメント配置モジュールと3段階の漸進的 LLM 戦略により、各コメントを正確な行番号に配置。独立したリフレクションモジュールが幻覚や知識のドリフトを早期に検出します。',
   'features.feat3Title': 'マルチモデルプロトコルサポート',
   'features.feat3Desc': 'Anthropic Messages API、OpenAI Chat Completions API、OpenAI Responses API をサポート。Anthropic、OpenAI、DashScope、DeepSeek、Z.AI などのプリセットプロバイダーを内蔵し、カスタムモデルエンドポイントにも対応。',
-  'features.feat4Title': '動的並行処理',
-  'features.feat4Desc': '設定可能な goroutine ワーカー（デフォルト8）でサブタスクを動的に分割し並列レビュー。大規模な変更セットでも迅速に完了します。',
+  'features.feat4Title': 'Effort 駆動の多段階レビュー',
+  'features.feat4Desc': 'コントロールできる Agent のレビュー深度：low は高速なフィードバック、medium は品質とコストの均衡、high は見落としが許されない重要な変更向け。階層が上がるほど、すでに見つけた問題を踏まえてさらに深く問い直します。新たなリスクが出ないラウンドに達した時点で自ら収束し、深さのために余計なコストを払いません。',
   'features.feat5Title': 'スマートメモリ圧縮',
   'features.feat5Desc': 'コードレビュー専用のメモリ圧縮方式。3段階パーティション（凍結/圧縮/アクティブ）コンテキスト管理により、トークン制限を突破して深いレビューを実現。',
   'features.feat6Title': '組み込みレビュールール',
-  'features.feat6Desc': '大規模な実環境で検証されたレビュールール。Java、TypeScript、Go、Python、Kotlin、Rust、C++、C など10以上の言語をカバーし、NPE、スレッドセーフティ、XSS、SQLインジェクションなどの専門ルールを搭載。',
+  'features.feat6Desc': '大規模な実環境で検証されたレビュールール。Java、TypeScript、Go、Python、Kotlin、Rust、C/C++、Swift、Solidity、Verilog など 40 以上の言語とファイル種別をカバーし、NPE、スレッドセーフティ、XSS、SQL インジェクションなどの専門チェックを標準搭載。',
 
   // Benchmark
   'benchmark.sectionLabel': 'オープンベンチマーク',

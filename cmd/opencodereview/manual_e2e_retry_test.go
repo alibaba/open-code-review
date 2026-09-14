@@ -47,7 +47,7 @@ func runManualReview(t *testing.T, srv *fakeLLM) manualResult {
 	repoDir := retryTestRepo(t)
 	startFakeLLM(t, srv)
 
-	cc, err := loadCommonContext(repoDir, "", 0, 4, true)
+	cc, err := loadCommonContext(repoDir, "", "", 0, 4, true)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
@@ -164,8 +164,7 @@ func TestManualE2ERetryReport(t *testing.T) {
 
 	t.Run("all_files_fail", func(t *testing.T) {
 		srv := newFakeLLM()
-		srv.hardFail["a.go"] = true
-		srv.hardFail["b.go"] = true
+		srv.failAll()
 		res := runManualReview(t, srv)
 		if res.freezeErr != nil {
 			t.Fatalf("Freeze: %v", res.freezeErr)

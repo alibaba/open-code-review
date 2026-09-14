@@ -13,7 +13,7 @@ import (
 
 func TestListSessions_EmptyRepoReturnsNil(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	got, err := ListSessions(t.TempDir())
 	if err != nil {
@@ -26,7 +26,7 @@ func TestListSessions_EmptyRepoReturnsNil(t *testing.T) {
 
 func TestListSessions_SortsAndAggregates(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	older := writeTestSession(t, repoDir, "feature-a", "commit-x", []model.LlmComment{
@@ -71,7 +71,7 @@ func TestListSessions_SortsAndAggregates(t *testing.T) {
 
 func TestLoadDetail_ReturnsItems(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := New(repoDir, "main", "test-model", SessionOptions{
@@ -116,7 +116,7 @@ func TestLoadDetail_ReturnsItems(t *testing.T) {
 
 func TestLoadSummary_FallsBackToSessionEndFilesReviewed(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := New(repoDir, "main", "test-model", SessionOptions{
@@ -146,7 +146,7 @@ func TestLoadSummary_FallsBackToSessionEndFilesReviewed(t *testing.T) {
 
 func TestLoadSummaryPrefersV1RunManifest(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := New(repoDir, "main", "test-model", SessionOptions{
@@ -207,7 +207,7 @@ func TestLoadSummaryPrefersV1RunManifest(t *testing.T) {
 
 func TestLoadSummaryIgnoresUnknownManifestVersion(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
@@ -226,7 +226,7 @@ func TestLoadSummaryIgnoresUnknownManifestVersion(t *testing.T) {
 
 func TestLoadSummary_MissingFile(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	if _, err := LoadSummary(t.TempDir(), "nonexistent"); err == nil {
 		t.Fatal("expected error for missing session")
 	}

@@ -152,6 +152,9 @@ ocr scan                          # сканировать весь репози
 ocr scan --path internal/agent    # сканировать каталог или конкретные файлы
 ocr scan --resume <session-id>   # возобновить прерванное полнофайловое сканирование
 
+# Сохранить результаты в файл (рекомендуется для хост-агентов ИИ)
+ocr review --format json --output result.json
+
 # Режим делегирования — ИИ-агент сам выполняет ревью
 # OCR отвечает за выбор файлов и разрешение правил; настройка LLM не требуется
 ocr delegate preview
@@ -179,7 +182,7 @@ ocr delegate rule src/main.go src/handler.go
   - [По умолчанию (под управлением OCR)](https://open-codereview.ai/docs/configuration) — OCR выполняет ревью с помощью настроенной LLM
   - [Режим делегирования](https://open-codereview.ai/docs/delegate) — кодинг-агент выполняет ревью с помощью собственной LLM; API-ключ для OCR не требуется
 - [Интеграция с CI/CD](https://open-codereview.ai/docs/cicd) — GitHub Actions, GitLab CI, GitFlic CI и Gerrit
-- [Просмотр сессий](https://open-codereview.ai/docs/viewer) — просмотр и воспроизведение сессий ревью в браузере
+- [Просмотр сессий](https://open-codereview.ai/docs/viewer) — просмотр и воспроизведение сессий ревью в браузере, отметка комментариев как исправленных/игнорируемых и их скрытие
 - [Телеметрия](https://open-codereview.ai/docs/telemetry) — интеграция с OpenTelemetry для наблюдаемости
 - [FAQ](https://open-codereview.ai/docs/faq) — частые вопросы и устранение неполадок
 

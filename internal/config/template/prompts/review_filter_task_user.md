@@ -1,22 +1,24 @@
 ### Task
 
-Below is one file's diff and a set of review comments about it. Identify only the comments that this diff **proves** to be wrong.
+Below are the diffs of one or more related files, and a set of review comments about them. Identify only the comments that these diffs **prove** to be wrong.
 
-Your default answer is to approve everything. On most files that is the correct answer.
+Every comment carries a `path`. The `<file>` element with that same path is the comment's subject; the other files are context. They can supply the evidence a cross-file comment rests on, but they never stand in for the subject file — code present somewhere in the group is not present in the file the comment was filed against.
+
+Your default answer is to approve everything. On most reviews that is the correct answer.
 
 ### The only two grounds for removal
 
-**Ground A — the comment targets code that is not in this diff.**
+**Ground A — the comment targets code that is not in its subject file's diff.**
 
-The symbol, statement, or construct the comment describes appears nowhere in the diff below. Typical shapes:
+The symbol, statement, or construct the comment describes appears nowhere in the `<file>` whose path the comment names. This ground is judged against that file alone — the same construct appearing in a sibling file does not rescue the comment. Typical shapes:
 
 - it discusses the body of a function, on a file that only declares or references it
 - it discusses host-language logic on a file that holds none — a query, build, markup, or configuration file
-- it claims code was removed, or an error is handled, and this diff contains no such change
+- it claims code was removed, or an error is handled, and its subject file's diff contains no such change
 
-**Ground B — a specific line of the diff literally contradicts the comment's central claim.**
+**Ground B — a specific diff line literally contradicts the comment's central claim.**
 
-The comment asserts a concrete fact and the diff shows the opposite in plain text. The contradiction must be readable straight off the diff, not derived through a chain of reasoning. Typical shapes:
+The comment asserts a concrete fact and the diffs show the opposite in plain text. Unlike Ground A, the contradicting line may sit in any `<file>` in the group: a comment calling an identifier unused is wrong once any of these files uses it. The contradiction must be readable straight off the diff, not derived through a chain of reasoning. Typical shapes:
 
 - it says an identifier is unused, and the diff shows it in use
 - it says a check, assertion, or branch is missing, and the diff contains it
@@ -55,11 +57,11 @@ Run these steps in order for every comment. Stop at the first step that applies 
 
 **Step 2 — value veto.** Is the comment about style, formatting, naming, blank lines, the wording of a code comment, or readability, and is what it states true of this diff? → **approve and stop.** Its low value is not your concern.
 
-**Step 3 — Ground A.** Is the code it describes absent from the diff? → **remove it.**
+**Step 3 — Ground A.** Is the code it describes absent from its subject file's diff? → **remove it.**
 
-**Step 4 — Ground B.** Is there one diff line that literally contradicts its central claim, requiring no chain of reasoning to see? → **remove it.** Steps 3 and 4 are not optional: once a comment reaches them and qualifies, report it.
+**Step 4 — Ground B.** Is there one diff line, in any file of the group, that literally contradicts its central claim, requiring no chain of reasoning to see? → **remove it.** Steps 3 and 4 are not optional: once a comment reaches them and qualifies, report it.
 
-Before concluding a contradiction in Step 4, search the whole diff for what the comment describes — not only the snippet it quoted. A comment that cites the wrong line while describing something the diff does contain is correct, and stays.
+Before concluding a contradiction in Step 4, search every `<file>` for what the comment describes — not only the snippet it quoted. A comment that cites the wrong line while describing something the diffs do contain is correct, and stays.
 
 **Step 5 —** approve.
 
@@ -67,9 +69,9 @@ Reaching Step 4 and needing more than a single inferential step to reach the con
 
 ### Code Diff
 
-```{{path}}
+<review_files>
 {{diff}}
-```
+</review_files>
 
 ### Review Comments
 

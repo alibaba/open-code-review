@@ -54,6 +54,59 @@ func TestLoadDefault_HasNoScanFields(t *testing.T) {
 	}
 }
 
+func TestGroupingPlan(t *testing.T) {
+	tests := []struct {
+		name         string
+		fileCount    int
+		totalChanged int64
+		minFiles     int
+		bundleLines  int
+		want         GroupingStrategy
+	}{
+		{"at file threshold defers to the LLM", 4, 10, 4, 200, GroupingViaLLM},
+		{"above file threshold defers to the LLM", 9, 10, 4, 200, GroupingViaLLM},
+		{"high churn does not override the file threshold", 4, 9999, 4, 200, GroupingViaLLM},
+		{"few files, low churn bundles", 3, 10, 4, 200, GroupingBundleAll},
+		{"one line below the churn threshold bundles", 3, 199, 4, 200, GroupingBundleAll},
+		{"at the churn threshold goes per file", 3, 200, 4, 200, GroupingPerFile},
+		{"above the churn threshold goes per file", 2, 5000, 4, 200, GroupingPerFile},
+		{"zero min files keeps grouping unconditional", 3, 10, 0, 200, GroupingViaLLM},
+		{"negative min files keeps grouping unconditional", 3, 10, -1, 200, GroupingViaLLM},
+		{"zero bundle threshold never bundles", 3, 10, 4, 0, GroupingPerFile},
+		{"negative bundle threshold never bundles", 3, 10, 4, -1, GroupingPerFile},
+		{"zero churn bundles", 2, 0, 4, 200, GroupingBundleAll},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tpl := Template{
+				GroupingMinFiles:            tt.minFiles,
+				GroupingBundleLineThreshold: tt.bundleLines,
+			}
+			if got := tpl.GroupingPlan(tt.fileCount, tt.totalChanged); got != tt.want {
+				t.Errorf("GroupingPlan(%d, %d) = %v, want %v",
+					tt.fileCount, tt.totalChanged, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGroupingStrategyString(t *testing.T) {
+	tests := []struct {
+		strategy GroupingStrategy
+		want     string
+	}{
+		{GroupingViaLLM, "llm"},
+		{GroupingBundleAll, "bundle_all"},
+		{GroupingPerFile, "per_file"},
+		{GroupingStrategy(99), "unknown"},
+	}
+	for _, tt := range tests {
+		if got := tt.strategy.String(); got != tt.want {
+			t.Errorf("GroupingStrategy(%d).String() = %q, want %q", int(tt.strategy), got, tt.want)
+		}
+	}
+}
+
 func TestCompletionTokenLimit(t *testing.T) {
 	review := Template{MaxTokens: 200000}
 	if got := review.CompletionTokenLimit(); got != 200000 {
@@ -96,14 +149,26 @@ func TestLoadDefault_FieldsPopulated(t *testing.T) {
 	if tpl.ReviewFilterTask == nil {
 		t.Fatal("ReviewFilterTask is nil, expected non-nil")
 	}
-	if tpl.MaxTokens != 58888 {
-		t.Errorf("MaxTokens = %d, want 58888", tpl.MaxTokens)
+	if tpl.MaxTokens != 200000 {
+		t.Errorf("MaxTokens = %d, want 200000", tpl.MaxTokens)
 	}
-	if tpl.MaxToolRequestTimes != 30 {
-		t.Errorf("MaxToolRequestTimes = %d, want 30", tpl.MaxToolRequestTimes)
+	if tpl.MaxCompletionTokens != 16384 {
+		t.Errorf("MaxCompletionTokens = %d, want 16384", tpl.MaxCompletionTokens)
+	}
+	if tpl.MaxToolRequestTimes != 100 {
+		t.Errorf("MaxToolRequestTimes = %d, want 100", tpl.MaxToolRequestTimes)
 	}
 	if tpl.PlanModeLineThreshold != 50 {
 		t.Errorf("PlanModeLineThreshold = %d, want 50", tpl.PlanModeLineThreshold)
+	}
+	if tpl.GroupingMinFiles != 4 {
+		t.Errorf("GroupingMinFiles = %d, want 4", tpl.GroupingMinFiles)
+	}
+	if tpl.GroupingBundleLineThreshold != 200 {
+		t.Errorf("GroupingBundleLineThreshold = %d, want 200", tpl.GroupingBundleLineThreshold)
+	}
+	if tpl.PlanModeGroupLineThreshold != 100 {
+		t.Errorf("PlanModeGroupLineThreshold = %d, want 100", tpl.PlanModeGroupLineThreshold)
 	}
 }
 
@@ -118,8 +183,7 @@ func TestLoadDefault_PlaceholdersPresent(t *testing.T) {
 		content     string
 		placeholder string
 	}{
-		{"MainTask user has current_file_path", tpl.MainTask.Messages[1].Content, "{{current_file_path}}"},
-		{"MainTask user has diff", tpl.MainTask.Messages[1].Content, "{{diff}}"},
+		{"MainTask user has diffs", tpl.MainTask.Messages[1].Content, "{{diffs}}"},
 		{"PlanTask system has plan_tools", tpl.PlanTask.Messages[0].Content, "{{plan_tools}}"},
 		{"MemoryCompression user has context", tpl.MemoryCompressionTask.Messages[1].Content, "{{context}}"},
 		{"ReviewFilter user has comments", tpl.ReviewFilterTask.Messages[1].Content, "{{comments}}"},
@@ -341,5 +405,74 @@ func TestResolveLang(t *testing.T) {
 	}
 	if got := resolveLang("German"); got != "German" {
 		t.Errorf("resolveLang(\"German\") = %q, want \"German\"", got)
+	}
+}
+
+func TestPlanRequired(t *testing.T) {
+	tests := []struct {
+		name      string
+		tpl       Template
+		fileCount int
+		total     int64
+		maxFile   int64
+		want      bool
+	}{
+		{
+			name:      "single file exceeds per-file threshold",
+			tpl:       Template{PlanModeLineThreshold: 50, PlanModeGroupLineThreshold: 120},
+			fileCount: 1, total: 60, maxFile: 60,
+			want: true,
+		},
+		{
+			name:      "single file below per-file threshold",
+			tpl:       Template{PlanModeLineThreshold: 50, PlanModeGroupLineThreshold: 120},
+			fileCount: 1, total: 40, maxFile: 40,
+			want: false,
+		},
+		{
+			name:      "single file cannot trigger group threshold",
+			tpl:       Template{PlanModeLineThreshold: 50, PlanModeGroupLineThreshold: 120},
+			fileCount: 1, total: 200, maxFile: 200,
+			want: true, // triggers per-file, not group
+		},
+		{
+			name:      "multi-file group exceeds group threshold",
+			tpl:       Template{PlanModeLineThreshold: 50, PlanModeGroupLineThreshold: 120},
+			fileCount: 5, total: 200, maxFile: 40,
+			want: true,
+		},
+		{
+			name:      "multi-file group below both thresholds",
+			tpl:       Template{PlanModeLineThreshold: 50, PlanModeGroupLineThreshold: 120},
+			fileCount: 3, total: 90, maxFile: 30,
+			want: false,
+		},
+		{
+			name:      "per-file threshold zero means always plan",
+			tpl:       Template{PlanModeLineThreshold: 0, PlanModeGroupLineThreshold: 120},
+			fileCount: 1, total: 5, maxFile: 5,
+			want: true,
+		},
+		{
+			name:      "group threshold zero disables group gate",
+			tpl:       Template{PlanModeLineThreshold: 50, PlanModeGroupLineThreshold: 0},
+			fileCount: 5, total: 200, maxFile: 40,
+			want: false,
+		},
+		{
+			name:      "multi-file group at exact group threshold boundary",
+			tpl:       Template{PlanModeLineThreshold: 50, PlanModeGroupLineThreshold: 120},
+			fileCount: 3, total: 120, maxFile: 40,
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.tpl.PlanRequired(tt.fileCount, tt.total, tt.maxFile)
+			if got != tt.want {
+				t.Errorf("PlanRequired(%d, %d, %d) = %v, want %v",
+					tt.fileCount, tt.total, tt.maxFile, got, tt.want)
+			}
+		})
 	}
 }

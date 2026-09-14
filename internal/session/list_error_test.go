@@ -21,7 +21,7 @@ func TestListSessions_DirIsFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("os.ReadDir does not report ENOTDIR for a regular file on Windows")
 	}
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 
 	dir, err := SessionsDir(repoDir)

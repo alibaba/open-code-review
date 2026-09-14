@@ -4,8 +4,13 @@
 package scan
 
 import (
+	"context"
+	"encoding/json"
+	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -232,7 +237,7 @@ func TestRenderMessages(t *testing.T) {
 	}
 }
 
-func TestFilterLargeScans(t *testing.T) {
+func TestSelectScanItems_Large(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	tpl.MaxTokens = 40 // threshold = 32
 	a := newAgentForTest(t, tpl)
@@ -244,7 +249,7 @@ func TestFilterLargeScans(t *testing.T) {
 		{Path: "huge.go", Content: huge},
 		{Path: "b.go", Content: short},
 	}
-	out := a.filterLargeScans(in)
+	out := selectScanItemsForTest(t, a, in)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 kept, got %d", len(out))
 	}
@@ -267,11 +272,11 @@ func exactNTokens(t *testing.T, n int) string {
 	return s
 }
 
-// TestFilterLargeScans_Boundary pins the 80% threshold exactly: with
+// TestSelectScanItems_LargeBoundary pins the 80% threshold exactly: with
 // MaxTokens=100 the limit is 80, so an 80-token item is kept and an 81-token
-// one is dropped. TestFilterLargeScans above uses margins wide enough to pass
+// one is dropped. TestSelectScanItems_Large above uses margins wide enough to pass
 // at any threshold, so it does not pin the value.
-func TestFilterLargeScans_Boundary(t *testing.T) {
+func TestSelectScanItems_LargeBoundary(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	tpl.MaxTokens = 100 // threshold = 80
 	a := newAgentForTest(t, tpl)
@@ -280,7 +285,7 @@ func TestFilterLargeScans_Boundary(t *testing.T) {
 		{Path: "at-limit.go", Content: exactNTokens(t, 80)},
 		{Path: "over-limit.go", Content: exactNTokens(t, 81)},
 	}
-	out := a.filterLargeScans(in)
+	out := selectScanItemsForTest(t, a, in)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 kept, got %d", len(out))
 	}
@@ -289,7 +294,7 @@ func TestFilterLargeScans_Boundary(t *testing.T) {
 	}
 }
 
-func TestFilterLargeScans_NoLimit(t *testing.T) {
+func TestSelectScanItems_NoLimit(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	tpl.MaxTokens = 0
 	a := newAgentForTest(t, tpl)
@@ -297,10 +302,15 @@ func TestFilterLargeScans_NoLimit(t *testing.T) {
 		{Path: "a.go", Content: "anything"},
 		{Path: "b.go", Content: strings.Repeat("x ", 1000)},
 	}
-	out := a.filterLargeScans(in)
+	out := selectScanItemsForTest(t, a, in)
 	if len(out) != 2 {
 		t.Errorf("with MaxTokens=0 nothing should be filtered, got %d", len(out))
 	}
+}
+
+func selectScanItemsForTest(t *testing.T, a *Agent, items []model.ScanItem) []model.ScanItem {
+	t.Helper()
+	return selectedScanItems(a.selectScanItems(items))
 }
 
 func TestInjectScanContentMap(t *testing.T) {
@@ -358,4 +368,198 @@ func TestTokenCountersDelegateToRunner(t *testing.T) {
 		t.Fatal("scan.Agent token getters must mirror runner")
 	}
 	_ = llmloop.AgentWarning{} // keep llmloop import meaningful
+}
+
+type blockingScanCompressionClient struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+	mu      sync.Mutex
+	round   int
+}
+
+func newBlockingScanCompressionClient() *blockingScanCompressionClient {
+	return &blockingScanCompressionClient{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (c *blockingScanCompressionClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	if len(req.Tools) == 0 {
+		c.once.Do(func() { close(c.started) })
+		<-c.release
+		summary := "compressed summary"
+		return &llm.ChatResponse{
+			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summary}}},
+			Usage:   &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+		}, nil
+	}
+
+	c.mu.Lock()
+	c.round++
+	r := c.round
+	c.mu.Unlock()
+
+	if r == 1 {
+		content := strings.Repeat("word ", 650)
+		return &llm.ChatResponse{
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{
+					Content: &content,
+					ToolCalls: []llm.ToolCall{{
+						ID:   "call_1",
+						Type: "function",
+						Function: llm.FunctionCall{
+							Name:      "code_comment",
+							Arguments: `{"comments":[{"path":"main.go","line":1,"content":"finding"}]}`,
+						},
+					}},
+				},
+			}},
+			Usage: &llm.UsageInfo{PromptTokens: 100, CompletionTokens: 50},
+		}, nil
+	}
+
+	// Round 2+: wait until the background compression goroutine has reached
+	// the mock (closed c.started) before returning task_done. This eliminates
+	// the race where the main loop finishes before compression starts,
+	// ensuring WaitBackground is the only thing holding Run open.
+	<-c.started
+
+	doneContent := ""
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{
+				Content: &doneContent,
+				ToolCalls: []llm.ToolCall{{
+					ID:   "call_done",
+					Type: "function",
+					Function: llm.FunctionCall{
+						Name:      "task_done",
+						Arguments: `{"state":"DONE"}`,
+					},
+				}},
+			},
+		}},
+		Usage: &llm.UsageInfo{PromptTokens: 20, CompletionTokens: 10},
+	}, nil
+}
+
+func TestScanAgent_WaitBackground_NoLeakOnRun(t *testing.T) {
+	repo := initTestRepo(t)
+	writeFile(t, repo, "main.go", []byte("package main\n\nfunc main() {}\n"))
+	gitCommit(t, repo, "init")
+
+	tpl := makeTemplateWithFullScan()
+	tpl.MaxTokens = 1000
+	tpl.MemoryCompressionTask = template.LlmConversation{
+		Messages: []template.ChatMessage{
+			{Role: "system", Content: "compress {{context}}"},
+		},
+	}
+
+	client := newBlockingScanCompressionClient()
+	sess := session.New(repo, "main", "test-model", session.SessionOptions{
+		ReviewMode: session.ReviewModeFullScan,
+	})
+
+	a := NewAgent(Args{
+		RepoDir:          repo,
+		Template:         tpl,
+		LLMClient:        client,
+		Model:            "test-model",
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
+		SkipPlan:       true,
+		SkipDedup:      true,
+		SkipSummary:    true,
+		MaxConcurrency: 1,
+		Session:        sess,
+	})
+
+	type runResult struct {
+		comments []model.LlmComment
+		err      error
+	}
+	done := make(chan runResult, 1)
+
+	go func() {
+		comments, err := a.Run(context.Background())
+		done <- runResult{comments: comments, err: err}
+	}()
+
+	// Wait until background compression starts and blocks
+	select {
+	case <-client.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for background compression to start")
+	}
+
+	// Verify that a.Run has NOT returned yet (held by a.runner.WaitBackground()).
+	// Use a timeout rather than default: the main goroutine's entire post-loop
+	// cleanup (RunMainTask return → dispatchSubtasks → Finalize) completes in
+	// under 1ms on any machine, so 200ms is a generous upper bound. If Run
+	// returns within this window, WaitBackground is not holding it.
+	select {
+	case res := <-done:
+		t.Fatalf("a.Run returned prematurely before background compression was released: err=%v", res.err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// Release compression and wait for Run to finish
+	close(client.release)
+
+	select {
+	case res := <-done:
+		if res.err != nil {
+			t.Fatalf("Run: %v", res.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for a.Run to finish")
+	}
+
+	// Verify session JSONL file:
+	// 1. memory_compression_task llm_request is recorded
+	// 2. session_end is the final record
+	path, err := session.SessionFilePath(repo, sess.SessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", path, err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) == 0 {
+		t.Fatal("expected non-empty session JSONL")
+	}
+
+	var hasCompressionRequest bool
+	for _, l := range lines {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(l), &rec); err != nil {
+			t.Fatalf("unmarshal line %q: %v", l, err)
+		}
+		if rec["type"] == "llm_request" && rec["taskType"] == string(session.MemoryCompressionTask) {
+			hasCompressionRequest = true
+		}
+	}
+
+	if !hasCompressionRequest {
+		t.Errorf("session JSONL missing memory_compression_task llm_request; contents:\n%s", string(data))
+	}
+
+	var lastRec map[string]any
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &lastRec); err != nil {
+		t.Fatalf("unmarshal last line %q: %v", lines[len(lines)-1], err)
+	}
+	if lastRec["type"] != "session_end" {
+		t.Errorf("last session JSONL record type = %q, want session_end", lastRec["type"])
+	}
 }

@@ -75,12 +75,12 @@ export const zh: TranslationKeys = {
   'features.feat2Desc': '独立的行级评论定位模块，采用三级渐进式 LLM 策略精确定位到具体行号。独立的反思模块提前拦截幻觉和知识偏移。',
   'features.feat3Title': '多模型协议支持',
   'features.feat3Desc': '同时支持 Anthropic Messages API、OpenAI Chat Completions API 和 OpenAI Responses API。内置 Anthropic、OpenAI、DashScope、DeepSeek、Z.AI 等预设提供商，开箱即用，同时支持自定义模型端点用于私有化部署。',
-  'features.feat4Title': '动态并发处理',
-  'features.feat4Desc': '动态拆分子任务进行并行审查，支持可配置的 goroutine 工作线程（默认 8 个）。即使是大型变更集也能快速完成。',
+  'features.feat4Title': 'Effort 驱动的多轮递进审查',
+  'features.feat4Desc': 'Agent 审查深度可控：low 快速反馈，medium 兼顾质量与成本，high 用于不容遗漏的关键变更。档位越高，越会带着已发现的问题继续向更深处追问；当一轮探索不再产出新风险时自动收敛，不为深度支付多余成本。',
   'features.feat5Title': '智能记忆压缩',
   'features.feat5Desc': '专为代码审查构建的记忆压缩方案，采用三级分区（冻结/压缩/活跃）上下文管理，突破 Token 限制实现深度审查。',
   'features.feat6Title': '内置审查规则',
-  'features.feat6Desc': '经海量真实场景验证的审查规则，覆盖 Java、TypeScript、Go、Python、Kotlin、Rust、C++、C 等 10+ 种语言，包含 NPE、线程安全、XSS、SQL 注入等专项规则。',
+  'features.feat6Desc': '经海量真实场景验证的审查规则，覆盖 40+ 种语言与文件类型——Java、TypeScript、Go、Python、Kotlin、Rust、C/C++、Swift、Solidity、Verilog 等，内置 NPE、线程安全、XSS、SQL 注入等专项检查。',
 
   // Benchmark
   'benchmark.sectionLabel': '公开基准测试',

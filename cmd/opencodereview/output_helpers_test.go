@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -173,7 +174,7 @@ func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "fail"}}
-	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "", nil, false, nil, nil)
+	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, nil, "abc123trace", nil, "", nil, false, nil, os.Stdout, nil, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -286,7 +287,14 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	comments := []model.LlmComment{{Path: "b.go", Content: "test"}}
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "c.go", Message: "failed"}}
-	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "", nil, false, nil, nil)
+	failures := []llmloop.ToolFailureDetail{{
+		ToolCallNumber: 2,
+		ToolName:       "file_read",
+		FilePath:       "b.go",
+		Arguments:      `{"path":"missing.go"}`,
+		Error:          "file not found",
+	}}
+	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, failures, "trace-xyz-789", nil, "", nil, false, nil, os.Stdout, nil, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -296,6 +304,12 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(r)
+	if !bytes.Contains(buf.Bytes(), []byte(`"failure"`)) {
+		t.Fatalf("tool_calls must use the failure field: %s", buf.String())
+	}
+	if bytes.Contains(buf.Bytes(), []byte(`"failure_count"`)) {
+		t.Fatalf("tool_calls must not emit the legacy failure_count field: %s", buf.String())
+	}
 
 	var out jsonOutput
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
@@ -313,6 +327,17 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 	if out.ToolCalls == nil || out.ToolCalls.Total != 3 {
 		t.Errorf("ToolCalls.Total = %v", out.ToolCalls)
 	}
+	if out.ToolCalls.Failure != 1 || len(out.ToolCalls.FailureDetails) != 1 {
+		t.Fatalf("ToolCalls failures = %+v", out.ToolCalls)
+	}
+	if out.ToolCalls.FailureByTool["file_read"] != 1 {
+		t.Errorf("failure_by_tool = %+v, want file_read=1", out.ToolCalls.FailureByTool)
+	}
+	failure := out.ToolCalls.FailureDetails[0]
+	if failure.ToolCallNumber != 2 || failure.ToolName != "file_read" || failure.FilePath != "b.go" ||
+		failure.Arguments != `{"path":"missing.go"}` || failure.Error != "file not found" {
+		t.Errorf("failure detail = %+v", failure)
+	}
 	if out.TraceID != "trace-xyz-789" {
 		t.Errorf("trace_id = %q, want trace-xyz-789", out.TraceID)
 	}
@@ -324,7 +349,7 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "warning", Message: "something"}}
-	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "", nil, false, nil, nil)
+	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, nil, "", nil, "", nil, false, nil, os.Stdout, nil, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -353,7 +378,7 @@ func TestOutputJSONNoFiles(t *testing.T) {
 	os.Stdout = w
 
 	identity := &jsonLLMIdentity{Provider: "anthropic", Model: "claude-opus-4-6"}
-	err := outputJSONNoFiles("test-trace-id-456", identity)
+	err := outputJSONNoFiles("test-trace-id-456", identity, os.Stdout)
 
 	_ = w.Close()
 	os.Stdout = old
@@ -377,6 +402,31 @@ func TestOutputJSONNoFiles(t *testing.T) {
 	}
 	if out.LLM == nil || out.LLM.Provider != "anthropic" || out.LLM.Model != "claude-opus-4-6" {
 		t.Fatalf("llm = %+v", out.LLM)
+	}
+	if out.ToolCalls == nil || out.ToolCalls.Failure != 0 || out.ToolCalls.FailureByTool == nil || len(out.ToolCalls.FailureByTool) != 0 || out.ToolCalls.FailureDetails == nil || len(out.ToolCalls.FailureDetails) != 0 {
+		t.Errorf("empty tool failure fields = %+v", out.ToolCalls)
+	}
+}
+
+func TestNewJSONToolCalls_FailureByTool(t *testing.T) {
+	failures := []llmloop.ToolFailureDetail{
+		{ToolName: "code_search", Arguments: `{"search_text":"needle"}`},
+		{ToolName: "file_read"},
+		{ToolName: "file_read"},
+		{ToolName: "file_find"},
+		{ToolName: "file_find"},
+		{ToolName: "file_find"},
+	}
+
+	got := newJSONToolCalls(nil, failures)
+	if got.Failure != 6 {
+		t.Fatalf("failure = %d, want 6", got.Failure)
+	}
+	if got.FailureByTool["code_search"] != 1 || got.FailureByTool["file_read"] != 2 || got.FailureByTool["file_find"] != 3 {
+		t.Errorf("failure_by_tool = %+v, want code_search=1 file_read=2 file_find=3", got.FailureByTool)
+	}
+	if got.FailureDetails[0].Arguments != `{"search_text":"needle"}` {
+		t.Errorf("failure arguments = %q, want preserved detail arguments", got.FailureDetails[0].Arguments)
 	}
 }
 
@@ -458,7 +508,7 @@ func TestOutputText_WithComments(t *testing.T) {
 func TestOutputTextWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	warnings := []agent.AgentWarning{{Type: "warning", File: "x.go", Message: "slow"}}
 	got := captureStdout(t, func() {
-		outputTextWithWarnings(nil, warnings, nil)
+		outputTextWithWarnings(nil, warnings, nil, os.Stdout)
 	})
 	if !strings.Contains(got, "Looks good to me") {
 		t.Errorf("expected 'Looks good to me', got %q", got)
@@ -468,7 +518,7 @@ func TestOutputTextWithWarnings_NoCommentsNoErrors(t *testing.T) {
 func TestOutputTextWithWarnings_NoCommentsWithSubtaskError(t *testing.T) {
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "y.go", Message: "failed"}}
 	got := captureStdout(t, func() {
-		outputTextWithWarnings(nil, warnings, nil)
+		outputTextWithWarnings(nil, warnings, nil, os.Stdout)
 	})
 	if !strings.Contains(got, "could not be reviewed") {
 		t.Errorf("expected subtask error message, got %q", got)
@@ -481,7 +531,7 @@ func TestOutputTextWithWarnings_WithComments(t *testing.T) {
 	}
 	warnings := []agent.AgentWarning{{Type: "info", File: "b.go", Message: "note"}}
 	got := captureStdout(t, func() {
-		outputTextWithWarnings(comments, warnings, nil)
+		outputTextWithWarnings(comments, warnings, nil, os.Stdout)
 	})
 	if !strings.Contains(got, "a.go") {
 		t.Errorf("expected comment path, got %q", got)
@@ -493,7 +543,7 @@ func TestOutputTextWithWarnings_WithComments(t *testing.T) {
 
 func TestRenderComment_EmptyContentNoDiff(t *testing.T) {
 	got := captureStdout(t, func() {
-		renderComment(model.LlmComment{Path: "skip.go", StartLine: 1, EndLine: 1, Content: "", ExistingCode: "", SuggestionCode: ""})
+		renderComment(model.LlmComment{Path: "skip.go", StartLine: 1, EndLine: 1, Content: "", ExistingCode: "", SuggestionCode: ""}, os.Stdout)
 	})
 	if got != "" {
 		t.Errorf("expected empty output for empty comment, got %q", got)
@@ -502,7 +552,7 @@ func TestRenderComment_EmptyContentNoDiff(t *testing.T) {
 
 func TestRenderComment_ContentOnly(t *testing.T) {
 	got := captureStdout(t, func() {
-		renderComment(model.LlmComment{Path: "file.go", StartLine: 5, EndLine: 10, Content: "consider renaming"})
+		renderComment(model.LlmComment{Path: "file.go", StartLine: 5, EndLine: 10, Content: "consider renaming"}, os.Stdout)
 	})
 	if !strings.Contains(got, "file.go:5-10") {
 		t.Errorf("expected path:line range, got %q", got)
@@ -521,7 +571,7 @@ func TestRenderComment_WithDiff(t *testing.T) {
 			Content:        "rename var",
 			ExistingCode:   "old := 1\n",
 			SuggestionCode: "new := 1\n",
-		})
+		}, os.Stdout)
 	})
 	if !strings.Contains(got, "diff.go:1-2") {
 		t.Errorf("expected path:line range, got %q", got)
@@ -544,7 +594,7 @@ func TestPrintDiffLine(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := captureStdout(t, func() {
-				printDiffLine(tc.prefix, tc.content, "\033[92m", "\033[48;2;0;60;0m")
+				printDiffLine(os.Stdout, tc.prefix, tc.content, "\033[92m", "\033[48;2;0;60;0m")
 			})
 			if !strings.Contains(got, tc.prefix) {
 				t.Errorf("expected prefix %q in output, got %q", tc.prefix, got)
@@ -559,7 +609,7 @@ func TestPrintDiffLine(t *testing.T) {
 func TestOutputPreviewText_NoFiles(t *testing.T) {
 	p := &agent.DiffPreview{TotalFiles: 0}
 	got := captureStdout(t, func() {
-		outputPreviewText(p)
+		outputPreviewText(p, os.Stdout)
 	})
 	if !strings.Contains(got, "No files changed") {
 		t.Errorf("expected 'No files changed', got %q", got)
@@ -579,7 +629,7 @@ func TestOutputPreviewText_WithReviewableFiles(t *testing.T) {
 		ExcludedCount:   0,
 	}
 	got := captureStdout(t, func() {
-		outputPreviewText(p)
+		outputPreviewText(p, os.Stdout)
 	})
 	if !strings.Contains(got, "2 file(s) changed") {
 		t.Errorf("expected file count, got %q", got)
@@ -605,7 +655,7 @@ func TestOutputPreviewText_WithExcludedFiles(t *testing.T) {
 		ExcludedCount:   1,
 	}
 	got := captureStdout(t, func() {
-		outputPreviewText(p)
+		outputPreviewText(p, os.Stdout)
 	})
 	if !strings.Contains(got, "Will review (1)") {
 		t.Errorf("expected 'Will review (1)', got %q", got)

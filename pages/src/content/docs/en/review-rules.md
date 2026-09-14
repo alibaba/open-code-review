@@ -78,7 +78,7 @@ for matching:
 ## How files are filtered
 
 The filter is a five-gate algorithm in
-[`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go).
+[`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
 For each diff, OCR asks:
 
 1. **`binary`** — Is the file binary? Excluded.
@@ -94,11 +94,12 @@ For each diff, OCR asks:
    pattern (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb`,
    …)? Excluded.
 
-Files that survive all five gates are sent to the LLM. A `deleted`
-reason (not a gate — it's computed separately in `Preview()`) marks
-files whose new path is `/dev/null`; there's no new content to review.
-Use `ocr review --preview` to print the result of this filter without
-spending a token.
+Files that survive all five gates are sent to the LLM, unless the diff
+alone exceeds 80% of `max_tokens`: `selectFiles` applies that ceiling
+after the gates and excludes the file as `too_large`. It also marks a
+file whose new path is `/dev/null` as `deleted`; there's no new content
+to review. Use `ocr review --preview` to print the result of this filter
+without spending a token.
 
 ### Default path exclusions
 
@@ -160,15 +161,16 @@ matching order:
 | `**/*.java` | `java.md` |
 | `**/*.go` | `go.md` — Go source. |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling). |
+| `**/*.{hbs,mustache}` | `handlebars_mustache.md` — Handlebars and Mustache templates. |
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — Astro components and islands. |
-| `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,hpp}` | `cpp.md` |
+| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.{py,ipynb}` | `python.md` — Python source. |
+| `**/*.{py,pyi,ipynb}` | `python.md` — Python source. |
 | `**/*.{php,phtml}` | `php.md` — PHP source and PHP templates. |
 | `**/*.proto` | `protobuf.md` — Protocol Buffers wire compatibility. |
 | `**/*.po` | `po.md` — gettext translation source catalogs. |
@@ -182,10 +184,29 @@ matching order:
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
+| `**/*.{v,sv,vh}` | `verilog.md` — Verilog and SystemVerilog RTL. |
+| `**/*.{vhd,vhdl}` | `vhdl.md` — VHDL RTL. |
+| `**/*.m` | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files)) |
+| `**/*.mm` | `objc.md` — Objective-C++ source. |
+| `**/*.sol` | `solidity.md` — Solidity smart contracts. |
+| `**/*.vy` | `vyper.md` — Vyper smart contracts. |
+| `**/*.rego` | `rego.md` — Rego policy (OPA). |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
 plan and main task prompts.
+
+### Content sniffing for `.m` files
+
+`.m` is shared by MATLAB and Objective-C. OCR peeks at the file's first
+non-blank line to disambiguate: if it looks like Objective-C (e.g. `#import`,
+`@implementation`, a C-style comment), `objc.md` is used instead of
+`matlab.md`. When the content cannot be read, resolution falls back to
+`matlab.md`.
+
+> **Stability note.** The sniff heuristic may change between OCR versions. If
+> you need deterministic `.m` routing, set an explicit project-level rule for
+> your `.m` paths — project rules always outrank the system layer.
 
 ## Inspecting which rule wins: `ocr rules check`
 

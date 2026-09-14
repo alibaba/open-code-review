@@ -20,7 +20,7 @@ func TestCompleteSessionIDs_WithSession(t *testing.T) {
 	}
 
 	t.Run("lists matching session IDs", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setTestHome(t, t.TempDir())
 		repoDir := t.TempDir()
 		id := writeRangeResumeSession(t, repoDir, "a.go")
 
@@ -31,7 +31,7 @@ func TestCompleteSessionIDs_WithSession(t *testing.T) {
 	})
 
 	t.Run("prefix that matches nothing yields empty list", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setTestHome(t, t.TempDir())
 		repoDir := t.TempDir()
 		writeRangeResumeSession(t, repoDir, "a.go")
 

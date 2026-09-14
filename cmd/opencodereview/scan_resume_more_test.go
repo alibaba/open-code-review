@@ -31,7 +31,7 @@ func writeScanResumeSession(t *testing.T, repoDir string, files ...string) strin
 // that completed no items.
 func TestLoadScanResumeState_WithSession(t *testing.T) {
 	t.Run("success returns state with completed items", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setTestHome(t, t.TempDir())
 		repoDir := t.TempDir()
 		id := writeScanResumeSession(t, repoDir, "a.go", "b.go")
 
@@ -45,7 +45,7 @@ func TestLoadScanResumeState_WithSession(t *testing.T) {
 	})
 
 	t.Run("non-scan session rejected", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setTestHome(t, t.TempDir())
 		repoDir := t.TempDir()
 		// Persist a range-mode session, then try to resume it as a scan.
 		id := writeRangeResumeSession(t, repoDir, "a.go")
@@ -57,7 +57,7 @@ func TestLoadScanResumeState_WithSession(t *testing.T) {
 	})
 
 	t.Run("no completed items errors", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setTestHome(t, t.TempDir())
 		repoDir := t.TempDir()
 		id := writeScanResumeSession(t, repoDir) // no items recorded
 
