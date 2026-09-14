@@ -64,7 +64,6 @@ binary          — file is binary
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
-provider_directory — matched an unconditional provider directory exclusion
 ```
 
 …or empty if the file is kept. `deleted` and `too_large` are **not**

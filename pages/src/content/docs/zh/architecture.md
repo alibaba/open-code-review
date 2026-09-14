@@ -77,6 +77,7 @@ default_path    — matched a built-in test-file exclude pattern
 噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，
 位于 diff-provider 层，通过 `internal/diff/git.go` 中的 `providerDirIgnoreDirs`
 列表——这些目录的 diff 被解析后即被剔除，永远不会到达 per-file 过滤器。
+Preview 将这些文件报告为 `provider_directory`；`include` 规则无法让它们变为可评审。
 
 运行 `ocr review --preview` 可不花 token 查看完整过滤结果。完整算法见
 [评审规则](../review-rules/#how-files-are-filtered)。

@@ -82,8 +82,9 @@ default_path    — matched a built-in test-file exclude pattern
 
 잡음이 많은 디렉터리(`vendor/`, `node_modules/`, `target/` 등)는 그보다 앞선
 diff 프로바이더 단계에서, `internal/diff/git.go`의 `providerDirIgnoreDirs`
-목록으로 걸러 냅니다. 이 디렉터리의 diff는 일단 파싱한 뒤 `filterDiffs`가
-떼어 내므로 파일 단위 필터까지 오지 못합니다.
+목록으로 걸러 냅니다. 이 디렉터리의 diff는 일단 파싱한 뒤 `isProviderDirExcluded`가
+떼어 내므로 파일 단위 필터까지 오지 못합니다. Preview는 이 파일들을 `provider_directory`로
+보고하며, `include` 규칙으로도 이들을 다시 리뷰 대상으로 되돌릴 수 없습니다.
 
 `ocr review --preview`를 돌리면 토큰 한 톨 쓰지 않고 필터 결과 전체를 볼 수
 있습니다. 알고리즘 전체는
