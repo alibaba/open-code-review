@@ -847,7 +847,7 @@ func TestOpenAIResponsesClient_EnrichesRestoredErrorBody(t *testing.T) {
 		Token:    "test-key",
 		Model:    "custom-model",
 		Protocol: ProtocolOpenAIResponses,
-	}, nil)
+	}, nil, nil)
 
 	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
 		Messages: []Message{{Role: "user", Content: "ping"}},
