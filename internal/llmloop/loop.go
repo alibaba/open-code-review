@@ -63,6 +63,15 @@ type Deps struct {
 	// requestNo must be the RequestNo of the session.TaskRecord already created
 	// for this request, so the report joins against the session JSONL.
 	NewRequestMeta func(filePath string, taskType session.TaskType, requestNo int) llm.RequestMeta
+
+	// MaxTokensBudget, when > 0, is the run's aggregate token budget
+	// (input+output across every LLM call on this Runner). RunMainTask checks
+	// it before each round and stops with StopTokenBudget once the running
+	// total is over it, so a single long conversation cannot outrun a budget
+	// that the caller's dispatch gate only evaluates between subtasks. 0 =
+	// unlimited, which is also what scan and every existing caller get by
+	// default.
+	MaxTokensBudget int64
 }
 
 // requestCtx returns ctx carrying the identity of one logical LLM request, or
@@ -287,6 +296,10 @@ const (
 	// StopCompression — context compression exceeded its threshold, so the loop
 	// could not continue. Token/context driven but not a declared budget.
 	StopCompression
+	// StopTokenBudget — the run's aggregate token budget (Deps.MaxTokensBudget)
+	// was already exceeded when the next round was about to start. This is a
+	// declared budget limit, like StopMaxRounds.
+	StopTokenBudget
 )
 
 // String names the stop for diagnostics — telemetry attributes, log lines and
@@ -302,6 +315,8 @@ func (s MainLoopStop) String() string {
 		return "empty_rounds"
 	case StopCompression:
 		return "compression"
+	case StopTokenBudget:
+		return "token_budget"
 	default:
 		return fmt.Sprintf("MainLoopStop(%d)", int(s))
 	}
@@ -331,6 +346,8 @@ func (s MainLoopStop) Reason() string {
 		return "stopped after repeated rounds without a usable tool result"
 	case StopCompression:
 		return "stopped because context compression exceeded its threshold"
+	case StopTokenBudget:
+		return "reached the aggregate token budget before finishing"
 	default:
 		return fmt.Sprintf("main task stopped for an unrecognized reason (stop=%d)", int(s))
 	}
@@ -381,6 +398,15 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		case <-ctx.Done():
 			return false, StopNone, ctx.Err()
 		default:
+		}
+
+		// The aggregate budget is checked here, before the request that would
+		// spend past it, rather than only at subtask dispatch: a conversation
+		// grows with every round and re-sends its whole history, so the one
+		// long group is exactly the spender a between-subtasks gate never sees.
+		if r.tokenBudgetExceeded() {
+			stop = StopTokenBudget
+			break
 		}
 
 		toolReqCount--
@@ -494,11 +520,23 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		}
 	}
 
-	if stop == StopMaxRounds {
+	switch stop {
+	case StopMaxRounds:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", taskKey)
+		r.runGraceRound(ctx, messages, taskKey, sessionID)
+	case StopTokenBudget:
+		fmt.Fprintf(stdout.Writer(), "[ocr] Token budget exceeded (used %d > budget %d) for %s.\n",
+			r.TotalTokensUsed(), r.deps.MaxTokensBudget, taskKey)
 		r.runGraceRound(ctx, messages, taskKey, sessionID)
 	}
 	return false, stop, nil
+}
+
+// tokenBudgetExceeded reports whether the run's aggregate token usage is past
+// Deps.MaxTokensBudget. A zero budget never trips.
+func (r *Runner) tokenBudgetExceeded() bool {
+	budget := r.deps.MaxTokensBudget
+	return budget > 0 && r.TotalTokensUsed() > budget
 }
 
 // runGraceRound performs one final LLM call after the tool-request budget is
@@ -511,7 +549,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	}
 
 	messages = append(messages, llm.NewTextMessage("user",
-		"Your tool-call budget is exhausted. This is your FINAL round. You may ONLY:\n"+
+		"Your review budget is exhausted. This is your FINAL round. You may ONLY:\n"+
 			"- Call code_comment to submit any findings you have identified but not yet reported.\n"+
 			"- Call task_done if you have nothing more to report.\n"+
 			"No other tools are available. Do not attempt further analysis."))
