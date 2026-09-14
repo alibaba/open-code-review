@@ -180,11 +180,6 @@ Beyond the common flags above, `ocr review` exposes a few groups of controls. Ru
 
 - `--format text|json|sarif` — `text` (default) for humans; `json` for machine-readable findings; `sarif` for code-scanning integrations such as GitHub Code Scanning.
 
-**Model**
-
-- `--provider <name>` / `--model <name>` — override the configured provider/model for this run only.
-- `--effort low|medium|high` — defaults to the configured effort, or `medium` when unset; sets review rounds to 1/2/3, which scales the effective per-group timeout (`--timeout` × rounds).
-
 **Budget**
 
 - `--max-tokens <n>` — per-group prompt ceiling; defaults to the configured value or the template default (`200000`).
