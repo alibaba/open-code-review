@@ -88,6 +88,10 @@ without changing the public API.
 Set `preview` to `true` to inspect which files would be reviewed without making
 an LLM request.
 
+When the review context is too long to pass inline, write it to a Markdown file
+and set `backgroundFile` to its path; a relative path resolves against the
+repository root. It cannot be combined with `background`.
+
 ## Behavior and safety
 
 - Reviews use `--audience agent` and JSON output.
