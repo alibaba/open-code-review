@@ -276,17 +276,17 @@ func opaqueToolCallFields(raw string) map[string]json.RawMessage {
 	if raw == "" {
 		return nil
 	}
+	// Unmarshal parses the whole document to find value boundaries, so a
+	// malformed payload fails here and every retained value is syntactically
+	// valid by construction - no second validation pass is needed.
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &all); err != nil {
 		return nil
 	}
 	var extra map[string]json.RawMessage
 	for k, v := range all {
-		if reservedToolCallFields[k] || len(v) == 0 {
+		if reservedToolCallFields[k] {
 			continue
-		}
-		if !json.Valid(v) {
-			return nil
 		}
 		if extra == nil {
 			extra = make(map[string]json.RawMessage, len(all))
