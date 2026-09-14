@@ -91,6 +91,7 @@ func TestExcludeReasonConstants(t *testing.T) {
 		ExcludeUserRule:          "user_exclude",
 		ExcludeExtension:         "unsupported_ext",
 		ExcludeDefaultPath:       "default_path",
+		ExcludeSecretPath:        "secret_exclude",
 		ExcludeProviderDirectory: "provider_directory",
 		ExcludeDeleted:           "deleted",
 		ExcludeBinary:            "binary",

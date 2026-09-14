@@ -12,6 +12,7 @@ const (
 	ExcludeUserRule    ExcludeReason = "user_exclude"
 	ExcludeExtension   ExcludeReason = "unsupported_ext"
 	ExcludeDefaultPath ExcludeReason = "default_path"
+	ExcludeSecretPath  ExcludeReason = "secret_exclude"
 	// ExcludeProviderDirectory is an unconditional diff-provider directory
 	// exclusion (for example vendor/ or node_modules/). Unlike default_path,
 	// an include rule cannot make the file reviewable.

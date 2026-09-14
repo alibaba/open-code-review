@@ -207,6 +207,30 @@ func TestWhyExcluded_DefaultPathFilter(t *testing.T) {
 	}
 }
 
+func TestWhyExcluded_SecretPathCannotBeIncluded(t *testing.T) {
+	agent := New(Args{
+		FileFilter: &rules.FileFilter{Include: []string{"**/.env"}},
+	})
+
+	tests := []struct {
+		path string
+		want ExcludeReason
+	}{
+		{".env", ExcludeSecretPath},
+		{".ssh/id_ed25519", ExcludeSecretPath},
+		{"id_rsa", ExcludeSecretPath},
+		{".env.example", ExcludeExtension},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := agent.whyExcluded(model.Diff{NewPath: tt.path}); got != tt.want {
+				t.Errorf("whyExcluded(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 	agent := New(Args{
 		FileFilter: &rules.FileFilter{

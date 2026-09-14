@@ -501,6 +501,9 @@ func (a *Agent) whyExcluded(it model.ScanItem) model.ExcludeReason {
 		return model.ExcludeBinary
 	}
 	path := it.Path
+	if allowedext.IsSecretPath(path) {
+		return model.ExcludeSecretPath
+	}
 	if a.args.FileFilter != nil && a.args.FileFilter.IsUserExcluded(path) {
 		return model.ExcludeUserRule
 	}

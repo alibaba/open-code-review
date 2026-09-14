@@ -157,6 +157,22 @@ func TestWhyExcluded_AllBranches(t *testing.T) {
 			want: model.ExcludeExtension,
 		},
 		{
+			name: "secret path",
+			item: model.ScanItem{Path: ".env"},
+			want: model.ExcludeSecretPath,
+		},
+		{
+			name:   "secret path cannot be included",
+			item:   model.ScanItem{Path: ".ssh/id_ed25519"},
+			filter: &rules.FileFilter{Include: []string{"**/.ssh/**"}},
+			want:   model.ExcludeSecretPath,
+		},
+		{
+			name: "environment example is reviewable",
+			item: model.ScanItem{Path: ".env.example"},
+			want: model.ExcludeExtension,
+		},
+		{
 			name:   "user include match passes",
 			item:   model.ScanItem{Path: "src/main.go", Content: "x"},
 			filter: &rules.FileFilter{Include: []string{"src/**"}},

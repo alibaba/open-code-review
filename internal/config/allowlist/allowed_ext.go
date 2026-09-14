@@ -42,6 +42,9 @@ var defaultData []byte
 //go:embed default_exclude_patterns.json
 var excludeData []byte
 
+//go:embed default_secret_patterns.json
+var secretData []byte
+
 var (
 	supported map[string]bool
 	initOnce  sync.Once
@@ -50,6 +53,11 @@ var (
 var (
 	excludePatterns []string // raw patterns from JSON (may contain {a,b} syntax)
 	excludeOnce     sync.Once
+)
+
+var (
+	secretPatterns []string // raw patterns from JSON (may contain {a,b} syntax)
+	secretOnce     sync.Once
 )
 
 func initMap() {
@@ -92,6 +100,28 @@ func IsExcludedPath(path string) bool {
 	excludeOnce.Do(initExclude)
 	lowerPath := strings.ToLower(path)
 	for _, pattern := range excludePatterns {
+		if matched, _ := doublestar.Match(pattern, lowerPath); matched {
+			return true
+		}
+	}
+	return false
+}
+
+func initSecret() {
+	if err := json.Unmarshal(secretData, &secretPatterns); err != nil {
+		panic("allowedext: failed to parse default_secret_patterns.json: " + err.Error())
+	}
+	for i, p := range secretPatterns {
+		secretPatterns[i] = strings.ToLower(p)
+	}
+}
+
+// IsSecretPath returns true when the given file path matches a built-in
+// credential-path pattern. The check is case-insensitive.
+func IsSecretPath(path string) bool {
+	secretOnce.Do(initSecret)
+	lowerPath := strings.ToLower(path)
+	for _, pattern := range secretPatterns {
 		if matched, _ := doublestar.Match(pattern, lowerPath); matched {
 			return true
 		}

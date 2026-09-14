@@ -73,6 +73,9 @@ func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 	}
 
 	path := effectivePath(d)
+	if allowedext.IsSecretPath(path) {
+		return ExcludeSecretPath
+	}
 	f := a.args.FileFilter
 
 	if f != nil && f.IsUserExcluded(path) {

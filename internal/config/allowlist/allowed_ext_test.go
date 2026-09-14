@@ -381,3 +381,30 @@ func TestIsExcludedPath(t *testing.T) {
 		})
 	}
 }
+
+func TestIsSecretPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{".env", true},
+		{"config/.env.local", true},
+		{"config/.env.production.local", true},
+		{".ssh/id_ed25519", true},
+		{"keys/id_rsa", true},
+		{"home/.netrc", true},
+		{"project/.NPMRC", true},
+		{".env.example", false},
+		{".env.sample", false},
+		{"Makefile", false},
+		{"src/credentials.go", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := IsSecretPath(tt.path); got != tt.want {
+				t.Errorf("IsSecretPath(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
