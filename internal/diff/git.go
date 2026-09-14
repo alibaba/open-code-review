@@ -69,6 +69,9 @@ type Provider struct {
 type DiffSet struct {
 	Included []model.Diff
 	Excluded []model.Diff
+	// ExcludedAt[i] is Excluded[i]'s index in the changeset order of Included
+	// and Excluded combined, so a caller can interleave the two back.
+	ExcludedAt []int
 }
 
 // NewProvider creates a Provider for range mode: from..to (via merge-base).
@@ -425,6 +428,7 @@ func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 			path = d.OldPath
 		}
 		if isProviderDirExcluded(path) {
+			result.ExcludedAt = append(result.ExcludedAt, len(result.Included)+len(result.Excluded))
 			result.Excluded = append(result.Excluded, d)
 		} else if !p.isPathExcluded(path, patterns) {
 			result.Included = append(result.Included, d)

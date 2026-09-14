@@ -124,6 +124,49 @@ func TestPreviewShowsProviderExcludedVendorDiff(t *testing.T) {
 	}
 }
 
+// TestPreviewKeepsChangesetOrder pins issue #1236: provider-directory entries
+// sit where Git lists them rather than ahead of every other file, so the
+// preview and --output json's files array read against `git diff --stat`.
+func TestPreviewKeepsChangesetOrder(t *testing.T) {
+	dir := initPreviewRepo(t)
+	paths := []string{"a.go", "target/mid.go", "z.go"}
+	write := func(content string) {
+		t.Helper()
+		for _, p := range paths {
+			full := filepath.Join(dir, filepath.FromSlash(p))
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				t.Fatalf("create directory for %s: %v", p, err)
+			}
+			if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", p, err)
+			}
+		}
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	write("package p\n")
+	run("add", ".")
+	run("commit", "-m", "add files")
+	write("package p\n\nconst V = 2\n")
+
+	preview, err := Preview(context.Background(), Args{RepoDir: dir})
+	if err != nil {
+		t.Fatalf("Preview error: %v", err)
+	}
+	got := make([]string, 0, len(preview.Entries))
+	for _, e := range preview.Entries {
+		got = append(got, e.Path)
+	}
+	if !slices.Equal(got, paths) {
+		t.Errorf("entry order = %v, want changeset order %v", got, paths)
+	}
+}
+
 // TestPreviewMarksOversizedDiffTooLarge pins that preview applies the per-file
 // diff-size ceiling the real run applies before dispatch, and reports it under
 // its own reason rather than silently listing the file as reviewable.

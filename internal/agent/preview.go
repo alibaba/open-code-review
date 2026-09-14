@@ -45,7 +45,7 @@ func Preview(ctx context.Context, args Args) (*DiffPreview, error) {
 }
 
 func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
-	providerExcluded, err := a.loadPreviewDiffs(ctx)
+	providerExcluded, excludedAt, err := a.loadPreviewDiffs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load diffs: %w", err)
 	}
@@ -58,11 +58,39 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 		Entries: make([]DiffPreviewEntry, 0, len(a.diffs)+len(providerExcluded)),
 	}
 
+	decisions := a.selectFiles(a.diffs)
+	next := 0
+	// addDecisions appends the per-file decisions up to, not including, upTo.
+	addDecisions := func(upTo int) {
+		for ; next < upTo; next++ {
+			dec := decisions[next]
+			d := dec.Diff
+			entry := DiffPreviewEntry{
+				Path:          effectivePath(d),
+				Insertions:    d.Insertions,
+				Deletions:     d.Deletions,
+				Status:        diffStatus(d),
+				WillReview:    dec.selected(),
+				ExcludeReason: dec.Reason,
+			}
+
+			if entry.WillReview {
+				result.ReviewableCount++
+			} else {
+				result.ExcludedCount++
+			}
+
+			result.Entries = append(result.Entries, entry)
+		}
+	}
+
 	// Provider directory exclusions happen before the per-file gates, so
 	// selectFiles cannot report them. Preview lists them separately to make its
 	// file and line totals match the Git changeset without implying that include
-	// rules can make them reviewable.
-	for _, d := range providerExcluded {
+	// rules can make them reviewable. Each keeps its place in the changeset:
+	// excludedAt[i]-i included files precede the i-th exclusion.
+	for i, d := range providerExcluded {
+		addDecisions(excludedAt[i] - i)
 		result.TotalInsertions += d.Insertions
 		result.TotalDeletions += d.Deletions
 		result.ExcludedCount++
@@ -74,38 +102,20 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 			ExcludeReason: ExcludeProviderDirectory,
 		})
 	}
-
-	for _, dec := range a.selectFiles(a.diffs) {
-		d := dec.Diff
-		entry := DiffPreviewEntry{
-			Path:          effectivePath(d),
-			Insertions:    d.Insertions,
-			Deletions:     d.Deletions,
-			Status:        diffStatus(d),
-			WillReview:    dec.selected(),
-			ExcludeReason: dec.Reason,
-		}
-
-		if entry.WillReview {
-			result.ReviewableCount++
-		} else {
-			result.ExcludedCount++
-		}
-
-		result.Entries = append(result.Entries, entry)
-	}
+	addDecisions(len(decisions))
 
 	return result, nil
 }
 
 // loadPreviewDiffs loads the normal review input plus provider-level directory
-// exclusions. Only Preview needs the excluded payload, so normal review runs do
-// not retain potentially large unified diffs or file contents for them.
-func (a *Agent) loadPreviewDiffs(ctx context.Context) ([]model.Diff, error) {
+// exclusions and their changeset positions (see diff.DiffSet.ExcludedAt). Only
+// Preview needs the excluded payload, so normal review runs do not retain
+// potentially large unified diffs or file contents for them.
+func (a *Agent) loadPreviewDiffs(ctx context.Context) ([]model.Diff, []int, error) {
 	provider := a.newDiffProvider()
 	set, err := provider.GetDiffSet(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	a.diffs = set.Included
 	for i := range a.diffs {
@@ -113,7 +123,7 @@ func (a *Agent) loadPreviewDiffs(ctx context.Context) ([]model.Diff, error) {
 		a.totalInsertions += d.Insertions
 		a.totalDeletions += d.Deletions
 	}
-	return set.Excluded, nil
+	return set.Excluded, set.ExcludedAt, nil
 }
 
 func effectivePath(d model.Diff) string {

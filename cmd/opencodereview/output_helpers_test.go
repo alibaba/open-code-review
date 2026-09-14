@@ -671,6 +671,72 @@ func TestOutputPreviewText_WithExcludedFiles(t *testing.T) {
 	}
 }
 
+// TestOutputPreviewText_ExcludedPathDoesNotWidenWillReview pins issue #1236:
+// a long excluded path must not pad the Will review rows, or the counts are
+// pushed off a normal-width terminal.
+func TestOutputPreviewText_ExcludedPathDoesNotWidenWillReview(t *testing.T) {
+	setColor(t, false)
+	reviewable := agent.DiffPreviewEntry{Path: "demo_real.go", Status: "added", Insertions: 3, WillReview: true}
+	render := func(entries ...agent.DiffPreviewEntry) string {
+		p := &agent.DiffPreview{Entries: entries, TotalFiles: len(entries), ReviewableCount: 1, ExcludedCount: len(entries) - 1}
+		out := captureStdout(t, func() { outputPreviewText(p, os.Stdout) })
+		for _, ln := range strings.Split(out, "\n") {
+			if strings.Contains(ln, reviewable.Path) {
+				return ln
+			}
+		}
+		t.Fatalf("no row for %s in:\n%s", reviewable.Path, out)
+		return ""
+	}
+
+	alone := render(reviewable)
+	withLong := render(reviewable, agent.DiffPreviewEntry{
+		Path:          "internal/some/deeply/nested/directory/structure/that/is/long/file_test.go",
+		Status:        "modified",
+		ExcludeReason: model.ExcludeDefaultPath,
+	})
+	if withLong != alone {
+		t.Errorf("Will review row changed by an excluded path:\n got  %q\n want %q", withLong, alone)
+	}
+}
+
+// TestOutputPreviewText_AggregatesProviderDirectories pins issue #1236: a
+// vendored tree can hold thousands of files nobody can act on, so the terminal
+// collapses them into one line naming the matched directories.
+func TestOutputPreviewText_AggregatesProviderDirectories(t *testing.T) {
+	setColor(t, false)
+	longVendored := "target/.pnpm/@scope+some-package@1.2.3/packages/some-package/esm/internal/index.js"
+	p := &agent.DiffPreview{
+		Entries: []agent.DiffPreviewEntry{
+			{Path: longVendored, Status: "added", ExcludeReason: model.ExcludeProviderDirectory},
+			{Path: "demo_real.go", Status: "added", Insertions: 3, WillReview: true},
+			{Path: "target/demo.go", Status: "added", ExcludeReason: model.ExcludeProviderDirectory},
+			{Path: "internal/diff/git_test.go", Status: "modified", ExcludeReason: model.ExcludeDefaultPath},
+			{Path: "vendor/a.go", Status: "modified", ExcludeReason: model.ExcludeProviderDirectory},
+		},
+		TotalFiles:      5,
+		ReviewableCount: 1,
+		ExcludedCount:   4,
+	}
+	got := captureStdout(t, func() { outputPreviewText(p, os.Stdout) })
+
+	for _, want := range []string{
+		"Excluded from review (4):",
+		"  [M]  internal/diff/git_test.go (default_path)",
+		"  3 file(s) in provider directories (target/, vendor/)",
+		"not reviewable",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("preview missing %q:\n%s", want, got)
+		}
+	}
+	for _, path := range []string{longVendored, "target/demo.go", "vendor/a.go"} {
+		if strings.Contains(got, path) {
+			t.Errorf("provider-directory path %q listed per row:\n%s", path, got)
+		}
+	}
+}
+
 // decodeSinglePreviewJSON asserts that s is exactly one JSON value followed
 // only by the encoder's trailing newline. Automation consuming --format json
 // relies on this: a stray banner or progress line on stdout would break it.
