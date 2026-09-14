@@ -37,6 +37,8 @@ type Provider struct {
 	AmbientAuth bool
 }
 
+// After modifying the built-in provider registry, run `go generate ./internal/llm`
+// and commit extensions/vscode/src/shared/providers.generated.ts.
 var registry = []Provider{
 	{
 		Name:        "anthropic",
