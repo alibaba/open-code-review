@@ -4,7 +4,9 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -155,6 +157,89 @@ func TestPreviewOmitsUntrackedProviderDirFile(t *testing.T) {
 	if preview.TotalFiles != 1 || preview.TotalInsertions != 1 {
 		t.Fatalf("totals = %d file(s) +%d, want 1 file +1 (main.go only); entries = %+v",
 			preview.TotalFiles, preview.TotalInsertions, preview.Entries)
+	}
+}
+
+// TestPreviewKeepsChangesetOrder pins issue #1236: provider-directory entries
+// sit where Git lists them rather than ahead of every other file, so the
+// preview and --output json's files array read against `git diff --name-only`.
+func TestPreviewKeepsChangesetOrder(t *testing.T) {
+	dir := initPreviewRepo(t)
+	paths := []string{"a.go", "target/mid.go", "z.go"}
+	write := func(content string) {
+		t.Helper()
+		for _, p := range paths {
+			full := filepath.Join(dir, filepath.FromSlash(p))
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				t.Fatalf("create directory for %s: %v", p, err)
+			}
+			if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", p, err)
+			}
+		}
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	write("package p\n")
+	run("add", ".")
+	run("commit", "-m", "add files")
+	write("package p\n\nconst V = 2\n")
+
+	cmd := exec.Command("git", "-C", dir, "diff", "--name-only")
+	nameOut, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git diff --name-only: %v", err)
+	}
+	want := strings.Split(strings.TrimSpace(string(nameOut)), "\n")
+	if !slices.Equal(want, paths) {
+		t.Fatalf("git changeset order = %v, fixture paths = %v", want, paths)
+	}
+
+	preview, err := Preview(context.Background(), Args{RepoDir: dir})
+	if err != nil {
+		t.Fatalf("Preview error: %v", err)
+	}
+	got := make([]string, 0, len(preview.Entries))
+	for _, e := range preview.Entries {
+		got = append(got, e.Path)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("entry order = %v, want changeset order %v", got, want)
+	}
+
+	var byPath = make(map[string]DiffPreviewEntry, len(preview.Entries))
+	for _, e := range preview.Entries {
+		byPath[e.Path] = e
+	}
+	if e := byPath["target/mid.go"]; e.ExcludeReason != ExcludeProviderDirectory || e.WillReview {
+		t.Errorf("target/mid.go = %+v, want provider_directory", e)
+	}
+
+	// Same encoding the CLI uses in outputPreviewJSON.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(preview); err != nil {
+		t.Fatalf("encode preview JSON: %v", err)
+	}
+	var decoded DiffPreview
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode preview JSON: %v\n%s", err, buf.String())
+	}
+	jsonPaths := make([]string, 0, len(decoded.Entries))
+	for _, e := range decoded.Entries {
+		jsonPaths = append(jsonPaths, e.Path)
+	}
+	if !slices.Equal(jsonPaths, want) {
+		t.Errorf("JSON files order = %v, want changeset order %v\n%s", jsonPaths, want, buf.String())
+	}
+	if len(decoded.Entries) != len(want) {
+		t.Errorf("JSON files count = %d, want %d", len(decoded.Entries), len(want))
 	}
 }
 

@@ -66,9 +66,33 @@ type Provider struct {
 // DiffSet separates the diffs a review may process from files excluded by the
 // provider's built-in directory rules. The latter remain unavailable to a
 // review, but callers such as Preview can account for them.
+//
+// excludedAt[i] is Excluded[i]'s index in the changeset order of Included and
+// Excluded combined, so ForEachInOrder can walk the two slices as Git listed
+// them rather than every provider exclusion first.
 type DiffSet struct {
-	Included []model.Diff
-	Excluded []model.Diff
+	Included   []model.Diff
+	Excluded   []model.Diff
+	excludedAt []int
+}
+
+// ForEachInOrder visits Included and Excluded in the original changeset order.
+// providerExcluded is true for built-in directory exclusions. Files dropped by
+// .gitignore are not visited.
+func (s DiffSet) ForEachInOrder(visit func(d model.Diff, providerExcluded bool)) {
+	next := 0
+	for i, d := range s.Excluded {
+		// excludedAt[i] is the mixed-stream index, so the number of included
+		// files that precede this exclusion is excludedAt[i]-i.
+		upTo := s.excludedAt[i] - i
+		for ; next < upTo; next++ {
+			visit(s.Included[next], false)
+		}
+		visit(d, true)
+	}
+	for ; next < len(s.Included); next++ {
+		visit(s.Included[next], false)
+	}
 }
 
 // NewProvider creates a Provider for range mode: from..to (via merge-base).
@@ -311,13 +335,7 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 // unconditional directory blocklist. A .gitignore negation cannot re-admit
 // one of these paths.
 func isProviderDirExcluded(relPath string) bool {
-	for _, prefix := range providerDirIgnoreDirs {
-		dirPart := strings.TrimSuffix(prefix, "/")
-		if relPath == dirPart || strings.HasPrefix(relPath, prefix) {
-			return true
-		}
-	}
-	return false
+	return ProviderDirPrefix(relPath) != ""
 }
 
 // matchGitignorePattern checks if relPath matches a single .gitignore pattern.
@@ -425,6 +443,7 @@ func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 			path = d.OldPath
 		}
 		if isProviderDirExcluded(path) {
+			result.excludedAt = append(result.excludedAt, len(result.Included)+len(result.Excluded))
 			result.Excluded = append(result.Excluded, d)
 		} else if !p.isPathExcluded(path, patterns) {
 			result.Included = append(result.Included, d)

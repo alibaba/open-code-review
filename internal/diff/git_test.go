@@ -9,10 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 // runGitTest runs a git command in dir and fails the test on error.
@@ -103,6 +105,50 @@ func TestGetDiffSetRetainsBuiltInDirectoryExclusionsForReporting(t *testing.T) {
 	}
 	if len(diffs) != 0 {
 		t.Fatalf("GetDiff = %+v, want no reviewable vendor diff", diffs)
+	}
+}
+
+func TestGetDiffSetWalksChangesetOrder(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	paths := []string{"a.go", "target/mid.go", "z.go"}
+	write := func(content string) {
+		t.Helper()
+		for _, p := range paths {
+			full := filepath.Join(repo, filepath.FromSlash(p))
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", p, err)
+			}
+			if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", p, err)
+			}
+		}
+	}
+	write("package p\n")
+	runGitTest(t, repo, "add", ".")
+	runGitTest(t, repo, "commit", "-q", "-m", "add files")
+	write("package p\n\nconst V = 2\n")
+
+	set, err := NewWorkspaceProvider(repo, gitcmd.New(0)).GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+
+	var got []string
+	var flags []bool
+	set.ForEachInOrder(func(d model.Diff, providerExcluded bool) {
+		got = append(got, d.NewPath)
+		flags = append(flags, providerExcluded)
+	})
+	if !slices.Equal(got, paths) {
+		t.Errorf("ForEachInOrder paths = %v, want %v", got, paths)
+	}
+	if len(flags) != 3 || flags[0] || !flags[1] || flags[2] {
+		t.Errorf("providerExcluded flags = %v, want [false true false]", flags)
 	}
 }
 
