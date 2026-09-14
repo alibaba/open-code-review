@@ -58,11 +58,13 @@ func TestReviewE2E_RecoveredAndFailedReachesJSONExit(t *testing.T) {
 	startFakeLLM(t, srv)
 
 	out, errOut, err := runReviewCapturingBoth(t, repoDir, "json")
-	// One file failed and one succeeded, so coverage is partial and the run
-	// exits 0.
-	if err != nil {
-		t.Fatalf("partial coverage must exit 0: %v\nstderr: %s", err, errOut)
+	// One file failed and one succeeded, so coverage is partial: results are
+	// published but the run must exit non-zero (#1027) so CI can detect the
+	// incomplete review from the exit status alone.
+	if err == nil {
+		t.Fatalf("partial coverage with a real item failure must exit non-zero\nstdout: %s", out)
 	}
+	_ = errOut
 
 	var got jsonOutput
 	if e := json.Unmarshal([]byte(out), &got); e != nil {
@@ -138,8 +140,10 @@ func TestReviewE2E_RetryReportReachesTextExit(t *testing.T) {
 	startFakeLLM(t, srv)
 
 	out, errOut, err := runReviewCapturingBoth(t, repoDir, "text")
-	if err != nil {
-		t.Fatalf("partial coverage must exit 0: %v\nstderr: %s", err, errOut)
+	// Partial coverage with a real item failure exits non-zero (#1027) while
+	// still publishing the partial result on stdout.
+	if err == nil {
+		t.Fatal("partial coverage with a real item failure must exit non-zero")
 	}
 	// This test attributes a 429 and a 402 to named files, which only holds while
 	// each file is its own request — i.e. while the fake still answers the

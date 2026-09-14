@@ -24,7 +24,7 @@ func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
 }
 
 func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
-	for _, state := range []session.TerminalState{session.StateComplete, session.StatePartial, session.StateSkipped} {
+	for _, state := range []session.TerminalState{session.StateComplete, session.StateSkipped} {
 		if err := reviewResultError(nil, &session.RunManifest{TerminalState: state}); err != nil {
 			t.Errorf("state %q returned error: %v", state, err)
 		}
@@ -79,6 +79,39 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 	if err := reviewResultError(nil, budgetAllFailed); err == nil ||
 		!strings.Contains(err.Error(), "2 of 2 selected item(s) failed") {
 		t.Fatalf("budget stop that covered nothing must produce a process error: %v", err)
+	}
+	// #1027: a partial run whose failures are real (timeout, provider, ...)
+	// must exit non-zero so CI can detect an incomplete review from the exit
+	// status alone, even though other items completed and the partial results
+	// were still published.
+	realPartial := &session.RunManifest{
+		TerminalState: session.StatePartial,
+		Coverage: session.Coverage{
+			Selected:  []session.CoverageItem{{ItemID: "a"}, {ItemID: "b"}},
+			Completed: []session.CoverageItem{{ItemID: "a"}},
+			Failed:    []session.CoverageItem{{ItemID: "b", Classification: session.FailureTimeout}},
+		},
+	}
+	if err := reviewResultError(nil, realPartial); err == nil ||
+		!strings.Contains(err.Error(), "1 of 2 selected item(s) failed") {
+		t.Fatalf("partial run with a real item failure must produce a process error: %v", err)
+	}
+	// A partial run that mixes budget and real failures still exits non-zero:
+	// the real failure is not erased by the controlled truncation.
+	mixedPartial := &session.RunManifest{
+		TerminalState: session.StatePartial,
+		Coverage: session.Coverage{
+			Selected:  []session.CoverageItem{{ItemID: "a"}, {ItemID: "b"}, {ItemID: "c"}},
+			Completed: []session.CoverageItem{{ItemID: "a"}},
+			Failed: []session.CoverageItem{
+				{ItemID: "b", Classification: session.FailureBudget},
+				{ItemID: "c", Classification: session.FailureProvider},
+			},
+		},
+	}
+	if err := reviewResultError(nil, mixedPartial); err == nil ||
+		!strings.Contains(err.Error(), "1 of 3 selected item(s) failed") {
+		t.Fatalf("mixed partial run must count only the real failure: %v", err)
 	}
 	want := errors.New("dispatch failed")
 	if err := reviewResultError(want, budgetPartial); !errors.Is(err, want) {
