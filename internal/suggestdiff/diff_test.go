@@ -73,14 +73,6 @@ func TestComputeLineDiff(t *testing.T) {
 			wantDels: 1,
 		},
 		{
-			name:     "case insensitive match with whitespace",
-			old:      []string{"  Hello  "},
-			new:      []string{"hello"},
-			wantLen:  1,
-			wantAdds: 0,
-			wantDels: 0,
-		},
-		{
 			name:     "multi-line edit",
 			old:      []string{"func main() {", "  fmt.Println(\"old\")", "}"},
 			new:      []string{"func main() {", "  fmt.Println(\"new\")", "  return", "}"},
@@ -115,6 +107,39 @@ func TestComputeLineDiff(t *testing.T) {
 	}
 }
 
+func TestComputeLineDiff_FuzzyMatchPreservesRawChanges(t *testing.T) {
+	tests := []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{
+			name: "case-only change",
+			old:  "const maxRetries = 3",
+			new:  "const MaxRetries = 3",
+		},
+		{
+			name: "indentation-only change",
+			old:  "\treturn nil",
+			new:  "\t\treturn nil",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ComputeLineDiff([]string{tt.old}, []string{tt.new})
+			if len(got) != 2 {
+				t.Fatalf("diff = %v, want delete + add", got)
+			}
+			if got[0].Type != DiffDeleted || got[0].Content != tt.old {
+				t.Errorf("deleted line = %+v, want %q", got[0], tt.old)
+			}
+			if got[1].Type != DiffAdded || got[1].Content != tt.new {
+				t.Errorf("added line = %+v, want %q", got[1], tt.new)
+			}
+		})
+	}
+}
 func TestComputeLineDiff_ContextContent(t *testing.T) {
 	old := []string{"a", "b", "c"}
 	new := []string{"a", "x", "c"}
