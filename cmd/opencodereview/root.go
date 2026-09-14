@@ -66,10 +66,6 @@ func init() {
 }
 
 func commandNeedsGit(cmd *cobra.Command) bool {
-	// `ocr --version` / `-V` is handled by the root command's RunE.
-	if v, _ := cmd.Flags().GetBool("version"); v {
-		return false
-	}
 	topLevel := cmd
 	for topLevel.Parent() != nil && topLevel.Parent().Parent() != nil {
 		topLevel = topLevel.Parent()
