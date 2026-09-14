@@ -93,13 +93,15 @@ curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/js
 ### 제 파일이 리뷰되지 않습니다 {#my-file-isn-t-being-reviewed}
 
 `ocr review --preview`를 돌려 보세요(LLM 비용이 들지 않습니다). 후보 파일마다
-남긴 **이유** 또는 버린 **이유**가 함께 나옵니다.
+남긴 **이유** 또는 버린 **이유**가 함께 나옵니다. `vendor/`, `node_modules/` 같은
+provider 디렉터리의 파일은 터미널에서는 한 줄로 묶입니다. `ocr review --preview --format json`은
+여전히 모든 항목을 나열합니다.
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: provider_directory)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
 제외 사유는

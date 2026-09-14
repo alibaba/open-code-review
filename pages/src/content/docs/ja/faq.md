@@ -91,13 +91,15 @@ LLM タイムアウトを引き上げてください——[タイムアウト](.
 ### ファイルがレビューされない
 
 `ocr review --preview` を実行してください（LLM コストなし）。出力には各候補ファイルと、それが
-保持されたか破棄されたかの**理由**が一覧されます。
+保持されたか破棄されたかの**理由**が一覧されます。`vendor/` や `node_modules/` などの
+provider ディレクトリ配下のファイルは端末では 1 行に集約されます。`ocr review --preview --format json`
+では引き続き全エントリが列挙されます。
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: provider_directory)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
 これらの除外理由は、[ファイルフィルタリング](../review-rules/#how-files-are-filtered)のゲートに対応します。
