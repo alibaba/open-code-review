@@ -692,3 +692,40 @@ test("v2 ocr-review command renders review intent with sentence break", async ()
   assert.match(prompts[1].text, /business context:\. If no target is specified/)
   assert.doesNotMatch(prompts[1].text, /  /)
 })
+
+test("ocr_review forwards backgroundFile as --background-file", async () => {
+  await withFakeOcr(
+    "console.log(JSON.stringify({status:'success', argv:process.argv.slice(2)}))",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_review.execute(
+        { backgroundFile: "docs/context.md" },
+        toolContext(worktree),
+      )
+      assert.deepEqual(JSON.parse(output).argv, [
+        "review",
+        "--audience",
+        "agent",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--background-file",
+        "docs/context.md",
+      ])
+    },
+  )
+})
+
+test("ocr_review rejects background combined with backgroundFile", async () => {
+  await withTemporaryDirectory(async (worktree) => {
+    const { hooks } = await loadPlugin(worktree)
+    await assert.rejects(
+      hooks.tool.ocr_review.execute(
+        { background: "inline context", backgroundFile: "docs/context.md" },
+        toolContext(worktree),
+      ),
+      /either 'background' or 'backgroundFile'/,
+    )
+  })
+})

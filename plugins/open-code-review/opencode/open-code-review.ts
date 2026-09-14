@@ -12,6 +12,7 @@ interface ReviewInput {
   to?: string
   resume?: string
   background?: string
+  backgroundFile?: string
   exclude?: string
   model?: string
   concurrency?: number
@@ -79,6 +80,11 @@ function buildReviewArgs(input: ReviewInput, repo: string): string[] {
   if (input.preview && input.resume) {
     throw new Error("'preview' and 'resume' cannot be used together.")
   }
+  // OCR would accept both and silently let the file win; rejecting here keeps
+  // the caller from believing the inline text was used.
+  if (input.background && input.backgroundFile) {
+    throw new Error("Use either 'background' or 'backgroundFile', not both.")
+  }
 
   const args = ["review", "--audience", "agent"]
   if (!input.preview) {
@@ -91,6 +97,7 @@ function buildReviewArgs(input: ReviewInput, repo: string): string[] {
   pushValue(args, "--to", input.to)
   pushValue(args, "--resume", input.resume)
   pushValue(args, "--background", input.background)
+  pushValue(args, "--background-file", input.backgroundFile)
   pushValue(args, "--exclude", input.exclude)
   pushValue(args, "--model", input.model)
   pushValue(args, "--concurrency", input.concurrency)
@@ -285,6 +292,11 @@ const reviewArgs = {
   to: optionalString("Target ref for a branch/range comparison. Must be paired with 'from'."),
   resume: optionalString("Resume a previous OCR review session by ID."),
   background: optionalString("Business or requirement context that the implementation should satisfy."),
+  backgroundFile: optionalString(
+    "Path to a Markdown file holding the review background, for context too long to pass inline. " +
+      "A relative path resolves against the repository root; an absolute path is used as given. " +
+      "Cannot be combined with 'background'.",
+  ),
   exclude: optionalString("Comma-separated gitignore-style exclusion patterns."),
   model: optionalString("Override the model configured in OpenCodeReview."),
   concurrency: optionalPositiveInt("Maximum concurrent file reviews."),
