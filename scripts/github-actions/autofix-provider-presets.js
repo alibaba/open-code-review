@@ -22,6 +22,25 @@ function runGit(args, options) {
   }).trimEnd();
 }
 
+// CI-only generation: discard the old output first so a missing go:generate
+// directive cannot leave a stale committed artifact looking up to date.
+function regenerate({ cwd = process.cwd(), env = process.env, exec = execFileSync } = {}) {
+  const generatedPath = path.join(cwd, ARTIFACT);
+  const generationEnv = { ...env };
+  delete generationEnv.GH_TOKEN;
+  delete generationEnv.GITHUB_TOKEN;
+  fs.rmSync(generatedPath, { force: true });
+  exec("go", ["generate", "./internal/llm"], {
+    cwd, env: generationEnv, stdio: "inherit",
+  });
+  if (!fs.existsSync(generatedPath) || !fs.lstatSync(generatedPath).isFile()) {
+    throw new Error(
+      `Provider generation did not produce a regular artifact. ` +
+      `Ensure the generator from #1221 is present and run '${REGENERATE}'.`,
+    );
+  }
+}
+
 // Generation runs in the preceding workflow step, without a persisted token.
 // This helper may commit only the generated artifact to the event's PR branch.
 function autofix({ cwd = process.cwd(), env = process.env, git = runGit } = {}) {
@@ -77,10 +96,16 @@ function autofix({ cwd = process.cwd(), env = process.env, git = runGit } = {}) 
   if (!fs.lstatSync(generatedPath).isFile()) {
     throw new Error("The generated provider artifact must be a regular file.");
   }
+  // Ignored, untracked output is invisible to both commands above. It still
+  // needs to be committed, including when the PR deleted and ignored it.
+  if (!command(["ls-files", "--cached", "-z", "--", ARTIFACT]).split("\0").includes(ARTIFACT)) {
+    changed.add(ARTIFACT);
+  }
   if (changed.size === 0) return "unchanged";
   if (!env.GH_TOKEN) throw new Error("A repository-scoped GH_TOKEN is required to push the fix.");
 
-  command(["add", "--", ARTIFACT]);
+  // Force only this allowlisted generated path, never other ignored files.
+  command(["add", "--force", "--", ARTIFACT]);
   const staged = command(["diff", "--cached", "--name-only", "-z"]).split("\0").filter(Boolean);
   if (staged.length !== 1 || staged[0] !== ARTIFACT) {
     throw new Error("The index must contain only the generated provider artifact.");
@@ -140,7 +165,14 @@ function autofix({ cwd = process.cwd(), env = process.env, git = runGit } = {}) 
 
 if (require.main === module) {
   try {
-    console.log(`Provider preset autofix: ${autofix()}.`);
+    if (process.argv.length === 3 && process.argv[2] === "--generate") {
+      regenerate();
+      console.log("Provider preset regeneration completed.");
+    } else if (process.argv.length === 2) {
+      console.log(`Provider preset autofix: ${autofix()}.`);
+    } else {
+      throw new Error("Usage: autofix-provider-presets.js [--generate]");
+    }
   } catch (error) {
     const message = error.message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
     console.error(`::error::${message}`);
@@ -148,4 +180,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { ARTIFACT, BOT_NAME, BOT_EMAIL, autofix, runGit };
+module.exports = { ARTIFACT, BOT_NAME, BOT_EMAIL, autofix, regenerate, runGit };

@@ -10,7 +10,7 @@ const assert = require("assert").strict;
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { ARTIFACT, BOT_NAME, BOT_EMAIL, autofix, runGit } = require("./autofix-provider-presets");
+const { ARTIFACT, BOT_NAME, BOT_EMAIL, autofix, regenerate, runGit } = require("./autofix-provider-presets");
 
 const REMOTE_URL = "https://github.com/example/providers.git";
 let passed = 0;
@@ -101,7 +101,7 @@ function fixture(t) {
     return output;
   };
   return {
-    cwd, remote, head, env, local, calls,
+    cwd, remote, head, env, local, calls, git,
     write: () => fs.writeFileSync(path.join(cwd, ARTIFACT), "fresh presets\n"),
     run: (overrides = {}) => autofix({ cwd, env: { ...env, ...overrides }, git }),
     remoteHead: () => local(["rev-parse", "refs/heads/feature"], remote),
@@ -280,6 +280,172 @@ test("reports an accepted push whose final verification loses the network", (t) 
   assert.throws(() => f.run(), /successful push.*Check the latest PR head and CI/);
   assert.notEqual(f.remoteHead(), f.head);
   assert.equal(f.calls.filter((args) => args.includes("push")).length, 1);
+});
+
+function removeAndIgnoreArtifact(f) {
+  f.local(["rm", "--", ARTIFACT]);
+  fs.writeFileSync(path.join(f.cwd, ".gitignore"), `${ARTIFACT}\n`);
+  f.local(["add", ".gitignore"]);
+  f.local(["commit", "-m", "Remove and ignore generated artifact"]);
+  f.local(["push", f.remote, "HEAD:refs/heads/feature"]);
+  f.env.OCR_HEAD_SHA = f.local(["rev-parse", "HEAD"]);
+  f.write();
+  assert.equal(f.local(["ls-files", "--", ARTIFACT]), "");
+  assert.equal(f.local(["check-ignore", "--", ARTIFACT]), ARTIFACT);
+}
+
+test("restores a deleted artifact even when the PR also ignores its replacement", (t) => {
+  const f = fixture(t);
+  removeAndIgnoreArtifact(f);
+  assert.equal(f.run(), "pushed");
+  const commit = f.remoteHead();
+  assert.equal(f.local(["show", "-s", "--format=%P", commit]), f.env.OCR_HEAD_SHA);
+  assert.equal(f.local(["diff", "--name-only", f.env.OCR_HEAD_SHA, commit]), ARTIFACT);
+  assert.equal(f.local(["show", `${commit}:${ARTIFACT}`]), "fresh presets");
+  assert.equal(f.local(["ls-files", "--", ARTIFACT]), ARTIFACT);
+  assert.equal(f.local(["status", "--porcelain"]), "");
+});
+
+test("an ignored replacement requires a push token instead of returning unchanged", (t) => {
+  const f = fixture(t);
+  removeAndIgnoreArtifact(f);
+  assert.throws(() => f.run({ GH_TOKEN: "" }), /GH_TOKEN is required/);
+  assert.equal(f.remoteHead(), f.env.OCR_HEAD_SHA);
+});
+
+test("restoring an ignored artifact still rejects unrelated generation changes", (t) => {
+  const f = fixture(t);
+  removeAndIgnoreArtifact(f);
+  fs.writeFileSync(path.join(f.cwd, "unexpected.txt"), "unexpected file\n");
+  assert.throws(() => f.run(), /outside the provider artifact/);
+  assert.ok(!f.calls.some((args) => args.includes("add") || args.includes("push")));
+  assert.equal(f.remoteHead(), f.env.OCR_HEAD_SHA);
+});
+
+for (const existingArtifact of [true, false]) {
+  test(`a no-op generator fails even when an old artifact exists: ${existingArtifact}`, (t) => {
+    const f = fixture(t);
+    if (!existingArtifact) fs.unlinkSync(path.join(f.cwd, ARTIFACT));
+    let called = false;
+    assert.throws(() => regenerate({
+      cwd: f.cwd,
+      env: f.env,
+      exec: () => {
+        called = true;
+        assert.equal(fs.existsSync(path.join(f.cwd, ARTIFACT)), false);
+        // Simulate successful `go generate` without any generation directive.
+        return "";
+      },
+    }), /did not produce.*generator.*#1221/);
+    assert.equal(called, true);
+    assert.equal(f.remoteHead(), f.head);
+    assert.equal(f.calls.length, 0);
+  });
+}
+
+test("regeneration runs Go without push tokens and requires freshly produced output", (t) => {
+  const f = fixture(t);
+  const env = { ...f.env, GITHUB_TOKEN: "another-test-token" };
+  regenerate({
+    cwd: f.cwd,
+    env,
+    exec: (file, args, options) => {
+      assert.equal(file, "go");
+      assert.deepEqual(args, ["generate", "./internal/llm"]);
+      assert.equal(options.cwd, f.cwd);
+      assert.equal(options.stdio, "inherit");
+      assert.equal(options.env.GH_TOKEN, undefined);
+      assert.equal(options.env.GITHUB_TOKEN, undefined);
+      assert.equal(fs.existsSync(path.join(f.cwd, ARTIFACT)), false);
+      f.write();
+    },
+  });
+  assert.equal(env.GH_TOKEN, "test-token-only");
+  assert.equal(env.GITHUB_TOKEN, "another-test-token");
+  assert.equal(f.remoteHead(), f.head);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.run(), "pushed");
+});
+
+test("fresh generation with identical contents still leaves the PR unchanged", (t) => {
+  const f = fixture(t);
+  regenerate({
+    cwd: f.cwd,
+    env: f.env,
+    exec: () => fs.writeFileSync(path.join(f.cwd, ARTIFACT), "old presets\n"),
+  });
+  assert.equal(f.run(), "unchanged");
+  assert.equal(f.remoteHead(), f.head);
+});
+
+test("a generator failure is propagated without committing or pushing", (t) => {
+  const f = fixture(t);
+  const failure = new Error("Generator failed");
+  assert.throws(() => regenerate({
+    cwd: f.cwd,
+    env: f.env,
+    exec: () => { throw failure; },
+  }), (error) => error === failure);
+  assert.equal(f.remoteHead(), f.head);
+  assert.equal(f.calls.length, 0);
+});
+
+test("regeneration rejects a directory in place of the generated file", (t) => {
+  const f = fixture(t);
+  assert.throws(() => regenerate({
+    cwd: f.cwd,
+    env: f.env,
+    exec: () => fs.mkdirSync(path.join(f.cwd, ARTIFACT)),
+  }), /did not produce a regular/);
+  assert.equal(f.remoteHead(), f.head);
+});
+
+const WORKFLOW_PATH = path.resolve(__dirname, "../../.github/workflows/provider-presets-autofix.yml");
+const SNAPSHOT = "provider-presets-autofix/autofix-provider-presets.js";
+
+test("the workflow preserves its own helper before checking out the exact PR head", () => {
+  const workflow = fs.readFileSync(WORKFLOW_PATH, "utf8");
+  const refs = [...workflow.matchAll(/^\s+ref: (.+)$/gm)].map((match) => match[1]);
+  assert.deepEqual(refs, ["${{ github.workflow_sha }}", "${{ github.event.pull_request.head.sha }}"]);
+  assert.equal((workflow.match(/persist-credentials: false/g) || []).length, 2);
+  const testStep = workflow.indexOf("run: node scripts/github-actions/autofix-provider-presets.test.js");
+  const copyStep = workflow.indexOf(`cp scripts/github-actions/autofix-provider-presets.js "$RUNNER_TEMP/${SNAPSHOT}"`);
+  const headCheckout = workflow.indexOf("ref: ${{ github.event.pull_request.head.sha }}");
+  const generateStep = workflow.indexOf(`run: node "$RUNNER_TEMP/${SNAPSHOT}" --generate`);
+  const pushStep = workflow.indexOf(`run: node "$RUNNER_TEMP/${SNAPSHOT}"\n`);
+  assert.ok(testStep > 0 && copyStep > testStep && headCheckout > copyStep);
+  assert.ok(generateStep > headCheckout && pushStep > generateStep);
+  assert.ok(!workflow.slice(0, generateStep).includes("GH_TOKEN:"));
+});
+
+test("a preserved helper repairs an older PR head with no autofix scripts", (t) => {
+  const f = fixture(t);
+  const relativeHelper = "scripts/github-actions/autofix-provider-presets.js";
+  const checkoutHelper = path.join(f.cwd, relativeHelper);
+  fs.mkdirSync(path.dirname(checkoutHelper), { recursive: true });
+  fs.copyFileSync(path.join(__dirname, "autofix-provider-presets.js"), checkoutHelper);
+  f.local(["add", "--", relativeHelper]);
+  f.local(["commit", "-m", "Introduce autofix tooling after the PR branched"]);
+
+  // Model the workflow-revision checkout and its out-of-tree snapshot. Spaces
+  // in RUNNER_TEMP also exercise the workflow's quoted snapshot-path contract.
+  const snapshot = path.join(path.dirname(f.cwd), "runner temp", SNAPSHOT);
+  fs.mkdirSync(path.dirname(snapshot), { recursive: true });
+  fs.copyFileSync(checkoutHelper, snapshot);
+  f.local(["checkout", "--detach", f.head]);
+  assert.equal(fs.existsSync(checkoutHelper), false);
+  assert.equal(f.local(["rev-parse", "HEAD"]), f.head);
+  assert.equal(f.local(["status", "--porcelain"]), "");
+
+  const preserved = require(snapshot);
+  const snapshotId = require.resolve(snapshot);
+  t.after(() => { delete require.cache[snapshotId]; });
+  preserved.regenerate({ cwd: f.cwd, env: f.env, exec: () => f.write() });
+  assert.equal(preserved.autofix({ cwd: f.cwd, env: f.env, git: f.git }), "pushed");
+  const commit = f.remoteHead();
+  assert.equal(f.local(["show", "-s", "--format=%P", commit]), f.head);
+  assert.equal(f.local(["diff", "--name-only", f.head, commit]), ARTIFACT);
+  assert.equal(f.local(["ls-tree", "--name-only", commit, "--", relativeHelper]), "");
 });
 
 if (failed) {

@@ -30,25 +30,39 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The PR may predate this workflow and have no helper of its own.
+      - name: Check out the workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
 
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
 
+      - name: Test the autofix helper
+        run: node scripts/github-actions/autofix-provider-presets.test.js
+
+      - name: Preserve the autofix helper
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/provider-presets-autofix"
+          cp scripts/github-actions/autofix-provider-presets.js "$RUNNER_TEMP/provider-presets-autofix/autofix-provider-presets.js"
+
+      - name: Check out the PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.26.6'
           cache: false
 
-      - name: Test the autofix helper
-        run: node scripts/github-actions/autofix-provider-presets.test.js
-
       - name: Regenerate provider presets
-        run: go generate ./internal/llm
+        run: node "$RUNNER_TEMP/provider-presets-autofix/autofix-provider-presets.js" --generate
 
       - name: Commit provider presets to the PR branch
         env:
@@ -57,4 +71,4 @@ jobs:
           OCR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
           OCR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           OCR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: node scripts/github-actions/autofix-provider-presets.js
+        run: node "$RUNNER_TEMP/provider-presets-autofix/autofix-provider-presets.js"
