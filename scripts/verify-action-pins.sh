@@ -14,8 +14,19 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 files=("action.yml")
-pinned='uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}[[:space:]]+#[[:space:]]*v[0-9]'
-local_ref='uses:[[:space:]]*\./'
+# The whole line must be a pinned reference: only list/indent syntax before
+# `uses:`, a 40-hex SHA, and a strict `# vX.Y.Z` comment with nothing after
+# it. Without the anchors a floating tag would be accepted whenever a
+# pinned-looking fragment appeared anywhere in the line (e.g. inside a
+# trailing comment), and a `# v7` comment would satisfy the format the
+# check claims to enforce. Anything unusual (quoted values, extra trailing
+# content) fails closed rather than being guessed at.
+# The directive filter also matches flow-mapping openers ("- {uses: …}"),
+# which the pinned pattern below never accepts — so flow-style entries fail
+# closed as unusual syntax instead of being silently skipped.
+directive='^[[:space:]]*(-[[:space:]]+)?(\{[[:space:]]*)?uses:'
+pinned='^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}[[:space:]]+#[[:space:]]*v[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$'
+local_ref='^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*\./'
 
 bad=""
 for file in "${files[@]}"; do
@@ -23,13 +34,16 @@ for file in "${files[@]}"; do
     echo "ERROR: $file not found; the pin check cannot run." >&2
     exit 1
   fi
-  hits="$(grep -nE 'uses:' "$file" || true)"
+  hits="$(grep -nE "$directive" "$file" || true)"
   [ -n "$hits" ] || continue
   while IFS= read -r line; do
-    if printf '%s' "$line" | grep -qE "$local_ref"; then
+    # Strip the NN: line-number prefix grep -n added; the patterns above
+    # anchor on the start of the actual line.
+    value="${line#*:}"
+    if printf '%s' "$value" | grep -qE "$local_ref"; then
       continue
     fi
-    if ! printf '%s' "$line" | grep -qE "$pinned"; then
+    if ! printf '%s' "$value" | grep -qE "$pinned"; then
       bad="${bad}${file}:${line}"$'\n'
     fi
   done <<< "$hits"
