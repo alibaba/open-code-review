@@ -183,14 +183,14 @@ Documentation is a crucial part of OpenCodeReview. We welcome improvements to RE
 
 ### Documentation Files
 
-| File                    | Purpose                              |
-| ----------------------- | ------------------------------------ |
-| `README.md`             | Main project documentation (English) |
+| File                              | Purpose                              |
+| --------------------------------- | ------------------------------------ |
+| `README.md`                       | Main project documentation (English) |
 | `docs/i18n/README.zh-CN.md`       | Chinese translation                  |
 | `docs/i18n/README.ja-JP.md`       | Japanese translation                 |
 | `docs/i18n/README.ko-KR.md`       | Korean translation                   |
 | `docs/i18n/README.ru-RU.md`       | Russian translation                  |
-| `CONTRIBUTING.md`       | Contribution guide (English)         |
+| `CONTRIBUTING.md`                 | Contribution guide (English)         |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | Contribution guide (Chinese)         |
 | `docs/i18n/CONTRIBUTING.ja-JP.md` | Contribution guide (Japanese)        |
 | `docs/i18n/CONTRIBUTING.ko-KR.md` | Contribution guide (Korean)          |

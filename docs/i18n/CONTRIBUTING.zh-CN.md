@@ -173,12 +173,12 @@ make build
 
 ### 文档文件一览
 
-| 文件                    | 用途                 |
-| ----------------------- | -------------------- |
-| `README.md`             | 项目主文档（英文）   |
-| `docs/i18n/README.zh-CN.md`       | 中文翻译             |
-| `CONTRIBUTING.md`       | 贡献指南（英文）     |
-| `docs/i18n/CONTRIBUTING.zh-CN.md` | 贡献指南（中文）     |
+| 文件                              | 用途               |
+| --------------------------------- | ------------------ |
+| `README.md`                       | 项目主文档（英文） |
+| `docs/i18n/README.zh-CN.md`       | 中文翻译           |
+| `CONTRIBUTING.md`                 | 贡献指南（英文）   |
+| `docs/i18n/CONTRIBUTING.zh-CN.md` | 贡献指南（中文）   |
 
 ## 提交变更
 
