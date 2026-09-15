@@ -448,6 +448,12 @@ runs:
       shell: bash
       env:
         OCR_VERSION: ${{ inputs.ocr_version }}
+        # The action installs the OCR runtime itself, so the launcher's
+        # detached self-updater must not npm-replace that install mid-run:
+        # the concurrent global reinstall can briefly remove the ocr shim
+        # and the JS package tree, failing later ocr calls in this action,
+        # and silently changes the runtime during one action execution.
+        OCR_NO_UPDATE: "1"
       run: |
         npm install -g "@alibaba-group/open-code-review@${OCR_VERSION}"
         echo "OpenCodeReview installed:"
@@ -501,6 +507,9 @@ runs:
 
     - name: Configure OCR
       env:
+        # Keep every ocr invocation on the install performed above; see the
+        # Install OpenCodeReview step for why self-update is disabled.
+        OCR_NO_UPDATE: "1"
         OCR_LLM_URL: ${{ inputs.llm_url }}
         OCR_LLM_MODEL: ${{ inputs.llm_model }}
         OCR_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
@@ -819,6 +828,9 @@ runs:
 
     - name: Run OpenCodeReview
       env:
+        # Keep the review on the install performed above; see the Install
+        # OpenCodeReview step for why self-update is disabled.
+        OCR_NO_UPDATE: "1"
         OCR_LLM_URL: ${{ inputs.llm_url }}
         OCR_LLM_TOKEN: ${{ inputs.llm_auth_token }}
         OCR_LLM_MODEL: ${{ inputs.llm_model }}

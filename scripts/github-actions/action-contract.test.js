@@ -222,7 +222,7 @@ function makeFixture() {
 const fs = require("fs");
 const args = process.argv.slice(2);
 const env = {};
-for (const name of ["OCR_LLM_TIMEOUT", "OCR_LLM_EXTRA_HEADERS", "REVIEW_TASK_TIMEOUT", "OCR_TIMEOUT"]) {
+for (const name of ["OCR_LLM_TIMEOUT", "OCR_LLM_EXTRA_HEADERS", "REVIEW_TASK_TIMEOUT", "OCR_TIMEOUT", "OCR_NO_UPDATE"]) {
   if (process.env[name] !== undefined) env[name] = process.env[name];
 }
 const record = { args, env };
@@ -1537,6 +1537,104 @@ function testRequiredStepTopologyAndEnvironmentContracts() {
   }
 }
 
+// Returns the composite steps whose shell block invokes the `ocr` CLI.
+// Full-line shell comments are dropped first: they mention `ocr` in prose
+// (the Validate inputs step documents an `ocr review` flag), and a comment
+// is not an invocation. `ocr` must also sit in a command position — start of
+// line or after a shell separator — so quoted strings such as the
+// "ocr review exited with code ..." echo never count. The sweep stays
+// fail-closed: a future step that invokes `ocr` without disabling the
+// self-updater breaks this contract without any step-name list to maintain.
+function ocrInvokingSteps() {
+  return STEPS.filter((step) => {
+    if (typeof step.run !== "string") return false;
+    const code = step.run
+      .split(/\r?\n/)
+      .filter((line) => !/^\s*#/.test(line))
+      .join("\n");
+    return /(?:^|[\s;&|(`])ocr\s+\S/.test(code);
+  });
+}
+
+function testActionOcrInvocationsDisableSelfUpdate() {
+  const invokers = ocrInvokingSteps();
+  const names = invokers.map((step) => step.name);
+  for (const expected of ["Install OpenCodeReview", "Configure OCR", "Run OpenCodeReview"]) {
+    assert.ok(
+      names.includes(expected),
+      `${expected} must be detected as an ocr-invoking step; detection must keep up with action.yml`
+    );
+  }
+  const values = inputValues({
+    llm_url: "https://llm.example.invalid/v1",
+    llm_auth_token: "unused-token",
+    llm_model: "contract-model",
+    llm_use_anthropic: "false",
+  });
+  for (const step of invokers) {
+    assert.strictEqual(
+      renderedEnv(step, values).OCR_NO_UPDATE,
+      "1",
+      `step ${step.name} invokes ocr and must disable CLI self-update (env OCR_NO_UPDATE: "1")`
+    );
+  }
+
+  // The same contract observed through the executed shell blocks: the first
+  // `ocr version` in the Install step is what spawns the detached updater,
+  // so every recorded invocation — version, config, review — must observe
+  // OCR_NO_UPDATE=1, not just the later steps.
+  const fixture = makeFixture();
+  try {
+    const install = runStep(
+      installStep(),
+      inputValues({ ocr_version: "1.9.10" }),
+      fixture,
+      { OCR_FAKE_VERSION_OUTPUT: "open-code-review 1.9.10 linux/amd64" }
+    );
+    assert.strictEqual(
+      install.status,
+      0,
+      `Install OpenCodeReview shell block failed; ${resultDescription(install)}`
+    );
+    const configure = runStep(stepNamed("Configure OCR"), values, fixture, {
+      OCR_LLM_TOKEN: values.llm_auth_token,
+    });
+    assert.strictEqual(
+      configure.status,
+      0,
+      `Configure OCR shell block failed; ${resultDescription(configure)}`
+    );
+    const run = runStep(
+      stepNamed("Run OpenCodeReview"),
+      values,
+      fixture,
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15" },
+      { replaceResultPaths: true }
+    );
+    assert.strictEqual(
+      run.status,
+      0,
+      `Run OpenCodeReview shell block failed; ${resultDescription(run)}`
+    );
+    const calls = readJsonLines(fixture.callsPath);
+    for (const subcommand of ["version", "config", "review"]) {
+      assert.ok(
+        calls.some((call) => call.args[0] === subcommand),
+        `the executed steps must exercise \`ocr ${subcommand}\``
+      );
+    }
+    for (const call of calls) {
+      assert.strictEqual(
+        call.env.OCR_NO_UPDATE,
+        "1",
+        `every action-owned ocr invocation must observe OCR_NO_UPDATE=1; \`ocr ${call.args.join(" ")}\` saw ${JSON.stringify(call.env.OCR_NO_UPDATE)}`
+      );
+    }
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
 function testContractsRunInDedicatedWorkflow() {
   assert.match(
     CONTRACT_WORKFLOW_TEXT,
@@ -1626,6 +1724,7 @@ const TESTS = [
   ["Install OpenCodeReview rejects stream_progress below v1.9.8", testInstallRejectsStreamProgressBelowV198],
   ["contract harness fails closed on unsupported YAML shapes", testContractHarnessFailsClosedOnUnsupportedYamlShapes],
   ["required action steps and env contracts are present", testRequiredStepTopologyAndEnvironmentContracts],
+  ["every action-owned ocr invocation disables CLI self-update", testActionOcrInvocationsDisableSelfUpdate],
   ["GitHub Actions contracts run in a dedicated workflow", testContractsRunInDedicatedWorkflow],
   ["GitHub Actions README documents timeout and version contracts", testExampleReadmeDocumentsTimeoutAndVersionContracts],
 ];
