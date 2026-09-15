@@ -50,6 +50,7 @@
   ".hbs",
   ".mustache",
   ".pug",
+  ".twig",
   ".astro",
   ".vue",
   ".ipynb",

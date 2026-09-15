@@ -17,6 +17,7 @@
     "**/*.{ftl,ftlh,ftlx}": "freemarker.md",
     "**/*.{hbs,mustache}": "handlebars_mustache.md",
     "**/*.pug": "pug.md",
+    "**/*.twig": "twig.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
     "**/*.{ts,js,tsx,jsx,mjs,cjs}": "ts_js_tsx_jsx.md",
