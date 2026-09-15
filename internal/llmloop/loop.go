@@ -102,6 +102,9 @@ type Runner struct {
 	toolCalls             map[string]int64
 	toolCallSequence      int64
 	toolFailures          []ToolFailureDetail
+	// toolFailureStreak counts each (taskKey, toolName) pair's consecutive
+	// failures; see tool_failure_streak.go.
+	toolFailureStreak toolFailureStreakState
 	// bg tracks every background goroutine that can still issue an LLM
 	// request after RunMainTask returned. WaitBackground joins them so a
 	// retry-report Freeze at the run boundary cannot observe an
@@ -614,7 +617,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 	toolName := call.Function.Name
 	p, found := r.deps.Tools.Get(toolName)
 	if !found {
-		return tool.Of(tool.NotAvailableMsg)
+		return r.toolFailureResult(taskKey, toolName, tool.NotAvailableMsg)
 	}
 
 	toolCallNumber := r.recordToolCall(toolName)
@@ -627,7 +630,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		telemetry.PrintToolCallError(toolName, fmt.Errorf("%s", errMsg))
 		r.recordToolFailure(toolCallNumber, toolName, taskKey, errMsg,
 			rec, call.Function.Arguments, time.Since(callStarted))
-		return tool.Of(errMsg)
+		return r.toolFailureResult(taskKey, toolName, errMsg)
 	}
 
 	startTime := time.Now()
@@ -652,7 +655,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 			r.recordToolFailure(toolCallNumber, toolName, taskKey, errMsg,
 				rec, call.Function.Arguments, dur)
 			telemetry.PrintToolCallError(t.Name(), toolErr)
-			return tool.Of(errMsg)
+			return r.toolFailureResult(taskKey, toolName, errMsg)
 		}
 
 		// Batched comments share the turn's thinking.
@@ -744,6 +747,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 				return []model.LlmComment{}, nil
 			})
 			telemetry.RecordToolCall(asyncCtx, toolName, time.Since(startTime), true)
+			r.resetToolFailureStreak(taskKey, t.Name())
 			return tool.Of(tool.CommentSucceed)
 		}
 
@@ -756,6 +760,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		if rec != nil {
 			rec.AddToolResult(t.Name(), call.Function.Arguments, tool.CommentSucceed)
 		}
+		r.resetToolFailureStreak(taskKey, t.Name())
 		return tool.Of(tool.CommentSucceed)
 	}
 
@@ -773,12 +778,13 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		r.recordToolFailure(toolCallNumber, toolName, taskKey, err.Error(),
 			rec, call.Function.Arguments, dur)
 		telemetry.PrintToolCallError(toolName, err)
-		return tool.Of(fmt.Sprintf("Error executing tool %s: %v", toolName, err))
+		return r.toolFailureResult(taskKey, toolName, fmt.Sprintf("Error executing tool %s: %v", toolName, err))
 	}
 	telemetry.PrintToolCallFinished(toolName, dur)
 	if rec != nil {
 		rec.AddToolResult(toolName, call.Function.Arguments, result)
 	}
+	r.resetToolFailureStreak(taskKey, toolName)
 	return tool.Of(result)
 }
 
@@ -841,10 +847,26 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 // "arguments": null, which unmarshals to a nil map and would panic on the
 // first write (#382). An equivalent inline guard exists in internal/llm's
 // buildAnthropicParams; keep the two in sync.
+//
+// When raw fails to parse whole, this retries against just its first balanced
+// top-level JSON value (see extractTopLevelJSON) before giving up: a model
+// that appends non-JSON content after otherwise-valid arguments would
+// otherwise have the whole call rejected and retry the same finding
+// unbounded. A raw string with no balanced value at all still fails with its
+// original error, unchanged from before.
 func parseToolArgs(raw string) (map[string]any, error) {
 	var args map[string]any
-	if err := json.Unmarshal([]byte(raw), &args); err != nil {
-		return nil, err
+	err := json.Unmarshal([]byte(raw), &args)
+	if err != nil {
+		span, ok := extractTopLevelJSON(raw)
+		if !ok {
+			return nil, err
+		}
+		var spanArgs map[string]any
+		if spanErr := json.Unmarshal([]byte(span), &spanArgs); spanErr != nil {
+			return nil, err
+		}
+		args = spanArgs
 	}
 	if args == nil {
 		args = make(map[string]any)
