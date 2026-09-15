@@ -124,7 +124,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--timeout <minutes>` | — | `15` | Per-group deadline. `0` disables the timeout. Scaled linearly by the number of effort review rounds (e.g. 15/30/45 min for low/medium/high). |
 | `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
-| `--max-tools <n>` | — | template default | Max tool-call rounds per group. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. The flag only ever *raises* the cap — a value below the template default is ignored. |
+| `--max-tools <n>` | — | template default | Max tool-call rounds per group. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. A resolved positive value sets the cap exactly. |
 | `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per group; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
 | `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Dispatch stops once the budget is exceeded and partial results are still published. |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
