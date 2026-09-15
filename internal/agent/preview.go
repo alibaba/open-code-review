@@ -24,6 +24,7 @@ const (
 	ExcludeUserRule          = model.ExcludeUserRule
 	ExcludeExtension         = model.ExcludeExtension
 	ExcludeDefaultPath       = model.ExcludeDefaultPath
+	ExcludeSecret            = model.ExcludeSecret
 	ExcludeProviderDirectory = model.ExcludeProviderDirectory
 	ExcludeDeleted           = model.ExcludeDeleted
 	ExcludeBinary            = model.ExcludeBinary

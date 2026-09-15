@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
@@ -320,6 +322,33 @@ func TestParseFilterToolCalls(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// logExclusions switches on the exclusion reason with a `continue` default, so
+// a reason with no case arm is dropped from the log and the filtered count alike.
+func TestLogExclusions_SecretPath(t *testing.T) {
+	agent := New(Args{})
+	decisions := []fileDecision{
+		{Diff: model.Diff{NewPath: ".env"}, Reason: ExcludeSecret},
+	}
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	agent.logExclusions(decisions)
+	restore()
+
+	got := buf.String()
+	if !strings.Contains(got, ".env") {
+		t.Errorf("log = %q, want it to name the skipped secret path", got)
+	}
+	if !strings.Contains(got, "secret path") {
+		t.Errorf("log = %q, want secret-specific wording, not the path/extension wording", got)
+	}
+	// The rollup only prints when staticSkipped was incremented, so its presence
+	// proves the decision reached a real case arm rather than `default`.
+	if !strings.Contains(got, "Filtered 1 file(s)") {
+		t.Errorf("log = %q, want the secret exclusion counted in the rollup", got)
 	}
 }
 

@@ -12,6 +12,10 @@ const (
 	ExcludeUserRule    ExcludeReason = "user_exclude"
 	ExcludeExtension   ExcludeReason = "unsupported_ext"
 	ExcludeDefaultPath ExcludeReason = "default_path"
+	// ExcludeSecret is a built-in credential path (for example .env or
+	// id_rsa). Like provider_directory and unlike default_path, an include
+	// rule cannot make the file reviewable.
+	ExcludeSecret ExcludeReason = "secret_exclude"
 	// ExcludeProviderDirectory is an unconditional diff-provider directory
 	// exclusion (for example vendor/ or node_modules/). Unlike default_path,
 	// an include rule cannot make the file reviewable.

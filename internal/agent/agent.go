@@ -1989,6 +1989,8 @@ func (a *Agent) logExclusions(decisions []fileDecision) {
 		switch dec.Reason {
 		case ExcludeBinary:
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", effectivePath(dec.Diff))
+		case ExcludeSecret:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — matches a built-in secret path\n", effectivePath(dec.Diff))
 		case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath:
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", effectivePath(dec.Diff))
 		default:
