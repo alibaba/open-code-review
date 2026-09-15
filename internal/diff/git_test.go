@@ -371,6 +371,61 @@ func TestCommitDiffTreatsOptionLikeRefAsRevision(t *testing.T) {
 	}
 }
 
+func TestWorkspaceUntrackedBinaryFileIsFlaggedNotReviewed(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatalf("write base.txt: %v", err)
+	}
+	runGitTest(t, repo, "add", "base.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "initial commit")
+
+	// Untracked binary blob (ELF-style header with NUL bytes) and a plain
+	// text file; only the binary must be flagged.
+	binary := []byte("\x7fELF\x02\x01\x01\x00\x00\x00binary payload\x00\x00")
+	if err := os.WriteFile(filepath.Join(repo, "myapp"), binary, 0o755); err != nil {
+		t.Fatalf("write myapp: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "notes.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write notes.txt: %v", err)
+	}
+
+	p := NewWorkspaceProvider(repo, nil)
+	set, err := p.GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+
+	var sawBinary, sawText bool
+	for _, d := range set.Included {
+		switch d.NewPath {
+		case "myapp":
+			sawBinary = true
+			if !d.IsBinary {
+				t.Errorf("myapp: expected IsBinary=true for an untracked NUL-containing file")
+			}
+			if d.Insertions != 0 {
+				t.Errorf("myapp: expected 0 insertions for a binary file, got %d", d.Insertions)
+			}
+		case "notes.txt":
+			sawText = true
+			if d.IsBinary || d.Insertions != 1 {
+				t.Errorf("notes.txt: expected reviewable text (binary=%v, insertions=%d)", d.IsBinary, d.Insertions)
+			}
+		}
+	}
+	if !sawBinary {
+		t.Errorf("myapp missing from the diff set")
+	}
+	if !sawText {
+		t.Errorf("notes.txt missing from the diff set")
+	}
+}
+
 func TestWorkspaceUntrackedSymlinkDoesNotReadExternalTarget(t *testing.T) {
 	repo := t.TempDir()
 	runGitTest(t, repo, "init", "-q")
