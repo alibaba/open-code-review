@@ -135,7 +135,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.properties` | `properties.md`——i18n / 配置文件。 |
 | `**/*{mapper,dao}*.xml` | `mapper_dao_xml.md`——MyBatis 风格 mapper SQL。 |
 | `**/pom.xml` | `pom_xml.md`——Maven 依赖。 |
-| `**/build.gradle` | `build_gradle.md`——Gradle 依赖。 |
+| `**/*.gradle` | `build_gradle.md`——Gradle 构建脚本（build.gradle、settings.gradle 及其他 `.gradle` 脚本）。 |
 | `**/package.json` | `package_json.md`——NPM 依赖 / 脚本。 |
 | `**/Cargo.toml` | `cargo_toml.md`——Rust manifest。 |
 | `**/composer.json` | `composer_json.md`——Composer 依赖、自动加载、脚本、插件和包配置。 |

@@ -155,7 +155,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.properties` | `properties.md` — i18n / файлы конфигурации. |
 | `**/*{mapper,dao}*.xml` | `mapper_dao_xml.md` — MyBatis-стиль mapper SQL. |
 | `**/pom.xml` | `pom_xml.md` — зависимости Maven. |
-| `**/build.gradle` | `build_gradle.md` — зависимости Gradle. |
+| `**/*.gradle` | `build_gradle.md` — сборочные скрипты Gradle (build.gradle, settings.gradle и другие `.gradle`-скрипты). |
 | `**/package.json` | `package_json.md` — зависимости / скрипты NPM. |
 | `**/Cargo.toml` | `cargo_toml.md` — манифест Rust. |
 | `**/composer.json` | `composer_json.md` — зависимости Composer, автозагрузка, скрипты, плагины и конфигурация пакета. |

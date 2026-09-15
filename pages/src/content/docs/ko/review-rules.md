@@ -143,7 +143,7 @@ diff 단계에서 일어납니다.
 | `**/*.properties` | `properties.md` — i18n / 설정 파일. |
 | `**/*{mapper,dao}*.xml` | `mapper_dao_xml.md` — MyBatis 형식의 매퍼 SQL. |
 | `**/pom.xml` | `pom_xml.md` — Maven 의존성. |
-| `**/build.gradle` | `build_gradle.md` — Gradle 의존성. |
+| `**/*.gradle` | `build_gradle.md` — Gradle 빌드 스크립트(build.gradle, settings.gradle 및 기타 `.gradle` 스크립트). |
 | `**/package.json` | `package_json.md` — NPM 의존성 / 스크립트. |
 | `**/Cargo.toml` | `cargo_toml.md` — Rust 매니페스트. |
 | `**/composer.json` | `composer_json.md` — Composer 의존성, 오토로딩, 스크립트, 플러그인, 패키지 설정. |

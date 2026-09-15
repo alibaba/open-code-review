@@ -112,7 +112,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.properties` | `properties.md`: i18n / 設定ファイル。 |
 | `**/*{mapper,dao}*.xml` | `mapper_dao_xml.md`: MyBatis 形式の mapper SQL。 |
 | `**/pom.xml` | `pom_xml.md`: Maven 依存関係。 |
-| `**/build.gradle` | `build_gradle.md`: Gradle 依存関係。 |
+| `**/*.gradle` | `build_gradle.md`: Gradle ビルドスクリプト（build.gradle、settings.gradle、その他の `.gradle` スクリプト）。 |
 | `**/package.json` | `package_json.md`: NPM 依存関係 / スクリプト。 |
 | `**/Cargo.toml` | `cargo_toml.md`: Rust manifest。 |
 | `**/composer.json` | `composer_json.md`: Composer の依存関係、自動読み込み、スクリプト、プラグイン、パッケージ設定。 |

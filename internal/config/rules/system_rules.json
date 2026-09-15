@@ -4,7 +4,7 @@
     "**/*.properties": "properties.md",
     "**/*{mapper,dao}*.xml": "mapper_dao_xml.md",
     "**/pom.xml": "pom_xml.md",
-    "**/build.gradle": "build_gradle.md",
+    "**/*.gradle": "build_gradle.md",
     "**/package.json": "package_json.md",
     "**/Cargo.toml": "cargo_toml.md",
     "**/composer.json": "composer_json.md",
