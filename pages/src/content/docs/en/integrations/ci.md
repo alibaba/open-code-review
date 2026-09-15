@@ -189,7 +189,7 @@ See [Review Rules](../../review-rules/) for the schema.
 
 #### Concurrency
 
-The default is 8 parallel sub-agents, one per file group. Lower it on
+The default is 8 parallel sub-agents, one per subtask. Lower it on
 large PRs to stay under your LLM provider's rate limits:
 
 ```yaml
@@ -421,7 +421,7 @@ script:
 
 Same flags as the GitHub Actions recipe — pass `--rule` for a
 project-specific rule file, and `--concurrency` to throttle parallel
-sub-agents (default 8):
+sub-agents (default 8, one per subtask):
 
 ```yaml
 script:

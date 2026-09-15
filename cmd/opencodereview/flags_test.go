@@ -4,6 +4,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -322,5 +323,43 @@ func TestParseScanFlags_NormalizedFormat(t *testing.T) {
 	}
 	if opts.outputFormat != "sarif" {
 		t.Errorf("outputFormat = %q, want sarif", opts.outputFormat)
+	}
+}
+
+func TestConcurrencyFlagUsageUsesSubtask(t *testing.T) {
+	var reviewOpts reviewOptions
+	reviewCmd := &cobra.Command{Use: "review"}
+	registerReviewFlags(reviewCmd, &reviewOpts)
+	reviewFlag := reviewCmd.Flags().Lookup("concurrency")
+	if reviewFlag == nil {
+		t.Fatal("review --concurrency flag missing")
+	}
+
+	var scanOpts scanOptions
+	scanCmd := &cobra.Command{Use: "scan"}
+	registerScanFlags(scanCmd, &scanOpts)
+	scanFlag := scanCmd.Flags().Lookup("concurrency")
+	if scanFlag == nil {
+		t.Fatal("scan --concurrency flag missing")
+	}
+
+	for _, tc := range []struct {
+		cmd   string
+		usage string
+	}{
+		{"review", reviewFlag.Usage},
+		{"scan", scanFlag.Usage},
+	} {
+		if !strings.Contains(tc.usage, "subtask") {
+			t.Errorf("%s --concurrency usage %q: want subtask unit", tc.cmd, tc.usage)
+		}
+		for _, leaked := range []string{"file-group", "file group", "file scans"} {
+			if strings.Contains(tc.usage, leaked) {
+				t.Errorf("%s --concurrency usage %q: leaked %q", tc.cmd, tc.usage, leaked)
+			}
+		}
+	}
+	if reviewFlag.Usage != scanFlag.Usage {
+		t.Errorf("review and scan --concurrency should share phrasing: review %q scan %q", reviewFlag.Usage, scanFlag.Usage)
 	}
 }
