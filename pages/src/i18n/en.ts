@@ -41,7 +41,7 @@ export const en = {
   'highlights.stat1Label': 'INTERNAL ACTIVE USERS',
   'highlights.stat1Caption': 'Battle-tested inside Alibaba Group',
   'highlights.stat2Value': '150K+',
-  'highlights.stat2Label': 'NPM COMMUNITY DOWNLOADS',
+  'highlights.stat2Label': 'NPM DOWNLOADS',
   'highlights.stat2Caption': 'Real npm downloads · last 30 days',
   'highlights.stat3Value': '3M+',
   'highlights.stat3Label': 'REAL-WORLD TASKS',

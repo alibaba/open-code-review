@@ -43,7 +43,7 @@ export const ja: TranslationKeys = {
   'highlights.stat1Label': '社内アクティブユーザー',
   'highlights.stat1Caption': 'Alibabaグループ内で実戦検証済み',
   'highlights.stat2Value': '150K+',
-  'highlights.stat2Label': 'NPM コミュニティダウンロード',
+  'highlights.stat2Label': 'NPM ダウンロード',
   'highlights.stat2Caption': 'npm 過去30日の実ダウンロード数',
   'highlights.stat3Value': '3M+',
   'highlights.stat3Label': '実タスク',
