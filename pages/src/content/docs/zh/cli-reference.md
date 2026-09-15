@@ -664,6 +664,21 @@ ocr completion powershell > ocr.ps1
 然后在 PowerShell 配置文件中添加一行以加载 `ocr.ps1`。
 
 
+## man 手册页
+
+`ocr` 提供 UNIX 手册页。安装后可用以下命令阅读：
+
+```sh
+man ocr
+```
+
+`install.sh` 安装器会自动安装该页面。其他安装方式（npm、源码构建）不会自动安装，请自行生成并放到你的 `MANPATH` 下：
+
+```sh
+ocr man <directory>
+```
+
+
 ## 提示与注意
 
 - `--audience agent` **并不**隐含 `--format json`。两者控制不同的事——屏蔽 UI
