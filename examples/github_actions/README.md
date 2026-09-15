@@ -24,6 +24,19 @@ The core of the demo is a single action step:
 
 See [`action.yml`](../../action.yml) for the full list of inputs, outputs, security guidance, and the four comment-posting modes (sticky summary + incremental).
 
+### Configure the review language
+
+Use the Action-specific `language` input to choose the review output language:
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    language: Chinese
+```
+
+The CLI also accepts `OCR_LANGUAGE` when running outside the Action. Both forms
+configure the same underlying `language` setting.
+
 ## Reproducible pinning
 
 The Action is an orchestrator: it installs the OCR CLI from npm at run time (`ocr_version`, default `latest`). Pinning only the Action reference therefore does **not** freeze review behavior — a new CLI release still changes what runs. For a fully reproducible setup, pin both:

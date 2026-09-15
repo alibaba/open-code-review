@@ -56,7 +56,8 @@ inputs:
   language:
     description: >-
       Review output language, written via `ocr config set language`
-      (e.g. English, Chinese). No env var exists for this.
+      (e.g. English, Chinese). The GitHub Actions input is `language`; the OCR
+      CLI also supports the `OCR_LANGUAGE` environment variable.
     required: false
     default: 'English'
   llm_timeout:
