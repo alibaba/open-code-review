@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -200,6 +201,54 @@ func TestSetErrorWritesJSONL(t *testing.T) {
 	}
 	if !found {
 		t.Error("no llm_error record found in JSONL")
+	}
+}
+
+func TestSetResponseSanitizedDoesNotPersistToolSecrets(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	defer sh.Finalize()
+	fs := sh.GetOrCreateFileSession("foo.go")
+	rec := fs.AppendTaskRecord(MainTask, nil)
+	const secret = "jsonl-secret-sentinel"
+	resp := &llm.ChatResponse{
+		Choices: []llm.Choice{
+			{Message: llm.ResponseMessage{ToolCalls: []llm.ToolCall{
+				{
+					ID: "call_1",
+					Function: llm.FunctionCall{
+						Name:      "mcp__server__tool",
+						Arguments: `{"token":"` + secret + `"}`,
+					},
+				},
+			}}},
+		},
+		Model: "test-model",
+	}
+	rec.SetResponseSanitized(resp, time.Second, func(_, _ string) string {
+		return `{"redacted":true}`
+	})
+
+	if sh.persist != nil {
+		sh.persist.mu.Lock()
+		err := sh.persist.writer.Flush()
+		sh.persist.mu.Unlock()
+		if err != nil {
+			t.Fatalf("flush: %v", err)
+		}
+	}
+	raw, err := os.ReadFile(sessionJSONLPath(t, repoDir, sh.SessionID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), secret) {
+		t.Fatalf("session JSONL contains raw sensitive tool arguments: %s", raw)
+	}
+	if !strings.Contains(string(raw), `\"redacted\":true`) {
+		t.Fatalf("session JSONL does not contain redaction marker: %s", raw)
 	}
 }
 

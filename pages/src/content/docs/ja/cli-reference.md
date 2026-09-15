@@ -4,6 +4,8 @@ sidebar:
   order: 6
 ---
 
+`ocr mcp` はサーバー一覧からツールと実効権限を管理します。Esc で戻ります。一覧を開いても接続しません。`ocr mcp import [file] [--yes]` は Cursor JSON / Codex TOML の 1 接続を無効・ツールなしで保存し、権限をコピーしません。非対話では単一サーバーのファイルと `--yes` が必要です。平文 env/header は環境変数参照に変換し、同名を上書きしません。OAuth 等の未対応フィールドは拒否します。非表示の貼り付け（Ctrl-S）と有効化は [MCP ガイド](../mcp/) を参照してください。
+
 各 `ocr` サブコマンド、引数、終了時の挙動に関する完全なリファレンスです。
 
 ## グローバルな使い方
@@ -18,6 +20,7 @@ Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
   config       Manage configuration settings
+  mcp          Manage MCP server connections and permissions
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
@@ -31,6 +34,7 @@ Examples:
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
+  ocr mcp                                  Open the MCP manager
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
   ocr session list                         List saved review sessions
@@ -73,6 +77,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr config unset <key>` | — | 保存済みの設定値をクリアします（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
 | `ocr config provider` | — | 対話的なプロバイダー設定 TUI。 |
 | `ocr config model` | — | 対話的な model 選択 TUI。 |
+| `ocr mcp` | — | MCP 接続、明示的な tool allowlist、実行権限を管理します。 |
 | `ocr llm test` | — | 短い chat リクエストを送信し、設定されたエンドポイントを検証します。 |
 | `ocr llm providers` | — | 組み込みの LLM プロバイダーをすべて一覧表示します。 |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | 保存されたレビューセッションを一覧表示します。 |
@@ -649,6 +654,38 @@ ocr completion powershell > ocr.ps1
 
 その後、`ocr.ps1` を読み込む行を PowerShell プロファイルに追加してください。
 
+## `ocr mcp`
+
+MCP 管理は model 設定とは独立し、`ocr review` だけに適用されます。
+
+```text
+ocr mcp
+ocr mcp add [name]
+ocr mcp import [file] [--yes]
+ocr mcp list [--json]
+ocr mcp show <name> [--json]
+ocr mcp edit <name>
+ocr mcp discover <name> [--json] [--yes]
+ocr mcp tools <name> [--enable TOOL ...] [--disable TOOL ...] [--yes]
+ocr mcp permissions [name]
+ocr mcp enable <name> [--yes]
+ocr mcp disable <name> [--yes]
+ocr mcp remove <name> [--yes]
+```
+
+TTY では `ocr mcp` が manager を開きます。非 TTY ではマスク済み status/help だけを
+出し、接続も保存もしません。`discover` は初期化と pagination された `tools/list`
+だけで、`tools/call` は送信しません。非対話環境で接続または変更し得る command は
+`--yes` が必須です。`list` と `show` は常に read-only で credentials をマスクします。
+
+`tools` は model-visible な明示 allowlist、`permissions` は実行権限（`deny`、`ask`、
+`allow`、server/tool の `inherit`）を制御します。権限は allowlist 外のツールを有効に
+できません。永続 `allow` には最新 fingerprint が必要です。期限は `--timeout 1..600`
+または `ocr config set mcp.approval_timeout_seconds <seconds>` で変更できます。
+
+接続 preview、実行時の 4 選択肢、移行、CI fail-closed 規則は
+[MCP サーバー](../mcp/)を参照してください。
+
 ## ヒントと注意点
 
 - `--audience agent` は `--format json` を**含意しません**。両者は異なることを制御します。UI の抑制 vs 構造化されたペイロードです。両方が必要な場合は組み合わせて使用してください。
@@ -662,3 +699,7 @@ ocr completion powershell > ocr.ps1
 - [設定](../configuration/): 引数の背後にある環境変数と config key。
 - [レビュールール](../review-rules/): `--rule` 引数とルールの解決。
 - [連携](../integrations/agent-skill/): agent と CI から `ocr review` を呼び出します。
+
+## 端末の接続ウィザード
+
+`ocr mcp add` は項目別入力と `Space` によるツール選択に対応します。`Enter` で次へ、`Ctrl-B` で戻り、`Esc` で中止します。権限とタイムアウト（既定 60 秒、1–600 秒）は `ocr mcp permissions` で設定します。`OCR_CONFIG_PATH` は設定の読み書きと review に同じファイルを指定します。`ocr mcp tools docs --disable write` だけなら接続も `--yes` も不要で、オフラインで権限を取り消せます。有効化には発見と接続への明示的な同意が必要です。

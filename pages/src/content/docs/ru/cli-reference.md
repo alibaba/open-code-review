@@ -4,6 +4,8 @@ sidebar:
   order: 6
 ---
 
+`ocr mcp` открывает список серверов для управления инструментами и эффективными правами. Esc возвращает назад. Список не инициирует подключений. `ocr mcp import [file] [--yes]` импортирует одно подключение Cursor JSON / Codex TOML отключённым, без инструментов и прав. Без диалога нужны файл с одним сервером и `--yes`. Открытые env/header заменяются ссылками на переменные окружения; имена не перезаписываются. OAuth и неподдерживаемые поля отклоняются. Скрытая вставка (Ctrl-S) и активация описаны в [руководстве MCP](../mcp/).
+
 Полный справочник по всем подкомандам и флагам `ocr`, а также поведению при
 завершении.
 
@@ -19,6 +21,7 @@ Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
   config       Manage configuration settings
+  mcp          Manage MCP server connections and permissions
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
@@ -32,6 +35,7 @@ Examples:
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
+  ocr mcp                                  Open the MCP manager
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
   ocr session list                         List saved review sessions
@@ -74,6 +78,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr config unset <key>` | — | Сбрасывает сохранённое значение конфигурации (`provider`, `max_tokens`, `effort`, `custom_providers.<name>`, `mcp_servers.<name>`). |
 | `ocr config provider` | — | Интерактивный TUI для настройки провайдера. |
 | `ocr config model` | — | Интерактивный TUI для выбора модели. |
+| `ocr mcp` | — | Управляет соединениями MCP, явным allowlist инструментов и разрешениями выполнения. |
 | `ocr llm test` | — | Отправляет небольшой запрос в чат для проверки настроенного эндпоинта. |
 | `ocr llm providers` | — | Выводит список всех встроенных LLM-провайдеров. |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | Выводит список сохранённых сессий ревью. |
@@ -610,6 +615,40 @@ ocr -V
 платформу (`<GOOS>/<GOARCH>`), дату сборки (если есть) и URL GitHub
 (`https://github.com/alibaba/open-code-review`).
 
+## `ocr mcp`
+
+Управление MCP отделено от настройки модели и относится только к `ocr review`:
+
+```text
+ocr mcp
+ocr mcp add [name]
+ocr mcp import [file] [--yes]
+ocr mcp list [--json]
+ocr mcp show <name> [--json]
+ocr mcp edit <name>
+ocr mcp discover <name> [--json] [--yes]
+ocr mcp tools <name> [--enable TOOL ...] [--disable TOOL ...] [--yes]
+ocr mcp permissions [name]
+ocr mcp enable <name> [--yes]
+ocr mcp disable <name> [--yes]
+ocr mcp remove <name> [--yes]
+```
+
+В TTY команда `ocr mcp` открывает manager. Вне TTY она печатает только
+замаскированный status/help, не подключается и ничего не записывает. `discover`
+выполняет инициализацию и все страницы `tools/list`, но не `tools/call`.
+Команды, способные подключаться или менять данные, в неинтерактивном процессе
+требуют `--yes`. `list` и `show` всегда read-only и скрывают credentials.
+
+`tools` управляет явным model-visible allowlist. `permissions` управляет
+выполнением (`deny`, `ask`, `allow`, а для server/tool также `inherit`), но не
+может включить инструмент вне allowlist. Постоянный `allow` требует актуального
+fingerprint. Тайм-аут задаётся через `--timeout 1..600` или
+`ocr config set mcp.approval_timeout_seconds <seconds>`.
+
+Preview соединения, четыре runtime-варианта, миграция и CI fail-closed описаны
+на странице [Серверы MCP](../mcp/).
+
 ## Советы и подводные камни
 
 - `--audience agent` **не** подразумевает `--format json`. Они управляют
@@ -631,3 +670,7 @@ ocr -V
 - [Конфигурация](../configuration/) — переменные окружения и ключи конфигурации, связанные с флагами.
 - [Правила ревью](../review-rules/) — флаг `--rule` и разрешение правил.
 - [Интеграции](../integrations/agent-skill/) — вызов `ocr review` из агентов и CI.
+
+## Подключение в терминале
+
+`ocr mcp add` предлагает пошаговый ввод и выбор инструментов клавишей `Space`. `Enter` продолжает, `Ctrl-B` возвращает назад, `Esc` отменяет. Права и тайм-аут (по умолчанию 60 секунд, 1–600) задаются через `ocr mcp permissions`. `OCR_CONFIG_PATH` задаёт один файл для чтения, записи настроек и review. Только отзыв через `ocr mcp tools docs --disable write` работает офлайн, без подключения и без `--yes`. Включение требует discovery и явного согласия на подключение.
