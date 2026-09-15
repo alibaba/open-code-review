@@ -16,8 +16,9 @@ import (
 // Secret paths are kept apart from default_exclude_patterns.json on purpose:
 // the default exclude list holds review noise that an include rule is allowed
 // to bring back, while these paths must not enter the review scope at all, so
-// no include rule can admit them. Matching follows the same glob and case rules
-// as IsExcludedPath; see the package comment in allowed_ext.go for the syntax.
+// no include rule can admit them. Unconditional secret paths use the same glob
+// and case rules as IsExcludedPath; .env-family paths are handled directly here
+// because they have explicit template exceptions.
 
 //go:embed default_secret_patterns.json
 var secretData []byte
@@ -46,12 +47,12 @@ func initSecret() {
 func IsSecretPath(filePath string) bool {
 	secretOnce.Do(initSecret)
 	lowerPath := strings.ToLower(filePath)
-	envTemplate := isEnvTemplate(lowerPath)
+
+	if isSecretEnvPath(lowerPath) {
+		return true
+	}
+
 	for _, pattern := range secretPatterns {
-		// Template names are exempt only from the broad .env.* rule.
-		if envTemplate && pattern == "**/.env.*" {
-			continue
-		}
 		if matched, _ := doublestar.Match(pattern, lowerPath); matched {
 			return true
 		}
@@ -59,11 +60,13 @@ func IsSecretPath(filePath string) bool {
 	return false
 }
 
-func isEnvTemplate(filePath string) bool {
-	switch path.Base(filePath) {
+func isSecretEnvPath(lowerPath string) bool {
+	base := path.Base(lowerPath)
+
+	switch base {
 	case ".env.example", ".env.sample", ".env.template":
-		return true
-	default:
 		return false
 	}
+
+	return base == ".env" || strings.HasPrefix(base, ".env.")
 }

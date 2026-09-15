@@ -84,10 +84,10 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 Для каждого diff OCR спрашивает:
 
 1. **`binary`** — Файл бинарный? Исключается.
-2. **`secret_exclude`** — Старый или новый путь совпадает со [встроенным шаблоном секретного пути](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)? Исключается.
+2. **`secret_exclude`** — Старый или новый путь подпадает под встроенную защиту секретных путей? Безусловные glob-шаблоны перечислены в [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json). Если да, путь исключается.
    Эта защита применяется до пользовательских правил и не может быть переопределена шаблоном `include`.
 
-   Правило `.env.*` не относит `.env.example`, `.env.sample` и `.env.template` к секретным путям; к ним применяются обычные правила ревью.
+   Пути `.env.*` для отдельных окружений считаются секретными, кроме `.env.example`, `.env.sample` и `.env.template`, к которым применяются обычные правила ревью.
 
 3. **`user_exclude`** — Путь совпадает с каким-либо пользовательским шаблоном
    `exclude`? Исключается.
