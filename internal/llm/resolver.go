@@ -402,6 +402,15 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	if strings.TrimSpace(apiKey) == "" {
 		apiKey = ""
 	}
+	// Warn when a static api_key is stored in plaintext in the config file.
+	// Credentials in plain JSON are readable by any process that can read the
+	// file, and they end up in config backups and editor history. Users should
+	// prefer api_key_cmd (e.g. "op read op://vault/item") so the secret stays
+	// in a secret manager and is never at rest in a JSON file.
+	if apiKey != "" {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: provider %q has a static api_key stored in the config file; "+
+			"consider using api_key_cmd to read the credential from a secret manager\n", cfg.Provider)
+	}
 	// Same rule for the command: `sh -c "   "` exits 0 with no output, so a
 	// whitespace-only api_key_cmd would suppress the env fallback and then fail
 	// with "produced empty output". Treating it as unset keeps the typo from
@@ -613,6 +622,12 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 	token := cfg.Llm.AuthToken
 	if strings.TrimSpace(token) == "" {
 		token = ""
+	}
+	// Warn when a static auth_token is stored in plaintext in the config file.
+	// See the api_key warning in tryProviderConfig for the rationale.
+	if token != "" {
+		fmt.Fprintln(os.Stderr, "[ocr] WARNING: llm config has a static auth_token stored in the config file; "+
+			"consider using auth_token_cmd to read the credential from a secret manager")
 	}
 	tokenCmd := cfg.Llm.AuthTokenCmd
 	if strings.TrimSpace(tokenCmd) == "" {
