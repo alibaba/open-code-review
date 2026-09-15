@@ -79,6 +79,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session show <id>` | `ocr sessions show <id>` | 1つのセッションとファイル単位のチェックポイントを表示します。 |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | 1つのセッションに記録されたレビューコメントを表示します。 |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 2つのセッションの指摘を比較します：新規・継続・解決済み・未レビュー。 |
+| `ocr session export [id]` | — | 1つのセッションを自己完結型の HTML ファイルとしてエクスポートします。 |
 | `ocr viewer` | — | 過去のレビューセッション用のローカル Web UI を起動します（`localhost:5483`）。 |
 | `ocr version` | — | バージョン、commit、プラットフォーム、ビルド日、GitHub URL を出力します。 |
 
@@ -448,6 +449,30 @@ ocr session compare --json <before-session-id> <after-session-id>
 |---|---|---|
 | `--repo <path>` | カレントディレクトリ | 比較するセッションが属するリポジトリ。 |
 | `--json` | `false` | 比較結果を JSON で出力します（`new`、`persisting`、`resolved`、`not_reviewed`）。 |
+
+### `ocr session export`
+
+1つのセッションを自己完結型の HTML ファイル 1 つとしてレンダリングします。
+ビューアのスタイルシートとスクリプトはインライン化されるため、生成された
+ファイルはネットワークアクセスなしで `file://` から開け、CI がレビュー結果を
+ビルド成果物として保存できます。
+
+```bash
+ocr session export -o review.html
+ocr session export 20250601-100000-abc123 -o review.html
+```
+
+セッション id を指定しない場合は、そのリポジトリの最新セッションをエクスポートします。
+成功した `ocr review` はセッション id を出力しないため、これが既定の動作です。
+`-o` を指定しない場合、HTML は標準出力に書き出されます。
+
+エクスポートされたページにはセッションが記録したレビュー対象のソース抜粋が
+含まれます。公開する前に、リポジトリ自体と同じように慎重に取り扱ってください。
+
+| フラグ | デフォルト | 説明 |
+|---|---|---|
+| `--repo <path>` | カレントディレクトリ | エクスポートするセッションが属するリポジトリ。 |
+| `--output <path>`、`-o` | 標準出力 | HTML を標準出力ではなくファイルに書き出します。 |
 
 ## `ocr rules`
 
