@@ -4,6 +4,7 @@
 package diff
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -118,6 +119,25 @@ new file mode 100644
 	for _, l := range h.Lines {
 		if l.Type != HunkAdded {
 			t.Errorf("expected all lines to be HunkAdded, got %d", l.Type)
+		}
+	}
+}
+
+func TestParseHunks_CRLFLineEndings(t *testing.T) {
+	raw := "diff --git a/pkg/new.go b/pkg/new.go\r\n" +
+		"--- a/pkg/new.go\r\n" +
+		"+++ b/pkg/new.go\r\n" +
+		"@@ -1,2 +1,2 @@\r\n" +
+		"-old\r\n" +
+		"+new\r\n"
+
+	hunks := ParseHunks(raw)
+	if len(hunks) != 1 {
+		t.Fatalf("expected 1 hunk, got %d", len(hunks))
+	}
+	for _, l := range hunks[0].Lines {
+		if strings.HasSuffix(l.Content, "\r") {
+			t.Errorf("hunk line content retains trailing CR: %q", l.Content)
 		}
 	}
 }
