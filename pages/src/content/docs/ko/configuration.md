@@ -163,7 +163,7 @@ LLM 요청마다 HTTP 타임아웃이 있으며 기본값은 **300초**입니다
 - `llm.timeout_sec` — 레거시 `llm` 섹션용, 초 단위.
 - `OCR_LLM_TIMEOUT` 환경 변수 — 정수 초. 모든 해석 경로에서 설정 파일 값보다 우선합니다.
 
-`timeout_sec` 키는 `ocr config set`이 지원하지 않으므로 `~/.opencodereview/config.json`을 직접 편집합니다:
+두 `timeout_sec` 키 모두 `ocr config set`으로 설정할 수 있습니다:
 
 ```json
 {

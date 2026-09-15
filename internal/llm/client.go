@@ -43,6 +43,37 @@ var AppVersion = "dev"
 // shrink it, same as keyCmdTimeout.
 var bedrockConfigLoadTimeout = 60 * time.Second
 
+// responseHeaderTimeoutMargin is added to the request timeout when setting
+// ResponseHeaderTimeout so the per-request context deadline (WithRequestTimeout),
+// which is 30s earlier, is the one to fire first. An equal ResponseHeaderTimeout
+// would race the context deadline, and a header-timeout win surfaces as a
+// nil-response transport error that shouldRetry treats as retryable, so the
+// request would be retried up to 5 more times (each with a fresh full timeout)
+// instead of failing on ctx.Err(). The margin still replaces the SDK's hardcoded
+// 10-minute default.
+const responseHeaderTimeoutMargin = 30 * time.Second
+
+// httpClientWithHeaderTimeout returns an HTTP client whose ResponseHeaderTimeout is
+// the request timeout plus responseHeaderTimeoutMargin, overriding the openai-go and
+// anthropic-sdk-go hardcoded 10-minute default (which each applies unless a client is
+// supplied via WithHTTPClient) so a configured timeout_sec is honored on a slow
+// endpoint (#1161). Shared by the OpenAI, OpenAI Responses and Anthropic constructors.
+// A timeout of zero or less leaves ResponseHeaderTimeout unset (no cap), matching the
+// SDKs' "no timeout" semantics; the callers clamp to a positive value first, so this
+// only guards a direct call. Package var, not func, so a test can assert each
+// constructor installs it, same as bedrockConfigLoadTimeout.
+var httpClientWithHeaderTimeout = func(timeout time.Duration) *http.Client {
+	t, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Client{Transport: http.DefaultTransport}
+	}
+	t = t.Clone()
+	if timeout > 0 {
+		t.ResponseHeaderTimeout = timeout + responseHeaderTimeoutMargin
+	}
+	return &http.Client{Transport: t}
+}
+
 // defaultAnthropicMaxTokens is used when ChatRequest.MaxTokens is unset.
 // The thinking guard also compares against this to decide whether to drop thinking.
 const defaultAnthropicMaxTokens = 8192
@@ -519,6 +550,7 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithMaxRetries(5),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
+		openaiopt.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
@@ -590,13 +622,38 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		// NewStreaming method sets stream=true on the wire itself. When
 		// streaming is NOT enabled, leaving the key in the body would make
 		// the API answer with text/event-stream and the non-streaming path
-		// fails to decode (see issue #647).
-		if k == "stream" {
+		// fails to decode (see issue #647). "stream_options" is owned by the
+		// streaming branch below for the same reason: providers reject it
+		// unless stream is true.
+		if k == "stream" || k == "stream_options" {
 			continue
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
 	if stream, ok := c.cfg.ExtraBody["stream"].(bool); ok && stream {
+		if streamOptions, ok := c.cfg.ExtraBody["stream_options"]; !ok {
+			// OpenAI-compatible servers omit token usage from streams unless
+			// asked, silently losing cost accounting for streamed requests.
+			// Ask for the final usage chunk by default.
+			params.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
+		} else if streamOptions != nil {
+			// An explicit stream_options in extra_body replaces the default,
+			// but usage stays requested unless include_usage itself is spelled
+			// out: configuring an unrelated stream option must not silently
+			// disable cost accounting. An explicit null suppresses the field
+			// entirely, for gateways that reject stream_options.
+			if object, ok := streamOptions.(map[string]any); ok {
+				if _, has := object["include_usage"]; !has {
+					merged := make(map[string]any, len(object)+1)
+					for key, value := range object {
+						merged[key] = value
+					}
+					merged["include_usage"] = true
+					streamOptions = merged
+				}
+			}
+			opts = append(opts, openaiopt.WithJSONSet("stream_options", streamOptions))
+		}
 		return c.completionsStreaming(ctx, params, opts...)
 	}
 
@@ -928,6 +985,11 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		option.WithMaxRetries(5),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
+		// anthropic-sdk-go's default client hardcodes the same 10-minute
+		// ResponseHeaderTimeout as openai-go, applied because this path does not
+		// pass WithoutEnvironmentDefaults, so a long timeout_sec is capped at 10
+		// minutes on a slow endpoint without this (#1161).
+		option.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
 
 	switch authHeader {
@@ -988,6 +1050,10 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 		option.WithMaxRetries(5),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
+		// No httpClientWithHeaderTimeout here (unlike NewAnthropicClient): bedrock.WithConfig
+		// is an option.Join carrying WithoutEnvironmentDefaults, so NewClient skips
+		// DefaultClientOptions and never installs the SDK's 10-minute-header-timeout
+		// default client. Adding one would impose a new cap, not remove one.
 		// Bedrock authenticates by SigV4 signature, added by the middleware
 		// below at transport time. Any API-key header the SDK would otherwise
 		// attach — including an empty one — is rejected outright with

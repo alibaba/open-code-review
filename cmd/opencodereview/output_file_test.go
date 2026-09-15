@@ -206,6 +206,15 @@ func TestResolveOutputWriter_MissingParent(t *testing.T) {
 
 // --- lazyFileWriter ---
 
+func outputTempFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(dir, ".ocr-out-*"))
+	if err != nil {
+		t.Fatalf("glob output temp files: %v", err)
+	}
+	return matches
+}
+
 // TestLazyFileWriter_NoWriteLeavesExistingFileUntouched pins the core
 // data-safety contract: a writer that is resolved but never written to (a
 // failed run, a preview error) must not create or truncate the target file.
@@ -247,16 +256,32 @@ func TestLazyFileWriter_NoWriteDoesNotCreateFile(t *testing.T) {
 	}
 }
 
-func TestLazyFileWriter_WriteCreatesFileAndPrintsHint(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "out.json")
-	stderr := captureStderr(t, func() {
-		w, closeFn, err := resolveOutputWriter(path, "json")
+func TestLazyFileWriter_WriteCommitsFileAndPrintsHintOnClose(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.json")
+	var closeFn func() error
+	stderrBeforeClose := captureStderr(t, func() {
+		w, close, err := resolveOutputWriter(path, "json")
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}
+		closeFn = close
 		if _, err := w.Write([]byte(`{"status":"success"}`)); err != nil {
 			t.Fatalf("write: %v", err)
 		}
+	})
+	t.Cleanup(func() { _ = closeFn() })
+	if stderrBeforeClose != "" {
+		t.Fatalf("hint printed before output was committed: %q", stderrBeforeClose)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("target became visible before close, stat err = %v", err)
+	}
+	if temps := outputTempFiles(t, dir); len(temps) != 1 {
+		t.Fatalf("output temp files before close = %v, want one", temps)
+	}
+
+	stderrAfterClose := captureStderr(t, func() {
 		if err := closeFn(); err != nil {
 			t.Fatalf("close: %v", err)
 		}
@@ -268,8 +293,225 @@ func TestLazyFileWriter_WriteCreatesFileAndPrintsHint(t *testing.T) {
 	if string(data) != `{"status":"success"}` {
 		t.Fatalf("file content = %q, want the written bytes", data)
 	}
-	if !strings.Contains(stderr, "[ocr] Results written to "+path) {
-		t.Fatalf("expected 'Results written' hint on stderr, got %q", stderr)
+	if !strings.Contains(stderrAfterClose, "[ocr] Results written to "+path) {
+		t.Fatalf("expected 'Results written' hint after close, got %q", stderrAfterClose)
+	}
+	if temps := outputTempFiles(t, dir); len(temps) != 0 {
+		t.Fatalf("output temp files after close = %v, want none", temps)
+	}
+}
+
+func TestLazyFileWriter_ReplacesExistingFileOnlyOnClose(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.json")
+	const oldContent = "previous complete report\n"
+	const newContent = `{"status":"success"}`
+	if err := os.WriteFile(path, []byte(oldContent), 0o640); err != nil {
+		t.Fatalf("write existing: %v", err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat existing: %v", err)
+	}
+
+	w, closeFn, err := resolveOutputWriter(path, "json")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if _, err := w.Write([]byte(newContent)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read before close: %v", err)
+	}
+	if string(data) != oldContent {
+		t.Fatalf("target changed before close: got %q, want %q", data, oldContent)
+	}
+	if temps := outputTempFiles(t, dir); len(temps) != 1 {
+		t.Fatalf("output temp files before close = %v, want one", temps)
+	}
+
+	if err := closeFn(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read after close: %v", err)
+	}
+	if string(data) != newContent {
+		t.Fatalf("target after close = %q, want %q", data, newContent)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat after close: %v", err)
+	}
+	if after.Mode().Perm() != before.Mode().Perm() {
+		t.Fatalf("target mode after close = %v, want %v", after.Mode().Perm(), before.Mode().Perm())
+	}
+	if temps := outputTempFiles(t, dir); len(temps) != 0 {
+		t.Fatalf("output temp files after close = %v, want none", temps)
+	}
+}
+
+func TestLazyFileWriter_NewFileUsesCreatePermissions(t *testing.T) {
+	dir := t.TempDir()
+	probePath := filepath.Join(dir, "probe")
+	probe, err := os.Create(probePath)
+	if err != nil {
+		t.Fatalf("create mode probe: %v", err)
+	}
+	if err := probe.Close(); err != nil {
+		t.Fatalf("close mode probe: %v", err)
+	}
+	probeInfo, err := os.Stat(probePath)
+	if err != nil {
+		t.Fatalf("stat mode probe: %v", err)
+	}
+	if err := os.Remove(probePath); err != nil {
+		t.Fatalf("remove mode probe: %v", err)
+	}
+
+	path := filepath.Join(dir, "out.json")
+	w, closeFn, err := resolveOutputWriter(path, "json")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if _, err := w.Write([]byte(`{}`)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := closeFn(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat output: %v", err)
+	}
+	if info.Mode().Perm() != probeInfo.Mode().Perm() {
+		t.Fatalf("new output mode = %v, want os.Create mode %v", info.Mode().Perm(), probeInfo.Mode().Perm())
+	}
+}
+
+func TestLazyFileWriter_RenameFailureLeavesTargetAndCleansTemp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.json")
+	w, closeFn, err := resolveOutputWriter(path, "json")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if _, err := w.Write([]byte(`{"status":"success"}`)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("create conflicting target: %v", err)
+	}
+	stderr := captureStderr(t, func() {
+		if err := closeFn(); err == nil {
+			t.Fatal("expected atomic rename to fail for a directory target")
+		}
+	})
+	if strings.Contains(stderr, "Results written") {
+		t.Fatalf("success hint printed after failed rename: %q", stderr)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat conflicting target: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("failed rename changed the conflicting target")
+	}
+	if temps := outputTempFiles(t, dir); len(temps) != 0 {
+		t.Fatalf("output temp files after failed rename = %v, want none", temps)
+	}
+}
+
+func TestLazyFileWriter_WriteFailureLeavesExistingFileUntouched(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.json")
+	const oldContent = "previous complete report\n"
+	if err := os.WriteFile(path, []byte(oldContent), 0o644); err != nil {
+		t.Fatalf("write existing: %v", err)
+	}
+	w, closeFn, err := resolveOutputWriter(path, "json")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if _, err := w.Write([]byte("partial replacement")); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	lazy := w.(*lazyFileWriter)
+	if err := lazy.file.Close(); err != nil {
+		t.Fatalf("inject close: %v", err)
+	}
+	if _, err := w.Write([]byte("must fail")); err == nil {
+		t.Fatal("expected the injected write failure")
+	}
+	if err := closeFn(); err != nil {
+		t.Fatalf("cleanup after reported write failure: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read existing: %v", err)
+	}
+	if string(data) != oldContent {
+		t.Fatalf("existing file changed after write failure: got %q, want %q", data, oldContent)
+	}
+	if temps := outputTempFiles(t, dir); len(temps) != 0 {
+		t.Fatalf("output temp files after write failure = %v, want none", temps)
+	}
+}
+
+func TestLazyFileWriter_PreservesSymlinkTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.json")
+	link := filepath.Join(dir, "out.json")
+	const oldContent = "previous complete report\n"
+	const newContent = `{"status":"success"}`
+	if err := os.WriteFile(target, []byte(oldContent), 0o644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Symlink(filepath.Base(target), link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	w, closeFn, err := resolveOutputWriter(link, "json")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if _, err := w.Write([]byte(newContent)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target before close: %v", err)
+	}
+	if string(data) != oldContent {
+		t.Fatalf("symlink target changed before close: got %q, want %q", data, oldContent)
+	}
+	if err := closeFn(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatalf("lstat link: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("output symlink was replaced instead of preserving its target")
+	}
+	data, err = os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target after close: %v", err)
+	}
+	if string(data) != newContent {
+		t.Fatalf("symlink target after close = %q, want %q", data, newContent)
+	}
+	if temps := outputTempFiles(t, dir); len(temps) != 0 {
+		t.Fatalf("output temp files after close = %v, want none", temps)
 	}
 }
 

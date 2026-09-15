@@ -2,7 +2,7 @@
 
 OpenCodeReview에 기여해 주셔서 감사합니다. 오타 수정, bug report, 새 기능 구현 등 모든 기여는 프로젝트에 도움이 됩니다.
 
-[English](CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | 한국어 | [Русский](CONTRIBUTING.ru-RU.md)
+[English](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | 한국어 | [Русский](CONTRIBUTING.ru-RU.md)
 
 ## Code of Conduct
 
@@ -135,6 +135,25 @@ make build
 └── bin/                  # NPM wrapper
 ```
 
+## AI 지원 개발
+
+개발에 AI의 도움을 받는 것 자체는 전혀 문제가 없으며, 그 덕분에 기여가 수월해진다면 오히려 환영합니다. 받아들일 수 없는 것은 모델이 생성한 코드를 읽어 보지도 않은 채 그대로 커밋하고, 그 안의 중복과 오류를 전혀 정리하지 않는 경우입니다. 그런 제출은 리뷰 논의를 지연시키고 풀 리퀘스트를 진행하기 어렵게 만듭니다.
+
+AI가 개발 과정에 관여했다면 아래 규칙을 따라 주세요.
+
+### 규칙:
+
+1. **초기 Issue 또는 Pull Request에서 AI/LLM을 사용했음을 밝히고, 사용한 도구/모델 등을 공개해야 합니다.**
+2. AI가 작성한 모든 코드를 이해하고, AI가 무엇을 했는지 알아야 합니다.
+3. 리뷰어가 변경 이유를 물으면, 본인이 작성했든 AI가 작성했든 스스로 설명할 수 있어야 합니다. 메인테이너의 질문과 리뷰 의견에 대한 답변의 내용은 본인의 이해에서 나와야 합니다. AI/LLM은 번역이나 문장 다듬기에만 사용할 수 있으며, 답변 자체를 생성하게 해서는 안 됩니다.
+4. PR에 `AI 생성 -> 수정 -> 수정 -> 수정` 과 같은 반복 사이클이 나타나면 안 됩니다. 이는 AI가 생성한 코드를 검토하지 않고, 문제가 생길 때마다 AI 스스로 수정하게 하는 과정을 반복하고 있음을 의미할 수 있습니다.
+5. 구성원에게 리뷰를 적극적으로 요청하기 전에 AI/LLM이 생성한 코드, 텍스트 등 모든 내용을 먼저 스스로 검토해야 합니다.
+6. 커밋을 AI/LLM에 귀속시켜서는 안 됩니다. 'Assisted-by', 'Co-developed-by' 또는 유사한 트레일러를 사용하는 것도 포함됩니다.
+7. 길고 장황한 커밋 메시지를 작성하지 마세요. 중요한 정보는 접힌 커밋 메시지가 아니라 PR 설명에 넣어야 합니다.
+8. 위의 모든 사항을 수행하고 싶지 않거나 수행할 수 없다면, Issue 또는 Pull Request를 닫아 주세요.
+
+감사합니다!
+
 ## 문서 기여
 
 문서는 OpenCodeReview의 중요한 일부입니다. README, inline code comment, configuration example, 사용자에게 노출되는 모든 text의 개선을 환영합니다.
@@ -145,7 +164,7 @@ make build
 - 혼란스러운 설명을 명확히 하거나 빠진 맥락 추가
 - command나 configuration option의 사용 예시 추가
 - feature 변경 이후 오래된 내용 update
-- 지역화 문서 번역 또는 개선(`README.zh-CN.md`, `README.ja-JP.md`, `README.ko-KR.md`, `CONTRIBUTING.zh-CN.md`, `CONTRIBUTING.ja-JP.md`, `CONTRIBUTING.ko-KR.md`)
+- 지역화 문서 번역 또는 개선(`docs/i18n/README.zh-CN.md`, `docs/i18n/README.ja-JP.md`, `docs/i18n/README.ko-KR.md`, `docs/i18n/CONTRIBUTING.zh-CN.md`, `docs/i18n/CONTRIBUTING.ja-JP.md`, `docs/i18n/CONTRIBUTING.ko-KR.md`)
 
 ### 문서 workflow
 
@@ -158,13 +177,13 @@ make build
 | File | Purpose |
 |------|---------|
 | `README.md` | main project documentation (English) |
-| `README.zh-CN.md` | Chinese translation |
-| `README.ja-JP.md` | Japanese translation |
-| `README.ko-KR.md` | Korean translation |
+| `docs/i18n/README.zh-CN.md` | Chinese translation |
+| `docs/i18n/README.ja-JP.md` | Japanese translation |
+| `docs/i18n/README.ko-KR.md` | Korean translation |
 | `CONTRIBUTING.md` | contribution guide (English) |
-| `CONTRIBUTING.zh-CN.md` | contribution guide (Chinese) |
-| `CONTRIBUTING.ja-JP.md` | contribution guide (Japanese) |
-| `CONTRIBUTING.ko-KR.md` | contribution guide (Korean) |
+| `docs/i18n/CONTRIBUTING.zh-CN.md` | contribution guide (Chinese) |
+| `docs/i18n/CONTRIBUTING.ja-JP.md` | contribution guide (Japanese) |
+| `docs/i18n/CONTRIBUTING.ko-KR.md` | contribution guide (Korean) |
 
 ## 변경 제출
 
@@ -241,4 +260,4 @@ PR이 빠르게 리뷰되고 merge되길 원하시나요? 다음 사항들이 �
 
 ## License
 
-OpenCodeReview에 기여하면 해당 기여가 [Apache License 2.0](LICENSE)에 따라 license되는 것에 동의하는 것입니다.
+OpenCodeReview에 기여하면 해당 기여가 [Apache License 2.0](../../LICENSE)에 따라 license되는 것에 동의하는 것입니다.

@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -78,4 +79,23 @@ func TestLoadTiktokenBpe_UnknownURL(t *testing.T) {
 
 func TestInitEmbeddedLoader(t *testing.T) {
 	InitEmbeddedLoader()
+}
+
+// TestCountTokensUsesEmbeddedBpeData guards the root cause behind the offline
+// failures of TestSelectFilesTooLarge_Boundary and TestSelectScanItems_LargeBoundary:
+// when no embedded loader is installed, tiktoken tries to download the encoding
+// and countTokensWithEncoding silently degrades to a len(text)/4 byte estimate.
+// This test never calls InitEmbeddedLoader, so it only passes while the package
+// init keeps the embedded data wired up.
+func TestCountTokensUsesEmbeddedBpeData(t *testing.T) {
+	const want = 80
+	text := strings.TrimSpace(strings.Repeat("a ", want))
+
+	got := CountTokens(text)
+	if got == len(text)/4 {
+		t.Fatalf("CountTokens(%d-token string) = %d, the len(text)/4 byte estimate: the embedded BPE loader is not installed", want, got)
+	}
+	if got != want {
+		t.Errorf("CountTokens(%d-token string) = %d, want %d", want, got, want)
+	}
 }

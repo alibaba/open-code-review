@@ -108,6 +108,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"crates/service/Cargo.toml", "Cargo Manifest Hygiene"},
 		{"scripts/deploy.py", "Mutable Default Arguments"},
 		{"src/app/main.py", "Mutable Default Arguments"},
+		{"stubs/example.pyi", "Mutable Default Arguments"},
+		{"src/app/main.pyi", "Mutable Default Arguments"},
 		{"notebook.ipynb", "Mutable Default Arguments"},
 		{"src/notebooks/data.ipynb", "Mutable Default Arguments"},
 		{"public/index.php", "PHP Review Principles"},
@@ -147,6 +149,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"if/common.thrift", "Field IDs and Wire Compatibility"},
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
+		{"src/parser.ml", "Pattern Matching"},
+		{"lib/parser.mli", "Pattern Matching"},
+		{"src/Component.re", "Pattern Matching"},
+		{"lib/Component.rei", "Pattern Matching"},
 		{"rtl/counter.v", "Blocking and Non-Blocking Assignments"},
 		{"rtl/alu.sv", "Blocking and Non-Blocking Assignments"},
 		{"rtl/defines.vh", "Blocking and Non-Blocking Assignments"},
@@ -159,6 +165,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
 		{"contracts/token.vy", "Language Restrictions"},
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
+		{"policies/authz.rego", "Default Posture"},
+		{"policies/authz.REGO", "Default Posture"},
 	}
 
 	for _, tt := range tests {

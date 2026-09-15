@@ -24,7 +24,7 @@
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,cxx,hpp,hxx}": "cpp.md",
     "**/*.c": "c.md",
-    "**/*.{py,ipynb}": "python.md",
+    "**/*.{py,pyi,ipynb}": "python.md",
     "**/*.{php,phtml}": "php.md",
     "**/*.proto": "protobuf.md",
     "**/*.po": "po.md",
@@ -44,11 +44,14 @@
     "**/*.zig": "zig.md",
     "**/*.thrift": "thrift.md",
     "**/*.capnp": "capnp.md",
+    "**/*.{ml,mli}": "ocaml.md",
+    "**/*.{re,rei}": "ocaml.md",
     "**/*.{v,sv,vh}": "verilog.md",
     "**/*.{vhd,vhdl}": "vhdl.md",
     "**/*.m": "matlab.md",
     "**/*.mm": "objc.md",
     "**/*.sol": "solidity.md",
-    "**/*.vy": "vyper.md"
+    "**/*.vy": "vyper.md",
+    "**/*.rego": "rego.md"
   }
 }

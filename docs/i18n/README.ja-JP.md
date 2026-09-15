@@ -1,6 +1,6 @@
 <div align="center">
   <a href="https://open-codereview.ai">
-    <img src="imgs/logo-core.svg" alt="OpenCodeReview logo" width="180" />
+    <img src="../../imgs/logo-core.svg" alt="OpenCodeReview logo" width="180" />
   </a>
   <h1>OpenCodeReview</h1>
 </div>
@@ -9,8 +9,13 @@
   <a href="https://trendshift.io/repositories/41087?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-41087" target="_blank" rel="noopener noreferrer">
     <img src="https://trendshift.io/api/badge/repositories/41087" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
   </a>
+</p>
+<p align="center">
   <a href="https://trendshift.io/repositories/41087" target="_blank">
     <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
+  </a>
+  <a href="https://trendshift.io/repositories/41087" target="_blank">
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/monthly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
   </a>
 </p>
 <p align="center">
@@ -29,7 +34,7 @@
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
-  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | 日本語 | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a>
+  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | 日本語 | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a>
 </p>
 
 ---
@@ -42,7 +47,7 @@ Gitのdiffを読み取り、変更されたファイルをツール利用機能�
 
 詳細は[公式サイト](https://open-codereview.ai)をご覧ください。
 
-![Highlights](imgs/highlights-ja.png)
+![Highlights](../../imgs/highlights-ja.png)
 
 ## ベンチマーク
 
@@ -60,7 +65,7 @@ Gitのdiffを読み取り、変更されたファイルをツール利用機能�
 | **平均時間 (Avg Time)** | レビューあたりの実時間 | CIパイプラインの待機時間に影響 |
 | **平均トークン (Avg Token)** | レビューあたりの総トークン消費量 | APIコストに直接影響 |
 
-![Benchmark](imgs/benchmark-ja.png)
+![Benchmark](../../imgs/benchmark-ja.png)
 
 ## なぜOpen Code Reviewなのか？
 
@@ -123,7 +128,7 @@ ocr config provider          # ビルトインプロバイダーを選択また�
 ocr config model             # アクティブなプロバイダーのモデルを選択
 ```
 
-![Provider setup](imgs/providers.jpg)
+![Provider setup](../../imgs/providers.jpg)
 
 対話的UIがプロバイダーの選択、APIキーの入力、モデル設定をガイドし、完了後に自動的に接続テストを行います。
 
@@ -172,11 +177,11 @@ ocr delegate rule src/main.go src/handler.go
 - [設定](https://open-codereview.ai/docs/configuration) — 設定キーと環境変数
 - [MCP サーバー](https://open-codereview.ai/docs/mcp) — 外部ツールでレビューエージェントを拡張
 - コーディングエージェント連携 — 使用するプラットフォームを選択
-  - [Claude Code](plugins/open-code-review/README.md#claude-code) — レビュー用スラッシュコマンドを含むプラグインをインストール
-  - [Codex](plugins/open-code-review/README.md#codex) — 呼び出し可能なレビュースキルを含むプラグインをインストール
-  - [Cursor](plugins/open-code-review/README.md#cursor) — 移植可能なレビュースキルを含むプラグインをインストール
-  - [OpenCode](plugins/open-code-review/opencode/README.md) — ネイティブレビュー・ツールとスラッシュコマンドをインストール
-  - [QCA Forward](plugins/open-code-review/qca/README.md) — QCA ホストモデルと公開可能なテンプレートで委任モードを実行
+  - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — レビュー用スラッシュコマンドを含むプラグインをインストール
+  - [Codex](../../plugins/open-code-review/README.md#codex) — 呼び出し可能なレビュースキルを含むプラグインをインストール
+  - [Cursor](../../plugins/open-code-review/README.md#cursor) — 移植可能なレビュースキルを含むプラグインをインストール
+  - [OpenCode](../../plugins/open-code-review/opencode/README.md) — ネイティブレビュー・ツールとスラッシュコマンドをインストール
+  - [QCA Forward](../../plugins/open-code-review/qca/README.md) — QCA ホストモデルと公開可能なテンプレートで委任モードを実行
   - [Skill 対応エージェント](https://open-codereview.ai/docs/agent-skill) — 移植可能なエージェントスキルをインストール
 - レビュー実行モード — 連携後、どの LLM がレビューを実行するかを選択
   - [デフォルト（OCR が管理）](https://open-codereview.ai/docs/configuration) — OCR が設定済みの LLM を使用してレビューを実行
@@ -196,4 +201,4 @@ ocr delegate rule src/main.go src/handler.go
 
 ## ライセンス
 
-[Apache-2.0](LICENSE) — Copyright 2026 Alibaba
+[Apache-2.0](../../LICENSE) — Copyright 2026 Alibaba

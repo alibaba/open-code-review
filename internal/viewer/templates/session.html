@@ -11,7 +11,10 @@
 <nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a><span class="sep">/</span><a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a><span class="sep">/</span><span class="current">{{.Session.Summary.SessionID | truncate 12}}</span></nav>
 <main>
 <div class="session-header">
-    <h2>Session: {{.Session.Summary.SessionID}}</h2>
+    <div class="page-heading">
+        <a class="back-link" href="/r/{{.EncodedRepo}}" aria-label="Back to sessions"></a>
+        <h2>Session: {{.Session.Summary.SessionID}}</h2>
+    </div>
     <div class="meta">
         <span><strong>CWD:</strong> {{.Session.Summary.CWD}}</span>
         <span><strong>Branch:</strong> {{.Session.Summary.GitBranch}}</span>
@@ -148,11 +151,13 @@
         </summary>
         <div class="comment-file-body">
         {{range .Comments}}
+            {{$lines := numberedCodeLines .ExistingCode .StartLine .EndLine}}
+            {{$numbered := and $lines (index $lines 0).Num}}
             <div class="comment-card" data-comment-card data-category="{{commentCategory .Category}}" data-severity="{{commentSeverity .Severity}}" data-mark-id="{{.MarkID}}">
                 <div class="comment-meta">
                     {{if .Category}}<span class="comment-badge {{categoryClass .Category}}">{{.Category}}</span>{{end}}
                     {{if .Severity}}<span class="comment-badge {{severityClass .Severity}}">{{.Severity}}</span>{{end}}
-                    {{if .StartLine}}<span class="comment-lines">L{{.StartLine}}{{if and .EndLine (ne .EndLine .StartLine)}}-L{{.EndLine}}{{end}}</span>{{end}}
+                    {{if .StartLine}}<span class="comment-lines{{if $numbered}} sr-only{{end}}">L{{.StartLine}}{{if and .EndLine (ne .EndLine .StartLine)}}-L{{.EndLine}}{{end}}</span>{{end}}
                     <span class="comment-badge mark-chip" data-mark-chip hidden></span>
                 </div>
                 <div class="comment-content">{{.Content}}</div>
@@ -161,7 +166,8 @@
                     {{if .ExistingCode}}
                     <div class="code-panel code-existing">
                         <div class="code-panel-label">Existing Code</div>
-                        <pre><code>{{.ExistingCode}}</code></pre>
+                        {{if $numbered}}<pre class="code-numbered"><code>{{range $i, $l := $lines}}{{if $i}}
+{{end}}<span class="code-line"><span class="line-no" aria-hidden="true">{{$l.Num}}</span><span class="line-text">{{$l.Text}}</span></span>{{end}}</code></pre>{{else}}<pre><code>{{.ExistingCode}}</code></pre>{{end}}
                     </div>
                     {{end}}
                     {{if .SuggestionCode}}
@@ -258,6 +264,7 @@
                 {{$tg.Type}}
             </h4>
             {{range $tg.Cards}}
+            {{$card := .}}
             <div class="card">
                 <div class="card-header">
                     <span class="request-label">Request #{{.RequestNo}}</span>
@@ -288,10 +295,36 @@
                     </div>
                 </details>
                 {{end}}
-                {{with .ResponseContent}}
-                <div class="card-body response-content">
-                    <div class="response-text">{{.}}</div>
-                </div>
+                {{if isGrouping $tg.Type}}
+                    {{with groupingView $card}}
+                    <div class="card-body grouping-view">
+                        {{range .}}
+                        <div class="grouping-group">
+                            <span class="grouping-label">{{.Label}}</span>
+                            <ul class="grouping-files">
+                                {{range .Files}}
+                                {{if .Resolved}}<li>{{.Path}}</li>{{else}}<li class="grouping-unresolved">#{{.Index}}</li>{{end}}
+                                {{end}}
+                            </ul>
+                        </div>
+                        {{end}}
+                    </div>
+                    {{with $card.ResponseContent}}
+                    <details class="tool-detail">
+                        <summary class="tool-detail-toggle">
+                            <span class="chevron-sm"></span>
+                            <span>Raw LLM response</span>
+                        </summary>
+                        <div class="tool-detail-body">
+                            <div class="response-text">{{.}}</div>
+                        </div>
+                    </details>
+                    {{end}}
+                    {{else}}
+                    {{template "responseBody" $card.ResponseContent}}
+                    {{end}}
+                {{else}}
+                {{template "responseBody" .ResponseContent}}
                 {{end}}
                 {{if .ToolCalls}}
                 <div class="tool-calls-section">
@@ -332,4 +365,12 @@
         {{end}}
     </div>
 </details>
+{{end}}
+
+{{define "responseBody"}}
+{{with .}}
+<div class="card-body response-content">
+    <div class="response-text">{{.}}</div>
+</div>
+{{end}}
 {{end}}

@@ -344,6 +344,58 @@ h3 {
     font-size: 0.82em;
 }
 
+/* ── Page heading ── */
+/* Keep the back link reachable beside long repository and session titles. */
+.page-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    min-width: 0;
+    margin-bottom: 1.25rem;
+}
+.page-heading > h2 {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-bottom: 0;
+    overflow-wrap: anywhere;
+}
+.back-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-alt);
+    color: var(--link);
+    text-decoration: none;
+    transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+
+.back-link::before {
+    content: "";
+    width: 20px;
+    height: 20px;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cline%20x1%3D%2219%22%20y1%3D%2212%22%20x2%3D%225%22%20y2%3D%2212%22%2F%3E%3Cpolyline%20points%3D%2212%2019%205%2012%2012%205%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cline%20x1%3D%2219%22%20y1%3D%2212%22%20x2%3D%225%22%20y2%3D%2212%22%2F%3E%3Cpolyline%20points%3D%2212%2019%205%2012%2012%205%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+}
+.back-link:hover {
+    color: var(--accent-hover);
+    background: var(--accent-soft);
+    border-color: var(--link);
+}
+.back-link:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+.session-header .page-heading {
+    margin-bottom: 0.75rem;
+}
+
 /* ── Token Usage Summary ── */
 .token-summary {
     background: var(--surface);
@@ -679,6 +731,38 @@ h3 {
     white-space: pre-wrap;
     word-break: break-word;
 }
+
+/* Grouping view: model-proposed file groups, indices resolved to paths */
+.grouping-view {
+    padding: 0.75rem 1.25rem;
+    background: var(--response-bg);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    max-height: 450px;
+    overflow-y: auto;
+}
+.grouping-group {
+    border-left: 3px solid var(--task-grouping);
+    padding-left: 0.75rem;
+}
+.grouping-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-strong);
+    margin-bottom: 0.25rem;
+}
+.grouping-files {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    color: var(--text-strong);
+    font-family: var(--mono);
+    word-break: break-word;
+}
+.grouping-unresolved { color: var(--text-faint); }
 
 /* Scrollbar styling */
 .response-text::-webkit-scrollbar { width: 6px; }
@@ -1080,6 +1164,20 @@ p {
     font-size: 0.85rem;
 }
 
+/* Visually hidden but still in the accessibility tree. Used for the line
+   range when the code gutter carries the numbers visually. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 .comment-lines {
     font-family: var(--mono);
     font-size: 0.72rem;
@@ -1131,6 +1229,33 @@ p {
     background: none;
 }
 
+/* Line-number gutter for the Existing Code block — issue #1172.
+   The newlines between rows exist so the raw markup stays readable; the rows
+   are block-level, so white-space is reset on the <pre> to keep those newlines
+   from rendering as blank lines, and pre-wrap moves onto the code text alone. */
+.code-panel pre.code-numbered {
+    white-space: normal;
+}
+.code-numbered .code-line {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+}
+.code-numbered .line-no {
+    flex: 0 0 auto;
+    min-width: 2.5em;
+    text-align: right;
+    user-select: none;
+    -webkit-user-select: none;
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+.code-numbered .line-text {
+    flex: 1 1 auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .code-existing .code-panel-label {
     background: #fef2f2;
     color: #dc2626;
@@ -1151,6 +1276,7 @@ p {
     .code-existing pre { background: rgba(220, 38, 38, 0.05); }
     .code-suggestion .code-panel-label { background: rgba(52, 211, 153, 0.12); color: #6ee7b7; }
     .code-suggestion pre { background: rgba(52, 211, 153, 0.05); }
+    .code-numbered .line-no { color: #8b93b5; }
 }
 
 /* ── Responsive ── */
@@ -1158,6 +1284,7 @@ p {
     main { padding: 0 1rem; margin: 1.25rem auto; }
     nav.breadcrumb { padding: 0 1rem; }
     .session-header { padding: 1.25rem; }
+    .page-heading { gap: 0.5rem; }
     .token-stats { grid-template-columns: repeat(2, 1fr); }
     .meta { gap: 0.5rem 1rem; font-size: 0.8rem; }
     .table th, .table td { padding: 0.6rem 0.75rem; font-size: 0.82rem; }

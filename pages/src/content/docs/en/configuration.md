@@ -202,8 +202,7 @@ increasing scope:
 - `OCR_LLM_TIMEOUT` environment variable — integer seconds; overrides
   the config-file value for every resolution path.
 
-The `timeout_sec` keys are not supported by `ocr config set` — edit
-`~/.opencodereview/config.json` directly:
+Both `timeout_sec` keys can be set with `ocr config set`:
 
 ```json
 {

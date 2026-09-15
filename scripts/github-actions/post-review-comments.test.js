@@ -16,7 +16,7 @@
 
 const assert = require("assert");
 const path = require("path");
-const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, preserveCheckpointMarker } = require(path.join(__dirname, "post-review-comments.js"));
+const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, preserveCheckpointMarker, tailForComment, MAX_COMMENT_STDERR_CHARS } = require(path.join(__dirname, "post-review-comments.js"));
 
 // REVIEW_TAG as the production code builds it for this test's hardcoded run
 // identity (context.runId=undefined -> 0, runAttempt=undefined -> 1). Used as
@@ -41,11 +41,12 @@ process.env.OCR_RETRY_BASE_DELAY = "1";
 process.env.OCR_READ_SUCCESS_DELAY = "0";
 process.env.OCR_READ_LOW_REMAINING_SPACING = "0";
 
+const DEFAULT_HEAD_SHA = "1".repeat(40);
 const context = {
   repo: { owner: "owner", repo: "repo" },
   issue: { number: 123 },
   eventName: "pull_request_target",
-  payload: { pull_request: { head: { sha: "head-sha" } } },
+  payload: { pull_request: { head: { sha: DEFAULT_HEAD_SHA } } },
 };
 
 function mockFs(resultText, stderrText) {
@@ -174,7 +175,7 @@ function makeGithub(opts = {}) {
       pulls: {
         get: async (params) => {
           getPullCalls.push(params);
-          return { data: { head: { sha: opts.headSha || "head-sha" } } };
+          return { data: { head: { sha: opts.headSha || DEFAULT_HEAD_SHA } } };
         },
         createReview: async (params) => {
           createReviewCalls.push(params);
@@ -2326,6 +2327,10 @@ async function main() {
   // Cross-push checkpoints (#476) — write path
   await testCheckpointAdvanceGateTable();
   await testCheckpointAdvanceRequiresFullSha();
+  await testManifestHeadPinsEveryReviewPost();
+  await testLegacyPullRequestEventUsesSnapshotHead();
+  await testIssueCommentRejectsMissingOrMalformedManifestHead();
+  await testLegacyPullRequestEventRejectsMissingSnapshotHead();
   await testCheckpointCarryForwardOnEveryBodyPath();
   await testCheckpointAdvancesOnZeroFindings();
   await testCheckpointNeverAdvancesWithoutSticky();
@@ -2350,6 +2355,7 @@ async function main() {
   testActionResolveStepNeverFailsTheJob();
   testActionFingerprintsRepoLocalRuleFile();
   testActionFingerprintIncludesBackground();
+  testActionFingerprintReadsNormalizedAxes();
   testActionRangeFromIsAStepOutput();
   testActionEmitsMachineReadableRangeOutputs();
   testActionPinsGithubScriptSha();
@@ -2358,6 +2364,7 @@ async function main() {
   await testActionPinsAuthorToTheDefaultTokenApp();
   await testActionResolveStepDeclaresItsRefInputs();
   await testCheckpointMarkerMatchingIsStateless();
+  testTailForCommentKeepsTheTail();
   console.log("All post-review-comments tests passed.");
 }
 function testParseDiffHunkRanges() {
@@ -2648,7 +2655,7 @@ async function testRunnerHeadDriftPreservesComments() {
 
   await runPostReviewComments({
     github: gh,
-    context, // context head is "head-sha"; mocked current head is "new-head"
+    context,
     core: { setOutput() {} },
     fs: mockFs(JSON.stringify(result), ""),
     out: {},
@@ -3743,10 +3750,11 @@ async function testCheckpointAdvanceGateTable() {
         const gh = makeGithub(
           failed === 1
             ? {
+                headSha: terminal === null ? context.payload.pull_request.head.sha : CK_RESOLVED,
                 files: [{ filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" }],
                 batchErrorSpec: [{ message: "Line could not be resolved", status: 422 }],
               }
-            : {}
+            : { headSha: terminal === null ? context.payload.pull_request.head.sha : CK_RESOLVED }
         );
         // published=false: the summary cannot be written at all (the issue
         // comment API is down), so summaryUrl stays empty.
@@ -3814,6 +3822,129 @@ async function testCheckpointAdvanceRequiresFullSha() {
       false,
       `resolved_head ${JSON.stringify(head)} must not advance the checkpoint`
     );
+  }
+}
+
+async function testManifestHeadPinsEveryReviewPost() {
+  const reviewedHead = "a".repeat(40);
+  const eventHead = "b".repeat(40);
+  const currentHead = "c".repeat(40);
+  const result = {
+    comments: [{ path: "src/a.js", content: "finding from reviewed head", start_line: 1, end_line: 1 }],
+    manifest: ckManifest({ input: { resolved_head: reviewedHead } }),
+  };
+
+  for (const [eventName, payload] of [
+    ["issue_comment", {}],
+    ["pull_request_target", { pull_request: { head: { sha: eventHead } } }],
+  ]) {
+    const gh = makeGithub({ headSha: currentHead, bulkError: "validation failed", bulkErrorStatus: 400 });
+    await runPostReviewComments({
+      github: gh,
+      context: {
+        repo: { owner: "owner", repo: "repo" },
+        issue: { number: 123 },
+        eventName,
+        payload,
+      },
+      core: { setOutput() {} },
+      fs: mockFs(JSON.stringify(result), ""),
+    });
+
+    assert.strictEqual(gh.createReviewCalls.length, 2, `${eventName}: batch and fallback both attempted`);
+    assert.deepStrictEqual(
+      gh.createReviewCalls.map((call) => call.commit_id),
+      [reviewedHead, reviewedHead],
+      `${eventName}: every posting path uses the reviewed manifest head`
+    );
+    assert.strictEqual(gh.getPullCalls.length, 0, `${eventName}: posting never refetches a moving PR head`);
+  }
+}
+
+async function testLegacyPullRequestEventUsesSnapshotHead() {
+  const eventHead = "d".repeat(40);
+  const gh = makeGithub({ headSha: "e".repeat(40) });
+  const result = {
+    comments: [{ path: "src/a.js", content: "legacy finding", start_line: 1, end_line: 1 }],
+  };
+
+  await runPostReviewComments({
+    github: gh,
+    context: {
+      repo: { owner: "owner", repo: "repo" },
+      issue: { number: 123 },
+      eventName: "pull_request_target",
+      payload: { pull_request: { head: { sha: eventHead } } },
+    },
+    core: { setOutput() {} },
+    fs: mockFs(JSON.stringify(result), ""),
+  });
+
+  assert.strictEqual(gh.createReviewCalls[0].commit_id, eventHead);
+  assert.strictEqual(gh.getPullCalls.length, 0, "legacy PR events use their immutable payload snapshot");
+}
+
+async function testIssueCommentRejectsMissingOrMalformedManifestHead() {
+  for (const [label, manifest, expectedError] of [
+    ["missing manifest", undefined, /resolved_head is required/],
+    ["missing input", {}, /resolved_head is missing/],
+    ["missing head", { input: {} }, /resolved_head is missing/],
+    ["null head", { input: { resolved_head: null } }, /resolved_head is missing/],
+    ["malformed", ckManifest({ input: { resolved_head: "not-a-sha" } }), /40-character lowercase string/],
+    ["array", ckManifest({ input: { resolved_head: ["a".repeat(40)] } }), /40-character lowercase string/],
+  ]) {
+    const gh = makeGithub({ headSha: "f".repeat(40) });
+    const result = {
+      comments: [{ path: "src/a.js", content: "unbound finding", start_line: 1, end_line: 1 }],
+      manifest,
+    };
+
+    await assert.rejects(
+      runPostReviewComments({
+        github: gh,
+        context: {
+          repo: { owner: "owner", repo: "repo" },
+          issue: { number: 123 },
+          eventName: "issue_comment",
+          payload: {},
+        },
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify(result), ""),
+      }),
+      expectedError,
+      `${label} manifest head must be rejected`
+    );
+    assert.strictEqual(gh.getPullCalls.length, 0, `${label}: rejection must not fetch the current PR head`);
+    assert.strictEqual(gh.createReviewCalls.length, 0, `${label}: rejection must happen before review writes`);
+    assert.strictEqual(gh.issueComments.length, 0, `${label}: rejection must happen before summary writes`);
+    assert.strictEqual(gh.updatedComments.length, 0, `${label}: rejection must happen before summary updates`);
+  }
+}
+
+async function testLegacyPullRequestEventRejectsMissingSnapshotHead() {
+  for (const payload of [undefined, null, {}, { pull_request: {} }, { pull_request: { head: {} } }]) {
+    const gh = makeGithub({});
+    const result = {
+      comments: [{ path: "src/a.js", content: "unbound legacy finding", start_line: 1, end_line: 1 }],
+    };
+
+    await assert.rejects(
+      runPostReviewComments({
+        github: gh,
+        context: {
+          repo: { owner: "owner", repo: "repo" },
+          issue: { number: 123 },
+          eventName: "pull_request_target",
+          payload,
+        },
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify(result), ""),
+      }),
+      /event payload\.pull_request\.head\.sha is missing/
+    );
+    assert.strictEqual(gh.createReviewCalls.length, 0, "a missing event snapshot must fail before review writes");
+    assert.strictEqual(gh.issueComments.length, 0, "a missing event snapshot must fail before summary writes");
+    assert.strictEqual(gh.updatedComments.length, 0, "a missing event snapshot must fail before summary updates");
   }
 }
 
@@ -4786,6 +4917,30 @@ function testActionFingerprintIncludesBackground() {
   }
 }
 
+// The validated axes fingerprint the normalized values, not the raw inputs, so
+// spellings that mean the same thing (HIGH vs high, '0' vs '' vs '00') hash
+// identically and keep the checkpoint.
+function testActionFingerprintReadsNormalizedAxes() {
+  const block = actionStepBlock("Resolve review range");
+  const digest = fingerprintDigestSource();
+  for (const [envVar, normalized] of [
+    ["OCR_FP_EFFORT", "EFFORT"],
+    ["OCR_FP_MAX_TOKENS_BUDGET", "MAX_TOKENS_BUDGET"],
+    ["OCR_FP_LLM_REASONING_EFFORT", "LLM_REASONING_EFFORT"],
+  ]) {
+    assert.strictEqual(
+      block.includes(`${envVar}: \${{ env.${normalized} }}`),
+      true,
+      `the step must pass the normalized env.${normalized} as ${envVar}`
+    );
+    assert.strictEqual(
+      digest.includes(`process.env.${envVar},`),
+      true,
+      `${envVar} must be hashed into the fingerprint`
+    );
+  }
+}
+
 // U5. A narrowed range published through $GITHUB_ENV outlives the step: a
 // second use of this action in the same job would inherit it and skip commits
 // it was never told about. Step outputs are scoped to the step that set them.
@@ -5123,6 +5278,21 @@ async function testCheckpointMarkerMatchingIsStateless() {
   const second = await read();
   assert.strictEqual(first.raw, marker, "the carried marker is the marker itself");
   assert.deepStrictEqual(second, first, "a second read of the same body reads the same thing");
+}
+
+// The stderr dump that accompanies an unparseable result must keep the tail:
+// with stream_progress the file is mostly progress lines and the error that
+// killed the run is the last thing written.
+function testTailForCommentKeepsTheTail() {
+  assert.strictEqual(tailForComment("short"), "short", "text within the limit passes through");
+  assert.strictEqual(tailForComment("", 10), "", "empty text passes through");
+  const head = "HEAD-LINE\n" + "x".repeat(MAX_COMMENT_STDERR_CHARS);
+  const tail = "y".repeat(100) + "\nTAIL-LINE: the actual error";
+  const out = tailForComment(head + tail);
+  assert.ok(out.includes("TAIL-LINE: the actual error"), "the tail must survive truncation");
+  assert.ok(!out.includes("HEAD-LINE"), "the head must be truncated away");
+  assert.match(out, /earlier characters truncated; see the ocr-stderr\.log artifact/, "truncation must be announced");
+  assert.ok(out.length <= MAX_COMMENT_STDERR_CHARS + 200, "the result stays far below GitHub's comment limit");
 }
 
 main().catch((err) => {

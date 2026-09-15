@@ -1,6 +1,6 @@
 <div align="center">
   <a href="https://open-codereview.ai">
-    <img src="imgs/logo-core.svg" alt="OpenCodeReview logo" width="180" />
+    <img src="../../imgs/logo-core.svg" alt="OpenCodeReview logo" width="180" />
   </a>
   <h1>OpenCodeReview</h1>
 </div>
@@ -9,8 +9,13 @@
   <a href="https://trendshift.io/repositories/41087?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-41087" target="_blank" rel="noopener noreferrer">
     <img src="https://trendshift.io/api/badge/repositories/41087" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
   </a>
+</p>
+<p align="center">
   <a href="https://trendshift.io/repositories/41087" target="_blank">
     <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
+  </a>
+  <a href="https://trendshift.io/repositories/41087" target="_blank">
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/monthly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
   </a>
 </p>
 <p align="center">
@@ -29,7 +34,7 @@
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
-  <a href="README.md">English</a> | 简体中文 | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a>
+  <a href="../../README.md">English</a> | 简体中文 | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a>
 </p>
 
 ---
@@ -42,7 +47,7 @@ Open Code Review 是一款 AI 驱动的代码审查 CLI 工具。它的前身是
 
 访问[官方网站](https://open-codereview.ai)了解更多信息。
 
-![Highlights](imgs/highlights-zh.png)
+![Highlights](../../imgs/highlights-zh.png)
 
 ## 基准测试
 
@@ -60,7 +65,7 @@ Open Code Review 是一款 AI 驱动的代码审查 CLI 工具。它的前身是
 | **平均耗时 (Avg Time)** | 每次审查的实际耗时 | 决定 CI 流水线的等待时间 |
 | **平均 Token (Avg Token)** | 每次审查消耗的总 token 数 | 直接影响 API 使用成本 |
 
-![Benchmark](imgs/benchmark-zh.png)
+![Benchmark](../../imgs/benchmark-zh.png)
 
 ## 为什么选择 Open Code Review？
 
@@ -123,7 +128,7 @@ ocr config provider          # 选择内置供应商或添加自定义供应商
 ocr config model             # 为当前供应商选择模型
 ```
 
-![Provider setup](imgs/providers.jpg)
+![Provider setup](../../imgs/providers.jpg)
 
 交互式界面会引导你完成供应商选择、API Key 输入和模型配置，完成后自动测试连通性。
 
@@ -172,11 +177,11 @@ ocr delegate rule src/main.go src/handler.go
 - [配置](https://open-codereview.ai/docs/configuration) —— 配置项与环境变量
 - [MCP 服务器](https://open-codereview.ai/docs/mcp) —— 用外部工具扩展评审 agent
 - 编程 Agent 集成 —— 选择你使用的平台
-  - [Claude Code](plugins/open-code-review/README.md#claude-code) —— 安装包含评审斜杠命令的插件
-  - [Codex](plugins/open-code-review/README.md#codex) —— 安装包含可调用评审 Skill 的插件
-  - [Cursor](plugins/open-code-review/README.md#cursor) —— 安装包含可移植评审 Skill 的插件
-  - [OpenCode](plugins/open-code-review/opencode/README.md) —— 安装原生评审工具和斜杠命令
-  - [QCA Forward](plugins/open-code-review/qca/README.md) —— 使用 QCA 宿主模型运行委托模式，并提供可发布的模板
+  - [Claude Code](../../plugins/open-code-review/README.md#claude-code) —— 安装包含评审斜杠命令的插件
+  - [Codex](../../plugins/open-code-review/README.md#codex) —— 安装包含可调用评审 Skill 的插件
+  - [Cursor](../../plugins/open-code-review/README.md#cursor) —— 安装包含可移植评审 Skill 的插件
+  - [OpenCode](../../plugins/open-code-review/opencode/README.md) —— 安装原生评审工具和斜杠命令
+  - [QCA Forward](../../plugins/open-code-review/qca/README.md) —— 使用 QCA 宿主模型运行委托模式，并提供可发布的模板
   - [兼容 Skill 的 Agent](https://open-codereview.ai/docs/agent-skill) —— 安装可移植的 Agent Skill
 - 评审执行模式 —— 完成集成后，选择由哪个 LLM 执行评审
   - [默认模式（OCR 驱动）](https://open-codereview.ai/docs/configuration) —— OCR 使用其已配置的 LLM 执行评审
@@ -196,4 +201,4 @@ ocr delegate rule src/main.go src/handler.go
 
 ## 许可证
 
-[Apache-2.0](LICENSE) — Copyright 2026 Alibaba
+[Apache-2.0](../../LICENSE) — Copyright 2026 Alibaba

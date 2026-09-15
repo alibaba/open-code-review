@@ -106,6 +106,38 @@ Set under **Settings → Secrets and variables → Actions**:
 > compatibility across LLM providers that don't support that field.
 > Remove the line if your provider needs thinking-mode left on.
 
+### Action inputs
+
+The upstream workflow delegates the review to the reusable composite action
+([`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml))
+via `uses: alibaba/open-code-review@main`. Beyond the credentials above,
+these inputs tune the review itself — pass them under `with:` on the action
+step:
+
+| Input | Default | Description |
+|---|---|---|
+| `effort` | `''` | Review effort preset passed to `ocr review --effort`: `low`, `medium`, or `high` (case-insensitive). Empty keeps the CLI default (the configured value, or medium). Requires OCR v1.10.0 or newer; the action fails early with a clear error on older versions. |
+| `max_tokens_budget` | `''` | Total token cap (input + output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Once the cap is exceeded, dispatch stops, skipped files are reported as `failed(budget)`, partial results are still published, and the review exits 0. |
+| `llm_reasoning_effort` | `''` | Reasoning depth for models with a steerable `reasoning_effort` request field (e.g. GLM-5.x, OpenAI reasoning models): `minimal`, `low`, `medium`, `high`, `max` (case-insensitive). Merged into the request body through `llm_extra_body`, so it works with every published CLI version; an explicit `reasoning_effort` key in `llm_extra_body` wins over this input. Empty (default) sends nothing. OpenAI-compatible protocols only — the Anthropic API rejects unknown body fields, so the action fails fast on that protocol; steer Anthropic thinking through an explicit `llm_extra_body` key instead. |
+| `stream_progress` | `'false'` | `'true'` streams live `[ocr]` progress lines to the workflow log (human audience on stderr) instead of staying silent until the run finishes. Display-only: stderr is still captured to a file for artifacts and comment posting. |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+    effort: high
+    max_tokens_budget: '10000000'
+    llm_reasoning_effort: low
+    stream_progress: 'true'
+```
+
+See [`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)
+for the full input list — posting modes (`sticky_summary`, `incremental`),
+severity/category routing, and cross-push checkpoints included.
+
 ### Customization
 
 All of the following are edits to the workflow file you just copied

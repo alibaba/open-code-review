@@ -224,7 +224,10 @@ async function runPostReviewComments({
     result = JSON.parse(raw);
   } catch (e) {
     log(`Failed to parse OCR output: ${e.message}`);
-    const stderr = safeRead(fs, stderrPath).trim();
+    // stream_progress streams human-audience progress into stderr, so the file
+    // can dwarf GitHub's 65536-char comment limit; keep the tail, which is
+    // where the error that killed the run was written.
+    const stderr = tailForComment(safeRead(fs, stderrPath).trim());
     if (stderr) {
       // No manifest exists on this path (the output could not be parsed), so it
       // can only ever carry the previous checkpoint forward — never advance it.
@@ -256,15 +259,22 @@ async function runPostReviewComments({
 
   // Resolve the PR head commit sha to attach the review to.
   let commitSha;
-  if (context.eventName === "pull_request_target") {
-    commitSha = context.payload.pull_request.head.sha;
+  if (result.manifest != null) {
+    commitSha = result.manifest.input?.resolved_head;
+  } else if (context.eventName === "pull_request_target") {
+    commitSha = context.payload?.pull_request?.head?.sha;
   } else {
-    const { data: pullRequest } = await github.rest.pulls.get({
-      owner,
-      repo,
-      pull_number: prNumber,
-    });
-    commitSha = pullRequest.head.sha;
+    throw new Error("OCR result manifest input.resolved_head is required to post inline comments for this event");
+  }
+  if (commitSha == null) {
+    throw new Error(result.manifest != null
+      ? "OCR result manifest input.resolved_head is missing; cannot post inline comments"
+      : "pull_request_target event payload.pull_request.head.sha is missing; cannot post inline comments");
+  }
+  if (typeof commitSha !== "string" || !/^[0-9a-f]{40}$/.test(commitSha)) {
+    throw new Error(
+      "Inline review commit SHA from manifest input.resolved_head or the pull_request_target event snapshot must be a 40-character lowercase string"
+    );
   }
 
   // Partition: inline (with valid line info) vs summary (without) vs routed
@@ -1807,6 +1817,14 @@ function fencedBlock(content, language = "") {
   return block + fence;
 }
 
+const MAX_COMMENT_STDERR_CHARS = 20000;
+
+function tailForComment(text, limit = MAX_COMMENT_STDERR_CHARS) {
+  const s = String(text || "");
+  if (s.length <= limit) return s;
+  return `[... ${s.length - limit} earlier characters truncated; see the ocr-stderr.log artifact ...]\n${s.slice(-limit)}`;
+}
+
 function safeFence(content) {
   const matches = String(content || "").match(/`+/g) || [];
   const maxTicks = matches.reduce((max, ticks) => Math.max(max, ticks.length), 0);
@@ -2613,6 +2631,8 @@ module.exports = {
   formatWarnings,
   fencedBlock,
   safeFence,
+  tailForComment,
+  MAX_COMMENT_STDERR_CHARS,
   SUMMARY_MARKER,
   NO_LINE_REASON,
   resolveBatchSize,

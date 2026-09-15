@@ -4,6 +4,7 @@
 package scan
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
@@ -104,7 +106,7 @@ func TestLookupDiff(t *testing.T) {
 	}
 }
 
-func TestFilterScanItems(t *testing.T) {
+func TestSelectScanItems_Reviewability(t *testing.T) {
 	a := NewAgent(Args{
 		Template: makeTemplateWithFullScan(),
 		FileFilter: &rules.FileFilter{
@@ -122,7 +124,7 @@ func TestFilterScanItems(t *testing.T) {
 		{Path: "handler.go", Content: "package h\n", LineCount: 1},
 	}
 
-	kept := a.filterScanItems(items)
+	kept := selectedScanItems(a.selectScanItems(items))
 	if len(kept) != 2 {
 		t.Fatalf("expected 2 kept, got %d", len(kept))
 	}
@@ -130,6 +132,33 @@ func TestFilterScanItems(t *testing.T) {
 		if it.Path == "image.png" || it.Path == "vendor/dep.go" {
 			t.Errorf("should not keep %s", it.Path)
 		}
+	}
+}
+
+// Without its own branch a credential path is reported as "filtered by
+// path/extension rules", which misstates why it was skipped.
+func TestLogSelection_SecretPath(t *testing.T) {
+	a := NewAgent(Args{
+		Template: makeTemplateWithFullScan(),
+		Session: session.New(t.TempDir(), "main", "test", session.SessionOptions{
+			ReviewMode: session.ReviewModeFullScan,
+		}),
+	})
+	decisions := []scanSelection{
+		{item: model.ScanItem{Path: ".env"}, reason: model.ExcludeSecret},
+	}
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	a.logSelection(decisions)
+	restore()
+
+	got := buf.String()
+	if !strings.Contains(got, "secret path") {
+		t.Errorf("log = %q, want secret-specific wording", got)
+	}
+	if strings.Contains(got, "path/extension rules") {
+		t.Errorf("log = %q, want the secret path not reported as a path/extension filter", got)
 	}
 }
 
@@ -196,6 +225,72 @@ func TestWhyExcluded_AllBranches(t *testing.T) {
 			got := a.whyExcluded(tt.item)
 			if got != tt.want {
 				t.Errorf("whyExcluded(%q) = %q, want %q", tt.item.Path, got, tt.want)
+			}
+		})
+	}
+}
+
+// Scan must apply the same secret precedence as the review side, so a credential
+// path is classified identically whichever selection path reaches it.
+func TestWhyExcluded_SecretPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		filter *rules.FileFilter
+		want   model.ExcludeReason
+	}{
+		{
+			name: "secret path excluded with no user config",
+			path: ".env",
+			want: model.ExcludeSecret,
+		},
+		{
+			name: "nested secret path excluded",
+			path: "foo/bar/.env",
+			want: model.ExcludeSecret,
+		},
+		{
+			name: "ssh directory contents excluded",
+			path: "foo/.ssh/id_ed25519",
+			want: model.ExcludeSecret,
+		},
+		{
+			name:   "include cannot override a secret path",
+			path:   ".env",
+			filter: &rules.FileFilter{Include: []string{"**/.env"}},
+			want:   model.ExcludeSecret,
+		},
+		{
+			name:   "user exclude does not change the reason",
+			path:   ".env",
+			filter: &rules.FileFilter{Exclude: []string{"**/.env"}},
+			want:   model.ExcludeSecret,
+		},
+		{
+			name:   "env template with explicit include stays reviewable",
+			path:   ".env.example",
+			filter: &rules.FileFilter{Include: []string{"**/.env.example"}},
+			want:   model.ExcludeNone,
+		},
+		{
+			name: "dockerfile unchanged",
+			path: "Dockerfile",
+			want: model.ExcludeNone,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := NewAgent(Args{
+				Template:   makeTemplateWithFullScan(),
+				FileFilter: tt.filter,
+				Session: session.New(t.TempDir(), "main", "test", session.SessionOptions{
+					ReviewMode: session.ReviewModeFullScan,
+				}),
+			})
+			got := a.whyExcluded(model.ScanItem{Path: tt.path, Content: "x"})
+			if got != tt.want {
+				t.Errorf("whyExcluded(%q) = %q, want %q", tt.path, got, tt.want)
 			}
 		})
 	}

@@ -9,8 +9,8 @@
 // Comments, identifiers and user-visible strings in this repository are written
 // in English so that any contributor can review and maintain every file,
 // whichever languages they happen to read. Translated content belongs in the
-// locale-specific docs (README.zh-CN.md, pages/src/content/docs/zh/…) and in
-// the i18n tables, not in code.
+// locale-specific docs (docs/i18n/README.zh-CN.md, pages/src/content/docs/zh/…)
+// and in the i18n tables, not in code.
 //
 // What it detects, and the one thing it cannot:
 //
@@ -246,7 +246,7 @@ func run() error {
 		}
 		fmt.Fprintf(os.Stderr, `
 Source files are English-only: comments, identifiers and strings alike.
-Translated prose belongs in README.<locale>.md, pages/src/content/docs/<locale>/
+Translated prose belongs in docs/i18n/README.<locale>.md, pages/src/content/docs/<locale>/
 or an i18n table.
 
 If the non-English text is intentional — an encoding fixture, a

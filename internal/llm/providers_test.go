@@ -185,6 +185,16 @@ func TestLookupProvider_OpenAIDetails(t *testing.T) {
 	}
 }
 
+func TestLookupProvider_DeepSeekFlash(t *testing.T) {
+	p, ok := LookupProvider("deepseek")
+	if !ok {
+		t.Fatal("deepseek not found")
+	}
+	if !ModelListContains(p.Models, "deepseek-flash") {
+		t.Error(`deepseek models do not contain "deepseek-flash"`)
+	}
+}
+
 func TestLookupProvider_OpenAIResponsesDetails(t *testing.T) {
 	const expectedEnvVar = "OPENAI_RESPONSES_API_KEY"
 

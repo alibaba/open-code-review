@@ -139,3 +139,27 @@ func sortFindings(findings []model.LlmComment) []model.LlmComment {
 	})
 	return findings
 }
+
+// ReviewedPaths returns the paths a run actually decided on, or nil when the run
+// recorded no manifest - nil tells Compare to treat every unmatched
+// before-finding as resolved.
+//
+// Completed and Reused are the only partitions that mean "the LLM's verdict on
+// this file is current": Reused carries a checkpoint forward from a resume
+// chain, which is still a verdict. Selected is deliberately not used - it is
+// the intended set, so an interrupted run would report every file it never got
+// to as clean. Failed and Waived items are selected but undecided for the same
+// reason.
+func ReviewedPaths(m *RunManifest) map[string]bool {
+	if m == nil {
+		return nil
+	}
+	cov := m.Coverage
+	paths := make(map[string]bool, len(cov.Completed)+len(cov.Reused))
+	for _, items := range [][]CoverageItem{cov.Completed, cov.Reused} {
+		for _, item := range items {
+			paths[item.Path] = true
+		}
+	}
+	return paths
+}
