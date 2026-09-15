@@ -85,6 +85,14 @@ func (a *Agent) planEnabled() bool {
 	return !a.args.SkipPlan && a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0
 }
 
+func (a *Agent) planEnabledFor(it model.ScanItem) bool {
+	if !a.planEnabled() || it.IsBinary || it.Content == "" {
+		return false
+	}
+	threshold := a.args.Template.PlanModeLineThreshold
+	return threshold <= 0 || it.LineCount >= threshold
+}
+
 func (a *Agent) dedupEnabled() bool {
 	return !a.args.SkipDedup && a.args.Template.DedupTask != nil && len(a.args.Template.DedupTask.Messages) > 0
 }
@@ -350,7 +358,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	}
 
 	// Pre-run cost projection so users aren't surprised by a large scan.
-	est := estimateCost(a.items, a.planEnabled(), a.dedupEnabled(), a.summaryEnabled())
+	est := estimateCost(a.items, a.planEnabledFor, a.dedupEnabled(), a.summaryEnabled())
 	fmt.Fprintf(stdout.Writer(), "[ocr] estimated cost: %s\n", est)
 	if a.args.MaxTokensBudget > 0 {
 		fmt.Fprintf(stdout.Writer(), "[ocr] token budget: %s (dispatch stops once exceeded)\n", humanTokens(a.args.MaxTokensBudget))
@@ -712,7 +720,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 		// don't even queue work that would blow the budget.
 		if a.args.MaxTokensBudget > 0 {
 			used := a.runner.TotalTokensUsed()
-			projected := used + estimateFileTokens(it, a.planEnabled())
+			projected := used + estimateFileTokens(it, a.planEnabledFor)
 			if projected > a.args.MaxTokensBudget {
 				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + next-file est ≈ %s > budget %s) — skipping %s and remaining files\n",
 					humanTokens(used), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), it.Path)
@@ -783,10 +791,10 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 //     {{plan_guidance}}.
 //
 // Plan phase is skipped (and {{plan_guidance}} is filled with a "no plan"
-// sentinel) when Template.PlanTask is nil, args.SkipPlan is true, the file
-// is small enough that planning overhead outweighs gain, or the plan call
-// itself fails. Plan failure never blocks the main review — it falls back
-// to v1 (plan-less) behavior.
+// sentinel) when PLAN_TASK is missing, --no-plan is set, the file is binary
+// or empty, the file is below PLAN_MODE_LINE_THRESHOLD, or the plan call
+// fails. Plan failure never blocks the main review — it falls back to
+// plan-less behavior.
 func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, string, error) {
 	ctx, span := telemetry.StartSpan(ctx, "scan.subtask."+it.Path)
 	defer span.End()
@@ -845,7 +853,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string) string {
 	const noPlan = "(no pre-scan plan; review the entire file as usual)"
 
-	if !a.planEnabled() {
+	if !a.planEnabledFor(it) {
 		return noPlan
 	}
 	pt := a.args.Template.PlanTask
