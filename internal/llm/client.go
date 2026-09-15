@@ -10,6 +10,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -77,6 +78,8 @@ var httpClientWithHeaderTimeout = func(timeout time.Duration) *http.Client {
 // defaultAnthropicMaxTokens is used when ChatRequest.MaxTokens is unset.
 // The thinking guard also compares against this to decide whether to drop thinking.
 const defaultAnthropicMaxTokens = 8192
+
+const maxErrorBodyBytes = 64 * 1024
 
 func userAgent(provider string) string {
 	ua := "open-code-review/" + AppVersion
@@ -409,6 +412,16 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 	}
 }
 
+// limitErrorBodyForLog bounds the payload included in terminal and session logs
+// without truncating the HTTP response before the SDK parses it.
+func limitErrorBodyForLog(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) <= maxErrorBodyBytes {
+		return raw
+	}
+	return strings.ToValidUTF8(raw[:maxErrorBodyBytes], "\uFFFD") + "... (truncated)"
+}
+
 // --- Factory ---
 
 // NewLLMClient creates the appropriate client based on the resolved endpoint protocol.
@@ -688,7 +701,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		}
 	}
 	if err != nil {
-		return nil, err
+		return nil, enrichOpenAIError(err)
 	}
 
 	return c.mapOpenAIResponse(sdkResp), nil
@@ -711,7 +724,7 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 	if err != nil {
 		class, phase := classifyStreamError(err)
 		reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
-		return nil, err
+		return nil, enrichOpenAIError(err)
 	}
 	return resp, nil
 }
@@ -788,6 +801,32 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 	}
 
 	return resp, nil
+}
+
+// enrichOpenAIError adds a restored error response body when the OpenAI SDK
+// could not extract one. It leaves standard OpenAI error payloads unchanged.
+func enrichOpenAIError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	if strings.TrimSpace(apiErr.RawJSON()) != "" || apiErr.Response == nil || apiErr.Response.Body == nil {
+		return err
+	}
+
+	body, readErr := io.ReadAll(apiErr.Response.Body)
+	_ = apiErr.Response.Body.Close()
+	apiErr.Response.Body = io.NopCloser(bytes.NewReader(body))
+	if readErr != nil {
+		return err
+	}
+	if body := limitErrorBodyForLog(string(body)); body != "" {
+		return fmt.Errorf("OpenAI-compatible API error response body: %s: %w", body, err)
+	}
+	return err
 }
 
 // buildOpenAIParams converts the shared ChatRequest into OpenAI SDK parameters.
