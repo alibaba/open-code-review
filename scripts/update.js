@@ -7,23 +7,28 @@
 
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
 const https = require("https");
 const { spawnSync } = require("child_process");
 
-const { resolveNativeBinary } = require("./platform");
+const {
+  resolveNativeBinary,
+  IS_WINDOWS,
+  BINARY_FILENAME,
+  STATE_DIR,
+  STAGED_BIN_DIR,
+  VERSION_JSON_PATH,
+} = require("./platform");
 const { loadPackageJson } = require("./install.js");
 const { SEMVER_RE, parseVersionOutput, semverGt } = require("./version");
 
-const stateDir = path.join(os.homedir(), ".opencodereview");
-const tsFile = path.join(stateDir, "last-update-check");
-const lockFile = path.join(stateDir, "update.lock");
-const hintFile = path.join(stateDir, "update-available");
+const tsFile = path.join(STATE_DIR, "last-update-check");
+const lockFile = path.join(STATE_DIR, "update.lock");
+const hintFile = path.join(STATE_DIR, "update-available");
 
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 
 function touchTimestamp() {
-  fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(STATE_DIR, { recursive: true });
   const now = new Date();
   try {
     fs.utimesSync(tsFile, now, now);
@@ -33,7 +38,7 @@ function touchTimestamp() {
 }
 
 function acquireLock() {
-  fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(STATE_DIR, { recursive: true });
   try {
     fs.writeFileSync(lockFile, String(process.pid), { flag: "wx" });
     return true;
@@ -125,6 +130,30 @@ function removeHint() {
   } catch (_) {}
 }
 
+function writeVersionJson(version) {
+  const meta = {
+    version,
+    stagedAt: new Date().toISOString(),
+    platform: `${process.platform}-${process.arch}`,
+  };
+  fs.writeFileSync(VERSION_JSON_PATH, JSON.stringify(meta, null, 2));
+}
+
+function stageBinary(srcPath) {
+  try {
+    fs.mkdirSync(STAGED_BIN_DIR, { recursive: true });
+    const dest = path.join(STAGED_BIN_DIR, BINARY_FILENAME);
+    const tmp = dest + ".tmp";
+    fs.copyFileSync(srcPath, tmp);
+    if (!IS_WINDOWS) {
+      fs.chmodSync(tmp, 0o755);
+    }
+    fs.renameSync(tmp, dest);
+
+    writeVersionJson(getInstalledVersion(dest) || "unknown");
+  } catch (_) {}
+}
+
 async function main() {
   touchTimestamp();
 
@@ -148,8 +177,12 @@ async function main() {
       return;
     }
 
+    // Stage current binary before npm i -g to cover the gap window
+    if (!resolved.fromStaged) {
+      stageBinary(resolved.path);
+    }
+
     const pkgName = pkg.name;
-    const IS_WINDOWS = process.platform === "win32";
     const result = spawnSync("npm", ["i", "-g", `${pkgName}@${latestVersion}`], {
       encoding: "utf8",
       timeout: 120000,
@@ -158,6 +191,11 @@ async function main() {
 
     if (result.status === 0) {
       removeHint();
+      // Refresh staged binary with the newly installed version
+      const newResolved = resolveNativeBinary();
+      if (newResolved && !newResolved.fromStaged) {
+        stageBinary(newResolved.path);
+      }
     } else {
       writeHint(latestVersion, pkgName);
     }
