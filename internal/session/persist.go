@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -361,12 +362,13 @@ func (jw *jsonlWriter) WriteResumeLineage(l *ResumeLineage) string {
 }
 
 // WriteSessionEnd writes the final session_end summary record and closes the
-// file. When manifest is non-nil it is embedded under "run_manifest"; session_end
-// is the last physical record of the stream and no separate run_manifest record
-// is appended. The record is flushed before the file is closed. Any marshal,
-// flush or close error is returned so the caller can surface it as a delivery
-// error rather than silently losing the manifest.
-func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, manifest *RunManifest) error {
+// file. When manifest is non-nil it is embedded under "run_manifest", and when
+// retryReport is non-nil under "llm_retry_report"; session_end is the last
+// physical record of the stream and neither gets a record of its own. A nil
+// retryReport is the normal case, not a loss. The record is flushed before the
+// file is closed. Any marshal, flush or close error is returned so the caller can
+// surface it as a delivery error rather than silently losing the manifest.
+func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, manifest *RunManifest, retryReport *llm.RetryReport) error {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -383,6 +385,9 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 	}
 	if manifest != nil {
 		rec["run_manifest"] = manifest
+	}
+	if retryReport != nil {
+		rec["llm_retry_report"] = retryReport
 	}
 	jw.lastUUID = uuid
 
