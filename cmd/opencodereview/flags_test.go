@@ -363,3 +363,36 @@ func TestConcurrencyFlagUsageUsesSubtask(t *testing.T) {
 		t.Errorf("review and scan --concurrency should share phrasing: review %q scan %q", reviewFlag.Usage, scanFlag.Usage)
 	}
 }
+
+func TestScanMaxToolsFlagUsageUsesSubtask(t *testing.T) {
+	var reviewOpts reviewOptions
+	reviewCmd := &cobra.Command{Use: "review"}
+	registerReviewFlags(reviewCmd, &reviewOpts)
+	reviewFlag := reviewCmd.Flags().Lookup("max-tools")
+	if reviewFlag == nil {
+		t.Fatal("review --max-tools flag missing")
+	}
+
+	var scanOpts scanOptions
+	scanCmd := &cobra.Command{Use: "scan"}
+	registerScanFlags(scanCmd, &scanOpts)
+	scanFlag := scanCmd.Flags().Lookup("max-tools")
+	if scanFlag == nil {
+		t.Fatal("scan --max-tools flag missing")
+	}
+
+	for _, tc := range []struct {
+		cmd   string
+		usage string
+	}{
+		{"review", reviewFlag.Usage},
+		{"scan", scanFlag.Usage},
+	} {
+		if !strings.Contains(tc.usage, "subtask") {
+			t.Errorf("%s --max-tools usage %q: want subtask unit", tc.cmd, tc.usage)
+		}
+		if strings.Contains(tc.usage, "per file") {
+			t.Errorf("%s --max-tools usage %q: leaked per file", tc.cmd, tc.usage)
+		}
+	}
+}

@@ -230,7 +230,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	addOutputPathFlag(cmd, &opts.outputPath)
 	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 8, "max concurrent subtasks")
 	cmd.Flags().IntVar(&opts.concurrentTaskTimeout, "timeout", 15, "concurrent task timeout in minutes")
-	cmd.Flags().IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")
+	cmd.Flags().IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per subtask; only takes effect when greater than template default")
 	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(&opts.maxTokens, "max-tokens", 0, "per-file prompt token ceiling (0 = configured or template default)")
 	cmd.Flags().IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage; dispatch stops once exceeded (0 = unlimited)")
