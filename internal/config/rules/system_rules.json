@@ -44,6 +44,7 @@
     "**/*.zig": "zig.md",
     "**/*.thrift": "thrift.md",
     "**/*.capnp": "capnp.md",
+    "**/*.{mojo,🔥}": "mojo.md",
     "**/*.{ml,mli}": "ocaml.md",
     "**/*.{re,rei}": "ocaml.md",
     "**/*.{v,sv,vh}": "verilog.md",
