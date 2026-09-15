@@ -40,6 +40,7 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 			if hasTraversalPathComponent(s) {
 				return "Error: file_patterns must not contain ..", nil
 			}
+			// Treat backslashes as separators so Windows pathspecs match.
 			patterns = append(patterns, strings.ReplaceAll(s, "\\", "/"))
 		}
 	}
