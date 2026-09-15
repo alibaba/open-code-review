@@ -114,7 +114,7 @@ The exclusion reasons map to gates in the
 | `user_exclude` | Remove the pattern from your `exclude` list. |
 | `unsupported_ext` | Add the extension to your `include` list to bypass the allowlist gate. |
 | `default_path` | Add the file to `include` — that overrides built-in test-file exclude patterns. |
-| `provider_directory` | Nothing to do — provider directories such as `vendor/` and `node_modules/` are never reviewable, even when included. |
+| `provider_directory` | For an intentionally tracked directory, add its exact prefix (for example `vendor/`) to `allow_provider_directories` in a personal `--rule` file. Other gates still apply. |
 | `deleted` | Nothing to do — there's no new content to review. |
 | `too_large` | The diff alone exceeds 80% of `max_tokens`. Raise `--max-tokens` (or the saved `max_tokens`), or split the change into smaller commits. |
 

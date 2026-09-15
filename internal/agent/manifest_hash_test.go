@@ -75,6 +75,13 @@ func TestRuleConfigSHA256(t *testing.T) {
 	if a.ruleConfigSHA256() == withFilter.ruleConfigSHA256() {
 		t.Error("adding a file filter did not change rule_config_sha256")
 	}
+	withAllowedProviderDirectory := New(Args{
+		SystemRule: base,
+		FileFilter: &rules.FileFilter{AllowProviderDirectories: []string{"vendor/"}},
+	})
+	if a.ruleConfigSHA256() == withAllowedProviderDirectory.ruleConfigSHA256() {
+		t.Error("allowing a provider directory did not change rule_config_sha256")
+	}
 }
 
 func TestRuleConfigSHA256_NilResolverAndFilter(t *testing.T) {

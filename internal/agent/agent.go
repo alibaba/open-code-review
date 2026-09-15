@@ -544,8 +544,9 @@ func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
 }
 
-// newDiffProvider resolves the configured input to a diff provider.
-func (a *Agent) newDiffProvider() *diff.Provider {
+// newDiffProvider resolves the configured input and file-selection settings to
+// a diff provider.
+func (a *Agent) newDiffProvider() (*diff.Provider, error) {
 	// A sealed input substitutes the commit SHAs a pre-flight resolve already froze
 	// for the refs the user typed. Both loads then read the same immutable objects,
 	// which is what makes this run's input provably the admitted one: a ref moving
@@ -565,19 +566,29 @@ func (a *Agent) newDiffProvider() *diff.Provider {
 		}
 	}
 
+	var provider *diff.Provider
 	switch {
 	case commit != "":
-		return diff.NewCommitProvider(a.args.RepoDir, commit, a.args.GitRunner)
+		provider = diff.NewCommitProvider(a.args.RepoDir, commit, a.args.GitRunner)
 	case from != "" && to != "":
-		return diff.NewProvider(a.args.RepoDir, from, to, a.args.GitRunner)
+		provider = diff.NewProvider(a.args.RepoDir, from, to, a.args.GitRunner)
 	default:
-		return diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
+		provider = diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
 	}
+	if a.args.FileFilter != nil {
+		if err := provider.SetAllowedProviderDirectories(a.args.FileFilter.AllowProviderDirectories); err != nil {
+			return nil, err
+		}
+	}
+	return provider, nil
 }
 
 // loadDiffs populates the diff-related fields used by normal review runs.
 func (a *Agent) loadDiffs(ctx context.Context) error {
-	provider := a.newDiffProvider()
+	provider, err := a.newDiffProvider()
+	if err != nil {
+		return fmt.Errorf("configure diff provider: %w", err)
+	}
 
 	parsed, err := provider.GetDiff(ctx)
 	if err != nil {
@@ -1062,6 +1073,9 @@ func (a *Agent) ruleConfigSHA256() string {
 		}
 		for _, exc := range f.Exclude {
 			fields = append(fields, "exclude", exc)
+		}
+		for _, dir := range f.AllowProviderDirectories {
+			fields = append(fields, "allow_provider_directory", dir)
 		}
 	}
 	return hashFields(fields...)

@@ -50,9 +50,10 @@ const (
 
 // Provider retrieves and parse git diffs from a repository.
 type Provider struct {
-	repoDir string
-	mode    Mode
-	runner  *gitcmd.Runner
+	repoDir             string
+	mode                Mode
+	runner              *gitcmd.Runner
+	allowedProviderDirs map[string]struct{}
 
 	// Range mode parameters
 	from, to string // from/to refs for range comparison
@@ -61,6 +62,35 @@ type Provider struct {
 	commit string // single commit hash/ref
 
 	mergeBase string // cached common ancestor for range mode
+}
+
+// SetAllowedProviderDirectories permits the named built-in directories to
+// reach review selection. It is intentionally opt-in: an empty list preserves
+// the default provider blocklist. Directory names must be exact built-in
+// prefixes (for example "vendor/"); VCS metadata directories remain blocked.
+func (p *Provider) SetAllowedProviderDirectories(dirs []string) error {
+	if len(dirs) == 0 {
+		p.allowedProviderDirs = nil
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(dirs))
+	for _, dir := range dirs {
+		normalized := strings.ToLower(strings.TrimSpace(dir))
+		normalized = strings.TrimPrefix(normalized, "./")
+		if !strings.HasSuffix(normalized, "/") {
+			normalized += "/"
+		}
+		canonical := providerDirectoryPrefix(normalized)
+		if canonical == "" {
+			return fmt.Errorf("unknown provider directory %q", dir)
+		}
+		if canonical == ".git/" || canonical == ".svn/" {
+			return fmt.Errorf("provider directory %q cannot be made reviewable", dir)
+		}
+		allowed[canonical] = struct{}{}
+	}
+	p.allowedProviderDirs = allowed
+	return nil
 }
 
 // DiffSet separates the diffs a review may process from files excluded by the
@@ -305,7 +335,7 @@ func (p *Provider) loadGitignorePatterns() []string {
 // correct under last-match-wins. Treating negations as unmatchable made every
 // file in such a repository look excluded, so a review silently covered nothing.
 func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bool {
-	if isProviderDirExcluded(relPath) {
+	if p.isProviderDirExcluded(relPath) {
 		return true
 	}
 
@@ -336,6 +366,15 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 // one of these paths.
 func isProviderDirExcluded(relPath string) bool {
 	return ProviderDirPrefix(relPath) != ""
+}
+
+func (p *Provider) isProviderDirExcluded(relPath string) bool {
+	prefix := ProviderDirPrefix(relPath)
+	if prefix == "" {
+		return false
+	}
+	_, allowed := p.allowedProviderDirs[prefix]
+	return !allowed
 }
 
 // matchGitignorePattern checks if relPath matches a single .gitignore pattern.
@@ -442,7 +481,7 @@ func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 		if path == "/dev/null" {
 			path = d.OldPath
 		}
-		if isProviderDirExcluded(path) {
+		if p.isProviderDirExcluded(path) {
 			result.excludedAt = append(result.excludedAt, len(result.Included)+len(result.Excluded))
 			result.Excluded = append(result.Excluded, d)
 		} else if !p.isPathExcluded(path, patterns) {
@@ -684,6 +723,12 @@ func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
+			continue
+		}
+		// allow_provider_directories is for intentionally tracked changes. Keep
+		// provider directories out of untracked discovery even when explicitly
+		// allowed, otherwise a local dependency tree could become one review.
+		if isProviderDirExcluded(line) {
 			continue
 		}
 		if !p.isPathExcluded(line, patterns) {

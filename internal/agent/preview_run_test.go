@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 )
@@ -124,6 +125,21 @@ func TestPreviewShowsProviderExcludedVendorDiff(t *testing.T) {
 	if entry.Path != "vendor/pkg/keep.go" || entry.WillReview || entry.ExcludeReason != ExcludeProviderDirectory {
 		t.Errorf("entry = %+v, want vendor/pkg/keep.go excluded as provider_directory", entry)
 	}
+
+	preview, err = Preview(context.Background(), Args{
+		RepoDir:    dir,
+		FileFilter: &rules.FileFilter{AllowProviderDirectories: []string{"vendor/"}},
+	})
+	if err != nil {
+		t.Fatalf("Preview with allowed vendor error: %v", err)
+	}
+	if len(preview.Entries) != 1 {
+		t.Fatalf("entries with allowed vendor = %d, want 1", len(preview.Entries))
+	}
+	entry = preview.Entries[0]
+	if entry.Path != "vendor/pkg/keep.go" || !entry.WillReview || entry.ExcludeReason != ExcludeNone {
+		t.Errorf("allowed vendor entry = %+v, want reviewable vendor/pkg/keep.go", entry)
+	}
 }
 
 // TestPreviewOmitsUntrackedProviderDirFile pins the tracked-only scope of
@@ -145,7 +161,10 @@ func TestPreviewOmitsUntrackedProviderDirFile(t *testing.T) {
 		t.Fatalf("write target/demo.go: %v", err)
 	}
 
-	preview, err := Preview(context.Background(), Args{RepoDir: dir})
+	preview, err := Preview(context.Background(), Args{
+		RepoDir:    dir,
+		FileFilter: &rules.FileFilter{AllowProviderDirectories: []string{"target/"}},
+	})
 	if err != nil {
 		t.Fatalf("Preview error: %v", err)
 	}

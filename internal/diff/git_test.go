@@ -106,6 +106,40 @@ func TestGetDiffSetRetainsBuiltInDirectoryExclusionsForReporting(t *testing.T) {
 	if len(diffs) != 0 {
 		t.Fatalf("GetDiff = %+v, want no reviewable vendor diff", diffs)
 	}
+
+	if err := provider.SetAllowedProviderDirectories([]string{"vendor/"}); err != nil {
+		t.Fatalf("SetAllowedProviderDirectories: %v", err)
+	}
+	set, err = provider.GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet with allowed vendor: %v", err)
+	}
+	if len(set.Included) != 1 || set.Included[0].NewPath != relPath || len(set.Excluded) != 0 {
+		t.Fatalf("GetDiffSet with allowed vendor = %+v, want %q included", set, relPath)
+	}
+}
+
+func TestSetAllowedProviderDirectoriesRejectsInvalidDirectories(t *testing.T) {
+	provider := NewWorkspaceProvider(t.TempDir(), nil)
+	for _, dir := range []string{"missing/", ".git/"} {
+		if err := provider.SetAllowedProviderDirectories([]string{dir}); err == nil {
+			t.Errorf("SetAllowedProviderDirectories(%q) succeeded, want error", dir)
+		}
+	}
+}
+
+func TestSetAllowedProviderDirectoriesUsesCanonicalProviderPrefix(t *testing.T) {
+	original := providerDirIgnoreDirs
+	providerDirIgnoreDirs = append(providerDirIgnoreDirs, "RPM/")
+	t.Cleanup(func() { providerDirIgnoreDirs = original })
+
+	provider := NewWorkspaceProvider(t.TempDir(), nil)
+	if err := provider.SetAllowedProviderDirectories([]string{"rpm/"}); err != nil {
+		t.Fatalf("SetAllowedProviderDirectories: %v", err)
+	}
+	if provider.isProviderDirExcluded("RPM/package.spec") {
+		t.Fatal("canonical provider prefix should be allowed")
+	}
 }
 
 func TestGetDiffSetWalksChangesetOrder(t *testing.T) {
