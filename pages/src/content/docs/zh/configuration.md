@@ -4,6 +4,8 @@ sidebar:
   order: 5
 ---
 
+`ocr mcp` 以服务器列表为入口，选中服务器后管理工具和实际权限，Esc 返回；打开列表不会连接。`ocr mcp import [file] [--yes]` 可导入一个 Cursor JSON 或 Codex TOML 连接，保存为禁用、零工具，不复制授权。非交互导入要求单服务器文件和 `--yes`。明文 env/header 转成环境变量引用，同名不覆盖，OAuth 等未支持字段会拒绝。私密粘贴（Ctrl-S）、凭据引用和启用步骤见 [MCP 指南](../mcp/)。
+
 配置文件在 `~/.opencodereview/config.json`，你有三种方式编辑它：
 
 - **交互式 TUI** —— `ocr config provider` / `ocr config model`，带引导菜单。
@@ -354,7 +356,39 @@ ocr config set language 中文
 ocr config set language English
 ```
 
+## MCP 策略配置
+
+建议使用 `ocr mcp` 向导接入：它只发现工具，不调用工具，并保存显式白名单。全局策略位于
+`mcp`：
+
+| 配置键 | 合法值 / 默认值 | 用途 |
+|---|---|---|
+| `mcp.version` | `1` | fail-closed 策略格式版本。 |
+| `mcp.enabled` | boolean，默认 `true` | MCP 全局可见性开关。 |
+| `mcp.default_permission` | `deny`、`ask`、`allow`；默认 `ask` | 默认执行策略；`allow` 不能扩大工具白名单。 |
+| `mcp.approval_timeout_seconds` | 整数 `1`–`600`；默认 `60` | 运行时审批时限，下次 review 生效。 |
+
+每个 `mcp_servers.<name>` 可配置 `type`（`stdio` 或 `remote`）、连接字段、`enabled`、
+`default_permission`（`inherit`、`deny`、`ask`、`allow`）、显式 `tools` 白名单、
+`tool_permissions` 和 `tool_definition_sha256`。`tools` 缺失或为空都表示零工具。全局或
+server 的 `deny` 是不可覆盖的上限；否则采用 tool > server > global。
+
+`env` 与 remote headers 应使用 `${ENV_NAME}` 引用。状态输出会掩码值和 URL query。
+旧 `setup` 仅为迁移而读取，`ocr review` 永远不会执行它。
+
+```bash
+ocr config set mcp.approval_timeout_seconds 120
+ocr mcp permissions docs
+```
+
+向导、stdio/remote 安全规则、指纹、权限继承、迁移和 CI 行为详见
+[MCP 服务器](../mcp/)。
+
 ## 另见
 
 - [快速开始](../quickstart/)——最小化设置与首次评审。
 - [CLI 参考](../cli-reference/)——review 命令接受的每个参数。
+
+## 终端接入体验
+
+`ocr mcp add` 提供逐项输入和 `Space` 工具勾选。`Enter` 继续，`Ctrl-B` 返回，`Esc` 取消。`ocr mcp permissions` 设置权限与超时（默认 60 秒，1–600 秒）。`OCR_CONFIG_PATH` 为配置读写和 review 选择同一份文件，可用于隔离体验。纯 `ocr mcp tools docs --disable write` 撤权不连接服务器，不需要 `--yes`，离线也能完成；启用工具仍需发现并明确确认连接。

@@ -98,6 +98,8 @@ type Runner struct {
 	bg sync.WaitGroup
 }
 
+const redactedToolArguments = `{"redacted":true}`
+
 // NewRunner returns a Runner bound to the given dependencies.
 func NewRunner(deps Deps) *Runner {
 	return &Runner{deps: deps}
@@ -338,7 +340,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
 			return false, StopNone, fmt.Errorf("LLM completion error: %w", err)
 		}
-		rec.SetResponse(resp, duration)
+		rec.SetResponseSanitized(resp, duration, r.sessionToolCallSanitizer(r.deps.MainToolDefs))
 		totalTokens := int64(0)
 		if resp.Usage != nil {
 			totalTokens = resp.Usage.TotalTokens
@@ -471,7 +473,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newP
 		return
 	}
 
-	rec.SetResponse(resp, duration)
+	rec.SetResponseSanitized(resp, duration, r.sessionToolCallSanitizer(graceDefs))
 	totalTokens := int64(0)
 	if resp.Usage != nil {
 		totalTokens = resp.Usage.TotalTokens
@@ -490,9 +492,48 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newP
 	}
 
 	thinking := resp.ReasoningContent()
+	allowed := toolDefinitionNameSet(graceDefs)
 	for _, call := range calls {
+		if _, ok := allowed[call.Function.Name]; !ok {
+			continue
+		}
 		r.executeToolCall(ctx, newPath, call, rec, thinking)
 	}
+}
+
+// sessionToolCallSanitizer redacts arguments for sensitive providers and for
+// tools that were not advertised in the request which produced the response.
+// This happens before SetResponse writes either memory or JSONL, while the
+// original response remains available for authorized execution.
+func (r *Runner) sessionToolCallSanitizer(defs []llm.ToolDef) session.ToolCallArgumentSanitizer {
+	allowed := toolDefinitionNameSet(defs)
+	return func(name, arguments string) string {
+		if _, ok := allowed[name]; !ok {
+			return redactedToolArguments
+		}
+		if r == nil || r.deps.Tools == nil {
+			return arguments
+		}
+		provider, ok := r.deps.Tools.Get(name)
+		if !ok {
+			return arguments
+		}
+		sensitive, ok := provider.(tool.SensitiveProvider)
+		if ok && sensitive.SensitiveToolCall() {
+			return redactedToolArguments
+		}
+		return arguments
+	}
+}
+
+func toolDefinitionNameSet(defs []llm.ToolDef) map[string]struct{} {
+	allowed := make(map[string]struct{}, len(defs))
+	for _, definition := range defs {
+		if definition.Function.Name != "" {
+			allowed[definition.Function.Name] = struct{}{}
+		}
+	}
+	return allowed
 }
 
 // graceRoundToolDefs returns the subset of tool definitions containing only
@@ -519,12 +560,20 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		if !ok {
 			return tool.Of(tool.NotAvailableMsg)
 		}
+		sensitiveCall := false
+		if sensitive, ok := p.(tool.SensitiveProvider); ok {
+			sensitiveCall = sensitive.SensitiveToolCall()
+		}
 		r.recordToolCall(call.Function.Name)
 		dynArgs, err := parseToolArgs(call.Function.Arguments)
 		if err != nil {
 			return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", call.Function.Name, err))
 		}
-		telemetry.PrintToolCallStarted(call.Function.Name, dynArgs)
+		logArgs := dynArgs
+		if sensitiveCall {
+			logArgs = nil
+		}
+		telemetry.PrintToolCallStarted(call.Function.Name, logArgs)
 		_, toolSpan := telemetry.StartToolSpan(ctx, call.Function.Name)
 		startTime := time.Now()
 		result, err := p.Execute(ctx, dynArgs)
@@ -541,7 +590,11 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		telemetry.RecordToolCall(ctx, call.Function.Name, dur, true)
 		telemetry.PrintToolCallFinished(call.Function.Name, dur)
 		if rec != nil {
-			rec.AddToolResult(call.Function.Name, call.Function.Arguments, result)
+			arguments := call.Function.Arguments
+			if sensitiveCall {
+				arguments = redactedToolArguments
+			}
+			rec.AddToolResult(call.Function.Name, arguments, result)
 		}
 		return tool.Of(result)
 	}

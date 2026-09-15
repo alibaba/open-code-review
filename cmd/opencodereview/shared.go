@@ -206,7 +206,7 @@ type llmRuntime struct {
 var newRetryCollector = llm.NewRetryCollector
 
 // loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
-// from the user's default config path (applying the configured language to
+// from the resolved config path, including OCR_CONFIG_PATH (applying the configured language to
 // tpl — defaulting when the config file is absent), resolves the LLM
 // endpoint (honoring resolveOpts), and
 // returns the runtime bundle. tpl is mutated in place.
@@ -218,7 +218,7 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 	planToolDefs := agent.BuildToolDefs(toolEntries, true)
 	mainToolDefs := agent.BuildToolDefs(toolEntries, false)
 
-	cfgPath, err := defaultConfigPath()
+	cfgPath, err := resolveConfigPath()
 	if err != nil {
 		return nil, err
 	}

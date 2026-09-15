@@ -402,15 +402,37 @@ func copyMessagesForJSON(msgs []llm.Message) any {
 	return out
 }
 
+// ToolCallArgumentSanitizer rewrites tool-call arguments before they enter
+// in-memory history or the persisted JSONL stream. It must not mutate the LLM
+// response because the caller may still need the original arguments to execute
+// an authorized tool.
+type ToolCallArgumentSanitizer func(toolName, arguments string) string
+
 // SetResponse records the LLM response in the most recent TaskRecord of the given type.
 // It uses actual token usage from the API response when available, falling back to
 // local estimation via tiktoken, and writes an llm_response record to the JSONL stream.
 func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration) {
+	tr.SetResponseSanitized(resp, duration, nil)
+}
+
+// SetResponseSanitized is SetResponse with an optional argument sanitizer.
+// The sanitizer is applied to a defensive copy, so execution can continue with
+// the original response while session history retains only safe arguments.
+func (tr *TaskRecord) SetResponseSanitized(resp *llm.ChatResponse, duration time.Duration, sanitize ToolCallArgumentSanitizer) {
 	if resp == nil || len(resp.Choices) == 0 {
 		tr.SetError(fmt.Errorf("empty response"), duration)
 		return
 	}
 	choice := resp.Choices[0]
+	toolCalls := append([]llm.ToolCall(nil), choice.Message.ToolCalls...)
+	if sanitize != nil {
+		for i := range toolCalls {
+			toolCalls[i].Function.Arguments = sanitize(
+				toolCalls[i].Function.Name,
+				toolCalls[i].Function.Arguments,
+			)
+		}
+	}
 	content := ""
 	if choice.Message.Content != nil {
 		content = *choice.Message.Content
@@ -438,7 +460,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 
 	tr.Response = &ResponseRecord{
 		Content:   content,
-		ToolCalls: choice.Message.ToolCalls,
+		ToolCalls: toolCalls,
 		Model:     resp.Model,
 		Usage:     usage,
 	}
@@ -446,8 +468,8 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 
 	if fs := tr.fileSession; fs != nil {
 		if p := fs.session.persist; p != nil {
-			toolCallsJSON := make([]map[string]any, 0, len(choice.Message.ToolCalls))
-			for _, tc := range choice.Message.ToolCalls {
+			toolCallsJSON := make([]map[string]any, 0, len(toolCalls))
+			for _, tc := range toolCalls {
 				toolCallsJSON = append(toolCallsJSON, map[string]any{
 					"id":        tc.ID,
 					"name":      tc.Function.Name,

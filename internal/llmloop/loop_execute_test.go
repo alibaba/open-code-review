@@ -26,6 +26,12 @@ func (p *erroringProvider) Execute(_ context.Context, _ map[string]any) (string,
 	return "", errors.New("boom")
 }
 
+type sensitiveArgsProvider struct {
+	argsCapturingProvider
+}
+
+func (p *sensitiveArgsProvider) SensitiveToolCall() bool { return true }
+
 // TestExecuteToolCall_DynamicNotRegistered covers the path where the LLM calls
 // a name that is neither a built-in tool nor present in the registry.
 func TestExecuteToolCall_DynamicNotRegistered(t *testing.T) {
@@ -81,6 +87,34 @@ func TestExecuteToolCall_DynamicSuccessRecordsResult(t *testing.T) {
 	}
 	if rec.ToolResults[0].ToolName != "dyn_ok" || rec.ToolResults[0].Result != "ok" {
 		t.Errorf("recorded result = %+v, want dyn_ok/ok", rec.ToolResults[0])
+	}
+}
+
+func TestExecuteToolCall_SensitiveProviderRedactsPersistedArguments(t *testing.T) {
+	reg := tool.NewRegistry()
+	provider := &sensitiveArgsProvider{argsCapturingProvider: argsCapturingProvider{
+		tool: tool.Dynamic("mcp_sensitive"),
+	}}
+	reg.Register(provider)
+	reg.Freeze()
+	r := NewRunner(Deps{Tools: reg, CommentCollector: tool.NewCommentCollector()})
+
+	rec := &session.TaskRecord{}
+	cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
+		Function: llm.FunctionCall{Name: "mcp_sensitive", Arguments: `{"token":"top-secret"}`},
+	}, rec, "")
+
+	if cp.Data != "ok" {
+		t.Fatalf("cp.Data = %q, want ok", cp.Data)
+	}
+	if !provider.captured || provider.gotArgs["token"] != "top-secret" {
+		t.Fatalf("provider args = %#v, want original invocation arguments", provider.gotArgs)
+	}
+	if len(rec.ToolResults) != 1 {
+		t.Fatalf("recorded results = %d, want 1", len(rec.ToolResults))
+	}
+	if got := rec.ToolResults[0].Arguments; got != `{"redacted":true}` {
+		t.Fatalf("persisted arguments = %q, want redacted marker", got)
 	}
 }
 

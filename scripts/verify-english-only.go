@@ -73,6 +73,7 @@ var scannedNames = map[string]bool{"Makefile": true}
 // each entry narrow and justified; a temporary entry must say what removes it.
 var allowedPrefixes = []struct{ prefix, reason string }{
 	{"pages/src/i18n/", "translated UI copy for the docs site"},
+	{"scripts/github-actions/check-mcp-docs.test.js", "localized documentation contract regex fixtures"},
 	{"extensions/vscode/", "TEMPORARY: the extension's comments, test names and zh-cn NLS bundle are still Chinese; drop this entry once they are translated"},
 }
 

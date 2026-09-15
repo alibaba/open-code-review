@@ -193,18 +193,25 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
-	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
+	mcpRuntime := initMCPRuntime(
+		ctx,
+		rt.AppCfg,
+		tools,
+		cc.RepoDir,
+		Version,
+		rt.PlanToolDefs,
+		rt.MainToolDefs,
+	)
 	defer func() {
-		for _, mc := range mcpClients {
+		for _, mc := range mcpRuntime.clients {
 			if err := mc.Close(); err != nil {
 				fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to close MCP server %q: %v\n", mc.Name(), err)
 			}
 		}
 	}()
 
-	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
-	rt.PlanToolDefs = append(rt.PlanToolDefs, mcpToolDefs...)
-	rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
+	rt.PlanToolDefs = append(rt.PlanToolDefs, mcpRuntime.toolDefs...)
+	rt.MainToolDefs = append(rt.MainToolDefs, mcpRuntime.toolDefs...)
 
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
@@ -501,10 +508,40 @@ func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOption
 	return outputPreview(preview, opts.outputFormat, out)
 }
 
-func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {
+type mcpRuntimeState struct {
+	clients  []*mcp.Client
+	toolDefs []llm.ToolDef
+}
+
+func initMCPRuntime(
+	ctx context.Context,
+	cfg *Config,
+	tools *tool.Registry,
+	repoDir, version string,
+	existingDefs ...[]llm.ToolDef,
+) mcpRuntimeState {
 	if cfg == nil || len(cfg.MCPServers) == 0 {
-		return nil
+		return mcpRuntimeState{}
 	}
+	global := mcp.MCPConfig{}
+	if cfg.MCP != nil {
+		global = *cfg.MCP
+	}
+	if err := mcp.ValidateMCPConfig(global); err != nil {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: invalid MCP policy; all MCP tools are disabled: %v\n", err)
+		return mcpRuntimeState{}
+	}
+	timeout, err := global.ApprovalTimeout()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: invalid MCP approval timeout; all MCP tools are disabled: %v\n", err)
+		return mcpRuntimeState{}
+	}
+	interactive := mcpInteractiveSession()
+	authorizer := mcp.NewRuntimeAuthorizer(
+		interactive,
+		timeout,
+		newMCPRuntimeApprovalPrompter(),
+	)
 
 	mcpNames := make([]string, 0, len(cfg.MCPServers))
 	for name := range cfg.MCPServers {
@@ -512,65 +549,107 @@ func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repo
 	}
 	sort.Strings(mcpNames)
 
-	var clients []*mcp.Client
+	state := mcpRuntimeState{}
+	connectedServers := make(map[string]mcp.MCPServerConfig)
 	for _, name := range mcpNames {
 		serverCfg := cfg.MCPServers[name]
-
-		isRemote := serverCfg.Type == "remote"
-
-		if isRemote {
-			if serverCfg.URL == "" {
-				fmt.Fprintf(os.Stderr, "[ocr] WARNING: remote MCP server %q has no URL configured, skipping\n", name)
-				continue
-			}
-			initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
-			mc, err := mcp.NewRemoteClient(initCtx, name, serverCfg.URL, serverCfg.Headers, version)
-			initCancel()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to connect to remote MCP server %q: %v\n", name, err)
-				continue
-			}
-			clients = append(clients, mc)
-			mcp.RegisterAll(tools, mc, serverCfg.Tools)
+		potentiallyVisible, policyErr := mcpServerPotentiallyVisible(global, serverCfg, interactive)
+		if policyErr != nil {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: invalid MCP server %q policy, skipping: %v\n", name, policyErr)
 			continue
 		}
-
-		if serverCfg.Command == "" {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: MCP server %q has no command configured, skipping\n", name)
+		if !potentiallyVisible {
 			continue
 		}
 		if serverCfg.Setup != "" {
-			fmt.Fprintf(os.Stderr, "[ocr] Running setup for MCP server %q: %s\n", name, serverCfg.Setup)
-			setupCtx, setupCancel := context.WithTimeout(ctx, 5*time.Minute)
-			setupCmd := shellCommand(setupCtx, serverCfg.Setup)
-			setupCmd.Dir = repoDir
-			configureProcessGroup(setupCmd)
-			output, err := setupCmd.CombinedOutput()
-			setupCancel()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "[ocr] ERROR: MCP server %q setup command failed.\n", name)
-				fmt.Fprintf(os.Stderr, "[ocr]   Command: %s\n", serverCfg.Setup)
-				fmt.Fprintf(os.Stderr, "[ocr]   Working directory: %s\n", repoDir)
-				fmt.Fprintf(os.Stderr, "[ocr]   Error: %v\n", err)
-				if len(output) > 0 {
-					fmt.Fprintf(os.Stderr, "[ocr]   Output:\n%s\n", string(output))
-				}
-				fmt.Fprintf(os.Stderr, "[ocr]   Skipping MCP server %q — review will proceed without it.\n", name)
-				continue
-			}
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: legacy setup for MCP server %q is ignored; install it explicitly and remove the setup field\n", name)
 		}
 
 		initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
-		mc, err := mcp.NewClient(initCtx, name, serverCfg.Command, serverCfg.Args, serverCfg.Env, repoDir, version)
+		mc, err := mcp.NewConfiguredClient(initCtx, name, serverCfg, repoDir, version)
 		initCancel()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to start MCP server %q: %v\n", name, err)
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to initialize MCP server %q: %v\n", name, err)
 			continue
 		}
-		clients = append(clients, mc)
-		mcp.RegisterAll(tools, mc, serverCfg.Tools)
+		state.clients = append(state.clients, mc)
+		connectedServers[name] = serverCfg
 	}
-	return clients
+	if len(state.clients) == 0 {
+		return state
+	}
+	registration, err := mcp.RegisterSelected(
+		tools,
+		state.clients,
+		global,
+		connectedServers,
+		authorizer,
+		interactive,
+		existingDefs...,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: MCP tool registration failed; no MCP tools will be available: %v\n", err)
+		closeMCPClients(state.clients)
+		return mcpRuntimeState{}
+	}
+	for _, skipped := range registration.Skipped {
+		status := "disabled"
+		if skipped.NeedsReview {
+			status = "needs review"
+		}
+		fmt.Fprintf(
+			os.Stderr,
+			"[ocr] WARNING: MCP server %q tool %q is %s: %s\n",
+			skipped.ID.Server,
+			skipped.ID.Name,
+			status,
+			skipped.Reason,
+		)
+	}
+	state.toolDefs = registration.ToolDefs
+	return state
+}
+
+// initMCPClients is retained for focused command-package tests. Production
+// review setup uses initMCPRuntime so definitions and providers come from the
+// same immutable registration.
+func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {
+	return initMCPRuntime(ctx, cfg, tools, repoDir, version).clients
+}
+
+func mcpServerPotentiallyVisible(global mcp.MCPConfig, server mcp.MCPServerConfig, interactive bool) (bool, error) {
+	if err := mcp.ValidateMCPServerConfig(server); err != nil {
+		return false, err
+	}
+	for _, toolName := range server.Tools {
+		permission, err := mcp.ResolvePermission(global, server, toolName)
+		if err != nil {
+			return false, err
+		}
+		// Compatibility can require approval, but must never undo revocation.
+		if permission == mcp.PermissionDeny {
+			continue
+		}
+		fingerprint := server.ToolDefinitionSHA256[toolName]
+		if global.Version >= 1 && fingerprint == "" {
+			continue
+		}
+		if global.Version == 0 && fingerprint == "" {
+			permission = mcp.PermissionAsk
+		}
+		if permission == mcp.PermissionAllow || (interactive && permission == mcp.PermissionAsk) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func closeMCPClients(clients []*mcp.Client) {
+	for _, client := range clients {
+		if client != nil {
+			_ = client.Close()
+		}
+	}
 }
 
 func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *tool.Registry {

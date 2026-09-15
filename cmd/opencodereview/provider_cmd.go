@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,7 +18,7 @@ import (
 )
 
 func runConfigProvider() error {
-	configPath, err := defaultConfigPath()
+	configPath, err := resolveConfigPath()
 	if err != nil {
 		return err
 	}
@@ -315,7 +316,7 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 }
 
 func runConfigModel() error {
-	configPath, err := defaultConfigPath()
+	configPath, err := resolveConfigPath()
 	if err != nil {
 		return err
 	}
@@ -418,18 +419,74 @@ func runConfigModel() error {
 
 func saveConfig(path string, cfg *Config) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
+	}
+	unlock, err := lockConfig(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := checkConfigRevision(path, cfg.revision); err != nil {
+		return err
 	}
 	data, err := json.MarshalIndent(cfg, "", "    ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("write config: %w", err)
+	data = append(data, '\n')
+
+	temp, err := os.CreateTemp(dir, ".ocr-config-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary config: %w", err)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("chmod config: %w", err)
+	tempPath := temp.Name()
+	removeTemp := true
+	defer func() {
+		if removeTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if err := temp.Chmod(0o600); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("chmod temporary config: %w", err)
+	}
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("write temporary config: %w", err)
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("sync temporary config: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("close temporary config: %w", err)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return fmt.Errorf("replace config: %w", err)
+	}
+	removeTemp = false
+	cfg.revision = revisionOfConfig(data)
+	if err := syncConfigDirectory(dir); err != nil {
+		return err
+	}
+	return nil
+}
+
+func syncConfigDirectory(dir string) error {
+	// Windows does not expose a portable directory fsync through os.File. The
+	// same-directory rename still prevents a partially written destination.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	directory, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open config directory for sync: %w", err)
+	}
+	defer directory.Close()
+	if err := directory.Sync(); err != nil {
+		return fmt.Errorf("sync config directory: %w", err)
 	}
 	return nil
 }
