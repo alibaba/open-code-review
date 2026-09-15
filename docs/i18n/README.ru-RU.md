@@ -1,6 +1,6 @@
 <div align="center">
   <a href="https://open-codereview.ai">
-    <img src="imgs/logo-core.svg" alt="OpenCodeReview logo" width="180" />
+    <img src="../../imgs/logo-core.svg" alt="OpenCodeReview logo" width="180" />
   </a>
   <h1>OpenCodeReview</h1>
 </div>
@@ -29,7 +29,7 @@
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
-  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | Русский
+  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | Русский
 </p>
 
 ---
@@ -42,7 +42,7 @@ Open Code Review — это CLI-инструмент для код-ревью н
 
 Подробнее на [официальном сайте](https://open-codereview.ai).
 
-![Highlights](imgs/highlights-ru.png)
+![Highlights](../../imgs/highlights-ru.png)
 
 ## Бенчмарк
 
@@ -60,7 +60,7 @@ Open Code Review — это CLI-инструмент для код-ревью н
 | **Avg Time** | Время выполнения одного ревью | Влияет на задержки в CI-пайплайне |
 | **Avg Token** | Суммарное потребление токенов за ревью | Прямо влияет на стоимость API |
 
-![Benchmark](imgs/benchmark-ru.png)
+![Benchmark](../../imgs/benchmark-ru.png)
 
 ## Почему Open Code Review?
 
@@ -123,7 +123,7 @@ ocr config provider          # Выбрать встроенного прова�
 ocr config model             # Выбрать модель для активного провайдера
 ```
 
-![Provider setup](imgs/providers.jpg)
+![Provider setup](../../imgs/providers.jpg)
 
 Интерактивный UI проведёт вас через выбор провайдера, ввод API-ключа и настройку модели, после чего автоматически проверит подключение.
 
@@ -172,11 +172,11 @@ ocr delegate rule src/main.go src/handler.go
 - [Конфигурация](https://open-codereview.ai/docs/configuration) — ключи конфигурации и переменные окружения
 - [MCP-сервер](https://open-codereview.ai/docs/mcp) — расширение агента ревью внешними инструментами
 - Интеграции с кодинг-агентами — выберите используемую платформу
-  - [Claude Code](plugins/open-code-review/README.md#claude-code) — установка плагина со slash-командами для ревью
-  - [Codex](plugins/open-code-review/README.md#codex) — установка плагина с вызываемыми навыками ревью
-  - [Cursor](plugins/open-code-review/README.md#cursor) — установка плагина с переносимыми навыками ревью
-  - [OpenCode](plugins/open-code-review/opencode/README.md) — установка нативных инструментов ревью и slash-команд
-  - [QCA Forward](plugins/open-code-review/qca/README.md) — запуск режима делегирования с хост-моделью QCA и готовым к публикации шаблоном
+  - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — установка плагина со slash-командами для ревью
+  - [Codex](../../plugins/open-code-review/README.md#codex) — установка плагина с вызываемыми навыками ревью
+  - [Cursor](../../plugins/open-code-review/README.md#cursor) — установка плагина с переносимыми навыками ревью
+  - [OpenCode](../../plugins/open-code-review/opencode/README.md) — установка нативных инструментов ревью и slash-команд
+  - [QCA Forward](../../plugins/open-code-review/qca/README.md) — запуск режима делегирования с хост-моделью QCA и готовым к публикации шаблоном
   - [Агенты с поддержкой Skill](https://open-codereview.ai/docs/agent-skill) — установка переносимого навыка агента
 - Режимы выполнения ревью — после интеграции выберите, какая LLM выполняет ревью
   - [По умолчанию (под управлением OCR)](https://open-codereview.ai/docs/configuration) — OCR выполняет ревью с помощью настроенной LLM
@@ -196,4 +196,4 @@ ocr delegate rule src/main.go src/handler.go
 
 ## Лицензия
 
-[Apache-2.0](LICENSE) — Copyright 2026 Alibaba
+[Apache-2.0](../../LICENSE) — Copyright 2026 Alibaba
