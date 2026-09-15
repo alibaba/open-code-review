@@ -54,7 +54,7 @@ Three independent fields:
   through the `unsupported_ext` and `default_path` checks and may still
   be reviewed.
 - `exclude` — optional. Glob patterns for files OCR must *not* review.
-  Highest precedence within the filter.
+  Highest precedence among user-configured filters.
 - `rules` — array of `{path, rule}` entries, evaluated **in declaration
   order**. The first `path` whose glob matches the file determines the
   prompt OCR sends to the model for that file.
@@ -77,24 +77,28 @@ for matching:
 
 ## How files are filtered
 
-The filter is a five-gate algorithm in
+The filter is a six-gate algorithm in
 [`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
 For each diff, OCR asks:
 
 1. **`binary`** — Is the file binary? Excluded.
-2. **`user_exclude`** — Does the path match any user `exclude` pattern?
+2. **`secret_exclude`** — Does either path match a
+   [built-in secret-path pattern](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)?
+   Excluded. This protection runs before user rules and cannot be overridden
+   by an `include` pattern.
+3. **`user_exclude`** — Does the path match any user `exclude` pattern?
    Excluded.
-3. **`user_include`** — If the user defined `include`, does the path
+4. **`user_include`** — If the user defined `include`, does the path
    match? If yes, **kept immediately** (bypasses the `unsupported_ext`
    and `default_path` gates below).
-4. **`unsupported_ext`** — Is the file extension in the
+5. **`unsupported_ext`** — Is the file extension in the
    [allowlist](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)?
    Excluded if not.
-5. **`default_path`** — Does the path match a built-in test-file exclude
+6. **`default_path`** — Does the path match a built-in test-file exclude
    pattern (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb`,
    …)? Excluded.
 
-Files that survive all five gates are sent to the LLM, unless the diff
+Files that survive all six gates are sent to the LLM, unless the diff
 alone exceeds 80% of `max_tokens`: `selectFiles` applies that ceiling
 after the gates and excludes the file as `too_large`. It also marks a
 file whose new path is `/dev/null` as `deleted`; there's no new content
