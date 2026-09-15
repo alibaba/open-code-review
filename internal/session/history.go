@@ -364,6 +364,12 @@ func (sh *SessionHistory) Finalize() error {
 // file path and task type. It auto-assigns the RequestNo based on existing records
 // and writes an llm_request record to the JSONL stream.
 func (fs *FileSession) AppendTaskRecord(taskType TaskType, messages []llm.Message) *TaskRecord {
+	return fs.AppendTaskRecordSanitized(taskType, messages, nil)
+}
+
+// AppendTaskRecordSanitized protects transcript copies without altering replay.
+func (fs *FileSession) AppendTaskRecordSanitized(taskType TaskType, messages []llm.Message, sanitize ToolCallArgumentSanitizer) *TaskRecord {
+	messages = SanitizedMessages(messages, sanitize)
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -428,15 +434,56 @@ func nativeTurnForJSON(n llm.NativeTurn) any {
 	return map[string]any{"family": n.Family, "payload": n.Payload}
 }
 
+// ToolCallArgumentSanitizer rewrites tool-call arguments before they enter
+// in-memory history or the persisted JSONL stream. It must not mutate the LLM
+// response because the caller may still need the original arguments to execute
+// an authorized tool.
+type ToolCallArgumentSanitizer func(toolName, arguments string) string
+
+// SanitizedMessages returns a safe history/summary copy. Opaque replay payloads
+// on sensitive turns stay in the live conversation, never in the transcript.
+func SanitizedMessages(messages []llm.Message, sanitize ToolCallArgumentSanitizer) []llm.Message {
+	messages = copyMessages(messages)
+	for i := range messages {
+		if sanitizeToolCalls(messages[i].ToolCalls, sanitize) {
+			messages[i].Native = llm.NativeTurn{}
+			messages[i].ReasoningContent = ""
+			messages[i].Content = "[sensitive tool turn]"
+		}
+	}
+	return messages
+}
+
+func sanitizeToolCalls(calls []llm.ToolCall, sanitize ToolCallArgumentSanitizer) bool {
+	changed := false
+	if sanitize != nil {
+		for i := range calls {
+			previous := calls[i].Function.Arguments
+			calls[i].Function.Arguments = sanitize(calls[i].Function.Name, previous)
+			changed = changed || previous != calls[i].Function.Arguments
+		}
+	}
+	return changed
+}
+
 // SetResponse records the LLM response in the most recent TaskRecord of the given type.
 // It uses actual token usage from the API response when available, falling back to
 // local estimation via tiktoken, and writes an llm_response record to the JSONL stream.
 func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration) {
+	tr.SetResponseSanitized(resp, duration, nil)
+}
+
+// SetResponseSanitized is SetResponse with an optional argument sanitizer.
+// The sanitizer is applied to a defensive copy, so execution can continue with
+// the original response while session history retains only safe arguments.
+func (tr *TaskRecord) SetResponseSanitized(resp *llm.ChatResponse, duration time.Duration, sanitize ToolCallArgumentSanitizer) {
 	if resp == nil || len(resp.Choices) == 0 {
 		tr.SetError(fmt.Errorf("empty response"), duration)
 		return
 	}
 	choice := resp.Choices[0]
+	toolCalls := append([]llm.ToolCall(nil), choice.Message.ToolCalls...)
+	sensitiveTurn := sanitizeToolCalls(toolCalls, sanitize)
 	content := ""
 	if choice.Message.Content != nil {
 		content = *choice.Message.Content
@@ -464,25 +511,30 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 
 	tr.Response = &ResponseRecord{
 		Content:          content,
-		ToolCalls:        choice.Message.ToolCalls,
+		ToolCalls:        toolCalls,
 		Model:            resp.Model,
 		Usage:            usage,
 		ReasoningContent: choice.Message.ReasoningContent,
 		Native:           resp.Native(),
 	}
+	if sensitiveTurn {
+		tr.Response.Native = llm.NativeTurn{}
+		tr.Response.ReasoningContent = ""
+		tr.Response.Content = "[sensitive tool turn]"
+	}
 	tr.Duration = duration
 
 	if fs := tr.fileSession; fs != nil {
 		if p := fs.session.persist; p != nil {
-			toolCallsJSON := make([]map[string]any, 0, len(choice.Message.ToolCalls))
-			for _, tc := range choice.Message.ToolCalls {
+			toolCallsJSON := make([]map[string]any, 0, len(toolCalls))
+			for _, tc := range toolCalls {
 				toolCallsJSON = append(toolCallsJSON, map[string]any{
 					"id":        tc.ID,
 					"name":      tc.Function.Name,
 					"arguments": tc.Function.Arguments,
 				})
 			}
-			p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration, nativeTurnForJSON(tr.Response.Native))
+			p.WriteLLMResponse(fs.FilePath, tr.Type, tr.Response.Content, tr.Response.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration, nativeTurnForJSON(tr.Response.Native))
 		}
 	}
 }
