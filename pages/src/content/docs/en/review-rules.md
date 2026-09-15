@@ -86,6 +86,9 @@ For each diff, OCR asks:
    [built-in secret-path pattern](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)?
    Excluded. This protection runs before user rules and cannot be overridden
    by an `include` pattern.
+
+   The `.env.*` rule does not classify `.env.example`, `.env.sample`, or `.env.template` as secret paths; they remain subject to the normal review rules.
+
 3. **`user_exclude`** — Does the path match any user `exclude` pattern?
    Excluded.
 4. **`user_include`** — If the user defined `include`, does the path

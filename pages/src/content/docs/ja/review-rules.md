@@ -64,6 +64,9 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 1. **`binary`**: ファイルはバイナリか？ 除外します。
 2. **`secret_exclude`**: 古いパスまたは新しいパスが[組み込みのシークレットパスパターン](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)に一致するか？ 一致するなら除外します。この保護はユーザールールより先に適用され、`include` パターンでは上書きできません。
+
+   `.env.*` ルールでは `.env.example`、`.env.sample`、`.env.template` はシークレットパスとして扱われず、通常のレビュールールが適用されます。
+
 3. **`user_exclude`**: パスがいずれかのユーザー `exclude` パターンに一致するか？ 除外します。
 4. **`user_include`**: ユーザーが `include` を定義している場合、パスは一致するか？ 一致するなら**即座に保持**します（下記の `unsupported_ext` と `default_path` のゲートをバイパス）。
 5. **`unsupported_ext`**: ファイルの拡張子は[ホワイトリスト](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)にあるか？ なければ除外します。

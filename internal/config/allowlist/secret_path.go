@@ -6,6 +6,7 @@ package allowedext
 import (
 	_ "embed"
 	"encoding/json"
+	"path"
 	"strings"
 	"sync"
 
@@ -42,13 +43,27 @@ func initSecret() {
 //
 // A path that is not a secret is not thereby reviewable: it still has to pass
 // the extension allowlist and the default exclude patterns.
-func IsSecretPath(path string) bool {
+func IsSecretPath(filePath string) bool {
 	secretOnce.Do(initSecret)
-	lowerPath := strings.ToLower(path)
+	lowerPath := strings.ToLower(filePath)
+	envTemplate := isEnvTemplate(lowerPath)
 	for _, pattern := range secretPatterns {
+		// Template names are exempt only from the broad .env.* rule.
+		if envTemplate && pattern == "**/.env.*" {
+			continue
+		}
 		if matched, _ := doublestar.Match(pattern, lowerPath); matched {
 			return true
 		}
 	}
 	return false
+}
+
+func isEnvTemplate(filePath string) bool {
+	switch path.Base(filePath) {
+	case ".env.example", ".env.sample", ".env.template":
+		return true
+	default:
+		return false
+	}
 }

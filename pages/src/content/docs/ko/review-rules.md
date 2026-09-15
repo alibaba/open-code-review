@@ -80,6 +80,9 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 1. **`binary`** — 바이너리 파일인가? 그렇다면 제외.
 2. **`secret_exclude`** — 이전 경로나 새 경로가 [내장 시크릿 경로 패턴](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)에 걸리는가? 그렇다면 제외.
    이 보호는 사용자 규칙보다 먼저 적용되며 `include` 패턴으로 우회할 수 없습니다.
+
+   `.env.*` 규칙은 `.env.example`, `.env.sample`, `.env.template`을 비밀 경로로 분류하지 않으며, 이러한 파일에는 일반 리뷰 규칙이 적용됩니다.
+
 3. **`user_exclude`** — 경로가 사용자 `exclude` 패턴에 걸리는가? 그렇다면 제외.
 4. **`user_include`** — 사용자가 `include`를 정의했다면 경로가 거기 걸리는가?
    걸리면 **바로 통과**합니다(아래 `unsupported_ext`와 `default_path` 관문을

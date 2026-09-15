@@ -21,6 +21,10 @@ func TestIsSecretPath(t *testing.T) {
 		{"env local nested", "foo/.env.local", true},
 		{"env scoped local at root", ".env.production.local", true},
 		{"env scoped local nested", "foo/.env.production.local", true},
+		{"env production", ".env.production", true},
+		{"env staging", ".env.staging", true},
+		{"env development", ".env.development", true},
+		{"env production nested", "foo/.env.production", true},
 
 		// SSH material: the directory pattern carries everything inside it,
 		// including files the key-name patterns do not list (config, known_hosts).
@@ -53,6 +57,9 @@ func TestIsSecretPath(t *testing.T) {
 		{"env sample", ".env.sample", false},
 		{"env template", ".env.template", false},
 
+		// Template exceptions must not bypass other secret-path rules.
+		{"env example in ssh dir", ".ssh/.env.example", true},
+
 		// Public and derived files that only look like key material
 		{"public key", "id_rsa.pub", false},
 		{"key backup", "foo/id_rsa.backup", false},
@@ -75,6 +82,8 @@ func TestIsSecretPath(t *testing.T) {
 
 		// Case-insensitive, matching IsExcludedPath.
 		{"uppercase env", ".ENV", true},
+		{"uppercase env production", ".ENV.PRODUCTION", true},
+		{"uppercase env example", ".ENV.EXAMPLE", false},
 		{"uppercase key", "ID_RSA", true},
 		{"mixed case ssh dir", "Foo/.SSH/id_ed25519", true},
 	}
