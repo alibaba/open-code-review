@@ -5,8 +5,11 @@ package tool
 
 import (
 	"context"
+	"fmt"
 	"strings"
 )
+
+const fileReadDiffMaxLines = 500
 
 // DiffMap is a read-only snapshot of parsed diffs, keyed by file path.
 // Safe for concurrent reads after construction via NewDiffMap.
@@ -51,24 +54,74 @@ func (p *FileReadDiffProvider) Execute(_ context.Context, args map[string]any) (
 		return "Error: no files found", nil
 	}
 
-	var sb strings.Builder
+	// start_line is a 1-based index into the diff lines of path_array taken
+	// in order, file headers not counted, so a truncated result can be
+	// continued from exactly where it stopped.
+	skip := 0
+	if v, ok := args["start_line"].(float64); ok && v > 1 {
+		skip = int(v) - 1
+	}
+
+	var content strings.Builder
+	totalDiffLines, shown := 0, 0
+	truncated := false
+	hasFoundDiff := false
+
+outer:
 	for _, item := range pathArray {
 		path, ok := item.(string)
 		if !ok {
 			continue
 		}
-		if d, exists := p.diffMap.Get(path); exists {
-			sb.WriteString("==== FILE: ")
-			sb.WriteString(path)
-			sb.WriteString(" ====\n")
-			sb.WriteString(d)
-			sb.WriteString("\n")
+		d, exists := p.diffMap.Get(path)
+		if !exists {
+			continue
+		}
+		hasFoundDiff = true
+		d = strings.TrimRight(d, "\n")
+		if d == "" {
+			// Binary files and pure renames have no diff body; list them on
+			// the first page, as before the cap, without spending budget.
+			if skip == 0 {
+				fmt.Fprintf(&content, "==== FILE: %s ====\n", path)
+			}
+			continue
+		}
+		lines := strings.Split(d, "\n")
+		from := max(skip-totalDiffLines, 0)
+		totalDiffLines += len(lines)
+		if from >= len(lines) {
+			continue
+		}
+		if shown >= fileReadDiffMaxLines {
+			truncated = true
+			break
+		}
+		fmt.Fprintf(&content, "==== FILE: %s ====\n", path)
+		for _, line := range lines[from:] {
+			if shown >= fileReadDiffMaxLines {
+				truncated = true
+				break outer
+			}
+			content.WriteString(line)
+			content.WriteString("\n")
+			shown++
 		}
 	}
 
-	result := sb.String()
-	if result == "" {
+	if !hasFoundDiff {
 		return "Error: diff not found for the requested paths", nil
 	}
-	return result, nil
+	if content.Len() == 0 {
+		return fmt.Sprintf("Error: start_line %d is past the end of the diff (%d lines)", skip+1, totalDiffLines), nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "IS_TRUNCATED: %t\n", truncated)
+	sb.WriteString(content.String())
+	if truncated {
+		fmt.Fprintf(&sb, "\nNote: Results truncated to %d lines. Call file_read_diff again with the same path_array and start_line=%d to read the rest.\n", fileReadDiffMaxLines, skip+shown+1)
+	}
+
+	return sb.String(), nil
 }
