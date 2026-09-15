@@ -525,6 +525,75 @@ function testDeclarationTargetsAreCoveredByTheTreesWeValidate() {
   }
 }
 
+const REPO_ROOT = path.join(__dirname, "..", "..");
+
+const DELEGATE_SKILL_PATHS = [
+  "skills/open-code-review-delegate/SKILL.md",
+  "plugins/open-code-review/skills/open-code-review-delegate/SKILL.md",
+];
+
+function step3Section(content, rel) {
+  const start = content.indexOf("### Step 3:");
+  assert.ok(start >= 0, `${rel}: missing ### Step 3 heading`);
+  const rest = content.slice(start);
+  const next = rest.search(/\n### Step 4:/);
+  assert.ok(next > 0, `${rel}: missing ### Step 4 heading after Step 3`);
+  return rest.slice(0, next);
+}
+
+function gitExampleLines(section) {
+  const lines = [];
+  const fenceRe = /```bash\n([\s\S]*?)```/g;
+  let match;
+  while ((match = fenceRe.exec(section)) !== null) {
+    for (const line of match[1].split("\n")) {
+      const trimmed = line.trim();
+      if (/^git\s+/.test(trimmed)) {
+        lines.push(trimmed);
+      }
+    }
+  }
+  return lines;
+}
+
+function testDelegateSkillsRequireNoPagerOnStep3GitExamples() {
+  const sections = [];
+  for (const rel of DELEGATE_SKILL_PATHS) {
+    const abs = path.join(REPO_ROOT, rel);
+    const content = fs.readFileSync(abs, "utf8");
+    const step3 = step3Section(content, rel);
+    const gitLines = gitExampleLines(step3);
+
+    assert.ok(
+      gitLines.some((line) => line.startsWith("git --no-pager diff <merge_base>")),
+      `${rel}: missing range-mode git --no-pager diff example; got ${JSON.stringify(gitLines)}`
+    );
+    assert.ok(
+      gitLines.some((line) => line.startsWith("git --no-pager show ")),
+      `${rel}: missing commit-mode git --no-pager show example; got ${JSON.stringify(gitLines)}`
+    );
+    assert.ok(
+      gitLines.some((line) => /git --no-pager diff HEAD/.test(line)),
+      `${rel}: missing workspace git --no-pager diff HEAD example; got ${JSON.stringify(gitLines)}`
+    );
+
+    const bare = gitLines.filter((line) => /^git\s+(diff|show)\b/.test(line));
+    assert.deepStrictEqual(
+      bare,
+      [],
+      `${rel}: Step 3 still instructs a bare git diff/show: ${JSON.stringify(bare)}`
+    );
+
+    sections.push(step3);
+  }
+
+  assert.strictEqual(
+    sections[0],
+    sections[1],
+    "canonical and plugin SKILL.md Step 3 sections must stay synchronized"
+  );
+}
+
 // --- end-to-end over temp fixtures ----------------------------------------
 //
 // These runners are deliberately NOT pointed at the real repository. The two
@@ -811,6 +880,7 @@ function main_() {
   testUnscannedDocsAreReportedNotSkippedSilently();
   testReadFileOrNullSizeCapIsOptional();
   testDeclarationTargetsAreCoveredByTheTreesWeValidate();
+  testDelegateSkillsRequireNoPagerOnStep3GitExamples();
   testCorpusFloorFailsClosed();
   testLinksRunnerOnFixture();
   testLinksRunnerPassesAndReportsCounts();
