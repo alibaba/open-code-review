@@ -170,7 +170,7 @@ The task and request timeouts are independent:
 | Input | Default | Description |
 |-------|---------|-------------|
 | `effort` | `''` | Review effort preset passed to `ocr review --effort`: `low`, `medium`, or `high` (case-insensitive). Higher effort runs more review rounds. Empty keeps the CLI default (the configured value, or medium). |
-| `max_tokens_budget` | `''` | Total token cap (input+output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Once the cap is exceeded, dispatch stops, skipped files are reported as failed(budget), partial results are still published, and the review exits 0. |
+| `max_tokens_budget` | `''` | Total token cap (input+output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Checked before every LLM round: a group already over the cap gets one final round to submit findings, no further groups are dispatched, over-budget and skipped files are reported as failed(budget), partial results are still published, and the review exits 0. |
 
 ```yaml
 - uses: alibaba/open-code-review@main
