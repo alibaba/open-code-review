@@ -252,6 +252,48 @@ type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
+
+	// ExtraFields carries provider fields that OCR does not model, captured
+	// verbatim from the response so they can be echoed on later turns. Some
+	// OpenAI-compatible providers attach opaque metadata to a tool call and
+	// reject the next request when it is missing - Vertex AI's Gemini endpoint
+	// returns a thought signature under extra_content (#947).
+	//
+	// It is json:"-" so the opaque payload stays out of review and session
+	// output; it is request state, not something a reader should see.
+	ExtraFields map[string]json.RawMessage `json:"-"`
+}
+
+// reservedToolCallFields are owned by OCR and never taken from a provider, so a
+// response cannot use ExtraFields to rewrite the identity of a tool call.
+var reservedToolCallFields = map[string]bool{"id": true, "type": true, "function": true}
+
+// opaqueToolCallFields extracts the fields of a provider tool call that OCR does
+// not model. Anything malformed yields nil rather than a partial map: forwarding
+// a half-parsed payload is worse than dropping it, since the provider would
+// reject the request either way.
+func opaqueToolCallFields(raw string) map[string]json.RawMessage {
+	if raw == "" {
+		return nil
+	}
+	// Unmarshal parses the whole document to find value boundaries, so a
+	// malformed payload fails here and every retained value is syntactically
+	// valid by construction - no second validation pass is needed.
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &all); err != nil {
+		return nil
+	}
+	var extra map[string]json.RawMessage
+	for k, v := range all {
+		if reservedToolCallFields[k] {
+			continue
+		}
+		if extra == nil {
+			extra = make(map[string]json.RawMessage, len(all))
+		}
+		extra[k] = v
+	}
+	return extra
 }
 
 // FunctionCall holds the name and arguments of a tool call.
@@ -810,14 +852,25 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 				asst.Content.OfString = openai.String(content)
 			}
 			for _, tc := range msg.ToolCalls {
-				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
-					OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-						ID: tc.ID,
-						Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-							Name:      tc.Function.Name,
-							Arguments: tc.Function.Arguments,
-						},
+				fn := &openai.ChatCompletionMessageFunctionToolCallParam{
+					ID: tc.ID,
+					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
 					},
+				}
+				// Echo provider fields OCR does not model. SetExtraFields
+				// overrides same-key fields, so opaqueToolCallFields having
+				// dropped the reserved ones is what keeps ID/Type/Function ours.
+				if len(tc.ExtraFields) > 0 {
+					extra := make(map[string]any, len(tc.ExtraFields))
+					for k, v := range tc.ExtraFields {
+						extra[k] = v
+					}
+					fn.SetExtraFields(extra)
+				}
+				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
+					OfFunction: fn,
 				})
 			}
 			// reasoning_content: gateway extension not modeled by the SDK (#805).
@@ -889,6 +942,7 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 					Name:      tc.Function.Name,
 					Arguments: tc.Function.Arguments,
 				},
+				ExtraFields: opaqueToolCallFields(tc.RawJSON()),
 			})
 		}
 
