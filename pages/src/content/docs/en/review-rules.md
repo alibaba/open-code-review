@@ -166,6 +166,7 @@ matching order:
 | `**/*.go` | `go.md` — Go source. |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling). |
 | `**/*.{hbs,mustache}` | `handlebars_mustache.md` — Handlebars and Mustache templates. |
+| `**/*.twig` | `twig.md` — Twig templates, including `.html.twig` and `.txt.twig`. |
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — Astro components and islands. |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
