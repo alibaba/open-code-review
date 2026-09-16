@@ -47,6 +47,7 @@ jobs:
           cp pages/logo.svg _site/logo.svg
           cp install.sh _site/install.sh
           cp install.ps1 _site/install.ps1
+          cp public/public/robots.txt _site/robots.txt
 
       - name: Verify install scripts
         run: |
@@ -55,6 +56,7 @@ jobs:
           sh -n _site/install.sh
           cmp install.sh _site/install.sh
           cmp install.ps1 _site/install.ps1
+          test -e _site/robots.txt
 
       - uses: actions/upload-pages-artifact@v5
         with:
