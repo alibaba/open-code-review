@@ -147,3 +147,52 @@ func TestBudgetGate_Unlimited(t *testing.T) {
 		t.Errorf("unlimited budget should run all 5 files, ran %d", calls)
 	}
 }
+
+type fakeNeverDoneBudgetClient struct {
+	perCallTokens int64
+}
+
+func (f *fakeNeverDoneBudgetClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	content := ""
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Role: "assistant", Content: &content}}},
+		Usage:   &llm.UsageInfo{PromptTokens: f.perCallTokens, TotalTokens: f.perCallTokens},
+	}, nil
+}
+
+func TestBudgetGate_StopsRunningScan(t *testing.T) {
+	fake := &fakeNeverDoneBudgetClient{perCallTokens: 60}
+	a := NewAgent(Args{
+		Template:         budgetTestTemplate(),
+		LLMClient:        fake,
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxTokensBudget:  100,
+		Session:          session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: session.ReviewModeFullScan}),
+		SkipPlan:         true,
+		SkipDedup:        true,
+		SkipSummary:      true,
+	})
+	a.args.Tools.Freeze()
+
+	completed, reason, err := a.executeSubtask(context.Background(), makeScanItems(1)[0])
+	if err != nil {
+		t.Fatalf("executeSubtask: %v", err)
+	}
+	if completed || reason == "" {
+		t.Fatalf("completed = %v, reason = %q; want a budget stop", completed, reason)
+	}
+	if !a.BudgetExceeded() {
+		t.Fatal("expected BudgetExceeded after stopping a running scan")
+	}
+
+	var warnings int
+	for _, warning := range a.Warnings() {
+		if warning.Type == "token_budget_reached" {
+			warnings++
+		}
+	}
+	if warnings != 1 {
+		t.Fatalf("token_budget_reached warnings = %d, want 1", warnings)
+	}
+}

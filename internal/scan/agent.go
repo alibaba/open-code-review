@@ -106,7 +106,7 @@ type Agent struct {
 	resumeInfo       *session.ResumeInfo
 	scanFingerprints map[string]string
 	projectSummary   string // populated post-run by maybeRunProjectSummary
-	budgetExceeded   bool   // set when the token budget gate stopped dispatch; written only by dispatchBatch's loop
+	budgetExceeded   atomic.Bool
 }
 
 // ProjectSummary returns the markdown project-level summary produced after
@@ -146,7 +146,8 @@ func NewAgent(args Args) *Agent {
 		// DiffLookup returns a synthetic Diff so the code_comment tool's
 		// line-number resolver (resolveFromFileContent) can match against
 		// the full file content of the scanned file.
-		DiffLookup: a.lookupDiff,
+		DiffLookup:      a.lookupDiff,
+		MaxTokensBudget: args.MaxTokensBudget,
 		// NewRequestMeta is deliberately left nil. The retry report describes
 		// ocr review; scan shares this Runner, and a nil factory is what keeps
 		// scan's requests out of the report. See llmloop.Deps.NewRequestMeta.
@@ -232,7 +233,7 @@ func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.Too
 // its partial comments and a nil error, and the value reaches output solely as
 // summary.budget_exceeded. Per-file MaxToolRequestTimes exhaustion does NOT set
 // it — that is an item-level outcome, not a run-level budget stop.
-func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded }
+func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded.Load() }
 
 func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
@@ -721,7 +722,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 				budgetHit = true
 				// budgetHit is per-batch and dies with this call; the field is
 				// the run-level signal emitRunResult reads after Run returns.
-				a.budgetExceeded = true
+				a.budgetExceeded.Store(true)
 				break
 			}
 		}
@@ -824,6 +825,10 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 		return false, "", err
 	}
 	if !completed {
+		if stop == llmloop.StopTokenBudget && a.budgetExceeded.CompareAndSwap(false, true) {
+			a.recordWarning("token_budget_reached", it.Path,
+				fmt.Sprintf("stopped file %q mid-scan: used %d tokens exceeds budget %d", it.Path, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
+		}
 		// Scan sessions opt out of the run manifest, so this one string is the
 		// whole diagnostic: it feeds both RecordReviewItemFailed and the
 		// scan_subtask_error warning, and under --format json the [ocr] progress

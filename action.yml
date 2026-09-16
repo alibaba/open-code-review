@@ -94,9 +94,9 @@ inputs:
   max_tokens_budget:
     description: >-
       Total token cap passed to `ocr review --max-tokens-budget`. Base-10
-      integer; empty or 0 means unlimited. Once the cap is exceeded, dispatch
-      stops, skipped files are reported as failed(budget), partial results
-      are still published, and the review exits 0.
+      integer; empty or 0 means unlimited. Checked before each LLM round and at
+      dispatch; over-budget and skipped files are reported as failed(budget),
+      partial results are still published, and the review exits 0.
     required: false
     default: ''
   stream_progress:

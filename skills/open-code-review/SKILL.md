@@ -187,7 +187,7 @@ Beyond the common flags above, `ocr review` exposes a few groups of controls. Ru
 **Budget**
 
 - `--max-tokens <n>` — per-group prompt ceiling; defaults to the configured value or the template default (`200000`).
-- `--max-tokens-budget <n>` — cap total input + output tokens for the run. Once exceeded, dispatch stops, partial results are still published, and skipped files are reported as `failed(budget)`.
+- `--max-tokens-budget <n>` — cap total input + output tokens for the run. Checked before each LLM round and at dispatch; over-budget and skipped files are reported as `failed(budget)`, and partial results are still published.
 - `--no-filter` — keep all review comments and skip the LLM post-filtering call.
 
 ## Gotchas

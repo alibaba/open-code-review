@@ -983,6 +983,7 @@ func TestClassifyMainLoopStop(t *testing.T) {
 		wantReason string
 	}{
 		{"max_rounds", llmloop.StopMaxRounds, session.FailureBudget, "reached the maximum tool-request rounds without finishing"},
+		{"token_budget", llmloop.StopTokenBudget, session.FailureBudget, "reached the aggregate token budget before finishing"},
 		{"empty_rounds", llmloop.StopEmptyRounds, session.FailureUnknown, "stopped after repeated rounds without a usable tool result"},
 		{"compression", llmloop.StopCompression, session.FailureUnknown, "stopped because context compression exceeded its threshold"},
 		{"none", llmloop.StopNone, session.FailureUnknown, "main task stopped before completing"},

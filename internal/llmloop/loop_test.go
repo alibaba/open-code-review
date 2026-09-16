@@ -825,6 +825,7 @@ func TestMainLoopStopStringAndReason(t *testing.T) {
 		{StopMaxRounds, "max_rounds"},
 		{StopEmptyRounds, "empty_rounds"},
 		{StopCompression, "compression"},
+		{StopTokenBudget, "token_budget"},
 	} {
 		t.Run(tc.wantName, func(t *testing.T) {
 			name := tc.stop.String()
@@ -853,12 +854,12 @@ func TestMainLoopStopStringAndReason(t *testing.T) {
 // stop its own String() and Reason() case instead of letting it fall through to
 // a message that says nothing.
 func TestMainLoopStopUnknownValue(t *testing.T) {
-	unknown := StopCompression + 1
+	unknown := StopTokenBudget + 1
 
-	if got, want := unknown.String(), "MainLoopStop(4)"; got != want {
+	if got, want := unknown.String(), "MainLoopStop(5)"; got != want {
 		t.Errorf("String() = %q, want %q; a new constant needs its own case in String() and Reason()", got, want)
 	}
-	if got, want := unknown.Reason(), "main task stopped for an unrecognized reason (stop=4)"; got != want {
+	if got, want := unknown.Reason(), "main task stopped for an unrecognized reason (stop=5)"; got != want {
 		t.Errorf("Reason() = %q, want %q; a new constant needs its own case in String() and Reason()", got, want)
 	}
 	if unknown.Reason() == StopNone.Reason() {
@@ -971,4 +972,37 @@ func TestExecuteToolCall_CodeCommentWellFormedArgsDoesNotWarn(t *testing.T) {
 	if w := r.Warnings(); len(w) != 0 {
 		t.Errorf("warnings = %+v, want none", w)
 	}
+}
+
+func TestRunMainTask_TokenBudgetStopsBeforeNextRound(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		withUsage(fileReadToolCallResponse("call_1", `{"path":"main.go"}`), 600),
+		withUsage(fileReadToolCallResponse("call_2", `{"path":"main.go"}`), 600),
+		withUsage(fileReadToolCallResponse("call_3", `{"path":"main.go"}`), 600),
+	}}
+	deps := newTestDeps(client)
+	deps.MaxTokensBudget = 1000
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "file_read", Description: "read"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+	}
+	runner := NewRunner(deps)
+
+	completed, stop, err := runner.RunMainTask(context.Background(), []llm.Message{
+		llm.NewTextMessage("user", "review"),
+	}, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if completed || stop != StopTokenBudget {
+		t.Fatalf("completed = %v, stop = %v; want false, StopTokenBudget", completed, stop)
+	}
+	if got := len(client.requests); got != 3 {
+		t.Fatalf("LLM requests = %d, want 3 (2 review rounds + grace)", got)
+	}
+}
+
+func withUsage(resp *llm.ChatResponse, prompt int64) *llm.ChatResponse {
+	resp.Usage = &llm.UsageInfo{PromptTokens: prompt, TotalTokens: prompt}
+	return resp
 }

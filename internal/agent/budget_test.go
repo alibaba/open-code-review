@@ -274,3 +274,87 @@ func TestDispatchSubtasks_UnlimitedBudget(t *testing.T) {
 		t.Error("unlimited budget must not set BudgetExceeded")
 	}
 }
+
+type fakeFirstDoneThenNeverClient struct {
+	perCallTokens int64
+	calls         int64
+}
+
+func (f *fakeFirstDoneThenNeverClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	n := atomic.AddInt64(&f.calls, 1)
+	if n == 1 {
+		return &llm.ChatResponse{
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{Role: "assistant", ToolCalls: []llm.ToolCall{{
+					ID: "1", Type: "function", Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"},
+				}}},
+				FinishReason: "tool_calls",
+			}},
+			Model: "fake",
+			Usage: &llm.UsageInfo{PromptTokens: 10, TotalTokens: 10},
+		}, nil
+	}
+	content := ""
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Role: "assistant", Content: &content}}},
+		Model:   "fake",
+		Usage:   &llm.UsageInfo{PromptTokens: f.perCallTokens, TotalTokens: f.perCallTokens},
+	}, nil
+}
+
+func TestDispatchSubtasks_TokenBudgetStopsRunningGroup(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	diffs := makeBudgetDiffs(2)
+	budget := estimateDiffFileTokens(diffs[1]) * 4
+	fake := &fakeFirstDoneThenNeverClient{perCallTokens: budget/2 + 1}
+	a := New(Args{
+		LLMClient:        fake,
+		Model:            "fake",
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   1,
+		MaxTokensBudget:  budget,
+		Template:         budgetAgentTestTemplate(),
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+		},
+	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
+	a.diffs = diffs
+	a.currentDate = "2025-06-26 10:00"
+	a.args.Tools.Freeze()
+
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if calls := atomic.LoadInt64(&fake.calls); calls != 4 {
+		t.Fatalf("LLM calls = %d, want 4 (1 completed + 2 review rounds + grace)", calls)
+	}
+	if !a.BudgetExceeded() {
+		t.Fatal("expected BudgetExceeded after stopping a running group")
+	}
+
+	var warnings int
+	for _, warning := range a.Warnings() {
+		if warning.Type == "token_budget_reached" {
+			warnings++
+		}
+	}
+	if warnings != 1 {
+		t.Fatalf("token_budget_reached warnings = %d, want 1", warnings)
+	}
+
+	if err := a.finalizeManifest(); err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	manifest := a.RunManifest()
+	if manifest == nil || manifest.TerminalState != session.StatePartial {
+		t.Fatalf("manifest terminal = %v, want partial", manifest)
+	}
+	if len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Failed) != 1 {
+		t.Fatalf("coverage = %+v, want one completed and one failed", manifest.Coverage)
+	}
+	if got := manifest.Coverage.Failed[0].Classification; got != session.FailureBudget {
+		t.Fatalf("failure classification = %q, want budget", got)
+	}
+}
