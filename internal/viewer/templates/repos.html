@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,25 +9,31 @@
 </head>
 <body>
 <nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a></nav>
-<main>
+<main class="repos-page">
+<div class="repos-heading">
 <h2>Repositories</h2>
 {{if .Repos}}
 <div class="repository-search">
-    <label for="repository-search-input">Search repositories</label>
-    <input id="repository-search-input" type="search" placeholder="Search repositories..." autocomplete="off">
+    <label class="sr-only" for="repository-search-input">Search repositories</label>
+    <input id="repository-search-input" type="search" placeholder="Search repositories" autocomplete="off">
 </div>
+{{end}}
+</div>
+{{if .Repos}}
 <table id="repositories-table" class="table">
-    <thead><tr><th>Repository</th><th>Sessions</th><th>Last Modified</th></tr></thead>
+    <thead><tr><th>Repository</th><th>Sessions</th><th>Last Modified</th><th class="repos-action-col">Action</th></tr></thead>
     <tbody>
     {{range .Repos}}
         <tr>
-            <td data-repository-name><a href="/r/{{.EncodedPath}}">{{.EncodedPath}}</a></td>
+            <td data-repository-name>{{.EncodedPath}}</td>
             <td>{{.SessionCount}}</td>
             <td>{{formatTime .LastModified}}</td>
+            <td><a class="repo-check" href="/r/{{.EncodedPath}}">Check</a></td>
         </tr>
     {{end}}
     </tbody>
 </table>
+<nav id="repositories-pagination" class="repos-pagination" aria-label="Repository pages" hidden></nav>
 <script src="/static/repos.js"></script>
 {{else}}
 <p>No session data found. Run a code review first.</p>

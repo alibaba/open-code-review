@@ -30,9 +30,7 @@ func TestHandleRepos_Success(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "test-repo") {
-		t.Errorf("response does not contain repo name")
-	}
+	assertReposLandingMarkup(t, rr.Body.String(), []string{"test-repo"})
 }
 
 func TestHandleRepos_EmptyRoot(t *testing.T) {
@@ -44,9 +42,7 @@ func TestHandleRepos_EmptyRoot(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "No session data found") {
-		t.Errorf("expected empty-state message in body")
-	}
+	assertReposEmptyMarkup(t, rr.Body.String())
 }
 
 func TestHandleRepos_NotFoundForNonRootPath(t *testing.T) {

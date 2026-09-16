@@ -60,9 +60,7 @@ func TestRenderTemplate_Success(t *testing.T) {
 	if ct != "text/html; charset=utf-8" {
 		t.Errorf("Content-Type = %q", ct)
 	}
-	if !strings.Contains(rr.Body.String(), "No session data found") {
-		t.Errorf("expected empty repos message in rendered output")
-	}
+	assertReposEmptyMarkup(t, rr.Body.String())
 }
 
 func TestRenderTemplate_WithRepos(t *testing.T) {
@@ -77,19 +75,7 @@ func TestRenderTemplate_WithRepos(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
-	body := rr.Body.String()
-	for _, required := range []string{
-		"my-project",
-		"other-project",
-		`id="repository-search-input"`,
-		`id="repositories-table"`,
-		"data-repository-name",
-		`src="/static/repos.js"`,
-	} {
-		if !strings.Contains(body, required) {
-			t.Errorf("rendered repository page missing %q", required)
-		}
-	}
+	assertReposLandingMarkup(t, rr.Body.String(), []string{"my-project", "other-project"})
 }
 
 func TestRenderTemplate_BadTemplate(t *testing.T) {
@@ -258,12 +244,13 @@ func TestStaticFS(t *testing.T) {
 	if sfs == nil {
 		t.Fatal("staticFS() returned nil")
 	}
-	// Should be able to open style.css
-	f, err := sfs.Open("style.css")
-	if err != nil {
-		t.Fatalf("failed to open style.css from staticFS: %v", err)
+	for _, name := range []string{"style.css", "repos.js"} {
+		f, err := sfs.Open(name)
+		if err != nil {
+			t.Fatalf("failed to open %s from staticFS: %v", name, err)
+		}
+		_ = f.Close()
 	}
-	_ = f.Close()
 }
 
 func TestResolveAllowedHostsFromEnv(t *testing.T) {
