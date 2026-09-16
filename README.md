@@ -193,7 +193,7 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
 
 ## Contributing
 
-This project exists thanks to all the people who contribute. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding guidelines, and how to submit pull requests.
+This project exists thanks to all the people who contribute. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding guidelines, and how to submit pull requests. New contributors can start with [good first issues](https://github.com/alibaba/open-code-review/labels/good%20first%20issue).
 
 <a href="https://github.com/alibaba/open-code-review/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />
