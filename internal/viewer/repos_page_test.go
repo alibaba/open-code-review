@@ -121,6 +121,34 @@ func TestMux_GetRootReposPage(t *testing.T) {
 	}
 }
 
+// Issue #1322 and the repositories.png mockup specify a green Check control.
+// --accent is still indigo until #1320, so the repos page sets the brand green
+// on .repo-check directly. This reads the shipped stylesheet, not a copy of
+// the hex in the test.
+func TestReposPageCSS_CheckIsMockupGreen(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read shipped style.css: %v", err)
+	}
+	src := string(css)
+	marker := ".repos-page #repositories-table .repo-check {"
+	idx := strings.Index(src, marker)
+	if idx < 0 {
+		t.Fatalf("shipped style.css missing %q", marker)
+	}
+	end := idx + 240
+	if end > len(src) {
+		end = len(src)
+	}
+	block := src[idx:end]
+	if !strings.Contains(block, "#2BDE5E") {
+		t.Errorf("Check color in shipped CSS is not the mockup green #2BDE5E:\n%s", block)
+	}
+	if strings.Contains(block, "var(--accent)") {
+		t.Errorf("Check still uses indigo --accent; the mockup and #1322 ask for green:\n%s", block)
+	}
+}
+
 func TestHandleRepos_RendersEveryRepoForClientPagination(t *testing.T) {
 	root := t.TempDir()
 	var names []string

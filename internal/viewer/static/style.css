@@ -218,8 +218,11 @@ h3 {
     letter-spacing: -0.02em;
 }
 
-/* ── Repositories landing page ── */
-/* Scoped to .repos-page so Sessions/Compare keep the shared .table rules. */
+/* ── Repositories landing page (#1322) ── */
+/* Scoped to .repos-page so Sessions/Compare keep the shared .table rules.
+   Do not put tokens or the app header here — those belong to #1320. Do not
+   add icon files here — those belong to #1321. Check uses the brand green
+   from the mockup (#2BDE5E); --accent is still indigo until #1320. */
 .repos-page .repos-heading {
     display: flex;
     align-items: center;
@@ -243,7 +246,7 @@ h3 {
     padding: 0.5rem 2.25rem 0.5rem 0.9rem;
     color: var(--text);
     background: var(--surface-alt);
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     border-radius: 999px;
     font: inherit;
     font-size: 0.875rem;
@@ -255,6 +258,7 @@ h3 {
     outline: 2px solid var(--link);
     outline-offset: 1px;
     background: var(--surface);
+    border-color: var(--border);
 }
 .repos-page .repository-search::after {
     content: "";
@@ -269,25 +273,54 @@ h3 {
     -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='16.5' y1='16.5' x2='21' y2='21'/%3E%3C/svg%3E") center / contain no-repeat;
     mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='16.5' y1='16.5' x2='21' y2='21'/%3E%3C/svg%3E") center / contain no-repeat;
 }
+.repos-page #repositories-table {
+    table-layout: fixed;
+    box-shadow: none;
+}
+.repos-page #repositories-table th {
+    background: var(--surface);
+    font-weight: 500;
+}
 .repos-page #repositories-table th.repos-action-col {
     text-transform: none;
     letter-spacing: 0;
 }
-.repos-page #repositories-table td[data-repository-name] {
-    color: var(--text);
+.repos-page #repositories-table th:nth-child(2),
+.repos-page #repositories-table td:nth-child(2) {
+    width: 16%;
 }
-.repos-page .repo-check {
-    color: var(--accent);
+.repos-page #repositories-table th:nth-child(3),
+.repos-page #repositories-table td:nth-child(3) {
+    width: 22%;
+}
+.repos-page #repositories-table th:nth-child(4),
+.repos-page #repositories-table td:nth-child(4) {
+    width: 12%;
+}
+.repos-page #repositories-table td {
+    color: var(--text);
+    padding: 0.95rem 1.25rem;
+}
+.repos-page #repositories-table tbody tr:hover {
+    background: var(--surface-alt);
+}
+.repos-page #repositories-table .repo-check {
+    color: #2BDE5E;
     font-weight: 500;
     text-decoration: none;
     white-space: nowrap;
 }
-.repos-page .repo-check:hover {
-    color: var(--accent-hover);
+.repos-page #repositories-table .repo-check:hover {
+    color: #22c54b;
 }
-.repos-page .repo-check:focus-visible {
-    outline: 2px solid var(--link);
+.repos-page #repositories-table .repo-check:focus-visible {
+    outline: 2px solid #2BDE5E;
     outline-offset: 2px;
+}
+@media (prefers-color-scheme: dark) {
+    .repos-page #repositories-table .repo-check:hover {
+        color: #57e87a;
+    }
 }
 .repos-page .repos-pagination {
     display: flex;
@@ -306,7 +339,7 @@ h3 {
     height: 2rem;
     padding: 0 0.4rem;
     border: 1px solid transparent;
-    border-radius: var(--radius-xs);
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-muted);
     font: inherit;
