@@ -386,3 +386,88 @@ func TestDispatchSubtasks_TokenBudgetStopsInFlightGroup(t *testing.T) {
 		t.Fatalf("stopped group classification = %q, want budget", got)
 	}
 }
+
+// fakeCommentAndDoneClient answers the first request with a code_comment and a
+// task_done in the same turn, reporting perCallTokens of usage. Its round
+// therefore completes with a new finding, which is what lets the round loop
+// reach round 2 at all, while leaving the run over budget.
+type fakeCommentAndDoneClient struct {
+	perCallTokens int64
+	path          string
+	calls         int64 // atomic
+}
+
+func (f *fakeCommentAndDoneClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	atomic.AddInt64(&f.calls, 1)
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{Role: "assistant", ToolCalls: []llm.ToolCall{
+				{ID: "1", Type: "function", Function: llm.FunctionCall{
+					Name:      "code_comment",
+					Arguments: `{"comments":[{"path":"` + f.path + `","content":"missing a nil check here"}]}`,
+				}},
+				{ID: "2", Type: "function", Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"}},
+			}},
+			FinishReason: "tool_calls",
+		}},
+		Model: "fake",
+		Usage: &llm.UsageInfo{PromptTokens: f.perCallTokens, TotalTokens: f.perCallTokens},
+	}, nil
+}
+
+// TestDispatchSubtasks_TokenBudgetSkipsNextRoundAfterCompletedRound covers the
+// round gate rather than the in-conversation check: a group whose round 1 ends
+// in task_done already over budget must not start round 2, must not get a grace
+// round (it has nothing unreported), and must stay completed, while the run
+// still reports that the budget was exceeded.
+func TestDispatchSubtasks_TokenBudgetSkipsNextRoundAfterCompletedRound(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	diffs := makeBudgetDiffs(1)
+	budget := estimateDiffFileTokens(diffs[0]) * 4
+	fake := &fakeCommentAndDoneClient{perCallTokens: budget + 1, path: diffs[0].NewPath}
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	tpl := budgetAgentTestTemplate()
+	tpl.MaxReviewRounds = 2
+	a := New(Args{
+		LLMClient:        fake,
+		Model:            "fake",
+		CommentCollector: collector,
+		Tools:            reg,
+		MaxConcurrency:   1,
+		MaxTokensBudget:  budget,
+		SkipFilter:       true, // the filter is an LLM call of its own
+		Template:         tpl,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment", Description: "comment"}},
+		},
+	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
+	a.diffs = diffs
+	a.currentDate = "2025-06-26 10:00"
+	a.args.Tools.Freeze()
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if calls := atomic.LoadInt64(&fake.calls); calls != 1 {
+		t.Fatalf("LLM calls = %d, want 1: round 2 and any grace round must be skipped", calls)
+	}
+	if len(comments) != 1 {
+		t.Errorf("comments = %d, want the round 1 finding", len(comments))
+	}
+	if !a.BudgetExceeded() {
+		t.Error("expected BudgetExceeded()==true when the round gate skips a round")
+	}
+
+	if err := a.finalizeManifest(); err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	manifest := a.RunManifest()
+	if manifest == nil || len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Failed) != 0 {
+		t.Fatalf("coverage = %+v, want the group completed", manifest)
+	}
+}

@@ -390,8 +390,8 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 	defer r.cancelPendingCompression(st)
 
 	// stop defaults to StopMaxRounds: if the for-loop exits because toolReqCount
-	// reached zero, the run stopped on the round budget. The empty-round and
-	// compression breaks overwrite it at their trigger points.
+	// reached zero, the run stopped on the round budget. The empty-round,
+	// compression and token-budget breaks overwrite it at their trigger points.
 	stop := StopMaxRounds
 	for toolReqCount > 0 {
 		select {

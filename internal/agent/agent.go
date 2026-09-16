@@ -1450,6 +1450,12 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 
 		if round > 1 && a.args.MaxTokensBudget > 0 && (a.budgetExceeded.Load() || a.runner.TotalTokensUsed() > a.args.MaxTokensBudget) {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Aggregate budget exceeded, skipping round %d for group %q\n", round, groupKey)
+			// A group can finish a round over budget with no other gate noticing,
+			// so record it here too or the run would report the budget as intact.
+			if a.budgetExceeded.CompareAndSwap(false, true) {
+				a.recordWarning("token_budget_reached", g.Diffs[0].NewPath,
+					fmt.Sprintf("skipped round %d of group %q: used %d tokens exceeds budget %d", round, groupKey, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
+			}
 			break
 		}
 
