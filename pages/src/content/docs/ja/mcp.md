@@ -306,6 +306,9 @@ field は削除され、手動 install/build の案内が出ます。安全用 f
 設定は同一 directory の mode `0600` temporary file に flush し、atomic replace されます。
 wizard の取消や discovery failure は元の設定を変更しません。
 
+`0600` は Unix 系のシステムに適用されます。Windows では Unix の権限ビットではなく、
+ディレクトリから継承した ACL が使われます。設定ディレクトリへのアクセスは自分のアカウントに制限してください。
+
 ## トラブルシューティング
 
 - **`needs-review`**: `ocr mcp tools <name>` で現在の定義を確認し、権限を選び直します。

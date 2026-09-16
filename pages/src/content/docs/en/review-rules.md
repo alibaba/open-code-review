@@ -83,9 +83,12 @@ For each diff, OCR asks:
 
 1. **`binary`** — Is the file binary? Excluded.
 2. **`secret_exclude`** — Does either path match a
-   [built-in secret-path pattern](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)?
+   built-in secret-path protection? The unconditional glob patterns are listed in [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json).
    Excluded. This protection runs before user rules and cannot be overridden
    by an `include` pattern.
+
+   Per-environment `.env.*` paths are treated as secret paths, except `.env.example`, `.env.sample`, and `.env.template`, which remain subject to the normal review rules.
+
 3. **`user_exclude`** — Does the path match any user `exclude` pattern?
    Excluded.
 4. **`user_include`** — If the user defined `include`, does the path

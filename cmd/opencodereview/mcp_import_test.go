@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -130,7 +131,12 @@ func TestMCPImportCommandAtomicDisabledAndNoConnection(t *testing.T) {
 	if !bytes.Equal(before, after) {
 		t.Fatal("failed import wrote config")
 	}
-	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows file modes do not represent ACLs; match the provider config tests.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatal("config not private")
 	}
 	cmd, _, _ = newMCPTestCommand(`{"mcpServers":{"a":{"command":"s"},"b":{"command":"s"}}}`)

@@ -22,7 +22,6 @@ export const ja: TranslationKeys = {
   'hero.copyFailed': 'コピー失敗',
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
-  'hero.installMacPorts': 'MacPorts',
   'hero.installMacOS': 'MacOS',
   'hero.installLinux': 'Linux',
   'hero.installWindows': 'Windows',

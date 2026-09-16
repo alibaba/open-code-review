@@ -5,6 +5,11 @@ on:
     branches: [main]
     paths:
       - 'extensions/vscode/**'
+      # The webview source lives in extensions/frontend and is built into the
+      # VS Code extension via build:webview, so frontend changes must also
+      # trigger this workflow.
+      - 'extensions/frontend/**'
+      - '.github/workflows/vscode-ext.yml'
 
 permissions:
   contents: read

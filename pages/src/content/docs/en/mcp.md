@@ -327,6 +327,9 @@ Configuration writes use a mode-`0600` temporary file in the same directory,
 flush it, and atomically replace the old file. Wizard cancellation and failed
 discovery leave the original file unchanged.
 
+`0600` is enforced on Unix-like systems. Windows uses directory-inherited ACLs,
+not Unix mode bits; keep the configuration directory private to your account.
+
 ## Troubleshooting
 
 - **`needs-review`**: run `ocr mcp tools <name>` and accept the discovered

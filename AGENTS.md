@@ -30,8 +30,9 @@ open-code-review (`ocr`) is an AI-powered code review CLI tool written in Go (mo
 
 ## License Headers
 
-- Every source file (`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`) must have an SPDX license header.
-- After creating new files, run `make license-add` to add the header automatically.
+- Every source file (`.go`, `.js`, `.mjs`, `.ts`, `.tsx`, `.kt`, `.kts`, `.sh`, `.py`, `.css`) must have an SPDX license header.
+- After creating new files, run `make license-add` to add the header automatically. It picks the comment syntax by extension: `//`, `#`, or a `/* */` block for CSS.
+- An extension belongs on that list once the repository actually holds files of that type and the comment can simply be prepended. `.html` meets neither bar cleanly — its `<!DOCTYPE html>` has to stay on the first line — so it is not covered yet.
 
 ## Code Style
 

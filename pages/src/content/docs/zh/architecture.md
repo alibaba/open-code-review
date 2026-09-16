@@ -321,10 +321,9 @@ Web UI（`ocr viewer`）直接读这些文件——没有数据库，只有 appe
 
 启用遥测后，agent 发出三个流水线级 span（`review.run` 包裹整个作业、
 `diff.parse` 包裹 diff 加载、每个被评审的组一个
-`subtask.execute.group.<group-key>`），加上
-每个决策点一个短生命周期的 `event.<name>` span（`plan.skipped`、
-`token.threshold.exceeded`、`subtask.error`……）。LLM 往返和工具调用仅作为
-metrics 记录——不作为 span。prompt 与响应内容**绝不**附加到遥测；
+`subtask.execute.group.<group-key>`），加上每个决策点一个短生命周期的
+`event.<name>` span（`plan.skipped`、`token.threshold.exceeded`、`subtask.error`……）。
+主评审循环中的 LLM 请求和工具调用会生成 span，相关测量值也会记录到 metrics 中。prompt 与响应内容**绝不**附加到遥测；
 `OCR_CONTENT_LOGGING` 标志已接入但目前是死代码。完整 schema 见[遥测](../telemetry/)。
 
 ## 哪些*不*自动化

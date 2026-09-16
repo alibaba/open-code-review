@@ -317,8 +317,8 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-Вызовы LLM не получают отдельных спанов: вместо этого они записываются как
-метрики. Следите за `ocr.llm.tokens_used` (счётчик с метками `model` + `type`),
+В основном цикле ревью вызовы LLM создают спаны `llm.request` и также записываются
+как метрики. Следите за `ocr.llm.tokens_used` (счётчик с метками `model` + `type`),
 `ocr.llm.requests_total` (счётчик с метками `model` + `status`) и
 `ocr.llm.request_duration_seconds` (гистограмма с меткой `model`). Консольный
 экспортёр выводит эти агрегаты в процессе работы. Для панелей мониторинга

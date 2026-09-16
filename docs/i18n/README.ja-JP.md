@@ -32,6 +32,7 @@
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
   <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | 日本語 | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a>
@@ -180,6 +181,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — レビュー用スラッシュコマンドを含むプラグインをインストール
   - [Codex](../../plugins/open-code-review/README.md#codex) — 呼び出し可能なレビュースキルを含むプラグインをインストール
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — 移植可能なレビュースキルを含むプラグインをインストール
+  - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — レビュー用スラッシュコマンドとスキルを含むプラグインをインストール
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — ネイティブレビュー・ツールとスラッシュコマンドをインストール
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — QCA ホストモデルと公開可能なテンプレートで委任モードを実行
   - [Skill 対応エージェント](https://open-codereview.ai/docs/agent-skill) — 移植可能なエージェントスキルをインストール

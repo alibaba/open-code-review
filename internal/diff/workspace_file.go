@@ -4,6 +4,7 @@
 package diff
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +12,15 @@ import (
 	"github.com/alibaba/open-code-review/internal/pathutil"
 )
 
+const maxUntrackedFileSize = 64 << 20
+
+var errWorkspaceFileTooLarge = errors.New("workspace file exceeds size limit")
+
 func readWorkspaceFileForDiff(repoDir, relPath string) ([]byte, error) {
+	return readWorkspaceFileForDiffWithLimit(repoDir, relPath, 0)
+}
+
+func readWorkspaceFileForDiffWithLimit(repoDir, relPath string, maxSize int64) ([]byte, error) {
 	repoRoot, err := pathutil.CanonicalPath(repoDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve repository path %q: %w", repoDir, err)
@@ -46,6 +55,9 @@ func readWorkspaceFileForDiff(repoDir, relPath string) ([]byte, error) {
 			return nil, fmt.Errorf("read symlink %q: %w", relPath, err)
 		}
 		return []byte(target), nil
+	}
+	if maxSize > 0 && info.Size() > maxSize {
+		return nil, errWorkspaceFileTooLarge
 	}
 
 	resolvedPath, err := filepath.EvalSymlinks(fullPath)

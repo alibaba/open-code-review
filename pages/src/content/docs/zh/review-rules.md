@@ -73,8 +73,11 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 对每个 diff，OCR 依次问：
 
 1. **`binary`**——文件是二进制吗？排除。
-2. **`secret_exclude`**——旧路径或新路径是否匹配某个[内置敏感路径模式](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)？若是，排除。
+2. **`secret_exclude`**——旧路径或新路径是否命中内置敏感路径保护？无条件匹配的 glob 模式列在 [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json) 中。若是，排除。
    此保护在用户规则之前执行，不能被 `include` 模式覆盖。
+
+   环境特定的 `.env.*` 路径会作为敏感路径处理，但 `.env.example`、`.env.sample` 和 `.env.template` 仍按普通审查规则处理。
+
 3. **`user_exclude`**——路径匹配任何用户 `exclude` 模式吗？排除。
 4. **`user_include`**——若用户定义了 `include`，路径匹配吗？若是，**立即保留**
    （绕过下面的 `unsupported_ext` 和 `default_path` 门）。

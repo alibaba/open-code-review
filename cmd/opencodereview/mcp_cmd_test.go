@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -77,7 +78,8 @@ func TestMCPNonInteractiveAddIsDisabledAndEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Windows file modes do not represent ACLs; match the provider config tests.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("config mode = %o, want 600", info.Mode().Perm())
 	}
 }
@@ -619,7 +621,8 @@ func TestSaveConfigUsesAtomicPrivateFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Windows file modes do not represent ACLs; match the provider config tests.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("mode = %o, want 600", info.Mode().Perm())
 	}
 	temps, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".ocr-config-*.tmp"))

@@ -567,6 +567,19 @@ func TestMCPWizardParsingSelectionAndApplyCoverage(t *testing.T) {
 	}
 
 	discovered := map[string]ocrmcp.DiscoveredTool{"read": tools[0], "write": tools[1]}
+	t.Run("apply repeated enable keeps one grant", func(t *testing.T) {
+		server := MCPServerConfig{Tools: []string{"read"}}
+		enable := make([]string, 1024)
+		for index := range enable {
+			enable[index] = "read"
+		}
+		if err := applyMCPToolChanges(&server, discovered, enable, nil); err != nil {
+			t.Fatal(err)
+		}
+		if len(server.Tools) != 1 || server.Tools[0] != "read" || server.ToolPermissions["read"] != ocrmcp.PermissionAsk || server.ToolDefinitionSHA256["read"] != tools[0].DefinitionSHA256 {
+			t.Fatalf("duplicate enable changed grant: %+v", server)
+		}
+	})
 	t.Run("apply enable disable and sort", func(t *testing.T) {
 		server := MCPServerConfig{
 			Tools: []string{"old", "write"},

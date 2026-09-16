@@ -61,9 +61,10 @@ import (
 
 // scannedExts lists the extensions treated as source files.
 var scannedExts = map[string]bool{
-	".go": true, ".ts": true, ".tsx": true, ".js": true, ".cjs": true,
-	".mjs": true, ".py": true, ".sh": true, ".ps1": true, ".css": true,
-	".html": true, ".yml": true, ".yaml": true, ".json": true,
+	".go": true, ".kt": true, ".kts": true, ".ts": true, ".tsx": true,
+	".js": true, ".cjs": true, ".mjs": true, ".py": true, ".sh": true,
+	".ps1": true, ".css": true, ".html": true, ".yml": true,
+	".yaml": true, ".json": true,
 }
 
 // scannedNames lists extension-less files that are still source files.
@@ -75,6 +76,8 @@ var allowedPrefixes = []struct{ prefix, reason string }{
 	{"pages/src/i18n/", "translated UI copy for the docs site"},
 	{"scripts/github-actions/check-mcp-docs.test.js", "localized documentation contract regex fixtures"},
 	{"extensions/vscode/", "TEMPORARY: the extension's comments, test names and zh-cn NLS bundle are still Chinese; drop this entry once they are translated"},
+	{"extensions/frontend/src/shared/i18n.ts", "translated UI copy for the extension webview"},
+	{"extensions/idea/", "TEMPORARY: the IDEA plugin's comments and zh-cn UI strings are still Chinese; drop this entry once they are translated"},
 }
 
 // exemptMarker on a line suppresses the report for that line. The trailing

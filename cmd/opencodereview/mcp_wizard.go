@@ -785,7 +785,7 @@ func selectMCPDiscoveredTools(tools []ocrmcp.DiscoveredTool, selection string) (
 }
 
 func applyMCPToolChanges(server *MCPServerConfig, discovered map[string]ocrmcp.DiscoveredTool, enable, disable []string) error {
-	selected := make(map[string]struct{}, len(server.Tools)+len(enable))
+	selected := make(map[string]struct{})
 	for _, toolName := range server.Tools {
 		selected[toolName] = struct{}{}
 	}

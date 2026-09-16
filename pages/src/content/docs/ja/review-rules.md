@@ -63,7 +63,10 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 フィルタリングは 6 段階のゲートアルゴリズムで、[`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go) にあります。各 diff について、OCR は順に次を問います:
 
 1. **`binary`**: ファイルはバイナリか？ 除外します。
-2. **`secret_exclude`**: 古いパスまたは新しいパスが[組み込みのシークレットパスパターン](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)に一致するか？ 一致するなら除外します。この保護はユーザールールより先に適用され、`include` パターンでは上書きできません。
+2. **`secret_exclude`**: 古いパスまたは新しいパスが組み込みのシークレットパス保護の対象か？ 無条件に適用される glob パターンは [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json) にあります。対象なら除外します。この保護はユーザールールより先に適用され、`include` パターンでは上書きできません。
+
+   環境ごとの `.env.*` パスはシークレットパスとして扱われますが、`.env.example`、`.env.sample`、`.env.template` には通常のレビュールールが適用されます。
+
 3. **`user_exclude`**: パスがいずれかのユーザー `exclude` パターンに一致するか？ 除外します。
 4. **`user_include`**: ユーザーが `include` を定義している場合、パスは一致するか？ 一致するなら**即座に保持**します（下記の `unsupported_ext` と `default_path` のゲートをバイパス）。
 5. **`unsupported_ext`**: ファイルの拡張子は[ホワイトリスト](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)にあるか？ なければ除外します。

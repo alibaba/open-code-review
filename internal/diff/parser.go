@@ -25,13 +25,35 @@ var (
 	binaryRe = regexp.MustCompile(`^Binary files `)
 )
 
+// splitDiffLines splits unified diff text on "\n" and drops the carriage
+// return that CRLF-terminated diff text leaves at the end of every line.
+//
+// Git writes its own structural lines with "\n", but the diff text can reach
+// us already converted: a .patch checked out under core.autocrlf=true, or
+// output captured through a Windows shell. Left in place, that "\r" is not
+// cosmetic. It rides into the "diff --git a/(.+?) b/(.+)$" capture, so NewPath
+// becomes "file.go\r" and the file can no longer be opened for review; and it
+// defeats the exact comparisons against "--- /dev/null" and "+++ /dev/null",
+// which silently costs a diff its IsNew or IsDeleted flag.
+//
+// Stripping it matches how the rest of the package already treats a trailing
+// carriage return: resolver.go trims it before matching lines, and filereader
+// and viewer do the same when reading file content.
+func splitDiffLines(text string) []string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSuffix(line, "\r")
+	}
+	return lines
+}
+
 // ParseDiffText splits the unified diff text into per-file Diff structs.
 // ref, if non-empty, is a git ref used to read new-file content via
 // git show instead of reading from the working tree.
 // runner, if non-nil, is used to execute git subprocesses through a
 // shared concurrency limiter.
 func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref string, runner *gitcmd.Runner) ([]model.Diff, error) {
-	lines := strings.Split(diffText, "\n")
+	lines := splitDiffLines(diffText)
 	var diffs []model.Diff
 	var current *model.Diff
 	var buf strings.Builder
@@ -120,6 +142,9 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 func finalizeDiff(ctx context.Context, d *model.Diff, repoDir string, ref string, runner *gitcmd.Runner) {
 	if d.IsDeleted || d.NewPath == "/dev/null" {
 		d.NewPath = "/dev/null"
+		return
+	}
+	if d.IsBinary {
 		return
 	}
 	if ref != "" {
