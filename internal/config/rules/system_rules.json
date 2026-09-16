@@ -13,6 +13,7 @@
     ".github/**/*.{yaml,yml}": "github_config.md",
     "**/*.{yaml,yml}": "yaml.md",
     "**/*.java": "java.md",
+    "**/*.{cs,csx}": "csharp.md",
     "**/*.go": "go.md",
     "**/*.{ftl,ftlh,ftlx}": "freemarker.md",
     "**/*.{hbs,mustache}": "handlebars_mustache.md",
