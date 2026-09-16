@@ -298,6 +298,7 @@ export const ja: TranslationKeys = {
   'docs.sidebar.claudeCode': 'Command（Claude Code）',
   'docs.sidebar.delegate': 'デリゲーションモード',
   'docs.sidebar.cicd': 'CI/CD',
+  'docs.sidebar.acp': 'ACP',
   'docs.sidebar.contributing': 'コントリビュート',
   'docs.sidebar.faq': 'FAQ',
   'docs.search.placeholder': '検索...',

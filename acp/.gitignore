@@ -1,0 +1,12 @@
+# Compiled mock binary from the manual build in README.md.
+# Anchored to this exact path: a bare "mock-ocr" pattern would also match the
+# testdata/mock-ocr/ SOURCE directory, silently ignoring any new scenario file
+# added there.
+/testdata/mock-ocr/mock-ocr
+
+/coverage.out
+
+# A bare `go build ./testdata/mock-ocr/` drops the binary in the module
+# root; the README's -o form puts it under testdata instead. Both are
+# build artifacts.
+/mock-ocr
