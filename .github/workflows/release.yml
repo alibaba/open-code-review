@@ -57,8 +57,47 @@ jobs:
           name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ env.bin_name }}
 
+  build-acp:
+    name: Build ACP (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: self-hosted
+    timeout-minutes: 15
+    container:
+      image: golang:1.26.6
+      options: --cpus=2
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+
+      - name: Build ACP adapter
+        working-directory: acp
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          go build -trimpath -ldflags "-s -w" \
+            -o "../ocr-acp-${{ matrix.goos }}-${{ matrix.goarch }}" ./cmd/ocr-acp
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-acp-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ocr-acp-${{ matrix.goos }}-${{ matrix.goarch }}
+
   release:
-    needs: build
+    needs: [build, build-acp]
     runs-on: self-hosted
     timeout-minutes: 20
     permissions:
@@ -142,7 +181,7 @@ jobs:
           merge-multiple: true
 
       - name: Generate checksums
-        run: sha256sum opencodereview-* | sort > sha256sum.txt
+        run: sha256sum opencodereview-* ocr-acp-* | sort > sha256sum.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -150,6 +189,7 @@ jobs:
           body: ${{ steps.notes.outputs.body }}
           files: |
             opencodereview-*
+            ocr-acp-*
             sha256sum.txt
 
       - name: Attest release artifacts
@@ -157,6 +197,7 @@ jobs:
         with:
           subject-path: |
             opencodereview-*
+            ocr-acp-*
             sha256sum.txt
 
   npm-publish:
