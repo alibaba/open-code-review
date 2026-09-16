@@ -5264,6 +5264,9 @@ async function testPrNumberOverrideAddressesEveryCall() {
   const findings = {
     comments: [{ path: "src/a.js", content: "finding", start_line: 3, end_line: 3 }],
     warnings: [],
+    // Posting inline comments needs the reviewed head from the manifest;
+    // workflow_run has no pull_request_target payload to fall back to.
+    manifest: ckManifest(),
   };
   const workflowRunContext = {
     repo: { owner: "owner", repo: "repo" },
