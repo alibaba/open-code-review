@@ -22,6 +22,102 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  provider-presets-autofix:
+    # Keep the test job on the merge ref with read-only permissions. Autofix
+    # must create its commit from the contributor's exact PR head instead.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    container:
+      image: golang:1.26.6
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Regenerate provider presets
+        id: provider-presets-generate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          generated=extensions/vscode/src/shared/providers.generated.ts
+          # Require fresh output, even when go generate finds no directive.
+          rm -f -- "$generated"
+          go generate ./internal/llm
+          if [[ ! -f "$generated" || -L "$generated" ]]; then
+            echo "::error::Provider generation produced no regular catalog. Ensure the generator from #1221 is present."
+            exit 1
+          fi
+          git add --force -- "$generated"
+          if ! git diff --quiet HEAD -- . ":(exclude)$generated" ||
+             [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+            echo "::error::Generation changed files outside the provider catalog; refusing to commit."
+            exit 1
+          fi
+          if [[ "$(git ls-files --stage -- "$generated")" != "100644 "* ]]; then
+            echo "::error::The generated catalog must have ordinary file permissions."
+            exit 1
+          fi
+          if git diff --cached --quiet -- "$generated"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit provider presets to the PR branch
+        id: provider-presets-commit
+        if: steps.provider-presets-generate.outputs.changed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GIT_TRACE: '0'
+          GIT_TRACE_CURL: '0'
+          GIT_CURL_VERBOSE: '0'
+        run: |
+          set -euo pipefail
+          generated=extensions/vscode/src/shared/providers.generated.ts
+          : "${GH_TOKEN:?A repository token is required to push the catalog}"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          test "$(git diff --cached --name-only)" = "$generated"
+          ref="refs/heads/$HEAD_REF"
+          git check-ref-format "$ref"
+          remote="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          current=$(git ls-remote --heads "$remote" "$ref" | cut -f1)
+          if [[ "$current" != "$HEAD_SHA" ]]; then
+            echo "::notice::The PR branch changed; skipping this outdated autofix."
+            exit 0
+          fi
+          git -c core.hooksPath=/dev/null \
+            -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit --no-gpg-sign --only -m "chore(vscode): regenerate provider presets" -- "$generated"
+          test "$(git rev-parse HEAD^)" = "$HEAD_SHA"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          unset GH_TOKEN
+          # The exact lease rejects concurrent advances, deletion and rewind.
+          # The parent check above ensures an accepted update is a fast-forward.
+          if ! GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="http.${remote}.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+            git -c core.hooksPath=/dev/null -c credential.helper= \
+              push "--force-with-lease=$ref:$HEAD_SHA" "$remote" "HEAD:$ref"; then
+            echo "::error::Could not confirm the autofix push. Check the latest PR head, then run 'go generate ./internal/llm' and commit the catalog if needed."
+            exit 1
+          fi
+          echo "::notice::Pushed the provider catalog. Checks must validate the new PR head; workflow approval may be required."
+
   test:
     runs-on: self-hosted
     timeout-minutes: 15
