@@ -30,7 +30,7 @@
    from them here so the Go side stays untouched. The "{{.Title}} (N)" text is
    asserted verbatim by compare_test.go — keep it contiguous. */}}
 {{range .Buckets}}
-<section class="compare-bucket {{if eq .Title "New"}}bucket-new{{else if eq .Title "Persisting"}}bucket-persisting{{else if eq .Title "Resolved"}}bucket-resolved{{else}}bucket-not-reviewed{{end}}">
+<section class="compare-bucket {{if eq .Title "New"}}bucket-new{{else if eq .Title "Persisting"}}bucket-persisting{{else if eq .Title "Resolved"}}bucket-resolved{{else if eq .Title "Not reviewed"}}bucket-not-reviewed{{else}}bucket-unknown{{end}}">
     <h3 class="compare-bucket-title"><span class="bucket-dot" aria-hidden="true"></span>{{.Title}} ({{len .Findings}})</h3>
     {{range .Findings}}
     <div class="comment-card">

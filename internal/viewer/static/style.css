@@ -1328,6 +1328,7 @@ p {
     .bucket-new { --bucket-tone: #fb923c; --bucket-tone-fg: #fdba74; }
     .bucket-persisting { --bucket-tone: #fbbf24; --bucket-tone-fg: #fcd34d; }
     .bucket-resolved { --bucket-tone: #34d399; --bucket-tone-fg: #6ee7b7; }
+    .bucket-not-reviewed { --bucket-tone: #6b7394; --bucket-tone-fg: #9ba3c2; }
 }
 
 /* Existing Code and Suggested Change sit side by side on wide screens;
