@@ -398,49 +398,41 @@ h3 {
 
 /* ── Token Usage Summary ── */
 .token-summary {
-    background: var(--surface);
-    border-radius: var(--radius);
-    padding: 1.75rem;
-    margin-bottom: 1.25rem;
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--border);
+    margin-bottom: 1.5rem;
 }
 .token-summary h3 {
-    margin: 0 0 1.25rem;
+    margin: 0 0 1rem;
     font-size: 1rem;
 }
 .token-stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 1rem;
-    margin-bottom: 1.5rem;
+    gap: 1.25rem;
+    padding: 1.25rem 1.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
 }
 .token-item {
-    text-align: center;
-    padding: 1rem 0.5rem;
-    background: var(--surface-alt);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-subtle);
-    transition: transform var(--transition), box-shadow var(--transition);
-}
-.token-item:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
+    text-align: left;
 }
 .token-value {
-    font-size: 1.75rem;
+    font-size: 1.5rem;
     font-weight: 700;
-    color: var(--accent);
+    color: var(--text-strong);
     line-height: 1.2;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
+}
+.token-value-error {
+    color: var(--badge-error-fg);
 }
 .token-label {
     font-size: 0.7rem;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    margin-top: 0.25rem;
+    margin-bottom: 0.35rem;
     font-weight: 500;
 }
 .token-table {
@@ -453,7 +445,6 @@ h3 {
     border: 1px solid var(--border-subtle);
 }
 .token-table th {
-    background: var(--surface-alt);
     text-align: left;
     padding: 0.55rem 0.85rem;
     color: var(--text-muted);
@@ -483,7 +474,7 @@ h3 {
     font-size: 0.82rem;
     font-weight: 600;
     list-style: none;
-    padding: 0.25rem 0 0.75rem;
+    padding: 1rem 0 0.75rem;
 }
 .token-breakdown-toggle::-webkit-details-marker { display: none; }
 .token-breakdown-toggle::marker { content: none; }
@@ -491,7 +482,6 @@ h3 {
 .token-breakdown[open] > .token-breakdown-toggle .chevron-sm { transform: rotate(45deg); }
 .token-breakdown-body {
     overflow-x: auto;
-    padding-top: 0.25rem;
 }
 
 /* ── File List ── */
