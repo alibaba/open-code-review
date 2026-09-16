@@ -168,7 +168,7 @@ schema 见[评审规则](../../review-rules/)。
 
 #### 并发
 
-默认 8 个并行子 agent——每个文件组一个。大 PR 上调低，以免触发 LLM provider 速率限制：
+默认 8 个并行子 agent——每个子任务一个。大 PR 上调低，以免触发 LLM provider 速率限制：
 
 ```yaml
 - name: Run OCR review
@@ -377,7 +377,7 @@ script:
 #### 自定义规则与并发
 
 与 GitHub Actions 配方相同的参数——`--rule` 传项目专属规则文件，
-`--concurrency` 限制并行子 agent（默认 8，每个文件组一个）：
+`--concurrency` 限制并行子 agent（默认 8，每个子任务一个）：
 
 ```yaml
 script:

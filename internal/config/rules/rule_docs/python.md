@@ -8,6 +8,7 @@
 - Code blocks that can never be reached (e.g., branches where the condition is always false, code after a `return`, `raise`, `break`, or `continue`)
 - Variables, imports, or function parameters that are declared but never read or referenced
 - Large blocks of commented-out code with no apparent intent to preserve
+- Do not report unused imports, variables, or parameters in `.pyi` stub files; a stub declares an interface it never executes, so re-exported imports, annotation-only declarations, and unreferenced parameter names are expected rather than dead
 
 #### Mutable Default Arguments and Shared State
 - Mutable default arguments such as `def f(x=[])` or `def f(x={})`; the default is created once and shared across every call. Default to `None` and build the value inside the body

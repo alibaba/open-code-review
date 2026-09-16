@@ -259,15 +259,22 @@ async function runPostReviewComments({
 
   // Resolve the PR head commit sha to attach the review to.
   let commitSha;
-  if (context.eventName === "pull_request_target") {
-    commitSha = context.payload.pull_request.head.sha;
+  if (result.manifest != null) {
+    commitSha = result.manifest.input?.resolved_head;
+  } else if (context.eventName === "pull_request_target") {
+    commitSha = context.payload?.pull_request?.head?.sha;
   } else {
-    const { data: pullRequest } = await github.rest.pulls.get({
-      owner,
-      repo,
-      pull_number: prNumber,
-    });
-    commitSha = pullRequest.head.sha;
+    throw new Error("OCR result manifest input.resolved_head is required to post inline comments for this event");
+  }
+  if (commitSha == null) {
+    throw new Error(result.manifest != null
+      ? "OCR result manifest input.resolved_head is missing; cannot post inline comments"
+      : "pull_request_target event payload.pull_request.head.sha is missing; cannot post inline comments");
+  }
+  if (typeof commitSha !== "string" || !/^[0-9a-f]{40}$/.test(commitSha)) {
+    throw new Error(
+      "Inline review commit SHA from manifest input.resolved_head or the pull_request_target event snapshot must be a 40-character lowercase string"
+    );
   }
 
   // Partition: inline (with valid line info) vs summary (without) vs routed

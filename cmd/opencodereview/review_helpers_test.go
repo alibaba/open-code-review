@@ -66,6 +66,48 @@ func TestRunPreviewJSONFormat(t *testing.T) {
 	}
 }
 
+// TestRunPreviewJSON_ProviderDirectoryKeepsChangesetOrder pins issue #1236:
+// JSON files from the CLI preview path include provider-directory entries in
+// Git changeset order, not prepended.
+func TestRunPreviewJSON_ProviderDirectoryKeepsChangesetOrder(t *testing.T) {
+	freshOCRHome(t)
+	dir := initTestGitRepo(t)
+	if err := os.MkdirAll(filepath.Join(dir, "target"), 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	gitCommitFile(t, dir, "a.go", "package p\n", "add a")
+	gitCommitFile(t, dir, filepath.Join("target", "mid.go"), "package p\n", "add target")
+	gitCommitFile(t, dir, "z.go", "package p\n", "add z")
+	for _, p := range []string{"a.go", filepath.Join("target", "mid.go"), "z.go"} {
+		if err := os.WriteFile(filepath.Join(dir, p), []byte("package p\n\nconst V = 2\n"), 0o644); err != nil {
+			t.Fatalf("modify %s: %v", p, err)
+		}
+	}
+
+	cc, err := loadCommonContext(dir, "", "", 0, 0, true)
+	if err != nil {
+		t.Fatalf("loadCommonContext: %v", err)
+	}
+	out := captureStdout(t, func() {
+		if err := runPreview(cc, reviewOptions{outputFormat: "json"}, os.Stdout); err != nil {
+			t.Errorf("runPreview error: %v", err)
+		}
+	})
+	got := decodeSinglePreviewJSON(t, out)
+	want := []string{"a.go", "target/mid.go", "z.go"}
+	if len(got.Entries) != len(want) {
+		t.Fatalf("files = %d, want %d: %+v", len(got.Entries), len(want), got.Entries)
+	}
+	for i, path := range want {
+		if got.Entries[i].Path != path {
+			t.Errorf("files[%d].path = %q, want %q", i, got.Entries[i].Path, path)
+		}
+	}
+	if got.Entries[1].ExcludeReason != model.ExcludeProviderDirectory || got.Entries[1].WillReview {
+		t.Errorf("target/mid.go = %+v, want provider_directory", got.Entries[1])
+	}
+}
+
 // TestRunPreviewAppliesResolvedMaxTokens pins that the preview path resolves
 // the per-file token ceiling and hands it to selection: without it the template
 // default reaches the agent as zero, the size gate never runs, and preview

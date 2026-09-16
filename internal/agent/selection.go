@@ -62,11 +62,11 @@ func (a *Agent) selectFiles(diffs []model.Diff) []fileDecision {
 	return decisions
 }
 
-// whyExcluded applies the static gates — binary, user exclude/include, then
-// the extension allowlist and default-path patterns — and returns the specific
-// reason a file is excluded, or ExcludeNone when it survives all of them. It
-// answers only what the path and the diff header say; the size gate lives in
-// selectFiles because it needs the resolved token limit.
+// whyExcluded applies the static gates — binary, the built-in secret paths,
+// user exclude/include, then the extension allowlist and default-path patterns
+// — and returns the specific reason a file is excluded, or ExcludeNone when it
+// survives all of them. It answers only what the path and the diff header say;
+// the size gate lives in selectFiles because it needs the resolved token limit.
 func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 	if d.IsBinary {
 		return ExcludeBinary
@@ -74,6 +74,12 @@ func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 
 	path := effectivePath(d)
 	f := a.args.FileFilter
+
+	// Ahead of both user rules: no include glob can admit a credential path,
+	// and no user exclude can claim it under a different reason.
+	if allowedext.IsSecretPath(d.OldPath) || allowedext.IsSecretPath(d.NewPath) {
+		return ExcludeSecret
+	}
 
 	if f != nil && f.IsUserExcluded(path) {
 		return ExcludeUserRule

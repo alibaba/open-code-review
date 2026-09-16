@@ -85,9 +85,9 @@ order:
 
 The noisy-directory filtering (`vendor/`, `node_modules/`, `target/`, …)
 happens earlier, at the diff-provider level, via the
-`providerDirIgnoreDirs` list in `internal/diff/git.go` — diffs for those
-directories are parsed and then stripped out before they ever reach the
-per-file filter.
+`providerDirIgnoreDirs` list in `internal/diff/git.go`. Preview reports these
+files as `provider_directory`; they never reach the per-file filter, and an
+`include` rule cannot make them reviewable.
 
 Run `ocr review --preview` to see the full filter result without spending
 a token. See [Review Rules](../review-rules/#how-files-are-filtered) for

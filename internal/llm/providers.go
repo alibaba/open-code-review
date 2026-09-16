@@ -203,7 +203,6 @@ var registry = []Provider{
 		EnvVar:      "DEEPSEEK_API_KEY",
 		Models: []string{
 			"deepseek-v4-pro",
-			"deepseek-v4-flash",
 			"deepseek-flash",
 		},
 	},

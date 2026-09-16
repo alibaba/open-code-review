@@ -63,6 +63,38 @@ type Provider struct {
 	mergeBase string // cached common ancestor for range mode
 }
 
+// DiffSet separates the diffs a review may process from files excluded by the
+// provider's built-in directory rules. The latter remain unavailable to a
+// review, but callers such as Preview can account for them.
+//
+// excludedAt[i] is Excluded[i]'s index in the changeset order of Included and
+// Excluded combined, so ForEachInOrder can walk the two slices as Git listed
+// them rather than every provider exclusion first.
+type DiffSet struct {
+	Included   []model.Diff
+	Excluded   []model.Diff
+	excludedAt []int
+}
+
+// ForEachInOrder visits Included and Excluded in the original changeset order.
+// providerExcluded is true for built-in directory exclusions. Files dropped by
+// .gitignore are not visited.
+func (s DiffSet) ForEachInOrder(visit func(d model.Diff, providerExcluded bool)) {
+	next := 0
+	for i, d := range s.Excluded {
+		// excludedAt[i] is the mixed-stream index, so the number of included
+		// files that precede this exclusion is excludedAt[i]-i.
+		upTo := s.excludedAt[i] - i
+		for ; next < upTo; next++ {
+			visit(s.Included[next], false)
+		}
+		visit(d, true)
+	}
+	for ; next < len(s.Included); next++ {
+		visit(s.Included[next], false)
+	}
+}
+
 // NewProvider creates a Provider for range mode: from..to (via merge-base).
 func NewProvider(repoDir, from, to string, runner *gitcmd.Runner) *Provider {
 	return &Provider{
@@ -170,19 +202,30 @@ func (p *Provider) MergeBase(ctx context.Context) string {
 	return p.mergeBase
 }
 
-// GetDiff returns all changes as parsed model.Diff structs.
+// GetDiff returns the changes available to a review as parsed model.Diff structs.
 func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
+	set, err := p.GetDiffSet(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return set.Included, nil
+}
+
+// GetDiffSet returns both reviewable diffs and those excluded by the provider's
+// built-in directory rules. It preserves GetDiff's filtering behavior while
+// allowing callers that report the whole Git changeset to show those exclusions.
+func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 	var combined strings.Builder
 
 	switch p.mode {
 	case ModeRange:
 		base := p.MergeBase(ctx)
 		if base == "" {
-			return nil, fmt.Errorf("cannot find merge-base between %s and %s", p.from, p.to)
+			return DiffSet{}, fmt.Errorf("cannot find merge-base between %s and %s", p.from, p.to)
 		}
 		out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, p.to, "--")
 		if err != nil {
-			return nil, gitFailure("git diff", stderr, err)
+			return DiffSet{}, gitFailure("git diff", stderr, err)
 		}
 		combined.WriteString(out)
 
@@ -193,7 +236,7 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 		// Diffs against the first parent instead, in regular unified format.
 		out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "show", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "--diff-merges=first-parent", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", p.commit)
 		if err != nil {
-			return nil, gitFailure("git show", stderr, err)
+			return DiffSet{}, gitFailure("git show", stderr, err)
 		}
 		combined.WriteString(out)
 
@@ -206,13 +249,13 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 		// failure describes what actually blocked the review.
 		tracked, stderr, err := p.workspaceTrackedDiff(ctx)
 		if err != nil {
-			return nil, gitFailure("workspace tracked diff", stderr, err)
+			return DiffSet{}, gitFailure("workspace tracked diff", stderr, err)
 		}
 		combined.WriteString(tracked)
 
 		untracked, err := p.untrackedFileDiffs(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("untracked file diff failed: %w", err)
+			return DiffSet{}, fmt.Errorf("untracked file diff failed: %w", err)
 		}
 		for _, ud := range untracked {
 			combined.WriteString(ud)
@@ -230,9 +273,9 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 
 	diffs, err := ParseDiffText(ctx, combined.String(), p.repoDir, ref, p.runner)
 	if err != nil {
-		return nil, err
+		return DiffSet{}, err
 	}
-	return p.filterDiffs(diffs), nil
+	return p.partitionDiffs(diffs), nil
 }
 
 // loadGitignorePatterns reads and parses .gitignore patterns from the repo root.
@@ -262,13 +305,8 @@ func (p *Provider) loadGitignorePatterns() []string {
 // correct under last-match-wins. Treating negations as unmatchable made every
 // file in such a repository look excluded, so a review silently covered nothing.
 func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bool {
-	// Hardcoded directory prefix checks. These are an unconditional blocklist:
-	// a .gitignore negation cannot re-admit .git/ or node_modules/.
-	for _, prefix := range providerDirIgnoreDirs {
-		dirPart := strings.TrimSuffix(prefix, "/")
-		if relPath == dirPart || strings.HasPrefix(relPath, prefix) {
-			return true
-		}
+	if isProviderDirExcluded(relPath) {
+		return true
 	}
 
 	excluded := false
@@ -291,6 +329,13 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 		}
 	}
 	return excluded
+}
+
+// isProviderDirExcluded reports whether relPath matches the provider's
+// unconditional directory blocklist. A .gitignore negation cannot re-admit
+// one of these paths.
+func isProviderDirExcluded(relPath string) bool {
+	return ProviderDirPrefix(relPath) != ""
 }
 
 // matchGitignorePattern checks if relPath matches a single .gitignore pattern.
@@ -384,17 +429,24 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 	return false
 }
 
-// filterDiffs removes diffs whose file paths are excluded.
-func (p *Provider) filterDiffs(diffs []model.Diff) []model.Diff {
+// partitionDiffs keeps diffs filtered by built-in directory rules available
+// for reporting while preserving the review input as the Included slice.
+func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 	patterns := p.loadGitignorePatterns()
-	var result []model.Diff
+	result := DiffSet{
+		Included: make([]model.Diff, 0, len(diffs)),
+		Excluded: make([]model.Diff, 0),
+	}
 	for _, d := range diffs {
 		path := d.NewPath
 		if path == "/dev/null" {
 			path = d.OldPath
 		}
-		if !p.isPathExcluded(path, patterns) {
-			result = append(result, d)
+		if isProviderDirExcluded(path) {
+			result.excludedAt = append(result.excludedAt, len(result.Included)+len(result.Excluded))
+			result.Excluded = append(result.Excluded, d)
+		} else if !p.isPathExcluded(path, patterns) {
+			result.Included = append(result.Included, d)
 		}
 	}
 	return result

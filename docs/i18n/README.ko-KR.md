@@ -1,6 +1,6 @@
 <div align="center">
   <a href="https://open-codereview.ai">
-    <img src="imgs/logo-core.svg" alt="OpenCodeReview logo" width="180" />
+    <img src="../../imgs/logo-core.svg" alt="OpenCodeReview logo" width="180" />
   </a>
   <h1>OpenCodeReview</h1>
 </div>
@@ -9,8 +9,13 @@
   <a href="https://trendshift.io/repositories/41087?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-41087" target="_blank" rel="noopener noreferrer">
     <img src="https://trendshift.io/api/badge/repositories/41087" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
   </a>
+</p>
+<p align="center">
   <a href="https://trendshift.io/repositories/41087" target="_blank">
     <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
+  </a>
+  <a href="https://trendshift.io/repositories/41087" target="_blank">
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/monthly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
   </a>
 </p>
 <p align="center">
@@ -29,7 +34,7 @@
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
-  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | 한국어 | <a href="README.ru-RU.md">Русский</a>
+  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | 한국어 | <a href="README.ru-RU.md">Русский</a>
 </p>
 
 ---
@@ -42,7 +47,7 @@ Open Code Review는 AI 기반 코드 리뷰 CLI 도구입니다. Alibaba Group�
 
 자세한 내용은 [공식 웹사이트](https://open-codereview.ai)를 참조하세요.
 
-![Highlights](imgs/highlights-en.png)
+![Highlights](../../imgs/highlights-ko.png)
 
 ## 벤치마크
 
@@ -60,7 +65,7 @@ Open Code Review는 AI 기반 코드 리뷰 CLI 도구입니다. Alibaba Group�
 | **평균 시간 (Avg Time)** | 리뷰당 실제 소요 시간 | CI 파이프라인 대기 시간에 영향 |
 | **평균 토큰 (Avg Token)** | 리뷰당 총 토큰 소비량 | API 비용에 직접 영향 |
 
-![Benchmark](imgs/benchmark-en.png)
+![Benchmark](../../imgs/benchmark-ko.png)
 
 ## 왜 Open Code Review인가?
 
@@ -123,7 +128,7 @@ ocr config provider          # built-in provider 선택 또는 custom provider �
 ocr config model             # 활성 provider의 model 선택
 ```
 
-![Provider setup](imgs/providers.jpg)
+![Provider setup](../../imgs/providers.jpg)
 
 대화형 UI가 provider 선택, API key 입력, model 설정을 안내하며, 완료 후 자동으로 연결 테스트를 수행합니다.
 
@@ -172,11 +177,11 @@ ocr delegate rule src/main.go src/handler.go
 - [설정](https://open-codereview.ai/docs/configuration) — 설정 키와 환경 변수
 - [MCP 서버](https://open-codereview.ai/docs/mcp) — 외부 도구로 리뷰 에이전트 확장
 - 코딩 에이전트 연동 — 사용하는 플랫폼 선택
-  - [Claude Code](plugins/open-code-review/README.md#claude-code) — 리뷰 슬래시 명령이 포함된 플러그인 설치
-  - [Codex](plugins/open-code-review/README.md#codex) — 호출 가능한 리뷰 스킬이 포함된 플러그인 설치
-  - [Cursor](plugins/open-code-review/README.md#cursor) — 이식 가능한 리뷰 스킬이 포함된 플러그인 설치
-  - [OpenCode](plugins/open-code-review/opencode/README.md) — 네이티브 리뷰 도구와 슬래시 명령 설치
-  - [QCA Forward](plugins/open-code-review/qca/README.md) — QCA 호스트 모델과 게시 가능한 템플릿으로 위임 모드 실행
+  - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — 리뷰 슬래시 명령이 포함된 플러그인 설치
+  - [Codex](../../plugins/open-code-review/README.md#codex) — 호출 가능한 리뷰 스킬이 포함된 플러그인 설치
+  - [Cursor](../../plugins/open-code-review/README.md#cursor) — 이식 가능한 리뷰 스킬이 포함된 플러그인 설치
+  - [OpenCode](../../plugins/open-code-review/opencode/README.md) — 네이티브 리뷰 도구와 슬래시 명령 설치
+  - [QCA Forward](../../plugins/open-code-review/qca/README.md) — QCA 호스트 모델과 게시 가능한 템플릿으로 위임 모드 실행
   - [Skill 호환 에이전트](https://open-codereview.ai/docs/agent-skill) — 이식 가능한 에이전트 스킬 설치
 - 리뷰 실행 모드 — 연동 후 리뷰를 수행할 LLM 선택
   - [기본 모드(OCR 관리)](https://open-codereview.ai/docs/configuration) — OCR이 설정된 LLM을 사용해 리뷰 수행
@@ -196,4 +201,4 @@ ocr delegate rule src/main.go src/handler.go
 
 ## License
 
-[Apache-2.0](LICENSE) Copyright 2026 Alibaba
+[Apache-2.0](../../LICENSE) Copyright 2026 Alibaba

@@ -178,7 +178,7 @@ PR에서 제어할 수 있는 값은 `run:` 안에 `${{ }}`로 직접 넣지 말
 
 #### 동시 실행 수 {#concurrency}
 
-기본적으로 파일 그룹당 하나씩, 서브 Agent 8개를 병렬로 돌립니다. 큰 PR에서 LLM
+기본적으로 서브태스크당 하나씩, 서브 Agent 8개를 병렬로 돌립니다. 큰 PR에서 LLM
 프로바이더의 요청 한도를 넘지 않으려면 값을 낮추세요:
 
 ```yaml
@@ -398,7 +398,7 @@ script:
 #### 커스텀 규칙과 동시 실행 수 {#custom-rules-and-concurrency}
 
 GitHub Actions 레시피와 같은 플래그를 씁니다. 프로젝트 전용 규칙 파일은 `--rule`로,
-병렬 서브 Agent 수(기본값 8) 조절은 `--concurrency`로 합니다:
+병렬 서브 Agent 수(기본값 8, 서브태스크당 하나) 조절은 `--concurrency`로 합니다:
 
 ```yaml
 script:

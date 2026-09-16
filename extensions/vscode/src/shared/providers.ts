@@ -64,7 +64,7 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     protocol: 'openai',
     baseUrl: 'https://api.deepseek.com',
     envVar: 'DEEPSEEK_API_KEY',
-    models: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-flash'],
+    models: ['deepseek-v4-pro', 'deepseek-flash'],
   },
   {
     name: 'tencent-tokenhub',

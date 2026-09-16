@@ -50,7 +50,7 @@ func addExcludeFlag(cmd *cobra.Command, target *string) {
 }
 
 func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, maxGitProcs, maxTokens, maxTokensBudget *int) {
-	cmd.Flags().IntVar(concurrency, "concurrency", 8, "max concurrent file-group reviews")
+	cmd.Flags().IntVar(concurrency, "concurrency", 8, "max concurrent subtasks")
 	cmd.Flags().IntVar(timeout, "timeout", 15, "concurrent task timeout in minutes")
 	cmd.Flags().IntVar(maxTools, "max-tools", 0, "max tool call rounds per subtask (0 = template default; min 50)")
 	cmd.Flags().IntVar(maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
@@ -228,9 +228,9 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
 	addOutputPathFlag(cmd, &opts.outputPath)
-	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file scans")
+	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 8, "max concurrent subtasks")
 	cmd.Flags().IntVar(&opts.concurrentTaskTimeout, "timeout", 15, "concurrent task timeout in minutes")
-	cmd.Flags().IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")
+	cmd.Flags().IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per subtask; only takes effect when greater than template default")
 	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(&opts.maxTokens, "max-tokens", 0, "per-file prompt token ceiling (0 = configured or template default)")
 	cmd.Flags().IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage; dispatch stops once exceeded (0 = unlimited)")

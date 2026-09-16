@@ -344,6 +344,58 @@ h3 {
     font-size: 0.82em;
 }
 
+/* ── Page heading ── */
+/* Keep the back link reachable beside long repository and session titles. */
+.page-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    min-width: 0;
+    margin-bottom: 1.25rem;
+}
+.page-heading > h2 {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-bottom: 0;
+    overflow-wrap: anywhere;
+}
+.back-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-alt);
+    color: var(--link);
+    text-decoration: none;
+    transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+
+.back-link::before {
+    content: "";
+    width: 20px;
+    height: 20px;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cline%20x1%3D%2219%22%20y1%3D%2212%22%20x2%3D%225%22%20y2%3D%2212%22%2F%3E%3Cpolyline%20points%3D%2212%2019%205%2012%2012%205%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cline%20x1%3D%2219%22%20y1%3D%2212%22%20x2%3D%225%22%20y2%3D%2212%22%2F%3E%3Cpolyline%20points%3D%2212%2019%205%2012%2012%205%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+}
+.back-link:hover {
+    color: var(--accent-hover);
+    background: var(--accent-soft);
+    border-color: var(--link);
+}
+.back-link:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+.session-header .page-heading {
+    margin-bottom: 0.75rem;
+}
+
 /* ── Token Usage Summary ── */
 .token-summary {
     background: var(--surface);
@@ -1232,6 +1284,7 @@ p {
     main { padding: 0 1rem; margin: 1.25rem auto; }
     nav.breadcrumb { padding: 0 1rem; }
     .session-header { padding: 1.25rem; }
+    .page-heading { gap: 0.5rem; }
     .token-stats { grid-template-columns: repeat(2, 1fr); }
     .meta { gap: 0.5rem 1rem; font-size: 0.8rem; }
     .table th, .table td { padding: 0.6rem 0.75rem; font-size: 0.82rem; }

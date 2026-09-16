@@ -84,14 +84,15 @@ curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/js
 
 ### 我的文件没被评审
 
-运行 `ocr review --preview`（无 LLM 成本）。输出列出每个候选文件及其被保留或
-丢弃的**原因**：
+运行 `ocr review --preview`（无 LLM 成本）。输出会给出每个候选文件被保留或
+丢弃的**原因**。`vendor/`、`node_modules/` 等 provider 目录下的文件在终端里折叠为
+一行汇总；`ocr review --preview --format json` 仍会列出每一条：
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
 这些排除原因对应[文件过滤](../review-rules/#how-files-are-filtered)中的门：
@@ -102,6 +103,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | 从你的 `exclude` 列表移除该模式。 |
 | `unsupported_ext` | 把扩展名加入你的 `include` 列表以绕过白名单门。 |
 | `default_path` | 把文件加入 `include`——那会覆盖内置测试文件排除模式。 |
+| `provider_directory` | 无需操作——`vendor/`、`node_modules/` 等 provider 目录永远不可评审，即使被 `include` 匹配也是如此。 |
 | `deleted` | 无需处理——没有新内容可评审。 |
 | `too_large` | 仅 diff 本身就超过 `max_tokens` 的 80%。调高 `--max-tokens`（或已保存的 `max_tokens`），或把改动拆成更小的 commit。 |
 

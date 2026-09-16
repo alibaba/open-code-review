@@ -108,6 +108,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"crates/service/Cargo.toml", "Cargo Manifest Hygiene"},
 		{"scripts/deploy.py", "Mutable Default Arguments"},
 		{"src/app/main.py", "Mutable Default Arguments"},
+		{"stubs/example.pyi", "Mutable Default Arguments"},
+		{"src/app/main.pyi", "Mutable Default Arguments"},
 		{"notebook.ipynb", "Mutable Default Arguments"},
 		{"src/notebooks/data.ipynb", "Mutable Default Arguments"},
 		{"public/index.php", "PHP Review Principles"},

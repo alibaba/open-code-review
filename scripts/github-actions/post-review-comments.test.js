@@ -41,11 +41,12 @@ process.env.OCR_RETRY_BASE_DELAY = "1";
 process.env.OCR_READ_SUCCESS_DELAY = "0";
 process.env.OCR_READ_LOW_REMAINING_SPACING = "0";
 
+const DEFAULT_HEAD_SHA = "1".repeat(40);
 const context = {
   repo: { owner: "owner", repo: "repo" },
   issue: { number: 123 },
   eventName: "pull_request_target",
-  payload: { pull_request: { head: { sha: "head-sha" } } },
+  payload: { pull_request: { head: { sha: DEFAULT_HEAD_SHA } } },
 };
 
 function mockFs(resultText, stderrText) {
@@ -174,7 +175,7 @@ function makeGithub(opts = {}) {
       pulls: {
         get: async (params) => {
           getPullCalls.push(params);
-          return { data: { head: { sha: opts.headSha || "head-sha" } } };
+          return { data: { head: { sha: opts.headSha || DEFAULT_HEAD_SHA } } };
         },
         createReview: async (params) => {
           createReviewCalls.push(params);
@@ -2326,6 +2327,10 @@ async function main() {
   // Cross-push checkpoints (#476) — write path
   await testCheckpointAdvanceGateTable();
   await testCheckpointAdvanceRequiresFullSha();
+  await testManifestHeadPinsEveryReviewPost();
+  await testLegacyPullRequestEventUsesSnapshotHead();
+  await testIssueCommentRejectsMissingOrMalformedManifestHead();
+  await testLegacyPullRequestEventRejectsMissingSnapshotHead();
   await testCheckpointCarryForwardOnEveryBodyPath();
   await testCheckpointAdvancesOnZeroFindings();
   await testCheckpointNeverAdvancesWithoutSticky();
@@ -2650,7 +2655,7 @@ async function testRunnerHeadDriftPreservesComments() {
 
   await runPostReviewComments({
     github: gh,
-    context, // context head is "head-sha"; mocked current head is "new-head"
+    context,
     core: { setOutput() {} },
     fs: mockFs(JSON.stringify(result), ""),
     out: {},
@@ -3745,10 +3750,11 @@ async function testCheckpointAdvanceGateTable() {
         const gh = makeGithub(
           failed === 1
             ? {
+                headSha: terminal === null ? context.payload.pull_request.head.sha : CK_RESOLVED,
                 files: [{ filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" }],
                 batchErrorSpec: [{ message: "Line could not be resolved", status: 422 }],
               }
-            : {}
+            : { headSha: terminal === null ? context.payload.pull_request.head.sha : CK_RESOLVED }
         );
         // published=false: the summary cannot be written at all (the issue
         // comment API is down), so summaryUrl stays empty.
@@ -3816,6 +3822,129 @@ async function testCheckpointAdvanceRequiresFullSha() {
       false,
       `resolved_head ${JSON.stringify(head)} must not advance the checkpoint`
     );
+  }
+}
+
+async function testManifestHeadPinsEveryReviewPost() {
+  const reviewedHead = "a".repeat(40);
+  const eventHead = "b".repeat(40);
+  const currentHead = "c".repeat(40);
+  const result = {
+    comments: [{ path: "src/a.js", content: "finding from reviewed head", start_line: 1, end_line: 1 }],
+    manifest: ckManifest({ input: { resolved_head: reviewedHead } }),
+  };
+
+  for (const [eventName, payload] of [
+    ["issue_comment", {}],
+    ["pull_request_target", { pull_request: { head: { sha: eventHead } } }],
+  ]) {
+    const gh = makeGithub({ headSha: currentHead, bulkError: "validation failed", bulkErrorStatus: 400 });
+    await runPostReviewComments({
+      github: gh,
+      context: {
+        repo: { owner: "owner", repo: "repo" },
+        issue: { number: 123 },
+        eventName,
+        payload,
+      },
+      core: { setOutput() {} },
+      fs: mockFs(JSON.stringify(result), ""),
+    });
+
+    assert.strictEqual(gh.createReviewCalls.length, 2, `${eventName}: batch and fallback both attempted`);
+    assert.deepStrictEqual(
+      gh.createReviewCalls.map((call) => call.commit_id),
+      [reviewedHead, reviewedHead],
+      `${eventName}: every posting path uses the reviewed manifest head`
+    );
+    assert.strictEqual(gh.getPullCalls.length, 0, `${eventName}: posting never refetches a moving PR head`);
+  }
+}
+
+async function testLegacyPullRequestEventUsesSnapshotHead() {
+  const eventHead = "d".repeat(40);
+  const gh = makeGithub({ headSha: "e".repeat(40) });
+  const result = {
+    comments: [{ path: "src/a.js", content: "legacy finding", start_line: 1, end_line: 1 }],
+  };
+
+  await runPostReviewComments({
+    github: gh,
+    context: {
+      repo: { owner: "owner", repo: "repo" },
+      issue: { number: 123 },
+      eventName: "pull_request_target",
+      payload: { pull_request: { head: { sha: eventHead } } },
+    },
+    core: { setOutput() {} },
+    fs: mockFs(JSON.stringify(result), ""),
+  });
+
+  assert.strictEqual(gh.createReviewCalls[0].commit_id, eventHead);
+  assert.strictEqual(gh.getPullCalls.length, 0, "legacy PR events use their immutable payload snapshot");
+}
+
+async function testIssueCommentRejectsMissingOrMalformedManifestHead() {
+  for (const [label, manifest, expectedError] of [
+    ["missing manifest", undefined, /resolved_head is required/],
+    ["missing input", {}, /resolved_head is missing/],
+    ["missing head", { input: {} }, /resolved_head is missing/],
+    ["null head", { input: { resolved_head: null } }, /resolved_head is missing/],
+    ["malformed", ckManifest({ input: { resolved_head: "not-a-sha" } }), /40-character lowercase string/],
+    ["array", ckManifest({ input: { resolved_head: ["a".repeat(40)] } }), /40-character lowercase string/],
+  ]) {
+    const gh = makeGithub({ headSha: "f".repeat(40) });
+    const result = {
+      comments: [{ path: "src/a.js", content: "unbound finding", start_line: 1, end_line: 1 }],
+      manifest,
+    };
+
+    await assert.rejects(
+      runPostReviewComments({
+        github: gh,
+        context: {
+          repo: { owner: "owner", repo: "repo" },
+          issue: { number: 123 },
+          eventName: "issue_comment",
+          payload: {},
+        },
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify(result), ""),
+      }),
+      expectedError,
+      `${label} manifest head must be rejected`
+    );
+    assert.strictEqual(gh.getPullCalls.length, 0, `${label}: rejection must not fetch the current PR head`);
+    assert.strictEqual(gh.createReviewCalls.length, 0, `${label}: rejection must happen before review writes`);
+    assert.strictEqual(gh.issueComments.length, 0, `${label}: rejection must happen before summary writes`);
+    assert.strictEqual(gh.updatedComments.length, 0, `${label}: rejection must happen before summary updates`);
+  }
+}
+
+async function testLegacyPullRequestEventRejectsMissingSnapshotHead() {
+  for (const payload of [undefined, null, {}, { pull_request: {} }, { pull_request: { head: {} } }]) {
+    const gh = makeGithub({});
+    const result = {
+      comments: [{ path: "src/a.js", content: "unbound legacy finding", start_line: 1, end_line: 1 }],
+    };
+
+    await assert.rejects(
+      runPostReviewComments({
+        github: gh,
+        context: {
+          repo: { owner: "owner", repo: "repo" },
+          issue: { number: 123 },
+          eventName: "pull_request_target",
+          payload,
+        },
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify(result), ""),
+      }),
+      /event payload\.pull_request\.head\.sha is missing/
+    );
+    assert.strictEqual(gh.createReviewCalls.length, 0, "a missing event snapshot must fail before review writes");
+    assert.strictEqual(gh.issueComments.length, 0, "a missing event snapshot must fail before summary writes");
+    assert.strictEqual(gh.updatedComments.length, 0, "a missing event snapshot must fail before summary updates");
   }
 }
 
