@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a><span class="sep">/</span><a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a><span class="sep">/</span><span class="current">{{.Session.Summary.SessionID | truncate 12}}</span></nav>
+{{template "app-header" .}}
 <main>
 <div class="session-header">
     <div class="page-heading">
@@ -248,6 +248,8 @@
 </main>
 </body>
 </html>
+
+{{define "breadcrumbs"}}<span class="sep">/</span><a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a><span class="sep">/</span><span class="current">{{.Session.Summary.SessionID | truncate 12}}</span>{{end}}
 
 {{define "task-cards"}}
 <details class="file-accordion">

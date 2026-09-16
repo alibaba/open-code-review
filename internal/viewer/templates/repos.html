@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a></nav>
+{{template "app-header" .}}
 <main>
 <h2>Repositories</h2>
 {{if .Repos}}
@@ -35,3 +35,5 @@
 </main>
 </body>
 </html>
+
+{{define "breadcrumbs"}}{{end}}
