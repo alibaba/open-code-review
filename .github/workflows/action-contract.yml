@@ -18,6 +18,7 @@ on:
       - 'scripts/github-actions/**'
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [main]
     paths:
@@ -30,6 +31,7 @@ on:
       - 'scripts/github-actions/**'
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
+      - '.github/workflows/ci.yml'
 
 permissions:
   contents: read
