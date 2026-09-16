@@ -294,7 +294,8 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-LLM 호출에는 별도 스팬이 생기지 않고 메트릭으로 기록됩니다.
+메인 리뷰 루프에서는 LLM 호출이 `llm.request` 스팬으로 기록되며 메트릭도 함께
+기록됩니다.
 `ocr.llm.tokens_used`(카운터, 레이블 `model` + `type`),
 `ocr.llm.requests_total`(카운터, 레이블 `model` + `status`),
 `ocr.llm.request_duration_seconds`(히스토그램, 레이블 `model`)를 보세요. console

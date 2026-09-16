@@ -13,7 +13,8 @@ metric、event を生成します。collector に接続すれば、これらの�
 テレメトリは**デフォルトで無効**です。有効にすると、OCR は以下をエクスポートします：
 
 - **Span**——3 つのパイプラインレベルの span（`review.run`、`diff.parse`、
-  `subtask.execute.group.<group-key>`）に加え、各決定ポイントのイベントごとに短命な `event.*` span を 1 つ。
+  `subtask.execute.group.<group-key>`）、LLM リクエスト span（`llm.request`）、
+  ツール実行 span（`tool.execute.<tool-name>`）、決定ポイントの短命な `event.*` span。
 - **Metric**——レビュー所要時間、レビューされたファイル数、生成されたコメント数、LLM リクエスト / token / レイテンシ、
   ツール呼び出し / レイテンシの集約カウントとヒストグラム。
 - **Event**——span 内の離散的なイベント。`plan.skipped`、
@@ -70,7 +71,7 @@ export OCR_CONTENT_LOGGING=0                        # reserved / currently a no-
 
 ### Span
 
-1 回のレビューの完全な span ツリー：
+1 回のレビューの span ツリーの例：
 
 ```
 review.run
@@ -82,6 +83,8 @@ review.run
 │   ├── event.plan.failed                  (when plan phase errored)
 │   ├── event.token.threshold.exceeded     (when prompt > 80% of max_tokens)
 │   ├── main.loop                          (one span per review round)
+│   │   ├── llm.request
+│   │   └── tool.execute.<tool-name>
 │   └── event.subtask.error                (when the subtask errored)
 ├── subtask.execute.group.<group-key2>
 └── …
@@ -89,8 +92,8 @@ review.run
 
 `subtask.execute.group.*` span はレビューされた**グループ**ごとに 1 つ発行され、ファイルごとではありません——ファイルはレビュー前に意味的にまとめられます。グループのキーは、そのグループのファイルパスをソートしてカンマで連結したものです（グループが 1 ファイルだけの場合はそのパス 1 つ）。
 
-LLM の往復とツールの実行は個別の span としては発行**されません**——metric（下記参照）にのみ現れます。
-決定ポイントのイベントは、短命な `event.<name>` span として現在の context にアタッチされます。
+メインレビュー ループの LLM リクエストとツール実行は、それぞれ `llm.request` と `tool.execute.<tool-name>` span を生成し、
+集計カウントとレイテンシも metric（下記参照）に記録されます。決定ポイントのイベントは、短命な `event.<name>` span として現在の context にアタッチされます。
 
 各 span は有用な属性を保持します：
 
@@ -100,6 +103,8 @@ LLM の往復とツールの実行は個別の span としては発行**され�
 | `diff.parse` | `files.changed`、`lines.inserted`、`lines.deleted` |
 | `subtask.execute.group.<group-key>` | `group.label`、`group.file_count`、`lines.changed`、`lines.changed.max_file` |
 | `main.loop` | `group.label`、`round` |
+| `llm.request` | `llm.model`、`llm.duration_ms`、`llm.total_tokens`、`llm.status` |
+| `tool.execute.<tool-name>` | `tool.name`、`tool.duration_ms`、`tool.status` |
 | `event.review.started` | `file.count`、`review.count`、`repo.dir` |
 | `event.review.skipped` | `reason`（`too_large` / `deleted` / `no_supported_files`）、`file.count`、`too_large.count` |
 | `event.grouping.skipped` | `strategy`、`file.count`、`lines.changed`、`threshold.files`、`threshold.lines` |
@@ -250,10 +255,10 @@ OCR は**すべて**をエクスポートします。サンプリングの設定
 
 - 1 つの `review.run` span + 1 つの `diff.parse` span + レビューされたグループごとに 1 つの
   `subtask.execute.group.<group-key>` span（およびその子の `plan.execute` /
-  `main.loop` / `review_filter.execute`）+ 各決定ポイントのイベントごとに 1 つの短命な `event.*` span。
-- 10 ファイルの PR で合計およそ 15〜25 個の span——グルーピングがファイルをまとめると少なくなり、
-  effort プリセットが追加のレビューラウンドを実行すると多くなります。LLM の往復とツール呼び出しは metric のカウントを増やしますが、
-  追加の span は作成しません。
+  `main.loop` / `review_filter.execute`）+ 各決定ポイントのイベントごとに 1 つの短命な `event.*` span、
+  および `llm.request` と `tool.execute.<tool-name>` span。
+- span の総数は、レビュー対象のグループ、レビューラウンド数、LLM リクエスト数、ツール実行数によって変わり、
+  ファイル数だけでは決まりません。
 
 エクスポートは**バッチ処理かつ非同期**です——テレメトリはレビューループをブロックしません。collector に到達できない場合、OCR は警告を記録して
 続行します。レビューは引き続き通常の出力を生成します。

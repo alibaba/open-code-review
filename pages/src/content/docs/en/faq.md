@@ -311,8 +311,8 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-LLM calls don't get their own spans — they're recorded as metrics
-instead. Watch `ocr.llm.tokens_used` (counter, labelled `model` +
+In the main review loop, LLM calls produce `llm.request` spans and are
+also recorded as metrics. Watch `ocr.llm.tokens_used` (counter, labelled `model` +
 `type`), `ocr.llm.requests_total` (counter, labelled `model` +
 `status`), and `ocr.llm.request_duration_seconds` (histogram, labelled
 `model`). The console exporter prints these aggregates inline. For
