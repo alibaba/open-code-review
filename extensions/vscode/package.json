@@ -121,5 +121,13 @@
   },
   "dependencies": {
     "preact": "^10.29.8"
-  }
+  },
+  "files": [
+    "out/**",
+    "resources/**",
+    "LICENSE",
+    "README.md",
+    "README.zh-CN.md",
+    "package.nls.json"
+  ]
 }
