@@ -122,6 +122,9 @@ func finalizeDiff(ctx context.Context, d *model.Diff, repoDir string, ref string
 		d.NewPath = "/dev/null"
 		return
 	}
+	if d.IsBinary {
+		return
+	}
 	if ref != "" {
 		args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", ref + ":" + d.NewPath}
 		var output []byte

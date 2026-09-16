@@ -103,6 +103,50 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 ```
 
+### Review from a trigger that carries no pull request
+
+The action needs a PR number to fetch the head and to post to. It resolves one in this order:
+
+| Source | When it applies |
+|--------|-----------------|
+| `pr_number` input | Whenever you set it. Overrides everything below. |
+| `github.event.pull_request.number`, then `github.event.issue.number` | `pull_request`, `pull_request_target`, `issue_comment`. |
+| `github.event.workflow_run.pull_requests[0].number` | `workflow_run`, when GitHub populated the array. |
+
+When none of them resolves, the action stops before installing OCR or spending any LLM quota, instead of reviewing and then failing to post.
+
+`workflow_run` is the trigger for "review the head CI already passed", and its payload names the PR only through that array — which GitHub fills in only for head branches that live in this repository, and which can list more than one PR when several share a head. Pass `pr_number` explicitly whenever you need a specific one:
+
+```yaml
+on:
+  workflow_run:
+    workflows: [Tests]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: alibaba/open-code-review@main
+        with:
+          llm_url: ${{ secrets.OCR_LLM_URL }}
+          llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          llm_model: ${{ vars.OCR_LLM_MODEL }}
+          llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+          pr_number: ${{ github.event.workflow_run.pull_requests[0].number }}
+          base_ref: ${{ github.event.workflow_run.pull_requests[0].base.ref }}
+          head_sha: ${{ github.event.workflow_run.head_sha }}
+```
+
+`pr_number` is the third member of the `base_ref` / `head_sha` set: each one lets the caller supply what its event cannot.
+
+> `workflow_run` runs the default branch's copy of the workflow with a write-scoped token, so gate the job on the upstream conclusion and leave the checkout to the action: it checks out the trusted base and fetches only the head's blobs, exactly as it does under `pull_request_target`.
+
 ### Customize comment trigger keywords
 
 By default the workflow also re-reviews on demand when a PR comment starts with `/open-code-review` or `@open-code-review`. The `if` condition is more defensive than a bare keyword check — it gates comment triggers so only authorized humans can spend LLM quota:
