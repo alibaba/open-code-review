@@ -5,6 +5,8 @@ package diff
 
 import (
 	"context"
+	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -270,5 +272,64 @@ index 1234567..89abcde 100644
 	}
 	if d.Insertions != 1 {
 		t.Errorf("Insertions = %d, want 1", d.Insertions)
+	}
+}
+
+func TestParseDiffText_MarksGitlinkAsSubmodule(t *testing.T) {
+	diffText := `diff --git a/vendor/tool b/vendor/tool
+index 1111111..2222222 160000
+--- a/vendor/tool
++++ b/vendor/tool
+@@ -1 +1 @@
+-Subproject commit 1111111
++Subproject commit 2222222
+`
+	diffs, err := ParseDiffText(context.Background(), diffText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d", len(diffs))
+	}
+	if !diffs[0].IsSubmodule || !diffs[0].IsBinary {
+		t.Fatalf("gitlink flags = submodule:%v binary:%v, want both true", diffs[0].IsSubmodule, diffs[0].IsBinary)
+	}
+}
+
+func TestParseDiffText_GitlinkAtRefEmitsNoWarning(t *testing.T) {
+	// A gitlink is already flagged as a submodule while parsing, so the
+	// ref-read path must not try to `git show ref:<gitlink>` and warn about
+	// it. The warning is cosmetic but callers that are fail-closed on stderr
+	// treat it as a hard failure.
+	diffText := `diff --git a/vendor/tool b/vendor/tool
+index 1111111..2222222 160000
+--- a/vendor/tool
++++ b/vendor/tool
+@@ -1 +1 @@
+-Subproject commit 1111111
++Subproject commit 2222222
+`
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	diffs, parseErr := ParseDiffText(context.Background(), diffText, t.TempDir(), "deadbeef", nil)
+	w.Close()
+	os.Stderr = orig
+	captured, _ := io.ReadAll(r)
+
+	if parseErr != nil {
+		t.Fatalf("ParseDiffText: %v", parseErr)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d", len(diffs))
+	}
+	if !diffs[0].IsSubmodule {
+		t.Fatalf("gitlink not flagged as submodule")
+	}
+	if len(captured) != 0 {
+		t.Fatalf("expected no stderr for a gitlink at ref, got: %s", captured)
 	}
 }

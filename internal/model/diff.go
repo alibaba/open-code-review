@@ -10,6 +10,7 @@ type Diff struct {
 	Diff           string `json:"diff"`
 	NewFileContent string `json:"new_file_content"`
 	IsBinary       bool   `json:"is_binary"`
+	IsSubmodule    bool   `json:"is_submodule"`
 	IsDeleted      bool   `json:"is_deleted"`
 	IsNew          bool   `json:"is_new"`
 	IsRenamed      bool   `json:"is_renamed"`

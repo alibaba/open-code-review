@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -89,6 +90,14 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 		case strings.HasPrefix(line, "rename to "):
 			current.NewPath = strings.TrimPrefix(line, "rename to ")
 			current.IsRenamed = true
+		case !inHunk && strings.HasPrefix(line, "Subproject commit "):
+			// Gitlink entries are directory-backed submodules, not regular files.
+			// Mark them non-reviewable so preview does not read the directory.
+			current.IsSubmodule = true
+			current.IsBinary = true
+		case strings.HasPrefix(line, "+Subproject commit ") || strings.HasPrefix(line, "-Subproject commit "):
+			current.IsSubmodule = true
+			current.IsBinary = true
 		// git emits "--- /dev/null" / "+++ /dev/null" without a/ b/ prefixes.
 		// Guarded by inHunk: inside a hunk the same strings can be content
 		// (e.g. an added line "++ /dev/null").
@@ -122,6 +131,13 @@ func finalizeDiff(ctx context.Context, d *model.Diff, repoDir string, ref string
 		d.NewPath = "/dev/null"
 		return
 	}
+	if d.IsSubmodule {
+		// Gitlink entries were already flagged while parsing. They have no
+		// reviewable file content in either the workspace or at a ref, and
+		// `git show <ref>:<gitlink>` fails, so reading them only produces a
+		// misleading warning that fail-closed callers treat as an error.
+		return
+	}
 	if ref != "" {
 		args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", ref + ":" + d.NewPath}
 		var output []byte
@@ -141,8 +157,21 @@ func finalizeDiff(ctx context.Context, d *model.Diff, repoDir string, ref string
 		d.NewFileContent = string(output)
 		return
 	}
+	if info, err := os.Stat(filepath.Join(repoDir, d.NewPath)); err == nil && info.IsDir() {
+		// Gitlink/submodule paths are represented as directories in the working
+		// tree. They are not reviewable file content and must not produce a
+		// misleading read warning.
+		d.IsSubmodule = true
+		d.IsBinary = true
+		return
+	}
 	content, err := readWorkspaceFileForDiff(repoDir, d.NewPath)
 	if err != nil {
+		if strings.Contains(err.Error(), "is a directory") {
+			d.IsSubmodule = true
+			d.IsBinary = true
+			return
+		}
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read file %s for review: %v\n", d.NewPath, err)
 		return
 	}
