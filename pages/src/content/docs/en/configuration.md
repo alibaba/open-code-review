@@ -394,7 +394,7 @@ ocr config set language English
 OCR_LANGUAGE=Chinese ocr review
 ```
 
-Both commands configure the same underlying `language` setting. For GitHub
+Both ways configure the same underlying `language` setting. For GitHub
 Actions, use the Action-specific input `language: Chinese`; GitLab CI, Bitbucket
 Pipelines, CodeUp CI, Gerrit CI, and GitFlic CI use `OCR_LANGUAGE=Chinese`.
 

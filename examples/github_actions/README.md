@@ -14,7 +14,7 @@ cp ocr-review.yml .github/workflows/ocr-review.yml
 The core of the demo is a single action step:
 
 ```yaml
-- uses: alibaba/open-code-review@main
+- uses: alibaba/open-code-review@<full-commit-sha> # vX.Y.Z
   with:
     llm_url: ${{ secrets.OCR_LLM_URL }}
     llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
