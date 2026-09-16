@@ -40,7 +40,6 @@ body:
       options:
         - npm (global)
         - Homebrew
-        - MacPorts
         - GitHub Release binary
         - Built from source
     validations:
