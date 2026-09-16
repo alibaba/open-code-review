@@ -77,7 +77,9 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	}
 
 	cmdArgs = append(cmdArgs, "-n", "--no-color")
-	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount))
+	// git grep limits matches per file. Fetch one extra to distinguish an exact
+	// limit from truncated results, then enforce the global limit below.
+	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount+1))
 
 	cmdArgs = append(cmdArgs, "-e", searchText)
 
@@ -177,7 +179,6 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	lines := strings.Split(strings.TrimRight(outStr, "\n"), "\n")
-	truncated := len(lines) >= gitGrepMaxCount
 
 	type match struct {
 		lineNum int
@@ -195,11 +196,8 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		offset = 1
 	}
 
-	var sb strings.Builder
-	if truncated {
-		sb.WriteString(fmt.Sprintf("Note: The results have been truncated. Only showing first %d results.\n", gitGrepMaxCount))
-	}
-
+	matchCount := 0
+	truncated := false
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -214,6 +212,11 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		if parseErr != nil {
 			continue
 		}
+		// Count only parsed text matches, not binary-file diagnostics.
+		if matchCount == gitGrepMaxCount {
+			truncated = true
+			break
+		}
 		m.lineNum = ln
 		m.content = parts[offset+2]
 		if !seen[fname] {
@@ -221,6 +224,12 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			fileOrder = append(fileOrder, fname)
 		}
 		fileMatches[fname] = append(fileMatches[fname], m)
+		matchCount++
+	}
+
+	var sb strings.Builder
+	if truncated {
+		sb.WriteString(fmt.Sprintf("Note: The results have been truncated. Only showing first %d results.\n", gitGrepMaxCount))
 	}
 
 	for _, path := range fileOrder {
