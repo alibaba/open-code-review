@@ -309,6 +309,41 @@ func TestWorkspaceDiffPreservesNonASCIIUntrackedPath(t *testing.T) {
 	}
 }
 
+func TestWorkspaceDiffSkipsOversizedUntrackedFile(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+
+	file, err := os.Create(filepath.Join(repo, "large.log"))
+	if err != nil {
+		t.Fatalf("create large file: %v", err)
+	}
+	if err := file.Truncate(maxUntrackedFileSize + 1); err != nil {
+		file.Close()
+		t.Fatalf("truncate large file: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close large file: %v", err)
+	}
+
+	provider := NewWorkspaceProvider(repo, gitcmd.New(0))
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff returned error: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("got %d diffs, want 1", len(diffs))
+	}
+	if !diffs[0].IsBinary || !diffs[0].IsNew {
+		t.Errorf("oversized file IsBinary = %t, IsNew = %t; want both true", diffs[0].IsBinary, diffs[0].IsNew)
+	}
+	if diffs[0].NewFileContent != "" {
+		t.Errorf("oversized file content has %d bytes, want none", len(diffs[0].NewFileContent))
+	}
+	if !strings.Contains(diffs[0].Diff, "Binary files /dev/null and b/large.log differ") {
+		t.Errorf("missing binary diff marker: %q", diffs[0].Diff)
+	}
+}
+
 // TestWorkspaceDiffSurvivesExternalDiffTool guards against issue #82: when a
 // user has configured an external diff tool (GIT_EXTERNAL_DIFF or
 // diff.external), git diff/show emit the tool's output instead of unified diff
@@ -458,6 +493,9 @@ func TestWorkspaceUntrackedBinaryFileIsFlaggedNotReviewed(t *testing.T) {
 			sawBinary = true
 			if !d.IsBinary {
 				t.Errorf("myapp: expected IsBinary=true for an untracked NUL-containing file")
+			}
+			if !d.IsNew || !strings.Contains(d.Diff, "Binary files /dev/null and b/myapp differ") {
+				t.Errorf("myapp: expected a new-file binary diff, got %q", d.Diff)
 			}
 			if d.Insertions != 0 {
 				t.Errorf("myapp: expected 0 insertions for a binary file, got %d", d.Insertions)
