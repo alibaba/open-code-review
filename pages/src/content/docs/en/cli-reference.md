@@ -345,8 +345,8 @@ envelope instead so callers can distinguish "no changes" from "no findings":
 
 | Code | Meaning |
 |---|---|
-| `0` | Review completed (possibly with zero comments, possibly with non-fatal warnings). |
-| `1` | Fatal error — bad flags, can't resolve LLM endpoint, all per-group sub-agents failed, etc. The error text is printed to stderr. |
+| `0` | Review completed. Either every selected item finished, or the only incomplete items were stopped by a `--max-tokens-budget` truncation (reported as `failed(budget)`). |
+| `1` | Fatal error — bad flags, can't resolve LLM endpoint, all per-group sub-agents failed, etc. The error text is printed to stderr. Also used when the run is only *partial*: at least one selected item failed for a real reason (timeout, provider error) even though other items completed. Partial results are still published before the non-zero exit, so JSON consumers keep the full coverage diagnosis. |
 
 Non-fatal warnings (a single sub-agent failed, a file exceeded the token
 threshold, etc.) are printed inline; in JSON mode they're added to the

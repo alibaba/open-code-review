@@ -327,14 +327,11 @@ func reviewResultError(runErr error, manifest *session.RunManifest) error {
 		return fmt.Errorf("review failed: %w", runErr)
 	}
 	if manifest != nil && manifest.TerminalState == session.StateFailed {
-		// The exit contract is: non-zero only for a run-level failure, or when
-		// every selected item failed. Any usable coverage — even incomplete — exits
-		// 0, so complete/partial/skipped all succeed and only failed lands here.
-		// That makes a budget stop exit 0 whenever anything was covered (it is a
-		// controlled truncation recording no run_failure) and non-zero only when
-		// the cap left nothing covered at all. Partial results are published
-		// regardless: runReview emits the frozen manifest before this error decides
-		// the exit status.
+		// The exit contract is: non-zero for a run-level failure, or when
+		// every selected item failed. Any usable coverage — even incomplete —
+		// exits 0, so complete/skipped succeed and only failed lands here.
+		// Partial results are published regardless: runReview emits the frozen
+		// manifest before this error decides the exit status.
 		//
 		// Reasons stored in the manifest already went through sanitizeReason, so
 		// they are safe to echo on stderr.
@@ -347,7 +344,32 @@ func reviewResultError(runErr error, manifest *session.RunManifest) error {
 		return fmt.Errorf("review failed: %d of %d selected item(s) failed",
 			len(manifest.Coverage.Failed), len(manifest.Coverage.Selected))
 	}
+	if manifest != nil && manifest.TerminalState == session.StatePartial {
+		// A partial run exits non-zero whenever any item failed for a reason
+		// other than budget truncation (#1027): timeout, provider and other
+		// real failures mean the review is incomplete and CI must be able to
+		// detect that from the exit status alone. budget is the one partial
+		// cause that stays exit 0: --max-tokens-budget documents a controlled
+		// truncation that publishes its partial results as a success.
+		if n := nonBudgetFailures(manifest); n > 0 {
+			return fmt.Errorf("review partially failed: %d of %d selected item(s) failed (terminal_state=partial)", n,
+				len(manifest.Coverage.Selected))
+		}
+	}
 	return nil
+}
+
+// nonBudgetFailures counts failed coverage items whose classification is not
+// budget. It answers one question: did anything fail for a reason other than a
+// controlled --max-tokens-budget truncation?
+func nonBudgetFailures(manifest *session.RunManifest) int {
+	n := 0
+	for _, it := range manifest.Coverage.Failed {
+		if it.Classification != session.FailureBudget {
+			n++
+		}
+	}
+	return n
 }
 
 func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeState, error) {

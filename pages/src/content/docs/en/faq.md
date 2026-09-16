@@ -231,13 +231,18 @@ is usually one of:
   local models) — see
   ["No tool calls parsed" (local models / Ollama)](#no-tool-calls-parsed-local-models-ollama).
 
-### Some sub-agents fail; the run still exits 0
+### Some sub-agents fail; what's the exit code?
 
-By design. OCR isolates per-group failures so one bad group doesn't kill
-a 20-file review. The aggregate exit code is `0` if *anything*
-succeeded; only a fully-failed run (zero successful sub-agents) exits
-non-zero. Check the `warnings` array in JSON mode or stderr in text
-mode to see which groups failed.
+OCR isolates per-group failures so one bad group doesn't kill a 20-file
+review, and the partial results are always published before the exit.
+But the aggregate exit code distinguishes *why* the run was incomplete:
+`0` only when every selected item finished (or the only incomplete
+items were stopped by a `--max-tokens-budget` truncation, reported as
+`failed(budget)`), and `1` as soon as any item failed for a real reason
+(timeout, provider error) — even if everything else succeeded. That
+way a CI job can detect an incomplete review from the exit status
+alone. Check the `warnings` array in JSON mode or stderr in text mode
+to see which groups failed.
 
 ### CI run is much slower than local
 
