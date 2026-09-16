@@ -52,21 +52,21 @@ inputs:
       (default) sends nothing. An explicit reasoning_effort key in
       llm_extra_body wins over this input.
     required: false
-    default: ''
+    default: ""
   language:
     description: >-
       Review output language, written via `ocr config set language`
       (e.g. English, Chinese). No env var exists for this.
     required: false
-    default: 'English'
+    default: "English"
   llm_timeout:
     description: LLM request timeout in seconds (mapped to env OCR_LLM_TIMEOUT).
     required: false
-    default: '300'
+    default: "300"
   review_task_timeout:
     description: Per-file/concurrent-task timeout in integer minutes, from 1 through 120.
     required: false
-    default: '15'
+    default: "15"
   github_token:
     description: GitHub token used to post review comments.
     required: false
@@ -90,7 +90,7 @@ inputs:
       medium, high (case-insensitive). Empty keeps the CLI default (the
       configured value, or medium). Requires OpenCodeReview v1.10.0 or newer.
     required: false
-    default: ''
+    default: ""
   max_tokens_budget:
     description: >-
       Total token cap passed to `ocr review --max-tokens-budget`. Base-10
@@ -98,7 +98,7 @@ inputs:
       stops, skipped files are reported as failed(budget), partial results
       are still published, and the review exits 0.
     required: false
-    default: ''
+    default: ""
   stream_progress:
     description: >-
       Stream live [ocr] review progress to the workflow log (human audience
@@ -107,27 +107,27 @@ inputs:
       (default) keeps the silent agent-audience run with stderr captured to
       a log file. Requires OpenCodeReview v1.9.8 or newer when enabled.
     required: false
-    default: 'false'
+    default: "false"
   upload_artifacts:
     description: >-
       Upload raw JSON result and stderr as workflow artifacts. Must be the
       literal string 'true' or 'false' (quoted); the step gates on a string
       comparison, so an unquoted YAML boolean will not match.
     required: false
-    default: 'true'
+    default: "true"
   sticky_summary:
     description: >-
       Summary dimension. true = update an existing summary comment in place
       (sticky) instead of posting a new one each run.
     required: false
-    default: 'true'
+    default: "true"
   incremental:
     description: >-
       Incremental dimension. true = only append inline comments whose (path,
       line range) does not overlap an existing bot review comment. History is
       never deleted (non-destructive).
     required: false
-    default: 'false'
+    default: "false"
   incremental_overlap_threshold:
     description: >-
       IoU (intersection-over-union) threshold used by incremental mode to decide
@@ -135,7 +135,7 @@ inputs:
       comments match when on the same line; single- vs multi-line never match.
       Value in (0, 1]; ignored unless incremental is true.
     required: false
-    default: '0.6'
+    default: "0.6"
   review_comment_batch_size:
     description: >-
       Maximum number of inline comments packed into a single createReview call.
@@ -144,7 +144,7 @@ inputs:
       after posting 71 inline comments in one request). Integer >= 1; values
       below 1 or non-numeric fall back to the default (50).
     required: false
-    default: '50'
+    default: "50"
   route_severity_below:
     description: >-
       Optional severity threshold that routes findings at-or-below it from
@@ -155,7 +155,7 @@ inputs:
       with an empty or unknown severity are never routed by this policy and
       keep their normal placement.
     required: false
-    default: ''
+    default: ""
   route_categories:
     description: >-
       Optional comma-separated list of categories routed from inline comments
@@ -167,7 +167,7 @@ inputs:
       are never routed by this policy and keep their normal placement. Combine
       with route_severity_below to route on either condition.
     required: false
-    default: ''
+    default: ""
   checkpoint_range:
     description: >-
       Cross-push checkpoints. true = a run that reviewed everything it selected
@@ -179,14 +179,14 @@ inputs:
       the checkpoint is an ancestor of the new head — the full range is reviewed
       exactly as it is today. Requires sticky_summary; ignored without it.
     required: false
-    default: 'false'
+    default: "false"
   full_review:
     description: >-
       Force one full review even when checkpoint_range is enabled (reason
       'manual_full_review'). Use it to re-review a PR from the merge-base
       without turning checkpointing off; the run still records a new checkpoint.
     required: false
-    default: 'false'
+    default: "false"
   base_ref:
     description: >-
       Override the base ref. Provide this (and head_sha) when invoking from a
@@ -195,10 +195,14 @@ inputs:
   head_sha:
     description: Override the head commit SHA (use with base_ref for comment triggers).
     required: false
+  pr_number:
+    description: Pull request number
+    required: false
+    default: ""
   node_version:
     description: Node.js version for actions/setup-node.
     required: false
-    default: '24'
+    default: "24"
 
 outputs:
   comments_total:
@@ -343,7 +347,7 @@ runs:
       if: env.HEAD_SHA != ''
       shell: bash
       env:
-        PR_NUM: ${{ github.event.pull_request.number || github.event.issue.number }}
+        PR_NUM: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
       run: |
         if [ -n "$PR_NUM" ]; then
           git fetch origin "pull/${PR_NUM}/head"
