@@ -47,7 +47,10 @@ jobs:
           cp pages/logo.svg _site/logo.svg
           cp install.sh _site/install.sh
           cp install.ps1 _site/install.ps1
-          cp public/public/robots.txt _site/robots.txt
+          cp pages/public/robots.txt _site/robots.txt
+
+      - name: Generate sitemap
+        run: node scripts/github-actions/generate-sitemap.js --out _site/sitemap.xml
 
       - name: Verify install scripts
         run: |
@@ -57,6 +60,10 @@ jobs:
           cmp install.sh _site/install.sh
           cmp install.ps1 _site/install.ps1
           test -e _site/robots.txt
+          grep -q '^Sitemap: ' _site/robots.txt
+          test -e _site/sitemap.xml
+          grep -q '<loc>' _site/sitemap.xml
+          grep -q '</urlset>' _site/sitemap.xml
 
       - uses: actions/upload-pages-artifact@v5
         with:
