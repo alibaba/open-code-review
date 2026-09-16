@@ -152,6 +152,57 @@ func TestGetDiffSetWalksChangesetOrder(t *testing.T) {
 	}
 }
 
+func TestGetDiffSetWalksChangesetOrderAcrossGitignoreDrop(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	// skip.log is tracked so git diff still emits it; partitionDiffs then
+	// drops it, which is the case excludedAt must not count.
+	all := []string{"a.go", "skip.log", "target/mid.go", "z.go"}
+	want := []string{"a.go", "target/mid.go", "z.go"}
+	write := func(content string) {
+		t.Helper()
+		for _, p := range all {
+			full := filepath.Join(repo, filepath.FromSlash(p))
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", p, err)
+			}
+			if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", p, err)
+			}
+		}
+	}
+	write("package p\n")
+	runGitTest(t, repo, "add", ".")
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("*.log\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	runGitTest(t, repo, "add", ".gitignore")
+	runGitTest(t, repo, "commit", "-q", "-m", "add files")
+	write("package p\n\nconst V = 2\n")
+
+	set, err := NewWorkspaceProvider(repo, gitcmd.New(0)).GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+
+	var got []string
+	var flags []bool
+	set.ForEachInOrder(func(d model.Diff, providerExcluded bool) {
+		got = append(got, d.NewPath)
+		flags = append(flags, providerExcluded)
+	})
+	if !slices.Equal(got, want) {
+		t.Errorf("ForEachInOrder paths = %v, want %v", got, want)
+	}
+	if len(flags) != 3 || flags[0] || !flags[1] || flags[2] {
+		t.Errorf("providerExcluded flags = %v, want [false true false]", flags)
+	}
+}
+
 // initRepoWithNonASCIIChange creates a repository whose changed file path
 // contains both non-ASCII characters and Next.js-style route groups. It forces
 // Git's default path quoting so tests do not depend on the user's global config.
