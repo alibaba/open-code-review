@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'pages/**'
+      - 'scripts/github-actions/generate-sitemap.js'
       - 'install.sh'
       - 'install.ps1'
       - '.github/workflows/deploy-pages.yml'
@@ -49,8 +50,8 @@ jobs:
           cp install.ps1 _site/install.ps1
           cp pages/public/robots.txt _site/robots.txt
 
-      - name: Generate sitemap
-        run: node scripts/github-actions/generate-sitemap.js --out _site/sitemap.xml
+      - name: Generate sitemap and entry points
+        run: node scripts/github-actions/generate-sitemap.js --out _site/sitemap.xml --site-dir _site
 
       - name: Verify install scripts
         run: |
@@ -64,6 +65,8 @@ jobs:
           test -e _site/sitemap.xml
           grep -q '<loc>' _site/sitemap.xml
           grep -q '</urlset>' _site/sitemap.xml
+          test -f _site/docs/quickstart/index.html
+          cmp _site/index.html _site/docs/quickstart/index.html
 
       - uses: actions/upload-pages-artifact@v5
         with:
