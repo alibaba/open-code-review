@@ -149,6 +149,9 @@ type ResumeInfo struct {
 	RerunFiles    int64  `json:"rerun_files"`
 	PreviousModel string `json:"previous_model,omitempty"`
 	CurrentModel  string `json:"current_model,omitempty"`
+	// Delta reports that the reused files came from a review of a different
+	// input (--delta-from), not from an interrupted run of this one.
+	Delta bool `json:"delta,omitempty"`
 }
 
 // New creates a new SessionHistory with the given repo directory.
