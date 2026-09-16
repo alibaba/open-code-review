@@ -25,14 +25,171 @@ jobs:
   test:
     runs-on: self-hosted
     timeout-minutes: 15
+    # GitHub scopes permissions to jobs, not steps. Fork tokens stay read-only.
+    permissions:
+      contents: write
     container:
       image: golang:1.26.6
       options: --cpus=2
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Keep the merge ref for tests and fetch both parents for the path check.
+          fetch-depth: 2
+          persist-credentials: false
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
+
+      - name: Check for provider preset changes
+        id: provider-presets-scope
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]'
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only HEAD^1 HEAD -- \
+            internal/llm/providers.go internal/llm/protocol.go internal/llm/gen \
+            go.mod go.sum extensions/vscode/src/shared/providers.generated.ts)
+          if [[ -z "$changed" ]]; then
+            echo "No provider inputs or catalog changed; skipping autofix."
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare the PR head for provider generation
+        id: provider-presets-prepare
+        if: steps.provider-presets-scope.outputs.needed == 'true'
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$(git rev-parse HEAD^2)" != "$HEAD_SHA" ]]; then
+            echo "::error::The merge checkout does not match the event PR head; refusing to autofix. Start a run for the latest PR head."
+            exit 1
+          fi
+          worktree=$(mktemp -d "$RUNNER_TEMP/provider-presets.XXXXXX")
+          if ! git worktree add --detach "$worktree" "$HEAD_SHA"; then
+            git worktree remove --force -- "$worktree" 2>/dev/null || rmdir -- "$worktree" 2>/dev/null || true
+            echo "::error::Could not prepare the provider generation worktree; refusing to autofix."
+            exit 1
+          fi
+          echo "path=$worktree" >> "$GITHUB_OUTPUT"
+
+      - name: Regenerate provider presets
+        id: provider-presets-generate
+        if: steps.provider-presets-prepare.outputs.path != ''
+        shell: bash
+        working-directory: ${{ steps.provider-presets-prepare.outputs.path }}
+        run: |
+          set -euo pipefail
+          generated=extensions/vscode/src/shared/providers.generated.ts
+          # Require fresh output, even when go generate finds no directive.
+          rm -f -- "$generated"
+          go generate ./internal/llm
+
+      - name: Validate the generated provider catalog
+        id: provider-presets-validate
+        if: steps.provider-presets-prepare.outputs.path != ''
+        shell: bash
+        working-directory: ${{ steps.provider-presets-prepare.outputs.path }}
+        run: |
+          set -euo pipefail
+          generated=extensions/vscode/src/shared/providers.generated.ts
+          if [[ ! -f "$generated" || -L "$generated" ]]; then
+            echo "::error::Provider generation produced no regular catalog. Ensure the provider preset generator is present."
+            exit 1
+          fi
+          git add --force -- "$generated"
+          if ! git diff --quiet HEAD -- . ":(exclude)$generated" ||
+             [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+            echo "::error::Generation changed files outside the provider catalog; refusing to commit."
+            exit 1
+          fi
+          if [[ "$(git ls-files --stage -- "$generated")" != "100644 "* ]]; then
+            echo "::error::The generated catalog must have ordinary file permissions."
+            exit 1
+          fi
+          if git diff --cached --quiet -- "$generated"; then
+            echo "Provider presets are up to date."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit the catalog if the PR head is still current
+        id: provider-presets-commit
+        if: steps.provider-presets-validate.outputs.changed == 'true'
+        shell: bash
+        working-directory: ${{ steps.provider-presets-prepare.outputs.path }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          generated=extensions/vscode/src/shared/providers.generated.ts
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          test "$(git diff --cached --name-only)" = "$generated"
+          ref="refs/heads/$HEAD_REF"
+          git check-ref-format "$ref"
+          remote="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          if ! current=$(git -c credential.helper= ls-remote --heads "$remote" "$ref" | cut -f1); then
+            echo "::error::Could not read the current PR head; refusing to autofix. Check repository access before retrying."
+            exit 1
+          fi
+          if [[ "$current" != "$HEAD_SHA" ]]; then
+            echo "::notice::The PR branch changed; skipping this outdated autofix."
+            exit 0
+          fi
+          git -c core.hooksPath=/dev/null \
+            -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit --no-gpg-sign --only -m "chore(vscode): regenerate provider presets" -- "$generated"
+          test "$(git rev-parse HEAD^)" = "$HEAD_SHA"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push the provider catalog
+        id: provider-presets-push
+        if: steps.provider-presets-commit.outputs.created == 'true'
+        shell: bash
+        working-directory: ${{ steps.provider-presets-prepare.outputs.path }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          GIT_TRACE: '0'
+          GIT_TRACE_CURL: '0'
+          GIT_CURL_VERBOSE: '0'
+        run: |
+          set -euo pipefail
+          : "${GITHUB_TOKEN:?A repository token is required to push the catalog}"
+          test "$(git rev-parse HEAD^)" = "$HEAD_SHA"
+          ref="refs/heads/$HEAD_REF"
+          remote="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          unset GITHUB_TOKEN
+          # A direct-child commit and an exact lease prevent overwriting a changed head.
+          if ! GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="http.${remote}.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+            git -c core.hooksPath=/dev/null -c credential.helper= \
+              push "--force-with-lease=$ref:$HEAD_SHA" "$remote" "HEAD:$ref"; then
+            echo "::error::Could not confirm the autofix push. Check the latest PR head, then run 'go generate ./internal/llm' and commit the catalog if needed."
+            exit 1
+          fi
+          echo "::notice::Pushed the provider catalog. Checks must validate the new PR head; workflow approval may be required."
+
+      - name: Clean up the provider generation worktree
+        id: provider-presets-cleanup
+        if: always() && steps.provider-presets-prepare.outputs.path != ''
+        shell: bash
+        env:
+          PROVIDER_WORKTREE: ${{ steps.provider-presets-prepare.outputs.path }}
+        run: git worktree remove --force -- "$PROVIDER_WORKTREE"
 
       - name: Verify license headers
         run: bash scripts/verify-license.sh
