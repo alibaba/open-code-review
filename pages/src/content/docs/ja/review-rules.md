@@ -124,6 +124,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `.github/**/*.{yaml,yml}` | `github_config.md`: その他の `.github` 設定 YAML。 |
 | `**/*.{yaml,yml}` | `yaml.md` |
 | `**/*.java` | `java.md` |
+| `**/*.{cs,csx}` | `csharp.md` |
 | `**/*.go` | `go.md`: Go ソースコード。 |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md`: FreeMarker テンプレート（SSTI / XSS / null 処理）。 |
 | `**/*.{hbs,mustache}` | `handlebars_mustache.md`: Handlebars / Mustache テンプレート。 |

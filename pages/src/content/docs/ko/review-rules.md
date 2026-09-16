@@ -155,6 +155,7 @@ diff 단계에서 일어납니다.
 | `.github/**/*.{yaml,yml}` | `github_config.md` — 그 밖의 `.github` 설정 YAML. |
 | `**/*.{yaml,yml}` | `yaml.md` |
 | `**/*.java` | `java.md` |
+| `**/*.{cs,csx}` | `csharp.md` |
 | `**/*.go` | `go.md` — Go 소스. |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md` — FreeMarker 템플릿(SSTI / XSS / null 처리). |
 | `**/*.{hbs,mustache}` | `handlebars_mustache.md` — Handlebars 및 Mustache 템플릿. |

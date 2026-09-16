@@ -167,6 +167,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `.github/**/*.{yaml,yml}` | `github_config.md` — прочий конфигурационный YAML `.github`. |
 | `**/*.{yaml,yml}` | `yaml.md` |
 | `**/*.java` | `java.md` |
+| `**/*.{cs,csx}` | `csharp.md` |
 | `**/*.go` | `go.md` — исходный код Go. |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md` — шаблоны FreeMarker (SSTI / XSS / обработка null). |
 | `**/*.{hbs,mustache}` | `handlebars_mustache.md` — шаблоны Handlebars и Mustache. |

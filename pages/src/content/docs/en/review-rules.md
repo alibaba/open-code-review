@@ -166,6 +166,7 @@ matching order:
 | `.github/**/*.{yaml,yml}` | `github_config.md` — other `.github` config YAML. |
 | `**/*.{yaml,yml}` | `yaml.md` |
 | `**/*.java` | `java.md` |
+| `**/*.{cs,csx}` | `csharp.md` |
 | `**/*.go` | `go.md` — Go source. |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling). |
 | `**/*.{hbs,mustache}` | `handlebars_mustache.md` — Handlebars and Mustache templates. |

@@ -147,6 +147,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `.github/**/*.{yaml,yml}` | `github_config.md`——其他 `.github` 配置 YAML。 |
 | `**/*.{yaml,yml}` | `yaml.md` |
 | `**/*.java` | `java.md` |
+| `**/*.{cs,csx}` | `csharp.md` |
 | `**/*.go` | `go.md`——Go 源代码。 |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。 |
 | `**/*.{hbs,mustache}` | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。 |
