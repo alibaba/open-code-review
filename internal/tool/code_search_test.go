@@ -6,12 +6,14 @@ package tool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
@@ -533,6 +535,135 @@ func TestCodeSearchProvider_Execute_WithFilePatterns(t *testing.T) {
 				t.Errorf("expected util.go for pattern %q, got: %s", test.pattern, got)
 			}
 		})
+	}
+}
+
+func TestCodeSearchProvider_Execute_RejectsMalformedFilePatterns(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	tests := []struct {
+		name  string
+		value any
+	}{
+		{name: "scalar", value: "pkg/"},
+		{name: "null", value: nil},
+		{name: "non-string entry", value: []any{"pkg/", 42}},
+		{name: "empty entry", value: []any{"pkg/", ""}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := p.Execute(context.Background(), map[string]any{
+				"search_text":   "Util",
+				"file_patterns": test.value,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(got, "Error: file_patterns") {
+				t.Fatalf("expected actionable file_patterns error, got %q", got)
+			}
+		})
+	}
+}
+
+func TestCodeSearchProvider_Execute_ValidFilePatternsStillFilter(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	got, err := p.Execute(context.Background(), map[string]any{
+		"search_text":   "func",
+		"file_patterns": []any{"pkg/"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "util.go") || strings.Contains(got, "hello.go") {
+		t.Fatalf("expected valid file_patterns to limit results to pkg/, got %q", got)
+	}
+}
+
+func TestCodeSearchProvider_Execute_BoundsUTF8ResultsAcrossFiles(t *testing.T) {
+	dir := setupTestRepo(t)
+	largeLine := strings.Repeat("\u5339", 100000) + " NEEDLE\n"
+	for _, name := range []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt", "g.txt", "h.txt", "i.txt", "j.txt", "k.txt", "l.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(largeLine), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	got, err := p.Execute(context.Background(), map[string]any{"search_text": "NEEDLE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len([]byte(got)) > 128*1024 {
+		t.Fatalf("search result exceeded practical byte bound: %d bytes", len([]byte(got)))
+	}
+	if !strings.Contains(got, "truncated") || !strings.Contains(got, "narrow") {
+		t.Fatalf("expected visible truncation guidance, got %q", got)
+	}
+	if !strings.Contains(got, "a.txt") || !strings.Contains(got, "b.txt") {
+		t.Fatalf("expected bounded result to retain multiple files, got %q", got)
+	}
+	if !strings.Contains(got, "\u5339") || !utf8.ValidString(got) {
+		t.Fatalf("expected UTF-8-safe retained content, got valid=%t", utf8.ValidString(got))
+	}
+}
+
+func TestCodeSearchProvider_Execute_TotalCapIncludesGitLimitNotice(t *testing.T) {
+	dir := setupTestRepo(t)
+	largeLine := strings.Repeat("x", 20*1024) + " NEEDLE\n"
+	for i := 0; i < gitGrepMaxCount; i++ {
+		name := fmt.Sprintf("match-%03d.txt", i)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(largeLine), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	got, err := p.Execute(context.Background(), map[string]any{"search_text": "NEEDLE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len([]byte(got)) > searchResultMaxBytes {
+		t.Fatalf("search result and notices exceeded byte bound: %d bytes", len([]byte(got)))
+	}
+	if !strings.Contains(got, "Git grep results are limited") || !strings.Contains(got, "response size limit") {
+		t.Fatalf("expected both match-count and response-limit notices, got %q", got)
+	}
+}
+
+func TestCodeSearchProvider_Execute_DistinguishesLineAndResponseLimits(t *testing.T) {
+	dir := setupTestRepo(t)
+	largeLine := strings.Repeat("x", 20*1024) + " NEEDLE\n"
+	if err := os.WriteFile(filepath.Join(dir, "large.txt"), []byte(largeLine), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	got, err := p.Execute(context.Background(), map[string]any{"search_text": "NEEDLE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Individual matching lines were truncated") {
+		t.Fatalf("expected line-limit notice, got %q", got)
+	}
+	if strings.Contains(got, "response size limit") {
+		t.Fatalf("single shortened line must not claim the whole response was truncated, got %q", got)
+	}
+}
+
+func TestTruncateUTF8SanitizesInvalidInputBelowLimit(t *testing.T) {
+	got, truncated := truncateUTF8("valid\xfftail", 1024)
+	if !utf8.ValidString(got) {
+		t.Fatalf("expected invalid bytes to be replaced, got %q", got)
+	}
+	if truncated {
+		t.Fatal("replacement below the byte limit must not be reported as truncation")
+	}
+	if !strings.Contains(got, "valid") || !strings.Contains(got, "tail") {
+		t.Fatalf("expected valid content around the invalid byte to survive, got %q", got)
 	}
 }
 

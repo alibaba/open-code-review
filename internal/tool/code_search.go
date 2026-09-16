@@ -12,11 +12,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
-	gitGrepMaxCount = 100
-	gitGrepTimeout  = 10 * time.Second
+	gitGrepMaxCount      = 100
+	gitGrepTimeout       = 10 * time.Second
+	searchResultMaxBytes = 128 * 1024
+	searchMatchMaxBytes  = 16 * 1024
 )
 
 // CodeSearchProvider performs text search across the repository using git grep.
@@ -33,10 +36,24 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 	caseSensitive, _ := args["case_sensitive"].(bool)
 	usePerlRegexp, _ := args["use_perl_regexp"].(bool)
 
-	filePatternsIface, _ := args["file_patterns"].([]any)
 	var patterns []string
-	for _, item := range filePatternsIface {
-		if s, ok := item.(string); ok && s != "" {
+	if raw, supplied := args["file_patterns"]; supplied {
+		var items []any
+		switch value := raw.(type) {
+		case []any:
+			items = value
+		case []string:
+			for _, item := range value {
+				items = append(items, item)
+			}
+		default:
+			return "Error: file_patterns must be an array of non-empty strings", nil
+		}
+		for _, item := range items {
+			s, ok := item.(string)
+			if !ok || s == "" {
+				return "Error: file_patterns must be an array of non-empty strings", nil
+			}
 			if hasTraversalPathComponent(s) {
 				return "Error: file_patterns must not contain ..", nil
 			}
@@ -196,8 +213,21 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	var sb strings.Builder
-	if truncated {
-		sb.WriteString(fmt.Sprintf("Note: The results have been truncated. Only showing first %d results.\n", gitGrepMaxCount))
+	const responseTruncationNotice = "\nNote: Search results were truncated to stay within the response size limit. Please narrow file_patterns to a more specific path.\n"
+	const lineTruncationNotice = "\nNote: Individual matching lines were truncated at 16 KiB. Use file_read when the complete line is needed.\n"
+	responseTruncated := false
+	lineTruncated := false
+	maxOutputBytes := searchResultMaxBytes - len(responseTruncationNotice) - len(lineTruncationNotice)
+	appendOutput := func(value string) bool {
+		value = strings.ToValidUTF8(value, "\uFFFD")
+		if sb.Len()+len(value) <= maxOutputBytes {
+			sb.WriteString(value)
+			return true
+		}
+		return false
+	}
+	if truncated && !appendOutput(fmt.Sprintf("Note: Git grep results are limited to the first %d matches per file.\n", gitGrepMaxCount)) {
+		responseTruncated = true
 	}
 
 	for _, line := range lines {
@@ -223,20 +253,57 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		fileMatches[fname] = append(fileMatches[fname], m)
 	}
 
+	stopOutput := false
 	for _, path := range fileOrder {
 		matches := fileMatches[path]
-		sb.WriteString(fmt.Sprintf("File: %s\nMatch lines: %d\n", path, len(matches)))
-		for _, m := range matches {
-			sb.WriteString(fmt.Sprintf("%d|%s\n", m.lineNum, m.content))
+		if !appendOutput(fmt.Sprintf("File: %s\nMatch lines: %d\n", path, len(matches))) {
+			responseTruncated = true
+			stopOutput = true
+			break
 		}
-		sb.WriteString("\n")
+		for _, m := range matches {
+			content, wasTruncated := truncateUTF8(m.content, searchMatchMaxBytes)
+			if wasTruncated {
+				lineTruncated = true
+			}
+			if !appendOutput(fmt.Sprintf("%d|%s\n", m.lineNum, content)) {
+				responseTruncated = true
+				stopOutput = true
+				break
+			}
+		}
+		if stopOutput || !appendOutput("\n") {
+			responseTruncated = true
+			break
+		}
 	}
 
-	if err != nil && errStr != "" {
-		sb.WriteString(fmt.Sprintf("Warning: %s\n", strings.TrimSpace(errStr)))
+	if !stopOutput && err != nil && errStr != "" {
+		if !appendOutput(fmt.Sprintf("Warning: %s\n", strings.TrimSpace(errStr))) {
+			responseTruncated = true
+		}
+	}
+	if lineTruncated {
+		sb.WriteString(lineTruncationNotice)
+	}
+	if responseTruncated {
+		// The body was budgeted to leave room, so these notices are always visible.
+		sb.WriteString(responseTruncationNotice)
 	}
 
 	return sb.String(), nil
+}
+
+func truncateUTF8(value string, maxBytes int) (string, bool) {
+	value = strings.ToValidUTF8(value, "\uFFFD")
+	if len(value) <= maxBytes {
+		return value, false
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.ValidString(value[:cut]) {
+		cut--
+	}
+	return value[:cut], true
 }
 
 func trimGitUsage(stderr string, exitCode int) string {

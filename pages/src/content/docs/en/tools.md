@@ -295,7 +295,7 @@ understands `pathspec` syntax and respects `.gitignore`.
 | Field | Required | Default | Notes |
 |---|---|---|---|
 | `search_text` | yes | — | Literal string or PCRE pattern (see `use_perl_regexp`). |
-| `file_patterns` | no | whole repo | Array of pathspec entries. Use `:(exclude)pat` to subtract. |
+| `file_patterns` | no | whole repo | Array of non-empty string pathspec entries. Scalar strings, null, and invalid entries are rejected. Use `:(exclude)pat` to subtract. An empty array searches the whole repo. |
 | `case_sensitive` | no | `false` | — |
 | `use_perl_regexp` | no | `false` | When `true`, `search_text` is treated as a regex. |
 
@@ -330,10 +330,11 @@ When there are no matches, the tool returns the literal string
 
 ### Limits
 
-- Caps matches at **100 per file** via `git grep --max-count 100`, so
-  total output across many files can exceed 100. When the per-file cap
-  is hit the output is prefixed with `Note: The results have been
-  truncated. Only showing first 100 results.`.
+- Caps matches at **100 per file** via `git grep --max-count 100`.
+- Caps the returned response at **128 KiB**, including its truncation
+  notices, and individual matching lines at **16 KiB**. Response
+  truncation tells the agent to narrow `file_patterns`; line truncation
+  directs it to `file_read` for the complete content.
 - Empty / whitespace-only `search_text` returns `Error: search_text is
   blank` instead of expanding to every line.
 - Searches the **current working tree** in workspace mode, or the

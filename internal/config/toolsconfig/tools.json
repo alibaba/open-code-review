@@ -103,7 +103,7 @@
     "main_task": true,
     "definition": {
       "name": "code_search",
-      "description": "Use this tool to search for specific text within files. Supports searching in specific files, directories, or across the entire codebase with flexible file pattern filtering. Can use either exact string matching or regular expressions.\n\n**Example output:**\nSearch results for 'toolRequest' (case-insensitive):\nFile: path/to/example.java\n433|      String name = toolRequest.get().getName();\n438|      logToolRequest(newPath, tool, toolRequest.get());\n\n**Regular expression examples (requires use_perl_regexp: true):**\n- Find classes that extend BaseModel: 'class.*extends.*BaseModel'\n- Find function: 'functionName(.*)'\n- Find the function call sites: '\\.functionName(.*)'\n- Match any of multiple strings: 'error|exception|fail'\n\n**File patterns examples:**\n- Single file: ['src/main.go']\n- Multiple files: ['src/main.go', 'lib/utils.js']\n- All Go files: ['*.go']\n- Exclude test files: [':(exclude)*_test.go']\n- Only in src directory: ['src/']\n- Multiple patterns: ['*.go', ':(exclude)vendor/']\n\n**Limitations:**\n- If more than 100 matches are found, only the first 100 results will be returned.\n- Empty search terms will return no results.\n- This tool searches in the current version of files.",
+      "description": "Use this tool to search for specific text within files. Supports searching in specific files, directories, or across the entire codebase with flexible file pattern filtering. Can use either exact string matching or regular expressions.\n\n**Example output:**\nSearch results for 'toolRequest' (case-insensitive):\nFile: path/to/example.java\n433|      String name = toolRequest.get().getName();\n438|      logToolRequest(newPath, tool, toolRequest.get());\n\n**Regular expression examples (requires use_perl_regexp: true):**\n- Find classes that extend BaseModel: 'class.*extends.*BaseModel'\n- Find function: 'functionName(.*)'\n- Find the function call sites: '\\.functionName(.*)'\n- Match any of multiple strings: 'error|exception|fail'\n\n**File patterns examples:**\n- Single file: ['src/main.go']\n- Multiple files: ['src/main.go', 'lib/utils.js']\n- All Go files: ['*.go']\n- Exclude test files: [':(exclude)*_test.go']\n- Only in src directory: ['src/']\n- Multiple patterns: ['*.go', ':(exclude)vendor/']\n\n**Limitations:**\n- Returns at most 100 matches per file. Total output is capped at 128 KiB and each matching line at 16 KiB; distinct notices identify response and line truncation. Narrow file_patterns or use file_read when more detail is needed.\n- Empty search terms will return no results.\n- This tool searches in the current version of files.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -116,7 +116,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Array of patterns to include/exclude files in the search. Supports Git pathspec syntax for including and excluding files. If omitted, searches the entire codebase."
+            "description": "Array of non-empty string patterns to include/exclude files in the search; a scalar string is invalid. Supports Git pathspec syntax for including and excluding files. If omitted or empty, searches the entire codebase."
           },
           "case_sensitive": {
             "type": "boolean",
