@@ -1287,6 +1287,59 @@ p {
     .code-numbered .line-no { color: #8b93b5; }
 }
 
+/* ── Session Compare ── */
+/* Scoped to .compare-page: the shared comment-card/code-panel classes are
+   styled above, and everything below only applies to compare.html so the
+   session-detail screens (#1326/#1327) can restyle independently. */
+.compare-bucket {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--bucket-tone, var(--border));
+    border-radius: var(--radius-sm);
+    padding: 1rem 1.25rem;
+    margin-bottom: 0.85rem;
+}
+.compare-bucket:last-child { margin-bottom: 0; }
+.compare-bucket-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 0.85rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--bucket-tone-fg, var(--text-strong));
+}
+.bucket-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--bucket-tone, var(--text-faint));
+}
+/* Outcome tones, mirroring the filled-badge pairs used by the .cat-* badges:
+   new findings read as a warning, persisting as a caution, resolved as
+   success, and not reviewed as neutral. */
+.bucket-new { --bucket-tone: #ea580c; --bucket-tone-fg: #c2410c; }
+.bucket-persisting { --bucket-tone: #d97706; --bucket-tone-fg: #92400e; }
+.bucket-resolved { --bucket-tone: #16a34a; --bucket-tone-fg: #15803d; }
+.bucket-not-reviewed { --bucket-tone: var(--text-faint); --bucket-tone-fg: var(--text-secondary); }
+
+@media (prefers-color-scheme: dark) {
+    .bucket-new { --bucket-tone: #fb923c; --bucket-tone-fg: #fdba74; }
+    .bucket-persisting { --bucket-tone: #fbbf24; --bucket-tone-fg: #fcd34d; }
+    .bucket-resolved { --bucket-tone: #34d399; --bucket-tone-fg: #6ee7b7; }
+}
+
+/* Existing Code and Suggested Change sit side by side on wide screens;
+   auto-fit collapses to one column for a single panel or a narrow viewport. */
+.compare-page .comment-code-diff {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+}
+
+@media (max-width: 768px) {
+    .compare-bucket { padding: 0.85rem 1rem; }
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
     main { padding: 0 1rem; margin: 1.25rem auto; }
