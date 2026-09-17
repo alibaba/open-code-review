@@ -303,6 +303,9 @@ Match lines: 1
 - 通过 `git grep --max-count 100` 把每文件命中数上限设为 **100**，因此跨多文件的
   总输出可能超过 100。触及每文件上限时，输出前会加
   `Note: The results have been truncated. Only showing first 100 results.`。
+- `use_perl_regexp` 为 `true` 而 `search_text` 不是合法 PCRE 时，会改用字面量
+  重新搜索，输出前会加一行 `Note:`，其中给出 git 拒绝该模式的原因；把元字符
+  转义后仍可按正则搜索。
 - 空 / 仅空白的 `search_text` 返回 `Error: search_text is blank`，而不是展开成
   每一行。
 - 工作区模式搜索**当前工作树**，区间 / commit 模式搜索解析出的目标 ref

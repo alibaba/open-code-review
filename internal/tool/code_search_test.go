@@ -370,18 +370,274 @@ func TestGitGrep_InvalidRef_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestGitGrep_PerlRegexp_InvalidPattern_ReturnsError(t *testing.T) {
+// gormCall is the shape of search term that motivated the literal fallback: a
+// caller hunting for code text that happens to be unbalanced as a regex.
+const gormCall = "Set(\"gorm:save_associations\", false)"
+
+func writeGormCall(t *testing.T, dir string) {
+	t.Helper()
+	writeTestFile(t, dir, "gorm.go", "package main\n\nfunc save(db *DB) {\n\tdb."+gormCall+"\n}\n")
+}
+
+func commitAll(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{{"add", "."}, {"commit", "-m", "add gorm call"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func TestGitGrep_PerlRegexp_InvalidPattern_FallsBackToLiteral(t *testing.T) {
+	dir := setupTestRepo(t)
+	writeGormCall(t, dir)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+
+	result, err := p.gitGrep(context.Background(), `Set("gorm:`, false, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(result, "Note: the pattern is not valid PCRE syntax") {
+		t.Errorf("expected a fallback note first, got: %s", result)
+	}
+	if !strings.Contains(result, "missing closing parenthesis") {
+		t.Errorf("expected git's reason for the rejected pattern, got: %s", result)
+	}
+	if !strings.Contains(result, "File: gorm.go") || !strings.Contains(result, gormCall) {
+		t.Errorf("expected the literal match from the retry, got: %s", result)
+	}
+}
+
+func TestGitGrep_PerlRegexp_InvalidPattern_FallbackNoMatch(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+
+	result, err := p.gitGrep(context.Background(), `absent("gorm:`, false, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(result, "Note: the pattern is not valid PCRE syntax") {
+		t.Errorf("expected a fallback note first, got: %s", result)
+	}
+	if !strings.HasSuffix(result, "No matches found") {
+		t.Errorf("expected the literal retry to report no matches, got: %s", result)
+	}
+}
+
+// A pattern PCRE accepts must stay a regex: the alternation below matches
+// nothing as a literal and so would report no matches after an unwanted
+// fallback.
+func TestGitGrep_PerlRegexp_ValidPatternStaysRegex(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+
+	result, err := p.gitGrep(context.Background(), "Hell|Nonexistent", false, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result, "Note:") {
+		t.Errorf("valid perl regexp should not report a fallback, got: %s", result)
+	}
+	if !strings.Contains(result, "hello.go") {
+		t.Errorf("expected the regex match, got: %s", result)
+	}
+}
+
+func TestGitGrep_PerlRegexp_FallbackKeepsRefAndPathspec(t *testing.T) {
+	dir := setupTestRepo(t)
+	writeGormCall(t, dir)
+	commitAll(t, dir)
+	commit := getHeadCommit(t, dir)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: commit, Mode: ModeCommit})
+
+	// The pathspec and ref both have to survive into the retry for this to
+	// match the committed gorm.go.
+	result, err := p.gitGrep(context.Background(), `Set("gorm:`, false, true, []string{"gorm.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "File: gorm.go") || !strings.Contains(result, gormCall) {
+		t.Errorf("expected the literal match at the ref, got: %s", result)
+	}
+
+	// And a pathspec that excludes the match still excludes it.
+	result, err = p.gitGrep(context.Background(), `Set("gorm:`, false, true, []string{"pkg/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(result, "No matches found") {
+		t.Errorf("expected the pathspec to be honored by the retry, got: %s", result)
+	}
+}
+
+// A non-git directory is retried with --no-index first, and the pattern
+// rejection only shows up on that second attempt.
+func TestGitGrep_NoIndexMode_InvalidPerlRegexpFallsBackToLiteral(t *testing.T) {
+	dir := t.TempDir()
+	writeGormCall(t, dir)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+
+	result, err := p.gitGrep(context.Background(), `Set("gorm:`, false, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "File: gorm.go") || !strings.Contains(result, gormCall) {
+		t.Errorf("expected the literal match outside a git repo, got: %s", result)
+	}
+}
+
+// A failure that is not about the pattern must keep reaching the model as an
+// error, unchanged by this fallback.
+func TestGitGrep_PerlRegexp_NonPatternFailureStillErrors(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "nonexistent_ref_abc123", Mode: ModeCommit})
+
 	result, err := p.gitGrep(context.Background(), "(unclosed", false, true, nil)
 	if err == nil {
-		t.Fatal("expected invalid perl regexp to return an error")
+		t.Fatal("expected invalid ref to return an error")
 	}
 	if result != "" {
-		t.Errorf("expected empty result for invalid perl regexp, got: %s", result)
+		t.Errorf("expected empty result, got: %s", result)
 	}
 	if !strings.Contains(err.Error(), "git grep failed") {
 		t.Errorf("expected git grep failure, got: %v", err)
+	}
+}
+
+func TestIsPCRECompileError(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		want   bool
+	}{
+		{
+			name:   "missing closing parenthesis",
+			stderr: "fatal: -e option, 'Set(\"gorm:': missing closing parenthesis\n",
+			want:   true,
+		},
+		{
+			name:   "range out of order",
+			stderr: "fatal: -e option, '[z-a]': range out of order in character class\n",
+			want:   true,
+		},
+		{
+			name:   "quantifier with nothing to repeat",
+			stderr: "fatal: -e option, '*foo': quantifier does not follow a repeatable item\n",
+			want:   true,
+		},
+		{
+			// Only the "fatal:" prefix is translated by gettext; the origin
+			// marker git substitutes into the message is not.
+			name:   "translated fatal prefix",
+			stderr: "Fehler: -e option, '(unclosed': missing closing parenthesis\n",
+			want:   true,
+		},
+		{
+			name:   "unresolved ref is diagnosed before the pattern",
+			stderr: "fatal: unable to resolve revision: nonexistent_ref_abc123\n",
+			want:   false,
+		},
+		{
+			name:   "invalid pathspec is diagnosed before the pattern",
+			stderr: "fatal: Invalid pathspec magic 'bogus' in ':(bogus)'\n",
+			want:   false,
+		},
+		{
+			name:   "not a git repository",
+			stderr: "fatal: not a git repository (or any of the parent directories): .git\n",
+			want:   false,
+		},
+		{
+			// Patterns read from a file carry a different origin.
+			name:   "pattern from -f file",
+			stderr: "fatal: In 'patterns.txt' at 3, '(unclosed': missing closing parenthesis\n",
+			want:   false,
+		},
+		{
+			name:   "unknown option",
+			stderr: "error: unknown option `max-count'\n",
+			want:   false,
+		},
+		{
+			name:   "empty",
+			stderr: "",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isPCRECompileError(tt.stderr); got != tt.want {
+				t.Errorf("isPCRECompileError(%q) = %v, want %v", tt.stderr, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPCRECompileReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		want   string
+	}{
+		{
+			name:   "reason after the pattern",
+			stderr: "fatal: -e option, 'Set(\"gorm:': missing closing parenthesis\n",
+			want:   "missing closing parenthesis",
+		},
+		{
+			// The pattern itself may contain the separator; the reason is the
+			// text after the last one.
+			name:   "pattern containing the separator",
+			stderr: "fatal: -e option, 'a': b(': missing closing parenthesis\n",
+			want:   "missing closing parenthesis",
+		},
+		{
+			name:   "reason without trailing newline",
+			stderr: "fatal: -e option, '[z-a]': range out of order in character class",
+			want:   "range out of order in character class",
+		},
+		{
+			name:   "no separator",
+			stderr: "fatal: not a git repository (or any of the parent directories): .git\n",
+			want:   "",
+		},
+		{
+			name:   "implausibly long tail is dropped",
+			stderr: "fatal: -e option, 'x': " + strings.Repeat("y", maxPCRECompileReason+1) + "\n",
+			want:   "",
+		},
+		{
+			name:   "empty",
+			stderr: "",
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pcreCompileReason(tt.stderr); got != tt.want {
+				t.Errorf("pcreCompileReason(%q) = %q, want %q", tt.stderr, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPatternFallbackNote(t *testing.T) {
+	if got := patternFallbackNote(false, "fatal: -e option, 'x(': missing closing parenthesis\n"); got != "" {
+		t.Errorf("expected no note without a fallback, got: %q", got)
+	}
+
+	withReason := patternFallbackNote(true, "fatal: -e option, 'x(': missing closing parenthesis\n")
+	if !strings.Contains(withReason, "(missing closing parenthesis)") {
+		t.Errorf("expected the reason in the note, got: %q", withReason)
+	}
+
+	withoutReason := patternFallbackNote(true, "")
+	if !strings.Contains(withoutReason, "not valid PCRE syntax") || strings.Contains(withoutReason, "()") {
+		t.Errorf("expected a note without a reason, got: %q", withoutReason)
 	}
 }
 
@@ -694,6 +950,26 @@ func TestCodeSearchProvider_Execute_PerlRegexp(t *testing.T) {
 	}
 	if !strings.Contains(got, "hello.go") {
 		t.Errorf("expected hello.go in perl regexp result, got: %s", got)
+	}
+}
+
+func TestCodeSearchProvider_Execute_InvalidPerlRegexpFallsBackToLiteral(t *testing.T) {
+	dir := setupTestRepo(t)
+	writeGormCall(t, dir)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	got, err := p.Execute(context.Background(), map[string]any{
+		"search_text":     `Set("gorm:`,
+		"use_perl_regexp": true,
+	})
+	if err != nil {
+		t.Fatalf("expected the literal retry to answer instead of failing: %v", err)
+	}
+	if !strings.HasPrefix(got, "Note: the pattern is not valid PCRE syntax") {
+		t.Errorf("expected a fallback note first, got: %s", got)
+	}
+	if !strings.Contains(got, gormCall) {
+		t.Errorf("expected the literal match, got: %s", got)
 	}
 }
 

@@ -334,6 +334,10 @@ When there are no matches, the tool returns the literal string
   total output across many files can exceed 100. When the per-file cap
   is hit the output is prefixed with `Note: The results have been
   truncated. Only showing first 100 results.`.
+- When `use_perl_regexp` is `true` and `search_text` is not valid PCRE,
+  the search is retried as a literal string and the output opens with a
+  `Note:` naming git's reason for rejecting the pattern. Escaping the
+  metacharacters keeps the search a regular expression.
 - Empty / whitespace-only `search_text` returns `Error: search_text is
   blank` instead of expanding to every line.
 - Searches the **current working tree** in workspace mode, or the
