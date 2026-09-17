@@ -585,21 +585,18 @@ h3 {
     gap: 0.5rem;
     transition: background var(--transition);
 }
+.file-list-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: var(--text-faint);
+}
+.file-list-icon svg {
+    width: 0.9em;
+    height: 0.9em;
+    display: block;
+}
 .file-list li:last-child { border-bottom: none; }
 .file-list li:hover { background: var(--accent-soft); }
-.file-list li::before {
-    content: "";
-    width: 16px;
-    height: 16px;
-    background: var(--surface-alt);
-    border-radius: 3px;
-    border: 1px solid var(--border);
-    flex-shrink: 0;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236b7394' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpolyline points='14 2 14 8 20 8'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: 10px;
-}
 
 /* ── Conversations Section ── */
 .conversations { margin-top: 0.75rem; }

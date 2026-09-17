@@ -203,7 +203,7 @@
     <div class="file-accordion-body">
         <ul class="file-list">
         {{range .Session.Summary.FilesReviewed}}
-            <li>{{.}}</li>
+            <li><span class="file-list-icon" aria-hidden="true">{{icon "file"}}</span><span>{{.}}</span></li>
         {{end}}
         </ul>
     </div>

@@ -461,3 +461,25 @@ func TestRenderTemplate_ToolCallIconIsInlineSVG(t *testing.T) {
 		t.Error("tool-call header should render the inline settings icon")
 	}
 }
+
+func TestRenderTemplate_FilesReviewedUseFileIcon(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session: &ViewSession{
+			Summary: SessionSummary{
+				SessionID:     "abc",
+				CWD:           "/test",
+				FilesReviewed: []string{"internal/agent/agent.go"},
+			},
+		},
+	})
+	body := rr.Body.String()
+	if !strings.Contains(body, `<span class="file-list-icon" aria-hidden="true"><svg`) {
+		t.Error("Files Reviewed rows should render the inline file icon")
+	}
+	if !strings.Contains(body, "internal/agent/agent.go") {
+		t.Error("Files Reviewed should still render the file path")
+	}
+}
