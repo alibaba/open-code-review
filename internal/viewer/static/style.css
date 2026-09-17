@@ -898,16 +898,6 @@ h3 {
     align-items: center;
     gap: 0.35rem;
 }
-.tool-calls-icon {
-    color: var(--text-faint);
-    display: inline-flex;
-}
-.tool-calls-icon svg {
-    width: 0.8rem;
-    height: 0.8rem;
-    display: block;
-}
-
 .tool-call-item {
     background: var(--surface);
     border: 1px solid var(--border);

@@ -330,7 +330,7 @@
                 {{end}}
                 {{if .ToolCalls}}
                 <div class="tool-calls-section">
-                    <div class="tool-calls-label"><span class="tool-calls-icon" aria-hidden="true">{{icon "settings"}}</span>Tool Calls ({{len .ToolCalls}})</div>
+                    <div class="tool-calls-label">Tool Calls ({{len .ToolCalls}})</div>
                     {{range .ToolCalls}}
                     <div class="tool-call-item {{if not .Ok}}tool-call-error{{end}}">
                         <div class="tool-call-header">
