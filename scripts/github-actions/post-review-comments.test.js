@@ -659,8 +659,6 @@ async function testIncrementalSkipsSameRunOverlapping() {
   assert.strictEqual(outputs.comments_skipped, "1");
   assert.strictEqual(outputs.comments_inline, "2");
 }
-
-
 async function testIncrementalAllOverlapPostsNoReview() {
   const history = [{ path: "src/a.js", line: 10, start_line: 10, side: "RIGHT", user: { login: "github-actions[bot]" } }];
   const result = { comments: [{ path: "src/a.js", content: "overlap", start_line: 10, end_line: 10 }], warnings: [] };
