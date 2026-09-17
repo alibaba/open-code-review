@@ -342,6 +342,18 @@ async function runPostReviewComments({
     toSend = reviewComments.filter(
       ({ reviewComment }) => !overlapsHistory(reviewComment, hist, incrementalOverlapThreshold)
     );
+
+    const deduped = [];
+    const acceptedComments = [];
+    for (const item of toSend) {
+      if (overlapsComments(item.reviewComment, acceptedComments, incrementalOverlapThreshold)) {
+        continue;
+      }
+      acceptedComments.push(item.reviewComment);
+      deduped.push(item);
+    }
+
+    toSend = deduped;
     stats.skipped = reviewComments.length - toSend.length;
     if (stats.skipped > 0) {
       log(`[incremental] skipped ${stats.skipped} overlapping comment(s); ${toSend.length} to post.`);
@@ -1123,19 +1135,23 @@ function isBotComment(comment, botLogin) {
 // A single-line comment is NEVER considered the same as a multi-line one, so
 // revisiting a line with a finer-grained single-line note is not suppressed by
 // a prior multi-line block (and vice versa).
-function overlapsHistory(reviewComment, history, threshold = DEFAULT_OVERLAP_THRESHOLD) {
+function overlapsComments(reviewComment, comments, threshold = DEFAULT_OVERLAP_THRESHOLD) {
   const t = resolveThreshold(threshold);
   const path = reviewComment.path;
   const cur = lineSpan(reviewComment);
   if (!cur) return false;
-  for (const h of history) {
-    if (h.path !== path) continue;
-    if (h.side && h.side !== "RIGHT") continue;
-    const other = lineSpan(h);
+  for (const comment of comments) {
+    if (comment.path !== path) continue;
+    if (comment.side && comment.side !== "RIGHT") continue;
+    const other = lineSpan(comment);
     if (!other) continue;
     if (sameCommentSpan(cur, other, t)) return true;
   }
   return false;
+}
+
+function overlapsHistory(reviewComment, history, threshold = DEFAULT_OVERLAP_THRESHOLD) {
+  return overlapsComments(reviewComment, history, threshold);
 }
 
 // Clamp/validate the caller-provided threshold to a sane (0, 1] number,
