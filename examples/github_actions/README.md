@@ -269,7 +269,8 @@ The action posts a summary issue comment plus inline review comments. Two inputs
 |-------|---------|-------------|
 | `sticky_summary` | `'true'` | Update an existing summary comment in place instead of posting a new one each run. |
 | `incremental` | `'false'` | Only append inline comments whose `(path, line range)` does not overlap an existing bot review comment. History is never deleted (non-destructive). |
-| `incremental_overlap_threshold` | `'0.6'` | IoU threshold `incremental` uses to decide whether a multi-line comment overlaps an existing one. Two single-line comments match on the same line; single- vs multi-line never match. Ignored unless `incremental` is `'true'`. |
+| `incremental_overlap_threshold` | `'0.6'` | IoU threshold `incremental` uses to decide whether a multi-line comment overlaps an existing one. Two single-line comments match on the same line; single- vs multi-line never match. Read only when `incremental` is enabled — `resolve_outdated` treats any shared line as an overlap, with no threshold, because a missed overlap there closes a thread whose finding is still live. |
+| `resolve_outdated` | `'false'` | Resolve the action's own outdated inline threads. `'false'` does nothing; `'report'` logs what it would resolve; `'true'` resolves them. See below. |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -345,6 +346,40 @@ Three properties are worth knowing before you enable it:
 > **Caveat — the trust boundary is write permission.** The checkpoint is read only from a comment GitHub attributes to the writer this run expects. On the default `github_token` that is exactly one app, `github-actions`, since the default token always belongs to it: a marker in a comment posted by any other bot — `dependabot[bot]`, a linter app, another workflow's App — is rejected. If you pass your own `github_token`, the run cannot learn which app that token belongs to (there is no API an installation token can call for it), so the check widens to "any writer GitHub attributes to a bot" and any bot that can post an issue comment carrying the summary marker is trusted. A comment from a human account is rejected either way, even when it names an app, since GitHub sets `performed_via_github_app` for comments people write through an App as well. What GitHub attests is who *posted* the comment, not that its body is unmodified: anyone with write permission on the repository can edit a bot comment and move the checkpoint forward, causing a range to be skipped. The boundary this buys is "write-permission holders are trusted" — a fork contributor, who is exactly the untrusted party under `pull_request_target`, posts as themselves and so cannot plant or alter a marker. If that is not an acceptable assumption for your repository, leave `checkpoint_range` off.
 >
 > Because a sticky summary keeps its original author, switching a repository from a custom App token to the default one leaves the old comment attributed to the old app, and every run reports `author_unverified` until that comment is deleted. That is the fail-closed direction (a full review, never a skipped range), and the step log names the app it expected.
+
+### Resolve outdated review threads
+
+Over a long PR, the bot's inline comments pile up on code that no longer exists. `resolve_outdated` closes those threads, using GitHub's own `isOutdated` flag — no LLM is involved in the decision, and the action only ever touches threads GitHub has already marked outdated.
+
+| Value | Behavior |
+|-------|----------|
+| `'false'` (default) | Does nothing. No GraphQL calls are made at all. |
+| `'report'` | Lists what would be resolved, and why each other thread was skipped. Changes nothing. |
+| `'true'` | Resolves them. |
+
+Start with `'report'` for a few PRs and read the `[resolve-outdated]` log line before switching to `'true'`.
+
+```yaml
+permissions:
+  contents: write        # required by resolve_outdated: 'true'
+  pull-requests: write
+
+steps:
+  - uses: alibaba/open-code-review@main
+    with:
+      resolve_outdated: 'report'
+```
+
+A thread is left alone unless **the action created it**. Ownership is decided by the marker OCR writes into every inline comment it posts, not by the comment's author — under the default `GITHUB_TOKEN` every workflow in your repository posts as `github-actions[bot]`, so a sibling workflow's review threads would otherwise be indistinguishable from OCR's own. Beyond that, a thread is left alone whenever **a human has replied** to it, when it is already resolved, when a finding from the current run still covers its lines, or when it has more comments than one API page returns (so a reply the action cannot see is never resolved over). Resolution also runs only after a run that actually produced findings: a run that failed to parse OCR's output, or that reported nothing, resolves nothing — "the model said nothing this time" is not evidence the old findings are gone. At most 50 threads are resolved per run; the rest carry over to the next one. Resolution is sequential and paced by `OCR_SUCCESS_DELAY` (2000 ms by default) to stay clear of GitHub's secondary rate limiter, so a full batch of 50 adds roughly 100 s to the job — lower `OCR_SUCCESS_DELAY` if that matters more to you than the pacing.
+
+Outputs: `comments_resolved` (threads resolved, `'true'` mode) and `comments_resolved_preview` (threads that would be resolved, `'report'` mode). Both are always present.
+
+Four things worth knowing before you turn this on:
+
+- **`'true'` requires `contents: write`.** The default read-only `GITHUB_TOKEN` cannot resolve a thread; the calling workflow must grant `contents: write` in its own `permissions:` block. Without it the action logs a warning naming the missing permission and continues — the review itself still posts. `'report'` never attempts a mutation, so it never learns whether the token has that permission: a clean-looking preview can still hit `FORBIDDEN` the moment you switch it to `'true'`.
+- **A force-push can mark a live finding's thread outdated.** GitHub sets `isOutdated` when the thread's lines are no longer in the diff, and it stays set even after a force-push that lands identical content, so a rebase can outdate a thread whose finding is still real. The current-run overlap check catches this when the model re-reports the finding; if it doesn't, the thread closes while the problem remains. This is the main reason to run `'report'` first.
+- **It only does anything on re-runs.** A thread can only become outdated after a later push, so the feature is exercised only by workflows that review on update (`types: [opened, synchronize, reopened]`, as in the sample workflow above). This repository's own review workflow triggers on `opened` only and never reaches the resolution path — do not read its runs as evidence the feature works for you.
+- **Resolving is not deleting.** Resolved threads collapse but stay readable, and anyone can unresolve one.
 
 ### Adjust retry and delay settings
 
