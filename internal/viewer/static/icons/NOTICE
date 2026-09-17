@@ -1,4 +1,7 @@
-UI icons in this directory are from Ant Design Icons, used under the MIT License.
+`logo.svg` is the Open Code Review brand mark, part of this project and covered by
+the repository's own license (Apache-2.0). It is not an Ant Design icon.
+
+The remaining UI icons in this directory are from Ant Design Icons, used under the MIT License.
 
   Ant Design Icons
   Copyright (c) 2015-present Ant UED, https://xtech.antfin.com/

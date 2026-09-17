@@ -108,9 +108,12 @@ func TestParseTemplate_SharedHeader(t *testing.T) {
 					t.Errorf("count of %q = %d, want 1", marker, count)
 				}
 			}
-			const brand = `<a href="/" class="nav-brand"><span class="brand-icon" aria-hidden="true"></span>Open Code Review Viewer</a>`
-			if !strings.Contains(body, `<nav class="breadcrumb">`+brand+tt.breadcrumb+`</nav>`) {
-				t.Error("expected shared home link, wordmark, decorative logo and page-specific breadcrumbs")
+			// The brand-icon inlines the logo SVG, so assert the surrounding
+			// structure plus an inline <svg> rather than an exact glyph body.
+			const head = `<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon" aria-hidden="true"><svg`
+			tail := `</span>Open Code Review Viewer</a>` + tt.breadcrumb + `</nav>`
+			if !strings.Contains(body, head) || !strings.Contains(body, tail) {
+				t.Error("expected shared home link, inline logo, wordmark and page-specific breadcrumbs")
 			}
 		})
 	}
@@ -404,7 +407,7 @@ func TestTemplateFuncTaskTypeClass(t *testing.T) {
 
 func TestInlineIcon(t *testing.T) {
 	// Known icons return their embedded SVG markup.
-	for _, name := range []string{"search", "settings", "chevron-left", "chevron-right", "chevron-down"} {
+	for _, name := range []string{"logo", "search", "settings", "chevron-left", "chevron-right", "chevron-down"} {
 		got := string(inlineIcon(name))
 		if !strings.Contains(got, "<svg") || !strings.Contains(got, "currentColor") {
 			t.Errorf("inlineIcon(%q) = %q, want inline svg using currentColor", name, got)
