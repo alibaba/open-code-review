@@ -395,7 +395,7 @@ loading, and one `subtask.execute.group.<group-key>` per reviewed
 group) plus a
 short-lived `event.<name>` span at each decision point (`plan.skipped`,
 `token.threshold.exceeded`, `subtask.error`, …). In the main review loop,
-LLM requests and tool calls are recorded as both spans and metrics. Prompt and
+LLM requests and tool calls emit spans and are also recorded in metrics. Prompt and
 response content is **never** attached to telemetry; the
 `OCR_CONTENT_LOGGING` flag is plumbed but currently dead. See
 [Telemetry](../telemetry/) for the full schema.
