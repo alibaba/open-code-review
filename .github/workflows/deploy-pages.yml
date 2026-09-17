@@ -47,9 +47,8 @@ jobs:
           cp pages/logo.svg _site/logo.svg
           cp install.sh _site/install.sh
           cp install.ps1 _site/install.ps1
-          cp pages/public/robots.txt _site/robots.txt
 
-      - name: Verify install scripts
+      - name: Verify deployment artifact
         run: |
           test -f _site/install.sh
           test -f _site/install.ps1
