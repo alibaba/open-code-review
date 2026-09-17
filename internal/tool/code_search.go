@@ -210,7 +210,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		fname := parts[offset]
 		ln, parseErr := strconv.Atoi(parts[offset+1])
 		if parseErr != nil {
-			// Skip binary-file diagnostics and other non-match lines.
+			// Skip lines whose line-number field is not numeric.
 			continue
 		}
 		// Count every file with a text match, including those beyond the render
