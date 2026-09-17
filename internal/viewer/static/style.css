@@ -1666,6 +1666,11 @@ p {
     background: transparent;
     border: none;
     box-shadow: none;
+    border-radius: 0;
+    /* The card chrome relied on overflow:hidden + radius to round its corner;
+       with the button flush against the header's top-left, that clip would
+       bite into it. */
+    overflow: visible;
     padding: 0;
 }
 
@@ -1678,8 +1683,9 @@ p {
 }
 
 .session-page .back-link {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
+    border-color: var(--border-subtle);
     background: var(--surface);
     color: var(--text-muted);
 }
@@ -1695,8 +1701,8 @@ p {
 }
 
 .session-page .back-link svg {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     display: block;
 }
 
