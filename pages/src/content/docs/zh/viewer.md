@@ -79,7 +79,8 @@ macOS 上是 `open`，Linux 与 BSD 上是 `xdg-open`，Windows 上是 `rundll32
 ### `/r/{repo}`——单仓库会话列表
 
 对每个会话：ID（一个 UUID）、分支名（OCR 能检测到时）、评审模式、模型、文件数、
-时长、开始时间戳，以及指向上一次（更早）会话的 `compare` 链接。
+时长、开始时间戳，以及指向上一次（更早）会话的 `Check` 链接。每页显示十个会话，
+右下角的分页控件用于翻页。
 
 ### `/r/{repo}/{sessionID}`——会话详情
 
@@ -102,8 +103,8 @@ macOS 上是 `open`，Linux 与 BSD 上是 `xdg-open`，Windows 上是 `rundll32
 
 ### `/r/{repo}/compare`——比较两次会话
 
-`ocr session compare` 输出的同样四个分组，以页面形式呈现。会话列表新增
-**Compare** 列：每行链接到与上一次（更早）会话的比较，因此最新一行显示的是
+`ocr session compare` 输出的同样四个分组，以页面形式呈现。会话列表的
+**Action** 列带有 `Check` 链接：每行打开与上一次（更早）会话的比较，因此最新一行显示的是
 相对上一次运行发生了什么变化。最早的一行显示 `-`，因为没有更早的运行可比。
 
 发现项分入四个分组：

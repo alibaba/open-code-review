@@ -90,7 +90,8 @@ total session count, and the most recent activity timestamp.
 
 For each session: ID (a UUID), branch name (when OCR was able to
 detect it), review mode, model, file count, duration, and a started-at
-timestamp, and a `compare` link to the next-older session.
+timestamp, and a `Check` link to the next-older session. Ten sessions
+fit on a page; the pager at the bottom right moves between pages.
 
 ### `/r/{repo}/{sessionID}` — Session detail
 
@@ -117,10 +118,10 @@ phases dominated the run.
 ### `/r/{repo}/compare` — Compare two sessions
 
 The same four buckets `ocr session compare` prints, rendered as a page.
-The session list has a **Compare** column: each row links to a
-comparison against the next-older session, so the newest row shows what
-changed since the run before it. The oldest row shows `-`, having no
-older run to compare against.
+The session list's **Action** column carries a `Check` link: each row
+opens a comparison against the next-older session, so the newest row
+shows what changed since the run before it. The oldest row shows `-`,
+having no older run to compare against.
 
 Findings are sorted into four buckets:
 
