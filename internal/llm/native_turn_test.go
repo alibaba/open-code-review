@@ -376,7 +376,7 @@ func TestOpenAIChatCompletions_ReplaysToolCallExtraContentAcrossTurns(t *testing
 					"id":"call_1",
 					"type":"function",
 					"function":{"name":"file_read","arguments":"{\"start_line\":450,\"end_line\":520}"},
-					"extra_content":[{"google":{"thought_signature":"sig-abc-123"}}]
+					"extra_content":{"google":{"thought_signature":"sig-abc-123"}}
 				}]
 			},
 			"finish_reason":"tool_calls"
@@ -388,7 +388,7 @@ func TestOpenAIChatCompletions_ReplaysToolCallExtraContentAcrossTurns(t *testing
 	if len(resp.ToolCalls()) != 1 {
 		t.Fatalf("tool calls = %d, want 1", len(resp.ToolCalls()))
 	}
-	if string(resp.ToolCalls()[0].ExtraContent) != `[{"google":{"thought_signature":"sig-abc-123"}}]` {
+	if string(resp.ToolCalls()[0].ExtraContent) != `{"google":{"thought_signature":"sig-abc-123"}}` {
 		t.Fatalf("extra_content = %s, want captured verbatim", resp.ToolCalls()[0].ExtraContent)
 	}
 
@@ -401,7 +401,7 @@ func TestOpenAIChatCompletions_ReplaysToolCallExtraContentAcrossTurns(t *testing
 	if err != nil {
 		t.Fatalf("marshal assistant message: %v", err)
 	}
-	if !bytes.Contains(payload, []byte(`"extra_content":[{"google":{"thought_signature":"sig-abc-123"}}]`)) {
+	if !bytes.Contains(payload, []byte(`"extra_content":{"google":{"thought_signature":"sig-abc-123"}}`)) {
 		t.Fatalf("assistant tool-call history dropped extra_content (thought signature): %s", payload)
 	}
 }
@@ -447,7 +447,7 @@ func TestOpenAIChatCompletions_StreamingCapturesToolCallExtraContent(t *testing.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeOpenAISSE(t, w,
 			`{"id":"chatcmpl_stream_sig","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
-			`{"id":"chatcmpl_stream_sig","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"file_read","arguments":""},"extra_content":[{"google":{"thought_signature":"sig-stream-1"}}]}]},"finish_reason":null}]}`,
+			`{"id":"chatcmpl_stream_sig","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"file_read","arguments":""},"extra_content":{"google":{"thought_signature":"sig-stream-1"}}}]},"finish_reason":null}]}`,
 			`{"id":"chatcmpl_stream_sig","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]},"finish_reason":null}]}`,
 			`{"id":"chatcmpl_stream_sig","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
 		)
@@ -472,7 +472,7 @@ func TestOpenAIChatCompletions_StreamingCapturesToolCallExtraContent(t *testing.
 	if len(resp.ToolCalls()) != 1 {
 		t.Fatalf("tool calls = %d, want 1", len(resp.ToolCalls()))
 	}
-	if string(resp.ToolCalls()[0].ExtraContent) != `[{"google":{"thought_signature":"sig-stream-1"}}]` {
+	if string(resp.ToolCalls()[0].ExtraContent) != `{"google":{"thought_signature":"sig-stream-1"}}` {
 		t.Fatalf("streamed extra_content = %s, want captured verbatim", resp.ToolCalls()[0].ExtraContent)
 	}
 
@@ -482,7 +482,46 @@ func TestOpenAIChatCompletions_StreamingCapturesToolCallExtraContent(t *testing.
 	if err != nil {
 		t.Fatalf("marshal assistant message: %v", err)
 	}
-	if !bytes.Contains(payload, []byte(`"extra_content":[{"google":{"thought_signature":"sig-stream-1"}}]`)) {
+	if !bytes.Contains(payload, []byte(`"extra_content":{"google":{"thought_signature":"sig-stream-1"}}`)) {
 		t.Fatalf("assistant tool-call history dropped streamed extra_content: %s", payload)
+	}
+}
+
+// TestOpenAIChatCompletions_StreamingClampsNegativeToolCallIndex covers the
+// gateway quirk behind #1371's review: some OpenAI-compatible providers (e.g.
+// Bedrock, liteLLM) send delta tool calls with index -1 for a single call. The
+// accumulator clamps that to slice position 0, so the extra_content capture
+// must key on 0 too, or the re-attachment loop drops the signature.
+func TestOpenAIChatCompletions_StreamingClampsNegativeToolCallIndex(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeOpenAISSE(t, w,
+			`{"id":"chatcmpl_stream_neg","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+			`{"id":"chatcmpl_stream_neg","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{"tool_calls":[{"index":-1,"id":"call_1","type":"function","function":{"name":"file_read","arguments":""},"extra_content":{"google":{"thought_signature":"sig-neg-1"}}}]},"finish_reason":null}]}`,
+			`{"id":"chatcmpl_stream_neg","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{"tool_calls":[{"index":-1,"function":{"arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"id":"chatcmpl_stream_neg","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "google/gemini-3.8-flash",
+		ExtraBody: map[string]any{
+			"stream": true,
+		},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "review this file"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if len(resp.ToolCalls()) != 1 {
+		t.Fatalf("tool calls = %d, want 1", len(resp.ToolCalls()))
+	}
+	if string(resp.ToolCalls()[0].ExtraContent) != `{"google":{"thought_signature":"sig-neg-1"}}` {
+		t.Fatalf("extra_content = %s, want captured from the index -1 delta under slice position 0", resp.ToolCalls()[0].ExtraContent)
 	}
 }

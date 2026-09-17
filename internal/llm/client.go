@@ -10,6 +10,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -758,10 +759,18 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 				if !ok {
 					continue
 				}
+				// Some gateways (e.g. Bedrock, liteLLM) send index -1 for a
+				// single tool call; the accumulator clamps negative indices
+				// to 0 when building the message, so the capture must use
+				// the same key or the re-attachment below would miss it.
+				toolIndex := deltaTool.Index
+				if toolIndex < 0 {
+					toolIndex = 0
+				}
 				if extraContentByChoice[choice.Index] == nil {
 					extraContentByChoice[choice.Index] = make(map[int64]json.RawMessage)
 				}
-				extraContentByChoice[choice.Index][deltaTool.Index] = json.RawMessage(ec.Raw())
+				extraContentByChoice[choice.Index][toolIndex] = json.RawMessage(ec.Raw())
 			}
 
 			extra, ok := choice.Delta.JSON.ExtraFields["reasoning_content"]
@@ -982,7 +991,7 @@ func toolCallExtraContent(raw string) json.RawMessage {
 		return nil
 	}
 	ec, ok := fields["extra_content"]
-	if !ok || string(ec) == "null" {
+	if !ok || bytes.Equal(bytes.TrimSpace(ec), []byte("null")) {
 		return nil
 	}
 	return ec
