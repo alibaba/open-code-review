@@ -1316,20 +1316,14 @@ p {
     flex-shrink: 0;
     background: var(--bucket-tone, var(--text-faint));
 }
-/* Outcome tones, mirroring the filled-badge pairs used by the .cat-* badges:
-   new findings read as a warning, persisting as a caution, resolved as
-   success, and not reviewed as neutral. */
-.bucket-new { --bucket-tone: #ea580c; --bucket-tone-fg: #c2410c; }
-.bucket-persisting { --bucket-tone: #d97706; --bucket-tone-fg: #92400e; }
-.bucket-resolved { --bucket-tone: #16a34a; --bucket-tone-fg: #15803d; }
+/* Outcome tones are derived from the shared token set (#1320), so light and
+   dark come for free: new findings read as high-severity orange, persisting
+   as medium-severity amber, resolved as the accent green used for Check, and
+   not reviewed as neutral text. */
+.bucket-new { --bucket-tone: var(--severity-high-fg); --bucket-tone-fg: var(--severity-high-fg); }
+.bucket-persisting { --bucket-tone: var(--severity-medium-fg); --bucket-tone-fg: var(--severity-medium-fg); }
+.bucket-resolved { --bucket-tone: var(--accent); --bucket-tone-fg: var(--accent); }
 .bucket-not-reviewed { --bucket-tone: var(--text-faint); --bucket-tone-fg: var(--text-secondary); }
-
-@media (prefers-color-scheme: dark) {
-    .bucket-new { --bucket-tone: #fb923c; --bucket-tone-fg: #fdba74; }
-    .bucket-persisting { --bucket-tone: #fbbf24; --bucket-tone-fg: #fcd34d; }
-    .bucket-resolved { --bucket-tone: #34d399; --bucket-tone-fg: #6ee7b7; }
-    .bucket-not-reviewed { --bucket-tone: #6b7394; --bucket-tone-fg: #9ba3c2; }
-}
 
 /* Existing Code and Suggested Change sit side by side on wide screens;
    auto-fit collapses to one column for a single panel or a narrow viewport. */
