@@ -296,6 +296,36 @@ func opaqueToolCallFields(raw string) map[string]json.RawMessage {
 	return extra
 }
 
+// streamedOpaqueToolCallFields extracts the unmodelled provider fields from a
+// streamed tool-call delta.
+//
+// The streaming path cannot reuse the capture in mapOpenAIResponse.
+// ChatCompletionAccumulator synthesizes its ChatCompletion field by field and
+// never sets raw JSON on the assembled message or its tool calls, so RawJSON()
+// there is "" and opaqueToolCallFields has nothing to read - the metadata is
+// gone by the time the completed response exists. The delta is the last place
+// it is present.
+//
+// JSON.ExtraFields already holds only what the SDK does not model, so the
+// stream's own "index" framing never reaches the next request. The reserved
+// filter is applied anyway so the invariant that a provider cannot rewrite a
+// tool call's identity is enforced identically on both paths.
+func streamedOpaqueToolCallFields(delta openai.ChatCompletionChunkChoiceDeltaToolCall) map[string]json.RawMessage {
+	var extra map[string]json.RawMessage
+	for k, v := range delta.JSON.ExtraFields {
+		if reservedToolCallFields[k] {
+			continue
+		}
+		// The chunk was unmarshalled successfully, so every raw value here is
+		// syntactically valid by construction, as in opaqueToolCallFields.
+		if extra == nil {
+			extra = make(map[string]json.RawMessage, len(delta.JSON.ExtraFields))
+		}
+		extra[k] = json.RawMessage(v.Raw())
+	}
+	return extra
+}
+
 // FunctionCall holds the name and arguments of a tool call.
 type FunctionCall struct {
 	Name      string `json:"name"`
@@ -764,6 +794,10 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 
 	accumulator := openai.ChatCompletionAccumulator{}
 	reasoningByChoice := make(map[int64]*strings.Builder)
+	// choice index -> tool-call index -> opaque fields, merged across chunks
+	// because a provider may attach the metadata to any chunk of the call.
+	opaqueByChoice := make(map[int64]map[int64]map[string]json.RawMessage)
+	opaqueIDs := make(map[int64]map[int64]string)
 	seenChoices := make(map[int64]bool)
 	finishedChoices := make(map[int64]bool)
 	var choiceOrder []int64
@@ -782,6 +816,28 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 			}
 			if choice.FinishReason != "" {
 				finishedChoices[choice.Index] = true
+			}
+
+			for _, delta := range choice.Delta.ToolCalls {
+				if delta.ID != "" {
+					if opaqueIDs[choice.Index] == nil {
+						opaqueIDs[choice.Index] = make(map[int64]string)
+					}
+					opaqueIDs[choice.Index][delta.Index] = delta.ID
+				}
+				fields := streamedOpaqueToolCallFields(delta)
+				if len(fields) == 0 {
+					continue
+				}
+				if opaqueByChoice[choice.Index] == nil {
+					opaqueByChoice[choice.Index] = make(map[int64]map[string]json.RawMessage)
+				}
+				if opaqueByChoice[choice.Index][delta.Index] == nil {
+					opaqueByChoice[choice.Index][delta.Index] = make(map[string]json.RawMessage, len(fields))
+				}
+				for k, v := range fields {
+					opaqueByChoice[choice.Index][delta.Index][k] = v
+				}
 			}
 
 			extra, ok := choice.Delta.JSON.ExtraFields["reasoning_content"]
@@ -821,7 +877,24 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 		resp.Usage = usage
 	}
 	for i := range resp.Choices {
-		builder := reasoningByChoice[accumulator.Choices[i].Index]
+		choiceIndex := accumulator.Choices[i].Index
+		byTool := opaqueByChoice[choiceIndex]
+		for j := range resp.Choices[i].Message.ToolCalls {
+			fields := byTool[int64(j)]
+			if len(fields) == 0 {
+				continue
+			}
+			// The accumulator fills its tool-call slice by the delta's index, so
+			// position and index agree. If a provider ever broke that, attaching
+			// one call's signature to another would be rejected as surely as
+			// sending none, so the mismatch is dropped instead.
+			if id, ok := opaqueIDs[choiceIndex][int64(j)]; ok && id != resp.Choices[i].Message.ToolCalls[j].ID {
+				continue
+			}
+			resp.Choices[i].Message.ToolCalls[j].ExtraFields = fields
+		}
+
+		builder := reasoningByChoice[choiceIndex]
 		if builder != nil && builder.Len() > 0 {
 			reasoningContent := builder.String()
 			resp.Choices[i].Message.ReasoningContent = reasoningContent
