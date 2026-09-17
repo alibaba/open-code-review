@@ -1095,6 +1095,11 @@ p {
     margin: 0 0 1rem;
     font-size: 1rem;
 }
+.comments-section .findings-count {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 400;
+}
 
 .comment-filter-bar {
     display: flex;
@@ -1102,9 +1107,6 @@ p {
     flex-wrap: wrap;
     gap: 0.5rem;
     margin-bottom: 0.65rem;
-}
-.category-filters {
-    margin-bottom: 1.25rem;
 }
 .comment-filter-label {
     min-width: 4.75rem;
@@ -1123,26 +1125,27 @@ p {
     letter-spacing: 0.01em;
     line-height: 1.35;
     cursor: pointer;
-    transition: opacity var(--transition), box-shadow var(--transition), border-color var(--transition);
+    background: var(--badge-neutral-bg);
+    color: var(--badge-neutral-fg);
+    transition: background var(--transition), color var(--transition), border-color var(--transition);
 }
-.comment-filter-chip:not(.is-active) { opacity: 0.72; }
-.comment-filter-chip:hover,
-.comment-filter-chip.is-active { opacity: 1; }
-.comment-filter-chip.is-active {
-    border-color: transparent;
-    box-shadow: 0 0 0 2px currentColor;
-}
+.comment-filter-chip:hover { border-color: var(--border); }
 .comment-filter-chip:focus-visible {
     outline: 2px solid var(--link);
     outline-offset: 2px;
 }
-.filter-all { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
-.severity-badge {
-    padding: 0.3em 0.75em;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
+/* The mockup dresses every chip neutral and marks the active one with the
+   accent. The severity/category tint classes stay on the markup for the
+   compare page badges, so they are neutralized here by scope; the scoped
+   active rule must stay below the scoped neutralizer to win the tie. */
+.comments-section .comment-filter-chip[class*="severity-"],
+.comments-section .comment-filter-chip[class*="cat-"] {
+    background: var(--badge-neutral-bg);
+    color: var(--badge-neutral-fg);
+}
+.comments-section .comment-filter-chip.is-active {
+    background: var(--accent-soft);
+    color: var(--link);
 }
 .severity-critical { background: var(--severity-critical-bg); color: var(--severity-critical-fg); }
 .severity-high { background: var(--severity-high-bg); color: var(--severity-high-fg); }
@@ -1221,6 +1224,15 @@ p {
 .cat-other { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
 .cat-default { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
 .severity-default { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
+
+/* The mockup shows the per-card category/severity badges neutral; the tint
+   classes above stay for the compare page badges, so the session card view
+   neutralizes them by scope. */
+.comments-section .comment-badge[class*="cat-"],
+.comments-section .comment-badge[class*="severity-"] {
+    background: var(--badge-neutral-bg);
+    color: var(--badge-neutral-fg);
+}
 
 @media (prefers-color-scheme: dark) {
     .cat-bug { background: rgba(220, 38, 38, 0.12); color: #fca5a5; }
@@ -1435,11 +1447,61 @@ p {
    State lives in the browser (localStorage); these are presentation only.
    Chips follow the filled-badge pattern used by the .cat-* / severity
    badges above: a background + color pair, with a dark-mode override. */
-.marks-bar {
+.comments-toolbar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.toolbar-filters {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.toolbar-filters .comment-filter-bar { margin-bottom: 0; }
+
+.toolbar-marks {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+}
+
+.toolbar-marks .comment-filter-label {
+    min-width: 0;
+    font-weight: 400;
+}
+
+.marks-actions {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    flex-wrap: wrap;
+}
+
+.clear-marks-link {
+    appearance: none;
+    border: none;
+    background: none;
+    padding: 0;
+    font: inherit;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.clear-marks-link:hover {
+    color: var(--text-strong);
+    text-decoration: underline;
+}
+
+.clear-marks-link:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
 }
 
 .marks-toggle {
@@ -1450,6 +1512,41 @@ p {
     font-weight: 600;
     cursor: pointer;
     user-select: none;
+}
+
+/* The hide-marked checkbox renders as the mockup's small switch. */
+.marks-toggle input[type="checkbox"] {
+    appearance: none;
+    width: 30px;
+    height: 18px;
+    margin: 0;
+    border-radius: 9px;
+    background: var(--surface-inset);
+    position: relative;
+    cursor: pointer;
+    transition: background var(--transition);
+}
+
+.marks-toggle input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--transition);
+}
+
+.marks-toggle input[type="checkbox"]:checked { background: var(--accent-hover); }
+
+.marks-toggle input[type="checkbox"]:checked::before { transform: translateX(12px); }
+
+.marks-toggle input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
 }
 
 .mark-chip {
@@ -1474,7 +1571,7 @@ p {
 .mark-btn {
     appearance: none;
     border: 1px solid var(--border, #d0d7de);
-    border-radius: 12px;
+    border-radius: 6px;
     background: transparent;
     padding: 0.2em 0.7em;
     font: inherit;
