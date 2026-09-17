@@ -147,8 +147,11 @@ inputs:
       One of: 'false' (default, does nothing and makes no API calls), 'report'
       (log what would be resolved, change nothing — run this first), 'true'
       (actually resolve). 'true' requires the calling workflow to grant
-      `contents: write` in its own `permissions:` block; the default read-only
-      token cannot resolve a thread and the action will warn and continue.
+      `contents: write` in its own `permissions:` block: GitHub gates the
+      resolve mutation on repository write access, not on the pull-request
+      scope, so `pull-requests: write` alone returns FORBIDDEN. Without it the
+      action warns and continues. 'report' issues no mutation, so it cannot
+      tell you in advance whether 'true' would be permitted.
       A thread is covered when a current finding shares ANY line with it; the
       incremental_overlap_threshold IoU test is not used here.
     required: false
@@ -253,8 +256,9 @@ outputs:
     value: ${{ steps.post.outputs.comments_resolved }}
   comments_resolved_preview:
     description: >-
-      Number of threads resolve_outdated 'report' mode would have resolved.
-      Always 0 in 'false' and 'true' modes.
+      Number of candidate threads resolve_outdated 'report' mode found. This is
+      the uncapped count, so it can exceed the 50 threads a single 'true' run
+      resolves. Always 0 in 'false' and 'true' modes.
     value: ${{ steps.post.outputs.comments_resolved_preview }}
   summary_comment_url:
     description: URL of the posted/updated summary comment, if any.
@@ -424,6 +428,7 @@ runs:
         MAX_TOKENS_BUDGET_INPUT: ${{ inputs.max_tokens_budget }}
         LLM_REASONING_EFFORT_INPUT: ${{ inputs.llm_reasoning_effort }}
         STREAM_PROGRESS_INPUT: ${{ inputs.stream_progress }}
+        RESOLVE_OUTDATED_INPUT: ${{ inputs.resolve_outdated }}
       shell: bash
       run: |
         if [[ ! "$REVIEW_TASK_TIMEOUT" =~ ^[0-9]+$ ]]; then
@@ -503,6 +508,20 @@ runs:
             ;;
         esac
         echo "STREAM_PROGRESS=$NORMALIZED_STREAM_PROGRESS" >> "$GITHUB_ENV"
+
+        # Thread cleanup mode: 'false' touches nothing and makes no API calls,
+        # 'report' logs what it would resolve, 'true' resolves. Empty maps to
+        # 'false' so a caller that passes an unset variable stays opt-in.
+        NORMALIZED_RESOLVE_OUTDATED="$(printf '%s' "$RESOLVE_OUTDATED_INPUT" | tr '[:upper:]' '[:lower:]')"
+        case "$NORMALIZED_RESOLVE_OUTDATED" in
+          "") NORMALIZED_RESOLVE_OUTDATED=false ;;
+          false|report|true) ;;
+          *)
+            echo "::error::resolve_outdated must be one of: false, report, true (got '$RESOLVE_OUTDATED_INPUT')"
+            exit 1
+            ;;
+        esac
+        echo "RESOLVE_OUTDATED=$NORMALIZED_RESOLVE_OUTDATED" >> "$GITHUB_ENV"
 
     - name: Install OpenCodeReview
       shell: bash
@@ -981,7 +1000,7 @@ runs:
         # Resolved by "Resolve PR refs", which fails the job when no number is
         # available; context.issue.number resolves nothing on a workflow_run.
         OCR_PR_NUMBER: ${{ env.PR_NUMBER }}
-        OCR_RESOLVE_OUTDATED: ${{ inputs.resolve_outdated }}
+        OCR_RESOLVE_OUTDATED: ${{ env.RESOLVE_OUTDATED }}
       with:
         github-token: ${{ inputs.github_token }}
         script: |

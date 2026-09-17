@@ -66,6 +66,15 @@ const SEVERITY_RANK = new Map(
 // Equivalently produced by an empty policy (no threshold, no categories).
 const NO_ROUTING = Object.freeze({ routeBySeverity: false, routeByCategory: false });
 
+// The documented resolve_outdated values. A Map, not an object literal: an
+// object lookup would inherit from Object.prototype, so 'constructor' or
+// 'toString' would resolve to a truthy non-string and silently read as
+// "configured" — the one direction this fail-closed feature must never fail.
+const RESOLVE_MODES = new Map([
+  ["true", "resolve"],
+  ["report", "report"],
+]);
+
 async function runPostReviewComments({
   github,
   context,
@@ -154,8 +163,7 @@ async function runPostReviewComments({
   // typo stays silent on exactly the runs that hit an early exit — a clean PR
   // or an unparseable result — which is most of them on a healthy repository.
   // Empty/unset/'false' are the documented ways to be off, so they never warn.
-  const resolveMode =
-    resolveOutdated === "true" ? "resolve" : resolveOutdated === "report" ? "report" : "off";
+  const resolveMode = RESOLVE_MODES.get(resolveOutdated) ?? "off";
   if (resolveMode === "off" && resolveOutdated && resolveOutdated !== "false") {
     const msg =
       `[resolve-outdated] ignoring unrecognized resolve_outdated value ${JSON.stringify(resolveOutdated)}; ` +
@@ -362,13 +370,31 @@ async function runPostReviewComments({
     reviewComments.push({ comment, reviewComment, id });
   }
 
+  // One lookup shared by both callers below (incremental dedupe and the resolve
+  // gate). Memoized on the PROMISE, so a run that needs it twice issues a single
+  // request — both paths used to call it, and under a token that 403s that meant
+  // two failed requests and two warning lines — while a run that needs it zero
+  // times still issues none.
+  //
+  // The resolve caller looks dead, because botLogin is null under every Actions
+  // token, and it is not. Under a PAT, getAuthenticated() succeeds and returns
+  // the human's login, and shouldResolveThread's `!rootIsBot && rootLogin !==
+  // botLogin` branch is the only thing separating "our own comment, posted via
+  // PAT" from "a human quoting our marker". Drop this call and the feature
+  // silently resolves nothing on every PAT run.
+  let authenticatedLoginPromise = null;
+  const authenticatedLogin = () => {
+    if (!authenticatedLoginPromise) authenticatedLoginPromise = getAuthenticatedLogin(github, log);
+    return authenticatedLoginPromise;
+  };
+
   // Incremental filtering (non-destructive): drop current inline comments
   // whose (path, line range) overlaps an existing bot review comment, so we
   // only append comments on lines not yet covered. History is never deleted.
   let toSend = reviewComments;
   if (incremental && reviewComments.length > 0) {
     const existing = await listExistingReviewComments(github, owner, repo, prNumber, log);
-    const botLogin = await getAuthenticatedLogin(github, log);
+    const botLogin = await authenticatedLogin();
     const hist = existing.filter((c) => isBotComment(c, botLogin));
     toSend = reviewComments.filter(
       ({ reviewComment }) => !overlapsHistory(reviewComment, hist, incrementalOverlapThreshold)
@@ -535,7 +561,7 @@ async function runPostReviewComments({
         prNumber,
         core,
         log,
-        botLogin: await getAuthenticatedLogin(github, log),
+        botLogin: await authenticatedLogin(),
         currentSpans,
         dryRun: resolveMode === "report",
       });
@@ -978,8 +1004,8 @@ function setStatsOutputs(out, stats, batchCounters, batchSize) {
   // Emitted on every exit (always "0" when resolve_outdated is off or in
   // 'true' mode respectively) so a consumer workflow can read them
   // unconditionally instead of testing for their existence.
-  out("comments_resolved", String(stats.resolved || 0));
-  out("comments_resolved_preview", String(stats.resolvedPreview || 0));
+  out("comments_resolved", String(stats.resolved));
+  out("comments_resolved_preview", String(stats.resolvedPreview));
   out("summary_comment_url", stats.summaryUrl || "");
   // The head this run's checkpoint advanced to, or "" when it did not advance
   // (#476). Gated on summaryUrl because the marker lives inside the summary
@@ -1147,7 +1173,7 @@ async function getAuthenticatedLogin(github, log) {
     const { data: user } = await github.rest.users.getAuthenticated();
     return user && user.login ? user.login : null;
   } catch (e) {
-    log(`[incremental] could not resolve authenticated user: ${e.message}`);
+    log(`[auth] could not resolve authenticated user: ${e.message}`);
     return null;
   }
 }
@@ -1273,6 +1299,12 @@ function num(v) {
 // HTML comment wrapper so user content or a quoted suggestion cannot forge it.
 const OCR_COMMENT_ID_SOURCE = String.raw`<!--\s*(ocr-\d+-\d+-[a-f0-9]+)\s*-->`;
 
+// Shared, non-global instance for the presence check. No /g means no lastIndex,
+// so .test() carries no state between the threads it is called on.
+// getPostedCommentIds builds its own /g copy instead, for exactly the reason
+// this one can be shared.
+const OCR_COMMENT_ID_RE = new RegExp(OCR_COMMENT_ID_SOURCE);
+
 // ---- Outdated thread resolution (#567) ----
 //
 // Deterministic, zero-LLM cleanup of the bot's OWN stale inline threads. The
@@ -1310,6 +1342,22 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   }
 }`;
 
+// resolveReviewThread requires `contents: write`. That is counter-intuitive:
+// a review thread is pull-request conversation state, so `pull-requests: write`
+// looks like the scope that should cover it, and it does not. GitHub gates the
+// mutation on repository WRITE ACCESS ("you can resolve a conversation if you
+// opened the pull request or have write access to the repository"), and for an
+// installation token that access is granted by Contents, not Pull requests.
+//
+// Measured on three jobs differing only in their permissions block, each
+// resolving its own thread on a scratch PR, with no try/catch to hide a failure:
+//   contents: read  + pull-requests: write  -> FORBIDDEN
+//   contents: write + pull-requests: read   -> resolved
+//   contents: write + pull-requests: write  -> resolved
+// https://github.com/chethanuk/open-code-review/actions/runs/35202780271
+//
+// Workflows elsewhere that appear to call this under `pull-requests: write`
+// wrap the mutation in try/catch and log a warning when it fails.
 const RESOLVE_THREAD_MUTATION = `
 mutation($threadId: ID!) {
   resolveReviewThread(input: { threadId: $threadId }) { thread { id isResolved } }
@@ -1379,7 +1427,7 @@ function rootComment(thread) {
 
 function threadIsOurs(thread) {
   const root = rootComment(thread);
-  return new RegExp(OCR_COMMENT_ID_SOURCE).test((root && root.body) || "");
+  return OCR_COMMENT_ID_RE.test((root && root.body) || "");
 }
 
 // GraphQL's reviewThreads returns a bot's SLUG ("github-actions") where REST —
@@ -1398,13 +1446,17 @@ function graphqlAuthorLogin(author) {
 }
 
 // Pure predicate: may this thread be resolved, and if not, why not?
-// Returns "resolve" | "not_outdated" | "already_resolved" | "unverified" |
+// Returns "resolve" | "not_outdated" | "already_resolved" |
+// "unverified_partial_view" | "unverified_no_line" | "unlocatable_path" |
 // "not_ours" | "human_reply" | "overlap".
 //
 // Deliberately does NOT consult `viewerCanResolve`: it reports false for tokens
 // that can in fact resolve the thread, so gating on it would silently disable
 // the feature. The mutation is attempted and its failure is caught instead.
-function shouldResolveThread(thread, { botLogin, currentSpans = [] } = {}) {
+function shouldResolveThread(
+  thread,
+  { botLogin, currentSpans = [], unlocatablePaths = new Set() } = {}
+) {
   if (!thread || thread.isOutdated !== true) return "not_outdated";
   if (thread.isResolved === true) return "already_resolved";
   // Any participant we cannot positively identify as the bot counts as a human
@@ -1416,7 +1468,9 @@ function shouldResolveThread(thread, { botLogin, currentSpans = [] } = {}) {
   // comments than the query returned could carry a human reply we never saw —
   // both stay open rather than being resolved on a partial view.
   const total = thread.comments && thread.comments.totalCount;
-  if (nodes.length === 0 || (typeof total === "number" && total > nodes.length)) return "unverified";
+  if (nodes.length === 0 || (typeof total === "number" && total > nodes.length)) {
+    return "unverified_partial_view";
+  }
   // Authorship alone cannot establish that WE created this thread. Every
   // workflow in a repo that uses the default GITHUB_TOKEN posts as the same
   // identity, so a sibling workflow's outdated review threads are
@@ -1457,6 +1511,15 @@ function shouldResolveThread(thread, { botLogin, currentSpans = [] } = {}) {
   for (const c of nodes) {
     if (graphqlAuthorLogin(c && c.author) !== rootLogin) return "human_reply";
   }
+  // This run reported a finding ON THIS PATH that it could not place on a line,
+  // so that finding is invisible to the veto below: spansIntersect can only ever
+  // answer "no overlap" for it, which is indistinguishable from "that finding is
+  // gone". Unlike a path-less finding (handled run-wide by the caller), the
+  // blind spot here is bounded by the path the finding names, so it costs this
+  // path's threads and nothing else.
+  if (unlocatablePaths && unlocatablePaths.has(normalizeComparePath(thread.path))) {
+    return "unlocatable_path";
+  }
   // A thread whose ORIGINAL lines are still covered by a finding from this run
   // is the rebase case: GitHub calls it outdated because the diff moved, but the
   // model just re-reported the same problem. Leave it open.
@@ -1466,7 +1529,7 @@ function shouldResolveThread(thread, { botLogin, currentSpans = [] } = {}) {
   // mitigation for GitHub reporting a still-live finding's thread as outdated
   // after a force-push. Resolving on a check that cannot fail is worse than
   // leaving the thread open, so treat it exactly like a partial comment view.
-  if (!lineSpan(span)) return "unverified";
+  if (!lineSpan(span)) return "unverified_no_line";
   if (spansIntersect(span, currentSpans)) return "overlap";
   return "resolve";
 }
@@ -1485,13 +1548,35 @@ function shouldResolveThread(thread, { botLogin, currentSpans = [] } = {}) {
 function spansIntersect(span, currentSpans) {
   const cur = lineSpan(span);
   if (!cur) return false;
+  const path = normalizeComparePath(span.path);
   for (const s of currentSpans || []) {
-    if (!s || s.path !== span.path) continue;
+    if (!s || normalizeComparePath(s.path) !== path) continue;
     const other = lineSpan(s);
     if (!other) continue;
     if (cur.start <= other.end && other.start <= cur.end) return true;
   }
   return false;
+}
+
+// Fold the spelling drift that actually occurs between the two sources the
+// resolve gate compares: `thread.path` comes from GitHub's GraphQL (always
+// repo-relative, forward slashes), while a finding's path comes straight out of
+// the model's JSON with no normalization, so `./src/a.js`, `/src/a.js` and
+// `src\a.js` all turn up. Without this the veto compares them as raw strings
+// and answers "no overlap", which resolves a thread sitting on a live finding.
+//
+// No case folding on purpose: paths are case-sensitive on the platforms that
+// matter, and folding would report overlaps that do not exist. For this gate a
+// false overlap is the safe direction, but a false MATCH between two genuinely
+// different files would silently veto real cleanup, so we do not invent one.
+//
+// Deliberately NOT wired into overlapsHistory/sameCommentSpan. They have the
+// same gap, but a miss there costs one duplicate comment rather than a wrongly
+// resolved thread, and changing them would move incremental-mode behavior in a
+// change that is not about incremental mode.
+function normalizeComparePath(p) {
+  if (typeof p !== "string") return "";
+  return p.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
 }
 
 // Classify a resolve-mutation failure. Both "forbidden" and "throttled" mean
@@ -1546,22 +1631,36 @@ async function resolveOutdatedThreads({
   // Fail closed on a finding this run produced but could not place in the tree:
   // no usable start/end line, or no path. `result.comments` comes straight from
   // the model's JSON with no normalization, so both are reachable. Either way
-  // the finding is live and its location is unknown, so it cannot veto any
-  // thread — spansIntersect compares `path` first, and a path-less span matches
-  // nothing — and "vetoes nothing" is indistinguishable from "the finding is
-  // gone", which is exactly the state that resolves a thread on top of a real
-  // problem. ANY unplaceable finding disables resolution for the whole run, not
-  // just for its own path: we do not know which path it belongs on either.
-  const unlocatable = currentSpans.filter((s) => !s || !s.path || !lineSpan(s)).length;
+  // the finding is live but invisible to the veto — spansIntersect compares
+  // `path` first, and a path-less span matches nothing — and "vetoes nothing" is
+  // indistinguishable from "the finding is gone", which is exactly the state
+  // that resolves a thread on top of a real problem. What differs is how far the
+  // blind spot reaches, and the two cases are NOT the same size:
+  //   - No path at all: the finding could belong to any path, so it cannot veto
+  //     anything specific. Resolution is disabled for the whole run, and we do
+  //     not even spend the listing query.
+  //   - Path but no line: bounded by the path the finding names, so it vetoes
+  //     that path only. This is the shape that already goes to the summary via
+  //     commentsWithoutLine on ordinary runs — routine output, not an anomaly.
+  //     Letting one of them disable the run would quietly no-op the feature on a
+  //     good share of real PRs.
+  const pathless = currentSpans.filter((s) => !s || !s.path).length;
+  const unlocatablePaths = new Set(
+    currentSpans.filter((s) => s && s.path && !lineSpan(s)).map((s) => normalizeComparePath(s.path))
+  );
   const reasons = {};
-  if (unlocatable > 0) reasons.unlocatable_finding = unlocatable;
+  if (pathless > 0) reasons.pathless_finding = pathless;
+  // `unlocatable_path` is deliberately NOT pre-seeded from the set's size: the
+  // thread loop below already counts it, and `reasons` reports threads skipped,
+  // not findings seen. Seeding it would add the two together and report a
+  // skipped= count no thread corresponds to.
   const threads =
-    unlocatable > 0 ? [] : await listBotReviewThreads({ github, owner, repo, prNumber, log, warn });
+    pathless > 0 ? [] : await listBotReviewThreads({ github, owner, repo, prNumber, log, warn });
 
   const candidates = [];
   const previewLines = [];
   for (const thread of threads) {
-    const reason = shouldResolveThread(thread, { botLogin, currentSpans });
+    const reason = shouldResolveThread(thread, { botLogin, currentSpans, unlocatablePaths });
     reasons[reason] = (reasons[reason] || 0) + 1;
     if (reason === "resolve") candidates.push(thread);
     if (dryRun) {

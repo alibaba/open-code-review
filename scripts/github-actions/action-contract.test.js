@@ -1010,6 +1010,50 @@ function testValidateInputsValidatesStreamProgress() {
   }
 }
 
+function testValidateInputsValidatesResolveOutdated() {
+  const validation = validationStep();
+  assert.ok(validation, "action.yml must retain input validation");
+  for (const value of ["yes", "1", "on", "resolve"]) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validation, inputValues({ resolve_outdated: value }), fixture);
+      assert.notStrictEqual(
+        result.status,
+        0,
+        `resolve_outdated=${JSON.stringify(value)} should be rejected; ${resultDescription(result)}`
+      );
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        /resolve_outdated must be one of/,
+        `rejection for resolve_outdated=${JSON.stringify(value)} must name the input; ${resultDescription(result)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+  const acceptance = [
+    ["TRUE", "true"],
+    ["Report", "report"],
+    ["", "false"],
+    ["false", "false"],
+  ];
+  for (const [value, expected] of acceptance) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validation, inputValues({ resolve_outdated: value }), fixture);
+      assert.strictEqual(result.status, 0, `resolve_outdated=${JSON.stringify(value)} should be accepted; ${resultDescription(result)}`);
+      const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
+      assert.strictEqual(
+        exported.RESOLVE_OUTDATED,
+        expected,
+        `validation must export ${JSON.stringify(expected)} for resolve_outdated=${JSON.stringify(value)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
 function testRunKeepsAgentAudienceAndLogFileByDefault() {
   const run = stepNamed("Run OpenCodeReview");
   assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
@@ -1824,6 +1868,7 @@ const TESTS = [
   ["llm_reasoning_effort rejects values outside the OpenAI/GLM vocabulary", testValidateInputsRejectsInvalidReasoningEffort],
   ["stream_progress defaults to false and describes [ocr] progress", testStreamProgressInputDefaultsToFalse],
   ["stream_progress validation accepts true/false case-insensitively", testValidateInputsValidatesStreamProgress],
+  ["resolve_outdated validation fails fast on an unknown value", testValidateInputsValidatesResolveOutdated],
   ["Run OpenCodeReview keeps --audience agent and the log file by default", testRunKeepsAgentAudienceAndLogFileByDefault],
   ["Run OpenCodeReview streams live progress when opted in", testRunStreamsProgressWhenOptedIn],
   ["llm_extra_body defaults to disabling thinking", testLlmExtraBodyDefaultDisablesThinking],

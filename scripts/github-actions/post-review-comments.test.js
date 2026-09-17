@@ -163,6 +163,9 @@ function makeGithub(opts = {}) {
   // return opts.threads (single page unless opts.threadPages is given);
   // mutations consult opts.resolveErrorSpec(index) for injected failures.
   const graphqlCalls = [];
+  // Every GET /user attempt, so a test can prove the shared lookup is memoized
+  // rather than re-requested per caller.
+  const authCalls = [];
   let resolveMutations = 0;
   async function graphql(query, vars) {
     graphqlCalls.push({ query, vars });
@@ -196,6 +199,7 @@ function makeGithub(opts = {}) {
     issueComments,
     updatedComments,
     graphqlCalls,
+    authCalls,
     resolveMutationCalls,
     graphql,
     listCommentsCalls,
@@ -213,6 +217,7 @@ function makeGithub(opts = {}) {
         // real Actions run, and the mock must 403 too — a mock that succeeds
         // would let identity logic pass tests it cannot pass in production.
         getAuthenticated: async () => {
+          authCalls.push(Date.now());
           throw Object.assign(new Error("Resource not accessible by integration"), { status: 403 });
         },
       },
@@ -2431,7 +2436,10 @@ async function main() {
   testResolveIdentityIsReadOffTheRootNode();
   testResolveVetoUsesPlainIntersection();
   await testGetAuthenticatedLoginIs403UnderTheActionsToken();
-  await testResolveFailsClosedOnAnUnlocatableFinding();
+  await testResolveVetoScopeMatchesWhatTheFindingLeftUnknown();
+  testResolveVetoSurvivesPathSpellingDrift();
+  await testUnlocatablePathVetoSurvivesPathSpellingDrift();
+  await testAuthenticatedLoginIsResolvedOncePerRun();
   await testReportModePreviewsEveryCandidate();
   await testUnrecognizedResolveValueWarnsOnEarlyExits();
   await testListBotReviewThreadsAnnouncesThePageCap();
@@ -4415,7 +4423,7 @@ function resolveEnv(over = {}) {
   );
 }
 
-// U2 (executed, not just read). A missing helper is the real-world failure —
+// Executed, not just read. A missing helper is the real-world failure —
 // `uses: owner/repo@sha` without a checkout, a container that cannot see
 // GITHUB_ACTION_PATH — and it used to throw, failing a job whose review would
 // otherwise have run fine against the full range.
@@ -4451,7 +4459,7 @@ async function testActionResolveScriptFallsBackInsteadOfThrowing() {
   assert.strictEqual(core.outputs.checkpoint_carry, "");
 }
 
-// U3/U4 (executed). The fingerprint is what makes "same configuration" mean
+// Executed, not just read. The fingerprint is what makes "same configuration" mean
 // something. It must move when the repo's own rule file appears or changes —
 // that file is loaded by every review whether or not `rule` is set — and when
 // an input that changes what the model is told changes.
@@ -4526,7 +4534,7 @@ async function testActionScriptFingerprintCoversRepoLocalRules() {
   assert.notStrictEqual(otherVersion, edited, "a changed OCR version must invalidate the checkpoint");
 }
 
-// U1. GET /user is 403 ("Resource not accessible by integration") for the
+// GET /user is 403 ("Resource not accessible by integration") for the
 // default GITHUB_TOKEN and for App installation tokens — i.e. for every token
 // this action runs with — so gating authorship on it meant production runs
 // always fell back to the full range and the feature never did anything. The
@@ -4566,7 +4574,7 @@ async function testCheckpointAuthorSurvivesUnavailableGetUser() {
   assert.strictEqual(isCheckpointAuthorOurs({ user: { login: "ocr-app[bot]" } }, "ocr-app"), true);
 }
 
-// U1 (corner). `user.type` alone carries the whole decision when there is no app
+// The corner case: `user.type` alone carries the whole decision when there is no app
 // attribution and the login has no "[bot]" suffix. That shape is accepted: type
 // is GitHub's own attestation about the writer, derived from the posting token
 // and not settable by a commenter, so it is exactly the evidence the trust
@@ -4582,7 +4590,7 @@ function testCheckpointBotTypeAloneEstablishesAuthorship() {
   assert.strictEqual(isCheckpointAuthorOurs({ user: { login: "plain", type: "Bot" } }, "ocr-app"), false);
 }
 
-// U1 (hole). `performed_via_github_app` is also set on comments written with a
+// The hole this closes: `performed_via_github_app` is also set on comments written with a
 // user-to-server token, i.e. by a HUMAN acting through some GitHub App (a CLI,
 // an editor integration, a browser extension). There the slug attests the
 // client, not the author, so accepting app attribution on its own would have
@@ -4616,7 +4624,7 @@ async function testCheckpointRejectsUserToServerAppComment() {
   assert.strictEqual(isCheckpointAuthorOurs(viaBot), true);
 }
 
-// U6 (robustness). The no-op is checked before the OCR output is read, because
+// Robustness: the no-op is checked before the OCR output is read, because
 // an empty range is also the range OCR is most likely to trip over: an error
 // banner written over the previous run's findings destroys them just as
 // thoroughly as "No comments generated" does.
@@ -4640,7 +4648,7 @@ async function testCheckpointNoopSurvivesUnreadableOcrOutput() {
   assert.deepStrictEqual(gh.issueComments, []);
 }
 
-// U6. A rerun on the same head reviews an empty range and therefore has nothing
+// A rerun on the same head reviews an empty range and therefore has nothing
 // to report. Writing "No comments generated" over the previous run's summary
 // would destroy findings for commits nobody touched, so the no-op leaves the
 // existing comment exactly as it is.
@@ -4683,7 +4691,7 @@ async function testCheckpointNoopLeavesSummaryUntouched() {
   assert.strictEqual(rewriting.updatedComments[0].body.includes("No comments generated"), true);
 }
 
-// U7. Reopening a PR, or marking a draft ready, is a request for a fresh look
+// Reopening a PR, or marking a draft ready, is a request for a fresh look
 // at the whole diff — not for the delta since the last push — even when a
 // perfectly valid checkpoint is sitting there.
 async function testCheckpointEventFullScopeTable() {
@@ -4702,7 +4710,7 @@ async function testCheckpointEventFullScopeTable() {
   }
 }
 
-// U9. The carry can come back empty for reasons that say nothing about the
+// The carry can come back empty for reasons that say nothing about the
 // marker's usefulness (author unprovable, listComments down). A run that then
 // completes without advancing must not blank a checkpoint it merely failed to
 // read.
@@ -4766,7 +4774,7 @@ async function testCheckpointCarryNeverErasesExistingMarker() {
   assert.strictEqual(lastSummaryBody(optedOut).includes("ocr-checkpoint"), false);
 }
 
-// U9 (continued). parseCheckpointMarker rejects a body carrying two markers as
+// The carry rescue, continued. parseCheckpointMarker rejects a body carrying two markers as
 // ambiguous. The rescue must apply the same rule: copying one of the two into
 // the rewritten body would pick a winner and hand the next run a single
 // well-formed marker to narrow on. Rescuing nothing keeps the fail-closed
@@ -4844,7 +4852,7 @@ async function testCheckpointAdvanceRequiresAFingerprint() {
   assert.strictEqual(parseCheckpointMarker(control.body).head, CK_RESOLVED);
 }
 
-// U12. A summary that reports three findings for a two-commit slice of a
+// A summary that reports three findings for a two-commit slice of a
 // forty-commit PR is misleading unless it says so. One visible line, only when
 // the range really was narrowed.
 async function testSummaryShowsNarrowedRangeLabel() {
@@ -4905,7 +4913,7 @@ async function testSummaryShowsNarrowedRangeLabel() {
   assert.strictEqual(off.includes("Reviewed `"), false, "opt-out runs render today's body");
 }
 
-// U2. The resolve step only chooses where the review starts; every failure it
+// The resolve step only chooses where the review starts; every failure it
 // can hit has the same safe answer. It must never be the reason a job fails.
 function testActionResolveStepNeverFailsTheJob() {
   const block = actionStepBlock("Resolve review range");
@@ -4944,7 +4952,7 @@ function fingerprintDigestSource() {
   return block.slice(at, end);
 }
 
-// U3. .opencodereview/rule.json is read from the repo whether or not `rule` is
+// .opencodereview/rule.json is read from the repo whether or not `rule` is
 // set, so a commit that edits it changes what a review says and must invalidate
 // the checkpoint.
 function testActionFingerprintsRepoLocalRuleFile() {
@@ -4962,7 +4970,7 @@ function testActionFingerprintsRepoLocalRuleFile() {
   assert.strictEqual(block.includes("range.reason = 'rule_unreadable';"), true, "…which forces a full review");
 }
 
-// U4. `background` changes what the model is told, so it changes what a review
+// `background` changes what the model is told, so it changes what a review
 // would say, so it belongs in the fingerprint.
 function testActionFingerprintIncludesBackground() {
   const block = actionStepBlock("Resolve review range");
@@ -5018,7 +5026,7 @@ function testActionFingerprintReadsNormalizedAxes() {
   }
 }
 
-// U5. A narrowed range published through $GITHUB_ENV outlives the step: a
+// A narrowed range published through $GITHUB_ENV outlives the step: a
 // second use of this action in the same job would inherit it and skip commits
 // it was never told about. Step outputs are scoped to the step that set them.
 function testActionRangeFromIsAStepOutput() {
@@ -5039,7 +5047,7 @@ function testActionRangeFromIsAStepOutput() {
   assert.strictEqual(post.includes("same_head_noop"), true, "…including the no-op signal");
 }
 
-// U8. "Why was this a full review" has to be answerable by a workflow, not just
+// "Why was this a full review" has to be answerable by a workflow, not just
 // by a human reading the step log.
 function testActionEmitsMachineReadableRangeOutputs() {
   const names = [
@@ -5069,7 +5077,7 @@ function testActionEmitsMachineReadableRangeOutputs() {
   assert.strictEqual(ACTION_README.includes("`checkpoint_after`"), true);
 }
 
-// U10. A floating tag on a step that runs with the repo's token is a supply
+// A floating tag on a step that runs with the repo's token is a supply
 // chain hole, and this file already pins every other action by sha.
 function testActionPinsGithubScriptSha() {
   assert.strictEqual(/actions\/github-script@v/.test(ACTION_YML), false, "no floating github-script tag may remain");
@@ -5078,7 +5086,7 @@ function testActionPinsGithubScriptSha() {
   assert.strictEqual(new Set(uses).size, 1, "…to the same sha");
 }
 
-// U11. `ocr_version` defaults to "latest", so falling back to `spec:${VERSION}`
+// `ocr_version` defaults to "latest", so falling back to `spec:${VERSION}`
 // pinned the axis to the constant "spec:latest" — it stopped distinguishing
 // versions in exactly the case it was written to cover. Nothing replaces it:
 // an unresolvable version produces an EMPTY fingerprint, which matches no
@@ -5215,7 +5223,7 @@ async function testActionPinsAuthorToTheDefaultTokenApp() {
   );
 }
 
-// U13. The reason set is documented in three places (the resolver's contract
+// The reason set is documented in three places (the resolver's contract
 // comment, the README table, the action outputs) and drifted between them once
 // already. Enumerate it once, here, and fail if any copy falls behind.
 async function testCheckpointReasonsMatchTheDocs() {
@@ -5516,8 +5524,8 @@ function testShouldResolveThreadTable() {
     // thread would be resolved on a check that is structurally unable to fail.
     // That veto is the mitigation for a force-push marking a still-live
     // finding's thread outdated, so this must stay open, not resolve.
-    { name: "no original line information", thread: botThread({ originalLine: null, originalStartLine: null }), spans: sameLine, want: "unverified" },
-    { name: "no original line information, nothing current either", thread: botThread({ originalLine: null, originalStartLine: null }), spans: [], want: "unverified" },
+    { name: "no original line information", thread: botThread({ originalLine: null, originalStartLine: null }), spans: sameLine, want: "unverified_no_line" },
+    { name: "no original line information, nothing current either", thread: botThread({ originalLine: null, originalStartLine: null }), spans: [], want: "unverified_no_line" },
     // GraphQL returns the bot SLUG; getAuthenticatedLogin/isBotComment use the
     // REST "[bot]"-suffixed form. Measured on a live PR: the same comment is
     // `github-actions` (__typename Bot) via GraphQL and `github-actions[bot]`
@@ -5621,9 +5629,9 @@ function testShouldResolveThreadTable() {
 async function testShouldResolveThreadPartialCommentView() {
   const botComments = (n) => Array.from({ length: n }, () => ({ author: { login: BOT } }));
   const cases = [
-    { name: "no visible comments", comments: { totalCount: 0, nodes: [] }, want: "unverified" },
-    { name: "comments object missing entirely", comments: undefined, want: "unverified" },
-    { name: "more comments than the page returned", comments: { totalCount: 101, nodes: botComments(100) }, want: "unverified" },
+    { name: "no visible comments", comments: { totalCount: 0, nodes: [] }, want: "unverified_partial_view" },
+    { name: "comments object missing entirely", comments: undefined, want: "unverified_partial_view" },
+    { name: "more comments than the page returned", comments: { totalCount: 101, nodes: botComments(100) }, want: "unverified_partial_view" },
     { name: "full page, nothing truncated", comments: { totalCount: 100, nodes: botComments(100) }, want: "resolve" },
     { name: "totalCount absent, comments visible", comments: { nodes: botComments(2) }, want: "resolve" },
   ];
@@ -5642,8 +5650,8 @@ async function testShouldResolveThreadPartialCommentView() {
   );
   assert.strictEqual(gh.resolveMutationCalls().length, 0, "a partially-visible thread is never resolved");
   assert.strictEqual(out.resolved, 0);
-  assert.deepStrictEqual(out.reasons, { unverified: 1 });
-  assert.match(resolveLogLines(core)[0], /skipped=unverified:1/);
+  assert.deepStrictEqual(out.reasons, { unverified_partial_view: 1 });
+  assert.match(resolveLogLines(core)[0], /skipped=unverified_partial_view:1/);
 }
 
 async function testResolveOutdatedThreadsCapsAndSequences() {
@@ -5932,7 +5940,7 @@ const { getAuthenticatedLogin } = require(path.join(__dirname, "post-review-comm
 // graphqlAuthorLogin() suffixes; `User` authors come back verbatim.
 const author = (login, typename) => ({ author: { login, __typename: typename } });
 
-// U1. Identity is the ROOT comment's author, not getAuthenticatedLogin().
+// Identity is the ROOT comment's author, not getAuthenticatedLogin().
 // Under every real Actions token that call 403s (botLogin === null), so the old
 // isBotComment() path recognized only `github-actions[bot]` and read OCR's own
 // root comment as a human reply on any App-token workflow.
@@ -6005,7 +6013,7 @@ function testResolveIdentityComesFromTheRootAuthor() {
   }
 }
 
-// U1b. Ownership and identity are read off ONE node: the `root` alias, which
+// Ownership and identity are read off ONE node: the `root` alias, which
 // carries both the marker body and the author. Deriving identity from
 // comments.nodes[0] instead is right only while GraphQL hands back a thread's
 // comments oldest-first, so a view whose first visible comment is not the root
@@ -6045,7 +6053,7 @@ function testResolveIdentityIsReadOffTheRootNode() {
   }
 }
 
-// U2. The resolve veto is a plain span intersection. The incremental
+// The resolve veto is a plain span intersection. The incremental
 // same-comment test it used to borrow answers a different question — its
 // single-vs-multi-line rule and IoU threshold both report "not the same
 // comment" for spans that plainly share lines, which resolved threads on top of
@@ -6076,7 +6084,7 @@ function testResolveVetoUsesPlainIntersection() {
   assert.strictEqual(overlapsHistory({ path: "src/a.js", line: 10 }, [{ path: "src/a.js", start_line: 8, line: 12 }]), false);
 }
 
-// U3. The identity lookup production actually gets: 403, hence null.
+// The identity lookup production actually gets: 403, hence null.
 async function testGetAuthenticatedLoginIs403UnderTheActionsToken() {
   const gh = makeGithub({});
   const core = mockCore();
@@ -6091,54 +6099,153 @@ async function testGetAuthenticatedLoginIs403UnderTheActionsToken() {
   assert.strictEqual(outputs.comments_resolved, "1");
 }
 
-// U4. A finding with no resolvable line has an unknown location, so it can
-// never veto a thread — which is indistinguishable from "that finding is gone".
-// One such finding disables resolution for the whole run.
-async function testResolveFailsClosedOnAnUnlocatableFinding() {
-  const result = {
-    comments: [
-      { path: "src/a.js", content: "still broken", start_line: 5, end_line: 5 },
-      { path: "src/a.js", content: "no line information at all", start_line: 0, end_line: 0 },
-    ],
-  };
-  const { github, outputs, core } = await run({
-    result,
-    opts: { resolveOutdated: "true" },
-    githubOpts: { threads: [botThread({ id: "STALE", originalLine: 99 })] },
-  });
-  assert.strictEqual(github.resolveMutationCalls().length, 0, "no thread may be resolved this run");
-  assert.strictEqual(github.graphqlCalls.length, 0, "not even the thread listing is worth issuing");
-  assert.strictEqual(outputs.comments_resolved, "0");
-  assert.match(resolveLogLines(core)[0], /skipped=unlocatable_finding:1/);
+// An unplaceable finding is live with an unknown location, so it can never
+// veto a thread — which is indistinguishable from "that finding is gone". The
+// blind spot is only as wide as what we failed to learn: a finding with a path
+// but no line (the ordinary commentsWithoutLine shape, present on plenty of
+// healthy runs) blinds us to that path alone, while a finding with no path at
+// all could belong anywhere and so costs the run.
+async function testResolveVetoScopeMatchesWhatTheFindingLeftUnknown() {
+  const placed = (path, line) => ({ path, content: `finding on ${path}`, start_line: line, end_line: line });
+  const noLine = (path) => ({ path, content: "no line information at all", start_line: 0, end_line: 0 });
+  const noPath = { content: "which file?", start_line: 99, end_line: 99 };
+  // Two stale threads on two paths, neither overlapping any finding below, so
+  // every case starts from "both are resolvable" and loses only what it should.
+  const threads = [
+    botThread({ id: "A", path: "src/a.js", originalLine: 99 }),
+    botThread({ id: "B", path: "src/b.js", originalLine: 99 }),
+  ];
 
-  // A finding with a line but no path is just as unplaceable: the veto compares
-  // path first, so it too can only ever answer "no overlap". `result.comments`
-  // is unvalidated model JSON, so a missing path is as reachable as a missing
-  // line.
-  const noPath = await run({
-    result: {
-      comments: [
-        { path: "src/a.js", content: "still broken", start_line: 5, end_line: 5 },
-        { content: "which file?", start_line: 99, end_line: 99 },
-      ],
+  const cases = [
+    {
+      name: "control: every finding placed, both paths resolve",
+      comments: [placed("src/a.js", 5), placed("src/b.js", 5)],
+      resolved: ["A", "B"],
+      listed: true,
+      skipped: /skipped=none/,
     },
-    opts: { resolveOutdated: "true" },
-    githubOpts: { threads: [botThread({ id: "STALE", originalLine: 99 })] },
-  });
-  assert.strictEqual(noPath.github.resolveMutationCalls().length, 0, "a path-less finding must veto the run");
-  assert.strictEqual(noPath.outputs.comments_resolved, "0");
-  assert.match(resolveLogLines(noPath.core)[0], /skipped=unlocatable_finding:1/);
+    {
+      name: "a no-line finding vetoes its own path and leaves the other alone",
+      comments: [placed("src/a.js", 5), noLine("src/a.js"), placed("src/b.js", 5)],
+      resolved: ["B"],
+      listed: true,
+      skipped: /skipped=unlocatable_path:1/,
+    },
+    {
+      name: "a no-line finding on a path with no threads changes nothing",
+      comments: [placed("src/a.js", 5), noLine("docs/untouched.md"), placed("src/b.js", 5)],
+      resolved: ["A", "B"],
+      listed: true,
+      skipped: /skipped=none/,
+    },
+    {
+      name: "a path-less finding still disables the whole run",
+      comments: [placed("src/a.js", 5), noPath],
+      resolved: [],
+      listed: false,
+      skipped: /skipped=pathless_finding:1/,
+    },
+    {
+      name: "both kinds at once: the run-wide veto wins, no listing either",
+      comments: [placed("src/a.js", 5), noLine("src/a.js"), noPath],
+      resolved: [],
+      listed: false,
+      skipped: /skipped=pathless_finding:1/,
+    },
+  ];
 
-  // Control: the same run with every finding placed on a line does resolve.
-  const ok = await run({
-    result: TWO_FINDINGS,
-    opts: { resolveOutdated: "true" },
-    githubOpts: { threads: [botThread({ id: "STALE", originalLine: 99 })] },
-  });
-  assert.strictEqual(ok.github.resolveMutationCalls().length, 1);
+  for (const c of cases) {
+    const { github, outputs, core } = await run({
+      result: { comments: c.comments },
+      opts: { resolveOutdated: "true" },
+      githubOpts: { threads },
+    });
+    const ids = github.resolveMutationCalls().map((call) => call.vars.threadId).sort();
+    assert.deepStrictEqual(ids, c.resolved, c.name);
+    assert.strictEqual(outputs.comments_resolved, String(c.resolved.length), c.name);
+    // A run-wide veto skips the listing query too: there is nothing a thread
+    // listing could tell us that we are allowed to act on.
+    assert.strictEqual(github.graphqlCalls.length > 0, c.listed, `${c.name} (thread listing)`);
+    assert.match(resolveLogLines(core)[0], c.skipped, c.name);
+  }
 }
 
-// U5. Report mode previews the whole backlog and names every thread.
+// The resolve veto compares a GraphQL `thread.path` against a path that
+// came out of the model's JSON with no normalization, so `./src/a.js`,
+// `/src/a.js` and `src\a.js` are all the file the thread is on. Compared as raw
+// strings every one of them reads as a different file, the veto answers "no
+// overlap", and the thread is resolved on top of a live finding.
+function testResolveVetoSurvivesPathSpellingDrift() {
+  const cases = [
+    { name: "identical paths", threadPath: "src/a.js", spanPath: "src/a.js", want: "overlap" },
+    { name: "leading ./ on the finding", threadPath: "src/a.js", spanPath: "./src/a.js", want: "overlap" },
+    { name: "leading / on the finding", threadPath: "src/a.js", spanPath: "/src/a.js", want: "overlap" },
+    { name: "backslash separators on the finding", threadPath: "src/a.js", spanPath: "src\\a.js", want: "overlap" },
+    { name: "drift on the thread side instead", threadPath: "./src/a.js", spanPath: "src/a.js", want: "overlap" },
+    // The dangerous direction. Normalization must never make two real files look
+    // like one: that would veto cleanup on threads nothing is covering, forever.
+    { name: "a different file in the same directory", threadPath: "src/a.js", spanPath: "src/b.js", want: "resolve" },
+    { name: "the same basename under a different directory", threadPath: "src/a.js", spanPath: "vendor/src/a.js", want: "resolve" },
+    { name: "one path is a prefix of the other", threadPath: "src/a.js", spanPath: "src/a.jsx", want: "resolve" },
+    // Case is deliberately NOT folded: on the platforms that matter these are
+    // two files, and folding them would invent an overlap.
+    { name: "case differences name two different files", threadPath: "src/a.js", spanPath: "src/A.js", want: "resolve" },
+  ];
+  for (const c of cases) {
+    const got = shouldResolveThread(botThread({ path: c.threadPath }), {
+      botLogin: null,
+      currentSpans: [{ path: c.spanPath, start_line: 10, line: 10 }],
+    });
+    assert.strictEqual(got, c.want, c.name);
+  }
+  // `result.comments` is unvalidated model JSON, so a path that is not a string
+  // reaches the comparison. It must not throw, and it must not match either.
+  assert.strictEqual(
+    shouldResolveThread(botThread(), {
+      botLogin: null,
+      currentSpans: [{ path: undefined, start_line: 10, line: 10 }],
+    }),
+    "resolve",
+    "a path-less span is neither a match nor a crash"
+  );
+}
+
+// The same drift at the OTHER path comparison the gate makes: the
+// unlocatable-path veto builds a Set out of finding paths and looks it up with a
+// thread path. Normalized at only one of the two sites, a no-line finding on
+// `./src/a.js` would fail to veto `src/a.js`'s threads, and the per-path veto
+// would be defeated by a leading dot.
+async function testUnlocatablePathVetoSurvivesPathSpellingDrift() {
+  const placed = (file, line) => ({ path: file, content: `finding on ${file}`, start_line: line, end_line: line });
+  const noLine = (file) => ({ path: file, content: "no line information at all", start_line: 0, end_line: 0 });
+  const threads = [
+    botThread({ id: "A", path: "src/a.js", originalLine: 99 }),
+    botThread({ id: "B", path: "src/b.js", originalLine: 99 }),
+  ];
+  const cases = [
+    { name: "control: the finding spells the path exactly as the thread does", noLinePath: "src/a.js", resolved: ["B"] },
+    { name: "leading ./ on the unplaceable finding", noLinePath: "./src/a.js", resolved: ["B"] },
+    { name: "leading / on the unplaceable finding", noLinePath: "/src/a.js", resolved: ["B"] },
+    { name: "backslash separators on the unplaceable finding", noLinePath: "src\\a.js", resolved: ["B"] },
+    { name: "a genuinely different path vetoes neither thread", noLinePath: "docs/x.md", resolved: ["A", "B"] },
+  ];
+  for (const c of cases) {
+    const { github, core } = await run({
+      result: { comments: [placed("src/a.js", 5), placed("src/b.js", 5), noLine(c.noLinePath)] },
+      opts: { resolveOutdated: "true" },
+      githubOpts: { threads },
+    });
+    const ids = github.resolveMutationCalls().map((call) => call.vars.threadId).sort();
+    assert.deepStrictEqual(ids, c.resolved, c.name);
+    assert.match(
+      resolveLogLines(core)[0],
+      c.resolved.length === 2 ? /skipped=none/ : /skipped=unlocatable_path:1/,
+      c.name
+    );
+  }
+}
+
+// Report mode previews the whole backlog and names every thread.
 async function testReportModePreviewsEveryCandidate() {
   const threads = [];
   for (let i = 0; i < 60; i++) threads.push(botThread({ id: `T${i}`, originalLine: 100 + i }));
@@ -6164,17 +6271,24 @@ async function testReportModePreviewsEveryCandidate() {
   );
 }
 
-// U6. A typo'd input must be visible on the runs that exit early — a clean PR
+// A typo'd input must be visible on the runs that exit early — a clean PR
 // or an unparseable result — which is where most runs end on a healthy repo.
 async function testUnrecognizedResolveValueWarnsOnEarlyExits() {
   const unrecognized = (r) => r.core.warnings.filter((w) => w.includes("unrecognized resolve_outdated")).length;
 
-  const clean = await run({ result: { comments: [] }, opts: { resolveOutdated: "yes" } });
-  assert.strictEqual(unrecognized(clean), 1, "zero-findings exit must still warn");
-  assert.strictEqual(clean.github.graphqlCalls.length, 0);
+  // "constructor" and "toString" are the reason the mode lookup is a Map: read
+  // off an object literal they would come back truthy non-strings, skip this
+  // warning, and pass the `!== "off"` gate into real mutations.
+  for (const value of ["yes", "constructor", "toString"]) {
+    const clean = await run({ result: { comments: [] }, opts: { resolveOutdated: value } });
+    assert.strictEqual(unrecognized(clean), 1, `${value}: zero-findings exit must still warn`);
+    assert.strictEqual(clean.github.graphqlCalls.length, 0, `${value} must resolve nothing`);
+    assert.strictEqual(clean.outputs.comments_resolved, "0", `${value} must resolve nothing`);
 
-  const broken = await run({ result: "{ not json", stderr: "boom", opts: { resolveOutdated: "yes" } });
-  assert.strictEqual(unrecognized(broken), 1, "parse-failure exit must still warn");
+    const broken = await run({ result: "{ not json", stderr: "boom", opts: { resolveOutdated: value } });
+    assert.strictEqual(unrecognized(broken), 1, `${value}: parse-failure exit must still warn`);
+    assert.strictEqual(broken.github.graphqlCalls.length, 0, `${value} must resolve nothing`);
+  }
 
   for (const value of ["", "false", "report", "true", undefined]) {
     const r = await run({ result: { comments: [] }, opts: { resolveOutdated: value } });
@@ -6182,7 +6296,7 @@ async function testUnrecognizedResolveValueWarnsOnEarlyExits() {
   }
 }
 
-// U7. Truncated listings are announced: silence reads as "there was nothing
+// Truncated listings are announced: silence reads as "there was nothing
 // else", and the reason counts would be a partial census printed as a full one.
 async function testListBotReviewThreadsAnnouncesThePageCap() {
   const pages = [];
@@ -6212,7 +6326,7 @@ async function testListBotReviewThreadsAnnouncesThePageCap() {
   assert.strictEqual(core2.logs.filter((l) => /max page limit/.test(l)).length, 0, "an uncapped walk says nothing");
 }
 
-// U8. Cleanup is the last thing the run does and the least important: an
+// Cleanup is the last thing the run does and the least important: an
 // unexpected throw there must not cost the run its outputs.
 async function testResolveCleanupNeverBreaksOutputs() {
   const boom = botThread({ id: "BOOM" });
@@ -6243,7 +6357,7 @@ async function testResolveCleanupNeverBreaksOutputs() {
   assert.strictEqual(core.warnings.filter((w) => /cleanup failed unexpectedly/.test(w)).length, 1);
 }
 
-// U9. Pacing rides on the documented OCR_SUCCESS_DELAY; there is no separate
+// Pacing rides on the documented OCR_SUCCESS_DELAY; there is no separate
 // undocumented resolve knob to discover.
 async function testResolvePacingUsesSuccessDelay() {
   const threads = [botThread({ id: "A" }), botThread({ id: "B" }), botThread({ id: "C" })];
@@ -6271,7 +6385,44 @@ async function testResolvePacingUsesSuccessDelay() {
   assert.deepStrictEqual(await sleeps("0"), [], "zero delay must not sleep");
 }
 
-// U9. The resolve gate stopped using the IoU threshold; action.yml's own
+// getAuthenticatedLogin used to be called once per consumer, so a run with
+// incremental dedupe AND resolve_outdated on issued two identical requests, took
+// two 403s, and logged the failure twice — the second time from a path that has
+// nothing to do with incremental mode, which is why the prefix is neutral now.
+async function testAuthenticatedLoginIsResolvedOncePerRun() {
+  const authFailures = (core) => core.logs.filter((l) => l.includes("could not resolve authenticated user"));
+  const stale = () => [botThread({ id: "STALE", originalLine: 99 })];
+
+  const both = await run({
+    result: TWO_FINDINGS,
+    opts: { resolveOutdated: "true", incremental: true },
+    githubOpts: { threads: stale() },
+  });
+  assert.strictEqual(both.github.authCalls.length, 1, "one lookup serves both callers");
+  assert.deepStrictEqual(
+    authFailures(both.core),
+    ["[auth] could not resolve authenticated user: Resource not accessible by integration"],
+    "reported once, and not under the [incremental] prefix the resolve path never earned"
+  );
+  assert.strictEqual(both.outputs.comments_resolved, "1", "sharing the lookup changes no outcome");
+
+  // Resolve-only must still look it up. The call reads as dead because botLogin
+  // is null under every Actions token, but under a PAT it IS the login OCR posts
+  // as, and shouldResolveThread's rootLogin !== botLogin branch is the only
+  // thing telling our own PAT-posted comment from a human quoting our marker.
+  const resolveOnly = await run({
+    result: TWO_FINDINGS,
+    opts: { resolveOutdated: "true" },
+    githubOpts: { threads: stale() },
+  });
+  assert.strictEqual(resolveOnly.github.authCalls.length, 1, "the resolve path is a real caller, not dead code");
+
+  // Lazy, not eager: a run with neither consumer pays for no request at all.
+  const neither = await run({ result: TWO_FINDINGS, githubOpts: { threads: stale() } });
+  assert.strictEqual(neither.github.authCalls.length, 0, "no consumer, no request");
+}
+
+// The resolve gate stopped using the IoU threshold; action.yml's own
 // description of resolve_outdated is the last place that could still promise
 // it. Nothing else parses that text, so drift there is invisible until a user
 // tunes a knob the feature does not read.

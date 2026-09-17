@@ -360,25 +360,49 @@ Over a long PR, the bot's inline comments pile up on code that no longer exists.
 Start with `'report'` for a few PRs and read the `[resolve-outdated]` log line before switching to `'true'`.
 
 ```yaml
-permissions:
-  contents: write        # required by resolve_outdated: 'true'
-  pull-requests: write
+- uses: alibaba/open-code-review@main
+  with:
+    resolve_outdated: 'report'
+```
 
-steps:
-  - uses: alibaba/open-code-review@main
-    with:
-      resolve_outdated: 'report'
+`'true'` needs `contents: write` (see below). Rather than adding that to the job that
+reviews the diff, keep it in a job of its own that never checks out the pull request:
+
+```yaml
+jobs:
+  review:
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: alibaba/open-code-review@main
+        with:
+          resolve_outdated: 'false'
+
+  resolve:
+    needs: review
+    # No actions/checkout in this job. The token that can write to the
+    # repository is never in a process that has the PR's code in it.
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: alibaba/open-code-review@main
+        with:
+          resolve_outdated: 'true'
 ```
 
 A thread is left alone unless **the action created it**. Ownership is decided by the marker OCR writes into every inline comment it posts, not by the comment's author — under the default `GITHUB_TOKEN` every workflow in your repository posts as `github-actions[bot]`, so a sibling workflow's review threads would otherwise be indistinguishable from OCR's own. Beyond that, a thread is left alone whenever **a human has replied** to it, when it is already resolved, when a finding from the current run still covers its lines, or when it has more comments than one API page returns (so a reply the action cannot see is never resolved over). Resolution also runs only after a run that actually produced findings: a run that failed to parse OCR's output, or that reported nothing, resolves nothing — "the model said nothing this time" is not evidence the old findings are gone. At most 50 threads are resolved per run; the rest carry over to the next one. Resolution is sequential and paced by `OCR_SUCCESS_DELAY` (2000 ms by default) to stay clear of GitHub's secondary rate limiter, so a full batch of 50 adds roughly 100 s to the job — lower `OCR_SUCCESS_DELAY` if that matters more to you than the pacing.
 
-Outputs: `comments_resolved` (threads resolved, `'true'` mode) and `comments_resolved_preview` (threads that would be resolved, `'report'` mode). Both are always present.
+Outputs: `comments_resolved` (threads resolved, `'true'` mode) and `comments_resolved_preview` (candidate threads found, `'report'` mode). The preview is the uncapped count, so a 60-thread backlog previews as 60 even though a run resolves at most 50. Both are always present.
 
-Four things worth knowing before you turn this on:
+Things worth knowing before you turn this on:
 
-- **`'true'` requires `contents: write`.** The default read-only `GITHUB_TOKEN` cannot resolve a thread; the calling workflow must grant `contents: write` in its own `permissions:` block. Without it the action logs a warning naming the missing permission and continues — the review itself still posts. `'report'` never attempts a mutation, so it never learns whether the token has that permission: a clean-looking preview can still hit `FORBIDDEN` the moment you switch it to `'true'`.
+- **`'true'` requires `contents: write`, and `pull-requests: write` will not do.** GitHub gates `resolveReviewThread` on repository write access rather than on the pull-request scope, and for an Actions token that access comes from Contents. Measured on a scratch PR with three jobs differing only in their `permissions:` block: `pull-requests: write` with `contents: read` returns `FORBIDDEN`, while `contents: write` with only `pull-requests: read` resolves the thread. Without the permission the action logs a warning naming it and continues, so the review itself still posts.
+- **`'report'` cannot tell you whether `'true'` would work.** It issues no mutation, so it never learns whether the token has the permission, and a clean-looking preview can still hit `FORBIDDEN` the moment you switch over. GraphQL's `viewerCanResolve` looks like the answer and is not: in the measurement above it read `false` in all three jobs, including the two whose mutations then succeeded.
 - **A force-push can mark a live finding's thread outdated.** GitHub sets `isOutdated` when the thread's lines are no longer in the diff, and it stays set even after a force-push that lands identical content, so a rebase can outdate a thread whose finding is still real. The current-run overlap check catches this when the model re-reports the finding; if it doesn't, the thread closes while the problem remains. This is the main reason to run `'report'` first.
 - **It only does anything on re-runs.** A thread can only become outdated after a later push, so the feature is exercised only by workflows that review on update (`types: [opened, synchronize, reopened]`, as in the sample workflow above). This repository's own review workflow triggers on `opened` only and never reaches the resolution path — do not read its runs as evidence the feature works for you.
+- **The run's findings and GitHub's `isOutdated` can be computed against different commits.** Findings are posted against the head the review actually ran on (`resolved_head` in the result manifest), while GitHub recomputes `isOutdated` against the pull request's current head. A push that lands mid-run leaves a window where a thread is outdated relative to code this run never saw. Same class as the force-push case above, and the same mitigation.
 - **Resolving is not deleting.** Resolved threads collapse but stay readable, and anyone can unresolve one.
 
 ### Adjust retry and delay settings
@@ -582,7 +606,7 @@ The action does not use an `OCR_DEBUG` flag. To diagnose a run:
 
 - **Artifacts**: with `upload_artifacts: 'true'` (the default), the raw `ocr-result.json` and `ocr-stderr.log` are uploaded as workflow artifacts named `ocr-review-result-<run_id>-<run_attempt>`. Download them from the run's **Artifacts** section.
 - **Step log**: the "Run OpenCodeReview" step prints both the JSON result and stderr to the workflow log.
-- **Action outputs**: the step exposes `comments_total`, `comments_inline`, `comments_skipped`, `comments_failed`, and `summary_comment_url` outputs — inspect them in the job's step outputs.
+- **Action outputs**: the step exposes `comments_total`, `comments_inline`, `comments_skipped`, `comments_routed`, `comments_failed`, `comments_resolved`, `comments_resolved_preview`, and `summary_comment_url` outputs — inspect them in the job's step outputs.
 - **GitHub step debug**: for verbose Actions runner diagnostics, enable the repository secret `ACTIONS_STEP_DEBUG=true` (standard GitHub Actions mechanism).
 
 To stop uploading the raw artifacts, set `upload_artifacts: 'false'`.
