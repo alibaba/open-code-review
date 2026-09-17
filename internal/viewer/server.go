@@ -10,13 +10,34 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
-//go:embed templates/*.html static/style.css static/session.js static/repos.js
+//go:embed templates/*.html static/style.css static/session.js static/repos.js static/icons/*.svg
 var assets embed.FS
+
+// iconNameRE guards the icon() template helper: names are hard-coded in
+// templates, but constraining them to a simple alphabet keeps the embedded
+// file read from ever turning into a path lookup outside static/icons.
+var iconNameRE = regexp.MustCompile(`^[a-z-]+$`)
+
+// inlineIcon returns the embedded SVG for name as trusted markup, or "" when
+// the name is malformed or the asset is missing. The SVGs ship with
+// fill="currentColor", so an inline <svg> inherits the surrounding text color
+// and adapts to light/dark without any script (CSP-safe).
+func inlineIcon(name string) template.HTML {
+	if !iconNameRE.MatchString(name) {
+		return ""
+	}
+	b, err := assets.ReadFile("static/icons/" + name + ".svg")
+	if err != nil {
+		return ""
+	}
+	return template.HTML(b) //nolint:gosec // content is a repo-controlled static asset, not user input
+}
 
 // StartServer binds addr and serves until the listener fails. openMode is one
 // of OpenAuto, OpenAlways or OpenNever; callers should have run
@@ -308,6 +329,7 @@ func parseTemplate(name string) (*template.Template, error) {
 		"formatTime":     formatTime,
 		"truncate":       truncateText,
 		"formatNumber":   formatNumber,
+		"icon":           inlineIcon,
 		"add":            func(a, b int) int { return a + b },
 		"cardCount": func(tasks map[TaskType][]*TaskCard) int {
 			n := 0

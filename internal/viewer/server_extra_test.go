@@ -401,3 +401,60 @@ func TestTemplateFuncTaskTypeClass(t *testing.T) {
 		t.Errorf("template execution with all task types: %v", err)
 	}
 }
+
+func TestInlineIcon(t *testing.T) {
+	// Known icons return their embedded SVG markup.
+	for _, name := range []string{"search", "settings", "chevron-left", "chevron-right", "chevron-down"} {
+		got := string(inlineIcon(name))
+		if !strings.Contains(got, "<svg") || !strings.Contains(got, "currentColor") {
+			t.Errorf("inlineIcon(%q) = %q, want inline svg using currentColor", name, got)
+		}
+	}
+	// Malformed or out-of-range names return empty markup instead of reading
+	// arbitrary files. Uppercase, slashes, dots and traversal are all rejected
+	// by the name guard; a well-formed but unknown name misses the embed.
+	for _, name := range []string{"", "Search", "foo/bar", "../style", "a.b", "chevron_left", "missing"} {
+		if got := inlineIcon(name); got != "" {
+			t.Errorf("inlineIcon(%q) = %q, want empty", name, got)
+		}
+	}
+}
+
+func TestRenderTemplate_ReposSearchIcon(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "repos.html", map[string]any{
+		"Repos": []RepoInfo{{EncodedPath: "my-project", SessionCount: 1}},
+	})
+	body := rr.Body.String()
+	if !strings.Contains(body, `<span class="search-icon" aria-hidden="true"><svg`) {
+		t.Error("repos search box should render the inline search icon")
+	}
+}
+
+func TestRenderTemplate_ToolCallIconIsInlineSVG(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session: &ViewSession{
+			Summary: SessionSummary{SessionID: "abc", CWD: "/test"},
+			Files: []*FileGroup{{
+				FilePath: "internal/viewer/server.go",
+				Tasks: map[TaskType][]*TaskCard{
+					MainTask: {{
+						RequestNo: 1,
+						Model:     "model-a",
+						ToolCalls: []ToolCallInfo{{Name: "code_search", Ok: true}},
+					}},
+				},
+			}},
+		},
+	})
+	body := rr.Body.String()
+	if strings.Contains(body, "&#9881;") || strings.Contains(body, "⚙") {
+		t.Error("tool-call icon should no longer use the unicode gear glyph")
+	}
+	if !strings.Contains(body, `<span class="tool-icon" aria-hidden="true"><svg`) {
+		t.Error("tool-call header should render the inline settings icon")
+	}
+}

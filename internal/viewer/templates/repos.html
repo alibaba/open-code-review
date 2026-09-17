@@ -14,7 +14,10 @@
 {{if .Repos}}
 <div class="repository-search">
     <label for="repository-search-input">Search repositories</label>
-    <input id="repository-search-input" type="search" placeholder="Search repositories..." autocomplete="off">
+    <div class="search-field">
+        <input id="repository-search-input" type="search" placeholder="Search repositories..." autocomplete="off">
+        <span class="search-icon" aria-hidden="true">{{icon "search"}}</span>
+    </div>
 </div>
 <table id="repositories-table" class="table">
     <thead><tr><th>Repository</th><th>Sessions</th><th>Last Modified</th></tr></thead>
