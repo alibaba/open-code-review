@@ -198,6 +198,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 
 	matchCount := 0
 	truncated := false
+	matchedFiles := make(map[string]bool)
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -207,18 +208,20 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			continue
 		}
 		fname := parts[offset]
-		m := match{}
 		ln, parseErr := strconv.Atoi(parts[offset+1])
 		if parseErr != nil {
+			// Skip binary-file diagnostics and other non-match lines.
 			continue
 		}
-		// Count only parsed text matches, not binary-file diagnostics.
-		if matchCount == gitGrepMaxCount {
+		// Count every file with a text match, including those beyond the render
+		// budget, so the truncation note can report the true matched-file count.
+		matchedFiles[fname] = true
+		if matchCount >= gitGrepMaxCount {
+			// Keep scanning to finish counting matched files, but render no more.
 			truncated = true
-			break
+			continue
 		}
-		m.lineNum = ln
-		m.content = parts[offset+2]
+		m := match{lineNum: ln, content: parts[offset+2]}
 		if !seen[fname] {
 			seen[fname] = true
 			fileOrder = append(fileOrder, fname)
@@ -229,7 +232,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 
 	var sb strings.Builder
 	if truncated {
-		sb.WriteString(fmt.Sprintf("Note: The results have been truncated. Only showing first %d results.\n", gitGrepMaxCount))
+		sb.WriteString(fmt.Sprintf("Note: Showing the first %d matches across %d matching files. Some files are partially shown or omitted entirely. Narrow file_patterns to see the rest.\n", gitGrepMaxCount, len(matchedFiles)))
 	}
 
 	for _, path := range fileOrder {

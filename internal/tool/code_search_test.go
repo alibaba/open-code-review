@@ -174,15 +174,16 @@ func TestGitGrep_ResultLimit(t *testing.T) {
 			secondCount int
 			wantCount   int
 			truncated   bool
+			wantFiles   int
 		}{
 			{name: "below_limit", firstCount: 49, secondCount: 50, wantCount: 99},
 			{name: "exact_limit", firstCount: 50, secondCount: 50, wantCount: 100},
 			{name: "single_file_exact_limit", firstCount: 100, wantCount: 100},
-			{name: "across_files", firstCount: 60, secondCount: 60, wantCount: 100, truncated: true},
-			{name: "single_file", firstCount: 101, wantCount: 100, truncated: true},
+			{name: "across_files", firstCount: 60, secondCount: 60, wantCount: 100, truncated: true, wantFiles: 2},
+			{name: "single_file", firstCount: 101, wantCount: 100, truncated: true, wantFiles: 1},
 			{name: "binary_before_text", binaryCount: 100, firstCount: 1, wantCount: 1},
 			{name: "binary_with_exact_limit", binaryCount: 1, firstCount: 100, wantCount: 100},
-			{name: "binary_with_truncation", binaryCount: 100, firstCount: 101, wantCount: 100, truncated: true},
+			{name: "binary_with_truncation", binaryCount: 100, firstCount: 101, wantCount: 100, truncated: true, wantFiles: 1},
 			{name: "binary_only", binaryCount: 101},
 		} {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
@@ -223,8 +224,13 @@ func TestGitGrep_ResultLimit(t *testing.T) {
 				if count := strings.Count(got, "|result_limit_needle\n"); count != tc.wantCount {
 					t.Errorf("returned %d matches, want %d", count, tc.wantCount)
 				}
-				if truncated := strings.Contains(got, "results have been truncated"); truncated != tc.truncated {
+				if truncated := strings.Contains(got, "Some files are partially shown or omitted entirely"); truncated != tc.truncated {
 					t.Errorf("truncation notice = %v, want %v", truncated, tc.truncated)
+				}
+				if tc.truncated {
+					if want := fmt.Sprintf("across %d matching files", tc.wantFiles); !strings.Contains(got, want) {
+						t.Errorf("expected note to report %q, got:\n%s", want, got)
+					}
 				}
 				if tc.name == "across_files" {
 					if !strings.Contains(got, "File: a.go\nMatch lines: 60\n") || !strings.Contains(got, "File: b.go\nMatch lines: 40\n") {
