@@ -85,9 +85,9 @@
     {{with .Session.TokenUsage.FileTokenBreakdown}}
     <details class="token-breakdown">
         <summary class="token-breakdown-toggle">
-            <span class="chevron-sm"></span>
+            <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
             <span>File breakdown</span>
-            <span class="file-count-badge">{{len .}} files</span>
+            <span class="file-count-badge">{{countLabel (len .) "file" "files"}}</span>
         </summary>
         <div class="token-breakdown-body">
             <table class="token-table">
@@ -145,7 +145,7 @@
     {{range groupCommentsByFile .Session.Comments}}
     <details class="comment-file-group" open>
         <summary class="comment-file-header">
-            <span class="chevron"></span>
+            <span class="chevron" aria-hidden="true">{{icon "chevron-right"}}</span>
             <span class="file-path">{{.FilePath}}</span>
             <span class="file-count-badge" data-comment-count>{{len .Comments}} comments</span>
         </summary>
@@ -196,9 +196,9 @@
 {{if .Session.Summary.FilesReviewed}}
 <details class="file-accordion section-accordion">
     <summary class="file-accordion-header">
-        <span class="chevron"></span>
+        <span class="chevron" aria-hidden="true">{{icon "chevron-right"}}</span>
         <span class="section-title">Files Reviewed</span>
-        <span class="file-count-badge">{{len .Session.Summary.FilesReviewed}} files</span>
+        <span class="file-count-badge">{{countLabel (len .Session.Summary.FilesReviewed) "file" "files"}}</span>
     </summary>
     <div class="file-accordion-body">
         <ul class="file-list">
@@ -213,9 +213,9 @@
 {{if .Session.SessionTasks}}
 <details class="file-accordion section-accordion" open>
     <summary class="file-accordion-header">
-        <span class="chevron"></span>
+        <span class="chevron" aria-hidden="true">{{icon "chevron-right"}}</span>
         <span class="section-title">Session Tasks</span>
-        <span class="file-count-badge">{{len .Session.SessionTasks}} tasks</span>
+        <span class="file-count-badge">{{countLabel (len .Session.SessionTasks) "task" "tasks"}}</span>
     </summary>
     <div class="file-accordion-body">
         <div class="conversations">
@@ -230,9 +230,9 @@
 {{if .Session.Files}}
 <details class="file-accordion section-accordion">
     <summary class="file-accordion-header">
-        <span class="chevron"></span>
+        <span class="chevron" aria-hidden="true">{{icon "chevron-right"}}</span>
         <span class="section-title">Conversations</span>
-        <span class="file-count-badge">{{len .Session.Files}} files</span>
+        <span class="file-count-badge">{{countLabel (len .Session.Files) "file" "files"}}</span>
     </summary>
     <div class="file-accordion-body">
         <div class="conversations">
@@ -254,9 +254,9 @@
 {{define "task-cards"}}
 <details class="file-accordion">
     <summary class="file-accordion-header">
-        <span class="chevron"></span>
+        <span class="chevron" aria-hidden="true">{{icon "chevron-right"}}</span>
         <span class="file-path">{{sessionTaskLabel .FilePath}}</span>
-        <span class="file-count-badge">{{cardCount .Tasks}} requests</span>
+        <span class="file-count-badge">{{countLabel (cardCount .Tasks) "request" "requests"}}</span>
     </summary>
     <div class="file-accordion-body">
         {{range $tg := orderedTasks .Tasks}}
@@ -278,7 +278,7 @@
                 {{if .Error}}
                 <details class="error-detail">
                     <summary class="error-detail-toggle">
-                        <span class="chevron-sm"></span>
+                        <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
                         <span>Error Detail</span>
                     </summary>
                     <div class="error-detail-body">
@@ -289,7 +289,7 @@
                 {{with .ReasoningContent}}
                 <details class="tool-detail">
                     <summary class="tool-detail-toggle">
-                        <span class="chevron-sm"></span>
+                        <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
                         <span>Reasoning</span>
                     </summary>
                     <div class="tool-detail-body">
@@ -314,7 +314,7 @@
                     {{with $card.ResponseContent}}
                     <details class="tool-detail">
                         <summary class="tool-detail-toggle">
-                            <span class="chevron-sm"></span>
+                            <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
                             <span>Raw LLM response</span>
                         </summary>
                         <div class="tool-detail-body">
@@ -330,7 +330,7 @@
                 {{end}}
                 {{if .ToolCalls}}
                 <div class="tool-calls-section">
-                    <div class="tool-calls-label">Tool Calls ({{len .ToolCalls}})</div>
+                    <div class="tool-calls-label"><span class="tool-calls-icon" aria-hidden="true">{{icon "settings"}}</span>Tool Calls ({{len .ToolCalls}})</div>
                     {{range .ToolCalls}}
                     <div class="tool-call-item {{if not .Ok}}tool-call-error{{end}}">
                         <div class="tool-call-header">
@@ -341,7 +341,7 @@
                         </div>
                         <details class="tool-detail">
                             <summary class="tool-detail-toggle">
-                                <span class="chevron-sm"></span>
+                                <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
                                 <span>Show Details</span>
                             </summary>
                             <div class="tool-detail-body">

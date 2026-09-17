@@ -310,6 +310,51 @@ func TestRenderTemplate_HidesEmptyConversationsSection(t *testing.T) {
 	}
 }
 
+func TestRenderTemplate_RendersConversationToolCallDetails(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session: &ViewSession{
+			Summary: SessionSummary{SessionID: "abc", CWD: "/test"},
+			Files: []*FileGroup{{
+				FilePath: "internal/viewer/server.go",
+				Tasks: map[TaskType][]*TaskCard{
+					MainTask: {{
+						RequestNo:        1,
+						Model:            "model-a",
+						PromptTokens:     10,
+						CompletionTokens: 20,
+						DurationMs:       30,
+						ToolCalls: []ToolCallInfo{{
+							Name:      "code_search",
+							Arguments: `{"query":"viewer"}`,
+							Result:    "matched server.go",
+							Ok:        true,
+						}},
+					}},
+				},
+			}},
+		},
+	})
+
+	body := rr.Body.String()
+	if strings.Contains(body, "1 files") || strings.Contains(body, "1 requests") {
+		t.Error("single-item counts should use singular labels")
+	}
+	if strings.Contains(body, "&#9881;") {
+		t.Error("tool call controls should use the shared SVG icon, not a Unicode glyph")
+	}
+	for _, want := range []string{
+		"Conversations", "1 file", "1 request", "internal/viewer/server.go", "Request #1", "model-a",
+		"Tool Calls (1)", "code_search", "Arguments", "matched server.go", "<svg",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered session page missing %q", want)
+		}
+	}
+}
+
 func TestRenderTemplate_ExecutionError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	// Pass wrong data type to trigger template execution error
