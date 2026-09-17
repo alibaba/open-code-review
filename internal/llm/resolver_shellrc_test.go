@@ -60,4 +60,21 @@ func TestTryShellRC(t *testing.T) {
 	if ep.Model != "override-model" {
 		t.Errorf("model override not applied: %q", ep.Model)
 	}
+
+	// An rc file with ANTHROPIC_API_KEY yields x-api-key auth header and default baseURL.
+	rcAPIKey := "export ANTHROPIC_API_KEY='sk-test-key'\n" +
+		"export ANTHROPIC_MODEL=claude-y\n"
+	if err := os.WriteFile(filepath.Join(home, ".bashrc"), []byte(rcAPIKey), 0o644); err != nil {
+		t.Fatalf("write .bashrc: %v", err)
+	}
+	// remove .zshrc so .bashrc is tested
+	_ = os.Remove(filepath.Join(home, ".zshrc"))
+
+	ep, ok, err = tryShellRC("")
+	if err != nil || !ok {
+		t.Fatalf("tryShellRC(apiKey) = ok:%v err:%v", ok, err)
+	}
+	if ep.Token != "sk-test-key" || ep.AuthHeader != "x-api-key" || ep.URL != "https://api.anthropic.com/v1/messages" {
+		t.Errorf("resolved endpoint with API key = %+v, want token sk-test-key, authHeader x-api-key, url https://api.anthropic.com/v1/messages", ep)
+	}
 }
