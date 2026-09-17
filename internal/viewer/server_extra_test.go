@@ -502,8 +502,11 @@ func TestRenderTemplate_ToolCallIconIsInlineSVG(t *testing.T) {
 	if strings.Contains(body, "&#9881;") || strings.Contains(body, "⚙") {
 		t.Error("tool-call icon should no longer use the unicode gear glyph")
 	}
-	if !strings.Contains(body, `<span class="tool-icon" aria-hidden="true"><svg`) {
-		t.Error("tool-call header should render the inline settings icon")
+	if !strings.Contains(body, `<span class="tool-calls-icon" aria-hidden="true"><svg`) {
+		t.Error("tool-calls label should render the inline settings icon")
+	}
+	if strings.Contains(body, `class="tool-icon"`) {
+		t.Error("individual tool-call rows should not render a duplicate settings icon")
 	}
 }
 
