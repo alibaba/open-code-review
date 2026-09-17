@@ -237,7 +237,7 @@ hunk 머리글 `@@ -x,y +m,n @@`에서 범위를 계산해야 합니다. 보통 
 후보 목록은 워크스페이스 모드에서는 `git ls-files --cached --others
 --exclude-standard`, range·commit 모드에서는 `git ls-tree -r --name-only <ref>`에서
 옵니다. 확장자가 없는 파일은 건너뛰되 `Makefile`, `Dockerfile`, `LICENSE`,
-`Vagrantfile`, `Containerfile`은 예외입니다.
+`Vagrantfile`, `Containerfile`, `BUILD`, `WORKSPACE`는 예외입니다.
 
 ### 출력 {#output}
 
