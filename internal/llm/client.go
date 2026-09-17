@@ -252,6 +252,13 @@ type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
+	// ExtraContent carries unmodeled provider metadata attached to the tool
+	// call, such as Gemini 3's thought signature, which OpenAI-compatible
+	// gateways return as tool_calls[].extra_content. Providers that require
+	// it echoed back reject the next request with HTTP 400 when it is
+	// dropped (#1357), so it is preserved verbatim and replayed by the
+	// OpenAI Chat Completions request builder.
+	ExtraContent json.RawMessage `json:"extra_content,omitempty"`
 }
 
 // FunctionCall holds the name and arguments of a tool call.
@@ -722,6 +729,10 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 
 	accumulator := openai.ChatCompletionAccumulator{}
 	reasoningByChoice := make(map[int64]*strings.Builder)
+	// The streaming accumulator ignores unmodeled tool-call fields, so
+	// provider metadata like Gemini 3 thought signatures (#1357) is captured
+	// from the delta fragments here and re-attached after mapping.
+	extraContentByChoice := make(map[int64]map[int64]json.RawMessage)
 	seenChoices := make(map[int64]bool)
 	finishedChoices := make(map[int64]bool)
 	var choiceOrder []int64
@@ -740,6 +751,17 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 			}
 			if choice.FinishReason != "" {
 				finishedChoices[choice.Index] = true
+			}
+
+			for _, deltaTool := range choice.Delta.ToolCalls {
+				ec, ok := deltaTool.JSON.ExtraFields["extra_content"]
+				if !ok {
+					continue
+				}
+				if extraContentByChoice[choice.Index] == nil {
+					extraContentByChoice[choice.Index] = make(map[int64]json.RawMessage)
+				}
+				extraContentByChoice[choice.Index][deltaTool.Index] = json.RawMessage(ec.Raw())
 			}
 
 			extra, ok := choice.Delta.JSON.ExtraFields["reasoning_content"]
@@ -779,11 +801,17 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 		resp.Usage = usage
 	}
 	for i := range resp.Choices {
-		builder := reasoningByChoice[accumulator.Choices[i].Index]
+		index := accumulator.Choices[i].Index
+		builder := reasoningByChoice[index]
 		if builder != nil && builder.Len() > 0 {
 			reasoningContent := builder.String()
 			resp.Choices[i].Message.ReasoningContent = reasoningContent
 			resp.Choices[i].Message.Native = NativeTurn{Family: "openai-chat-completions", Payload: ReasoningPayload(reasoningContent)}
+		}
+		for j := range resp.Choices[i].Message.ToolCalls {
+			if ec, ok := extraContentByChoice[index][int64(j)]; ok {
+				resp.Choices[i].Message.ToolCalls[j].ExtraContent = ec
+			}
 		}
 	}
 
@@ -810,14 +838,21 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 				asst.Content.OfString = openai.String(content)
 			}
 			for _, tc := range msg.ToolCalls {
-				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
-					OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-						ID: tc.ID,
-						Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-							Name:      tc.Function.Name,
-							Arguments: tc.Function.Arguments,
-						},
+				fnCall := openai.ChatCompletionMessageFunctionToolCallParam{
+					ID: tc.ID,
+					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
 					},
+				}
+				// Provider metadata captured from the original tool call
+				// (e.g. Gemini 3 thought signatures, #1357) must be echoed
+				// back unchanged or the provider rejects the request.
+				if len(tc.ExtraContent) > 0 {
+					fnCall.SetExtraFields(map[string]any{"extra_content": tc.ExtraContent})
+				}
+				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
+					OfFunction: &fnCall,
 				})
 			}
 			// reasoning_content: gateway extension not modeled by the SDK (#805).
@@ -889,6 +924,7 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 					Name:      tc.Function.Name,
 					Arguments: tc.Function.Arguments,
 				},
+				ExtraContent: toolCallExtraContent(tc.RawJSON()),
 			})
 		}
 
@@ -929,6 +965,27 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 		Choices: choices,
 		Usage:   usage,
 	}
+}
+
+// toolCallExtraContent extracts the unmodeled extra_content field from a tool
+// call's raw response JSON, so provider metadata like Gemini 3 thought
+// signatures survives into conversation history (#1357). The SDK models only
+// id/type/function, and the streaming accumulator ignores raw JSON entirely,
+// so without this the field would be dropped and providers that require it
+// echoed back reject the next request with HTTP 400.
+func toolCallExtraContent(raw string) json.RawMessage {
+	if raw == "" {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return nil
+	}
+	ec, ok := fields["extra_content"]
+	if !ok || string(ec) == "null" {
+		return nil
+	}
+	return ec
 }
 
 // --- AnthropicClient ---
