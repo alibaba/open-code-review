@@ -216,7 +216,7 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 
 ### 프롬프트 상한 {#prompt-limit}
 
-`max_tokens`는 리뷰 단위 하나에 대한 **프롬프트**(입력) 상한입니다. 그 단위는 `ocr review`에서는 파일 그룹, `ocr scan`에서는 파일 하나입니다. 내장 템플릿의 기본값은 `ocr review` 200,000토큰, `ocr scan` 58,888토큰입니다. 컨텍스트 윈도가 다른 모델에서는 `max_tokens`를 저장해 바꿉니다:
+`max_tokens`는 서브태스크 하나(파일 하나 또는 관련된 파일 묶음)에 대한 **프롬프트**(입력) 상한입니다. 내장 템플릿의 기본값은 `ocr review` 200,000토큰, `ocr scan` 58,888토큰입니다. 컨텍스트 윈도가 다른 모델에서는 `max_tokens`를 저장해 바꿉니다:
 
 ```bash
 ocr config set max_tokens 400000
@@ -233,7 +233,7 @@ ocr scan --max-tokens 400000
 
 ### 리뷰 강도 (effort) {#review-effort}
 
-`effort`는 파일 그룹마다 리뷰를 몇 라운드 돌릴지 정합니다. `low` = 1라운드, `medium`(기본값) = 2라운드, `high` = 3라운드입니다. 라운드가 늘어나면 더 많은 문제를 찾지만 비용도 그만큼 늘어납니다.
+`effort`는 서브태스크마다 리뷰를 몇 라운드 돌릴지 정합니다. `low` = 1라운드, `medium`(기본값) = 2라운드, `high` = 3라운드입니다. 라운드가 늘어나면 더 많은 문제를 찾지만 비용도 그만큼 늘어납니다.
 
 ```bash
 ocr config set effort high

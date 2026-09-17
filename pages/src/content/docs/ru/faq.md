@@ -98,15 +98,17 @@ curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/js
 
 ### Мой файл не проверяется
 
-Запустите `ocr review --preview` (без затрат на LLM). В выводе перечислены все
-файлы-кандидаты с **причиной**, по которой каждый из них был оставлен или
-исключён:
+Запустите `ocr review --preview` (без затрат на LLM). В выводе для каждого
+файла-кандидата указана **причина**, по которой он был оставлен или
+исключён. Файлы в каталогах provider, например `vendor/` и `node_modules/`,
+в терминале сворачиваются в одну строку; `ocr review --preview --format json`
+по-прежнему перечисляет каждую запись:
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
 Причины исключения соответствуют этапам
@@ -118,6 +120,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | Удалите шаблон из списка `exclude`. |
 | `unsupported_ext` | Добавьте расширение в список `include`, чтобы обойти проверку списка разрешённых типов. |
 | `default_path` | Добавьте файл в `include`: это переопределяет встроенные шаблоны исключения тестовых файлов. |
+| `provider_directory` | Ничего делать не нужно: каталоги provider, например `vendor/` и `node_modules/`, никогда не проверяются, даже если соответствуют `include`. |
 | `deleted` | Ничего делать не нужно: нового содержимого для ревью нет. |
 | `too_large` | Один только diff превышает 80% от `max_tokens`. Увеличьте `--max-tokens` (или сохранённое значение `max_tokens`) либо разбейте изменение на более мелкие коммиты. |
 
@@ -314,8 +317,8 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-Вызовы LLM не получают отдельных спанов: вместо этого они записываются как
-метрики. Следите за `ocr.llm.tokens_used` (счётчик с метками `model` + `type`),
+В основном цикле ревью вызовы LLM создают спаны `llm.request` и также записываются
+как метрики. Следите за `ocr.llm.tokens_used` (счётчик с метками `model` + `type`),
 `ocr.llm.requests_total` (счётчик с метками `model` + `status`) и
 `ocr.llm.request_duration_seconds` (гистограмма с меткой `model`). Консольный
 экспортёр выводит эти агрегаты в процессе работы. Для панелей мониторинга

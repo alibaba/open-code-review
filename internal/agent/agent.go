@@ -247,7 +247,8 @@ func New(args Args) *Agent {
 		AllDiffs:          a.allDiffs,
 		// Non-nil only here: the same Runner serves scan, whose requests must
 		// stay out of the retry report. See newRequestMeta.
-		NewRequestMeta: a.newRequestMeta,
+		NewRequestMeta:  a.newRequestMeta,
+		MaxTokensBudget: args.MaxTokensBudget,
 	})
 	return a
 }
@@ -544,10 +545,8 @@ func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
 }
 
-// loadDiffs populates the diff-related fields.
-func (a *Agent) loadDiffs(ctx context.Context) error {
-	var provider *diff.Provider
-
+// newDiffProvider resolves the configured input to a diff provider.
+func (a *Agent) newDiffProvider() *diff.Provider {
 	// A sealed input substitutes the commit SHAs a pre-flight resolve already froze
 	// for the refs the user typed. Both loads then read the same immutable objects,
 	// which is what makes this run's input provably the admitted one: a ref moving
@@ -569,12 +568,17 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 
 	switch {
 	case commit != "":
-		provider = diff.NewCommitProvider(a.args.RepoDir, commit, a.args.GitRunner)
+		return diff.NewCommitProvider(a.args.RepoDir, commit, a.args.GitRunner)
 	case from != "" && to != "":
-		provider = diff.NewProvider(a.args.RepoDir, from, to, a.args.GitRunner)
+		return diff.NewProvider(a.args.RepoDir, from, to, a.args.GitRunner)
 	default:
-		provider = diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
+		return diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
 	}
+}
+
+// loadDiffs populates the diff-related fields used by normal review runs.
+func (a *Agent) loadDiffs(ctx context.Context) error {
+	provider := a.newDiffProvider()
 
 	parsed, err := provider.GetDiff(ctx)
 	if err != nil {
@@ -590,8 +594,8 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 	a.inputResolution = provider.ResolveInput(ctx)
 	a.repoRemoteIdentity = provider.RemoteIdentity(ctx)
 
-	for i := range parsed {
-		d := &parsed[i]
+	for i := range a.diffs {
+		d := &a.diffs[i]
 		a.totalInsertions += d.Insertions
 		a.totalDeletions += d.Deletions
 	}
@@ -1200,19 +1204,20 @@ func classifyItemError(err error) (session.FailureClass, string) {
 }
 
 // classifyMainLoopStop maps a non-error, non-completed main-loop stop to an item
-// failure class and a safe reason. Only the configured max-tool-request budget is
-// a declared budget stop, so only it may use the budget classification; every
-// other stop keeps the unknown class, because the FailureClass taxonomy has no
-// category that fits an empty-round or compression exit. Stating that as "not
-// max-rounds" rather than case-by-case is deliberate: a stop added to the enum
-// later must default to the honest catch-all class, never inherit "budget".
+// failure class and a safe reason. Only the configured limits — the
+// max-tool-request rounds and the aggregate token budget — are declared budget
+// stops, so only they may use the budget classification; every other stop keeps
+// the unknown class, because the FailureClass taxonomy has no category that fits
+// an empty-round or compression exit. Stating that as "not a declared limit"
+// rather than case-by-case is deliberate: a stop added to the enum later must
+// default to the honest catch-all class, never inherit "budget".
 //
 // The reason text comes from stop.Reason(), shared with the scan path so the
 // same stop cannot read differently in the two commands' output. In --format
 // json runs the progress lines that would say why an item stopped are discarded,
 // so that string is the only stop diagnostic that leaves a CI runner.
 func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, string) {
-	if stop == llmloop.StopMaxRounds {
+	if stop == llmloop.StopMaxRounds || stop == llmloop.StopTokenBudget {
 		return session.FailureBudget, stop.Reason()
 	}
 	return session.FailureUnknown, stop.Reason()
@@ -1443,8 +1448,14 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 			return false, nil, ctx.Err()
 		}
 
-		if round > 1 && a.args.MaxTokensBudget > 0 && a.budgetExceeded.Load() {
+		if round > 1 && a.args.MaxTokensBudget > 0 && (a.budgetExceeded.Load() || a.runner.TotalTokensUsed() > a.args.MaxTokensBudget) {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Aggregate budget exceeded, skipping round %d for group %q\n", round, groupKey)
+			// A group can finish a round over budget with no other gate noticing,
+			// so record it here too or the run would report the budget as intact.
+			if a.budgetExceeded.CompareAndSwap(false, true) {
+				a.recordWarning("token_budget_reached", g.Diffs[0].NewPath,
+					fmt.Sprintf("skipped round %d of group %q: used %d tokens exceeds budget %d", round, groupKey, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
+			}
 			break
 		}
 
@@ -1505,6 +1516,15 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		confirmed = append(confirmed, newlyConfirmed...)
 
 		if !mainCompleted {
+			if mainStop == llmloop.StopTokenBudget {
+				// The runner stopped this conversation on the aggregate budget. Surface
+				// it the same way the dispatch gate does, so BudgetExceeded() and the
+				// warning list agree with the item's failed(budget) classification.
+				if a.budgetExceeded.CompareAndSwap(false, true) {
+					a.recordWarning("token_budget_reached", g.Diffs[0].NewPath,
+						fmt.Sprintf("stopped group %q mid-review: used %d tokens exceeds budget %d", groupKey, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
+				}
+			}
 			class, reason := classifyMainLoopStop(mainStop)
 			lastStop = &subtaskStop{
 				class:         class,
@@ -1986,6 +2006,8 @@ func (a *Agent) logExclusions(decisions []fileDecision) {
 		switch dec.Reason {
 		case ExcludeBinary:
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", effectivePath(dec.Diff))
+		case ExcludeSecret:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — matches a built-in secret path\n", effectivePath(dec.Diff))
 		case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath:
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", effectivePath(dec.Diff))
 		default:

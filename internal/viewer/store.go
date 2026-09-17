@@ -16,7 +16,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -328,6 +330,143 @@ type ToolCallInfo struct {
 	Result     string
 	Ok         bool
 	DurationMs int64
+}
+
+// GroupingFileRef is one file inside a grouping group, resolved from the integer
+// index the model returned back to its path. Resolved is false when the index
+// named no file in the request's list — rendered as "#<idx>" so an auditor sees
+// the anomaly rather than a silently dropped entry.
+type GroupingFileRef struct {
+	Index    int
+	Path     string
+	Resolved bool
+}
+
+// GroupingGroupView is one semantic group as shown in the viewer: the model's
+// label plus its files resolved back to paths. It represents the grouping LLM
+// call's *proposed* partition — the record this card holds. The final partition
+// the reviewer actually used can differ, because enforceMaxFilesPerGroup and
+// enforceGroupTokenBudget may re-split it afterwards; that is not part of this
+// record (it surfaces only in the CLI `--format json` "groups" field).
+type GroupingGroupView struct {
+	Label string
+	Files []GroupingFileRef
+}
+
+// groupingFileListRe matches one line of the numbered file list buildFileList
+// emits into the grouping request, e.g. "[0] MODIFIED   internal/x.go (+12/-3)".
+// It couples the viewer to buildFileList's "[%d] " prefix + formatDiffEntry's
+// "STATUS   path (+N/-M)" shape (internal/agent/grouping.go, agent/agent.go);
+// TestBuildGroupingIndex guards that coupling. The trailing "(+N/-M)" anchors
+// the path capture so a path with spaces still resolves.
+var groupingFileListRe = regexp.MustCompile(`(?m)^\[(\d+)\]\s+\S+\s+(.+?)\s+\(\+\d+/-\d+\)\s*$`)
+
+// buildGroupingIndex scans the grouping request messages for the numbered file
+// list and returns an index→path map. reqMessages is the raw JSONL value
+// (a []any of map[string]any with a string "content"). Returns nil if nothing
+// parses, which makes groupingView fall back to the raw response text.
+func buildGroupingIndex(reqMessages any) map[int]string {
+	msgs, ok := reqMessages.([]any)
+	if !ok {
+		return nil
+	}
+	index := make(map[int]string)
+	for _, m := range msgs {
+		mm, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		// Only the user message carries the actual file list. Scanning the system
+		// prompt too would let its worked example (grouping_task_system.md's
+		// "[0] MODIFIED path ...") — which users can reword onto its own line —
+		// seed a bogus index→path entry that silently mislabels an out-of-range
+		// index instead of showing it as "#idx".
+		if role, _ := mm["role"].(string); role != "user" {
+			continue
+		}
+		content, ok := mm["content"].(string)
+		if !ok {
+			continue
+		}
+		for _, match := range groupingFileListRe.FindAllStringSubmatch(content, -1) {
+			idx, err := strconv.Atoi(match[1])
+			if err != nil {
+				continue
+			}
+			index[idx] = match[2]
+		}
+	}
+	if len(index) == 0 {
+		return nil
+	}
+	return index
+}
+
+// groupingResponseView mirrors one element of the grouping LLM response (label
+// plus integer file indices) as the viewer consumes it.
+type groupingResponseView struct {
+	Label string `json:"label"`
+	Files []int  `json:"files"`
+}
+
+// parseGroupingGroups parses the grouping LLM response into label + integer
+// indices. It mirrors parseGroupingResponse's one-shot Unmarshal and
+// markdown-fence stripping. ok is false when the content is not the index-shaped
+// JSON — a parse failure, or (notably) a session recorded before the index
+// switch whose "files" held path strings; the caller then keeps showing the raw
+// response, which for those older sessions is already the readable path form.
+func parseGroupingGroups(content string) (groups []groupingResponseView, ok bool) {
+	content = strings.TrimSpace(content)
+	if strings.HasPrefix(content, "```") {
+		lines := strings.Split(content, "\n")
+		if len(lines) >= 2 {
+			lines = lines[1:]
+		}
+		if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
+			lines = lines[:len(lines)-1]
+		}
+		content = strings.Join(lines, "\n")
+	}
+	if err := json.Unmarshal([]byte(content), &groups); err != nil {
+		return nil, false
+	}
+	return groups, true
+}
+
+// groupingView resolves a grouping task card into a path-labelled view of the
+// model's proposed groups, or nil when either side is missing/unparseable (the
+// template then falls back to the raw response text).
+func groupingView(card *TaskCard) []GroupingGroupView {
+	if card == nil {
+		return nil
+	}
+	groups, ok := parseGroupingGroups(card.ResponseContent)
+	if !ok {
+		return nil
+	}
+	index := buildGroupingIndex(card.RequestMessages)
+	if index == nil {
+		return nil
+	}
+	views := make([]GroupingGroupView, 0, len(groups))
+	anyResolved := false
+	for _, g := range groups {
+		gv := GroupingGroupView{Label: g.Label, Files: make([]GroupingFileRef, 0, len(g.Files))}
+		for _, idx := range g.Files {
+			path, resolved := index[idx]
+			anyResolved = anyResolved || resolved
+			gv.Files = append(gv.Files, GroupingFileRef{Index: idx, Path: path, Resolved: resolved})
+		}
+		views = append(views, gv)
+	}
+	// The request list matched the regex (index != nil) yet not one referenced
+	// index resolved: the list format has drifted from what the response indexes
+	// into. Rendering every file as "#idx" would be more misleading than the raw
+	// response, so fall back to it.
+	if !anyResolved {
+		return nil
+	}
+	return views
 }
 
 // safeSegment validates that s is safe to use as a single path component and

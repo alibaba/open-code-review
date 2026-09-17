@@ -311,6 +311,44 @@ func TestParseTemplate_ExistingCodeLineNumbers(t *testing.T) {
 			wantHasNot: []string{`class="line-no"`},
 		},
 		{
+			name: "suggestion block aligned when existing code is numbered",
+			comment: &ReviewComment{
+				FilePath:       "a.go",
+				Content:        "c",
+				ExistingCode:   "a\nb",
+				SuggestionCode: "x\ny",
+				StartLine:      10,
+				EndLine:        11,
+			},
+			wantHas: []string{
+				`<div class="code-panel-label">Existing Code</div>`,
+				`<pre class="code-numbered">`,
+				`<div class="code-panel-label">Suggested Change</div>`,
+				"<pre class=\"code-gutter-offset\"><code>x\ny</code></pre>",
+			},
+			wantHasNot: []string{
+				"<pre><code>x\ny</code></pre>",
+			},
+		},
+		{
+			name: "suggestion block not offset when existing code is unnumbered",
+			comment: &ReviewComment{
+				FilePath:       "a.go",
+				Content:        "c",
+				ExistingCode:   "a\nb",
+				SuggestionCode: "x\ny",
+				StartLine:      10,
+				EndLine:        14,
+			},
+			wantHas: []string{
+				`<div class="code-panel-label">Suggested Change</div>`,
+				"<pre><code>x\ny</code></pre>",
+			},
+			wantHasNot: []string{
+				`code-gutter-offset`,
+			},
+		},
+		{
 			name:       "html in numbered code is escaped",
 			comment:    &ReviewComment{FilePath: "a.go", Content: "c", ExistingCode: "<script>alert(1)</script>", StartLine: 3, EndLine: 3},
 			wantHas:    []string{`<span class="line-text">&lt;script&gt;alert(1)&lt;/script&gt;</span>`},

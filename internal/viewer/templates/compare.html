@@ -8,10 +8,13 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a><span class="sep">/</span><a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a><span class="sep">/</span><span class="current">compare</span></nav>
-<main>
+{{template "app-header" .}}
+<main class="compare-page">
 <div class="session-header">
-    <h2>Compare sessions</h2>
+    <div class="page-heading">
+        <a class="back-link" href="/r/{{.EncodedRepo}}" aria-label="Back to sessions"></a>
+        <h2>Compare sessions</h2>
+    </div>
     <div class="meta">
         <span><strong>Before:</strong> <a href="/r/{{.EncodedRepo}}/{{.Before.SessionID}}"><code>{{truncate 12 .Before.SessionID}}</code></a></span>
         <span><strong>After:</strong> <a href="/r/{{.EncodedRepo}}/{{.After.SessionID}}"><code>{{truncate 12 .After.SessionID}}</code></a></span>
@@ -23,9 +26,12 @@
 </div>
 
 {{/* The range variable below is a model.LlmComment: .Path, not the viewer's .FilePath. */}}
+{{/* Bucket titles are fixed strings from handleCompare; the tone class is chosen
+   from them here so the Go side stays untouched. The "{{.Title}} (N)" text is
+   asserted verbatim by compare_test.go — keep it contiguous. */}}
 {{range .Buckets}}
-<section class="comment-file-group">
-    <h3 class="section-title">{{.Title}} ({{len .Findings}})</h3>
+<section class="compare-bucket {{if eq .Title "New"}}bucket-new{{else if eq .Title "Persisting"}}bucket-persisting{{else if eq .Title "Resolved"}}bucket-resolved{{else if eq .Title "Not reviewed"}}bucket-not-reviewed{{else}}bucket-unknown{{end}}">
+    <h3 class="compare-bucket-title"><span class="bucket-dot" aria-hidden="true"></span>{{.Title}} ({{len .Findings}})</h3>
     {{range .Findings}}
     <div class="comment-card">
         <div class="comment-meta">
@@ -59,3 +65,5 @@
 </main>
 </body>
 </html>
+
+{{define "breadcrumbs"}}<span class="sep">/</span><a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a><span class="sep">/</span><span class="current">compare</span>{{end}}

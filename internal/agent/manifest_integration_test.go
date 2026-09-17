@@ -473,7 +473,7 @@ type groupedBudgetPartialClient struct {
 
 func (c *groupedBudgetPartialClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	if len(req.Tools) == 0 {
-		content := `[{"label":"pair","files":["a.go","b.go"]}]`
+		content := `[{"label":"pair","files":[0,1]}]`
 		return &llm.ChatResponse{
 			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
 			Model:   "fake",

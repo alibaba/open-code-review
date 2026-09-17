@@ -209,6 +209,14 @@ func TestHandleCompare(t *testing.T) {
 				"newly broken", "still broken", "was broken", "none"},
 		},
 		{
+			name:   "back link returns to sessions",
+			query:  "before=s1&after=s2",
+			status: http.StatusOK,
+			contains: []string{
+				`<a class="back-link" href="/r/myrepo" aria-label="Back to sessions">`,
+			},
+		},
+		{
 			// The CLI renders a suggested patch as a diff (renderComment ->
 			// buildDiffLines); dropping it here would leave the page showing
 			// prose only, which is not the parity #1104 asked for.

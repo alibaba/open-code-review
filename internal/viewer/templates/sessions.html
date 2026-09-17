@@ -8,9 +8,12 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a><span class="sep">/</span><span class="current">{{.RepoName}}</span></nav>
+{{template "app-header" .}}
 <main>
-<h2>Sessions: {{.RepoName}}</h2>
+<div class="page-heading">
+    <a class="back-link" href="/" aria-label="Back to repositories"></a>
+    <h2>Sessions: {{.RepoName}}</h2>
+</div>
 {{if .Sessions}}
 <table class="table">
     <thead><tr><th>Session ID</th><th>Branch</th><th>Mode</th><th>Model</th><th>Files</th><th>Status</th><th>Comments</th><th>Duration</th><th>Started At</th><th>Compare</th></tr></thead>
@@ -39,3 +42,5 @@
 </main>
 </body>
 </html>
+
+{{define "breadcrumbs"}}<span class="sep">/</span><span class="current">{{.RepoName}}</span>{{end}}

@@ -103,6 +103,50 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 ```
 
+### Review from a trigger that carries no pull request
+
+The action needs a PR number to fetch the head and to post to. It resolves one in this order:
+
+| Source | When it applies |
+|--------|-----------------|
+| `pr_number` input | Whenever you set it. Overrides everything below. |
+| `github.event.pull_request.number`, then `github.event.issue.number` | `pull_request`, `pull_request_target`, `issue_comment`. |
+| `github.event.workflow_run.pull_requests[0].number` | `workflow_run`, when GitHub populated the array. |
+
+When none of them resolves, the action stops before installing OCR or spending any LLM quota, instead of reviewing and then failing to post.
+
+`workflow_run` is the trigger for "review the head CI already passed", and its payload names the PR only through that array — which GitHub fills in only for head branches that live in this repository, and which can list more than one PR when several share a head. Pass `pr_number` explicitly whenever you need a specific one:
+
+```yaml
+on:
+  workflow_run:
+    workflows: [Tests]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: alibaba/open-code-review@main
+        with:
+          llm_url: ${{ secrets.OCR_LLM_URL }}
+          llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          llm_model: ${{ vars.OCR_LLM_MODEL }}
+          llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+          pr_number: ${{ github.event.workflow_run.pull_requests[0].number }}
+          base_ref: ${{ github.event.workflow_run.pull_requests[0].base.ref }}
+          head_sha: ${{ github.event.workflow_run.head_sha }}
+```
+
+`pr_number` is the third member of the `base_ref` / `head_sha` set: each one lets the caller supply what its event cannot.
+
+> `workflow_run` runs the default branch's copy of the workflow with a write-scoped token, so gate the job on the upstream conclusion and leave the checkout to the action: it checks out the trusted base and fetches only the head's blobs, exactly as it does under `pull_request_target`.
+
 ### Customize comment trigger keywords
 
 By default the workflow also re-reviews on demand when a PR comment starts with `/open-code-review` or `@open-code-review`. The `if` condition is more defensive than a bare keyword check — it gates comment triggers so only authorized humans can spend LLM quota:
@@ -170,7 +214,7 @@ The task and request timeouts are independent:
 | Input | Default | Description |
 |-------|---------|-------------|
 | `effort` | `''` | Review effort preset passed to `ocr review --effort`: `low`, `medium`, or `high` (case-insensitive). Higher effort runs more review rounds. Empty keeps the CLI default (the configured value, or medium). |
-| `max_tokens_budget` | `''` | Total token cap (input+output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Once the cap is exceeded, dispatch stops, skipped files are reported as failed(budget), partial results are still published, and the review exits 0. |
+| `max_tokens_budget` | `''` | Total token cap (input+output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Checked before every LLM round: a group already over the cap gets one final round to submit findings, no further groups are dispatched, over-budget and skipped files are reported as failed(budget), partial results are still published, and the review exits 0. |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -225,7 +269,8 @@ The action posts a summary issue comment plus inline review comments. Two inputs
 |-------|---------|-------------|
 | `sticky_summary` | `'true'` | Update an existing summary comment in place instead of posting a new one each run. |
 | `incremental` | `'false'` | Only append inline comments whose `(path, line range)` does not overlap an existing bot review comment. History is never deleted (non-destructive). |
-| `incremental_overlap_threshold` | `'0.6'` | IoU threshold `incremental` uses to decide whether a multi-line comment overlaps an existing one. Two single-line comments match on the same line; single- vs multi-line never match. Ignored unless `incremental` is `'true'`. |
+| `incremental_overlap_threshold` | `'0.6'` | IoU threshold `incremental` uses to decide whether a multi-line comment overlaps an existing one. Two single-line comments match on the same line; single- vs multi-line never match. Read only when `incremental` is enabled — `resolve_outdated` treats any shared line as an overlap, with no threshold, because a missed overlap there closes a thread whose finding is still live. |
+| `resolve_outdated` | `'false'` | Resolve the action's own outdated inline threads. `'false'` does nothing; `'report'` logs what it would resolve; `'true'` resolves them. See below. |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -301,6 +346,64 @@ Three properties are worth knowing before you enable it:
 > **Caveat — the trust boundary is write permission.** The checkpoint is read only from a comment GitHub attributes to the writer this run expects. On the default `github_token` that is exactly one app, `github-actions`, since the default token always belongs to it: a marker in a comment posted by any other bot — `dependabot[bot]`, a linter app, another workflow's App — is rejected. If you pass your own `github_token`, the run cannot learn which app that token belongs to (there is no API an installation token can call for it), so the check widens to "any writer GitHub attributes to a bot" and any bot that can post an issue comment carrying the summary marker is trusted. A comment from a human account is rejected either way, even when it names an app, since GitHub sets `performed_via_github_app` for comments people write through an App as well. What GitHub attests is who *posted* the comment, not that its body is unmodified: anyone with write permission on the repository can edit a bot comment and move the checkpoint forward, causing a range to be skipped. The boundary this buys is "write-permission holders are trusted" — a fork contributor, who is exactly the untrusted party under `pull_request_target`, posts as themselves and so cannot plant or alter a marker. If that is not an acceptable assumption for your repository, leave `checkpoint_range` off.
 >
 > Because a sticky summary keeps its original author, switching a repository from a custom App token to the default one leaves the old comment attributed to the old app, and every run reports `author_unverified` until that comment is deleted. That is the fail-closed direction (a full review, never a skipped range), and the step log names the app it expected.
+
+### Resolve outdated review threads
+
+Over a long PR, the bot's inline comments pile up on code that no longer exists. `resolve_outdated` closes those threads, using GitHub's own `isOutdated` flag — no LLM is involved in the decision, and the action only ever touches threads GitHub has already marked outdated.
+
+| Value | Behavior |
+|-------|----------|
+| `'false'` (default) | Does nothing. No GraphQL calls are made at all. |
+| `'report'` | Lists what would be resolved, and why each other thread was skipped. Changes nothing. |
+| `'true'` | Resolves them. |
+
+Start with `'report'` for a few PRs and read the `[resolve-outdated]` log line before switching to `'true'`.
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    resolve_outdated: 'report'
+```
+
+`'true'` needs `contents: write` (see below). Rather than adding that to the job that
+reviews the diff, keep it in a job of its own that never checks out the pull request:
+
+```yaml
+jobs:
+  review:
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: alibaba/open-code-review@main
+        with:
+          resolve_outdated: 'false'
+
+  resolve:
+    needs: review
+    # No actions/checkout in this job. The token that can write to the
+    # repository is never in a process that has the PR's code in it.
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: alibaba/open-code-review@main
+        with:
+          resolve_outdated: 'true'
+```
+
+A thread is left alone unless **the action created it**. Ownership is decided by the marker OCR writes into every inline comment it posts, not by the comment's author — under the default `GITHUB_TOKEN` every workflow in your repository posts as `github-actions[bot]`, so a sibling workflow's review threads would otherwise be indistinguishable from OCR's own. Beyond that, a thread is left alone whenever **a human has replied** to it, when it is already resolved, when a finding from the current run still covers its lines, or when it has more comments than one API page returns (so a reply the action cannot see is never resolved over). Resolution also runs only after a run that actually produced findings: a run that failed to parse OCR's output, or that reported nothing, resolves nothing — "the model said nothing this time" is not evidence the old findings are gone. At most 50 threads are resolved per run; the rest carry over to the next one. Resolution is sequential and paced by `OCR_SUCCESS_DELAY` (2000 ms by default) to stay clear of GitHub's secondary rate limiter, so a full batch of 50 adds roughly 100 s to the job — lower `OCR_SUCCESS_DELAY` if that matters more to you than the pacing.
+
+Outputs: `comments_resolved` (threads resolved, `'true'` mode) and `comments_resolved_preview` (candidate threads found, `'report'` mode). The preview is the uncapped count, so a 60-thread backlog previews as 60 even though a run resolves at most 50. Both are always present.
+
+Things worth knowing before you turn this on:
+
+- **`'true'` requires `contents: write`, and `pull-requests: write` will not do.** GitHub gates `resolveReviewThread` on repository write access rather than on the pull-request scope, and for an Actions token that access comes from Contents. Measured on a scratch PR with three jobs differing only in their `permissions:` block: `pull-requests: write` with `contents: read` returns `FORBIDDEN`, while `contents: write` with only `pull-requests: read` resolves the thread. Without the permission the action logs a warning naming it and continues, so the review itself still posts.
+- **`'report'` cannot tell you whether `'true'` would work.** It issues no mutation, so it never learns whether the token has the permission, and a clean-looking preview can still hit `FORBIDDEN` the moment you switch over. GraphQL's `viewerCanResolve` looks like the answer and is not: in the measurement above it read `false` in all three jobs, including the two whose mutations then succeeded.
+- **A force-push can mark a live finding's thread outdated.** GitHub sets `isOutdated` when the thread's lines are no longer in the diff, and it stays set even after a force-push that lands identical content, so a rebase can outdate a thread whose finding is still real. The current-run overlap check catches this when the model re-reports the finding; if it doesn't, the thread closes while the problem remains. This is the main reason to run `'report'` first.
+- **It only does anything on re-runs.** A thread can only become outdated after a later push, so the feature is exercised only by workflows that review on update (`types: [opened, synchronize, reopened]`, as in the sample workflow above). This repository's own review workflow triggers on `opened` only and never reaches the resolution path — do not read its runs as evidence the feature works for you.
+- **The run's findings and GitHub's `isOutdated` can be computed against different commits.** Findings are posted against the head the review actually ran on (`resolved_head` in the result manifest), while GitHub recomputes `isOutdated` against the pull request's current head. A push that lands mid-run leaves a window where a thread is outdated relative to code this run never saw. Same class as the force-push case above, and the same mitigation.
+- **Resolving is not deleting.** Resolved threads collapse but stay readable, and anyone can unresolve one.
 
 ### Adjust retry and delay settings
 
@@ -503,7 +606,7 @@ The action does not use an `OCR_DEBUG` flag. To diagnose a run:
 
 - **Artifacts**: with `upload_artifacts: 'true'` (the default), the raw `ocr-result.json` and `ocr-stderr.log` are uploaded as workflow artifacts named `ocr-review-result-<run_id>-<run_attempt>`. Download them from the run's **Artifacts** section.
 - **Step log**: the "Run OpenCodeReview" step prints both the JSON result and stderr to the workflow log.
-- **Action outputs**: the step exposes `comments_total`, `comments_inline`, `comments_skipped`, `comments_failed`, and `summary_comment_url` outputs — inspect them in the job's step outputs.
+- **Action outputs**: the step exposes `comments_total`, `comments_inline`, `comments_skipped`, `comments_routed`, `comments_failed`, `comments_resolved`, `comments_resolved_preview`, and `summary_comment_url` outputs — inspect them in the job's step outputs.
 - **GitHub step debug**: for verbose Actions runner diagnostics, enable the repository secret `ACTIONS_STEP_DEBUG=true` (standard GitHub Actions mechanism).
 
 To stop uploading the raw artifacts, set `upload_artifacts: 'false'`.

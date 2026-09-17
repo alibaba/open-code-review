@@ -90,14 +90,16 @@ LLM タイムアウトを引き上げてください——[タイムアウト](.
 
 ### ファイルがレビューされない
 
-`ocr review --preview` を実行してください（LLM コストなし）。出力には各候補ファイルと、それが
-保持されたか破棄されたかの**理由**が一覧されます。
+`ocr review --preview` を実行してください（LLM コストなし）。出力には、各候補ファイルが
+保持されたか破棄されたかの**理由**が示されます。`vendor/` や `node_modules/` などの
+provider ディレクトリ配下のファイルは端末では 1 行に集約されます。`ocr review --preview --format json`
+では引き続き全エントリが列挙されます。
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
 これらの除外理由は、[ファイルフィルタリング](../review-rules/#how-files-are-filtered)のゲートに対応します。
@@ -108,6 +110,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | あなたの `exclude` リストからそのパターンを削除してください。 |
 | `unsupported_ext` | ホワイトリストゲートを回避するため、拡張子を `include` リストに追加してください。 |
 | `default_path` | ファイルを `include` に追加してください——組み込みのテストファイル除外パターンを上書きします。 |
+| `provider_directory` | 対応は不要です。`vendor/` や `node_modules/` などの provider ディレクトリは、`include` に一致してもレビュー対象にはなりません。 |
 | `deleted` | 対処不要——レビュー対象の新しい内容がありません。 |
 | `too_large` | diff だけで `max_tokens` の 80% を超えています。`--max-tokens`（または保存された `max_tokens`）を引き上げるか、変更をより小さな commit に分割してください。 |
 
@@ -277,7 +280,7 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-LLM 呼び出しには独自の span がありません——metric として記録されます。`ocr.llm.tokens_used`
+メインレビュー ループの LLM 呼び出しは `llm.request` span を生成し、metric としても記録されます。`ocr.llm.tokens_used`
 （counter、`model` + `type` でラベル付け）、`ocr.llm.requests_total`（counter、`model`
 + `status` でラベル付け）、`ocr.llm.request_duration_seconds`（histogram、`model` でラベル付け）に
 注目してください。console exporter はこれらの集計をインラインで出力します。ダッシュボードが必要な場合は、

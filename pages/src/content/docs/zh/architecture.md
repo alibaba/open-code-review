@@ -77,6 +77,7 @@ default_path    — matched a built-in test-file exclude pattern
 噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，
 位于 diff-provider 层，通过 `internal/diff/git.go` 中的 `providerDirIgnoreDirs`
 列表——这些目录的 diff 被解析后即被剔除，永远不会到达 per-file 过滤器。
+Preview 将这些文件报告为 `provider_directory`；`include` 规则无法让它们变为可评审。
 
 运行 `ocr review --preview` 可不花 token 查看完整过滤结果。完整算法见
 [评审规则](../review-rules/#how-files-are-filtered)。
@@ -320,10 +321,9 @@ Web UI（`ocr viewer`）直接读这些文件——没有数据库，只有 appe
 
 启用遥测后，agent 发出三个流水线级 span（`review.run` 包裹整个作业、
 `diff.parse` 包裹 diff 加载、每个被评审的组一个
-`subtask.execute.group.<group-key>`），加上
-每个决策点一个短生命周期的 `event.<name>` span（`plan.skipped`、
-`token.threshold.exceeded`、`subtask.error`……）。LLM 往返和工具调用仅作为
-metrics 记录——不作为 span。prompt 与响应内容**绝不**附加到遥测；
+`subtask.execute.group.<group-key>`），加上每个决策点一个短生命周期的
+`event.<name>` span（`plan.skipped`、`token.threshold.exceeded`、`subtask.error`……）。
+主评审循环中的 LLM 请求和工具调用会生成 span，相关测量值也会记录到 metrics 中。prompt 与响应内容**绝不**附加到遥测；
 `OCR_CONTENT_LOGGING` 标志已接入但目前是死代码。完整 schema 见[遥测](../telemetry/)。
 
 ## 哪些*不*自动化

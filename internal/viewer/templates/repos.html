@@ -8,13 +8,16 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a></nav>
+{{template "app-header" .}}
 <main>
 <h2>Repositories</h2>
 {{if .Repos}}
 <div class="repository-search">
     <label for="repository-search-input">Search repositories</label>
-    <input id="repository-search-input" type="search" placeholder="Search repositories..." autocomplete="off">
+    <div class="search-field">
+        <input id="repository-search-input" type="search" placeholder="Search repositories..." autocomplete="off">
+        <span class="search-icon" aria-hidden="true">{{icon "search"}}</span>
+    </div>
 </div>
 <table id="repositories-table" class="table">
     <thead><tr><th>Repository</th><th>Sessions</th><th>Last Modified</th></tr></thead>
@@ -35,3 +38,5 @@
 </main>
 </body>
 </html>
+
+{{define "breadcrumbs"}}{{end}}

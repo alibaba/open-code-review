@@ -93,13 +93,15 @@ curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/js
 ### 제 파일이 리뷰되지 않습니다 {#my-file-isn-t-being-reviewed}
 
 `ocr review --preview`를 돌려 보세요(LLM 비용이 들지 않습니다). 후보 파일마다
-남긴 **이유** 또는 버린 **이유**가 함께 나옵니다.
+남긴 **이유** 또는 버린 **이유**가 함께 나옵니다. `vendor/`, `node_modules/` 같은
+provider 디렉터리의 파일은 터미널에서는 한 줄로 묶입니다. `ocr review --preview --format json`은
+여전히 모든 항목을 나열합니다.
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
 제외 사유는
@@ -111,6 +113,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | `exclude` 목록에서 해당 패턴을 빼세요. |
 | `unsupported_ext` | 확장자를 `include` 목록에 넣어 허용 목록 관문을 건너뛰세요. |
 | `default_path` | 파일을 `include`에 넣으세요. 내장 테스트 파일 제외 패턴을 덮어씁니다. |
+| `provider_directory` | 조치할 필요가 없습니다. `vendor/`, `node_modules/` 같은 provider 디렉터리는 `include`와 일치해도 검토 대상이 될 수 없습니다. |
 | `deleted` | 할 일이 없습니다. 리뷰할 새 내용이 없습니다. |
 | `too_large` | diff만으로 `max_tokens`의 80%를 넘습니다. `--max-tokens`(또는 저장된 `max_tokens`)를 올리거나 변경을 더 작은 커밋으로 나누세요. |
 
@@ -291,7 +294,8 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-LLM 호출에는 별도 스팬이 생기지 않고 메트릭으로 기록됩니다.
+메인 리뷰 루프에서는 LLM 호출이 `llm.request` 스팬으로 기록되며 메트릭도 함께
+기록됩니다.
 `ocr.llm.tokens_used`(카운터, 레이블 `model` + `type`),
 `ocr.llm.requests_total`(카운터, 레이블 `model` + `status`),
 `ocr.llm.request_duration_seconds`(히스토그램, 레이블 `model`)를 보세요. console

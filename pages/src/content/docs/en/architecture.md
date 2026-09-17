@@ -85,9 +85,9 @@ order:
 
 The noisy-directory filtering (`vendor/`, `node_modules/`, `target/`, …)
 happens earlier, at the diff-provider level, via the
-`providerDirIgnoreDirs` list in `internal/diff/git.go` — diffs for those
-directories are parsed and then stripped out before they ever reach the
-per-file filter.
+`providerDirIgnoreDirs` list in `internal/diff/git.go`. Preview reports these
+files as `provider_directory`; they never reach the per-file filter, and an
+`include` rule cannot make them reviewable.
 
 Run `ocr review --preview` to see the full filter result without spending
 a token. See [Review Rules](../review-rules/#how-files-are-filtered) for
@@ -394,8 +394,8 @@ When telemetry is enabled the agent emits three pipeline-level spans
 loading, and one `subtask.execute.group.<group-key>` per reviewed
 group) plus a
 short-lived `event.<name>` span at each decision point (`plan.skipped`,
-`token.threshold.exceeded`, `subtask.error`, …). LLM round trips and
-tool calls are recorded only as metrics — not as spans. Prompt and
+`token.threshold.exceeded`, `subtask.error`, …). In the main review loop,
+LLM requests and tool calls emit spans and are also recorded in metrics. Prompt and
 response content is **never** attached to telemetry; the
 `OCR_CONTENT_LOGGING` flag is plumbed but currently dead. See
 [Telemetry](../telemetry/) for the full schema.

@@ -107,7 +107,7 @@ curl -o .github/workflows/ocr-review.yml \
 | 입력 | 기본값 | 설명 |
 |---|---|---|
 | `effort` | `''` | `ocr review --effort`로 전달되는 리뷰 강도 프리셋: `low`, `medium`, `high`(대소문자 무시). 비워 두면 CLI 기본값(설정된 값, 없으면 medium)을 따릅니다. OCR v1.10.0 이상이 필요하며, 더 낮은 버전에서는 액션이 명확한 오류와 함께 일찍 실패합니다. |
-| `max_tokens_budget` | `''` | `ocr review --max-tokens-budget`으로 전달되는 총 토큰(입력 + 출력) 상한. 비어 있거나 `'0'`이면 무제한입니다. 상한을 넘으면 디스패치가 멈추고, 건너뛴 파일은 `failed(budget)`로 보고되며, 부분 결과는 그대로 게시되고, 리뷰는 0으로 종료합니다. |
+| `max_tokens_budget` | `''` | `ocr review --max-tokens-budget`으로 전달되는 총 토큰(입력 + 출력) 상한. 비어 있거나 `'0'`이면 무제한입니다. LLM 라운드마다 먼저 확인하며, 이미 상한을 넘긴 하위 작업은 발견 사항을 제출할 마지막 라운드를 한 번 받고, 이후 하위 작업은 디스패치되지 않으며, 예산을 넘기거나 건너뛴 파일은 `failed(budget)`로 보고되고, 부분 결과는 그대로 게시되며, 리뷰는 0으로 종료합니다. |
 | `llm_reasoning_effort` | `''` | `reasoning_effort` 요청 필드를 조절할 수 있는 모델(예: GLM-5.x, OpenAI reasoning 모델)의 추론 깊이: `minimal`, `low`, `medium`, `high`, `max`(대소문자 무시). `llm_extra_body`를 통해 요청 본문에 병합되므로 이미 배포된 모든 CLI 버전에서 동작합니다. `llm_extra_body` 안의 명시적 `reasoning_effort` 키가 이 입력보다 우선합니다. 비어 있으면(기본값) 아무것도 보내지 않습니다. OpenAI 호환 프로토콜 전용입니다 — Anthropic API는 알 수 없는 본문 필드를 거부하므로 해당 프로토콜에서는 액션이 즉시 실패합니다. Anthropic의 thinking 제어는 `llm_extra_body`의 명시적 키를 사용하세요. |
 | `stream_progress` | `'false'` | `'true'`로 설정하면 실행이 끝날 때까지 조용히 기다리는 대신 `[ocr]` 진행 라인을 워크플로 로그에 실시간으로 흘려보냅니다(stderr의 human audience). 표시 전용 토글이며 stderr는 여전히 파일에 캡처되어 아티팩트와 코멘트 게시에 사용됩니다. |
 
@@ -178,7 +178,7 @@ PR에서 제어할 수 있는 값은 `run:` 안에 `${{ }}`로 직접 넣지 말
 
 #### 동시 실행 수 {#concurrency}
 
-기본적으로 파일 그룹당 하나씩, 서브 Agent 8개를 병렬로 돌립니다. 큰 PR에서 LLM
+기본적으로 서브태스크당 하나씩, 서브 Agent 8개를 병렬로 돌립니다. 큰 PR에서 LLM
 프로바이더의 요청 한도를 넘지 않으려면 값을 낮추세요:
 
 ```yaml
@@ -398,7 +398,7 @@ script:
 #### 커스텀 규칙과 동시 실행 수 {#custom-rules-and-concurrency}
 
 GitHub Actions 레시피와 같은 플래그를 씁니다. 프로젝트 전용 규칙 파일은 `--rule`로,
-병렬 서브 Agent 수(기본값 8) 조절은 `--concurrency`로 합니다:
+병렬 서브 Agent 수(기본값 8, 서브태스크당 하나) 조절은 `--concurrency`로 합니다:
 
 ```yaml
 script:

@@ -9,10 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 // runGitTest runs a git command in dir and fails the test on error.
@@ -66,6 +68,139 @@ func initRepoWithChange(t *testing.T) string {
 		t.Fatalf("modify sample.txt: %v", err)
 	}
 	return repo
+}
+
+func TestGetDiffSetRetainsBuiltInDirectoryExclusionsForReporting(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+
+	relPath := "vendor/example/keep.go"
+	path := filepath.Join(repo, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create vendor directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("package example\n\nconst Version = 1\n"), 0o644); err != nil {
+		t.Fatalf("write vendor file: %v", err)
+	}
+	runGitTest(t, repo, "add", relPath)
+	runGitTest(t, repo, "commit", "-q", "-m", "add tracked vendor file")
+	if err := os.WriteFile(path, []byte("package example\n\nconst Version = 2\n"), 0o644); err != nil {
+		t.Fatalf("modify vendor file: %v", err)
+	}
+
+	provider := NewWorkspaceProvider(repo, gitcmd.New(0))
+	set, err := provider.GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet returned error: %v", err)
+	}
+	if len(set.Included) != 0 || len(set.Excluded) != 1 || set.Excluded[0].NewPath != relPath {
+		t.Fatalf("GetDiffSet = %+v, want no included diff and %q excluded", set, relPath)
+	}
+
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff returned error: %v", err)
+	}
+	if len(diffs) != 0 {
+		t.Fatalf("GetDiff = %+v, want no reviewable vendor diff", diffs)
+	}
+}
+
+func TestGetDiffSetWalksChangesetOrder(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	paths := []string{"a.go", "target/mid.go", "z.go"}
+	write := func(content string) {
+		t.Helper()
+		for _, p := range paths {
+			full := filepath.Join(repo, filepath.FromSlash(p))
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", p, err)
+			}
+			if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", p, err)
+			}
+		}
+	}
+	write("package p\n")
+	runGitTest(t, repo, "add", ".")
+	runGitTest(t, repo, "commit", "-q", "-m", "add files")
+	write("package p\n\nconst V = 2\n")
+
+	set, err := NewWorkspaceProvider(repo, gitcmd.New(0)).GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+
+	var got []string
+	var flags []bool
+	set.ForEachInOrder(func(d model.Diff, providerExcluded bool) {
+		got = append(got, d.NewPath)
+		flags = append(flags, providerExcluded)
+	})
+	if !slices.Equal(got, paths) {
+		t.Errorf("ForEachInOrder paths = %v, want %v", got, paths)
+	}
+	if len(flags) != 3 || flags[0] || !flags[1] || flags[2] {
+		t.Errorf("providerExcluded flags = %v, want [false true false]", flags)
+	}
+}
+
+func TestGetDiffSetWalksChangesetOrderAcrossGitignoreDrop(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	// skip.log is tracked so git diff still emits it; partitionDiffs then
+	// drops it, which is the case excludedAt must not count.
+	all := []string{"a.go", "skip.log", "target/mid.go", "z.go"}
+	want := []string{"a.go", "target/mid.go", "z.go"}
+	write := func(content string) {
+		t.Helper()
+		for _, p := range all {
+			full := filepath.Join(repo, filepath.FromSlash(p))
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", p, err)
+			}
+			if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", p, err)
+			}
+		}
+	}
+	write("package p\n")
+	runGitTest(t, repo, "add", ".")
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("*.log\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	runGitTest(t, repo, "add", ".gitignore")
+	runGitTest(t, repo, "commit", "-q", "-m", "add files")
+	write("package p\n\nconst V = 2\n")
+
+	set, err := NewWorkspaceProvider(repo, gitcmd.New(0)).GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+
+	var got []string
+	var flags []bool
+	set.ForEachInOrder(func(d model.Diff, providerExcluded bool) {
+		got = append(got, d.NewPath)
+		flags = append(flags, providerExcluded)
+	})
+	if !slices.Equal(got, want) {
+		t.Errorf("ForEachInOrder paths = %v, want %v", got, want)
+	}
+	if len(flags) != 3 || flags[0] || !flags[1] || flags[2] {
+		t.Errorf("providerExcluded flags = %v, want [false true false]", flags)
+	}
 }
 
 // initRepoWithNonASCIIChange creates a repository whose changed file path
@@ -171,6 +306,41 @@ func TestWorkspaceDiffPreservesNonASCIIUntrackedPath(t *testing.T) {
 	}
 	if diffs[0].NewFileContent != "untracked\n" {
 		t.Errorf("NewFileContent = %q, want %q", diffs[0].NewFileContent, "untracked\n")
+	}
+}
+
+func TestWorkspaceDiffSkipsOversizedUntrackedFile(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+
+	file, err := os.Create(filepath.Join(repo, "large.log"))
+	if err != nil {
+		t.Fatalf("create large file: %v", err)
+	}
+	if err := file.Truncate(maxUntrackedFileSize + 1); err != nil {
+		file.Close()
+		t.Fatalf("truncate large file: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close large file: %v", err)
+	}
+
+	provider := NewWorkspaceProvider(repo, gitcmd.New(0))
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff returned error: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("got %d diffs, want 1", len(diffs))
+	}
+	if !diffs[0].IsBinary || !diffs[0].IsNew {
+		t.Errorf("oversized file IsBinary = %t, IsNew = %t; want both true", diffs[0].IsBinary, diffs[0].IsNew)
+	}
+	if diffs[0].NewFileContent != "" {
+		t.Errorf("oversized file content has %d bytes, want none", len(diffs[0].NewFileContent))
+	}
+	if !strings.Contains(diffs[0].Diff, "Binary files /dev/null and b/large.log differ") {
+		t.Errorf("missing binary diff marker: %q", diffs[0].Diff)
 	}
 }
 
@@ -284,6 +454,64 @@ func TestCommitDiffTreatsOptionLikeRefAsRevision(t *testing.T) {
 		t.Fatal("option-like commit ref was interpreted as a git show option")
 	} else if !os.IsNotExist(statErr) {
 		t.Fatal(statErr)
+	}
+}
+
+func TestWorkspaceUntrackedBinaryFileIsFlaggedNotReviewed(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatalf("write base.txt: %v", err)
+	}
+	runGitTest(t, repo, "add", "base.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "initial commit")
+
+	// Untracked binary blob (ELF-style header with NUL bytes) and a plain
+	// text file; only the binary must be flagged.
+	binary := []byte("\x7fELF\x02\x01\x01\x00\x00\x00binary payload\x00\x00")
+	if err := os.WriteFile(filepath.Join(repo, "myapp"), binary, 0o755); err != nil {
+		t.Fatalf("write myapp: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "notes.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write notes.txt: %v", err)
+	}
+
+	p := NewWorkspaceProvider(repo, nil)
+	set, err := p.GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+
+	var sawBinary, sawText bool
+	for _, d := range set.Included {
+		switch d.NewPath {
+		case "myapp":
+			sawBinary = true
+			if !d.IsBinary {
+				t.Errorf("myapp: expected IsBinary=true for an untracked NUL-containing file")
+			}
+			if !d.IsNew || !strings.Contains(d.Diff, "Binary files /dev/null and b/myapp differ") {
+				t.Errorf("myapp: expected a new-file binary diff, got %q", d.Diff)
+			}
+			if d.Insertions != 0 {
+				t.Errorf("myapp: expected 0 insertions for a binary file, got %d", d.Insertions)
+			}
+		case "notes.txt":
+			sawText = true
+			if d.IsBinary || d.Insertions != 1 {
+				t.Errorf("notes.txt: expected reviewable text (binary=%v, insertions=%d)", d.IsBinary, d.Insertions)
+			}
+		}
+	}
+	if !sawBinary {
+		t.Errorf("myapp missing from the diff set")
+	}
+	if !sawText {
+		t.Errorf("notes.txt missing from the diff set")
 	}
 }
 

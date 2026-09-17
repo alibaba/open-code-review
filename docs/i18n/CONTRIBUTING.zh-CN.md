@@ -2,7 +2,7 @@
 
 感谢你对 OpenCodeReview 的关注！无论是修复拼写错误、报告 Bug，还是实现新功能，每一份贡献都很有价值。
 
-[English version](CONTRIBUTING.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md)
+[English version](../../CONTRIBUTING.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md)
 
 ## 行为准则
 
@@ -163,7 +163,7 @@ make build
 - 完善表述不清的说明或补充缺失的上下文
 - 为命令或配置项添加使用示例
 - 更新过时的内容（例如功能变更后的文档同步）
-- 翻译或改进中英文文档（`README.zh-CN.md`、`CONTRIBUTING.zh-CN.md`）
+- 翻译或改进中英文文档（`docs/i18n/README.zh-CN.md`、`docs/i18n/CONTRIBUTING.zh-CN.md`）
 
 ### 文档贡献流程
 
@@ -173,12 +173,12 @@ make build
 
 ### 文档文件一览
 
-| 文件                    | 用途                 |
-| ----------------------- | -------------------- |
-| `README.md`             | 项目主文档（英文）   |
-| `README.zh-CN.md`       | 中文翻译             |
-| `CONTRIBUTING.md`       | 贡献指南（英文）     |
-| `CONTRIBUTING.zh-CN.md` | 贡献指南（中文）     |
+| 文件                              | 用途               |
+| --------------------------------- | ------------------ |
+| `README.md`                       | 项目主文档（英文） |
+| `docs/i18n/README.zh-CN.md`       | 中文翻译           |
+| `CONTRIBUTING.md`                 | 贡献指南（英文）   |
+| `docs/i18n/CONTRIBUTING.zh-CN.md` | 贡献指南（中文）   |
 
 ## 提交变更
 
@@ -255,4 +255,4 @@ feat(agent): add support for custom tool definitions
 
 ## 许可证
 
-向 OpenCodeReview 贡献代码即表示你同意你的贡献将以 [Apache License 2.0](LICENSE) 进行许可。
+向 OpenCodeReview 贡献代码即表示你同意你的贡献将以 [Apache License 2.0](../../LICENSE) 进行许可。

@@ -82,8 +82,9 @@ default_path    — matched a built-in test-file exclude pattern
 
 잡음이 많은 디렉터리(`vendor/`, `node_modules/`, `target/` 등)는 그보다 앞선
 diff 프로바이더 단계에서, `internal/diff/git.go`의 `providerDirIgnoreDirs`
-목록으로 걸러 냅니다. 이 디렉터리의 diff는 일단 파싱한 뒤 `filterDiffs`가
-떼어 내므로 파일 단위 필터까지 오지 못합니다.
+목록으로 걸러 냅니다. 이 디렉터리의 diff는 일단 파싱한 뒤 `isProviderDirExcluded`가
+떼어 내므로 파일 단위 필터까지 오지 못합니다. Preview는 이 파일들을 `provider_directory`로
+보고하며, `include` 규칙으로도 이들을 다시 리뷰 대상으로 되돌릴 수 없습니다.
 
 `ocr review --preview`를 돌리면 토큰 한 톨 쓰지 않고 필터 결과 전체를 볼 수
 있습니다. 알고리즘 전체는
@@ -378,8 +379,8 @@ OCR은 이 검사로 괴물 같은 diff(자동 생성된 lock 파일, 수천 줄
 전체를 감싸는 `review.run`, diff 로딩을 감싸는 `diff.parse`, 그리고 리뷰한
 그룹마다 하나씩 생기는 `subtask.execute.group.<group-key>`입니다. 여기에 결정
 지점마다 짧게 생겼다 사라지는 `event.<name>` 스팬(`plan.skipped`,
-`token.threshold.exceeded`, `subtask.error` 등)이 더해집니다. LLM 왕복과 도구
-호출은 스팬이 아니라 메트릭으로만 기록됩니다. 프롬프트와 응답 내용은
+`token.threshold.exceeded`, `subtask.error` 등)이 더해집니다. LLM 요청과 도구
+호출은 메인 리뷰 루프에서 스팬을 생성하며, 관련 측정값도 메트릭에 기록됩니다. 프롬프트와 응답 내용은
 텔레메트리에 **절대** 실리지 않습니다. `OCR_CONTENT_LOGGING` 플래그는 배선만 돼
 있고 지금은 동작하지 않습니다. 전체 스키마는
 [텔레메트리](../telemetry/)를 참고하세요.

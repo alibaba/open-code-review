@@ -56,7 +56,7 @@ default_path    — matched a built-in test-file exclude pattern
 4. `unsupported_ext` は拡張子のホワイトリストでフィルタリングします。
 5. `default_path` は最後のゲートです: 組み込みの**テストファイル**除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、`**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）に一致します。各パターンはルートプレフィックスとして `**/` を付けます。
 
-ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、diff-provider 層で、`internal/diff/git.go` の `providerDirIgnoreDirs` リストを通じて発生します。これらのディレクトリの diff は解析されたあと除去され、ファイルごとのフィルターに到達することは決してありません。
+ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、diff-provider 層で、`internal/diff/git.go` の `providerDirIgnoreDirs` リストを通じて発生します。これらのディレクトリの diff は解析されたあと除去され、ファイルごとのフィルターに到達することは決してありません。Preview はこれらのファイルを `provider_directory` として報告します。`include` ルールでこれらをレビュー対象に戻すことはできません。
 
 `ocr review --preview` を実行すると、token を消費せずに完全なフィルタリング結果を確認できます。完全なアルゴリズムは[レビュールール](../review-rules/#how-files-are-filtered)を参照してください。
 
@@ -241,7 +241,7 @@ if countMessagesTokens(messages) > tokenLimit {
 
 ## テレメトリ
 
-テレメトリを有効にすると、agent は 3 つのパイプラインレベルの span を発行します（`review.run` はジョブ全体を包み、`diff.parse` は diff の読み込みを包み、レビューされた各グループにつき 1 つの `subtask.execute.group.<group-key>`）。加えて、各決定ポイントで短命な `event.<name>` span を発行します（`plan.skipped`、`token.threshold.exceeded`、`subtask.error`……）。LLM の往復とツール呼び出しは metrics としてのみ記録され、span としては記録されません。prompt とレスポンスの内容がテレメトリに添付されることは**決してありません**。`OCR_CONTENT_LOGGING` フラグは配線済みですが、現在はデッドコードです。完全な schema は[テレメトリ](../telemetry/)を参照してください。
+テレメトリを有効にすると、agent は 3 つのパイプラインレベルの span を発行します（`review.run` はジョブ全体を包み、`diff.parse` は diff の読み込みを包み、レビューされた各グループにつき 1 つの `subtask.execute.group.<group-key>`）。加えて、各決定ポイントで短命な `event.<name>` span を発行します（`plan.skipped`、`token.threshold.exceeded`、`subtask.error`……）。メインレビュー ループでは、LLM リクエストとツール呼び出しが span を生成し、関連する測定値も metrics に記録されます。prompt とレスポンスの内容がテレメトリに添付されることは**決してありません**。`OCR_CONTENT_LOGGING` フラグは配線済みですが、現在はデッドコードです。完全な schema は[テレメトリ](../telemetry/)を参照してください。
 
 ## *自動化されない*もの
 
