@@ -17,3 +17,4 @@ adapts to both light and dark themes. The path data is unchanged from upstream.
   chevron-down.svg  <- down    (outlined)
   search.svg        <- search  (outlined)
   settings.svg      <- setting (outlined)
+  file.svg          <- file    (outlined)

@@ -407,7 +407,7 @@ func TestTemplateFuncTaskTypeClass(t *testing.T) {
 
 func TestInlineIcon(t *testing.T) {
 	// Known icons return their embedded SVG markup.
-	for _, name := range []string{"logo", "search", "settings", "chevron-left", "chevron-right", "chevron-down"} {
+	for _, name := range []string{"logo", "search", "settings", "file", "chevron-left", "chevron-right", "chevron-down"} {
 		got := string(inlineIcon(name))
 		if !strings.Contains(got, "<svg") || !strings.Contains(got, "currentColor") {
 			t.Errorf("inlineIcon(%q) = %q, want inline svg using currentColor", name, got)
