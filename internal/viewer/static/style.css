@@ -560,7 +560,7 @@ h3 {
 .token-breakdown-toggle::-webkit-details-marker { display: none; }
 .token-breakdown-toggle::marker { content: none; }
 .token-breakdown-toggle .file-count-badge { margin-left: auto; }
-.token-breakdown[open] > .token-breakdown-toggle .chevron-sm { transform: rotate(45deg); }
+.token-breakdown[open] > .token-breakdown-toggle .chevron-sm svg { transform: rotate(90deg); }
 .token-breakdown-body {
     overflow-x: auto;
 }
@@ -575,7 +575,7 @@ h3 {
     overflow: hidden;
 }
 .file-list li {
-    padding: 0.6rem 1.25rem;
+    padding: 0.65rem 0.9rem;
     color: var(--text-secondary);
     border-bottom: 1px solid var(--border-subtle);
     font-family: var(--mono);
@@ -606,19 +606,19 @@ h3 {
     background: var(--surface);
     border-radius: var(--radius);
     margin-bottom: 0.75rem;
-    box-shadow: var(--shadow-sm);
+    box-shadow: none;
     border: 1px solid var(--border);
     overflow: hidden;
     transition: box-shadow var(--transition);
 }
 .file-accordion:hover {
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-sm);
 }
 
 .file-accordion-header {
     cursor: pointer;
-    padding: 1rem 1.25rem;
-    font-size: 0.95rem;
+    padding: 0.8rem 0.9rem;
+    font-size: 0.84rem;
     color: var(--text-strong);
     user-select: none;
     display: flex;
@@ -642,21 +642,17 @@ h3 {
     background: var(--surface-alt);
     border: 1px solid var(--border-subtle);
     flex-shrink: 0;
-    transition: transform var(--transition), background var(--transition);
+    color: var(--text-muted);
+    transition: background var(--transition);
 }
-.chevron::after {
-    content: "";
-    width: 6px;
-    height: 6px;
-    border-right: 1.5px solid var(--text-muted);
-    border-bottom: 1.5px solid var(--text-muted);
-    transform: rotate(-45deg);
-    margin-top: -1px;
+.chevron svg {
+    width: 0.7rem;
+    height: 0.7rem;
+    display: block;
     transition: transform var(--transition);
 }
-.file-accordion[open] > .file-accordion-header .chevron::after {
-    transform: rotate(45deg);
-    margin-top: -2px;
+.file-accordion[open] > .file-accordion-header .chevron svg {
+    transform: rotate(90deg);
 }
 
 .file-path {
@@ -687,12 +683,24 @@ h3 {
 }
 
 .file-accordion-body {
-    padding: 1rem 1.25rem 1.25rem;
+    padding: 0.75rem 0.9rem 0.9rem;
 }
 
 .section-accordion {
     margin-top: 1.25rem;
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
 }
+.section-accordion > .file-accordion-header {
+    cursor: pointer;
+    padding: 0.9rem 1rem 0.35rem;
+    font-size: 0.82rem;
+}
+.section-accordion > .file-accordion-header:hover { background: transparent; }
+.section-accordion:not([open]) > .file-accordion-header { padding-bottom: 0.9rem; }
+.section-accordion[open] > .file-accordion-header { border-bottom: none; }
+.section-accordion > .file-accordion-body { padding: 0.6rem 1rem 1rem; }
 .section-title {
     flex: 1;
     font-weight: 600;
@@ -703,14 +711,14 @@ h3 {
 }
 
 /* Task Group */
-.task-group { margin-bottom: 1.25rem; }
+.task-group { margin-bottom: 1rem; }
 .task-group:last-child { margin-bottom: 0; }
 
 .task-type-label {
-    font-size: 0.7rem;
+    font-size: 0.64rem;
     text-transform: uppercase;
     color: var(--text-muted);
-    margin-bottom: 0.75rem;
+    margin: 0.1rem 0 0.45rem;
     letter-spacing: 0.06em;
     display: flex;
     align-items: center;
@@ -737,7 +745,7 @@ h3 {
 .card {
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    margin-bottom: 0.85rem;
+    margin-bottom: 0.6rem;
     overflow: hidden;
     transition: box-shadow var(--transition), border-color var(--transition);
 }
@@ -754,8 +762,8 @@ h3 {
 
 .card-header {
     background: var(--surface-alt);
-    padding: 0.7rem 1rem;
-    font-size: 0.85rem;
+    padding: 0.45rem 0.65rem;
+    font-size: 0.76rem;
     display: flex;
     align-items: center;
     gap: 0.6rem;
@@ -766,12 +774,12 @@ h3 {
 .request-label {
     font-weight: 600;
     color: var(--text-strong);
-    font-size: 0.82rem;
+    font-size: 0.72rem;
 }
 
 /* Badges */
 .badge {
-    padding: 0.2em 0.6em;
+    padding: 0.18em 0.5em;
     border-radius: 20px;
     font-size: 0.7em;
     font-weight: 500;
@@ -876,7 +884,7 @@ h3 {
 .tool-calls-section {
     background: var(--surface-inset);
     border-top: 1px solid var(--border);
-    padding: 0.85rem 1rem;
+    padding: 0.65rem;
 }
 
 .tool-calls-label {
@@ -885,7 +893,19 @@ h3 {
     text-transform: uppercase;
     color: var(--text-muted);
     letter-spacing: 0.05em;
-    margin-bottom: 0.6rem;
+    margin-bottom: 0.45rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.tool-calls-icon {
+    color: var(--text-faint);
+    display: inline-flex;
+}
+.tool-calls-icon svg {
+    width: 0.8rem;
+    height: 0.8rem;
+    display: block;
 }
 
 .tool-call-item {
@@ -907,23 +927,12 @@ h3 {
 }
 
 .tool-call-header {
-    padding: 0.55rem 0.85rem;
+    padding: 0.45rem 0.65rem;
     display: flex;
     align-items: center;
     gap: 0.5rem;
     font-size: 0.82rem;
     flex-wrap: wrap;
-}
-
-.tool-icon {
-    color: var(--text-faint);
-    display: inline-flex;
-    align-items: center;
-}
-.tool-icon svg {
-    width: 0.85em;
-    height: 0.85em;
-    display: block;
 }
 
 .tool-name {
@@ -957,17 +966,20 @@ h3 {
 
 /* Small chevron for tool details */
 .chevron-sm {
-    display: inline-block;
-    width: 5px;
-    height: 5px;
-    border-right: 1.5px solid var(--link);
-    border-bottom: 1.5px solid var(--link);
-    transform: rotate(-45deg);
-    transition: transform var(--transition);
+    display: inline-flex;
+    width: 0.7rem;
+    height: 0.7rem;
+    color: var(--link);
     flex-shrink: 0;
 }
-.tool-detail[open] > .tool-detail-toggle .chevron-sm {
-    transform: rotate(45deg);
+.chevron-sm svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    transition: transform var(--transition);
+}
+.tool-detail[open] > .tool-detail-toggle .chevron-sm svg {
+    transform: rotate(90deg);
 }
 
 .tool-detail-body {
@@ -1001,12 +1013,11 @@ h3 {
     font-weight: 500;
 }
 .error-detail-toggle:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
-.error-detail[open] > .error-detail-toggle .chevron-sm {
-    transform: rotate(45deg);
+.error-detail[open] > .error-detail-toggle .chevron-sm svg {
+    transform: rotate(90deg);
 }
 .error-detail-toggle .chevron-sm {
-    border-right-color: var(--danger);
-    border-bottom-color: var(--danger);
+    color: var(--danger);
 }
 .error-detail-body {
     padding: 0 0.85rem 0.75rem;
@@ -1165,9 +1176,8 @@ p {
 .comment-file-group[open] > .comment-file-header {
     border-bottom: 1px solid var(--border-subtle);
 }
-.comment-file-group[open] > .comment-file-header .chevron::after {
-    transform: rotate(45deg);
-    margin-top: -2px;
+.comment-file-group[open] > .comment-file-header .chevron svg {
+    transform: rotate(90deg);
 }
 
 .comment-file-body {

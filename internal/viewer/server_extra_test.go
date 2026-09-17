@@ -407,6 +407,51 @@ func TestRenderTemplate_HidesEmptyConversationsSection(t *testing.T) {
 	}
 }
 
+func TestRenderTemplate_RendersConversationToolCallDetails(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session: &ViewSession{
+			Summary: SessionSummary{SessionID: "abc", CWD: "/test"},
+			Files: []*FileGroup{{
+				FilePath: "internal/viewer/server.go",
+				Tasks: map[TaskType][]*TaskCard{
+					MainTask: {{
+						RequestNo:        1,
+						Model:            "model-a",
+						PromptTokens:     10,
+						CompletionTokens: 20,
+						DurationMs:       30,
+						ToolCalls: []ToolCallInfo{{
+							Name:      "code_search",
+							Arguments: `{"query":"viewer"}`,
+							Result:    "matched server.go",
+							Ok:        true,
+						}},
+					}},
+				},
+			}},
+		},
+	})
+
+	body := rr.Body.String()
+	if strings.Contains(body, "1 files") || strings.Contains(body, "1 requests") {
+		t.Error("single-item counts should use singular labels")
+	}
+	if strings.Contains(body, "&#9881;") {
+		t.Error("tool call controls should use the shared SVG icon, not a Unicode glyph")
+	}
+	for _, want := range []string{
+		"Conversations", "1 file", "1 request", "internal/viewer/server.go", "Request #1", "model-a",
+		"Tool Calls (1)", "code_search", "Arguments", "matched server.go", "<svg",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered session page missing %q", want)
+		}
+	}
+}
+
 func TestRenderTemplate_ExecutionError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	// Pass wrong data type to trigger template execution error
@@ -554,8 +599,11 @@ func TestRenderTemplate_ToolCallIconIsInlineSVG(t *testing.T) {
 	if strings.Contains(body, "&#9881;") || strings.Contains(body, "⚙") {
 		t.Error("tool-call icon should no longer use the unicode gear glyph")
 	}
-	if !strings.Contains(body, `<span class="tool-icon" aria-hidden="true"><svg`) {
-		t.Error("tool-call header should render the inline settings icon")
+	if !strings.Contains(body, `<span class="tool-calls-icon" aria-hidden="true"><svg`) {
+		t.Error("tool-calls label should render the inline settings icon")
+	}
+	if strings.Contains(body, `class="tool-icon"`) {
+		t.Error("individual tool-call rows should not render a duplicate settings icon")
 	}
 }
 

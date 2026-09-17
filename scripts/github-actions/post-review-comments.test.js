@@ -650,6 +650,67 @@ async function testIncrementalSkipsOverlapping() {
   assert.strictEqual(outputs.comments_inline, "1");
 }
 
+async function testIncrementalSkipsSameRunIoUOverlapping() {
+  const result = {
+    comments: [
+      { path: "src/a.js", content: "first finding", start_line: 10, end_line: 14 },
+      { path: "src/a.js", content: "overlapping finding", start_line: 11, end_line: 15 },
+      { path: "src/b.js", content: "independent finding", start_line: 20, end_line: 24 },
+    ],
+    warnings: [],
+  };
+
+  const { github, outputs } = await run({
+    result,
+    githubOpts: { history: [] },
+    opts: { stickySummary: true, incremental: true },
+  });
+
+  assert.strictEqual(github.createReviewCalls.length, 1, "one batch review");
+
+  const sent = github.createReviewCalls[0].comments;
+
+  assert.strictEqual(sent.length, 2, "same-run overlapping multiline comment should be suppressed");
+  assert.strictEqual(sent[0].path, "src/a.js");
+  assert.strictEqual(sent[0].start_line, 10);
+  assert.strictEqual(sent[0].line, 14);
+  assert.strictEqual(sent[1].path, "src/b.js");
+  assert.strictEqual(sent[1].start_line, 20);
+  assert.strictEqual(sent[1].line, 24);
+
+  assert.strictEqual(outputs.comments_skipped, "1");
+  assert.strictEqual(outputs.comments_inline, "2");
+}
+
+async function testIncrementalSkipsSameRunOverlapping() {
+  const result = {
+    comments: [
+      { path: "src/a.js", content: "first finding", start_line: 10, end_line: 10 },
+      { path: "src/a.js", content: "duplicate finding", start_line: 10, end_line: 10 },
+      { path: "src/b.js", content: "independent finding", start_line: 5, end_line: 5 },
+    ],
+    warnings: [],
+  };
+
+  const { github, outputs } = await run({
+    result,
+    githubOpts: { history: [] },
+    opts: { stickySummary: true, incremental: true },
+  });
+
+  assert.strictEqual(github.createReviewCalls.length, 1, "one batch review");
+
+  const sent = github.createReviewCalls[0].comments;
+
+  assert.strictEqual(sent.length, 2, "same-run duplicate should be suppressed");
+  assert.strictEqual(sent[0].path, "src/a.js");
+  assert.strictEqual(sent[0].line, 10);
+  assert.strictEqual(sent[1].path, "src/b.js");
+  assert.strictEqual(sent[1].line, 5);
+
+  assert.strictEqual(outputs.comments_skipped, "1");
+  assert.strictEqual(outputs.comments_inline, "2");
+}
 async function testIncrementalAllOverlapPostsNoReview() {
   const history = [{ path: "src/a.js", line: 10, start_line: 10, side: "RIGHT", user: { login: "github-actions[bot]" } }];
   const result = { comments: [{ path: "src/a.js", content: "overlap", start_line: 10, end_line: 10 }], warnings: [] };
@@ -2278,6 +2339,8 @@ async function main() {
   await testNonStickyFallbackAllSuccessStillPostsSummary();
   await testNoCommentsStickyUpdate();
   await testIncrementalSkipsOverlapping();
+  await testIncrementalSkipsSameRunOverlapping();
+  await testIncrementalSkipsSameRunIoUOverlapping();
   await testIncrementalAllOverlapPostsNoReview();
   await testIncrementalMultiLineIoUDefaultThreshold();
   await testIncrementalOverlapThresholdPropagated();

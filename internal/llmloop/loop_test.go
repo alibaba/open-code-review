@@ -853,12 +853,12 @@ func TestMainLoopStopStringAndReason(t *testing.T) {
 // stop its own String() and Reason() case instead of letting it fall through to
 // a message that says nothing.
 func TestMainLoopStopUnknownValue(t *testing.T) {
-	unknown := StopCompression + 1
+	unknown := StopTokenBudget + 1
 
-	if got, want := unknown.String(), "MainLoopStop(4)"; got != want {
+	if got, want := unknown.String(), "MainLoopStop(5)"; got != want {
 		t.Errorf("String() = %q, want %q; a new constant needs its own case in String() and Reason()", got, want)
 	}
-	if got, want := unknown.Reason(), "main task stopped for an unrecognized reason (stop=4)"; got != want {
+	if got, want := unknown.Reason(), "main task stopped for an unrecognized reason (stop=5)"; got != want {
 		t.Errorf("Reason() = %q, want %q; a new constant needs its own case in String() and Reason()", got, want)
 	}
 	if unknown.Reason() == StopNone.Reason() {
@@ -971,4 +971,78 @@ func TestExecuteToolCall_CodeCommentWellFormedArgsDoesNotWarn(t *testing.T) {
 	if w := r.Warnings(); len(w) != 0 {
 		t.Errorf("warnings = %+v, want none", w)
 	}
+}
+
+// TestRunMainTask_TokenBudgetStopsBeforeNextRound pins the in-conversation
+// budget check: once the Runner's aggregate usage is over Deps.MaxTokensBudget
+// the next round is not sent, the stop is classified StopTokenBudget, and the
+// model still gets its one grace round to submit findings.
+func TestRunMainTask_TokenBudgetStopsBeforeNextRound(t *testing.T) {
+	// Every round reads a file and reports 600 tokens; budget 1000 admits two
+	// rounds (0 and 600 are both within budget) and refuses the third (1200).
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		withUsage(fileReadToolCallResponse("call_1", `{"path":"main.go"}`), 600),
+		withUsage(fileReadToolCallResponse("call_2", `{"path":"main.go"}`), 600),
+		withUsage(fileReadToolCallResponse("call_3", `{"path":"main.go"}`), 600),
+		withUsage(fileReadToolCallResponse("call_4", `{"path":"main.go"}`), 600),
+	}}
+	deps := newTestDeps(client)
+	deps.MaxTokensBudget = 1000
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "file_read", Description: "read"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if completed {
+		t.Fatal("RunMainTask completed without task_done")
+	}
+	if stop != StopTokenBudget {
+		t.Fatalf("expected StopTokenBudget, got %v", stop)
+	}
+	// Two review rounds plus exactly one grace round; the budget must not be
+	// spent on a third review round and the grace round must not be skipped.
+	if got := len(client.requests); got != 3 {
+		t.Fatalf("expected 3 LLM requests (2 rounds + grace), got %d", got)
+	}
+	last := client.requests[2]
+	for _, def := range last.Tools {
+		if def.Function.Name == "file_read" {
+			t.Fatalf("grace round must not offer file_read, got tools %+v", last.Tools)
+		}
+	}
+	if runner.TotalTokensUsed() <= deps.MaxTokensBudget {
+		t.Fatalf("usage %d should exceed the budget %d after the stop", runner.TotalTokensUsed(), deps.MaxTokensBudget)
+	}
+}
+
+// TestRunMainTask_ZeroTokenBudgetNeverStops guards the default: callers that
+// never set a budget keep the pre-existing round-only behaviour.
+func TestRunMainTask_ZeroTokenBudgetNeverStops(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		withUsage(fileReadToolCallResponse("call_1", `{"path":"main.go"}`), 5000),
+		withUsage(fileReadToolCallResponse("call_2", `{"path":"main.go"}`), 5000),
+		taskDoneResponse(),
+	}}
+	deps := newTestDeps(client)
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if !completed || stop != StopNone {
+		t.Fatalf("expected completion with StopNone, got completed=%v stop=%v", completed, stop)
+	}
+}
+
+func withUsage(resp *llm.ChatResponse, prompt int64) *llm.ChatResponse {
+	resp.Usage = &llm.UsageInfo{PromptTokens: prompt, CompletionTokens: 0, TotalTokens: prompt}
+	return resp
 }

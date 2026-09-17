@@ -331,6 +331,12 @@ func parseTemplate(name string) (*template.Template, error) {
 		"formatNumber":   formatNumber,
 		"icon":           inlineIcon,
 		"add":            func(a, b int) int { return a + b },
+		"countLabel": func(n int, singular, plural string) string {
+			if n == 1 {
+				return strconv.Itoa(n) + " " + singular
+			}
+			return strconv.Itoa(n) + " " + plural
+		},
 		"cardCount": func(tasks map[TaskType][]*TaskCard) int {
 			n := 0
 			for _, cards := range tasks {
