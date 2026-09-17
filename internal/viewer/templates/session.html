@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,15 +9,15 @@
 </head>
 <body>
 {{template "app-header" .}}
-<main>
+<main class="session-page">
 <div class="session-header">
     <div class="page-heading">
-        <a class="back-link" href="/r/{{.EncodedRepo}}" aria-label="Back to sessions"></a>
+        <a class="back-link" href="/r/{{.EncodedRepo}}" aria-label="Back to sessions">{{icon "chevron-left"}}</a>
         <h2>Session: {{.Session.Summary.SessionID}}</h2>
     </div>
     <div class="meta">
-        <span><strong>CWD:</strong> {{.Session.Summary.CWD}}</span>
-        <span><strong>Branch:</strong> {{.Session.Summary.GitBranch}}</span>
+        <span class="meta-truncate" title="{{.Session.Summary.CWD}}"><strong>CWD:</strong> {{.Session.Summary.CWD}}</span>
+        <span class="meta-truncate" title="{{.Session.Summary.GitBranch}}"><strong>Branch:</strong> {{.Session.Summary.GitBranch}}</span>
         <span><strong>Mode:</strong> {{if .Session.Summary.ReviewMode}}{{.Session.Summary.ReviewMode}}{{else}}-{{end}}</span>
         {{if eq .Session.Summary.ReviewMode "range"}}
         <span><strong>From:</strong> <code>{{.Session.Summary.DiffFrom}}</code></span>
@@ -29,7 +29,7 @@
         <span><strong>Model:</strong> <code>{{.Session.Summary.Model}}</code></span>
         <span><strong>Duration:</strong> {{formatDuration .Session.Summary.DurationSec}}</span>
         <span><strong>Files:</strong> {{.Session.Summary.FileCount}}</span>
-        <span><strong>Status:</strong> {{if .Session.Summary.Aborted}}aborted{{else if .Session.Summary.Legacy}}legacy{{else}}{{.Session.Summary.TerminalState}}{{end}}</span>
+        <span><strong>Status:</strong> {{if .Session.Summary.Aborted}}<span class="meta-status status-aborted">aborted</span>{{else if .Session.Summary.Legacy}}<span class="meta-status status-legacy">legacy</span>{{else if eq .Session.Summary.TerminalState "complete"}}<span class="meta-status status-complete">complete</span>{{else if eq .Session.Summary.TerminalState "partial"}}<span class="meta-status status-partial">partial</span>{{else if eq .Session.Summary.TerminalState "failed"}}<span class="meta-status status-failed">failed</span>{{else if eq .Session.Summary.TerminalState "skipped"}}<span class="meta-status status-legacy">skipped</span>{{else}}<span class="meta-status">{{.Session.Summary.TerminalState}}</span>{{end}}</span>
     </div>
 </div>
 

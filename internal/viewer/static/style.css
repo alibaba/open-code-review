@@ -1657,3 +1657,86 @@ p {
     height: 34px;
     color: var(--text-muted);
 }
+
+/* ── Session Page Header ── */
+/* The mockup drops the card/gradient chrome: title row and meta bar sit on
+   the page background. Scoped to .session-page so the rest of the session
+   detail sections stay untouched. */
+.session-page .session-header {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+
+.session-page .session-header::before {
+    content: none;
+}
+
+.session-page .session-header .page-heading {
+    align-items: center;
+}
+
+.session-page .back-link {
+    width: 36px;
+    height: 36px;
+    background: var(--surface);
+    color: var(--text-muted);
+}
+
+.session-page .back-link:hover {
+    background: var(--accent-soft);
+    color: var(--accent-hover);
+    border-color: var(--link);
+}
+
+.session-page .back-link::before {
+    content: none;
+}
+
+.session-page .back-link svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+}
+
+.session-page .session-header h2 {
+    margin-bottom: 0;
+}
+
+.session-page .meta {
+    gap: 0.5rem 2.25rem;
+}
+
+.session-page .meta span {
+    white-space: nowrap;
+}
+
+.session-page .meta .meta-truncate {
+    max-width: 22rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.session-page .meta .meta-status {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.session-page .meta .status-complete {
+    color: var(--link);
+}
+
+.session-page .meta .status-partial,
+.session-page .meta .status-aborted {
+    color: var(--badge-duration-fg);
+}
+
+.session-page .meta .status-failed {
+    color: var(--danger);
+}
+
+.session-page .meta .status-legacy {
+    color: var(--text-muted);
+    font-weight: 500;
+}

@@ -264,6 +264,89 @@ func TestRenderTemplate_SessionPage(t *testing.T) {
 	}
 }
 
+func TestRenderTemplate_SessionHeaderMockup(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary: SessionSummary{
+			SessionID:     "b029c726-7b6b",
+			Model:         "claude-opus-5",
+			CWD:           "/Users/kite/Documents/code/github/open-code-review",
+			GitBranch:     "refactor/rename-runprofile",
+			ReviewMode:    "range",
+			DiffFrom:      "05af664",
+			DiffTo:        "HEAD",
+			TerminalState: "complete",
+		},
+	}
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "my-repo",
+		RepoName:    "MyRepo",
+		Session:     vs,
+	})
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, required := range []string{
+		`<main class="session-page">`,
+		`aria-label="Back to sessions"><svg`,
+		`<span class="meta-truncate" title="/Users/kite/Documents/code/github/open-code-review">`,
+		`<span class="meta-truncate" title="refactor/rename-runprofile">`,
+		`<strong>From:</strong> <code>05af664</code>`,
+		`<strong>To:</strong> <code>HEAD</code>`,
+		`<span class="meta-status status-complete">complete</span>`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("rendered session header missing %q", required)
+		}
+	}
+	if strings.Contains(body, "<script>") {
+		t.Error("session page must not contain inline <script> elements (CSP)")
+	}
+}
+
+func TestRenderTemplate_SessionHeaderStatusClasses(t *testing.T) {
+	cases := []struct {
+		name      string
+		aborted   bool
+		legacy    bool
+		termState string
+		wantClass string
+	}{
+		{"complete", false, false, "complete", "status-complete"},
+		{"partial", false, false, "partial", "status-partial"},
+		{"failed", false, false, "failed", "status-failed"},
+		{"skipped", false, false, "skipped", "status-legacy"},
+		{"aborted", true, false, "complete", "status-aborted"},
+		{"legacy", false, true, "complete", "status-legacy"},
+		{"unknown state stays unclassed", false, false, "odd state", `>odd state</span>`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			renderTemplate(rr, "session.html", sessionPageData{
+				EncodedRepo: "repo",
+				RepoName:    "MyRepo",
+				Session: &ViewSession{
+					Summary: SessionSummary{
+						SessionID:     "abc",
+						CWD:           "/test",
+						Aborted:       tc.aborted,
+						Legacy:        tc.legacy,
+						TerminalState: tc.termState,
+					},
+				},
+			})
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rr.Code)
+			}
+			if !strings.Contains(rr.Body.String(), tc.wantClass) {
+				t.Errorf("expected %q in rendered status markup", tc.wantClass)
+			}
+		})
+	}
+}
+
 func TestRenderTemplate_SecondarySectionsCollapsedByDefault(t *testing.T) {
 	rr := httptest.NewRecorder()
 	vs := &ViewSession{
