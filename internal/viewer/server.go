@@ -425,11 +425,8 @@ func parseTemplate(name string) (*template.Template, error) {
 		},
 		"numberedCodeLines": numberedCodeLines,
 	}
-	content, err := assets.ReadFile("templates/" + name)
-	if err != nil {
-		return nil, err
-	}
-	return template.New(name).Funcs(funcMap).Parse(string(content))
+	// Keep page-specific breadcrumb definitions isolated from other pages.
+	return template.New(name).Funcs(funcMap).ParseFS(assets, "templates/"+name, "templates/app-header.html")
 }
 
 func truncateText(n int, s string) string {

@@ -22,7 +22,6 @@ export const ko: TranslationKeys = {
   'hero.copyFailed': '복사 실패',
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
-  'hero.installMacPorts': 'MacPorts',
   'hero.installMacOS': 'MacOS',
   'hero.installLinux': 'Linux',
   'hero.installWindows': 'Windows',

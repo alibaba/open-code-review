@@ -47,6 +47,75 @@ func TestParseTemplate_NonExistent(t *testing.T) {
 	}
 }
 
+// Execute each page independently: parsing alone misses undefined partials,
+// and parsing every page together can overwrite page-specific breadcrumbs.
+func TestParseTemplate_SharedHeader(t *testing.T) {
+	tests := []struct {
+		name       string
+		data       any
+		breadcrumb string
+	}{
+		{
+			name:       "repos.html",
+			data:       map[string]any{"Repos": []RepoInfo{{EncodedPath: "my-repo", SessionCount: 1}}},
+			breadcrumb: "",
+		},
+		{
+			name: "sessions.html",
+			data: sessionsData{
+				EncodedRepo: "my-repo",
+				RepoName:    "MyRepo",
+				Sessions:    []SessionSummary{{SessionID: "0123456789abcdef"}},
+			},
+			breadcrumb: `<span class="sep">/</span><span class="current">MyRepo</span>`,
+		},
+		{
+			name: "session.html",
+			data: sessionPageData{
+				EncodedRepo: "my-repo",
+				RepoName:    "MyRepo",
+				Session:     &ViewSession{Summary: SessionSummary{SessionID: "0123456789abcdef"}},
+			},
+			breadcrumb: `<span class="sep">/</span><a href="/r/my-repo">MyRepo</a><span class="sep">/</span><span class="current">0123456789ab…</span>`,
+		},
+		{
+			name: "compare.html",
+			data: comparePageData{
+				EncodedRepo: "my-repo",
+				RepoName:    "MyRepo",
+				Before:      SessionSummary{SessionID: "before"},
+				After:       SessionSummary{SessionID: "after"},
+			},
+			breadcrumb: `<span class="sep">/</span><a href="/r/my-repo">MyRepo</a><span class="sep">/</span><span class="current">compare</span>`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpl, err := parseTemplate(tt.name)
+			if err != nil {
+				t.Fatalf("parseTemplate: %v", err)
+			}
+			if tmpl.Lookup("app-header") == nil {
+				t.Fatal("shared app-header template is missing")
+			}
+			var output strings.Builder
+			if err := tmpl.Execute(&output, tt.data); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			body := output.String()
+			for _, marker := range []string{`<nav class="breadcrumb">`, `class="nav-brand"`, `class="brand-icon"`} {
+				if count := strings.Count(body, marker); count != 1 {
+					t.Errorf("count of %q = %d, want 1", marker, count)
+				}
+			}
+			const brand = `<a href="/" class="nav-brand"><span class="brand-icon" aria-hidden="true"></span>Open Code Review Viewer</a>`
+			if !strings.Contains(body, `<nav class="breadcrumb">`+brand+tt.breadcrumb+`</nav>`) {
+				t.Error("expected shared home link, wordmark, decorative logo and page-specific breadcrumbs")
+			}
+		})
+	}
+}
+
 func TestRenderTemplate_Success(t *testing.T) {
 	rr := httptest.NewRecorder()
 	renderTemplate(rr, "repos.html", map[string]any{
