@@ -9,33 +9,41 @@
 </head>
 <body>
 {{template "app-header" .}}
-<main>
+<main class="sessions-page">
 <div class="page-heading">
-    <a class="back-link" href="/" aria-label="Back to repositories"></a>
+    <a class="back-link" href="/" aria-label="Back to repositories">{{icon "chevron-left"}}</a>
     <h2>Sessions: {{.RepoName}}</h2>
 </div>
 {{if .Sessions}}
-<table class="table">
-    <thead><tr><th>Session ID</th><th>Branch</th><th>Mode</th><th>Model</th><th>Files</th><th>Status</th><th>Comments</th><th>Duration</th><th>Started At</th><th>Compare</th></tr></thead>
+<div class="table-scroll">
+<table id="sessions-table" class="table">
+    <thead><tr><th>Session ID</th><th>Branch</th><th>Mode</th><th>Model</th><th>Files</th><th>Status</th><th>Comments</th><th>Duration</th><th>Started At</th><th class="col-action">Action</th></tr></thead>
     <tbody>
     {{range $i, $s := .Sessions}}
         <tr>
-            <td><a href="/r/{{$.EncodedRepo}}/{{$s.SessionID}}">{{$s.SessionID | printf "%.8s"}}…</a></td>
-            <td>{{$s.GitBranch}}</td>
-            <td>{{if $s.ReviewMode}}{{$s.ReviewMode}}{{else}}-{{end}}</td>
-            <td><code>{{$s.Model}}</code></td>
-            <td>{{$s.FileCount}}</td>
+            <td class="col-session"><a class="session-id" href="/r/{{$.EncodedRepo}}/{{$s.SessionID}}" title="{{$s.SessionID}}">Session: {{truncate 30 $s.SessionID}}</a></td>
+            <td class="col-branch">{{$s.GitBranch}}</td>
+            <td class="col-mode">{{if $s.ReviewMode}}{{$s.ReviewMode}}{{else}}-{{end}}</td>
+            <td class="col-model">{{$s.Model}}</td>
+            <td class="col-files">{{$s.FileCount}}</td>
             <td>{{if $s.Aborted}}aborted{{else if $s.Legacy}}legacy{{else}}{{$s.TerminalState}}{{end}}</td>
-            <td>{{if $s.CommentCount}}{{$s.CommentCount}}{{else}}-{{end}}</td>
-            <td>{{formatDuration $s.DurationSec}}</td>
-            <td>{{formatTime $s.Timestamp}}</td>
+            <td class="col-comments">{{if $s.CommentCount}}{{$s.CommentCount}}{{else}}-{{end}}</td>
+            <td class="col-duration">{{formatDuration $s.DurationSec}}</td>
+            <td class="col-started">{{formatTime $s.Timestamp}}</td>
             {{/* Rows are newest-first, so the next-older session is index+1.
                  The oldest row has no older neighbour to compare against. */}}
-            <td>{{if lt (add $i 1) (len $.Sessions)}}{{$prev := index $.Sessions (add $i 1)}}<a href="/r/{{$.EncodedRepo}}/compare?before={{$prev.SessionID}}&amp;after={{$s.SessionID}}">compare</a>{{else}}-{{end}}</td>
+            <td class="col-action">{{if lt (add $i 1) (len $.Sessions)}}{{$prev := index $.Sessions (add $i 1)}}<a href="/r/{{$.EncodedRepo}}/compare?before={{$prev.SessionID}}&amp;after={{$s.SessionID}}">Check</a>{{else}}-{{end}}</td>
         </tr>
     {{end}}
     </tbody>
 </table>
+</div>
+<nav id="sessions-pagination" class="pagination" aria-label="Session pages" hidden>
+    <button type="button" class="page-step" data-page-step="-1" aria-label="Previous page">{{icon "chevron-left"}}</button>
+    <span id="sessions-page-numbers" class="page-numbers"></span>
+    <button type="button" class="page-step" data-page-step="1" aria-label="Next page">{{icon "chevron-right"}}</button>
+</nav>
+<script src="/static/sessions.js"></script>
 {{else}}
 <p>No sessions found for this repository.</p>
 {{end}}
