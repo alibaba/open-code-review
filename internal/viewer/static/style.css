@@ -277,33 +277,45 @@ h3 {
 
 .repository-search {
     display: grid;
-    gap: 0.35rem;
-    margin-bottom: 1rem;
+    /* Right-align explicitly rather than relying on the heading's flex-grow. */
+    margin-left: auto;
 }
+/* The placeholder carries the visible name; keep the label for screen readers. */
 .repository-search label {
-    color: var(--text-muted);
-    font-size: 0.9rem;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
 }
 .repository-search input {
-    width: min(100%, 24rem);
-    padding: 0.5rem 0.65rem;
+    padding: 0.45rem 0.85rem;
     color: var(--text);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    background: var(--surface-alt);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
     font: inherit;
+    transition: background var(--transition), border-color var(--transition);
+}
+.repository-search input:hover {
+    border-color: var(--border);
 }
 .repository-search input:focus {
     outline: 2px solid var(--link);
     outline-offset: 1px;
+    background: var(--surface);
 }
 .search-field {
     position: relative;
-    width: min(100%, 24rem);
+    width: min(100%, 17rem);
 }
 .search-field input {
     width: 100%;
-    padding-right: 2rem;
+    padding-right: 2.2rem;
 }
 .search-icon {
     position: absolute;
@@ -1491,4 +1503,169 @@ p {
 .mark-btn.mark-clear {
     border-style: dashed;
     opacity: 0.6;
+}
+
+/* ── Repositories Page ── */
+.repos-page .page-heading {
+    align-items: center;
+    flex-wrap: wrap;
+    row-gap: 0.75rem;
+}
+
+.repos-page .table th {
+    background: transparent;
+    white-space: nowrap;
+}
+
+.repos-page .table th,
+.repos-page .table td {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+}
+
+.repos-page .table td {
+    vertical-align: top;
+}
+
+.repos-page .table-scroll {
+    overflow-x: auto;
+}
+
+.repos-page .col-repository {
+    min-width: 16rem;
+}
+
+.repos-page .col-sessions,
+.repos-page .col-modified,
+.repos-page .col-action {
+    white-space: nowrap;
+}
+
+.repos-page .col-sessions {
+    width: 6rem;
+}
+
+.repos-page .col-modified {
+    width: 11rem;
+}
+
+.repos-page .col-action {
+    width: 4.5rem;
+}
+
+.repos-page .table th.col-action {
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+/* The repo path reads as plain text like the mockup; it stays a link. */
+.repos-page .col-repository a {
+    color: var(--text);
+    text-decoration: none;
+    transition: color var(--transition);
+}
+.repos-page .col-repository a:hover {
+    color: var(--link);
+    text-decoration: underline;
+}
+.repos-page .col-repository a:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+}
+
+.repos-page .repo-check {
+    color: var(--link);
+    font-weight: 500;
+    text-decoration: none;
+    transition: color var(--transition);
+}
+.repos-page .repo-check:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+}
+.repos-page .repo-check:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+}
+
+.repos-page .pagination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-1);
+    margin-top: var(--space-5);
+}
+
+.repos-page .pagination[hidden] {
+    display: none;
+}
+
+.repos-page .page-numbers {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-1);
+}
+
+.repos-page .page-step,
+.repos-page .page-number {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+
+.repos-page .page-step svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+}
+
+.repos-page .page-step:hover:not(:disabled),
+.repos-page .page-number:hover:not([aria-current="page"]) {
+    background: var(--hover-row);
+    color: var(--text-strong);
+}
+
+.repos-page .page-step:disabled {
+    color: var(--text-faint);
+    cursor: default;
+}
+
+.repos-page .page-step:focus-visible,
+.repos-page .page-number:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+
+.repos-page .page-number[aria-current="page"] {
+    border-color: var(--pagination-active-border);
+    background: var(--surface);
+    color: var(--pagination-active-text);
+    font-weight: 600;
+}
+
+.repos-page .page-gap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    color: var(--text-muted);
 }

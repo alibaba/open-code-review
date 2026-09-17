@@ -84,7 +84,10 @@ on-disk directories). You don't usually type this — you click through.
 ### `/` — Repository list
 
 For each repo with at least one session you see the repo path, the
-total session count, and the most recent activity timestamp.
+total session count, the most recent activity timestamp, and a `Check`
+link to its sessions. The search box filters the list by repo path, and
+ten repositories fit on a page; the pager at the bottom right moves
+between pages.
 
 ### `/r/{repo}` — Session list for one repo
 
