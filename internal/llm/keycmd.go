@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -29,6 +30,56 @@ const keyCmdMaxOutput = 64 << 10
 // errKeyCmdOutputTooLarge aborts the stdout copy once the cap is hit. It never
 // reaches the caller: cappedBuffer.overflow is what produces the error message.
 var errKeyCmdOutputTooLarge = errors.New("credential command output exceeds cap")
+
+// suspiciousPatterns matches shell constructs that are never legitimate in a
+// credential-helper invocation and almost certainly indicate config tampering
+// or an accidental shell compound command. The list is intentionally narrow:
+// each entry must have zero plausible false-positives in real credential
+// commands (op, aws, pass, 1Password, keychain, etc.).
+//
+// Patterns deliberately NOT included:
+//   - Command separators (;, &&, ||, &): rejected in the original draft but
+//     removed because existing tests and documented usage include them
+//     (e.g. "sleep 30 2>/dev/null & printf tok", "read -r x; printf %s \"$x\"").
+//   - Shell redirections (>, 2>, >>): also rejected in the original draft but
+//     "2>/dev/null" and "2>nul" are idiomatic in helpers that suppress stderr,
+//     so matching \d*>>?\s*\S causes false positives on every such command.
+//
+// This is defence-in-depth only. api_key_cmd is explicitly designed to run
+// arbitrary commands from the user's own config file, so a determined user can
+// always bypass these checks. The goal is to surface accidental
+// misconfigurations, not to sandbox the shell.
+var suspiciousPatterns = []*regexp.Regexp{
+	// Backtick command substitution: `cmd` or `cmd arg`.
+	// Legitimate credential helpers (op, aws, pass, keychain) never contain
+	// backticks; a backtick always means command substitution.
+	regexp.MustCompile("`"),
+	// Embedded null bytes: \x00 is never part of a command name or argument
+	// and is a common injection primitive.
+	regexp.MustCompile(`\x00`),
+}
+
+// validateKeyCmd returns an error when cmd contains patterns that are almost
+// certainly not part of a legitimate credential-helper invocation. It is called
+// before the shell runs so that tampered or malformed config produces a clear
+// diagnostic instead of silently executing destructive commands.
+func validateKeyCmd(cmd, label string) error {
+	for _, re := range suspiciousPatterns {
+		if loc := re.FindStringIndex(cmd); loc != nil {
+			end := loc[1] + 8
+			if end > len(cmd) {
+				end = len(cmd)
+			}
+			return fmt.Errorf(
+				"%s contains a suspicious shell pattern at offset %d (%q); "+
+					"api_key_cmd / auth_token_cmd must be a single credential-helper "+
+					"invocation (e.g. \"op read op://vault/item\"), not a compound shell expression",
+				label, loc[0], cmd[loc[0]:end],
+			)
+		}
+	}
+	return nil
+}
 
 // cappedBuffer collects at most max bytes and records whether more were offered.
 // Refusing the write makes os/exec's copier close the pipe, so a runaway command
@@ -57,6 +108,9 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 // fallback. The resolved credential is used in memory only and is never written
 // to config or logged.
 func resolveKeyCmd(cmd, label string) (string, error) {
+	if err := validateKeyCmd(cmd, label); err != nil {
+		return "", err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), keyCmdTimeout)
 	defer cancel()
 
