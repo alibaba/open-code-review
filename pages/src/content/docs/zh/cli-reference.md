@@ -325,8 +325,8 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
 
 | 码 | 含义 |
 |---|---|
-| `0` | 评审完成（可能零评论，可能有非致命警告）。 |
-| `1` | 致命错误——参数错误、无法解析 LLM 端点、所有 per-file 子 agent 失败等。错误文本打印到 stderr。 |
+| `0` | 评审完成。要么所有选中条目都完成，要么未完成的条目仅因 `--max-tokens-budget` 截断（记为 `failed(budget)`）。 |
+| `1` | 致命错误——参数错误、无法解析 LLM 端点、所有 per-file 子 agent 失败等。错误文本打印到 stderr。运行仅为*部分*（即使其余条目都完成，仍有条目因超时、provider 错误等真实原因失败）时也使用该码。部分结果在非零退出前仍会发布，JSON 消费方不会丢失覆盖诊断。 |
 
 非致命警告（单个子 agent 失败、某文件超过 token 阈值等）内联打印；JSON 模式下
 会加入 `warnings` 数组。
