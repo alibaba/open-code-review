@@ -280,18 +280,6 @@ h3 {
     /* Right-align explicitly rather than relying on the heading's flex-grow. */
     margin-left: auto;
 }
-/* The placeholder carries the visible name; keep the label for screen readers. */
-.repository-search label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-    border: 0;
-}
 .repository-search input {
     padding: 0.45rem 0.85rem;
     color: var(--text);

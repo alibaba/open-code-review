@@ -12,13 +12,15 @@
 <main class="repos-page">
 <div class="page-heading">
     <h2>Repositories</h2>
+    {{if .Repos}}
     <div class="repository-search">
-        <label for="repository-search-input">Search repositories</label>
+        <label class="sr-only" for="repository-search-input">Search repositories</label>
         <div class="search-field">
             <input id="repository-search-input" type="search" placeholder="Search repositories..." autocomplete="off">
             <span class="search-icon" aria-hidden="true">{{icon "search"}}</span>
         </div>
     </div>
+    {{end}}
 </div>
 {{if .Repos}}
 <div class="table-scroll">

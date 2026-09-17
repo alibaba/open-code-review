@@ -138,6 +138,11 @@ func TestRenderTemplate_Success(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "No session data found") {
 		t.Errorf("expected empty repos message in rendered output")
 	}
+	// The search input is useless without a table and repos.js only loads
+	// alongside rows, so it must stay inside the {{if .Repos}} branch.
+	if strings.Contains(rr.Body.String(), "repository-search-input") {
+		t.Error("empty repositories page should not render the search input")
+	}
 }
 
 func TestRenderTemplate_WithRepos(t *testing.T) {

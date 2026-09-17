@@ -25,11 +25,6 @@
         return cell ? cell.textContent.trim().toLowerCase().includes(query) : false;
     };
 
-    const pageCount = () => {
-        const visible = rows.filter(matches).length;
-        return Math.max(1, Math.ceil(visible / PAGE_SIZE));
-    };
-
     const pageList = (total) => {
         // Pages [1, total] plus a window of NEIGHBOURS pages around the
         // current one; a gap wider than 2 collapses into an ellipsis.
@@ -59,17 +54,17 @@
         if (page !== undefined) {
             current = page;
         }
-        const total = pageCount();
+        // Filter once; both the page count and the visibility loop read the
+        // same filtered list.
+        const filtered = rows.filter(matches);
+        const total = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
         current = Math.min(Math.max(current, 1), total);
-        let index = 0;
-        rows.forEach((row) => {
-            if (!matches(row)) {
-                row.hidden = true;
-                return;
-            }
-            row.hidden = Math.floor(index / PAGE_SIZE) + 1 !== current;
-            index++;
-        });
+        for (const row of rows) {
+            row.hidden = true;
+        }
+        for (const row of filtered.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE)) {
+            row.hidden = false;
+        }
 
         const hadFocus = numbers.contains(document.activeElement);
         numbers.replaceChildren();
@@ -86,6 +81,7 @@
             button.type = "button";
             button.className = "page-number";
             button.textContent = String(item);
+            button.setAttribute("aria-label", `Page ${item}`);
             if (item === current) {
                 button.setAttribute("aria-current", "page");
             }
