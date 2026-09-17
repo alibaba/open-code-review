@@ -44,7 +44,46 @@ OCR は**4 層の優先順位チェーン**でルールを解決します。各�
 
 - `include`: 任意。組み込みのデフォルト除外パターン（テストファイルの除外。下記参照）を*バイパス*するための glob パターンです。ホワイトリストではありません。どの `include` パターンにも一致しないファイルも、依然として `unsupported_ext` と `default_path` のチェックを通過し、レビューされる可能性があります。
 - `exclude`: 任意。OCR がレビューしないファイルの glob パターンです。ユーザー設定のフィルターの中で最も優先されます。
-- `rules`: `{path, rule}` エントリの配列で、**宣言順**に評価されます。そのファイルに最初に一致した `path` glob のエントリが、OCR がモデルに送る prompt を決定します。
+- `rules`: `{path, rule, merge_system_rule?}` エントリの配列で、**宣言順**に評価されます。そのファイルに最初に一致した `path` glob のエントリが、OCR がモデルに送る prompt を決定します。`merge_system_rule` は任意で、デフォルトは `false`（置換）です。
+
+### システムルールとのマージ {#merging-with-the-system-rule}
+
+デフォルトでは、一致したユーザールールはそのファイル向けの言語別システムルールを*置き換え*ます。エントリに `"merge_system_rule": true` を設定すると、システムルールを残したまま自分のルールを並べて使えます:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+```bash
+$ ocr rules check src/main/java/com/example/UserService.java
+File: src/main/java/com/example/UserService.java
+Source: Project (.opencodereview/rule.json)
+Pattern: **/*
+Rule:
+────────────────────────────────────────
+## System-Specific Rules (Mandatory)
+
+…contents of java.md…
+
+---
+
+## User-Specific Rules (Mandatory)
+
+Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.
+────────────────────────────────────────
+```
+
+システム側は**ファイルごと**に解決され、[ファイルごとのルール解決](#ファイルごとのルール解決) の埋め込み表と同じです。キャッチオールの `**/*` エントリ 1 つでも、`.java` には `java.md`、`.py` には `python.md`、未知の拡張子には `default.md` が付きます。`merge_system_rule` は 3 つのユーザー層すべてで使えます（`--rule`、`<repo>/.opencodereview/rule.json`、`~/.opencodereview/rule.json`）。
+
+マージされるのは**システム**層だけです。同じファイルに複数の*ユーザー*エントリが一致しても first-match-wins のままです（議論 [#633](https://github.com/alibaba/open-code-review/discussions/633) を参照）。一致した層は下位のユーザー層を引き続きシャドウし、`merge_system_rule` が複数のユーザールールを積み上げることはありません。
 
 ### glob の機能
 
@@ -252,6 +291,24 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
   ]
 }
 ```
+
+### 組み込みの言語別ルールの上にグローバルなセキュリティルールを載せる {#global-security-rules-on-top-of-the-built-in-per-language-rules}
+
+キャッチオールの `**/*` ユーザールールは、通常は組み込みの言語別システムルールを捨てます。残したいときは `"merge_system_rule": true` を設定します。システム側は依然としてファイルごとに解決されるため、各言語は専用のレビュー観点を保てます:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+マシン上のすべてのリポジトリ向けなら `~/.opencodereview/rule.json` に、単一プロジェクト向けなら `<repo>/.opencodereview/rule.json` に置いてください。
 
 ## 関連項目
 
