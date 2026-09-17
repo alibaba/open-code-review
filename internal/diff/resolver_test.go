@@ -502,6 +502,14 @@ func TestMatchConsecutive_AmbiguousMatchDeclines(t *testing.T) {
 	}
 }
 
+func TestMatchConsecutive_OverlappingDuplicateDeclines(t *testing.T) {
+	lines := []indexedLine{{1, "x"}, {2, "x"}, {3, "x"}}
+	_, _, ok := matchConsecutive(lines, []string{"x", "x"})
+	if ok {
+		t.Errorf("expected overlapping duplicate match to decline, got ok=true")
+	}
+}
+
 func TestMatchConsecutive_TargetLongerThanLines(t *testing.T) {
 	lines := []indexedLine{{1, "a"}}
 	_, _, ok := matchConsecutive(lines, []string{"a", "b"})
