@@ -139,3 +139,20 @@ func finalizeRequest(ctx context.Context, collector *RetryCollector, reqErr erro
 	}
 	collector.Finalize(meta, reqErr, errors.Is(ctx.Err(), context.Canceled))
 }
+
+// finalizeOnExit is the body of the client-boundary defer shared by every
+// CompletionsWithCtx implementation. It must run on every exit path, including
+// a panic: an unfinalized entry makes Freeze drop the whole run's report. On a
+// panic the request is finalized with errRequestPanicked and the panic value
+// is re-raised unchanged, so agent.go's per-file recovery behaves exactly as
+// before.
+//
+// Callers invoke it as "defer finalizeOnExit(ctx, collector, &err)" with a
+// named error result, so the finalize sees the error actually returned.
+func finalizeOnExit(ctx context.Context, collector *RetryCollector, errp *error) {
+	if r := recover(); r != nil {
+		finalizeRequest(ctx, collector, errRequestPanicked)
+		panic(r)
+	}
+	finalizeRequest(ctx, collector, *errp)
+}
