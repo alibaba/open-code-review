@@ -140,7 +140,7 @@
     {{end}}
     </div>
     <div class="marks-row">
-        <span class="comment-filter-label" data-marks-count></span>
+        <span class="comment-filter-label" data-marks-count aria-live="polite"></span>
         <div class="marks-actions">
             <label class="marks-toggle"><input type="checkbox" data-hide-marked checked>Hide marked</label>
             <button type="button" class="clear-marks-link" data-clear-all-marks>clear all marked</button>
@@ -195,7 +195,7 @@
     </details>
     {{end}}
     </div>
-    <p class="comment-filter-empty" data-comment-filter-empty hidden>No comments match this filter.</p>
+    <p class="comment-filter-empty" data-comment-filter-empty role="status" hidden>No comments match this filter.</p>
 </div>
 {{end}}
 

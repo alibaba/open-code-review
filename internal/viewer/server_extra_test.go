@@ -250,6 +250,7 @@ func TestRenderTemplate_SessionsTableMockup(t *testing.T) {
 	for _, want := range []string{
 		header,
 		`id="sessions-table"`,
+		`<div class="table-scroll" tabindex="0" role="region" aria-label="Sessions table">`,
 		`<a class="back-link" href="/" aria-label="Back to repositories"><svg`,
 		`<td class="col-session"><a class="session-id" href="/r/my-repo/` + fullID + `" title="` + fullID + `">Session: b029c726-7b6b-46aa-b923-9fea9f…</a></td>`,
 		`<td class="col-branch">refactor/rename-runprofile</td>`,
@@ -817,6 +818,7 @@ func TestRenderTemplate_ReposTableMockup(t *testing.T) {
 	body := rr.Body.String()
 	for _, required := range []string{
 		`<main class="repos-page">`,
+		`<div class="table-scroll" tabindex="0" role="region" aria-label="Repositories table">`,
 		`<th scope="col" class="col-action">Action</th>`,
 		`<a class="repo-check" href="/r/my-project">Check</a>`,
 		`<td class="col-repository" data-repository-name><a href="/r/my-project">my-project</a></td>`,

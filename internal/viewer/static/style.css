@@ -1475,6 +1475,7 @@ p {
 
 .sessions-page .table-scroll {
     overflow-x: auto;
+    overscroll-behavior: contain;
 }
 
 .sessions-page .col-session {
@@ -1550,7 +1551,10 @@ p {
 
 /* ── Accessibility: focus ── */
 /* Collapsible headers and in-table links keep the same visible focus ring
-   as the rest of the design system instead of the bare browser default. */
+   as the rest of the design system instead of the bare browser default.
+   The scrollable table wrappers are focusable regions (keyboard users can
+   otherwise never reach the columns that overflow), so they get one too —
+   drawn inside the box, where overflow would clip a positive offset. */
 .file-accordion-header:focus-visible,
 .token-breakdown-toggle:focus-visible,
 .comment-file-header:focus-visible,
@@ -1560,6 +1564,11 @@ p {
 nav.breadcrumb a:focus-visible {
     outline: 2px solid var(--link);
     outline-offset: 2px;
+}
+.sessions-page .table-scroll:focus-visible,
+.repos-page .table-scroll:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: -2px;
 }
 
 /* ── Accessibility: reduced motion ── */
@@ -1748,6 +1757,7 @@ nav.breadcrumb a:focus-visible {
 
 .repos-page .table-scroll {
     overflow-x: auto;
+    overscroll-behavior: contain;
 }
 
 .repos-page .col-repository {
