@@ -405,6 +405,28 @@ func TestTextTokens_MeetWCAGAA(t *testing.T) {
 	}
 }
 
+// TestResponsiveCSS_MetaOverrideComesAfterBase guards the cascade for the
+// narrow-screen meta overrides: the selectors are equally specific as the
+// base rules, so if the override block is ever moved above them the wraps
+// silently stop applying at narrow widths (exactly what review caught).
+func TestResponsiveCSS_MetaOverrideComesAfterBase(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	text := string(css)
+	base := strings.Index(text, ".session-page .meta span {\n    white-space: nowrap;\n}")
+	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;\n    }")
+	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;\n    }")
+	if base == -1 || normal == -1 || truncate == -1 {
+		t.Fatal("style.css is missing the session meta rules or their 768px overrides")
+	}
+	if normal < base || truncate < base {
+		t.Error("the 768px session meta overrides must come after the base " +
+			".session-page .meta rules: equal specificity means source order decides")
+	}
+}
+
 // TestFocusCSS_CoversChrome holds the focus-visible rules for the
 // collapsible headers, in-table links and scrollable table regions: these
 // elements have no other visible focus indicator, so losing the rule would
