@@ -1,6 +1,6 @@
 {
   "name": "open-code-review-pi",
-  "version": "1.12.2",
+  "version": "1.12.3",
   "description": "pi coding agent extension for OpenCodeReview (ocr): /ocr-review commands and ocr_review / ocr_delegate tools for AI-powered code review of Git changes.",
   "type": "module",
   "license": "Apache-2.0",
@@ -22,7 +22,9 @@
     "ai"
   ],
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "files": [
     "src",
