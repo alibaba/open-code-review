@@ -46,6 +46,7 @@ environment variable.
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
+| `vertex` | anthropic-vertex | derived from `gcp_region` | — (Application Default Credentials) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
@@ -133,11 +134,52 @@ block describes one URL and one token, has nowhere to put a region or a profile,
 and bedrock uses neither value it does carry, so the combination is rejected
 rather than accepted and ignored.
 
+### Google Vertex AI
+
+`vertex` speaks the same Messages API as `anthropic`, but requests are
+authorized from [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials)
+instead of carrying an API key, and the region and project decide the host.
+There is no `api_key` to set, and none is accepted as a substitute:
+
+```bash
+gcloud auth application-default login
+
+ocr config set provider                       vertex
+ocr config set model                          claude-sonnet-5
+ocr config set providers.vertex.gcp_region    us-east5
+ocr config set providers.vertex.gcp_project   my-project
+```
+
+| Field | Meaning |
+|---|---|
+| `providers.vertex.gcp_region` | Region whose Vertex AI host serves the request. There is no ambient default — a review run fails at startup without one. |
+| `providers.vertex.gcp_project` | Project the request is billed and scoped to. Falls back to `GOOGLE_CLOUD_PROJECT` when unset. |
+
+Credentials come from `gcloud auth application-default login`, a service
+account key referenced by `GOOGLE_APPLICATION_CREDENTIALS`, or the ambient
+metadata server on GCE/GKE/Cloud Run — the same chain every other Google Cloud
+SDK reads.
+
+`ocr llm test` reports the region and project in place of a URL, because
+vertex has no configured URL — the region and project decide the host:
+
+```
+Source: provider:vertex
+Region:  us-east5
+Project: my-project
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+Vertex is **not** available through `llm.protocol` or `OCR_LLM_PROTOCOL`, for
+the same reason bedrock is not: that block describes one URL and one token,
+and vertex uses neither.
+
 ### Custom providers
 
 Any provider name not in the table above is treated as custom and must
 supply at least `url` and `protocol` (`protocol` is `anthropic`,
-`openai`, `openai-responses`, or `anthropic-bedrock`):
+`openai`, `openai-responses`, `anthropic-bedrock`, or `anthropic-vertex`):
 
 ```bash
 ocr config set provider                             my-gateway
@@ -168,6 +210,18 @@ ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
 ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
 ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
 ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
+```
+
+A custom provider on the `anthropic-vertex` protocol likewise needs no `url`
+and takes the same GCP fields as the built-in — useful for a second region or
+project:
+
+```bash
+ocr config set provider                                vertex-eu
+ocr config set custom_providers.vertex-eu.protocol     anthropic-vertex
+ocr config set custom_providers.vertex-eu.gcp_region   europe-west1
+ocr config set custom_providers.vertex-eu.gcp_project  my-eu-project
+ocr config set custom_providers.vertex-eu.model        claude-sonnet-5
 ```
 
 The `url` can be either the API base URL or the full `/responses` endpoint — OCR normalizes it either way.
