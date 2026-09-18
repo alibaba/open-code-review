@@ -7,7 +7,7 @@ import com.alibaba.opencodereview.idea.model.FileChange
 import com.alibaba.opencodereview.idea.model.FileStatus
 
 /**
- * 全为纯函数（git 文本 → 领域模型），不依赖 IDE API，可直接单测。
+ * All pure functions (git text -> domain models) with no IDE API dependencies, so they can be unit-tested directly.
  */
 
 fun mapStatusCode(code: Char): FileStatus = when (code) {
@@ -16,13 +16,13 @@ fun mapStatusCode(code: Char): FileStatus = when (code) {
     'D' -> FileStatus.DELETED
     'R' -> FileStatus.RENAMED
     'M' -> FileStatus.MODIFIED
-    else -> FileStatus.MODIFIED // C（copied）/T（typechange）/U（unmerged）等一律降级为修改，见 GitMapTest
+    else -> FileStatus.MODIFIED // C (copied) / T (typechange) / U (unmerged) and the like all degrade to MODIFIED, see GitMapTest
 }
 
 /**
- * 解析 `git status --porcelain` 输出。
- * 每行格式：XY<space>path，X 为暂存区状态，Y 为工作区状态，`??` 表示未跟踪。
- * 重命名行格式 `R  old -> new`，取 new。
+ * Parses `git status --porcelain` output.
+ * Each line is XY<space>path, where X is the staged status, Y the worktree status, and `??` means untracked.
+ * A rename line looks like `R  old -> new`; take new.
  */
 fun parsePorcelain(output: String): List<FileChange> {
     val files = mutableListOf<FileChange>()
@@ -36,20 +36,22 @@ fun parsePorcelain(output: String): List<FileChange> {
         if (x == '?' && y == '?') {
             code = '?'
         } else if (x == 'R' || y == 'R' || x == 'C' || y == 'C') {
-            // 重命名(R)与复制(C)都是 `old -> new` 格式，取 new。
+            // Both renames (R) and copies (C) use the `old -> new` format; take new.
             code = if (x == 'R' || y == 'R') 'R' else 'C'
-            // 引号格式（旧路径含空格等特殊字符，git 加了引号）：分隔符是 `" -> `（闭引号 + 箭头）。
-            // 不用 `" -> "`（多一个引号）——新路径可能没引号（无特殊字符），不要求新路径也带引号。
+            // Quoted form (the old path contains spaces or other special characters, so git quoted it): the
+            // separator is `" -> ` (closing quote + arrow).
+            // Do not search for `" -> "` (one quote more) -- the new path may be unquoted (no special characters),
+            // so the new path cannot be required to carry quotes either.
             val quotedSep = path.indexOf("\" -> ")
             if (quotedSep >= 0) {
-                path = path.substring(quotedSep + 5) // 跳过 `" -> `（5 字符），保留新路径
+                path = path.substring(quotedSep + 5) // skip `" -> ` (5 characters), keeping the new path
             } else {
-                // 无引号格式：文件名不含空格，` -> ` 不会出现在文件名里，直接找即可。
+                // Unquoted form: the file name has no spaces, so ` -> ` cannot appear inside it and a plain search is safe.
                 val arrow = path.indexOf(" -> ")
                 if (arrow >= 0) path = path.substring(arrow + 4)
             }
         } else {
-            // 暂存区状态优先，没有再取工作区状态
+            // Staged status takes priority; fall back to the worktree status when there is none
             code = if (x != ' ' && x != '?') x else y
         }
         path = unquoteGitPath(path)
@@ -59,11 +61,11 @@ fun parsePorcelain(output: String): List<FileChange> {
     return files
 }
 
-/** 解析 `git ls-files --others --exclude-standard` 输出的未跟踪路径列表。 */
+/** Parses the untracked path list produced by `git ls-files --others --exclude-standard`. */
 fun parseUntrackedList(output: String): List<String> =
     output.lineSequence().map { unquoteGitPath(it.trim()) }.filter(String::isNotEmpty).toList()
 
-/** 合并已跟踪变更与未跟踪文件，按路径去重，已跟踪的优先。 */
+/** Merges tracked changes with untracked files, deduplicating by path with tracked entries taking priority. */
 fun mergeWorkspaceFiles(tracked: List<FileChange>, untrackedPaths: List<String>): List<FileChange> {
     val files = mutableListOf<FileChange>()
     val seen = mutableSetOf<String>()
@@ -77,8 +79,9 @@ fun mergeWorkspaceFiles(tracked: List<FileChange>, untrackedPaths: List<String>)
 }
 
 /**
- * 构建工作区文件列表。与 OCR CLI 的 workspace 模式一致：
- * 先 `diff HEAD`，为空则回退 `diff --cached`（首次提交前没有 HEAD），最后合并未跟踪文件。
+ * Builds the workspace file list, matching the OCR CLI's workspace mode:
+ * `diff HEAD` first, falling back to `diff --cached` when it is empty (no HEAD before the first commit),
+ * then merging in the untracked files.
  */
 fun buildWorkspaceFiles(diffHeadOut: String, diffCachedOut: String, untrackedOut: String): List<FileChange> {
     var tracked = parseNameStatus(diffHeadOut)
@@ -87,9 +90,11 @@ fun buildWorkspaceFiles(diffHeadOut: String, diffCachedOut: String, untrackedOut
 }
 
 /**
- * 解析 `git branch -a --format=%(refname)` 输出。刻意取完整 refname 而非 `%(refname:short)`：
- * git 会把 `refs/remotes/origin/HEAD` 缩写为 `origin`——既不以 HEAD 结尾、本身也不等于 HEAD，后置过滤无法拦截，
- * 下拉列表中会出现选中后报 "unknown revision" 的假分支。完整 refname 可精确排除 `refs/remotes/<remote>/HEAD` 符号引用。
+ * Parses `git branch -a --format=%(refname)` output. The full refname is used deliberately instead of
+ * `%(refname:short)`: git abbreviates `refs/remotes/origin/HEAD` to `origin`, which neither ends in HEAD nor
+ * equals HEAD, so post-filtering cannot catch it and the dropdown would show a fake branch that errors with
+ * "unknown revision" when selected. The full refname allows precisely excluding the `refs/remotes/<remote>/HEAD`
+ * symbolic refs.
  */
 fun parseBranchList(output: String): List<String> {
     val branches = mutableListOf<String>()
@@ -100,7 +105,7 @@ fun parseBranchList(output: String): List<String> {
         val name = when {
             ref.startsWith("refs/heads/") -> ref.removePrefix("refs/heads/")
             ref.startsWith("refs/remotes/") -> ref.removePrefix("refs/remotes/")
-            // 非 heads/remotes 的引用（tags、stash 等）不应出现在 branch -a 输出中，保险起见跳过。
+            // Refs other than heads/remotes (tags, stash, ...) should not appear in branch -a output; skip them defensively.
             ref.startsWith("refs/") -> continue
             else -> ref
         }
@@ -111,9 +116,11 @@ fun parseBranchList(output: String): List<String> {
 }
 
 /**
- * 把 `origin/HEAD` 和它指向的默认远程分支（[defaultRemote]）提到列表最前、紧跟第一个本地分支之后，
- * 其余条目保持原序（对齐 GitHub 网页端的分支顺序）。[defaultRemote] 为 null（仓库没有 origin/HEAD）
- * 时不重排，原样返回。位次对齐 VS Code 扩展：本地默认分支、`origin/HEAD`、默认远程分支、其余。
+ * Moves `origin/HEAD` and the default remote branch it points at ([defaultRemote]) to the front of the list,
+ * right after the first local branch, keeping the remaining entries in their original order (matching the
+ * branch order on GitHub's web UI). When [defaultRemote] is null (the repository has no origin/HEAD), the list
+ * is returned as-is with no reordering. The positions align with the VS Code extension: local default branch,
+ * `origin/HEAD`, default remote branch, then the rest.
  */
 fun pinDefaultBranches(branches: List<String>, defaultRemote: String?): List<String> {
     if (defaultRemote.isNullOrBlank()) return branches
@@ -124,7 +131,7 @@ fun pinDefaultBranches(branches: List<String>, defaultRemote: String?): List<Str
     return listOf(rest.first()) + pin + rest.drop(1)
 }
 
-/** 生成用于 `rev-parse --verify` 的分支引用候选：补 origin/、并把 main 与 master 互换。 */
+/** Builds branch ref candidates for `rev-parse --verify`: add the origin/ prefix and swap main with master. */
 fun branchRefCandidates(ref: String): List<String> {
     val candidates = mutableListOf(ref)
     if (!ref.contains('/')) candidates += "origin/$ref"
@@ -136,9 +143,9 @@ fun branchRefCandidates(ref: String): List<String> {
 }
 
 /**
- * 解码 git 的 quotepath 转义（`core.quotepath=true` 时中文会变成 `"\344\275\240"`）。
- * 所有 git 调用均带 `-c core.quotepath=false`，但仓库/全局配置仍可能引入引号形式，
- * 故保留此层处理。
+ * Decodes git's quotepath escapes (with `core.quotepath=true`, Chinese paths become `"\344\275\240"`).
+ * Every git invocation passes `-c core.quotepath=false`, but repository/global config can still introduce
+ * the quoted form, so this decoding layer is kept.
  */
 fun unquoteGitPath(path: String): String {
     if (path.length < 2 || !path.startsWith('"') || !path.endsWith('"')) return path
@@ -153,7 +160,7 @@ fun unquoteGitPath(path: String): String {
             i++
             continue
         }
-        // 八进制转义：字符范围收紧为 0-7，避免 toInt(8) 遇 '8'/'9' 抛异常。
+        // Octal escape: the digit range is tightened to 0-7 so toInt(8) does not throw on '8'/'9'.
         if (i + 3 < inner.length && inner.substring(i + 1, i + 4).all { it in '0'..'7' }) {
             bytes += inner.substring(i + 1, i + 4).toInt(8).toByte()
             i += 4
@@ -174,8 +181,8 @@ fun unquoteGitPath(path: String): String {
 }
 
 /**
- * 解析 `git diff --name-status` / `git show --name-status` 输出。
- * 制表符分隔：`status<TAB>path`；重命名是 `R<score><TAB>old<TAB>new`，取 new。
+ * Parses `git diff --name-status` / `git show --name-status` output.
+ * Tab-separated: `status<TAB>path`; a rename is `R<score><TAB>old<TAB>new`, take new.
  */
 fun parseNameStatus(output: String): List<FileChange> {
     val files = mutableListOf<FileChange>()

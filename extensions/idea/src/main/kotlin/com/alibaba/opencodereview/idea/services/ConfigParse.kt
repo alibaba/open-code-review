@@ -13,12 +13,14 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
 /**
- * snake_case 与 camelCase 之间的转换边界：
- * `~/.opencodereview/config.json` 是 CLI snake_case 格式（`api_key`/`auth_header`/`custom_providers`/`use_anthropic`），插件内部使用 camelCase。
- * 不要给 [OcrConfig] 加 `@SerialName` 直接反序列化配置文件——那样序列化给前端时字段名仍为 snake_case，前端会读取到 undefined。
+ * The conversion boundary between snake_case and camelCase:
+ * `~/.opencodereview/config.json` is the CLI's snake_case format (`api_key`/`auth_header`/`custom_providers`/`use_anthropic`)
+ * while the plugin works with camelCase internally.
+ * Do not add `@SerialName` to [OcrConfig] and deserialize the file directly: fields serialized to the frontend
+ * would keep their snake_case names, and the frontend would read undefined.
  */
 
-/** 取字符串字段，缺失或类型不符一律返回 ""。 */
+/** Reads a string field; returns "" whenever the field is missing or of the wrong type. */
 private fun JsonObject?.strAt(key: String): String {
     val prim = this?.get(key) as? JsonPrimitive ?: return ""
     return if (prim.isString) prim.content else ""
@@ -26,8 +28,8 @@ private fun JsonObject?.strAt(key: String): String {
 
 private fun parseProviderEntry(raw: JsonElement?): ProviderEntry {
     val obj = raw as? JsonObject ?: return ProviderEntry()
-    // models 缺失时保持 null（非空列表）：调用方按"有无此字段"决定是否使用预置模型兜底，
-    // 空列表会被当作"该 provider 无任何模型"。
+    // A missing models field stays null (not an empty list): callers use the field's presence to decide
+    // whether to fall back to the preset models, while an empty list reads as "this provider has no models at all".
     val models = (obj["models"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull {
         (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content
     }
@@ -47,7 +49,8 @@ private fun parseProviderMap(raw: JsonElement?): Map<String, ProviderEntry> {
 }
 
 /**
- * 解析配置文件内容。空白输入返回 null；JSON 非法会抛异常（由 [ConfigService] 捕获后当作"无配置"）。
+ * Parses the config file content. Blank input returns null; invalid JSON throws
+ * (caught by [ConfigService] and treated as "no configuration").
  */
 fun parseConfig(raw: String): OcrConfig? {
     if (raw.isBlank()) return null

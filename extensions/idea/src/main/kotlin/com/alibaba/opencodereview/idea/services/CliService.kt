@@ -18,12 +18,13 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-/** CLI 以非 0 退出时抛出，message 已经过 [extractCliError] 提炼，可直接展示给用户。 */
+/** Thrown when the CLI exits non-zero. The message has already been refined by [extractCliError] and is safe to show to users. */
 class CliException(message: String) : RuntimeException(message)
 
 /**
- * 所有子进程必经 [ShellEnv]：环境取登录 shell 的、命令名由 `resolveBin` 解析为绝对路径。
- * 裸命令名加继承环境在 GUI 启动的 IDEA 中无法运行。本类方法均为阻塞调用，调用方须在后台线程执行。
+ * Every subprocess goes through [ShellEnv]: the environment comes from the login shell, and command names are
+ * resolved to absolute paths by `resolveBin`. A bare command name plus the inherited environment cannot run in a
+ * GUI-launched IDEA. All methods here are blocking; callers must run them on a background thread.
  */
 class CliService(private val cliPath: String = "ocr") {
 
@@ -55,7 +56,7 @@ class CliService(private val cliPath: String = "ocr") {
 
     fun isAvailable(): Boolean = checkEnvironment().ocr.ok
 
-    /** node → npm → ocr 顺序探测并短路：前一个不可用时后续直接判失败，避免无意义的等待。 */
+    /** Probes node -> npm -> ocr in order with short-circuiting: once one is unavailable the rest fail immediately, avoiding pointless waits. */
     fun checkEnvironment(force: Boolean = false): EnvCheckResult {
         if (!force) getCachedEnvironment()?.let { return it }
         val node = probeCommand("node")
@@ -67,56 +68,61 @@ class CliService(private val cliPath: String = "ocr") {
     }
 
     private fun probeCommand(bin: String): EnvToolStatus = runCatching {
-        // 参数固定为 --version，可安全套 shell（Windows 上 npm/ocr 是 .cmd，不套 shell 无法执行）。
+        // The arguments are fixed (--version), so shell wrapping is safe (on Windows npm/ocr are .cmd files, which cannot run without a shell).
         val process = ProcessBuilder(ShellEnv.forShell(listOf(ShellEnv.resolveBin(bin), "--version")))
             .withShellEnv()
             .redirectErrorStream(true)
             .start()
         process.outputStream.close()
-        // stdout 必须分线程读取。本线程 readText() 会阻塞至进程退出（或管道写满），导致后续
-        // waitFor(PROBE_TIMEOUT_MS) 无法执行——探测卡住的 node 会永久挂住整个环境检查。写法与 ShellEnv.capture 一致。
+        // stdout must be read on a separate thread. readText() on this thread would block until the process exits
+        // (or the pipe fills up), so waitFor(PROBE_TIMEOUT_MS) would never run -- a stuck node probe would hang the
+        // whole environment check permanently. Same pattern as ShellEnv.capture.
         val out = StringBuilder()
         val reader = Thread({
             runCatching { process.inputStream.bufferedReader().forEachLine { synchronized(out) { out.appendLine(it) } } }
         }, "ocr-probe-$bin").apply { isDaemon = true; start() }
         if (!process.waitFor(PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-            // Windows 上探测经 cmd.exe 套壳，只杀壳会留下卡死的 node/npm，须树级强杀。
+            // On Windows the probe runs wrapped in cmd.exe; killing only the shell would leave a stuck node/npm behind, so a tree force-kill is required.
             destroyTreeForcibly(process)
-            // 进程被强杀后 stdout 管道关闭、reader 将很快 EOF 退出；短 join 避免 daemon 线程在反复环境检查中堆积。
+            // After the force-kill the stdout pipe closes and the reader will EOF out shortly; the short join keeps daemon threads from piling up across repeated environment checks.
             reader.join(500)
-            // 关流与 runRaw/install 的清理一致，避免高频环境检查下 fd 累积到 GC。
+            // Closing the streams matches the cleanup in runRaw/install, keeping fds from accumulating until GC under frequent environment checks.
             process.closeStreamsQuietly()
             return EnvToolStatus()
         }
-        // 有界等待 reader 收完：--version 探测毫秒级结束；极端情况（子进程继承 stdout 管道不 EOF）2s 上限也避免主线程永久挂。
-        // 读写 out 均 synchronized，即便超时 reader 仍在写，读 out 也不踩 StringBuilder 跨线程脏读。
+        // Bounded wait for the reader to finish: a --version probe ends in milliseconds, and in the extreme case
+        // (a child inheriting the stdout pipe never EOFs) the 2s cap keeps the main thread from hanging forever.
+        // Reads and writes of out are both synchronized, so even with a timed-out reader still writing, reading out
+        // avoids cross-thread torn reads of the StringBuilder.
         reader.join(2_000)
-        // 关流（超时分支已自行关流并返回；此处覆盖正常退出/非零退出路径），避免高频环境检查下 fd 累积到 GC。
+        // Close the streams (the timeout branch already closed them and returned; this covers the normal-exit and
+        // non-zero-exit paths), keeping fds from accumulating until GC under frequent environment checks.
         process.closeStreamsQuietly()
         if (process.exitValue() != 0) return EnvToolStatus()
         val version = synchronized(out) { out.lineSequence().firstOrNull()?.trim()?.takeIf(String::isNotEmpty) }
         EnvToolStatus(ok = true, version = version)
     }.getOrElse { EnvToolStatus() }
 
-    /** 全局安装 ocr CLI，逐行回显 npm 日志，按 exit code 返回是否成功。 */
+    /** Installs the ocr CLI globally, echoing npm logs line by line, and reports success by exit code. */
     fun install(onLog: (LogLine) -> Unit): Boolean {
         val args = listOf("install", "-g", NPM_PACKAGE, "--loglevel", "http", "--no-progress")
         onLog(LogLine("$ npm ${args.joinToString(" ")}"))
         return runCatching {
-            // 参数均为固定值，同 probeCommand，可套 shell 以便 Windows 上执行 npm.cmd。
-            // 先收尾上一个 install（若有）再 start 新的，避免两个 npm install 同时跑争全局 npm 缓存/lockfile。
+            // The arguments are all fixed values; as in probeCommand, shell wrapping is safe so npm.cmd can run on Windows.
+            // Finalize the previous install (if any) before starting a new one, so two npm installs never race on
+            // the global npm cache/lockfile.
             installProcess.getAndSet(null)?.let(::killStaleInstall)
             val process = ProcessBuilder(ShellEnv.forShell(listOf(ShellEnv.resolveBin("npm")) + args))
-                // 非 TTY 下 npm 仍可能画进度条，强制关闭并去色，否则日志中充斥转义序列。
+                // npm may still draw progress bars when not a TTY; force them off and strip color, otherwise the log fills with escape sequences.
                 .withShellEnv("npm_config_progress" to "false", "npm_config_color" to "false")
                 .redirectErrorStream(true)
                 .start()
             // Register only in the installation slot; review handles are independent.
-            // 正常刚清空过应为 null；并发 install 罕见，若有同样收尾。
+            // Should normally be null since it was just cleared; concurrent installs are rare, but finalize one the same way if it happens.
             installProcess.getAndSet(process)?.let(::killStaleInstall)
             try {
                 process.outputStream.close()
-                // npm 用 \r 覆盖行，此处归一为 \n 再逐行输出。
+                // npm overwrites lines with \r; normalize to \n here before emitting line by line.
                 process.inputStream.bufferedReader().forEachLine { raw ->
                     raw.replace('\r', '\n').lineSequence().forEach { line ->
                         if (line.isNotBlank()) onLog(LogLine(line))
@@ -126,7 +132,7 @@ class CliService(private val cliPath: String = "ocr") {
                 if (exit == 0) {
                     onLog(LogLine(HostStrings.t(currentIdeLocale(), "ext.cli.installOk")))
                     invalidateEnvironmentCache()
-                    // 新装的全局 bin 可能不在已缓存的 PATH 中，须让 shell 环境重新解析一次。
+                    // The freshly installed global bin may not be on the cached PATH; the shell environment must re-resolve once.
                     ShellEnv.invalidate()
                 } else {
                     onLog(
@@ -138,8 +144,11 @@ class CliService(private val cliPath: String = "ocr") {
                 }
                 exit == 0
             } finally {
-                // 与 runRaw 对齐：异常路径（forEachLine 抛 IOException 等）下进程可能仍存活，树级强杀 + 关流兜底。
-                // 不加 isAlive 守卫：树级强杀对已死进程无害（枚举返回空、destroyForcibly 为 no-op），且检查-枚举之间留竞态窗口不如尽早枚举。
+                // Mirrors runRaw: on exception paths (forEachLine throwing IOException and the like) the process may
+                // still be alive, so tree force-kill + stream close act as the safety net.
+                // No isAlive guard: a tree force-kill is harmless on a dead process (enumeration returns empty,
+                // destroyForcibly is a no-op), and an isAlive check would itself open a race window -- enumerating
+                // early is strictly better.
                 destroyTreeForcibly(process)
                 process.closeStreamsQuietly()
                 installProcess.compareAndSet(process, null)
@@ -151,8 +160,9 @@ class CliService(private val cliPath: String = "ocr") {
     }
 
     /**
-     * 执行任意 CLI 参数：stderr 逐行回调，结束返回 stdout 全文；退出码非 0 抛 CliException。
-     * 不走 forShell——args 含用户输入，套 shell 会增加注入面。
+     * Runs arbitrary CLI arguments: stderr is streamed back line by line, the full stdout is returned at the end,
+     * and a non-zero exit throws CliException.
+     * Deliberately not forShell -- args contain user input, and shell wrapping would enlarge the injection surface.
      */
     fun runRaw(
         args: List<String>,
@@ -181,7 +191,7 @@ class CliService(private val cliPath: String = "ocr") {
                     }
                 }
             }, "ocr-cli-stderr").apply { isDaemon = true; start() }
-            process.outputStream.close() // 在 try 内：close 抛 IOException 时 finally 仍会清理已注册的进程，不致脱管。
+            process.outputStream.close() // inside the try: if close throws IOException, the finally still cleans up the registered process so nothing leaks unmanaged.
             val stdout = process.inputStream.bufferedReader().readText()
             val exit = process.waitFor()
             stderrThread.join(2_000)
@@ -209,8 +219,8 @@ class CliService(private val cliPath: String = "ocr") {
     ): CliResult = parseCliResult(runRaw(buildReviewArgs(opts), cwd, onLog, cancellation = cancellation))
 
     /**
-     * 执行 `ocr llm test`。传入 [home] / [configPath] 时在隔离环境下执行，
-     * 使"测试连通性"不会破坏用户真正的 ~/.opencodereview/config.json。
+     * Runs `ocr llm test`. When [home] / [configPath] are passed, it runs in an isolated environment so that
+     * "testing connectivity" cannot damage the user's real ~/.opencodereview/config.json.
      */
     fun testConnection(home: File? = null, configPath: File? = null): Pair<Boolean, String?> {
         val envExtra = buildMap {
@@ -235,9 +245,9 @@ class CliService(private val cliPath: String = "ocr") {
             {
                 runCatching {
                     destroyTreeForcibly(process, descendants)
-                    // 流正常由 runRaw 的 finally 关闭，此处幂等兜底（双关安全）。
+                    // Streams are normally closed by runRaw's finally; this idempotent fallback is safe to double-close.
                     process.closeStreamsQuietly()
-                }.onFailure { thisLogger().warn("[ocr] 强制终止进程树失败", it) }
+                }.onFailure { thisLogger().warn("[ocr] Failed to force-terminate the process tree", it) }
             },
             FORCE_KILL_DELAY_MS,
             TimeUnit.MILLISECONDS,
@@ -245,35 +255,43 @@ class CliService(private val cliPath: String = "ocr") {
     }
 
     /**
-     * 进程树终止。destroy()/destroyForcibly() 只作用于直接子进程；孙进程（npm 全局 ocr 是 Node
-     * launcher，由它再 spawn Go 二进制）在父进程死后被托管到系统根进程，descendants() 便再不可见。
-     * 所以优雅阶段先快照子孙、只信号父进程（新版 launcher 会把 SIGTERM 转发给 Go 自行清理，
-     * 重复信号子孙可能打断其清理）；强杀阶段以快照为准并补一次实时枚举，兜住快照后新出现的子孙。
-     * 返回的快照句柄在孙进程被托管后依然有效，是强杀阶段唯一可靠的追杀依据。
+     * Process-tree termination. destroy()/destroyForcibly() only affect direct children; grandchildren (the npm
+     * global ocr is a Node launcher that spawns the Go binary itself) are reparented to the system root process
+     * once the parent dies, after which descendants() can no longer see them.
+     * So the graceful phase snapshots the descendants first and signals only the parent (the newer launcher
+     * forwards SIGTERM to the Go binary for its own cleanup; repeated signals may interrupt that cleanup);
+     * the force-kill phase relies on the snapshot plus one fresh enumeration to also catch grandchildren spawned
+     * after the snapshot.
+     * The returned snapshot handles stay valid after grandchildren are reparented and are the only reliable basis
+     * for hunting them down in the force-kill phase.
      */
     private fun destroyGracefully(process: Process): List<ProcessHandle> {
-        // 枚举失败（极端平台问题）时退回空快照：宁可强杀阶段漏杀，也不能让调用方的关流收尾被异常跳过。
+        // When enumeration fails (an extreme platform problem), fall back to an empty snapshot: better to miss some
+        // kills in the force-kill phase than to let the caller's stream-close cleanup be skipped by an exception.
         val descendants = runCatching { process.toHandle().descendants().toList() }.getOrDefault(emptyList())
         process.destroy()
         return descendants
     }
 
     /**
-     * 强杀整棵树。顺序有讲究：实时枚举必须在杀父进程之前（父进程死后子孙被托管到系统根进程，
-     * descendants() 便再不可见）；杀父优先于杀子孙，防止父进程（npm lifecycle、supervisor 类）
-     * 在子孙被杀后、自己被杀前又 spawn 出新子孙。单个句柄强杀失败不阻断其余。
-     * 无快照调用为 best-effort：进程若在枚举前一瞬刚好退出，子孙已随父进程之死被托管而不可见，
+     * Force-kills the whole tree. The order matters: the fresh enumeration must happen before killing the parent
+     * (once the parent dies its descendants are reparented to the system root process and descendants() can no
+     * longer see them); the parent is killed before the descendants so a supervisor-like parent (npm lifecycle
+     * and the like) cannot spawn new children after its descendants die but before it dies itself. One handle's
+     * force-kill failing does not block the rest.
+     * Snapshot-less calls are best-effort: if the process happens to exit the instant before enumeration, its
+     * descendants were already reparented along with the parent's death and are invisible.
      * Cancellation passes a snapshot so descendants remain reachable after their parent exits.
      */
     private fun destroyTreeForcibly(process: Process, snapshot: List<ProcessHandle> = emptyList()) {
-        // 实时枚举失败不阻断后续：快照 + 父进程强杀仍须执行，保证本方法不向外抛异常。
+        // A fresh-enumeration failure does not block the rest: the snapshot + parent force-kill must still run, and this method must never throw outward.
         val live = runCatching { process.toHandle().descendants().toList() }.getOrDefault(emptyList())
         val tree = (snapshot + live).distinctBy(ProcessHandle::pid)
         runCatching { process.destroyForcibly() }
         tree.forEach { runCatching { it.destroyForcibly() } }
     }
 
-    /** 关掉进程的三路流，吞掉 close() 声明的 IOException，不吞 InterruptedException 等运行期信号。 */
+    /** Closes the process's three streams, swallowing only the IOException declared by close() and never runtime signals such as InterruptedException. */
     private fun Process.closeStreamsQuietly() {
         try { inputStream.close() } catch (_: IOException) {}
         try { outputStream.close() } catch (_: IOException) {}
@@ -284,16 +302,16 @@ class CliService(private val cliPath: String = "ocr") {
     private fun killStaleInstall(stale: Process) {
         try {
             if (stale.isAlive) {
-                thisLogger().warn("[ocr] 上一个 npm install 仍在运行，已终止")
+                thisLogger().warn("[ocr] The previous npm install was still running and has been terminated")
                 val descendants = destroyGracefully(stale)
                 if (!stale.waitFor(FORCE_KILL_DELAY_MS, TimeUnit.MILLISECONDS)) {
-                    thisLogger().warn("[ocr] 上一个 npm install ${FORCE_KILL_DELAY_MS}ms 内未退出，强制终止")
+                    thisLogger().warn("[ocr] The previous npm install did not exit within ${FORCE_KILL_DELAY_MS}ms; force-terminating")
                 }
-                // npm 的子孙（lifecycle 脚本、node-gyp 等）不随父进程退出，必须树级收尾。
+                // npm's descendants (lifecycle scripts, node-gyp, ...) do not die with the parent, so a tree-level cleanup is required.
                 destroyTreeForcibly(stale, descendants)
             }
         } finally {
-            // 关流必须在 finally：waitFor 被中断等异常路径下也不能泄漏 stale 进程的 fd。
+            // Stream close must be in finally: even on exception paths such as an interrupted waitFor, the stale process's fds must not leak.
             stale.closeStreamsQuietly()
         }
     }

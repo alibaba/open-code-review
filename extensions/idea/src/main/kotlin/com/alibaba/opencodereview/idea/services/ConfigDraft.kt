@@ -15,28 +15,30 @@ import kotlinx.serialization.json.jsonObject
 import java.util.Locale
 
 /**
- * 在内存中将 config set 条目合并进原始配置 JSON，不落盘。
- * 配置面板测试连通性依赖此函数：先计算草稿写入临时 HOME、在隔离环境执行测试，用户配置文件全程不变。
+ * Merges `config set` entries into the raw config JSON in memory, without touching disk.
+ * The config panel's connectivity test relies on this: it computes the draft into a temporary HOME
+ * and runs the test in an isolated environment, so the user's config file stays untouched throughout.
  */
 
-/** 原始配置 JSON 的可变表示。值均为不可变的 [JsonElement]，整棵子树通过替换来"修改"。 */
+/** A mutable representation of the raw config JSON. Values are immutable [JsonElement]s; a whole subtree is "modified" by replacement. */
 typealias RawConfig = MutableMap<String, JsonElement>
 
 fun emptyRawConfig(): RawConfig = mutableMapOf()
 
-/** 解析配置文件文本；空白或非法 JSON 返回空草稿（调用方语义上等于"当作没有配置"）。 */
+/** Parses the config file text; blank input or invalid JSON yields an empty draft (semantically "no configuration" for callers). */
 fun parseRawConfig(text: String): RawConfig {
     if (text.isBlank()) return emptyRawConfig()
     return runCatching {
         OcrJson.parseToJsonElement(text).jsonObject.toMutableMap()
     }.getOrElse {
-        // JSON 解析失败在此记录——readRaw 的外层 runCatching 只能捕获 IO 错误，JSON 错误被这里吞掉后到不了外层。
+        // JSON parse failures are logged here -- the outer runCatching in readRaw only catches IO errors,
+        // so a JSON error swallowed here would never reach it.
         Logger.getInstance("ConfigDraft").warn("[ocr] Failed to parse config JSON, treating as empty", it)
         emptyRawConfig()
     }
 }
 
-/** 序列化为写盘用的两空格缩进 JSON。 */
+/** Serializes to two-space-indented JSON for writing to disk. */
 fun RawConfig.toPrettyJson(): String = PrettyJson.encodeToString(JsonObject.serializer(), JsonObject(this))
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -48,12 +50,13 @@ private val PrettyJson = kotlinx.serialization.json.Json {
 }
 
 /**
- * 顶层浅拷贝即等价深拷贝：[JsonElement] 不可变，改动都通过 [mutateObj] 整体替换子树，
- * 不存在原地修改嵌套对象的路径，base 不会被写穿。
+ * A shallow copy of the top level is equivalent to a deep copy: [JsonElement]s are immutable, and all
+ * changes go through [mutateObj], which replaces whole subtrees. No path mutates a nested object in
+ * place, so the base can never be written through.
  */
 fun RawConfig.copyDraft(): RawConfig = toMutableMap()
 
-/** 读-改-写一个嵌套对象字段：不存在则视为空对象，修改后整体写回。 */
+/** Read-modify-write of a nested object field: a missing object is treated as empty, and the whole object is written back after the change. */
 private fun RawConfig.mutateObj(key: String, block: (MutableMap<String, JsonElement>) -> Unit) {
     val inner = (this[key] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
     block(inner)
@@ -66,7 +69,8 @@ private fun RawConfig.strAt(key: String): String {
 }
 
 /**
- * 解析 models 字段的用户输入：优先按 JSON 数组解析，失败或不是数组则按逗号分隔。
+ * Parses the user input for the models field: try a JSON array first, falling back to comma splitting
+ * when parsing fails or the value is not an array.
  */
 internal fun parseModelList(value: String): List<String> {
     val trimmed = value.trim()
@@ -78,12 +82,12 @@ internal fun parseModelList(value: String): List<String> {
                 (item as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
             }
         }
-        // 解析失败则退化为逗号分隔，不报错。
+        // On a parse failure, degrade to comma splitting without raising an error.
     }
     return trimmed.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 }
 
-/** 仅识别这 6 个 provider 字段，其余键忽略。 */
+/** Only these 6 provider fields are recognized; every other key is ignored. */
 private fun applyProviderField(entry: MutableMap<String, JsonElement>, field: String, value: String) {
     when (field) {
         "api_key" -> entry["api_key"] = JsonPrimitive(value)
@@ -112,14 +116,15 @@ private fun RawConfig.setProviderEntryField(
 private fun RawConfig.setCustomProviderField(name: String, field: String, value: String) =
     setProviderEntryField("custom_providers", name, field, value)
 
-/** `providers.<name>.<field>`：name 是内置 provider 就写 providers，否则写 custom_providers。 */
+/** `providers.<name>.<field>`: if name is a built-in provider, write to providers; otherwise write to custom_providers. */
 private fun RawConfig.setProviderValue(key: String, value: String) {
     val parts = key.split('.')
     if (parts.size != 3) return
     val name = parts[1]
     val field = parts[2]
     if (isPresetProvider(name)) {
-        // 与 isPresetProvider / ConfigUtils 一致：预置键按规范小写存储，避免 "OpenAI" 被判为预置却写进大写键、后续查不到。
+        // Consistent with isPresetProvider / ConfigUtils: preset keys are stored canonically lowercased, so "OpenAI"
+        // is not judged preset yet written under a capitalized key that later lookups would miss.
         setProviderEntryField("providers", name.trim().lowercase(Locale.ROOT), field, value)
     } else {
         setCustomProviderField(name, field, value)
@@ -152,15 +157,17 @@ private fun RawConfig.setConfigValue(key: String, value: String) {
 
     when (key) {
         "provider" -> {
-            // 预置 provider 按规范小写存储，与 providers bucket 键一致；自定义 provider 保留用户原名。
+            // Preset providers are stored canonically lowercased, matching the providers bucket keys; custom providers keep the user's original name.
             val providerName = if (isPresetProvider(value)) value.trim().lowercase(Locale.ROOT) else value
-            // 切换 provider 时清空顶层 model：旧 model 通常不属于新 provider（用归一化名比较，避免大小写差异误判为切换）。
+            // Clear the top-level model when the provider changes: the old model usually does not belong to the new provider
+            // (compare normalized names so a case difference alone is not mistaken for a switch).
             if (strAt("provider") != providerName) this["model"] = JsonPrimitive("")
             this["provider"] = JsonPrimitive(providerName)
             ensureProviderBucketEntry(value)
         }
 
-        // 已选 provider 时，model 写入该 provider 条目而非顶层——CLI 优先读取 provider 条目中的 model，写顶层不生效。
+        // With a provider selected, the model is written into that provider's entry instead of the top level --
+        // the CLI prefers the model inside the provider entry and ignores the top-level one.
         "model" -> {
             val provider = strAt("provider")
             if (provider.isNotEmpty()) {
@@ -183,7 +190,7 @@ private fun RawConfig.setConfigValue(key: String, value: String) {
     }
 }
 
-/** 在内存中把 config set 条目合并进原始配置（不写磁盘）。 */
+/** Merges the config set entries into the raw config in memory (nothing is written to disk). */
 fun applyConfigEntries(base: RawConfig, entries: List<ConfigEntry>): RawConfig {
     val draft = base.copyDraft()
     for (entry in entries) {
