@@ -819,11 +819,18 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 			}
 
 			for _, delta := range choice.Delta.ToolCalls {
+				// Key by the same index the accumulator places the call at, or
+				// the capture lands in a bucket the attach loop never reads.
+				// The SDK clamps a negative index to 0 because, per its own
+				// comment, "the API may send -1 for single tool calls" - so a
+				// signature on the chunk that opens a single call arrives under
+				// -1 and is dropped unless it is clamped here too.
+				toolIndex := max(delta.Index, 0)
 				if delta.ID != "" {
 					if opaqueIDs[choice.Index] == nil {
 						opaqueIDs[choice.Index] = make(map[int64]string)
 					}
-					opaqueIDs[choice.Index][delta.Index] = delta.ID
+					opaqueIDs[choice.Index][toolIndex] = delta.ID
 				}
 				fields := streamedOpaqueToolCallFields(delta)
 				if len(fields) == 0 {
@@ -832,11 +839,11 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 				if opaqueByChoice[choice.Index] == nil {
 					opaqueByChoice[choice.Index] = make(map[int64]map[string]json.RawMessage)
 				}
-				if opaqueByChoice[choice.Index][delta.Index] == nil {
-					opaqueByChoice[choice.Index][delta.Index] = make(map[string]json.RawMessage, len(fields))
+				if opaqueByChoice[choice.Index][toolIndex] == nil {
+					opaqueByChoice[choice.Index][toolIndex] = make(map[string]json.RawMessage, len(fields))
 				}
 				for k, v := range fields {
-					opaqueByChoice[choice.Index][delta.Index][k] = v
+					opaqueByChoice[choice.Index][toolIndex][k] = v
 				}
 			}
 

@@ -489,6 +489,18 @@ func TestOpenAIChatCompletions_ReplaysOpaqueToolCallFieldsFromStream(t *testing.
 				streamChunk(`{"index":0,"function":{"arguments":"{}"},"extra_content":` + opaque + `}`),
 			},
 		},
+		{
+			// Reported by @subaru-ye. The SDK clamps a negative tool index to 0
+			// because, per its own comment, "the API may send -1 for single tool
+			// calls" - so the opening chunk of a single call, which is exactly
+			// where a signature sits, accumulates at position 0. A capture keyed
+			// by the raw -1 lands in a bucket the attach loop never reads.
+			name: "negative tool index on the chunk that opens the call",
+			chunks: []string{
+				streamChunk(`{"index":-1,"id":"call_1","type":"function",` +
+					`"function":{"name":"file_read","arguments":"{}"},"extra_content":` + opaque + `}`),
+			},
+		},
 	}
 
 	for _, tt := range tests {
