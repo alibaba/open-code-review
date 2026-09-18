@@ -26,7 +26,7 @@ of OCR's execution modes:
 **From npm (recommended):**
 
 ```bash
-pi install npm:@alibaba-group/open-code-review-pi
+pi install npm:open-code-review-pi
 ```
 
 The package has zero runtime dependencies, so the install does not pull in a

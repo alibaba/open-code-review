@@ -100,7 +100,7 @@ for details.
 Install the OpenCodeReview extension for the [pi coding agent](https://github.com/badlogic/pi-mono):
 
 ```bash
-pi install npm:@alibaba-group/open-code-review-pi
+pi install npm:open-code-review-pi
 ```
 
 This registers the `/ocr-review` and `/ocr-review-delegate` slash commands and
