@@ -1,7 +1,7 @@
 # Coding agent plugins
 
 Open Code Review ships platform-specific integrations for Claude Code, Codex,
-Cursor, Kimi Code, and QCA Forward. Choose your platform below instead of
+Cursor, Kimi Code, pi, and QCA Forward. Choose your platform below instead of
 adapting installation instructions written for a different agent.
 
 All integrations require Git 2.41 or later. Install the `ocr` CLI first:
@@ -94,6 +94,21 @@ installation with `/plugins list`, `/plugins info open-code-review`,
 See the
 [Kimi Code plugin documentation](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/plugins.html)
 for details.
+
+## pi
+
+Install the OpenCodeReview extension for the [pi coding agent](https://github.com/badlogic/pi-mono):
+
+```bash
+pi install npm:@alibaba-group/open-code-review-pi
+```
+
+This registers the `/ocr-review` and `/ocr-review-delegate` slash commands and
+the `ocr_review` and `ocr_delegate` tools. Full review mode runs the `ocr` CLI
+with OCR's configured LLM; delegation mode has OCR select files and rules while
+pi's model performs the review itself. See the
+[pi extension documentation](pi/README.md) for manual installation, usage, and
+troubleshooting.
 
 ## QCA Forward
 

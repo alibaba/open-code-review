@@ -21,6 +21,7 @@ CHANGELOG.md
 vendor/
 temp/
 .codegraph/
+.pi/
 
 # Ignore downloaded Go binary, but keep JS entry point
 !bin/ocr.js
