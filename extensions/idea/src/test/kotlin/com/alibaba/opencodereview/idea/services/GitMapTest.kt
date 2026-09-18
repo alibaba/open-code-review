@@ -14,7 +14,7 @@ class GitMapTest {
     // ------------------------------------------------------------ mapStatusCode
 
     @Test
-    fun `状态码映射覆盖 git 的五种码`() {
+    fun `status mapping covers the five Git codes`() {
         assertEquals(FileStatus.ADDED, mapStatusCode('A'))
         assertEquals(FileStatus.ADDED, mapStatusCode('?'))
         assertEquals(FileStatus.DELETED, mapStatusCode('D'))
@@ -23,8 +23,8 @@ class GitMapTest {
     }
 
     @Test
-    fun `未知状态码退化成 modified`() {
-        // git 另有 C（copied）/ T（type change）/ U（unmerged），一律按修改处理。
+    fun `unknown status codes fall back to modified`() {
+        // Treat Git C (copied), T (type change), and U (unmerged) codes as modified.
         assertEquals(FileStatus.MODIFIED, mapStatusCode('C'))
         assertEquals(FileStatus.MODIFIED, mapStatusCode('T'))
         assertEquals(FileStatus.MODIFIED, mapStatusCode('X'))
@@ -33,7 +33,7 @@ class GitMapTest {
     // ------------------------------------------------------------ parseNameStatus
 
     @Test
-    fun `解析 name-status 的制表符格式`() {
+    fun `parses tab-separated name-status output`() {
         val out = "M\tsrc/a.kt\nA\tsrc/b.kt\nD\tsrc/c.kt\n"
         assertEquals(
             listOf(
@@ -46,20 +46,20 @@ class GitMapTest {
     }
 
     @Test
-    fun `重命名行取新路径`() {
-        // R<score> 后跟旧路径和新路径，需要的是改动后的位置。
+    fun `rename lines use the new path`() {
+        // R<score> is followed by old and new paths; use the post-change location.
         val out = "R100\tsrc/old.kt\tsrc/new.kt\n"
         assertEquals(listOf(FileChange("src/new.kt", FileStatus.RENAMED)), parseNameStatus(out))
     }
 
     @Test
-    fun `name-status 忽略空行与缺列的行`() {
+    fun `name-status ignores blank lines and lines with missing columns`() {
         val out = "\nM\tsrc/a.kt\n\nonlyonecolumn\n\n"
         assertEquals(listOf(FileChange("src/a.kt", FileStatus.MODIFIED)), parseNameStatus(out))
     }
 
     @Test
-    fun `name-status 按路径去重且首次出现优先`() {
+    fun `name-status deduplicates paths and preserves the first occurrence`() {
         val out = "M\tsrc/a.kt\nD\tsrc/a.kt\n"
         assertEquals(listOf(FileChange("src/a.kt", FileStatus.MODIFIED)), parseNameStatus(out))
     }
@@ -67,8 +67,8 @@ class GitMapTest {
     // ------------------------------------------------------------ parsePorcelain
 
     @Test
-    fun `porcelain 暂存区状态优先于工作区状态`() {
-        // "AM" = 已暂存的新增 + 之后又改过，应算 added。
+    fun `porcelain prefers index status over worktree status`() {
+        // "AM" is a staged addition modified again afterward; classify it as added.
         assertEquals(
             listOf(FileChange("src/a.kt", FileStatus.ADDED)),
             parsePorcelain("AM src/a.kt\n"),
@@ -76,7 +76,7 @@ class GitMapTest {
     }
 
     @Test
-    fun `porcelain 暂存区为空时取工作区状态`() {
+    fun `porcelain uses worktree status when index status is empty`() {
         assertEquals(
             listOf(FileChange("src/a.kt", FileStatus.MODIFIED)),
             parsePorcelain(" M src/a.kt\n"),
@@ -84,7 +84,7 @@ class GitMapTest {
     }
 
     @Test
-    fun `porcelain 双问号是未跟踪文件`() {
+    fun `porcelain double question marks mean untracked files`() {
         assertEquals(
             listOf(FileChange("src/new.kt", FileStatus.ADDED)),
             parsePorcelain("?? src/new.kt\n"),
@@ -92,7 +92,7 @@ class GitMapTest {
     }
 
     @Test
-    fun `porcelain 重命名行取箭头右侧`() {
+    fun `porcelain renames use the path after the arrow`() {
         assertEquals(
             listOf(FileChange("b.kt", FileStatus.RENAMED)),
             parsePorcelain("R  a.kt -> b.kt\n"),
@@ -100,7 +100,7 @@ class GitMapTest {
     }
 
     @Test
-    fun `porcelain 重命名-含空格引号格式取新路径`() {
+    fun `porcelain renames use the new path with quoted spaces`() {
         assertEquals(
             listOf(FileChange("your file.kt", FileStatus.RENAMED)),
             parsePorcelain("R  \"my file.kt\" -> \"your file.kt\"\n"),
@@ -108,10 +108,10 @@ class GitMapTest {
     }
 
     @Test
-    fun `porcelain 重命名-文件名含箭头不误匹配`() {
-        // 文件名 "a -> b.kt" 含空格+箭头，git 加引号；新路径 result.kt 无引号。
-        // 旧代码 indexOf(" -> ") 会匹配到文件名内部的箭头，取错路径。
-        // 修复后优先找 `" -> `（闭引号+箭头），正确定位分隔符。
+    fun `porcelain renames do not confuse arrows inside filenames`() {
+        // Git quotes "a -> b.kt" because it contains spaces and an arrow; result.kt is unquoted.
+        // The old indexOf(" -> ") matched the arrow inside the filename and selected the wrong path.
+        // Prefer `" -> ` (closing quote and arrow) to locate the actual separator.
         assertEquals(
             listOf(FileChange("result.kt", FileStatus.RENAMED)),
             parsePorcelain("R  \"a -> b.kt\" -> result.kt\n"),
@@ -119,8 +119,8 @@ class GitMapTest {
     }
 
     @Test
-    fun `porcelain 重命名-含箭头无空格不引号`() {
-        // x->y.kt 含 -> 但无空格，git 不加引号；` -> ` 不会出现在文件名里。
+    fun `porcelain renames handle unquoted arrows without spaces`() {
+        // Git does not quote x->y.kt, which has no spaces; ` -> ` cannot occur inside that filename.
         assertEquals(
             listOf(FileChange("z.kt", FileStatus.RENAMED)),
             parsePorcelain("R  x->y.kt -> z.kt\n"),
@@ -128,9 +128,9 @@ class GitMapTest {
     }
 
     @Test
-    fun `porcelain 重命名-旧不引号新引号`() {
-        // 旧路径无特殊字符（不引号），新路径含空格（引号）。
-        // 走 ` -> ` 回退分支（旧路径无 ` -> `，不会误匹配），unquoteGitPath 去掉新路径引号。
+    fun `porcelain renames handle an unquoted old path and quoted new path`() {
+        // The old path has no special characters and is unquoted; the new path has spaces and is quoted.
+        // Use the ` -> ` fallback, which cannot match inside the old path, and unquoteGitPath removes the new path quotes.
         assertEquals(
             listOf(FileChange("new name.kt", FileStatus.RENAMED)),
             parsePorcelain("R  normal.kt -> \"new name.kt\"\n"),
@@ -138,14 +138,14 @@ class GitMapTest {
     }
 
     @Test
-    fun `porcelain 忽略空行和过短的行`() {
+    fun `porcelain ignores blank and too-short lines`() {
         assertEquals(emptyList(), parsePorcelain("\nM\n  \n"))
     }
 
-    // ------------------------------------------------------------ 未跟踪 / 合并
+    // ------------------------------------------------------------ Untracked files and merging
 
     @Test
-    fun `解析未跟踪列表并去掉空行`() {
+    fun `parses untracked paths and removes blank lines`() {
         assertEquals(
             listOf("a.kt", "dir/b.kt"),
             parseUntrackedList("a.kt\n\ndir/b.kt\n\n"),
@@ -153,7 +153,7 @@ class GitMapTest {
     }
 
     @Test
-    fun `合并时已跟踪状态优先于未跟踪的 added`() {
+    fun `merging prefers tracked status over untracked added status`() {
         val merged = mergeWorkspaceFiles(
             tracked = listOf(FileChange("a.kt", FileStatus.DELETED)),
             untrackedPaths = listOf("a.kt", "b.kt"),
@@ -167,7 +167,7 @@ class GitMapTest {
     // ------------------------------------------------------------ buildWorkspaceFiles
 
     @Test
-    fun `工作区文件优先用 diff HEAD 的结果`() {
+    fun `workspace files prefer diff HEAD results`() {
         val files = buildWorkspaceFiles(
             diffHeadOut = "M\ta.kt\n",
             diffCachedOut = "A\tshould-be-ignored.kt\n",
@@ -180,8 +180,8 @@ class GitMapTest {
     }
 
     @Test
-    fun `diff HEAD 为空时回退到暂存区`() {
-        // 首次提交前不存在 HEAD，只能查看 --cached。
+    fun `empty diff HEAD falls back to staged changes`() {
+        // Before the first commit, HEAD does not exist; only --cached can be inspected.
         val files = buildWorkspaceFiles(
             diffHeadOut = "",
             diffCachedOut = "A\ta.kt\n",
@@ -196,9 +196,9 @@ class GitMapTest {
     // ------------------------------------------------------------ parseBranchList
 
     @Test
-    fun `分支列表裁掉 refs 前缀并保留远端 HEAD`() {
-        // origin/HEAD 是指向远端默认分支的符号引用——用户选择它作为比较目标表示
-        // "对比远端默认分支"，是一个有效的分支引用，不应过滤。
+    fun `branch lists trim refs prefixes and preserve remote HEAD`() {
+        // origin/HEAD is a symbolic ref to the remote default branch. Selecting it means
+        // comparing against that default branch; it is valid and must not be filtered out.
         val out = """
             refs/heads/main
             refs/remotes/origin/HEAD
@@ -212,32 +212,32 @@ class GitMapTest {
     }
 
     @Test
-    fun `分支列表去重并忽略空行`() {
+    fun `branch lists deduplicate and ignore blank lines`() {
         val out = "refs/heads/main\n\nrefs/heads/main\n  \n"
         assertEquals(listOf("main"), parseBranchList(out))
     }
 
     @Test
-    fun `分支列表跳过 tag 之类的非分支引用`() {
+    fun `branch lists skip non-branch refs such as tags`() {
         val out = "refs/heads/main\nrefs/tags/v1.0\nrefs/stash\n"
         assertEquals(listOf("main"), parseBranchList(out))
     }
 
     @Test
-    fun `裸 HEAD 不算分支`() {
+    fun `bare HEAD is not a branch`() {
         assertEquals(emptyList(), parseBranchList("HEAD\n"))
     }
 
     // ------------------------------------------------------------ branchRefCandidates
 
     @Test
-    fun `裸分支名补上 origin 前缀`() {
+    fun `bare branch names gain an origin candidate`() {
         assertEquals(listOf("feature/x"), branchRefCandidates("feature/x"))
         assertEquals(listOf("dev", "origin/dev"), branchRefCandidates("dev"))
     }
 
     @Test
-    fun `main 与 master 互相作为候选`() {
+    fun `main and master are mutual fallback candidates`() {
         assertEquals(
             listOf("main", "origin/main", "master", "origin/master"),
             branchRefCandidates("main"),
@@ -251,27 +251,27 @@ class GitMapTest {
     // ------------------------------------------------------------ unquoteGitPath
 
     @Test
-    fun `没有引号的路径原样返回`() {
+    fun `unquoted paths are returned unchanged`() {
         assertEquals("src/a.kt", unquoteGitPath("src/a.kt"))
     }
 
     @Test
-    fun `八进制转义还原成中文路径`() {
-        // "中" 的 UTF-8 是 E4 B8 AD => \344\270\255
-        assertEquals("中", unquoteGitPath("\"\\344\\270\\255\""))
+    fun `octal escapes decode to Chinese paths`() {
+        // U+4E2D encodes as UTF-8 E4 B8 AD, or octal \344\270\255.
+        assertEquals("中", unquoteGitPath("\"\\344\\270\\255\"")) // allow-non-english: fixture verifies UTF-8 Git path decoding
     }
 
     @Test
-    fun `常见反斜杠转义还原`() {
+    fun `common backslash escapes are decoded`() {
         assertEquals("a\"b", unquoteGitPath("\"a\\\"b\""))
         assertEquals("a\\b", unquoteGitPath("\"a\\\\b\""))
         assertEquals("a\tb", unquoteGitPath("\"a\\tb\""))
     }
 
     @Test
-    fun `非法八进制不会抛异常`() {
-        // JS 的 parseInt("899", 8) 会截断，Kotlin 的 toInt(8) 会抛出异常；
-        // 因此 GitMap 将判据收紧到 0-7，此处守住"不抛出"这一底线。
+    fun `invalid octal does not throw`() {
+        // JavaScript parseInt("899", 8) truncates, whereas Kotlin toInt(8) throws.
+        // GitMap therefore accepts only digits 0-7; keep the no-throw guarantee covered here.
         unquoteGitPath("\"\\899\"")
         unquoteGitPath("\"\\9\"")
         unquoteGitPath("\"\\\"")
@@ -280,23 +280,23 @@ class GitMapTest {
     // ------------------------------------------------------------ formatRelative
 
     @Test
-    fun `相对时间覆盖各档位`() {
+    fun `relative time covers every interval`() {
         val now = 1_700_000_000_000L
         fun ago(ms: Long) = formatRelative((now - ms) / 1000, now, SupportedLocale.ZH_CN)
 
-        assertEquals("刚刚", ago(30_000))
-        assertEquals("5 分钟前", ago(5 * 60_000))
-        assertEquals("1 小时前", ago(3_600_000))
-        assertEquals("3 小时前", ago(3 * 3_600_000))
-        assertEquals("昨天", ago(25 * 3_600_000))
-        assertEquals("5 天前", ago(5 * 86_400_000L))
-        assertEquals("2 个月前", ago(70 * 86_400_000L))
-        assertEquals("2 年前", ago(800 * 86_400_000L))
+        assertEquals("刚刚", ago(30_000)) // allow-non-english: assertion verifies Chinese UI translations
+        assertEquals("5 分钟前", ago(5 * 60_000)) // allow-non-english: assertion verifies Chinese UI translations
+        assertEquals("1 小时前", ago(3_600_000)) // allow-non-english: assertion verifies Chinese UI translations
+        assertEquals("3 小时前", ago(3 * 3_600_000)) // allow-non-english: assertion verifies Chinese UI translations
+        assertEquals("昨天", ago(25 * 3_600_000)) // allow-non-english: assertion verifies Chinese UI translations
+        assertEquals("5 天前", ago(5 * 86_400_000L)) // allow-non-english: assertion verifies Chinese UI translations
+        assertEquals("2 个月前", ago(70 * 86_400_000L)) // allow-non-english: assertion verifies Chinese UI translations
+        assertEquals("2 年前", ago(800 * 86_400_000L)) // allow-non-english: assertion verifies Chinese UI translations
     }
 
     @Test
-    fun `相对时间跟着 locale 走`() {
-        // 同一档位切换为英文——守住宿主侧 i18n 字典两种语言均已齐备这一不变量。
+    fun `relative time follows the locale`() {
+        // Use English for the same intervals to verify that both host i18n dictionaries are complete.
         val now = 1_700_000_000_000L
         fun ago(ms: Long) = formatRelative((now - ms) / 1000, now, SupportedLocale.EN)
 
@@ -311,22 +311,22 @@ class GitMapTest {
     }
 
     @Test
-    fun `时间戳缺失或非法返回空串`() {
+    fun `missing or invalid timestamps return an empty string`() {
         assertEquals("", formatRelative(null, 1_700_000_000_000L, SupportedLocale.ZH_CN))
         assertEquals("", formatRelative(0, 1_700_000_000_000L, SupportedLocale.ZH_CN))
         assertEquals("", formatRelative(-1, 1_700_000_000_000L, SupportedLocale.ZH_CN))
     }
 
     @Test
-    fun `未来时间戳按刚刚处理`() {
-        // 机器时钟漂移或提交时间被修改时不应显示负数。
-        assertEquals("刚刚", formatRelative(1_700_000_060L, 1_700_000_000_000L, SupportedLocale.ZH_CN))
+    fun `future timestamps are treated as just now`() {
+        // Clock drift or modified commit times must not produce negative values.
+        assertEquals("刚刚", formatRelative(1_700_000_060L, 1_700_000_000_000L, SupportedLocale.ZH_CN)) // allow-non-english: assertion verifies Chinese UI translations
     }
 
     // ------------------------------------------------------------ pinDefaultBranches
 
     @Test
-    fun `origin HEAD 与默认分支提到第二三位其余保序`() {
+    fun `origin HEAD and the default branch move to second and third while preserving other order`() {
         val branches = listOf("master", "origin/368-x", "origin/Avasam", "origin/HEAD", "origin/add-once", "origin/master")
         assertEquals(
             listOf("master", "origin/HEAD", "origin/master", "origin/368-x", "origin/Avasam", "origin/add-once"),
@@ -335,7 +335,7 @@ class GitMapTest {
     }
 
     @Test
-    fun `默认分支是 main 时也生效`() {
+    fun `prioritization also works when the default branch is main`() {
         val branches = listOf("main", "origin/HEAD", "origin/chore", "origin/main", "origin/feat")
         assertEquals(
             listOf("main", "origin/HEAD", "origin/main", "origin/chore", "origin/feat"),
@@ -344,13 +344,13 @@ class GitMapTest {
     }
 
     @Test
-    fun `没有 origin HEAD 时不重排原样返回`() {
+    fun `without origin HEAD the original order is preserved`() {
         val branches = listOf("master", "origin/develop", "origin/feature")
         assertEquals(branches, pinDefaultBranches(branches, null))
     }
 
     @Test
-    fun `默认远程分支不在列表里时不重排`() {
+    fun `without the default remote branch the original order is preserved`() {
         val branches = listOf("master", "origin/develop")
         assertEquals(branches, pinDefaultBranches(branches, "origin/master"))
     }
