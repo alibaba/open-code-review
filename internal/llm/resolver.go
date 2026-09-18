@@ -249,9 +249,9 @@ func errBedrockNotConfigurable(key string) error {
 
 // tryOCREnv reads OCR-specific environment variables.
 func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
-	url := os.Getenv(envOCRLLMURL)
-	token := os.Getenv(envOCRLLMToken)
-	model := os.Getenv(envOCRLLMModel)
+	url := strings.TrimSpace(os.Getenv(envOCRLLMURL))
+	token := strings.TrimSpace(os.Getenv(envOCRLLMToken))
+	model := strings.TrimSpace(os.Getenv(envOCRLLMModel))
 	if modelOverride != "" {
 		model = modelOverride
 	}
@@ -700,9 +700,9 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 
 // tryCCEnv reads Claude Code environment variables.
 func tryCCEnv(modelOverride string) (ResolvedEndpoint, bool, error) {
-	baseURL := os.Getenv(envCCBaseURL)
-	token := os.Getenv(envCCToken)
-	model := os.Getenv(envCCModel)
+	baseURL := strings.TrimSpace(os.Getenv(envCCBaseURL))
+	token := strings.TrimSpace(os.Getenv(envCCToken))
+	model := strings.TrimSpace(os.Getenv(envCCModel))
 	if modelOverride != "" {
 		model = modelOverride
 	}

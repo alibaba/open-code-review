@@ -74,6 +74,32 @@ func TestResolveEndpoint_CCEnvCleanModelUnchanged(t *testing.T) {
 	}
 }
 
+func TestResolveEndpoint_CCEnvTrimsEnvValues(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "")
+	t.Setenv("OCR_LLM_TOKEN", "")
+	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://api.example.com/api/anthropic\r")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "test-token\n")
+	t.Setenv("ANTHROPIC_MODEL", " claude-opus-4-7\r")
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.URL != "https://api.example.com/api/anthropic/v1/messages" {
+		t.Errorf("expected trimmed URL, got %q", ep.URL)
+	}
+	if ep.Token != "test-token" {
+		t.Errorf("expected trimmed token, got %q", ep.Token)
+	}
+	if ep.Model != "claude-opus-4-7" {
+		t.Errorf("expected trimmed model, got %q", ep.Model)
+	}
+	if ep.Source != "Claude Code environment" {
+		t.Errorf("expected source %q, got %q", "Claude Code environment", ep.Source)
+	}
+}
+
 func TestResolveEndpoint_OCREnvStripsModelSuffix(t *testing.T) {
 	t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/messages")
 	t.Setenv("OCR_LLM_TOKEN", "test-token")
@@ -88,6 +114,46 @@ func TestResolveEndpoint_OCREnvStripsModelSuffix(t *testing.T) {
 	}
 	if ep.Source != "OCR environment" {
 		t.Errorf("expected source %q, got %q", "OCR environment", ep.Source)
+	}
+}
+
+func TestResolveEndpoint_OCREnvTrimsEnvValues(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/messages\r")
+	t.Setenv("OCR_LLM_TOKEN", "test-token\r\n")
+	t.Setenv("OCR_LLM_MODEL", "\tclaude-haiku ")
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.URL != "https://api.example.com/v1/messages" {
+		t.Errorf("expected trimmed URL, got %q", ep.URL)
+	}
+	if ep.Token != "test-token" {
+		t.Errorf("expected trimmed token, got %q", ep.Token)
+	}
+	if ep.Model != "claude-haiku" {
+		t.Errorf("expected trimmed model, got %q", ep.Model)
+	}
+	if ep.Source != "OCR environment" {
+		t.Errorf("expected source %q, got %q", "OCR environment", ep.Source)
+	}
+}
+
+func TestResolveEndpoint_WhitespaceOnlyOCREnvFallsBack(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "  ")
+	t.Setenv("OCR_LLM_TOKEN", "\t")
+	t.Setenv("OCR_LLM_MODEL", "\n")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://api.example.com")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "test-token")
+	t.Setenv("ANTHROPIC_MODEL", "claude-opus-4-7")
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Source != "Claude Code environment" {
+		t.Errorf("expected source %q, got %q", "Claude Code environment", ep.Source)
 	}
 }
 
