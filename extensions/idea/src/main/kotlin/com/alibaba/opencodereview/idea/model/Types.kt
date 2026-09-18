@@ -8,13 +8,15 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * 与前端约定的领域模型，字段逐一对应。
+ * Domain models agreed with the frontend, field for field.
  *
- * 字段名须为 camelCase：前端按属性名取值，snake_case 会导致前端静默渲染为空白卡片或 0 行号。
- * CLI 的 snake_case JSON 在 [com.alibaba.opencodereview.idea.services.parseCliResult] 转换为本层类型，不应将 CLI 的命名带入本层。
+ * Field names must be camelCase: the frontend reads by property name, and snake_case would make the frontend
+ * silently render blank cards or 0 line numbers.
+ * The CLI's snake_case JSON is converted to this layer's types by
+ * [com.alibaba.opencodereview.idea.services.parseCliResult]; the CLI's naming must not leak into this layer.
  */
 
-/** 出站与入站 JSON 的统一配置：默认值须发送（前端依属性存在性判断），null 不发送（对应前端 `undefined` 语义）。 */
+/** Shared JSON config for outbound and inbound: defaults must be sent (the frontend checks property existence), nulls omitted (matching the frontend's `undefined` semantics). */
 val OcrJson: Json = Json {
     ignoreUnknownKeys = true
     encodeDefaults = true
@@ -38,7 +40,7 @@ enum class ReviewState {
     @SerialName("failed") FAILED,
 }
 
-/** 注意 `falsePositive` 为 camelCase，而非 `false_positive`——前端按此字面量进行比较。 */
+/** Note `falsePositive` is camelCase, not `false_positive` -- the frontend compares against that literal. */
 @Serializable
 enum class CommentStatus {
     @SerialName("pending") PENDING,
@@ -64,8 +66,9 @@ enum class FileStatus {
 }
 
 /**
- * `startLine` / `endLine` 取 0 作为哨兵值，表示 CLI 未提供可用行号。
- * 评论定位逻辑（CommentAnchor）依据此约定进入 existingCode 重定位分支，不可改为 1。
+     * `startLine` / `endLine` use 0 as the sentinel for "the CLI provided no usable line numbers".
+     * The comment anchoring logic (CommentAnchor) relies on this convention to enter the existingCode relocation
+     * branch; do not change it to 1.
  */
 @Serializable
 data class ReviewComment(
@@ -95,7 +98,7 @@ data class AgentWarning(
     val message: String = "",
 )
 
-/** [status] 保持 String 类型：CLI 的取值域（success / completed_with_errors / completed_with_warnings / skipped）由 CLI 决定，出现新增取值不应导致解析失败。 */
+/** [status] stays a String: the value domain (success / completed_with_errors / completed_with_warnings / skipped) is owned by the CLI, and new values must not break parsing. */
 @Serializable
 data class CliResult(
     val status: String = "",
@@ -134,7 +137,7 @@ data class OcrConfig(
     val language: String = "Chinese",
 )
 
-/** [sha] 采用 7 位短哈希，与前端截取规则一致。 */
+/** [sha] is a 7-character short hash, matching the frontend's truncation rule. */
 @Serializable
 data class CommitInfo(
     val sha: String = "",
@@ -185,7 +188,7 @@ data class CliRunOptions(
     val concurrency: Int? = null,
 )
 
-/** 审查完成后评论的挂载上下文，字段取自 [CliRunOptions]（对应前端的字段子集）。 */
+/** The mount context for comments after a review completes; fields are taken from [CliRunOptions] (the subset matching the frontend). */
 @Serializable
 data class ReviewContext(
     val mode: ReviewMode = ReviewMode.WORKSPACE,

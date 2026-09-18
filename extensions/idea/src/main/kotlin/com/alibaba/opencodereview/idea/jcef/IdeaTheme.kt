@@ -9,20 +9,23 @@ import java.util.Locale
 import javax.swing.UIManager
 
 /**
- * 将当前 IDEA 主题映射为页面所用的 `--vscode-*` CSS 变量集合。
- * 从 UIManager 与编辑器配色实时取值，Darcula/Light/第三方主题均随之同步。
+ * Maps the current IDEA theme to the set of `--vscode-*` CSS variables the page consumes.
+ * Values are read live from UIManager and the editor color scheme, so Darcula/light/third-party
+ * themes are all picked up automatically.
  *
- * 两条硬性规则：
- * 一、alpha 必须保留。IntelliJ 主题存在大量半透明叠加层，压缩为 #rrggbb 会得到实心纯白。
- * 二、颜色仅取自 LaF。前景与背景一律取 UIManager，避免「暗色界面搭配亮色编辑器配色」时拼出白底浅灰。
+ * Two hard rules:
+ * 1. Alpha must be preserved. IntelliJ themes contain many semi-transparent overlay layers;
+ *    collapsing them to #rrggbb yields solid pure white.
+ * 2. Colors come only from the LaF. Both foreground and background are read from UIManager,
+ *    avoiding a "dark UI with a light editor scheme" combination that would produce light gray on white.
  */
 object IdeaTheme {
 
-    /** 变量名 -> 取值。使用惰性 lambda，使 VARIABLE_NAMES 读取全部键时不触碰 UI API，可在纯 JUnit 环境运行。 */
+    /** Variable name -> provider. Lazy lambdas keep VARIABLE_NAMES from touching any UI API when reading the keys, so it works in a plain JUnit environment. */
     private val SPEC: List<Pair<String, () -> String>> = listOf(
-        // ---------------------------------------------------------- 文字
+        // ---------------------------------------------------------- Text
         "--vscode-foreground" to { css(ui("Label.foreground", fallback = LIGHT_TEXT)) },
-        // 次要说明文字，使用频率最高（卡片副标题、行号、token 统计等）。
+        // Secondary description text, the most frequently used color (card subtitles, line numbers, token counts, ...).
         "--vscode-descriptionForeground" to {
             css(ui("Label.infoForeground", "Component.infoForeground", fallback = MUTED_TEXT))
         },
@@ -34,14 +37,15 @@ object IdeaTheme {
             css(ui("Link.activeForeground", "Component.linkForeground", fallback = LINK))
         },
 
-        // ---------------------------------------------------------- 背景
-        // 侧栏整体底色，取 IDEA 工具窗背景（Panel.background）。
+        // ---------------------------------------------------------- Background
+        // Overall sidebar background, from the IDEA tool-window background (Panel.background).
         "--vscode-sideBar-background" to { css(ui("Panel.background", fallback = PANEL_BG)) },
         "--vscode-sideBarSectionHeader-background" to {
             css(ui("ToolWindow.Header.background", "Panel.background", fallback = PANEL_BG))
         },
-        // 日志面板底色，应比侧栏底色更深一层。
-        // 不取编辑器配色 defaultBackground：若从 EditorColorsManager 取值，在暗色界面搭配亮色编辑器配色时，会得到白底，而字色取自 LaF，导致不可读。
+        // Log panel background, should be one shade darker than the sidebar background.
+        // Deliberately not the editor scheme's defaultBackground: reading it from EditorColorsManager yields a
+        // white background under a dark UI with a light editor scheme, while the text color comes from the LaF -- unreadable.
         "--vscode-editor-background" to {
             css(ui("EditorPane.background", "TextArea.background", "TextField.background", fallback = INPUT_BG))
         },
@@ -54,7 +58,7 @@ object IdeaTheme {
         },
         "--vscode-button-secondaryBackground" to { css(ui("Button.background", fallback = PANEL_BG)) },
 
-        // ---------------------------------------------------------- 列表与悬停
+        // ---------------------------------------------------------- Lists and hover
         "--vscode-list-activeSelectionBackground" to {
             css(ui("List.selectionBackground", fallback = SELECTION))
         },
@@ -68,14 +72,14 @@ object IdeaTheme {
             css(ui("ActionButton.hoverBackground", "List.hoverBackground", fallback = HOVER_BG))
         },
 
-        // ---------------------------------------------------------- 边框
+        // ---------------------------------------------------------- Borders
         "--vscode-widget-border" to { css(ui("Component.borderColor", fallback = BORDER)) },
         "--vscode-input-border" to { css(ui("Component.borderColor", fallback = BORDER)) },
         "--vscode-button-border" to {
             css(ui("Button.startBorderColor", "Component.borderColor", fallback = BORDER))
         },
 
-        // ---------------------------------------------------------- 角标
+        // ---------------------------------------------------------- Badges
         "--vscode-badge-background" to {
             css(ui("Counter.background", "List.selectionBackground", fallback = SELECTION))
         },
@@ -83,8 +87,8 @@ object IdeaTheme {
             css(ui("Counter.foreground", "List.selectionForeground", fallback = LIGHT_TEXT))
         },
 
-        // ---------------------------------------------------------- 滚动条
-        // 滚动条底色：IDEA 无对应 UIManager 键，沿用 VS Code 做法，以前景色叠加透明度生成。
+        // ---------------------------------------------------------- Scrollbar
+        // Scrollbar slider background: IDEA has no matching UIManager key, so follow VS Code's approach and layer transparency over the foreground color.
         "--vscode-scrollbarSlider-background" to {
             rgba(ui("Label.foreground", fallback = LIGHT_TEXT), 0.25)
         },
@@ -92,17 +96,17 @@ object IdeaTheme {
             rgba(ui("Label.foreground", fallback = LIGHT_TEXT), 0.40)
         },
 
-        // ---------------------------------------------------------- 字体
+        // ---------------------------------------------------------- Fonts
         "--vscode-font-family" to { cssFontStack(UIManager.getFont("Label.font")?.family, "sans-serif") },
         "--vscode-editor-font-family" to {
             cssFontStack(runCatching { scheme().editorFontName }.getOrNull(), "monospace")
         },
     )
 
-    /** 页面可用的全部变量名集合。不触碰任何 UI API，可在纯 JUnit 环境读取。 */
+    /** All variable names the page can use. Touches no UI API, so it can be read in a plain JUnit environment. */
     val VARIABLE_NAMES: Set<String> = SPEC.map { it.first }.toSet()
 
-    /** 生成注入用的 `:root { ... }`。取不到某个值时使用兜底色，绝不抛出异常。 */
+    /** Builds the `:root { ... }` block for injection. Falls back to the fallback colors when a value cannot be read, and never throws. */
     fun cssVariables(): String = buildString {
         append(":root {\n")
         SPEC.forEach { (name, provider) ->
@@ -112,15 +116,15 @@ object IdeaTheme {
         append("}")
     }
 
-    // ------------------------------------------------------------ 取色
+    // ------------------------------------------------------------ Color lookup
 
     private fun ui(vararg keys: String, fallback: Color): Color =
         keys.firstNotNullOfOrNull { runCatching { UIManager.getColor(it) }.getOrNull() } ?: fallback
 
-    /** 仅用于取编辑器字体名——颜色一律走 [ui]，参见类注释规则二。 */
+    /** Only for reading the editor font name -- colors always go through [ui]; see rule 2 in the class doc. */
     private fun scheme() = EditorColorsManager.getInstance().globalScheme
 
-    /** 转换为 CSS 颜色，半透明时输出 rgba()。 */
+    /** Converts to a CSS color, emitting rgba() for semi-transparent values. */
     internal fun css(color: Color): String =
         if (color.alpha == 255) {
             String.format(Locale.ROOT, "#%02x%02x%02x", color.red, color.green, color.blue)
@@ -129,29 +133,32 @@ object IdeaTheme {
         }
 
     /**
-     * 输出 `rgba()`，[extraAlpha] 与颜色自带 alpha 相乘（非覆盖：滚动条变量为「前景色叠加一层透明度」，
-     * 前景本身可能已半透明，直接覆盖会比主题原意更实）。
+     * Emits `rgba()`; [extraAlpha] multiplies the color's own alpha rather than overriding it (the scrollbar
+     * variables are "foreground layered with transparency", and the foreground may itself be semi-transparent --
+     * overriding would render more opaque than the theme intends).
      */
     private fun rgba(color: Color, extraAlpha: Double): String {
-        // 夹到 [0,1]：extraAlpha 或前景色 alpha 异常时不让 rgba 通道值越界导致 CSS 声明失效。
+        // Clamp to [0,1]: if extraAlpha or the foreground alpha is out of range, keep the rgba channel value from
+        // going out of bounds and invalidating the CSS declaration.
         val alpha = ((color.alpha / 255.0) * extraAlpha).coerceIn(0.0, 1.0)
-        // 必须使用 Locale.ROOT：德语等 locale 小数点为逗号，`0,086` 会导致 CSS 声明失效。
+        // Locale.ROOT is mandatory: in locales such as German the decimal separator is a comma, and `0,086` would invalidate the CSS declaration.
         val formatted = String.format(Locale.ROOT, "%.3f", alpha)
         return "rgba(${color.red}, ${color.green}, ${color.blue}, $formatted)"
     }
 
-    /** 字体名里要剥掉的字符：会破坏 `:root{}` 结构（`} ; \ 换行）或提前闭合外层 `<style>` 块（`<`，防 `</style` 注入）。 */
+    /** Characters to strip from font names: they would break the `:root{}` structure (`} ; \ newline`) or close the outer `<style>` block early (`<`, guarding against `</style` injection). */
     private val FONT_NAME_INVALID = Regex("[\"\\\\{};\\n\\r<]")
 
-    /** 字体名可能含空格（如 "JetBrains Mono"），必须加引号，否则整条声明会被浏览器丢弃。 */
+    /** Font names may contain spaces ("JetBrains Mono"), so they must be quoted; otherwise the browser drops the whole declaration. */
     private fun cssFontStack(family: String?, generic: String): String {
         val name = family?.takeIf { it.isNotBlank() } ?: return generic
-        // 字体名来自 UIManager，取值不可控，统一过这一层再拼进 CSS。
+        // Font names come from UIManager and are uncontrolled input, so always sanitize here before splicing into CSS.
         val sanitized = name.replace(FONT_NAME_INVALID, "")
         return "\"$sanitized\", $generic"
     }
 
-    // 兜底色（Darcula 近似）。仅在 LaF 完全未装配时使用，保证页面不会因单个 null 值而整块透明。
+    // Fallback colors (Darcula approximations). Used only when the LaF is entirely unavailable, so the page never
+    // goes fully transparent because of a single null value.
     private val LIGHT_TEXT = Color(0xBB, 0xBB, 0xBB)
     private val MUTED_TEXT = Color(0x80, 0x80, 0x80)
     private val ERROR_TEXT = Color(0xFF, 0x52, 0x61)

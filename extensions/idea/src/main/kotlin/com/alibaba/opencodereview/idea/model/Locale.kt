@@ -8,8 +8,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * 本插件支持的语言枚举。
- * 序列化值须为 `en` / `zh-cn` 字面量：前端以此从词条表中取值，写作 `ZH_CN` 或 `zh-CN` 将使文案退化为 key 本身。
+ * The locales this plugin supports.
+ * The serialized values must stay the literals `en` / `zh-cn`: the frontend looks copy up in its word table by
+ * these values, and writing `ZH_CN` or `zh-CN` would degrade the UI text to the key itself.
  */
 @Serializable
 enum class SupportedLocale {
@@ -18,21 +19,22 @@ enum class SupportedLocale {
 }
 
 /**
- * 语言判定规则：仅 `zh-cn`（忽略大小写）视为简体中文，
- * `zh-tw` / `zh-hk` 等变体在对应翻译补齐之前，一律回退为英文。
+ * Locale resolution rule: only `zh-cn` (case-insensitive) counts as Simplified Chinese;
+ * variants such as `zh-tw` / `zh-hk` all fall back to English until their translations exist.
  */
 fun resolveLocale(raw: String): SupportedLocale =
     if (raw.lowercase() == "zh-cn") SupportedLocale.ZH_CN else SupportedLocale.EN
 
-/** 转换为 HTML `lang` 属性取值：`zh-cn` 转为 `zh-CN`，其余原样返回。 */
+/** Converts to the HTML `lang` attribute value: `zh-cn` becomes `zh-CN`; everything else is returned as-is. */
 fun SupportedLocale.toHtmlLang(): String = when (this) {
     SupportedLocale.ZH_CN -> "zh-CN"
     SupportedLocale.EN -> "en"
 }
 
 /**
- * 返回当前 IDE 界面语言。`DynamicBundle.getLocale()` 反映 IDE 界面语言
- * （安装中文语言包后为 zh-CN），取不到时回退至 JVM 默认区域。不持有 webview locale 的组件可直接调用，无需额外注入。
+ * Returns the current IDE UI language. `DynamicBundle.getLocale()` reflects the IDE UI language
+ * (zh-CN once the Chinese language pack is installed), falling back to the JVM default locale when unavailable.
+ * Components that do not hold a webview locale can call this directly, no injection needed.
  */
 fun currentIdeLocale(): SupportedLocale {
     val tag = runCatching { DynamicBundle.getLocale().toLanguageTag() }
