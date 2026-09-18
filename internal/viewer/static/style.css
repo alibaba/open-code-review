@@ -21,8 +21,8 @@ Copyright 2026 alibaba/open-code-review Contributors
     /* Text */
     --text: rgba(0, 0, 0, 0.77);
     --text-strong: rgba(0, 0, 0, 0.87);
-    --text-secondary: rgba(0, 0, 0, 0.55);
-    --text-muted: rgba(0, 0, 0, 0.39);
+    --text-secondary: rgba(0, 0, 0, 0.62);
+    --text-muted: rgba(0, 0, 0, 0.55);
     --text-faint: var(--text-muted);
 
     /* Borders */
@@ -115,7 +115,7 @@ Copyright 2026 alibaba/open-code-review Contributors
         --text: rgba(255, 255, 255, 0.8);
         --text-strong: rgba(255, 255, 255, 0.9);
         --text-secondary: rgba(255, 255, 255, 0.6);
-        --text-muted: rgba(255, 255, 255, 0.4);
+        --text-muted: rgba(255, 255, 255, 0.47);
 
         --border: rgba(255, 255, 255, 0.16);
         --border-subtle: rgba(255, 255, 255, 0.08);

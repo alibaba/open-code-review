@@ -4,11 +4,13 @@
 package viewer
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -331,6 +333,74 @@ func TestSurfaceCSS_LightSurfaceIsWhite(t *testing.T) {
 	if !dark.Match(css) {
 		t.Error("style.css lost the dark-mode --surface: #0a0a0a token: " +
 			"dark surfaces must keep sitting above the black page")
+	}
+}
+
+// TestTextTokens_MeetWCAGAA holds the muted and secondary text tokens to
+// WCAG AA (4.5:1) against each theme's page background, so future palette
+// tweaks cannot quietly drop the low-emphasis labels back below the line.
+// Both tokens blend pure black (light) or pure white (dark) at an alpha,
+// which makes the blended color a gray and the luminance math a single
+// channel.
+func TestTextTokens_MeetWCAGAA(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	text := string(css)
+
+	luminance := func(channel float64) float64 {
+		if channel <= 0.04045 {
+			return channel / 12.92
+		}
+		return math.Pow((channel+0.055)/1.055, 2.4)
+	}
+	// ratio blends the token's alpha over its page background (black text
+	// on a white page in light mode, white text on black in dark mode) and
+	// returns the WCAG contrast ratio for the resulting gray.
+	ratio := func(alpha float64, whiteText, darkPage bool) float64 {
+		channel := 1 - alpha
+		if whiteText {
+			channel = alpha
+		}
+		page := 1.0
+		if darkPage {
+			page = 0.0
+		}
+		fg, bg := luminance(channel), luminance(page)
+		if fg < bg {
+			fg, bg = bg, fg
+		}
+		return (fg + 0.05) / (bg + 0.05)
+	}
+	firstAlpha := func(pattern string) float64 {
+		t.Helper()
+		m := regexp.MustCompile(pattern).FindStringSubmatch(text)
+		if m == nil {
+			t.Fatalf("style.css is missing %q", pattern)
+		}
+		v, err := strconv.ParseFloat(m[1], 64)
+		if err != nil {
+			t.Fatalf("parse alpha %q: %v", m[1], err)
+		}
+		return v
+	}
+
+	tokens := []struct {
+		name       string
+		blackAlpha float64 // light mode: rgba(0, 0, 0, alpha)
+		whiteAlpha float64 // dark mode: rgba(255, 255, 255, alpha)
+	}{
+		{"--text-muted", firstAlpha(`--text-muted: rgba\(0, 0, 0, ([\d.]+)\);`), firstAlpha(`--text-muted: rgba\(255, 255, 255, ([\d.]+)\);`)},
+		{"--text-secondary", firstAlpha(`--text-secondary: rgba\(0, 0, 0, ([\d.]+)\);`), firstAlpha(`--text-secondary: rgba\(255, 255, 255, ([\d.]+)\);`)},
+	}
+	for _, tc := range tokens {
+		if got := ratio(tc.blackAlpha, false, false); got < 4.5 {
+			t.Errorf("light %s contrasts at %.2f:1, want >= 4.5 (WCAG AA)", tc.name, got)
+		}
+		if got := ratio(tc.whiteAlpha, true, true); got < 4.5 {
+			t.Errorf("dark %s contrasts at %.2f:1, want >= 4.5 (WCAG AA)", tc.name, got)
+		}
 	}
 }
 
