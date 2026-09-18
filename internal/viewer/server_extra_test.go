@@ -405,6 +405,33 @@ func TestTextTokens_MeetWCAGAA(t *testing.T) {
 	}
 }
 
+// TestFocusCSS_CoversChrome holds the focus-visible rules for the
+// collapsible headers, in-table links and scrollable table regions: these
+// elements have no other visible focus indicator, so losing the rule would
+// leave keyboard users with no sign of where they are.
+func TestFocusCSS_CoversCollapsiblesAndTableLinks(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	for _, selector := range []string{
+		".file-accordion-header:focus-visible",
+		".token-breakdown-toggle:focus-visible",
+		".comment-file-header:focus-visible",
+		".tool-detail-toggle:focus-visible",
+		".error-detail-toggle:focus-visible",
+		".table a:focus-visible",
+		"nav.breadcrumb a:focus-visible",
+		".repos-page .table-scroll:focus-visible",
+		".sessions-page .table-scroll:focus-visible",
+	} {
+		if !strings.Contains(string(css), selector) {
+			t.Errorf("style.css is missing the %q focus-visible rule: "+
+				"these elements have no other visible focus indicator for keyboard users", selector)
+		}
+	}
+}
+
 func TestRenderTemplate_SessionPage(t *testing.T) {
 	rr := httptest.NewRecorder()
 	vs := &ViewSession{
