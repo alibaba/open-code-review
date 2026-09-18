@@ -9,8 +9,8 @@ import kotlinx.serialization.Serializable
 
 /**
  * The locales this plugin supports.
- * The serialized values must stay the literals `en` / `zh-cn`: the frontend looks copy up in its word table by
- * these values, and writing `ZH_CN` or `zh-CN` would degrade the UI text to the key itself.
+ * The serialized values must stay the literals `en` / `zh-cn`: the frontend uses these values to look up
+ * entries in its localization table, and writing `ZH_CN` or `zh-CN` would degrade the UI text to the key itself.
  */
 @Serializable
 enum class SupportedLocale {

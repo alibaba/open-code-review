@@ -66,9 +66,9 @@ enum class FileStatus {
 }
 
 /**
-     * `startLine` / `endLine` use 0 as the sentinel for "the CLI provided no usable line numbers".
-     * The comment anchoring logic (CommentAnchor) relies on this convention to enter the existingCode relocation
-     * branch; do not change it to 1.
+ * `startLine` / `endLine` use 0 as the sentinel for "the CLI provided no usable line numbers".
+ * The comment anchoring logic (CommentAnchor) relies on this convention to enter the existingCode relocation
+ * branch; do not change it to 1.
  */
 @Serializable
 data class ReviewComment(
