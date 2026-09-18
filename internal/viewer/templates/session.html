@@ -115,7 +115,7 @@
     <div class="comments-toolbar">
     <div class="toolbar-filters">
     {{with severityCounts .Session.Comments}}
-    <div class="comment-filter-bar severity-filters" aria-label="Filter comments by severity">
+    <div class="comment-filter-bar" aria-label="Filter comments by severity">
         <span class="comment-filter-label">Severity:</span>
         <button type="button" class="comment-filter-chip filter-all is-active" data-filter-kind="severity" data-filter-value="all" aria-pressed="true">All ({{len $.Session.Comments}})</button>
         {{if .Critical}}<button type="button" class="comment-filter-chip severity-critical" data-filter-kind="severity" data-filter-value="critical" aria-pressed="false">Critical ({{.Critical}})</button>{{end}}
@@ -125,7 +125,7 @@
     </div>
     {{end}}
     {{with categoryCounts .Session.Comments}}
-    <div class="comment-filter-bar category-filters" aria-label="Filter comments by category">
+    <div class="comment-filter-bar" aria-label="Filter comments by category">
         <span class="comment-filter-label">Category:</span>
         <button type="button" class="comment-filter-chip filter-all is-active" data-filter-kind="category" data-filter-value="all" aria-pressed="true">All ({{len $.Session.Comments}})</button>
         {{if .Bug}}<button type="button" class="comment-filter-chip cat-bug" data-filter-kind="category" data-filter-value="bug" aria-pressed="false">Bug ({{.Bug}})</button>{{end}}
