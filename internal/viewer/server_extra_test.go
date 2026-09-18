@@ -6,6 +6,8 @@ package viewer
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -135,6 +137,11 @@ func TestRenderTemplate_Success(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "No session data found") {
 		t.Errorf("expected empty repos message in rendered output")
+	}
+	// The search input is useless without a table and repos.js only loads
+	// alongside rows, so it must stay inside the {{if .Repos}} branch.
+	if strings.Contains(rr.Body.String(), "repository-search-input") {
+		t.Error("empty repositories page should not render the search input")
 	}
 }
 
@@ -626,5 +633,75 @@ func TestRenderTemplate_FilesReviewedUseFileIcon(t *testing.T) {
 	}
 	if !strings.Contains(body, "internal/agent/agent.go") {
 		t.Error("Files Reviewed should still render the file path")
+	}
+}
+
+func TestRenderTemplate_ReposTableMockup(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "repos.html", map[string]any{
+		"Repos": []RepoInfo{{EncodedPath: "my-project", SessionCount: 3}},
+	})
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, required := range []string{
+		`<main class="repos-page">`,
+		`<th scope="col" class="col-action">Action</th>`,
+		`<a class="repo-check" href="/r/my-project">Check</a>`,
+		`<td class="col-repository" data-repository-name><a href="/r/my-project">my-project</a></td>`,
+		`aria-label="Previous page"><svg`,
+		`aria-label="Next page"><svg`,
+		`<nav id="repos-pagination" class="pagination" aria-label="Repository pages" hidden>`,
+		`data-page-step="-1"`,
+		`data-page-step="1"`,
+		`id="repos-page-numbers"`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("rendered repositories page missing %q", required)
+		}
+	}
+	if strings.Contains(body, "<script>") {
+		t.Error("repositories page must not contain inline <script> elements (CSP)")
+	}
+}
+
+func TestReposJS_PagerContract(t *testing.T) {
+	html, err := os.ReadFile(filepath.Join("templates", "repos.html"))
+	if err != nil {
+		t.Fatalf("read repos.html: %v", err)
+	}
+	js, err := os.ReadFile(filepath.Join("static", "repos.js"))
+	if err != nil {
+		t.Fatalf("read repos.js: %v", err)
+	}
+	for _, id := range []string{
+		"repository-search-input",
+		"repositories-table",
+		"repos-pagination",
+		"repos-page-numbers",
+	} {
+		if !strings.Contains(string(html), `id="`+id+`"`) {
+			t.Errorf("repos.html is missing id %q", id)
+		}
+		if !strings.Contains(string(js), `getElementById("`+id+`")`) {
+			t.Errorf("repos.js does not look up id %q", id)
+		}
+	}
+	if !strings.Contains(string(js), "data-page-step") {
+		t.Error("repos.js should drive the pagination step buttons via data-page-step")
+	}
+}
+
+func TestReposCSS_PagerStaysHiddenUntilScripted(t *testing.T) {
+	css, err := os.ReadFile(filepath.Join("static", "style.css"))
+	if err != nil {
+		t.Fatalf("read style.css: %v", err)
+	}
+	guard := regexp.MustCompile(`\.repos-page \.pagination\[hidden\] \{\s*display: none;`)
+	if !guard.Match(css) {
+		t.Error("style.css lost the .repos-page .pagination[hidden] { display: none } guard: " +
+			"the pager's own display: flex is an author rule, so it outranks the UA [hidden] rule " +
+			"and the pager would paint before repos.js reveals it")
 	}
 }
