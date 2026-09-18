@@ -78,6 +78,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"templates/email.MUSTACHE", "Handlebars/Mustache Escaping Boundaries"},
 		{"templates/account.pug", "Pug Escaping and Output Contexts"},
 		{"templates/account.PUG", "Pug Escaping and Output Contexts"},
+		{"index.twig", "Twig Escaping and Output Contexts"},
+		{"templates/account/profile.html.twig", "Twig Escaping and Output Contexts"},
+		{"templates/email.txt.twig", "Twig Escaping and Output Contexts"},
+		{"TEMPLATES/ACCOUNT.HTML.TWIG", "Twig Escaping and Output Contexts"},
 		{"src/main/resources/mapper/usermapper.xml", "SQL Logic Error Detection"},
 		{"src/main/resources/dao/userdao.xml", "SQL Logic Error Detection"},
 		{"pom.xml", "snapshot"},
@@ -190,6 +194,7 @@ func TestResolve_FallbackToDefault(t *testing.T) {
 		"readme.md",
 		"docs/architecture.txt",
 		"Makefile",
+		"templates/account.twig.bak",
 	}
 
 	for _, path := range paths {
