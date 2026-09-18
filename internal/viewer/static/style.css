@@ -8,7 +8,7 @@
 
     /* Surfaces — neutral layers from the viewer redesign mockups */
     --bg: #ffffff;
-    --surface: #fafafa;
+    --surface: #ffffff;
     --surface-alt: #f5f5f5;
     --surface-inset: #f0f0f0;
     --response-bg: var(--surface);
@@ -691,6 +691,7 @@ h3 {
     border-radius: var(--radius);
     background: var(--surface);
     box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border);
 }
 .section-accordion > .file-accordion-header {
     cursor: pointer;
