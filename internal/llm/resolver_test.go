@@ -91,6 +91,49 @@ func TestResolveEndpoint_OCREnvStripsModelSuffix(t *testing.T) {
 	}
 }
 
+func TestResolveEndpoint_CCEnvTrimsWhitespaceAndCRLF(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "")
+	t.Setenv("OCR_LLM_TOKEN", "")
+	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://api.example.com\r\n")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", " test-token\r ")
+	t.Setenv("ANTHROPIC_MODEL", " claude-opus-4-7 \r\n")
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.URL != "https://api.example.com/v1/messages" {
+		t.Errorf("expected URL %q, got %q", "https://api.example.com/v1/messages", ep.URL)
+	}
+	if ep.Token != "test-token" {
+		t.Errorf("expected token %q, got %q", "test-token", ep.Token)
+	}
+	if ep.Model != "claude-opus-4-7" {
+		t.Errorf("expected model %q, got %q", "claude-opus-4-7", ep.Model)
+	}
+}
+
+func TestResolveEndpoint_OCREnvTrimsWhitespaceAndCRLF(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/messages\r")
+	t.Setenv("OCR_LLM_TOKEN", " test-token \r\n")
+	t.Setenv("OCR_LLM_MODEL", "\tclaude-haiku\r\n")
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.URL != "https://api.example.com/v1/messages" {
+		t.Errorf("expected URL %q, got %q", "https://api.example.com/v1/messages", ep.URL)
+	}
+	if ep.Token != "test-token" {
+		t.Errorf("expected token %q, got %q", "test-token", ep.Token)
+	}
+	if ep.Model != "claude-haiku" {
+		t.Errorf("expected model %q, got %q", "claude-haiku", ep.Model)
+	}
+}
+
 func TestResolveEndpoint_ConfigFileStripsModelSuffix(t *testing.T) {
 	t.Setenv("OCR_LLM_URL", "")
 	t.Setenv("OCR_LLM_TOKEN", "")
@@ -771,6 +814,31 @@ func TestResolveEndpoint_ProviderAPIKeyEnvFallback(t *testing.T) {
 	}
 	if ep.Token != "env-api-key" {
 		t.Errorf("Token = %q, want %q (should fall back to env var)", ep.Token, "env-api-key")
+	}
+}
+
+func TestResolveEndpoint_ProviderAPIKeyEnvFallback_TrimsWhitespaceAndCRLF(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "  env-api-key\r\n ")
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {Model: "claude-sonnet-4-6"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Token != "env-api-key" {
+		t.Errorf("Token = %q, want %q (should trim whitespace/CRLF from env var)", ep.Token, "env-api-key")
 	}
 }
 
@@ -2387,6 +2455,21 @@ func TestEnsureMessagesSuffix(t *testing.T) {
 			name:  "proxy URL with /v1/ mid-path",
 			input: "https://proxy.example.com/v1/anthropic",
 			want:  "https://proxy.example.com/v1/anthropic",
+		},
+		{
+			name:  "URL with trailing CR and LF",
+			input: "https://api.anthropic.com/v1\r\n",
+			want:  "https://api.anthropic.com/v1/messages",
+		},
+		{
+			name:  "URL with trailing CR only",
+			input: "https://api.anthropic.com/api/anthropic\r",
+			want:  "https://api.anthropic.com/api/anthropic/v1/messages",
+		},
+		{
+			name:  "URL with leading and trailing spaces",
+			input: "   https://api.anthropic.com/v1/messages   ",
+			want:  "https://api.anthropic.com/v1/messages",
 		},
 	}
 
