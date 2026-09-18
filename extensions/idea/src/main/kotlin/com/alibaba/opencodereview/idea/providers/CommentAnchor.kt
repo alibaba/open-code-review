@@ -24,7 +24,7 @@ enum class SidebarOnlyReason {
     /** A binary file, detected by GitService.isBinaryFile through content inspection. */
     BINARY,
 
-    /** The file exists, but neither the line numbers nor the existingCode fallback can be matched. */
+    /** The file exists, but neither the supplied line numbers nor existingCode can resolve a location. */
     UNRESOLVED,
 
     /** The file is outside the review scope, or its content cannot be read at the specified ref. */
@@ -53,7 +53,7 @@ internal fun normalizeLine(line: String): String {
     return if (s.startsWith("+") || s.startsWith("-")) s.substring(1).trim() else s
 }
 
-/** Split into lines, apply [normalizeLine], and discard blank lines, whose variation across versions would hinder sliding-window matching. */
+/** Split into lines and apply [normalizeLine]. Discard blank lines so changes in blank lines between revisions do not prevent a match. */
 internal fun splitAndNormalize(code: String): List<String> {
     val result = mutableListOf<String>()
     for (raw in code.split("\n")) {
@@ -141,7 +141,7 @@ private fun candidateRefs(git: GitService, ctx: ReviewContext, status: FileStatu
     val mountLeft = status == FileStatus.DELETED
 
     val primary = if (mountLeft) leftRef?.let { it to AnchorSide.LEFT } else rightRef?.let { it to AnchorSide.RIGHT }
-    // Added files have no before side; trying it would only add a git show call without readable content.
+    // Added files have no content at the old ref; skip the git show call for that side.
     val alt = if (status == FileStatus.ADDED) {
         null
     } else if (mountLeft) {

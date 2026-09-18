@@ -10,7 +10,7 @@ package com.alibaba.opencodereview.idea.model
  */
 object HostStrings {
 
-    /** `{param}` placeholders for single-pass replacement, avoiding order-dependent substitution injection. */
+    /** Match `{param}` placeholders for a single pass so replacement values are not expanded again. */
     private val PARAM_REGEX = Regex("""\{(\w+)\}""")
 
     private val EN: Map<String, String> = mapOf(

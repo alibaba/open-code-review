@@ -60,9 +60,9 @@ import javax.swing.JTextArea
  * then sidebar-only display; see [resolveCommentAnchor].
  *
  * Workspace mode: RangeHighlighter is itself a RangeMarker, so offsets adjust automatically after document edits.
- * apply and jumpTo query it for the current line numbers.
+ * [apply] reads the current line range from the anchor; [jumpTo] reads its current start line.
  *
- * Branch/commit mode: content is a read-only Git snapshot; mounts stores only the side and lines needed for navigation.
+ * Branch/commit mode: content is a read-only Git snapshot; [mounts] stores only the side and line numbers needed for navigation.
  * GitService.diffDecorator attaches editor markers through a callback when the document is created.
  */
 class CommentService(
@@ -311,7 +311,7 @@ class CommentService(
     }
 
     /**
-     * The lines currently occupied by comment index in the document (0-based inclusive range).
+     * The lines currently occupied by the comment at [index] in the document (0-based inclusive range).
      * Line backgrounds, inline panels, navigation, and applying suggestions all use this single entry point.
      *
      * In workspace mode, prefer the live anchor (RangeHighlighter follows user edits).
@@ -542,7 +542,7 @@ class CommentService(
     }
 
     /**
-     * Attach the inline comment panel below offset in the editor.
+     * Attach the inline comment panel below the given [offset] in the editor.
      * Skip existing panels; panels are deduplicated by (index, editor).
      */
     private fun mountInlineComment(index: Int, comment: ReviewComment, editor: EditorEx, offset: Int) {
@@ -616,7 +616,7 @@ class CommentService(
         dead.forEach { runCatching { it.dispose() } }
     }
 
-    /** Attach panels for all resolved comments in file that are not yet expanded. */
+    /** Attach panels for resolved comments in [file], skipping any that already have a panel in the same editor. */
     private fun mountInlineCommentsForFile(file: VirtualFile) {
         val toMount = synchronized(lock) {
             mounts.entries.mapNotNull { (index, target) ->
