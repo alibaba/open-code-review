@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 
 /**
  * cancel() must terminate the whole process tree: ocr is a Node launcher whose child is the actual Go binary.
- * Killing only the direct child reparents its children to the system root process, leaving orphans (see the commit message).
+ * Killing only the direct child can leave its descendants running as orphaned processes.
  */
 class CliServiceTreeKillTest {
 

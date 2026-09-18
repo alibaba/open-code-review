@@ -14,7 +14,7 @@ import kotlin.test.assertTrue
  * Automate this check: once `<resource-bundle>` is declared, action labels come entirely from properties.
  * Misspelled keys or missing translations do not cause IDEA errors; the Tools menu instead shows
  * a raw key such as `action.OpenCodeReview.OpenToolWindow.text`, or falls back to English.
- * Manual checks with `runIde` may discover these problems only after the plugin has been released.
+ * Relying on manual `runIde` checks can let these problems go unnoticed until after release.
  */
 class OcrBundleTest {
 
@@ -40,7 +40,7 @@ class OcrBundleTest {
     }
 
     @Test
-    fun `every plugin_xml action has a corresponding string key`() {
+    fun `every action in the plugin descriptor has a corresponding string key`() {
         val ids = Regex("""<action\s+id="([^"]+)"""").findAll(pluginXml).map { it.groupValues[1] }.toList()
         assertTrue(ids.isNotEmpty(), "No action ids matched in plugin.xml; update this test")
         ids.forEach { id ->
@@ -50,7 +50,7 @@ class OcrBundleTest {
     }
 
     @Test
-    fun `plugin_xml actions must not have a text attribute`() {
+    fun `actions in the plugin descriptor must not have a text attribute`() {
         // A text= attribute overrides the bundle key, silently disabling localization.
         val actionBlocks = Regex("""<action\b[^>]*>""", RegexOption.DOT_MATCHES_ALL).findAll(pluginXml)
         actionBlocks.forEach { block ->

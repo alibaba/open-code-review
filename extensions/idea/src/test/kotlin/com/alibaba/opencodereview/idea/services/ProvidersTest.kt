@@ -23,7 +23,7 @@ class ProvidersTest {
     private val nameRegex = Regex("""\bname:\s*'([^']+)'""")
 
     @Test
-    fun `preset provider names exactly match frontend providers_ts`() {
+    fun `preset provider names exactly match the frontend provider table`() {
         val ts = FrontendSources.file("src/shared/providers.ts").readText()
         val fromFrontend = nameRegex.findAll(ts).map { it.groupValues[1] }.toSortedSet()
 

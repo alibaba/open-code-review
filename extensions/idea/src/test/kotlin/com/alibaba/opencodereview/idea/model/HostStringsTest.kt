@@ -10,8 +10,8 @@ import kotlin.test.assertTrue
 /**
  * Keep both [HostStrings] tables consistent.
  *
- * Regression background: eight shared keys previously had rewritten Chinese values,
- * and seven shared keys were missing entirely. Neither issue failed compilation, requiring manual comparison.
+ * Previously, eight shared keys had different Chinese values and seven shared keys were missing.
+ * Both problems compiled without errors and had to be found by manual comparison.
  * Compare key sets and placeholders automatically wherever possible.
  */
 class HostStringsTest {
@@ -39,7 +39,7 @@ class HostStringsTest {
     @Test
     fun `all entries are non-empty and use the ext prefix`() {
         en.keys.forEach { key ->
-            assertTrue(key.startsWith("ext."), "Host strings must use ext. rather than the frontend view./cmp. prefixes: $key")
+            assertTrue(key.startsWith("ext."), "Host strings must use the 'ext.' prefix rather than the frontend 'view.' or 'cmp.' prefixes: $key")
         }
         (en + zh).forEach { (key, value) -> assertTrue(value.isNotBlank(), "$key has an empty value") }
     }

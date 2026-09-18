@@ -20,9 +20,10 @@ import org.junit.Test
  * Both are hard to detect manually because they produce no error; build-time checks expose this drift.
  *
  * Like [com.alibaba.opencodereview.idea.services.ProvidersTest], read frontend source with a regex and compare
- * against a hardcoded host set. Keep that set here to avoid changing manually regression-tested production code
- * or adding production helpers, following the `ProvidersTest` use of `presetProviderNames()`. Update this set
- * whenever the corresponding implementation changes, or the test will report the set difference.
+ * the names with the host implementation. `ProvidersTest` uses the existing `presetProviderNames()` helper.
+ * Keep the message discriminator sets here to avoid adding helpers to production code that has already
+ * undergone manual regression testing. Update these sets when the corresponding implementation changes,
+ * or the test will report the set difference.
  */
 class MessageContractTest {
 

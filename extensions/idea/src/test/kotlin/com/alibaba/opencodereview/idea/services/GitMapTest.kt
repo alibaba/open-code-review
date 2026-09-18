@@ -67,7 +67,7 @@ class GitMapTest {
     // ------------------------------------------------------------ parsePorcelain
 
     @Test
-    fun `porcelain prefers index status over worktree status`() {
+    fun `porcelain prefers index status over working tree status`() {
         // "AM" is a staged addition modified again afterward; classify it as added.
         assertEquals(
             listOf(FileChange("src/a.kt", FileStatus.ADDED)),
@@ -76,7 +76,7 @@ class GitMapTest {
     }
 
     @Test
-    fun `porcelain uses worktree status when index status is empty`() {
+    fun `porcelain uses working tree status when index status is empty`() {
         assertEquals(
             listOf(FileChange("src/a.kt", FileStatus.MODIFIED)),
             parsePorcelain(" M src/a.kt\n"),
@@ -270,7 +270,7 @@ class GitMapTest {
 
     @Test
     fun `invalid octal does not throw`() {
-        // JavaScript parseInt("899", 8) truncates, whereas Kotlin toInt(8) throws.
+        // JavaScript parseInt("899", 8) returns NaN, whereas Kotlin toInt(8) throws.
         // GitMap therefore accepts only digits 0-7; keep the no-throw guarantee covered here.
         unquoteGitPath("\"\\899\"")
         unquoteGitPath("\"\\9\"")
