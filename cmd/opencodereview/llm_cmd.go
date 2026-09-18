@@ -118,6 +118,12 @@ func runLLMTest() error {
 		} else {
 			fmt.Printf("Profile: (from the ambient AWS chain)\n")
 		}
+	} else if region, project, ok := vertexContext(llmClient); ok {
+		// Vertex has no configured URL either — region and project decide the
+		// host — so report what was resolved instead of a URL that was never
+		// set.
+		fmt.Printf("Region:  %s\n", region)
+		fmt.Printf("Project: %s\n", project)
 	} else {
 		fmt.Printf("URL:    %s\n", ep.URL)
 	}
@@ -141,6 +147,15 @@ func bedrockContext(client llm.LLMClient) (region, profile string, ok bool) {
 		return "", "", false
 	}
 	return c.BedrockContext()
+}
+
+// vertexContext is bedrockContext for the vertex protocol.
+func vertexContext(client llm.LLMClient) (region, project string, ok bool) {
+	c, isAnthropic := client.(*llm.AnthropicClient)
+	if !isAnthropic {
+		return "", "", false
+	}
+	return c.VertexContext()
 }
 
 func runLLMProviders() {

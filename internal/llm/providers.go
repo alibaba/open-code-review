@@ -81,6 +81,29 @@ var registry = []Provider{
 		},
 	},
 	{
+		// Vertex takes no api_key and no base URL: the SDK's vertex middleware
+		// derives the host from the resolved region and authorizes each request
+		// with an OAuth2 token from Application Default Credentials (gcloud auth
+		// application-default login, a service account key via
+		// GOOGLE_APPLICATION_CREDENTIALS, or the ambient metadata server on GCP).
+		// Set gcp_project and gcp_region the way any other Vertex AI tool expects.
+		//
+		// Model accepts the plain Claude model ID as published on Vertex AI's
+		// Model Garden; unlike Bedrock, Vertex does not prefix it with a region.
+		Name:        "vertex",
+		DisplayName: "Google Vertex AI (Anthropic Claude)",
+		Protocol:    ProtocolAnthropicVertex,
+		AmbientAuth: true,
+		Models: []string{
+			"claude-opus-5",
+			"claude-sonnet-5",
+			"claude-opus-4-8",
+			"claude-opus-4-7",
+			"claude-opus-4-6",
+			"claude-sonnet-4-6",
+		},
+	},
+	{
 		Name:        "openai",
 		DisplayName: "OpenAI API",
 		Protocol:    ProtocolOpenAIChatCompletions,
