@@ -51,6 +51,8 @@
     --scroll-thumb: rgba(0, 0, 0, 0.16);
     --code-red-bg: rgba(227, 61, 73, 0.08);
     --code-green-bg: rgba(23, 203, 75, 0.08);
+    /* The compare page back button still draws its arrow with a CSS mask. */
+    --back-arrow: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cline%20x1%3D%2219%22%20y1%3D%2212%22%20x2%3D%225%22%20y2%3D%2212%22%2F%3E%3Cpolyline%20points%3D%2212%2019%205%2012%2012%205%22%2F%3E%3C%2Fsvg%3E");
 
     /* Task accents */
     --task-main: #4f46e5;
@@ -440,29 +442,23 @@ h3 {
     margin-bottom: 0;
     overflow-wrap: anywhere;
 }
+/* One back button serves every page: an icon box for the inline chevron
+   (repositories 36px is the base size; session detail shrinks it below).
+   The compare page still renders the original empty link with the CSS arrow. */
 .back-link {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
-    width: 44px;
-    height: 44px;
+    width: 36px;
+    height: 36px;
     padding: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--surface-alt);
-    color: var(--link);
+    background: var(--surface);
+    color: var(--text-muted);
     text-decoration: none;
     transition: color var(--transition), background var(--transition), border-color var(--transition);
-}
-
-.back-link::before {
-    content: "";
-    width: 20px;
-    height: 20px;
-    background: currentColor;
-    -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cline%20x1%3D%2219%22%20y1%3D%2212%22%20x2%3D%225%22%20y2%3D%2212%22%2F%3E%3Cpolyline%20points%3D%2212%2019%205%2012%2012%205%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
-    mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cline%20x1%3D%2219%22%20y1%3D%2212%22%20x2%3D%225%22%20y2%3D%2212%22%2F%3E%3Cpolyline%20points%3D%2212%2019%205%2012%2012%205%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
 }
 .back-link:hover {
     color: var(--accent-hover);
@@ -472,6 +468,34 @@ h3 {
 .back-link:focus-visible {
     outline: 2px solid var(--link);
     outline-offset: 2px;
+}
+.back-link svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+}
+.session-page .back-link {
+    width: 32px;
+    height: 32px;
+    border-color: var(--border-subtle);
+}
+.session-page .back-link svg {
+    width: 16px;
+    height: 16px;
+}
+.compare-page .back-link {
+    width: 44px;
+    height: 44px;
+    background: var(--surface-alt);
+    color: var(--link);
+}
+.compare-page .back-link::before {
+    content: "";
+    width: 20px;
+    height: 20px;
+    background: currentColor;
+    -webkit-mask: var(--back-arrow) center / contain no-repeat;
+    mask: var(--back-arrow) center / contain no-repeat;
 }
 .session-header .page-heading {
     margin-bottom: 0.75rem;
@@ -1415,29 +1439,6 @@ p {
     align-items: center;
 }
 
-.sessions-page .back-link {
-    width: 36px;
-    height: 36px;
-    background: var(--surface);
-    color: var(--text-muted);
-}
-
-.sessions-page .back-link:hover {
-    background: var(--accent-soft);
-    color: var(--accent-hover);
-    border-color: var(--link);
-}
-
-.sessions-page .back-link::before {
-    content: none;
-}
-
-.sessions-page .back-link svg {
-    width: 18px;
-    height: 18px;
-    display: block;
-}
-
 .sessions-page .table th {
     background: transparent;
     white-space: nowrap;
@@ -1700,30 +1701,6 @@ p {
     align-items: center;
 }
 
-.session-page .back-link {
-    width: 32px;
-    height: 32px;
-    border-color: var(--border-subtle);
-    background: var(--surface);
-    color: var(--text-muted);
-}
-
-.session-page .back-link:hover {
-    background: var(--accent-soft);
-    color: var(--accent-hover);
-    border-color: var(--link);
-}
-
-.session-page .back-link::before {
-    content: none;
-}
-
-.session-page .back-link svg {
-    width: 16px;
-    height: 16px;
-    display: block;
-}
-
 .session-page .session-header h2 {
     margin-bottom: 0;
 }
@@ -1767,7 +1744,8 @@ p {
 
 /* ── Pagination (shared) ── */
 /* The repositories and sessions pages drive one pager markup, so its rules
-   are unscoped; nothing outside .pagination/.page-* names is affected. */
+   are unscoped; only the .pagination, .page-numbers, .page-step,
+   .page-number and .page-gap class names are affected. */
 .pagination {
     display: flex;
     flex-wrap: wrap;

@@ -11,7 +11,7 @@
     let query = "";
 
     // A row is visible when it matches the search query and sits on the
-    // current page of the filtered list, so both controls write through the
+    // current page of the filtered list; the search writes through the
     // pager's single render pass.
     const matches = (row) => {
         if (!query) return true;
