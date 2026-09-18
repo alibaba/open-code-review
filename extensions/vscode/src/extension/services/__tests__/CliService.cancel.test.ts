@@ -39,6 +39,8 @@ function createMockProcess() {
 
 describe('CliService.cancel', () => {
   beforeEach(() => {
+    // POSIX cases use Linux; Windows cases override this explicitly.
+    setPlatform('linux');
     jest.spyOn(process, 'kill').mockImplementation(() => true);
   });
 
