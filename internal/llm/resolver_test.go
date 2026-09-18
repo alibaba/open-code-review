@@ -1214,6 +1214,55 @@ func TestResolveEndpointWithModelOverride_ValidModelInPresetList(t *testing.T) {
 	}
 }
 
+func TestResolveEndpointWithModelOverride_PresetTrimsWhitespaceAndCRLF(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test", Model: "claude-sonnet-4-6"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpointWithModelOverride(cfgPath, "  claude-opus-4-8 \r\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Model != "claude-opus-4-8" {
+		t.Errorf("Model = %q, want %q", ep.Model, "claude-opus-4-8")
+	}
+}
+
+func TestResolveEndpointWithModelOverride_LegacyLlmTrimsWhitespaceAndCRLF(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:       "https://api.example.com/v1/messages",
+			AuthToken: "test-token",
+			Model:     "claude-sonnet-4-6",
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpointWithModelOverride(cfgPath, "  claude-opus-4-8 \r\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Model != "claude-opus-4-8" {
+		t.Errorf("Model = %q, want %q", ep.Model, "claude-opus-4-8")
+	}
+}
+
 func TestResolveEndpointWithModelOverride_InvalidModelInPresetList(t *testing.T) {
 	clearAllEnv(t)
 

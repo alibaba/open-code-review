@@ -991,9 +991,8 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
 		// anthropic-sdk-go's default client hardcodes the same 10-minute
-		// ResponseHeaderTimeout as openai-go, applied because this path does not
-		// pass WithoutEnvironmentDefaults, so a long timeout_sec is capped at 10
-		// minutes on a slow endpoint without this (#1161).
+		// ResponseHeaderTimeout as openai-go, so a long timeout_sec is capped at 10
+		// minutes on a slow endpoint without httpClientWithHeaderTimeout (#1161).
 		option.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
 

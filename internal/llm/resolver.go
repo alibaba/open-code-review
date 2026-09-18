@@ -511,7 +511,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	gateOverrideOnModelList := !ambientAuth
 
 	// Apply model override with validation.
-	if modelOverride != "" {
+	if modelOverride = strings.TrimSpace(modelOverride); modelOverride != "" {
 		if gateOverrideOnModelList && len(availableModels) > 0 {
 			if !ModelListContains(availableModels, modelOverride) {
 				return ResolvedEndpoint{}, false, fmt.Errorf(
@@ -601,7 +601,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 // tryLegacyLlmConfig resolves an endpoint from the legacy llm config block.
 func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, bool, error) {
 	model := cfg.Llm.Model
-	if modelOverride != "" {
+	if modelOverride = strings.TrimSpace(modelOverride); modelOverride != "" {
 		model = modelOverride
 	}
 	// Fall through to later strategies when the legacy block is incomplete. This
