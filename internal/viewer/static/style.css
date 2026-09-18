@@ -1592,17 +1592,24 @@ p {
     background: transparent;
     padding: 0.2em 0.7em;
     font: inherit;
+    color: var(--text-secondary);
     font-size: 0.72rem;
     font-weight: 600;
     line-height: 1.35;
     cursor: pointer;
-    transition: opacity var(--transition), border-color var(--transition);
-    opacity: 0.75;
+    transition: color var(--transition), border-color var(--transition);
 }
 
-.mark-btn:hover { opacity: 1; }
+.mark-btn:hover {
+    border-color: var(--link);
+    color: var(--text-strong);
+}
+
+.mark-btn:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
 
 .mark-btn.mark-clear {
     border-style: dashed;
-    opacity: 0.6;
 }
