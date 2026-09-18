@@ -53,7 +53,7 @@ describe('parsePorcelain', () => {
     ]);
   });
 
-  it('deduplicates paths with both staged and worktree changes', () => {
+  it('deduplicates paths with both staged and working tree changes', () => {
     expect(parsePorcelain('MM src/a.ts')).toEqual([
       { path: 'src/a.ts', status: 'modified' },
     ]);

@@ -96,7 +96,7 @@ export class GitService {
 
   /**
    * Subscribe to VS Code Git repository state changes and debounce workspace file list refreshes.
-   * Keep staged, worktree, and untracked changes up to date in the sidebar workspace mode.
+   * Keep staged, working tree, and untracked changes up to date in the sidebar workspace mode.
    */
   watchWorkspaceChanges(onUpdate: (state: GitState) => void): vscode.Disposable {
     const cleanups: vscode.Disposable[] = [];

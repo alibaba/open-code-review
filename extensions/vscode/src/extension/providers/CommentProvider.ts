@@ -49,7 +49,7 @@ export class CommentProvider {
     this.syncListeners.forEach((fn) => fn(states));
   }
 
-  /** Display review comments as threads when resolved in a Git or workspace snapshot, otherwise only in the sidebar. */
+  /** Display review comments as threads when their locations can be resolved in a Git or workspace snapshot; otherwise show them only in the sidebar. */
   async show(comments: ReviewComment[], ctx: ReviewContext): Promise<void> {
     this.clear();
     this.reviewContext = ctx;

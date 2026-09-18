@@ -18,7 +18,7 @@ export interface MountableCommentAnchor {
     right: vscode.Uri;
     title: string;
   };
-  /** Explain when line numbers have been relocated using existingCode. */
+  /** Explanation shown when line numbers are relocated using existingCode. */
   locateNote?: string;
 }
 
@@ -67,7 +67,7 @@ export function splitAndNormalize(code: string): string[] {
   return result;
 }
 
-/** Find existingCode with a sliding match over the file content and return 1-based line numbers. */
+/** Find existingCode in the file content using a sliding-window match and return 1-based line numbers. */
 export function findLinesByExistingCode(content: string, existingCode: string): { start: number; end: number } | null {
   const targetLines = splitAndNormalize(existingCode);
   if (targetLines.length === 0) return null;

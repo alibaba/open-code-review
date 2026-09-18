@@ -17,7 +17,7 @@ export function mapStatusCode(code: string): FileChange['status'] {
 
 /**
  * Parse `git status --porcelain` output.
- * Each line is XY<space>path: X is the index status, Y the worktree status, and '??' means untracked.
+ * Each line is XY<space>path: X is the index status, Y is the working tree status, and '??' means untracked.
  * Rename lines have the form `R  old -> new`; use the new path.
  */
 export function parsePorcelain(output: string): FileChange[] {
@@ -36,7 +36,7 @@ export function parsePorcelain(output: string): FileChange[] {
       const arrow = path.indexOf(' -> ');
       if (arrow >= 0) path = path.slice(arrow + 4);
     } else {
-      // Prefer the index status, otherwise use the worktree status.
+      // Prefer the index status, otherwise use the working tree status.
       const c = x !== ' ' && x !== '?' ? x : y;
       code = c;
     }
