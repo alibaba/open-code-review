@@ -27,7 +27,7 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
-  ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
+  ocr review --background "Focus on auth"                                           Review with inline context
   ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
@@ -118,7 +118,7 @@ ocr r      [flags]   (alias)
 | `--output <path>` | `-o` | stdout | Запись результатов ревью в файл UTF-8 (`-` означает stdout). Файл создаётся лениво при первой записи, поэтому неудачные запуски не затрагивают существующие файлы. В текстовом формате цветовые коды ANSI удаляются автоматически. |
 | `--audience <who>` | — | `human` | `human` выводит ход выполнения (в stderr, когда `--format` равен `json`/`sarif`, чтобы stdout оставался единым разбираемым документом); `agent` полностью подавляет вывод хода выполнения и печатает только итоговую сводку / JSON. |
 | `--background <text>` | `-b` | — | Необязательные требования / бизнес-контекст, добавляемые в промпты планирования и основной задачи. |
-| `--background-file <path>` | `-B` | — | Путь к Markdown-файлу с контекстом ревью. Если также задан `--background`, используются оба источника. |
+| `--background-file <path>` | `-B` | — | Путь к Markdown-файлу с контекстом ревью. Если также задан `--background`, файл имеет приоритет, а встроенный текст игнорируется. |
 | `--exclude <patterns>` | — | — | Разделённые запятыми шаблоны исключения в стиле gitignore; объединяются с excludes из `rule.json`. |
 | `--concurrency <n>` | — | `8` | Максимальное число подзадач, проверяемых параллельно. |
 | `--timeout <minutes>` | — | `15` | Срок выполнения для каждой подзадачи. `0` отключает тайм-аут. Масштабируется линейно по числу раундов effort (например, 15/30/45 мин для low/medium/high). |

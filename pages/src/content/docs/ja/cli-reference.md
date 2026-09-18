@@ -26,7 +26,7 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
-  ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
+  ocr review --background "Focus on auth"                                           Review with inline context
   ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
@@ -112,7 +112,7 @@ ocr r      [flags]   (alias)
 | `--output <path>` | `-o` | 標準出力 | レビュー結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
 | `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します（`--format` が `json`/`sarif` の場合は stderr に出力し、stdout は解析可能な単一ドキュメントのままになります）。`agent` は進捗行を完全に抑制し、最終サマリー / JSON のみを出力します。 |
 | `--background <text>` | `-b` | — | plan + main prompt に注入する、任意の要件 / 業務コンテキスト。 |
-| `--background-file <path>` | `-B` | — | レビューの背景として使用する Markdown ファイルのパス。`--background` も指定した場合は両方を結合します。 |
+| `--background-file <path>` | `-B` | — | レビューの背景として使用する Markdown ファイルのパス。`--background` も指定した場合はファイルが優先され、インラインのテキストは無視されます。 |
 | `--exclude <patterns>` | — | — | 除外する gitignore 形式のパターン（カンマ区切り）。`rule.json` の excludes とマージされます。 |
 | `--concurrency <n>` | — | `8` | 並行してレビューするサブタスクの最大数。 |
 | `--timeout <minutes>` | — | `15` | サブタスクごとの締め切り時間。`0` でタイムアウトを無効化します。effort ラウンド数に応じて線形にスケールします（例: low/medium/high で 15/30/45 分）。 |
