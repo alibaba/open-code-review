@@ -1542,6 +1542,10 @@ p {
     .token-stats { grid-template-columns: repeat(2, 1fr); }
     .meta { gap: 0.5rem 1rem; font-size: 0.8rem; }
     .table th, .table td { padding: 0.6rem 0.75rem; font-size: 0.82rem; }
+    /* Let the session meta items and their truncated values wrap instead of
+       holding their one-line shape on a narrow viewport. */
+    .session-page .meta span { white-space: normal; }
+    .session-page .meta .meta-truncate { max-width: 100%; }
 }
 
 /* ── Accessibility: focus ── */
@@ -1589,6 +1593,7 @@ nav.breadcrumb a:focus-visible {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 0.75rem;
     margin-top: 0.35rem;
 }
@@ -1601,6 +1606,7 @@ nav.breadcrumb a:focus-visible {
 .marks-actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.75rem;
 }
 
