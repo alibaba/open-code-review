@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { FileChange } from '../../shared/types';
+import { FileChange } from '@shared/types';
 import path from 'path';
 
 export function mapStatusCode(code: string): FileChange['status'] {

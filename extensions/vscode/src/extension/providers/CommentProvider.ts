@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { t, resolveLocale, SupportedLocale } from '../../shared/i18n';
+import { t, resolveLocale, SupportedLocale } from '@shared/i18n';
 import * as vscode from 'vscode';
-import { ReviewComment, CommentStatus, CommentSyncState, ReviewContext, ReviewMode } from '../../shared/types';
-import { COMMENT_CONTROLLER_ID } from '../../shared/constants';
+import { ReviewComment, CommentStatus, CommentSyncState, ReviewContext, ReviewMode } from '@shared/types';
+import { COMMENT_CONTROLLER_ID } from '@shared/constants';
 import { LineOffsetTracker } from './lineOffset';
 import { GitService } from '../services/GitService';
 import {

@@ -217,6 +217,40 @@ func TestParseTemplate_SessionWithComments(t *testing.T) {
 	}
 }
 
+func TestParseTemplate_CommentsToolbarMockup(t *testing.T) {
+	tmpl, err := parseTemplate("session.html")
+	if err != nil {
+		t.Fatalf("parseTemplate: %v", err)
+	}
+
+	comments := []*ReviewComment{
+		{FilePath: "a.go", Content: "c1", Category: "bug", Severity: "critical"},
+		{FilePath: "a.go", Content: "c2", Category: "docs", Severity: "medium"},
+	}
+	vs := &ViewSession{
+		Summary:  SessionSummary{SessionID: "s", CWD: "/p"},
+		Comments: comments,
+	}
+
+	rr := httptest.NewRecorder()
+	if err := tmpl.Execute(rr, sessionPageData{EncodedRepo: "r", RepoName: "R", Session: vs}); err != nil {
+		t.Fatalf("execute session.html: %v", err)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`<span class="findings-count">(2 findings)</span>`,
+		`>All (2)</button>`,
+		`>Medium (1)</button>`,
+		`aria-pressed="true"`,
+		`data-marks-count`,
+		`<button type="button" class="clear-marks-link" data-clear-all-marks>clear all marked</button>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered comments toolbar missing %q", want)
+		}
+	}
+}
+
 func TestCategoryCounts_NormalizesUnknownCategories(t *testing.T) {
 	counts := categoryCounts([]*ReviewComment{
 		{Category: "bug"},

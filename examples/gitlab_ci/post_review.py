@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 alibaba/open-code-review Contributors
+
 """Post an OpenCodeReview result onto a GitLab merge request.
 
 This is the CI-layer "glue" for GitLab, mirroring examples/gerrit_ci and

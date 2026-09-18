@@ -6,6 +6,9 @@ package viewer
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -135,6 +138,11 @@ func TestRenderTemplate_Success(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "No session data found") {
 		t.Errorf("expected empty repos message in rendered output")
 	}
+	// The search input is useless without a table and repos.js only loads
+	// alongside rows, so it must stay inside the {{if .Repos}} branch.
+	if strings.Contains(rr.Body.String(), "repository-search-input") {
+		t.Error("empty repositories page should not render the search input")
+	}
 }
 
 func TestRenderTemplate_WithRepos(t *testing.T) {
@@ -213,6 +221,119 @@ func TestRenderTemplate_Sessions(t *testing.T) {
 	}
 }
 
+func TestRenderTemplate_SessionsTableMockup(t *testing.T) {
+	const fullID = "b029c726-7b6b-46aa-b923-9fea9f012345"
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "sessions.html", sessionsData{
+		EncodedRepo: "my-repo",
+		RepoName:    "my-project",
+		Sessions: []SessionSummary{
+			{
+				SessionID:     fullID,
+				GitBranch:     "refactor/rename-runprofile",
+				ReviewMode:    "range",
+				Model:         "claude-opus-5",
+				FileCount:     8,
+				TerminalState: "complete",
+				CommentCount:  5,
+				DurationSec:   290,
+			},
+			{SessionID: "older-session"},
+		},
+	})
+	body := rr.Body.String()
+
+	const header = `<thead><tr><th>Session ID</th><th>Branch</th><th>Mode</th><th>Model</th>` +
+		`<th>Files</th><th>Status</th><th>Comments</th><th>Duration</th><th>Started At</th><th class="col-action">Action</th></tr></thead>`
+	for _, want := range []string{
+		header,
+		`id="sessions-table"`,
+		`<a class="back-link" href="/" aria-label="Back to repositories"><svg`,
+		`<td class="col-session"><a class="session-id" href="/r/my-repo/` + fullID + `" title="` + fullID + `">Session: b029c726-7b6b-46aa-b923-9fea9f…</a></td>`,
+		`<td class="col-branch">refactor/rename-runprofile</td>`,
+		`<td class="col-mode">range</td>`,
+		`<td class="col-model">claude-opus-5</td>`,
+		`<td class="col-files">8</td>`,
+		`<td>complete</td>`,
+		`<td class="col-comments">5</td>`,
+		`<td class="col-duration">4m50s</td>`,
+		`<a href="/r/my-repo/compare?before=older-session&amp;after=` + fullID + `">Compare</a>`,
+		`id="sessions-pagination"`,
+		`data-page-step="-1"`,
+		`data-page-step="1"`,
+		`id="sessions-page-numbers"`,
+		`src="/static/sessions.js"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered sessions page missing %q", want)
+		}
+	}
+	if strings.Contains(body, "<code>claude-opus-5</code>") {
+		t.Error("the model column should render as plain text, as in the mockup")
+	}
+	if strings.Contains(body, "<script>") {
+		t.Error("sessions page must not carry an inline script")
+	}
+}
+
+func TestSessionsJS_PagerContract(t *testing.T) {
+	script, err := assets.ReadFile("static/sessions.js")
+	if err != nil {
+		t.Fatalf("read static/sessions.js: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "sessions.html", sessionsData{
+		EncodedRepo: "my-repo",
+		RepoName:    "my-project",
+		Sessions:    []SessionSummary{{SessionID: "s-new"}, {SessionID: "s-old"}},
+	})
+	body := rr.Body.String()
+	if !strings.Contains(body, `<nav id="sessions-pagination" class="pagination" aria-label="Session pages" hidden>`) {
+		t.Error("pager should render hidden until sessions.js enables it")
+	}
+	for _, id := range []string{"sessions-table", "sessions-pagination", "sessions-page-numbers"} {
+		if !strings.Contains(body, `id="`+id+`"`) {
+			t.Errorf("sessions.html does not render #%s", id)
+		}
+		if !strings.Contains(string(script), `"`+id+`"`) {
+			t.Errorf("sessions.js does not look up #%s", id)
+		}
+	}
+	if !strings.Contains(string(script), "ocrPager") {
+		t.Error("sessions.js should delegate pagination to the shared ocrPager")
+	}
+}
+
+func TestPagerCSS_StaysHiddenUntilScripted(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	guard := regexp.MustCompile(`\.pagination\[hidden\] \{\s*display: none;`)
+	if !guard.Match(css) {
+		t.Error("style.css lost the .pagination[hidden] { display: none } guard: " +
+			"the pager's own display: flex is an author rule, so it outranks the UA [hidden] rule " +
+			"and the control would paint before the page script reveals it, and stay up with scripting off")
+	}
+}
+
+func TestSurfaceCSS_LightSurfaceIsWhite(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	light := regexp.MustCompile(`--surface: #ffffff;`)
+	if !light.Match(css) {
+		t.Error("style.css lost the light-mode --surface: #ffffff token: " +
+			"cards and tables must read as white and stay delineated by --border, not a grey fill")
+	}
+	dark := regexp.MustCompile(`--surface: #0a0a0a;`)
+	if !dark.Match(css) {
+		t.Error("style.css lost the dark-mode --surface: #0a0a0a token: " +
+			"dark surfaces must keep sitting above the black page")
+	}
+}
+
 func TestRenderTemplate_SessionPage(t *testing.T) {
 	rr := httptest.NewRecorder()
 	vs := &ViewSession{
@@ -253,6 +374,89 @@ func TestRenderTemplate_SessionPage(t *testing.T) {
 	}
 	if !strings.Contains(body, `<a href="/r/repo">MyRepo</a>`) {
 		t.Errorf("expected breadcrumb navigation to remain in session template")
+	}
+}
+
+func TestRenderTemplate_SessionHeaderMockup(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary: SessionSummary{
+			SessionID:     "b029c726-7b6b",
+			Model:         "claude-opus-5",
+			CWD:           "/Users/kite/Documents/code/github/open-code-review",
+			GitBranch:     "refactor/rename-runprofile",
+			ReviewMode:    "range",
+			DiffFrom:      "05af664",
+			DiffTo:        "HEAD",
+			TerminalState: "complete",
+		},
+	}
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "my-repo",
+		RepoName:    "MyRepo",
+		Session:     vs,
+	})
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, required := range []string{
+		`<main class="session-page">`,
+		`aria-label="Back to sessions"><svg`,
+		`<span class="meta-truncate" title="/Users/kite/Documents/code/github/open-code-review">`,
+		`<span class="meta-truncate" title="refactor/rename-runprofile">`,
+		`<strong>From:</strong> <code>05af664</code>`,
+		`<strong>To:</strong> <code>HEAD</code>`,
+		`<span class="meta-status status-complete">complete</span>`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("rendered session header missing %q", required)
+		}
+	}
+	if strings.Contains(body, "<script>") {
+		t.Error("session page must not contain inline <script> elements (CSP)")
+	}
+}
+
+func TestRenderTemplate_SessionHeaderStatusClasses(t *testing.T) {
+	cases := []struct {
+		name      string
+		aborted   bool
+		legacy    bool
+		termState string
+		wantClass string
+	}{
+		{"complete", false, false, "complete", "status-complete"},
+		{"partial", false, false, "partial", "status-partial"},
+		{"failed", false, false, "failed", "status-failed"},
+		{"skipped", false, false, "skipped", "status-legacy"},
+		{"aborted", true, false, "complete", "status-aborted"},
+		{"legacy", false, true, "complete", "status-legacy"},
+		{"unknown state stays unclassed", false, false, "odd state", `>odd state</span>`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			renderTemplate(rr, "session.html", sessionPageData{
+				EncodedRepo: "repo",
+				RepoName:    "MyRepo",
+				Session: &ViewSession{
+					Summary: SessionSummary{
+						SessionID:     "abc",
+						CWD:           "/test",
+						Aborted:       tc.aborted,
+						Legacy:        tc.legacy,
+						TerminalState: tc.termState,
+					},
+				},
+			})
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rr.Code)
+			}
+			if !strings.Contains(rr.Body.String(), tc.wantClass) {
+				t.Errorf("expected %q in rendered status markup", tc.wantClass)
+			}
+		})
 	}
 }
 
@@ -529,5 +733,100 @@ func TestRenderTemplate_FilesReviewedUseFileIcon(t *testing.T) {
 	}
 	if !strings.Contains(body, "internal/agent/agent.go") {
 		t.Error("Files Reviewed should still render the file path")
+	}
+}
+
+func TestRenderTemplate_ReposTableMockup(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "repos.html", map[string]any{
+		"Repos": []RepoInfo{{EncodedPath: "my-project", SessionCount: 3}},
+	})
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, required := range []string{
+		`<main class="repos-page">`,
+		`<th scope="col" class="col-action">Action</th>`,
+		`<a class="repo-check" href="/r/my-project">Check</a>`,
+		`<td class="col-repository" data-repository-name><a href="/r/my-project">my-project</a></td>`,
+		`aria-label="Previous page"><svg`,
+		`aria-label="Next page"><svg`,
+		`<nav id="repos-pagination" class="pagination" aria-label="Repository pages" hidden>`,
+		`data-page-step="-1"`,
+		`data-page-step="1"`,
+		`id="repos-page-numbers"`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("rendered repositories page missing %q", required)
+		}
+	}
+	if strings.Contains(body, "<script>") {
+		t.Error("repositories page must not contain inline <script> elements (CSP)")
+	}
+}
+
+func TestReposJS_PagerContract(t *testing.T) {
+	html, err := os.ReadFile(filepath.Join("templates", "repos.html"))
+	if err != nil {
+		t.Fatalf("read repos.html: %v", err)
+	}
+	js, err := os.ReadFile(filepath.Join("static", "repos.js"))
+	if err != nil {
+		t.Fatalf("read repos.js: %v", err)
+	}
+	// The search box and the table live in repos.html itself; the pager nav
+	// comes from the shared pager partial, so assert it on the rendered page.
+	for _, id := range []string{"repository-search-input", "repositories-table"} {
+		if !strings.Contains(string(html), `id="`+id+`"`) {
+			t.Errorf("repos.html is missing id %q", id)
+		}
+	}
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "repos.html", map[string]any{
+		"Repos": []RepoInfo{{EncodedPath: "project-a", SessionCount: 2}},
+	})
+	body := rr.Body.String()
+	if !strings.Contains(body, `<nav id="repos-pagination" class="pagination" aria-label="Repository pages" hidden>`) {
+		t.Error("pager should render hidden until repos.js enables it")
+	}
+	for _, id := range []string{"repository-search-input", "repositories-table", "repos-pagination", "repos-page-numbers"} {
+		if !strings.Contains(body, `id="`+id+`"`) {
+			t.Errorf("repos.html does not render #%s", id)
+		}
+		if !strings.Contains(string(js), `getElementById("`+id+`")`) {
+			t.Errorf("repos.js does not look up id %q", id)
+		}
+	}
+	if !strings.Contains(string(js), "ocrPager") || !strings.Contains(string(js), "filter:") {
+		t.Error("repos.js should hand the table and its search filter to the shared ocrPager")
+	}
+}
+
+func TestPagerJS_Contract(t *testing.T) {
+	script, err := assets.ReadFile("static/pager.js")
+	if err != nil {
+		t.Fatalf("read static/pager.js: %v", err)
+	}
+	for _, want := range []string{
+		// The page scripts drive the pager through this global.
+		"window.ocrPager",
+		// The pager owns every hook the markup and styles rely on.
+		"data-page-step",
+		`className = "page-number"`,
+		`className = "page-gap"`,
+		`setAttribute("aria-current", "page")`,
+		`setAttribute("aria-label", ` + "`Page ${item}`" + `)`,
+		// Progressive enhancement: the pager stays hidden while it only
+		// has one page to show.
+		"pager.hidden = total < 2",
+		// Focus returns to the current page number / an enabled step.
+		"preventScroll",
+		// The repositories search re-applies its filter from page 1.
+		"refresh",
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("pager.js is missing %q", want)
+		}
 	}
 }

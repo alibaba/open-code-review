@@ -1,3 +1,8 @@
+/*
+SPDX-License-Identifier: Apache-2.0
+Copyright 2026 alibaba/open-code-review Contributors
+*/
+
 
 :root {
     color-scheme: light dark;
@@ -8,7 +13,7 @@
 
     /* Surfaces — neutral layers from the viewer redesign mockups */
     --bg: #ffffff;
-    --surface: #fafafa;
+    --surface: #ffffff;
     --surface-alt: #f5f5f5;
     --surface-inset: #f0f0f0;
     --response-bg: var(--surface);
@@ -277,33 +282,33 @@ h3 {
 
 .repository-search {
     display: grid;
-    gap: 0.35rem;
-    margin-bottom: 1rem;
-}
-.repository-search label {
-    color: var(--text-muted);
-    font-size: 0.9rem;
+    /* Right-align explicitly rather than relying on the heading's flex-grow. */
+    margin-left: auto;
 }
 .repository-search input {
-    width: min(100%, 24rem);
-    padding: 0.5rem 0.65rem;
+    padding: 0.45rem 0.85rem;
     color: var(--text);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    background: var(--surface-alt);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
     font: inherit;
+    transition: background var(--transition), border-color var(--transition);
+}
+.repository-search input:hover {
+    border-color: var(--border);
 }
 .repository-search input:focus {
     outline: 2px solid var(--link);
     outline-offset: 1px;
+    background: var(--surface);
 }
 .search-field {
     position: relative;
-    width: min(100%, 24rem);
+    width: min(100%, 17rem);
 }
 .search-field input {
     width: 100%;
-    padding-right: 2rem;
+    padding-right: 2.2rem;
 }
 .search-icon {
     position: absolute;
@@ -440,29 +445,22 @@ h3 {
     margin-bottom: 0;
     overflow-wrap: anywhere;
 }
+/* One back button serves every page: an icon box for the inline chevron
+   (repositories 36px is the base size; session detail shrinks it below). */
 .back-link {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
-    width: 44px;
-    height: 44px;
+    width: 36px;
+    height: 36px;
     padding: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--surface-alt);
-    color: var(--link);
+    background: var(--surface);
+    color: var(--text-muted);
     text-decoration: none;
     transition: color var(--transition), background var(--transition), border-color var(--transition);
-}
-
-.back-link::before {
-    content: "";
-    width: 20px;
-    height: 20px;
-    background: currentColor;
-    -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cline%20x1%3D%2219%22%20y1%3D%2212%22%20x2%3D%225%22%20y2%3D%2212%22%2F%3E%3Cpolyline%20points%3D%2212%2019%205%2012%2012%205%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
-    mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cline%20x1%3D%2219%22%20y1%3D%2212%22%20x2%3D%225%22%20y2%3D%2212%22%2F%3E%3Cpolyline%20points%3D%2212%2019%205%2012%2012%205%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
 }
 .back-link:hover {
     color: var(--accent-hover);
@@ -472,6 +470,20 @@ h3 {
 .back-link:focus-visible {
     outline: 2px solid var(--link);
     outline-offset: 2px;
+}
+.back-link svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+}
+.session-page .back-link {
+    width: 32px;
+    height: 32px;
+    border-color: var(--border-subtle);
+}
+.session-page .back-link svg {
+    width: 16px;
+    height: 16px;
 }
 .session-header .page-heading {
     margin-bottom: 0.75rem;
@@ -688,6 +700,7 @@ h3 {
 
 .section-accordion {
     margin-top: 1.25rem;
+    border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--surface);
     box-shadow: var(--shadow-sm);
@@ -1095,6 +1108,11 @@ p {
     margin: 0 0 1rem;
     font-size: 1rem;
 }
+.comments-section .findings-count {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 400;
+}
 
 .comment-filter-bar {
     display: flex;
@@ -1102,9 +1120,6 @@ p {
     flex-wrap: wrap;
     gap: 0.5rem;
     margin-bottom: 0.65rem;
-}
-.category-filters {
-    margin-bottom: 1.25rem;
 }
 .comment-filter-label {
     min-width: 4.75rem;
@@ -1123,26 +1138,27 @@ p {
     letter-spacing: 0.01em;
     line-height: 1.35;
     cursor: pointer;
-    transition: opacity var(--transition), box-shadow var(--transition), border-color var(--transition);
+    background: var(--badge-neutral-bg);
+    color: var(--badge-neutral-fg);
+    transition: background var(--transition), color var(--transition), border-color var(--transition);
 }
-.comment-filter-chip:not(.is-active) { opacity: 0.72; }
-.comment-filter-chip:hover,
-.comment-filter-chip.is-active { opacity: 1; }
-.comment-filter-chip.is-active {
-    border-color: transparent;
-    box-shadow: 0 0 0 2px currentColor;
-}
+.comment-filter-chip:hover { border-color: var(--border); }
 .comment-filter-chip:focus-visible {
     outline: 2px solid var(--link);
     outline-offset: 2px;
 }
-.filter-all { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
-.severity-badge {
-    padding: 0.3em 0.75em;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
+/* The mockup dresses every chip neutral and marks the active one with the
+   accent. The severity/category tint classes stay on the markup for the
+   compare page badges, so they are neutralized here by scope; the scoped
+   active rule must stay below the scoped neutralizer to win the tie. */
+.comments-section .comment-filter-chip[class*="severity-"],
+.comments-section .comment-filter-chip[class*="cat-"] {
+    background: var(--badge-neutral-bg);
+    color: var(--badge-neutral-fg);
+}
+.comments-section .comment-filter-chip.is-active {
+    background: var(--accent-soft);
+    color: var(--link);
 }
 .severity-critical { background: var(--severity-critical-bg); color: var(--severity-critical-fg); }
 .severity-high { background: var(--severity-high-bg); color: var(--severity-high-fg); }
@@ -1221,6 +1237,15 @@ p {
 .cat-other { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
 .cat-default { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
 .severity-default { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
+
+/* The mockup shows the per-card category/severity badges neutral; the tint
+   classes above stay for the compare page badges, so the session card view
+   neutralizes them by scope. */
+.comments-section .comment-badge[class*="cat-"],
+.comments-section .comment-badge[class*="severity-"] {
+    background: var(--badge-neutral-bg);
+    color: var(--badge-neutral-fg);
+}
 
 @media (prefers-color-scheme: dark) {
     .cat-bug { background: rgba(220, 38, 38, 0.12); color: #fca5a5; }
@@ -1355,6 +1380,26 @@ p {
     background: #f8fdfb;
 }
 
+/* The mockup keeps the panel labels on the card background and tints only
+   the code band (existing #feeff0, suggested #ecfbf1). These scoped rules
+   override the shared tinted-label styles above, which the compare page
+   keeps. */
+.comments-section .code-existing .code-panel-label,
+.comments-section .code-suggestion .code-panel-label {
+    background: transparent;
+    color: var(--text-muted);
+}
+.comments-section .code-existing pre {
+    background: #feeff0;
+}
+.comments-section .code-suggestion pre {
+    background: #ecfbf1;
+}
+@media (prefers-color-scheme: dark) {
+    .comments-section .code-existing pre { background: rgba(220, 38, 38, 0.08); }
+    .comments-section .code-suggestion pre { background: rgba(52, 211, 153, 0.07); }
+}
+
 @media (prefers-color-scheme: dark) {
     .code-existing .code-panel-label { background: rgba(220, 38, 38, 0.12); color: #fca5a5; }
     .code-existing pre { background: rgba(220, 38, 38, 0.05); }
@@ -1411,6 +1456,81 @@ p {
     .compare-bucket { padding: 0.85rem 1rem; }
 }
 
+.sessions-page .page-heading {
+    align-items: center;
+}
+
+.sessions-page .table th {
+    background: transparent;
+    white-space: nowrap;
+}
+
+.sessions-page .table th,
+.sessions-page .table td {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+}
+
+.sessions-page .table-scroll {
+    overflow-x: auto;
+}
+
+.sessions-page .col-session {
+    min-width: 13.75rem;
+}
+
+.sessions-page .col-branch {
+    width: 9rem;
+}
+
+.sessions-page .col-mode {
+    width: 4.5rem;
+}
+
+.sessions-page .col-model {
+    width: 8rem;
+}
+
+.sessions-page .col-started {
+    width: 8rem;
+}
+
+.sessions-page .col-action {
+    width: 4rem;
+}
+
+.sessions-page .col-files,
+.sessions-page .col-comments,
+.sessions-page .col-duration,
+.sessions-page .col-model {
+    white-space: nowrap;
+}
+
+.sessions-page .table td {
+    vertical-align: top;
+}
+
+.sessions-page .table th.col-action {
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.sessions-page .session-id {
+    color: var(--text);
+    text-decoration: none;
+}
+
+.sessions-page .session-id:hover {
+    color: var(--link);
+    text-decoration: underline;
+}
+
+.sessions-page .session-id:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
     main { padding: 0 1rem; margin: 1.25rem auto; }
@@ -1435,11 +1555,58 @@ p {
    State lives in the browser (localStorage); these are presentation only.
    Chips follow the filled-badge pattern used by the .cat-* / severity
    badges above: a background + color pair, with a dark-mode override. */
-.marks-bar {
+.comments-toolbar {
+    margin-bottom: 1rem;
+}
+
+.toolbar-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.toolbar-filters .comment-filter-bar { margin-bottom: 0; }
+
+/* Counter far left, switch and clear link far right — one row below the
+   filters, per the mockup. */
+.marks-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 0.35rem;
+}
+
+.marks-row .comment-filter-label {
+    min-width: 0;
+    font-weight: 400;
+}
+
+.marks-actions {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    flex-wrap: wrap;
+}
+
+.clear-marks-link {
+    appearance: none;
+    border: none;
+    background: none;
+    padding: 0;
+    font: inherit;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.clear-marks-link:hover {
+    color: var(--text-strong);
+    text-decoration: underline;
+}
+
+.clear-marks-link:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
 }
 
 .marks-toggle {
@@ -1450,6 +1617,41 @@ p {
     font-weight: 600;
     cursor: pointer;
     user-select: none;
+}
+
+/* The hide-marked checkbox renders as the mockup's small switch. */
+.marks-toggle input[type="checkbox"] {
+    appearance: none;
+    width: 30px;
+    height: 18px;
+    margin: 0;
+    border-radius: 9px;
+    background: var(--surface-inset);
+    position: relative;
+    cursor: pointer;
+    transition: background var(--transition);
+}
+
+.marks-toggle input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--transition);
+}
+
+.marks-toggle input[type="checkbox"]:checked { background: var(--accent-hover); }
+
+.marks-toggle input[type="checkbox"]:checked::before { transform: translateX(12px); }
+
+.marks-toggle input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
 }
 
 .mark-chip {
@@ -1474,21 +1676,262 @@ p {
 .mark-btn {
     appearance: none;
     border: 1px solid var(--border, #d0d7de);
-    border-radius: 12px;
+    border-radius: 6px;
     background: transparent;
     padding: 0.2em 0.7em;
     font: inherit;
+    color: var(--text-secondary);
     font-size: 0.72rem;
     font-weight: 600;
     line-height: 1.35;
     cursor: pointer;
-    transition: opacity var(--transition), border-color var(--transition);
-    opacity: 0.75;
+    transition: color var(--transition), border-color var(--transition);
 }
 
-.mark-btn:hover { opacity: 1; }
+.mark-btn:hover {
+    border-color: var(--link);
+    color: var(--text-strong);
+}
+
+.mark-btn:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
 
 .mark-btn.mark-clear {
     border-style: dashed;
-    opacity: 0.6;
+}
+
+/* ── Repositories Page ── */
+.repos-page .page-heading {
+    align-items: center;
+    flex-wrap: wrap;
+    row-gap: 0.75rem;
+}
+
+.repos-page .table th {
+    background: transparent;
+    white-space: nowrap;
+}
+
+.repos-page .table th,
+.repos-page .table td {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+}
+
+.repos-page .table td {
+    vertical-align: top;
+}
+
+.repos-page .table-scroll {
+    overflow-x: auto;
+}
+
+.repos-page .col-repository {
+    min-width: 16rem;
+}
+
+.repos-page .col-sessions,
+.repos-page .col-modified,
+.repos-page .col-action {
+    white-space: nowrap;
+}
+
+.repos-page .col-sessions {
+    width: 6rem;
+}
+
+.repos-page .col-modified {
+    width: 11rem;
+}
+
+.repos-page .col-action {
+    width: 4.5rem;
+}
+
+.repos-page .table th.col-action {
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+/* The repo path reads as plain text like the mockup; it stays a link. */
+.repos-page .col-repository a {
+    color: var(--text);
+    text-decoration: none;
+    transition: color var(--transition);
+}
+.repos-page .col-repository a:hover {
+    color: var(--link);
+    text-decoration: underline;
+}
+.repos-page .col-repository a:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+}
+
+.repos-page .repo-check {
+    color: var(--link);
+    font-weight: 500;
+    text-decoration: none;
+    transition: color var(--transition);
+}
+.repos-page .repo-check:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+}
+.repos-page .repo-check:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+}
+
+/* ── Session Page Header ── */
+/* The mockup drops the card/gradient chrome: title row and meta bar sit on
+   the page background. Scoped to .session-page so the rest of the session
+   detail sections stay untouched. */
+.session-page .session-header {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+    /* The card chrome relied on overflow:hidden + radius to round its corner;
+       with the button flush against the header's top-left, that clip would
+       bite into it. */
+    overflow: visible;
+    padding: 0;
+}
+
+.session-page .session-header::before {
+    content: none;
+}
+
+.session-page .session-header .page-heading {
+    align-items: center;
+}
+
+.session-page .session-header h2 {
+    margin-bottom: 0;
+}
+
+.session-page .meta {
+    gap: 0.5rem 2.25rem;
+}
+
+.session-page .meta span {
+    white-space: nowrap;
+}
+
+.session-page .meta .meta-truncate {
+    max-width: 22rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.session-page .meta .meta-status {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.session-page .meta .status-complete {
+    color: var(--link);
+}
+
+.session-page .meta .status-partial,
+.session-page .meta .status-aborted {
+    color: var(--badge-duration-fg);
+}
+
+.session-page .meta .status-failed {
+    color: var(--danger);
+}
+
+.session-page .meta .status-legacy {
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+/* ── Pagination (shared) ── */
+/* The repositories and sessions pages drive one pager markup, so its rules
+   are unscoped; only the .pagination, .page-numbers, .page-step,
+   .page-number and .page-gap class names are affected. */
+.pagination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-1);
+    margin-top: var(--space-5);
+}
+
+.pagination[hidden] {
+    display: none;
+}
+
+.page-numbers {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-1);
+}
+
+.page-step,
+.page-number {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+
+.page-step svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+}
+
+.page-step:hover:not(:disabled),
+.page-number:hover:not([aria-current="page"]) {
+    background: var(--hover-row);
+    color: var(--text-strong);
+}
+
+.page-step:disabled {
+    color: var(--text-faint);
+    cursor: default;
+}
+
+.page-step:focus-visible,
+.page-number:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+
+.page-number[aria-current="page"] {
+    border-color: var(--pagination-active-border);
+    background: var(--surface);
+    color: var(--pagination-active-text);
+    font-weight: 600;
+}
+
+.page-gap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    color: var(--text-muted);
 }
