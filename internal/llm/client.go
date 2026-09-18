@@ -45,13 +45,6 @@ var AppVersion = "dev"
 // shrink it, same as keyCmdTimeout.
 var bedrockConfigLoadTimeout = 60 * time.Second
 
-// vertexAuthLoadTimeout bounds how long NewAnthropicVertexClient may spend
-// resolving Application Default Credentials (vertex.WithGoogleAuth ->
-// google.FindDefaultCredentials), which can reach the network — the GCE/GKE
-// metadata server, or a token refresh against Google's OAuth endpoint. Package
-// var, not const, so tests can shrink it, same as bedrockConfigLoadTimeout.
-var vertexAuthLoadTimeout = 60 * time.Second
-
 // responseHeaderTimeoutMargin is added to the request timeout when setting
 // ResponseHeaderTimeout so the per-request context deadline (WithRequestTimeout),
 // which is 30s earlier, is the one to fire first. An equal ResponseHeaderTimeout
@@ -1255,8 +1248,17 @@ func NewAnthropicVertexClient(cfg ClientConfig) *AnthropicClient {
 		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
-	loadCtx, cancel := context.WithTimeout(context.Background(), vertexAuthLoadTimeout)
-	defer cancel()
+	// authCtx is deliberately context.Background(), not a bounded or
+	// cancelable context: unlike awsconfig.LoadDefaultConfig, whose result
+	// carries no reference to the context used to load it,
+	// google.FindDefaultCredentials embeds the ctx it is given inside the
+	// returned Credentials' TokenSource, and that same TokenSource keeps using
+	// it for every future token refresh — not just the one performed during
+	// this call. A canceled-after-construction context (the timeout-then-defer-
+	// cancel pattern bedrockConfigLoadTimeout uses) would make the very first
+	// real request fail with "context canceled" on the token endpoint, since
+	// the deferred cancel already fired by the time any request is sent.
+	authCtx := context.Background()
 
 	// vertex.WithGoogleAuth panics when Application Default Credentials cannot
 	// be resolved (google.FindDefaultCredentials returns an error), unlike
@@ -1276,7 +1278,7 @@ func NewAnthropicVertexClient(cfg ClientConfig) *AnthropicClient {
 				}
 			}
 		}()
-		vertexOpt = vertex.WithGoogleAuth(loadCtx, cfg.GCPRegion, projectID)
+		vertexOpt = vertex.WithGoogleAuth(authCtx, cfg.GCPRegion, projectID)
 	}()
 	if authErr != nil {
 		return &AnthropicClient{
