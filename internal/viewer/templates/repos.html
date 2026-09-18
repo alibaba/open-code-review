@@ -38,11 +38,8 @@
     </tbody>
 </table>
 </div>
-<nav id="repos-pagination" class="pagination" aria-label="Repository pages" hidden>
-    <button type="button" class="page-step" data-page-step="-1" aria-label="Previous page">{{icon "chevron-left"}}</button>
-    <span id="repos-page-numbers" class="page-numbers"></span>
-    <button type="button" class="page-step" data-page-step="1" aria-label="Next page">{{icon "chevron-right"}}</button>
-</nav>
+{{template "pager" (dict "prefix" "repos" "label" "Repository pages")}}
+<script src="/static/pager.js"></script>
 <script src="/static/repos.js"></script>
 {{else}}
 <p>No session data found. Run a code review first.</p>

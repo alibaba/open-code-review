@@ -1509,86 +1509,6 @@ p {
     border-radius: var(--radius-xs);
 }
 
-.sessions-page .pagination {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-end;
-    gap: var(--space-1);
-    margin-top: var(--space-5);
-}
-
-.sessions-page .pagination[hidden] {
-    display: none;
-}
-
-.sessions-page .page-numbers {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-end;
-    gap: var(--space-1);
-}
-
-.sessions-page .page-step,
-.sessions-page .page-number {
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    flex: 0 0 auto;
-    padding: 0;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-secondary);
-    font: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-    transition: color var(--transition), background var(--transition), border-color var(--transition);
-}
-
-.sessions-page .page-step svg {
-    width: 16px;
-    height: 16px;
-    display: block;
-}
-
-.sessions-page .page-step:hover:not(:disabled),
-.sessions-page .page-number:hover:not([aria-current="page"]) {
-    background: var(--hover-row);
-    color: var(--text-strong);
-}
-
-.sessions-page .page-step:disabled {
-    color: var(--text-faint);
-    cursor: default;
-}
-
-.sessions-page .page-step:focus-visible,
-.sessions-page .page-number:focus-visible {
-    outline: 2px solid var(--link);
-    outline-offset: 2px;
-}
-
-.sessions-page .page-number[aria-current="page"] {
-    border-color: var(--pagination-active-border);
-    background: var(--surface);
-    color: var(--pagination-active-text);
-    font-weight: 600;
-}
-
-.sessions-page .page-gap {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    color: var(--text-muted);
-}
-
 /* ── Responsive ── */
 @media (max-width: 768px) {
     main { padding: 0 1rem; margin: 1.25rem auto; }
@@ -1756,86 +1676,6 @@ p {
     border-radius: var(--radius-xs);
 }
 
-.repos-page .pagination {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-end;
-    gap: var(--space-1);
-    margin-top: var(--space-5);
-}
-
-.repos-page .pagination[hidden] {
-    display: none;
-}
-
-.repos-page .page-numbers {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-end;
-    gap: var(--space-1);
-}
-
-.repos-page .page-step,
-.repos-page .page-number {
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    flex: 0 0 auto;
-    padding: 0;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-secondary);
-    font: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-    transition: color var(--transition), background var(--transition), border-color var(--transition);
-}
-
-.repos-page .page-step svg {
-    width: 16px;
-    height: 16px;
-    display: block;
-}
-
-.repos-page .page-step:hover:not(:disabled),
-.repos-page .page-number:hover:not([aria-current="page"]) {
-    background: var(--hover-row);
-    color: var(--text-strong);
-}
-
-.repos-page .page-step:disabled {
-    color: var(--text-faint);
-    cursor: default;
-}
-
-.repos-page .page-step:focus-visible,
-.repos-page .page-number:focus-visible {
-    outline: 2px solid var(--link);
-    outline-offset: 2px;
-}
-
-.repos-page .page-number[aria-current="page"] {
-    border-color: var(--pagination-active-border);
-    background: var(--surface);
-    color: var(--pagination-active-text);
-    font-weight: 600;
-}
-
-.repos-page .page-gap {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    color: var(--text-muted);
-}
-
 /* ── Session Page Header ── */
 /* The mockup drops the card/gradient chrome: title row and meta bar sit on
    the page background. Scoped to .session-page so the rest of the session
@@ -1923,4 +1763,87 @@ p {
 .session-page .meta .status-legacy {
     color: var(--text-muted);
     font-weight: 500;
+}
+
+/* ── Pagination (shared) ── */
+/* The repositories and sessions pages drive one pager markup, so its rules
+   are unscoped; nothing outside .pagination/.page-* names is affected. */
+.pagination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-1);
+    margin-top: var(--space-5);
+}
+
+.pagination[hidden] {
+    display: none;
+}
+
+.page-numbers {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-1);
+}
+
+.page-step,
+.page-number {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+
+.page-step svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+}
+
+.page-step:hover:not(:disabled),
+.page-number:hover:not([aria-current="page"]) {
+    background: var(--hover-row);
+    color: var(--text-strong);
+}
+
+.page-step:disabled {
+    color: var(--text-faint);
+    cursor: default;
+}
+
+.page-step:focus-visible,
+.page-number:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+
+.page-number[aria-current="page"] {
+    border-color: var(--pagination-active-border);
+    background: var(--surface);
+    color: var(--pagination-active-text);
+    font-weight: 600;
+}
+
+.page-gap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    color: var(--text-muted);
 }

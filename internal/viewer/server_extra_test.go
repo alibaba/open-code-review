@@ -299,21 +299,21 @@ func TestSessionsJS_PagerContract(t *testing.T) {
 			t.Errorf("sessions.js does not look up #%s", id)
 		}
 	}
-	if !strings.Contains(string(script), "data-page-step") {
-		t.Error("sessions.js should drive the template's page-step buttons")
+	if !strings.Contains(string(script), "ocrPager") {
+		t.Error("sessions.js should delegate pagination to the shared ocrPager")
 	}
 }
 
-func TestSessionsCSS_PagerStaysHiddenUntilScripted(t *testing.T) {
+func TestPagerCSS_StaysHiddenUntilScripted(t *testing.T) {
 	css, err := assets.ReadFile("static/style.css")
 	if err != nil {
 		t.Fatalf("read static/style.css: %v", err)
 	}
-	guard := regexp.MustCompile(`\.sessions-page \.pagination\[hidden\] \{\s*display: none;`)
+	guard := regexp.MustCompile(`\.pagination\[hidden\] \{\s*display: none;`)
 	if !guard.Match(css) {
-		t.Error("style.css lost the .sessions-page .pagination[hidden] { display: none } guard: " +
+		t.Error("style.css lost the .pagination[hidden] { display: none } guard: " +
 			"the pager's own display: flex is an author rule, so it outranks the UA [hidden] rule " +
-			"and the control would paint before sessions.js reveals it, and stay up with scripting off")
+			"and the control would paint before the page script reveals it, and stay up with scripting off")
 	}
 }
 
@@ -758,33 +758,58 @@ func TestReposJS_PagerContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read repos.js: %v", err)
 	}
-	for _, id := range []string{
-		"repository-search-input",
-		"repositories-table",
-		"repos-pagination",
-		"repos-page-numbers",
-	} {
+	// The search box and the table live in repos.html itself; the pager nav
+	// comes from the shared pager partial, so assert it on the rendered page.
+	for _, id := range []string{"repository-search-input", "repositories-table"} {
 		if !strings.Contains(string(html), `id="`+id+`"`) {
 			t.Errorf("repos.html is missing id %q", id)
+		}
+	}
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "repos.html", map[string]any{
+		"Repos": []RepoInfo{{EncodedPath: "project-a", SessionCount: 2}},
+	})
+	body := rr.Body.String()
+	if !strings.Contains(body, `<nav id="repos-pagination" class="pagination" aria-label="Repository pages" hidden>`) {
+		t.Error("pager should render hidden until repos.js enables it")
+	}
+	for _, id := range []string{"repository-search-input", "repositories-table", "repos-pagination", "repos-page-numbers"} {
+		if !strings.Contains(body, `id="`+id+`"`) {
+			t.Errorf("repos.html does not render #%s", id)
 		}
 		if !strings.Contains(string(js), `getElementById("`+id+`")`) {
 			t.Errorf("repos.js does not look up id %q", id)
 		}
 	}
-	if !strings.Contains(string(js), "data-page-step") {
-		t.Error("repos.js should drive the pagination step buttons via data-page-step")
+	if !strings.Contains(string(js), "ocrPager") || !strings.Contains(string(js), "filter:") {
+		t.Error("repos.js should hand the table and its search filter to the shared ocrPager")
 	}
 }
 
-func TestReposCSS_PagerStaysHiddenUntilScripted(t *testing.T) {
-	css, err := os.ReadFile(filepath.Join("static", "style.css"))
+func TestPagerJS_Contract(t *testing.T) {
+	script, err := assets.ReadFile("static/pager.js")
 	if err != nil {
-		t.Fatalf("read style.css: %v", err)
+		t.Fatalf("read static/pager.js: %v", err)
 	}
-	guard := regexp.MustCompile(`\.repos-page \.pagination\[hidden\] \{\s*display: none;`)
-	if !guard.Match(css) {
-		t.Error("style.css lost the .repos-page .pagination[hidden] { display: none } guard: " +
-			"the pager's own display: flex is an author rule, so it outranks the UA [hidden] rule " +
-			"and the pager would paint before repos.js reveals it")
+	for _, want := range []string{
+		// The page scripts drive the pager through this global.
+		"window.ocrPager",
+		// The pager owns every hook the markup and styles rely on.
+		"data-page-step",
+		`className = "page-number"`,
+		`className = "page-gap"`,
+		`setAttribute("aria-current", "page")`,
+		`setAttribute("aria-label", ` + "`Page ${item}`" + `)`,
+		// Progressive enhancement: the pager stays hidden while it only
+		// has one page to show.
+		"pager.hidden = total < 2",
+		// Focus returns to the current page number / an enabled step.
+		"preventScroll",
+		// The repositories search re-applies its filter from page 1.
+		"refresh",
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("pager.js is missing %q", want)
+		}
 	}
 }
