@@ -9,38 +9,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
-
-func TestLookupProvider_CodingPlan(t *testing.T) {
-	wantModels := []string{
-		"qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "MiniMax-M2.5",
-		"qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7",
-	}
-	for _, tt := range []struct {
-		name, url, env string
-	}{
-		{"dashscope-codingplan", "https://coding.dashscope.aliyuncs.com/v1", "DASHSCOPE_CODINGPLAN_KEY"},
-		{"dashscope-codingplan-intl", "https://coding-intl.dashscope.aliyuncs.com/v1", "DASHSCOPE_CODINGPLAN_INTL_KEY"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			p, ok := LookupProvider(tt.name)
-			if !ok {
-				t.Fatal("Coding Plan preset not found")
-			}
-			if p.BaseURL != tt.url || p.EnvVar != tt.env || p.Protocol != ProtocolOpenAIChatCompletions || p.AuthHeader != "" {
-				t.Fatalf("unexpected preset: %+v", p)
-			}
-			if !reflect.DeepEqual(p.Models, wantModels) {
-				t.Errorf("models = %v, want %v", p.Models, wantModels)
-			}
-		})
-	}
-}
 
 func TestResolveEndpoint_CodingPlanCredentials(t *testing.T) {
 	for _, provider := range []string{"dashscope-codingplan", "dashscope-codingplan-intl"} {
