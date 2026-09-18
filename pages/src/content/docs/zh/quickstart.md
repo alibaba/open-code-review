@@ -9,7 +9,7 @@ sidebar:
 ## 前置条件
 
 - **Git ≥ 2.41**
-- **Node.js ≥ 18**
+- **Node.js ≥ 14**
 - **LLM API key**（使用[委托模式](../integrations/delegate/)时不需要）
 
 ## 第 1 步 —— 安装 CLI

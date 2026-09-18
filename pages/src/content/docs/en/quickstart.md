@@ -9,7 +9,7 @@ Get your first code review running in a few minutes.
 ## Prerequisites
 
 - **Git ≥ 2.41**
-- **Node.js ≥ 18**
+- **Node.js ≥ 14**
 - **LLM API key** (not needed if using [Delegation Mode](../integrations/delegate/))
 
 ## Step 1 — Install the CLI

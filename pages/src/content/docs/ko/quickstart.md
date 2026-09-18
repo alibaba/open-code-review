@@ -9,7 +9,7 @@ sidebar:
 ## 사전 요구 사항 {#prerequisites}
 
 - **Git ≥ 2.41**
-- **Node.js ≥ 18**
+- **Node.js ≥ 14**
 - **LLM API 키** ([Delegation Mode](../integrations/delegate/)를 사용한다면 필요 없음)
 
 ## 1단계 — CLI 설치 {#step-1-install-the-cli}
