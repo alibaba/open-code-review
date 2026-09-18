@@ -19,8 +19,21 @@ func ExcludedDirs() []string {
 func ProviderDirPrefix(relPath string) string {
 	for _, prefix := range providerDirIgnoreDirs {
 		dirPart := strings.TrimSuffix(prefix, "/")
-		if relPath == dirPart || strings.HasPrefix(relPath, prefix) {
+		if strings.EqualFold(relPath, dirPart) ||
+			(len(relPath) >= len(prefix) && strings.EqualFold(relPath[:len(prefix)], prefix)) {
 			return prefix
+		}
+	}
+	return ""
+}
+
+// providerDirectoryPrefix returns the canonical blocklist prefix for prefix.
+// Configuration is case-insensitive, while ProviderDirPrefix returns the
+// spelling stored in providerDirIgnoreDirs for use as the map key.
+func providerDirectoryPrefix(prefix string) string {
+	for _, candidate := range providerDirIgnoreDirs {
+		if strings.EqualFold(prefix, candidate) {
+			return candidate
 		}
 	}
 	return ""

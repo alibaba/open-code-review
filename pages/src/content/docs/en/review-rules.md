@@ -33,6 +33,7 @@ is always *some* rule resolved.
 {
   "include": ["src/**/*.{ts,tsx}", "src/**/*.go"],
   "exclude": ["**/*.test.ts", "**/generated/**"],
+  "allow_provider_directories": ["vendor/"],
   "rules": [
     {
       "path": "src/api/**/*.go",
@@ -46,7 +47,7 @@ is always *some* rule resolved.
 }
 ```
 
-Three independent fields:
+Four independent fields:
 
 - `include` — optional. Glob patterns that *bypass* built-in default
   exclude patterns (test-file exclusions — see below). It is not a
@@ -55,6 +56,12 @@ Three independent fields:
   be reviewed.
 - `exclude` — optional. Glob patterns for files OCR must *not* review.
   Highest precedence among user-configured filters.
+- `allow_provider_directories` — optional. Exact built-in directory prefixes
+  whose **tracked** changes may proceed to review. This is intended for a
+  personal `--rule` file when a repository intentionally modifies vendored
+  code; the repository default should normally omit it. `vendor/` is one
+  example. Untracked provider-directory files, and VCS metadata directories
+  such as `.git/`, remain unavailable to review.
 - `rules` — array of `{path, rule}` entries, evaluated **in declaration
   order**. The first `path` whose glob matches the file determines the
   prompt OCR sends to the model for that file.
@@ -134,7 +141,23 @@ matches test-file patterns:
 Noisy-directory filtering (`vendor/`, `node_modules/`, `target/`, …)
 happens earlier, at the diff level in
 [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go),
-before the per-file filter runs.
+before the per-file filter runs. By default these files are excluded. To review
+an intentionally tracked directory such as `vendor/` for one run, use a local
+rule file:
+
+```json
+{
+  "allow_provider_directories": ["vendor/"]
+}
+```
+
+```sh
+ocr review --rule ~/ocr-rules/vendor-review.json
+```
+
+The directory then proceeds through the normal binary, secret, user-exclude,
+extension, default-path, and size gates; it is not automatically sent to the
+LLM.
 
 To **review** a file that matches one of these test-file patterns, add
 it to the user `include` list — that overrides the default-path gate.
