@@ -32,7 +32,7 @@
             <td class="col-started">{{formatTime $s.Timestamp}}</td>
             {{/* Rows are newest-first, so the next-older session is index+1.
                  The oldest row has no older neighbour to compare against. */}}
-            <td class="col-action">{{if lt (add $i 1) (len $.Sessions)}}{{$prev := index $.Sessions (add $i 1)}}<a href="/r/{{$.EncodedRepo}}/compare?before={{$prev.SessionID}}&amp;after={{$s.SessionID}}">Check</a>{{else}}-{{end}}</td>
+            <td class="col-action">{{if lt (add $i 1) (len $.Sessions)}}{{$prev := index $.Sessions (add $i 1)}}<a href="/r/{{$.EncodedRepo}}/compare?before={{$prev.SessionID}}&amp;after={{$s.SessionID}}">Compare</a>{{else}}-{{end}}</td>
         </tr>
     {{end}}
     </tbody>

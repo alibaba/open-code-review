@@ -257,7 +257,7 @@ func TestRenderTemplate_SessionsTableMockup(t *testing.T) {
 		`<td>complete</td>`,
 		`<td class="col-comments">5</td>`,
 		`<td class="col-duration">4m50s</td>`,
-		`<a href="/r/my-repo/compare?before=older-session&amp;after=` + fullID + `">Check</a>`,
+		`<a href="/r/my-repo/compare?before=older-session&amp;after=` + fullID + `">Compare</a>`,
 		`id="sessions-pagination"`,
 		`data-page-step="-1"`,
 		`data-page-step="1"`,
