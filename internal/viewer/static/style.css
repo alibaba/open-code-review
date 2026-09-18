@@ -1367,6 +1367,26 @@ p {
     background: #f8fdfb;
 }
 
+/* The mockup keeps the panel labels on the card background and tints only
+   the code band (existing #feeff0, suggested #ecfbf1). These scoped rules
+   override the shared tinted-label styles above, which the compare page
+   keeps. */
+.comments-section .code-existing .code-panel-label,
+.comments-section .code-suggestion .code-panel-label {
+    background: transparent;
+    color: var(--text-muted);
+}
+.comments-section .code-existing pre {
+    background: #feeff0;
+}
+.comments-section .code-suggestion pre {
+    background: #ecfbf1;
+}
+@media (prefers-color-scheme: dark) {
+    .comments-section .code-existing pre { background: rgba(220, 38, 38, 0.08); }
+    .comments-section .code-suggestion pre { background: rgba(52, 211, 153, 0.07); }
+}
+
 @media (prefers-color-scheme: dark) {
     .code-existing .code-panel-label { background: rgba(220, 38, 38, 0.12); color: #fca5a5; }
     .code-existing pre { background: rgba(220, 38, 38, 0.05); }
