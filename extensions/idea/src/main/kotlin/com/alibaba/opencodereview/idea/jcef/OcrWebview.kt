@@ -21,9 +21,11 @@ import java.awt.event.HierarchyEvent
 import javax.swing.JComponent
 
 /**
- * 装配双向消息桥的 JCEF 页面。侧栏与配置面板共用同一实现。
+ * A JCEF page with a two-way message bridge. The sidebar and the config panel share this one
+ * implementation.
  *
- * 消息桥两个方向：页面→宿主 `window.__ocrPost(json)`；宿主→页面 `window.__ocrReceive(msg)`。
+ * The bridge runs both ways: page → host through `window.__ocrPost(json)`, host → page through
+ * `window.__ocrReceive(msg)`.
  */
 internal class OcrWebview(
     html: (bridgeScript: String) -> String,
@@ -36,7 +38,8 @@ internal class OcrWebview(
     }
 
     private val browser = JBCefBrowser()
-    // create(JBCefBrowser) 重载是 scheduled-for-removal API（Plugin Verifier/市场审核会点名），用 JBCefBrowserBase 重载。
+    // The create(JBCefBrowser) overload is a scheduled-for-removal API that the Plugin Verifier and
+    // the marketplace review call out, so use the JBCefBrowserBase overload.
     private val query = JBCefJSQuery.create(browser as JBCefBrowserBase)
 
     @Volatile
@@ -109,15 +112,17 @@ internal class OcrWebview(
             ?.get(target)
     }.getOrNull()
 
-    /** resize 后强制整屏重绘，修复离屏渲染模式下 resize 后面板大面积变白。 */
+    /** Forces a full repaint after a resize, fixing the large white areas that appear after a
+     *  resize in off-screen rendering mode. */
     private fun scheduleFullRepaint() {
         if (disposed) return
         repaintTimers.forEach { it.restart() }
     }
 
     /**
-     * 从页面端触发整屏重绘。给根元素 opacity 施加近乎无感的扰动再撤销，
-     * 使合成器整块重绘但不触发重排。两层 rAF 确保修改与撤销落入不同帧。
+     * Triggers a full repaint from the page side. The root element's opacity gets a nudge that is
+     * barely perceptible and is then reverted, which makes the compositor repaint the whole layer
+     * without a reflow. Two nested rAFs keep the change and the revert in different frames.
      */
     private fun forceFullRepaint() {
         if (disposed) return
@@ -130,8 +135,9 @@ internal class OcrWebview(
     }
 
     /**
-     * 同步 OSR 渲染器的像素密度到组件当前屏幕的 DPI。
-     * 切屏后若不一致，画面会按错误比例缩放。先 setScreenInfo 更新缓存再 notifyScreenInfoChanged。
+     * Syncs the OSR renderer's pixel density to the DPI of the screen the component is now on.
+     * After a screen change a mismatch scales the picture by the wrong ratio. setScreenInfo updates
+     * the cache first, then notifyScreenInfoChanged applies it.
      */
     private fun resyncPixelDensity() {
         if (!JreHiDpiUtil.isJreHiDPIEnabled()) return
@@ -142,7 +148,8 @@ internal class OcrWebview(
             val cached = readField(handler, "myPixelDensity") as? Double ?: return
             if (cached == gcScale) return
             val scaleFactor = readField(handler, "myScaleFactor") as? Double ?: 1.0
-            // 必须设置 isAccessible = true：JBCefOsrHandler 类为包私有，反射调用需绕过访问控制。
+            // isAccessible = true is required: the JBCefOsrHandler class is package-private, so the
+            // reflective call has to bypass access control.
             handler.javaClass
                 .getMethod("setScreenInfo", Double::class.javaPrimitiveType, Double::class.javaPrimitiveType)
                 .also { it.isAccessible = true }
@@ -152,7 +159,8 @@ internal class OcrWebview(
         }.onFailure { thisLogger().warn("[ocr] Failed to correct JCEF pixelDensity, skipping", it) }
     }
 
-    /** 重算 `--vscode-*` 并替换主题 style 内容。必须 EDT 取色，统一 invokeLater 调度。 */
+    /** Recomputes the `--vscode-*` variables and replaces the theme style content. Colors must be
+     *  read on the EDT, so everything is dispatched through invokeLater. */
     private fun applyTheme() {
         ApplicationManager.getApplication().invokeLater {
             if (disposed) return@invokeLater
@@ -164,10 +172,12 @@ internal class OcrWebview(
         }
     }
 
-    /** 把一条已序列化好的宿主消息推进页面。 */
+    /** Pushes one already-serialized host message into the page. */
     fun post(json: String) {
-        // post 由消息处理线程调用、dispose 在 EDT 触发，二者并发：browser 可能已释放。
-        // 与 forceFullRepaint/applyTheme 一致，先看 disposed 守卫；executeJavaScript 失败（browser 已销毁）也不让通道崩溃。
+        // post is called from message-handling threads and dispose fires on the EDT, so the two run
+        // concurrently and the browser may already be released. Like forceFullRepaint/applyTheme,
+        // check the disposed guard first, and a failed executeJavaScript (browser destroyed) must
+        // not take the channel down.
         if (disposed) return
         val literal = Json.encodeToString(String.serializer(), json)
         runCatching {
@@ -180,7 +190,8 @@ internal class OcrWebview(
     }
 
     override fun dispose() {
-        // 幂等：JcefConfigPanelHost 在项目关闭路径与对话框关闭回调都可能各调一次。
+        // Idempotent: JcefConfigPanelHost may call this once on the project-close path and once from
+        // the dialog-close callback.
         if (disposed) return
         disposed = true
         repaintTimers.forEach { it.stop() }

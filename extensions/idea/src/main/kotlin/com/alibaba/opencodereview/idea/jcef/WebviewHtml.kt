@@ -8,19 +8,21 @@ import com.alibaba.opencodereview.idea.model.SupportedLocale
 import com.alibaba.opencodereview.idea.model.toHtmlLang
 
 /**
- * 装配提交至 JCEF 的 HTML。JS 采用内联而非 `<script src>`：loadHTML() 无 base URL。
- * lang 属性保留，页面 :lang() 选择器与字体回退依赖该属性。
+ * Assembles the HTML handed to JCEF. The JavaScript is inlined rather than referenced with
+ * `<script src>` because loadHTML() has no base URL.
+ * The lang attribute is kept: the page's :lang() selectors and font fallback depend on it.
  */
 object WebviewHtml {
 
-    /** 注入 `--vscode-*` 变量的 `<style>` 的 id，切换主题时据此定位。 */
+    /** Id of the `<style>` carrying the injected `--vscode-*` variables; a theme switch locates it
+     *  by this. */
     internal const val THEME_STYLE_ID = "ocr-theme"
 
-    /** 侧栏页面。[bridgeScript] 由 `JBCefJSQuery.inject("json")` 生成。 */
+    /** Sidebar page. [bridgeScript] is produced by `JBCefJSQuery.inject("json")`. */
     fun sidebar(locale: SupportedLocale, bridgeScript: String): String =
         page("/webview/webview.js", locale, bridgeScript)
 
-    /** 配置面板页面。 */
+    /** Config panel page. */
     fun configPanel(locale: SupportedLocale, bridgeScript: String): String =
         page("/webview/configPanel.js", locale, bridgeScript)
 
@@ -36,7 +38,7 @@ object WebviewHtml {
     }
 
     /**
-     * 纯字符串拼装，不触碰 UI，便于直接单测。
+     * Pure string assembly that touches no UI, so it can be unit-tested directly.
      */
     internal fun buildPage(
         lang: String,
@@ -47,8 +49,10 @@ object WebviewHtml {
         append("<!DOCTYPE html>\n")
         append("<html lang=\"").append(lang).append("\">\n")
         append("<head>\n<meta charset=\"UTF-8\">\n")
-        // 主题变量单独放一个 style、id 固定：切换主题时仅替换它的 textContent，下方布局规则不被覆盖；
-        // id 由 THEME_STYLE_ID 统一提供，Kotlin 侧拼 JS 选择器用同一常量，避免改 id 漏改选择器。
+        // The theme variables get a style element of their own with a fixed id: a theme switch
+        // replaces only its textContent, leaving the layout rules below untouched. The id comes from
+        // THEME_STYLE_ID, the same constant Kotlin uses to build the JS selector, so renaming the id
+        // cannot leave the selector behind.
         append("<style id=\"").append(THEME_STYLE_ID).append("\">\n")
         append(themeCss).append('\n')
         append("</style>\n<style>\n")
@@ -56,8 +60,8 @@ object WebviewHtml {
         append("#root { height: 100%; }\n")
         append("</style>\n</head>\n<body>\n")
         append("<div id=\"root\"></div>\n")
-        // 桥必须在 bundle 之前就绪：页面加载后即注册 __ocrReceive，
-        // 当页面发起 ready 消息时 __ocrPost 必须已存在。
+        // The bridge must be ready before the bundle: the page registers __ocrReceive as soon as it
+        // loads, and __ocrPost must already exist by the time the page sends its ready message.
         append("<script>\nwindow.__ocrPost = function (json) { ")
         append(escapeForInlineScript(bridgeScript))
         append(" };\n</script>\n")
@@ -66,27 +70,35 @@ object WebviewHtml {
     }
 
     /**
-     * 内联脚本中出现 `</script` 会被 HTML 解析器当作脚本结束标记，bundle 的后半段会被当作正文渲染。
-     * minifier 输出不稳定，无条件转义；`<\/script` 在 JS 字符串与正则中与原文等价。
+     * A `</script` inside an inline script reads as the script's end tag to the HTML parser, and the
+     * rest of the bundle is then rendered as body text. Minifier output is not stable, so escape
+     * unconditionally; `<\/script` is equivalent to the original inside JS strings and regexes.
      *
-     * **注意**：仅处理 `</script>` 序列，不做 HTML 实体转义；调用方须确保传入的是可信 JS（来自插件打包产物）。
+     * **Note**: only the `</script>` sequence is handled, with no HTML entity escaping; callers must
+     * pass trusted JS (from the plugin's own build output).
      */
     internal fun escapeForInlineScript(js: String): String =
         js.replace("</script", "<\\/script", ignoreCase = true)
 
     private fun readResource(path: String): String? {
-        // 必须是绝对 classpath 路径（以 / 开头）：相对路径会按本类包名解析，静默落空后只剩 fallback 页面，难以排查。
+        // The path must be absolute on the classpath (start with /): a relative path resolves against
+        // this class's package and fails silently, leaving only the fallback page and a bug that is
+        // hard to trace.
         require(path.startsWith("/")) { "Resource path must be absolute: $path" }
-        // runCatching：readText 抛 IOException（IO 故障）时返回 null，触发 page() 的 missingBundle 兜底，而非让异常上抛崩 JCEF 装配。
-        // 剥掉开头的 UTF-8 BOM（U+FEFF），否则内联 JS 以 BOM 起头，部分引擎解析异常。
+        // runCatching: an IOException from readText (an I/O fault) yields null, which triggers
+        // page()'s missingBundle fallback instead of letting the exception escape and break JCEF
+        // assembly.
+        // Strips a leading UTF-8 BOM (U+FEFF); otherwise the inline JS starts with a BOM and some
+        // engines fail to parse it.
         return runCatching {
             javaClass.getResourceAsStream(path)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
         }.getOrNull()?.removePrefix("\uFEFF")
     }
 
     /**
-     * bundle 不在 jar 内（几乎仅因前端未构建一种原因）。文案走 [HostStrings]，不能写死中文：
-     * 英文 IDE 下出现中文说明，用户既读不懂也无法修复。
+     * The bundle is missing from the jar — almost always because the frontend was not built.
+     * The copy goes through [HostStrings] and must not be hardcoded Chinese: on an English IDE a
+     * Chinese explanation is one the user can neither read nor act on.
      */
     internal fun missingBundle(resource: String, locale: SupportedLocale): String = """
         <!DOCTYPE html>
