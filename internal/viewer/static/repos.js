@@ -20,6 +20,7 @@
     };
 
     const pagerApi = ocrPager({ table, pager, numbers, filter: matches });
+    ocrArrowScroll(document.querySelector(".repos-page .table-scroll"));
 
     input.addEventListener("input", () => {
         query = input.value.trim().toLowerCase();

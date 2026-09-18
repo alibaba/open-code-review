@@ -910,6 +910,9 @@ func TestPagerJS_Contract(t *testing.T) {
 	for _, want := range []string{
 		// The page scripts drive the pager through this global.
 		"window.ocrPager",
+		// The page scripts also route arrow keys through this helper so the
+		// focusable table regions scroll in every browser.
+		"window.ocrArrowScroll",
 		// The pager owns every hook the markup and styles rely on.
 		"data-page-step",
 		`className = "page-number"`,

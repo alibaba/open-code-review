@@ -104,4 +104,20 @@
 
         return { refresh: () => render(1) };
     };
+
+    // The scrollable table wrappers are focusable regions, but not every
+    // browser scrolls a focused container with the arrow keys; route the
+    // keys through scrollBy so keyboard users can reach overflowing columns.
+    // Only the region itself listens: focus inside the table (a link, for
+    // instance) keeps its own key behavior.
+    window.ocrArrowScroll = (region) => {
+        if (!region) return;
+        region.addEventListener("keydown", (event) => {
+            if (event.target !== region) return;
+            const step = { ArrowLeft: -40, ArrowRight: 40 }[event.key];
+            if (step === undefined) return;
+            region.scrollBy({ left: step });
+            event.preventDefault();
+        });
+    };
 })();
