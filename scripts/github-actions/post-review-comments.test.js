@@ -650,6 +650,34 @@ async function testIncrementalSkipsOverlapping() {
   assert.strictEqual(outputs.comments_inline, "1");
 }
 
+// Under a GitHub App installation token getAuthenticatedLogin() 403s, so the
+// app's own history is recognized by OCR's inline marker plus a Bot author.
+// A human quoting the marker is not history.
+async function testIncrementalRecognizesAppTokenHistoryByMarker() {
+  const marker = `<!-- ${newCommentId("42-1")} -->`;
+  const history = [
+    { path: "src/a.js", line: 10, start_line: 10, side: "RIGHT", body: `finding\n${marker}`, user: { login: "my-app[bot]", type: "Bot" } },
+    { path: "src/b.js", line: 5, start_line: 5, side: "RIGHT", body: `quoted\n${marker}`, user: { login: "alice", type: "User" } },
+  ];
+  const result = {
+    comments: [
+      { path: "src/a.js", content: "same finding", start_line: 10, end_line: 10 },
+      { path: "src/b.js", content: "new", start_line: 5, end_line: 5 },
+    ],
+    warnings: [],
+  };
+
+  const { github, outputs } = await run({
+    result,
+    githubOpts: { history },
+    opts: { stickySummary: true, incremental: true },
+  });
+
+  const sent = github.createReviewCalls[0].comments;
+  assert.deepStrictEqual(sent.map((c) => c.path), ["src/b.js"], "app history skipped, human quote ignored");
+  assert.strictEqual(outputs.comments_skipped, "1");
+}
+
 async function testIncrementalSkipsSameRunIoUOverlapping() {
   const result = {
     comments: [
@@ -2340,6 +2368,7 @@ async function main() {
   await testNoCommentsStickyUpdate();
   await testIncrementalSkipsOverlapping();
   await testIncrementalSkipsSameRunOverlapping();
+  await testIncrementalRecognizesAppTokenHistoryByMarker();
   await testIncrementalSkipsSameRunIoUOverlapping();
   await testIncrementalAllOverlapPostsNoReview();
   await testIncrementalMultiLineIoUDefaultThreshold();

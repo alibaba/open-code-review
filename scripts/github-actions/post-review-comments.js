@@ -1231,7 +1231,12 @@ function isBotComment(comment, botLogin) {
   if (botLogin && comment.user.login === botLogin) return true;
   // GITHUB_TOKEN posts as "github-actions[bot]"; GitHub Apps post as the app.
   const login = comment.user.login || "";
-  return /github-actions\[bot\]$/i.test(login) || (botLogin != null && login === botLogin);
+  if (/github-actions\[bot\]$/i.test(login)) return true;
+  // Under a GitHub App installation token getAuthenticatedLogin() 403s, so
+  // botLogin is null and the login rules above never match the app. Fall back
+  // to the marker OCR stamps into every inline comment, as threadIsOurs does,
+  // and require a Bot author so a human quoting the marker is not history.
+  return comment.user.type === "Bot" && OCR_COMMENT_ID_RE.test(comment.body || "");
 }
 
 // Incremental overlap test. The current comment is considered a duplicate of
