@@ -301,9 +301,10 @@ Match lines: 1
 
 ### 制限
 
-- `git grep --max-count 100` によってファイルごとのヒット数上限を **100** に設定するため、複数ファイルにまたがる
-  合計出力は 100 を超える可能性があります。ファイルごとの上限に達した場合、出力の前に
-  `Note: The results have been truncated. Only showing first 100 results.` が付加されます。
+- 描画されるのは**合計 100 件**までです。ファイルごとの上限は `git grep --max-count 101` とし、
+  ちょうど 100 件か切り詰められたかを区別します。全体の上限を超えた場合、出力の前に
+  `Note: Showing the first 100 matches across <n> matching files. Some files are partially
+  shown or omitted entirely. Narrow file_patterns to see the rest.` が付加されます。
 - `use_perl_regexp` が `true` で `search_text` が有効な PCRE でない場合、リテラル文字列として
   検索し直し、出力の先頭に git がパターンを拒否した理由を示す `Note:` が付きます。メタ文字を
   エスケープすれば正規表現のまま検索できます。

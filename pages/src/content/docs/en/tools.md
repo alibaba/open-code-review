@@ -330,10 +330,11 @@ When there are no matches, the tool returns the literal string
 
 ### Limits
 
-- Caps matches at **100 per file** via `git grep --max-count 100`, so
-  total output across many files can exceed 100. When the per-file cap
-  is hit the output is prefixed with `Note: The results have been
-  truncated. Only showing first 100 results.`.
+- Renders at most **100 matches** in total. `git grep --max-count 101`
+  is used per file so an exact 100 can be told apart from a truncated
+  result; beyond the global cap the output opens with `Note: Showing the
+  first 100 matches across <n> matching files. Some files are partially
+  shown or omitted entirely. Narrow file_patterns to see the rest.`
 - When `use_perl_regexp` is `true` and `search_text` is not valid PCRE,
   the search is retried as a literal string and the output opens with a
   `Note:` naming git's reason for rejecting the pattern. Escaping the
