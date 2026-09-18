@@ -759,6 +759,60 @@ func TestGitGrep_Timeout(t *testing.T) {
 	}
 }
 
+// nonASCIIPath is committed by setupNonASCIIPathRepo. Git prints it as a
+// quoted octal escape unless core.quotepath is disabled.
+const nonASCIIPath = "src/café/文件.go" // allow-non-english: fixture exercises non-ASCII paths
+
+// setupNonASCIIPathRepo commits nonASCIIPath with core.quotepath forced on, so
+// tests do not depend on the user's global Git config, and returns the
+// repository and its HEAD commit.
+func setupNonASCIIPathRepo(t *testing.T) (string, string) {
+	t.Helper()
+	dir := setupTestRepo(t)
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("config", "core.quotepath", "true")
+	full := filepath.Join(dir, filepath.FromSlash(nonASCIIPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte("package cafe\n\nfunc Needle() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "--", nonASCIIPath)
+	git("commit", "-q", "-m", "add non-ASCII path")
+	return dir, getHeadCommit(t, dir)
+}
+
+func TestGitGrep_NonASCIIPath(t *testing.T) {
+	dir, commit := setupNonASCIIPathRepo(t)
+	for _, tc := range []struct {
+		name string
+		mode ReviewMode
+		ref  string
+	}{
+		{name: "workspace", mode: ModeWorkspace},
+		{name: "commit", mode: ModeCommit, ref: commit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: tc.mode, Ref: tc.ref})
+			result, err := p.gitGrep(context.Background(), "Needle", true, false, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := "File: " + nonASCIIPath + "\n"; !strings.Contains(result, want) {
+				t.Errorf("expected %q in result, got: %s", want, result)
+			}
+		})
+	}
+}
+
 func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
 	args := p.buildGrepArgs("foo", false, false, true, nil)
