@@ -1544,6 +1544,20 @@ p {
     .table th, .table td { padding: 0.6rem 0.75rem; font-size: 0.82rem; }
 }
 
+/* ── Accessibility: focus ── */
+/* Collapsible headers and in-table links keep the same visible focus ring
+   as the rest of the design system instead of the bare browser default. */
+.file-accordion-header:focus-visible,
+.token-breakdown-toggle:focus-visible,
+.comment-file-header:focus-visible,
+.tool-detail-toggle:focus-visible,
+.error-detail-toggle:focus-visible,
+.table a:focus-visible,
+nav.breadcrumb a:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+
 /* ── Accessibility: reduced motion ── */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
