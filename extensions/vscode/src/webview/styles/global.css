@@ -1,3 +1,8 @@
+/*
+SPDX-License-Identifier: Apache-2.0
+Copyright 2026 alibaba/open-code-review Contributors
+*/
+
 /* === 1. CSS Variables ===
  * 结构色映射到 VSCode 主题 token(带 silent-night 回退值),自动适配亮/暗主题。
  * accent(薄荷绿)保留为品牌色,不跟随主题。 */

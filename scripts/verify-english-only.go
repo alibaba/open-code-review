@@ -61,9 +61,10 @@ import (
 
 // scannedExts lists the extensions treated as source files.
 var scannedExts = map[string]bool{
-	".go": true, ".ts": true, ".tsx": true, ".js": true, ".cjs": true,
-	".mjs": true, ".py": true, ".sh": true, ".ps1": true, ".css": true,
-	".html": true, ".yml": true, ".yaml": true, ".json": true,
+	".go": true, ".kt": true, ".kts": true, ".ts": true, ".tsx": true,
+	".js": true, ".cjs": true, ".mjs": true, ".py": true, ".sh": true,
+	".ps1": true, ".css": true, ".html": true, ".yml": true,
+	".yaml": true, ".json": true,
 }
 
 // scannedNames lists extension-less files that are still source files.

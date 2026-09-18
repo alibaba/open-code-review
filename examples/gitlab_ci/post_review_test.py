@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 alibaba/open-code-review Contributors
+
 """Tests for post_review.py.
 
 Standard-library unittest only (no pytest, no network, no real time.sleep): run with
