@@ -317,6 +317,23 @@ func TestSessionsCSS_PagerStaysHiddenUntilScripted(t *testing.T) {
 	}
 }
 
+func TestSurfaceCSS_LightSurfaceIsWhite(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	light := regexp.MustCompile(`--surface: #ffffff;`)
+	if !light.Match(css) {
+		t.Error("style.css lost the light-mode --surface: #ffffff token: " +
+			"cards and tables must read as white and stay delineated by --border, not a grey fill")
+	}
+	dark := regexp.MustCompile(`--surface: #0a0a0a;`)
+	if !dark.Match(css) {
+		t.Error("style.css lost the dark-mode --surface: #0a0a0a token: " +
+			"dark surfaces must keep sitting above the black page")
+	}
+}
+
 func TestRenderTemplate_SessionPage(t *testing.T) {
 	rr := httptest.NewRecorder()
 	vs := &ViewSession{
