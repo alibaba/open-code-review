@@ -8,7 +8,7 @@
     {{if $.Static}}<style>{{$.InlineCSS}}</style>{{else}}<link rel="stylesheet" href="/static/style.css">{{end}}
 </head>
 <body>
-{{if $.Static}}<nav class="breadcrumb"><span class="nav-brand"><span class="brand-icon" aria-hidden="true">{{icon "logo"}}</span>Open Code Review Viewer</span>{{template "breadcrumbs" .}}</nav>{{else}}{{template "app-header" .}}{{end}}
+{{if $.Static}}<nav class="breadcrumb">{{template "nav-brand" false}}{{template "breadcrumbs" .}}</nav>{{else}}{{template "app-header" .}}{{end}}
 <main class="session-page">
 <div class="session-header">
     <div class="page-heading">

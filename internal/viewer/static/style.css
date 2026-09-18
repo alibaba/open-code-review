@@ -210,7 +210,7 @@ nav.breadcrumb .nav-brand {
     gap: var(--space-2);
     transition: color var(--transition);
 }
-nav.breadcrumb .nav-brand:hover { color: var(--link); }
+nav.breadcrumb a.nav-brand:hover { color: var(--link); }
 
 nav.breadcrumb .nav-brand .brand-icon {
     width: 22px;

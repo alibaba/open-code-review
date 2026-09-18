@@ -27,6 +27,7 @@ const (
 	fixtureStart    = `{"type":"session_start","timestamp":"2025-06-10T08:00:00Z","cwd":"/home/dev/proj","gitBranch":"feat","model":"claude-3","reviewMode":"commit","diffCommit":"ccc"}`
 	fixtureRequest  = `{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":1,"messages":[{"role":"user","content":"review this"}]}`
 	fixtureResponse = `{"type":"llm_response","filePath":"main.go","taskType":"main_task","content":"Code looks good","duration_ms":1500,"model":"claude-3","usage":{"prompt_tokens":100,"completion_tokens":50}}`
+	fixtureComment  = `{"type":"review_item_done","filePath":"main.go","comments":[{"content":"possible nil dereference","path":"main.go","severity":"high"}]}`
 	fixtureEnd      = `{"type":"session_end","duration_seconds":120.5,"files_reviewed":["main.go"],"llm_failures":0}`
 )
 
@@ -50,7 +51,9 @@ func TestExportSession_SelfContained(t *testing.T) {
 		"--font: -apple-system",                 // style.css:5, inlined verbatim
 		`'<code class="inline-code">$1</code>'`, // session.js:17, inlined verbatim
 		`<span class="crumb">proj</span>`,       // the repo breadcrumb, de-linked
-		"sess1",                                 // the session itself rendered
+		// the shared nav-brand partial, logo included, de-linked
+		`<span class="nav-brand"><span class="brand-icon" aria-hidden="true"><svg`,
+		"sess1", // the session itself rendered
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("export missing %q", want)
@@ -90,6 +93,13 @@ func TestExportSession_Variants(t *testing.T) {
 			name:    "session without comments omits the findings section",
 			lines:   []string{fixtureStart, fixtureRequest, fixtureResponse, fixtureEnd},
 			notWant: []string{"<h3>Review Comments"},
+		},
+		{
+			// Keeps the notWant above honest: the heading it pins must still
+			// render when there are findings.
+			name:  "session with comments renders the findings section",
+			lines: []string{fixtureStart, fixtureComment, fixtureEnd},
+			want:  []string{`<h3>Review Comments <span class="findings-count">(1 findings)</span></h3>`, "possible nil dereference"},
 		},
 		{
 			name:  "session_start only still renders",
