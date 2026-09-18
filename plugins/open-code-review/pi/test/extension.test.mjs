@@ -8,6 +8,7 @@ import {
   buildReviewPrompt,
   parseReviewJson,
   summarizeSeverities,
+  validateDelegateParams,
   validateReviewParams,
 } from "../src/index.ts"
 
@@ -101,6 +102,17 @@ test("buildDelegateArgs builds preview and rule commands", () => {
     "a.go",
     "b.go",
   ])
+})
+
+test("validateDelegateParams rejects conflicting combinations", () => {
+  assert.match(validateDelegateParams({ action: "preview", from: "main" }), /Both 'from' and 'to'/)
+  assert.match(
+    validateDelegateParams({ action: "preview", commit: "abc", from: "main", to: "feat" }),
+    /not both/,
+  )
+  assert.match(validateDelegateParams({ action: "rule" }), /at least one file path/)
+  assert.equal(validateDelegateParams({ action: "preview", from: "main", to: "feat" }), undefined)
+  assert.equal(validateDelegateParams({ action: "rule", paths: ["a.go"] }), undefined)
 })
 
 test("command prompts embed user arguments and key instructions", () => {

@@ -103,6 +103,9 @@ npm run typecheck   # tsc --noEmit against the pi extension API types
 npm test            # node --test on the pure helpers (arg building, parsing, prompts)
 ```
 
+The tests import the TypeScript source directly and rely on Node's built-in
+type stripping, so **Node.js 22.18 or newer** is required for development.
+
 The extension intentionally keeps zero runtime dependencies: the only non-Node
 import is a type-only import of `ExtensionAPI`, which pi erases when loading
 the file. All subprocess work goes through `pi.exec`, and tool parameter

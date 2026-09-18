@@ -32,6 +32,9 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test test/*.test.mjs"
   },
+  "engines": {
+    "node": ">=22.18"
+  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.85.1",
     "@types/node": "^24.0.0",
