@@ -42,6 +42,7 @@ type ScanTemplate struct {
 	MaxCompletionTokens   int              `json:"MAX_COMPLETION_TOKENS,omitempty"`
 	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	MaxFileSizeBytes      int64            `json:"MAX_FILE_SIZE_BYTES,omitempty"`
+	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD,omitempty"`
 	MaxTokensBudget       int64            `json:"MAX_TOKENS_BUDGET,omitempty"`
 	BatchStrategy         string           `json:"BATCH_STRATEGY,omitempty"`
 	BatchSize             int              `json:"BATCH_SIZE,omitempty"`
