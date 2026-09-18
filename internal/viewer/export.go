@@ -39,10 +39,17 @@ func ExportSession(out io.Writer, root, encodedRepo, sessionID string) error {
 	if err != nil {
 		return fmt.Errorf("read embedded stylesheet: %w", err)
 	}
+	// The exported page needs the a11y helpers (arrow scrolling for the
+	// token breakdown) ahead of the session script that calls them.
+	a11y, err := assets.ReadFile("static/a11y.js")
+	if err != nil {
+		return fmt.Errorf("read embedded a11y script: %w", err)
+	}
 	js, err := assets.ReadFile("static/session.js")
 	if err != nil {
 		return fmt.Errorf("read embedded script: %w", err)
 	}
+	js = string(a11y) + "\n" + js
 
 	tmpl, err := parseTemplate("session.html")
 	if err != nil {

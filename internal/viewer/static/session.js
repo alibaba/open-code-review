@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
+// The token breakdown table overflows its scroll wrapper on narrow screens;
+// make that wrapper an arrow-key reachable region like the list-page tables.
+ocrArrowScroll(document.querySelector(".token-breakdown-body"));
+
 document.querySelectorAll('.response-text').forEach(function(el) {
     const text = el.textContent;
     const esc = function(s) {
