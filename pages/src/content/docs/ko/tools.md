@@ -187,14 +187,18 @@ hunk 머리글 `@@ -x,y +m,n @@`에서 범위를 계산해야 합니다. 보통 
 {
   "name": "file_read_diff",
   "input": {
-    "path_array": ["src/api/handler.go", "src/db/queries.go"]
+    "path_array": ["src/api/handler.go", "src/db/queries.go"],
+    "start_line": 1
   }
 }
 ```
 
+`start_line`은 선택 사항이며 기본값은 1입니다.
+
 ### 출력 {#output}
 
 ```
+IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -212,6 +216,12 @@ hunk 머리글 `@@ -x,y +m,n @@`에서 범위를 계산해야 합니다. 보통 
 변경 집합에 없는 경로는 조용히 빠집니다. 요청한 경로가 **하나도** 변경 집합에 없으면
 `Error: diff not found for the requested paths`를 반환하고, `path_array`가 비어
 있으면 `Error: no files found`를 반환합니다.
+
+호출당 최대 500줄의 diff가 돌아오며, 요청한 순서대로 모든 파일에 걸쳐 셉니다(파일
+헤더는 세지 않습니다). 남은 내용이 있으면 `IS_TRUNCATED`가 `true`가 되고, 다음
+페이지에서 넘길 `start_line`을 알려주는 안내가 끝에 붙습니다. 같은 `path_array`와
+함께 전달하세요. 마지막 diff 줄을 넘는 `start_line`은 전체 줄 수를 알려주는 오류를
+반환합니다.
 
 ## `file_find` {#filefind}
 
