@@ -70,7 +70,7 @@ export class ConfigService {
     return this.writeRaw(raw);
   }
 
-  /** 在隔离的临时 HOME 上运行 ocr llm test，不修改 ~/.opencodereview/config.json。 */
+  /** Run ocr llm test with an isolated temporary HOME without modifying ~/.opencodereview/config.json. */
   async testWithEntries(entries: ConfigEntry[]): Promise<{ ok: boolean; message?: string }> {
     const draft = applyConfigEntries(this.readRaw(), entries);
     const testHome = mkdtempSync(join(tmpdir(), 'ocr-test-home-'));
