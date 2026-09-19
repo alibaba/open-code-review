@@ -16,6 +16,7 @@ Usage:
 
 Commands:
   review, r    Start a code review
+  gate         Evaluate a saved review result for CI
   rules        Inspect and debug review rules
   config       Manage configuration settings
   llm          LLM utility commands
@@ -67,6 +68,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | 命令 | 别名 | 作用 |
 |---|---|---|
 | `ocr review` | `ocr r` | 运行代码评审并输出评论。 |
+| `ocr gate` | — | 离线判定已有审阅结果是否满足 CI 门禁。 |
 | `ocr scan` | `ocr s` | 无需 Git diff，扫描完整文件。 |
 | `ocr rules check <file>` | — | 显示某文件路径适用哪条规则及其来源。 |
 | `ocr config set <key> <value>` | — | 将一个配置值持久化到 `~/.opencodereview/config.json`。 |
@@ -331,6 +333,31 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
 
 非致命警告（单个子 agent 失败、某文件超过 token 阈值等）内联打印；JSON 模式下
 会加入 `warnings` 数组。
+
+## `ocr gate`
+
+读取一份已有的 `ocr review --format json` 结果，不调用模型、不读取仓库，也不连接托管平台。运行此命令即主动启用门禁；它不修改 `ocr review` 的退出码或 manifest。
+
+```bash
+ocr gate --input ocr-result.json --fail-on-severity high --format json
+ocr gate --input ocr-result.json --expected-base <base-sha> --expected-head <head-sha>
+```
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--input <path>` | 必填 | 读取结果文件；`-` 表示标准输入。 |
+| `--fail-on-severity <level>` | 不检查严重度 | 阻断达到或超过 `critical`、`high`、`medium` 或 `low` 阈值的问题。忽略大小写和首尾空白；问题严重度缺失或未知时，该检查无法确认通过。 |
+| `--expected-base <sha>` | 不检查 | 要求精确匹配实际审阅的 base；范围审阅中是 merge-base，不是请求分支的最新提交。 |
+| `--expected-head <sha>` | 不检查 | 要求精确匹配被审 head。两个版本参数都要求完整、小写的 40 或 64 位对象 ID；工作区结果不能证明不可变版本身份。 |
+| `--format <text\|json>`、`-f` | `text` | JSON 格式为 `ocr.gate/v1`，包含运行 ID、策略和带稳定原因码的有序检查列表。 |
+
+仅 `pass` 返回 **0**。`fail`（确认触发严重度规则）和 `inconclusive`（证据不足）在输出判定后返回 **1**。参数、输入文件和输出写入错误也返回 1，可能只有 stderr 诊断；无效 JSON 会输出无法判定的结果。同时存在阻断问题和覆盖不足时，总状态为 `fail`，两项原因都会保留。
+
+覆盖完整性与评论交付始终检查。所有 selected 项必须 completed，或按现有 resume 契约 reused。失败项（**包括预算中断**）、waived 项及运行级失败均不能通过。零选中项为无法判定：manifest v1 不能区分空变更与全部被排除的变更。覆盖记录缺失或不一致、旧格式和未知 manifest 版本也不能通过。通过仅针对选中集合，不证明文件选择包含了团队期望审阅的全部内容。
+
+工具失败计数必须与明细一致。只要记录过 `code_comment` 失败，交付就无法确认，即使之后另一次提交成功；当前结果无法证明重试提交了相同问题。普通搜索或读取失败本身不阻断。严重度判定使用全部原始问题，包括未发布为行级评论的问题；未配置 `--fail-on-severity` 时不检查严重度。
+
+结果文件、策略和预期版本必须来自可信来源。此命令不验证 JSON 的真实性，不查询 PR 当前 head，不验证发布是否成功，也不证明代码没有缺陷。不传预期版本参数即不检查版本匹配。CI 必须保留原审阅退出码，不能用 gate 通过覆盖执行或发布失败。每次运行使用新结果路径，因为审阅失败可能保留原有输出文件。记录审阅退出码，即使失败也保存或上传结果，再执行 gate；执行或门禁任一失败都应使 CI 失败。重新判定已有结果不会消耗额外模型 token。
 
 ## `ocr scan`
 

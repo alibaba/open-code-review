@@ -16,6 +16,7 @@ Usage:
 
 Commands:
   review, r    Start a code review
+  gate         Evaluate a saved review result for CI
   rules        Inspect and debug review rules
   config       Manage configuration settings
   llm          LLM utility commands
@@ -68,6 +69,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | 명령 | 별칭 | 하는 일 |
 |---|---|---|
 | `ocr review` | `ocr r` | 코드 리뷰를 실행하고 코멘트를 출력합니다. |
+| `ocr gate` | — | 모델 호출 없이 저장된 리뷰 결과를 CI 게이트로 평가합니다. |
 | `ocr scan` | `ocr s` | Git diff 없이 파일 전체를 스캔합니다. |
 | `ocr rules check <file>` | — | 주어진 파일 경로에 어떤 규칙이 적용되는지, 그 규칙이 어디서 왔는지 보여줍니다. |
 | `ocr config set <key> <value>` | — | 설정값을 `~/.opencodereview/config.json`에 저장합니다. |
@@ -345,6 +347,31 @@ ocr review --format json | jq .summary   # stdout은 JSON 문서 하나입니다
 
 치명적이지 않은 경고(서브 Agent 하나 실패, 파일이 토큰 한계 초과 등)는 실행 중간에
 출력되고, JSON 모드에서는 `warnings` 배열에 담깁니다.
+
+## `ocr gate` {#ocr-gate}
+
+저장된 `ocr review --format json` 결과 하나를 평가합니다. 모델, 저장소, 호스팅 API에 접근하지 않습니다. 이 명령을 실행하면 게이트가 활성화되며, 기존 `ocr review` 종료 코드나 manifest는 변경하지 않습니다.
+
+```bash
+ocr gate --input ocr-result.json --fail-on-severity high --format json
+ocr gate --input ocr-result.json --expected-base <base-sha> --expected-head <head-sha>
+```
+
+| 플래그 | 기본값 | 설명 |
+|---|---|---|
+| `--input <path>` | 필수 | 결과 파일. `-`는 표준 입력입니다. |
+| `--fail-on-severity <level>` | 비활성 | `critical`, `high`, `medium`, `low` 중 지정한 값 이상의 문제를 차단합니다. 대소문자와 앞뒤 공백은 무시합니다. 심각도가 없거나 알 수 없으면 판정 불가입니다. |
+| `--expected-base <sha>` | 비활성 | 실제 base를 확인합니다. 범위 리뷰에서는 요청한 브랜치 끝이 아닌 merge-base입니다. |
+| `--expected-head <sha>` | 비활성 | 리뷰한 head를 확인합니다. 두 플래그 모두 전체 소문자 40자리 또는 64자리 객체 ID가 필요합니다. 작업 공간 결과는 불변 버전을 증명할 수 없습니다. |
+| `--format <text\|json>`, `-f` | `text` | JSON 스키마는 `ocr.gate/v1`이며 실행 ID, 정책, 안정적인 이유 코드가 있는 순서별 검사를 포함합니다. |
+
+`pass`만 **0**으로 종료합니다. `fail`(심각도 정책 위반)과 `inconclusive`(증거 부족)는 결과를 출력한 뒤 **1**로 종료합니다. 인자, 입력 파일, 출력 쓰기 오류도 1이며 stderr 진단만 남을 수 있습니다. 잘못된 JSON은 판정 불가 결과를 출력합니다. 차단할 문제와 불완전한 커버리지가 동시에 있으면 전체 상태는 `fail`이며 두 이유를 모두 유지합니다.
+
+커버리지와 코멘트 제출은 항상 검사합니다. 모든 selected 항목이 completed 또는 기존 resume 계약에 따른 reused여야 합니다. **예산 중단을 포함한** failed, waived, 실행 전체 실패는 통과하지 않습니다. 선택 항목이 0개여도 판정 불가입니다. manifest v1은 빈 변경과 모두 제외된 변경을 구별할 수 없습니다. 누락되거나 모순된 커버리지, 이전 형식, 알 수 없는 manifest 버전도 통과하지 않습니다. 통과는 선택된 집합에만 적용되며 팀이 의도한 모든 파일의 선택을 보장하지 않습니다.
+
+도구 실패 횟수와 상세 내역이 일치해야 합니다. `code_comment` 실패가 기록되면 이후 다른 제출이 성공했더라도 전달 여부는 판정 불가입니다. 현재 결과로는 동일한 문제가 다시 제출되었는지 증명할 수 없습니다. 탐색용 검색이나 읽기 실패만으로 차단하지는 않습니다. 심각도는 인라인으로 게시되지 않은 것을 포함한 모든 원본 문제를 기준으로 하며, `--fail-on-severity`를 지정하지 않으면 검사하지 않습니다.
+
+신뢰할 수 있는 결과, 정책, 예상 리비전을 사용하세요. 이 명령은 JSON의 진위, 현재 PR head, 게시 성공 여부, 코드에 결함이 없는지를 확인하지 않습니다. 예상 리비전 플래그가 없으면 버전을 비교하지 않습니다. CI에서 원래 리뷰 종료 코드를 보존하고 게이트 통과로 실행 또는 게시 실패를 덮어쓰지 마세요. 실패한 리뷰가 기존 출력 파일을 남길 수 있으므로 실행마다 새 결과 경로를 사용하세요. 종료 코드를 기록하고 실패 시에도 결과를 저장하거나 업로드한 다음 게이트를 평가하며, 실행 또는 게이트 중 하나라도 실패하면 CI를 실패시킵니다. 결과 재평가는 추가 모델 토큰을 사용하지 않습니다.
 
 ## `ocr scan` {#ocr-scan}
 
