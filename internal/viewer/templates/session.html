@@ -89,7 +89,7 @@
             <span>File breakdown</span>
             <span class="file-count-badge">{{countLabel (len .) "file" "files"}}</span>
         </summary>
-        <div class="token-breakdown-body" tabindex="0" role="region" aria-label="Token breakdown table">
+        <div class="token-breakdown-body" role="region" aria-label="Token breakdown table">
             <table class="token-table">
                 <thead><tr><th>File</th><th>Prompt</th><th>Completion</th>{{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<th>Cache Read</th><th>Cache Write</th>{{end}}<th>Total</th></tr></thead>
                 <tbody>

@@ -49,7 +49,7 @@ func ExportSession(out io.Writer, root, encodedRepo, sessionID string) error {
 	if err != nil {
 		return fmt.Errorf("read embedded script: %w", err)
 	}
-	js = string(a11y) + "\n" + js
+	js = []byte(string(a11y) + "\n" + string(js))
 
 	tmpl, err := parseTemplate("session.html")
 	if err != nil {
