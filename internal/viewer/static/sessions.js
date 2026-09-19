@@ -8,4 +8,5 @@
     if (!table || !pager || !numbers) return;
 
     ocrPager({ table, pager, numbers });
+    ocrArrowScroll(document.querySelector(".sessions-page .table-scroll"));
 })();

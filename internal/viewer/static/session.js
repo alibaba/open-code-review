@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
+// The token breakdown table overflows its scroll wrapper on narrow screens;
+// make that wrapper an arrow-key reachable region like the list-page tables.
+ocrArrowScroll(document.querySelector(".token-breakdown-body"));
+
 document.querySelectorAll('.response-text').forEach(function(el) {
     const text = el.textContent;
     const esc = function(s) {
@@ -122,14 +126,24 @@ document.querySelectorAll('.response-text').forEach(function(el) {
 
         if (emptyState) {
             emptyState.hidden = visibleCount !== 0;
-            emptyState.textContent = visibleCount === 0 && hiddenByMarks > 0
+            const emptyText = visibleCount === 0 && hiddenByMarks > 0
                 ? 'All matching comments are hidden by marks.'
                 : 'No comments match this filter.';
+            // Both live regions below announce on textContent changes, so
+            // write only when the sentence actually changed — every filter
+            // click runs this code and re-announcing the same sentence is
+            // noise for screen reader users.
+            if (emptyState.textContent !== emptyText) {
+                emptyState.textContent = emptyText;
+            }
         }
 
         if (marksCount) {
-            marksCount.textContent = markedCount + ' marked, ' + hiddenByMarks + ' hidden' +
+            const marksText = markedCount + ' marked, ' + hiddenByMarks + ' hidden' +
                 (marksSaveFailed ? ' — not saved (storage unavailable)' : '');
+            if (marksCount.textContent !== marksText) {
+                marksCount.textContent = marksText;
+            }
         }
     }
 

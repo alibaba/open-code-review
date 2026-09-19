@@ -89,7 +89,7 @@
             <span>File breakdown</span>
             <span class="file-count-badge">{{countLabel (len .) "file" "files"}}</span>
         </summary>
-        <div class="token-breakdown-body">
+        <div class="token-breakdown-body" role="region" aria-label="Token breakdown table">
             <table class="token-table">
                 <thead><tr><th>File</th><th>Prompt</th><th>Completion</th>{{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<th>Cache Read</th><th>Cache Write</th>{{end}}<th>Total</th></tr></thead>
                 <tbody>
@@ -140,7 +140,7 @@
     {{end}}
     </div>
     <div class="marks-row">
-        <span class="comment-filter-label" data-marks-count></span>
+        <span class="comment-filter-label" data-marks-count aria-live="polite"></span>
         <div class="marks-actions">
             <label class="marks-toggle"><input type="checkbox" data-hide-marked checked>Hide marked</label>
             <button type="button" class="clear-marks-link" data-clear-all-marks>clear all marked</button>
@@ -195,7 +195,7 @@
     </details>
     {{end}}
     </div>
-    <p class="comment-filter-empty" data-comment-filter-empty hidden>No comments match this filter.</p>
+    <p class="comment-filter-empty" data-comment-filter-empty role="status" hidden>No comments match this filter.</p>
 </div>
 {{end}}
 
@@ -250,7 +250,7 @@
 </details>
 {{end}}
 
-{{if $.Static}}<script>{{$.InlineJS}}</script>{{else}}<script src="/static/session.js"></script>{{end}}
+{{if $.Static}}<script>{{$.InlineJS}}</script>{{else}}<script src="/static/a11y.js"></script><script src="/static/session.js"></script>{{end}}
 </main>
 </body>
 </html>

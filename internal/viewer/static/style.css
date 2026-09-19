@@ -21,8 +21,8 @@ Copyright 2026 alibaba/open-code-review Contributors
     /* Text */
     --text: rgba(0, 0, 0, 0.77);
     --text-strong: rgba(0, 0, 0, 0.87);
-    --text-secondary: rgba(0, 0, 0, 0.55);
-    --text-muted: rgba(0, 0, 0, 0.39);
+    --text-secondary: rgba(0, 0, 0, 0.62);
+    --text-muted: rgba(0, 0, 0, 0.55);
     --text-faint: var(--text-muted);
 
     /* Borders */
@@ -115,7 +115,7 @@ Copyright 2026 alibaba/open-code-review Contributors
         --text: rgba(255, 255, 255, 0.8);
         --text-strong: rgba(255, 255, 255, 0.9);
         --text-secondary: rgba(255, 255, 255, 0.6);
-        --text-muted: rgba(255, 255, 255, 0.4);
+        --text-muted: rgba(255, 255, 255, 0.47);
 
         --border: rgba(255, 255, 255, 0.16);
         --border-subtle: rgba(255, 255, 255, 0.08);
@@ -577,6 +577,11 @@ h3 {
 .token-breakdown[open] > .token-breakdown-toggle .chevron-sm svg { transform: rotate(90deg); }
 .token-breakdown-body {
     overflow-x: auto;
+    overscroll-behavior: contain;
+}
+.token-breakdown-body:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: -2px;
 }
 
 /* ── File List ── */
@@ -1475,6 +1480,7 @@ p {
 
 .sessions-page .table-scroll {
     overflow-x: auto;
+    overscroll-behavior: contain;
 }
 
 .sessions-page .col-session {
@@ -1544,6 +1550,30 @@ p {
     .table th, .table td { padding: 0.6rem 0.75rem; font-size: 0.82rem; }
 }
 
+/* ── Accessibility: focus ── */
+/* Collapsible headers and breadcrumb links keep the same visible focus ring
+   as the rest of the design system instead of the bare browser default.
+   In-table links draw their ring inside the box: .table-scroll computes
+   overflow-y to auto, so a positive offset would clip on the first and last
+   rows. The scrollable table wrappers are focusable regions (keyboard users
+   can otherwise never reach the columns that overflow) and get the same
+   inset ring. */
+.file-accordion-header:focus-visible,
+.token-breakdown-toggle:focus-visible,
+.comment-file-header:focus-visible,
+.tool-detail-toggle:focus-visible,
+.error-detail-toggle:focus-visible,
+nav.breadcrumb a:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+.table a:focus-visible,
+.sessions-page .table-scroll:focus-visible,
+.repos-page .table-scroll:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: -2px;
+}
+
 /* ── Accessibility: reduced motion ── */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -1575,6 +1605,7 @@ p {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 0.75rem;
     margin-top: 0.35rem;
 }
@@ -1587,6 +1618,7 @@ p {
 .marks-actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.75rem;
 }
 
@@ -1728,6 +1760,7 @@ p {
 
 .repos-page .table-scroll {
     overflow-x: auto;
+    overscroll-behavior: contain;
 }
 
 .repos-page .col-repository {
@@ -1829,6 +1862,19 @@ p {
     max-width: 22rem;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* Narrow screens let the session meta items wrap instead of holding their
+   one-line shape. This block must stay below the base rules above: the
+   selectors are equally specific and source order decides. */
+@media (max-width: 768px) {
+    .session-page .meta span {
+        white-space: normal;
+    }
+
+    .session-page .meta .meta-truncate {
+        max-width: 100%;
+    }
 }
 
 .session-page .meta .meta-status {

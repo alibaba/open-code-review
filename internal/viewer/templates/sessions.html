@@ -15,7 +15,7 @@
     <h2>Sessions: {{.RepoName}}</h2>
 </div>
 {{if .Sessions}}
-<div class="table-scroll">
+<div class="table-scroll" role="region" aria-label="Sessions table">
 <table id="sessions-table" class="table">
     <thead><tr><th>Session ID</th><th>Branch</th><th>Mode</th><th>Model</th><th>Files</th><th>Status</th><th>Comments</th><th>Duration</th><th>Started At</th><th class="col-action">Action</th></tr></thead>
     <tbody>
@@ -40,6 +40,7 @@
 </div>
 {{template "pager" (dict "prefix" "sessions" "label" "Session pages")}}
 <script src="/static/pager.js"></script>
+<script src="/static/a11y.js"></script>
 <script src="/static/sessions.js"></script>
 {{else}}
 <p>No sessions found for this repository.</p>
