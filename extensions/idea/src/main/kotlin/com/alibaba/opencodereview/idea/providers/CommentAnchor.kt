@@ -24,7 +24,7 @@ enum class SidebarOnlyReason {
     /** A binary file, detected by GitService.isBinaryFile through content inspection. */
     BINARY,
 
-    /** The file exists, but neither the supplied line numbers nor existingCode can resolve a location. */
+    /** The file exists, but neither the supplied line numbers nor existingCode identifies a usable location. */
     UNRESOLVED,
 
     /** The file is outside the review scope, or its content cannot be read at the specified ref. */

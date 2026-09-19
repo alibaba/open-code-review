@@ -726,7 +726,11 @@ class CommentService(
         }
     }
 
-    /** Resolve a CLI path within the project, rejecting paths outside repoRoot. Git diff comment paths are repository-relative; using basePath for a project opened in a subdirectory would duplicate the subdirectory and fail to find the file. */
+    /**
+     * Resolve a CLI path within the repository, rejecting paths outside repoRoot.
+     * Git diff comment paths are repository-relative. If the project is opened in a subdirectory,
+     * resolving them against basePath would repeat the subdirectory and fail to find the file.
+     */
     private fun resolveProjectFile(relative: String): VirtualFile? {
         val base = git.repoRoot()?.toPath()?.toRealPath() ?: return null
         val target = runCatching { base.resolve(relative).toRealPath() }.getOrNull() ?: return null
