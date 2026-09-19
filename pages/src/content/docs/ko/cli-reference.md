@@ -112,6 +112,8 @@ ocr r      [flags]   (alias)
 | `--to <ref>` | — | — | diff가 끝나는 대상 ref(예: `feature-branch`). 지정하면 OCR이 `merge-base(from, to)..to`를 계산합니다. |
 | `--commit <sha>` | `-c` | — | 리뷰할 단일 커밋(부모 커밋과의 diff). |
 | `--preview` | `-p` | `false` | 필터 파이프라인만 돌리고 LLM은 호출하지 않습니다. 파일 목록과 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다(미리 보기에는 내보낼 완료된 지적이 없습니다). |
+| `--no-filter` | — | `false` | 리뷰 코멘트를 모두 남기고 그룹 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. |
+| `--no-summary` | — | `false` | 리뷰 완료 후 `CHANGE_SUMMARY_TASK`, `IMPACT_ANALYSIS_TASK`, `FLOW_DIAGRAM_TASK` LLM 호출을 건너뜁니다. |
 | `--no-filter` | — | `false` | 리뷰 코멘트를 모두 남기고 서브태스크 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. 서브태스크는 파일 하나 또는 관련된 파일 묶음을 리뷰합니다. |
 | `--resume <session-id>` | — | — | 호환되는 이전 range 또는 commit 리뷰 세션에서 이어서 실행합니다. |
 | `--format <fmt>` | `-f` | `text` | `text`(사람이 읽는 형식), `json`(기계가 읽는 코멘트 배열), `sarif`(GitHub Code Scanning용 SARIF 2.1.0 리포트). |
@@ -318,6 +320,10 @@ ocr review --format json | jq .summary   # stdout은 JSON 문서 하나입니다
 | `summary` | 선택. 실행 집계입니다: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens`(omitempty), `cache_write_tokens`(omitempty), `elapsed`. `skipped` 실행에서는 나오지 않습니다. |
 | `comments` | 항상 있으며 비어 있을 수 있습니다. 코멘트별 필드는 위 예시와 같습니다. |
 | `warnings` | 선택. 서브 Agent가 하나 이상 실패했을 때 나오며, 각 항목이 해당 파일과 오류를 설명합니다. |
+| `project_summary` | 선택. scan 모드의 프로젝트 수준 요약(markdown). `ocr review`에서는 비어 있습니다. |
+| `change_summary` | 선택. review 모드의 변경 요약(markdown): 의도, 영향받는 모듈, 통계, 주요 결정. `CHANGE_SUMMARY_TASK` 리뷰 후 LLM 호출로 생성됩니다. `--no-summary` 설정 시 또는 작업 실패 시 생략됩니다. |
+| `impact_analysis` | 선택. review 모드의 비즈니스 영향 분석(markdown): 영향받는 기능, 계약 변경, 리스크 평가, 회귀 취약 영역. `IMPACT_ANALYSIS_TASK` 리뷰 후 LLM 호출로 생성됩니다. |
+| `flow_diagram` | 선택. review 모드의 Mermaid 흐름도 문자열. 호출 체인/데이터 흐름 영향과 비즈니스 프로세스 전후 비교를 보여줍니다. `FLOW_DIAGRAM_TASK` 리뷰 후 LLM 호출로 생성됩니다. |
 | `session_id` | 선택. 세션을 남긴 실행에 나옵니다. 호환되는 range나 commit 리뷰를 다시 시도할 때 `ocr review --resume <session-id>`에 넘기세요. |
 | `resume` | 선택. 이어서 한 실행에 나오며 `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, `current_model`을 담습니다. |
 

@@ -778,6 +778,18 @@ type ResultProvider interface {
 	// scan's PROJECT_SUMMARY_TASK. Empty for review mode and for scans
 	// that skipped / failed the summary phase.
 	ProjectSummary() string
+	// ChangeSummary is the post-run change summary produced by the
+	// CHANGE_SUMMARY_TASK. Empty for scan mode and for reviews that
+	// skipped / failed the summary phase.
+	ChangeSummary() string
+	// ImpactAnalysis is the post-run business impact analysis produced by
+	// the IMPACT_ANALYSIS_TASK. Empty for scan mode and for reviews that
+	// skipped / failed the analysis phase.
+	ImpactAnalysis() string
+	// FlowDiagram is the post-run Mermaid flow diagram produced by the
+	// FLOW_DIAGRAM_TASK. Empty for scan mode and for reviews that
+	// skipped / failed the diagram phase.
+	FlowDiagram() string
 	ToolCalls() map[string]int64
 	ToolFailures() []llmloop.ToolFailureDetail
 	// SessionID returns the persisted session identifier so callers can show it
@@ -881,7 +893,8 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
+			ag.ProjectSummary(), ag.ChangeSummary(), ag.ImpactAnalysis(), ag.FlowDiagram(),
+			ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
 	}
 	if outputFormat == "sarif" {
 		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
@@ -893,6 +906,15 @@ func emitRunResult(
 	outputRetryReportText(out, retryReport)
 	if summary := ag.ProjectSummary(); summary != "" {
 		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", sanitizeTerminal(summary))
+	}
+	if s := ag.ChangeSummary(); s != "" {
+		fmt.Fprintf(out, "\n\n──────── Change Summary ────────\n\n%s\n", sanitizeTerminal(s))
+	}
+	if s := ag.ImpactAnalysis(); s != "" {
+		fmt.Fprintf(out, "\n\n──────── Impact Analysis ────────\n\n%s\n", sanitizeTerminal(s))
+	}
+	if s := ag.FlowDiagram(); s != "" {
+		fmt.Fprintf(out, "\n\n──────── Flow Diagram ────────\n\n%s\n", sanitizeTerminal(s))
 	}
 	// Text rendering ignores fmt.Fprintf write errors; surface them here so a
 	// failed --output write (permission, disk full) fails the command non-zero

@@ -114,6 +114,18 @@ type Agent struct {
 // is absent, no comments were collected, or the summary LLM call failed.
 func (a *Agent) ProjectSummary() string { return a.projectSummary }
 
+// ChangeSummary returns an empty string for scan mode. The change summary
+// task is review-only; defined so *Agent satisfies ResultProvider.
+func (a *Agent) ChangeSummary() string { return "" }
+
+// ImpactAnalysis returns an empty string for scan mode. The impact analysis
+// task is review-only; defined so *Agent satisfies ResultProvider.
+func (a *Agent) ImpactAnalysis() string { return "" }
+
+// FlowDiagram returns an empty string for scan mode. The flow diagram task
+// is review-only; defined so *Agent satisfies ResultProvider.
+func (a *Agent) FlowDiagram() string { return "" }
+
 // NewAgent creates a scan Agent from the given args. The Session is
 // auto-created (review_mode = full_scan) when not supplied.
 func NewAgent(args Args) *Agent {
@@ -955,8 +967,8 @@ func buildSummaryCommentsList(comments []model.LlmComment) string {
 		sb.WriteString(c.Path)
 		sb.WriteString("`: ")
 		oneLine := strings.ReplaceAll(c.Content, "\n", " ")
-		if len(oneLine) > maxLine {
-			oneLine = oneLine[:maxLine] + "..."
+		if len([]rune(oneLine)) > maxLine {
+			oneLine = string([]rune(oneLine)[:maxLine]) + "..."
 		}
 		sb.WriteString(oneLine)
 		sb.WriteString("\n")

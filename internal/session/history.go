@@ -26,6 +26,9 @@ const (
 	ReLocationTask        TaskType = "re_location_task"
 	ReviewFilterTask      TaskType = "review_filter_task"
 	GroupingTask          TaskType = "grouping_task"
+	ChangeSummaryTask     TaskType = "change_summary_task"
+	ImpactAnalysisTask    TaskType = "impact_analysis_task"
+	FlowDiagramTask       TaskType = "flow_diagram_task"
 )
 
 const (
