@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -64,6 +65,51 @@ func TestLookupProvider_MiniMaxDetails(t *testing.T) {
 	}
 }
 
+func TestLookupProvider_DashScopeCodingPlanDetails(t *testing.T) {
+	wantModels := []string{
+		"qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "MiniMax-M2.5",
+		"qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7",
+	}
+	tests := []struct {
+		name, wantURL, wantEnvVar string
+	}{
+		{
+			name:       "dashscope-codingplan",
+			wantURL:    "https://coding.dashscope.aliyuncs.com/v1",
+			wantEnvVar: "DASHSCOPE_CODINGPLAN_KEY",
+		},
+		{
+			name:       "dashscope-codingplan-intl",
+			wantURL:    "https://coding-intl.dashscope.aliyuncs.com/v1",
+			wantEnvVar: "DASHSCOPE_CODINGPLAN_INTL_KEY",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, ok := LookupProvider(tt.name)
+			if !ok {
+				t.Fatalf("LookupProvider(%q) returned false, want true", tt.name)
+			}
+			if provider.Protocol != ProtocolOpenAIChatCompletions {
+				t.Errorf("LookupProvider(%q).Protocol = %q, want %q", tt.name, provider.Protocol, ProtocolOpenAIChatCompletions)
+			}
+			if provider.BaseURL != tt.wantURL {
+				t.Errorf("LookupProvider(%q).BaseURL = %q, want %q", tt.name, provider.BaseURL, tt.wantURL)
+			}
+			if provider.EnvVar != tt.wantEnvVar {
+				t.Errorf("LookupProvider(%q).EnvVar = %q, want %q", tt.name, provider.EnvVar, tt.wantEnvVar)
+			}
+			if provider.AuthHeader != "" {
+				t.Errorf("LookupProvider(%q).AuthHeader = %q, want empty", tt.name, provider.AuthHeader)
+			}
+			if !reflect.DeepEqual(provider.Models, wantModels) {
+				t.Errorf("LookupProvider(%q).Models = %v, want %v", tt.name, provider.Models, wantModels)
+			}
+		})
+	}
+}
+
 func TestLookupProvider_Unknown(t *testing.T) {
 	_, ok := LookupProvider("nonexistent-provider")
 	if ok {
@@ -76,7 +122,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-codingplan", "dashscope-codingplan-intl", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}

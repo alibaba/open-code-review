@@ -49,6 +49,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
+| `dashscope-codingplan` | openai | `https://coding.dashscope.aliyuncs.com/v1` | `DASHSCOPE_CODINGPLAN_KEY` |
+| `dashscope-codingplan-intl` | openai | `https://coding-intl.dashscope.aliyuncs.com/v1` | `DASHSCOPE_CODINGPLAN_INTL_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
 | `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
 | `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
@@ -65,6 +67,32 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+### Alibaba Cloud Coding Plan
+
+`ocr config provider` で中国のサブスクリプションには `dashscope-codingplan`、国際版には `dashscope-codingplan-intl` を選択します。両プリセットは既存の OpenAI Chat Completions クライアントを利用し、レビューのツール呼び出しと `ocr llm test` に対応します。
+
+ローカル設定では、Coding Plan コンソールから専用の `sk-sp-` キーを取得します：
+
+```bash
+ocr config set provider dashscope-codingplan
+ocr config set model qwen3.7-plus
+ocr config set providers.dashscope-codingplan.api_key "sk-sp-xxxxxxxxxx"
+ocr llm test
+```
+
+国際版には対応するキーとプリセットを使います。`api_key` が未設定の場合、対応する環境変数が使われます：
+
+```bash
+ocr config set provider dashscope-codingplan-intl
+ocr config set model qwen3.7-plus
+export DASHSCOPE_CODINGPLAN_INTL_KEY="sk-sp-xxxxxxxxxx"
+ocr llm test
+```
+
+`dashscope-tokenplan` は別の Token Plan プリセットで、エンドポイント、キー、モデル一覧が異なります。Coding Plan の割り当てはモデル呼び出し回数で消費され、OCR の token 統計は残りの割り当てを示しません。使用量と利用可能なモデルはプランのコンソールで確認してください。従量課金や Token Plan のキーを混用しないでください。別プランの `mimo-v2.5` は Coding Plan のモデル候補に含まれません。
+
+Coding Plan は対話型の開発ツール向けであり、CI、バックエンドサービス、非対話型のバッチ処理には使用できません。最新のモデルと利用条件は公式の[中国版](https://help.aliyun.com/zh/model-studio/coding-plan)および[国際版](https://www.alibabacloud.com/help/en/model-studio/coding-plan)ガイドを参照してください。
 
 ### 組み込み provider の Base URL を上書きする
 

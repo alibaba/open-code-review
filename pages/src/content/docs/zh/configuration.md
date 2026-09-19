@@ -48,6 +48,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
+| `dashscope-codingplan` | openai | `https://coding.dashscope.aliyuncs.com/v1` | `DASHSCOPE_CODINGPLAN_KEY` |
+| `dashscope-codingplan-intl` | openai | `https://coding-intl.dashscope.aliyuncs.com/v1` | `DASHSCOPE_CODINGPLAN_INTL_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
 | `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
 | `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
@@ -64,6 +66,32 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+### 阿里云 Coding Plan
+
+在 `ocr config provider` 中，国内订阅选择 `dashscope-codingplan`，国际订阅选择 `dashscope-codingplan-intl`。两个预设均复用现有的 OpenAI Chat Completions 客户端，支持审查工具调用和 `ocr llm test` 连通性检查。
+
+本地配置时，从 Coding Plan 控制台获取套餐专用的 `sk-sp-` Key：
+
+```bash
+ocr config set provider dashscope-codingplan
+ocr config set model qwen3.7-plus
+ocr config set providers.dashscope-codingplan.api_key "sk-sp-xxxxxxxxxx"
+ocr llm test
+```
+
+国际订阅需使用对应的 Key 和预设。未设置 `api_key` 时，OCR 会使用对应的环境变量：
+
+```bash
+ocr config set provider dashscope-codingplan-intl
+ocr config set model qwen3.7-plus
+export DASHSCOPE_CODINGPLAN_INTL_KEY="sk-sp-xxxxxxxxxx"
+ocr llm test
+```
+
+`dashscope-tokenplan` 仍是独立的 Token Plan 预设，端点、Key 和模型列表均单独配置。Coding Plan 按模型调用次数扣减额度，OCR 的 token 统计不代表剩余套餐额度；请在套餐控制台查看用量和可用模型。不要混用按量付费或 Token Plan 的 Key。预设列出的是 Coding Plan 模型 ID，其他套餐中的 `mimo-v2.5` 不属于 Coding Plan 选项。
+
+Coding Plan 面向交互式编程工具，不适用于 CI、后端服务或非交互式批量任务。最新模型和使用条款参见官方的[国内指南](https://help.aliyun.com/zh/model-studio/coding-plan)和[国际指南](https://www.alibabacloud.com/help/en/model-studio/coding-plan)。
 
 ### 覆盖内置 provider 的 Base URL
 

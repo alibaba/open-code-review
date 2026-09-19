@@ -51,6 +51,8 @@ environment variable.
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
+| `dashscope-codingplan` | openai | `https://coding.dashscope.aliyuncs.com/v1` | `DASHSCOPE_CODINGPLAN_KEY` |
+| `dashscope-codingplan-intl` | openai | `https://coding-intl.dashscope.aliyuncs.com/v1` | `DASHSCOPE_CODINGPLAN_INTL_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
 | `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
 | `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
@@ -67,6 +69,32 @@ environment variable.
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+### Alibaba Cloud Coding Plan
+
+Select `dashscope-codingplan` for China or `dashscope-codingplan-intl` for International in `ocr config provider`. Both presets use the existing OpenAI Chat Completions client, including review tool calls and the `ocr llm test` connectivity check.
+
+For local setup, get your plan-specific `sk-sp-` key from the Coding Plan console:
+
+```bash
+ocr config set provider dashscope-codingplan
+ocr config set model qwen3.7-plus
+ocr config set providers.dashscope-codingplan.api_key "sk-sp-xxxxxxxxxx"
+ocr llm test
+```
+
+For an International subscription, use its own key and preset instead. The environment variable is used when `api_key` is unset:
+
+```bash
+ocr config set provider dashscope-codingplan-intl
+ocr config set model qwen3.7-plus
+export DASHSCOPE_CODINGPLAN_INTL_KEY="sk-sp-xxxxxxxxxx"
+ocr llm test
+```
+
+`dashscope-tokenplan` remains a separate Token Plan preset with its own endpoint, key and model catalog. Coding Plan counts model calls toward its quota; OCR's token statistics are not the remaining plan quota. Check usage and available models in the plan console. Do not reuse a pay-as-you-go or Token Plan key. The presets list Coding Plan model IDs, so `mimo-v2.5` from another plan is not a Coding Plan choice.
+
+Coding Plan is intended for interactive coding tools, not CI, backend services or non-interactive batch jobs. See the official [China](https://help.aliyun.com/zh/model-studio/coding-plan) and [International](https://www.alibabacloud.com/help/en/model-studio/coding-plan) guides for current models and usage terms.
 
 ### Overriding a built-in provider's Base URL
 

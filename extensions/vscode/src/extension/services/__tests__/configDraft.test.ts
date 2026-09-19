@@ -4,6 +4,17 @@
 import { applyConfigEntries } from '../configDraft';
 
 describe('applyConfigEntries', () => {
+  it.each(['dashscope-codingplan', 'dashscope-codingplan-intl'])('stores %s in built-in providers', (provider) => {
+    const draft = applyConfigEntries({}, [
+      { key: 'provider', value: provider },
+      { key: 'model', value: 'qwen3.7-plus' },
+      { key: `providers.${provider}.api_key`, value: 'sk-sp-test' },
+    ]);
+    expect(draft.provider).toBe(provider);
+    expect(draft.providers?.[provider]).toEqual({ model: 'qwen3.7-plus', api_key: 'sk-sp-test' });
+    expect(draft.custom_providers).toBeUndefined();
+  });
+
   it('merges built-in provider entries', () => {
     const draft = applyConfigEntries({}, [
       { key: 'provider', value: 'anthropic' },
