@@ -391,7 +391,12 @@ it defaults to English when unset:
 ```bash
 ocr config set language 中文
 ocr config set language English
+OCR_LANGUAGE=Chinese ocr review
 ```
+
+Both ways configure the same underlying `language` setting. For GitHub
+Actions, use the Action-specific input `language: Chinese`; GitLab CI, Bitbucket
+Pipelines, CodeUp CI, Gerrit CI, and GitFlic CI use `OCR_LANGUAGE=Chinese`.
 
 ## See Also
 

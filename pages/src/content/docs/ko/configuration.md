@@ -295,7 +295,12 @@ ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={oc
 ```bash
 ocr config set language 中文
 ocr config set language English
+OCR_LANGUAGE=Chinese ocr review
 ```
+
+두 방법 모두 동일한 `language` 설정을 구성합니다. GitHub Actions에서는 전용
+입력 `language: Chinese`를 사용하고, GitLab CI, Bitbucket Pipelines, CodeUp CI,
+Gerrit CI, GitFlic CI에서는 `OCR_LANGUAGE=Chinese`를 사용합니다.
 
 ## 관련 문서 {#see-also}
 
