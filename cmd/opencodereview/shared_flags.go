@@ -128,6 +128,12 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if opts.preview && opts.resume != "" {
 		return fmt.Errorf("--preview and --resume cannot be used together")
 	}
+	if opts.deltaFrom != "" && opts.resume != "" {
+		return fmt.Errorf("--delta-from and --resume cannot be used together")
+	}
+	if opts.preview && opts.deltaFrom != "" {
+		return fmt.Errorf("--preview and --delta-from cannot be used together")
+	}
 	if err := validateAudience(opts.audience); err != nil {
 		return err
 	}
@@ -206,6 +212,8 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)
 	cmd.Flags().StringVar(&opts.resume, "resume", "", "resume from a previous review session id")
 	cmd.RegisterFlagCompletionFunc("resume", completeSessionIDs)
+	cmd.Flags().StringVar(&opts.deltaFrom, "delta-from", "", "review a new version of a change, reusing a previous session's results for files whose diff is unchanged")
+	cmd.RegisterFlagCompletionFunc("delta-from", completeSessionIDs)
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
 	addOutputPathFlag(cmd, &opts.outputPath)

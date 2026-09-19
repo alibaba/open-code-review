@@ -34,6 +34,7 @@ type reviewOptions struct {
 	to                    string
 	commit                string
 	resume                string
+	deltaFrom             string
 	excludes              string
 	outputFormat          string
 	audience              string
@@ -73,6 +74,9 @@ var reviewCmd = &cobra.Command{
 
   # Resume a previous range review
   ocr review --from master --to dev-ref --resume <session-id>
+
+  # Review a new version of a change, reusing results for files whose diff is unchanged
+  ocr review --from master --to dev-ref --delta-from <session-id>
 
   # Output JSON format
   ocr review --format json
@@ -351,6 +355,18 @@ func reviewResultError(runErr error, manifest *session.RunManifest) error {
 }
 
 func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeState, error) {
+	if opts.deltaFrom != "" {
+		// A delta run loads its parent exactly as a resume does; only the input
+		// identity check differs, and ResumeState.Delta carries that decision.
+		deltaOpts := opts
+		deltaOpts.resume, deltaOpts.deltaFrom = opts.deltaFrom, ""
+		state, err := loadReviewResumeState(repoDir, deltaOpts)
+		if err != nil {
+			return nil, fmt.Errorf("--delta-from: %w", err)
+		}
+		state.Delta = true
+		return state, nil
+	}
 	if opts.resume == "" {
 		return nil, nil
 	}
@@ -416,6 +432,9 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 		ProviderExplicit: opts.provider != "",
 		ModelExplicit:    opts.model != "",
 	}); err != nil {
+		if state.Delta {
+			return nil, fmt.Errorf("--delta-from: %w", err)
+		}
 		return nil, err
 	}
 	return sealed, nil

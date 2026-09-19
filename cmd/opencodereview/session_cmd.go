@@ -494,7 +494,11 @@ func printSessionDetail(w io.Writer, s *session.Summary, items []session.ItemDet
 		fmt.Fprintf(w, "  Resumed:   from session %s\n", s.ResumedFrom)
 	}
 	if l := s.ResumeLineage; l != nil {
-		fmt.Fprintf(w, "  Parent:    run %s\n", l.ParentRunID)
+		if l.Delta {
+			fmt.Fprintf(w, "  Parent:    run %s (delta)\n", l.ParentRunID)
+		} else {
+			fmt.Fprintf(w, "  Parent:    run %s\n", l.ParentRunID)
+		}
 		if l.IsTransition() {
 			fmt.Fprintf(w, "  Transition: %s → %s\n",
 				describeTarget(l.SourceProvider, l.SourceModel),

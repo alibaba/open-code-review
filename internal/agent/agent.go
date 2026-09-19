@@ -906,8 +906,13 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 		RerunFiles:    rerun,
 		PreviousModel: resume.Model,
 		CurrentModel:  a.args.Model,
+		Delta:         resume.Delta,
 	}
-	fmt.Fprintf(stdout.Writer(), "[ocr] Resume %s: reusing %d file(s), reviewing %d file(s)\n", resume.SessionID, reused, rerun)
+	label := "Resume"
+	if resume.Delta {
+		label = "Delta from"
+	}
+	fmt.Fprintf(stdout.Writer(), "[ocr] %s %s: reusing %d file(s), reviewing %d file(s)\n", label, resume.SessionID, reused, rerun)
 	return toDispatch
 }
 

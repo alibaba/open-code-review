@@ -115,6 +115,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
 | `--no-filter` | — | `false` | Keep all review comments and skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
+| `--delta-from <session-id>` | — | — | Review a new version of a change, reusing that session's results for every file whose diff is unchanged. See [Reviewing a new version of a change](#reviewing-a-new-version-of-a-change). |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
 | `--output <path>` | `-o` | stdout | Write review results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
 | `--audience <who>` | — | `human` | `human` streams progress lines (to stderr when `--format` is `json`/`sarif`, so stdout stays a single parseable document); `agent` suppresses progress entirely and prints only the final summary / JSON. |
@@ -233,6 +234,29 @@ would review the same thing the parent did:
 - `--preview` and `--resume` cannot be used together
 
 A rejected resume writes nothing: no session, no manifest, no LLM call.
+
+### Reviewing a new version of a change
+
+When a change gets a new version — review feedback addressed, a rebase, one more
+commit — `--delta-from` reviews only the files whose diff changed and reuses the
+earlier session's findings for the rest:
+
+```bash
+ocr review --from main --to feature-branch --delta-from <session-id>
+```
+
+A file is reused only when its diff is byte-identical to the one the earlier
+session reviewed, so its findings and line numbers still apply as recorded.
+Review against the same base both times: a moved base changes every file's diff.
+Everything else follows the rules for `--resume`, except that the input is
+allowed to differ: range or commit reviews only, the same repository, rules and
+file filter, and no implicit provider or model change. `--delta-from` cannot be
+combined with `--resume` or `--preview`.
+
+The run records the earlier session as its parent, lists reused files under
+`coverage.reused`, and reports `"delta": true` in the JSON `resume` block. Reused
+files are not reviewed again, so a finding in an unchanged file that depends on
+code in a changed file is not re-checked; run a full review when that matters.
 
 ### Output
 
