@@ -4,6 +4,8 @@ sidebar:
   order: 5
 ---
 
+`ocr mcp`는 서버 목록에서 도구와 실제 권한을 관리하며 Esc로 돌아갑니다. 목록을 열어도 연결하지 않습니다. `ocr mcp import [file] [--yes]`는 Cursor JSON 또는 Codex TOML 연결 하나를 비활성·도구 없음 상태로 저장하며 권한을 복사하지 않습니다. 비대화형에서는 단일 서버 파일과 `--yes`가 필요합니다. 평문 env/header는 환경 변수 참조로 바뀌며 같은 이름을 덮어쓰지 않습니다. OAuth 등 미지원 필드는 거부합니다. 비공개 붙여넣기(Ctrl-S)와 활성화는 [MCP 가이드](../mcp/)를 참고하세요.
+
 설정 파일은 `~/.opencodereview/config.json`에 있습니다. 편집하는 방법은 세 가지입니다:
 
 - **대화형 TUI** — `ocr config provider` / `ocr config model`. 메뉴가 안내합니다.
@@ -297,7 +299,33 @@ ocr config set language 中文
 ocr config set language English
 ```
 
+## MCP 보안 설정
+
+MCP 연결은 `ocr mcp` 관리자를 사용합니다. 전역 `mcp` 설정에는
+`mcp.version`(`1`), `mcp.enabled`, `mcp.default_permission`(`deny`, `ask`,
+`allow`, 기본 `ask`), `mcp.approval_timeout_seconds`(기본 60초, 범위 1–600)가
+있습니다. timeout 변경은 다음 `ocr review`부터 적용됩니다.
+
+각 `mcp_servers.<name>`에는 `stdio`/`remote` 연결, `enabled`,
+`default_permission`, 명시적 `tools`, `tool_permissions`,
+`tool_definition_sha256`를 둡니다. 비어 있거나 없는 `tools`는 도구 0개를
+뜻합니다. 상위 `deny`는 하위에서 덮을 수 없으며, `allow`는 승인 prompt만 생략할
+뿐 allowlist를 넓히지 않습니다. `env`와 header에는 `${ENV_NAME}` 참조를 사용하고,
+기존 `setup`은 `ocr review`에서 실행되지 않습니다.
+
+```bash
+ocr config set mcp.approval_timeout_seconds 120
+ocr mcp permissions docs
+```
+
+wizard, fingerprint, 원격 연결, 권한 상속,
+마이그레이션의 전체 설명은 [MCP 가이드](../mcp/)를 참고하세요.
+
 ## 관련 문서 {#see-also}
 
 - [빠른 시작](../quickstart/) — 최소 설정과 첫 리뷰.
 - [CLI 레퍼런스](../cli-reference/) — review 명령이 받는 모든 플래그.
+
+## 터미널 연결 마법사
+
+`ocr mcp add`는 항목별 입력과 `Space` 도구 선택을 제공합니다. `Enter`는 다음 단계, `Ctrl-B`는 이전 단계, `Esc`는 취소입니다. `ocr mcp permissions`에서 권한과 제한 시간(기본 60초, 1–600초)을 설정합니다. `OCR_CONFIG_PATH`는 설정 읽기·쓰기와 review에 동일하게 적용됩니다. `tools --disable`만 실행하면 오프라인에서도 연결이나 `--yes` 없이 권한을 취소합니다. 자세한 절차는 [MCP 가이드](../mcp/)를 참고하세요.

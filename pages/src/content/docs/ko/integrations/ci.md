@@ -4,6 +4,8 @@ sidebar:
   order: 4
 ---
 
+`ocr mcp`는 서버 목록에서 도구와 실제 권한을 관리하며 Esc로 돌아갑니다. 목록을 열어도 연결하지 않습니다. `ocr mcp import [file] [--yes]`는 Cursor JSON 또는 Codex TOML 연결 하나를 비활성·도구 없음 상태로 저장하며 권한을 복사하지 않습니다. 비대화형에서는 단일 서버 파일과 `--yes`가 필요합니다. 평문 env/header는 환경 변수 참조로 바뀌며 같은 이름을 덮어쓰지 않습니다. OAuth 등 미지원 필드는 거부합니다. 비공개 붙여넣기(Ctrl-S)와 활성화는 [MCP 가이드](../mcp/)를 참고하세요.
+
 Pull Request나 Merge Request마다 OCR을 실행합니다. 업스트림 저장소는 그대로 복사해
 설정만 하면 되는 파이프라인 두 벌을 제공합니다. 하나는 GitHub Actions용, 하나는
 GitLab CI용입니다. 둘 다 [CLI 레퍼런스](../cli-reference/#json)에서 설명하는 핵심
@@ -499,8 +501,30 @@ script:
   - cat /tmp/ocr-stderr.log
 ```
 
+## CI의 MCP
+
+MCP는 CI와 비대화형 환경에서 fail closed로 동작합니다. 승인 terminal이 없으므로 `ask`
+도구는 모델에서 숨겨지고 실행되지 않습니다. `tools`에 명시되고,
+`tool_definition_sha256`가 일치하며, 영구 `allow`로 해석되고, 전역/server `deny` 아래에
+있지 않은 도구만 노출될 수 있습니다. 이 경우에도 독립 authorizer가 `tools/call` 직전에
+정책을 다시 검사합니다.
+
+신뢰할 수 있는 대화형 환경에서 `ocr mcp tools`와 `ocr mcp permissions`로 설정을
+준비하세요. runner 안에서는 대화형 승인을 시도하지 않습니다. 연결하거나 쓰는
+비대화형 관리 명령은 `--yes`가 필요하고, 하위 명령 없는 `ocr mcp`는 마스킹된 상태와
+도움말만 출력합니다.
+
+MCP secret은 최소 범위 CI 환경 변수로 제공하고 설정에는 `${ENV_NAME}`를 사용합니다.
+해석된 token은 commit하지 않습니다. `ocr review`에만 MCP가 적용되며 `ocr scan`에는
+적용되지 않습니다. 전체 권한표, fingerprint 마이그레이션, remote 제한은
+[MCP 가이드](../mcp/)를 참고하세요.
+
 ## 관련 문서 {#see-also}
 
 - [CLI 레퍼런스](../cli-reference/#json) — 두 파이프라인이 소비하는 JSON 출력
   구조입니다. CI 스크립트를 처음부터 직접 작성할 때 유용합니다.
 - [설정](../../configuration/) — OCR이 인식하는 모든 환경 변수와 설정 키입니다.
+
+## 터미널 연결 마법사
+
+`ocr mcp add`는 항목별 입력과 `Space` 도구 선택을 제공합니다. `Enter`는 다음 단계, `Ctrl-B`는 이전 단계, `Esc`는 취소입니다. `ocr mcp permissions`에서 권한과 제한 시간(기본 60초, 1–600초)을 설정합니다. `OCR_CONFIG_PATH`는 설정 읽기·쓰기와 review에 동일하게 적용됩니다. `tools --disable`만 실행하면 오프라인에서도 연결이나 `--yes` 없이 권한을 취소합니다. 자세한 절차는 [MCP 가이드](../mcp/)를 참고하세요.

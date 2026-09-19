@@ -4,159 +4,182 @@ sidebar:
   order: 10
 ---
 
-OCR은 **Model Context Protocol(MCP) 클라이언트**로 동작할 수 있습니다. 외부
-MCP 서버를 하나 이상 지정해 두면 그 서버가 제공하는 도구를 리뷰 Agent가 쓸 수
-있게 됩니다. `file_read`나 `code_search` 같은 [내장 도구](../tools/)와 나란히
-놓입니다.
+## 시작하기
 
-## 언제 쓰나 {#when-to-use-it}
+`ocr mcp`를 실행하고 **Add server**를 선택합니다. 이미 설정된 서버는
+**CONFIGURED SERVERS**, 추가·가져오기·전역 권한은 **MANAGEMENT ACTIONS**에 표시됩니다.
+**Tab**으로 영역을 이동하고 **Enter**로 엽니다. 각 단계는 현재 화면을 교체합니다.
+**Esc**는 이전 화면 또는 취소, **Ctrl-C**는 종료, **PgUp/PgDn**은 긴 내용 스크롤입니다.
+목록을 여는 것만으로 서버에 연결하지 않습니다. 연결 상태는 마지막 검사 결과입니다.
 
-diff 바깥에 있는 맥락이 리뷰에 도움이 될 때 MCP 서버를 붙입니다.
+1. 서버 이름과 `stdio` 또는 `remote`를 선택합니다.
+2. stdio는 실행 파일, 개별 인수, 환경 변수 참조를 입력합니다.
+   remote는 URL과 header 참조를 입력합니다.
+3. 실행 명령 또는 주소와 위험 안내를 확인한 뒤 연결을 승인합니다.
+4. 서버 도구 목록을 확인합니다. **Space**로 필요한 도구만 선택합니다.
+5. 선택한 도구는 기본 `ask`이며 최종 확인 후 저장합니다.
+   **Ctrl-B**로 이전 단계에 돌아갈 수 있습니다.
+6. 연결하지 않고 보관하려면 **Save disabled (no connection)**을 선택합니다.
+   비활성·도구 없음 상태로 저장됩니다.
 
-- **이슈·티켓 조회** — 연결된 Jira나 GitHub 이슈를 Agent가 직접 가져와, 그
-  변경이 요구 사항에 적힌 대로인지 확인하게 합니다.
-- **문서·지식 베이스** — 사내 API 문서나 코딩 표준을 끌어와 코멘트가 실제 팀
-  규칙을 근거로 삼게 합니다.
-- **맞춤 분석** — 린터, 스키마 검증기, 의존성 검사기를 도구로 노출해 리뷰어가
-  필요할 때 부르게 합니다.
+서버의 **Tools**는 설정된 도구와 권한을 보여 주며, **Test connection**은 확인 후
+도구를 다시 찾습니다. 새 도구는 자동 선택하지 않습니다. 변경된 정의를 수락하면
+권한이 `ask`로 돌아갑니다. 도구 비활성화는 오프라인에서도 가능합니다.
 
-저장소를 그냥 읽기만 하면 되는 경우라면 내장 도구로 충분합니다. MCP는 체크아웃
-바깥까지 손을 뻗기 위한 것입니다.
+## 연결 예시
 
-## 설정 {#configuration}
-
-#### 로컬 MCP 서버 추가하기 {#adding-a-local-mcp-server}
-
-`ocr config set` 명령이 아래 필드를 대화 없이 기록합니다. 배열 필드(`args`,
-`env`, `tools`)에는 JSON 배열 문자열을 넘깁니다.
-
-```bash
-# Minimal: just a command
-ocr config set mcp_servers.docs.command npx
-
-# Arguments
-ocr config set mcp_servers.docs.args '["-y", "@acme/docs-mcp-server"]'
-
-# Restrict which tools are exposed to the reviewer
-ocr config set mcp_servers.docs.tools '["search_docs", "get_page"]'
-
-# A setup command to run before the server starts
-ocr config set mcp_servers.docs.setup "npm install -g @acme/docs-mcp-server"
-
-# Environment variables (KEY=VALUE entries)
-ocr config set mcp_servers.docs.env '["DOCS_TOKEN=secret", "DOCS_REGION=eu"]'
-```
-
-#### 원격 MCP 서버 추가하기 {#adding-a-remote-mcp-server}
-
-**Streamable HTTP**를 지원하는 서버라면 `type`을 `remote`로 두고, 로컬 명령 대신
-`url`을 지정합니다. `url`만 설정하는 것으로는 부족합니다. 기본 type이
-`stdio`이기 때문입니다.
-
-기존 연결을 덮어쓰지 않도록 새 서버 이름을 쓰세요.
+이미 설치한 로컬 서버에 연결하려면:
 
 ```bash
-ocr config set mcp_servers.search.type remote
-ocr config set mcp_servers.search.url https://mcp.example.com/mcp
-ocr config set mcp_servers.search.tools '["search", "fetch"]'
+ocr mcp add docs --type stdio --command /absolute/path/to/docs-mcp --yes
+ocr mcp tools docs --enable search_docs --yes
+ocr mcp enable docs --yes
 ```
 
-이 명령들은 연결을 사용자 설정에 저장합니다. 다음 리뷰에서 OCR이 서버에 접속해
-`search`와 `fetch`를 내장 도구와 나란히 Agent에게 넘깁니다. 도구 허용 목록이
-서버가 제공할 수 있는 나머지 도구를 리뷰 바깥에 남겨 둡니다. 이미 설정한 다른
-서버와 리뷰 설정은 그대로입니다.
-
-설정을 마치면 Agent는 리뷰 중에 매번 묻지 않고 이 도구들을 부릅니다. 도구
-인자 — 검색어, 요청한 URL, Agent가 함께 실어 보내는 맥락 — 는 내 컴퓨터를 떠나
-그 엔드포인트를 운영하는 쪽에 닿습니다. 사용자 설정이므로 저장소를 가로질러
-적용됩니다. 외부 요청이 허용된 곳에서만 켜고, 요청에 비밀 값이나 비공개 코드,
-내부 URL을 담지 마세요. 서드파티 서비스에 연결하기 전에 운영자의 개인정보
-처리방침과 이용 약관을 확인하세요.
-
-#### MCP 서버 제거하기 {#removing-an-mcp-server}
-
-서버를 지울 때는 `unset`을 씁니다.
+원격 Streamable HTTP 서버에 연결하려면:
 
 ```bash
-ocr config unset mcp_servers.docs
+ocr mcp add search --type remote --url https://mcp.example.com/mcp --yes
+ocr mcp tools search --enable search --yes
+ocr mcp enable search --yes
 ```
 
-MCP 서버는 사용자 설정 파일(`~/.opencodereview/config.json`)의 `mcp_servers`
-키 아래에 자리합니다.
+명령의 도구 이름은 예시입니다. 서버가 제공하는 이름을 모르면 대화형 관리자를
+사용하세요. 비대화형 add는 저장만 하며 시작하거나 연결하지 않습니다.
+외부 서비스에 보내는 요청에는 비공개 코드와 내부 URL을 넣지 말고 운영자의
+개인정보 처리방침을 확인하세요. 인증이 없는 서버는 header가 필요 없습니다.
 
-| 필드 | 타입 | 필수 | 설명 |
-|---|---|---|---|
-| `type` | 문자열 | | 로컬 하위 프로세스는 `stdio`(기본값), Streamable HTTP는 `remote`. |
-| `command` | 문자열 | `stdio`에 필수 | MCP 서버를 띄우는 실행 파일(예: `npx`, `uvx`, 절대 경로). |
-| `args` | 문자열 배열 | | `command`에 넘길 인자(`stdio` 전용). |
-| `url` | 문자열 | `remote`에 필수 | HTTP 또는 HTTPS MCP 엔드포인트. |
-| `headers` | 객체 | | HTTP 헤더 이름과 문자열 값(`remote` 전용). 값은 연결 시점에 OCR의 환경에서 `$VAR` 또는 `${VAR}`를 펼칩니다. 빈 문자열로 펼쳐진 값은 빈 채로 보내지거나 무시되지 않고 **연결을 실패시킵니다**. 익명 접근이면 생략합니다. |
-| `tools` | 문자열 배열 | | 등록할 도구 이름의 허용 목록. 비어 있으면 서버가 제공하는 모든 도구를 등록합니다. |
-| `setup` | 문자열 | | 서버가 뜨기 전에 한 번 실행하는 셸 명령(`stdio` 전용, 예: 의존성 설치). 저장소 루트에서 5분 제한으로 돕니다. |
-| `env` | 문자열 배열 | | 하위 프로세스에 넘길 `KEY=VALUE` 형태의 추가 환경 변수(`stdio` 전용). |
+## 가져오기
 
-인증이 필요한 원격 서버라면 그 서버의 안내에 따라 `headers`를 설정하세요.
-`ocr config set`에 넘기는 JSON에 환경 변수 참조가 들어 있으면, OCR이 설정을
-저장하기 전에 셸이 먼저 펼쳐 버리지 않도록 작은따옴표로 감싸세요. 익명 접근을
-허용하는 서버라면 `headers`는 아예 필요 없습니다.
+**Import (JSON / TOML)**에서 파일을 선택하거나 내용을 붙여 넣습니다.
+Cursor JSON의 `mcpServers`와 Codex TOML의 `mcp_servers`를 지원합니다.
+붙여 넣은 내용은 숨겨지며 **Ctrl-S**로 미리보기를 엽니다.
 
-## 도구 걸러 내기 {#filtering-tools}
-
-기본적으로 서버가 알리는 도구는 모두 등록됩니다. 서버가 리뷰에 필요한 것보다
-많은 도구를 노출한다면 `tools`에 허용 목록을 지정하세요. 도구가 적고
-날카로울수록 Agent가 흐트러지지 않고 토큰 비용도 줄어듭니다. 목록에 적었지만
-서버가 실제로 제공하지 않는 이름은 경고와 함께 건너뜁니다. 그래서 오타는 조용히
-묻히지 않고 stderr에 드러납니다.
-
-## 이름 충돌 {#name-conflicts}
-
-MCP 도구 이름은 내장 도구와 이름 공간 하나를 함께 씁니다. 서버가 알린 도구
-이름이 **내장·예약** 도구(`file_read`, `code_search`, `task_done` 등)나 다른
-MCP 서버가 이미 등록한 도구와 겹치면 OCR은 그 도구를 **건너뛰고** 경고를
-남깁니다. 먼저 등록한 쪽이 이깁니다. 도구를 이렇게 잃지 않으려면 서버마다
-겹치지 않는 도구 이름을 쓰세요.
-
-## `setup` 명령 {#the-setup-command}
-
-`setup`은 서버 하위 프로세스가 뜨기 전에 저장소 루트에서 한 번 실행됩니다.
-필요할 때 서버를 설치하거나 빌드하는 데 쓰세요.
-
-```json
-"setup": "npm install -g @acme/docs-mcp-server"
+```bash
+ocr mcp import ./mcp.json
+ocr mcp import ./one-server.toml --yes
 ```
 
-제한 시간은 **5분**입니다. 0이 아닌 코드로 끝나면 OCR은 명령, 작업 디렉터리,
-출력을 기록한 뒤 그 서버를 건너뛰고 리뷰를 이어 갑니다.
+한 번에 연결 하나만 가져오며, 권한은 복사하지 않습니다. 기존 이름은 덮어쓰지 않습니다.
+파일 제한은 1 MiB, 64개 서버이며 비대화형 입력에는 서버 하나와 `--yes`가 필요합니다.
+OAuth, 사용자 지정 cwd와 지원하지 않는 필드는 거부합니다.
+평문 env/header는 환경 변수 참조로 바뀝니다. 활성화 전에 **Edit connection**에서
+검색을 승인하고 사용할 도구를 선택하세요.
 
-## 문제 해결 {#troubleshooting}
+## 두 단계 권한 검사
 
-MCP 진단 메시지는 모두 **stderr**로 나가며 `[ocr]` 접두사가 붙습니다. 그래서
-stdout의 `--format json` 출력을 더럽히지 않습니다.
+`ocr review`만 MCP를 사용합니다. `ocr scan`은 MCP를 로드하지 않습니다.
+`tools`가 비어 있거나 없으면 **도구 0개**를 뜻합니다.
 
-- `Running setup for MCP server "x": …` — setup 명령이 실행 중입니다.
-- `failed to start MCP server "x": …` — 하위 프로세스가 30초 초기화 제한 안에
-  연결되지 않았거나, `command`가 `PATH`에 없습니다.
-- `remote MCP server "x" has no URL configured, skipping` — `type`은 `remote`인데
-  `url`이 비어 있습니다. `url`만 넣고 `type`을 빠뜨리는 경우의 뒷면입니다.
-- `failed to connect to remote MCP server "x": …` — 엔드포인트가 30초 초기화 제한
-  안에 연결되지 않았거나 도구 목록을 내주지 않았습니다. URL, 네트워크 접근,
-  필요한 헤더를 확인하세요.
-- `MCP server "x" header "h" expanded to empty value` — `headers`에 쓴 `$VAR`가
-  OCR의 환경에 없습니다. 헤더가 없는 것으로 넘어가지 않고 연결이 실패합니다.
-- `remote MCP server "x" returned HTTP 401 Unauthorized` — 토큰이나 헤더 설정을
-  확인하세요.
-- `remote MCP server "x" returned HTTP 403 Forbidden` — 자격 증명은 서버에
-  닿았지만 필요한 권한이 없습니다.
-- `tool "y" conflicts with built-in tool, skipping` — 서버 쪽 도구 이름을
-  바꾸거나 `tools`에서 빼세요.
-- `allowed tool "y" not found in server's tool list` — `tools`에 적은 이름이
-  서버가 제공하는 것과 맞지 않습니다. 철자를 확인하세요.
+모델 표시 범위와 실행 승인은 독립적인 두 단계입니다. 전역·서버가 활성화되어 있고,
+명시적으로 선택한 도구의 fingerprint가 일치해야 모델에 표시됩니다.
+실제 실행 직전에도 Authorizer가 도구 신원, 권한, context를 다시 검사합니다.
 
-띄우거나 연결하는 데 실패한 서버는 건너뜁니다. 리뷰는 그 서버의 도구 없이
-이어집니다.
+거부, 취소, timeout, EOF 또는 입력 불가 시 `tools/call`을 보내지 않습니다.
+`allow`는 승인 창만 생략하며 allowlist를 넓히지 않습니다.
+서버 annotation은 검증되지 않은 정보이며 자동 승인에 사용하지 않습니다.
 
-## 함께 보기 {#see-also}
+| 설정 | 의미 |
+|---|---|
+| 전역 `deny` | 모든 MCP 도구 거부 |
+| 서버 `deny` | 해당 서버의 모든 도구 거부 |
+| 도구 `deny` | 해당 도구 거부 |
+| `inherit` | 상위 설정 사용 |
+| `ask` | 실행 전 승인 필요 |
+| `allow` | 선택·fingerprint·상위 정책 검사를 통과한 도구만 자동 실행 |
 
-- [도구](../tools/) — MCP 도구가 나란히 놓이는 내장 도구 여섯 가지.
-- [설정](../configuration/) — 설정 파일 전체와 모든 키.
-- [CLI 레퍼런스](../cli-reference/) — `ocr config`와 리뷰 플래그.
+상위 `deny`는 하위 설정으로 덮어쓸 수 없습니다.
+그 밖에는 도구 > 서버 > 전역 순서로 가장 구체적인 설정을 사용합니다.
+
+실행 승인 선택지는 **Allow once**, **Allow this review**, **Deny once (default)**,
+**Deny this review**입니다. 이번 review의 선택은 정확한 서버·도구에만 적용되며
+다음 review나 설정 파일에 남지 않습니다. 영구 `allow`는 `ocr mcp permissions`에서 설정합니다.
+
+## CI와 timeout
+
+TTY가 아니거나 CI 환경이면 `ask` 도구는 모델에서 숨겨집니다. 명시적으로 선택하고
+fingerprint가 일치하는 `allow` 도구만 자동 실행할 수 있습니다. 실패 시 fail closed입니다.
+
+`mcp.approval_timeout_seconds`의 기본값은 60초이며 범위는 1–600초입니다.
+
+```bash
+ocr mcp permissions --timeout 120
+ocr config set mcp.approval_timeout_seconds 120
+```
+
+승인 대기열과 입력 모두 제한 시간을 적용합니다. timeout은 허용을 의미하지 않습니다.
+
+## 도구 검색과 신원
+
+검색은 프로토콜 초기화와 페이지별 `tools/list`만 수행합니다.
+`tools/call` 실행이나 모델 등록은 하지 않습니다.
+최대 64페이지·512도구, 설명 8 KiB, schema 256 KiB·깊이 64, 전체 목록 4 MiB,
+실행 결과 1 MiB 제한이 있습니다. 중복 이름·cursor·잘못된 schema는 거부합니다.
+
+모델 별칭은 `mcp__<server-slug>__<tool-slug>__<16-hex>` 형식입니다.
+이름 충돌이 있으면 해당 review의 모든 MCP 등록을 중단하여 부분 노출을 막습니다.
+실행 중 도구 목록은 고정되며 변경된 정의는 다음 검색에서 수동 승인해야 합니다.
+
+## 설정과 마이그레이션
+
+전역 키는 `mcp.version`(1), `mcp.enabled`, `mcp.default_permission`,
+`mcp.approval_timeout_seconds`입니다. 서버는 `mcp_servers`에 저장되며
+`default_permission`, `tools`, `tool_permissions`, `tool_definition_sha256`,
+`allow_insecure_http`를 사용합니다.
+
+일반 review는 legacy 설정을 자동 변경하지 않습니다. fingerprint 없는 기존 도구는
+대화형 `ask`만 가능하고 CI 자동 실행은 불가능합니다.
+기존 `setup`은 실행하지 않으며 관리자가 저장할 때 제거합니다. 서버는 직접 설치하세요.
+마이그레이션 후 구버전 OCR로 설정을 편집하지 마세요.
+
+`OCR_CONFIG_PATH`로 읽기·쓰기·review의 설정 파일을 함께 지정할 수 있습니다.
+저장은 같은 디렉터리의 0600 임시 파일을 fsync 후 원자적으로 교체합니다.
+취소·검색 실패는 저장하지 않습니다. 동시에 다른 프로세스가 수정하면 저장을 거부하므로
+관리자를 다시 열고 변경을 적용하세요. 구버전과 수동 편집기는 이 잠금을 따르지 않습니다.
+
+`0600` 권한은 Unix 계열 시스템에 적용됩니다. Windows는 Unix 권한 비트 대신
+디렉터리에서 상속한 ACL을 사용하므로 설정 디렉터리를 본인 계정만 접근할 수 있도록 보호하세요.
+
+## 자격 증명과 로그
+
+stdio는 부모 프로세스의 전체 환경을 상속하지 않습니다. 필요한 변수는
+`${ENV_NAME}`으로 명시합니다. header 값도 환경 변수 참조를 사용하며 토큰을
+명령 인수나 URL에 넣지 마세요. 비밀 값은 로그·오류·결과에서 마스킹합니다.
+외부 주소는 HTTPS가 기본이며 다른 HTTP 주소는 `allow_insecure_http`와 확인이 필요합니다.
+교차 출처 redirect와 HTTPS에서 HTTP로의 redirect는 거부합니다.
+
+MCP 도구가 모델에 노출된 review에서는 `OCR_RAW_LOGGING` 원문 저장을 중단합니다.
+민감한 도구 호출의 native payload와 설명·사고 내용은 저장용 기록에서 제외하며
+모델이 다음 호출에 사용하는 원래 데이터는 유지합니다.
+
+도구 검색만 하더라도 로컬 프로세스 시작이나 원격 접속 자체에는 부작용이 있을 수 있습니다.
+이 기능은 운영체제 sandbox가 아닙니다.
+
+## 명령
+
+```text
+ocr mcp
+ocr mcp add [name]
+ocr mcp import [file] [--yes]
+ocr mcp list [--json]
+ocr mcp show <name> [--json]
+ocr mcp edit <name>
+ocr mcp discover <name> [--json] [--yes]
+ocr mcp tools <name> [--enable TOOL ...] [--disable TOOL ...] [--yes]
+ocr mcp permissions [name]
+ocr mcp enable <name>
+ocr mcp disable <name>
+ocr mcp remove <name> [--yes]
+```
+
+`list/show`는 접속하지 않고 민감한 연결 값도 출력하지 않습니다.
+삭제 확인의 기본값은 No이며 비대화형에서는 `--yes`가 필요합니다.
+
+## 문제 해결
+
+- `needs-review`: Tools에서 정의를 확인하고 다시 승인합니다.
+- CI에서 도구 없음: `ask`, 비활성 상태, allowlist와 fingerprint를 확인합니다.
+- 연결 실패: 실행 파일·주소·환경 변수와 서버의 MCP 지원을 확인합니다.
+- 결과 초과: 쿼리를 좁혀 1 MiB 이하로 요청합니다.
+- 서버 `isError`: 성공으로 기록하지 않고 실제 도구 실패로 보고합니다.
+- 이름 충돌: 구성 키나 도구 이름을 조정합니다.

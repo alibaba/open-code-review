@@ -4,6 +4,8 @@ sidebar:
   order: 4
 ---
 
+`ocr mcp` 以服务器列表为入口，选中服务器后管理工具和实际权限，Esc 返回；打开列表不会连接。`ocr mcp import [file] [--yes]` 可导入一个 Cursor JSON 或 Codex TOML 连接，保存为禁用、零工具，不复制授权。非交互导入要求单服务器文件和 `--yes`。明文 env/header 转成环境变量引用，同名不覆盖，OAuth 等未支持字段会拒绝。私密粘贴（Ctrl-S）、凭据引用和启用步骤见 [MCP 指南](../mcp/)。
+
 在每个 Pull Request 或 Merge Request 上运行 OCR。上游仓库提供两条现成流水线，
 你复制并配置即可——一条 GitHub Actions，一条 GitLab CI。两者都是
 [CLI 参考](../cli-reference/#json)中记录的核心命令的薄包装。
@@ -472,8 +474,29 @@ script:
   - cat /tmp/ocr-stderr.log
 ```
 
+## CI 中的 MCP
+
+MCP 在 CI 和其他非交互环境中 fail closed。`ask` 工具对模型隐藏且不能执行，因为不存在
+审批终端。只有明确列入 `tools`、`tool_definition_sha256` 匹配、最终权限为持久 `allow`，
+并且没有全局/server `deny` 的工具才可能暴露；即便如此，独立 authorizer 仍会在
+`tools/call` 前重新检查策略。
+
+请在可信的交互终端中通过 `ocr mcp tools` 和 `ocr mcp permissions` 准备并复核配置，
+不要在 runner 内尝试交互审批。可能连接或写配置的非交互管理命令必须带 `--yes`；裸
+`ocr mcp` 只打印脱敏状态和帮助。
+
+MCP secret 应由最小权限的 CI 环境变量提供，并在配置中以 `${ENV_NAME}` 引用；不要提交
+解析后的 token。固定本地 server 包或 remote endpoint，只授予最小 server/tool 范围，
+并让 MCP 凭据与 LLM、PR 发布 token 独立轮换。MCP 只用于 `ocr review`，不用于 `ocr scan`。
+
+完整权限矩阵、指纹迁移、remote transport 限制和排障见 [MCP 服务器](../mcp/)。
+
 ## 另见
 
 - [CLI 参考](../cli-reference/#json)——两条流水线消费的 JSON 结构，从头写
   CI 脚本时有用。
 - [配置](../../configuration/)——OCR 接受的每个环境变量与 config key。
+
+## 终端接入体验
+
+`ocr mcp add` 提供逐项输入和 `Space` 工具勾选。`Enter` 继续，`Ctrl-B` 返回，`Esc` 取消。`ocr mcp permissions` 设置权限与超时（默认 60 秒，1–600 秒）。`OCR_CONFIG_PATH` 为配置读写和 review 选择同一份文件，可用于隔离体验。纯 `ocr mcp tools docs --disable write` 撤权不连接服务器，不需要 `--yes`，离线也能完成；启用工具仍需发现并明确确认连接。

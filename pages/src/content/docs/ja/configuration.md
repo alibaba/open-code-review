@@ -4,6 +4,8 @@ sidebar:
   order: 5
 ---
 
+`ocr mcp` はサーバー一覧からツールと実効権限を管理します。Esc で戻ります。一覧を開いても接続しません。`ocr mcp import [file] [--yes]` は Cursor JSON / Codex TOML の 1 接続を無効・ツールなしで保存し、権限をコピーしません。非対話では単一サーバーのファイルと `--yes` が必要です。平文 env/header は環境変数参照に変換し、同名を上書きしません。OAuth 等の未対応フィールドは拒否します。非表示の貼り付け（Ctrl-S）と有効化は [MCP ガイド](../mcp/) を参照してください。
+
 設定ファイルは `~/.opencodereview/config.json` にあります。編集方法は 3 つあります。
 
 - **インタラクティブ TUI** —— `ocr config provider` / `ocr config model`。ガイド付きメニューが表示されます。
@@ -389,7 +391,40 @@ ocr config set language 中文
 ocr config set language English
 ```
 
+## MCP policy 設定
+
+接続には `ocr mcp` wizard を推奨します。ツールを呼び出さずに発見し、明示的な
+allowlist を保存します。global policy は `mcp` にあります。
+
+| 設定 key | 値 / 既定値 | 用途 |
+|---|---|---|
+| `mcp.version` | `1` | fail-closed policy format の version。 |
+| `mcp.enabled` | boolean、既定 `true` | MCP 全体の可視性 switch。 |
+| `mcp.default_permission` | `deny`、`ask`、`allow`、既定 `ask` | 実行の既定 policy。`allow` は allowlist を広げません。 |
+| `mcp.approval_timeout_seconds` | 整数 `1`–`600`、既定 `60` | 実行時確認の期限。次回 review から有効。 |
+
+各 `mcp_servers.<name>` には `type`（`stdio` / `remote`）、接続 field、`enabled`、
+`default_permission`（`inherit` / `deny` / `ask` / `allow`）、明示的 `tools` allowlist、
+`tool_permissions`、`tool_definition_sha256` があります。空または欠落した `tools` は
+ゼロツールです。global/server の `deny` は hard upper bound、それ以外は
+tool > server > global の順です。
+
+`env` と remote headers では `${ENV_NAME}` 参照を推奨します。status output は値と URL
+query をマスクします。旧 `setup` は移行用に読むだけで、`ocr review` は実行しません。
+
+```bash
+ocr config set mcp.approval_timeout_seconds 120
+ocr mcp permissions docs
+```
+
+wizard、stdio/remote security、fingerprint、権限、移行、CI については
+[MCP サーバー](../mcp/)を参照してください。
+
 ## 関連項目
 
 - [クイックスタート](../quickstart/)——最小限のセットアップと初回のレビュー。
 - [CLI リファレンス](../cli-reference/)——review コマンドが受け入れる各引数。
+
+## 端末の接続ウィザード
+
+`ocr mcp add` は項目別入力と `Space` によるツール選択に対応します。`Enter` で次へ、`Ctrl-B` で戻り、`Esc` で中止します。権限とタイムアウト（既定 60 秒、1–600 秒）は `ocr mcp permissions` で設定します。`OCR_CONFIG_PATH` は設定の読み書きと review に同じファイルを指定します。`ocr mcp tools docs --disable write` だけなら接続も `--yes` も不要で、オフラインで権限を取り消せます。有効化には発見と接続への明示的な同意が必要です。

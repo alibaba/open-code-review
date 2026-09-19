@@ -4,6 +4,8 @@ sidebar:
   order: 4
 ---
 
+`ocr mcp` はサーバー一覧からツールと実効権限を管理します。Esc で戻ります。一覧を開いても接続しません。`ocr mcp import [file] [--yes]` は Cursor JSON / Codex TOML の 1 接続を無効・ツールなしで保存し、権限をコピーしません。非対話では単一サーバーのファイルと `--yes` が必要です。平文 env/header は環境変数参照に変換し、同名を上書きしません。OAuth 等の未対応フィールドは拒否します。非表示の貼り付け（Ctrl-S）と有効化は [MCP ガイド](../mcp/) を参照してください。
+
 すべての Pull Request または Merge Request で OCR を実行します。上流リポジトリは、コピーして設定するだけのすぐ使える 2 つのパイプラインを提供しています——1 つは GitHub Actions、もう 1 つは GitLab CI です。どちらも
 [CLI リファレンス](../cli-reference/#json)に記載されている中核コマンドの薄いラッパーです。
 
@@ -429,7 +431,31 @@ script:
   - cat /tmp/ocr-stderr.log
 ```
 
+## CI での MCP
+
+MCP は CI とその他の非対話環境で fail closed です。approval terminal がないため
+`ask` ツールはモデルから隠れ、実行できません。`tools` に明示され、
+`tool_definition_sha256` が一致し、永続 `allow` に解決され、global/server `deny` の
+下にないツールだけが公開候補です。それでも独立 authorizer が `tools/call` 直前に
+policy を再検査します。
+
+信頼できる対話端末で `ocr mcp tools` と `ocr mcp permissions` を使い設定を準備・確認し、
+runner 内で対話 approval を試みないでください。接続または保存し得る非対話管理 command
+には `--yes` が必要です。裸の `ocr mcp` はマスク済み status/help だけを表示します。
+
+MCP secret は最小 scope の CI environment variable で渡し、設定には `${ENV_NAME}` を
+記述します。解決済み token を commit しないでください。local server package または
+remote endpoint を pin し、最小の server/tool scope のみ許可し、LLM/PR posting token と
+独立して rotation します。MCP は `ocr review` のみで、`ocr scan` には適用されません。
+
+permission matrix、fingerprint migration、remote transport 制限、troubleshooting は
+[MCP サーバー](../mcp/)を参照してください。
+
 ## 関連項目
 
 - [CLI リファレンス](../cli-reference/#json)——2 つのパイプラインが消費する JSON の構造。ゼロから CI スクリプトを書くときに役立ちます。
 - [設定](../../configuration/)——OCR が受け付けるすべての環境変数と config key。
+
+## 端末の接続ウィザード
+
+`ocr mcp add` は項目別入力と `Space` によるツール選択に対応します。`Enter` で次へ、`Ctrl-B` で戻り、`Esc` で中止します。権限とタイムアウト（既定 60 秒、1–600 秒）は `ocr mcp permissions` で設定します。`OCR_CONFIG_PATH` は設定の読み書きと review に同じファイルを指定します。`ocr mcp tools docs --disable write` だけなら接続も `--yes` も不要で、オフラインで権限を取り消せます。有効化には発見と接続への明示的な同意が必要です。

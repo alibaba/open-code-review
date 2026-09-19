@@ -4,6 +4,8 @@ sidebar:
   order: 6
 ---
 
+`ocr mcp` now starts from a server list. Select a server to manage tools and effective permissions; Esc goes back. Opening the list does not connect. `ocr mcp import [file] [--yes]` accepts one Cursor JSON or Codex TOML connection, disabled with zero tools and no copied grants. Non-interactive import requires a single-server file and `--yes`. Literal env/header values become environment references; existing names are not overwritten. OAuth and unsupported connection fields are rejected. See the [MCP guide](../mcp/) for private paste (Ctrl-S), credential references and activation.
+
 The complete reference for every `ocr` subcommand, flag, and exit
 behaviour.
 
@@ -19,6 +21,7 @@ Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
   config       Manage configuration settings
+  mcp          Manage MCP server connections and permissions
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
@@ -32,6 +35,7 @@ Examples:
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
+  ocr mcp                                  Open the MCP manager
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
   ocr session list                         List saved review sessions
@@ -75,6 +79,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr config unset custom_providers.<name>` | — | Delete a custom provider (clears active `provider`/`model` if it was active). |
 | `ocr config provider` | — | Interactive provider-setup TUI. |
 | `ocr config model` | — | Interactive model-selection TUI. |
+| `ocr mcp` | — | Manage MCP connections, explicit tool allowlists, and execution permissions. |
 | `ocr llm test` | — | Send a small chat request to verify the configured endpoint. |
 | `ocr llm providers` | — | List all built-in LLM providers. |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions. |
@@ -727,6 +732,40 @@ ocr completion powershell > ocr.ps1
 Add a line to your PowerShell profile that dot-sources `ocr.ps1`.
 
 
+## `ocr mcp`
+
+MCP management is separate from model setup and applies only to `ocr review`:
+
+```text
+ocr mcp
+ocr mcp add [name]
+ocr mcp import [file] [--yes]
+ocr mcp list [--json]
+ocr mcp show <name> [--json]
+ocr mcp edit <name>
+ocr mcp discover <name> [--json] [--yes]
+ocr mcp tools <name> [--enable TOOL ...] [--disable TOOL ...] [--yes]
+ocr mcp permissions [name]
+ocr mcp enable <name> [--yes]
+ocr mcp disable <name> [--yes]
+ocr mcp remove <name> [--yes]
+```
+
+In a TTY, `ocr mcp` opens the manager. Outside a TTY it prints only redacted
+status/help, never connects, and never writes. `discover` performs initialization
+and paginated `tools/list`, not `tools/call`; commands that may connect or mutate
+in a non-interactive process require `--yes`. `list` and `show` are always
+read-only and redact credentials.
+
+`tools` controls the explicit model-visible allowlist. `permissions` controls
+execution (`deny`, `ask`, `allow`, plus server/tool `inherit`) but cannot enable
+an unlisted tool. Persistent `allow` is accepted only for a current tool
+fingerprint. Set the global prompt deadline with `--timeout 1..600` or
+`ocr config set mcp.approval_timeout_seconds <seconds>`.
+
+See [MCP Servers](../mcp/) for connection previews, runtime choices, migration,
+and the fail-closed CI rules.
+
 ## Tips & gotchas
 
 - `--audience agent` does **not** imply `--format json`, and `--format json`
@@ -760,3 +799,7 @@ Add a line to your PowerShell profile that dot-sources `ocr.ps1`.
 - [Configuration](../configuration/) — env vars and config keys behind the flags.
 - [Review Rules](../review-rules/) — the `--rule` flag and rule resolution.
 - [Integrations](../integrations/agent-skill/) — calling `ocr review` from agents and CI.
+
+## Terminal onboarding
+
+`ocr mcp add` offers field-by-field input and a `Space` tool checklist. Use `Enter` to continue, `Ctrl-B` to go back and `Esc` to cancel. Set permissions and the 1–600 second timeout (default 60) with `ocr mcp permissions`. `OCR_CONFIG_PATH` selects the same file for configuration reads, writes and review. Pure `ocr mcp tools docs --disable write` revocation works offline without connecting or requiring `--yes`; enabling tools still requires discovery and connection consent.
