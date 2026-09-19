@@ -340,12 +340,9 @@ func TestSurfaceCSS_LightSurfaceIsWhite(t *testing.T) {
 // TestTextTokens_MeetWCAGAAOnPageBackground holds the muted and secondary
 // text tokens to WCAG AA (4.5:1) against each theme's *page* background, so
 // future palette tweaks cannot quietly drop the low-emphasis labels back
-// below the line. Scope note: this is the page background only — muted text
-// also lands on --surface-alt / --surface-inset panels in dark mode, which
-// are slightly lighter and yield lower ratios; auditing every surface pair
-// is a bigger job than this test claims to do. Both tokens blend pure black
-// (light) or pure white (dark) at an alpha, which makes the blended color a
-// gray and the luminance math a single channel.
+// below the line. Both tokens blend pure black (light) or pure white (dark)
+// at an alpha, which makes the blended color a gray and the luminance math
+// a single channel.
 func TestTextTokens_MeetWCAGAAOnPageBackground(t *testing.T) {
 	css, err := assets.ReadFile("static/style.css")
 	if err != nil {
@@ -1012,6 +1009,7 @@ func TestA11yJS_Contract(t *testing.T) {
 		"region.tabIndex",
 		"addEventListener(\"resize\"",
 		"scrollWidth > region.clientWidth",
+		`addEventListener("toggle"`,
 	} {
 		if !strings.Contains(string(script), want) {
 			t.Errorf("a11y.js is missing %q", want)

@@ -20,6 +20,9 @@
         };
         sync();
         window.addEventListener("resize", sync);
+        // A collapsed <details> measures 0 wide, so re-sync when it opens.
+        const owner = region.closest("details");
+        if (owner) owner.addEventListener("toggle", sync);
         region.addEventListener("keydown", (event) => {
             if (event.target !== region || !scrolls()) return;
             const step = {
