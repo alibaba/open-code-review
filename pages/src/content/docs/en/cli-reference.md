@@ -345,12 +345,12 @@ envelope instead so callers can distinguish "no changes" from "no findings":
 
 | Code | Meaning |
 |---|---|
-| `0` | Review completed (possibly with zero comments, possibly with non-fatal warnings). |
-| `1` | Fatal error — bad flags, can't resolve LLM endpoint, all per-group sub-agents failed, etc. The error text is printed to stderr. |
+| `0` | Review completed or was skipped (possibly with zero comments or non-fatal warnings). A partial review caused only by configured budget limits also exits `0`. |
+| `1` | Fatal error, or an operational per-group failure such as a timeout, provider error, or bad configuration. Partial results are still published before the error is returned. |
 
-Non-fatal warnings (a single sub-agent failed, a file exceeded the token
-threshold, etc.) are printed inline; in JSON mode they're added to the
-`warnings` array.
+Warnings are printed inline; in JSON mode they're added to the `warnings`
+array. Inspect `manifest.coverage.failed` for the affected files and their
+failure classifications.
 
 ## `ocr scan`
 
