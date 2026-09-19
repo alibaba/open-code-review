@@ -183,29 +183,37 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 // extractSideLines extracts one side of the diff from a hunk.
 // When newSide is true, returns context+added lines with new-file line numbers.
 // When newSide is false, returns context+deleted lines with old-file line numbers.
+// Blank lines are skipped, matching splitAndNormalize, so an ExistingCode
+// snippet that spans a blank line still matches; line numbers stay absolute.
 func extractSideLines(hunk *Hunk, newSide bool) []indexedLine {
 	var result []indexedLine
 	oldLine := hunk.OldStart
 	newLine := hunk.NewStart
 
+	add := func(lineNum int, content string) {
+		if n := normalizeLine(content); n != "" {
+			result = append(result, indexedLine{lineNum, n})
+		}
+	}
+
 	for _, l := range hunk.Lines {
 		switch l.Type {
 		case HunkContext:
 			if newSide {
-				result = append(result, indexedLine{newLine, normalizeLine(l.Content)})
+				add(newLine, l.Content)
 			} else {
-				result = append(result, indexedLine{oldLine, normalizeLine(l.Content)})
+				add(oldLine, l.Content)
 			}
 			oldLine++
 			newLine++
 		case HunkAdded:
 			if newSide {
-				result = append(result, indexedLine{newLine, normalizeLine(l.Content)})
+				add(newLine, l.Content)
 			}
 			newLine++
 		case HunkDeleted:
 			if !newSide {
-				result = append(result, indexedLine{oldLine, normalizeLine(l.Content)})
+				add(oldLine, l.Content)
 			}
 			oldLine++
 		}

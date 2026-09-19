@@ -295,3 +295,28 @@ func TestExtractCodeBlock(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveComment_DeletedSnippetSpanningBlankLine verifies a deleted-code
+// snippet that crosses a blank line resolves against the hunk's old side; there
+// is no file-content fallback for deleted code.
+func TestResolveComment_DeletedSnippetSpanningBlankLine(t *testing.T) {
+	d := &model.Diff{
+		NewPath: "main.go",
+		Diff: "@@ -1,5 +1,2 @@\n" +
+			" package main\n" +
+			"-func old() {}\n" +
+			"-\n" +
+			"-func older() {}\n" +
+			" func keep() {}\n",
+	}
+	cm := model.LlmComment{
+		Path:         "main.go",
+		ExistingCode: "func old() {}\n\nfunc older() {}",
+	}
+	if !ResolveComment(&cm, d) {
+		t.Fatal("expected ResolveComment to match across the blank line")
+	}
+	if cm.StartLine != 2 || cm.EndLine != 4 {
+		t.Errorf("expected lines 2-4, got %d-%d", cm.StartLine, cm.EndLine)
+	}
+}
