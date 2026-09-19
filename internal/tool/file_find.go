@@ -202,7 +202,7 @@ func (p *FileFindProvider) listWalkFiles(ctx context.Context) ([]string, error) 
 // shouldSkipFile returns true if a git ls-files output path should be skipped.
 // Keeps only widely useful files (those with recognizable extensions).
 func shouldSkipFile(path string) bool {
-	// Keep extensionless build/config files like Makefile, Dockerfile, LICENSE
+	// Keep well-known extensionless build/config files.
 	base := path
 	if idx := strings.LastIndex(path, "/"); idx != -1 {
 		base = path[idx+1:]
@@ -211,7 +211,7 @@ func shouldSkipFile(path string) bool {
 	if !hasExt {
 		// Allow well-known extensionless files
 		switch base {
-		case "Makefile", "Dockerfile", "LICENSE", "Vagrantfile", "Containerfile":
+		case "Makefile", "Dockerfile", "LICENSE", "Vagrantfile", "Containerfile", "BUILD", "WORKSPACE":
 			return false
 		}
 		return true // skip other extensionless files
