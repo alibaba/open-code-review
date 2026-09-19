@@ -126,6 +126,7 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/model.jl", "Type Stability"},
 		{"MyPkg/src/solver.jl", "Type Stability"},
 		{"main.tf", "Hardcoded Secrets"},
+		{"main.tofu", "Hardcoded Secrets"},
 		{"modules/network/vpc.hcl", "Overly Permissive Access"},
 		{"envs/prod.tfvars", "Hardcoded Secrets"},
 		{"infra/main.bicep", "Hardcoded Secrets"},

@@ -261,7 +261,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{graphql,gql}`                | `graphql.md` — схема и операции GraphQL.                                                         |
 | `**/*.prisma`                       | `prisma.md` — схема Prisma.                                                                      |
 | `**/*.jl`                           | `julia.md` — исходный код Julia.                                                                 |
-| `**/*.{tf,hcl,tfvars}`              | `terraform.md` — Terraform / HCL.                                                                |
+| `**/*.{tf,tofu,hcl,tfvars}`              | `terraform.md` — Terraform / HCL.                                                                |
 | `**/*.bicep`                        | `bicep.md` — шаблоны Bicep (Azure).                                                              |
 | `**/*.elm`                          | `elm.md` - исходный код Elm.                                                                     |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet.                                        |
