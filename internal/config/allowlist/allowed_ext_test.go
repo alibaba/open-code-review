@@ -174,19 +174,20 @@ func TestIsExcludedPath(t *testing.T) {
 		{"__tests__ dir", "src/__tests__/foo.js", true},
 		{"__tests__ nested", "packages/ui/__tests__/Button.test.tsx", true},
 
-		// Python test files. pytest collects both `test_*.py` and `*_test.py` (python_files).
-		{"python pytest prefix at root", "test_utils.py", true},
-		{"python pytest prefix nested", "app/test_handler.py", true},
-		{"python pytest prefix in tests dir", "tests/test_utils.py", true},
-		{"python pytest prefix deeply nested", "packages/core/app/test_api.py", true},
+		// Python test files. The suffix form (*_test.py) stays excluded.
+		// The pytest prefix form (test_*.py) stays reviewable: excluding it
+		// by default made test-only PRs select zero items and skip (#1454).
+		{"python pytest prefix at root", "test_utils.py", false},
+		{"python pytest prefix nested", "app/test_handler.py", false},
+		{"python pytest prefix in tests dir", "tests/test_utils.py", false},
+		{"python pytest prefix deeply nested", "packages/core/app/test_api.py", false},
 		{"python conftest is reviewable", "conftest.py", false},
 		{"python nested conftest is reviewable", "tests/unit/conftest.py", false},
 		{"python _test suffix", "app/handler_test.py", true},
 		{"python test dir", "test/unit/handler_test.py", true},
 		{"python tests dir", "tests/unit/handler_test.py", true},
 		{"python non-test", "app/handler.py", false},
-		// The prefix pattern must not drift into names that merely start with a
-		// longer word.
+		// Names that merely contain "test" as a longer word must stay reviewable.
 		{"python contest prefix not excluded", "app/contest_utils.py", false},
 		{"python attestation name not excluded", "app/attestation.py", false},
 		{"python latest name not excluded", "app/latest.py", false},

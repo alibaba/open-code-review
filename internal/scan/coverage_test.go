@@ -207,6 +207,16 @@ func TestWhyExcluded_AllBranches(t *testing.T) {
 			want: model.ExcludeDefaultPath,
 		},
 		{
+			name: "python pytest prefix is reviewable",
+			item: model.ScanItem{Path: "tests/test_utils.py", Content: "x"},
+			want: model.ExcludeNone,
+		},
+		{
+			name: "python _test suffix stays default-excluded",
+			item: model.ScanItem{Path: "app/handler_test.py", Content: "x"},
+			want: model.ExcludeDefaultPath,
+		},
+		{
 			name: "allowed file passes",
 			item: model.ScanItem{Path: "main.go", Content: "x"},
 			want: model.ExcludeNone,
