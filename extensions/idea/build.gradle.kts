@@ -53,7 +53,7 @@ intellijPlatform {
     }
 
     // verifyPlugin requires an explicitly declared target IDE (2.x no longer infers it); using the same version as
-    // the build lets local caches be reused.
+    // the build lets local cache be reused.
     // This only affects the verifyPlugin check task, not packaging -- the produced zip is unchanged.
     pluginVerification {
         ides {
@@ -69,14 +69,14 @@ intellijPlatform {
 // src/main/resources/webview/. processResources depends on it, so ./gradlew build
 // automatically includes npm install + npm run build.
 //
-// No node installed, or only want to compile Kotlin: ./gradlew build -PskipFrontend=true
+// When Node is not installed, or only want to compile Kotlin: ./gradlew build -PskipFrontend=true
 // ---------------------------------------------------------------------------
 val frontendDir = layout.projectDirectory.dir("../frontend")
 val webviewOutDir = layout.projectDirectory.dir("src/main/resources/webview")
 val skipFrontend = providers.gradleProperty("skipFrontend").map(String::toBoolean).getOrElse(false)
 val npmCommand = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) "npm.cmd" else "npm"
 
-// npm's absolute PATH location, resolved once at configuration time.
+// npm's absolute PATH location, resolves once at configuration time.
 // Why locate it manually instead of commandLine("npm"): node installed via nvm is only on the login shell's PATH,
 // and Gradle run from a GUI-launched IDEA often sees a reduced PATH -- the failure would be the cryptic "Cannot run program npm".
 val npmExecutable: String? = providers.environmentVariable("PATH").orElse("").get()
@@ -91,14 +91,14 @@ val npmMissingHint = """
     [ocr] Cannot find $npmCommand (not on PATH). Pick one:
       - Run ./gradlew ... from a terminal where npm works (nvm-installed node is only on the login shell's PATH)
       - Or skip the frontend build: ./gradlew <task> -PskipFrontend=true
-        (skipping uses the artifacts already in src/main/resources/webview/, which may be stale)
+        (if skipped, the build uses the existing artifacts in src/main/resources/webview/, which may be stale)
 """.trimIndent()
 
-// Inside doFirst / onlyIf use **local variables only**; do not reference the script-level vals above directly:
+// Inside doFirst / onlyIf use **local variables** only; do not reference the script-level vals above directly:
 // in the Kotlin DSL a script-level val is a field of the script object, and a lambda capturing it captures the
 // entire script object, which cannot go into the configuration cache
 // ("cannot serialize Gradle script object references").
-// For the same reason logger must be the task's own (doFirst's `it`), not the script's project.logger.
+    // For the same reason, use the task's own logger (the receiver inside doFirst), not the script's project.logger.
 val frontendInstall by tasks.registering(Exec::class) {
     val npm = npmExecutable
     val hint = npmMissingHint
@@ -108,7 +108,7 @@ val frontendInstall by tasks.registering(Exec::class) {
     workingDir = frontendDir.asFile
     commandLine(npm ?: npmCommand, "install", "--no-audit", "--no-fund")
     doFirst { if (npm == null) throw GradleException(hint) }
-    // Reinstall only when package.json changes; declaring node_modules as output lets Gradle judge UP-TO-DATE.
+    // Reinstall only when package.json changes; declaring node_modules as an output lets Gradle consider the task UP-TO-DATE.
     inputs.file(frontendDir.file("package.json"))
     outputs.dir(frontendDir.dir("node_modules"))
     onlyIf { !skip }

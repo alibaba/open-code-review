@@ -123,10 +123,10 @@ class JcefConfigPanelHost(
             preferredSize = Dimension(WIDTH, HEIGHT)
         }
 
-        /** The page already has its own save/close buttons; another row of OK/Cancel at the bottom would only confuse. */
+        /** The page already has its own save/close buttons; another row of OK/Cancel at the bottom would lead to confusion. */
         override fun createActions(): Array<Action> = emptyArray()
 
-        /** Remembers the window size the user adjusted. */
+        /** Remembers the user-adjusted window size. */
         override fun getDimensionServiceKey(): String = "ocr.configPanel"
     }
 }

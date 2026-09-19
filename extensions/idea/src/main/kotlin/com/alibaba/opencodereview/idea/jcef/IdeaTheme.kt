@@ -11,9 +11,9 @@ import javax.swing.UIManager
 /**
  * Maps the current IDEA theme to the set of `--vscode-*` CSS variables the page consumes.
  * Values are read live from UIManager and the editor color scheme, so Darcula/light/third-party
- * themes are all picked up automatically.
+ * themes are all synchronized automatically.
  *
- * Two hard rules:
+ * Two strict rules:
  * 1. Alpha must be preserved. IntelliJ themes contain many semi-transparent overlay layers;
  *    collapsing them to #rrggbb yields solid pure white.
  * 2. Colors come only from the LaF. Both foreground and background are read from UIManager,
@@ -21,11 +21,11 @@ import javax.swing.UIManager
  */
 object IdeaTheme {
 
-    /** Variable name -> provider. Lazy lambdas keep VARIABLE_NAMES from touching any UI API when reading the keys, so it works in a plain JUnit environment. */
+    /** Variable name -> value. Lazy lambdas keep VARIABLE_NAMES from touching any UI API when reading the keys, so it works in a plain JUnit environment. */
     private val SPEC: List<Pair<String, () -> String>> = listOf(
         // ---------------------------------------------------------- Text
         "--vscode-foreground" to { css(ui("Label.foreground", fallback = LIGHT_TEXT)) },
-        // Secondary description text, the most frequently used color (card subtitles, line numbers, token counts, ...).
+        // Secondary description text, the most frequently used text (card subtitles, line numbers, token counts, ...).
         "--vscode-descriptionForeground" to {
             css(ui("Label.infoForeground", "Component.infoForeground", fallback = MUTED_TEXT))
         },
@@ -38,12 +38,12 @@ object IdeaTheme {
         },
 
         // ---------------------------------------------------------- Background
-        // Overall sidebar background, from the IDEA tool-window background (Panel.background).
+        // Overall sidebar background color, from the IDEA tool-window background (Panel.background).
         "--vscode-sideBar-background" to { css(ui("Panel.background", fallback = PANEL_BG)) },
         "--vscode-sideBarSectionHeader-background" to {
             css(ui("ToolWindow.Header.background", "Panel.background", fallback = PANEL_BG))
         },
-        // Log panel background, should be one shade darker than the sidebar background.
+        // Log panel background color, should be one shade darker than the sidebar background.
         // Deliberately not the editor scheme's defaultBackground: reading it from EditorColorsManager yields a
         // white background under a dark UI with a light editor scheme, while the text color comes from the LaF -- unreadable.
         "--vscode-editor-background" to {
@@ -103,10 +103,10 @@ object IdeaTheme {
         },
     )
 
-    /** All variable names the page can use. Touches no UI API, so it can be read in a plain JUnit environment. */
+    /** All variable names the page can use. Do not touch the UI API, so it can be read in a plain JUnit environment. */
     val VARIABLE_NAMES: Set<String> = SPEC.map { it.first }.toSet()
 
-    /** Builds the `:root { ... }` block for injection. Falls back to the fallback colors when a value cannot be read, and never throws. */
+    /** Generates the `:root { ... }` block for injection. Falls back to the fallback colors when a value cannot be read, and never throws errors. */
     fun cssVariables(): String = buildString {
         append(":root {\n")
         SPEC.forEach { (name, provider) ->

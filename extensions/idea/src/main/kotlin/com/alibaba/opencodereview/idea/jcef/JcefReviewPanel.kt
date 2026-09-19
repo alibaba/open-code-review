@@ -39,7 +39,7 @@ class JcefReviewPanel(project: Project) : Disposable {
             webview = null
             component = jcefUnsupportedPlaceholder()
         } else {
-            // OcrWebview construction or attachSidebar can still throw even when isSupported is true:
+            // OcrWebview construction or attachSidebar can still throw errors even when isSupported is true:
             // the factory layer catches and shows the placeholder, but a half-constructed OcrWebview (timer already
             // started, message bus already connected) would leak if nobody disposes it -- so clean up here, then fall back to the placeholder.
             val (vw, comp, ch) = try {
@@ -60,18 +60,18 @@ class JcefReviewPanel(project: Project) : Disposable {
                     throw e
                 }
             } catch (e: Exception) {
-                // Catch Exception only: Errors such as OOM/LinkageError are not swallowed here -- the factory layer's
+                // Catch Exceptions only: Errors such as OOM/LinkageError are not swallowed here -- the factory layer's
                 // catch(Throwable) is the backstop for them, so fatal problems are not masked.
                 // ProcessCanceledException is IntelliJ's cancellation signal and must never be swallowed (it would break cancellation).
                 if (e is ProcessCanceledException) throw e
-                thisLogger().warn("[ocr] Sidebar JCEF webview init failed, falling back to the placeholder", e)
+                thisLogger().warn("[ocr] Sidebar JCEF webview initialization failed, falling back to the placeholder", e)
                 Triple(null, jcefUnsupportedPlaceholder(), null)
             }
             webview = vw
             component = comp
             channel = ch
             // OcrWebview's internal messageBus.connect(this) hooks it into the Disposer tree (under ROOT_DISPOSABLE);
-            // it must be registered as a child of this panel, otherwise the Disposer cannot find the parent on IDE
+            // it must be registered as a child node of this panel, otherwise the Disposer cannot find the parent on IDE
             // shutdown -> memory leak.
             vw?.let { Disposer.register(this, it) }
         }
@@ -82,7 +82,7 @@ class JcefReviewPanel(project: Project) : Disposable {
         // the local avoids racing a possible re-attach.
         val ch = channel
         channel = null
-        // A detach throw must not block the webview release (otherwise the JCEF browser leaks its timer and
+        // A detach throw should not block the webview release (otherwise the JCEF browser leaks its timer and
         // message-bus listeners), hence runCatching.
         if (ch != null) runCatching { service.detachSidebar(ch) }
         webview?.dispose()
