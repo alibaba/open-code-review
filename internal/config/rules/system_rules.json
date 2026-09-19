@@ -33,7 +33,7 @@
     "**/*.prisma": "prisma.md",
     "**/*.jl": "julia.md",
     "**/*.R": "r.md",
-    "**/*.{tf,hcl,tfvars}": "terraform.md",
+    "**/*.{tf,tofu,hcl,tfvars}": "terraform.md",
     "**/*.bicep": "bicep.md",
     "**/*.nix": "nix.md",
     "**/*.{hs,lhs}": "haskell.md",
