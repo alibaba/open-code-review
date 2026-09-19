@@ -70,6 +70,7 @@ const (
 const (
 	envCCBaseURL = "ANTHROPIC_BASE_URL"
 	envCCToken   = "ANTHROPIC_AUTH_TOKEN"
+	envCCAPIKey  = "ANTHROPIC_API_KEY"
 	envCCModel   = "ANTHROPIC_MODEL"
 )
 
@@ -698,22 +699,33 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 	}, true, nil
 }
 
-// tryCCEnv reads Claude Code environment variables.
+// tryCCEnv reads Claude Code / Anthropic environment variables.
 func tryCCEnv(modelOverride string) (ResolvedEndpoint, bool, error) {
-	baseURL := os.Getenv(envCCBaseURL)
-	token := os.Getenv(envCCToken)
-	model := os.Getenv(envCCModel)
+	baseURL := strings.TrimSpace(os.Getenv(envCCBaseURL))
+	token := strings.TrimSpace(os.Getenv(envCCToken))
+	authHeader := "authorization"
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv(envCCAPIKey))
+		if token != "" {
+			authHeader = "x-api-key"
+		}
+	}
+	model := strings.TrimSpace(os.Getenv(envCCModel))
 	if modelOverride != "" {
 		model = modelOverride
 	}
-	if baseURL == "" || token == "" || model == "" {
+	if baseURL == "" {
+		baseURL = "https://api.anthropic.com"
+	}
+	if token == "" || model == "" {
 		return ResolvedEndpoint{}, false, nil
 	}
 
 	url := ensureMessagesSuffix(baseURL)
 
-	// Claude Code environment tokens are OAuth/Bearer-style credentials.
-	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: ProtocolAnthropic, AuthHeader: "authorization", Source: "Claude Code environment"}, true, nil
+	// Claude Code environment tokens are OAuth/Bearer-style credentials,
+	// while ANTHROPIC_API_KEY uses x-api-key.
+	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: ProtocolAnthropic, AuthHeader: authHeader, Source: "Claude Code environment"}, true, nil
 }
 
 // tryShellRC parses ~/.zshrc and ~/.bashrc for ANTHROPIC_* exports.
@@ -762,7 +774,8 @@ func parseShellRC(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 		return ResolvedEndpoint{}, false, nil
 	}
 
-	var baseURL, token, model string
+	var baseURL, token, model, authHeader string
+	authHeader = "authorization"
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		matches := exportRe.FindStringSubmatch(line)
@@ -784,6 +797,12 @@ func parseShellRC(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 			baseURL = value
 		case "ANTHROPIC_AUTH_TOKEN":
 			token = value
+			authHeader = "authorization"
+		case "ANTHROPIC_API_KEY":
+			if token == "" {
+				token = value
+				authHeader = "x-api-key"
+			}
 		case "ANTHROPIC_MODEL":
 			model = value
 		}
@@ -791,15 +810,17 @@ func parseShellRC(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 	if modelOverride != "" {
 		model = modelOverride
 	}
+	if baseURL == "" {
+		baseURL = "https://api.anthropic.com"
+	}
 
-	if baseURL == "" || token == "" || model == "" {
+	if token == "" || model == "" {
 		return ResolvedEndpoint{}, false, nil
 	}
 
 	url := ensureMessagesSuffix(baseURL)
 
-	// Claude Code shell rc tokens are OAuth/Bearer-style credentials.
-	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: ProtocolAnthropic, AuthHeader: "authorization", Source: "Shell rc file"}, true, nil
+	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: ProtocolAnthropic, AuthHeader: authHeader, Source: "Shell rc file"}, true, nil
 }
 
 func defaultAuthHeader(protocol string) string {
