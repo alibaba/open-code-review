@@ -7,6 +7,7 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -391,9 +392,25 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 			Role:             m.Role,
 			Content:          m.Content,
 			ToolCallID:       m.ToolCallID,
-			ToolCalls:        append([]llm.ToolCall(nil), m.ToolCalls...),
+			ToolCalls:        copyToolCalls(m.ToolCalls),
 			Native:           m.Native,
 			ReasoningContent: m.ReasoningContent,
+		}
+	}
+	return cp
+}
+
+// copyToolCalls deep-copies tool calls. ExtraContent is a byte slice, so an
+// element copy alone would alias the caller's bytes.
+func copyToolCalls(tcs []llm.ToolCall) []llm.ToolCall {
+	if len(tcs) == 0 {
+		return nil
+	}
+	cp := make([]llm.ToolCall, len(tcs))
+	for i, tc := range tcs {
+		cp[i] = tc
+		if len(tc.ExtraContent) > 0 {
+			cp[i].ExtraContent = append(json.RawMessage(nil), tc.ExtraContent...)
 		}
 	}
 	return cp
@@ -405,7 +422,7 @@ func copyMessagesForJSON(msgs []llm.Message) any {
 		Role          string         `json:"role"`
 		Content       any            `json:"content"`
 		ToolCallID    string         `json:"tool_call_id,omitempty"`
-		ToolCalls     []llm.ToolCall `json:"tool_calls,omitempty"`
+		ToolCalls     []toolCallJSON `json:"tool_calls,omitempty"`
 		NativePayload any            `json:"native_payload,omitempty"`
 	}
 	out := make([]msg, 0, len(msgs))
@@ -414,9 +431,32 @@ func copyMessagesForJSON(msgs []llm.Message) any {
 			Role:          m.Role,
 			Content:       m.Content,
 			ToolCallID:    m.ToolCallID,
-			ToolCalls:     m.ToolCalls,
+			ToolCalls:     toolCallsForJSON(m.ToolCalls),
 			NativePayload: nativeTurnForJSON(m.Native),
 		})
+	}
+	return out
+}
+
+// toolCallJSON is the persisted shape of a tool call. A struct rather than a
+// map, because a map sorts its keys: this keeps each record byte-identical to
+// what []llm.ToolCall produced before, with extra_content appended only when
+// present. ExtraContent is json:"-" on ToolCall, so it is carried here (#1357).
+type toolCallJSON struct {
+	ID           string           `json:"id"`
+	Type         string           `json:"type"`
+	Function     llm.FunctionCall `json:"function"`
+	ExtraContent json.RawMessage  `json:"extra_content,omitempty"`
+}
+
+// toolCallsForJSON projects tool calls for persistence.
+func toolCallsForJSON(tcs []llm.ToolCall) []toolCallJSON {
+	if len(tcs) == 0 {
+		return nil
+	}
+	out := make([]toolCallJSON, 0, len(tcs))
+	for _, tc := range tcs {
+		out = append(out, toolCallJSON{ID: tc.ID, Type: tc.Type, Function: tc.Function, ExtraContent: tc.ExtraContent})
 	}
 	return out
 }
@@ -476,11 +516,15 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 		if p := fs.session.persist; p != nil {
 			toolCallsJSON := make([]map[string]any, 0, len(choice.Message.ToolCalls))
 			for _, tc := range choice.Message.ToolCalls {
-				toolCallsJSON = append(toolCallsJSON, map[string]any{
+				entry := map[string]any{
 					"id":        tc.ID,
 					"name":      tc.Function.Name,
 					"arguments": tc.Function.Arguments,
-				})
+				}
+				if len(tc.ExtraContent) > 0 {
+					entry["extra_content"] = tc.ExtraContent
+				}
+				toolCallsJSON = append(toolCallsJSON, entry)
 			}
 			p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration, nativeTurnForJSON(tr.Response.Native))
 		}
