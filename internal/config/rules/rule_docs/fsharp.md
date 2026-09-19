@@ -20,7 +20,7 @@
 - Starting background work without retaining, awaiting, supervising, or observing the task's exception; do not flag a deliberately detached process when its lifetime and error reporting are explicit
 
 #### Sequences, Collections, and Performance
-- Enumerating an `seq` with side effects or an expensive source multiple times when the result is expected to be stable or when repeated execution changes behavior; materialize once only when the code needs repeated traversal
+- Enumerating a `seq` with side effects or an expensive source multiple times when the result is expected to be stable or when repeated execution changes behavior; materialize once only when the code needs repeated traversal
 - Calling `Seq.head`, `Seq.reduce`, indexed access, or a map lookup without establishing that the collection/key is present for non-constant input
 - Accidentally forcing a lazy sequence in a hot path, or composing a sequence pipeline whose deferred exceptions escape a boundary that promises eager validation
 - Quadratic list append, repeated immutable-map updates, or repeated string concatenation in a loop where input size can make the behavior materially expensive; do not replace concise collection code merely for micro-optimizations
