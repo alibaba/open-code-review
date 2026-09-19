@@ -41,11 +41,16 @@ var llmProvidersCmd = &cobra.Command{
 	Short: "List all built-in LLM providers",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		runLLMProviders()
+		runLLMProviders(llmProvidersOpts.capabilities)
 	},
 }
 
+var llmProvidersOpts struct {
+	capabilities bool
+}
+
 func init() {
+	llmProvidersCmd.Flags().BoolVar(&llmProvidersOpts.capabilities, "capabilities", false, "show direct API capability matrix for each provider")
 	llmCmd.AddCommand(llmTestCmd)
 	llmCmd.AddCommand(llmProvidersCmd)
 }
@@ -143,13 +148,25 @@ func bedrockContext(client llm.LLMClient) (region, profile string, ok bool) {
 	return c.BedrockContext()
 }
 
-func runLLMProviders() {
+func runLLMProviders(showCapabilities ...bool) {
 	providers := llm.ListProviders()
 	fmt.Println("\nBuilt-in providers:")
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "  NAME\tPROTOCOL\tBASE URL\n")
-	fmt.Fprintf(w, "  ----\t--------\t--------\n")
+	showCaps := len(showCapabilities) > 0 && showCapabilities[0]
+	if showCaps {
+		fmt.Fprintf(w, "  NAME\tPROTOCOL\tTOOLS\tUSAGE\tCLOUD AUTH\tBASE URL\n")
+		fmt.Fprintf(w, "  ----\t--------\t-----\t-----\t----------\t--------\n")
+	} else {
+		fmt.Fprintf(w, "  NAME\tPROTOCOL\tBASE URL\n")
+		fmt.Fprintf(w, "  ----\t--------\t--------\n")
+	}
 	for _, p := range providers {
+		if showCaps {
+			caps := p.EffectiveCapabilities()
+			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%s\n",
+				p.Name, p.Protocol, yesNo(caps.ToolCalling), caps.UsageReporting, yesNo(caps.CloudAuth), p.BaseURL)
+			continue
+		}
 		fmt.Fprintf(w, "  %s\t%s\t%s\n", p.Name, p.Protocol, p.BaseURL)
 	}
 	if err := w.Flush(); err != nil {
@@ -157,4 +174,11 @@ func runLLMProviders() {
 	}
 	fmt.Println("\nUse 'ocr config provider' to configure a provider interactively.")
 	fmt.Println("Use 'ocr config set provider <name>' to switch providers non-interactively.")
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
 }
