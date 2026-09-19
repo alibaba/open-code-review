@@ -76,7 +76,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "qwen-cloud", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -410,6 +410,46 @@ func TestLookupProvider_XAIDetails(t *testing.T) {
 		"grok-4.6",
 		"grok-4.5",
 		"grok-4.3",
+	}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
+	}
+}
+
+func TestLookupProvider_QwenCloudDetails(t *testing.T) {
+	p, ok := LookupProvider("qwen-cloud")
+	if !ok {
+		t.Fatal("qwen-cloud not found")
+	}
+	if p.DisplayName != "Qwen Cloud Token Plan API" {
+		t.Errorf("DisplayName = %q, want %q", p.DisplayName, "Qwen Cloud Token Plan API")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1")
+	}
+	if p.EnvVar != "QWEN_CLOUD_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "QWEN_CLOUD_API_KEY")
+	}
+	if p.AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
+	}
+	expectedModels := []string{
+		"qwen3.8-max",
+		"qwen3.8-flash",
+		"qwen3.7-max",
+		"qwen3.7-plus",
+		"deepseek-v4-pro",
+		"deepseek-v4.1-flash",
+		"glm-5.3",
+		"glm-5.2",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
