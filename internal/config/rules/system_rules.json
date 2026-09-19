@@ -52,6 +52,7 @@
     "**/*.mm": "objc.md",
     "**/*.sol": "solidity.md",
     "**/*.vy": "vyper.md",
-    "**/*.rego": "rego.md"
+    "**/*.rego": "rego.md",
+    "**/*.{clj,cljs,cljc,edn}": "clojure.md"
   }
 }
