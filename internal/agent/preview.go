@@ -30,6 +30,7 @@ const (
 	ExcludeDeleted           = model.ExcludeDeleted
 	ExcludeBinary            = model.ExcludeBinary
 	ExcludeTooLarge          = model.ExcludeTooLarge
+	ExcludeUndecodable       = model.ExcludeUndecodable
 )
 
 // Preview loads diffs and applies the same selection the real run applies
@@ -96,6 +97,11 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 			Status:        diffStatus(dec.Diff),
 			WillReview:    dec.selected(),
 			ExcludeReason: dec.Reason,
+			// Reported whenever detection marked the file, not only when that
+			// marking excluded it: a file that is marked and still reviewed is
+			// the commoner case, and the review path already warns about it on
+			// stderr.
+			DetectedCharset: dec.Diff.UndecodedCharset,
 		}
 		if entry.WillReview {
 			result.ReviewableCount++

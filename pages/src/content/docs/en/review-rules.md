@@ -52,7 +52,8 @@ Three independent fields:
   exclude patterns (test-file exclusions — see below). It is not a
   whitelist: files not matching any `include` pattern still proceed
   through the `unsupported_ext` and `default_path` checks and may still
-  be reviewed.
+  be reviewed. It cannot rescue a file dropped by `binary` or
+  `undecodable_encoding`, which run before it.
 - `exclude` — optional. Glob patterns for files OCR must *not* review.
   Highest precedence among user-configured filters.
 - `rules` — array of `{path, rule}` entries, evaluated **in declaration
@@ -77,36 +78,39 @@ for matching:
 
 ## How files are filtered
 
-The filter is a six-gate algorithm in
+The filter is a seven-gate algorithm in
 [`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
 For each diff, OCR asks:
 
 1. **`binary`** — Is the file binary? Excluded.
-2. **`secret_exclude`** — Does either path match a
+2. **`undecodable_encoding`** — Do the file's bytes decode as text in
+   any supported charset? Excluded if not.
+3. **`secret_exclude`** — Does either path match a
    built-in secret-path protection? The unconditional glob patterns are listed in [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json).
    Excluded. This protection runs before user rules and cannot be overridden
    by an `include` pattern.
 
    Per-environment `.env.*` paths are treated as secret paths, except `.env.example`, `.env.sample`, and `.env.template`, which remain subject to the normal review rules.
 
-3. **`user_exclude`** — Does the path match any user `exclude` pattern?
+4. **`user_exclude`** — Does the path match any user `exclude` pattern?
    Excluded.
-4. **`user_include`** — If the user defined `include`, does the path
+5. **`user_include`** — If the user defined `include`, does the path
    match? If yes, **kept immediately** (bypasses the `unsupported_ext`
    and `default_path` gates below).
-5. **`unsupported_ext`** — Is the file extension in the
+6. **`unsupported_ext`** — Is the file extension in the
    [allowlist](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)?
    Excluded if not.
-6. **`default_path`** — Does the path match a built-in test-file exclude
+7. **`default_path`** — Does the path match a built-in test-file exclude
    pattern (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb`,
    …)? Excluded.
 
-Files that survive all six gates are sent to the LLM, unless the diff
-alone exceeds 80% of `max_tokens`: `selectFiles` applies that ceiling
-after the gates and excludes the file as `too_large`. It also marks a
-file whose new path is `/dev/null` as `deleted`; there's no new content
-to review. Use `ocr review --preview` to print the result of this filter
-without spending a token.
+Files that survive all seven gates are sent to the LLM as decoded UTF-8
+text rather than raw bytes, unless the diff alone exceeds 80% of
+`max_tokens`: `selectFiles` applies that ceiling after the gates and
+excludes the file as `too_large`. It also marks a file whose new path is
+`/dev/null` as `deleted`; there's no new content to review. Use
+`ocr review --preview` to print the result of this filter without
+spending a token.
 
 ### Default path exclusions
 

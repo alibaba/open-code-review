@@ -501,6 +501,13 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 }
 
 func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer) error {
+	// Loading diffs itself writes to stdout (the per-file charset-decode
+	// notice), so the machine-readable formats must be silenced around Preview,
+	// not just around the final emit. Without this the JSON document is
+	// preceded by human-readable lines and no longer parses.
+	q := newQuietHandle(opts.outputFormat, opts.audience)
+	defer q.Restore()
+
 	maxTokens, err := previewMaxTokens(cc.Template.MaxTokens, opts.maxTokens)
 	if err != nil {
 		return err
