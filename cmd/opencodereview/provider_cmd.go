@@ -5,7 +5,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -426,19 +425,14 @@ func saveConfig(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	// Existing files are chmod'd to 0600 before WriteFile so sensitive bytes are
-	// not written while the file remains broadly readable; post-write Chmod
-	// remains as defense in depth. WriteFile applies 0o600 only when creating
-	// the file (e.g. after ocr config set writes an API key into a previously
-	// world-readable config).
-	if err := os.Chmod(path, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("chmod config before write: %w", err)
+	// WriteFile applies 0o600 only when creating the file; existing files keep
+	// their prior permissions. Tighten an existing config before writing any
+	// credential material; a missing file will be created as 0600 below.
+	if err := os.Chmod(path, 0o600); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("chmod config: %w", err)
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("chmod config: %w", err)
 	}
 	return nil
 }
