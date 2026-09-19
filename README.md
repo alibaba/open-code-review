@@ -33,6 +33,7 @@
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="pi" src="https://img.shields.io/badge/pi-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
   English | <a href="docs/i18n/README.zh-CN.md">简体中文</a> | <a href="docs/i18n/README.ja-JP.md">日本語</a> | <a href="docs/i18n/README.ko-KR.md">한국어</a> | <a href="docs/i18n/README.ru-RU.md">Русский</a>
@@ -183,6 +184,7 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
   - [Cursor](plugins/open-code-review/README.md#cursor) — install a plugin with portable review skills
   - [Kimi Code](plugins/open-code-review/README.md#kimi-code) — install a plugin with review slash commands and skills
   - [OpenCode](plugins/open-code-review/opencode/README.md) — install native review tools and slash commands
+  - [pi](plugins/open-code-review/pi/README.md) — install the pi coding agent extension with review commands and tools
   - [QCA Forward](plugins/open-code-review/qca/README.md) — run delegation mode with the QCA host model and a ready-to-publish template
   - [Skill-compatible agents](https://open-codereview.ai/docs/agent-skill) — install the portable agent skill
 - Review Execution Modes — after integration, choose which LLM performs the review
