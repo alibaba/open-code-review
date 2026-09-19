@@ -144,7 +144,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{graphql,gql}` | `graphql.md`: GraphQL スキーマと操作。 |
 | `**/*.prisma` | `prisma.md`: Prisma スキーマ。 |
 | `**/*.jl` | `julia.md`: Julia ソースコード。 |
-| `**/*.{tf,hcl,tfvars}` | `terraform.md`: Terraform / HCL。 |
+| `**/*.{tf,tofu,hcl,tfvars}` | `terraform.md`: Terraform / HCL。 |
 | `**/*.bicep` | `bicep.md`: Bicep（Azure）テンプレート。 |
 | `**/*.elm` | `elm.md` - Elm ソースコード。 |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。 |

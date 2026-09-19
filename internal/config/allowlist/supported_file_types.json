@@ -75,6 +75,7 @@
   ".json5",
   ".dart",
   ".tf",
+  ".tofu",
   ".graphql",
   ".gql",
   ".prisma",
