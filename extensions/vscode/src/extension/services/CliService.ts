@@ -104,7 +104,7 @@ export class CliService {
     });
   }
 
-  /** Run arbitrary arguments, stream logs via a callback, and return all stdout on completion. Reject nonzero exits with the CLI error text. */
+  /** Run arbitrary arguments, stream logs via a callback, and return stdout on completion. Reject nonzero exits with the CLI error text. */
   runRaw(
     args: string[],
     cwd: string,

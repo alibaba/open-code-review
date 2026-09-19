@@ -95,7 +95,7 @@ describe('CliService.runRaw', () => {
 });
 
 describe('CliService.testConnection', () => {
-  it('reports failure for a nonzero CLI exit instead of reporting a successful connection', async () => {
+  it('reports failure for a nonzero CLI exit', async () => {
     const svc = new CliService('node');
     // The default ['llm', 'test'] arguments cannot be overridden, so verify failure propagation through runRaw directly.
     const r = await svc.runRaw(
