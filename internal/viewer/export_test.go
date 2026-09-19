@@ -49,6 +49,7 @@ func TestExportSession_SelfContained(t *testing.T) {
 
 	for _, want := range []string{
 		"--font: -apple-system",                 // style.css:5, inlined verbatim
+		"window.ocrArrowScroll",                 // a11y.js prepended; session.js calls it on line 1
 		`'<code class="inline-code">$1</code>'`, // session.js:17, inlined verbatim
 		`<span class="crumb">proj</span>`,       // the repo breadcrumb, de-linked
 		// the shared nav-brand partial, logo included, de-linked
