@@ -204,8 +204,8 @@ class ConfigDraftTest {
 
     @Test
     fun `unknown top-level fields are preserved in the draft`() {
-        // This is why a JsonObject tree is used instead of a data class: writeRaw rewrites the entire file,
-        // so losing fields would silently delete unrecognized keys from the user configuration.
+        // A JsonObject tree preserves unknown fields when writeRaw rewrites the entire file.
+        // Dropping those fields would silently delete unrecognized keys from the user configuration.
         val d = draft("""{"future_flag": {"deep": [1, 2]}}""", "provider" to "openai")
         assertEquals("""{"deep":[1,2]}""", d.obj("future_flag").toString())
     }

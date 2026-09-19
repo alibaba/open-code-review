@@ -48,7 +48,7 @@ class CliServiceTreeKillTest {
 
             cancellation.cancel()
 
-            // Allow the 3-second grace period plus scheduling time; the fix kills descendants from a snapshot instead of leaving orphans.
+            // Allow the 3-second grace period plus scheduling time for cleanup of the captured descendants.
             assertTrue(
                 waitFor({ !isAlive(grandchildPid) }, 8_000),
                 "The grandchild survived cancel(): orphan process leak",

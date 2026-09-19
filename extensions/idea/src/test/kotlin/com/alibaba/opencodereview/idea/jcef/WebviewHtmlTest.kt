@@ -40,7 +40,7 @@ class WebviewHtmlTest {
 
     @Test
     fun `IdeaTheme has no variables unused by the frontend`() {
-        // Unused variables do not cause errors, but can falsely suggest that a color is taking effect.
+        // Unused variables can misleadingly suggest that the frontend uses a configured color.
         val css = FrontendSources.readAllText("src/webview", ".css", ".tsx", ".ts")
         val used = varRegex.findAll(css).map { it.value }.toSet()
         val extra = IdeaTheme.VARIABLE_NAMES - used
