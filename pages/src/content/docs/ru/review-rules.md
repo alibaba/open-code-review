@@ -200,6 +200,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.sol` | `solidity.md` — смарт-контракты Solidity. |
 | `**/*.vy` | `vyper.md` — смарт-контракты Vyper. |
 | `**/*.rego` | `rego.md` — политики Rego (OPA). |
+| `**/*.{sh,bash,zsh,fish}` | `shell.md` — сценарии оболочки (POSIX sh, Bash, Zsh, Fish). |
 | *(fallback)* | `default.md` |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

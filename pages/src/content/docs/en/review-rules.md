@@ -199,6 +199,7 @@ matching order:
 | `**/*.sol` | `solidity.md` — Solidity smart contracts. |
 | `**/*.vy` | `vyper.md` — Vyper smart contracts. |
 | `**/*.rego` | `rego.md` — Rego policy (OPA). |
+| `**/*.{sh,bash,zsh,fish}` | `shell.md` — shell scripts (POSIX sh, Bash, Zsh, Fish). |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
