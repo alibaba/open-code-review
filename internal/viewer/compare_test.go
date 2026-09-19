@@ -206,7 +206,8 @@ func TestHandleCompare(t *testing.T) {
 		{
 			name: "happy path", query: "before=s1&after=s2", status: http.StatusOK,
 			contains: []string{"New (1)", "Persisting (1)", "Resolved (1)", "Not reviewed (0)",
-				"newly broken", "still broken", "was broken", "none"},
+				"newly broken", "still broken", "was broken", "none", `data-pagination-source`,
+				`<div class="comment-card" data-pagination-item hidden>`, `id="compare-0-pagination"`},
 		},
 		{
 			name:   "back link returns to sessions",

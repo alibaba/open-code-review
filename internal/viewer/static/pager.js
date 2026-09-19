@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-// Shared client-side pager for the viewer's list pages. The page script
-// looks up its own elements and hands them to ocrPager, which hides every
-// row, reveals the current page slice, and renders the page-number buttons.
+// Shared client-side pager for the viewer's list pages. Page scripts can hand
+// it table rows or arbitrary elements; data-pagination-source markup is also
+// initialized automatically below. The pager hides every row, reveals the
+// current page slice, and renders the page-number buttons.
 // `filter` narrows the row list (the repositories search); when its external
 // state changes, call refresh() to re-apply it from page 1.
 (() => {
@@ -34,8 +35,8 @@
         return items;
     };
 
-    window.ocrPager = ({ table, pager, numbers, pageSize = 10, filter }) => {
-        const rows = Array.from(table.querySelectorAll("tbody tr"));
+    window.ocrPager = ({ table, rows: suppliedRows, pager, numbers, pageSize = 10, filter, onRender }) => {
+        const rows = suppliedRows || Array.from(table.querySelectorAll("tbody tr"));
         const steps = Array.from(pager.querySelectorAll("[data-page-step]"));
         const matches = filter || (() => true);
         let current = 1;
@@ -52,7 +53,8 @@
             for (const row of rows) {
                 row.hidden = true;
             }
-            for (const row of filtered.slice((current - 1) * pageSize, current * pageSize)) {
+            const visible = filtered.slice((current - 1) * pageSize, current * pageSize);
+            for (const row of visible) {
                 row.hidden = false;
             }
 
@@ -94,6 +96,9 @@
             }
 
             pager.hidden = total < 2;
+            if (onRender) {
+                onRender({ current, total, filtered, visible });
+            }
         };
 
         for (const step of steps) {
@@ -104,4 +109,15 @@
 
         return { refresh: () => render(1) };
     };
+
+    document.querySelectorAll("[data-pagination-source]").forEach((source) => {
+        const pager = source.nextElementSibling;
+        if (!pager || !pager.matches(".pagination")) return;
+        const numbers = pager.querySelector(".page-numbers");
+        const selector = source.dataset.paginationItemSelector || "[data-pagination-item]";
+        const rows = Array.from(source.querySelectorAll(selector));
+        if (!numbers || rows.length === 0) return;
+        const pageSize = Number(source.dataset.paginationPageSize) || 20;
+        ocrPager({ rows, pager, numbers, pageSize });
+    });
 })();

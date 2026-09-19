@@ -610,7 +610,7 @@ func TestRenderTemplate_SecondarySectionsCollapsedByDefault(t *testing.T) {
 	if !strings.Contains(body, `<details class="token-breakdown">`) || strings.Contains(body, `<details class="token-breakdown" open>`) {
 		t.Fatal("file token breakdown should be rendered and collapsed by default")
 	}
-	if !strings.Contains(body, `<details class="comment-file-group" open>`) {
+	if !strings.Contains(body, `<details class="comment-file-group" open hidden>`) {
 		t.Fatal("review comment groups should remain expanded")
 	}
 }
@@ -941,6 +941,11 @@ func TestPagerJS_Contract(t *testing.T) {
 		"preventScroll",
 		// The repositories search re-applies its filter from page 1.
 		"refresh",
+		// Detail pages can hand arbitrary result elements to the same pager.
+		"data-pagination-source",
+		"data-pagination-item",
+		"paginationPageSize",
+		"nextElementSibling",
 	} {
 		if !strings.Contains(string(script), want) {
 			t.Errorf("pager.js is missing %q", want)
@@ -948,9 +953,74 @@ func TestPagerJS_Contract(t *testing.T) {
 	}
 }
 
+func TestSessionTemplatePaginatesLongResultSections(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary: SessionSummary{
+			SessionID:     "s",
+			CWD:           "/p",
+			FilesReviewed: []string{"a.go"},
+		},
+		TokenUsage: TokenUsageSummary{
+			FileTokenBreakdown: []FileTokenUsage{{FilePath: "a.go"}},
+		},
+		SessionTasks: []*FileGroup{{FilePath: "__grouping__", Tasks: map[TaskType][]*TaskCard{}}},
+		Files:        []*FileGroup{{FilePath: "a.go", Tasks: map[TaskType][]*TaskCard{}}},
+	}
+	renderTemplate(rr, "session.html", sessionPageData{EncodedRepo: "r", RepoName: "R", Session: vs})
+	body := rr.Body.String()
+	for _, want := range []string{
+		`<table class="token-table" data-pagination-source data-pagination-page-size="20">`,
+		`id="token-breakdown-pagination"`,
+		`<ul class="file-list" data-pagination-source data-pagination-page-size="20">`,
+		`id="files-reviewed-pagination"`,
+		`<div class="conversations" data-pagination-source data-pagination-page-size="20">`,
+		`id="session-tasks-pagination"`,
+		`id="conversations-pagination"`,
+		`data-pagination-item`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("session page missing long-list pagination hook %q", want)
+		}
+	}
+}
+
+func TestSessionJS_UsesDefaultCommentPaging(t *testing.T) {
+	script, err := assets.ReadFile("static/session.js")
+	if err != nil {
+		t.Fatalf("read static/session.js: %v", err)
+	}
+	for _, want := range []string{
+		"let activeSeverity = 'all'",
+		"let activeCategory = 'all'",
+		"pageSize: 20",
+		"rows: cards",
+		"commentsPager.refresh()",
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("session.js is missing %q", want)
+		}
+	}
+	if strings.Contains(string(script), "Select a severity or category to view findings.") {
+		t.Error("session.js retains an unreachable empty-state branch")
+	}
+}
+
+func TestSessionTemplateLoadsPagerScript(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary:  SessionSummary{SessionID: "s", CWD: "/p"},
+		Comments: []*ReviewComment{{FilePath: "a.go", Content: "c1", Category: "bug", Severity: "high"}},
+	}
+	renderTemplate(rr, "session.html", sessionPageData{EncodedRepo: "r", RepoName: "R", Session: vs})
+	if !strings.Contains(rr.Body.String(), `<script src="/static/a11y.js"></script><script src="/static/pager.js"></script><script src="/static/session.js"></script>`) {
+		t.Error("session page should load a11y.js, pager.js, and session.js in dependency order")
+	}
+}
+
 // TestHandleSession_ServedPageKeepsStaticRefs guards the other half of the
 // export gates in session.html. sessionPageData.Static is false for every HTTP
-// render, so the served page must still link the two /static/ assets and keep
+// render, so the served page must still link the three /static/ assets and keep
 // its breadcrumb anchors — inlining them over HTTP would defeat the browser
 // cache, and the {{else}} branches are otherwise untested.
 func TestHandleSession_ServedPageKeepsStaticRefs(t *testing.T) {
@@ -973,6 +1043,7 @@ func TestHandleSession_ServedPageKeepsStaticRefs(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`href="/static/style.css"`,
+		`src="/static/pager.js"`,
 		`src="/static/session.js"`,
 		`<a href="/" class="nav-brand"`,
 		`<a href="/r/repo">`,
