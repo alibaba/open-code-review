@@ -1028,13 +1028,18 @@ func TestResponsiveCSS_MetaOverrideComesAfterBase(t *testing.T) {
 	}
 	text := string(css)
 	base := strings.Index(text, ".session-page .meta span {\n    white-space: nowrap;\n}")
-	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;\n    }")
-	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;\n    }")
+	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;")
+	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;")
 	if base == -1 || normal == -1 || truncate == -1 {
 		t.Fatal("style.css is missing the session meta rules or their 768px overrides")
 	}
 	if normal < base || truncate < base {
 		t.Error("the 768px session meta overrides must come after the base " +
 			".session-page .meta rules: equal specificity means source order decides")
+	}
+
+	narrow := regexp.MustCompile(`(?s)@media \(max-width: 768px\) \{.*?\.session-page \.meta span \{.*?white-space: normal;.*?flex-wrap: wrap;.*?overflow-wrap: anywhere;.*?\}.*?\.session-page \.meta \.meta-truncate \{.*?max-width: 100%;.*?overflow: visible;.*?text-overflow: clip;.*?\}`)
+	if !narrow.MatchString(text) {
+		t.Fatal("narrow-screen session metadata must wrap long values without clipping")
 	}
 }

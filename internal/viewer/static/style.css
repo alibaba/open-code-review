@@ -1870,10 +1870,14 @@ nav.breadcrumb a:focus-visible {
 @media (max-width: 768px) {
     .session-page .meta span {
         white-space: normal;
+        flex-wrap: wrap;
+        overflow-wrap: anywhere;
     }
 
     .session-page .meta .meta-truncate {
         max-width: 100%;
+        overflow: visible;
+        text-overflow: clip;
     }
 }
 
