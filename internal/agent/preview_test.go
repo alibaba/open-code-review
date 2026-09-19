@@ -195,6 +195,20 @@ func TestWhyExcluded_DefaultPathFilter(t *testing.T) {
 			},
 			expected: ExcludeNone,
 		},
+		{
+			name: "python pytest prefix is reviewable",
+			diff: model.Diff{
+				NewPath: "tests/test_utils.py",
+			},
+			expected: ExcludeNone,
+		},
+		{
+			name: "python _test suffix stays default-excluded",
+			diff: model.Diff{
+				NewPath: "app/handler_test.py",
+			},
+			expected: ExcludeDefaultPath,
+		},
 	}
 
 	for _, tt := range tests {
@@ -513,6 +527,63 @@ func TestWhyExcluded_SecretRename(t *testing.T) {
 
 	if got := agent.whyExcluded(diff); got != ExcludeSecret {
 		t.Fatalf("whyExcluded() = %q, want %q", got, ExcludeSecret)
+	}
+}
+
+// TestSelectFiles_PythonPRShapes pins issue #1454: adding **/test_*.py to the
+// default exclude list made a non-empty test-only pytest PR select zero items
+// and skip with "Review skipped: no items were selected." Pytest prefix files
+// stay reviewable; the older *_test.py suffix exclude is unchanged.
+func TestSelectFiles_PythonPRShapes(t *testing.T) {
+	agent := New(Args{})
+
+	t.Run("test-only pytest prefix is selected", func(t *testing.T) {
+		diffs := []model.Diff{
+			{NewPath: "tests/test_utils.py"},
+			{NewPath: "app/test_handler.py"},
+		}
+		decisions := agent.selectFiles(diffs)
+		_, counts := summarizeSelection(decisions)
+		if counts.Selected != 2 {
+			t.Fatalf("selected = %d, want 2; reasons = %v", counts.Selected, selectionReasons(decisions))
+		}
+	})
+
+	t.Run("mixed source and tests still selects source", func(t *testing.T) {
+		diffs := []model.Diff{
+			{NewPath: "app/handler.py"},
+			{NewPath: "tests/test_handler.py"},
+			{NewPath: "app/handler_test.py"},
+		}
+		reasons := selectionReasons(agent.selectFiles(diffs))
+		if reasons["app/handler.py"] != ExcludeNone {
+			t.Errorf("app/handler.py = %q, want selected", reasons["app/handler.py"])
+		}
+		if reasons["tests/test_handler.py"] != ExcludeNone {
+			t.Errorf("tests/test_handler.py = %q, want selected", reasons["tests/test_handler.py"])
+		}
+		if reasons["app/handler_test.py"] != ExcludeDefaultPath {
+			t.Errorf("app/handler_test.py = %q, want %q", reasons["app/handler_test.py"], ExcludeDefaultPath)
+		}
+	})
+
+	t.Run("ordinary source is selected", func(t *testing.T) {
+		diffs := []model.Diff{{NewPath: "app/handler.py"}}
+		reasons := selectionReasons(agent.selectFiles(diffs))
+		if reasons["app/handler.py"] != ExcludeNone {
+			t.Errorf("app/handler.py = %q, want selected", reasons["app/handler.py"])
+		}
+	})
+}
+
+// TestSelectFiles_DefaultExcludedOnlyStillUnselected keeps the skip path for
+// changesets that contain only default-excluded files (e.g. Go tests). Those
+// runs still select nothing and surface "Review skipped: no items were selected."
+func TestSelectFiles_DefaultExcludedOnlyStillUnselected(t *testing.T) {
+	agent := New(Args{})
+	_, counts := summarizeSelection(agent.selectFiles([]model.Diff{{NewPath: "foo_test.go"}}))
+	if counts.Selected != 0 {
+		t.Fatalf("selected = %d, want 0", counts.Selected)
 	}
 }
 
