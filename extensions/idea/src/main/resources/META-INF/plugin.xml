@@ -4,8 +4,15 @@
     <id>com.alibaba.open-code-review-idea</id>
 
     <!-- Public plugin name should be written in Title Case.
-         Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-name -->
-    <name>Open Code Review</name>
+         Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-name
+
+         The vendor prefix is deliberate: a third party had already taken the bare
+         "Open Code Review" on JetBrains Marketplace, so uploading under that name is
+         rejected. The prefix also marks this listing as the one published by the
+         project itself. Only the Marketplace / Plugins listing shows this name — the
+         tool window and the Tools menu action read their labels from OcrBundle, which
+         still says "Open Code Review". -->
+    <name>Alibaba Open Code Review</name>
 
     <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
     <vendor url="https://github.com/alibaba/open-code-review">Alibaba</vendor>
@@ -14,6 +21,9 @@
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
         AI Code Review — powered by the open-code-review CLI.<br/>
+        The official IntelliJ plugin of the
+        <a href="https://github.com/alibaba/open-code-review">alibaba/open-code-review</a>
+        project, published by the project itself.<br/>
         Bring AI code review into IntelliJ IDEA: start reviews from the tool window,
         stream logs live, and act on every comment right in the editor.<br/><br/>
 

@@ -23,9 +23,11 @@ class OcrToolWindowFactory : ToolWindowFactory, DumbAware {
             val p = JcefReviewPanel(project)
             p.component to (p as Disposable)
         } catch (e: Throwable) {
-            // ProcessCanceledException 是 IntelliJ 取消信号，绝不能吞（否则破坏取消机制）；其余（含 NoClassDefFoundError 等 JCEF 缺失）走占位。
+            // ProcessCanceledException is IntelliJ's cancellation signal and must never be swallowed
+            // (that would break cancellation); anything else — including a missing JCEF such as
+            // NoClassDefFoundError — falls back to the placeholder.
             if (e is ProcessCanceledException) throw e
-            thisLogger().warn("[ocr] JCEF 初始化失败，工具窗走占位", e)
+            thisLogger().warn("[ocr] JCEF initialization failed, the tool window falls back to the placeholder", e)
             jcefUnsupportedPlaceholder() to null
         }
         val content = ContentFactory.getInstance().createContent(panel, "", false)

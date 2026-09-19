@@ -10,8 +10,8 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 /**
- * cancel() 必须终止整棵进程树：ocr 是 Node launcher，真正的 Go 二进制是它的子进程。
- * 只杀直接子进程会把孙进程托管给系统根进程，变成杀不到的孤儿（bug 复现见 commit message）。
+ * cancel() must terminate the whole process tree: ocr is a Node launcher whose child is the actual Go binary.
+ * Killing only the direct child can leave its descendants running as orphaned processes.
  */
 class CliServiceTreeKillTest {
 
@@ -19,12 +19,12 @@ class CliServiceTreeKillTest {
 
     @Test
     fun `cancel kills the whole process tree including grandchildren`() {
-        if (isWindows) return // 依赖 bash 脚本模拟 launcher，仅 POSIX 有意义
+        if (isWindows) return // The bash launcher simulation is meaningful only on POSIX.
 
         val dir = Files.createTempDirectory("ocr-treekill-test").toFile()
         val pidFile = File(dir, "grandchild.pid")
         val script = File(dir, "fake-ocr.sh")
-        // 模拟 launcher 行为：spawn 一个孙进程并记录其 pid，自己 wait 住
+        // Simulate a launcher that spawns a grandchild, records its PID, and waits.
         script.writeText(
             """
             #!/bin/bash
@@ -41,21 +41,21 @@ class CliServiceTreeKillTest {
             val cancellation = CliCancellation()
             val runner = thread { runCatching { service.runRaw(emptyList(), dir, {}, cancellation = cancellation) } }
 
-            // 等孙进程起来
-            assertTrue(waitFor(pidFile::exists, 5_000), "fake launcher 未及时写出孙进程 pid")
+            // Wait for the grandchild to start.
+            assertTrue(waitFor(pidFile::exists, 5_000), "The fake launcher did not write the grandchild PID in time")
             grandchildPid = pidFile.readText().trim().toLong()
-            assertTrue(isAlive(grandchildPid), "孙进程应在运行中")
+            assertTrue(isAlive(grandchildPid), "The grandchild should be running")
 
             cancellation.cancel()
 
-            // 优雅宽限 3s + 调度余量；修复前孙进程会永远存活（孤儿），修复后被快照追杀
+            // Allow the 3-second grace period plus scheduling time for cleanup of the captured descendants.
             assertTrue(
                 waitFor({ !isAlive(grandchildPid) }, 8_000),
-                "cancel() 后孙进程仍存活：孤儿进程泄漏",
+                "The grandchild survived cancel(): orphan process leak",
             )
             runner.join(5_000)
         } finally {
-            // 测试失败也不把 sleep 留在系统里
+            // Do not leave sleep running even if the test fails.
             pidFile.takeIf { it.exists() }?.readText()?.trim()?.toLongOrNull()?.let { pid ->
                 ProcessHandle.of(pid).ifPresent { it.destroyForcibly() }
             }

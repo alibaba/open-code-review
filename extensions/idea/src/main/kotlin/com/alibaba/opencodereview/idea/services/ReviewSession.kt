@@ -31,8 +31,9 @@ interface SessionCallbacks {
 }
 
 /**
- * 一次审查对应一个 session，状态仅在 session 内（`cancelled` 标记），
- * 不做跨 session 持久化——webview 重建后由前端重新请求。[run] 为阻塞调用，调用方须在后台线程执行。
+ * One review corresponds to one session; state lives only inside the session (the `cancelled` flag),
+ * with no cross-session persistence. After the webview is recreated the frontend simply requests again.
+ * [run] is a blocking call; callers must run it on a background thread.
  */
 class ReviewSession(private val cli: CliService, private val cwd: File) {
 
@@ -44,8 +45,9 @@ class ReviewSession(private val cli: CliService, private val cwd: File) {
     private val cancelEntered = AtomicBoolean(false)
 
     fun run(opts: CliRunOptions, cb: SessionCallbacks) {
-        // 不复位 cancelled：若 cancel() 在 run 被调度后、真正执行前到达，复位会抹掉这次取消。
-        if (cancelled) { // run 启动前已被取消（被调度但尚未跑）：直接 CANCELLED，不先发 RUNNING 制造多余状态跳变
+        // Do not reset cancelled: if cancel() arrives after run is scheduled but before it actually executes,
+        // resetting here would erase that cancellation.
+        if (cancelled) { // cancelled before run started (scheduled but not yet executing): report CANCELLED directly instead of emitting RUNNING first, which would add a spurious state transition
             cb.onState(ReviewState.CANCELLED)
             return
         }
@@ -65,8 +67,9 @@ class ReviewSession(private val cli: CliService, private val cwd: File) {
             cb.onState(state, error.takeIf { state == ReviewState.FAILED })
             cb.onDone(result)
         } catch (error: Exception) {
-            // 只接 Exception：OOM/LinkageError 等 Error 不在此吞，让其上抛，避免掩盖致命问题。
-            // ProcessCanceledException 是 IntelliJ 取消信号，不吞。
+            // Catch Exception only: Errors such as OOM/LinkageError are not swallowed here -- they propagate
+            // so fatal problems are not masked.
+            // ProcessCanceledException is IntelliJ's cancellation signal; do not swallow it.
             if (error is ProcessCanceledException) throw error
             if (cancelled) {
                 cb.onState(ReviewState.CANCELLED)

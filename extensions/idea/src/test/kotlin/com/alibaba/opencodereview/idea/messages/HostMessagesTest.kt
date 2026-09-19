@@ -29,18 +29,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 出站消息的 JSON 形状。
+ * JSON shapes of outbound messages.
  *
- * 此组断言看似琐碎，但它是唯一能拦截"前端静默空白"问题的手段：
- * 字段名拼写错误、`type` 字面量不匹配、枚举序列化为 Kotlin 的大写常量，
- * 编译器均不会报告，运行时也不抛异常，仅表现为前端无法渲染内容。
+ * These assertions catch silent blank-frontend failures:
+ * misspelled fields, mismatched `type` literals, and enums serialized as uppercase Kotlin constants
+ * neither fail compilation nor throw at runtime; the frontend simply cannot render the content.
  */
 class HostMessagesTest {
 
     private fun parse(json: String) = Json.parseToJsonElement(json).jsonObject
 
     @Test
-    fun `init 必须带齐 config gitState locale`() {
+    fun `init includes config gitState and locale`() {
         val json = parse(
             HostToWebview.Init(
                 config = OcrConfig(provider = "kimi", model = "k2"),
@@ -51,14 +51,14 @@ class HostMessagesTest {
         assertEquals("init", json["type"].toString().trim('"'))
         assertTrue(json.containsKey("config"))
         assertTrue(json.containsKey("gitState"))
-        // config 缺失时前端配置就绪判定恒为 false，界面将停留在配置视图。
+        // Without config, the frontend readiness check stays false and the UI remains on the configuration view.
         assertEquals("kimi", json["config"]!!.jsonObject["provider"].toString().trim('"'))
         assertEquals("main", json["gitState"]!!.jsonObject["currentBranch"].toString().trim('"'))
         assertEquals("zh-cn", json["locale"].toString().trim('"'))
     }
 
     @Test
-    fun `locale 序列化成前端认的字面量`() {
+    fun `locale serializes to literals recognized by the frontend`() {
         val en = parse(
             HostToWebview.Init(null, GitState(), SupportedLocale.EN).toJson(),
         )
@@ -66,30 +66,30 @@ class HostMessagesTest {
     }
 
     @Test
-    fun `config 为 null 时显式发 null 而非省略`() {
+    fun `null config is sent explicitly rather than omitted`() {
         val json = parse(HostToWebview.Config(null).toJson())
         assertEquals("config", json["type"].toString().trim('"'))
-        // explicitNulls = true：null 字段显式发 "config": null，与前端 OcrConfig | null 契约一致。
+        // With explicitNulls = true, send "config": null to match the frontend OcrConfig | null contract.
         assertTrue(json.containsKey("config"))
         assertTrue(json["config"] is JsonNull)
     }
 
     @Test
-    fun `stateChange 无错误时 error 字段为 null`() {
+    fun `stateChange has a null error field when no error occurs`() {
         val ok = parse(HostToWebview.StateChange(ReviewState.RUNNING).toJson())
         assertEquals("stateChange", ok["type"].toString().trim('"'))
         assertEquals("running", ok["state"].toString().trim('"'))
-        // explicitNulls = true：null 字段显式发 "error": null，与前端 String | null 契约一致。
+        // With explicitNulls = true, send "error": null to match the frontend String | null contract.
         assertTrue(ok.containsKey("error"))
         assertTrue(ok["error"] is JsonNull)
 
-        val failed = parse(HostToWebview.StateChange(ReviewState.FAILED, "炸了").toJson())
+        val failed = parse(HostToWebview.StateChange(ReviewState.FAILED, "炸了").toJson()) // allow-non-english: fixture verifies Unicode message serialization
         assertEquals("failed", failed["state"].toString().trim('"'))
-        assertEquals("炸了", failed["error"].toString().trim('"'))
+        assertEquals("炸了", failed["error"].toString().trim('"')) // allow-non-english: fixture verifies Unicode message serialization
     }
 
     @Test
-    fun `modeFiles 的模式与状态都是小写字面量`() {
+    fun `modeFiles uses lowercase mode and status literals`() {
         val json = parse(
             HostToWebview.ModeFiles(
                 ReviewMode.BRANCH,
@@ -104,7 +104,7 @@ class HostMessagesTest {
     }
 
     @Test
-    fun `logLine 包一层 line 对象`() {
+    fun `logLine wraps the payload in a line object`() {
         val json = parse(HostToWebview.Log(LogLine("hello", LogLevel.ERROR)).toJson())
         assertEquals("logLine", json["type"].toString().trim('"'))
         assertEquals("hello", json["line"]!!.jsonObject["text"].toString().trim('"'))
@@ -112,7 +112,7 @@ class HostMessagesTest {
     }
 
     @Test
-    fun `reviewDone 把结果包在 result 里且评论字段是 camelCase`() {
+    fun `reviewDone wraps the result and uses camelCase comment fields`() {
         val json = parse(
             HostToWebview.ReviewDone(
                 CliResult(
@@ -120,7 +120,7 @@ class HostMessagesTest {
                     comments = listOf(
                         ReviewComment(
                             path = "a.kt",
-                            content = "改这里",
+                            content = "改这里", // allow-non-english: fixture verifies Unicode message serialization
                             suggestionCode = "val x = 1",
                             existingCode = "var x = 1",
                             startLine = 10,
@@ -132,7 +132,7 @@ class HostMessagesTest {
         )
         assertEquals("reviewDone", json["type"].toString().trim('"'))
         val result = json["result"]!!.jsonObject.toString()
-        // CLI 输出侧为 suggestion_code / existing_code / start_line，这些名称不得透传到前端。
+        // CLI output uses suggestion_code / existing_code / start_line; do not pass these names through to the frontend.
         assertTrue(result.contains("\"suggestionCode\""))
         assertTrue(result.contains("\"existingCode\""))
         assertTrue(result.contains("\"startLine\""))
@@ -141,7 +141,7 @@ class HostMessagesTest {
     }
 
     @Test
-    fun `commentSync 的状态字面量是 falsePositive`() {
+    fun `commentSync uses the falsePositive status literal`() {
         val json = parse(
             HostToWebview.CommentSync(
                 listOf(
@@ -159,16 +159,16 @@ class HostMessagesTest {
     }
 
     @Test
-    fun `gitState 消息的 type 是 gitState 而不是 gitStateChanged`() {
-        // Kotlin 侧类名为 GitStateChanged，但消息契约中的字面量为 gitState。
+    fun `the gitState message type is gitState rather than gitStateChanged`() {
+        // The Kotlin class is GitStateChanged, but the message contract uses the literal gitState.
         val json = parse(HostToWebview.GitStateChanged(GitState()).toJson())
         assertEquals("gitState", json["type"].toString().trim('"'))
     }
 
-    // ------------------------------------------------------------ 配置面板
+    // ------------------------------------------------------------ Configuration panel
 
     @Test
-    fun `configPanelInit 带 focus env skipEnvCheck`() {
+    fun `configPanelInit includes focus env and skipEnvCheck`() {
         val focus = buildJsonObject { put("step", 2) }
         val json = parse(
             ConfigPanelHostToWebview.Init(
@@ -186,7 +186,7 @@ class HostMessagesTest {
     }
 
     @Test
-    fun `configPanel 的其余出站消息形状`() {
+    fun `the remaining configPanel outbound message shapes match`() {
         assertEquals(
             "configPanelFocus",
             parse(ConfigPanelHostToWebview.Focus(null).toJson())["type"].toString().trim('"'),
@@ -196,7 +196,7 @@ class HostMessagesTest {
         assertEquals("false", conn["ok"].toString())
         assertEquals("401", conn["message"].toString().trim('"'))
 
-        // 成功时 message 为 null，显式发 "message": null（与前端 String | null 契约一致）。
+        // On success, send "message": null explicitly to match the frontend String | null contract.
         val okConn = parse(ConfigPanelHostToWebview.ConnectionResult(true).toJson())
         assertTrue(okConn.containsKey("message"))
         assertTrue(okConn["message"] is JsonNull)
@@ -226,7 +226,7 @@ class HostMessagesTest {
     }
 
     @Test
-    fun `copyDone 是只有 type 的空消息`() {
+    fun `copyDone is an empty message with only type`() {
         val json = parse(ConfigPanelHostToWebview.CopyDone.toJson())
         assertEquals("copyDone", json["type"].toString().trim('"'))
         assertEquals(1, json.size)
