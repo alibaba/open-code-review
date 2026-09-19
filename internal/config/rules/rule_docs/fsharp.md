@@ -4,7 +4,7 @@
 - `match` expressions that omit a reachable discriminated-union or `option` case, especially after a union gains a new case; do not report a match that the compiler can prove exhaustive
 - Catch-all `_` branches used only to suppress an incomplete-pattern warning when an omitted case needs distinct behavior or error handling
 - Active patterns or guards whose ordering shadows a later reachable case, silently selecting the wrong branch
-- `Option.get`, `Option.Value`, `Result.get`, or equivalent unwraps where `None` or `Error` can occur for runtime, external, or untrusted input
+- `Option.get`, accessing `.Value` on an option/value option, or project-specific partial `Result` unwraps where `None`, `ValueNone`, or `Error` can occur for runtime, external, or untrusted input
 - Treating a domain failure as an exception while callers are otherwise required to handle it through `Result`; do not flag an intentionally documented exception boundary
 
 #### Resource Lifetime and Mutable State
@@ -28,10 +28,10 @@
 #### .NET Interop and Type Boundaries
 - Passing F# `option` values through a .NET API as though they were `null`, or treating a nullable/reference return from .NET as non-null without a local invariant
 - P/Invoke, reflection, serialization, or JSON bindings whose declared types, field names, nullability, ownership, or enum values do not match the external contract
-- Unsafe casts (`unbox`, `:?`, `Unchecked.defaultof`, or reflection-based invocation) without a locally established runtime type/nullability invariant
+- Runtime downcasts or unchecked/default-producing operations (`:?>`, `unbox`, `Unchecked.defaultof`, or reflection-based invocation) without a locally established runtime type/nullability invariant
 - Untrusted values flowing into SQL, shell commands, file paths, URLs, deserialization, or HTML without validation or parameterization, and secrets written to source, logs, or error messages
 
 #### Signatures and Module Boundaries
-- An `.fsi` signature that promises a different type, exception behavior, mutability contract, or visibility from the implementation it exposes
+- An `.fsi` signature whose exposed types, arity, generic constraints, mutability, or visibility do not match the implementation or intended public API
 - Public functions that leak mutable implementation state or an internal representation where callers can violate the module's invariants
 - Module initialization with observable I/O, non-deterministic global state, or exceptions that make importing the module fail unexpectedly; do not report explicit, documented application bootstrap code
