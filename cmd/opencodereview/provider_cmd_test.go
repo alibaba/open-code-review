@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -497,5 +498,119 @@ func TestApplyOfficialProviderConfig_IgnoresURLFromResult(t *testing.T) {
 	}
 	if got := cfg.Providers["litellm"].URL; got != wantURL {
 		t.Errorf("persisted URL = %q, want existing URL %q", got, wantURL)
+	}
+}
+
+func TestSaveConfig_ReplacesWithoutLeavingTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"provider":"old"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveConfig(path, &Config{Provider: "anthropic"}); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"anthropic"`) {
+		t.Errorf("config not replaced: %s", data)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("expected only config.json in dir, got %d entries", len(entries))
+	}
+}
+
+func TestSaveConfig_FailedReplaceCleansUpTemp(t *testing.T) {
+	dir := t.TempDir()
+	// A directory at the config path makes the final rename fail.
+	path := filepath.Join(dir, "config.json")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveConfig(path, &Config{Provider: "anthropic"}); err == nil {
+		t.Fatal("expected an error when the config path is a directory")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("expected the temporary file to be removed, got %d entries", len(entries))
+	}
+}
+
+func TestSaveConfig_WritesThroughSymlink(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real.json")
+	if err := os.WriteFile(real, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.json")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := saveConfig(link, &Config{Provider: "anthropic"}); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Error("expected config.json to remain a symlink")
+	}
+	data, err := os.ReadFile(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"anthropic"`) {
+		t.Errorf("symlink target not updated: %s", data)
+	}
+}
+
+func TestSaveConfig_WritesThroughSymlinkToMissingTarget(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real.json")
+	link := filepath.Join(dir, "config.json")
+	// A relative link to a target that does not exist yet.
+	if err := os.Symlink("real.json", link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := saveConfig(link, &Config{Provider: "anthropic"}); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Error("expected config.json to remain a symlink")
+	}
+	data, err := os.ReadFile(real)
+	if err != nil {
+		t.Fatalf("expected the symlink target to be created: %v", err)
+	}
+	if !strings.Contains(string(data), `"anthropic"`) {
+		t.Errorf("symlink target has unexpected content: %s", data)
+	}
+}
+
+func TestResolveSymlinkTarget_Loop(t *testing.T) {
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+	if err := os.Symlink(b, a); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(a, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveSymlinkTarget(a); err == nil {
+		t.Fatal("expected an error for a symlink loop")
 	}
 }

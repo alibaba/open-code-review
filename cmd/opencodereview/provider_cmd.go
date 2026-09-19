@@ -5,6 +5,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -425,13 +426,70 @@ func saveConfig(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("write config: %w", err)
+	return writeFileAtomic(path, data)
+}
+
+// writeFileAtomic replaces path with data via a same-directory temporary file
+// and a rename, so an interrupted write never leaves a truncated config (which
+// holds API keys) behind. os.CreateTemp opens the file 0600 from the start. A
+// symlinked path is written through to its target, as os.WriteFile would.
+func writeFileAtomic(path string, data []byte) error {
+	target, err := resolveSymlinkTarget(path)
+	if err != nil {
+		return err
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("chmod config: %w", err)
+	f, err := os.CreateTemp(filepath.Dir(target), ".config-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
+	}
+	tmp := f.Name()
+	if _, err := f.Write(data); err != nil {
+		return errors.Join(fmt.Errorf("write config: %w", err), cleanupOutputTemp(f, tmp))
+	}
+	if err := f.Sync(); err != nil {
+		return errors.Join(fmt.Errorf("sync config: %w", err), cleanupOutputTemp(f, tmp))
+	}
+	if err := f.Close(); err != nil {
+		return errors.Join(fmt.Errorf("close config: %w", err), cleanupOutputTemp(nil, tmp))
+	}
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		return errors.Join(fmt.Errorf("chmod config: %w", err), cleanupOutputTemp(nil, tmp))
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		return errors.Join(fmt.Errorf("replace config: %w", err), cleanupOutputTemp(nil, tmp))
 	}
 	return nil
+}
+
+// maxSymlinkHops bounds symlink resolution, matching the common ELOOP limit.
+const maxSymlinkHops = 40
+
+// resolveSymlinkTarget follows path through any chain of symlinks and returns
+// the file that a write should replace. Unlike filepath.EvalSymlinks, the final
+// target does not have to exist yet, so a link to a not-yet-created config is
+// still written through (os.WriteFile creates such a target too).
+func resolveSymlinkTarget(path string) (string, error) {
+	for range maxSymlinkHops {
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			return path, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("inspect config path %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+		link, err := os.Readlink(path)
+		if err != nil {
+			return "", fmt.Errorf("read config symlink %s: %w", path, err)
+		}
+		if !filepath.IsAbs(link) {
+			link = filepath.Join(filepath.Dir(path), link)
+		}
+		path = link
+	}
+	return "", fmt.Errorf("resolve config path: too many levels of symbolic links")
 }
 
 func maskKey(key string) string {
