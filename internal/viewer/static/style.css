@@ -1535,7 +1535,7 @@ p {
 
 .sessions-page .session-id:focus-visible {
     outline: 2px solid var(--link);
-    outline-offset: 2px;
+    outline-offset: -2px;
     border-radius: var(--radius-xs);
 }
 
@@ -1802,7 +1802,7 @@ nav.breadcrumb a:focus-visible {
 }
 .repos-page .col-repository a:focus-visible {
     outline: 2px solid var(--link);
-    outline-offset: 2px;
+    outline-offset: -2px;
     border-radius: var(--radius-xs);
 }
 
@@ -1818,7 +1818,7 @@ nav.breadcrumb a:focus-visible {
 }
 .repos-page .repo-check:focus-visible {
     outline: 2px solid var(--link);
-    outline-offset: 2px;
+    outline-offset: -2px;
     border-radius: var(--radius-xs);
 }
 
@@ -1870,10 +1870,14 @@ nav.breadcrumb a:focus-visible {
 @media (max-width: 768px) {
     .session-page .meta span {
         white-space: normal;
+        flex-wrap: wrap;
+        overflow-wrap: anywhere;
     }
 
     .session-page .meta .meta-truncate {
         max-width: 100%;
+        overflow: visible;
+        text-overflow: clip;
     }
 }
 
