@@ -29,6 +29,7 @@ type jsonlWriter struct {
 	repoDir     string
 	gitBranch   string
 	model       string
+	llmSource   string
 	reviewMode  string
 	diffFrom    string
 	diffTo      string
@@ -47,6 +48,7 @@ func newJSONLWriter(sessionID, repoDir, gitBranch, model string, opts SessionOpt
 		repoDir:     repoDir,
 		gitBranch:   gitBranch,
 		model:       model,
+		llmSource:   opts.LLMSource,
 		reviewMode:  opts.ReviewMode,
 		diffFrom:    opts.DiffFrom,
 		diffTo:      opts.DiffTo,
@@ -144,6 +146,9 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 		"cwd":        jw.repoDir,
 		"gitBranch":  jw.gitBranch,
 		"model":      jw.model,
+	}
+	if jw.llmSource != "" {
+		rec["llmSource"] = jw.llmSource
 	}
 	if jw.reviewMode != "" {
 		rec["reviewMode"] = jw.reviewMode
@@ -295,6 +300,9 @@ func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, request
 		"request_no":  requestNo,
 		"error":       errorMsg,
 		"duration_ms": duration.Milliseconds(),
+	}
+	if jw.llmSource != "" {
+		rec["llmSource"] = jw.llmSource
 	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid

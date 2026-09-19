@@ -126,6 +126,10 @@ type Args struct {
 	// variables with no named provider.
 	Provider string
 
+	// EndpointSource is the non-secret label for the configuration source that
+	// resolved the endpoint. It is persisted with the session for diagnostics.
+	EndpointSource string
+
 	// GitRunner limits the total number of concurrent git subprocesses.
 	// When nil, subprocesses are spawned without a global limit.
 	GitRunner *gitcmd.Runner
@@ -224,6 +228,7 @@ func New(args Args) *Agent {
 			DiffCommit:  args.Commit,
 			ResumedFrom: resumedFromSession(args.Resume),
 			Operation:   session.OperationReview,
+			LLMSource:   args.EndpointSource,
 		})
 	}
 	a := &Agent{
