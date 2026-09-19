@@ -319,6 +319,10 @@ and `results.sarif` contains only the report. `--preview` does not
 support `--format sarif` — run a full review (or `ocr scan`) to
 produce a report.
 
+File paths in SARIF finding locations and suggested fixes are URI-encoded.
+For example, `src/report#1.go` is written as `src/report%231.go`, so SARIF
+consumers resolve the full filename correctly.
+
 ### Troubleshooting
 
 | Symptom | Cause / Fix |
