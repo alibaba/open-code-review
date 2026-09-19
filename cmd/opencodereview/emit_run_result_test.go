@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/alibaba/open-code-review/internal/agent"
@@ -20,6 +22,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/telemetry"
 )
 
 type mockResultProvider struct {
@@ -754,5 +757,33 @@ func TestEmitRunResult_TextReportWithWarnings(t *testing.T) {
 	}
 	if strings.Count(got, "LLM retry report summary:") != 1 {
 		t.Errorf("report emitted more than once: %s", got)
+	}
+}
+
+// TestEmitRunResult_RecordsNoRunMetrics guards against double counting: the
+// agent's Run records duration and comment counts, so emitting must not.
+func TestEmitRunResult_RecordsNoRunMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	restore := telemetry.EnableMetricsForTest(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)))
+	defer restore()
+
+	ag := &mockResultProvider{filesReviewed: 1}
+	comments := []model.LlmComment{{Path: "a.go", Content: "finding"}}
+	captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, comments, time.Now(), "json", "developer", nil, nil, os.Stdout, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == "ocr.review.duration_seconds" || m.Name == "ocr.comments_generated_total" {
+				t.Errorf("emitRunResult recorded %s; run metrics belong to the agent", m.Name)
+			}
+		}
 	}
 }

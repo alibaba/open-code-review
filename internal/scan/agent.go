@@ -315,6 +315,11 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// provider prompt caches actually reuse prefixes at.
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
+	// Record the run duration exactly once, on every return path (success,
+	// partial and failed runs alike). The command layer records nothing.
+	runCtx, runStart := ctx, time.Now()
+	defer func() { telemetry.RecordReviewDuration(runCtx, time.Since(runStart)) }()
+
 	ctx, scanSpan := telemetry.StartSpan(ctx, "scan.enumerate")
 	provider := NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner, a.args.MaxFileSizeBytes)
 	items, err := provider.Enumerate(ctx)
@@ -546,11 +551,6 @@ func extFromPath(path string) string {
 // future per-batch hooks (e.g. Phase 6 dedup) and improve LLM prompt-cache
 // hit rate by keeping same-language files adjacent in time.
 func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error) {
-	startTime := time.Now()
-	defer func() {
-		telemetry.RecordReviewDuration(ctx, time.Since(startTime))
-	}()
-
 	if len(a.items) == 0 {
 		return []model.LlmComment{}, nil
 	}

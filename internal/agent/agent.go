@@ -282,6 +282,11 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// so affinity keys stay per-conversation, the granularity provider prompt caches actually reuse prefixes at.
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
+	// Record the run duration exactly once, on every return path (success,
+	// partial and failed runs alike). The command layer records nothing.
+	runCtx, runStart := ctx, time.Now()
+	defer func() { telemetry.RecordReviewDuration(runCtx, time.Since(runStart)) }()
+
 	// Step 1: Parse diffs
 	ctx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
 	if err := a.loadDiffs(ctx); err != nil {
@@ -624,11 +629,6 @@ func (a *Agent) injectDiffMap() {
 
 // dispatchSubtasks runs the Plan + Main phases for each file group concurrently.
 func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error) {
-	startTime := time.Now()
-	defer func() {
-		telemetry.RecordReviewDuration(ctx, time.Since(startTime))
-	}()
-
 	// Pre-dispatch pass: freeze the coverage denominator before any reuse or
 	// concurrent dispatch. Register every non-deleted planned item (reused and
 	// to-run alike) into the selected set, then seal it. Must run before

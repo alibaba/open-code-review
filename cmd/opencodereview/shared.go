@@ -802,7 +802,7 @@ type resumeInfoProvider interface {
 }
 
 // emitRunResult is the post-LLM-run finalization shared by `ocr review` and
-// `ocr scan`: resolves comment line numbers, records telemetry, restores
+// `ocr scan`: resolves comment line numbers, restores
 // stdout early for agent-text audiences so the summary is visible, prints
 // the trace summary, and writes the result in the requested format.
 //
@@ -829,11 +829,9 @@ func emitRunResult(
 	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
+	// Duration and comment-count metrics are recorded by the agent's Run, which
+	// is reached on failed runs too; recording them here would double-count.
 	duration := time.Since(startTime)
-	telemetry.RecordReviewDuration(ctx, duration)
-	if len(comments) > 0 {
-		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
-	}
 
 	traceID := telemetry.TraceIDFromContext(ctx)
 	manifest := ag.RunManifest()
