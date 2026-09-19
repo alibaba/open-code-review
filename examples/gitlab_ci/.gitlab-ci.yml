@@ -11,8 +11,7 @@
 #                        pipeline fails fast if this is unset.
 #
 # Not a CI/CD variable (hardcoded in the script below):
-#   llm.use_anthropic  - Pinned to `false` (OpenAI-compatible APIs). GitLab CI/CD cannot
-#                        store variables shorter than 8 chars, so this is set via
+#   llm.use_anthropic  - Pinned to `false` (OpenAI-compatible APIs) by this example via
 #                        `ocr config set llm.use_anthropic false`. To use Anthropic
 #                        Claude, edit that line in the Configure OCR step to `true`.
 #
@@ -53,6 +52,10 @@
 #   OCR_ROUTE_SEVERITY_BELOW     - route findings at/below this severity to the summary note (e.g. "low")
 #   OCR_ROUTE_CATEGORIES         - comma-separated categories to route to the summary (e.g. "style,documentation")
 #   OCR_FAIL_ON_SEVERITY         - fail the CI job when a comment's severity is at/above this level (e.g. "critical")
+#   OCR_GATE                     - "true" enables the shared ocr gate command (default: false).
+#                                  Requires a CLI build with gate support. Also requires complete
+#                                  selected-file coverage, matching base/head, and successful publication.
+#                                  With OCR_GATE=false, OCR_FAIL_ON_SEVERITY keeps its legacy behavior.
 #
 # Outputs (written under .ocr/ in the project directory so GitLab Runner can
 # upload them as artifacts — Runner rejects paths outside the build dir):
@@ -83,6 +86,28 @@ code-review:
   variables:
     GIT_DEPTH: 0  # Full history needed for merge-base diff
   script:
+    # Validate the opt-in policy before installing OCR or spending model tokens.
+    - |
+      # Clear artifacts before any fallible setup on a reused runner.
+      mkdir -p .ocr
+      : > .ocr/ocr-result.json
+      : > .ocr/ocr-stderr.log
+      : > .ocr/ocr-gate.json
+      : > .ocr/ocr-gate-stderr.log
+      : > .ocr/ocr-stats.env
+      OCR_GATE="$(printf '%s' "${OCR_GATE:-false}" | tr '[:upper:]' '[:lower:]')"
+      case "$OCR_GATE" in
+        true|false) ;;
+        *) echo "OCR_GATE must be true or false"; exit 1 ;;
+      esac
+      if [ "$OCR_GATE" = "true" ]; then
+        OCR_GATE_SEVERITY="$(printf '%s' "${OCR_FAIL_ON_SEVERITY:-}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        case "$OCR_GATE_SEVERITY" in
+          ""|critical|high|medium|low) ;;
+          *) echo "OCR_FAIL_ON_SEVERITY must be critical, high, medium, or low"; exit 1 ;;
+        esac
+      fi
+
     # Install OpenCodeReview
     # OCR_VERSION (optional) pins the npm version spec for reproducible reviews;
     # unset falls back to "latest".
@@ -90,9 +115,14 @@ code-review:
       : "${OCR_VERSION:=latest}"
       npm install -g "@alibaba-group/open-code-review@${OCR_VERSION}"
       echo "OpenCodeReview installed with version:" && ocr version || true
+      if [ "$OCR_GATE" = "true" ] && ! ocr gate --help >/dev/null 2>&1; then
+        echo "OCR_GATE=true requires an OpenCodeReview build with the gate command; update OCR_VERSION"
+        exit 1
+      fi
 
     # Configure OCR
-    # Gitlab CI/CD does not support configuring variables with value length less than 8, so you can't set use_anthropic as a CI variable
+    # The example pins the protocol below. Short non-secret policy values such
+    # as OCR_GATE belong in visible variables; only masked values need 8 characters.
     - |
       : "${OCR_LLM_URL:?set OCR_LLM_URL in Settings -> CI/CD -> Variables}"
       : "${OCR_LLM_AUTH_TOKEN:?set OCR_LLM_AUTH_TOKEN in Settings -> CI/CD -> Variables}"
@@ -117,9 +147,13 @@ code-review:
     #   OCR_BACKGROUND         -> --background
     #   OCR_RULE               -> --rule
     - |
-      mkdir -p .ocr
       echo "Reviewing MR: ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME} against ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
       ARGS=(--from "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" --to "${CI_COMMIT_SHA}" --format json --audience agent)
+      if [ "$OCR_GATE" = "true" ]; then
+        OCR_EXPECTED_HEAD="$(git rev-parse --verify "${CI_COMMIT_SHA}^{commit}")"
+        OCR_EXPECTED_BASE="$(git merge-base "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" "$OCR_EXPECTED_HEAD")"
+        ARGS=(--from "$OCR_EXPECTED_BASE" --to "$OCR_EXPECTED_HEAD" --format json --audience agent)
+      fi
       if [ -n "$OCR_REVIEW_CONCURRENCY" ]; then ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY"); fi
       if [ -n "$OCR_BACKGROUND" ]; then ARGS+=(--background "$OCR_BACKGROUND"); fi
       if [ -n "$OCR_RULE" ]; then ARGS+=(--rule "$OCR_RULE"); fi
@@ -143,18 +177,38 @@ code-review:
     # post_review.py failed on severity gating or a posting error.
     - |
       set +e
-      python3 post_review.py .ocr/ocr-result.json
+      if [ "$OCR_GATE" = "true" ]; then
+        # The CLI owns severity policy; the publisher only verifies publication.
+        OCR_FAIL_ON_SEVERITY='' python3 post_review.py .ocr/ocr-result.json --require-publication
+      else
+        python3 post_review.py .ocr/ocr-result.json
+      fi
       POST_EXIT_CODE=$?
       set -e
 
-    # Fail the job on OCR error or severity gate (mirrors the GitHub Action).
+    # Evaluate even when review or publication failed; preserve all artifacts.
+    - |
+      OCR_GATE_EXIT_CODE=0
+      if [ "$OCR_GATE" = "true" ]; then
+        if [[ ! "$OCR_EXPECTED_BASE" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] ||
+           [[ ! "$OCR_EXPECTED_HEAD" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+          echo "The gate requires the immutable base/head resolved before review"
+          exit 1
+        fi
+        GATE_ARGS=(--input .ocr/ocr-result.json --format json --expected-base "$OCR_EXPECTED_BASE" --expected-head "$OCR_EXPECTED_HEAD")
+        [ -z "$OCR_GATE_SEVERITY" ] || GATE_ARGS+=(--fail-on-severity "$OCR_GATE_SEVERITY")
+        ocr gate "${GATE_ARGS[@]}" > .ocr/ocr-gate.json 2> .ocr/ocr-gate-stderr.log || OCR_GATE_EXIT_CODE=$?
+        cat .ocr/ocr-gate.json
+        cat .ocr/ocr-gate-stderr.log >&2
+      fi
+
+    # Fail only after publication and gate evaluation have both been attempted.
     # post_review.py has already posted any stderr to the MR summary by this
     # point, so the failure is visible both as a red pipeline and on the MR.
     - |
-      # Default OCR/POST exit codes so the gate below is safe even if a
-      # prior step was skipped (e.g., post_review.py step never reached).
-      : "${OCR_EXIT_CODE:=0}"
-      : "${POST_EXIT_CODE:=0}"
+      # Missing outcomes are not evidence of success.
+      : "${OCR_EXIT_CODE:=1}"
+      : "${POST_EXIT_CODE:=1}"
       if [ "$OCR_EXIT_CODE" != "0" ]; then
         echo "ocr review exited with code ${OCR_EXIT_CODE}; see MR summary for stderr."
         exit "$OCR_EXIT_CODE"
@@ -163,14 +217,20 @@ code-review:
         echo "post_review.py exited with code ${POST_EXIT_CODE}; see MR summary for details."
         exit "$POST_EXIT_CODE"
       fi
+      if [ "$OCR_GATE" = "true" ] && [ "${OCR_GATE_EXIT_CODE:-1}" != "0" ]; then
+        echo "ocr gate did not pass; see .ocr/ocr-gate.json and .ocr/ocr-gate-stderr.log."
+        exit "${OCR_GATE_EXIT_CODE:-1}"
+      fi
 
   # Expose the review result, stderr, and posting stats to downstream jobs.
-  # The dotenv report carries OCR_COMMENTS_* and OCR_SUMMARY_URL.
+  # The dotenv report carries OCR_COMMENTS_*, OCR_SUMMARY_URL, and OCR_SUMMARY_PUBLISHED.
   artifacts:
     when: always
     expire_in: 1 week
     paths:
       - .ocr/ocr-result.json
       - .ocr/ocr-stderr.log
+      - .ocr/ocr-gate.json
+      - .ocr/ocr-gate-stderr.log
     reports:
       dotenv: .ocr/ocr-stats.env

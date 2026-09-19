@@ -1606,5 +1606,67 @@ class MainAuthHeaderTest(unittest.TestCase):
         self.assertEqual(rc, 1)
 
 
+class RequiredPublicationTest(unittest.TestCase):
+    def run_main(self, result, poster, required=True):
+        with tempfile.TemporaryDirectory() as root:
+            input_path = os.path.join(root, "result.json")
+            stats_path = os.path.join(root, "stats.env")
+            with open(input_path, "w", encoding="utf-8") as f:
+                f.write(result if isinstance(result, str) else json.dumps(result))
+            args = [input_path, "--stats-file", stats_path, "--stderr-log", os.path.join(root, "stderr")]
+            if required:
+                args.append("--require-publication")
+            env = dict(MainAuthHeaderTest.BASE_ENV, GITLAB_API_TOKEN="fixture-token")
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(pr, "make_poster", return_value=poster), \
+                    mock.patch.object(pr, "fetch_diff_refs", return_value=DIFF_REFS), \
+                    mock.patch.object(pr, "_sleep", NOOP_SLEEP):
+                code = pr.main(args)
+            with open(stats_path, encoding="utf-8") as f:
+                return code, f.read()
+
+    def test_success_and_empty_findings(self):
+        for comments in ([], None, [comment()], [comment(end_line=0, start_line=0)]):
+            with self.subTest(comments=comments):
+                code, stats = self.run_main({"comments": comments}, Recorder())
+                self.assertEqual(code, 0)
+                self.assertIn("OCR_SUMMARY_PUBLISHED=true", stats)
+
+    def test_inline_failure_still_publishes_fallback_but_blocks(self):
+        poster = Recorder(disc_outcomes=[{"success": False, "http_status": 403}])
+        code, stats = self.run_main({"comments": [comment()]}, poster)
+        self.assertEqual(code, 1)
+        self.assertIn("OCR_COMMENTS_FAILED=1", stats)
+        self.assertIn("possible issue", poster.final_summary_body)
+
+    def test_stale_summary_url_is_not_success(self):
+        for comments in ([], [comment()]):
+            with self.subTest(comments=comments):
+                old = [{"id": 42, "body": pr.SUMMARY_MARKER, "web_url": "https://x/old"}]
+                poster = Recorder(notes=old, update_outcomes=[{"success": False}] * 3)
+                code, stats = self.run_main({"comments": comments}, poster)
+                self.assertEqual(code, 1)
+                self.assertIn("OCR_SUMMARY_URL=https://x/old", stats)
+                self.assertIn("OCR_SUMMARY_PUBLISHED=false", stats)
+
+    def test_mr_fallback_url_is_not_success(self):
+        poster = Recorder(notes_read_failure=True)
+        poster.mr_url = lambda: "https://x/mr"
+        code, stats = self.run_main({"comments": [comment()]}, poster)
+        self.assertEqual(code, 1)
+        self.assertIn("OCR_SUMMARY_URL=https://x/mr", stats)
+        self.assertIn("OCR_SUMMARY_PUBLISHED=false", stats)
+
+    def test_malformed_input_blocks(self):
+        code, _ = self.run_main("{", Recorder())
+        self.assertEqual(code, 1)
+
+    def test_default_preserves_best_effort_publication(self):
+        code, _ = self.run_main({"comments": [comment()]}, Recorder(notes_read_failure=True), required=False)
+        self.assertEqual(code, 0)
+        code, _ = self.run_main("{", Recorder(), required=False)
+        self.assertEqual(code, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -209,6 +209,32 @@ The task and request timeouts are independent:
     llm_timeout: '900'
 ```
 
+### Opt into the shared CI gate
+
+Add these inputs to your existing action step:
+
+```yaml
+gate: 'true'
+fail_on_severity: high
+```
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `gate` | `'false'` | Enable `ocr gate` after publication. Accepts `true` or `false`, case-insensitively. |
+| `fail_on_severity` | `''` | Optional threshold: `critical`, `high`, `medium`, or `low`. Requires `gate: 'true'`; matching ignores case and surrounding whitespace. Empty checks coverage and delivery without blocking on finding severity. |
+
+Use an `ocr_version` that includes the `ocr gate` command. An action update does not add that command to an older pinned CLI: when enabled, the action checks support before running the model and fails with an upgrade message if it is unavailable. Leaving the gate disabled preserves compatibility with the existing supported CLI versions.
+
+The gate always checks complete coverage of the selected set, recorded `code_comment` failures, and the exact immutable base/head resolved before review. Budget stops, waived items, zero selected files, missing evidence, and unknown manifest versions do not pass. Thresholds apply to the original findings, including findings routed to the summary or skipped by incremental posting. Only the CLI's `pass` decision exits `0`.
+
+Enabling the gate forces a full review from the merge base, even if `checkpoint_range` is enabled. It does not consume or advance checkpoints: earlier blocking findings must not disappear just because a later push reviews a narrower range. Comment routing and incremental posting still work; they do not filter the gate's input.
+
+The action attempts publication even after a non-zero review exit, then evaluates the gate and uploads artifacts before final enforcement. The job fails if the review failed, the gate failed or could not run, publication threw an error, any inline submission remained failed, or the final summary was not confirmed published. A fallback summary does not clear an inline submission failure under this conservative policy. Missing outcomes never count as success, and a gate pass cannot erase a review or publication failure.
+
+The `gate_exit_code` action output is the gate command's exit code only; it is empty if the gate is disabled or was not reached. It is not an overall job-success flag. With artifact upload enabled, `ocr-gate.json` and `ocr-gate-stderr.log` accompany the review result and stderr. Each invocation uses a fresh temporary directory, including repeated invocations in the same job.
+
+The revisions are the event's reviewed snapshot. This integration does not query a PR's live head after review or attest excluded files. Use trusted workflow policy and CLI artifacts; merge-time freshness enforcement remains separate.
+
 ### Control review effort and token budget
 
 | Input | Default | Description |
@@ -604,7 +630,7 @@ OCR supports both OpenAI and Anthropic API formats:
 
 The action does not use an `OCR_DEBUG` flag. To diagnose a run:
 
-- **Artifacts**: with `upload_artifacts: 'true'` (the default), the raw `ocr-result.json` and `ocr-stderr.log` are uploaded as workflow artifacts named `ocr-review-result-<run_id>-<run_attempt>`. Download them from the run's **Artifacts** section.
+- **Artifacts**: with `upload_artifacts: 'true'` (the default), the raw `ocr-result.json` and `ocr-stderr.log` are uploaded as workflow artifacts named `ocr-review-result-<run_id>-<run_attempt>`. When the gate runs, `ocr-gate.json` and `ocr-gate-stderr.log` are included. Download them from the run's **Artifacts** section.
 - **Step log**: the "Run OpenCodeReview" step prints both the JSON result and stderr to the workflow log.
 - **Action outputs**: the step exposes `comments_total`, `comments_inline`, `comments_skipped`, `comments_routed`, `comments_failed`, `comments_resolved`, `comments_resolved_preview`, and `summary_comment_url` outputs — inspect them in the job's step outputs.
 - **GitHub step debug**: for verbose Actions runner diagnostics, enable the repository secret `ACTIONS_STEP_DEBUG=true` (standard GitHub Actions mechanism).

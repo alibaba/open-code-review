@@ -16,6 +16,7 @@ Usage:
 
 Commands:
   review, r    Start a code review
+  gate         Evaluate a saved review result for CI
   rules        Inspect and debug review rules
   config       Manage configuration settings
   llm          LLM utility commands
@@ -67,6 +68,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | コマンド | エイリアス | 役割 |
 |---|---|---|
 | `ocr review` | `ocr r` | コードレビューを実行してコメントを出力します。 |
+| `ocr gate` | — | 保存済みレビュー結果をモデル呼び出しなしで CI 判定します。 |
 | `ocr scan` | `ocr s` | Git diff を必要とせず、ファイル全体をスキャンします。 |
 | `ocr rules check <file>` | — | あるファイルパスにどのルールが適用され、その出所はどこかを表示します。 |
 | `ocr config set <key> <value>` | — | 設定値を `~/.opencodereview/config.json` に永続化します。 |
@@ -330,6 +332,31 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
 | `1` | 致命的エラー。引数の誤り、LLM エンドポイントを解決できない、すべてのファイルごとのサブエージェントが失敗した、などです。エラーテキストは stderr に出力されます。 |
 
 致命的でない警告（個々のサブエージェントの失敗、あるファイルが token しきい値を超過、など）はインラインで出力されます。JSON モードでは `warnings` 配列に追加されます。
+
+## `ocr gate`
+
+保存済みの `ocr review --format json` 結果を評価します。モデル、リポジトリ、ホスティング API にはアクセスしません。このコマンドを実行するとゲートが有効になります。`ocr review` の終了コードや manifest は変更しません。
+
+```bash
+ocr gate --input ocr-result.json --fail-on-severity high --format json
+ocr gate --input ocr-result.json --expected-base <base-sha> --expected-head <head-sha>
+```
+
+| フラグ | 既定値 | 説明 |
+|---|---|---|
+| `--input <path>` | 必須 | 結果ファイル。`-` は標準入力です。 |
+| `--fail-on-severity <level>` | 無効 | `critical`、`high`、`medium`、`low` の指定値以上をブロックします。大文字小文字と前後の空白を無視します。重要度の欠落や未知の値は判定不能です。 |
+| `--expected-base <sha>` | 無効 | 実際の base と照合します。範囲レビューでは要求したブランチ先端ではなく merge-base です。 |
+| `--expected-head <sha>` | 無効 | レビューした head と照合します。両フラグとも小文字の完全な 40 桁または 64 桁のオブジェクト ID が必要です。作業ツリー結果では不変のバージョンを証明できません。 |
+| `--format <text\|json>`、`-f` | `text` | JSON は `ocr.gate/v1`。実行 ID、ポリシー、安定した理由コード付きのチェック一覧を出力します。 |
+
+`pass` のみ終了コード **0** です。`fail`（重要度の条件違反）と `inconclusive`（証拠不足）は結果出力後に **1** を返します。引数、入力ファイル、出力書き込みのエラーも 1 で、stderr の診断のみになる場合があります。不正な JSON は判定不能の結果を出力します。ブロック対象の指摘と未完了のレビューが共存する場合は `fail` とし、両方の理由を保持します。
+
+カバレッジとコメント提出は常に検査します。selected の全項目が completed または既存の resume 契約による reused である必要があります。**予算上限による中断を含む** failed、waived、実行全体の失敗は通過しません。選択数ゼロも判定不能です。manifest v1 は空の変更と全ファイル除外を区別できません。欠落・矛盾した記録、旧形式、未知の manifest バージョンも通過しません。通過は選択された範囲のみが対象で、チームが意図した全ファイルの選択を保証しません。
+
+ツール失敗の件数と詳細は一致する必要があります。`code_comment` の失敗記録があれば、後の提出が成功していても交付は判定不能です。同じ指摘が再提出されたことを現在の結果では証明できません。探索用の検索・読み取り失敗だけではブロックしません。重要度はインライン投稿されなかったものを含む全指摘から判定し、`--fail-on-severity` 未指定時は検査しません。
+
+信頼できる成果物、ポリシー、期待リビジョンを使用してください。JSON の真正性、PR の現在の head、投稿成功、コードの無欠陥性は確認しません。期待リビジョン未指定時はバージョン照合を行いません。CI では元のレビュー終了コードを保持し、ゲートの通過で実行・投稿の失敗を消さないでください。レビュー失敗で既存出力が残る場合があるため、毎回新しい出力パスを使います。終了コードを保存し、失敗時も結果を保存・アップロードした後にゲートを評価し、実行またはゲートが失敗したら CI を失敗させます。再評価でモデルのトークンは消費しません。
 
 ## `ocr scan`
 

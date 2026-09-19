@@ -1095,18 +1095,24 @@ def find_summary_note(notes, tag=None):
 
 
 def upsert_summary(poster, body, sticky, tag=None):
+    """Return the best-effort summary URL, preserving the legacy contract."""
+    return _upsert_summary_result(poster, body, sticky, tag)[0]
+
+
+def _upsert_summary_result(poster, body, sticky, tag=None):
     """Find-or-create/update a summary note.
 
     Sticky matches the cross-run :data:`SUMMARY_MARKER`; non-sticky matches
     this run's ``tag`` (per-run), so retries within a run update the note in
     place rather than creating duplicates. Returns the note URL (best-effort)
-    or None when the read API is unavailable and a write would risk duplicating.
+    and whether this run's content was confirmed written. An existing note URL
+    remains useful for navigation after a failure, but is not publication evidence.
     """
     notes = poster.list_notes()
     if notes is None:
         log("[summary] cannot list notes for %s upsert; skipping to avoid duplicate."
             % ("sticky" if sticky else "non-sticky"))
-        return None
+        return None, False
     needle = SUMMARY_MARKER if sticky else tag
     existing = find_summary_note(notes, tag=needle) if needle else None
     if existing is not None:
@@ -1115,9 +1121,10 @@ def upsert_summary(poster, body, sticky, tag=None):
             log("[summary] failed to update note %s (HTTP %s): %s; stale content may remain."
                 % (existing.get("id"), (resp or {}).get("http_status"),
                    _truncate_error((resp or {}).get("error_body"))))
-        return (resp or {}).get("url") or existing.get("web_url")
+        return ((resp or {}).get("url") or existing.get("web_url"),
+                bool((resp or {}).get("success")))
     resp = poster.post_note(body)
-    return (resp or {}).get("url")
+    return (resp or {}).get("url"), bool((resp or {}).get("success"))
 
 
 def ensure_summary_anchor(poster, body, sticky, tag=None):
@@ -1143,15 +1150,20 @@ def ensure_summary_anchor(poster, body, sticky, tag=None):
 
 
 def finalize_summary(poster, body, sticky, anchor_id, tag=None):
+    """Return the best-effort final summary URL."""
+    return _finalize_summary_result(poster, body, sticky, anchor_id, tag)[0]
+
+
+def _finalize_summary_result(poster, body, sticky, anchor_id, tag=None):
     """Phase 2: write the final summary body to the anchored note (or upsert)."""
     if anchor_id is not None:
         resp = poster.update_note(anchor_id, body)
         if (resp or {}).get("success"):
-            return (resp or {}).get("url")
+            return (resp or {}).get("url"), True
         log("[summary] failed to update anchored note %s (HTTP %s): %s; falling back to upsert."
             % (anchor_id, (resp or {}).get("http_status"),
                _truncate_error((resp or {}).get("error_body"))))
-    return upsert_summary(poster, body, sticky, tag=tag)
+    return _upsert_summary_result(poster, body, sticky, tag=tag)
 
 
 # --------------------------------------------------------------------------- #
@@ -1164,7 +1176,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
 
     Returns a stats dict with mutually-exclusive counts::
 
-        {total, inline, summary, routed, skipped, failed, summary_url}
+        {total, inline, summary, routed, skipped, failed, summary_url, summary_published}
     """
     comments = result.get("comments") or []
     warnings = result.get("warnings") or []
@@ -1177,15 +1189,16 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     failure_delay = config["failure_delay"]
     rate_limit_threshold = config["rate_limit_threshold"]
     stats = {"total": len(comments), "inline": 0, "summary": 0,
-             "routed": 0, "skipped": 0, "failed": 0, "summary_url": None}
+             "routed": 0, "skipped": 0, "failed": 0, "summary_url": None,
+             "summary_published": False}
 
     # No comments: LGTM summary (sticky-aware).
     if not comments:
         message = result.get("message", "No comments generated. Looks good to me.")
         body = wrap_summary_body("✅ **OpenCodeReview**: %s" % message,
                                  config.get("run_tag", "0-0"))
-        stats["summary_url"] = upsert_summary(poster, body, sticky,
-                                             tag=summary_tag_for(config.get("run_tag", "0-0")))
+        stats["summary_url"], stats["summary_published"] = _upsert_summary_result(
+            poster, body, sticky, tag=summary_tag_for(config.get("run_tag", "0-0")))
         return stats
 
     # Partition: inline / no-line / routed.
@@ -1312,8 +1325,8 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     summary_body += format_warnings(warnings)
     run_tag = config.get("run_tag", "0-0")
     full_body = wrap_summary_body(summary_body, run_tag)
-    stats["summary_url"] = finalize_summary(poster, full_body, sticky, anchor_id,
-                                           tag=summary_tag_for(run_tag))
+    stats["summary_url"], stats["summary_published"] = _finalize_summary_result(
+        poster, full_body, sticky, anchor_id, tag=summary_tag_for(run_tag))
     if not stats["summary_url"]:
         stats["summary_url"] = poster.mr_url()
     return stats
@@ -1375,7 +1388,8 @@ def _parse_bool(value, default=False):
 # artifact is always present for downstream jobs (see .gitlab-ci.yml
 # `reports: dotenv`).
 ZERO_STATS = {"total": 0, "inline": 0, "summary": 0,
-              "routed": 0, "skipped": 0, "failed": 0, "summary_url": None}
+              "routed": 0, "skipped": 0, "failed": 0, "summary_url": None,
+              "summary_published": False}
 
 
 def build_config(env):
@@ -1414,6 +1428,7 @@ def write_stats_file(path, stats):
     for key in ("total", "inline", "summary", "routed", "skipped", "failed"):
         lines.append("OCR_COMMENTS_%s=%d" % (key.upper(), stats.get(key, 0)))
     lines.append("OCR_SUMMARY_URL=%s" % (stats.get("summary_url") or ""))
+    lines.append("OCR_SUMMARY_PUBLISHED=%s" % str(bool(stats.get("summary_published"))).lower())
     parent = os.path.dirname(path)
     if parent:
         try:
@@ -1465,6 +1480,8 @@ def parse_args(argv):
                    help="dotenv output path for posting stats (default: .ocr/ocr-stats.env)")
     p.add_argument("--dry-run", action="store_true",
                    help="print discussions/notes instead of posting them")
+    p.add_argument("--require-publication", action="store_true",
+                   help="fail if input is invalid, an inline submission fails, or the final summary is not published")
     return p.parse_args(argv)
 
 
@@ -1524,7 +1541,7 @@ def main(argv=None):
             )
             upsert_summary(poster, body, config.get("sticky_summary", True),
                            tag=summary_tag_for(run_tag))
-        return 0
+        return 1 if args.require_publication else 0
 
     comments = result.get("comments", [])
 
@@ -1541,6 +1558,11 @@ def main(argv=None):
 
     stats = publish(result, diff_refs, poster, config, sleep=_sleep)
     write_stats_file(args.stats_file, stats)
+
+    if not args.dry_run and args.require_publication and (
+            stats["failed"] or not stats["summary_published"]):
+        log("Failing job: review publication is incomplete.")
+        return 1
 
     if not args.dry_run and check_fail_on_severity(comments, config.get("fail_on_severity", "")):
         log("Failing job: review contains severity at or above '%s'." % config["fail_on_severity"])

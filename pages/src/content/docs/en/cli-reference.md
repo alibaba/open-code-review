@@ -17,6 +17,7 @@ Usage:
 
 Commands:
   review, r    Start a code review
+  gate         Evaluate a saved review result for CI
   rules        Inspect and debug review rules
   config       Manage configuration settings
   llm          LLM utility commands
@@ -69,6 +70,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | Command | Alias | What it does |
 |---|---|---|
 | `ocr review` | `ocr r` | Run a code review and emit comments. |
+| `ocr gate` | — | Evaluate a saved review result for CI without calling a model. |
 | `ocr scan` | `ocr s` | Scan complete files without requiring a Git diff. |
 | `ocr rules check <file>` | — | Show which rule applies to a given file path and where it came from. |
 | `ocr config set <key> <value>` | — | Persist a config value to `~/.opencodereview/config.json`. |
@@ -352,6 +354,59 @@ envelope instead so callers can distinguish "no changes" from "no findings":
 Non-fatal warnings (a single sub-agent failed, a file exceeded the token
 threshold, etc.) are printed inline; in JSON mode they're added to the
 `warnings` array.
+
+## `ocr gate`
+
+Evaluate one saved `ocr review --format json` result without calling a model,
+reading the repository, or contacting a hosting platform. Running this command
+opts into the gate; it does not change `ocr review` exit codes or its manifest.
+
+```bash
+ocr gate --input ocr-result.json --fail-on-severity high --format json
+# Optional: bind the result to trusted, full resolved object IDs.
+ocr gate --input ocr-result.json --expected-base <base-sha> --expected-head <head-sha>
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input <path>` | required | Read the saved result; `-` reads stdin. |
+| `--fail-on-severity <level>` | disabled | Block findings at or above `critical`, `high`, `medium`, or `low`. Matching ignores case and surrounding whitespace. Unknown or missing finding severity makes this check inconclusive. |
+| `--expected-base <sha>` | disabled | Require the exact resolved base (the merge base for range review), not the requested branch tip. |
+| `--expected-head <sha>` | disabled | Require the exact reviewed head. Both revision flags require full lowercase 40- or 64-character object IDs. Workspace results cannot attest an immutable revision. |
+| `--format <text\|json>`, `-f` | `text` | JSON uses schema `ocr.gate/v1` and includes the run ID, policy, and ordered checks with stable reason codes. |
+
+Only `pass` exits **0**. `fail` (a confirmed severity violation) and
+`inconclusive` (insufficient evidence) both exit **1**, after writing the decision.
+Argument, input-file, and output-write errors also exit 1; these may have only a
+stderr diagnostic. Invalid JSON produces an inconclusive JSON/text decision.
+If both a blocking finding and incomplete coverage exist, the overall result is
+`fail`; both checks remain visible.
+
+Coverage and comment delivery are always checked. Every selected item must be
+completed or reused under OCR's existing resume contract. Failed items
+**including budget stops**, waived items, and run-level failures do not pass.
+Zero selected items are inconclusive: manifest v1 cannot distinguish an empty
+change from changes excluded by selection. Missing or inconsistent coverage,
+legacy output, and unknown manifest versions do not pass either. A pass covers
+only the selected set; it does not prove that file selection included everything
+your team intended to review.
+
+Tool failure counts and details must agree. Any recorded `code_comment` failure
+makes delivery inconclusive, even if another submission later succeeded: the
+current result cannot establish that it delivered the same findings. Failed
+exploratory searches or reads alone do not block. Severity uses all original
+findings, including those not published inline. Without `--fail-on-severity`,
+severity does not affect the decision.
+
+Use a trusted artifact and trusted policy/expected revisions. This command does
+not authenticate JSON, query the current PR head, validate publication, or
+certify that the code is defect-free. Missing expected-revision flags leave
+revision matching unchecked. Keep the review's original exit code in CI; a gate
+pass must not erase a process or publishing failure. Use a fresh result path per
+run because a failed review can leave an existing output file untouched. Capture
+the review exit code, retain/upload the result even on failure, evaluate the gate,
+and fail CI if either execution or the gate failed. Re-evaluating an artifact
+never spends additional model tokens.
 
 ## `ocr scan`
 
