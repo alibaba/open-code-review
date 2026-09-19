@@ -3,6 +3,8 @@
 
 package llm
 
+//go:generate go run ./gen -output ../../extensions/frontend/src/shared/providers.generated.ts
+
 import (
 	"sort"
 	"strings"
@@ -35,6 +37,8 @@ type Provider struct {
 	AmbientAuth bool
 }
 
+// After modifying the built-in provider registry, run `go generate ./internal/llm`
+// and commit extensions/frontend/src/shared/providers.generated.ts.
 var registry = []Provider{
 	{
 		Name:        "anthropic",

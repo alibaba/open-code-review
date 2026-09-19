@@ -10,25 +10,38 @@ import java.util.Locale
  * Only the names are copied, not the baseUrl/models/protocol tables: the host side only needs
  * [isPresetProvider] (to decide whether a value is written to `providers` or `custom_providers`),
  * and duplicating the whole tables would create a second data source that drifts apart on the two sides.
- * Drift is caught by `ProvidersTest`, which regex-extracts the `name:` fields from the shared
- * frontend source and compares them.
+ * Drift is caught by `ProvidersTest`, which reads the generated shared frontend catalog
+ * and compares its provider names with this set.
  */
 private val PRESET_PROVIDER_NAMES: Set<String> = setOf(
     "anthropic",
-    "openai",
+    "baidu-qianfan",
+    "bedrock",
     "dashscope",
     "dashscope-tokenplan",
-    "volcengine",
     "deepseek",
-    "tencent-tokenhub",
+    "edenai",
+    "gemini",
     "hy-tokenplan",
+    "iflytek",
     "kimi",
-    "z-ai",
-    "z-ai-coding",
+    "kimi-global",
+    "litellm",
     "mimo",
     "minimax",
     "minimax-cn",
-    "baidu-qianfan",
+    "mistral",
+    "novita",
+    "ollama-cloud",
+    "openai",
+    "openai-responses",
+    "siliconflow",
+    "siliconflow-cn",
+    "tencent-tokenhub",
+    "volcengine",
+    "xai",
+    "z-ai",
+    "z-ai-coding",
 )
 
 /** Compares after trim + lowercase; Locale.ROOT avoids surprises such as the Turkish-locale 'I' lowercasing to a dotless i. */
