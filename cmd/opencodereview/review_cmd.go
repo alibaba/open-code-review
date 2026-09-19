@@ -367,6 +367,7 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 	if err != nil {
 		return nil, fmt.Errorf("load resume session: %w (run 'ocr session list' to see available sessions)", err)
 	}
+	warnRecoveredResume(state)
 	if err := state.ValidateOptions(current); err != nil {
 		return nil, fmt.Errorf("%w (run 'ocr session list' to see available sessions)", err)
 	}
