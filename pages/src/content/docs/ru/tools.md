@@ -204,14 +204,18 @@ LINE_RANGE: 10-80
 {
   "name": "file_read_diff",
   "input": {
-    "path_array": ["src/api/handler.go", "src/db/queries.go"]
+    "path_array": ["src/api/handler.go", "src/db/queries.go"],
+    "start_line": 1
   }
 }
 ```
 
+`start_line` необязателен, по умолчанию 1.
+
 ### Вывод
 
 ```
+IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -230,6 +234,13 @@ LINE_RANGE: 10-80
 пропускается. Если **ни одного** из запрошенных путей нет в наборе изменений,
 инструмент возвращает `Error: diff not found for the requested paths`; пустой
 `path_array` возвращает `Error: no files found`.
+
+За один вызов возвращается не более 500 строк diff; они считаются по всем
+запрошенным файлам в заданном порядке (заголовки файлов не учитываются). Если
+осталось ещё, `IS_TRUNCATED` равен `true`, а в конец добавляется сообщение с
+`start_line` для следующей страницы — передайте его вместе с тем же
+`path_array`. Если `start_line` больше последней строки diff, возвращается
+ошибка с общим числом строк.
 
 ## `file_find`
 

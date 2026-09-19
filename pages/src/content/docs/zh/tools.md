@@ -174,14 +174,18 @@ hunk 头 `@@ -x,y +m,n @@` 计算范围——通常 `m-50` 到 `m+n+50`。
 {
   "name": "file_read_diff",
   "input": {
-    "path_array": ["src/api/handler.go", "src/db/queries.go"]
+    "path_array": ["src/api/handler.go", "src/db/queries.go"],
+    "start_line": 1
   }
 }
 ```
 
+`start_line` 可选，默认为 1。
+
 ### 输出
 
 ```
+IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -199,6 +203,11 @@ hunk 头 `@@ -x,y +m,n @@` 计算范围——通常 `m-50` 到 `m+n+50`。
 若某路径不在变更集中，该条目被静默省略。若请求的路径**都不**在变更集中，工具
 返回 `Error: diff not found for the requested paths`；空的 `path_array` 返回
 `Error: no files found`。
+
+每次调用最多返回 500 行 diff，按请求顺序跨所有文件累计（文件头不计入）。若仍有
+剩余，`IS_TRUNCATED` 为 `true`，并在末尾追加一条提示，给出下一页应传的
+`start_line`——需配合相同的 `path_array` 使用。`start_line` 超过最后一行 diff 时
+返回错误并给出总行数。
 
 ## `file_find`
 
