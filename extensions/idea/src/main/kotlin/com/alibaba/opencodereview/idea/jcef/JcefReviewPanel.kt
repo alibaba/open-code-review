@@ -20,9 +20,11 @@ import javax.swing.JPanel
 import java.awt.BorderLayout
 
 /**
- * 侧栏的 JCEF 宿主：创建 webview、装配消息桥、投递宿主消息。消息分发交由路由层处理。
- * attach/detach 走侧栏专用入口：JCEF 回调仅提供字符串、不含来源标识，
- * 通道身份须由本层显式提供，否则配置面板消息会串入侧栏。
+ * The sidebar's JCEF host: creates the webview, wires the message bridge and posts host messages.
+ * Dispatching is left to the routing layer.
+ * attach/detach go through the sidebar-only entry points: a JCEF callback supplies a bare string
+ * with no origin, so the channel identity has to come from this layer — otherwise config panel
+ * messages would leak into the sidebar.
  */
 class JcefReviewPanel(project: Project) : Disposable {
 
@@ -38,8 +40,10 @@ class JcefReviewPanel(project: Project) : Disposable {
             webview = null
             component = jcefUnsupportedPlaceholder()
         } else {
-            // OcrWebview 构造或 attachSidebar 即便 isSupported 为真仍可能抛：
-            // 工厂层会 catch 并显示占位，但半构造的 OcrWebview（已起 timer、连了消息总线）没人 dispose 会泄漏，故此处自清理后回退占位。
+            // OcrWebview's constructor and attachSidebar can throw even when isSupported is true:
+            // the factory layer catches and shows the placeholder, but a half-constructed
+            // OcrWebview (timers already running, message bus connected) leaks unless someone
+            // disposes it, so clean up here and fall back to the placeholder.
             val (vw, comp, ch) = try {
                 val view = OcrWebview(
                     html = { bridge -> WebviewHtml.sidebar(service.currentLocale(), bridge) },
@@ -47,44 +51,51 @@ class JcefReviewPanel(project: Project) : Disposable {
                 )
                 val outbound = WebviewChannel { json -> view.post(json) }
                 try {
-                    val viewComponent = view.component // 取在 attach 之前，缩小 attach 之后仍可能抛错的窗口
+                    val viewComponent = view.component // read before attach, narrowing the window in which attach can still throw
                     service.attachSidebar(outbound)
                     Triple(view, viewComponent, outbound)
                 } catch (e: Exception) {
-                    // attach 前后都先尝试 detach（幂等）：channel 可能已被部分注册，不清理会泄漏且继续向已 dispose 的 view 投递。
+                    // Try detach first in both cases (it is idempotent): the channel may be
+                    // partially registered, and leaving it leaks and keeps posting to a disposed view.
                     runCatching { service.detachSidebar(outbound) }
                     runCatching { view.dispose() }
                     throw e
                 }
             } catch (e: Exception) {
-                // 只接 Exception：OOM/LinkageError 等 Error 不在此吞，交给工厂层 catch(Throwable) 统一兜底，避免掩盖致命问题。
-                // ProcessCanceledException 是 IntelliJ 取消信号，绝不能吞（否则破坏取消机制）。
+                // Exception only: Errors such as OOM/LinkageError are not swallowed here but left to
+                // the factory's catch(Throwable), so a fatal problem is not masked.
+                // ProcessCanceledException is IntelliJ's cancellation signal and must never be
+                // swallowed (that would break cancellation).
                 if (e is ProcessCanceledException) throw e
-                thisLogger().warn("[ocr] 侧栏 JCEF webview 初始化失败，回退占位", e)
+                thisLogger().warn("[ocr] Sidebar JCEF webview failed to initialize, falling back to placeholder", e)
                 Triple(null, jcefUnsupportedPlaceholder(), null)
             }
             webview = vw
             component = comp
             channel = ch
-            // OcrWebview 内部 messageBus.connect(this) 把自己挂到 Disposer 树（ROOT_DISPOSable 下）；
-            // 必须注册为本面板的子节点，否则 IDE 关闭时 Disposer 找不到 parent → memory leak。
+            // Inside OcrWebview, messageBus.connect(this) attaches it to the Disposer tree (under
+            // ROOT_DISPOSABLE); it must be registered as a child of this panel, or the Disposer
+            // finds no parent when the IDE closes → memory leak.
             vw?.let { Disposer.register(this, it) }
         }
     }
 
     override fun dispose() {
-        // 先取局部再清空：channel 是 @Volatile 但读后置空非原子，捕获局部避免与可能的再 attach 竞态。
+        // Read into a local before clearing: channel is @Volatile but reading then clearing is not
+        // atomic, so capture the local to avoid racing a possible re-attach.
         val ch = channel
         channel = null
-        // detach 抛也不应阻断 webview 释放（否则 JCEF browser 泄漏：timer、消息总线监听），故 runCatching。
+        // A throwing detach must not block the webview release (that would leak the JCEF browser:
+        // timers, message bus listeners), hence runCatching.
         if (ch != null) runCatching { service.detachSidebar(ch) }
         webview?.dispose()
     }
 }
 
 /**
- * JCEF 不可用时的兜底提示（此时插件所有 UI 均不可用）。[locale] 默认取 IDE 界面语言：
- * 进入此路径意味着 webview 无法启动，页面语言信息不可用。
+ * Fallback notice for when JCEF is unavailable (all of the plugin's UI is then unusable).
+ * [locale] defaults to the IDE UI language: reaching this path means the webview cannot start, so
+ * no page language is available.
  */
 internal fun jcefUnsupportedPlaceholder(locale: SupportedLocale = currentIdeLocale()): JComponent =
     JPanel(BorderLayout()).apply {

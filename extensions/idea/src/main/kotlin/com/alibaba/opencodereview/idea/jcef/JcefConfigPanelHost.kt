@@ -17,7 +17,8 @@ import javax.swing.Action
 import javax.swing.JComponent
 
 /**
- * 配置面板的窗口实现，使用非模态对话框：可与编辑器并排查看、可拖动缩放、关闭即释放。
+ * Window implementation for the config panel, using a non-modal dialog: it can sit next to the
+ * editor, be dragged and resized, and is released as soon as it closes.
  */
 class JcefConfigPanelHost(
     private val project: Project,
@@ -40,7 +41,8 @@ class JcefConfigPanelHost(
         get() = dialog?.isShowing == true
 
     override val channel: WebviewChannel = WebviewChannel { json ->
-        // 面板已关闭时静默丢弃：安装等长耗时任务的日志可能在关闭后才到达。
+        // Silently dropped while the panel is closed: log lines from long tasks such as an install
+        // can arrive after it closes.
         webview?.post(json)
     }
 
@@ -48,7 +50,8 @@ class JcefConfigPanelHost(
         onEdt {
             dialog?.let { existing ->
                 if (existing.isShowing) {
-                    // 已打开时仅置顶，不重建窗口（重建会丢失用户已填写的表单）。
+                    // When already open, just bring it to the front without rebuilding the window
+                    // (rebuilding would lose the user's filled-in form).
                     existing.window?.toFront()
                     return@onEdt
                 }
@@ -69,12 +72,14 @@ class JcefConfigPanelHost(
         webview = view
         val created = PanelDialog(view.component)
         dialog = created
-        // OcrWebview 内部 messageBus.connect(this) 把自己挂到 Disposer 树（ROOT_DISPOSABLE 下）；
-        // 注册为本 host 的子节点，否则 IDE 关闭时 Disposer 找不到 parent → memory leak。
+        // Inside OcrWebview, messageBus.connect(this) attaches it to the Disposer tree (under
+        // ROOT_DISPOSABLE); register it as a child of this host, or the Disposer finds no parent
+        // when the IDE closes → memory leak.
         Disposer.register(this, view)
-        // 对话框关闭（点击关闭按钮、按 Esc 或由页面发送 closeConfigPanel）时销毁 webview，否则 CEF browser 会持续驻留，下次又重新创建。
+        // Dispose the webview when the dialog closes (close button, Esc, or a closeConfigPanel sent
+        // by the page), or the CEF browser lingers and has to be created again next time.
         Disposer.register(created.disposable) {
-            view.dispose()  // 幂等，Disposer 也会调一次
+            view.dispose()  // idempotent; the Disposer calls it too
             if (webview === view) webview = null
             if (dialog === created) dialog = null
         }
@@ -82,14 +87,17 @@ class JcefConfigPanelHost(
     }
 
     override fun dispose() {
-        // 取局部后清空，避免与对话框关闭回调的二次 dispose 竞态。
+        // Read into locals and clear, to avoid racing the dialog-close callback's second dispose.
         val w = webview
         val d = dialog
         webview = null
         dialog = null
-        // 关闭仍可见的对话框（项目关闭时若面板开着，避免留孤儿原生窗口）+ 释放 JCEF browser 都须在 EDT
-        // （Swing/CEF 契约）。不用 onEdt——其 isDisposed 守卫会在项目关闭路径跳过、browser 永不释放；
-        // 此处 invokeLater 不带守卫，关闭时 EDT 仍会派发；派发不到也无妨（JVM 退出由 OS 回收）。OcrWebview/dialog.close 幂等。
+        // Both closing a still-visible dialog (so that closing a project with the panel open leaves
+        // no orphan native window) and releasing the JCEF browser must happen on the EDT (the
+        // Swing/CEF contract). onEdt is not used because its isDisposed guard skips the project-close
+        // path and the browser would never be released; this invokeLater has no guard, so the EDT
+        // still dispatches during shutdown, and if it does not, the JVM exit reclaims the resources.
+        // OcrWebview and dialog.close are idempotent.
         val app = ApplicationManager.getApplication()
         val cleanup: () -> Unit = {
             d?.let { runCatching { it.close(DialogWrapper.OK_EXIT_CODE) } }
@@ -108,9 +116,10 @@ class JcefConfigPanelHost(
         DialogWrapper(project, /* canBeParent = */ false) {
 
         init {
-            // 每次开窗时重新取词：用户可能中途更换 IDE 语言，下次打开即采用新语言。
+            // Re-fetch the strings each time the window opens: the user may switch the IDE language
+            // in the meantime, and the next open should use the new one.
             title = HostStrings.t(locale(), "ext.configPanelTitle")
-            isModal = false // 配置时要能回去看代码
+            isModal = false // the user must be able to go back and read code while configuring
             init()
         }
 
@@ -118,10 +127,11 @@ class JcefConfigPanelHost(
             preferredSize = Dimension(WIDTH, HEIGHT)
         }
 
-        /** 页面自身已有保存/关闭按钮，底部再放置一排 OK/Cancel 仅会造成困惑。 */
+        /** The page already has save/close buttons; another row of OK/Cancel at the bottom would
+         *  only confuse. */
         override fun createActions(): Array<Action> = emptyArray()
 
-        /** 记住用户调过的窗口大小。 */
+        /** Remembers the window size the user set. */
         override fun getDimensionServiceKey(): String = "ocr.configPanel"
     }
 }

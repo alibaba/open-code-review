@@ -76,8 +76,8 @@ var allowedPrefixes = []struct{ prefix, reason string }{
 	{"pages/src/i18n/", "translated UI copy for the docs site"},
 	{"extensions/vscode/", "TEMPORARY: the extension's comments, test names and zh-cn NLS bundle are still Chinese; drop this entry once they are translated"},
 	{"extensions/frontend/src/shared/i18n.ts", "translated UI copy for the extension webview"},
-	{"extensions/idea/src/main/", "TEMPORARY: drop after #1421, #1422 and #1423 translate production sources and exempt the host i18n table"},
-	{"extensions/idea/build.gradle.kts", "TEMPORARY: drop after #1422 translates the build script"},
+	{"extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/model/HostStrings.kt", "host-side mirror of the webview i18n table"},
+	{"extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/", "TEMPORARY: drop after #1421 translates the services sources"},
 }
 
 // exemptMarker on a line suppresses the report for that line. The trailing
