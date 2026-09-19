@@ -117,6 +117,7 @@ matches test-file patterns:
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
 - `**/src/test/**/*.kt`
+- `**/*Test.fs`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`

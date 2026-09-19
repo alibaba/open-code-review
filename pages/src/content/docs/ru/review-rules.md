@@ -117,6 +117,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
 - `**/src/test/**/*.kt`
+- `**/*Test.fs`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`

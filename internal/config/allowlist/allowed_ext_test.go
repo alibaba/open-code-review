@@ -169,6 +169,11 @@ func TestIsExcludedPath(t *testing.T) {
 		{"kotlin scripts test dir", "src/test/kotlin/scripts/FooTest.kts", true},
 		{"kotlin scripts main dir", "src/main/kotlin/scripts/Foo.kts", false},
 
+		// F# test files
+		{"fsharp Test suffix", "src/Domain/OrderTest.fs", true},
+		{"fsharp Test suffix at root", "OrderTest.fs", true},
+		{"fsharp non-test", "src/Domain/TestSupport.fs", false},
+
 		// JS/TS test files
 		{"js test file", "src/utils.test.js", true},
 		{"tsx test file", "src/Component.test.tsx", true},
