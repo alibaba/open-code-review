@@ -53,8 +53,59 @@ OCR은 **네 겹의 우선순위 사슬**로 규칙을 해석합니다. 파일 �
   있습니다.
 - `exclude` — 선택. OCR이 리뷰하면 *안 되는* 파일의 glob 패턴입니다. 사용자 설정 필터 안에서
   가장 높은 우선순위를 가집니다.
-- `rules` — `{path, rule}` 항목의 배열이며 **선언 순서대로** 평가합니다. 파일에
-  처음 일치하는 `path`가 그 파일을 리뷰할 때 OCR이 모델에 보낼 프롬프트를 정합니다.
+- `rules` — `{path, rule, merge_system_rule?}` 항목의 배열이며 **선언 순서대로**
+  평가합니다. 파일에 처음 일치하는 `path`가 그 파일을 리뷰할 때 OCR이 모델에 보낼
+  프롬프트를 정합니다. `merge_system_rule`은 선택이며 기본값은 `false`(교체)입니다.
+
+### 시스템 규칙과 병합하기 {#merging-with-the-system-rule}
+
+기본적으로 일치한 사용자 규칙은 그 파일의 언어별 시스템 규칙을 *교체*합니다.
+항목에 `"merge_system_rule": true`를 두면 시스템 규칙을 유지한 채 내 규칙을
+함께 씁니다:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+```bash
+$ ocr rules check src/main/java/com/example/UserService.java
+File: src/main/java/com/example/UserService.java
+Source: Project (.opencodereview/rule.json)
+Pattern: **/*
+Rule:
+────────────────────────────────────────
+## System-Specific Rules (Mandatory)
+
+…contents of java.md…
+
+---
+
+## User-Specific Rules (Mandatory)
+
+Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.
+────────────────────────────────────────
+```
+
+시스템 쪽은 **파일마다** 해석되며,
+[파일별 규칙 해석](#rule-resolution-per-file)의 내장 표와 같습니다. 포괄
+`**/*` 항목 하나라도 `.java`에는 `java.md`, `.py`에는 `python.md`, 알 수 없는
+확장자에는 `default.md`가 붙습니다. `merge_system_rule`은 세 사용자 계층
+모두에서 동작합니다(`--rule`, `<repo>/.opencodereview/rule.json`,
+`~/.opencodereview/rule.json`).
+
+병합되는 것은 **시스템** 계층뿐입니다. 같은 파일에 여러 *사용자* 항목이
+걸려도 여전히 먼저 일치한 쪽이 이깁니다(토론
+[#633](https://github.com/alibaba/open-code-review/discussions/633) 참고).
+일치한 계층은 아래 사용자 계층을 계속 가리며, `merge_system_rule`이 여러
+사용자 규칙을 겹쳐 쌓지는 않습니다.
 
 ### glob 기능 {#glob-features}
 
@@ -287,6 +338,27 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
   ]
 }
 ```
+
+### 내장 언어별 규칙 위에 전역 보안 규칙 얹기 {#global-security-rules-on-top-of-the-built-in-per-language-rules}
+
+포괄 `**/*` 사용자 규칙은 보통 내장 언어별 시스템 규칙을 버립니다. 유지하려면
+`"merge_system_rule": true`를 설정하세요. 시스템 쪽은 여전히 파일마다
+해석되므로 각 언어는 고유한 리뷰 초점을 유지합니다:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+모든 저장소용으로는 `~/.opencodereview/rule.json`에, 한 프로젝트용이면
+`<repo>/.opencodereview/rule.json`에 두세요.
 
 ## 관련 문서 {#see-also}
 

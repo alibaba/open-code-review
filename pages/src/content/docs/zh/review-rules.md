@@ -49,8 +49,54 @@ OCR 用一条**四层优先级链**解析规则。对每个文件路径，按序
   下文）。它不是白名单：不匹配任何 `include` 模式的文件仍会经过
   `unsupported_ext` 和 `default_path` 检查，可能仍被评审。
 - `exclude`——可选。OCR 不予评审的文件 glob 模式。在用户配置的过滤规则中优先级最高。
-- `rules`——`{path, rule}` 条目数组，按**声明顺序**求值。第一个 `path` glob
-  匹配该文件的条目，决定 OCR 发给模型的 prompt。
+- `rules`——`{path, rule, merge_system_rule?}` 条目数组，按**声明顺序**求值。
+  第一个 `path` glob 匹配该文件的条目，决定 OCR 发给模型的 prompt。
+  `merge_system_rule` 可选，默认 `false`（替换系统规则）。
+
+### 与系统规则合并
+
+默认情况下，匹配到的用户规则会*替换*该文件对应语言的系统规则。在条目上设置
+`"merge_system_rule": true`，即可在保留系统规则的同时叠加你自己的规则：
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+```bash
+$ ocr rules check src/main/java/com/example/UserService.java
+File: src/main/java/com/example/UserService.java
+Source: Project (.opencodereview/rule.json)
+Pattern: **/*
+Rule:
+────────────────────────────────────────
+## System-Specific Rules (Mandatory)
+
+…contents of java.md…
+
+---
+
+## User-Specific Rules (Mandatory)
+
+Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.
+────────────────────────────────────────
+```
+
+系统半边按**每个文件**解析，来源与
+[每文件的规则解析](#每文件的规则解析) 中的内嵌表相同——一条兜底的 `**/*`
+条目会给 `.java` 文件配上 `java.md`，给 `.py` 文件配上 `python.md`，给无法识别的扩展名配上
+`default.md`。`merge_system_rule` 在三个用户层均生效（`--rule`、
+`<repo>/.opencodereview/rule.json` 和 `~/.opencodereview/rule.json`）。
+
+它只合并**系统**层。同一文件若有多条*用户*条目命中，仍是先匹配者胜（见讨论
+[#633](https://github.com/alibaba/open-code-review/discussions/633)）；更高层一旦匹配，仍会遮蔽更低的用户层——`merge_system_rule` 不会把多条用户规则叠在一起。
 
 ### glob 能力
 
@@ -276,6 +322,26 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
   ]
 }
 ```
+
+### 在内置按语言规则之上叠加全局安全规则
+
+兜底的 `**/*` 用户规则通常会丢弃内置的按语言系统规则。若要保留它们，设置
+`"merge_system_rule": true`——系统半边仍按文件解析，因此每种语言都会保留各自的评审重点：
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+放到 `~/.opencodereview/rule.json` 可作用于本机所有仓库，或放到
+`<repo>/.opencodereview/rule.json` 仅作用于单个项目。
 
 ## 另见
 
