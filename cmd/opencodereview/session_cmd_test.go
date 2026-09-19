@@ -871,7 +871,7 @@ func TestRunSessionExport_DefaultsToNewest(t *testing.T) {
 	older.RecordReviewItemDone("a.go", "a.go", "a.go", "fp-a", nil)
 	older.Finalize()
 
-	time.Sleep(1100 * time.Millisecond) // session ids and StartTime are second-resolution
+	time.Sleep(1100 * time.Millisecond) // StartTime is persisted at second resolution
 
 	newer := session.New(repoDir, "main", "test-model", session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "new"})
 	newer.RecordReviewItemDone("b.go", "b.go", "b.go", "fp-b", nil)
@@ -884,7 +884,7 @@ func TestRunSessionExport_DefaultsToNewest(t *testing.T) {
 	if !strings.Contains(body, newer.SessionID) {
 		t.Errorf("export defaulted to the wrong session; want %s", newer.SessionID)
 	}
-	if newer.SessionID != older.SessionID && strings.Contains(body, older.SessionID) {
+	if strings.Contains(body, older.SessionID) {
 		t.Errorf("export contains the older session id %s", older.SessionID)
 	}
 }
