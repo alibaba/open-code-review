@@ -112,6 +112,9 @@ func TestSaveConfigEnforcesModeOnExistingFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"provider":"old"}`), 0o644); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("set seed permissions: %v", err)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("stat seed: %v", err)
