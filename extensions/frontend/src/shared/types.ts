@@ -81,6 +81,7 @@ export interface FileChange {
 }
 
 export interface GitState {
+  workspaceFolder?: { name: string; path: string };
   branches: string[];
   currentBranch: string;
   recentCommits: CommitInfo[];

@@ -195,9 +195,9 @@ describe('pickRepoRoot', () => {
     expect(pickRepoRoot(roots, ws)).toBe(parent);
   });
 
-  it('都不匹配时退回第一个', () => {
+  it('does not select an unrelated repository', () => {
     const roots = ['/some/other/repo', '/another/repo'];
-    expect(pickRepoRoot(roots, ws)).toBe('/some/other/repo');
+    expect(pickRepoRoot(roots, ws)).toBeNull();
   });
 
   it('空候选返回 null', () => {

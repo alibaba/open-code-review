@@ -25,6 +25,7 @@ export class CommentProvider {
   private offsets = new LineOffsetTracker();
   private syncListeners: Array<(s: CommentSyncState[]) => void> = [];
   private reviewContext: ReviewContext = { mode: ReviewMode.Workspace };
+  private reviewRoot?: string;
 
   private locale: SupportedLocale;
 
@@ -50,13 +51,18 @@ export class CommentProvider {
   }
 
   /** 展示审查评论：能解析到 git/工作区快照的挂 thread，否则仅侧边栏。 */
-  async show(comments: ReviewComment[], ctx: ReviewContext): Promise<void> {
+  async show(comments: ReviewComment[], ctx: ReviewContext, git = this.git): Promise<void> {
     this.clear();
+    this.git = git;
     this.reviewContext = ctx;
     this.comments = comments;
 
-    const root = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-    if (!root) return;
+    const root = await git.getRepositoryRoot();
+    if (!root) {
+      this.emitSync();
+      return;
+    }
+    this.reviewRoot = root;
 
     await this.git.prepareReviewFileStatus(ctx);
     const deps = this.buildAnchorDeps(root, ctx);
@@ -145,7 +151,7 @@ export class CommentProvider {
     }
     const c = this.comments[index];
     if (!c) return;
-    const root = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+    const root = this.reviewRoot;
     if (!root) return;
     const uri = vscode.Uri.file(`${root}/${c.path}`);
     const doc = await vscode.workspace.openTextDocument(uri);
@@ -321,6 +327,7 @@ export class CommentProvider {
     this.status.clear();
     this.offsets.clear();
     this.reviewContext = { mode: ReviewMode.Workspace };
+    this.reviewRoot = undefined;
   }
 
   dispose(): void {

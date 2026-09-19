@@ -16,6 +16,7 @@ export type WebviewToHost =
   | { type: 'activateCustomProvider'; name: string }
   | { type: 'closeConfigPanel' }
   | { type: 'getGitState'; mode: ReviewMode }
+  | { type: 'selectWorkspace' }
   | { type: 'getModeFiles'; mode: ReviewMode; from?: string; to?: string; commit?: string }
   | { type: 'openFileDiff'; path: string; status: FileChange['status']; mode: ReviewMode; from?: string; to?: string; commit?: string }
   | { type: 'startReview'; options: CliRunOptions }
@@ -34,6 +35,7 @@ export type WebviewToHost =
 export type HostToWebview =
   | { type: 'init'; config: OcrConfig | null; gitState: GitState; locale: SupportedLocale }
   | { type: 'gitState'; gitState: GitState }
+  | { type: 'workspaceChanged'; gitState: GitState }
   | { type: 'modeFiles'; mode: ReviewMode; files: FileChange[] }
   | { type: 'logLine'; line: LogLine }
   | { type: 'stateChange'; state: ReviewState; error?: string }

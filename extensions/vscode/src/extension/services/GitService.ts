@@ -3,8 +3,9 @@
 
 import { t, resolveLocale } from '@shared/i18n';
 import * as vscode from 'vscode';
-import { readFile } from 'fs/promises';
+import { readFile, realpath } from 'fs/promises';
 import { execFile } from 'child_process';
+import { relative } from 'path';
 import { GitState, FileChange, ReviewMode, ReviewContext } from '@shared/types';
 import { buildWorkspaceFiles, branchRefCandidates, parseNameStatus, pickRepoRoot } from './gitMap';
 
@@ -15,7 +16,24 @@ export class GitService {
   private cache: GitState = { branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] };
   private reviewFileStatus = new Map<string, FileChange['status']>();
 
-  constructor(private log?: vscode.OutputChannel) {}
+  constructor(
+    private log?: vscode.OutputChannel,
+    readonly workspaceFolder = vscode.workspace.workspaceFolders?.[0],
+  ) {}
+
+  forWorkspace(folder: vscode.WorkspaceFolder): GitService {
+    return new GitService(this.log, folder);
+  }
+
+  private snapshot(): GitState {
+    return {
+      ...this.cache,
+      workspaceFolder: this.workspaceFolder && {
+        name: this.workspaceFolder.name,
+        path: this.workspaceFolder.uri.fsPath,
+      },
+    };
+  }
 
   private trace(msg: string): void {
     this.log?.appendLine(`[git] ${msg}`);
@@ -38,16 +56,17 @@ export class GitService {
   private selectRepo(api: any): any | null {
     const repos: any[] = api.repositories;
     if (!repos || repos.length === 0) return null;
-    const ws = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+    const ws = this.workspaceFolder?.uri.fsPath;
     const root = pickRepoRoot(repos.map((r) => r.rootUri?.fsPath ?? ''), ws);
-    return repos.find((r) => (r.rootUri?.fsPath ?? '') === root) ?? repos[0];
+    return repos.find((r) => (r.rootUri?.fsPath ?? '') === root) ?? null;
   }
 
   /** 等待至少一个仓库就绪（git 扩展异步扫描，首次可能为空）。 */
   private async waitForRepo(timeoutMs = 5000): Promise<any | null> {
     const api = await this.ensureApi();
     if (!api) return null;
-    if (api.repositories.length > 0) return this.selectRepo(api);
+    const selected = this.selectRepo(api);
+    if (selected) return selected;
 
     return new Promise((resolve) => {
       let done = false;
@@ -59,26 +78,35 @@ export class GitService {
         clearTimeout(timer);
         resolve(repo);
       };
-      const disposable = api.onDidOpenRepository?.(() => finish(this.selectRepo(api)));
-      const poll = setInterval(() => {
-        if (api.repositories.length > 0) finish(this.selectRepo(api));
-      }, 200);
+      const checkForRepo = () => {
+        const repo = this.selectRepo(api);
+        if (repo) finish(repo);
+      };
+      const disposable = api.onDidOpenRepository?.(checkForRepo);
+      const poll = setInterval(checkForRepo, 200);
       const timer = setTimeout(() => finish(this.selectRepo(api)), timeoutMs);
     });
   }
 
   async getState(mode: ReviewMode): Promise<GitState> {
-    const empty: GitState = { branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] };
-
     if (mode === ReviewMode.Workspace) {
       await this.refreshWorkspaceFiles();
-      return { ...this.cache };
+      return this.snapshot();
     }
 
-    const repo = await this.waitForRepo();
+    let repo = await this.waitForRepo();
+    if (repo) {
+      const root = await this.getRepositoryRoot();
+      const apiRoot = await realpath(repo.rootUri.fsPath).catch(() => null);
+      // An ancestor may be discovered before the selected nested repository.
+      if (!root || !apiRoot || relative(apiRoot, root) !== '') repo = null;
+    }
     if (!repo) {
       this.trace(`getState(${mode}): no repo`);
-      return empty;
+      this.cache.branches = [];
+      this.cache.currentBranch = '';
+      this.cache.recentCommits = [];
+      return this.snapshot();
     }
 
     try {
@@ -91,7 +119,7 @@ export class GitService {
       await this.refreshRecentCommits(repo);
     }
 
-    return { ...this.cache };
+    return this.snapshot();
   }
 
   /**
@@ -109,7 +137,7 @@ export class GitService {
       debounceTimer = setTimeout(() => {
         debounceTimer = undefined;
         void this.refreshWorkspaceFiles().then(() => {
-          if (!cancelled) onUpdate({ ...this.cache });
+          if (!cancelled) onUpdate(this.snapshot());
         });
       }, WORKSPACE_REFRESH_DEBOUNCE_MS);
     };
@@ -144,7 +172,7 @@ export class GitService {
 
   /** 工作区模式仅刷新变更文件，不等待 VS Code Git 扩展，也不拉分支/提交历史。 */
   private async refreshWorkspaceFiles(): Promise<void> {
-    const root = await this.repoRootFast();
+    const root = await this.getRepositoryRoot();
     if (!root) {
       this.cache.workspaceFiles = [];
       return;
@@ -169,8 +197,8 @@ export class GitService {
   }
 
   /** 通过 git rev-parse 解析仓库根，避免等待 VS Code Git 扩展初始化。 */
-  private async repoRootFast(): Promise<string | null> {
-    const ws = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+  async getRepositoryRoot(): Promise<string | null> {
+    const ws = this.workspaceFolder?.uri.fsPath;
     if (!ws) return null;
     try {
       const out = await runGit(ws, ['rev-parse', '--show-toplevel']);
@@ -205,7 +233,7 @@ export class GitService {
 
   /** 分支对比：merge-base 三点 diff。 */
   async getBranchDiff(from: string, to: string): Promise<FileChange[]> {
-    const root = await this.repoRoot();
+    const root = await this.getRepositoryRoot();
     if (!root || !from || !to) return [];
 
     const resolvedFrom = await this.resolveGitRef(root, from);
@@ -238,7 +266,7 @@ export class GitService {
 
   /** 单次提交：该 commit 相对父提交的改动文件。 */
   async getCommitFiles(sha: string): Promise<FileChange[]> {
-    const root = await this.repoRoot();
+    const root = await this.getRepositoryRoot();
     if (!root || !sha) return [];
     try {
       const out = await runGit(root, [
@@ -258,21 +286,13 @@ export class GitService {
     }
   }
 
-  private async repoRoot(): Promise<string | null> {
-    const repo = await this.waitForRepo();
-    if (!repo) return this.repoRootFast();
-    return repo.rootUri?.fsPath
-      ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath
-      ?? process.cwd();
-  }
-
   /** 在 VSCode 原生 diff 视图中打开某个待审查文件。三种模式各自决定 diff 的左右两侧。 */
   async openDiff(opts: {
     path: string; status: FileChange['status'];
     mode: ReviewMode; from?: string; to?: string; commit?: string;
   }): Promise<void> {
     const api = await this.ensureApi();
-    const root = await this.repoRoot();
+    const root = await this.getRepositoryRoot();
     if (!api || !root) return;
 
     const fileUri = vscode.Uri.file(`${root}/${opts.path}`);
@@ -425,7 +445,7 @@ export class GitService {
   }
 
   async readFileAtRef(ref: string, relPath: string): Promise<string | null> {
-    const root = await this.repoRoot();
+    const root = await this.getRepositoryRoot();
     if (!root) return null;
     try {
       return await runGit(root, ['show', `${ref}:${relPath}`]);
@@ -435,7 +455,7 @@ export class GitService {
   }
 
   async readWorkspaceFile(relPath: string): Promise<string | null> {
-    const root = await this.repoRoot();
+    const root = await this.getRepositoryRoot();
     if (!root) return null;
     try {
       return await readFile(`${root}/${relPath}`, 'utf8');
@@ -459,7 +479,7 @@ export class GitService {
     rightRef: string | null;
   } | null> {
     const api = await this.ensureApi();
-    const root = await this.repoRoot();
+    const root = await this.getRepositoryRoot();
     if (!api || !root) return null;
 
     if (ctx.mode === ReviewMode.Commit && ctx.commit) {
@@ -494,7 +514,7 @@ export class GitService {
 
   async createGitFileUri(relPath: string, ref: string): Promise<vscode.Uri | null> {
     const api = await this.ensureApi();
-    const root = await this.repoRoot();
+    const root = await this.getRepositoryRoot();
     if (!api || !root) return null;
     return api.toGitUri(vscode.Uri.file(`${root}/${relPath}`), ref);
   }

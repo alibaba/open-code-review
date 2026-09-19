@@ -14,6 +14,7 @@ interface Props {
   filesLoading: boolean;
   configured: boolean;
   onModeChange: (mode: ReviewMode) => void;
+  onSelectWorkspace: () => void;
   onRequestModeFiles: (mode: ReviewMode, from?: string, to?: string, commit?: string) => void;
   onOpenFile: (file: FileChange, mode: ReviewMode, from?: string, to?: string, commit?: string) => void;
   onStart: (options: CliRunOptions) => void;
@@ -22,7 +23,7 @@ interface Props {
   running?: boolean;
 }
 
-export function IdleView({ gitState, modeFiles, filesLoading, configured, onModeChange, onRequestModeFiles, onOpenFile, onStart, onOpenConfig, onOpenCustomProviders, running }: Props) {
+export function IdleView({ gitState, modeFiles, filesLoading, configured, onModeChange, onSelectWorkspace, onRequestModeFiles, onOpenFile, onStart, onOpenConfig, onOpenCustomProviders, running }: Props) {
   const [mode, setMode] = useState<ReviewMode>(ReviewMode.Workspace);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -72,6 +73,12 @@ export function IdleView({ gitState, modeFiles, filesLoading, configured, onMode
 
   return (
     <div class="setup">
+      {gitState.workspaceFolder && (
+        <button type="button" class="mode-param-input" disabled={running || filesLoading}
+          title={gitState.workspaceFolder.path} onClick={onSelectWorkspace}>
+          {t('view.idle.project')}: {gitState.workspaceFolder.name}
+        </button>
+      )}
       <div class="mode-tabs">
         {([ReviewMode.Workspace, ReviewMode.Branch, ReviewMode.Commit]).map((m) => (
           <button key={m} class={`mode-tab${mode === m ? ' active' : ''}`} onClick={() => switchMode(m)}>

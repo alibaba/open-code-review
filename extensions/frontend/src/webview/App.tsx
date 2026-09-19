@@ -45,7 +45,8 @@ export function App() {
     <I18nContext.Provider value={resolveLocale(state.locale)}>
       <div class="ocr-root">
         <div class="action-region">
-          <IdleView gitState={state.gitState} modeFiles={state.modeFiles} filesLoading={state.filesLoading}
+          <IdleView key={state.gitState.workspaceFolder?.path} gitState={state.gitState} modeFiles={state.modeFiles} filesLoading={state.filesLoading}
+            onSelectWorkspace={() => bridge.post({ type: 'selectWorkspace' })}
             configured={configured} onModeChange={onModeChange} onRequestModeFiles={requestModeFiles}
             onOpenFile={openFile} onStart={start} onOpenConfig={() => bridge.post({ type: 'openConfigPanel' })}
             onOpenCustomProviders={() => bridge.post({

@@ -11,6 +11,7 @@ A VS Code code-review extension built on the [`open-code-review`](https://www.np
 ## Features
 
 - **Three review modes**: workspace changes, branch comparison (`--from` / `--to`), and a single commit (`--commit`).
+- **Project selection**: use the **Project** button above the review modes to choose a folder in a multi-root workspace. File previews, reviews, and inline comments use that folder's Git repository. Switching projects clears the previous results and review selections; project selection is unavailable while a review is running.
 - **Files-to-review preview**: lists changed files from the current Git state; click a file to view its changes in the native diff view.
 - **Custom review prompt**: optionally append a `--background` hint for the current review.
 - **Streaming logs**: tail the CLI output live during review, cancel anytime.

@@ -85,7 +85,7 @@ export function buildWorkspaceFiles(diffHeadOut: string, diffCachedOut: string, 
 /**
  * 从候选仓库根路径中选出与 workspace 匹配的那个。
  * VSCode git 扩展异步扫描嵌套仓库,repositories 顺序不稳定,直接取 [0] 会漂移到子仓库。
- * 优先级:精确等于 workspace 根 > workspace 的最深祖先 > 第一个。
+ * Prefer the workspace root, then its deepest ancestor; reject unrelated repositories.
  */
 export function pickRepoRoot(roots: string[], workspacePath?: string): string | null {
   if (roots.length === 0) return null;
@@ -107,7 +107,7 @@ export function pickRepoRoot(roots: string[], workspacePath?: string): string | 
       candidate.relative.length < deepest.relative.length ? candidate : deepest).root;
   }
 
-  return roots[0];
+  return null;
 }
 
 /** 生成用于 rev-parse 验证的分支引用候选列表。 */

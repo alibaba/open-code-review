@@ -15,6 +15,28 @@ const baseConfig = {
 };
 
 describe('reducer', () => {
+  it('clears previous project results and mode files on workspace selection', () => {
+    const state = reducer({
+      ...initialState,
+      view: 'done',
+      modeFiles: [{ path: 'first.ts', status: 'modified' }],
+      logs: [{ text: 'first project', level: 'info' }],
+      session: { state: 'done', result: { status: 'success', comments: [], warnings: [] } },
+      commentStatus: { 0: 'applied' },
+      commentJumpable: { 0: true },
+      reviewMode: ReviewMode.Commit,
+    }, {
+      type: 'workspaceChanged',
+      gitState: { ...initialState.gitState, workspaceFolder: { name: 'second', path: '/second' } },
+    });
+
+    expect(state).toMatchObject({
+      view: 'idle', modeFiles: [], logs: [], filesLoading: false,
+      session: { state: 'idle', result: null }, commentStatus: {}, commentJumpable: {},
+      reviewMode: ReviewMode.Workspace, gitState: { workspaceFolder: { path: '/second' } },
+    });
+  });
+
   it('init sets config and gitState', () => {
     const s = reducer(initialState, {
       type: 'init',

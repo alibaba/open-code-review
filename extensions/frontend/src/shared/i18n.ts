@@ -29,6 +29,10 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'view.idle.customPrompt': 'Custom review prompt (optional)',
     'view.idle.manageCustom': 'Manage custom providers',
     'view.idle.modelConfig': 'Model config',
+    'view.idle.project': 'Project',
+    'view.idle.selectWorkspace': 'Choose project',
+    'ext.selectWorkspace': 'Choose the workspace folder to review',
+    'ext.noRepository': 'The selected workspace folder is not in a Git repository.',
 
     // ── RunningView ──
     'view.running.reviewLog': 'Review log',
@@ -188,6 +192,10 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'view.idle.customPrompt': '自定义审查提示词（可选）',
     'view.idle.manageCustom': '管理自定义 Provider',
     'view.idle.modelConfig': '模型配置',
+    'view.idle.project': '项目',
+    'view.idle.selectWorkspace': '选择项目',
+    'ext.selectWorkspace': '选择要审查的工作区文件夹',
+    'ext.noRepository': '所选工作区文件夹不在 Git 仓库中。',
 
     'view.running.reviewLog': '审查日志',
     'view.running.cancel': '取消',

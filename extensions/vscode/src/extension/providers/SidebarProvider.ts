@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { resolveLocale, toHtmlLang } from '@shared/i18n';
+import { resolveLocale, t, toHtmlLang } from '@shared/i18n';
 import * as vscode from 'vscode';
 import { ConfigPanelFocus } from '@shared/configUtils';
 import { HostToWebview, WebviewToHost } from '@shared/messages';
@@ -17,6 +17,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private session?: ReviewSession;
   private openConfigPanel?: (focus?: ConfigPanelFocus) => void;
   private gitWatchDisposable?: vscode.Disposable;
+  private reviewRunning = false;
 
   constructor(
     private extensionUri: vscode.Uri,
@@ -42,10 +43,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     view.webview.html = this.html(view.webview);
     view.webview.onDidReceiveMessage((msg: WebviewToHost) => this.handle(msg));
 
-    this.gitWatchDisposable?.dispose();
-    this.gitWatchDisposable = this.git.watchWorkspaceChanges((gitState) => {
-      this.post({ type: 'gitState', gitState });
-    });
+    this.watchWorkspace();
     view.onDidDispose(() => {
       this.gitWatchDisposable?.dispose();
       this.gitWatchDisposable = undefined;
@@ -57,55 +55,100 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage(msg);
   }
 
+  private watchWorkspace(): void {
+    this.gitWatchDisposable?.dispose();
+    const git = this.git;
+    this.gitWatchDisposable = git.watchWorkspaceChanges((gitState) => {
+      if (git === this.git) this.post({ type: 'gitState', gitState });
+    });
+  }
+
   private async handle(msg: WebviewToHost): Promise<void> {
-    const cwd = vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? process.cwd();
+    const git = this.git;
     switch (msg.type) {
       case 'ready': {
         const config = this.config.read();
-        const gitState = await this.git.getState(ReviewMode.Workspace);
+        const gitState = await git.getState(ReviewMode.Workspace);
         const locale = resolveLocale(vscode.env.language);
-        this.post({ type: 'init', config, gitState, locale });
+        if (git === this.git) this.post({ type: 'init', config, gitState, locale });
+        break;
+      }
+      case 'selectWorkspace': {
+        if (this.reviewRunning) break;
+        const folder = await vscode.window.showWorkspaceFolderPick({
+          placeHolder: t(resolveLocale(vscode.env.language), 'ext.selectWorkspace'),
+        });
+        if (!folder || this.reviewRunning || folder.uri.fsPath === this.git.workspaceFolder?.uri.fsPath) break;
+        const selected = this.git.forWorkspace(folder);
+        const gitState = await selected.getState(ReviewMode.Workspace);
+        if (this.reviewRunning || git !== this.git) break;
+        this.git = selected;
+        this.comments.clear();
+        this.watchWorkspace();
+        this.post({ type: 'workspaceChanged', gitState });
         break;
       }
       case 'getGitState': {
-        this.post({ type: 'gitState', gitState: await this.git.getState(msg.mode) });
+        const gitState = await git.getState(msg.mode);
+        if (git === this.git) this.post({ type: 'gitState', gitState });
         break;
       }
       case 'getModeFiles': {
         let files: FileChange[] = [];
         if (msg.mode === ReviewMode.Branch && msg.from && msg.to) {
-          files = await this.git.getBranchDiff(msg.from, msg.to);
+          files = await git.getBranchDiff(msg.from, msg.to);
         } else if (msg.mode === ReviewMode.Commit && msg.commit) {
-          files = await this.git.getCommitFiles(msg.commit);
+          files = await git.getCommitFiles(msg.commit);
         }
-        this.post({ type: 'modeFiles', mode: msg.mode, files });
+        if (git === this.git) this.post({ type: 'modeFiles', mode: msg.mode, files });
         break;
       }
       case 'openFileDiff':
-        await this.git.openDiff({
+        await git.openDiff({
           path: msg.path, status: msg.status, mode: msg.mode,
           from: msg.from, to: msg.to, commit: msg.commit,
         });
         break;
       case 'startReview': {
-        this.session = new ReviewSession(this.cli, cwd);
-        await this.session.run(msg.options, {
-          onState: (state, error) => this.post({ type: 'stateChange', state, error }),
-          onLog: (line) => this.post({ type: 'logLine', line }),
-          onDone: (result) => {
-            void (async () => {
-              if (result.comments.length) {
-                await this.comments.show(result.comments, {
-                  mode: msg.options.mode,
-                  from: msg.options.from,
-                  to: msg.options.to,
-                  commit: msg.options.commit,
-                });
-              }
-              this.post({ type: 'reviewDone', result });
-            })();
-          },
-        });
+        if (this.reviewRunning) break;
+        this.reviewRunning = true;
+        try {
+          const cwd = await git.getRepositoryRoot();
+          if (!cwd) {
+            this.post({ type: 'stateChange', state: 'failed', error: t(resolveLocale(vscode.env.language), 'ext.noRepository') });
+            break;
+          }
+          this.comments.clear();
+          this.session = new ReviewSession(this.cli, cwd);
+          let completion = Promise.resolve();
+          await this.session.run(msg.options, {
+            onState: (state, error) => this.post({ type: 'stateChange', state, error }),
+            onLog: (line) => this.post({ type: 'logLine', line }),
+            onDone: (result) => {
+              completion = (async () => {
+                try {
+                  if (result.comments.length) {
+                    await this.comments.show(result.comments, {
+                      mode: msg.options.mode,
+                      from: msg.options.from,
+                      to: msg.options.to,
+                      commit: msg.options.commit,
+                    }, git);
+                  }
+                } catch (e) {
+                  this.post({
+                    type: 'logLine',
+                    line: { level: 'warn', text: `[ocr] Unable to display inline comments: ${e instanceof Error ? e.message : String(e)}` },
+                  });
+                }
+                this.post({ type: 'reviewDone', result });
+              })();
+            },
+          });
+          await completion;
+        } finally {
+          this.reviewRunning = false;
+        }
         break;
       }
       case 'cancelReview':

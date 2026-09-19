@@ -56,21 +56,28 @@ class MessageContractTest {
         "installDone",
     )
 
+    // The shared UI enables workspace selection only when GitState.workspaceFolder
+    // is supplied by the host. IDEA does not advertise or implement this feature.
+    private val vscodeOnlyInboundTypes = setOf("selectWorkspace")
+    private val vscodeOnlyOutboundTypes = setOf("workspaceChanged")
+
     @Test
     fun `入站消息判别符与前端 WebviewToHost 完全一致`() {
         val fromFrontend = typeLiteralsOf("WebviewToHost")
+        assertTrue(fromFrontend.containsAll(vscodeOnlyInboundTypes))
         assertEquals(
             "入站消息契约不一致。前端多出 ${fromFrontend - inboundTypes}，宿主多出 ${inboundTypes - fromFrontend}",
-            fromFrontend, inboundTypes,
+            fromFrontend - vscodeOnlyInboundTypes, inboundTypes,
         )
     }
 
     @Test
     fun `侧栏出站消息判别符与前端 HostToWebview 完全一致`() {
         val fromFrontend = typeLiteralsOf("HostToWebview")
+        assertTrue(fromFrontend.containsAll(vscodeOnlyOutboundTypes))
         assertEquals(
             "侧栏出站消息契约不一致。前端多出 ${fromFrontend - outboundSidebarTypes}，宿主多出 ${outboundSidebarTypes - fromFrontend}",
-            fromFrontend, outboundSidebarTypes,
+            fromFrontend - vscodeOnlyOutboundTypes, outboundSidebarTypes,
         )
     }
 

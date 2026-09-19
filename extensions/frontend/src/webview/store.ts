@@ -61,6 +61,14 @@ export function reducer(state: AppState, msg: HostToWebview | LocalAction): AppS
       };
     case 'gitState':
       return { ...state, gitState: msg.gitState, filesLoading: false };
+    case 'workspaceChanged':
+      return {
+        ...initialState,
+        config: state.config,
+        locale: state.locale,
+        gitState: msg.gitState,
+        filesLoading: false,
+      };
     case 'modeFiles':
       return { ...state, modeFiles: msg.files, filesLoading: false };
     case 'config':
@@ -80,7 +88,7 @@ export function reducer(state: AppState, msg: HostToWebview | LocalAction): AppS
       return { ...state, logs: [...state.logs, msg.line] };
     case 'reviewDone': {
       const commentJumpable: Record<number, boolean> = {};
-      msg.result.comments.forEach((_, i) => { commentJumpable[i] = true; });
+      msg.result.comments.forEach((_, i) => { commentJumpable[i] = state.commentJumpable[i] ?? true; });
       return {
         ...state,
         session: { ...state.session, result: msg.result },
