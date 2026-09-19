@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
 
 func TestCountLines(t *testing.T) {
@@ -240,5 +242,41 @@ func TestProvider_Enumerate_PathFilter(t *testing.T) {
 	want := []string{"pkg/b.go", "pkg/sub/c.go"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Errorf("paths = %v, want %v", paths, want)
+	}
+}
+
+// TestProvider_Enumerate_RunnerIgnoresGitStderr covers the production path:
+// ocr scan always injects a gitcmd.Runner, and gitLs used to call Runner.Run
+// (CombinedOutput). `git ls-files -z` puts paths on stdout and diagnostics on
+// stderr; merging them turns the first filename into "trace...\\nmain.go" so
+// Lstat fails and the real file is dropped. GIT_TRACE=1 is a reliable way to
+// make git write to stderr on success.
+func TestProvider_Enumerate_RunnerIgnoresGitStderr(t *testing.T) {
+	repo := initTestRepo(t)
+	writeFile(t, repo, "main.go", []byte("package main\n"))
+	gitCommit(t, repo, "init")
+
+	t.Setenv("GIT_TRACE", "1")
+	got, err := NewProvider(repo, nil, gitcmd.New(1), 0).Enumerate(context.Background())
+	if err != nil {
+		t.Fatalf("Enumerate: %v", err)
+	}
+
+	var paths []string
+	for _, it := range got {
+		if strings.Contains(it.Path, "trace:") {
+			t.Errorf("NUL parse mixed git stderr into a path: %q", it.Path)
+		}
+		paths = append(paths, it.Path)
+	}
+	found := false
+	for _, p := range paths {
+		if p == "main.go" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("main.go missing from scan results (stderr mixed into -z parse?); paths=%v", paths)
 	}
 }

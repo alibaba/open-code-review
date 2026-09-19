@@ -246,14 +246,15 @@ func (p *Provider) gitLs(ctx context.Context, args ...string) ([]string, error) 
 	cmdArgs := append([]string{"-c", "core.quotepath=false", "ls-files"}, args...)
 	var out string
 	var err error
+	// Use stdout only, not CombinedOutput: with -z, git emits NUL-delimited
+	// paths on stdout, and merging stderr (warnings, GIT_TRACE) would glue
+	// the diagnostic onto the first filename and drop that file from the scan.
 	if p.runner != nil {
-		out, err = p.runner.Run(ctx, p.repoDir, cmdArgs...)
+		raw, runErr := p.runner.Output(ctx, p.repoDir, cmdArgs...)
+		out, err = string(raw), runErr
 	} else {
 		cmd := exec.CommandContext(ctx, "git", cmdArgs...)
 		cmd.Dir = p.repoDir
-		// Use Output (stdout only), not CombinedOutput: with -z, git emits
-		// NUL-delimited paths on stdout, and merging stderr in would corrupt
-		// the filename parsing below.
 		raw, runErr := cmd.Output()
 		out, err = string(raw), runErr
 	}
