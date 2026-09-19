@@ -589,16 +589,7 @@ type ChatRequest struct {
 // path including the streaming branch, the EOF recovery and a panic. Results are
 // named so the defer can read the error actually returned.
 func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
-	defer func() {
-		// A panic still has to finalize, or the entry stays unfinalized and Freeze
-		// drops the whole run's report. The panic value itself is re-raised
-		// unchanged so agent.go's per-file recovery behaves exactly as before.
-		if r := recover(); r != nil {
-			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
-			panic(r)
-		}
-		finalizeRequest(ctx, c.cfg.retryCollector, err)
-	}()
+	defer finalizeOnExit(ctx, c.cfg.retryCollector, &err)
 
 	model := req.Model
 	if model == "" {
@@ -1261,13 +1252,7 @@ func anthropicThinkingBudgetTokens(v any) (int64, bool) {
 // named. A parameter-building failure returns before any HTTP attempt, so
 // Finalize finds no entry and the request stays out of the report entirely.
 func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
-			panic(r)
-		}
-		finalizeRequest(ctx, c.cfg.retryCollector, err)
-	}()
+	defer finalizeOnExit(ctx, c.cfg.retryCollector, &err)
 
 	if c.initErr != nil {
 		return nil, c.initErr

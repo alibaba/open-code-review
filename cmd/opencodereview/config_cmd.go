@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/configfile"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/spf13/cobra"
 )
@@ -309,79 +310,16 @@ func deleteCustomProvider(cfg *Config, name string) (bool, error) {
 	return wasActive, nil
 }
 
-// ProviderEntry holds per-provider configuration in the providers map.
-type ProviderEntry struct {
-	APIKey       string            `json:"api_key,omitempty"`
-	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
-	URL          string            `json:"url,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Models       []string          `json:"models,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
-
-	// AWSProfile and AWSRegion pin the credentials and region for providers that
-	// authenticate from the AWS chain (bedrock). Both are optional — without
-	// them the standard chain decides, as with any other AWS tool. They must
-	// exist here as well as in the resolver's own view of the file: config is
-	// unmarshalled into this struct and marshalled back on every write, so a
-	// field missing from it is silently dropped from a hand-written config the
-	// first time any config command runs.
-	AWSProfile string `json:"aws_profile,omitempty"`
-	AWSRegion  string `json:"aws_region,omitempty"`
-}
-
-// MCPServerConfig holds configuration for a single MCP server.
-// Type "stdio" (default) uses a subprocess; type "remote" uses Streamable HTTP.
-type MCPServerConfig struct {
-	Type    string            `json:"type,omitempty"` // "stdio" (default) or "remote"
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     []string          `json:"env,omitempty"`
-	URL     string            `json:"url,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Tools   []string          `json:"tools,omitempty"`
-	Setup   string            `json:"setup,omitempty"`
-}
-
-// Config represents the user-level configuration file (~/.opencodereview/config.json).
-type Config struct {
-	Provider        string                     `json:"provider,omitempty"`
-	Model           string                     `json:"model,omitempty"`
-	MaxTokens       int                        `json:"max_tokens,omitempty"`
-	Effort          string                     `json:"effort,omitempty"`
-	Providers       map[string]ProviderEntry   `json:"providers,omitempty"`
-	CustomProviders map[string]ProviderEntry   `json:"custom_providers,omitempty"`
-	Llm             LlmConfig                  `json:"llm,omitempty"`
-	Language        string                     `json:"language,omitempty"`
-	Telemetry       *TelemetryConfig           `json:"telemetry,omitempty"`
-	MCPServers      map[string]MCPServerConfig `json:"mcp_servers,omitempty"`
-}
-
-type LlmConfig struct {
-	URL          string            `json:"url,omitempty"`
-	AuthToken    string            `json:"auth_token,omitempty"`
-	AuthTokenCmd string            `json:"auth_token_cmd,omitempty"` // shell command whose stdout is the auth token; used when auth_token is empty
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`      // canonical protocol name; takes priority over UseAnthropic
-	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol (legacy fallback)
-	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
-}
-
-// TelemetryConfig holds telemetry-specific settings.
-type TelemetryConfig struct {
-	Enabled      bool   `json:"enabled,omitempty"`         // Master switch for telemetry
-	Exporter     string `json:"exporter,omitempty"`        // "console" or "otlp"
-	OTLPEndpoint string `json:"otlp_endpoint,omitempty"`   // OTLP collector address
-	ContentLog   bool   `json:"content_logging,omitempty"` // Include prompt/response content
-}
+// The app config schema lives in internal/configfile so the cmd layer and
+// the llm resolver share one authoritative definition. These aliases keep
+// the cmd-side names.
+type (
+	Config          = configfile.Config
+	ProviderEntry   = configfile.ProviderEntry
+	LlmConfig       = configfile.LlmConfig
+	TelemetryConfig = configfile.TelemetryConfig
+	MCPServerConfig = configfile.MCPServerConfig
+)
 
 func loadOrCreateConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -578,20 +516,20 @@ func setConfigValue(cfg *Config, key, value string) error {
 		if err != nil {
 			return fmt.Errorf("invalid boolean for telemetry.enabled: %w", err)
 		}
-		cfg.ensureTelemetry()
+		ensureTelemetry(cfg)
 		cfg.Telemetry.Enabled = b
 	case "telemetry.exporter", "telemetry.Exporter":
-		cfg.ensureTelemetry()
+		ensureTelemetry(cfg)
 		cfg.Telemetry.Exporter = value
 	case "telemetry.otlp_endpoint", "telemetry.OTLPEndpoint":
-		cfg.ensureTelemetry()
+		ensureTelemetry(cfg)
 		cfg.Telemetry.OTLPEndpoint = value
 	case "telemetry.content_logging", "telemetry.ContentLog":
 		b, err := strconv.ParseBool(value)
 		if err != nil {
 			return fmt.Errorf("invalid boolean for telemetry.content_logging: %w", err)
 		}
-		cfg.ensureTelemetry()
+		ensureTelemetry(cfg)
 		cfg.Telemetry.ContentLog = b
 	case "llm.extra_body", "llm.ExtraBody":
 		var m map[string]any
@@ -973,7 +911,7 @@ func parseMCPHeaders(value string) (map[string]string, error) {
 	return m, nil
 }
 
-func (c *Config) ensureTelemetry() {
+func ensureTelemetry(c *Config) {
 	if c.Telemetry == nil {
 		c.Telemetry = &TelemetryConfig{}
 	}
