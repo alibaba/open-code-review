@@ -4,7 +4,7 @@
 - `match` expressions that omit a reachable discriminated-union or `option` case, especially after a union gains a new case; do not report a match that the compiler can prove exhaustive
 - Catch-all `_` branches used only to suppress an incomplete-pattern warning when an omitted case needs distinct behavior or error handling
 - Active patterns or guards whose ordering shadows a later reachable case, silently selecting the wrong branch
-- `Option.get`, accessing `.Value` on an option/value option, or project-specific partial `Result` unwraps where `None`, `ValueNone`, or `Error` can occur for runtime, external, or untrusted input
+- `Option.get`, `ValueOption.get`, accessing `.Value` on an option/value option, or project-specific partial `Result` unwraps where `None`, `ValueNone`, or `Error` can occur for runtime, external, or untrusted input
 - Treating a domain failure as an exception while callers are otherwise required to handle it through `Result`; do not flag an intentionally documented exception boundary
 
 #### Resource Lifetime and Mutable State
