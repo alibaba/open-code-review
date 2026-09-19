@@ -10,6 +10,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -252,6 +253,13 @@ type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
+	// ExtraContent carries unmodeled provider metadata attached to the tool
+	// call, such as Gemini 3's thought signature, which OpenAI-compatible
+	// gateways return as tool_calls[].extra_content. Providers that require
+	// it echoed back reject the next request with HTTP 400 when it is
+	// dropped (#1357), so it is preserved verbatim and replayed by the
+	// OpenAI Chat Completions request builder.
+	ExtraContent json.RawMessage `json:"extra_content,omitempty"`
 }
 
 // FunctionCall holds the name and arguments of a tool call.
@@ -688,7 +696,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		}
 	}
 	if err != nil {
-		return nil, err
+		return nil, formatOpenAIError(err)
 	}
 
 	return c.mapOpenAIResponse(sdkResp), nil
@@ -711,7 +719,7 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 	if err != nil {
 		class, phase := classifyStreamError(err)
 		reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
-		return nil, err
+		return nil, formatOpenAIError(err)
 	}
 	return resp, nil
 }
@@ -722,6 +730,11 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 
 	accumulator := openai.ChatCompletionAccumulator{}
 	reasoningByChoice := make(map[int64]*strings.Builder)
+	// The streaming accumulator ignores unmodeled tool-call fields, so
+	// provider metadata like Gemini 3 thought signatures (#1357) is captured
+	// from the delta fragments here and re-attached after mapping.
+	// Keyed by choice index -> clamped tool index.
+	extraContentByChoice := make(map[int64]map[int64]json.RawMessage)
 	seenChoices := make(map[int64]bool)
 	finishedChoices := make(map[int64]bool)
 	var choiceOrder []int64
@@ -740,6 +753,27 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 			}
 			if choice.FinishReason != "" {
 				finishedChoices[choice.Index] = true
+			}
+
+			for _, deltaTool := range choice.Delta.ToolCalls {
+				ec, ok := deltaTool.JSON.ExtraFields["extra_content"]
+				if !ok {
+					continue
+				}
+				raw := bytes.TrimSpace([]byte(ec.Raw()))
+				if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+					continue
+				}
+				// Clamp negative indices to 0, matching the accumulator's
+				// clampToZero behavior for gateways (e.g. Bedrock) that emit -1.
+				toolIndex := deltaTool.Index
+				if toolIndex < 0 {
+					toolIndex = 0
+				}
+				if extraContentByChoice[choice.Index] == nil {
+					extraContentByChoice[choice.Index] = make(map[int64]json.RawMessage)
+				}
+				extraContentByChoice[choice.Index][toolIndex] = json.RawMessage(raw)
 			}
 
 			extra, ok := choice.Delta.JSON.ExtraFields["reasoning_content"]
@@ -779,11 +813,17 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 		resp.Usage = usage
 	}
 	for i := range resp.Choices {
-		builder := reasoningByChoice[accumulator.Choices[i].Index]
+		choiceIndex := accumulator.Choices[i].Index
+		builder := reasoningByChoice[choiceIndex]
 		if builder != nil && builder.Len() > 0 {
 			reasoningContent := builder.String()
 			resp.Choices[i].Message.ReasoningContent = reasoningContent
 			resp.Choices[i].Message.Native = NativeTurn{Family: "openai-chat-completions", Payload: ReasoningPayload(reasoningContent)}
+		}
+		for j := range resp.Choices[i].Message.ToolCalls {
+			if ec, ok := extraContentByChoice[choiceIndex][int64(j)]; ok {
+				resp.Choices[i].Message.ToolCalls[j].ExtraContent = ec
+			}
 		}
 	}
 
@@ -810,14 +850,21 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 				asst.Content.OfString = openai.String(content)
 			}
 			for _, tc := range msg.ToolCalls {
-				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
-					OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-						ID: tc.ID,
-						Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-							Name:      tc.Function.Name,
-							Arguments: tc.Function.Arguments,
-						},
+				fnCall := openai.ChatCompletionMessageFunctionToolCallParam{
+					ID: tc.ID,
+					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
 					},
+				}
+				// Provider metadata captured from the original tool call
+				// (e.g. Gemini 3 thought signatures, #1357) must be echoed
+				// back unchanged or the provider rejects the request.
+				if len(tc.ExtraContent) > 0 {
+					fnCall.SetExtraFields(map[string]any{"extra_content": tc.ExtraContent})
+				}
+				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
+					OfFunction: &fnCall,
 				})
 			}
 			// reasoning_content: gateway extension not modeled by the SDK (#805).
@@ -889,6 +936,7 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 					Name:      tc.Function.Name,
 					Arguments: tc.Function.Arguments,
 				},
+				ExtraContent: toolCallExtraContent(tc.RawJSON()),
 			})
 		}
 
@@ -929,6 +977,68 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 		Choices: choices,
 		Usage:   usage,
 	}
+}
+
+// toolCallExtraContent extracts the unmodeled extra_content field from a tool
+// call's raw response JSON, so provider metadata like Gemini 3 thought
+// signatures survives into conversation history (#1357). The SDK models only
+// id/type/function, and the streaming accumulator ignores raw JSON entirely,
+// so without this the field would be dropped and providers that require it
+// echoed back reject the next request with HTTP 400.
+func toolCallExtraContent(raw string) json.RawMessage {
+	if raw == "" {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return nil
+	}
+	ec, ok := fields["extra_content"]
+	if !ok {
+		return nil
+	}
+	trimmed := bytes.TrimSpace(ec)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	return json.RawMessage(trimmed)
+}
+
+const maxErrorBodyBytes = 64 * 1024
+
+// limitErrorBodyForLog bounds the payload included in terminal and session logs
+// without truncating the HTTP response before the SDK parses it.
+func limitErrorBodyForLog(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) <= maxErrorBodyBytes {
+		return raw
+	}
+	return strings.ToValidUTF8(raw[:maxErrorBodyBytes], "\uFFFD") + "... (truncated)"
+}
+
+// formatOpenAIError enriches an OpenAI API error with the provider response body
+// when the SDK was unable to parse it (e.g. non-standard 4xx error payloads from
+// gateways such as Vertex AI / Google Gemini #1357, #1042), avoiding opaque "400 Bad Request" errors.
+func formatOpenAIError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	if apiErr.Response != nil && apiErr.Response.Body != nil {
+		bodyBytes, readErr := io.ReadAll(apiErr.Response.Body)
+		_ = apiErr.Response.Body.Close()
+		if readErr == nil && len(bodyBytes) > 0 {
+			apiErr.Response.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			trimmed := bytes.TrimSpace(bodyBytes)
+			if len(trimmed) > 0 && !strings.Contains(apiErr.Error(), string(trimmed)) {
+				return fmt.Errorf("%w: %s", err, limitErrorBodyForLog(string(trimmed)))
+			}
+		}
+	}
+	return err
 }
 
 // --- AnthropicClient ---

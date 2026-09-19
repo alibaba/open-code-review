@@ -5,7 +5,11 @@ package llm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -346,5 +350,225 @@ func TestBuildAnthropicParams_NativeReuseDoesNotAliasOriginalSlice(t *testing.T)
 	}
 	if original.Content[1].GetCacheControl() != nil && original.Content[1].GetCacheControl().Type != "" {
 		t.Fatalf("original payload's tool_use block was mutated: %+v", original.Content[1])
+	}
+}
+
+// --- Issue #1357: Gemini 3 thought signatures on OpenAI-compatible gateways ---
+//
+// Gemini 3 models reached through Vertex AI's OpenAI-compatible chat
+// completions endpoint attach a thought signature to each tool call as
+// tool_calls[].extra_content, and reject follow-up requests with HTTP 400
+// when the rebuilt history drops it. These tests are the deterministic,
+// no-live-model reproductions: the signature must survive
+// mapOpenAIResponse -> NewToolCallMessage -> buildOpenAIParams byte for byte,
+// both for standard non-streaming responses and streamed delta chunks.
+
+func TestOpenAIChatCompletions_ReplaysToolCallExtraContentAcrossTurns(t *testing.T) {
+	client := NewOpenAIClient(ClientConfig{URL: "https://aiplatform.googleapis.com/v1/projects/p/locations/global/endpoints/openapi"})
+	body := `{
+		"id":"chatcmpl_sig",
+		"object":"chat.completion",
+		"model":"google/gemini-3.8-flash",
+		"choices":[{
+			"index":0,
+			"message":{
+				"role":"assistant",
+				"content":"",
+				"tool_calls":[{
+					"id":"call_1",
+					"type":"function",
+					"function":{"name":"file_read","arguments":"{\"start_line\":450,\"end_line\":520}"},
+					"extra_content":{"google":{"thought_signature":"sig-abc-123"}}
+				}]
+			},
+			"finish_reason":"tool_calls"
+		}]
+	}`
+	sdkResp := unmarshalChatCompletionBody(t, body)
+	resp := client.mapOpenAIResponse(sdkResp)
+
+	if len(resp.ToolCalls()) != 1 {
+		t.Fatalf("tool calls = %d, want 1", len(resp.ToolCalls()))
+	}
+	if string(resp.ToolCalls()[0].ExtraContent) != `{"google":{"thought_signature":"sig-abc-123"}}` {
+		t.Fatalf("extra_content = %s, want captured verbatim", resp.ToolCalls()[0].ExtraContent)
+	}
+
+	historyMsg := NewToolCallMessage(resp.Content(), resp.ToolCalls(), resp.Native(), resp.ReasoningContent())
+	params := client.buildOpenAIParams("google/gemini-3.8-flash", ChatRequest{Messages: []Message{historyMsg}})
+	if len(params.Messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(params.Messages))
+	}
+	payload, err := json.Marshal(params.Messages[0])
+	if err != nil {
+		t.Fatalf("marshal assistant message: %v", err)
+	}
+	if !bytes.Contains(payload, []byte(`"extra_content":{"google":{"thought_signature":"sig-abc-123"}}`)) {
+		t.Fatalf("assistant tool-call history dropped extra_content (thought signature): %s", payload)
+	}
+}
+
+// TestOpenAIChatCompletions_ToolCallExtraContentOmittedWhenAbsent locks the
+// wire format for providers that never send extra_content: the rebuilt
+// assistant tool call must not gain an empty or null extra_content field.
+func TestOpenAIChatCompletions_ToolCallExtraContentOmittedWhenAbsent(t *testing.T) {
+	client := NewOpenAIClient(ClientConfig{URL: "https://api.openai.com/v1"})
+	body := `{
+		"id":"chatcmpl_plain",
+		"object":"chat.completion",
+		"model":"gpt-x",
+		"choices":[{
+			"index":0,
+			"message":{
+				"role":"assistant",
+				"content":"",
+				"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":"{}"}}]
+			},
+			"finish_reason":"tool_calls"
+		}]
+	}`
+	sdkResp := unmarshalChatCompletionBody(t, body)
+	resp := client.mapOpenAIResponse(sdkResp)
+
+	historyMsg := NewToolCallMessage(resp.Content(), resp.ToolCalls(), resp.Native(), resp.ReasoningContent())
+	params := client.buildOpenAIParams("gpt-x", ChatRequest{Messages: []Message{historyMsg}})
+	payload, err := json.Marshal(params.Messages[0])
+	if err != nil {
+		t.Fatalf("marshal assistant message: %v", err)
+	}
+	if bytes.Contains(payload, []byte(`extra_content`)) {
+		t.Fatalf("assistant tool call gained an extra_content field: %s", payload)
+	}
+}
+
+// TestOpenAIChatCompletions_StreamingCapturesToolCallExtraContent covers the
+// streaming path for issue #1357: the SDK accumulator ignores unmodeled
+// fields, so extra_content must be captured from the delta fragments and
+// re-attached to the mapped tool call, including when gateways return index -1.
+func TestOpenAIChatCompletions_StreamingCapturesToolCallExtraContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeOpenAISSE(t, w,
+			`{"id":"chatcmpl_stream_sig","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+			`{"id":"chatcmpl_stream_sig","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{"tool_calls":[{"index":-1,"id":"call_1","type":"function","function":{"name":"file_read","arguments":""},"extra_content":{"google":{"thought_signature":"sig-stream-1"}}}]},"finish_reason":null}]}`,
+			`{"id":"chatcmpl_stream_sig","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{"tool_calls":[{"index":-1,"function":{"arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"id":"chatcmpl_stream_sig","object":"chat.completion.chunk","created":1,"model":"google/gemini-3.8-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "google/gemini-3.8-flash",
+		ExtraBody: map[string]any{
+			"stream": true,
+		},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "review this file"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if len(resp.ToolCalls()) != 1 {
+		t.Fatalf("tool calls = %d, want 1", len(resp.ToolCalls()))
+	}
+	if string(resp.ToolCalls()[0].ExtraContent) != `{"google":{"thought_signature":"sig-stream-1"}}` {
+		t.Fatalf("streamed extra_content = %s, want captured verbatim", resp.ToolCalls()[0].ExtraContent)
+	}
+
+	historyMsg := NewToolCallMessage(resp.Content(), resp.ToolCalls(), resp.Native(), resp.ReasoningContent())
+	params := client.buildOpenAIParams("google/gemini-3.8-flash", ChatRequest{Messages: []Message{historyMsg}})
+	payload, err := json.Marshal(params.Messages[0])
+	if err != nil {
+		t.Fatalf("marshal assistant message: %v", err)
+	}
+	if !bytes.Contains(payload, []byte(`"extra_content":{"google":{"thought_signature":"sig-stream-1"}}`)) {
+		t.Fatalf("assistant tool-call history dropped streamed extra_content: %s", payload)
+	}
+}
+
+// TestOpenAIChatCompletions_EnrichesErrorWithResponseBody verifies that
+// provider 4xx validation errors with custom response bodies surface the
+// underlying message rather than failing with an empty body (#1357, #1042).
+// Specifically tests both object and array-wrapped error bodies returned by
+// Google Gemini endpoints.
+func TestOpenAIChatCompletions_EnrichesErrorWithResponseBody(t *testing.T) {
+	t.Run("object error body", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error":{"code":400,"message":"Invalid argument: thought_signature is missing","status":"INVALID_ARGUMENT"}}`))
+		}))
+		defer server.Close()
+
+		client := NewOpenAIClient(ClientConfig{
+			URL:    server.URL + "/v1",
+			APIKey: "test-key",
+			Model:  "google/gemini-3.8-flash",
+		})
+
+		_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+			Messages: []Message{{Role: "user", Content: "hi"}},
+		})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "Invalid argument: thought_signature is missing") {
+			t.Errorf("error = %q, want containing underlying response body message", err.Error())
+		}
+	})
+
+	t.Run("gemini array-wrapped error body #1042", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`[{"error":{"code":400,"message":"Function call is missing a thought_signature in functionCall parts","status":"INVALID_ARGUMENT"}}]`))
+		}))
+		defer server.Close()
+
+		client := NewOpenAIClient(ClientConfig{
+			URL:    server.URL + "/v1",
+			APIKey: "test-key",
+			Model:  "gemini-3.7-flash",
+		})
+
+		_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+			Messages: []Message{{Role: "user", Content: "hi"}},
+		})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "Function call is missing a thought_signature in functionCall parts") {
+			t.Errorf("error = %q, want containing underlying response body message", err.Error())
+		}
+	})
+}
+
+// TestOpenAIResponsesClient_EnrichesErrorWithResponseBody verifies that the
+// OpenAI Responses API client also surfaces provider error bodies on failure.
+func TestOpenAIResponsesClient_EnrichesErrorWithResponseBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`[{"error":{"code":400,"message":"responses request rejected by gateway","status":"INVALID_ARGUMENT"}}]`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "custom-model",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "responses request rejected by gateway") {
+		t.Errorf("error = %q, want containing underlying response body message", err.Error())
 	}
 }
