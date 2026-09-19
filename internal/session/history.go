@@ -450,7 +450,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 		cacheWriteTokens = int(resp.Usage.CacheWriteTokens)
 	} else {
 		for _, m := range tr.RequestMessages {
-			promptTokens += llm.CountTokens(m.ExtractText())
+			promptTokens += llm.CountTokens(m.ExtractText()) + m.EstimatedTokens()
 		}
 		completionTokens = llm.CountTokens(content)
 	}

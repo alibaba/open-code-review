@@ -2178,3 +2178,134 @@ func TestAnthropicClient_RetryCodesTriggersRetry(t *testing.T) {
 		t.Errorf("Content() = %q, want %q", got, "success")
 	}
 }
+
+func TestToolCall_EstimatedTokens(t *testing.T) {
+	tests := []struct {
+		name string
+		tc   ToolCall
+		want int
+	}{
+		{
+			name: "empty tool call",
+			tc:   ToolCall{},
+			want: 0,
+		},
+		{
+			name: "short tool call",
+			tc: ToolCall{
+				ID: "call_1",
+				Function: FunctionCall{
+					Name:      "read",
+					Arguments: "{}",
+				},
+			},
+			want: (len("call_1") + len("read") + len("{}")) / 4,
+		},
+		{
+			name: "large tool call arguments",
+			tc: ToolCall{
+				ID: "call_large",
+				Function: FunctionCall{
+					Name:      "file_write",
+					Arguments: strings.Repeat("x", 400),
+				},
+			},
+			want: (len("call_large") + len("file_write") + 400) / 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.tc.EstimatedTokens()
+			if got != tt.want {
+				t.Errorf("ToolCall.EstimatedTokens() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMessage_EstimatedTokens(t *testing.T) {
+	t.Run("text only message", func(t *testing.T) {
+		m := Message{Role: "user", Content: "hello world"}
+		if got := m.EstimatedTokens(); got != 0 {
+			t.Errorf("EstimatedTokens() = %d, want 0 for text-only message", got)
+		}
+	})
+
+	t.Run("message with tool calls", func(t *testing.T) {
+		m := Message{
+			Role: "assistant",
+			ToolCalls: []ToolCall{
+				{
+					ID: "call_1",
+					Function: FunctionCall{
+						Name:      "file_read",
+						Arguments: `{"path":"main.go"}`,
+					},
+				},
+			},
+		}
+		expected := m.ToolCalls[0].EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected || got == 0 {
+			t.Errorf("EstimatedTokens() = %d, want %d", got, expected)
+		}
+	})
+
+	t.Run("message with reasoning payload and tool calls", func(t *testing.T) {
+		reasoning := ReasoningPayload(strings.Repeat("thinking ", 50))
+		m := Message{
+			Role: "assistant",
+			Native: NativeTurn{
+				Family:  "openai-chat-completions",
+				Payload: reasoning,
+			},
+			ToolCalls: []ToolCall{
+				{
+					ID: "call_1",
+					Function: FunctionCall{
+						Name:      "code_search",
+						Arguments: `{"query":"func Test"}`,
+					},
+				},
+			},
+		}
+		expected := m.Native.EstimatedTokens() + m.ToolCalls[0].EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected {
+			t.Errorf("EstimatedTokens() = %d, want %d", got, expected)
+		}
+	})
+
+	t.Run("anthropic message param with tool use does not double count", func(t *testing.T) {
+		toolUseParam := anthropic.ToolUseBlockParam{
+			ID:    "tool_1",
+			Name:  "file_read",
+			Input: map[string]any{"path": "foo.go"},
+		}
+		p := anthropic.MessageParam{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				{OfToolUse: &toolUseParam},
+			},
+		}
+		m := Message{
+			Role: "assistant",
+			Native: NativeTurn{
+				Family:  "anthropic-messages",
+				Payload: p,
+			},
+			ToolCalls: []ToolCall{
+				{
+					ID: "tool_1",
+					Function: FunctionCall{
+						Name:      "file_read",
+						Arguments: `{"path":"foo.go"}`,
+					},
+				},
+			},
+		}
+		expected := m.Native.EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected {
+			t.Errorf("EstimatedTokens() = %d, want %d (should not double-count)", got, expected)
+		}
+	})
+}
