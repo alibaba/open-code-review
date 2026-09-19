@@ -195,12 +195,37 @@ func NewTextMessage(role, content string) Message {
 // NewToolCallMessage creates an assistant history message. Use this instead of
 // NewTextMessage("assistant", ...) to preserve native replay state and reasoning.
 func NewToolCallMessage(content string, toolCalls []ToolCall, native NativeTurn, reasoningContent string) Message {
-	var tc []ToolCall
-	if len(toolCalls) > 0 {
-		tc = make([]ToolCall, len(toolCalls))
-		copy(tc, toolCalls)
+	return Message{Role: "assistant", Content: content, ToolCalls: CloneToolCalls(toolCalls), Native: native, ReasoningContent: reasoningContent}
+}
+
+// CloneToolCalls copies tool calls so the copy shares nothing mutable with the
+// original.
+//
+// A plain slice copy is not enough: ExtraFields is a map, so the copies would
+// share it and a write through either one would be visible in the other. That
+// is safe today only because nothing mutates the map after mapOpenAIResponse
+// fills it — an invariant held by convention, in two packages, with nothing to
+// enforce it. The map is small and tool calls are few, so making the type safe
+// by construction is cheaper than keeping the convention correct.
+func CloneToolCalls(toolCalls []ToolCall) []ToolCall {
+	if len(toolCalls) == 0 {
+		return nil
 	}
-	return Message{Role: "assistant", Content: content, ToolCalls: tc, Native: native, ReasoningContent: reasoningContent}
+	cp := make([]ToolCall, len(toolCalls))
+	copy(cp, toolCalls)
+	for i := range cp {
+		if cp[i].ExtraFields == nil {
+			continue
+		}
+		extra := make(map[string]json.RawMessage, len(cp[i].ExtraFields))
+		for k, v := range cp[i].ExtraFields {
+			// The value is a []byte; copying the map alone would still share
+			// every backing array with the original.
+			extra[k] = append(json.RawMessage(nil), v...)
+		}
+		cp[i].ExtraFields = extra
+	}
+	return cp
 }
 
 // NewToolResultMessage creates a tool-role message with the given result.

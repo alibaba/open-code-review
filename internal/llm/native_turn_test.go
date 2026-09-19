@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -573,4 +574,67 @@ func streamChunk(toolCall string) string {
 func streamFinish() string {
 	return `{"id":"chatcmpl_1","object":"chat.completion.chunk","created":1,"model":"gemini-3",` +
 		`"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`
+}
+
+// TestCloneToolCalls_SharesNothingMutable is the regression for the review note
+// on #1233: ToolCall was copied with a plain slice copy, so every copy shared
+// the one ExtraFields map and the byte slices inside it.
+//
+// Nothing mutates the map after mapOpenAIResponse fills it, so this was safe —
+// but safe by a convention held in two packages with nothing to enforce it. The
+// test states the property the convention was relying on, so a future writer
+// through a copy cannot silently reach the original.
+func TestCloneToolCalls_SharesNothingMutable(t *testing.T) {
+	original := []ToolCall{{
+		ID:   "call_1",
+		Type: "function",
+		Function: FunctionCall{
+			Name:      "file_read",
+			Arguments: "{}",
+		},
+		ExtraFields: map[string]json.RawMessage{
+			"extra_content": json.RawMessage(`{"google":{"thought_signature":"sig"}}`),
+		},
+	}}
+
+	clone := CloneToolCalls(original)
+
+	if len(clone) != 1 {
+		t.Fatalf("clone length = %d, want 1", len(clone))
+	}
+	if got := string(clone[0].ExtraFields["extra_content"]); got != string(original[0].ExtraFields["extra_content"]) {
+		t.Fatalf("clone lost the value: %s", got)
+	}
+
+	// Writing a new key through the clone must not reach the original.
+	clone[0].ExtraFields["injected"] = json.RawMessage(`true`)
+	if _, leaked := original[0].ExtraFields["injected"]; leaked {
+		t.Fatal("the copies share one map: a write through the clone reached the original")
+	}
+
+	// Overwriting the shared byte slice in place must not reach it either.
+	copy(clone[0].ExtraFields["extra_content"], []byte(`{"google":{"thought_signature":"XXX"}}`))
+	if strings.Contains(string(original[0].ExtraFields["extra_content"]), "XXX") {
+		t.Fatalf("the copies share the backing array: original is now %s",
+			original[0].ExtraFields["extra_content"])
+	}
+
+	// And the fields OCR owns still survive the clone.
+	if clone[0].ID != "call_1" || clone[0].Function.Name != "file_read" {
+		t.Fatalf("clone lost its own fields: %+v", clone[0])
+	}
+}
+
+func TestCloneToolCalls_EmptyAndNilStayNil(t *testing.T) {
+	if got := CloneToolCalls(nil); got != nil {
+		t.Fatalf("nil in, %v out", got)
+	}
+	if got := CloneToolCalls([]ToolCall{}); got != nil {
+		t.Fatalf("empty in, %v out", got)
+	}
+	// A tool call with no opaque fields must not gain an empty map.
+	got := CloneToolCalls([]ToolCall{{ID: "call_1"}})
+	if got[0].ExtraFields != nil {
+		t.Fatalf("absent ExtraFields became %v", got[0].ExtraFields)
+	}
 }
