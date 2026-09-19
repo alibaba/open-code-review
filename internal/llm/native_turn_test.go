@@ -5,7 +5,12 @@ package llm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -346,5 +351,290 @@ func TestBuildAnthropicParams_NativeReuseDoesNotAliasOriginalSlice(t *testing.T)
 	}
 	if original.Content[1].GetCacheControl() != nil && original.Content[1].GetCacheControl().Type != "" {
 		t.Fatalf("original payload's tool_use block was mutated: %+v", original.Content[1])
+	}
+}
+
+// TestOpenAIChatCompletions_ReplaysOpaqueToolCallFieldsAcrossTurns is the
+// end-to-end adapter regression for #947: Vertex AI's OpenAI-compatible Gemini
+// endpoint returns a thought signature under tool_calls[].extra_content and
+// rejects the next request with HTTP 400 when it is missing. The opaque value is
+// nested, so this also pins that the whole subtree survives rather than just a
+// top-level key.
+func TestOpenAIChatCompletions_ReplaysOpaqueToolCallFieldsAcrossTurns(t *testing.T) {
+	client := NewOpenAIClient(ClientConfig{URL: "https://api.openai.com/v1"})
+	body := `{
+		"id":"chatcmpl_1",
+		"object":"chat.completion",
+		"model":"gemini-3",
+		"choices":[{
+			"index":0,
+			"message":{
+				"role":"assistant",
+				"content":null,
+				"tool_calls":[{
+					"id":"call_1",
+					"type":"function",
+					"function":{"name":"file_read","arguments":"{}"},
+					"extra_content":{"google":{"thought_signature":"opaque-signature"}}
+				}]
+			},
+			"finish_reason":"tool_calls"
+		}]
+	}`
+	sdkResp := unmarshalChatCompletionBody(t, body)
+	resp := client.mapOpenAIResponse(sdkResp)
+
+	historyMsg := NewToolCallMessage(resp.Content(), resp.ToolCalls(), resp.Native(), resp.ReasoningContent())
+
+	params := client.buildOpenAIParams("gemini-3", ChatRequest{Messages: []Message{historyMsg}})
+	if len(params.Messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(params.Messages))
+	}
+	payload, err := json.Marshal(params.Messages[0])
+	if err != nil {
+		t.Fatalf("marshal assistant message: %v", err)
+	}
+	if !bytes.Contains(payload, []byte(`"extra_content":{"google":{"thought_signature":"opaque-signature"}}`)) {
+		t.Fatalf("assistant tool-call history dropped extra_content: %s", payload)
+	}
+	// The fields OCR owns must still be the ones OCR wrote.
+	if !bytes.Contains(payload, []byte(`"id":"call_1"`)) || !bytes.Contains(payload, []byte(`"name":"file_read"`)) {
+		t.Fatalf("assistant tool-call history lost its own fields: %s", payload)
+	}
+}
+
+// TestOpaqueToolCallFields_ReservedFieldsStayOurs proves a provider cannot use
+// the opaque channel to rewrite the identity of a tool call: SetExtraFields
+// overrides same-key fields, so id, type and function must never be captured.
+func TestOpaqueToolCallFields_ReservedFieldsStayOurs(t *testing.T) {
+	raw := `{"id":"theirs","type":"custom","function":{"name":"theirs"},"extra_content":{"k":"v"}}`
+	got := opaqueToolCallFields(raw)
+
+	for _, k := range []string{"id", "type", "function"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("reserved field %q was captured as an opaque field", k)
+		}
+	}
+	if string(got["extra_content"]) != `{"k":"v"}` {
+		t.Errorf("extra_content = %s, want {\"k\":\"v\"}", got["extra_content"])
+	}
+}
+
+// TestOpaqueToolCallFields_MalformedNotForwarded pins that nothing is forwarded
+// when the payload cannot be parsed, rather than a partial map.
+func TestOpaqueToolCallFields_MalformedNotForwarded(t *testing.T) {
+	for name, raw := range map[string]string{
+		"empty":         "",
+		"not json":      "{not json",
+		"truncated":     `{"extra_content":{"google":`,
+		"not an object": `["extra_content"]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := opaqueToolCallFields(raw); got != nil {
+				t.Errorf("opaqueToolCallFields(%q) = %v, want nil", raw, got)
+			}
+		})
+	}
+}
+
+// TestToolCall_OpaqueFieldsStayOutOfSerializedOutput guards the logging half of
+// the contract in #947: the opaque payload is request state and must not reach
+// review or session output.
+func TestToolCall_OpaqueFieldsStayOutOfSerializedOutput(t *testing.T) {
+	tc := ToolCall{
+		ID:          "call_1",
+		Type:        "function",
+		Function:    FunctionCall{Name: "file_read", Arguments: "{}"},
+		ExtraFields: map[string]json.RawMessage{"extra_content": json.RawMessage(`{"google":{"thought_signature":"opaque-signature"}}`)},
+	}
+	payload, err := json.Marshal(tc)
+	if err != nil {
+		t.Fatalf("marshal tool call: %v", err)
+	}
+	if bytes.Contains(payload, []byte("opaque-signature")) || bytes.Contains(payload, []byte("extra_content")) {
+		t.Fatalf("opaque tool-call fields leaked into serialized output: %s", payload)
+	}
+}
+
+// TestOpenAIChatCompletions_ReplaysOpaqueToolCallFieldsFromStream is the
+// streaming half of #947, reported against this change by @subaru-ye.
+//
+// The non-streaming capture reads tc.RawJSON() on the completed response.
+// ChatCompletionAccumulator builds its ChatCompletion field by field and never
+// sets raw JSON on the assembled message or its tool calls, so on the streaming
+// path that string is "" and the signature is already gone by the time
+// mapOpenAIResponse runs. Both subtests fail on the parent commit with the
+// replayed tool call carrying no extra_content.
+//
+// The two cases differ in which chunk carries the metadata: providers are free
+// to attach it to the chunk that opens the call or to a later one, so the
+// capture merges across chunks rather than reading only the first.
+func TestOpenAIChatCompletions_ReplaysOpaqueToolCallFieldsFromStream(t *testing.T) {
+	const opaque = `{"google":{"thought_signature":"opaque-signature"}}`
+	open := `{"index":0,"id":"call_1","type":"function","function":{"name":"file_read","arguments":""}`
+	tests := []struct {
+		name   string
+		chunks []string
+	}{
+		{
+			name: "metadata on the chunk that opens the call",
+			chunks: []string{
+				streamChunk(open + `,"extra_content":` + opaque + `}`),
+				streamChunk(`{"index":0,"function":{"arguments":"{}"}}`),
+			},
+		},
+		{
+			name: "metadata on a later chunk",
+			chunks: []string{
+				streamChunk(open + `}`),
+				streamChunk(`{"index":0,"function":{"arguments":"{}"},"extra_content":` + opaque + `}`),
+			},
+		},
+		{
+			// Reported by @subaru-ye. The SDK clamps a negative tool index to 0
+			// because, per its own comment, "the API may send -1 for single tool
+			// calls" - so the opening chunk of a single call, which is exactly
+			// where a signature sits, accumulates at position 0. A capture keyed
+			// by the raw -1 lands in a bucket the attach loop never reads.
+			name: "negative tool index on the chunk that opens the call",
+			chunks: []string{
+				streamChunk(`{"index":-1,"id":"call_1","type":"function",` +
+					`"function":{"name":"file_read","arguments":"{}"},"extra_content":` + opaque + `}`),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				flusher, ok := w.(http.Flusher)
+				if !ok {
+					t.Error("response writer does not support flushing")
+					return
+				}
+				for _, chunk := range append(tt.chunks, streamFinish()) {
+					if _, err := fmt.Fprintf(w, "data: %s\n\n", chunk); err != nil {
+						t.Errorf("write SSE event: %v", err)
+						return
+					}
+					flusher.Flush()
+				}
+				if _, err := fmt.Fprint(w, "data: [DONE]\n\n"); err != nil {
+					t.Errorf("write SSE terminator: %v", err)
+				}
+			}))
+			defer server.Close()
+
+			client := NewOpenAIClient(ClientConfig{
+				URL:       server.URL + "/v1",
+				APIKey:    "test-key",
+				Model:     "gemini-3",
+				ExtraBody: map[string]any{"stream": true},
+			})
+			resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages: []Message{{Role: "user", Content: "review this"}},
+			})
+			if err != nil {
+				t.Fatalf("CompletionsWithCtx: %v", err)
+			}
+			calls := resp.ToolCalls()
+			if len(calls) != 1 {
+				t.Fatalf("tool calls = %d, want 1", len(calls))
+			}
+
+			historyMsg := NewToolCallMessage(resp.Content(), calls, resp.Native(), resp.ReasoningContent())
+			params := client.buildOpenAIParams("gemini-3", ChatRequest{Messages: []Message{historyMsg}})
+			payload, err := json.Marshal(params.Messages[0])
+			if err != nil {
+				t.Fatalf("marshal assistant message: %v", err)
+			}
+			if !bytes.Contains(payload, []byte(`"extra_content":`+opaque)) {
+				t.Fatalf("streamed tool-call history dropped extra_content: %s", payload)
+			}
+			// The stream's own framing is not provider metadata and must not be
+			// echoed, and the fields OCR owns must still be the ones OCR wrote.
+			if bytes.Contains(payload, []byte(`"index"`)) {
+				t.Fatalf("streaming framing leaked into the next request: %s", payload)
+			}
+			if !bytes.Contains(payload, []byte(`"id":"call_1"`)) || !bytes.Contains(payload, []byte(`"name":"file_read"`)) {
+				t.Fatalf("streamed tool-call history lost its own fields: %s", payload)
+			}
+		})
+	}
+}
+
+// streamChunk wraps one tool-call delta in a chat.completion.chunk envelope.
+func streamChunk(toolCall string) string {
+	return `{"id":"chatcmpl_1","object":"chat.completion.chunk","created":1,"model":"gemini-3",` +
+		`"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[` + toolCall + `]},"finish_reason":null}]}`
+}
+
+// streamFinish closes the choice; the stream is rejected as truncated without it.
+func streamFinish() string {
+	return `{"id":"chatcmpl_1","object":"chat.completion.chunk","created":1,"model":"gemini-3",` +
+		`"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`
+}
+
+// TestCloneToolCalls_SharesNothingMutable is the regression for the review note
+// on #1233: ToolCall was copied with a plain slice copy, so every copy shared
+// the one ExtraFields map and the byte slices inside it.
+//
+// Nothing mutates the map after mapOpenAIResponse fills it, so this was safe —
+// but safe by a convention held in two packages with nothing to enforce it. The
+// test states the property the convention was relying on, so a future writer
+// through a copy cannot silently reach the original.
+func TestCloneToolCalls_SharesNothingMutable(t *testing.T) {
+	original := []ToolCall{{
+		ID:   "call_1",
+		Type: "function",
+		Function: FunctionCall{
+			Name:      "file_read",
+			Arguments: "{}",
+		},
+		ExtraFields: map[string]json.RawMessage{
+			"extra_content": json.RawMessage(`{"google":{"thought_signature":"sig"}}`),
+		},
+	}}
+
+	clone := CloneToolCalls(original)
+
+	if len(clone) != 1 {
+		t.Fatalf("clone length = %d, want 1", len(clone))
+	}
+	if got := string(clone[0].ExtraFields["extra_content"]); got != string(original[0].ExtraFields["extra_content"]) {
+		t.Fatalf("clone lost the value: %s", got)
+	}
+
+	// Writing a new key through the clone must not reach the original.
+	clone[0].ExtraFields["injected"] = json.RawMessage(`true`)
+	if _, leaked := original[0].ExtraFields["injected"]; leaked {
+		t.Fatal("the copies share one map: a write through the clone reached the original")
+	}
+
+	// Overwriting the shared byte slice in place must not reach it either.
+	copy(clone[0].ExtraFields["extra_content"], []byte(`{"google":{"thought_signature":"XXX"}}`))
+	if strings.Contains(string(original[0].ExtraFields["extra_content"]), "XXX") {
+		t.Fatalf("the copies share the backing array: original is now %s",
+			original[0].ExtraFields["extra_content"])
+	}
+
+	// And the fields OCR owns still survive the clone.
+	if clone[0].ID != "call_1" || clone[0].Function.Name != "file_read" {
+		t.Fatalf("clone lost its own fields: %+v", clone[0])
+	}
+}
+
+func TestCloneToolCalls_EmptyAndNilStayNil(t *testing.T) {
+	if got := CloneToolCalls(nil); got != nil {
+		t.Fatalf("nil in, %v out", got)
+	}
+	if got := CloneToolCalls([]ToolCall{}); got != nil {
+		t.Fatalf("empty in, %v out", got)
+	}
+	// A tool call with no opaque fields must not gain an empty map.
+	got := CloneToolCalls([]ToolCall{{ID: "call_1"}})
+	if got[0].ExtraFields != nil {
+		t.Fatalf("absent ExtraFields became %v", got[0].ExtraFields)
 	}
 }

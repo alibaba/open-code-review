@@ -195,12 +195,37 @@ func NewTextMessage(role, content string) Message {
 // NewToolCallMessage creates an assistant history message. Use this instead of
 // NewTextMessage("assistant", ...) to preserve native replay state and reasoning.
 func NewToolCallMessage(content string, toolCalls []ToolCall, native NativeTurn, reasoningContent string) Message {
-	var tc []ToolCall
-	if len(toolCalls) > 0 {
-		tc = make([]ToolCall, len(toolCalls))
-		copy(tc, toolCalls)
+	return Message{Role: "assistant", Content: content, ToolCalls: CloneToolCalls(toolCalls), Native: native, ReasoningContent: reasoningContent}
+}
+
+// CloneToolCalls copies tool calls so the copy shares nothing mutable with the
+// original.
+//
+// A plain slice copy is not enough: ExtraFields is a map, so the copies would
+// share it and a write through either one would be visible in the other. That
+// is safe today only because nothing mutates the map after mapOpenAIResponse
+// fills it — an invariant held by convention, in two packages, with nothing to
+// enforce it. The map is small and tool calls are few, so making the type safe
+// by construction is cheaper than keeping the convention correct.
+func CloneToolCalls(toolCalls []ToolCall) []ToolCall {
+	if len(toolCalls) == 0 {
+		return nil
 	}
-	return Message{Role: "assistant", Content: content, ToolCalls: tc, Native: native, ReasoningContent: reasoningContent}
+	cp := make([]ToolCall, len(toolCalls))
+	copy(cp, toolCalls)
+	for i := range cp {
+		if cp[i].ExtraFields == nil {
+			continue
+		}
+		extra := make(map[string]json.RawMessage, len(cp[i].ExtraFields))
+		for k, v := range cp[i].ExtraFields {
+			// The value is a []byte; copying the map alone would still share
+			// every backing array with the original.
+			extra[k] = append(json.RawMessage(nil), v...)
+		}
+		cp[i].ExtraFields = extra
+	}
+	return cp
 }
 
 // NewToolResultMessage creates a tool-role message with the given result.
@@ -252,6 +277,78 @@ type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
+
+	// ExtraFields carries provider fields that OCR does not model, captured
+	// verbatim from the response so they can be echoed on later turns. Some
+	// OpenAI-compatible providers attach opaque metadata to a tool call and
+	// reject the next request when it is missing - Vertex AI's Gemini endpoint
+	// returns a thought signature under extra_content (#947).
+	//
+	// It is json:"-" so the opaque payload stays out of review and session
+	// output; it is request state, not something a reader should see.
+	ExtraFields map[string]json.RawMessage `json:"-"`
+}
+
+// reservedToolCallFields are owned by OCR and never taken from a provider, so a
+// response cannot use ExtraFields to rewrite the identity of a tool call.
+var reservedToolCallFields = map[string]bool{"id": true, "type": true, "function": true}
+
+// opaqueToolCallFields extracts the fields of a provider tool call that OCR does
+// not model. Anything malformed yields nil rather than a partial map: forwarding
+// a half-parsed payload is worse than dropping it, since the provider would
+// reject the request either way.
+func opaqueToolCallFields(raw string) map[string]json.RawMessage {
+	if raw == "" {
+		return nil
+	}
+	// Unmarshal parses the whole document to find value boundaries, so a
+	// malformed payload fails here and every retained value is syntactically
+	// valid by construction - no second validation pass is needed.
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &all); err != nil {
+		return nil
+	}
+	var extra map[string]json.RawMessage
+	for k, v := range all {
+		if reservedToolCallFields[k] {
+			continue
+		}
+		if extra == nil {
+			extra = make(map[string]json.RawMessage, len(all))
+		}
+		extra[k] = v
+	}
+	return extra
+}
+
+// streamedOpaqueToolCallFields extracts the unmodelled provider fields from a
+// streamed tool-call delta.
+//
+// The streaming path cannot reuse the capture in mapOpenAIResponse.
+// ChatCompletionAccumulator synthesizes its ChatCompletion field by field and
+// never sets raw JSON on the assembled message or its tool calls, so RawJSON()
+// there is "" and opaqueToolCallFields has nothing to read - the metadata is
+// gone by the time the completed response exists. The delta is the last place
+// it is present.
+//
+// JSON.ExtraFields already holds only what the SDK does not model, so the
+// stream's own "index" framing never reaches the next request. The reserved
+// filter is applied anyway so the invariant that a provider cannot rewrite a
+// tool call's identity is enforced identically on both paths.
+func streamedOpaqueToolCallFields(delta openai.ChatCompletionChunkChoiceDeltaToolCall) map[string]json.RawMessage {
+	var extra map[string]json.RawMessage
+	for k, v := range delta.JSON.ExtraFields {
+		if reservedToolCallFields[k] {
+			continue
+		}
+		// The chunk was unmarshalled successfully, so every raw value here is
+		// syntactically valid by construction, as in opaqueToolCallFields.
+		if extra == nil {
+			extra = make(map[string]json.RawMessage, len(delta.JSON.ExtraFields))
+		}
+		extra[k] = json.RawMessage(v.Raw())
+	}
+	return extra
 }
 
 // FunctionCall holds the name and arguments of a tool call.
@@ -722,6 +819,10 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 
 	accumulator := openai.ChatCompletionAccumulator{}
 	reasoningByChoice := make(map[int64]*strings.Builder)
+	// choice index -> tool-call index -> opaque fields, merged across chunks
+	// because a provider may attach the metadata to any chunk of the call.
+	opaqueByChoice := make(map[int64]map[int64]map[string]json.RawMessage)
+	opaqueIDs := make(map[int64]map[int64]string)
 	seenChoices := make(map[int64]bool)
 	finishedChoices := make(map[int64]bool)
 	var choiceOrder []int64
@@ -740,6 +841,35 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 			}
 			if choice.FinishReason != "" {
 				finishedChoices[choice.Index] = true
+			}
+
+			for _, delta := range choice.Delta.ToolCalls {
+				// Key by the same index the accumulator places the call at, or
+				// the capture lands in a bucket the attach loop never reads.
+				// The SDK clamps a negative index to 0 because, per its own
+				// comment, "the API may send -1 for single tool calls" - so a
+				// signature on the chunk that opens a single call arrives under
+				// -1 and is dropped unless it is clamped here too.
+				toolIndex := max(delta.Index, 0)
+				if delta.ID != "" {
+					if opaqueIDs[choice.Index] == nil {
+						opaqueIDs[choice.Index] = make(map[int64]string)
+					}
+					opaqueIDs[choice.Index][toolIndex] = delta.ID
+				}
+				fields := streamedOpaqueToolCallFields(delta)
+				if len(fields) == 0 {
+					continue
+				}
+				if opaqueByChoice[choice.Index] == nil {
+					opaqueByChoice[choice.Index] = make(map[int64]map[string]json.RawMessage)
+				}
+				if opaqueByChoice[choice.Index][toolIndex] == nil {
+					opaqueByChoice[choice.Index][toolIndex] = make(map[string]json.RawMessage, len(fields))
+				}
+				for k, v := range fields {
+					opaqueByChoice[choice.Index][toolIndex][k] = v
+				}
 			}
 
 			extra, ok := choice.Delta.JSON.ExtraFields["reasoning_content"]
@@ -779,7 +909,24 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 		resp.Usage = usage
 	}
 	for i := range resp.Choices {
-		builder := reasoningByChoice[accumulator.Choices[i].Index]
+		choiceIndex := accumulator.Choices[i].Index
+		byTool := opaqueByChoice[choiceIndex]
+		for j := range resp.Choices[i].Message.ToolCalls {
+			fields := byTool[int64(j)]
+			if len(fields) == 0 {
+				continue
+			}
+			// The accumulator fills its tool-call slice by the delta's index, so
+			// position and index agree. If a provider ever broke that, attaching
+			// one call's signature to another would be rejected as surely as
+			// sending none, so the mismatch is dropped instead.
+			if id, ok := opaqueIDs[choiceIndex][int64(j)]; ok && id != resp.Choices[i].Message.ToolCalls[j].ID {
+				continue
+			}
+			resp.Choices[i].Message.ToolCalls[j].ExtraFields = fields
+		}
+
+		builder := reasoningByChoice[choiceIndex]
 		if builder != nil && builder.Len() > 0 {
 			reasoningContent := builder.String()
 			resp.Choices[i].Message.ReasoningContent = reasoningContent
@@ -810,14 +957,25 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 				asst.Content.OfString = openai.String(content)
 			}
 			for _, tc := range msg.ToolCalls {
-				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
-					OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-						ID: tc.ID,
-						Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-							Name:      tc.Function.Name,
-							Arguments: tc.Function.Arguments,
-						},
+				fn := &openai.ChatCompletionMessageFunctionToolCallParam{
+					ID: tc.ID,
+					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
 					},
+				}
+				// Echo provider fields OCR does not model. SetExtraFields
+				// overrides same-key fields, so opaqueToolCallFields having
+				// dropped the reserved ones is what keeps ID/Type/Function ours.
+				if len(tc.ExtraFields) > 0 {
+					extra := make(map[string]any, len(tc.ExtraFields))
+					for k, v := range tc.ExtraFields {
+						extra[k] = v
+					}
+					fn.SetExtraFields(extra)
+				}
+				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
+					OfFunction: fn,
 				})
 			}
 			// reasoning_content: gateway extension not modeled by the SDK (#805).
@@ -889,6 +1047,7 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 					Name:      tc.Function.Name,
 					Arguments: tc.Function.Arguments,
 				},
+				ExtraFields: opaqueToolCallFields(tc.RawJSON()),
 			})
 		}
 
