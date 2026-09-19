@@ -425,6 +425,9 @@ func saveConfig(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
+	// WriteFile applies 0o600 only when creating the file; existing files keep
+	// prior permissions. Chmod enforces 0600 on every persist (e.g. after
+	// ocr config set writes an API key into a previously world-readable config).
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
