@@ -290,6 +290,19 @@ func TestFileReadDiffProvider_Execute_Pagination(t *testing.T) {
 			wantCount:   300,
 		},
 		{
+			// The budget runs out exactly as a file ends, with another file
+			// still to come: the next file must not get a header it has no
+			// room to fill.
+			name:        "page ending on a file boundary omits the next file's header",
+			paths:       []any{"big.go", "a.go"},
+			startLine:   float64(701),
+			wantPrefix:  "IS_TRUNCATED: true\n",
+			wantHeaders: []string{"big.go"},
+			wantBody:    []string{"big 701", "big 1200"},
+			wantCount:   500,
+			wantNote:    "start_line=1201",
+		},
+		{
 			name:      "found file with an empty diff is listed, not reported missing",
 			paths:     []any{"empty.go"},
 			wantExact: "IS_TRUNCATED: false\n==== FILE: empty.go ====\n",
