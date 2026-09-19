@@ -18,19 +18,20 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermissions
 
 /**
- * 读写 `~/.opencodereview/config.json`。分工：
- * 写单个键走 CLI（`ocr config set`），因 CLI 自带校验和规范化；只有"删除自定义 provider"直接改文件——CLI 无对应 unset 子命令。
+ * Reads and writes `~/.opencodereview/config.json`. Division of labor:
+ * single-key writes go through the CLI (`ocr config set`), which validates and normalizes;
+ * only "delete a custom provider" edits the file directly -- the CLI has no matching unset subcommand.
  */
 class ConfigService(
     private val cli: CliService,
-    /** `ocr config set` 的工作目录。该子命令不依赖 cwd，取稳定值即可。 */
+    /** Working directory for `ocr config set`. That subcommand does not depend on cwd, so any stable value works. */
     private val cwd: File = File(System.getProperty("user.dir")),
 ) {
 
     private fun configPath(): File =
         File(File(System.getProperty("user.home"), ".opencodereview"), "config.json")
 
-    /** 读取并转换为插件内部使用的 camelCase 配置；文件不存在或内容非法返回 null。 */
+    /** Reads the file and converts it to the plugin's internal camelCase config; returns null when the file is missing or invalid. */
     fun read(): OcrConfig? {
         val path = configPath()
         if (!path.isFile) return null
@@ -40,19 +41,22 @@ class ConfigService(
         }
     }
 
-    /** 读取原始 snake_case JSON，保留所有未知字段。解析失败记日志（与 [read] 一致），返回空配置。 */
+    /** Reads the raw snake_case JSON, preserving all unknown fields. Parse failures are logged (same as [read]) and an empty config is returned. */
     private fun readRaw(): RawConfig {
         val path = configPath()
         if (!path.isFile) return emptyRawConfig()
         return runCatching { parseRawConfig(path.readText()) }.getOrElse {
-            // 记日志便于排查；返回空配置，下游 writeRaw/deleteCustomProvider 在 bucket 取不到时会 bail，不会覆盖这份坏文件。
+            // Logged to ease troubleshooting; an empty config is returned, and downstream writeRaw/deleteCustomProvider bail
+            // when the bucket is missing, so this broken file is never overwritten.
             thisLogger().warn("[ocr] Failed to parse raw config (treated as empty; writes will bail): ${path.absolutePath}", it)
             emptyRawConfig()
         }
     }
 
-    /** 写回原始配置。整份配置为空时删文件而非写 `{}`——保留空文件会让 CLI 认为"已配置过"。
-     *  @Synchronized 串行化写盘：避免并发写（删除 provider vs setMany 回滚）的固定 tmp 文件名碰撞与交错。 */
+    /** Writes the raw config back. When the whole config is empty, delete the file instead of writing `{}` --
+     *  keeping an empty file would make the CLI believe it "has been configured".
+     *  @Synchronized serializes writes: it avoids tmp-file-name collisions and interleaving between concurrent
+     *  writers (delete provider vs the setMany rollback). */
     @Synchronized
     private fun writeRaw(raw: RawConfig): OcrConfig? {
         val path = configPath()
@@ -67,21 +71,24 @@ class ConfigService(
             if (!dir.isDirectory) {
                 Files.createDirectories(dir.toPath())
             }
-            // 已存在的目录也收紧（CLI 或旧版可能留 755，目录含 api_key 须 700）。
+            // Tighten even a pre-existing directory (the CLI or older versions may leave 755; the directory holds api_key and must be 700).
             trySetPosixPermissions(dir, "rwx------")
-            // 原子写 + 先收紧权限：唯一名临时文件避免跨实例/跨 IDE 窗口碰撞；空文件先收紧 rw------- 再写 api_key，全程不暴露在可读文件里。
+            // Atomic write + permissions tightened first: a uniquely named temp file avoids collisions across
+            // instances/IDE windows; the empty file is tightened to rw------- before api_key is written, so the
+            // key never sits in a readable file at any point.
             val tmpPath = Files.createTempFile(dir.toPath(), "config-", ".tmp")
             val tmp = tmpPath.toFile()
             trySetPosixPermissions(tmp, "rw-------")
             try {
                 tmp.writeText(raw.toPrettyJson())
             } catch (e: IOException) {
-                // writeText 失败（如盘满）时 tmp 可能已含部分 api_key；600 权限已收紧，但须删掉避免残留泄漏。
+                // If writeText fails (e.g. disk full), tmp may already hold a partial api_key; permissions are
+                // already tightened to 600, but the file must be deleted so no residue leaks.
                 runCatching { Files.deleteIfExists(tmpPath) }
                 throw e
             }
             try {
-                // 优先原子 move；不支持原子 move 的 FS（部分 Windows/网络盘）退化为 REPLACE_EXISTING。
+                // Prefer an atomic move; filesystems without atomic-move support (some Windows/network drives) fall back to REPLACE_EXISTING.
                 try {
                     Files.move(tmpPath, path.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
                 } catch (e: java.nio.file.AtomicMoveNotSupportedException) {
@@ -99,7 +106,7 @@ class ConfigService(
         return read()
     }
 
-    /** 判断配置是否还有实质内容。空字符串不计入——空串在此判定中为 falsy。 */
+    /** Whether the config still has real content. Empty strings do not count -- a blank string is falsy in this check. */
     private fun RawConfig.hasContent(): Boolean {
         fun nonEmptyStr(key: String): Boolean {
             val prim = this[key] as? kotlinx.serialization.json.JsonPrimitive ?: return false
@@ -117,9 +124,10 @@ class ConfigService(
     }
 
     /**
-     * 删除一个自定义 provider。连带清理：容器为空则删除 `custom_providers` 键；所删 provider 正是当前选中项时
-     * 一并清除 `provider`/`model`，避免配置指向不存在的 provider。
-     * 整段 read-modify-write 加锁：并发删除（用户连点）会互相覆盖、丢一个删除。
+     * Deletes a custom provider, with cascading cleanup: the `custom_providers` key is removed when its container
+     * becomes empty, and when the deleted provider is the currently selected one, `provider`/`model` are cleared
+     * too so the config does not point at a provider that no longer exists.
+     * The whole read-modify-write is locked: concurrent deletes (a double click) would overwrite each other and lose one delete.
      */
     @Synchronized
     fun deleteCustomProvider(name: String): OcrConfig? {
@@ -141,8 +149,8 @@ class ConfigService(
     }
 
     /**
-     * 在隔离的临时 HOME 上执行 `ocr llm test`，不触及用户真正的配置文件。
-     * 返回 (是否成功, 失败原因)。
+     * Runs `ocr llm test` on an isolated temporary HOME, never touching the user's real config file.
+     * Returns (success, failure reason).
      */
     fun testWithEntries(entries: List<ConfigEntry>): Pair<Boolean, String?> {
         val draft = applyConfigEntries(readRaw(), entries)
@@ -171,7 +179,7 @@ class ConfigService(
         }
     }
 
-    /** 写单个配置项，返回写后的配置。CLI 退出码非 0 时 [CliService.runRaw] 会抛 [CliException]。 */
+    /** Writes a single config entry and returns the config after the write. [CliService.runRaw] throws [CliException] when the CLI exits non-zero. */
     @Synchronized
     fun set(key: String, value: String): OcrConfig? {
         cli.runRaw(toConfigSetArgs(key, value), cwd, {})
@@ -179,8 +187,10 @@ class ConfigService(
     }
 
     /**
-     * 按顺序写多个配置项。顺序有意义：`provider` 须在 `model` 前生效，否则 model 写到顶层而非 provider 条目
-     * （见 [applyConfigEntries] 的 model 分支）。中途失败回滚到 setMany 前的快照，避免半应用（如 provider 改了但 api_key 没写）。
+     * Writes several config entries in order. Order matters: `provider` must take effect before `model`,
+     * otherwise the model lands at the top level instead of inside the provider entry
+     * (see the model branch of [applyConfigEntries]). On a mid-way failure, roll back to the snapshot taken
+     * before setMany to avoid a half-applied state (e.g. provider changed but api_key not written).
      */
     @Synchronized
     fun setMany(entries: List<ConfigEntry>): OcrConfig? {
@@ -193,17 +203,20 @@ class ConfigService(
             }
             return read()
         } catch (e: Exception) {
-            // applied 只含已成功的条目，失败的是下一条 entries[applied.size]；用它的 key 记日志才准确。
+            // applied holds only the entries that succeeded; the failed one is the next entry, entries[applied.size].
+            // Logging that entry's key is what makes the message accurate.
             thisLogger().warn("[ocr] setMany failed at '${entries.getOrNull(applied.size)?.key ?: "?"}', rolling back", e)
-            // 只在快照有内容时回滚写回；snapshot 为空（原配置缺失/损坏）时 writeRaw 会删文件，反而丢用户数据。
+            // Roll back only when the snapshot has content: with an empty snapshot (original config missing/corrupt),
+            // writeRaw would delete the file and lose user data instead.
             if (snapshot.hasContent()) writeRaw(snapshot)
             throw e
         }
     }
 
-    /** Windows 无 POSIX 权限视图，静默跳过；失败仅权限未收紧，不应导致写配置失败。 */
+    /** Windows has no POSIX permission view, so it is skipped silently; a failure only leaves permissions looser and must not fail the config write. */
     private fun trySetPosixPermissions(target: File, spec: String) {
-        // Windows 上 setPosixFilePermissions 必抛 UnsupportedOperationException，每次写都记日志会刷屏——直接跳过。
+        // On Windows setPosixFilePermissions always throws UnsupportedOperationException, and logging it on every
+        // write would spam the log -- skip directly.
         if (SystemInfo.isWindows) return
         runCatching {
             Files.setPosixFilePermissions(target.toPath(), PosixFilePermissions.fromString(spec))

@@ -19,15 +19,19 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
 /**
- * 出站消息集合，分为侧栏通道使用的 `HostToWebview`（8 条）与配置面板通道使用的 `ConfigPanelHostToWebview`（10 条）。
+ * Outbound messages: `HostToWebview` (8) for the sidebar channel and `ConfigPanelHostToWebview`
+ * (10) for the config panel channel.
  *
- * 采用密封类加 `classDiscriminator = "type"`，而非手工拼接 `buildJsonObject`：手工拼接漏字段或误用 snake_case
- * 时编译器无法发现，前端将静默渲染空白卡片；密封类把"缺一个字段"提升为编译期错误。
+ * Sealed classes with `classDiscriminator = "type"` rather than a hand-built `buildJsonObject`:
+ * a hand-built object with a missing field or a snake_case name compiles fine and makes the
+ * frontend silently render a blank card, while the sealed class turns a missing field into a
+ * compile-time error.
  */
 
 /**
- * 出站 JSON 编码器。`explicitNulls = true` 使值为 null 的字段显式输出为 `"field": null`，
- * 与前端 TypeScript 类型声明（`field: Type | null` 非可选）的契约一致——前端期望字段始终存在。
+ * Outbound JSON encoder. `explicitNulls = true` writes null fields explicitly as `"field": null`,
+ * matching the contract of the frontend TypeScript declarations (`field: Type | null`, not
+ * optional): the frontend expects the field to always be present.
  */
 val HostJson: Json = Json {
     classDiscriminator = "type"
@@ -38,7 +42,9 @@ val HostJson: Json = Json {
 @Serializable
 sealed class HostToWebview {
 
-    /** 前端 `ready` 之后的第一条消息。缺少 `config` 会使前端 `isConfigReady(null)` 判定配置未就绪，导致 UI 永久停留在配置视图。 */
+    /** The first message after the frontend's `ready`. A missing `config` makes the frontend's
+     *  `isConfigReady(null)` report the configuration as not ready, stranding the UI on the config
+     *  view. */
     @Serializable
     @SerialName("init")
     data class Init(
@@ -77,15 +83,17 @@ sealed class HostToWebview {
 }
 
 /**
- * 配置面板专用出站消息。与 [HostToWebview] 分开声明，原因是侧栏与配置面板为两个独立 webview，
- * 各自只识别本通道的 `type` 取值；共用通道会使其中一侧收到无法识别的消息。
+ * Outbound messages used by the config panel alone. Declared separately from [HostToWebview]
+ * because the sidebar and the config panel are two independent webviews, each recognising only the
+ * `type` values of its own channel; a shared channel would deliver a type one side cannot read.
  */
 @Serializable
 sealed class ConfigPanelHostToWebview {
 
     /**
-     * [focus] 表示前端自定义的焦点描述，宿主不解释其内容、原样回传，
-     * 故类型为 [JsonElement] 而非 Kotlin data class——宿主侧仅作透传。
+     * [focus] is a frontend-defined focus description; the host does not interpret it and passes it
+     * back unchanged, hence the [JsonElement] type rather than a Kotlin data class: the host only
+     * relays it.
      */
     @Serializable
     @SerialName("configPanelInit")
@@ -109,7 +117,8 @@ sealed class ConfigPanelHostToWebview {
     @SerialName("connectionResult")
     data class ConnectionResult(val ok: Boolean, val message: String? = null) : ConfigPanelHostToWebview()
 
-    /** 该类型已不再发送（CLI 检查结果改由 `environmentResult` 承载）；为保持消息契约完整仍予声明。 */
+    /** No longer sent (the CLI check result now travels as `environmentResult`); declared anyway to
+     *  keep the message contract complete. */
     @Serializable
     @SerialName("cliStatus")
     data class CliStatus(val installed: Boolean) : ConfigPanelHostToWebview()
@@ -140,7 +149,8 @@ fun HostToWebview.toJson(): String = HostJson.encodeToString(HostToWebview.seria
 fun ConfigPanelHostToWebview.toJson(): String =
     HostJson.encodeToString(ConfigPanelHostToWebview.serializer(), this)
 
-/** 单条 webview 通道。由 JCEF 侧实现此接口，路由层仅负责将 JSON 字符串交付其发送。 */
+/** A single webview channel. The JCEF side implements this interface; the routing layer only hands
+ *  it a JSON string to send. */
 fun interface WebviewChannel {
     fun post(json: String)
 }

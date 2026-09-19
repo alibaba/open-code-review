@@ -215,7 +215,7 @@ nav.breadcrumb .nav-brand {
     gap: var(--space-2);
     transition: color var(--transition);
 }
-nav.breadcrumb .nav-brand:hover { color: var(--link); }
+nav.breadcrumb a.nav-brand:hover { color: var(--link); }
 
 nav.breadcrumb .nav-brand .brand-icon {
     width: 22px;
@@ -232,7 +232,9 @@ nav.breadcrumb .nav-brand .brand-icon svg {
     display: block;
 }
 
-nav.breadcrumb a {
+/* The exported standalone page renders the repo crumb as a <span>, since a
+   site-absolute href is dead over file://. Match both so it keeps its styling. */
+nav.breadcrumb a, nav.breadcrumb .crumb {
     color: var(--text-muted);
     text-decoration: none;
     font-weight: 500;

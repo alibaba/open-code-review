@@ -36,28 +36,28 @@ class ConfigDraftTest {
     // ------------------------------------------------------------ provider
 
     @Test
-    fun `切换 provider 会清掉顶层 model`() {
+    fun `switching provider clears the top-level model`() {
         val d = draft("""{"provider": "openai", "model": "gpt-5.5"}""", "provider" to "anthropic")
         assertEquals("anthropic", d.str("provider"))
         assertEquals("", d.str("model"))
     }
 
     @Test
-    fun `内置 provider 会创建 providers 条目`() {
+    fun `built-in provider creates a providers entry`() {
         val d = draft("{}", "provider" to "dashscope")
         assertEquals(JsonObject(emptyMap()), d.obj("providers", "dashscope"))
         assertNull(d.obj("custom_providers"))
     }
 
     @Test
-    fun `非内置 provider 会创建 custom_providers 条目`() {
+    fun `non-built-in provider creates a custom_providers entry`() {
         val d = draft("{}", "provider" to "my-gateway")
         assertEquals(JsonObject(emptyMap()), d.obj("custom_providers", "my-gateway"))
         assertNull(d.obj("providers"))
     }
 
     @Test
-    fun `provider 置空不创建任何条目`() {
+    fun `empty provider does not create an entry`() {
         val d = draft("{}", "provider" to "")
         assertEquals("", d.str("provider"))
         assertNull(d.obj("providers"))
@@ -65,7 +65,7 @@ class ConfigDraftTest {
     }
 
     @Test
-    fun `已存在的 provider 条目不会被清空`() {
+    fun `existing provider entries are not cleared`() {
         val d = draft("""{"providers": {"openai": {"api_key": "k"}}}""", "provider" to "openai")
         assertEquals("k", d.str("providers", "openai", "api_key"))
     }
@@ -73,28 +73,28 @@ class ConfigDraftTest {
     // ------------------------------------------------------------ model
 
     @Test
-    fun `选了内置 provider 时 model 写进该条目`() {
+    fun `model is written to the selected built-in provider entry`() {
         val d = draft("""{"provider": "openai"}""", "model" to "gpt-5.5")
         assertEquals("gpt-5.5", d.str("providers", "openai", "model"))
-        // 顶层 model 不应被写入——CLI 优先读取 provider 条目中的值。
+        // Do not write the top-level model; the CLI prefers the value in the provider entry.
         assertNull(d.str("model"))
     }
 
     @Test
-    fun `选了自定义 provider 时 model 写进 custom_providers`() {
+    fun `model is written to custom_providers for a custom provider`() {
         val d = draft("""{"provider": "mine"}""", "model" to "m1")
         assertEquals("m1", d.str("custom_providers", "mine", "model"))
     }
 
     @Test
-    fun `没选 provider 时 model 落在顶层`() {
+    fun `model is written at the top level when no provider is selected`() {
         val d = draft("{}", "model" to "m1")
         assertEquals("m1", d.str("model"))
     }
 
     @Test
-    fun `provider 和 model 同批写入时顺序决定归属`() {
-        // setMany 的顺序契约：provider 先生效，model 才能确定写入哪个条目。
+    fun `provider and model batch ordering determines the destination`() {
+        // setMany ordering contract: apply provider first to determine the destination for model.
         val d = draft("{}", "provider" to "openai", "model" to "gpt-5.5")
         assertEquals("gpt-5.5", d.str("providers", "openai", "model"))
     }
@@ -102,7 +102,7 @@ class ConfigDraftTest {
     // ------------------------------------------------------------ providers.<name>.<field>
 
     @Test
-    fun `providers 前缀按名字路由到内置或自定义容器`() {
+    fun `the providers prefix routes by name to built-in or custom containers`() {
         val preset = draft("{}", "providers.anthropic.api_key" to "sk-1")
         assertEquals("sk-1", preset.str("providers", "anthropic", "api_key"))
 
@@ -112,26 +112,26 @@ class ConfigDraftTest {
     }
 
     @Test
-    fun `custom_providers 前缀始终写自定义容器`() {
-        // 即使名称与内置 provider 重名，显式前缀也不改变路由。
+    fun `the custom_providers prefix always writes to the custom container`() {
+        // An explicit prefix preserves routing even when the name matches a built-in provider.
         val d = draft("{}", "custom_providers.anthropic.url" to "http://proxy")
         assertEquals("http://proxy", d.str("custom_providers", "anthropic", "url"))
     }
 
     @Test
-    fun `段数不对的 key 被忽略`() {
+    fun `keys with the wrong number of segments are ignored`() {
         assertEquals(emptyRawConfig(), draft("{}", "providers.anthropic" to "x"))
         assertEquals(emptyRawConfig(), draft("{}", "providers.a.b.c" to "x"))
         assertEquals(emptyRawConfig(), draft("{}", "custom_providers.a" to "x"))
     }
 
     @Test
-    fun `未知 provider 字段被忽略`() {
+    fun `unknown provider fields are ignored`() {
         assertEquals(JsonObject(emptyMap()), draft("{}", "providers.openai.nope" to "x").obj("providers", "openai"))
     }
 
     @Test
-    fun `写字段时保留同条目的其他字段`() {
+    fun `writing a field preserves other fields in the same entry`() {
         val d = draft(
             """{"providers": {"openai": {"api_key": "k", "url": "u"}}}""",
             "providers.openai.model" to "gpt-5.5",
@@ -141,32 +141,32 @@ class ConfigDraftTest {
         assertEquals("gpt-5.5", d.str("providers", "openai", "model"))
     }
 
-    // ------------------------------------------------------------ models 列表
+    // ------------------------------------------------------------ Model lists
 
     @Test
-    fun `models 支持 JSON 数组`() {
+    fun `models supports JSON arrays`() {
         assertEquals(listOf("a", "b"), parseModelList("""["a", "b"]"""))
     }
 
     @Test
-    fun `models 支持逗号分隔并去空白`() {
+    fun `models supports comma-separated values and trims whitespace`() {
         assertEquals(listOf("a", "b"), parseModelList(" a , b , "))
     }
 
     @Test
-    fun `非法 JSON 数组回退到逗号分隔`() {
-        // 用户输入 "[a,b" 这类不完整数组时不应报错，按逗号切分。
+    fun `invalid JSON arrays fall back to comma splitting`() {
+        // Incomplete arrays such as "[a,b" should split on commas instead of failing.
         assertEquals(listOf("[a", "b"), parseModelList("[a,b"))
     }
 
     @Test
-    fun `models 空输入是空列表`() {
+    fun `empty models input becomes an empty list`() {
         assertEquals(emptyList(), parseModelList("   "))
         assertEquals(emptyList(), parseModelList("[]"))
     }
 
     @Test
-    fun `models 写进条目是 JSON 数组`() {
+    fun `models is stored in the entry as a JSON array`() {
         val d = draft("{}", "providers.openai.models" to "a,b")
         assertEquals(
             JsonArray(listOf(JsonPrimitive("a"), JsonPrimitive("b"))),
@@ -177,7 +177,7 @@ class ConfigDraftTest {
     // ------------------------------------------------------------ llm
 
     @Test
-    fun `llm 五个字段都能写`() {
+    fun `all five llm fields can be written`() {
         val d = draft(
             "{}",
             "llm.url" to "http://x",
@@ -194,24 +194,24 @@ class ConfigDraftTest {
     }
 
     @Test
-    fun `use_anthropic 只有字面量 true 算开启`() {
+    fun `use_anthropic is enabled only by the true literal`() {
         assertEquals(JsonPrimitive(false), draft("{}", "llm.use_anthropic" to "false").obj("llm")!!["use_anthropic"])
         assertEquals(JsonPrimitive(false), draft("{}", "llm.use_anthropic" to "TRUE").obj("llm")!!["use_anthropic"])
         assertEquals(JsonPrimitive(false), draft("{}", "llm.use_anthropic" to "").obj("llm")!!["use_anthropic"])
     }
 
-    // ------------------------------------------------------------ 保真 / 不写穿
+    // ------------------------------------------------------------ Preservation and isolation
 
     @Test
-    fun `未知顶层字段在草稿里被保留`() {
-        // 此为选择 JsonObject 树而非 data class 的理由：writeRaw 会整体重写文件，
-        // 丢失字段即等于把用户配置中未被识别的键静默删除。
+    fun `unknown top-level fields are preserved in the draft`() {
+        // A JsonObject tree preserves unknown fields when writeRaw rewrites the entire file.
+        // Dropping those fields would silently delete unrecognized keys from the user configuration.
         val d = draft("""{"future_flag": {"deep": [1, 2]}}""", "provider" to "openai")
         assertEquals("""{"deep":[1,2]}""", d.obj("future_flag").toString())
     }
 
     @Test
-    fun `原配置不被写穿`() {
+    fun `the original configuration is not mutated`() {
         val base = parseRawConfig("""{"provider": "openai", "providers": {"openai": {"api_key": "k"}}}""")
         applyConfigEntries(base, listOf(ConfigEntry("providers.openai.api_key", "changed")))
         assertEquals("k", base.str("providers", "openai", "api_key"))
@@ -219,20 +219,20 @@ class ConfigDraftTest {
     }
 
     @Test
-    fun `未知顶层 key 被忽略`() {
+    fun `unknown top-level keys are ignored`() {
         assertEquals(emptyRawConfig(), draft("{}", "totally.unknown.key.here" to "x"))
         assertEquals(emptyRawConfig(), draft("{}", "language" to "English"))
     }
 
     @Test
-    fun `非法 JSON 配置文件当作空草稿`() {
-        // 与 ConfigService.readRaw() 的兜底一致：解析失败即视为未配置，不应连带影响写操作。
+    fun `invalid JSON configuration becomes an empty draft`() {
+        // Match ConfigService.readRaw(): parse failures mean unconfigured and must not prevent subsequent writes.
         assertEquals(emptyRawConfig(), parseRawConfig("{ not json"))
         assertEquals(emptyRawConfig(), parseRawConfig(""))
     }
 
     @Test
-    fun `序列化用两空格缩进`() {
+    fun `serialization uses two-space indentation`() {
         val json = draft("{}", "provider" to "openai").toPrettyJson()
         assertTrue(json.contains("\n  \"provider\""), json)
     }

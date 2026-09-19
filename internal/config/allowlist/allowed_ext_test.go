@@ -174,12 +174,23 @@ func TestIsExcludedPath(t *testing.T) {
 		{"__tests__ dir", "src/__tests__/foo.js", true},
 		{"__tests__ nested", "packages/ui/__tests__/Button.test.tsx", true},
 
-		// Python test files
-		{"python test file", "tests/test_utils.py", false}, // pattern is *_test.py, not test_*.py
+		// Python test files. pytest collects both `test_*.py` and `*_test.py` (python_files).
+		{"python pytest prefix at root", "test_utils.py", true},
+		{"python pytest prefix nested", "app/test_handler.py", true},
+		{"python pytest prefix in tests dir", "tests/test_utils.py", true},
+		{"python pytest prefix deeply nested", "packages/core/app/test_api.py", true},
+		{"python conftest is reviewable", "conftest.py", false},
+		{"python nested conftest is reviewable", "tests/unit/conftest.py", false},
 		{"python _test suffix", "app/handler_test.py", true},
 		{"python test dir", "test/unit/handler_test.py", true},
 		{"python tests dir", "tests/unit/handler_test.py", true},
 		{"python non-test", "app/handler.py", false},
+		// The prefix pattern must not drift into names that merely start with a
+		// longer word.
+		{"python contest prefix not excluded", "app/contest_utils.py", false},
+		{"python attestation name not excluded", "app/attestation.py", false},
+		{"python latest name not excluded", "app/latest.py", false},
+		{"python test_ prefix other extension", "src/test_helpers.go", false},
 
 		// Ruby spec files
 		{"ruby spec file", "app/models/user_spec.rb", true},
