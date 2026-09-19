@@ -165,7 +165,7 @@ func parseEnvOverrides() (envOverrides, error) {
 	if err != nil {
 		return envOverrides{}, err
 	}
-	if raw := os.Getenv(envOCRLLMExtraHeaders); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv(envOCRLLMExtraHeaders)); raw != "" {
 		env.headers, err = ParseExtraHeaders(raw)
 		if err != nil {
 			return envOverrides{}, fmt.Errorf("%s: %w", envOCRLLMExtraHeaders, err)
@@ -180,7 +180,9 @@ func finalizeResolvedEndpoint(source string, ep ResolvedEndpoint, env envOverrid
 	if ep.Source == "" {
 		ep.Source = source
 	}
-	ep.Model = stripModelSuffix(ep.Model)
+	ep.URL = strings.TrimSpace(ep.URL)
+	ep.Token = strings.TrimSpace(ep.Token)
+	ep.Model = stripModelSuffix(strings.TrimSpace(ep.Model))
 	if env.hasTimeout {
 		ep.Timeout = env.timeout
 	}
@@ -249,11 +251,11 @@ func errBedrockNotConfigurable(key string) error {
 
 // tryOCREnv reads OCR-specific environment variables.
 func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
-	url := os.Getenv(envOCRLLMURL)
-	token := os.Getenv(envOCRLLMToken)
-	model := os.Getenv(envOCRLLMModel)
+	url := strings.TrimSpace(os.Getenv(envOCRLLMURL))
+	token := strings.TrimSpace(os.Getenv(envOCRLLMToken))
+	model := strings.TrimSpace(os.Getenv(envOCRLLMModel))
 	if modelOverride != "" {
-		model = modelOverride
+		model = strings.TrimSpace(modelOverride)
 	}
 	if url == "" || token == "" || model == "" {
 		return ResolvedEndpoint{}, false, nil
@@ -272,7 +274,7 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	}
 	if protocol == "" {
 		useAnthropic := true // default true
-		if v := os.Getenv(envOCRUseAnthropic); v != "" {
+		if v := strings.TrimSpace(os.Getenv(envOCRUseAnthropic)); v != "" {
 			lower := strings.ToLower(v)
 			useAnthropic = lower == "true" || lower == "1" || lower == "yes"
 		}
@@ -423,7 +425,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		// Same whitespace rule as the static key above, so `export
 		// ANTHROPIC_API_KEY="  "` reports "no api_key configured" instead of
 		// sending `Authorization: Bearer  ` and getting an opaque 401.
-		if v := os.Getenv(preset.EnvVar); strings.TrimSpace(v) != "" {
+		if v := strings.TrimSpace(os.Getenv(preset.EnvVar)); v != "" {
 			apiKey = v
 		}
 	}
@@ -509,7 +511,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	gateOverrideOnModelList := !ambientAuth
 
 	// Apply model override with validation.
-	if modelOverride != "" {
+	if modelOverride = strings.TrimSpace(modelOverride); modelOverride != "" {
 		if gateOverrideOnModelList && len(availableModels) > 0 {
 			if !ModelListContains(availableModels, modelOverride) {
 				return ResolvedEndpoint{}, false, fmt.Errorf(
@@ -599,7 +601,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 // tryLegacyLlmConfig resolves an endpoint from the legacy llm config block.
 func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, bool, error) {
 	model := cfg.Llm.Model
-	if modelOverride != "" {
+	if modelOverride = strings.TrimSpace(modelOverride); modelOverride != "" {
 		model = modelOverride
 	}
 	// Fall through to later strategies when the legacy block is incomplete. This
@@ -700,11 +702,11 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 
 // tryCCEnv reads Claude Code environment variables.
 func tryCCEnv(modelOverride string) (ResolvedEndpoint, bool, error) {
-	baseURL := os.Getenv(envCCBaseURL)
-	token := os.Getenv(envCCToken)
-	model := os.Getenv(envCCModel)
+	baseURL := strings.TrimSpace(os.Getenv(envCCBaseURL))
+	token := strings.TrimSpace(os.Getenv(envCCToken))
+	model := strings.TrimSpace(os.Getenv(envCCModel))
 	if modelOverride != "" {
-		model = modelOverride
+		model = strings.TrimSpace(modelOverride)
 	}
 	if baseURL == "" || token == "" || model == "" {
 		return ResolvedEndpoint{}, false, nil
@@ -789,7 +791,7 @@ func parseShellRC(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 		}
 	}
 	if modelOverride != "" {
-		model = modelOverride
+		model = strings.TrimSpace(modelOverride)
 	}
 
 	if baseURL == "" || token == "" || model == "" {
@@ -917,6 +919,7 @@ func splitHeaderPairs(raw string) ([]string, error) {
 
 // ensureMessagesSuffix appends /v1/messages to base URLs that lack a versioned path.
 func ensureMessagesSuffix(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
 	u := strings.TrimRight(rawURL, "/")
 	// Already ends with the full messages path — don't modify.
 	if strings.HasSuffix(u, "/v1/messages") {

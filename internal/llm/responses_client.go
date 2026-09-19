@@ -39,6 +39,8 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	if cfg.SessionKey == "" {
 		cfg.SessionKey = NewSessionKey()
 	}
+	cfg.URL = strings.TrimSpace(cfg.URL)
+	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
 	ensureResponsesEndpoint(&cfg)
 	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/responses")
 
@@ -79,7 +81,7 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 //	https://api.openai.com/v1/responses/  -> https://api.openai.com/v1/responses
 //	https://api.openai.com                -> https://api.openai.com/responses
 func ensureResponsesEndpoint(cfg *ClientConfig) {
-	baseURL := strings.TrimRight(cfg.URL, "/")
+	baseURL := strings.TrimRight(strings.TrimSpace(cfg.URL), "/")
 	if !strings.HasSuffix(baseURL, "/responses") {
 		baseURL = baseURL + "/responses"
 	}
