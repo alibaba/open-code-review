@@ -223,7 +223,8 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			truncated = true
 			continue
 		}
-		m := match{lineNum: ln, content: parts[offset+2]}
+		// Drop the CR that git grep keeps on lines of CRLF files.
+		m := match{lineNum: ln, content: strings.TrimSuffix(parts[offset+2], "\r")}
 		if !seen[fname] {
 			seen[fname] = true
 			fileOrder = append(fileOrder, fname)

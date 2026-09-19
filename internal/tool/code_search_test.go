@@ -821,3 +821,23 @@ func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	assertContains(t, args, "--exclude-standard")
 	assertNotContains(t, args, "--untracked")
 }
+
+// TestGitGrep_CRLFFileHasNoTrailingCR verifies matched lines from CRLF files
+// are returned without the carriage return git grep leaves in its output.
+func TestGitGrep_CRLFFileHasNoTrailingCR(t *testing.T) {
+	dir := setupTestRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "crlf.go"), []byte("package main\r\n\r\nfunc Crlf() {}\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	result, err := p.gitGrep(context.Background(), "Crlf", false, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "3|func Crlf() {}\n") {
+		t.Errorf("expected CR-free match line, got: %q", result)
+	}
+	if strings.Contains(result, "\r") {
+		t.Errorf("result still contains a carriage return: %q", result)
+	}
+}

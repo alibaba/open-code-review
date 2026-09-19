@@ -107,9 +107,9 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 
 	var args []string
 	if ref := p.FileReader.Ref; ref != "" {
-		args = []string{"ls-tree", "-r", "--name-only", "--end-of-options", ref}
+		args = []string{"-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "--end-of-options", ref}
 	} else {
-		args = []string{"ls-files", "--cached", "--others", "--exclude-standard"}
+		args = []string{"-c", "core.quotepath=false", "ls-files", "--cached", "--others", "--exclude-standard"}
 	}
 
 	if p.FileReader.Runner != nil {

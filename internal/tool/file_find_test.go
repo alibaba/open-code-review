@@ -299,3 +299,40 @@ func TestShouldSkipFile(t *testing.T) {
 		})
 	}
 }
+
+// TestFileFind_NonASCIIPath verifies non-ASCII file names come back verbatim
+// instead of the octal-escaped, quoted form git uses when core.quotepath is on.
+func TestFileFind_NonASCIIPath(t *testing.T) {
+	dir := setupFileFindRepo(t)
+	name := "caf\u00e9.go"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	// Force the escaping behavior regardless of the user's global config.
+	run("config", "core.quotepath", "true")
+	run("add", ".")
+	run("commit", "-m", "add non-ascii file")
+
+	head, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"", strings.TrimSpace(string(head))} {
+		p := NewFileFind(&FileReader{RepoDir: dir, Ref: ref})
+		got, err := p.Execute(context.Background(), map[string]any{"query_name": "caf"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, name) || strings.Contains(got, `\303`) {
+			t.Errorf("ref %q: expected verbatim %q, got: %s", ref, name, got)
+		}
+	}
+}
