@@ -167,6 +167,7 @@ func TestRenderTemplate_WithRepos(t *testing.T) {
 		`id="repositories-table"`,
 		"data-repository-name",
 		`src="/static/repos.js"`,
+		`src="/static/a11y.js"`,
 	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("rendered repository page missing %q", required)
@@ -272,6 +273,7 @@ func TestRenderTemplate_SessionsTableMockup(t *testing.T) {
 		`data-page-step="1"`,
 		`id="sessions-page-numbers"`,
 		`src="/static/sessions.js"`,
+		`src="/static/a11y.js"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("rendered sessions page missing %q", want)
@@ -453,6 +455,80 @@ func TestFocusCSS_CoversCollapsiblesAndTableLinks(t *testing.T) {
 			t.Errorf("style.css is missing the %q focus-visible rule: "+
 				"these elements have no other visible focus indicator for keyboard users", selector)
 		}
+	}
+}
+
+// TestFocusCSS_InTableLinksUseInsetOffset pins the effective outline-offset
+// on in-table links, not just that a matching selector exists. .table-scroll
+// computes overflow-y to auto, so a positive offset is clipped on the first
+// and last rows. .table a:focus-visible is inset, but three more-specific
+// page rules used to keep +2px and win the cascade for every repos-table
+// link plus the session id.
+func TestFocusCSS_InTableLinksUseInsetOffset(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	text := string(css)
+	for _, selector := range []string{
+		".table a:focus-visible",
+		".sessions-page .session-id:focus-visible",
+		".repos-page .col-repository a:focus-visible",
+		".repos-page .repo-check:focus-visible",
+	} {
+		got, ok := lastOutlineOffset(text, selector)
+		if !ok {
+			t.Errorf("style.css has no outline-offset for %q", selector)
+			continue
+		}
+		if got != "-2px" {
+			t.Errorf("effective outline-offset for %q = %s, want -2px (inset, so .table-scroll does not clip the ring)", selector, got)
+		}
+	}
+}
+
+// lastOutlineOffset returns the last outline-offset declared by a rule whose
+// selector list includes selector as a complete comma-separated item. That is
+// the cascade winner among those rules: they share :focus-visible and the
+// more specific page rules beat .table a:focus-visible, so looking only at
+// rules that name the selector is the effective offset for these four.
+func lastOutlineOffset(css, selector string) (string, bool) {
+	offsetRe := regexp.MustCompile(`outline-offset:\s*(-?[0-9.]+px)`)
+	var last string
+	found := false
+	start := 0
+	for {
+		i := strings.Index(css[start:], selector)
+		if i < 0 {
+			return last, found
+		}
+		i += start
+		openRel := strings.Index(css[i:], "{")
+		if openRel < 0 {
+			return last, found
+		}
+		open := i + openRel
+		prev := strings.LastIndexAny(css[:i], "{}")
+		selList := css[prev+1 : open]
+		matched := false
+		for _, item := range strings.Split(selList, ",") {
+			if strings.TrimSpace(item) == selector {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			closeRel := strings.Index(css[open:], "}")
+			if closeRel < 0 {
+				return last, found
+			}
+			body := css[open+1 : open+closeRel]
+			if ms := offsetRe.FindAllStringSubmatch(body, -1); len(ms) > 0 {
+				last = ms[len(ms)-1][1]
+				found = true
+			}
+		}
+		start = i + len(selector)
 	}
 }
 
@@ -979,6 +1055,7 @@ func TestHandleSession_ServedPageKeepsStaticRefs(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`href="/static/style.css"`,
+		`src="/static/a11y.js"`,
 		`src="/static/session.js"`,
 		`<a href="/" class="nav-brand"`,
 		`<a href="/r/repo">`,
@@ -1034,8 +1111,11 @@ func TestResponsiveCSS_MetaOverrideComesAfterBase(t *testing.T) {
 	}
 	text := string(css)
 	base := strings.Index(text, ".session-page .meta span {\n    white-space: nowrap;\n}")
-	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;\n    }")
-	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;\n    }")
+	// .meta span is display:flex, so the path is an anonymous flex item
+	// whose min-content is the whole string. overflow-wrap:anywhere is what
+	// lets it break at 375px; white-space:normal alone does not.
+	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;\n        flex-wrap: wrap;\n        overflow-wrap: anywhere;\n    }")
+	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;\n        overflow: visible;\n        text-overflow: clip;\n    }")
 	if base == -1 || normal == -1 || truncate == -1 {
 		t.Fatal("style.css is missing the session meta rules or their 768px overrides")
 	}
