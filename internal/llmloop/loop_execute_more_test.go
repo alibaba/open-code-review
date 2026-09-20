@@ -16,13 +16,17 @@ import (
 )
 
 // scriptedLLMClient returns a fixed sequence of responses, one per call,
-// letting tests drive the full main loop turn by turn.
+// letting tests drive the full main loop turn by turn. requests records the
+// Messages of every call it received, in order, so a test can inspect what
+// history the previous round's response actually produced.
 type scriptedLLMClient struct {
 	responses []*llm.ChatResponse
 	calls     int
+	requests  [][]llm.Message
 }
 
-func (s *scriptedLLMClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+func (s *scriptedLLMClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	s.requests = append(s.requests, req.Messages)
 	if s.calls >= len(s.responses) {
 		return s.responses[len(s.responses)-1], nil
 	}
@@ -31,7 +35,7 @@ func (s *scriptedLLMClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequ
 	return resp, nil
 }
 
-// newThinkingTestRunner builds a Runner wired for a full RunPerFile pass:
+// newThinkingTestRunner builds a Runner wired for a full RunMainTask pass:
 // a scripted LLM client, the code_comment tool, and a comment collector.
 func newThinkingTestRunner(t *testing.T, client llm.LLMClient) (*Runner, *tool.CommentCollector) {
 	t.Helper()
@@ -68,20 +72,20 @@ func codeCommentResponse(reasoning, content string) *llm.ChatResponse {
 	}
 }
 
-// TestRunPerFile_BackfillsThinkingFromReasoningContent verifies the full
+// TestRunMainTask_BackfillsThinkingFromReasoningContent verifies the full
 // wiring: the model's native reasoning_content on a tool-calling turn is
 // backfilled into the comment's thinking, while the turn's assistant
 // content is ignored.
-func TestRunPerFile_BackfillsThinkingFromReasoningContent(t *testing.T) {
+func TestRunMainTask_BackfillsThinkingFromReasoningContent(t *testing.T) {
 	client := &scriptedLLMClient{responses: []*llm.ChatResponse{
 		codeCommentResponse("native reasoning", "I'll now leave a comment on this file"),
 		taskDoneResponse(),
 	}}
 	r, collector := newThinkingTestRunner(t, client)
 
-	ok, _, err := r.RunPerFile(context.Background(), []llm.Message{msg("user", "review")}, "file.go")
+	ok, _, err := r.RunMainTask(context.Background(), []llm.Message{msg("user", "review")}, "file.go")
 	if err != nil || !ok {
-		t.Fatalf("RunPerFile = (%v, err %v), want completed", ok, err)
+		t.Fatalf("RunMainTask = (%v, err %v), want completed", ok, err)
 	}
 
 	comments := collector.Comments()
@@ -93,19 +97,19 @@ func TestRunPerFile_BackfillsThinkingFromReasoningContent(t *testing.T) {
 	}
 }
 
-// TestRunPerFile_NoFallbackToContent is a regression test: when a turn has
+// TestRunMainTask_NoFallbackToContent is a regression test: when a turn has
 // assistant content but no reasoning_content, the comment thinking must stay
 // empty. It fails if the removed `thinking = content` fallback returns.
-func TestRunPerFile_NoFallbackToContent(t *testing.T) {
+func TestRunMainTask_NoFallbackToContent(t *testing.T) {
 	client := &scriptedLLMClient{responses: []*llm.ChatResponse{
 		codeCommentResponse("", "I'll now leave a comment on this file"),
 		taskDoneResponse(),
 	}}
 	r, collector := newThinkingTestRunner(t, client)
 
-	ok, _, err := r.RunPerFile(context.Background(), []llm.Message{msg("user", "review")}, "file.go")
+	ok, _, err := r.RunMainTask(context.Background(), []llm.Message{msg("user", "review")}, "file.go")
 	if err != nil || !ok {
-		t.Fatalf("RunPerFile = (%v, err %v), want completed", ok, err)
+		t.Fatalf("RunMainTask = (%v, err %v), want completed", ok, err)
 	}
 
 	comments := collector.Comments()
@@ -114,6 +118,63 @@ func TestRunPerFile_NoFallbackToContent(t *testing.T) {
 	}
 	if comments[0].Thinking != "" {
 		t.Errorf("comment Thinking = %q, want empty (no content fallback)", comments[0].Thinking)
+	}
+}
+
+// TestRunMainTask_DoesNotDuplicateReasoningIntoVisibleContent is a regression
+// test found in review of the #805 fix: ChatResponse.Content() falls back to
+// ReasoningContent when there's no visible text — the common shape for an
+// openai-chat-completions tool-calling turn (content: null, reasoning_content
+// set). If the loop built history from Content() instead of VisibleContent(),
+// that same reasoning text would land in both the ordinary content field and
+// the reasoning_content native payload on replay, doubling it on the wire.
+func TestRunMainTask_DoesNotDuplicateReasoningIntoVisibleContent(t *testing.T) {
+	emptyContent := ""
+	reasoning := "private reasoning that must not be duplicated"
+	reasoningResp := &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{
+			Content:          &emptyContent,
+			ReasoningContent: reasoning,
+			Native:           llm.NativeTurn{Family: "openai-chat-completions", Payload: llm.ReasoningPayload(reasoning)},
+			ToolCalls: []llm.ToolCall{{
+				ID:   "call_comment",
+				Type: "function",
+				Function: llm.FunctionCall{
+					Name:      tool.CodeComment.Name(),
+					Arguments: `{"comments":[{"content":"issue","existing_code":"x"}]}`,
+				},
+			}},
+		}}},
+	}
+	client := &scriptedLLMClient{responses: []*llm.ChatResponse{reasoningResp, taskDoneResponse()}}
+	r, _ := newThinkingTestRunner(t, client)
+
+	ok, _, err := r.RunMainTask(context.Background(), []llm.Message{msg("user", "review")}, "file.go")
+	if err != nil || !ok {
+		t.Fatalf("RunMainTask = (%v, err %v), want completed", ok, err)
+	}
+
+	// requests[1] is the second call: its Messages carry the history built
+	// from reasoningResp. The assistant message in it must have empty
+	// visible Content — the reasoning text belongs solely to Native.
+	if len(r.deps.LLMClient.(*scriptedLLMClient).requests) < 2 {
+		t.Fatalf("expected at least 2 requests, got %d", len(r.deps.LLMClient.(*scriptedLLMClient).requests))
+	}
+	secondReq := r.deps.LLMClient.(*scriptedLLMClient).requests[1]
+	var assistantMsg *llm.Message
+	for i := range secondReq {
+		if secondReq[i].Role == "assistant" {
+			assistantMsg = &secondReq[i]
+		}
+	}
+	if assistantMsg == nil {
+		t.Fatal("no assistant message found in the replayed history")
+	}
+	if assistantMsg.Content != "" {
+		t.Errorf("assistant Content = %q, want empty — reasoning must not be duplicated into visible content", assistantMsg.Content)
+	}
+	if reasoning, ok := assistantMsg.Native.Payload.(llm.ReasoningPayload); !ok || string(reasoning) != "private reasoning that must not be duplicated" {
+		t.Errorf("assistant Native.Payload = %#v, want the reasoning text preserved for replay", assistantMsg.Native.Payload)
 	}
 }
 

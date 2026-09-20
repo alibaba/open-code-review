@@ -48,13 +48,14 @@ jobs:
           cp install.sh _site/install.sh
           cp install.ps1 _site/install.ps1
 
-      - name: Verify install scripts
+      - name: Verify deployment artifact
         run: |
           test -f _site/install.sh
           test -f _site/install.ps1
           sh -n _site/install.sh
           cmp install.sh _site/install.sh
           cmp install.ps1 _site/install.ps1
+          test -e _site/robots.txt
 
       - uses: actions/upload-pages-artifact@v5
         with:

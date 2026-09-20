@@ -163,7 +163,7 @@ LLM 요청마다 HTTP 타임아웃이 있으며 기본값은 **300초**입니다
 - `llm.timeout_sec` — 레거시 `llm` 섹션용, 초 단위.
 - `OCR_LLM_TIMEOUT` 환경 변수 — 정수 초. 모든 해석 경로에서 설정 파일 값보다 우선합니다.
 
-`timeout_sec` 키는 `ocr config set`이 지원하지 않으므로 `~/.opencodereview/config.json`을 직접 편집합니다:
+두 `timeout_sec` 키 모두 `ocr config set`으로 설정할 수 있습니다:
 
 ```json
 {
@@ -216,7 +216,7 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 
 ### 프롬프트 상한 {#prompt-limit}
 
-`max_tokens`는 리뷰 단위 하나에 대한 **프롬프트**(입력) 상한입니다. 그 단위는 `ocr review`에서는 파일 그룹, `ocr scan`에서는 파일 하나입니다. 내장 템플릿의 기본값은 `ocr review` 200,000토큰, `ocr scan` 58,888토큰입니다. 컨텍스트 윈도가 다른 모델에서는 `max_tokens`를 저장해 바꿉니다:
+`max_tokens`는 서브태스크 하나(파일 하나 또는 관련된 파일 묶음)에 대한 **프롬프트**(입력) 상한입니다. 내장 템플릿의 기본값은 `ocr review` 200,000토큰, `ocr scan` 58,888토큰입니다. 컨텍스트 윈도가 다른 모델에서는 `max_tokens`를 저장해 바꿉니다:
 
 ```bash
 ocr config set max_tokens 400000
@@ -233,7 +233,7 @@ ocr scan --max-tokens 400000
 
 ### 리뷰 강도 (effort) {#review-effort}
 
-`effort`는 파일 그룹마다 리뷰를 몇 라운드 돌릴지 정합니다. `low` = 1라운드, `medium`(기본값) = 2라운드, `high` = 3라운드입니다. 라운드가 늘어나면 더 많은 문제를 찾지만 비용도 그만큼 늘어납니다.
+`effort`는 서브태스크마다 리뷰를 몇 라운드 돌릴지 정합니다. `low` = 1라운드, `medium`(기본값) = 2라운드, `high` = 3라운드입니다. 라운드가 늘어나면 더 많은 문제를 찾지만 비용도 그만큼 늘어납니다.
 
 ```bash
 ocr config set effort high

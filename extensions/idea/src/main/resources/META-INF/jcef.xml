@@ -1,0 +1,3 @@
+<!-- 当 com.intellij.modules.jcef 可用时（IDEA 2026.2+），JCEF 模块的类被加入插件 classloader。
+     本文件留空即可——工具窗工厂仍在主 plugin.xml，在 JCEF 不可用时靠 try-catch 走兜底。 -->
+<idea-plugin />

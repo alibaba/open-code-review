@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { CliResult, CliRunOptions, LogLine, ReviewComment, ReviewMode } from '../../shared/types';
+import { CliResult, CliRunOptions, LogLine, ReviewComment, ReviewMode } from '@shared/types';
 
 export function buildReviewArgs(opts: CliRunOptions): string[] {
   const args: string[] = ['review'];
@@ -12,8 +12,8 @@ export function buildReviewArgs(opts: CliRunOptions): string[] {
     if (opts.commit) args.push('--commit', opts.commit);
   }
   args.push('--format', 'json');
-  // JSON 结果走 stdout，进度日志走 stderr，供扩展实时回显
-  // TODO: 待 CLI 发布支持 --progress-stderr 后再启用（当前已安装版本不识别该 flag）
+  // Send JSON results to stdout and progress logs to stderr for live display in the extension.
+  // TODO: Enable when a CLI release supports --progress-stderr (the installed version does not recognize it).
   // args.push('--progress-stderr');
   if (opts.customPrompt && opts.customPrompt.trim()) {
     args.push('--background', opts.customPrompt.trim());
@@ -57,7 +57,7 @@ export function parseCliResult(stdout: string): CliResult {
   };
 }
 
-/** 从 CLI stderr 中提取最有用的报错文本：优先 `Error:` 行，否则取最后一行非空内容。 */
+/** Extract the most useful CLI error from stderr: prefer an `Error:` line, otherwise the last non-empty line. */
 export function extractCliError(stderr: string): string {
   const lines = stderr.split('\n').map((l) => l.trim()).filter(Boolean);
   const errLine = [...lines].reverse().find((l) => /^error:/i.test(l));

@@ -16,7 +16,7 @@
 
 const assert = require("assert");
 const path = require("path");
-const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, preserveCheckpointMarker } = require(path.join(__dirname, "post-review-comments.js"));
+const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, preserveCheckpointMarker, tailForComment, MAX_COMMENT_STDERR_CHARS } = require(path.join(__dirname, "post-review-comments.js"));
 
 // REVIEW_TAG as the production code builds it for this test's hardcoded run
 // identity (context.runId=undefined -> 0, runAttempt=undefined -> 1). Used as
@@ -41,11 +41,12 @@ process.env.OCR_RETRY_BASE_DELAY = "1";
 process.env.OCR_READ_SUCCESS_DELAY = "0";
 process.env.OCR_READ_LOW_REMAINING_SPACING = "0";
 
+const DEFAULT_HEAD_SHA = "1".repeat(40);
 const context = {
   repo: { owner: "owner", repo: "repo" },
   issue: { number: 123 },
   eventName: "pull_request_target",
-  payload: { pull_request: { head: { sha: "head-sha" } } },
+  payload: { pull_request: { head: { sha: DEFAULT_HEAD_SHA } } },
 };
 
 function mockFs(resultText, stderrText) {
@@ -157,10 +158,50 @@ function makeGithub(opts = {}) {
     return n;
   }
 
+  // GraphQL surface for outdated-thread resolution (#567). Records every call
+  // so a test can assert the default-off path issues literally none. Queries
+  // return opts.threads (single page unless opts.threadPages is given);
+  // mutations consult opts.resolveErrorSpec(index) for injected failures.
+  const graphqlCalls = [];
+  // Every GET /user attempt, so a test can prove the shared lookup is memoized
+  // rather than re-requested per caller.
+  const authCalls = [];
+  let resolveMutations = 0;
+  async function graphql(query, vars) {
+    graphqlCalls.push({ query, vars });
+    if (/resolveReviewThread/.test(query)) {
+      const idx = resolveMutations++;
+      if (typeof opts.resolveErrorSpec === "function") {
+        const err = opts.resolveErrorSpec(idx);
+        if (err) throw err;
+      }
+      return { resolveReviewThread: { thread: { id: vars.threadId, isResolved: true } } };
+    }
+    if (opts.threadsThrow) throw new Error(opts.threadsError || "graphql unavailable");
+    const pages = opts.threadPages || [opts.threads || []];
+    const pageIdx = vars.cursor ? Number(vars.cursor) : 0;
+    const hasNextPage = pageIdx + 1 < pages.length;
+    return {
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            pageInfo: { hasNextPage, endCursor: String(pageIdx + 1) },
+            nodes: pages[pageIdx] || [],
+          },
+        },
+      },
+    };
+  }
+  const resolveMutationCalls = () => graphqlCalls.filter((c) => /resolveReviewThread/.test(c.query));
+
   return {
     createReviewCalls,
     issueComments,
     updatedComments,
+    graphqlCalls,
+    authCalls,
+    resolveMutationCalls,
+    graphql,
     listCommentsCalls,
     listReviewCommentsCalls,
     listReviewsCalls,
@@ -169,12 +210,21 @@ function makeGithub(opts = {}) {
     ops,
     rest: {
       users: {
-        getAuthenticated: async () => ({ data: { login: "github-actions[bot]" } }),
+        // Production truth, not convenience: `users.getAuthenticated` is a
+        // user-token endpoint, so the default GITHUB_TOKEN (and a GitHub App
+        // installation token) gets 403 "Resource not accessible by
+        // integration". getAuthenticatedLogin() therefore returns null on every
+        // real Actions run, and the mock must 403 too — a mock that succeeds
+        // would let identity logic pass tests it cannot pass in production.
+        getAuthenticated: async () => {
+          authCalls.push(Date.now());
+          throw Object.assign(new Error("Resource not accessible by integration"), { status: 403 });
+        },
       },
       pulls: {
         get: async (params) => {
           getPullCalls.push(params);
-          return { data: { head: { sha: opts.headSha || "head-sha" } } };
+          return { data: { head: { sha: opts.headSha || DEFAULT_HEAD_SHA } } };
         },
         createReview: async (params) => {
           createReviewCalls.push(params);
@@ -351,11 +401,14 @@ function makeGithub(opts = {}) {
 function mockCore() {
   const outputs = {};
   const logs = [];
+  const warnings = [];
   return {
     outputs,
     logs,
+    warnings,
     setOutput(name, value) { outputs[name] = value; },
     info(message) { logs.push(message); },
+    warning(message) { warnings.push(message); },
   };
 }
 
@@ -597,6 +650,67 @@ async function testIncrementalSkipsOverlapping() {
   assert.strictEqual(outputs.comments_inline, "1");
 }
 
+async function testIncrementalSkipsSameRunIoUOverlapping() {
+  const result = {
+    comments: [
+      { path: "src/a.js", content: "first finding", start_line: 10, end_line: 14 },
+      { path: "src/a.js", content: "overlapping finding", start_line: 11, end_line: 15 },
+      { path: "src/b.js", content: "independent finding", start_line: 20, end_line: 24 },
+    ],
+    warnings: [],
+  };
+
+  const { github, outputs } = await run({
+    result,
+    githubOpts: { history: [] },
+    opts: { stickySummary: true, incremental: true },
+  });
+
+  assert.strictEqual(github.createReviewCalls.length, 1, "one batch review");
+
+  const sent = github.createReviewCalls[0].comments;
+
+  assert.strictEqual(sent.length, 2, "same-run overlapping multiline comment should be suppressed");
+  assert.strictEqual(sent[0].path, "src/a.js");
+  assert.strictEqual(sent[0].start_line, 10);
+  assert.strictEqual(sent[0].line, 14);
+  assert.strictEqual(sent[1].path, "src/b.js");
+  assert.strictEqual(sent[1].start_line, 20);
+  assert.strictEqual(sent[1].line, 24);
+
+  assert.strictEqual(outputs.comments_skipped, "1");
+  assert.strictEqual(outputs.comments_inline, "2");
+}
+
+async function testIncrementalSkipsSameRunOverlapping() {
+  const result = {
+    comments: [
+      { path: "src/a.js", content: "first finding", start_line: 10, end_line: 10 },
+      { path: "src/a.js", content: "duplicate finding", start_line: 10, end_line: 10 },
+      { path: "src/b.js", content: "independent finding", start_line: 5, end_line: 5 },
+    ],
+    warnings: [],
+  };
+
+  const { github, outputs } = await run({
+    result,
+    githubOpts: { history: [] },
+    opts: { stickySummary: true, incremental: true },
+  });
+
+  assert.strictEqual(github.createReviewCalls.length, 1, "one batch review");
+
+  const sent = github.createReviewCalls[0].comments;
+
+  assert.strictEqual(sent.length, 2, "same-run duplicate should be suppressed");
+  assert.strictEqual(sent[0].path, "src/a.js");
+  assert.strictEqual(sent[0].line, 10);
+  assert.strictEqual(sent[1].path, "src/b.js");
+  assert.strictEqual(sent[1].line, 5);
+
+  assert.strictEqual(outputs.comments_skipped, "1");
+  assert.strictEqual(outputs.comments_inline, "2");
+}
 async function testIncrementalAllOverlapPostsNoReview() {
   const history = [{ path: "src/a.js", line: 10, start_line: 10, side: "RIGHT", user: { login: "github-actions[bot]" } }];
   const result = { comments: [{ path: "src/a.js", content: "overlap", start_line: 10, end_line: 10 }], warnings: [] };
@@ -2225,6 +2339,8 @@ async function main() {
   await testNonStickyFallbackAllSuccessStillPostsSummary();
   await testNoCommentsStickyUpdate();
   await testIncrementalSkipsOverlapping();
+  await testIncrementalSkipsSameRunOverlapping();
+  await testIncrementalSkipsSameRunIoUOverlapping();
   await testIncrementalAllOverlapPostsNoReview();
   await testIncrementalMultiLineIoUDefaultThreshold();
   await testIncrementalOverlapThresholdPropagated();
@@ -2326,6 +2442,10 @@ async function main() {
   // Cross-push checkpoints (#476) — write path
   await testCheckpointAdvanceGateTable();
   await testCheckpointAdvanceRequiresFullSha();
+  await testManifestHeadPinsEveryReviewPost();
+  await testLegacyPullRequestEventUsesSnapshotHead();
+  await testIssueCommentRejectsMissingOrMalformedManifestHead();
+  await testLegacyPullRequestEventRejectsMissingSnapshotHead();
   await testCheckpointCarryForwardOnEveryBodyPath();
   await testCheckpointAdvancesOnZeroFindings();
   await testCheckpointNeverAdvancesWithoutSticky();
@@ -2350,6 +2470,7 @@ async function main() {
   testActionResolveStepNeverFailsTheJob();
   testActionFingerprintsRepoLocalRuleFile();
   testActionFingerprintIncludesBackground();
+  testActionFingerprintReadsNormalizedAxes();
   testActionRangeFromIsAStepOutput();
   testActionEmitsMachineReadableRangeOutputs();
   testActionPinsGithubScriptSha();
@@ -2358,6 +2479,36 @@ async function main() {
   await testActionPinsAuthorToTheDefaultTokenApp();
   await testActionResolveStepDeclaresItsRefInputs();
   await testCheckpointMarkerMatchingIsStateless();
+  testTailForCommentKeepsTheTail();
+  // Optional pr_number (#1150)
+  await testPrNumberOverrideAddressesEveryCall();
+  // Outdated thread resolution (#567)
+  testShouldResolveThreadTable();
+  await testShouldResolveThreadPartialCommentView();
+  await testResolveOutdatedThreadsCapsAndSequences();
+  await testResolveOutdatedThreadsErrorHandling();
+  await testListBotReviewThreadsPaginatesAndDegrades();
+  await testResolveOutdatedThreadsDryRun();
+  await testResolveOutdatedOffByDefaultIssuesNoGraphql();
+  await testResolveOutdatedNeverRunsOnEmptyRuns();
+  await testResolveOutdatedResolvesAfterASuccessfulRun();
+  await testResolveOutdatedReportModePreviewsOnly();
+  await testResolveOutdatedForbiddenDoesNotFailTheRun();
+  // Audit fixes on top of #567
+  testResolveIdentityComesFromTheRootAuthor();
+  testResolveIdentityIsReadOffTheRootNode();
+  testResolveVetoUsesPlainIntersection();
+  await testGetAuthenticatedLoginIs403UnderTheActionsToken();
+  await testResolveVetoScopeMatchesWhatTheFindingLeftUnknown();
+  testResolveVetoSurvivesPathSpellingDrift();
+  await testUnlocatablePathVetoSurvivesPathSpellingDrift();
+  await testAuthenticatedLoginIsResolvedOncePerRun();
+  await testReportModePreviewsEveryCandidate();
+  await testUnrecognizedResolveValueWarnsOnEarlyExits();
+  await testListBotReviewThreadsAnnouncesThePageCap();
+  await testResolveCleanupNeverBreaksOutputs();
+  await testResolvePacingUsesSuccessDelay();
+  testActionYmlDoesNotPromiseTheIoUThresholdToResolveOutdated();
   console.log("All post-review-comments tests passed.");
 }
 function testParseDiffHunkRanges() {
@@ -2648,7 +2799,7 @@ async function testRunnerHeadDriftPreservesComments() {
 
   await runPostReviewComments({
     github: gh,
-    context, // context head is "head-sha"; mocked current head is "new-head"
+    context,
     core: { setOutput() {} },
     fs: mockFs(JSON.stringify(result), ""),
     out: {},
@@ -3743,10 +3894,11 @@ async function testCheckpointAdvanceGateTable() {
         const gh = makeGithub(
           failed === 1
             ? {
+                headSha: terminal === null ? context.payload.pull_request.head.sha : CK_RESOLVED,
                 files: [{ filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" }],
                 batchErrorSpec: [{ message: "Line could not be resolved", status: 422 }],
               }
-            : {}
+            : { headSha: terminal === null ? context.payload.pull_request.head.sha : CK_RESOLVED }
         );
         // published=false: the summary cannot be written at all (the issue
         // comment API is down), so summaryUrl stays empty.
@@ -3814,6 +3966,129 @@ async function testCheckpointAdvanceRequiresFullSha() {
       false,
       `resolved_head ${JSON.stringify(head)} must not advance the checkpoint`
     );
+  }
+}
+
+async function testManifestHeadPinsEveryReviewPost() {
+  const reviewedHead = "a".repeat(40);
+  const eventHead = "b".repeat(40);
+  const currentHead = "c".repeat(40);
+  const result = {
+    comments: [{ path: "src/a.js", content: "finding from reviewed head", start_line: 1, end_line: 1 }],
+    manifest: ckManifest({ input: { resolved_head: reviewedHead } }),
+  };
+
+  for (const [eventName, payload] of [
+    ["issue_comment", {}],
+    ["pull_request_target", { pull_request: { head: { sha: eventHead } } }],
+  ]) {
+    const gh = makeGithub({ headSha: currentHead, bulkError: "validation failed", bulkErrorStatus: 400 });
+    await runPostReviewComments({
+      github: gh,
+      context: {
+        repo: { owner: "owner", repo: "repo" },
+        issue: { number: 123 },
+        eventName,
+        payload,
+      },
+      core: { setOutput() {} },
+      fs: mockFs(JSON.stringify(result), ""),
+    });
+
+    assert.strictEqual(gh.createReviewCalls.length, 2, `${eventName}: batch and fallback both attempted`);
+    assert.deepStrictEqual(
+      gh.createReviewCalls.map((call) => call.commit_id),
+      [reviewedHead, reviewedHead],
+      `${eventName}: every posting path uses the reviewed manifest head`
+    );
+    assert.strictEqual(gh.getPullCalls.length, 0, `${eventName}: posting never refetches a moving PR head`);
+  }
+}
+
+async function testLegacyPullRequestEventUsesSnapshotHead() {
+  const eventHead = "d".repeat(40);
+  const gh = makeGithub({ headSha: "e".repeat(40) });
+  const result = {
+    comments: [{ path: "src/a.js", content: "legacy finding", start_line: 1, end_line: 1 }],
+  };
+
+  await runPostReviewComments({
+    github: gh,
+    context: {
+      repo: { owner: "owner", repo: "repo" },
+      issue: { number: 123 },
+      eventName: "pull_request_target",
+      payload: { pull_request: { head: { sha: eventHead } } },
+    },
+    core: { setOutput() {} },
+    fs: mockFs(JSON.stringify(result), ""),
+  });
+
+  assert.strictEqual(gh.createReviewCalls[0].commit_id, eventHead);
+  assert.strictEqual(gh.getPullCalls.length, 0, "legacy PR events use their immutable payload snapshot");
+}
+
+async function testIssueCommentRejectsMissingOrMalformedManifestHead() {
+  for (const [label, manifest, expectedError] of [
+    ["missing manifest", undefined, /resolved_head is required/],
+    ["missing input", {}, /resolved_head is missing/],
+    ["missing head", { input: {} }, /resolved_head is missing/],
+    ["null head", { input: { resolved_head: null } }, /resolved_head is missing/],
+    ["malformed", ckManifest({ input: { resolved_head: "not-a-sha" } }), /40-character lowercase string/],
+    ["array", ckManifest({ input: { resolved_head: ["a".repeat(40)] } }), /40-character lowercase string/],
+  ]) {
+    const gh = makeGithub({ headSha: "f".repeat(40) });
+    const result = {
+      comments: [{ path: "src/a.js", content: "unbound finding", start_line: 1, end_line: 1 }],
+      manifest,
+    };
+
+    await assert.rejects(
+      runPostReviewComments({
+        github: gh,
+        context: {
+          repo: { owner: "owner", repo: "repo" },
+          issue: { number: 123 },
+          eventName: "issue_comment",
+          payload: {},
+        },
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify(result), ""),
+      }),
+      expectedError,
+      `${label} manifest head must be rejected`
+    );
+    assert.strictEqual(gh.getPullCalls.length, 0, `${label}: rejection must not fetch the current PR head`);
+    assert.strictEqual(gh.createReviewCalls.length, 0, `${label}: rejection must happen before review writes`);
+    assert.strictEqual(gh.issueComments.length, 0, `${label}: rejection must happen before summary writes`);
+    assert.strictEqual(gh.updatedComments.length, 0, `${label}: rejection must happen before summary updates`);
+  }
+}
+
+async function testLegacyPullRequestEventRejectsMissingSnapshotHead() {
+  for (const payload of [undefined, null, {}, { pull_request: {} }, { pull_request: { head: {} } }]) {
+    const gh = makeGithub({});
+    const result = {
+      comments: [{ path: "src/a.js", content: "unbound legacy finding", start_line: 1, end_line: 1 }],
+    };
+
+    await assert.rejects(
+      runPostReviewComments({
+        github: gh,
+        context: {
+          repo: { owner: "owner", repo: "repo" },
+          issue: { number: 123 },
+          eventName: "pull_request_target",
+          payload,
+        },
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify(result), ""),
+      }),
+      /event payload\.pull_request\.head\.sha is missing/
+    );
+    assert.strictEqual(gh.createReviewCalls.length, 0, "a missing event snapshot must fail before review writes");
+    assert.strictEqual(gh.issueComments.length, 0, "a missing event snapshot must fail before summary writes");
+    assert.strictEqual(gh.updatedComments.length, 0, "a missing event snapshot must fail before summary updates");
   }
 }
 
@@ -4185,6 +4460,9 @@ function resolveEnv(over = {}) {
       OCR_HEAD_SHA: CK_NEW,
       OCR_BASE_REF: "main",
       OCR_MERGE_BASE: CK_MB,
+      // Written by "Resolve PR refs", which fails the job rather than leaving
+      // it empty; ckPayload records the same PR, so the checkpoint matches.
+      OCR_PR_NUMBER: "123",
       OCR_STICKY_SUMMARY: "true",
       OCR_FULL_REVIEW: "false",
       OCR_EVENT_ACTION: "synchronize",
@@ -4208,7 +4486,7 @@ function resolveEnv(over = {}) {
   );
 }
 
-// U2 (executed, not just read). A missing helper is the real-world failure —
+// Executed, not just read. A missing helper is the real-world failure —
 // `uses: owner/repo@sha` without a checkout, a container that cannot see
 // GITHUB_ACTION_PATH — and it used to throw, failing a job whose review would
 // otherwise have run fine against the full range.
@@ -4244,7 +4522,7 @@ async function testActionResolveScriptFallsBackInsteadOfThrowing() {
   assert.strictEqual(core.outputs.checkpoint_carry, "");
 }
 
-// U3/U4 (executed). The fingerprint is what makes "same configuration" mean
+// Executed, not just read. The fingerprint is what makes "same configuration" mean
 // something. It must move when the repo's own rule file appears or changes —
 // that file is loaded by every review whether or not `rule` is set — and when
 // an input that changes what the model is told changes.
@@ -4266,6 +4544,7 @@ async function testActionScriptFingerprintCoversRepoLocalRules() {
           OCR_HEAD_SHA: CK_NEW,
           OCR_BASE_REF: "main",
           OCR_MERGE_BASE: CK_MB,
+          OCR_PR_NUMBER: "123",
           OCR_STICKY_SUMMARY: "true",
           OCR_FULL_REVIEW: "false",
           OCR_EVENT_ACTION: "synchronize",
@@ -4318,7 +4597,7 @@ async function testActionScriptFingerprintCoversRepoLocalRules() {
   assert.notStrictEqual(otherVersion, edited, "a changed OCR version must invalidate the checkpoint");
 }
 
-// U1. GET /user is 403 ("Resource not accessible by integration") for the
+// GET /user is 403 ("Resource not accessible by integration") for the
 // default GITHUB_TOKEN and for App installation tokens — i.e. for every token
 // this action runs with — so gating authorship on it meant production runs
 // always fell back to the full range and the feature never did anything. The
@@ -4358,7 +4637,7 @@ async function testCheckpointAuthorSurvivesUnavailableGetUser() {
   assert.strictEqual(isCheckpointAuthorOurs({ user: { login: "ocr-app[bot]" } }, "ocr-app"), true);
 }
 
-// U1 (corner). `user.type` alone carries the whole decision when there is no app
+// The corner case: `user.type` alone carries the whole decision when there is no app
 // attribution and the login has no "[bot]" suffix. That shape is accepted: type
 // is GitHub's own attestation about the writer, derived from the posting token
 // and not settable by a commenter, so it is exactly the evidence the trust
@@ -4374,7 +4653,7 @@ function testCheckpointBotTypeAloneEstablishesAuthorship() {
   assert.strictEqual(isCheckpointAuthorOurs({ user: { login: "plain", type: "Bot" } }, "ocr-app"), false);
 }
 
-// U1 (hole). `performed_via_github_app` is also set on comments written with a
+// The hole this closes: `performed_via_github_app` is also set on comments written with a
 // user-to-server token, i.e. by a HUMAN acting through some GitHub App (a CLI,
 // an editor integration, a browser extension). There the slug attests the
 // client, not the author, so accepting app attribution on its own would have
@@ -4408,7 +4687,7 @@ async function testCheckpointRejectsUserToServerAppComment() {
   assert.strictEqual(isCheckpointAuthorOurs(viaBot), true);
 }
 
-// U6 (robustness). The no-op is checked before the OCR output is read, because
+// Robustness: the no-op is checked before the OCR output is read, because
 // an empty range is also the range OCR is most likely to trip over: an error
 // banner written over the previous run's findings destroys them just as
 // thoroughly as "No comments generated" does.
@@ -4432,7 +4711,7 @@ async function testCheckpointNoopSurvivesUnreadableOcrOutput() {
   assert.deepStrictEqual(gh.issueComments, []);
 }
 
-// U6. A rerun on the same head reviews an empty range and therefore has nothing
+// A rerun on the same head reviews an empty range and therefore has nothing
 // to report. Writing "No comments generated" over the previous run's summary
 // would destroy findings for commits nobody touched, so the no-op leaves the
 // existing comment exactly as it is.
@@ -4475,7 +4754,7 @@ async function testCheckpointNoopLeavesSummaryUntouched() {
   assert.strictEqual(rewriting.updatedComments[0].body.includes("No comments generated"), true);
 }
 
-// U7. Reopening a PR, or marking a draft ready, is a request for a fresh look
+// Reopening a PR, or marking a draft ready, is a request for a fresh look
 // at the whole diff — not for the delta since the last push — even when a
 // perfectly valid checkpoint is sitting there.
 async function testCheckpointEventFullScopeTable() {
@@ -4494,7 +4773,7 @@ async function testCheckpointEventFullScopeTable() {
   }
 }
 
-// U9. The carry can come back empty for reasons that say nothing about the
+// The carry can come back empty for reasons that say nothing about the
 // marker's usefulness (author unprovable, listComments down). A run that then
 // completes without advancing must not blank a checkpoint it merely failed to
 // read.
@@ -4558,7 +4837,7 @@ async function testCheckpointCarryNeverErasesExistingMarker() {
   assert.strictEqual(lastSummaryBody(optedOut).includes("ocr-checkpoint"), false);
 }
 
-// U9 (continued). parseCheckpointMarker rejects a body carrying two markers as
+// The carry rescue, continued. parseCheckpointMarker rejects a body carrying two markers as
 // ambiguous. The rescue must apply the same rule: copying one of the two into
 // the rewritten body would pick a winner and hand the next run a single
 // well-formed marker to narrow on. Rescuing nothing keeps the fail-closed
@@ -4636,7 +4915,7 @@ async function testCheckpointAdvanceRequiresAFingerprint() {
   assert.strictEqual(parseCheckpointMarker(control.body).head, CK_RESOLVED);
 }
 
-// U12. A summary that reports three findings for a two-commit slice of a
+// A summary that reports three findings for a two-commit slice of a
 // forty-commit PR is misleading unless it says so. One visible line, only when
 // the range really was narrowed.
 async function testSummaryShowsNarrowedRangeLabel() {
@@ -4697,7 +4976,7 @@ async function testSummaryShowsNarrowedRangeLabel() {
   assert.strictEqual(off.includes("Reviewed `"), false, "opt-out runs render today's body");
 }
 
-// U2. The resolve step only chooses where the review starts; every failure it
+// The resolve step only chooses where the review starts; every failure it
 // can hit has the same safe answer. It must never be the reason a job fails.
 function testActionResolveStepNeverFailsTheJob() {
   const block = actionStepBlock("Resolve review range");
@@ -4736,7 +5015,7 @@ function fingerprintDigestSource() {
   return block.slice(at, end);
 }
 
-// U3. .opencodereview/rule.json is read from the repo whether or not `rule` is
+// .opencodereview/rule.json is read from the repo whether or not `rule` is
 // set, so a commit that edits it changes what a review says and must invalidate
 // the checkpoint.
 function testActionFingerprintsRepoLocalRuleFile() {
@@ -4754,7 +5033,7 @@ function testActionFingerprintsRepoLocalRuleFile() {
   assert.strictEqual(block.includes("range.reason = 'rule_unreadable';"), true, "…which forces a full review");
 }
 
-// U4. `background` changes what the model is told, so it changes what a review
+// `background` changes what the model is told, so it changes what a review
 // would say, so it belongs in the fingerprint.
 function testActionFingerprintIncludesBackground() {
   const block = actionStepBlock("Resolve review range");
@@ -4786,7 +5065,31 @@ function testActionFingerprintIncludesBackground() {
   }
 }
 
-// U5. A narrowed range published through $GITHUB_ENV outlives the step: a
+// The validated axes fingerprint the normalized values, not the raw inputs, so
+// spellings that mean the same thing (HIGH vs high, '0' vs '' vs '00') hash
+// identically and keep the checkpoint.
+function testActionFingerprintReadsNormalizedAxes() {
+  const block = actionStepBlock("Resolve review range");
+  const digest = fingerprintDigestSource();
+  for (const [envVar, normalized] of [
+    ["OCR_FP_EFFORT", "EFFORT"],
+    ["OCR_FP_MAX_TOKENS_BUDGET", "MAX_TOKENS_BUDGET"],
+    ["OCR_FP_LLM_REASONING_EFFORT", "LLM_REASONING_EFFORT"],
+  ]) {
+    assert.strictEqual(
+      block.includes(`${envVar}: \${{ env.${normalized} }}`),
+      true,
+      `the step must pass the normalized env.${normalized} as ${envVar}`
+    );
+    assert.strictEqual(
+      digest.includes(`process.env.${envVar},`),
+      true,
+      `${envVar} must be hashed into the fingerprint`
+    );
+  }
+}
+
+// A narrowed range published through $GITHUB_ENV outlives the step: a
 // second use of this action in the same job would inherit it and skip commits
 // it was never told about. Step outputs are scoped to the step that set them.
 function testActionRangeFromIsAStepOutput() {
@@ -4807,7 +5110,7 @@ function testActionRangeFromIsAStepOutput() {
   assert.strictEqual(post.includes("same_head_noop"), true, "…including the no-op signal");
 }
 
-// U8. "Why was this a full review" has to be answerable by a workflow, not just
+// "Why was this a full review" has to be answerable by a workflow, not just
 // by a human reading the step log.
 function testActionEmitsMachineReadableRangeOutputs() {
   const names = [
@@ -4837,7 +5140,7 @@ function testActionEmitsMachineReadableRangeOutputs() {
   assert.strictEqual(ACTION_README.includes("`checkpoint_after`"), true);
 }
 
-// U10. A floating tag on a step that runs with the repo's token is a supply
+// A floating tag on a step that runs with the repo's token is a supply
 // chain hole, and this file already pins every other action by sha.
 function testActionPinsGithubScriptSha() {
   assert.strictEqual(/actions\/github-script@v/.test(ACTION_YML), false, "no floating github-script tag may remain");
@@ -4846,7 +5149,7 @@ function testActionPinsGithubScriptSha() {
   assert.strictEqual(new Set(uses).size, 1, "…to the same sha");
 }
 
-// U11. `ocr_version` defaults to "latest", so falling back to `spec:${VERSION}`
+// `ocr_version` defaults to "latest", so falling back to `spec:${VERSION}`
 // pinned the axis to the constant "spec:latest" — it stopped distinguishing
 // versions in exactly the case it was written to cover. Nothing replaces it:
 // an unresolvable version produces an EMPTY fingerprint, which matches no
@@ -4983,7 +5286,7 @@ async function testActionPinsAuthorToTheDefaultTokenApp() {
   );
 }
 
-// U13. The reason set is documented in three places (the resolver's contract
+// The reason set is documented in three places (the resolver's contract
 // comment, the README table, the action outputs) and drifted between them once
 // already. Enumerate it once, here, and fail if any copy falls behind.
 async function testCheckpointReasonsMatchTheDocs() {
@@ -5052,17 +5355,18 @@ async function testCheckpointReasonsMatchTheDocs() {
   assert.strictEqual(/force-push/.test(forcePush[1]), true, "unknown_object is where a force-push actually lands");
 }
 
-// The resolve step's git refs come from $GITHUB_ENV, written by two earlier
-// steps. Reading them straight off the ambient job env made that dependency
-// invisible: nothing in the step said it needed those steps to have run. Pin
-// both halves — the declaration, and what happens when the declaration is empty
-// because an upstream step was skipped.
+// The resolve step's git refs and PR number come from $GITHUB_ENV, written by
+// two earlier steps. Reading them straight off the ambient job env made that
+// dependency invisible: nothing in the step said it needed those steps to have
+// run. Pin both halves — the declaration, and what happens when the declaration
+// is empty because an upstream step was skipped.
 async function testActionResolveStepDeclaresItsRefInputs() {
   const block = actionStepBlock("Resolve review range");
   for (const [envVar, source] of [
     ["OCR_HEAD_SHA", "env.HEAD_SHA"],
     ["OCR_BASE_REF", "env.BASE_REF"],
     ["OCR_MERGE_BASE", "env.MERGE_BASE"],
+    ["OCR_PR_NUMBER", "env.PR_NUMBER"],
   ]) {
     assert.strictEqual(
       block.includes(`${envVar}: \${{ ${source} }}`),
@@ -5071,7 +5375,7 @@ async function testActionResolveStepDeclaresItsRefInputs() {
     );
     assert.strictEqual(block.includes(`process.env.${envVar}`), true, `…and read it as ${envVar}`);
   }
-  for (const bare of ["process.env.HEAD_SHA", "process.env.BASE_REF", "process.env.MERGE_BASE"]) {
+  for (const bare of ["process.env.HEAD_SHA", "process.env.BASE_REF", "process.env.MERGE_BASE", "process.env.PR_NUMBER"]) {
     assert.strictEqual(block.includes(bare), false, `no undeclared ${bare} may remain`);
   }
 
@@ -5088,6 +5392,77 @@ async function testActionResolveStepDeclaresItsRefInputs() {
   assert.strictEqual(core.outputs.range_reason, "base_changed", "…because the stored base cannot match an empty one");
   assert.strictEqual(core.outputs.range_from, "", "empty range_from means ${RANGE_FROM:-$MERGE_BASE}");
   assert.strictEqual(core.warnings.length, 0, "and it is a decision, not a crash");
+}
+
+// ---------------------------------------------------------------------------
+// Optional pr_number (#1150)
+// ---------------------------------------------------------------------------
+
+// Everything this module writes is addressed by one number. On a workflow_run
+// the event payload holds no issue and no pull request, so context.issue.number
+// is undefined and every call used to be addressed to /issues//… — a 404 after
+// a completed review. The caller now resolves the number and passes it in.
+async function testPrNumberOverrideAddressesEveryCall() {
+  const findings = {
+    comments: [{ path: "src/a.js", content: "finding", start_line: 3, end_line: 3 }],
+    warnings: [],
+    // Posting inline comments needs the reviewed head from the manifest;
+    // workflow_run has no pull_request_target payload to fall back to.
+    manifest: ckManifest(),
+  };
+  const workflowRunContext = {
+    repo: { owner: "owner", repo: "repo" },
+    // What @actions/github's Context yields for a workflow_run payload.
+    issue: { number: undefined },
+    eventName: "workflow_run",
+    payload: { workflow_run: { pull_requests: [{ number: 4242 }] } },
+  };
+
+  const github = makeGithub({
+    files: [{ filename: "src/a.js", patch: "@@ -1,3 +1,3 @@\n a\n b\n c" }],
+  });
+  await runPostReviewComments({
+    github,
+    context: workflowRunContext,
+    core: mockCore(),
+    fs: mockFs(JSON.stringify(findings), ""),
+    prNumber: 4242,
+    stickySummary: true,
+  });
+
+  // Every read and write, not just the summary: the head lookup, the diff
+  // inventory, the review itself and the summary comment all address the PR the
+  // caller resolved.
+  const addressed = [
+    ...github.getPullCalls.map((c) => c.pull_number),
+    ...github.listFilesCalls.map((c) => c.pull_number),
+    ...github.createReviewCalls.map((c) => c.pull_number),
+    ...github.listCommentsCalls.map((c) => c.issue_number),
+    ...github.issueComments.map((c) => c.issue_number),
+  ];
+  assert.ok(github.createReviewCalls.length > 0, "the review must be posted");
+  assert.ok(github.issueComments.length > 0, "the summary must be posted");
+  assert.deepStrictEqual(
+    [...new Set(addressed)],
+    [4242],
+    "every call must address the resolved PR, and none of them undefined"
+  );
+
+  // Omitting the option keeps the event-derived number, so callers that never
+  // pass one (and every trigger that carries a PR) are unaffected.
+  const legacy = makeGithub({ files: [{ filename: "src/a.js", patch: "@@ -1,3 +1,3 @@\n a\n b\n c" }] });
+  await runPostReviewComments({
+    github: legacy,
+    context,
+    core: mockCore(),
+    fs: mockFs(JSON.stringify(findings), ""),
+    stickySummary: true,
+  });
+  assert.deepStrictEqual(
+    [...new Set(legacy.createReviewCalls.map((c) => c.pull_number))],
+    [context.issue.number],
+    "without the option the event's own number is still used"
+  );
 }
 
 // The flagless marker RegExp is shared across calls now. That is only safe
@@ -5123,6 +5498,1002 @@ async function testCheckpointMarkerMatchingIsStateless() {
   const second = await read();
   assert.strictEqual(first.raw, marker, "the carried marker is the marker itself");
   assert.deepStrictEqual(second, first, "a second read of the same body reads the same thing");
+}
+
+// The stderr dump that accompanies an unparseable result must keep the tail:
+// with stream_progress the file is mostly progress lines and the error that
+// killed the run is the last thing written.
+function testTailForCommentKeepsTheTail() {
+  assert.strictEqual(tailForComment("short"), "short", "text within the limit passes through");
+  assert.strictEqual(tailForComment("", 10), "", "empty text passes through");
+  const head = "HEAD-LINE\n" + "x".repeat(MAX_COMMENT_STDERR_CHARS);
+  const tail = "y".repeat(100) + "\nTAIL-LINE: the actual error";
+  const out = tailForComment(head + tail);
+  assert.ok(out.includes("TAIL-LINE: the actual error"), "the tail must survive truncation");
+  assert.ok(!out.includes("HEAD-LINE"), "the head must be truncated away");
+  assert.match(out, /earlier characters truncated; see the ocr-stderr\.log artifact/, "truncation must be announced");
+  assert.ok(out.length <= MAX_COMMENT_STDERR_CHARS + 200, "the result stays far below GitHub's comment limit");
+}
+
+// ---- Outdated thread resolution (#567) ----
+
+// Exported separately from the big destructure above so the pre-existing import
+// line stays untouched.
+const {
+  listBotReviewThreads,
+  shouldResolveThread,
+  resolveOutdatedThreads,
+  MAX_RESOLVE_PER_RUN,
+} = require(path.join(__dirname, "post-review-comments.js"));
+
+const BOT = "github-actions[bot]";
+
+// A root body carrying the marker OCR stamps into every inline comment it
+// creates (`ocr-<runId>-<runAttempt>-<random hex>`, per newCommentId). This is
+// what proves a thread is ours, so the resolvable fixture must carry it.
+const OURS = "<!-- ocr-42-1-deadbeefcafe1234 -->\nfindings go here";
+
+// An outdated, unresolved, bot-only thread on src/a.js:10 that OCR created —
+// the one shape that is resolvable. Every case below is this minus exactly one
+// condition.
+function botThread(over = {}) {
+  return Object.assign(
+    {
+      id: "T1",
+      path: "src/a.js",
+      isOutdated: true,
+      isResolved: false,
+      originalLine: 10,
+      originalStartLine: null,
+      comments: { nodes: [{ author: { login: BOT } }] },
+      root: { nodes: [{ body: OURS }] },
+    },
+    over
+  );
+}
+
+function resolveArgs(gh, core, over = {}) {
+  return Object.assign(
+    {
+      github: gh,
+      owner: "owner",
+      repo: "repo",
+      prNumber: 123,
+      core,
+      log: (m) => core.info(m),
+      // null, exactly like production: getAuthenticatedLogin() 403s under the
+      // Actions token, so the resolve path never learns a login.
+      botLogin: null,
+      currentSpans: [],
+    },
+    over
+  );
+}
+
+// Count of the single per-invocation summary line. Everything else the feature
+// emits goes to core.warning, so this stays exactly 1 whatever happens.
+function resolveLogLines(core) {
+  return core.logs.filter((l) => l.includes("[resolve-outdated]"));
+}
+
+function testShouldResolveThreadTable() {
+  const sameLine = [{ path: "src/a.js", start_line: 10, line: 10 }];
+  const cases = [
+    { name: "outdated bot thread, nothing current on those lines", thread: botThread(), spans: [], want: "resolve" },
+    // viewerCanResolve reports false for tokens that CAN resolve, so the
+    // predicate must ignore it entirely (no "cannot_resolve" outcome exists).
+    { name: "viewerCanResolve:false is ignored", thread: botThread({ viewerCanResolve: false }), spans: sameLine.slice(0, 0), want: "resolve" },
+    // With no usable original line the overlap veto below cannot fire, so the
+    // thread would be resolved on a check that is structurally unable to fail.
+    // That veto is the mitigation for a force-push marking a still-live
+    // finding's thread outdated, so this must stay open, not resolve.
+    { name: "no original line information", thread: botThread({ originalLine: null, originalStartLine: null }), spans: sameLine, want: "unverified_no_line" },
+    { name: "no original line information, nothing current either", thread: botThread({ originalLine: null, originalStartLine: null }), spans: [], want: "unverified_no_line" },
+    // GraphQL returns the bot SLUG; getAuthenticatedLogin/isBotComment use the
+    // REST "[bot]"-suffixed form. Measured on a live PR: the same comment is
+    // `github-actions` (__typename Bot) via GraphQL and `github-actions[bot]`
+    // via REST. Without normalizing, every one of our own threads reads as a
+    // human reply and the feature silently resolves nothing.
+    {
+      name: "GraphQL bot slug without [bot] still counts as ours",
+      thread: botThread({ comments: { totalCount: 1, nodes: [{ author: { login: "github-actions", __typename: "Bot" } }] } }),
+      spans: [],
+      want: "resolve",
+    },
+    {
+      name: "a User whose login merely looks bot-ish is still a human",
+      thread: botThread({ comments: { totalCount: 1, nodes: [{ author: { login: "github-actions", __typename: "User" } }] } }),
+      spans: [],
+      want: "human_reply",
+    },
+    { name: "same line on a DIFFERENT path never vetoes", thread: botThread({ path: "src/b.js" }), spans: sameLine, want: "resolve" },
+    // Ownership is the marker, not the author. Every workflow in a repo using
+    // the default GITHUB_TOKEN posts as this same identity, so these threads
+    // are bot-authored AND indistinguishable from ours by author alone — yet
+    // they are someone else's conversation and must never be resolved.
+    {
+      name: "a sibling workflow's thread under the same bot identity is not ours",
+      thread: botThread({ root: { nodes: [{ body: "Dependency update available." }] } }),
+      spans: [],
+      want: "not_ours",
+    },
+    { name: "root body absent", thread: botThread({ root: undefined }), spans: [], want: "not_ours" },
+    { name: "root present but empty", thread: botThread({ root: { nodes: [] } }), spans: [], want: "not_ours" },
+    // The marker is anchored to its HTML comment wrapper, so a body that merely
+    // mentions the ID (a quote, a code block, a suggestion echoing our comment)
+    // cannot pass ownership off to another author's thread.
+    {
+      name: "an unwrapped mention of an OCR id does not prove ownership",
+      thread: botThread({ root: { nodes: [{ body: "re: ocr-42-1-deadbeefcafe1234 — see above" }] } }),
+      spans: [],
+      want: "not_ours",
+    },
+    // "Not ours" is answered before the author loop: a thread we did not create
+    // is not ours to classify, so a human reply on it is not our business.
+    {
+      name: "not ours outranks a human reply",
+      thread: botThread({
+        root: { nodes: [{ body: "some other bot" }] },
+        comments: { nodes: [{ author: { login: BOT } }, { author: { login: "octocat" } }] },
+      }),
+      spans: [],
+      want: "not_ours",
+    },
+    { name: "not outdated", thread: botThread({ isOutdated: false }), spans: [], want: "not_outdated" },
+    { name: "isOutdated absent", thread: botThread({ isOutdated: undefined }), spans: [], want: "not_outdated" },
+    { name: "already resolved", thread: botThread({ isResolved: true }), spans: [], want: "already_resolved" },
+    {
+      name: "a human replied",
+      thread: botThread({ comments: { nodes: [{ author: { login: BOT } }, { author: { login: "octocat" } }] } }),
+      spans: [],
+      want: "human_reply",
+    },
+    {
+      name: "unidentifiable author counts as human",
+      thread: botThread({ comments: { nodes: [{ author: null }] } }),
+      spans: [],
+      want: "human_reply",
+    },
+    { name: "current single-line finding on the same line (rebase)", thread: botThread(), spans: sameLine, want: "overlap" },
+    {
+      name: "current multi-line finding above the IoU threshold",
+      thread: botThread({ originalStartLine: 10, originalLine: 20 }),
+      spans: [{ path: "src/a.js", start_line: 11, line: 20 }],
+      want: "overlap",
+    },
+    // Any shared line vetoes. This case scores below the incremental IoU
+    // threshold (2 shared lines out of a 31-line union), which is why the
+    // dedupe test would call it a different comment — but lines 19-20 of this
+    // thread are covered by a finding the model just reported, so resolving it
+    // would close a live finding's thread.
+    {
+      name: "current multi-line finding sharing only its first lines",
+      thread: botThread({ originalStartLine: 10, originalLine: 20 }),
+      spans: [{ path: "src/a.js", start_line: 19, line: 40 }],
+      want: "overlap",
+    },
+    {
+      name: "current multi-line finding entirely below the thread",
+      thread: botThread({ originalStartLine: 10, originalLine: 20 }),
+      spans: [{ path: "src/a.js", start_line: 30, line: 40 }],
+      want: "resolve",
+    },
+  ];
+  for (const c of cases) {
+    const got = shouldResolveThread(c.thread, { botLogin: BOT, currentSpans: c.spans });
+    assert.strictEqual(got, c.want, c.name);
+    assert.notStrictEqual(got, "cannot_resolve", "permission is never a predicate outcome");
+  }
+}
+
+// The author check can only clear a thread when the query returned all of its
+// comments. A truncated or empty comment list must veto, or a human reply past
+// the page boundary would be invisible and the thread resolved on top of it.
+async function testShouldResolveThreadPartialCommentView() {
+  const botComments = (n) => Array.from({ length: n }, () => ({ author: { login: BOT } }));
+  const cases = [
+    { name: "no visible comments", comments: { totalCount: 0, nodes: [] }, want: "unverified_partial_view" },
+    { name: "comments object missing entirely", comments: undefined, want: "unverified_partial_view" },
+    { name: "more comments than the page returned", comments: { totalCount: 101, nodes: botComments(100) }, want: "unverified_partial_view" },
+    { name: "full page, nothing truncated", comments: { totalCount: 100, nodes: botComments(100) }, want: "resolve" },
+    { name: "totalCount absent, comments visible", comments: { nodes: botComments(2) }, want: "resolve" },
+  ];
+  for (const c of cases) {
+    const thread = botThread({ comments: c.comments });
+    assert.strictEqual(shouldResolveThread(thread, { botLogin: BOT, currentSpans: [] }), c.want, c.name);
+  }
+
+  // End to end: a truncated thread is counted and reported, never mutated.
+  const gh = makeGithub({
+    threads: [botThread({ id: "TRUNC", comments: { totalCount: 101, nodes: botComments(100) } })],
+  });
+  const core = mockCore();
+  const out = await withEnv({ OCR_SUCCESS_DELAY: "0" }, () =>
+    resolveOutdatedThreads(resolveArgs(gh, core))
+  );
+  assert.strictEqual(gh.resolveMutationCalls().length, 0, "a partially-visible thread is never resolved");
+  assert.strictEqual(out.resolved, 0);
+  assert.deepStrictEqual(out.reasons, { unverified_partial_view: 1 });
+  assert.match(resolveLogLines(core)[0], /skipped=unverified_partial_view:1/);
+}
+
+async function testResolveOutdatedThreadsCapsAndSequences() {
+  const threads = [];
+  for (let i = 0; i < 60; i++) threads.push(botThread({ id: `T${i}`, originalLine: 100 + i }));
+  const gh = makeGithub({ threads });
+  const core = mockCore();
+
+  // Wrap the mock to observe concurrency: a Promise.all implementation would
+  // show 50 in flight at once, a sequential loop never more than 1.
+  const inner = gh.graphql;
+  let inFlight = 0;
+  let maxInFlight = 0;
+  gh.graphql = async (q, v) => {
+    inFlight++;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise((r) => setImmediate(r));
+    const res = await inner(q, v);
+    inFlight--;
+    return res;
+  };
+
+  const started = Date.now();
+  const out = await withEnv({ OCR_SUCCESS_DELAY: "0" }, () =>
+    resolveOutdatedThreads(resolveArgs(gh, core))
+  );
+
+  assert.strictEqual(MAX_RESOLVE_PER_RUN, 50);
+  assert.strictEqual(gh.resolveMutationCalls().length, 50, "capped at MAX_RESOLVE_PER_RUN");
+  assert.strictEqual(maxInFlight, 1, "mutations must be strictly sequential");
+  assert.deepStrictEqual(
+    { candidates: out.candidates, attempted: out.attempted, resolved: out.resolved, failed: out.failed },
+    { candidates: 60, attempted: 50, resolved: 50, failed: 0 }
+  );
+  // Pacing is the documented OCR_SUCCESS_DELAY: at its 2000ms default this
+  // loop would need ~98s, so finishing in under 2s proves the knob is the
+  // pacing source. (testResolvePacingUsesSuccessDelay proves the other
+  // direction — that a non-zero value actually sleeps.)
+  assert.strictEqual(Date.now() - started < 2000, true, "OCR_SUCCESS_DELAY must control pacing");
+  assert.strictEqual(resolveLogLines(core).length, 1, "exactly one summary line per invocation");
+  assert.match(resolveLogLines(core)[0], /mode=resolve threads=60 candidates=60 attempted=50 resolved=50/);
+}
+
+async function testResolveOutdatedThreadsErrorHandling() {
+  const gqlErr = (message, extra) => Object.assign(new Error(message), extra || {});
+  const threads = [botThread({ id: "A" }), botThread({ id: "B" }), botThread({ id: "C" })];
+  const cases = [
+    {
+      name: "FORBIDDEN on the first mutation stops the run",
+      spec: () => gqlErr("Resource not accessible by integration", { errors: [{ type: "FORBIDDEN" }] }),
+      mutations: 1,
+      want: { resolved: 0, failed: 0 },
+      warnings: 1,
+      warnMatch: /contents: write/,
+    },
+    {
+      name: "FORBIDDEN nested under response.errors is recognized too",
+      spec: () => gqlErr("GraphQL request failed", { response: { errors: [{ type: "FORBIDDEN" }] } }),
+      mutations: 1,
+      want: { resolved: 0, failed: 0 },
+      warnings: 1,
+      warnMatch: /contents: write/,
+    },
+    {
+      name: "secondary rate limit stops the run without blaming permissions",
+      spec: () => gqlErr("You have exceeded a secondary rate limit", { status: 403 }),
+      mutations: 1,
+      want: { resolved: 0, failed: 0 },
+      warnings: 1,
+      warnMatch: /rate limited/,
+    },
+    {
+      name: "a generic failure tallies and keeps going",
+      spec: (i) => (i === 0 ? gqlErr("Something odd happened") : null),
+      mutations: 3,
+      want: { resolved: 2, failed: 1 },
+      warnings: 1,
+      warnMatch: /failed to resolve thread A/,
+    },
+  ];
+
+  for (const c of cases) {
+    const gh = makeGithub({ threads, resolveErrorSpec: c.spec });
+    const core = mockCore();
+    const out = await withEnv({ OCR_SUCCESS_DELAY: "0" }, () =>
+      resolveOutdatedThreads(resolveArgs(gh, core))
+    );
+    assert.strictEqual(gh.resolveMutationCalls().length, c.mutations, c.name);
+    assert.strictEqual(out.resolved, c.want.resolved, `${c.name}: resolved`);
+    assert.strictEqual(out.failed, c.want.failed, `${c.name}: failed`);
+    assert.strictEqual(core.warnings.length, c.warnings, `${c.name}: warning count`);
+    assert.match(core.warnings[0], c.warnMatch, `${c.name}: warning text`);
+    assert.strictEqual(resolveLogLines(core).length, 1, `${c.name}: one summary line`);
+  }
+}
+
+async function testListBotReviewThreadsPaginatesAndDegrades() {
+  // Multi-page walk: the cursor from pageInfo drives the next request.
+  const paged = makeGithub({ threadPages: [[botThread({ id: "P1" })], [botThread({ id: "P2" })]] });
+  const core = mockCore();
+  const all = await listBotReviewThreads({
+    github: paged,
+    owner: "owner",
+    repo: "repo",
+    prNumber: 123,
+    log: (m) => core.info(m),
+    warn: (m) => core.warning(m),
+  });
+  assert.deepStrictEqual(all.map((t) => t.id), ["P1", "P2"]);
+
+  // A throwing query degrades to no threads instead of rejecting, and the
+  // orchestrator on top of it resolves nothing.
+  const broken = makeGithub({ threadsThrow: true });
+  const core2 = mockCore();
+  assert.deepStrictEqual(
+    await listBotReviewThreads({
+      github: broken,
+      owner: "owner",
+      repo: "repo",
+      prNumber: 123,
+      log: (m) => core2.info(m),
+      warn: (m) => core2.warning(m),
+    }),
+    []
+  );
+  const core3 = mockCore();
+  const broken2 = makeGithub({ threadsThrow: true });
+  const out = await resolveOutdatedThreads(resolveArgs(broken2, core3));
+  assert.strictEqual(out.resolved, 0);
+  assert.strictEqual(broken2.resolveMutationCalls().length, 0);
+  assert.strictEqual(resolveLogLines(core3).length, 1, "listing failure is a warning, not a second summary");
+}
+
+async function testResolveOutdatedThreadsDryRun() {
+  const gh = makeGithub({
+    threads: [botThread({ id: "A" }), botThread({ id: "B", isResolved: true }), botThread({ id: "C", isOutdated: false })],
+  });
+  const core = mockCore();
+  const out = await resolveOutdatedThreads(resolveArgs(gh, core, { dryRun: true }));
+  assert.strictEqual(gh.resolveMutationCalls().length, 0, "report mode never mutates");
+  assert.strictEqual(out.candidates, 1);
+  assert.strictEqual(out.attempted, 1);
+  assert.strictEqual(out.resolved, 0);
+  assert.deepStrictEqual(out.reasons, { resolve: 1, already_resolved: 1, not_outdated: 1 });
+  assert.match(resolveLogLines(core)[0], /mode=report .*skipped=already_resolved:1,not_outdated:1/);
+}
+
+// ---- Outdated thread resolution: wiring into a full run (#567) ----
+
+const TWO_FINDINGS = {
+  comments: [
+    { path: "src/a.js", content: "still broken", start_line: 5, end_line: 5 },
+    { path: "src/a.js", content: "new problem", start_line: 42, end_line: 42 },
+  ],
+};
+
+async function testResolveOutdatedOffByDefaultIssuesNoGraphql() {
+  const threads = [botThread({ id: "STALE", originalLine: 99 })];
+  const base = await run({ result: TWO_FINDINGS, githubOpts: { threads } });
+  assert.strictEqual(base.github.graphqlCalls.length, 0, "default off must not touch GraphQL at all");
+  assert.strictEqual(base.outputs.comments_resolved, "0");
+  assert.strictEqual(base.outputs.comments_resolved_preview, "0");
+
+  // Unrecognized values are off, not a crash and not an implicit 'true'. A
+  // non-empty one is also WARNED about: falling back to off is correct but
+  // invisible, and a workflow that says 'TRUE' would otherwise look configured
+  // while doing nothing. Empty/unset/'false' are the documented ways to be off,
+  // so they must stay silent.
+  for (const { value, warns } of [
+    { value: "yes", warns: true },
+    { value: "1", warns: true },
+    { value: "TRUE", warns: true },
+    { value: "false", warns: false },
+    { value: "", warns: false },
+    { value: undefined, warns: false },
+  ]) {
+    const r = await run({ result: TWO_FINDINGS, opts: { resolveOutdated: value }, githubOpts: { threads } });
+    assert.strictEqual(r.github.graphqlCalls.length, 0, `resolve_outdated=${value} must be off`);
+    assert.strictEqual(r.outputs.comments_resolved, "0", `resolve_outdated=${value}`);
+    const warned = r.core.warnings.filter((w) => w.includes("unrecognized resolve_outdated"));
+    assert.strictEqual(warned.length, warns ? 1 : 0, `resolve_outdated=${JSON.stringify(value)} warning`);
+  }
+
+  // Turning the feature on changes nothing about how findings are published.
+  const on = await run({ result: TWO_FINDINGS, opts: { resolveOutdated: "true" }, githubOpts: { threads } });
+  for (const key of ["comments_total", "comments_inline", "comments_skipped", "comments_routed", "comments_failed"]) {
+    assert.strictEqual(on.outputs[key], base.outputs[key], `${key} must be unaffected by resolve_outdated`);
+  }
+}
+
+async function testResolveOutdatedNeverRunsOnEmptyRuns() {
+  const threads = [botThread({ id: "STALE", originalLine: 99 })];
+
+  // Unparseable OCR output: the run exits before it knows anything about the
+  // findings, so it must not close a single thread.
+  const parseFail = await run({
+    result: "{ not json",
+    stderr: "boom",
+    opts: { resolveOutdated: "true" },
+    githubOpts: { threads },
+  });
+  assert.strictEqual(parseFail.github.graphqlCalls.length, 0, "parse-failure exit must never resolve");
+  assert.strictEqual(parseFail.outputs.comments_resolved, "0");
+  assert.strictEqual(parseFail.outputs.comments_resolved_preview, "0");
+
+  // A run that reported nothing is not evidence that old findings are gone:
+  // no mutation AND no thread listing.
+  const noFindings = await run({
+    result: { comments: [] },
+    opts: { resolveOutdated: "true" },
+    githubOpts: { threads },
+  });
+  assert.strictEqual(noFindings.github.graphqlCalls.length, 0, "zero-findings exit must never resolve");
+  assert.strictEqual(noFindings.outputs.comments_resolved, "0");
+}
+
+async function testResolveOutdatedResolvesAfterASuccessfulRun() {
+  // Two outdated bot threads. One sits on line 5 — where this run produced a
+  // finding that incremental dedupe then suppressed. A suppressed finding is
+  // still a live finding, so that thread must survive; only line 99 is stale.
+  const threads = [
+    botThread({ id: "COVERED", originalLine: 5 }),
+    botThread({ id: "STALE", originalLine: 99 }),
+  ];
+  const { github, outputs, core } = await run({
+    result: TWO_FINDINGS,
+    opts: { resolveOutdated: "true", incremental: true },
+    githubOpts: {
+      threads,
+      history: [{ path: "src/a.js", line: 5, side: "RIGHT", user: { login: BOT } }],
+    },
+  });
+
+  assert.strictEqual(outputs.comments_skipped, "1", "the line-5 finding was deduped away");
+  const mutations = github.resolveMutationCalls();
+  assert.strictEqual(mutations.length, 1, "only the uncovered thread is resolved");
+  assert.strictEqual(mutations[0].vars.threadId, "STALE");
+  assert.strictEqual(outputs.comments_resolved, "1");
+  assert.strictEqual(outputs.comments_resolved_preview, "0", "preview stays 0 outside report mode");
+  assert.match(resolveLogLines(core)[0], /mode=resolve .*resolved=1 failed=0 skipped=overlap:1/);
+}
+
+async function testResolveOutdatedReportModePreviewsOnly() {
+  const threads = [
+    botThread({ id: "STALE", originalLine: 99 }),
+    botThread({ id: "REPLIED", originalLine: 100, comments: { nodes: [{ author: { login: "octocat" } }] } }),
+  ];
+  const { github, outputs, core } = await run({
+    result: TWO_FINDINGS,
+    opts: { resolveOutdated: "report" },
+    githubOpts: { threads },
+  });
+  assert.strictEqual(github.resolveMutationCalls().length, 0, "report mode never mutates");
+  assert.strictEqual(outputs.comments_resolved, "0");
+  assert.strictEqual(outputs.comments_resolved_preview, "1");
+  assert.match(resolveLogLines(core)[0], /mode=report .*candidates=1 attempted=1 resolved=0 .*skipped=human_reply:1/);
+}
+
+async function testResolveOutdatedForbiddenDoesNotFailTheRun() {
+  const { github, outputs, core } = await run({
+    result: TWO_FINDINGS,
+    opts: { resolveOutdated: "true" },
+    githubOpts: {
+      threads: [botThread({ id: "STALE", originalLine: 99 })],
+      resolveErrorSpec: () =>
+        Object.assign(new Error("Resource not accessible by integration"), {
+          errors: [{ type: "FORBIDDEN" }],
+        }),
+    },
+  });
+  // The run completes normally: findings are published, the summary is
+  // finalized, and the permission problem is a warning, not a thrown error.
+  assert.strictEqual(github.resolveMutationCalls().length, 1);
+  assert.strictEqual(outputs.comments_resolved, "0");
+  assert.strictEqual(outputs.comments_inline, "2");
+  assert.strictEqual(github.updatedComments.length, 1, "summary still finalized");
+  assert.strictEqual(core.warnings.length, 1);
+  assert.match(core.warnings[0], /contents: write/);
+}
+
+// ---- Audit fixes on top of #567 ----
+
+const { getAuthenticatedLogin } = require(path.join(__dirname, "post-review-comments.js"));
+
+// A GraphQL author node. `Bot`-typed authors come back as a bare slug, which
+// graphqlAuthorLogin() suffixes; `User` authors come back verbatim.
+const author = (login, typename) => ({ author: { login, __typename: typename } });
+
+// Identity is the ROOT comment's author, not getAuthenticatedLogin().
+// Under every real Actions token that call 403s (botLogin === null), so the old
+// isBotComment() path recognized only `github-actions[bot]` and read OCR's own
+// root comment as a human reply on any App-token workflow.
+function testResolveIdentityComesFromTheRootAuthor() {
+  const cases = [
+    {
+      name: "GITHUB_TOKEN identity with no authenticated login",
+      botLogin: null,
+      comments: { totalCount: 2, nodes: [author("github-actions", "Bot"), author("github-actions", "Bot")] },
+      want: "resolve",
+    },
+    {
+      name: "a custom GitHub App's own threads are ours",
+      botLogin: null,
+      comments: { totalCount: 2, nodes: [author("my-app", "Bot"), author("my-app", "Bot")] },
+      want: "resolve",
+    },
+    {
+      name: "already-suffixed App login, no authenticated login",
+      botLogin: null,
+      comments: { totalCount: 1, nodes: [author("my-app[bot]")] },
+      want: "resolve",
+    },
+    {
+      name: "another bot replying to our thread is not us",
+      botLogin: null,
+      comments: { totalCount: 2, nodes: [author("my-app", "Bot"), author("github-actions", "Bot")] },
+      want: "human_reply",
+    },
+    {
+      name: "a human replying to an App thread",
+      botLogin: null,
+      comments: { totalCount: 2, nodes: [author("my-app", "Bot"), author("octocat", "User")] },
+      want: "human_reply",
+    },
+    // PAT: users.getAuthenticated works, so botLogin IS the human OCR posts as.
+    {
+      name: "PAT run, the token owner's own thread",
+      botLogin: "alice",
+      comments: { totalCount: 2, nodes: [author("alice", "User"), author("alice", "User")] },
+      want: "resolve",
+    },
+    {
+      name: "PAT run, a DIFFERENT human replied",
+      botLogin: "alice",
+      comments: { totalCount: 2, nodes: [author("alice", "User"), author("bob", "User")] },
+      want: "human_reply",
+    },
+    // Fail closed: a human-typed root author we cannot confirm as the token we
+    // authenticated as is a quote of our marker, not our comment.
+    {
+      name: "human-typed root author with no authenticated login to match",
+      botLogin: null,
+      comments: { totalCount: 1, nodes: [author("alice", "User")] },
+      want: "human_reply",
+    },
+    {
+      name: "unreadable root author",
+      botLogin: null,
+      comments: { totalCount: 2, nodes: [{ author: null }, author("my-app", "Bot")] },
+      want: "human_reply",
+    },
+  ];
+  for (const c of cases) {
+    const got = shouldResolveThread(botThread({ comments: c.comments }), {
+      botLogin: c.botLogin,
+      currentSpans: [],
+    });
+    assert.strictEqual(got, c.want, c.name);
+  }
+}
+
+// Ownership and identity are read off ONE node: the `root` alias, which
+// carries both the marker body and the author. Deriving identity from
+// comments.nodes[0] instead is right only while GraphQL hands back a thread's
+// comments oldest-first, so a view whose first visible comment is not the root
+// would hang our decision on someone else's login.
+function testResolveIdentityIsReadOffTheRootNode() {
+  const ours = (over) => ({ nodes: [Object.assign({ body: OURS }, over)] });
+  const cases = [
+    // No totalCount, so the partial-view guard cannot fire: the only comment we
+    // can see is NOT the root, and its author must not become our identity.
+    {
+      name: "visible comment is not the root",
+      root: ours(author("my-app", "Bot")),
+      comments: { nodes: [author("sibling-bot", "Bot")] },
+      want: "human_reply",
+    },
+    {
+      name: "root author matches every comment",
+      root: ours(author("my-app", "Bot")),
+      comments: { totalCount: 2, nodes: [author("my-app", "Bot"), author("my-app", "Bot")] },
+      want: "resolve",
+    },
+    // A response that omitted the author on the root alias still decides on
+    // nodes[0], exactly as before — the field is additive, not required.
+    {
+      name: "root alias without an author falls back to nodes[0]",
+      root: ours(),
+      comments: { totalCount: 1, nodes: [author("my-app", "Bot")] },
+      want: "resolve",
+    },
+  ];
+  for (const c of cases) {
+    const got = shouldResolveThread(botThread({ root: c.root, comments: c.comments }), {
+      botLogin: null,
+      currentSpans: [],
+    });
+    assert.strictEqual(got, c.want, c.name);
+  }
+}
+
+// The resolve veto is a plain span intersection. The incremental
+// same-comment test it used to borrow answers a different question — its
+// single-vs-multi-line rule and IoU threshold both report "not the same
+// comment" for spans that plainly share lines, which resolved threads on top of
+// live findings.
+function testResolveVetoUsesPlainIntersection() {
+  const cases = [
+    { name: "single-line thread inside a multi-line finding", thread: { originalStartLine: null, originalLine: 10 }, span: { start_line: 8, line: 12 }, want: "overlap" },
+    { name: "single-line finding inside a multi-line thread", thread: { originalStartLine: 10, originalLine: 20 }, span: { start_line: 15, line: 15 }, want: "overlap" },
+    { name: "finding strictly containing the thread", thread: { originalStartLine: 10, originalLine: 20 }, span: { start_line: 10, line: 30 }, want: "overlap" },
+    { name: "touching at a single line", thread: { originalStartLine: 10, originalLine: 20 }, span: { start_line: 20, line: 40 }, want: "overlap" },
+    { name: "disjoint spans still resolve", thread: { originalStartLine: 10, originalLine: 20 }, span: { start_line: 30, line: 40 }, want: "resolve" },
+    { name: "adjacent but not overlapping", thread: { originalStartLine: null, originalLine: 10 }, span: { start_line: 11, line: 12 }, want: "resolve" },
+  ];
+  for (const c of cases) {
+    const got = shouldResolveThread(botThread(c.thread), {
+      botLogin: null,
+      currentSpans: [Object.assign({ path: "src/a.js" }, c.span)],
+    });
+    assert.strictEqual(got, c.want, c.name);
+  }
+  // Incremental dedupe keeps its own, narrower semantics: this is the same
+  // single-vs-multi pair the veto now calls an overlap.
+  assert.strictEqual(
+    sameCommentSpan(lineSpan({ line: 10 }), lineSpan({ start_line: 8, line: 12 }), 0.6),
+    false,
+    "sameCommentSpan must be unchanged for the incremental caller"
+  );
+  assert.strictEqual(overlapsHistory({ path: "src/a.js", line: 10 }, [{ path: "src/a.js", start_line: 8, line: 12 }]), false);
+}
+
+// The identity lookup production actually gets: 403, hence null.
+async function testGetAuthenticatedLoginIs403UnderTheActionsToken() {
+  const gh = makeGithub({});
+  const core = mockCore();
+  assert.strictEqual(await getAuthenticatedLogin(gh, (m) => core.info(m)), null);
+  // ...and the whole pipeline still resolves without it.
+  const { github, outputs } = await run({
+    result: TWO_FINDINGS,
+    opts: { resolveOutdated: "true" },
+    githubOpts: { threads: [botThread({ id: "STALE", originalLine: 99 })] },
+  });
+  assert.strictEqual(github.resolveMutationCalls().length, 1, "resolution must not depend on getAuthenticated");
+  assert.strictEqual(outputs.comments_resolved, "1");
+}
+
+// An unplaceable finding is live with an unknown location, so it can never
+// veto a thread — which is indistinguishable from "that finding is gone". The
+// blind spot is only as wide as what we failed to learn: a finding with a path
+// but no line (the ordinary commentsWithoutLine shape, present on plenty of
+// healthy runs) blinds us to that path alone, while a finding with no path at
+// all could belong anywhere and so costs the run.
+async function testResolveVetoScopeMatchesWhatTheFindingLeftUnknown() {
+  const placed = (path, line) => ({ path, content: `finding on ${path}`, start_line: line, end_line: line });
+  const noLine = (path) => ({ path, content: "no line information at all", start_line: 0, end_line: 0 });
+  const noPath = { content: "which file?", start_line: 99, end_line: 99 };
+  // Two stale threads on two paths, neither overlapping any finding below, so
+  // every case starts from "both are resolvable" and loses only what it should.
+  const threads = [
+    botThread({ id: "A", path: "src/a.js", originalLine: 99 }),
+    botThread({ id: "B", path: "src/b.js", originalLine: 99 }),
+  ];
+
+  const cases = [
+    {
+      name: "control: every finding placed, both paths resolve",
+      comments: [placed("src/a.js", 5), placed("src/b.js", 5)],
+      resolved: ["A", "B"],
+      listed: true,
+      skipped: /skipped=none/,
+    },
+    {
+      name: "a no-line finding vetoes its own path and leaves the other alone",
+      comments: [placed("src/a.js", 5), noLine("src/a.js"), placed("src/b.js", 5)],
+      resolved: ["B"],
+      listed: true,
+      skipped: /skipped=unlocatable_path:1/,
+    },
+    {
+      name: "a no-line finding on a path with no threads changes nothing",
+      comments: [placed("src/a.js", 5), noLine("docs/untouched.md"), placed("src/b.js", 5)],
+      resolved: ["A", "B"],
+      listed: true,
+      skipped: /skipped=none/,
+    },
+    {
+      name: "a path-less finding still disables the whole run",
+      comments: [placed("src/a.js", 5), noPath],
+      resolved: [],
+      listed: false,
+      skipped: /skipped=pathless_finding:1/,
+    },
+    {
+      name: "both kinds at once: the run-wide veto wins, no listing either",
+      comments: [placed("src/a.js", 5), noLine("src/a.js"), noPath],
+      resolved: [],
+      listed: false,
+      skipped: /skipped=pathless_finding:1/,
+    },
+  ];
+
+  for (const c of cases) {
+    const { github, outputs, core } = await run({
+      result: { comments: c.comments },
+      opts: { resolveOutdated: "true" },
+      githubOpts: { threads },
+    });
+    const ids = github.resolveMutationCalls().map((call) => call.vars.threadId).sort();
+    assert.deepStrictEqual(ids, c.resolved, c.name);
+    assert.strictEqual(outputs.comments_resolved, String(c.resolved.length), c.name);
+    // A run-wide veto skips the listing query too: there is nothing a thread
+    // listing could tell us that we are allowed to act on.
+    assert.strictEqual(github.graphqlCalls.length > 0, c.listed, `${c.name} (thread listing)`);
+    assert.match(resolveLogLines(core)[0], c.skipped, c.name);
+  }
+}
+
+// The resolve veto compares a GraphQL `thread.path` against a path that
+// came out of the model's JSON with no normalization, so `./src/a.js`,
+// `/src/a.js` and `src\a.js` are all the file the thread is on. Compared as raw
+// strings every one of them reads as a different file, the veto answers "no
+// overlap", and the thread is resolved on top of a live finding.
+function testResolveVetoSurvivesPathSpellingDrift() {
+  const cases = [
+    { name: "identical paths", threadPath: "src/a.js", spanPath: "src/a.js", want: "overlap" },
+    { name: "leading ./ on the finding", threadPath: "src/a.js", spanPath: "./src/a.js", want: "overlap" },
+    { name: "leading / on the finding", threadPath: "src/a.js", spanPath: "/src/a.js", want: "overlap" },
+    { name: "backslash separators on the finding", threadPath: "src/a.js", spanPath: "src\\a.js", want: "overlap" },
+    { name: "drift on the thread side instead", threadPath: "./src/a.js", spanPath: "src/a.js", want: "overlap" },
+    // The dangerous direction. Normalization must never make two real files look
+    // like one: that would veto cleanup on threads nothing is covering, forever.
+    { name: "a different file in the same directory", threadPath: "src/a.js", spanPath: "src/b.js", want: "resolve" },
+    { name: "the same basename under a different directory", threadPath: "src/a.js", spanPath: "vendor/src/a.js", want: "resolve" },
+    { name: "one path is a prefix of the other", threadPath: "src/a.js", spanPath: "src/a.jsx", want: "resolve" },
+    // Case is deliberately NOT folded: on the platforms that matter these are
+    // two files, and folding them would invent an overlap.
+    { name: "case differences name two different files", threadPath: "src/a.js", spanPath: "src/A.js", want: "resolve" },
+  ];
+  for (const c of cases) {
+    const got = shouldResolveThread(botThread({ path: c.threadPath }), {
+      botLogin: null,
+      currentSpans: [{ path: c.spanPath, start_line: 10, line: 10 }],
+    });
+    assert.strictEqual(got, c.want, c.name);
+  }
+  // `result.comments` is unvalidated model JSON, so a path that is not a string
+  // reaches the comparison. It must not throw, and it must not match either.
+  assert.strictEqual(
+    shouldResolveThread(botThread(), {
+      botLogin: null,
+      currentSpans: [{ path: undefined, start_line: 10, line: 10 }],
+    }),
+    "resolve",
+    "a path-less span is neither a match nor a crash"
+  );
+}
+
+// The same drift at the OTHER path comparison the gate makes: the
+// unlocatable-path veto builds a Set out of finding paths and looks it up with a
+// thread path. Normalized at only one of the two sites, a no-line finding on
+// `./src/a.js` would fail to veto `src/a.js`'s threads, and the per-path veto
+// would be defeated by a leading dot.
+async function testUnlocatablePathVetoSurvivesPathSpellingDrift() {
+  const placed = (file, line) => ({ path: file, content: `finding on ${file}`, start_line: line, end_line: line });
+  const noLine = (file) => ({ path: file, content: "no line information at all", start_line: 0, end_line: 0 });
+  const threads = [
+    botThread({ id: "A", path: "src/a.js", originalLine: 99 }),
+    botThread({ id: "B", path: "src/b.js", originalLine: 99 }),
+  ];
+  const cases = [
+    { name: "control: the finding spells the path exactly as the thread does", noLinePath: "src/a.js", resolved: ["B"] },
+    { name: "leading ./ on the unplaceable finding", noLinePath: "./src/a.js", resolved: ["B"] },
+    { name: "leading / on the unplaceable finding", noLinePath: "/src/a.js", resolved: ["B"] },
+    { name: "backslash separators on the unplaceable finding", noLinePath: "src\\a.js", resolved: ["B"] },
+    { name: "a genuinely different path vetoes neither thread", noLinePath: "docs/x.md", resolved: ["A", "B"] },
+  ];
+  for (const c of cases) {
+    const { github, core } = await run({
+      result: { comments: [placed("src/a.js", 5), placed("src/b.js", 5), noLine(c.noLinePath)] },
+      opts: { resolveOutdated: "true" },
+      githubOpts: { threads },
+    });
+    const ids = github.resolveMutationCalls().map((call) => call.vars.threadId).sort();
+    assert.deepStrictEqual(ids, c.resolved, c.name);
+    assert.match(
+      resolveLogLines(core)[0],
+      c.resolved.length === 2 ? /skipped=none/ : /skipped=unlocatable_path:1/,
+      c.name
+    );
+  }
+}
+
+// Report mode previews the whole backlog and names every thread.
+async function testReportModePreviewsEveryCandidate() {
+  const threads = [];
+  for (let i = 0; i < 60; i++) threads.push(botThread({ id: `T${i}`, originalLine: 100 + i }));
+  threads.push(botThread({ id: "REPLIED", originalLine: 900, comments: { totalCount: 2, nodes: [author("github-actions", "Bot"), author("octocat", "User")] } }));
+
+  const { github, outputs, core } = await run({
+    result: TWO_FINDINGS,
+    opts: { resolveOutdated: "report" },
+    githubOpts: { threads },
+  });
+  assert.strictEqual(github.resolveMutationCalls().length, 0, "report mode never mutates");
+  assert.strictEqual(outputs.comments_resolved_preview, "60", "preview is the candidate count, not the 50 cap");
+
+  const lines = resolveLogLines(core);
+  assert.match(lines[0], /mode=report threads=61 candidates=60 attempted=50/, "summary stays the first line");
+  assert.strictEqual(lines.length, 62, "one summary line plus one line per thread");
+  assert.strictEqual(lines.filter((l) => / -> resolve$/.test(l)).length, 60);
+  assert.strictEqual(lines.filter((l) => /src\/a\.js:900 -> human_reply$/.test(l)).length, 1);
+  assert.strictEqual(
+    core.warnings.filter((w) => w.includes("[resolve-outdated]")).length,
+    0,
+    "per-thread detail must never burn GitHub's 10-annotation budget"
+  );
+}
+
+// A typo'd input must be visible on the runs that exit early — a clean PR
+// or an unparseable result — which is where most runs end on a healthy repo.
+async function testUnrecognizedResolveValueWarnsOnEarlyExits() {
+  const unrecognized = (r) => r.core.warnings.filter((w) => w.includes("unrecognized resolve_outdated")).length;
+
+  // "constructor" and "toString" are the reason the mode lookup is a Map: read
+  // off an object literal they would come back truthy non-strings, skip this
+  // warning, and pass the `!== "off"` gate into real mutations.
+  for (const value of ["yes", "constructor", "toString"]) {
+    const clean = await run({ result: { comments: [] }, opts: { resolveOutdated: value } });
+    assert.strictEqual(unrecognized(clean), 1, `${value}: zero-findings exit must still warn`);
+    assert.strictEqual(clean.github.graphqlCalls.length, 0, `${value} must resolve nothing`);
+    assert.strictEqual(clean.outputs.comments_resolved, "0", `${value} must resolve nothing`);
+
+    const broken = await run({ result: "{ not json", stderr: "boom", opts: { resolveOutdated: value } });
+    assert.strictEqual(unrecognized(broken), 1, `${value}: parse-failure exit must still warn`);
+    assert.strictEqual(broken.github.graphqlCalls.length, 0, `${value} must resolve nothing`);
+  }
+
+  for (const value of ["", "false", "report", "true", undefined]) {
+    const r = await run({ result: { comments: [] }, opts: { resolveOutdated: value } });
+    assert.strictEqual(unrecognized(r), 0, `resolve_outdated=${JSON.stringify(value)} must stay silent`);
+  }
+}
+
+// Truncated listings are announced: silence reads as "there was nothing
+// else", and the reason counts would be a partial census printed as a full one.
+async function testListBotReviewThreadsAnnouncesThePageCap() {
+  const pages = [];
+  for (let i = 0; i < 12; i++) pages.push([botThread({ id: `P${i}` })]);
+  const core = mockCore();
+  const all = await listBotReviewThreads({
+    github: makeGithub({ threadPages: pages }),
+    owner: "owner",
+    repo: "repo",
+    prNumber: 123,
+    log: (m) => core.info(m),
+    warn: (m) => core.warning(m),
+  });
+  assert.strictEqual(all.length, 10, "one thread per page, capped at MAX_PAGES");
+  assert.strictEqual(core.logs.filter((l) => /max page limit \(10\)/.test(l)).length, 1);
+  assert.strictEqual(core.warnings.length, 0, "the cap is a log line, not an annotation");
+
+  const core2 = mockCore();
+  await listBotReviewThreads({
+    github: makeGithub({ threadPages: [[botThread({ id: "A" })], [botThread({ id: "B" })]] }),
+    owner: "owner",
+    repo: "repo",
+    prNumber: 123,
+    log: (m) => core2.info(m),
+    warn: (m) => core2.warning(m),
+  });
+  assert.strictEqual(core2.logs.filter((l) => /max page limit/.test(l)).length, 0, "an uncapped walk says nothing");
+}
+
+// Cleanup is the last thing the run does and the least important: an
+// unexpected throw there must not cost the run its outputs.
+async function testResolveCleanupNeverBreaksOutputs() {
+  const boom = botThread({ id: "BOOM" });
+  Object.defineProperty(boom, "isOutdated", {
+    get() {
+      throw new TypeError("thread shape changed");
+    },
+  });
+  const { outputs, core } = await run({
+    result: TWO_FINDINGS,
+    opts: { resolveOutdated: "true" },
+    githubOpts: { threads: [boom] },
+  });
+  for (const key of [
+    "comments_total",
+    "comments_inline",
+    "comments_skipped",
+    "comments_routed",
+    "comments_failed",
+    "comments_resolved",
+    "comments_resolved_preview",
+  ]) {
+    assert.strictEqual(typeof outputs[key], "string", `${key} must still be set`);
+  }
+  assert.strictEqual(outputs.comments_total, "2");
+  assert.strictEqual(outputs.comments_inline, "2", "the review itself still posted");
+  assert.strictEqual(outputs.comments_resolved, "0");
+  assert.strictEqual(core.warnings.filter((w) => /cleanup failed unexpectedly/.test(w)).length, 1);
+}
+
+// Pacing rides on the documented OCR_SUCCESS_DELAY; there is no separate
+// undocumented resolve knob to discover.
+async function testResolvePacingUsesSuccessDelay() {
+  const threads = [botThread({ id: "A" }), botThread({ id: "B" }), botThread({ id: "C" })];
+  // Records the sleeps the loop asks for instead of timing them: a wall-clock
+  // lower bound flakes, because a timer can fire ~1ms early against Date.now().
+  const sleeps = async (delay) => {
+    const gh = makeGithub({ threads });
+    const core = mockCore();
+    const realSetTimeout = global.setTimeout;
+    const asked = [];
+    global.setTimeout = (callback, ms, ...args) => {
+      asked.push(ms);
+      return realSetTimeout(callback, 0, ...args);
+    };
+    try {
+      await withEnv({ OCR_SUCCESS_DELAY: delay }, () => resolveOutdatedThreads(resolveArgs(gh, core)));
+    } finally {
+      global.setTimeout = realSetTimeout;
+    }
+    assert.strictEqual(gh.resolveMutationCalls().length, 3);
+    return asked;
+  };
+  // Two sleeps between three mutations, none after the last.
+  assert.deepStrictEqual(await sleeps("40"), [40, 40], "OCR_SUCCESS_DELAY must pace the mutations");
+  assert.deepStrictEqual(await sleeps("0"), [], "zero delay must not sleep");
+}
+
+// getAuthenticatedLogin used to be called once per consumer, so a run with
+// incremental dedupe AND resolve_outdated on issued two identical requests, took
+// two 403s, and logged the failure twice — the second time from a path that has
+// nothing to do with incremental mode, which is why the prefix is neutral now.
+async function testAuthenticatedLoginIsResolvedOncePerRun() {
+  const authFailures = (core) => core.logs.filter((l) => l.includes("could not resolve authenticated user"));
+  const stale = () => [botThread({ id: "STALE", originalLine: 99 })];
+
+  const both = await run({
+    result: TWO_FINDINGS,
+    opts: { resolveOutdated: "true", incremental: true },
+    githubOpts: { threads: stale() },
+  });
+  assert.strictEqual(both.github.authCalls.length, 1, "one lookup serves both callers");
+  assert.deepStrictEqual(
+    authFailures(both.core),
+    ["[auth] could not resolve authenticated user: Resource not accessible by integration"],
+    "reported once, and not under the [incremental] prefix the resolve path never earned"
+  );
+  assert.strictEqual(both.outputs.comments_resolved, "1", "sharing the lookup changes no outcome");
+
+  // Resolve-only must still look it up. The call reads as dead because botLogin
+  // is null under every Actions token, but under a PAT it IS the login OCR posts
+  // as, and shouldResolveThread's rootLogin !== botLogin branch is the only
+  // thing telling our own PAT-posted comment from a human quoting our marker.
+  const resolveOnly = await run({
+    result: TWO_FINDINGS,
+    opts: { resolveOutdated: "true" },
+    githubOpts: { threads: stale() },
+  });
+  assert.strictEqual(resolveOnly.github.authCalls.length, 1, "the resolve path is a real caller, not dead code");
+
+  // Lazy, not eager: a run with neither consumer pays for no request at all.
+  const neither = await run({ result: TWO_FINDINGS, githubOpts: { threads: stale() } });
+  assert.strictEqual(neither.github.authCalls.length, 0, "no consumer, no request");
+}
+
+// The resolve gate stopped using the IoU threshold; action.yml's own
+// description of resolve_outdated is the last place that could still promise
+// it. Nothing else parses that text, so drift there is invisible until a user
+// tunes a knob the feature does not read.
+function testActionYmlDoesNotPromiseTheIoUThresholdToResolveOutdated() {
+  const yml = require("fs").readFileSync(path.join(__dirname, "..", "..", "action.yml"), "utf8");
+  const desc = yml.split("\n  resolve_outdated:\n")[1].split("\n    required:")[0];
+  assert.strictEqual(/is decided by incremental_overlap_threshold/.test(desc), false, desc);
+  assert.strictEqual(/shares ANY line/.test(desc), true, desc);
 }
 
 main().catch((err) => {

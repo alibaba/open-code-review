@@ -12,9 +12,11 @@ review.
 ## Launching
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
+ocr viewer                       # start and open the browser
+ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer --open=never          # just print the URL
+ocr viewer --open=always         # force it when auto declines (piped output, WSL)
 ```
 
 The default address is `localhost:5483`. The server holds the foreground
@@ -31,15 +33,49 @@ another terminal shows up the moment its JSONL file appears.
 > `OCR_VIEWER_ALLOWED_HOSTS` to a comma-separated list of allowed
 > hostnames (e.g. `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`).
 
-## Three pages
+## Opening the browser
 
-The viewer has three URLs:
+`ocr viewer` opens the URL in your default browser as soon as the server is
+listening. `--open` controls this and takes the same three values as the global
+`--color`:
+
+| Value | Behavior |
+|---|---|
+| `auto` (default) | Open only where it is likely to work — see below. |
+| `always` | Open unconditionally. Use this where `auto` declines but a browser is in fact reachable — piped output, or WSL with no display. |
+| `never` | Print the URL and do nothing else. |
+
+In `auto` mode the browser is **not** opened when:
+
+- stdout is not a terminal — output is piped or redirected;
+- `SSH_CONNECTION` is set **and** no display is forwarded — a remote host with
+  nothing to open into. `ssh -X` and `ssh -Y` set `DISPLAY`, so they are not
+  suppressed;
+- on Linux, `DISPLAY` and `WAYLAND_DISPLAY` are both empty — no display server.
+
+The reason is appended to the ready line, so a deliberately suppressed
+auto-open never looks like a broken one:
+
+```
+Viewer ready: http://localhost:5483 (browser not opened: no DISPLAY or WAYLAND_DISPLAY)
+```
+
+On Unix, `$BROWSER` is tried first: a colon-separated list of commands, each
+either containing a `%s` placeholder for the URL or receiving it as a trailing
+argument. Otherwise the platform default runs — `open` on macOS, `xdg-open` on
+Linux and the BSDs, `rundll32` on Windows. Failing to open a browser is a
+warning on stderr and never fatal; the server keeps serving either way.
+
+## Four pages
+
+The viewer has four URLs:
 
 | URL | What you see |
 |---|---|
 | `/` | List of all repositories that have sessions on disk. |
 | `/r/{repo}` | List of sessions for one repository, newest first. |
 | `/r/{repo}/{sessionID}` | Full detail for a single session. |
+| `/r/{repo}/compare` | Two sessions of one repository, compared. |
 
 `{repo}` is a path-encoded string (separators `/` and `\` replaced with
 `-`, colons replaced with `_` — the same encoding used to name the
@@ -48,13 +84,17 @@ on-disk directories). You don't usually type this — you click through.
 ### `/` — Repository list
 
 For each repo with at least one session you see the repo path, the
-total session count, and the most recent activity timestamp.
+total session count, the most recent activity timestamp, and a `Check`
+link to its sessions. The search box filters the list by repo path, and
+ten repositories fit on a page; the pager at the bottom right moves
+between pages.
 
 ### `/r/{repo}` — Session list for one repo
 
 For each session: ID (a UUID), branch name (when OCR was able to
 detect it), review mode, model, file count, duration, and a started-at
-timestamp.
+timestamp, and a `Check` link to the next-older session. Ten sessions
+fit on a page; the pager at the bottom right moves between pages.
 
 ### `/r/{repo}/{sessionID}` — Session detail
 
@@ -78,6 +118,40 @@ Each lane is a horizontal strip of **task cards** — one per LLM round
 trip. Cards are coloured by task type so you can see at a glance which
 phases dominated the run.
 
+### `/r/{repo}/compare` — Compare two sessions
+
+The same four buckets `ocr session compare` prints, rendered as a page.
+The session list's **Action** column carries a `Check` link: each row
+opens a comparison against the next-older session, so the newest row
+shows what changed since the run before it. The oldest row shows `-`,
+having no older run to compare against.
+
+Findings are sorted into four buckets:
+
+| Bucket | Meaning |
+|---|---|
+| New | Only the later run reported it. |
+| Persisting | Both runs reported it. |
+| Resolved | Only the earlier run reported it, and the later run did review that file. |
+| Not reviewed | Only the earlier run reported it, and the later run never looked at that file. Nobody re-checked it, so it is not resolved. |
+
+One thing the page does differently: the CLI omits a bucket that came
+out empty, the page always prints all four. `Resolved (0)` is an
+answer, and a section that silently vanished would read as a broken
+page.
+
+A run old enough to predate run manifests recorded no coverage, so
+every unmatched finding from it falls into Resolved rather than Not
+reviewed.
+
+To compare any other pair, edit the query string:
+`/r/{repo}/compare?before=<older session id>&after=<newer session id>`.
+Both ids must belong to the repository in the URL.
+
+If the two runs used different review modes, the page shows the same
+warning `ocr session compare` prints: they may not have looked at the
+same files, so the buckets are not directly comparable.
+
 ## What's in a task card
 
 Click a task card to expand. Each card has:
@@ -95,6 +169,39 @@ The full message list sent to the model and the in-scope tool
 definitions are **not** rendered in the card UI; if you need them,
 inspect the JSONL transcript directly (the `messages` field on each
 `llm_request` record).
+
+## Review comments
+
+Below the task lanes, the session page lists every finding the review
+produced as **comment cards**, grouped by file, showing the comment
+text, its existing/suggested code where present, and severity/category
+badges. Chips on the filter bar narrow the list by severity or category.
+
+### Marking findings as you fix them
+
+Each card carries three buttons — **Fixed** / **Ignored** /
+**Clear** — that set a per-comment mark:
+
+- Marks are mutually exclusive: setting one replaces another, and
+  **Clear** removes it. The current state shows as a colored chip on
+  the card.
+- **Hide marked** (on by default, remembered per browser) keeps marked
+  cards out of the way while you work through what is left. The toolbar
+  counts how many are marked and hidden; switch the toggle off any time
+  to see everything again.
+- **Clear all marks** resets the whole session at once.
+
+Marks are viewer state, not review data — the viewer itself stays
+read-only:
+
+- They are stored in your browser's `localStorage`, scoped to the
+  session page. Nothing is ever written next to the session JSONL, and
+  the viewer exposes no write API at all.
+- Marks belong to one session **and one browser**: another browser or
+  machine sees the session unmarked, and clearing the browser's storage
+  for the site starts it over.
+- Re-running a review of the same change produces a new session, which
+  starts unmarked.
 
 ## Use cases
 
@@ -151,8 +258,8 @@ reviewed together.
 Lines are append-only — a partial JSONL means a session was killed
 mid-run, and the viewer renders what it has.
 
-To free disk space, delete entire session files; the viewer regenerates
-its index on the next request.
+To free disk space, delete entire session files; the viewer
+regenerates its index on the next request.
 
 ## Privacy
 

@@ -43,7 +43,7 @@ OCR は**4 層の優先順位チェーン**でルールを解決します。各�
 3 つの独立したフィールドがあります:
 
 - `include`: 任意。組み込みのデフォルト除外パターン（テストファイルの除外。下記参照）を*バイパス*するための glob パターンです。ホワイトリストではありません。どの `include` パターンにも一致しないファイルも、依然として `unsupported_ext` と `default_path` のチェックを通過し、レビューされる可能性があります。
-- `exclude`: 任意。OCR がレビューしないファイルの glob パターンです。フィルタリングで最も優先されます。
+- `exclude`: 任意。OCR がレビューしないファイルの glob パターンです。ユーザー設定のフィルターの中で最も優先されます。
 - `rules`: `{path, rule}` エントリの配列で、**宣言順**に評価されます。そのファイルに最初に一致した `path` glob のエントリが、OCR がモデルに送る prompt を決定します。
 
 ### glob の機能
@@ -60,15 +60,19 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 ## ファイルがどのようにフィルタリングされるか
 
-フィルタリングは 5 段階のゲートアルゴリズムで、[`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go) にあります。各 diff について、OCR は順に次を問います:
+フィルタリングは 6 段階のゲートアルゴリズムで、[`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go) にあります。各 diff について、OCR は順に次を問います:
 
 1. **`binary`**: ファイルはバイナリか？ 除外します。
-2. **`user_exclude`**: パスがいずれかのユーザー `exclude` パターンに一致するか？ 除外します。
-3. **`user_include`**: ユーザーが `include` を定義している場合、パスは一致するか？ 一致するなら**即座に保持**します（下記の `unsupported_ext` と `default_path` のゲートをバイパス）。
-4. **`unsupported_ext`**: ファイルの拡張子は[ホワイトリスト](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)にあるか？ なければ除外します。
-5. **`default_path`**: パスがいずれかの組み込みテストファイル除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）に一致するか？ 除外します。
+2. **`secret_exclude`**: 古いパスまたは新しいパスが組み込みのシークレットパス保護の対象か？ 無条件に適用される glob パターンは [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json) にあります。対象なら除外します。この保護はユーザールールより先に適用され、`include` パターンでは上書きできません。
 
-5 つのゲートをすべて通過したファイルだけが LLM に送られます。`deleted` の理由（これはゲートではなく、`Preview()` の中で個別に計算されます）は、新しいパスが `/dev/null` であるファイルを示します。レビューすべき新しい内容がありません。`ocr review --preview` を使えば、token を消費せずにこのフィルタリング結果を出力できます。
+   環境ごとの `.env.*` パスはシークレットパスとして扱われますが、`.env.example`、`.env.sample`、`.env.template` には通常のレビュールールが適用されます。
+
+3. **`user_exclude`**: パスがいずれかのユーザー `exclude` パターンに一致するか？ 除外します。
+4. **`user_include`**: ユーザーが `include` を定義している場合、パスは一致するか？ 一致するなら**即座に保持**します（下記の `unsupported_ext` と `default_path` のゲートをバイパス）。
+5. **`unsupported_ext`**: ファイルの拡張子は[ホワイトリスト](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)にあるか？ なければ除外します。
+6. **`default_path`**: パスがいずれかの組み込みテストファイル除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）に一致するか？ 除外します。
+
+6 つのゲートをすべて通過したファイルだけが LLM に送られます。ただし diff だけで `max_tokens` の 80% を超える場合は例外で、`selectFiles` がゲートのあとにその上限を適用し、そのファイルを `too_large` として除外します。同じく、新しいパスが `/dev/null` であるファイルは `deleted` と記されます。レビューすべき新しい内容がありません。`ocr review --preview` を使えば、token を消費せずにこのフィルタリング結果を出力できます。
 
 ### デフォルトパスの除外
 
@@ -83,6 +87,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/test/**/*_test.py`
 - `**/tests/**/*_test.py`
 - `**/*_test.py`
+- `**/test_*.py`
 - `**/*_spec.rb`
 - `**/spec/**/*_spec.rb`
 - `**/*Test.java`
@@ -122,15 +127,16 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.java` | `java.md` |
 | `**/*.go` | `go.md`: Go ソースコード。 |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md`: FreeMarker テンプレート（SSTI / XSS / null 処理）。 |
+| `**/*.{hbs,mustache}` | `handlebars_mustache.md`: Handlebars / Mustache テンプレート。 |
 | `**/*.ets` | `arkts.md`: ArkTS / HarmonyOS。 |
 | `**/*.astro` | `astro.md`: Astro コンポーネントと islands。 |
-| `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,hpp}` | `cpp.md` |
+| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.{py,ipynb}` | `python.md`: Python ソースコード。 |
+| `**/*.{py,pyi,ipynb}` | `python.md`: Python ソースコード。 |
 | `**/*.{php,phtml}` | `php.md`: PHP ソースと PHP テンプレート。 |
 | `**/*.proto` | `protobuf.md`: Protocol Buffers のワイヤ互換性。 |
 | `**/*.po` | `po.md`: gettext 翻訳ソースカタログ。 |
@@ -145,9 +151,13 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。 |
 | `**/*.thrift` | `thrift.md`: Apache Thrift IDL のワイヤ互換性。 |
 | `**/*.capnp` | `capnp.md`: Cap'n Proto スキーマのワイヤ互換性。 |
+| `**/*.{v,sv,vh}` | `verilog.md`: Verilog および SystemVerilog の RTL。 |
+| `**/*.{vhd,vhdl}` | `vhdl.md`: VHDL の RTL。 |
 | `**/*.m` | `matlab.md`（または[コンテンツスニッフィング](#content-sniffing-for-m-files)により `objc.md`） |
+| `**/*.mm` | `objc.md`: Objective-C++ ソースコード。 |
 | `**/*.sol` | `solidity.md`: Solidity スマートコントラクト。 |
 | `**/*.vy` | `vyper.md`: Vyper スマートコントラクト。 |
+| `**/*.rego` | `rego.md`: Rego ポリシー（OPA）。 |
 | *(fallback)* | `default.md` |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。

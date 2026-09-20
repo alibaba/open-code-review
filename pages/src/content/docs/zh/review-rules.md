@@ -48,7 +48,7 @@ OCR 用一条**四层优先级链**解析规则。对每个文件路径，按序
 - `include`——可选。glob 模式，用于*绕过*内置的默认排除模式（测试文件排除——见
   下文）。它不是白名单：不匹配任何 `include` 模式的文件仍会经过
   `unsupported_ext` 和 `default_path` 检查，可能仍被评审。
-- `exclude`——可选。OCR 不予评审的文件 glob 模式。过滤中优先级最高。
+- `exclude`——可选。OCR 不予评审的文件 glob 模式。在用户配置的过滤规则中优先级最高。
 - `rules`——`{path, rule}` 条目数组，按**声明顺序**求值。第一个 `path` glob
   匹配该文件的条目，决定 OCR 发给模型的 prompt。
 
@@ -68,23 +68,29 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 ## 文件如何被过滤
 
-过滤是一个五重门算法，位于
-[`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go)。
+过滤是一个六重门算法，位于
+[`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go)。
 对每个 diff，OCR 依次问：
 
 1. **`binary`**——文件是二进制吗？排除。
-2. **`user_exclude`**——路径匹配任何用户 `exclude` 模式吗？排除。
-3. **`user_include`**——若用户定义了 `include`，路径匹配吗？若是，**立即保留**
+2. **`secret_exclude`**——旧路径或新路径是否命中内置敏感路径保护？无条件匹配的 glob 模式列在 [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json) 中。若是，排除。
+   此保护在用户规则之前执行，不能被 `include` 模式覆盖。
+
+   环境特定的 `.env.*` 路径会作为敏感路径处理，但 `.env.example`、`.env.sample` 和 `.env.template` 仍按普通审查规则处理。
+
+3. **`user_exclude`**——路径匹配任何用户 `exclude` 模式吗？排除。
+4. **`user_include`**——若用户定义了 `include`，路径匹配吗？若是，**立即保留**
    （绕过下面的 `unsupported_ext` 和 `default_path` 门）。
-4. **`unsupported_ext`**——文件扩展名在
+5. **`unsupported_ext`**——文件扩展名在
    [白名单](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)
    里吗？不在则排除。
-5. **`default_path`**——路径匹配某个内置测试文件排除模式
+6. **`default_path`**——路径匹配某个内置测试文件排除模式
    （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）吗？排除。
 
-通过全部五重门的文件才发给 LLM。`deleted` 原因（不是门——它在 `Preview()` 中
-单独计算）标记新路径为 `/dev/null` 的文件；没有新内容可评审。用
-`ocr review --preview` 可在不花 token 的情况下打印此过滤结果。
+通过全部六重门的文件才发给 LLM，除非仅 diff 本身就超过 `max_tokens` 的 80%：
+`selectFiles` 在各门之后施加该上限，并把文件排除为 `too_large`。它同样把新路径
+为 `/dev/null` 的文件标记为 `deleted`；没有新内容可评审。用 `ocr review
+--preview` 可在不花 token 的情况下打印此过滤结果。
 
 ### 默认路径排除
 
@@ -101,6 +107,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/test/**/*_test.py`
 - `**/tests/**/*_test.py`
 - `**/*_test.py`
+- `**/test_*.py`
 - `**/*_spec.rb`
 - `**/spec/**/*_spec.rb`
 - `**/*Test.java`
@@ -143,15 +150,16 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.java` | `java.md` |
 | `**/*.go` | `go.md`——Go 源代码。 |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。 |
+| `**/*.{hbs,mustache}` | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。 |
 | `**/*.ets` | `arkts.md`——ArkTS / HarmonyOS。 |
 | `**/*.astro` | `astro.md`——Astro 组件与 islands。 |
-| `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,hpp}` | `cpp.md` |
+| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.{py,ipynb}` | `python.md`——Python 源代码。 |
+| `**/*.{py,pyi,ipynb}` | `python.md`——Python 源代码。 |
 | `**/*.{php,phtml}` | `php.md`——PHP 源代码和 PHP 模板。 |
 | `**/*.proto` | `protobuf.md`——Protocol Buffers 线协议兼容性。 |
 | `**/*.po` | `po.md`——gettext 翻译源目录。 |
@@ -166,9 +174,13 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`——Jsonnet 配置模板与库。 |
 | `**/*.thrift` | `thrift.md`——Apache Thrift IDL 线协议兼容性。 |
 | `**/*.capnp` | `capnp.md`——Cap'n Proto schema 线协议兼容性。 |
+| `**/*.{v,sv,vh}` | `verilog.md`——Verilog 与 SystemVerilog RTL。 |
+| `**/*.{vhd,vhdl}` | `vhdl.md`——VHDL RTL。 |
 | `**/*.m` | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
+| `**/*.mm` | `objc.md`——Objective-C++ 源代码。 |
 | `**/*.sol` | `solidity.md`——Solidity 智能合约。 |
 | `**/*.vy` | `vyper.md`——Vyper 智能合约。 |
+| `**/*.rego` | `rego.md`——Rego 策略（OPA）。 |
 | *(fallback)* | `default.md` |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。

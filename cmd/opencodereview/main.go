@@ -15,8 +15,10 @@ import (
 
 func main() {
 	llm.AppVersion = Version
-	llm.InitEmbeddedLoader()
+	os.Exit(run())
+}
 
+func run() int {
 	ctx := context.Background()
 	if telemetry.Init(ctx) {
 		defer telemetry.ShutdownWithTimeout(ctx, 5*time.Second)
@@ -24,6 +26,7 @@ func main() {
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }

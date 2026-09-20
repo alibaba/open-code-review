@@ -40,6 +40,17 @@ func minimumArgs(n int) cobra.PositionalArgs {
 	}
 }
 
+// maximumArgs behaves like cobra.MaximumNArgs(n) but reports too many arguments
+// with the command's own usage information.
+func maximumArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) <= n {
+			return nil
+		}
+		return argCountError(cmd, fmt.Sprintf("accepts at most %d argument(s)", n))
+	}
+}
+
 // argCountError assembles the guidance for a wrong argument count. The count the
 // user supplied is deliberately not echoed back — it adds nothing they do not
 // already know from the line they just typed.
