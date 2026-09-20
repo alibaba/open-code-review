@@ -643,7 +643,7 @@ async function testCleanRunApproves() {
   assert.strictEqual(github.createReviewCalls.length, 1, "formal APPROVE review submitted");
   const sent = github.createReviewCalls[0];
   assert.strictEqual(sent.event, "APPROVE");
-  assert.strictEqual(sent.commit_id, "head-sha");
+  assert.strictEqual(sent.commit_id, DEFAULT_HEAD_SHA);
   assert.match(sent.body, /Review complete: 0 finding\(s\) across 2 selected item\(s\)\./);
   assert.strictEqual(github.issueComments.length, 0, "no summary comment posted");
   assert.strictEqual(github.updatedComments.length, 0, "no existing comment updated");
@@ -719,13 +719,47 @@ async function testAlreadyApprovedSkips() {
   const { github } = await run({
     result,
     githubOpts: {
-      reviews: [{ state: "APPROVED", commit_id: "head-sha", user: { login: "github-actions[bot]" } }],
+      reviews: [{ state: "APPROVED", commit_id: DEFAULT_HEAD_SHA, user: { login: "github-actions[bot]" } }],
     },
   });
 
   assert.strictEqual(github.createReviewCalls.length, 0, "already approved, skip");
   assert.strictEqual(github.issueComments.length, 0, "no summary comment posted");
   assert.strictEqual(github.updatedComments.length, 0, "no existing comment updated");
+}
+
+// A prior approval on the same commit by a HUMAN must not count as ours: the
+// bot still approves, since "no prior approvals by the bot" is what gates the
+// skip. Locks the identity boundary in the other direction.
+async function testHumanApprovalDoesNotSkip() {
+  const result = { comments: [], status: "complete", message: "All clear." };
+
+  const { github } = await run({
+    result,
+    githubOpts: {
+      reviews: [{ state: "APPROVED", commit_id: DEFAULT_HEAD_SHA, user: { login: "release-manager", type: "User" } }],
+    },
+  });
+
+  assert.strictEqual(github.createReviewCalls.length, 1, "a human approval never suppresses the bot's own");
+  assert.strictEqual(github.createReviewCalls[0].event, "APPROVE");
+}
+
+// A prior bot approval on a DIFFERENT commit must not suppress approval of the
+// current head: the skip is per-commit, so a stale approval cannot mask a new
+// one (the exact state "dismiss stale approvals" is meant to catch).
+async function testBotApprovalOnOtherCommitStillApproves() {
+  const result = { comments: [], status: "complete", message: "All clear." };
+
+  const { github } = await run({
+    result,
+    githubOpts: {
+      reviews: [{ state: "APPROVED", commit_id: "f".repeat(40), user: { login: "github-actions[bot]" } }],
+    },
+  });
+
+  assert.strictEqual(github.createReviewCalls.length, 1, "a stale approval on another commit is not a skip");
+  assert.strictEqual(github.createReviewCalls[0].commit_id, DEFAULT_HEAD_SHA);
 }
 
 async function testIncrementalSkipsOverlapping() {
@@ -2446,6 +2480,8 @@ async function main() {
   await testNoItemsSelectedCommentsOnly();
   await testPartialStatusCommentsOnly();
   await testAlreadyApprovedSkips();
+  await testHumanApprovalDoesNotSkip();
+  await testBotApprovalOnOtherCommitStillApproves();
   await testIncrementalSkipsOverlapping();
   await testIncrementalSkipsSameRunOverlapping();
   await testIncrementalSkipsSameRunIoUOverlapping();

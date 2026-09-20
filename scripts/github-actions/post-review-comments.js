@@ -1087,12 +1087,7 @@ async function submitCleanApproval({ github, context, owner, repo, prNumber, mes
     const reviews = await readAllPages("listReviews", (page, per_page) =>
       github.rest.pulls.listReviews({ owner, repo, pull_number: prNumber, per_page, page }), log);
     const alreadyApproved = reviews.some(
-      (r) =>
-        r.state === "APPROVED" &&
-        r.commit_id === commitSha &&
-        botLogin &&
-        r.user &&
-        r.user.login === botLogin
+      (r) => r.state === "APPROVED" && r.commit_id === commitSha && isBotComment(r, botLogin)
     );
     if (alreadyApproved) {
       log("[approve] this commit is already approved by the bot; skipping.");
