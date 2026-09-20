@@ -248,13 +248,13 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 		// still fall through to the default checks. If extension is valid and
 		// path is not default-excluded, they are still reviewed.
 		{
-			name: "non-included file with valid extension still reviewed (additive semantics)",
+			name: "non-included vendored dependency uses default exclusion",
 			diff: model.Diff{
 				NewPath: "vendor/baz.go",
 			},
-			// .go is a supported extension and vendor/baz.go does not hit
-			// IsExcludedPath, so it falls through to ExcludeNone.
-			expected: ExcludeNone,
+			// Include patterns remain additive, but default exclusions still apply
+			// to non-matching files.
+			expected: ExcludeDefaultPath,
 		},
 		{
 			name: "non-included file in non-excluded directory still reviewed",

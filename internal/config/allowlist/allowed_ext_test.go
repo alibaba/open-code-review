@@ -223,6 +223,17 @@ func TestIsExcludedPath(t *testing.T) {
 		{"ets test file", "entry/src/test/Component.test.ets", true},
 		{"ets non-test", "entry/src/main/Component.ets", false},
 
+		// Dependency directories and build output
+		{"node_modules deeply nested", "extensions/frontend/node_modules/@babel/core/lib/index.js", true},
+		{"pnpm lockfile nested", "apps/web/pnpm-lock.yaml", true},
+		{"minified css", "public/assets/app.min.css", true},
+		{"python virtual environment", "tools/.venv/lib/site-packages/httpx/client.py", true},
+		{"jvm target directory", "services/api/target/generated/Main.java", true},
+		{"swift package build", "ios/.build/checkouts/dependency/Sources/File.swift", true},
+		{"terraform metadata", "deploy/.terraform/providers/registry.terraform.io/provider.json", true},
+		{"distribution lookalike", "src/distribution/index.js", false},
+		{"target lookalike", "src/targeting/rules.ts", false},
+
 		// Julia test files
 		{"julia test file", "test/runtests.jl", true},
 		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
@@ -291,15 +302,13 @@ func TestIsExcludedPath(t *testing.T) {
 		{"capnp schema is reviewed", "schema/addressbook.capnp", false},
 		{"capnp in filename only", "src/capnp_helpers.go", false},
 
-		// Jsonnet vendored dependencies (written by `jb install`, wiped by `rm -rf vendor`).
-		// The pattern is extension-scoped: IsExcludedPath applies every pattern to every
-		// path, so a bare **/vendor/** would also drop vendored Go and PHP sources.
+		// Vendored dependencies (written by package managers and not reviewed as source).
 		{"jsonnet vendor root", "vendor/github.com/grafana/jsonnet-libs/ksonnet-util/kausal.libsonnet", true},
 		{"jsonnet vendor nested dir", "jsonnet/vendor/foo/main.jsonnet", true},
 		{"jsonnet non-vendor lib", "lib/config.libsonnet", false},
 		{"jsonnet non-vendor env", "environments/prod/main.jsonnet", false},
-		{"go under vendor still reviewed", "vendor/github.com/pkg/errors/errors.go", false},
-		{"php under vendor still reviewed", "vendor/monolog/monolog/src/Logger.php", false},
+		{"go vendor dependency", "vendor/github.com/pkg/errors/errors.go", true},
+		{"php vendor dependency", "vendor/monolog/monolog/src/Logger.php", true},
 		// Zig test files
 		{"zig test directory", "test/parser.zig", true},
 		{"zig nested test directory", "src/test/unit/parser.zig", true},
