@@ -114,6 +114,13 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 		}
 	}
 	if len(rawComments) == 0 {
+		// Some models (observed with MiniMax-M3) emit the tool argument object
+		// itself as a single comment, omitting the "comments" wrapper.
+		if _, has := args["content"].(string); has {
+			rawComments = []any{args}
+		}
+	}
+	if len(rawComments) == 0 {
 		raw, _ := json.Marshal(args)
 		return nil, nil, fmt.Sprintf("Error: 'comments' array is required. Got args: %s", string(raw))
 	}

@@ -36,12 +36,18 @@ func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (st
 	}
 
 	maxLines := fileReadMaxLines
-	if endLine > 0 {
-		requested := int(endLine) - int(startLine) + 1
-		if requested <= 0 {
-			return "", fmt.Errorf("invalid line range: start_line %d is greater than end_line %d", int(startLine), int(endLine))
+	if endLine > 0 && endLine < startLine {
+		// Reasoning models (observed with MiniMax-M3) sometimes send a line
+		// count where the schema wants an end line; a reversed range is never
+		// intended. Honor endLine as "lines to read from startLine" instead of
+		// failing the whole tool call.
+		if int(endLine) < maxLines {
+			maxLines = int(endLine)
 		}
-		if requested < maxLines {
+		endLine = startLine + float64(maxLines) - 1
+	}
+	if endLine > 0 {
+		if requested := int(endLine) - int(startLine) + 1; requested < maxLines {
 			maxLines = requested
 		}
 	}

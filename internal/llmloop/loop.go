@@ -893,6 +893,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 // unbounded. A raw string with no balanced value at all still fails with its
 // original error, unchanged from before.
 func parseToolArgs(raw string) (map[string]any, error) {
+	raw = stripThinkBlocks(raw)
 	var args map[string]any
 	err := json.Unmarshal([]byte(raw), &args)
 	if err != nil {
