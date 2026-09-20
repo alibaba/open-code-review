@@ -47,6 +47,9 @@ func TestIsAllowedExt(t *testing.T) {
 		{".MUSTACHE", true},
 		{".pug", true},
 		{".PUG", true},
+		{".twig", true},
+		{".TWIG", true},
+		{".Twig", true},
 		{".graphql", true},
 		{".GRAPHQL", true},
 		{".gql", true},
@@ -216,6 +219,15 @@ func TestIsExcludedPath(t *testing.T) {
 		{"pug fixture", "test/fixtures/page.pug", true},
 		{"pug template in tests directory", "tests/templates/page.pug", false},
 		{"pug template in test directory", "test/templates/page.pug", false},
+
+		// Twig has no extension-specific test-path convention;
+		// generic fixture and testdata directories remain excluded.
+		{"twig template", "templates/account/profile.html.twig", false},
+		{"twig template in tests directory", "tests/templates/page.twig", false},
+		{"twig template in test directory", "test/templates/page.twig", false},
+		{"twig fixture", "test/fixtures/page.html.twig", true},
+		{"twig uppercase fixture", "TEST/FIXTURES/PAGE.HTML.TWIG", true},
+		{"twig testdata", "templates/testdata/page.twig", true},
 
 		// HarmonyOS oh_modules and test files
 		{"oh_modules root", "oh_modules/some_lib/index.ets", true},
