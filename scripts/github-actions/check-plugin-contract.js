@@ -645,9 +645,18 @@ function walkTextFiles(repoRoot, rel = "", seen = new Set()) {
   return out;
 }
 
+function repoAbsPath(repoRoot, repoPath) {
+  const base = path.resolve(repoRoot);
+  const abs = path.join(base, repoPath);
+  if (abs !== base && !abs.startsWith(base + path.sep)) return null;
+  return abs;
+}
+
 function probeKind(repoRoot, repoPath) {
+  const abs = repoAbsPath(repoRoot, repoPath);
+  if (abs === null) return null;
   try {
-    const stat = fs.statSync(path.join(repoRoot, repoPath));
+    const stat = fs.statSync(abs);
     return stat.isDirectory() ? "dir" : "file";
   } catch (e) {
     return null;
@@ -967,6 +976,7 @@ module.exports = {
   resolveDeclaredPath,
   checkPluginDeclarations,
   pluginEntries,
+  repoAbsPath,
   listEntries,
   readFileOrNull,
   runLinksCheck,
