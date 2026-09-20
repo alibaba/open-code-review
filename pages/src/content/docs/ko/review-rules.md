@@ -78,10 +78,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 있는 여섯 관문 알고리즘입니다. diff마다 OCR이 다음을 묻습니다.
 
 1. **`binary`** — 바이너리 파일인가? 그렇다면 제외.
-2. **`secret_exclude`** — 이전 경로나 새 경로가 내장 시크릿 경로 보호 대상인가? 조건 없이 적용되는 glob 패턴은 [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)에 있습니다. 그렇다면 제외.
-   이 보호는 사용자 규칙보다 먼저 적용되며 `include` 패턴으로 우회할 수 없습니다.
-
-   환경별 `.env.*` 경로는 비밀 경로로 처리되지만, `.env.example`, `.env.sample`, `.env.template`에는 일반 리뷰 규칙이 적용됩니다.
+2. **`secret_exclude`** — 이전 경로나 새 경로가 내장 시크릿 경로 보호 대상인가? 그렇다면 제외. 이 보호는 사용자 규칙보다 먼저 적용되며 `include` 패턴으로 우회할 수 없습니다. 패턴 목록은 아래 [내장 시크릿 경로](#built-in-secret-paths)를 참고하세요.
 
 3. **`user_exclude`** — 경로가 사용자 `exclude` 패턴에 걸리는가? 그렇다면 제외.
 4. **`user_include`** — 사용자가 `include`를 정의했다면 경로가 거기 걸리는가?
@@ -99,15 +96,34 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 표시합니다. 리뷰할 새 내용이 없다는 뜻입니다. 토큰을 쓰지 않고 이 필터의 결과만
 보려면 `ocr review --preview`를 쓰세요.
 
+### 내장 시크릿 경로 {#built-in-secret-paths}
+
+내장 시크릿 경로는 리뷰되지 않습니다
+([`internal/config/allowlist/default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)
+참고):
+
+- `**/.ssh/**`
+- `**/id_rsa`
+- `**/id_dsa`
+- `**/id_ecdsa`
+- `**/id_ed25519`
+- `**/.netrc`
+- `**/_netrc`
+- `**/.npmrc`
+- `**/.pypirc`
+- `**/.dockercfg`
+
+또한 `.env`와 `.env.*` 변형도 시크릿 경로로 처리합니다(`.env.example`, `.env.sample`, `.env.template` 제외).
+
 ### 기본 경로 제외 목록 {#default-path-exclusions}
 
-내장 제외 목록은 테스트 파일 패턴에 걸립니다
+내장 제외 목록은
 ([`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json)
-참고).
+참고) 여러 언어의 테스트 파일과 테스트 fixture, 스냅샷, 생성 코드, vendored 의존성을 제외합니다.
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
-- `**/src/test/**/*.kt`
+- `**/src/test/**/*.{kt,kts}`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`
@@ -122,13 +138,52 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/*_test.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
+- `**/test/**/*.jl`
+- `**/test/**/*.hs`
+- `**/*Spec.hs`
+- `**/test/**/*.lhs`
+- `**/*Spec.lhs`
+- `**/tests/**/*.nim`
+- `**/tests/**/*.R`
+- `**/__snapshots__/**`
+- `**/*.snap`
+- `**/testdata/**`
+- `**/fixtures/**`
+- `**/.ipynb_checkpoints/**`
+- `**/*.generated.*`
+- `**/*.gen.go`
+- `**/*.pb.go`
+- `**/*.pb.cc`
+- `**/*.pb.h`
+- `**/*Test.swift`
+- `**/*Tests.swift`
+- `**/Tests/**/*.swift`
+- `**/tests/**/*.elm`
+- `**/vendor/**/*.{jsonnet,libsonnet}`
+- `**/test/**/*.zig`
+- `**/*_test.zig`
+- `**/kitex_gen/**/*.go`
+- `**/*.capnp.h`
+- `**/*.capnp.go`
+- `**/*.capnp.ts`
+- `**/*_capnp.rs`
+- `**/*_capnp.py`
+- `**/test/**/*.ml`
+- `**/tb_*.{v,sv,vhd,vhdl}`
+- `**/*_tb.{v,sv,vhd,vhdl}`
+- `lib/**/*.sol`
+- `**/*.t.sol`
+- `**/test/**/*.sol`
+- `**/tests/**/*.sol`
+- `**/test/**/*.vy`
+- `**/tests/**/*.vy`
 
 잡음이 많은 디렉터리(`vendor/`, `node_modules/`, `target/` 등)를 걸러내는 일은 더
 앞에서, 파일별 필터가 돌기 전
 [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)의
 diff 단계에서 일어납니다.
 
-이런 테스트 파일 패턴에 걸리는 파일을 **리뷰하고 싶다면** 사용자 `include` 목록에
+이런 패턴에 걸리는 파일을 **리뷰하고 싶다면** 사용자 `include` 목록에
 넣으세요. `include`가 기본 경로 관문을 덮어씁니다.
 
 ## 파일별 규칙 해석 {#rule-resolution-per-file}

@@ -73,10 +73,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 对每个 diff，OCR 依次问：
 
 1. **`binary`**——文件是二进制吗？排除。
-2. **`secret_exclude`**——旧路径或新路径是否命中内置敏感路径保护？无条件匹配的 glob 模式列在 [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json) 中。若是，排除。
-   此保护在用户规则之前执行，不能被 `include` 模式覆盖。
-
-   环境特定的 `.env.*` 路径会作为敏感路径处理，但 `.env.example`、`.env.sample` 和 `.env.template` 仍按普通审查规则处理。
+2. **`secret_exclude`**——旧路径或新路径是否命中内置敏感路径保护？若是，排除。此保护在用户规则之前执行，不能被 `include` 模式覆盖；模式清单见下文[内置敏感路径](#built-in-secret-paths)。
 
 3. **`user_exclude`**——路径匹配任何用户 `exclude` 模式吗？排除。
 4. **`user_include`**——若用户定义了 `include`，路径匹配吗？若是，**立即保留**
@@ -92,15 +89,33 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 为 `/dev/null` 的文件标记为 `deleted`；没有新内容可评审。用 `ocr review
 --preview` 可在不花 token 的情况下打印此过滤结果。
 
+### 内置敏感路径 {#built-in-secret-paths}
+
+内置的敏感路径不会被审查（见
+[`internal/config/allowlist/default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)）：
+
+- `**/.ssh/**`
+- `**/id_rsa`
+- `**/id_dsa`
+- `**/id_ecdsa`
+- `**/id_ed25519`
+- `**/.netrc`
+- `**/_netrc`
+- `**/.npmrc`
+- `**/.pypirc`
+- `**/.dockercfg`
+
+此外，`.env` 和任何 `.env.*` 变体（`.env.example`、`.env.sample`、`.env.template` 除外）也按敏感路径处理。
+
 ### 默认路径排除
 
 内置排除列表（见
 [`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json)）
-匹配测试文件模式：
+会排除各语言的测试文件，以及测试夹具、快照、生成代码与 vendored 依赖：
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
-- `**/src/test/**/*.kt`
+- `**/src/test/**/*.{kt,kts}`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`
@@ -115,12 +130,51 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/*_test.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
+- `**/test/**/*.jl`
+- `**/test/**/*.hs`
+- `**/*Spec.hs`
+- `**/test/**/*.lhs`
+- `**/*Spec.lhs`
+- `**/tests/**/*.nim`
+- `**/tests/**/*.R`
+- `**/__snapshots__/**`
+- `**/*.snap`
+- `**/testdata/**`
+- `**/fixtures/**`
+- `**/.ipynb_checkpoints/**`
+- `**/*.generated.*`
+- `**/*.gen.go`
+- `**/*.pb.go`
+- `**/*.pb.cc`
+- `**/*.pb.h`
+- `**/*Test.swift`
+- `**/*Tests.swift`
+- `**/Tests/**/*.swift`
+- `**/tests/**/*.elm`
+- `**/vendor/**/*.{jsonnet,libsonnet}`
+- `**/test/**/*.zig`
+- `**/*_test.zig`
+- `**/kitex_gen/**/*.go`
+- `**/*.capnp.h`
+- `**/*.capnp.go`
+- `**/*.capnp.ts`
+- `**/*_capnp.rs`
+- `**/*_capnp.py`
+- `**/test/**/*.ml`
+- `**/tb_*.{v,sv,vhd,vhdl}`
+- `**/*_tb.{v,sv,vhd,vhdl}`
+- `lib/**/*.sol`
+- `**/*.t.sol`
+- `**/test/**/*.sol`
+- `**/tests/**/*.sol`
+- `**/test/**/*.vy`
+- `**/tests/**/*.vy`
 
 噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，位于
 [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)
 的 diff 层，先于 per-file 过滤运行。
 
-要**评审**一个匹配这些测试文件模式的文件，把它加入用户 `include` 列表——那会
+要**评审**一个匹配这些模式的文件，把它加入用户 `include` 列表——那会
 覆盖 default-path 门。
 
 ## 每文件的规则解析

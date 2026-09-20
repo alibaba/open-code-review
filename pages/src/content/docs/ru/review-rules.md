@@ -84,10 +84,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 Для каждого diff OCR спрашивает:
 
 1. **`binary`** — Файл бинарный? Исключается.
-2. **`secret_exclude`** — Старый или новый путь подпадает под встроенную защиту секретных путей? Безусловные glob-шаблоны перечислены в [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json). Если да, путь исключается.
-   Эта защита применяется до пользовательских правил и не может быть переопределена шаблоном `include`.
-
-   Пути `.env.*` для отдельных окружений считаются секретными, кроме `.env.example`, `.env.sample` и `.env.template`, к которым применяются обычные правила ревью.
+2. **`secret_exclude`** — Старый или новый путь подпадает под встроенную защиту секретных путей? Если да, путь исключается. Эта защита применяется до пользовательских правил и не может быть переопределена шаблоном `include`; список шаблонов — в разделе [Встроенные секретные пути](#built-in-secret-paths).
 
 3. **`user_exclude`** — Путь совпадает с каким-либо пользовательским шаблоном
    `exclude`? Исключается.
@@ -108,15 +105,34 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 Используйте `ocr review --preview`, чтобы вывести результат этого фильтра, не
 тратя ни одного токена.
 
+### Встроенные секретные пути {#built-in-secret-paths}
+
+Встроенные секретные пути не попадают в ревью (см.
+[`internal/config/allowlist/default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)):
+
+- `**/.ssh/**`
+- `**/id_rsa`
+- `**/id_dsa`
+- `**/id_ecdsa`
+- `**/id_ed25519`
+- `**/.netrc`
+- `**/_netrc`
+- `**/.npmrc`
+- `**/.pypirc`
+- `**/.dockercfg`
+
+Кроме того, `.env` и любой вариант `.env.*` тоже считаются секретным путём; исключение — шаблоны `.env.example`, `.env.sample` и `.env.template`.
+
 ### Стандартные исключения путей
 
 Встроенный список исключений (см.
 [`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json))
-совпадает с шаблонами тестовых файлов:
+исключает тестовые файлы разных языков, а также фикстуры, снапшоты,
+сгенерированный код и vendored-зависимости:
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
-- `**/src/test/**/*.kt`
+- `**/src/test/**/*.{kt,kts}`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`
@@ -131,14 +147,53 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/*_test.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
+- `**/test/**/*.jl`
+- `**/test/**/*.hs`
+- `**/*Spec.hs`
+- `**/test/**/*.lhs`
+- `**/*Spec.lhs`
+- `**/tests/**/*.nim`
+- `**/tests/**/*.R`
+- `**/__snapshots__/**`
+- `**/*.snap`
+- `**/testdata/**`
+- `**/fixtures/**`
+- `**/.ipynb_checkpoints/**`
+- `**/*.generated.*`
+- `**/*.gen.go`
+- `**/*.pb.go`
+- `**/*.pb.cc`
+- `**/*.pb.h`
+- `**/*Test.swift`
+- `**/*Tests.swift`
+- `**/Tests/**/*.swift`
+- `**/tests/**/*.elm`
+- `**/vendor/**/*.{jsonnet,libsonnet}`
+- `**/test/**/*.zig`
+- `**/*_test.zig`
+- `**/kitex_gen/**/*.go`
+- `**/*.capnp.h`
+- `**/*.capnp.go`
+- `**/*.capnp.ts`
+- `**/*_capnp.rs`
+- `**/*_capnp.py`
+- `**/test/**/*.ml`
+- `**/tb_*.{v,sv,vhd,vhdl}`
+- `**/*_tb.{v,sv,vhd,vhdl}`
+- `lib/**/*.sol`
+- `**/*.t.sol`
+- `**/test/**/*.sol`
+- `**/tests/**/*.sol`
+- `**/test/**/*.vy`
+- `**/tests/**/*.vy`
 
 Фильтрация шумных каталогов (`vendor/`, `node_modules/`, `target/`, …)
 происходит раньше, на уровне diff в
 [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go),
 до запуска попереходного файлового фильтра.
 
-Чтобы **отревьюить** файл, совпадающий с одним из этих шаблонов тестовых
-файлов, добавьте его в пользовательский список `include` — это переопределяет
+Чтобы **отревьюить** файл, совпадающий с одним из этих шаблонов,
+добавьте его в пользовательский список `include` — это переопределяет
 этап default_path.
 
 ## Разрешение правила для файла

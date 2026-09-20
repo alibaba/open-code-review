@@ -82,12 +82,10 @@ The filter is a six-gate algorithm in
 For each diff, OCR asks:
 
 1. **`binary`** — Is the file binary? Excluded.
-2. **`secret_exclude`** — Does either path match a
-   built-in secret-path protection? The unconditional glob patterns are listed in [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json).
-   Excluded. This protection runs before user rules and cannot be overridden
-   by an `include` pattern.
-
-   Per-environment `.env.*` paths are treated as secret paths, except `.env.example`, `.env.sample`, and `.env.template`, which remain subject to the normal review rules.
+2. **`secret_exclude`** — Does either path match a built-in secret-path
+   protection? Excluded. This protection runs before user rules and cannot
+   be overridden by an `include` pattern; the patterns are listed under
+   [Built-in secret paths](#built-in-secret-paths) below.
 
 3. **`user_exclude`** — Does the path match any user `exclude` pattern?
    Excluded.
@@ -108,15 +106,34 @@ file whose new path is `/dev/null` as `deleted`; there's no new content
 to review. Use `ocr review --preview` to print the result of this filter
 without spending a token.
 
+### Built-in secret paths
+
+The built-in secret paths are not reviewed (see
+[`internal/config/allowlist/default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)):
+
+- `**/.ssh/**`
+- `**/id_rsa`
+- `**/id_dsa`
+- `**/id_ecdsa`
+- `**/id_ed25519`
+- `**/.netrc`
+- `**/_netrc`
+- `**/.npmrc`
+- `**/.pypirc`
+- `**/.dockercfg`
+
+`.env` and any `.env.*` variant is likewise treated as a secret path, except the templates `.env.example`, `.env.sample`, and `.env.template`.
+
 ### Default path exclusions
 
 The built-in exclude list (see
 [`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json))
-matches test-file patterns:
+excludes test files across languages, plus test fixtures, snapshots,
+generated code, and vendored dependencies:
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
-- `**/src/test/**/*.kt`
+- `**/src/test/**/*.{kt,kts}`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`
@@ -131,13 +148,52 @@ matches test-file patterns:
 - `**/*_test.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
+- `**/test/**/*.jl`
+- `**/test/**/*.hs`
+- `**/*Spec.hs`
+- `**/test/**/*.lhs`
+- `**/*Spec.lhs`
+- `**/tests/**/*.nim`
+- `**/tests/**/*.R`
+- `**/__snapshots__/**`
+- `**/*.snap`
+- `**/testdata/**`
+- `**/fixtures/**`
+- `**/.ipynb_checkpoints/**`
+- `**/*.generated.*`
+- `**/*.gen.go`
+- `**/*.pb.go`
+- `**/*.pb.cc`
+- `**/*.pb.h`
+- `**/*Test.swift`
+- `**/*Tests.swift`
+- `**/Tests/**/*.swift`
+- `**/tests/**/*.elm`
+- `**/vendor/**/*.{jsonnet,libsonnet}`
+- `**/test/**/*.zig`
+- `**/*_test.zig`
+- `**/kitex_gen/**/*.go`
+- `**/*.capnp.h`
+- `**/*.capnp.go`
+- `**/*.capnp.ts`
+- `**/*_capnp.rs`
+- `**/*_capnp.py`
+- `**/test/**/*.ml`
+- `**/tb_*.{v,sv,vhd,vhdl}`
+- `**/*_tb.{v,sv,vhd,vhdl}`
+- `lib/**/*.sol`
+- `**/*.t.sol`
+- `**/test/**/*.sol`
+- `**/tests/**/*.sol`
+- `**/test/**/*.vy`
+- `**/tests/**/*.vy`
 
 Noisy-directory filtering (`vendor/`, `node_modules/`, `target/`, …)
 happens earlier, at the diff level in
 [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go),
 before the per-file filter runs.
 
-To **review** a file that matches one of these test-file patterns, add
+To **review** a file that matches one of these patterns, add
 it to the user `include` list — that overrides the default-path gate.
 
 ## Rule resolution per file
