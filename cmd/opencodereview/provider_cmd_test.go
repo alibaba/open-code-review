@@ -14,14 +14,14 @@ import (
 
 // isolateLLMConnectionTest keeps the "Testing connection..." step that ends
 // every apply*Config call away from the developer's own machine. Without it
-// resolveConfigPath() falls back to ~/.opencodereview/config.json and `go test`
-// resolves a real endpoint: with providers.<name>.api_key_cmd configured that
-// runs the credential helper and blocks on a pinentry/Touch ID prompt for up to
-// the 60s credential timeout, and with a static key it fires a real request.
+// `go test` could resolve a real endpoint: with providers.<name>.api_key_cmd
+// configured that runs the credential helper and blocks on a pinentry/Touch ID
+// prompt for up to the 60s credential timeout, and with a static key it fires a
+// real request.
 //
-// The path points at a file that does not exist, so resolution fails fast the
-// way it already does on a machine with no config. HOME is redirected into an
-// empty temp dir as well, so the shell-rc strategy has nothing to read either.
+// The connection-test seam is stubbed because provider tests deliberately
+// exercise the saved configuration path without exercising network I/O. HOME is
+// still redirected so any other credential lookup has nothing to read either.
 func isolateLLMConnectionTest(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
@@ -37,6 +37,9 @@ func isolateLLMConnectionTest(t *testing.T) {
 	} {
 		t.Setenv(k, "")
 	}
+	old := runLLMTestPath
+	runLLMTestPath = func(string) error { return nil }
+	t.Cleanup(func() { runLLMTestPath = old })
 }
 
 func TestMaskKey(t *testing.T) {
@@ -306,6 +309,27 @@ func TestApplyOfficialProviderConfig_APIKeyCmdSatisfiesRequirement(t *testing.T)
 	}
 	if got := diskCfg.Providers["deepseek"].APIKeyCmd; got != "op read op://dev/deepseek/api-key" {
 		t.Errorf("persisted api_key_cmd = %q, want it preserved", got)
+	}
+}
+
+func TestApplyOfficialProviderConfigTestsSavedConfigPath(t *testing.T) {
+	isolateLLMConnectionTest(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-from-env")
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	var testedPath string
+	runLLMTestPath = func(path string) error {
+		testedPath = path
+		return nil
+	}
+
+	if err := applyOfficialProviderConfig(configPath, &Config{}, providerTUIResult{
+		provider: "deepseek",
+		model:    "deepseek-v4-flash",
+	}); err != nil {
+		t.Fatalf("applyOfficialProviderConfig: %v", err)
+	}
+	if testedPath != configPath {
+		t.Errorf("connection test path = %q, want saved config path %q", testedPath, configPath)
 	}
 }
 

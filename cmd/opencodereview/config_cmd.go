@@ -98,8 +98,9 @@ func defaultConfigPath() (string, error) {
 }
 
 // resolveConfigPath returns OCR_CONFIG_PATH when set, otherwise the default user config path.
-// Intentionally used only by read-only commands (e.g. ocr llm test). Write paths such as
-// config set and review keep defaultConfigPath() so a leaked OCR_CONFIG_PATH cannot redirect writes.
+// Commands that read app configuration use it consistently. Config writers such as
+// config set and the provider wizards keep defaultConfigPath() so OCR_CONFIG_PATH
+// cannot redirect writes.
 func resolveConfigPath() (string, error) {
 	if p := strings.TrimSpace(os.Getenv("OCR_CONFIG_PATH")); p != "" {
 		return p, nil

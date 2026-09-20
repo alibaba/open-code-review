@@ -172,7 +172,7 @@ func TestRunPreviewAppliesResolvedMaxTokens(t *testing.T) {
 
 // TestPreviewMaxTokensMatchesRun pins the one input preview and the run do not
 // share: the per-file token ceiling. Both resolve it through the same
-// resolveMaxTokens over the same default config path — the run at
+// resolveMaxTokens over the same effective config path — the run at
 // review_cmd.go's resolveMaxTokens call, preview through previewMaxTokens, which
 // builds no LLM runtime. Comparing previewMaxTokens against a direct
 // resolveMaxTokens over that config reproduces the run's exact resolution
@@ -203,11 +203,11 @@ func TestPreviewMaxTokensMatchesRun(t *testing.T) {
 			}
 
 			// What the run applies: review_cmd.go resolves max_tokens with exactly
-			// this resolveMaxTokens call over the app config at the default path,
-			// then hands the result to agent.New.
-			cfgPath, err := defaultConfigPath()
+			// this resolveMaxTokens call over the app config at the effective config
+			// path, then hands the result to agent.New.
+			cfgPath, err := resolveConfigPath()
 			if err != nil {
-				t.Fatalf("defaultConfigPath: %v", err)
+				t.Fatalf("resolveConfigPath: %v", err)
 			}
 			appCfg, err := LoadAppConfig(cfgPath)
 			if err != nil {
@@ -244,6 +244,25 @@ func writeAppConfigMaxTokens(t *testing.T, home string, maxTokens int) {
 	body := fmt.Sprintf(`{"max_tokens":%d}`, maxTokens)
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(body), 0o600); err != nil {
 		t.Fatalf("write app config: %v", err)
+	}
+}
+
+func TestPreviewMaxTokensUsesOCRConfigPath(t *testing.T) {
+	home := freshOCRHome(t)
+	writeAppConfigMaxTokens(t, home, 1000)
+
+	overridePath := filepath.Join(t.TempDir(), "override.json")
+	if err := os.WriteFile(overridePath, []byte(`{"max_tokens":2000}`), 0o600); err != nil {
+		t.Fatalf("write override config: %v", err)
+	}
+	t.Setenv("OCR_CONFIG_PATH", overridePath)
+
+	got, err := previewMaxTokens(500, 0)
+	if err != nil {
+		t.Fatalf("previewMaxTokens: %v", err)
+	}
+	if got != 2000 {
+		t.Errorf("previewMaxTokens = %d, want 2000 from OCR_CONFIG_PATH", got)
 	}
 }
 

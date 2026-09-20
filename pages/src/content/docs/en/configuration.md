@@ -11,6 +11,21 @@ to edit it:
 - **Command line** — `ocr config set <key> <value>`, ideal for scripts and CI.
 - **Manual edit (not recommended)** — the JSON file directly (it gets reformatted on the next `ocr config set` write).
 
+### Using another config file
+
+Review and connectivity commands use `~/.opencodereview/config.json` by
+default. Set `OCR_CONFIG_PATH` to use another file for `ocr review`, `ocr scan`,
+`ocr llm test`, and review previews:
+
+```bash
+OCR_CONFIG_PATH=/path/to/config.json ocr llm test
+OCR_CONFIG_PATH=/path/to/config.json ocr review --preview
+```
+
+`ocr config set` and the interactive provider wizards continue to write the
+default file. After a wizard saves a provider, its connection test checks that
+newly saved file directly, even when `OCR_CONFIG_PATH` is set.
+
 ## Configuring a model
 
 ### Recommended: interactive setup

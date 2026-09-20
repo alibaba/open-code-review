@@ -55,7 +55,15 @@ func runLLMTest() error {
 	if err != nil {
 		return err
 	}
+	return runLLMTestPath(cfgPath)
+}
 
+// runLLMTestPath verifies the endpoint described by cfgPath. Callers that have
+// just written a config file pass that exact path so an unrelated
+// OCR_CONFIG_PATH read override cannot make the wizard test another config.
+var runLLMTestPath = runLLMTestWithConfigPath
+
+func runLLMTestWithConfigPath(cfgPath string) error {
 	appCfg, err := LoadAppConfig(cfgPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)

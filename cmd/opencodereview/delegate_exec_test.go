@@ -98,6 +98,7 @@ func freshOCRHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	setTestHome(t, home)
+	t.Setenv("OCR_CONFIG_PATH", "")
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	return home

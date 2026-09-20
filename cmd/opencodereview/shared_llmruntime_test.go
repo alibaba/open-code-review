@@ -64,6 +64,39 @@ func TestLoadLLMRuntime_BadToolConfig(t *testing.T) {
 	}
 }
 
+// TestLoadLLMRuntime_UsesOCRConfigPath pins that review and scan resolve both
+// the app settings and the endpoint from the same OCR_CONFIG_PATH override.
+func TestLoadLLMRuntime_UsesOCRConfigPath(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	configPath := filepath.Join(t.TempDir(), "override.json")
+	if err := saveConfig(configPath, &Config{Llm: LlmConfig{
+		URL:       "https://override.example.test/v1",
+		AuthToken: "override-token",
+		Model:     "override-model",
+		Protocol:  "openai",
+	}}); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+	t.Setenv("OCR_CONFIG_PATH", configPath)
+	for _, key := range []string{
+		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL",
+		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
+	} {
+		t.Setenv(key, "")
+	}
+
+	rt, err := loadLLMRuntime(loadTestTemplate(t), "", llm.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("loadLLMRuntime: %v", err)
+	}
+	if rt.Model != "override-model" {
+		t.Errorf("model = %q, want override-model", rt.Model)
+	}
+	if rt.RuntimeConfig.EndpointHost != "override.example.test" {
+		t.Errorf("endpoint host = %q, want override.example.test", rt.RuntimeConfig.EndpointHost)
+	}
+}
+
 // TestLoadLLMRuntime_UnresolvableEndpoint covers the ResolveEndpointWithOptions
 // failure branch: no config file and no env vars means no endpoint resolves.
 func TestLoadLLMRuntime_UnresolvableEndpoint(t *testing.T) {

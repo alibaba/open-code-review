@@ -4,6 +4,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -54,6 +56,26 @@ func TestRunConfigSetPersists(t *testing.T) {
 			t.Error("expected error for unknown config key")
 		}
 	})
+}
+
+// TestRunConfigSetIgnoresOCRConfigPath pins that OCR_CONFIG_PATH only changes
+// config reads; config set continues writing the canonical user config file.
+func TestRunConfigSetIgnoresOCRConfigPath(t *testing.T) {
+	home := freshOCRHome(t)
+	overridePath := filepath.Join(t.TempDir(), "override.json")
+	t.Setenv("OCR_CONFIG_PATH", overridePath)
+
+	if err := runConfigSet("language", "en"); err != nil {
+		t.Fatalf("runConfigSet: %v", err)
+	}
+
+	defaultPath := filepath.Join(home, ".opencodereview", "config.json")
+	if _, err := os.Stat(defaultPath); err != nil {
+		t.Fatalf("stat default config: %v", err)
+	}
+	if _, err := os.Stat(overridePath); !os.IsNotExist(err) {
+		t.Fatalf("override config exists or stat failed: %v", err)
+	}
 }
 
 // TestRunConfigUnsetPaths drives runConfigUnset across its dispatch branches.
