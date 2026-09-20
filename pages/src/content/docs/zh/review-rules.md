@@ -45,7 +45,7 @@ OCR 用一条**四层优先级链**解析规则。对每个文件路径，按序
 
 三个独立字段：
 
-- `include`——可选。glob 模式，用于*绕过*内置的默认排除模式（测试文件排除——见
+- `include`——可选。glob 模式，用于*绕过*内置的默认排除模式（测试文件与依赖目录排除——见
   下文）。它不是白名单：不匹配任何 `include` 模式的文件仍会经过
   `unsupported_ext` 和 `default_path` 检查，可能仍被评审。
 - `exclude`——可选。OCR 不予评审的文件 glob 模式。在用户配置的过滤规则中优先级最高。
@@ -84,8 +84,9 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 5. **`unsupported_ext`**——文件扩展名在
    [白名单](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)
    里吗？不在则排除。
-6. **`default_path`**——路径匹配某个内置测试文件排除模式
-   （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）吗？排除。
+6. **`default_path`**——路径匹配某个内置默认排除模式——测试文件
+   （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`……）或依赖/构建产物目录
+   （`**/node_modules/**`、`**/vendor/**`……）吗？排除。
 
 通过全部六重门的文件才发给 LLM，除非仅 diff 本身就超过 `max_tokens` 的 80%：
 `selectFiles` 在各门之后施加该上限，并把文件排除为 `too_large`。它同样把新路径
@@ -96,31 +97,18 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 内置排除列表（见
 [`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json)）
-匹配测试文件模式：
+匹配两类路径——JSON 文件是唯一权威来源：
 
-- `**/*_test.go`
-- `**/src/test/java/**/*.java`
-- `**/src/test/**/*.kt`
-- `**/*.test.{js,jsx,ts,tsx}`
-- `**/*.spec.{js,jsx,ts,tsx}`
-- `**/__tests__/**`
-- `**/test/**/*_test.py`
-- `**/tests/**/*_test.py`
-- `**/*_test.py`
-- `**/test_*.py`
-- `**/*_spec.rb`
-- `**/spec/**/*_spec.rb`
-- `**/*Test.java`
-- `**/*Tests.java`
-- `**/*_test.rs`
-- `**/oh_modules/**`
-- `**/*.test.ets`
+- 测试文件，例如 `**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`、`**/test_*.py`
+- 依赖目录与构建产物，例如 `**/node_modules/**`、`**/vendor/**`、`**/target/**`、`**/__pycache__/**`、`**/package-lock.json`、`**/*.min.{js,css}`
 
-噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，位于
+噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）也发生在更早的阶段，位于
 [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)
-的 diff 层，先于 per-file 过滤运行。
+的 diff 层，但该黑名单只匹配仓库根目录。嵌套在任意深度的这类目录由
+default-path 门兜底：一旦包目录下的 `node_modules/` 被提交进了仓库，
+`.gitignore` 就不再把它挡在 diff 之外，这些模式就是兜底防线。
 
-要**评审**一个匹配这些测试文件模式的文件，把它加入用户 `include` 列表——那会
+要**评审**一个匹配这些默认模式的文件，把它加入用户 `include` 列表——那会
 覆盖 default-path 门。
 
 ## 每文件的规则解析

@@ -42,7 +42,7 @@ OCR は**4 層の優先順位チェーン**でルールを解決します。各�
 
 3 つの独立したフィールドがあります:
 
-- `include`: 任意。組み込みのデフォルト除外パターン（テストファイルの除外。下記参照）を*バイパス*するための glob パターンです。ホワイトリストではありません。どの `include` パターンにも一致しないファイルも、依然として `unsupported_ext` と `default_path` のチェックを通過し、レビューされる可能性があります。
+- `include`: 任意。組み込みのデフォルト除外パターン（テストファイルと依存ディレクトリの除外。下記参照）を*バイパス*するための glob パターンです。ホワイトリストではありません。どの `include` パターンにも一致しないファイルも、依然として `unsupported_ext` と `default_path` のチェックを通過し、レビューされる可能性があります。
 - `exclude`: 任意。OCR がレビューしないファイルの glob パターンです。ユーザー設定のフィルターの中で最も優先されます。
 - `rules`: `{path, rule}` エントリの配列で、**宣言順**に評価されます。そのファイルに最初に一致した `path` glob のエントリが、OCR がモデルに送る prompt を決定します。
 
@@ -70,35 +70,20 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 3. **`user_exclude`**: パスがいずれかのユーザー `exclude` パターンに一致するか？ 除外します。
 4. **`user_include`**: ユーザーが `include` を定義している場合、パスは一致するか？ 一致するなら**即座に保持**します（下記の `unsupported_ext` と `default_path` のゲートをバイパス）。
 5. **`unsupported_ext`**: ファイルの拡張子は[ホワイトリスト](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)にあるか？ なければ除外します。
-6. **`default_path`**: パスがいずれかの組み込みテストファイル除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）に一致するか？ 除外します。
+6. **`default_path`**: パスがいずれかの組み込みデフォルト除外パターン——テストファイル（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`……）または依存・ビルド出力ディレクトリ（`**/node_modules/**`、`**/vendor/**`……）——に一致するか？ 除外します。
 
 6 つのゲートをすべて通過したファイルだけが LLM に送られます。ただし diff だけで `max_tokens` の 80% を超える場合は例外で、`selectFiles` がゲートのあとにその上限を適用し、そのファイルを `too_large` として除外します。同じく、新しいパスが `/dev/null` であるファイルは `deleted` と記されます。レビューすべき新しい内容がありません。`ocr review --preview` を使えば、token を消費せずにこのフィルタリング結果を出力できます。
 
 ### デフォルトパスの除外
 
-組み込みの除外リスト（[`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json) を参照）は、テストファイルのパターンに一致します:
+組み込みの除外リスト（[`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json) を参照）は、2 種類のパスに一致します。JSON ファイルが唯一の情報源です:
 
-- `**/*_test.go`
-- `**/src/test/java/**/*.java`
-- `**/src/test/**/*.kt`
-- `**/*.test.{js,jsx,ts,tsx}`
-- `**/*.spec.{js,jsx,ts,tsx}`
-- `**/__tests__/**`
-- `**/test/**/*_test.py`
-- `**/tests/**/*_test.py`
-- `**/*_test.py`
-- `**/test_*.py`
-- `**/*_spec.rb`
-- `**/spec/**/*_spec.rb`
-- `**/*Test.java`
-- `**/*Tests.java`
-- `**/*_test.rs`
-- `**/oh_modules/**`
-- `**/*.test.ets`
+- テストファイル。例: `**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`、`**/test_*.py`
+- 依存ディレクトリとビルド出力。例: `**/node_modules/**`、`**/vendor/**`、`**/target/**`、`**/__pycache__/**`、`**/package-lock.json`、`**/*.min.{js,css}`
 
-ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go) の diff 層で発生し、ファイルごとのフィルタリングより先に実行されます。
+ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go) の diff 層でも発生しますが、このブロックリストはリポジトリルートでのみ一致します。任意の深さにネストされたこれらのディレクトリを捕捉するのは default-path ゲートです。パッケージディレクトリ配下の `node_modules/` がひとたびコミットされると、`.gitignore` はそれを diff から除外しなくなり、これらのパターンが最後の防線になります。
 
-これらのテストファイルパターンに一致するファイルを**レビューする**には、それをユーザー `include` リストに追加してください。それが default-path ゲートを上書きします。
+これらのデフォルトパターンに一致するファイルを**レビューする**には、それをユーザー `include` リストに追加してください。それが default-path ゲートを上書きします。
 
 ## ファイルごとのルール解決
 

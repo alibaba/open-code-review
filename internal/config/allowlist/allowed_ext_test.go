@@ -291,15 +291,15 @@ func TestIsExcludedPath(t *testing.T) {
 		{"capnp schema is reviewed", "schema/addressbook.capnp", false},
 		{"capnp in filename only", "src/capnp_helpers.go", false},
 
-		// Jsonnet vendored dependencies (written by `jb install`, wiped by `rm -rf vendor`).
-		// The pattern is extension-scoped: IsExcludedPath applies every pattern to every
-		// path, so a bare **/vendor/** would also drop vendored Go and PHP sources.
+		// Vendored dependency trees (written by `go mod vendor`, Composer, `jb install`,
+		// ...) are excluded wholesale: once such a directory is committed, .gitignore no
+		// longer keeps it out of a diff, and every file inside is third-party code.
 		{"jsonnet vendor root", "vendor/github.com/grafana/jsonnet-libs/ksonnet-util/kausal.libsonnet", true},
 		{"jsonnet vendor nested dir", "jsonnet/vendor/foo/main.jsonnet", true},
 		{"jsonnet non-vendor lib", "lib/config.libsonnet", false},
 		{"jsonnet non-vendor env", "environments/prod/main.jsonnet", false},
-		{"go under vendor still reviewed", "vendor/github.com/pkg/errors/errors.go", false},
-		{"php under vendor still reviewed", "vendor/monolog/monolog/src/Logger.php", false},
+		{"go under vendor excluded", "vendor/github.com/pkg/errors/errors.go", true},
+		{"php under vendor excluded", "vendor/monolog/monolog/src/Logger.php", true},
 		// Zig test files
 		{"zig test directory", "test/parser.zig", true},
 		{"zig nested test directory", "src/test/unit/parser.zig", true},
@@ -379,6 +379,55 @@ func TestIsExcludedPath(t *testing.T) {
 		{"vhdl non-testbench source vhdl ext", "rtl/fifo.vhdl", false},
 		{"hdl tb without underscore not excluded", "rtl/tbench.v", false},
 		{"hdl tb substring mid-name not excluded", "rtl/outbound.v", false},
+
+		// Dependency and build-output directories. The diff-level provider blocklist
+		// only matches these names at the repository root; the default-path gate is
+		// what catches them nested at any depth, e.g. inside a monorepo package.
+		{"node_modules at root", "node_modules/lodash/index.js", true},
+		{"node_modules deeply nested", "extensions/frontend/node_modules/@babel/core/lib/index.js", true},
+		{"bower_components", "bower_components/jquery/dist/jquery.js", true},
+		{"pnpm store", ".pnpm-store/v10/files/ab123/node_modules/lodash/lodash.js", true},
+		{"yarn cache", ".yarn/cache/lodash-npm-4.17.21-6382.zip/node_modules/lodash/lodash.js", true},
+		{"yarn sdks", ".yarn/sdks/typescript/lib/typescript.js", true},
+		{"package-lock at root", "package-lock.json", true},
+		{"package-lock nested", "web/package-lock.json", true},
+		{"pnpm-lock nested", "packages/app/pnpm-lock.yaml", true},
+		{"npm-shrinkwrap", "npm-shrinkwrap.json", true},
+		{"minified js", "static/js/bundle.min.js", true},
+		{"minified css", "assets/css/site.min.css", true},
+		{"min in filename only", "src/minified.js", false},
+		{"dist at root", "dist/index.js", true},
+		{"dist nested", "packages/lib/dist/index.mjs", true},
+		{"dist lookalike", "src/distribution/index.js", false},
+		{"next build output", "app/.next/server/app/page.js", true},
+		{"nuxt build output", "site/.nuxt/dist/server/server.mjs", true},
+		{"svelte-kit output", "ui/.svelte-kit/output/server/entries/pages/index.js", true},
+		{"astro build output", "blog/.astro/types.d.ts", true},
+		{"turbo cache", "repo/.turbo/run-logs/index.js", true},
+		{"ruby bundle path", "pkg/.bundle/ruby/3.3.0/gems/rack-3.0.8/lib/rack.rb", true},
+		{"jvm target dir", "target/classes/com/example/App.class", true},
+		{"rust target dir nested", "crates/sub/target/debug/libsub.rlib", true},
+		{"target in filename only", "src/target.go", false},
+		{"gradle project cache", ".gradle/8.10/checksums/checksums.lock", true},
+		{"pycache at root", "__pycache__/handler.cpython-312.pyc", true},
+		{"pycache nested", "app/sub/__pycache__/handler.cpython-312.pyc", true},
+		{"venv dot", ".venv/lib/python3.12/site-packages/requests/api.py", true},
+		{"venv plain", "venv/lib/python3.12/site-packages/requests/api.py", true},
+		{"egg-info at root", "mylib.egg-info/PKG-INFO", true},
+		{"egg-info nested", "backend/pkg/mylib.egg-info/SOURCES.txt", true},
+		{"tox env", ".tox/py312/lib/python3.12/site-packages/pluggy/_manager.py", true},
+		{"mypy cache", ".mypy_cache/3.12/requests.data.json", true},
+		{"pytest cache", ".pytest_cache/v/cache/lastfailed", true},
+		{"ruff cache", ".ruff_cache/0.6.9/123456.keys", true},
+		{"cocoapods", "Pods/Alamofire/Source/AFError.swift", true},
+		{"carthage build", "Carthage/Build/iOS/Alamofire/Alamofire.swift", true},
+		{"swift package build", ".build/debug/App.build/sources.swift", true},
+		{"dotnet obj dir", "obj/Debug/net8.0/app.AssemblyInfo.cs", true},
+		{"obj lookalike", "src/objects/model.go", false},
+		{"dart tool", ".dart_tool/package_config.json", true},
+		{"terraform providers", "infra/.terraform/providers/registry.terraform.io/hashicorp/aws/5.0.0/darwin_arm64/terraform-provider-aws", true},
+		{"coverage dir", "coverage/lcov-report/index.html", true},
+		{"coverage in filename only", "src/coverage_report.ts", false},
 
 		// Case insensitive
 		{"case insensitive go", "Foo/Bar_Test.go", true},

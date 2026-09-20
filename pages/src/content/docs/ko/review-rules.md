@@ -47,8 +47,8 @@ OCR은 **네 겹의 우선순위 사슬**로 규칙을 해석합니다. 파일 �
 
 서로 독립적인 필드 세 개가 있습니다.
 
-- `include` — 선택. 내장 기본 제외 패턴(아래에서 설명하는 테스트 파일 제외)을
-  *건너뛰는* glob 패턴입니다. 화이트리스트가 아닙니다. 어떤 `include` 패턴에도
+- `include` — 선택. 내장 기본 제외 패턴(아래에서 설명하는 테스트 파일 및 의존성
+  디렉터리 제외)을 *건너뛰는* glob 패턴입니다. 화이트리스트가 아닙니다. 어떤 `include` 패턴에도
   걸리지 않은 파일도 `unsupported_ext`와 `default_path` 검사를 계속 거치며 리뷰될 수
   있습니다.
 - `exclude` — 선택. OCR이 리뷰하면 *안 되는* 파일의 glob 패턴입니다. 사용자 설정 필터 안에서
@@ -90,8 +90,9 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 5. **`unsupported_ext`** — 파일 확장자가
    [허용 목록](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)에
    있는가? 없으면 제외.
-6. **`default_path`** — 경로가 내장 테스트 파일 제외 패턴(`**/*_test.go`,
-   `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb` 등)에 걸리는가? 그렇다면 제외.
+6. **`default_path`** — 경로가 내장 기본 제외 패턴, 즉 테스트 파일(`**/*_test.go`,
+   `**/*.test.{js,jsx,ts,tsx}` 등)이나 의존성/빌드 출력 디렉터리(`**/node_modules/**`,
+   `**/vendor/**` 등)에 걸리는가? 그렇다면 제외.
 
 여섯 관문을 모두 통과한 파일이 LLM으로 갑니다. 다만 diff만으로 `max_tokens`의
 80%를 넘으면 `selectFiles`가 관문 뒤에서 그 상한을 적용해 `too_large`로
@@ -101,34 +102,23 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 
 ### 기본 경로 제외 목록 {#default-path-exclusions}
 
-내장 제외 목록은 테스트 파일 패턴에 걸립니다
+내장 제외 목록은 두 부류의 경로에 걸립니다. JSON 파일이 유일한 출처입니다
 ([`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json)
 참고).
 
-- `**/*_test.go`
-- `**/src/test/java/**/*.java`
-- `**/src/test/**/*.kt`
-- `**/*.test.{js,jsx,ts,tsx}`
-- `**/*.spec.{js,jsx,ts,tsx}`
-- `**/__tests__/**`
-- `**/test/**/*_test.py`
-- `**/tests/**/*_test.py`
-- `**/*_test.py`
-- `**/test_*.py`
-- `**/*_spec.rb`
-- `**/spec/**/*_spec.rb`
-- `**/*Test.java`
-- `**/*Tests.java`
-- `**/*_test.rs`
-- `**/oh_modules/**`
-- `**/*.test.ets`
+- 테스트 파일. 예: `**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb`, `**/test_*.py`
+- 의존성 디렉터리와 빌드 출력. 예: `**/node_modules/**`, `**/vendor/**`, `**/target/**`,
+  `**/__pycache__/**`, `**/package-lock.json`, `**/*.min.{js,css}`
 
 잡음이 많은 디렉터리(`vendor/`, `node_modules/`, `target/` 등)를 걸러내는 일은 더
-앞에서, 파일별 필터가 돌기 전
+앞에서도 일어납니다(파일별 필터가 돌기 전
 [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)의
-diff 단계에서 일어납니다.
+diff 단계). 다만 그 블랙리스트는 저장소 루트에서만 일치합니다. 어떤 깊이에 중첩된
+이런 디렉터리를 잡아내는 것은 기본 경로 관문입니다. 패키지 디렉터리 아래의
+`node_modules/`가 한번 커밋되면 `.gitignore`는 더 이상 그것을 diff에서 걸러주지
+않으며, 이 패턴들이 마지막 방어선이 됩니다.
 
-이런 테스트 파일 패턴에 걸리는 파일을 **리뷰하고 싶다면** 사용자 `include` 목록에
+이런 기본 패턴에 걸리는 파일을 **리뷰하고 싶다면** 사용자 `include` 목록에
 넣으세요. `include`가 기본 경로 관문을 덮어씁니다.
 
 ## 파일별 규칙 해석 {#rule-resolution-per-file}

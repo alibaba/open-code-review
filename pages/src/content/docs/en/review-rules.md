@@ -49,7 +49,8 @@ is always *some* rule resolved.
 Three independent fields:
 
 - `include` — optional. Glob patterns that *bypass* built-in default
-  exclude patterns (test-file exclusions — see below). It is not a
+  exclude patterns (test-file and dependency-directory exclusions — see
+  below). It is not a
   whitelist: files not matching any `include` pattern still proceed
   through the `unsupported_ext` and `default_path` checks and may still
   be reviewed.
@@ -97,9 +98,10 @@ For each diff, OCR asks:
 5. **`unsupported_ext`** — Is the file extension in the
    [allowlist](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)?
    Excluded if not.
-6. **`default_path`** — Does the path match a built-in test-file exclude
-   pattern (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb`,
-   …)? Excluded.
+6. **`default_path`** — Does the path match a built-in default exclude
+   pattern — a test file (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, …)
+   or a dependency / build-output directory (`**/node_modules/**`,
+   `**/vendor/**`, …)? Excluded.
 
 Files that survive all six gates are sent to the LLM, unless the diff
 alone exceeds 80% of `max_tokens`: `selectFiles` applies that ceiling
@@ -112,32 +114,23 @@ without spending a token.
 
 The built-in exclude list (see
 [`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json))
-matches test-file patterns:
+matches two families of paths — the JSON file is the source of truth:
 
-- `**/*_test.go`
-- `**/src/test/java/**/*.java`
-- `**/src/test/**/*.kt`
-- `**/*.test.{js,jsx,ts,tsx}`
-- `**/*.spec.{js,jsx,ts,tsx}`
-- `**/__tests__/**`
-- `**/test/**/*_test.py`
-- `**/tests/**/*_test.py`
-- `**/*_test.py`
-- `**/test_*.py`
-- `**/*_spec.rb`
-- `**/spec/**/*_spec.rb`
-- `**/*Test.java`
-- `**/*Tests.java`
-- `**/*_test.rs`
-- `**/oh_modules/**`
-- `**/*.test.ets`
+- test files, e.g. `**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`,
+  `**/*_spec.rb`, `**/test_*.py`
+- dependency directories and build output, e.g. `**/node_modules/**`,
+  `**/vendor/**`, `**/target/**`, `**/__pycache__/**`,
+  `**/package-lock.json`, `**/*.min.{js,css}`
 
 Noisy-directory filtering (`vendor/`, `node_modules/`, `target/`, …)
-happens earlier, at the diff level in
+also happens earlier, at the diff level in
 [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go),
-before the per-file filter runs.
+but that blocklist only matches at the repository root. The default-path
+gate is what catches these directories nested at any depth: once a
+`node_modules/` inside a package directory is committed, `.gitignore`
+no longer keeps it out of diffs, and these patterns are the backstop.
 
-To **review** a file that matches one of these test-file patterns, add
+To **review** a file that matches one of these default patterns, add
 it to the user `include` list — that overrides the default-path gate.
 
 ## Rule resolution per file
