@@ -252,7 +252,10 @@ func TestRenderTemplate_SessionsTableMockup(t *testing.T) {
 		`id="sessions-table"`,
 		`<div class="table-scroll" role="region" aria-label="Sessions table">`,
 		`<a class="back-link" href="/" aria-label="Back to repositories"><svg`,
-		`<td class="col-session"><a class="session-id" href="/r/my-repo/` + fullID + `" title="` + fullID + `">Session: b029c726-7b6b-46aa-b923-9fea9f…</a></td>`,
+		`<td class="col-session"><a class="session-id" href="/r/my-repo/` + fullID + `" title="` + fullID + `">b029c726…</a></td>`,
+		// The cell shows only the first UUID segment: the column is 36 characters
+		// of mostly-identical text otherwise, and the full value stays in title=
+		// and in the href, so hovering and linking are unaffected.
 		`<td class="col-branch">refactor/rename-runprofile</td>`,
 		`<td class="col-mode">range</td>`,
 		`<td class="col-model">claude-opus-5</td>`,

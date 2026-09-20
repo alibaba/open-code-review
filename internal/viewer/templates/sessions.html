@@ -21,7 +21,7 @@
     <tbody>
     {{range $i, $s := .Sessions}}
         <tr>
-            <td class="col-session"><a class="session-id" href="/r/{{$.EncodedRepo}}/{{$s.SessionID}}" title="{{$s.SessionID}}">Session: {{truncate 30 $s.SessionID}}</a></td>
+            <td class="col-session"><a class="session-id" href="/r/{{$.EncodedRepo}}/{{$s.SessionID}}" title="{{$s.SessionID}}">{{truncate 8 $s.SessionID}}</a></td>
             <td class="col-branch">{{$s.GitBranch}}</td>
             <td class="col-mode">{{if $s.ReviewMode}}{{$s.ReviewMode}}{{else}}-{{end}}</td>
             <td class="col-model">{{$s.Model}}</td>
