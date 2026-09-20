@@ -131,6 +131,11 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/*_test.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 
 Фильтрация шумных каталогов (`vendor/`, `node_modules/`, `target/`, …)
 происходит раньше, на уровне diff в

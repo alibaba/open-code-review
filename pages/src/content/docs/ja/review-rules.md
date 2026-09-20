@@ -95,6 +95,11 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/*_test.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 
 ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go) の diff 層で発生し、ファイルごとのフィルタリングより先に実行されます。
 

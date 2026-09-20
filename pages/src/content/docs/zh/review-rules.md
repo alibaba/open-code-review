@@ -115,6 +115,11 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/*_test.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 
 噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，位于
 [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)

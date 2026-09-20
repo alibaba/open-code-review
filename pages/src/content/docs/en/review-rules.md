@@ -131,6 +131,11 @@ matches test-file patterns:
 - `**/*_test.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 
 Noisy-directory filtering (`vendor/`, `node_modules/`, `target/`, …)
 happens earlier, at the diff level in

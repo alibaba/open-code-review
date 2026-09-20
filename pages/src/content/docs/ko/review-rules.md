@@ -122,6 +122,11 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/*_test.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 
 잡음이 많은 디렉터리(`vendor/`, `node_modules/`, `target/` 등)를 걸러내는 일은 더
 앞에서, 파일별 필터가 돌기 전
