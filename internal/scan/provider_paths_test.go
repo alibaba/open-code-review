@@ -69,9 +69,6 @@ func TestProvider_Enumerate_PreservesWhitespaceInTrackedPaths(t *testing.T) {
 // the first real pathname, and that file is renamed out of the scan.
 func TestProvider_Enumerate_StderrWarningIsNotParsedAsAPath(t *testing.T) {
 	requireWhitespaceFilenames(t)
-	if os.Geteuid() == 0 {
-		t.Skip("root reads a 0000 directory regardless of its mode, so git does not warn")
-	}
 
 	repo := initTestRepo(t)
 	writeFile(t, repo, "kept.go", []byte("package p\n"))
@@ -87,6 +84,14 @@ func TestProvider_Enumerate_StderrWarningIsNotParsedAsAPath(t *testing.T) {
 	}
 	// Restore the mode so t.TempDir's cleanup can remove the tree.
 	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o755) })
+	// Ask the filesystem whether the mode took, rather than inferring it from
+	// the OS. Root is exempt from the mode, and a filesystem mounted without
+	// permission support ignores it outright -- in either case git reads the
+	// directory happily, writes no warning, and the test would assert against
+	// a stream that has nothing wrong with it.
+	if _, err := os.ReadDir(unreadable); err == nil {
+		t.Skip("this environment does not enforce directory modes, so git has nothing to warn about")
+	}
 
 	got, err := NewProvider(repo, nil, gitcmd.New(2), 0).Enumerate(context.Background())
 	if err != nil {
