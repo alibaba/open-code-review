@@ -113,7 +113,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | `exclude` 목록에서 해당 패턴을 빼세요. |
 | `unsupported_ext` | 확장자를 `include` 목록에 넣어 허용 목록 관문을 건너뛰세요. |
 | `default_path` | 파일을 `include`에 넣으세요. 내장 테스트 파일 제외 패턴을 덮어씁니다. |
-| `provider_directory` | 조치할 필요가 없습니다. `vendor/`, `node_modules/` 같은 provider 디렉터리는 `include`와 일치해도 검토 대상이 될 수 없습니다. |
+| `provider_directory` | 의도적으로 추적하는 디렉터리는 개인 `--rule` 파일의 `allow_provider_directories`에 정확한 접두사(예: `vendor/`)를 추가하세요. 다른 필터 관문은 계속 적용됩니다. |
 | `deleted` | 할 일이 없습니다. 리뷰할 새 내용이 없습니다. |
 | `too_large` | diff만으로 `max_tokens`의 80%를 넘습니다. `--max-tokens`(또는 저장된 `max_tokens`)를 올리거나 변경을 더 작은 커밋으로 나누세요. |
 

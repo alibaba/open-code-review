@@ -103,7 +103,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | 从你的 `exclude` 列表移除该模式。 |
 | `unsupported_ext` | 把扩展名加入你的 `include` 列表以绕过白名单门。 |
 | `default_path` | 把文件加入 `include`——那会覆盖内置测试文件排除模式。 |
-| `provider_directory` | 无需操作——`vendor/`、`node_modules/` 等 provider 目录永远不可评审，即使被 `include` 匹配也是如此。 |
+| `provider_directory` | 对于有意跟踪的目录，可在个人 `--rule` 文件的 `allow_provider_directories` 中加入精确前缀（例如 `vendor/`）。其他过滤门仍然生效。 |
 | `deleted` | 无需处理——没有新内容可评审。 |
 | `too_large` | 仅 diff 本身就超过 `max_tokens` 的 80%。调高 `--max-tokens`（或已保存的 `max_tokens`），或把改动拆成更小的 commit。 |
 

@@ -211,16 +211,18 @@ type ProjectRuleEntry struct {
 
 // ProjectRule holds rules loaded from <repoDir>/.opencodereview/rule.json.
 type ProjectRule struct {
-	Rules   []ProjectRuleEntry `json:"rules"`
-	Include []string           `json:"include,omitempty"`
-	Exclude []string           `json:"exclude,omitempty"`
+	Rules                    []ProjectRuleEntry `json:"rules"`
+	Include                  []string           `json:"include,omitempty"`
+	Exclude                  []string           `json:"exclude,omitempty"`
+	AllowProviderDirectories []string           `json:"allow_provider_directories,omitempty"`
 }
 
-// FileFilter holds the merged user-configured include/exclude glob patterns
-// collected from all rule.json layers (custom, project, global).
+// FileFilter holds the user-configured file selection settings resolved from
+// rule.json layers (custom, project, global).
 type FileFilter struct {
-	Include []string
-	Exclude []string
+	Include                  []string
+	Exclude                  []string
+	AllowProviderDirectories []string
 }
 
 // HasInclude reports whether any include patterns are configured.
@@ -295,7 +297,7 @@ type ResolverOptions struct {
 // Objective-C when their content says so. Wrapping the *system* layer (rather
 // than the composed resolver) keeps user layers outranking the sniff.
 //
-// It also returns a FileFilter with the merged include/exclude patterns from all layers.
+// It also returns a FileFilter with file selection settings from the effective layer.
 func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver, *FileFilter, error) {
 	sysRule, err := LoadDefault()
 	if err != nil {
@@ -346,26 +348,41 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 	}, filter, nil
 }
 
-// buildFileFilter picks the highest-priority layer that has any include/exclude
-// configured. Priority order: custom (--rule) > project > global.
+// buildFileFilter resolves include/exclude and provider-directory settings
+// independently. That lets a personal --rule file allow vendor/ for one run
+// without discarding the repository's normal include/exclude rules. Each setting
+// uses the usual priority: custom (--rule) > project > global.
 func buildFileFilter(layers ...*ProjectRule) *FileFilter {
+	var pathFilter, providerDirectories *ProjectRule
 	for _, pr := range layers {
 		if pr == nil {
 			continue
 		}
-		if len(pr.Include) == 0 && len(pr.Exclude) == 0 {
-			continue
+		if pathFilter == nil && (len(pr.Include) > 0 || len(pr.Exclude) > 0) {
+			pathFilter = pr
 		}
-		f := &FileFilter{}
-		for _, p := range pr.Include {
+		if providerDirectories == nil && len(pr.AllowProviderDirectories) > 0 {
+			providerDirectories = pr
+		}
+	}
+	if pathFilter == nil && providerDirectories == nil {
+		return nil
+	}
+	f := &FileFilter{}
+	if pathFilter != nil {
+		for _, p := range pathFilter.Include {
 			f.Include = append(f.Include, strings.ToLower(p))
 		}
-		for _, p := range pr.Exclude {
+		for _, p := range pathFilter.Exclude {
 			f.Exclude = append(f.Exclude, strings.ToLower(p))
 		}
-		return f
 	}
-	return nil
+	if providerDirectories != nil {
+		for _, dir := range providerDirectories.AllowProviderDirectories {
+			f.AllowProviderDirectories = append(f.AllowProviderDirectories, strings.ToLower(dir))
+		}
+	}
+	return f
 }
 
 func loadGlobalRule() (*ProjectRule, error) {

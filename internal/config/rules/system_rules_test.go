@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -756,7 +757,7 @@ func TestNewResolver_FileFilterMerged(t *testing.T) {
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	projJSON := `{"rules":[],"include":["src/**/*.java"],"exclude":["**/generated/**"]}`
+	projJSON := `{"rules":[],"include":["src/**/*.java"],"exclude":["**/generated/**"],"allow_provider_directories":["vendor/"]}`
 	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(projJSON), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -776,6 +777,9 @@ func TestNewResolver_FileFilterMerged(t *testing.T) {
 	}
 	if !filter.IsUserExcluded("src/generated/api.java") {
 		t.Error("expected src/generated/api.java to be excluded")
+	}
+	if got := filter.AllowProviderDirectories; !slices.Equal(got, []string{"vendor/"}) {
+		t.Errorf("allow provider directories = %v, want [vendor/]", got)
 	}
 }
 
@@ -801,7 +805,7 @@ func TestNewResolver_FileFilterPriorityOverride(t *testing.T) {
 	}
 
 	customDir := t.TempDir()
-	customJSON := `{"rules":[],"include":["lib/**/*.kt"],"exclude":["**/tmp/**"]}`
+	customJSON := `{"rules":[],"include":["lib/**/*.kt"],"exclude":["**/tmp/**"],"allow_provider_directories":["vendor/"]}`
 	customPath := filepath.Join(customDir, "custom.json")
 	if err := os.WriteFile(customPath, []byte(customJSON), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -829,6 +833,9 @@ func TestNewResolver_FileFilterPriorityOverride(t *testing.T) {
 	}
 	if filter.IsUserExcluded("src/gen/api.java") {
 		t.Error("project exclude should not be active when custom is present")
+	}
+	if got := filter.AllowProviderDirectories; !slices.Equal(got, []string{"vendor/"}) {
+		t.Errorf("allow provider directories = %v, want custom [vendor/]", got)
 	}
 }
 
@@ -860,6 +867,35 @@ func TestNewResolver_FileFilterFallsToProject(t *testing.T) {
 	}
 	if !filter.IsUserIncluded("src/main/foo.java") {
 		t.Error("expected project include to take effect when custom has none")
+	}
+}
+
+func TestNewResolver_ProviderDirectoriesDoNotReplaceProjectPathFilters(t *testing.T) {
+	repoDir := t.TempDir()
+	ocrDir := filepath.Join(repoDir, ".opencodereview")
+	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	projectJSON := `{"rules":[],"include":["src/**/*.go"],"exclude":["**/generated/**"]}`
+	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(projectJSON), 0o644); err != nil {
+		t.Fatalf("write project rule: %v", err)
+	}
+
+	customPath := filepath.Join(t.TempDir(), "vendor.json")
+	customJSON := `{"rules":[],"allow_provider_directories":["vendor/"]}`
+	if err := os.WriteFile(customPath, []byte(customJSON), 0o644); err != nil {
+		t.Fatalf("write custom rule: %v", err)
+	}
+
+	_, filter, err := NewResolver(repoDir, customPath, ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if filter == nil || !filter.IsUserIncluded("src/app/main.go") || !filter.IsUserExcluded("src/generated/main.go") {
+		t.Fatalf("filter = %+v, want project path filters preserved", filter)
+	}
+	if got := filter.AllowProviderDirectories; !slices.Equal(got, []string{"vendor/"}) {
+		t.Errorf("allow provider directories = %v, want custom [vendor/]", got)
 	}
 }
 

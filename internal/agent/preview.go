@@ -112,7 +112,10 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 // exclusions. Only Preview needs the excluded payload, so normal review runs do
 // not retain potentially large unified diffs or file contents for them.
 func (a *Agent) loadPreviewDiffs(ctx context.Context) (diff.DiffSet, error) {
-	provider := a.newDiffProvider()
+	provider, err := a.newDiffProvider()
+	if err != nil {
+		return diff.DiffSet{}, fmt.Errorf("configure diff provider: %w", err)
+	}
 	set, err := provider.GetDiffSet(ctx)
 	if err != nil {
 		return diff.DiffSet{}, err
