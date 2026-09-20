@@ -81,7 +81,8 @@ yarn package      # produce a distributable .vsix package (see "Build a release 
 ### Debugging notes
 
 - **Two-way messaging**: the WebView and Extension Host communicate via `postMessage`; message
-  types live in `src/shared/messages.ts`. Both sides route through `dispatch` / `handle` — start
+  types live in `extensions/frontend/src/shared/messages.ts`. Both sides route through `dispatch`
+  / `handle` — start
   there when debugging.
 - **CLI invocation**: all `ocr` sub-commands run via `child_process.spawn` in
   `src/extension/services/CliService.ts`. `runRaw` rejects on a non-zero CLI exit code and includes
@@ -137,16 +138,20 @@ Or in VS Code: Extensions panel → top-right `⋯` → **Install from VSIX…**
 
 It uses a **Monolithic WebView + Thin Extension Host** design:
 
-- The **WebView** is a separately built Preact SPA that reproduces the full visual and interactive prototype.
-- The **Extension Host** layer is thin, handling only CLI invocation, the file system, Git operations, and editor comments.
-- The two communicate via `postMessage`, with shared TypeScript types in `src/shared/` for type safety.
+- The **WebView** is a separately built Preact SPA, built from the shared frontend at
+  `extensions/frontend/` (also used by the IntelliJ IDEA plugin).
+- The **Extension Host** layer is thin, handling only CLI invocation, the file system, Git operations,
+  and editor comments.
+- The two communicate via `postMessage`, with shared TypeScript types in
+  `extensions/frontend/src/shared/` for type safety.
 
 ```
 src/
-├── extension/      Extension Host (Node.js): services / providers / commands
-├── webview/        WebView SPA (Preact): views / components / store / bridge
-└── shared/         shared types and the postMessage protocol (no vscode dependency)
+└── extension/          Extension Host (Node.js): services / providers / commands
 ```
+
+The WebView and shared types are built from the shared frontend at `extensions/frontend/` (also
+used by the IntelliJ IDEA plugin).
 
 ---
 

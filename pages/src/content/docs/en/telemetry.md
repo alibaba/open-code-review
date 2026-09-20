@@ -14,8 +14,9 @@ the data is enough to answer "what did the agent spend time on?",
 Telemetry is **off by default**. Once enabled, OCR exports:
 
 - **Spans** — three pipeline-level spans (`review.run`, `diff.parse`,
-  `subtask.execute.group.<group-key>`) plus one short-lived `event.*`
-  span per decision-point event.
+  `subtask.execute.group.<group-key>`), LLM request spans (`llm.request`),
+  tool execution spans (`tool.execute.<tool-name>`), and short-lived
+  `event.*` spans at decision points.
 - **Metrics** — aggregated counts and histograms for review duration,
   files reviewed, comments generated, LLM requests / tokens / latency,
   and tool calls / latency.
@@ -105,17 +106,20 @@ gRPC has no URL path, so this applies to the HTTP protocols only.
 
 ### Spans
 
-The full span tree for a review:
+An example span tree for a review:
 
 ```
 review.run
 ├── diff.parse
 ├── event.review.started                   (decision-point event)
+├── event.grouping.skipped                 (when the change set is below the grouping thresholds)
 ├── subtask.execute.group.<group-key1>
 │   ├── event.plan.skipped                 (when changes are below both thresholds)
 │   ├── event.plan.failed                  (when plan phase errored)
 │   ├── event.token.threshold.exceeded     (when prompt > 80% of max_tokens)
 │   ├── main.loop                          (one span per review round)
+│   │   ├── llm.request
+│   │   └── tool.execute.<tool-name>
 │   └── event.subtask.error                (when the subtask errored)
 ├── subtask.execute.group.<group-key2>
 └── …
@@ -126,10 +130,11 @@ per file — files are bundled semantically before review. The group key is
 the group's file paths, sorted and comma-joined (a single path when the
 group holds one file).
 
-LLM round trips and tool executions are **not** emitted as separate
-spans — they show up only in metrics (see below). Decision-point events
-fire as short-lived `event.<name>` spans attached to the current
-context.
+The main review loop records LLM requests and tool executions as
+`llm.request` and `tool.execute.<tool-name>` spans, respectively. Their
+aggregate counts and latency are also recorded as metrics (see below).
+Decision-point events fire as short-lived `event.<name>` spans attached
+to the current context.
 
 Each span carries useful attributes:
 
@@ -139,7 +144,11 @@ Each span carries useful attributes:
 | `diff.parse` | `files.changed`, `lines.inserted`, `lines.deleted` |
 | `subtask.execute.group.<group-key>` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file` |
 | `main.loop` | `group.label`, `round` |
+| `llm.request` | `llm.model`, `llm.duration_ms`, `llm.total_tokens`, `llm.status` |
+| `tool.execute.<tool-name>` | `tool.name`, `tool.duration_ms`, `tool.status` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |
+| `event.review.skipped` | `reason` (`too_large` / `deleted` / `no_supported_files`), `file.count`, `too_large.count` |
+| `event.grouping.skipped` | `strategy`, `file.count`, `lines.changed`, `threshold.files`, `threshold.lines` |
 | `event.plan.skipped` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file`, `threshold`, `threshold.group` |
 | `event.plan.failed` | `group.label`, `message` |
 | `event.token.threshold.exceeded` | `group.label`, `tokens`, `max_tokens`, `round` |
@@ -170,6 +179,8 @@ The full list:
 |---|---|
 | `review.started` | Diffs loaded; we know how many files we'll review. |
 | `no.files.changed` | The diff resolved to zero files. |
+| `review.skipped` | Selection left nothing to review; `reason` is `too_large`, `deleted`, or `no_supported_files`. |
+| `grouping.skipped` | The change set held fewer than `GROUPING_MIN_FILES` files, so the grouping call was skipped. `strategy` is `bundle_all` (churn below `GROUPING_BUNDLE_LINE_THRESHOLD`, every file in one group) or `per_file` (at or above it, one group per file). A single-file change set is always `per_file` — there is nothing to partition, whatever the thresholds say — and reports only here, with no terminal line. |
 | `plan.skipped` | A group was below both plan thresholds: its largest file changed fewer than `PLAN_MODE_LINE_THRESHOLD` lines, and (for 2+ file groups) the total was below `PLAN_MODE_GROUP_LINE_THRESHOLD`. |
 | `plan.failed` | The plan phase errored; main loop ran without a plan. |
 | `token.threshold.exceeded` | Prompt tokens > 80 % of `MAX_TOKENS` (the input ceiling); group skipped. |
@@ -195,6 +206,14 @@ If you need to inspect what was sent to or returned from the LLM, use
 the local JSONL transcripts that the [Session Viewer](../viewer/)
 reads. Those live entirely on disk under `~/.opencodereview/` and are
 never shipped to the collector.
+
+For deeper debugging, set `OCR_RAW_LOGGING=1` to capture the raw
+request and response bodies of every LLM call in
+`~/.opencodereview/raw/` — more detailed debugging information than
+the session transcripts. Off by default. With streaming enabled, the
+capture reads the entire response body before handing it on to the
+rest of the processing. Capture redacts headers but records
+request and response bodies as-is.
 
 ## Recipes
 
@@ -292,11 +311,10 @@ run that's:
 - 1 `review.run` span + 1 `diff.parse` span + 1
   `subtask.execute.group.<group-key>` span per reviewed group (plus its
   `plan.execute` / `main.loop` / `review_filter.execute` children) + 1
-  short-lived `event.*` span per decision-point event.
-- A 10-file PR produces ~15–25 spans total — fewer when grouping bundles
-  files together, more when the effort preset runs extra review rounds.
-  LLM round trips and tool calls add to the metric counters but do not
-  create extra spans.
+  short-lived `event.*` span per decision-point event, plus
+  `llm.request` and `tool.execute.<tool-name>` spans.
+- The total span count depends on the reviewed groups, review rounds,
+  LLM requests, and tool executions, rather than file count alone.
 
 The export is **batched and asynchronous** — telemetry doesn't block
 the review loop. If the collector is unreachable, OCR logs a warning

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,26 +8,39 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a></nav>
-<main>
-<h2>Repositories</h2>
-{{if .Repos}}
-<div class="repository-search">
-    <label for="repository-search-input">Search repositories</label>
-    <input id="repository-search-input" type="search" placeholder="Search repositories..." autocomplete="off">
+{{template "app-header" .}}
+<main class="repos-page">
+<div class="page-heading">
+    <h2>Repositories</h2>
+    {{if .Repos}}
+    <div class="repository-search">
+        <label class="sr-only" for="repository-search-input">Search repositories</label>
+        <div class="search-field">
+            <input id="repository-search-input" type="search" placeholder="Search repositories..." autocomplete="off">
+            <span class="search-icon" aria-hidden="true">{{icon "search"}}</span>
+        </div>
+    </div>
+    {{end}}
 </div>
+{{if .Repos}}
+<div class="table-scroll" role="region" aria-label="Repositories table">
 <table id="repositories-table" class="table">
-    <thead><tr><th>Repository</th><th>Sessions</th><th>Last Modified</th></tr></thead>
+    <thead><tr><th scope="col" class="col-repository">Repository</th><th scope="col" class="col-sessions">Sessions</th><th scope="col" class="col-modified">Last Modified</th><th scope="col" class="col-action">Action</th></tr></thead>
     <tbody>
     {{range .Repos}}
         <tr>
-            <td data-repository-name><a href="/r/{{.EncodedPath}}">{{.EncodedPath}}</a></td>
-            <td>{{.SessionCount}}</td>
-            <td>{{formatTime .LastModified}}</td>
+            <td class="col-repository" data-repository-name><a href="/r/{{.EncodedPath}}">{{.EncodedPath}}</a></td>
+            <td class="col-sessions">{{.SessionCount}}</td>
+            <td class="col-modified">{{formatTime .LastModified}}</td>
+            <td class="col-action"><a class="repo-check" href="/r/{{.EncodedPath}}">Check</a></td>
         </tr>
     {{end}}
     </tbody>
 </table>
+</div>
+{{template "pager" (dict "prefix" "repos" "label" "Repository pages")}}
+<script src="/static/pager.js"></script>
+<script src="/static/a11y.js"></script>
 <script src="/static/repos.js"></script>
 {{else}}
 <p>No session data found. Run a code review first.</p>
@@ -35,3 +48,5 @@
 </main>
 </body>
 </html>
+
+{{define "breadcrumbs"}}{{end}}

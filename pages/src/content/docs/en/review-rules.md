@@ -54,7 +54,7 @@ Three independent fields:
   through the `unsupported_ext` and `default_path` checks and may still
   be reviewed.
 - `exclude` — optional. Glob patterns for files OCR must *not* review.
-  Highest precedence within the filter.
+  Highest precedence among user-configured filters.
 - `rules` — array of `{path, rule}` entries, evaluated **in declaration
   order**. The first `path` whose glob matches the file determines the
   prompt OCR sends to the model for that file.
@@ -77,28 +77,36 @@ for matching:
 
 ## How files are filtered
 
-The filter is a five-gate algorithm in
-[`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go).
+The filter is a six-gate algorithm in
+[`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
 For each diff, OCR asks:
 
 1. **`binary`** — Is the file binary? Excluded.
-2. **`user_exclude`** — Does the path match any user `exclude` pattern?
+2. **`secret_exclude`** — Does either path match a
+   built-in secret-path protection? The unconditional glob patterns are listed in [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json).
+   Excluded. This protection runs before user rules and cannot be overridden
+   by an `include` pattern.
+
+   Per-environment `.env.*` paths are treated as secret paths, except `.env.example`, `.env.sample`, and `.env.template`, which remain subject to the normal review rules.
+
+3. **`user_exclude`** — Does the path match any user `exclude` pattern?
    Excluded.
-3. **`user_include`** — If the user defined `include`, does the path
+4. **`user_include`** — If the user defined `include`, does the path
    match? If yes, **kept immediately** (bypasses the `unsupported_ext`
    and `default_path` gates below).
-4. **`unsupported_ext`** — Is the file extension in the
+5. **`unsupported_ext`** — Is the file extension in the
    [allowlist](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)?
    Excluded if not.
-5. **`default_path`** — Does the path match a built-in test-file exclude
+6. **`default_path`** — Does the path match a built-in test-file exclude
    pattern (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb`,
    …)? Excluded.
 
-Files that survive all five gates are sent to the LLM. A `deleted`
-reason (not a gate — it's computed separately in `Preview()`) marks
-files whose new path is `/dev/null`; there's no new content to review.
-Use `ocr review --preview` to print the result of this filter without
-spending a token.
+Files that survive all six gates are sent to the LLM, unless the diff
+alone exceeds 80% of `max_tokens`: `selectFiles` applies that ceiling
+after the gates and excludes the file as `too_large`. It also marks a
+file whose new path is `/dev/null` as `deleted`; there's no new content
+to review. Use `ocr review --preview` to print the result of this filter
+without spending a token.
 
 ### Default path exclusions
 
@@ -115,6 +123,7 @@ matches test-file patterns:
 - `**/test/**/*_test.py`
 - `**/tests/**/*_test.py`
 - `**/*_test.py`
+- `**/test_*.py`
 - `**/*_spec.rb`
 - `**/spec/**/*_spec.rb`
 - `**/*Test.java`
@@ -163,13 +172,13 @@ matching order:
 | `**/*.{hbs,mustache}` | `handlebars_mustache.md` — Handlebars and Mustache templates. |
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — Astro components and islands. |
-| `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,hpp}` | `cpp.md` |
+| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.{py,ipynb}` | `python.md` — Python source. |
+| `**/*.{py,pyi,ipynb}` | `python.md` — Python source. |
 | `**/*.{php,phtml}` | `php.md` — PHP source and PHP templates. |
 | `**/*.proto` | `protobuf.md` — Protocol Buffers wire compatibility. |
 | `**/*.po` | `po.md` — gettext translation source catalogs. |
@@ -183,9 +192,13 @@ matching order:
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
+| `**/*.{v,sv,vh}` | `verilog.md` — Verilog and SystemVerilog RTL. |
+| `**/*.{vhd,vhdl}` | `vhdl.md` — VHDL RTL. |
 | `**/*.m` | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files)) |
+| `**/*.mm` | `objc.md` — Objective-C++ source. |
 | `**/*.sol` | `solidity.md` — Solidity smart contracts. |
 | `**/*.vy` | `vyper.md` — Vyper smart contracts. |
+| `**/*.rego` | `rego.md` — Rego policy (OPA). |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

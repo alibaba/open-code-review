@@ -31,6 +31,10 @@ func TestIsAllowedExt(t *testing.T) {
 		{".ETS", true},
 		{".json5", true},
 		{".JSON5", true},
+		{".kt", true},
+		{".KT", true},
+		{".kts", true},
+		{".KTS", true},
 		{".ftl", true},
 		{".FTL", true},
 		{".ftlh", true},
@@ -41,6 +45,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".HBS", true},
 		{".mustache", true},
 		{".MUSTACHE", true},
+		{".pug", true},
+		{".PUG", true},
 		{".graphql", true},
 		{".GRAPHQL", true},
 		{".gql", true},
@@ -90,10 +96,30 @@ func TestIsAllowedExt(t *testing.T) {
 		{".THRIFT", true},
 		{".capnp", true},
 		{".CAPNP", true},
+		{".ml", true},
+		{".ML", true},
+		{".mli", true},
+		{".MLI", true},
+		{".re", true},
+		{".RE", true},
+		{".rei", true},
+		{".REI", true},
+		{".v", true},
+		{".V", true},
+		{".sv", true},
+		{".SV", true},
+		{".vh", true},
+		{".VH", true},
+		{".vhd", true},
+		{".VHD", true},
+		{".vhdl", true},
+		{".VHDL", true},
 		{".sol", true},
 		{".SOL", true},
 		{".vy", true},
 		{".VY", true},
+		{".rego", true},
+		{".REGO", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -134,6 +160,8 @@ func TestIsExcludedPath(t *testing.T) {
 		// Kotlin test directory
 		{"kotlin test dir", "src/test/kotlin/FooTest.kt", true},
 		{"kotlin main dir", "src/main/kotlin/Foo.kt", false},
+		{"kotlin scripts test dir", "src/test/kotlin/scripts/FooTest.kts", true},
+		{"kotlin scripts main dir", "src/main/kotlin/scripts/Foo.kts", false},
 
 		// JS/TS test files
 		{"js test file", "src/utils.test.js", true},
@@ -146,12 +174,23 @@ func TestIsExcludedPath(t *testing.T) {
 		{"__tests__ dir", "src/__tests__/foo.js", true},
 		{"__tests__ nested", "packages/ui/__tests__/Button.test.tsx", true},
 
-		// Python test files
-		{"python test file", "tests/test_utils.py", false}, // pattern is *_test.py, not test_*.py
+		// Python test files. pytest collects both `test_*.py` and `*_test.py` (python_files).
+		{"python pytest prefix at root", "test_utils.py", true},
+		{"python pytest prefix nested", "app/test_handler.py", true},
+		{"python pytest prefix in tests dir", "tests/test_utils.py", true},
+		{"python pytest prefix deeply nested", "packages/core/app/test_api.py", true},
+		{"python conftest is reviewable", "conftest.py", false},
+		{"python nested conftest is reviewable", "tests/unit/conftest.py", false},
 		{"python _test suffix", "app/handler_test.py", true},
 		{"python test dir", "test/unit/handler_test.py", true},
 		{"python tests dir", "tests/unit/handler_test.py", true},
 		{"python non-test", "app/handler.py", false},
+		// The prefix pattern must not drift into names that merely start with a
+		// longer word.
+		{"python contest prefix not excluded", "app/contest_utils.py", false},
+		{"python attestation name not excluded", "app/attestation.py", false},
+		{"python latest name not excluded", "app/latest.py", false},
+		{"python test_ prefix other extension", "src/test_helpers.go", false},
 
 		// Ruby spec files
 		{"ruby spec file", "app/models/user_spec.rb", true},
@@ -172,6 +211,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"handlebars template in tests directory", "tests/templates/card.hbs", false},
 		{"mustache template in test directory", "test/templates/email.mustache", false},
 
+		// Pug has no extension-specific test-path convention;
+		// generic fixture directories remain excluded.
+		{"pug fixture", "test/fixtures/page.pug", true},
+		{"pug template in tests directory", "tests/templates/page.pug", false},
+		{"pug template in test directory", "test/templates/page.pug", false},
+
 		// HarmonyOS oh_modules and test files
 		{"oh_modules root", "oh_modules/some_lib/index.ets", true},
 		{"oh_modules nested", "entry/oh_modules/lib/index.ets", true},
@@ -182,6 +227,11 @@ func TestIsExcludedPath(t *testing.T) {
 		{"julia test file", "test/runtests.jl", true},
 		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
 		{"julia non-test", "src/model.jl", false},
+
+		// OCaml test files
+		{"ocaml test file", "test/foo_test.ml", true},
+		{"ocaml test nested", "lib/test/unit/parser.ml", true},
+		{"ocaml non-test", "src/parser.ml", false},
 
 		// Swift test files
 		{"swift Tests suffix", "MyAppTests/UserTests.swift", true},
@@ -310,6 +360,25 @@ func TestIsExcludedPath(t *testing.T) {
 		{"generated not dotted", "src/generated/code.go", false},
 		{"gen not suffix", "src/gen/util.go", false},
 		{"pb not suffix", "src/pb/client.go", false},
+
+		// Hardware Description Language testbenches (Verilog/SystemVerilog/VHDL).
+		// Conventional testbench naming: tb_<name> prefix or <name>_tb suffix.
+		{"verilog tb_ prefix", "rtl/tb_counter.v", true},
+		{"systemverilog tb_ prefix", "rtl/tb_alu.sv", true},
+		{"vhdl tb_ prefix", "rtl/tb_fifo.vhd", true},
+		{"vhdl tb_ prefix vhdl ext", "rtl/tb_fifo.vhdl", true},
+		{"verilog _tb suffix", "rtl/counter_tb.v", true},
+		{"systemverilog _tb suffix", "rtl/alu_tb.sv", true},
+		{"vhdl _tb suffix", "rtl/fifo_tb.vhd", true},
+		{"vhdl _tb suffix vhdl ext", "rtl/fifo_tb.vhdl", true},
+		{"verilog tb_ prefix at root", "tb_top.v", true},
+		{"verilog _tb suffix at root", "top_tb.v", true},
+		{"verilog non-testbench source", "rtl/counter.v", false},
+		{"systemverilog non-testbench source", "rtl/alu.sv", false},
+		{"vhdl non-testbench source", "rtl/fifo.vhd", false},
+		{"vhdl non-testbench source vhdl ext", "rtl/fifo.vhdl", false},
+		{"hdl tb without underscore not excluded", "rtl/tbench.v", false},
+		{"hdl tb substring mid-name not excluded", "rtl/outbound.v", false},
 
 		// Case insensitive
 		{"case insensitive go", "Foo/Bar_Test.go", true},

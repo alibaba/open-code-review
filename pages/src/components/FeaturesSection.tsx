@@ -8,7 +8,7 @@ import { useSectionTitleStyle } from '../hooks/useResponsiveStyle';
 import icon1 from '../assets/icons/icon-feature-architecture.svg';
 import icon2 from '../assets/icons/icon-feature-positioning.svg';
 import icon3 from '../assets/icons/icon-feature-multi-model.svg';
-import icon4 from '../assets/icons/icon-feature-concurrent.svg';
+import icon4 from '../assets/icons/icon-feature-effort.svg';
 import icon5 from '../assets/icons/icon-feature-compression.svg';
 import icon6 from '../assets/icons/icon-feature-rules.svg';
 

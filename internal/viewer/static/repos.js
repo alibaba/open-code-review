@@ -4,15 +4,26 @@
 (() => {
     const input = document.getElementById("repository-search-input");
     const table = document.getElementById("repositories-table");
-    if (!input || !table) return;
+    const pager = document.getElementById("repos-pagination");
+    const numbers = document.getElementById("repos-page-numbers");
+    if (!input || !table || !pager || !numbers) return;
 
-    const rows = table.querySelectorAll("tbody tr");
+    let query = "";
+
+    // A row is visible when it matches the search query and sits on the
+    // current page of the filtered list; the search writes through the
+    // pager's single render pass.
+    const matches = (row) => {
+        if (!query) return true;
+        const cell = row.querySelector("[data-repository-name]");
+        return cell ? cell.textContent.trim().toLowerCase().includes(query) : false;
+    };
+
+    const pagerApi = ocrPager({ table, pager, numbers, filter: matches });
+    ocrArrowScroll(document.querySelector(".repos-page .table-scroll"));
+
     input.addEventListener("input", () => {
-        const query = input.value.trim().toLowerCase();
-        rows.forEach((row) => {
-            const nameCell = row.querySelector("[data-repository-name]");
-            const name = nameCell ? nameCell.textContent.trim().toLowerCase() : "";
-            row.hidden = !name.includes(query);
-        });
+        query = input.value.trim().toLowerCase();
+        pagerApi.refresh();
     });
 })();

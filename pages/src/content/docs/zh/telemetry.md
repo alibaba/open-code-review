@@ -13,7 +13,8 @@ metric 和 event。接入 collector 后，这些数据足以回答“agent 把�
 遥测**默认关闭**。启用后，OCR 导出：
 
 - **Span**——三个流水线级 span（`review.run`、`diff.parse`、
-  `subtask.execute.group.<group-key>`）外加每个决策点事件一个短生命周期的
+  `subtask.execute.group.<group-key>`）、LLM 请求 span（`llm.request`）、
+  工具执行 span（`tool.execute.<tool-name>`）和决策点的短生命周期
   `event.*` span。
 - **Metric**——评审时长、评审文件数、生成评论数、LLM 请求 / token / 延迟、
   工具调用 / 延迟的聚合计数与直方图。
@@ -71,17 +72,20 @@ export OCR_CONTENT_LOGGING=0                        # reserved / currently a no-
 
 ### Span
 
-一次评审的完整 span 树：
+一次评审的 span 树示例：
 
 ```
 review.run
 ├── diff.parse
 ├── event.review.started                   (decision-point event)
+├── event.grouping.skipped                 (when the change set is below the grouping thresholds)
 ├── subtask.execute.group.<group-key1>
 │   ├── event.plan.skipped                 (when changes are below both thresholds)
 │   ├── event.plan.failed                  (when plan phase errored)
 │   ├── event.token.threshold.exceeded     (when prompt > 80% of max_tokens)
 │   ├── main.loop                          (one span per review round)
+│   │   ├── llm.request
+│   │   └── tool.execute.<tool-name>
 │   └── event.subtask.error                (when the subtask errored)
 ├── subtask.execute.group.<group-key2>
 └── …
@@ -91,8 +95,9 @@ review.run
 文件在评审前已按语义打包。组的 key 是该组文件路径排序后用逗号连接的结果（组内只有
 一个文件时就是那一个路径）。
 
-LLM 往返和工具执行**不**作为单独 span 发出——它们只出现在 metric（见下）中。
-决策点事件作为短生命周期的 `event.<name>` span 附着到当前 context。
+主评审循环中的 LLM 请求和工具执行分别产生 `llm.request` 和 `tool.execute.<tool-name>` span，
+其聚合计数和延迟也记录在 metric（见下）中。决策点事件作为短生命周期的
+`event.<name>` span 附着到当前 context。
 
 每个 span 携带有用属性：
 
@@ -102,7 +107,11 @@ LLM 往返和工具执行**不**作为单独 span 发出——它们只出现在
 | `diff.parse` | `files.changed`、`lines.inserted`、`lines.deleted` |
 | `subtask.execute.group.<group-key>` | `group.label`、`group.file_count`、`lines.changed`、`lines.changed.max_file` |
 | `main.loop` | `group.label`、`round` |
+| `llm.request` | `llm.model`、`llm.duration_ms`、`llm.total_tokens`、`llm.status` |
+| `tool.execute.<tool-name>` | `tool.name`、`tool.duration_ms`、`tool.status` |
 | `event.review.started` | `file.count`、`review.count`、`repo.dir` |
+| `event.review.skipped` | `reason`（`too_large` / `deleted` / `no_supported_files`）、`file.count`、`too_large.count` |
+| `event.grouping.skipped` | `strategy`、`file.count`、`lines.changed`、`threshold.files`、`threshold.lines` |
 | `event.plan.skipped` | `group.label`、`group.file_count`、`lines.changed`、`lines.changed.max_file`、`threshold`、`threshold.group` |
 | `event.plan.failed` | `group.label`、`message` |
 | `event.token.threshold.exceeded` | `group.label`、`tokens`、`max_tokens`、`round` |
@@ -131,6 +140,8 @@ OCR 通过 OTel meter 记录数值 metric——计数与直方图，由 collecto
 |---|---|
 | `review.started` | diff 已加载；我们知道将评审多少文件。 |
 | `no.files.changed` | diff 解析出零文件。 |
+| `review.skipped` | 选择结果为空，没有文件可评审；`reason` 为 `too_large`、`deleted` 或 `no_supported_files`。 |
+| `grouping.skipped` | 变更集的文件数低于 `GROUPING_MIN_FILES`，因此跳过了分组调用。`strategy` 为 `bundle_all`（变更行数低于 `GROUPING_BUNDLE_LINE_THRESHOLD`，全部文件归一组）或 `per_file`（达到该阈值，每文件一组）。单文件变更集恒为 `per_file`——无论阈值如何取值，都没有可分之物——且只在此处上报，终端不打印。 |
 | `plan.skipped` | 某组低于两个 plan 阈值：其最大文件的变更行数少于 `PLAN_MODE_LINE_THRESHOLD`，且（对 2 个以上文件的组）合计变更行数低于 `PLAN_MODE_GROUP_LINE_THRESHOLD`。 |
 | `plan.failed` | plan 阶段出错；main 循环无 plan 运行。 |
 | `token.threshold.exceeded` | prompt token > `MAX_TOKENS`（输入上限）的 80 %；该组被跳过。 |
@@ -149,6 +160,11 @@ OCR 通过 OTel meter 记录数值 metric——计数与直方图，由 collecto
 
 如需检查发给 LLM 或从 LLM 返回的内容，使用[会话查看器](../viewer/)读取的本地
 JSONL 转录。它们完全存在于 `~/.opencodereview/` 下的磁盘上，绝不发往 collector。
+
+如需更深入的调试，设置 `OCR_RAW_LOGGING=1`，可把每次 LLM 调用的原始请求与响应
+记录到 `~/.opencodereview/raw/`，提供比会话转录更详细的调试信息。默认关闭。
+如果开启流式输出，抓取会先将整个响应体读完再交给后续处理。
+抓取对请求头和响应头做了脱敏，但请求与响应体按原样记录。
 
 ## 配方
 
@@ -242,9 +258,9 @@ OCR 导出**一切**。没有采样配置；OTel 的采样是 collector 的责�
 
 - 1 个 `review.run` span + 1 个 `diff.parse` span + 每个被评审组 1 个
   `subtask.execute.group.<group-key>` span（外加其 `plan.execute` / `main.loop` /
-  `review_filter.execute` 子 span）+ 每个决策点事件 1 个短生命周期的 `event.*` span。
-- 10 文件的 PR 总共约 15–25 个 span——分组把文件打包在一起时更少，effort 档位跑更多
-  评审轮时更多。LLM 往返和工具调用增加 metric 计数但不创建额外 span。
+  `review_filter.execute` 子 span）+ 每个决策点事件 1 个短生命周期的 `event.*` span，
+  以及 `llm.request` 和 `tool.execute.<tool-name>` span。
+- span 总数取决于被评审的组、评审轮数、LLM 请求数和工具执行数，而不只取决于文件数。
 
 导出是**批量且异步**的——遥测不阻塞评审循环。若 collector 不可达，OCR 记录警告
 并继续；评审仍会产出正常输出。

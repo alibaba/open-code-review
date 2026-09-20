@@ -5,7 +5,7 @@ import { spawnSync } from 'child_process';
 
 const DELIM = '_OCR_ENV_DELIM_';
 
-/** 从登录 shell 的 `env` 输出中解析出 key=value（取两个分隔标记之间的内容）。 */
+/** Parse key=value pairs between the delimiter markers in login shell `env` output. */
 export function parseEnvBlock(stdout: string): Record<string, string> {
   const start = stdout.indexOf(DELIM);
   const end = stdout.lastIndexOf(DELIM);
@@ -22,9 +22,9 @@ export function parseEnvBlock(stdout: string): Record<string, string> {
 let cached: NodeJS.ProcessEnv | null = null;
 
 /**
- * GUI 启动的 VSCode 继承的是精简 PATH，不含 nvm / homebrew / npm 全局 bin。
- * 通过用户的登录交互式 shell（加载 ~/.zshrc、~/.zprofile 等）解析真实环境变量并缓存。
- * Windows 下终端与 GUI 环境一致，直接用 process.env。
+ * VS Code launched from the GUI inherits a minimal PATH without nvm, Homebrew, or global npm binaries.
+ * Resolve and cache the environment using the interactive login shell, which loads ~/.zshrc, ~/.zprofile, etc.
+ * On Windows, the terminal and GUI share the environment, so use process.env directly.
  */
 export function getShellEnv(): NodeJS.ProcessEnv {
   if (cached) return cached;
@@ -49,9 +49,9 @@ export function getShellEnv(): NodeJS.ProcessEnv {
 const binCache = new Map<string, string>();
 
 /**
- * 通过登录交互式 shell 解析命令的绝对路径（`command -v`），覆盖 nvm / homebrew
- * 等用 shell function 或动态 PATH 暴露二进制的情况。解析失败时回退到原命令名
- * （交给 spawn 在注入的 PATH 中查找）。Windows 直接返回原名。
+ * Resolve a command with `command -v` in an interactive login shell, including nvm and Homebrew
+ * setups that expose binaries through shell functions or dynamic PATH entries. On failure, use the original
+ * command name so spawn can search the injected PATH. On Windows, return the original name directly.
  */
 export function resolveBin(name: string): string {
   if (process.platform === 'win32' || process.env.OCR_SKIP_SHELL_RESOLVE) return name;
@@ -68,7 +68,7 @@ export function resolveBin(name: string): string {
     const path = (res.stdout || '').trim().split('\n').pop()?.trim();
     if (path && path.startsWith('/')) resolved = path;
   } catch {
-    // 回退到原命令名
+    // Fall back to the original command name.
   }
   binCache.set(name, resolved);
   return resolved;

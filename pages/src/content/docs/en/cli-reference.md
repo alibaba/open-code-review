@@ -81,6 +81,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints. |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | Print the review comments recorded in one session. |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | Compare two sessions' findings: new, persisting, resolved, not reviewed. |
+| `ocr session export [id]` | — | Export one session as a self-contained HTML file. |
 | `ocr viewer` | — | Launch the local web UI for past review sessions (`localhost:5483`). |
 | `ocr version` | — | Print version, commit, platform, build date, and GitHub URL. |
 
@@ -112,7 +113,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
-| `--no-filter` | — | `false` | Keep all review comments and skip the per-group `REVIEW_FILTER_TASK` LLM post-processing call. |
+| `--no-filter` | — | `false` | Keep all review comments and skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
 | `--output <path>` | `-o` | stdout | Write review results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
@@ -120,13 +121,13 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--background <text>` | `-b` | — | Optional requirement / business context injected into the plan + main prompts. |
 | `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Takes precedence over `--background` when both are set. |
 | `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json` |
-| `--concurrency <n>` | — | `8` | Maximum number of file groups reviewed in parallel. |
-| `--timeout <minutes>` | — | `15` | Per-group deadline. `0` disables the timeout. Scaled linearly by the number of effort review rounds (e.g. 15/30/45 min for low/medium/high). |
+| `--concurrency <n>` | — | `8` | Maximum number of subtasks reviewed in parallel. |
+| `--timeout <minutes>` | — | `15` | Per-subtask deadline. `0` disables the timeout. Scaled linearly by the number of effort review rounds (e.g. 15/30/45 min for low/medium/high). |
 | `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
-| `--max-tools <n>` | — | template default | Max tool-call rounds per group. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. The flag only ever *raises* the cap — a value below the template default is ignored. |
-| `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per group; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
-| `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Dispatch stops once the budget is exceeded and partial results are still published. |
+| `--max-tools <n>` | — | template default | Max tool-call rounds per subtask. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. The flag only ever *raises* the cap — a value below the template default is ignored. |
+| `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per subtask; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
+| `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Checked before every LLM round: a subtask already over budget gets one final round to submit findings and is reported as `failed(budget)`, no further subtasks are dispatched, and partial results are still published. |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
@@ -475,6 +476,29 @@ output stays pipeable.
 | `--repo <path>` | current dir | Repository whose sessions should be compared. |
 | `--json` | `false` | Emit the comparison as JSON (`new`, `persisting`, `resolved`, `not_reviewed`). |
 
+### `ocr session export`
+
+Renders one session as a single self-contained HTML file. The viewer's
+stylesheet and script are inlined, so the artifact opens over `file://` with no
+network access at all and CI can archive a review as a build artifact.
+
+```bash
+ocr session export -o review.html
+ocr session export 20250601-100000-abc123 -o review.html
+```
+
+With no session id the newest session for the repository is exported. That is
+the default because a *successful* `ocr review` never prints its session id.
+Without `-o` the HTML goes to stdout.
+
+The exported page embeds the reviewed source excerpts the session recorded, so
+treat the file with the same care as the repository itself before publishing it.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--repo <path>` | current dir | Repository whose session should be exported. |
+| `--output <path>`, `-o` | stdout | Write the HTML to a file instead of stdout. |
+
 ## `ocr rules`
 
 Rule introspection. There is exactly one subcommand:
@@ -599,15 +623,23 @@ ocr viewer [flags]
 
 Flags:
   --addr <address>   listen address (default: localhost:5483)
+  --open <mode>      when to open the browser: auto, always, never (default: auto)
 
 Examples:
-  ocr viewer                     # start on default port
+  ocr viewer                     # start and open the browser
   ocr viewer --addr :3000        # bind to all interfaces on port 3000
+  ocr viewer --open=never        # just print the URL
+  ocr viewer --open=always       # force it when auto declines (piped output, WSL)
 ```
 
 Starts an embedded HTTP server that reads
 `~/.opencodereview/sessions/...` and renders past review sessions in a
 browser-friendly UI. See [Session Viewer](../viewer/).
+
+`--open=auto` skips the browser when stdout is not a terminal, when
+`SSH_CONNECTION` is set with no display forwarded, or when Linux has neither
+`DISPLAY` nor `WAYLAND_DISPLAY`; the reason is printed alongside the URL. Use
+`--open=always` where auto declines but a browser is in fact reachable.
 
 ## `ocr version`
 
