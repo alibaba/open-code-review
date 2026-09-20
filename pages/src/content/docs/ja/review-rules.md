@@ -10,12 +10,12 @@ sidebar:
 
 OCR は**4 層の優先順位チェーン**でルールを解決します。各ファイルパスについて、層を順に試し、最初に一致したパターンが有効になります。
 
-| 優先順位 | 出所 | パス | 説明 |
-|---|---|---|---|
-| 1（最高） | `--rule` 引数 | ユーザー指定 | CLI による上書き。指定されている限り常に有効になります。 |
-| 2 | プロジェクト設定 | `<repoDir>/.opencodereview/rule.json` | プロジェクトレベルのルール。安全に commit できます。 |
-| 3 | グローバル設定 | `~/.opencodereview/rule.json` | ユーザーレベルの好み。 |
-| 4（最低） | システムデフォルト | 埋め込み `system_rules.json` | 一般的な言語をカバーする組み込みルール。 |
+| 優先順位  | 出所               | パス                                  | 説明                                                     |
+| --------- | ------------------ | ------------------------------------- | -------------------------------------------------------- |
+| 1（最高） | `--rule` 引数      | ユーザー指定                          | CLI による上書き。指定されている限り常に有効になります。 |
+| 2         | プロジェクト設定   | `<repoDir>/.opencodereview/rule.json` | プロジェクトレベルのルール。安全に commit できます。     |
+| 3         | グローバル設定     | `~/.opencodereview/rule.json`         | ユーザーレベルの好み。                                   |
+| 4（最低） | システムデフォルト | 埋め込み `system_rules.json`          | 一般的な言語をカバーする組み込みルール。                 |
 
 より高い優先順位の層のファイルが存在しない場合は静かにスキップされます。エラーではありません。したがって `.opencodereview/rule.json` を一度も追加していないプロジェクトは、そのままグローバル / システム層に落ちます。
 
@@ -167,53 +167,53 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 埋め込みの `system_rules.json` から主なパターンを相対的なマッチ順で示します:
 
-| パターン | ルールドキュメント |
-|---|---|
-| `**/*.properties` | `properties.md`: i18n / 設定ファイル。 |
-| `**/*{mapper,dao}*.xml` | `mapper_dao_xml.md`: MyBatis 形式の mapper SQL。 |
-| `**/pom.xml` | `pom_xml.md`: Maven 依存関係。 |
-| `**/build.gradle` | `build_gradle.md`: Gradle 依存関係。 |
-| `**/package.json` | `package_json.md`: NPM 依存関係 / スクリプト。 |
-| `**/Cargo.toml` | `cargo_toml.md`: Rust manifest。 |
-| `**/composer.json` | `composer_json.md`: Composer の依存関係、自動読み込み、スクリプト、プラグイン、パッケージ設定。 |
-| `**/*.{json,json5}` | `json.md`: 汎用 JSON（`.json5` にも一致）。 |
-| `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md`: GitHub Actions ワークフロー YAML。 |
-| `.github/**/*.{yaml,yml}` | `github_config.md`: その他の `.github` 設定 YAML。 |
-| `**/*.{yaml,yml}` | `yaml.md` |
-| `**/*.java` | `java.md` |
-| `**/*.go` | `go.md`: Go ソースコード。 |
-| `**/*.{ftl,ftlh,ftlx}` | `freemarker.md`: FreeMarker テンプレート（SSTI / XSS / null 処理）。 |
-| `**/*.{hbs,mustache}` | `handlebars_mustache.md`: Handlebars / Mustache テンプレート。 |
-| `**/*.ets` | `arkts.md`: ArkTS / HarmonyOS。 |
-| `**/*.astro` | `astro.md`: Astro コンポーネントと islands。 |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt,kts}` | `kotlin.md` |
-| `**/*.rs` | `rust.md` |
-| `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
-| `**/*.c` | `c.md` |
-| `**/*.{py,pyi,ipynb}` | `python.md`: Python ソースコード。 |
-| `**/*.{php,phtml}` | `php.md`: PHP ソースと PHP テンプレート。 |
-| `**/*.proto` | `protobuf.md`: Protocol Buffers のワイヤ互換性。 |
-| `**/*.po` | `po.md`: gettext 翻訳ソースカタログ。 |
-| `**/*.pot` | `pot.md`: gettext テンプレートファイル。 |
-| `**/*.{graphql,gql}` | `graphql.md`: GraphQL スキーマと操作。 |
-| `**/*.prisma` | `prisma.md`: Prisma スキーマ。 |
-| `**/*.jl` | `julia.md`: Julia ソースコード。 |
-| `**/*.{tf,hcl,tfvars}` | `terraform.md`: Terraform / HCL。 |
-| `**/*.bicep` | `bicep.md`: Bicep（Azure）テンプレート。 |
-| `**/*.elm` | `elm.md` - Elm ソースコード。 |
-| `**/*.{jsonnet,libsonnet}` | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。 |
-| `**/*.thrift` | `thrift.md`: Apache Thrift IDL のワイヤ互換性。 |
-| `**/*.capnp` | `capnp.md`: Cap'n Proto スキーマのワイヤ互換性。 |
-| `**/*.{v,sv,vh}` | `verilog.md`: Verilog および SystemVerilog の RTL。 |
-| `**/*.{vhd,vhdl}` | `vhdl.md`: VHDL の RTL。 |
-| `**/*.m` | `matlab.md`（または[コンテンツスニッフィング](#content-sniffing-for-m-files)により `objc.md`） |
-| `**/*.mm` | `objc.md`: Objective-C++ ソースコード。 |
-| `**/*.sol` | `solidity.md`: Solidity スマートコントラクト。 |
-| `**/*.vy` | `vyper.md`: Vyper スマートコントラクト。 |
-| `**/*.rego` | `rego.md`: Rego ポリシー（OPA）。 |
-| *(fallback)* | `default.md` |
+| パターン                            | ルールドキュメント                                                                              |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `**/*.properties`                   | `properties.md`: i18n / 設定ファイル。                                                          |
+| `**/*{mapper,dao}*.xml`             | `mapper_dao_xml.md`: MyBatis 形式の mapper SQL。                                                |
+| `**/pom.xml`                        | `pom_xml.md`: Maven 依存関係。                                                                  |
+| `**/build.gradle`                   | `build_gradle.md`: Gradle 依存関係。                                                            |
+| `**/package.json`                   | `package_json.md`: NPM 依存関係 / スクリプト。                                                  |
+| `**/Cargo.toml`                     | `cargo_toml.md`: Rust manifest。                                                                |
+| `**/composer.json`                  | `composer_json.md`: Composer の依存関係、自動読み込み、スクリプト、プラグイン、パッケージ設定。 |
+| `**/*.{json,json5}`                 | `json.md`: 汎用 JSON（`.json5` にも一致）。                                                     |
+| `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md`: GitHub Actions ワークフロー YAML。                                       |
+| `.github/**/*.{yaml,yml}`           | `github_config.md`: その他の `.github` 設定 YAML。                                              |
+| `**/*.{yaml,yml}`                   | `yaml.md`                                                                                       |
+| `**/*.java`                         | `java.md`                                                                                       |
+| `**/*.go`                           | `go.md`: Go ソースコード。                                                                      |
+| `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md`: FreeMarker テンプレート（SSTI / XSS / null 処理）。                            |
+| `**/*.{hbs,mustache}`               | `handlebars_mustache.md`: Handlebars / Mustache テンプレート。                                  |
+| `**/*.ets`                          | `arkts.md`: ArkTS / HarmonyOS。                                                                 |
+| `**/*.astro`                        | `astro.md`: Astro コンポーネントと islands。                                                    |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                              |
+| `**/*.{kt,kts}`                     | `kotlin.md`                                                                                     |
+| `**/*.rs`                           | `rust.md`                                                                                       |
+| `**/*.R`                            | `r.md`                                                                                          |
+| `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                        |
+| `**/*.c`                            | `c.md`                                                                                          |
+| `**/*.{py,pyi,ipynb}`               | `python.md`: Python ソースコード。                                                              |
+| `**/*.{php,phtml}`                  | `php.md`: PHP ソースと PHP テンプレート。                                                       |
+| `**/*.proto`                        | `protobuf.md`: Protocol Buffers のワイヤ互換性。                                                |
+| `**/*.po`                           | `po.md`: gettext 翻訳ソースカタログ。                                                           |
+| `**/*.pot`                          | `pot.md`: gettext テンプレートファイル。                                                        |
+| `**/*.{graphql,gql}`                | `graphql.md`: GraphQL スキーマと操作。                                                          |
+| `**/*.prisma`                       | `prisma.md`: Prisma スキーマ。                                                                  |
+| `**/*.jl`                           | `julia.md`: Julia ソースコード。                                                                |
+| `**/*.{tf,hcl,tfvars}`              | `terraform.md`: Terraform / HCL。                                                               |
+| `**/*.bicep`                        | `bicep.md`: Bicep（Azure）テンプレート。                                                        |
+| `**/*.elm`                          | `elm.md` - Elm ソースコード。                                                                   |
+| `**/*.{jsonnet,libsonnet}`          | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。                                          |
+| `**/*.thrift`                       | `thrift.md`: Apache Thrift IDL のワイヤ互換性。                                                 |
+| `**/*.capnp`                        | `capnp.md`: Cap'n Proto スキーマのワイヤ互換性。                                                |
+| `**/*.{v,sv,vh}`                    | `verilog.md`: Verilog および SystemVerilog の RTL。                                             |
+| `**/*.{vhd,vhdl}`                   | `vhdl.md`: VHDL の RTL。                                                                        |
+| `**/*.m`                            | `matlab.md`（または[コンテンツスニッフィング](#content-sniffing-for-m-files)により `objc.md`）  |
+| `**/*.mm`                           | `objc.md`: Objective-C++ ソースコード。                                                         |
+| `**/*.sol`                          | `solidity.md`: Solidity スマートコントラクト。                                                  |
+| `**/*.vy`                           | `vyper.md`: Vyper スマートコントラクト。                                                        |
+| `**/*.rego`                         | `rego.md`: Rego ポリシー（OPA）。                                                               |
+| _(fallback)_                        | `default.md`                                                                                    |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。
 
