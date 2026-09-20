@@ -39,6 +39,12 @@ func TestUnquoteGitPath(t *testing.T) {
 		{"unknown escape", `"a/\q.go"`, "", `"a/\q.go"`, false},
 		{"short octal", `"a/\30"`, "", `"a/\30"`, false},
 		{"bad octal digit", `"a/\398"`, "", `"a/\398"`, false},
+		// Three octal digits can express 511, which is not a byte. Git never
+		// emits one, but truncating to the low bits would return a path that
+		// is quietly not the one on disk.
+		{"octal above 255", `"a/\400.go"`, "", `"a/\400.go"`, false},
+		{"octal at the top of the range", `"a/\777.go"`, "", `"a/\777.go"`, false},
+		{"octal at the top of a byte", `"a/\377.go"`, "a/\xff.go", "", true},
 		{"empty", "", "", "", false},
 	}
 	for _, tt := range tests {

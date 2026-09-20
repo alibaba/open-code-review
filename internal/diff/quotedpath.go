@@ -74,6 +74,12 @@ func unquoteGitPath(s string) (path string, rest string, ok bool) {
 					}
 					v = v*8 + int(digit-'0')
 				}
+				if v > 0xff {
+					// \400 and above do not fit in a byte. Git never emits
+					// them, and truncating to the low bits would hand back a
+					// path that is quietly not the one on disk.
+					return "", s, false
+				}
 				i += 2
 				b.WriteByte(byte(v))
 			default:
