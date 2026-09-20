@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -393,16 +394,26 @@ type TelemetryConfig struct {
 	unknownJSONFields map[string]json.RawMessage
 }
 
-var (
-	providerEntryJSONFields = []string{
-		"api_key", "api_key_cmd", "url", "protocol", "model", "models", "auth_header",
-		"timeout_sec", "extra_body", "extra_headers", "retry_codes", "aws_profile", "aws_region",
+func jsonFieldNames(value any) []string {
+	typeOf := reflect.TypeOf(value)
+	for typeOf.Kind() == reflect.Pointer {
+		typeOf = typeOf.Elem()
 	}
-	mcpServerConfigJSONFields = []string{"type", "command", "args", "env", "url", "headers", "tools", "setup"}
-	configJSONFields          = []string{"provider", "model", "max_tokens", "effort", "providers", "custom_providers", "llm", "language", "telemetry", "mcp_servers"}
-	llmConfigJSONFields       = []string{"url", "auth_token", "auth_token_cmd", "auth_header", "model", "protocol", "use_anthropic", "timeout_sec", "extra_body", "extra_headers", "retry_codes"}
-	telemetryConfigJSONFields = []string{"enabled", "exporter", "otlp_endpoint", "content_logging"}
-)
+
+	fields := make([]string, 0, typeOf.NumField())
+	for i := 0; i < typeOf.NumField(); i++ {
+		field := typeOf.Field(i)
+		if field.PkgPath != "" {
+			continue
+		}
+		tag := field.Tag.Get("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if name != "" && name != "-" {
+			fields = append(fields, name)
+		}
+	}
+	return fields
+}
 
 func collectUnknownJSONFields(data []byte, knownFields []string) (map[string]json.RawMessage, error) {
 	var fields map[string]json.RawMessage
@@ -449,7 +460,7 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	unknown, err := collectUnknownJSONFields(data, configJSONFields)
+	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(Config{}))
 	if err != nil {
 		return err
 	}
@@ -473,7 +484,7 @@ func (e *ProviderEntry) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	unknown, err := collectUnknownJSONFields(data, providerEntryJSONFields)
+	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(ProviderEntry{}))
 	if err != nil {
 		return err
 	}
@@ -497,7 +508,7 @@ func (c *MCPServerConfig) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	unknown, err := collectUnknownJSONFields(data, mcpServerConfigJSONFields)
+	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(MCPServerConfig{}))
 	if err != nil {
 		return err
 	}
@@ -521,7 +532,7 @@ func (c *LlmConfig) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	unknown, err := collectUnknownJSONFields(data, llmConfigJSONFields)
+	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(LlmConfig{}))
 	if err != nil {
 		return err
 	}
@@ -545,7 +556,7 @@ func (c *TelemetryConfig) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	unknown, err := collectUnknownJSONFields(data, telemetryConfigJSONFields)
+	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(TelemetryConfig{}))
 	if err != nil {
 		return err
 	}
