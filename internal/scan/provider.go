@@ -260,10 +260,13 @@ func (p *Provider) gitLs(ctx context.Context, args ...string) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
+	// Keep every record byte-for-byte. A pathname may legitimately begin or
+	// end with a space, which is why -z is used in the first place; trimming
+	// here would rewrite " a.go" to "a.go" and the later Lstat would miss the
+	// real file. Only the empty record left by the final NUL is dropped.
 	raw := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
 	files := make([]string, 0, len(raw))
 	for _, f := range raw {
-		f = strings.TrimSpace(f)
 		if f != "" {
 			files = append(files, f)
 		}

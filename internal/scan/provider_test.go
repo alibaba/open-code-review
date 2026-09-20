@@ -242,3 +242,31 @@ func TestProvider_Enumerate_PathFilter(t *testing.T) {
 		t.Errorf("paths = %v, want %v", paths, want)
 	}
 }
+
+// A leading or trailing space is a valid byte in a pathname, and `ls-files -z`
+// delimits records with NUL precisely so those bytes survive. Trimming each
+// record turned " spaced.go" into "spaced.go", which no longer exists on disk,
+// so the Lstat below it failed and the tracked file dropped out of the scan.
+func TestProvider_Enumerate_KeepsWhitespaceInFilenames(t *testing.T) {
+	repo := initTestRepo(t)
+	// Only a leading space: Windows strips trailing spaces from a path
+	// component, so a trailing-space name is not portable enough for CI.
+	const spaced = " spaced.go"
+	writeFile(t, repo, spaced, []byte("package spaced\n"))
+	writeFile(t, repo, "plain.go", []byte("package plain\n"))
+	gitCommit(t, repo, "init")
+
+	got, err := NewProvider(repo, nil, nil, 0).Enumerate(context.Background())
+	if err != nil {
+		t.Fatalf("Enumerate: %v", err)
+	}
+	paths := make([]string, 0, len(got))
+	for _, it := range got {
+		paths = append(paths, it.Path)
+	}
+	sort.Strings(paths)
+	want := []string{" spaced.go", "plain.go"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Errorf("paths = %q, want %q", paths, want)
+	}
+}
