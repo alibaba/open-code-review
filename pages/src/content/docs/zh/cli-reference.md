@@ -80,6 +80,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session comments <id>` | `ocr sessions comments <id>` | 输出单个会话中记录的评审评论。 |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 对比两个会话的问题：新增、仍存在、已解决、未评审。 |
 | `ocr session export [id]` | — | 将单个会话导出为自包含的 HTML 文件。 |
+| `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | 删除一个已保存的评审会话。 |
 | `ocr viewer` | — | 启动用于历史评审会话的本地 Web UI（`localhost:5483`）。 |
 | `ocr version` | — | 打印版本、commit、平台、构建日期与 GitHub URL。 |
 
@@ -470,6 +471,30 @@ ocr session export 20250601-100000-abc123 -o review.html
 |---|---|---|
 | `--repo <path>` | 当前目录 | 要导出会话的仓库。 |
 | `--output <path>`、`-o` | 标准输出 | 将 HTML 写入文件而不是标准输出。 |
+
+### `ocr session rm`
+
+从 `~/.opencodereview/sessions/` 中删除一个已保存的会话。
+
+```bash
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --yes
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --repo ~/work/my-project
+```
+
+只要会话 id 就够了，因此在任何目录下都能运行。如果同一个 id 在多个仓库中都存在，
+命令会列出候选项并且不删除任何内容；用 `--repo` 指定其中一个。
+
+命令会打印该会话的仓库、分支、开始时间、文件数和评论数，并请你确认。**非交互式的
+stdin 一律视为「否」**，因此流水线或 CI 任务需要传入 `--yes`（`-y`）来跳过确认。
+
+元数据无法解析的会话仍然可以删除；完全读不了的会话则会报错而不是删除。使用
+`--repo` 时，记录了其他仓库或没有记录仓库的会话会被拒绝：这种情况请只用 id 删除。
+
+| 标志 | 默认值 | 说明 |
+|---|---|---|
+| `--repo <path>` | 所有仓库 | 只在该仓库下查找这个会话。 |
+| `--yes`、`-y` | `false` | 跳过确认提示。 |
 
 ## `ocr rules`
 

@@ -81,6 +81,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session comments <id>` | `ocr sessions comments <id>` | 세션에 기록된 리뷰 코멘트를 출력합니다. |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 두 세션의 지적을 비교합니다: 새로 생긴 것, 남아 있는 것, 해결된 것, 리뷰하지 않은 것. |
 | `ocr session export [id]` | — | 세션 하나를 단일 HTML 파일로 내보냅니다. |
+| `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | 저장된 리뷰 세션 하나를 삭제합니다. |
 | `ocr viewer` | — | 지난 리뷰 세션을 볼 수 있는 로컬 웹 UI를 띄웁니다(`localhost:5483`). |
 | `ocr version` | — | 버전, 커밋, 플랫폼, 빌드 날짜, GitHub URL을 출력합니다. |
 
@@ -488,6 +489,33 @@ ocr session export 20250601-100000-abc123 -o review.html
 |---|---|---|
 | `--repo <path>` | 현재 디렉터리 | 내보낼 세션이 속한 저장소. |
 | `--output <path>`, `-o` | 표준 출력 | HTML을 표준 출력 대신 파일로 씁니다. |
+
+### `ocr session rm` {#ocr-session-rm}
+
+`~/.opencodereview/sessions/`에 저장된 세션 하나를 삭제합니다.
+
+```bash
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --yes
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --repo ~/work/my-project
+```
+
+id만으로 충분하므로 어느 디렉터리에서든 실행할 수 있습니다. 같은 id가 여러
+저장소에 저장되어 있으면 후보를 보여주고 아무것도 삭제하지 않습니다. `--repo`로
+하나를 지정하세요.
+
+세션의 저장소, 브랜치, 시작 시각, 파일 수, 댓글 수를 출력하고 확인을 요청합니다.
+**비대화형 stdin은 "아니오"로 처리되므로**, 파이프라인이나 CI 작업에서 프롬프트를
+건너뛰려면 `--yes`(`-y`)를 전달해야 합니다.
+
+메타데이터를 해석할 수 없는 세션도 삭제할 수 있습니다. 아예 읽을 수 없는 경우에는
+삭제하지 않고 오류를 보고합니다. `--repo`를 지정하면 다른 저장소를 기록했거나
+저장소를 기록하지 않은 세션은 거부됩니다. 그때는 id만으로 삭제하세요.
+
+| 플래그 | 기본값 | 설명 |
+|---|---|---|
+| `--repo <path>` | 모든 저장소 | 이 저장소 아래에서만 세션을 찾습니다. |
+| `--yes`, `-y` | `false` | 확인 프롬프트를 건너뜁니다. |
 
 ## `ocr rules` {#ocr-rules}
 

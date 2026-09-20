@@ -82,6 +82,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session comments <id>` | `ocr sessions comments <id>` | Print the review comments recorded in one session. |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | Compare two sessions' findings: new, persisting, resolved, not reviewed. |
 | `ocr session export [id]` | — | Export one session as a self-contained HTML file. |
+| `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | Delete one saved review session. |
 | `ocr viewer` | — | Launch the local web UI for past review sessions (`localhost:5483`). |
 | `ocr version` | — | Print version, commit, platform, build date, and GitHub URL. |
 
@@ -499,6 +500,33 @@ treat the file with the same care as the repository itself before publishing it.
 |---|---|---|
 | `--repo <path>` | current dir | Repository whose session should be exported. |
 | `--output <path>`, `-o` | stdout | Write the HTML to a file instead of stdout. |
+
+### `ocr session rm`
+
+Deletes one persisted session from `~/.opencodereview/sessions/`.
+
+```bash
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --yes
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --repo ~/work/my-project
+```
+
+The id is enough on its own, so the command runs from any directory. If the same
+id is saved for more than one repository, the candidates are listed and nothing
+is deleted; pass `--repo` to pick one.
+
+The session's repository, branch, start time, file count and comment count are
+printed, and you are asked to confirm. **A non-interactive stdin answers no**, so
+a pipeline or a CI job must pass `--yes` (`-y`) to skip the prompt.
+
+A session whose metadata cannot be parsed is still deletable; one that cannot be
+read at all is reported instead. With `--repo`, a session that records a
+different repository, or none, is refused: delete it by id alone.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--repo <path>` | every repository | Only look for the session under this repository. |
+| `--yes`, `-y` | `false` | Skip the confirmation prompt. |
 
 ## `ocr rules`
 
