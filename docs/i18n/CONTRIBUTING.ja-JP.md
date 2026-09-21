@@ -139,6 +139,7 @@ make build
 │   ├── tool/             # 組み込みツール（file_read、code_searchなど）
 │   └── viewer/           # WebUIセッションビューアー
 ├── pages/                # デプロイ済みドキュメント
+├── scripts/              # Web operations & chore
 └── bin/                  # NPMラッパー
 ```
 

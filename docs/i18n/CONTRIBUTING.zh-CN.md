@@ -139,6 +139,7 @@ make build
 │   ├── tool/             # 内置工具（file_read, code_search 等）
 │   └── viewer/           # WebUI 会话查看器
 ├── pages/                # 已部署的文档站
+├── scripts/              # Web 运维与杂务脚本
 └── bin/                  # NPM 包装器
 ```
 

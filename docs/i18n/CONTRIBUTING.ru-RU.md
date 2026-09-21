@@ -139,6 +139,7 @@ make build
 │   ├── tool/             # Встроенные инструменты (file_read, code_search и др.)
 │   └── viewer/           # WebUI-просмотрщик сессий
 ├── pages/                # Развёрнутая документация
+├── scripts/              # Web operations & chore
 └── bin/                  # NPM-обёртка
 ```
 

@@ -140,6 +140,7 @@ make build
 │   ├── tool/             # Built-in tools (file_read, code_search, etc.)
 │   └── viewer/           # WebUI session viewer
 ├── pages/                # Deployed documentation
+├── scripts/              # Web operations & chore
 └── bin/                  # NPM wrapper
 ```
 
