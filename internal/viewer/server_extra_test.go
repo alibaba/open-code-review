@@ -343,6 +343,33 @@ func TestSurfaceCSS_LightSurfaceIsWhite(t *testing.T) {
 	}
 }
 
+func TestThemeToggle_IsAvailableInAppHeader(t *testing.T) {
+	head, err := assets.ReadFile("templates/app-header.html")
+	if err != nil {
+		t.Fatalf("read templates/app-header.html: %v", err)
+	}
+	if !strings.Contains(string(head), `data-theme-toggle`) {
+		t.Fatal("app-header.html is missing the theme toggle button hook")
+	}
+	if !strings.Contains(string(head), "☀") && !strings.Contains(string(head), "Toggle color theme") {
+		t.Fatal("app-header.html does not expose a visible theme toggle")
+	}
+}
+
+func TestThemeToggleCSS_UsesDataThemeOverride(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	text := string(css)
+	if !strings.Contains(text, "body[data-theme=\"light\"]") || !strings.Contains(text, "body[data-theme=\"dark\"]") {
+		t.Fatal("style.css is missing body[data-theme=\"light\"] / body[data-theme=\"dark\"] overrides")
+	}
+	if !strings.Contains(text, "--bg: #ffffff;") || !strings.Contains(text, "--bg: #000000;") {
+		t.Fatal("style.css is missing the light/dark page background tokens used by the theme toggle")
+	}
+}
+
 // TestTextTokens_MeetWCAGAAOnPageBackground holds the muted and secondary
 // text tokens to WCAG AA (4.5:1) against each theme's *page* background, so
 // future palette tweaks cannot quietly drop the low-emphasis labels back
