@@ -35,6 +35,12 @@ func TestIsAllowedExt(t *testing.T) {
 		{".KT", true},
 		{".kts", true},
 		{".KTS", true},
+		{".fs", true},
+		{".FS", true},
+		{".fsi", true},
+		{".FSI", true},
+		{".fsx", true},
+		{".FSX", true},
 		{".ftl", true},
 		{".FTL", true},
 		{".ftlh", true},
@@ -162,6 +168,11 @@ func TestIsExcludedPath(t *testing.T) {
 		{"kotlin main dir", "src/main/kotlin/Foo.kt", false},
 		{"kotlin scripts test dir", "src/test/kotlin/scripts/FooTest.kts", true},
 		{"kotlin scripts main dir", "src/main/kotlin/scripts/Foo.kts", false},
+
+		// F# test files
+		{"fsharp Test suffix", "src/Domain/OrderTest.fs", true},
+		{"fsharp Test suffix at root", "OrderTest.fs", true},
+		{"fsharp non-test", "src/Domain/TestSupport.fs", false},
 
 		// JS/TS test files
 		{"js test file", "src/utils.test.js", true},
