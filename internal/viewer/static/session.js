@@ -36,12 +36,16 @@ document.querySelectorAll('.response-text').forEach(function(el) {
 (function() {
     const filters = Array.from(document.querySelectorAll('.comment-filter-chip[data-filter-kind]'));
     const groups = Array.from(document.querySelectorAll('.comment-file-group'));
+    const cards = Array.from(document.querySelectorAll('[data-comment-card]'));
+    const pager = document.getElementById('comments-pagination');
+    const pageNumbers = document.getElementById('comments-page-numbers');
     const emptyState = document.querySelector('[data-comment-filter-empty]');
     const hideMarkedToggle = document.querySelector('[data-hide-marked]');
     const marksCount = document.querySelector('[data-marks-count]');
     const clearAllButton = document.querySelector('[data-clear-all-marks]');
+    let commentsPager;
 
-    if (filters.length === 0 || groups.length === 0) {
+    if (filters.length === 0 || groups.length === 0 || cards.length === 0 || !pager || !pageNumbers) {
         return;
     }
 
@@ -90,22 +94,32 @@ document.querySelectorAll('.response-text').forEach(function(el) {
             filter.setAttribute('aria-pressed', String(isActive));
         });
 
-        let visibleCount = 0;
+        if (commentsPager) {
+            commentsPager.reset();
+        }
+    }
+
+    function refreshComments() {
+        if (commentsPager) {
+            commentsPager.refresh();
+        }
+    }
+
+    function renderCommentState(state) {
+        const visibleCards = new Set(state.visible);
+        const matchingCards = new Set(state.filtered);
+
         groups.forEach(function(group) {
             const cards = Array.from(group.querySelectorAll('[data-comment-card]'));
-            let groupVisibleCount = 0;
-            cards.forEach(function(card) {
-                const visible = cardMatches(card);
-                card.hidden = !visible;
-                if (visible) {
-                    groupVisibleCount++;
-                    visibleCount++;
-                }
+            const groupMatchingCount = cards.reduce(function(count, card) {
+                return count + (matchingCards.has(card) ? 1 : 0);
+            }, 0);
+            group.hidden = !cards.some(function(card) {
+                return visibleCards.has(card);
             });
-            group.hidden = groupVisibleCount === 0;
             const count = group.querySelector('[data-comment-count]');
             if (count) {
-                count.textContent = groupVisibleCount + ' comment' + (groupVisibleCount === 1 ? '' : 's');
+                count.textContent = groupMatchingCount + ' comment' + (groupMatchingCount === 1 ? '' : 's');
             }
         });
 
@@ -125,8 +139,8 @@ document.querySelectorAll('.response-text').forEach(function(el) {
         });
 
         if (emptyState) {
-            emptyState.hidden = visibleCount !== 0;
-            const emptyText = visibleCount === 0 && hiddenByMarks > 0
+            emptyState.hidden = state.visible.length !== 0;
+            const emptyText = state.filtered.length === 0 && hiddenByMarks > 0
                 ? 'All matching comments are hidden by marks.'
                 : 'No comments match this filter.';
             // Both live regions below announce on textContent changes, so
@@ -205,7 +219,7 @@ document.querySelectorAll('.response-text').forEach(function(el) {
         return marks;
     }
 
-    // Set by saveStoredMarks, read by updateFilterState. Every caller
+    // Set by saveStoredMarks, read by renderCommentState. Every caller
     // persists before triggering the next render, which is what makes the
     // warning appear at the moment a mark silently stops persisting.
     let marksSaveFailed = false;
@@ -268,7 +282,7 @@ document.querySelectorAll('.response-text').forEach(function(el) {
             }
             setMark(card.dataset.markId, button.dataset.setMark);
             applyMarkState(card, button.dataset.setMark);
-            updateFilterState();
+            refreshComments();
         });
     });
 
@@ -277,7 +291,7 @@ document.querySelectorAll('.response-text').forEach(function(el) {
         hideMarkedToggle.addEventListener('change', function() {
             hideMarked = hideMarkedToggle.checked;
             storeHideMarked(hideMarked);
-            updateFilterState();
+            refreshComments();
         });
     }
 
@@ -288,17 +302,26 @@ document.querySelectorAll('.response-text').forEach(function(el) {
             document.querySelectorAll('[data-comment-card]').forEach(function(card) {
                 applyMarkState(card, '');
             });
-            updateFilterState();
+            refreshComments();
         });
     }
 
     // Replay stored marks before the first filter pass so hidden counts and
     // chip states are correct on load.
-    document.querySelectorAll('[data-comment-card]').forEach(function(card) {
+    cards.forEach(function(card) {
         if (card.dataset.markId && marks[card.dataset.markId]) {
             applyMarkState(card, marks[card.dataset.markId]);
         }
     });
 
-    updateFilterState();
+    commentsPager = window.ocrPager({
+        rows: cards,
+        pager: pager,
+        numbers: pageNumbers,
+        pageSize: 20,
+        filter: cardMatches,
+        onRender: renderCommentState
+    });
+    // Construction already runs the first render; calling refresh/reset
+    // here would scan every comment a second time on large sessions.
 })();

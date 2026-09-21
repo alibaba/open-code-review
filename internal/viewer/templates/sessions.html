@@ -17,11 +17,11 @@
 {{if .Sessions}}
 <div class="table-scroll" role="region" aria-label="Sessions table">
 <table id="sessions-table" class="table">
-    <thead><tr><th>Session ID</th><th>Branch</th><th>Mode</th><th>Model</th><th>Files</th><th>Status</th><th>Comments</th><th>Duration</th><th>Started At</th><th class="col-action">Action</th></tr></thead>
+    <thead><tr><th scope="col">Session ID</th><th scope="col">Branch</th><th scope="col">Mode</th><th scope="col">Model</th><th scope="col">Files</th><th scope="col">Status</th><th scope="col">Comments</th><th scope="col">Duration</th><th scope="col">Started At</th><th scope="col" class="col-action">Action</th></tr></thead>
     <tbody>
     {{range $i, $s := .Sessions}}
         <tr>
-            <td class="col-session"><a class="session-id" href="/r/{{$.EncodedRepo}}/{{$s.SessionID}}" title="{{$s.SessionID}}">Session: {{truncate 30 $s.SessionID}}</a></td>
+            <td class="col-session"><a class="session-id" href="/r/{{$.EncodedRepo}}/{{$s.SessionID}}" title="{{$s.SessionID}}">{{truncate 8 $s.SessionID}}</a></td>
             <td class="col-branch">{{$s.GitBranch}}</td>
             <td class="col-mode">{{if $s.ReviewMode}}{{$s.ReviewMode}}{{else}}-{{end}}</td>
             <td class="col-model">{{$s.Model}}</td>

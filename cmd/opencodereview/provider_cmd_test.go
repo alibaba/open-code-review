@@ -102,6 +102,47 @@ func TestSaveConfig(t *testing.T) {
 	}
 }
 
+func TestSaveConfigEnforcesModeOnExistingFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not honor Unix file modes the same way")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"provider":"old"}`), 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("set seed permissions: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat seed: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o644 {
+		t.Fatalf("seed perm = %o, want 644", perm)
+	}
+
+	cfg := &Config{
+		Provider: "anthropic",
+		Model:    "claude-opus-4-6",
+		Providers: map[string]ProviderEntry{
+			"anthropic": {APIKey: "sk-secret"},
+		},
+	}
+	if err := saveConfig(path, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	info, err = os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat after save: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("perm after saveConfig = %o, want 600 (existing 0644 must be tightened)", perm)
+	}
+}
+
 func TestApplyProviderDeletions(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")

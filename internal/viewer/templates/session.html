@@ -90,11 +90,11 @@
             <span class="file-count-badge">{{countLabel (len .) "file" "files"}}</span>
         </summary>
         <div class="token-breakdown-body" role="region" aria-label="Token breakdown table">
-            <table class="token-table">
+            <table class="token-table" data-pagination-source data-pagination-page-size="20">
                 <thead><tr><th>File</th><th>Prompt</th><th>Completion</th>{{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<th>Cache Read</th><th>Cache Write</th>{{end}}<th>Total</th></tr></thead>
                 <tbody>
                 {{range .}}
-                    <tr>
+                    <tr data-pagination-item>
                         <td title="{{sessionTaskLabel .FilePath}}">{{sessionTaskLabel .FilePath | truncate 60}}</td>
                         <td title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</td>
                         <td title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</td>
@@ -104,6 +104,7 @@
                 {{end}}
                 </tbody>
             </table>
+            {{template "pager" (dict "prefix" "token-breakdown" "label" "File breakdown pages")}}
         </div>
     </details>
     {{end}}
@@ -149,7 +150,7 @@
     </div>
     <div class="comment-groups">
     {{range groupCommentsByFile .Session.Comments}}
-    <details class="comment-file-group" open>
+    <details class="comment-file-group" open hidden>
         <summary class="comment-file-header">
             <span class="chevron" aria-hidden="true">{{icon "chevron-right"}}</span>
             <span class="file-path">{{.FilePath}}</span>
@@ -159,7 +160,7 @@
         {{range .Comments}}
             {{$lines := numberedCodeLines .ExistingCode .StartLine .EndLine}}
             {{$numbered := and $lines (index $lines 0).Num}}
-            <div class="comment-card" data-comment-card data-category="{{commentCategory .Category}}" data-severity="{{commentSeverity .Severity}}" data-mark-id="{{.MarkID}}">
+            <div class="comment-card" data-comment-card data-category="{{commentCategory .Category}}" data-severity="{{commentSeverity .Severity}}" data-mark-id="{{.MarkID}}" hidden>
                 <div class="comment-meta">
                     {{if .Category}}<span class="comment-badge {{categoryClass .Category}}">{{.Category}}</span>{{end}}
                     {{if .Severity}}<span class="comment-badge {{severityClass .Severity}}">{{.Severity}}</span>{{end}}
@@ -195,6 +196,7 @@
     </details>
     {{end}}
     </div>
+    {{template "pager" (dict "prefix" "comments" "label" "Review comment pages")}}
     <p class="comment-filter-empty" data-comment-filter-empty role="status" hidden>No comments match this filter.</p>
 </div>
 {{end}}
@@ -207,11 +209,12 @@
         <span class="file-count-badge">{{countLabel (len .Session.Summary.FilesReviewed) "file" "files"}}</span>
     </summary>
     <div class="file-accordion-body">
-        <ul class="file-list">
+        <ul class="file-list" data-pagination-source data-pagination-page-size="20">
         {{range .Session.Summary.FilesReviewed}}
-            <li><span class="file-list-icon" aria-hidden="true">{{icon "file"}}</span><span>{{.}}</span></li>
+            <li data-pagination-item><span class="file-list-icon" aria-hidden="true">{{icon "file"}}</span><span>{{.}}</span></li>
         {{end}}
         </ul>
+        {{template "pager" (dict "prefix" "files-reviewed" "label" "Reviewed file pages")}}
     </div>
 </details>
 {{end}}
@@ -224,11 +227,12 @@
         <span class="file-count-badge">{{countLabel (len .Session.SessionTasks) "task" "tasks"}}</span>
     </summary>
     <div class="file-accordion-body">
-        <div class="conversations">
+        <div class="conversations" data-pagination-source data-pagination-page-size="20">
 {{range .Session.SessionTasks}}
 {{template "task-cards" .}}
 {{end}}
         </div>
+        {{template "pager" (dict "prefix" "session-tasks" "label" "Session task pages")}}
     </div>
 </details>
 {{end}}
@@ -241,16 +245,17 @@
         <span class="file-count-badge">{{countLabel (len .Session.Files) "file" "files"}}</span>
     </summary>
     <div class="file-accordion-body">
-        <div class="conversations">
+        <div class="conversations" data-pagination-source data-pagination-page-size="20">
 {{range .Session.Files}}
 {{template "task-cards" .}}
 {{end}}
         </div>
+        {{template "pager" (dict "prefix" "conversations" "label" "Conversation pages")}}
     </div>
 </details>
 {{end}}
 
-{{if $.Static}}<script>{{$.InlineJS}}</script>{{else}}<script src="/static/a11y.js"></script><script src="/static/session.js"></script>{{end}}
+{{if $.Static}}<script>{{$.InlineJS}}</script>{{else}}<script src="/static/a11y.js"></script><script src="/static/pager.js"></script><script src="/static/session.js"></script>{{end}}
 </main>
 </body>
 </html>
@@ -262,7 +267,7 @@
 {{define "meta-status"}}{{if .Aborted}}<span class="meta-status status-aborted">aborted</span>{{else if .Legacy}}<span class="meta-status status-legacy">legacy</span>{{else if eq .TerminalState "complete"}}<span class="meta-status status-complete">complete</span>{{else if eq .TerminalState "partial"}}<span class="meta-status status-partial">partial</span>{{else if eq .TerminalState "failed"}}<span class="meta-status status-failed">failed</span>{{else if eq .TerminalState "skipped"}}<span class="meta-status status-legacy">skipped</span>{{else}}<span class="meta-status">{{.TerminalState}}</span>{{end}}{{end}}
 
 {{define "task-cards"}}
-<details class="file-accordion">
+<details class="file-accordion" data-pagination-item>
     <summary class="file-accordion-header">
         <span class="chevron" aria-hidden="true">{{icon "chevron-right"}}</span>
         <span class="file-path">{{sessionTaskLabel .FilePath}}</span>
