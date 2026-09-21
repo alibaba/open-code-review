@@ -97,9 +97,11 @@ For each diff, OCR asks:
 5. **`unsupported_ext`** — Is the file extension in the
    [allowlist](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)?
    Excluded if not.
-6. **`default_path`** — Does the path match a built-in test-file exclude
-   pattern (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb`,
-   …)? Excluded.
+6. **`default_path`** — Does the path match a built-in exclude pattern?
+   Excluded. These cover test files (`**/*_test.go`,
+   `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb`, …) and dependency or
+   build-output directories (`**/node_modules/**`, `**/vendor/**`,
+   `**/target/**`, …).
 
 Files that survive all six gates are sent to the LLM, unless the diff
 alone exceeds 80% of `max_tokens`: `selectFiles` applies that ceiling
@@ -112,7 +114,7 @@ without spending a token.
 
 The built-in exclude list (see
 [`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json))
-matches test-file patterns:
+covers two groups. Test files:
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
@@ -132,12 +134,29 @@ matches test-file patterns:
 - `**/oh_modules/**`
 - `**/*.test.ets`
 
-Noisy-directory filtering (`vendor/`, `node_modules/`, `target/`, …)
-happens earlier, at the diff level in
-[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go),
-before the per-file filter runs.
+…and dependency or build-output directories:
 
-To **review** a file that matches one of these test-file patterns, add
+- `**/node_modules/**`
+- `**/bower_components/**`
+- `**/vendor/**`
+- `**/target/**`
+- `**/dist/**`
+- `**/__pycache__/**`, `**/.venv/**`, `**/site-packages/**`
+- `**/Pods/**`, `**/Carthage/**`
+- `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
+
+`**/build/**` and `**/bin/**` are deliberately absent: projects keep
+hand-written sources in both.
+
+The same noisy directories are also filtered earlier, at the diff level in
+[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go).
+That list matches by path prefix, so it catches only a directory at the
+**repository root**. `vendor/pkg/x.go` never reaches the per-file filter and
+is reported as `provider_directory`; `api/vendor/pkg/x.go` does reach it and
+is reported as `default_path`. Only the second can be brought back by an
+`include` rule.
+
+To **review** a file that matches one of these patterns, add
 it to the user `include` list — that overrides the default-path gate.
 
 ## Rule resolution per file

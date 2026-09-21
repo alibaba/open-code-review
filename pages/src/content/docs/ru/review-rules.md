@@ -132,10 +132,27 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/oh_modules/**`
 - `**/*.test.ets`
 
-Фильтрация шумных каталогов (`vendor/`, `node_modules/`, `target/`, …)
-происходит раньше, на уровне diff в
-[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go),
-до запуска попереходного файлового фильтра.
+…и каталоги зависимостей и сборки:
+
+- `**/node_modules/**`
+- `**/bower_components/**`
+- `**/vendor/**`
+- `**/target/**`
+- `**/dist/**`
+- `**/__pycache__/**`, `**/.venv/**`, `**/site-packages/**`
+- `**/Pods/**`, `**/Carthage/**`
+- `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
+
+`**/build/**` и `**/bin/**` намеренно отсутствуют: во многих проектах в них
+лежат написанные вручную исходники.
+
+Те же шумные каталоги фильтруются и раньше, на уровне diff в
+[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go).
+Этот список сопоставляется по префиксу пути, поэтому ловит каталог только в
+**корне репозитория**: `vendor/pkg/x.go` не доходит до файлового фильтра и
+отмечается как `provider_directory`, а `api/vendor/pkg/x.go` доходит и
+исключается как `default_path`. Вернуть правилом `include` можно только
+второй.
 
 Чтобы **отревьюить** файл, совпадающий с одним из этих шаблонов тестовых
 файлов, добавьте его в пользовательский список `include` — это переопределяет

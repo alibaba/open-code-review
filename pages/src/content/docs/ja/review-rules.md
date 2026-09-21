@@ -96,9 +96,22 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/oh_modules/**`
 - `**/*.test.ets`
 
-ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go) の diff 層で発生し、ファイルごとのフィルタリングより先に実行されます。
+……および依存関係とビルド出力のディレクトリ:
 
-これらのテストファイルパターンに一致するファイルを**レビューする**には、それをユーザー `include` リストに追加してください。それが default-path ゲートを上書きします。
+- `**/node_modules/**`
+- `**/bower_components/**`
+- `**/vendor/**`
+- `**/target/**`
+- `**/dist/**`
+- `**/__pycache__/**`、`**/.venv/**`、`**/site-packages/**`
+- `**/Pods/**`、`**/Carthage/**`
+- `**/.next/**`、`**/.nuxt/**`、`**/.gradle/**`、`**/.terraform/**`……
+
+`**/build/**` と `**/bin/**` は意図的に含めていません。手書きのソースをそこに置くプロジェクトが多いためです。
+
+同じディレクトリは、より早い [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go) の diff 層でもフィルタリングされます。このリストはパスの接頭辞で照合するため、**リポジトリルート**のディレクトリしか捕捉しません。`vendor/pkg/x.go` はファイルごとのフィルタに届かず `provider_directory` として報告され、`api/vendor/pkg/x.go` は届いて `default_path` で除外されます。`include` ルールで戻せるのは後者だけです。
+
+上記いずれかのパターンに一致するファイルを**レビューする**には、それをユーザー `include` リストに追加してください。それが default-path ゲートを上書きします。
 
 ## ファイルごとのルール解決
 
