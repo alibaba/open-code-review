@@ -296,6 +296,7 @@ export const ru: TranslationKeys = {
   'docs.sidebar.claudeCode': 'Command (Claude Code)',
   'docs.sidebar.delegate': 'Режим делегирования',
   'docs.sidebar.cicd': 'CI/CD',
+  'docs.sidebar.acp': 'ACP',
   'docs.sidebar.contributing': 'Участие в разработке',
   'docs.sidebar.faq': 'FAQ',
   'docs.search.placeholder': 'Поиск...',

@@ -294,6 +294,7 @@ export const en = {
   'docs.sidebar.claudeCode': 'Command (Claude Code)',
   'docs.sidebar.delegate': 'Delegation Mode',
   'docs.sidebar.cicd': 'CI/CD',
+  'docs.sidebar.acp': 'ACP',
   'docs.sidebar.contributing': 'Contributing',
   'docs.sidebar.faq': 'FAQ',
   'docs.search.placeholder': 'Search...',
