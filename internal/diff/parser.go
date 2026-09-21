@@ -47,14 +47,8 @@ func splitDiffLines(text string) []string {
 	return lines
 }
 
-// parseDiffHeaderLine extracts the two pathnames from a "diff --git" line.
-//
-// The plain regex handles the ordinary case and keeps its existing behaviour
-// for unquoted names that contain spaces. It cannot match a header where git
-// quoted a side, because the quote sits where the regex expects "a/" or "b/",
-// and a header that does not match starts no file section at all: the whole
-// changed file leaves the review without a warning, and OCR still reports
-// success. parseQuotedDiffHeader covers exactly those headers.
+// parseDiffHeaderLine extracts the two pathnames from a "diff --git" line,
+// falling back to parseQuotedDiffHeader when git has quoted a side (see there).
 func parseDiffHeaderLine(line string) (oldPath string, newPath string, ok bool) {
 	if m := diffHeaderRe.FindStringSubmatch(line); m != nil {
 		return m[1], m[2], true
