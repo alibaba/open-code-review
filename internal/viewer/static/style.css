@@ -577,7 +577,12 @@ h3 {
 .token-breakdown[open] > .token-breakdown-toggle .chevron-sm svg { transform: rotate(90deg); }
 .token-breakdown-body {
     overflow-x: auto;
-    overscroll-behavior: contain;
+    /* x-axis only: overflow-x:auto makes overflow-y compute to auto, so a
+       plain `contain` would swallow vertical wheel events even when there is
+       nothing to scroll vertically, trapping the page scroll under the
+       cursor. Containing just the x-axis keeps horizontal overscroll from
+       chaining while letting vertical wheel fall through to the page. */
+    overscroll-behavior-x: contain;
 }
 .token-breakdown-body:focus-visible {
     outline: 2px solid var(--link);
@@ -1480,7 +1485,12 @@ p {
 
 .sessions-page .table-scroll {
     overflow-x: auto;
-    overscroll-behavior: contain;
+    /* x-axis only: overflow-x:auto makes overflow-y compute to auto, so a
+       plain `contain` would swallow vertical wheel events even when there is
+       nothing to scroll vertically, trapping the page scroll under the
+       cursor. Containing just the x-axis keeps horizontal overscroll from
+       chaining while letting vertical wheel fall through to the page. */
+    overscroll-behavior-x: contain;
 }
 
 .sessions-page .col-session {
@@ -1760,7 +1770,12 @@ nav.breadcrumb a:focus-visible {
 
 .repos-page .table-scroll {
     overflow-x: auto;
-    overscroll-behavior: contain;
+    /* x-axis only: overflow-x:auto makes overflow-y compute to auto, so a
+       plain `contain` would swallow vertical wheel events even when there is
+       nothing to scroll vertically, trapping the page scroll under the
+       cursor. Containing just the x-axis keeps horizontal overscroll from
+       chaining while letting vertical wheel fall through to the page. */
+    overscroll-behavior-x: contain;
 }
 
 .repos-page .col-repository {
