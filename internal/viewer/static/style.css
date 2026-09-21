@@ -1484,7 +1484,7 @@ p {
 }
 
 .sessions-page .col-session {
-    min-width: 13.75rem;
+    width: 7rem;
 }
 
 .sessions-page .col-branch {
