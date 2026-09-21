@@ -454,6 +454,7 @@ func TestIsExcludedPath(t *testing.T) {
 		{"podsmith is not Pods", "ios/podsmith/Helper.swift", false},
 		{"venvironment is not venv", "tools/venvironment/setup.py", false},
 		{"coverages is not coverage", "app/coverages/report.ts", false},
+		{"coverage as a domain dir is reviewed", "src/coverage/plan.ts", false},
 		{"node_modules in a filename", "src/node_modules_helper.ts", false},
 		{"min in a filename is not minified", "src/minified.ts", false},
 		{"lockfile lookalike", "src/package-lock-utils.ts", false},

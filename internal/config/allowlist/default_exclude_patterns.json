@@ -101,5 +101,5 @@
   "**/.terraform/**",
   "**/.terraform.lock.hcl",
   "**/.stack-work/**",
-  "**/coverage/**"
+  "**/coverage/lcov-report/**"
 ]
