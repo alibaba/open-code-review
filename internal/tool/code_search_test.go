@@ -821,3 +821,60 @@ func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	assertContains(t, args, "--exclude-standard")
 	assertNotContains(t, args, "--untracked")
 }
+
+func TestBuildGrepArgs_MaxCountFlag(t *testing.T) {
+	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
+
+	gitGrepSupportsMaxCount.Store(true)
+	args := p.buildGrepArgs("foo", false, false, false, nil)
+	assertContains(t, args, "--max-count")
+
+	gitGrepSupportsMaxCount.Store(false)
+	argsNoMax := p.buildGrepArgs("foo", false, false, false, nil)
+	assertNotContains(t, argsNoMax, "--max-count")
+}
+
+func TestIsUnknownMaxCountError(t *testing.T) {
+	if isUnknownMaxCountError(nil, "error: unknown option `max-count'") {
+		t.Error("expected nil err to return false")
+	}
+
+	nonExitErr := errors.New("generic error")
+	if isUnknownMaxCountError(nonExitErr, "error: unknown option `max-count'") {
+		t.Error("expected non-ExitError to return false")
+	}
+
+	exit128Cmd := exec.Command("git", "--git-dir=/nonexistent-dir-12345", "status")
+	exit128Err := exit128Cmd.Run()
+	if isUnknownMaxCountError(exit128Err, "error: unknown option `max-count'") {
+		t.Error("expected exit 128 to return false")
+	}
+
+	exit129Cmd := exec.Command("git", "--invalid-flag-xyz")
+	exit129Err := exit129Cmd.Run()
+	if isUnknownMaxCountError(exit129Err, "error: unknown option `other-option'") {
+		t.Error("expected exit 129 without max-count in stderr to return false")
+	}
+
+	if !isUnknownMaxCountError(exit129Err, "error: unknown option `max-count'") {
+		t.Error("expected exit 129 with backtick max-count to return true")
+	}
+
+	if !isUnknownMaxCountError(exit129Err, "error: unknown option 'max-count'") {
+		t.Error("expected exit 129 with single-quote max-count to return true")
+	}
+}
+
+func TestGitGrep_FallbackWhenMaxCountUnsupported(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+
+	gitGrepSupportsMaxCount.Store(false)
+	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	if err != nil {
+		t.Fatalf("unexpected error when max-count is disabled: %v", err)
+	}
+	if !strings.Contains(result, "hello.go") {
+		t.Errorf("expected hello.go in result, got: %s", result)
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -18,6 +19,12 @@ const (
 	gitGrepMaxCount = 100
 	gitGrepTimeout  = 10 * time.Second
 )
+
+var gitGrepSupportsMaxCount atomic.Bool
+
+func init() {
+	gitGrepSupportsMaxCount.Store(true)
+}
 
 // CodeSearchProvider performs text search across the repository using git grep.
 type CodeSearchProvider struct {
@@ -81,7 +88,10 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	cmdArgs = append(cmdArgs, "-n", "--no-color")
 	// git grep limits matches per file. Fetch one extra to distinguish an exact
 	// limit from truncated results, then enforce the global limit below.
-	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount+1))
+	// Git < 2.38 does not support --max-count; omit it when unsupported.
+	if gitGrepSupportsMaxCount.Load() {
+		cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount+1))
+	}
 
 	cmdArgs = append(cmdArgs, "-e", searchText)
 
@@ -147,6 +157,15 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 
 	outStr, errStr, err := p.runGitGrep(ctx, cmdArgs)
 
+	// Older git versions (< 2.38) do not support `git grep --max-count` and exit
+	// with code 129 ("unknown option `max-count'"). If detected, disable the flag
+	// globally and retry without it.
+	if err != nil && gitGrepSupportsMaxCount.Load() && isUnknownMaxCountError(err, errStr) {
+		gitGrepSupportsMaxCount.Store(false)
+		cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, false, pathspec)
+		outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
+	}
+
 	// Non-git directory: `git grep` exits 128 with "not a git repository".
 	// `ocr scan` supports plain directories, so retry in --no-index mode, which
 	// searches the working tree directly while still honoring .gitignore.
@@ -154,6 +173,11 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	if err != nil && p.FileReader.Ref == "" && isNotGitRepoError(err, errStr) {
 		cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, true, pathspec)
 		outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
+		if err != nil && gitGrepSupportsMaxCount.Load() && isUnknownMaxCountError(err, errStr) {
+			gitGrepSupportsMaxCount.Store(false)
+			cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, true, pathspec)
+			outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
+		}
 	}
 
 	if err != nil {
@@ -267,6 +291,15 @@ func isNotGitRepoError(err error, stderr string) bool {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 128 &&
 		(strings.Contains(stderr, "not a git repository") || strings.Contains(stderr, ".git")) {
+		return true
+	}
+	return false
+}
+
+func isUnknownMaxCountError(err error, stderr string) bool {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 129 &&
+		strings.Contains(stderr, "max-count") {
 		return true
 	}
 	return false
