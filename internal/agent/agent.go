@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"runtime/debug"
 	"slices"
 	"sort"
@@ -1997,15 +1998,31 @@ func parseFilterResponse(raw string, total int) map[int]struct{} {
 // logExclusions reports the files the selection dropped: the static gates
 // first with their rollup, then the size gate with its own, so the two groups
 // stay distinguishable in the log. Deletions are not reported — they are
-// excluded from review but not dropped from the run, as before.
+// excluded from review but not dropped from the run, as before. Selected files
+// are silent here except for the undecoded-charset warning, which needs the
+// same pass to know the file survived selection.
 func (a *Agent) logExclusions(decisions []fileDecision) {
 	staticSkipped := 0
 	for _, dec := range decisions {
 		// Listed exhaustively rather than defaulted, so a reason added later
 		// cannot silently inherit the path/extension wording.
 		switch dec.Reason {
+		case ExcludeNone:
+			// The file IS reviewed. This is the first point in the run that
+			// knows that, which is why the undecoded warning lives here and
+			// not at the decode site: warning earlier would fire for every
+			// .png and vendored file that was going to be dropped anyway.
+			if dec.Diff.UndecodedCharset != "" {
+				fmt.Fprintf(os.Stderr,
+					"[ocr] WARNING: %s left undecoded (detected %s); review text may contain replacement characters\n",
+					effectivePath(dec.Diff), dec.Diff.UndecodedCharset)
+			}
+			continue
 		case ExcludeBinary:
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", effectivePath(dec.Diff))
+		case ExcludeUndecodable:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — undecodable encoding (detected %s)\n",
+				effectivePath(dec.Diff), dec.Diff.UndecodedCharset)
 		case ExcludeSecret:
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — matches a built-in secret path\n", effectivePath(dec.Diff))
 		case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath:
