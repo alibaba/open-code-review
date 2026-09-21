@@ -240,7 +240,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.astro`                        | `astro.md` — Astro 컴포넌트와 아일랜드.                                          |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                               |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                      |
-| `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — F# 구현, 시그니처, 스크립트 파일.                                              |
+| `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — F# 구현, 시그니처, 스크립트 파일.                                  |
 | `**/*.rs`                           | `rust.md`                                                                        |
 | `**/*.R`                            | `r.md`                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                         |
@@ -255,7 +255,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.jl`                           | `julia.md` — Julia 소스.                                                         |
 | `**/*.{tf,hcl,tfvars}`              | `terraform.md` — Terraform / HCL.                                                |
 | `**/*.bicep`                        | `bicep.md` — Bicep(Azure) 템플릿.                                                |
-| `**/*.nu`                           | `nushell.md` — Nushell 스크립트.                                                |
+| `**/*.nu`                           | `nushell.md` — Nushell 스크립트.                                                 |
 | `**/*.elm`                          | `elm.md` — Elm 소스.                                                             |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리.                                 |
 | `**/*.thrift`                       | `thrift.md` — Apache Thrift IDL 통신 호환성.                                     |
