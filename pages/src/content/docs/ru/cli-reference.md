@@ -291,6 +291,7 @@ ocr review --format json | jq .summary   # stdout — единый JSON-доку
       "content": "Concurrent map access without a lock — wrap with sync.RWMutex.",
       "start_line": 42,
       "end_line": 47,
+      "side": "RIGHT",
       "existing_code": "m[k] = v",
       "suggestion_code": "mu.Lock(); defer mu.Unlock(); m[k] = v",
       "thinking": "Looking at line 42, the map …"
@@ -310,6 +311,8 @@ ocr review --format json | jq .summary   # stdout — единый JSON-доку
 | `warnings` | Необязательно. Присутствует, если один или несколько субагентов завершились с ошибкой; каждая запись описывает затронутый файл и ошибку. |
 | `session_id` | Необязательно. Присутствует у сохранённых запусков ревью; передайте его в `ocr review --resume <session-id>`, чтобы повторить совместимое ревью диапазона или коммита. |
 | `resume` | Необязательно. Присутствует у возобновлённых запусков и содержит `resumed_from`, `reused_files`, `rerun_files`, `previous_model` и `current_model`. |
+
+Каждый привязанный комментарий также содержит `side`: `RIGHT` обозначает файл после изменения, а `LEFT` — файл до изменения для удалённого кода. Для непривязанных комментариев поле отсутствует.
 
 Если для ревью не подошёл ни один файл, режим JSON вместо этого выводит
 объект со статусом `skipped`, чтобы вызывающая сторона могла отличить

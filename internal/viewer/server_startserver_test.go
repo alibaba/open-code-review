@@ -321,6 +321,11 @@ func TestParseTemplate_ExistingCodeLineNumbers(t *testing.T) {
 		wantHasNot []string
 	}{
 		{
+			name:    "old file coordinate is visibly labeled",
+			comment: &ReviewComment{FilePath: "a.go", ExistingCode: "legacy()", StartLine: 2, EndLine: 2, Side: "LEFT"},
+			wantHas: []string{`<span class="comment-badge">LEFT (old file)</span>`, `<span class="line-no" aria-hidden="true">2</span>`},
+		},
+		{
 			name:    "resolved range is numbered",
 			comment: &ReviewComment{FilePath: "a.go", Content: "c", ExistingCode: "a\nb\nc", StartLine: 10, EndLine: 12},
 			wantHas: []string{

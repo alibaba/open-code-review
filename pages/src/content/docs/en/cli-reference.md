@@ -306,6 +306,7 @@ to discard them at the shell.
       "content": "Concurrent map access without a lock — wrap with sync.RWMutex.",
       "start_line": 42,
       "end_line": 47,
+      "side": "RIGHT",
       "existing_code": "m[k] = v",
       "suggestion_code": "mu.Lock(); defer mu.Unlock(); m[k] = v",
       "thinking": "Looking at line 42, the map …"
@@ -326,6 +327,9 @@ Top-level fields:
 | `warnings` | Optional. Present when one or more sub-agents failed; each entry describes the affected file and the error. |
 | `session_id` | Optional. Present on persisted review runs; pass this to `ocr review --resume <session-id>` when retrying compatible range or commit reviews. |
 | `resume` | Optional. Present on resumed runs with `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, and `current_model`. |
+
+Each resolved comment also includes `side`: `RIGHT` for the post-change
+file or `LEFT` for a deleted-code location. Unresolved comments omit it.
 
 When no files were eligible for review, JSON mode emits a `skipped`
 envelope instead so callers can distinguish "no changes" from "no findings":

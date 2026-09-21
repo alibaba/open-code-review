@@ -287,6 +287,7 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
       "content": "Concurrent map access without a lock — wrap with sync.RWMutex.",
       "start_line": 42,
       "end_line": 47,
+      "side": "RIGHT",
       "existing_code": "m[k] = v",
       "suggestion_code": "mu.Lock(); defer mu.Unlock(); m[k] = v",
       "thinking": "Looking at line 42, the map …"
@@ -307,6 +308,8 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
 | `warnings` | 任意。1 つ以上のサブエージェントが失敗した場合に存在します。各項目は影響を受けたファイルとエラーを記述します。 |
 | `session_id` | 任意。永続化されたレビュー実行に含まれます。互換性のある範囲または単一 commit レビューを再試行する際に `ocr review --resume <session-id>` へ渡せます。 |
 | `resume` | 任意。再開した実行で存在し、`resumed_from`、`reused_files`、`rerun_files`、`previous_model`、`current_model` を含みます。 |
+
+解決済みの各コメントには `side` も含まれます。`RIGHT` は変更後のファイル、`LEFT` は削除されたコードの変更前ファイルを示します。位置を解決できないコメントでは省略されます。
 
 レビュー対象のファイルがない場合、JSON モードは `skipped` の外殻を発行し、呼び出し側が「変更なし」と「発見なし」を区別できるようにします:
 

@@ -5,6 +5,8 @@ package com.alibaba.opencodereview.idea.services
 
 import com.alibaba.opencodereview.idea.model.CliRunOptions
 import com.alibaba.opencodereview.idea.model.LogLevel
+import com.alibaba.opencodereview.idea.model.OcrJson
+import com.alibaba.opencodereview.idea.model.ReviewComment
 import com.alibaba.opencodereview.idea.model.ReviewMode
 import com.alibaba.opencodereview.idea.model.ReviewState
 import kotlin.test.Test
@@ -176,6 +178,29 @@ class CliParseTest {
         val result = parseCliResult("""{"status":"success","comments":[{"path":"a","content":"c"}]}""")
         assertEquals(0, result.comments.single().startLine)
         assertEquals(0, result.comments.single().endLine)
+    }
+
+    @Test
+    fun `CLI side survives parsing and model serialization`() {
+        for (side in listOf("LEFT", "RIGHT")) {
+            val result = parseCliResult(
+                """{"status":"success","comments":[{"path":"a.kt","content":"finding","start_line":2,"end_line":2,"side":"$side"}]}""",
+            )
+            val comment = result.comments.single()
+            assertEquals(side, comment.side)
+            val encoded = OcrJson.encodeToString(ReviewComment.serializer(), comment)
+            assertEquals(side, OcrJson.decodeFromString(ReviewComment.serializer(), encoded).side)
+        }
+    }
+
+    @Test
+    fun `missing and empty CLI sides preserve legacy anchoring`() {
+        for (sideField in listOf("", ",\"side\":\"\"")) {
+            val result = parseCliResult(
+                """{"status":"success","comments":[{"path":"a.kt","content":"finding"$sideField}]}""",
+            )
+            assertNull(result.comments.single().side)
+        }
     }
 
     @Test

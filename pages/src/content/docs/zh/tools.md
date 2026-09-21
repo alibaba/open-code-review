@@ -91,8 +91,8 @@ OCR 自动计算行号。
 OCR 用一个**动态滑动窗口**在 diff 中查找 `existing_code` 文本。匹配按序尝试：
 
 1. **hunk 新侧**——一段连续的 **context + added** 行（不是仅有 deleted、也不是仅有
-   unchanged），得到新文件行号。若失败，OCR 重试 **hunk 旧侧**——context +
-   deleted 行——得到旧文件行号。
+   unchanged），得到新文件行号和 `side=RIGHT`。若失败，OCR 重试 **hunk 旧侧**——context +
+   deleted 行——得到旧文件行号和 `side=LEFT`。
 2. **全新文件扫描**——若无 hunk 匹配，OCR 对整个变更后文件逐行扫描连续匹配
    （`resolveFromFileContent`）。
 3. **重新定位任务**——若文本匹配在较复杂的 diff 上仍失败，OCR 运行
@@ -100,6 +100,8 @@ OCR 用一个**动态滑动窗口**在 diff 中查找 `existing_code` 文本。�
 
 匹配**对空白不敏感**：比较前会 trim 行并去除 diff 的 `+`/`-` 标记，因此缩进
 无需精确一致。作为最后手段，评论会以 `start_line=0` 交付，告诉用户“问题是真实的，但需自行定位”。
+
+解析成功的 `side` 会包含在机器可读输出中。`RIGHT` 表示变更后的文件，`LEFT` 表示删除代码所在的变更前文件；无法解析的评论会省略该字段。
 
 ### 示例
 

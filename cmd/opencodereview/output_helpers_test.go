@@ -562,6 +562,21 @@ func TestRenderComment_ContentOnly(t *testing.T) {
 	}
 }
 
+func TestRenderComment_LeftSideShowsDiffSide(t *testing.T) {
+	got := captureStdout(t, func() {
+		renderComment(model.LlmComment{
+			Path:      "deleted.go",
+			StartLine: 5,
+			EndLine:   5,
+			Side:      model.CommentSideLeft,
+			Content:   "review the removed call",
+		}, os.Stdout)
+	})
+	if !strings.Contains(got, "deleted.go:5-5 [LEFT]") {
+		t.Errorf("expected old-side marker, got %q", got)
+	}
+}
+
 func TestRenderComment_WithDiff(t *testing.T) {
 	got := captureStdout(t, func() {
 		renderComment(model.LlmComment{

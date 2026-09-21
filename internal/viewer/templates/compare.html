@@ -38,6 +38,7 @@
         <div class="comment-meta">
             {{if .Category}}<span class="comment-badge {{categoryClass .Category}}">{{.Category}}</span>{{end}}
             {{if .Severity}}<span class="comment-badge {{severityClass .Severity}}">{{.Severity}}</span>{{end}}
+            {{if eq .Side "LEFT"}}<span class="comment-badge">LEFT (old file)</span>{{end}}
             <span class="comment-lines">{{.Path}}{{if .StartLine}}:L{{.StartLine}}{{if and .EndLine (ne .EndLine .StartLine)}}-L{{.EndLine}}{{end}}{{end}}</span>
         </div>
         <div class="comment-content">{{.Content}}</div>
