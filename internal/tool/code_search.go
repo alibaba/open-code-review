@@ -301,9 +301,9 @@ func isNotGitRepoError(err error, stderr string) bool {
 
 func isUnknownMaxCountError(err error, stderr string) bool {
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 129 &&
-		strings.Contains(stderr, "max-count") {
-		return true
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 129 {
+		diagnostic := trimGitUsage(stderr, 129)
+		return strings.Contains(diagnostic, "max-count")
 	}
 	return false
 }

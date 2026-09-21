@@ -865,6 +865,19 @@ func TestIsUnknownMaxCountError(t *testing.T) {
 	if !isUnknownMaxCountError(exit129Err, "error: unknown option 'max-count'") {
 		t.Error("expected exit 129 with single-quote max-count to return true")
 	}
+
+	// On modern Git, an unrelated usage error can include --max-count in the help/usage text,
+	// while the diagnostic line specifies a different option.
+	unrelatedStderr := "error: unknown option `unrelated-flag'\nusage: git grep [<options>]\n    -m, --max-count <n>   process at most <n> matches per file"
+	if isUnknownMaxCountError(exit129Err, unrelatedStderr) {
+		t.Error("expected exit 129 with max-count only in usage help text to return false")
+	}
+
+	// Preserves support for localized diagnostics.
+	localizedStderr := "错误: 未知选项 'max-count'\n用法: git grep [<选项>]" // allow-non-english: fixture verifies localized git diagnostic matching
+	if !isUnknownMaxCountError(exit129Err, localizedStderr) {
+		t.Error("expected exit 129 with localized max-count error to return true")
+	}
 }
 
 func TestGitGrep_FallbackWhenMaxCountUnsupported(t *testing.T) {
@@ -937,11 +950,13 @@ func TestGitGrep_ConcurrentFallback(t *testing.T) {
 	const concurrency = 4
 	var wg sync.WaitGroup
 	errCh := make(chan error, concurrency)
+	startBarrier := make(chan struct{})
 
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			<-startBarrier
 			p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
 			result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
 			if err != nil {
@@ -954,6 +969,7 @@ func TestGitGrep_ConcurrentFallback(t *testing.T) {
 			}
 		}()
 	}
+	close(startBarrier)
 	wg.Wait()
 	close(errCh)
 
