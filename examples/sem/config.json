@@ -1,0 +1,10 @@
+{
+  "mcp_servers": {
+    "sem": {
+      "command": "sem",
+      "args": ["mcp"],
+      "tools": ["sem_entities", "sem_context", "sem_impact", "sem_diff"],
+      "env": ["SEM_CLOUD=0", "SEM_MCP_CLOUD=0"]
+    }
+  }
+}
