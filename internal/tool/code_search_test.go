@@ -10,8 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
@@ -876,5 +878,110 @@ func TestGitGrep_FallbackWhenMaxCountUnsupported(t *testing.T) {
 	}
 	if !strings.Contains(result, "hello.go") {
 		t.Errorf("expected hello.go in result, got: %s", result)
+	}
+}
+
+func shimGitRejectMaxCount(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH shim relies on a shebang script")
+	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("real git not found: %v", err)
+	}
+	dir := t.TempDir()
+	script := fmt.Sprintf(`#!/bin/sh
+for arg in "$@"; do
+	if [ "$arg" = "--max-count" ]; then
+		echo "error: unknown option 'max-count'" >&2
+		echo "usage: git grep [<options>]" >&2
+		exit 129
+	fi
+done
+exec "%s" "$@"
+`, realGit)
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write git shim: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestGitGrep_AutomaticRetryOnUnsupportedMaxCount(t *testing.T) {
+	shimGitRejectMaxCount(t)
+	dir := setupTestRepo(t)
+
+	// Ensure capability cache begins as enabled.
+	gitGrepSupportsMaxCount.Store(true)
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	if err != nil {
+		t.Fatalf("expected automatic retry without max-count to succeed, got: %v", err)
+	}
+	if !strings.Contains(result, "hello.go") {
+		t.Errorf("expected hello.go in result, got: %s", result)
+	}
+	if gitGrepSupportsMaxCount.Load() != false {
+		t.Errorf("expected gitGrepSupportsMaxCount to be updated to false, got true")
+	}
+}
+
+func TestGitGrep_ConcurrentFallback(t *testing.T) {
+	shimGitRejectMaxCount(t)
+	dir := setupTestRepo(t)
+
+	// Multiple concurrent searches begin while capability cache is true.
+	gitGrepSupportsMaxCount.Store(true)
+
+	const concurrency = 4
+	var wg sync.WaitGroup
+	errCh := make(chan error, concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+			result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if !strings.Contains(result, "hello.go") {
+				errCh <- fmt.Errorf("missing hello.go in result: %s", result)
+				return
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("concurrent search failed: %v", err)
+	}
+	if gitGrepSupportsMaxCount.Load() != false {
+		t.Errorf("expected gitGrepSupportsMaxCount to be updated to false, got true")
+	}
+}
+
+func TestGitGrep_NonGitDirectory_AutomaticRetryOnUnsupportedMaxCount(t *testing.T) {
+	shimGitRejectMaxCount(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "hello.go"), []byte("package main\nfunc Hello() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gitGrepSupportsMaxCount.Store(true)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	if err != nil {
+		t.Fatalf("expected non-git directory fallback with retry to succeed, got: %v", err)
+	}
+	if !strings.Contains(result, "hello.go") {
+		t.Errorf("expected hello.go in result, got: %s", result)
+	}
+	if gitGrepSupportsMaxCount.Load() != false {
+		t.Errorf("expected gitGrepSupportsMaxCount to be updated to false, got true")
 	}
 }

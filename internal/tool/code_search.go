@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -155,12 +156,13 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		return "Error: ref must not start with '-'", nil
 	}
 
+	usedMaxCount := slices.Contains(cmdArgs, "--max-count")
 	outStr, errStr, err := p.runGitGrep(ctx, cmdArgs)
 
 	// Older git versions (< 2.38) do not support `git grep --max-count` and exit
-	// with code 129 ("unknown option `max-count'"). If detected, disable the flag
-	// globally and retry without it.
-	if err != nil && gitGrepSupportsMaxCount.Load() && isUnknownMaxCountError(err, errStr) {
+	// with code 129 ("unknown option `max-count'"). If this invocation used the flag,
+	// disable it globally and retry without it.
+	if err != nil && usedMaxCount && isUnknownMaxCountError(err, errStr) {
 		gitGrepSupportsMaxCount.Store(false)
 		cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, false, pathspec)
 		outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
@@ -172,8 +174,9 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	// Ref-based search needs a real repo, so it is not retried.
 	if err != nil && p.FileReader.Ref == "" && isNotGitRepoError(err, errStr) {
 		cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, true, pathspec)
+		usedMaxCount = slices.Contains(cmdArgs, "--max-count")
 		outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
-		if err != nil && gitGrepSupportsMaxCount.Load() && isUnknownMaxCountError(err, errStr) {
+		if err != nil && usedMaxCount && isUnknownMaxCountError(err, errStr) {
 			gitGrepSupportsMaxCount.Store(false)
 			cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, true, pathspec)
 			outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
