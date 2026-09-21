@@ -138,8 +138,8 @@ make build
 │   ├── telemetry/        # OpenTelemetry 集成
 │   ├── tool/             # 内置工具（file_read, code_search 等）
 │   └── viewer/           # WebUI 会话查看器
-├── pages/                # WebUI 前端
-├── scripts/              # 构建和安装脚本
+├── pages/                # WebUI 前端（仓库根目录 pages/）
+├── scripts/              # 构建和安装脚本（仓库根目录 scripts/）
 └── bin/                  # NPM 包装器
 ```
 
