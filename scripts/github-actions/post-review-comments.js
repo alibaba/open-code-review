@@ -155,6 +155,7 @@ async function runPostReviewComments({
     summaryUrl: "",
     checkpointAfter: "",
   };
+  let outsideDiffCount = 0;
 
   // Parsed here, before anything can exit early, even though it is only acted
   // on after the posting loop. Unknown values fall to "off", which is the right
@@ -175,9 +176,10 @@ async function runPostReviewComments({
   // ---- Checkpoint write path (#476) ----
   //
   // The checkpoint may only move forward past a run that published everything
-  // it found: terminal_state "complete" AND nothing failed to post AND a real
-  // 40-hex resolved head. Anything else re-emits the marker this run started
-  // with (carry-forward), so an unrelated failure never silently resets the PR
+  // it found: terminal_state "complete", no blocking posting failures, and a
+  // real 40-hex resolved head. Proven out-of-diff findings are published in the
+  // summary and do not block advancement. Other failures re-emit the marker
+  // this run started with, so an unrelated failure never silently resets the PR
   // to full reviews, and never silently skips a range that was not reviewed.
   //
   // The fourth condition — the summary was actually published — is enforced in
@@ -195,7 +197,7 @@ async function runPostReviewComments({
     stats.checkpointAfter = "";
     if (!checkpointEnabled || !stickySummary) return null;
     if (!manifest || manifest.terminal_state !== "complete") return null;
-    if (stats.failed !== 0) return null;
+    if (stats.failed !== outsideDiffCount) return null;
     // No fingerprint means the resolve step fell over before it computed one
     // (its catch path publishes an empty one). A marker without a fingerprint
     // can never validate, so writing one here would only overwrite a usable
@@ -480,6 +482,7 @@ async function runPostReviewComments({
       });
       successCount += r.succeeded;
       failedCount += r.failed;
+      outsideDiffCount += r.failedComments.filter((fc) => fc.outsideDiff === true).length;
       for (const fc of r.failedComments) failedComments.push(fc);
       batchCounters.attempted++;
       if (r.reconciled) batchCounters.reconciled++;
@@ -738,6 +741,9 @@ async function publishBatch({
           failedComments.push({
             comment: item.comment,
             error: `${describeCommentLocation(item.reviewComment)} could not be resolved (outside PR diff hunks)`,
+            // This is a proven placement limitation, not a publication failure:
+            // the finding is included in the final summary carrying the marker.
+            outsideDiff: true,
           });
           log(`[422-fallback] Comment for ${item.reviewComment.path} (${describeCommentLocation(item.reviewComment)}) is outside PR diff hunks; routing to summary failure.`);
         }
