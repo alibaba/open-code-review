@@ -141,13 +141,22 @@ func RelocateAcrossFiles(cm *model.LlmComment, diffs []model.Diff) (string, bool
 // indexedLine pairs a normalized line with its absolute file line number.
 type indexedLine struct {
 	lineNum int
-	content string
+	// newLineNum is the same line's number in the new file, or 0 when the line
+	// is deleted and so has no position there. A context line carries both.
+	newLineNum int
+	content    string
 }
 
 // resolveFromHunk tries to find startLine/endLine by matching ExistingCode
-// against hunk lines. It tries the new-side first (context + added lines →
-// new-file line numbers), then falls back to old-side (context + deleted →
-// old-file line numbers).
+// against hunk lines, and only ever reports new-file line numbers: StartLine
+// and EndLine have no side field, so every consumer reads them as positions in
+// the new file.
+//
+// The new-side pass (context + added lines) is new-file throughout. The
+// old-side pass (context + deleted lines) exists because the new-side view drops
+// deleted lines, so code quoted around a deletion is not consecutive there. It
+// keeps working only when the matched lines survive into the new file; a match
+// covering a deleted line has no new-file position to report, so it declines.
 func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 	hunks := ParseHunks(d.Diff)
 	if len(hunks) == 0 {
@@ -170,19 +179,32 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 
 	for i := range hunks {
 		oldSide := extractSideLines(&hunks[i], false)
-		if start, end, ok := matchConsecutive(oldSide, targetLines); ok {
-			cm.StartLine = start
-			cm.EndLine = end
-			return true
+		_, _, at, ok := matchConsecutiveIndex(oldSide, targetLines)
+		if !ok {
+			continue
 		}
+		start, end, anchored := newSideSpan(oldSide[at : at+len(targetLines)])
+		if !anchored {
+			// The match covers a deleted line, which has no position in the new
+			// file. Publishing the old-file number would anchor the comment to
+			// whatever unrelated code now sits at that line, so decline here:
+			// the caller's file-content fallback gets a chance, and a comment
+			// that is not found there stays at 0, the documented unanchored
+			// signal. A later hunk may still hold a surviving match.
+			continue
+		}
+		cm.StartLine = start
+		cm.EndLine = end
+		return true
 	}
 
 	return false
 }
 
 // extractSideLines extracts one side of the diff from a hunk.
-// When newSide is true, returns context+added lines with new-file line numbers.
-// When newSide is false, returns context+deleted lines with old-file line numbers.
+// When newSide is true, returns context+added lines numbered in the new file.
+// When newSide is false, returns context+deleted lines numbered in the old file;
+// each line also carries its new-file number, which is 0 for a deleted line.
 func extractSideLines(hunk *Hunk, newSide bool) []indexedLine {
 	var result []indexedLine
 	oldLine := hunk.OldStart
@@ -192,20 +214,20 @@ func extractSideLines(hunk *Hunk, newSide bool) []indexedLine {
 		switch l.Type {
 		case HunkContext:
 			if newSide {
-				result = append(result, indexedLine{newLine, normalizeLine(l.Content)})
+				result = append(result, indexedLine{lineNum: newLine, newLineNum: newLine, content: normalizeLine(l.Content)})
 			} else {
-				result = append(result, indexedLine{oldLine, normalizeLine(l.Content)})
+				result = append(result, indexedLine{lineNum: oldLine, newLineNum: newLine, content: normalizeLine(l.Content)})
 			}
 			oldLine++
 			newLine++
 		case HunkAdded:
 			if newSide {
-				result = append(result, indexedLine{newLine, normalizeLine(l.Content)})
+				result = append(result, indexedLine{lineNum: newLine, newLineNum: newLine, content: normalizeLine(l.Content)})
 			}
 			newLine++
 		case HunkDeleted:
 			if !newSide {
-				result = append(result, indexedLine{oldLine, normalizeLine(l.Content)})
+				result = append(result, indexedLine{lineNum: oldLine, content: normalizeLine(l.Content)})
 			}
 			oldLine++
 		}
@@ -215,8 +237,16 @@ func extractSideLines(hunk *Hunk, newSide bool) []indexedLine {
 
 // matchConsecutive scans sideLines for a consecutive run matching all targetLines.
 func matchConsecutive(sideLines []indexedLine, targetLines []string) (startLine, endLine int, found bool) {
+	startLine, endLine, _, found = matchConsecutiveIndex(sideLines, targetLines)
+	return startLine, endLine, found
+}
+
+// matchConsecutiveIndex is matchConsecutive plus the index of the first matched
+// line, which the old-side pass needs in order to read the run's new-file
+// numbers.
+func matchConsecutiveIndex(sideLines []indexedLine, targetLines []string) (startLine, endLine, at int, found bool) {
 	if len(targetLines) == 0 || len(sideLines) < len(targetLines) {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	for i := 0; i <= len(sideLines)-len(targetLines); i++ {
 		matched := true
@@ -227,10 +257,28 @@ func matchConsecutive(sideLines []indexedLine, targetLines []string) (startLine,
 			}
 		}
 		if matched {
-			return sideLines[i].lineNum, sideLines[i+len(targetLines)-1].lineNum, true
+			return sideLines[i].lineNum, sideLines[i+len(targetLines)-1].lineNum, i, true
 		}
 	}
-	return 0, 0, false
+	return 0, 0, 0, false
+}
+
+// newSideSpan reports the new-file range covered by a matched old-side run, and
+// whether every line in it survives into the new file. A deleted line reports
+// anchored=false, since it has no new-file position.
+//
+// The old-side view omits added lines, so a run that straddles an insertion
+// covers a wider range in the new file than the quoted code does: the two
+// context lines around one insertion sit at new-file 5 and 7, not 5 and 6. The
+// first matched line is exact in both readings, and that is the line a comment
+// anchors to; the extra span only mirrors what the quote already spans.
+func newSideSpan(matched []indexedLine) (startLine, endLine int, anchored bool) {
+	for _, l := range matched {
+		if l.newLineNum == 0 {
+			return 0, 0, false
+		}
+	}
+	return matched[0].newLineNum, matched[len(matched)-1].newLineNum, true
 }
 
 // resolveFromFileContent scans the new file content line-by-line for consecutive

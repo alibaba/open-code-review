@@ -110,7 +110,13 @@ OCR walks the diff looking for the text in `existing_code` using a
 1. **Hunk new-side** — a run of consecutive **context + added** lines
    (not deleted-only, not unchanged-only), yielding new-file line
    numbers. If that fails, OCR retries the **hunk old-side** — context +
-   deleted lines — yielding old-file line numbers.
+   deleted lines. That pass exists because the new-side view drops
+   deleted lines, so code quoted around a deletion is not consecutive
+   there. It reports the new-file number of each matched line that
+   survives into the new file, and declines a match covering a deleted
+   line: `start_line` and `end_line` carry no side, so a deleted line has
+   no number to publish, and the comment stays unanchored instead of
+   pointing at unrelated new-file code.
 2. **Full new-file scan** — if no hunk matched, OCR scans the entire
    post-change file content line-by-line for consecutive matches
    (`resolveFromFileContent`).

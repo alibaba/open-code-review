@@ -18,7 +18,7 @@ const testDiff = `diff --git a/pkg/example/handler.go b/pkg/example/handler.go
 +    log.Printf("handling request: %s", r.URL.Path)
      err := process(ctx)`
 
-func TestResolveLineNumbers_SingleLineHunkMatch(t *testing.T) {
+func TestResolveLineNumbers_DeletedLineIsNotAnchored(t *testing.T) {
 	diffs := []model.Diff{
 		{NewPath: "pkg/example/handler.go", Diff: testDiff},
 	}
@@ -31,18 +31,13 @@ func TestResolveLineNumbers_SingleLineHunkMatch(t *testing.T) {
 		t.Fatalf("expected 1 comment, got %d", len(result))
 	}
 	cm := result[0]
-	if cm.StartLine == 0 || cm.EndLine == 0 {
-		t.Errorf("expected non-zero line numbers, got StartLine=%d EndLine=%d", cm.StartLine, cm.EndLine)
-	}
-	// The existing code is at old-file line 11.
-	// Diff: @@ -10,7 → context "ctx := r.Context()" is old line 10, offset becomes 1.
-	// Then deleted line "log.Print..." matches → OldStart(10) + offset-before-match...
-	// Actually offset increments AFTER each FROM-side check, so it's still 0 when we hit line 0 (context).
-	// After context line, offset=1. Deleted line at index 1 tries match with offset=1 → startLine=11.
-	// Wait — need to trace carefully: ctx line is HunkContext, offset++ makes it 1 before next iteration.
-	// So deleted line sees offset=1, startLine = 10+1 = 11 ✓
-	if cm.StartLine != 11 || cm.EndLine != 11 {
-		t.Errorf("expected 11..11, got %d..%d", cm.StartLine, cm.EndLine)
+	// The quoted line is deleted, so the hunk's only candidate number is its
+	// old-file 11. New-file line 11 holds the replacement log.Printf call, so
+	// publishing that number would anchor the comment to code the quote does
+	// not describe. A deleted line has no new-file position, and StartLine/
+	// EndLine carry no side, so the comment must stay unanchored instead.
+	if cm.StartLine != 0 || cm.EndLine != 0 {
+		t.Errorf("deleted-line match: expected 0..0 (unanchored), got %d..%d", cm.StartLine, cm.EndLine)
 	}
 }
 
@@ -50,9 +45,11 @@ func TestResolveLineNumbers_WhitespaceTolerant(t *testing.T) {
 	diffs := []model.Diff{
 		{NewPath: "pkg/example/handler.go", Diff: testDiff},
 	}
-	// LLM may return indented or differently formatted code
+	// LLM may return indented or differently formatted code. The replacement
+	// line is added, so it does have a new-file position and the tolerance stays
+	// observable: a match that failed outright would leave the comment at 0.
 	comments := []model.LlmComment{
-		{Path: "pkg/example/handler.go", ExistingCode: `log.Print("handling request")`},
+		{Path: "pkg/example/handler.go", ExistingCode: `log.Printf("handling request: %s", r.URL.Path)`},
 	}
 
 	result := ResolveLineNumbers(comments, diffs)
@@ -77,9 +74,12 @@ func TestResolveLineNumbers_MultiLineHunkMatch(t *testing.T) {
 	diffs := []model.Diff{
 		{NewPath: "test.go", Diff: rawMulti},
 	}
+	// The quote is the replacement pair, not the pair it replaced: the deleted
+	// lines number 6..7 in the old file and have no position in the new one, so
+	// only the added lines can be anchored.
 	comments := []model.LlmComment{
-		{Path: "test.go", ExistingCode: `    x := 1
-    y := 2`},
+		{Path: "test.go", ExistingCode: `    x := 10
+    y := 20`},
 	}
 
 	result := ResolveLineNumbers(comments, diffs)
@@ -338,9 +338,9 @@ func TestExtractSideLines_NewSide(t *testing.T) {
 	got := extractSideLines(&hunk, true)
 
 	want := []indexedLine{
-		{10, `ctx := r.Context()`},
-		{11, `log.Printf("new: %s", r.URL)`},
-		{12, `err := process(ctx)`},
+		{10, 10, `ctx := r.Context()`},
+		{11, 11, `log.Printf("new: %s", r.URL)`},
+		{12, 12, `err := process(ctx)`},
 	}
 
 	if len(got) != len(want) {
@@ -368,19 +368,23 @@ func TestExtractSideLines_OldSide(t *testing.T) {
 
 	got := extractSideLines(&hunk, false)
 
+	// The old side numbers lines in the old file, and each line also records
+	// where it landed in the new file: the deleted line has no position there,
+	// which is what lets the resolver refuse to publish an old-file number.
 	want := []indexedLine{
-		{10, `ctx := r.Context()`},
-		{11, `log.Print("old")`},
-		{12, `err := process(ctx)`},
+		{lineNum: 10, newLineNum: 10, content: `ctx := r.Context()`},
+		{lineNum: 11, newLineNum: 0, content: `log.Print("old")`},
+		{lineNum: 12, newLineNum: 12, content: `err := process(ctx)`},
 	}
 
 	if len(got) != len(want) {
 		t.Fatalf("old-side: expected %d lines, got %d", len(want), len(got))
 	}
 	for i := range want {
-		if got[i].lineNum != want[i].lineNum || got[i].content != want[i].content {
-			t.Errorf("old-side[%d]: got {%d, %q}, want {%d, %q}",
-				i, got[i].lineNum, got[i].content, want[i].lineNum, want[i].content)
+		if got[i] != want[i] {
+			t.Errorf("old-side[%d]: got {%d, %d, %q}, want {%d, %d, %q}",
+				i, got[i].lineNum, got[i].newLineNum, got[i].content,
+				want[i].lineNum, want[i].newLineNum, want[i].content)
 		}
 	}
 }
@@ -417,6 +421,15 @@ func TestExtractSideLines_DivergentStartLines(t *testing.T) {
 	for i, w := range wantOld {
 		if oldSide[i].lineNum != w {
 			t.Errorf("old-side[%d].lineNum = %d, want %d", i, oldSide[i].lineNum, w)
+		}
+	}
+	// The same two lines are A(new 8) and C(new 10); the insertion at B is what
+	// pulls the numberings apart, and it is why an old-side match has to be
+	// re-read on the new side before any number is published.
+	wantOldNew := []int{8, 10}
+	for i, w := range wantOldNew {
+		if oldSide[i].newLineNum != w {
+			t.Errorf("old-side[%d].newLineNum = %d, want %d", i, oldSide[i].newLineNum, w)
 		}
 	}
 }
@@ -471,7 +484,7 @@ func TestExtractSideLines_OnlyDeleted(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMatchConsecutive_SingleLine(t *testing.T) {
-	lines := []indexedLine{{5, "hello"}, {6, "world"}, {7, "foo"}}
+	lines := []indexedLine{{5, 5, "hello"}, {6, 6, "world"}, {7, 7, "foo"}}
 	start, end, ok := matchConsecutive(lines, []string{"world"})
 	if !ok || start != 6 || end != 6 {
 		t.Errorf("single-line: got (%d, %d, %v), want (6, 6, true)", start, end, ok)
@@ -479,7 +492,7 @@ func TestMatchConsecutive_SingleLine(t *testing.T) {
 }
 
 func TestMatchConsecutive_MultiLine(t *testing.T) {
-	lines := []indexedLine{{1, "a"}, {2, "b"}, {3, "c"}, {4, "d"}}
+	lines := []indexedLine{{1, 1, "a"}, {2, 2, "b"}, {3, 3, "c"}, {4, 4, "d"}}
 	start, end, ok := matchConsecutive(lines, []string{"b", "c"})
 	if !ok || start != 2 || end != 3 {
 		t.Errorf("multi-line: got (%d, %d, %v), want (2, 3, true)", start, end, ok)
@@ -487,7 +500,7 @@ func TestMatchConsecutive_MultiLine(t *testing.T) {
 }
 
 func TestMatchConsecutive_NoMatch(t *testing.T) {
-	lines := []indexedLine{{1, "a"}, {2, "b"}}
+	lines := []indexedLine{{1, 1, "a"}, {2, 2, "b"}}
 	_, _, ok := matchConsecutive(lines, []string{"x"})
 	if ok {
 		t.Errorf("expected no match")
@@ -495,7 +508,7 @@ func TestMatchConsecutive_NoMatch(t *testing.T) {
 }
 
 func TestMatchConsecutive_FirstMatchWins(t *testing.T) {
-	lines := []indexedLine{{10, "x"}, {11, "y"}, {20, "x"}, {21, "y"}}
+	lines := []indexedLine{{10, 10, "x"}, {11, 11, "y"}, {20, 20, "x"}, {21, 21, "y"}}
 	start, end, ok := matchConsecutive(lines, []string{"x", "y"})
 	if !ok || start != 10 || end != 11 {
 		t.Errorf("first match: got (%d, %d, %v), want (10, 11, true)", start, end, ok)
@@ -503,7 +516,7 @@ func TestMatchConsecutive_FirstMatchWins(t *testing.T) {
 }
 
 func TestMatchConsecutive_TargetLongerThanLines(t *testing.T) {
-	lines := []indexedLine{{1, "a"}}
+	lines := []indexedLine{{1, 1, "a"}}
 	_, _, ok := matchConsecutive(lines, []string{"a", "b"})
 	if ok {
 		t.Errorf("expected no match when target is longer")
@@ -518,7 +531,7 @@ func TestMatchConsecutive_EmptySideLines(t *testing.T) {
 }
 
 func TestMatchConsecutive_MatchAtEnd(t *testing.T) {
-	lines := []indexedLine{{1, "a"}, {2, "b"}, {3, "c"}}
+	lines := []indexedLine{{1, 1, "a"}, {2, 2, "b"}, {3, 3, "c"}}
 	start, end, ok := matchConsecutive(lines, []string{"b", "c"})
 	if !ok || start != 2 || end != 3 {
 		t.Errorf("match-at-end: got (%d, %d, %v), want (2, 3, true)", start, end, ok)
@@ -526,7 +539,7 @@ func TestMatchConsecutive_MatchAtEnd(t *testing.T) {
 }
 
 func TestMatchConsecutive_MatchAtStart(t *testing.T) {
-	lines := []indexedLine{{1, "a"}, {2, "b"}, {3, "c"}}
+	lines := []indexedLine{{1, 1, "a"}, {2, 2, "b"}, {3, 3, "c"}}
 	start, end, ok := matchConsecutive(lines, []string{"a", "b"})
 	if !ok || start != 1 || end != 2 {
 		t.Errorf("match-at-start: got (%d, %d, %v), want (1, 2, true)", start, end, ok)
@@ -534,10 +547,47 @@ func TestMatchConsecutive_MatchAtStart(t *testing.T) {
 }
 
 func TestMatchConsecutive_ExactFull(t *testing.T) {
-	lines := []indexedLine{{1, "a"}, {2, "b"}}
+	lines := []indexedLine{{1, 1, "a"}, {2, 2, "b"}}
 	start, end, ok := matchConsecutive(lines, []string{"a", "b"})
 	if !ok || start != 1 || end != 2 {
 		t.Errorf("exact-full: got (%d, %d, %v), want (1, 2, true)", start, end, ok)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// newSideSpan unit tests
+// ---------------------------------------------------------------------------
+
+func TestNewSideSpan_SurvivingLines(t *testing.T) {
+	// Old-file 5 and 6, new-file 5 and 7: the insertion between them is absent
+	// from the old-side view, so the matched run is wider on the new side.
+	matched := []indexedLine{
+		{lineNum: 5, newLineNum: 5, content: "x := 1"},
+		{lineNum: 6, newLineNum: 7, content: "y := 2"},
+	}
+	start, end, anchored := newSideSpan(matched)
+	if !anchored || start != 5 || end != 7 {
+		t.Errorf("got (%d, %d, %v), want (5, 7, true)", start, end, anchored)
+	}
+}
+
+func TestNewSideSpan_DeletedLine(t *testing.T) {
+	matched := []indexedLine{
+		{lineNum: 5, newLineNum: 5, content: "x := 1"},
+		{lineNum: 6, newLineNum: 0, content: "removed()"},
+	}
+	start, end, anchored := newSideSpan(matched)
+	if anchored || start != 0 || end != 0 {
+		t.Errorf("got (%d, %d, %v), want (0, 0, false)", start, end, anchored)
+	}
+}
+
+func TestNewSideSpan_SingleDeletedLine(t *testing.T) {
+	start, end, anchored := newSideSpan([]indexedLine{
+		{lineNum: 2, newLineNum: 0, content: "legacyCall()"},
+	})
+	if anchored || start != 0 || end != 0 {
+		t.Errorf("got (%d, %d, %v), want (0, 0, false)", start, end, anchored)
 	}
 }
 
@@ -587,9 +637,81 @@ func TestResolveFromHunk_OldSideAcrossAddedLines(t *testing.T) {
 
 	result := ResolveLineNumbers(comments, diffs)
 	cm := result[0]
-	// Old-side extracts [x:=1(5), y:=2(6), }(7)] — consecutive after skipping added line
-	if cm.StartLine != 5 || cm.EndLine != 6 {
-		t.Errorf("old-side across added: expected 5..6, got %d..%d", cm.StartLine, cm.EndLine)
+	// Both quoted lines survive, but the insertion splits them in the new file:
+	// y := 2 moves from old-file 6 to new-file 7. Old-side extracts
+	// [x:=1(5), y:=2(6), }(7)] and matches at 5..6, which is only correct for the
+	// old file. Every matched line has a new-file number, so the span is
+	// reported as 5..7; the anchor at 5 is exact, since that is where the quote
+	// starts in the new file.
+	if cm.StartLine != 5 || cm.EndLine != 7 {
+		t.Errorf("old-side across added: expected new-file 5..7, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveLineNumbers_DeletedCodeBelowInsertions(t *testing.T) {
+	// The report in #1486. Ten lines are inserted above a deleted legacyCall(),
+	// and a comment quotes the deleted code. Old-side matching returned old-file
+	// line 2, which it published as StartLine; new-file line 2 is added1(), so
+	// the comment landed on unrelated inserted code with no field recording that
+	// the number was an old-file one. Old-file 2 is not "line 2 of the file
+	// being reviewed" - the deletion makes the two numberings disagree.
+	raw := `diff --git a/main.go b/main.go
+--- a/main.go
++++ b/main.go
+@@ -1,4 +1,13 @@
+ package main
++    added1()
++    added2()
++    added3()
++    added4()
++    added5()
++    added6()
++    added7()
++    added8()
++    added9()
++    added10()
+-    legacyCall()
+ func foo() {
+ }`
+
+	// The two cases are the paths a caller can actually reach: hunks alone, and
+	// the new-file content that the fallback scans when the hunks decline.
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{name: "hunks only"},
+		{
+			name: "with new file content",
+			content: `package main
+    added1()
+    added2()
+    added3()
+    added4()
+    added5()
+    added6()
+    added7()
+    added8()
+    added9()
+    added10()
+func foo() {
+}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			diffs := []model.Diff{{NewPath: "main.go", Diff: raw, NewFileContent: tc.content}}
+			comments := []model.LlmComment{
+				{Path: "main.go", ExistingCode: `    legacyCall()`},
+			}
+
+			result := ResolveLineNumbers(comments, diffs)
+			cm := result[0]
+			if cm.StartLine != 0 || cm.EndLine != 0 {
+				t.Errorf("deleted legacyCall(): expected 0..0 (unanchored), got %d..%d", cm.StartLine, cm.EndLine)
+			}
+		})
 	}
 }
 
@@ -793,9 +915,10 @@ func TestResolveLineNumbers_MultipleCommentsOnSameFile(t *testing.T) {
 	if result[1].StartLine != 3 || result[1].EndLine != 3 {
 		t.Errorf("comment[1]: expected 3..3, got %d..%d", result[1].StartLine, result[1].EndLine)
 	}
-	// comment 2: deleted old() → old-side; @@ -1,4: old-side lines: package(1), main(2), old(3), }(4)
-	if result[2].StartLine != 3 || result[2].EndLine != 3 {
-		t.Errorf("comment[2]: expected 3..3, got %d..%d", result[2].StartLine, result[2].EndLine)
+	// comment 2: deleted old() has no new-file position, so it stays unanchored
+	// rather than reporting old-file line 3, which is import "os" in the new file.
+	if result[2].StartLine != 0 || result[2].EndLine != 0 {
+		t.Errorf("comment[2]: expected 0..0 (unanchored), got %d..%d", result[2].StartLine, result[2].EndLine)
 	}
 }
 
@@ -809,9 +932,12 @@ func TestResolveLineNumbers_OldPathMapping(t *testing.T) {
 +func newFunc() {}`
 
 	diffs := []model.Diff{{OldPath: "old_name.go", NewPath: "new_name.go", Diff: raw}}
-	// Comment references old path — should still resolve via diffByPath[oldPath]
+	// Comment references the old path — it should still resolve through
+	// diffByPath[oldPath]. The quote is the replacement line: the deleted
+	// func oldFunc() has no new-file position, so quoting it would leave the
+	// comment unanchored and prove nothing about the path lookup.
 	comments := []model.LlmComment{
-		{Path: "old_name.go", ExistingCode: "func oldFunc() {}"},
+		{Path: "old_name.go", ExistingCode: "func newFunc() {}"},
 	}
 
 	result := ResolveLineNumbers(comments, diffs)
