@@ -148,8 +148,7 @@ make build
 │   ├── telemetry/        # OpenTelemetry integration
 │   ├── tool/             # Built-in tools (file_read, code_search, etc.)
 │   └── viewer/           # WebUI session viewer
-├── pages/                # WebUI frontend (repo-root pages/)
-├── scripts/              # Build & install scripts (repo-root scripts/)
+├── pages/                # Deployed documentation
 └── bin/                  # NPM wrapper
 ```
 

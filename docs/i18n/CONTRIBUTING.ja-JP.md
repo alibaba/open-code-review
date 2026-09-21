@@ -138,8 +138,7 @@ make build
 │   ├── telemetry/        # OpenTelemetry統合
 │   ├── tool/             # 組み込みツール（file_read、code_searchなど）
 │   └── viewer/           # WebUIセッションビューアー
-├── pages/                # WebUIフロントエンド (repo-root pages/)
-├── scripts/              # ビルド & インストールスクリプト (repo-root scripts/)
+├── pages/                # デプロイ済みドキュメント
 └── bin/                  # NPMラッパー
 ```
 

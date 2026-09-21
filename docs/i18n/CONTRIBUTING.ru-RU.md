@@ -138,8 +138,7 @@ make build
 │   ├── telemetry/        # Интеграция с OpenTelemetry
 │   ├── tool/             # Встроенные инструменты (file_read, code_search и др.)
 │   └── viewer/           # WebUI-просмотрщик сессий
-├── pages/                # Фронтенд WebUI (repo-root pages/)
-├── scripts/              # Скрипты сборки и установки (repo-root scripts/)
+├── pages/                # Развёрнутая документация
 └── bin/                  # NPM-обёртка
 ```
 
