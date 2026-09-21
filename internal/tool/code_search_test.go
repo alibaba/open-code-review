@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -223,6 +224,17 @@ func TestGitGrep_ResultLimit(t *testing.T) {
 				}
 				if count := strings.Count(got, "|result_limit_needle\n"); count != tc.wantCount {
 					t.Errorf("returned %d matches, want %d", count, tc.wantCount)
+				}
+				if tc.binaryCount > 0 {
+					if strings.Contains(got, "0_binary_") {
+						t.Errorf("binary diagnostics leaked into text results: %s", got)
+					}
+					if tc.firstCount > 0 && !strings.Contains(got, "File: a.go\n") {
+						t.Errorf("text file path was corrupted by binary diagnostics: %s", got)
+					}
+					if tc.firstCount == 0 && tc.secondCount == 0 && got != "No matches found" {
+						t.Errorf("binary-only search = %q, want No matches found", got)
+					}
 				}
 				if truncated := strings.Contains(got, "Some files are partially shown or omitted entirely"); truncated != tc.truncated {
 					t.Errorf("truncation notice = %v, want %v", truncated, tc.truncated)
@@ -820,4 +832,48 @@ func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	assertContains(t, args, "--no-index")
 	assertContains(t, args, "--exclude-standard")
 	assertNotContains(t, args, "--untracked")
+}
+
+// TestCodeSearchSpecialPaths checks the actual Git output format, including
+// revision prefixes, rather than mocking the delimiters the parser expects.
+func TestCodeSearchSpecialPaths(t *testing.T) {
+	for _, name := range []string{"normal.go", "foo:bar.go", "foo:123:bar.go", "a\"b.go", "line\nbreak.go", "\u7528\u6237.go"} {
+		t.Run(name, func(t *testing.T) {
+			if runtime.GOOS == "windows" && strings.ContainsAny(name, ":\"\n") {
+				t.Skip("filename is not supported on Windows")
+			}
+			dir := setupTestRepo(t)
+			run := func(args ...string) {
+				t.Helper()
+				cmd := exec.Command("git", args...)
+				cmd.Dir = dir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git %v: %v\n%s", args, err, out)
+				}
+			}
+			run("config", "core.quotepath", "true")
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("package example\n// needle: one\n// needle: two\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			check := func(t *testing.T, ref string, runner *gitcmd.Runner) {
+				t.Helper()
+				p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: ref, Runner: runner})
+				got, err := p.Execute(context.Background(), map[string]any{"search_text": "needle"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := "File: " + name + "\nMatch lines: 2\n2|// needle: one\n3|// needle: two\n\n"
+				if got != want {
+					t.Errorf("got %q, want %q", got, want)
+				}
+			}
+			t.Run("untracked", func(t *testing.T) { check(t, "", nil) })
+			run("add", ".")
+			run("commit", "-m", "add search fixture")
+			for _, ref := range []string{"", "HEAD"} {
+				t.Run("tracked/"+ref, func(t *testing.T) { check(t, ref, nil) })
+				t.Run("runner/"+ref, func(t *testing.T) { check(t, ref, gitcmd.New(2)) })
+			}
+		})
+	}
 }

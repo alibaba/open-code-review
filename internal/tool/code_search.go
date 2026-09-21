@@ -78,7 +78,9 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 		cmdArgs = append(cmdArgs, "-F")
 	}
 
-	cmdArgs = append(cmdArgs, "-n", "--no-color")
+	// Binary-match notices are plain text even with -z and would corrupt the
+	// NUL-delimited records below. Only request line matches from text files.
+	cmdArgs = append(cmdArgs, "-I", "-n", "-z", "--no-color")
 	// git grep limits matches per file. Fetch one extra to distinguish an exact
 	// limit from truncated results, then enforce the global limit below.
 	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount+1))
@@ -180,8 +182,6 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		}
 	}
 
-	lines := strings.Split(strings.TrimRight(outStr, "\n"), "\n")
-
 	type match struct {
 		lineNum int
 		content string
@@ -190,29 +190,28 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	var fileOrder []string
 	seen := make(map[string]bool)
 
-	hasRef := p.FileReader.Ref != ""
-	splitN := 3
-	offset := 0
-	if hasRef {
-		splitN = 4
-		offset = 1
-	}
-
 	matchCount := 0
 	truncated := false
 	matchedFiles := make(map[string]bool)
-	for _, line := range lines {
-		if line == "" {
-			continue
+	// With -n -z, Git emits path NUL line-number NUL content LF.
+	// Consume the path before looking for LF: filenames may contain both
+	// colons and newlines, and must not be parsed as display-formatted text.
+	for remaining := outStr; remaining != ""; {
+		fname, rest, ok := strings.Cut(remaining, "\x00")
+		if !ok {
+			break
 		}
-		parts := strings.SplitN(line, ":", splitN)
-		if len(parts) < splitN {
-			continue
+		lineNumber, rest, ok := strings.Cut(rest, "\x00")
+		if !ok {
+			break
 		}
-		fname := parts[offset]
-		ln, parseErr := strconv.Atoi(parts[offset+1])
+		content, next, _ := strings.Cut(rest, "\n")
+		remaining = next
+		if ref := p.FileReader.Ref; ref != "" {
+			fname = strings.TrimPrefix(fname, ref+":")
+		}
+		ln, parseErr := strconv.Atoi(lineNumber)
 		if parseErr != nil {
-			// Skip lines whose line-number field is not numeric.
 			continue
 		}
 		// Count every file with a text match, including those beyond the render
@@ -223,7 +222,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			truncated = true
 			continue
 		}
-		m := match{lineNum: ln, content: parts[offset+2]}
+		m := match{lineNum: ln, content: content}
 		if !seen[fname] {
 			seen[fname] = true
 			fileOrder = append(fileOrder, fname)
