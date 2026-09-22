@@ -4,6 +4,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -33,6 +34,8 @@ const (
 // only for explicitly selected tools, every invocation asks for approval, and
 // an unanswered prompt expires after 60 seconds.
 type MCPConfig struct {
+	unknownJSONFields map[string]json.RawMessage
+
 	Version                int        `json:"version,omitempty"`
 	Enabled                *bool      `json:"enabled,omitempty"`
 	DefaultPermission      Permission `json:"default_permission,omitempty"`
@@ -42,6 +45,8 @@ type MCPConfig struct {
 // MCPServerConfig contains connection details and the explicit tool allowlist
 // for one MCP server. An empty Tools slice enables no tools.
 type MCPServerConfig struct {
+	unknownJSONFields map[string]json.RawMessage
+
 	Type    string            `json:"type,omitempty"`
 	Command string            `json:"command,omitempty"`
 	Args    []string          `json:"args,omitempty"`
@@ -191,6 +196,13 @@ func enabled(value *bool) bool {
 }
 
 func cloneServerConfig(config MCPServerConfig) MCPServerConfig {
+	if config.unknownJSONFields != nil {
+		fields := make(map[string]json.RawMessage, len(config.unknownJSONFields))
+		for key, value := range config.unknownJSONFields {
+			fields[key] = slices.Clone(value)
+		}
+		config.unknownJSONFields = fields
+	}
 	config.Args = slices.Clone(config.Args)
 	config.Env = slices.Clone(config.Env)
 	config.Tools = slices.Clone(config.Tools)

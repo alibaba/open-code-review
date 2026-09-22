@@ -4,11 +4,13 @@
 package viewer
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -243,13 +245,20 @@ func TestRenderTemplate_SessionsTableMockup(t *testing.T) {
 	})
 	body := rr.Body.String()
 
-	const header = `<thead><tr><th>Session ID</th><th>Branch</th><th>Mode</th><th>Model</th>` +
-		`<th>Files</th><th>Status</th><th>Comments</th><th>Duration</th><th>Started At</th><th class="col-action">Action</th></tr></thead>`
+	// Every th carries scope="col": the session cell no longer repeats the word
+	// "Session", so the header is what tells a screen reader what the column holds.
+	const header = `<thead><tr><th scope="col">Session ID</th><th scope="col">Branch</th><th scope="col">Mode</th><th scope="col">Model</th>` +
+		`<th scope="col">Files</th><th scope="col">Status</th><th scope="col">Comments</th><th scope="col">Duration</th><th scope="col">Started At</th><th scope="col" class="col-action">Action</th></tr></thead>`
 	for _, want := range []string{
 		header,
 		`id="sessions-table"`,
+		`<div class="table-scroll" role="region" aria-label="Sessions table">`,
 		`<a class="back-link" href="/" aria-label="Back to repositories"><svg`,
-		`<td class="col-session"><a class="session-id" href="/r/my-repo/` + fullID + `" title="` + fullID + `">Session: b029c726-7b6b-46aa-b923-9fea9f…</a></td>`,
+		// Session ids are random v4 UUIDs, so the first segment already separates
+		// any two of them; the remaining 27 characters cost a wide column and buy
+		// no distinguishing power. The full value stays in title= and in the href,
+		// so hovering and linking are unaffected.
+		`<td class="col-session"><a class="session-id" href="/r/my-repo/` + fullID + `" title="` + fullID + `">b029c726…</a></td>`,
 		`<td class="col-branch">refactor/rename-runprofile</td>`,
 		`<td class="col-mode">range</td>`,
 		`<td class="col-model">claude-opus-5</td>`,
@@ -331,6 +340,119 @@ func TestSurfaceCSS_LightSurfaceIsWhite(t *testing.T) {
 	if !dark.Match(css) {
 		t.Error("style.css lost the dark-mode --surface: #0a0a0a token: " +
 			"dark surfaces must keep sitting above the black page")
+	}
+}
+
+// TestTextTokens_MeetWCAGAAOnPageBackground holds the muted and secondary
+// text tokens to WCAG AA (4.5:1) against each theme's *page* background, so
+// future palette tweaks cannot quietly drop the low-emphasis labels back
+// below the line. Both tokens blend pure black (light) or pure white (dark)
+// at an alpha, which makes the blended color a gray and the luminance math
+// a single channel.
+func TestTextTokens_MeetWCAGAAOnPageBackground(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	text := string(css)
+
+	// Split the sheet at the dark media query so each side contains exactly
+	// one page background, then read whatever --bg it declares.
+	darkStart := strings.Index(text, "@media (prefers-color-scheme: dark)")
+	if darkStart == -1 {
+		t.Fatal("style.css is missing the dark @media block")
+	}
+	bgGray := func(section, theme string) float64 {
+		t.Helper()
+		ms := regexp.MustCompile(`--bg: (#[0-9a-fA-F]{6});`).FindAllStringSubmatch(section, -1)
+		if len(ms) != 1 {
+			t.Fatalf("%s section has %d --bg tokens, want exactly 1", theme, len(ms))
+		}
+		v, err := strconv.ParseInt(strings.TrimPrefix(ms[0][1], "#"), 16, 32)
+		if err != nil {
+			t.Fatalf("parse --bg %q: %v", ms[0][1], err)
+		}
+		// The token is a flat hex like #ffffff; one channel is the gray.
+		return float64(v&0xff) / 255
+	}
+	lightBG := bgGray(text[:darkStart], "light")
+	darkBG := bgGray(text[darkStart:], "dark")
+
+	luminance := func(channel float64) float64 {
+		if channel <= 0.04045 {
+			return channel / 12.92
+		}
+		return math.Pow((channel+0.055)/1.055, 2.4)
+	}
+	// ratio blends the token's alpha over its page background (black text
+	// on the light page, white text on the dark page) and returns the WCAG
+	// contrast ratio for the resulting gray.
+	ratio := func(alpha float64, whiteText bool, page float64) float64 {
+		channel := 1 - alpha
+		if whiteText {
+			channel = alpha
+		}
+		fg, bg := luminance(channel), luminance(page)
+		if fg < bg {
+			fg, bg = bg, fg
+		}
+		return (fg + 0.05) / (bg + 0.05)
+	}
+	onlyAlpha := func(pattern string) float64 {
+		t.Helper()
+		ms := regexp.MustCompile(pattern).FindAllStringSubmatch(text, -1)
+		if len(ms) != 1 {
+			t.Fatalf("style.css has %d matches for %q, want exactly 1 (a second theme reusing this channel pattern would make positional matching silently pick the wrong rule)", len(ms), pattern)
+		}
+		v, err := strconv.ParseFloat(ms[0][1], 64)
+		if err != nil {
+			t.Fatalf("parse alpha %q: %v", ms[0][1], err)
+		}
+		return v
+	}
+
+	tokens := []struct {
+		name       string
+		blackAlpha float64 // light mode: rgba(0, 0, 0, alpha)
+		whiteAlpha float64 // dark mode: rgba(255, 255, 255, alpha)
+	}{
+		{"--text-muted", onlyAlpha(`--text-muted: rgba\(0, 0, 0, ([\d.]+)\);`), onlyAlpha(`--text-muted: rgba\(255, 255, 255, ([\d.]+)\);`)},
+		{"--text-secondary", onlyAlpha(`--text-secondary: rgba\(0, 0, 0, ([\d.]+)\);`), onlyAlpha(`--text-secondary: rgba\(255, 255, 255, ([\d.]+)\);`)},
+	}
+	for _, tc := range tokens {
+		if got := ratio(tc.blackAlpha, false, lightBG); got < 4.5 {
+			t.Errorf("light %s contrasts at %.2f:1, want >= 4.5 (WCAG AA)", tc.name, got)
+		}
+		if got := ratio(tc.whiteAlpha, true, darkBG); got < 4.5 {
+			t.Errorf("dark %s contrasts at %.2f:1, want >= 4.5 (WCAG AA)", tc.name, got)
+		}
+	}
+}
+
+// TestFocusCSS_CoversCollapsiblesAndTableLinks holds the focus-visible rules for the
+// collapsible headers, in-table links and scrollable table regions: these
+// elements have no other visible focus indicator, so losing the rule would
+// leave keyboard users with no sign of where they are.
+func TestFocusCSS_CoversCollapsiblesAndTableLinks(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	for _, selector := range []string{
+		".file-accordion-header:focus-visible",
+		".token-breakdown-toggle:focus-visible",
+		".comment-file-header:focus-visible",
+		".tool-detail-toggle:focus-visible",
+		".error-detail-toggle:focus-visible",
+		".table a:focus-visible",
+		"nav.breadcrumb a:focus-visible",
+		".repos-page .table-scroll:focus-visible",
+		".sessions-page .table-scroll:focus-visible",
+	} {
+		if !strings.Contains(string(css), selector) {
+			t.Errorf("style.css is missing the %q focus-visible rule: "+
+				"these elements have no other visible focus indicator for keyboard users", selector)
+		}
 	}
 }
 
@@ -494,7 +616,7 @@ func TestRenderTemplate_SecondarySectionsCollapsedByDefault(t *testing.T) {
 	if !strings.Contains(body, `<details class="token-breakdown">`) || strings.Contains(body, `<details class="token-breakdown" open>`) {
 		t.Fatal("file token breakdown should be rendered and collapsed by default")
 	}
-	if !strings.Contains(body, `<details class="comment-file-group" open>`) {
+	if !strings.Contains(body, `<details class="comment-file-group" open hidden>`) {
 		t.Fatal("review comment groups should remain expanded")
 	}
 }
@@ -747,6 +869,7 @@ func TestRenderTemplate_ReposTableMockup(t *testing.T) {
 	body := rr.Body.String()
 	for _, required := range []string{
 		`<main class="repos-page">`,
+		`<div class="table-scroll" role="region" aria-label="Repositories table">`,
 		`<th scope="col" class="col-action">Action</th>`,
 		`<a class="repo-check" href="/r/my-project">Check</a>`,
 		`<td class="col-repository" data-repository-name><a href="/r/my-project">my-project</a></td>`,
@@ -801,6 +924,9 @@ func TestReposJS_PagerContract(t *testing.T) {
 	if !strings.Contains(string(js), "ocrPager") || !strings.Contains(string(js), "filter:") {
 		t.Error("repos.js should hand the table and its search filter to the shared ocrPager")
 	}
+	if !strings.Contains(string(js), "pagerApi.reset()") {
+		t.Error("repos.js should reset to page 1 when the search query changes")
+	}
 }
 
 func TestPagerJS_Contract(t *testing.T) {
@@ -822,8 +948,14 @@ func TestPagerJS_Contract(t *testing.T) {
 		"pager.hidden = total < 2",
 		// Focus returns to the current page number / an enabled step.
 		"preventScroll",
-		// The repositories search re-applies its filter from page 1.
-		"refresh",
+		// refresh keeps the current page (clamped); reset starts at page 1.
+		"refresh: () => render()",
+		"reset: () => render(1)",
+		// Detail pages can hand arbitrary result elements to the same pager.
+		"data-pagination-source",
+		"data-pagination-item",
+		"paginationPageSize",
+		"nextElementSibling",
 	} {
 		if !strings.Contains(string(script), want) {
 			t.Errorf("pager.js is missing %q", want)
@@ -831,9 +963,82 @@ func TestPagerJS_Contract(t *testing.T) {
 	}
 }
 
+func TestSessionTemplatePaginatesLongResultSections(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary: SessionSummary{
+			SessionID:     "s",
+			CWD:           "/p",
+			FilesReviewed: []string{"a.go"},
+		},
+		TokenUsage: TokenUsageSummary{
+			FileTokenBreakdown: []FileTokenUsage{{FilePath: "a.go"}},
+		},
+		SessionTasks: []*FileGroup{{FilePath: "__grouping__", Tasks: map[TaskType][]*TaskCard{}}},
+		Files:        []*FileGroup{{FilePath: "a.go", Tasks: map[TaskType][]*TaskCard{}}},
+	}
+	renderTemplate(rr, "session.html", sessionPageData{EncodedRepo: "r", RepoName: "R", Session: vs})
+	body := rr.Body.String()
+	for _, want := range []string{
+		`<table class="token-table" data-pagination-source data-pagination-page-size="20">`,
+		`id="token-breakdown-pagination"`,
+		`<ul class="file-list" data-pagination-source data-pagination-page-size="20">`,
+		`id="files-reviewed-pagination"`,
+		`<div class="conversations" data-pagination-source data-pagination-page-size="20">`,
+		`id="session-tasks-pagination"`,
+		`id="conversations-pagination"`,
+		`data-pagination-item`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("session page missing long-list pagination hook %q", want)
+		}
+	}
+}
+
+func TestSessionJS_UsesDefaultCommentPaging(t *testing.T) {
+	script, err := assets.ReadFile("static/session.js")
+	if err != nil {
+		t.Fatalf("read static/session.js: %v", err)
+	}
+	for _, want := range []string{
+		"let activeSeverity = 'all'",
+		"let activeCategory = 'all'",
+		"pageSize: 20",
+		"rows: cards",
+		"commentsPager.reset()",
+		"commentsPager.refresh()",
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("session.js is missing %q", want)
+		}
+	}
+	if strings.Contains(string(script), "Select a severity or category to view findings.") {
+		t.Error("session.js retains an unreachable empty-state branch")
+	}
+	if idx := strings.Index(string(script), "commentsPager = window.ocrPager"); idx >= 0 {
+		if strings.Contains(string(script)[idx:], "updateFilterState()") ||
+			strings.Contains(string(script)[idx:], "commentsPager.refresh()") ||
+			strings.Contains(string(script)[idx:], "commentsPager.reset()") {
+			t.Error("session.js should not re-render comments immediately after constructing the pager")
+		}
+	}
+}
+
+func TestSessionTemplateLoadsPagerScript(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary:  SessionSummary{SessionID: "s", CWD: "/p"},
+		Comments: []*ReviewComment{{FilePath: "a.go", Content: "c1", Category: "bug", Severity: "high"}},
+	}
+	renderTemplate(rr, "session.html", sessionPageData{EncodedRepo: "r", RepoName: "R", Session: vs})
+	if !strings.Contains(rr.Body.String(), `<script src="/static/a11y.js"></script><script src="/static/pager.js"></script><script src="/static/session.js"></script>`) {
+		t.Error("session page should load a11y.js, pager.js, and session.js in dependency order")
+	}
+}
+
 // TestHandleSession_ServedPageKeepsStaticRefs guards the other half of the
 // export gates in session.html. sessionPageData.Static is false for every HTTP
-// render, so the served page must still link the two /static/ assets and keep
+// render, so the served page must still link the three /static/ assets and keep
 // its breadcrumb anchors — inlining them over HTTP would defeat the browser
 // cache, and the {{else}} branches are otherwise untested.
 func TestHandleSession_ServedPageKeepsStaticRefs(t *testing.T) {
@@ -856,6 +1061,7 @@ func TestHandleSession_ServedPageKeepsStaticRefs(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`href="/static/style.css"`,
+		`src="/static/pager.js"`,
 		`src="/static/session.js"`,
 		`<a href="/" class="nav-brand"`,
 		`<a href="/r/repo">`,
@@ -866,5 +1072,63 @@ func TestHandleSession_ServedPageKeepsStaticRefs(t *testing.T) {
 	}
 	if strings.Contains(body, `<span class="crumb">`) {
 		t.Error("served page de-linked the repo crumb; that is export-only")
+	}
+}
+
+func TestA11yJS_Contract(t *testing.T) {
+	script, err := assets.ReadFile("static/a11y.js")
+	if err != nil {
+		t.Fatalf("read static/a11y.js: %v", err)
+	}
+	for _, want := range []string{
+		// The page scripts hand the scrollable table regions to this global.
+		"window.ocrArrowScroll",
+		// Only the region itself may intercept: focus inside the table (a
+		// link, for instance) keeps its own key behavior.
+		"event.target !== region",
+		// Horizontal overflow is the point; Home/End jump to the edges.
+		"ArrowLeft",
+		"ArrowRight",
+		"Home",
+		"End",
+		"preventDefault",
+		// The region joins the tab order only while it overflows, and the
+		// keys fall through natively when there is nothing to scroll.
+		"scrolls()",
+		"region.tabIndex",
+		"addEventListener(\"resize\"",
+		"scrollWidth > region.clientWidth",
+		`addEventListener("toggle"`,
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("a11y.js is missing %q", want)
+		}
+	}
+}
+
+// TestResponsiveCSS_MetaOverrideComesAfterBase guards the cascade for the
+// narrow-screen meta overrides: the selectors are equally specific as the
+// base rules, so if the override block is ever moved above them the wraps
+// silently stop applying at narrow widths (exactly what review caught).
+func TestResponsiveCSS_MetaOverrideComesAfterBase(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	text := string(css)
+	base := strings.Index(text, ".session-page .meta span {\n    white-space: nowrap;\n}")
+	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;")
+	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;")
+	if base == -1 || normal == -1 || truncate == -1 {
+		t.Fatal("style.css is missing the session meta rules or their 768px overrides")
+	}
+	if normal < base || truncate < base {
+		t.Error("the 768px session meta overrides must come after the base " +
+			".session-page .meta rules: equal specificity means source order decides")
+	}
+
+	narrow := regexp.MustCompile(`(?s)@media \(max-width: 768px\) \{.*?\.session-page \.meta span \{.*?white-space: normal;.*?flex-wrap: wrap;.*?overflow-wrap: anywhere;.*?\}.*?\.session-page \.meta \.meta-truncate \{.*?max-width: 100%;.*?overflow: visible;.*?text-overflow: clip;.*?\}`)
+	if !narrow.MatchString(text) {
+		t.Fatal("narrow-screen session metadata must wrap long values without clipping")
 	}
 }

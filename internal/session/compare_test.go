@@ -39,6 +39,7 @@ func TestCompare(t *testing.T) {
 		before          []model.LlmComment
 		after           []model.LlmComment
 		reviewed        map[string]bool
+		manifest        *RunManifest
 		wantNew         []string
 		wantPersisting  []string
 		wantResolved    []string
@@ -189,6 +190,32 @@ func TestCompare(t *testing.T) {
 			wantResolved:   []string{"./pkg/../pkg/a.go:5"},
 		},
 		{
+			name:           "renamed file keeps the finding persisting",
+			before:         []model.LlmComment{cmt("old/a.go", 5, "bug", "x := 1", "unused")},
+			after:          []model.LlmComment{cmt("new/a.go", 12, "bug", "x := 1", "unused")},
+			manifest:       reviewedManifest(CoverageItem{Path: "new/a.go", OldPath: "old/a.go"}),
+			wantNew:        []string{},
+			wantPersisting: []string{"new/a.go:12"},
+			wantResolved:   []string{},
+		},
+		{
+			name:           "fixed finding in a renamed file is resolved",
+			before:         []model.LlmComment{cmt("old/a.go", 5, "bug", "x := 1", "unused")},
+			manifest:       reviewedManifest(CoverageItem{Path: "new/a.go", OldPath: "old/a.go"}),
+			wantNew:        []string{},
+			wantResolved:   []string{"old/a.go:5"},
+			wantPersisting: []string{},
+		},
+		{
+			name:            "failed rename remains not reviewed",
+			before:          []model.LlmComment{cmt("old/a.go", 5, "bug", "x := 1", "unused")},
+			manifest:        &RunManifest{Coverage: Coverage{Failed: []CoverageItem{{Path: "new/a.go", OldPath: "old/a.go"}}}},
+			wantNew:         []string{},
+			wantPersisting:  []string{},
+			wantResolved:    []string{},
+			wantNotReviewed: []string{"old/a.go:5"},
+		},
+		{
 			name:            "a path-less finding is never claimed as resolved",
 			before:          []model.LlmComment{cmt("", 5, "bug", "x := 1", "unplaceable")},
 			reviewed:        map[string]bool{"a.go": true},
@@ -218,7 +245,15 @@ func TestCompare(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Compare(tt.before, tt.after, tt.reviewed)
+			manifest := tt.manifest
+			if manifest == nil && tt.reviewed != nil {
+				items := make([]CoverageItem, 0, len(tt.reviewed))
+				for path := range tt.reviewed {
+					items = append(items, CoverageItem{Path: path})
+				}
+				manifest = &RunManifest{Coverage: Coverage{Completed: items}}
+			}
+			got := Compare(tt.before, tt.after, manifest)
 			want := map[string][]string{
 				"new":          tt.wantNew,
 				"persisting":   tt.wantPersisting,
@@ -249,6 +284,10 @@ func TestCompare(t *testing.T) {
 			}
 		})
 	}
+}
+
+func reviewedManifest(items ...CoverageItem) *RunManifest {
+	return &RunManifest{Coverage: Coverage{Completed: items}}
 }
 
 // TestCompare_SortedOrderIsStableAcrossInputOrder pins that shuffling the

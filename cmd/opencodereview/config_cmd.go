@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alibaba/open-code-review/internal/config/jsonfields"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	ocrmcp "github.com/alibaba/open-code-review/internal/mcp"
@@ -396,6 +397,11 @@ type ProviderEntry struct {
 	// first time any config command runs.
 	AWSProfile string `json:"aws_profile,omitempty"`
 	AWSRegion  string `json:"aws_region,omitempty"`
+
+	// unknownJSONFields keeps JSON keys with no matching struct field alive across
+	// a load/save cycle. Unexported: any struct-literal rebuild must copy it
+	// (see cloneProviderEntry) or the fields are dropped again
+	unknownJSONFields map[string]json.RawMessage
 }
 
 // MCPServerConfig remains an alias for compatibility with the command package's
@@ -417,6 +423,8 @@ type Config struct {
 	Telemetry       *TelemetryConfig           `json:"telemetry,omitempty"`
 	MCP             *ocrmcp.MCPConfig          `json:"mcp,omitempty"`
 	MCPServers      map[string]MCPServerConfig `json:"mcp_servers,omitempty"`
+
+	unknownJSONFields map[string]json.RawMessage
 }
 
 type LlmConfig struct {
@@ -431,6 +439,8 @@ type LlmConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+
+	unknownJSONFields map[string]json.RawMessage
 }
 
 // TelemetryConfig holds telemetry-specific settings.
@@ -439,6 +449,104 @@ type TelemetryConfig struct {
 	Exporter     string `json:"exporter,omitempty"`        // "console" or "otlp"
 	OTLPEndpoint string `json:"otlp_endpoint,omitempty"`   // OTLP collector address
 	ContentLog   bool   `json:"content_logging,omitempty"` // Include prompt/response content
+
+	unknownJSONFields map[string]json.RawMessage
+}
+
+func (c *Config) UnmarshalJSON(data []byte) error {
+	type configAlias Config
+	var decoded configAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	unknown, err := jsonfields.Collect(data, jsonfields.Names(Config{}))
+	if err != nil {
+		return err
+	}
+	*c = Config(decoded)
+	c.unknownJSONFields = unknown
+	return nil
+}
+
+func (c Config) MarshalJSON() ([]byte, error) {
+	type configAlias Config
+	data, err := json.Marshal(configAlias(c))
+	if err != nil {
+		return nil, err
+	}
+	return jsonfields.Merge(data, c.unknownJSONFields)
+}
+
+func (e *ProviderEntry) UnmarshalJSON(data []byte) error {
+	type providerEntryAlias ProviderEntry
+	var decoded providerEntryAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	unknown, err := jsonfields.Collect(data, jsonfields.Names(ProviderEntry{}))
+	if err != nil {
+		return err
+	}
+	*e = ProviderEntry(decoded)
+	e.unknownJSONFields = unknown
+	return nil
+}
+
+func (e ProviderEntry) MarshalJSON() ([]byte, error) {
+	type providerEntryAlias ProviderEntry
+	data, err := json.Marshal(providerEntryAlias(e))
+	if err != nil {
+		return nil, err
+	}
+	return jsonfields.Merge(data, e.unknownJSONFields)
+}
+
+func (c *LlmConfig) UnmarshalJSON(data []byte) error {
+	type llmConfigAlias LlmConfig
+	var decoded llmConfigAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	unknown, err := jsonfields.Collect(data, jsonfields.Names(LlmConfig{}))
+	if err != nil {
+		return err
+	}
+	*c = LlmConfig(decoded)
+	c.unknownJSONFields = unknown
+	return nil
+}
+
+func (c LlmConfig) MarshalJSON() ([]byte, error) {
+	type llmConfigAlias LlmConfig
+	data, err := json.Marshal(llmConfigAlias(c))
+	if err != nil {
+		return nil, err
+	}
+	return jsonfields.Merge(data, c.unknownJSONFields)
+}
+
+func (c *TelemetryConfig) UnmarshalJSON(data []byte) error {
+	type telemetryConfigAlias TelemetryConfig
+	var decoded telemetryConfigAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	unknown, err := jsonfields.Collect(data, jsonfields.Names(TelemetryConfig{}))
+	if err != nil {
+		return err
+	}
+	*c = TelemetryConfig(decoded)
+	c.unknownJSONFields = unknown
+	return nil
+}
+
+func (c TelemetryConfig) MarshalJSON() ([]byte, error) {
+	type telemetryConfigAlias TelemetryConfig
+	data, err := json.Marshal(telemetryConfigAlias(c))
+	if err != nil {
+		return nil, err
+	}
+	return jsonfields.Merge(data, c.unknownJSONFields)
 }
 
 func loadOrCreateConfig(path string) (*Config, error) {
