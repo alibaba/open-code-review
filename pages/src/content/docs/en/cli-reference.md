@@ -126,7 +126,8 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per subtask. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. The flag only ever *raises* the cap — a value below the template default is ignored. |
-| `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per subtask; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
+| `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per subtask; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `--max-completion-tokens`. |
+| `--max-completion-tokens <n>` | — | config or template default | Provider completion (output) token cap per request; the template default is `16384`. Overrides the saved `max_completion_tokens` setting for this run. Separate from `--max-tokens`, so raising the prompt ceiling never inflates the output cap. Raise it for reasoning models whose chain-of-thought exceeds `16384` tokens, which would otherwise be truncated mid-response. |
 | `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Checked before every LLM round: a subtask already over budget gets one final round to submit findings and is reported as `failed(budget)`, no further subtasks are dispatched, and partial results are still published. |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
@@ -743,6 +744,8 @@ Add a line to your PowerShell profile that dot-sources `ocr.ps1`.
 - `MAX_TOKENS` caps the **prompt** only. The model's output is capped
   separately by `MAX_COMPLETION_TOKENS` (`16384`), so raising
   `--max-tokens` for a large-context model does not inflate output cost.
+  Override the output cap per run with `--max-completion-tokens`, or
+  persistently with `ocr config set max_completion_tokens <n>`.
 - The plan phase is **automatically skipped** when changed lines fall below
   both `PLAN_MODE_LINE_THRESHOLD` (`50`, applied to the largest single file
   in the group) and `PLAN_MODE_GROUP_LINE_THRESHOLD` (`100`, applied to the

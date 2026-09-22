@@ -283,6 +283,28 @@ ocr scan --max-tokens 120000
 输出预算。它同样与限制单次运行总 token 用量的 `--max-tokens-budget` 相互独立。
 可以用 `ocr config unset max_tokens` 恢复为内置默认值。
 
+### 输出上限
+
+`max_completion_tokens` 是每次请求发送给 provider 的补全（**输出**）上限，两个内置
+模板的默认值均为 `16384`。它与 `max_tokens` 是有意分开的两个开关：为支持大上下文
+模型而调高提示词上限，不应连带放大要求模型生成的内容量。
+
+```bash
+ocr config set max_completion_tokens 65536
+ocr config unset max_completion_tokens   # 恢复为内置默认值
+```
+
+`--max-completion-tokens` 可覆盖单次运行的已保存设置：
+
+```bash
+ocr review --max-completion-tokens 65536
+ocr scan --max-completion-tokens 65536
+```
+
+优先级为：命令行参数 > 已保存设置 > 内置模板默认值。推理模型的思维链长度自然超过
+`16384` token 时应调高此项：恰好卡在该长度时响应会被截断，而模型随后往往会丢弃自己
+已经找到的候选发现，最终一条都不返回。
+
 ### 评审投入档位（effort）
 
 `effort` 决定每个子任务要跑几轮 main 循环：`low` = 1 轮，`medium` = 2 轮（默认），

@@ -231,6 +231,24 @@ ocr scan --max-tokens 400000
 
 실행별 플래그가 `max_tokens`보다 우선하고, 둘 다 없으면 OCR은 내장 작업 템플릿 기본값을 사용합니다. 이 상한은 모델의 **출력** 상한(`MAX_COMPLETION_TOKENS`, 두 템플릿 모두 `16384`)이나 실행 전체 토큰 사용량을 제한하는 `--max-tokens-budget`과는 별개입니다. `ocr config unset max_tokens`로 내장 기본값을 복원합니다.
 
+### 출력 상한
+
+`max_completion_tokens`는 모든 요청에서 provider에게 보내는 완성(**출력**) 상한이며, 두 내장 템플릿 모두 `16384`입니다. 이것은 의도적으로 `max_tokens`와 분리된 제어입니다: 컨텍스트 윈도가 큰 모델을 위해 프롬프트 상한을 올린다고 해서 모델이 생성해야 할 양이 함께 늘어나면 안 됩니다.
+
+```bash
+ocr config set max_completion_tokens 65536
+ocr config unset max_completion_tokens   # 내장 기본값으로 복원
+```
+
+`--max-completion-tokens`로 한 번의 실행에만 저장된 설정을 덮어쓸 수 있습니다.
+
+```bash
+ocr review --max-completion-tokens 65536
+ocr scan --max-completion-tokens 65536
+```
+
+우선순위는 명령줄 플래그 > 저장된 설정 > 내장 템플릿 기본값입니다. 연쇄 사고가 본래 `16384`토큰을 넘는 추론 모델에서는 이 값을 올리세요. 정확히 그 길이에서 응답이 잘리면 모델이 스스로 찾아낸 후보 발견을 버리고 아무것도 반환하지 않는 경우가 있습니다.
+
 ### 리뷰 강도 (effort) {#review-effort}
 
 `effort`는 서브태스크마다 리뷰를 몇 라운드 돌릴지 정합니다. `low` = 1라운드, `medium`(기본값) = 2라운드, `high` = 3라운드입니다. 라운드가 늘어나면 더 많은 문제를 찾지만 비용도 그만큼 늘어납니다.

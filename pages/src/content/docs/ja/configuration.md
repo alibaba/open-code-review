@@ -304,6 +304,30 @@ OCR は組み込みのタスクテンプレートのデフォルト値を使用�
 実行全体のトークン使用量を制限する `--max-tokens-budget` とも独立しています。
 組み込みのデフォルトに戻すには `ocr config unset max_tokens` を実行してください。
 
+### 出力上限
+
+`max_completion_tokens` はすべてのリクエストで送られる provider 補完（**出力**）の上限で、
+組み込みテンプレートでは `16384` です。これは意図的に `max_tokens` とは別の制御です。
+大きなコンテキストウィンドウのモデルに向けてプロンプト上限を上げても、モデルに生成を
+求める量が一緒に増えてはいけません。
+
+```bash
+ocr config set max_completion_tokens 65536
+ocr config unset max_completion_tokens   # 組み込みのデフォルトに戻す
+```
+
+`--max-completion-tokens` で 1 回の実行だけ保存済み設定を上書きできます。
+
+```bash
+ocr review --max-completion-tokens 65536
+ocr scan --max-completion-tokens 65536
+```
+
+優先順位はコマンドラインフラグ > 保存済み設定 > 組み込みテンプレートのデフォルトです。
+連鎖思考が自然に `16384` トークンを超える推論モデルでは上げてください。ちょうどその長さで
+応答が途中までしか生成されず、モデルが自分で見つけた候補を破棄して何も返さなくなることが
+あります。
+
 ### レビューの労力プリセット（effort）
 
 `effort` は、サブタスクごとに main ループを何ラウンド実行するかを決めます:

@@ -159,13 +159,16 @@ func runConfigUnset(key string) error {
 	if key == "max_tokens" {
 		return unsetMaxTokens(configPath)
 	}
+	if key == "max_completion_tokens" {
+		return unsetMaxCompletionTokens(configPath)
+	}
 	if key == "effort" {
 		return unsetEffort(configPath)
 	}
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, max_completion_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
 	}
 
 	switch parts[0] {
@@ -174,7 +177,7 @@ func runConfigUnset(key string) error {
 	case "mcp_servers":
 		return unsetMCPServer(configPath, parts[1])
 	default:
-		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, max_completion_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
 	}
 }
 
@@ -190,6 +193,21 @@ func unsetMaxTokens(configPath string) error {
 	}
 
 	fmt.Println("Cleared max_tokens; using the embedded template default.")
+	return nil
+}
+
+func unsetMaxCompletionTokens(configPath string) error {
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	cfg.MaxCompletionTokens = 0
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Println("Cleared max_completion_tokens; using the embedded template default.")
 	return nil
 }
 
@@ -357,16 +375,22 @@ type MCPServerConfig struct {
 
 // Config represents the user-level configuration file (~/.opencodereview/config.json).
 type Config struct {
-	Provider        string                     `json:"provider,omitempty"`
-	Model           string                     `json:"model,omitempty"`
-	MaxTokens       int                        `json:"max_tokens,omitempty"`
-	Effort          string                     `json:"effort,omitempty"`
-	Providers       map[string]ProviderEntry   `json:"providers,omitempty"`
-	CustomProviders map[string]ProviderEntry   `json:"custom_providers,omitempty"`
-	Llm             LlmConfig                  `json:"llm,omitempty"`
-	Language        string                     `json:"language,omitempty"`
-	Telemetry       *TelemetryConfig           `json:"telemetry,omitempty"`
-	MCPServers      map[string]MCPServerConfig `json:"mcp_servers,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	Model     string `json:"model,omitempty"`
+	MaxTokens int    `json:"max_tokens,omitempty"`
+	// MaxCompletionTokens caps the provider completion (output) budget. It is
+	// deliberately separate from MaxTokens: the prompt ceiling and the output
+	// ceiling are different controls, so raising max_tokens for a large-context
+	// model never inflates the output budget. 0 means "unset", which falls back
+	// to the embedded template default.
+	MaxCompletionTokens int                        `json:"max_completion_tokens,omitempty"`
+	Effort              string                     `json:"effort,omitempty"`
+	Providers           map[string]ProviderEntry   `json:"providers,omitempty"`
+	CustomProviders     map[string]ProviderEntry   `json:"custom_providers,omitempty"`
+	Llm                 LlmConfig                  `json:"llm,omitempty"`
+	Language            string                     `json:"language,omitempty"`
+	Telemetry           *TelemetryConfig           `json:"telemetry,omitempty"`
+	MCPServers          map[string]MCPServerConfig `json:"mcp_servers,omitempty"`
 
 	unknownJSONFields map[string]json.RawMessage
 }
@@ -615,6 +639,7 @@ var supportedConfigKeys = []string{
 	"provider",
 	"model",
 	"max_tokens",
+	"max_completion_tokens",
 	"effort",
 	"providers.<name>.<field>",
 	"custom_providers.<name>.<field>",
@@ -696,6 +721,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid max_tokens %q: must be a positive integer", value)
 		}
 		cfg.MaxTokens = maxTokens
+	case "max_completion_tokens":
+		maxCompletionTokens, err := strconv.Atoi(value)
+		if err != nil || maxCompletionTokens <= 0 {
+			return fmt.Errorf("invalid max_completion_tokens %q: must be a positive integer", value)
+		}
+		cfg.MaxCompletionTokens = maxCompletionTokens
 	case "effort":
 		e, err := template.ParseEffort(value)
 		if err != nil {

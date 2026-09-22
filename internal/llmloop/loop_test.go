@@ -150,6 +150,31 @@ func TestRunMainTask_UsesCompletionTokenLimit(t *testing.T) {
 	}
 }
 
+// TestRunMainTask_CompletionTokenLimitIgnoresPromptCeiling pins the separation
+// the two ceilings exist for: raising the prompt ceiling must not inflate the
+// output cap the provider is asked to generate. A --max-completion-tokens
+// override reaches the request only through Template.MaxCompletionTokens, so
+// this asserts the wire value tracks that field and nothing else.
+func TestRunMainTask_CompletionTokenLimitIgnoresPromptCeiling(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
+	deps := newTestDeps(client)
+	// A raised prompt ceiling with the output cap left at its template default.
+	deps.Template.MaxTokens = 200000
+	deps.Template.MaxCompletionTokens = 16384
+	runner := NewRunner(deps)
+
+	if _, _, err := runner.RunMainTask(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review")},
+		"main.go",
+	); err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if got := client.requests[0].MaxTokens; got != 16384 {
+		t.Fatalf("request MaxTokens = %d, want the output cap 16384; the prompt ceiling must not move it", got)
+	}
+}
+
 func TestRunMainTask_TaskDoneExplicitDone(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		taskDoneResponseWithArguments(`{"state":"DONE"}`),
