@@ -57,7 +57,9 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 }
 
 func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool, usePerlRegexp bool, noIndex bool, pathspec []string) []string {
-	cmdArgs := []string{"--no-pager", "grep"}
+	// core.quotepath=false reports non-ASCII paths literally instead of as
+	// quoted octal escapes, which file_read cannot open.
+	cmdArgs := []string{"--no-pager", "-c", "core.quotepath=false", "grep"}
 
 	if noIndex {
 		// Non-git directory: search the working tree directly while still
@@ -77,7 +79,9 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	}
 
 	cmdArgs = append(cmdArgs, "-n", "--no-color")
-	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount))
+	// git grep limits matches per file. Fetch one extra to distinguish an exact
+	// limit from truncated results, then enforce the global limit below.
+	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount+1))
 
 	cmdArgs = append(cmdArgs, "-e", searchText)
 
@@ -177,7 +181,6 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	lines := strings.Split(strings.TrimRight(outStr, "\n"), "\n")
-	truncated := len(lines) >= gitGrepMaxCount
 
 	type match struct {
 		lineNum int
@@ -195,11 +198,9 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		offset = 1
 	}
 
-	var sb strings.Builder
-	if truncated {
-		sb.WriteString(fmt.Sprintf("Note: The results have been truncated. Only showing first %d results.\n", gitGrepMaxCount))
-	}
-
+	matchCount := 0
+	truncated := false
+	matchedFiles := make(map[string]bool)
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -209,18 +210,31 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			continue
 		}
 		fname := parts[offset]
-		m := match{}
 		ln, parseErr := strconv.Atoi(parts[offset+1])
 		if parseErr != nil {
+			// Skip lines whose line-number field is not numeric.
 			continue
 		}
-		m.lineNum = ln
-		m.content = parts[offset+2]
+		// Count every file with a text match, including those beyond the render
+		// budget, so the truncation note can report the true matched-file count.
+		matchedFiles[fname] = true
+		if matchCount >= gitGrepMaxCount {
+			// Keep scanning to finish counting matched files, but render no more.
+			truncated = true
+			continue
+		}
+		m := match{lineNum: ln, content: parts[offset+2]}
 		if !seen[fname] {
 			seen[fname] = true
 			fileOrder = append(fileOrder, fname)
 		}
 		fileMatches[fname] = append(fileMatches[fname], m)
+		matchCount++
+	}
+
+	var sb strings.Builder
+	if truncated {
+		sb.WriteString(fmt.Sprintf("Note: Showing the first %d matches across %d matching files. Some files are partially shown or omitted entirely. Narrow file_patterns to see the rest.\n", gitGrepMaxCount, len(matchedFiles)))
 	}
 
 	for _, path := range fileOrder {

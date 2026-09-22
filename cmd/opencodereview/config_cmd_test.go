@@ -4,9 +4,11 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -1531,6 +1533,80 @@ func TestConfigRoundTripPreservesTimeoutSec(t *testing.T) {
 	}
 	if got := reloaded.Llm.TimeoutSec; got != 60 {
 		t.Errorf("llm.timeout_sec = %d, want 60 (lost in round-trip)", got)
+	}
+}
+
+func TestConfigRoundTripPreservesUnknownFields(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	original := `{
+    "provider": "anthropic",
+    "future_top_level": {"enabled": true},
+    "providers": {
+        "anthropic": {
+            "model": "claude-opus-4-6",
+            "future_provider": {"value": "preserve-me"}
+        }
+    },
+    "llm": {
+        "model": "claude-opus-4-6",
+        "future_llm": 7
+    },
+    "telemetry": {
+        "enabled": true,
+        "future_telemetry": "keep-me"
+    },
+    "mcp_servers": {
+        "docs": {
+            "command": "docs-server",
+            "future_mcp": {"version": 2}
+        }
+    }
+}`
+	if err := os.WriteFile(configPath, []byte(original), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("loadOrCreateConfig: %v", err)
+	}
+	if err := setConfigValue(cfg, "language", "English"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("parse saved config: %v", err)
+	}
+	assertJSONValue(t, got, []string{"future_top_level", "enabled"}, true)
+	assertJSONValue(t, got, []string{"providers", "anthropic", "future_provider", "value"}, "preserve-me")
+	assertJSONValue(t, got, []string{"llm", "future_llm"}, float64(7))
+	assertJSONValue(t, got, []string{"telemetry", "future_telemetry"}, "keep-me")
+	assertJSONValue(t, got, []string{"mcp_servers", "docs", "future_mcp", "version"}, float64(2))
+}
+
+func assertJSONValue(t *testing.T, root map[string]any, path []string, want any) {
+	t.Helper()
+	var current any = root
+	for _, part := range path {
+		object, ok := current.(map[string]any)
+		if !ok {
+			t.Fatalf("JSON path %q entered %T at %q", strings.Join(path, "."), current, part)
+		}
+		current, ok = object[part]
+		if !ok {
+			t.Fatalf("JSON path %q is missing", strings.Join(path, "."))
+		}
+	}
+	if !reflect.DeepEqual(current, want) {
+		t.Errorf("JSON path %q = %#v, want %#v", strings.Join(path, "."), current, want)
 	}
 }
 

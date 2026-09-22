@@ -37,6 +37,8 @@ Analyze the review target (commits, branch, or changes) to extract concise busin
 
 ### Step 2: Run Code Review
 
+**Do not pre-check whether `ocr` is installed** — skip probes like `command -v ocr` or `ocr --version`. Assume the CLI is available and run the review directly; that saves a tool call on the common path. Only if the review fails with `command not found` should you install it per Troubleshooting.
+
 Run the OCR command with appropriate flags. **Always pass business context via `--background`** when available:
 
 ```bash
@@ -192,7 +194,7 @@ Beyond the common flags above, `ocr review` exposes a few groups of controls. Ru
 **Budget**
 
 - `--max-tokens <n>` — per-group prompt ceiling; defaults to the configured value or the template default (`200000`).
-- `--max-tokens-budget <n>` — cap total input + output tokens for the run. Once exceeded, dispatch stops, partial results are still published, and skipped files are reported as `failed(budget)`.
+- `--max-tokens-budget <n>` — cap total input + output tokens for the run. Checked before every LLM round: a group already over budget gets one final round to submit findings, no further groups are dispatched, partial results are still published, and skipped files are reported as `failed(budget)`.
 - `--no-filter` — keep all review comments and skip the LLM post-filtering call.
 
 ## Gotchas

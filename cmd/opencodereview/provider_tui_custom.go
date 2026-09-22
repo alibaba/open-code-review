@@ -278,6 +278,7 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 			out.ExtraHeaders[k] = val
 		}
 	}
+	out.SetUnknownJSONFields(v.UnknownJSONFields())
 	return out
 }
 func cloneCustomProvidersMap(src map[string]ProviderEntry) map[string]ProviderEntry {

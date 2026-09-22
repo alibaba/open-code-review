@@ -80,6 +80,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session show <id>` | `ocr sessions show <id>` | 세션 하나와 파일별 체크포인트를 살펴봅니다. |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | 세션에 기록된 리뷰 코멘트를 출력합니다. |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 두 세션의 지적을 비교합니다: 새로 생긴 것, 남아 있는 것, 해결된 것, 리뷰하지 않은 것. |
+| `ocr session export [id]` | — | 세션 하나를 단일 HTML 파일로 내보냅니다. |
 | `ocr viewer` | — | 지난 리뷰 세션을 볼 수 있는 로컬 웹 UI를 띄웁니다(`localhost:5483`). |
 | `ocr version` | — | 버전, 커밋, 플랫폼, 빌드 날짜, GitHub URL을 출력합니다. |
 
@@ -125,7 +126,7 @@ ocr r      [flags]   (alias)
 | `--rule <path>` | — | — | 커스텀 JSON 리뷰 규칙 파일 경로. 프로젝트 수준과 전역 `rule.json`을 덮어씁니다. |
 | `--max-tools <n>` | — | 템플릿 기본값 | 서브태스크당 최대 도구 호출 라운드 수. `0`이면 템플릿 기본값(`100`)을 쓰고, 1~49는 `50`으로 올려 맞춥니다. 이 플래그는 상한을 *올리기만* 합니다. 템플릿 기본값보다 낮은 값은 무시됩니다. |
 | `--max-tokens <n>` | — | 설정 또는 템플릿 기본값 | 서브태스크당 프롬프트(입력) 토큰 상한이며 템플릿 기본값은 `200000`입니다. 이 실행에 한해 저장된 `max_tokens` 설정을 덮어씁니다. 출력 상한은 바뀌지 않습니다. `MAX_COMPLETION_TOKENS`를 참고하세요. |
-| `--max-tokens-budget <n>` | — | `0`(무제한) | 리뷰 전체의 입력+출력 토큰 사용량을 제한합니다. 예산을 넘기면 작업 전달을 멈추지만 그때까지의 결과는 그대로 내보냅니다. |
+| `--max-tokens-budget <n>` | — | `0`(무제한) | 리뷰 전체의 입력+출력 토큰 사용량을 제한합니다. LLM 라운드마다 먼저 확인하며, 이미 예산을 넘긴 하위 작업은 발견 사항을 제출할 마지막 라운드를 한 번 받고 `failed(budget)`로 보고됩니다. 이후 하위 작업은 전달되지 않지만 그때까지의 결과는 그대로 내보냅니다. |
 | `--provider <name>` | — | — | 이 실행에 쓸 프로바이더를 고릅니다. `providers`와 `custom_providers` 양쪽의 이름을 모두 받습니다. |
 | `--model <name>` | — | — | 이 실행에 한해 해석된 LLM 모델을 덮어씁니다(예: `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | 동시에 띄울 git 서브프로세스의 최대 개수. |
@@ -463,6 +464,29 @@ ocr session compare --json <before-session-id> <after-session-id>
 |---|---|---|
 | `--repo <path>` | 현재 디렉터리 | 비교할 세션이 속한 저장소. |
 | `--json` | `false` | 비교 결과를 JSON으로 출력합니다(`new`, `persisting`, `resolved`, `not_reviewed`). |
+
+### `ocr session export` {#ocr-session-export}
+
+세션 하나를 단일 HTML 파일로 렌더링합니다. 뷰어의 스타일시트와 스크립트가
+인라인으로 들어가므로, 결과물은 네트워크 접근 없이 `file://`로 열리며 CI가
+리뷰 결과를 빌드 아티팩트로 보관할 수 있습니다.
+
+```bash
+ocr session export -o review.html
+ocr session export 20250601-100000-abc123 -o review.html
+```
+
+세션 id를 주지 않으면 해당 저장소의 가장 최근 세션을 내보냅니다. 성공한
+`ocr review`는 세션 id를 출력하지 않기 때문에 이것이 기본값입니다. `-o`를 주지
+않으면 HTML은 표준 출력으로 나갑니다.
+
+내보낸 페이지에는 세션이 기록한 리뷰 대상 소스 발췌가 들어 있습니다. 공개하기
+전에 저장소 자체와 같은 수준으로 주의해서 다루세요.
+
+| 플래그 | 기본값 | 설명 |
+|---|---|---|
+| `--repo <path>` | 현재 디렉터리 | 내보낼 세션이 속한 저장소. |
+| `--output <path>`, `-o` | 표준 출력 | HTML을 표준 출력 대신 파일로 씁니다. |
 
 ## `ocr rules` {#ocr-rules}
 

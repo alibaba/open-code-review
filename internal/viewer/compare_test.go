@@ -206,7 +206,8 @@ func TestHandleCompare(t *testing.T) {
 		{
 			name: "happy path", query: "before=s1&after=s2", status: http.StatusOK,
 			contains: []string{"New (1)", "Persisting (1)", "Resolved (1)", "Not reviewed (0)",
-				"newly broken", "still broken", "was broken", "none"},
+				"newly broken", "still broken", "was broken", "none", `data-pagination-source`,
+				`<div class="comment-card" data-pagination-item hidden>`, `id="compare-0-pagination"`},
 		},
 		{
 			name:   "back link returns to sessions",
@@ -361,12 +362,12 @@ func TestRenderTemplate_SessionsCompareLink(t *testing.T) {
 			name:     "two sessions link newest to next oldest",
 			sessions: []SessionSummary{{SessionID: "s-new"}, {SessionID: "s-old"}},
 			// Rows are newest-first, so the oldest row has no link.
-			contains: []string{"/compare?before=s-old&amp;after=s-new", "<th>Compare</th>"},
+			contains: []string{"/compare?before=s-old&amp;after=s-new", `<th scope="col" class="col-action">Action</th>`},
 		},
 		{
 			name:     "a single session has nothing to compare against",
 			sessions: []SessionSummary{{SessionID: "only"}},
-			contains: []string{"<th>Compare</th>"},
+			contains: []string{`<th scope="col" class="col-action">Action</th>`},
 			absent:   []string{"/compare?"},
 		},
 	}
@@ -431,7 +432,7 @@ func TestNewMux_RouteDispatch(t *testing.T) {
 		},
 		{
 			name: "session list", target: "/r/myrepo", status: http.StatusOK,
-			contains: []string{"Sessions:", "<th>Compare</th>"},
+			contains: []string{"Sessions:", `<th scope="col" class="col-action">Action</th>`},
 		},
 		{
 			name: "repo list", target: "/", status: http.StatusOK,
