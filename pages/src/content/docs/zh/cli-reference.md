@@ -432,7 +432,8 @@ ocr session comments --severity critical,high --category bug,security <session-i
 （出现在 before 会话，但 after 会话没有评审该文件，因此不计为已解决）。
 
 匹配依据是文件路径、类别和问题代码片段，而不是行号，所以仅仅是行号发生偏移
-的问题仍然算作 persisting。
+的问题仍然算作 persisting。如果 after 会话的运行清单记录了文件重命名，匹配前
+会先将旧路径映射到新路径。
 
 ```bash
 ocr session compare <before-session-id> <after-session-id>

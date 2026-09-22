@@ -459,7 +459,8 @@ session never looked at, so they are not counted as resolved).
 
 Findings are matched on path, category and the offending snippet, not on line
 numbers, so a finding that only moved down the file still counts as
-persisting.
+persisting. When the after session's manifest records a file rename, the old
+path is mapped to the new path before matching.
 
 ```bash
 ocr session compare <before-session-id> <after-session-id>

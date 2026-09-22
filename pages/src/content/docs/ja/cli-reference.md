@@ -433,7 +433,8 @@ ocr session comments --severity critical,high --category bug,security <session-i
 レビューしていないため解決済みとは数えないもの）。
 
 照合はパス・カテゴリ・該当コード片で行い、行番号は使いません。そのため行が
-ずれただけの指摘は persisting のままになります。
+ずれただけの指摘は persisting のままになります。after セッションのランマニフェストに
+ファイル名変更が記録されている場合、照合前に旧パスを新パスへ対応付けます。
 
 ```bash
 ocr session compare <before-session-id> <after-session-id>

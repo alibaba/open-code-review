@@ -28,30 +28,27 @@ type CompareResult struct {
 // side is longer. Persisting carries the after copy, which has the current line
 // numbers.
 //
-// afterReviewed is the set of paths the after run actually reviewed (from its
-// manifest coverage). When it is nil - a legacy session that recorded no
-// manifest - every unmatched before-finding is reported as resolved.
-func Compare(before, after []model.LlmComment, afterReviewed map[string]bool) CompareResult {
-	var reviewed map[string]bool
-	if afterReviewed != nil {
-		// Normalize here rather than at the call site: the manifest stores
-		// normalizePath-cleaned paths while a comment path comes straight from
-		// the LLM, so the two only meet if both go through the same cleaner.
-		reviewed = make(map[string]bool, len(afterReviewed))
-		for p := range afterReviewed {
-			reviewed[normalizePath(p)] = true
-		}
-	}
+// afterManifest supplies both the paths the after run actually reviewed and
+// any old-to-new path pairs recorded for renamed files. When it is nil - a
+// legacy session that recorded no manifest - every unmatched before-finding is
+// reported as resolved and paths are matched as recorded.
+func Compare(before, after []model.LlmComment, afterManifest *RunManifest) CompareResult {
+	reviewed := ReviewedPaths(afterManifest)
+	renamed := renamedPaths(afterManifest)
 
 	pool := make(map[string][]model.LlmComment, len(after))
 	for _, c := range after {
-		k := findingKey(c)
+		k := findingKey(c, c.Path)
 		pool[k] = append(pool[k], c)
 	}
 
 	var res CompareResult
 	for _, c := range before {
-		k := findingKey(c)
+		path := normalizePath(c.Path)
+		if newPath, ok := renamed[path]; ok {
+			path = newPath
+		}
+		k := findingKey(c, path)
 		if matches := pool[k]; len(matches) > 0 {
 			res.Persisting = append(res.Persisting, matches[0])
 			pool[k] = matches[1:]
@@ -59,7 +56,7 @@ func Compare(before, after []model.LlmComment, afterReviewed map[string]bool) Co
 		}
 		// A path-less finding cannot be attributed to any reviewed file, so it
 		// falls out here as not-reviewed rather than being claimed as fixed.
-		if reviewed != nil && !reviewed[normalizePath(c.Path)] {
+		if reviewed != nil && !reviewed[path] {
 			res.NotReviewed = append(res.NotReviewed, c)
 			continue
 		}
@@ -87,11 +84,7 @@ func Compare(before, after []model.LlmComment, afterReviewed map[string]bool) Co
 // the identity of a published GitHub Code Scanning alert - changing how it
 // normalizes would re-open every alert downstream - so the two stay apart even
 // though they read the same fields.
-//
-// ponytail: a file renamed between the two runs reads as resolved + new,
-// because the key holds only the new path. Upgrade path when that matters: map
-// the before path through the after manifest's CoverageItem.OldPath -> Path.
-func findingKey(c model.LlmComment) string {
+func findingKey(c model.LlmComment, path string) string {
 	body := normalizeSnippet(c.ExistingCode)
 	if body == "" {
 		// ponytail: no snippet recorded, so the prose is all the identity there
@@ -100,7 +93,7 @@ func findingKey(c model.LlmComment) string {
 		// to survive.
 		body = normalizeSnippet(c.Content)
 	}
-	return normalizePath(c.Path) + "|" + strings.ToLower(strings.TrimSpace(c.Category)) + "|" + body
+	return normalizePath(path) + "|" + strings.ToLower(strings.TrimSpace(c.Category)) + "|" + body
 }
 
 // normalizeSnippet collapses every whitespace run to a single space so that
@@ -158,7 +151,29 @@ func ReviewedPaths(m *RunManifest) map[string]bool {
 	paths := make(map[string]bool, len(cov.Completed)+len(cov.Reused))
 	for _, items := range [][]CoverageItem{cov.Completed, cov.Reused} {
 		for _, item := range items {
-			paths[item.Path] = true
+			paths[normalizePath(item.Path)] = true
+		}
+	}
+	return paths
+}
+
+// renamedPaths returns normalized old-to-new path mappings for files whose
+// verdict is current in the after run. Failed and waived files are excluded for
+// the same reason ReviewedPaths excludes them: the later run did not decide
+// whether their earlier findings still apply.
+func renamedPaths(m *RunManifest) map[string]string {
+	if m == nil {
+		return nil
+	}
+	cov := m.Coverage
+	paths := make(map[string]string)
+	for _, items := range [][]CoverageItem{cov.Completed, cov.Reused} {
+		for _, item := range items {
+			oldPath := normalizePath(item.OldPath)
+			newPath := normalizePath(item.Path)
+			if oldPath != "" && newPath != "" && oldPath != newPath {
+				paths[oldPath] = newPath
+			}
 		}
 	}
 	return paths

@@ -449,7 +449,8 @@ ocr session comments --severity critical,high --category bug,security <session-i
 있지만 뒤 세션이 아예 보지 않은 파일이라 해결된 것으로 세지 않음)입니다.
 
 지적은 라인 번호가 아니라 경로와 분류, 문제가 된 코드 조각으로 대조합니다. 그래서
-파일 안에서 위치만 밀린 지적은 여전히 남아 있는 것으로 잡힙니다.
+파일 안에서 위치만 밀린 지적은 여전히 남아 있는 것으로 잡힙니다. after 세션의 실행
+매니페스트에 파일 이름 변경이 기록되어 있으면 대조 전에 이전 경로를 새 경로로 바꿉니다.
 
 ```bash
 ocr session compare <before-session-id> <after-session-id>

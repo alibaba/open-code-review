@@ -338,7 +338,7 @@ func runSessionCompare(beforeID, afterID string) error {
 	if err != nil {
 		return fmt.Errorf("load session %q: %w", afterID, err)
 	}
-	result := session.Compare(beforeComments, afterComments, reviewedPaths(afterSummary))
+	result := session.Compare(beforeComments, afterComments, afterSummary.RunManifest)
 
 	if sessionCompareJSON {
 		payload := struct {
@@ -373,13 +373,6 @@ func describeCompareSide(sessionID string, s *session.Summary) sessionCompareSid
 		side.Range = r
 	}
 	return side
-}
-
-// reviewedPaths returns the paths the run actually reviewed. The partition
-// choice and its rationale live with session.ReviewedPaths, which the web
-// viewer's compare page calls too - the two must not drift.
-func reviewedPaths(s *session.Summary) map[string]bool {
-	return session.ReviewedPaths(s.RunManifest)
 }
 
 // printSessionCompare writes to stdout, matching the other `ocr session`
