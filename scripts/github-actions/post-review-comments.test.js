@@ -2442,6 +2442,7 @@ async function main() {
   // Cross-push checkpoints (#476) — write path
   await testCheckpointAdvanceGateTable();
   await testCheckpointAdvancesAcrossOutOfDiffBatches();
+  await testCheckpointMalformedRangesRemainBlocking();
   await testCheckpointAdvanceRequiresFullSha();
   await testManifestHeadPinsEveryReviewPost();
   await testLegacyPullRequestEventUsesSnapshotHead();
@@ -2566,21 +2567,28 @@ function testClassifyCommentAgainstDiff() {
   // Single line inside a hunk.
   assert.strictEqual(at({ path: "foo.js", line: 11 }), "valid");
   // Single line outside every hunk.
-  assert.strictEqual(at({ path: "foo.js", line: 30 }), "invalid");
+  assert.strictEqual(at({ path: "foo.js", line: 30 }), "outside_diff");
   // File not in the PR at all.
-  assert.strictEqual(at({ path: "bar.js", line: 10 }), "invalid");
+  assert.strictEqual(at({ path: "bar.js", line: 10 }), "outside_diff");
 
   // Multi-line span wholly inside ONE hunk.
   assert.strictEqual(at({ path: "foo.js", start_line: 10, line: 12 }), "valid");
   // Span straddling two hunks: both endpoints exist, but not in the same hunk.
   // A flat line-set would wrongly call this valid and 422 all over again.
-  assert.strictEqual(at({ path: "foo.js", start_line: 11, line: 51 }), "invalid");
+  assert.strictEqual(at({ path: "foo.js", start_line: 11, line: 51 }), "outside_diff");
   // Reversed span.
-  assert.strictEqual(at({ path: "foo.js", start_line: 52, line: 11 }), "invalid");
+  for (const path of ["foo.js", "bar.js", "binary.png"]) {
+    assert.strictEqual(at({ path, start_line: 52, line: 11 }), "malformed");
+  }
+  for (const line of [0, -1, 1.5, "11", NaN, Infinity]) {
+    assert.strictEqual(at({ path: "foo.js", line }), "malformed");
+    assert.strictEqual(at({ path: "foo.js", start_line: line, line: 11 }), "malformed");
+  }
+  assert.strictEqual(at({ path: "", line: 11 }), "malformed");
   // Span partially overhanging the end of a hunk.
-  assert.strictEqual(at({ path: "foo.js", start_line: 11, line: 13 }), "invalid");
+  assert.strictEqual(at({ path: "foo.js", start_line: 11, line: 13 }), "outside_diff");
 
-  // ---- "unknown" must never be reported as "invalid" ----
+  // ---- "unknown" must never be reported as "outside_diff" ----
   // File is in the PR but GitHub omitted its patch (binary / oversized diff).
   assert.strictEqual(at({ path: "binary.png", line: 3 }), "unknown");
   // No line information to check.
@@ -3947,6 +3955,47 @@ async function testCheckpointAdvanceGateTable() {
     }
   }
   assert.strictEqual(advancing, 2, "only complete, published runs without blocking failures may advance");
+}
+
+// Malformed spans are never checkpoint-safe, even on absent paths or alongside
+// genuinely out-of-diff findings. Preserve the previous checkpoint if present.
+async function testCheckpointMalformedRangesRemainBlocking() {
+  for (const carry of ["", CARRY]) {
+    for (const path of ["src/a.js", "src/missing.js", "assets/logo.png"]) {
+      for (const mixed of [false, true]) {
+        const comments = [{ path, content: "Malformed finding", start_line: 2, end_line: 1 }];
+        if (mixed) {
+          comments.push({ path: "src/a.js", content: "Outside finding", start_line: 90, end_line: 90 });
+        }
+        const gh = makeGithub({
+          headSha: CK_RESOLVED,
+          files: [
+            { filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" },
+            { filename: "assets/logo.png" },
+          ],
+          batchErrorSpec: [{ message: "Line could not be resolved", status: 422 }],
+        });
+        const outputs = {};
+        await runPostReviewComments({
+          github: gh,
+          context,
+          core: { info() {}, setOutput: (k, v) => { outputs[k] = v; } },
+          fs: mockFs(JSON.stringify({ comments, manifest: ckManifest() }), ""),
+          ...ckRunOptions({ checkpointCarry: carry }),
+        });
+        const body = lastSummaryBody(gh);
+        assert.strictEqual(outputs.checkpoint_after, "", `${path}: malformed ranges must block advancement`);
+        assert.deepStrictEqual(parseCheckpointMarker(body), carry ? parseCheckpointMarker(carry) : null);
+        assert.strictEqual(outputs.comments_failed, String(comments.length));
+        assert.strictEqual(outputs.comments_inline, "0");
+        assert.strictEqual(gh.createReviewCalls.length, 1, "malformed ranges must not be retried");
+        assert.ok(body.includes("Malformed finding"));
+        assert.ok(body.includes("Lines 2-1 could not be resolved (malformed comment location)"));
+        assert.ok(!body.includes("Lines 2-1 could not be resolved (outside PR diff hunks)"));
+        if (mixed) assert.ok(body.includes("Line 90 could not be resolved (outside PR diff hunks)"));
+      }
+    }
+  }
 }
 
 // #1521: out-of-diff findings must not prevent either the first checkpoint or
