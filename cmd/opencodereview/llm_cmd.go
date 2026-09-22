@@ -50,18 +50,23 @@ func init() {
 	llmCmd.AddCommand(llmProvidersCmd)
 }
 
+var runLLMTestPath = runLLMTestWithConfigPath
+
 func runLLMTest() error {
-	cfgPath, err := resolveConfigPath()
+	cfgPath, err := defaultConfigPath()
 	if err != nil {
 		return err
 	}
+	return runLLMTestPath(cfgPath)
+}
 
-	appCfg, err := LoadAppConfig(cfgPath)
+func runLLMTestWithConfigPath(configPath string) error {
+	appCfg, err := LoadAppConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	ep, err := llm.ResolveEndpoint(cfgPath)
+	ep, err := llm.ResolveEndpoint(configPath)
 	if err != nil {
 		return fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
