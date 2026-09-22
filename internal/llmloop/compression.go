@@ -63,10 +63,22 @@ type compressionState struct {
 	pendingJob *compressionJob
 }
 
-// messageTokens counts visible text plus the Native replay payload that
-// ExtractText() does not see.
+// messageTokens counts visible text, tool calls (names, arguments, IDs),
+// plus the Native replay payload (reasoning/thinking) that ExtractText()
+// does not see.
 func messageTokens(m llm.Message) int {
-	return llm.CountTokens(m.ExtractText()) + m.Native.EstimatedTokens()
+	return llm.CountTokens(m.ExtractText()) + toolCallsTokens(m.ToolCalls) + m.Native.EstimatedTokens()
+}
+
+func toolCallsTokens(calls []llm.ToolCall) int {
+	var total int
+	for _, tc := range calls {
+		total += llm.CountTokens(tc.Function.Name) + llm.CountTokens(tc.Function.Arguments)
+		if tc.ID != "" {
+			total += llm.CountTokens(tc.ID)
+		}
+	}
+	return total
 }
 
 // CountMessagesTokens returns the rough token count of msgs by summing the

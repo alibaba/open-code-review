@@ -132,8 +132,8 @@ type NativeTurn struct {
 type ReasoningPayload string
 
 // EstimatedTokens returns a rough token estimate for the portion of Payload
-// not already counted by ExtractText() (thinking blocks, reasoning items,
-// tool-call arguments). Uses marshaled bytes/4 as the heuristic.
+// not already counted by ExtractText() or ToolCalls (thinking blocks, reasoning
+// items). Uses marshaled bytes/4 as the heuristic.
 func (n NativeTurn) EstimatedTokens() int {
 	switch p := n.Payload.(type) {
 	case ReasoningPayload:
@@ -146,8 +146,6 @@ func (n NativeTurn) EstimatedTokens() int {
 				total += marshaledLen(block.OfThinking)
 			case block.OfRedactedThinking != nil:
 				total += marshaledLen(block.OfRedactedThinking)
-			case block.OfToolUse != nil:
-				total += marshaledLen(block.OfToolUse)
 			}
 		}
 		return total
@@ -157,8 +155,6 @@ func (n NativeTurn) EstimatedTokens() int {
 			switch {
 			case item.OfReasoning != nil:
 				total += marshaledLen(item.OfReasoning)
-			case item.OfFunctionCall != nil:
-				total += marshaledLen(item.OfFunctionCall)
 			}
 		}
 		return total

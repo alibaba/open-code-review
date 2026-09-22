@@ -55,6 +55,85 @@ func TestCountMessagesTokens_IncludesNativePayload(t *testing.T) {
 	}
 }
 
+// TestCountMessagesTokens_IncludesToolCallsAndArguments guards against assistant
+// tool invocations (function names and JSON arguments) being omitted from the token
+// budget. ExtractText() only inspects Content, which is empty or minimal on tool-call
+// turns; omitting ToolCalls leads to under-counting and late compression.
+func TestCountMessagesTokens_IncludesToolCallsAndArguments(t *testing.T) {
+	withoutCalls := []llm.Message{
+		msg("user", "review diff"),
+		llm.NewToolCallMessage("", nil, llm.NativeTurn{}, ""),
+	}
+	withCalls := []llm.Message{
+		msg("user", "review diff"),
+		llm.NewToolCallMessage("", []llm.ToolCall{
+			{
+				ID:   "call_1",
+				Type: "function",
+				Function: llm.FunctionCall{
+					Name:      "code_comment",
+					Arguments: `{"comments":[{"path":"main.go","startLine":1,"endLine":5,"content":"` + strings.Repeat("issue ", 100) + `"}]}`,
+				},
+			},
+		}, llm.NativeTurn{}, ""),
+	}
+
+	base := CountMessagesTokens(withoutCalls)
+	got := CountMessagesTokens(withCalls)
+	if got <= base {
+		t.Errorf("CountMessagesTokens with ToolCalls = %d, want > base %d", got, base)
+	}
+
+	// Tool-call tokens should reflect the argument size.
+	expectedMinTokens := llm.CountTokens(withCalls[1].ToolCalls[0].Function.Arguments)
+	if got < expectedMinTokens {
+		t.Errorf("CountMessagesTokens = %d, want at least %d tokens from arguments", got, expectedMinTokens)
+	}
+}
+
+// TestComputeActiveZoneSize_AccountsForToolCalls verifies that rounds containing
+// assistant turns with heavy tool call arguments correctly consume token budget
+// during active zone calculation, rather than being treated as 0-token messages.
+func TestComputeActiveZoneSize_AccountsForToolCalls(t *testing.T) {
+	largeArgs := `{"comments":[{"content":"` + strings.Repeat("detailed review feedback ", 50) + `"}]}`
+	messages := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		// Round 0: assistant with large tool-call arguments + tool result
+		llm.NewToolCallMessage("", []llm.ToolCall{
+			{
+				ID:       "call_1",
+				Type:     "function",
+				Function: llm.FunctionCall{Name: "code_comment", Arguments: largeArgs},
+			},
+		}, llm.NativeTurn{}, ""),
+		msg("tool", "done"),
+		// Round 1: assistant with small tool-call + tool result
+		llm.NewToolCallMessage("", []llm.ToolCall{
+			{
+				ID:       "call_2",
+				Type:     "function",
+				Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"},
+			},
+		}, llm.NativeTurn{}, ""),
+		msg("tool", "ok"),
+	}
+
+	rounds := groupIntoRounds(messages, 2)
+	if len(rounds) != 2 {
+		t.Fatalf("expected 2 rounds, got %d", len(rounds))
+	}
+
+	// Budget that only fits Round 1 (small), but cannot fit Round 0 (large args).
+	// PromptTokenLimit(50) is 40. Round 1 uses ~10 tokens. Round 0 uses ~250+ tokens.
+	// Only Round 1 fits (activeCount = 1).
+	// If tool call arguments were ignored, both rounds would fit (activeCount = 2).
+	activeCount := computeActiveZoneSize(rounds, messages, 50, 0)
+	if activeCount != 1 {
+		t.Errorf("computeActiveZoneSize = %d, want 1 (large tool-call round must not fit in budget)", activeCount)
+	}
+}
+
 func TestGroupIntoRounds(t *testing.T) {
 	messages := []llm.Message{
 		msg("system", "sys"),

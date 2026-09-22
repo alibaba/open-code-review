@@ -6,6 +6,7 @@ package llm
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -346,5 +347,81 @@ func TestBuildAnthropicParams_NativeReuseDoesNotAliasOriginalSlice(t *testing.T)
 	}
 	if original.Content[1].GetCacheControl() != nil && original.Content[1].GetCacheControl().Type != "" {
 		t.Fatalf("original payload's tool_use block was mutated: %+v", original.Content[1])
+	}
+}
+
+func TestNativeTurn_EstimatedTokens(t *testing.T) {
+	// Empty / nil payload has 0 tokens.
+	if got := (NativeTurn{}).EstimatedTokens(); got != 0 {
+		t.Errorf("empty NativeTurn = %d, want 0", got)
+	}
+
+	// Reasoning payload estimation.
+	reasoning := NativeTurn{
+		Family:  "openai-chat-completions",
+		Payload: ReasoningPayload(strings.Repeat("abcd", 100)),
+	}
+	if got := reasoning.EstimatedTokens(); got == 0 {
+		t.Errorf("ReasoningPayload EstimatedTokens() = 0, want > 0")
+	}
+
+	// Anthropic thinking blocks are counted, while tool_use blocks are not (they belong in Message.ToolCalls).
+	anthropicWithThinking := NativeTurn{
+		Family: "anthropic-messages",
+		Payload: anthropic.MessageParam{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				anthropic.NewThinkingBlock("sig", strings.Repeat("thinking ", 50)),
+				anthropic.NewToolUseBlock("toolu_1", map[string]any{"arg": strings.Repeat("x", 500)}, "code_comment"),
+			},
+		},
+	}
+	anthropicOnlyToolUse := NativeTurn{
+		Family: "anthropic-messages",
+		Payload: anthropic.MessageParam{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				anthropic.NewToolUseBlock("toolu_1", map[string]any{"arg": strings.Repeat("x", 500)}, "code_comment"),
+			},
+		},
+	}
+	if got := anthropicOnlyToolUse.EstimatedTokens(); got != 0 {
+		t.Errorf("NativeTurn with only tool_use = %d, want 0 (tool_use is counted via ToolCalls)", got)
+	}
+	if got := anthropicWithThinking.EstimatedTokens(); got == 0 {
+		t.Errorf("NativeTurn with thinking blocks = 0, want > 0")
+	}
+
+	// OpenAI responses reasoning items are counted, while function_call items are not.
+	respWithReasoningBody := `{
+		"id":"resp_1",
+		"object":"response",
+		"model":"o3",
+		"status":"completed",
+		"output":[
+			{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"step one"}],"encrypted_content":"enc_abc123"},
+			{"type":"function_call","call_id":"call_xyz","name":"do_thing","arguments":"{\"x\":1}"}
+		],
+		"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}
+	}`
+	respOnlyFuncCallBody := `{
+		"id":"resp_2",
+		"object":"response",
+		"model":"o3",
+		"status":"completed",
+		"output":[
+			{"type":"function_call","call_id":"call_xyz","name":"do_thing","arguments":"{\"x\":1}"}
+		],
+		"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}
+	}`
+	responsesClient := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
+	respWithReasoning := responsesClient.mapResponsesResponse(unmarshalResponsesBody(t, respWithReasoningBody)).Native()
+	respOnlyFuncCall := responsesClient.mapResponsesResponse(unmarshalResponsesBody(t, respOnlyFuncCallBody)).Native()
+
+	if got := respOnlyFuncCall.EstimatedTokens(); got != 0 {
+		t.Errorf("NativeTurn with only function_call = %d, want 0 (function_call is counted via ToolCalls)", got)
+	}
+	if got := respWithReasoning.EstimatedTokens(); got == 0 {
+		t.Errorf("NativeTurn with reasoning item = 0, want > 0")
 	}
 }
