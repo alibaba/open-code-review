@@ -80,11 +80,31 @@ func buildConfirmedCommentsBlock(comments []model.LlmComment) string {
 	return sb.String()
 }
 
-// flattenOneLine collapses a multi-line string into a single line.
+// flattenOneLine collapses a multi-line string into a single line and strips the
+// control characters that must not reach a prompt. Every line-break form is
+// mapped to a space — not just \r\n, \n and \r, but vertical tab, form feed, NEL
+// and the Unicode line/paragraph separators — so the result is genuinely one
+// line. Remaining C0 controls, DEL and C1 controls are dropped rather than
+// spaced, so an ANSI escape sequence carried in by a model-authored finding
+// cannot survive into the rendered block.
+//
+// This mirrors internal/session.stripUnsafeChars, which applies the same rule to
+// the manifest side. The two must stay in step: the confirmed-findings block
+// below is built from the same findings the manifest records, and a character
+// stripped in one place but not the other would make the prompt and the
+// persisted session disagree about what a finding said.
 func flattenOneLine(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t', r == '\n', r == '\r', r == '\v', r == '\f',
+			r == 0x85, r == 0x2028, r == 0x2029:
+			return ' '
+		case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
+			return -1
+		default:
+			return r
+		}
+	}, s)
 	return strings.TrimSpace(s)
 }
 
