@@ -15,14 +15,36 @@ class CommentAnchorTest {
         .joinToString("\n")
 
     @Test
-    fun `normalizeLine removes diff markers`() {
-        assertEquals("added", normalizeLine("+added"))
-        assertEquals("removed", normalizeLine("-removed"))
+    fun `normalizeLine trims and leaves diff markers alone`() {
+        assertEquals("+added", normalizeLine("  +added  "))
+        assertEquals("-removed", normalizeLine("-removed"))
     }
 
     @Test
-    fun `splitAndNormalize skips blank lines`() {
-        assertEquals(listOf("a", "b"), splitAndNormalize("a\n\n b "))
+    fun `snippetForms tries the code as written before the diff-quoted reading`() {
+        assertEquals(listOf(listOf("+  - name: app"), listOf("- name: app")), snippetForms("+  - name: app"))
+    }
+
+    @Test
+    fun `snippetForms drops a line that is nothing but a marker`() {
+        assertEquals(listOf(listOf("+", "+foo"), listOf("foo")), snippetForms("+\n+foo"))
+    }
+
+    private val yaml = listOf("defaults:", "  name: app", "items:", "  - name: app").joinToString("\n")
+
+    @Test
+    fun `findLinesByExistingCode does not confuse a YAML list item with the mapping line above it`() {
+        assertEquals(LineSpan(4, 4), findLinesByExistingCode(yaml, "- name: app"))
+    }
+
+    @Test
+    fun `findLinesByExistingCode matches a YAML list item quoted with its diff marker`() {
+        assertEquals(LineSpan(4, 4), findLinesByExistingCode(yaml, "+  - name: app"))
+    }
+
+    @Test
+    fun `findLinesByExistingCode keeps a bare mapping line on the mapping line`() {
+        assertEquals(LineSpan(2, 2), findLinesByExistingCode(yaml, "name: app"))
     }
 
     @Test
@@ -42,6 +64,12 @@ class CommentAnchorTest {
     fun `findLinesByExistingCode matches consecutive non-empty lines`() {
         val found = findLinesByExistingCode(content, "console.log(i);")
         assertEquals(LineSpan(3, 3), found)
+    }
+
+    @Test
+    fun `findLinesByExistingCode matches across blank lines in the file`() {
+        val spaced = listOf("package main", "", "func foo() {", "", "  return 1", "}").joinToString("\n")
+        assertEquals(LineSpan(3, 6), findLinesByExistingCode(spaced, "func foo() {\n  return 1\n}"))
     }
 
     @Test

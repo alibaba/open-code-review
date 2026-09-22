@@ -47,28 +47,47 @@ sealed class CommentAnchorResult {
     data class SidebarOnly(val reason: SidebarOnlyReason) : CommentAnchorResult()
 }
 
-/** Remove leading diff markers (`+`/`-`) and surrounding whitespace for lenient comparison of existingCode with file content. */
-internal fun normalizeLine(line: String): String {
-    val s = line.trim()
-    return if (s.startsWith("+") || s.startsWith("-")) s.substring(1).trim() else s
-}
+/** Trim a line, and nothing else: on the content side a leading '+' or '-' is code, not a diff marker. */
+internal fun normalizeLine(line: String): String = line.trim()
 
-/** Split into lines and apply [normalizeLine]. Discard blank lines so changes in blank lines between revisions do not prevent a match. */
-internal fun splitAndNormalize(code: String): List<String> {
-    val result = mutableListOf<String>()
-    for (raw in code.split("\n")) {
-        val n = normalizeLine(raw)
-        if (n.isNotEmpty()) result += n
-    }
-    return result
+/** Trim each line and drop the blank ones, so a snippet's blank lines never become match targets of their own. */
+private fun normalizeLines(lines: List<String>): List<String> = lines.map(::normalizeLine).filter { it.isNotEmpty() }
+
+/**
+ * Remove one leading diff marker from each line: the reading for a snippet quoted out of diff output
+ * ("+  - name: app" becomes "- name: app").
+ *
+ * Exactly one marker per line, and only from the first character, so a deleted YAML list item keeps its own dash
+ * ("-- name: app" becomes "- name: app"). A line that is nothing but a marker loses the marker, is left blank,
+ * and is dropped.
+ */
+private fun stripDiffMarkers(lines: List<String>): List<String> = normalizeLines(
+    lines.map { if (it.startsWith("+") || it.startsWith("-")) it.substring(1) else it },
+)
+
+/**
+ * The readings an [existingCode] snippet may be matched against, in priority order.
+ *
+ * Verbatim first: the model copied the code out of the file, where a leading '-' is code, a YAML list item being
+ * the everyday case. Diff-quoted second: the model copied it out of the diff instead, where that first character
+ * is a marker. Both readings are returned even when they are identical, so callers stop at the first match.
+ */
+internal fun snippetForms(existingCode: String): List<List<String>> {
+    val lines = existingCode.split("\n")
+    val forms = mutableListOf<List<String>>()
+    val verbatim = normalizeLines(lines)
+    if (verbatim.isNotEmpty()) forms += verbatim
+    val stripped = stripDiffMarkers(lines)
+    if (stripped.isNotEmpty()) forms += stripped
+    return forms
 }
 
 internal data class LineSpan(val start: Int, val end: Int)
 
 /** Find [existingCode] in file content with a sliding window; return 1-based line numbers, or null when no match exists. */
 internal fun findLinesByExistingCode(content: String, existingCode: String): LineSpan? {
-    val target = splitAndNormalize(existingCode)
-    if (target.isEmpty()) return null
+    val forms = snippetForms(existingCode)
+    if (forms.isEmpty()) return null
 
     val normalized = mutableListOf<String>()
     val lineNums = mutableListOf<Int>()
@@ -79,17 +98,19 @@ internal fun findLinesByExistingCode(content: String, existingCode: String): Lin
             lineNums += index + 1
         }
     }
-    if (normalized.size < target.size) return null
 
-    for (i in 0..(normalized.size - target.size)) {
-        var matched = true
-        for (j in target.indices) {
-            if (normalized[i + j] != target[j]) {
-                matched = false
-                break
+    for (target in forms) {
+        if (normalized.size < target.size) continue
+        for (i in 0..(normalized.size - target.size)) {
+            var matched = true
+            for (j in target.indices) {
+                if (normalized[i + j] != target[j]) {
+                    matched = false
+                    break
+                }
             }
+            if (matched) return LineSpan(lineNums[i], lineNums[i + target.size - 1])
         }
-        if (matched) return LineSpan(lineNums[i], lineNums[i + target.size - 1])
     }
     return null
 }
@@ -106,7 +127,9 @@ internal fun resolveLinesInContent(
     endLine: Int,
     existingCode: String?,
 ): ResolvedLines? {
-    val lineCount = content.split("\n").size // Use the same split("\n") line boundaries as splitAndNormalize in this file.
+    // Count lines the same way findLinesByExistingCode splits them, so an in-range line number means the same
+    // thing to both.
+    val lineCount = content.split("\n").size
     val start = if (startLine > 0) startLine else 0
     val end = if (endLine > 0) endLine else start
 

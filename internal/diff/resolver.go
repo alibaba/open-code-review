@@ -145,35 +145,31 @@ type indexedLine struct {
 }
 
 // resolveFromHunk tries to find startLine/endLine by matching ExistingCode
-// against hunk lines. It tries the new-side first (context + added lines →
-// new-file line numbers), then falls back to old-side (context + deleted →
-// old-file line numbers).
+// against hunk lines. It works through the snippet's readings in the order
+// snippetForms returns them, and within each reading tries the new side of every
+// hunk (context + added lines → new-file line numbers) before the old side
+// (context + deleted lines → old-file line numbers). A snippet present on both
+// sides therefore resolves to the new-file line number.
 func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 	hunks := ParseHunks(d.Diff)
 	if len(hunks) == 0 {
 		return false
 	}
 
-	targetLines := splitAndNormalize(cm.ExistingCode)
-	if len(targetLines) == 0 {
+	forms := snippetForms(cm.ExistingCode)
+	if len(forms) == 0 {
 		return false
 	}
 
-	for i := range hunks {
-		newSide := extractSideLines(&hunks[i], true)
-		if start, end, ok := matchConsecutive(newSide, targetLines); ok {
-			cm.StartLine = start
-			cm.EndLine = end
-			return true
-		}
-	}
-
-	for i := range hunks {
-		oldSide := extractSideLines(&hunks[i], false)
-		if start, end, ok := matchConsecutive(oldSide, targetLines); ok {
-			cm.StartLine = start
-			cm.EndLine = end
-			return true
+	for _, form := range forms {
+		for _, newSide := range []bool{true, false} {
+			for i := range hunks {
+				if start, end, ok := matchConsecutive(extractSideLines(&hunks[i], newSide), form); ok {
+					cm.StartLine = start
+					cm.EndLine = end
+					return true
+				}
+			}
 		}
 	}
 
@@ -183,6 +179,8 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 // extractSideLines extracts one side of the diff from a hunk.
 // When newSide is true, returns context+added lines with new-file line numbers.
 // When newSide is false, returns context+deleted lines with old-file line numbers.
+// Each line is normalized, so the result compares directly against a snippet's
+// forms in matchConsecutive.
 func extractSideLines(hunk *Hunk, newSide bool) []indexedLine {
 	var result []indexedLine
 	oldLine := hunk.OldStart
@@ -213,7 +211,9 @@ func extractSideLines(hunk *Hunk, newSide bool) []indexedLine {
 	return result
 }
 
-// matchConsecutive scans sideLines for a consecutive run matching all targetLines.
+// matchConsecutive scans sideLines for a consecutive run matching all
+// targetLines. Comparison is exact, on already-normalized text, and the first
+// run wins.
 func matchConsecutive(sideLines []indexedLine, targetLines []string) (startLine, endLine int, found bool) {
 	if len(targetLines) == 0 || len(sideLines) < len(targetLines) {
 		return 0, 0, false
@@ -234,47 +234,29 @@ func matchConsecutive(sideLines []indexedLine, targetLines []string) (startLine,
 }
 
 // resolveFromFileContent scans the new file content line-by-line for consecutive
-// matches of the normalized existing_code.
+// matches of the normalized existing_code. Blank lines are dropped from both
+// sides so that blank lines in the source don't break the sliding-window match:
+// "consecutive" here means adjacent non-blank lines. As in resolveFromHunk, the
+// snippet's verbatim reading is tried before its diff-quoted one.
 func resolveFromFileContent(d *model.Diff, cm *model.LlmComment) bool {
 	if d.NewFileContent == "" {
 		return false
 	}
 
 	fileLines := strings.Split(d.NewFileContent, "\n")
-	targetLines := splitAndNormalize(cm.ExistingCode)
-	if len(targetLines) == 0 {
-		return false
-	}
-
-	// Normalize file lines the same way as target: skip blanks so that
-	// blank lines in the source don't break the sliding-window match.
-	// "Consecutive" here means adjacent non-blank lines.
-	normalizedFileLines := make([]string, 0, len(fileLines))
-	fileLineNums := make([]int, 0, len(fileLines))
+	fileIndex := make([]indexedLine, 0, len(fileLines))
 	for i, line := range fileLines {
 		n := normalizeLine(strings.TrimRight(line, "\r"))
 		if n == "" {
 			continue
 		}
-		normalizedFileLines = append(normalizedFileLines, n)
-		fileLineNums = append(fileLineNums, i+1)
+		fileIndex = append(fileIndex, indexedLine{lineNum: i + 1, content: n})
 	}
 
-	if len(normalizedFileLines) < len(targetLines) {
-		return false
-	}
-
-	for i := 0; i <= len(normalizedFileLines)-len(targetLines); i++ {
-		matched := true
-		for j, target := range targetLines {
-			if normalizedFileLines[i+j] != target {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			cm.StartLine = fileLineNums[i]
-			cm.EndLine = fileLineNums[i+len(targetLines)-1]
+	for _, form := range snippetForms(cm.ExistingCode) {
+		if start, end, ok := matchConsecutive(fileIndex, form); ok {
+			cm.StartLine = start
+			cm.EndLine = end
 			return true
 		}
 	}
@@ -282,11 +264,49 @@ func resolveFromFileContent(d *model.Diff, cm *model.LlmComment) bool {
 	return false
 }
 
-// splitAndNormalize splits code text into lines and normalizes each one.
-func splitAndNormalize(code string) []string {
+// snippetForms returns the normalized line runs an existing_code snippet may be
+// matched against, in priority order.
+//
+// A snippet reaches us in one of two forms. Verbatim: the model copied it out of
+// the file, where a leading '+' or '-' is code — a YAML list item is the
+// everyday case. Diff-quoted: the model copied it out of the diff instead, where
+// that first character is a marker rather than code.
+//
+// Verbatim comes first so a dash belonging to the code is never read as a
+// marker. Both readings are returned even when a snippet carries no marker and
+// the two are identical: callers stop at the first form that matches, so the
+// repeat costs one scan and cannot change the answer.
+func snippetForms(code string) [][]string {
+	forms := make([][]string, 0)
+	if verbatim := normalizeLines(splitCode(code)); len(verbatim) != 0 {
+		forms = append(forms, verbatim)
+	}
+	if stripped := stripMarkers(splitCode(code)); len(stripped) != 0 {
+		forms = append(forms, stripped)
+	}
+	return forms
+}
+
+// splitCode splits snippet text into its non-blank lines, before any
+// normalization. Both readings of a snippet start from these same lines, so the
+// only thing that distinguishes them is the marker a line may carry.
+func splitCode(code string) []string {
 	raw := strings.Split(code, "\n")
 	result := make([]string, 0, len(raw))
 	for _, line := range raw {
+		if line == "" {
+			continue
+		}
+		result = append(result, line)
+	}
+	return result
+}
+
+// normalizeLines trims each line and drops the ones left blank, so a snippet's
+// blank lines never become match targets of their own.
+func normalizeLines(code []string) []string {
+	result := make([]string, 0, len(code))
+	for _, line := range code {
 		n := normalizeLine(line)
 		if n == "" {
 			continue
@@ -296,11 +316,35 @@ func splitAndNormalize(code string) []string {
 	return result
 }
 
-// normalizeLine removes leading/trailing whitespace and strips any leading
-// '+' or '-' diff marker.
+// stripMarkers removes one leading diff marker from each line, then trims the
+// whitespace that marker was shielding — turning a snippet quoted out of diff
+// output ("+  - name: app") into the code it quoted ("- name: app").
+//
+// Exactly one marker per line, and only from the first character, so a deleted
+// YAML list item keeps its own dash: "-- name: app" becomes "- name: app" and
+// matches the item rather than the mapping line above it.
+//
+// A line that is nothing but a marker loses the marker and is left blank, which
+// normalizeLines then drops — that is the diff quoting a blank line. Dropping it
+// keeps this reading in step with the rest of the file, where a blank is never a
+// match target: normalizeLines and resolveFromFileContent both drop blanks, and
+// a snippet spanning blank lines is expected to match across them. Keeping the
+// blank would also fail outright on the file-content path, which indexes no
+// blank entries to match it.
+func stripMarkers(code []string) []string {
+	stripped := make([]string, 0, len(code))
+	for _, line := range code {
+		if line != "" && (line[0] == '+' || line[0] == '-') {
+			line = line[1:]
+		}
+		stripped = append(stripped, line)
+	}
+	return normalizeLines(stripped)
+}
+
+// normalizeLine trims surrounding whitespace, and nothing else. A leading '+'
+// or '-' is left in place because on the content side it is code: stripping it
+// here is what used to send a YAML list item to the mapping line above it.
 func normalizeLine(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "+")
-	s = strings.TrimPrefix(s, "-")
 	return strings.TrimSpace(s)
 }
