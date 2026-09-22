@@ -263,7 +263,7 @@ matching order:
 | `**/*.{graphql,gql}`                | `graphql.md` — GraphQL schema and operations.                                                         |
 | `**/*.prisma`                       | `prisma.md` — Prisma schema.                                                                          |
 | `**/*.jl`                           | `julia.md` — Julia source.                                                                            |
-| `**/*.{tf,tofu,hcl,tfvars}`              | `terraform.md` — Terraform / HCL.                                                                     |
+| `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md` — Terraform / HCL.                                                                     |
 | `**/*.bicep`                        | `bicep.md` — Bicep (Azure) templates.                                                                 |
 | `**/*.elm`                          | `elm.md` - Elm source.                                                                                |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — Jsonnet configuration templates and libraries.                                         |
