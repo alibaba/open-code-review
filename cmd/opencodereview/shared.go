@@ -65,6 +65,29 @@ func resolveMaxTokens(templateDefault int, cfg *Config, cliOverride int) (int, e
 	return cfg.MaxTokens, nil
 }
 
+// resolveMaxCompletionTokens applies the per-run CLI override, then the saved
+// setting, and finally the embedded template default. It mirrors
+// resolveMaxTokens on purpose: both express the same precedence chain, but over
+// two different budgets. The output cap must stay independent of the prompt
+// ceiling — sharing one resolution path would let --max-tokens silently inflate
+// what a provider is asked to generate, which is the coupling
+// template.CompletionTokenLimit's contract exists to prevent.
+func resolveMaxCompletionTokens(templateDefault int, cfg *Config, cliOverride int) (int, error) {
+	if cliOverride < 0 {
+		return 0, fmt.Errorf("--max-completion-tokens must be a non-negative integer")
+	}
+	if cliOverride > 0 {
+		return cliOverride, nil
+	}
+	if cfg == nil || cfg.MaxCompletionTokens == 0 {
+		return templateDefault, nil
+	}
+	if cfg.MaxCompletionTokens < 0 {
+		return 0, fmt.Errorf("invalid max_completion_tokens in app config: must be a positive integer")
+	}
+	return cfg.MaxCompletionTokens, nil
+}
+
 // resolveEffort applies the standard precedence for the review effort preset:
 // CLI flag > saved app config > EffortDefault.
 func resolveEffort(cfg *Config, cliOverride string) (template.Effort, error) {
