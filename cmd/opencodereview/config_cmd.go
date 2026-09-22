@@ -334,6 +334,9 @@ type ProviderEntry struct {
 	AWSProfile string `json:"aws_profile,omitempty"`
 	AWSRegion  string `json:"aws_region,omitempty"`
 
+	// unknownJSONFields keeps JSON keys with no matching struct field alive across
+	// a load/save cycle. Unexported: any struct-literal rebuild must copy it
+	// (see cloneProviderEntry) or the fields are dropped again
 	unknownJSONFields map[string]json.RawMessage
 }
 
