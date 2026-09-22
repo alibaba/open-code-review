@@ -84,13 +84,17 @@ on-disk directories). You don't usually type this — you click through.
 ### `/` — Repository list
 
 For each repo with at least one session you see the repo path, the
-total session count, and the most recent activity timestamp.
+total session count, the most recent activity timestamp, and a `Check`
+link to its sessions. The search box filters the list by repo path, and
+ten repositories fit on a page; the pager at the bottom right moves
+between pages.
 
 ### `/r/{repo}` — Session list for one repo
 
 For each session: ID (a UUID), branch name (when OCR was able to
 detect it), review mode, model, file count, duration, and a started-at
-timestamp, and a `compare` link to the next-older session.
+timestamp, and a `Check` link to the next-older session. Ten sessions
+fit on a page; the pager at the bottom right moves between pages.
 
 ### `/r/{repo}/{sessionID}` — Session detail
 
@@ -114,13 +118,17 @@ Each lane is a horizontal strip of **task cards** — one per LLM round
 trip. Cards are coloured by task type so you can see at a glance which
 phases dominated the run.
 
+Longer lists on this page — **File breakdown**, **Files Reviewed**,
+**Session Tasks**, and **Conversations** — show twenty items per page.
+The pager stays hidden while a section still fits on one page.
+
 ### `/r/{repo}/compare` — Compare two sessions
 
 The same four buckets `ocr session compare` prints, rendered as a page.
-The session list has a **Compare** column: each row links to a
-comparison against the next-older session, so the newest row shows what
-changed since the run before it. The oldest row shows `-`, having no
-older run to compare against.
+The session list's **Action** column carries a `Check` link: each row
+opens a comparison against the next-older session, so the newest row
+shows what changed since the run before it. The oldest row shows `-`,
+having no older run to compare against.
 
 Findings are sorted into four buckets:
 
@@ -135,6 +143,9 @@ One thing the page does differently: the CLI omits a bucket that came
 out empty, the page always prints all four. `Resolved (0)` is an
 answer, and a section that silently vanished would read as a broken
 page.
+
+Each bucket shows twenty findings per page; the pager stays hidden
+when the bucket fits on one page.
 
 A run old enough to predate run manifests recorded no coverage, so
 every unmatched finding from it falls into Resolved rather than Not
@@ -172,6 +183,10 @@ Below the task lanes, the session page lists every finding the review
 produced as **comment cards**, grouped by file, showing the comment
 text, its existing/suggested code where present, and severity/category
 badges. Chips on the filter bar narrow the list by severity or category.
+Twenty comments fit on a page; the pager stays hidden when there is
+only one. Changing a severity or category filter returns to page 1;
+marking a finding, toggling **Hide marked**, or clearing marks keeps
+the current page where it still exists.
 
 ### Marking findings as you fix them
 

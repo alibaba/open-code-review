@@ -22,8 +22,18 @@ inputs:
       Selects the LLM protocol (mapped to env OCR_USE_ANTHROPIC). An explicitly supplied empty
       string, true, 1, or yes selects Anthropic
       case-insensitively; every other value selects the OpenAI-compatible
-      protocol, preserving the CLI environment contract.
+      protocol, preserving the CLI environment contract. Ignored when
+      llm_protocol names the protocol explicitly.
     required: true
+  llm_protocol:
+    description: >-
+      Explicit LLM protocol written to `llm.protocol`: anthropic, openai or
+      openai-responses (case-insensitive). When set it wins over
+      llm_use_anthropic, which is mirrored from it the way `ocr config set
+      llm.protocol` mirrors the boolean. Leave empty to keep deriving the
+      protocol from llm_use_anthropic; an OCR_LLM_PROTOCOL variable in the
+      job or step environment is honoured the same way when this is empty.
+    required: false
   llm_auth_header:
     description: Custom auth header name (mapped to env OCR_LLM_AUTH_HEADER).
     required: false
@@ -94,9 +104,11 @@ inputs:
   max_tokens_budget:
     description: >-
       Total token cap passed to `ocr review --max-tokens-budget`. Base-10
-      integer; empty or 0 means unlimited. Once the cap is exceeded, dispatch
-      stops, skipped files are reported as failed(budget), partial results
-      are still published, and the review exits 0.
+      integer; empty or 0 means unlimited. Checked before every LLM round:
+      a group already over the cap gets one final round to submit findings,
+      no further groups are dispatched, over-budget and skipped files are
+      reported as failed(budget), partial results are still published, and
+      the review exits 0.
     required: false
     default: ''
   stream_progress:
@@ -133,9 +145,29 @@ inputs:
       IoU (intersection-over-union) threshold used by incremental mode to decide
       whether a new multi-line comment overlaps an existing one. Two single-line
       comments match when on the same line; single- vs multi-line never match.
-      Value in (0, 1]; ignored unless incremental is true.
+      Value in (0, 1]. Read only when incremental is true: resolve_outdated
+      decides overlap by any shared line, with no threshold, because a missed
+      overlap there resolves a thread whose finding is still live.
     required: false
     default: '0.6'
+  resolve_outdated:
+    description: >-
+      Resolve the action's own outdated inline review threads (threads GitHub
+      has already marked outdated because their lines no longer exist in the
+      diff). Threads a human replied to, threads already resolved, and threads
+      whose lines a finding from the current run still covers are never touched.
+      One of: 'false' (default, does nothing and makes no API calls), 'report'
+      (log what would be resolved, change nothing — run this first), 'true'
+      (actually resolve). 'true' requires the calling workflow to grant
+      `contents: write` in its own `permissions:` block: GitHub gates the
+      resolve mutation on repository write access, not on the pull-request
+      scope, so `pull-requests: write` alone returns FORBIDDEN. Without it the
+      action warns and continues. 'report' issues no mutation, so it cannot
+      tell you in advance whether 'true' would be permitted.
+      A thread is covered when a current finding shares ANY line with it; the
+      incremental_overlap_threshold IoU test is not used here.
+    required: false
+    default: 'false'
   review_comment_batch_size:
     description: >-
       Maximum number of inline comments packed into a single createReview call.
@@ -229,6 +261,17 @@ outputs:
   comments_failed:
     description: Number of inline comments that failed to post.
     value: ${{ steps.post.outputs.comments_failed }}
+  comments_resolved:
+    description: >-
+      Number of outdated bot review threads resolved this run. Always 0 unless
+      resolve_outdated is 'true'.
+    value: ${{ steps.post.outputs.comments_resolved }}
+  comments_resolved_preview:
+    description: >-
+      Number of candidate threads resolve_outdated 'report' mode found. This is
+      the uncapped count, so it can exceed the 50 threads a single 'true' run
+      resolves. Always 0 in 'false' and 'true' modes.
+    value: ${{ steps.post.outputs.comments_resolved_preview }}
   summary_comment_url:
     description: URL of the posted/updated summary comment, if any.
     value: ${{ steps.post.outputs.summary_comment_url }}
@@ -397,6 +440,7 @@ runs:
         MAX_TOKENS_BUDGET_INPUT: ${{ inputs.max_tokens_budget }}
         LLM_REASONING_EFFORT_INPUT: ${{ inputs.llm_reasoning_effort }}
         STREAM_PROGRESS_INPUT: ${{ inputs.stream_progress }}
+        RESOLVE_OUTDATED_INPUT: ${{ inputs.resolve_outdated }}
       shell: bash
       run: |
         if [[ ! "$REVIEW_TASK_TIMEOUT" =~ ^[0-9]+$ ]]; then
@@ -477,6 +521,20 @@ runs:
         esac
         echo "STREAM_PROGRESS=$NORMALIZED_STREAM_PROGRESS" >> "$GITHUB_ENV"
 
+        # Thread cleanup mode: 'false' touches nothing and makes no API calls,
+        # 'report' logs what it would resolve, 'true' resolves. Empty maps to
+        # 'false' so a caller that passes an unset variable stays opt-in.
+        NORMALIZED_RESOLVE_OUTDATED="$(printf '%s' "$RESOLVE_OUTDATED_INPUT" | tr '[:upper:]' '[:lower:]')"
+        case "$NORMALIZED_RESOLVE_OUTDATED" in
+          "") NORMALIZED_RESOLVE_OUTDATED=false ;;
+          false|report|true) ;;
+          *)
+            echo "::error::resolve_outdated must be one of: false, report, true (got '$RESOLVE_OUTDATED_INPUT')"
+            exit 1
+            ;;
+        esac
+        echo "RESOLVE_OUTDATED=$NORMALIZED_RESOLVE_OUTDATED" >> "$GITHUB_ENV"
+
     - name: Install OpenCodeReview
       shell: bash
       env:
@@ -537,11 +595,16 @@ runs:
         OCR_LLM_URL: ${{ inputs.llm_url }}
         OCR_LLM_MODEL: ${{ inputs.llm_model }}
         OCR_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
+        OCR_LLM_PROTOCOL_INPUT: ${{ inputs.llm_protocol }}
         OCR_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
         OCR_EXTRA_BODY: ${{ inputs.llm_extra_body }}
         OCR_LANGUAGE: ${{ inputs.language }}
       shell: bash
       run: |
+        # An explicit protocol wins over llm_use_anthropic: the input first,
+        # then OCR_LLM_PROTOCOL inherited from the job or step environment.
+        # Read it before the derivation below reuses that variable name.
+        EXPLICIT_PROTOCOL="$(printf '%s' "${OCR_LLM_PROTOCOL_INPUT:-${OCR_LLM_PROTOCOL:-}}" | tr '[:upper:]' '[:lower:]')"
         NORMALIZED_USE_ANTHROPIC="$(printf '%s' "$OCR_USE_ANTHROPIC" | tr '[:upper:]' '[:lower:]')"
         case "$NORMALIZED_USE_ANTHROPIC" in
           ""|true|1|yes)
@@ -553,6 +616,28 @@ runs:
             OCR_LLM_PROTOCOL="openai"
             ;;
         esac
+        # use_anthropic is mirrored from the explicit protocol the same way
+        # `ocr config set llm.protocol` mirrors it, so the two never disagree.
+        case "$EXPLICIT_PROTOCOL" in
+          "")
+            ;;
+          anthropic)
+            OCR_USE_ANTHROPIC="true"
+            OCR_LLM_PROTOCOL="anthropic"
+            ;;
+          openai|openai-responses)
+            OCR_USE_ANTHROPIC="false"
+            OCR_LLM_PROTOCOL="$EXPLICIT_PROTOCOL"
+            ;;
+          *)
+            echo "::error::llm_protocol must be anthropic, openai or openai-responses (got '${EXPLICIT_PROTOCOL}')"
+            exit 1
+            ;;
+        esac
+        # Exported for the checkpoint fingerprint: the normalized explicit
+        # protocol, empty when neither the input nor the inherited variable
+        # was set, so checkpoints taken before the input existed stay valid.
+        echo "OCR_LLM_PROTOCOL_EXPLICIT=${EXPLICIT_PROTOCOL}" >> "$GITHUB_ENV"
         # reasoning_effort is OpenAI-compatible vocabulary; the Anthropic API
         # rejects unknown body fields, so fail fast instead of breaking every
         # request. Anthropic thinking control goes through an explicit
@@ -642,6 +727,7 @@ runs:
         OCR_FP_LLM_URL: ${{ inputs.llm_url }}
         OCR_FP_LLM_MODEL: ${{ inputs.llm_model }}
         OCR_FP_LLM_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
+        OCR_FP_LLM_PROTOCOL: ${{ env.OCR_LLM_PROTOCOL_EXPLICIT }}
         OCR_FP_LANGUAGE: ${{ inputs.language }}
         OCR_FP_LLM_EXTRA_BODY: ${{ inputs.llm_extra_body }}
         # Normalized by Validate inputs, so spellings that mean the same thing
@@ -784,6 +870,12 @@ runs:
                 process.env.OCR_FP_LLM_URL,
                 process.env.OCR_FP_LLM_MODEL,
                 process.env.OCR_FP_LLM_USE_ANTHROPIC,
+                // The explicit protocol as Configure OCR resolved it — the input
+                // first, then OCR_LLM_PROTOCOL inherited from the job — so a
+                // protocol switched through the environment alone still fails
+                // closed to a full review. Appended only when set, so
+                // checkpoints taken before the input existed stay valid.
+                ...(process.env.OCR_FP_LLM_PROTOCOL ? [process.env.OCR_FP_LLM_PROTOCOL] : []),
                 process.env.OCR_FP_LANGUAGE,
                 process.env.OCR_FP_LLM_EXTRA_BODY,
                 process.env.OCR_FP_LLM_REASONING_EFFORT,
@@ -954,6 +1046,7 @@ runs:
         # Resolved by "Resolve PR refs", which fails the job when no number is
         # available; context.issue.number resolves nothing on a workflow_run.
         OCR_PR_NUMBER: ${{ env.PR_NUMBER }}
+        OCR_RESOLVE_OUTDATED: ${{ env.RESOLVE_OUTDATED }}
       with:
         github-token: ${{ inputs.github_token }}
         script: |
@@ -996,4 +1089,5 @@ runs:
             rangeMode: process.env.OCR_RANGE_MODE || '',
             rangeFrom: process.env.OCR_RANGE_FROM || '',
             rangeTo: process.env.OCR_RANGE_TO || '',
+            resolveOutdated: process.env.OCR_RESOLVE_OUTDATED,
           });

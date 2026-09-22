@@ -2,7 +2,7 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import * as vscode from 'vscode';
-import { COMMANDS } from '../shared/constants';
+import { COMMANDS } from '@shared/constants';
 import { CommentProvider } from './providers/CommentProvider';
 
 export function registerCommands(
@@ -15,7 +15,7 @@ export function registerCommands(
 
   reg(COMMANDS.configOpen, openConfig);
 
-  // 标题栏按钮传入的是 CommentThread，侧边栏 / Markdown 链接传入的是 index
+  // Title-bar buttons pass a CommentThread; sidebar and Markdown links pass an index.
   const idxOf = (arg: vscode.CommentThread | number): number =>
     typeof arg === 'number' ? arg : comments.indexOfThread(arg);
 

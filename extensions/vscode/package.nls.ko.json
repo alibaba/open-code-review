@@ -1,0 +1,11 @@
+{
+  "ocr.activitybar.title": "Open Code Review",
+  "ocr.sidebar.name": "Code Review",
+  "ocr.review.start": "OCR: 코드 검토 시작",
+  "ocr.review.cancel": "OCR: 검토 취소",
+  "ocr.config.open": "OCR: 설정 열기",
+  "ocr.comment.apply": "적용",
+  "ocr.comment.discard": "무시",
+  "ocr.comment.falsePositive": "오탐",
+  "ocr.description": "AI 코드 검토 — open-code-review CLI 기반"
+}

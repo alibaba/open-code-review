@@ -146,7 +146,8 @@ func NewAgent(args Args) *Agent {
 		// DiffLookup returns a synthetic Diff so the code_comment tool's
 		// line-number resolver (resolveFromFileContent) can match against
 		// the full file content of the scanned file.
-		DiffLookup: a.lookupDiff,
+		DiffLookup:      a.lookupDiff,
+		MaxTokensBudget: args.MaxTokensBudget,
 		// NewRequestMeta is deliberately left nil. The retry report describes
 		// ocr review; scan shares this Runner, and a nil factory is what keeps
 		// scan's requests out of the report. See llmloop.Deps.NewRequestMeta.

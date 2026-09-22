@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -297,6 +298,9 @@ func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
 		AWSProfile:        "example-profile",
 		IdentityTokenFile: "C:/tokens/provider.jwt",
 		TokenExchangeURL:  "https://auth.example.com/token",
+		unknownJSONFields: map[string]json.RawMessage{
+			"future_provider": json.RawMessage(`{"value":"preserve-me"}`),
+		},
 	}
 
 	rv := reflect.ValueOf(orig)

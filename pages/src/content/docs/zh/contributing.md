@@ -163,7 +163,7 @@ open-code-review/
 
 ## 许可证头
 
-每个源文件（`.go`、`.sh`、`.js`、`.mjs`、`.ts`、`.tsx`）都必须包含 SPDX 许可证头。创建新文件后请运行：
+每个源文件（`.go`、`.js`、`.mjs`、`.ts`、`.tsx`、`.kt`、`.kts`、`.sh`、`.py`、`.css`）都必须包含 SPDX 许可证头。创建新文件后请运行：
 
 ```bash
 make license-add

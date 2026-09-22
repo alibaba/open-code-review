@@ -92,7 +92,7 @@ docs(README): update configuration examples
 
 ### License Headers
 
-모든 소스 파일(`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`)에는 SPDX 라이선스 헤더가 필요합니다. 새 파일을 생성한 후 다음을 실행하세요:
+모든 소스 파일(`.go`, `.js`, `.mjs`, `.ts`, `.tsx`, `.kt`, `.kts`, `.sh`, `.py`, `.css`)에는 SPDX 라이선스 헤더가 필요합니다. 새 파일을 생성한 후 다음을 실행하세요:
 
 ```bash
 make license-add

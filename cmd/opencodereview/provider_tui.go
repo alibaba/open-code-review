@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -1303,6 +1304,7 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		IdentityTokenFile: v.IdentityTokenFile,
 		TokenExchangeURL:  v.TokenExchangeURL,
 	}
+	out.unknownJSONFields = cloneUnknownJSONFields(v.unknownJSONFields)
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
 		for k, val := range v.ExtraBody {
@@ -1314,6 +1316,17 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		for k, val := range v.ExtraHeaders {
 			out.ExtraHeaders[k] = val
 		}
+	}
+	return out
+}
+
+func cloneUnknownJSONFields(src map[string]json.RawMessage) map[string]json.RawMessage {
+	if src == nil {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(src))
+	for key, value := range src {
+		out[key] = append(json.RawMessage(nil), value...)
 	}
 	return out
 }
