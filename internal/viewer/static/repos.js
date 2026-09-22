@@ -24,6 +24,6 @@
 
     input.addEventListener("input", () => {
         query = input.value.trim().toLowerCase();
-        pagerApi.refresh();
+        pagerApi.reset();
     });
 })();

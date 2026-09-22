@@ -35,6 +35,12 @@ func TestIsAllowedExt(t *testing.T) {
 		{".KT", true},
 		{".kts", true},
 		{".KTS", true},
+		{".fs", true},
+		{".FS", true},
+		{".fsi", true},
+		{".FSI", true},
+		{".fsx", true},
+		{".FSX", true},
 		{".ftl", true},
 		{".FTL", true},
 		{".ftlh", true},
@@ -162,6 +168,11 @@ func TestIsExcludedPath(t *testing.T) {
 		{"kotlin main dir", "src/main/kotlin/Foo.kt", false},
 		{"kotlin scripts test dir", "src/test/kotlin/scripts/FooTest.kts", true},
 		{"kotlin scripts main dir", "src/main/kotlin/scripts/Foo.kts", false},
+
+		// F# test files
+		{"fsharp Test suffix", "src/Domain/OrderTest.fs", true},
+		{"fsharp Test suffix at root", "OrderTest.fs", true},
+		{"fsharp non-test", "src/Domain/TestSupport.fs", false},
 
 		// JS/TS test files
 		{"js test file", "src/utils.test.js", true},
@@ -292,14 +303,16 @@ func TestIsExcludedPath(t *testing.T) {
 		{"capnp in filename only", "src/capnp_helpers.go", false},
 
 		// Jsonnet vendored dependencies (written by `jb install`, wiped by `rm -rf vendor`).
-		// The pattern is extension-scoped: IsExcludedPath applies every pattern to every
-		// path, so a bare **/vendor/** would also drop vendored Go and PHP sources.
+		// This used to be extension-scoped to keep vendored Go and PHP sources reviewable.
+		// #1494 reversed that on purpose: vendor/ is a dependency directory whatever the
+		// language inside it, and those two cases below now expect exclusion. The narrow
+		// **/vendor/**/*.{jsonnet,libsonnet} pattern is gone, superseded by **/vendor/**.
 		{"jsonnet vendor root", "vendor/github.com/grafana/jsonnet-libs/ksonnet-util/kausal.libsonnet", true},
 		{"jsonnet vendor nested dir", "jsonnet/vendor/foo/main.jsonnet", true},
 		{"jsonnet non-vendor lib", "lib/config.libsonnet", false},
 		{"jsonnet non-vendor env", "environments/prod/main.jsonnet", false},
-		{"go under vendor still reviewed", "vendor/github.com/pkg/errors/errors.go", false},
-		{"php under vendor still reviewed", "vendor/monolog/monolog/src/Logger.php", false},
+		{"go under vendor", "vendor/github.com/pkg/errors/errors.go", true},
+		{"php under vendor", "vendor/monolog/monolog/src/Logger.php", true},
 		// Zig test files
 		{"zig test directory", "test/parser.zig", true},
 		{"zig nested test directory", "src/test/unit/parser.zig", true},
@@ -379,6 +392,76 @@ func TestIsExcludedPath(t *testing.T) {
 		{"vhdl non-testbench source vhdl ext", "rtl/fifo.vhdl", false},
 		{"hdl tb without underscore not excluded", "rtl/tbench.v", false},
 		{"hdl tb substring mid-name not excluded", "rtl/outbound.v", false},
+
+		// Dependency directories and build output (#1494). Files inside these
+		// carry ordinary .js/.ts/.json/.css extensions, so the extension gate
+		// passes them through and only a path pattern stops them. The real case
+		// that prompted this: extensions/frontend/node_modules was committed
+		// once, and from then on git diff stopped consulting .gitignore for it,
+		// so a single review picked up 389 files.
+		{"node_modules at root", "node_modules/left-pad/index.js", true},
+		{"node_modules nested in a workspace", "extensions/frontend/node_modules/@babel/core/lib/index.js", true},
+		{"node_modules nested at depth", "a/b/c/d/node_modules/pkg/dist/index.js", true},
+		{"bower_components", "bower_components/jquery/dist/jquery.js", true},
+		{"pnpm store", ".pnpm-store/v3/files/00/abc.js", true},
+		{"yarn unplugged", ".yarn/unplugged/pkg-npm-1.0.0/node_modules/pkg/index.js", true},
+		{"yarn sdks", ".yarn/sdks/typescript/lib/tsc.js", true},
+		{"yarn pnp loader", ".pnp.cjs", true},
+		{"npm lockfile", "package-lock.json", true},
+		{"npm lockfile in a package", "packages/ui/package-lock.json", true},
+		{"pnpm lockfile", "pnpm-lock.yaml", true},
+		{"npm shrinkwrap", "npm-shrinkwrap.json", true},
+		{"minified js", "web/static/app.min.js", true},
+		{"minified css", "web/static/app.min.css", true},
+		{"dist output", "web/dist/main.js", true},
+		{"next build cache", ".next/static/chunks/main.js", true},
+		{"nuxt build output", ".nuxt/dist/client/app.js", true},
+		{"sveltekit generated", ".svelte-kit/generated/root.js", true},
+		{"astro generated types", ".astro/types.d.ts", true},
+		{"turbo cache", ".turbo/daemon/log.json", true},
+		{"angular cli cache", ".angular/cache/17.0.0/vite/deps/index.js", true},
+		{"parcel cache", ".parcel-cache/index.js", true},
+		{"docusaurus build cache", ".docusaurus/registry.js", true},
+		{"vendored go", "api/vendor/github.com/pkg/errors/errors.go", true},
+		{"bundler vendored gems", ".bundle/ruby/3.2.0/gems/rails/lib/rails.rb", true},
+		{"cargo or maven target", "target/debug/build/foo/out.rs", true},
+		{"gradle cache", ".gradle/caches/modules-2/init.gradle.kts", true},
+		{"python bytecode cache", "svc/__pycache__/mod.py", true},
+		{"python dot venv", ".venv/lib/python3.11/site-packages/foo/bar.py", true},
+		{"python bare venv", "venv/lib/python3.11/site-packages/foo/bar.py", true},
+		{"python site-packages anywhere", "env/lib/site-packages/requests/api.py", true},
+		{"python egg-info", "src/mypkg.egg-info/PKG-INFO", true},
+		{"tox env", ".tox/py311/lib/python3.11/x.py", true},
+		{"mypy cache", ".mypy_cache/3.11/foo.json", true},
+		{"pytest cache", ".pytest_cache/v/cache/lastfailed", true},
+		{"ruff cache", ".ruff_cache/content.json", true},
+		{"cocoapods", "ios/Pods/Firebase/Core/FIRApp.m", true},
+		{"carthage", "Carthage/Build/iOS/Alamofire.swift", true},
+		{"swiftpm build dir", ".build/checkouts/swift-nio/Sources/NIO/Channel.swift", true},
+		{"dotnet obj", "src/Api/obj/Debug/net8.0/Api.AssemblyInfo.cs", true},
+		{"dart tool", ".dart_tool/package_config.json", true},
+		{"terraform modules", "infra/.terraform/modules/vpc/main.tf", true},
+		{"terraform lockfile", "infra/.terraform.lock.hcl", true},
+		{"haskell stack work", ".stack-work/dist/x/Main.hs", true},
+		{"coverage report", "coverage/lcov-report/index.js", true},
+
+		// Lookalikes: a directory pattern must match a whole path segment, not
+		// a prefix of one, or these ordinary sources disappear from review.
+		{"distribution is not dist", "src/distribution/index.js", false},
+		{"objects is not obj", "src/objects/model.ts", false},
+		{"targeting is not target", "app/targeting/rules.go", false},
+		{"vendors is not vendor", "src/vendors/stripe.ts", false},
+		{"podsmith is not Pods", "ios/podsmith/Helper.swift", false},
+		{"venvironment is not venv", "tools/venvironment/setup.py", false},
+		{"coverages is not coverage", "app/coverages/report.ts", false},
+		{"coverage as a domain dir is reviewed", "src/coverage/plan.ts", false},
+		{"node_modules in a filename", "src/node_modules_helper.ts", false},
+		{"min in a filename is not minified", "src/minified.ts", false},
+		{"lockfile lookalike", "src/package-lock-utils.ts", false},
+		// #1494 leaves these two out on purpose: plenty of projects keep
+		// hand-written sources in them, including this repository's bin/ocr.js.
+		{"bin is reviewed", "bin/ocr.js", false},
+		{"build is reviewed", "build/index.js", false},
 
 		// Case insensitive
 		{"case insensitive go", "Foo/Bar_Test.go", true},

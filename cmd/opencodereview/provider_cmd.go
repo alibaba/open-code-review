@@ -425,11 +425,14 @@ func saveConfig(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
+	// WriteFile applies 0o600 only when creating the file; existing files keep
+	// their prior permissions. Tighten an existing config before writing any
+	// credential material; a missing file will be created as 0600 below.
+	if err := os.Chmod(path, 0o600); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("chmod config: %w", err)
+	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("chmod config: %w", err)
 	}
 	return nil
 }

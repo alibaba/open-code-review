@@ -12,12 +12,12 @@ sidebar:
 OCR은 **네 겹의 우선순위 사슬**로 규칙을 해석합니다. 파일 경로마다 계층을 순서대로
 훑고, 처음 일치한 패턴이 이깁니다.
 
-| 우선순위 | 출처 | 경로 | 설명 |
-|---|---|---|---|
-| 1(가장 높음) | `--rule` 플래그 | 사용자가 지정 | CLI 재정의. 지정하면 언제나 이깁니다. |
-| 2 | 프로젝트 설정 | `<repoDir>/.opencodereview/rule.json` | 프로젝트별 규칙. 커밋해도 됩니다. |
-| 3 | 전역 설정 | `~/.opencodereview/rule.json` | 사용자 전체에 적용할 취향. |
-| 4(가장 낮음) | 시스템 기본값 | 내장 `system_rules.json` | 주요 언어를 다루는 내장 규칙. |
+| 우선순위     | 출처            | 경로                                  | 설명                                  |
+| ------------ | --------------- | ------------------------------------- | ------------------------------------- |
+| 1(가장 높음) | `--rule` 플래그 | 사용자가 지정                         | CLI 재정의. 지정하면 언제나 이깁니다. |
+| 2            | 프로젝트 설정   | `<repoDir>/.opencodereview/rule.json` | 프로젝트별 규칙. 커밋해도 됩니다.     |
+| 3            | 전역 설정       | `~/.opencodereview/rule.json`         | 사용자 전체에 적용할 취향.            |
+| 4(가장 낮음) | 시스템 기본값   | 내장 `system_rules.json`              | 주요 언어를 다루는 내장 규칙.         |
 
 우선순위가 높은 계층의 파일이 없으면 오류 없이 조용히 건너뜁니다. 그래서
 `.opencodereview/rule.json`을 두지 않은 프로젝트는 그대로 전역·시스템 계층으로
@@ -48,10 +48,10 @@ OCR은 **네 겹의 우선순위 사슬**로 규칙을 해석합니다. 파일 �
 서로 독립적인 필드 세 개가 있습니다.
 
 - `include` — 선택. 내장 기본 제외 패턴(아래에서 설명하는 테스트 파일 제외)을
-  *건너뛰는* glob 패턴입니다. 화이트리스트가 아닙니다. 어떤 `include` 패턴에도
+  _건너뛰는_ glob 패턴입니다. 화이트리스트가 아닙니다. 어떤 `include` 패턴에도
   걸리지 않은 파일도 `unsupported_ext`와 `default_path` 검사를 계속 거치며 리뷰될 수
   있습니다.
-- `exclude` — 선택. OCR이 리뷰하면 *안 되는* 파일의 glob 패턴입니다. 사용자 설정 필터 안에서
+- `exclude` — 선택. OCR이 리뷰하면 _안 되는_ 파일의 glob 패턴입니다. 사용자 설정 필터 안에서
   가장 높은 우선순위를 가집니다.
 - `rules` — `{path, rule}` 항목의 배열이며 **선언 순서대로** 평가합니다. 파일에
   처음 일치하는 `path`가 그 파일을 리뷰할 때 OCR이 모델에 보낼 프롬프트를 정합니다.
@@ -78,10 +78,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 있는 여섯 관문 알고리즘입니다. diff마다 OCR이 다음을 묻습니다.
 
 1. **`binary`** — 바이너리 파일인가? 그렇다면 제외.
-2. **`secret_exclude`** — 이전 경로나 새 경로가 내장 시크릿 경로 보호 대상인가? 조건 없이 적용되는 glob 패턴은 [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)에 있습니다. 그렇다면 제외.
-   이 보호는 사용자 규칙보다 먼저 적용되며 `include` 패턴으로 우회할 수 없습니다.
-
-   환경별 `.env.*` 경로는 비밀 경로로 처리되지만, `.env.example`, `.env.sample`, `.env.template`에는 일반 리뷰 규칙이 적용됩니다.
+2. **`secret_exclude`** — 이전 경로나 새 경로가 내장 시크릿 경로 보호 대상인가? 그렇다면 제외. 이 보호는 사용자 규칙보다 먼저 적용되며 `include` 패턴으로 우회할 수 없습니다. 패턴 목록은 아래 [내장 시크릿 경로](#built-in-secret-paths)를 참고하세요.
 
 3. **`user_exclude`** — 경로가 사용자 `exclude` 패턴에 걸리는가? 그렇다면 제외.
 4. **`user_include`** — 사용자가 `include`를 정의했다면 경로가 거기 걸리는가?
@@ -99,15 +96,35 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 표시합니다. 리뷰할 새 내용이 없다는 뜻입니다. 토큰을 쓰지 않고 이 필터의 결과만
 보려면 `ocr review --preview`를 쓰세요.
 
+### 내장 시크릿 경로 {#built-in-secret-paths}
+
+내장 시크릿 경로는 리뷰되지 않습니다
+([`internal/config/allowlist/default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)
+참고):
+
+- `**/.ssh/**`
+- `**/id_rsa`
+- `**/id_dsa`
+- `**/id_ecdsa`
+- `**/id_ed25519`
+- `**/.netrc`
+- `**/_netrc`
+- `**/.npmrc`
+- `**/.pypirc`
+- `**/.dockercfg`
+
+또한 `.env`와 `.env.*` 변형도 시크릿 경로로 처리합니다(`.env.example`, `.env.sample`, `.env.template` 제외).
+
 ### 기본 경로 제외 목록 {#default-path-exclusions}
 
-내장 제외 목록은 테스트 파일 패턴에 걸립니다
+내장 제외 목록은
 ([`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json)
-참고).
+참고) 두 그룹을 다룹니다. 첫 번째는 여러 언어의 테스트 파일과 테스트 fixture, 스냅샷, 생성 코드입니다.
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
-- `**/src/test/**/*.kt`
+- `**/src/test/**/*.{kt,kts}`
+- `**/*Test.fs`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`
@@ -122,13 +139,68 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/*_test.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
+- `**/test/**/*.jl`
+- `**/test/**/*.hs`
+- `**/*Spec.hs`
+- `**/test/**/*.lhs`
+- `**/*Spec.lhs`
+- `**/tests/**/*.nim`
+- `**/tests/**/*.R`
+- `**/__snapshots__/**`
+- `**/*.snap`
+- `**/testdata/**`
+- `**/fixtures/**`
+- `**/.ipynb_checkpoints/**`
+- `**/*.generated.*`
+- `**/*.gen.go`
+- `**/*.pb.go`
+- `**/*.pb.cc`
+- `**/*.pb.h`
+- `**/*Test.swift`
+- `**/*Tests.swift`
+- `**/Tests/**/*.swift`
+- `**/tests/**/*.elm`
+- `**/vendor/**/*.{jsonnet,libsonnet}`
+- `**/test/**/*.zig`
+- `**/*_test.zig`
+- `**/kitex_gen/**/*.go`
+- `**/*.capnp.h`
+- `**/*.capnp.go`
+- `**/*.capnp.ts`
+- `**/*_capnp.rs`
+- `**/*_capnp.py`
+- `**/test/**/*.ml`
+- `**/tb_*.{v,sv,vhd,vhdl}`
+- `**/*_tb.{v,sv,vhd,vhdl}`
+- `lib/**/*.sol`
+- `**/*.t.sol`
+- `**/test/**/*.sol`
+- `**/tests/**/*.sol`
+- `**/test/**/*.vy`
+- `**/tests/**/*.vy`
 
-잡음이 많은 디렉터리(`vendor/`, `node_modules/`, `target/` 등)를 걸러내는 일은 더
-앞에서, 파일별 필터가 돌기 전
-[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)의
-diff 단계에서 일어납니다.
+…그리고 의존성 디렉터리와 빌드 산출물 디렉터리:
 
-이런 테스트 파일 패턴에 걸리는 파일을 **리뷰하고 싶다면** 사용자 `include` 목록에
+- `**/node_modules/**`
+- `**/bower_components/**`
+- `**/vendor/**`
+- `**/target/**`
+- `**/dist/**`
+- `**/__pycache__/**`, `**/.venv/**`, `**/site-packages/**`
+- `**/Pods/**`, `**/Carthage/**`
+- `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
+
+`**/build/**` 와 `**/bin/**` 은 의도적으로 빠져 있습니다. 많은 프로젝트가 손으로
+작성한 소스를 그 안에 두기 때문입니다.
+
+같은 디렉터리들은 더 앞선 diff 단계
+[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go) 에서도 걸러집니다.
+이 목록은 경로 접두사로 비교하므로 **저장소 루트**의 디렉터리만 잡습니다.
+`vendor/pkg/x.go` 는 파일별 필터까지 오지 않고 `provider_directory` 로
+보고되고, `api/vendor/pkg/x.go` 는 도달해서 `default_path` 로 제외됩니다.
+`include` 규칙으로 되돌릴 수 있는 것은 후자뿐입니다.
+
+위 패턴 중 하나에 걸리는 파일을 **리뷰하고 싶다면** 사용자 `include` 목록에
 넣으세요. `include`가 기본 경로 관문을 덮어씁니다.
 
 ## 파일별 규칙 해석 {#rule-resolution-per-file}
@@ -142,53 +214,54 @@ diff 단계에서 일어납니다.
 
 내장 `system_rules.json`에서 고른 패턴을 상대적인 대조 순서대로 아래에 정리했습니다.
 
-| 패턴 | 규칙 문서 |
-|---|---|
-| `**/*.properties` | `properties.md` — i18n / 설정 파일. |
-| `**/*{mapper,dao}*.xml` | `mapper_dao_xml.md` — MyBatis 형식의 매퍼 SQL. |
-| `**/pom.xml` | `pom_xml.md` — Maven 의존성. |
-| `**/build.gradle` | `build_gradle.md` — Gradle 의존성. |
-| `**/package.json` | `package_json.md` — NPM 의존성 / 스크립트. |
-| `**/Cargo.toml` | `cargo_toml.md` — Rust 매니페스트. |
-| `**/composer.json` | `composer_json.md` — Composer 의존성, 오토로딩, 스크립트, 플러그인, 패키지 설정. |
-| `**/*.{json,json5}` | `json.md` — 일반 JSON(`.json5`도 포함). |
-| `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md` — GitHub Actions 워크플로 YAML. |
-| `.github/**/*.{yaml,yml}` | `github_config.md` — 그 밖의 `.github` 설정 YAML. |
-| `**/*.{yaml,yml}` | `yaml.md` |
-| `**/*.java` | `java.md` |
-| `**/*.go` | `go.md` — Go 소스. |
-| `**/*.{ftl,ftlh,ftlx}` | `freemarker.md` — FreeMarker 템플릿(SSTI / XSS / null 처리). |
-| `**/*.{hbs,mustache}` | `handlebars_mustache.md` — Handlebars 및 Mustache 템플릿. |
-| `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
-| `**/*.astro` | `astro.md` — Astro 컴포넌트와 아일랜드. |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt,kts}` | `kotlin.md` |
-| `**/*.rs` | `rust.md` |
-| `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
-| `**/*.c` | `c.md` |
-| `**/*.{py,pyi,ipynb}` | `python.md` — Python 소스. |
-| `**/*.{php,phtml}` | `php.md` — PHP 소스와 PHP 템플릿. |
-| `**/*.proto` | `protobuf.md` — Protocol Buffers 통신 호환성. |
-| `**/*.po` | `po.md` — gettext 번역 원본 카탈로그. |
-| `**/*.pot` | `pot.md` — gettext 템플릿 파일. |
-| `**/*.{graphql,gql}` | `graphql.md` — GraphQL 스키마와 오퍼레이션. |
-| `**/*.prisma` | `prisma.md` — Prisma 스키마. |
-| `**/*.jl` | `julia.md` — Julia 소스. |
-| `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
-| `**/*.bicep` | `bicep.md` — Bicep(Azure) 템플릿. |
-| `**/*.elm` | `elm.md` — Elm 소스. |
-| `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리. |
-| `**/*.thrift` | `thrift.md` — Apache Thrift IDL 통신 호환성. |
-| `**/*.capnp` | `capnp.md` — Cap'n Proto 스키마 통신 호환성. |
-| `**/*.{v,sv,vh}` | `verilog.md` — Verilog 및 SystemVerilog RTL. |
-| `**/*.{vhd,vhdl}` | `vhdl.md` — VHDL RTL. |
-| `**/*.m` | `matlab.md`(또는 [내용 탐지](#content-sniffing-for-m-files)로 `objc.md`) |
-| `**/*.mm` | `objc.md` — Objective-C++ 소스. |
-| `**/*.sol` | `solidity.md` — Solidity 스마트 컨트랙트. |
-| `**/*.vy` | `vyper.md` — Vyper 스마트 컨트랙트. |
-| `**/*.rego` | `rego.md` — Rego 정책 (OPA). |
-| *(대체값)* | `default.md` |
+| 패턴                                | 규칙 문서                                                                        |
+| ----------------------------------- | -------------------------------------------------------------------------------- |
+| `**/*.properties`                   | `properties.md` — i18n / 설정 파일.                                              |
+| `**/*{mapper,dao}*.xml`             | `mapper_dao_xml.md` — MyBatis 형식의 매퍼 SQL.                                   |
+| `**/pom.xml`                        | `pom_xml.md` — Maven 의존성.                                                     |
+| `**/build.gradle`                   | `build_gradle.md` — Gradle 의존성.                                               |
+| `**/package.json`                   | `package_json.md` — NPM 의존성 / 스크립트.                                       |
+| `**/Cargo.toml`                     | `cargo_toml.md` — Rust 매니페스트.                                               |
+| `**/composer.json`                  | `composer_json.md` — Composer 의존성, 오토로딩, 스크립트, 플러그인, 패키지 설정. |
+| `**/*.{json,json5}`                 | `json.md` — 일반 JSON(`.json5`도 포함).                                          |
+| `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md` — GitHub Actions 워크플로 YAML.                            |
+| `.github/**/*.{yaml,yml}`           | `github_config.md` — 그 밖의 `.github` 설정 YAML.                                |
+| `**/*.{yaml,yml}`                   | `yaml.md`                                                                        |
+| `**/*.java`                         | `java.md`                                                                        |
+| `**/*.go`                           | `go.md` — Go 소스.                                                               |
+| `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — FreeMarker 템플릿(SSTI / XSS / null 처리).                     |
+| `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — Handlebars 및 Mustache 템플릿.                        |
+| `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                  |
+| `**/*.astro`                        | `astro.md` — Astro 컴포넌트와 아일랜드.                                          |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                               |
+| `**/*.{kt,kts}`                     | `kotlin.md`                                                                      |
+| `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — F# 구현, 시그니처, 스크립트 파일.                                              |
+| `**/*.rs`                           | `rust.md`                                                                        |
+| `**/*.R`                            | `r.md`                                                                           |
+| `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                         |
+| `**/*.c`                            | `c.md`                                                                           |
+| `**/*.{py,pyi,ipynb}`               | `python.md` — Python 소스.                                                       |
+| `**/*.{php,phtml}`                  | `php.md` — PHP 소스와 PHP 템플릿.                                                |
+| `**/*.proto`                        | `protobuf.md` — Protocol Buffers 통신 호환성.                                    |
+| `**/*.po`                           | `po.md` — gettext 번역 원본 카탈로그.                                            |
+| `**/*.pot`                          | `pot.md` — gettext 템플릿 파일.                                                  |
+| `**/*.{graphql,gql}`                | `graphql.md` — GraphQL 스키마와 오퍼레이션.                                      |
+| `**/*.prisma`                       | `prisma.md` — Prisma 스키마.                                                     |
+| `**/*.jl`                           | `julia.md` — Julia 소스.                                                         |
+| `**/*.{tf,hcl,tfvars}`              | `terraform.md` — Terraform / HCL.                                                |
+| `**/*.bicep`                        | `bicep.md` — Bicep(Azure) 템플릿.                                                |
+| `**/*.elm`                          | `elm.md` — Elm 소스.                                                             |
+| `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리.                                 |
+| `**/*.thrift`                       | `thrift.md` — Apache Thrift IDL 통신 호환성.                                     |
+| `**/*.capnp`                        | `capnp.md` — Cap'n Proto 스키마 통신 호환성.                                     |
+| `**/*.{v,sv,vh}`                    | `verilog.md` — Verilog 및 SystemVerilog RTL.                                     |
+| `**/*.{vhd,vhdl}`                   | `vhdl.md` — VHDL RTL.                                                            |
+| `**/*.m`                            | `matlab.md`(또는 [내용 탐지](#content-sniffing-for-m-files)로 `objc.md`)         |
+| `**/*.mm`                           | `objc.md` — Objective-C++ 소스.                                                  |
+| `**/*.sol`                          | `solidity.md` — Solidity 스마트 컨트랙트.                                        |
+| `**/*.vy`                           | `vyper.md` — Vyper 스마트 컨트랙트.                                              |
+| `**/*.rego`                         | `rego.md` — Rego 정책 (OPA).                                                     |
+| _(대체값)_                          | `default.md`                                                                     |
 
 해석된 규칙 본문은 plan과 main 작업 프롬프트에서 `{{system_rule}}` 자리에 들어갑니다.
 

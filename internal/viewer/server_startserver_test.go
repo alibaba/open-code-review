@@ -209,6 +209,8 @@ func TestParseTemplate_SessionWithComments(t *testing.T) {
 		`data-filter-kind="category" data-filter-value="other"`,
 		`data-comment-card data-category="bug" data-severity="critical"`,
 		`data-comment-card data-category="other" data-severity="low"`,
+		`<nav id="comments-pagination" class="pagination" aria-label="Review comment pages" hidden>`,
+		`<details class="comment-file-group" open hidden>`,
 		`data-comment-filter-empty`,
 		`<p class="comment-filter-empty" data-comment-filter-empty role="status" hidden>`,
 		`<span class="comment-filter-label" data-marks-count aria-live="polite"></span>`,

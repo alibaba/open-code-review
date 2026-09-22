@@ -86,6 +86,11 @@ diff 프로바이더 단계에서, `internal/diff/git.go`의 `providerDirIgnoreD
 떼어 내므로 파일 단위 필터까지 오지 못합니다. Preview는 이 파일들을 `provider_directory`로
 보고하며, `include` 규칙으로도 이들을 다시 리뷰 대상으로 되돌릴 수 없습니다.
 
+이 목록은 경로 접두사로 비교하므로 **저장소 루트**의 디렉터리만 대상입니다.
+중첩된 같은 이름의 디렉터리는 파일 단위 필터까지 도달해 `default_path` 로
+제외됩니다. `vendor/pkg/x.go` 는 `provider_directory` 로, `api/vendor/pkg/x.go` 는
+`default_path` 로 보고되며 `include` 규칙으로 되돌릴 수 있는 것은 후자뿐입니다.
+
 `ocr review --preview`를 돌리면 토큰 한 톨 쓰지 않고 필터 결과 전체를 볼 수
 있습니다. 알고리즘 전체는
 [리뷰 규칙](../review-rules/#how-files-are-filtered)을 참고하세요.
