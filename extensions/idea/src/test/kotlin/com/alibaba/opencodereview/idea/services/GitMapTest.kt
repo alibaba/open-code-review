@@ -6,8 +6,11 @@ package com.alibaba.opencodereview.idea.services
 import com.alibaba.opencodereview.idea.model.FileChange
 import com.alibaba.opencodereview.idea.model.FileStatus
 import com.alibaba.opencodereview.idea.model.SupportedLocale
+import java.io.File
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class GitMapTest {
 
@@ -354,4 +357,63 @@ class GitMapTest {
         val branches = listOf("master", "origin/develop")
         assertEquals(branches, pinDefaultBranches(branches, "origin/master"))
     }
+
+    // ------------------------------------------------------------ commitShowNameStatusArgs
+
+    @Test
+    fun `commit show args request first-parent merge diffs`() {
+        val args = commitShowNameStatusArgs("abc123").toList()
+        assertTrue(args.contains("--diff-merges=first-parent"))
+        assertTrue(args.contains("--end-of-options"))
+        assertEquals("abc123", args.last())
+    }
+
+    @Test
+    fun `lists merge commit files relative to the first parent`() {
+        val repo = Files.createTempDirectory("ocr-idea-merge-").toFile()
+        try {
+            git(repo, "init", "-q")
+            git(repo, "config", "user.email", "test@example.com")
+            git(repo, "config", "user.name", "Test User")
+            git(repo, "config", "commit.gpgsign", "false")
+
+            File(repo, "base.ts").writeText("export const base = true;\n")
+            git(repo, "add", "base.ts")
+            git(repo, "commit", "-q", "-m", "base")
+            git(repo, "branch", "-M", "main")
+
+            git(repo, "checkout", "-q", "-b", "feature")
+            File(repo, "feature.ts").writeText("export const feature = true;\n")
+            git(repo, "add", "feature.ts")
+            git(repo, "commit", "-q", "-m", "feature")
+
+            git(repo, "checkout", "-q", "main")
+            File(repo, "main.ts").writeText("export const main = true;\n")
+            git(repo, "add", "main.ts")
+            git(repo, "commit", "-q", "-m", "main")
+            git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge")
+
+            val sha = git(repo, "rev-parse", "HEAD").trim()
+            val out = git(repo, *commitShowNameStatusArgs(sha))
+            assertEquals(
+                listOf(FileChange("feature.ts", FileStatus.ADDED)),
+                parseNameStatus(out),
+            )
+        } finally {
+            repo.deleteRecursively()
+        }
+    }
+}
+
+private fun git(repo: File, vararg args: String): String {
+    val process = ProcessBuilder(listOf("git") + args.toList())
+        .directory(repo)
+        .redirectErrorStream(true)
+        .start()
+    val out = process.inputStream.bufferedReader().readText()
+    val code = process.waitFor()
+    if (code != 0) {
+        throw AssertionError("git ${args.joinToString(" ")} failed ($code): $out")
+    }
+    return out
 }
