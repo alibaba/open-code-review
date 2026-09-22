@@ -44,6 +44,12 @@ type ResolvedEndpoint struct {
 	// providers. Empty means "let the AWS SDK decide".
 	AWSProfile string
 	AWSRegion  string
+
+	// GCPProject and GCPRegion configure the vertex protocol. Unlike
+	// AWSRegion, neither can be left for the transport to guess: a Vertex
+	// request is scoped to a project as well as a region.
+	GCPProject string
+	GCPRegion  string
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -247,6 +253,15 @@ func errBedrockNotConfigurable(key string) error {
 		key, ProtocolAnthropicBedrock)
 }
 
+// errVertexNotConfigurable explains why the two url+token strategies reject the
+// vertex protocol, for the same reason errBedrockNotConfigurable does: both
+// describe a single HTTP endpoint and carry no place for a region or a
+// project, and vertex uses neither the url nor the token they do carry.
+func errVertexNotConfigurable(key string) error {
+	return fmt.Errorf("%s cannot be %q: vertex derives its host from gcp_region and authorizes with Application Default Credentials, so it has no use for a url or a token; configure it as a provider instead (\"provider\": \"vertex\")",
+		key, ProtocolAnthropicVertex)
+}
+
 // tryOCREnv reads OCR-specific environment variables.
 func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	url := os.Getenv(envOCRLLMURL)
@@ -268,6 +283,9 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 		}
 		if protocol == ProtocolAnthropicBedrock {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", errBedrockNotConfigurable(envOCRLLMProtocol))
+		}
+		if protocol == ProtocolAnthropicVertex {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", errVertexNotConfigurable(envOCRLLMProtocol))
 		}
 	}
 	if protocol == "" {
@@ -333,6 +351,15 @@ type providerEntryConfig struct {
 	// makes a review run reproducible without exporting AWS_PROFILE first.
 	AWSProfile string `json:"aws_profile,omitempty"`
 	AWSRegion  string `json:"aws_region,omitempty"`
+
+	// GCPProject and GCPRegion apply to ambient-auth providers that
+	// authenticate from Application Default Credentials (currently vertex).
+	// Unlike AWSRegion, both are effectively required: a review run with
+	// neither set fails at client construction rather than falling back to an
+	// ambient default, because Vertex AI has no equivalent of "whichever
+	// region the credential chain implies".
+	GCPProject string `json:"gcp_project,omitempty"`
+	GCPRegion  string `json:"gcp_region,omitempty"`
 }
 
 type configFile struct {
@@ -450,9 +477,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	} else {
 		// Custom provider: protocol is always required; model can come from
 		// cfg.Model. url is required for every protocol that names an HTTP
-		// endpoint, which is all of them except bedrock — there the region
-		// decides the host, so demanding a url would mean storing a value the
-		// client never reads.
+		// endpoint, which is all of them except bedrock and vertex — there the
+		// region (and, for vertex, the project) decides the host, so demanding
+		// a url would mean storing a value the client never reads.
 		if entry.Protocol == "" {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires a protocol field", cfg.Provider)
 		}
@@ -460,7 +487,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		if err := ValidateProtocol(normalized); err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q: %w", cfg.Provider, err)
 		}
-		if normalized != ProtocolAnthropicBedrock && entry.URL == "" {
+		if normalized != ProtocolAnthropicBedrock && normalized != ProtocolAnthropicVertex && entry.URL == "" {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires a url field for protocol %q", cfg.Provider, normalized)
 		}
 		url = entry.URL
@@ -470,11 +497,11 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	// Ambient auth follows the protocol actually in force, which is why this is
 	// resolved after the override above rather than read off the preset. A preset
 	// declares ambient auth (AmbientAuth), but an entry may override the preset's
-	// protocol: a bedrock preset switched to "openai" speaks a protocol with no
-	// SigV4 signing and needs a token like anything else. Conversely an entry
-	// that selects the bedrock protocol explicitly signs its requests whatever
-	// the preset says.
-	ambientAuth := protocol == ProtocolAnthropicBedrock ||
+	// protocol: a bedrock or vertex preset switched to "openai" speaks a protocol
+	// with no ambient signing and needs a token like anything else. Conversely an
+	// entry that explicitly selects the bedrock or vertex protocol signs its
+	// requests whatever the preset says.
+	ambientAuth := protocol == ProtocolAnthropicBedrock || protocol == ProtocolAnthropicVertex ||
 		(isPreset && preset.AmbientAuth && entry.Protocol == "")
 
 	// No credential at all is an error, and it is reported before api_key_cmd
@@ -593,6 +620,8 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		AmbientAuth:  ambientAuth,
 		AWSProfile:   entry.AWSProfile,
 		AWSRegion:    entry.AWSRegion,
+		GCPProject:   entry.GCPProject,
+		GCPRegion:    entry.GCPRegion,
 	}, true, nil
 }
 
@@ -636,6 +665,9 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		}
 		if protocol == ProtocolAnthropicBedrock {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", errBedrockNotConfigurable("llm.protocol"))
+		}
+		if protocol == ProtocolAnthropicVertex {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", errVertexNotConfigurable("llm.protocol"))
 		}
 	}
 	if protocol == "" {

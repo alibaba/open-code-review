@@ -62,6 +62,7 @@ var cpProtocols = []string{
 	llm.ProtocolOpenAIChatCompletions,
 	llm.ProtocolOpenAIResponses,
 	llm.ProtocolAnthropicBedrock,
+	llm.ProtocolAnthropicVertex,
 }
 
 // manualProtocols lists the protocol options offered in the Manual form, which
@@ -198,7 +199,16 @@ type providerTUIModel struct {
 // ends at the protocol step instead of walking three fields that would be
 // written as dead config.
 func (m providerTUIModel) cpAmbientProtocol() bool {
-	return cpProtocols[m.cpProtocolIdx] == llm.ProtocolAnthropicBedrock
+	return isAmbientAuthProtocol(cpProtocols[m.cpProtocolIdx])
+}
+
+// isAmbientAuthProtocol reports whether protocol authenticates from the
+// environment rather than a stored credential — bedrock (AWS SigV4) and
+// vertex (Google Application Default Credentials). Shared by every Custom
+// form save path that needs to drop a url/api_key/auth_header the protocol no
+// longer reads.
+func isAmbientAuthProtocol(protocol string) bool {
+	return protocol == llm.ProtocolAnthropicBedrock || protocol == llm.ProtocolAnthropicVertex
 }
 
 func cpProtocolIndex(protocol string) int {
@@ -1252,7 +1262,7 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 		AuthHeader: r.authHeader,
 		APIKey:     strings.TrimSpace(m.apiKeyInput.Value()),
 	}
-	if r.protocol == llm.ProtocolAnthropicBedrock {
+	if isAmbientAuthProtocol(r.protocol) {
 		entry.APIKey = ""
 	}
 	m.existingCfg.CustomProviders[r.provider] = entry
@@ -1299,6 +1309,8 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		RetryCodes: append([]int(nil), v.RetryCodes...),
 		AWSProfile: v.AWSProfile,
 		AWSRegion:  v.AWSRegion,
+		GCPProject: v.GCPProject,
+		GCPRegion:  v.GCPRegion,
 	}
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
@@ -1371,7 +1383,7 @@ func (m *providerTUIModel) applyEditCustomProviderSave() error {
 	}
 	// Switching an entry to an ambient protocol drops the key it no longer uses,
 	// rather than leaving a live credential in a file nothing reads it from.
-	if entry.Protocol == llm.ProtocolAnthropicBedrock {
+	if isAmbientAuthProtocol(entry.Protocol) {
 		entry.APIKey = ""
 	}
 	// If name changed, delete old key
@@ -1994,8 +2006,9 @@ func (m providerTUIModel) result() providerTUIResult {
 			url := m.cpURLInput.Value()
 			// An ambient protocol collects none of these. Clearing them also
 			// covers switching an existing entry over to one: the url the
-			// previous protocol needed is dead config under bedrock, and leaving
-			// it behind is how a stale host outlives the change that removed it.
+			// previous protocol needed is dead config under bedrock or vertex,
+			// and leaving it behind is how a stale host outlives the change
+			// that removed it.
 			if m.cpAmbientProtocol() {
 				url, apiKey, authHeader = "", "", ""
 			}
@@ -2275,7 +2288,13 @@ func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
 					}
 				}
 				if m.cpAmbientProtocol() {
-					s.WriteString(tuiDimStyle.Render("    credentials come from the AWS chain; pin a region or profile with `ocr config set custom_providers."+m.cpNameInput.Value()+".aws_region <r>`") + "\n")
+					name := m.cpNameInput.Value()
+					switch cpProtocols[m.cpProtocolIdx] {
+					case llm.ProtocolAnthropicVertex:
+						s.WriteString(tuiDimStyle.Render("    credentials come from Application Default Credentials; set a region and project with `ocr config set custom_providers."+name+".gcp_region <r>` and `.gcp_project <p>`") + "\n")
+					default:
+						s.WriteString(tuiDimStyle.Render("    credentials come from the AWS chain; pin a region or profile with `ocr config set custom_providers."+name+".aws_region <r>`") + "\n")
+					}
 				}
 			case cpStepBaseURL:
 				s.WriteString("    " + m.cpURLInput.View() + "\n")

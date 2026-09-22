@@ -332,6 +332,14 @@ type ProviderEntry struct {
 	// first time any config command runs.
 	AWSProfile string `json:"aws_profile,omitempty"`
 	AWSRegion  string `json:"aws_region,omitempty"`
+
+	// GCPProject and GCPRegion pin the project and region for providers that
+	// authenticate from Application Default Credentials (vertex). Unlike
+	// AWSRegion, both are effectively required — Vertex AI has no equivalent of
+	// "whichever region the credential chain implies". Same round-trip
+	// requirement as AWSProfile/AWSRegion above.
+	GCPProject string `json:"gcp_project,omitempty"`
+	GCPRegion  string `json:"gcp_region,omitempty"`
 }
 
 // MCPServerConfig holds configuration for a single MCP server.
@@ -545,6 +553,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 		if normalized == llm.ProtocolAnthropicBedrock {
 			return fmt.Errorf("llm.protocol cannot be %q: bedrock derives its host from aws_region and signs with the AWS credential chain, so it has no use for llm.url or llm.auth_token; run `ocr config set provider bedrock` instead", normalized)
 		}
+		// Same reasoning, same fix: vertex derives its host from gcp_region and
+		// authorizes from Application Default Credentials, so it has nowhere
+		// here to put a region or a project either.
+		if normalized == llm.ProtocolAnthropicVertex {
+			return fmt.Errorf("llm.protocol cannot be %q: vertex derives its host from gcp_region and authorizes with Application Default Credentials, so it has no use for llm.url or llm.auth_token; run `ocr config set provider vertex` instead", normalized)
+		}
 		cfg.Llm.Protocol = normalized
 		// Mirror use_anthropic so older binaries that predate llm.protocol
 		// still pick the right protocol family: anthropic -> true, the OpenAI
@@ -609,7 +623,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile, gcp_region, gcp_project\nProtocol values: anthropic, anthropic-bedrock, anthropic-vertex, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -642,6 +656,13 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: clearing aws_region/aws_profile on %q: protocol %q does not use the AWS credential chain\n", providerName, normalized)
 			entry.AWSRegion = ""
 			entry.AWSProfile = ""
+		}
+		// Same hygiene for the other ambient-auth protocol: gcp_region/gcp_project
+		// are dead config once the entry no longer speaks vertex.
+		if normalized != llm.ProtocolAnthropicVertex && (entry.GCPRegion != "" || entry.GCPProject != "") {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: clearing gcp_region/gcp_project on %q: protocol %q does not use Application Default Credentials\n", providerName, normalized)
+			entry.GCPRegion = ""
+			entry.GCPProject = ""
 		}
 	case "model":
 		entry.Model = value
@@ -685,7 +706,7 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 		}
 		entry.TimeoutSec = timeout
 	case "aws_region", "aws_profile":
-		normalized, err := normalizeAWSSetting(field, key, value)
+		normalized, err := normalizeAmbientAuthSetting(field, key, value)
 		if err != nil {
 			return err
 		}
@@ -697,8 +718,21 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 		} else {
 			entry.AWSProfile = normalized
 		}
+	case "gcp_region", "gcp_project":
+		normalized, err := normalizeAmbientAuthSetting(field, key, value)
+		if err != nil {
+			return err
+		}
+		if !providerAcceptsGCPSettings(providerName, entry) {
+			return fmt.Errorf("%s does not apply to provider %q: gcp_region and gcp_project are only used by providers that authenticate with Application Default Credentials (protocol %s)", field, providerName, llm.ProtocolAnthropicVertex)
+		}
+		if field == "gcp_region" {
+			entry.GCPRegion = normalized
+		} else {
+			entry.GCPProject = normalized
+		}
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile, gcp_region, gcp_project", field)
 	}
 	return nil
 }
@@ -721,23 +755,39 @@ func parseTimeoutSeconds(value string) (int, error) {
 // The entry's own protocol decides whenever it sets one: a preset's protocol can
 // be overridden per entry (see tryProviderConfig), so `protocol: openai` on the
 // bedrock preset would otherwise still accept AWS settings that nothing reads.
-// Only when the entry is silent does the preset's own AmbientAuth flag answer.
+// Only when the entry is silent does the preset's own protocol answer — and it
+// must be checked against ProtocolAnthropicBedrock specifically, not just
+// AmbientAuth: vertex is ambient-auth too, and its preset has no use for an AWS
+// region or profile.
 func providerAcceptsAWSSettings(providerName string, entry *ProviderEntry) bool {
 	if entry.Protocol != "" {
 		return llm.NormalizeProtocol(entry.Protocol) == llm.ProtocolAnthropicBedrock
 	}
 	preset, isPreset := llm.LookupProvider(providerName)
-	return isPreset && preset.AmbientAuth
+	return isPreset && preset.Protocol == llm.ProtocolAnthropicBedrock && preset.AmbientAuth
 }
 
-// normalizeAWSSetting trims the value and rejects the shapes AWS itself will
-// not accept. Region names are deliberately not checked against a fixed list:
-// AWS adds regions faster than any embedded list stays correct, and a wrong one
-// already surfaces at request time.
-func normalizeAWSSetting(field, key, value string) (string, error) {
+// providerAcceptsGCPSettings is providerAcceptsAWSSettings for gcp_region /
+// gcp_project: it reports whether they mean anything for this provider,
+// following the entry's own protocol override the same way.
+func providerAcceptsGCPSettings(providerName string, entry *ProviderEntry) bool {
+	if entry.Protocol != "" {
+		return llm.NormalizeProtocol(entry.Protocol) == llm.ProtocolAnthropicVertex
+	}
+	preset, isPreset := llm.LookupProvider(providerName)
+	return isPreset && preset.Protocol == llm.ProtocolAnthropicVertex && preset.AmbientAuth
+}
+
+// normalizeAmbientAuthSetting trims the value and rejects a shape no cloud
+// region, profile or project name is ever spelled with. Shared by both
+// ambient-auth protocols (aws_region/aws_profile for bedrock, gcp_region/
+// gcp_project for vertex). Values are deliberately not checked against a fixed
+// list: both AWS and GCP add regions/projects faster than any embedded list
+// stays correct, and a wrong one already surfaces at request time.
+func normalizeAmbientAuthSetting(field, key, value string) (string, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
-		return "", nil // clearing the field hands the decision back to the AWS chain
+		return "", nil // clearing the field hands the decision back to the ambient credential chain
 	}
 	if strings.ContainsAny(trimmed, " \t\n") {
 		return "", fmt.Errorf("invalid %s for %s: %q contains whitespace", field, key, value)

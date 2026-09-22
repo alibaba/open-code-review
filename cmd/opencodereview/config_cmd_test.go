@@ -289,8 +289,11 @@ func TestSetConfigValueProviderEntryProtocol(t *testing.T) {
 		t.Fatal("expected error for invalid protocol")
 	}
 
-	if err := setConfigValue(cfg, "custom_providers.custom.protocol", "anthropic-vertex"); err == nil {
-		t.Fatal("expected error for unsupported protocol anthropic-vertex")
+	if err := setConfigValue(cfg, "custom_providers.custom.protocol", "anthropic-vertex"); err != nil {
+		t.Fatalf("setConfigValue anthropic-vertex: %v", err)
+	}
+	if cfg.CustomProviders["custom"].Protocol != llm.ProtocolAnthropicVertex {
+		t.Errorf("protocol = %q, want %q", cfg.CustomProviders["custom"].Protocol, llm.ProtocolAnthropicVertex)
 	}
 
 	if err := setConfigValue(cfg, "custom_providers.custom.protocol", "openai-responses"); err != nil {
@@ -1139,8 +1142,8 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 	}
 	want := "unknown config key: bogus.key\n" +
 		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.timeout_sec, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
-		"Protocol values: anthropic, anthropic-bedrock, openai, openai-responses\n" +
+		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile, gcp_region, gcp_project\n" +
+		"Protocol values: anthropic, anthropic-bedrock, anthropic-vertex, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {
 		t.Errorf("unknown-key message drifted:\n got: %q\nwant: %q", err.Error(), want)

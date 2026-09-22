@@ -2221,17 +2221,21 @@ func TestResolveEndpoint_CustomProviderOpenAIAlias(t *testing.T) {
 	}
 }
 
-func TestResolveEndpoint_CustomProviderAnthropicVertexRejected(t *testing.T) {
+// TestResolveEndpoint_CustomProviderAnthropicVertexAccepted covers the vertex
+// protocol the same way TestCustomProviderCanSelectBedrock covers bedrock: a
+// custom provider entry no longer needs a url for an ambient-auth protocol,
+// and gcp_project/gcp_region flow through to the resolved endpoint.
+func TestResolveEndpoint_CustomProviderAnthropicVertexAccepted(t *testing.T) {
 	clearAllEnv(t)
 
 	cfg := configFile{
 		Provider: "my-gateway",
 		CustomProviders: map[string]providerEntryConfig{
 			"my-gateway": {
-				APIKey:   "token",
-				URL:      "https://gateway.internal.com/v1",
-				Protocol: "anthropic-vertex",
-				Model:    "claude-3",
+				Protocol:   "anthropic-vertex",
+				Model:      "claude-sonnet-5",
+				GCPProject: "my-project",
+				GCPRegion:  "us-east5",
 			},
 		},
 	}
@@ -2239,12 +2243,21 @@ func TestResolveEndpoint_CustomProviderAnthropicVertexRejected(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	os.WriteFile(cfgPath, data, 0644)
 
-	_, err := ResolveEndpoint(cfgPath)
-	if err == nil {
-		t.Fatal("expected error for anthropic-vertex (unsupported)")
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "unsupported protocol") {
-		t.Errorf("error %q should mention 'unsupported protocol'", err.Error())
+	if ep.Protocol != ProtocolAnthropicVertex {
+		t.Errorf("Protocol = %q, want %q", ep.Protocol, ProtocolAnthropicVertex)
+	}
+	if !ep.AmbientAuth {
+		t.Error("AmbientAuth = false, want true — vertex authorizes from Application Default Credentials")
+	}
+	if ep.Token != "" {
+		t.Errorf("Token = %q, want empty", ep.Token)
+	}
+	if ep.GCPProject != "my-project" || ep.GCPRegion != "us-east5" {
+		t.Errorf("GCPProject/GCPRegion = %q/%q, want my-project/us-east5", ep.GCPProject, ep.GCPRegion)
 	}
 }
 
