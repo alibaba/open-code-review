@@ -625,7 +625,12 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		// fails to decode (see issue #647). "stream_options" is owned by the
 		// streaming branch below for the same reason: providers reject it
 		// unless stream is true.
-		if k == "stream" || k == "stream_options" {
+		if k == "stream" {
+			stream, isBool := v.(bool)
+			if !isBool || stream {
+				continue
+			}
+		} else if k == "stream_options" {
 			continue
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
@@ -1298,7 +1303,10 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		// forwarding it here makes the API answer with SSE and every call fails
 		// to decode. Drop the key rather than forward it.
 		if k == "stream" {
-			continue
+			stream, isBool := v.(bool)
+			if !isBool || stream {
+				continue
+			}
 		}
 		// Drop thinking when it conflicts with this request's constraints:
 		// forced tool_choice or budget_tokens >= max_tokens.

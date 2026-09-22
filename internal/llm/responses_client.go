@@ -124,7 +124,10 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 		// path), forwarding it here makes the API answer with SSE and every
 		// call fails to decode. Drop the key rather than forward it.
 		if k == "stream" {
-			continue
+			stream, isBool := v.(bool)
+			if !isBool || stream {
+				continue
+			}
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}

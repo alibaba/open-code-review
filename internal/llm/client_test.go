@@ -987,16 +987,18 @@ func TestOpenAIClient_StreamOptionsConfigOverrides(t *testing.T) {
 // Completions request. Forwarding it makes the API answer with
 // text/event-stream (SSE) while Chat.Completions.New expects a JSON body,
 // breaking every call (see issue #647). Only extra_body.stream=true as a
-// boolean triggers the streaming path; other types (string "true", bool
-// false) must be dropped from the wire body entirely so the server returns
-// JSON. Other extra_body keys are still forwarded.
+// boolean triggers the streaming path. A false boolean must be forwarded so
+// gateways that stream by default can be explicitly told to return JSON;
+// other non-boolean values must still be dropped. Other extra_body keys are
+// still forwarded.
 func TestOpenAIClient_NonStreamingRequestDropsStreamField(t *testing.T) {
 	tests := []struct {
-		name  string
-		value any
+		name       string
+		value      any
+		wantStream bool
 	}{
 		{name: "missing"},
-		{name: "boolean false", value: false},
+		{name: "boolean false", value: false, wantStream: true},
 		{name: "string true", value: "true"},
 	}
 
@@ -1010,8 +1012,13 @@ func TestOpenAIClient_NonStreamingRequestDropsStreamField(t *testing.T) {
 					return
 				}
 
-				if _, exists := body["stream"]; exists {
-					t.Errorf("stream field should NOT be present in non-streaming request body, got %v", body["stream"])
+				stream, present := body["stream"]
+				if tt.wantStream {
+					if !present || stream != false {
+						t.Errorf("stream = %v (present %v), want false", stream, present)
+					}
+				} else if present {
+					t.Errorf("stream field should NOT be present in non-streaming request body, got %v", stream)
 				}
 
 				w.Header().Set("Content-Type", "application/json")
@@ -1463,6 +1470,46 @@ func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
 	}
 	if resp.Content() != "ok" {
 		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+	}
+}
+
+func TestAnthropicClient_ExtraBodyStreamFalseForwarded(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_stream_false_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/v1/messages",
+		APIKey: "test-key",
+		Model:  "claude-test",
+		ExtraBody: map[string]any{
+			"stream": false,
+		},
+	})
+
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "hi"}},
+		MaxTokens: 64,
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	if got, present := gotBody["stream"]; !present || got != false {
+		t.Errorf("stream = %v (present %v), want false", got, present)
 	}
 }
 

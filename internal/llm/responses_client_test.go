@@ -662,6 +662,44 @@ func TestOpenAIResponsesClient_ExtraBodyStreamDropped(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesClient_ExtraBodyStreamFalseForwarded(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"resp_stream_false",
+			"object":"response",
+			"model":"gpt-5.4",
+			"status":"completed",
+			"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
+			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-5.4",
+		ExtraBody: map[string]any{
+			"stream": false,
+		},
+	})
+
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	if got, present := gotBody["stream"]; !present || got != false {
+		t.Errorf("stream = %v (present %v), want false", got, present)
+	}
+}
+
 // TestOpenAIResponsesClient_NonSuccessStatusReturnsError verifies that a
 // response with HTTP 200 but a non-completed status is surfaced as an error
 // rather than a normal ChatResponse. The Responses API returns 200 for
