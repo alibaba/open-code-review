@@ -45,31 +45,32 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 API-ключ. Если `providers.<name>.api_key` не задан, OCR использует
 соответствующую переменную окружения.
 
-| Имя | Протокол | Базовый URL | Переменная окружения для API-ключа |
-|---|---|---|---|
-| `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
-| `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
-| `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
-| `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
-| `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
-| `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
-| `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
-| `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
-| `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
-| `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
-| `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
-| `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
-| `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
-| `kimi-global` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_GLOBAL_API_KEY` |
-| `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
-| `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
-| `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
-| `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
-| `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
-| `siliconflow` | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
-| `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
-| `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
-| `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+| Имя                   | Протокол          | Базовый URL                                                          | Переменная окружения для API-ключа |
+| --------------------- | ----------------- | -------------------------------------------------------------------- | ---------------------------------- |
+| `anthropic`           | anthropic         | `https://api.anthropic.com`                                          | `ANTHROPIC_API_KEY`                |
+| `bedrock`             | anthropic-bedrock | определяется `aws_region`                                            | — (цепочка учётных данных AWS)     |
+| `openai`              | openai            | `https://api.openai.com/v1`                                          | `OPENAI_API_KEY`                   |
+| `openai-responses`    | openai-responses  | `https://api.openai.com/v1`                                          | `OPENAI_RESPONSES_API_KEY`         |
+| `gemini`              | openai            | `https://generativelanguage.googleapis.com/v1beta/openai`            | `GEMINI_API_KEY`                   |
+| `dashscope`           | openai            | `https://dashscope.aliyuncs.com/compatible-mode/v1`                  | `DASHSCOPE_API_KEY`                |
+| `dashscope-tokenplan` | openai            | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY`          |
+| `volcengine`          | openai            | `https://ark.cn-beijing.volces.com/api/v3`                           | `ARK_API_KEY`                      |
+| `deepseek`            | openai            | `https://api.deepseek.com`                                           | `DEEPSEEK_API_KEY`                 |
+| `tencent-tokenhub`    | openai            | `https://tokenhub.tencentmaas.com/v1`                                | `TENCENT_TOKENHUB_API_KEY`         |
+| `hy-tokenplan`        | openai            | `https://api.lkeap.cloud.tencent.com/plan/v3`                        | `TENCENT_HUNYUAN_TOKENPLAN_KEY`    |
+| `iflytek`             | openai            | `https://spark-api-open.xf-yun.com/v1`                               | `SPARK_API_KEY`                    |
+| `kimi`                | openai            | `https://api.moonshot.cn/v1`                                         | `MOONSHOT_API_KEY`                 |
+| `kimi-global`         | openai            | `https://api.moonshot.ai/v1`                                         | `MOONSHOT_GLOBAL_API_KEY`          |
+| `z-ai`                | openai            | `https://open.bigmodel.cn/api/paas/v4`                               | `Z_AI_API_KEY`                     |
+| `mimo`                | openai            | `https://api.xiaomimimo.com/v1`                                      | `MIMO_API_KEY`                     |
+| `minimax`             | openai            | `https://api.minimax.io/v1`                                          | `MINIMAX_GLOBAL_API_KEY`           |
+| `minimax-cn`          | openai            | `https://api.minimaxi.com/v1`                                        | `MINIMAX_API_KEY`                  |
+| `baidu-qianfan`       | openai            | `https://qianfan.baidubce.com/v2`                                    | `QIANFAN_API_KEY`                  |
+| `siliconflow`         | openai            | `https://api.siliconflow.com/v1`                                     | `SILICONFLOW_GLOBAL_API_KEY`       |
+| `siliconflow-cn`      | openai            | `https://api.siliconflow.cn/v1`                                      | `SILICONFLOW_API_KEY`              |
+| `novita`              | openai            | `https://api.novita.ai/openai`                                       | `NOVITA_API_KEY`                   |
+| `xai`                 | openai            | `https://api.x.ai/v1`                                                | `XAI_API_KEY`                      |
+| `openrouter`          | openai            | `https://openrouter.ai/api/v1`                                       | `OPENROUTER_API_KEY`               |
 
 ### Переопределение Base URL встроенного провайдера
 
@@ -105,10 +106,10 @@ ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
 
-| Поле | Значение |
-|---|---|
-| `providers.bedrock.aws_region` | Регион, чей хост `bedrock-runtime` обслуживает запрос. По умолчанию — `AWS_REGION` или активный профиль. |
-| `providers.bedrock.aws_profile` | Именованный профиль для получения учётных данных. По умолчанию — `AWS_PROFILE` или окружающая цепочка. |
+| Поле                            | Значение                                                                                                 |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `providers.bedrock.aws_region`  | Регион, чей хост `bedrock-runtime` обслуживает запрос. По умолчанию — `AWS_REGION` или активный профиль. |
+| `providers.bedrock.aws_profile` | Именованный профиль для получения учётных данных. По умолчанию — `AWS_PROFILE` или окружающая цепочка.   |
 
 Оба поля необязательны: если они не заданы, выбор делает стандартная цепочка,
 как и для любого другого инструмента AWS. Явная фиксация делает запуск
@@ -214,7 +215,11 @@ Ollama игнорирует API-ключ, однако для пользоват
 ```json
 {
   "custom_providers": {
-    "ollama": { "url": "http://127.0.0.1:11434/v1", "protocol": "openai", "timeout_sec": 900 }
+    "ollama": {
+      "url": "http://127.0.0.1:11434/v1",
+      "protocol": "openai",
+      "timeout_sec": 900
+    }
   }
 }
 ```

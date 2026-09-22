@@ -42,31 +42,32 @@ preset — once selected, you only need to fill in the API key. If
 `providers.<name>.api_key` is unset, OCR falls back to the corresponding
 environment variable.
 
-| Name | Protocol | Base URL | API key env var |
-|---|---|---|---|
-| `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
-| `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
-| `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
-| `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
-| `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
-| `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
-| `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
-| `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
-| `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
-| `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
-| `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
-| `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
-| `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
-| `kimi-global` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_GLOBAL_API_KEY` |
-| `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
-| `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
-| `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
-| `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
-| `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
-| `siliconflow`  | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
-| `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
-| `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
-| `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+| Name                  | Protocol          | Base URL                                                             | API key env var                 |
+| --------------------- | ----------------- | -------------------------------------------------------------------- | ------------------------------- |
+| `anthropic`           | anthropic         | `https://api.anthropic.com`                                          | `ANTHROPIC_API_KEY`             |
+| `bedrock`             | anthropic-bedrock | derived from `aws_region`                                            | — (AWS credential chain)        |
+| `openai`              | openai            | `https://api.openai.com/v1`                                          | `OPENAI_API_KEY`                |
+| `openai-responses`    | openai-responses  | `https://api.openai.com/v1`                                          | `OPENAI_RESPONSES_API_KEY`      |
+| `gemini`              | openai            | `https://generativelanguage.googleapis.com/v1beta/openai`            | `GEMINI_API_KEY`                |
+| `dashscope`           | openai            | `https://dashscope.aliyuncs.com/compatible-mode/v1`                  | `DASHSCOPE_API_KEY`             |
+| `dashscope-tokenplan` | openai            | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY`       |
+| `volcengine`          | openai            | `https://ark.cn-beijing.volces.com/api/v3`                           | `ARK_API_KEY`                   |
+| `deepseek`            | openai            | `https://api.deepseek.com`                                           | `DEEPSEEK_API_KEY`              |
+| `tencent-tokenhub`    | openai            | `https://tokenhub.tencentmaas.com/v1`                                | `TENCENT_TOKENHUB_API_KEY`      |
+| `hy-tokenplan`        | openai            | `https://api.lkeap.cloud.tencent.com/plan/v3`                        | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
+| `iflytek`             | openai            | `https://spark-api-open.xf-yun.com/v1`                               | `SPARK_API_KEY`                 |
+| `kimi`                | openai            | `https://api.moonshot.cn/v1`                                         | `MOONSHOT_API_KEY`              |
+| `kimi-global`         | openai            | `https://api.moonshot.ai/v1`                                         | `MOONSHOT_GLOBAL_API_KEY`       |
+| `z-ai`                | openai            | `https://open.bigmodel.cn/api/paas/v4`                               | `Z_AI_API_KEY`                  |
+| `mimo`                | openai            | `https://api.xiaomimimo.com/v1`                                      | `MIMO_API_KEY`                  |
+| `minimax`             | openai            | `https://api.minimax.io/v1`                                          | `MINIMAX_GLOBAL_API_KEY`        |
+| `minimax-cn`          | openai            | `https://api.minimaxi.com/v1`                                        | `MINIMAX_API_KEY`               |
+| `baidu-qianfan`       | openai            | `https://qianfan.baidubce.com/v2`                                    | `QIANFAN_API_KEY`               |
+| `siliconflow`         | openai            | `https://api.siliconflow.com/v1`                                     | `SILICONFLOW_GLOBAL_API_KEY`    |
+| `siliconflow-cn`      | openai            | `https://api.siliconflow.cn/v1`                                      | `SILICONFLOW_API_KEY`           |
+| `novita`              | openai            | `https://api.novita.ai/openai`                                       | `NOVITA_API_KEY`                |
+| `xai`                 | openai            | `https://api.x.ai/v1`                                                | `XAI_API_KEY`                   |
+| `openrouter`          | openai            | `https://openrouter.ai/api/v1`                                       | `OPENROUTER_API_KEY`            |
 
 ### Overriding a built-in provider's Base URL
 
@@ -100,10 +101,10 @@ ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
 
-| Field | Meaning |
-|---|---|
-| `providers.bedrock.aws_region` | Region whose `bedrock-runtime` host serves the request. Falls back to `AWS_REGION` or the active profile. |
-| `providers.bedrock.aws_profile` | Named profile to resolve credentials from. Falls back to `AWS_PROFILE` or the ambient chain. |
+| Field                           | Meaning                                                                                                   |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `providers.bedrock.aws_region`  | Region whose `bedrock-runtime` host serves the request. Falls back to `AWS_REGION` or the active profile. |
+| `providers.bedrock.aws_profile` | Named profile to resolve credentials from. Falls back to `AWS_PROFILE` or the ambient chain.              |
 
 Both fields are optional: left unset, the standard chain decides, as with any
 other AWS tool. Pinning them makes a run reproducible without exporting
@@ -207,7 +208,11 @@ Both `timeout_sec` keys can be set with `ocr config set`:
 ```json
 {
   "custom_providers": {
-    "ollama": { "url": "http://127.0.0.1:11434/v1", "protocol": "openai", "timeout_sec": 900 }
+    "ollama": {
+      "url": "http://127.0.0.1:11434/v1",
+      "protocol": "openai",
+      "timeout_sec": 900
+    }
   }
 }
 ```
