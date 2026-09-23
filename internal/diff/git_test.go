@@ -27,6 +27,19 @@ func runGitTest(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// gitOutput runs a git command in dir and returns its trimmed stdout, failing
+// the test on error. For the read-only queries a test needs a value from.
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v failed: %v", args, err)
+	}
+	return string(out)
+}
+
 // writeGarbageExternalDiff writes a shell script that emits non-diff output and
 // returns its path. When git invokes it via GIT_EXTERNAL_DIFF / diff.external it
 // replaces the normal unified-diff machinery, so the output can no longer be
@@ -764,5 +777,144 @@ func TestCommitDiffMergeCommitReviewsFirstParentDiff(t *testing.T) {
 	}
 	if d.NewFileContent == "" {
 		t.Error("NewFileContent is empty: content was not read at the merge commit")
+	}
+}
+
+// #1487: range and commit modes filtered their changed files with the WORKING
+// TREE's .gitignore. The reviewed ref is history, so an ignore rule that exists
+// only locally — an uncommitted .gitignore, or one on the checked-out branch but
+// not on the reviewed one — silently dropped files out of the review. The run
+// still exited 0, so a file the user explicitly asked about was never looked at.
+//
+// A range review must answer "what did this ref change", not "what does my
+// checkout ignore". Workspace mode keeps reading the working tree, because there
+// the working tree IS the thing under review.
+func TestRangeModeIgnoresWorkingTreeGitignore(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q", "-b", "main")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	// Base commit: no .gitignore at all, so nothing is ignored on the reviewed
+	// side of the comparison.
+	write("base.txt", "base\n")
+	runGitTest(t, repo, "add", ".")
+	runGitTest(t, repo, "commit", "-q", "-m", "base")
+
+	// The reviewed branch adds a file that its own history does not ignore.
+	runGitTest(t, repo, "checkout", "-q", "-b", "feature")
+	write("gen.go", "package p\n\n// generated\n")
+	runGitTest(t, repo, "add", "gen.go")
+	runGitTest(t, repo, "commit", "-q", "-m", "add generated file")
+
+	// The local checkout then gains an UNCOMMITTED .gitignore that ignores it.
+	// This is the trap: it exists only in the working tree of whoever runs the
+	// review, and it must not reach into the range comparison.
+	write(".gitignore", "gen.go\n")
+
+	runner := gitcmd.New(0)
+	set, err := NewProvider(repo, "main", "feature", runner).GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+
+	var got []string
+	set.ForEachInOrder(func(d model.Diff, _ bool) {
+		got = append(got, d.NewPath)
+	})
+	if !slices.Equal(got, []string{"gen.go"}) {
+		t.Errorf("range review selected %v, want [gen.go]: a local .gitignore dropped a file the reviewed ref changed", got)
+	}
+}
+
+// The same rule for commit mode: `ocr review --commit` diffs against the commit's
+// first parent, so the working tree's ignore rules are equally out of scope.
+func TestCommitModeIgnoresWorkingTreeGitignore(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q", "-b", "main")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	write("base.txt", "base\n")
+	runGitTest(t, repo, "add", ".")
+	runGitTest(t, repo, "commit", "-q", "-m", "base")
+
+	write("gen.go", "package p\n\n// generated\n")
+	runGitTest(t, repo, "add", "gen.go")
+	runGitTest(t, repo, "commit", "-q", "-m", "add generated file")
+	head := strings.TrimSpace(gitOutput(t, repo, "rev-parse", "HEAD"))
+
+	// A .gitignore that ignores the file the commit introduced, present only in
+	// the working tree.
+	write(".gitignore", "gen.go\n")
+
+	set, err := NewCommitProvider(repo, head, gitcmd.New(0)).GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+	var got []string
+	set.ForEachInOrder(func(d model.Diff, _ bool) {
+		got = append(got, d.NewPath)
+	})
+	if !slices.Equal(got, []string{"gen.go"}) {
+		t.Errorf("commit review selected %v, want [gen.go]: a local .gitignore dropped a file the commit introduced", got)
+	}
+}
+
+// Workspace mode must NOT regress: there the working tree is the thing under
+// review, so its .gitignore is the right one to honor.
+func TestWorkspaceModeStillHonorsWorkingTreeGitignore(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q", "-b", "main")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	write("base.txt", "base\n")
+	runGitTest(t, repo, "add", ".")
+	runGitTest(t, repo, "commit", "-q", "-m", "base")
+
+	// Both files are uncommitted, and the working tree ignores one of them.
+	write("keep.txt", "keep\n")
+	write("gen.go", "package p\n\n// generated\n")
+	write(".gitignore", "gen.go\n")
+	runGitTest(t, repo, "add", ".gitignore")
+	runGitTest(t, repo, "add", "keep.txt")
+
+	set, err := NewWorkspaceProvider(repo, gitcmd.New(0)).GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+	var got []string
+	set.ForEachInOrder(func(d model.Diff, _ bool) {
+		got = append(got, d.NewPath)
+	})
+	// .gitignore is itself a staged change, so it is reviewed too; gen.go is the
+	// one that must stay out.
+	if !slices.Equal(got, []string{".gitignore", "keep.txt"}) {
+		t.Errorf("workspace review selected %v, want [.gitignore keep.txt]: the working tree's .gitignore must still apply", got)
 	}
 }
