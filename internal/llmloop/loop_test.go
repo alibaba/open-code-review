@@ -6,6 +6,7 @@ package llmloop
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -172,6 +173,92 @@ func TestRunMainTask_CompletionTokenLimitIgnoresPromptCeiling(t *testing.T) {
 	}
 	if got := client.requests[0].MaxTokens; got != 16384 {
 		t.Fatalf("request MaxTokens = %d, want the output cap 16384; the prompt ceiling must not move it", got)
+	}
+}
+
+// truncatedResponse builds a response the provider cut at the output cap:
+// finish_reason "length", no tool call, so the model never got to submit
+// findings. This is the shape that made #1532 report `comments: 0` with
+// `status: success`.
+func truncatedResponse() *llm.ChatResponse {
+	content := "I was cut off mid-analysis."
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message:      llm.ResponseMessage{Content: &content},
+			FinishReason: "length",
+		}},
+		Model: "fake",
+		Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 16384},
+	}
+}
+
+// TestRunMainTask_WarnsOnTruncatedResponse pins that a clipped response is
+// reported instead of silently reading as "the model found nothing". Before
+// this, the only giveaway was out_tokens == 16384 && tool_calls == 0 in a
+// session JSONL; the warning now travels the channel every agent already
+// publishes (warnings[] in json/sarif/text) at no new cost to the output
+// contract.
+func TestRunMainTask_WarnsOnTruncatedResponse(t *testing.T) {
+	// Every round is clipped: the model never gets to call a tool, so the loop
+	// burns its whole tool-request budget on truncated answers. One warning per
+	// clipped round is the point — the reader needs to see how much of the
+	// review was cut, not just that some of it was.
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		truncatedResponse(), truncatedResponse(), truncatedResponse(),
+	}}
+	deps := newTestDeps(client)
+	deps.Template.MaxCompletionTokens = 16384
+	runner := NewRunner(deps)
+
+	if _, _, err := runner.RunMainTask(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review")},
+		"main.go",
+	); err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+
+	warnings := runner.Warnings()
+	if len(warnings) != 3 {
+		t.Fatalf("warnings = %d, want one per clipped request (3)", len(warnings))
+	}
+	for i, w := range warnings {
+		if w.Type != "response_truncated" {
+			t.Errorf("warning %d type = %q, want response_truncated", i, w.Type)
+		}
+		if w.File != "main.go" {
+			t.Errorf("warning %d file = %q, want the subtask key main.go", i, w.File)
+		}
+		// The message must name the cap and the round so the reader can act on
+		// it without opening the session file.
+		if !strings.Contains(w.Message, "16384") {
+			t.Errorf("warning %d message %q must name the cap that was hit", i, w.Message)
+		}
+		if !strings.Contains(w.Message, fmt.Sprintf("round %d", i+1)) {
+			t.Errorf("warning %d message %q must name its round", i, w.Message)
+		}
+	}
+}
+
+// TestRunMainTask_SilentOnCompleteResponse is the other half: a response the
+// provider finished normally must not produce a warning, or the signal would
+// be noise every reader learns to ignore.
+func TestRunMainTask_SilentOnCompleteResponse(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
+	deps := newTestDeps(client)
+	deps.Template.MaxCompletionTokens = 16384
+	runner := NewRunner(deps)
+
+	if _, _, err := runner.RunMainTask(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review")},
+		"main.go",
+	); err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+
+	if w := runner.Warnings(); len(w) != 0 {
+		t.Fatalf("warnings = %v, want none for a complete response", w)
 	}
 }
 

@@ -328,6 +328,16 @@ ocr scan --max-completion-tokens 65536
 応答が途中までしか生成されず、モデルが自分で見つけた候補を破棄して何も返さなくなることが
 あります。
 
+切り詰められたラウンドは隠されずに報告されます。provider が `finish_reason: length` で
+終了した応答は、その実行の `warnings` に `response_truncated` エントリを追加します
+（`json`・`sarif`・`text` のいずれの出力でも確認できます）。そこには何ラウンド目か、
+どの上限に達したか、何回ツール呼び出しを行えたかが記されます。`comments: 0` のレビューに
+このような警告が付いている場合は、上限を上げて再実行する価値があります:
+
+```bash
+ocr review --max-completion-tokens 65536
+```
+
 ### レビューの労力プリセット（effort）
 
 `effort` は、サブタスクごとに main ループを何ラウンド実行するかを決めます:

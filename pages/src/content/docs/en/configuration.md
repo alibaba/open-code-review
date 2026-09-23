@@ -331,6 +331,17 @@ cap for reasoning models whose chain-of-thought naturally exceeds `16384`
 tokens: at exactly that length a response is truncated mid-analysis, and the
 model often then discards its own candidate findings and returns none.
 
+A truncated round is reported rather than hidden. Any response the provider
+finishes with `finish_reason: length` adds a `response_truncated` entry to the
+run's `warnings` (visible in `json`, `sarif` and `text` output), naming the
+round, the cap it hit and how many tool calls it managed. A review that
+reports `comments: 0` alongside such a warning is worth retrying with a
+higher cap:
+
+```bash
+ocr review --max-completion-tokens 65536
+```
+
 ### Review effort
 
 `effort` sets how many review rounds each subtask gets: `low` = 1,

@@ -436,6 +436,21 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 			return false, StopNone, fmt.Errorf("LLM completion error: %w", err)
 		}
 		rec.SetResponse(resp, duration)
+		// A response cut at the output cap is otherwise indistinguishable from
+		// "the model found nothing": the run reports success with zero comments,
+		// and the only giveaway was out_tokens == the cap && tool_calls == 0
+		// buried in the session JSONL. Surfacing it through the warnings channel
+		// every agent already publishes (json/sarif/text) costs one entry in the
+		// output contract and no new field. All three clients populate
+		// FinishReason — openai-compatible per choice (streamed or not),
+		// anthropic from stop_reason, responses via mapResponsesFinishReason's
+		// incomplete -> length — so one check covers every backend.
+		if len(resp.Choices) > 0 && resp.Choices[0].FinishReason == "length" {
+			r.RecordWarning("response_truncated", taskKey, fmt.Sprintf(
+				"round %d hit the output cap (%d tokens) with %d tool call(s); "+
+					"the analysis may be incomplete - consider raising --max-completion-tokens",
+				rec.RequestNo, r.deps.Template.CompletionTokenLimit(), len(resp.ToolCalls())))
+		}
 		totalTokens := int64(0)
 		if resp.Usage != nil {
 			totalTokens = resp.Usage.TotalTokens
