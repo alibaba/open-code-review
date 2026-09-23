@@ -961,6 +961,76 @@ func TestResolveDetail_SystemPugPatternMatch(t *testing.T) {
 	}
 }
 
+func TestResolveDetail_SystemHamlSlimPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{
+		"app/views/users/index.html.haml",
+		"app/views/users/show.html.slim",
+		"APP/VIEWS/USERS/INDEX.HTML.HAML",
+	} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.{haml,slim}" {
+				t.Errorf("expected pattern '**/*.{haml,slim}', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"HAML and Slim Escaping and Output Contexts",
+				"server-side template injection",
+				"Indentation and Whitespace Semantics",
+				"Accessibility",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected HAML/Slim rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemErbPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{
+		"app/views/users/index.html.erb",
+		"app/views/users/_form.html.erb",
+		"APP/VIEWS/USERS/INDEX.HTML.ERB",
+	} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.erb" {
+				t.Errorf("expected pattern '**/*.erb', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"ERB Escaping and Output Contexts",
+				"server-side template injection",
+				"Whitespace and Output Structure",
+				"Accessibility",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected ERB rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveDetail_SystemGoPatternMatch(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
