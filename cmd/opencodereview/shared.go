@@ -342,6 +342,7 @@ func applyCLIExcludes(cc *commonContext, patterns []string) {
 		cc.FileFilter = &rules.FileFilter{}
 	}
 	cc.FileFilter.Exclude = append(cc.FileFilter.Exclude, patterns...)
+	rules.WarnAboutWindowsPatterns(cc.FileFilter)
 }
 
 // excludeToolDef returns a copy of defs with any entries whose function name

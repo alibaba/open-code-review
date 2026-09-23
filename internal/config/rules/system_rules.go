@@ -363,6 +363,7 @@ func buildFileFilter(layers ...*ProjectRule) *FileFilter {
 		for _, p := range pr.Exclude {
 			f.Exclude = append(f.Exclude, strings.ToLower(p))
 		}
+		WarnAboutWindowsPatterns(f)
 		return f
 	}
 	return nil
