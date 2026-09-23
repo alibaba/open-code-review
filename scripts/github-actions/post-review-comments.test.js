@@ -2448,6 +2448,8 @@ async function main() {
   await testLegacyPullRequestEventRejectsMissingSnapshotHead();
   await testCheckpointCarryForwardOnEveryBodyPath();
   await testCheckpointAdvancesOnZeroFindings();
+  await testCheckpointBootstrapsOnFirstRunWithFailedPosts();
+  await testCheckpointStillRefusesToBootstrapOnIncompleteTerminalState();
   await testCheckpointNeverAdvancesWithoutSticky();
   await testCheckpointCarryIsGatedLikeTheAdvance();
   await testCheckpointResolverUsesPreReadComment();
@@ -3869,9 +3871,17 @@ function lastSummaryBody(gh) {
   return null;
 }
 
-// K2/C4: the advance is gated on publication completeness. Only a run that is
-// terminal-complete, failed nothing, and published a summary may move the
-// checkpoint forward.
+// K2/C4: the advance is gated on coverage completeness. Only a run that is
+// terminal-complete and published its summary may move the checkpoint forward.
+//
+// The `failed` axis is deliberately NOT part of the gate any more: a failed
+// inline post is a delivery-channel outcome (the finding is still rendered into
+// the same summary body), so it says nothing about what the run reviewed. It
+// used to be a condition, which made the marker unwritable on a PR's first run
+// and left the feature permanently inert on the large PRs it exists for (#1521).
+// The axis is kept in the table so the fixture still proves a real failure
+// happened in every row, and so the new behavior is pinned rather than merely
+// asserted once.
 async function testCheckpointAdvanceGateTable() {
   const terminals = ["complete", "partial", "failed", "skipped", null];
   const failures = [0, 1];
@@ -3924,7 +3934,7 @@ async function testCheckpointAdvanceGateTable() {
         // finding, otherwise the row proves nothing.
         assert.strictEqual(outputs.comments_failed, String(failed), `${label}: fixture failure count`);
         assert.strictEqual(outputs.summary_comment_url === "", !isPublished, `${label}: fixture publication`);
-        const expectAdvance = terminal === "complete" && failed === 0 && isPublished;
+        const expectAdvance = terminal === "complete" && isPublished;
         assert.strictEqual(advanced, expectAdvance, `${label}: marker written=${advanced}`);
         if (expectAdvance) {
           advancing++;
@@ -3943,7 +3953,9 @@ async function testCheckpointAdvanceGateTable() {
       }
     }
   }
-  assert.strictEqual(advancing, 1, "exactly one of the 20 cells may advance");
+  // terminal=complete x published=true is 2 of the 20 cells (failed=0 and
+  // failed=1); the delivery channel no longer decides the outcome.
+  assert.strictEqual(advancing, 2, "exactly two of the 20 cells may advance");
 }
 
 // A manifest whose resolved_head is not a full sha cannot identify a range, so
@@ -4176,6 +4188,104 @@ async function testCheckpointAdvancesOnZeroFindings() {
   assert.strictEqual(payload.head, CK_RESOLVED, "the zero-findings path must advance");
   assert.strictEqual(body.includes(CARRY), false, "advancing replaces the carried marker, never duplicates it");
   assert.strictEqual(outputs.checkpoint_after, CK_RESOLVED);
+}
+
+// #1521: the checkpoint could never bootstrap. The marker was only written by a
+// run with zero failed inline posts, and a first run on a PR has no earlier
+// marker to carry forward — so any failed post (most commonly a finding whose
+// line is provably outside the diff hunks, which can never be posted inline)
+// meant no marker was written, the next run read none, and the range stayed at
+// merge-base forever. The feature was silently inert on exactly the PRs it was
+// built for: the large ones, where out-of-diff findings are routine.
+//
+// A failed post is a delivery-channel outcome, not a coverage outcome: every
+// failed comment is rendered into the same sticky summary body (see the
+// finalize phase), so the finding is published either way. Coverage is what
+// terminal_state "complete" already attests. So the advance may proceed when the
+// run was terminal-complete and published its summary, regardless of how many
+// comments landed inline.
+async function testCheckpointBootstrapsOnFirstRunWithFailedPosts() {
+  // failed=1 is produced the way production produces it: a finding on a line
+  // provably outside the diff hunks, so the 422 fallback can neither repost nor
+  // reconcile it. checkpointCarry is empty — this is the PR's FIRST run.
+  const result = {
+    comments: [{ path: "src/a.js", content: "c1", start_line: 90, end_line: 90 }],
+    manifest: ckManifest(),
+  };
+  const gh = makeGithub({
+    headSha: CK_RESOLVED,
+    files: [{ filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" }],
+    batchErrorSpec: [{ message: "Line could not be resolved", status: 422 }],
+  });
+  const outputs = {};
+  await runPostReviewComments(
+    Object.assign(
+      {
+        github: gh,
+        context,
+        core: { setOutput: (k, v) => { outputs[k] = v; } },
+        fs: mockFs(JSON.stringify(result), ""),
+      },
+      ckRunOptions()
+    )
+  );
+
+  // Pin the fixture itself, so a green test proves something: exactly one
+  // comment failed to post inline, and the summary really was published.
+  assert.strictEqual(outputs.comments_failed, "1", "fixture failure count");
+  assert.notStrictEqual(outputs.summary_comment_url, "", "fixture publication");
+
+  const body = lastSummaryBody(gh);
+  const payload = parseCheckpointMarker(body);
+  assert.ok(payload, "a first run with failed posts must still write the marker, or the range never bootstraps");
+  assert.strictEqual(payload.head, CK_RESOLVED, "the recorded head is the run's resolved head");
+  assert.strictEqual(payload.terminal_state, "complete");
+  assert.strictEqual(outputs.checkpoint_after, CK_RESOLVED, "the advanced head is exported for the caller");
+
+  // The finding was NOT lost — it is rendered into the very body carrying the
+  // marker. That is what makes advancing sound: the coverage claim and the
+  // published findings are the same artifact.
+  assert.ok(body.includes("c1"), "the failed comment must still be rendered in the summary body");
+  assert.ok(
+    body.includes("outside PR diff hunks"),
+    "the summary must say why that comment is not inline"
+  );
+}
+
+// The bootstrap fix must not widen the gate for a run that did NOT finish: a
+// partial or failed manifest is still not evidence that the selected set was
+// reviewed, failed posts or not. Only the delivery-channel condition relaxed.
+async function testCheckpointStillRefusesToBootstrapOnIncompleteTerminalState() {
+  for (const terminal of ["partial", "failed", "skipped"]) {
+    const result = {
+      comments: [{ path: "src/a.js", content: "c1", start_line: 90, end_line: 90 }],
+      manifest: ckManifest({ terminal_state: terminal }),
+    };
+    const gh = makeGithub({
+      headSha: CK_RESOLVED,
+      files: [{ filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" }],
+      batchErrorSpec: [{ message: "Line could not be resolved", status: 422 }],
+    });
+    const outputs = {};
+    await runPostReviewComments(
+      Object.assign(
+        {
+          github: gh,
+          context,
+          core: { setOutput: (k, v) => { outputs[k] = v; } },
+          fs: mockFs(JSON.stringify(result), ""),
+        },
+        ckRunOptions()
+      )
+    );
+    assert.strictEqual(outputs.comments_failed, "1", `${terminal}: fixture failure count`);
+    assert.strictEqual(
+      parseCheckpointMarker(lastSummaryBody(gh)),
+      null,
+      `${terminal}: an unfinished run must never advance the range, failed posts or not`
+    );
+    assert.strictEqual(outputs.checkpoint_after, "", `${terminal}: nothing advanced`);
+  }
 }
 
 // A non-sticky run has nowhere durable to keep a checkpoint, so it must never

@@ -175,15 +175,28 @@ async function runPostReviewComments({
   // ---- Checkpoint write path (#476) ----
   //
   // The checkpoint may only move forward past a run that published everything
-  // it found: terminal_state "complete" AND nothing failed to post AND a real
-  // 40-hex resolved head. Anything else re-emits the marker this run started
-  // with (carry-forward), so an unrelated failure never silently resets the PR
-  // to full reviews, and never silently skips a range that was not reviewed.
+  // it found: terminal_state "complete" AND a real 40-hex resolved head. Anything
+  // else re-emits the marker this run started with (carry-forward), so an
+  // unrelated failure never silently resets the PR to full reviews, and never
+  // silently skips a range that was not reviewed.
   //
   // The fourth condition — the summary was actually published — is enforced in
   // two places: structurally, because the marker lives INSIDE the summary body
   // (a summary that never lands carries no checkpoint), and explicitly on the
   // checkpoint_after output in setStatsOutputs.
+  //
+  // A failed inline post is deliberately NOT one of the conditions. It is a
+  // delivery-channel outcome, not a coverage outcome: every comment that fails
+  // to post inline is rendered into this same summary body (see the failed block
+  // below), so the finding is published either way and nothing the run reviewed
+  // is lost. Gating the advance on `stats.failed !== 0` therefore bought no
+  // coverage safety, and it cost the feature its bootstrap: the marker could
+  // only ever be written by a run with zero failed posts, while a PR's first run
+  // has no earlier marker to carry forward — so on the large PRs the feature
+  // exists for, where findings outside the diff hunks are routine, no marker was
+  // ever written, the next run read none, and the range stayed at merge-base
+  // forever (#1521). terminal_state "complete" is what attests coverage; the
+  // delivery channel is reported separately through comments_failed.
   //
   // NOTE on terminal_state: per computeTerminal (internal/session/manifest.go:941)
   // "complete" means nothing in the SELECTED set failed. Items the run waived or
@@ -195,7 +208,6 @@ async function runPostReviewComments({
     stats.checkpointAfter = "";
     if (!checkpointEnabled || !stickySummary) return null;
     if (!manifest || manifest.terminal_state !== "complete") return null;
-    if (stats.failed !== 0) return null;
     // No fingerprint means the resolve step fell over before it computed one
     // (its catch path publishes an empty one). A marker without a fingerprint
     // can never validate, so writing one here would only overwrite a usable
