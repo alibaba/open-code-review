@@ -139,8 +139,8 @@ make build
 │   ├── telemetry/        # OpenTelemetry integration
 │   ├── tool/             # Built-in tools (file_read, code_search, etc.)
 │   └── viewer/           # WebUI session viewer
-├── pages/                # Deployed documentation
-├── scripts/              # Web operations & chore
+├── pages/                # 배포된 문서
+├── scripts/              # 웹 운영 및 잡무
 └── bin/                  # NPM wrapper
 ```
 
