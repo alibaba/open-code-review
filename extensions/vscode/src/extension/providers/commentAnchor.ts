@@ -81,18 +81,20 @@ function stripDiffMarkers(lines: string[]): string[] {
  *
  * Verbatim first: the model copied the code out of the file, where a leading '-' is
  * code, a YAML list item being the everyday case. Diff-quoted second: the model
- * copied it out of the diff instead, where that first character is a marker. Both
- * readings are returned even when they are identical, so callers stop at the first
- * one that matches.
+ * copied it out of the diff instead, where that first character is a marker. A
+ * snippet carrying no marker reads the same both ways, so the two collapse into
+ * one form: callers would otherwise scan the file twice for an answer the first
+ * scan already settled.
  */
 export function snippetForms(existingCode: string): string[][] {
   const lines = existingCode.split('\n');
-  const forms: string[][] = [];
   const verbatim = normalizeLines(lines);
-  if (verbatim.length > 0) forms.push(verbatim);
+  if (verbatim.length === 0) return [];
   const stripped = stripDiffMarkers(lines);
-  if (stripped.length > 0) forms.push(stripped);
-  return forms;
+  const identical =
+    stripped.length === verbatim.length && stripped.every((line, i) => line === verbatim[i]);
+  if (stripped.length > 0 && !identical) return [verbatim, stripped];
+  return [verbatim];
 }
 
 /** Find existingCode in the file content using a sliding-window match and return 1-based line numbers. */

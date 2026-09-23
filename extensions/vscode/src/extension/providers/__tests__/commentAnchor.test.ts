@@ -25,6 +25,14 @@ describe('commentAnchor line resolution', () => {
     expect(snippetForms('+\n+foo')).toEqual([['+', '+foo'], ['foo']]);
   });
 
+  it('snippetForms collapses an unmarked snippet into a single reading', () => {
+    expect(snippetForms('name: app')).toEqual([['name: app']]);
+  });
+
+  it('snippetForms keeps both readings when the stripped one is shorter', () => {
+    expect(snippetForms('foo\n+')).toEqual([['foo', '+'], ['foo']]);
+  });
+
   it('resolveLinesInContent uses explicit line numbers when in range', () => {
     expect(resolveLinesInContent(content, 2, 2)).toEqual({ start: 2, end: 2, relocated: false });
   });

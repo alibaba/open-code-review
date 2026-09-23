@@ -118,13 +118,14 @@ OCR walks the diff looking for the text in `existing_code` using a
    diff, OCR runs the `RE_LOCATION_TASK` prompt asking the model to
    re-anchor the snippet.
 
-Matching is **whitespace-insensitive** and reads each snippet twice: as
-written in the file first, then with one leading `+`/`-` removed per
-line, for a snippet copied out of the diff. Trying the verbatim reading
-first is what keeps a leading `-` that belongs to the code — a YAML list
-item, say — from being taken for a diff marker. As a last resort the
-comment is delivered with `start_line=0`, telling the user "the issue is
-real but you'll need to find the spot yourself".
+Matching is **whitespace-insensitive** and reads each snippet as written
+in the file first, then with one leading `+`/`-` removed per line, for a
+snippet copied out of the diff. Trying the verbatim reading first is what
+keeps a leading `-` that belongs to the code — a YAML list item, say —
+from being taken for a diff marker; a snippet carrying no marker reads
+the same both ways, so it is matched once. As a last resort the comment
+is delivered with `start_line=0`, telling the user "the issue is real but
+you'll need to find the spot yourself".
 
 ### Example
 

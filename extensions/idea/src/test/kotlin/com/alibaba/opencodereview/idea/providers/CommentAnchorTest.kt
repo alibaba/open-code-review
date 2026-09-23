@@ -30,6 +30,16 @@ class CommentAnchorTest {
         assertEquals(listOf(listOf("+", "+foo"), listOf("foo")), snippetForms("+\n+foo"))
     }
 
+    @Test
+    fun `snippetForms collapses an unmarked snippet into a single reading`() {
+        assertEquals(listOf(listOf("name: app")), snippetForms("name: app"))
+    }
+
+    @Test
+    fun `snippetForms keeps both readings when the stripped one is shorter`() {
+        assertEquals(listOf(listOf("foo", "+"), listOf("foo")), snippetForms("foo\n+"))
+    }
+
     private val yaml = listOf("defaults:", "  name: app", "items:", "  - name: app").joinToString("\n")
 
     @Test

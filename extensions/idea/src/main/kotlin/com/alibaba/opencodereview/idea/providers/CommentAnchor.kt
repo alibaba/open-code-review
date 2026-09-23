@@ -70,16 +70,16 @@ private fun stripDiffMarkers(lines: List<String>): List<String> = normalizeLines
  *
  * Verbatim first: the model copied the code out of the file, where a leading '-' is code, a YAML list item being
  * the everyday case. Diff-quoted second: the model copied it out of the diff instead, where that first character
- * is a marker. Both readings are returned even when they are identical, so callers stop at the first match.
+ * is a marker. A snippet carrying no marker reads the same both ways, so the two collapse into one form: callers
+ * would otherwise scan the file twice for an answer the first scan already settled.
  */
 internal fun snippetForms(existingCode: String): List<List<String>> {
     val lines = existingCode.split("\n")
-    val forms = mutableListOf<List<String>>()
     val verbatim = normalizeLines(lines)
-    if (verbatim.isNotEmpty()) forms += verbatim
+    if (verbatim.isEmpty()) return emptyList()
     val stripped = stripDiffMarkers(lines)
-    if (stripped.isNotEmpty()) forms += stripped
-    return forms
+    if (stripped.isNotEmpty() && stripped != verbatim) return listOf(verbatim, stripped)
+    return listOf(verbatim)
 }
 
 internal data class LineSpan(val start: Int, val end: Int)

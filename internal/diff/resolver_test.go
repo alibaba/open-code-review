@@ -602,17 +602,29 @@ func TestSnippetForms_VerbatimFirstThenDiffQuoted(t *testing.T) {
 	}
 }
 
-// TestSnippetForms_UnmarkedSnippetYieldsBothReadings covers a snippet with no
-// marker: the two readings collapse to the same lines, and both are still
-// returned, so the second form is a repeat of the first rather than a
-// second opinion.
-func TestSnippetForms_UnmarkedSnippetYieldsBothReadings(t *testing.T) {
+// TestSnippetForms_UnmarkedSnippetYieldsOneReading covers a snippet with no
+// marker: both readings are the same lines, so only one form is returned and
+// callers do not scan the file twice for the same answer.
+func TestSnippetForms_UnmarkedSnippetYieldsOneReading(t *testing.T) {
 	forms := snippetForms("name: app")
+	if len(forms) != 1 {
+		t.Fatalf("expected 1 form, got %d: %v", len(forms), forms)
+	}
+	if forms[0][0] != "name: app" {
+		t.Errorf("unmarked snippet: got %v, want [name: app]", forms)
+	}
+}
+
+// TestSnippetForms_ShorterStrippedReadingIsNotCollapsed pins the length check in
+// the collapse rule: stripping a marker-only trailing line leaves a shorter
+// reading that is still a distinct form and must be kept.
+func TestSnippetForms_ShorterStrippedReadingIsNotCollapsed(t *testing.T) {
+	forms := snippetForms("foo\n+")
 	if len(forms) != 2 {
 		t.Fatalf("expected 2 forms, got %d: %v", len(forms), forms)
 	}
-	if forms[0][0] != "name: app" || forms[1][0] != "name: app" {
-		t.Errorf("unmarked snippet: got %v, want both forms [name: app]", forms)
+	if forms[0][1] != "+" || forms[1][0] != "foo" {
+		t.Errorf("got %v, want [[foo +] [foo]]", forms)
 	}
 }
 

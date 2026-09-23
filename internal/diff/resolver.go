@@ -4,6 +4,7 @@
 package diff
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -161,14 +162,25 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 		return false
 	}
 
+	newSide := make([][]indexedLine, 0, len(hunks))
+	oldSide := make([][]indexedLine, 0, len(hunks))
+	for i := range hunks {
+		newSide = append(newSide, extractSideLines(&hunks[i], true))
+		oldSide = append(oldSide, extractSideLines(&hunks[i], false))
+	}
+
 	for _, form := range forms {
-		for _, newSide := range []bool{true, false} {
-			for i := range hunks {
-				if start, end, ok := matchConsecutive(extractSideLines(&hunks[i], newSide), form); ok {
-					cm.StartLine = start
-					cm.EndLine = end
-					return true
-				}
+		for i := range hunks {
+			if start, end, ok := matchConsecutive(newSide[i], form); ok {
+				cm.StartLine = start
+				cm.EndLine = end
+				return true
+			}
+
+			if start, end, ok := matchConsecutive(oldSide[i], form); ok {
+				cm.StartLine = start
+				cm.EndLine = end
+				return true
 			}
 		}
 	}
@@ -273,18 +285,19 @@ func resolveFromFileContent(d *model.Diff, cm *model.LlmComment) bool {
 // that first character is a marker rather than code.
 //
 // Verbatim comes first so a dash belonging to the code is never read as a
-// marker. Both readings are returned even when a snippet carries no marker and
-// the two are identical: callers stop at the first form that matches, so the
-// repeat costs one scan and cannot change the answer.
+// marker. A snippet carrying no marker reads the same both ways, so the two
+// collapse into one form: callers would otherwise scan the file twice for an
+// answer the first scan already settled.
 func snippetForms(code string) [][]string {
-	forms := make([][]string, 0)
-	if verbatim := normalizeLines(splitCode(code)); len(verbatim) != 0 {
-		forms = append(forms, verbatim)
+	lines := splitCode(code)
+	verbatim := normalizeLines(lines)
+	if len(verbatim) == 0 {
+		return nil
 	}
-	if stripped := stripMarkers(splitCode(code)); len(stripped) != 0 {
-		forms = append(forms, stripped)
+	if stripped := stripMarkers(lines); len(stripped) != 0 && !slices.Equal(stripped, verbatim) {
+		return [][]string{verbatim, stripped}
 	}
-	return forms
+	return [][]string{verbatim}
 }
 
 // splitCode splits snippet text into its non-blank lines, before any
