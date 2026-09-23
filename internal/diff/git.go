@@ -275,6 +275,12 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 	if err != nil {
 		return DiffSet{}, err
 	}
+	// History modes filter with the ignore rules the reviewed ref carries, not
+	// with whatever the local checkout happens to ignore (#1487). Workspace mode
+	// keeps reading the working tree: there the working tree IS under review.
+	if ref != "" {
+		return p.partitionDiffsWithPatterns(diffs, p.loadGitignorePatternsAtRef(ctx, ref)), nil
+	}
 	return p.partitionDiffs(diffs), nil
 }
 
@@ -284,8 +290,36 @@ func (p *Provider) loadGitignorePatterns() []string {
 	if err != nil {
 		return nil
 	}
+	return parseGitignorePatterns(string(data))
+}
+
+// loadGitignorePatternsAtRef reads and parses the .gitignore as it exists in
+// ref, rather than in the working tree.
+//
+// Range and commit modes review history, so the ignore rules that apply are the
+// ones the reviewed ref actually carries. Reading the working tree instead let a
+// local, uncommitted .gitignore — or one that exists on the checked-out branch
+// but not on the reviewed one — silently drop files out of the review while the
+// run still exited 0 (#1487). A missing or unreadable .gitignore in ref yields
+// nil, which is the correct answer for a ref that simply has none.
+func (p *Provider) loadGitignorePatternsAtRef(ctx context.Context, ref string) []string {
+	if ref == "" {
+		return nil
+	}
+	out, _, err := p.runGitSplit(ctx, "show", "--end-of-options", ref+":.gitignore")
+	if err != nil {
+		// Not present in ref (or not readable): treat as "no ignore rules",
+		// which is what the reviewed history says.
+		return nil
+	}
+	return parseGitignorePatterns(out)
+}
+
+// parseGitignorePatterns splits .gitignore file content into the pattern bodies
+// the matcher understands, dropping blank lines and comments.
+func parseGitignorePatterns(content string) []string {
 	var patterns []string
-	for line := range strings.SplitSeq(string(data), "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -435,11 +469,17 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 // In workspace mode, ignored untracked files are already filtered out.
 // Applying .gitignore here would incorrectly drop tracked changes.
 func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
-	var patterns []string
-	honorGitignore := p.mode != ModeWorkspace
-	if honorGitignore {
-		patterns = p.loadGitignorePatterns()
+	if p.mode == ModeWorkspace {
+		return p.partitionDiffsWithPatterns(diffs, nil)
 	}
+	return p.partitionDiffsWithPatterns(diffs, p.loadGitignorePatterns())
+}
+
+// partitionDiffsWithPatterns is partitionDiffs with the ignore patterns supplied
+// by the caller, so a history-mode review can pass the ones its reviewed ref
+// carries instead of the working tree's.
+func (p *Provider) partitionDiffsWithPatterns(diffs []model.Diff, patterns []string) DiffSet {
+	honorGitignore := p.mode != ModeWorkspace
 	result := DiffSet{
 		Included: make([]model.Diff, 0, len(diffs)),
 		Excluded: make([]model.Diff, 0),
