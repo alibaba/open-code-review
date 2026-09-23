@@ -62,18 +62,19 @@ func looksLikeWindowsPath(pattern string) bool {
 	return false
 }
 
-// WarnAboutWindowsPatterns reports include/exclude patterns that look like
-// Windows paths. It only runs on Windows: elsewhere a backslash is
-// unambiguously an escape and the suggestion would be noise.
+// WindowsPatternWarnings describes every include/exclude pattern in f that
+// looks like a Windows path, in a form ready to print. It returns nil unless
+// running on Windows, where the ambiguity exists at all, and for a nil filter.
 //
-// The warning changes nothing about matching — converting the separator is a
-// semantic decision (see the ambiguity where `\` precedes a metacharacter) and
-// belongs to a separate, explicitly agreed change. This only turns a silent
-// no-op into a visible one.
-func WarnAboutWindowsPatterns(f *FileFilter) {
+// Returning the text rather than writing it keeps this package free of an
+// output decision and lets the caller emit it once, after all layers are
+// merged — which is what stops a project-rule pattern from being reported a
+// second time when CLI --exclude patterns are appended to the same filter.
+func WindowsPatternWarnings(f *FileFilter) []string {
 	if f == nil || runtime.GOOS != "windows" {
-		return
+		return nil
 	}
+	var warnings []string
 	for _, group := range []struct {
 		label    string
 		patterns []string
@@ -83,11 +84,23 @@ func WarnAboutWindowsPatterns(f *FileFilter) {
 	} {
 		for _, pattern := range group.patterns {
 			if looksLikeWindowsPath(pattern) {
-				fmt.Fprintf(os.Stderr,
-					"[ocr] WARNING: %s pattern %s looks like a Windows path and will never match; "+
-						"patterns are matched against slash-separated paths, so write it as %s\n",
-					group.label, pattern, strings.ReplaceAll(pattern, `\`, "/"))
+				warnings = append(warnings, fmt.Sprintf(
+					"[ocr] WARNING: %s pattern %q looks like a Windows path and will never match; "+
+						"patterns are matched against slash-separated paths, so write it as %q",
+					group.label, pattern, strings.ReplaceAll(pattern, `\`, "/")))
 			}
 		}
+	}
+	return warnings
+}
+
+// WarnAboutWindowsPatterns prints every warning WindowsPatternWarnings
+// reports. Matching semantics are untouched: converting the separator is a
+// semantic decision (see the ambiguity where `\` precedes a metacharacter) and
+// belongs to a separate, explicitly agreed change. This only turns a silent
+// no-op into a visible one.
+func WarnAboutWindowsPatterns(f *FileFilter) {
+	for _, warning := range WindowsPatternWarnings(f) {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 }
