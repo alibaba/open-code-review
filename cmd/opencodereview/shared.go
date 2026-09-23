@@ -334,6 +334,11 @@ func sanitizeEndpointHost(rawURL string) string {
 // applyCLIExcludes appends user-supplied --exclude patterns (already split
 // into a []string) onto cc.FileFilter.Exclude. Creates the FileFilter if
 // none was returned by rule.json layers. Idempotent on empty input.
+//
+// The whole merged filter is reported, not just the appended patterns, because
+// this is the one point where every layer has been combined — the CLI patterns
+// are the last to arrive. Reporting here and nowhere else is what keeps a
+// project-rule pattern from being named twice.
 func applyCLIExcludes(cc *commonContext, patterns []string) {
 	if len(patterns) == 0 {
 		return
