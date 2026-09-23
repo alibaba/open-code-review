@@ -10,7 +10,7 @@ import (
 )
 
 func TestLookupProvider_KnownProviders(t *testing.T) {
-	names := []string{"anthropic", "openai", "dashscope", "edenai"}
+	names := []string{"anthropic", "openai", "openrouter", "dashscope", "edenai"}
 	for _, name := range names {
 		p, ok := LookupProvider(name)
 		if !ok {
@@ -76,7 +76,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -182,6 +182,22 @@ func TestLookupProvider_OpenAIDetails(t *testing.T) {
 		if p.Models[i] != model {
 			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
 		}
+	}
+}
+
+func TestLookupProvider_OpenRouterDetails(t *testing.T) {
+	p, ok := LookupProvider("openrouter")
+	if !ok {
+		t.Fatal("openrouter not found")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://openrouter.ai/api/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://openrouter.ai/api/v1")
+	}
+	if p.EnvVar != "OPENROUTER_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "OPENROUTER_API_KEY")
 	}
 }
 

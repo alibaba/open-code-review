@@ -48,6 +48,7 @@ environment variable.
 | `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
@@ -67,6 +68,38 @@ environment variable.
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+### OpenRouter
+
+Select **OpenRouter** in `ocr config provider`, choose a model, and enter your
+OpenRouter API key (or use `OPENROUTER_API_KEY`). OpenRouter uses the
+OpenAI-compatible Chat Completions protocol even when the selected model is
+from another vendor. Run `ocr config model` to switch models later using the
+same saved key. This includes switching across vendors; direct providers also
+let you reuse their key for models within their own service.
+
+The CLI offers a built-in list of model suggestions. To use another model,
+choose **Enter custom model name...** and copy its exact ID from the
+[OpenRouter catalog](https://openrouter.ai/models), such as
+`anthropic/claude-fable-5.1`. Keep any variant suffix, such as `:free`.
+Choose a model that supports tool calling for OCR's review workflow;
+`ocr llm test` checks basic connectivity, not tool calling.
+
+For non-interactive setup:
+
+```bash
+export OPENROUTER_API_KEY="your-openrouter-api-key"
+ocr config set provider openrouter
+ocr config set model anthropic/claude-fable-5.1
+ocr llm test
+```
+
+To also make a model available with `--model`, add it to
+`providers.openrouter.models`:
+
+```bash
+ocr config set providers.openrouter.models '["anthropic/claude-fable-5.1"]'
+```
 
 ### Overriding a built-in provider's Base URL
 

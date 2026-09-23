@@ -105,6 +105,20 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:        "openrouter",
+		DisplayName: "OpenRouter",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://openrouter.ai/api/v1",
+		EnvVar:      "OPENROUTER_API_KEY",
+		Models: []string{
+			"anthropic/claude-fable-5.1",
+			"openai/gpt-5.6-sol",
+			"anthropic/claude-opus-5",
+			"openai/gpt-6-astra",
+			"moonshotai/kimi-k3",
+		},
+	},
+	{
 		Name:        "edenai",
 		DisplayName: "Eden AI",
 		Protocol:    ProtocolOpenAIChatCompletions,
