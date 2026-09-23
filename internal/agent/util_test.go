@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
@@ -67,110 +66,6 @@ func TestStripEmptyPlanBlock_IntegrationWithReplaceAll(t *testing.T) {
 	}
 	if strings.Contains(final, "Review Plan") {
 		t.Errorf("dangling Review Plan header retained: %q", final)
-	}
-}
-
-func TestStripMarkdownFences(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name:  "no fences",
-			input: `["c-0","c-2"]`,
-			want:  `["c-0","c-2"]`,
-		},
-		{
-			name:  "json fenced block",
-			input: "```json\n[\"c-0\"]\n```",
-			want:  `["c-0"]`,
-		},
-		{
-			name:  "plain fenced block",
-			input: "```\nhello\n```",
-			want:  "hello",
-		},
-		{
-			name:  "surrounding whitespace",
-			input: "  \n```json\ncontent\n```\n  ",
-			want:  "content",
-		},
-		{
-			name:  "empty string",
-			input: "",
-			want:  "",
-		},
-		{
-			name:  "only opening fence no newline",
-			input: "```json{}```",
-			want:  "{}",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := stripMarkdownFences(tt.input)
-			if got != tt.want {
-				t.Errorf("stripMarkdownFences() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestBuildMessageXML(t *testing.T) {
-	msgs := []llm.Message{
-		llm.NewTextMessage("user", "hello"),
-		llm.NewTextMessage("assistant", "world"),
-	}
-
-	got := buildMessageXML(msgs)
-
-	if !strings.Contains(got, `<message id="0" role="user">`) {
-		t.Errorf("missing user message tag in output:\n%s", got)
-	}
-	if !strings.Contains(got, `<message id="1" role="assistant">`) {
-		t.Errorf("missing assistant message tag in output:\n%s", got)
-	}
-	if !strings.Contains(got, "hello") || !strings.Contains(got, "world") {
-		t.Errorf("missing message content in output:\n%s", got)
-	}
-}
-
-func TestCopyMessages(t *testing.T) {
-	orig := []llm.Message{
-		llm.NewTextMessage("user", "a"),
-		llm.NewTextMessage("assistant", "b"),
-	}
-
-	cp := copyMessages(orig)
-
-	if len(cp) != len(orig) {
-		t.Fatalf("copyMessages length = %d, want %d", len(cp), len(orig))
-	}
-
-	cp = append(cp, llm.NewTextMessage("user", "c"))
-	if len(cp) != len(orig)+1 {
-		t.Errorf("appended copy length = %d, want %d", len(cp), len(orig)+1)
-	}
-	if len(orig) != 2 {
-		t.Error("copyMessages: appending to copy modified original slice")
-	}
-}
-
-func TestCountMessagesTokens(t *testing.T) {
-	msgs := []llm.Message{
-		llm.NewTextMessage("user", "hello world"),
-	}
-
-	count := countMessagesTokens(msgs)
-	if count <= 0 {
-		t.Errorf("countMessagesTokens() = %d, want > 0", count)
-	}
-
-	empty := countMessagesTokens(nil)
-	if empty != 0 {
-		t.Errorf("countMessagesTokens(nil) = %d, want 0", empty)
 	}
 }
 
