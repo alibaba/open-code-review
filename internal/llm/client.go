@@ -10,6 +10,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
@@ -252,6 +254,11 @@ type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
+	// ExtraContent is opaque provider metadata this tool call must carry back
+	// unchanged on the next turn — Gemini 3 sends a thought signature here
+	// (#1357). Replayed verbatim, never parsed. json:"-" for the reason Native
+	// gives; internal/session persists it deliberately.
+	ExtraContent json.RawMessage `json:"-"`
 }
 
 // FunctionCall holds the name and arguments of a tool call.
@@ -688,7 +695,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		}
 	}
 	if err != nil {
-		return nil, err
+		return nil, withProviderErrorBody(err)
 	}
 
 	return c.mapOpenAIResponse(sdkResp), nil
@@ -722,6 +729,7 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 
 	accumulator := openai.ChatCompletionAccumulator{}
 	reasoningByChoice := make(map[int64]*strings.Builder)
+	extraContentByChoice := make(map[int64]map[int64]json.RawMessage)
 	seenChoices := make(map[int64]bool)
 	finishedChoices := make(map[int64]bool)
 	var choiceOrder []int64
@@ -740,6 +748,26 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 			}
 			if choice.FinishReason != "" {
 				finishedChoices[choice.Index] = true
+			}
+
+			// extra_content rides on the tool-call delta and the accumulator
+			// drops unmodeled fields, so capture it here — before the
+			// reasoning_content lookup returns early (#1357).
+			for _, toolDelta := range choice.Delta.ToolCalls {
+				ec, ok := toolDelta.JSON.ExtraFields["extra_content"]
+				if !ok {
+					continue
+				}
+				value := normalizeExtraContent(json.RawMessage(ec.Raw()))
+				if value == nil {
+					continue
+				}
+				byTool := extraContentByChoice[choice.Index]
+				if byTool == nil {
+					byTool = make(map[int64]json.RawMessage)
+					extraContentByChoice[choice.Index] = byTool
+				}
+				byTool[clampToZero(toolDelta.Index)] = value
 			}
 
 			extra, ok := choice.Delta.JSON.ExtraFields["reasoning_content"]
@@ -763,7 +791,7 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return nil, err
+		return nil, withProviderErrorBody(err)
 	}
 	if len(choiceOrder) == 0 {
 		return nil, &streamIntegrityError{reason: "contained no choices"}
@@ -779,6 +807,15 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 		resp.Usage = usage
 	}
 	for i := range resp.Choices {
+		// The accumulator expands to fit the same clamped index, so a tool call's
+		// slice position is the key captured above.
+		byTool := extraContentByChoice[accumulator.Choices[i].Index]
+		for j := range resp.Choices[i].Message.ToolCalls {
+			if ec, ok := byTool[int64(j)]; ok {
+				resp.Choices[i].Message.ToolCalls[j].ExtraContent = ec
+			}
+		}
+
 		builder := reasoningByChoice[accumulator.Choices[i].Index]
 		if builder != nil && builder.Len() > 0 {
 			reasoningContent := builder.String()
@@ -810,15 +847,18 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 				asst.Content.OfString = openai.String(content)
 			}
 			for _, tc := range msg.ToolCalls {
-				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
-					OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-						ID: tc.ID,
-						Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-							Name:      tc.Function.Name,
-							Arguments: tc.Function.Arguments,
-						},
+				fn := &openai.ChatCompletionMessageFunctionToolCallParam{
+					ID: tc.ID,
+					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
 					},
-				})
+				}
+				// extra_content: provider metadata required back verbatim (#1357).
+				if len(tc.ExtraContent) > 0 {
+					fn.SetExtraFields(map[string]any{"extra_content": tc.ExtraContent})
+				}
+				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{OfFunction: fn})
 			}
 			// reasoning_content: gateway extension not modeled by the SDK (#805).
 			if reasoning, ok := msg.Native.Payload.(ReasoningPayload); ok && reasoning != "" {
@@ -862,6 +902,109 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 	return params
 }
 
+// maxErrorBodyBytes bounds the provider payload quoted in an error message.
+const maxErrorBodyBytes = 64 << 10
+
+// withProviderErrorBody appends the provider's response body to an API error the
+// SDK left without one. It extracts the payload with the gjson path "error",
+// which misses when a provider array-wraps its error document (#1042). The
+// response body is restored so later consumers still see it whole; only the
+// diagnostic text is bounded.
+func withProviderErrorBody(err error) error {
+	// Enriching restores the body it reads, so without this a second pass would
+	// find it readable and append the payload again.
+	var done *enrichedError
+	if errors.As(err, &done) {
+		return err
+	}
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) || apiErr.Response == nil || apiErr.Response.Body == nil {
+		return err
+	}
+	// "null" is what gjson reports for an "error" key holding null: a payload in
+	// name only, so the body is still the useful thing.
+	if raw := strings.TrimSpace(apiErr.RawJSON()); raw != "" && raw != "null" {
+		return err
+	}
+	// The SDK buffers every non-2xx body and bails before building the error if
+	// that read fails, so what arrives here is an in-memory reader that cannot
+	// fail. A short read would still leave its bytes the most useful thing to
+	// hand back: an error-replaying reader would only blind DumpResponse.
+	body, readErr := io.ReadAll(apiErr.Response.Body)
+	_ = apiErr.Response.Body.Close()
+	apiErr.Response.Body = io.NopCloser(bytes.NewReader(body))
+	if readErr != nil || len(bytes.TrimSpace(body)) == 0 {
+		return err
+	}
+	return &enrichedError{err: err, body: limitErrorBodyForLog(body)}
+}
+
+// enrichedError carries an API error together with the provider payload the SDK
+// could not extract, and marks it as already enriched.
+type enrichedError struct {
+	err  error
+	body string
+}
+
+func (e *enrichedError) Error() string { return e.err.Error() + ": " + e.body }
+func (e *enrichedError) Unwrap() error { return e.err }
+
+// limitErrorBodyForLog bounds the payload included in terminal and session logs
+// without truncating the response the SDK parsed. Control bytes are dropped so a
+// body cannot rewrite the terminal; newlines and tabs stay for readability.
+func limitErrorBodyForLog(raw []byte) string {
+	raw = bytes.TrimSpace(raw)
+	var suffix string
+	if len(raw) > maxErrorBodyBytes {
+		// Cut the bytes before building the string so an oversized body is never
+		// copied whole just to be discarded.
+		raw = raw[:maxErrorBodyBytes]
+		suffix = "... (truncated)"
+	}
+	trimmed := strings.ToValidUTF8(string(raw), "")
+	return strings.Map(func(r rune) rune {
+		// unicode.IsControl covers C1 (U+0080-U+009F) as well as C0, so a body
+		// cannot reach the terminal through the bare CSI or DCS forms either.
+		if r == '\n' || r == '\t' || !unicode.IsControl(r) {
+			return r
+		}
+		return -1
+	}, trimmed) + suffix
+}
+
+// clampToZero matches the SDK accumulator's handling of the negative tool-call
+// delta index some gateways send for a single call.
+func clampToZero(i int64) int64 {
+	if i < 0 {
+		return 0
+	}
+	return i
+}
+
+// toolCallExtraContent reads extra_content from a tool call's raw response
+// JSON. The SDK's tool-call union has no ExtraFields map, so the raw payload is
+// the only place the field survives.
+func toolCallExtraContent(raw string) json.RawMessage {
+	if raw == "" {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return nil
+	}
+	return normalizeExtraContent(fields["extra_content"])
+}
+
+// normalizeExtraContent drops absent, empty and null values so that a provider
+// sending "extra_content": null produces the same wire format as one omitting it.
+func normalizeExtraContent(ec json.RawMessage) json.RawMessage {
+	trimmed := bytes.TrimSpace(ec)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	return trimmed
+}
+
 // mapOpenAIResponse converts the SDK response into ChatResponse.
 func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatResponse {
 	rawJSON := sdkResp.RawJSON()
@@ -889,6 +1032,7 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 					Name:      tc.Function.Name,
 					Arguments: tc.Function.Arguments,
 				},
+				ExtraContent: toolCallExtraContent(tc.RawJSON()),
 			})
 		}
 

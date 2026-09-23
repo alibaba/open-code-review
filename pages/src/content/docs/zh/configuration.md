@@ -390,4 +390,4 @@ ocr mcp permissions docs
 
 ## 终端接入体验
 
-`ocr mcp add` 提供逐项输入和 `Space` 工具勾选。`Enter` 继续，`Ctrl-B` 返回，`Esc` 取消。`ocr mcp permissions` 设置权限与超时（默认 60 秒，1–600 秒）。`OCR_CONFIG_PATH` 为配置读写和 review 选择同一份文件，可用于隔离体验。纯 `ocr mcp tools docs --disable write` 撤权不连接服务器，不需要 `--yes`，离线也能完成；启用工具仍需发现并明确确认连接。
+`ocr mcp add` 提供逐项输入和 `Space` 工具勾选。`Enter` 继续，`Ctrl-B` 返回，`Esc` 取消。`ocr mcp permissions` 设置权限与超时（默认 60 秒，1–600 秒）。配置命令和 review 统一使用 `~/.opencodereview/config.json`。隔离体验时，仅为 OCR 进程将 `HOME`（Windows 还需 `USERPROFILE`）设置为独立测试目录。纯 `ocr mcp tools docs --disable write` 撤权不连接服务器，不需要 `--yes`，离线也能完成；启用工具仍需发现并明确确认连接。

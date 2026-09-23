@@ -45,6 +45,10 @@ func TestResolveKeyCmd(t *testing.T) {
 		// takes the edges).
 		{name: "interior tab kept", cmd: "printf 'sk-a\\tb\\n'", want: "sk-a\tb"},
 		{name: "command not found", cmd: "this-cmd-does-not-exist-xyz", wantErr: "failed:"},
+		// validateKeyCmd runs before the shell: a backtick or a literal NUL byte in
+		// the command string is rejected with a diagnostic, never executed.
+		{name: "backtick substitution rejected", cmd: "printf %s `id`", wantErr: "suspicious shell pattern"},
+		{name: "nul byte in command rejected", cmd: "printf %s\x00", wantErr: "suspicious shell pattern"},
 		// Boundary: exactly the cap is fine, one byte more is refused. The child
 		// dies of SIGPIPE as soon as we stop accepting, so this stays fast.
 		{name: "output exactly at cap", cmd: "head -c 65536 /dev/zero | tr '\\0' a", want: strings.Repeat("a", keyCmdMaxOutput)},
@@ -70,6 +74,40 @@ func TestResolveKeyCmd(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateKeyCmd(t *testing.T) {
+	label := `api_key_cmd for provider "x"`
+
+	// Legitimate helper invocations pass untouched, including ones that use the
+	// separators and redirections deliberately left out of suspiciousPatterns.
+	for _, cmd := range []string{
+		"op read op://vault/item/credential",
+		"aws secretsmanager get-secret-value --query SecretString --output text",
+		"pass show api/openai 2>/dev/null",
+		`read -r x; printf %s "$x"`,
+	} {
+		if err := validateKeyCmd(cmd, label); err != nil {
+			t.Errorf("validateKeyCmd(%q) = %v, want nil", cmd, err)
+		}
+	}
+
+	// A backtick is reported with its byte offset and the source label so a
+	// tampered config produces an actionable diagnostic.
+	err := validateKeyCmd("printf %s `id`", label)
+	if err == nil {
+		t.Fatal("validateKeyCmd with backtick = nil, want error")
+	}
+	for _, want := range []string{"suspicious shell pattern", "offset 10", label} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err.Error(), want)
+		}
+	}
+
+	// A literal NUL byte in the command string is rejected too.
+	if err := validateKeyCmd("printf %s\x00", label); err == nil {
+		t.Error("validateKeyCmd with NUL byte = nil, want error")
 	}
 }
 

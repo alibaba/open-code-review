@@ -18,7 +18,7 @@ import (
 )
 
 func runConfigProvider() error {
-	configPath, err := resolveConfigPath()
+	configPath, err := defaultConfigPath()
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	fmt.Printf("Model: %s\n", result.model)
 
 	fmt.Println("\nTesting connection...")
-	if err := runLLMTest(); err != nil {
+	if err := runLLMTestPath(configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Connection test failed: %v\n", err)
 		fmt.Fprintln(os.Stderr, "Configuration has been saved. Fix the issue and run 'ocr llm test' to re-verify.")
 		return nil
@@ -220,7 +220,7 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	fmt.Printf("Model: %s\n", model)
 
 	fmt.Println("\nTesting connection...")
-	if err := runLLMTest(); err != nil {
+	if err := runLLMTestPath(configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Connection test failed: %v\n", err)
 		fmt.Fprintln(os.Stderr, "Provider configuration has been saved. Fix the issue and run 'ocr llm test' to re-verify.")
 		return nil
@@ -305,7 +305,7 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	fmt.Printf("Model: %s\n", model)
 
 	fmt.Println("\nTesting connection...")
-	if err := runLLMTest(); err != nil {
+	if err := runLLMTestPath(configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Connection test failed: %v\n", err)
 		fmt.Fprintln(os.Stderr, "Provider configuration has been saved. Fix the issue and run 'ocr llm test' to re-verify.")
 		return nil
@@ -316,7 +316,7 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 }
 
 func runConfigModel() error {
-	configPath, err := resolveConfigPath()
+	configPath, err := defaultConfigPath()
 	if err != nil {
 		return err
 	}

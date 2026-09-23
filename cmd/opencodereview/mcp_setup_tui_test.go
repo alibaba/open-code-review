@@ -233,12 +233,8 @@ func TestMCPToolRevocationWorksOffline(t *testing.T) {
 	}
 }
 
-func TestMCPConfigOverrideIsSharedByReadsAndWrites(t *testing.T) {
+func TestMCPConfigIgnoresRemovedOverride(t *testing.T) {
 	defaultPath := setupMCPTestHome(t, &Config{Language: "default-language"})
-	before, err := os.ReadFile(defaultPath)
-	if err != nil {
-		t.Fatal(err)
-	}
 	custom := filepath.Join(t.TempDir(), "custom.json")
 	t.Setenv("OCR_CONFIG_PATH", custom)
 	setMCPTestInteractive(t, false)
@@ -252,16 +248,19 @@ func TestMCPConfigOverrideIsSharedByReadsAndWrites(t *testing.T) {
 	if err := runConfigUnset("mcp.default_permission"); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadOrCreateConfig(custom)
+	cfg, err := loadOrCreateConfig(defaultPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.MCP.ApprovalTimeoutSeconds != 120 || len(cfg.MCPServers) != 1 {
-		t.Fatal("writes ignored override")
+		t.Fatal("writes did not use the default user config")
 	}
-	after, _ := os.ReadFile(defaultPath)
-	if !bytes.Equal(before, after) {
-		t.Fatal("default config was modified")
+	if _, err := os.Stat(custom); !os.IsNotExist(err) {
+		t.Fatal("removed override redirected configuration writes")
+	}
+	cmd, out, _ := newMCPTestCommand("")
+	if err := runMCPShow(cmd, "demo", true); err != nil || !strings.Contains(out.String(), "demo") {
+		t.Fatalf("read did not use the same default config: %v", err)
 	}
 }
 

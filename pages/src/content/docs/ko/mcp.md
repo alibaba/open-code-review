@@ -132,7 +132,7 @@ ocr config set mcp.approval_timeout_seconds 120
 기존 `setup`은 실행하지 않으며 관리자가 저장할 때 제거합니다. 서버는 직접 설치하세요.
 마이그레이션 후 구버전 OCR로 설정을 편집하지 마세요.
 
-`OCR_CONFIG_PATH`로 읽기·쓰기·review의 설정 파일을 함께 지정할 수 있습니다.
+설정 명령과 review는 `~/.opencodereview/config.json`을 사용합니다. 격리 테스트에서는 OCR 프로세스의 `HOME`(Windows에서는 `USERPROFILE`도)을 전용 테스트 디렉터리로 설정하세요.
 저장은 같은 디렉터리의 0600 임시 파일을 fsync 후 원자적으로 교체합니다.
 취소·검색 실패는 저장하지 않습니다. 동시에 다른 프로세스가 수정하면 저장을 거부하므로
 관리자를 다시 열고 변경을 적용하세요. 구버전과 수동 편집기는 이 잠금을 따르지 않습니다.

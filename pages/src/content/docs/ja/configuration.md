@@ -427,4 +427,4 @@ wizard、stdio/remote security、fingerprint、権限、移行、CI について
 
 ## 端末の接続ウィザード
 
-`ocr mcp add` は項目別入力と `Space` によるツール選択に対応します。`Enter` で次へ、`Ctrl-B` で戻り、`Esc` で中止します。権限とタイムアウト（既定 60 秒、1–600 秒）は `ocr mcp permissions` で設定します。`OCR_CONFIG_PATH` は設定の読み書きと review に同じファイルを指定します。`ocr mcp tools docs --disable write` だけなら接続も `--yes` も不要で、オフラインで権限を取り消せます。有効化には発見と接続への明示的な同意が必要です。
+`ocr mcp add` は項目別入力と `Space` によるツール選択に対応します。`Enter` で次へ、`Ctrl-B` で戻り、`Esc` で中止します。権限とタイムアウト（既定 60 秒、1–600 秒）は `ocr mcp permissions` で設定します。設定コマンドと review は `~/.opencodereview/config.json` を使用します。分離テストでは、OCR プロセスの `HOME`（Windows では `USERPROFILE` も）を専用のテストディレクトリに設定します。`ocr mcp tools docs --disable write` だけなら接続も `--yes` も不要で、オフラインで権限を取り消せます。有効化には発見と接続への明示的な同意が必要です。

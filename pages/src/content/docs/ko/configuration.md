@@ -328,4 +328,4 @@ wizard, fingerprint, 원격 연결, 권한 상속,
 
 ## 터미널 연결 마법사
 
-`ocr mcp add`는 항목별 입력과 `Space` 도구 선택을 제공합니다. `Enter`는 다음 단계, `Ctrl-B`는 이전 단계, `Esc`는 취소입니다. `ocr mcp permissions`에서 권한과 제한 시간(기본 60초, 1–600초)을 설정합니다. `OCR_CONFIG_PATH`는 설정 읽기·쓰기와 review에 동일하게 적용됩니다. `tools --disable`만 실행하면 오프라인에서도 연결이나 `--yes` 없이 권한을 취소합니다. 자세한 절차는 [MCP 가이드](../mcp/)를 참고하세요.
+`ocr mcp add`는 항목별 입력과 `Space` 도구 선택을 제공합니다. `Enter`는 다음 단계, `Ctrl-B`는 이전 단계, `Esc`는 취소입니다. `ocr mcp permissions`에서 권한과 제한 시간(기본 60초, 1–600초)을 설정합니다. 설정 명령과 review는 `~/.opencodereview/config.json`을 사용합니다. 격리 테스트에서는 OCR 프로세스의 `HOME`(Windows에서는 `USERPROFILE`도)을 전용 테스트 디렉터리로 설정하세요. `tools --disable`만 실행하면 오프라인에서도 연결이나 `--yes` 없이 권한을 취소합니다. 자세한 절차는 [MCP 가이드](../mcp/)를 참고하세요.

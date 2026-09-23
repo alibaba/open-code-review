@@ -331,7 +331,7 @@ func runMCPAdd(cmd *cobra.Command, args []string, opts mcpAddOptions) error {
 		return err
 	}
 
-	configPath, err := resolveConfigPath()
+	configPath, err := defaultConfigPath()
 	if err != nil {
 		return err
 	}
@@ -550,7 +550,7 @@ func runMCPRemove(cmd *cobra.Command, name string, yes bool) error {
 }
 
 func loadReadOnlyMCPConfig() (*Config, error) {
-	path, err := resolveConfigPath()
+	path, err := defaultConfigPath()
 	if err != nil {
 		return nil, err
 	}
@@ -565,7 +565,7 @@ func loadReadOnlyMCPConfig() (*Config, error) {
 }
 
 func loadWritableMCPConfig() (string, *Config, error) {
-	path, err := resolveConfigPath()
+	path, err := defaultConfigPath()
 	if err != nil {
 		return "", nil, err
 	}

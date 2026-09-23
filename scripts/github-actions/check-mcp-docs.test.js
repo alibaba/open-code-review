@@ -121,8 +121,9 @@ function read(relativePath) {
 
 for (const locale of COMPLETE_LOCALES) {
   const page = read(`${locale}/mcp.md`);
+  assert.ok(!page.includes("OCR_CONFIG_PATH"), `${locale}/mcp.md must not advertise the removed override`);
 
-  for (const token of ["Space", "Ctrl-B", "Esc", "OCR_CONFIG_PATH", "Save disabled (no connection)", "Import (JSON / TOML)", "Ctrl-S", "Tools", "1 MiB", "OAuth", "CONFIGURED SERVERS", "MANAGEMENT ACTIONS", "Tab", "PgUp/PgDn", "Ctrl-C", "OCR_RAW_LOGGING"]) {
+  for (const token of ["Space", "Ctrl-B", "Esc", "HOME", "USERPROFILE", "~/.opencodereview/config.json", "Save disabled (no connection)", "Import (JSON / TOML)", "Ctrl-S", "Tools", "1 MiB", "OAuth", "CONFIGURED SERVERS", "MANAGEMENT ACTIONS", "Tab", "PgUp/PgDn", "Ctrl-C", "OCR_RAW_LOGGING"]) {
     assert.ok(page.includes(token), `${locale}/mcp.md must describe the actual terminal flow: ${token}`);
   }
 
@@ -142,7 +143,10 @@ for (const locale of COMPLETE_LOCALES) {
 
   for (const supportPage of SUPPORT_PAGES) {
     const support = read(`${locale}/${supportPage}`);
-    assert.ok(support.includes("OCR_CONFIG_PATH"), `${locale}/${supportPage} must document configuration isolation`);
+    for (const token of ["HOME", "USERPROFILE", "~/.opencodereview/config.json"]) {
+      assert.ok(support.includes(token), `${locale}/${supportPage} must document configuration isolation: ${token}`);
+    }
+    assert.ok(!support.includes("OCR_CONFIG_PATH"), `${locale}/${supportPage} must not advertise the removed override`);
     assert.ok(support.includes("../mcp/"), `${locale}/${supportPage} must link to the MCP guide`);
   }
 

@@ -91,8 +91,8 @@ func TestMCPReviewAcceptance(t *testing.T) {
 				server.ToolDefinitionSHA256["probe"] = strings.Repeat("a", 64)
 			}
 			cfg.MCPServers["fixture"] = server
-			configPath := filepath.Join(home, "config.json")
-			t.Setenv("OCR_CONFIG_PATH", configPath)
+			configPath := filepath.Join(home, ".opencodereview", "config.json")
+			t.Setenv("OCR_CONFIG_PATH", filepath.Join(home, "removed-override.json"))
 			if err := saveConfig(configPath, cfg); err != nil {
 				t.Fatal(err)
 			}

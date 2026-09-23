@@ -96,7 +96,9 @@ def exercise(ocr, fixture, scratch):
             ("ci-ask", None, 0, 0), ("ci-allow", None, 0, 4),
         ]:
             env.pop("CI", None)
-            env["OCR_CONFIG_PATH"] = str(scratch / f"{case}.json")
+            case_home = scratch / f"{case}-home"
+            case_home.mkdir()
+            env.update(HOME=str(case_home), USERPROFILE=str(case_home))
             marker = scratch / f"{case}.calls"
             env["OCR_TEST_ONE"] = "1"
             env["OCR_TEST_CALLS"] = str(marker)
@@ -110,7 +112,7 @@ def exercise(ocr, fixture, scratch):
                 cli("mcp", "permissions", "fixture", "--tool", "echo=allow", "--yes")
             if case.startswith("ci-"):
                 env["CI"] = "true"
-            config = Path(env["OCR_CONFIG_PATH"])
+            config = case_home / ".opencodereview" / "config.json"
             before = config.read_bytes()
             for _ in range(2):
                 server.rounds, server.advertised = 0, 0

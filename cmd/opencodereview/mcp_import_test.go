@@ -121,7 +121,7 @@ func TestMCPImportCommandAtomicDisabledAndNoConnection(t *testing.T) {
 	if strings.Contains(out.String()+stderr.String(), "SECRET") {
 		t.Fatal("secret in preview")
 	}
-	path, _ := resolveConfigPath()
+	path, _ := defaultConfigPath()
 	before, _ := os.ReadFile(path)
 	cmd, _, _ = newMCPTestCommand(data)
 	if runMCPImport(cmd, "-", true) == nil {

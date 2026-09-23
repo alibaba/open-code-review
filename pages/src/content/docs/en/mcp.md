@@ -355,7 +355,7 @@ not Unix mode bits; keep the configuration directory private to your account.
 
 ## Terminal onboarding
 
-`ocr mcp add` offers field-by-field input and a `Space` tool checklist. Use `Enter` to continue, `Ctrl-B` to go back and `Esc` to cancel. Set permissions and the 1–600 second timeout (default 60) with `ocr mcp permissions`. `OCR_CONFIG_PATH` selects the same file for configuration reads, writes and review. Pure `ocr mcp tools docs --disable write` revocation works offline without connecting or requiring `--yes`; enabling tools still requires discovery and connection consent.
+`ocr mcp add` offers field-by-field input and a `Space` tool checklist. Use `Enter` to continue, `Ctrl-B` to go back and `Esc` to cancel. Set permissions and the 1–600 second timeout (default 60) with `ocr mcp permissions`. Configuration commands and review use `~/.opencodereview/config.json`. For isolated testing, set `HOME` (and `USERPROFILE` on Windows) to a dedicated test directory for the OCR process. Pure `ocr mcp tools docs --disable write` revocation works offline without connecting or requiring `--yes`; enabling tools still requires discovery and connection consent.
 
 ## Transcript and raw logging
 

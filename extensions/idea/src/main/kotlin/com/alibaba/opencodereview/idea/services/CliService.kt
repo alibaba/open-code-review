@@ -219,16 +219,15 @@ class CliService(private val cliPath: String = "ocr") {
     ): CliResult = parseCliResult(runRaw(buildReviewArgs(opts), cwd, onLog, cancellation = cancellation))
 
     /**
-     * Runs `ocr llm test`. When [home] / [configPath] are passed, it runs in an isolated environment so that
+     * Runs `ocr llm test`. When [home] is passed, it runs in an isolated environment so that
      * "testing connectivity" cannot damage the user's real ~/.opencodereview/config.json.
      */
-    fun testConnection(home: File? = null, configPath: File? = null): Pair<Boolean, String?> {
+    fun testConnection(home: File? = null): Pair<Boolean, String?> {
         val envExtra = buildMap {
             home?.let {
                 put("HOME", it.absolutePath)
                 put("USERPROFILE", it.absolutePath)
             }
-            configPath?.let { put("OCR_CONFIG_PATH", it.absolutePath) }
         }
         val cwd = File(System.getProperty("user.dir"))
         return runCatching {

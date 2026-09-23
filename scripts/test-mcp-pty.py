@@ -119,8 +119,16 @@ def exercise(ocr, server, scratch):
     env.update(OCR_TEST_CALL_MARKER=str(call_marker), OCR_TEST_START_MARKER=str(start_marker))
     captures = []
 
+    def config_path(name):
+        return scratch / name / ".opencodereview" / "config.json"
+
+    def select_home(name):
+        home = scratch / name
+        home.mkdir(exist_ok=True)
+        env.update(HOME=str(home), USERPROFILE=str(home))
+
     def start(name):
-        env["OCR_CONFIG_PATH"] = str(scratch / f"{name}.json")
+        select_home(name)
         terminal = Terminal([str(ocr), "mcp", "add", name], env)
         captures.append(terminal)
         terminal.wait("Connection name")
@@ -136,7 +144,7 @@ def exercise(ocr, server, scratch):
     try:
         # One terminal owner: setup replaces the dashboard and cancellation
         # restores focus. The emulator checks the current screen, not history.
-        env["OCR_CONFIG_PATH"] = str(scratch / "navigation.json")
+        select_home("navigation")
         terminal = Terminal([str(ocr), "mcp"], env)
         captures.append(terminal)
         terminal.wait_screen("MANAGEMENT ACTIONS")
@@ -153,7 +161,7 @@ def exercise(ocr, server, scratch):
         terminal.send("\x03")
         terminal.finish()
         terminal.assert_single_screen_session()
-        assert not (scratch / "navigation.json").exists()
+        assert not config_path("navigation").exists()
 
         # Cancel before discovery: neither a subprocess nor a config may exist.
         terminal = start("cancelled")
@@ -166,7 +174,7 @@ def exercise(ocr, server, scratch):
         terminal.wait("Review connection")
         terminal.send("\x1b")
         terminal.finish()
-        assert not start_marker.exists() and not (scratch / "cancelled.json").exists()
+        assert not start_marker.exists() and not config_path("cancelled").exists()
 
         terminal = start("local")
         terminal.send("\r")
@@ -187,15 +195,15 @@ def exercise(ocr, server, scratch):
         terminal.wait("Save connection")
         terminal.send("\x1b[B\r")
         terminal.finish()
-        cfg = json.loads((scratch / "local.json").read_text())
+        cfg = json.loads(config_path("local").read_text())
         local = cfg["mcp_servers"]["local"]
         assert local["tools"] == ["echo"] and local["tool_permissions"] == {"echo": "ask"}
         assert len(local["tool_definition_sha256"]["echo"]) == 64
-        assert (scratch / "local.json").stat().st_mode & 0o777 == 0o600
+        assert config_path("local").stat().st_mode & 0o777 == 0o600
         assert not call_marker.exists()
 
         # The manager and permissions use real selector screens, not typed enums.
-        env["OCR_CONFIG_PATH"] = str(scratch / "local.json")
+        select_home("local")
         terminal = Terminal([str(ocr), "mcp", "permissions"], env)
         captures.append(terminal)
         terminal.wait("Global default permission")
@@ -205,7 +213,7 @@ def exercise(ocr, server, scratch):
         terminal.wait("MCP confirmation")
         terminal.send("\x1b[B\r")
         terminal.finish()
-        assert json.loads((scratch / "local.json").read_text())["mcp"]["approval_timeout_seconds"] == 120
+        assert json.loads(config_path("local").read_text())["mcp"]["approval_timeout_seconds"] == 120
 
         terminal = Terminal([str(ocr), "mcp", "permissions", "local"], env)
         captures.append(terminal)
@@ -216,7 +224,7 @@ def exercise(ocr, server, scratch):
         terminal.wait("MCP confirmation")
         terminal.send("\x1b[B\r")
         terminal.finish()
-        assert json.loads((scratch / "local.json").read_text())["mcp_servers"]["local"]["tool_permissions"]["echo"] == "allow"
+        assert json.loads(config_path("local").read_text())["mcp_servers"]["local"]["tool_permissions"]["echo"] == "allow"
 
         terminal = Terminal([str(ocr), "mcp", "tools", "local"], env)
         captures.append(terminal)
@@ -227,12 +235,12 @@ def exercise(ocr, server, scratch):
         terminal.drain(0.5)
         terminal.send("\x1b[B\r")
         terminal.finish()
-        assert json.loads((scratch / "local.json").read_text())["mcp_servers"]["local"]["tool_permissions"]["echo"] == "ask"
+        assert json.loads(config_path("local").read_text())["mcp_servers"]["local"]["tool_permissions"]["echo"] == "ask"
         assert not call_marker.exists()
 
         # Server-first management is read-only until an explicit action.
         # Keep navigation in one session and check the on-disk state after each action.
-        env["OCR_CONFIG_PATH"] = str(scratch / "local.json")
+        select_home("local")
         started_before = start_marker.stat().st_mtime_ns
         terminal = Terminal([str(ocr), "mcp"], env)
         captures.append(terminal)
@@ -250,10 +258,10 @@ def exercise(ocr, server, scratch):
         terminal.wait("Save these permissions")
         terminal.send("y")
         terminal.wait("No prompt (allow)")
-        assert json.loads((scratch / "local.json").read_text())["mcp_servers"]["local"]["tool_permissions"]["echo"] == "allow"
+        assert json.loads(config_path("local").read_text())["mcp_servers"]["local"]["tool_permissions"]["echo"] == "allow"
         terminal.send("\x1b[A\r")  # Revoke locally, without discovery.
         terminal.wait("Not enabled; hidden from model")
-        assert not json.loads((scratch / "local.json").read_text())["mcp_servers"]["local"].get("tools")
+        assert not json.loads(config_path("local").read_text())["mcp_servers"]["local"].get("tools")
         assert start_marker.stat().st_mtime_ns == started_before
         terminal.send("\x1b")  # tools
         terminal.send("\x1b")  # server
@@ -274,10 +282,10 @@ def exercise(ocr, server, scratch):
         terminal.send("q")
         terminal.finish()
         terminal.assert_single_screen_session()
-        assert json.loads((scratch / "local.json").read_text())["mcp_servers"]["local"]["tools"] == ["echo"]
+        assert json.loads(config_path("local").read_text())["mcp_servers"]["local"]["tools"] == ["echo"]
 
         # Paste a configuration privately, preview, cancel, and then import it.
-        env["OCR_CONFIG_PATH"] = str(scratch / "imported.json")
+        select_home("imported")
         pasted = '{"mcpServers":{"imported":{"command":"never-start","env":{"TOKEN":"IMPORT_SECRET_SENTINEL"}}}}'
         terminal = Terminal([str(ocr), "mcp"], env)
         captures.append(terminal)
@@ -308,7 +316,7 @@ def exercise(ocr, server, scratch):
         terminal.send("q")
         terminal.finish()
         terminal.assert_single_screen_session()
-        imported = json.loads((scratch / "imported.json").read_text())["mcp_servers"]["imported"]
+        imported = json.loads(config_path("imported").read_text())["mcp_servers"]["imported"]
         assert imported["enabled"] is False and not imported.get("tools")
         assert imported["env"] == ["TOKEN=${TOKEN}"]
         assert b"IMPORT_SECRET_SENTINEL" not in terminal.output
@@ -330,14 +338,14 @@ def exercise(ocr, server, scratch):
         terminal.send(" \r")
         terminal.send("\x1b[B\r")
         terminal.finish()
-        cfg = json.loads((scratch / "remote.json").read_text())
+        cfg = json.loads(config_path("remote").read_text())
         assert cfg["mcp_servers"]["remote"]["tools"] == ["echo"]
         assert not call_marker.exists()
 
         # Non-interactive management cannot write or discover implicitly.
-        env["OCR_CONFIG_PATH"] = str(scratch / "noninteractive.json")
+        select_home("noninteractive")
         result = subprocess.run([str(ocr), "mcp"], env=env, capture_output=True, timeout=10)
-        assert result.returncode == 0 and not (scratch / "noninteractive.json").exists()
+        assert result.returncode == 0 and not config_path("noninteractive").exists()
         print("PASS: real PTY server-first management, tool permission/revocation, consent/refresh, private paste import, stdio + remote discovery, back, checkbox/save, timeout, cancellation, private config, non-TTY, and zero business calls")
     finally:
         for terminal in captures:

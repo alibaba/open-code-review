@@ -197,7 +197,7 @@ func TestMCPConfigSetCannotBypassPersistentAllowEntryPoint(t *testing.T) {
 
 func TestMCPListAndShowNeverLeakConnectionSecrets(t *testing.T) {
 	secretValues := []string{"header-canary", "env-canary", "arg-canary", "query-canary", "user-canary", "pass-canary"}
-	path := setupMCPTestHome(t, &Config{MCPServers: map[string]MCPServerConfig{
+	setupMCPTestHome(t, &Config{MCPServers: map[string]MCPServerConfig{
 		"remote": {
 			Type: "remote", URL: "https://user-canary:pass-canary@example.com/mcp?token=query-canary",
 			Headers: map[string]string{"Authorization": "header-canary"},
@@ -206,7 +206,6 @@ func TestMCPListAndShowNeverLeakConnectionSecrets(t *testing.T) {
 			Type: "stdio", Command: "example-mcp", Args: []string{"arg-canary"}, Env: []string{"TOKEN=env-canary"},
 		},
 	}})
-	t.Setenv("OCR_CONFIG_PATH", path)
 	for _, asJSON := range []bool{false, true} {
 		cmd, output, _ := newMCPTestCommand("")
 		if err := runMCPList(cmd, asJSON); err != nil {
@@ -255,10 +254,9 @@ func TestMCPConnectionPreviewRedactsCredentialArguments(t *testing.T) {
 }
 
 func TestMCPDiscoveryConfirmationFailsClosed(t *testing.T) {
-	path := setupMCPTestHome(t, &Config{MCPServers: map[string]MCPServerConfig{
+	setupMCPTestHome(t, &Config{MCPServers: map[string]MCPServerConfig{
 		"local": {Type: "stdio", Command: "example-mcp"},
 	}})
-	t.Setenv("OCR_CONFIG_PATH", path)
 	called := 0
 	setMCPTestDiscovery(t, func(context.Context, string, MCPServerConfig) ([]ocrmcp.DiscoveredTool, error) {
 		called++
@@ -563,7 +561,6 @@ func TestMCPStatusNeedsReviewWithoutCurrentFingerprint(t *testing.T) {
 func setupMCPTestHome(t *testing.T, cfg *Config) string {
 	t.Helper()
 	setTestHome(t, t.TempDir())
-	t.Setenv("OCR_CONFIG_PATH", "")
 	path, err := defaultConfigPath()
 	if err != nil {
 		t.Fatal(err)

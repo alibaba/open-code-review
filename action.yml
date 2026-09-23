@@ -317,8 +317,9 @@ outputs:
   checkpoint_after:
     description: >-
       The head this run recorded as the new checkpoint, or empty when it did not
-      advance one (incomplete run, a finding failed to post, or the summary did
-      not publish).
+      advance one (incomplete run, a blocking publication failure, or the summary did
+      not publish). Findings proven outside the PR diff and included in the
+      published summary do not block advancement.
     value: ${{ steps.post.outputs.checkpoint_after }}
 
 runs:

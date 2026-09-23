@@ -24,7 +24,8 @@ func TestCompressionRedactsSensitiveTurnsBeforeBuildingXML(t *testing.T) {
 	registry.Freeze()
 	r.deps.Tools = registry
 	r.deps.MainToolDefs = []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: name}}}
-	calls := []llm.ToolCall{{ID: "sensitive", Function: llm.FunctionCall{Name: name, Arguments: `{"token":"` + secret + `"}`}}}
+	extra := json.RawMessage(`{"signature":"` + secret + `"}`)
+	calls := []llm.ToolCall{{ID: "sensitive", Function: llm.FunctionCall{Name: name, Arguments: `{"token":"` + secret + `"}`}, ExtraContent: extra}}
 	messages[2] = llm.NewToolCallMessage(secret, calls, llm.NativeTurn{Family: "anthropic", Payload: map[string]any{"input": secret}}, secret)
 	messages[3] = llm.NewTextMessage("tool", "safe tool result")
 
@@ -46,6 +47,9 @@ func TestCompressionRedactsSensitiveTurnsBeforeBuildingXML(t *testing.T) {
 	}
 	if messages[2].Native.Payload == nil || messages[2].ExtractText() != secret || !strings.Contains(calls[0].Function.Arguments, secret) {
 		t.Fatal("compression modified live replay state")
+	}
+	if string(messages[2].ToolCalls[0].ExtraContent) != string(extra) {
+		t.Fatal("compression modified live replay metadata")
 	}
 	if err := r.deps.Session.Finalize(); err != nil {
 		t.Fatal(err)

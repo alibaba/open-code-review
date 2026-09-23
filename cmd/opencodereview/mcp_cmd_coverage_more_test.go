@@ -46,8 +46,7 @@ func TestMCPRootAndReadOnlyOutputBranches(t *testing.T) {
 			},
 		},
 	}
-	path := setupMCPTestHome(t, cfg)
-	t.Setenv("OCR_CONFIG_PATH", path)
+	setupMCPTestHome(t, cfg)
 
 	cmd, listOut, _ := newMCPTestCommand("")
 	if err := runMCPList(cmd, false); err != nil {
@@ -78,10 +77,9 @@ func TestMCPRootAndReadOnlyOutputBranches(t *testing.T) {
 }
 
 func TestMCPDiscoverSuccessAndSafeFailures(t *testing.T) {
-	path := setupMCPTestHome(t, &Config{MCPServers: map[string]MCPServerConfig{
+	setupMCPTestHome(t, &Config{MCPServers: map[string]MCPServerConfig{
 		"local": {Type: "stdio", Command: "example-mcp"},
 	}})
-	t.Setenv("OCR_CONFIG_PATH", path)
 	setMCPTestInteractive(t, false)
 	setMCPTestDiscovery(t, func(ctx context.Context, name string, server MCPServerConfig) ([]ocrmcp.DiscoveredTool, error) {
 		if ctx == nil || name != "local" || server.Command != "example-mcp" {
@@ -327,7 +325,6 @@ func TestMCPAddValidationAndConfigLoadBranches(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("OCR_CONFIG_PATH", path)
 	cfg, err := loadReadOnlyMCPConfig()
 	if err != nil || cfg == nil {
 		t.Fatalf("missing read-only config = %#v, %v", cfg, err)
