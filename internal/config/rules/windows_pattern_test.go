@@ -115,10 +115,11 @@ func TestWarnAboutWindowsPatterns(t *testing.T) {
 	}
 	got := buf.String()
 
-	if !strings.Contains(got, `src\gen\*`) {
+	// %q quotes the pattern, so each backslash arrives doubled.
+	if !strings.Contains(got, `"src\\gen\\*"`) {
 		t.Errorf("warning should name the offending pattern, got:\n%s", got)
 	}
-	if !strings.Contains(got, "src/gen/*") {
+	if !strings.Contains(got, `"src/gen/*"`) {
 		t.Errorf("warning should suggest the slash form, got:\n%s", got)
 	}
 	if strings.Contains(got, `"*.go"`) {
@@ -154,7 +155,7 @@ func TestWarnAboutWindowsPatterns_IncludesBothGroups(t *testing.T) {
 	if !strings.Contains(got, "include") || !strings.Contains(got, "exclude") {
 		t.Errorf("warning should cover both groups, got:\n%s", got)
 	}
-	if !strings.Contains(got, `src\inc`) || !strings.Contains(got, `src\exc`) {
+	if !strings.Contains(got, `"src\\inc"`) || !strings.Contains(got, `"src\\exc"`) {
 		t.Errorf("warning should name both patterns, got:\n%s", got)
 	}
 }
