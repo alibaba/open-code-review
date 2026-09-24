@@ -17,6 +17,7 @@ import (
 	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/estimate"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
@@ -76,6 +77,9 @@ type Args struct {
 	// batches are dispatched. 0 = unlimited. Set via --max-tokens-budget
 	// or ScanTemplate.MaxTokensBudget.
 	MaxTokensBudget int64
+	// Estimation controls pre-run projections and dispatch budget look-ahead.
+	// Zero values retain the default heuristics; API usage is unaffected.
+	Estimation estimate.Parameters
 }
 
 // planEnabled / dedupEnabled / summaryEnabled report whether each optional
@@ -351,7 +355,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	}
 
 	// Pre-run cost projection so users aren't surprised by a large scan.
-	est := estimateCost(a.items, a.planEnabled(), a.dedupEnabled(), a.summaryEnabled())
+	est := estimateCost(a.items, a.planEnabled(), a.dedupEnabled(), a.summaryEnabled(), a.args.Estimation)
 	fmt.Fprintf(stdout.Writer(), "[ocr] estimated cost: %s\n", est)
 	if a.args.MaxTokensBudget > 0 {
 		fmt.Fprintf(stdout.Writer(), "[ocr] token budget: %s (dispatch stops once exceeded)\n", humanTokens(a.args.MaxTokensBudget))
@@ -713,7 +717,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 		// don't even queue work that would blow the budget.
 		if a.args.MaxTokensBudget > 0 {
 			used := a.runner.TotalTokensUsed()
-			projected := used + estimateFileTokens(it, a.planEnabled())
+			projected := used + estimateFileTokens(it, a.planEnabled(), a.args.Estimation)
 			if projected > a.args.MaxTokensBudget {
 				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + next-file est ≈ %s > budget %s) — skipping %s and remaining files\n",
 					humanTokens(used), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), it.Path)

@@ -26,6 +26,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/estimate"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
@@ -149,6 +150,10 @@ type Args struct {
 	// whole run; dispatch stops once the running total + a per-group look-ahead
 	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
 	MaxTokensBudget int64
+
+	// Estimation controls pre-run projections and dispatch budget look-ahead.
+	// Zero values retain the default heuristics; API usage is unaffected.
+	Estimation estimate.Parameters
 
 	// SkipFilter disables the REVIEW_FILTER_TASK even when the template
 	// defines one. Set via the --no-filter CLI flag.
@@ -390,7 +395,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// projected cost against their cap). Keeps the prior text-mode output
 	// unchanged for the common unlimited path.
 	if a.args.MaxTokensBudget > 0 {
-		est := estimateDiffCost(a.diffs)
+		est := estimateDiffCost(a.diffs, a.args.Estimation)
 		fmt.Fprintf(stdout.Writer(), "[ocr] estimated cost: %s\n", est)
 		fmt.Fprintf(stdout.Writer(), "[ocr] token budget: %s (dispatch stops once exceeded)\n", humanTokens(a.args.MaxTokensBudget))
 		if est.TotalTokens > a.args.MaxTokensBudget {
@@ -687,7 +692,7 @@ dispatchLoop:
 			used := a.runner.TotalTokensUsed()
 			var groupEst int64
 			for _, d := range group.Diffs {
-				groupEst += estimateDiffFileTokens(d)
+				groupEst += estimateDiffFileTokens(d, a.args.Estimation)
 			}
 			projected := used + groupEst
 			if projected > a.args.MaxTokensBudget {
@@ -1070,7 +1075,7 @@ func (a *Agent) ruleConfigSHA256() string {
 
 // runtimeConfigSHA256 is the deterministic identity of the allowlisted, non-secret
 // runtime settings: protocol, model, sanitized endpoint host, language, per-request
-// timeout, configured concurrency and the aggregate token budget. Every field is
+// timeout, configured concurrency, token budget and estimation parameters. Every field is
 // tagged so structurally different configs cannot collide once length-prefixed. No
 // secret ever reaches this hash — RuntimeConfig carries only the credential-free
 // host, never the token or full URL.
@@ -1080,6 +1085,7 @@ func (a *Agent) ruleConfigSHA256() string {
 // interchangeable when auditing why one stopped short.
 func (a *Agent) runtimeConfigSHA256() string {
 	r := a.args.RuntimeConfig
+	p := a.args.Estimation.WithDefaults()
 	return hashFields(
 		"protocol", r.Protocol,
 		"model", a.args.Model,
@@ -1088,6 +1094,8 @@ func (a *Agent) runtimeConfigSHA256() string {
 		"timeout", r.Timeout.String(),
 		"concurrency", strconv.Itoa(a.args.MaxConcurrency),
 		"max_tokens_budget", strconv.FormatInt(a.args.MaxTokensBudget, 10),
+		"estimation_overhead_tokens", strconv.FormatInt(p.PromptOverheadTokens, 10),
+		"estimation_output_tokens_per_round", strconv.FormatInt(p.OutputTokensPerRound, 10),
 	)
 }
 

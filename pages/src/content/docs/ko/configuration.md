@@ -231,6 +231,31 @@ ocr scan --max-tokens 400000
 
 실행별 플래그가 `max_tokens`보다 우선하고, 둘 다 없으면 OCR은 내장 작업 템플릿 기본값을 사용합니다. 이 상한은 모델의 **출력** 상한(`MAX_COMPLETION_TOKENS`, 두 템플릿 모두 `16384`)이나 실행 전체 토큰 사용량을 제한하는 `--max-tokens-budget`과는 별개입니다. `ocr config unset max_tokens`로 내장 기본값을 복원합니다.
 
+### 토큰 추정 {#token-estimation}
+
+`~/.opencodereview/config.json`의 최상위 키 두 개로 `ocr review`와 `ocr scan`의 대략적인 토큰 추정치를 보정할 수 있습니다.
+
+| 키 | 기본값 | 의미 |
+|---|---|---|
+| `estimation_overhead_tokens` | `2000` | 호출마다 콘텐츠 토큰 외에 추가되는 프롬프트 오버헤드 추정치. |
+| `estimation_output_tokens_per_round` | `700` | `MAIN_TASK` 라운드당 출력 토큰 추정치. |
+
+두 값 모두 0 이상의 정수를 받습니다. `0`, 키 생략 또는 `ocr config unset`은 기본값을 복원합니다. 예:
+
+```bash
+ocr config set estimation_overhead_tokens 8000
+ocr config set estimation_output_tokens_per_round 3000
+```
+
+이 값은 보정 예시이며 특정 모델에 대한 권장값이 아닙니다. 대표적인 실행에서 보고된 실제 사용량과 추정치를 비교해 조정하세요. OCR은 모델 이름으로 이 값을 자동 추론하지 않습니다. 추정은 여전히 파일당 `MAIN_TASK` 7라운드를 가정하며, PLAN, 중복 제거 및 요약은 각각의 출력 추정치를 유지합니다.
+
+이 설정은 실행 전 추정치와 `--max-tokens-budget` 사용 시 다음 파일을 처리하기 전의 예산 검사에 적용됩니다. API가 보고하는 실제 사용량이나 요청 토큰 상한은 바꾸지 않으며, 추정치는 여전히 대략적인 값입니다. 기본값 복원:
+
+```bash
+ocr config unset estimation_overhead_tokens
+ocr config unset estimation_output_tokens_per_round
+```
+
 ### 리뷰 강도 (effort) {#review-effort}
 
 `effort`는 서브태스크마다 리뷰를 몇 라운드 돌릴지 정합니다. `low` = 1라운드, `medium`(기본값) = 2라운드, `high` = 3라운드입니다. 라운드가 늘어나면 더 많은 문제를 찾지만 비용도 그만큼 늘어납니다.

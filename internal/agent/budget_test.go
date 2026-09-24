@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/estimate"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -77,6 +78,43 @@ func makeBudgetDiffs(n int) []model.Diff {
 		}
 	}
 	return diffs
+}
+
+func TestDispatchSubtasks_CustomEstimation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		params estimate.Parameters
+		calls  int64
+	}{
+		{"defaults", estimate.Parameters{}, 1},
+		{"overhead override", estimate.Parameters{PromptOverheadTokens: 8000}, 0},
+		{"output override", estimate.Parameters{OutputTokensPerRound: 3000}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setTestHome(t, t.TempDir())
+			fake := &fakeBudgetAgentClient{perCallTokens: 10}
+			a := New(Args{
+				LLMClient: fake, Model: "fake", MaxConcurrency: 1,
+				Template: budgetAgentTestTemplate(), MaxTokensBudget: 30_000,
+				Estimation: tc.params,
+				MainToolDefs: []llm.ToolDef{
+					{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+				},
+			})
+			t.Cleanup(func() { _ = a.Session().Finalize() })
+			a.diffs = makeBudgetDiffs(1)
+			a.args.Tools.Freeze()
+			if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if calls := atomic.LoadInt64(&fake.calls); calls != tc.calls {
+				t.Fatalf("LLM calls = %d, want %d", calls, tc.calls)
+			}
+			if a.BudgetExceeded() != (tc.calls == 0) {
+				t.Fatalf("BudgetExceeded = %v, expected stopped=%v", a.BudgetExceeded(), tc.calls == 0)
+			}
+		})
+	}
 }
 
 // TestDispatchSubtasks_TokenBudgetStopsDispatch verifies the per-file gate
@@ -319,7 +357,7 @@ func TestDispatchSubtasks_TokenBudgetStopsInFlightGroup(t *testing.T) {
 	diffs := makeBudgetDiffs(2)
 	// The gate admits both groups (estimate <= budget). The second group's
 	// second round pushes usage past the budget, so its third round is refused.
-	budget := estimateDiffFileTokens(diffs[1]) * 4
+	budget := estimateDiffFileTokens(diffs[1], estimate.Parameters{}) * 4
 	perCall := budget/2 + 1
 	fake := &fakeFirstDoneThenNeverClient{perCallTokens: perCall}
 	a := New(Args{
@@ -423,7 +461,7 @@ func (f *fakeCommentAndDoneClient) CompletionsWithCtx(_ context.Context, _ llm.C
 func TestDispatchSubtasks_TokenBudgetSkipsNextRoundAfterCompletedRound(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	diffs := makeBudgetDiffs(1)
-	budget := estimateDiffFileTokens(diffs[0]) * 4
+	budget := estimateDiffFileTokens(diffs[0], estimate.Parameters{}) * 4
 	fake := &fakeCommentAndDoneClient{perCallTokens: budget + 1, path: diffs[0].NewPath}
 	collector := tool.NewCommentCollector()
 	reg := tool.NewRegistry()

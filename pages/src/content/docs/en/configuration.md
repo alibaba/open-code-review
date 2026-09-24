@@ -307,6 +307,39 @@ model's **output** cap (`MAX_COMPLETION_TOKENS`, `16384` in both templates)
 and of `--max-tokens-budget`, which caps total token use for a whole run.
 Restore the embedded default with `ocr config unset max_tokens`.
 
+### Token estimation
+
+Two top-level keys in `~/.opencodereview/config.json` calibrate the rough token
+estimates for both `ocr review` and `ocr scan`:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `estimation_overhead_tokens` | `2000` | Estimated prompt overhead per call, in addition to content tokens. |
+| `estimation_output_tokens_per_round` | `700` | Estimated output tokens per `MAIN_TASK` round. |
+
+Both accept nonnegative integers; `0`, an omitted key, or `ocr config unset`
+restores the default. For example:
+
+```bash
+ocr config set estimation_overhead_tokens 8000
+ocr config set estimation_output_tokens_per_round 3000
+```
+
+These are calibration examples, not recommendations for a particular model.
+Compare estimates with reported usage from representative runs and adjust as
+needed; OCR does not infer these values from model names. The estimate still
+assumes seven `MAIN_TASK` rounds per file, while PLAN, deduplication, and summary
+retain their own output estimates.
+
+The settings affect the pre-run estimate and the budget check before dispatching
+another file with `--max-tokens-budget`. They do not change API-reported usage or
+request token limits, and estimates remain approximate. Restore the defaults with:
+
+```bash
+ocr config unset estimation_overhead_tokens
+ocr config unset estimation_output_tokens_per_round
+```
+
 ### Review effort
 
 `effort` sets how many review rounds each subtask gets: `low` = 1,

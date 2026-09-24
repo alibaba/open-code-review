@@ -283,6 +283,35 @@ ocr scan --max-tokens 120000
 输出预算。它同样与限制单次运行总 token 用量的 `--max-tokens-budget` 相互独立。
 可以用 `ocr config unset max_tokens` 恢复为内置默认值。
 
+### Token 估算
+
+`~/.opencodereview/config.json` 中的两个顶层配置项可用于校准 `ocr review` 和
+`ocr scan` 的粗略 token 估算：
+
+| 配置项 | 默认值 | 含义 |
+|---|---|---|
+| `estimation_overhead_tokens` | `2000` | 每次调用除内容 token 外的提示词开销估计值。 |
+| `estimation_output_tokens_per_round` | `700` | 每轮 `MAIN_TASK` 的输出 token 估计值。 |
+
+两者均接受非负整数；设为 `0`、省略配置项或执行 `ocr config unset` 都会恢复默认值。例如：
+
+```bash
+ocr config set estimation_overhead_tokens 8000
+ocr config set estimation_output_tokens_per_round 3000
+```
+
+以上数值仅是校准示例，并非针对某个模型的推荐值。请根据有代表性的运行所报告的
+实际用量与估算值进行比较和调整；OCR 不会根据模型名称自动推断这些值。
+估算仍假设每个文件执行七轮 `MAIN_TASK`，PLAN、去重和摘要阶段保留各自的输出估算。
+
+这些设置影响运行前的估算，以及使用 `--max-tokens-budget` 时分派下一个文件前的预算检查。
+它们不会改变 API 报告的实际用量或请求 token 上限，估算结果仍是近似值。恢复默认值：
+
+```bash
+ocr config unset estimation_overhead_tokens
+ocr config unset estimation_output_tokens_per_round
+```
+
 ### 评审投入档位（effort）
 
 `effort` 决定每个子任务要跑几轮 main 循环：`low` = 1 轮，`medium` = 2 轮（默认），

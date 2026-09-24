@@ -304,6 +304,38 @@ OCR は組み込みのタスクテンプレートのデフォルト値を使用�
 実行全体のトークン使用量を制限する `--max-tokens-budget` とも独立しています。
 組み込みのデフォルトに戻すには `ocr config unset max_tokens` を実行してください。
 
+### トークン数の見積もり
+
+`~/.opencodereview/config.json` の二つのトップレベルキーで、`ocr review` と
+`ocr scan` のトークン数の概算を調整できます。
+
+| キー | デフォルト | 意味 |
+|---|---|---|
+| `estimation_overhead_tokens` | `2000` | 呼び出しごとにコンテンツのトークン数に加えるプロンプトのオーバーヘッドの推定値。 |
+| `estimation_output_tokens_per_round` | `700` | `MAIN_TASK` の各ラウンドの出力トークン数の推定値。 |
+
+どちらも非負の整数を受け付けます。`0`、キーの省略、または `ocr config unset` で
+デフォルトに戻ります。設定例：
+
+```bash
+ocr config set estimation_overhead_tokens 8000
+ocr config set estimation_output_tokens_per_round 3000
+```
+
+これらは調整例であり、特定のモデルの推奨値ではありません。代表的な実行で報告される
+実際の使用量と見積もりを比較して調整してください。OCR はモデル名からこれらの値を
+自動的に推定しません。見積もりは引き続きファイルごとに `MAIN_TASK` を七ラウンドと
+仮定し、PLAN、重複排除、要約にはそれぞれの出力見積もりを使います。
+
+これらの設定は、実行前の見積もりと、`--max-tokens-budget` 使用時に次のファイルを
+処理に回す前の予算チェックに適用されます。API が報告する実際の使用量やリクエストの
+トークン上限は変わらず、見積もりは概算のままです。デフォルトに戻すには：
+
+```bash
+ocr config unset estimation_overhead_tokens
+ocr config unset estimation_output_tokens_per_round
+```
+
 ### レビューの労力プリセット（effort）
 
 `effort` は、サブタスクごとに main ループを何ラウンド実行するかを決めます:

@@ -239,6 +239,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
+		Estimation:            resolveEstimation(rt.AppCfg),
 	})
 
 	closeRaw := bindRawWriter(rt.RawHolder, cc.RepoDir, ag.Session())
