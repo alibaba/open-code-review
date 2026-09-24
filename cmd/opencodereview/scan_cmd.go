@@ -184,9 +184,7 @@ func executeScan(opts scanOptions) (retErr error) {
 	}
 	// Apply language to the scan template too (loadLLMRuntime only mutates
 	// the diff-review template it was handed).
-	if rt.AppCfg != nil {
-		scanTpl.ApplyLanguage(rt.AppCfg.Language)
-	}
+	scanTpl.ApplyLanguage(configuredLanguage(rt.AppCfg))
 
 	// file_read_diff is meaningless in scan mode (no diff exists). Hiding it
 	// from MainToolDefs stops the LLM from burning tool-call rounds probing

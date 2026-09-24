@@ -65,8 +65,8 @@ inputs:
     default: ''
   language:
     description: >-
-      Review output language, written via `ocr config set language`
-      (e.g. English, Chinese). No env var exists for this.
+      Review output language (e.g. English, Chinese), configured through this
+      Action's `language` input.
     required: false
     default: 'English'
   llm_timeout:
