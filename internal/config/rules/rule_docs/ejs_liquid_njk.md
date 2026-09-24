@@ -1,16 +1,17 @@
-> Favor precision over recall: only raise an issue when the rendered consequence or trust boundary is clear. EJS, Liquid and Nunjucks all embed a host language and compile to HTML, so distinguish each engine's built-in escaping from the validation or serialization required by the actual output context.
+> Favor precision over recall: only raise an issue when the rendered consequence or trust boundary is clear. EJS, Liquid and Nunjucks all embed a host language and compile to HTML, but their escaping contracts differ: EJS `<%= %>` and Nunjucks `{{ }}` HTML-escape by default, while Liquid emits output raw unless an `escape` filter is applied. Distinguish each engine's built-in escaping from the validation or serialization required by the actual output context.
 
 #### Escaping and Output Contexts
-- EJS unescaped output (`<%- %>`) or Liquid/Nunjucks raw output (`| safe`, Nunjucks `| safe`) that can receive untrusted HTML without prior, context-appropriate sanitization
+- EJS unescaped output (`<%- %>`) or Nunjucks raw output (`| safe`) that can receive untrusted HTML without prior, context-appropriate sanitization
+- Liquid `{{ value }}` emitting untrusted text into an HTML context without the `escape` filter; Liquid does not HTML-escape output automatically, so an explicit escape filter is the only HTML-safe form
 - EJS escaped output (`<%= %>`) or Nunjucks `{{ value }}` used inside JavaScript, CSS, JSON, URL, or event-handler syntax as though HTML escaping protected those grammars
-- Do not report ordinary `<%= %>` / `{{ value }}` in an HTML text node solely for lacking an explicit escape helper; these engines HTML-escape those forms by default
+- Do not report ordinary EJS `<%= %>` or Nunjucks `{{ value }}` in an HTML text node solely for lacking an explicit escape helper; both HTML-escape those forms by default. Liquid is the exception — it has no default escaping, so report the missing `escape` filter rather than treating it as a false positive
 - Sanitized HTML rendered unescaped after transformations that invalidate the sanitizer's guarantee, such as concatenating new untrusted markup afterward
-- Liquid templates that disable escaping engine-wide, or Nunjucks `autoescape` turned off, without a documented reason scoped to trusted input only
+- Nunjucks `autoescape` turned off, or an environment registered without autoescaping enabled, without a documented reason scoped to trusted input only
 
 #### Attributes, URLs, and Dynamic Markup
 - Attribute values from untrusted data that are HTML-escaped but not validated for the sink, especially `href`, `src`, `action`, `formaction`, `srcdoc`, `style`, and event-handler attributes
 - EJS attribute construction by string concatenation, or object spreads of untrusted data that can introduce event handlers or override security-sensitive attributes; inspect attribute names and non-HTML sink semantics rather than conventional helper forwarding
-- Liquid `{{ }}` used inside an attribute whose value is then interpreted as a URL by client code, without scheme validation — `javascript:` and `data:` survive HTML escaping
+- Liquid `{{ }}` used inside an attribute whose value is then interpreted as a URL by client code, without scheme validation — Liquid output is unescaped to begin with, and even in engines that do HTML-escape, `javascript:` and `data:` survive HTML escaping because escaping does not constrain URL schemes
 - Boolean attributes whose values use strings such as `"false"` when presence still enables the HTML behavior, or conditional attributes that leave a control enabled, selected, or focusable on the wrong branch
 - IDs, `name` values, fragment links, or ARIA references generated in loops without a stable uniqueness guarantee
 
@@ -37,7 +38,7 @@
 - Layout or wrapper overrides that silently drop required metadata, scripts, security controls, fallback content, or accessibility structure
 
 #### Control Flow, Filters, and Macros
-- Liquid filters treated as runtime sanitizers or as validators for a non-HTML sink; Liquid filters transform display text and do not make a value safe for a URL, attribute, or script context
+- Liquid filters treated as runtime sanitizers or as validators for a non-HTML sink; Liquid filters transform display text and do not make a value safe for a URL, attribute, or script context — and only `escape` (not a filter in general) makes a value safe for HTML
 - Nunjucks custom filters registered without `autoescape` awareness, so a filter returning untrusted markup bypasses the engine's escaping
 - Nunjucks macros that emit unescaped markup (`| safe`) for values the caller controls, or that build attributes by concatenation
 - Loops or conditionals whose tag boundaries are misplaced, so a block that appears nested is emitted as a sibling (and vice versa) — particularly around EJS `<% } %>`, Nunjucks `{% endif %}`, or Liquid `{% endif %}` pairs split across partials
