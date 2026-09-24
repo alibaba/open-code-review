@@ -2330,6 +2330,67 @@ async function testRoutedFindingsCarryNoIdempotencyId() {
   assert.doesNotMatch(body, /ocr-\d+-\d+-[a-f0-9]+/, "routed summary body carries no idempotency id");
 }
 
+// #1557: the sticky summary anchor used to be located by substring alone, so a
+// HUMAN comment that merely quoted the marker was returned as "the existing
+// summary" and its body was overwritten in place. Quoting a marker is a normal
+// thing for a human (or another tool) to do when discussing a prior review, and
+// the destroyed comment was the evidence artifact of a downstream merge gate —
+// silent data loss with no way to tell an overwrite from a comment that never
+// existed. The anchor must therefore be restricted to a comment GitHub
+// attributes to a bot writer.
+async function testSummaryAnchorSkipsHumanCommentQuotingTheMarker() {
+  // Bot summary posted first, then the human quotes it (the timeline order the
+  // bug needs: the human's is the NEWEST matching comment).
+  const botSummary = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const humanQuotingMarker = {
+    id: 77,
+    html_url: "http://ex/77",
+    user: { login: "human-reviewer", type: "User" },
+    body: `Review-feedback disposition: addressed.\n\nQuoting the earlier review for context:\n${SUMMARY_MARKER}`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [botSummary, humanQuotingMarker] },
+    opts: { stickySummary: true },
+  });
+
+  const updatedIds = github.updatedComments.map((c) => c.comment_id);
+  assert.deepStrictEqual(
+    updatedIds,
+    [42],
+    `only the bot's own summary may be rewritten; got ${JSON.stringify(updatedIds)}`
+  );
+  assert.doesNotMatch(github.updatedComments[0].body, /Review-feedback disposition/, "the human comment's text must survive");
+}
+
+// The other half of the contract: tightening the anchor must not stop the bot
+// from finding its own summary, or every run would post a second summary and
+// the checkpoint marker would stop advancing.
+async function testSummaryAnchorStillFindsTheBotsOwnSummary() {
+  const botSummary = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [botSummary] },
+    opts: { stickySummary: true },
+  });
+
+  assert.strictEqual(github.updatedComments.length, 1, "the bot's own summary is still updated in place");
+  assert.strictEqual(github.updatedComments[0].comment_id, 42);
+  assert.deepStrictEqual(github.issueComments, [], "and no duplicate summary is posted");
+}
+
 async function main() {
   await testFailedInlineCommentsAreSummarized();
   await testWarningsListedAfterSummaryComments();
@@ -2511,6 +2572,8 @@ async function main() {
   await testResolveCleanupNeverBreaksOutputs();
   await testResolvePacingUsesSuccessDelay();
   testActionYmlDoesNotPromiseTheIoUThresholdToResolveOutdated();
+  await testSummaryAnchorSkipsHumanCommentQuotingTheMarker();
+  await testSummaryAnchorStillFindsTheBotsOwnSummary();
   console.log("All post-review-comments tests passed.");
 }
 function testParseDiffHunkRanges() {

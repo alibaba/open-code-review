@@ -1090,6 +1090,14 @@ async function findExistingSummaryComment({ github, owner, repo, prNumber, log }
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body;
     if (typeof body === "string" && body.includes(SUMMARY_MARKER)) {
+      // The marker is plain Markdown, so anyone can quote it verbatim — a human
+      // dispositioning a review, or another tool citing one. postSummary rewrites
+      // whatever this returns IN PLACE, so accepting a substring match on someone
+      // else's comment destroys it silently, with no error and no way to tell an
+      // overwrite from a comment that never existed. Only a writer GitHub
+      // attributes to a bot can be our summary; isCheckpointAuthorOurs is the
+      // same gate the checkpoint reader already applies to this comment.
+      if (!isCheckpointAuthorOurs(comments[i])) continue;
       return comments[i];
     }
   }
@@ -1108,13 +1116,30 @@ async function findExistingSummaryComment({ github, owner, repo, prNumber, log }
 // Sticky matches the persistent cross-run marker (SUMMARY_MARKER); non-sticky
 // matches this run's tag (SUMMARY_TAG) so each run gets its own comment while
 // retries within a run reuse it. Throws on read failure so callers can degrade.
-async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log }) {
+//
+// The marker match alone is NOT enough to claim a comment: the body is plain
+// Markdown, so any human (or another tool) can quote a prior review's marker
+// verbatim. Both callers below treat the match as "this comment is ours" and
+// rewrite it in place, so a substring hit on somebody else's comment silently
+// destroys it — and the comment most worth quoting is exactly the durable
+// evidence a downstream gate reads. requireBotAuthor therefore keeps that
+// boundary: only a writer GitHub attributes to a bot can be the anchor.
+//
+// It defaults to ON, so a new caller is safe without opting in. The checkpoint
+// reader passes false deliberately: it must distinguish "a comment quoting the
+// marker exists but is not ours" (author_unverified) from "there is no summary
+// yet" (no_summary_comment), which requires seeing the rejected comment rather
+// than having it filtered out here. That distinction is only about which reason
+// a fail-closed gate reports — both review the full range — so the safety
+// property is unchanged.
+async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, requireBotAuthor = true, log }) {
   const comments = await readAllPages("listIssueComments", (page, per_page) =>
     github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page, page }), log
   );
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body || "";
     if (sticky ? body.includes(SUMMARY_MARKER) : body.includes(tag)) {
+      if (requireBotAuthor && !isCheckpointAuthorOurs(comments[i])) continue;
       return comments[i];
     }
   }
@@ -3025,6 +3050,11 @@ async function readCheckpointComment({ github, owner, repo, prNumber, appSlug = 
       prNumber,
       sticky: true,
       tag: "",
+      // Author checked below, not here: this path has to tell "someone quoted
+      // our marker" apart from "there is no summary yet", and the finder's
+      // tightened default would collapse both into no_summary_comment. The
+      // isCheckpointAuthorOurs gate right after this is the same check.
+      requireBotAuthor: false,
       log,
     });
   } catch (e) {
