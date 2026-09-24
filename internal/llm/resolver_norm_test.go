@@ -60,11 +60,54 @@ func TestTryCCEnv(t *testing.T) {
 	t.Run("incomplete environment is a miss", func(t *testing.T) {
 		t.Setenv(envCCBaseURL, "https://cc.example")
 		t.Setenv(envCCToken, "")
+		t.Setenv(envCCAPIKey, "")
 		t.Setenv(envCCModel, "m")
 
 		_, ok, err := tryCCEnv("")
 		if err != nil || ok {
 			t.Fatalf("tryCCEnv should miss on empty token: ok=%v err=%v", ok, err)
+		}
+	})
+
+	t.Run("anthropic api key fallback with default baseURL", func(t *testing.T) {
+		t.Setenv(envCCBaseURL, "")
+		t.Setenv(envCCToken, "")
+		t.Setenv(envCCAPIKey, "sk-ant-test-key")
+		t.Setenv(envCCModel, "claude-test-model")
+
+		ep, ok, err := tryCCEnv("")
+		if err != nil || !ok {
+			t.Fatalf("tryCCEnv: ok=%v err=%v", ok, err)
+		}
+		if ep.Token != "sk-ant-test-key" {
+			t.Errorf("token = %q, want sk-ant-test-key", ep.Token)
+		}
+		if ep.AuthHeader != "x-api-key" {
+			t.Errorf("authHeader = %q, want x-api-key", ep.AuthHeader)
+		}
+		if ep.URL != "https://api.anthropic.com/v1/messages" {
+			t.Errorf("url = %q, want https://api.anthropic.com/v1/messages", ep.URL)
+		}
+	})
+
+	t.Run("anthropic auth token takes precedence over api key", func(t *testing.T) {
+		t.Setenv(envCCBaseURL, "https://custom.anthropic.com")
+		t.Setenv(envCCToken, "token-wins")
+		t.Setenv(envCCAPIKey, "key-loses")
+		t.Setenv(envCCModel, "claude-test-model")
+
+		ep, ok, err := tryCCEnv("")
+		if err != nil || !ok {
+			t.Fatalf("tryCCEnv: ok=%v err=%v", ok, err)
+		}
+		if ep.Token != "token-wins" {
+			t.Errorf("token = %q, want token-wins", ep.Token)
+		}
+		if ep.AuthHeader != "authorization" {
+			t.Errorf("authHeader = %q, want authorization", ep.AuthHeader)
+		}
+		if ep.URL != "https://custom.anthropic.com/v1/messages" {
+			t.Errorf("url = %q, want https://custom.anthropic.com/v1/messages", ep.URL)
 		}
 	})
 }
