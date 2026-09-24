@@ -121,6 +121,14 @@ async function runPostReviewComments({
   // resolve, anything else (including the default) is a hard no-op that issues
   // zero GraphQL calls.
   resolveOutdated = "",
+  // The GitHub App slug that owns this action's summary comment, when known
+  // (the default GITHUB_TOKEN is always "github-actions"). Pins the summary
+  // anchor's identity check so a different bot quoting the marker cannot be
+  // rewritten in place. Empty when the caller supplied its own token: an
+  // installation token cannot ask GitHub which app it is, so that case keeps
+  // the wider "any bot" check rather than pinning to a slug that would reject
+  // our own summary too.
+  appSlug = "",
 }) {
   const log = (msg) => {
     if (core && typeof core.info === "function") core.info(msg);
@@ -275,7 +283,7 @@ async function runPostReviewComments({
         `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview** encountered an error:\n${fencedBlock(stderr)}`,
         null
       );
-      const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log });
+      const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, appSlug, log });
       stats.summaryUrl = posted.url;
     }
     setStatsOutputs(out, stats);
@@ -298,7 +306,7 @@ async function runPostReviewComments({
     const message = result.message || "No comments generated. Looks good to me.";
     // A clean run is still a complete run: this path advances the checkpoint.
     const body = appendCheckpoint(`${SUMMARY_MARKER}\n✅ **OpenCodeReview**: ${message}${rangeNote}`, result.manifest);
-    const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log });
+    const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, appSlug, log });
     stats.summaryUrl = posted.url;
     setStatsOutputs(out, stats);
     return;
@@ -437,6 +445,7 @@ async function runPostReviewComments({
     prNumber,
     sticky: stickySummary,
     tag: SUMMARY_TAG,
+    appSlug,
     body: wrapSummary(
       buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings)
     ),
@@ -540,6 +549,7 @@ async function runPostReviewComments({
     anchor,
     sticky: stickySummary,
     tag: SUMMARY_TAG,
+    appSlug,
     body: wrapSummary(appendCheckpoint(summaryBody, result.manifest)),
     preserveMarker,
     log,
@@ -1059,10 +1069,10 @@ function setStatsOutputs(out, stats, batchCounters, batchSize) {
 
 // ---- Summary posting (sticky vs new) ----
 
-async function postSummary({ github, owner, repo, prNumber, body, sticky, preserveMarker = false, log }) {
+async function postSummary({ github, owner, repo, prNumber, body, sticky, preserveMarker = false, appSlug = "", log }) {
   const fullBody = body;
   if (sticky) {
-    const existing = await findExistingSummaryComment({ github, owner, repo, prNumber, log });
+    const existing = await findExistingSummaryComment({ github, owner, repo, prNumber, appSlug, log });
     if (existing) {
       const { data: updated } = await github.rest.issues.updateComment({
         owner,
@@ -1082,7 +1092,7 @@ async function postSummary({ github, owner, repo, prNumber, body, sticky, preser
   return { id: created.id, url: created.html_url, updated: false };
 }
 
-async function findExistingSummaryComment({ github, owner, repo, prNumber, log }) {
+async function findExistingSummaryComment({ github, owner, repo, prNumber, appSlug = "", log }) {
   const comments = await readAllPages("listIssueComments", (page, per_page) =>
     github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page, page }), log
   );
@@ -1091,13 +1101,18 @@ async function findExistingSummaryComment({ github, owner, repo, prNumber, log }
     const body = comments[i].body;
     if (typeof body === "string" && body.includes(SUMMARY_MARKER)) {
       // The marker is plain Markdown, so anyone can quote it verbatim — a human
-      // dispositioning a review, or another tool citing one. postSummary rewrites
-      // whatever this returns IN PLACE, so accepting a substring match on someone
-      // else's comment destroys it silently, with no error and no way to tell an
-      // overwrite from a comment that never existed. Only a writer GitHub
-      // attributes to a bot can be our summary; isCheckpointAuthorOurs is the
-      // same gate the checkpoint reader already applies to this comment.
-      if (!isCheckpointAuthorOurs(comments[i])) continue;
+      // dispositioning a review, another tool citing one, or a DIFFERENT bot
+      // echoing one. postSummary rewrites whatever this returns IN PLACE, so
+      // accepting a substring match on someone else's comment destroys it
+      // silently, with no error and no way to tell an overwrite from a comment
+      // that never existed. isCheckpointAuthorOurs is the same gate the
+      // checkpoint reader already applies to this comment; appSlug pins it to
+      // the app that owns the OCR summary when that identity is known (the
+      // default GITHUB_TOKEN is always the "github-actions" app), so a
+      // bot-typed writer from another app cannot be selected. An empty slug
+      // keeps the wider "any bot" check for a caller-supplied token, whose app
+      // identity GitHub will not disclose.
+      if (!isCheckpointAuthorOurs(comments[i], appSlug)) continue;
       return comments[i];
     }
   }
@@ -1132,14 +1147,14 @@ async function findExistingSummaryComment({ github, owner, repo, prNumber, log }
 // than having it filtered out here. That distinction is only about which reason
 // a fail-closed gate reports — both review the full range — so the safety
 // property is unchanged.
-async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, requireBotAuthor = true, log }) {
+async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, requireBotAuthor = true, appSlug = "", log }) {
   const comments = await readAllPages("listIssueComments", (page, per_page) =>
     github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page, page }), log
   );
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body || "";
     if (sticky ? body.includes(SUMMARY_MARKER) : body.includes(tag)) {
-      if (requireBotAuthor && !isCheckpointAuthorOurs(comments[i])) continue;
+      if (requireBotAuthor && !isCheckpointAuthorOurs(comments[i], appSlug)) continue;
       return comments[i];
     }
   }
@@ -1150,10 +1165,10 @@ async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, 
 // its timeline position is pinned above the not-yet-posted review. Returns
 // { id, url } for the existing/created comment, or null when the existence
 // check fails (read API unavailable) — callers then defer to finalizeSummary.
-async function ensureSummaryAnchor({ github, owner, repo, prNumber, body, sticky, tag, log }) {
+async function ensureSummaryAnchor({ github, owner, repo, prNumber, body, sticky, tag, appSlug = "", log }) {
   let existing = null;
   try {
-    existing = await findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log });
+    existing = await findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, appSlug, log });
   } catch (e) {
     log(`[summary] cannot check for existing summary before review (${e.message}); skipping anchor.`);
     return null;
@@ -1176,7 +1191,7 @@ async function ensureSummaryAnchor({ github, owner, repo, prNumber, body, sticky
 // known, update it directly (no extra read). Otherwise upsert: find then update
 // or create. Returns { id, url }, or null when the read API is unavailable and
 // the summary cannot be safely written without risking a duplicate.
-async function finalizeSummary({ github, owner, repo, prNumber, anchor, body, sticky, tag, preserveMarker = false, log }) {
+async function finalizeSummary({ github, owner, repo, prNumber, anchor, body, sticky, tag, preserveMarker = false, appSlug = "", log }) {
   const keep = (newBody, oldBody) => (preserveMarker ? preserveCheckpointMarker(newBody, oldBody) : newBody);
   if (anchor && anchor.id != null) {
     const { data: updated } = await github.rest.issues.updateComment({
@@ -1189,7 +1204,7 @@ async function finalizeSummary({ github, owner, repo, prNumber, anchor, body, st
   }
   let existing = null;
   try {
-    existing = await findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log });
+    existing = await findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, appSlug, log });
   } catch (e) {
     log(`[summary] cannot check for existing summary at finalize (${e.message}); skipping to avoid duplicate.`);
     return null;
