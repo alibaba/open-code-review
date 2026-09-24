@@ -141,6 +141,50 @@ Rule: …
 
 ## 리뷰 {#reviews}
 
+### 요구사항이나 설계 문서를 기준으로 코드를 리뷰할 수 있나요? {#review-against-requirements}
+
+`--background-file`로 로컬 Markdown 파일을 공통 리뷰 맥락으로 전달하세요.
+
+```bash
+ocr review --repo /path/to/repo --background-file docs/requirements.md
+```
+
+상대 경로는 선택한 저장소 루트를 기준으로 해석됩니다. 내용은 plan과 main 리뷰
+프롬프트에 포함됩니다. 짧은 요구사항은
+`--background "Reject requests with an expired token"`으로 전달할 수도 있습니다.
+두 플래그를 함께 지정하면 파일이 우선하며 인라인 텍스트는 무시됩니다.
+
+변경되는 동작과 인수 조건에 집중하세요. 원본 파일 크기 제한은 **1 MiB**입니다.
+정리된 내용이 **2,000자**를 넘으면 경고하고 **8,000자**를 넘으면 거부합니다
+(토큰 수가 아닙니다). 사내 지식 기반의 내용은 관련 부분을 로컬 Markdown 파일로
+내보내세요. 이 플래그는 문서 URL을 가져오지 않습니다.
+
+요구사항을 특정 파일에 연결하려면 기존 [프로젝트 리뷰 규칙](../review-rules/)을 사용하세요.
+예를 들어 다음 내용을 `<repo>/.opencodereview/rule.json`에 저장합니다.
+
+```json
+{
+  "rules": [
+    {
+      "path": "src/auth/**/*.go",
+      "rule": "docs/requirements/auth.md",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+OCR은 `<repo>/docs/requirements/auth.md`를 읽어 일치하는 경로에 내장 규칙과 함께
+적용합니다. 규칙 파일 참조는 공백 없는 한 줄 경로 중 `.md`, `.txt`,
+`.markdown` 확장자를 지원하며 크기 제한은 **512 KiB**입니다.
+프로젝트 규칙이 참조하는 파일은 저장소 안에 있어야 합니다. 처음 일치하는 규칙이
+적용됩니다. 저장소 루트에서 `ocr rules check src/auth/login.go`를 실행하면
+LLM 호출 없이 해석된 규칙 내용을 확인할 수 있습니다.
+
+이 연결은 명시적으로 설정해야 합니다. OCR은 `AGENTS.md`를 자동으로 읽거나 각 파일에
+적용되는 명세를 자동으로 찾지 않습니다. 맥락 제공은 모델의 요구사항 검토를 돕지만,
+모든 요구사항이 검증된다는 보장은 아닙니다.
+
 ### 코멘트가 하나도 없는 파일, 정말 리뷰된 건가요? {#a-file-shows-zero-comments-was-it-actually-reviewed}
 
 [세션 뷰어](../viewer/)(`ocr viewer`)를 열어 해당 세션을 찾고, 그 파일이 속한
