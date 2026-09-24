@@ -4,9 +4,91 @@
 package llm
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
+
+// UsageReportingLevel describes how trustworthy a provider's usage numbers are.
+type UsageReportingLevel string
+
+const (
+	// UsageExact means the provider returns request usage that OCR can report
+	// without estimation.
+	UsageExact UsageReportingLevel = "exact"
+	// UsageEstimated means OCR can only estimate usage locally.
+	UsageEstimated UsageReportingLevel = "estimated"
+	// UsageUnavailable means neither the provider nor OCR can produce a useful
+	// usage number for this integration.
+	UsageUnavailable UsageReportingLevel = "unavailable"
+)
+
+// ProviderCapabilities names the provider features OCR can rely on directly.
+// These are provider/API-layer capabilities only; delegation to a coding-agent
+// harness does not count as tool calling or cloud auth for this matrix.
+type ProviderCapabilities struct {
+	Streaming        bool
+	ToolCalling      bool
+	StructuredOutput bool
+	UsageReporting   UsageReportingLevel
+	PromptCaching    bool
+	Cancellation     bool
+	CloudAuth        bool
+}
+
+// Normalize fills in conservative defaults for a provider capability record.
+func (c ProviderCapabilities) Normalize() ProviderCapabilities {
+	if c.UsageReporting == "" {
+		c.UsageReporting = UsageExact
+	}
+	return c
+}
+
+// AuthMode records how a provider entry obtains credentials.
+type AuthMode string
+
+const (
+	AuthModeAPIKey           AuthMode = "api_key"
+	AuthModeAPIKeyCmd        AuthMode = "api_key_cmd"
+	AuthModeEnv              AuthMode = "env"
+	AuthModeAmbient          AuthMode = "ambient"
+	AuthModeWorkloadIdentity AuthMode = "workload_identity"
+	AuthModeUnsupported      AuthMode = "unsupported"
+)
+
+// NormalizeAuthMode canonicalizes auth_mode values.
+func NormalizeAuthMode(raw string) AuthMode {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	switch normalized {
+	case "":
+		return ""
+	case string(AuthModeAPIKey), "key", "static":
+		return AuthModeAPIKey
+	case string(AuthModeAPIKeyCmd), "key_cmd":
+		return AuthModeAPIKeyCmd
+	case string(AuthModeEnv), "environment":
+		return AuthModeEnv
+	case string(AuthModeAmbient):
+		return AuthModeAmbient
+	case string(AuthModeWorkloadIdentity), "wif":
+		return AuthModeWorkloadIdentity
+	case string(AuthModeUnsupported):
+		return AuthModeUnsupported
+	default:
+		return AuthMode(normalized)
+	}
+}
+
+// ValidateAuthMode accepts the auth modes understood by provider config.
+func ValidateAuthMode(mode AuthMode) error {
+	switch mode {
+	case "", AuthModeAPIKey, AuthModeAPIKeyCmd, AuthModeEnv, AuthModeAmbient, AuthModeWorkloadIdentity, AuthModeUnsupported:
+		return nil
+	default:
+		return fmt.Errorf("unsupported auth_mode %q; supported auth modes are %q, %q, %q, %q, %q, %q",
+			mode, AuthModeAPIKey, AuthModeAPIKeyCmd, AuthModeEnv, AuthModeAmbient, AuthModeWorkloadIdentity, AuthModeUnsupported)
+	}
+}
 
 // Provider holds the preset configuration for a known LLM provider.
 //
@@ -19,13 +101,14 @@ import (
 // To add a built-in provider that speaks a different protocol, set Protocol
 // accordingly and ensure NewLLMClient has a matching case.
 type Provider struct {
-	Name        string
-	DisplayName string
-	Protocol    string
-	BaseURL     string
-	AuthHeader  string // Anthropic-only; empty for OpenAI-compatible
-	EnvVar      string // environment variable name for API key fallback
-	Models      []string
+	Name         string
+	DisplayName  string
+	Protocol     string
+	BaseURL      string
+	AuthHeader   string // Anthropic-only; empty for OpenAI-compatible
+	EnvVar       string // environment variable name for API key fallback
+	Models       []string
+	Capabilities ProviderCapabilities
 
 	// AmbientAuth marks a provider whose credentials come from the
 	// environment's own chain rather than an api_key — AWS SigV4, for
@@ -33,6 +116,21 @@ type Provider struct {
 	// there is no key to configure and demanding one would make the provider
 	// impossible to use.
 	AmbientAuth bool
+}
+
+// EffectiveCapabilities returns the provider capability matrix with defaults
+// derived from the current direct API adapter surface.
+func (p Provider) EffectiveCapabilities() ProviderCapabilities {
+	c := p.Capabilities.Normalize()
+	switch NormalizeProtocol(p.Protocol) {
+	case ProtocolAnthropic, ProtocolAnthropicBedrock, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses:
+		c.ToolCalling = true
+		c.Cancellation = true
+	}
+	if p.AmbientAuth {
+		c.CloudAuth = true
+	}
+	return c
 }
 
 var registry = []Provider{

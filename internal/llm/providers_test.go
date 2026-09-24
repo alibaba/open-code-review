@@ -71,6 +71,61 @@ func TestLookupProvider_Unknown(t *testing.T) {
 	}
 }
 
+func TestNormalizeAuthMode(t *testing.T) {
+	tests := []struct {
+		input string
+		want  AuthMode
+	}{
+		{"", ""},
+		{"api_key", AuthModeAPIKey},
+		{"key", AuthModeAPIKey},
+		{"api_key_cmd", AuthModeAPIKeyCmd},
+		{"key_cmd", AuthModeAPIKeyCmd},
+		{"env", AuthModeEnv},
+		{"environment", AuthModeEnv},
+		{"ambient", AuthModeAmbient},
+		{"workload_identity", AuthModeWorkloadIdentity},
+		{"wif", AuthModeWorkloadIdentity},
+		{"unsupported", AuthModeUnsupported},
+	}
+	for _, tt := range tests {
+		if got := NormalizeAuthMode(tt.input); got != tt.want {
+			t.Errorf("NormalizeAuthMode(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+	if err := ValidateAuthMode(AuthMode("bogus")); err == nil {
+		t.Fatal("ValidateAuthMode accepted an unknown mode")
+	}
+}
+
+func TestProviderCapabilitiesDefaults(t *testing.T) {
+	openai, ok := LookupProvider("openai-responses")
+	if !ok {
+		t.Fatal("openai-responses not found")
+	}
+	caps := openai.EffectiveCapabilities()
+	if !caps.ToolCalling {
+		t.Error("openai-responses should report direct API tool calling")
+	}
+	if !caps.Cancellation {
+		t.Error("openai-responses should report cancellation support")
+	}
+	if caps.UsageReporting != UsageExact {
+		t.Errorf("UsageReporting = %q, want %q", caps.UsageReporting, UsageExact)
+	}
+	if caps.CloudAuth {
+		t.Error("openai-responses should not report cloud auth until a direct cloud-auth source is implemented")
+	}
+
+	bedrock, ok := LookupProvider("bedrock")
+	if !ok {
+		t.Fatal("bedrock not found")
+	}
+	if !bedrock.EffectiveCapabilities().CloudAuth {
+		t.Error("bedrock should report cloud auth because it uses the ambient AWS chain")
+	}
+}
+
 func TestListProviders_Order(t *testing.T) {
 	providers := ListProviders()
 	if len(providers) < 3 {

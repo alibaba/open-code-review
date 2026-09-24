@@ -23,6 +23,7 @@ type ResolvedEndpoint struct {
 	Provider     string
 	Protocol     string            // canonical protocol name (see protocol.go); resolver normalizes aliases
 	AuthHeader   string            // Anthropic auth header: "x-api-key" or "authorization"
+	AuthMode     AuthMode          // how the provider entry resolved credentials, when known
 	Source       string            // human-readable config source label
 	ExtraBody    map[string]any    // vendor-specific request body fields
 	ExtraHeaders map[string]string // extra HTTP headers for the LLM request
@@ -42,8 +43,10 @@ type ResolvedEndpoint struct {
 
 	// AWSProfile and AWSRegion override the ambient AWS chain for SigV4
 	// providers. Empty means "let the AWS SDK decide".
-	AWSProfile string
-	AWSRegion  string
+	AWSProfile        string
+	AWSRegion         string
+	IdentityTokenFile string
+	TokenExchangeURL  string
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -138,9 +141,12 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 		if err != nil {
 			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", strategy.name, err)
 		}
-		// An ambient-auth endpoint is complete without a URL or token: the
-		// transport supplies both. Everything else still needs all three.
-		complete := ep.Model != "" && (ep.AmbientAuth || (ep.URL != "" && ep.Token != ""))
+		// Ambient-auth and workload-identity endpoints are complete without a
+		// static token: the transport or token-exchange layer supplies it.
+		// Everything else still needs URL, token and model.
+		complete := ep.Model != "" && (ep.AmbientAuth ||
+			(ep.AuthMode == AuthModeWorkloadIdentity && ep.URL != "") ||
+			(ep.URL != "" && ep.Token != ""))
 		if ok && complete {
 			return finalizeResolvedEndpoint(strategy.name, ep, env), nil
 		}
@@ -319,6 +325,7 @@ type providerEntryConfig struct {
 	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
 	URL          string            `json:"url,omitempty"`
 	Protocol     string            `json:"protocol,omitempty"`
+	AuthMode     string            `json:"auth_mode,omitempty"`
 	Model        string            `json:"model,omitempty"`
 	Models       []string          `json:"models,omitempty"`
 	AuthHeader   string            `json:"auth_header,omitempty"`
@@ -331,8 +338,10 @@ type providerEntryConfig struct {
 	// SigV4 (currently bedrock). Both are optional: without them the standard
 	// AWS chain decides, same as any other AWS tool. Setting them in config
 	// makes a review run reproducible without exporting AWS_PROFILE first.
-	AWSProfile string `json:"aws_profile,omitempty"`
-	AWSRegion  string `json:"aws_region,omitempty"`
+	AWSProfile        string `json:"aws_profile,omitempty"`
+	AWSRegion         string `json:"aws_region,omitempty"`
+	IdentityTokenFile string `json:"identity_token_file,omitempty"`
+	TokenExchangeURL  string `json:"token_exchange_url,omitempty"`
 }
 
 type configFile struct {
@@ -399,6 +408,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	// verbatim -- unlike command stdout, which has a mechanical trailing newline
 	// to strip, a static value has no artifact that trimming must undo.
 	apiKey := entry.APIKey
+	apiKeyFromEnv := false
 	if strings.TrimSpace(apiKey) == "" {
 		apiKey = ""
 	}
@@ -425,6 +435,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		// sending `Authorization: Bearer  ` and getting an opaque 401.
 		if v := os.Getenv(preset.EnvVar); strings.TrimSpace(v) != "" {
 			apiKey = v
+			apiKeyFromEnv = true
 		}
 	}
 	var url, protocol, authHeader, model string
@@ -477,12 +488,34 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	ambientAuth := protocol == ProtocolAnthropicBedrock ||
 		(isPreset && preset.AmbientAuth && entry.Protocol == "")
 
+	authMode := NormalizeAuthMode(entry.AuthMode)
+	if err := ValidateAuthMode(authMode); err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+	}
+	if authMode == AuthModeAmbient && !ambientAuth {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: auth_mode %q applies only to ambient-auth protocols such as %q", cfg.Provider, authMode, ProtocolAnthropicBedrock)
+	}
+	if authMode == "" {
+		switch {
+		case ambientAuth:
+			authMode = AuthModeAmbient
+		case entry.IdentityTokenFile != "" || entry.TokenExchangeURL != "":
+			authMode = AuthModeWorkloadIdentity
+		case apiKeyFromEnv:
+			authMode = AuthModeEnv
+		case apiKey != "":
+			authMode = AuthModeAPIKey
+		case apiKeyCmd != "":
+			authMode = AuthModeAPIKeyCmd
+		}
+	}
+
 	// No credential at all is an error, and it is reported before api_key_cmd
 	// runs: only the command's *execution* is deferred, not the emptiness check.
 	// An ambient-auth provider is the exception — it has no key to configure,
 	// since credentials come from the environment's own chain and the request is
 	// signed rather than bearing a token.
-	if apiKey == "" && apiKeyCmd == "" && !ambientAuth {
+	if apiKey == "" && apiKeyCmd == "" && !ambientAuth && authMode != AuthModeWorkloadIdentity {
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key or api_key_cmd configured and no environment variable fallback found", cfg.Provider)
 	}
 
@@ -579,20 +612,23 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	}
 
 	return ResolvedEndpoint{
-		URL:          url,
-		Token:        apiKey,
-		Model:        model,
-		Provider:     cfg.Provider,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "provider:" + cfg.Provider,
-		ExtraBody:    extraBody,
-		ExtraHeaders: extraHeaders,
-		Timeout:      timeout,
-		RetryCodes:   retryCodes,
-		AmbientAuth:  ambientAuth,
-		AWSProfile:   entry.AWSProfile,
-		AWSRegion:    entry.AWSRegion,
+		URL:               url,
+		Token:             apiKey,
+		Model:             model,
+		Provider:          cfg.Provider,
+		Protocol:          protocol,
+		AuthHeader:        authHeader,
+		AuthMode:          authMode,
+		Source:            "provider:" + cfg.Provider,
+		ExtraBody:         extraBody,
+		ExtraHeaders:      extraHeaders,
+		Timeout:           timeout,
+		RetryCodes:        retryCodes,
+		AmbientAuth:       ambientAuth,
+		AWSProfile:        entry.AWSProfile,
+		AWSRegion:         entry.AWSRegion,
+		IdentityTokenFile: entry.IdentityTokenFile,
+		TokenExchangeURL:  entry.TokenExchangeURL,
 	}, true, nil
 }
 
