@@ -2391,6 +2391,71 @@ async function testSummaryAnchorStillFindsTheBotsOwnSummary() {
   assert.deepStrictEqual(github.issueComments, [], "and no duplicate summary is posted");
 }
 
+// Review follow-up on #1560: restricting the anchor to "a writer GitHub
+// attributes to a bot" still leaves the destructive rewrite one notch too wide.
+// isCheckpointAuthorOurs with an EMPTY appSlug accepts ANY bot-typed writer, so
+// a different bot or GitHub App that quotes the marker is still selected and
+// rewritten in place — the same silent data loss, just from a machine instead
+// of a human. The summary finders must pin the identity to the app that owns
+// the OCR summary when that identity is known.
+async function testSummaryAnchorSkipsAnotherAppsComment() {
+  // Newest matching comment belongs to a DIFFERENT app; ours is older.
+  const ours = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const otherApp = {
+    id: 77,
+    html_url: "http://ex/77",
+    user: { login: "someone-elses-bot[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "some-other-app" },
+    body: `Cited for the record:\n${SUMMARY_MARKER}`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [ours, otherApp] },
+    opts: { stickySummary: true, appSlug: "github-actions" },
+  });
+
+  const updatedIds = github.updatedComments.map((c) => c.comment_id);
+  assert.deepStrictEqual(
+    updatedIds,
+    [42],
+    `only this action's own summary may be rewritten; got ${JSON.stringify(updatedIds)}`
+  );
+  assert.doesNotMatch(github.updatedComments[0].body, /Cited for the record/, "the other app's text must survive");
+}
+
+// The other half of the pinning contract, and the reason pinning cannot simply
+// be unconditional: an installation token cannot ask GitHub which app it is
+// (GET /app needs a JWT), so on a caller-supplied token the app identity is
+// genuinely unknown. There the old wider check still holds — but it must be
+// the WIDER check, not a pin that rejects every comment including our own, or
+// every run would post a duplicate summary and the checkpoint would stop
+// advancing.
+async function testSummaryAnchorStillFindsOurSummaryWhenAppIsUnknown() {
+  const botSummary = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [botSummary] },
+    // No appSlug: the caller supplied its own token, so no slug is known.
+    opts: { stickySummary: true },
+  });
+
+  assert.strictEqual(github.updatedComments.length, 1, "an unknown app identity keeps the wider bot check");
+  assert.strictEqual(github.updatedComments[0].comment_id, 42);
+  assert.deepStrictEqual(github.issueComments, [], "and still does not post a duplicate summary");
+}
+
 async function main() {
   await testFailedInlineCommentsAreSummarized();
   await testWarningsListedAfterSummaryComments();
@@ -2574,6 +2639,8 @@ async function main() {
   testActionYmlDoesNotPromiseTheIoUThresholdToResolveOutdated();
   await testSummaryAnchorSkipsHumanCommentQuotingTheMarker();
   await testSummaryAnchorStillFindsTheBotsOwnSummary();
+  await testSummaryAnchorSkipsAnotherAppsComment();
+  await testSummaryAnchorStillFindsOurSummaryWhenAppIsUnknown();
   console.log("All post-review-comments tests passed.");
 }
 function testParseDiffHunkRanges() {

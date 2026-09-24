@@ -1044,6 +1044,12 @@ runs:
         OCR_RANGE_REASON: ${{ steps.range.outputs.range_reason }}
         OCR_BASE_REF: ${{ env.BASE_REF }}
         OCR_MERGE_BASE: ${{ env.MERGE_BASE }}
+        # Same expression the Resolve review range step uses, so the summary
+        # anchor is pinned to the same app identity the checkpoint reader checks
+        # against. Empty for a caller-supplied token, whose app GitHub will not
+        # disclose; that keeps the wider "any bot" check rather than pinning to
+        # a slug that would reject our own summary too.
+        OCR_CHECKPOINT_APP_SLUG: ${{ inputs.github_token == github.token && 'github-actions' || '' }}
         # Resolved by "Resolve PR refs", which fails the job when no number is
         # available; context.issue.number resolves nothing on a workflow_run.
         OCR_PR_NUMBER: ${{ env.PR_NUMBER }}
@@ -1091,4 +1097,7 @@ runs:
             rangeFrom: process.env.OCR_RANGE_FROM || '',
             rangeTo: process.env.OCR_RANGE_TO || '',
             resolveOutdated: process.env.OCR_RESOLVE_OUTDATED,
+            // Pins the summary anchor's author check to the app that owns the
+            // OCR summary (see OCR_CHECKPOINT_APP_SLUG above).
+            appSlug: process.env.OCR_CHECKPOINT_APP_SLUG || '',
           });
