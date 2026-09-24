@@ -26,6 +26,7 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
+  ocr review --staged                      Review the staged snapshot
   ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
   ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
@@ -107,6 +108,7 @@ ocr r      [flags]   (alias)
 | `--from <ref>` | — | — | diff の開始 ref（例: `main`）。 |
 | `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
+| `--staged` | — | `false` | 捕捉した `HEAD` に対するステージ済みの変更だけをレビューし、組み込みのコード参照には固定した index のスナップショットを使用します。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、サブタスクごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。サブタスクは単一ファイル、または関連ファイルのまとまりをレビューします。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
@@ -128,7 +130,7 @@ ocr r      [flags]   (alias)
 | `--max-git-procs <n>` | — | `16` | 並行 git サブプロセスの最大数。 |
 | `--tools <path>` | — | 埋め込み | カスタム JSON ツール設定ファイルのパス。埋め込みのツール定義を上書きします。 |
 
-> モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
+> モード引数は排他です: `--from`/`--to`、`--commit`、`--staged` のいずれか、または指定なし（ワークスペースモード）を選びます。
 > 混在させるとそのままエラーになります。
 > `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
 
@@ -162,7 +164,60 @@ OCR は 2 つの git コマンドからワークツリーの変更を組み立�
 - `git diff HEAD` で追跡済みの変更を取得します（staged + unstaged をまとめて `HEAD` と比較。空の場合は `git diff --staged` にフォールバック）
 - `git ls-files --others --exclude-standard` で untracked ファイルを取得し、ディスクから読み込んでファイル全体の新規追加として扱います
 
-これは通常、commit 前に確認したい内容そのものです。より小さな範囲が必要なら、選択的に stage してください。
+このモードには未ステージの編集や未追跡ファイルも含まれます。次の commit に向けてステージした変更だけをレビューするには、`--staged` を使用してください。
+
+#### ステージ済みスナップショットモード
+
+```bash
+ocr review --staged
+ocr review --staged --preview
+ocr review --staged --preview --format json
+ocr review --staged --format json --output staged-review.json
+```
+
+次の commit に向けてステージした変更をレビューします。一部の hunk だけをステージした
+場合も対象です。OCR は index 全体を Git tree として捕捉し、捕捉した `HEAD` と
+比較します。最初の commit 前は空の tree を基準にします。捕捉した入力はレビュー中も
+固定され、ステージ済みの差分が空なら LLM 呼び出しを省略します。Git 2.41 以降が必要で、
+linked worktree にも対応しています。
+
+Diff と組み込みのファイル読み取り、ファイル検索、内容検索は同じ tree を使用し、
+文脈として参照する未変更ファイルも含みます。リポジトリの `.gitattributes` と
+`.opencodereview/` 内の既定ルールもこの tree から読み取ります。`rule.json` を含む
+各ルールファイルの上限は 512 KiB です。参照するルール文書は、スナップショット内の
+通常ファイルをリポジトリ相対パスで指定します。ファイルの欠落、絶対パス、
+シンボリックリンクはエラーになります。
+
+明示的な `--rule` ファイル、`--exclude`、グローバル設定、Git のグローバル属性、
+`.git/info/attributes`、Git の設定は外部入力として適用されます。カスタム MCP サーバー
+などの外部ツールは、現在のワークツリーや外部の状態を読み取る場合があります。
+
+`.gitignore` はステージ済みのパスを除外しません。OCR の既定のディレクトリ・機密ファイル
+除外、対応ファイルの許可リスト、レビュールールの除外指定は適用されます。`--preview` は
+モデルを呼び出さずに、選択ファイル、除外理由、スナップショットの識別情報を表示します。
+実行するたびに、その実行用のスナップショットを捕捉します。
+
+ステージ済みのレビューは `ocr.run-manifest/v2` を使用します。`input.mode` は `staged`、
+`input.snapshot_tree` は Git tree のオブジェクト ID、`input.resolved_base` は捕捉した
+`HEAD` の commit（最初の commit 前は省略）です。`resolved_head` と `exact_range` は
+省略されます。JSON プレビューにも同じ `input` の識別フィールドが含まれます。この結果を
+処理するには v2 への対応が必要です。v1 のみを扱うツールは未対応と報告する必要が
+あります。他のレビューモードは v1 を維持します。
+
+ユーザーの index、ワークツリー、ref は変更されません。一時的な index のコピーは
+削除され、参照されていない tree オブジェクトは通常の Git のガベージコレクションに
+従って管理されます。
+
+`--staged` は `--from`、`--to`、`--commit`、`--resume` と併用できません。
+ステージ済みのセッションは再開できません。
+未解決のマージ競合、intent-to-add エントリ（`git add -N`）、split index、sparse index は
+エラーになります。submodule/gitlink の変更もファイル内容の読み取り前にエラーになります。
+追加、更新、削除、通常ファイルと gitlink の相互変換が対象です。
+
+変更のない submodule を含むリポジトリでも、通常ファイルをレビューできます。
+`file_find` は gitlink パスを省き、`file_read` はその読み取りを拒否します。
+`code_search` は Git の再帰設定にかかわらず submodule 内を検索しません。
+シンボリックリンクは保存されたリンクの blob 自体を読み取り、リンク先はたどりません。
 
 #### 範囲モード
 
@@ -200,7 +255,7 @@ ocr review --commit abc123 --resume <session-id>
 再開は意図的に厳密です。今回の実行が親と同じ対象をレビューする場合にのみ、
 チェックポイントが再利用されます:
 
-- ワークスペースレビューは再開できません
+- ワークスペースレビューとステージ済みのレビューは再開できません
 - レビューモードが一致する必要があります: 範囲セッションを単一 commit として
   再開することはできません
 - 解決後の入力が一致する必要があります。ref の*表記*は比較しません

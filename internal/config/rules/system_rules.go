@@ -280,6 +280,14 @@ type ResolverOptions struct {
 	// working tree, which is what `ocr scan` and `ocr rules check` want.
 	Ref string
 
+	// ProjectRef loads the project rule and referenced rule documents from this
+	// immutable tree. Empty preserves the existing working-tree configuration.
+	// Snapshot files are limited to 512 KiB each, including rule.json. Referenced
+	// documents must exist as repository-relative regular blobs: missing files,
+	// absolute paths, and symlinks fail closed instead of falling back to disk.
+	// Explicit custom and global rules remain user-controlled disk inputs.
+	ProjectRef string
+
 	// Runner bounds concurrent git subprocesses. Optional; when nil the
 	// resolver shells out to git directly.
 	Runner *gitcmd.Runner
@@ -318,7 +326,13 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 
 	var projectRule *ProjectRule
 	if repoDir != "" {
-		pr, err := loadProjectRule(repoDir)
+		var pr *ProjectRule
+		var err error
+		if opts.ProjectRef != "" {
+			pr, err = loadProjectRuleAtRef(repoDir, opts.ProjectRef, opts.Runner)
+		} else {
+			pr, err = loadProjectRule(repoDir)
+		}
 		if err != nil {
 			return nil, nil, err
 		}

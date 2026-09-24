@@ -95,7 +95,7 @@ type delegateContext struct {
 
 func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true, "")
 	if err != nil {
 		return nil, err
 	}

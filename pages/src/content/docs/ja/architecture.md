@@ -12,7 +12,7 @@ sidebar:
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Staged · Commit · Range</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
@@ -25,17 +25,24 @@ flowchart TD
 
 ## diff provider
 
-`internal/diff/git.go` は `Provider` 構造体を定義しており、その未エクスポートのフィールド `mode`（型は `Mode`、`int` 列挙体）が、CLI 引数に対応する 3 つのモードのいずれかを選択します:
+`internal/diff/git.go` は `Provider` 構造体を定義しており、その未エクスポートのフィールド `mode`（型は `Mode`、`int` 列挙体）が、CLI 引数に対応する 4 つのモードのいずれかを選択します:
 
 | モード | トリガー方法 | 返す内容 |
 |---|---|---|
 | `Workspace` | 引数なし | staged + unstaged + untracked の変更 |
+| `Staged` | `--staged` | 捕捉した `HEAD` の tree と index の tree の差分。最初の commit 前は空の tree が基準 |
 | `Commit` | `--commit <sha>` / `-c <sha>` | `<sha>` が導入した変更（`git show <sha>` 経由。`<sha>^..<sha>` の diff に相当） |
 | `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
 
+`--staged` はルールやツールの読み込み前に `HEAD` と index 全体を捕捉します。
+`internal/diff/staged.go` が一時的な index のコピーからスナップショットの tree を生成します。
+Diff の生成、組み込みのコードツール、既定のプロジェクトルール、リポジトリの
+`.gitattributes` はレビュー全体を通してこの固定した入力を使用します。
+元の index、ワークツリー、ref はそのまま保持されます。
+
 各 diff は次を保持します: old/new path、old/new hunk、挿入/削除カウント、バイナリフラグ、リネーム検出。`DiffContextLines` は **3** に固定されており、Git のデフォルトと一致します。
 
-untracked ファイルはディスクから読み込まれ、ファイル全体の新規追加として扱われるため、commit 前にレビューできます。
+ワークスペースモードでは untracked ファイルをディスクから読み込み、ファイル全体の新規追加として commit 前にレビューします。
 
 ## 5 段階ゲートのファイルフィルタリング
 

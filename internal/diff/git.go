@@ -47,6 +47,7 @@ const (
 	ModeWorkspace Mode = iota // current workspace (staged + unstaged + untracked)
 	ModeCommit                // single commit vs its parent
 	ModeRange                 // merge-base(from,to)..to
+	ModeStaged                // frozen HEAD tree vs frozen index tree
 )
 
 // Provider retrieves and parse git diffs from a repository.
@@ -60,6 +61,7 @@ type Provider struct {
 
 	// Commit mode parameter
 	commit string // single commit hash/ref
+	staged *StagedSnapshot
 
 	mergeBase string // cached common ancestor for range mode
 }
@@ -126,16 +128,29 @@ func NewWorkspaceProvider(repoDir string, runner *gitcmd.Runner) *Provider {
 	}
 }
 
-// InputResolution carries this run's frozen, immutable commit endpoints, per the
+// NewStagedProvider reviews an already captured index snapshot. Copying the
+// value keeps later caller mutations from changing the provider's input.
+func NewStagedProvider(repoDir string, snapshot *StagedSnapshot, runner *gitcmd.Runner) *Provider {
+	p := &Provider{repoDir: repoDir, mode: ModeStaged, runner: runner}
+	if snapshot != nil {
+		frozen := *snapshot
+		p.staged = &frozen
+	}
+	return p
+}
+
+// InputResolution carries this run's frozen, immutable input objects, per the
 // run-manifest input-mode matrix. An empty field means "not applicable or not
 // resolvable" — a root commit and a merge commit have no single comparison base,
 // an unborn workspace has no HEAD, and a workspace has no immutable head — and a
 // caller must never treat an empty value as a real endpoint or fabricate one.
-// ExactRange is populated only when both a unique base and a head resolve.
+// ExactRange is populated only when both a unique base and a head commit resolve.
+// SnapshotTree is populated only for staged mode and is never a commit endpoint.
 type InputResolution struct {
 	ResolvedBase string
 	ResolvedHead string
 	ExactRange   string
+	SnapshotTree string
 }
 
 // ResolveInput freezes this run's commit endpoints by asking git, following the
@@ -149,6 +164,8 @@ type InputResolution struct {
 //   - workspace: base = current HEAD when the repository has one (empty on an
 //     unborn repository); head and range stay empty (a workspace has no immutable
 //     head).
+//   - staged: base = the captured HEAD commit (empty before the first commit);
+//     snapshot_tree = the captured index tree; head and range stay empty.
 //
 // Commit mode follows the same first-parent comparison used by GetDiff. Root
 // commits have no parent, so only their resolved head is available.
@@ -179,6 +196,11 @@ func (p *Provider) ResolveInput(ctx context.Context) InputResolution {
 		// base = current HEAD if the repository has one; an unborn repository has
 		// no HEAD, so this stays empty rather than fabricating a base.
 		return InputResolution{ResolvedBase: p.resolveCommit(ctx, "HEAD")}
+	case ModeStaged:
+		if p.staged != nil {
+			return InputResolution{ResolvedBase: p.staged.BaseCommit, SnapshotTree: p.staged.Tree}
+		}
+		return InputResolution{}
 	default:
 		return InputResolution{}
 	}
@@ -219,6 +241,29 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 	var combined strings.Builder
 
 	switch p.mode {
+	case ModeStaged:
+		if p.staged == nil || p.staged.BaseTree == "" || p.staged.Tree == "" {
+			return DiffSet{}, fmt.Errorf("staged review requires a captured index snapshot")
+		}
+		// Raw modes expose gitlink changes even when a pure rename's patch
+		// omits mode headers. Disable rename detection only for this preflight
+		// so each record has one path and every changed mode is checked.
+		raw, stderr, err := p.runGitSplit(ctx, "diff", "--raw", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", "--no-color", "--end-of-options", p.staged.BaseTree, p.staged.Tree, "--")
+		if err != nil {
+			return DiffSet{}, gitFailure("staged snapshot raw diff", stderr, err)
+		}
+		hasGitlink, err := stagedRawDiffHasGitlink(raw)
+		if err != nil {
+			return DiffSet{}, err
+		}
+		if hasGitlink {
+			return DiffSet{}, fmt.Errorf("staged review does not support submodule (gitlink) changes; review those changes separately")
+		}
+		out, stderr, err := p.runGitSplit(ctx, "--attr-source="+p.staged.Tree, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--submodule=short", "--ignore-submodules=none", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", p.staged.BaseTree, p.staged.Tree, "--")
+		if err != nil {
+			return DiffSet{}, gitFailure("staged snapshot diff", stderr, err)
+		}
+		combined.WriteString(out)
 	case ModeRange:
 		base := p.MergeBase(ctx)
 		if base == "" {
@@ -270,6 +315,8 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 		ref = p.to
 	case ModeCommit:
 		ref = p.commit
+	case ModeStaged:
+		ref = p.staged.Tree
 	}
 
 	diffs, err := ParseDiffText(ctx, combined.String(), p.repoDir, ref, p.runner)
@@ -433,7 +480,13 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 // partitionDiffs keeps diffs filtered by built-in directory rules available
 // for reporting while preserving the review input as the Included slice.
 func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
-	patterns := p.loadGitignorePatterns()
+	var patterns []string
+	if p.mode != ModeStaged {
+		patterns = p.loadGitignorePatterns()
+	}
+	// Every staged path is already tracked in the captured index. Gitignore
+	// rules do not untrack such paths, and live working-tree rules must never
+	// hide staged changes. Built-in OCR directory exclusions still apply.
 	result := DiffSet{
 		Included: make([]model.Diff, 0, len(diffs)),
 		Excluded: make([]model.Diff, 0),

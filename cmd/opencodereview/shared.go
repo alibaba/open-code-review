@@ -107,8 +107,9 @@ func previewMaxTokens(templateDefault, cliOverride int) (int, error) {
 // contentRef is the git ref whose file content the rule resolver should
 // inspect when disambiguating ambiguous extensions — derive it via
 // tool.ParseReviewMode(from, to, commit).RefValue(to, commit). Pass "" to
-// read the working tree, which is what scan wants.
-func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxGitProcs int, requireGit bool) (*commonContext, error) {
+// read the working tree, which is what scan wants. A non-empty projectRef pins
+// repository rule files to a Git tree, as required by staged snapshot reviews.
+func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxGitProcs int, requireGit bool, projectRef string) (*commonContext, error) {
 	tpl, err := template.LoadDefault()
 	if err != nil {
 		return nil, fmt.Errorf("load default template: %w", err)
@@ -129,10 +130,12 @@ func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxG
 	// through this limiter.
 	gitRunner := gitcmd.New(maxGitProcs)
 
-	resolver, fileFilter, err := rules.NewResolver(repoDir, rulePath, rules.ResolverOptions{
-		Ref:    contentRef,
-		Runner: gitRunner,
-	})
+	resolverOpts := rules.ResolverOptions{
+		Ref:        contentRef,
+		Runner:     gitRunner,
+		ProjectRef: projectRef,
+	}
+	resolver, fileFilter, err := rules.NewResolver(repoDir, rulePath, resolverOpts)
 	if err != nil {
 		return nil, fmt.Errorf("load rules: %w", err)
 	}

@@ -736,6 +736,14 @@ func outputPreviewJSON(p *agent.DiffPreview, out io.Writer) error {
 }
 
 func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
+	if p.Input != nil {
+		fmt.Fprintf(out, "Review mode: %s\n", sanitizeTerminal(p.Input.Mode))
+		base := p.Input.ResolvedBase
+		if base == "" {
+			base = "(unborn HEAD)"
+		}
+		fmt.Fprintf(out, "Base commit: %s\nSnapshot tree: %s\n", sanitizeTerminal(base), sanitizeTerminal(p.Input.SnapshotTree))
+	}
 	if p.TotalFiles == 0 {
 		fmt.Fprintln(out, "No files changed.")
 		return

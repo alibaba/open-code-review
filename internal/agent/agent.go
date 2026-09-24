@@ -63,6 +63,10 @@ type Args struct {
 	// Commit is a single commit hash to review (vs its parent).
 	Commit string
 
+	// StagedSnapshot is the complete index tree captured before configuration
+	// and tool setup. It is independent of commit/range input and cannot resume.
+	StagedSnapshot *diff.StagedSnapshot
+
 	// ReviewMode is one of "workspace", "range", or "commit".
 	// When empty, it is derived from From/To/Commit at session creation time.
 	// Full-scan reviews are owned by internal/scan and never reach this Args.
@@ -205,6 +209,11 @@ type ResumeInfo = session.ResumeInfo
 
 // New creates a new Agent from the given arguments.
 func New(args Args) *Agent {
+	if args.StagedSnapshot != nil {
+		snapshot := *args.StagedSnapshot
+		args.StagedSnapshot = &snapshot
+		args.ReviewMode = session.ReviewModeStaged
+	}
 	if args.Tools == nil {
 		args.Tools = tool.NewRegistry()
 	}
@@ -229,6 +238,11 @@ func New(args Args) *Agent {
 	a := &Agent{
 		args:    args,
 		session: args.Session,
+	}
+	if snapshot := args.StagedSnapshot; snapshot != nil {
+		a.inputResolution = diff.InputResolution{
+			ResolvedBase: snapshot.BaseCommit, SnapshotTree: snapshot.Tree,
+		}
 	}
 	a.initManifest()
 	// DiffLookup closure captures a so the runner can resolve per-file
@@ -547,6 +561,9 @@ func (a *Agent) recordWarning(warningType, file, message string) {
 
 // newDiffProvider resolves the configured input to a diff provider.
 func (a *Agent) newDiffProvider() *diff.Provider {
+	if a.args.StagedSnapshot != nil {
+		return diff.NewStagedProvider(a.args.RepoDir, a.args.StagedSnapshot, a.args.GitRunner)
+	}
 	// A sealed input substitutes the commit SHAs a pre-flight resolve already froze
 	// for the refs the user typed. Both loads then read the same immutable objects,
 	// which is what makes this run's input provably the admitted one: a ref moving
@@ -922,6 +939,9 @@ func countDispatchable(diffs []model.Diff) int64 {
 }
 
 func (a *Agent) reviewMode() string {
+	if a.args.StagedSnapshot != nil {
+		return session.ReviewModeStaged
+	}
 	if a.args.ReviewMode != "" {
 		return a.args.ReviewMode
 	}
@@ -962,11 +982,12 @@ func (a *Agent) initManifest() {
 	})
 }
 
-// manifestMode maps the review to the manifest input mode. It derives purely
-// from From/To/Commit so the value is always one of the three valid input modes
-// and stays stable across a resume chain (independent of an explicit ReviewMode
-// label). It is also the mode component of every item_id.
+// manifestMode derives input identity from the actual input, independently of
+// an explicit ReviewMode label. It is also the mode component of every item_id.
 func (a *Agent) manifestMode() string {
+	if a.args.StagedSnapshot != nil {
+		return session.InputModeStaged
+	}
 	return reviewModeString(a.args.From, a.args.To, a.args.Commit)
 }
 
@@ -996,6 +1017,7 @@ func (a *Agent) applyInputIdentity(b *session.ManifestBuilder) {
 	in := a.manifestInput()
 	in.ResolvedBase = a.inputResolution.ResolvedBase
 	in.ResolvedHead = a.inputResolution.ResolvedHead
+	in.SnapshotTree = a.inputResolution.SnapshotTree
 	in.ExactRange = a.inputResolution.ExactRange
 	in.SourceArtifactSHA256 = a.sourceArtifactSHA256()
 	b.SetInput(in)

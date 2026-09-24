@@ -15,7 +15,7 @@ sidebar:
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Staged · Commit · Range</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
@@ -45,22 +45,29 @@ flowchart TD
 ## Провайдер diff
 
 В `internal/diff/git.go` определена структура `Provider`, приватное поле `mode`
-которой (тип `Mode`, перечисление на основе `int`) выбирает один из трёх
+которой (тип `Mode`, перечисление на основе `int`) выбирает один из четырёх
 режимов, соответствующих флагам CLI:
 
 | Режим | Условие | Результат |
 |---|---|---|
 | `Workspace` | без флагов | индексированные, неиндексированные и неотслеживаемые изменения |
+| `Staged` | `--staged` | разница между зафиксированным деревом `HEAD` и деревом индекса; до первого коммита база — пустое дерево |
 | `Commit` | `--commit <sha>` / `-c <sha>` | изменения, внесённые `<sha>` (через `git show <sha>`, что эквивалентно diff `<sha>^..<sha>`) |
 | `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
+
+`--staged` фиксирует `HEAD` и весь индекс до загрузки правил и инструментов.
+`internal/diff/staged.go` создаёт дерево снимка из временной копии индекса.
+Построение diff, встроенные инструменты для работы с кодом, правила проекта по
+умолчанию и `.gitattributes` репозитория используют этот неизменный вход на
+протяжении всего ревью. Исходный индекс, рабочее дерево и refs сохраняются.
 
 Каждый diff содержит старый и новый пути, старые и новые фрагменты, количество
 добавлений и удалений, признак бинарного файла и сведения о переименовании.
 Значение `DiffContextLines` зафиксировано на **3** — это же значение Git
 использует по умолчанию.
 
-Неотслеживаемые файлы читаются с диска и считаются целиком добавленными, чтобы
-их можно было проверить до коммита.
+В режиме рабочей области неотслеживаемые файлы читаются с диска и считаются
+целиком добавленными для проверки перед коммитом.
 
 ## Пятиступенчатый фильтр файлов
 

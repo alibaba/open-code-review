@@ -27,6 +27,7 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
+  ocr review --staged                      Review the staged snapshot
   ocr review --background "Focus on auth"                                           Review with inline context
   ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
@@ -113,6 +114,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--from <ref>` | — | — | Source ref to start the diff from (e.g., `main`). |
 | `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
+| `--staged` | — | `false` | Review only staged changes against the captured `HEAD`, using a frozen index snapshot for built-in code context. |
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
 | `--no-filter` | — | `false` | Keep all review comments and skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
@@ -135,7 +137,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--tools <path>` | — | embedded | Path to a custom JSON tool-config file. Overrides the embedded tool definitions. |
 
 > Mode flags are mutually exclusive: pass either `--from`/`--to`, or
-> `--commit`, or neither (workspace mode). Mixing them is a hard error.
+> `--commit`, or `--staged`, or none (workspace mode). Mixing them is a hard error.
 > `--resume` supports only range or commit reviews and cannot be combined
 > with `--preview`.
 
@@ -173,8 +175,62 @@ OCR assembles the working-tree changes from two git commands:
 - untracked files via `git ls-files --others --exclude-standard`, read
   from disk and treated as full-file additions
 
-This is what you usually want pre-commit. Stage selectively if you want
-narrower scope.
+This includes unstaged and untracked work. To review only what you have staged
+for the next commit, use `--staged`.
+
+#### Staged snapshot mode
+
+```bash
+ocr review --staged
+ocr review --staged --preview
+ocr review --staged --preview --format json
+ocr review --staged --format json --output staged-review.json
+```
+
+Use this mode to review the changes staged for your next commit, including
+selected hunks. OCR captures the complete index as a Git tree and compares it
+with the captured `HEAD`, using an empty base tree before the first commit.
+The captured input stays fixed throughout the review. An empty staged diff
+skips the LLM. Requires Git 2.41 or later; linked worktrees are supported.
+
+The diff, built-in file reading, file discovery, and content search use the same
+tree, including unchanged context files. Repository `.gitattributes` and default
+rules under `.opencodereview/` also come from this tree. Each snapshot rule file,
+including `rule.json`, is limited to 512 KiB. Referenced rule documents must be
+repository-relative regular files in the snapshot; missing files, absolute
+paths, and symbolic links cause an error.
+
+Explicit `--rule` files, `--exclude`, global configuration, global Git attributes,
+`.git/info/attributes`, and Git configuration remain external inputs. Custom MCP
+servers and other external tools may read live or external state.
+
+`.gitignore` does not exclude staged paths. OCR's default directory and secret
+exclusions, supported-file allowlist, and review-rule exclusions apply.
+`--preview` shows selected files, exclusions, and snapshot identity without a
+model call. Each invocation captures its own snapshot.
+
+Staged runs use `ocr.run-manifest/v2`: `input.mode` is `staged`,
+`input.snapshot_tree` contains the Git tree object ID, and `input.resolved_base`
+is the captured `HEAD` commit (omitted before the first commit). `resolved_head`
+and `exact_range` are omitted. JSON preview includes the same `input` identity
+fields. Consumers need v2 support to process these results; v1-only consumers
+must report them as unsupported. Other review modes retain v1.
+
+The user's index, working tree, and refs remain unchanged. Temporary index copies
+are cleaned up, and unreferenced tree objects follow Git's normal garbage
+collection lifecycle.
+
+`--staged` is incompatible with `--from`, `--to`, `--commit`, and `--resume`.
+Staged sessions cannot be resumed.
+Unresolved merge conflicts, intent-to-add entries (`git add -N`), split indexes,
+and sparse indexes cause an error. Changed submodule/gitlink entries also cause
+an error before file content is read, including additions, updates, deletions,
+and conversions between regular files and gitlinks.
+
+Repositories with unchanged submodules support reviews of ordinary files.
+`file_find` omits gitlink paths, `file_read` rejects them, and `code_search` skips
+submodule contents regardless of Git's recursion setting. Symbolic links are read
+as their stored link blobs, without following their targets.
 
 #### Range mode
 
@@ -216,7 +272,7 @@ ocr review --commit abc123 --resume <session-id>
 Resume is strict by design. Checkpoints are only reused when the resumed run
 would review the same thing the parent did:
 
-- workspace reviews cannot be resumed
+- workspace and staged reviews cannot be resumed
 - the review mode must match: a range session cannot be resumed as a commit one
 - the resolved input must match. Ref *spellings* are not compared — `abc1234`
   and `abc1234def` name the same commit — but if the same refs now resolve to a

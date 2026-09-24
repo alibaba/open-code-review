@@ -264,7 +264,7 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 		s.FailedFiles++
 	case "session_end":
 		s.Aborted = false
-		if rec.RunManifest != nil && rec.RunManifest.SchemaVersion == ManifestSchemaVersion {
+		if rec.RunManifest != nil && rec.RunManifest.HasSupportedSchema() {
 			m := rec.RunManifest.cloned()
 			s.RunManifest = &m
 			s.SelectedFiles = len(m.Coverage.Selected)
@@ -273,8 +273,8 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 			s.FailedFiles = len(m.Coverage.Failed)
 			s.WaivedFiles = len(m.Coverage.Waived)
 		} else {
-			// A completed session without a known v1 manifest is legacy. Keep the
-			// checkpoint-derived counts, but never infer a v1 complete state.
+			// Without a supported manifest, keep checkpoint-derived counts but
+			// never infer a coverage-derived complete state.
 			s.Legacy = true
 			if s.CompletedFiles == 0 && s.ReusedFiles == 0 && s.FailedFiles == 0 && len(rec.FilesReviewed) > 0 {
 				s.CompletedFiles = len(rec.FilesReviewed)

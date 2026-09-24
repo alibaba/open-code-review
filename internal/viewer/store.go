@@ -809,7 +809,7 @@ func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 		data, err := json.Marshal(raw)
 		if err == nil {
 			var manifest session.RunManifest
-			if err := json.Unmarshal(data, &manifest); err == nil && manifest.SchemaVersion == session.ManifestSchemaVersion {
+			if err := json.Unmarshal(data, &manifest); err == nil && manifest.HasSupportedSchema() {
 				summary.RunManifest = &manifest
 				summary.TerminalState = string(manifest.TerminalState)
 				summary.FilesReviewed = filesReviewedFromSelected(manifest.Coverage.Selected)

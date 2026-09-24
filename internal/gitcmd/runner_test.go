@@ -70,6 +70,32 @@ func TestRunner_Run(t *testing.T) {
 	}
 }
 
+func TestRunner_RunSplitWithEnvIsolatesIndex(t *testing.T) {
+	dir := initRepo(t)
+	privateIndex := filepath.Join(t.TempDir(), "index")
+	original, err := os.ReadFile(filepath.Join(dir, ".git", "index"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := New(1)
+	_, stderr, err := r.RunSplitWithEnv(context.Background(), dir, []string{"GIT_INDEX_FILE=" + privateIndex}, "read-tree", "--empty")
+	if err != nil {
+		t.Fatalf("private index command: %v (%s)", err, stderr)
+	}
+	out, _, err := r.RunSplit(context.Background(), dir, "ls-files")
+	if err != nil || strings.TrimSpace(out) != "hello.txt" {
+		t.Fatalf("private environment escaped invocation: %q, %v", out, err)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, ".git", "index"))
+	if err != nil || string(after) != string(original) {
+		t.Fatalf("original index modified: %v", err)
+	}
+	out, _, err = r.RunSplitWithEnv(context.Background(), dir, []string{"GIT_INDEX_FILE=" + privateIndex}, "ls-files")
+	if err != nil || strings.TrimSpace(out) != "" {
+		t.Fatalf("private index was not used: %q, %v", out, err)
+	}
+}
+
 func TestRunner_Run_InvalidCommand(t *testing.T) {
 	dir := initRepo(t)
 	r := New(2)

@@ -13,7 +13,7 @@ sidebar:
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Staged · Commit · Range</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
@@ -34,18 +34,24 @@ flowchart TD
 ## diff provider
 
 `internal/diff/git.go` 定义了一个 `Provider` 结构，其未导出字段 `mode`（类型为
-`Mode`，一个 `int` 枚举）选择与 CLI 参数对应的三种模式之一：
+`Mode`，一个 `int` 枚举）选择与 CLI 参数对应的四种模式之一：
 
 | 模式 | 触发方式 | 返回内容 |
 |---|---|---|
 | `Workspace` | 无参数 | staged + unstaged + untracked 变更 |
+| `Staged` | `--staged` | 捕获的 `HEAD` tree 到索引 tree 的差异；首次提交前以空 tree 为基线 |
 | `Commit` | `--commit <sha>` / `-c <sha>` | `<sha>` 引入的变更（经 `git show <sha>`，等价于 `<sha>^..<sha>` diff） |
 | `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
+
+`--staged` 在加载规则和工具前捕获 `HEAD` 与完整索引。
+`internal/diff/staged.go` 从临时索引副本生成快照 tree。Diff 生成、内置代码工具、
+默认项目规则和仓库 `.gitattributes` 在整个评审期间使用这份固定输入。
+原始索引、工作区和 ref 保持原样。
 
 每个 diff 携带：old/new path、old/new hunk、插入/删除计数、二进制标志、重命名
 检测。`DiffContextLines` 固定为 **3**——与 Git 默认一致。
 
-untracked 文件从磁盘读取并作为整文件新增处理，以便 commit 前评审。
+工作区模式从磁盘读取 untracked 文件，按整文件新增处理，以便 commit 前评审。
 
 ## 五重门文件过滤
 

@@ -15,7 +15,7 @@ the source code with confidence.
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Staged · Commit · Range</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
@@ -37,21 +37,28 @@ Two entry points matter: `Agent.Run` (top of pipeline) and
 ## The diff provider
 
 `internal/diff/git.go` defines a `Provider` struct whose unexported
-`mode` field (of type `Mode`, an `int` enum) selects one of three modes
+`mode` field (of type `Mode`, an `int` enum) selects one of four modes
 that mirror the CLI flags:
 
 | Mode | Triggered by | What it returns |
 |---|---|---|
 | `Workspace` | no flags | staged + unstaged + untracked changes |
+| `Staged` | `--staged` | captured `HEAD` tree to captured index tree; empty base tree before the first commit |
 | `Commit` | `--commit <sha>` / `-c <sha>` | the changes introduced by `<sha>` (via `git show <sha>`, equivalent to the `<sha>^..<sha>` diff) |
 | `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
+
+`--staged` captures `HEAD` and the complete index before loading rules or tools.
+`internal/diff/staged.go` writes the snapshot tree from a temporary index copy.
+Diff generation, built-in code tools, default project rules, and repository
+`.gitattributes` use this fixed input throughout the review. The original index,
+working tree, and refs stay unchanged.
 
 Each diff carries: old/new path, old/new hunks, insertion/deletion counts,
 binary flag, and rename detection. `DiffContextLines` is fixed at **3** —
 the same default Git uses.
 
-Untracked files are read from disk and treated as full-file additions so
-they're reviewed pre-commit.
+In workspace mode, untracked files are read from disk and treated as full-file
+additions for review before committing.
 
 ## The five-gate file filter
 

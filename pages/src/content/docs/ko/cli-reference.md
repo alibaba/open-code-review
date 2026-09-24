@@ -26,6 +26,7 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
+  ocr review --staged                      Review the staged snapshot
   ocr review --background "Focus on auth"                                           Review with inline context
   ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
@@ -112,6 +113,7 @@ ocr r      [flags]   (alias)
 | `--from <ref>` | — | — | diff를 시작할 원본 ref(예: `main`). |
 | `--to <ref>` | — | — | diff가 끝나는 대상 ref(예: `feature-branch`). 지정하면 OCR이 `merge-base(from, to)..to`를 계산합니다. |
 | `--commit <sha>` | `-c` | — | 리뷰할 단일 커밋(부모 커밋과의 diff). |
+| `--staged` | — | `false` | 캡처한 `HEAD`를 기준으로 스테이징된 변경만 리뷰하며, 내장 코드 도구는 고정된 인덱스 스냅샷을 사용합니다. |
 | `--preview` | `-p` | `false` | 필터 파이프라인만 돌리고 LLM은 호출하지 않습니다. 파일 목록과 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다(미리 보기에는 내보낼 완료된 지적이 없습니다). |
 | `--no-filter` | — | `false` | 리뷰 코멘트를 모두 남기고 서브태스크 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. 서브태스크는 파일 하나 또는 관련된 파일 묶음을 리뷰합니다. |
 | `--resume <session-id>` | — | — | 호환되는 이전 range 또는 commit 리뷰 세션에서 이어서 실행합니다. |
@@ -133,8 +135,8 @@ ocr r      [flags]   (alias)
 | `--max-git-procs <n>` | — | `16` | 동시에 띄울 git 서브프로세스의 최대 개수. |
 | `--tools <path>` | — | 내장 | 커스텀 JSON 도구 설정 파일 경로. 내장 도구 정의를 덮어씁니다. |
 
-> 모드 플래그는 함께 쓸 수 없습니다. `--from`/`--to`, `--commit`, 아무것도 주지
-> 않기(워크스페이스 모드) 중 하나만 고르세요. 섞어 쓰면 오류로 중단됩니다.
+> 모드 플래그는 함께 쓸 수 없습니다. `--from`/`--to`, `--commit`, `--staged`,
+> 아무것도 주지 않기(워크스페이스 모드) 중 하나만 고르세요. 섞어 쓰면 오류로 중단됩니다.
 > `--resume`은 range와 commit 리뷰만 지원하며 `--preview`와 함께 쓸 수 없습니다.
 
 ### 실행 단위 LLM 선택 {#per-run-llm-selection}
@@ -170,7 +172,57 @@ OCR은 git 명령 두 개로 작업 트리의 변경을 모읍니다.
 - 추적되지 않은 파일은 `git ls-files --others --exclude-standard`로 찾아 디스크에서
   읽고, 파일 전체가 추가된 것으로 다룹니다.
 
-커밋 직전에 보통 원하는 동작입니다. 범위를 좁히고 싶다면 필요한 것만 스테이징하세요.
+이 모드는 스테이징하지 않은 변경과 추적되지 않은 파일도 포함합니다. 다음 커밋을 위해 스테이징한 변경만 리뷰하려면 `--staged`를 사용하세요.
+
+#### 스테이징 스냅샷 모드 {#staged-snapshot-mode}
+
+```bash
+ocr review --staged
+ocr review --staged --preview
+ocr review --staged --preview --format json
+ocr review --staged --format json --output staged-review.json
+```
+
+다음 커밋을 위해 스테이징한 변경을 리뷰합니다. 일부 hunk만 스테이징한 경우도 지원합니다.
+OCR은 전체 인덱스를 Git tree로 캡처하고 캡처한 `HEAD`와 비교합니다. 첫 커밋 전에는
+빈 tree를 기준으로 사용합니다. 캡처한 입력은 리뷰가 끝날 때까지 고정되며, 스테이징된
+차이가 없으면 LLM 호출을 생략합니다. Git 2.41 이상이 필요하며 linked worktree를 지원합니다.
+
+Diff와 내장 파일 읽기, 파일 찾기, 내용 검색은 같은 tree를 사용하며, 문맥으로 참조하는
+변경되지 않은 파일도 포함합니다. 저장소의 `.gitattributes`와 `.opencodereview/` 아래의
+기본 규칙도 이 tree에서 읽습니다. `rule.json`을 포함한 각 스냅샷 규칙 파일의 상한은
+512 KiB입니다. 참조하는 규칙 문서는 스냅샷의 일반 파일이며 저장소 상대 경로여야 합니다.
+누락된 파일, 절대 경로, 심볼릭 링크는 오류를 발생시킵니다.
+
+명시적인 `--rule` 파일, `--exclude`, 전역 설정, Git 전역 속성, `.git/info/attributes`,
+Git 설정은 외부 입력으로 적용됩니다. 커스텀 MCP 서버 같은 외부 도구는 현재 작업 트리나
+외부 상태를 읽을 수 있습니다.
+
+`.gitignore`는 스테이징된 경로를 제외하지 않습니다. OCR의 기본 디렉터리 및 민감 파일
+제외, 지원 파일 허용 목록, 리뷰 규칙의 제외 설정은 적용됩니다. `--preview`는 모델 호출
+없이 선택한 파일, 제외 이유, 스냅샷 식별 정보를 표시합니다. 실행할 때마다 해당 실행을
+위한 스냅샷을 캡처합니다.
+
+스테이징 리뷰는 `ocr.run-manifest/v2`를 사용합니다. `input.mode`는 `staged`,
+`input.snapshot_tree`는 Git tree 객체 ID, `input.resolved_base`는 캡처한 `HEAD`
+커밋입니다(첫 커밋 전에는 생략). `resolved_head`와 `exact_range`는 생략합니다.
+JSON 미리 보기에도 같은 `input` 식별 필드가 포함됩니다. 이 결과를 처리하려면 v2 지원이
+필요하며, v1만 지원하는 도구는 지원되지 않는 결과로 보고해야 합니다. 다른 리뷰 모드는
+v1을 유지합니다.
+
+사용자의 인덱스, 작업 트리, ref는 변경되지 않습니다. 임시 인덱스 복사본은 정리되며,
+참조되지 않는 tree 객체는 Git의 일반 가비지 컬렉션 수명 주기에 따라 관리됩니다.
+
+`--staged`는 `--from`, `--to`, `--commit`, `--resume`과 함께 사용할 수 없습니다.
+스테이징된 세션은 이어서 실행할 수 없습니다.
+해결되지 않은 병합 충돌, intent-to-add 항목(`git add -N`), split index, sparse index는
+오류를 발생시킵니다. 변경된 submodule/gitlink 항목도 파일 내용을 읽기 전에 오류를
+발생시킵니다. 추가, 갱신, 삭제, 일반 파일과 gitlink 사이의 전환이 모두 해당됩니다.
+
+변경되지 않은 서브모듈을 포함한 저장소에서도 일반 파일을 리뷰할 수 있습니다.
+`file_find`는 gitlink 경로를 제외하고 `file_read`는 해당 경로의 읽기를 거부합니다.
+`code_search`는 Git의 재귀 설정과 관계없이 서브모듈 내용을 건너뜁니다.
+심볼릭 링크는 저장된 링크 blob 자체를 읽으며 링크 대상은 따라가지 않습니다.
 
 #### range 모드 {#range-mode}
 
@@ -209,7 +261,7 @@ ocr review --commit abc123 --resume <session-id>
 이어서 하기는 의도적으로 엄격합니다. 이어받은 실행이 원래 실행과 똑같은 대상을 리뷰할
 때만 체크포인트를 재사용합니다.
 
-- 워크스페이스 리뷰는 이어서 할 수 없습니다.
+- 워크스페이스 리뷰와 스테이징된 변경 리뷰는 이어서 할 수 없습니다.
 - 리뷰 모드가 같아야 합니다. range 세션을 commit 리뷰로 이어받을 수 없습니다.
 - 해석된 입력이 같아야 합니다. ref를 *어떻게 적었는지*는 따지지 않습니다. `abc1234`와
   `abc1234def`는 같은 커밋을 가리킵니다. 다만 같은 ref가 지금은 다른 diff로

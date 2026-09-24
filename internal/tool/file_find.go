@@ -6,6 +6,7 @@ package tool
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/fs"
 	"os/exec"
 	"path/filepath"
@@ -99,6 +100,9 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 // listGitFiles returns tracked and untracked files (respecting .gitignore) via git ls-files.
 // In range/commit mode it uses git ls-tree to list files at the reviewed ref.
 func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, error) {
+	if p.FileReader.Mode == ModeStaged && p.FileReader.Ref == "" {
+		return nil, fmt.Errorf("staged file discovery requires a snapshot tree")
+	}
 	ctx, cancel := context.WithTimeout(parentCtx, fileFindTimeout)
 	defer cancel()
 
@@ -108,6 +112,9 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 	var args []string
 	if ref := p.FileReader.Ref; ref != "" {
 		args = []string{"ls-tree", "-r", "--name-only", "--end-of-options", ref}
+		if p.FileReader.Mode == ModeStaged {
+			args = []string{"ls-tree", "-r", "-z", "--end-of-options", ref}
+		}
 	} else {
 		args = []string{"ls-files", "--cached", "--others", "--exclude-standard"}
 	}
@@ -136,7 +143,18 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 
 	var files []string
 	lines := bytes.Split(bytes.TrimRight(output, "\n"), []byte{'\n'})
+	if p.FileReader.Mode == ModeStaged {
+		lines = bytes.Split(output, []byte{0})
+	}
 	for _, line := range lines {
+		if p.FileReader.Mode == ModeStaged {
+			header, name, ok := bytes.Cut(line, []byte{'\t'})
+			fields := strings.Fields(string(header))
+			if !ok || len(fields) != 3 || fields[1] != "blob" {
+				continue // Do not advertise gitlinks as readable files.
+			}
+			line = name
+		}
 		if len(line) > 0 {
 			s := string(line)
 			// Skip binary-like files that lack meaningful extensions patterns

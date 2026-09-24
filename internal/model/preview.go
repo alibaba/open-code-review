@@ -38,10 +38,19 @@ type PreviewEntry struct {
 // Preview is the full preview result, mode-agnostic so cmd/opencodereview
 // can render it the same way for review and scan.
 type Preview struct {
+	Input           *PreviewInput  `json:"input,omitempty"`
 	Entries         []PreviewEntry `json:"files"`
 	TotalInsertions int64          `json:"total_insertions"`
 	TotalDeletions  int64          `json:"total_deletions"`
 	TotalFiles      int            `json:"total_files"`
 	ReviewableCount int            `json:"reviewable_count"`
 	ExcludedCount   int            `json:"excluded_count"`
+}
+
+// PreviewInput identifies a staged preview's immutable input. Commit-based
+// modes retain their existing output contract.
+type PreviewInput struct {
+	Mode         string `json:"mode"`
+	ResolvedBase string `json:"resolved_base,omitempty"`
+	SnapshotTree string `json:"snapshot_tree"`
 }

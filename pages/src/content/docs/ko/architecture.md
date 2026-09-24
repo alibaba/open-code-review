@@ -14,7 +14,7 @@ Enter를 누른 순간부터 터미널에 JSON이 찍힐 때까지, `ocr review`
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Staged · Commit · Range</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
@@ -36,20 +36,26 @@ flowchart TD
 
 `internal/diff/git.go`가 정의하는 `Provider` 구조체에는 익스포트되지 않은
 `mode` 필드(`Mode` 타입, `int` 열거형)가 있습니다. 이 필드가 CLI 플래그와
-짝을 이루는 세 가지 모드 중 하나를 고릅니다.
+짝을 이루는 네 가지 모드 중 하나를 고릅니다.
 
 | 모드 | 켜지는 조건 | 반환하는 것 |
 |---|---|---|
 | `Workspace` | 플래그 없음 | staged + unstaged + untracked 변경 |
+| `Staged` | `--staged` | 캡처한 `HEAD` tree와 인덱스 tree의 차이. 첫 커밋 전에는 빈 tree를 기준으로 사용 |
 | `Commit` | `--commit <sha>` / `-c <sha>` | `<sha>`가 만든 변경(`git show <sha>` 사용, `<sha>^..<sha>` diff와 같음) |
 | `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
+
+`--staged`는 규칙과 도구를 불러오기 전에 `HEAD`와 전체 인덱스를 캡처합니다.
+`internal/diff/staged.go`는 임시 인덱스 복사본에서 스냅샷 tree를 생성합니다.
+Diff 생성, 내장 코드 도구, 기본 프로젝트 규칙, 저장소 `.gitattributes`는 리뷰 내내
+이 고정된 입력을 사용합니다. 원래 인덱스, 작업 트리, ref는 그대로 유지됩니다.
 
 diff마다 옛/새 경로, 옛/새 hunk, 추가·삭제 줄 수, 바이너리 여부, 이름 변경
 감지 결과가 함께 실립니다. `DiffContextLines`는 **3**으로 고정돼 있으며 Git이
 쓰는 기본값과 같습니다.
 
-추적되지 않는 파일은 디스크에서 읽어 파일 전체가 추가된 것으로 다룹니다.
-그래서 커밋 전에도 리뷰됩니다.
+워크스페이스 모드에서는 추적되지 않는 파일을 디스크에서 읽고 파일 전체가 추가된
+것으로 다루어 커밋 전에 리뷰합니다.
 
 ## 다섯 관문 파일 필터 {#the-five-gate-file-filter}
 

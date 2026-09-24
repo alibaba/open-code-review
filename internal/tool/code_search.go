@@ -29,6 +29,9 @@ func NewCodeSearch(fr *FileReader) *CodeSearchProvider { return &CodeSearchProvi
 func (p *CodeSearchProvider) Tool() Tool { return CodeSearch }
 
 func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (string, error) {
+	if p.FileReader.Mode == ModeStaged && p.FileReader.Ref == "" {
+		return "", fmt.Errorf("staged code search requires a snapshot tree")
+	}
 	searchText, _ := args["search_text"].(string)
 	caseSensitive, _ := args["case_sensitive"].(bool)
 	usePerlRegexp, _ := args["use_perl_regexp"].(bool)
@@ -59,7 +62,16 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool, usePerlRegexp bool, noIndex bool, pathspec []string) []string {
 	// core.quotepath=false reports non-ASCII paths literally instead of as
 	// quoted octal escapes, which file_read cannot open.
-	cmdArgs := []string{"--no-pager", "-c", "core.quotepath=false", "grep"}
+	cmdArgs := []string{"--no-pager", "-c", "core.quotepath=false"}
+	if p.FileReader.Mode == ModeStaged {
+		cmdArgs = append(cmdArgs, "--attr-source="+p.FileReader.Ref)
+	}
+	cmdArgs = append(cmdArgs, "grep")
+	if p.FileReader.Mode == ModeStaged {
+		// A gitlink's child repository is outside the captured tree's blobs,
+		// even when submodule.recurse enables recursive searches by default.
+		cmdArgs = append(cmdArgs, "--no-recurse-submodules")
+	}
 
 	if noIndex {
 		// Non-git directory: search the working tree directly while still

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 )
 
@@ -70,6 +71,13 @@ func (r *Runner) Output(ctx context.Context, repoDir string, args ...string) ([]
 
 // RunSplit executes a git command and returns stdout and stderr separately.
 func (r *Runner) RunSplit(ctx context.Context, repoDir string, args ...string) (string, string, error) {
+	return r.RunSplitWithEnv(ctx, repoDir, nil, args...)
+}
+
+// RunSplitWithEnv runs a command with per-invocation environment overrides.
+// Overrides are appended after the inherited environment, so the last value
+// wins without changing process-wide state or other concurrent Git commands.
+func (r *Runner) RunSplitWithEnv(ctx context.Context, repoDir string, env []string, args ...string) (string, string, error) {
 	if err := r.acquire(ctx); err != nil {
 		return "", "", err
 	}
@@ -77,6 +85,7 @@ func (r *Runner) RunSplit(ctx context.Context, repoDir string, args ...string) (
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoDir
+	cmd.Env = append(os.Environ(), env...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

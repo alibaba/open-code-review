@@ -16,6 +16,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -51,6 +52,7 @@ type reviewOptions struct {
 	effort                string
 	noFilter              bool
 	preview               bool
+	staged                bool
 }
 
 var reviewOpts reviewOptions
@@ -63,6 +65,9 @@ var reviewCmd = &cobra.Command{
 	Args:    cobra.NoArgs,
 	Example: `  # Review staged + unstaged + untracked changes in current workspace
   ocr review
+
+  # Review only the frozen staging-area snapshot
+  ocr review --staged
 
   # Review a branch against its base (merge-base mode)
   ocr review --from master --to dev-ref
@@ -112,6 +117,9 @@ func init() {
 }
 
 func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error) {
+	if err := validateStagedOptions(opts); err != nil {
+		return err
+	}
 	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
 	if err != nil {
 		return err
@@ -134,7 +142,22 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}()
 
 	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, opts.maxTools, opts.maxGitProcs, true)
+	var stagedSnapshot *diff.StagedSnapshot
+	var projectRef string
+	if opts.staged {
+		// Freeze before loading repository rules or selecting files. Everything
+		// that reads repository content must use this same immutable tree.
+		opts.repoDir, err = resolveRepoDir(opts.repoDir)
+		if err != nil {
+			return err
+		}
+		stagedSnapshot, err = diff.CaptureStagedSnapshot(ctx, opts.repoDir, gitcmd.New(opts.maxGitProcs))
+		if err != nil {
+			return fmt.Errorf("capture staged snapshot: %w", err)
+		}
+		contentRef, projectRef = stagedSnapshot.Tree, stagedSnapshot.Tree
+	}
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, opts.maxTools, opts.maxGitProcs, true, projectRef)
 	if err != nil {
 		return err
 	}
@@ -152,7 +175,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	opts.background = bg
 
 	if opts.preview {
-		return runPreviewContext(ctx, cc, opts, out)
+		return runPreviewContext(ctx, cc, opts, out, stagedSnapshot)
 	}
 
 	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
@@ -198,10 +221,14 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
+	ref := fileReadRef(mode, opts, sealedInput)
+	if stagedSnapshot != nil {
+		mode, ref = tool.ModeStaged, stagedSnapshot.Tree
+	}
 	fileReader := &tool.FileReader{
 		RepoDir: cc.RepoDir,
 		Mode:    mode,
-		Ref:     fileReadRef(mode, opts, sealedInput),
+		Ref:     ref,
 		Runner:  cc.GitRunner,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
@@ -236,6 +263,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
 		SealedInput:           sealedInput,
+		StagedSnapshot:        stagedSnapshot,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
@@ -440,6 +468,9 @@ func fileReadRef(mode tool.ReviewMode, opts reviewOptions, sealed *diff.InputRes
 }
 
 func reviewModeFromOptions(opts reviewOptions) string {
+	if opts.staged {
+		return session.ReviewModeStaged
+	}
 	if opts.commit != "" {
 		return session.ReviewModeCommit
 	}
@@ -500,7 +531,10 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 	return nil
 }
 
-func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer) error {
+func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer, snapshot *diff.StagedSnapshot) error {
+	if opts.staged && snapshot == nil {
+		return fmt.Errorf("staged preview requires a frozen snapshot")
+	}
 	maxTokens, err := previewMaxTokens(cc.Template.MaxTokens, opts.maxTokens)
 	if err != nil {
 		return err
@@ -511,13 +545,15 @@ func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOption
 	tpl.MaxTokens = maxTokens
 
 	preview, err := agent.Preview(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		Template:   tpl,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:        cc.RepoDir,
+		From:           opts.from,
+		To:             opts.to,
+		Commit:         opts.commit,
+		ReviewMode:     reviewModeFromOptions(opts),
+		StagedSnapshot: snapshot,
+		Template:       tpl,
+		FileFilter:     cc.FileFilter,
+		GitRunner:      cc.GitRunner,
 	})
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)

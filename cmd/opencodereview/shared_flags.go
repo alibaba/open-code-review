@@ -122,6 +122,9 @@ func validateOutputFormat(format string) (string, error) {
 }
 
 func validateReviewOptions(opts *reviewOptions) error {
+	if err := validateStagedOptions(*opts); err != nil {
+		return err
+	}
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
@@ -157,6 +160,19 @@ func validateReviewOptions(opts *reviewOptions) error {
 		if _, err := template.ParseEffort(opts.effort); err != nil {
 			return fmt.Errorf("--effort: %w", err)
 		}
+	}
+	return nil
+}
+
+func validateStagedOptions(opts reviewOptions) error {
+	if !opts.staged {
+		return nil
+	}
+	if opts.from != "" || opts.to != "" || opts.commit != "" {
+		return fmt.Errorf("--staged cannot be combined with --from, --to, or --commit")
+	}
+	if opts.resume != "" {
+		return fmt.Errorf("--staged and --resume cannot be used together; staged snapshots cannot be resumed")
 	}
 	return nil
 }
@@ -204,6 +220,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)
+	cmd.Flags().BoolVar(&opts.staged, "staged", false, "review a frozen snapshot of staged changes only (cannot be combined with --from, --to, --commit, or --resume)")
 	cmd.Flags().StringVar(&opts.resume, "resume", "", "resume from a previous review session id")
 	cmd.RegisterFlagCompletionFunc("resume", completeSessionIDs)
 	addExcludeFlag(cmd, &opts.excludes)

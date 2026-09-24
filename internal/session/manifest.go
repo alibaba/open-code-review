@@ -22,6 +22,11 @@ import (
 // value; unknown future versions must be ignored rather than misread.
 const ManifestSchemaVersion = "ocr.run-manifest/v1"
 
+// StagedManifestSchemaVersion extends the frozen v1 contract with a staged
+// input and a tree identity. Existing modes continue to emit v1 so downstream
+// consumers need not upgrade unless they opt into staged reviews.
+const StagedManifestSchemaVersion = "ocr.run-manifest/v2"
+
 // OperationReview is the manifest operation for a diff review run. It is the
 // only operation wired in v1 (scan stays legacy with no manifest).
 const OperationReview = "review"
@@ -34,12 +39,13 @@ const (
 	InputModeRange     = "range"
 	InputModeCommit    = "commit"
 	InputModeWorkspace = "workspace"
+	InputModeStaged    = "staged"
 )
 
-// validInputMode reports whether m is one of the three mandatory input modes.
+// validInputMode reports whether m is a supported input mode.
 func validInputMode(m string) bool {
 	switch m {
-	case InputModeRange, InputModeCommit, InputModeWorkspace:
+	case InputModeRange, InputModeCommit, InputModeWorkspace, InputModeStaged:
 		return true
 	default:
 		return false
@@ -247,11 +253,14 @@ type ManifestRepository struct {
 // typed. A child (resume) run always recomputes its own input rather than
 // copying the parent's.
 type ManifestInput struct {
-	Mode                 string `json:"mode"`
-	RequestedFrom        string `json:"requested_from,omitempty"`
-	RequestedHead        string `json:"requested_head,omitempty"`
-	ResolvedBase         string `json:"resolved_base,omitempty"`
-	ResolvedHead         string `json:"resolved_head,omitempty"`
+	Mode          string `json:"mode"`
+	RequestedFrom string `json:"requested_from,omitempty"`
+	RequestedHead string `json:"requested_head,omitempty"`
+	ResolvedBase  string `json:"resolved_base,omitempty"`
+	ResolvedHead  string `json:"resolved_head,omitempty"`
+	// SnapshotTree is an index tree object ID, never a commit SHA. Only staged
+	// v2 manifests set it; resolved_head and exact_range remain empty.
+	SnapshotTree         string `json:"snapshot_tree,omitempty"`
 	ExactRange           string `json:"exact_range,omitempty"`
 	SourceArtifactSHA256 string `json:"source_artifact_sha256,omitempty"`
 }
@@ -283,6 +292,20 @@ type RunManifest struct {
 	Coverage      Coverage           `json:"coverage"`
 	RunFailure    *RunFailure        `json:"run_failure,omitempty"`
 	ElapsedMS     int64              `json:"elapsed_ms"`
+}
+
+// HasSupportedSchema reports whether this build understands the coverage
+// contract. It does not attest policy satisfaction or admit a resume.
+func (m RunManifest) HasSupportedSchema() bool {
+	return m.SchemaVersion == ManifestSchemaVersion ||
+		(m.SchemaVersion == StagedManifestSchemaVersion && m.Input.Mode == InputModeStaged)
+}
+
+func manifestSchemaForMode(mode string) string {
+	if mode == InputModeStaged {
+		return StagedManifestSchemaVersion
+	}
+	return ManifestSchemaVersion
 }
 
 // itemState is the internal per-item lifecycle. Every registered item starts as
@@ -803,7 +826,7 @@ func (b *ManifestBuilder) Finalize(elapsed time.Duration) (RunManifest, error) {
 		return RunManifest{}, err
 	}
 	m := RunManifest{
-		SchemaVersion: ManifestSchemaVersion,
+		SchemaVersion: manifestSchemaForMode(b.input.Mode),
 		RunID:         b.runID,
 		ParentRunID:   b.parentRunID,
 		Operation:     b.operation,
@@ -848,6 +871,20 @@ func (b *ManifestBuilder) validateLocked(cov Coverage) error {
 	if !validInputMode(b.input.Mode) {
 		return fmt.Errorf("manifest: invalid input.mode %q", b.input.Mode)
 	}
+	if b.input.Mode == InputModeStaged {
+		if !validGitObjectID(b.input.SnapshotTree) {
+			return errors.New("manifest: staged input requires a snapshot_tree object ID")
+		}
+		if b.input.ResolvedBase != "" && !validGitObjectID(b.input.ResolvedBase) {
+			return errors.New("manifest: staged input resolved_base must be a commit object ID")
+		}
+		if b.input.ResolvedHead != "" || b.input.ExactRange != "" ||
+			b.input.RequestedFrom != "" || b.input.RequestedHead != "" || b.parentRunID != "" {
+			return errors.New("manifest: staged input cannot contain commit/range requests or resume lineage")
+		}
+	} else if b.input.SnapshotTree != "" {
+		return errors.New("manifest: snapshot_tree is only valid for staged input")
+	}
 	// selected must be the disjoint union of the four terminal sets. The internal
 	// map already guarantees a single state per item_id, so this is a size check
 	// plus per-item field checks.
@@ -871,6 +908,18 @@ func (b *ManifestBuilder) validateLocked(cov Coverage) error {
 		return fmt.Errorf("manifest: invalid run_failure class %q", b.runFailure.Classification)
 	}
 	return nil
+}
+
+func validGitObjectID(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	for _, c := range value {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // cloned returns a copy of the manifest whose coverage slices are owned copies,

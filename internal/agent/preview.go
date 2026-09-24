@@ -65,6 +65,11 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 		// Non-nil so an empty diff marshals as `"files":[]`, not `"files":null`.
 		Entries: make([]DiffPreviewEntry, 0, len(a.diffs)+len(set.Excluded)),
 	}
+	if snapshot := a.args.StagedSnapshot; snapshot != nil {
+		result.Input = &model.PreviewInput{
+			Mode: "staged", ResolvedBase: snapshot.BaseCommit, SnapshotTree: snapshot.Tree,
+		}
+	}
 
 	// Provider directory exclusions happen before the per-file gates, so
 	// selectFiles cannot report them. Preview lists them as well, so its file

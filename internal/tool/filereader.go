@@ -28,6 +28,8 @@ const (
 	ModeRange
 	// ModeCommit reads files as they exist at a specific commit hash.
 	ModeCommit
+	// ModeStaged reads blobs from the captured index tree, never the live index.
+	ModeStaged
 )
 
 // ParseReviewMode returns the correct ReviewMode based on provided flag values.
@@ -58,7 +60,7 @@ func (m ReviewMode) RefValue(toRef, commit string) (string, bool) {
 type FileReader struct {
 	RepoDir string
 	Mode    ReviewMode
-	// Ref is the git ref to use for ModeRange (--to) or ModeCommit (--commit).
+	// Ref is the git ref for range/commit, or the immutable tree for staged mode.
 	// Empty for ModeWorkspace.
 	Ref    string
 	Runner *gitcmd.Runner
@@ -68,11 +70,15 @@ type FileReader struct {
 // resolved according to the active review mode.
 // - Workspace: reads directly from the filesystem.
 // - Range / Commit: uses `git show <Ref>:<path>` to read at the given ref.
+// - Staged: requires a blob at the snapshot path, rejecting trees and gitlinks.
 func (fr *FileReader) Read(ctx context.Context, path string) (string, error) {
+	if fr.Mode == ModeStaged && fr.Ref == "" {
+		return "", fmt.Errorf("staged file reader requires a snapshot tree")
+	}
 	switch fr.Mode {
 	case ModeWorkspace:
 		return fr.readFromDisk(path)
-	case ModeRange, ModeCommit:
+	case ModeRange, ModeCommit, ModeStaged:
 		return fr.readFromGitShow(ctx, path)
 	default:
 		return fr.readFromDisk(path)
@@ -119,11 +125,11 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
 
-	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
+	args, operation := fr.gitReadArgs(path)
 	if fr.Runner != nil {
 		output, err := fr.Runner.Output(ctx, fr.RepoDir, args...)
 		if err != nil {
-			return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+			return "", fmt.Errorf("%s: %w", operation, err)
 		}
 		return string(output), nil
 	}
@@ -132,18 +138,31 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 	cmd.Dir = fr.RepoDir
 	output, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+		return "", fmt.Errorf("%s: %w", operation, err)
 	}
 	return string(output), nil
+}
+
+func (fr *FileReader) gitReadArgs(path string) ([]string, string) {
+	object := fr.Ref + ":" + path
+	if fr.Mode == ModeStaged {
+		// Unlike show, cat-file blob cannot render a directory or a gitlink's
+		// commit as source content. Symlinks remain their stored link blobs.
+		return []string{"cat-file", "blob", object}, fmt.Sprintf("read staged blob %q (directories and gitlinks are not files)", path)
+	}
+	return []string{"-c", "core.quotepath=false", "show", "--end-of-options", object}, "git show " + object
 }
 
 // ReadLines returns a window of lines from the file plus the total line count.
 // startLine is 1-based; maxLines is the maximum number of lines to collect.
 func (fr *FileReader) ReadLines(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
+	if fr.Mode == ModeStaged && fr.Ref == "" {
+		return nil, 0, fmt.Errorf("staged file reader requires a snapshot tree")
+	}
 	switch fr.Mode {
 	case ModeWorkspace:
 		return fr.readLinesFromDisk(path, startLine, maxLines)
-	case ModeRange, ModeCommit:
+	case ModeRange, ModeCommit, ModeStaged:
 		innerCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		return fr.readLinesFromGitShow(innerCtx, path, startLine, maxLines)
@@ -205,7 +224,7 @@ func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([
 }
 
 func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
-	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
+	args, operation := fr.gitReadArgs(path)
 
 	var collected []string
 	var totalLines int
@@ -217,7 +236,7 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 			return scanErr
 		}, args...)
 		if err != nil {
-			return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+			return nil, 0, fmt.Errorf("%s: %w", operation, err)
 		}
 		return collected, totalLines, nil
 	}
@@ -226,10 +245,10 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 	cmd.Dir = fr.RepoDir
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+		return nil, 0, fmt.Errorf("%s: %w", operation, err)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+		return nil, 0, fmt.Errorf("%s: %w", operation, err)
 	}
 
 	collected, totalLines, scanErr := scanLines(stdoutPipe, startLine, maxLines)
@@ -239,10 +258,10 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 	waitErr := cmd.Wait()
 
 	if scanErr != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, scanErr)
+		return nil, 0, fmt.Errorf("%s: %w", operation, scanErr)
 	}
 	if waitErr != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, waitErr)
+		return nil, 0, fmt.Errorf("%s: %w", operation, waitErr)
 	}
 	return collected, totalLines, nil
 }
