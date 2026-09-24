@@ -801,6 +801,13 @@ type resumeInfoProvider interface {
 	ResumeInfo() *agent.ResumeInfo
 }
 
+// commentDeliveryProvider is implemented by agents that reconcile
+// code_comment submissions. Optional like resumeInfoProvider: agents
+// without it (scan) simply emit no delivery record.
+type commentDeliveryProvider interface {
+	CommentDelivery() *llmloop.CommentDeliveryReport
+}
+
 // emitRunResult is the post-LLM-run finalization shared by `ocr review` and
 // `ocr scan`: resolves comment line numbers, records telemetry, restores
 // stdout early for agent-text audiences so the summary is visible, prints
@@ -869,6 +876,10 @@ func emitRunResult(
 		})
 	}
 
+	var delivery *llmloop.CommentDeliveryReport
+	if p, ok := ag.(commentDeliveryProvider); ok {
+		delivery = p.CommentDelivery()
+	}
 	if outputFormat == "json" {
 		var resumeInfo *agent.ResumeInfo
 		if p, ok := ag.(resumeInfoProvider); ok {
@@ -881,7 +892,7 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, delivery)
 	}
 	if outputFormat == "sarif" {
 		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
@@ -891,6 +902,7 @@ func emitRunResult(
 	// run-level diagnostics about how the comments were obtained, so it reads
 	// after them but must not separate the summary from the end of output.
 	outputRetryReportText(out, retryReport)
+	outputCommentDeliveryText(out, delivery)
 	if summary := ag.ProjectSummary(); summary != "" {
 		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", sanitizeTerminal(summary))
 	}

@@ -390,3 +390,104 @@ func TestExecuteToolCall_CodeCommentNoReasoning(t *testing.T) {
 		t.Errorf("comments[0].Thinking = %q, want empty", comments[0].Thinking)
 	}
 }
+
+// TestExecuteToolCall_CodeCommentRejectionStaysUnrecovered drives the real
+// CodeComment branch with a rejected shape: the failure must be recorded
+// and — with no later acceptance, as when the run stops here — reconcile
+// as unrecovered, with record numbers correlating to failure_details.
+func TestExecuteToolCall_CodeCommentRejectionStaysUnrecovered(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+	r := NewRunner(Deps{Tools: reg, CommentCollector: collector})
+
+	cp := r.executeToolCall(context.Background(), "group-a", llm.ToolCall{
+		Function: llm.FunctionCall{Name: tool.CodeComment.Name(), Arguments: `{}`},
+	}, &session.TaskRecord{}, "")
+
+	if !strings.Contains(cp.Data, "'comments' array is required") {
+		t.Fatalf("cp.Data = %q, want rejection message", cp.Data)
+	}
+	got := r.CommentDelivery()
+	if got == nil || got.Unrecovered != 1 || len(got.ToolCallNumbers) != 1 {
+		t.Fatalf("CommentDelivery() = %+v, want 1 unrecovered number", got)
+	}
+	failures := r.ToolFailures()
+	found := false
+	for _, f := range failures {
+		if f.ToolCallNumber == got.ToolCallNumbers[0] && f.ToolName == tool.CodeComment.Name() {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("record number %d has no code_comment entry in failures %+v", got.ToolCallNumbers[0], failures)
+	}
+}
+
+// TestExecuteToolCall_CodeCommentRetryRecovers drives reject-then-accept
+// through the real branch: the later acceptance must clear the rejection.
+func TestExecuteToolCall_CodeCommentRetryRecovers(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+	r := NewRunner(Deps{Tools: reg, CommentCollector: collector})
+
+	rec := &session.TaskRecord{}
+	r.executeToolCall(context.Background(), "group-a", llm.ToolCall{
+		Function: llm.FunctionCall{Name: tool.CodeComment.Name(), Arguments: `{}`},
+	}, rec, "")
+	cp := r.executeToolCall(context.Background(), "group-a", llm.ToolCall{
+		Function: llm.FunctionCall{
+			Name:      tool.CodeComment.Name(),
+			Arguments: `{"comments":[{"content":"issue","existing_code":"foo","path":"a.go"}]}`,
+		},
+	}, rec, "")
+
+	if cp.Data != tool.CommentSucceed {
+		t.Fatalf("retry cp.Data = %q, want CommentSucceed", cp.Data)
+	}
+	got := r.CommentDelivery()
+	if got == nil {
+		t.Fatal("CommentDelivery() = nil, want a record after a rejection")
+	}
+	if got.Unrecovered != 0 || len(got.ToolCallNumbers) != 0 {
+		t.Errorf("CommentDelivery() = %+v, want fully recovered", got)
+	}
+}
+
+// TestExecuteToolCall_CodeCommentAsyncAcceptRecovers proves the parse-accept
+// hook fires on the worker-pool path too: without it the rejection below
+// would stay unrecovered.
+func TestExecuteToolCall_CodeCommentAsyncAcceptRecovers(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	pool := NewCommentWorkerPool(2)
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+	r := NewRunner(Deps{Tools: reg, CommentCollector: collector, CommentWorkerPool: pool})
+
+	rec := &session.TaskRecord{}
+	r.executeToolCall(context.Background(), "group-a", llm.ToolCall{
+		Function: llm.FunctionCall{Name: tool.CodeComment.Name(), Arguments: `{}`},
+	}, rec, "")
+	cp := r.executeToolCall(context.Background(), "group-a", llm.ToolCall{
+		Function: llm.FunctionCall{
+			Name:      tool.CodeComment.Name(),
+			Arguments: `{"comments":[{"content":"issue","existing_code":"foo","path":"a.go"}]}`,
+		},
+	}, rec, "")
+
+	if cp.Data != tool.CommentSucceed {
+		t.Fatalf("async cp.Data = %q, want CommentSucceed", cp.Data)
+	}
+	r.CollectPendingComments()
+	got := r.CommentDelivery()
+	if got == nil {
+		t.Fatal("CommentDelivery() = nil, want a record after a rejection")
+	}
+	if got.Unrecovered != 0 {
+		t.Errorf("CommentDelivery() = %+v, want async acceptance to recover", got)
+	}
+}

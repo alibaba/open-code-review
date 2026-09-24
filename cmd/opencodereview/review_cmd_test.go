@@ -4,12 +4,16 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
@@ -83,6 +87,35 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 	want := errors.New("dispatch failed")
 	if err := reviewResultError(want, budgetPartial); !errors.Is(err, want) {
 		t.Fatalf("run error not preserved: %v", err)
+	}
+}
+
+func TestReviewResultError_CompleteWithDeliveryCarriesRecordAndExitsZero(t *testing.T) {
+	// One harness for the full shape: failures recorded, terminal complete,
+	// the record carried in JSON, and exit 0 — proving the record is
+	// diagnostic, never an exit input.
+	ag := &mockResultProvider{
+		filesReviewed: 2,
+		manifest:      mockManifest(session.StateComplete),
+		toolFailures: []llmloop.ToolFailureDetail{
+			{ToolCallNumber: 5, ToolName: "code_comment", FilePath: "group-a", Arguments: `{}`, Error: "rejected"},
+		},
+		delivery: &llmloop.CommentDeliveryReport{Unrecovered: 1, ToolCallNumbers: []int64{5}},
+	}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.Status != string(session.StateComplete) || out.CommentDelivery == nil {
+		t.Fatalf("status/record = %q/%+v, want complete with a record", out.Status, out.CommentDelivery)
+	}
+	if err := reviewResultError(nil, ag.RunManifest()); err != nil {
+		t.Errorf("complete manifest with a delivery record must exit 0, got: %v", err)
 	}
 }
 

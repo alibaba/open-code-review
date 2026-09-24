@@ -111,6 +111,11 @@ type Runner struct {
 	toolCalls             map[string]int64
 	toolCallSequence      int64
 	toolFailures          []ToolFailureDetail
+	// codeCommentSuccess holds, per task key, the highest tool-call number
+	// of an accepted code_comment submission. A rejection counts as
+	// recovered when the same task saw a later acceptance, so recovery
+	// must compare within a task, never against a run-global maximum.
+	codeCommentSuccess map[string]int64
 	// toolFailureStreak counts each (taskKey, toolName) pair's consecutive
 	// failures; see tool_failure_streak.go.
 	toolFailureStreak toolFailureStreakState
@@ -119,6 +124,17 @@ type Runner struct {
 	// retry-report Freeze at the run boundary cannot observe an
 	// un-finalized request. See WaitBackground.
 	bg sync.WaitGroup
+}
+
+// CommentDeliveryReport reconciles code_comment submissions for one run.
+// It is present in machine-readable output only when at least one
+// code_comment call was rejected; Unrecovered counts the rejections no
+// later accepted submission superseded, and ToolCallNumbers identifies
+// them against tool_calls.failure_details. A later acceptance means the
+// model resubmitted — it does not prove no finding was lost.
+type CommentDeliveryReport struct {
+	Unrecovered     int     `json:"unrecovered"`
+	ToolCallNumbers []int64 `json:"tool_call_numbers"`
 }
 
 // ToolFailureDetail describes one failed registered-tool invocation.
@@ -249,6 +265,50 @@ func (r *Runner) recordToolFailure(number int64, name, taskKey, errMsg string,
 	if rec != nil {
 		rec.AddToolFailure(name, rawArguments, errMsg, duration)
 	}
+}
+
+// recordCodeCommentSuccess notes an accepted code_comment submission for
+// later reconciliation. Only the highest number per task matters: a
+// rejection is recovered exactly when its task saw a later acceptance.
+func (r *Runner) recordCodeCommentSuccess(number int64, taskKey string) {
+	r.toolCallsMu.Lock()
+	defer r.toolCallsMu.Unlock()
+	if r.codeCommentSuccess == nil {
+		r.codeCommentSuccess = make(map[string]int64)
+	}
+	if number > r.codeCommentSuccess[taskKey] {
+		r.codeCommentSuccess[taskKey] = number
+	}
+}
+
+// CommentDelivery reconciles this run's code_comment submissions. It
+// returns nil when no code_comment call was rejected, so callers can
+// omit the record from output entirely on clean runs.
+func (r *Runner) CommentDelivery() *CommentDeliveryReport {
+	r.toolCallsMu.Lock()
+	defer r.toolCallsMu.Unlock()
+
+	commentName := tool.CodeComment.Name()
+	rejected := false
+	// Non-nil so a fully recovered run marshals an explicit empty array,
+	// matching newJSONToolCalls' treatment of failure_details.
+	numbers := make([]int64, 0)
+	for _, f := range r.toolFailures {
+		if f.ToolName != commentName {
+			continue
+		}
+		rejected = true
+		if f.ToolCallNumber > r.codeCommentSuccess[f.FilePath] {
+			numbers = append(numbers, f.ToolCallNumber)
+		}
+	}
+	if !rejected {
+		return nil
+	}
+	// toolFailures appends in completion order, which concurrent groups
+	// can interleave; the record must read deterministically.
+	sort.Slice(numbers, func(i, j int) bool { return numbers[i] < numbers[j] })
+	return &CommentDeliveryReport{Unrecovered: len(numbers), ToolCallNumbers: numbers}
 }
 
 // RecordUsage adds the prompt/completion/cache tokens reported by an LLM
@@ -695,6 +755,10 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 			telemetry.PrintToolCallError(t.Name(), toolErr)
 			return r.toolFailureResult(taskKey, toolName, errMsg)
 		}
+		// Parse acceptance is the success point for both the sync path and
+		// the worker-pool path below, so reconciliation records it here,
+		// ahead of the split.
+		r.recordCodeCommentSuccess(toolCallNumber, taskKey)
 
 		// Batched comments share the turn's thinking.
 		if thinking != "" {
