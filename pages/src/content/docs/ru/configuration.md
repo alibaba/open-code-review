@@ -54,6 +54,8 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
+| `dashscope-codingplan` | openai | `https://coding.dashscope.aliyuncs.com/v1` | `DASHSCOPE_CODINGPLAN_KEY` |
+| `dashscope-codingplan-intl` | openai | `https://coding-intl.dashscope.aliyuncs.com/v1` | `DASHSCOPE_CODINGPLAN_INTL_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
 | `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
 | `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
@@ -70,6 +72,32 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+### Alibaba Cloud Coding Plan
+
+В `ocr config provider` выберите `dashscope-codingplan` для китайской подписки или `dashscope-codingplan-intl` для международной. Оба пресета используют существующий клиент OpenAI Chat Completions, включая вызовы инструментов при проверке кода и тест подключения `ocr llm test`.
+
+Для локальной настройки получите отдельный ключ `sk-sp-` в консоли Coding Plan:
+
+```bash
+ocr config set provider dashscope-codingplan
+ocr config set model qwen3.7-plus
+ocr config set providers.dashscope-codingplan.api_key "sk-sp-xxxxxxxxxx"
+ocr llm test
+```
+
+Для международной подписки используйте соответствующий ключ и пресет. Если `api_key` не задан, используется соответствующая переменная окружения:
+
+```bash
+ocr config set provider dashscope-codingplan-intl
+ocr config set model qwen3.7-plus
+export DASHSCOPE_CODINGPLAN_INTL_KEY="sk-sp-xxxxxxxxxx"
+ocr llm test
+```
+
+`dashscope-tokenplan` остаётся отдельным пресетом Token Plan со своим адресом, ключом и списком моделей. Coding Plan расходует квоту по числу вызовов модели; статистика token в OCR не показывает остаток квоты. Проверяйте использование и доступные модели в консоли плана. Не смешивайте ключи разных планов или оплаты по факту использования. Модель `mimo-v2.5` из другого плана не входит в список Coding Plan.
+
+Coding Plan предназначен для интерактивных инструментов разработки, а не для CI, серверных приложений или неинтерактивных пакетных задач. Актуальные модели и условия использования описаны в официальных руководствах для [Китая](https://help.aliyun.com/zh/model-studio/coding-plan) и [международной версии](https://www.alibabacloud.com/help/en/model-studio/coding-plan).
 
 ### Переопределение Base URL встроенного провайдера
 
