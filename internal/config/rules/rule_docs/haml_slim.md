@@ -1,9 +1,9 @@
-> Favor precision over recall: only raise an issue when the rendered consequence or trust boundary is clear. HAML and Slim are Ruby template languages that evaluate embedded Ruby, so distinguish their built-in HTML escaping from the validation or serialization required by the actual output context.
+> Favor precision over recall: only raise an issue when the rendered consequence or trust boundary is clear. HAML and Slim are Ruby template languages that evaluate embedded Ruby, and both are host-configurable — escaping depends on the engine options actually in effect rather than on a fixed language default — so distinguish the escaping the template really gets from the validation or serialization required by the actual output context.
 
 #### HAML and Slim Escaping and Output Contexts
 - Unescaped interpolation (`!=` in HAML, `==` in Slim) or `html_safe` / `raw` output that can receive untrusted HTML without prior, context-appropriate sanitization
 - Escaped interpolation (`=` in HAML, `=` in Slim) used inside JavaScript, CSS, JSON, URL, or event-handler syntax as though HTML escaping protected those grammars
-- Do not report ordinary `=` / `#{value}` in an HTML text node solely for lacking an explicit escape helper; both languages HTML-escape those forms by default
+- Do not report ordinary `=` / `#{value}` in an HTML text node solely for lacking an explicit escape helper **when escaping is confirmed active for the engine rendering it**. That guarantee is configuration-dependent, not a language default: HAML's bare `Haml::Engine` defaults to `escape_html: false` and only escapes when `:escape_html` is set or ActionView's XSS-safe mode applies (the usual Rails case, where an initializer can still turn it off), and Slim escapes through Temple's `Escapable` filter, which `:disable_escape` turns off. Before applying this exemption, verify the escaping is actually enabled for the template being reviewed; when it cannot be established, treat unescaped interpolation as a finding rather than suppressing it
 - Sanitized HTML rendered unescaped after transformations that invalidate the sanitizer's guarantee, such as concatenating new untrusted markup afterward
 
 #### Attributes, URLs, and Dynamic Markup

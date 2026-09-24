@@ -1,7 +1,7 @@
-> Favor precision over recall: only raise an issue when the rendered consequence or trust boundary is clear. ERB evaluates embedded Ruby, so distinguish ERB's own HTML escaping from the validation or serialization required by the actual output context.
+> Favor precision over recall: only raise an issue when the rendered consequence or trust boundary is clear. ERB itself only substitutes embedded Ruby — HTML escaping is supplied by the host (Rails escapes `<%= %>` by default, bare ERB does not escape at all) — so distinguish the escaping the host actually applies from the validation or serialization required by the actual output context.
 
 #### ERB Escaping and Output Contexts
-- Unescaped output (`<%-`) or `html_safe` / `raw` output that can receive untrusted HTML without prior, context-appropriate sanitization
+- Unescaped output — `html_safe` / `raw` strings, or `<%= %>` reaching markup after escaping has been bypassed — that can receive untrusted HTML without prior, context-appropriate sanitization
 - Escaped output (`<%= %>`) used inside JavaScript, CSS, JSON, URL, or event-handler syntax as though HTML escaping protected those grammars
 - Do not report ordinary `<%= value %>` in an HTML text node solely for lacking an explicit escape helper; Rails ERB HTML-escapes that form by default
 - Sanitized HTML rendered unescaped after transformations that invalidate the sanitizer's guarantee, such as concatenating new untrusted markup afterward
@@ -34,7 +34,7 @@
 - `while` or recursive constructs with a reachable non-terminating path, or expensive expressions and method calls repeated inside large loops
 
 #### Whitespace and Output Structure
-- Whitespace-sensitive output where ERB tags emit stray newlines that concatenate words or tokens, or where `<%-` / `-%>` trimming changes which text nodes are produced
+- Whitespace-sensitive output where ERB tags emit stray newlines that concatenate words or tokens, or where `<%-` / `-%>` trimming changes which text nodes are produced. `<%-` and `-%>` trim surrounding whitespace only; they are not an unescaped-output form — output is always produced by `<%= %>`, and escaping is a property of the value, not of the tag's dash
 - Literal HTML or plain-text blocks whose indentation looks like control-flow nesting but is emitted mostly unprocessed, producing a different structure than intended
 - Conditional branches that omit required empty or error states, or that render controls without the data their handlers need
 
