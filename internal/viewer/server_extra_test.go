@@ -454,6 +454,26 @@ func TestFocusCSS_CoversCollapsiblesAndTableLinks(t *testing.T) {
 				"these elements have no other visible focus indicator for keyboard users", selector)
 		}
 	}
+
+	// A rule that exists but keeps a positive offset is the bug this guards:
+	// .table-scroll computes overflow-y to auto, so a ring drawn outside the
+	// element is clipped away and keyboard users see nothing. Assert the
+	// effective offset, not merely that the selector is present.
+	for _, selector := range []string{
+		".sessions-page .session-id:focus-visible",
+		".repos-page .col-repository a:focus-visible",
+		".repos-page .repo-check:focus-visible",
+	} {
+		block := regexp.MustCompile(regexp.QuoteMeta(selector) + `\s*\{([^}]*)\}`).FindStringSubmatch(string(css))
+		if block == nil {
+			t.Errorf("style.css is missing the %q rule block", selector)
+			continue
+		}
+		if !strings.Contains(block[1], "outline-offset: -2px") {
+			t.Errorf("%s does not use outline-offset: -2px: the ring is drawn "+
+				"outside the element and .table-scroll clips it", selector)
+		}
+	}
 }
 
 func TestRenderTemplate_SessionPage(t *testing.T) {
@@ -1061,6 +1081,7 @@ func TestHandleSession_ServedPageKeepsStaticRefs(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`href="/static/style.css"`,
+		`src="/static/a11y.js"`,
 		`src="/static/pager.js"`,
 		`src="/static/session.js"`,
 		`<a href="/" class="nav-brand"`,
@@ -1117,8 +1138,8 @@ func TestResponsiveCSS_MetaOverrideComesAfterBase(t *testing.T) {
 	}
 	text := string(css)
 	base := strings.Index(text, ".session-page .meta span {\n    white-space: nowrap;\n}")
-	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;")
-	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;")
+	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;\n        flex-wrap: wrap;\n        overflow-wrap: anywhere;\n    }")
+	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;\n        overflow: visible;\n        text-overflow: clip;\n    }")
 	if base == -1 || normal == -1 || truncate == -1 {
 		t.Fatal("style.css is missing the session meta rules or their 768px overrides")
 	}
