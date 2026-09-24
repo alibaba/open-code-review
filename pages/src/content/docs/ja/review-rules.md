@@ -180,7 +180,6 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/*Tests.swift`
 - `**/Tests/**/*.swift`
 - `**/tests/**/*.elm`
-- `**/vendor/**/*.{jsonnet,libsonnet}`
 - `**/test/**/*.zig`
 - `**/*_test.zig`
 - `**/kitex_gen/**/*.go`
@@ -198,17 +197,47 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/tests/**/*.sol`
 - `**/test/**/*.vy`
 - `**/tests/**/*.vy`
-
-……および依存関係とビルド出力のディレクトリ:
-
 - `**/node_modules/**`
 - `**/bower_components/**`
-- `**/vendor/**`
-- `**/target/**`
+- `**/.pnpm-store/**`
+- `**/.yarn/{cache,unplugged,releases,sdks,patches}/**`
+- `**/.pnp.cjs`
+- `**/.pnp.loader.mjs`
+- `**/package-lock.json`
+- `**/pnpm-lock.yaml`
+- `**/npm-shrinkwrap.json`
+- `**/*.min.{js,css}`
 - `**/dist/**`
-- `**/__pycache__/**`、`**/.venv/**`、`**/site-packages/**`
-- `**/Pods/**`、`**/Carthage/**`
-- `**/.next/**`、`**/.nuxt/**`、`**/.gradle/**`、`**/.terraform/**`……
+- `**/.next/**`
+- `**/.nuxt/**`
+- `**/.svelte-kit/**`
+- `**/.astro/**`
+- `**/.turbo/**`
+- `**/.angular/**`
+- `**/.parcel-cache/**`
+- `**/.docusaurus/**`
+- `**/vendor/**`
+- `**/.bundle/**`
+- `**/target/**`
+- `**/.gradle/**`
+- `**/__pycache__/**`
+- `**/.venv/**`
+- `**/venv/**`
+- `**/site-packages/**`
+- `**/*.egg-info/**`
+- `**/.tox/**`
+- `**/.mypy_cache/**`
+- `**/.pytest_cache/**`
+- `**/.ruff_cache/**`
+- `**/Pods/**`
+- `**/Carthage/**`
+- `**/.build/**`
+- `**/obj/**`
+- `**/.dart_tool/**`
+- `**/.terraform/**`
+- `**/.terraform.lock.hcl`
+- `**/.stack-work/**`
+- `**/coverage/lcov-report/**`
 
 `**/build/**` と `**/bin/**` は意図的に含めていません。手書きのソースをそこに置くプロジェクトが多いためです。
 

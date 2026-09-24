@@ -207,7 +207,6 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/*Tests.swift`
 - `**/Tests/**/*.swift`
 - `**/tests/**/*.elm`
-- `**/vendor/**/*.{jsonnet,libsonnet}`
 - `**/test/**/*.zig`
 - `**/*_test.zig`
 - `**/kitex_gen/**/*.go`
@@ -225,17 +224,47 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/tests/**/*.sol`
 - `**/test/**/*.vy`
 - `**/tests/**/*.vy`
-
-……以及依赖目录和构建产物目录：
-
 - `**/node_modules/**`
 - `**/bower_components/**`
-- `**/vendor/**`
-- `**/target/**`
+- `**/.pnpm-store/**`
+- `**/.yarn/{cache,unplugged,releases,sdks,patches}/**`
+- `**/.pnp.cjs`
+- `**/.pnp.loader.mjs`
+- `**/package-lock.json`
+- `**/pnpm-lock.yaml`
+- `**/npm-shrinkwrap.json`
+- `**/*.min.{js,css}`
 - `**/dist/**`
-- `**/__pycache__/**`, `**/.venv/**`, `**/site-packages/**`
-- `**/Pods/**`, `**/Carthage/**`
-- `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
+- `**/.next/**`
+- `**/.nuxt/**`
+- `**/.svelte-kit/**`
+- `**/.astro/**`
+- `**/.turbo/**`
+- `**/.angular/**`
+- `**/.parcel-cache/**`
+- `**/.docusaurus/**`
+- `**/vendor/**`
+- `**/.bundle/**`
+- `**/target/**`
+- `**/.gradle/**`
+- `**/__pycache__/**`
+- `**/.venv/**`
+- `**/venv/**`
+- `**/site-packages/**`
+- `**/*.egg-info/**`
+- `**/.tox/**`
+- `**/.mypy_cache/**`
+- `**/.pytest_cache/**`
+- `**/.ruff_cache/**`
+- `**/Pods/**`
+- `**/Carthage/**`
+- `**/.build/**`
+- `**/obj/**`
+- `**/.dart_tool/**`
+- `**/.terraform/**`
+- `**/.terraform.lock.hcl`
+- `**/.stack-work/**`
+- `**/coverage/lcov-report/**`
 
 `**/build/**` 和 `**/bin/**` 有意不在其中：很多项目会把手写源码放在这两个目录下。
 
