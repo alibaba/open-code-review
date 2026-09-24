@@ -98,6 +98,16 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 			return r.toolFailureResult(taskKey, toolName, errMsg)
 		}
 
+		// Parse acceptance is the success point for both the sync path and
+		// the worker-pool path below, so reconciliation records it here,
+		// ahead of the split — but only when the batch actually submitted a
+		// finding: an acceptance that submitted nothing must not recover an
+		// earlier rejection. (Main rejects zero-valid batches outright, so
+		// this gate guards the record rather than model-visible behavior.)
+		if len(comments) > 0 {
+			r.RecordCodeCommentSuccess(toolCallNumber, taskKey)
+		}
+
 		// Batched comments share the turn's thinking.
 		if thinking != "" {
 			for i := range comments {
