@@ -37,7 +37,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 30
     container:
-      image: node:24
+      image: node:24-trixie
     if: github.event_name == 'pull_request_target'
     steps:
       # Materialize action.yml + scripts/ into the workspace so the local
