@@ -51,6 +51,23 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     ],
   },
   {
+    name: 'qwen-cloud',
+    displayName: 'Qwen Cloud Token Plan API',
+    protocol: 'openai',
+    baseUrl: 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
+    envVar: 'QWEN_CLOUD_API_KEY',
+    models: [
+      'qwen3.8-max',
+      'qwen3.8-flash',
+      'qwen3.7-max',
+      'qwen3.7-plus',
+      'deepseek-v4-pro',
+      'deepseek-v4.1-flash',
+      'glm-5.3',
+      'glm-5.2',
+    ],
+  },
+  {
     name: 'volcengine',
     displayName: 'Volcano Engine Ark API',
     protocol: 'openai',
