@@ -6,6 +6,7 @@ package diff
 import (
 	"strings"
 
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -46,7 +47,7 @@ func ResolveLineNumbers(comments []model.LlmComment, diffs []model.Diff) []model
 		}
 
 		// Primary: try matching from deleted/context lines in diff hunks
-		if resolveFromHunk(d, cm) {
+		if _, ok := resolveFromHunk(d, cm); ok {
 			continue
 		}
 
@@ -60,16 +61,27 @@ func ResolveLineNumbers(comments []model.LlmComment, diffs []model.Diff) []model
 // ResolveComment attempts to resolve StartLine/EndLine for a single comment
 // by matching ExistingCode against the diff. Returns true on success.
 func ResolveComment(cm *model.LlmComment, d *model.Diff) bool {
+	_, ok := ResolveCommentSide(cm, d)
+	return ok
+}
+
+// ResolveCommentSide attempts to resolve StartLine/EndLine for a single
+// comment and reports which file side supplied the match. A comment that
+// already has line numbers remains located but has unknown provenance.
+func ResolveCommentSide(cm *model.LlmComment, d *model.Diff) (location.Side, bool) {
 	if cm.StartLine > 0 || cm.EndLine > 0 {
-		return true
+		return location.SideUnknown, true
 	}
 	if cm.ExistingCode == "" {
-		return false
+		return location.SideUnknown, false
 	}
-	if resolveFromHunk(d, cm) {
-		return true
+	if side, ok := resolveFromHunk(d, cm); ok {
+		return side, true
 	}
-	return resolveFromFileContent(d, cm)
+	if resolveFromFileContent(d, cm) {
+		return location.SideNew, true
+	}
+	return location.SideUnknown, false
 }
 
 // RelocateAcrossFiles handles the comment whose ExistingCode belongs to a
@@ -98,13 +110,21 @@ func ResolveComment(cm *model.LlmComment, d *model.Diff) bool {
 // cm.Path is skipped because its own file has already been tried, and probing
 // happens on a copy so a failed candidate cannot leave line numbers behind.
 func RelocateAcrossFiles(cm *model.LlmComment, diffs []model.Diff) (string, bool) {
+	path, _, ok := RelocateAcrossFilesWithSide(cm, diffs)
+	return path, ok
+}
+
+// RelocateAcrossFilesWithSide is RelocateAcrossFiles with the resolved source
+// side included in its result.
+func RelocateAcrossFilesWithSide(cm *model.LlmComment, diffs []model.Diff) (string, location.Side, bool) {
 	if cm == nil || cm.ExistingCode == "" || len(diffs) == 0 {
-		return "", false
+		return "", location.SideUnknown, false
 	}
 
 	type hit struct {
 		path       string
 		start, end int
+		side       location.Side
 	}
 	var hits []hit
 
@@ -115,27 +135,28 @@ func RelocateAcrossFiles(cm *model.LlmComment, diffs []model.Diff) (string, bool
 		}
 		probe := *cm
 		probe.StartLine, probe.EndLine = 0, 0
-		if !ResolveComment(&probe, d) {
+		side, ok := ResolveCommentSide(&probe, d)
+		if !ok {
 			continue
 		}
 		path := d.NewPath
 		if path == "" {
 			path = d.OldPath
 		}
-		hits = append(hits, hit{path: path, start: probe.StartLine, end: probe.EndLine})
+		hits = append(hits, hit{path: path, start: probe.StartLine, end: probe.EndLine, side: side})
 		if len(hits) > 1 {
 			// Ambiguous already; no verdict can come from looking further.
-			return "", false
+			return "", location.SideUnknown, false
 		}
 	}
 
 	if len(hits) != 1 {
-		return "", false
+		return "", location.SideUnknown, false
 	}
 	cm.Path = hits[0].path
 	cm.StartLine = hits[0].start
 	cm.EndLine = hits[0].end
-	return hits[0].path, true
+	return hits[0].path, hits[0].side, true
 }
 
 // indexedLine pairs a normalized line with its absolute file line number.
@@ -148,15 +169,15 @@ type indexedLine struct {
 // against hunk lines. It tries the new-side first (context + added lines →
 // new-file line numbers), then falls back to old-side (context + deleted →
 // old-file line numbers).
-func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
+func resolveFromHunk(d *model.Diff, cm *model.LlmComment) (location.Side, bool) {
 	hunks := ParseHunks(d.Diff)
 	if len(hunks) == 0 {
-		return false
+		return location.SideUnknown, false
 	}
 
 	targetLines := splitAndNormalize(cm.ExistingCode)
 	if len(targetLines) == 0 {
-		return false
+		return location.SideUnknown, false
 	}
 
 	for i := range hunks {
@@ -164,7 +185,7 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 		if start, end, ok := matchConsecutive(newSide, targetLines); ok {
 			cm.StartLine = start
 			cm.EndLine = end
-			return true
+			return location.SideNew, true
 		}
 	}
 
@@ -173,11 +194,11 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 		if start, end, ok := matchConsecutive(oldSide, targetLines); ok {
 			cm.StartLine = start
 			cm.EndLine = end
-			return true
+			return location.SideOld, true
 		}
 	}
 
-	return false
+	return location.SideUnknown, false
 }
 
 // extractSideLines extracts one side of the diff from a hunk.

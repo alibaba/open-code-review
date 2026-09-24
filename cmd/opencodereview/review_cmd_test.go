@@ -4,14 +4,60 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/ghpost"
+	"github.com/alibaba/open-code-review/internal/location"
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 )
+
+func TestGitHubFindingsMapsSidesAndFailsClosedWhenMissing(t *testing.T) {
+	comments := []model.LlmComment{{Content: "old"}, {Content: "new"}, {Content: "legacy"}}
+	findings := githubFindings(comments, []location.Side{location.SideOld, location.SideNew})
+	want := []ghpost.Side{ghpost.SideOld, ghpost.SideNew, ghpost.SideUnknown}
+	for i := range want {
+		if findings[i].Side != want[i] || findings[i].Comment.Content != comments[i].Content {
+			t.Fatalf("finding %d = %+v, want side %q", i, findings[i], want[i])
+		}
+	}
+}
+
+func TestGitHubPostingErrorIsReturnedWithoutLogging(t *testing.T) {
+	originalStderr := os.Stderr
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = writer
+	t.Cleanup(func() { os.Stderr = originalStderr })
+
+	sentinel := errors.New("delivery failed")
+	got := githubPostingError(sentinel)
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	os.Stderr = originalStderr
+	var output bytes.Buffer
+	if _, err := io.Copy(&output, reader); err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close stderr reader: %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("githubPostingError wrote stderr: %q", output.String())
+	}
+	if !errors.Is(got, sentinel) || !strings.Contains(got.Error(), "post review to GitHub") {
+		t.Fatalf("githubPostingError = %v", got)
+	}
+}
 
 func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
 	err := validateReviewRefs(t.TempDir(), reviewOptions{commit: "-O./pwn.sh"})
@@ -86,6 +132,33 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 	}
 }
 
+func TestGitHubPostingTargetUsesManifestIdentity(t *testing.T) {
+	manifest := &session.RunManifest{Input: session.ManifestInput{
+		Mode:          session.InputModeRange,
+		RequestedFrom: "origin/main",
+		ResolvedBase:  "base-sha",
+		ResolvedHead:  "head-sha",
+		ExactRange:    "base-sha..head-sha",
+	}}
+	target, err := githubPostingTargetFromManifest("/repo", manifest)
+	if err != nil {
+		t.Fatalf("githubPostingTargetFromManifest: %v", err)
+	}
+	if target.RepoDir != "/repo" || target.BaseRef != "origin/main" || target.ResolvedBase != "base-sha" || target.ResolvedHead != "head-sha" {
+		t.Fatalf("target = %+v", target)
+	}
+
+	for name, broken := range map[string]*session.RunManifest{
+		"missing":      nil,
+		"workspace":    {Input: session.ManifestInput{Mode: session.InputModeWorkspace}},
+		"missing base": {Input: session.ManifestInput{Mode: session.InputModeRange, RequestedFrom: "main", ResolvedHead: "head"}},
+	} {
+		if _, err := githubPostingTargetFromManifest("/repo", broken); err == nil {
+			t.Errorf("%s manifest was accepted", name)
+		}
+	}
+}
+
 func TestValidateReviewRefsRejectsOptionLikeRangeRef(t *testing.T) {
 	err := validateReviewRefs(t.TempDir(), reviewOptions{to: "-O./pwn.sh"})
 	if err == nil {
@@ -140,5 +213,21 @@ func TestParseReviewFlagsAllowsFromAndTo(t *testing.T) {
 	}
 	if opts.from != "main" || opts.to != "HEAD" {
 		t.Fatalf("unexpected opts: from=%q to=%q", opts.from, opts.to)
+	}
+}
+
+func TestValidateReviewOptionsRejectsPostToPRWithoutRange(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	opts := reviewOptions{postToPR: true, audience: "human"}
+	if err := validateReviewOptions(&opts); err == nil || !strings.Contains(err.Error(), "requires --from and --to") {
+		t.Fatalf("error = %v, want range-mode requirement", err)
+	}
+}
+
+func TestValidateReviewOptionsRejectsPostToPRWithoutToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	opts := reviewOptions{from: "master", to: "main", postToPR: true, audience: "human"}
+	if err := validateReviewOptions(&opts); err == nil || !strings.Contains(err.Error(), "GitHub token") {
+		t.Fatalf("error = %v, want missing-token rejection", err)
 	}
 }
