@@ -3,7 +3,7 @@ SPDX-License-Identifier: Apache-2.0
 Copyright 2026 alibaba/open-code-review Contributors
 */}}
 {{define "app-header"}}
-<nav class="breadcrumb">{{template "nav-brand" true}}{{template "breadcrumbs" .}}</nav>
+<nav class="breadcrumb">{{template "nav-brand" true}}{{template "breadcrumbs" .}}{{template "theme-toggle"}}{{end}}
 {{end}}
 
 {{/* The brand, linked to "/" or not. The flag is the partial's dot rather than
@@ -11,3 +11,5 @@ Copyright 2026 alibaba/open-code-review Contributors
      not all of them carry Static. The exported session page passes false:
      "/" is dead over file://. */}}
 {{define "nav-brand"}}{{if .}}<a href="/" class="nav-brand">{{else}}<span class="nav-brand">{{end}}<span class="brand-icon" aria-hidden="true">{{icon "logo"}}</span>Open Code Review Viewer{{if .}}</a>{{else}}</span>{{end}}{{end}}
+
+{{define "theme-toggle"}}<button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">☀</button>{{end}}
