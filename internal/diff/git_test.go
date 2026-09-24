@@ -152,17 +152,15 @@ func TestGetDiffSetWalksChangesetOrder(t *testing.T) {
 	}
 }
 
-func TestGetDiffSetWalksChangesetOrderAcrossGitignoreDrop(t *testing.T) {
+func TestGetDiffSetWalksChangesetOrderWithTrackedIgnoredFile(t *testing.T) {
 	repo := t.TempDir()
 	runGitTest(t, repo, "init", "-q")
 	runGitTest(t, repo, "config", "user.email", "test@example.com")
 	runGitTest(t, repo, "config", "user.name", "Test User")
 	runGitTest(t, repo, "config", "commit.gpgsign", "false")
 
-	// skip.log is tracked so git diff still emits it; partitionDiffs then
-	// drops it, which is the case excludedAt must not count.
+	// skip.log is tracked, so matching .gitignore must not drop it.
 	all := []string{"a.go", "skip.log", "target/mid.go", "z.go"}
-	want := []string{"a.go", "target/mid.go", "z.go"}
 	write := func(content string) {
 		t.Helper()
 		for _, p := range all {
@@ -195,11 +193,11 @@ func TestGetDiffSetWalksChangesetOrderAcrossGitignoreDrop(t *testing.T) {
 		got = append(got, d.NewPath)
 		flags = append(flags, providerExcluded)
 	})
-	if !slices.Equal(got, want) {
-		t.Errorf("ForEachInOrder paths = %v, want %v", got, want)
+	if !slices.Equal(got, all) {
+		t.Errorf("ForEachInOrder paths = %v, want %v", got, all)
 	}
-	if len(flags) != 3 || flags[0] || !flags[1] || flags[2] {
-		t.Errorf("providerExcluded flags = %v, want [false true false]", flags)
+	if !slices.Equal(flags, []bool{false, false, true, false}) {
+		t.Errorf("providerExcluded flags = %v, want [false false true false]", flags)
 	}
 }
 
@@ -764,5 +762,57 @@ func TestCommitDiffMergeCommitReviewsFirstParentDiff(t *testing.T) {
 	}
 	if d.NewFileContent == "" {
 		t.Error("NewFileContent is empty: content was not read at the merge commit")
+	}
+}
+
+// Issue #1121: staged additions matching .gitignore vanished from
+// workspace review; only untracked ignored files stay excluded.
+func TestWorkspaceDiffKeepsStagedFileMatchingGitignore(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile := func(rel, content string) {
+		t.Helper()
+		full := filepath.Join(repo, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	writeFile(".gitignore", "build/\n")
+	writeFile("src/app.go", "package app\n\nconst Version = 1\n")
+	runGitTest(t, repo, "add", ".gitignore", "src/app.go")
+	runGitTest(t, repo, "commit", "-q", "-m", "initial commit")
+
+	// Tracked modification, force-added new file, and an untracked ignored file.
+	writeFile("src/app.go", "package app\n\nconst Version = 2\n")
+	writeFile("src/ui/build/lib/helper.go", "package lib\n\nfunc Helper() {}\n")
+	writeFile("src/ui/build/lib/generated.go", "package lib\n\nfunc Generated() {}\n")
+	runGitTest(t, repo, "add", "-f", "src/ui/build/lib/helper.go")
+
+	provider := NewWorkspaceProvider(repo, gitcmd.New(0))
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff (workspace) returned error: %v", err)
+	}
+
+	paths := make(map[string]bool, len(diffs))
+	for _, d := range diffs {
+		paths[d.NewPath] = true
+	}
+	if !paths["src/app.go"] {
+		t.Errorf("modified tracked file missing from workspace diff; got %v", paths)
+	}
+	if !paths["src/ui/build/lib/helper.go"] {
+		t.Errorf("staged new file matching .gitignore was dropped; got %v", paths)
+	}
+	if paths["src/ui/build/lib/generated.go"] {
+		t.Errorf("untracked ignored file must stay excluded; got %v", paths)
 	}
 }
