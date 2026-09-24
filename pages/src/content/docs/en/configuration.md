@@ -69,38 +69,6 @@ environment variable.
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
-### OpenRouter
-
-Select **OpenRouter** in `ocr config provider`, choose a model, and enter your
-OpenRouter API key (or use `OPENROUTER_API_KEY`). OpenRouter uses the
-OpenAI-compatible Chat Completions protocol even when the selected model is
-from another vendor. Run `ocr config model` to switch models later using the
-same saved key. This includes switching across vendors; direct providers also
-let you reuse their key for models within their own service.
-
-The CLI offers a built-in list of model suggestions. To use another model,
-choose **Enter custom model name...** and copy its exact ID from the
-[OpenRouter catalog](https://openrouter.ai/models), such as
-`anthropic/claude-fable-5.1`. Keep any variant suffix, such as `:free`.
-Choose a model that supports tool calling for OCR's review workflow;
-`ocr llm test` checks basic connectivity, not tool calling.
-
-For non-interactive setup:
-
-```bash
-export OPENROUTER_API_KEY="your-openrouter-api-key"
-ocr config set provider openrouter
-ocr config set model anthropic/claude-fable-5.1
-ocr llm test
-```
-
-To also make a model available with `--model`, add it to
-`providers.openrouter.models`:
-
-```bash
-ocr config set providers.openrouter.models '["anthropic/claude-fable-5.1"]'
-```
-
 ### Overriding a built-in provider's Base URL
 
 Every built-in provider has a preset Base URL (shown in the table above).
