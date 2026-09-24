@@ -122,15 +122,24 @@ make build
 ├── internal/
 │   ├── agent/            # 评审 Agent 逻辑
 │   ├── config/           # 配置管理
+│   ├── delegate/         # 委派模式的确定性 spec 生成
 │   ├── diff/             # Git diff 解析
+│   ├── gitcmd/           # git 子进程执行器
 │   ├── llm/              # LLM API 客户端（Anthropic & OpenAI）
+│   ├── llmloop/          # review 与 scan 共用的 LLM 工具循环
+│   ├── mcp/              # MCP 客户端与工具注册
 │   ├── model/            # 数据模型
+│   ├── pathutil/         # 路径规范化与包含关系检查
+│   ├── release/          # 发布产物命名检查
+│   ├── scan/             # 全文件扫描（ocr scan）
 │   ├── session/          # 评审会话管理
-│   ├── tool/             # 内置工具（file_read, code_search 等）
+│   ├── stdout/           # stdout 静默/重定向
+│   ├── suggestdiff/      # CLI 建议的行级 diff
 │   ├── telemetry/        # OpenTelemetry 集成
+│   ├── tool/             # 内置工具（file_read, code_search 等）
 │   └── viewer/           # WebUI 会话查看器
-├── pages/                # WebUI 前端
-├── scripts/              # 构建和安装脚本
+├── pages/                # 已部署的文档站
+├── scripts/              # Web 运维与杂务脚本
 └── bin/                  # NPM 包装器
 ```
 

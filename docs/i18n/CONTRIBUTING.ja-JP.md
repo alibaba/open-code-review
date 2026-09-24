@@ -122,15 +122,24 @@ make build
 ├── internal/
 │   ├── agent/            # レビューエージェントのロジック
 │   ├── config/           # 設定管理
+│   ├── delegate/         # 委譲モードの決定的な仕様生成
 │   ├── diff/             # Git diffのパース
+│   ├── gitcmd/           # gitサブプロセス実行
 │   ├── llm/              # LLM APIクライアント（Anthropic & OpenAI）
+│   ├── llmloop/          # reviewとscanで共有するLLMツールループ
+│   ├── mcp/              # MCPクライアントとツール登録
 │   ├── model/            # データモデル
+│   ├── pathutil/         # パスの正規化と包含判定
+│   ├── release/          # リリース成果物の命名チェック
+│   ├── scan/             # 全ファイルスキャン（ocr scan）
 │   ├── session/          # レビューセッション管理
-│   ├── tool/             # 組み込みツール（file_read、code_searchなど）
+│   ├── stdout/           # stdoutの抑制・リダイレクト
+│   ├── suggestdiff/      # CLI向けの行単位の提案diff
 │   ├── telemetry/        # OpenTelemetry統合
+│   ├── tool/             # 組み込みツール（file_read、code_searchなど）
 │   └── viewer/           # WebUIセッションビューアー
-├── pages/                # WebUIフロントエンド
-├── scripts/              # ビルド & インストールスクリプト
+├── pages/                # デプロイ済みドキュメント
+├── scripts/              # Web運用と雑務
 └── bin/                  # NPMラッパー
 ```
 

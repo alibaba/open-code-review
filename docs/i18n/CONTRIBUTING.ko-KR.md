@@ -123,15 +123,24 @@ make build
 ├── internal/
 │   ├── agent/            # Review agent logic
 │   ├── config/           # Configuration management
+│   ├── delegate/         # Delegation-mode spec generation
 │   ├── diff/             # Git diff parsing
+│   ├── gitcmd/           # Git subprocess runner
 │   ├── llm/              # LLM API client (Anthropic & OpenAI)
+│   ├── llmloop/          # Shared LLM tool-use loop
+│   ├── mcp/              # MCP client and tool registration
 │   ├── model/            # Data models
+│   ├── pathutil/         # Path canonicalization and containment
+│   ├── release/          # Release asset naming checks
+│   ├── scan/             # Full-file scan (ocr scan)
 │   ├── session/          # Review session management
-│   ├── tool/             # Built-in tools (file_read, code_search, etc.)
+│   ├── stdout/           # Stdout quiet/redirect helper
+│   ├── suggestdiff/      # Line-level suggestion diffs for CLI
 │   ├── telemetry/        # OpenTelemetry integration
+│   ├── tool/             # Built-in tools (file_read, code_search, etc.)
 │   └── viewer/           # WebUI session viewer
-├── pages/                # WebUI frontend
-├── scripts/              # Build & install scripts
+├── pages/                # 배포된 문서
+├── scripts/              # 웹 운영 및 잡무
 └── bin/                  # NPM wrapper
 ```
 
