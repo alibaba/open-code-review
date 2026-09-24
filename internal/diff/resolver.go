@@ -214,10 +214,16 @@ func extractSideLines(hunk *Hunk, newSide bool) []indexedLine {
 }
 
 // matchConsecutive scans sideLines for a consecutive run matching all targetLines.
+// A second, distinct match elsewhere in sideLines makes the location ambiguous:
+// rather than guess between them (trading one wrong location for another, the
+// same trade-off RelocateAcrossFiles already declines above), it reports no
+// match at all so the caller's existing fallback chain gets a chance to
+// disambiguate instead.
 func matchConsecutive(sideLines []indexedLine, targetLines []string) (startLine, endLine int, found bool) {
 	if len(targetLines) == 0 || len(sideLines) < len(targetLines) {
 		return 0, 0, false
 	}
+	matchStart := -1
 	for i := 0; i <= len(sideLines)-len(targetLines); i++ {
 		matched := true
 		for j, target := range targetLines {
@@ -226,11 +232,18 @@ func matchConsecutive(sideLines []indexedLine, targetLines []string) (startLine,
 				break
 			}
 		}
-		if matched {
-			return sideLines[i].lineNum, sideLines[i+len(targetLines)-1].lineNum, true
+		if !matched {
+			continue
 		}
+		if matchStart >= 0 {
+			return 0, 0, false
+		}
+		matchStart = i
 	}
-	return 0, 0, false
+	if matchStart < 0 {
+		return 0, 0, false
+	}
+	return sideLines[matchStart].lineNum, sideLines[matchStart+len(targetLines)-1].lineNum, true
 }
 
 // resolveFromFileContent scans the new file content line-by-line for consecutive
@@ -249,37 +262,22 @@ func resolveFromFileContent(d *model.Diff, cm *model.LlmComment) bool {
 	// Normalize file lines the same way as target: skip blanks so that
 	// blank lines in the source don't break the sliding-window match.
 	// "Consecutive" here means adjacent non-blank lines.
-	normalizedFileLines := make([]string, 0, len(fileLines))
-	fileLineNums := make([]int, 0, len(fileLines))
+	var fileSideLines []indexedLine
 	for i, line := range fileLines {
 		n := normalizeLine(strings.TrimRight(line, "\r"))
 		if n == "" {
 			continue
 		}
-		normalizedFileLines = append(normalizedFileLines, n)
-		fileLineNums = append(fileLineNums, i+1)
+		fileSideLines = append(fileSideLines, indexedLine{i + 1, n})
 	}
 
-	if len(normalizedFileLines) < len(targetLines) {
+	start, end, ok := matchConsecutive(fileSideLines, targetLines)
+	if !ok {
 		return false
 	}
-
-	for i := 0; i <= len(normalizedFileLines)-len(targetLines); i++ {
-		matched := true
-		for j, target := range targetLines {
-			if normalizedFileLines[i+j] != target {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			cm.StartLine = fileLineNums[i]
-			cm.EndLine = fileLineNums[i+len(targetLines)-1]
-			return true
-		}
-	}
-
-	return false
+	cm.StartLine = start
+	cm.EndLine = end
+	return true
 }
 
 // splitAndNormalize splits code text into lines and normalizes each one.
