@@ -286,10 +286,11 @@ main tool-use loop never blocks on post-processing:
 
 1. **Line resolution** (in-worker) — `existing_code` is matched against
    the diff using a sliding-window algorithm to compute precise
-   `start_line` / `end_line`. If matching fails, both default to `0` — a
-   `0` line range is the implicit signal for an "unanchored" comment the
-   user must locate manually (there is no stored flag; downstream
-   consumers check `start_line == 0`).
+   `start_line` / `end_line` and the matching diff `side` (`RIGHT` for the
+   post-change file, `LEFT` for deleted code). If matching fails, both line
+   fields default to `0` and `side` is omitted — a `0` line range is the
+   implicit signal for an "unanchored" comment the user must locate manually
+   (there is no stored flag; downstream consumers check `start_line == 0`).
 2. **Re-location task** *(optional fallback)* — when line resolution
    fails on a non-trivial diff, OCR runs the `RE_LOCATION_TASK` prompt
    asking the model to re-anchor the snippet. Useful for paraphrased

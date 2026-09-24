@@ -130,6 +130,7 @@ func toLlmComments(comments []*ReviewComment) []model.LlmComment {
 			ExistingCode:   c.ExistingCode,
 			StartLine:      c.StartLine,
 			EndLine:        c.EndLine,
+			Side:           c.Side,
 			Category:       c.Category,
 			Severity:       c.Severity,
 		})

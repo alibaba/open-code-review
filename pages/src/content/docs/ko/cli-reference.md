@@ -301,6 +301,7 @@ ocr review --format json | jq .summary   # stdout은 JSON 문서 하나입니다
       "content": "Concurrent map access without a lock — wrap with sync.RWMutex.",
       "start_line": 42,
       "end_line": 47,
+      "side": "RIGHT",
       "existing_code": "m[k] = v",
       "suggestion_code": "mu.Lock(); defer mu.Unlock(); m[k] = v",
       "thinking": "Looking at line 42, the map …"
@@ -321,6 +322,8 @@ ocr review --format json | jq .summary   # stdout은 JSON 문서 하나입니다
 | `warnings` | 선택. 서브 Agent가 하나 이상 실패했을 때 나오며, 각 항목이 해당 파일과 오류를 설명합니다. |
 | `session_id` | 선택. 세션을 남긴 실행에 나옵니다. 호환되는 range나 commit 리뷰를 다시 시도할 때 `ocr review --resume <session-id>`에 넘기세요. |
 | `resume` | 선택. 이어서 한 실행에 나오며 `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, `current_model`을 담습니다. |
+
+위치가 해결된 각 코멘트에는 `side`도 포함됩니다. `RIGHT`는 변경 후 파일을, `LEFT`는 삭제된 코드가 있던 변경 전 파일을 뜻합니다. 위치를 해결하지 못한 코멘트에서는 생략됩니다.
 
 리뷰 대상 파일이 하나도 없으면 JSON 모드는 대신 `skipped` 응답을 내보냅니다. 호출한
 쪽에서 "변경 없음"과 "지적 없음"을 구분할 수 있습니다:

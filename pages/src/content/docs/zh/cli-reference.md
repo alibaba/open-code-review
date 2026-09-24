@@ -287,6 +287,7 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
       "content": "Concurrent map access without a lock — wrap with sync.RWMutex.",
       "start_line": 42,
       "end_line": 47,
+      "side": "RIGHT",
       "existing_code": "m[k] = v",
       "suggestion_code": "mu.Lock(); defer mu.Unlock(); m[k] = v",
       "thinking": "Looking at line 42, the map …"
@@ -307,6 +308,8 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
 | `warnings` | 可选。当一个或多个子 agent 失败时存在；每条描述受影响文件与错误。 |
 | `session_id` | 可选。持久化的评审运行会包含该字段；重试兼容的区间或单 commit 评审时可传给 `ocr review --resume <session-id>`。 |
 | `resume` | 可选。恢复运行时存在，包含 `resumed_from`、`reused_files`、`rerun_files`、`previous_model` 和 `current_model`。 |
+
+每条已定位的评论还会包含 `side`：`RIGHT` 表示变更后的文件，`LEFT` 表示删除代码所在的变更前文件。无法定位的评论会省略该字段。
 
 当没有文件可评审时，JSON 模式会发一个 `skipped` 外壳，以便调用方区分“无变更”
 与“无发现”：

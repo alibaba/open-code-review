@@ -48,9 +48,14 @@ describe('parseCliResult', () => {
     expect(r.status).toBe('success');
     expect(r.comments[0]).toEqual({
       path: 'src/a.ts', content: 'bug', startLine: 10, endLine: 12,
-      suggestionCode: 'fix', existingCode: 'old', thinking: undefined,
+      suggestionCode: 'fix', existingCode: 'old', thinking: undefined, side: undefined,
     });
     expect(r.summary?.filesReviewed).toBe(2);
+  });
+
+  it.each(['LEFT', 'RIGHT'])('preserves explicit %s coordinates', (side) => {
+    const r = parseCliResult(JSON.stringify({status: 'success', comments: [{path: 'a.ts', content: 'issue', start_line: 2, end_line: 2, side}]}));
+    expect(r.comments[0].side).toBe(side);
   });
 
   it('returns no comments for skipped status', () => {

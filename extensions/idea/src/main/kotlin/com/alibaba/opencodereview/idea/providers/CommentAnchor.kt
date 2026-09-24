@@ -3,6 +3,8 @@
 
 package com.alibaba.opencodereview.idea.providers
 
+import com.alibaba.opencodereview.idea.model.COMMENT_SIDE_LEFT
+import com.alibaba.opencodereview.idea.model.COMMENT_SIDE_RIGHT
 import com.alibaba.opencodereview.idea.model.FileStatus
 import com.alibaba.opencodereview.idea.model.HostStrings
 import com.alibaba.opencodereview.idea.model.ReviewComment
@@ -135,9 +137,18 @@ internal fun formatLocateNote(originalLine: Int, resolvedLine: Int, locale: Supp
     }
 
 /** Choose candidate (ref, side) pairs by file status, in the order they should be tried. */
-private fun candidateRefs(git: GitService, ctx: ReviewContext, status: FileStatus): List<Pair<String, AnchorSide>> {
-    val leftRef = if (status == FileStatus.ADDED) null else git.leftRefFor(ctx)
-    val rightRef = if (status == FileStatus.DELETED) null else git.rightRefFor(ctx)
+internal fun candidateRefs(
+    status: FileStatus,
+    leftRef: String?,
+    rightRef: String?,
+    requestedSide: String?,
+): List<Pair<String, AnchorSide>> {
+    if (requestedSide == COMMENT_SIDE_LEFT) {
+        return if (status == FileStatus.ADDED) emptyList() else listOfNotNull(leftRef?.let { it to AnchorSide.LEFT })
+    }
+    if (requestedSide == COMMENT_SIDE_RIGHT) {
+        return if (status == FileStatus.DELETED) emptyList() else listOfNotNull(rightRef?.let { it to AnchorSide.RIGHT })
+    }
     val mountLeft = status == FileStatus.DELETED
 
     val primary = if (mountLeft) leftRef?.let { it to AnchorSide.LEFT } else rightRef?.let { it to AnchorSide.RIGHT }
@@ -161,6 +172,17 @@ fun resolveCommentAnchor(comment: ReviewComment, ctx: ReviewContext, git: GitSer
     }
 
     if (ctx.mode == ReviewMode.WORKSPACE) {
+        // Old-file coordinates cannot be resolved against the current workspace;
+        // avoid reading the workspace file before returning the sidebar result.
+        if (comment.side == COMMENT_SIDE_LEFT) {
+            val status = git.getReviewFileStatus(comment.path)
+            val reason = if (status == null || status == FileStatus.DELETED) {
+                SidebarOnlyReason.MISSING_FILE
+            } else {
+                SidebarOnlyReason.UNRESOLVED
+            }
+            return CommentAnchorResult.SidebarOnly(reason)
+        }
         val content = git.readWorkspaceFile(comment.path)
             ?: return CommentAnchorResult.SidebarOnly(SidebarOnlyReason.MISSING_FILE)
         return mountableOrUnresolved(comment, content, AnchorSide.WORKSPACE, locale)
@@ -171,7 +193,12 @@ fun resolveCommentAnchor(comment: ReviewComment, ctx: ReviewContext, git: GitSer
     val status = git.getReviewFileStatus(comment.path)
         ?: return CommentAnchorResult.SidebarOnly(SidebarOnlyReason.MISSING_FILE)
 
-    val candidates = candidateRefs(git, ctx, status)
+    val candidates = candidateRefs(
+        status,
+        if (status == FileStatus.ADDED) null else git.leftRefFor(ctx),
+        if (status == FileStatus.DELETED) null else git.rightRefFor(ctx),
+        comment.side,
+    )
     if (candidates.isEmpty()) return CommentAnchorResult.SidebarOnly(SidebarOnlyReason.MISSING_FILE)
 
     for ((ref, side) in candidates) {
@@ -182,7 +209,7 @@ fun resolveCommentAnchor(comment: ReviewComment, ctx: ReviewContext, git: GitSer
     return CommentAnchorResult.SidebarOnly(SidebarOnlyReason.UNRESOLVED)
 }
 
-private fun mountableOrUnresolved(comment: ReviewComment, content: String, side: AnchorSide, locale: SupportedLocale): CommentAnchorResult {
+internal fun mountableOrUnresolved(comment: ReviewComment, content: String, side: AnchorSide, locale: SupportedLocale): CommentAnchorResult {
     val lines = resolveLinesInContent(content, comment.startLine, comment.endLine, comment.existingCode)
         ?: return CommentAnchorResult.SidebarOnly(SidebarOnlyReason.UNRESOLVED)
     return CommentAnchorResult.Mountable(

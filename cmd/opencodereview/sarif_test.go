@@ -203,6 +203,35 @@ func TestOutputSARIF_FullFieldMapping(t *testing.T) {
 	}
 }
 
+func TestOutputSARIF_LeftSideCarriesSideAndOmitsFix(t *testing.T) {
+	comment := model.LlmComment{
+		Path:           "main.go",
+		Content:        "The removed call was not replaced safely.",
+		SuggestionCode: "replacement()",
+		ExistingCode:   "legacyCall()",
+		StartLine:      2,
+		EndLine:        2,
+		Side:           model.CommentSideLeft,
+	}
+	out := captureStdout(t, func() {
+		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, os.Stdout); err != nil {
+			t.Fatalf("outputSARIF: %v", err)
+		}
+	})
+	doc := mustUnmarshal(t, out)
+	result := mustGetResult(t, doc)
+
+	locations := result["locations"].([]any)
+	location := locations[0].(map[string]any)
+	properties := location["properties"].(map[string]any)
+	if properties["side"] != model.CommentSideLeft {
+		t.Fatalf("location side = %v, want %q", properties["side"], model.CommentSideLeft)
+	}
+	if _, ok := result["fixes"]; ok {
+		t.Fatal("deleted-side comment must not emit a current-file SARIF fix")
+	}
+}
+
 // --- AC-5 & AC-6: Severity → Level mapping ---
 
 func TestSarifSeverityLevel(t *testing.T) {
