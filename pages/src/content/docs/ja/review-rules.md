@@ -198,8 +198,8 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.go`                           | `go.md`: Go ソースコード。                                                                      |
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md`: FreeMarker テンプレート（SSTI / XSS / null 処理）。                            |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md`: Handlebars / Mustache テンプレート。                                  |
-| `**/*.{haml,slim}`                  | `haml_slim.md`: HAML / Slim テンプレート（SSTI / XSS / エスケープ / インデント意味論）。                        
-| `**/*.erb`                          | `erb.md`: ERB テンプレート（SSTI / XSS / エスケープ / 空白と出力構造）。                                       
+| `**/*.{haml,slim}`                  | `haml_slim.md`: HAML / Slim テンプレート（SSTI / XSS / エスケープ / インデント意味論）。 |
+| `**/*.erb`                          | `erb.md`: ERB テンプレート（SSTI / XSS / エスケープ / 空白と出力構造）。 |
 | `**/*.ets`                          | `arkts.md`: ArkTS / HarmonyOS。                                                                 |
 | `**/*.astro`                        | `astro.md`: Astro コンポーネントと islands。                                                    |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                              |
