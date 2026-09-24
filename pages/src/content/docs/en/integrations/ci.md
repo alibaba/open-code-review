@@ -4,6 +4,8 @@ sidebar:
   order: 4
 ---
 
+`ocr mcp` now starts from a server list. Select a server to manage tools and effective permissions; Esc goes back. Opening the list does not connect. `ocr mcp import [file] [--yes]` accepts one Cursor JSON or Codex TOML connection, disabled with zero tools and no copied grants. Non-interactive import requires a single-server file and `--yes`. Literal env/header values become environment references; existing names are not overwritten. OAuth and unsupported connection fields are rejected. See the [MCP guide](../mcp/) for private paste (Ctrl-S), credential references and activation.
+
 Run OCR on every Pull Request or Merge Request. The upstream repo
 ships two ready-made pipelines you copy and configure — one for
 GitHub Actions, one for GitLab CI. Both are thin wrappers around the
@@ -528,9 +530,36 @@ script:
   - cat /tmp/ocr-stderr.log
 ```
 
+## MCP in CI
+
+MCP fails closed in CI and other non-interactive environments. An `ask` tool is
+hidden from the model and cannot execute because no approval prompt is
+available. Only a tool that is explicitly listed in `tools`, has a matching
+`tool_definition_sha256`, resolves to persistent `allow`, and is not under a
+global/server `deny` can be exposed. Even then, the independent authorizer
+rechecks policy immediately before `tools/call`.
+
+Prepare and review the configuration in a trusted interactive environment with
+`ocr mcp tools` and `ocr mcp permissions`; do not try to approve interactively
+inside the runner. Non-interactive management commands that may connect or
+write require `--yes`. A bare `ocr mcp` only prints redacted status/help.
+
+Provide MCP secrets through scoped CI environment variables referenced as
+`${ENV_NAME}`. Never put resolved tokens in committed config. Pin the local
+server package or remote endpoint, grant the smallest server/tool scope, and
+rotate credentials independently from LLM and PR-posting tokens. MCP applies to
+`ocr review`, not `ocr scan`.
+
+See [MCP Servers](../mcp/) for the complete permission matrix, fingerprint
+migration, remote transport restrictions, and troubleshooting.
+
 ## See Also
 
 - [CLI Reference](../cli-reference/#json) — the JSON output shape both pipelines
   consume, useful when writing your own CI script from scratch.
 - [Configuration](../../configuration/) — every env var and config
   key OCR honors.
+
+## Terminal onboarding
+
+`ocr mcp add` offers field-by-field input and a `Space` tool checklist. Use `Enter` to continue, `Ctrl-B` to go back and `Esc` to cancel. Set permissions and the 1–600 second timeout (default 60) with `ocr mcp permissions`. Configuration commands and review use `~/.opencodereview/config.json`. For isolated testing, set `HOME` (and `USERPROFILE` on Windows) to a dedicated test directory for the OCR process. Pure `ocr mcp tools docs --disable write` revocation works offline without connecting or requiring `--yes`; enabling tools still requires discovery and connection consent.

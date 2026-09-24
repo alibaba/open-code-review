@@ -193,11 +193,47 @@ func TestShouldMaskConfigValue(t *testing.T) {
 		{"providers.x.api_key_cmd", false},
 		{"providers.x.APIKeyCmd", false},
 		{"llm.AuthToken", true},
+		{"mcp_servers.local.env", true},
+		{"mcp_servers.local.headers", true},
+		{"mcp_servers.local.args", true},
+		{"mcp_servers.local.url", true},
+		{"mcp_servers.local.setup", true},
+		{"mcp_servers.local.command", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
 			if got := shouldMaskConfigValue(tt.key); got != tt.want {
 				t.Errorf("shouldMaskConfigValue(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigDisplayValueRedactsMCPConnectionSecrets(t *testing.T) {
+	const secret = "mcp-display-secret-sentinel"
+	tests := []struct {
+		key   string
+		value string
+		want  string
+	}{
+		{key: "mcp_servers.local.args", value: `["--token","` + secret + `"]`, want: "***"},
+		{key: "mcp_servers.local.env", value: `["TOKEN=` + secret + `"]`, want: "***"},
+		{key: "mcp_servers.local.headers", value: `{"Authorization":"` + secret + `"}`, want: "***"},
+		{key: "mcp_servers.local.setup", value: "install --token " + secret, want: "***"},
+		{
+			key:   "mcp_servers.remote.url",
+			value: "https://example.test/mcp?token=" + secret,
+			want:  "https://example.test/mcp",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			got := configDisplayValue(tt.key, tt.value)
+			if strings.Contains(got, secret) {
+				t.Fatalf("display value leaked secret: %q", got)
+			}
+			if got != tt.want {
+				t.Fatalf("display value = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -764,6 +800,32 @@ func TestSetMCPServerValue_EnvInvalidFormat(t *testing.T) {
 	}
 }
 
+func TestSetMCPServerValueErrorsDoNotEchoConnectionSecrets(t *testing.T) {
+	const secret = "mcp-config-error-secret-sentinel"
+	tests := []struct {
+		name  string
+		field string
+		value string
+	}{
+		{name: "malformed env", field: "env", value: `["BROKEN-` + secret + `"]`},
+		{name: "unparseable URL", field: "url", value: "https://example.test/%zz?token=" + secret},
+		{name: "URL without host", field: "url", value: "https:///mcp?token=" + secret},
+		{name: "userinfo URL", field: "url", value: "https://user:" + secret + "@example.test/mcp"},
+		{name: "fragment URL", field: "url", value: "https://example.test/mcp#" + secret},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := setMCPServerValue(&Config{}, "mcp_servers.server."+tt.field, tt.value)
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("validation error leaked secret: %v", err)
+			}
+		})
+	}
+}
+
 func TestSetMCPServerValue_Tools(t *testing.T) {
 	cfg := &Config{}
 	if err := setMCPServerValue(cfg, "mcp_servers.my-server.tools", `["search","read","search"]`); err != nil {
@@ -1140,10 +1202,10 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.timeout_sec, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Supported keys: provider, model, max_tokens, effort, mcp.enabled, mcp.default_permission, mcp.approval_timeout_seconds, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.timeout_sec, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
 		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
 		"Protocol values: anthropic, anthropic-bedrock, openai, openai-responses\n" +
-		"MCP server fields: type, command, args, env, url, headers, tools, setup"
+		"MCP server fields: type, command, args, env, url, headers, allow_insecure_http, enabled, default_permission, tools, tool_permissions, tool_definition_sha256, setup"
 	if err.Error() != want {
 		t.Errorf("unknown-key message drifted:\n got: %q\nwant: %q", err.Error(), want)
 	}

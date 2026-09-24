@@ -4,6 +4,8 @@ sidebar:
   order: 5
 ---
 
+`ocr mcp` открывает список серверов для управления инструментами и эффективными правами. Esc возвращает назад. Список не инициирует подключений. `ocr mcp import [file] [--yes]` импортирует одно подключение Cursor JSON / Codex TOML отключённым, без инструментов и прав. Без диалога нужны файл с одним сервером и `--yes`. Открытые env/header заменяются ссылками на переменные окружения; имена не перезаписываются. OAuth и неподдерживаемые поля отклоняются. Скрытая вставка (Ctrl-S) и активация описаны в [руководстве MCP](../mcp/).
+
 Файл конфигурации находится по пути `~/.opencodereview/config.json`. Изменить
 его можно тремя способами:
 
@@ -416,7 +418,41 @@ ocr config set language 中文
 ocr config set language English
 ```
 
+## Конфигурация политики MCP
+
+Для подключения используйте мастер `ocr mcp`: он обнаруживает инструменты, не
+вызывая их, и сохраняет явный allowlist. Глобальная политика находится в `mcp`:
+
+| Ключ | Значения / значение по умолчанию | Назначение |
+|---|---|---|
+| `mcp.version` | `1` | Версия fail-closed формата политики. |
+| `mcp.enabled` | boolean, `true` | Глобальный переключатель видимости MCP. |
+| `mcp.default_permission` | `deny`, `ask`, `allow`; по умолчанию `ask` | Политика выполнения; `allow` не расширяет allowlist. |
+| `mcp.approval_timeout_seconds` | целое `1`–`600`; по умолчанию `60` | Срок runtime approval со следующего review. |
+
+В каждом `mcp_servers.<name>` задаются `type` (`stdio` или `remote`), поля
+соединения, `enabled`, `default_permission` (`inherit`, `deny`, `ask`, `allow`),
+явный allowlist `tools`, `tool_permissions` и `tool_definition_sha256`. Пустой
+или отсутствующий `tools` означает ноль инструментов. Global/server `deny` —
+непереопределяемый верхний предел; иначе действует tool > server > global.
+
+Используйте `${ENV_NAME}` в `env` и remote headers. Status output маскирует
+значения и URL query. Старый `setup` читается только для миграции и никогда не
+выполняется командой `ocr review`.
+
+```bash
+ocr config set mcp.approval_timeout_seconds 120
+ocr mcp permissions docs
+```
+
+Мастер, правила stdio/remote, fingerprints, permissions, миграция и CI описаны
+на странице [Серверы MCP](../mcp/).
+
 ## См. также
 
 - [Быстрый старт](../quickstart/) — минимальная настройка и первое ревью.
 - [Справочник CLI](../cli-reference/) — все флаги, принимаемые командой ревью.
+
+## Подключение в терминале
+
+`ocr mcp add` предлагает пошаговый ввод и выбор инструментов клавишей `Space`. `Enter` продолжает, `Ctrl-B` возвращает назад, `Esc` отменяет. Права и тайм-аут (по умолчанию 60 секунд, 1–600) задаются через `ocr mcp permissions`. Команды настройки и review используют `~/.opencodereview/config.json`. Для изолированного теста задайте `HOME` (и `USERPROFILE` в Windows) только для процесса OCR, указав отдельный тестовый каталог. Только отзыв через `ocr mcp tools docs --disable write` работает офлайн, без подключения и без `--yes`. Включение требует discovery и явного согласия на подключение.

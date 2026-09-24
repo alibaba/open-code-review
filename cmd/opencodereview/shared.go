@@ -230,7 +230,7 @@ type llmRuntime struct {
 var newRetryCollector = llm.NewRetryCollector
 
 // loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
-// from the user's default config path (applying the configured language to
+// from the default user config path (applying the configured language to
 // tpl — defaulting when the config file is absent), resolves the LLM
 // endpoint (honoring resolveOpts), and
 // returns the runtime bundle. tpl is mutated in place.

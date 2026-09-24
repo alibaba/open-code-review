@@ -16,6 +16,8 @@ on:
       - 'scripts/platform.js'
       - 'scripts/version.js'
       - 'scripts/github-actions/**'
+      - 'pages/src/content/docs/**'
+      - 'pages/src/i18n/**'
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
   pull_request:
@@ -28,6 +30,8 @@ on:
       - 'scripts/platform.js'
       - 'scripts/version.js'
       - 'scripts/github-actions/**'
+      - 'pages/src/content/docs/**'
+      - 'pages/src/i18n/**'
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
 

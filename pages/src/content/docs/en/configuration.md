@@ -4,6 +4,8 @@ sidebar:
   order: 5
 ---
 
+`ocr mcp` now starts from a server list. Select a server to manage tools and effective permissions; Esc goes back. Opening the list does not connect. `ocr mcp import [file] [--yes]` accepts one Cursor JSON or Codex TOML connection, disabled with zero tools and no copied grants. Non-interactive import requires a single-server file and `--yes`. Literal env/header values become environment references; existing names are not overwritten. OAuth and unsupported connection fields are rejected. See the [MCP guide](../mcp/) for private paste (Ctrl-S), credential references and activation.
+
 The config file lives at `~/.opencodereview/config.json`. You have three ways
 to edit it:
 
@@ -393,7 +395,41 @@ ocr config set language 中文
 ocr config set language English
 ```
 
+## MCP policy configuration
+
+Use `ocr mcp` for guided setup; it discovers tools without invoking them and
+saves an explicit allowlist. The global policy is stored under `mcp`:
+
+| Key | Values / default | Purpose |
+|---|---|---|
+| `mcp.version` | `1` | Version of the fail-closed policy format. |
+| `mcp.enabled` | boolean, `true` | Global MCP visibility switch. |
+| `mcp.default_permission` | `deny`, `ask`, `allow`; default `ask` | Default execution policy. `allow` never adds tools to an allowlist. |
+| `mcp.approval_timeout_seconds` | integer `1`–`600`; default `60` | Runtime approval deadline, applied on the next review. |
+
+Each `mcp_servers.<name>` supports `type` (`stdio` or `remote`), connection
+fields, `enabled`, `default_permission` (`inherit`, `deny`, `ask`, or `allow`),
+the explicit `tools` allowlist, `tool_permissions`, and
+`tool_definition_sha256`. Empty or missing `tools` means no tools. A global or
+server `deny` is a hard upper bound; otherwise tool > server > global is used.
+
+Prefer `${ENV_NAME}` references in `env` and remote headers. Status commands
+redact values and URL query data. The legacy `setup` field is read only for
+migration and is never executed by `ocr review`.
+
+```bash
+ocr config set mcp.approval_timeout_seconds 120
+ocr mcp permissions docs
+```
+
+See [MCP Servers](../mcp/) for the wizard, remote/stdio rules, fingerprints,
+permissions, migration, and CI behavior.
+
 ## See Also
 
 - [QuickStart](../quickstart/) — minimal setup and first review.
 - [CLI Reference](../cli-reference/) — every flag the review command accepts.
+
+## Terminal onboarding
+
+`ocr mcp add` offers field-by-field input and a `Space` tool checklist. Use `Enter` to continue, `Ctrl-B` to go back and `Esc` to cancel. Set permissions and the 1–600 second timeout (default 60) with `ocr mcp permissions`. Configuration commands and review use `~/.opencodereview/config.json`. For isolated testing, set `HOME` (and `USERPROFILE` on Windows) to a dedicated test directory for the OCR process. Pure `ocr mcp tools docs --disable write` revocation works offline without connecting or requiring `--yes`; enabling tools still requires discovery and connection consent.

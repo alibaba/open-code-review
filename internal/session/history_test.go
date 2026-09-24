@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -549,6 +550,38 @@ func TestAddToolFailure(t *testing.T) {
 	}
 	if got := int64(persisted["duration_ms"].(float64)); got != 25 {
 		t.Errorf("persisted duration_ms = %d, want 25", got)
+	}
+}
+
+func TestSetResponseSanitizedDoesNotMutateExecutionResponse(t *testing.T) {
+	sh := New("/tmp/repo", "main", "model", SessionOptions{})
+	fs := sh.GetOrCreateFileSession("file.go")
+	rec := fs.AppendTaskRecord(MainTask, nil)
+	const secret = "session-secret-sentinel"
+	resp := &llm.ChatResponse{
+		Choices: []llm.Choice{
+			{Message: llm.ResponseMessage{ToolCalls: []llm.ToolCall{
+				{
+					ID: "call_1",
+					Function: llm.FunctionCall{
+						Name:      "mcp__server__tool",
+						Arguments: `{"token":"` + secret + `"}`,
+					},
+				},
+			}}},
+		},
+		Model: "test-model",
+	}
+
+	rec.SetResponseSanitized(resp, time.Second, func(_, _ string) string {
+		return `{"redacted":true}`
+	})
+
+	if got := rec.Response.ToolCalls[0].Function.Arguments; got != `{"redacted":true}` {
+		t.Fatalf("recorded arguments = %q, want redacted marker", got)
+	}
+	if got := resp.ToolCalls()[0].Function.Arguments; !strings.Contains(got, secret) {
+		t.Fatalf("execution response was mutated: %q", got)
 	}
 }
 
