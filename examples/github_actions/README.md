@@ -93,6 +93,33 @@ Go to your repository's **Settings → Secrets and variables → Actions**.
 
 See [`action.yml`](../../action.yml) for the full input list. Workflow-level settings (triggers, keywords) are edited in the workflow file itself.
 
+### Filter reported findings
+
+Use a CLI version that supports `--min-severity` and `--exclude-categories`:
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    min_severity: medium
+    exclude_categories: style,maintainability,test
+```
+
+Both inputs default to empty (no filtering). The CLI omits findings below the
+inclusive severity threshold or in an excluded category. If either severity or
+category is missing or unrecognized, the finding is kept. Supported categories
+are `bug`, `security`, `performance`, `maintainability`, `test`, `style`,
+`documentation`, and `other`. Values are case-insensitive and trimmed; invalid
+values fail validation before the review starts.
+
+Filtering selects the findings to publish. Saved sessions retain the original
+findings, and LLM work is unchanged. After filtering, `route_severity_below` and
+`route_categories` can move matching retained findings to the summary. Changing
+either filter invalidates the cross-push checkpoint, so the next run reviews
+the full range.
+
 ### Change the trigger events
 
 Modify the `on.pull_request_target.types` array in the workflow file:

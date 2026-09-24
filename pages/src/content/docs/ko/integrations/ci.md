@@ -110,6 +110,8 @@ curl -o .github/workflows/ocr-review.yml \
 | `max_tokens_budget` | `''` | `ocr review --max-tokens-budget`으로 전달되는 총 토큰(입력 + 출력) 상한. 비어 있거나 `'0'`이면 무제한입니다. LLM 라운드마다 먼저 확인하며, 이미 상한을 넘긴 하위 작업은 발견 사항을 제출할 마지막 라운드를 한 번 받고, 이후 하위 작업은 디스패치되지 않으며, 예산을 넘기거나 건너뛴 파일은 `failed(budget)`로 보고되고, 부분 결과는 그대로 게시되며, 리뷰는 0으로 종료합니다. |
 | `llm_reasoning_effort` | `''` | `reasoning_effort` 요청 필드를 조절할 수 있는 모델(예: GLM-5.x, OpenAI reasoning 모델)의 추론 깊이: `minimal`, `low`, `medium`, `high`, `max`(대소문자 무시). `llm_extra_body`를 통해 요청 본문에 병합되므로 이미 배포된 모든 CLI 버전에서 동작합니다. `llm_extra_body` 안의 명시적 `reasoning_effort` 키가 이 입력보다 우선합니다. 비어 있으면(기본값) 아무것도 보내지 않습니다. OpenAI 호환 프로토콜 전용입니다 — Anthropic API는 알 수 없는 본문 필드를 거부하므로 해당 프로토콜에서는 액션이 즉시 실패합니다. Anthropic의 thinking 제어는 `llm_extra_body`의 명시적 키를 사용하세요. |
 | `stream_progress` | `'false'` | `'true'`로 설정하면 실행이 끝날 때까지 조용히 기다리는 대신 `[ocr]` 진행 라인을 워크플로 로그에 실시간으로 흘려보냅니다(stderr의 human audience). 표시 전용 토글이며 stderr는 여전히 파일에 캡처되어 아티팩트와 코멘트 게시에 사용됩니다. |
+| `min_severity` | `''` | 보고할 심각도의 하한으로, 지정한 수준을 포함합니다: `critical`, `high`, `medium`, `low`. 비워 두면 심각도 필터를 끕니다. 심각도나 범주가 없거나 알 수 없는 지적은 유지합니다. |
+| `exclude_categories` | `''` | 제외할 범주를 쉼표로 구분합니다: `bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other`. 비워 두면 범주 제외를 끕니다. 심각도나 범주가 없거나 알 수 없는 지적은 유지합니다. |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -122,7 +124,11 @@ curl -o .github/workflows/ocr-review.yml \
     max_tokens_budget: '10000000'
     llm_reasoning_effort: low
     stream_progress: 'true'
+    min_severity: medium
+    exclude_categories: style,maintainability,test
 ```
+
+`min_severity`와 `exclude_categories`를 사용하려면 `--min-severity`와 `--exclude-categories`를 지원하는 CLI 버전이 필요합니다. CLI가 보고할 지적을 먼저 필터링한 뒤, `route_severity_below`와 `route_categories`가 남은 지적 중 요약에 넣을 항목을 결정합니다. 원래 지적은 세션에 보존됩니다. 두 필터 중 하나를 바꾸면 푸시 간 체크포인트가 무효화되어 다음 실행에서 전체 범위를 리뷰합니다. 필터 규칙과 예제는 [CLI 레퍼런스](../cli-reference/)를 참고하세요.
 
 전체 입력 목록은
 [`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)을

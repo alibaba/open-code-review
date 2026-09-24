@@ -8,11 +8,14 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
 	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/alibaba/open-code-review/internal/agent"
@@ -20,7 +23,70 @@ import (
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/telemetry"
 )
+
+func TestEmitRunResultDoesNotRecountGeneratedComments(t *testing.T) {
+	// Telemetry caches global instruments, so isolate the enabled provider.
+	if os.Getenv("OCR_TEST_REPORT_METRICS") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestEmitRunResultDoesNotRecountGeneratedComments$")
+		home := t.TempDir()
+		cmd.Env = append(os.Environ(), "OCR_TEST_REPORT_METRICS=1",
+			"OCR_ENABLE_TELEMETRY=1", "OTEL_EXPORTER_OTLP_ENDPOINT=",
+			"HOME="+home, "USERPROFILE="+home)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("telemetry regression: %v\n%s", err, output)
+		}
+		return
+	}
+
+	ctx := context.Background()
+	if !telemetry.Init(ctx) {
+		t.Fatal("telemetry must be enabled")
+	}
+	t.Cleanup(func() { _ = telemetry.Shutdown(ctx) })
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	t.Cleanup(func() { _ = provider.Shutdown(ctx) })
+
+	comments := []model.LlmComment{
+		{Path: "a.go", Content: "low", Severity: "low", Category: "bug"},
+		{Path: "a.go", Content: "medium", Severity: "medium", Category: "bug"},
+		{Path: "a.go", Content: "high", Severity: "high", Category: "bug"},
+	}
+	// Review and scan agents record generated findings before reporting.
+	telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
+	for _, format := range []string{"text", "json", "sarif"} {
+		for _, minimum := range []string{"", "high", "critical"} {
+			t.Run(format+"/"+minimum, func(t *testing.T) {
+				retained := filterReviewComments(comments, reviewOptions{minSeverity: minimum})
+				var out bytes.Buffer
+				if err := emitRunResult(ctx, &mockResultProvider{filesReviewed: 1}, retained,
+					time.Now(), format, "human", nil, nil, &out, nil); err != nil {
+					t.Fatal(err)
+				}
+				var metrics metricdata.ResourceMetrics
+				if err := reader.Collect(ctx, &metrics); err != nil {
+					t.Fatal(err)
+				}
+				for _, scope := range metrics.ScopeMetrics {
+					for _, metric := range scope.Metrics {
+						if metric.Name != "ocr.comments_generated_total" {
+							continue
+						}
+						sum, ok := metric.Data.(metricdata.Sum[int64])
+						if !ok || len(sum.DataPoints) != 1 || sum.DataPoints[0].Value != 3 {
+							t.Fatalf("generated count changed during reporting: %+v", metric.Data)
+						}
+						return
+					}
+				}
+				t.Fatal("generated-comments metric missing")
+			})
+		}
+	}
+}
 
 type mockResultProvider struct {
 	diffs            []model.Diff

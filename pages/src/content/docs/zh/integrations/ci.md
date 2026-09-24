@@ -100,6 +100,8 @@ composite action
 | `max_tokens_budget` | `''` | 传给 `ocr review --max-tokens-budget` 的 token 总量上限（输入 + 输出）。留空或 `'0'` 表示不限。每次 LLM 轮次前都会检查：已超出上限的子任务会获得最后一轮来提交发现，不再派发新的子任务，超出预算和被跳过的文件记为 `failed(budget)`，已产生的部分结果仍会发布，评审以 0 退出。 |
 | `llm_reasoning_effort` | `''` | 面向支持 `reasoning_effort` 请求字段的模型（如 GLM-5.x、OpenAI reasoning 模型）的推理深度：`minimal`、`low`、`medium`、`high`、`max`（不区分大小写）。经 `llm_extra_body` 合并进请求体，因此所有已发布的 CLI 版本均可使用；`llm_extra_body` 中显式的 `reasoning_effort` 键优先于此 input。留空（默认）则不发送。仅适用于 OpenAI 兼容协议——Anthropic API 会拒绝未知请求体字段，action 在该协议下会快速失败；Anthropic 的 thinking 控制请改用 `llm_extra_body` 中的显式键。 |
 | `stream_progress` | `'false'` | 设为 `'true'` 时，把 `[ocr]` 实时进度行流入工作流日志（stderr 上的 human audience），而不是在评审结束前保持静默。仅影响展示：stderr 仍会写入文件，供产物上传与评论张贴使用。 |
+| `min_severity` | `''` | 报告的严重程度下限，包含指定级别：`critical`、`high`、`medium` 或 `low`。留空关闭此筛选。严重程度或类别缺失、未知的结果会保留。 |
+| `exclude_categories` | `''` | 要排除的类别，用逗号分隔：`bug`、`security`、`performance`、`maintainability`、`test`、`style`、`documentation`、`other`。留空关闭类别排除。严重程度或类别缺失、未知的结果会保留。 |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -112,7 +114,11 @@ composite action
     max_tokens_budget: '10000000'
     llm_reasoning_effort: low
     stream_progress: 'true'
+    min_severity: medium
+    exclude_categories: style,maintainability,test
 ```
+
+`min_severity` 和 `exclude_categories` 需要支持 `--min-severity` 和 `--exclude-categories` 的 CLI 版本。CLI 先筛选报告结果，再由 `route_severity_below` 和 `route_categories` 决定将哪些保留的结果放入摘要。完整结果保存在会话中。更改任一筛选参数会使跨推送检查点失效，下一次运行将评审完整范围。筛选规则和示例见 [CLI 参考](../cli-reference/)。
 
 完整 input 列表见
 [`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)——

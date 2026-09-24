@@ -109,7 +109,9 @@ unstaged + untracked 变更。
 | `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
-| `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个子任务的 `REVIEW_FILTER_TASK` LLM 后处理调用。子任务评审单个文件或一组相关文件。 |
+| `--no-filter` | — | `false` | 跳过每个子任务的 `REVIEW_FILTER_TASK` LLM 后处理调用；结果筛选参数仍然生效。子任务评审单个文件或一组相关文件。 |
+| `--min-severity <level>` | — | — | 仅报告达到指定严重程度下限的结果：`critical`、`high`、`medium` 或 `low`。严重程度或类别未知时始终保留。 |
+| `--exclude-categories <list>` | — | — | 排除逗号分隔的类别：`bug`、`security`、`performance`、`maintainability`、`test`、`style`、`documentation`、`other`。严重程度或类别未知时始终保留。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
 | `--output <path>` | `-o` | 标准输出 | 将评审结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
@@ -132,6 +134,16 @@ unstaged + untracked 变更。
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
 > `--resume` 仅支持区间或单 commit 评审，不能与 `--preview` 同时使用。
+
+### 筛选报告中的问题
+
+```bash
+ocr review --min-severity medium --exclude-categories style,maintainability,test
+```
+
+严重程度下限包含指定级别本身。参数值不区分大小写，并忽略首尾空白；不支持的值会在评审开始前报错。同时使用两个参数时，低于下限或属于排除类别的结果会被省略。严重程度或类别只要有一项缺失或无法识别，就保留该结果，不受另一项筛选条件影响。
+
+筛选在输出结果时应用，支持文本、JSON（包括评论数量）和 SARIF，也适用于部分完成及恢复会话的结果。筛选只影响报告：LLM 执行量和文件覆盖范围保持不变，完整结果保存在会话中；恢复会话时可以使用新的筛选条件。`--no-filter` 跳过 LLM 后处理，报告筛选参数独立生效。
 
 ### 单次运行的 LLM 选择
 
@@ -425,6 +437,8 @@ ocr session comments --severity critical,high --category bug,security <session-i
 | `--json` | `false` | 以 JSON 数组输出评论。 |
 | `--severity <list>` | 全部 | 逗号分隔的要包含的严重程度（`critical`、`high`、`medium`、`low`）。 |
 | `--category <list>` | 全部 | 逗号分隔的要包含的类别（如 `bug`、`security`）。 |
+
+严重程度缺失或无法识别时，该结果通过 `--severity` 筛选；类别缺失或无法识别时，通过 `--category` 筛选。有有效值的字段照常参与筛选。例如，`--severity high` 会排除严重程度为 `low` 的结果，即使它的类别未知。匹配不区分大小写，并忽略首尾空白。
 
 ### `ocr session compare`
 

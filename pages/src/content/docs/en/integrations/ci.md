@@ -120,6 +120,8 @@ step:
 | `max_tokens_budget` | `''` | Total token cap (input + output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Checked before every LLM round: a subtask already over the cap gets one final round to submit findings, no further subtasks are dispatched, over-budget and skipped files are reported as `failed(budget)`, partial results are still published, and the review exits 0. |
 | `llm_reasoning_effort` | `''` | Reasoning depth for models with a steerable `reasoning_effort` request field (e.g. GLM-5.x, OpenAI reasoning models): `minimal`, `low`, `medium`, `high`, `max` (case-insensitive). Merged into the request body through `llm_extra_body`, so it works with every published CLI version; an explicit `reasoning_effort` key in `llm_extra_body` wins over this input. Empty (default) sends nothing. OpenAI-compatible protocols only — the Anthropic API rejects unknown body fields, so the action fails fast on that protocol; steer Anthropic thinking through an explicit `llm_extra_body` key instead. |
 | `stream_progress` | `'false'` | `'true'` streams live `[ocr]` progress lines to the workflow log (human audience on stderr) instead of staying silent until the run finishes. Display-only: stderr is still captured to a file for artifacts and comment posting. |
+| `min_severity` | `''` | Minimum reported severity, inclusive: `critical`, `high`, `medium`, or `low`. Empty disables the severity filter. Findings with missing or unknown severity or category are kept. |
+| `exclude_categories` | `''` | Comma-separated categories to omit: `bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other`. Empty disables category exclusions. Findings with missing or unknown severity or category are kept. |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -132,7 +134,17 @@ step:
     max_tokens_budget: '10000000'
     llm_reasoning_effort: low
     stream_progress: 'true'
+    min_severity: medium
+    exclude_categories: style,maintainability,test
 ```
+
+`min_severity` and `exclude_categories` require a CLI version that supports
+`--min-severity` and `--exclude-categories`. The CLI filters the reported findings
+first; `route_severity_below` and `route_categories` then determine which retained
+findings go into the summary. Saved sessions retain the original findings.
+Changing either filter invalidates the cross-push checkpoint, so the next run
+reviews the full range. See the [CLI reference](../cli-reference/) for filtering
+rules and examples.
 
 See [`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)
 for the full input list — posting modes (`sticky_summary`, `incremental`),

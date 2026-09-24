@@ -108,7 +108,9 @@ ocr r      [flags]   (alias)
 | `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
-| `--no-filter` | — | `false` | すべてのレビューコメントを保持し、サブタスクごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。サブタスクは単一ファイル、または関連ファイルのまとまりをレビューします。 |
+| `--no-filter` | — | `false` | サブタスクごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。結果のフィルターは引き続き適用されます。サブタスクは単一ファイル、または関連ファイルのまとまりをレビューします。 |
+| `--min-severity <level>` | — | — | 指定した重要度以上の指摘のみを出力します：`critical`、`high`、`medium`、`low`。重要度またはカテゴリが不明な指摘は常に保持します。 |
+| `--exclude-categories <list>` | — | — | カンマ区切りのカテゴリを除外します：`bug`、`security`、`performance`、`maintainability`、`test`、`style`、`documentation`、`other`。重要度またはカテゴリが不明な指摘は常に保持します。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |
 | `--output <path>` | `-o` | 標準出力 | レビュー結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
@@ -131,6 +133,16 @@ ocr r      [flags]   (alias)
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
 > `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
+
+### 出力する指摘のフィルタリング
+
+```bash
+ocr review --min-severity medium --exclude-categories style,maintainability,test
+```
+
+重要度の下限には指定したレベル自体を含みます。値は大文字と小文字を区別せず、前後の空白を無視します。未対応の値はレビュー開始前にエラーになります。両方のフラグを指定すると、重要度が下限未満か、除外カテゴリに属する指摘を省略します。重要度とカテゴリのどちらかが欠落しているか認識できない場合は、もう一方のフィルターに関係なく、その指摘を保持します。
+
+フィルターは結果の出力時に適用され、部分的な結果や再開したセッションにも対応します。対象はテキスト、JSON（コメント数を含む）、SARIF です。フィルターが変更するのは出力する指摘だけで、LLM の処理量とファイルのカバレッジは同じです。保存済みセッションには元の指摘が残るため、再開時にフィルターを変更できます。`--no-filter` は LLM 後処理を省略し、出力のフィルターは独立して適用されます。
 
 ### 実行単位の LLM 選択
 
@@ -425,6 +437,8 @@ ocr session comments --severity critical,high --category bug,security <session-i
 | `--json` | `false` | コメントを JSON 配列として出力します。 |
 | `--severity <list>` | すべて | 含める重要度をカンマ区切りで指定します（`critical`、`high`、`medium`、`low`）。 |
 | `--category <list>` | すべて | 含めるカテゴリをカンマ区切りで指定します（例: `bug`、`security`）。 |
+
+重要度が欠落または不明な指摘は `--severity` を通過し、カテゴリが欠落または不明な指摘は `--category` を通過します。有効な値を持つフィールドは通常どおり絞り込みます。たとえば `--severity high` は、カテゴリが不明でも重要度が `low` の指摘を除外します。比較は大文字と小文字を区別せず、前後の空白を無視します。
 
 ### `ocr session compare`
 

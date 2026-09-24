@@ -167,10 +167,8 @@ func sarifRules() []sarifRule {
 
 // sarifSeverityLevel maps an OCR severity string to a SARIF result level.
 // critical/high → error, medium → warning, low → note.
-// Empty/unknown falls back to "note", matching normalizeCodeCommentSeverity
-// in internal/tool/code_comment.go which defaults unknown severities to "low"
-// (→ "note" at the SARIF level). This prevents an empty severity from being
-// bumped to "warning", which would overstate the finding's importance.
+// The comment parser preserves unknown severity as empty. SARIF maps empty or
+// unknown severity to "note", retaining the existing output-level fallback.
 func sarifSeverityLevel(severity string) string {
 	switch severity {
 	case "critical", "high":

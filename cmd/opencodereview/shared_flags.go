@@ -122,6 +122,9 @@ func validateOutputFormat(format string) (string, error) {
 }
 
 func validateReviewOptions(opts *reviewOptions) error {
+	if err := validateReviewFindingFilters(opts); err != nil {
+		return err
+	}
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
@@ -215,7 +218,11 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addModelFlag(cmd, &opts.model)
 	cmd.Flags().StringVar(&opts.effort, "effort", "", "review effort preset: low | medium | high (\"\" = configured or default medium)")
 	cmd.RegisterFlagCompletionFunc("effort", completeEnum(template.EffortNames()...))
-	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
+	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "skip LLM post-filtering (reporting filters still apply)")
+	cmd.Flags().StringVar(&opts.minSeverity, "min-severity", "", "minimum reported finding severity: critical | high | medium | low (unknown metadata is kept)")
+	cmd.RegisterFlagCompletionFunc("min-severity", completeEnum(reviewSeverities...))
+	cmd.Flags().StringVar(&opts.excludeCategories, "exclude-categories", "", "comma-separated finding categories to omit: bug, security, performance, maintainability, test, style, documentation, other (unknown metadata is kept)")
+	cmd.RegisterFlagCompletionFunc("exclude-categories", completeEnum(reviewCategories...))
 	addPreviewFlag(cmd, &opts.preview)
 }
 

@@ -114,7 +114,9 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
-| `--no-filter` | — | `false` | Keep all review comments and skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files. |
+| `--no-filter` | — | `false` | Skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files. |
+| `--min-severity <level>` | — | — | Only report findings at or above `critical`, `high`, `medium`, or `low`. Unknown severity or category is always kept. |
+| `--exclude-categories <list>` | — | — | Omit findings in these comma-separated categories: `bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other`. Unknown severity or category is always kept. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
 | `--output <path>` | `-o` | stdout | Write review results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
@@ -138,6 +140,25 @@ staged + unstaged + untracked changes in the current directory's repo.
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
 > `--resume` supports only range or commit reviews and cannot be combined
 > with `--preview`.
+
+### Filter reported findings
+
+```bash
+ocr review --min-severity medium --exclude-categories style,maintainability,test
+```
+
+The severity threshold is inclusive. Values are case-insensitive and surrounding
+whitespace is ignored; unsupported values fail before the review starts. With
+both flags, a finding is omitted if it falls below the threshold or belongs to
+an excluded category. If either severity or category is missing or unrecognized,
+the finding is kept regardless of the other filter.
+
+Filtering is applied when results are emitted, including partial and resumed
+results. It covers text, JSON (including the comment count), and SARIF.
+Filtering affects reported output only: LLM work and file coverage remain
+unchanged, and saved sessions retain the original findings. A resumed review
+can use different filters. `--no-filter` skips LLM post-processing; reporting
+filters apply independently.
 
 ### Per-run LLM selection
 
@@ -450,6 +471,12 @@ ocr session comments --severity critical,high --category bug,security <session-i
 | `--json` | `false` | Emit the comments as a JSON array. |
 | `--severity <list>` | all | Comma-separated severities to include (`critical`, `high`, `medium`, `low`). |
 | `--category <list>` | all | Comma-separated categories to include (e.g. `bug`, `security`). |
+
+A missing or unrecognized severity passes `--severity`; a missing or
+unrecognized category passes `--category`. Fields with recognized values are
+filtered normally. For example, `--severity high` excludes a low-severity finding
+even if its category is unknown. Matching is case-insensitive and ignores
+surrounding whitespace.
 
 ### `ocr session compare`
 

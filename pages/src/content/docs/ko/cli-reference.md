@@ -113,7 +113,9 @@ ocr r      [flags]   (alias)
 | `--to <ref>` | — | — | diff가 끝나는 대상 ref(예: `feature-branch`). 지정하면 OCR이 `merge-base(from, to)..to`를 계산합니다. |
 | `--commit <sha>` | `-c` | — | 리뷰할 단일 커밋(부모 커밋과의 diff). |
 | `--preview` | `-p` | `false` | 필터 파이프라인만 돌리고 LLM은 호출하지 않습니다. 파일 목록과 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다(미리 보기에는 내보낼 완료된 지적이 없습니다). |
-| `--no-filter` | — | `false` | 리뷰 코멘트를 모두 남기고 서브태스크 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. 서브태스크는 파일 하나 또는 관련된 파일 묶음을 리뷰합니다. |
+| `--no-filter` | — | `false` | 서브태스크 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. 결과 필터는 계속 적용됩니다. 서브태스크는 파일 하나 또는 관련 파일 묶음을 리뷰합니다. |
+| `--min-severity <level>` | — | — | 지정한 심각도 이상인 지적만 보고합니다: `critical`, `high`, `medium`, `low`. 심각도나 범주를 알 수 없으면 항상 유지합니다. |
+| `--exclude-categories <list>` | — | — | 쉼표로 구분한 범주를 제외합니다: `bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other`. 심각도나 범주를 알 수 없으면 항상 유지합니다. |
 | `--resume <session-id>` | — | — | 호환되는 이전 range 또는 commit 리뷰 세션에서 이어서 실행합니다. |
 | `--format <fmt>` | `-f` | `text` | `text`(사람이 읽는 형식), `json`(기계가 읽는 코멘트 배열), `sarif`(GitHub Code Scanning용 SARIF 2.1.0 리포트). |
 | `--output <path>` | `-o` | stdout | 리뷰 결과를 UTF-8 파일로 씁니다(`-`는 stdout). 첫 쓰기 시점에 파일을 만들므로 실패한 실행은 기존 파일을 건드리지 않습니다. text 형식에서는 ANSI 색 코드를 자동으로 제거합니다. |
@@ -136,6 +138,16 @@ ocr r      [flags]   (alias)
 > 모드 플래그는 함께 쓸 수 없습니다. `--from`/`--to`, `--commit`, 아무것도 주지
 > 않기(워크스페이스 모드) 중 하나만 고르세요. 섞어 쓰면 오류로 중단됩니다.
 > `--resume`은 range와 commit 리뷰만 지원하며 `--preview`와 함께 쓸 수 없습니다.
+
+### 보고할 지적 필터링 {#filter-reported-findings}
+
+```bash
+ocr review --min-severity medium --exclude-categories style,maintainability,test
+```
+
+심각도 하한에는 지정한 수준 자체가 포함됩니다. 값은 대소문자를 구분하지 않으며 앞뒤 공백을 무시합니다. 지원하지 않는 값은 리뷰 시작 전에 오류를 냅니다. 두 플래그를 함께 사용하면 하한보다 낮거나 제외 범주에 속하는 지적을 생략합니다. 심각도나 범주 중 하나라도 없거나 인식할 수 없으면 다른 필터 조건과 관계없이 해당 지적을 유지합니다.
+
+필터는 결과를 출력할 때 적용되며, 부분 완료된 결과와 재개한 세션에도 적용됩니다. 지원 형식은 텍스트, JSON(코멘트 수 포함), SARIF입니다. 필터는 보고할 결과만 바꿉니다. LLM 작업량과 파일 커버리지는 동일하고, 원래 지적은 세션에 보존됩니다. 세션을 재개할 때 다른 필터를 사용할 수 있습니다. `--no-filter`는 LLM 후처리를 건너뛰며, 보고할 결과의 필터는 독립적으로 적용됩니다.
 
 ### 실행 단위 LLM 선택 {#per-run-llm-selection}
 
@@ -442,6 +454,8 @@ ocr session comments --severity critical,high --category bug,security <session-i
 | `--json` | `false` | 코멘트를 JSON 배열로 출력합니다. |
 | `--severity <list>` | 전체 | 포함할 심각도(쉼표 구분): `critical`, `high`, `medium`, `low`. |
 | `--category <list>` | 전체 | 포함할 분류(쉼표 구분). 예: `bug`, `security`. |
+
+심각도가 없거나 인식할 수 없는 지적은 `--severity`를 통과하고, 범주가 없거나 인식할 수 없는 지적은 `--category`를 통과합니다. 유효한 값이 있는 필드는 일반적인 방식으로 필터링합니다. 예를 들어 `--severity high`는 범주가 알려지지 않았더라도 심각도가 `low`인 지적을 제외합니다. 비교할 때 대소문자를 구분하지 않고 앞뒤 공백을 무시합니다.
 
 ### `ocr session compare` {#ocr-session-compare}
 

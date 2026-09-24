@@ -177,6 +177,21 @@ inputs:
       below 1 or non-numeric fall back to the default (50).
     required: false
     default: '50'
+  min_severity:
+    description: >-
+      Minimum severity reported by ocr review: critical, high, medium, or low.
+      Empty reports all severities. Findings with unknown severity or category
+      are always kept. Requires a CLI version supporting --min-severity.
+    default: ''
+    required: false
+  exclude_categories:
+    description: >-
+      Comma-separated finding categories to omit from review output: bug,
+      security, performance, maintainability, test, style, documentation, other.
+      Findings with unknown severity or category are always kept. Requires a
+      CLI version supporting --exclude-categories.
+    required: false
+    default: ''
   route_severity_below:
     description: >-
       Optional severity threshold that routes findings at-or-below it from
@@ -756,6 +771,8 @@ runs:
         OCR_FP_RULE: ${{ inputs.rule }}
         OCR_FP_ROUTE_SEVERITY_BELOW: ${{ inputs.route_severity_below }}
         OCR_FP_ROUTE_CATEGORIES: ${{ inputs.route_categories }}
+        OCR_FP_MIN_SEVERITY: ${{ inputs.min_severity }}
+        OCR_FP_EXCLUDE_CATEGORIES: ${{ inputs.exclude_categories }}
         OCR_FP_BACKGROUND: ${{ inputs.background }}
         OCR_RULE_PATH: ${{ inputs.rule }}
         # `github.token` is always the "github-actions" app, so when the caller
@@ -888,6 +905,8 @@ runs:
                 process.env.OCR_FP_RULE,
                 process.env.OCR_FP_ROUTE_SEVERITY_BELOW,
                 process.env.OCR_FP_ROUTE_CATEGORIES,
+                process.env.OCR_FP_MIN_SEVERITY,
+                process.env.OCR_FP_EXCLUDE_CATEGORIES,
                 process.env.OCR_FP_BACKGROUND,
                 versionActual,
                 ruleDigest,
@@ -959,6 +978,8 @@ runs:
         OCR_REVIEW_CONCURRENCY: ${{ inputs.review_concurrency }}
         OCR_BACKGROUND: ${{ inputs.background }}
         OCR_RULE: ${{ inputs.rule }}
+        OCR_MIN_SEVERITY: ${{ inputs.min_severity }}
+        OCR_EXCLUDE_CATEGORIES: ${{ inputs.exclude_categories }}
         # Step output, not job env: empty when the resolve step was skipped or
         # chose the full range, and never inherited from an earlier use of this
         # action in the same job.
@@ -984,6 +1005,8 @@ runs:
         [ -n "$OCR_REVIEW_CONCURRENCY" ] && ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY")
         [ -n "$OCR_BACKGROUND" ] && ARGS+=(--background "$OCR_BACKGROUND")
         [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")
+        [ -n "$OCR_MIN_SEVERITY" ] && ARGS+=(--min-severity "$OCR_MIN_SEVERITY")
+        [ -n "$OCR_EXCLUDE_CATEGORIES" ] && ARGS+=(--exclude-categories "$OCR_EXCLUDE_CATEGORIES")
         [ -n "${EFFORT:-}" ] && ARGS+=(--effort "$EFFORT")
         [ -n "${MAX_TOKENS_BUDGET:-}" ] && ARGS+=(--max-tokens-budget "$MAX_TOKENS_BUDGET")
         set +e
