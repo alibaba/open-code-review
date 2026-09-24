@@ -53,6 +53,12 @@ func TestIsAllowedExt(t *testing.T) {
 		{".MUSTACHE", true},
 		{".pug", true},
 		{".PUG", true},
+		{".haml", true},
+		{".HAML", true},
+		{".slim", true},
+		{".SLIM", true},
+		{".erb", true},
+		{".ERB", true},
 		{".graphql", true},
 		{".GRAPHQL", true},
 		{".gql", true},
@@ -227,6 +233,16 @@ func TestIsExcludedPath(t *testing.T) {
 		{"pug fixture", "test/fixtures/page.pug", true},
 		{"pug template in tests directory", "tests/templates/page.pug", false},
 		{"pug template in test directory", "test/templates/page.pug", false},
+
+		// HAML/Slim/ERB have no extension-specific test-path convention
+		// beyond the generic fixture directories either; their conventional
+		// Rails test locations are covered by the shared patterns.
+		{"haml fixture", "test/fixtures/card.haml", true},
+		{"haml in tests directory", "tests/templates/card.haml", false},
+		{"slim fixture", "test/fixtures/card.slim", true},
+		{"slim in tests directory", "tests/templates/card.slim", false},
+		{"erb fixture", "test/fixtures/card.erb", true},
+		{"erb in tests directory", "tests/templates/card.erb", false},
 
 		// HarmonyOS oh_modules and test files
 		{"oh_modules root", "oh_modules/some_lib/index.ets", true},
