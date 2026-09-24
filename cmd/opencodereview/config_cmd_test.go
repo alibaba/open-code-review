@@ -939,11 +939,11 @@ func TestEnsureTelemetry(t *testing.T) {
 	if cfg.Telemetry != nil {
 		t.Fatal("Telemetry should be nil initially")
 	}
-	cfg.ensureTelemetry()
+	ensureTelemetry(cfg)
 	if cfg.Telemetry == nil {
 		t.Fatal("Telemetry should be non-nil after ensureTelemetry()")
 	}
-	cfg.ensureTelemetry()
+	ensureTelemetry(cfg)
 	if cfg.Telemetry == nil {
 		t.Fatal("Telemetry should remain non-nil on second call")
 	}

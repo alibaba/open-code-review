@@ -93,13 +93,7 @@ func ensureResponsesEndpoint(cfg *ClientConfig) {
 // see the OpenAI Chat Completions counterpart for why it is deferred and why the
 // results are named.
 func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
-			panic(r)
-		}
-		finalizeRequest(ctx, c.cfg.retryCollector, err)
-	}()
+	defer finalizeOnExit(ctx, c.cfg.retryCollector, &err)
 
 	model := req.Model
 	if model == "" {

@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/configfile"
 )
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
@@ -321,50 +323,13 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR environment"}, true, nil
 }
 
-// llmFileConfig represents the llm section in config.json.
-type llmFileConfig struct {
-	URL          string            `json:"url,omitempty"`
-	AuthToken    string            `json:"auth_token,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	AuthTokenCmd string            `json:"auth_token_cmd,omitempty"` // shell command whose stdout is the auth token; used when auth_token is empty
-	Protocol     string            `json:"protocol,omitempty"`       // anthropic|openai|openai-responses; takes priority over use_anthropic
-	UseAnthropic *bool             `json:"use_anthropic,omitempty"`  // pointer to distinguish unset from false; legacy fallback when protocol is empty
-	TimeoutSec   int               `json:"timeout_sec,omitempty"`    // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
-}
-
-// providerEntryConfig represents a single provider entry in config.json.
-type providerEntryConfig struct {
-	APIKey       string            `json:"api_key,omitempty"`
-	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
-	URL          string            `json:"url,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Models       []string          `json:"models,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
-
-	// AWSProfile and AWSRegion apply to ambient-auth providers that sign with
-	// SigV4 (currently bedrock). Both are optional: without them the standard
-	// AWS chain decides, same as any other AWS tool. Setting them in config
-	// makes a review run reproducible without exporting AWS_PROFILE first.
-	AWSProfile string `json:"aws_profile,omitempty"`
-	AWSRegion  string `json:"aws_region,omitempty"`
-}
-
-type configFile struct {
-	Provider        string                         `json:"provider,omitempty"`
-	Model           string                         `json:"model,omitempty"`
-	Providers       map[string]providerEntryConfig `json:"providers,omitempty"`
-	CustomProviders map[string]providerEntryConfig `json:"custom_providers,omitempty"`
-	Llm             llmFileConfig                  `json:"llm,omitempty"`
-}
+// The config.json schema is defined once in internal/configfile and shared
+// with the cmd layer; these aliases keep the resolver-side names.
+type (
+	llmFileConfig       = configfile.LlmConfig
+	providerEntryConfig = configfile.ProviderEntry
+	configFile          = configfile.Config
+)
 
 // tryOCRConfig reads the OCR config file.
 func tryOCRConfig(path string, opts ResolveOptions) (ResolvedEndpoint, bool, error) {
