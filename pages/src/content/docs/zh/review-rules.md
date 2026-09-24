@@ -426,6 +426,10 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
 `<repo>/.opencodereview/rule.json` 只应用于某一个。由于系统那一半是按文件解析的，
 每种语言仍然会在你的规则之外获得自己的内置规则——无需枚举扩展名。
 
+全局文件是三个用户层中**最低**的一层。如果 `--rule` 或项目的
+`.opencodereview/rule.json` 中有条目匹配同一个文件，那条条目会胜出，
+全局规则根本不会被读到——所以这条通配规则只放在一处。
+
 ## 另见
 
 - [CLI 参考](../cli-reference/)——`ocr review --rule`、`--preview` 与 `ocr rules check`。

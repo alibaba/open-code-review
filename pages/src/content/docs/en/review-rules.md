@@ -103,9 +103,9 @@ Two things are worth knowing about how the merge is assembled:
 
 - The **system half is resolved per file**, not once for the run. The
   entry above is a catch-all, yet a `.java` file gets `java.md`, a `.py`
-  file gets `python.md`, and an extension OCR does not recognise falls
-  back to `default.md`. One entry therefore adds your rule on top of the
-  right language rules everywhere, without repeating it per extension.
+  file gets `python.md`, an unrecognized extension uses `default.md`.
+  One entry therefore adds your rule on top of the right language rules
+  everywhere, without repeating it per extension.
 - Either half may be empty. If the system layer resolves to nothing for
   a file, you get your rule alone; if your rule text is empty, you get
   the system rule alone. In neither case is the other half replaced by a
@@ -465,6 +465,11 @@ Save it at `~/.opencodereview/rule.json` to apply it to every repo, or
 in `<repo>/.opencodereview/rule.json` to apply it to one. Because the
 system half is resolved per file, each language still gets its own
 built-in rules alongside yours — no need to enumerate extensions.
+
+The global file is the **lowest** of the three user layers. If `--rule`
+or the project's `.opencodereview/rule.json` has an entry that matches
+the same file, that entry wins and the global one is never reached, so
+put the catch-all rule in only one place.
 
 ## See Also
 

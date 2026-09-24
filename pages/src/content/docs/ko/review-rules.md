@@ -442,6 +442,10 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
 해석되므로, 각 언어는 내 규칙과 함께 자기 내장 규칙을 그대로 받습니다. 확장자를
 나열할 필요가 없습니다.
 
+전역 파일은 세 사용자 계층 중 **가장 낮은** 계층입니다. `--rule` 또는 프로젝트의
+`.opencodereview/rule.json`에 같은 파일에 맞는 항목이 있으면 그 항목이 이겨서
+전역 항목은 아예 읽히지 않습니다 — 포괄 항목은 한 곳에만 두세요.
+
 ## 관련 문서 {#see-also}
 
 - [CLI 레퍼런스](../cli-reference/) — `ocr review --rule`, `--preview`,
