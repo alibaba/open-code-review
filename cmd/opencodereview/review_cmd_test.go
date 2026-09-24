@@ -25,17 +25,17 @@ func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
 
 func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 	for _, state := range []session.TerminalState{session.StateComplete, session.StatePartial, session.StateSkipped} {
-		if err := reviewResultError(nil, &session.RunManifest{TerminalState: state}); err != nil {
+		if err := reviewResultError(nil, &session.RunManifest{TerminalState: state}, timeoutErrorParams{}); err != nil {
 			t.Errorf("state %q returned error: %v", state, err)
 		}
 	}
-	if err := reviewResultError(nil, &session.RunManifest{TerminalState: session.StateFailed}); err == nil {
+	if err := reviewResultError(nil, &session.RunManifest{TerminalState: session.StateFailed}, timeoutErrorParams{}); err == nil {
 		t.Fatal("failed manifest must produce a process error")
 	}
 	err := reviewResultError(nil, &session.RunManifest{
 		TerminalState: session.StateFailed,
 		RunFailure:    &session.RunFailure{Classification: session.RunFailureInput, Reason: "diff resolution failed"},
-	})
+	}, timeoutErrorParams{})
 	if err == nil || !strings.Contains(err.Error(), string(session.RunFailureInput)) || !strings.Contains(err.Error(), "diff resolution failed") {
 		t.Fatalf("run failure detail missing from error: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 			Selected: []session.CoverageItem{{ItemID: "a"}, {ItemID: "b"}},
 			Failed:   []session.CoverageItem{{ItemID: "a"}, {ItemID: "b"}},
 		},
-	})
+	}, timeoutErrorParams{})
 	if err == nil || !strings.Contains(err.Error(), "2 of 2 selected item(s) failed") {
 		t.Fatalf("failed item counts missing from error: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 			Failed:    []session.CoverageItem{{ItemID: "b", Classification: session.FailureBudget}},
 		},
 	}
-	if err := reviewResultError(nil, budgetPartial); err != nil {
+	if err := reviewResultError(nil, budgetPartial, timeoutErrorParams{}); err != nil {
 		t.Fatalf("budget stop with usable coverage must not produce a process error: %v", err)
 	}
 	// When the cap stopped the run before any file completed, every selected item
@@ -76,12 +76,12 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 			},
 		},
 	}
-	if err := reviewResultError(nil, budgetAllFailed); err == nil ||
+	if err := reviewResultError(nil, budgetAllFailed, timeoutErrorParams{}); err == nil ||
 		!strings.Contains(err.Error(), "2 of 2 selected item(s) failed") {
 		t.Fatalf("budget stop that covered nothing must produce a process error: %v", err)
 	}
 	want := errors.New("dispatch failed")
-	if err := reviewResultError(want, budgetPartial); !errors.Is(err, want) {
+	if err := reviewResultError(want, budgetPartial, timeoutErrorParams{}); !errors.Is(err, want) {
 		t.Fatalf("run error not preserved: %v", err)
 	}
 }

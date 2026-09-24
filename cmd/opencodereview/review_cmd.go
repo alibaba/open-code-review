@@ -282,7 +282,14 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		fmt.Fprintf(os.Stderr, "[ocr] warning: freeze retry report: %v (retry report suppressed)\n", freezeErr)
 	}
 
-	resultErr := reviewResultError(runErr, manifest)
+	// Enhanced timeout error handling: includes elapsed time, timeout limit, and session ID.
+	// Future enhancement: populate token usage from ag.TotalInputTokens() and ag.TotalOutputTokens()
+	// to show accumulated token consumption before timeout in error messages.
+	resultErr := reviewResultError(runErr, manifest, timeoutErrorParams{
+		startTime:      startTime,
+		timeoutMinutes: opts.concurrentTaskTimeout,
+		sessionID:      ag.Session().SessionID,
+	})
 	if resultErr != nil {
 		span.SetStatus(codes.Error, resultErr.Error())
 		span.RecordError(resultErr)
@@ -322,9 +329,17 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	return emitErr
 }
 
-func reviewResultError(runErr error, manifest *session.RunManifest) error {
+type timeoutErrorParams struct {
+	startTime      time.Time
+	timeoutMinutes int
+	sessionID      string
+}
+
+func reviewResultError(runErr error, manifest *session.RunManifest, timeoutParams timeoutErrorParams) error {
 	if runErr != nil {
-		return fmt.Errorf("review failed: %w", runErr)
+		// Enhance timeout errors with actionable guidance
+		enhancedErr := enhanceTimeoutError(runErr, timeoutParams.startTime, timeoutParams.timeoutMinutes, timeoutParams.sessionID)
+		return fmt.Errorf("review failed: %w", enhancedErr)
 	}
 	if manifest != nil && manifest.TerminalState == session.StateFailed {
 		// The exit contract is: non-zero only for a run-level failure, or when
