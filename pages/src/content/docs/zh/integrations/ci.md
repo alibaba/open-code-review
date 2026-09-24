@@ -42,6 +42,27 @@ sidebar:
 配置 `GITLAB_API_TOKEN`，但对 fork MR 会回退使用内置 `CI_JOB_TOKEN`（它可通过
 `/discussions` 发起讨论）——为可靠性推荐使用专用 token。
 
+## 可选 CI 门禁
+
+两种集成都支持在发布评审结果后运行 `ocr gate`，门禁**默认关闭**。通过 GitHub 的
+`ocr_version` 参数或 GitLab 的 `OCR_VERSION` 变量选择包含 `ocr gate` 的 CLI
+版本。启用门禁后，集成会在调用模型前检查该命令是否可用。
+
+| 决策 | 含义 | 退出码 |
+|---|---|---|
+| `pass` | 所选文件均有完整评审记录，且所有已启用的检查通过。 | `0` |
+| `fail` | 发现达到或超过所配置严重度阈值的问题。 | `1` |
+| `inconclusive` | 缺少必要的评审记录，或无法确认所选文件已完成评审、提交版本匹配、评论工具调用成功。 | `1` |
+
+评审前，集成将 merge base 和 head 解析为不可变的 commit ID，并将相同 ID 传给
+评审和门禁。门禁会检查原始评审结果中的全部问题，包括汇总到摘要或在发布时去重的
+问题。因预算限制中断、存在标为豁免的文件、未选中任何文件、缺少评审记录、
+已记录的 `code_comment` 调用失败或 manifest 版本不受支持时，门禁均无法通过。
+
+作业会先尝试发布评审结果并运行门禁，保留评审结果和诊断信息。评审执行、发布和
+门禁均成功后，作业才通过。行内评论发布失败会使作业失败，即使相关问题已汇总到
+摘要；最终摘要也必须确认发布。
+
 ## GitHub Actions
 
 上游工作流位于
@@ -99,7 +120,9 @@ composite action
 | `effort` | `''` | 传给 `ocr review --effort` 的评审强度预设：`low`、`medium` 或 `high`（不区分大小写）。留空则沿用 CLI 默认值（已配置的值，否则为 medium）。需要 OCR v1.10.0 或更新版本；在更旧版本上 action 会提前以明确报错失败。 |
 | `max_tokens_budget` | `''` | 传给 `ocr review --max-tokens-budget` 的 token 总量上限（输入 + 输出）。留空或 `'0'` 表示不限。每次 LLM 轮次前都会检查：已超出上限的子任务会获得最后一轮来提交发现，不再派发新的子任务，超出预算和被跳过的文件记为 `failed(budget)`，已产生的部分结果仍会发布，评审以 0 退出。 |
 | `llm_reasoning_effort` | `''` | 面向支持 `reasoning_effort` 请求字段的模型（如 GLM-5.x、OpenAI reasoning 模型）的推理深度：`minimal`、`low`、`medium`、`high`、`max`（不区分大小写）。经 `llm_extra_body` 合并进请求体，因此所有已发布的 CLI 版本均可使用；`llm_extra_body` 中显式的 `reasoning_effort` 键优先于此 input。留空（默认）则不发送。仅适用于 OpenAI 兼容协议——Anthropic API 会拒绝未知请求体字段，action 在该协议下会快速失败；Anthropic 的 thinking 控制请改用 `llm_extra_body` 中的显式键。 |
-| `stream_progress` | `'false'` | 设为 `'true'` 时，把 `[ocr]` 实时进度行流入工作流日志（stderr 上的 human audience），而不是在评审结束前保持静默。仅影响展示：stderr 仍会写入文件，供产物上传与评论张贴使用。 |
+| `stream_progress` | `'false'` | 设为 `'true'` 时，在工作流日志中实时显示 `[ocr]` 进度。stderr 仍会写入文件，供产物上传与评论发布使用。 |
+| `gate` | `'false'` | 启用共享 CI 门禁。接受 `true` 或 `false`，不区分大小写。 |
+| `fail_on_severity` | `''` | 需要 `gate: 'true'`。发现的问题达到或超过指定严重度时，作业失败。可选 `critical`、`high`、`medium` 或 `low`；留空关闭严重度检查，忽略大小写和首尾空白。 |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -118,6 +141,23 @@ composite action
 [`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)——
 包括张贴模式（`sticky_summary`、`incremental`）、severity/类别路由与跨 push
 检查点等。
+
+### 启用门禁
+
+在现有 action 步骤的 `with:` 下添加：
+
+```yaml
+gate: 'true'
+fail_on_severity: high
+```
+
+门禁模式每次评审完整的 `merge-base..head` 区间，并关闭检查点读写，即使已启用
+`checkpoint_range`。多次更新的 PR 因此可能消耗更多 token。评论路由和增量发布仍可使用。
+
+`gate_exit_code` 输出记录门禁命令的退出码，关闭门禁或未执行到该步骤时为空。
+`upload_artifacts: 'true'`（默认）时，可从运行的 **Artifacts** 下载
+`ocr-result.json`、`ocr-stderr.log`，以及门禁运行时的 `ocr-gate.json` 和
+`ocr-gate-stderr.log`。每次 action 调用使用独立的临时目录。
 
 ### 定制
 
@@ -291,12 +331,11 @@ review（或 `ocr scan`）来生成报告。
 |---|---|
 | `Cannot find merge-base` | checkout 步骤用了浅克隆，但区间模式评审需要完整历史。上游工作流在 `actions/checkout` 上设 `fetch-depth: 0`——编辑文件时保留该设置。 |
 | `Failed to parse OCR output` | `OCR_LLM_URL` 或 `OCR_LLM_AUTH_TOKEN` 缺失或错误。在 *Settings → Secrets and variables → Actions* 下复查值。 |
-| 评审评论落到错误行 | 通常意味着评审开始到评论张贴之间 diff 发生了偏移。张贴脚本此时回退为普通 issue 评论——无需处理。 |
+| 评审评论落到错误行 | PR head 或 diff 可能在评审期间发生变化。无法作为行内评论发布的问题会写入摘要。启用 `gate: 'true'` 时，行内评论发布失败仍会使作业失败。核对评审时的 head 和评论位置后重新运行。 |
 
-> **注意。** `OCR_DEBUG` 环境变量目前在 OCR 中**未实现**——设置
-> `OCR_DEBUG: "1"` 无效。此处记录以备将来接入。当前若需详细输出，可检查工作流写
-> 到 `/tmp/ocr-result.json` 和 `/tmp/ocr-stderr.log` 的原始评审 JSON 和 stderr
-> （见下方故障排查），或本地运行 `ocr review`。
+> 在本次运行的产物中查看 `ocr-result.json` 和 `ocr-stderr.log`。门禁诊断信息位于
+> `ocr-gate.json` 和 `ocr-gate-stderr.log`，stderr 也会显示在 "Run OpenCodeReview"
+> 步骤日志中。
 
 ## GitLab CI
 
@@ -308,18 +347,20 @@ review（或 `ocr scan`）来生成报告。
 - 在 `merge_requests` 事件上触发（所有 MR 事件——创建、更新、重开）。
 - 在 `node:20` 镜像中运行，安装 OCR，通过 `ocr config set` 配置，再以 MR diff 模式
    运行核心命令。
-- 用内联 Python 脚本解析 JSON 外壳，把每条发现作为 GitLab Discussion（在 diff
+- 用 `post_review.py` 解析 JSON 结果，把每个问题作为 GitLab Discussion（在 diff
   上内联）张贴，用 MR 的 `versions` 端点计算正确的 `base_sha` / `start_sha` /
   `head_sha` 以精确定位。对无法内联张贴的评论回退为普通 MR note，并以摘要 note
   收尾。
 
 ### 安装
 
-把流水线放进仓库根：
+把流水线和发布脚本放进仓库根目录：
 
 ```bash
 curl -o .gitlab-ci.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/gitlab_ci/.gitlab-ci.yml
+curl -o post_review.py \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/gitlab_ci/post_review.py
 ```
 
 若已有 `.gitlab-ci.yml` 并想保留，把配方放到其他路径并用 `include:`
@@ -329,6 +370,8 @@ curl -o .gitlab-ci.yml \
 include:
   - local: 'ci/ocr-review.gitlab-ci.yml'
 ```
+
+将 `post_review.py` 保留在仓库根目录，或同步修改流水线中的脚本路径。
 
 ### 必需 CI/CD 变量
 
@@ -341,8 +384,10 @@ include:
 | `OCR_LLM_MODEL` | 否 | 否 | 模型名。无默认——必须显式设置。 |
 | `GITLAB_API_TOKEN` | 否 | 是 | 带 `api` scope 的 project / personal / group access token。可选——缺失时回退使用内置 `CI_JOB_TOKEN`（如对 fork MR）。为可靠性推荐专用 `GITLAB_API_TOKEN`。 |
 
-> GitLab 拒绝短于 8 字符的变量，因此流水线中 `llm.use_anthropic` 硬编码为
-> `false`。要用 Anthropic Claude 模型，直接编辑脚本。
+> GitLab 的 8 字符下限适用于
+> [Masked 变量](https://docs.gitlab.com/ci/variables/#mask-a-cicd-variable)。
+> `OCR_GATE` 等非敏感配置值可设为可见（Visible）变量。流水线将 `llm.use_anthropic`
+> 设为 `false`；使用 Anthropic Claude 模型时修改该行。
 
 > 流水线启动时还会运行
 > `ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'`，
@@ -354,6 +399,21 @@ include:
    > 即可让评审讨论带上品牌名，无需额外设置——当你不需要
    > [以服务账号身份发布](#post-under-a-service-account-identity)中记录的更持久
    > 服务账号设置时很方便。
+
+### 启用门禁
+
+在作业中添加以下变量，或在 CI/CD 设置中将其设为可见（Visible）变量：
+
+```yaml
+variables:
+  OCR_GATE: 'true'
+  OCR_FAIL_ON_SEVERITY: high
+```
+
+`OCR_GATE` 默认为 `false`，接受 `true` 或 `false`，不区分大小写。启用门禁时，
+`OCR_FAIL_ON_SEVERITY` 接受 `critical`、`high`、`medium` 或 `low`，忽略大小写和
+首尾空白；留空关闭严重度检查。关闭门禁时，该变量沿用发布脚本原有的严重度策略。
+门禁模式需要对当前 MR 区间进行一次新的完整评审。
 
 ### 定制
 
@@ -391,16 +451,19 @@ script:
 
 #### 固定 OCR 版本
 
+将 `OCR_VERSION` 设为要安装的 npm 版本。门禁模式需要包含 `ocr gate` 的版本。
+
 ```yaml
-script:
-  - npm install -g @alibaba-group/open-code-review@1.0.0
+variables:
+  OCR_VERSION: '<version>'
 ```
 
 #### 避免每次推送都复审
 
-`only: [merge_requests]` 在**每次** MR 更新时触发，对长生命周期 MR 会消耗大量
-LLM token。GitLab 无原生“仅在创建时”事件，因此推荐模式是运行评审前检测已有
-OCR note，若有则跳过。把 `ocr review` 调用替换为 Python wrapper：
+设置 `OCR_GATE=true` 时，每次 MR 更新都需进行新的完整评审，供门禁评估当前区间。
+设置 `OCR_GATE=false` 时，可以检测 MR 中已有的 OCR 评论，跳过评审以节省 token。
+后续变更将在下一次请求评审时检查。以下 Python 脚本可替代原有的 `ocr review`
+调用，仅在门禁关闭且已有 OCR 评论时跳过评审：
 
 ```python
 import json, os, sys, urllib.request
@@ -418,7 +481,10 @@ req = urllib.request.Request(url, headers={"PRIVATE-TOKEN": API_TOKEN})
 with urllib.request.urlopen(req) as resp:
     notes = json.loads(resp.read().decode())
 
-if any("OpenCodeReview" in n.get("body", "") for n in notes):
+if (
+    os.environ.get("OCR_GATE", "false").lower() == "false"
+    and any("OpenCodeReview" in n.get("body", "") for n in notes)
+):
     print("OCR already reviewed this MR. Skipping to save tokens.")
     sys.exit(0)
 
@@ -463,13 +529,17 @@ note，便会继续。
 | `Failed to parse OCR output` | `OCR_LLM_URL` 或 `OCR_LLM_AUTH_TOKEN` 错误。在 *Settings → CI/CD → Variables* 下复查值。 |
 | 内联评论落到错误行 | GitLab 内联讨论要求精确 SHA 匹配；张贴脚本取 `versions` 元数据以得到正确的 `base_sha` / `start_sha` / `head_sha`。若某条发现仍无法锚定，回退为普通 MR note。 |
 
-流水线把原始评审 JSON 写到 `/tmp/ocr-result.json`，stderr 写到
-`/tmp/ocr-stderr.log`。可在 debug 步骤中 cat 它们，检查 OCR 返回了什么：
+流水线通过 `when: always` 保留项目内的产物：`.ocr/ocr-result.json`、
+`.ocr/ocr-stderr.log`、`.ocr/ocr-gate.json` 和 `.ocr/ocr-gate-stderr.log`。
+关闭门禁或未执行到该步骤时，门禁文件为空。发布统计通过 `.ocr/ocr-stats.env`
+dotenv 报告提供。可在调试步骤中查看这些文件：
 
 ```yaml
 script:
-  - cat /tmp/ocr-result.json
-  - cat /tmp/ocr-stderr.log
+  - cat .ocr/ocr-result.json
+  - cat .ocr/ocr-stderr.log
+  - cat .ocr/ocr-gate.json
+  - cat .ocr/ocr-gate-stderr.log
 ```
 
 ## 另见

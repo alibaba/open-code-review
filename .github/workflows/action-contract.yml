@@ -17,6 +17,7 @@ on:
       - 'scripts/version.js'
       - 'scripts/github-actions/**'
       - 'examples/github_actions/README.md'
+      - 'examples/gitlab_ci/**'
       - '.github/workflows/action-contract.yml'
   pull_request:
     branches: [main]
@@ -29,6 +30,7 @@ on:
       - 'scripts/version.js'
       - 'scripts/github-actions/**'
       - 'examples/github_actions/README.md'
+      - 'examples/gitlab_ci/**'
       - '.github/workflows/action-contract.yml'
 
 permissions:
@@ -59,3 +61,14 @@ jobs:
 
       - name: Test launcher contracts
         run: npm run test:launcher
+
+  gitlab-contract:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    container:
+      image: python:3.14
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Test GitLab publication and pipeline contracts
+        run: python3 -m unittest discover -s examples/gitlab_ci -p '*_test.py'
