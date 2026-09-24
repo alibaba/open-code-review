@@ -3,7 +3,7 @@
 
 import type { TranslationKeys } from './types';
 
-export const az: TranslationKeys = {
+export const az: Partial<TranslationKeys> = {
   // Navbar
   'navbar.features': 'İmkanlar',
   'navbar.benchmark': 'Müqayisəli sınaq',

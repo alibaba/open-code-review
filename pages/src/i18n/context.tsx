@@ -10,7 +10,14 @@ import { ko } from './ko';
 import { ru } from './ru';
 import { az } from './az';
 
-const translations: Record<Language, TranslationKeys> = { en, zh, ja, ko, ru, az };
+const translations: Record<Language, TranslationKeys> = {
+  en,
+  zh,
+  ja,
+  ko,
+  ru,
+  az: { ...en, ...az },
+};
 
 interface LanguageContextValue {
   language: Language;
