@@ -825,11 +825,11 @@ dispatchLoop:
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		a.recordContextFailure(ctxErr)
-		return a.args.CommentCollector.Comments(), ctxErr
+		return a.finalComments(), ctxErr
 	}
 
 	if dispatched == 0 {
-		return a.args.CommentCollector.Comments(), nil
+		return a.finalComments(), nil
 	}
 
 	failed := atomic.LoadInt64(&a.subtaskFailed)
@@ -843,13 +843,27 @@ dispatchLoop:
 	if failed > 0 && failed == dispatched && reused == 0 {
 		// Even when all subtasks failed, some may have produced comments before
 		// hitting the error. Return those comments instead of discarding them.
-		if comments := a.args.CommentCollector.Comments(); len(comments) > 0 {
+		if comments := a.finalComments(); len(comments) > 0 {
 			return comments, nil
 		}
 		return nil, fmt.Errorf("all %d file review(s) failed — check your LLM configuration and API key", dispatched)
 	}
 
-	return a.args.CommentCollector.Comments(), nil
+	return a.finalComments(), nil
+}
+
+// finalComments returns the collected review comments after collapsing
+// near-duplicates that target the same file and overlapping line range.
+// This is a cheap, deterministic, no-LLM-call safety net (see
+// tool.DedupByLocation) that applies to every `ocr review` run, independent
+// of the LLM-based DEDUP_TASK that only `ocr scan` currently wires up.
+func (a *Agent) finalComments() []model.LlmComment {
+	raw := a.args.CommentCollector.Comments()
+	deduped := tool.DedupByLocation(raw)
+	if summary := tool.DedupSummary(len(raw), len(deduped)); summary != "" {
+		fmt.Fprintf(stdout.Writer(), "[ocr] review dedup: %s\n", summary)
+	}
+	return deduped
 }
 
 func (a *Agent) recordContextFailure(err error) {
