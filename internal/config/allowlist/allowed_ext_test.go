@@ -53,6 +53,12 @@ func TestIsAllowedExt(t *testing.T) {
 		{".MUSTACHE", true},
 		{".pug", true},
 		{".PUG", true},
+		{".ejs", true},
+		{".EJS", true},
+		{".liquid", true},
+		{".LIQUID", true},
+		{".njk", true},
+		{".NJK", true},
 		{".graphql", true},
 		{".GRAPHQL", true},
 		{".gql", true},
@@ -227,6 +233,15 @@ func TestIsExcludedPath(t *testing.T) {
 		{"pug fixture", "test/fixtures/page.pug", true},
 		{"pug template in tests directory", "tests/templates/page.pug", false},
 		{"pug template in test directory", "test/templates/page.pug", false},
+
+		// EJS/Liquid/Nunjucks have no extension-specific test-path convention
+		// beyond the generic fixture directories either.
+		{"ejs fixture", "test/fixtures/card.ejs", true},
+		{"ejs in tests directory", "tests/templates/card.ejs", false},
+		{"liquid fixture", "test/fixtures/card.liquid", true},
+		{"liquid in tests directory", "tests/templates/card.liquid", false},
+		{"njk fixture", "test/fixtures/card.njk", true},
+		{"njk in tests directory", "tests/templates/card.njk", false},
 
 		// HarmonyOS oh_modules and test files
 		{"oh_modules root", "oh_modules/some_lib/index.ets", true},
