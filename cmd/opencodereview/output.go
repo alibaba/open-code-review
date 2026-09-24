@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -335,6 +336,12 @@ type jsonOutput struct {
 	// them here, and sits last with omitempty so a first-try-success run emits
 	// byte-identical JSON to before #368.
 	RetryReport *llm.RetryReport `json:"retry_report,omitempty"`
+	// CommentDelivery reconciles code_comment submissions: which rejected
+	// calls no later accepted submission superseded. Nil unless at least
+	// one code_comment call was rejected, so clean runs emit byte-identical
+	// JSON. Named apart from the action's comments_failed, which counts
+	// GitHub posting failures, not generation-side rejections.
+	CommentDelivery *llmloop.CommentDeliveryReport `json:"comment_delivery,omitempty"`
 }
 
 func outputJSON(comments []model.LlmComment) error {
@@ -356,7 +363,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, toolFailures []llmloop.ToolFailureDetail,
 	traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
-	retryReport *llm.RetryReport, groups []agent.FileGroupInfo) error {
+	retryReport *llm.RetryReport, groups []agent.FileGroupInfo, delivery *llmloop.CommentDeliveryReport) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	payload := jsonOutput{
 		Status:   "success",
@@ -374,12 +381,13 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			Elapsed:          duration.Round(time.Second).String(),
 			BudgetExceeded:   budgetExceeded,
 		},
-		Groups:         groups,
-		ProjectSummary: projectSummary,
-		Resume:         resumeInfo,
-		SessionID:      sessionID,
-		Manifest:       manifest,
-		RetryReport:    retryReport,
+		Groups:          groups,
+		ProjectSummary:  projectSummary,
+		Resume:          resumeInfo,
+		SessionID:       sessionID,
+		Manifest:        manifest,
+		RetryReport:     retryReport,
+		CommentDelivery: delivery,
 	}
 	payload.ToolCalls = newJSONToolCalls(toolCalls, toolFailures)
 	if manifest != nil {
@@ -493,6 +501,26 @@ func outputRetryReportText(w io.Writer, rep *llm.RetryReport) {
 	}
 
 	fmt.Fprintf(w, "\nPer-attempt detail: --format json (retry_report).\n")
+}
+
+// outputCommentDeliveryText renders the reconciled comment-delivery record
+// for human output. It runs only when at least one code_comment call was
+// rejected; a fully recovered run still prints, so the recovery is visible
+// rather than inferred from the absence of a line.
+func outputCommentDeliveryText(w io.Writer, rep *llmloop.CommentDeliveryReport) {
+	if rep == nil {
+		return
+	}
+	if rep.Unrecovered == 0 {
+		fmt.Fprintln(w, "\nComment delivery: every rejected submission was superseded by a later accepted one.")
+		return
+	}
+	nums := make([]string, 0, len(rep.ToolCallNumbers))
+	for _, n := range rep.ToolCallNumbers {
+		nums = append(nums, strconv.FormatInt(n, 10))
+	}
+	fmt.Fprintf(w, "\nComment delivery: %d unrecovered rejected %s (tool calls: %s).\n",
+		rep.Unrecovered, plural(rep.Unrecovered, "submission"), strings.Join(nums, ", "))
 }
 
 // groupRetryRequests buckets by review stage, then sorts for stable output.

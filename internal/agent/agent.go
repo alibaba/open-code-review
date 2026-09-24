@@ -527,6 +527,10 @@ func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 // ToolFailures returns failed registered-tool calls accumulated during review.
 func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.ToolFailures() }
 
+// CommentDelivery reconciles this review's code_comment submissions, or
+// returns nil when none was rejected.
+func (a *Agent) CommentDelivery() *llmloop.CommentDeliveryReport { return a.runner.CommentDelivery() }
+
 // BudgetExceeded reports whether the aggregate token budget gate stopped
 // dispatch before all files were reviewed. The run still returns the partial
 // comments collected up to that point (and a nil error), so those results are
