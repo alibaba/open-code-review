@@ -27,6 +27,16 @@ type Provider struct {
 	EnvVar      string // environment variable name for API key fallback
 	Models      []string
 
+	// ExtraHeaders are sent with every request to this preset, beneath the
+	// entry's own extra_headers, which win on a key clash. Values may use
+	// SessionKeyTemplateVar.
+	ExtraHeaders map[string]string
+
+	// ModelProtocols overrides Protocol for the listed models, for a preset
+	// whose gateway serves model families over different wire protocols. An
+	// entry's explicit protocol still wins.
+	ModelProtocols map[string]string
+
 	// AmbientAuth marks a provider whose credentials come from the
 	// environment's own chain rather than an api_key — AWS SigV4, for
 	// instance. The resolver skips its api_key requirement for these, because
@@ -408,6 +418,73 @@ var registry = []Provider{
 		},
 	},
 	{
+		// OpenCode Go serves each model family on its own wire protocol from
+		// one base URL, so ModelProtocols routes the Messages-API and
+		// Responses-API models; everything else is Chat Completions.
+		// Go routes and caches per conversation from x-opencode-session, and
+		// its Messages endpoint only reads the key from x-api-key.
+		Name:        "opencode-go",
+		DisplayName: "OpenCode Go",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://opencode.ai/zen/go/v1",
+		AuthHeader:  "x-api-key",
+		EnvVar:      "OPENCODE_API_KEY",
+		ExtraHeaders: map[string]string{
+			"x-opencode-session": SessionKeyTemplateVar,
+		},
+		ModelProtocols: map[string]string{
+			"grok-4.7":                   ProtocolOpenAIResponses,
+			"grok-4.6":                   ProtocolOpenAIResponses,
+			"gpt-6-luna":                 ProtocolOpenAIResponses,
+			"gpt-5.6-luna":               ProtocolOpenAIResponses,
+			"muse-spark-1.3-contributor": ProtocolOpenAIResponses,
+			"muse-spark-1.2-contributor": ProtocolOpenAIResponses,
+			"minimax-m3":                 ProtocolAnthropic,
+			"minimax-m2.7":               ProtocolAnthropic,
+			"minimax-m2.5":               ProtocolAnthropic,
+			"qwen3.8-max":                ProtocolAnthropic,
+			"qwen3.8-flash":              ProtocolAnthropic,
+			"qwen3.7-max":                ProtocolAnthropic,
+			"qwen3.7-plus":               ProtocolAnthropic,
+			"qwen3.6-plus":               ProtocolAnthropic,
+		},
+		Models: []string{
+			"kimi-k3",
+			"glm-5.3",
+			"deepseek-v4.1-flash",
+			"deepseek-v4-pro",
+			"grok-4.7",
+			"gpt-6-luna",
+			"qwen3.8-max",
+			"minimax-m3",
+			"glm-5.3-flash",
+			"glm-5.2",
+			"glm-5.1",
+			"kimi-k2.7-code",
+			"kimi-k2.6",
+			"deepseek-v4-flash",
+			"deepseek-v4-flash-vision-exp",
+			"mimo-v2.6-pro",
+			"mimo-v2.6-flash",
+			"mimo-v2.5-pro",
+			"mimo-v2.5",
+			"longcat-2.0",
+			"hy4-preview",
+			"hy3",
+			"space-bunny-free",
+			"grok-4.6",
+			"gpt-5.6-luna",
+			"muse-spark-1.3-contributor",
+			"muse-spark-1.2-contributor",
+			"qwen3.8-flash",
+			"qwen3.7-max",
+			"qwen3.7-plus",
+			"qwen3.6-plus",
+			"minimax-m2.7",
+			"minimax-m2.5",
+		},
+	},
+	{
 		Name:        "novita",
 		DisplayName: "Novita API",
 		Protocol:    ProtocolOpenAIChatCompletions,
@@ -535,6 +612,20 @@ func copyProvider(p Provider) Provider {
 		models := make([]string, len(p.Models))
 		copy(models, p.Models)
 		p.Models = models
+	}
+	if p.ExtraHeaders != nil {
+		headers := make(map[string]string, len(p.ExtraHeaders))
+		for k, v := range p.ExtraHeaders {
+			headers[k] = v
+		}
+		p.ExtraHeaders = headers
+	}
+	if p.ModelProtocols != nil {
+		protocols := make(map[string]string, len(p.ModelProtocols))
+		for k, v := range p.ModelProtocols {
+			protocols[k] = v
+		}
+		p.ModelProtocols = protocols
 	}
 	return p
 }

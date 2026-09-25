@@ -76,7 +76,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "opencode-go", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -391,6 +391,43 @@ func TestLookupProvider_MistralDetails(t *testing.T) {
 		"codestral-latest",
 		"mistral-large-latest",
 		"mistral-small-latest",
+	}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
+	}
+}
+
+func TestLookupProvider_OpenCodeGoDetails(t *testing.T) {
+	p, ok := LookupProvider("opencode-go")
+	if !ok {
+		t.Fatal("opencode-go not found")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://opencode.ai/zen/go/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://opencode.ai/zen/go/v1")
+	}
+	if p.EnvVar != "OPENCODE_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "OPENCODE_API_KEY")
+	}
+	// Go's Messages endpoint answers 401 to a Bearer token.
+	if p.AuthHeader != "x-api-key" {
+		t.Errorf("AuthHeader = %q, want x-api-key", p.AuthHeader)
+	}
+	expectedModels := []string{
+		"kimi-k3", "glm-5.3", "deepseek-v4.1-flash", "deepseek-v4-pro", "grok-4.7", "gpt-6-luna",
+		"qwen3.8-max", "minimax-m3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "kimi-k2.7-code",
+		"kimi-k2.6", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "mimo-v2.6-pro",
+		"mimo-v2.6-flash", "mimo-v2.5-pro", "mimo-v2.5", "longcat-2.0", "hy4-preview", "hy3",
+		"space-bunny-free", "grok-4.6", "gpt-5.6-luna", "muse-spark-1.3-contributor",
+		"muse-spark-1.2-contributor", "qwen3.8-flash", "qwen3.7-max", "qwen3.7-plus",
+		"qwen3.6-plus", "minimax-m2.7", "minimax-m2.5",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))

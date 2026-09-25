@@ -283,6 +283,7 @@ func TestCloneProviderEntry_NilExtraBody(t *testing.T) {
 func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
 	orig := ProviderEntry{
 		APIKey:       "key",
+		APIKeys:      []string{"key-2"},
 		APIKeyCmd:    "op read op://dev/x/api-key",
 		URL:          "http://localhost",
 		Protocol:     "openai",
@@ -1952,6 +1953,23 @@ func TestApiKeyStepCanConfirm(t *testing.T) {
 			wantOK: true,
 		},
 		{
+			name: "official api_keys only",
+			cfg: &Config{
+				Provider:  "deepseek",
+				Providers: map[string]ProviderEntry{"deepseek": {APIKeys: []string{"sk-1", "sk-2"}}},
+			},
+			wantOK: true,
+		},
+		{
+			name: "official whitespace-only api_keys",
+			cfg: &Config{
+				Provider:  "deepseek",
+				Providers: map[string]ProviderEntry{"deepseek": {APIKeys: []string{"  "}}},
+			},
+			wantOK:     false,
+			wantErrMsg: "API key is required (configure it, set providers.deepseek.api_key_cmd, or set $DEEPSEEK_API_KEY)",
+		},
+		{
 			name:      "custom saved api_key",
 			customTab: true,
 			cfg: &Config{
@@ -1966,6 +1984,15 @@ func TestApiKeyStepCanConfirm(t *testing.T) {
 			cfg: &Config{
 				Provider:        "stepfun",
 				CustomProviders: map[string]ProviderEntry{"stepfun": {APIKeyCmd: "op read op://dev/stepfun/api-key"}},
+			},
+			wantOK: true,
+		},
+		{
+			name:      "custom api_keys only",
+			customTab: true,
+			cfg: &Config{
+				Provider:        "stepfun",
+				CustomProviders: map[string]ProviderEntry{"stepfun": {APIKeys: []string{"sk-1"}}},
 			},
 			wantOK: true,
 		},

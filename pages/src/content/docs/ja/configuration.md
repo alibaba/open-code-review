@@ -37,8 +37,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ### 組み込み provider
 
 以下の provider が OCR に同梱されており、Base URL とプロトコルがプリセット
-されています——選択後は API key を入力するだけです。`providers.<name>.api_key`
-が未設定の場合は、対応する環境変数に自動的にフォールバックします。
+されています——選択後は API key を入力するだけです。`providers.<name>.api_key`、
+`api_keys`、`api_key_cmd` のいずれも未設定の場合は、対応する環境変数に自動的にフォールバックします。
 
 | 名称 | プロトコル | Base URL | API key 環境変数 |
 |---|---|---|---|
@@ -66,6 +66,33 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+| `opencode-go` | openai | `https://opencode.ai/zen/go/v1` | `OPENCODE_API_KEY` |
+
+### 複数の API キー
+
+`api_keys` には同じ provider の追加キーを列挙します。リクエストが利用上限の応答（HTTP 429、または残高不足の 402）を受けると、次のリトライでは次のキーを使い、その実行の以降のリクエストもそのキーから始めます。8 秒を超える `Retry-After` は上限に達したキーのリセット時刻を示すものなので、次のキーを試す前にその時間は待ちません。キーが拒否された 401 など、その他のエラーではキーを切り替えません。
+
+フェイルオーバーは 1 リクエストあたり 6 回という通常のリトライ回数の範囲で動作します。もともとリトライされる 429 では、リクエストは増えません。402 は通常その時点でリクエストを終了させますが、`api_keys` があるとその範囲内で次のキーでリトライされます。そのため 1 リクエストが試せるキーは最大 6 個で、7 個目以降のキーは後続のリクエストでのみ使われます。
+
+複数のキーを許可し、キーごとに上限を設けている provider でのみ使ってください。アカウント全体や IP 単位の 429 は、別のキーでは回避できません。
+
+```bash
+ocr config set providers.my-gateway.api_keys "$KEY_1,$KEY_2,$KEY_3"
+```
+
+最初に使うキーは `api_key`、または代わりに `api_key_cmd` を設定していればその出力で、続いて `api_keys` を順に使います。どちらも未設定なら `api_keys` の先頭が最初のキーになり、provider の環境変数は使われません。`api_keys` は組み込み provider とカスタム provider の両方で使えます。
+
+### OpenCode Go
+
+[OpenCode Go](https://opencode.ai/docs/go/) は OpenCode が提供するオープンなコーディングモデル向けのサブスクリプションです：
+
+```bash
+ocr config set provider                         opencode-go
+ocr config set model                            deepseek-v4.1-flash
+ocr config set providers.opencode-go.api_key    "$OPENCODE_API_KEY"
+```
+
+OCR はレビューのセッション ID を `x-opencode-session` で送信し、Go はこれをルーティングとプロンプトキャッシュに使います。Go はモデルファミリーごとに異なる API で提供しており、OCR はモデルからプロトコルを選びます。多くのモデルは Chat Completions、MiniMax と Qwen は Messages API、Grok・GPT・Muse Spark は Responses API です。`providers.opencode-go.protocol` を設定すると、すべてのモデルでそのプロトコルに固定されます。
 
 ### 組み込み provider の Base URL を上書きする
 
@@ -235,8 +262,8 @@ ocr config set providers.anthropic.api_key_cmd \
 ```
 
 優先順位：静的な `api_key` が常に優先されます（両方設定されている場合はコマンドを
-無視し、警告を表示します）。それ以外の場合は `api_key_cmd` を実行します。どちらも
-設定されていない場合のみ、OCR は provider の環境変数にフォールバックします。
+無視し、警告を表示します）。それ以外の場合は `api_key_cmd` を実行し、それもなければ
+`api_keys` の先頭を使います。いずれも設定されていない場合のみ、OCR は provider の環境変数にフォールバックします。
 
 コマンドは `ocr` 実行ごとに 1 回実行され、成功する必要があります。非ゼロ終了、
 空の出力、複数行の出力、64KiB を超える出力はいずれもハードエラーです（OCR が黙って
