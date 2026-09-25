@@ -929,12 +929,12 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 		tools = append(tools, openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
 			Name:        t.Function.Name,
 			Description: openai.String(t.Function.Description),
-			Parameters:  shared.FunctionParameters(t.Function.Parameters),
+			Parameters:  t.Function.Parameters,
 		}))
 	}
 
 	params := openai.ChatCompletionNewParams{
-		Model:    shared.ChatModel(model),
+		Model:    model,
 		Messages: messages,
 	}
 
@@ -1628,7 +1628,7 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	}
 
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(model),
+		Model:     model,
 		MaxTokens: maxTokens,
 		Messages:  messages,
 	}
@@ -1775,7 +1775,7 @@ func (c *AnthropicClient) mapAnthropicResponse(sdkResp *anthropic.Message) *Chat
 
 	return &ChatResponse{
 		ID:    sdkResp.ID,
-		Model: string(sdkResp.Model),
+		Model: sdkResp.Model,
 		Choices: []Choice{{
 			Message: ResponseMessage{
 				Role:             "assistant",
