@@ -220,7 +220,7 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 	}
 
 	params := responses.ResponseNewParams{
-		Model: openai.ResponsesModel(model),
+		Model: model,
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: input,
 		},
@@ -334,7 +334,7 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 
 	return &ChatResponse{
 		ID:    sdkResp.ID,
-		Model: string(sdkResp.Model),
+		Model: sdkResp.Model,
 		Choices: []Choice{{
 			Message: ResponseMessage{
 				Role:             "assistant",
