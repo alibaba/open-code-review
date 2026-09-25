@@ -99,6 +99,7 @@ The agent's strengths are concentrated where they matter most — dynamic decisi
 
 - **Scenario-tuned prompts** — Prompt templates deeply optimized for code review, improving effectiveness while reducing token consumption.
 - **Scenario-tuned toolset** — Distilled from deep analysis of tool-call traces in large-scale production data — including call frequency distributions, per-tool repetition rates, and the impact of new tools on the overall call chain — resulting in a purpose-built toolset that is more stable and predictable for code review than a generic agent toolkit.
+- **Built-in adversarial review pass** — After the standard rounds, each file group gets a fresh adversarial conversation that challenges the chosen design, stress-tests the change's assumptions (races, security, data loss, rollback), and reports what the standard review missed.
 
 ## How to Use
 

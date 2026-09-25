@@ -372,12 +372,27 @@ func (s MainLoopStop) Reason() string {
 // Review calls this once per review round, so one review subtask can drive
 // several of these conversations in sequence.
 func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKey string) (bool, MainLoopStop, error) {
+	return r.runConversation(ctx, messages, taskKey, session.MainTask)
+}
+
+// RunAdversarialTask drives one ADVERSARIAL_TASK conversation loop to its end
+// with the same tool loop, round limits and budget semantics as RunMainTask,
+// recording its requests under the adversarial_task session task type.
+func (r *Runner) RunAdversarialTask(ctx context.Context, messages []llm.Message, taskKey string) (bool, MainLoopStop, error) {
+	return r.runConversation(ctx, messages, taskKey, session.AdversarialTask)
+}
+
+// runConversation is the shared tool-use loop behind RunMainTask and
+// RunAdversarialTask. taskType selects the session task bucket that the
+// conversation's requests and responses are recorded under, and scopes the
+// provider cache affinity key.
+func (r *Runner) runConversation(ctx context.Context, messages []llm.Message, taskKey string, taskType session.TaskType) (bool, MainLoopStop, error) {
 	// Every round of this loop re-sends the growing conversation, so each
 	// request is a prefix extension of the previous one — exactly what
 	// provider prompt caches reuse. Scope the affinity key to this subtask's
-	// main-task conversation so every round routes to the same cache node.
+	// conversation so every round routes to the same cache node.
 	ctx = llm.ContextWithSessionKey(ctx,
-		llm.SessionTaskKey(r.deps.Session.SessionID, string(session.MainTask), taskKey))
+		llm.SessionTaskKey(r.deps.Session.SessionID, string(taskType), taskKey))
 
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
 	const maxConsecutiveEmptyRounds = 3
@@ -412,12 +427,12 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		toolReqCount--
 
 		fs := r.deps.Session.GetOrCreateFileSession(taskKey)
-		rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
+		rec := fs.AppendTaskRecord(taskType, append([]llm.Message(nil), messages...))
 		startTime := time.Now()
 
 		// Scoped to this round: ctx itself must stay identity-free so each
 		// iteration's meta replaces the previous one instead of nesting.
-		reqCtx := r.requestCtx(ctx, taskKey, session.MainTask, rec.RequestNo)
+		reqCtx := r.requestCtx(ctx, taskKey, taskType, rec.RequestNo)
 
 		_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
 		resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
@@ -523,11 +538,11 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 	switch stop {
 	case StopMaxRounds:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", taskKey)
-		r.runGraceRound(ctx, messages, taskKey, sessionID)
+		r.runGraceRound(ctx, messages, taskKey, taskType, sessionID)
 	case StopTokenBudget:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Token budget exceeded (used %d > budget %d) for %s.\n",
 			r.TotalTokensUsed(), r.deps.MaxTokensBudget, taskKey)
-		r.runGraceRound(ctx, messages, taskKey, sessionID)
+		r.runGraceRound(ctx, messages, taskKey, taskType, sessionID)
 	}
 	return false, stop, nil
 }
@@ -542,7 +557,7 @@ func (r *Runner) tokenBudgetExceeded() bool {
 // runGraceRound performs one final LLM call after the tool-request budget is
 // exhausted, giving the model a chance to submit any findings it identified
 // but did not yet report via code_comment.
-func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID string) {
+func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, taskType session.TaskType, sessionID string) {
 	graceDefs := graceRoundToolDefs(r.deps.MainToolDefs)
 	if len(graceDefs) == 0 {
 		return
@@ -560,9 +575,9 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	}
 
 	fs := r.deps.Session.GetOrCreateFileSession(taskKey)
-	rec := fs.AppendTaskRecord(session.MainTask, messages)
+	rec := fs.AppendTaskRecord(taskType, messages)
 	startTime := time.Now()
-	reqCtx := r.requestCtx(ctx, taskKey, session.MainTask, rec.RequestNo)
+	reqCtx := r.requestCtx(ctx, taskKey, taskType, rec.RequestNo)
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{

@@ -421,6 +421,7 @@ var retryStages = []struct {
 }{
 	{session.PlanTask, "Review planning"},
 	{session.MainTask, "Core review"},
+	{session.AdversarialTask, "Adversarial review"},
 	{session.MemoryCompressionTask, "Context compaction"},
 	{session.ReLocationTask, "Comment re-location"},
 	{session.ReviewFilterTask, "Comment filtering"},

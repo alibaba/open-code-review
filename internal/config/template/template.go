@@ -28,6 +28,7 @@ type Template struct {
 	ReLocationTask              *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask            *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 	GroupingTask                *LlmConversation `json:"GROUPING_TASK,omitempty"`
+	AdversarialTask             *LlmConversation `json:"ADVERSARIAL_TASK,omitempty"`
 }
 
 // ScanTemplate holds the full-file scan task template configuration loaded
@@ -181,6 +182,7 @@ type templateManifest struct {
 	ReLocationTask              *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask            *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 	GroupingTask                *manifestConversation `json:"GROUPING_TASK,omitempty"`
+	AdversarialTask             *manifestConversation `json:"ADVERSARIAL_TASK,omitempty"`
 }
 
 func resolveConversation(m manifestConversation) (LlmConversation, error) {
@@ -249,6 +251,9 @@ func LoadDefault() (*Template, error) {
 	if tpl.GroupingTask, err = resolveOptionalConversation(m.GroupingTask, "GROUPING_TASK"); err != nil {
 		return nil, err
 	}
+	if tpl.AdversarialTask, err = resolveOptionalConversation(m.AdversarialTask, "ADVERSARIAL_TASK"); err != nil {
+		return nil, err
+	}
 	return &tpl, nil
 }
 
@@ -279,12 +284,18 @@ func resolveLang(lang string) string {
 }
 
 // ApplyLanguage injects a language directive into all system-role messages
-// across MAIN_TASK, PLAN_TASK (if set), and MEMORY_COMPRESSION_TASK.
+// across MAIN_TASK, PLAN_TASK (if set), ADVERSARIAL_TASK (if set), and
+// MEMORY_COMPRESSION_TASK. The adversarial pass emits user-visible review
+// comments, so it must honor the configured output language like the main
+// task does.
 func (t *Template) ApplyLanguage(lang string) {
 	instruction := "\n\nAlways respond in " + resolveLang(lang) + "."
 	applyLanguage(&t.MainTask, instruction)
 	if t.PlanTask != nil {
 		applyLanguage(t.PlanTask, instruction)
+	}
+	if t.AdversarialTask != nil {
+		applyLanguage(t.AdversarialTask, instruction)
 	}
 	applyLanguage(&t.MemoryCompressionTask, instruction)
 }

@@ -27,6 +27,7 @@ const (
 	ReLocationTask        TaskType = "re_location_task"
 	ReviewFilterTask      TaskType = "review_filter_task"
 	GroupingTask          TaskType = "grouping_task"
+	AdversarialTask       TaskType = "adversarial_task"
 )
 
 const (

@@ -199,6 +199,36 @@ func TestLoadDefault_PlaceholdersPresent(t *testing.T) {
 	}
 }
 
+func TestLoadDefault_AdversarialTask(t *testing.T) {
+	tpl, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault() error: %v", err)
+	}
+	if tpl.AdversarialTask == nil {
+		t.Fatal("AdversarialTask is nil, expected non-nil")
+	}
+	if len(tpl.AdversarialTask.Messages) != 2 {
+		t.Fatalf("AdversarialTask.Messages length = %d, want 2", len(tpl.AdversarialTask.Messages))
+	}
+	if role := tpl.AdversarialTask.Messages[0].Role; role != "system" {
+		t.Errorf("AdversarialTask.Messages[0].Role = %q, want system", role)
+	}
+	if !strings.Contains(tpl.AdversarialTask.Messages[0].Content, "adversarial code reviewer") {
+		t.Error("AdversarialTask system message does not name the adversarial reviewer role")
+	}
+	for _, ph := range []string{
+		"{{diffs}}", "{{change_files}}", "{{system_rule}}",
+		"{{requirement_background}}", "{{confirmed_comments}}", "{{current_system_date_time}}",
+	} {
+		if !strings.Contains(tpl.AdversarialTask.Messages[1].Content, ph) {
+			t.Errorf("AdversarialTask user message does not contain %q", ph)
+		}
+	}
+	if strings.Contains(tpl.AdversarialTask.Messages[1].Content, "{{plan_guidance}}") {
+		t.Error("AdversarialTask user message must not depend on the plan phase")
+	}
+}
+
 func TestValidate_PassesOnDefault(t *testing.T) {
 	tpl, err := LoadDefault()
 	if err != nil {
@@ -222,6 +252,9 @@ func TestApplyLanguage(t *testing.T) {
 	}
 	if !strings.HasSuffix(tpl.PlanTask.Messages[0].Content, suffix) {
 		t.Errorf("PlanTask system message does not end with %q", suffix)
+	}
+	if !strings.HasSuffix(tpl.AdversarialTask.Messages[0].Content, suffix) {
+		t.Errorf("AdversarialTask system message does not end with %q", suffix)
 	}
 	if !strings.HasSuffix(tpl.MemoryCompressionTask.Messages[0].Content, suffix) {
 		t.Errorf("MemoryCompressionTask system message does not end with %q", suffix)

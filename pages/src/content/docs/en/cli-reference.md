@@ -139,6 +139,27 @@ staged + unstaged + untracked changes in the current directory's repo.
 > `--resume` supports only range or commit reviews and cannot be combined
 > with `--preview`.
 
+### Adversarial review pass
+
+After a group's standard review completes, `ocr review` always runs one
+extra **adversarial pass** for that group — a fresh conversation with the
+same context tools that challenges the chosen design, stress-tests the
+change's assumptions (concurrency and races, authorization and injection,
+data loss and rollback, error handling, resource leaks), and reports what
+the standard rounds missed. It receives the standard pass's findings as
+do-not-repeat context, and its comments go through the same review filter
+as every other finding.
+
+There is no flag for it: the pass is part of the default pipeline. Notes:
+
+- Cost: roughly one extra LLM conversation per file group.
+- The pass is best-effort — if it fails or stops early (including a
+  `--max-tokens-budget` trip), the run records a warning and keeps the
+  standard findings; the group's exit status does not change.
+- An empty adversarial pass is a valid outcome: the model is told to call
+  `task_done` when nothing survives its challenges.
+- `--preview` never runs it (a preview performs no LLM calls).
+
 ### Per-run LLM selection
 
 Both `review` and `scan` accept `--provider` and `--model`. The overrides

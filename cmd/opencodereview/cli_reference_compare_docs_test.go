@@ -143,3 +143,38 @@ func TestCLIReferenceDocumentsSessionRm(t *testing.T) {
 		})
 	}
 }
+
+// TestCLIReferenceDocumentsAdversarialPass pins the always-on adversarial
+// review pass in every locale's `ocr review` reference: the section header,
+// the fact that it has no flag (part of the default pipeline), and the
+// best-effort failure semantics users will ask about.
+func TestCLIReferenceDocumentsAdversarialPass(t *testing.T) {
+	type localePins struct {
+		locale string
+		wants  []string
+	}
+	for _, lp := range []localePins{
+		{"en", []string{
+			"### Adversarial review pass",
+			"part of the default pipeline",
+			"do-not-repeat context",
+		}},
+		{"zh", []string{"### 对抗性审查", "该 pass 是默认流水线的一部分", "勿重复"}},                                          // allow-non-english: localized pins for the zh cli-reference page
+		{"ja", []string{"### 敵対的レビューパス", "デフォルトのパイプラインの一部", "繰り返さない"}},                                     // allow-non-english: localized pins for the ja cli-reference page
+		{"ru", []string{"### Адверсариальный этап ревью", "часть конвейера по умолчанию", "не повторять"}}, // allow-non-english: localized pins for the ru cli-reference page
+		{"ko", []string{"### 적대적 리뷰 패스", "기본 파이프라인의 일부", "반복 금지"}},                                         // allow-non-english: localized pins for the ko cli-reference page
+	} {
+		t.Run(lp.locale, func(t *testing.T) {
+			path := filepath.Join("..", "..", "pages", "src", "content", "docs", lp.locale, "cli-reference.md")
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			for _, want := range lp.wants {
+				if !strings.Contains(string(body), want) {
+					t.Errorf("%s: missing %q", path, want)
+				}
+			}
+		})
+	}
+}

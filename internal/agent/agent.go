@@ -1322,23 +1322,48 @@ func (a *Agent) buildMainTaskMessages(rule, changeFiles, diffs, planResult, conf
 	return messages
 }
 
+// buildAdversarialTaskMessages renders the ADVERSARIAL_TASK messages for the
+// post-main-loop adversarial pass. confirmed carries the standard pass's
+// findings so the adversarial reviewer does not restate them; the plan
+// guidance is deliberately omitted to keep the second opinion independent.
+func (a *Agent) buildAdversarialTaskMessages(rule, changeFiles, diffs, confirmed string) []llm.Message {
+	rawMsgs := a.args.Template.AdversarialTask.Messages
+	messages := make([]llm.Message, 0, len(rawMsgs))
+	for _, m := range rawMsgs {
+		content := m.Content
+		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
+		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
+		content = strings.ReplaceAll(content, "{{change_files}}", changeFiles)
+		content = strings.ReplaceAll(content, "{{diffs}}", diffs)
+		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
+		if confirmed == "" {
+			content = stripEmptyConfirmedBlock(content)
+		}
+		content = strings.ReplaceAll(content, "{{confirmed_comments}}", confirmed)
+		messages = append(messages, llm.NewTextMessage(m.Role, content))
+	}
+	return messages
+}
+
 // checkPromptBudget validates that the rendered messages fit within the token
-// limit. Returns a *subtaskStop when they do not, nil otherwise.
-func (a *Agent) checkPromptBudget(ctx context.Context, messages []llm.Message, groupKey string, round int) *subtaskStop {
+// limit. phase labels the conversation in warnings and telemetry ("round N"
+// for the main loop, "adversarial" for the adversarial pass). Returns a
+// *subtaskStop when they do not, nil otherwise.
+func (a *Agent) checkPromptBudget(ctx context.Context, messages []llm.Message, groupKey string, phase string) *subtaskStop {
 	tokenCount := llmloop.CountMessagesTokens(messages)
 	maxAllowed := a.args.Template.MaxTokens
 	tokenLimit := llmloop.PromptTokenLimit(maxAllowed)
 	if tokenCount <= tokenLimit {
 		return nil
 	}
-	msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d) [round %d]", tokenCount, 80, maxAllowed, round)
+	msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d) [%s]", tokenCount, 80, maxAllowed, phase)
 	fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: %s for group %q\n", msg, groupKey)
 	a.recordWarning("token_threshold_exceeded", groupKey, msg)
 	telemetry.Event(ctx, "token.threshold.exceeded",
 		telemetry.AnyToAttr("group.label", groupKey),
 		telemetry.AnyToAttr("tokens", tokenCount),
 		telemetry.AnyToAttr("max_tokens", maxAllowed),
-		telemetry.AnyToAttr("round", round))
+		telemetry.AnyToAttr("phase", phase))
 	return &subtaskStop{
 		class:      session.FailureBudget,
 		reason:     "prompt exceeded the configured token budget",
@@ -1371,11 +1396,13 @@ func diffsChurn(diffs []model.Diff) (total, maxFile int64) {
 	return total, maxFile
 }
 
-// executeGroupSubtask performs the Plan Phase + Main Loop for a file group. It
-// returns (completed, stop, err): a hard Go error (err) for provider/config/ctx
-// failures the caller classifies via classifyItemError, or a structured *stop
-// for a non-error early exit (token budget, main-loop stop) carrying the manifest
-// class recorded at its trigger point. A completed review returns (true, nil, nil).
+// executeGroupSubtask performs the Plan Phase + Main Loop + adversarial pass
+// for a file group. It returns (completed, stop, err): a hard Go error (err)
+// for provider/config/ctx failures the caller classifies via classifyItemError,
+// or a structured *stop for a non-error early exit (token budget, main-loop
+// stop) carrying the manifest class recorded at its trigger point. A completed
+// review returns (true, nil, nil). The adversarial pass is best-effort and
+// never contributes to err or stop.
 func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *subtaskStop, error) {
 	groupKey := fileGroupKey(g.Diffs)
 	ctx, span := telemetry.StartSpan(ctx, "subtask.execute.group."+groupKey)
@@ -1473,7 +1500,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		confirmedText := buildConfirmedCommentsBlock(confirmed)
 		messages := a.buildMainTaskMessages(rule, changeFilesExcludingGroup, concatenatedDiffs, roundPlan, confirmedText)
 
-		if stop := a.checkPromptBudget(ctx, messages, groupKey, round); stop != nil {
+		if stop := a.checkPromptBudget(ctx, messages, groupKey, fmt.Sprintf("round %d", round)); stop != nil {
 			if round == 1 {
 				return false, stop, nil
 			}
@@ -1552,10 +1579,109 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		}
 	}
 
+	// Phase 3: adversarial pass — an independent conversation that challenges
+	// the change with the standard pass's findings in hand, hunting for what
+	// the cooperative rounds missed. Runs only after a completed standard
+	// pass (completed is false with no stop only if a future round-loop change
+	// introduces such a path): on a stop the group is already classified, and
+	// re-reviewing it adversarially would mix a failure report with
+	// second-opinion findings.
+	if lastStop == nil && completed {
+		a.executeGroupAdversarialPass(ctx, g, groupKey, rule, changeFilesExcludingGroup, concatenatedDiffs, confirmed, baseline)
+	}
+
 	if lastStop != nil {
 		return false, lastStop, nil
 	}
 	return completed, nil, nil
+}
+
+// executeGroupAdversarialPass runs the ADVERSARIAL_TASK conversation for a
+// group whose standard review completed. The standard pass's confirmed
+// findings are injected as do-not-repeat context, and any new comments the
+// pass produces go through the same review filter as the standard rounds.
+//
+// The pass is best-effort: every failure path only records a warning, because
+// the standard findings are already banked in the collector and a failed
+// second opinion must not fail the group or change its exit status.
+func (a *Agent) executeGroupAdversarialPass(ctx context.Context, g FileGroup, groupKey, rule, changeFiles, diffs string, confirmed []model.LlmComment, baseline map[string]int) {
+	at := a.args.Template.AdversarialTask
+	if at == nil || len(at.Messages) == 0 {
+		return
+	}
+
+	skip := func(reason string) {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping adversarial pass for group %q (%s)\n", groupKey, reason)
+		telemetry.Event(ctx, "adversarial.skipped",
+			telemetry.AnyToAttr("group.label", groupKey),
+			telemetry.AnyToAttr("reason", reason))
+	}
+
+	// The same gates as the main loop's later rounds: a capped confirmed list
+	// would bloat the do-not-repeat block past usefulness, and an exhausted
+	// budget has nothing left to spend on a second opinion.
+	if a.args.MaxTokensBudget > 0 && (a.budgetExceeded.Load() || a.runner.TotalTokensUsed() > a.args.MaxTokensBudget) {
+		skip("aggregate token budget exceeded")
+		return
+	}
+	if len(confirmed) >= confirmedCap {
+		skip(fmt.Sprintf("confirmed findings reached the cap of %d", confirmedCap))
+		return
+	}
+
+	messages := a.buildAdversarialTaskMessages(rule, changeFiles, diffs, buildConfirmedCommentsBlock(confirmed))
+	if a.checkPromptBudget(ctx, messages, groupKey, "adversarial") != nil {
+		return
+	}
+
+	advCompleted, advStop, err := func() (bool, llmloop.MainLoopStop, error) {
+		ctx, advSpan := telemetry.StartSpan(ctx, "adversarial.loop")
+		defer advSpan.End()
+		telemetry.SetAttr(advSpan, "group.label", groupKey)
+		return a.runner.RunAdversarialTask(ctx, messages, groupKey)
+	}()
+	if err != nil {
+		a.recordWarning("adversarial_pass_failed", groupKey, fmt.Sprintf("adversarial pass: %v", err))
+		fmt.Fprintf(stdout.Writer(), "[ocr] Adversarial pass failed for group %q: %v (keeping standard findings)\n", groupKey, err)
+		telemetry.Event(ctx, "adversarial.failed",
+			telemetry.AnyToAttr("group.label", groupKey))
+		return
+	}
+
+	// Drain async comment workers, then filter the pass's own comments in
+	// isolation: baseline still marks the boundary the standard rounds left.
+	if a.args.CommentWorkerPool != nil {
+		a.args.CommentWorkerPool.AwaitKey(groupKey)
+	}
+	a.executeGroupReviewFilter(ctx, g, baseline)
+
+	added := 0
+	for _, d := range g.Diffs {
+		all := a.args.CommentCollector.CommentsForPath(d.NewPath)
+		if b := baseline[d.NewPath]; len(all) > b {
+			added += len(all) - b
+		}
+		baseline[d.NewPath] = len(all)
+	}
+
+	if !advCompleted {
+		if advStop == llmloop.StopTokenBudget && a.budgetExceeded.CompareAndSwap(false, true) {
+			a.recordWarning("token_budget_reached", g.Diffs[0].NewPath,
+				fmt.Sprintf("stopped the adversarial pass for group %q mid-review: used %d tokens exceeds budget %d", groupKey, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
+		}
+		_, reason := classifyMainLoopStop(advStop)
+		fmt.Fprintf(stdout.Writer(), "[ocr] Adversarial pass for group %q stopped early (%s); %d finding(s) kept\n", groupKey, reason, added)
+		telemetry.Event(ctx, "adversarial.stopped",
+			telemetry.AnyToAttr("group.label", groupKey),
+			telemetry.AnyToAttr("comments.added", added),
+			telemetry.AnyToAttr("stop", advStop.String()))
+		return
+	}
+
+	fmt.Fprintf(stdout.Writer(), "[ocr] Adversarial pass added %d finding(s) for group %q\n", added, groupKey)
+	telemetry.Event(ctx, "adversarial.completed",
+		telemetry.AnyToAttr("group.label", groupKey),
+		telemetry.AnyToAttr("comments.added", added))
 }
 
 // filterTools defines the two mutually exclusive tools for the review filter.
