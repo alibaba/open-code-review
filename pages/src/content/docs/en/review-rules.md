@@ -312,6 +312,7 @@ matching order:
 | `**/*.astro`                        | `astro.md` — Astro components and islands.                                                            |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                                    |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                                           |
+| `**/*.scala`                        | `scala.md` — Scala source.                                                                            |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — F# implementation, signature, and script files.                                         |
 | `**/*.rs`                           | `rust.md`                                                                                             |
 | `**/*.R`                            | `r.md`                                                                                                |
