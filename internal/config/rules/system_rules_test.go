@@ -552,12 +552,10 @@ func TestNewResolver_ProjectRuleMergesSystemRule(t *testing.T) {
 	wantUserRule := "project-go-rule"
 
 	got := resolver.Resolve("main.go")
-	systemIdx := strings.Index(got, wantSystemRule)
-	if systemIdx < 0 {
+	if !strings.Contains(got, wantSystemRule) {
 		t.Fatalf("expected merged system rule, got %q", truncate(got, 120))
 	}
-	userIdx := strings.Index(got, wantUserRule)
-	if userIdx < 0 {
+	if !strings.Contains(got, wantUserRule) {
 		t.Fatalf("expected merged project rule, got %q", truncate(got, 120))
 	}
 }

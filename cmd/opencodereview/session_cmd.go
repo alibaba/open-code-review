@@ -472,7 +472,7 @@ func filterComments(comments []model.LlmComment, severities, categories string) 
 
 func parseFilterSet(s string) map[string]bool {
 	set := map[string]bool{}
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		part = strings.ToLower(strings.TrimSpace(part))
 		if part != "" {
 			set[part] = true

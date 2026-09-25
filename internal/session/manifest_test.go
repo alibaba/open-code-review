@@ -828,14 +828,14 @@ func TestConcurrentTransitions(t *testing.T) {
 	b := NewManifestBuilder("run-1", "review")
 	b.SetInput(ManifestInput{Mode: InputModeWorkspace})
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
+	for i := range n {
 		id := fmt.Sprintf("item-%03d", i)
 		b.RegisterSelected(sel(id))
 	}
 	if err := b.SealSelected(); err != nil {
 		t.Fatalf("SealSelected: %v", err)
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

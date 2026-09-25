@@ -607,7 +607,7 @@ func (p *Provider) commitParents(ctx context.Context, ref string) []string {
 // firstLine returns the first non-empty trimmed line of git output, so a stray
 // trailing newline or an unexpected second line never pollutes a resolved SHA.
 func firstLine(out string) string {
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if s := strings.TrimSpace(line); s != "" {
 			return s
 		}
@@ -718,7 +718,7 @@ func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
 	}
 	patterns := p.loadGitignorePatterns()
 	var files []string
-	for _, name := range strings.Split(strings.TrimRight(out, "\x00"), "\x00") {
+	for name := range strings.SplitSeq(strings.TrimRight(out, "\x00"), "\x00") {
 		if name == "" {
 			continue
 		}

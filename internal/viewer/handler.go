@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net/http"
 	"path/filepath"
+	"slices"
 
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -168,11 +169,9 @@ func handleCompare(w http.ResponseWriter, r *http.Request, root, repo string) {
 	// ServeMux never inspects query values, so these ids need the same
 	// rejection newMux gives the path segments: both end up in filepath.Join
 	// inside LoadSession.
-	for _, id := range []string{before, after} {
-		if unsafeSegment(id) {
-			http.Error(w, "invalid session id", http.StatusBadRequest)
-			return
-		}
+	if slices.ContainsFunc([]string{before, after}, unsafeSegment) {
+		http.Error(w, "invalid session id", http.StatusBadRequest)
+		return
 	}
 
 	bv, err := LoadSession(root, repo, before)

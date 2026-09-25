@@ -158,6 +158,11 @@ func TestStripMarkdownFences(t *testing.T) {
 			want:  "{}",
 		},
 		{
+			name:  "single-line json fence",
+			input: "```json{}```",
+			want:  "{}",
+		},
+		{
 			name:  "empty after strip",
 			input: "```json\n```",
 			want:  "",

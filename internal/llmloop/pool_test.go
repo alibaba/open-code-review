@@ -76,7 +76,7 @@ func TestCommentWorkerPool_Concurrency(t *testing.T) {
 	var running atomic.Int32
 	var maxRunning atomic.Int32
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		p.Submit(func() ([]model.LlmComment, error) {
 			cur := running.Add(1)
 			for {
@@ -177,18 +177,16 @@ func TestCommentWorkerPool_AwaitKeyConcurrentSubmitOtherKey(t *testing.T) {
 	start := make(chan struct{})
 	var submits atomic.Int64
 	var producerWg sync.WaitGroup
-	for i := 0; i < 4; i++ {
-		producerWg.Add(1)
-		go func() {
-			defer producerWg.Done()
+	for range 4 {
+		producerWg.Go(func() {
 			<-start
-			for j := 0; j < submissionsPerProducer; j++ {
+			for range submissionsPerProducer {
 				p.SubmitFor("producer.go", func() ([]model.LlmComment, error) {
 					return nil, nil
 				})
 				submits.Add(1)
 			}
-		}()
+		})
 	}
 
 	// Concurrently drain per-goroutine keys that occasionally have real work.
@@ -196,20 +194,18 @@ func TestCommentWorkerPool_AwaitKeyConcurrentSubmitOtherKey(t *testing.T) {
 	// order), matching the per-file usage in the review path.
 	var drained atomic.Int64
 	var drainerWg sync.WaitGroup
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		key := fmt.Sprintf("drainer-%d.go", i)
-		drainerWg.Add(1)
-		go func() {
-			defer drainerWg.Done()
+		drainerWg.Go(func() {
 			<-start
-			for j := 0; j < 200; j++ {
+			for range 200 {
 				p.SubmitFor(key, func() ([]model.LlmComment, error) {
 					return []model.LlmComment{{Path: key}}, nil
 				})
 				p.AwaitKey(key)
 				drained.Add(1)
 			}
-		}()
+		})
 	}
 	close(start)
 	drainerWg.Wait()

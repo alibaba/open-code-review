@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -203,9 +204,7 @@ func (r *Runner) ToolCalls() map[string]int64 {
 	r.toolCallsMu.Lock()
 	defer r.toolCallsMu.Unlock()
 	out := make(map[string]int64, len(r.toolCalls))
-	for k, v := range r.toolCalls {
-		out[k] = v
-	}
+	maps.Copy(out, r.toolCalls)
 	return out
 }
 

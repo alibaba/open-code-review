@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -105,12 +106,7 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 
 func hasTraversalPathComponent(pathspec string) bool {
 	norm := strings.ReplaceAll(pathspec, "\\", "/")
-	for _, part := range strings.Split(norm, "/") {
-		if part == ".." {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Split(norm, "/"), "..")
 }
 
 func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []string) (string, string, error) {

@@ -205,7 +205,7 @@ func TestProvider_Enumerate_NonGitDirectory(t *testing.T) {
 // per-iteration ctx.Err() check that was previously missing.
 func TestProvider_Enumerate_RespectsContextCancellation(t *testing.T) {
 	repo := initTestRepo(t)
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		writeFile(t, repo, "pkg/"+strings.Repeat("a", i+1)+".go", []byte("package pkg\n"))
 	}
 	gitCommit(t, repo, "init")

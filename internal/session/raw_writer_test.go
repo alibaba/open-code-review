@@ -172,14 +172,12 @@ func TestRawFileWriter_ConcurrentWrites(t *testing.T) {
 	const goroutines = 32
 	const perG = 10
 	var wg sync.WaitGroup
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < perG; j++ {
+	for range goroutines {
+		wg.Go(func() {
+			for range perG {
 				w.Write(llm.RawRecord{RequestID: "r"})
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if err := w.Close(); err != nil {
@@ -299,7 +297,7 @@ func TestRawFileWriter_RecoversFromTransientWriteFailure(t *testing.T) {
 
 	// r1 and r2 hit the failure and are dropped; r3 lands after recovery.
 	var ids []string
-	for _, line := range strings.Split(strings.TrimSpace(string(f.data)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(f.data)), "\n") {
 		if line == "" {
 			continue
 		}

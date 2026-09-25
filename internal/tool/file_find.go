@@ -137,8 +137,8 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 	}
 
 	var files []string
-	lines := bytes.Split(bytes.TrimRight(output, "\n"), []byte{'\n'})
-	for _, line := range lines {
+	lines := bytes.SplitSeq(bytes.TrimRight(output, "\n"), []byte{'\n'})
+	for line := range lines {
 		if len(line) > 0 {
 			s := string(line)
 			// Skip binary-like files that lack meaningful extensions patterns

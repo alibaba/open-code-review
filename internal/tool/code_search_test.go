@@ -25,7 +25,7 @@ func TestBuildGrepArgs_WorkspaceMode(t *testing.T) {
 	assertContains(t, args, "-i")
 	assertContains(t, args, "--untracked")
 	if idx := slices.Index(args, "--"); idx >= 0 {
-		for i := 0; i < idx; i++ {
+		for i := range idx {
 			if args[i] == "myFunc" && (i == 0 || args[i-1] != "-e") {
 				t.Error("myFunc should only appear as argument to -e, not as positional")
 			}

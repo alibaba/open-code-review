@@ -321,7 +321,7 @@ func TestCompare_SortBreaksTiesOnSnippet(t *testing.T) {
 	want := []string{"aaa := 1", "zzz := 1"}
 	// Map iteration order is randomized per range statement, so a missing
 	// tie-break shows up within a handful of repetitions.
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		var got []string
 		for _, c := range Compare(nil, after, nil).New {
 			got = append(got, c.ExistingCode)

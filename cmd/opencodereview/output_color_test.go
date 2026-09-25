@@ -153,7 +153,7 @@ func TestOutputPreviewText_ColumnsAlign(t *testing.T) {
 	setColor(t, false)
 	plain := captureStdout(t, func() { outputPreviewText(p, os.Stdout) })
 	var widths []int
-	for _, ln := range strings.Split(plain, "\n") {
+	for ln := range strings.SplitSeq(plain, "\n") {
 		if strings.Contains(ln, ".go") {
 			widths = append(widths, strings.Index(ln, "+"))
 		}

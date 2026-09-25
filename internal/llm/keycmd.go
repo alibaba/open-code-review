@@ -50,10 +50,7 @@ var suspiciousPatterns = []*regexp.Regexp{
 func validateKeyCmd(cmd, label string) error {
 	for _, re := range suspiciousPatterns {
 		if loc := re.FindStringIndex(cmd); loc != nil {
-			end := loc[1] + 8
-			if end > len(cmd) {
-				end = len(cmd)
-			}
+			end := min(loc[1]+8, len(cmd))
 			return fmt.Errorf(
 				"%s contains a suspicious shell pattern at offset %d (%q); "+
 					"api_key_cmd / auth_token_cmd must be a single credential-helper "+

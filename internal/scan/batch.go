@@ -71,10 +71,7 @@ func groupBatches(items []model.ScanItem, strategy BatchStrategy, size int) [][]
 		}
 		// Chunk the natural group into BatchSize-sized slices.
 		for start := 0; start < len(group); start += size {
-			end := start + size
-			if end > len(group) {
-				end = len(group)
-			}
+			end := min(start+size, len(group))
 			out = append(out, group[start:end])
 		}
 	}

@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"strings"
@@ -652,9 +653,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			if object, ok := streamOptions.(map[string]any); ok {
 				if _, has := object["include_usage"]; !has {
 					merged := make(map[string]any, len(object)+1)
-					for key, value := range object {
-						merged[key] = value
-					}
+					maps.Copy(merged, object)
 					merged["include_usage"] = true
 					streamOptions = merged
 				}
