@@ -85,7 +85,14 @@ var scanCmd = &cobra.Command{
 		if err := validateScanOptions(&scanOpts); err != nil {
 			return err
 		}
-		return executeScan(scanOpts)
+		// First signal cancels the context so the defer chain shuts down
+		// gracefully: the completed-file checkpoints are persisted, the
+		// session_end record is flushed and the handle closed. A second
+		// signal force-exits instead of being dropped for the whole
+		// shutdown window (see interrupt.go).
+		ctx, stop := interruptContextWithForcedExit(cmd.Context())
+		defer stop()
+		return executeScanContext(ctx, scanOpts)
 	},
 }
 
@@ -108,7 +115,7 @@ func splitPaths(raw string) []string {
 	return out
 }
 
-func executeScan(opts scanOptions) (retErr error) {
+func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
 	if err != nil {
 		return err
@@ -157,7 +164,7 @@ func executeScan(opts scanOptions) (retErr error) {
 			return err
 		}
 		scanTpl.MaxTokens = maxTokens
-		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat, out)
+		return runScanPreview(ctx, cc, scanTpl, scanPaths, opts.outputFormat, out)
 
 	}
 
@@ -232,7 +239,7 @@ func executeScan(opts scanOptions) (retErr error) {
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
 
-	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(context.Background()), "scan.run")
+	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(ctx), "scan.run")
 	defer span.End()
 	var traceID string
 	if telemetry.IsEnabled() {
@@ -264,6 +271,7 @@ func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (
 	if err != nil {
 		return nil, fmt.Errorf("load resume session: %w (run 'ocr session list' to see available sessions)", err)
 	}
+	warnRecoveredResume(state)
 	if err := state.ValidateScanOptions(scanPaths); err != nil {
 		return nil, fmt.Errorf("%w (run 'ocr session list' to see available sessions)", err)
 	}
@@ -273,8 +281,8 @@ func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (
 	return state, nil
 }
 
-func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string, outputFormat string, out io.Writer) error {
-	preview, err := scan.Preview(context.Background(), scan.Args{
+func runScanPreview(ctx context.Context, cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string, outputFormat string, out io.Writer) error {
+	preview, err := scan.Preview(ctx, scan.Args{
 		RepoDir:          cc.RepoDir,
 		Paths:            scanPaths,
 		FileFilter:       cc.FileFilter,
