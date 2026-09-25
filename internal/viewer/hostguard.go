@@ -72,7 +72,7 @@ func buildAllowedHosts(bindHost string, envVal string) map[string]struct{} {
 		}
 		allowed[bh] = struct{}{}
 	}
-	for _, h := range strings.Split(envVal, ",") {
+	for h := range strings.SplitSeq(envVal, ",") {
 		h = strings.ToLower(strings.TrimSpace(h))
 		if h != "" {
 			allowed[h] = struct{}{}

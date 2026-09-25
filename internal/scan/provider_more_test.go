@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"testing"
 
@@ -144,10 +145,5 @@ func itemPaths(items []model.ScanItem) []string {
 }
 
 func contains(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, want)
 }

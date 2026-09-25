@@ -262,7 +262,7 @@ func TestEscapeControl(t *testing.T) {
 		}
 	}
 	// Every escape it produces has to be one the JSON parser accepts.
-	for c := byte(0); c < 0x20; c++ {
+	for c := range byte(0x20) {
 		var target string
 		blob := `["` + escapeControl(c) + `"]`
 		if err := json.Unmarshal([]byte(blob), &[]*string{&target}); err != nil {
