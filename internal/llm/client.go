@@ -169,6 +169,36 @@ func (n NativeTurn) EstimatedTokens() int {
 	}
 }
 
+// countsToolCalls reports whether the NativeTurn payload already accounts for
+// tool invocations (such as Anthropic MessageParam content blocks or Responses
+// API function call items), avoiding double-counting with Message.ToolCalls.
+// It follows the same fallback conditions as buildAnthropicParams and
+// buildResponsesParams, falling back to Message.ToolCalls when the native
+// content or item slice is structurally empty.
+func (n NativeTurn) countsToolCalls() bool {
+	switch p := n.Payload.(type) {
+	case anthropic.MessageParam:
+		return len(p.Content) > 0
+	case []responses.ResponseInputItemUnionParam:
+		return len(p) > 0
+	default:
+		return false
+	}
+}
+
+// EstimatedTokens returns a rough token estimate for the portion of Message
+// not already counted by ExtractText() (thinking blocks, reasoning items,
+// and tool-call arguments/names). Uses bytes/4 as the heuristic.
+func (m Message) EstimatedTokens() int {
+	total := m.Native.EstimatedTokens()
+	if !m.Native.countsToolCalls() {
+		for _, tc := range m.ToolCalls {
+			total += tc.EstimatedTokens()
+		}
+	}
+	return total
+}
+
 func marshaledLen(v any) int {
 	if v == nil {
 		return 0
@@ -265,6 +295,21 @@ type ToolCall struct {
 type FunctionCall struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"` // JSON-encoded string
+}
+
+// EstimatedTokens returns a rough token estimate for the tool call (function
+// name, arguments, ID framing, and opaque provider metadata) using the
+// bytes/4 heuristic.
+func (tc ToolCall) EstimatedTokens() int {
+	b := len(tc.ID) + len(tc.Function.Name) + len(tc.Function.Arguments) + len(tc.ExtraContent)
+	if b == 0 {
+		return 0
+	}
+	t := b / 4
+	if t == 0 {
+		return 1
+	}
+	return t
 }
 
 // ResponseMessage extends Message with optional reasoning content.
