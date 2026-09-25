@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/alibaba/open-code-review/internal/chatgptauth"
 	openai "github.com/openai/openai-go/v3"
@@ -40,12 +39,7 @@ type OpenAIResponsesClient struct {
 // ExtraHeaders are applied per request (not baked into the SDK client)
 // so SessionKeyTemplateVar can expand to the session key each request carries.
 func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = 5 * time.Minute
-	}
-	if cfg.SessionKey == "" {
-		cfg.SessionKey = NewSessionKey()
-	}
+	applyClientDefaults(&cfg)
 	ensureResponsesEndpoint(&cfg)
 	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/responses")
 
@@ -55,28 +49,9 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 		retries = 0
 		httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	}
-	opts := []openaiopt.RequestOption{
-		openaiopt.WithAPIKey(cfg.APIKey),
-		openaiopt.WithBaseURL(sdkBaseURL),
-		openaiopt.WithMaxRetries(retries),
-		openaiopt.WithHeader("User-Agent", userAgent("")),
-		openaiopt.WithRequestTimeout(cfg.Timeout),
-		openaiopt.WithHTTPClient(httpClient),
-	}
-	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
-		opts = append(opts, openaiopt.WithMiddleware(mw))
-	}
-	// Raw before the retry observer; see NewOpenAIClient for why order matters.
-	if cfg.rawHolder != nil {
-		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
-	}
-	if cfg.retryCollector != nil {
-		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
-	}
-
 	client := &OpenAIResponsesClient{
 		cfg: cfg,
-		sdk: openai.NewClient(opts...),
+		sdk: newOpenAISDK(cfg, sdkBaseURL, retries, httpClient),
 	}
 	if cfg.ChatGPTPlan {
 		client.chatGPTToken = func(ctx context.Context) (string, error) {
@@ -112,18 +87,11 @@ func ensureResponsesEndpoint(cfg *ClientConfig) {
 // CompletionsWithCtx sends a Responses API request and maps the result back to
 // the shared ChatResponse shape.
 //
-// The deferred finalizeRequest is this client's boundary for the retry report;
+// The deferred finalizeOnExit is this client's boundary for the retry report;
 // see the OpenAI Chat Completions counterpart for why it is deferred and why the
 // results are named.
 func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
-			panic(r)
-		}
-		err = describeTimeout(ctx, err)
-		finalizeRequest(ctx, c.cfg.retryCollector, err)
-	}()
+	defer finalizeOnExit(ctx, c.cfg.retryCollector, &err)
 
 	var planToken string
 	if c.cfg.ChatGPTPlan {
@@ -150,31 +118,13 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 
 	params := c.buildResponsesParams(model, req)
 
-	sessionKey := c.cfg.SessionKey
-	if k := SessionKeyFromContext(ctx); k != "" {
-		sessionKey = k
-	}
-
 	var opts []openaiopt.RequestOption
 	if c.cfg.ChatGPTPlan {
 		opts = append(opts, openaiopt.WithAPIKey(planToken))
 	}
-	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
-		opts = append(opts, openaiopt.WithHeader(k, v))
-	}
-	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// Streaming is selected by the resolved provider, not extra_body.stream.
-		// Drop true and non-boolean values so ordinary Responses.New receives
-		// JSON, but forward explicit false for gateways that default to SSE.
-		// When streaming is required, NewStreaming overrides it with true.
-		if k == "stream" {
-			stream, isBool := v.(bool)
-			if !isBool || stream {
-				continue
-			}
-		}
-		opts = append(opts, openaiopt.WithJSONSet(k, v))
-	}
+	// When streaming is required, NewStreaming overrides a forwarded false with
+	// true.
+	opts = append(opts, openAIRequestOptions(ctx, c.cfg)...)
 
 	var sdkResp *responses.Response
 	if c.cfg.RequiresStreaming {
