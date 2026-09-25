@@ -1230,7 +1230,7 @@ func TestModelTUI_DeleteSetsSavedInSession(t *testing.T) {
 	m.deleteModelName = "aaa"
 	m.confirmingDeleteModel = true
 
-	result, _ := m.confirmDeleteCustomProviderModel()
+	result, _ := m.confirmDeleteModel()
 	m2 := asModelTUIModel(t, result)
 	if !m2.savedInSession {
 		t.Error("savedInSession should be true after delete")
@@ -1389,7 +1389,7 @@ func TestModelTUI_CustomProvider_DeleteClearsCustomInput(t *testing.T) {
 	m.deleteModelName = "aaa"
 	m.confirmingDeleteModel = true
 
-	result, _ := m.confirmDeleteCustomProviderModel()
+	result, _ := m.confirmDeleteModel()
 	m2 := asModelTUIModel(t, result)
 
 	if m2.customModel {
