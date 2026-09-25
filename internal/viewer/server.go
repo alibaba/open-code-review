@@ -291,8 +291,8 @@ type codeLine struct {
 //
 // Num is left at 0 on every line whenever the reported range and the snippet
 // cannot both be true. internal/diff/resolver.go matches existing_code against
-// the file with blank lines dropped on both sides (splitAndNormalize and
-// resolveFromFileContent), so endLine-startLine+1 is not guaranteed to equal
+// the file with blank lines dropped on both sides (splitCode and normalizeLines
+// behind resolveFromFileContent), so endLine-startLine+1 is not guaranteed to equal
 // the number of lines in the snippet, and numbering it anyway would put line
 // numbers next to the wrong code. In a review tool no gutter beats a wrong one.
 func numberedCodeLines(code string, startLine, endLine int) []codeLine {

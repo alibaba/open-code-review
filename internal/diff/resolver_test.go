@@ -292,10 +292,13 @@ func TestNormalizeLine(t *testing.T) {
 		want  string
 	}{
 		{"  hello  ", "hello"},
-		{"+added line", "added line"},
-		{"-deleted line", "deleted line"},
 		{"\tindented\t", "indented"},
 		{"", ""},
+		// The content side never strips markers: a leading '+' or '-' is code
+		// there, not a diff marker.
+		{"+added line", "+added line"},
+		{"-deleted line", "-deleted line"},
+		{"  - name: app  ", "- name: app"},
 	}
 
 	for _, tt := range tests {
@@ -306,16 +309,54 @@ func TestNormalizeLine(t *testing.T) {
 	}
 }
 
-func TestSplitAndNormalize_SkipsEmptyLines(t *testing.T) {
-	lines := splitAndNormalize(`line1
+func TestNormalizeLines_SkipsEmptyLines(t *testing.T) {
+	lines := normalizeLines(splitCode(`line1
 
-line2`)
+line2`))
 
 	if len(lines) != 2 {
 		t.Errorf("expected 2 lines, got %d", len(lines))
 	}
 	if lines[0] != "line1" || lines[1] != "line2" {
 		t.Errorf("got %v", lines)
+	}
+}
+
+// TestStripMarkers pins the second accepted form: one marker goes from each
+// line, and the whitespace it shielded is trimmed afterwards, so the second
+// character of a YAML list item ("- ") is reachable.
+func TestStripMarkers(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"+added line", "added line"},
+		{"-deleted line", "deleted line"},
+		{"y := 2", "y := 2"},
+		{"--flag", "-flag"},
+		// Deleted YAML list item: diff marker plus the item's own dash.
+		{"-- name: app", "- name: app"},
+		// Marker, then indentation, then the item's own dash.
+		{"+  - name: app", "- name: app"},
+		// One marker per line, and only from the first character.
+		{"+a", "a"},
+		{"-a", "a"},
+	}
+
+	for _, tt := range tests {
+		if got := stripMarkers(splitCode(tt.input)); got[0] != tt.want {
+			t.Errorf("stripMarkers(%q) = %q, want %q", tt.input, got[0], tt.want)
+		}
+	}
+}
+
+// TestStripMarkers_MarkerOnlyLineIsDropped pins the line a diff quotes for a
+// blank line: the lone marker comes off, leaves nothing behind, and the blank it
+// leaves is dropped rather than kept as a match target of its own.
+func TestStripMarkers_MarkerOnlyLineIsDropped(t *testing.T) {
+	got := stripMarkers(splitCode("+\nfoo"))
+	if len(got) != 1 || got[0] != "foo" {
+		t.Errorf("marker-only line: got %v, want [foo]", got)
 	}
 }
 
@@ -538,6 +579,52 @@ func TestMatchConsecutive_ExactFull(t *testing.T) {
 	start, end, ok := matchConsecutive(lines, []string{"a", "b"})
 	if !ok || start != 1 || end != 2 {
 		t.Errorf("exact-full: got (%d, %d, %v), want (1, 2, true)", start, end, ok)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// snippetForms unit tests
+// ---------------------------------------------------------------------------
+
+// TestSnippetForms_VerbatimFirstThenDiffQuoted pins the two accepted readings
+// and their order: the code as written in the file, then the same code as quoted
+// out of diff output.
+func TestSnippetForms_VerbatimFirstThenDiffQuoted(t *testing.T) {
+	forms := snippetForms("+  - name: app")
+	if len(forms) != 2 {
+		t.Fatalf("expected 2 forms, got %d: %v", len(forms), forms)
+	}
+	if forms[0][0] != "+  - name: app" {
+		t.Errorf("verbatim form = %q, want %q", forms[0][0], "+  - name: app")
+	}
+	if forms[1][0] != "- name: app" {
+		t.Errorf("diff-quoted form = %q, want %q", forms[1][0], "- name: app")
+	}
+}
+
+// TestSnippetForms_UnmarkedSnippetYieldsOneReading covers a snippet with no
+// marker: both readings are the same lines, so only one form is returned and
+// callers do not scan the file twice for the same answer.
+func TestSnippetForms_UnmarkedSnippetYieldsOneReading(t *testing.T) {
+	forms := snippetForms("name: app")
+	if len(forms) != 1 {
+		t.Fatalf("expected 1 form, got %d: %v", len(forms), forms)
+	}
+	if forms[0][0] != "name: app" {
+		t.Errorf("unmarked snippet: got %v, want [name: app]", forms)
+	}
+}
+
+// TestSnippetForms_ShorterStrippedReadingIsNotCollapsed pins the length check in
+// the collapse rule: stripping a marker-only trailing line leaves a shorter
+// reading that is still a distinct form and must be kept.
+func TestSnippetForms_ShorterStrippedReadingIsNotCollapsed(t *testing.T) {
+	forms := snippetForms("foo\n+")
+	if len(forms) != 2 {
+		t.Fatalf("expected 2 forms, got %d: %v", len(forms), forms)
+	}
+	if forms[0][1] != "+" || forms[1][0] != "foo" {
+		t.Errorf("got %v, want [[foo +] [foo]]", forms)
 	}
 }
 
@@ -856,6 +943,32 @@ func TestResolveLineNumbers_MixedStrategies(t *testing.T) {
 	}
 }
 
+// TestResolveLineNumbers_DiffQuotedBlankLine covers a snippet whose first line is
+// a blank line quoted out of the diff: the lone marker has to come off and the
+// blank has to go with it, or the rest of the snippet cannot be reached.
+func TestResolveLineNumbers_DiffQuotedBlankLine(t *testing.T) {
+	raw := `diff --git a/test.go b/test.go
+--- a/test.go
++++ b/test.go
+@@ -1,2 +1,4 @@
+ package main
++
++import "fmt"
+ func main() {}`
+
+	diffs := []model.Diff{{NewPath: "test.go", Diff: raw}}
+	comments := []model.LlmComment{
+		{Path: "test.go", ExistingCode: "+\n+import \"fmt\""},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	// new-side: package main(1), blank(2), import "fmt"(3), func main(4)
+	if cm.StartLine != 3 || cm.EndLine != 3 {
+		t.Errorf("diff-quoted blank line: expected 3..3, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
 func TestResolveLineNumbers_DiffMarkerInExistingCode(t *testing.T) {
 	raw := `diff --git a/test.go b/test.go
 --- a/test.go
@@ -873,8 +986,224 @@ func TestResolveLineNumbers_DiffMarkerInExistingCode(t *testing.T) {
 
 	result := ResolveLineNumbers(comments, diffs)
 	cm := result[0]
-	// normalizeLine strips leading '+', so "+y := 2" → "y := 2" matches
+	// The verbatim reading keeps the '+'; it is the diff-quoted reading that
+	// matches here, with stripMarkers turning "+y := 2" into "y := 2".
 	if cm.StartLine != 2 || cm.EndLine != 2 {
 		t.Errorf("diff marker in existing_code: expected 2..2, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// YAML list items: a leading '-' is code, not a diff marker
+// ---------------------------------------------------------------------------
+
+// yamlListHunk adds a list item "  - name: app" while its context already
+// carries a mapping line "name: app". The two collapse to the same text if the
+// item's own dash is stripped, which is what used to send the comment to the
+// mapping line.
+const yamlListHunk = `diff --git a/deploy.yaml b/deploy.yaml
+--- a/deploy.yaml
++++ b/deploy.yaml
+@@ -1,2 +1,4 @@
+ defaults:
+   name: app
++items:
++  - name: app
+`
+
+// TestResolveLineNumbers_YAMLListItemNotConfusedWithMappingLine is the
+// regression: the item's dash is part of the code, so the item matches itself
+// and not the mapping line above it.
+func TestResolveLineNumbers_YAMLListItemNotConfusedWithMappingLine(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "deploy.yaml", Diff: yamlListHunk}}
+	comments := []model.LlmComment{
+		{Path: "deploy.yaml", ExistingCode: "- name: app"},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	// The added list item is new-file line 4; the mapping line is line 2.
+	if cm.StartLine != 4 || cm.EndLine != 4 {
+		t.Errorf("YAML list item: expected 4..4, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+// TestResolveLineNumbers_YAMLListItemDiffStyle covers the same item quoted the
+// way the code_comment schema asks for it: marker, indentation, item dash.
+func TestResolveLineNumbers_YAMLListItemDiffStyle(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "deploy.yaml", Diff: yamlListHunk}}
+	comments := []model.LlmComment{
+		{Path: "deploy.yaml", ExistingCode: "+  - name: app"},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 4 || cm.EndLine != 4 {
+		t.Errorf("diff-style YAML list item: expected 4..4, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+// TestResolveLineNumbers_YAMLListItemBlockKeepsBothLines checks the window: a
+// two-line snippet anchored on the item must cover the item and its sibling,
+// not the mapping line and the "items:" header.
+func TestResolveLineNumbers_YAMLListItemBlockKeepsBothLines(t *testing.T) {
+	raw := `diff --git a/deploy.yaml b/deploy.yaml
+--- a/deploy.yaml
++++ b/deploy.yaml
+@@ -1,2 +1,4 @@
+ defaults:
+   name: app
++items:
++  - name: app
++    image: redis:7
+`
+	diffs := []model.Diff{{NewPath: "deploy.yaml", Diff: raw}}
+	comments := []model.LlmComment{
+		{Path: "deploy.yaml", ExistingCode: "- name: app\n    image: redis:7"},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 4 || cm.EndLine != 5 {
+		t.Errorf("YAML item block: expected 4..5, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+// TestResolveLineNumbers_YAMLDeletedListItem covers the old side of a hunk: the
+// deleted item is old-file line 2, and its dash is code there too.
+func TestResolveLineNumbers_YAMLDeletedListItem(t *testing.T) {
+	raw := `diff --git a/deploy.yaml b/deploy.yaml
+--- a/deploy.yaml
++++ b/deploy.yaml
+@@ -1,2 +1,2 @@
+ items:
+-  - name: app
++  - name: web
+`
+	diffs := []model.Diff{{NewPath: "deploy.yaml", Diff: raw}}
+
+	for _, snippet := range []string{"- name: app", "-- name: app"} {
+		comments := []model.LlmComment{{Path: "deploy.yaml", ExistingCode: snippet}}
+		result := ResolveLineNumbers(comments, diffs)
+		cm := result[0]
+		if cm.StartLine != 2 || cm.EndLine != 2 {
+			t.Errorf("snippet %q: expected 2..2, got %d..%d", snippet, cm.StartLine, cm.EndLine)
+		}
+	}
+}
+
+// TestResolveLineNumbers_VerbatimMatchWinsOverMarkerStripping pins the order of
+// the two forms. With both "name: app" and "  - name: app" present, a snippet
+// carrying no marker means the mapping line, and the diff-style form must not
+// move it down to the item.
+func TestResolveLineNumbers_VerbatimMatchWinsOverMarkerStripping(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "deploy.yaml", Diff: yamlListHunk}}
+	comments := []model.LlmComment{
+		{Path: "deploy.yaml", ExistingCode: "name: app"},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 2 || cm.EndLine != 2 {
+		t.Errorf("mapping line: expected 2..2, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+// TestResolveLineNumbers_SnippetMissingItemDashDeclines pins where the tolerance
+// stops: a snippet missing a character the file has is left unlocated rather
+// than matched against a line whose text differs, leaving it to the re-location
+// step.
+func TestResolveLineNumbers_SnippetMissingItemDashDeclines(t *testing.T) {
+	raw := `diff --git a/deploy.yaml b/deploy.yaml
+--- a/deploy.yaml
++++ b/deploy.yaml
+@@ -1,2 +1,3 @@
+ items:
++  - name: app
+`
+	diffs := []model.Diff{{NewPath: "deploy.yaml", Diff: raw}}
+	comments := []model.LlmComment{
+		{Path: "deploy.yaml", ExistingCode: "name: app"},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 0 || cm.EndLine != 0 {
+		t.Errorf("snippet missing the item's dash: expected 0..0, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+// TestResolveFromFileContent_YAMLListItem exercises the fallback path, which
+// normalizes the whole file rather than a hunk and had the same collision.
+func TestResolveFromFileContent_YAMLListItem(t *testing.T) {
+	// The hunk touches only the top of the file, so the item cannot be found
+	// there and the resolver falls through to NewFileContent.
+	diffs := []model.Diff{{
+		NewPath: "deploy.yaml",
+		Diff: `diff --git a/deploy.yaml b/deploy.yaml
+--- a/deploy.yaml
++++ b/deploy.yaml
+@@ -1,1 +1,2 @@
+ # deploy
++#
+`,
+		NewFileContent: `# deploy
+#
+defaults:
+  name: app
+items:
+  - name: app
+`,
+	}}
+	comments := []model.LlmComment{{Path: "deploy.yaml", ExistingCode: "- name: app"}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	// The item is line 6; the mapping line is line 4.
+	if cm.StartLine != 6 || cm.EndLine != 6 {
+		t.Errorf("file-content fallback: expected 6..6, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+// TestResolveFromFileContent_DiffStyleSnippet covers the fallback path with the
+// diff-style form: the hunk only touches the top of the file, so the item has to
+// come from NewFileContent, where the collision used to happen a second time.
+func TestResolveFromFileContent_DiffStyleSnippet(t *testing.T) {
+	diffs := []model.Diff{{
+		NewPath: "deploy.yaml",
+		Diff: `diff --git a/deploy.yaml b/deploy.yaml
+--- a/deploy.yaml
++++ b/deploy.yaml
+@@ -1,1 +1,2 @@
+ # deploy
++#
+`,
+		NewFileContent: `# deploy
+#
+defaults:
+  name: app
+items:
+  - name: app
+`,
+	}}
+	comments := []model.LlmComment{{Path: "deploy.yaml", ExistingCode: "+  - name: app"}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	// The item is line 6; the mapping line is line 4.
+	if cm.StartLine != 6 || cm.EndLine != 6 {
+		t.Errorf("file-content fallback, diff-style snippet: expected 6..6, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+// TestResolveFromFileContent_SnippetLongerThanFile covers a snippet with more
+// lines than the file has non-blank lines: no window can fit, so both forms
+// decline.
+func TestResolveFromFileContent_SnippetLongerThanFile(t *testing.T) {
+	d := &model.Diff{NewPath: "a.go", NewFileContent: "package a\n"}
+	cm := &model.LlmComment{Path: "a.go", ExistingCode: "package a\nfunc foo() {}\n"}
+
+	if resolveFromFileContent(d, cm) {
+		t.Errorf("snippet longer than file: expected false, got start=%d end=%d", cm.StartLine, cm.EndLine)
 	}
 }
