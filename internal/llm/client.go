@@ -10,6 +10,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
@@ -42,6 +44,37 @@ var AppVersion = "dev"
 // solely on the AWS SDK's own defaults. Package var, not const, so tests can
 // shrink it, same as keyCmdTimeout.
 var bedrockConfigLoadTimeout = 60 * time.Second
+
+// responseHeaderTimeoutMargin is added to the request timeout when setting
+// ResponseHeaderTimeout so the per-request context deadline (WithRequestTimeout),
+// which is 30s earlier, is the one to fire first. An equal ResponseHeaderTimeout
+// would race the context deadline, and a header-timeout win surfaces as a
+// nil-response transport error that shouldRetry treats as retryable, so the
+// request would be retried up to 5 more times (each with a fresh full timeout)
+// instead of failing on ctx.Err(). The margin still replaces the SDK's hardcoded
+// 10-minute default.
+const responseHeaderTimeoutMargin = 30 * time.Second
+
+// httpClientWithHeaderTimeout returns an HTTP client whose ResponseHeaderTimeout is
+// the request timeout plus responseHeaderTimeoutMargin, overriding the openai-go and
+// anthropic-sdk-go hardcoded 10-minute default (which each applies unless a client is
+// supplied via WithHTTPClient) so a configured timeout_sec is honored on a slow
+// endpoint (#1161). Shared by the OpenAI, OpenAI Responses and Anthropic constructors.
+// A timeout of zero or less leaves ResponseHeaderTimeout unset (no cap), matching the
+// SDKs' "no timeout" semantics; the callers clamp to a positive value first, so this
+// only guards a direct call. Package var, not func, so a test can assert each
+// constructor installs it, same as bedrockConfigLoadTimeout.
+var httpClientWithHeaderTimeout = func(timeout time.Duration) *http.Client {
+	t, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Client{Transport: http.DefaultTransport}
+	}
+	t = t.Clone()
+	if timeout > 0 {
+		t.ResponseHeaderTimeout = timeout + responseHeaderTimeoutMargin
+	}
+	return &http.Client{Transport: t}
+}
 
 // defaultAnthropicMaxTokens is used when ChatRequest.MaxTokens is unset.
 // The thinking guard also compares against this to decide whether to drop thinking.
@@ -221,6 +254,11 @@ type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
+	// ExtraContent is opaque provider metadata this tool call must carry back
+	// unchanged on the next turn — Gemini 3 sends a thought signature here
+	// (#1357). Replayed verbatim, never parsed. json:"-" for the reason Native
+	// gives; internal/session persists it deliberately.
+	ExtraContent json.RawMessage `json:"-"`
 }
 
 // FunctionCall holds the name and arguments of a tool call.
@@ -341,6 +379,12 @@ type ClientConfig struct {
 	// caller that builds a client without one.
 	retryCollector *RetryCollector
 
+	// rawHolder is the opt-in raw LLM capture sink (see raw.go).
+	// Unexported for the same reason as retryCollector: it is a handle on the
+	// current run, set only by NewLLMClient. A nil holder means capture is off
+	// and no raw middleware is mounted.
+	rawHolder *RawHolder
+
 	// AWSProfile and AWSRegion are used only by SigV4 providers (bedrock).
 	// Empty means the standard AWS credential chain decides.
 	AWSProfile string
@@ -385,9 +429,11 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // protocol).
 //
 // collector observes every HTTP attempt the returned client makes; pass nil to
-// build a client that is not observed. It is a parameter rather than a field on
-// ResolvedEndpoint because it belongs to the run, not to the endpoint.
-func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
+// build a client that is not observed. raw, when non-nil, mounts the raw
+// capture middleware (see raw.go) so every HTTP attempt is also recorded
+// verbatim. Both belong to the run, not to the endpoint, which is why they are
+// parameters rather than fields on ResolvedEndpoint.
+func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder) LLMClient {
 	cfg := ClientConfig{
 		URL:            ep.URL,
 		APIKey:         ep.Token,
@@ -398,6 +444,7 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 		ExtraHeaders:   ep.ExtraHeaders,
 		RetryCodes:     ep.RetryCodes,
 		retryCollector: collector,
+		rawHolder:      raw,
 		AWSProfile:     ep.AWSProfile,
 		AWSRegion:      ep.AWSRegion,
 	}
@@ -510,9 +557,16 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithMaxRetries(5),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
+		openaiopt.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
+	}
+	// Raw must register before the retry observer: the SDK wraps middlewares
+	// last-in-innermost, and raw's full-body read plus disk write would
+	// otherwise inflate the observer's DurationToHeadersMS.
+	if cfg.rawHolder != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
@@ -575,13 +629,38 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		// NewStreaming method sets stream=true on the wire itself. When
 		// streaming is NOT enabled, leaving the key in the body would make
 		// the API answer with text/event-stream and the non-streaming path
-		// fails to decode (see issue #647).
-		if k == "stream" {
+		// fails to decode (see issue #647). "stream_options" is owned by the
+		// streaming branch below for the same reason: providers reject it
+		// unless stream is true.
+		if k == "stream" || k == "stream_options" {
 			continue
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
 	if stream, ok := c.cfg.ExtraBody["stream"].(bool); ok && stream {
+		if streamOptions, ok := c.cfg.ExtraBody["stream_options"]; !ok {
+			// OpenAI-compatible servers omit token usage from streams unless
+			// asked, silently losing cost accounting for streamed requests.
+			// Ask for the final usage chunk by default.
+			params.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
+		} else if streamOptions != nil {
+			// An explicit stream_options in extra_body replaces the default,
+			// but usage stays requested unless include_usage itself is spelled
+			// out: configuring an unrelated stream option must not silently
+			// disable cost accounting. An explicit null suppresses the field
+			// entirely, for gateways that reject stream_options.
+			if object, ok := streamOptions.(map[string]any); ok {
+				if _, has := object["include_usage"]; !has {
+					merged := make(map[string]any, len(object)+1)
+					for key, value := range object {
+						merged[key] = value
+					}
+					merged["include_usage"] = true
+					streamOptions = merged
+				}
+			}
+			opts = append(opts, openaiopt.WithJSONSet("stream_options", streamOptions))
+		}
 		return c.completionsStreaming(ctx, params, opts...)
 	}
 
@@ -616,7 +695,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		}
 	}
 	if err != nil {
-		return nil, err
+		return nil, withProviderErrorBody(err)
 	}
 
 	return c.mapOpenAIResponse(sdkResp), nil
@@ -650,6 +729,7 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 
 	accumulator := openai.ChatCompletionAccumulator{}
 	reasoningByChoice := make(map[int64]*strings.Builder)
+	extraContentByChoice := make(map[int64]map[int64]json.RawMessage)
 	seenChoices := make(map[int64]bool)
 	finishedChoices := make(map[int64]bool)
 	var choiceOrder []int64
@@ -668,6 +748,26 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 			}
 			if choice.FinishReason != "" {
 				finishedChoices[choice.Index] = true
+			}
+
+			// extra_content rides on the tool-call delta and the accumulator
+			// drops unmodeled fields, so capture it here — before the
+			// reasoning_content lookup returns early (#1357).
+			for _, toolDelta := range choice.Delta.ToolCalls {
+				ec, ok := toolDelta.JSON.ExtraFields["extra_content"]
+				if !ok {
+					continue
+				}
+				value := normalizeExtraContent(json.RawMessage(ec.Raw()))
+				if value == nil {
+					continue
+				}
+				byTool := extraContentByChoice[choice.Index]
+				if byTool == nil {
+					byTool = make(map[int64]json.RawMessage)
+					extraContentByChoice[choice.Index] = byTool
+				}
+				byTool[clampToZero(toolDelta.Index)] = value
 			}
 
 			extra, ok := choice.Delta.JSON.ExtraFields["reasoning_content"]
@@ -691,7 +791,7 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return nil, err
+		return nil, withProviderErrorBody(err)
 	}
 	if len(choiceOrder) == 0 {
 		return nil, &streamIntegrityError{reason: "contained no choices"}
@@ -707,6 +807,15 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 		resp.Usage = usage
 	}
 	for i := range resp.Choices {
+		// The accumulator expands to fit the same clamped index, so a tool call's
+		// slice position is the key captured above.
+		byTool := extraContentByChoice[accumulator.Choices[i].Index]
+		for j := range resp.Choices[i].Message.ToolCalls {
+			if ec, ok := byTool[int64(j)]; ok {
+				resp.Choices[i].Message.ToolCalls[j].ExtraContent = ec
+			}
+		}
+
 		builder := reasoningByChoice[accumulator.Choices[i].Index]
 		if builder != nil && builder.Len() > 0 {
 			reasoningContent := builder.String()
@@ -738,15 +847,18 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 				asst.Content.OfString = openai.String(content)
 			}
 			for _, tc := range msg.ToolCalls {
-				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
-					OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-						ID: tc.ID,
-						Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-							Name:      tc.Function.Name,
-							Arguments: tc.Function.Arguments,
-						},
+				fn := &openai.ChatCompletionMessageFunctionToolCallParam{
+					ID: tc.ID,
+					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
 					},
-				})
+				}
+				// extra_content: provider metadata required back verbatim (#1357).
+				if len(tc.ExtraContent) > 0 {
+					fn.SetExtraFields(map[string]any{"extra_content": tc.ExtraContent})
+				}
+				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{OfFunction: fn})
 			}
 			// reasoning_content: gateway extension not modeled by the SDK (#805).
 			if reasoning, ok := msg.Native.Payload.(ReasoningPayload); ok && reasoning != "" {
@@ -790,6 +902,109 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 	return params
 }
 
+// maxErrorBodyBytes bounds the provider payload quoted in an error message.
+const maxErrorBodyBytes = 64 << 10
+
+// withProviderErrorBody appends the provider's response body to an API error the
+// SDK left without one. It extracts the payload with the gjson path "error",
+// which misses when a provider array-wraps its error document (#1042). The
+// response body is restored so later consumers still see it whole; only the
+// diagnostic text is bounded.
+func withProviderErrorBody(err error) error {
+	// Enriching restores the body it reads, so without this a second pass would
+	// find it readable and append the payload again.
+	var done *enrichedError
+	if errors.As(err, &done) {
+		return err
+	}
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) || apiErr.Response == nil || apiErr.Response.Body == nil {
+		return err
+	}
+	// "null" is what gjson reports for an "error" key holding null: a payload in
+	// name only, so the body is still the useful thing.
+	if raw := strings.TrimSpace(apiErr.RawJSON()); raw != "" && raw != "null" {
+		return err
+	}
+	// The SDK buffers every non-2xx body and bails before building the error if
+	// that read fails, so what arrives here is an in-memory reader that cannot
+	// fail. A short read would still leave its bytes the most useful thing to
+	// hand back: an error-replaying reader would only blind DumpResponse.
+	body, readErr := io.ReadAll(apiErr.Response.Body)
+	_ = apiErr.Response.Body.Close()
+	apiErr.Response.Body = io.NopCloser(bytes.NewReader(body))
+	if readErr != nil || len(bytes.TrimSpace(body)) == 0 {
+		return err
+	}
+	return &enrichedError{err: err, body: limitErrorBodyForLog(body)}
+}
+
+// enrichedError carries an API error together with the provider payload the SDK
+// could not extract, and marks it as already enriched.
+type enrichedError struct {
+	err  error
+	body string
+}
+
+func (e *enrichedError) Error() string { return e.err.Error() + ": " + e.body }
+func (e *enrichedError) Unwrap() error { return e.err }
+
+// limitErrorBodyForLog bounds the payload included in terminal and session logs
+// without truncating the response the SDK parsed. Control bytes are dropped so a
+// body cannot rewrite the terminal; newlines and tabs stay for readability.
+func limitErrorBodyForLog(raw []byte) string {
+	raw = bytes.TrimSpace(raw)
+	var suffix string
+	if len(raw) > maxErrorBodyBytes {
+		// Cut the bytes before building the string so an oversized body is never
+		// copied whole just to be discarded.
+		raw = raw[:maxErrorBodyBytes]
+		suffix = "... (truncated)"
+	}
+	trimmed := strings.ToValidUTF8(string(raw), "")
+	return strings.Map(func(r rune) rune {
+		// unicode.IsControl covers C1 (U+0080-U+009F) as well as C0, so a body
+		// cannot reach the terminal through the bare CSI or DCS forms either.
+		if r == '\n' || r == '\t' || !unicode.IsControl(r) {
+			return r
+		}
+		return -1
+	}, trimmed) + suffix
+}
+
+// clampToZero matches the SDK accumulator's handling of the negative tool-call
+// delta index some gateways send for a single call.
+func clampToZero(i int64) int64 {
+	if i < 0 {
+		return 0
+	}
+	return i
+}
+
+// toolCallExtraContent reads extra_content from a tool call's raw response
+// JSON. The SDK's tool-call union has no ExtraFields map, so the raw payload is
+// the only place the field survives.
+func toolCallExtraContent(raw string) json.RawMessage {
+	if raw == "" {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return nil
+	}
+	return normalizeExtraContent(fields["extra_content"])
+}
+
+// normalizeExtraContent drops absent, empty and null values so that a provider
+// sending "extra_content": null produces the same wire format as one omitting it.
+func normalizeExtraContent(ec json.RawMessage) json.RawMessage {
+	trimmed := bytes.TrimSpace(ec)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	return trimmed
+}
+
 // mapOpenAIResponse converts the SDK response into ChatResponse.
 func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatResponse {
 	rawJSON := sdkResp.RawJSON()
@@ -817,6 +1032,7 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 					Name:      tc.Function.Name,
 					Arguments: tc.Function.Arguments,
 				},
+				ExtraContent: toolCallExtraContent(tc.RawJSON()),
 			})
 		}
 
@@ -913,6 +1129,11 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		option.WithMaxRetries(5),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
+		// anthropic-sdk-go's default client hardcodes the same 10-minute
+		// ResponseHeaderTimeout as openai-go, applied because this path does not
+		// pass WithoutEnvironmentDefaults, so a long timeout_sec is capped at 10
+		// minutes on a slow endpoint without this (#1161).
+		option.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
 
 	switch authHeader {
@@ -930,6 +1151,10 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
+	}
+	// Raw before the retry observer; see NewOpenAIClient for why order matters.
+	if cfg.rawHolder != nil {
+		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
@@ -969,6 +1194,10 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 		option.WithMaxRetries(5),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
+		// No httpClientWithHeaderTimeout here (unlike NewAnthropicClient): bedrock.WithConfig
+		// is an option.Join carrying WithoutEnvironmentDefaults, so NewClient skips
+		// DefaultClientOptions and never installs the SDK's 10-minute-header-timeout
+		// default client. Adding one would impose a new cap, not remove one.
 		// Bedrock authenticates by SigV4 signature, added by the middleware
 		// below at transport time. Any API-key header the SDK would otherwise
 		// attach — including an empty one — is rejected outright with
@@ -981,6 +1210,10 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	// session key template can expand — same as the plain Anthropic client.
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
+	}
+	// Raw before the retry observer; see NewOpenAIClient for why order matters.
+	if cfg.rawHolder != nil {
+		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))

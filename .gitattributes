@@ -1,8 +1,30 @@
 * text=auto eol=lf
 
-*.png binary
-*.jpg binary
-*.jpeg binary
-*.gif binary
-*.ico binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
 *.tiktoken binary
+
+# Web fonts — must never receive CRLF normalisation
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.eot   binary
+
+# WebAssembly bytecode
+*.wasm  binary
+
+# Compressed archives
+*.zip   binary
+*.jar   binary
+*.tar   binary
+*.gz    binary
+*.tgz   binary
+
+# Other binary image formats
+*.webp  binary
+*.bmp   binary
+*.tiff  binary

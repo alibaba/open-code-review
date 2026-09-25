@@ -51,6 +51,7 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 | `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
@@ -209,8 +210,7 @@ Ollama игнорирует API-ключ, однако для пользоват
 - Переменная окружения `OCR_LLM_TIMEOUT` — целое число секунд; переопределяет
   значение из файла конфигурации для всех вариантов разрешения настроек.
 
-Ключи `timeout_sec` не поддерживаются командой `ocr config set` — измените
-`~/.opencodereview/config.json` напрямую:
+Оба ключа `timeout_sec` можно задать командой `ocr config set`:
 
 ```json
 {
@@ -297,10 +297,11 @@ OCR игнорирует эти избыточные коды. Если зада
 выполняет повторные попытки по умолчанию, поэтому такие коды нельзя добавлять
 в `retry_codes`.
 
-### Лимит запроса на файл
+### Лимит запроса
 
-По умолчанию OCR ограничивает промпт для каждого ревью файла 200 000 токенами
-(`ocr scan` использует меньшее значение — 58 888). Если контекстное окно вашей
+`max_tokens` — это предел **промпта** (входных токенов) для одной подзадачи
+(один файл или набор связанных файлов). Встроенные шаблоны по умолчанию дают
+200 000 токенов для `ocr review` и 58 888 для `ocr scan`. Если контекстное окно вашей
 модели отличается, сохраните `max_tokens`:
 
 ```bash
@@ -328,7 +329,7 @@ ocr scan --max-tokens 120000
 ### Предустановка усилий ревью (effort)
 
 Параметр `effort` определяет, сколько раундов основного цикла выполняется для
-каждой группы файлов: `low` — 1 раунд, `medium` — 2 раунда (по умолчанию),
+каждой подзадачи: `low` — 1 раунд, `medium` — 2 раунда (по умолчанию),
 `high` — 3 раунда. Больше раундов — выше полнота находок, но больше времени и
 токенов.
 

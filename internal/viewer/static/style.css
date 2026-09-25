@@ -1,3 +1,8 @@
+/*
+SPDX-License-Identifier: Apache-2.0
+Copyright 2026 alibaba/open-code-review Contributors
+*/
+
 
 :root {
     color-scheme: light dark;
@@ -6,34 +11,51 @@
     --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
     --mono: "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, "Liberation Mono", ui-monospace, monospace;
 
-    /* Surfaces — layered depth */
-    --bg: #f8f9fc;
+    /* Surfaces — neutral layers from the viewer redesign mockups */
+    --bg: #ffffff;
     --surface: #ffffff;
-    --surface-alt: #f3f4f8;
-    --surface-inset: #eef0f5;
-    --response-bg: #fafbfd;
+    --surface-alt: #f5f5f5;
+    --surface-inset: #f0f0f0;
+    --response-bg: var(--surface);
 
     /* Text */
-    --text: #1a1d26;
-    --text-strong: #0f1118;
-    --text-secondary: #4a5068;
-    --text-muted: #6b7394;
-    --text-faint: #9ba3c2;
+    --text: rgba(0, 0, 0, 0.77);
+    --text-strong: rgba(0, 0, 0, 0.87);
+    --text-secondary: rgba(0, 0, 0, 0.62);
+    --text-muted: rgba(0, 0, 0, 0.55);
+    --text-faint: var(--text-muted);
 
     /* Borders */
-    --border: #e2e5f0;
-    --border-subtle: #eceef5;
+    --border: rgba(0, 0, 0, 0.08);
+    --border-subtle: rgba(0, 0, 0, 0.06);
 
-    /* Accents */
-    --accent: #4f46e5;
-    --accent-hover: #4338ca;
-    --accent-soft: rgba(79, 70, 229, 0.08);
-    --accent-glow: rgba(79, 70, 229, 0.12);
-    --link: #4f46e5;
+    /* Accents — mockup green for fills/borders/active states */
+    --accent: #17cb4b;
+    --accent-hover: #14a83e;
+    --accent-soft: rgba(23, 203, 75, 0.1);
+    --accent-glow: rgba(23, 203, 75, 0.16);
+    /* Green for text/links: darkened so it clears WCAG AA on light surfaces
+       (the brighter --accent is ~2.2:1 as text). Overridden back to --accent in dark mode. */
+    --link: #177d35;
 
     /* Code */
-    --code-bg: #f0f1f7;
-    --inline-code-bg: #eff0f7;
+    --code-bg: var(--surface-inset);
+    --inline-code-bg: var(--surface-alt);
+
+    /* Controls & interactive surfaces */
+    --row-border: #ebebeb;
+    --btn-border: rgba(0, 0, 0, 0.16);
+    --input-bg: rgba(0, 0, 0, 0.04);
+    --input-hover: rgba(0, 0, 0, 0.08);
+    --tag-bg: rgba(0, 0, 0, 0.05);
+    --tag-hover: rgba(0, 0, 0, 0.08);
+    --hover-row: rgba(0, 0, 0, 0.03);
+    --marked-text: rgba(0, 0, 0, 0.55);
+    --pagination-active-border: rgba(0, 0, 0, 0.24);
+    --pagination-active-text: rgba(0, 0, 0, 0.87);
+    --scroll-thumb: rgba(0, 0, 0, 0.16);
+    --code-red-bg: rgba(227, 61, 73, 0.08);
+    --code-green-bg: rgba(23, 203, 75, 0.08);
 
     /* Task accents */
     --task-main: #4f46e5;
@@ -49,14 +71,34 @@
     --badge-model-bg: #eef2ff;    --badge-model-fg: #3730a3;
     --badge-tokens-bg: #ecfdf5;   --badge-tokens-fg: #065f46;
     --badge-duration-bg: #fefce8; --badge-duration-fg: #854d0e;
-    --badge-error-bg: #fef2f2;    --badge-error-fg: #dc2626;
-    --badge-neutral-bg: #f1f3f9;
-    --badge-neutral-fg: #4a5068;
+    --badge-error-bg: #fef2f2;    --badge-error-fg: #b91c1c;
+    --badge-neutral-bg: var(--surface-inset);
+    --badge-neutral-fg: var(--text-secondary);
+
+    /* Severity — shared by filters and findings */
+    --severity-critical-bg: var(--badge-error-bg);
+    --severity-critical-fg: var(--badge-error-fg);
+    --severity-high-bg: #fff7ed;
+    --severity-high-fg: #c2410c;
+    --severity-medium-bg: #fefce8;
+    --severity-medium-fg: #a16207;
+    --severity-low-bg: var(--badge-neutral-bg);
+    --severity-low-fg: var(--badge-neutral-fg);
+
+    /* Spacing */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.25rem;
+    --space-6: 1.5rem;
+    --space-7: 1.75rem;
+    --space-8: 2rem;
 
     /* Effects */
-    --shadow-sm: 0 1px 2px rgba(15, 17, 24, 0.04), 0 1px 3px rgba(15, 17, 24, 0.06);
-    --shadow-md: 0 4px 6px -1px rgba(15, 17, 24, 0.05), 0 2px 4px -2px rgba(15, 17, 24, 0.05);
-    --shadow-lg: 0 10px 15px -3px rgba(15, 17, 24, 0.06), 0 4px 6px -4px rgba(15, 17, 24, 0.04);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.06), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
     --radius: 10px;
     --radius-sm: 6px;
     --radius-xs: 4px;
@@ -65,29 +107,39 @@
 
 @media (prefers-color-scheme: dark) {
     :root {
-        --bg: #0c0d14;
-        --surface: #15171f;
-        --surface-alt: #1e2130;
-        --surface-inset: #12141b;
-        --response-bg: #15171f;
+        --bg: #000000;
+        --surface: #0a0a0a;
+        --surface-alt: #141414;
+        --surface-inset: #111111;
 
-        --text: #d1d5e8;
-        --text-strong: #edf0fa;
-        --text-secondary: #9ba3c2;
-        --text-muted: #6b7394;
-        --text-faint: #4a5068;
+        --text: rgba(255, 255, 255, 0.8);
+        --text-strong: rgba(255, 255, 255, 0.9);
+        --text-secondary: rgba(255, 255, 255, 0.6);
+        --text-muted: rgba(255, 255, 255, 0.47);
 
-        --border: #262940;
-        --border-subtle: #1e2130;
+        --border: rgba(255, 255, 255, 0.16);
+        --border-subtle: rgba(255, 255, 255, 0.08);
 
-        --accent: #818cf8;
-        --accent-hover: #a5b4fc;
-        --accent-soft: rgba(129, 140, 248, 0.1);
-        --accent-glow: rgba(129, 140, 248, 0.08);
-        --link: #818cf8;
+        --accent: #2bde5e;
+        --accent-hover: #60e686;
+        --accent-soft: rgba(43, 222, 94, 0.1);
+        --accent-glow: rgba(43, 222, 94, 0.12);
+        /* On dark surfaces the bright accent green already clears AA as text. */
+        --link: var(--accent);
 
-        --code-bg: #1a1d28;
-        --inline-code-bg: #1e2130;
+        --row-border: #292929;
+        --btn-border: #3d3d3d;
+        --input-bg: rgba(255, 255, 255, 0.08);
+        --input-hover: rgba(255, 255, 255, 0.12);
+        --tag-bg: rgba(255, 255, 255, 0.06);
+        --tag-hover: rgba(255, 255, 255, 0.1);
+        --hover-row: rgba(255, 255, 255, 0.03);
+        --marked-text: #9e9e9e;
+        --pagination-active-border: #3d3d3d;
+        --pagination-active-text: #ffffff;
+        --scroll-thumb: rgba(255, 255, 255, 0.16);
+        --code-red-bg: rgba(227, 61, 73, 0.12);
+        --code-green-bg: rgba(43, 222, 94, 0.08);
 
         --task-main: #818cf8;
         --task-plan: #a78bfa;
@@ -100,8 +152,12 @@
         --badge-tokens-bg: rgba(52, 211, 153, 0.12);   --badge-tokens-fg: #6ee7b7;
         --badge-duration-bg: rgba(251, 191, 36, 0.12); --badge-duration-fg: #fcd34d;
         --badge-error-bg: rgba(248, 113, 113, 0.12);   --badge-error-fg: #fca5a5;
-        --badge-neutral-bg: #1e2130;
-        --badge-neutral-fg: #9ba3c2;
+        --badge-neutral-bg: var(--surface-alt);
+
+        --severity-high-bg: rgba(234, 88, 12, 0.12);
+        --severity-high-fg: #fdba74;
+        --severity-medium-bg: rgba(251, 191, 36, 0.12);
+        --severity-medium-fg: #fcd34d;
 
         --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
         --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
@@ -130,7 +186,7 @@ code, pre {
 nav.breadcrumb {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
-    padding: 0 1.5rem;
+    padding: 0 var(--space-6);
     height: 52px;
     display: flex;
     align-items: center;
@@ -156,31 +212,39 @@ nav.breadcrumb .nav-brand {
     text-decoration: none;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
     transition: color var(--transition);
 }
-nav.breadcrumb .nav-brand:hover { color: var(--accent); }
+nav.breadcrumb a.nav-brand:hover { color: var(--link); }
 
 nav.breadcrumb .nav-brand .brand-icon {
     width: 22px;
     height: 22px;
-    border-radius: 5px;
-    display: inline-block;
     flex-shrink: 0;
-    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 64 64'%3E%3Cdefs%3E%3CclipPath id='a'%3E%3Crect width='64' height='64' rx='16'/%3E%3C/clipPath%3E%3C/defs%3E%3Cg clip-path='url(%23a)'%3E%3Crect width='64' height='64' rx='16' fill='%232BDE5E'/%3E%3Cpath fill-rule='evenodd' fill='%23000' d='M16.01 24.65c-1.81 1.4-3.41 3.05-4.72 4.91-.09.12-.3.02-.24-.12 1.32-2.68 2.96-5.07 4.84-7.12V14.09c0-.8.65-1.46 1.46-1.46h29.3c.8 0 1.46.65 1.46 1.46v10.66c-4.5-3.46-10.16-5.33-16.1-5.33-5.9 0-11.51 1.84-15.99 5.24Zm15.98 12.24c3.15 0 5.7-2.56 5.7-5.71 0-.59-.09-1.17-.27-1.73-.46.98-1.44 1.6-2.52 1.6-1.54 0-2.78-1.25-2.78-2.79 0-1.08.62-2.06 1.59-2.52-.56-.18-1.14-.27-1.72-.27-3.15 0-5.7 2.56-5.7 5.71s2.55 5.71 5.7 5.71Zm15.16 3.83c2.28-2.12 4.25-4.72 5.79-7.69.07-.14-.14-.27-.23-.14-1.35 1.88-2.99 3.53-4.85 4.93l.01-.03c-4.41 3.31-9.9 5.12-15.68 5.16h-.02c-.06 0-.12 0-.18 0-5.84 0-11.42-1.81-15.88-5.16 1.22 7.64 7.26 13.93 15.35 16.46.35.11.72.11 1.07 0 7.03-2.2 12.51-7.23 14.62-13.52Z'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-strong);
+}
+nav.breadcrumb .nav-brand .brand-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
 }
 
-nav.breadcrumb a {
+/* The exported standalone page renders the repo crumb as a <span>, since a
+   site-absolute href is dead over file://. Match both so it keeps its styling. */
+nav.breadcrumb a, nav.breadcrumb .crumb {
     color: var(--text-muted);
     text-decoration: none;
     font-weight: 500;
     transition: color var(--transition);
 }
-nav.breadcrumb a:hover { color: var(--accent); }
+nav.breadcrumb a:hover { color: var(--link); }
 
 nav.breadcrumb .sep {
     color: var(--text-faint);
-    margin: 0 0.5rem;
+    margin: 0 var(--space-2);
     font-size: 0.75rem;
 }
 
@@ -220,25 +284,49 @@ h3 {
 
 .repository-search {
     display: grid;
-    gap: 0.35rem;
-    margin-bottom: 1rem;
-}
-.repository-search label {
-    color: var(--text-muted);
-    font-size: 0.9rem;
+    /* Right-align explicitly rather than relying on the heading's flex-grow. */
+    margin-left: auto;
 }
 .repository-search input {
-    width: min(100%, 24rem);
-    padding: 0.5rem 0.65rem;
+    padding: 0.45rem 0.85rem;
     color: var(--text);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    background: var(--surface-alt);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
     font: inherit;
+    transition: background var(--transition), border-color var(--transition);
+}
+.repository-search input:hover {
+    border-color: var(--border);
 }
 .repository-search input:focus {
     outline: 2px solid var(--link);
     outline-offset: 1px;
+    background: var(--surface);
+}
+.search-field {
+    position: relative;
+    width: min(100%, 17rem);
+}
+.search-field input {
+    width: 100%;
+    padding-right: 2.2rem;
+}
+.search-icon {
+    position: absolute;
+    right: 0.6rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0.95rem;
+    height: 0.95rem;
+    color: var(--text-faint);
+    pointer-events: none;
+    display: inline-flex;
+}
+.search-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
 }
 
 /* ── Table ── */
@@ -344,51 +432,102 @@ h3 {
     font-size: 0.82em;
 }
 
+/* ── Page heading ── */
+/* Keep the back link reachable beside long repository and session titles. */
+.page-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    min-width: 0;
+    margin-bottom: 1.25rem;
+}
+.page-heading > h2 {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-bottom: 0;
+    overflow-wrap: anywhere;
+}
+/* One back button serves every page: an icon box for the inline chevron
+   (repositories 36px is the base size; session detail shrinks it below). */
+.back-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+.back-link:hover {
+    color: var(--accent-hover);
+    background: var(--accent-soft);
+    border-color: var(--link);
+}
+.back-link:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+.back-link svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+}
+.session-page .back-link {
+    width: 32px;
+    height: 32px;
+    border-color: var(--border-subtle);
+}
+.session-page .back-link svg {
+    width: 16px;
+    height: 16px;
+}
+.session-header .page-heading {
+    margin-bottom: 0.75rem;
+}
+
 /* ── Token Usage Summary ── */
 .token-summary {
-    background: var(--surface);
-    border-radius: var(--radius);
-    padding: 1.75rem;
-    margin-bottom: 1.25rem;
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--border);
+    margin-bottom: 1.5rem;
 }
 .token-summary h3 {
-    margin: 0 0 1.25rem;
+    margin: 0 0 1rem;
     font-size: 1rem;
 }
 .token-stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 1rem;
-    margin-bottom: 1.5rem;
+    gap: 1.25rem;
+    padding: 1.25rem 1.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
 }
 .token-item {
-    text-align: center;
-    padding: 1rem 0.5rem;
-    background: var(--surface-alt);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-subtle);
-    transition: transform var(--transition), box-shadow var(--transition);
-}
-.token-item:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
+    text-align: left;
 }
 .token-value {
-    font-size: 1.75rem;
+    font-size: 1.5rem;
     font-weight: 700;
-    color: var(--accent);
+    color: var(--text-strong);
     line-height: 1.2;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
+}
+.token-value-error {
+    color: var(--badge-error-fg);
 }
 .token-label {
     font-size: 0.7rem;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    margin-top: 0.25rem;
+    margin-bottom: 0.35rem;
     font-weight: 500;
 }
 .token-table {
@@ -401,7 +540,6 @@ h3 {
     border: 1px solid var(--border-subtle);
 }
 .token-table th {
-    background: var(--surface-alt);
     text-align: left;
     padding: 0.55rem 0.85rem;
     color: var(--text-muted);
@@ -431,15 +569,24 @@ h3 {
     font-size: 0.82rem;
     font-weight: 600;
     list-style: none;
-    padding: 0.25rem 0 0.75rem;
+    padding: 1rem 0 0.75rem;
 }
 .token-breakdown-toggle::-webkit-details-marker { display: none; }
 .token-breakdown-toggle::marker { content: none; }
 .token-breakdown-toggle .file-count-badge { margin-left: auto; }
-.token-breakdown[open] > .token-breakdown-toggle .chevron-sm { transform: rotate(45deg); }
+.token-breakdown[open] > .token-breakdown-toggle .chevron-sm svg { transform: rotate(90deg); }
 .token-breakdown-body {
     overflow-x: auto;
-    padding-top: 0.25rem;
+    /* x-axis only: overflow-x:auto makes overflow-y compute to auto, so a
+       plain `contain` would swallow vertical wheel events even when there is
+       nothing to scroll vertically, trapping the page scroll under the
+       cursor. Containing just the x-axis keeps horizontal overscroll from
+       chaining while letting vertical wheel fall through to the page. */
+    overscroll-behavior-x: contain;
+}
+.token-breakdown-body:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: -2px;
 }
 
 /* ── File List ── */
@@ -452,7 +599,7 @@ h3 {
     overflow: hidden;
 }
 .file-list li {
-    padding: 0.6rem 1.25rem;
+    padding: 0.65rem 0.9rem;
     color: var(--text-secondary);
     border-bottom: 1px solid var(--border-subtle);
     font-family: var(--mono);
@@ -462,21 +609,18 @@ h3 {
     gap: 0.5rem;
     transition: background var(--transition);
 }
+.file-list-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: var(--text-faint);
+}
+.file-list-icon svg {
+    width: 0.9em;
+    height: 0.9em;
+    display: block;
+}
 .file-list li:last-child { border-bottom: none; }
 .file-list li:hover { background: var(--accent-soft); }
-.file-list li::before {
-    content: "";
-    width: 16px;
-    height: 16px;
-    background: var(--surface-alt);
-    border-radius: 3px;
-    border: 1px solid var(--border);
-    flex-shrink: 0;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236b7394' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpolyline points='14 2 14 8 20 8'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: 10px;
-}
 
 /* ── Conversations Section ── */
 .conversations { margin-top: 0.75rem; }
@@ -486,19 +630,19 @@ h3 {
     background: var(--surface);
     border-radius: var(--radius);
     margin-bottom: 0.75rem;
-    box-shadow: var(--shadow-sm);
+    box-shadow: none;
     border: 1px solid var(--border);
     overflow: hidden;
     transition: box-shadow var(--transition);
 }
 .file-accordion:hover {
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-sm);
 }
 
 .file-accordion-header {
     cursor: pointer;
-    padding: 1rem 1.25rem;
-    font-size: 0.95rem;
+    padding: 0.8rem 0.9rem;
+    font-size: 0.84rem;
     color: var(--text-strong);
     user-select: none;
     display: flex;
@@ -522,21 +666,17 @@ h3 {
     background: var(--surface-alt);
     border: 1px solid var(--border-subtle);
     flex-shrink: 0;
-    transition: transform var(--transition), background var(--transition);
+    color: var(--text-muted);
+    transition: background var(--transition);
 }
-.chevron::after {
-    content: "";
-    width: 6px;
-    height: 6px;
-    border-right: 1.5px solid var(--text-muted);
-    border-bottom: 1.5px solid var(--text-muted);
-    transform: rotate(-45deg);
-    margin-top: -1px;
+.chevron svg {
+    width: 0.7rem;
+    height: 0.7rem;
+    display: block;
     transition: transform var(--transition);
 }
-.file-accordion[open] > .file-accordion-header .chevron::after {
-    transform: rotate(45deg);
-    margin-top: -2px;
+.file-accordion[open] > .file-accordion-header .chevron svg {
+    transform: rotate(90deg);
 }
 
 .file-path {
@@ -567,12 +707,25 @@ h3 {
 }
 
 .file-accordion-body {
-    padding: 1rem 1.25rem 1.25rem;
+    padding: 0.75rem 0.9rem 0.9rem;
 }
 
 .section-accordion {
     margin-top: 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
 }
+.section-accordion > .file-accordion-header {
+    cursor: pointer;
+    padding: 0.9rem 1rem 0.35rem;
+    font-size: 0.82rem;
+}
+.section-accordion > .file-accordion-header:hover { background: transparent; }
+.section-accordion:not([open]) > .file-accordion-header { padding-bottom: 0.9rem; }
+.section-accordion[open] > .file-accordion-header { border-bottom: none; }
+.section-accordion > .file-accordion-body { padding: 0.6rem 1rem 1rem; }
 .section-title {
     flex: 1;
     font-weight: 600;
@@ -583,14 +736,14 @@ h3 {
 }
 
 /* Task Group */
-.task-group { margin-bottom: 1.25rem; }
+.task-group { margin-bottom: 1rem; }
 .task-group:last-child { margin-bottom: 0; }
 
 .task-type-label {
-    font-size: 0.7rem;
+    font-size: 0.64rem;
     text-transform: uppercase;
     color: var(--text-muted);
-    margin-bottom: 0.75rem;
+    margin: 0.1rem 0 0.45rem;
     letter-spacing: 0.06em;
     display: flex;
     align-items: center;
@@ -617,7 +770,7 @@ h3 {
 .card {
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    margin-bottom: 0.85rem;
+    margin-bottom: 0.6rem;
     overflow: hidden;
     transition: box-shadow var(--transition), border-color var(--transition);
 }
@@ -634,8 +787,8 @@ h3 {
 
 .card-header {
     background: var(--surface-alt);
-    padding: 0.7rem 1rem;
-    font-size: 0.85rem;
+    padding: 0.45rem 0.65rem;
+    font-size: 0.76rem;
     display: flex;
     align-items: center;
     gap: 0.6rem;
@@ -646,12 +799,12 @@ h3 {
 .request-label {
     font-weight: 600;
     color: var(--text-strong);
-    font-size: 0.82rem;
+    font-size: 0.72rem;
 }
 
 /* Badges */
 .badge {
-    padding: 0.2em 0.6em;
+    padding: 0.18em 0.5em;
     border-radius: 20px;
     font-size: 0.7em;
     font-weight: 500;
@@ -679,6 +832,38 @@ h3 {
     white-space: pre-wrap;
     word-break: break-word;
 }
+
+/* Grouping view: model-proposed file groups, indices resolved to paths */
+.grouping-view {
+    padding: 0.75rem 1.25rem;
+    background: var(--response-bg);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    max-height: 450px;
+    overflow-y: auto;
+}
+.grouping-group {
+    border-left: 3px solid var(--task-grouping);
+    padding-left: 0.75rem;
+}
+.grouping-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-strong);
+    margin-bottom: 0.25rem;
+}
+.grouping-files {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    color: var(--text-strong);
+    font-family: var(--mono);
+    word-break: break-word;
+}
+.grouping-unresolved { color: var(--text-faint); }
 
 /* Scrollbar styling */
 .response-text::-webkit-scrollbar { width: 6px; }
@@ -713,7 +898,7 @@ h3 {
     padding: 0.15em 0.4em;
     border-radius: var(--radius-xs);
     font-size: 0.86em;
-    color: var(--accent);
+    color: var(--link);
 }
 .response-text .md-h1 { font-size: 1.15em; font-weight: 700; margin: 0.75em 0 0.35em; color: var(--text-strong); letter-spacing: -0.02em; }
 .response-text .md-h2 { font-size: 1.05em; font-weight: 600; margin: 0.6em 0 0.3em; color: var(--text-strong); letter-spacing: -0.01em; }
@@ -724,7 +909,7 @@ h3 {
 .tool-calls-section {
     background: var(--surface-inset);
     border-top: 1px solid var(--border);
-    padding: 0.85rem 1rem;
+    padding: 0.65rem;
 }
 
 .tool-calls-label {
@@ -733,7 +918,19 @@ h3 {
     text-transform: uppercase;
     color: var(--text-muted);
     letter-spacing: 0.05em;
-    margin-bottom: 0.6rem;
+    margin-bottom: 0.45rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.tool-calls-icon {
+    color: var(--text-faint);
+    display: inline-flex;
+}
+.tool-calls-icon svg {
+    width: 0.8rem;
+    height: 0.8rem;
+    display: block;
 }
 
 .tool-call-item {
@@ -755,17 +952,12 @@ h3 {
 }
 
 .tool-call-header {
-    padding: 0.55rem 0.85rem;
+    padding: 0.45rem 0.65rem;
     display: flex;
     align-items: center;
     gap: 0.5rem;
     font-size: 0.82rem;
     flex-wrap: wrap;
-}
-
-.tool-icon {
-    color: var(--text-faint);
-    font-size: 0.85em;
 }
 
 .tool-name {
@@ -799,17 +991,20 @@ h3 {
 
 /* Small chevron for tool details */
 .chevron-sm {
-    display: inline-block;
-    width: 5px;
-    height: 5px;
-    border-right: 1.5px solid var(--link);
-    border-bottom: 1.5px solid var(--link);
-    transform: rotate(-45deg);
-    transition: transform var(--transition);
+    display: inline-flex;
+    width: 0.7rem;
+    height: 0.7rem;
+    color: var(--link);
     flex-shrink: 0;
 }
-.tool-detail[open] > .tool-detail-toggle .chevron-sm {
-    transform: rotate(45deg);
+.chevron-sm svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    transition: transform var(--transition);
+}
+.tool-detail[open] > .tool-detail-toggle .chevron-sm svg {
+    transform: rotate(90deg);
 }
 
 .tool-detail-body {
@@ -843,12 +1038,11 @@ h3 {
     font-weight: 500;
 }
 .error-detail-toggle:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
-.error-detail[open] > .error-detail-toggle .chevron-sm {
-    transform: rotate(45deg);
+.error-detail[open] > .error-detail-toggle .chevron-sm svg {
+    transform: rotate(90deg);
 }
 .error-detail-toggle .chevron-sm {
-    border-right-color: var(--danger);
-    border-bottom-color: var(--danger);
+    color: var(--danger);
 }
 .error-detail-body {
     padding: 0 0.85rem 0.75rem;
@@ -926,6 +1120,11 @@ p {
     margin: 0 0 1rem;
     font-size: 1rem;
 }
+.comments-section .findings-count {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 400;
+}
 
 .comment-filter-bar {
     display: flex;
@@ -933,9 +1132,6 @@ p {
     flex-wrap: wrap;
     gap: 0.5rem;
     margin-bottom: 0.65rem;
-}
-.category-filters {
-    margin-bottom: 1.25rem;
 }
 .comment-filter-label {
     min-width: 4.75rem;
@@ -954,38 +1150,32 @@ p {
     letter-spacing: 0.01em;
     line-height: 1.35;
     cursor: pointer;
-    transition: opacity var(--transition), box-shadow var(--transition), border-color var(--transition);
+    background: var(--badge-neutral-bg);
+    color: var(--badge-neutral-fg);
+    transition: background var(--transition), color var(--transition), border-color var(--transition);
 }
-.comment-filter-chip:not(.is-active) { opacity: 0.72; }
-.comment-filter-chip:hover,
-.comment-filter-chip.is-active { opacity: 1; }
-.comment-filter-chip.is-active {
-    border-color: transparent;
-    box-shadow: 0 0 0 2px currentColor;
-}
+.comment-filter-chip:hover { border-color: var(--border); }
 .comment-filter-chip:focus-visible {
     outline: 2px solid var(--link);
     outline-offset: 2px;
 }
-.filter-all { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
-.severity-badge {
-    padding: 0.3em 0.75em;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
+/* The mockup dresses every chip neutral and marks the active one with the
+   accent. The severity/category tint classes stay on the markup for the
+   compare page badges, so they are neutralized here by scope; the scoped
+   active rule must stay below the scoped neutralizer to win the tie. */
+.comments-section .comment-filter-chip[class*="severity-"],
+.comments-section .comment-filter-chip[class*="cat-"] {
+    background: var(--badge-neutral-bg);
+    color: var(--badge-neutral-fg);
 }
-.severity-critical { background: #fef2f2; color: #dc2626; }
-.severity-high { background: #fff7ed; color: #ea580c; }
-.severity-medium { background: #fefce8; color: #a16207; }
-.severity-low { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
-
-@media (prefers-color-scheme: dark) {
-    .severity-critical { background: rgba(220, 38, 38, 0.12); color: #fca5a5; }
-    .severity-high { background: rgba(234, 88, 12, 0.12); color: #fdba74; }
-    .severity-medium { background: rgba(251, 191, 36, 0.12); color: #fcd34d; }
-    .severity-low { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
+.comments-section .comment-filter-chip.is-active {
+    background: var(--accent-soft);
+    color: var(--link);
 }
+.severity-critical { background: var(--severity-critical-bg); color: var(--severity-critical-fg); }
+.severity-high { background: var(--severity-high-bg); color: var(--severity-high-fg); }
+.severity-medium { background: var(--severity-medium-bg); color: var(--severity-medium-fg); }
+.severity-low { background: var(--severity-low-bg); color: var(--severity-low-fg); }
 
 .comment-groups { margin-top: 0.5rem; }
 
@@ -1014,9 +1204,8 @@ p {
 .comment-file-group[open] > .comment-file-header {
     border-bottom: 1px solid var(--border-subtle);
 }
-.comment-file-group[open] > .comment-file-header .chevron::after {
-    transform: rotate(45deg);
-    margin-top: -2px;
+.comment-file-group[open] > .comment-file-header .chevron svg {
+    transform: rotate(90deg);
 }
 
 .comment-file-body {
@@ -1061,6 +1250,15 @@ p {
 .cat-default { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
 .severity-default { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
 
+/* The mockup shows the per-card category/severity badges neutral; the tint
+   classes above stay for the compare page badges, so the session card view
+   neutralizes them by scope. */
+.comments-section .comment-badge[class*="cat-"],
+.comments-section .comment-badge[class*="severity-"] {
+    background: var(--badge-neutral-bg);
+    color: var(--badge-neutral-fg);
+}
+
 @media (prefers-color-scheme: dark) {
     .cat-bug { background: rgba(220, 38, 38, 0.12); color: #fca5a5; }
     .cat-security { background: rgba(190, 24, 93, 0.12); color: #f9a8d4; }
@@ -1078,6 +1276,20 @@ p {
     color: var(--text-muted);
     text-align: center;
     font-size: 0.85rem;
+}
+
+/* Visually hidden but still in the accessibility tree. Used for the line
+   range when the code gutter carries the numbers visually. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
 }
 
 .comment-lines {
@@ -1131,6 +1343,40 @@ p {
     background: none;
 }
 
+/* Line-number gutter for the Existing Code block — issue #1172.
+   The newlines between rows exist so the raw markup stays readable; the rows
+   are block-level, so white-space is reset on the <pre> to keep those newlines
+   from rendering as blank lines, and pre-wrap moves onto the code text alone. */
+.code-panel pre.code-numbered {
+    white-space: normal;
+}
+.code-numbered .code-line {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+}
+.code-numbered .line-no {
+    flex: 0 0 auto;
+    min-width: 2.5em;
+    text-align: right;
+    user-select: none;
+    -webkit-user-select: none;
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+.code-numbered .line-text {
+    flex: 1 1 auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Offset Suggested Change code to align vertically with Existing Code when
+   line numbers are present — issue #1313.
+   0.75rem is the default pre padding-left; 2.5em is line-no min-width; 0.7rem is gap. */
+.code-panel pre.code-gutter-offset {
+    padding-left: calc(0.75rem + 2.5em + 0.7rem);
+}
+
 .code-existing .code-panel-label {
     background: #fef2f2;
     color: #dc2626;
@@ -1146,21 +1392,196 @@ p {
     background: #f8fdfb;
 }
 
+/* The mockup keeps the panel labels on the card background and tints only
+   the code band (existing #feeff0, suggested #ecfbf1). These scoped rules
+   override the shared tinted-label styles above, which the compare page
+   keeps. */
+.comments-section .code-existing .code-panel-label,
+.comments-section .code-suggestion .code-panel-label {
+    background: transparent;
+    color: var(--text-muted);
+}
+.comments-section .code-existing pre {
+    background: #feeff0;
+}
+.comments-section .code-suggestion pre {
+    background: #ecfbf1;
+}
+@media (prefers-color-scheme: dark) {
+    .comments-section .code-existing pre { background: rgba(220, 38, 38, 0.08); }
+    .comments-section .code-suggestion pre { background: rgba(52, 211, 153, 0.07); }
+}
+
 @media (prefers-color-scheme: dark) {
     .code-existing .code-panel-label { background: rgba(220, 38, 38, 0.12); color: #fca5a5; }
     .code-existing pre { background: rgba(220, 38, 38, 0.05); }
     .code-suggestion .code-panel-label { background: rgba(52, 211, 153, 0.12); color: #6ee7b7; }
     .code-suggestion pre { background: rgba(52, 211, 153, 0.05); }
+    .code-numbered .line-no { color: #8b93b5; }
+}
+
+/* ── Session Compare ── */
+/* Scoped to .compare-page: the shared comment-card/code-panel classes are
+   styled above, and everything below only applies to compare.html so the
+   session-detail screens (#1326/#1327) can restyle independently. */
+.compare-bucket {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--bucket-tone, var(--border));
+    border-radius: var(--radius-sm);
+    padding: 1rem 1.25rem;
+    margin-bottom: 0.85rem;
+}
+.compare-bucket:last-child { margin-bottom: 0; }
+.compare-bucket-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 0.85rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--bucket-tone-fg, var(--text-strong));
+}
+.bucket-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--bucket-tone, var(--text-faint));
+}
+/* Outcome tones are derived from the shared token set (#1320), so light and
+   dark come for free: new findings read as high-severity orange, persisting
+   as medium-severity amber, resolved as the accent green used for Check, and
+   not reviewed as neutral text. */
+.bucket-new { --bucket-tone: var(--severity-high-fg); --bucket-tone-fg: var(--severity-high-fg); }
+.bucket-persisting { --bucket-tone: var(--severity-medium-fg); --bucket-tone-fg: var(--severity-medium-fg); }
+.bucket-resolved { --bucket-tone: var(--accent); --bucket-tone-fg: var(--link); }
+.bucket-not-reviewed { --bucket-tone: var(--text-faint); --bucket-tone-fg: var(--text-secondary); }
+
+/* Existing Code and Suggested Change sit side by side on wide screens;
+   auto-fit collapses to one column for a single panel or a narrow viewport. */
+.compare-page .comment-code-diff {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+}
+
+@media (max-width: 768px) {
+    .compare-bucket { padding: 0.85rem 1rem; }
+}
+
+.sessions-page .page-heading {
+    align-items: center;
+}
+
+.sessions-page .table th {
+    background: transparent;
+    white-space: nowrap;
+}
+
+.sessions-page .table th,
+.sessions-page .table td {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+}
+
+.sessions-page .table-scroll {
+    overflow-x: auto;
+    /* x-axis only: overflow-x:auto makes overflow-y compute to auto, so a
+       plain `contain` would swallow vertical wheel events even when there is
+       nothing to scroll vertically, trapping the page scroll under the
+       cursor. Containing just the x-axis keeps horizontal overscroll from
+       chaining while letting vertical wheel fall through to the page. */
+    overscroll-behavior-x: contain;
+}
+
+.sessions-page .col-session {
+    width: 7rem;
+}
+
+.sessions-page .col-branch {
+    width: 9rem;
+}
+
+.sessions-page .col-mode {
+    width: 4.5rem;
+}
+
+.sessions-page .col-model {
+    width: 8rem;
+}
+
+.sessions-page .col-started {
+    width: 8rem;
+}
+
+.sessions-page .col-action {
+    width: 4rem;
+}
+
+.sessions-page .col-files,
+.sessions-page .col-comments,
+.sessions-page .col-duration,
+.sessions-page .col-model {
+    white-space: nowrap;
+}
+
+.sessions-page .table td {
+    vertical-align: top;
+}
+
+.sessions-page .table th.col-action {
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.sessions-page .session-id {
+    color: var(--text);
+    text-decoration: none;
+}
+
+.sessions-page .session-id:hover {
+    color: var(--link);
+    text-decoration: underline;
+}
+
+.sessions-page .session-id:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
 }
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
     main { padding: 0 1rem; margin: 1.25rem auto; }
-    nav.breadcrumb { padding: 0 1rem; }
+    nav.breadcrumb { padding: 0 var(--space-4); }
     .session-header { padding: 1.25rem; }
+    .page-heading { gap: 0.5rem; }
     .token-stats { grid-template-columns: repeat(2, 1fr); }
     .meta { gap: 0.5rem 1rem; font-size: 0.8rem; }
     .table th, .table td { padding: 0.6rem 0.75rem; font-size: 0.82rem; }
+}
+
+/* ── Accessibility: focus ── */
+/* Collapsible headers and breadcrumb links keep the same visible focus ring
+   as the rest of the design system instead of the bare browser default.
+   In-table links draw their ring inside the box: .table-scroll computes
+   overflow-y to auto, so a positive offset would clip on the first and last
+   rows. The scrollable table wrappers are focusable regions (keyboard users
+   can otherwise never reach the columns that overflow) and get the same
+   inset ring. */
+.file-accordion-header:focus-visible,
+.token-breakdown-toggle:focus-visible,
+.comment-file-header:focus-visible,
+.tool-detail-toggle:focus-visible,
+.error-detail-toggle:focus-visible,
+nav.breadcrumb a:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+.table a:focus-visible,
+.sessions-page .table-scroll:focus-visible,
+.repos-page .table-scroll:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: -2px;
 }
 
 /* ── Accessibility: reduced motion ── */
@@ -1170,4 +1591,414 @@ p {
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
     }
+}
+
+/* Comment marks (fixed / ignored) — issue #825.
+   State lives in the browser (localStorage); these are presentation only.
+   Chips follow the filled-badge pattern used by the .cat-* / severity
+   badges above: a background + color pair, with a dark-mode override. */
+.comments-toolbar {
+    margin-bottom: 1rem;
+}
+
+.toolbar-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.toolbar-filters .comment-filter-bar { margin-bottom: 0; }
+
+/* Counter far left, switch and clear link far right — one row below the
+   filters, per the mockup. */
+.marks-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.35rem;
+}
+
+.marks-row .comment-filter-label {
+    min-width: 0;
+    font-weight: 400;
+}
+
+.marks-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.clear-marks-link {
+    appearance: none;
+    border: none;
+    background: none;
+    padding: 0;
+    font: inherit;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.clear-marks-link:hover {
+    color: var(--text-strong);
+    text-decoration: underline;
+}
+
+.clear-marks-link:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+
+.marks-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+
+/* The hide-marked checkbox renders as the mockup's small switch. */
+.marks-toggle input[type="checkbox"] {
+    appearance: none;
+    width: 30px;
+    height: 18px;
+    margin: 0;
+    border-radius: 9px;
+    background: var(--surface-inset);
+    position: relative;
+    cursor: pointer;
+    transition: background var(--transition);
+}
+
+.marks-toggle input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--transition);
+}
+
+.marks-toggle input[type="checkbox"]:checked { background: var(--accent-hover); }
+
+.marks-toggle input[type="checkbox"]:checked::before { transform: translateX(12px); }
+
+.marks-toggle input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+
+.mark-chip {
+    text-transform: capitalize;
+}
+
+.mark-fixed { background: #f0fdf4; color: #15803d; }
+.mark-ignored { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
+
+@media (prefers-color-scheme: dark) {
+    .mark-fixed { background: rgba(21, 128, 61, 0.12); color: #86efac; }
+    .mark-ignored { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
+}
+
+.comment-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.mark-btn {
+    appearance: none;
+    border: 1px solid var(--border, #d0d7de);
+    border-radius: 6px;
+    background: transparent;
+    padding: 0.2em 0.7em;
+    font: inherit;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.35;
+    cursor: pointer;
+    transition: color var(--transition), border-color var(--transition);
+}
+
+.mark-btn:hover {
+    border-color: var(--link);
+    color: var(--text-strong);
+}
+
+.mark-btn:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+
+.mark-btn.mark-clear {
+    border-style: dashed;
+}
+
+/* ── Repositories Page ── */
+.repos-page .page-heading {
+    align-items: center;
+    flex-wrap: wrap;
+    row-gap: 0.75rem;
+}
+
+.repos-page .table th {
+    background: transparent;
+    white-space: nowrap;
+}
+
+.repos-page .table th,
+.repos-page .table td {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+}
+
+.repos-page .table td {
+    vertical-align: top;
+}
+
+.repos-page .table-scroll {
+    overflow-x: auto;
+    /* x-axis only: overflow-x:auto makes overflow-y compute to auto, so a
+       plain `contain` would swallow vertical wheel events even when there is
+       nothing to scroll vertically, trapping the page scroll under the
+       cursor. Containing just the x-axis keeps horizontal overscroll from
+       chaining while letting vertical wheel fall through to the page. */
+    overscroll-behavior-x: contain;
+}
+
+.repos-page .col-repository {
+    min-width: 16rem;
+}
+
+.repos-page .col-sessions,
+.repos-page .col-modified,
+.repos-page .col-action {
+    white-space: nowrap;
+}
+
+.repos-page .col-sessions {
+    width: 6rem;
+}
+
+.repos-page .col-modified {
+    width: 11rem;
+}
+
+.repos-page .col-action {
+    width: 4.5rem;
+}
+
+.repos-page .table th.col-action {
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+/* The repo path reads as plain text like the mockup; it stays a link. */
+.repos-page .col-repository a {
+    color: var(--text);
+    text-decoration: none;
+    transition: color var(--transition);
+}
+.repos-page .col-repository a:hover {
+    color: var(--link);
+    text-decoration: underline;
+}
+.repos-page .col-repository a:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+}
+
+.repos-page .repo-check {
+    color: var(--link);
+    font-weight: 500;
+    text-decoration: none;
+    transition: color var(--transition);
+}
+.repos-page .repo-check:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+}
+.repos-page .repo-check:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+}
+
+/* ── Session Page Header ── */
+/* The mockup drops the card/gradient chrome: title row and meta bar sit on
+   the page background. Scoped to .session-page so the rest of the session
+   detail sections stay untouched. */
+.session-page .session-header {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+    /* The card chrome relied on overflow:hidden + radius to round its corner;
+       with the button flush against the header's top-left, that clip would
+       bite into it. */
+    overflow: visible;
+    padding: 0;
+}
+
+.session-page .session-header::before {
+    content: none;
+}
+
+.session-page .session-header .page-heading {
+    align-items: center;
+}
+
+.session-page .session-header h2 {
+    margin-bottom: 0;
+}
+
+.session-page .meta {
+    gap: 0.5rem 2.25rem;
+}
+
+.session-page .meta span {
+    white-space: nowrap;
+}
+
+.session-page .meta .meta-truncate {
+    max-width: 22rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Narrow screens let the session meta items wrap instead of holding their
+   one-line shape. This block must stay below the base rules above: the
+   selectors are equally specific and source order decides. */
+@media (max-width: 768px) {
+    .session-page .meta span {
+        white-space: normal;
+        flex-wrap: wrap;
+        overflow-wrap: anywhere;
+    }
+
+    .session-page .meta .meta-truncate {
+        max-width: 100%;
+        overflow: visible;
+        text-overflow: clip;
+    }
+}
+
+.session-page .meta .meta-status {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.session-page .meta .status-complete {
+    color: var(--link);
+}
+
+.session-page .meta .status-partial,
+.session-page .meta .status-aborted {
+    color: var(--badge-duration-fg);
+}
+
+.session-page .meta .status-failed {
+    color: var(--danger);
+}
+
+.session-page .meta .status-legacy {
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+/* ── Pagination (shared) ── */
+/* The repositories and sessions pages drive one pager markup, so its rules
+   are unscoped; only the .pagination, .page-numbers, .page-step,
+   .page-number and .page-gap class names are affected. */
+.pagination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-1);
+    margin-top: var(--space-5);
+}
+
+.pagination[hidden] {
+    display: none;
+}
+
+.page-numbers {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-1);
+}
+
+.page-step,
+.page-number {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+
+.page-step svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+}
+
+.page-step:hover:not(:disabled),
+.page-number:hover:not([aria-current="page"]) {
+    background: var(--hover-row);
+    color: var(--text-strong);
+}
+
+.page-step:disabled {
+    color: var(--text-faint);
+    cursor: default;
+}
+
+.page-step:focus-visible,
+.page-number:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+
+.page-number[aria-current="page"] {
+    border-color: var(--pagination-active-border);
+    background: var(--surface);
+    color: var(--pagination-active-text);
+    font-weight: 600;
+}
+
+.page-gap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    color: var(--text-muted);
 }

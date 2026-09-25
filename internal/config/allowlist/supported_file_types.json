@@ -100,5 +100,18 @@
   ".thrift",
   ".capnp",
   ".sol",
-  ".vy"
+  ".vy",
+  ".fsi",
+  ".fsx",
+  ".pug",
+  ".ml",
+  ".mli",
+  ".re",
+  ".rei",
+  ".v",
+  ".sv",
+  ".vh",
+  ".vhd",
+  ".vhdl",
+  ".rego"
 ]

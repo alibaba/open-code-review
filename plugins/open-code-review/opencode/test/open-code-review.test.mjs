@@ -4,7 +4,7 @@
 import assert from "node:assert/strict"
 import { access, chmod, copyFile, link, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { delimiter, join } from "node:path"
+import { delimiter, dirname, join } from "node:path"
 import test from "node:test"
 import { OpenCodeReviewPlugin } from "../dist/open-code-review.js"
 
@@ -74,7 +74,7 @@ function toolContext(worktree, signal = new AbortController().signal) {
   }
 }
 
-async function waitForFile(path, timeoutMs = 1_000) {
+async function waitForFile(path, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
@@ -126,7 +126,14 @@ async function withShortOverallTimeout(timeoutMs, callback) {
 
 test("module exposes only one OpenCode plugin entry point", async () => {
   const module = await import("../dist/open-code-review.js")
-  assert.deepEqual(Object.keys(module), ["OpenCodeReviewPlugin"])
+  assert.deepEqual(Object.keys(module).sort(), ["OpenCodeReviewPlugin", "default"])
+})
+
+test("default export serves both plugin APIs", async () => {
+  const module = await import("../dist/open-code-review.js")
+  assert.equal(module.default.id, "open-code-review")
+  assert.equal(typeof module.default.setup, "function")
+  assert.equal(module.default.server, module.OpenCodeReviewPlugin)
 })
 
 test("plugin registers tools and preserves existing user commands", async () => {
@@ -169,13 +176,63 @@ test("fake OCR helper removes its temporary directory", async () => {
   await assert.rejects(access(temporaryDirectory), { code: "ENOENT" })
 })
 
-test("ocr_review creates agent-friendly workspace arguments", async () => {
+test("ocr_review trims and passes multi-paragraph background through a private temporary file", async () => {
+  const background = ` \nReview requirements\n\n${"x".repeat(6_000)}\n\t `
+  await withFakeOcr(
+    [
+      "const fs = require('node:fs')",
+      "const path = require('node:path')",
+      "const args = process.argv.slice(2)",
+      "const backgroundIndex = args.indexOf('--background-file')",
+      "const backgroundPath = args[backgroundIndex + 1]",
+      "console.log(JSON.stringify({",
+      "  status: 'success',",
+      "  argv: args,",
+      "  backgroundPath,",
+      "  background: fs.readFileSync(backgroundPath, 'utf8'),",
+      "  backgroundMode: fs.statSync(backgroundPath).mode & 0o777,",
+      "  backgroundDirectoryMode: fs.statSync(path.dirname(backgroundPath)).mode & 0o777,",
+      "}))",
+    ].join("\n"),
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_review.execute(
+        { background, timeoutMinutes: 30 },
+        toolContext(worktree),
+      )
+      const parsed = JSON.parse(output)
+      assert.equal(parsed.background, background.trim())
+      assert.equal(parsed.argv.includes("--background"), false)
+      assert.deepEqual(parsed.argv, [
+        "review",
+        "--audience",
+        "agent",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--background-file",
+        parsed.backgroundPath,
+        "--timeout",
+        "30",
+      ])
+      if (process.platform !== "win32") {
+        assert.equal(parsed.backgroundMode, 0o600)
+        assert.equal(parsed.backgroundDirectoryMode, 0o700)
+      }
+      await assert.rejects(access(parsed.backgroundPath), { code: "ENOENT" })
+      await assert.rejects(access(dirname(parsed.backgroundPath)), { code: "ENOENT" })
+    },
+  )
+})
+
+test("ocr_review treats whitespace-only background as absent", async () => {
   await withFakeOcr(
     "console.log(JSON.stringify({status:'success', argv:process.argv.slice(2)}))",
     async (worktree) => {
       const { hooks } = await loadPlugin(worktree)
       const output = await hooks.tool.ocr_review.execute(
-        { background: "Add rate limiting", timeoutMinutes: 30 },
+        { background: "  \n\t " },
         toolContext(worktree),
       )
       assert.deepEqual(JSON.parse(output).argv, [
@@ -186,10 +243,6 @@ test("ocr_review creates agent-friendly workspace arguments", async () => {
         "json",
         "--repo",
         worktree,
-        "--background",
-        "Add rate limiting",
-        "--timeout",
-        "30",
       ])
     },
   )
@@ -305,6 +358,51 @@ test("ocr_review reports non-zero exits with OCR output", async () => {
   )
 })
 
+test("ocr_review removes its temporary background after a non-zero exit", async () => {
+  await withFakeOcr(
+    [
+      "const fs = require('node:fs')",
+      "const args = process.argv.slice(2)",
+      "const backgroundIndex = args.indexOf('--background-file')",
+      "fs.writeFileSync('background-path.txt', args[backgroundIndex + 1])",
+      "console.error('review failed')",
+      "process.exit(7)",
+    ].join("\n"),
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      await assert.rejects(
+        hooks.tool.ocr_review.execute(
+          { background: "Failure cleanup context" },
+          toolContext(worktree),
+        ),
+        /review failed/,
+      )
+      const backgroundPath = await readFile(join(worktree, "background-path.txt"), "utf8")
+      await assert.rejects(access(backgroundPath), { code: "ENOENT" })
+      await assert.rejects(access(dirname(backgroundPath)), { code: "ENOENT" })
+    },
+  )
+})
+
+test("ocr_review reports child process signal termination", { skip: process.platform === "win32" }, async () => {
+  await withFakeOcr(
+    "process.kill(process.pid, 'SIGTERM')",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      await assert.rejects(
+        hooks.tool.ocr_review.execute({}, toolContext(worktree)),
+        (error) => {
+          assert.equal(error.name, "OcrExecutionError")
+          assert.equal(error.exitCode, null)
+          assert.equal(error.signal, "SIGTERM")
+          assert.match(error.message, /terminated by signal SIGTERM/)
+          return true
+        },
+      )
+    },
+  )
+})
+
 test("ocr_review explains how to install a missing OCR executable", async () => {
   await withTemporaryDirectory(async (directory) => {
     const previousPath = process.env.PATH
@@ -323,18 +421,41 @@ test("ocr_review explains how to install a missing OCR executable", async () => 
 
 test("ocr_review terminates when OpenCode cancels the tool", async () => {
   await withFakeOcr(
-    "setInterval(() => {}, 1000)",
+    [
+      "const fs = require('node:fs')",
+      "const args = process.argv.slice(2)",
+      "const backgroundIndex = args.indexOf('--background-file')",
+      "fs.writeFileSync('background-path.txt', args[backgroundIndex + 1])",
+      "fs.writeFileSync('ocr-child.pid', String(process.pid))",
+      "setInterval(() => {}, 1000)",
+    ].join("\n"),
     async (worktree) => {
       const { hooks } = await loadPlugin(worktree)
       const controller = new AbortController()
-      setTimeout(() => controller.abort(), 20)
+      const execution = hooks.tool.ocr_review.execute(
+        { background: "Cancellation cleanup context" },
+        toolContext(worktree, controller.signal),
+      )
+      const pathRecord = join(worktree, "background-path.txt")
+      await waitForFile(pathRecord)
+      const backgroundPath = await readFile(pathRecord, "utf8")
+      const pidRecord = join(worktree, "ocr-child.pid")
+      await waitForFile(pidRecord)
+      const pid = Number(await readFile(pidRecord, "utf8"))
+      controller.abort()
       await assert.rejects(
-        hooks.tool.ocr_review.execute(
-          {},
-          toolContext(worktree, controller.signal),
-        ),
+        execution,
         /cancelled by OpenCode/,
       )
+      await assert.rejects(access(backgroundPath), { code: "ENOENT" })
+      await assert.rejects(access(dirname(backgroundPath)), { code: "ENOENT" })
+      try {
+        await waitForProcessExit(pid)
+      } finally {
+        if (isProcessRunning(pid)) {
+          process.kill(pid, "SIGKILL")
+        }
+      }
     },
   )
 })
@@ -557,4 +678,198 @@ test("ocr_health preserves OpenCode cancellation", async () => {
       await assert.rejects(execution, /cancelled by OpenCode/)
     },
   )
+})
+
+function stubV2Context({ directory, commands = [], failSessionLookup = false } = {}) {
+  const tools = []
+  const addedCommands = []
+  const prompts = []
+  return {
+    ctx: {
+      tool: {
+        transform: async (callback) => callback({
+          add: (definition) => tools.push(definition),
+          list: () => [],
+          get: () => undefined,
+          update: () => {},
+          remove: () => {},
+          namespace: () => {},
+        }),
+        reload: async () => {},
+      },
+      command: {
+        list: async () => ({ data: commands.map((name) => ({ name })) }),
+        transform: async (callback) => callback({
+          add: (definition) => addedCommands.push(definition),
+        }),
+        reload: async () => {},
+      },
+      session: {
+        get: async () => {
+          if (failSessionLookup) throw new Error("session gone")
+          return { location: { directory } }
+        },
+        prompt: async (input) => {
+          prompts.push(input)
+          return {}
+        },
+      },
+      location: { directory },
+    },
+    tools,
+    addedCommands,
+    prompts,
+  }
+}
+
+function v2ToolContext() {
+  return {
+    sessionID: "session-test",
+    agent: "build",
+    messageID: "message-test",
+    id: "call-test",
+    progress: async () => {},
+  }
+}
+
+test("v2 setup registers both tools and both commands", async () => {
+  const module = await import("../dist/open-code-review.js")
+  const { ctx, tools, addedCommands } = stubV2Context({ directory: "/tmp/project" })
+  await module.default.setup(ctx)
+  assert.deepEqual(tools.map((definition) => definition.name).sort(), ["ocr_health", "ocr_review"])
+  assert.deepEqual(addedCommands.map((definition) => definition.name).sort(), ["ocr-health", "ocr-review"])
+})
+
+test("v2 numeric inputs require positive integers", async () => {
+  const module = await import("../dist/open-code-review.js")
+  const { ctx, tools } = stubV2Context({ directory: "/tmp/project" })
+  await module.default.setup(ctx)
+  const review = tools.find((definition) => definition.name === "ocr_review")
+  for (const field of ["concurrency", "timeoutMinutes", "overallTimeoutMinutes", "maxTools", "maxGitProcesses"]) {
+    assert.deepEqual(
+      { type: review.input.properties[field].type, minimum: review.input.properties[field].minimum },
+      { type: "integer", minimum: 1 },
+    )
+  }
+})
+
+test("v2 preserves user-defined commands", async () => {
+  const module = await import("../dist/open-code-review.js")
+  const { ctx, addedCommands } = stubV2Context({ directory: "/tmp/project", commands: ["ocr-review"] })
+  await module.default.setup(ctx)
+  assert.deepEqual(addedCommands.map((definition) => definition.name), ["ocr-health"])
+})
+
+test("v2 ocr_review preview resolves cwd from the session location", async () => {
+  await withFakeOcr(
+    "console.log(process.argv.slice(2).join('\\n'))",
+    async (worktree) => {
+      const module = await import("../dist/open-code-review.js")
+      const { ctx, tools } = stubV2Context({ directory: worktree })
+      await module.default.setup(ctx)
+      const review = tools.find((definition) => definition.name === "ocr_review")
+      const output = await review.execute({ preview: true }, v2ToolContext())
+      assert.deepEqual(output.content.split("\n"), [
+        "review",
+        "--audience",
+        "agent",
+        "--repo",
+        worktree,
+        "--preview",
+      ])
+    },
+  )
+})
+
+test("v2 falls back to the plugin location when session lookup fails", async () => {
+  await withFakeOcr(
+    "console.log(process.argv.slice(2).join('\\n'))",
+    async (worktree) => {
+      const module = await import("../dist/open-code-review.js")
+      const { ctx, tools } = stubV2Context({ directory: worktree, failSessionLookup: true })
+      await module.default.setup(ctx)
+      const review = tools.find((definition) => definition.name === "ocr_review")
+      const output = await review.execute({ preview: true }, v2ToolContext())
+      assert.match(output.content, new RegExp(`--repo\n${worktree}\n--preview`))
+    },
+  )
+})
+
+test("v2 ocr-review command renders review intent with sentence break", async () => {
+  const module = await import("../dist/open-code-review.js")
+  const { ctx, addedCommands, prompts } = stubV2Context({ directory: "/tmp/project" })
+  await module.default.setup(ctx)
+  const command = addedCommands.find((definition) => definition.name === "ocr-review")
+  await command.execute({ sessionID: "session-test", prompt: { text: "my staged changes" }, delivery: "steer" })
+  assert.match(prompts[0].text, /business context:my staged changes\. If no target is specified/)
+  await command.execute({ sessionID: "session-test", prompt: {}, delivery: "steer" })
+  assert.match(prompts[1].text, /business context:\. If no target is specified/)
+  assert.doesNotMatch(prompts[1].text, /  /)
+})
+
+test("ocr_review forwards backgroundFile as --background-file", async () => {
+  await withFakeOcr(
+    "console.log(JSON.stringify({status:'success', argv:process.argv.slice(2)}))",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_review.execute(
+        { backgroundFile: "docs/context.md" },
+        toolContext(worktree),
+      )
+      assert.deepEqual(JSON.parse(output).argv, [
+        "review",
+        "--audience",
+        "agent",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--background-file",
+        "docs/context.md",
+      ])
+    },
+  )
+})
+
+test("ocr_review rejects background combined with backgroundFile", async () => {
+  await withTemporaryDirectory(async (worktree) => {
+    const { hooks } = await loadPlugin(worktree)
+    await assert.rejects(
+      hooks.tool.ocr_review.execute(
+        { background: "inline context", backgroundFile: "docs/context.md" },
+        toolContext(worktree),
+      ),
+      /either 'background' or 'backgroundFile'/,
+    )
+  })
+})
+
+test("ocr_review reports the terminating signal rather than a fabricated exit code", { skip: process.platform === "win32" }, async () => {
+  await withFakeOcr(
+    "process.kill(process.pid, 'SIGKILL')",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      await assert.rejects(
+        hooks.tool.ocr_review.execute({}, toolContext(worktree)),
+        (error) => {
+          assert.equal(error.name, "OcrExecutionError")
+          assert.equal(error.exitCode, null)
+          assert.equal(error.signal, "SIGKILL")
+          assert.match(error.message, /terminated by signal SIGKILL/)
+          return true
+        },
+      )
+    },
+  )
+})
+
+test("v2 exposes backgroundFile in the tool input schema", async () => {
+  const module = await import("../dist/open-code-review.js")
+  const { ctx, tools } = stubV2Context({ directory: "/tmp/project" })
+  await module.default.setup(ctx)
+  const review = tools.find((definition) => definition.name === "ocr_review")
+  // additionalProperties is false, so an undeclared input is unreachable on 2.x
+  // even though buildReviewArgs would forward it.
+  assert.equal(review.input.additionalProperties, false)
+  assert.equal(review.input.properties.backgroundFile?.type, "string")
 })

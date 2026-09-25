@@ -342,3 +342,22 @@ func TestCodeCommentProvider_Execute(t *testing.T) {
 		}
 	})
 }
+
+func TestParseComments_NormalizePath(t *testing.T) {
+	args := map[string]any{
+		"comments": []any{
+			map[string]any{"path": `pkg\util.go`, "content": "fix 1"},
+			map[string]any{"path": `./pkg/util.go`, "content": "fix 2"},
+			map[string]any{"path": `pkg/sub//util.go`, "content": "fix 3"},
+		},
+	}
+	comments, errMsg := ParseComments(args)
+	if errMsg != "" || len(comments) != 3 {
+		t.Fatalf("ParseComments failed: err=%q len=%d", errMsg, len(comments))
+	}
+	for i, want := range []string{"pkg/util.go", "pkg/util.go", "pkg/sub/util.go"} {
+		if comments[i].Path != want {
+			t.Errorf("comment[%d].Path = %q, want %q", i, comments[i].Path, want)
+		}
+	}
+}

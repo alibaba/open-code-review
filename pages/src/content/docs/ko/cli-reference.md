@@ -80,6 +80,8 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session show <id>` | `ocr sessions show <id>` | 세션 하나와 파일별 체크포인트를 살펴봅니다. |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | 세션에 기록된 리뷰 코멘트를 출력합니다. |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 두 세션의 지적을 비교합니다: 새로 생긴 것, 남아 있는 것, 해결된 것, 리뷰하지 않은 것. |
+| `ocr session export [id]` | — | 세션 하나를 단일 HTML 파일로 내보냅니다. |
+| `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | 저장된 리뷰 세션 하나를 삭제합니다. |
 | `ocr viewer` | — | 지난 리뷰 세션을 볼 수 있는 로컬 웹 UI를 띄웁니다(`localhost:5483`). |
 | `ocr version` | — | 버전, 커밋, 플랫폼, 빌드 날짜, GitHub URL을 출력합니다. |
 
@@ -111,7 +113,7 @@ ocr r      [flags]   (alias)
 | `--to <ref>` | — | — | diff가 끝나는 대상 ref(예: `feature-branch`). 지정하면 OCR이 `merge-base(from, to)..to`를 계산합니다. |
 | `--commit <sha>` | `-c` | — | 리뷰할 단일 커밋(부모 커밋과의 diff). |
 | `--preview` | `-p` | `false` | 필터 파이프라인만 돌리고 LLM은 호출하지 않습니다. 파일 목록과 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다(미리 보기에는 내보낼 완료된 지적이 없습니다). |
-| `--no-filter` | — | `false` | 리뷰 코멘트를 모두 남기고 그룹 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. |
+| `--no-filter` | — | `false` | 리뷰 코멘트를 모두 남기고 서브태스크 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. 서브태스크는 파일 하나 또는 관련된 파일 묶음을 리뷰합니다. |
 | `--resume <session-id>` | — | — | 호환되는 이전 range 또는 commit 리뷰 세션에서 이어서 실행합니다. |
 | `--format <fmt>` | `-f` | `text` | `text`(사람이 읽는 형식), `json`(기계가 읽는 코멘트 배열), `sarif`(GitHub Code Scanning용 SARIF 2.1.0 리포트). |
 | `--output <path>` | `-o` | stdout | 리뷰 결과를 UTF-8 파일로 씁니다(`-`는 stdout). 첫 쓰기 시점에 파일을 만들므로 실패한 실행은 기존 파일을 건드리지 않습니다. text 형식에서는 ANSI 색 코드를 자동으로 제거합니다. |
@@ -119,13 +121,13 @@ ocr r      [flags]   (alias)
 | `--background <text>` | `-b` | — | plan과 main 프롬프트에 넣을 요구사항 또는 비즈니스 맥락(선택). |
 | `--background-file <path>` | `-B` | — | 리뷰 배경으로 쓸 Markdown 파일 경로. `--background`와 함께 지정하면 이쪽이 우선합니다. |
 | `--exclude <patterns>` | — | — | 제외할 gitignore 형식 패턴(쉼표 구분). `rule.json`의 `excludes` 항목과 합쳐집니다. |
-| `--concurrency <n>` | — | `8` | 병렬로 리뷰할 파일 그룹의 최대 개수. |
-| `--timeout <minutes>` | — | `15` | 그룹당 제한 시간. `0`이면 타임아웃을 끕니다. effort 라운드 수에 비례해 선형 확장됩니다(예: low/medium/high에서 15/30/45분). |
+| `--concurrency <n>` | — | `8` | 병렬로 리뷰할 서브태스크의 최대 개수. |
+| `--timeout <minutes>` | — | `15` | 서브태스크당 제한 시간. `0`이면 타임아웃을 끕니다. effort 라운드 수에 비례해 선형 확장됩니다(예: low/medium/high에서 15/30/45분). |
 | `--effort <level>` | — | `medium` | 리뷰 강도 프리셋: `low`(라운드 1회), `medium`(2회), `high`(3회). 라운드를 늘리면 놓치는 지적이 줄지만 비용도 그만큼 늘어납니다. 이 실행에 한해 저장된 `effort` 설정을 덮어씁니다. |
 | `--rule <path>` | — | — | 커스텀 JSON 리뷰 규칙 파일 경로. 프로젝트 수준과 전역 `rule.json`을 덮어씁니다. |
-| `--max-tools <n>` | — | 템플릿 기본값 | 그룹당 최대 도구 호출 라운드 수. `0`이면 템플릿 기본값(`100`)을 쓰고, 1~49는 `50`으로 올려 맞춥니다. 이 플래그는 상한을 *올리기만* 합니다. 템플릿 기본값보다 낮은 값은 무시됩니다. |
-| `--max-tokens <n>` | — | 설정 또는 템플릿 기본값 | 그룹당 프롬프트(입력) 토큰 상한이며 템플릿 기본값은 `200000`입니다. 이 실행에 한해 저장된 `max_tokens` 설정을 덮어씁니다. 출력 상한은 바뀌지 않습니다. `MAX_COMPLETION_TOKENS`를 참고하세요. |
-| `--max-tokens-budget <n>` | — | `0`(무제한) | 리뷰 전체의 입력+출력 토큰 사용량을 제한합니다. 예산을 넘기면 작업 전달을 멈추지만 그때까지의 결과는 그대로 내보냅니다. |
+| `--max-tools <n>` | — | 템플릿 기본값 | 서브태스크당 최대 도구 호출 라운드 수. `0`이면 템플릿 기본값(`100`)을 쓰고, 1~49는 `50`으로 올려 맞춥니다. 이 플래그는 상한을 *올리기만* 합니다. 템플릿 기본값보다 낮은 값은 무시됩니다. |
+| `--max-tokens <n>` | — | 설정 또는 템플릿 기본값 | 서브태스크당 프롬프트(입력) 토큰 상한이며 템플릿 기본값은 `200000`입니다. 이 실행에 한해 저장된 `max_tokens` 설정을 덮어씁니다. 출력 상한은 바뀌지 않습니다. `MAX_COMPLETION_TOKENS`를 참고하세요. |
+| `--max-tokens-budget <n>` | — | `0`(무제한) | 리뷰 전체의 입력+출력 토큰 사용량을 제한합니다. LLM 라운드마다 먼저 확인하며, 이미 예산을 넘긴 하위 작업은 발견 사항을 제출할 마지막 라운드를 한 번 받고 `failed(budget)`로 보고됩니다. 이후 하위 작업은 전달되지 않지만 그때까지의 결과는 그대로 내보냅니다. |
 | `--provider <name>` | — | — | 이 실행에 쓸 프로바이더를 고릅니다. `providers`와 `custom_providers` 양쪽의 이름을 모두 받습니다. |
 | `--model <name>` | — | — | 이 실행에 한해 해석된 LLM 모델을 덮어씁니다(예: `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | 동시에 띄울 git 서브프로세스의 최대 개수. |
@@ -448,7 +450,8 @@ ocr session comments --severity critical,high --category bug,security <session-i
 있지만 뒤 세션이 아예 보지 않은 파일이라 해결된 것으로 세지 않음)입니다.
 
 지적은 라인 번호가 아니라 경로와 분류, 문제가 된 코드 조각으로 대조합니다. 그래서
-파일 안에서 위치만 밀린 지적은 여전히 남아 있는 것으로 잡힙니다.
+파일 안에서 위치만 밀린 지적은 여전히 남아 있는 것으로 잡힙니다. after 세션의 실행
+매니페스트에 파일 이름 변경이 기록되어 있으면 대조 전에 이전 경로를 새 경로로 바꿉니다.
 
 ```bash
 ocr session compare <before-session-id> <after-session-id>
@@ -463,6 +466,56 @@ ocr session compare --json <before-session-id> <after-session-id>
 |---|---|---|
 | `--repo <path>` | 현재 디렉터리 | 비교할 세션이 속한 저장소. |
 | `--json` | `false` | 비교 결과를 JSON으로 출력합니다(`new`, `persisting`, `resolved`, `not_reviewed`). |
+
+### `ocr session export` {#ocr-session-export}
+
+세션 하나를 단일 HTML 파일로 렌더링합니다. 뷰어의 스타일시트와 스크립트가
+인라인으로 들어가므로, 결과물은 네트워크 접근 없이 `file://`로 열리며 CI가
+리뷰 결과를 빌드 아티팩트로 보관할 수 있습니다.
+
+```bash
+ocr session export -o review.html
+ocr session export 20250601-100000-abc123 -o review.html
+```
+
+세션 id를 주지 않으면 해당 저장소의 가장 최근 세션을 내보냅니다. 성공한
+`ocr review`는 세션 id를 출력하지 않기 때문에 이것이 기본값입니다. `-o`를 주지
+않으면 HTML은 표준 출력으로 나갑니다.
+
+내보낸 페이지에는 세션이 기록한 리뷰 대상 소스 발췌가 들어 있습니다. 공개하기
+전에 저장소 자체와 같은 수준으로 주의해서 다루세요.
+
+| 플래그 | 기본값 | 설명 |
+|---|---|---|
+| `--repo <path>` | 현재 디렉터리 | 내보낼 세션이 속한 저장소. |
+| `--output <path>`, `-o` | 표준 출력 | HTML을 표준 출력 대신 파일로 씁니다. |
+
+### `ocr session rm` {#ocr-session-rm}
+
+`~/.opencodereview/sessions/`에 저장된 세션 하나를 삭제합니다.
+
+```bash
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --yes
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --repo ~/work/my-project
+```
+
+id만으로 충분하므로 어느 디렉터리에서든 실행할 수 있습니다. 같은 id가 여러
+저장소에 저장되어 있으면 후보를 보여주고 아무것도 삭제하지 않습니다. `--repo`로
+하나를 지정하세요.
+
+세션의 저장소, 브랜치, 시작 시각, 파일 수, 댓글 수를 출력하고 확인을 요청합니다.
+**비대화형 stdin은 "아니오"로 처리되므로**, 파이프라인이나 CI 작업에서 프롬프트를
+건너뛰려면 `--yes`(`-y`)를 전달해야 합니다.
+
+메타데이터를 해석할 수 없는 세션도 삭제할 수 있습니다. 아예 읽을 수 없는 경우에는
+삭제하지 않고 오류를 보고합니다. `--repo`를 지정하면 다른 저장소를 기록했거나
+저장소를 기록하지 않은 세션은 거부됩니다. 그때는 id만으로 삭제하세요.
+
+| 플래그 | 기본값 | 설명 |
+|---|---|---|
+| `--repo <path>` | 모든 저장소 | 이 저장소 아래에서만 세션을 찾습니다. |
+| `--yes`, `-y` | `false` | 확인 프롬프트를 건너뜁니다. |
 
 ## `ocr rules` {#ocr-rules}
 
@@ -581,14 +634,22 @@ ocr viewer [flags]
 
 Flags:
   --addr <address>   listen address (default: localhost:5483)
+  --open <mode>      when to open the browser: auto, always, never (default: auto)
 
 Examples:
-  ocr viewer                     # start on default port
+  ocr viewer                     # start and open the browser
   ocr viewer --addr :3000        # bind to all interfaces on port 3000
+  ocr viewer --open=never        # just print the URL
+  ocr viewer --open=always       # force it when auto declines (piped output, WSL)
 ```
 
 `~/.opencodereview/sessions/...`를 읽어 지난 리뷰 세션을 브라우저에서 보기 좋게
 렌더링하는 내장 HTTP 서버를 띄웁니다. [세션 뷰어](../viewer/)를 참고하세요.
+
+`--open=auto`는 stdout이 터미널이 아닐 때, `SSH_CONNECTION`이 설정되어 있고
+전달된 디스플레이가 없을 때, 또는 Linux에서 `DISPLAY`와 `WAYLAND_DISPLAY`가 모두
+없을 때 브라우저 열기를 건너뜁니다. 그 이유는 URL과 함께 출력됩니다. auto가 열지
+않지만 실제로는 브라우저에 닿을 수 있다면 `--open=always`를 사용하세요.
 
 ## `ocr version` {#ocr-version}
 
