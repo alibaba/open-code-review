@@ -541,18 +541,16 @@ func TestObserverConcurrentRequests(t *testing.T) {
 	const n = 8
 	metas := make([]RequestMeta, n)
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
+	for i := range n {
 		m := testMeta()
 		m.FilePath = fmt.Sprintf("file_%d.go", i)
 		metas[i] = m
 		client := anthropicClient(server.URL, c, map[string]string{"X-Test-Request": m.FilePath})
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := ping(metaCtx(m), client); err != nil {
 				t.Errorf("%s: %v", m.FilePath, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

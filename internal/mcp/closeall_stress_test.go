@@ -27,7 +27,7 @@ func TestCloseAll_StressManyUnresponsiveServers(t *testing.T) {
 	pinProductionTerminateDuration(t)
 
 	var clients []*Client
-	for i := 0; i < 24; i++ {
+	for i := range 24 {
 		clients = append(clients, startEnvServer(t, fmt.Sprintf("hang-%02d", i), runAsHangingServerEnv))
 	}
 
@@ -66,13 +66,13 @@ func TestCloseAll_MixedFleetRealisticProfile(t *testing.T) {
 	pinProductionTerminateDuration(t)
 
 	var clients []*Client
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		clients = append(clients, startEnvServer(t, fmt.Sprintf("normal-%d", i), runAsServerEnv))
 	}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		clients = append(clients, startEnvServer(t, fmt.Sprintf("hang-%d", i), runAsHangingServerEnv))
 	}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		clients = append(clients, startEnvServer(t, fmt.Sprintf("exit3-%d", i), runAsExit3ServerEnv))
 	}
 
@@ -87,12 +87,12 @@ func TestCloseAll_MixedFleetRealisticProfile(t *testing.T) {
 		t.Fatal("CloseAll: expected errors from hung and exit-3 servers, got nil")
 	}
 	msgText := err.Error()
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if !strings.Contains(msgText, fmt.Sprintf("hang-%d", i)) {
 			t.Errorf("error %q does not mention hung server hang-%d", msgText, i)
 		}
 	}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if !strings.Contains(msgText, fmt.Sprintf("exit3-%d", i)) {
 			t.Errorf("error %q does not mention exit-3 server exit3-%d", msgText, i)
 		}

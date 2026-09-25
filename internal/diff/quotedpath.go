@@ -67,7 +67,7 @@ func unquoteGitPath(s string) (path string, rest string, ok bool) {
 					return "", s, false
 				}
 				v := 0
-				for d := 0; d < 3; d++ {
+				for d := range 3 {
 					digit := s[i+d]
 					if digit < '0' || digit > '7' {
 						return "", s, false

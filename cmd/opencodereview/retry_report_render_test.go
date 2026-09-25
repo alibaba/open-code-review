@@ -239,7 +239,7 @@ func TestOutputRetryReportText_SanitizesControlChars(t *testing.T) {
 
 func TestOutputRetryReportText_TruncatesStageList(t *testing.T) {
 	rep := &llm.RetryReport{TotalRequests: retryGroupListLimit + 2}
-	for i := 0; i < retryGroupListLimit+2; i++ {
+	for i := range retryGroupListLimit + 2 {
 		rep.Requests = append(rep.Requests, llm.RequestReport{
 			FilePath:  fmt.Sprintf("file-%d.go", i),
 			TaskType:  string(session.MainTask),
