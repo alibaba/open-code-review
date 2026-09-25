@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -538,12 +539,7 @@ type OpenAIClient struct {
 // ExtraHeaders are applied per request (not baked into the SDK client) so
 // SessionKeyTemplateVar can expand to the session key each request carries.
 func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = 5 * time.Minute
-	}
-	if cfg.SessionKey == "" {
-		cfg.SessionKey = NewSessionKey()
-	}
+	applyClientDefaults(&cfg)
 	baseURL := strings.TrimRight(cfg.URL, "/")
 	if !strings.HasSuffix(baseURL, "/chat/completions") {
 		cfg.URL = baseURL + "/chat/completions"
@@ -551,6 +547,24 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 
 	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/chat/completions")
 
+	return &OpenAIClient{
+		cfg: cfg,
+		sdk: newOpenAISDK(cfg, sdkBaseURL),
+	}
+}
+
+func applyClientDefaults(cfg *ClientConfig) {
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.SessionKey == "" {
+		cfg.SessionKey = NewSessionKey()
+	}
+}
+
+// Callers normalize cfg.URL themselves: the two OpenAI clients keep different
+// trailing-slash contracts on it.
+func newOpenAISDK(cfg ClientConfig, sdkBaseURL string) openai.Client {
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(cfg.APIKey),
 		openaiopt.WithBaseURL(sdkBaseURL),
@@ -559,23 +573,48 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 		openaiopt.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
+	opts = append(opts, openaiopt.WithMiddleware(sdkMiddlewares(cfg)...))
+	return openai.NewClient(opts...)
+}
+
+// Raw must register before the retry observer: the SDK wraps middlewares
+// last-in-innermost, and raw's full-body read plus disk write would otherwise
+// inflate the observer's DurationToHeadersMS.
+func sdkMiddlewares(cfg ClientConfig) []retryObserver {
+	var mws []retryObserver
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
-		opts = append(opts, openaiopt.WithMiddleware(mw))
+		mws = append(mws, mw)
 	}
-	// Raw must register before the retry observer: the SDK wraps middlewares
-	// last-in-innermost, and raw's full-body read plus disk write would
-	// otherwise inflate the observer's DurationToHeadersMS.
 	if cfg.rawHolder != nil {
-		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
+		mws = append(mws, newRawMiddleware(cfg.rawHolder))
 	}
 	if cfg.retryCollector != nil {
-		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
+		mws = append(mws, newRetryObserver(cfg.retryCollector))
 	}
+	return mws
+}
 
-	return &OpenAIClient{
-		cfg: cfg,
-		sdk: openai.NewClient(opts...),
+func (cfg ClientConfig) requestSessionKey(ctx context.Context) string {
+	if k := SessionKeyFromContext(ctx); k != "" {
+		return k
 	}
+	return cfg.SessionKey
+}
+
+func openAIRequestOptions(ctx context.Context, cfg ClientConfig, skipBodyKeys ...string) []openaiopt.RequestOption {
+	sessionKey := cfg.requestSessionKey(ctx)
+
+	var opts []openaiopt.RequestOption
+	for k, v := range expandSessionKeyInHeaders(cfg.ExtraHeaders, sessionKey) {
+		opts = append(opts, openaiopt.WithHeader(k, v))
+	}
+	for k, v := range expandSessionKeyInBody(cfg.ExtraBody, sessionKey) {
+		if slices.Contains(skipBodyKeys, k) {
+			continue
+		}
+		opts = append(opts, openaiopt.WithJSONSet(k, v))
+	}
+	return opts
 }
 
 // ChatRequest represents the payload for a chat completion call.
@@ -591,21 +630,12 @@ type ChatRequest struct {
 
 // CompletionsWithCtx sends a chat completion request with context support for cancellation and timeout.
 //
-// The deferred finalizeRequest is the client boundary for the retry report: it is
+// The deferred finalizeOnExit is the client boundary for the retry report: it is
 // the only place that knows the logical request is over, and it covers every exit
 // path including the streaming branch, the EOF recovery and a panic. Results are
 // named so the defer can read the error actually returned.
 func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
-	defer func() {
-		// A panic still has to finalize, or the entry stays unfinalized and Freeze
-		// drops the whole run's report. The panic value itself is re-raised
-		// unchanged so agent.go's per-file recovery behaves exactly as before.
-		if r := recover(); r != nil {
-			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
-			panic(r)
-		}
-		finalizeRequest(ctx, c.cfg.retryCollector, err)
-	}()
+	defer finalizeOnExit(ctx, c.cfg.retryCollector, &err)
 
 	model := req.Model
 	if model == "" {
@@ -614,29 +644,15 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 
 	params := c.buildOpenAIParams(model, req)
 
-	sessionKey := c.cfg.SessionKey
-	if k := SessionKeyFromContext(ctx); k != "" {
-		sessionKey = k
-	}
-
-	var opts []openaiopt.RequestOption
-	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
-		opts = append(opts, openaiopt.WithHeader(k, v))
-	}
-	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// Skip the "stream" key here. The streaming decision below uses a
-		// dedicated boolean check, and when streaming is enabled the SDK's
-		// NewStreaming method sets stream=true on the wire itself. When
-		// streaming is NOT enabled, leaving the key in the body would make
-		// the API answer with text/event-stream and the non-streaming path
-		// fails to decode (see issue #647). "stream_options" is owned by the
-		// streaming branch below for the same reason: providers reject it
-		// unless stream is true.
-		if k == "stream" || k == "stream_options" {
-			continue
-		}
-		opts = append(opts, openaiopt.WithJSONSet(k, v))
-	}
+	// Skip the "stream" key here. The streaming decision below uses a
+	// dedicated boolean check, and when streaming is enabled the SDK's
+	// NewStreaming method sets stream=true on the wire itself. When
+	// streaming is NOT enabled, leaving the key in the body would make
+	// the API answer with text/event-stream and the non-streaming path
+	// fails to decode (see issue #647). "stream_options" is owned by the
+	// streaming branch below for the same reason: providers reject it
+	// unless stream is true.
+	opts := openAIRequestOptions(ctx, c.cfg, "stream", "stream_options")
 	if stream, ok := c.cfg.ExtraBody["stream"].(bool); ok && stream {
 		if streamOptions, ok := c.cfg.ExtraBody["stream_options"]; !ok {
 			// OpenAI-compatible servers omit token usage from streams unless
@@ -1104,12 +1120,7 @@ type AnthropicClient struct {
 // available to ExtraHeaders/ExtraBody via SessionKeyTemplateVar, applied per
 // request so it can expand to the session key each request carries.
 func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = 5 * time.Minute
-	}
-	if cfg.SessionKey == "" {
-		cfg.SessionKey = NewSessionKey()
-	}
+	applyClientDefaults(&cfg)
 	if !strings.HasSuffix(cfg.URL, "/v1/messages") && !strings.HasSuffix(cfg.URL, "/v1/messages/") {
 		baseURL := strings.TrimRight(cfg.URL, "/")
 		if !strings.HasSuffix(baseURL, "/v1/messages") {
@@ -1149,16 +1160,7 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		)
 	}
 
-	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
-		opts = append(opts, option.WithMiddleware(mw))
-	}
-	// Raw before the retry observer; see NewOpenAIClient for why order matters.
-	if cfg.rawHolder != nil {
-		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
-	}
-	if cfg.retryCollector != nil {
-		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
-	}
+	opts = append(opts, option.WithMiddleware(sdkMiddlewares(cfg)...))
 
 	return &AnthropicClient{
 		cfg: cfg,
@@ -1179,12 +1181,7 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 // AWS_BEARER_TOKEN_BEDROCK if set. Region comes from AWS_REGION or the active
 // profile.
 func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = 5 * time.Minute
-	}
-	if cfg.SessionKey == "" {
-		cfg.SessionKey = NewSessionKey()
-	}
+	applyClientDefaults(&cfg)
 
 	// cfg.URL is deliberately unused: bedrock.WithConfig is appended last and
 	// installs its own base URL from the resolved region, so anything set here
@@ -1208,16 +1205,7 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	}
 	// ExtraHeaders are applied per request in CompletionsWithCtx, where the
 	// session key template can expand — same as the plain Anthropic client.
-	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
-		opts = append(opts, option.WithMiddleware(mw))
-	}
-	// Raw before the retry observer; see NewOpenAIClient for why order matters.
-	if cfg.rawHolder != nil {
-		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
-	}
-	if cfg.retryCollector != nil {
-		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
-	}
+	opts = append(opts, option.WithMiddleware(sdkMiddlewares(cfg)...))
 
 	// Load the AWS config here rather than calling bedrock.WithLoadDefaultConfig,
 	// which panics on failure.
@@ -1405,13 +1393,7 @@ func anthropicThinkingBudgetTokens(v any) (int64, bool) {
 // named. A parameter-building failure returns before any HTTP attempt, so
 // Finalize finds no entry and the request stays out of the report entirely.
 func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
-			panic(r)
-		}
-		finalizeRequest(ctx, c.cfg.retryCollector, err)
-	}()
+	defer finalizeOnExit(ctx, c.cfg.retryCollector, &err)
 
 	if c.initErr != nil {
 		return nil, c.initErr
@@ -1427,10 +1409,7 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		return nil, err
 	}
 
-	sessionKey := c.cfg.SessionKey
-	if k := SessionKeyFromContext(ctx); k != "" {
-		sessionKey = k
-	}
+	sessionKey := c.cfg.requestSessionKey(ctx)
 
 	var opts []option.RequestOption
 	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {

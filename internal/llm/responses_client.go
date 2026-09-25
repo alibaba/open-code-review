@@ -7,10 +7,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	openai "github.com/openai/openai-go/v3"
-	openaiopt "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 )
@@ -33,37 +31,13 @@ type OpenAIResponsesClient struct {
 // ExtraHeaders are applied per request (not baked into the SDK client)
 // so SessionKeyTemplateVar can expand to the session key each request carries.
 func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = 5 * time.Minute
-	}
-	if cfg.SessionKey == "" {
-		cfg.SessionKey = NewSessionKey()
-	}
+	applyClientDefaults(&cfg)
 	ensureResponsesEndpoint(&cfg)
 	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/responses")
 
-	opts := []openaiopt.RequestOption{
-		openaiopt.WithAPIKey(cfg.APIKey),
-		openaiopt.WithBaseURL(sdkBaseURL),
-		openaiopt.WithMaxRetries(5),
-		openaiopt.WithHeader("User-Agent", userAgent("")),
-		openaiopt.WithRequestTimeout(cfg.Timeout),
-		openaiopt.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
-	}
-	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
-		opts = append(opts, openaiopt.WithMiddleware(mw))
-	}
-	// Raw before the retry observer; see NewOpenAIClient for why order matters.
-	if cfg.rawHolder != nil {
-		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
-	}
-	if cfg.retryCollector != nil {
-		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
-	}
-
 	return &OpenAIResponsesClient{
 		cfg: cfg,
-		sdk: openai.NewClient(opts...),
+		sdk: newOpenAISDK(cfg, sdkBaseURL),
 	}
 }
 
@@ -89,17 +63,11 @@ func ensureResponsesEndpoint(cfg *ClientConfig) {
 // CompletionsWithCtx sends a Responses API request and maps the result back to
 // the shared ChatResponse shape.
 //
-// The deferred finalizeRequest is this client's boundary for the retry report;
+// The deferred finalizeOnExit is this client's boundary for the retry report;
 // see the OpenAI Chat Completions counterpart for why it is deferred and why the
 // results are named.
 func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
-			panic(r)
-		}
-		finalizeRequest(ctx, c.cfg.retryCollector, err)
-	}()
+	defer finalizeOnExit(ctx, c.cfg.retryCollector, &err)
 
 	model := req.Model
 	if model == "" {
@@ -108,26 +76,12 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 
 	params := c.buildResponsesParams(model, req)
 
-	sessionKey := c.cfg.SessionKey
-	if k := SessionKeyFromContext(ctx); k != "" {
-		sessionKey = k
-	}
-
-	var opts []openaiopt.RequestOption
-	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
-		opts = append(opts, openaiopt.WithHeader(k, v))
-	}
-	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// This client is non-streaming: it calls Responses.New, which expects a
-		// single JSON body. If a provider config sets extra_body.stream=true
-		// (valid for the Chat Completions client, which switches to a streaming
-		// path), forwarding it here makes the API answer with SSE and every
-		// call fails to decode. Drop the key rather than forward it.
-		if k == "stream" {
-			continue
-		}
-		opts = append(opts, openaiopt.WithJSONSet(k, v))
-	}
+	// This client is non-streaming: it calls Responses.New, which expects a
+	// single JSON body. If a provider config sets extra_body.stream=true
+	// (valid for the Chat Completions client, which switches to a streaming
+	// path), forwarding it here makes the API answer with SSE and every
+	// call fails to decode. Drop the key rather than forward it.
+	opts := openAIRequestOptions(ctx, c.cfg, "stream")
 
 	sdkResp, err := c.sdk.Responses.New(ctx, params, opts...)
 	if err != nil {
