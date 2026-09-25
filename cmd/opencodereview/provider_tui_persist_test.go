@@ -33,13 +33,8 @@ func TestPersistCustomModelName(t *testing.T) {
 
 	t.Run("custom tab success", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "config.json")
-		cfg := &Config{
-			CustomProviders: map[string]ProviderEntry{
-				"cp": {URL: "https://x.example", Protocol: "openai", Models: []string{"m1"}},
-			},
-		}
-		m := newProviderTUI(cfg, path)
-		m.activeTab = tabCustom
+		cfg := cpConfig()
+		m := newProviderTUIOnTab(cfg, path, tabCustom)
 		m.customIdx = 0
 		persisted, err := m.persistCustomModelName("m2")
 		if err != nil || !persisted {
@@ -53,12 +48,8 @@ func TestPersistCustomModelName(t *testing.T) {
 	t.Run("official tab success", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "config.json")
 		cfg := &Config{}
-		m := newProviderTUI(cfg, path)
-		m.activeTab = tabOfficial
-		provider := m.currentProvider()
-		if provider.Name == "" {
-			t.Skip("no official provider available")
-		}
+		m := newProviderTUIOnTab(cfg, path, tabOfficial)
+		provider := currentProviderOrSkip(t, m)
 		persisted, err := m.persistCustomModelName("my-model")
 		if err != nil || !persisted {
 			t.Fatalf("got (%v, %v), want (true, nil)", persisted, err)
@@ -69,13 +60,8 @@ func TestPersistCustomModelName(t *testing.T) {
 	})
 
 	t.Run("custom tab save failure rolls back", func(t *testing.T) {
-		cfg := &Config{
-			CustomProviders: map[string]ProviderEntry{
-				"cp": {URL: "https://x.example", Protocol: "openai", Models: []string{"m1"}},
-			},
-		}
-		m := newProviderTUI(cfg, unwritableConfigPath(t))
-		m.activeTab = tabCustom
+		cfg := cpConfig()
+		m := newProviderTUIOnTab(cfg, unwritableConfigPath(t), tabCustom)
 		m.customIdx = 0
 		persisted, err := m.persistCustomModelName("m2")
 		if err == nil || persisted {
@@ -88,12 +74,8 @@ func TestPersistCustomModelName(t *testing.T) {
 
 	t.Run("official tab save failure rolls back", func(t *testing.T) {
 		cfg := &Config{}
-		m := newProviderTUI(cfg, unwritableConfigPath(t))
-		m.activeTab = tabOfficial
-		provider := m.currentProvider()
-		if provider.Name == "" {
-			t.Skip("no official provider available")
-		}
+		m := newProviderTUIOnTab(cfg, unwritableConfigPath(t), tabOfficial)
+		provider := currentProviderOrSkip(t, m)
 		persisted, err := m.persistCustomModelName("my-model")
 		if err == nil || persisted {
 			t.Fatalf("got (%v, %v), want (false, error)", persisted, err)
@@ -111,13 +93,8 @@ func TestUpdateCustomModelInput(t *testing.T) {
 	newModel := func(t *testing.T) providerTUIModel {
 		t.Helper()
 		path := filepath.Join(t.TempDir(), "config.json")
-		cfg := &Config{
-			CustomProviders: map[string]ProviderEntry{
-				"cp": {URL: "https://x.example", Protocol: "openai", Models: []string{"m1"}},
-			},
-		}
-		m := newProviderTUI(cfg, path)
-		m.activeTab = tabCustom
+		cfg := cpConfig()
+		m := newProviderTUIOnTab(cfg, path, tabCustom)
 		m.customIdx = 0
 		m.customModel = true
 		return m
@@ -177,8 +154,7 @@ func TestUpdateCustomModelInput(t *testing.T) {
 func TestApplyCreateCustomProvider(t *testing.T) {
 	setup := func(t *testing.T, cfg *Config, path string) providerTUIModel {
 		t.Helper()
-		m := newProviderTUI(cfg, path)
-		m.activeTab = tabCustom
+		m := newProviderTUIOnTab(cfg, path, tabCustom)
 		m.creatingCustom = true
 		m.cpProtocolIdx = 0
 		return m
@@ -374,5 +350,13 @@ func TestConfirmDeleteOfficialModelActiveClear(t *testing.T) {
 	}
 	if cfg.Model == "user-added" {
 		t.Error("active Model should be cleared after deleting the active model")
+	}
+}
+
+func cpConfig() *Config {
+	return &Config{
+		CustomProviders: map[string]ProviderEntry{
+			"cp": {URL: "https://x.example", Protocol: "openai", Models: []string{"m1"}},
+		},
 	}
 }
