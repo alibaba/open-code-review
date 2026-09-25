@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 // unwritableConfigPath returns a config path that is itself a directory, so any
@@ -144,6 +146,57 @@ func TestConfirmDeleteOfficialModel_SaveFailureRollback(t *testing.T) {
 	entry := got.existingCfg.Providers[provider.Name]
 	if !containsStr(entry.Models, userModel) {
 		t.Errorf("rolled-back models = %v, want to contain %q", entry.Models, userModel)
+	}
+}
+
+// modelTUIModel.confirmDeleteModel serves official and custom providers from
+// one body, so a failed save has to roll back whichever config map the
+// provider lives in, along with the active model.
+func TestModelTUIConfirmDeleteModel_SaveFailureRollback(t *testing.T) {
+	for _, custom := range []bool{false, true} {
+		name := "official"
+		if custom {
+			name = "custom"
+		}
+		t.Run(name, func(t *testing.T) {
+			const provider, userModel = "prov", "user-added"
+			entries := map[string]ProviderEntry{provider: {Models: []string{userModel}}}
+			cfg := &Config{Provider: provider, Model: userModel}
+			if custom {
+				cfg.CustomProviders = entries
+			} else {
+				cfg.Providers = entries
+			}
+			m := newModelTUIConfig(modelTUIConfig{
+				Provider:       llm.Provider{Name: provider, DisplayName: "Prov", Models: []string{userModel}},
+				ProviderName:   provider,
+				RegistryModels: []string{"registry-model"},
+				ExistingCfg:    cfg,
+				ConfigPath:     unwritableConfigPath(t),
+				IsCustom:       custom,
+			})
+			m.deleteModelName = userModel
+			m.confirmingDeleteModel = true
+			if !m.isUserAddedModel(userModel) {
+				t.Fatalf("test setup: %q not recognized as user-added", userModel)
+			}
+
+			out, _ := m.confirmDeleteModel()
+			got := out.(modelTUIModel)
+
+			if !strings.Contains(got.formError, "failed to save") {
+				t.Errorf("formError = %q, want save-failure message", got.formError)
+			}
+			if got.savedInSession {
+				t.Error("savedInSession should be false after save failure")
+			}
+			if !containsStr(entries[provider].Models, userModel) {
+				t.Errorf("rolled-back models = %v, want to contain %q", entries[provider].Models, userModel)
+			}
+			if cfg.Model != userModel {
+				t.Errorf("active model = %q, want %q restored", cfg.Model, userModel)
+			}
+		})
 	}
 }
 

@@ -367,7 +367,7 @@ func TestConfirmDeleteOfficialModelActiveClear(t *testing.T) {
 	m.confirmingDeleteModel = true
 	m.deleteModelName = "user-added"
 
-	out, _ := m.confirmDeleteOfficialModel()
+	out, _ := m.confirmDeleteModel()
 	got := out.(modelTUIModel)
 	if !got.savedInSession {
 		t.Fatalf("should persist deletion; formError=%q", got.formError)
