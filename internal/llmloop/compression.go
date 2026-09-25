@@ -6,6 +6,7 @@ package llmloop
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -112,9 +113,9 @@ func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int
 
 	count := 0
 	tokensUsed := 0
-	for i := len(rounds) - 1; i >= 0; i-- {
-		roundTokens := messageTokens(messages[rounds[i].assistantIdx])
-		for _, ti := range rounds[i].toolIdxs {
+	for _, r := range slices.Backward(rounds) {
+		roundTokens := messageTokens(messages[r.assistantIdx])
+		for _, ti := range r.toolIdxs {
 			roundTokens += messageTokens(messages[ti])
 		}
 		if tokensUsed+roundTokens > budget {
