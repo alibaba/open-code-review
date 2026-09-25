@@ -47,8 +47,7 @@ func TestApplyEditCustomProviderSave_RenameReassignsActiveProvider(t *testing.T)
 			"oldname": {URL: "https://example.com/v1", Protocol: "openai"},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, configPath, tabCustom)
 	m.editingCustom = true
 	m.editTargetName = "oldname"
 	m.cpProtocolIdx = 1 // openai
@@ -87,8 +86,7 @@ func TestApplyEditCustomProviderSave_SaveFailureRestoresBackup(t *testing.T) {
 			"aaa": {URL: "https://example.com/v1", Protocol: "openai", Models: []string{"m1"}},
 		},
 	}
-	m := newProviderTUI(cfg, blockPath)
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, blockPath, tabCustom)
 	m.editingCustom = true
 	m.editTargetName = "aaa"
 	m.cpProtocolIdx = 1
