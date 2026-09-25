@@ -76,6 +76,11 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"templates/account.HBS", "Handlebars/Mustache Escaping Boundaries"},
 		{"templates/email.mustache", "Handlebars/Mustache Escaping Boundaries"},
 		{"templates/email.MUSTACHE", "Handlebars/Mustache Escaping Boundaries"},
+
+		{"templates/account.jinja2", "Jinja Escaping Boundaries"},
+		{"templates/email.j2", "Jinja Escaping Boundaries"},
+		{"templates/account.JINJA2", "Jinja Escaping Boundaries"},
+		{"templates/email.J2", "Jinja Escaping Boundaries"},
 		{"templates/account.pug", "Pug Escaping and Output Contexts"},
 		{"templates/account.PUG", "Pug Escaping and Output Contexts"},
 		{"src/main/resources/mapper/usermapper.xml", "SQL Logic Error Detection"},

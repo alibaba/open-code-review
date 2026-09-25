@@ -272,6 +272,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 
 내장 `system_rules.json`에서 고른 패턴을 상대적인 대조 순서대로 아래에 정리했습니다.
 
+
 | 패턴                                | 규칙 문서                                                                        |
 | ----------------------------------- | -------------------------------------------------------------------------------- |
 | `**/*.properties`                   | `properties.md` — i18n / 설정 파일.                                              |
@@ -320,6 +321,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.vy`                           | `vyper.md` — Vyper 스마트 컨트랙트.                                              |
 | `**/*.rego`                         | `rego.md` — Rego 정책 (OPA).                                                     |
 | _(대체값)_                          | `default.md`                                                                     |
+| `**/*.{jinja2,j2}` | `jinja.md` — Jinja 템플릿. |
 
 해석된 규칙 본문은 plan과 main 작업 프롬프트에서 `{{system_rule}}` 자리에 들어갑니다.
 
