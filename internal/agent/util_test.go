@@ -97,6 +97,11 @@ func TestStripMarkdownFences(t *testing.T) {
 			want:  "content",
 		},
 		{
+			name:  "single-line json fence",
+			input: "```json[\"c-0\"]```",
+			want:  `["c-0"]`,
+		},
+		{
 			name:  "empty string",
 			input: "",
 			want:  "",

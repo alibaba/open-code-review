@@ -6,6 +6,7 @@ package diff
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -14,14 +15,7 @@ func TestExcludedDirs(t *testing.T) {
 	if len(dirs) == 0 {
 		t.Fatal("ExcludedDirs should return non-empty list")
 	}
-	found := false
-	for _, d := range dirs {
-		if d == ".git/" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(dirs, ".git/") {
 		t.Error("ExcludedDirs should include .git/")
 	}
 

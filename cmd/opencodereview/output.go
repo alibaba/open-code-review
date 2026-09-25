@@ -187,7 +187,7 @@ func wrapByRunes(text string, maxW int) []string {
 		return nil
 	}
 	var result []string
-	for _, para := range strings.Split(text, "\n") {
+	for para := range strings.SplitSeq(text, "\n") {
 		result = append(result, wrapSingleRuneLine(para, maxW)...)
 	}
 	return result
