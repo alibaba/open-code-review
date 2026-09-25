@@ -961,6 +961,37 @@ func TestResolveDetail_SystemPugPatternMatch(t *testing.T) {
 	}
 }
 
+func TestResolveDetail_SystemScalaPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"Service.scala", "src/main/scala/com/example/Service.scala", "SRC/MAIN/SERVICE.SCALA"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.scala" {
+				t.Errorf("expected pattern '**/*.scala', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Null and Option Safety",
+				"Non-Exhaustive Pattern Matching",
+				"Type Erasure and Unchecked Casts",
+				"Implicit Resolution",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected Scala rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveDetail_SystemGoPatternMatch(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
