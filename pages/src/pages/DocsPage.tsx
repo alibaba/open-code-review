@@ -173,6 +173,12 @@ const DocsPage: React.FC = () => {
     return scrollToFragmentWhenReady(decodeFragment(fragment));
   }, [hash, docContent]);
 
+  useEffect(() => {
+    if (slugParam && !validSlugs.has(slugParam as DocSlug)) {
+      navigate('/docs/quickstart', { replace: true });
+    }
+  }, [slugParam, navigate]);
+
   /* Track active heading via IntersectionObserver */
   useEffect(() => {
     if (headings.length === 0) return;
