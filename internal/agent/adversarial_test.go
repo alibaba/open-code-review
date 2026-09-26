@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -16,11 +17,11 @@ import (
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
-// fakeAdversarialAwareClient tells the standard and the adversarial pass apart
-// by the system-message marker each template carries, and records what the
-// adversarial conversation was actually sent. Every test using it serializes
-// dispatch (MaxConcurrency 1 over one single-file group), so the counters need
-// no locking.
+// fakeAdversarialAwareClient tells the standard pass, the adversarial pass and
+// the review filter apart by the system-message marker each carries, and
+// records what the adversarial conversation was actually sent. Every test
+// using it serializes dispatch (MaxConcurrency 1 over one single-file group),
+// so the counters need no locking.
 type fakeAdversarialAwareClient struct {
 	path       string
 	mainTokens int64
@@ -34,9 +35,24 @@ type fakeAdversarialAwareClient struct {
 	mainCalls          int
 	advCalls           int
 	advLastUserMessage string
+
+	// Filter-call tracking for the baseline-isolation test: the first filter
+	// call approves, every later one reports its first candidate incorrect, so
+	// a removal verdict lands on the pass's own comment rather than an
+	// earlier round's.
+	filterCalls    int
+	filterRequests []string
 }
 
 func (f *fakeAdversarialAwareClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	if len(req.Messages) > 0 && strings.Contains(req.Messages[0].ExtractText(), "review filter") {
+		f.filterCalls++
+		f.filterRequests = append(f.filterRequests, req.Messages[len(req.Messages)-1].ExtractText())
+		if f.filterCalls == 1 {
+			return approveAllCommentsChatResponse(), nil
+		}
+		return reportIncorrectCommentsChatResponse("c-0"), nil
+	}
 	if len(req.Messages) > 0 && strings.Contains(req.Messages[0].ExtractText(), "adversarial review") {
 		f.advCalls++
 		f.advLastUserMessage = req.Messages[len(req.Messages)-1].ExtractText()
@@ -87,6 +103,38 @@ func commentAndDoneChatResponse(path, content string, tokens int64) *llm.ChatRes
 		}},
 		Model: "fake",
 		Usage: &llm.UsageInfo{PromptTokens: tokens, TotalTokens: tokens},
+	}
+}
+
+// approveAllCommentsChatResponse is the filter's approve verdict.
+func approveAllCommentsChatResponse() *llm.ChatResponse {
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{Role: "assistant", ToolCalls: []llm.ToolCall{
+				{ID: "1", Type: "function", Function: llm.FunctionCall{Name: "approve_all_comments", Arguments: "{}"}},
+			}},
+			FinishReason: "tool_calls",
+		}},
+		Model: "fake",
+		Usage: &llm.UsageInfo{},
+	}
+}
+
+// reportIncorrectCommentsChatResponse is the filter's removal verdict, naming
+// candidates by their order in the filter prompt.
+func reportIncorrectCommentsChatResponse(ids ...string) *llm.ChatResponse {
+	args, _ := json.Marshal(struct {
+		CommentIDs []string `json:"comment_ids"`
+	}{CommentIDs: ids})
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{Role: "assistant", ToolCalls: []llm.ToolCall{
+				{ID: "1", Type: "function", Function: llm.FunctionCall{Name: "report_incorrect_comments", Arguments: string(args)}},
+			}},
+			FinishReason: "tool_calls",
+		}},
+		Model: "fake",
+		Usage: &llm.UsageInfo{},
 	}
 }
 
@@ -407,5 +455,80 @@ func TestExecuteGroupAdversarialPass_SkipsWhenPromptOverBudget(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected a token_threshold_exceeded warning from the prompt-size gate")
+	}
+}
+
+// TestDispatchSubtasks_AdversarialPassFiltersOnlyItsOwnComments drives the
+// baseline isolation the SkipFilter tests cannot see: with the filter enabled,
+// the standard round's already-filtered comment is not resubmitted after the
+// adversarial pass, the pass's own comment is the filter's only candidate, and
+// a removal verdict on it keeps it out of the final result.
+func TestDispatchSubtasks_AdversarialPassFiltersOnlyItsOwnComments(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	diffs := makeBudgetDiffs(1)
+	fake := &fakeAdversarialAwareClient{path: diffs[0].NewPath}
+	tpl := adversarialAgentTestTemplate()
+	tpl.MaxReviewRounds = 1
+	tpl.ReviewFilterTask = &template.LlmConversation{
+		Messages: []template.ChatMessage{
+			{Role: "system", Content: "review filter"},
+			{Role: "user", Content: "comments: {{comments}}"},
+		},
+	}
+	// Same construction as newAdversarialTestAgent but with SkipFilter left
+	// false — the filter's LLM call is the subject of this test.
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	a := New(Args{
+		LLMClient:        fake,
+		Model:            "fake",
+		CommentCollector: collector,
+		Tools:            reg,
+		MaxConcurrency:   1,
+		Template:         tpl,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment", Description: "comment"}},
+		},
+	})
+	a.diffs = diffs
+	a.currentDate = "2025-06-26 10:00"
+	a.args.Tools.Freeze()
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+
+	if fake.mainCalls != 1 || fake.advCalls != 1 {
+		t.Fatalf("calls: standard=%d adversarial=%d, want 1 and 1", fake.mainCalls, fake.advCalls)
+	}
+	if len(fake.filterRequests) != 2 {
+		t.Fatalf("filter calls = %d, want 2 (one after the standard round, one after the pass)", len(fake.filterRequests))
+	}
+
+	// The first filter run judges the standard round's comment.
+	if !strings.Contains(fake.filterRequests[0], "missing a nil check here") {
+		t.Errorf("standard round's filter run does not carry the standard comment: %q", fake.filterRequests[0])
+	}
+	// The second filter run judges only the pass's own comment: the standard
+	// comment was already filtered once and must not be resubmitted.
+	if !strings.Contains(fake.filterRequests[1], "potential race condition here") {
+		t.Errorf("adversarial filter run does not carry the pass's comment: %q", fake.filterRequests[1])
+	}
+	if strings.Contains(fake.filterRequests[1], "missing a nil check here") {
+		t.Errorf("standard comment was resubmitted to the filter after the adversarial pass: %q", fake.filterRequests[1])
+	}
+
+	// The removal verdict on the pass's comment stands: only the standard
+	// finding survives into the final result.
+	if len(comments) != 1 || comments[0].Content != "missing a nil check here" {
+		t.Fatalf("comments = %+v, want the standard finding only after the filter removed the adversarial one", comments)
+	}
+
+	fs := a.Session().GetOrCreateFileSession(diffs[0].NewPath)
+	if n := len(fs.TaskRecords[session.ReviewFilterTask]); n != 2 {
+		t.Fatalf("review filter session records = %d, want 2", n)
 	}
 }

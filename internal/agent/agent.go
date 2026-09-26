@@ -1582,10 +1582,13 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 	// Phase 3: adversarial pass — an independent conversation that challenges
 	// the change with the standard pass's findings in hand, hunting for what
 	// the cooperative rounds missed. Runs only after a completed standard
-	// pass (completed is false with no stop only if a future round-loop change
-	// introduces such a path): on a stop the group is already classified, and
-	// re-reviewing it adversarially would mix a failure report with
-	// second-opinion findings.
+	// pass: every loop exit that leaves lastStop nil comes after the
+	// completed = true assignment — the zero-findings and confirmed-cap
+	// breaks sit directly below it, and the round-2+ budget, prompt and
+	// error breaks only run once round 1 has passed it — and nothing resets
+	// completed, so the check here is defensive against a future loop
+	// change. On a stop the group is already classified, and re-reviewing it
+	// adversarially would mix a failure report with second-opinion findings.
 	if lastStop == nil && completed {
 		a.executeGroupAdversarialPass(ctx, g, groupKey, rule, changeFilesExcludingGroup, concatenatedDiffs, confirmed, baseline)
 	}
