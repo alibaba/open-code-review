@@ -248,7 +248,7 @@ func TestCodeSearchProvider_Execute_InvalidPerlRegexp(t *testing.T) {
 	p := NewCodeSearch(fr)
 
 	// An unbalanced parenthesis in PCRE mode causes git grep to fail with exit code 128.
-	// It should return a graceful error message for the model instead of crashing the tool execution.
+	// It should return a graceful error message for the model instead of failing the tool call with a Go error.
 	result, err := p.Execute(context.Background(), map[string]any{
 		"search_text":     "func (unclosed",
 		"use_perl_regexp": true,
@@ -256,8 +256,8 @@ func TestCodeSearchProvider_Execute_InvalidPerlRegexp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected graceful tool error string, but got fatal Go error: %v", err)
 	}
-	if !strings.Contains(result, "Error:") {
-		t.Errorf("expected result to start with Error: message, got: %q", result)
+	if !strings.Contains(result, "Error: invalid regular expression") {
+		t.Errorf("expected result to contain 'Error: invalid regular expression', got: %q", result)
 	}
 }
 
