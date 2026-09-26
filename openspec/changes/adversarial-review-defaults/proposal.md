@@ -2,31 +2,32 @@
 
 ## Why
 
-`ocr review` 的默认 prompt 是中立描述型的:它评审改了什么,但不会主动猎取那些代价高、危险或难以察觉的失效类别(认证与信任边界、数据丢失与不可逆状态、竞态与幂等缺口、依赖降级、迁移隐患、可观测性盲区)。挑战式评审姿态——如 openai/codex-plugin-cc 的 adversarial review 所实现的——正是为猎取这些类别而设计;其实质内容(按优先级排序的攻击面清单、带 grounding 约束的发现实质性门槛、防灌水的校准规则)与 ocr 的客观语气及其 grounded 移除式 filter 相互兼容。把这份实质并入默认 prompt,意味着每一次评审都会主动猎取这些失效类别——不新增 flag、不新增成本旋钮、不改输出契约。
+`ocr review` 的默认评审是合作式中立姿态:主任务 prompt 评审"改了什么",并要求"避免评论正确的代码"。竞态、鉴权缺口、数据丢失与回滚缺失、资源泄漏这类高代价失效,在 diff 里往往表现为"缺失的东西"(没写的锁、判空、回滚),这类问题在该姿态下被系统性低估。多轮回喂已确认发现的机制还会带来反向压力:后续轮次被告知"别重复、再找真问题",容易产出低价值发现凑数。因此把对抗性第二意见作为默认流水线的一部分加入——不新增 flag、不新增配置键。
 
 ## What Changes
 
-- 把对抗性评审的实质内容并入默认评审 system prompt(`internal/config/template/prompts/main_task_system.md`),新增三个小节:
-  - **Review Priorities** — 明确要求评审 agent 主动探查的失效类别清单(认证/权限/租户隔离/信任边界;数据丢失、损坏与不可逆状态;回滚安全、重试、部分失败与幂等;竞态条件、顺序假设与过期状态;空态、null、超时与依赖降级;版本漂移、schema 漂移与迁移隐患;掩盖失效的可观测性缺口)。
-  - **Finding Bar** — 只报实质性发现;每条须回答:会出什么事、为什么这条代码路径脆弱、可能的影响是什么、能降低风险的具体改动;且必须以已评审的 diff 或工具输出为依据,不得虚构文件、行号或代码路径。
-  - **Calibration** — 宁要一条强发现不要多条弱发现;变更确实安全就明说(零发现也是合法结果);后续评审轮次不得为凑数而编造发现。
-- 保持现有客观中立语气、Strict Focus Rules、上下文工具循环、`code_comment` 输出结构(severity/category)、plan 阈值与 filter 阶段不变。
-- CLI 面零变化:不新增 flag、不新增配置键,该姿态默认作用于每一次 `ocr review`。
-- 明确排除:`ocr scan` 模板、规则引擎(`system_rules.json`)、强制开启 plan 阶段、review filter 的改动,以及 ROADMAP 的 "Ultra Mode"(那意味着预算/轮数扩展,仍是独立的规划项)。
+- 新增 `ADVERSARIAL_TASK` 模板会话(`adversarial_task_system.md` + `adversarial_task_user.md`,经 `task_template.json` 清单引用、`go:embed` 加载)。模板字段可选,缺失时静默跳过该 pass。
+- 新增 session task type `adversarial_task`。`internal/llmloop` 把 `RunMainTask` 的函数体重构为共享的 `runConversation`,新增 `RunAdversarialTask` 复用同一套工具循环、轮数上限、grace round 与聚合预算语义,仅会话分桶与 provider 缓存亲和键不同。
+- `ocr review` 流水线为每个文件组新增第三阶段:标准评审(Plan → 主循环)成功完成后,运行一次独立的对抗性对话。输入与主任务相同(system rule、组外变更文件、组内 diff、需求背景),外加标准轮次的确认清单作为"勿重复"上下文;刻意不含 plan 引导。
+- 对抗性会话经同一条 `code_comment` 通道提交评论、进同一个 collector;随后以 `baseline` 边界只对本 pass 新增的评论运行 review filter,标准轮次已过滤的评论不重复送审。
+- 尽力而为契约:聚合 token 预算耗尽、确认发现达到 30 条上限、渲染后 prompt 超过 `max_tokens` 的 80%、LLM 错误或对话中途停止时,只经运行日志与 telemetry 记录原因,不改变组的完成状态或退出码。模板未配置 `ADVERSARIAL_TASK` 时 pass 静默不运行(默认模板恒配置该会话,CLI 无模板覆盖途径,该路径仅库调用可达)。
+- 配套对齐:`ApplyLanguage` 覆盖新会话(pass 产出用户可见评论,必须遵守输出语言配置);retry 报表新增 "Adversarial review" 阶段;`checkPromptBudget` 的 `round int` 参数改为 `phase string`,telemetry 事件 `token.threshold.exceeded` 的属性随之从 `round` 改为 `phase`(注意:按该属性聚合的既有看板需同步调整)。
+- CLI 面零变化:无 flag、无配置键;`--preview` 不执行 LLM 调用,因此不运行该 pass。
 
 ## Capabilities
 
 ### New Capabilities
 
-- `review-prompting`:`ocr review` 的默认评审姿态——评审 agent 必须主动猎取哪些失效类别、每条发现必须满足的实质性门槛、以及保证多轮评审不灌水的校准规则。
+- `review-prompting`:`ocr review` 的对抗性评审 pass 行为契约——何时运行、输入什么、产出如何过滤、失败如何处理,以及输出语言与会话归属约束。
 
 ### Modified Capabilities
 
-(无——这是项目的第一个 spec)
+(无——这是项目的第一个 spec。)
 
 ## Impact
 
-- **代码**:`internal/config/template/prompts/main_task_system.md`(经 `go:embed` 内嵌;`task_template.json` 清单不变)。在 `internal/config/template/template_test.go` 增加轻量内容存在性断言,防止小节被意外删除。
-- **行为**:每次 `ocr review`(`--audience agent` 与 `--audience human` 皆然)都携带新姿态;每个评审组约增加 300–400 prompt token(实现时实测确认),相对 200,000 的 `MAX_TOKENS` 预算可忽略。
-- **不受影响**:`ocr scan`(独立 `scan_template.json`)、delegate 模式、分组/plan 阈值、filter 的 grounded 移除判据、评论输出 schema、插件 SKILL.md 文档、全部 CLI flag。
-- **流程**:按 AGENTS.md,PR 须披露 AI/LLM 使用、commit message 用英文、`make check` 与 `make test` 通过,并在 fixture diff 上做行为前后冒烟,验证更强的发现能在 filter 中存活。
+- **代码**:`internal/agent/agent.go`(`executeGroupAdversarialPass`、`buildAdversarialTaskMessages`、`checkPromptBudget` 参数化)、`internal/llmloop/loop.go`(`runConversation` 抽取与 `RunAdversarialTask`)、`internal/config/template/`(`template.go`、`task_template.json`、`prompts/adversarial_task_system.md`、`prompts/adversarial_task_user.md`)、`internal/session/history.go`、`cmd/opencodereview/output.go`。
+- **测试**:`internal/agent/adversarial_test.go`(7 个用例:正常路径、失败保状态、预算耗尽跳过、模板缺失跳过、对话中途预算停止、确认发现达上限跳过、prompt 超预算跳过)、`internal/config/template/template_test.go`(`TestLoadDefault_AdversarialTask`、`TestApplyLanguage` 扩展)、`cmd/opencodereview/cli_reference_compare_docs_test.go`(5 个语言版本的文档断言)。
+- **文档**:README 及其 4 个本地化版本各加一条特性说明;`cli-reference.md` 5 个语言版本新增对抗性评审小节;`telemetry.md` 5 个语言版本将 `token.threshold.exceeded` 的属性从 `round` 更新为 `phase`("round N" / "adversarial"),并补记 `adversarial.loop` span 与 `adversarial.skipped` / `failed` / `stopped` / `completed` 四个事件。
+- **成本**:每个文件组约多一次完整 agentic 对话;花费计入共享的 `--max-tokens-budget`,预算紧张时会挤占后续文件组的覆盖(表现为覆盖率截断,而非单纯多花钱)。
+- **状态**:实现已在 `performance` 分支落地(提交 6750a1e)。本 change 是回顾式规格:tasks 只剩核对与收尾项,落地后经 `openspec sync` 将 `review-prompting` 同步为项目第一个正式 spec,再 archive。
