@@ -11,6 +11,7 @@ import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.Assume.assumeTrue
 
 class GitMapTest {
 
@@ -370,6 +371,7 @@ class GitMapTest {
 
     @Test
     fun `lists merge commit files relative to the first parent`() {
+        assumeTrue("git is not on PATH", gitAvailable())
         val repo = Files.createTempDirectory("ocr-idea-merge-").toFile()
         try {
             git(repo, "init", "-q")
@@ -403,6 +405,12 @@ class GitMapTest {
             repo.deleteRecursively()
         }
     }
+}
+
+private fun gitAvailable(): Boolean = try {
+    ProcessBuilder("git", "--version").redirectErrorStream(true).start().waitFor() == 0
+} catch (e: java.io.IOException) {
+    false
 }
 
 private fun git(repo: File, vararg args: String): String {
