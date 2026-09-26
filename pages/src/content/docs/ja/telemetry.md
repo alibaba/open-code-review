@@ -85,6 +85,7 @@ review.run
 │   ├── main.loop                          (one span per review round)
 │   │   ├── llm.request
 │   │   └── tool.execute.<tool-name>
+│   ├── adversarial.loop                    (one span per adversarial pass)
 │   └── event.subtask.error                (when the subtask errored)
 ├── subtask.execute.group.<group-key2>
 └── …
@@ -103,6 +104,7 @@ review.run
 | `diff.parse` | `files.changed`、`lines.inserted`、`lines.deleted` |
 | `subtask.execute.group.<group-key>` | `group.label`、`group.file_count`、`lines.changed`、`lines.changed.max_file` |
 | `main.loop` | `group.label`、`round` |
+| `adversarial.loop` | `group.label` |
 | `llm.request` | `llm.model`、`llm.duration_ms`、`llm.total_tokens`、`llm.status` |
 | `tool.execute.<tool-name>` | `tool.name`、`tool.duration_ms`、`tool.status` |
 | `event.review.started` | `file.count`、`review.count`、`repo.dir` |
@@ -110,7 +112,11 @@ review.run
 | `event.grouping.skipped` | `strategy`、`file.count`、`lines.changed`、`threshold.files`、`threshold.lines` |
 | `event.plan.skipped` | `group.label`、`group.file_count`、`lines.changed`、`lines.changed.max_file`、`threshold`、`threshold.group` |
 | `event.plan.failed` | `group.label`、`message` |
-| `event.token.threshold.exceeded` | `group.label`、`tokens`、`max_tokens`、`round` |
+| `event.token.threshold.exceeded` | `group.label`、`tokens`、`max_tokens`、`phase` ("round N" / "adversarial") |
+| `event.adversarial.skipped` | `group.label`、`reason` |
+| `event.adversarial.failed` | `group.label` |
+| `event.adversarial.stopped` | `group.label`、`comments.added`、`stop` |
+| `event.adversarial.completed` | `group.label`、`comments.added` |
 | `event.subtask.error` | `group.label`、`error` |
 
 ### Metric
