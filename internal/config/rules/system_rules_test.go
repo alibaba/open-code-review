@@ -4,9 +4,11 @@
 package rules
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -750,6 +752,33 @@ func TestFileFilter_CaseInsensitive(t *testing.T) {
 	}
 	if !f.IsUserExcluded("pkg/Main.JAVA") {
 		t.Errorf("expected brace-expanded uppercase pattern to match case-insensitively")
+	}
+}
+
+// TestFileFilter_WindowsSeparatorPatternNeverMatches documents the silent
+// failure behind #1463: a pattern typed with Windows backslash separators
+// never matches the slash-separated paths git reports, because doublestar
+// reads '\' as an escape. The fix for #1463 only adds a load-time warning;
+// this matching behavior is deliberately unchanged, and this test pins it so
+// that any future semantic change (for example converting separators) has to
+// confront it consciously.
+func TestFileFilter_WindowsSeparatorPatternNeverMatches(t *testing.T) {
+	broken := &FileFilter{Exclude: []string{`src\gen\*`}}
+	if broken.IsUserExcluded("src/gen/file.go") {
+		t.Errorf("backslash pattern %q unexpectedly matched src/gen/file.go", `src\gen\*`)
+	}
+
+	// What doublestar actually sees: each backslash escapes the next
+	// character, so the pattern degenerates to the literal string "srcgen*"
+	// with no wildcards left, and matches only a path literally named that.
+	if !broken.IsUserExcluded("srcgen*") {
+		t.Errorf("expected pattern %q to degenerate to the literal %q", `src\gen\*`, "srcgen*")
+	}
+
+	// Control: the same pattern with slash separators matches.
+	working := &FileFilter{Exclude: []string{"src/gen/*"}}
+	if !working.IsUserExcluded("src/gen/file.go") {
+		t.Errorf("slash pattern src/gen/* failed to match src/gen/file.go")
 	}
 }
 
@@ -2042,4 +2071,50 @@ func TestLoadGlobalRule(t *testing.T) {
 			t.Errorf("unexpected rule: %+v", pr)
 		}
 	})
+}
+
+func TestBuildFileFilter_WarnsWindowsSeparators(t *testing.T) {
+	var buf bytes.Buffer
+	f := buildFileFilterFor(&buf, "windows", &ProjectRule{
+		Include: []string{`src\win\**`},
+		Exclude: []string{`src\gen\*`, "src/generated/**"},
+	})
+	if f == nil {
+		t.Fatal("expected a non-nil FileFilter")
+	}
+	got := buf.String()
+	for _, want := range []string{`src\win\**`, `src\gen\*`} {
+		if !strings.Contains(got, strconv.Quote(want)) {
+			t.Errorf("expected a warning naming %q, got %q", want, got)
+		}
+	}
+	if strings.Contains(got, "src/generated/**") {
+		t.Errorf("clean pattern should not be warned, got %q", got)
+	}
+	// Behavior is unchanged: patterns are copied into the filter verbatim.
+	if len(f.Include) != 1 || len(f.Exclude) != 2 {
+		t.Errorf("expected patterns copied verbatim, got include=%v exclude=%v", f.Include, f.Exclude)
+	}
+}
+
+func TestBuildFileFilter_NoSeparatorWarningOffWindows(t *testing.T) {
+	var buf bytes.Buffer
+	buildFileFilterFor(&buf, "linux", &ProjectRule{Exclude: []string{`src\gen\*`}})
+	if buf.Len() != 0 {
+		t.Errorf("expected no warning on linux, got %q", buf.String())
+	}
+}
+
+func TestBuildFileFilter_WarnsOnlySelectedLayer(t *testing.T) {
+	var buf bytes.Buffer
+	// The clean custom layer is selected, so the dirty project layer patterns
+	// are inert and must not be warned: warnings follow the same
+	// first-layer-wins rule as the filter itself.
+	buildFileFilterFor(&buf, "windows",
+		&ProjectRule{Exclude: []string{"src/generated/**"}},
+		&ProjectRule{Exclude: []string{`src\gen\*`}},
+	)
+	if strings.Contains(buf.String(), `src\gen\*`) {
+		t.Errorf("inert layer should not be warned, got %q", buf.String())
+	}
 }
