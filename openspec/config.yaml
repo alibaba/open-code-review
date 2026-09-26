@@ -1,0 +1,45 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+context: |
+  Language convention for planning artifacts: every artifact this project
+  produces under openspec/ (proposal.md, specs/**/*.md, design.md, tasks.md)
+  MUST be written in Simplified Chinese. Keep the following verbatim in
+  English: code identifiers, file paths, CLI flags and subcommands, template
+  placeholders, prompt section names coined by a change (for example
+  Review Priorities / Finding Bar / Calibration), test function names, and
+  artifact structural headings and markers, which the tooling parses by
+  literal text (openspec show rejects a proposal without a literal
+  ## Why): proposal ## Why, ## What Changes, ## Capabilities,
+  ### New Capabilities, ### Modified Capabilities, ## Impact; design
+  ## Context, ## Goals / Non-Goals, ## Decisions, ## Risks / Trade-offs,
+  ## Migration Plan; spec ## Purpose, ## ADDED Requirements,
+  ### Requirement:, #### Scenario:, **WHEN**/**THEN**; tasks # Tasks and
+  the checkbox format.
+  Normative keyword mapping: SHALL -> 应, SHALL NOT -> 不得, MUST -> 必须. # allow-non-english: shows artifact authors the exact Chinese normative keywords
+  Rationale: openspec/*.md artifacts are Markdown, which
+  scripts/verify-english-only.go does not scan, so Chinese is CI-safe there;
+  this config and all source files stay English per AGENTS.md.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
