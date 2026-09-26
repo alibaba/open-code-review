@@ -173,12 +173,6 @@ const DocsPage: React.FC = () => {
     return scrollToFragmentWhenReady(decodeFragment(fragment));
   }, [hash, docContent]);
 
-  useEffect(() => {
-    if (slugParam && !validSlugs.has(slugParam as DocSlug)) {
-      navigate('/docs/quickstart', { replace: true });
-    }
-  }, [slugParam, navigate]);
-
   /* Track active heading via IntersectionObserver */
   useEffect(() => {
     if (headings.length === 0) return;
@@ -210,11 +204,17 @@ const DocsPage: React.FC = () => {
     setExpandedItems(prev => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
-  const navigateToDoc = useCallback((slug: DocSlug) => {
-    navigate(`/docs/${slug}`);
+  const navigateToDoc = useCallback((slug: DocSlug, options?: { replace?: boolean }) => {
+    navigate(`/docs/${slug}`, { replace: options?.replace });
     // Scroll page to top
     window.scrollTo(0, 0);
   }, [navigate]);
+
+  useEffect(() => {
+    if (slugParam && !validSlugs.has(slugParam as DocSlug)) {
+      navigateToDoc('quickstart', { replace: true });
+    }
+  }, [slugParam, navigateToDoc]);
 
   /* Intercept clicks on internal doc links and convert to SPA navigation */
   const handleContentClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
