@@ -192,6 +192,11 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/test/**/*.lhs`
 - `**/*Spec.lhs`
 - `**/tests/**/*.nim`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 - `**/tests/**/*.R`
 - `**/__snapshots__/**`
 - `**/*.snap`
@@ -281,7 +286,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.astro`                        | `astro.md`——Astro 组件与 islands。                                    |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                    |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                           |
-| `**/*.{fs,fsi,fsx}`                 | `fsharp.md`——F# 实现、签名和脚本文件。                                           |
+| `**/*.{fs,fsi,fsx}`                 | `fsharp.md`——F# 实现、签名和脚本文件。                                |
 | `**/*.rs`                           | `rust.md`                                                             |
 | `**/*.R`                            | `r.md`                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                              |
@@ -296,6 +301,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.jl`                           | `julia.md`——Julia 源代码。                                            |
 | `**/*.{tf,hcl,tfvars}`              | `terraform.md`——Terraform / HCL。                                     |
 | `**/*.bicep`                        | `bicep.md`——Bicep（Azure）模板。                                      |
+| `**/*.nu`                           | `nushell.md`——Nushell 脚本。                                          |
 | `**/*.elm`                          | `elm.md` - Elm 源代码。                                               |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md`——Jsonnet 配置模板与库。                                  |
 | `**/*.thrift`                       | `thrift.md`——Apache Thrift IDL 线协议兼容性。                         |

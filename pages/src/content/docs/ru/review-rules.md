@@ -217,6 +217,11 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/test/**/*.lhs`
 - `**/*Spec.lhs`
 - `**/tests/**/*.nim`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 - `**/tests/**/*.R`
 - `**/__snapshots__/**`
 - `**/*.snap`
@@ -326,6 +331,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.jl`                           | `julia.md` — исходный код Julia.                                                                 |
 | `**/*.{tf,hcl,tfvars}`              | `terraform.md` — Terraform / HCL.                                                                |
 | `**/*.bicep`                        | `bicep.md` — шаблоны Bicep (Azure).                                                              |
+| `**/*.nu`                           | `nushell.md` — скрипты Nushell.                                                                  |
 | `**/*.elm`                          | `elm.md` - исходный код Elm.                                                                     |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet.                                        |
 | `**/*.thrift`                       | `thrift.md` — совместимость Apache Thrift IDL на уровне wire.                                    |
