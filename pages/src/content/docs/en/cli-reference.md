@@ -114,6 +114,8 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
+| `--no-filter` | — | `false` | Keep all review comments and skip the per-group `REVIEW_FILTER_TASK` LLM post-processing call. |
+| `--no-summary` | — | `false` | Skip the post-run `CHANGE_SUMMARY_TASK`, `IMPACT_ANALYSIS_TASK` and `FLOW_DIAGRAM_TASK` LLM calls. |
 | `--no-filter` | — | `false` | Keep all review comments and skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
@@ -325,6 +327,10 @@ Top-level fields:
 | `summary` | Optional. Run aggregates: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (omitempty), `cache_write_tokens` (omitempty), `elapsed`. Omitted for `skipped` runs. |
 | `comments` | Always present, possibly empty. Per-comment fields are the ones in the example above. |
 | `warnings` | Optional. Present when one or more sub-agents failed; each entry describes the affected file and the error. |
+| `project_summary` | Optional. Scan-mode project-level summary (markdown). Empty for `ocr review`. |
+| `change_summary` | Optional. Review-mode change summary (markdown): intent, modules affected, statistics, key decisions. Produced by the `CHANGE_SUMMARY_TASK` post-run LLM call. Omitted when `--no-summary` is set or the task fails. |
+| `impact_analysis` | Optional. Review-mode business impact analysis (markdown): affected functionality, contract changes, risk assessment, regression-prone areas. Produced by the `IMPACT_ANALYSIS_TASK` post-run LLM call. |
+| `flow_diagram` | Optional. Review-mode Mermaid flow diagram string showing call-chain/data-flow impact and business process before/after. Produced by the `FLOW_DIAGRAM_TASK` post-run LLM call. |
 | `session_id` | Optional. Present on persisted review runs; pass this to `ocr review --resume <session-id>` when retrying compatible range or commit reviews. |
 | `resume` | Optional. Present on resumed runs with `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, and `current_model`. |
 

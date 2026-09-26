@@ -158,6 +158,11 @@ type Args struct {
 	// defines one. Set via the --no-filter CLI flag.
 	SkipFilter bool
 
+	// SkipSummary disables the CHANGE_SUMMARY_TASK, IMPACT_ANALYSIS_TASK and
+	// FLOW_DIAGRAM_TASK even when the template defines them. Set via the
+	// --no-summary CLI flag.
+	SkipSummary bool
+
 	// RuntimeConfig carries the non-secret, allowlisted runtime settings that
 	// identify how this run was configured, for the manifest's
 	// runtime_config_sha256. It is populated by the cmd layer from the resolved
@@ -195,6 +200,14 @@ type Agent struct {
 	budgetExceeded  atomic.Bool // set when a token/tool-call budget gate stopped dispatch
 
 	fileGroups []FileGroup // semantic grouping result, stored for JSON output
+
+	// changeSummary, impactAnalysis and flowDiagram hold the post-run LLM
+	// summaries produced by maybeRunChangeSummary, maybeRunImpactAnalysis and
+	// maybeRunFlowDiagram respectively. Empty when the template has no
+	// corresponding task or SkipSummary is set.
+	changeSummary  string
+	impactAnalysis string
+	flowDiagram    string
 
 	// inputResolution holds this run's frozen commit endpoints (resolved_base/
 	// head/exact_range), and repoRemoteIdentity the credential-free repository
@@ -423,6 +436,15 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// and be discarded wholesale. Cheap in the normal case — every job has
 	// already been cancelled by now.
 	a.runner.WaitBackground()
+
+	// Post-run summary tasks: change summary, impact analysis, and flow
+	// diagram. Each is best-effort: a failure records a warning via
+	// recordWarning and leaves the field empty, without affecting the
+	// review result or exit code.
+	a.maybeRunChangeSummary(ctx)
+	a.maybeRunImpactAnalysis(ctx, comments)
+	a.maybeRunFlowDiagram(ctx, comments)
+
 	// Freeze coverage into the immutable manifest before session_end embeds it,
 	// so the CLI and the persisted session serialize the identical object. A
 	// persistence failure is a delivery error in its own right: when the review
@@ -522,6 +544,21 @@ func (a *Agent) TotalCacheWriteTokens() int64 { return a.runner.TotalCacheWriteT
 // for the diff-review path; defined so *Agent satisfies the
 // cmd/opencodereview.ResultProvider interface that scan.Agent also implements.
 func (a *Agent) ProjectSummary() string { return "" }
+
+// ChangeSummary returns the post-run change summary produced by the
+// CHANGE_SUMMARY_TASK. Empty when the template has no such task, when
+// SkipSummary is set, or when the task failed.
+func (a *Agent) ChangeSummary() string { return a.changeSummary }
+
+// ImpactAnalysis returns the post-run business impact analysis produced by
+// the IMPACT_ANALYSIS_TASK. Empty when the template has no such task, when
+// SkipSummary is set, or when the task failed.
+func (a *Agent) ImpactAnalysis() string { return a.impactAnalysis }
+
+// FlowDiagram returns the post-run Mermaid flow diagram produced by the
+// FLOW_DIAGRAM_TASK. Empty when the template has no such task, when
+// SkipSummary is set, or when the task failed.
+func (a *Agent) FlowDiagram() string { return a.flowDiagram }
 
 // Warnings returns a copy of non-fatal warnings recorded during review.
 func (a *Agent) Warnings() []AgentWarning { return a.runner.Warnings() }
@@ -2207,4 +2244,231 @@ func BuildToolDefs(entries []toolsconfig.ToolConfigEntry, planOnly bool) []llm.T
 		})
 	}
 	return defs
+}
+
+// buildDiffSummary renders a compact, path-anchored summary of all diffs for
+// embedding in post-run summary task prompts. It lists each file with its
+// status (added/modified/deleted/renamed), insertions, deletions, and total
+// counts, in the order they appear in the diffs slice.
+func buildDiffSummary(diffs []model.Diff) string {
+	if len(diffs) == 0 {
+		return "(no files changed)"
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%d file(s) changed, +%d/-%d\n\n", len(diffs), countInsertions(diffs), countDeletions(diffs)))
+	for _, d := range diffs {
+		status := "MODIFIED"
+		switch {
+		case d.IsNew:
+			status = "ADDED"
+		case d.IsDeleted:
+			status = "DELETED"
+		case d.IsRenamed:
+			status = "RENAMED"
+		}
+		sb.WriteString(fmt.Sprintf("- %s   %s (+%d/-%d)\n", status, d.NewPath, d.Insertions, d.Deletions))
+	}
+	return sb.String()
+}
+
+func countInsertions(diffs []model.Diff) int64 {
+	var n int64
+	for _, d := range diffs {
+		n += int64(d.Insertions)
+	}
+	return n
+}
+
+func countDeletions(diffs []model.Diff) int64 {
+	var n int64
+	for _, d := range diffs {
+		n += int64(d.Deletions)
+	}
+	return n
+}
+
+// buildReviewCommentsList renders comments as a compact path-anchored markdown
+// list for embedding in summary task prompts. Content is truncated to bound
+// prompt growth.
+func buildReviewCommentsList(comments []model.LlmComment) string {
+	const maxLine = 280
+	var sb strings.Builder
+	for _, c := range comments {
+		sb.WriteString("- `")
+		sb.WriteString(c.Path)
+		sb.WriteString("`: ")
+		oneLine := strings.ReplaceAll(c.Content, "\n", " ")
+		if len([]rune(oneLine)) > maxLine {
+			oneLine = string([]rune(oneLine)[:maxLine]) + "..."
+		}
+		sb.WriteString(oneLine)
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// maybeRunChangeSummary runs the CHANGE_SUMMARY_TASK over the parsed diffs.
+// Best-effort: any error, empty input, or missing template leaves
+// changeSummary unset.
+func (a *Agent) maybeRunChangeSummary(ctx context.Context) {
+	if a.args.SkipSummary || a.args.Template.ChangeSummaryTask == nil || len(a.args.Template.ChangeSummaryTask.Messages) == 0 {
+		return
+	}
+	if len(a.diffs) == 0 {
+		return
+	}
+	task := a.args.Template.ChangeSummaryTask
+	diffSummary := buildDiffSummary(a.diffs)
+
+	messages := make([]llm.Message, 0, len(task.Messages))
+	for _, m := range task.Messages {
+		content := m.Content
+		content = strings.ReplaceAll(content, "{{diff_summary}}", diffSummary)
+		content = strings.ReplaceAll(content, "{{background}}", a.args.Background)
+		content = strings.ReplaceAll(content, "{{commit_message}}", a.commitMessage(ctx))
+		messages = append(messages, llm.NewTextMessage(m.Role, content))
+	}
+
+	const pathKey = "__review_change_summary__"
+	fs := a.session.GetOrCreateFileSession(pathKey)
+	rec := fs.AppendTaskRecord(session.ChangeSummaryTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.ChangeSummaryTask), pathKey))
+	startTime := time.Now()
+
+	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+		Model:     a.args.Model,
+		Messages:  messages,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
+	})
+	if err != nil {
+		rec.SetError(err, time.Since(startTime))
+		a.recordWarning("summary_error", pathKey, fmt.Sprintf("change summary: %v", err))
+		return
+	}
+	rec.SetResponse(resp, time.Since(startTime))
+	a.runner.RecordUsage(resp.Usage)
+
+	body := strings.TrimSpace(llmloop.StripMarkdownFences(resp.Content()))
+	if body == "" {
+		return
+	}
+	a.changeSummary = body
+}
+
+// maybeRunImpactAnalysis runs the IMPACT_ANALYSIS_TASK over the diffs and
+// collected review comments. Best-effort.
+func (a *Agent) maybeRunImpactAnalysis(ctx context.Context, comments []model.LlmComment) {
+	if a.args.SkipSummary || a.args.Template.ImpactAnalysisTask == nil || len(a.args.Template.ImpactAnalysisTask.Messages) == 0 {
+		return
+	}
+	if len(a.diffs) == 0 {
+		return
+	}
+	task := a.args.Template.ImpactAnalysisTask
+	diffSummary := buildDiffSummary(a.diffs)
+	commentsList := buildReviewCommentsList(comments)
+
+	messages := make([]llm.Message, 0, len(task.Messages))
+	for _, m := range task.Messages {
+		content := m.Content
+		content = strings.ReplaceAll(content, "{{diff_summary}}", diffSummary)
+		content = strings.ReplaceAll(content, "{{background}}", a.args.Background)
+		content = strings.ReplaceAll(content, "{{all_comments}}", commentsList)
+		content = strings.ReplaceAll(content, "{{change_summary}}", a.changeSummary)
+		messages = append(messages, llm.NewTextMessage(m.Role, content))
+	}
+
+	const pathKey = "__review_impact_analysis__"
+	fs := a.session.GetOrCreateFileSession(pathKey)
+	rec := fs.AppendTaskRecord(session.ImpactAnalysisTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.ImpactAnalysisTask), pathKey))
+	startTime := time.Now()
+
+	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+		Model:     a.args.Model,
+		Messages:  messages,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
+	})
+	if err != nil {
+		rec.SetError(err, time.Since(startTime))
+		a.recordWarning("summary_error", pathKey, fmt.Sprintf("impact analysis: %v", err))
+		return
+	}
+	rec.SetResponse(resp, time.Since(startTime))
+	a.runner.RecordUsage(resp.Usage)
+
+	body := strings.TrimSpace(llmloop.StripMarkdownFences(resp.Content()))
+	if body == "" {
+		return
+	}
+	a.impactAnalysis = body
+}
+
+// maybeRunFlowDiagram runs the FLOW_DIAGRAM_TASK to produce a Mermaid flow
+// diagram of the change. Best-effort.
+func (a *Agent) maybeRunFlowDiagram(ctx context.Context, comments []model.LlmComment) {
+	if a.args.SkipSummary || a.args.Template.FlowDiagramTask == nil || len(a.args.Template.FlowDiagramTask.Messages) == 0 {
+		return
+	}
+	if len(a.diffs) == 0 {
+		return
+	}
+	task := a.args.Template.FlowDiagramTask
+	diffSummary := buildDiffSummary(a.diffs)
+	commentsList := buildReviewCommentsList(comments)
+
+	messages := make([]llm.Message, 0, len(task.Messages))
+	for _, m := range task.Messages {
+		content := m.Content
+		content = strings.ReplaceAll(content, "{{diff_summary}}", diffSummary)
+		content = strings.ReplaceAll(content, "{{background}}", a.args.Background)
+		content = strings.ReplaceAll(content, "{{commit_message}}", a.commitMessage(ctx))
+		content = strings.ReplaceAll(content, "{{all_comments}}", commentsList)
+		messages = append(messages, llm.NewTextMessage(m.Role, content))
+	}
+
+	const pathKey = "__review_flow_diagram__"
+	fs := a.session.GetOrCreateFileSession(pathKey)
+	rec := fs.AppendTaskRecord(session.FlowDiagramTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.FlowDiagramTask), pathKey))
+	startTime := time.Now()
+
+	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+		Model:     a.args.Model,
+		Messages:  messages,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
+	})
+	if err != nil {
+		rec.SetError(err, time.Since(startTime))
+		a.recordWarning("summary_error", pathKey, fmt.Sprintf("flow diagram: %v", err))
+		return
+	}
+	rec.SetResponse(resp, time.Since(startTime))
+	a.runner.RecordUsage(resp.Usage)
+
+	// Unlike change_summary and impact_analysis, flow_diagram does NOT strip
+	// markdown fences: the ```mermaid code block is the expected output
+	// format and must be preserved for rendering.
+	body := strings.TrimSpace(resp.Content())
+	if body == "" {
+		return
+	}
+	a.flowDiagram = body
+}
+
+// commitMessage returns the git commit message for the reviewed commit, or
+// empty string when not in commit mode or when git log fails.
+func (a *Agent) commitMessage(ctx context.Context) string {
+	if a.args.Commit == "" {
+		return ""
+	}
+	out, err := a.args.GitRunner.Run(ctx, a.args.RepoDir,
+		"log", "-1", "--format=%B", a.args.Commit)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }

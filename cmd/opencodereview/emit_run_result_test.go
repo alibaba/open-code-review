@@ -32,6 +32,9 @@ type mockResultProvider struct {
 	cacheWriteTokens int64
 	warnings         []agent.AgentWarning
 	projectSummary   string
+	changeSummary    string
+	impactAnalysis   string
+	flowDiagram      string
 	toolCalls        map[string]int64
 	toolFailures     []llmloop.ToolFailureDetail
 	resumeInfo       *agent.ResumeInfo
@@ -49,6 +52,9 @@ func (m *mockResultProvider) TotalCacheReadTokens() int64    { return m.cacheRea
 func (m *mockResultProvider) TotalCacheWriteTokens() int64   { return m.cacheWriteTokens }
 func (m *mockResultProvider) Warnings() []agent.AgentWarning { return m.warnings }
 func (m *mockResultProvider) ProjectSummary() string         { return m.projectSummary }
+func (m *mockResultProvider) ChangeSummary() string          { return m.changeSummary }
+func (m *mockResultProvider) ImpactAnalysis() string         { return m.impactAnalysis }
+func (m *mockResultProvider) FlowDiagram() string            { return m.flowDiagram }
 func (m *mockResultProvider) ToolCalls() map[string]int64    { return m.toolCalls }
 func (m *mockResultProvider) ToolFailures() []llmloop.ToolFailureDetail {
 	return m.toolFailures
