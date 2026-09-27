@@ -806,10 +806,11 @@ runs:
             const roots = [process.env.GITHUB_ACTION_PATH, process.env.GITHUB_WORKSPACE].filter(Boolean);
             const helper = roots.map(r => path.resolve(r, REL)).find(p => fs.existsSync(p));
             if (!helper) throw new Error(`Could not locate ${REL}; searched roots: ${roots.join(', ')}`);
-            const { resolveCheckpointRange, readCheckpointComment } = require(helper);
+            const { resolveCheckpointRange, readCheckpointComment, getAuthenticatedLogin } = require(helper);
 
             const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
             let ruleUnverified = false;
+            const botLogin = await getAuthenticatedLogin(github, core.info);
 
             // `rule` names a JSON file that OCR reads off the workspace at review
             // time (rules.NewResolver only touches disk when the path is non-empty;
@@ -908,10 +909,9 @@ runs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               prNumber: Number(process.env.OCR_PR_NUMBER),
-              // Non-empty only when the token is the default one, whose app
-              // identity is known; empty keeps the wider bot check.
               appSlug: process.env.OCR_CHECKPOINT_APP_SLUG || '',
               log: (m) => core.info(m),
+              botLogin,
             };
             // One read serves both purposes: the range decision, and the verbatim
             // marker the posting step re-emits on a run that does not advance the
