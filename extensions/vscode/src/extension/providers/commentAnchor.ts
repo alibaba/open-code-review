@@ -53,9 +53,7 @@ export interface CommentAnchorDeps {
 }
 
 export function normalizeLine(s: string): string {
-  let line = s.trim();
-  if (line.startsWith('+') || line.startsWith('-')) line = line.slice(1).trim();
-  return line;
+  return s.trim();
 }
 
 export function splitAndNormalize(code: string): string[] {
@@ -65,6 +63,38 @@ export function splitAndNormalize(code: string): string[] {
     if (n) result.push(n);
   }
   return result;
+}
+
+export function splitAndNormalizeDiffSnippet(code: string): string[] {
+  const result: string[] = [];
+  for (const raw of code.split('\n')) {
+    let n = normalizeLine(raw);
+    if (n.startsWith('+') || n.startsWith('-')) n = normalizeLine(n.slice(1));
+    if (n) result.push(n);
+  }
+  return result;
+}
+
+function findNormalizedLines(
+  normalized: string[],
+  lineNums: number[],
+  targetLines: string[],
+): { start: number; end: number } | null {
+  if (targetLines.length === 0 || normalized.length < targetLines.length) return null;
+
+  for (let i = 0; i <= normalized.length - targetLines.length; i++) {
+    let matched = true;
+    for (let j = 0; j < targetLines.length; j++) {
+      if (normalized[i + j] !== targetLines[j]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) {
+      return { start: lineNums[i], end: lineNums[i + targetLines.length - 1] };
+    }
+  }
+  return null;
 }
 
 /** Find existingCode in the file content using a sliding-window match and return 1-based line numbers. */
@@ -81,21 +111,17 @@ export function findLinesByExistingCode(content: string, existingCode: string): 
     normalized.push(n);
     lineNums.push(i + 1);
   }
-  if (normalized.length < targetLines.length) return null;
+  const literalMatch = findNormalizedLines(normalized, lineNums, targetLines);
+  if (literalMatch) return literalMatch;
 
-  for (let i = 0; i <= normalized.length - targetLines.length; i++) {
-    let matched = true;
-    for (let j = 0; j < targetLines.length; j++) {
-      if (normalized[i + j] !== targetLines[j]) {
-        matched = false;
-        break;
-      }
-    }
-    if (matched) {
-      return { start: lineNums[i], end: lineNums[i + targetLines.length - 1] };
-    }
+  const diffStyleTargetLines = splitAndNormalizeDiffSnippet(existingCode);
+  if (
+    targetLines.length === diffStyleTargetLines.length &&
+    targetLines.every((line, index) => line === diffStyleTargetLines[index])
+  ) {
+    return null;
   }
-  return null;
+  return findNormalizedLines(normalized, lineNums, diffStyleTargetLines);
 }
 
 export function resolveLinesInContent(
