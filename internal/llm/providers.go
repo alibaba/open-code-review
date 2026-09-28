@@ -119,6 +119,27 @@ var registry = []Provider{
 		},
 	},
 	{
+		// AnyRouter fronts 200+ models from many upstreams behind one
+		// OpenAI-compatible endpoint, and the catalog turns over faster than a
+		// preset can track — so seed one id per major upstream and price tier and
+		// leave the rest to `ocr config set model <name>`. Every catalog id
+		// answers on /chat/completions, including the anthropic/* ones, so the
+		// gateway's /messages endpoint stays unused.
+		Name:        "anyrouter",
+		DisplayName: "AnyRouter AI Gateway",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://anyrouter.dev/api/v1",
+		EnvVar:      "ANYROUTER_API_KEY",
+		Models: []string{
+			"anthropic/claude-sonnet-4.6",
+			"openai/gpt-5.4",
+			"openai/gpt-5.4-mini",
+			"deepseek/deepseek-v4-pro",
+			"moonshotai/kimi-k3",
+			"z-ai/glm-5.3-flash",
+		},
+	},
+	{
 		Name:        "edenai",
 		DisplayName: "Eden AI",
 		Protocol:    ProtocolOpenAIChatCompletions,

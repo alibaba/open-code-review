@@ -10,7 +10,7 @@ import (
 )
 
 func TestLookupProvider_KnownProviders(t *testing.T) {
-	names := []string{"anthropic", "openai", "openrouter", "dashscope", "edenai"}
+	names := []string{"anthropic", "openai", "openrouter", "anyrouter", "dashscope", "edenai"}
 	for _, name := range names {
 		p, ok := LookupProvider(name)
 		if !ok {
@@ -76,7 +76,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "anyrouter", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -198,6 +198,52 @@ func TestLookupProvider_OpenRouterDetails(t *testing.T) {
 	}
 	if p.EnvVar != "OPENROUTER_API_KEY" {
 		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "OPENROUTER_API_KEY")
+	}
+}
+
+func TestLookupProvider_AnyRouterDetails(t *testing.T) {
+	p, ok := LookupProvider("anyrouter")
+	if !ok {
+		t.Fatal("anyrouter not found")
+	}
+	if p.DisplayName != "AnyRouter AI Gateway" {
+		t.Errorf("DisplayName = %q, want %q", p.DisplayName, "AnyRouter AI Gateway")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://anyrouter.dev/api/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://anyrouter.dev/api/v1")
+	}
+	if p.EnvVar != "ANYROUTER_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "ANYROUTER_API_KEY")
+	}
+	if p.AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
+	}
+	// Model ids carry the upstream prefix, so the picker has to keep the
+	// provider/model form: the gateway routes on it rather than guessing from
+	// a bare model name.
+	expectedModels := []string{
+		"anthropic/claude-sonnet-4.6",
+		"openai/gpt-5.4",
+		"openai/gpt-5.4-mini",
+		"deepseek/deepseek-v4-pro",
+		"moonshotai/kimi-k3",
+		"z-ai/glm-5.3-flash",
+	}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
+	}
+	for _, m := range p.Models {
+		if !strings.Contains(m, "/") {
+			t.Errorf("model %q is not in provider/model form", m)
+		}
 	}
 }
 
