@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -500,6 +501,49 @@ func TestRunSessionCompare_JSONShape(t *testing.T) {
 	}
 }
 
+func TestRunSessionCompare_RenamedFileFindingPersists(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	opts := session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "abc123"}
+
+	before := newCompareSession(t, repoDir, opts, []model.LlmComment{
+		{Path: "old/name.go", StartLine: 7, EndLine: 7, Category: "bug", ExistingCode: "x := 1", Content: "still here"},
+	})
+	before.Finalize()
+	after := newCompareSession(t, repoDir, opts, []model.LlmComment{
+		{Path: "new/name.go", StartLine: 19, EndLine: 19, Category: "bug", ExistingCode: "x := 1", Content: "still here"},
+	})
+	after.SetFinalManifest(&session.RunManifest{
+		SchemaVersion: session.ManifestSchemaVersion,
+		RunID:         after.SessionID,
+		Operation:     session.OperationReview,
+		TerminalState: session.StateComplete,
+		Coverage: session.Coverage{
+			Selected:  []session.CoverageItem{{ItemID: "renamed", Path: "new/name.go", OldPath: "old/name.go"}},
+			Completed: []session.CoverageItem{{ItemID: "renamed", Path: "new/name.go", OldPath: "old/name.go"}},
+		},
+	})
+	after.Finalize()
+
+	useCompareRepo(t, repoDir, true)
+	out := captureStdout(t, func() {
+		if err := runSessionCompare(before.SessionID, after.SessionID); err != nil {
+			t.Fatalf("runSessionCompare: %v", err)
+		}
+	})
+
+	var decoded session.CompareResult
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("unmarshal: %v (out=%q)", err, out)
+	}
+	if len(decoded.New) != 0 || len(decoded.Resolved) != 0 || len(decoded.NotReviewed) != 0 {
+		t.Fatalf("unexpected buckets: %+v", decoded)
+	}
+	if len(decoded.Persisting) != 1 || decoded.Persisting[0].Path != "new/name.go" || decoded.Persisting[0].StartLine != 19 {
+		t.Fatalf("persisting = %+v, want the after copy at new/name.go:19", decoded.Persisting)
+	}
+}
+
 func TestRunSessionCompare_JSONEmptyBucketsAreArrays(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	repoDir := t.TempDir()
@@ -800,5 +844,131 @@ func TestRunSessionCompare_UnfinishedAfterRunIsNotResolved(t *testing.T) {
 	}
 	if len(decoded.NotReviewed) != 1 || decoded.NotReviewed[0].Path != "failed.go" {
 		t.Errorf("not_reviewed = %+v, want only failed.go", decoded.NotReviewed)
+	}
+}
+
+// exportTo runs `session export` against repoDir, writing to a file under
+// t.TempDir(), and returns the file's contents. The command reads its flags
+// from package globals, so they are set and restored here rather than through
+// a cobra round trip.
+func exportTo(t *testing.T, repoDir, sessionID string) (string, error) {
+	t.Helper()
+	out := filepath.Join(t.TempDir(), "session.html")
+
+	prevRepo, prevOut := sessionExportRepoDir, sessionExportOutput
+	t.Cleanup(func() { sessionExportRepoDir, sessionExportOutput = prevRepo, prevOut })
+	sessionExportRepoDir, sessionExportOutput = repoDir, out
+
+	if err := runSessionExport(sessionID); err != nil {
+		return "", err
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read exported file: %v", err)
+	}
+	return string(b), nil
+}
+
+func TestRunSessionExport_WritesFile(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+
+	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
+		ReviewMode: session.ReviewModeCommit,
+		DiffCommit: "abc123",
+	})
+	sh.RecordReviewItemDone("a.go", "a.go", "a.go", "fp-a", []model.LlmComment{{Path: "a.go", Content: "note"}})
+	sh.Finalize()
+
+	body, err := exportTo(t, repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("runSessionExport: %v", err)
+	}
+
+	for _, want := range []string{
+		"<!DOCTYPE html>",
+		sh.SessionID,
+		"--font: -apple-system", // the stylesheet arrived inline
+		"inline-code",           // so did the script
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("exported file missing %q", want)
+		}
+	}
+	// The whole point of the artifact: nothing left to fetch.
+	for _, bad := range []string{"/static/", "ZgotmplZ", `<a href="/`} {
+		if strings.Contains(body, bad) {
+			t.Errorf("exported file is not self-contained, contains %q", bad)
+		}
+	}
+}
+
+// TestRunSessionExport_DefaultsToNewest pins the no-argument form. A successful
+// `ocr review` never prints its session id, so requiring one would push every
+// CI archive step through `--format json`.
+func TestRunSessionExport_DefaultsToNewest(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+
+	older := session.New(repoDir, "main", "test-model", session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "old"})
+	older.RecordReviewItemDone("a.go", "a.go", "a.go", "fp-a", nil)
+	older.Finalize()
+
+	time.Sleep(1100 * time.Millisecond) // StartTime is persisted at second resolution
+
+	newer := session.New(repoDir, "main", "test-model", session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "new"})
+	newer.RecordReviewItemDone("b.go", "b.go", "b.go", "fp-b", nil)
+	newer.Finalize()
+
+	body, err := exportTo(t, repoDir, "")
+	if err != nil {
+		t.Fatalf("runSessionExport: %v", err)
+	}
+	if !strings.Contains(body, newer.SessionID) {
+		t.Errorf("export defaulted to the wrong session; want %s", newer.SessionID)
+	}
+	if strings.Contains(body, older.SessionID) {
+		t.Errorf("export contains the older session id %s", older.SessionID)
+	}
+}
+
+func TestRunSessionExport_Errors(t *testing.T) {
+	tests := []struct {
+		name      string
+		seed      bool // create a session first
+		sessionID string
+		wantErr   string
+	}{
+		{name: "unknown session id", seed: true, sessionID: "no-such-session", wantErr: "no-such-session"},
+		{name: "no sessions at all", seed: false, sessionID: "", wantErr: "no sessions found"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setTestHome(t, t.TempDir())
+			repoDir := t.TempDir()
+			if tt.seed {
+				sh := session.New(repoDir, "main", "m", session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "c"})
+				sh.RecordReviewItemDone("a.go", "a.go", "a.go", "fp", nil)
+				sh.Finalize()
+			}
+
+			out := filepath.Join(t.TempDir(), "session.html")
+			prevRepo, prevOut := sessionExportRepoDir, sessionExportOutput
+			t.Cleanup(func() { sessionExportRepoDir, sessionExportOutput = prevRepo, prevOut })
+			sessionExportRepoDir, sessionExportOutput = repoDir, out
+
+			err := runSessionExport(tt.sessionID)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want it to mention %q", err, tt.wantErr)
+			}
+			// A failed export must not leave a truncated artifact behind.
+			if _, statErr := os.Stat(out); statErr == nil {
+				t.Error("failed export created the output file anyway")
+			}
+		})
 	}
 }

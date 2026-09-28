@@ -58,6 +58,8 @@ default_path    — matched a built-in test-file exclude pattern
 
 ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、diff-provider 層で、`internal/diff/git.go` の `providerDirIgnoreDirs` リストを通じて発生します。これらのディレクトリの diff は解析されたあと除去され、ファイルごとのフィルターに到達することは決してありません。Preview はこれらのファイルを `provider_directory` として報告します。`include` ルールでこれらをレビュー対象に戻すことはできません。
 
+このリストはパスの接頭辞で照合するため、対象は**リポジトリルート**のディレクトリだけです。ネストした同名ディレクトリはファイルごとのフィルターに到達し、`default_path` で除外されます。`vendor/pkg/x.go` は `provider_directory`、`api/vendor/pkg/x.go` は `default_path` として報告され、`include` ルールで戻せるのは後者だけです。
+
 `ocr review --preview` を実行すると、token を消費せずに完全なフィルタリング結果を確認できます。完全なアルゴリズムは[レビュールール](../review-rules/#how-files-are-filtered)を参照してください。
 
 ## セマンティックなファイルグルーピング

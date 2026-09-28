@@ -12,12 +12,12 @@ sidebar:
 OCR 用一条**四层优先级链**解析规则。对每个文件路径，按序尝试各层；第一个匹配
 的模式生效。
 
-| 优先级 | 来源 | 路径 | 说明 |
-|---|---|---|---|
-| 1（最高） | `--rule` 参数 | 用户指定 | CLI 覆盖；只要提供就总是生效。 |
-| 2 | 项目配置 | `<repoDir>/.opencodereview/rule.json` | 项目级规则——可安全提交。 |
-| 3 | 全局配置 | `~/.opencodereview/rule.json` | 用户级偏好。 |
-| 4（最低） | 系统默认 | 内嵌 `system_rules.json` | 覆盖常见语言的内置规则。 |
+| 优先级    | 来源          | 路径                                  | 说明                           |
+| --------- | ------------- | ------------------------------------- | ------------------------------ |
+| 1（最高） | `--rule` 参数 | 用户指定                              | CLI 覆盖；只要提供就总是生效。 |
+| 2         | 项目配置      | `<repoDir>/.opencodereview/rule.json` | 项目级规则——可安全提交。       |
+| 3         | 全局配置      | `~/.opencodereview/rule.json`         | 用户级偏好。                   |
+| 4（最低） | 系统默认      | 内嵌 `system_rules.json`              | 覆盖常见语言的内置规则。       |
 
 若更高优先级层的文件不存在，会被静默跳过——不是错误。因此从未添加
 `.opencodereview/rule.json` 的项目会直接落到全局 / 系统层。
@@ -52,6 +52,61 @@ OCR 用一条**四层优先级链**解析规则。对每个文件路径，按序
 - `rules`——`{path, rule}` 条目数组，按**声明顺序**求值。第一个 `path` glob
   匹配该文件的条目，决定 OCR 发给模型的 prompt。
 
+每个 `rules` 条目还接受一个可选的第三个字段：
+
+- `merge_system_rule`——可选，默认为 `false`。为 `false`（默认）时，匹配到的条目会
+  **替换**该文件的内置系统规则。为 `true` 时，保留匹配到的系统规则，用户规则与
+  之**合并**。
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+配上该条目后，`ocr rules check src/main/java/com/example/UserService.java`
+会同时报告两半：
+
+```
+$ ocr rules check src/main/java/com/example/UserService.java
+Source: Project (.opencodereview/rule.json)
+Pattern: **/*
+Rule:
+────────────────────────────────────────
+## System-Specific Rules (Mandatory)
+
+…contents of java.md…
+
+---
+
+## User-Specific Rules (Mandatory)
+
+Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.
+────────────────────────────────────────
+```
+
+关于合并是如何拼装的，有两点值得知道：
+
+- **系统那一半是按文件解析的**，不是整个运行只解析一次。上面那条是通配条目，
+  但 `.java` 文件得到 `java.md`，`.py` 文件得到 `python.md`，OCR 不认识的扩展名
+  回落到 `default.md`。因此一条条目就能把你的规则加在到处都正确的语言规则之上，
+  无需按扩展名重复书写。
+- 任何一半都可能是空的。如果某个文件的系统层解析结果为空，你只会得到你的规则；
+  如果你的规则文本为空，你只会得到系统规则。这两种情况下另一半都不会被替换成空。
+
+该字段会从全部三个用户层读取——`--rule`、项目的 `.opencodereview/rule.json`，
+以及 `~/.opencodereview/rule.json`。层优先级不变：第一个匹配的条目仍然胜出，
+匹配到的层仍然遮蔽其下的层。
+
+需要牢记的限制：合并只触及**系统**层。如果你自己的两条条目匹配同一个文件，
+靠前的那条仍然完全胜出——`merge_system_rule` 不会把它们彼此合并。
+
 ### glob 能力
 
 OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)
@@ -73,10 +128,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 对每个 diff，OCR 依次问：
 
 1. **`binary`**——文件是二进制吗？排除。
-2. **`secret_exclude`**——旧路径或新路径是否命中内置敏感路径保护？无条件匹配的 glob 模式列在 [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json) 中。若是，排除。
-   此保护在用户规则之前执行，不能被 `include` 模式覆盖。
-
-   环境特定的 `.env.*` 路径会作为敏感路径处理，但 `.env.example`、`.env.sample` 和 `.env.template` 仍按普通审查规则处理。
+2. **`secret_exclude`**——旧路径或新路径是否命中内置敏感路径保护？若是，排除。此保护在用户规则之前执行，不能被 `include` 模式覆盖；模式清单见下文[内置敏感路径](#built-in-secret-paths)。
 
 3. **`user_exclude`**——路径匹配任何用户 `exclude` 模式吗？排除。
 4. **`user_include`**——若用户定义了 `include`，路径匹配吗？若是，**立即保留**
@@ -92,21 +144,41 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 为 `/dev/null` 的文件标记为 `deleted`；没有新内容可评审。用 `ocr review
 --preview` 可在不花 token 的情况下打印此过滤结果。
 
+### 内置敏感路径 {#built-in-secret-paths}
+
+内置的敏感路径不会被审查（见
+[`internal/config/allowlist/default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)）：
+
+- `**/.ssh/**`
+- `**/id_rsa`
+- `**/id_dsa`
+- `**/id_ecdsa`
+- `**/id_ed25519`
+- `**/.netrc`
+- `**/_netrc`
+- `**/.npmrc`
+- `**/.pypirc`
+- `**/.dockercfg`
+
+此外，`.env` 和任何 `.env.*` 变体（`.env.example`、`.env.sample`、`.env.template` 除外）也按敏感路径处理。
+
 ### 默认路径排除
 
 内置排除列表（见
 [`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json)）
-匹配测试文件模式：
+涵盖两组。第一组是各语言的测试文件，以及测试夹具、快照与生成代码：
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
-- `**/src/test/**/*.kt`
+- `**/src/test/**/*.{kt,kts}`
+- `**/*Test.fs`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`
 - `**/test/**/*_test.py`
 - `**/tests/**/*_test.py`
 - `**/*_test.py`
+- `**/test_*.py`
 - `**/*_spec.rb`
 - `**/spec/**/*_spec.rb`
 - `**/*Test.java`
@@ -114,12 +186,67 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/*_test.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
+- `**/test/**/*.jl`
+- `**/test/**/*.hs`
+- `**/*Spec.hs`
+- `**/test/**/*.lhs`
+- `**/*Spec.lhs`
+- `**/tests/**/*.nim`
+- `**/tests/**/*.R`
+- `**/__snapshots__/**`
+- `**/*.snap`
+- `**/testdata/**`
+- `**/fixtures/**`
+- `**/.ipynb_checkpoints/**`
+- `**/*.generated.*`
+- `**/*.gen.go`
+- `**/*.pb.go`
+- `**/*.pb.cc`
+- `**/*.pb.h`
+- `**/*Test.swift`
+- `**/*Tests.swift`
+- `**/Tests/**/*.swift`
+- `**/tests/**/*.elm`
+- `**/vendor/**/*.{jsonnet,libsonnet}`
+- `**/test/**/*.zig`
+- `**/*_test.zig`
+- `**/kitex_gen/**/*.go`
+- `**/*.capnp.h`
+- `**/*.capnp.go`
+- `**/*.capnp.ts`
+- `**/*_capnp.rs`
+- `**/*_capnp.py`
+- `**/test/**/*.ml`
+- `**/tb_*.{v,sv,vhd,vhdl}`
+- `**/*_tb.{v,sv,vhd,vhdl}`
+- `lib/**/*.sol`
+- `**/*.t.sol`
+- `**/test/**/*.sol`
+- `**/tests/**/*.sol`
+- `**/test/**/*.vy`
+- `**/tests/**/*.vy`
 
-噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，位于
-[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)
-的 diff 层，先于 per-file 过滤运行。
+……以及依赖目录和构建产物目录：
 
-要**评审**一个匹配这些测试文件模式的文件，把它加入用户 `include` 列表——那会
+- `**/node_modules/**`
+- `**/bower_components/**`
+- `**/vendor/**`
+- `**/target/**`
+- `**/dist/**`
+- `**/__pycache__/**`, `**/.venv/**`, `**/site-packages/**`
+- `**/Pods/**`, `**/Carthage/**`
+- `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
+
+`**/build/**` 和 `**/bin/**` 有意不在其中：很多项目会把手写源码放在这两个目录下。
+
+同样这些噪声目录在更早的 diff 层也会被过滤，位于
+[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)。
+该列表按路径前缀匹配，因此只能命中**仓库根目录**下的目录：`vendor/pkg/x.go`
+根本不会进入 per-file 过滤，会被报告为 `provider_directory`；而
+`api/vendor/pkg/x.go` 会进入，并由 `default_path` 排除。只有后者可以用
+`include` 规则重新纳入评审。
+
+要**评审**一个匹配上述任一模式的文件，把它加入用户 `include` 列表——那会
 覆盖 default-path 门。
 
 ## 每文件的规则解析
@@ -133,53 +260,54 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 以下是内嵌 `system_rules.json` 的部分模式，按相对匹配顺序排列：
 
-| 模式 | 规则文档 |
-|---|---|
-| `**/*.properties` | `properties.md`——i18n / 配置文件。 |
-| `**/*{mapper,dao}*.xml` | `mapper_dao_xml.md`——MyBatis 风格 mapper SQL。 |
-| `**/pom.xml` | `pom_xml.md`——Maven 依赖。 |
-| `**/build.gradle` | `build_gradle.md`——Gradle 依赖。 |
-| `**/package.json` | `package_json.md`——NPM 依赖 / 脚本。 |
-| `**/Cargo.toml` | `cargo_toml.md`——Rust manifest。 |
-| `**/composer.json` | `composer_json.md`——Composer 依赖、自动加载、脚本、插件和包配置。 |
-| `**/*.{json,json5}` | `json.md`——通用 JSON（也匹配 `.json5`）。 |
-| `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md`——GitHub Actions 工作流 YAML。 |
-| `.github/**/*.{yaml,yml}` | `github_config.md`——其他 `.github` 配置 YAML。 |
-| `**/*.{yaml,yml}` | `yaml.md` |
-| `**/*.java` | `java.md` |
-| `**/*.go` | `go.md`——Go 源代码。 |
-| `**/*.{ftl,ftlh,ftlx}` | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。 |
-| `**/*.{hbs,mustache}` | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。 |
-| `**/*.ets` | `arkts.md`——ArkTS / HarmonyOS。 |
-| `**/*.astro` | `astro.md`——Astro 组件与 islands。 |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt,kts}` | `kotlin.md` |
-| `**/*.rs` | `rust.md` |
-| `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
-| `**/*.c` | `c.md` |
-| `**/*.{py,pyi,ipynb}` | `python.md`——Python 源代码。 |
-| `**/*.{php,phtml}` | `php.md`——PHP 源代码和 PHP 模板。 |
-| `**/*.proto` | `protobuf.md`——Protocol Buffers 线协议兼容性。 |
-| `**/*.po` | `po.md`——gettext 翻译源目录。 |
-| `**/*.pot` | `pot.md`——gettext 模板文件。 |
-| `**/*.{graphql,gql}` | `graphql.md`——GraphQL schema 与操作。 |
-| `**/*.prisma` | `prisma.md`——Prisma schema。 |
-| `**/*.jl` | `julia.md`——Julia 源代码。 |
-| `**/*.{tf,hcl,tfvars}` | `terraform.md`——Terraform / HCL。 |
-| `**/*.bicep` | `bicep.md`——Bicep（Azure）模板。 |
-| `**/*.elm` | `elm.md` - Elm 源代码。 |
-| `**/*.{jsonnet,libsonnet}` | `jsonnet.md`——Jsonnet 配置模板与库。 |
-| `**/*.thrift` | `thrift.md`——Apache Thrift IDL 线协议兼容性。 |
-| `**/*.capnp` | `capnp.md`——Cap'n Proto schema 线协议兼容性。 |
-| `**/*.{v,sv,vh}` | `verilog.md`——Verilog 与 SystemVerilog RTL。 |
-| `**/*.{vhd,vhdl}` | `vhdl.md`——VHDL RTL。 |
-| `**/*.m` | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
-| `**/*.mm` | `objc.md`——Objective-C++ 源代码。 |
-| `**/*.sol` | `solidity.md`——Solidity 智能合约。 |
-| `**/*.vy` | `vyper.md`——Vyper 智能合约。 |
-| `**/*.rego` | `rego.md`——Rego 策略（OPA）。 |
-| *(fallback)* | `default.md` |
+| 模式                                | 规则文档                                                              |
+| ----------------------------------- | --------------------------------------------------------------------- |
+| `**/*.properties`                   | `properties.md`——i18n / 配置文件。                                    |
+| `**/*{mapper,dao}*.xml`             | `mapper_dao_xml.md`——MyBatis 风格 mapper SQL。                        |
+| `**/pom.xml`                        | `pom_xml.md`——Maven 依赖。                                            |
+| `**/build.gradle`                   | `build_gradle.md`——Gradle 依赖。                                      |
+| `**/package.json`                   | `package_json.md`——NPM 依赖 / 脚本。                                  |
+| `**/Cargo.toml`                     | `cargo_toml.md`——Rust manifest。                                      |
+| `**/composer.json`                  | `composer_json.md`——Composer 依赖、自动加载、脚本、插件和包配置。     |
+| `**/*.{json,json5}`                 | `json.md`——通用 JSON（也匹配 `.json5`）。                             |
+| `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md`——GitHub Actions 工作流 YAML。                   |
+| `.github/**/*.{yaml,yml}`           | `github_config.md`——其他 `.github` 配置 YAML。                        |
+| `**/*.{yaml,yml}`                   | `yaml.md`                                                             |
+| `**/*.java`                         | `java.md`                                                             |
+| `**/*.go`                           | `go.md`——Go 源代码。                                                  |
+| `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。          |
+| `**/*.{hbs,mustache}`               | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。               |
+| `**/*.ets`                          | `arkts.md`——ArkTS / HarmonyOS。                                       |
+| `**/*.astro`                        | `astro.md`——Astro 组件与 islands。                                    |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                    |
+| `**/*.{kt,kts}`                     | `kotlin.md`                                                           |
+| `**/*.{fs,fsi,fsx}`                 | `fsharp.md`——F# 实现、签名和脚本文件。                                           |
+| `**/*.rs`                           | `rust.md`                                                             |
+| `**/*.R`                            | `r.md`                                                                |
+| `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                              |
+| `**/*.c`                            | `c.md`                                                                |
+| `**/*.{py,pyi,ipynb}`               | `python.md`——Python 源代码。                                          |
+| `**/*.{php,phtml}`                  | `php.md`——PHP 源代码和 PHP 模板。                                     |
+| `**/*.proto`                        | `protobuf.md`——Protocol Buffers 线协议兼容性。                        |
+| `**/*.po`                           | `po.md`——gettext 翻译源目录。                                         |
+| `**/*.pot`                          | `pot.md`——gettext 模板文件。                                          |
+| `**/*.{graphql,gql}`                | `graphql.md`——GraphQL schema 与操作。                                 |
+| `**/*.prisma`                       | `prisma.md`——Prisma schema。                                          |
+| `**/*.jl`                           | `julia.md`——Julia 源代码。                                            |
+| `**/*.{tf,hcl,tfvars}`              | `terraform.md`——Terraform / HCL。                                     |
+| `**/*.bicep`                        | `bicep.md`——Bicep（Azure）模板。                                      |
+| `**/*.elm`                          | `elm.md` - Elm 源代码。                                               |
+| `**/*.{jsonnet,libsonnet}`          | `jsonnet.md`——Jsonnet 配置模板与库。                                  |
+| `**/*.thrift`                       | `thrift.md`——Apache Thrift IDL 线协议兼容性。                         |
+| `**/*.capnp`                        | `capnp.md`——Cap'n Proto schema 线协议兼容性。                         |
+| `**/*.{v,sv,vh}`                    | `verilog.md`——Verilog 与 SystemVerilog RTL。                          |
+| `**/*.{vhd,vhdl}`                   | `vhdl.md`——VHDL RTL。                                                 |
+| `**/*.m`                            | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
+| `**/*.mm`                           | `objc.md`——Objective-C++ 源代码。                                     |
+| `**/*.sol`                          | `solidity.md`——Solidity 智能合约。                                    |
+| `**/*.vy`                           | `vyper.md`——Vyper 智能合约。                                          |
+| `**/*.rego`                         | `rego.md`——Rego 策略（OPA）。                                         |
+| _(fallback)_                        | `default.md`                                                          |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。
 
@@ -275,6 +403,32 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
   ]
 }
 ```
+
+### 在内置语言规则之上叠加全局安全规则
+
+默认情况下，通配用户规则会**替换**内置的按语言规则，因此为 `**/*` 添加一条条目
+会在各处悄悄丢掉 `java.md`、`python.md` 等等。设置 `merge_system_rule` 即可两者
+兼得：
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+把它放到 `~/.opencodereview/rule.json` 即可应用于每个仓库，或放到
+`<repo>/.opencodereview/rule.json` 只应用于某一个。由于系统那一半是按文件解析的，
+每种语言仍然会在你的规则之外获得自己的内置规则——无需枚举扩展名。
+
+全局文件是三个用户层中**最低**的一层。如果 `--rule` 或项目的
+`.opencodereview/rule.json` 中有条目匹配同一个文件，那条条目会胜出，
+全局规则根本不会被读到——所以这条通配规则只放在一处。
 
 ## 另见
 

@@ -169,7 +169,7 @@ Thanks!
 
 ## License headers
 
-Every source file (`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`) must include an SPDX license header. After creating new files, run:
+Every source file (`.go`, `.js`, `.mjs`, `.ts`, `.tsx`, `.kt`, `.kts`, `.sh`, `.py`, `.css`) must include an SPDX license header. After creating new files, run:
 
 ```bash
 make license-add
