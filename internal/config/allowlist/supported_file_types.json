@@ -111,5 +111,8 @@
   ".vhdl",
   ".sol",
   ".vy",
-  ".rego"
+  ".rego",
+  ".haml",
+  ".slim",
+  ".erb"
 ]

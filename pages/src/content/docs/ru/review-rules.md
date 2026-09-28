@@ -307,6 +307,8 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.go`                           | `go.md` — исходный код Go.                                                                       |
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — шаблоны FreeMarker (SSTI / XSS / обработка null).                              |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — шаблоны Handlebars и Mustache.                                        |
+| `**/*.{haml,slim}`                  | `haml_slim.md` — шаблоны HAML и Slim (SSTI / XSS / экранирование / семантика отступов). |
+| `**/*.erb`                          | `erb.md` — шаблоны ERB (SSTI / XSS / экранирование / пробелы и структура вывода). |
 | `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                                  |
 | `**/*.astro`                        | `astro.md` — компоненты и islands Astro.                                                         |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                               |

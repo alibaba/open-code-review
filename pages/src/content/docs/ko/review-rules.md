@@ -289,6 +289,8 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.go`                           | `go.md` — Go 소스.                                                               |
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — FreeMarker 템플릿(SSTI / XSS / null 처리).                     |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — Handlebars 및 Mustache 템플릿.                        |
+| `**/*.{haml,slim}`                  | `haml_slim.md` — HAML 및 Slim 템플릿(SSTI / XSS / 이스케이프 / 들여쓰기 의미론). |
+| `**/*.erb`                          | `erb.md` — ERB 템플릿(SSTI / XSS / 이스케이프 / 공백 및 출력 구조). |
 | `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                  |
 | `**/*.astro`                        | `astro.md` — Astro 컴포넌트와 아일랜드.                                          |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                               |
