@@ -300,7 +300,7 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
 
 | フィールド | 説明 |
 |---|---|
-| `status` | `complete`、`partial`、`failed`、`skipped`（実行マニフェスト由来）、または `success`、`completed_with_warnings`、`completed_with_errors`（マニフェスト以前のパス）。`skipped` はレビュー対象ファイルがない場合にも使われます。 |
+| `status` | 出力に `manifest` フィールドが含まれる場合はその終端状態（`complete`、`partial`、`failed`、`skipped`）。含まれない場合は `success`、`completed_with_warnings`、`completed_with_errors`。`skipped` はレビュー対象ファイルがない場合にも使われます。 |
 | `llm` | 解決された LLM の識別情報。正規化済みの `model` は常に含まれ、`provider` は名前付きの設定済み provider の場合だけ含まれます。 |
 | `message` | 任意。人間が読みやすいサマリー（例: `"No comments generated. Looks good to me."`）。 |
 | `summary` | 任意。実行の集計: `files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` の実行時は省略されます。 |
