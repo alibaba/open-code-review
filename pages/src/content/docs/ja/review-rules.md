@@ -244,6 +244,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.go`                           | `go.md`: Go ソースコード。                                                                      |
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md`: FreeMarker テンプレート（SSTI / XSS / null 処理）。                            |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md`: Handlebars / Mustache テンプレート。                                  |
+| `**/*.{ejs,liquid,njk}`             | `ejs_liquid_njk.md`: EJS / Liquid / Nunjucks テンプレート（SSTI / XSS / エスケープ）。 |
 | `**/*.ets`                          | `arkts.md`: ArkTS / HarmonyOS。                                                                 |
 | `**/*.astro`                        | `astro.md`: Astro コンポーネントと islands。                                                    |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                              |

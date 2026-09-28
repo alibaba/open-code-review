@@ -111,5 +111,8 @@
   ".vhdl",
   ".sol",
   ".vy",
-  ".rego"
+  ".rego",
+  ".ejs",
+  ".liquid",
+  ".njk"
 ]

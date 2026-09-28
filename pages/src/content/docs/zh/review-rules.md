@@ -277,6 +277,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.go`                           | `go.md`——Go 源代码。                                                  |
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。          |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。               |
+| `**/*.{ejs,liquid,njk}`             | `ejs_liquid_njk.md`——EJS、Liquid 与 Nunjucks 模板（SSTI / XSS / 转义）。 |
 | `**/*.ets`                          | `arkts.md`——ArkTS / HarmonyOS。                                       |
 | `**/*.astro`                        | `astro.md`——Astro 组件与 islands。                                    |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                    |

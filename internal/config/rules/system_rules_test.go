@@ -961,6 +961,42 @@ func TestResolveDetail_SystemPugPatternMatch(t *testing.T) {
 	}
 }
 
+func TestResolveDetail_SystemEjsLiquidNjkPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{
+		"views/users/index.ejs",
+		"snippets/card.liquid",
+		"templates/account/profile.njk",
+		"VIEWS/USERS/INDEX.EJS",
+	} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.{ejs,liquid,njk}" {
+				t.Errorf("expected pattern '**/*.{ejs,liquid,njk}', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Escaping and Output Contexts",
+				"server-side template injection",
+				"Template Trust, Evaluation, and Side Effects",
+				"Accessibility",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected EJS/Liquid/Nunjucks rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveDetail_SystemGoPatternMatch(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
