@@ -304,7 +304,7 @@ ocr review --format json | jq .summary   # stdout — единый JSON-доку
 
 | Поле | Примечания |
 |---|---|
-| `status` | `success`, `completed_with_warnings`, `completed_with_errors` или `skipped`. |
+| `status` | `complete`, `partial`, `failed`, `skipped` (из манифеста запуска) или `success`, `completed_with_warnings`, `completed_with_errors` на пути до манифеста. `skipped` также используется, когда нет файлов для ревью. |
 | `message` | Необязательно. Сводка для чтения человеком, например, `"No comments generated. Looks good to me."`. |
 | `summary` | Необязательно. Сводные показатели запуска: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (omitempty), `cache_write_tokens` (omitempty), `elapsed`. Отсутствует у запусков со статусом `skipped`. |
 | `comments` | Присутствует всегда, но может быть пустым. Поля комментария показаны в примере выше. |

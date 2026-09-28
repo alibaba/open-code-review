@@ -299,7 +299,7 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
 
 | 字段 | 说明 |
 |---|---|
-| `status` | `success`、`completed_with_warnings`、`completed_with_errors` 或 `skipped`。 |
+| `status` | `complete`、`partial`、`failed`、`skipped`（来自运行 manifest），或 `success`、`completed_with_warnings`、`completed_with_errors`（无 manifest 的旧路径）。`skipped` 也用于没有可评审文件的情况。 |
 | `llm` | 实际解析的 LLM 标识。规范化后的 `model` 始终存在；`provider` 仅在使用已命名的配置 provider 时存在。 |
 | `message` | 可选。人类可读摘要，如 `"No comments generated. Looks good to me."`。 |
 | `summary` | 可选。运行聚合：`files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` 运行时省略。 |

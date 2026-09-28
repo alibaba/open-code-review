@@ -313,7 +313,7 @@ ocr review --format json | jq .summary   # stdout은 JSON 문서 하나입니다
 
 | 필드 | 설명 |
 |---|---|
-| `status` | `success`, `completed_with_warnings`, `completed_with_errors`, `skipped` 중 하나입니다. |
+| `status` | `complete`, `partial`, `failed`, `skipped`(실행 매니페스트 기준) 또는 `success`, `completed_with_warnings`, `completed_with_errors`(매니페스트 이전 경로). `skipped`는 리뷰할 파일이 없는 경우에도 사용됩니다. |
 | `llm` | 해석된 LLM 정보입니다. 정규화한 `model`은 항상 있고, `provider`는 이름이 있는 설정된 프로바이더일 때만 나옵니다. |
 | `message` | 선택. 사람이 읽는 요약입니다(예: `"No comments generated. Looks good to me."`). |
 | `summary` | 선택. 실행 집계입니다: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens`(omitempty), `cache_write_tokens`(omitempty), `elapsed`. `skipped` 실행에서는 나오지 않습니다. |

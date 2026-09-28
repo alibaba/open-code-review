@@ -319,7 +319,7 @@ Top-level fields:
 
 | Field | Notes |
 |---|---|
-| `status` | `success`, `completed_with_warnings`, `completed_with_errors`, or `skipped`. |
+| `status` | `complete`, `partial`, `failed`, `skipped` (from the run manifest), or `success`, `completed_with_warnings`, `completed_with_errors` on the pre-manifest path. `skipped` also covers the no-supported-files case. |
 | `llm` | Resolved LLM identity. The normalized `model` is always present; `provider` is present only for a named configured provider. |
 | `message` | Optional. Human-readable summary, e.g. `"No comments generated. Looks good to me."`. |
 | `summary` | Optional. Run aggregates: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (omitempty), `cache_write_tokens` (omitempty), `elapsed`. Omitted for `skipped` runs. |
