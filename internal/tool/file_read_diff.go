@@ -117,9 +117,8 @@ outer:
 	}
 
 	var sb strings.Builder
+	// file_read prints the marker unconditionally; here it is omitted when false.
 	if truncated {
-		// Only flagged when true: an untruncated result carries no marker line,
-		// keeping the common case byte-identical to the pre-cap output.
 		sb.WriteString("IS_TRUNCATED: true\n")
 	}
 	sb.WriteString(content.String())
