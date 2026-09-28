@@ -198,7 +198,6 @@ hunk 머리글 `@@ -x,y +m,n @@`에서 범위를 계산해야 합니다. 보통 
 ### 출력 {#output}
 
 ```
-IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -218,10 +217,10 @@ IS_TRUNCATED: false
 있으면 `Error: no files found`를 반환합니다.
 
 호출당 최대 500줄의 diff가 돌아오며, 요청한 순서대로 모든 파일에 걸쳐 셉니다(파일
-헤더는 세지 않습니다). 남은 내용이 있으면 `IS_TRUNCATED`가 `true`가 되고, 다음
-페이지에서 넘길 `start_line`을 알려주는 안내가 끝에 붙습니다. 같은 `path_array`와
-함께 전달하세요. 마지막 diff 줄을 넘는 `start_line`은 전체 줄 수를 알려주는 오류를
-반환합니다.
+헤더는 세지 않습니다). 남은 내용이 있으면 결과 앞에 `IS_TRUNCATED: true` 줄이 붙고,
+다음 페이지에서 넘길 `start_line`을 알려주는 안내가 끝에 붙습니다. 같은
+`path_array`와 함께 전달하세요. 잘리지 않으면 이 표시 줄은 나오지 않습니다.
+마지막 diff 줄을 넘는 `start_line`은 전체 줄 수를 알려주는 오류를 반환합니다.
 
 ## `file_find` {#filefind}
 

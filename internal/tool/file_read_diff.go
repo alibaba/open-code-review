@@ -117,7 +117,11 @@ outer:
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "IS_TRUNCATED: %t\n", truncated)
+	if truncated {
+		// Only flagged when true: an untruncated result carries no marker line,
+		// keeping the common case byte-identical to the pre-cap output.
+		sb.WriteString("IS_TRUNCATED: true\n")
+	}
 	sb.WriteString(content.String())
 	if truncated {
 		fmt.Fprintf(&sb, "\nNote: Results truncated to %d lines. Call file_read_diff again with the same path_array and start_line=%d to read the rest.\n", fileReadDiffMaxLines, skip+shown+1)

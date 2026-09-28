@@ -186,7 +186,6 @@ hunk ヘッダー `@@ -x,y +m,n @@` から範囲を計算すべきです——�
 ### 出力
 
 ```
-IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -206,9 +205,10 @@ IS_TRUNCATED: false
 `Error: no files found` を返します。
 
 1 回の呼び出しで返る diff は最大 500 行で、要求された順に全ファイルを通して
-数えます（ファイルヘッダーは数えません）。残りがある場合、`IS_TRUNCATED` は
-`true` になり、次のページで渡す `start_line` を示す注記が末尾に追記されます——
-同じ `path_array` と併せて指定してください。最後の diff 行を超える `start_line`
+数えます（ファイルヘッダーは数えません）。残りがある場合、結果の先頭に
+`IS_TRUNCATED: true` 行が付き、次のページで渡す `start_line` を示す注記が末尾に
+追記されます——同じ `path_array` と併せて指定してください。切り詰めがなければ
+このマーク行は出力されません。最後の diff 行を超える `start_line`
 は、総行数を示すエラーを返します。
 
 ## `file_find`

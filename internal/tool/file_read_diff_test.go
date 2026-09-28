@@ -85,8 +85,8 @@ func TestFileReadDiffProvider_Execute(t *testing.T) {
 				}
 				return
 			}
-			if !strings.HasPrefix(got, "IS_TRUNCATED: false\n") {
-				t.Errorf("got %q, want starting with 'IS_TRUNCATED: false\\n'", got)
+			if strings.Contains(got, "IS_TRUNCATED") {
+				t.Errorf("got %q, want no IS_TRUNCATED line in an untruncated result", got)
 			}
 			if !strings.Contains(got, tt.wantSub) {
 				t.Errorf("got %q, want containing %q", got, tt.wantSub)
@@ -138,8 +138,8 @@ func TestFileReadDiffProvider_Execute_Truncation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasPrefix(got, "IS_TRUNCATED: false\n") {
-			t.Errorf("expected IS_TRUNCATED: false prefix, got:\n%s", got)
+		if strings.Contains(got, "IS_TRUNCATED") {
+			t.Errorf("expected no IS_TRUNCATED line, got:\n%s", got)
 		}
 		if strings.Contains(got, "Note: Results truncated") {
 			t.Errorf("unexpected footer note in exact 500 lines output")
@@ -183,8 +183,8 @@ func TestFileReadDiffProvider_Execute_Truncation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasPrefix(got, "IS_TRUNCATED: false\n") {
-			t.Errorf("expected IS_TRUNCATED: false, got:\n%s", got)
+		if strings.Contains(got, "IS_TRUNCATED") {
+			t.Errorf("expected no IS_TRUNCATED line, got:\n%s", got)
 		}
 		if !strings.Contains(got, "==== FILE: valid.go ====") {
 			t.Errorf("expected valid.go output present")
@@ -209,40 +209,39 @@ func TestFileReadDiffProvider_Execute_Pagination(t *testing.T) {
 	p := NewFileReadDiff(dm)
 
 	tests := []struct {
-		name        string
-		paths       []any
-		startLine   any // nil means the arg is omitted
-		wantPrefix  string
-		wantHeaders []string
-		wantBody    []string // first and last diff line of the page
-		wantCount   int
-		wantNote    string // empty means no truncation note
-		wantExact   string // compare the whole output instead
+		name          string
+		paths         []any
+		startLine     any // nil means the arg is omitted
+		wantTruncated bool
+		wantHeaders   []string
+		wantBody      []string // first and last diff line of the page
+		wantCount     int
+		wantNote      string // empty means no truncation note
+		wantExact     string // compare the whole output instead
 	}{
 		{
-			name:        "first page of a single file over 500 lines",
-			paths:       []any{"big.go"},
-			wantPrefix:  "IS_TRUNCATED: true\n",
-			wantHeaders: []string{"big.go"},
-			wantBody:    []string{"big 1", "big 500"},
-			wantCount:   500,
-			wantNote:    "start_line=501",
+			name:          "first page of a single file over 500 lines",
+			paths:         []any{"big.go"},
+			wantTruncated: true,
+			wantHeaders:   []string{"big.go"},
+			wantBody:      []string{"big 1", "big 500"},
+			wantCount:     500,
+			wantNote:      "start_line=501",
 		},
 		{
-			name:        "second page continues where the first stopped",
-			paths:       []any{"big.go"},
-			startLine:   float64(501),
-			wantPrefix:  "IS_TRUNCATED: true\n",
-			wantHeaders: []string{"big.go"},
-			wantBody:    []string{"big 501", "big 1000"},
-			wantCount:   500,
-			wantNote:    "start_line=1001",
+			name:          "second page continues where the first stopped",
+			paths:         []any{"big.go"},
+			startLine:     float64(501),
+			wantTruncated: true,
+			wantHeaders:   []string{"big.go"},
+			wantBody:      []string{"big 501", "big 1000"},
+			wantCount:     500,
+			wantNote:      "start_line=1001",
 		},
 		{
 			name:        "last page is not truncated",
 			paths:       []any{"big.go"},
 			startLine:   float64(1001),
-			wantPrefix:  "IS_TRUNCATED: false\n",
 			wantHeaders: []string{"big.go"},
 			wantBody:    []string{"big 1001", "big 1200"},
 			wantCount:   200,
@@ -257,25 +256,23 @@ func TestFileReadDiffProvider_Execute_Pagination(t *testing.T) {
 			name:        "non-positive start_line reads from the beginning",
 			paths:       []any{"a.go"},
 			startLine:   float64(0),
-			wantPrefix:  "IS_TRUNCATED: false\n",
 			wantHeaders: []string{"a.go"},
 			wantBody:    []string{"a 1", "a 300"},
 			wantCount:   300,
 		},
 		{
-			name:        "multi-file first page stops inside the second file",
-			paths:       []any{"a.go", "b.go"},
-			wantPrefix:  "IS_TRUNCATED: true\n",
-			wantHeaders: []string{"a.go", "b.go"},
-			wantBody:    []string{"a 1", "b 200"},
-			wantCount:   500,
-			wantNote:    "start_line=501",
+			name:          "multi-file first page stops inside the second file",
+			paths:         []any{"a.go", "b.go"},
+			wantTruncated: true,
+			wantHeaders:   []string{"a.go", "b.go"},
+			wantBody:      []string{"a 1", "b 200"},
+			wantCount:     500,
+			wantNote:      "start_line=501",
 		},
 		{
 			name:        "multi-file second page skips the finished file",
 			paths:       []any{"a.go", "b.go"},
 			startLine:   float64(501),
-			wantPrefix:  "IS_TRUNCATED: false\n",
 			wantHeaders: []string{"b.go"},
 			wantBody:    []string{"b 201", "b 300"},
 			wantCount:   100,
@@ -284,7 +281,6 @@ func TestFileReadDiffProvider_Execute_Pagination(t *testing.T) {
 			name:        "multi-file page starting on a file boundary",
 			paths:       []any{"a.go", "b.go"},
 			startLine:   float64(301),
-			wantPrefix:  "IS_TRUNCATED: false\n",
 			wantHeaders: []string{"b.go"},
 			wantBody:    []string{"b 1", "b 300"},
 			wantCount:   300,
@@ -293,19 +289,19 @@ func TestFileReadDiffProvider_Execute_Pagination(t *testing.T) {
 			// The budget runs out exactly as a file ends, with another file
 			// still to come: the next file must not get a header it has no
 			// room to fill.
-			name:        "page ending on a file boundary omits the next file's header",
-			paths:       []any{"big.go", "a.go"},
-			startLine:   float64(701),
-			wantPrefix:  "IS_TRUNCATED: true\n",
-			wantHeaders: []string{"big.go"},
-			wantBody:    []string{"big 701", "big 1200"},
-			wantCount:   500,
-			wantNote:    "start_line=1201",
+			name:          "page ending on a file boundary omits the next file's header",
+			paths:         []any{"big.go", "a.go"},
+			startLine:     float64(701),
+			wantTruncated: true,
+			wantHeaders:   []string{"big.go"},
+			wantBody:      []string{"big 701", "big 1200"},
+			wantCount:     500,
+			wantNote:      "start_line=1201",
 		},
 		{
 			name:      "found file with an empty diff is listed, not reported missing",
 			paths:     []any{"empty.go"},
-			wantExact: "IS_TRUNCATED: false\n==== FILE: empty.go ====\n",
+			wantExact: "==== FILE: empty.go ====\n",
 		},
 	}
 
@@ -325,8 +321,12 @@ func TestFileReadDiffProvider_Execute_Pagination(t *testing.T) {
 				}
 				return
 			}
-			if !strings.HasPrefix(got, tt.wantPrefix) {
-				t.Errorf("got prefix %q, want %q", strings.SplitN(got, "\n", 2)[0], tt.wantPrefix)
+			if tt.wantTruncated {
+				if !strings.HasPrefix(got, "IS_TRUNCATED: true\n") {
+					t.Errorf("got prefix %q, want 'IS_TRUNCATED: true'", strings.SplitN(got, "\n", 2)[0])
+				}
+			} else if strings.Contains(got, "IS_TRUNCATED") {
+				t.Errorf("unexpected IS_TRUNCATED line in:\n%s", got)
 			}
 			var headers, body []string
 			for _, line := range strings.Split(got, "\n") {

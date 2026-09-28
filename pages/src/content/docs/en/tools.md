@@ -213,7 +213,6 @@ useful when a comment hinges on whether a related file was updated.
 ### Output
 
 ```
-IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -234,9 +233,10 @@ If a path isn't in the change set, that entry is silently omitted. If
 returns `Error: no files found`.
 
 At most 500 diff lines come back per call, counted across all requested
-files in order (file headers don't count). When more remain,
-`IS_TRUNCATED` is `true` and a closing note gives the `start_line` to
-pass, with the same `path_array`, for the next page. A `start_line`
+files in order (file headers don't count). When more remain, the result
+starts with an `IS_TRUNCATED: true` line and a closing note gives the
+`start_line` to pass, with the same `path_array`, for the next page; a
+result within the budget carries no marker line. A `start_line`
 beyond the last diff line returns an error naming the total.
 
 ## `file_find`

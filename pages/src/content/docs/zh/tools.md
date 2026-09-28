@@ -185,7 +185,6 @@ hunk 头 `@@ -x,y +m,n @@` 计算范围——通常 `m-50` 到 `m+n+50`。
 ### 输出
 
 ```
-IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -205,9 +204,9 @@ IS_TRUNCATED: false
 `Error: no files found`。
 
 每次调用最多返回 500 行 diff，按请求顺序跨所有文件累计（文件头不计入）。若仍有
-剩余，`IS_TRUNCATED` 为 `true`，并在末尾追加一条提示，给出下一页应传的
-`start_line`——需配合相同的 `path_array` 使用。`start_line` 超过最后一行 diff 时
-返回错误并给出总行数。
+剩余，结果开头会出现 `IS_TRUNCATED: true` 行，并在末尾追加一条提示，给出下一页
+应传的 `start_line`——需配合相同的 `path_array` 使用；未截断时不输出该标记行。
+`start_line` 超过最后一行 diff 时返回错误并给出总行数。
 
 ## `file_find`
 
