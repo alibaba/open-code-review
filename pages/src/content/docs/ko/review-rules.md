@@ -56,6 +56,64 @@ OCR은 **네 겹의 우선순위 사슬**로 규칙을 해석합니다. 파일 �
 - `rules` — `{path, rule}` 항목의 배열이며 **선언 순서대로** 평가합니다. 파일에
   처음 일치하는 `path`가 그 파일을 리뷰할 때 OCR이 모델에 보낼 프롬프트를 정합니다.
 
+각 `rules` 항목은 세 번째 선택 필드도 받습니다.
+
+- `merge_system_rule` — 선택, 기본값 `false`. `false`(기본값)면 일치한 항목이 그
+  파일의 내장 시스템 규칙을 **대체**합니다. `true`면 일치한 시스템 규칙이 유지되고
+  사용자 규칙과 **합쳐**집니다.
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+이 항목을 두면 `ocr rules check src/main/java/com/example/UserService.java`가
+두 절반을 모두 보고합니다.
+
+```
+$ ocr rules check src/main/java/com/example/UserService.java
+Source: Project (.opencodereview/rule.json)
+Pattern: **/*
+Rule:
+────────────────────────────────────────
+## System-Specific Rules (Mandatory)
+
+…contents of java.md…
+
+---
+
+## User-Specific Rules (Mandatory)
+
+Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.
+────────────────────────────────────────
+```
+
+합쳐진 결과가 어떻게 만들어지는지 알아둘 점이 두 가지 있습니다.
+
+- **시스템 쪽 절반은 파일마다** 해석됩니다. 실행당 한 번이 아닙니다. 위 항목은
+  전역을 덮는 하나지만, `.java` 파일은 `java.md`를, `.py` 파일은 `python.md`를,
+  OCR이 인식하지 못하는 확장자는 `default.md`를 받습니다. 따라서 항목 하나로
+  확장자를 일일이 나열하지 않고도 어디서나 알맞은 언어 규칙 위에 내 규칙을 얹을 수
+  있습니다.
+- 어느 쪽이든 비어 있을 수 있습니다. 어떤 파일의 시스템 층이 빈 것으로 해석되면
+  내 규칙만 받습니다. 내 규칙 텍스트가 비어 있으면 시스템 규칙만 받습니다. 어느
+  경우도 다른 절반이 빈 값으로 대체되지는 않습니다.
+
+이 필드는 사용자 층 세 곳 — `--rule`, 프로젝트의 `.opencodereview/rule.json`,
+`~/.opencodereview/rule.json` — 모두에서 읽힙니다. 층 우선순위는 그대로입니다. 처음
+일치한 항목이 여전히 이기고, 일치한 층이 여전히 아래 층을 가립니다.
+
+기억해 둘 제약: 합침은 **시스템** 층에만 미칩니다. 내 항목 두 개가 같은 파일에
+일치하면 앞선 항목이 여전히 완전히 이깁니다. `merge_system_rule`는 그것들을 서로
+합치지 않습니다.
+
 ### glob 기능 {#glob-features}
 
 OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)로
@@ -360,6 +418,33 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
   ]
 }
 ```
+
+### 내장 언어 규칙 위에 얹는 전역 보안 규칙
+
+전역 사용자 규칙은 기본적으로 내장 언어별 규칙을 **대체**하므로, `**/*`에 항목을
+하나 추가하면 여기저기서 `java.md`, `python.md` 등이 조용히 사라집니다.
+`merge_system_rule`를 켜면 둘 다 유지됩니다.
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+모든 저장소에 적용하려면 `~/.opencodereview/rule.json`에, 하나에만 적용하려면
+`<repo>/.opencodereview/rule.json`에 저장하세요. 시스템 쪽 절반은 파일마다
+해석되므로, 각 언어는 내 규칙과 함께 자기 내장 규칙을 그대로 받습니다. 확장자를
+나열할 필요가 없습니다.
+
+전역 파일은 세 사용자 계층 중 **가장 낮은** 계층입니다. `--rule` 또는 프로젝트의
+`.opencodereview/rule.json`에 같은 파일에 맞는 항목이 있으면 그 항목이 이겨서
+전역 항목은 아예 읽히지 않습니다 — 포괄 항목은 한 곳에만 두세요.
 
 ## 관련 문서 {#see-also}
 

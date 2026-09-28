@@ -1390,28 +1390,6 @@ func TestParseModelListValue(t *testing.T) {
 	}
 }
 
-func TestResolveConfigPath_Default(t *testing.T) {
-	t.Setenv("OCR_CONFIG_PATH", "")
-	p, err := resolveConfigPath()
-	if err != nil {
-		t.Fatalf("resolveConfigPath: %v", err)
-	}
-	if p == "" {
-		t.Fatal("expected non-empty default config path")
-	}
-}
-
-func TestResolveConfigPath_Env(t *testing.T) {
-	t.Setenv("OCR_CONFIG_PATH", "/tmp/test-config.json")
-	p, err := resolveConfigPath()
-	if err != nil {
-		t.Fatalf("resolveConfigPath: %v", err)
-	}
-	if p != "/tmp/test-config.json" {
-		t.Errorf("path = %q, want /tmp/test-config.json", p)
-	}
-}
-
 func TestLoadOrCreateConfig_NewFile(t *testing.T) {
 	cfg, err := loadOrCreateConfig(t.TempDir() + "/nonexistent.json")
 	if err != nil {

@@ -59,6 +59,68 @@ Three independent fields:
   order**. The first `path` whose glob matches the file determines the
   prompt OCR sends to the model for that file.
 
+Each `rules` entry also accepts an optional third field:
+
+- `merge_system_rule` — optional, defaults to `false`. When `false`
+  (the default), a matching entry **replaces** the built-in system rule
+  for that file. When `true`, the matched system rule is kept and the
+  user rule is **combined** with it.
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+With that entry in place, `ocr rules check src/main/java/com/example/UserService.java`
+reports both halves:
+
+```
+$ ocr rules check src/main/java/com/example/UserService.java
+Source: Project (.opencodereview/rule.json)
+Pattern: **/*
+Rule:
+────────────────────────────────────────
+## System-Specific Rules (Mandatory)
+
+…contents of java.md…
+
+---
+
+## User-Specific Rules (Mandatory)
+
+Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.
+────────────────────────────────────────
+```
+
+Two things are worth knowing about how the merge is assembled:
+
+- The **system half is resolved per file**, not once for the run. The
+  entry above is a catch-all, yet a `.java` file gets `java.md`, a `.py`
+  file gets `python.md`, an unrecognized extension uses `default.md`.
+  One entry therefore adds your rule on top of the right language rules
+  everywhere, without repeating it per extension.
+- Either half may be empty. If the system layer resolves to nothing for
+  a file, you get your rule alone; if your rule text is empty, you get
+  the system rule alone. In neither case is the other half replaced by a
+  placeholder.
+
+The field is read from all three user layers — `--rule`, the project's
+`.opencodereview/rule.json`, and `~/.opencodereview/rule.json`. Layer
+priority is unchanged: the first matching entry still wins, and a
+matching layer still shadows the layers below it.
+
+The limitation to keep in mind: merging reaches the **system** layer
+only. If two of your own entries match the same file, the first one
+still wins outright — `merge_system_rule` does not combine them with
+each other.
+
 ### Glob features
 
 OCR uses [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)
@@ -379,6 +441,35 @@ inherits them:
   ]
 }
 ```
+
+### Global security rules on top of the built-in language rules
+
+A catch-all user rule **replaces** the built-in per-language rules by
+default, so adding one entry for `**/*` would quietly drop `java.md`,
+`python.md` and the rest everywhere. Set `merge_system_rule` to keep
+both:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+Save it at `~/.opencodereview/rule.json` to apply it to every repo, or
+in `<repo>/.opencodereview/rule.json` to apply it to one. Because the
+system half is resolved per file, each language still gets its own
+built-in rules alongside yours — no need to enumerate extensions.
+
+The global file is the **lowest** of the three user layers. If `--rule`
+or the project's `.opencodereview/rule.json` has an entry that matches
+the same file, that entry wins and the global one is never reached, so
+put the catch-all rule in only one place.
 
 ## See Also
 

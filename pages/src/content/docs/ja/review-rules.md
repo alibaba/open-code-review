@@ -46,6 +46,52 @@ OCR は**4 層の優先順位チェーン**でルールを解決します。各�
 - `exclude`: 任意。OCR がレビューしないファイルの glob パターンです。ユーザー設定のフィルターの中で最も優先されます。
 - `rules`: `{path, rule}` エントリの配列で、**宣言順**に評価されます。そのファイルに最初に一致した `path` glob のエントリが、OCR がモデルに送る prompt を決定します。
 
+各 `rules` エントリは、任意の 3 番目のフィールドも受け付けます:
+
+- `merge_system_rule` — 任意。既定値は `false`。`false`（既定）の場合、一致したエントリはそのファイルの組み込みシステムルールを**置き換え**ます。`true` の場合、一致したシステムルールが保持され、ユーザールールと**結合**されます。
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+このエントリを置くと、`ocr rules check src/main/java/com/example/UserService.java`
+は両方の半分を報告します:
+
+```
+$ ocr rules check src/main/java/com/example/UserService.java
+Source: Project (.opencodereview/rule.json)
+Pattern: **/*
+Rule:
+────────────────────────────────────────
+## System-Specific Rules (Mandatory)
+
+…contents of java.md…
+
+---
+
+## User-Specific Rules (Mandatory)
+
+Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.
+────────────────────────────────────────
+```
+
+マージがどう組み立てられるかについて、知っておく価値のある点が 2 つあります:
+
+- **システム側の半分はファイルごとに解決**されます（実行ごとに一度ではありません）。上のエントリは包括的なものですが、`.java` ファイルでは `java.md`、`.py` ファイルでは `python.md`、OCR が認識しない拡張子では `default.md` が使われます。したがって 1 つのエントリで、拡張子を列挙することなく、あらゆる場所で適切な言語ルールの上にあなたのルールを追加できます。
+- どちらの半分も空になりえます。ファイルに対してシステム層が空に解決された場合、あなたのルールだけが得られます。あなたのルールのテキストが空の場合、システムルールだけが得られます。どちらの場合も、残った半分だけが使われ、もう半分が何らかのプレースホルダーで埋められることはありません。
+
+このフィールドは 3 つすべてのユーザー層 — `--rule`、プロジェクトの `.opencodereview/rule.json`、`~/.opencodereview/rule.json` — から読み取られます。層の優先順位は変わりません。最初に一致したエントリが引き続き勝ち、一致した層が引き続きその下の層を覆い隠します。
+
+心に留めておくべき制約: マージが及ぶのは**システム**層だけです。自分自身の 2 つのエントリが同じファイルに一致した場合、依然として最初のものが完全に勝ちます — `merge_system_rule` はそれらをお互いに結合しません。
+
 ### glob の機能
 
 OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4) でマッチングを行います:
@@ -324,6 +370,26 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
   ]
 }
 ```
+
+### 組み込みの言語ルールの上にグローバルなセキュリティルールを重ねる
+
+包括的なユーザールールは、既定では組み込みの言語別ルールを**置き換え**ます。そのため `**/*` に 1 つエントリを追加すると、いたる所で `java.md`、`python.md` などが静かに失われます。`merge_system_rule` を設定すれば両方を維持できます:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+すべてのリポジトリに適用するなら `~/.opencodereview/rule.json` に、1 つだけに適用するなら `<repo>/.opencodereview/rule.json` に保存してください。システム側の半分はファイルごとに解決されるため、各言語はあなたのルールに加えて引き続き自分自身の組み込みルールを得ます — 拡張子を列挙する必要はありません。
+
+グローバルファイルは 3 つのユーザー層の中で**最も低い**層です。`--rule` またはプロジェクトの `.opencodereview/rule.json` に同じファイルに一致するエントリがあれば、そのエントリが勝ち、グローバルなエントリはまったく読み取られません — 包括的なエントリは 1 か所だけに置いてください。
 
 ## 関連項目
 

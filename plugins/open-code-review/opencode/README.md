@@ -96,6 +96,8 @@ repository root. It cannot be combined with `background`.
 
 - Reviews use `--audience agent` and JSON output.
 - The process is launched with an argument array and `shell: false`.
+- Background context uses OCR's sanitised 8,000-character file input through a
+  private temporary file, removed after success, failure, cancellation, or timeout.
 - Tool-driven reviews default to a 30-minute overall timeout and a 10 MiB output limit.
 - Cancelling the OpenCode tool terminates the OCR process (1.x; on 2.x
   the tool API has no abort signal, so cancellation relies on the overall
