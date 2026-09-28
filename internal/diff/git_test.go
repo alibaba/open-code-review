@@ -5,6 +5,7 @@ package diff
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,19 +26,6 @@ func runGitTest(t *testing.T, dir string, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
-}
-
-// gitOutput runs a git command in dir and returns its trimmed stdout, failing
-// the test on error. For the read-only queries a test needs a value from.
-func gitOutput(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git %v failed: %v", args, err)
-	}
-	return string(out)
 }
 
 // writeGarbageExternalDiff writes a shell script that emits non-diff output and
@@ -858,7 +846,7 @@ func TestCommitModeIgnoresWorkingTreeGitignore(t *testing.T) {
 	write("gen.go", "package p\n\n// generated\n")
 	runGitTest(t, repo, "add", "gen.go")
 	runGitTest(t, repo, "commit", "-q", "-m", "add generated file")
-	head := strings.TrimSpace(gitOutput(t, repo, "rev-parse", "HEAD"))
+	head := gitOut(t, repo, "rev-parse", "HEAD")
 
 	// A .gitignore that ignores the file the commit introduced, present only in
 	// the working tree.
@@ -916,5 +904,135 @@ func TestWorkspaceModeStillHonorsWorkingTreeGitignore(t *testing.T) {
 	// one that must stay out.
 	if !slices.Equal(got, []string{".gitignore", "keep.txt"}) {
 		t.Errorf("workspace review selected %v, want [.gitignore keep.txt]: the working tree's .gitignore must still apply", got)
+	}
+}
+
+// The positive half of the ref-based rule: a .gitignore the reviewed ref itself
+// carries must still filter that ref's tracked files. Without this, replacing
+// the pattern load with nil — no gitignore filtering at all in history modes —
+// would pass every other history-mode test while silently over-reviewing every
+// repository that ignores a tracked-but-generated file.
+func TestRangeModeStillFiltersGitignoreFromReviewedRef(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q", "-b", "main")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	// A base commit on main, so the range has something to compare against.
+	write("base.txt", "base\n")
+	runGitTest(t, repo, "add", ".")
+	runGitTest(t, repo, "commit", "-q", "-m", "base")
+
+	// The reviewed branch carries the rule in its own history: a .gitignore
+	// committed alongside a generated-but-tracked file, forced past git's
+	// ignore check the way a repo keeps such a file tracked in the first place.
+	runGitTest(t, repo, "checkout", "-q", "-b", "feature")
+	write(".gitignore", "gen.go\n")
+	write("gen.go", "package p\n\n// generated\n")
+	write("keep.go", "package p\n\n// real\n")
+	runGitTest(t, repo, "add", "-f", ".gitignore", "gen.go", "keep.go")
+	runGitTest(t, repo, "commit", "-q", "-m", "add generated and real files")
+
+	// The working tree holds no .gitignore at all, so any pattern that filters
+	// gen.go here had to come from the reviewed ref.
+	if err := os.Remove(filepath.Join(repo, ".gitignore")); err != nil {
+		t.Fatalf("remove working-tree .gitignore: %v", err)
+	}
+
+	set, err := NewProvider(repo, "main", "feature", gitcmd.New(0)).GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+	var got []string
+	set.ForEachInOrder(func(d model.Diff, _ bool) {
+		got = append(got, d.NewPath)
+	})
+	// .gitignore is itself part of the change under review; gen.go is the one
+	// the ref's own rule must keep out.
+	if !slices.Equal(got, []string{".gitignore", "keep.go"}) {
+		t.Errorf("range review selected %v, want [.gitignore keep.go]: the reviewed ref's own .gitignore must still filter gen.go", got)
+	}
+}
+
+// The same positive half for commit mode: the reviewed commit's own .gitignore
+// applies to the diff it introduces.
+func TestCommitModeStillFiltersGitignoreFromReviewedCommit(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q", "-b", "main")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	write("base.txt", "base\n")
+	runGitTest(t, repo, "add", ".")
+	runGitTest(t, repo, "commit", "-q", "-m", "base")
+
+	write(".gitignore", "gen.go\n")
+	write("gen.go", "package p\n\n// generated\n")
+	write("keep.go", "package p\n\n// real\n")
+	runGitTest(t, repo, "add", "-f", ".gitignore", "gen.go", "keep.go")
+	runGitTest(t, repo, "commit", "-q", "-m", "add generated and real files")
+	head := strings.TrimSpace(gitOut(t, repo, "rev-parse", "HEAD"))
+
+	if err := os.Remove(filepath.Join(repo, ".gitignore")); err != nil {
+		t.Fatalf("remove working-tree .gitignore: %v", err)
+	}
+
+	set, err := NewCommitProvider(repo, head, gitcmd.New(0)).GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+	var got []string
+	set.ForEachInOrder(func(d model.Diff, _ bool) {
+		got = append(got, d.NewPath)
+	})
+	// The commit adds .gitignore itself, so it is part of the diff; gen.go is
+	// the one the commit's own rule must keep out.
+	if !slices.Equal(got, []string{".gitignore", "keep.go"}) {
+		t.Errorf("commit review selected %v, want [.gitignore keep.go]: the reviewed commit's own .gitignore must still filter gen.go", got)
+	}
+}
+
+// A run cancelled while the ref's .gitignore is being read must report the
+// cancellation, not quietly continue with no ignore rules: swallowing ctx.Err()
+// turns a cancelled or timed-out review into one that reviews everything the
+// ref ignores and still reports success.
+func TestRangeModeCancelledWhileReadingGitignoreReportsCancellation(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q", "-b", "main")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("gen.go\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	runGitTest(t, repo, "add", "-f", ".")
+	runGitTest(t, repo, "commit", "-q", "-m", "base")
+
+	// Already cancelled: the reader must surface the cancellation rather than
+	// swallow it into "no ignore rules" and keep reviewing. Driving the reader
+	// directly also keeps this off the PATH shim, which cannot run on Windows.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := NewProvider(repo, "", "HEAD", nil).loadGitignorePatternsAtRef(ctx, "HEAD")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("loadGitignorePatternsAtRef error = %v, want context.Canceled", err)
 	}
 }
