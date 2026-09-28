@@ -222,7 +222,6 @@ LINE_RANGE: 10-80
 - old line
 + new line 1
 + new line 2
-
 ==== FILE: src/db/queries.go ====
 @@ -5,1 +5,1 @@
 - query := "SELECT *"

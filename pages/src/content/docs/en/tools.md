@@ -220,7 +220,6 @@ useful when a comment hinges on whether a related file was updated.
 - old line
 + new line 1
 + new line 2
-
 ==== FILE: src/db/queries.go ====
 @@ -5,1 +5,1 @@
 - query := "SELECT *"

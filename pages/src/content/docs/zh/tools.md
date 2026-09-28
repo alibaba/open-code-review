@@ -192,7 +192,6 @@ hunk 头 `@@ -x,y +m,n @@` 计算范围——通常 `m-50` 到 `m+n+50`。
 - old line
 + new line 1
 + new line 2
-
 ==== FILE: src/db/queries.go ====
 @@ -5,1 +5,1 @@
 - query := "SELECT *"

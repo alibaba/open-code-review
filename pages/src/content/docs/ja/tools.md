@@ -193,7 +193,6 @@ hunk ヘッダー `@@ -x,y +m,n @@` から範囲を計算すべきです——�
 - old line
 + new line 1
 + new line 2
-
 ==== FILE: src/db/queries.go ====
 @@ -5,1 +5,1 @@
 - query := "SELECT *"

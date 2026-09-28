@@ -205,7 +205,6 @@ hunk 머리글 `@@ -x,y +m,n @@`에서 범위를 계산해야 합니다. 보통 
 - old line
 + new line 1
 + new line 2
-
 ==== FILE: src/db/queries.go ====
 @@ -5,1 +5,1 @@
 - query := "SELECT *"
