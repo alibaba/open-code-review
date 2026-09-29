@@ -300,25 +300,20 @@ func sarifFingerprints(c model.LlmComment, category string) map[string]string {
 // terminal state and any warnings collected during the review.
 //
 // executionSuccessful mapping:
-//   - StateFailed → false (the run genuinely failed)
-//   - StateSkipped, StatePartial, StateComplete, nil → true
+//   - StateFailed → false
+//   - StatePartial with an operational failure → false
+//   - StatePartial with only budget failures → true
+//   - StateSkipped, StateComplete, nil → true
 //
 // StateSkipped is a fully successful empty run (e.g. a PR that only touches
-// excluded paths). StatePartial is the expected, publishable outcome of budget
-// truncation — declaring it as failed contradicts the pipeline's own contract
-// (see the comment in review_cmd.go: "A successfully constructed manifest is
-// publishable even when execution or session delivery failed").
+// excluded paths). Publishability is independent of execution success: even an
+// operationally failed partial run is emitted before the CLI returns non-zero.
 //
 // When the terminal state is not Complete, a notification carrying the
 // manifest message is added so consumers can see why the run was non-complete.
 func sarifInvocationFromRun(warnings []agent.AgentWarning, manifest *session.RunManifest, findings int) sarifInvocation {
-	successful := true
-	if manifest != nil {
-		successful = manifest.TerminalState != session.StateFailed
-	}
-
 	inv := sarifInvocation{
-		ExecutionSuccessful: successful,
+		ExecutionSuccessful: !reviewManifestRequiresNonZeroExit(manifest),
 	}
 
 	// When the run is non-complete, add a notification with the manifest
