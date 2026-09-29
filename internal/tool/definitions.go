@@ -75,6 +75,13 @@ type Provider interface {
 	Execute(ctx context.Context, args map[string]any) (string, error)
 }
 
+// SensitiveProvider marks tools whose arguments must not be written to
+// console telemetry or persisted session records. Implementations remain
+// responsible for redacting sensitive values from returned results and errors.
+type SensitiveProvider interface {
+	SensitiveToolCall() bool
+}
+
 // Registry holds tool providers. It is safe for concurrent reads after Freeze.
 type Registry struct {
 	providers map[string]Provider

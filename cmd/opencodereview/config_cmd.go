@@ -9,12 +9,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 
+	"github.com/alibaba/open-code-review/internal/config/jsonfields"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	ocrmcp "github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/spf13/cobra"
 )
 
@@ -112,15 +113,17 @@ func runConfigSet(key, value string) error {
 	if err := setConfigValue(cfg, key, value); err != nil {
 		return err
 	}
+	if strings.HasPrefix(strings.ToLower(key), "mcp") {
+		if err := validateMCPPersistentAllow(cfg); err != nil {
+			return err
+		}
+	}
 
 	if err := saveConfig(configPath, cfg); err != nil {
 		return err
 	}
 
-	displayValue := value
-	if shouldMaskConfigValue(key) {
-		displayValue = maskKey(value)
-	}
+	displayValue := configDisplayValue(key, value)
 	fmt.Printf("Set %s = %s\n", key, displayValue)
 	if warning := legacyLLMShadowWarning(cfg.Provider, key); warning != "" {
 		fmt.Fprint(os.Stderr, warning)
@@ -131,10 +134,36 @@ func runConfigSet(key, value string) error {
 // shouldMaskConfigValue reports whether the echoed value of a config key holds a
 // secret and must be masked. Matching on the normalized suffix covers both
 // snake_case and Go field spellings of api_key/auth_token at any path depth,
-// while the *_cmd variants stay unmasked: a command line is not a secret.
+// while the *_cmd variants stay unmasked. MCP args, URL query values and the
+// deprecated setup command may contain inline credentials, so their raw values
+// are never echoed by the generic config command.
 func shouldMaskConfigValue(key string) bool {
 	normalizedKey := strings.ToLower(strings.ReplaceAll(key, "_", ""))
-	return strings.HasSuffix(normalizedKey, "apikey") || strings.HasSuffix(normalizedKey, "authtoken")
+	if strings.HasSuffix(normalizedKey, "apikey") || strings.HasSuffix(normalizedKey, "authtoken") {
+		return true
+	}
+	key = strings.ToLower(key)
+	return strings.HasPrefix(key, "mcp_servers.") &&
+		(strings.HasSuffix(key, ".env") || strings.HasSuffix(key, ".headers") ||
+			strings.HasSuffix(key, ".args") || strings.HasSuffix(key, ".url") ||
+			strings.HasSuffix(key, ".setup"))
+}
+
+func configDisplayValue(key, value string) string {
+	if !shouldMaskConfigValue(key) {
+		return value
+	}
+	key = strings.ToLower(key)
+	if strings.HasPrefix(key, "mcp_servers.") {
+		if strings.HasSuffix(key, ".url") {
+			parsed, err := url.Parse(strings.TrimSpace(value))
+			if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+				return (&url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: parsed.Path}).String()
+			}
+		}
+		return "***"
+	}
+	return maskKey(value)
 }
 
 func runConfigUnset(key string) error {
@@ -152,6 +181,12 @@ func runConfigUnset(key string) error {
 	if key == "effort" {
 		return unsetEffort(configPath)
 	}
+	if key == "mcp" {
+		return unsetMCPConfig(configPath, "")
+	}
+	if strings.HasPrefix(key, "mcp.") {
+		return unsetMCPConfig(configPath, strings.TrimPrefix(key, "mcp."))
+	}
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[1] == "" {
@@ -166,6 +201,35 @@ func runConfigUnset(key string) error {
 	default:
 		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
 	}
+}
+
+func unsetMCPConfig(configPath, field string) error {
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if cfg.MCP == nil {
+		return fmt.Errorf("MCP configuration is not set")
+	}
+
+	switch field {
+	case "":
+		cfg.MCP = nil
+	case "enabled":
+		cfg.MCP.Enabled = nil
+	case "default_permission":
+		cfg.MCP.DefaultPermission = ""
+	case "approval_timeout_seconds":
+		cfg.MCP.ApprovalTimeoutSeconds = 0
+	default:
+		return fmt.Errorf("unset supports mcp, mcp.enabled, mcp.default_permission, and mcp.approval_timeout_seconds")
+	}
+
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+	fmt.Printf("Cleared MCP configuration value %q.\n", field)
+	return nil
 }
 
 func unsetMaxTokens(configPath string) error {
@@ -330,23 +394,14 @@ type ProviderEntry struct {
 	unknownJSONFields map[string]json.RawMessage
 }
 
-// MCPServerConfig holds configuration for a single MCP server.
-// Type "stdio" (default) uses a subprocess; type "remote" uses Streamable HTTP.
-type MCPServerConfig struct {
-	Type    string            `json:"type,omitempty"` // "stdio" (default) or "remote"
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     []string          `json:"env,omitempty"`
-	URL     string            `json:"url,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Tools   []string          `json:"tools,omitempty"`
-	Setup   string            `json:"setup,omitempty"`
-
-	unknownJSONFields map[string]json.RawMessage
-}
+// MCPServerConfig remains an alias for compatibility with the command package's
+// existing tests while the shared MCP package owns validation and policy rules.
+type MCPServerConfig = ocrmcp.MCPServerConfig
 
 // Config represents the user-level configuration file (~/.opencodereview/config.json).
 type Config struct {
+	// revision is local transaction metadata, never serialized into user config.
+	revision        *configRevision
 	Provider        string                     `json:"provider,omitempty"`
 	Model           string                     `json:"model,omitempty"`
 	MaxTokens       int                        `json:"max_tokens,omitempty"`
@@ -356,6 +411,7 @@ type Config struct {
 	Llm             LlmConfig                  `json:"llm,omitempty"`
 	Language        string                     `json:"language,omitempty"`
 	Telemetry       *TelemetryConfig           `json:"telemetry,omitempty"`
+	MCP             *ocrmcp.MCPConfig          `json:"mcp,omitempty"`
 	MCPServers      map[string]MCPServerConfig `json:"mcp_servers,omitempty"`
 
 	unknownJSONFields map[string]json.RawMessage
@@ -387,73 +443,13 @@ type TelemetryConfig struct {
 	unknownJSONFields map[string]json.RawMessage
 }
 
-func jsonFieldNames(value any) []string {
-	typeOf := reflect.TypeOf(value)
-	for typeOf.Kind() == reflect.Pointer {
-		typeOf = typeOf.Elem()
-	}
-
-	fields := make([]string, 0, typeOf.NumField())
-	for i := 0; i < typeOf.NumField(); i++ {
-		field := typeOf.Field(i)
-		if field.PkgPath != "" {
-			continue
-		}
-		tag := field.Tag.Get("json")
-		name, _, _ := strings.Cut(tag, ",")
-		if name != "" && name != "-" {
-			fields = append(fields, name)
-		}
-	}
-	return fields
-}
-
-func collectUnknownJSONFields(data []byte, knownFields []string) (map[string]json.RawMessage, error) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return nil, err
-	}
-
-	known := make(map[string]struct{}, len(knownFields))
-	for _, field := range knownFields {
-		known[field] = struct{}{}
-	}
-	for field := range fields {
-		if _, ok := known[strings.ToLower(field)]; ok {
-			delete(fields, field)
-		}
-	}
-	return fields, nil
-}
-
-func mergeUnknownJSONFields(data []byte, unknown map[string]json.RawMessage) ([]byte, error) {
-	if len(unknown) == 0 {
-		return data, nil
-	}
-
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return nil, err
-	}
-	known := make(map[string]struct{}, len(fields))
-	for field := range fields {
-		known[strings.ToLower(field)] = struct{}{}
-	}
-	for field, value := range unknown {
-		if _, exists := known[strings.ToLower(field)]; !exists {
-			fields[field] = value
-		}
-	}
-	return json.Marshal(fields)
-}
-
 func (c *Config) UnmarshalJSON(data []byte) error {
 	type configAlias Config
 	var decoded configAlias
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(Config{}))
+	unknown, err := jsonfields.Collect(data, jsonfields.Names(Config{}))
 	if err != nil {
 		return err
 	}
@@ -468,7 +464,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return mergeUnknownJSONFields(data, c.unknownJSONFields)
+	return jsonfields.Merge(data, c.unknownJSONFields)
 }
 
 func (e *ProviderEntry) UnmarshalJSON(data []byte) error {
@@ -477,7 +473,7 @@ func (e *ProviderEntry) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(ProviderEntry{}))
+	unknown, err := jsonfields.Collect(data, jsonfields.Names(ProviderEntry{}))
 	if err != nil {
 		return err
 	}
@@ -492,31 +488,7 @@ func (e ProviderEntry) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return mergeUnknownJSONFields(data, e.unknownJSONFields)
-}
-
-func (c *MCPServerConfig) UnmarshalJSON(data []byte) error {
-	type mcpServerConfigAlias MCPServerConfig
-	var decoded mcpServerConfigAlias
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(MCPServerConfig{}))
-	if err != nil {
-		return err
-	}
-	*c = MCPServerConfig(decoded)
-	c.unknownJSONFields = unknown
-	return nil
-}
-
-func (c MCPServerConfig) MarshalJSON() ([]byte, error) {
-	type mcpServerConfigAlias MCPServerConfig
-	data, err := json.Marshal(mcpServerConfigAlias(c))
-	if err != nil {
-		return nil, err
-	}
-	return mergeUnknownJSONFields(data, c.unknownJSONFields)
+	return jsonfields.Merge(data, e.unknownJSONFields)
 }
 
 func (c *LlmConfig) UnmarshalJSON(data []byte) error {
@@ -525,7 +497,7 @@ func (c *LlmConfig) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(LlmConfig{}))
+	unknown, err := jsonfields.Collect(data, jsonfields.Names(LlmConfig{}))
 	if err != nil {
 		return err
 	}
@@ -540,7 +512,7 @@ func (c LlmConfig) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return mergeUnknownJSONFields(data, c.unknownJSONFields)
+	return jsonfields.Merge(data, c.unknownJSONFields)
 }
 
 func (c *TelemetryConfig) UnmarshalJSON(data []byte) error {
@@ -549,7 +521,7 @@ func (c *TelemetryConfig) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(TelemetryConfig{}))
+	unknown, err := jsonfields.Collect(data, jsonfields.Names(TelemetryConfig{}))
 	if err != nil {
 		return err
 	}
@@ -564,14 +536,14 @@ func (c TelemetryConfig) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return mergeUnknownJSONFields(data, c.unknownJSONFields)
+	return jsonfields.Merge(data, c.unknownJSONFields)
 }
 
 func loadOrCreateConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &Config{}, nil
+			return &Config{revision: &configRevision{}}, nil
 		}
 		return nil, err
 	}
@@ -579,6 +551,7 @@ func loadOrCreateConfig(path string) (*Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	cfg.revision = revisionOfConfig(data)
 	return &cfg, nil
 }
 
@@ -595,6 +568,7 @@ func LoadAppConfig(path string) (*Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse app config: %w", err)
 	}
+	cfg.revision = revisionOfConfig(data)
 	return &cfg, nil
 }
 
@@ -606,6 +580,9 @@ var supportedConfigKeys = []string{
 	"model",
 	"max_tokens",
 	"effort",
+	"mcp.enabled",
+	"mcp.default_permission",
+	"mcp.approval_timeout_seconds",
 	"providers.<name>.<field>",
 	"custom_providers.<name>.<field>",
 	"mcp_servers.<name>.<field>",
@@ -637,6 +614,9 @@ func setConfigValue(cfg *Config, key, value string) error {
 	}
 	if strings.HasPrefix(key, "mcp_servers.") {
 		return setMCPServerValue(cfg, key, value)
+	}
+	if strings.HasPrefix(key, "mcp.") {
+		return setMCPGlobalValue(cfg, key, value)
 	}
 
 	switch key {
@@ -793,7 +773,39 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, allow_insecure_http, enabled, default_permission, tools, tool_permissions, tool_definition_sha256, setup", key, strings.Join(supportedConfigKeys, ", "))
+	}
+	return nil
+}
+
+func setMCPGlobalValue(cfg *Config, key, value string) error {
+	if cfg.MCP == nil {
+		cfg.MCP = &ocrmcp.MCPConfig{}
+	}
+	switch strings.TrimPrefix(key, "mcp.") {
+	case "enabled":
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid boolean for mcp.enabled: %w", err)
+		}
+		cfg.MCP.Enabled = &enabled
+	case "default_permission":
+		permission, err := parseMCPPermission(value, false)
+		if err != nil {
+			return err
+		}
+		if permission == ocrmcp.PermissionAllow {
+			return persistentMCPAllowEntryPointError()
+		}
+		cfg.MCP.DefaultPermission = permission
+	case "approval_timeout_seconds":
+		seconds, err := strconv.Atoi(value)
+		if err != nil || seconds < 1 || seconds > 600 {
+			return fmt.Errorf("invalid mcp.approval_timeout_seconds %q: must be an integer from 1 to 600", value)
+		}
+		cfg.MCP.ApprovalTimeoutSeconds = seconds
+	default:
+		return fmt.Errorf("unknown MCP config field %q: supported fields are enabled, default_permission, approval_timeout_seconds", strings.TrimPrefix(key, "mcp."))
 	}
 	return nil
 }
@@ -1086,7 +1098,7 @@ func setMCPServerValue(cfg *Config, key, value string) error {
 		for _, e := range env {
 			idx := strings.Index(e, "=")
 			if idx <= 0 {
-				return fmt.Errorf("invalid env entry %q: must be in KEY=VALUE format", e)
+				return fmt.Errorf("invalid MCP environment entry: must be in KEY=VALUE format")
 			}
 		}
 		entry.Env = env
@@ -1096,13 +1108,19 @@ func setMCPServerValue(cfg *Config, key, value string) error {
 		}
 		parsed, err := url.Parse(value)
 		if err != nil {
-			return fmt.Errorf("invalid MCP server URL %q: %w", value, err)
+			return fmt.Errorf("invalid MCP server URL: the value cannot be parsed")
 		}
 		if parsed.Scheme != "http" && parsed.Scheme != "https" {
-			return fmt.Errorf("MCP server URL must use http or https scheme, got %q", parsed.Scheme)
+			return fmt.Errorf("MCP server URL must use http or https scheme")
 		}
 		if parsed.Host == "" {
-			return fmt.Errorf("MCP server URL %q must include a host", value)
+			return fmt.Errorf("MCP server URL must include a host")
+		}
+		if parsed.User != nil {
+			return fmt.Errorf("MCP server URL user information is not allowed; configure credentials through headers")
+		}
+		if parsed.Fragment != "" {
+			return fmt.Errorf("MCP server URL fragments are not allowed")
 		}
 		entry.URL = value
 	case "headers":
@@ -1111,32 +1129,122 @@ func setMCPServerValue(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid headers for %s: %w", key, err)
 		}
 		entry.Headers = parsed
+	case "allow_insecure_http":
+		allow, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid boolean for %s: %w", key, err)
+		}
+		entry.AllowInsecureHTTP = allow
+	case "enabled":
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid boolean for %s: %w", key, err)
+		}
+		entry.Enabled = &enabled
+	case "default_permission":
+		permission, err := parseMCPPermission(value, true)
+		if err != nil {
+			return err
+		}
+		if permission == ocrmcp.PermissionAllow {
+			return persistentMCPAllowEntryPointError()
+		}
+		entry.DefaultPermission = permission
 	case "tools":
-		var tools []string
-		if err := json.Unmarshal([]byte(value), &tools); err != nil {
-			return fmt.Errorf("invalid JSON array for %s: %w", key, err)
+		tools, err := parseMCPToolList(key, value)
+		if err != nil {
+			return err
 		}
-		seen := make(map[string]struct{}, len(tools))
-		filtered := make([]string, 0, len(tools))
-		for _, t := range tools {
-			if t == "" {
-				return fmt.Errorf("tool names in %s must not be empty", key)
-			}
-			if _, dup := seen[t]; dup {
-				continue
-			}
-			seen[t] = struct{}{}
-			filtered = append(filtered, t)
+		entry.Tools = tools
+	case "tool_permissions":
+		permissions, err := parseMCPToolPermissions(key, value)
+		if err != nil {
+			return err
 		}
-		entry.Tools = filtered
+		entry.ToolPermissions = permissions
+	case "tool_definition_sha256":
+		var hashes map[string]string
+		if err := json.Unmarshal([]byte(value), &hashes); err != nil {
+			return fmt.Errorf("invalid JSON object for %s: %w", key, err)
+		}
+		for toolName, hash := range hashes {
+			if strings.TrimSpace(toolName) == "" || strings.TrimSpace(hash) == "" {
+				return fmt.Errorf("tool names and hashes in %s must not be empty", key)
+			}
+		}
+		entry.ToolDefinitionSHA256 = hashes
 	case "setup":
 		entry.Setup = value
 	default:
-		return fmt.Errorf("unknown MCP server field %q: supported fields are type, command, args, env, url, headers, tools, setup", field)
+		return fmt.Errorf("unknown MCP server field %q: supported fields are type, command, args, env, url, headers, allow_insecure_http, enabled, default_permission, tools, tool_permissions, tool_definition_sha256, setup", field)
 	}
 
 	cfg.MCPServers[name] = entry
 	return nil
+}
+
+func parseMCPPermission(value string, allowInherit bool) (ocrmcp.Permission, error) {
+	permission := ocrmcp.Permission(strings.ToLower(strings.TrimSpace(value)))
+	switch permission {
+	case ocrmcp.PermissionAsk, ocrmcp.PermissionAllow, ocrmcp.PermissionDeny:
+		return permission, nil
+	case ocrmcp.PermissionInherit:
+		if allowInherit {
+			return permission, nil
+		}
+	}
+	allowed := "ask, allow, or deny"
+	if allowInherit {
+		allowed = "inherit, ask, allow, or deny"
+	}
+	return ocrmcp.PermissionDeny, fmt.Errorf("invalid MCP permission %q: must be %s", value, allowed)
+}
+
+func parseMCPToolList(key, value string) ([]string, error) {
+	var tools []string
+	if err := json.Unmarshal([]byte(value), &tools); err != nil {
+		return nil, fmt.Errorf("invalid JSON array for %s: %w", key, err)
+	}
+	seen := make(map[string]struct{}, len(tools))
+	filtered := make([]string, 0, len(tools))
+	for _, toolName := range tools {
+		toolName = strings.TrimSpace(toolName)
+		if toolName == "" {
+			return nil, fmt.Errorf("tool names in %s must not be empty", key)
+		}
+		if _, duplicate := seen[toolName]; duplicate {
+			continue
+		}
+		seen[toolName] = struct{}{}
+		filtered = append(filtered, toolName)
+	}
+	return filtered, nil
+}
+
+func parseMCPToolPermissions(key, value string) (map[string]ocrmcp.Permission, error) {
+	var raw map[string]string
+	if err := json.Unmarshal([]byte(value), &raw); err != nil {
+		return nil, fmt.Errorf("invalid JSON object for %s: %w", key, err)
+	}
+	permissions := make(map[string]ocrmcp.Permission, len(raw))
+	for toolName, value := range raw {
+		if strings.TrimSpace(toolName) == "" {
+			return nil, fmt.Errorf("tool names in %s must not be empty", key)
+		}
+		permission, err := parseMCPPermission(value, true)
+		if err != nil {
+			return nil, fmt.Errorf("invalid permission for tool %q: %w", toolName, err)
+		}
+		if permission == ocrmcp.PermissionAllow {
+			return nil, persistentMCPAllowEntryPointError()
+		}
+		permissions[toolName] = permission
+	}
+	return permissions, nil
+}
+
+func persistentMCPAllowEntryPointError() error {
+	return fmt.Errorf("persistent MCP allow can only be set with 'ocr mcp permissions' after discovery verifies the tool definition")
 }
 
 // parseMCPHeaders parses a JSON object of header key-value pairs.

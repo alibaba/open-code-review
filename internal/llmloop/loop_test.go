@@ -721,6 +721,75 @@ func TestRunMainTask_GraceRoundSubmitsComment(t *testing.T) {
 	}
 }
 
+func TestRunMainTask_GraceRoundRejectsUnadvertisedSensitiveTool(t *testing.T) {
+	const secret = "grace-round-secret-sentinel"
+	hiddenCall := &llm.ChatResponse{
+		Choices: []llm.Choice{
+			{Message: llm.ResponseMessage{ToolCalls: []llm.ToolCall{
+				{
+					ID: "call_hidden",
+					Function: llm.FunctionCall{
+						Name:      "mcp__server__hidden",
+						Arguments: `{"token":"` + secret + `"}`,
+					},
+				},
+			}}},
+		},
+		Model: "fake",
+	}
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		hiddenCall,
+	}}
+	provider := &sensitiveArgsProvider{argsCapturingProvider: argsCapturingProvider{
+		tool: tool.Dynamic("mcp__server__hidden"),
+	}}
+	reg := tool.NewRegistry()
+	reg.Register(&fakeFileReadProvider{result: "package main\n"})
+	reg.Register(provider)
+	reg.Freeze()
+	deps := Deps{
+		LLMClient:        client,
+		Model:            "fake",
+		Template:         template.Template{MaxTokens: 100000, MaxToolRequestTimes: 1},
+		Tools:            reg,
+		CommentCollector: tool.NewCommentCollector(),
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "mcp__server__hidden"}},
+		},
+		Session: session.New(t.TempDir(), "main", "fake", session.SessionOptions{}),
+	}
+
+	completed, stop, err := NewRunner(deps).RunMainTask(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review")},
+		"main.go",
+	)
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if completed || stop != StopMaxRounds {
+		t.Fatalf("completed = %v, stop = %v; want false, StopMaxRounds", completed, stop)
+	}
+	if provider.captured {
+		t.Fatal("grace round executed a tool that was not advertised in that request")
+	}
+	records := deps.Session.GetOrCreateFileSession("main.go").TaskRecords[session.MainTask]
+	if len(records) != 2 || records[1].Response == nil || len(records[1].Response.ToolCalls) != 1 {
+		t.Fatalf("unexpected grace response record: %#v", records)
+	}
+	got := records[1].Response.ToolCalls[0].Function.Arguments
+	if got != redactedToolArguments || strings.Contains(got, secret) {
+		t.Fatalf("grace response arguments = %q, want only redaction marker", got)
+	}
+	if !strings.Contains(hiddenCall.ToolCalls()[0].Function.Arguments, secret) {
+		t.Fatal("execution response was mutated while recording the grace round")
+	}
+}
+
 func TestRunMainTask_GraceRoundSkippedWhenContextCancelled(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),

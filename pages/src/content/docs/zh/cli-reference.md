@@ -4,6 +4,8 @@ sidebar:
   order: 6
 ---
 
+`ocr mcp` 以服务器列表为入口，选中服务器后管理工具和实际权限，Esc 返回；打开列表不会连接。`ocr mcp import [file] [--yes]` 可导入一个 Cursor JSON 或 Codex TOML 连接，保存为禁用、零工具，不复制授权。非交互导入要求单服务器文件和 `--yes`。明文 env/header 转成环境变量引用，同名不覆盖，OAuth 等未支持字段会拒绝。私密粘贴（Ctrl-S）、凭据引用和启用步骤见 [MCP 指南](../mcp/)。
+
 每个 `ocr` 子命令、参数与退出行为的完整参考。
 
 ## 全局用法
@@ -18,6 +20,7 @@ Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
   config       Manage configuration settings
+  mcp          Manage MCP server connections and permissions
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
@@ -31,6 +34,7 @@ Examples:
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
+  ocr mcp                                  Open the MCP manager
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
   ocr session list                         List saved review sessions
@@ -73,6 +77,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr config unset <key>` | — | 清除一个已保存的配置值（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
 | `ocr config provider` | — | 交互式 provider 配置 TUI。 |
 | `ocr config model` | — | 交互式 model 选择 TUI。 |
+| `ocr mcp` | — | 管理 MCP 连接、显式工具白名单与执行权限。 |
 | `ocr llm test` | — | 发送一条简短 chat 请求以验证配置的端点。 |
 | `ocr llm providers` | — | 列出所有内置 LLM provider。 |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | 列出已保存的评审会话。 |
@@ -713,6 +718,36 @@ ocr completion powershell > ocr.ps1
 然后在 PowerShell 配置文件中添加一行以加载 `ocr.ps1`。
 
 
+## `ocr mcp`
+
+MCP 管理与模型设置相互独立，仅作用于 `ocr review`：
+
+```text
+ocr mcp
+ocr mcp add [name]
+ocr mcp import [file] [--yes]
+ocr mcp list [--json]
+ocr mcp show <name> [--json]
+ocr mcp edit <name>
+ocr mcp discover <name> [--json] [--yes]
+ocr mcp tools <name> [--enable TOOL ...] [--disable TOOL ...] [--yes]
+ocr mcp permissions [name]
+ocr mcp enable <name> [--yes]
+ocr mcp disable <name> [--yes]
+ocr mcp remove <name> [--yes]
+```
+
+TTY 中裸 `ocr mcp` 打开管理器；非 TTY 只输出脱敏状态和帮助，不连接、不写配置。
+`discover` 仅初始化并分页读取 `tools/list`，不会发出 `tools/call`。非交互进程中，可能
+连接或改写的命令必须显式使用 `--yes`。`list` 与 `show` 始终只读并隐藏凭据。
+
+`tools` 控制模型可见的显式白名单；`permissions` 控制执行权限（`deny`、`ask`、`allow`，
+server/tool 还可用 `inherit`），但不能启用白名单外工具。持久 `allow` 只接受具有当前
+指纹的工具。可用 `--timeout 1..600` 或
+`ocr config set mcp.approval_timeout_seconds <seconds>` 修改全局审批时限。
+
+连接预览、运行时四个选项、迁移和 CI fail-closed 规则详见 [MCP 服务器](../mcp/)。
+
 ## 提示与注意
 
 - `--audience agent` **并不**隐含 `--format json`。两者控制不同的事——屏蔽 UI
@@ -731,3 +766,7 @@ ocr completion powershell > ocr.ps1
 - [配置](../configuration/)——参数背后的环境变量与 config key。
 - [评审规则](../review-rules/)——`--rule` 参数与规则解析。
 - [集成](../integrations/agent-skill/)——从 agent 与 CI 调用 `ocr review`。
+
+## 终端接入体验
+
+`ocr mcp add` 提供逐项输入和 `Space` 工具勾选。`Enter` 继续，`Ctrl-B` 返回，`Esc` 取消。`ocr mcp permissions` 设置权限与超时（默认 60 秒，1–600 秒）。配置命令和 review 统一使用 `~/.opencodereview/config.json`。隔离体验时，仅为 OCR 进程将 `HOME`（Windows 还需 `USERPROFILE`）设置为独立测试目录。纯 `ocr mcp tools docs --disable write` 撤权不连接服务器，不需要 `--yes`，离线也能完成；启用工具仍需发现并明确确认连接。

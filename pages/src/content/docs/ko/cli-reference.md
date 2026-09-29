@@ -4,6 +4,8 @@ sidebar:
   order: 6
 ---
 
+`ocr mcp`는 서버 목록에서 도구와 실제 권한을 관리하며 Esc로 돌아갑니다. 목록을 열어도 연결하지 않습니다. `ocr mcp import [file] [--yes]`는 Cursor JSON 또는 Codex TOML 연결 하나를 비활성·도구 없음 상태로 저장하며 권한을 복사하지 않습니다. 비대화형에서는 단일 서버 파일과 `--yes`가 필요합니다. 평문 env/header는 환경 변수 참조로 바뀌며 같은 이름을 덮어쓰지 않습니다. OAuth 등 미지원 필드는 거부합니다. 비공개 붙여넣기(Ctrl-S)와 활성화는 [MCP 가이드](../mcp/)를 참고하세요.
+
 모든 `ocr` 하위 명령과 플래그, 종료 동작을 정리한 레퍼런스입니다.
 
 ## 전역 사용법 {#global-usage}
@@ -18,6 +20,7 @@ Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
   config       Manage configuration settings
+  mcp          Manage MCP server connections and permissions
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
@@ -31,6 +34,7 @@ Examples:
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
+  ocr mcp                                  Open the MCP manager
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
   ocr session list                         List saved review sessions
@@ -74,6 +78,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr config unset custom_providers.<name>` | — | 커스텀 프로바이더를 삭제합니다(활성 상태였다면 `provider`/`model`도 함께 지웁니다). |
 | `ocr config provider` | — | 대화형 프로바이더 설정 TUI입니다. |
 | `ocr config model` | — | 대화형 모델 선택 TUI입니다. |
+| `ocr mcp` | — | MCP 연결, 명시적 도구 allowlist, 실행 권한을 관리합니다. |
 | `ocr llm test` | — | 설정된 엔드포인트를 확인하려고 작은 채팅 요청을 보냅니다. |
 | `ocr llm providers` | — | 내장 LLM 프로바이더를 모두 나열합니다. |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | 저장된 리뷰 세션을 나열합니다. |
@@ -735,6 +740,39 @@ ocr completion powershell > ocr.ps1
 PowerShell 프로필에 `ocr.ps1`을 점으로 불러오는 줄을 추가하세요.
 
 
+## `ocr mcp`
+
+MCP 관리는 모델 설정과 분리되며 `ocr review`에만 적용됩니다.
+
+```text
+ocr mcp
+ocr mcp add [name]
+ocr mcp import [file] [--yes]
+ocr mcp list [--json]
+ocr mcp show <name> [--json]
+ocr mcp edit <name>
+ocr mcp discover <name> [--json] [--yes]
+ocr mcp tools <name> [--enable TOOL ...] [--disable TOOL ...] [--yes]
+ocr mcp permissions [name]
+ocr mcp enable <name> [--yes]
+ocr mcp disable <name> [--yes]
+ocr mcp remove <name> [--yes]
+```
+
+TTY의 `ocr mcp`는 관리자를 엽니다. 비대화형 환경에서는 마스킹된 상태와 도움말만
+출력하고 연결하거나 설정을 쓰지 않습니다. `discover`는 초기화와 페이지별
+`tools/list`만 수행하며 `tools/call`은 실행하지 않습니다. 연결하거나 변경할 수 있는
+비대화형 명령은 `--yes`가 필요합니다. `list`와 `show`는 항상 읽기 전용이며 자격 증명을
+가립니다.
+
+`tools`는 모델에 보이는 명시적 allowlist를, `permissions`는 `deny`/`ask`/`allow`
+(server/tool은 `inherit` 포함)를 관리합니다. 권한은 allowlist 밖 도구를 켤 수 없고,
+영구 `allow`에는 현재 fingerprint가 필요합니다. timeout은 `--timeout 1..600` 또는
+`ocr config set mcp.approval_timeout_seconds <seconds>`로 설정합니다.
+
+전체 연결·승인·마이그레이션·CI 규칙은 한국어 페이지 대신
+[MCP 가이드](../mcp/)를 참고하세요.
+
 ## 팁과 주의점 {#tips-gotchas}
 
 - `--audience agent`는 `--format json`을 **뜻하지 않고**, `--format json`도 조용한
@@ -764,3 +802,7 @@ PowerShell 프로필에 `ocr.ps1`을 점으로 불러오는 줄을 추가하세�
 - [리뷰 규칙](../review-rules/) — `--rule` 플래그와 규칙 해석 방식입니다.
 - [연동](../integrations/agent-skill/) — Agent와 CI에서 `ocr review`를 호출하는
   방법입니다.
+
+## 터미널 연결 마법사
+
+`ocr mcp add`는 항목별 입력과 `Space` 도구 선택을 제공합니다. `Enter`는 다음 단계, `Ctrl-B`는 이전 단계, `Esc`는 취소입니다. `ocr mcp permissions`에서 권한과 제한 시간(기본 60초, 1–600초)을 설정합니다. 설정 명령과 review는 `~/.opencodereview/config.json`을 사용합니다. 격리 테스트에서는 OCR 프로세스의 `HOME`(Windows에서는 `USERPROFILE`도)을 전용 테스트 디렉터리로 설정하세요. `tools --disable`만 실행하면 오프라인에서도 연결이나 `--yes` 없이 권한을 취소합니다. 자세한 절차는 [MCP 가이드](../mcp/)를 참고하세요.
