@@ -30,10 +30,10 @@ ocr delegate rule <path1> <path2> ...
 
 ### Step 3: Get Diffs and Review
 
-For each reviewable file, get its diff using git (based on mode/ref from Step 1):
-- Range: `git diff <merge_base>..<to> -- <path>`
-- Commit: `git show <commit> -- <path>`
-- Workspace: `git diff HEAD -- <path>` (or read directly for untracked files)
+For each reviewable file, get its diff using git (based on mode/ref from Step 1). Always pass `--no-pager`:
+- Range: `git --no-pager diff <merge_base>..<to> -- <path>`
+- Commit: `git --no-pager show <commit> -- <path>`
+- Workspace: `git --no-pager diff HEAD -- <path>` (or read directly for untracked files)
 
 Then review focusing on: correctness, security, performance, error handling, concurrency, maintainability. Only comment on changed code (+ lines).
 

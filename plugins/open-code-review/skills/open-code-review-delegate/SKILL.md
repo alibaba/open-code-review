@@ -59,22 +59,23 @@ Pass the reviewable file paths from Step 1. Output is grouped by rule content â€
 
 ### Step 3: Get Diffs
 
-Use git directly based on the mode/ref info from Step 1:
+Use git directly based on the mode/ref info from Step 1. Always pass
+`--no-pager` on the git command itself.
 
 **Range mode** (merge_base provided in preview output):
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff <merge_base>..<to> -- <path>
 ```
 
 **Commit mode**:
 ```bash
-git show <commit> -- <path>
+git --no-pager show <commit> -- <path>
 ```
 
 **Workspace mode**:
 ```bash
 # Tracked files
-git diff HEAD -- <path>
+git --no-pager diff HEAD -- <path>
 # New untracked files â€” read directly (entire file is new code)
 cat <path>
 ```
