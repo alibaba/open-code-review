@@ -414,7 +414,10 @@ rm -rf ~/.opencodereview                                # all state
 
 OCR doesn't write outside `~/.opencodereview` (apart from the binary
 download via NPM), so removing that directory wipes history, config,
-and per-user rules.
+and per-user rules. `ocr review --fetch` also writes to your repository:
+like `git fetch`, it stores the fetched Git objects and updates the selected
+remote-tracking branch (and its reflog), while leaving local branches and
+the working tree untouched.
 
 ## See Also
 

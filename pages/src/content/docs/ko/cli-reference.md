@@ -111,6 +111,8 @@ ocr r      [flags]   (alias)
 | `--repo <path>` | — | 현재 디렉터리 | Git 저장소 루트. |
 | `--from <ref>` | — | — | diff를 시작할 원본 ref(예: `main`). |
 | `--to <ref>` | — | — | diff가 끝나는 대상 ref(예: `feature-branch`). 지정하면 OCR이 `merge-base(from, to)..to`를 계산합니다. |
+| `--fetch` | — | `false` | 범위를 계산하기 전에 `--remote`에서 `--from` 브랜치를 fetch하고, 로컬 브랜치 대신 fetch한 원격 추적 브랜치를 기준으로 리뷰합니다(`--from origin/main`은 `origin`의 `main` 브랜치를 뜻합니다). `--to`는 fetch하지 않으므로 아직 push하지 않은 커밋도 리뷰에 남습니다. 갱신되는 것은 그 원격 추적 브랜치뿐이고, fetch가 실패하면 LLM을 호출하기 전에 리뷰를 멈춥니다. `--from`/`--to`가 필요하며, `--from`에는 태그, 커밋, `HEAD`, `refs/...` 형태의 ref가 아닌 브랜치 이름을 줘야 합니다. |
+| `--remote <name>` | — | `origin` | `--fetch`가 가져올 원격. 지정하면 `--from`이 다른 원격 이름으로 시작하더라도 항상 이 원격의 브랜치로 해석합니다(앞의 `<name>/`는 생략 가능). |
 | `--commit <sha>` | `-c` | — | 리뷰할 단일 커밋(부모 커밋과의 diff). |
 | `--preview` | `-p` | `false` | 필터 파이프라인만 돌리고 LLM은 호출하지 않습니다. 파일 목록과 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다(미리 보기에는 내보낼 완료된 지적이 없습니다). |
 | `--no-filter` | — | `false` | 리뷰 코멘트를 모두 남기고 서브태스크 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. 서브태스크는 파일 하나 또는 관련된 파일 묶음을 리뷰합니다. |
@@ -136,6 +138,7 @@ ocr r      [flags]   (alias)
 > 모드 플래그는 함께 쓸 수 없습니다. `--from`/`--to`, `--commit`, 아무것도 주지
 > 않기(워크스페이스 모드) 중 하나만 고르세요. 섞어 쓰면 오류로 중단됩니다.
 > `--resume`은 range와 commit 리뷰만 지원하며 `--preview`와 함께 쓸 수 없습니다.
+> `--fetch`는 `--from`/`--to`와, `--remote`는 `--fetch`와 함께일 때만 쓸 수 있습니다.
 
 ### 실행 단위 LLM 선택 {#per-run-llm-selection}
 
@@ -180,6 +183,18 @@ ocr review --from main --to feature-branch
 
 OCR이 `merge-base(main, feature-branch)..feature-branch`를 계산하므로, 브랜치를 딴 뒤
 `main`에 들어온 무관한 변경은 빠지고 그 기능 브랜치가 *만들어 낸* diff만 보입니다.
+
+로컬 기준 브랜치가 원격보다 뒤처져 있을 수 있다면 `--fetch`를 붙이세요.
+
+```bash
+ocr review --fetch --from main --to HEAD
+```
+
+OCR이 `origin`에서 `main`을 `origin/main`으로 fetch해(`--remote <name>`을 주면
+`<name>`에서 `<name>/main`으로) 그 최신 원격 추적 브랜치를 기준으로 리뷰하고, 범위의 양
+끝을 해석한 커밋에 고정하므로 리뷰 도중 ref가 움직여도 리뷰 대상은 바뀌지 않습니다.
+갱신되는 것은 그 원격 추적 브랜치뿐이고 로컬 브랜치와 작업 트리는 그대로 둡니다.
+`--fetch` 없이는 OCR이 원격 ref를 새로 고치지 않습니다.
 
 #### commit 모드 {#commit-mode}
 

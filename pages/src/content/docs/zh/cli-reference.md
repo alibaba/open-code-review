@@ -107,6 +107,8 @@ unstaged + untracked 变更。
 | `--repo <path>` | — | 当前目录 | Git 仓库根。 |
 | `--from <ref>` | — | — | diff 起始 ref（如 `main`）。 |
 | `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
+| `--fetch` | — | `false` | 解析区间之前，先从 `--remote` 拉取 `--from` 分支，并以拉取到的远程跟踪分支（而非本地分支）为基准评审（`--from origin/main` 表示 `origin` 上的 `main` 分支）。`--to` 从不拉取，未推送的提交仍在评审范围内。只会更新该远程跟踪分支；拉取失败时，评审在任何 LLM 调用之前停止。需要 `--from`/`--to`；`--from` 必须是分支名，不能是标签、提交、`HEAD` 或 `refs/...` 形式的 ref。 |
+| `--remote <name>` | — | `origin` | `--fetch` 拉取所用的远程。设置后，`--from` 始终表示该远程上的分支（前缀 `<name>/` 可省略），即使它以另一个远程的名称开头。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个子任务的 `REVIEW_FILTER_TASK` LLM 后处理调用。子任务评审单个文件或一组相关文件。 |
@@ -132,6 +134,7 @@ unstaged + untracked 变更。
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
 > `--resume` 仅支持区间或单 commit 评审，不能与 `--preview` 同时使用。
+> `--fetch` 只能与 `--from`/`--to` 一起使用，`--remote` 只能与 `--fetch` 一起使用。
 
 ### 单次运行的 LLM 选择
 
@@ -174,6 +177,17 @@ ocr review --from main --to feature-branch
 
 OCR 计算 `merge-base(main, feature-branch)..feature-branch`，因此你只看到
 feature 分支*引入*的 diff——而非分支切出后落到 `main` 上的无关变更。
+
+如果本地的基准分支可能落后于远程，加上 `--fetch`：
+
+```bash
+ocr review --fetch --from main --to HEAD
+```
+
+OCR 从 `origin` 拉取 `main` 到 `origin/main`（使用 `--remote <name>` 时，从 `<name>`
+拉取到 `<name>/main`），以这个最新的远程跟踪分支为基准评审，并把区间两端固定在解析到的
+提交上，评审过程中 ref 的变动不会改变评审内容。只会更新该远程跟踪分支，本地分支与工作区
+保持不变。不加 `--fetch` 时，OCR 从不刷新远程 ref。
 
 #### Commit 模式
 

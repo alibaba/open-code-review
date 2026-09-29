@@ -42,14 +42,18 @@ type SealedInput struct {
 // selection, so this stays silent. stdout.Quiet is safe here for the reason it
 // documents: this is pre-flight work on the main goroutine, before any
 // concurrent output exists.
+//
+// Endpoints the caller already froze (review --fetch) arrive in
+// args.SealedInput and are admitted as they are: resolving the typed refs again
+// could land on a commit the caller never froze.
 func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	defer stdout.Quiet()()
 
-	resolution, err := resolveInputBeforeDiff(ctx, args)
-	if err != nil {
-		return nil, err
-	}
-	if resolution != nil {
+	if args.SealedInput == nil {
+		resolution, err := ResolveInput(ctx, args)
+		if err != nil {
+			return nil, err
+		}
 		args.SealedInput = resolution
 	}
 
@@ -61,10 +65,10 @@ func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	return &SealedInput{Identity: a.runIdentity(), Resolution: a.inputResolution}, nil
 }
 
-// resolveInputBeforeDiff turns every moving head ref into an immutable commit
-// before the diff used for admission is loaded. Range mode then computes its
-// merge-base against that frozen head; commit mode needs only the frozen head.
-func resolveInputBeforeDiff(ctx context.Context, args Args) (*diff.InputResolution, error) {
+// ResolveInput turns every moving head ref into an immutable commit before any
+// diff is loaded from it. Range mode then computes its merge-base against that
+// frozen head; commit mode needs only the frozen head.
+func ResolveInput(ctx context.Context, args Args) (*diff.InputResolution, error) {
 	switch {
 	case args.Commit != "":
 		head, err := resolveCommitHead(ctx, args, args.Commit)

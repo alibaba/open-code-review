@@ -125,6 +125,12 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
+	if opts.remote != "" && !opts.fetch {
+		return fmt.Errorf("--remote requires --fetch")
+	}
+	if opts.fetch && opts.from == "" {
+		return fmt.Errorf("--fetch requires --from and --to")
+	}
 	if opts.preview && opts.resume != "" {
 		return fmt.Errorf("--preview and --resume cannot be used together")
 	}
@@ -204,6 +210,8 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)
+	cmd.Flags().BoolVar(&opts.fetch, "fetch", false, "fetch the --from branch from --remote first and review against the fetched remote-tracking branch; --to is never fetched")
+	cmd.Flags().StringVar(&opts.remote, "remote", "", "remote that --fetch reads from (default: origin)")
 	cmd.Flags().StringVar(&opts.resume, "resume", "", "resume from a previous review session id")
 	cmd.RegisterFlagCompletionFunc("resume", completeSessionIDs)
 	addExcludeFlag(cmd, &opts.excludes)
