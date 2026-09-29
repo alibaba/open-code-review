@@ -288,6 +288,22 @@ matches it uses this path. `ocr review` can also reach the same path when
 manifest construction fails and the no-files guard matches. Optional
 metadata such as `llm` or `trace_id` may be present.
 
+### Does `complete` mean every comment submission succeeded?
+
+No. `manifest.terminal_state` is derived from coverage alone: it reads
+`"complete"` whenever every selected item finished reviewing, even if a
+`code_comment` tool call was rejected along the way (the model usually
+retries with fixed arguments, and the item still completes). Exit 0
+likewise means usable coverage existed, not that every tool call
+succeeded. Machine consumers that must tell recovered retries apart from
+potentially lost submissions should read `comment_delivery`, which is
+present whenever at least one `code_comment` call was rejected:
+`unrecovered` counts the rejections no later accepted submission
+superseded, and `tool_call_numbers` identifies them against
+`tool_calls.failure_details`. `"unrecovered": 0` means every rejection
+was followed by an accepted submission for the same task — which shows
+the model resubmitted, not proof that no finding was lost.
+
 ### Where do session JSONLs live?
 
 ```
