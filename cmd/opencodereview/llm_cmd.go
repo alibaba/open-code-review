@@ -81,10 +81,7 @@ func runLLMTestWithConfigPath(configPath string) error {
 	}
 	task.ApplyLanguage(lang)
 
-	timeout := 30 * time.Second
-	if task.Timeout > 0 {
-		timeout = time.Duration(task.Timeout) * time.Second
-	}
+	timeout := llmTestTimeout(task.Timeout, ep.Timeout)
 
 	// No retry collector: llm test is a connectivity probe, not a review, and the
 	// retry report only describes ocr review.
@@ -163,6 +160,17 @@ func runLLMTestWithConfigPath(configPath string) error {
 		fmt.Println(note)
 	}
 	return nil
+}
+
+func llmTestTimeout(taskSeconds int, endpointTimeout time.Duration) time.Duration {
+	timeout := 30 * time.Second
+	if taskTimeout := time.Duration(taskSeconds) * time.Second; taskTimeout > timeout {
+		timeout = taskTimeout
+	}
+	if endpointTimeout > timeout {
+		timeout = endpointTimeout
+	}
+	return timeout
 }
 
 // testToolDefs offers the configured self-test tool, or none when the task

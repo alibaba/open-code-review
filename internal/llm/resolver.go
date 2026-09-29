@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -14,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/codexauth"
 )
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
@@ -31,8 +34,11 @@ type ResolvedEndpoint struct {
 	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
 	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
 	// knob; users can still override via OCR_LLM_TIMEOUT.
-	Timeout    time.Duration
-	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
+	Timeout               time.Duration
+	RetryCodes            []int // additional HTTP status codes that trigger exponential-backoff retry
+	RequiresStreaming     bool
+	RejectsSamplingParams bool
+	DetailErrorEnvelope   bool
 
 	// AmbientAuth marks an endpoint that carries no token and needs no base
 	// URL, because the transport supplies both — AWS SigV4 signing derives the
@@ -46,6 +52,13 @@ type ResolvedEndpoint struct {
 	AWSProfile string
 	AWSRegion  string
 }
+
+const codexRefreshTimeout = 30 * time.Second
+
+var (
+	codexAuthStore      codexauth.CodexStore = codexauth.FileStore{}
+	newCodexOAuthClient                      = codexauth.NewOAuthClient
+)
 
 // Environment variable names for OCR-specific configuration.
 const (
@@ -78,6 +91,7 @@ const (
 type ResolveOptions struct {
 	Provider string
 	Model    string
+	Context  context.Context
 }
 
 // ResolveEndpoint resolves an endpoint without per-run overrides.
@@ -388,14 +402,14 @@ func tryOCRConfig(path string, opts ResolveOptions) (ResolvedEndpoint, bool, err
 		cfg.Provider = opts.Provider
 	}
 	if cfg.Provider != "" {
-		return tryProviderConfig(cfg, opts.Model)
+		return tryProviderConfig(cfg, opts.Model, opts.Context)
 	}
 
 	return tryLegacyLlmConfig(cfg, opts.Model)
 }
 
 // tryProviderConfig resolves an endpoint from the provider-based configuration.
-func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, bool, error) {
+func tryProviderConfig(cfg configFile, modelOverride string, callerContext context.Context) (ResolvedEndpoint, bool, error) {
 	preset, isPreset := LookupProvider(cfg.Provider)
 
 	var entry providerEntryConfig
@@ -501,6 +515,21 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	// the preset says.
 	ambientAuth := protocol == ProtocolAnthropicBedrock ||
 		(isPreset && preset.AmbientAuth && entry.Protocol == "")
+	var externalAuth *codexauth.CodexAuth
+	if isPreset && preset.ExternalAuth && apiKey == "" && apiKeyCmd == "" {
+		if entry.URL != "" || entry.Protocol != "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf(
+				"provider %q cannot use Codex subscription authentication when url or protocol is overridden; set api_key explicitly", cfg.Provider)
+		}
+		auth, err := codexAuthStore.Load()
+		if err != nil {
+			return ResolvedEndpoint{}, false, fmt.Errorf(
+				"codex provider is selected but not signed in: %w\n"+
+					"  run: ocr auth login", err)
+		}
+		externalAuth = auth
+		apiKey = auth.AccessToken
+	}
 
 	// No credential at all is an error, and it is reported before api_key_cmd
 	// runs: only the command's *execution* is deferred, not the emptiness check.
@@ -531,7 +560,13 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	// supported value, and the one to use when spend has to be attributed — can
 	// never appear in a list compiled upstream. The list stays a picker for
 	// `ocr config model`; it does not gate an override.
-	gateOverrideOnModelList := !ambientAuth
+	//
+	// External-auth providers are the same case for the same reason. A Codex
+	// subscription exposes whatever models the signed-in account is entitled
+	// to, which differs by plan and changes over time, so a list compiled here
+	// cannot be authoritative. Let the endpoint decide and report its own
+	// refusal rather than blocking a model the account can actually run.
+	gateOverrideOnModelList := !ambientAuth && !(isPreset && preset.ExternalAuth)
 
 	// Apply model override with validation.
 	if modelOverride != "" {
@@ -602,22 +637,44 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		}
 		apiKey = resolved
 	}
+	if externalAuth != nil && externalAuth.NeedsRefresh(time.Now()) {
+		if callerContext == nil {
+			callerContext = context.Background()
+		}
+		refreshCtx, cancel := context.WithTimeout(callerContext, codexRefreshTimeout)
+		defer cancel()
+		auth, err := newCodexOAuthClient().RefreshIfNeeded(refreshCtx, codexAuthStore, time.Now)
+		if err != nil {
+			return ResolvedEndpoint{}, false, fmt.Errorf(
+				"refresh Codex authentication: %w\n"+
+					"  run: ocr auth login", err)
+		}
+		apiKey = auth.AccessToken
+	}
+
+	// Gateway-specific request shaping applies only while the entry still points
+	// at the preset's own endpoint. A url or protocol override sends the request
+	// elsewhere, and that destination does not share the gateway's constraints.
+	codexGatewayBehavior := isPreset && entry.Protocol == "" && entry.URL == ""
 
 	return ResolvedEndpoint{
-		URL:          url,
-		Token:        apiKey,
-		Model:        model,
-		Provider:     cfg.Provider,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "provider:" + cfg.Provider,
-		ExtraBody:    extraBody,
-		ExtraHeaders: extraHeaders,
-		Timeout:      timeout,
-		RetryCodes:   retryCodes,
-		AmbientAuth:  ambientAuth,
-		AWSProfile:   entry.AWSProfile,
-		AWSRegion:    entry.AWSRegion,
+		URL:                   url,
+		Token:                 apiKey,
+		Model:                 model,
+		Provider:              cfg.Provider,
+		Protocol:              protocol,
+		AuthHeader:            authHeader,
+		Source:                "provider:" + cfg.Provider,
+		ExtraBody:             extraBody,
+		ExtraHeaders:          extraHeaders,
+		Timeout:               timeout,
+		RetryCodes:            retryCodes,
+		RequiresStreaming:     codexGatewayBehavior && preset.RequiresStreaming,
+		RejectsSamplingParams: codexGatewayBehavior && preset.RejectsSamplingParams,
+		DetailErrorEnvelope:   codexGatewayBehavior && preset.DetailErrorEnvelope,
+		AmbientAuth:           ambientAuth,
+		AWSProfile:            entry.AWSProfile,
+		AWSRegion:             entry.AWSRegion,
 	}, true, nil
 }
 
@@ -829,7 +886,6 @@ func parseShellRC(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 
 	url := ensureMessagesSuffix(baseURL)
 
-	// Claude Code shell rc tokens are OAuth/Bearer-style credentials.
 	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: ProtocolAnthropic, AuthHeader: "authorization", Source: "Shell rc file"}, true, nil
 }
 

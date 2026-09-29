@@ -1952,6 +1952,11 @@ func TestApiKeyStepCanConfirm(t *testing.T) {
 			wantOK: true,
 		},
 		{
+			name:   "official external auth",
+			cfg:    &Config{Provider: "codex", Providers: map[string]ProviderEntry{"codex": {}}},
+			wantOK: true,
+		},
+		{
 			name:      "custom saved api_key",
 			customTab: true,
 			cfg: &Config{
