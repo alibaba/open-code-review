@@ -91,6 +91,7 @@ type summaryRecord struct {
 	SourceModel     string          `json:"source_model"`
 	TargetProvider  string          `json:"target_provider"`
 	TargetModel     string          `json:"target_model"`
+	Delta           bool            `json:"delta"`
 }
 
 // SessionsDir returns the on-disk directory that holds JSONL session files
@@ -253,6 +254,7 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 			SourceModel:    rec.SourceModel,
 			TargetProvider: rec.TargetProvider,
 			TargetModel:    rec.TargetModel,
+			Delta:          rec.Delta,
 		}
 	case "review_item_done":
 		s.CompletedFiles++

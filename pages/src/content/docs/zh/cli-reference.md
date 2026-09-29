@@ -111,6 +111,7 @@ unstaged + untracked 变更。
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个子任务的 `REVIEW_FILTER_TASK` LLM 后处理调用。子任务评审单个文件或一组相关文件。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
+| `--delta-from <session-id>` | — | — | 评审变更的新版本，对 diff 未变化的文件复用该会话的结果。参见[评审变更的新版本](#评审变更的新版本)。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
 | `--output <path>` | `-o` | 标准输出 | 将评审结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
 | `--audience <who>` | — | `human` | `human` 流式输出进度行（`--format` 为 `json`/`sarif` 时输出到 stderr，使 stdout 保持为单个可解析文档）；`agent` 完全抑制进度行，只打印最终摘要 / JSON。 |
@@ -216,6 +217,24 @@ ocr review --commit abc123 --resume <session-id>
 - `--preview` 和 `--resume` 不能同时使用
 
 被拒绝的恢复不会留下任何产物：不创建 session、不写 manifest、不调用 LLM。
+
+### 评审变更的新版本
+
+当变更出现新版本（处理了评审意见、rebase 或追加了提交）时，`--delta-from` 只评审
+diff 发生变化的文件，其余文件复用之前会话的评审结果：
+
+```bash
+ocr review --from main --to feature-branch --delta-from <session-id>
+```
+
+只有 diff 与之前会话评审的 diff 完全一致的文件才会被复用，因此其评审意见和行号仍按记录有效。
+两次评审请使用相同的基准：基准移动会改变每个文件的 diff。除了允许输入不同之外，其余规则与
+`--resume` 相同：仅支持区间或单 commit 评审，仓库、规则和文件过滤必须一致，provider 或
+model 不能隐式变化。`--delta-from` 不能与 `--resume` 或 `--preview` 同时使用。
+
+该运行会把之前的会话记录为父运行，在 `coverage.reused` 中列出复用的文件，并在 JSON 的
+`resume` 块中报告 `"delta": true`。被复用的文件不会再次评审，因此未变化文件中依赖于已变化文件
+代码的评审意见不会被重新检查；在意这一点时请运行完整评审。
 
 ### 输出
 

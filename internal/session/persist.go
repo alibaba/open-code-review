@@ -356,6 +356,9 @@ func (jw *jsonlWriter) WriteResumeLineage(l *ResumeLineage) string {
 		"target_provider": l.TargetProvider,
 		"target_model":    l.TargetModel,
 	}
+	if l.Delta {
+		rec["delta"] = true
+	}
 	jw.writeRecordLocked(rec)
 	// Flushed like the checkpoint records are, and for the same reason: the point
 	// of lineage is to survive a run that dies. Left buffered it would only reach
