@@ -82,6 +82,8 @@ curl -o .github/workflows/ocr-review.yml \
 | `max_tokens_budget` | `''` | `ocr review --max-tokens-budget` に渡すトークン総量（入力 + 出力）の上限。空または `'0'` は無制限です。LLM の各ラウンドの前に確認されます: すでに上限を超えたサブタスクには発見を提出するための最終ラウンドが 1 回与えられ、以降のサブタスクはディスパッチされず、予算超過およびスキップされたファイルは `failed(budget)` として報告され、部分的な結果は引き続き公開され、レビューは 0 で終了します。 |
 | `llm_reasoning_effort` | `''` | `reasoning_effort` リクエストフィールドを調整できるモデル（GLM-5.x、OpenAI reasoning モデルなど）の推論深度：`minimal`、`low`、`medium`、`high`、`max`（大文字小文字を区別しません）。`llm_extra_body` 経由でリクエストボディにマージされるため、公開済みのすべての CLI バージョンで動作します。`llm_extra_body` 内の明示的な `reasoning_effort` キーがこの入力より優先されます。空（デフォルト）の場合は送信しません。OpenAI 互換プロトコル専用です——Anthropic API は未知のボディフィールドを拒否するため、そのプロトコルではアクションが即座に失敗します。Anthropic の thinking 制御には `llm_extra_body` の明示的なキーを使ってください。 |
 | `stream_progress` | `'false'` | `'true'` にすると、レビューが終了するまで沈黙する代わりに、`[ocr]` の進捗行をワークフローログへライブで流します（stderr の human audience）。表示のみの切り替えで、stderr は引き続きファイルにキャプチャされ、アーティファクトとコメント投稿に使われます。 |
+| `min_severity` | `''` | 出力する重要度の下限（指定レベルを含む）：`critical`、`high`、`medium`、`low`。空欄で重要度のフィルターを無効にします。重要度またはカテゴリが欠落・不明の指摘は保持します。 |
+| `exclude_categories` | `''` | 除外するカテゴリをカンマ区切りで指定します：`bug`、`security`、`performance`、`maintainability`、`test`、`style`、`documentation`、`other`。空欄でカテゴリの除外を無効にします。重要度またはカテゴリが欠落・不明の指摘は保持します。 |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -94,7 +96,11 @@ curl -o .github/workflows/ocr-review.yml \
     max_tokens_budget: '10000000'
     llm_reasoning_effort: low
     stream_progress: 'true'
+    min_severity: medium
+    exclude_categories: style,maintainability,test
 ```
+
+`min_severity` と `exclude_categories` には、`--min-severity` と `--exclude-categories` に対応した CLI が必要です。CLI が出力する指摘を絞り込んだ後、`route_severity_below` と `route_categories` が残った指摘のうちサマリーに載せるものを決めます。保存済みセッションには元の指摘が残ります。どちらかのフィルターを変更するとプッシュをまたぐチェックポイントが無効になり、次の実行では全範囲をレビューします。ルールと使用例は [CLI リファレンス](../cli-reference/) を参照してください。
 
 入力の完全な一覧は
 [`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)

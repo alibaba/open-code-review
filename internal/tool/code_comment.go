@@ -174,17 +174,20 @@ func normalizeCommentPath(p string) string {
 }
 
 func normalizeCodeCommentCategory(category string) string {
-	normalized := strings.ToLower(category)
+	normalized := strings.ToLower(strings.TrimSpace(category))
 	if _, ok := validCodeCommentCategories[normalized]; ok {
 		return normalized
 	}
-	return codeCommentCategoryOther
+	// Keep unknown metadata distinguishable from an explicit "other" so
+	// reporting filters cannot silently discard an unclassified finding.
+	return ""
 }
 
 func normalizeCodeCommentSeverity(severity string) string {
-	normalized := strings.ToLower(severity)
+	normalized := strings.ToLower(strings.TrimSpace(severity))
 	if _, ok := validCodeCommentSeverities[normalized]; ok {
 		return normalized
 	}
-	return codeCommentSeverityLow
+	// An unrecognized severity is not evidence that the finding is low risk.
+	return ""
 }

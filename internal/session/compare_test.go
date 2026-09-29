@@ -46,6 +46,38 @@ func TestCompare(t *testing.T) {
 		wantNotReviewed []string
 	}{
 		{
+			name:           "legacy other category matches an unclassified finding",
+			before:         []model.LlmComment{cmt("a.go", 40, "other", "x := 1", "unused")},
+			after:          []model.LlmComment{cmt("a.go", 52, "", "x := 1", "unused")},
+			wantNew:        []string{},
+			wantPersisting: []string{"a.go:52"},
+			wantResolved:   []string{},
+		},
+		{
+			name:           "unclassified finding matches a legacy other category",
+			before:         []model.LlmComment{cmt("a.go", 40, "", "x := 1", "unused")},
+			after:          []model.LlmComment{cmt("a.go", 52, " Other ", "x := 1", "unused")},
+			wantNew:        []string{},
+			wantPersisting: []string{"a.go:52"},
+			wantResolved:   []string{},
+		},
+		{
+			name:           "renamed legacy other finding matches an unclassified finding",
+			before:         []model.LlmComment{cmt("old.go", 40, "other", "x := 1", "unused")},
+			after:          []model.LlmComment{cmt("new.go", 52, "", "x := 1", "unused")},
+			manifest:       reviewedManifest(CoverageItem{OldPath: "old.go", Path: "new.go"}),
+			wantPersisting: []string{"new.go:52"},
+		},
+		{
+			name:   "reused rename matches an unclassified finding to legacy other",
+			before: []model.LlmComment{cmt("old.go", 40, "", "x := 1", "unused")},
+			after:  []model.LlmComment{cmt("new.go", 52, " Other ", "x := 1", "unused")},
+			manifest: &RunManifest{Coverage: Coverage{
+				Reused: []CoverageItem{{OldPath: "old.go", Path: "new.go"}},
+			}},
+			wantPersisting: []string{"new.go:52"},
+		},
+		{
 			name:           "line drift keeps the finding persisting",
 			before:         []model.LlmComment{cmt("a.go", 40, "bug", "x := 1", "unused")},
 			after:          []model.LlmComment{cmt("a.go", 52, "bug", "x := 1", "unused")},

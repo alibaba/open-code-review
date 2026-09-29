@@ -833,9 +833,8 @@ func emitRunResult(
 
 	duration := time.Since(startTime)
 	telemetry.RecordReviewDuration(ctx, duration)
-	if len(comments) > 0 {
-		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
-	}
+	// Review and scan agents record generated findings before reporting filters.
+	// Emitting a report must not count the retained findings a second time.
 
 	traceID := telemetry.TraceIDFromContext(ctx)
 	manifest := ag.RunManifest()

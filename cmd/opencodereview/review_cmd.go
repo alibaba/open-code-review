@@ -35,6 +35,8 @@ type reviewOptions struct {
 	commit                string
 	resume                string
 	excludes              string
+	minSeverity           string
+	excludeCategories     string
 	outputFormat          string
 	audience              string
 	outputPath            string
@@ -266,6 +268,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	startTime := time.Now()
 
 	comments, runErr := ag.Run(runCtx)
+	comments = filterReviewComments(comments, opts)
 	manifest := ag.RunManifest()
 
 	// Freeze the retry report at the same boundary as the manifest: ag.Run has

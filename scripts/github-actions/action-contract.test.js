@@ -1957,7 +1957,40 @@ function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
   );
 }
 
+function testFindingFiltersForwarded() {
+  const run = stepNamed("Run OpenCodeReview");
+  for (const filters of [
+    { min_severity: "", exclude_categories: "" },
+    { min_severity: "high", exclude_categories: "style,maintainability,test" },
+    { min_severity: " MEDIUM ", exclude_categories: "Style, Test" },
+    // Treat shell syntax as literal input; CLI validation owns the values.
+    { min_severity: "high; exit 42", exclude_categories: "$(exit 43)" },
+  ]) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(run, inputValues(filters), fixture, {
+        MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15",
+      }, { replaceResultPaths: true });
+      assert.strictEqual(result.status, 0, resultDescription(result));
+      const call = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
+      assert.ok(call, "must invoke ocr review");
+      for (const [input, flag] of [["min_severity", "--min-severity"], ["exclude_categories", "--exclude-categories"]]) {
+        const index = call.args.indexOf(flag);
+        if (filters[input]) {
+          assert.ok(index >= 0, `must forward ${flag}`);
+          assert.strictEqual(call.args[index + 1], filters[input], "must preserve one literal argument");
+        } else {
+          assert.strictEqual(index, -1, `must omit unset ${flag}`);
+        }
+      }
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
 const TESTS = [
+  ["finding filters forward as literal arguments and default to disabled", testFindingFiltersForwarded],
   ["review_task_timeout names and describes the CLI task deadline", testReviewTaskTimeoutInputNameAndScope],
   ["llm_timeout defaults to the CLI's 5-minute timeout", testLlmTimeoutInputDefault],
   ["review_task_timeout accepts 1/10/120", testReviewTimeoutValidationAcceptsBoundaries],

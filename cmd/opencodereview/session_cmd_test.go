@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/tool"
 	"github.com/spf13/cobra"
 )
 
@@ -968,6 +970,86 @@ func TestRunSessionExport_Errors(t *testing.T) {
 			// A failed export must not leave a truncated artifact behind.
 			if _, statErr := os.Stat(out); statErr == nil {
 				t.Error("failed export created the output file anyway")
+			}
+		})
+	}
+}
+
+func TestSessionCommentFiltersKeepUnknownFields(t *testing.T) {
+	comments := []model.LlmComment{
+		{Content: "high bug", Severity: "high", Category: "bug"},
+		{Content: "low style", Severity: "low", Category: "style"},
+		{Content: "legacy other", Severity: "low", Category: "other"},
+		{Content: "unknown severity", Category: "other"},
+		{Content: "unknown category", Severity: "high"},
+		{Content: "both missing"},
+		{Content: "legacy unknown", Severity: "future", Category: "future"},
+		{Content: "normalized", Severity: " HIGH ", Category: " OTHER "},
+	}
+	original := append([]model.LlmComment(nil), comments...)
+	for _, tc := range []struct {
+		name, severity, category string
+		want                     []string
+	}{
+		{"disabled", "", "", []string{"high bug", "low style", "legacy other", "unknown severity", "unknown category", "both missing", "legacy unknown", "normalized"}},
+		{"severity", "HIGH", "", []string{"high bug", "unknown severity", "unknown category", "both missing", "legacy unknown", "normalized"}},
+		{"category", "", " Other ", []string{"legacy other", "unknown severity", "unknown category", "both missing", "legacy unknown", "normalized"}},
+		{"combined", "high", "other", []string{"unknown severity", "unknown category", "both missing", "legacy unknown", "normalized"}},
+		{"known fields still filter", "low", "style", []string{"low style", "both missing", "legacy unknown"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			for _, c := range filterComments(comments, tc.severity, tc.category) {
+				got = append(got, c.Content)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			if !reflect.DeepEqual(comments, original) {
+				t.Fatal("filter mutated saved findings")
+			}
+		})
+	}
+}
+
+func TestRunSessionComments_ParsedUnknownMetadata(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repo := t.TempDir()
+	comments, msg := tool.ParseComments(map[string]any{"comments": []any{
+		map[string]any{"path": "a.go", "content": "KEEP_UNKNOWN_SEVERITY", "severity": "urgent", "category": "other"},
+		map[string]any{"path": "a.go", "content": "KEEP_UNKNOWN_CATEGORY", "severity": "high", "category": "correctness"},
+		map[string]any{"path": "a.go", "content": "DROP_KNOWN_LOW", "severity": "low", "category": "other"},
+		map[string]any{"path": "a.go", "content": "DROP_KNOWN_STYLE", "severity": "high", "category": "style"},
+	}})
+	if msg != "" {
+		t.Fatal(msg)
+	}
+	sh := session.New(repo, "main", "test-model", session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "abc123"})
+	sh.RecordReviewItemDone("a.go", "a.go", "a.go", "fp-a", comments)
+	sh.Finalize()
+	for _, format := range []string{"text", "json"} {
+		t.Run(format, func(t *testing.T) {
+			args := []string{"--repo", repo, "--severity", "high", "--category", "other"}
+			if format == "json" {
+				args = append(args, "--json")
+			}
+			args = append(args, sh.SessionID)
+			got := captureStdout(t, func() {
+				if err := runSessionCommentsCompat(args); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if !strings.Contains(got, "KEEP_UNKNOWN_SEVERITY") || !strings.Contains(got, "KEEP_UNKNOWN_CATEGORY") || strings.Contains(got, "DROP_KNOWN") {
+				t.Fatalf("session filter lost unknown findings or retained excluded known fields: %s", got)
+			}
+			if format == "json" {
+				var decoded []model.LlmComment
+				if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+					t.Fatal(err)
+				}
+				if len(decoded) != 2 {
+					t.Fatalf("wrong finding count: %v", decoded)
+				}
 			}
 		})
 	}

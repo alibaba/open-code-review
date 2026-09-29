@@ -93,7 +93,13 @@ func findingKey(c model.LlmComment, path string) string {
 		// to survive.
 		body = normalizeSnippet(c.Content)
 	}
-	return normalizePath(path) + "|" + strings.ToLower(strings.TrimSpace(c.Category)) + "|" + body
+	category := strings.ToLower(strings.TrimSpace(c.Category))
+	if category == "" {
+		// Older parsers stored unrecognized categories as "other". Keep
+		// those findings stable when newer runs leave them unclassified.
+		category = "other"
+	}
+	return normalizePath(path) + "|" + category + "|" + body
 }
 
 // normalizeSnippet collapses every whitespace run to a single space so that

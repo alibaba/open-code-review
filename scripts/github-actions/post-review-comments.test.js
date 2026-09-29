@@ -5156,6 +5156,8 @@ function testActionFingerprintIncludesBackground() {
     ["OCR_FP_RULE", "rule"],
     ["OCR_FP_ROUTE_SEVERITY_BELOW", "route_severity_below"],
     ["OCR_FP_ROUTE_CATEGORIES", "route_categories"],
+    ["OCR_FP_MIN_SEVERITY", "min_severity"],
+    ["OCR_FP_EXCLUDE_CATEGORIES", "exclude_categories"],
     ["OCR_FP_BACKGROUND", "background"],
   ]) {
     assert.strictEqual(
@@ -5311,6 +5313,8 @@ async function testActionFingerprintCoversLlmHeaderAxes() {
     ["OCR_FP_LLM_EXTRA_HEADERS", "X-Model=gpt-4o"],
     ["OCR_FP_LLM_AUTH_HEADER", "X-Api-Key"],
     ["OCR_FP_LLM_TIMEOUT", "600"],
+    ["OCR_FP_MIN_SEVERITY", "high"],
+    ["OCR_FP_EXCLUDE_CATEGORIES", "style,test"],
   ]) {
     const changed = (await runWith({ [envVar]: value })).outputs.config_fingerprint;
     assert.notStrictEqual(changed, base, `a changed ${envVar} must invalidate the checkpoint`);

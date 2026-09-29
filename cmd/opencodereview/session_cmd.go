@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -451,6 +452,7 @@ func printSessionCompare(beforeID, afterID string, before, after *session.Summar
 
 // filterComments keeps comments whose severity and category are in the given
 // comma-separated, case-insensitive filter lists. Empty filters keep everything.
+// A missing or unknown field passes its filter; a known field must still match.
 func filterComments(comments []model.LlmComment, severities, categories string) []model.LlmComment {
 	sevSet := parseFilterSet(severities)
 	catSet := parseFilterSet(categories)
@@ -459,10 +461,12 @@ func filterComments(comments []model.LlmComment, severities, categories string) 
 	}
 	var out []model.LlmComment
 	for _, c := range comments {
-		if sevSet != nil && !sevSet[strings.ToLower(c.Severity)] {
+		severity := strings.ToLower(strings.TrimSpace(c.Severity))
+		category := strings.ToLower(strings.TrimSpace(c.Category))
+		if sevSet != nil && slices.Contains(reviewSeverities, severity) && !sevSet[severity] {
 			continue
 		}
-		if catSet != nil && !catSet[strings.ToLower(c.Category)] {
+		if catSet != nil && slices.Contains(reviewCategories, category) && !catSet[category] {
 			continue
 		}
 		out = append(out, c)
