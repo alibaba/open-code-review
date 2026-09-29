@@ -223,6 +223,13 @@ type llmRuntime struct {
 	RuntimeConfig agent.RuntimeConfig
 }
 
+func configuredLanguage(cfg *Config) string {
+	if cfg != nil && cfg.Language != "" {
+		return cfg.Language
+	}
+	return strings.TrimSpace(os.Getenv("OCR_LANGUAGE"))
+}
+
 // newRetryCollector builds the per-run retry collector. It is a variable so a
 // test can hand back a collector whose invariants are already violated, which is
 // the only way to exercise the Freeze construction-error branch from the
@@ -253,10 +260,7 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 	}
 	// Apply the language directive even when the config file is missing
 	// (upstream #fix: ApplyLanguage with empty lang falls back to default).
-	var lang string
-	if appCfg != nil {
-		lang = appCfg.Language
-	}
+	lang := configuredLanguage(appCfg)
 	tpl.ApplyLanguage(lang)
 
 	ep, err := llm.ResolveEndpointWithOptions(cfgPath, resolveOpts)
