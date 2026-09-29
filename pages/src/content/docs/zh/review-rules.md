@@ -260,7 +260,6 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 以下是内嵌 `system_rules.json` 的部分模式，按相对匹配顺序排列：
 
-
 | 模式                                | 规则文档                                                              |
 | ----------------------------------- | --------------------------------------------------------------------- |
 | `**/*.properties`                   | `properties.md`——i18n / 配置文件。                                    |
@@ -278,6 +277,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.go`                           | `go.md`——Go 源代码。                                                  |
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。          |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。               |
+| `**/*.{jinja2,j2}`                  | `jinja.md`——Jinja 模板                                              |
 | `**/*.ets`                          | `arkts.md`——ArkTS / HarmonyOS。                                       |
 | `**/*.astro`                        | `astro.md`——Astro 组件与 islands。                                    |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                    |
@@ -308,7 +308,6 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.sol`                          | `solidity.md`——Solidity 智能合约。                                    |
 | `**/*.vy`                           | `vyper.md`——Vyper 智能合约。                                          |
 | `**/*.rego`                         | `rego.md`——Rego 策略（OPA）。                                         |
-| `**/*.{jinja2,j2}` | `jinja.md`——Jinja 模板 |
 | _(fallback)_                        | `default.md`                                                          |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。

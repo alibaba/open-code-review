@@ -291,7 +291,6 @@ text the agent should follow:
 Selected embedded `system_rules.json` patterns are shown below in relative
 matching order:
 
-
 | Pattern                             | Rule doc                                                                                              |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `**/*.properties`                   | `properties.md` — i18n / configuration files.                                                         |
@@ -309,6 +308,7 @@ matching order:
 | `**/*.go`                           | `go.md` — Go source.                                                                                  |
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling).                                  |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — Handlebars and Mustache templates.                                         |
+| `**/*.{jinja2,j2}`                  | `jinja.md` — Jinja templates                                                                          |
 | `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                                       |
 | `**/*.astro`                        | `astro.md` — Astro components and islands.                                                            |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                                    |
@@ -339,7 +339,6 @@ matching order:
 | `**/*.sol`                          | `solidity.md` — Solidity smart contracts.                                                             |
 | `**/*.vy`                           | `vyper.md` — Vyper smart contracts.                                                                   |
 | `**/*.rego`                         | `rego.md` — Rego policy (OPA).                                                                        |
-| `**/*.{jinja2,j2}` | `jinja.md` — Jinja templates |
 | _(fallback)_                        | `default.md`                                                                                          |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

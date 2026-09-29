@@ -290,7 +290,6 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 Выбранные шаблоны встроенного `system_rules.json` показаны ниже в относительном
 порядке сопоставления:
 
-
 | Шаблон                              | Документ правила                                                                                 |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `**/*.properties`                   | `properties.md` — i18n / файлы конфигурации.                                                     |
@@ -308,6 +307,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.go`                           | `go.md` — исходный код Go.                                                                       |
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — шаблоны FreeMarker (SSTI / XSS / обработка null).                              |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — шаблоны Handlebars и Mustache.                                        |
+| `**/*.{jinja2,j2}`                  | `jinja.md` — шаблоны Jinja                                                                       |
 | `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                                  |
 | `**/*.astro`                        | `astro.md` — компоненты и islands Astro.                                                         |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                               |
@@ -338,7 +338,6 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.sol`                          | `solidity.md` — смарт-контракты Solidity.                                                        |
 | `**/*.vy`                           | `vyper.md` — смарт-контракты Vyper.                                                              |
 | `**/*.rego`                         | `rego.md` — политики Rego (OPA).                                                                 |
-| `**/*.{jinja2,j2}` | `jinja.md` — шаблоны Jinja |
 | _(fallback)_                        | `default.md`                                                                                     |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

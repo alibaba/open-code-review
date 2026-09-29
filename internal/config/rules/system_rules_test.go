@@ -76,7 +76,6 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"templates/account.HBS", "Handlebars/Mustache Escaping Boundaries"},
 		{"templates/email.mustache", "Handlebars/Mustache Escaping Boundaries"},
 		{"templates/email.MUSTACHE", "Handlebars/Mustache Escaping Boundaries"},
-
 		{"templates/account.jinja2", "Jinja Escaping Boundaries"},
 		{"templates/email.j2", "Jinja Escaping Boundaries"},
 		{"templates/account.JINJA2", "Jinja Escaping Boundaries"},

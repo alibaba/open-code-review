@@ -51,7 +51,6 @@ func TestIsAllowedExt(t *testing.T) {
 		{".HBS", true},
 		{".mustache", true},
 		{".MUSTACHE", true},
-
 		{".jinja2", true},
 		{".JINJA2", true},
 		{".j2", true},

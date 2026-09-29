@@ -227,7 +227,6 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 埋め込みの `system_rules.json` から主なパターンを相対的なマッチ順で示します:
 
-
 | パターン                            | ルールドキュメント                                                                              |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `**/*.properties`                   | `properties.md`: i18n / 設定ファイル。                                                          |
@@ -245,6 +244,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.go`                           | `go.md`: Go ソースコード。                                                                      |
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md`: FreeMarker テンプレート（SSTI / XSS / null 処理）。                            |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md`: Handlebars / Mustache テンプレート。                                  |
+| `**/*.{jinja2,j2}`                  | `jinja.md`: Jinja テンプレート                                                                 |
 | `**/*.ets`                          | `arkts.md`: ArkTS / HarmonyOS。                                                                 |
 | `**/*.astro`                        | `astro.md`: Astro コンポーネントと islands。                                                    |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                              |
@@ -275,7 +275,6 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.sol`                          | `solidity.md`: Solidity スマートコントラクト。                                                  |
 | `**/*.vy`                           | `vyper.md`: Vyper スマートコントラクト。                                                        |
 | `**/*.rego`                         | `rego.md`: Rego ポリシー（OPA）。                                                               |
-| `**/*.{jinja2,j2}` | `jinja.md`: Jinja テンプレート |
 | _(fallback)_                        | `default.md`                                                                                    |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。
