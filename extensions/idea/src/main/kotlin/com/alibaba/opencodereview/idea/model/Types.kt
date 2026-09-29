@@ -67,6 +67,9 @@ enum class FileStatus {
     @SerialName("binary") BINARY,
 }
 
+const val COMMENT_SIDE_LEFT = "LEFT"
+const val COMMENT_SIDE_RIGHT = "RIGHT"
+
 /**
  * `startLine` / `endLine` take 0 as the sentinel for "the CLI supplied no usable line number".
  * Comment anchoring (CommentAnchor) relies on this convention to take the existingCode relocation
@@ -81,6 +84,7 @@ data class ReviewComment(
     val startLine: Int = 0,
     val endLine: Int = 0,
     val thinking: String? = null,
+    val side: String? = null,
 )
 
 @Serializable

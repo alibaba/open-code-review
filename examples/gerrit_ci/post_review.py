@@ -117,6 +117,10 @@ def build_review_input(result):
         line = c.get("end_line") or 0
         if line > 0:
             entry["line"] = line
+            # Gerrit CommentInput defaults to the revision (new) side. A LEFT
+            # coordinate belongs to the change's parent/base patchset.
+            if str(c.get("side", "")).upper() == "LEFT":
+                entry["side"] = "PARENT"
         grouped.setdefault(path, []).append(entry)
 
     if comments:
@@ -171,7 +175,11 @@ def fold_comments(review_input):
     ]
     for path, entries in (review_input.get("comments") or {}).items():
         for e in entries:
-            loc = "`%s:%d`" % (path, e["line"]) if "line" in e else "`%s`" % path
+            if "line" in e:
+                side_label = " (old file)" if e.get("side") == "PARENT" else ""
+                loc = "`%s:%d%s`" % (path, e["line"], side_label)
+            else:
+                loc = "`%s`" % path
             parts.append("\n---\n\n%s\n\n%s" % (loc, e["message"]))
     full = "\n".join(parts)
     if len(full) > MAX_MESSAGE_LEN:

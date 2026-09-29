@@ -113,6 +113,17 @@ class OldLineForTest(unittest.TestCase):
         self.assertEqual(pr.old_line_for(hunks, 1), 1)
 
 
+class PublishSideTest(unittest.TestCase):
+    def test_left_side_falls_back_to_summary(self):
+        posted = []
+        result = {"comments": [{"path": "main.go", "content": "old", "start_line": 3, "end_line": 3, "side": "LEFT"}]}
+        stats = pr.publish(result, {"main.go": pr.FileDiff("main.go", "main.go")}, posted.append)
+        self.assertEqual(stats["inline"], 0)
+        self.assertEqual(stats["fallback"], 1)
+        self.assertNotIn("newLine", posted[0])
+        self.assertIn("old file", posted[0]["message"])
+
+
 class ParseDiffTest(unittest.TestCase):
     def test_modified_file(self):
         fd = pr.parse_diff(SAMPLE_DIFF)[0]

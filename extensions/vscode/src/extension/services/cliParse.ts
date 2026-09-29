@@ -32,6 +32,7 @@ function toComment(raw: any): ReviewComment {
     existingCode: raw.existing_code || undefined,
     startLine: raw.start_line,
     endLine: raw.end_line,
+    side: raw.side === 'LEFT' || raw.side === 'RIGHT' ? raw.side : undefined,
     thinking: raw.thinking || undefined,
   };
 }

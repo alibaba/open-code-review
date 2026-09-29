@@ -160,6 +160,7 @@ func TestLlmComment_JSON(t *testing.T) {
 		ExistingCode:   "old code",
 		StartLine:      10,
 		EndLine:        15,
+		Side:           CommentSideLeft,
 		Thinking:       "reasoning",
 	}
 

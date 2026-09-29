@@ -3,6 +3,8 @@
 
 package com.alibaba.opencodereview.idea.providers
 
+import com.alibaba.opencodereview.idea.model.FileStatus
+import com.alibaba.opencodereview.idea.model.ReviewComment
 import com.alibaba.opencodereview.idea.model.SupportedLocale
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -82,6 +84,48 @@ class CommentAnchorTest {
             "⚠ Line number was relocated based on code content.",
             formatLocateNote(0, 2, SupportedLocale.EN),
         )
+    }
+
+    @Test
+    fun `explicit side selects only its snapshot even when both have valid line numbers`() {
+        for ((side, anchorSide, ref) in listOf(
+            Triple("LEFT", AnchorSide.LEFT, "base"),
+            Triple("RIGHT", AnchorSide.RIGHT, "head"),
+        )) {
+            assertEquals(listOf(ref to anchorSide), candidateRefs(FileStatus.MODIFIED, "base", "head", side))
+        }
+    }
+
+    @Test
+    fun `explicit side never falls back to the opposite snapshot`() {
+        assertEquals(emptyList(), candidateRefs(FileStatus.MODIFIED, null, "head", "LEFT"))
+        assertEquals(emptyList(), candidateRefs(FileStatus.MODIFIED, "base", null, "RIGHT"))
+        assertEquals(emptyList(), candidateRefs(FileStatus.ADDED, "base", "head", "LEFT"))
+        assertEquals(emptyList(), candidateRefs(FileStatus.DELETED, "base", "head", "RIGHT"))
+    }
+
+    @Test
+    fun `legacy comments keep status-based candidate order`() {
+        assertEquals(
+            listOf("head" to AnchorSide.RIGHT, "base" to AnchorSide.LEFT),
+            candidateRefs(FileStatus.MODIFIED, "base", "head", null),
+        )
+        assertEquals(listOf("base" to AnchorSide.LEFT), candidateRefs(FileStatus.DELETED, "base", null, null))
+    }
+
+    @Test
+    fun `deleted-side coordinates mount on the left diff side`() {
+        val comment = ReviewComment(startLine = 2, endLine = 2, side = "LEFT")
+        assertEquals(
+            CommentAnchorResult.Mountable(2, 2, AnchorSide.LEFT, false, null),
+            mountableOrUnresolved(comment, content, AnchorSide.LEFT, SupportedLocale.EN),
+        )
+        for (side in listOf(null, "RIGHT")) {
+            assertEquals(
+                CommentAnchorResult.Mountable(2, 2, AnchorSide.WORKSPACE, false, null),
+                mountableOrUnresolved(comment.copy(side = side), content, AnchorSide.WORKSPACE, SupportedLocale.EN),
+            )
+        }
     }
 
     // ---------------------------------------------------------------- Diff-side mounting
