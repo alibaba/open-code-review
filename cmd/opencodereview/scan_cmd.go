@@ -15,6 +15,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
+	"github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/alibaba/open-code-review/internal/scan"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -85,7 +86,9 @@ var scanCmd = &cobra.Command{
 		if err := validateScanOptions(&scanOpts); err != nil {
 			return err
 		}
-		return executeScan(scanOpts)
+		ctx, stop := interruptContextWithForcedExit(cmd.Context())
+		defer stop()
+		return executeScanContext(ctx, scanOpts)
 	},
 }
 
@@ -109,6 +112,10 @@ func splitPaths(raw string) []string {
 }
 
 func executeScan(opts scanOptions) (retErr error) {
+	return executeScanContext(context.Background(), opts)
+}
+
+func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
 	if err != nil {
 		return err
@@ -200,6 +207,9 @@ func executeScan(opts scanOptions) (retErr error) {
 		Runner:  cc.GitRunner,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
+	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
+	defer closeReviewMCPClients(mcpClients)
+	scanToolDefs = append(scanToolDefs, mcp.CollectToolDefs(mcpClients, tools)...)
 
 	ag := scan.NewAgent(scan.Args{
 		RepoDir:               cc.RepoDir,
@@ -232,7 +242,7 @@ func executeScan(opts scanOptions) (retErr error) {
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
 
-	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(context.Background()), "scan.run")
+	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(ctx), "scan.run")
 	defer span.End()
 	var traceID string
 	if telemetry.IsEnabled() {
