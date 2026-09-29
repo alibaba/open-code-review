@@ -4,6 +4,7 @@
 package diff
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -45,13 +46,7 @@ func ResolveLineNumbers(comments []model.LlmComment, diffs []model.Diff) []model
 			continue
 		}
 
-		// Primary: try matching from deleted/context lines in diff hunks
-		if resolveFromHunk(d, cm) {
-			continue
-		}
-
-		// Fallback: scan the new file content for consecutive matches
-		resolveFromFileContent(d, cm)
+		resolveExistingCode(d, cm)
 	}
 
 	return result
@@ -66,10 +61,20 @@ func ResolveComment(cm *model.LlmComment, d *model.Diff) bool {
 	if cm.ExistingCode == "" {
 		return false
 	}
-	if resolveFromHunk(d, cm) {
+	return resolveExistingCode(d, cm)
+}
+
+func resolveExistingCode(d *model.Diff, cm *model.LlmComment) bool {
+	targetLines := splitAndNormalize(cm.ExistingCode)
+	if resolveFromHunk(d, cm, targetLines) || resolveFromFileContent(d, cm, targetLines) {
 		return true
 	}
-	return resolveFromFileContent(d, cm)
+
+	diffStyleTargetLines := splitAndNormalizeDiffSnippet(cm.ExistingCode)
+	if slices.Equal(targetLines, diffStyleTargetLines) {
+		return false
+	}
+	return resolveFromHunk(d, cm, diffStyleTargetLines) || resolveFromFileContent(d, cm, diffStyleTargetLines)
 }
 
 // RelocateAcrossFiles handles the comment whose ExistingCode belongs to a
@@ -148,13 +153,12 @@ type indexedLine struct {
 // against hunk lines. It tries the new-side first (context + added lines →
 // new-file line numbers), then falls back to old-side (context + deleted →
 // old-file line numbers).
-func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
+func resolveFromHunk(d *model.Diff, cm *model.LlmComment, targetLines []string) bool {
 	hunks := ParseHunks(d.Diff)
 	if len(hunks) == 0 {
 		return false
 	}
 
-	targetLines := splitAndNormalize(cm.ExistingCode)
 	if len(targetLines) == 0 {
 		return false
 	}
@@ -235,13 +239,12 @@ func matchConsecutive(sideLines []indexedLine, targetLines []string) (startLine,
 
 // resolveFromFileContent scans the new file content line-by-line for consecutive
 // matches of the normalized existing_code.
-func resolveFromFileContent(d *model.Diff, cm *model.LlmComment) bool {
+func resolveFromFileContent(d *model.Diff, cm *model.LlmComment, targetLines []string) bool {
 	if d.NewFileContent == "" {
 		return false
 	}
 
 	fileLines := strings.Split(d.NewFileContent, "\n")
-	targetLines := splitAndNormalize(cm.ExistingCode)
 	if len(targetLines) == 0 {
 		return false
 	}
@@ -296,11 +299,23 @@ func splitAndNormalize(code string) []string {
 	return result
 }
 
-// normalizeLine removes leading/trailing whitespace and strips any leading
-// '+' or '-' diff marker.
+func splitAndNormalizeDiffSnippet(code string) []string {
+	raw := strings.Split(code, "\n")
+	result := make([]string, 0, len(raw))
+	for _, line := range raw {
+		n := normalizeLine(line)
+		if strings.HasPrefix(n, "+") || strings.HasPrefix(n, "-") {
+			n = normalizeLine(n[1:])
+		}
+		if n == "" {
+			continue
+		}
+		result = append(result, n)
+	}
+	return result
+}
+
+// normalizeLine removes leading and trailing whitespace.
 func normalizeLine(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "+")
-	s = strings.TrimPrefix(s, "-")
 	return strings.TrimSpace(s)
 }
