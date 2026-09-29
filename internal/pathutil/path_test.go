@@ -4,8 +4,11 @@
 package pathutil
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -197,5 +200,69 @@ func TestWithinBase_AdditionalCases(t *testing.T) {
 				t.Errorf("WithinBase(%q, %q) = %v, want %v", tc.base, tc.target, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestPatternBackslashIssue(t *testing.T) {
+	cases := []struct {
+		name    string
+		pattern string
+		want    bool
+	}{
+		{name: "windows separators", pattern: `src\gen\*`, want: true},
+		{name: "windows separators without wildcard", pattern: `src\gen\file.go`, want: true},
+		{name: "separator before a wildcard", pattern: `node_modules\**`, want: true},
+		{name: "separator before wildcards on both sides", pattern: `src\**\*.log`, want: true},
+		{name: "leading separator before a wildcard", pattern: `**\*.log`, want: true},
+		{name: "escaped star cannot name a file on windows", pattern: `src\*`, want: true},
+		{name: "escaped question mark cannot name a file on windows", pattern: `src\?one.go`, want: true},
+		{name: "backslash before slash", pattern: `src\/gen`, want: true},
+		{name: "dangling backslash", pattern: `src\`, want: true},
+		{name: "mixed with legitimate escapes", pattern: `src\gen\[x\]\*.go`, want: true},
+		{name: "slash separators", pattern: "src/gen/*", want: false},
+		{name: "escaped brackets stay silent", pattern: `src/\[generated\]/file.go`, want: false},
+		{name: "escaped brackets beside a wildcard stay silent", pattern: `src/\[generated\]/*.go`, want: false},
+		{name: "escaped braces stay silent", pattern: `src/\{a,b\}/x`, want: false},
+		{name: "escaped backslash stays silent", pattern: `src\\gen`, want: false},
+		{name: "no backslash at all", pattern: "**/*_test.go", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := patternBackslashIssue(tc.pattern); got != tc.want {
+				t.Errorf("patternBackslashIssue(%q) = %v, want %v", tc.pattern, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWarnPatternBackslashes(t *testing.T) {
+	unsafe := "src\\gen\x1b[2J\nforged"
+	patterns := []string{
+		`src\gen\*`,
+		`node_modules\**`,
+		unsafe,
+		"src/gen/*",
+		`src/\[generated\]/file.go`,
+	}
+
+	var buf bytes.Buffer
+	WarnPatternBackslashes(&buf, "windows", "--exclude", patterns)
+	got := buf.String()
+	for _, want := range []string{`src\gen\*`, `node_modules\**`, unsafe} {
+		if !strings.Contains(got, strconv.Quote(want)) {
+			t.Errorf("expected a warning naming %q, got %q", want, got)
+		}
+	}
+	if n := strings.Count(got, "[ocr] WARNING:"); n != 3 {
+		t.Errorf("expected exactly 3 warning lines, got %d: %q", n, got)
+	}
+	if strings.ContainsRune(got, '\x1b') || strings.Count(got, "\n") != 3 {
+		t.Errorf("warning contains raw terminal controls or extra lines: %q", got)
+	}
+
+	buf.Reset()
+	WarnPatternBackslashes(&buf, "linux", "--exclude", patterns)
+	if buf.Len() != 0 {
+		t.Errorf("expected no warning off windows, got %q", buf.String())
 	}
 }
