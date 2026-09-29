@@ -306,7 +306,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{graphql,gql}`                | `graphql.md` — GraphQL 스키마와 오퍼레이션.                                      |
 | `**/*.prisma`                       | `prisma.md` — Prisma 스키마.                                                     |
 | `**/*.jl`                           | `julia.md` — Julia 소스.                                                         |
-| `**/*.{tf,hcl,tfvars}`              | `terraform.md` — Terraform / HCL.                                                |
+| `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md` — Terraform / HCL.                                                |
 | `**/*.bicep`                        | `bicep.md` — Bicep(Azure) 템플릿.                                                |
 | `**/*.elm`                          | `elm.md` — Elm 소스.                                                             |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리.                                 |
