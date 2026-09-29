@@ -313,9 +313,13 @@ Match lines: 1
 
 ### 제한 {#limits}
 
-- `git grep --max-count 100`으로 **파일당 100건**까지만 받으므로, 파일이 많으면 전체
-  출력은 100건을 넘을 수 있습니다. 파일당 상한에 걸리면 출력 앞에 `Note: The results
-  have been truncated. Only showing first 100 results.`가 붙습니다.
+- 합계 **100건**까지만 렌더링합니다. 파일당 상한은 `git grep --max-count 101`로 두어
+  정확히 100건인지 잘린 것인지 구분합니다. 전체 상한을 넘으면 출력 앞에 `Note: Showing
+  the first 100 matches across <n> matching files. Some files are partially shown or
+  omitted entirely. Narrow file_patterns to see the rest.`가 붙습니다.
+- `use_perl_regexp`가 `true`인데 `search_text`가 올바른 PCRE가 아니면 리터럴 문자열로 다시
+  검색하고, 출력 앞에 git이 패턴을 거부한 이유를 알려 주는 `Note:`가 붙습니다. 메타 문자를
+  이스케이프하면 정규식 검색을 그대로 쓸 수 있습니다.
 - `search_text`가 비어 있거나 공백뿐이면 모든 줄로 번지지 않고 `Error: search_text is
   blank`를 반환합니다.
 - 워크스페이스 모드에서는 **현재 작업 트리**를, range·commit 모드에서는 해석된 대상
