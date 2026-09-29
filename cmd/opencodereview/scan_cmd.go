@@ -45,6 +45,7 @@ type scanOptions struct {
 	batch                 string
 	maxTokens             int
 	maxTokensBudget       int
+	maxCompletionTokens   int
 	provider              string
 	model                 string
 	resume                string
@@ -178,6 +179,11 @@ func executeScan(opts scanOptions) (retErr error) {
 		return err
 	}
 	scanTpl.MaxTokens = maxTokens
+	maxCompletionTokens, err := resolveMaxCompletionTokens(scanTpl.MaxCompletionTokens, rt.AppCfg, opts.maxCompletionTokens)
+	if err != nil {
+		return err
+	}
+	scanTpl.MaxCompletionTokens = maxCompletionTokens
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,

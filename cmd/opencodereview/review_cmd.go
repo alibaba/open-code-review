@@ -48,6 +48,7 @@ type reviewOptions struct {
 	maxGitProcs           int
 	maxTokens             int
 	maxTokensBudget       int
+	maxCompletionTokens   int
 	effort                string
 	noFilter              bool
 	preview               bool
@@ -172,6 +173,15 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return err
 	}
 	cc.Template.MaxTokens = maxTokens
+
+	// The output cap resolves through its own chain and is assigned to its own
+	// field. Sharing resolveMaxTokens here would make a --max-tokens override
+	// silently raise what the provider is asked to generate.
+	maxCompletionTokens, err := resolveMaxCompletionTokens(cc.Template.MaxCompletionTokens, rt.AppCfg, opts.maxCompletionTokens)
+	if err != nil {
+		return err
+	}
+	cc.Template.MaxCompletionTokens = maxCompletionTokens
 
 	effort, err := resolveEffort(rt.AppCfg, opts.effort)
 	if err != nil {

@@ -46,6 +46,59 @@ func TestResolveMaxTokensPrecedence(t *testing.T) {
 	}
 }
 
+// TestResolveMaxCompletionTokensPrecedence pins the precedence of the output
+// cap: CLI override > saved app config > embedded template default. It mirrors
+// resolveMaxTokens deliberately, and the two must never collapse into one
+// control: the prompt ceiling and the provider completion ceiling are separate
+// knobs, so raising --max-tokens for a large-context model must not silently
+// inflate the output budget (template.go's CompletionTokenLimit comment).
+func TestResolveMaxCompletionTokensPrecedence(t *testing.T) {
+	tests := []struct {
+		name        string
+		cfg         *Config
+		cliOverride int
+		template    int
+		want        int
+		wantErr     bool
+	}{
+		{name: "template default", template: 16384, want: 16384},
+		{name: "zero config is unset", cfg: &Config{}, template: 16384, want: 16384},
+		{name: "saved config", cfg: &Config{MaxCompletionTokens: 65536}, template: 16384, want: 65536},
+		{name: "saved config can lower the cap", cfg: &Config{MaxCompletionTokens: 4096}, template: 16384, want: 4096},
+		{name: "cli overrides config", cfg: &Config{MaxCompletionTokens: 65536}, cliOverride: 32768, template: 16384, want: 32768},
+		{name: "cli override beats template default", cliOverride: 32768, template: 16384, want: 32768},
+		{name: "negative config", cfg: &Config{MaxCompletionTokens: -1}, template: 16384, wantErr: true},
+		{name: "negative cli", cliOverride: -1, template: 16384, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveMaxCompletionTokens(tt.template, tt.cfg, tt.cliOverride)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("resolveMaxCompletionTokens() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("resolveMaxCompletionTokens() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestResolveMaxCompletionTokens_IndependentOfMaxTokens pins that the two
+// ceilings stay orthogonal: configuring one must not move the other. Sharing a
+// resolution path would let a --max-tokens override silently raise the output
+// cap, which is exactly the coupling CompletionTokenLimit exists to prevent.
+func TestResolveMaxCompletionTokens_IndependentOfMaxTokens(t *testing.T) {
+	cfg := &Config{MaxTokens: 200000}
+	got, err := resolveMaxCompletionTokens(16384, cfg, 0)
+	if err != nil {
+		t.Fatalf("resolveMaxCompletionTokens() error = %v", err)
+	}
+	if got != 16384 {
+		t.Errorf("output cap = %d, want the template default 16384; max_tokens must not move it", got)
+	}
+}
+
 func TestApplyCLIExcludes_Empty(t *testing.T) {
 	cc := &commonContext{FileFilter: &rules.FileFilter{Exclude: []string{"a"}}}
 	applyCLIExcludes(cc, nil)

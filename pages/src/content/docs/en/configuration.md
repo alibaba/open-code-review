@@ -308,6 +308,41 @@ model's **output** cap (`MAX_COMPLETION_TOKENS`, `16384` in both templates)
 and of `--max-tokens-budget`, which caps total token use for a whole run.
 Restore the embedded default with `ocr config unset max_tokens`.
 
+### Output cap
+
+`max_completion_tokens` is the provider completion (**output**) cap sent on
+every request, `16384` in both embedded templates. It is deliberately a
+separate control from `max_tokens`: raising the prompt ceiling for a
+large-context model must never inflate what the model is asked to generate.
+
+```bash
+ocr config set max_completion_tokens 65536
+ocr config unset max_completion_tokens   # back to the embedded default
+```
+
+`--max-completion-tokens` overrides the saved setting for one run:
+
+```bash
+ocr review --max-completion-tokens 65536
+ocr scan --max-completion-tokens 65536
+```
+
+Precedence is CLI flag > saved setting > embedded template default. Raise the
+cap for reasoning models whose chain-of-thought naturally exceeds `16384`
+tokens: at exactly that length a response is truncated mid-analysis, and the
+model often then discards its own candidate findings and returns none.
+
+A truncated round is reported rather than hidden. Any response the provider
+finishes with `finish_reason: length` adds a `response_truncated` entry to the
+run's `warnings` (visible in `json`, `sarif` and `text` output), naming the
+round, the cap it hit and how many tool calls it managed. A review that
+reports `comments: 0` alongside such a warning is worth retrying with a
+higher cap:
+
+```bash
+ocr review --max-completion-tokens 65536
+```
+
 ### Review effort
 
 `effort` sets how many review rounds each subtask gets: `low` = 1,
