@@ -36,7 +36,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 ### 내장 프로바이더 {#built-in-providers}
 
-다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 선택한 뒤 API 키만 채우면 됩니다. `providers.<name>.api_key`가 비어 있으면 OCR은 해당 환경 변수로 대체합니다.
+다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 선택한 뒤 API 키만 채우면 됩니다. `providers.<name>.api_key`, `api_keys`, `api_key_cmd`가 모두 비어 있으면 OCR은 해당 환경 변수로 대체합니다.
 
 | 이름 | 프로토콜 | Base URL | API 키 환경 변수 |
 |---|---|---|---|
@@ -64,6 +64,33 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+| `opencode-go` | openai | `https://opencode.ai/zen/go/v1` | `OPENCODE_API_KEY` |
+
+### 여러 API 키 {#multiple-api-keys}
+
+`api_keys`에는 같은 프로바이더의 추가 키를 나열합니다. 요청이 사용량 한도 응답(HTTP 429, 또는 잔액 소진 시 402)을 받으면 다음 재시도는 다음 키를 사용하고, 이번 실행의 이후 요청도 그 키부터 시작합니다. 8초보다 긴 `Retry-After`는 한도에 걸린 키가 초기화되는 시점을 뜻하므로, 다음 키를 시도하기 전에 그만큼 기다리지 않습니다. 키가 거부된 401 같은 다른 오류에서는 키를 바꾸지 않습니다.
+
+페일오버는 요청당 6번이라는 일반 재시도 한도 안에서 동작합니다. 어차피 재시도되는 429에서는 요청이 늘지 않습니다. 402는 원래 요청을 바로 끝내지만, `api_keys`가 있으면 그 한도 안에서 다음 키로 재시도됩니다. 따라서 요청 하나가 시도할 수 있는 키는 최대 6개이며, 7번째 이후 키는 이후 요청에서만 쓰입니다.
+
+여러 키를 허용하고 키마다 한도를 따로 두는 프로바이더에서만 사용하세요. 계정 전체나 IP 단위의 429는 다른 키로 피할 수 없습니다.
+
+```bash
+ocr config set providers.my-gateway.api_keys "$KEY_1,$KEY_2,$KEY_3"
+```
+
+가장 먼저 사용하는 키는 `api_key`이며, 대신 `api_key_cmd`를 설정했다면 그 출력이고, 이어서 `api_keys`를 순서대로 사용합니다. 둘 다 없으면 `api_keys`의 첫 항목이 첫 키가 되며, 프로바이더의 환경 변수는 사용하지 않습니다. `api_keys`는 내장 프로바이더와 사용자 정의 프로바이더 모두에서 동작합니다.
+
+### OpenCode Go {#opencode-go}
+
+[OpenCode Go](https://opencode.ai/docs/go/)는 OpenCode가 제공하는 오픈 코딩 모델 구독입니다:
+
+```bash
+ocr config set provider                         opencode-go
+ocr config set model                            deepseek-v4.1-flash
+ocr config set providers.opencode-go.api_key    "$OPENCODE_API_KEY"
+```
+
+OCR은 리뷰의 세션 ID를 `x-opencode-session`으로 보내며, Go는 이를 라우팅과 프롬프트 캐싱에 사용합니다. Go는 모델 계열마다 서로 다른 API로 제공하며, OCR은 모델에 따라 프로토콜을 고릅니다. 대부분은 Chat Completions, MiniMax와 Qwen은 Messages API, Grok·GPT·Muse Spark는 Responses API입니다. `providers.opencode-go.protocol`을 설정하면 모든 모델에 그 프로토콜이 고정됩니다.
 
 ### 내장 프로바이더의 Base URL 재정의 {#overriding-a-built-in-provider-s-base-url}
 
@@ -194,7 +221,7 @@ ocr config set providers.anthropic.api_key_cmd \
   "secret-tool lookup service ocr-anthropic"
 ```
 
-우선순위: 정적 `api_key`가 항상 이깁니다(둘 다 설정하면 명령은 무시되고 경고가 출력됩니다). 그다음 `api_key_cmd`가 실행되며, 둘 다 없을 때만 OCR이 프로바이더의 환경 변수로 대체합니다.
+우선순위: 정적 `api_key`가 항상 이깁니다(둘 다 설정하면 명령은 무시되고 경고가 출력됩니다). 그다음 `api_key_cmd`가 실행되고, 그것도 없으면 `api_keys`의 첫 항목을 쓰며, 모두 없을 때만 OCR이 프로바이더의 환경 변수로 대체합니다.
 
 명령은 `ocr` 실행마다 한 번 돌고 반드시 성공해야 합니다. 0이 아닌 종료 코드, 빈 출력, 여러 줄 출력, 64KiB 초과 출력은 하드 에러입니다(OCR은 조용히 대체하지 않습니다). 프롬프트에 응답하는 시간을 포함해 60초 안에 끝나야 합니다. 명령은 터미널의 stdin과 stderr를 물려받으므로 대화형 프롬프트(pinentry, Touch ID)가 표시되고 응답할 수 있습니다. 명령이 stdout 파이프를 잡고 있는 백그라운드 데몬(`gpg-agent`, 최초 실행 시의 `op` 데몬)을 남기면 자격 증명은 도착하지만 `ocr` 실행마다 그 파이프가 닫히길 기다리며 5초씩 멈춥니다. 데몬의 출력을 리다이렉트(`>/dev/null 2>&1`)하면 대기가 사라집니다.
 

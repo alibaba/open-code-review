@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	neturl "net/url"
 	"os"
 	"path/filepath"
@@ -18,15 +19,18 @@ import (
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
 type ResolvedEndpoint struct {
-	URL          string
-	Token        string
-	Model        string
-	Provider     string
-	Protocol     string            // canonical protocol name (see protocol.go); resolver normalizes aliases
-	AuthHeader   string            // Anthropic auth header: "x-api-key" or "authorization"
-	Source       string            // human-readable config source label
-	ExtraBody    map[string]any    // vendor-specific request body fields
-	ExtraHeaders map[string]string // extra HTTP headers for the LLM request
+	URL   string
+	Token string
+	// FallbackTokens are further keys for the same provider, tried in order
+	// after Token when a request hits a usage limit.
+	FallbackTokens []string
+	Model          string
+	Provider       string
+	Protocol       string            // canonical protocol name (see protocol.go); resolver normalizes aliases
+	AuthHeader     string            // Anthropic auth header: "x-api-key" or "authorization"
+	Source         string            // human-readable config source label
+	ExtraBody      map[string]any    // vendor-specific request body fields
+	ExtraHeaders   map[string]string // extra HTTP headers for the LLM request
 	// Timeout is the per-request HTTP timeout; 0 means use the client default (5 min).
 	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
 	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
@@ -339,6 +343,7 @@ type llmFileConfig struct {
 // providerEntryConfig represents a single provider entry in config.json.
 type providerEntryConfig struct {
 	APIKey       string            `json:"api_key,omitempty"`
+	APIKeys      []string          `json:"api_keys,omitempty"`    // further keys, tried in order after api_key when one hits a usage limit
 	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
 	URL          string            `json:"url,omitempty"`
 	Protocol     string            `json:"protocol,omitempty"`
@@ -433,6 +438,13 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	if strings.TrimSpace(apiKeyCmd) == "" {
 		apiKeyCmd = ""
 	}
+	// api_keys only adds fallbacks behind whichever key is primary. It fills
+	// the primary slot itself only when neither api_key nor api_key_cmd is set,
+	// so a secret-manager command keeps its place in the precedence.
+	fallbackTokens := collectFallbackKeys(apiKey, entry.APIKeys)
+	if apiKey == "" && apiKeyCmd == "" && len(fallbackTokens) > 0 {
+		apiKey, fallbackTokens = fallbackTokens[0], fallbackTokens[1:]
+	}
 	switch {
 	case apiKey != "":
 		// Static api_key always wins. Warn (don't error) if a command is also set,
@@ -471,6 +483,27 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 				return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
 			}
 			protocol = normalized
+		}
+		// A preset that serves model families over different wire protocols
+		// picks the protocol from the model, unless the entry pins one. This
+		// runs before ambient auth is derived so that follows the protocol in
+		// force. The model is the one resolution ends on: validation below can
+		// only reject it, never change it.
+		if entry.Protocol == "" {
+			effectiveModel := modelOverride
+			if effectiveModel == "" {
+				effectiveModel = entry.Model
+			}
+			if effectiveModel == "" {
+				effectiveModel = cfg.Model
+			}
+			if p, ok := preset.ModelProtocols[effectiveModel]; ok {
+				normalized := NormalizeProtocol(p)
+				if err := ValidateProtocol(normalized); err != nil {
+					return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: model %q: %w", cfg.Provider, effectiveModel, err)
+				}
+				protocol = normalized
+			}
 		}
 	} else {
 		// Custom provider: protocol is always required; model can come from
@@ -574,6 +607,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 
 	extraBody = entry.ExtraBody
 	extraHeaders := entry.ExtraHeaders
+	if isPreset && len(preset.ExtraHeaders) > 0 {
+		extraHeaders = mergeHeaders(preset.ExtraHeaders, entry.ExtraHeaders)
+	}
 
 	timeout, err := ValidateTimeoutSec(entry.TimeoutSec)
 	if err != nil {
@@ -601,24 +637,66 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 			return ResolvedEndpoint{}, false, err
 		}
 		apiKey = resolved
+		// The command's output is only known now; drop it from the
+		// fallbacks so a limited key is never retried as its own fallback.
+		fallbackTokens = collectFallbackKeys(apiKey, fallbackTokens)
 	}
 
+	if ambientAuth || len(fallbackTokens) == 0 {
+		fallbackTokens = nil
+	}
+	if total := len(fallbackTokens) + 1; total > sdkMaxRetries+1 {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: provider %q has %d API keys, but one request makes at most %d attempts; keys past the %dth are only reached by later requests\n",
+			cfg.Provider, total, sdkMaxRetries+1, sdkMaxRetries+1)
+	}
 	return ResolvedEndpoint{
-		URL:          url,
-		Token:        apiKey,
-		Model:        model,
-		Provider:     cfg.Provider,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "provider:" + cfg.Provider,
-		ExtraBody:    extraBody,
-		ExtraHeaders: extraHeaders,
-		Timeout:      timeout,
-		RetryCodes:   retryCodes,
-		AmbientAuth:  ambientAuth,
-		AWSProfile:   entry.AWSProfile,
-		AWSRegion:    entry.AWSRegion,
+		URL:            url,
+		Token:          apiKey,
+		FallbackTokens: fallbackTokens,
+		Model:          model,
+		Provider:       cfg.Provider,
+		Protocol:       protocol,
+		AuthHeader:     authHeader,
+		Source:         "provider:" + cfg.Provider,
+		ExtraBody:      extraBody,
+		ExtraHeaders:   extraHeaders,
+		Timeout:        timeout,
+		RetryCodes:     retryCodes,
+		AmbientAuth:    ambientAuth,
+		AWSProfile:     entry.AWSProfile,
+		AWSRegion:      entry.AWSRegion,
 	}, true, nil
+}
+
+// mergeHeaders layers overrides on top of base. HTTP header names are
+// case-insensitive, and the clients apply the map with http.Header.Set, so an
+// override spelled differently from the base name must replace it rather than
+// sit beside it and race it in map iteration order.
+func mergeHeaders(base, overrides map[string]string) map[string]string {
+	merged := make(map[string]string, len(base)+len(overrides))
+	for k, v := range base {
+		merged[http.CanonicalHeaderKey(k)] = v
+	}
+	for k, v := range overrides {
+		merged[http.CanonicalHeaderKey(k)] = v
+	}
+	return merged
+}
+
+// collectFallbackKeys returns the api_keys entries that add a key beyond
+// primary, in order. Whitespace-only entries are typos and a repeated key would
+// only replay the limit it just hit, so both are dropped.
+func collectFallbackKeys(primary string, keys []string) []string {
+	var out []string
+	seen := map[string]bool{primary: true}
+	for _, k := range keys {
+		if strings.TrimSpace(k) == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	return out
 }
 
 // tryLegacyLlmConfig resolves an endpoint from the legacy llm config block.

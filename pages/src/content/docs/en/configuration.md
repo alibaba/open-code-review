@@ -38,9 +38,9 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ### Built-in providers
 
 The following providers ship with OCR, with the Base URL and protocol
-preset — once selected, you only need to fill in the API key. If
-`providers.<name>.api_key` is unset, OCR falls back to the corresponding
-environment variable.
+preset — once selected, you only need to fill in the API key. If none of
+`providers.<name>.api_key`, `api_keys` or `api_key_cmd` is set, OCR falls
+back to the corresponding environment variable.
 
 | Name | Protocol | Base URL | API key env var |
 |---|---|---|---|
@@ -68,6 +68,52 @@ environment variable.
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+| `opencode-go` | openai | `https://opencode.ai/zen/go/v1` | `OPENCODE_API_KEY` |
+
+### Multiple API keys
+
+`api_keys` lists further keys for the same provider. When a request gets a
+usage-limit response (HTTP 429, or 402 for an exhausted balance), its next
+retry uses the next key, and the rest of the run carries on from that key.
+A `Retry-After` longer than 8 seconds describes when the limited key resets,
+so it is not waited out before trying the next key. Other errors, such as a
+401 for a rejected key, do not switch keys.
+
+Failover works inside the usual retry budget of 6 attempts per request. For
+a 429, which is retried anyway, it adds no requests. A 402 normally ends a
+request at once; with `api_keys` it is retried on the next key within that
+budget. So one request reaches at most 6 keys, and keys past the sixth are
+only used by later requests.
+
+Use it only with a provider that allows several keys and limits each key on
+its own. A 429 that applies to the whole account or IP is not escaped by
+another key.
+
+```bash
+ocr config set providers.my-gateway.api_keys "$KEY_1,$KEY_2,$KEY_3"
+```
+
+The primary key is `api_key`, or the output of `api_key_cmd` when that is
+set instead, and `api_keys` follow it in order. With neither set, the first
+entry of `api_keys` is the primary, and the provider's environment variable
+is not used. `api_keys` works on built-in and custom providers alike.
+
+### OpenCode Go
+
+[OpenCode Go](https://opencode.ai/docs/go/) is OpenCode's subscription for
+open coding models:
+
+```bash
+ocr config set provider                         opencode-go
+ocr config set model                            deepseek-v4.1-flash
+ocr config set providers.opencode-go.api_key    "$OPENCODE_API_KEY"
+```
+
+OCR sends the review's session ID in `x-opencode-session`, which Go uses for
+routing and prompt caching. Go serves each model family over its own API, and
+OCR picks the protocol from the model: Chat Completions for most, the Messages
+API for MiniMax and Qwen, and the Responses API for Grok, GPT and Muse Spark.
+Setting `providers.opencode-go.protocol` pins one protocol for every model.
 
 ### Overriding a built-in provider's Base URL
 
@@ -238,8 +284,9 @@ ocr config set providers.anthropic.api_key_cmd \
 ```
 
 Precedence: a static `api_key` always wins (if both are set, the command is
-ignored and a warning is printed); otherwise `api_key_cmd` runs; only if
-neither is set does OCR fall back to the provider's environment variable.
+ignored and a warning is printed); otherwise `api_key_cmd` runs; otherwise
+the first `api_keys` entry is used; only if none of them is set does OCR fall
+back to the provider's environment variable.
 
 The command runs once per `ocr` invocation and must succeed: a non-zero exit,
 empty output, multi-line output, or more than 64KiB of output is a hard error
