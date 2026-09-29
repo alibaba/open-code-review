@@ -6,7 +6,7 @@ sidebar:
 
 OCR can act as a **Model Context Protocol (MCP) client**. You point it at
 one or more external MCP servers, and the tools those servers expose
-become available to the review agent — right alongside the
+become available to the review and scan agents — right alongside the
 [built-in tools](../tools/) like `file_read` and `code_search`.
 
 ## When to use it
@@ -64,13 +64,13 @@ ocr config set mcp_servers.search.tools '["search", "fetch"]'
 ```
 
 These commands save the connection in your user config. On the next
-review, OCR connects and makes `search` and `fetch` available to the
-agent alongside the built-in tools. The tool allowlist keeps any
-additional tools the server might offer out of the review. Other
+`ocr review` or `ocr scan` run, OCR connects and makes `search` and
+`fetch` available alongside the built-in tools. The tool allowlist keeps
+any additional tools the server might offer out of the run. Other
 configured servers and your review settings are unchanged.
 
-Once configured, the agent can call these tools during reviews without
-asking before each call. Tool arguments — search queries, requested URLs,
+Once configured, the agent can call these tools during reviews and scans
+without asking before each call. Tool arguments — search queries, requested URLs,
 and any context the agent includes — leave your machine and reach whoever
 operates the endpoint. Because this is user configuration, it applies
 across repositories: enable it only where external requests are allowed,
@@ -104,6 +104,27 @@ instructions for `headers`. Use single quotes around JSON passed to
 `ocr config set` when it contains environment variable references, so
 your shell does not expand them before OCR saves the configuration.
 Servers that allow anonymous access need no `headers` at all.
+
+## Using MCP tools during a scan
+
+The same user-level MCP configuration applies to full-file scans. For
+example, after adding the `docs` server above, scan a file with:
+
+```bash
+ocr scan --path path/to/file.go
+```
+
+OCR connects to configured servers before the scan agent starts. While
+reviewing each file, the agent can call allowed MCP tools to fetch context;
+their responses are returned to the agent for that file's main task. The
+scan pre-plan has no tool access. `file_read_diff` is unavailable because a
+full-file scan has no diff, even when MCP is enabled.
+
+`ocr scan --preview` only lists the files that would be scanned. It does not
+start or connect to MCP servers. If a server fails to connect during a normal
+scan, OCR logs a warning and continues with its built-in tools and any other
+working MCP servers. Connected clients are closed when the scan finishes or
+exits with an error.
 
 ## Filtering tools
 
@@ -161,11 +182,11 @@ pollute `--format json` output on stdout:
 - `allowed tool "y" not found in server's tool list` — the name in `tools`
   doesn't match anything the server offers; check spelling.
 
-A server that fails to start or connect is skipped; the review proceeds
+A server that fails to start or connect is skipped; the review or scan proceeds
 without its tools.
 
 ## See also
 
 - [Tools](../tools/) — the six built-in tools MCP tools sit beside.
 - [Configuration](../configuration/) — the full config file and every key.
-- [CLI Reference](../cli-reference/) — `ocr config` and the review flags.
+- [CLI Reference](../cli-reference/) — `ocr config`, `ocr review`, and `ocr scan` flags.
