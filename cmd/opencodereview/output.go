@@ -828,3 +828,21 @@ func statusBadge(status string) string {
 		return "[?]"
 	}
 }
+
+// warnRecoveredResume tells the user that the resumed session ended mid-write
+// and replay recovered the last complete checkpoint. Recovery already happened
+// inside LoadResumeState; this only makes the dropped torn fragment visible so
+// an interrupted run is not silently resumed as if nothing was lost. A nil or
+// intact state prints nothing, and the warning always goes to stderr so
+// --format json on stdout stays machine-readable.
+func warnRecoveredResume(state *session.ResumeState) {
+	if state == nil || !state.Recovered {
+		return
+	}
+	detail := ""
+	if fragment := state.RecoveredFragment; fragment != "" {
+		detail = fmt.Sprintf(" (dropped torn trailing record %q)", fragment)
+	}
+	fmt.Fprintf(os.Stderr, "[ocr] warning: resume session %s ended mid-write%s; resumed from the last complete checkpoint\n",
+		state.SessionID, detail)
+}
