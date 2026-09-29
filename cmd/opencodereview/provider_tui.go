@@ -4,7 +4,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -79,7 +78,6 @@ type customProviderListItem struct {
 	name  string
 	entry ProviderEntry
 }
-
 type providerTUIResult struct {
 	provider         string
 	model            string
@@ -108,14 +106,12 @@ func (r providerTUIResult) resolvedModel() string {
 	}
 	return ""
 }
-
 func (m providerTUIModel) sessionModelPickFor(providerName string) string {
 	if providerName == "" || m.sessionModelPick == nil {
 		return ""
 	}
 	return m.sessionModelPick[providerName]
 }
-
 func (m providerTUIModel) sessionModelPickSnapshot() map[string]string {
 	if len(m.sessionModelPick) == 0 {
 		return nil
@@ -201,7 +197,6 @@ type providerTUIModel struct {
 func (m providerTUIModel) cpAmbientProtocol() bool {
 	return cpProtocols[m.cpProtocolIdx] == llm.ProtocolAnthropicBedrock
 }
-
 func cpProtocolIndex(protocol string) int {
 	return protocolIndexIn(cpProtocols, protocol)
 }
@@ -212,7 +207,6 @@ func cpProtocolIndex(protocol string) int {
 func manualProtocolIndex(protocol string) int {
 	return protocolIndexIn(manualProtocols, protocol)
 }
-
 func protocolIndexIn(list []string, protocol string) int {
 	normalized := llm.NormalizeProtocol(protocol)
 	for i, p := range list {
@@ -222,7 +216,6 @@ func protocolIndexIn(list []string, protocol string) int {
 	}
 	return 1
 }
-
 func (m providerTUIModel) customProviderNameTaken(name string) bool {
 	if m.existingCfg == nil || m.existingCfg.CustomProviders == nil {
 		return false
@@ -230,7 +223,6 @@ func (m providerTUIModel) customProviderNameTaken(name string) bool {
 	_, exists := m.existingCfg.CustomProviders[name]
 	return exists
 }
-
 func (m providerTUIModel) customProviderActiveModel(cp customProviderListItem) string {
 	if m.existingCfg == nil || m.existingCfg.Provider != cp.name {
 		return ""
@@ -238,7 +230,6 @@ func (m providerTUIModel) customProviderActiveModel(cp customProviderListItem) s
 	entry := m.customProviderEntry(cp.name, cp.entry)
 	return activeModelForProvider(m.existingCfg, cp.name, entry)
 }
-
 func (m providerTUIModel) officialProviderActiveModel(p llm.Provider) string {
 	if m.existingCfg == nil || m.existingCfg.Provider != p.Name {
 		return ""
@@ -249,7 +240,6 @@ func (m providerTUIModel) officialProviderActiveModel(p llm.Provider) string {
 	}
 	return activeModelForProvider(m.existingCfg, p.Name, entry)
 }
-
 func collectCustomProviders(cfg *Config) []customProviderListItem {
 	if cfg == nil || cfg.CustomProviders == nil {
 		return nil
@@ -261,7 +251,6 @@ func collectCustomProviders(cfg *Config) []customProviderListItem {
 	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
 	return out
 }
-
 func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 	providers := llm.ListProviders()
 	sort.SliceStable(providers, func(i, j int) bool {
@@ -407,25 +396,21 @@ func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 
 	return m
 }
-
 func (m providerTUIModel) Init() tea.Cmd {
 	return nil
 }
-
 func (m providerTUIModel) currentProvider() llm.Provider {
 	if m.activeTab != tabOfficial || m.officialIdx >= len(m.providers) {
 		return llm.Provider{}
 	}
 	return m.providers[m.officialIdx]
 }
-
 func (m providerTUIModel) selectedCustomProvider() (customProviderListItem, bool) {
 	if m.activeTab != tabCustom || m.customIdx >= len(m.customProviders) {
 		return customProviderListItem{}, false
 	}
 	return m.customProviders[m.customIdx], true
 }
-
 func (m providerTUIModel) modelProviderName() string {
 	if m.activeTab == tabCustom {
 		if cp, ok := m.selectedCustomProvider(); ok {
@@ -438,7 +423,6 @@ func (m providerTUIModel) modelProviderName() string {
 	}
 	return provider.Name
 }
-
 func isUserAddedOfficialModelName(name, providerName string, registryModels []string, cfg *Config) bool {
 	if providerName == "" || cfg == nil {
 		return false
@@ -452,7 +436,6 @@ func isUserAddedOfficialModelName(name, providerName string, registryModels []st
 	}
 	return llm.ModelListContains(entry.Models, name)
 }
-
 func registryModelsForProvider(name string, fallback []string) []string {
 	if preset, ok := llm.LookupProvider(name); ok {
 		return append([]string(nil), preset.Models...)
@@ -462,7 +445,6 @@ func registryModelsForProvider(name string, fallback []string) []string {
 	}
 	return append([]string(nil), fallback...)
 }
-
 func applyModelDeleteToEntry(entry ProviderEntry, name string) ProviderEntry {
 	entry.Models = removeModels(entry.Models, []string{name})
 	if entry.Model == name {
@@ -470,19 +452,16 @@ func applyModelDeleteToEntry(entry ProviderEntry, name string) ProviderEntry {
 	}
 	return entry
 }
-
 func clearCfgActiveModelIfDeleted(cfg *Config, providerName, name string) {
 	if cfg != nil && cfg.Provider == providerName && cfg.Model == name {
 		cfg.Model = ""
 	}
 }
-
 func rollbackCfgActiveModel(cfg *Config, providerName, prevModel string) {
 	if cfg != nil && cfg.Provider == providerName {
 		cfg.Model = prevModel
 	}
 }
-
 func (m *modelTUIModel) rollbackModelDelete(prevEntry ProviderEntry, prevCfgModel string) {
 	if m.existingCfg == nil {
 		return
@@ -495,7 +474,6 @@ func (m *modelTUIModel) rollbackModelDelete(prevEntry ProviderEntry, prevCfgMode
 	}
 	rollbackCfgActiveModel(m.existingCfg, m.providerName, prevCfgModel)
 }
-
 func (m providerTUIModel) isUserAddedOfficialModel(name string) bool {
 	if m.activeTab != tabOfficial {
 		return false
@@ -523,7 +501,6 @@ func (m providerTUIModel) cursorOnDeletableModel() bool {
 		return false
 	}
 }
-
 func (m providerTUIModel) models() []string {
 	switch m.activeTab {
 	case tabOfficial:
@@ -542,7 +519,6 @@ func (m providerTUIModel) models() []string {
 	}
 	return nil
 }
-
 func (m *providerTUIModel) prepareModelSelection(providerName, configModel string) {
 	m.modelIdx = 0
 	m.customModel = false
@@ -570,7 +546,6 @@ func (m *providerTUIModel) prepareModelSelection(providerName, configModel strin
 	m.modelIdx = len(models)
 	m.modelInput.SetValue(currentModel)
 }
-
 func (m providerTUIModel) providerNameForModelStep() string {
 	switch m.activeTab {
 	case tabOfficial:
@@ -582,7 +557,6 @@ func (m providerTUIModel) providerNameForModelStep() string {
 	}
 	return ""
 }
-
 func (m *providerTUIModel) recordSessionModelPick(model string) {
 	if model == "" {
 		return
@@ -596,7 +570,6 @@ func (m *providerTUIModel) recordSessionModelPick(model string) {
 	}
 	m.sessionModelPick[name] = model
 }
-
 func (m *providerTUIModel) customProviderEntry(name string, fallback ProviderEntry) ProviderEntry {
 	if m.existingCfg != nil {
 		if entry, ok := m.existingCfg.CustomProviders[name]; ok {
@@ -605,7 +578,6 @@ func (m *providerTUIModel) customProviderEntry(name string, fallback ProviderEnt
 	}
 	return fallback
 }
-
 func (m *providerTUIModel) syncSessionModelSelection() error {
 	if m.existingCfg == nil {
 		return nil
@@ -619,21 +591,17 @@ func (m *providerTUIModel) syncSessionModelSelection() error {
 	m.recordSessionModelPick(model)
 	return nil
 }
-
 func (m providerTUIModel) isCustomModelItem(idx int) bool {
 	return idx == len(m.models())
 }
-
 func (m providerTUIModel) modelCount() int {
 	return len(m.models()) + 1
 }
-
 func (m providerTUIModel) customListCount() int {
 	return len(m.customProviders) + 1
 }
 
 // --- Update ---
-
 func (m providerTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -762,7 +730,6 @@ func (m providerTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
-
 func (m providerTUIModel) updateCustomModelInput(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc":
@@ -934,7 +901,6 @@ func (m *providerTUIModel) refreshModelSelectionForCustom() {
 	}
 	m.modelIdx = len(models) // land on "Enter custom model name..."
 }
-
 func officialProviderEnvKeySet(p llm.Provider) bool {
 	return p.EnvVar != "" && os.Getenv(p.EnvVar) != ""
 }
@@ -982,7 +948,6 @@ func (m providerTUIModel) apiKeyCmdForStep() string {
 	}
 	return ""
 }
-
 func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	if m.apiKeyOriginal != "" {
 		return true, ""
@@ -1013,7 +978,6 @@ func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	}
 	return false, "API key is required"
 }
-
 func (m providerTUIModel) updateAPIKeyInput(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc":
@@ -1043,669 +1007,6 @@ func (m providerTUIModel) updateAPIKeyInput(key string, msg tea.KeyPressMsg) (te
 	}
 }
 
-func (m providerTUIModel) updateCustomProviderForm(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		m.cancelled = true
-		return m, tea.Quit
-	case "esc":
-		if m.cpStep == cpStepName {
-			m.creatingCustom = false
-			m.editingCustom = false
-			m.editTargetName = ""
-			m.cpNameInput.Blur()
-			m.cpNameInput.SetValue("")
-			m.cpURLInput.SetValue("")
-			m.cpAuthInput.SetValue("")
-			m.apiKeyInput.SetValue("")
-			m.apiKeyMasked = false
-			m.apiKeyOriginal = ""
-			m.formError = ""
-			return m, nil
-		}
-		m.blurCPStep()
-		if m.editingCustom && m.cpStep == cpStepAPIKey {
-			m.cpStep = cpStepBaseURL
-		} else {
-			m.cpStep--
-		}
-		m.formError = ""
-		return m, m.focusCPStep()
-	case "enter":
-		return m.handleCustomFormEnter()
-	default:
-		if m.cpStep == cpStepProtocol {
-			switch key {
-			case "up", "k":
-				if m.cpProtocolIdx > 0 {
-					m.cpProtocolIdx--
-				}
-				return m, nil
-			case "down", "j":
-				if m.cpProtocolIdx < len(cpProtocols)-1 {
-					m.cpProtocolIdx++
-				}
-				return m, nil
-			}
-		}
-		if m.cpStep == cpStepAPIKey {
-			if m.apiKeyMasked {
-				m.beginAPIKeyReplace()
-			}
-			var cmd tea.Cmd
-			m.apiKeyInput, cmd = m.apiKeyInput.Update(msg)
-			return m, cmd
-		}
-		return m.passThroughCPInput(msg)
-	}
-}
-
-func (m *providerTUIModel) enterEditCustomProvider() {
-	cp := m.customProviders[m.customIdx]
-	entry := m.customProviderEntry(cp.name, cp.entry)
-	m.editingCustom = true
-	m.editTargetName = cp.name
-	m.cpStep = cpStepName
-	m.formError = ""
-	m.cpProtocolIdx = cpProtocolIndex(entry.Protocol)
-	m.cpNameInput.SetValue(cp.name)
-	m.cpURLInput.SetValue(entry.URL)
-	m.cpAuthInput.SetValue(entry.AuthHeader)
-	if entry.APIKey != "" {
-		m.apiKeyOriginal = entry.APIKey
-		m.apiKeyMasked = true
-		m.apiKeyInput.SetValue(maskedSecretPlaceholder())
-	} else {
-		m.apiKeyInput.SetValue("")
-		m.apiKeyMasked = false
-		m.apiKeyOriginal = ""
-	}
-}
-
-func authHeaderFormError(raw string) string {
-	return fmt.Sprintf(
-		"Unsupported Auth Header %q. Use 'authorization' (default), 'x-api-key', or leave empty.",
-		strings.TrimSpace(raw),
-	)
-}
-
-const manualAuthTokenRequiredError = "Auth token is required (configure it or set llm.auth_token_cmd; whitespace-only input is not accepted)"
-
-// manualAuthTokenCmd returns the configured llm.auth_token_cmd, which the
-// resolver runs when llm.auth_token is empty. Trimmed for the same reason as
-// apiKeyCmdForStep: the resolver treats a whitespace-only command as unset.
-func (m providerTUIModel) manualAuthTokenCmd() string {
-	if m.existingCfg == nil {
-		return ""
-	}
-	return strings.TrimSpace(m.existingCfg.Llm.AuthTokenCmd)
-}
-
-func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
-	switch m.cpStep {
-	case cpStepName:
-		name := m.cpNameInput.Value()
-		if name == "" {
-			return m, nil
-		}
-		if m.creatingCustom && m.customProviderNameTaken(name) {
-			m.formError = fmt.Sprintf(`Provider "%s" already exists`, name)
-			return m, nil
-		}
-		if m.editingCustom && name != m.editTargetName && m.customProviderNameTaken(name) {
-			m.formError = fmt.Sprintf(`Provider "%s" already exists`, name)
-			return m, nil
-		}
-		m.formError = ""
-		m.cpNameInput.Blur()
-		m.cpStep = cpStepProtocol
-		return m, nil
-	case cpStepProtocol:
-		if m.cpAmbientProtocol() {
-			return m.finishCustomForm()
-		}
-		m.cpStep = cpStepBaseURL
-		return m, m.cpURLInput.Focus()
-	case cpStepBaseURL:
-		if m.cpURLInput.Value() == "" {
-			return m, nil
-		}
-		m.cpURLInput.Blur()
-		m.cpStep = cpStepAPIKey
-		if m.creatingCustom {
-			m.apiKeyInput.SetValue("")
-			m.apiKeyMasked = false
-		}
-		return m, m.focusCPStep()
-	case cpStepAPIKey:
-		m.apiKeyInput.Blur()
-		m.cpStep = cpStepAuthHeader
-		return m, m.cpAuthInput.Focus()
-	case cpStepAuthHeader:
-		raw := m.cpAuthInput.Value()
-		if _, err := llm.NormalizeAuthHeader(raw); err != nil {
-			m.formError = authHeaderFormError(raw)
-			return m, nil
-		}
-		m.cpAuthInput.Blur()
-		return m.finishCustomForm()
-	}
-	return m, nil
-}
-
-// finishCustomForm saves the Custom provider form. It runs from the auth-header
-// step for a token-based protocol and from the protocol step for an ambient one,
-// which has nothing further to collect.
-func (m providerTUIModel) finishCustomForm() (tea.Model, tea.Cmd) {
-	if m.editingCustom {
-		r := m.result()
-		if err := m.applyEditCustomProviderSave(); err != nil {
-			return m, nil
-		}
-		// Edit succeeded — drop the user into the model list for this provider.
-		m.editingCustom = false
-		m.editTargetName = ""
-		m.apiKeyInput.SetValue("")
-		m.apiKeyMasked = false
-		m.apiKeyOriginal = ""
-		if idx := m.findCustomIdx(r.provider); idx >= 0 {
-			m.customIdx = idx
-		}
-		m.step = stepModel
-		m.prepareModelSelection(r.provider, m.customProviderEntry(r.provider, ProviderEntry{}).Model)
-		return m, nil
-	}
-	if m.creatingCustom {
-		return m.applyCreateCustomProvider()
-	}
-	m.confirmed = true
-	return m, tea.Quit
-}
-
-func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
-	if m.existingCfg == nil {
-		m.formError = "failed to save: config not loaded"
-		return m, nil
-	}
-	if m.configPath == "" {
-		m.formError = "failed to save: config path not available"
-		return m, nil
-	}
-	r := m.result()
-	if r.provider == "" {
-		m.formError = "Provider name is required"
-		m.cpStep = cpStepName
-		return m, m.cpNameInput.Focus()
-	}
-	if m.customProviderNameTaken(r.provider) {
-		m.formError = fmt.Sprintf(`Provider "%s" already exists`, r.provider)
-		m.cpStep = cpStepName
-		return m, m.cpNameInput.Focus()
-	}
-
-	if m.existingCfg.CustomProviders == nil {
-		m.existingCfg.CustomProviders = make(map[string]ProviderEntry)
-	}
-
-	entry := ProviderEntry{
-		URL:        r.url,
-		Protocol:   r.protocol,
-		AuthHeader: r.authHeader,
-		APIKey:     strings.TrimSpace(m.apiKeyInput.Value()),
-	}
-	if r.protocol == llm.ProtocolAnthropicBedrock {
-		entry.APIKey = ""
-	}
-	m.existingCfg.CustomProviders[r.provider] = entry
-
-	if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-		m.formError = fmt.Sprintf("failed to save: %v", err)
-		return m, nil
-	}
-
-	m.customProviders = collectCustomProviders(m.existingCfg)
-	if idx := m.findCustomIdx(r.provider); idx >= 0 {
-		m.customIdx = idx
-	}
-	m.creatingCustom = false
-	m.cpNameInput.SetValue("")
-	m.cpURLInput.SetValue("")
-	m.cpAuthInput.SetValue("")
-	m.apiKeyInput.SetValue("")
-	m.apiKeyMasked = false
-	m.apiKeyOriginal = ""
-	m.formError = ""
-	m.cpStep = cpStepName
-	m.savedInSession = true
-	// Drop into the model selection step so the user picks/adds a model for
-	// the newly created provider right away.
-	m.step = stepModel
-	m.prepareModelSelection(r.provider, "")
-	return m, nil
-}
-
-// cloneProviderEntry deep-copies a ProviderEntry so callers (rollback paths,
-// map cloning) can safely mutate the returned value without aliasing the
-// original's slice or map fields.
-func cloneProviderEntry(v ProviderEntry) ProviderEntry {
-	out := ProviderEntry{
-		APIKey:     v.APIKey,
-		APIKeyCmd:  v.APIKeyCmd,
-		URL:        v.URL,
-		Protocol:   v.Protocol,
-		Model:      v.Model,
-		Models:     append([]string(nil), v.Models...),
-		AuthHeader: v.AuthHeader,
-		TimeoutSec: v.TimeoutSec,
-		RetryCodes: append([]int(nil), v.RetryCodes...),
-		AWSProfile: v.AWSProfile,
-		AWSRegion:  v.AWSRegion,
-	}
-	out.unknownJSONFields = cloneUnknownJSONFields(v.unknownJSONFields)
-	if v.ExtraBody != nil {
-		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
-		for k, val := range v.ExtraBody {
-			out.ExtraBody[k] = val
-		}
-	}
-	if v.ExtraHeaders != nil {
-		out.ExtraHeaders = make(map[string]string, len(v.ExtraHeaders))
-		for k, val := range v.ExtraHeaders {
-			out.ExtraHeaders[k] = val
-		}
-	}
-	return out
-}
-
-func cloneUnknownJSONFields(src map[string]json.RawMessage) map[string]json.RawMessage {
-	if src == nil {
-		return nil
-	}
-	out := make(map[string]json.RawMessage, len(src))
-	for key, value := range src {
-		out[key] = append(json.RawMessage(nil), value...)
-	}
-	return out
-}
-
-func cloneCustomProvidersMap(src map[string]ProviderEntry) map[string]ProviderEntry {
-	if src == nil {
-		return nil
-	}
-	out := make(map[string]ProviderEntry, len(src))
-	for k, v := range src {
-		out[k] = cloneProviderEntry(v)
-	}
-	return out
-}
-
-func cloneCustomProviderList(src []customProviderListItem) []customProviderListItem {
-	out := make([]customProviderListItem, len(src))
-	for i, cp := range src {
-		out[i] = customProviderListItem{name: cp.name, entry: cloneProviderEntry(cp.entry)}
-	}
-	return out
-}
-
-func (m *providerTUIModel) applyEditCustomProviderSave() error {
-	if m.existingCfg == nil {
-		m.formError = "failed to save: config not loaded"
-		return fmt.Errorf("config not loaded")
-	}
-	if m.configPath == "" {
-		m.formError = "failed to save: config path not available"
-		return fmt.Errorf("config path not available")
-	}
-	r := m.result()
-	backupProviders := cloneCustomProvidersMap(m.existingCfg.CustomProviders)
-	backupActiveProvider := m.existingCfg.Provider
-	backupActiveModel := m.existingCfg.Model
-	backupCustomList := cloneCustomProviderList(m.customProviders)
-
-	if m.existingCfg.CustomProviders == nil {
-		m.existingCfg.CustomProviders = make(map[string]ProviderEntry)
-	}
-	entry := m.existingCfg.CustomProviders[r.editTargetName]
-	if r.model != "" {
-		entry.Model = r.model
-	}
-	if len(r.models) > 0 {
-		entry.Models = append([]string(nil), r.models...)
-	}
-	entry.Models = ensureModelInList(entry.Models, r.model)
-	// Optional fields are always applied so users can intentionally clear them.
-	// To detect "user cleared the API key" vs "user left it masked/untouched",
-	// apiKey is only overwritten when the user actively typed something.
-	entry.URL = r.url
-	entry.Protocol = r.protocol
-	entry.AuthHeader = r.authHeader
-	if key, edited := m.customAPIKeyForSave(); edited {
-		entry.APIKey = key
-	}
-	// Switching an entry to an ambient protocol drops the key it no longer uses,
-	// rather than leaving a live credential in a file nothing reads it from.
-	if entry.Protocol == llm.ProtocolAnthropicBedrock {
-		entry.APIKey = ""
-	}
-	// If name changed, delete old key
-	if r.editTargetName != "" && r.editTargetName != r.provider {
-		if _, exists := m.existingCfg.CustomProviders[r.provider]; exists {
-			m.formError = fmt.Sprintf(`Provider "%s" already exists`, r.provider)
-			return fmt.Errorf("provider %q already exists", r.provider)
-		}
-		delete(m.existingCfg.CustomProviders, r.editTargetName)
-		if m.existingCfg.Provider == r.editTargetName {
-			m.existingCfg.Provider = r.provider
-			m.existingCfg.Model = ""
-		}
-	}
-	m.existingCfg.CustomProviders[r.provider] = entry
-
-	if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-		m.formError = fmt.Sprintf("failed to save: %v", err)
-		if reloaded, reloadErr := loadOrCreateConfig(m.configPath); reloadErr == nil {
-			m.existingCfg = reloaded
-			m.customProviders = collectCustomProviders(reloaded)
-		} else {
-			m.existingCfg.CustomProviders = backupProviders
-			m.existingCfg.Provider = backupActiveProvider
-			m.existingCfg.Model = backupActiveModel
-			m.customProviders = backupCustomList
-		}
-		return fmt.Errorf("save config: %w", err)
-	}
-	m.customProviders = collectCustomProviders(m.existingCfg)
-	if idx := m.findCustomIdx(r.provider); idx >= 0 {
-		m.customIdx = idx
-	}
-	m.savedInSession = true
-	return nil
-}
-
-func (m providerTUIModel) findCustomIdx(name string) int {
-	for i, cp := range m.customProviders {
-		if cp.name == name {
-			return i
-		}
-	}
-	return -1
-}
-
-func (m *providerTUIModel) blurCPStep() {
-	switch m.cpStep {
-	case cpStepName:
-		m.cpNameInput.Blur()
-	case cpStepBaseURL:
-		m.cpURLInput.Blur()
-	case cpStepAPIKey:
-		m.apiKeyInput.Blur()
-	case cpStepAuthHeader:
-		m.cpAuthInput.Blur()
-	}
-}
-
-func (m *providerTUIModel) focusCPStep() tea.Cmd {
-	switch m.cpStep {
-	case cpStepName:
-		return m.cpNameInput.Focus()
-	case cpStepBaseURL:
-		return m.cpURLInput.Focus()
-	case cpStepAPIKey:
-		return m.apiKeyInput.Focus()
-	case cpStepAuthHeader:
-		return m.cpAuthInput.Focus()
-	}
-	return nil
-}
-
-func (m providerTUIModel) passThroughCPInput(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-	switch m.cpStep {
-	case cpStepName:
-		m.cpNameInput, cmd = m.cpNameInput.Update(msg)
-	case cpStepBaseURL:
-		m.cpURLInput, cmd = m.cpURLInput.Update(msg)
-	case cpStepAPIKey:
-		if m.apiKeyMasked && isUserEditMsg(msg) {
-			m.beginAPIKeyReplace()
-		}
-		m.apiKeyInput, cmd = m.apiKeyInput.Update(msg)
-	case cpStepAuthHeader:
-		m.cpAuthInput, cmd = m.cpAuthInput.Update(msg)
-	}
-	if _, ok := msg.(tea.KeyPressMsg); ok {
-		m.formError = ""
-	}
-	return m, cmd
-}
-
-func (m providerTUIModel) updateManualForm(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		m.cancelled = true
-		return m, tea.Quit
-	case "esc":
-		if m.manualStep == manualStepURL {
-			m.inManualForm = false
-			m.manualURLInput.Blur()
-			if m.existingCfg != nil {
-				m.manualURLInput.SetValue(m.existingCfg.Llm.URL)
-				m.manualModelInput.SetValue(m.existingCfg.Llm.Model)
-				m.manualAuthHeaderInput.SetValue(m.existingCfg.Llm.AuthHeader)
-				if m.existingCfg.Llm.AuthToken != "" {
-					m.manualTokenOriginal = m.existingCfg.Llm.AuthToken
-					m.manualTokenMasked = true
-					m.manualTokenInput.SetValue(maskedSecretPlaceholder())
-				} else {
-					m.manualTokenInput.SetValue("")
-					m.manualTokenMasked = false
-					m.manualTokenOriginal = ""
-				}
-			} else {
-				m.manualURLInput.SetValue("")
-				m.manualModelInput.SetValue("")
-				m.manualAuthHeaderInput.SetValue("")
-				m.manualTokenInput.SetValue("")
-				m.manualTokenMasked = false
-				m.manualTokenOriginal = ""
-			}
-			m.formError = ""
-			return m, nil
-		}
-		m.blurManualStep()
-		m.manualStep--
-		m.formError = ""
-		return m, m.focusManualStep()
-	case "enter":
-		return m.handleManualFormEnter()
-	default:
-		if m.manualStep == manualStepProtocol {
-			switch key {
-			case "up", "k":
-				if m.manualProtocolIdx > 0 {
-					m.manualProtocolIdx--
-				}
-				return m, nil
-			case "down", "j":
-				if m.manualProtocolIdx < len(manualProtocols)-1 {
-					m.manualProtocolIdx++
-				}
-				return m, nil
-			}
-		}
-		if m.manualStep == manualStepAuthToken && m.manualTokenMasked {
-			m.beginManualTokenReplace()
-		}
-		return m.passThroughManualInput(msg)
-	}
-}
-
-func (m providerTUIModel) updateDeleteConfirm(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "y", "Y":
-		if m.deleteTargetIdx < 0 || m.deleteTargetIdx >= len(m.customProviders) {
-			m.confirmingDelete = false
-			return m, nil
-		}
-		m.deletedProviders = append(m.deletedProviders, m.deleteTargetName)
-		newList := make([]customProviderListItem, 0, len(m.customProviders)-1)
-		newList = append(newList, m.customProviders[:m.deleteTargetIdx]...)
-		newList = append(newList, m.customProviders[m.deleteTargetIdx+1:]...)
-		m.customProviders = newList
-		if m.customIdx >= len(m.customProviders) && m.customIdx > 0 {
-			m.customIdx = len(m.customProviders) - 1
-		}
-		if m.existingCfg != nil {
-			if m.existingCfg.CustomProviders != nil {
-				delete(m.existingCfg.CustomProviders, m.deleteTargetName)
-			}
-			if m.existingCfg.Provider == m.deleteTargetName {
-				m.existingCfg.Provider = ""
-				m.existingCfg.Model = ""
-			}
-			if m.configPath != "" {
-				if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-					if reloaded, reloadErr := loadOrCreateConfig(m.configPath); reloadErr == nil {
-						m.existingCfg = reloaded
-						m.customProviders = collectCustomProviders(reloaded)
-					}
-					m.formError = fmt.Sprintf("failed to save: %v", err)
-					m.confirmingDelete = false
-					return m, nil
-				}
-			}
-		}
-		m.savedInSession = true
-		m.confirmingDelete = false
-		return m, nil
-	case "n", "N", "esc":
-		m.confirmingDelete = false
-		return m, nil
-	case "ctrl+c":
-		m.cancelled = true
-		return m, tea.Quit
-	}
-	return m, nil
-}
-
-func (m providerTUIModel) updateDeleteModelConfirm(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "y", "Y":
-		switch m.activeTab {
-		case tabCustom:
-			return m.confirmDeleteCustomModel()
-		case tabOfficial:
-			return m.confirmDeleteOfficialModel()
-		default:
-			m.confirmingDeleteModel = false
-		}
-		return m, nil
-	case "n", "N", "esc":
-		m.confirmingDeleteModel = false
-		return m, nil
-	case "ctrl+c":
-		m.cancelled = true
-		return m, tea.Quit
-	}
-	return m, nil
-}
-
-func (m providerTUIModel) confirmDeleteCustomModel() (tea.Model, tea.Cmd) {
-	if m.customIdx >= len(m.customProviders) {
-		m.confirmingDeleteModel = false
-		return m, nil
-	}
-	models := m.models()
-	if m.modelIdx < len(models) {
-		cp := m.customProviders[m.customIdx]
-		prevEntry := cloneProviderEntry(cp.entry)
-		prevCfgModel := ""
-		if m.existingCfg != nil && m.existingCfg.Provider == cp.name {
-			prevCfgModel = m.existingCfg.Model
-		}
-		cp.entry = applyModelDeleteToEntry(cp.entry, m.deleteModelName)
-		clearCfgActiveModelIfDeleted(m.existingCfg, cp.name, m.deleteModelName)
-		m.customProviders[m.customIdx] = cp
-		if m.existingCfg != nil {
-			if m.existingCfg.CustomProviders == nil {
-				m.existingCfg.CustomProviders = make(map[string]ProviderEntry)
-			}
-			m.existingCfg.CustomProviders[cp.name] = cp.entry
-		}
-		if m.configPath != "" {
-			if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-				if !m.reloadConfigAfterSaveFailure() {
-					cp.entry = prevEntry
-					m.customProviders[m.customIdx] = cp
-					if m.existingCfg != nil {
-						m.existingCfg.CustomProviders[cp.name] = prevEntry
-						rollbackCfgActiveModel(m.existingCfg, cp.name, prevCfgModel)
-					}
-				}
-				m.formError = fmt.Sprintf("failed to save: %v", err)
-				m.adjustModelIdxAfterDelete()
-				m.confirmingDeleteModel = false
-				return m, nil
-			}
-		}
-		m.adjustModelIdxAfterDelete()
-		m.savedInSession = true
-	}
-	m.confirmingDeleteModel = false
-	return m, nil
-}
-
-func (m providerTUIModel) confirmDeleteOfficialModel() (tea.Model, tea.Cmd) {
-	if !m.isUserAddedOfficialModel(m.deleteModelName) {
-		m.confirmingDeleteModel = false
-		return m, nil
-	}
-	provider := m.currentProvider()
-	if m.existingCfg == nil || provider.Name == "" {
-		m.confirmingDeleteModel = false
-		return m, nil
-	}
-	if m.existingCfg.Providers == nil {
-		m.existingCfg.Providers = make(map[string]ProviderEntry)
-	}
-	prevEntry := cloneProviderEntry(m.existingCfg.Providers[provider.Name])
-	prevCfgModel := ""
-	if m.existingCfg.Provider == provider.Name {
-		prevCfgModel = m.existingCfg.Model
-	}
-	entry := applyModelDeleteToEntry(m.existingCfg.Providers[provider.Name], m.deleteModelName)
-	clearCfgActiveModelIfDeleted(m.existingCfg, provider.Name, m.deleteModelName)
-	m.existingCfg.Providers[provider.Name] = entry
-	if m.configPath != "" {
-		if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-			if !m.reloadConfigAfterSaveFailure() {
-				m.existingCfg.Providers[provider.Name] = prevEntry
-				rollbackCfgActiveModel(m.existingCfg, provider.Name, prevCfgModel)
-			}
-			m.formError = fmt.Sprintf("failed to save: %v", err)
-			m.adjustModelIdxAfterDelete()
-			m.confirmingDeleteModel = false
-			return m, nil
-		}
-	}
-	m.adjustModelIdxAfterDelete()
-	// In-memory delete succeeded; configPath may be empty in tests (no disk write).
-	m.savedInSession = true
-	m.confirmingDeleteModel = false
-	return m, nil
-}
-
-func (m *providerTUIModel) adjustModelIdxAfterDelete() {
-	updated := m.models()
-	if m.modelIdx >= len(updated) {
-		if len(updated) > 0 {
-			m.modelIdx = len(updated) - 1
-		} else {
-			m.modelIdx = 0
-		}
-	}
-}
-
 // reloadConfigAfterSaveFailure reloads on-disk config and refreshes derived
 // provider TUI state so the UI matches persisted data after a failed save.
 // Returns false when reload could not run (e.g. missing/invalid config path).
@@ -1721,224 +1022,6 @@ func (m *providerTUIModel) reloadConfigAfterSaveFailure() bool {
 	m.customProviders = collectCustomProviders(reloaded)
 	return true
 }
-
-func (m providerTUIModel) handleManualFormEnter() (tea.Model, tea.Cmd) {
-	switch m.manualStep {
-	case manualStepURL:
-		if m.manualURLInput.Value() == "" {
-			return m, nil
-		}
-		m.manualURLInput.Blur()
-		m.manualStep = manualStepProtocol
-		return m, nil
-	case manualStepProtocol:
-		m.manualStep = manualStepModel
-		return m, m.manualModelInput.Focus()
-	case manualStepModel:
-		if m.manualModelInput.Value() == "" {
-			return m, nil
-		}
-		m.manualModelInput.Blur()
-		m.manualStep = manualStepAuthToken
-		return m, m.manualTokenInput.Focus()
-	case manualStepAuthToken:
-		// Same precedence as the provider tabs: an already configured
-		// llm.auth_token_cmd stands in for a typed or saved token.
-		if strings.TrimSpace(m.manualTokenInput.Value()) == "" && m.manualTokenOriginal == "" && m.manualAuthTokenCmd() == "" {
-			m.formError = manualAuthTokenRequiredError
-			return m, nil
-		}
-		m.formError = ""
-		m.manualTokenInput.Blur()
-		m.manualStep = manualStepAuthHeader
-		return m, m.manualAuthHeaderInput.Focus()
-	case manualStepAuthHeader:
-		raw := m.manualAuthHeaderInput.Value()
-		if _, err := llm.NormalizeAuthHeader(raw); err != nil {
-			m.formError = authHeaderFormError(raw)
-			return m, nil
-		}
-		m.manualAuthHeaderInput.Blur()
-		m.confirmed = true
-		return m, tea.Quit
-	}
-	return m, nil
-}
-
-func (m *providerTUIModel) blurManualStep() {
-	switch m.manualStep {
-	case manualStepURL:
-		m.manualURLInput.Blur()
-	case manualStepProtocol:
-		// no input to blur
-	case manualStepModel:
-		m.manualModelInput.Blur()
-	case manualStepAuthToken:
-		m.manualTokenInput.Blur()
-	case manualStepAuthHeader:
-		m.manualAuthHeaderInput.Blur()
-	}
-}
-
-func (m *providerTUIModel) focusManualStep() tea.Cmd {
-	switch m.manualStep {
-	case manualStepURL:
-		return m.manualURLInput.Focus()
-	case manualStepProtocol:
-		return nil
-	case manualStepModel:
-		return m.manualModelInput.Focus()
-	case manualStepAuthToken:
-		return m.manualTokenInput.Focus()
-	case manualStepAuthHeader:
-		return m.manualAuthHeaderInput.Focus()
-	}
-	return nil
-}
-
-func (m providerTUIModel) passThroughManualInput(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-	switch m.manualStep {
-	case manualStepURL:
-		m.manualURLInput, cmd = m.manualURLInput.Update(msg)
-	case manualStepProtocol:
-		return m, nil
-	case manualStepModel:
-		m.manualModelInput, cmd = m.manualModelInput.Update(msg)
-	case manualStepAuthToken:
-		if m.manualTokenMasked && isUserEditMsg(msg) {
-			m.beginManualTokenReplace()
-		}
-		m.manualTokenInput, cmd = m.manualTokenInput.Update(msg)
-	case manualStepAuthHeader:
-		m.manualAuthHeaderInput, cmd = m.manualAuthHeaderInput.Update(msg)
-	}
-	if _, ok := msg.(tea.KeyPressMsg); ok {
-		m.formError = ""
-	}
-	return m, cmd
-}
-
-func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
-	switch m.step {
-	case stepProvider:
-		switch m.activeTab {
-		case tabOfficial:
-			m.step = stepModel
-			currentModel := ""
-			if m.existingCfg != nil {
-				if entry, ok := m.existingCfg.Providers[m.currentProvider().Name]; ok {
-					currentModel = activeModelForProvider(m.existingCfg, m.currentProvider().Name, entry)
-				}
-			}
-			m.prepareModelSelection(m.currentProvider().Name, currentModel)
-			return m, nil
-
-		case tabCustom:
-			addIdx := len(m.customProviders)
-			if m.customIdx == addIdx {
-				m.creatingCustom = true
-				m.cpStep = cpStepName
-				m.cpProtocolIdx = 0 // default anthropic
-				m.formError = ""
-				m.cpNameInput.SetValue("")
-				m.cpURLInput.SetValue("")
-				m.cpAuthInput.SetValue("")
-				m.apiKeyInput.SetValue("")
-				m.apiKeyMasked = false
-				return m, m.cpNameInput.Focus()
-			}
-			cp := m.customProviders[m.customIdx]
-			m.step = stepModel
-			entry := m.customProviderEntry(cp.name, cp.entry)
-			m.prepareModelSelection(cp.name, activeModelForProvider(m.existingCfg, cp.name, entry))
-			return m, nil
-
-		case tabManual:
-			m.inManualForm = true
-			m.manualStep = manualStepURL
-			return m, m.manualURLInput.Focus()
-		}
-
-	case stepModel:
-		if m.isCustomModelItem(m.modelIdx) {
-			m.customModel = true
-			return m, m.modelInput.Focus()
-		}
-		if err := m.syncSessionModelSelection(); err != nil {
-			m.formError = err.Error()
-			return m, nil
-		}
-		if m.activeTab == tabOfficial && m.currentProvider().AmbientAuth {
-			// An ambient-auth provider has no key to collect, so the model step
-			// is the last one. Showing an API-key prompt that must be left blank
-			// would read as a step the user failed to complete.
-			m.formError = ""
-			m.confirmed = true
-			return m, tea.Quit
-		}
-		m.step = stepAPIKey
-		m.formError = ""
-		m.loadExistingAPIKey()
-		return m, m.apiKeyInput.Focus()
-	}
-	return m, nil
-}
-
-func (m providerTUIModel) handleUp() (tea.Model, tea.Cmd) {
-	switch m.step {
-	case stepProvider:
-		switch m.activeTab {
-		case tabOfficial:
-			if m.officialIdx > 0 {
-				m.officialIdx--
-			} else if len(m.providers) > 0 {
-				m.officialIdx = len(m.providers) - 1
-			}
-		case tabCustom:
-			if m.customIdx > 0 {
-				m.customIdx--
-			} else {
-				m.customIdx = m.customListCount() - 1
-			}
-		}
-	case stepModel:
-		if m.modelIdx > 0 {
-			m.modelIdx--
-		} else {
-			m.modelIdx = m.modelCount() - 1
-		}
-	}
-	return m, nil
-}
-
-func (m providerTUIModel) handleDown() (tea.Model, tea.Cmd) {
-	switch m.step {
-	case stepProvider:
-		switch m.activeTab {
-		case tabOfficial:
-			if m.officialIdx < len(m.providers)-1 {
-				m.officialIdx++
-			} else if len(m.providers) > 0 {
-				m.officialIdx = 0
-			}
-		case tabCustom:
-			if m.customIdx < m.customListCount()-1 {
-				m.customIdx++
-			} else {
-				m.customIdx = 0
-			}
-		}
-	case stepModel:
-		if m.modelIdx < m.modelCount()-1 {
-			m.modelIdx++
-		} else {
-			m.modelIdx = 0
-		}
-	}
-	return m, nil
-}
-
 func (m *providerTUIModel) loadExistingAPIKey() {
 	m.apiKeyMasked = false
 	m.apiKeyOriginal = ""
@@ -1961,7 +1044,6 @@ func (m *providerTUIModel) loadExistingAPIKey() {
 		m.apiKeyInput.SetValue(maskedSecretPlaceholder())
 	}
 }
-
 func (m providerTUIModel) selectedModelFromState() string {
 	if m.modelInput.Value() != "" && (m.customModel || m.isCustomModelItem(m.modelIdx)) {
 		return m.modelInput.Value()
@@ -1972,7 +1054,6 @@ func (m providerTUIModel) selectedModelFromState() string {
 	}
 	return ""
 }
-
 func (m providerTUIModel) result() providerTUIResult {
 	switch m.activeTab {
 	case tabOfficial:
@@ -2082,14 +1163,12 @@ func (m providerTUIModel) result() providerTUIResult {
 
 	return providerTUIResult{}
 }
-
 func listCursorPrefix(isCursor bool) string {
 	if isCursor {
 		return "  " + tuiCursorStyle.Render(tuiCursor) + " "
 	}
 	return "    "
 }
-
 func listCursorPrefixForModel(isCursor, userAdded bool) string {
 	if !isCursor {
 		return "    "
@@ -2099,14 +1178,12 @@ func listCursorPrefixForModel(isCursor, userAdded bool) string {
 	}
 	return listCursorPrefix(true)
 }
-
 func renderListName(name string, isCursor bool) string {
 	if isCursor {
 		return tuiSelectedItemStyle.Render(name)
 	}
 	return tuiItemStyle.Render(name)
 }
-
 func renderModelName(name string, isCursor, userAdded bool) string {
 	if isCursor && userAdded {
 		return tuiUserModelSelectedStyle.Render(name)
@@ -2115,7 +1192,6 @@ func renderModelName(name string, isCursor, userAdded bool) string {
 }
 
 // --- View ---
-
 func (m providerTUIModel) View() tea.View {
 	var s strings.Builder
 	s.WriteString("\n")
@@ -2133,464 +1209,6 @@ func (m providerTUIModel) View() tea.View {
 	v.AltScreen = true
 	return v
 }
-
-func renderTabBar(active providerTab) string {
-	tabs := []struct {
-		label string
-		tab   providerTab
-	}{
-		{"Official", tabOfficial},
-		{"Custom", tabCustom},
-		{"Manual", tabManual},
-	}
-
-	var parts []string
-	for _, t := range tabs {
-		if t.tab == active {
-			parts = append(parts, tuiActiveTabStyle.Render("◉ "+t.label))
-		} else {
-			parts = append(parts, tuiInactiveTabStyle.Render("○ "+t.label))
-		}
-	}
-	return "  " + strings.Join(parts, "    ")
-}
-
-func (m providerTUIModel) viewProvider(s *strings.Builder) {
-	s.WriteString(renderTabBar(m.activeTab))
-	s.WriteString("\n\n")
-
-	switch m.activeTab {
-	case tabOfficial:
-		m.viewOfficialTab(s)
-	case tabCustom:
-		m.viewCustomTab(s)
-	case tabManual:
-		m.viewManualTab(s)
-	}
-
-	s.WriteString("\n")
-	if m.creatingCustom || m.editingCustom || m.inManualForm {
-		s.WriteString(tuiHelpStyle.Render("  Enter Confirm · Esc Back"))
-	} else if m.confirmingDelete {
-		s.WriteString(tuiHelpStyle.Render("  y Confirm · n/Esc Cancel"))
-	} else if m.activeTab == tabCustom && m.customIdx < len(m.customProviders) {
-		s.WriteString(tuiHelpStyle.Render("  Enter Select · e Edit · d Delete · Tab/Arrow Navigate · Esc Cancel"))
-	} else {
-		s.WriteString(tuiHelpStyle.Render("  Enter to select · Tab/Arrow keys to navigate · Esc to cancel"))
-	}
-	s.WriteString("\n")
-}
-
-func (m providerTUIModel) viewOfficialTab(s *strings.Builder) {
-	s.WriteString(tuiTitleStyle.Render("  Select a provider"))
-	s.WriteString("\n\n")
-
-	for i, p := range m.providers {
-		isCursor := i == m.officialIdx
-		s.WriteString(listCursorPrefix(isCursor) + renderListName(p.DisplayName, isCursor))
-		if activeModel := m.officialProviderActiveModel(p); activeModel != "" {
-			s.WriteString("  " + tuiDimStyle.Render("("+activeModel+")"))
-		}
-		s.WriteString("\n")
-	}
-}
-
-func (m providerTUIModel) viewCustomTab(s *strings.Builder) {
-	if m.creatingCustom || m.editingCustom {
-		m.viewCustomProviderForm(s)
-		return
-	}
-
-	s.WriteString(tuiTitleStyle.Render("  Select a provider"))
-	s.WriteString("\n\n")
-
-	for i, cp := range m.customProviders {
-		isCursor := i == m.customIdx
-		activeModel := m.customProviderActiveModel(cp)
-		// userAdded here means "green highlight when selected" for user-managed rows.
-		highlight := isCursor
-
-		s.WriteString(listCursorPrefixForModel(isCursor, highlight))
-		s.WriteString(renderModelName(cp.name, isCursor, highlight))
-		if activeModel != "" {
-			s.WriteString("  " + tuiDimStyle.Render("("+activeModel+")"))
-		}
-		s.WriteString("\n")
-	}
-
-	addIdx := len(m.customProviders)
-	cursor := "    "
-	if m.customIdx == addIdx {
-		cursor = "  " + tuiCursorStyle.Render(tuiCursor) + " "
-	}
-	addLabel := "+ Add custom provider"
-	if m.customIdx == addIdx {
-		s.WriteString(cursor + tuiSelectedItemStyle.Render(addLabel))
-	} else {
-		s.WriteString(cursor + tuiDimStyle.Render(addLabel))
-	}
-	s.WriteString("\n")
-
-	if m.confirmingDelete {
-		s.WriteString("\n")
-		prompt := fmt.Sprintf("  Delete %q?", m.deleteTargetName)
-		// existingCfg is the config snapshot from TUI startup; it reflects
-		// the on-disk active provider, not any in-session selection changes.
-		if m.existingCfg != nil && m.existingCfg.Provider == m.deleteTargetName {
-			prompt += " This is the active provider."
-		}
-		prompt += " (y/n)"
-		s.WriteString(tuiSelectedItemStyle.Render(prompt))
-		s.WriteString("\n")
-	}
-}
-
-func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
-	title := "  Add Custom Provider"
-	if m.editingCustom {
-		title = fmt.Sprintf("  Edit Custom Provider (%s)", m.editTargetName)
-	}
-	s.WriteString(tuiTitleStyle.Render(title))
-	s.WriteString("\n\n")
-
-	type field struct {
-		label  string
-		value  string
-		active bool
-	}
-
-	fields := []field{
-		{"Provider name", m.cpNameInput.Value(), m.cpStep == cpStepName},
-		{"Protocol", cpProtocols[m.cpProtocolIdx], m.cpStep == cpStepProtocol},
-	}
-	if !m.cpAmbientProtocol() {
-		fields = append(fields,
-			field{"Base URL", m.cpURLInput.Value(), m.cpStep == cpStepBaseURL},
-			field{"API Key", strings.Repeat("*", len(m.apiKeyInput.Value())), m.cpStep == cpStepAPIKey},
-			field{"Auth Header", m.cpAuthInput.Value(), m.cpStep == cpStepAuthHeader},
-		)
-	}
-
-	for _, f := range fields {
-		if f.active {
-			s.WriteString("  " + tuiSelectedItemStyle.Render(f.label+":") + "\n")
-			switch m.cpStep {
-			case cpStepName:
-				s.WriteString("    " + m.cpNameInput.View() + "\n")
-			case cpStepProtocol:
-				for i, proto := range cpProtocols {
-					if i == m.cpProtocolIdx {
-						cur := "    " + tuiCursorStyle.Render(tuiCursor) + " "
-						s.WriteString(cur + tuiSelectedItemStyle.Render(proto) + "\n")
-					} else {
-						cur := "      "
-						s.WriteString(cur + tuiItemStyle.Render(proto) + "\n")
-					}
-				}
-				if m.cpAmbientProtocol() {
-					s.WriteString(tuiDimStyle.Render("    credentials come from the AWS chain; pin a region or profile with `ocr config set custom_providers."+m.cpNameInput.Value()+".aws_region <r>`") + "\n")
-				}
-			case cpStepBaseURL:
-				s.WriteString("    " + m.cpURLInput.View() + "\n")
-			case cpStepAPIKey:
-				s.WriteString("    " + m.apiKeyInput.View() + "\n")
-				if m.apiKeyMasked && m.apiKeyOriginal != "" {
-					s.WriteString(tuiDimStyle.Render("    "+savedSecretReplaceHint(m.apiKeyOriginal)) + "\n")
-				}
-			case cpStepAuthHeader:
-				s.WriteString("    " + m.cpAuthInput.View() + "\n")
-			}
-		} else {
-			display := f.value
-			if display == "" && f.label == "Auth Header" {
-				display = "(Authorization)"
-			}
-			if display == "" {
-				s.WriteString("  " + tuiDimStyle.Render(f.label+":") + "\n")
-			} else {
-				s.WriteString("  " + tuiDimStyle.Render(f.label+": "+display) + "\n")
-			}
-		}
-	}
-
-	if m.formError != "" {
-		s.WriteString("\n")
-		s.WriteString(tuiErrorStyle.Render("  " + m.formError))
-		s.WriteString("\n")
-	}
-}
-
-func (m providerTUIModel) viewManualTab(s *strings.Builder) {
-	if !m.inManualForm {
-		s.WriteString(tuiTitleStyle.Render("  Manual Configuration"))
-		s.WriteString("\n\n")
-		s.WriteString(tuiItemStyle.Render("  Configure LLM endpoint manually."))
-		s.WriteString("\n")
-		if m.existingCfg != nil && m.existingCfg.Llm.URL != "" {
-			s.WriteString("\n")
-			s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  Current: %s (%s)", m.existingCfg.Llm.URL, m.existingCfg.Llm.Model)))
-			s.WriteString("\n")
-		}
-		s.WriteString("\n")
-		s.WriteString(tuiItemStyle.Render("  Press Enter to configure."))
-		s.WriteString("\n")
-		return
-	}
-
-	s.WriteString(tuiTitleStyle.Render("  Manual Configuration"))
-	s.WriteString("\n\n")
-
-	type field struct {
-		label  string
-		value  string
-		active bool
-	}
-
-	fields := []field{
-		{"URL", m.manualURLInput.Value(), m.manualStep == manualStepURL},
-		{"Protocol", manualProtocols[m.manualProtocolIdx], m.manualStep == manualStepProtocol},
-		{"Model", m.manualModelInput.Value(), m.manualStep == manualStepModel},
-		{"Auth Token", strings.Repeat("*", len(m.manualTokenInput.Value())), m.manualStep == manualStepAuthToken},
-		{"Auth Header", m.manualAuthHeaderInput.Value(), m.manualStep == manualStepAuthHeader},
-	}
-
-	for _, f := range fields {
-		if f.active {
-			s.WriteString("  " + tuiSelectedItemStyle.Render(f.label+":") + "\n")
-			switch m.manualStep {
-			case manualStepURL:
-				s.WriteString("    " + m.manualURLInput.View() + "\n")
-			case manualStepProtocol:
-				for i, proto := range manualProtocols {
-					if i == m.manualProtocolIdx {
-						cur := "    " + tuiCursorStyle.Render(tuiCursor) + " "
-						s.WriteString(cur + tuiSelectedItemStyle.Render(proto) + "\n")
-					} else {
-						cur := "      "
-						s.WriteString(cur + tuiItemStyle.Render(proto) + "\n")
-					}
-				}
-			case manualStepModel:
-				s.WriteString("    " + m.manualModelInput.View() + "\n")
-			case manualStepAuthToken:
-				s.WriteString("    " + m.manualTokenInput.View() + "\n")
-				if m.manualTokenMasked && m.manualTokenOriginal != "" {
-					s.WriteString(tuiDimStyle.Render("    "+savedSecretReplaceHint(m.manualTokenOriginal)) + "\n")
-				}
-				if m.manualAuthTokenCmd() != "" {
-					s.WriteString(tuiDimStyle.Render(keyCmdConfiguredHintLine("    ", "llm.auth_token_cmd")) + "\n")
-				}
-			case manualStepAuthHeader:
-				s.WriteString("    " + m.manualAuthHeaderInput.View() + "\n")
-			}
-		} else {
-			display := f.value
-			if display == "" && f.label == "Auth Header" {
-				display = "(Authorization)"
-			}
-			if display == "" {
-				s.WriteString("  " + tuiDimStyle.Render(f.label+":") + "\n")
-			} else {
-				s.WriteString("  " + tuiDimStyle.Render(f.label+": "+display) + "\n")
-			}
-		}
-	}
-
-	if m.formError != "" {
-		s.WriteString("\n")
-		s.WriteString(tuiErrorStyle.Render("  " + m.formError))
-		s.WriteString("\n")
-	}
-}
-
-func (m providerTUIModel) viewModel(s *strings.Builder) {
-	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select a model (%s)", m.modelProviderName())))
-	s.WriteString("\n\n")
-
-	models := m.models()
-
-	for i, model := range models {
-		isCursor := i == m.modelIdx
-		if m.activeTab == tabOfficial {
-			userAdded := m.isUserAddedOfficialModel(model)
-			s.WriteString(listCursorPrefixForModel(isCursor, userAdded))
-			s.WriteString(renderModelName(model, isCursor, userAdded))
-		} else {
-			// Custom tab: all models are user-managed; pass isCursor as userAdded
-			// so green highlight applies only to the selected row (not registry semantics).
-			s.WriteString(listCursorPrefixForModel(isCursor, isCursor))
-			s.WriteString(renderModelName(model, isCursor, isCursor))
-		}
-		s.WriteString("\n")
-	}
-
-	customIdx := len(models)
-	isCursor := m.modelIdx == customIdx
-	customLabel := "Enter custom model name..."
-	if isCursor {
-		s.WriteString(listCursorPrefix(isCursor) + tuiSelectedItemStyle.Render(customLabel))
-	} else {
-		s.WriteString(listCursorPrefix(isCursor) + tuiDimStyle.Render(customLabel))
-	}
-	s.WriteString("\n")
-
-	if m.customModel {
-		s.WriteString("\n")
-		s.WriteString("  " + m.modelInput.View())
-		if m.formError != "" {
-			s.WriteString("\n")
-			s.WriteString("  " + tuiErrorStyle.Render(m.formError))
-		}
-		s.WriteString("\n")
-	}
-
-	s.WriteString("\n")
-
-	if m.confirmingDeleteModel {
-		s.WriteString("  " + tuiSelectedItemStyle.Render(fmt.Sprintf("Delete %q? (y/n)", m.deleteModelName)))
-		s.WriteString("\n")
-		s.WriteString(tuiHelpStyle.Render("  y Confirm · n/Esc Cancel"))
-	} else if m.cursorOnDeletableModel() {
-		s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  d Delete  Esc Back"))
-	} else {
-		s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  Esc Back"))
-	}
-	s.WriteString("\n")
-}
-
-func (m providerTUIModel) viewAPIKey(s *strings.Builder) {
-	var title string
-	if m.activeTab == tabCustom && m.customIdx < len(m.customProviders) {
-		title = fmt.Sprintf("  Enter API Key (%s)", m.customProviders[m.customIdx].name)
-	} else {
-		provider := m.currentProvider()
-		title = fmt.Sprintf("  Enter API Key (%s)", provider.DisplayName)
-	}
-	s.WriteString(tuiTitleStyle.Render(title))
-	s.WriteString("\n\n")
-
-	s.WriteString("  " + m.apiKeyInput.View())
-	s.WriteString("\n")
-
-	// When an API key is already saved, the input starts masked. Surface a
-	// hint so the user knows typing or pasting will replace the saved key,
-	// and show a short prefix fingerprint so they can sanity-check which key
-	// is currently saved without exposing it.
-	if m.apiKeyMasked && m.apiKeyOriginal != "" {
-		s.WriteString("\n")
-		s.WriteString(tuiDimStyle.Render(savedSecretReplaceHintLine(m.apiKeyOriginal)))
-		s.WriteString("\n")
-	}
-
-	// Mirrors the env-var hint below: the step is already satisfied, so say so
-	// rather than leaving an empty field that looks unconfigured.
-	if m.apiKeyCmdForStep() != "" {
-		s.WriteString("\n")
-		s.WriteString(tuiDimStyle.Render(keyCmdConfiguredHintLine("  ", "api_key_cmd")))
-		s.WriteString("\n")
-	}
-
-	if m.activeTab == tabOfficial {
-		provider := m.currentProvider()
-		if envKey := os.Getenv(provider.EnvVar); envKey != "" {
-			s.WriteString("\n")
-			hasSavedKey := m.apiKeyMasked && m.apiKeyOriginal != ""
-			s.WriteString(tuiDimStyle.Render(officialAPIKeyEnvSetHintLine(provider.EnvVar, hasSavedKey)))
-			s.WriteString("\n")
-		} else {
-			s.WriteString("\n")
-			s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  Tip: You can also set via env var %s", provider.EnvVar)))
-			s.WriteString("\n")
-		}
-	}
-
-	if m.formError != "" {
-		s.WriteString("\n")
-		s.WriteString(tuiErrorStyle.Render("  " + m.formError))
-		s.WriteString("\n")
-	}
-
-	s.WriteString("\n")
-	s.WriteString(tuiHelpStyle.Render("  Enter Confirm  Esc Back"))
-	s.WriteString("\n")
-}
-
-// savedSecretFingerprintMinHiddenLen is the minimum number of runes that must
-// sit between the visible prefix and suffix so the fingerprint does not expose
-// the entire key (e.g. a 10-rune key with prefix 6 + suffix 4).
-const savedSecretFingerprintMinHiddenLen = 5
-
-// savedSecretFingerprintMinLen is the minimum trimmed secret length required
-// before a fingerprint is shown. Shorter keys hide the parenthetical hint.
-const savedSecretFingerprintMinLen = savedSecretFingerprintPrefixLen + savedSecretFingerprintSuffixLen + savedSecretFingerprintMinHiddenLen
-
-// savedSecretFingerprintPrefixLen is how many leading runes to show.
-const savedSecretFingerprintPrefixLen = 6
-
-// savedSecretFingerprintSuffixLen is how many trailing runes to show.
-const savedSecretFingerprintSuffixLen = 4
-
-// savedSecretFingerprint returns a short fingerprint for display, e.g.
-// "sk-a1b2...wxyz" (first 6 + "..." + last 4). Returns "" when the trimmed
-// secret is shorter than savedSecretFingerprintMinLen runes.
-func savedSecretFingerprint(s string) string {
-	s = strings.TrimSpace(s)
-	runes := []rune(s)
-	if len(runes) < savedSecretFingerprintMinLen {
-		return ""
-	}
-	prefix := string(runes[:savedSecretFingerprintPrefixLen])
-	suffix := string(runes[len(runes)-savedSecretFingerprintSuffixLen:])
-	return prefix + "..." + suffix
-}
-
-// savedSecretReplaceHint builds the replace hint text without leading indent.
-func savedSecretReplaceHint(original string) string {
-	hint := "Type or paste to replace the saved key."
-	if fp := savedSecretFingerprint(original); fp != "" {
-		hint += fmt.Sprintf("  (saved: %s)", fp)
-	}
-	return hint
-}
-
-func savedSecretReplaceHintLine(original string) string {
-	return "  " + savedSecretReplaceHint(original)
-}
-
-func officialAPIKeyEnvSetHint(envVar string, hasSavedKey bool) string {
-	if hasSavedKey {
-		return fmt.Sprintf("$%s is set; used only when no key is saved here.", envVar)
-	}
-	return fmt.Sprintf("$%s is set. Leave empty to use it; enter a key here to override.", envVar)
-}
-
-func officialAPIKeyEnvSetHintLine(envVar string, hasSavedKey bool) string {
-	return "  " + officialAPIKeyEnvSetHint(envVar, hasSavedKey)
-}
-
-// keyCmdConfiguredHint explains why this step accepts an empty field. A
-// provider configured only by command renders a blank input -- the command line
-// is not the secret, but it is also not the value being edited here -- so
-// without this the user has no way to tell a credential is already wired up,
-// and no way to know that leaving the field empty is the correct action.
-// keyLabel names the config key so the hint points at what to edit instead.
-//
-// The command itself is deliberately not echoed. It is usually a bare reference
-// (`op read op://...`), but nothing stops a user from inlining a secret into it
-// (`VAULT_TOKEN=hvs.xxx vault kv get ...`), and this wizard masks every other
-// credential it displays -- printing one user-authored string verbatim into
-// screenshots and terminal recordings is the one hole in that. Naming the config
-// key is what the hint is for and is enough to identify the command: there is
-// exactly one per provider, so the user knows which value to go read or edit.
-func keyCmdConfiguredHint(keyLabel string) string {
-	return fmt.Sprintf("%s is set; leave empty to keep using it.", keyLabel)
-}
-
-func keyCmdConfiguredHintLine(indent, keyLabel string) string {
-	return indent + keyCmdConfiguredHint(keyLabel)
-}
-
-// --- Styles ---
 
 const tuiCursor = "▸"
 
@@ -2633,523 +1251,3 @@ var (
 )
 
 // --- Model-only TUI (for `ocr config model`) ---
-
-type modelTUIConfig struct {
-	Provider       llm.Provider
-	CurrentModel   string
-	RegistryModels []string
-	ExistingCfg    *Config
-	ConfigPath     string
-	ProviderName   string
-	IsCustom       bool
-}
-
-type modelTUIModel struct {
-	width  int
-	height int
-
-	provider    llm.Provider
-	models      []string
-	modelIdx    int
-	customModel bool
-	modelInput  textinput.Model
-	activeModel string
-
-	registryModels   []string
-	existingCfg      *Config
-	configPath       string
-	providerName     string
-	isCustomProvider bool
-
-	confirmingDeleteModel bool
-	deleteModelName       string
-	formError             string
-
-	confirmed bool
-	cancelled bool
-
-	// savedInSession is true after a model add/delete was persisted during the session.
-	savedInSession bool
-}
-
-// newModelTUI builds a model-only TUI for tests. It has no config path or existing
-// config, so add/delete/persist operations are unavailable — use newModelTUIConfig
-// in production (ocr config model). IsCustom follows whether the provider is a preset.
-func newModelTUI(provider llm.Provider, currentModel string) modelTUIModel {
-	registryModels := append([]string(nil), provider.Models...)
-	isCustom := true
-	if preset, ok := llm.LookupProvider(provider.Name); ok {
-		isCustom = false
-		registryModels = append([]string(nil), preset.Models...)
-	}
-	return newModelTUIConfig(modelTUIConfig{
-		Provider:       provider,
-		CurrentModel:   currentModel,
-		ProviderName:   provider.Name,
-		RegistryModels: registryModels,
-		IsCustom:       isCustom,
-	})
-}
-
-func newModelTUIConfig(cfg modelTUIConfig) modelTUIModel {
-	mi := textinput.New()
-	mi.Placeholder = "model name(s), comma-separated"
-	mi.SetWidth(50)
-
-	m := modelTUIModel{
-		provider:         cfg.Provider,
-		width:            80,
-		height:           24,
-		modelInput:       mi,
-		activeModel:      cfg.CurrentModel,
-		registryModels:   append([]string(nil), cfg.RegistryModels...),
-		existingCfg:      cfg.ExistingCfg,
-		configPath:       cfg.ConfigPath,
-		providerName:     cfg.ProviderName,
-		isCustomProvider: cfg.IsCustom,
-	}
-
-	if cfg.IsCustom {
-		m.models = append([]string(nil), cfg.Provider.Models...)
-	}
-
-	if cfg.CurrentModel != "" {
-		found := false
-		models := m.displayModels()
-		for i, model := range models {
-			if model == cfg.CurrentModel {
-				m.modelIdx = i
-				found = true
-				break
-			}
-		}
-		if !found {
-			m.modelIdx = len(models)
-			m.modelInput.SetValue(cfg.CurrentModel)
-		}
-	}
-
-	return m
-}
-
-func (m modelTUIModel) displayModels() []string {
-	// Custom providers store the list in m.models (updated on add/delete).
-	// Official providers derive the list from registry + config on each call.
-	if m.isCustomProvider {
-		return m.models
-	}
-	models := append([]string(nil), m.registryModels...)
-	if m.existingCfg != nil && m.providerName != "" {
-		if entry, ok := m.existingCfg.Providers[m.providerName]; ok {
-			models = mergeModelLists(models, entry.Models)
-		}
-	}
-	return models
-}
-
-func (m modelTUIModel) isUserAddedModel(name string) bool {
-	if m.isCustomProvider {
-		// Custom providers have no llm registry; every model comes from config and
-		// is user-managed. List membership guards confirm against stale names.
-		return llm.ModelListContains(m.displayModels(), name)
-	}
-	return isUserAddedOfficialModelName(name, m.providerName, m.registryModels, m.existingCfg)
-}
-
-func (m modelTUIModel) cursorOnUserAddedModel() bool {
-	if m.confirmingDeleteModel {
-		return false
-	}
-	models := m.displayModels()
-	if m.modelIdx >= len(models) {
-		return false
-	}
-	if m.isCustomProvider {
-		return true
-	}
-	return m.isUserAddedModel(models[m.modelIdx])
-}
-
-func (m *modelTUIModel) adjustModelIdxAfterDelete() {
-	m.syncModelsFromConfig()
-	models := m.displayModels()
-	if m.modelIdx >= len(models) {
-		if len(models) > 0 {
-			m.modelIdx = len(models) - 1
-		} else {
-			m.modelIdx = 0
-		}
-	}
-}
-
-// reloadConfigAfterSaveFailure reloads on-disk config so in-memory state matches
-// persisted data after a failed save. Returns false when reload could not run.
-func (m *modelTUIModel) reloadConfigAfterSaveFailure() bool {
-	if m.configPath == "" {
-		return false
-	}
-	reloaded, err := loadOrCreateConfig(m.configPath)
-	if err != nil {
-		return false
-	}
-	m.existingCfg = reloaded
-	m.syncModelsFromConfig()
-	return true
-}
-
-func (m *modelTUIModel) syncModelsFromConfig() {
-	if !m.isCustomProvider || m.existingCfg == nil || m.providerName == "" {
-		return
-	}
-	if entry, ok := m.existingCfg.CustomProviders[m.providerName]; ok {
-		m.models = append([]string(nil), entry.Models...)
-	}
-}
-
-func (m *modelTUIModel) refreshModelSelectionAfterAdd(name string) {
-	models := m.displayModels()
-	for i, model := range models {
-		if model == name {
-			m.modelIdx = i
-			return
-		}
-	}
-	if len(models) > 0 {
-		m.modelIdx = len(models) - 1
-	} else {
-		m.modelIdx = 0
-	}
-}
-
-// persistAddedModelName appends a model to the provider's Models list in config
-// and saves to disk. It does not change the active model.
-func (m *modelTUIModel) persistAddedModelName(name string) error {
-	if name == "" {
-		return fmt.Errorf("model name must not be empty")
-	}
-	if m.existingCfg == nil || m.providerName == "" {
-		return fmt.Errorf("config not available")
-	}
-	if m.isCustomProvider {
-		if m.existingCfg.CustomProviders == nil {
-			m.existingCfg.CustomProviders = make(map[string]ProviderEntry)
-		}
-		entry := m.existingCfg.CustomProviders[m.providerName]
-		prevEntry := cloneProviderEntry(entry)
-		entry.Models = ensureModelInList(entry.Models, name)
-		m.existingCfg.CustomProviders[m.providerName] = entry
-		if m.configPath != "" {
-			if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-				if !m.reloadConfigAfterSaveFailure() {
-					m.existingCfg.CustomProviders[m.providerName] = prevEntry
-					m.models = append([]string(nil), prevEntry.Models...)
-				}
-				return fmt.Errorf("failed to save models: %w", err)
-			}
-		}
-		m.models = append([]string(nil), entry.Models...)
-		m.savedInSession = true
-		return nil
-	}
-	if m.existingCfg.Providers == nil {
-		m.existingCfg.Providers = make(map[string]ProviderEntry)
-	}
-	entry := m.existingCfg.Providers[m.providerName]
-	prevEntry := cloneProviderEntry(entry)
-	entry.Models = ensureModelInList(entry.Models, name)
-	m.existingCfg.Providers[m.providerName] = entry
-	if m.configPath != "" {
-		if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-			if !m.reloadConfigAfterSaveFailure() {
-				m.existingCfg.Providers[m.providerName] = prevEntry
-			}
-			return fmt.Errorf("failed to save models: %w", err)
-		}
-	}
-	m.savedInSession = true
-	return nil
-}
-
-func (m modelTUIModel) Init() tea.Cmd {
-	return nil
-}
-
-func (m modelTUIModel) isCustomItem(idx int) bool {
-	return idx == len(m.displayModels())
-}
-
-func (m modelTUIModel) itemCount() int {
-	return len(m.displayModels()) + 1
-}
-
-func (m modelTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		return m, nil
-
-	case tea.KeyPressMsg:
-		key := msg.String()
-
-		if m.confirmingDeleteModel {
-			return m.updateDeleteModelConfirm(key)
-		}
-
-		if m.customModel {
-			switch key {
-			case "esc":
-				m.customModel = false
-				m.modelInput.Blur()
-				m.modelInput.SetValue("")
-				return m, nil
-			case "enter":
-				name := strings.TrimSpace(m.modelInput.Value())
-				if name == "" {
-					return m, nil
-				}
-				if llm.ModelListContains(m.displayModels(), name) {
-					m.formError = fmt.Sprintf("Already in list: %s", name)
-					return m, nil
-				}
-				m.formError = ""
-				if err := m.persistAddedModelName(name); err != nil {
-					m.formError = err.Error()
-					return m, nil
-				}
-				m.customModel = false
-				m.modelInput.Blur()
-				m.modelInput.SetValue("")
-				m.refreshModelSelectionAfterAdd(name)
-				return m, nil
-			default:
-				var cmd tea.Cmd
-				m.modelInput, cmd = m.modelInput.Update(msg)
-				m.formError = ""
-				return m, cmd
-			}
-		}
-
-		switch key {
-		case "ctrl+c", "esc":
-			m.cancelled = true
-			return m, tea.Quit
-		case "enter":
-			if m.isCustomItem(m.modelIdx) {
-				m.customModel = true
-				return m, m.modelInput.Focus()
-			}
-			m.confirmed = true
-			return m, tea.Quit
-		case "up", "k":
-			if m.modelIdx > 0 {
-				m.modelIdx--
-			} else {
-				m.modelIdx = m.itemCount() - 1
-			}
-			return m, nil
-		case "down", "j":
-			if m.modelIdx < m.itemCount()-1 {
-				m.modelIdx++
-			} else {
-				m.modelIdx = 0
-			}
-			return m, nil
-		case "d":
-			if m.cursorOnUserAddedModel() {
-				models := m.displayModels()
-				m.confirmingDeleteModel = true
-				m.deleteModelName = models[m.modelIdx]
-			}
-			return m, nil
-		}
-
-	default:
-		if m.customModel {
-			var cmd tea.Cmd
-			m.modelInput, cmd = m.modelInput.Update(msg)
-			return m, cmd
-		}
-	}
-	return m, nil
-}
-
-func (m *modelTUIModel) updateDeleteModelConfirm(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "y", "Y":
-		return m.confirmDeleteModel()
-	case "n", "N", "esc":
-		m.confirmingDeleteModel = false
-		return *m, nil
-	case "ctrl+c":
-		m.cancelled = true
-		return *m, tea.Quit
-	}
-	return *m, nil
-}
-
-func (m *modelTUIModel) confirmDeleteModel() (tea.Model, tea.Cmd) {
-	if m.isCustomProvider {
-		return m.confirmDeleteCustomProviderModel()
-	}
-	return m.confirmDeleteOfficialModel()
-}
-
-func (m *modelTUIModel) confirmDeleteCustomProviderModel() (tea.Model, tea.Cmd) {
-	if !m.isUserAddedModel(m.deleteModelName) {
-		m.confirmingDeleteModel = false
-		return *m, nil
-	}
-	if m.existingCfg == nil || m.providerName == "" {
-		m.confirmingDeleteModel = false
-		return *m, nil
-	}
-	if m.existingCfg.CustomProviders == nil {
-		m.existingCfg.CustomProviders = make(map[string]ProviderEntry)
-	}
-	prevEntry := cloneProviderEntry(m.existingCfg.CustomProviders[m.providerName])
-	prevCfgModel := ""
-	if m.existingCfg.Provider == m.providerName {
-		prevCfgModel = m.existingCfg.Model
-	}
-	entry := applyModelDeleteToEntry(m.existingCfg.CustomProviders[m.providerName], m.deleteModelName)
-	clearCfgActiveModelIfDeleted(m.existingCfg, m.providerName, m.deleteModelName)
-	m.existingCfg.CustomProviders[m.providerName] = entry
-	if m.configPath != "" {
-		if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-			if !m.reloadConfigAfterSaveFailure() {
-				m.rollbackModelDelete(prevEntry, prevCfgModel)
-			}
-			m.formError = fmt.Sprintf("failed to save: %v", err)
-			m.adjustModelIdxAfterDelete()
-			m.confirmingDeleteModel = false
-			return *m, nil
-		}
-	}
-	m.adjustModelIdxAfterDelete()
-	m.resetCustomModelInput()
-	m.savedInSession = true
-	m.confirmingDeleteModel = false
-	return *m, nil
-}
-
-func (m *modelTUIModel) confirmDeleteOfficialModel() (tea.Model, tea.Cmd) {
-	if !m.isUserAddedModel(m.deleteModelName) {
-		m.confirmingDeleteModel = false
-		return *m, nil
-	}
-	if m.existingCfg == nil || m.providerName == "" {
-		m.confirmingDeleteModel = false
-		return *m, nil
-	}
-	if m.existingCfg.Providers == nil {
-		m.existingCfg.Providers = make(map[string]ProviderEntry)
-	}
-	prevEntry := cloneProviderEntry(m.existingCfg.Providers[m.providerName])
-	prevCfgModel := ""
-	if m.existingCfg.Provider == m.providerName {
-		prevCfgModel = m.existingCfg.Model
-	}
-	entry := applyModelDeleteToEntry(m.existingCfg.Providers[m.providerName], m.deleteModelName)
-	clearCfgActiveModelIfDeleted(m.existingCfg, m.providerName, m.deleteModelName)
-	m.existingCfg.Providers[m.providerName] = entry
-	if m.configPath != "" {
-		if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-			if !m.reloadConfigAfterSaveFailure() {
-				m.rollbackModelDelete(prevEntry, prevCfgModel)
-			}
-			m.formError = fmt.Sprintf("failed to save: %v", err)
-			m.adjustModelIdxAfterDelete()
-			m.confirmingDeleteModel = false
-			return *m, nil
-		}
-	}
-	m.adjustModelIdxAfterDelete()
-	m.resetCustomModelInput()
-	m.savedInSession = true
-	m.confirmingDeleteModel = false
-	return *m, nil
-}
-
-func (m *modelTUIModel) resetCustomModelInput() {
-	m.customModel = false
-	m.modelInput.SetValue("")
-	m.modelInput.Blur()
-}
-
-func (m modelTUIModel) selectedModel() string {
-	if m.customModel || m.isCustomItem(m.modelIdx) {
-		return m.modelInput.Value()
-	}
-	models := m.displayModels()
-	if m.modelIdx < len(models) {
-		return models[m.modelIdx]
-	}
-	return ""
-}
-
-func (m modelTUIModel) View() tea.View {
-	var s strings.Builder
-	s.WriteString("\n")
-	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select a model (%s)", m.provider.DisplayName)))
-	s.WriteString("\n")
-	if m.provider.BaseURL != "" {
-		s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  Base URL: %s", m.provider.BaseURL)))
-		s.WriteString("\n")
-	}
-	s.WriteString("\n")
-
-	models := m.displayModels()
-	for i, model := range models {
-		isCursor := i == m.modelIdx
-		if m.isCustomProvider {
-			// All models are user-managed; isCursor drives green highlight on selection.
-			s.WriteString(listCursorPrefixForModel(isCursor, isCursor))
-			s.WriteString(renderModelName(model, isCursor, isCursor))
-		} else {
-			userAdded := m.isUserAddedModel(model)
-			s.WriteString(listCursorPrefixForModel(isCursor, userAdded))
-			s.WriteString(renderModelName(model, isCursor, userAdded))
-		}
-		s.WriteString("\n")
-	}
-
-	customIdx := len(models)
-	isCursor := m.modelIdx == customIdx
-	customLabel := "Enter custom model name..."
-	if isCursor {
-		s.WriteString(listCursorPrefix(isCursor) + tuiSelectedItemStyle.Render(customLabel))
-	} else {
-		s.WriteString(listCursorPrefix(isCursor) + tuiDimStyle.Render(customLabel))
-	}
-	s.WriteString("\n")
-
-	if m.customModel {
-		s.WriteString("\n")
-		s.WriteString("  " + m.modelInput.View())
-		s.WriteString("\n")
-	}
-
-	if m.formError != "" {
-		s.WriteString("\n")
-		s.WriteString(tuiErrorStyle.Render("  " + m.formError))
-		s.WriteString("\n")
-	}
-
-	s.WriteString("\n")
-
-	if m.confirmingDeleteModel {
-		s.WriteString("  " + tuiSelectedItemStyle.Render(fmt.Sprintf("Delete %q? (y/n)", m.deleteModelName)))
-		s.WriteString("\n")
-		s.WriteString(tuiHelpStyle.Render("  y Confirm · n/Esc Cancel"))
-	} else if m.cursorOnUserAddedModel() {
-		s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  d Delete  Esc Cancel"))
-	} else {
-		s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  Esc Cancel"))
-	}
-	s.WriteString("\n")
-
-	v := tea.NewView(s.String())
-	v.AltScreen = true
-	return v
-}
