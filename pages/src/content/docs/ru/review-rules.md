@@ -232,7 +232,6 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/*Tests.swift`
 - `**/Tests/**/*.swift`
 - `**/tests/**/*.elm`
-- `**/vendor/**/*.{jsonnet,libsonnet}`
 - `**/test/**/*.zig`
 - `**/*_test.zig`
 - `**/kitex_gen/**/*.go`
@@ -250,17 +249,47 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/tests/**/*.sol`
 - `**/test/**/*.vy`
 - `**/tests/**/*.vy`
-
-…и каталоги зависимостей и сборки:
-
 - `**/node_modules/**`
 - `**/bower_components/**`
-- `**/vendor/**`
-- `**/target/**`
+- `**/.pnpm-store/**`
+- `**/.yarn/{cache,unplugged,releases,sdks,patches}/**`
+- `**/.pnp.cjs`
+- `**/.pnp.loader.mjs`
+- `**/package-lock.json`
+- `**/pnpm-lock.yaml`
+- `**/npm-shrinkwrap.json`
+- `**/*.min.{js,css}`
 - `**/dist/**`
-- `**/__pycache__/**`, `**/.venv/**`, `**/site-packages/**`
-- `**/Pods/**`, `**/Carthage/**`
-- `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
+- `**/.next/**`
+- `**/.nuxt/**`
+- `**/.svelte-kit/**`
+- `**/.astro/**`
+- `**/.turbo/**`
+- `**/.angular/**`
+- `**/.parcel-cache/**`
+- `**/.docusaurus/**`
+- `**/vendor/**`
+- `**/.bundle/**`
+- `**/target/**`
+- `**/.gradle/**`
+- `**/__pycache__/**`
+- `**/.venv/**`
+- `**/venv/**`
+- `**/site-packages/**`
+- `**/*.egg-info/**`
+- `**/.tox/**`
+- `**/.mypy_cache/**`
+- `**/.pytest_cache/**`
+- `**/.ruff_cache/**`
+- `**/Pods/**`
+- `**/Carthage/**`
+- `**/.build/**`
+- `**/obj/**`
+- `**/.dart_tool/**`
+- `**/.terraform/**`
+- `**/.terraform.lock.hcl`
+- `**/.stack-work/**`
+- `**/coverage/lcov-report/**`
 
 `**/build/**` и `**/bin/**` намеренно отсутствуют: во многих проектах в них
 лежат написанные вручную исходники.

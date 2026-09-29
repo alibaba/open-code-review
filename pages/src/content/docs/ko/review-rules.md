@@ -218,7 +218,6 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/*Tests.swift`
 - `**/Tests/**/*.swift`
 - `**/tests/**/*.elm`
-- `**/vendor/**/*.{jsonnet,libsonnet}`
 - `**/test/**/*.zig`
 - `**/*_test.zig`
 - `**/kitex_gen/**/*.go`
@@ -236,17 +235,47 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/tests/**/*.sol`
 - `**/test/**/*.vy`
 - `**/tests/**/*.vy`
-
-…그리고 의존성 디렉터리와 빌드 산출물 디렉터리:
-
 - `**/node_modules/**`
 - `**/bower_components/**`
-- `**/vendor/**`
-- `**/target/**`
+- `**/.pnpm-store/**`
+- `**/.yarn/{cache,unplugged,releases,sdks,patches}/**`
+- `**/.pnp.cjs`
+- `**/.pnp.loader.mjs`
+- `**/package-lock.json`
+- `**/pnpm-lock.yaml`
+- `**/npm-shrinkwrap.json`
+- `**/*.min.{js,css}`
 - `**/dist/**`
-- `**/__pycache__/**`, `**/.venv/**`, `**/site-packages/**`
-- `**/Pods/**`, `**/Carthage/**`
-- `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
+- `**/.next/**`
+- `**/.nuxt/**`
+- `**/.svelte-kit/**`
+- `**/.astro/**`
+- `**/.turbo/**`
+- `**/.angular/**`
+- `**/.parcel-cache/**`
+- `**/.docusaurus/**`
+- `**/vendor/**`
+- `**/.bundle/**`
+- `**/target/**`
+- `**/.gradle/**`
+- `**/__pycache__/**`
+- `**/.venv/**`
+- `**/venv/**`
+- `**/site-packages/**`
+- `**/*.egg-info/**`
+- `**/.tox/**`
+- `**/.mypy_cache/**`
+- `**/.pytest_cache/**`
+- `**/.ruff_cache/**`
+- `**/Pods/**`
+- `**/Carthage/**`
+- `**/.build/**`
+- `**/obj/**`
+- `**/.dart_tool/**`
+- `**/.terraform/**`
+- `**/.terraform.lock.hcl`
+- `**/.stack-work/**`
+- `**/coverage/lcov-report/**`
 
 `**/build/**` 와 `**/bin/**` 은 의도적으로 빠져 있습니다. 많은 프로젝트가 손으로
 작성한 소스를 그 안에 두기 때문입니다.
