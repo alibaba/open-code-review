@@ -536,6 +536,134 @@ func TestTriggerAsyncCompression(t *testing.T) {
 	}
 }
 
+func TestRunCompression_TruncatedSummaryDeclined(t *testing.T) {
+	t_tempDir = t.TempDir()
+	summaryText := "truncated partial summary that was cut off..."
+
+	tests := []struct {
+		name       string
+		choice     llm.Choice
+		wantReason string
+	}{
+		{
+			name: "finish_reason length",
+			choice: llm.Choice{
+				FinishReason: "length",
+				Message:      llm.ResponseMessage{Content: &summaryText},
+			},
+			wantReason: "length",
+		},
+		{
+			name: "finish_reason max_tokens",
+			choice: llm.Choice{
+				FinishReason: "max_tokens",
+				Message:      llm.ResponseMessage{Content: &summaryText},
+			},
+			wantReason: "max_tokens",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeLLMClient{
+				response: &llm.ChatResponse{
+					Choices: []llm.Choice{tc.choice},
+				},
+			}
+			tpl := template.Template{
+				MemoryCompressionTask: template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "{{context}}"}},
+				},
+				MaxTokens: 50,
+			}
+			r := newTestRunner(client, tpl)
+
+			msgs := []llm.Message{
+				msg("system", "sys"),
+				msg("user", "prompt"),
+			}
+			for i := 0; i < 10; i++ {
+				msgs = append(msgs, msg("assistant", strings.Repeat("word ", 100)))
+				msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
+			}
+
+			got, err := r.runCompression(context.Background(), msgs, "test.go")
+			if err == nil {
+				t.Fatal("expected error on truncated summary, got nil")
+			}
+			if !strings.Contains(err.Error(), "memory compression truncated") {
+				t.Errorf("error = %q, want it to mention memory compression truncated", err.Error())
+			}
+			if !strings.Contains(err.Error(), tc.wantReason) {
+				t.Errorf("error = %q, want it to contain reason %q", err.Error(), tc.wantReason)
+			}
+			if len(got) != len(msgs) {
+				t.Fatalf("expected messages unchanged on truncated summary, got len %d vs %d", len(got), len(msgs))
+			}
+			for i := range msgs {
+				if got[i].ExtractText() != msgs[i].ExtractText() {
+					t.Errorf("message[%d] changed: got %q, want %q", i, got[i].ExtractText(), msgs[i].ExtractText())
+				}
+			}
+		})
+	}
+}
+
+func TestTriggerAsyncCompression_TruncatedSummaryDeclined(t *testing.T) {
+	t_tempDir = t.TempDir()
+	summaryText := "incomplete async summary"
+	client := &fakeLLMClient{
+		response: &llm.ChatResponse{
+			Choices: []llm.Choice{{
+				FinishReason: "length",
+				Message:      llm.ResponseMessage{Content: &summaryText},
+			}},
+			Usage: &llm.UsageInfo{PromptTokens: 50, CompletionTokens: 10},
+		},
+	}
+	tpl := template.Template{
+		MemoryCompressionTask: template.LlmConversation{
+			Messages: []template.ChatMessage{{Role: "user", Content: "{{context}}"}},
+		},
+		MaxTokens: 50,
+	}
+	r := newTestRunner(client, tpl)
+
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+	}
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, msg("assistant", strings.Repeat("word ", 100)))
+		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
+	}
+
+	st := &compressionState{}
+	r.triggerAsyncCompression(context.Background(), st, msgs, "test.go")
+
+	st.mu.Lock()
+	job := st.pendingJob
+	st.mu.Unlock()
+
+	if job == nil {
+		t.Fatal("expected pendingJob to be set")
+	}
+	<-job.done
+
+	if job.rebuilt != nil {
+		t.Fatal("expected rebuilt to remain nil on truncated summary")
+	}
+
+	origLen := len(msgs)
+	applied := r.tryApplyPendingCompression(st, &msgs)
+	if applied {
+		t.Error("tryApplyPendingCompression should return false when summary was truncated")
+	}
+	if len(msgs) != origLen {
+		t.Errorf("messages length changed: got %d, want %d", len(msgs), origLen)
+	}
+}
+
 func TestCompression_CrossFileIsolation(t *testing.T) {
 	t_tempDir = t.TempDir()
 	summary := "summary A"

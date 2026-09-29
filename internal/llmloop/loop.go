@@ -448,6 +448,10 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		llmSpan.End()
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
+		if resp.IsTruncated() {
+			fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: LLM response truncated for %s (finish_reason: %s)\n", taskKey, resp.FinishReason())
+		}
+
 		content := resp.VisibleContent()
 		calls := resp.ToolCalls()
 
