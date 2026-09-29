@@ -332,6 +332,10 @@ runs:
         if command -v git >/dev/null 2>&1; then
           echo "git_installed=true" >> "$GITHUB_OUTPUT"
           echo "git is already installed: $(git --version)"
+          GIT_VERSION="$(git --version | awk '{print $3}' || true)"
+          if [ -n "$GIT_VERSION" ] && [ "$(printf '%s\n%s\n' "2.41" "$GIT_VERSION" | sort -V | head -n 1)" != "2.41" ]; then
+            echo "::warning::git $GIT_VERSION is older than the minimum supported 2.41; some commands may not work correctly."
+          fi
         else
           echo "git_installed=false" >> "$GITHUB_OUTPUT"
           echo "git is not installed"
@@ -361,7 +365,11 @@ runs:
           echo "::error::Unable to install git: no supported package manager found"
           exit 1
         fi
-        git --version
+        GIT_VERSION="$(git --version | awk '{print $3}' || true)"
+        echo "git is installed: $(git --version)"
+        if [ -n "$GIT_VERSION" ] && [ "$(printf '%s\n%s\n' "2.41" "$GIT_VERSION" | sort -V | head -n 1)" != "2.41" ]; then
+          echo "::warning::git $GIT_VERSION is older than the minimum supported 2.41; some commands may not work correctly."
+        fi
 
     - name: Setup Node.js
       if: steps.check_deps.outputs.node_installed != 'true'
