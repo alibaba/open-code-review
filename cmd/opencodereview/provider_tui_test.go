@@ -6,6 +6,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -301,8 +302,7 @@ func TestProviderTUI_ManualFormEscRefocusesPreviousInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := newProviderTUI(&Config{}, "")
-			m.activeTab = tabManual
+			m := newProviderTUIOnTab(&Config{}, "", tabManual)
 			m.inManualForm = true
 			m.manualStep = tt.fromStep
 
@@ -545,14 +545,8 @@ func TestProviderTUI_SessionModelPickSurvivesOfficialProviderSwitch(t *testing.T
 			"deepseek": {Model: "deepseek-v4-flash"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "baidu-qianfan" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "baidu-qianfan")
 
 	result, _ := m.Update(enterKey())
 	m2 := result.(providerTUIModel)
@@ -613,24 +607,14 @@ func TestProviderTUI_CustomTabSelectAddStartsForm(t *testing.T) {
 }
 
 func TestProviderTUI_CustomFormEscFromNameExitsForm(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-
-	// Switch to custom tab and start form
-	result, _ := m.Update(rightKey())
-	m2 := result.(providerTUIModel)
-	result, _ = m2.Update(enterKey())
-	m3 := result.(providerTUIModel)
-	if !m3.creatingCustom {
-		t.Fatalf("should be creating custom")
-	}
+	m := openCustomProviderForm(t, &Config{}, "")
 
 	// Esc from name step should exit form
-	result, _ = m3.Update(escKey())
-	m4 := result.(providerTUIModel)
-	if m4.creatingCustom {
+	m = sendKey(m, escKey())
+	if m.creatingCustom {
 		t.Error("Esc from name step should exit custom form")
 	}
-	if m4.cancelled {
+	if m.cancelled {
 		t.Error("should not be cancelled")
 	}
 }
@@ -684,47 +668,24 @@ func TestProviderTUI_CustomFormRejectsDuplicateName(t *testing.T) {
 }
 
 func TestProviderTUI_CustomFormRejectsInvalidAuthHeader(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{}
-	m := newProviderTUI(cfg, configPath)
-
-	result, _ := m.Update(rightKey())
-	m2 := result.(providerTUIModel)
-	result, _ = m2.Update(enterKey())
-	m3 := result.(providerTUIModel)
-
-	m3.cpNameInput.SetValue("my-new")
-	result, _ = m3.Update(enterKey())
-	m4 := result.(providerTUIModel)
-	result, _ = m4.Update(enterKey())
-	m5 := result.(providerTUIModel)
-	m5.cpURLInput.SetValue("https://api.example.com")
-	result, _ = m5.Update(enterKey())
-	m6 := result.(providerTUIModel)
-	result, _ = m6.Update(enterKey())
-	m7 := result.(providerTUIModel)
-	if m7.cpStep != cpStepAuthHeader {
-		t.Fatalf("cpStep = %d, want %d", m7.cpStep, cpStepAuthHeader)
-	}
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	m := fillCustomFormToAuthHeader(t, openCustomProviderForm(t, &Config{}, configPath), "")
 
 	for _, c := range "bad-header" {
-		result, _ = m7.Update(charKey(c))
-		m7 = result.(providerTUIModel)
+		m = sendKey(m, charKey(c))
 	}
-	result, _ = m7.Update(enterKey())
-	m8 := result.(providerTUIModel)
+	m = sendKey(m, enterKey())
 
-	if m8.cpStep != cpStepAuthHeader {
-		t.Errorf("cpStep = %d, want %d", m8.cpStep, cpStepAuthHeader)
+	if m.cpStep != cpStepAuthHeader {
+		t.Errorf("cpStep = %d, want %d", m.cpStep, cpStepAuthHeader)
 	}
-	if m8.formError == "" {
+	if m.formError == "" {
 		t.Error("expected formError for invalid auth header")
 	}
-	if !strings.Contains(m8.formError, "Unsupported Auth Header") {
-		t.Errorf("formError = %q, want unsupported auth header message", m8.formError)
+	if !strings.Contains(m.formError, "Unsupported Auth Header") {
+		t.Errorf("formError = %q, want unsupported auth header message", m.formError)
 	}
-	if !m8.creatingCustom {
+	if !m.creatingCustom {
 		t.Error("creatingCustom should remain true when validation fails")
 	}
 	if _, err := os.Stat(configPath); err == nil {
@@ -744,8 +705,7 @@ func TestProviderTUI_CustomFormEditRejectsInvalidAuthHeader(t *testing.T) {
 			},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, configPath, tabCustom)
 	m.customIdx = 0
 	m.enterEditCustomProvider()
 	m.cpStep = cpStepAuthHeader
@@ -784,8 +744,7 @@ func TestProviderTUI_EditCustomProviderSaveRejectsDuplicateRename(t *testing.T) 
 			},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, configPath, tabCustom)
 	m.editingCustom = true
 	m.editTargetName = "other"
 	m.cpProtocolIdx = 1 // openai
@@ -821,8 +780,7 @@ func TestApplyEditCustomProviderSave_ClearsAPIKeyWhenEditedEmpty(t *testing.T) {
 			},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, configPath, tabCustom)
 	m.editingCustom = true
 	m.editTargetName = "aaa"
 	m.cpProtocolIdx = 0
@@ -836,10 +794,7 @@ func TestApplyEditCustomProviderSave_ClearsAPIKeyWhenEditedEmpty(t *testing.T) {
 	if got := cfg.CustomProviders["aaa"].APIKey; got != "" {
 		t.Errorf("APIKey = %q, want empty", got)
 	}
-	diskCfg, err := loadOrCreateConfig(configPath)
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
+	diskCfg := loadDiskConfig(t, configPath)
 	if got := diskCfg.CustomProviders["aaa"].APIKey; got != "" {
 		t.Errorf("persisted APIKey = %q, want empty", got)
 	}
@@ -857,8 +812,7 @@ func TestApplyEditCustomProviderSave_PreservesAPIKeyWhenMasked(t *testing.T) {
 			},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, configPath, tabCustom)
 	m.customIdx = 0
 	m.enterEditCustomProvider()
 
@@ -884,14 +838,8 @@ func TestProviderTUI_EditCustomClearKey_NoMaskedOnStepAPIKey(t *testing.T) {
 			},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
-	for i, cp := range m.customProviders {
-		if cp.name == "aaa" {
-			m.customIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, configPath, tabCustom)
+	selectCustomProvider(t, &m, "aaa")
 	m.enterEditCustomProvider()
 	m.cpStep = cpStepAPIKey
 	m.beginAPIKeyReplace()
@@ -935,8 +883,7 @@ func TestProviderTUI_ReenterEditAfterClearKey_ShowsEmpty(t *testing.T) {
 			},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, configPath, tabCustom)
 	m.customIdx = 0
 	m.editingCustom = true
 	m.editTargetName = "aaa"
@@ -982,51 +929,34 @@ func TestCustomAPIKeyForSave(t *testing.T) {
 }
 
 func TestProviderTUI_CustomFormCreateReturnsToModelList(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
+	configPath := filepath.Join(t.TempDir(), "config.json")
 	cfg := &Config{}
-	m := newProviderTUI(cfg, configPath)
+	m := fillCustomFormToAuthHeader(t, openCustomProviderForm(t, cfg, configPath), "key-123")
 
-	result, _ := m.Update(rightKey())
-	m2 := result.(providerTUIModel)
-	result, _ = m2.Update(enterKey())
-	m3 := result.(providerTUIModel)
-
-	m3.cpNameInput.SetValue("my-new")
-	result, _ = m3.Update(enterKey()) // name -> protocol
-	m4 := result.(providerTUIModel)
-	result, _ = m4.Update(enterKey()) // protocol -> URL
-	m5 := result.(providerTUIModel)
-	m5.cpURLInput.SetValue("https://api.example.com")
-	result, _ = m5.Update(enterKey()) // URL -> API key
-	m6 := result.(providerTUIModel)
-	m6.apiKeyInput.SetValue("key-123")
-	result, _ = m6.Update(enterKey()) // API key -> auth header
-	m7 := result.(providerTUIModel)
-	result, cmd := m7.Update(enterKey()) // auth header -> save
-	m8 := result.(providerTUIModel)
+	result, cmd := m.Update(enterKey()) // auth header -> save
+	m = result.(providerTUIModel)
 
 	if cmd != nil {
 		t.Error("create should not quit TUI")
 	}
-	if m8.creatingCustom {
+	if m.creatingCustom {
 		t.Error("creatingCustom should be false after create")
 	}
 	// Create should drop the user into the model selection step for the new
 	// provider so they can pick/add a model right away.
-	if m8.step != stepModel {
-		t.Errorf("step = %d, want stepModel", m8.step)
+	if m.step != stepModel {
+		t.Errorf("step = %d, want stepModel", m.step)
 	}
-	if len(m8.customProviders) != 1 {
-		t.Fatalf("expected 1 custom provider, got %d", len(m8.customProviders))
+	if len(m.customProviders) != 1 {
+		t.Fatalf("expected 1 custom provider, got %d", len(m.customProviders))
 	}
-	if m8.customProviders[0].name != "my-new" {
-		t.Errorf("provider name = %q, want %q", m8.customProviders[0].name, "my-new")
+	if m.customProviders[0].name != "my-new" {
+		t.Errorf("provider name = %q, want %q", m.customProviders[0].name, "my-new")
 	}
 	if cfg.Provider != "" {
 		t.Error("active provider should not be set when only creating")
 	}
-	if !m8.savedInSession {
+	if !m.savedInSession {
 		t.Error("savedInSession should be true after create")
 	}
 	if _, err := os.Stat(configPath); err != nil {
@@ -1087,13 +1017,6 @@ func TestProviderTUI_SelectExistingCustomGoesToModel(t *testing.T) {
 }
 
 // --- collectCustomProviders tests ---
-
-func TestCollectCustomProviders_NilConfig(t *testing.T) {
-	result := collectCustomProviders(nil)
-	if result != nil {
-		t.Errorf("expected nil, got %v", result)
-	}
-}
 
 func TestCollectCustomProviders_ReadsCustomProviders(t *testing.T) {
 	cfg := &Config{
@@ -1315,198 +1238,50 @@ func TestActiveModelForProvider_FallsBackToCfgModel(t *testing.T) {
 	}
 }
 
-func TestProviderTUI_CustomModelInput_AddsSingleName(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{
-		Provider: "stepfun",
-		Model:    "step-3.5-flash",
-		CustomProviders: map[string]ProviderEntry{
-			"stepfun": {
-				URL:    "https://api.stepfun.com/v1",
-				Model:  "step-3.5-flash",
-				Models: []string{"step-3.5-flash"},
-			},
-		},
-	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
-	m.customIdx = 0
-	m.step = stepModel
-	m.modelIdx = len(m.models()) // land on "Enter custom model name..."
-	m.customModel = true
-	m.modelInput.SetValue("newmodel")
-	m.modelInput.Focus()
+func TestProviderTUI_CustomModelInput_AddsModel(t *testing.T) {
+	for _, tab := range customModelInputTabs {
+		t.Run(tab.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.json")
+			m := enterCustomModelName(tab.build(t, configPath), "newmodel")
 
-	result, _ := m.Update(enterKey())
-	m2 := result.(providerTUIModel)
-
-	if m2.customModel {
-		t.Error("customModel should be cleared after Enter")
-	}
-	if m2.formError != "" {
-		t.Errorf("formError = %q, want empty", m2.formError)
-	}
-	got := m2.existingCfg.CustomProviders["stepfun"].Models
-	want := []string{"step-3.5-flash", "newmodel"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("Models = %v, want %v", got, want)
-	}
-	if !m2.savedInSession {
-		t.Error("savedInSession should be true after add")
-	}
-
-	diskCfg, err := loadOrCreateConfig(configPath)
-	if err != nil {
-		t.Fatalf("load disk config: %v", err)
-	}
-	diskModels := diskCfg.CustomProviders["stepfun"].Models
-	if len(diskModels) != 2 || diskModels[1] != "newmodel" {
-		t.Errorf("disk Models = %v, want last=step-3.5-flash,newmodel", diskModels)
+			if m.customModel {
+				t.Error("customModel should be cleared after Enter")
+			}
+			if m.formError != "" {
+				t.Errorf("formError = %q, want empty", m.formError)
+			}
+			if !m.savedInSession {
+				t.Error("savedInSession should be true after add")
+			}
+			assertModels(t, "Models", tab.models(m.existingCfg), tab.listed, "newmodel")
+			assertModels(t, "disk Models", tab.models(loadDiskConfig(t, configPath)), tab.listed, "newmodel")
+		})
 	}
 }
 
 func TestProviderTUI_CustomModelInput_RejectsDuplicate(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{
-		Provider: "stepfun",
-		Model:    "step-3.5-flash",
-		CustomProviders: map[string]ProviderEntry{
-			"stepfun": {
-				URL:    "https://api.stepfun.com/v1",
-				Model:  "step-3.5-flash",
-				Models: []string{"step-3.5-flash"},
-			},
-		},
-	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
-	m.customIdx = 0
-	m.step = stepModel
-	m.modelIdx = len(m.models())
-	m.customModel = true
-	m.modelInput.SetValue("step-3.5-flash")
-	m.modelInput.Focus()
+	for _, tab := range customModelInputTabs {
+		t.Run(tab.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.json")
+			m := enterCustomModelName(tab.build(t, configPath), tab.listed)
 
-	result, _ := m.Update(enterKey())
-	m2 := result.(providerTUIModel)
-
-	if !m2.customModel {
-		t.Error("customModel should stay true after duplicate reject")
-	}
-	if m2.formError != "Already in list: step-3.5-flash" {
-		t.Errorf("formError = %q, want %q", m2.formError, "Already in list: step-3.5-flash")
-	}
-	if m2.modelInput.Value() != "step-3.5-flash" {
-		t.Errorf("input should be preserved on dup; got %q", m2.modelInput.Value())
-	}
-	if len(m2.existingCfg.CustomProviders["stepfun"].Models) != 1 {
-		t.Errorf("Models mutated: %v", m2.existingCfg.CustomProviders["stepfun"].Models)
-	}
-	if _, err := os.Stat(configPath); err == nil {
-		t.Errorf("disk file should not exist; duplicate did not persist")
-	}
-	if m2.savedInSession {
-		t.Error("savedInSession should be false after rejected duplicate")
-	}
-}
-
-func TestProviderTUI_OfficialTab_CustomModelInput_PersistsName(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{
-		Provider: "dashscope",
-		Model:    "qwen3.7-max",
-		Providers: map[string]ProviderEntry{
-			"dashscope": {
-				Model:  "qwen3.7-max",
-				Models: []string{"qwen3.7-max"},
-			},
-		},
-	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabOfficial
-
-	// Land the cursor on the official provider we configured.
-	for i, p := range m.providers {
-		if p.Name == "dashscope" {
-			m.officialIdx = i
-			break
-		}
-	}
-	m.step = stepModel
-	m.modelIdx = len(m.models()) // "Enter custom model name..."
-	m.customModel = true
-	m.modelInput.SetValue("my-custom-model")
-	m.modelInput.Focus()
-
-	result, _ := m.Update(enterKey())
-	m2 := result.(providerTUIModel)
-
-	if m2.customModel {
-		t.Error("customModel should be cleared after Enter")
-	}
-	if m2.formError != "" {
-		t.Errorf("formError = %q, want empty", m2.formError)
-	}
-	if !m2.savedInSession {
-		t.Error("savedInSession should be true after successful add")
-	}
-	got := m2.existingCfg.Providers["dashscope"].Models
-	want := []string{"qwen3.7-max", "my-custom-model"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("official Models = %v, want %v", got, want)
-	}
-
-	diskCfg, err := loadOrCreateConfig(configPath)
-	if err != nil {
-		t.Fatalf("load disk config: %v", err)
-	}
-	diskModels := diskCfg.Providers["dashscope"].Models
-	if len(diskModels) != 2 || diskModels[1] != "my-custom-model" {
-		t.Errorf("disk Models = %v, want [qwen3.7-max my-custom-model]", diskModels)
-	}
-}
-
-func TestProviderTUI_OfficialTab_CustomModelInput_RejectsDuplicate(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{
-		Provider: "dashscope",
-		Model:    "qwen3.7-max",
-		Providers: map[string]ProviderEntry{
-			"dashscope": {
-				Model:  "qwen3.7-max",
-				Models: []string{"qwen3.7-max"},
-			},
-		},
-	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "dashscope" {
-			m.officialIdx = i
-			break
-		}
-	}
-	m.step = stepModel
-	m.modelIdx = len(m.models())
-	m.customModel = true
-	m.modelInput.SetValue("qwen3.7-max")
-	m.modelInput.Focus()
-
-	result, _ := m.Update(enterKey())
-	m2 := result.(providerTUIModel)
-
-	if !m2.customModel {
-		t.Error("customModel should stay true after duplicate reject")
-	}
-	if m2.formError != "Already in list: qwen3.7-max" {
-		t.Errorf("formError = %q, want %q", m2.formError, "Already in list: qwen3.7-max")
-	}
-	if _, err := os.Stat(configPath); err == nil {
-		t.Errorf("disk file should not exist; duplicate did not persist")
+			if !m.customModel {
+				t.Error("customModel should stay true after duplicate reject")
+			}
+			if want := "Already in list: " + tab.listed; m.formError != want {
+				t.Errorf("formError = %q, want %q", m.formError, want)
+			}
+			if m.modelInput.Value() != tab.listed {
+				t.Errorf("input should be preserved on dup; got %q", m.modelInput.Value())
+			}
+			assertModels(t, "Models", tab.models(m.existingCfg), tab.listed)
+			if _, err := os.Stat(configPath); err == nil {
+				t.Errorf("disk file should not exist; duplicate did not persist")
+			}
+			if m.savedInSession {
+				t.Error("savedInSession should be false after rejected duplicate")
+			}
+		})
 	}
 }
 
@@ -1524,15 +1299,90 @@ func officialDashscopeModelTUI(t *testing.T, configPath string, extraModels []st
 			},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "dashscope" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, configPath, tabOfficial)
+	selectOfficialProvider(t, &m, "dashscope")
 	m.step = stepModel
+	return m
+}
+
+// Each tab starts with listed as its only model.
+type customModelInputTab struct {
+	name   string
+	build  func(t *testing.T, configPath string) providerTUIModel
+	listed string
+	models func(cfg *Config) []string
+}
+
+var customModelInputTabs = []customModelInputTab{
+	{
+		name: "custom tab",
+		build: func(t *testing.T, configPath string) providerTUIModel {
+			return customStepfunModelTUI(t, configPath, nil)
+		},
+		listed: "step-3.5-flash",
+		models: func(cfg *Config) []string { return cfg.CustomProviders["stepfun"].Models },
+	},
+	{
+		name: "official tab",
+		build: func(t *testing.T, configPath string) providerTUIModel {
+			return officialDashscopeModelTUI(t, configPath, nil)
+		},
+		listed: "qwen3.7-max",
+		models: func(cfg *Config) []string { return cfg.Providers["dashscope"].Models },
+	},
+}
+
+func enterCustomModelName(m providerTUIModel, name string) providerTUIModel {
+	m.modelIdx = len(m.models())
+	m.customModel = true
+	m.modelInput.SetValue(name)
+	m.modelInput.Focus()
+	return sendKey(m, enterKey())
+}
+
+func loadDiskConfig(t *testing.T, configPath string) *Config {
+	t.Helper()
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("load disk config: %v", err)
+	}
+	return cfg
+}
+
+func assertModels(t *testing.T, what string, got []string, want ...string) {
+	t.Helper()
+	if !slices.Equal(got, want) {
+		t.Errorf("%s = %v, want %v", what, got, want)
+	}
+}
+
+func sendKey(m providerTUIModel, key tea.KeyPressMsg) providerTUIModel {
+	result, _ := m.Update(key)
+	return result.(providerTUIModel)
+}
+
+func openCustomProviderForm(t *testing.T, cfg *Config, configPath string) providerTUIModel {
+	t.Helper()
+	m := sendKey(sendKey(newProviderTUI(cfg, configPath), rightKey()), enterKey())
+	if !m.creatingCustom {
+		t.Fatal("should be creating custom")
+	}
+	return m
+}
+
+// The provider is always named "my-new".
+func fillCustomFormToAuthHeader(t *testing.T, m providerTUIModel, apiKey string) providerTUIModel {
+	t.Helper()
+	m.cpNameInput.SetValue("my-new")
+	m = sendKey(m, enterKey()) // name -> protocol
+	m = sendKey(m, enterKey()) // protocol -> URL
+	m.cpURLInput.SetValue("https://api.example.com")
+	m = sendKey(m, enterKey()) // URL -> API key
+	m.apiKeyInput.SetValue(apiKey)
+	m = sendKey(m, enterKey()) // API key -> auth header
+	if m.cpStep != cpStepAuthHeader {
+		t.Fatalf("cpStep = %d, want %d", m.cpStep, cpStepAuthHeader)
+	}
 	return m
 }
 
@@ -1553,14 +1403,8 @@ func customStepfunModelTUI(t *testing.T, configPath string, models []string) pro
 			},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
-	for i, cp := range m.customProviders {
-		if cp.name == "stepfun" {
-			m.customIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, configPath, tabCustom)
+	selectCustomProvider(t, &m, "stepfun")
 	m.step = stepModel
 	return m
 }
@@ -1596,58 +1440,11 @@ func TestProviderTUI_OfficialTab_DeleteUserAddedModel(t *testing.T) {
 	if m3.confirmingDeleteModel {
 		t.Error("confirmingDeleteModel should be false after y")
 	}
-	got := m3.existingCfg.Providers["dashscope"].Models
-	if len(got) != 1 || got[0] != "qwen3.7-max" {
-		t.Errorf("Models = %v, want [qwen3.7-max]", got)
-	}
+	assertModels(t, "Models", m3.existingCfg.Providers["dashscope"].Models, "qwen3.7-max")
 	if !m3.savedInSession {
 		t.Error("savedInSession should be true after delete")
 	}
-
-	diskCfg, err := loadOrCreateConfig(configPath)
-	if err != nil {
-		t.Fatalf("load disk config: %v", err)
-	}
-	if len(diskCfg.Providers["dashscope"].Models) != 1 {
-		t.Errorf("disk Models = %v, want [qwen3.7-max]", diskCfg.Providers["dashscope"].Models)
-	}
-}
-
-func TestProviderTUI_OfficialTab_DeleteBuiltInModelIgnored(t *testing.T) {
-	m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
-	m.modelIdx = modelIdxForName(t, m, "qwen3.7-max")
-
-	result, _ := m.Update(dKey())
-	m2 := result.(providerTUIModel)
-	if m2.confirmingDeleteModel {
-		t.Error("pressing d on built-in model should not trigger delete confirmation")
-	}
-}
-
-func TestProviderTUI_OfficialTab_RegistryModelNotDeletable(t *testing.T) {
-	m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
-	m.modelIdx = modelIdxForName(t, m, "qwen3.7-max")
-
-	if m.isUserAddedOfficialModel("qwen3.7-max") {
-		t.Error("qwen3.7-max should not be user-added when it is in the registry")
-	}
-
-	result, _ := m.Update(dKey())
-	m2 := result.(providerTUIModel)
-	if m2.confirmingDeleteModel {
-		t.Error("pressing d on registry model should not trigger delete confirmation")
-	}
-}
-
-func TestProviderTUI_OfficialTab_DeleteOnCustomModelInputIgnored(t *testing.T) {
-	m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
-	m.modelIdx = len(m.models())
-
-	result, _ := m.Update(dKey())
-	m2 := result.(providerTUIModel)
-	if m2.confirmingDeleteModel {
-		t.Error("pressing d on Enter custom model name... should not trigger delete confirmation")
-	}
+	assertModels(t, "disk Models", loadDiskConfig(t, configPath).Providers["dashscope"].Models, "qwen3.7-max")
 }
 
 func TestProviderTUI_CustomTab_DeleteOnCustomModelInputIgnored(t *testing.T) {
@@ -1658,38 +1455,6 @@ func TestProviderTUI_CustomTab_DeleteOnCustomModelInputIgnored(t *testing.T) {
 	m2 := result.(providerTUIModel)
 	if m2.confirmingDeleteModel {
 		t.Error("pressing d on Enter custom model name... should not trigger delete confirmation")
-	}
-}
-
-func TestProviderTUI_CustomTab_ModelShowsDeleteHint(t *testing.T) {
-	m := customStepfunModelTUI(t, "", []string{"step-3.5-flash", "aaa"})
-
-	m.modelIdx = len(m.models())
-	got := stripANSI(m.View().Content)
-	if strings.Contains(got, "d Delete") {
-		t.Errorf("custom input row should not show d Delete hint; got:\n%s", got)
-	}
-
-	m.modelIdx = modelIdxForName(t, m, "aaa")
-	got = stripANSI(m.View().Content)
-	if !strings.Contains(got, "d Delete") {
-		t.Errorf("custom model row should show d Delete hint; got:\n%s", got)
-	}
-}
-
-func TestProviderTUI_OfficialTab_UserAddedModelShowsDeleteHint(t *testing.T) {
-	m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
-
-	m.modelIdx = modelIdxForName(t, m, "qwen3.7-max")
-	got := stripANSI(m.View().Content)
-	if strings.Contains(got, "d Delete") {
-		t.Errorf("built-in model should not show d Delete hint; got:\n%s", got)
-	}
-
-	m.modelIdx = modelIdxForName(t, m, "my-custom-model")
-	got = stripANSI(m.View().Content)
-	if !strings.Contains(got, "d Delete") {
-		t.Errorf("user-added model should show d Delete hint; got:\n%s", got)
 	}
 }
 
@@ -1714,62 +1479,6 @@ func TestProviderTUI_OfficialTab_DeleteModelPreservesActiveModel(t *testing.T) {
 	}
 	if m3.existingCfg.Model != "qwen3.7-max" {
 		t.Errorf("cfg.Model = %q, want qwen3.7-max", m3.existingCfg.Model)
-	}
-}
-
-func TestProviderTUI_OfficialTab_DeleteUserAddedModelCancel(t *testing.T) {
-	cancelKeys := []struct {
-		name string
-		key  tea.KeyPressMsg
-	}{
-		{"n", nKey()},
-		{"esc", escKey()},
-	}
-	for _, tc := range cancelKeys {
-		t.Run(tc.name, func(t *testing.T) {
-			m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
-			m.modelIdx = modelIdxForName(t, m, "my-custom-model")
-
-			result, _ := m.Update(dKey())
-			m2 := result.(providerTUIModel)
-			if !m2.confirmingDeleteModel {
-				t.Fatal("expected confirmingDeleteModel after d")
-			}
-
-			result, _ = m2.Update(tc.key)
-			m3 := result.(providerTUIModel)
-			if m3.confirmingDeleteModel {
-				t.Error("confirmingDeleteModel should be false after cancel")
-			}
-			got := m3.existingCfg.Providers["dashscope"].Models
-			if len(got) != 2 || got[1] != "my-custom-model" {
-				t.Errorf("Models = %v, want model unchanged", got)
-			}
-		})
-	}
-}
-
-func TestProviderTUI_OfficialTab_DeleteActiveUserModelClearsCfg(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	m := officialDashscopeModelTUI(t, configPath, []string{"my-custom-model"})
-	m.existingCfg.Model = "my-custom-model"
-	m.existingCfg.Providers["dashscope"] = ProviderEntry{
-		Model:  "my-custom-model",
-		Models: []string{"qwen3.7-max", "my-custom-model"},
-	}
-	m.modelIdx = modelIdxForName(t, m, "my-custom-model")
-
-	result, _ := m.Update(dKey())
-	m2 := result.(providerTUIModel)
-	result, _ = m2.Update(yKey())
-	m3 := result.(providerTUIModel)
-
-	if m3.existingCfg.Providers["dashscope"].Model != "" {
-		t.Errorf("entry.Model = %q, want empty", m3.existingCfg.Providers["dashscope"].Model)
-	}
-	if m3.existingCfg.Model != "" {
-		t.Errorf("cfg.Model = %q, want empty", m3.existingCfg.Model)
 	}
 }
 
@@ -1822,14 +1531,8 @@ func TestProviderTUI_CustomTab_DeleteModelViaDKey(t *testing.T) {
 			},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
-	for i, cp := range m.customProviders {
-		if cp.name == "stepfun" {
-			m.customIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, configPath, tabCustom)
+	selectCustomProvider(t, &m, "stepfun")
 	m.step = stepModel
 	m.modelIdx = modelIdxForName(t, m, "aaa")
 
@@ -1841,18 +1544,8 @@ func TestProviderTUI_CustomTab_DeleteModelViaDKey(t *testing.T) {
 
 	result, _ = m2.Update(yKey())
 	m3 := result.(providerTUIModel)
-	got := m3.existingCfg.CustomProviders["stepfun"].Models
-	if len(got) != 1 || got[0] != "step-3.5-flash" {
-		t.Errorf("Models = %v, want [step-3.5-flash]", got)
-	}
-
-	diskCfg, err := loadOrCreateConfig(configPath)
-	if err != nil {
-		t.Fatalf("load disk config: %v", err)
-	}
-	if len(diskCfg.CustomProviders["stepfun"].Models) != 1 {
-		t.Errorf("disk Models = %v, want [step-3.5-flash]", diskCfg.CustomProviders["stepfun"].Models)
-	}
+	assertModels(t, "Models", m3.existingCfg.CustomProviders["stepfun"].Models, "step-3.5-flash")
+	assertModels(t, "disk Models", loadDiskConfig(t, configPath).CustomProviders["stepfun"].Models, "step-3.5-flash")
 }
 
 func TestProviderTUI_PersistCustomModelName_SaveFailureRollsBack(t *testing.T) {
@@ -1888,8 +1581,7 @@ func TestProviderTUI_ManualFormPassesKToAuthHeaderInput(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	cfg := &Config{Llm: LlmConfig{URL: "https://example.com/v1", Model: "m", AuthToken: "k"}}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabManual
+	m := newProviderTUIOnTab(cfg, configPath, tabManual)
 	m.inManualForm = true
 	m.manualStep = manualStepAuthHeader
 	m.manualAuthHeaderInput.Focus()
@@ -1927,14 +1619,11 @@ func TestProviderTUI_CustomFormPassesKToAuthHeaderInput(t *testing.T) {
 	m.cpStep = cpStepAuthHeader
 	m.cpAuthInput.Focus()
 
-	result, _ := m.Update(charKey('k'))
-	m2 := result.(providerTUIModel)
-	result, _ = m2.Update(charKey('e'))
-	m3 := result.(providerTUIModel)
-	result, _ = m3.Update(charKey('y'))
-	m4 := result.(providerTUIModel)
+	for _, c := range "key" {
+		m = sendKey(m, charKey(c))
+	}
 
-	if got := m4.cpAuthInput.Value(); got != "key" {
+	if got := m.cpAuthInput.Value(); got != "key" {
 		t.Errorf("cpAuthInput.Value() = %q, want %q", got, "key")
 	}
 }
@@ -1947,14 +1636,8 @@ func TestProviderTUI_ViewAPIKey_MaskedShowsReplaceHintAndLastFour(t *testing.T) 
 			"dashscope": {APIKey: "sk-secret-1234567890abcd"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "dashscope" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "dashscope")
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
 	m.apiKeyInput.Focus()
@@ -1980,14 +1663,8 @@ func TestProviderTUI_ViewAPIKey_ShortKeyOmitsFingerprint(t *testing.T) {
 			"dashscope": {APIKey: "12345678901234"}, // 14 runes — below min length 15
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "dashscope" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "dashscope")
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
 	m.apiKeyInput.Focus()
@@ -2009,14 +1686,8 @@ func TestProviderTUI_ViewAPIKey_MinLenKeyShowsFingerprint(t *testing.T) {
 			"dashscope": {APIKey: "123456789012345"}, // 15 runes — at min length
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "dashscope" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "dashscope")
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
 	m.apiKeyInput.Focus()
@@ -2044,14 +1715,8 @@ func TestProviderTUI_ViewAPIKey_FreshHidesReplaceHint(t *testing.T) {
 			"dashscope": {},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "dashscope" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "dashscope")
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
 
@@ -2084,14 +1749,8 @@ func TestProviderTUI_ViewAPIKey_EnvSetNoSavedKey(t *testing.T) {
 			"deepseek": {Model: "deepseek-v4-flash"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "deepseek" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "deepseek")
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
 	m.apiKeyInput.Focus()
@@ -2112,14 +1771,8 @@ func TestProviderTUI_ViewAPIKey_EnvSetWithSavedKey(t *testing.T) {
 			"deepseek": {APIKey: "sk-secret-1234567890abcd", Model: "deepseek-v4-flash"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "deepseek" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "deepseek")
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
 	m.apiKeyInput.Focus()
@@ -2150,8 +1803,7 @@ func TestProviderTUI_ApiKeyPasteReplacesMaskedKey(t *testing.T) {
 			},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.customIdx = 0
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
@@ -2186,8 +1838,7 @@ func TestProviderTUI_ManualTokenPasteReplacesMaskedToken(t *testing.T) {
 			AuthToken: "old-token-secret",
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabManual
+	m := newProviderTUIOnTab(cfg, "", tabManual)
 	m.inManualForm = true
 	m.manualStep = manualStepAuthToken
 	m.manualTokenMasked = true
@@ -2221,8 +1872,7 @@ func TestProviderTUI_ApiKeyTypingShowsOneStarPerChar(t *testing.T) {
 			"stepfun": {APIKey: "old-key-ssss", Model: "step-3.5-flash"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.customIdx = 0
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
@@ -2250,8 +1900,7 @@ func TestProviderTUI_ApiKeyEnterWithoutEditKeepsOriginal(t *testing.T) {
 			"stepfun": {APIKey: "keep-me"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.customIdx = 0
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
@@ -2282,14 +1931,8 @@ func TestProviderTUI_ApiKeyClearSavedKeyReturnsEmpty(t *testing.T) {
 			"deepseek": {APIKey: "old-saved-key", Model: "deepseek-v4-flash"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "deepseek" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "deepseek")
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
 	m.beginAPIKeyReplace()
@@ -2307,14 +1950,8 @@ func TestProviderTUI_ApiKeyResultTrimSpace(t *testing.T) {
 			"deepseek": {Model: "deepseek-v4-flash"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "deepseek" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "deepseek")
 	m.step = stepAPIKey
 	m.apiKeyInput.SetValue("   ")
 
@@ -2331,14 +1968,8 @@ func TestProviderTUI_OfficialApiKeyEmptyWithoutEnvBlocksEnter(t *testing.T) {
 			"dashscope": {},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "dashscope" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "dashscope")
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
 	m.apiKeyInput.Focus()
@@ -2368,14 +1999,8 @@ func TestProviderTUI_OfficialApiKeyEmptyWithEnvAllowsEnter(t *testing.T) {
 			"dashscope": {},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "dashscope" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "dashscope")
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
 	m.apiKeyInput.Focus()
@@ -2402,8 +2027,7 @@ func TestProviderTUI_CustomExistingApiKeyEmptyBlocksEnter(t *testing.T) {
 			"stepfun": {APIKey: "old-key"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.customIdx = 0
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
@@ -2426,8 +2050,7 @@ func TestProviderTUI_CustomExistingApiKeyEmptyBlocksEnter(t *testing.T) {
 }
 
 func TestProviderTUI_CustomCreateApiKeyOptional(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(&Config{}, "", tabCustom)
 	m.creatingCustom = true
 	m.cpStep = cpStepAPIKey
 	m.apiKeyInput.SetValue("")
@@ -2451,14 +2074,8 @@ func TestProviderTUI_ViewAPIKey_ShowsFormError(t *testing.T) {
 			"dashscope": {},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "dashscope" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "dashscope")
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
 	m.formError = "API key is required (or set $DASHSCOPE_API_KEY)"
@@ -2480,14 +2097,8 @@ func TestProviderTUI_CancelIncompleteOfficialProviderSwitch_NoPersistedChanges(t
 			"deepseek": {Model: "deepseek-v4-flash"},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "baidu-qianfan" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, configPath, tabOfficial)
+	selectOfficialProvider(t, &m, "baidu-qianfan")
 	m.step = stepModel
 	m.modelIdx = modelIdxForName(t, m, "glm-5")
 
@@ -2516,10 +2127,7 @@ func TestProviderTUI_CancelIncompleteOfficialProviderSwitch_NoPersistedChanges(t
 		t.Error("expected tea.Quit on final Esc")
 	}
 	if _, err := os.Stat(configPath); err == nil {
-		diskCfg, err := loadOrCreateConfig(configPath)
-		if err != nil {
-			t.Fatalf("load config: %v", err)
-		}
+		diskCfg := loadDiskConfig(t, configPath)
 		if diskCfg.Provider != "deepseek" {
 			t.Errorf("Provider = %q, want deepseek", diskCfg.Provider)
 		}
@@ -2539,8 +2147,7 @@ func TestProviderTUI_SameOfficialProviderModelChange_DefersPersistUntilConfirm(t
 			"deepseek": {Model: "deepseek-v4-flash"},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabOfficial
+	m := newProviderTUIOnTab(cfg, configPath, tabOfficial)
 	m.step = stepModel
 	m.modelIdx = modelIdxForName(t, m, "deepseek-v4-pro")
 
@@ -2574,14 +2181,8 @@ func TestProviderTUI_OfficialModelChangeBlockedAtAPIKey_KeepsGlobalModel(t *test
 			},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "anthropic" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, configPath, tabOfficial)
+	selectOfficialProvider(t, &m, "anthropic")
 	m.step = stepModel
 	m.modelIdx = modelIdxForName(t, m, "claude-opus-4-7")
 
@@ -2640,8 +2241,7 @@ func TestProviderTUI_DeleteModelPreservesActiveModel(t *testing.T) {
 			},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.customIdx = 0
 	m.step = stepModel
 	m.modelIdx = 1 // aaa
@@ -2884,8 +2484,7 @@ func TestEnterEditCustomProvider_ProtocolIndex(t *testing.T) {
 					"cp": {URL: "https://x.example.com", Protocol: tt.protocol},
 				},
 			}
-			m := newProviderTUI(cfg, "")
-			m.activeTab = tabCustom
+			m := newProviderTUIOnTab(cfg, "", tabCustom)
 			m.customIdx = 0
 			m.enterEditCustomProvider()
 			if m.cpProtocolIdx != tt.wantIdx {
@@ -2990,8 +2589,7 @@ func TestApplyManualConfig_DoubleWritesProtocolAndUseAnthropic(t *testing.T) {
 // Manual tab returns the canonical protocol name picked from manualProtocols.
 func TestProviderTUIResult_ManualProtocolIsCanonical(t *testing.T) {
 	cfg := &Config{}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabManual
+	m := newProviderTUIOnTab(cfg, "", tabManual)
 	m.inManualForm = true
 	m.manualURLInput.SetValue("https://example.com/v1")
 	m.manualModelInput.SetValue("m")
@@ -3025,14 +2623,8 @@ func TestProviderTUI_ViewAPIKey_ShowsAPIKeyCmdHint(t *testing.T) {
 			"deepseek": {APIKeyCmd: "op read op://dev/deepseek/key", Model: "deepseek-v4-flash"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "deepseek" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "deepseek")
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
 	m.apiKeyInput.Focus()
@@ -3056,14 +2648,8 @@ func TestProviderTUI_ViewAPIKey_NoCmdHintWhenUnset(t *testing.T) {
 			"deepseek": {Model: "deepseek-v4-flash"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "deepseek" {
-			m.officialIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "deepseek")
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
 

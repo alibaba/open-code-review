@@ -195,7 +195,7 @@ func TestConfirmDeleteCustomProviderModel_Guards(t *testing.T) {
 		m, _, _ := newCustomModelTUI(t, []string{"m1"})
 		m.confirmingDeleteModel = true
 		m.deleteModelName = "not-in-list"
-		out, _ := m.confirmDeleteCustomProviderModel()
+		out, _ := m.confirmDeleteModel()
 		got := out.(modelTUIModel)
 		if got.confirmingDeleteModel {
 			t.Error("unknown model should end confirm without saving")
@@ -210,7 +210,7 @@ func TestConfirmDeleteCustomProviderModel_Guards(t *testing.T) {
 		m.deleteModelName = "m1"
 		m.existingCfg = nil
 		m.confirmingDeleteModel = true
-		out, _ := m.confirmDeleteCustomProviderModel()
+		out, _ := m.confirmDeleteModel()
 		if out.(modelTUIModel).savedInSession {
 			t.Error("nil cfg must not persist")
 		}
@@ -243,7 +243,7 @@ func TestConfirmDeleteOfficialModel(t *testing.T) {
 		m, cfg := newOfficial(t)
 		m.confirmingDeleteModel = true
 		m.deleteModelName = "user-added"
-		out, _ := m.confirmDeleteOfficialModel()
+		out, _ := m.confirmDeleteModel()
 		got := out.(modelTUIModel)
 		if !got.savedInSession {
 			t.Errorf("should persist deletion; formError=%q", got.formError)
@@ -257,7 +257,7 @@ func TestConfirmDeleteOfficialModel(t *testing.T) {
 		m, _ := newOfficial(t)
 		m.confirmingDeleteModel = true
 		m.deleteModelName = "gpt-4" // in registry, not user-added
-		out, _ := m.confirmDeleteOfficialModel()
+		out, _ := m.confirmDeleteModel()
 		if out.(modelTUIModel).savedInSession {
 			t.Error("registry model must not be deletable")
 		}
