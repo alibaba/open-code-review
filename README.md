@@ -50,6 +50,12 @@ Visit the [official website](https://open-codereview.ai) for more details.
 
 ![Highlights](imgs/highlights-en.png)
 
+## Demo
+
+<a href="imgs/open-code-review-launch.mp4"><img src="imgs/open-code-review-launch.jpg" width="560" alt="OpenCodeReview launch video"></a>
+
+A 22-second 16:9 launch video with sound ([captions](imgs/open-code-review-launch.srt)). Click the poster to play.
+
 ## Benchmark
 
 > Compared to general-purpose agents (Claude Code), Open Code Review achieves significantly higher **Precision** and **F1** with the same underlying model, while consuming only **~1/9 of the tokens** and completing reviews faster. Note that its Recall is lower than general-purpose agents — a deliberate trade-off favoring precision over noise.
