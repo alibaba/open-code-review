@@ -39,7 +39,7 @@ func scanTestMCPServer() *mcp.Server {
 
 func TestScanMCPServerProcess(t *testing.T) {
 	if os.Getenv(scanMCPServerEnv) == "" {
-		return
+		t.Skip("helper process")
 	}
 	if err := scanTestMCPServer().Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		t.Fatal(err)
@@ -162,13 +162,13 @@ func TestScanUsesConfiguredMCPTool(t *testing.T) {
 			repo := initTestGitRepo(t)
 			gitCommitFile(t, repo, "sample.go", "package sample\n", "add sample")
 			output := filepath.Join(t.TempDir(), "scan.json")
-			originalClose := closeReviewMCPClients
+			originalClose := closeMCPClients
 			closedClients := -1
-			closeReviewMCPClients = func(clients []*ocrmcp.Client) {
+			closeMCPClients = func(clients []*ocrmcp.Client) {
 				closedClients = len(clients)
 				originalClose(clients)
 			}
-			t.Cleanup(func() { closeReviewMCPClients = originalClose })
+			t.Cleanup(func() { closeMCPClients = originalClose })
 			if err := executeScan(scanOptions{repoDir: repo, paths: "sample.go", outputFormat: "json", outputPath: output, noDedup: true, noSummary: true}); err != nil {
 				t.Fatalf("executeScan: %v", err)
 			}
@@ -264,13 +264,13 @@ func TestScanClosesMCPOnFailureAndCancellation(t *testing.T) {
 			t.Setenv("OCR_LLM_AUTH_HEADER", "x-api-key")
 			repo := initTestGitRepo(t)
 			gitCommitFile(t, repo, "sample.go", "package sample\n", "add sample")
-			originalClose := closeReviewMCPClients
+			originalClose := closeMCPClients
 			closedClients := -1
-			closeReviewMCPClients = func(clients []*ocrmcp.Client) {
+			closeMCPClients = func(clients []*ocrmcp.Client) {
 				closedClients = len(clients)
 				originalClose(clients)
 			}
-			t.Cleanup(func() { closeReviewMCPClients = originalClose })
+			t.Cleanup(func() { closeMCPClients = originalClose })
 			output := filepath.Join(t.TempDir(), "scan.json")
 			err = executeScanContext(ctx, scanOptions{repoDir: repo, paths: "sample.go", outputFormat: "json", outputPath: output, noPlan: true, noDedup: true, noSummary: true})
 			if err == nil {

@@ -208,7 +208,7 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
-	defer closeReviewMCPClients(mcpClients)
+	defer closeMCPClients(mcpClients)
 	scanToolDefs = append(scanToolDefs, mcp.CollectToolDefs(mcpClients, tools)...)
 
 	ag := scan.NewAgent(scan.Args{

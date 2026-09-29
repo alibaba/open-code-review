@@ -207,7 +207,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
 	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
-	defer closeReviewMCPClients(mcpClients)
+	defer closeMCPClients(mcpClients)
 
 	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
 	rt.PlanToolDefs = append(rt.PlanToolDefs, mcpToolDefs...)
@@ -599,9 +599,9 @@ func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repo
 	return clients
 }
 
-// closeReviewMCPClients is a variable so tests can observe the shutdown
+// closeMCPClients is a variable so tests can observe the shutdown
 // boundary without starting an intentionally unresponsive subprocess.
-var closeReviewMCPClients = func(clients []*mcp.Client) {
+var closeMCPClients = func(clients []*mcp.Client) {
 	closeCtx, cancel := context.WithTimeout(context.Background(), mcp.CloseAllTimeout)
 	defer cancel()
 	if err := mcp.CloseAll(closeCtx, clients); err != nil {
