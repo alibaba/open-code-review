@@ -218,57 +218,70 @@ func TestScanPreviewDoesNotStartMCP(t *testing.T) {
 	}
 }
 
-func TestScanClosesMCPOnCancellation(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	remote := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
-		return scanTestMCPServer()
-	}, nil))
-	defer remote.Close()
-	cfgPath, err := defaultConfigPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cfg := &Config{MCPServers: map[string]MCPServerConfig{"test": {Type: "remote", URL: remote.URL}}}
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(cfgPath, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cancel()
-		w.WriteHeader(http.StatusPaymentRequired)
-	}))
-	defer llmServer.Close()
-	t.Setenv("OCR_LLM_URL", llmServer.URL+"/v1/messages")
-	t.Setenv("OCR_LLM_TOKEN", "test-token")
-	t.Setenv("OCR_LLM_MODEL", "claude-test")
-	t.Setenv("OCR_LLM_PROTOCOL", "anthropic")
-	t.Setenv("OCR_LLM_AUTH_HEADER", "x-api-key")
-	repo := initTestGitRepo(t)
-	gitCommitFile(t, repo, "sample.go", "package sample\n", "add sample")
-	originalClose := closeReviewMCPClients
-	closedClients := -1
-	closeReviewMCPClients = func(clients []*ocrmcp.Client) {
-		closedClients = len(clients)
-		originalClose(clients)
-	}
-	t.Cleanup(func() { closeReviewMCPClients = originalClose })
-	output := filepath.Join(t.TempDir(), "scan.json")
-	err = executeScanContext(ctx, scanOptions{repoDir: repo, paths: "sample.go", outputFormat: "json", outputPath: output, noPlan: true, noDedup: true, noSummary: true})
-	if err == nil {
-		t.Fatal("expected cancellation error")
-	}
-	if closedClients != 1 {
-		t.Errorf("closed clients = %d, want 1", closedClients)
+func TestScanClosesMCPOnFailureAndCancellation(t *testing.T) {
+	for _, cancelScan := range []bool{false, true} {
+		name := "scan_failure"
+		if cancelScan {
+			name = "cancellation"
+		}
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+			remote := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+				return scanTestMCPServer()
+			}, nil))
+			defer remote.Close()
+			cfgPath, err := defaultConfigPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cfg := &Config{MCPServers: map[string]MCPServerConfig{"test": {Type: "remote", URL: remote.URL}}}
+			data, err := json.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(cfgPath, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if cancelScan {
+					cancel()
+				}
+				w.WriteHeader(http.StatusPaymentRequired)
+			}))
+			defer llmServer.Close()
+			t.Setenv("OCR_LLM_URL", llmServer.URL+"/v1/messages")
+			t.Setenv("OCR_LLM_TOKEN", "test-token")
+			t.Setenv("OCR_LLM_MODEL", "claude-test")
+			t.Setenv("OCR_LLM_PROTOCOL", "anthropic")
+			t.Setenv("OCR_LLM_AUTH_HEADER", "x-api-key")
+			repo := initTestGitRepo(t)
+			gitCommitFile(t, repo, "sample.go", "package sample\n", "add sample")
+			originalClose := closeReviewMCPClients
+			closedClients := -1
+			closeReviewMCPClients = func(clients []*ocrmcp.Client) {
+				closedClients = len(clients)
+				originalClose(clients)
+			}
+			t.Cleanup(func() { closeReviewMCPClients = originalClose })
+			output := filepath.Join(t.TempDir(), "scan.json")
+			err = executeScanContext(ctx, scanOptions{repoDir: repo, paths: "sample.go", outputFormat: "json", outputPath: output, noPlan: true, noDedup: true, noSummary: true})
+			if err == nil {
+				t.Fatal("expected scan error")
+			}
+			if !cancelScan && ctx.Err() != nil {
+				t.Fatalf("scan failure unexpectedly canceled context: %v", ctx.Err())
+			}
+			if closedClients != 1 {
+				t.Errorf("closed clients = %d, want 1", closedClients)
+			}
+		})
 	}
 }
