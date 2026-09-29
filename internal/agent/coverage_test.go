@@ -14,6 +14,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -349,6 +350,52 @@ func TestExecuteReviewFilter_RemovesComments(t *testing.T) {
 		if c.Content == "remove this" {
 			t.Error("filtered comment should have been removed")
 		}
+	}
+}
+
+func TestExecuteReviewFilterScopesCandidatesToNewReviewItems(t *testing.T) {
+	tmpDir := t.TempDir()
+	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+	client := &fakeAgentClient{
+		responses: []*llm.ChatResponse{{
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{
+					ToolCalls: []llm.ToolCall{{
+						ID:   "call_1",
+						Type: "function",
+						Function: llm.FunctionCall{
+							Name:      "report_incorrect_comments",
+							Arguments: `{"comment_ids":["c-0"]}`,
+						},
+					}},
+				},
+			}},
+			Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+		}},
+	}
+	collector := tool.NewCommentCollector()
+	collector.AddForReviewItem(model.LlmComment{Path: "b.go", Content: "reused comment"}, location.SideOld, "b.go")
+	collector.AddForReviewItem(model.LlmComment{Path: "b.go", Content: "new cross-file comment"}, location.SideNew, "a.go")
+	a := New(Args{
+		LLMClient:        client,
+		Model:            "test",
+		Session:          sess,
+		CommentCollector: collector,
+		Template: template.Template{
+			ReviewFilterTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}} path={{path}} diff={{diff}}"}},
+			},
+			MaxTokens:           10000,
+			MaxToolRequestTimes: 5,
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+		},
+	})
+
+	a.executeReviewFilterForReviewItems(context.Background(), model.Diff{NewPath: "b.go", Diff: "+code"}, "b.go", map[string]struct{}{"a.go": {}})
+
+	comments := collector.CommentsForPath("b.go")
+	if len(comments) != 1 || comments[0].Content != "reused comment" {
+		t.Fatalf("comments = %+v, want only the reused comment", comments)
 	}
 }
 
