@@ -877,6 +877,176 @@ func TestDispatchSubtasks_WithoutTaskDoneIsAllFailed(t *testing.T) {
 	}
 }
 
+func TestDispatchSubtasks_ReusedAndFailedPreservesComments(t *testing.T) {
+	tests := []struct {
+		name     string
+		comments []model.LlmComment
+	}{
+		{name: "without findings"},
+		{name: "with findings", comments: []model.LlmComment{{Path: "a.go", Content: "cached finding"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reused := model.ScanItem{Path: "a.go", Content: "package a\n", LineCount: 1}
+			failed := model.ScanItem{Path: "b.go", Content: "package b\n", LineCount: 1}
+			fingerprint := scanItemFingerprint(reused)
+			resume := &session.ResumeState{
+				SessionID:  "prior-session",
+				Model:      "test-model",
+				ReviewMode: session.ReviewModeFullScan,
+				Items: map[string]session.ResumeItem{
+					fingerprint: {
+						FilePath:    reused.Path,
+						OldPath:     reused.Path,
+						NewPath:     reused.Path,
+						Fingerprint: fingerprint,
+						Comments:    tt.comments,
+					},
+				},
+			}
+			tpl := makeTemplateWithFullScan()
+			tpl.BatchStrategy = string(BatchByLanguage)
+			a := NewAgent(Args{
+				Template:         tpl,
+				LLMClient:        &errorScanClient{err: context.DeadlineExceeded},
+				CommentCollector: tool.NewCommentCollector(),
+				Tools:            tool.NewRegistry(),
+				MaxConcurrency:   1,
+				SkipPlan:         true,
+				SkipDedup:        true,
+				SkipSummary:      true,
+				Resume:           resume,
+				Session: session.New(t.TempDir(), "main", "test-model", session.SessionOptions{
+					ReviewMode:  session.ReviewModeFullScan,
+					ResumedFrom: resume.SessionID,
+				}),
+			})
+			a.items = []model.ScanItem{reused, failed}
+			a.args.Tools.Freeze()
+
+			comments, err := a.dispatchSubtasks(context.Background())
+			if err != nil {
+				t.Fatalf("dispatchSubtasks: %v", err)
+			}
+			if len(comments) != len(tt.comments) {
+				t.Fatalf("comments = %+v, want %+v", comments, tt.comments)
+			}
+			if len(tt.comments) > 0 && comments[0].Content != tt.comments[0].Content {
+				t.Errorf("comments = %+v, want cached finding", comments)
+			}
+		})
+	}
+}
+
+func TestDispatchSubtasks_ReusedEarlierBatchExemptsLaterAllFailed(t *testing.T) {
+	reused := model.ScanItem{Path: "a.go", Content: "package a\n", LineCount: 1}
+	failed := model.ScanItem{Path: "b.ts", Content: "const b = 1\n", LineCount: 1}
+	fingerprint := scanItemFingerprint(reused)
+	resume := &session.ResumeState{
+		SessionID:  "prior-session",
+		Model:      "test-model",
+		ReviewMode: session.ReviewModeFullScan,
+		Items: map[string]session.ResumeItem{
+			fingerprint: {
+				FilePath:    reused.Path,
+				OldPath:     reused.Path,
+				NewPath:     reused.Path,
+				Fingerprint: fingerprint,
+				Comments:    []model.LlmComment{{Path: reused.Path, Content: "cached finding"}},
+			},
+		},
+	}
+	tpl := makeTemplateWithFullScan()
+	tpl.BatchStrategy = string(BatchByLanguage)
+	a := NewAgent(Args{
+		Template:         tpl,
+		LLMClient:        &errorScanClient{err: context.DeadlineExceeded},
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   1,
+		SkipPlan:         true,
+		SkipDedup:        true,
+		SkipSummary:      true,
+		Resume:           resume,
+		Session: session.New(t.TempDir(), "main", "test-model", session.SessionOptions{
+			ReviewMode:  session.ReviewModeFullScan,
+			ResumedFrom: resume.SessionID,
+		}),
+	})
+	a.items = []model.ScanItem{reused, failed}
+	a.args.Tools.Freeze()
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if len(comments) != 1 || comments[0].Content != "cached finding" {
+		t.Fatalf("comments = %+v, want cached finding from earlier batch", comments)
+	}
+}
+
+func TestDispatchSubtasks_PlannedReuseAfterBudgetStopDoesNotExemptAllFailed(t *testing.T) {
+	empty := ""
+	client := &fakeScanClient{responses: []*llm.ChatResponse{{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &empty}}},
+		Usage:   &llm.UsageInfo{PromptTokens: 50_000, TotalTokens: 50_000},
+	}}}
+	reused := model.ScanItem{Path: "c.ts", Content: "const c = 1\n", LineCount: 1}
+	fingerprint := scanItemFingerprint(reused)
+	resume := &session.ResumeState{
+		SessionID:  "prior-session",
+		Model:      "test-model",
+		ReviewMode: session.ReviewModeFullScan,
+		Items: map[string]session.ResumeItem{
+			fingerprint: {
+				FilePath:    reused.Path,
+				OldPath:     reused.Path,
+				NewPath:     reused.Path,
+				Fingerprint: fingerprint,
+				Comments:    []model.LlmComment{{Path: reused.Path, Content: "planned cached finding"}},
+			},
+		},
+	}
+	tpl := makeTemplateWithFullScan()
+	tpl.BatchStrategy = string(BatchByLanguage)
+	tpl.BatchSize = 2
+	a := NewAgent(Args{
+		Template:         tpl,
+		LLMClient:        client,
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   1,
+		MaxTokensBudget:  60_000,
+		SkipPlan:         true,
+		SkipDedup:        true,
+		SkipSummary:      true,
+		Resume:           resume,
+		Session: session.New(t.TempDir(), "main", "test-model", session.SessionOptions{
+			ReviewMode:  session.ReviewModeFullScan,
+			ResumedFrom: resume.SessionID,
+		}),
+	})
+	a.items = []model.ScanItem{
+		{Path: "a.go", Content: "package a\n", LineCount: 1},
+		{Path: "b.js", Content: "const b = 1\n", LineCount: 1},
+		reused,
+	}
+	a.args.Tools.Freeze()
+
+	_, err := a.dispatchSubtasks(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "all 1 file scan(s) failed") {
+		t.Fatalf("expected all-failed error after budget stop, got %v", err)
+	}
+	info := a.ResumeInfo()
+	if info == nil || info.ReusedFiles != 1 || info.RerunFiles != 2 {
+		t.Fatalf("ResumeInfo = %+v, want planned 1 reused / 2 rerun", info)
+	}
+	if !a.BudgetExceeded() {
+		t.Fatal("expected budget stop before planned reuse")
+	}
+}
+
 func TestPhaseEnabled(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	a := newAgentForTest(t, tpl)
