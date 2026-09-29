@@ -109,6 +109,8 @@ unstaged + untracked 变更。
 | `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
+| `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个文件的 `REVIEW_FILTER_TASK` LLM 后处理调用。 |
+| `--no-summary` | — | `false` | 跳过评审完成后的 `CHANGE_SUMMARY_TASK`、`IMPACT_ANALYSIS_TASK` 和 `FLOW_DIAGRAM_TASK` LLM 调用。 |
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个子任务的 `REVIEW_FILTER_TASK` LLM 后处理调用。子任务评审单个文件或一组相关文件。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
@@ -305,6 +307,10 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
 | `summary` | 可选。运行聚合：`files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` 运行时省略。 |
 | `comments` | 总是存在，可能为空。每条评论的字段如上例。 |
 | `warnings` | 可选。当一个或多个子 agent 失败时存在；每条描述受影响文件与错误。 |
+| `project_summary` | 可选。scan 模式的项目级总结（markdown）。`ocr review` 中为空。 |
+| `change_summary` | 可选。review 模式的变更概述（markdown）：意图、受影响模块、统计、关键决策。由 `CHANGE_SUMMARY_TASK` 评审后 LLM 调用生成。设置 `--no-summary` 或任务失败时省略。 |
+| `impact_analysis` | 可选。review 模式的业务影响分析（markdown）：受影响功能、契约变更、风险评估、回归易发区域。由 `IMPACT_ANALYSIS_TASK` 评审后 LLM 调用生成。 |
+| `flow_diagram` | 可选。review 模式的 Mermaid 流程图字符串，展示调用链路/数据流影响和业务流程前后对比。由 `FLOW_DIAGRAM_TASK` 评审后 LLM 调用生成。 |
 | `session_id` | 可选。持久化的评审运行会包含该字段；重试兼容的区间或单 commit 评审时可传给 `ocr review --resume <session-id>`。 |
 | `resume` | 可选。恢复运行时存在，包含 `resumed_from`、`reused_files`、`rerun_files`、`previous_model` 和 `current_model`。 |
 
