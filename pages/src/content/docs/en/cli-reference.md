@@ -158,6 +158,10 @@ does not change that source order. Incomplete strategies fall through without
 being mixed. A selected built-in provider's credentials may still come from its
 supported environment variable.
 
+OpenRouter accepts any model ID passed with `--model`; its built-in model list
+provides suggestions for `ocr config model` rather than restricting per-run
+selection. The OpenRouter API validates the requested model.
+
 ### Modes
 
 #### Workspace mode (default)

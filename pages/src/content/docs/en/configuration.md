@@ -48,7 +48,7 @@ environment variable.
 | `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
-| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
+| `openrouter` (open model list) | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
@@ -68,6 +68,9 @@ environment variable.
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+OpenRouter's listed models are suggestions for the picker. An unlisted model ID
+passed with `--model` is sent to OpenRouter for validation.
 
 ### Overriding a built-in provider's Base URL
 

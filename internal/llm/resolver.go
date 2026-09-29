@@ -525,13 +525,10 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	}
 	availableModels = append(availableModels, entry.Models...)
 
-	// A preset's Models list doubles as an allowlist for --model. For an
-	// ambient-auth provider it cannot: Bedrock identifiers are scoped to an
-	// account and a region, and an application inference profile ARN — a
-	// supported value, and the one to use when spend has to be attributed — can
-	// never appear in a list compiled upstream. The list stays a picker for
-	// `ocr config model`; it does not gate an override.
-	gateOverrideOnModelList := !ambientAuth
+	// Bedrock identifiers are account- and region-specific, while aggregators
+	// with open catalogs may accept models absent from the preset. Their lists
+	// remain picker suggestions rather than gates for per-run overrides.
+	gateOverrideOnModelList := !ambientAuth && !(isPreset && preset.OpenModelList)
 
 	// Apply model override with validation.
 	if modelOverride != "" {

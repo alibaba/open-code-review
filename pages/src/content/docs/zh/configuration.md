@@ -45,7 +45,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
-| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
+| `openrouter`（开放模型列表） | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
@@ -65,6 +65,9 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+OpenRouter 列出的模型仅用于选择器建议。通过 `--model` 指定未列出的模型 ID 时，
+OCR 会将其交由 OpenRouter 验证。
 
 ### 覆盖内置 provider 的 Base URL
 

@@ -199,6 +199,9 @@ func TestLookupProvider_OpenRouterDetails(t *testing.T) {
 	if p.EnvVar != "OPENROUTER_API_KEY" {
 		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "OPENROUTER_API_KEY")
 	}
+	if !p.OpenModelList {
+		t.Error("OpenModelList = false, want true")
+	}
 }
 
 func TestLookupProvider_DeepSeekFlash(t *testing.T) {

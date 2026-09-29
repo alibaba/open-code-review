@@ -1364,6 +1364,34 @@ func TestResolveEndpointWithModelOverride_NoValidationWhenNoModelList(t *testing
 	}
 }
 
+func TestResolveEndpointWithModelOverride_OpenRouterAcceptsUnlistedModel(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "openrouter",
+		Providers: map[string]providerEntryConfig{
+			"openrouter": {
+				APIKey: "test-key",
+				Models: []string{"custom-picker-suggestion"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	const model = "deepseek/deepseek-v4.1-flash"
+	ep, err := ResolveEndpointWithOptions(cfgPath, ResolveOptions{Provider: "openrouter", Model: model})
+	if err != nil {
+		t.Fatalf("OpenRouter rejected an unlisted model: %v", err)
+	}
+	if ep.Model != model || ep.Provider != "openrouter" {
+		t.Fatalf("resolved model/provider = %q/%q, want %q/openrouter", ep.Model, ep.Provider, model)
+	}
+}
+
 func TestResolveEndpointWithModelOverride_MergesPresetAndEntryModels(t *testing.T) {
 	clearAllEnv(t)
 
