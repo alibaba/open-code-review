@@ -6,6 +6,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -72,9 +73,7 @@ func ToToolDef(t *mcp.Tool) llm.ToolDef {
 
 	switch schema := t.InputSchema.(type) {
 	case map[string]any:
-		for k, v := range schema {
-			params[k] = v
-		}
+		maps.Copy(params, schema)
 		if _, ok := params["type"]; !ok {
 			params["type"] = "object"
 		}

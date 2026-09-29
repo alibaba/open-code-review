@@ -680,7 +680,7 @@ func TestOutputPreviewText_ExcludedPathDoesNotWidenWillReview(t *testing.T) {
 	render := func(entries ...agent.DiffPreviewEntry) string {
 		p := &agent.DiffPreview{Entries: entries, TotalFiles: len(entries), ReviewableCount: 1, ExcludedCount: len(entries) - 1}
 		out := captureStdout(t, func() { outputPreviewText(p, os.Stdout) })
-		for _, ln := range strings.Split(out, "\n") {
+		for ln := range strings.SplitSeq(out, "\n") {
 			if strings.Contains(ln, reviewable.Path) {
 				return ln
 			}

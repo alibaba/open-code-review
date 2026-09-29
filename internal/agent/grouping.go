@@ -328,10 +328,7 @@ func enforceMaxFilesPerGroup(groups []FileGroup) []FileGroup {
 			continue
 		}
 		for i := 0; i < len(g.Diffs); i += maxFilesPerGroup {
-			end := i + maxFilesPerGroup
-			if end > len(g.Diffs) {
-				end = len(g.Diffs)
-			}
+			end := min(i+maxFilesPerGroup, len(g.Diffs))
 			result = append(result, FileGroup{
 				Label: g.Label,
 				Diffs: g.Diffs[i:end],

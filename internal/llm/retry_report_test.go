@@ -665,7 +665,7 @@ func TestFreezeErrorIsDeterministic(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected a construction error, got %+v", first)
 	}
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		_, again := build().Freeze("run-1")
 		if again == nil || again.Error() != err.Error() {
 			t.Fatalf("error is not deterministic: %v vs %v", err, again)

@@ -6,6 +6,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	neturl "net/url"
 	"os"
@@ -189,9 +190,7 @@ func finalizeResolvedEndpoint(source string, ep ResolvedEndpoint, env envOverrid
 		if ep.ExtraHeaders == nil {
 			ep.ExtraHeaders = env.headers
 		} else {
-			for key, value := range env.headers {
-				ep.ExtraHeaders[key] = value
-			}
+			maps.Copy(ep.ExtraHeaders, env.headers)
 		}
 	}
 	return ep
@@ -794,7 +793,7 @@ func parseShellRC(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 	}
 
 	var baseURL, token, model string
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		matches := exportRe.FindStringSubmatch(line)
 		if matches == nil {
