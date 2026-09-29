@@ -6,23 +6,9 @@ package scan
 import (
 	"fmt"
 
+	"github.com/alibaba/open-code-review/internal/estimate"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
-)
-
-// Cost-estimation heuristics. These are deliberately rough — their job is
-// to give the user an order-of-magnitude warning before a large scan, not
-// to be billing-accurate. Real usage is always reported from the API
-// response after the run.
-const (
-	// promptOverheadTokens approximates the fixed prompt scaffolding per LLM
-	// call (system prompt + template wrappers + tool definitions).
-	promptOverheadTokens = 2000
-	// avgMainRoundsPerFile is the assumed number of MAIN_TASK tool-use
-	// rounds for a typical file. Observed ~6 on real repos; round up.
-	avgMainRoundsPerFile = 7
-	// avgOutputTokensPerRound approximates completion tokens per round.
-	avgOutputTokensPerRound = 700
 )
 
 // Estimate is a pre-run, order-of-magnitude projection of scan cost.
@@ -33,33 +19,25 @@ type Estimate struct {
 	TotalTokens  int64
 }
 
-// estimateCost projects token usage for reviewing the given items under the
-// supplied scan template. planEnabled / dedupEnabled / summaryEnabled
-// reflect the effective runtime toggles (template field present AND not
-// disabled by a --no-* flag).
 // estimateFileTokens projects the input+output token cost of reviewing a
 // single file (PLAN_TASK + MAIN_TASK rounds). Excludes the run-level dedup/
 // summary phases. Returns 0 for files that are skipped before dispatch
 // (binary / empty). Used both by the aggregate estimate and by the
 // per-file budget look-ahead in dispatch.
-func estimateFileTokens(it model.ScanItem, planEnabled bool) int64 {
+func estimateFileTokens(it model.ScanItem, planEnabled bool, params estimate.Parameters) int64 {
 	if it.IsBinary || it.Content == "" {
 		return 0
 	}
 	fileTokens := int64(llm.CountTokens(it.Content))
 
-	var total int64
-	if planEnabled {
-		total += fileTokens + promptOverheadTokens // PLAN input
-		total += 400                               // PLAN output (small JSON)
-	}
-	// MAIN_TASK: file content carried across rounds + per-round overhead.
-	total += (fileTokens + promptOverheadTokens) * avgMainRoundsPerFile
-	total += avgOutputTokensPerRound * avgMainRoundsPerFile
-	return total
+	input, output := params.FileTokens(fileTokens, planEnabled)
+	return input + output
 }
 
-func estimateCost(items []model.ScanItem, planEnabled, dedupEnabled, summaryEnabled bool) Estimate {
+// estimateCost projects token usage using the effective runtime phase toggles
+// (template field present AND not disabled by a --no-* flag).
+func estimateCost(items []model.ScanItem, planEnabled, dedupEnabled, summaryEnabled bool, params estimate.Parameters) Estimate {
+	params = params.WithDefaults()
 	var est Estimate
 	var allCommentsApprox int64
 
@@ -69,17 +47,10 @@ func estimateCost(items []model.ScanItem, planEnabled, dedupEnabled, summaryEnab
 			continue // skipped before dispatch
 		}
 		est.Files++
-		// Per-file cost folds into InputTokens for the aggregate; we don't
-		// split input/output here since the look-ahead only needs the total.
-		// Recompute the input/output split inline to keep the headline
-		// numbers meaningful.
 		fileTokens := int64(llm.CountTokens(it.Content))
-		if planEnabled {
-			est.InputTokens += fileTokens + promptOverheadTokens
-			est.OutputTokens += 400
-		}
-		est.InputTokens += (fileTokens + promptOverheadTokens) * avgMainRoundsPerFile
-		est.OutputTokens += avgOutputTokensPerRound * avgMainRoundsPerFile
+		input, output := params.FileTokens(fileTokens, planEnabled)
+		est.InputTokens += input
+		est.OutputTokens += output
 
 		// Rough comment yield used to size dedup/summary inputs downstream.
 		allCommentsApprox += 3
@@ -88,13 +59,13 @@ func estimateCost(items []model.ScanItem, planEnabled, dedupEnabled, summaryEnab
 	// DEDUP_TASK: one call per batch; approximate as a single pass over all
 	// comments (batches partition them, so total dedup input ≈ all comments).
 	if dedupEnabled && allCommentsApprox > 0 {
-		est.InputTokens += allCommentsApprox*120 + promptOverheadTokens
+		est.InputTokens += allCommentsApprox*120 + params.PromptOverheadTokens
 		est.OutputTokens += allCommentsApprox * 20
 	}
 
 	// PROJECT_SUMMARY_TASK: one call over all comments.
 	if summaryEnabled && allCommentsApprox > 0 {
-		est.InputTokens += allCommentsApprox*120 + promptOverheadTokens
+		est.InputTokens += allCommentsApprox*120 + params.PromptOverheadTokens
 		est.OutputTokens += 2000
 	}
 

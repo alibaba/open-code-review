@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -46,6 +47,7 @@ Examples:
 var configSetCmd = &cobra.Command{
 	Use:     "set <key> <value>",
 	Short:   "Set a configuration value",
+	Long:    "Set a configuration value. For estimation_overhead_tokens and estimation_output_tokens_per_round, zero restores the built-in default.",
 	Example: "  ocr config set llm.model claude-opus-4-6\n  ocr config set provider anthropic",
 	Args:    exactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -56,7 +58,7 @@ var configSetCmd = &cobra.Command{
 var configUnsetCmd = &cobra.Command{
 	Use:     "unset <key>",
 	Short:   "Remove a configuration value",
-	Long:    "Remove a provider, custom_providers.<name>, or mcp_servers.<name>.",
+	Long:    "Remove a provider, max_tokens, effort, estimation_overhead_tokens, estimation_output_tokens_per_round, custom_providers.<name>, or mcp_servers.<name>.",
 	Example: "  ocr config unset provider\n  ocr config unset custom_providers.my-provider\n  ocr config unset mcp_servers.github",
 	Args:    exactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -118,8 +120,13 @@ func runConfigSet(key, value string) error {
 	}
 
 	displayValue := value
-	if shouldMaskConfigValue(key) {
+	switch {
+	case shouldMaskConfigValue(key):
 		displayValue = maskKey(value)
+	case key == "estimation_overhead_tokens" && cfg.EstimationOverheadTokens == 0:
+		displayValue = fmt.Sprintf("0 (using default %d)", resolveEstimation(nil).PromptOverheadTokens)
+	case key == "estimation_output_tokens_per_round" && cfg.EstimationOutputTokensPerRound == 0:
+		displayValue = fmt.Sprintf("0 (using default %d)", resolveEstimation(nil).OutputTokensPerRound)
 	}
 	fmt.Printf("Set %s = %s\n", key, displayValue)
 	if warning := legacyLLMShadowWarning(cfg.Provider, key); warning != "" {
@@ -152,10 +159,13 @@ func runConfigUnset(key string) error {
 	if key == "effort" {
 		return unsetEffort(configPath)
 	}
+	if key == "estimation_overhead_tokens" || key == "estimation_output_tokens_per_round" {
+		return unsetEstimationTokens(configPath, key)
+	}
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, effort, estimation_overhead_tokens, estimation_output_tokens_per_round, custom_providers.<name>, and mcp_servers.<name>")
 	}
 
 	switch parts[0] {
@@ -164,8 +174,23 @@ func runConfigUnset(key string) error {
 	case "mcp_servers":
 		return unsetMCPServer(configPath, parts[1])
 	default:
-		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, effort, estimation_overhead_tokens, estimation_output_tokens_per_round, custom_providers.<name>, and mcp_servers.<name>")
 	}
+}
+
+func unsetEstimationTokens(configPath, key string) error {
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if err := setConfigValue(cfg, key, "0"); err != nil {
+		return err
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+	fmt.Printf("Cleared %s; using the default estimate.\n", key)
+	return nil
 }
 
 func unsetMaxTokens(configPath string) error {
@@ -347,16 +372,18 @@ type MCPServerConfig struct {
 
 // Config represents the user-level configuration file (~/.opencodereview/config.json).
 type Config struct {
-	Provider        string                     `json:"provider,omitempty"`
-	Model           string                     `json:"model,omitempty"`
-	MaxTokens       int                        `json:"max_tokens,omitempty"`
-	Effort          string                     `json:"effort,omitempty"`
-	Providers       map[string]ProviderEntry   `json:"providers,omitempty"`
-	CustomProviders map[string]ProviderEntry   `json:"custom_providers,omitempty"`
-	Llm             LlmConfig                  `json:"llm,omitempty"`
-	Language        string                     `json:"language,omitempty"`
-	Telemetry       *TelemetryConfig           `json:"telemetry,omitempty"`
-	MCPServers      map[string]MCPServerConfig `json:"mcp_servers,omitempty"`
+	Provider                       string                     `json:"provider,omitempty"`
+	Model                          string                     `json:"model,omitempty"`
+	MaxTokens                      int                        `json:"max_tokens,omitempty"`
+	Effort                         string                     `json:"effort,omitempty"`
+	Providers                      map[string]ProviderEntry   `json:"providers,omitempty"`
+	CustomProviders                map[string]ProviderEntry   `json:"custom_providers,omitempty"`
+	Llm                            LlmConfig                  `json:"llm,omitempty"`
+	Language                       string                     `json:"language,omitempty"`
+	Telemetry                      *TelemetryConfig           `json:"telemetry,omitempty"`
+	MCPServers                     map[string]MCPServerConfig `json:"mcp_servers,omitempty"`
+	EstimationOverheadTokens       int                        `json:"estimation_overhead_tokens,omitempty"`
+	EstimationOutputTokensPerRound int                        `json:"estimation_output_tokens_per_round,omitempty"`
 
 	unknownJSONFields map[string]json.RawMessage
 }
@@ -595,7 +622,20 @@ func LoadAppConfig(path string) (*Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse app config: %w", err)
 	}
+	if err := validateEstimationTokens("estimation_overhead_tokens", cfg.EstimationOverheadTokens); err != nil {
+		return nil, fmt.Errorf("invalid app config: %w", err)
+	}
+	if err := validateEstimationTokens("estimation_output_tokens_per_round", cfg.EstimationOutputTokensPerRound); err != nil {
+		return nil, fmt.Errorf("invalid app config: %w", err)
+	}
 	return &cfg, nil
+}
+
+func validateEstimationTokens(key string, value int) error {
+	if value < 0 || int64(value) > math.MaxInt32 {
+		return fmt.Errorf("invalid %s %d: must be a non-negative 32-bit integer", key, value)
+	}
+	return nil
 }
 
 // supportedConfigKeys is the single source of truth for the top-level config
@@ -606,6 +646,8 @@ var supportedConfigKeys = []string{
 	"model",
 	"max_tokens",
 	"effort",
+	"estimation_overhead_tokens",
+	"estimation_output_tokens_per_round",
 	"providers.<name>.<field>",
 	"custom_providers.<name>.<field>",
 	"mcp_servers.<name>.<field>",
@@ -686,6 +728,19 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid max_tokens %q: must be a positive integer", value)
 		}
 		cfg.MaxTokens = maxTokens
+	case "estimation_overhead_tokens", "estimation_output_tokens_per_round":
+		tokens, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid %s %q: must be a non-negative 32-bit integer", key, value)
+		}
+		if err := validateEstimationTokens(key, tokens); err != nil {
+			return err
+		}
+		if key == "estimation_overhead_tokens" {
+			cfg.EstimationOverheadTokens = tokens
+		} else {
+			cfg.EstimationOutputTokensPerRound = tokens
+		}
 	case "effort":
 		e, err := template.ParseEffort(value)
 		if err != nil {
