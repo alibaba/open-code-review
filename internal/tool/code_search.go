@@ -51,6 +51,9 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 
 	result, err := p.gitGrep(ctx, searchText, caseSensitive, usePerlRegexp, patterns)
 	if err != nil {
+		if usePerlRegexp && (strings.Contains(err.Error(), "pcre2_compile failed") || strings.Contains(err.Error(), "missing closing parenthesis")) {
+			return fmt.Sprintf("Error: invalid regular expression: %v", err), nil
+		}
 		return "", err
 	}
 	return result, nil
