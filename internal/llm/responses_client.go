@@ -350,19 +350,19 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 }
 
 // mapResponsesFinishReason applies the coarse-grained mapping from decision 8:
-//   - completed -> stop
 //   - incomplete -> length
-//   - failed/cancelled -> error
-//   - any tool calls present -> tool_calls (overrides status, since a model
-//     that emitted function calls is mid-tool-loop regardless of API status)
+//   - otherwise, any tool calls present -> tool_calls
+//   - failed/cancelled without tool calls -> error
 //   - otherwise -> stop (defensive default; keeps the loop progressing)
 func mapResponsesFinishReason(status string, toolCalls []ToolCall) string {
+	// Tool calls do not imply that the response finished generating.
+	if status == string(responses.ResponseStatusIncomplete) {
+		return "length"
+	}
 	if len(toolCalls) > 0 {
 		return "tool_calls"
 	}
 	switch status {
-	case string(responses.ResponseStatusIncomplete):
-		return "length"
 	case string(responses.ResponseStatusFailed), string(responses.ResponseStatusCancelled):
 		return "error"
 	default:
