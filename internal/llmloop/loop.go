@@ -383,6 +383,9 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
 	sessionID := uuid.NewString()
+	if closer, ok := r.deps.LLMClient.(interface{ CloseSession(string) }); ok {
+		defer closer.CloseSession(sessionID)
+	}
 
 	// Async compression is owned by this conversation alone; the deferred
 	// cancel aborts any job still in flight when the conversation ends.

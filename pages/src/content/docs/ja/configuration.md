@@ -39,11 +39,13 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 以下の provider が OCR に同梱されており、Base URL とプロトコルがプリセット
 されています——選択後は API key を入力するだけです。`providers.<name>.api_key`
 が未設定の場合は、対応する環境変数に自動的にフォールバックします。
+Copilot と Bedrock は独自の認証チェーンを使用するため、API key の設定は不要です。
 
 | 名称 | プロトコル | Base URL | API key 環境変数 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region` から決定 | —（AWS 認証情報チェーン） |
+| `copilot` | copilot | Copilot CLI が管理 | —（Copilot 認証） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -84,6 +86,26 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 設定した `url` はプリセット Base URL より優先されます。
 `providers.<name>.url` が未設定（または削除）の場合、OCR はプリセット
 デフォルトにフォールバックします——エンドポイントが異なる場合のみ設定すればよいです。
+
+### GitHub Copilot SDK（実験的）
+
+[Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli)
+をインストールし、`copilot login` でブラウザー認証を完了します。
+保存済み設定を変更せず、1 回のレビューで使用できます。
+
+```bash
+ocr review --provider copilot --model auto
+```
+
+OCR は `PATH` または `COPILOT_CLI_PATH` から CLI を見つけます。
+モデルには OCR のレビューツールだけを公開し、ツールの実行は OCR が担当します。
+通常のツール呼び出しは同じ SDK セッションを継続します。履歴の圧縮や最終ラウンドの
+ツール制限時には、JSON 履歴でセッションを再作成します。ラウンド数、タイムアウト、
+コンテキスト、合計トークンの制限は OCR が管理しますが、1 回の出力トークン数の
+厳密な上限は未検証です。SDK が使用量を返さない場合は推定します。
+呼び出しはアカウントの Copilot 利用枠を消費するため、小さいレビューから試してください。
+モデルと任意のタイムアウトのみを設定でき、URL、API key、独自ヘッダー、
+リクエスト本文、プロトコルの上書きには対応しません。Copilot と Bedrock は URL の上書きにも対応しません。
 
 ### AWS Bedrock
 

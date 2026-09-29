@@ -7,6 +7,7 @@
 //   - "anthropic-bedrock" — the same API served by AWS Bedrock, SigV4-signed
 //   - "openai" — OpenAI Chat Completions API
 //   - "openai-responses" — OpenAI Responses API
+//   - "copilot" — GitHub Copilot SDK through Copilot CLI
 package llm
 
 import (
@@ -467,6 +468,7 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // protocol dispatch (canonical names from protocol.go):
 //   - ProtocolAnthropic ("anthropic") -> AnthropicClient
 //   - ProtocolOpenAIResponses ("openai-responses") -> OpenAIResponsesClient
+//   - ProtocolCopilot ("copilot") -> CopilotClient
 //   - ProtocolOpenAIChatCompletions ("openai") or anything else -> OpenAIClient
 //
 // The defensive default keeps legacy callers that somehow bypass resolver
@@ -500,6 +502,8 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		return NewAnthropicBedrockClient(cfg)
 	case ProtocolOpenAIResponses:
 		return NewOpenAIResponsesClient(cfg)
+	case ProtocolCopilot:
+		return NewCopilotClient(cfg)
 	default:
 		return NewOpenAIClient(cfg)
 	}

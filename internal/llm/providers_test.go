@@ -32,6 +32,19 @@ func TestLookupProvider_KnownProviders(t *testing.T) {
 	}
 }
 
+func TestLookupProvider_CopilotDetails(t *testing.T) {
+	p, ok := LookupProvider("copilot")
+	if !ok {
+		t.Fatal("Copilot provider is missing")
+	}
+	if p.Protocol != ProtocolCopilot || p.BaseURL != "" || p.EnvVar != "" || !p.AmbientAuth {
+		t.Errorf("Copilot transport = %#v", p)
+	}
+	if len(p.Models) != 1 || p.Models[0] != "auto" {
+		t.Errorf("Copilot models = %v, want [auto]", p.Models)
+	}
+}
+
 func TestLookupProvider_MiniMaxDetails(t *testing.T) {
 	tests := []struct {
 		name, wantURL, wantEnvVar string
@@ -76,7 +89,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "copilot", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
