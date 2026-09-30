@@ -174,7 +174,9 @@ hunk 头 `@@ -x,y +m,n @@` 计算范围——通常 `m-50` 到 `m+n+50`。
 {
   "name": "file_read_diff",
   "input": {
-    "path_array": ["src/api/handler.go", "src/db/queries.go"]
+    "path_array": ["src/api/handler.go", "src/db/queries.go"],
+    "max_lines": 500,
+    "offset": 0
   }
 }
 ```
@@ -182,6 +184,7 @@ hunk 头 `@@ -x,y +m,n @@` 计算范围——通常 `m-50` 到 `m+n+50`。
 ### 输出
 
 ```
+IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -195,6 +198,11 @@ hunk 头 `@@ -x,y +m,n @@` 计算范围——通常 `m-50` 到 `m+n+50`。
 - query := "SELECT *"
 + query := "SELECT id"
 ```
+
+单次返回有体积上限：最多 `max_lines` 行（默认 500，硬上限 5000）。输出被截断时，
+响应以 `IS_TRUNCATED: true` 和 `NEXT_OFFSET: <n>` 开头；把该值作为 `offset`
+再次调用即可读取后续页。某一页从文件中间开始时，会重复该文件的
+`==== FILE: ... ====` 头行。
 
 若某路径不在变更集中，该条目被静默省略。若请求的路径**都不**在变更集中，工具
 返回 `Error: diff not found for the requested paths`；空的 `path_array` 返回
