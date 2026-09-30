@@ -102,6 +102,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/domain/Order.fs", "Discriminated Unions and Pattern Matching"},
 		{"src/domain/Order.fsi", "Discriminated Unions and Pattern Matching"},
 		{"scripts/migrate.fsx", "Discriminated Unions and Pattern Matching"},
+		{"src/domain/Order.cs", "Nullability, Type Safety, and Invariants"},
+		{"Controllers/WeatherForecastController.cs", "ASP.NET Core and Dependency Injection"},
 		{"src/main/handler.cpp", "Smart Pointer"},
 		{"src/main/handler.cxx", "Smart Pointer"},
 		{"include/handler.hxx", "Smart Pointer"},
