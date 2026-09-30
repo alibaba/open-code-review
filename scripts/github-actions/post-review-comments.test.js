@@ -2330,7 +2330,89 @@ async function testRoutedFindingsCarryNoIdempotencyId() {
   assert.doesNotMatch(body, /ocr-\d+-\d+-[a-f0-9]+/, "routed summary body carries no idempotency id");
 }
 
+async function testMalformedJsonWithStderrUsesAuthenticatedLogin() {
+  const gh = makeGithub({});
+  await runPostReviewComments({
+    github: gh,
+    context,
+    core: mockCore(),
+    fs: mockFs("{not json", "stderr error log"),
+    stickySummary: true,
+  });
+  // Validates Regression 1: authenticatedLogin must not throw a ReferenceError before initialization
+  assert.strictEqual(gh.issueComments.length, 1, "anchor created for error");
+  assert.match(gh.issueComments[0].body, /stderr error log/);
+}
+
+async function testZeroFindingsWithPatAuthoredSummary() {
+  const existing = [{ id: 42, body: "<!-- ocr-summary -->\nold", user: { login: "alice", type: "User" } }];
+  const gh = makeGithub({ existingSummary: existing });
+  gh.rest.users.getAuthenticated = async () => ({ data: { login: "alice" } });
+  
+  await runPostReviewComments({
+    github: gh,
+    context,
+    core: mockCore(),
+    fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest() }), ""),
+    stickySummary: true,
+  });
+  
+  // Validates Regression 3: Zero findings path must use botLogin to update the PAT summary
+  assert.strictEqual(gh.updatedComments.length, 1, "Must update existing PAT summary");
+  assert.strictEqual(gh.updatedComments[0].comment_id, 42);
+  assert.strictEqual(gh.issueComments.length, 0, "Must not create a new comment");
+}
+
+async function testCustomAppSummaryWhenAuthUnavailable() {
+  const existing = [{
+    id: 43,
+    body: "<!-- ocr-summary -->\nold",
+    user: { login: "my-custom-app[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "my-custom-app" }
+  }];
+  const gh = makeGithub({ existingSummary: existing });
+  gh.rest.users.getAuthenticated = async () => { throw makeErr("Forbidden", 403); };
+
+  await runPostReviewComments({
+    github: gh,
+    context,
+    core: mockCore(),
+    fs: mockFs(JSON.stringify({ comments: [{ path: "a.js", content: "x", start_line: 1, end_line: 1 }] }), ""),
+    stickySummary: true,
+    appSlug: "my-custom-app" // Passed in by action.yml for custom apps
+  });
+
+  // Validates Regression 2: Custom Apps bypass botLogin and use appSlug
+  assert.strictEqual(gh.updatedComments.length, 1, "Must update custom app summary");
+  assert.strictEqual(gh.updatedComments[0].comment_id, 43);
+  assert.strictEqual(gh.issueComments.length, 0, "Must not create a new comment");
+}
+
+async function testHumanCommentWithMarkerIsIgnored() {
+  const existing = [{ id: 44, body: "Quoting the bot: <!-- ocr-summary -->", user: { login: "human-dev", type: "User" } }];
+  const gh = makeGithub({ existingSummary: existing });
+  gh.rest.users.getAuthenticated = async () => ({ data: { login: "alice" } });
+
+  await runPostReviewComments({
+    github: gh,
+    context,
+    core: mockCore(),
+    fs: mockFs(JSON.stringify({ comments: [{ path: "a.js", content: "x", start_line: 1, end_line: 1 }] }), ""),
+    stickySummary: true,
+    appSlug: "github-actions"
+  });
+
+  // Validates the core bug fix: A human comment with the marker is NOT overwritten
+  assert.strictEqual(gh.issueComments.length, 1, "Must create a new summary anchor because the existing one is human");
+  assert.strictEqual(gh.updatedComments.length, 1, "Must update the newly created anchor");
+  assert.notStrictEqual(gh.updatedComments[0].comment_id, 44, "Must NOT overwrite the human comment");
+}
+
 async function main() {
+  await testMalformedJsonWithStderrUsesAuthenticatedLogin();
+  await testZeroFindingsWithPatAuthoredSummary();
+  await testCustomAppSummaryWhenAuthUnavailable();
+  await testHumanCommentWithMarkerIsIgnored();
   await testFailedInlineCommentsAreSummarized();
   await testWarningsListedAfterSummaryComments();
   await testErrorCommentUsesSafeFence();

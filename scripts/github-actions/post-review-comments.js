@@ -157,6 +157,11 @@ async function runPostReviewComments({
   };
   let outsideDiffCount = 0;
 
+  let authenticatedLoginPromise = null;
+  const authenticatedLogin = () => {
+    if (!authenticatedLoginPromise) authenticatedLoginPromise = getAuthenticatedLogin(github, log);
+    return authenticatedLoginPromise;
+  };
   // Parsed here, before anything can exit early, even though it is only acted
   // on after the posting loop. Unknown values fall to "off", which is the right
   // default but an invisible one: a workflow that says 'True' or 'yes' would
@@ -172,6 +177,8 @@ async function runPostReviewComments({
     if (core && typeof core.warning === "function") core.warning(msg);
     else log(msg);
   }
+
+  
 
   // ---- Checkpoint write path (#476) ----
   //
@@ -275,7 +282,7 @@ async function runPostReviewComments({
         `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview** encountered an error:\n${fencedBlock(stderr)}`,
         null
       );
-      const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log, botLogin: await authenticatedLogin() });
+      const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log, botLogin: await authenticatedLogin(), appSlug });
       stats.summaryUrl = posted.url;
     }
     setStatsOutputs(out, stats);
@@ -298,7 +305,7 @@ async function runPostReviewComments({
     const message = result.message || "No comments generated. Looks good to me.";
     // A clean run is still a complete run: this path advances the checkpoint.
     const body = appendCheckpoint(`${SUMMARY_MARKER}\n✅ **OpenCodeReview**: ${message}${rangeNote}`, result.manifest);
-    const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log });
+    const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log, botLogin: await authenticatedLogin(), appSlug });
     stats.summaryUrl = posted.url;
     setStatsOutputs(out, stats);
     return;
@@ -384,11 +391,7 @@ async function runPostReviewComments({
   // botLogin` branch is the only thing separating "our own comment, posted via
   // PAT" from "a human quoting our marker". Drop this call and the feature
   // silently resolves nothing on every PAT run.
-  let authenticatedLoginPromise = null;
-  const authenticatedLogin = () => {
-    if (!authenticatedLoginPromise) authenticatedLoginPromise = getAuthenticatedLogin(github, log);
-    return authenticatedLoginPromise;
-  };
+  
 
   // Incremental filtering (non-destructive): drop current inline comments
   // whose (path, line range) overlaps an existing bot review comment, so we
@@ -442,6 +445,7 @@ async function runPostReviewComments({
     ),
     log,
     botLogin: await authenticatedLogin(),
+    appSlug,
   });
 
   // Submit inline comments (the to-send set) as one or more PR reviews.
@@ -545,6 +549,7 @@ async function runPostReviewComments({
     preserveMarker,
     log,
     botLogin: await authenticatedLogin(),
+    appSlug,
   });
   if (finalized) stats.summaryUrl = finalized.url;
 
@@ -1061,10 +1066,10 @@ function setStatsOutputs(out, stats, batchCounters, batchSize) {
 
 // ---- Summary posting (sticky vs new) ----
 
-async function postSummary({ github, owner, repo, prNumber, body, sticky, preserveMarker = false, log, botLogin }) {
+async function postSummary({ github, owner, repo, prNumber, body, sticky, preserveMarker = false, log, botLogin, appSlug }) {
   const fullBody = body;
   if (sticky) {
-    const existing = await findExistingSummaryComment({ github, owner, repo, prNumber, log, botLogin });
+    const existing = await findExistingSummaryComment({ github, owner, repo, prNumber, log, botLogin, appSlug });
     if (existing) {
       const { data: updated } = await github.rest.issues.updateComment({
         owner,
@@ -1084,15 +1089,14 @@ async function postSummary({ github, owner, repo, prNumber, body, sticky, preser
   return { id: created.id, url: created.html_url, updated: false };
 }
 
-async function findExistingSummaryComment({ github, owner, repo, prNumber, log, botLogin }) {
+async function findExistingSummaryComment({ github, owner, repo, prNumber, log, botLogin, appSlug }) {
   const comments = await readAllPages("listIssueComments", (page, per_page) =>
     github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page, page }), log
   );
-  // Issue comments are returned oldest-first; pick the newest matching.
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body;
     if (typeof body === "string" && body.includes(SUMMARY_MARKER)) {
-      if (isBotComment(comments[i], botLogin)) {
+      if (isSummaryAuthorOurs(comments[i], botLogin, appSlug)) {
         return comments[i];
       }
     }
@@ -1112,14 +1116,14 @@ async function findExistingSummaryComment({ github, owner, repo, prNumber, log, 
 // Sticky matches the persistent cross-run marker (SUMMARY_MARKER); non-sticky
 // matches this run's tag (SUMMARY_TAG) so each run gets its own comment while
 // retries within a run reuse it. Throws on read failure so callers can degrade.
-async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log, botLogin }) {
+async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log, botLogin, appSlug }) {
   const comments = await readAllPages("listIssueComments", (page, per_page) =>
     github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page, page }), log
   );
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body || "";
     if (sticky ? body.includes(SUMMARY_MARKER) : body.includes(tag)) {
-      if (isBotComment(comments[i], botLogin)) {
+      if (isSummaryAuthorOurs(comments[i], botLogin, appSlug)) {
         return comments[i];
       }
     }
@@ -1131,10 +1135,10 @@ async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, 
 // its timeline position is pinned above the not-yet-posted review. Returns
 // { id, url } for the existing/created comment, or null when the existence
 // check fails (read API unavailable) — callers then defer to finalizeSummary.
-async function ensureSummaryAnchor({ github, owner, repo, prNumber, body, sticky, tag, log, botLogin }) {
+async function ensureSummaryAnchor({ github, owner, repo, prNumber, body, sticky, tag, log, botLogin, appSlug }) {
   let existing = null;
   try {
-    existing = await findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log, botLogin });
+    existing = await findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log, botLogin, appSlug });
   } catch (e) {
     log(`[summary] cannot check for existing summary before review (${e.message}); skipping anchor.`);
     return null;
@@ -1157,7 +1161,7 @@ async function ensureSummaryAnchor({ github, owner, repo, prNumber, body, sticky
 // known, update it directly (no extra read). Otherwise upsert: find then update
 // or create. Returns { id, url }, or null when the read API is unavailable and
 // the summary cannot be safely written without risking a duplicate.
-async function finalizeSummary({ github, owner, repo, prNumber, anchor, body, sticky, tag, preserveMarker = false, log, botLogin }) {
+async function finalizeSummary({ github, owner, repo, prNumber, anchor, body, sticky, tag, preserveMarker = false, log, botLogin, appSlug }) {
   const keep = (newBody, oldBody) => (preserveMarker ? preserveCheckpointMarker(newBody, oldBody) : newBody);
   if (anchor && anchor.id != null) {
     const { data: updated } = await github.rest.issues.updateComment({
@@ -1170,7 +1174,7 @@ async function finalizeSummary({ github, owner, repo, prNumber, anchor, body, st
   }
   let existing = null;
   try {
-    existing = await findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log, botLogin });
+    existing = await findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log, botLogin, appSlug });
   } catch (e) {
     log(`[summary] cannot check for existing summary at finalize (${e.message}); skipping to avoid duplicate.`);
     return null;
@@ -1194,16 +1198,6 @@ async function finalizeSummary({ github, owner, repo, prNumber, anchor, body, st
 }
 
 // ---- Incremental helpers ----
-
-async function getAuthenticatedLogin(github, log) {
-  try {
-    const { data: user } = await github.rest.users.getAuthenticated();
-    return user && user.login ? user.login : null;
-  } catch (e) {
-    log(`[auth] could not resolve authenticated user: ${e.message}`);
-    return null;
-  }
-}
 
 async function listExistingReviewComments(github, owner, repo, prNumber, log) {
   const all = [];
@@ -2994,6 +2988,15 @@ function checkpointAuthorSlug(comment) {
 // author_unverified until that comment is deleted and reposted. That is
 // fail-closed — a wider review, never a wrong one — and the log line below
 // names the slug that was expected so it is diagnosable.
+
+function isSummaryAuthorOurs(comment, botLogin, appSlug) {
+  if (!comment || !comment.user) return false;
+  // If it's a PAT (Personal Access Token), botLogin matches the human's login
+  if (botLogin && comment.user.login === botLogin) return true;
+  // Otherwise, fallback to the standard App/Bot check
+  return isCheckpointAuthorOurs(comment, appSlug);
+}
+
 function isCheckpointAuthorOurs(comment, appSlug = "") {
   const user = (comment && comment.user) || null;
   if (!user) return false;
@@ -3033,6 +3036,7 @@ async function readCheckpointComment({ github, owner, repo, prNumber, appSlug = 
       tag: "",
       log,
       botLogin,
+      appSlug,
     });
   } catch (e) {
     log(`[checkpoint] cannot list issue comments (${e.message}); reviewing the full range.`);
