@@ -372,6 +372,7 @@ With no `--path`, the whole repository is scanned.
 | Flag | Short | Default | Description |
 |---|---|---|---|
 | `--path <list>` | - | whole repo | Comma-separated repo-relative directories or files to scan (e.g., `internal/agent`, `internal/llm/client.go`). |
+| `--scan-template <path>` | - | embedded prompts | Load a validated prompt-only JSON override; does not change runtime budgets or exposed tools. |
 | `--exclude <patterns>` | - | - | Comma-separated gitignore-style patterns to skip (e.g., `**/generated/*,*.pb.go`); merged with `rule.json` excludes. |
 | `--output <path>` | `-o` | stdout | Write scan results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
 | `--preview` | `-p` | `false` | Enumerate and filter files without calling the LLM. Prints the file list, reviewable/excluded counts, total lines, and per-file exclusion reasons. Honors `--format json`; `--format sarif` is not supported. |
@@ -384,6 +385,28 @@ ocr scan --exclude '**/generated/*,*.pb.go'
 ```
 
 See `ocr scan -h` for the full flag list.
+
+### Prompt template overrides
+
+`--scan-template` replaces the complete `MAIN_TASK` system/user conversation and the fallback text used when planning is skipped or fails. The UTF-8 JSON path is relative to the current working directory. Without this flag, the embedded prompts and existing behavior remain unchanged.
+
+Start with [the bounded-review example](https://github.com/alibaba/open-code-review/blob/main/examples/scan/bounded-template.json):
+
+```bash
+ocr scan --path src/handler.py \
+  --scan-template examples/scan/bounded-template.json \
+  --rule examples/scan/bounded-rule.json \
+  --background 'Review only handle_request; use only supplied evidence.'
+```
+
+Both `MAIN_TASK` and nonempty, literal `NO_PLAN_GUIDANCE` are required. `MAIN_TASK.messages` must start with a `system` message, end with a `user` message, and contain only nonempty `system`/`user` messages. Together, these messages must include `{{current_file_path}}`, `{{file_content}}`, `{{system_rule}}`, `{{requirement_background}}`, and `{{plan_guidance}}`. Optional placeholders are `{{current_system_date_time}}` and `{{change_files}}` (the latter is a fixed scan-mode sentinel).
+
+`PLAN_TASK` may be omitted to retain the embedded planner, set to `null` to disable it, or replaced with a conversation of the same message shape. A replacement planner must include `{{current_file_path}}`, `{{file_content}}`, and `{{system_rule}}`; `{{current_system_date_time}}` is optional. For a bounded scope, disable or replace the default whole-file planner. `--no-plan` still skips planning, and every planning fallback uses `NO_PLAN_GUIDANCE`.
+
+Unreadable files, invalid JSON, duplicate or unknown fields, unsupported message roles or placeholders, and missing required values fail before any model request, including with `--preview`. Runtime settings such as `MAX_TOKENS`, `MAX_COMPLETION_TOKENS`, and `MAX_TOOL_REQUEST_TIMES` are rejected in this file. Existing budget flags and tool configuration still apply; prompt instructions do not restrict the exposed tool set.
+
+Custom scan checkpoints include the main/plan prompts after language configuration, fallback text, background, resolved per-file rule, and whether planning is enabled. With `--resume`, changing any of these inputs, or switching back to embedded prompts, reviews the affected files again. Moving or reformatting an otherwise identical override preserves checkpoint reuse. Time passing alone does not invalidate a checkpoint because the value substituted for the current-date placeholder is excluded from the identity.
+
 
 ## `ocr session`
 

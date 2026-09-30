@@ -350,6 +350,7 @@ ocr s      [flags]   (alias)
 | 参数 | 简写 | 默认 | 说明 |
 |---|---|---|---|
 | `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。 |
+| `--scan-template <path>` | - | 内置提示词 | 加载经过校验的提示词 JSON 覆盖文件；不会改变运行预算或暴露的工具。 |
 | `--exclude <patterns>` | - | - | 逗号分隔的 gitignore 风格排除模式（如 `**/generated/*,*.pb.go`）；与 `rule.json` 的 excludes 合并。 |
 | `--output <path>` | `-o` | 标准输出 | 将扫描结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
 | `--preview` | `-p` | `false` | 枚举并过滤文件但跳过 LLM。打印文件列表、可评审/排除数量、总行数及每个文件的排除原因。支持 `--format json`；不支持 `--format sarif`。 |
@@ -362,6 +363,28 @@ ocr scan --exclude '**/generated/*,*.pb.go'
 ```
 
 完整参数列表见 `ocr scan -h`。
+
+### 自定义扫描提示模板
+
+`--scan-template` 可替换完整的 `MAIN_TASK` system/user 对话，以及跳过计划或计划失败时使用的提示文案。文件须为 UTF-8 JSON，路径相对于当前工作目录。不传此参数时，沿用内置提示词和现有行为。
+
+可以从[限定范围的扫描示例](https://github.com/alibaba/open-code-review/blob/main/examples/scan/bounded-template.json)开始：
+
+```bash
+ocr scan --path src/handler.py \
+  --scan-template examples/scan/bounded-template.json \
+  --rule examples/scan/bounded-rule.json \
+  --background 'Review only handle_request; use only supplied evidence.'
+```
+
+必须提供 `MAIN_TASK` 和非空的纯文本 `NO_PLAN_GUIDANCE`。`MAIN_TASK.messages` 须以 `system` 消息开始、以 `user` 消息结束，且只包含内容非空的 `system`/`user` 消息。这些消息合起来必须包含 `{{current_file_path}}`、`{{file_content}}`、`{{system_rule}}`、`{{requirement_background}}` 和 `{{plan_guidance}}`。可选占位符为 `{{current_system_date_time}}` 和 `{{change_files}}`，后者在扫描模式中替换为固定提示。
+
+省略 `PLAN_TASK` 会保留内置计划阶段；设为 `null` 可关闭，也可以提供相同消息结构的自定义对话。自定义计划须包含 `{{current_file_path}}`、`{{file_content}}` 和 `{{system_rule}}`，可选使用 `{{current_system_date_time}}`。限定审查范围时，应关闭或替换默认的全文件计划。`--no-plan` 仍可跳过计划，所有计划回退路径都会使用 `NO_PLAN_GUIDANCE`。
+
+文件无法读取、JSON 无效、字段重复或未知、消息角色或占位符不受支持、必填值缺失时，会在任何模型请求之前报错，`--preview` 也会校验。此文件禁止设置 `MAX_TOKENS`、`MAX_COMPLETION_TOKENS`、`MAX_TOOL_REQUEST_TIMES` 等运行参数。原有预算参数和工具配置继续生效；提示词指令本身不会限制暴露的工具集合。
+
+自定义扫描检查点包含应用语言配置后的主任务和计划提示词、回退文案、背景、逐文件解析后的规则，以及是否启用计划。使用 `--resume` 时，修改这些输入中的任何一项，或切回内置提示词，都会重新审查受影响的文件。仅移动相同内容的模板文件或调整 JSON 格式仍会复用检查点。当前日期占位符的替换值不参与标识计算，因此仅时间推移不会使检查点失效。
+
 
 ## `ocr session`
 

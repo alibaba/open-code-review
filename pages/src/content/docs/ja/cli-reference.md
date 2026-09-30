@@ -348,6 +348,7 @@ ocr s      [flags]   (alias)
 | 引数 | 短縮形 | デフォルト | 説明 |
 |---|---|---|---|
 | `--path <list>` | - | リポジトリ全体 | スキャン対象のリポジトリ相対ディレクトリまたはファイル（カンマ区切り、例: `internal/agent`、`internal/llm/client.go`）。 |
+| `--scan-template <path>` | - | 組み込みプロンプト | 検証済みのプロンプト専用 JSON を読み込みます。実行予算や公開ツールは変更しません。 |
 | `--exclude <patterns>` | - | - | 除外する gitignore 形式のパターン（カンマ区切り、例: `**/generated/*,*.pb.go`）。`rule.json` の excludes とマージされます。 |
 | `--output <path>` | `-o` | 標準出力 | スキャン結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
 | `--preview` | `-p` | `false` | LLM を呼び出さずにファイルを列挙・フィルタリングします。ファイルリスト、レビュー対象/除外数、総行数、ファイルごとの除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません。 |
@@ -360,6 +361,28 @@ ocr scan --exclude '**/generated/*,*.pb.go'
 ```
 
 完全なフラグリストは `ocr scan -h` を参照してください。
+
+### スキャンプロンプトの上書き
+
+`--scan-template` は `MAIN_TASK` の system/user 会話全体と、計画を省略した場合や計画が失敗した場合の文言を置き換えます。ファイルは UTF-8 JSON で、パスは現在の作業ディレクトリを基準にします。指定しない場合は、組み込みプロンプトと既存の動作を維持します。
+
+[範囲を限定するサンプル](https://github.com/alibaba/open-code-review/blob/main/examples/scan/bounded-template.json)を出発点として利用できます。
+
+```bash
+ocr scan --path src/handler.py \
+  --scan-template examples/scan/bounded-template.json \
+  --rule examples/scan/bounded-rule.json \
+  --background 'Review only handle_request; use only supplied evidence.'
+```
+
+`MAIN_TASK` と空でないプレーンテキストの `NO_PLAN_GUIDANCE` が必須です。`MAIN_TASK.messages` は `system` で始まり、`user` で終わり、内容が空でない `system`/`user` メッセージのみを含めます。会話全体に `{{current_file_path}}`、`{{file_content}}`、`{{system_rule}}`、`{{requirement_background}}`、`{{plan_guidance}}` を含めてください。`{{current_system_date_time}}` と `{{change_files}}` は任意です。後者はスキャン専用の固定文言に置換されます。
+
+`PLAN_TASK` を省略すると組み込みの計画を維持し、`null` にすると無効になります。同じメッセージ形式で置き換えることもできます。置換した計画には `{{current_file_path}}`、`{{file_content}}`、`{{system_rule}}` が必須で、`{{current_system_date_time}}` は任意です。範囲を限定する場合は、既定の全ファイル計画を無効化または置換してください。`--no-plan` は引き続き計画を省略し、すべての計画フォールバックで `NO_PLAN_GUIDANCE` を使用します。
+
+読めないファイル、不正な JSON、重複・未知のフィールド、未対応のロール・プレースホルダー、必須値の欠落は、モデル要求の前にエラーになります。`--preview` でも検証します。このファイルでは `MAX_TOKENS`、`MAX_COMPLETION_TOKENS`、`MAX_TOOL_REQUEST_TIMES` などの実行設定を指定できません。既存の予算フラグとツール設定は有効で、プロンプトの指示だけでは公開ツールを制限できません。
+
+カスタムスキャンのチェックポイントには、言語設定適用後の主タスクと計画のプロンプト、フォールバック文言、背景、ファイルごとに解決されたルール、計画の有効状態が含まれます。`--resume` 時にこれらの入力を変更するか、組み込みプロンプトに戻すと、対象ファイルを再レビューします。同一内容のテンプレートを移動したり JSON の整形だけを変更したりしても、チェックポイントは再利用されます。現在日時のプレースホルダーに代入する値は識別情報に含めないため、時間の経過だけではチェックポイントは無効になりません。
+
 
 ## `ocr session`
 

@@ -365,6 +365,7 @@ ocr s      [flags]   (alias)
 | 플래그 | 단축 | 기본값 | 설명 |
 |---|---|---|---|
 | `--path <list>` | - | 저장소 전체 | 스캔할 저장소 기준 상대 디렉터리나 파일(쉼표 구분). 예: `internal/agent`, `internal/llm/client.go`. |
+| `--scan-template <path>` | - | 내장 프롬프트 | 검증된 프롬프트 전용 JSON을 불러옵니다. 실행 예산이나 노출된 도구는 변경하지 않습니다. |
 | `--exclude <patterns>` | - | - | 건너뛸 gitignore 형식 패턴(쉼표 구분). 예: `**/generated/*,*.pb.go`. `rule.json`의 excludes와 합쳐집니다. |
 | `--output <path>` | `-o` | stdout | 스캔 결과를 UTF-8 파일로 씁니다(`-`는 stdout). 첫 쓰기 시점에 파일을 만들므로 실패한 실행은 기존 파일을 건드리지 않습니다. text 형식에서는 ANSI 색 코드를 자동으로 제거합니다. |
 | `--preview` | `-p` | `false` | LLM을 호출하지 않고 파일을 나열하고 필터링합니다. 파일 목록, 리뷰 대상과 제외 대상 개수, 전체 라인 수, 파일별 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다. |
@@ -377,6 +378,28 @@ ocr scan --exclude '**/generated/*,*.pb.go'
 ```
 
 전체 플래그 목록은 `ocr scan -h`로 확인하세요.
+
+### 스캔 프롬프트 템플릿 재정의 {#scan-prompt-overrides}
+
+`--scan-template`은 전체 `MAIN_TASK` system/user 대화와 계획을 건너뛰거나 계획이 실패했을 때의 안내 문구를 교체합니다. 파일은 UTF-8 JSON이어야 하며, 경로는 현재 작업 디렉터리를 기준으로 합니다. 지정하지 않으면 내장 프롬프트와 기존 동작이 유지됩니다.
+
+[범위를 제한하는 예제](https://github.com/alibaba/open-code-review/blob/main/examples/scan/bounded-template.json)로 시작할 수 있습니다.
+
+```bash
+ocr scan --path src/handler.py \
+  --scan-template examples/scan/bounded-template.json \
+  --rule examples/scan/bounded-rule.json \
+  --background 'Review only handle_request; use only supplied evidence.'
+```
+
+`MAIN_TASK`와 비어 있지 않은 일반 텍스트 `NO_PLAN_GUIDANCE`는 필수입니다. `MAIN_TASK.messages`는 `system` 메시지로 시작하고 `user` 메시지로 끝나야 하며, 내용이 비어 있지 않은 `system`/`user` 메시지만 포함해야 합니다. 대화 전체에 `{{current_file_path}}`, `{{file_content}}`, `{{system_rule}}`, `{{requirement_background}}`, `{{plan_guidance}}`가 필요합니다. `{{current_system_date_time}}`과 `{{change_files}}`는 선택 사항이며, 후자는 스캔 모드의 고정 안내로 치환됩니다.
+
+`PLAN_TASK`를 생략하면 내장 계획이 유지되고, `null`이면 비활성화됩니다. 같은 메시지 구조로 교체할 수도 있습니다. 사용자 지정 계획에는 `{{current_file_path}}`, `{{file_content}}`, `{{system_rule}}`가 필요하며, `{{current_system_date_time}}`은 선택 사항입니다. 범위를 제한하려면 기본 전체 파일 계획을 비활성화하거나 교체하세요. `--no-plan`은 계속 계획을 건너뛰며, 모든 계획 대체 경로에서 `NO_PLAN_GUIDANCE`를 사용합니다.
+
+파일 읽기 실패, 잘못된 JSON, 중복되거나 알 수 없는 필드, 지원하지 않는 역할이나 플레이스홀더, 필수 값 누락은 모델 요청 전에 오류를 발생시킵니다. `--preview`도 검증합니다. 이 파일에서 `MAX_TOKENS`, `MAX_COMPLETION_TOKENS`, `MAX_TOOL_REQUEST_TIMES` 같은 실행 설정은 허용되지 않습니다. 기존 예산 플래그와 도구 설정은 계속 적용되며, 프롬프트 지시만으로 노출된 도구 목록을 제한할 수는 없습니다.
+
+사용자 지정 스캔 체크포인트에는 언어 설정이 적용된 주 작업과 계획 프롬프트, 대체 문구, 배경, 파일별로 결정된 규칙, 계획 활성화 여부가 포함됩니다. `--resume`에서 이러한 입력을 변경하거나 내장 프롬프트로 돌아가면 해당 파일을 다시 검토합니다. 내용이 동일한 템플릿 파일을 이동하거나 JSON 형식만 변경하면 체크포인트를 재사용합니다. 현재 날짜 플레이스홀더에 대입하는 값은 식별자에서 제외하므로 시간 경과만으로 체크포인트가 무효화되지는 않습니다.
+
 
 ## `ocr session` {#ocr-session}
 

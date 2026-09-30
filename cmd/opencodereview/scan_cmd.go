@@ -25,6 +25,7 @@ import (
 )
 
 type scanOptions struct {
+	scanTemplatePath      string
 	toolConfigPath        string
 	rulePath              string
 	repoDir               string
@@ -79,6 +80,9 @@ var scanCmd = &cobra.Command{
   # Skip the per-file PLAN_TASK pre-pass
   ocr scan --no-plan
 
+  # Use custom prompts for a bounded review
+  ocr scan --path src/handler.py --scan-template bounded-template.json --no-plan
+
   # Resume a previous full-file scan
   ocr scan --resume <session-id>`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -128,7 +132,7 @@ func executeScan(opts scanOptions) (retErr error) {
 	// scan owns its own template (scan_template.json) independent from the
 	// diff-review template loaded by loadCommonContext above. Apply --max-tools
 	// as an "only raise" override to the scan template's per-file budget.
-	scanTpl, err := template.LoadScanDefault()
+	scanTpl, err := template.LoadScan(opts.scanTemplatePath)
 	if err != nil {
 		return fmt.Errorf("load scan template: %w", err)
 	}
