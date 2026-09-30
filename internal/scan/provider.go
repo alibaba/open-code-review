@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -47,22 +48,37 @@ type Provider struct {
 	maxFileSizeBytes int64
 }
 
+// normalizeScanPath reduces a user-supplied `--path` selector to the
+// slash-separated, repo-relative form that `git ls-files` output uses, and
+// returns "" for the repository root so the caller can drop it and scan
+// everything. Separators are converted before cleaning, because a Windows
+// spelling such as `.\internal\scan` would otherwise keep its `.\` prefix and
+// match no listed file.
+func normalizeScanPath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	p = path.Clean(filepath.ToSlash(p))
+	if p == "." {
+		return ""
+	}
+	return p
+}
+
 // NewProvider creates a Provider that enumerates the repository at repoDir.
 // If paths is non-empty each element must be a repo-relative path (file or
-// directory); only matching files are returned. maxFileSizeBytes <= 0 falls
-// back to DefaultMaxFileSizeBytes.
+// directory); only matching files are returned. Selectors naming the repository
+// root are dropped, so they mean the same thing as passing no paths at all.
+// maxFileSizeBytes <= 0 falls back to DefaultMaxFileSizeBytes.
 func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileSizeBytes int64) *Provider {
 	cleaned := make([]string, 0, len(paths))
 	for _, p := range paths {
-		p = strings.TrimSpace(p)
+		p = normalizeScanPath(p)
 		if p == "" {
 			continue
 		}
-		// Normalize: strip leading "./" and trailing "/" so prefix matching
-		// against `git ls-files` output (which never has leading "./") works.
-		p = strings.TrimPrefix(p, "./")
-		p = strings.TrimSuffix(p, "/")
-		cleaned = append(cleaned, filepath.ToSlash(p))
+		cleaned = append(cleaned, p)
 	}
 	if maxFileSizeBytes <= 0 {
 		maxFileSizeBytes = DefaultMaxFileSizeBytes
