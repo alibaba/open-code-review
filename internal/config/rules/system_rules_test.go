@@ -102,6 +102,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/domain/Order.fs", "Discriminated Unions and Pattern Matching"},
 		{"src/domain/Order.fsi", "Discriminated Unions and Pattern Matching"},
 		{"scripts/migrate.fsx", "Discriminated Unions and Pattern Matching"},
+		{"src/main/scala/com/example/Service.scala", "Scala Review Principles"},
+		{"modules/account/src/main/scala/User.scala", "Initialization Order, Lazy Values, and Cycles"},
+		{"app/Main.scala", "Pattern Matching, Exhaustiveness, and Erasure"},
 		{"src/main/handler.cpp", "Smart Pointer"},
 		{"src/main/handler.cxx", "Smart Pointer"},
 		{"include/handler.hxx", "Smart Pointer"},
@@ -990,6 +993,42 @@ func TestResolveDetail_SystemGoPatternMatch(t *testing.T) {
 			} {
 				if !strings.Contains(detail.Rule, required) {
 					t.Errorf("expected Go rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemScalaPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{
+		"src/main/scala/com/example/Service.scala",
+		"modules/account/src/main/scala/User.scala",
+		"app/Main.SCALA",
+	} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.scala" {
+				t.Errorf("expected pattern '**/*.scala', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Scala Review Principles",
+				"Null, Option, and Java Interop Boundaries",
+				"Pattern Matching, Exhaustiveness, and Erasure",
+				"Concurrency, Futures, and ExecutionContext",
+				"Initialization Order, Lazy Values, and Cycles",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected Scala rule to contain %q", required)
 				}
 			}
 		})
