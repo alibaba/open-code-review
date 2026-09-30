@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -74,8 +75,9 @@ func TestNewProvider_NormalizesPaths(t *testing.T) {
 		"cmd",
 		"   internal/diff   ",
 		filepath.FromSlash("a/b"),
+		filepath.Join(".", "internal", "scan") + string(filepath.Separator),
 	}, nil, 0)
-	want := []string{"internal/agent", "cmd", "internal/diff", "a/b"}
+	want := []string{"internal/agent", "cmd", "internal/diff", "a/b", "internal/scan"}
 	if !reflect.DeepEqual(p.paths, want) {
 		t.Errorf("paths = %v, want %v", p.paths, want)
 	}
@@ -240,5 +242,136 @@ func TestProvider_Enumerate_PathFilter(t *testing.T) {
 	want := []string{"pkg/b.go", "pkg/sub/c.go"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Errorf("paths = %v, want %v", paths, want)
+	}
+}
+
+// TestNormalizeScanPath pins the selector spellings that used to survive
+// normalization and then match no `git ls-files` entry. A "" result means
+// "repository root", which the caller turns into "no path filter".
+func TestNormalizeScanPath(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"", ""},
+		{"   ", ""},
+		{".", ""},
+		{"./", ""},
+		{"././", ""},
+		{"   .   ", ""},
+		{"internal/..", ""},
+		{"./internal/agent/", "internal/agent"},
+		{"internal/agent/.", "internal/agent"},
+		{"a//b", "a/b"},
+		{"cmd", "cmd"},
+		{"   internal/diff   ", "internal/diff"},
+		{"./a/b/../c", "a/c"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := normalizeScanPath(tt.in); got != tt.want {
+				t.Errorf("normalizeScanPath(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+
+	// On Windows a backslash is the separator, so a native spelling must
+	// normalize like its slash form. Elsewhere it is a legal filename
+	// character and has to be left alone.
+	native := []struct{ in, want string }{
+		{filepath.Join(".", "internal", "scan"), "internal/scan"},
+		{filepath.Join(".", "internal", "scan") + string(filepath.Separator), "internal/scan"},
+		{filepath.FromSlash("./pkg/"), "pkg"},
+	}
+	if runtime.GOOS == "windows" {
+		native = append(native,
+			struct{ in, want string }{`.\internal\scan`, "internal/scan"},
+			struct{ in, want string }{`.\`, ""},
+		)
+	}
+	for _, tt := range native {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := normalizeScanPath(tt.in); got != tt.want {
+				t.Errorf("normalizeScanPath(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNewProvider_RootSelectorsDropFilter covers the spellings users reach for
+// when they mean "the whole repository". A leftover "." or "" selector matches
+// no `git ls-files` entry, so it used to turn a full scan into a silent no-op.
+func TestNewProvider_RootSelectorsDropFilter(t *testing.T) {
+	for _, sel := range []string{".", "./", "././", "internal/..", "   .   "} {
+		t.Run(sel, func(t *testing.T) {
+			if got := NewProvider("/tmp/repo", []string{sel}, nil, 0).paths; len(got) != 0 {
+				t.Errorf("NewProvider(%q).paths = %q, want no filter", sel, got)
+			}
+		})
+	}
+
+	// A root selector mixed with a real one must not leave a stray empty entry
+	// behind, which would otherwise shadow the real selector.
+	p := NewProvider("/tmp/repo", []string{"./", "cmd"}, nil, 0)
+	if want := []string{"cmd"}; !reflect.DeepEqual(p.paths, want) {
+		t.Errorf("paths = %q, want %q", p.paths, want)
+	}
+}
+
+func TestProvider_Enumerate_RootPathSelector(t *testing.T) {
+	repo := initTestRepo(t)
+	writeFile(t, repo, "a.go", []byte("package a\n"))
+	writeFile(t, repo, "pkg/b.go", []byte("package pkg\n"))
+	gitCommit(t, repo, "init")
+
+	want := []string{"a.go", "pkg/b.go"}
+	for _, sel := range []string{".", "./", filepath.Join(".", "")} {
+		t.Run(sel, func(t *testing.T) {
+			got, err := NewProvider(repo, []string{sel}, nil, 0).Enumerate(context.Background())
+			if err != nil {
+				t.Fatalf("Enumerate: %v", err)
+			}
+			paths := make([]string, 0, len(got))
+			for _, it := range got {
+				paths = append(paths, it.Path)
+			}
+			sort.Strings(paths)
+			if !reflect.DeepEqual(paths, want) {
+				t.Errorf("paths = %v, want %v", paths, want)
+			}
+		})
+	}
+}
+
+// TestProvider_Enumerate_NativeSeparatorPathSelector covers the same class of
+// miss for native separators. On Windows a selector like `.\pkg` used to keep
+// its leading `.\` and match no listed file.
+func TestProvider_Enumerate_NativeSeparatorPathSelector(t *testing.T) {
+	repo := initTestRepo(t)
+	writeFile(t, repo, "a.go", []byte("package a\n"))
+	writeFile(t, repo, "pkg/b.go", []byte("package pkg\n"))
+	gitCommit(t, repo, "init")
+
+	for _, sel := range []string{
+		filepath.Join(".", "pkg"),
+		filepath.Join(".", "pkg") + string(filepath.Separator),
+		filepath.FromSlash("./pkg/"),
+	} {
+		t.Run(sel, func(t *testing.T) {
+			got, err := NewProvider(repo, []string{sel}, nil, 0).Enumerate(context.Background())
+			if err != nil {
+				t.Fatalf("Enumerate: %v", err)
+			}
+			paths := make([]string, 0, len(got))
+			for _, it := range got {
+				paths = append(paths, it.Path)
+			}
+			sort.Strings(paths)
+			// a.go must stay excluded: the selector resolves to "pkg", not the
+			// repository root.
+			if want := []string{"pkg/b.go"}; !reflect.DeepEqual(paths, want) {
+				t.Errorf("paths = %v, want %v", paths, want)
+			}
+		})
 	}
 }
