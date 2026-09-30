@@ -121,6 +121,7 @@ async function runPostReviewComments({
   // resolve, anything else (including the default) is a hard no-op that issues
   // zero GraphQL calls.
   resolveOutdated = "",
+  appSlug = "",
 }) {
   const log = (msg) => {
     if (core && typeof core.info === "function") core.info(msg);
@@ -282,7 +283,7 @@ async function runPostReviewComments({
         `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview** encountered an error:\n${fencedBlock(stderr)}`,
         null
       );
-      const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log, botLogin: await authenticatedLogin(), appSlug });
+      const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log, botLogin: authenticatedLogin, appSlug });
       stats.summaryUrl = posted.url;
     }
     setStatsOutputs(out, stats);
@@ -305,7 +306,7 @@ async function runPostReviewComments({
     const message = result.message || "No comments generated. Looks good to me.";
     // A clean run is still a complete run: this path advances the checkpoint.
     const body = appendCheckpoint(`${SUMMARY_MARKER}\n✅ **OpenCodeReview**: ${message}${rangeNote}`, result.manifest);
-    const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log, botLogin: await authenticatedLogin(), appSlug });
+    const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log, botLogin: authenticatedLogin, appSlug });
     stats.summaryUrl = posted.url;
     setStatsOutputs(out, stats);
     return;
@@ -444,7 +445,7 @@ async function runPostReviewComments({
       buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings)
     ),
     log,
-    botLogin: await authenticatedLogin(),
+    botLogin: authenticatedLogin,
     appSlug,
   });
 
@@ -548,7 +549,7 @@ async function runPostReviewComments({
     body: wrapSummary(appendCheckpoint(summaryBody, result.manifest)),
     preserveMarker,
     log,
-    botLogin: await authenticatedLogin(),
+    botLogin: authenticatedLogin,
     appSlug,
   });
   if (finalized) stats.summaryUrl = finalized.url;
@@ -1096,7 +1097,9 @@ async function findExistingSummaryComment({ github, owner, repo, prNumber, log, 
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body;
     if (typeof body === "string" && body.includes(SUMMARY_MARKER)) {
-      if (isSummaryAuthorOurs(comments[i], botLogin, appSlug)) {
+      // Lazy evaluation
+      const login = typeof botLogin === 'function' ? await botLogin() : botLogin;
+      if (isSummaryAuthorOurs(comments[i], login, appSlug)) {
         return comments[i];
       }
     }
@@ -1116,14 +1119,16 @@ async function findExistingSummaryComment({ github, owner, repo, prNumber, log, 
 // Sticky matches the persistent cross-run marker (SUMMARY_MARKER); non-sticky
 // matches this run's tag (SUMMARY_TAG) so each run gets its own comment while
 // retries within a run reuse it. Throws on read failure so callers can degrade.
-async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log, botLogin, appSlug }) {
+async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log, botLogin, appSlug, ignoreAuthor = false }) {
   const comments = await readAllPages("listIssueComments", (page, per_page) =>
     github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page, page }), log
   );
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body || "";
     if (sticky ? body.includes(SUMMARY_MARKER) : body.includes(tag)) {
-      if (isSummaryAuthorOurs(comments[i], botLogin, appSlug)) {
+      // Lazy evaluation: only fetch the login if we actually found a marker
+      const login = typeof botLogin === 'function' ? await botLogin() : botLogin;
+      if (ignoreAuthor || isSummaryAuthorOurs(comments[i], login, appSlug)) {
         return comments[i];
       }
     }
@@ -1138,7 +1143,7 @@ async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, 
 async function ensureSummaryAnchor({ github, owner, repo, prNumber, body, sticky, tag, log, botLogin, appSlug }) {
   let existing = null;
   try {
-    existing = await findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log, botLogin, appSlug });
+    existing = await findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log, botLogin, appSlug});
   } catch (e) {
     log(`[summary] cannot check for existing summary before review (${e.message}); skipping anchor.`);
     return null;
@@ -2997,6 +3002,22 @@ function isSummaryAuthorOurs(comment, botLogin, appSlug) {
   return isCheckpointAuthorOurs(comment, appSlug);
 }
 
+async function getAuthenticatedLogin(github, log) {
+  try {
+    // Defend against test mocks that strip the 'users' endpoint entirely
+    if (!github || !github.rest || !github.rest.users || typeof github.rest.users.getAuthenticated !== 'function') {
+      return null;
+    }
+    const { data: user } = await github.rest.users.getAuthenticated();
+    return user && user.login ? user.login : null;
+  } catch (e) {
+    if (log && typeof log === 'function') {
+      try { log(`[auth] could not resolve authenticated user: ${e.message}`); } catch (_) {}
+    }
+    return null;
+  }
+}
+
 function isCheckpointAuthorOurs(comment, appSlug = "") {
   const user = (comment && comment.user) || null;
   if (!user) return false;
@@ -3037,6 +3058,7 @@ async function readCheckpointComment({ github, owner, repo, prNumber, appSlug = 
       log,
       botLogin,
       appSlug,
+      ignoreAuthor: true,
     });
   } catch (e) {
     log(`[checkpoint] cannot list issue comments (${e.message}); reviewing the full range.`);

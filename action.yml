@@ -1048,6 +1048,7 @@ runs:
         # available; context.issue.number resolves nothing on a workflow_run.
         OCR_PR_NUMBER: ${{ env.PR_NUMBER }}
         OCR_RESOLVE_OUTDATED: ${{ env.RESOLVE_OUTDATED }}
+        OCR_CHECKPOINT_APP_SLUG: ${{ inputs.github_token == github.token && 'github-actions' || '' }}
       with:
         github-token: ${{ inputs.github_token }}
         script: |
