@@ -550,3 +550,83 @@ func TestWholeRepoScanPathScopeResumeRoundTrip(t *testing.T) {
 		t.Fatal("expected scoped resume mismatch")
 	}
 }
+
+func TestJSONLWriterHeartbeatRecordsReachDiskWhileQuiet(t *testing.T) {
+	// A writer sitting in a long provider call appends nothing else, yet its
+	// heartbeat loop must keep flushing heartbeat records so the file's
+	// modification time stays fresh. Records carry the same chain fields as
+	// every other record type.
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	defer swapHeartbeatInterval(t, 20*time.Millisecond)()
+
+	jw, err := newJSONLWriter(generateUUID(), repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	if err != nil {
+		t.Fatalf("newJSONLWriter: %v", err)
+	}
+	jw.WriteSessionStart(time.Now())
+	time.Sleep(150 * time.Millisecond) // quiet interval: several beats, no other records
+	jw.flushAndClose()
+
+	path, err := SessionFilePath(repoDir, jw.sessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	counts := countRecordTypes(t, path)
+	if counts["heartbeat"] < 3 {
+		t.Fatalf("expected >= 3 heartbeat records during the quiet interval, got %d", counts["heartbeat"])
+	}
+
+	// The heartbeat must stop with the writer: after the close, no further
+	// records may appear no matter how long the process lives on.
+	before := counts["heartbeat"]
+	time.Sleep(120 * time.Millisecond)
+	if after := countRecordTypes(t, path)["heartbeat"]; after != before {
+		t.Fatalf("heartbeat records kept appearing after close: %d -> %d", before, after)
+	}
+}
+
+func TestJSONLWriterHeartbeatStopsAtSessionEnd(t *testing.T) {
+	// WriteSessionEnd closes the file, so the heartbeat loop must be stopped
+	// by then — a beat landing after the close would write to a closed file.
+	// session_end itself must remain the last physical record.
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	defer swapHeartbeatInterval(t, 20*time.Millisecond)()
+
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	time.Sleep(100 * time.Millisecond) // let at least one beat land
+	if err := sh.Finalize(); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+
+	path, err := SessionFilePath(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	counts := countRecordTypes(t, path)
+	if counts["heartbeat"] < 1 {
+		t.Fatal("expected at least one heartbeat record before session_end")
+	}
+
+	time.Sleep(120 * time.Millisecond)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var last map[string]any
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
+		t.Fatalf("unmarshal last record: %v", err)
+	}
+	if got, _ := last["type"].(string); got != "session_end" {
+		t.Fatalf("last record type = %q, want session_end", got)
+	}
+	if after := countRecordTypes(t, path)["heartbeat"]; after != counts["heartbeat"] {
+		t.Fatalf("heartbeat records kept appearing after session_end: %d -> %d", counts["heartbeat"], after)
+	}
+}
