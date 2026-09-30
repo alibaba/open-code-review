@@ -509,6 +509,53 @@ branded bot identity like `OpenCodeReview Bot`.
 Discussions are now posted under the service account name instead
 of the user who originally created the token.
 
+### Native Code Quality report (no API token)
+
+If you only need findings to show up in the merge request, skip the
+posting script entirely. `--format codequality` writes a
+[GitLab Code Quality report](https://docs.gitlab.com/ci/testing/code_quality/),
+which GitLab renders natively in the merge request instead of through
+API-posted discussions:
+
+```yaml
+ocr-code-quality:
+  stage: test
+  image: node:20
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    GIT_DEPTH: 0
+  script:
+    - npm install -g @alibaba-group/open-code-review
+    - ocr config set llm.url "$OCR_LLM_URL"
+    - ocr config set llm.auth_token "$OCR_LLM_AUTH_TOKEN"
+    - ocr config set llm.model "$OCR_LLM_MODEL"
+    - ocr review --from "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --to "$CI_COMMIT_SHA"
+        --format codequality --audience agent --output gl-code-quality-report.json
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality-report.json
+```
+
+A ready-to-copy version lives at
+[`examples/gitlab_ci/ocr-codequality.gitlab-ci.yml`](https://github.com/alibaba/open-code-review/blob/main/examples/gitlab_ci/ocr-codequality.gitlab-ci.yml).
+
+| | Inline discussions (`.gitlab-ci.yml`) | Code Quality report |
+|---|---|---|
+| Token needed to publish | `GITLAB_API_TOKEN` (or `CI_JOB_TOKEN`) | none |
+| Fork MRs | needs pipeline settings | no posting step to configure |
+| Suggested fixes | yes | no (use `--format json` or `sarif` for fixes) |
+
+Severity maps to GitLab levels as `critical` → critical, `high` →
+major, `medium` → minor, `low` → info. Findings without a file path
+are left out, because GitLab rejects issues that have no location;
+they remain available through `--format json`. Fingerprints match the
+SARIF ones, so GitLab tracks the same finding across pipelines instead
+of reporting it as new each time. The merge request widget is available
+on every GitLab tier; inline annotations in the *Changes* tab require
+GitLab Ultimate.
+
 ### Troubleshooting
 
 | Symptom | Cause / Fix |
