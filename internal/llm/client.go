@@ -669,15 +669,28 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// Skip the "stream" key here. The streaming decision below uses a
-		// dedicated boolean check, and when streaming is enabled the SDK's
-		// NewStreaming method sets stream=true on the wire itself. When
-		// streaming is NOT enabled, leaving the key in the body would make
-		// the API answer with text/event-stream and the non-streaming path
-		// fails to decode (see issue #647). "stream_options" is owned by the
-		// streaming branch below for the same reason: providers reject it
-		// unless stream is true.
-		if k == "stream" || k == "stream_options" {
+		// The "stream" key needs case-by-case handling:
+		//
+		//   - bool true  -> drop. The streaming decision below uses a
+		//     dedicated boolean check, and when streaming is enabled the
+		//     SDK's NewStreaming method sets stream=true on the wire itself.
+		//   - bool false -> forward. Some gateways (vLLM, certain
+		//     OpenAI-compatible frontends) default to text/event-stream when
+		//     the stream field is absent. Forcing a non-streaming JSON body
+		//     needs an explicit "stream": false on the wire (issue #1527).
+		//   - any other type (string "true", null, map, ...) -> drop. The
+		//     forwarding branch below expects a clean boolean, and a malformed
+		//     value that reached the wire would either be ignored by the
+		//     server or break the non-streaming JSON decoder (issue #647).
+		//
+		// "stream_options" is owned by the streaming branch below: providers
+		// reject it unless stream is true.
+		if k == "stream" {
+			b, isBool := v.(bool)
+			if !isBool || b {
+				continue
+			}
+		} else if k == "stream_options" {
 			continue
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
@@ -1482,12 +1495,20 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		opts = append(opts, option.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// This client is non-streaming: it calls Messages.New, which expects a
-		// single JSON body. If a provider config sets extra_body.stream=true,
-		// forwarding it here makes the API answer with SSE and every call fails
-		// to decode. Drop the key rather than forward it.
+		// "stream" is handled case-by-case. This client calls Messages.New,
+		// which is non-streaming, so an explicit stream=true would make the
+		// API answer with SSE and the JSON decoder would fail (issue #647):
+		// drop truthy and non-boolean values. An explicit stream=false is
+		// safe to forward and is the documented merge semantics of
+		// extra_body (issue #1527): some Anthropic-compatible gateways
+		// default to SSE when the stream field is absent, and the only way
+		// to force a JSON body on the wire is to write "stream": false
+		// explicitly.
 		if k == "stream" {
-			continue
+			b, isBool := v.(bool)
+			if !isBool || b {
+				continue
+			}
 		}
 		// Drop thinking when it conflicts with this request's constraints:
 		// forced tool_choice or budget_tokens >= max_tokens.
