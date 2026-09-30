@@ -600,6 +600,89 @@ func TestResolveEndpointWithOptions_ExplicitProviderUsesProviderAPIKeyEnvironmen
 	if ep.Token != "environment-token" || ep.URL != "https://api.anthropic.com/v1/messages" || ep.Model != "claude-sonnet-4-6" {
 		t.Fatalf("endpoint = %+v", ep)
 	}
+	if ep.AuthMode != AuthModeEnv {
+		t.Fatalf("AuthMode = %q, want %q", ep.AuthMode, AuthModeEnv)
+	}
+}
+
+func TestResolveEndpoint_ProviderAuthMetadata(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "openai-responses",
+		Providers: map[string]providerEntryConfig{
+			"openai-responses": {
+				APIKey:            "sk-openai-test",
+				Model:             "gpt-5.6-terra",
+				AuthMode:          string(AuthModeWorkloadIdentity),
+				IdentityTokenFile: "C:/tokens/openai.jwt",
+				TokenExchangeURL:  "https://auth.example.com/token",
+			},
+		},
+	}
+	path, _ := writeResolverConfig(t, cfg)
+
+	ep, err := ResolveEndpoint(path)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if ep.AuthMode != AuthModeWorkloadIdentity {
+		t.Errorf("AuthMode = %q, want %q", ep.AuthMode, AuthModeWorkloadIdentity)
+	}
+	if ep.IdentityTokenFile != "C:/tokens/openai.jwt" {
+		t.Errorf("IdentityTokenFile = %q", ep.IdentityTokenFile)
+	}
+	if ep.TokenExchangeURL != "https://auth.example.com/token" {
+		t.Errorf("TokenExchangeURL = %q", ep.TokenExchangeURL)
+	}
+}
+
+func TestResolveEndpoint_ProviderWorkloadIdentityWithoutAPIKey(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "openai-responses",
+		Providers: map[string]providerEntryConfig{
+			"openai-responses": {
+				Model:             "gpt-5.6-terra",
+				IdentityTokenFile: "C:/tokens/openai.jwt",
+				TokenExchangeURL:  "https://auth.example.com/token",
+			},
+		},
+	}
+	path, _ := writeResolverConfig(t, cfg)
+
+	ep, err := ResolveEndpoint(path)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if ep.Token != "" {
+		t.Errorf("Token = %q, want empty before token exchange is implemented", ep.Token)
+	}
+	if ep.AuthMode != AuthModeWorkloadIdentity {
+		t.Errorf("AuthMode = %q, want %q", ep.AuthMode, AuthModeWorkloadIdentity)
+	}
+}
+
+func TestResolveEndpoint_ProviderAmbientAuthModeRequiresAmbientProvider(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "openai",
+		Providers: map[string]providerEntryConfig{
+			"openai": {
+				APIKey:   "sk-openai-test",
+				Model:    "gpt-5.4",
+				AuthMode: string(AuthModeAmbient),
+			},
+		},
+	}
+	path, _ := writeResolverConfig(t, cfg)
+
+	_, err := ResolveEndpoint(path)
+	if err == nil || !strings.Contains(err.Error(), "auth_mode") || !strings.Contains(err.Error(), "ambient") {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 func TestResolveEndpoint_ProviderAnthropic(t *testing.T) {
