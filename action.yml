@@ -1092,4 +1092,5 @@ runs:
             rangeFrom: process.env.OCR_RANGE_FROM || '',
             rangeTo: process.env.OCR_RANGE_TO || '',
             resolveOutdated: process.env.OCR_RESOLVE_OUTDATED,
+            appSlug: process.env.OCR_CHECKPOINT_APP_SLUG || '',
           });
