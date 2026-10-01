@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -182,11 +183,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 
 	lines := strings.Split(strings.TrimRight(outStr, "\n"), "\n")
 
-	type match struct {
-		lineNum int
-		content string
-	}
-	fileMatches := make(map[string][]match)
+	fileMatches := make(map[string][]grepMatch)
 	var fileOrder []string
 	seen := make(map[string]bool)
 
@@ -223,7 +220,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			truncated = true
 			continue
 		}
-		m := match{lineNum: ln, content: parts[offset+2]}
+		m := grepMatch{lineNum: ln, content: parts[offset+2]}
 		if !seen[fname] {
 			seen[fname] = true
 			fileOrder = append(fileOrder, fname)
@@ -239,6 +236,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 
 	for _, path := range fileOrder {
 		matches := fileMatches[path]
+		p.decodeMatches(ctx, path, matches)
 		sb.WriteString(fmt.Sprintf("File: %s\nMatch lines: %d\n", path, len(matches)))
 		for _, m := range matches {
 			sb.WriteString(fmt.Sprintf("%d|%s\n", m.lineNum, m.content))
@@ -261,6 +259,64 @@ func trimGitUsage(stderr string, exitCode int) string {
 		}
 	}
 	return strings.TrimSpace(stderr)
+}
+
+// grepMatch is one `git grep` hit: a line number and the raw line body git
+// printed for it.
+type grepMatch struct {
+	lineNum int
+	content string
+}
+
+// decodeMatches replaces match bodies with decoded file lines when git grep
+// emitted non-UTF-8 bytes for this file. It mutates matches in place.
+//
+// Detection deliberately does NOT run on the matched lines: a couple of grep
+// hits is exactly the small-evidence case that misdetects — a 142-byte payload
+// carrying one short CJK comment scores 51 where its whole file scores 100. So
+// this reuses FileReader.ReadLines, which detects on whole-file evidence at its
+// own seam, and simply reads the answer back out.
+//
+// Any failure leaves the raw bytes in place: a search result is never worth an
+// error, and raw bytes are what ships today.
+//
+// The file can change between `git grep` and this re-read, in which case a
+// line number would name different text. That is guarded by bailing out for
+// the whole file on the only detectable symptom — the re-read is shorter than
+// the highest matched line number. A same-length concurrent edit is not
+// detectable without a lock, and a search result is not worth a lock; if it
+// ever matters, compare the file's mtime and size across the two reads.
+func (p *CodeSearchProvider) decodeMatches(ctx context.Context, path string, matches []grepMatch) {
+	if p.FileReader == nil {
+		return
+	}
+	// The common case: everything git printed is already valid UTF-8. One
+	// utf8.ValidString per match line and no extra file read at all.
+	needsDecode := false
+	highest := 0
+	for _, m := range matches {
+		if !utf8.ValidString(m.content) {
+			needsDecode = true
+		}
+		if m.lineNum > highest {
+			highest = m.lineNum
+		}
+	}
+	if !needsDecode || highest <= 0 {
+		return
+	}
+
+	lines, _, err := p.FileReader.ReadLines(ctx, path, 1, highest)
+	if err != nil || len(lines) < highest {
+		return
+	}
+	for i := range matches {
+		// git grep line numbers are 1-based, but this input is parsed from a
+		// subprocess: never index on it without checking.
+		if n := matches[i].lineNum; n >= 1 && n <= len(lines) {
+			matches[i].content = lines[n-1]
+		}
+	}
 }
 
 func isNotGitRepoError(err error, stderr string) bool {
