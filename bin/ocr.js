@@ -5,7 +5,7 @@
 
 "use strict";
 
-const { spawnSync, spawn } = require("child_process");
+const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -25,7 +25,39 @@ function launcherExitCode(result) {
   return result.status ?? (result.error ? 1 : 0);
 }
 
-module.exports = { launcherExitCode };
+// Returns a signal handler that forwards the signal to a child process.
+function forwardSignal(child, signal) {
+  return () => {
+    child.kill(signal);
+  };
+}
+
+function installSignalHandlers(child, platform, signalTarget) {
+  const handlers = [];
+  function add(signal, handler) {
+    handlers.push([signal, handler]);
+    signalTarget.on(signal, handler);
+  }
+
+  // Windows sends console Ctrl+C to both attached processes. Keep the wrapper
+  // alive so it can wait for the binary, but do not call child.kill("SIGINT"):
+  // Node maps that operation to an abrupt TerminateProcess call on Windows.
+  if (platform === "win32") {
+    add("SIGINT", () => {});
+  } else {
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      add(signal, forwardSignal(child, signal));
+    }
+  }
+
+  return () => {
+    for (const [signal, handler] of handlers) {
+      signalTarget.removeListener(signal, handler);
+    }
+  };
+}
+
+module.exports = { launcherExitCode, forwardSignal, installSignalHandlers };
 
 if (require.main !== module) {
   // Required as a module (tests); the launcher body below must not run.
@@ -77,9 +109,33 @@ if (!process.env.OCR_NO_UPDATE) {
   }
 }
 
-const result = spawnSync(binaryPath, process.argv.slice(2), {
+const child = spawn(binaryPath, process.argv.slice(2), {
   stdio: "inherit",
   env: process.env,
 });
 
-process.exit(launcherExitCode(result));
+const removeSignalHandlers = installSignalHandlers(
+  child,
+  process.platform,
+  process
+);
+
+let settled = false;
+function settle(result) {
+  if (settled) return;
+  settled = true;
+  removeSignalHandlers();
+  process.exitCode = launcherExitCode(result);
+}
+
+// Spawn failures surface through "error", not "close" alone. Setting
+// exitCode lets a piped diagnostic drain before the wrapper terminates.
+child.on("error", (err) => {
+  console.error(`[ERROR] Failed to start ${binaryPath}: ${err.message}`);
+  settle({ error: err });
+});
+
+// Wait for child to exit and propagate its exit status
+child.on("close", (code, signal) => {
+  settle({ status: code, signal: signal });
+});

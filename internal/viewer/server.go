@@ -8,47 +8,47 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
-//go:embed templates/*.html static/style.css static/session.js static/repos.js
+//go:embed templates/*.html static/style.css static/pager.js static/a11y.js static/session.js static/repos.js static/sessions.js static/icons/*.svg
 var assets embed.FS
 
-func StartServer(addr string) error {
+// iconNameRE guards the icon() template helper: names are hard-coded in
+// templates, but constraining them to a simple alphabet keeps the embedded
+// file read from ever turning into a path lookup outside static/icons.
+var iconNameRE = regexp.MustCompile(`^[a-z-]+$`)
+
+// inlineIcon returns the embedded SVG for name as trusted markup, or "" when
+// the name is malformed or the asset is missing. The SVGs ship with
+// fill="currentColor", so an inline <svg> inherits the surrounding text color
+// and adapts to light/dark without any script (CSP-safe).
+func inlineIcon(name string) template.HTML {
+	if !iconNameRE.MatchString(name) {
+		return ""
+	}
+	b, err := assets.ReadFile("static/icons/" + name + ".svg")
+	if err != nil {
+		return ""
+	}
+	return template.HTML(b) //nolint:gosec // content is a repo-controlled static asset, not user input
+}
+
+// StartServer binds addr and serves until the listener fails. openMode is one
+// of OpenAuto, OpenAlways or OpenNever; callers should have run
+// ValidateOpenMode first, and anything unrecognized behaves as OpenAuto.
+func StartServer(addr, openMode string) error {
 	root, err := SessionsRoot()
 	if err != nil {
 		return fmt.Errorf("resolve sessions root: %w", err)
 	}
 
-	mux := http.NewServeMux()
-
-	// Static assets (must be registered before "/" catch-all)
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
-
-	// Routes
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		handleRepos(w, r, root)
-	})
-	mux.HandleFunc("/r/{repo}", func(w http.ResponseWriter, r *http.Request) {
-		repo := r.PathValue("repo")
-		if strings.Contains(repo, "..") || strings.Contains(repo, "/") {
-			http.Error(w, "invalid repo path", http.StatusBadRequest)
-			return
-		}
-		handleSessions(w, r, root, repo)
-	})
-	mux.HandleFunc("/r/{repo}/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
-		repo := r.PathValue("repo")
-		sid := r.PathValue("sessionID")
-		if strings.Contains(repo, "..") || strings.Contains(sid, "..") {
-			http.Error(w, "invalid path", http.StatusBadRequest)
-			return
-		}
-		handleSession(w, r, root, repo, sid)
-	})
+	mux := newMux(root)
 
 	// Wrap the mux with a Host-header allowlist. Without this, any web page
 	// the user visits can DNS-rebind its origin to 127.0.0.1 and read the
@@ -61,12 +61,120 @@ func StartServer(addr string) error {
 	handler := securityHeaders(guarded)
 
 	srv := &http.Server{
-		Addr:    addr,
 		Handler: handler,
 	}
 
-	fmt.Printf("\nOpen browser: http://%s\n", DisplayAddr(addr))
-	return srv.ListenAndServe()
+	// Bind before printing or opening anything: once Listen returns, early
+	// connections queue in the accept backlog instead of being refused, so the
+	// browser cannot outrun the server.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+	// srv.Serve takes ownership and closes ln itself; this covers the
+	// early-return path below and any future one. Close is idempotent enough
+	// here — the second call just reports ErrClosed, which nothing reads.
+	defer ln.Close()
+
+	url, err := displayURL(addr, ln.Addr().String())
+	if err != nil {
+		return err
+	}
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- srv.Serve(ln)
+	}()
+
+	autoOpen, suppressed := shouldAutoOpen(openMode)
+	if suppressed != "" {
+		fmt.Printf("Viewer ready: %s (browser not opened: %s)\n", url, suppressed)
+	} else {
+		fmt.Printf("Viewer ready: %s\n", url)
+	}
+	if autoOpen {
+		go func() {
+			if err := openBrowser(url); err != nil {
+				browserWarnf("could not open browser: %v", err)
+			}
+		}()
+	}
+
+	return <-serveErr
+}
+
+// newMux builds the viewer's routing table against a sessions root. The
+// viewer is read-only: the document routes are registered with GET-only
+// patterns (which also serve HEAD), so the ServeMux itself answers any other
+// method with 405 + Allow before a handler runs. The root pattern matches
+// exactly "/" via {$}; every other unmatched path gets the ServeMux's 404.
+// New routes must register method-qualified patterns to keep this contract
+// testable (TestMux_HasNoWriteRoutes).
+func newMux(root string) *http.ServeMux {
+	mux := http.NewServeMux()
+
+	// Static assets.
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
+
+	// Routes
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		handleRepos(w, r, root)
+	})
+	mux.HandleFunc("GET /r/{repo}", func(w http.ResponseWriter, r *http.Request) {
+		repo := r.PathValue("repo")
+		if unsafeSegment(repo) {
+			http.Error(w, "invalid repo path", http.StatusBadRequest)
+			return
+		}
+		handleSessions(w, r, root, repo)
+	})
+	// Registered before the {sessionID} wildcard for readability only: a
+	// literal segment wins over a wildcard whatever the order.
+	mux.HandleFunc("GET /r/{repo}/compare", func(w http.ResponseWriter, r *http.Request) {
+		repo := r.PathValue("repo")
+		if unsafeSegment(repo) {
+			http.Error(w, "invalid repo path", http.StatusBadRequest)
+			return
+		}
+		handleCompare(w, r, root, repo)
+	})
+	mux.HandleFunc("GET /r/{repo}/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
+		repo := r.PathValue("repo")
+		sid := r.PathValue("sessionID")
+		if unsafeSegment(repo) || unsafeSegment(sid) {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		handleSession(w, r, root, repo, sid)
+	})
+
+	return mux
+}
+
+// displayURL builds the URL to print and hand to the browser.
+//
+// The host comes from the requested address, not from the listener: net.Listen
+// resolves a hostname to an IP literal, while the Host allowlist in hostGuard is
+// built from the requested address (resolveAllowedHostsFromEnv). Using the
+// resolved form makes the two disagree, so `ocr viewer --addr box.local:5483`
+// would auto-open http://192.168.1.10:5483 and land on "403 forbidden host".
+//
+// The port comes from the listener so `--addr :0` reports the port the kernel
+// actually assigned rather than the literal 0.
+func displayURL(requestedAddr, listenerAddr string) (string, error) {
+	_, port, err := net.SplitHostPort(listenerAddr)
+	if err != nil {
+		return "", fmt.Errorf("parse listener addr %q: %w", listenerAddr, err)
+	}
+	return "http://" + DisplayAddr(net.JoinHostPort(splitBindHost(requestedAddr), port)), nil
+}
+
+// unsafeSegment rejects a URL-supplied name that must stay a single directory
+// or file name once it reaches filepath.Join. ServeMux unescapes each path
+// segment, so "%2F" and "%5C" arrive here as real separators; "\" is one on
+// Windows, so it is rejected everywhere "/" is.
+func unsafeSegment(s string) bool {
+	return strings.Contains(s, "..") || strings.ContainsAny(s, `/\`)
 }
 
 var cstZone = func() *time.Location {
@@ -172,13 +280,64 @@ func severityCounts(comments []*ReviewComment) SeverityCount {
 	return counts
 }
 
+// codeLine is one rendered line of an Existing Code block. Num is the file
+// line number, or 0 when the number cannot be trusted.
+type codeLine struct {
+	Num  int
+	Text string
+}
+
+// numberedCodeLines pairs each line of existing_code with its file line number.
+//
+// Num is left at 0 on every line whenever the reported range and the snippet
+// cannot both be true. internal/diff/resolver.go matches existing_code against
+// the file with blank lines dropped on both sides (splitAndNormalize and
+// resolveFromFileContent), so endLine-startLine+1 is not guaranteed to equal
+// the number of lines in the snippet, and numbering it anyway would put line
+// numbers next to the wrong code. In a review tool no gutter beats a wrong one.
+func numberedCodeLines(code string, startLine, endLine int) []codeLine {
+	if code == "" {
+		return nil
+	}
+	raw := strings.Split(code, "\n")
+	// A trailing newline terminates the last line, it does not start a new one.
+	if len(raw) > 1 && raw[len(raw)-1] == "" {
+		raw = raw[:len(raw)-1]
+	}
+	lines := make([]codeLine, len(raw))
+	for i, text := range raw {
+		lines[i] = codeLine{Text: strings.TrimSuffix(text, "\r")}
+	}
+	if endLine == 0 {
+		// A record with only start_line set is a single-line finding. A
+		// non-zero inverted range is left alone so the guard below rejects
+		// it, matching the hasRegion test in cmd/opencodereview/sarif.go.
+		endLine = startLine
+	}
+	if startLine <= 0 || endLine-startLine+1 != len(lines) {
+		return lines
+	}
+	for i := range lines {
+		lines[i].Num = startLine + i
+	}
+	return lines
+}
+
 func parseTemplate(name string) (*template.Template, error) {
 	funcMap := template.FuncMap{
 		"formatDuration": formatDuration,
 		"formatTime":     formatTime,
 		"truncate":       truncateText,
 		"formatNumber":   formatNumber,
+		"icon":           inlineIcon,
+		"dict":           dictKV,
 		"add":            func(a, b int) int { return a + b },
+		"countLabel": func(n int, singular, plural string) string {
+			if n == 1 {
+				return strconv.Itoa(n) + " " + singular
+			}
+			return strconv.Itoa(n) + " " + plural
+		},
 		"cardCount": func(tasks map[TaskType][]*TaskCard) int {
 			n := 0
 			for _, cards := range tasks {
@@ -210,6 +369,8 @@ func parseTemplate(name string) (*template.Template, error) {
 				return fp
 			}
 		},
+		"isGrouping":   func(tt TaskType) bool { return tt == GroupingTask },
+		"groupingView": groupingView,
 		"orderedTasks": func(tasks map[TaskType][]*TaskCard) []struct {
 			Type  TaskType
 			Cards []*TaskCard
@@ -291,12 +452,27 @@ func parseTemplate(name string) (*template.Template, error) {
 				return "cat-default"
 			}
 		},
+		"numberedCodeLines": numberedCodeLines,
 	}
-	content, err := assets.ReadFile("templates/" + name)
-	if err != nil {
-		return nil, err
+	// Keep page-specific breadcrumb definitions isolated from other pages.
+	return template.New(name).Funcs(funcMap).ParseFS(assets, "templates/"+name, "templates/app-header.html", "templates/pager.html")
+}
+
+// dictKV builds a map from key/value pairs so pages can pass inline
+// arguments to a shared partial: {{template "pager" (dict "prefix" "repos")}}.
+func dictKV(keysAndValues ...any) (map[string]any, error) {
+	if len(keysAndValues)%2 != 0 {
+		return nil, fmt.Errorf("dict expects key and value pairs, got %d values", len(keysAndValues))
 	}
-	return template.New(name).Funcs(funcMap).Parse(string(content))
+	m := make(map[string]any, len(keysAndValues)/2)
+	for i := 0; i < len(keysAndValues); i += 2 {
+		key, ok := keysAndValues[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("dict keys must be strings, got %T", keysAndValues[i])
+		}
+		m[key] = keysAndValues[i+1]
+	}
+	return m, nil
 }
 
 func truncateText(n int, s string) string {

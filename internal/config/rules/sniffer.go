@@ -73,8 +73,7 @@ func (s *sniffer) resolveDetail(path string) RuleDetail {
 }
 
 // CanonicalConfig forwards the wrapped layer's fields and appends the objc
-// rule text, so editing objc.md changes the run manifest's
-// rule_config_sha256 exactly as editing any other rule doc does.
+// rule text, so editing objc.md changes the run manifest's rule_config_sha256.
 func (s *sniffer) CanonicalConfig() []string {
 	fields := s.inner.CanonicalConfig()
 	if s.objcRule != "" {

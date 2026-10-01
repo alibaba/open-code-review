@@ -8,13 +8,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/suggestdiff"
@@ -277,8 +280,35 @@ type jsonSummary struct {
 }
 
 type jsonToolCalls struct {
-	Total  int64            `json:"total"`
-	ByTool map[string]int64 `json:"by_tool"`
+	Total          int64                       `json:"total"`
+	ByTool         map[string]int64            `json:"by_tool"`
+	Failure        int64                       `json:"failure"`
+	FailureByTool  map[string]int64            `json:"failure_by_tool"`
+	FailureDetails []llmloop.ToolFailureDetail `json:"failure_details"`
+}
+
+func newJSONToolCalls(toolCalls map[string]int64, failures []llmloop.ToolFailureDetail) *jsonToolCalls {
+	var total int64
+	for _, count := range toolCalls {
+		total += count
+	}
+	failureByTool := make(map[string]int64)
+	for _, failure := range failures {
+		failureByTool[failure.ToolName]++
+	}
+	if toolCalls == nil {
+		toolCalls = make(map[string]int64)
+	}
+	if failures == nil {
+		failures = make([]llmloop.ToolFailureDetail, 0)
+	}
+	return &jsonToolCalls{
+		Total:          total,
+		ByTool:         toolCalls,
+		Failure:        int64(len(failures)),
+		FailureByTool:  failureByTool,
+		FailureDetails: failures,
+	}
 }
 
 type jsonLLMIdentity struct {
@@ -309,8 +339,9 @@ type jsonOutput struct {
 
 func outputJSON(comments []model.LlmComment) error {
 	out := jsonOutput{
-		Status:   "success",
-		Comments: comments,
+		Status:    "success",
+		ToolCalls: newJSONToolCalls(nil, nil),
+		Comments:  comments,
 	}
 	if len(comments) == 0 {
 		out.Message = "No comments generated. Looks good to me."
@@ -322,7 +353,8 @@ func outputJSON(comments []model.LlmComment) error {
 
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
-	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
+	duration time.Duration, projectSummary string, toolCalls map[string]int64, toolFailures []llmloop.ToolFailureDetail,
+	traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
 	retryReport *llm.RetryReport, groups []agent.FileGroupInfo) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
@@ -349,18 +381,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		Manifest:       manifest,
 		RetryReport:    retryReport,
 	}
-	var total int64
-	for _, v := range toolCalls {
-		total += v
-	}
-	byTool := toolCalls
-	if byTool == nil {
-		byTool = make(map[string]int64)
-	}
-	payload.ToolCalls = &jsonToolCalls{
-		Total:  total,
-		ByTool: byTool,
-	}
+	payload.ToolCalls = newJSONToolCalls(toolCalls, toolFailures)
 	if manifest != nil {
 		payload.Status = string(manifest.TerminalState)
 		payload.Message = manifestMessage(manifest, len(comments))
@@ -608,14 +629,12 @@ func manifestMessage(manifest *session.RunManifest, findings int) string {
 
 func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity, out io.Writer) error {
 	payload := jsonOutput{
-		Status:   "skipped",
-		LLM:      llmIdentity,
-		TraceID:  traceID,
-		Message:  "No supported files changed.",
-		Comments: []model.LlmComment{},
-		ToolCalls: &jsonToolCalls{
-			ByTool: map[string]int64{},
-		},
+		Status:    "skipped",
+		LLM:       llmIdentity,
+		TraceID:   traceID,
+		Message:   "No supported files changed.",
+		Comments:  []model.LlmComment{},
+		ToolCalls: newJSONToolCalls(nil, nil),
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
@@ -624,8 +643,8 @@ func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity, out io.Writ
 
 // emitFailureUsage writes a best-effort structured usage record to stderr when
 // a review fails, so the outer caller still sees the cost of the failed attempt.
-// It carries only token/tool-call tallies and elapsed, never credentials or
-// prompts.
+// It carries token/tool-call diagnostics and elapsed. Failed tool-call details
+// include the raw arguments returned by the LLM.
 //
 // A plain aggregate budget stop does NOT reach here: it is a controlled coverage
 // truncation, so it yields terminal_state=partial and a nil error. It only
@@ -649,10 +668,8 @@ func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity, out io.Writ
 // was skipped, so the report is never duplicated and never silently dropped.
 func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat string, llmIdentity *jsonLLMIdentity,
 	retryReport *llm.RetryReport) {
-	var toolTotal int64
-	for _, v := range ag.ToolCalls() {
-		toolTotal += v
-	}
+	toolCallSummary := newJSONToolCalls(ag.ToolCalls(), ag.ToolFailures())
+	toolTotal := toolCallSummary.Total
 	budgetExceeded := ag.BudgetExceeded()
 	if outputFormat == "json" {
 		out := jsonOutput{
@@ -668,10 +685,7 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 				Elapsed:          duration.Round(time.Second).String(),
 				BudgetExceeded:   budgetExceeded,
 			},
-			ToolCalls: &jsonToolCalls{
-				Total:  toolTotal,
-				ByTool: ag.ToolCalls(),
-			},
+			ToolCalls:   toolCallSummary,
 			SessionID:   ag.SessionID(),
 			RetryReport: retryReport,
 		}
@@ -680,9 +694,14 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 		_ = enc.Encode(out)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "[ocr] usage on failure: %d file(s), %d input + %d output = %d total tokens, %d tool calls, elapsed %s, budget_exceeded=%v",
+	fmt.Fprintf(os.Stderr, "[ocr] usage on failure: %d file(s), %d input + %d output = %d total tokens, %d tool calls",
 		ag.FilesReviewed(), ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
-		toolTotal, duration.Round(time.Second).String(), budgetExceeded)
+		toolTotal)
+	if toolCallSummary.Failure > 0 {
+		fmt.Fprintf(os.Stderr, ", %d failed", toolCallSummary.Failure)
+	}
+	fmt.Fprintf(os.Stderr, ", elapsed %s, budget_exceeded=%v",
+		duration.Round(time.Second).String(), budgetExceeded)
 	if id := ag.SessionID(); id != "" {
 		fmt.Fprintf(os.Stderr, ", session %s", id)
 	}
@@ -722,23 +741,13 @@ func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 		return
 	}
 
-	maxPathLen := 0
-	for _, e := range p.Entries {
-		if n := len(sanitizeTerminal(e.Path)); n > maxPathLen {
-			maxPathLen = n
-		}
-	}
-	if maxPathLen < 20 {
-		maxPathLen = 20
-	}
-	pathFmt := fmt.Sprintf("%%-%ds", maxPathLen)
-
 	fmt.Fprintf(out, "\nPreview: %d file(s) changed  |  %s  %s\n", p.TotalFiles,
 		colorf("\033[32m", "+%d", p.TotalInsertions),
 		colorf("\033[31m", "-%d", p.TotalDeletions))
 
 	if p.ReviewableCount > 0 {
 		fmt.Fprintf(out, "\n%s\n", colorf("\033[1m", "Will review (%d):", p.ReviewableCount))
+		pathFmt := previewPathFmt(p.Entries, func(e agent.DiffPreviewEntry) bool { return e.WillReview })
 		for _, e := range p.Entries {
 			if !e.WillReview {
 				continue
@@ -754,7 +763,22 @@ func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 
 	if p.ExcludedCount > 0 {
 		fmt.Fprintf(out, "\n%s\n", colorf("\033[1m", "Excluded from review (%d):", p.ExcludedCount))
+		// Provider-directory files can number in the thousands and no rule can
+		// make them reviewable, so they collapse into one line instead of a row each.
+		perRow := func(e agent.DiffPreviewEntry) bool {
+			return !e.WillReview && e.ExcludeReason != agent.ExcludeProviderDirectory
+		}
+		pathFmt := previewPathFmt(p.Entries, perRow)
+		var providerDirs []string
+		providerCount := 0
 		for _, e := range p.Entries {
+			if e.ExcludeReason == agent.ExcludeProviderDirectory {
+				providerCount++
+				if prefix := diff.ProviderDirPrefix(e.Path); prefix != "" {
+					providerDirs = append(providerDirs, prefix)
+				}
+				continue
+			}
 			if e.WillReview {
 				continue
 			}
@@ -762,9 +786,26 @@ func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 				statusBadge(e.Status), sanitizeTerminal(e.Path),
 				colorf("\033[2m", "(%s)", sanitizeTerminal(string(e.ExcludeReason))))
 		}
+		if providerCount > 0 {
+			slices.Sort(providerDirs)
+			fmt.Fprintf(out, "  %s\n", colorf("\033[2m", "%d file(s) in provider directories (%s) — not reviewable",
+				providerCount, sanitizeTerminal(strings.Join(slices.Compact(providerDirs), ", "))))
+		}
 	}
 
 	fmt.Fprintln(out)
+}
+
+// previewPathFmt pads paths to the widest one among the rows a section prints,
+// so a long path in one section cannot push another section's columns out.
+func previewPathFmt(entries []agent.DiffPreviewEntry, printed func(agent.DiffPreviewEntry) bool) string {
+	width := 20
+	for _, e := range entries {
+		if printed(e) {
+			width = max(width, len(sanitizeTerminal(e.Path)))
+		}
+	}
+	return fmt.Sprintf("%%-%ds", width)
 }
 
 // statusBadge renders the per-file status tag. The letter carries the meaning,

@@ -18,8 +18,19 @@ var embedFS embed.FS
 
 const embedPrefix = "bpe_data/"
 
-// initEmbeddedLoader configures tiktoken to use embedded BPE data instead of fetching from network.
-// Call this once during application startup, before any GetEncoding/EncodingForModel calls.
+// init installs the embedded BPE loader as soon as this package is linked in.
+// Token counting must never depend on the network: tiktoken's default loader
+// downloads encoding files on first use, and countTokensWithEncoding silently
+// degrades to a len(text)/4 byte estimate when that download fails. Relying on
+// an explicit startup call left every consumer other than the CLI binary - the
+// test suite included - on the network loader and that silent estimate.
+func init() {
+	InitEmbeddedLoader()
+}
+
+// InitEmbeddedLoader configures tiktoken to use embedded BPE data instead of
+// fetching from network. The package init already calls it, so callers only
+// need it to reinstall the loader after replacing it.
 func InitEmbeddedLoader() {
 	loader := &embeddedBpeLoader{}
 	tiktoken.SetBpeLoader(loader)

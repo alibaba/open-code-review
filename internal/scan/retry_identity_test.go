@@ -125,7 +125,7 @@ func TestScanRequestsCarryNoIdentity(t *testing.T) {
 		client := &identityProbeClient{reply: "no findings"}
 		a := newProbeAgent(t, makeTemplateWithFullScan(), client, nil)
 
-		// executeSubtask drives llmloop.RunPerFile, the code path scan shares
+		// executeSubtask drives llmloop.RunMainTask, the code path scan shares
 		// with review — so this is the assertion that NewAgent leaves
 		// Deps.NewRequestMeta nil.
 		if _, _, err := a.executeSubtask(context.Background(), model.ScanItem{

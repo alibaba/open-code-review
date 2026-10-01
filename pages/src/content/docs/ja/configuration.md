@@ -46,6 +46,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `bedrock` | anthropic-bedrock | `aws_region` から決定 | —（AWS 認証情報チェーン） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
@@ -199,8 +200,7 @@ Ollama は API key を無視しますが、カスタム provider は空でない
 - `OCR_LLM_TIMEOUT` 環境変数——整数（秒単位）。すべての解決パスで設定ファイルの
   値を上書きします。
 
-`timeout_sec` key は `ocr config set` ではサポートされていません——
-`~/.opencodereview/config.json` を直接編集してください。
+どちらの `timeout_sec` key も `ocr config set` で設定できます：
 
 ```json
 {
@@ -279,10 +279,11 @@ SDK がすでにリトライするため、設定ファイルから読み込む�
 `ocr config set` で指定した場合は、OCR が警告を出し、これらのコードを保存しません。
 5xx のレスポンスも SDK がデフォルトでリトライするため、`retry_codes` には追加できません。
 
-### ファイルごとのプロンプト上限
+### プロンプト上限
 
-OCR はデフォルトで、`ocr review` のレビュー 1 回につき 200,000 トークンのプロンプト
-上限を使用します（`ocr scan` はより小さい 58,888 を使います）。モデルのコンテキスト
+`max_tokens` は、1 つのサブタスク（単一ファイル、または関連ファイルのまとまり）に対する
+**プロンプト**（入力）上限です。組み込みテンプレートのデフォルトは `ocr review` が 200,000
+トークン、`ocr scan` が 58,888 です。モデルのコンテキスト
 ウィンドウに合わせて `max_tokens` を保存すれば、この上限を変更できます。
 
 ```bash
@@ -306,7 +307,7 @@ OCR は組み込みのタスクテンプレートのデフォルト値を使用�
 
 ### レビューの労力プリセット（effort）
 
-`effort` は、ファイルグループごとに main ループを何ラウンド実行するかを決めます:
+`effort` は、サブタスクごとに main ループを何ラウンド実行するかを決めます:
 `low` = 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド。
 ラウンドが多いほど recall は上がりますが、時間とトークン消費も増えます。
 

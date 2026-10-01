@@ -10,7 +10,11 @@ on:
     branches: [main]
     paths:
       - 'action.yml'
+      - 'bin/ocr.js'
+      - 'bin/ocr.test.js'
       - 'package.json'
+      - 'scripts/platform.js'
+      - 'scripts/version.js'
       - 'scripts/github-actions/**'
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
@@ -18,7 +22,11 @@ on:
     branches: [main]
     paths:
       - 'action.yml'
+      - 'bin/ocr.js'
+      - 'bin/ocr.test.js'
       - 'package.json'
+      - 'scripts/platform.js'
+      - 'scripts/version.js'
       - 'scripts/github-actions/**'
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
@@ -41,10 +49,13 @@ jobs:
     container:
       image: node:24
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
 
       - name: Test GitHub Actions contracts
         run: npm run test:github-actions
+
+      - name: Test launcher contracts
+        run: npm run test:launcher

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { t, resolveLocale, SupportedLocale } from '../../shared/i18n';
+import { t, resolveLocale, SupportedLocale } from '@shared/i18n';
 import * as vscode from 'vscode';
-import { ReviewComment, CommentStatus, CommentSyncState, ReviewContext, ReviewMode } from '../../shared/types';
-import { COMMENT_CONTROLLER_ID } from '../../shared/constants';
+import { ReviewComment, CommentStatus, CommentSyncState, ReviewContext, ReviewMode } from '@shared/types';
+import { COMMENT_CONTROLLER_ID } from '@shared/constants';
 import { LineOffsetTracker } from './lineOffset';
 import { GitService } from '../services/GitService';
 import {
@@ -49,7 +49,7 @@ export class CommentProvider {
     this.syncListeners.forEach((fn) => fn(states));
   }
 
-  /** 展示审查评论：能解析到 git/工作区快照的挂 thread，否则仅侧边栏。 */
+  /** Display review comments as threads when their locations can be resolved in a Git or workspace snapshot; otherwise show them only in the sidebar. */
   async show(comments: ReviewComment[], ctx: ReviewContext): Promise<void> {
     this.clear();
     this.reviewContext = ctx;
@@ -232,7 +232,7 @@ export class CommentProvider {
     );
   }
 
-  /** 未记录原因时根据评论元数据推断（如 L0 多为行号未解析）。 */
+  /** Infer missing reasons from comment metadata (for example, L0 usually means an unresolved line number). */
   private inferJumpBlockReason(c: ReviewComment): SidebarOnlyReason | 'mount-failed' {
     if (c.startLine <= 0 && c.endLine <= 0) return 'unresolved';
     return 'missing-file';
@@ -254,7 +254,7 @@ export class CommentProvider {
     }
   }
 
-  /** 在已打开的 diff 编辑器中定位到挂载侧行，不再额外打开单文件 tab。 */
+  /** Reveal the anchored line on its side of the open diff editor without opening another file tab. */
   private async revealInDiffSide(
     uri: vscode.Uri,
     range: vscode.Range,

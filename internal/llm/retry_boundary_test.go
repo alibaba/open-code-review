@@ -731,3 +731,76 @@ func TestBoundaryHelpersAreInertWithoutCollectorOrMeta(t *testing.T) {
 		t.Errorf("collector holds %d entries, want 0", entries)
 	}
 }
+
+func TestHTTPClientWithHeaderTimeout(t *testing.T) {
+	// #1161: openai-go and anthropic-sdk-go both hardcode a 10-minute
+	// ResponseHeaderTimeout, so a long timeout_sec is ignored on a slow endpoint.
+	// httpClientWithHeaderTimeout must set it to the configured timeout plus the
+	// margin on a cloned transport.
+	const timeout = 42 * time.Second
+	want := timeout + responseHeaderTimeoutMargin
+	c := httpClientWithHeaderTimeout(timeout)
+
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport = %T, want *http.Transport", c.Transport)
+	}
+	if tr.ResponseHeaderTimeout != want {
+		t.Fatalf("ResponseHeaderTimeout = %v, want %v", tr.ResponseHeaderTimeout, want)
+	}
+	// The margin must exceed the request timeout so the context deadline fires first.
+	if tr.ResponseHeaderTimeout <= timeout {
+		t.Fatalf("ResponseHeaderTimeout = %v, must exceed request timeout %v", tr.ResponseHeaderTimeout, timeout)
+	}
+	// Must be a clone, not the shared http.DefaultTransport (which we must not mutate).
+	if def, ok := http.DefaultTransport.(*http.Transport); ok && tr == def {
+		t.Fatal("returned the shared http.DefaultTransport instead of a clone")
+	}
+
+	// timeout <= 0 means no cap: ResponseHeaderTimeout must stay unset (0), not
+	// become the bare margin, so a "no timeout" config is not silently bounded.
+	for _, d := range []time.Duration{0, -time.Second} {
+		zc := httpClientWithHeaderTimeout(d)
+		ztr, ok := zc.Transport.(*http.Transport)
+		if !ok {
+			t.Fatalf("timeout %v: Transport = %T, want *http.Transport", d, zc.Transport)
+		}
+		if ztr.ResponseHeaderTimeout != 0 {
+			t.Fatalf("timeout %v: ResponseHeaderTimeout = %v, want 0 (no cap)", d, ztr.ResponseHeaderTimeout)
+		}
+	}
+}
+
+func TestConstructorsInstallHeaderTimeoutClient(t *testing.T) {
+	// Round one shipped without wiring NewAnthropicClient and the suite stayed green
+	// because the helper was only tested in isolation. Assert each constructor
+	// actually installs the header-timeout client with its configured timeout, so
+	// deleting a WithHTTPClient line fails here instead of reaching review (#1161).
+	orig := httpClientWithHeaderTimeout
+	defer func() { httpClientWithHeaderTimeout = orig }()
+
+	const timeout = 123 * time.Second
+	cfg := ClientConfig{URL: "https://example.com", Timeout: timeout}
+
+	cases := []struct {
+		name string
+		make func()
+	}{
+		{"NewOpenAIClient", func() { NewOpenAIClient(cfg) }},
+		{"NewOpenAIResponsesClient", func() { NewOpenAIResponsesClient(cfg) }},
+		{"NewAnthropicClient", func() { NewAnthropicClient(cfg) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []time.Duration
+			httpClientWithHeaderTimeout = func(d time.Duration) *http.Client {
+				got = append(got, d)
+				return orig(d)
+			}
+			tc.make()
+			if len(got) != 1 || got[0] != timeout {
+				t.Fatalf("httpClientWithHeaderTimeout calls = %v, want exactly [%v]", got, timeout)
+			}
+		})
+	}
+}

@@ -151,7 +151,7 @@ func TestInjectDiffMap(t *testing.T) {
 	}
 }
 
-func TestFilterDiffs(t *testing.T) {
+func TestSelectFilesDropsFilteredPaths(t *testing.T) {
 	a := New(Args{
 		FileFilter: &rules.FileFilter{
 			Exclude: []string{"vendor/**"},
@@ -164,7 +164,7 @@ func TestFilterDiffs(t *testing.T) {
 		{NewPath: "handler.go"},
 	}
 
-	kept := a.filterDiffs(a.diffs)
+	kept, _ := summarizeSelection(a.selectFiles(a.diffs))
 
 	names := make(map[string]bool)
 	for _, d := range kept {
