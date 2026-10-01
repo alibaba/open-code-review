@@ -131,8 +131,9 @@ type ToolFailureDetail struct {
 	// it parses as a single path.
 	FilePath string `json:"file_path,omitempty"`
 	// Arguments is the raw tool-call argument string returned by the LLM.
-	Arguments string `json:"arguments"`
-	Error     string `json:"error"`
+	Arguments string            `json:"arguments"`
+	Error     string            `json:"error"`
+	Recovery  *FileReadRecovery `json:"recovery,omitempty"`
 }
 
 // NewRunner returns a Runner bound to the given dependencies.
@@ -215,6 +216,16 @@ func (r *Runner) ToolFailures() []ToolFailureDetail {
 	defer r.toolCallsMu.Unlock()
 
 	out := append([]ToolFailureDetail(nil), r.toolFailures...)
+	for i := range out {
+		if recovery := out[i].Recovery; recovery != nil {
+			cloned := *recovery
+			if recovery.SuccessfulRead != nil {
+				read := *recovery.SuccessfulRead
+				cloned.SuccessfulRead = &read
+			}
+			out[i].Recovery = &cloned
+		}
+	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].ToolCallNumber < out[j].ToolCallNumber
 	})
@@ -233,13 +244,20 @@ func (r *Runner) recordToolCall(name string) int64 {
 }
 
 func (r *Runner) recordToolFailure(number int64, name, taskKey, errMsg string,
-	rec *session.TaskRecord, rawArguments string, duration time.Duration) {
+	rec *session.TaskRecord, rawArguments string, duration time.Duration, evidence *tool.FileReadEvidence) {
 	detail := ToolFailureDetail{
 		ToolCallNumber: number,
 		ToolName:       name,
 		FilePath:       taskKey,
 		Arguments:      rawArguments,
 		Error:          errMsg,
+	}
+	if name == tool.FileRead.Name() {
+		detail.Recovery = &FileReadRecovery{Status: "not_observed"}
+		if evidence != nil {
+			detail.Recovery.TargetCommit = evidence.TargetCommit
+			detail.Recovery.CandidatePath = evidence.CandidatePath
+		}
 	}
 
 	r.toolCallsMu.Lock()
@@ -667,7 +685,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		telemetry.PrintToolCallStarted(toolName, nil)
 		telemetry.PrintToolCallError(toolName, fmt.Errorf("%s", errMsg))
 		r.recordToolFailure(toolCallNumber, toolName, taskKey, errMsg,
-			rec, call.Function.Arguments, time.Since(callStarted))
+			rec, call.Function.Arguments, time.Since(callStarted), nil)
 		return r.toolFailureResult(taskKey, toolName, errMsg)
 	}
 
@@ -691,7 +709,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 			toolSpan.End()
 			telemetry.RecordToolCall(ctx, t.Name(), dur, false)
 			r.recordToolFailure(toolCallNumber, toolName, taskKey, errMsg,
-				rec, call.Function.Arguments, dur)
+				rec, call.Function.Arguments, dur, nil)
 			telemetry.PrintToolCallError(t.Name(), toolErr)
 			return r.toolFailureResult(taskKey, toolName, errMsg)
 		}
@@ -805,7 +823,13 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 	// Synchronous path for all other tools
 	telemetry.PrintToolCallStarted(toolName, args)
 	_, toolSpan := telemetry.StartToolSpan(ctx, toolName)
-	result, err := p.Execute(ctx, args)
+	var result string
+	var readEvidence *tool.FileReadEvidence
+	if reader, ok := p.(*tool.FileReadProvider); ok {
+		result, readEvidence, err = reader.ExecuteWithEvidence(ctx, args)
+	} else {
+		result, err = p.Execute(ctx, args)
+	}
 	dur := time.Since(startTime)
 	ok := err == nil
 	telemetry.RecordToolResult(toolSpan, toolName, dur.Milliseconds(), err)
@@ -814,10 +838,16 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 
 	if err != nil {
 		r.recordToolFailure(toolCallNumber, toolName, taskKey, err.Error(),
-			rec, call.Function.Arguments, dur)
+			rec, call.Function.Arguments, dur, readEvidence)
 		telemetry.PrintToolCallError(toolName, err)
-		return r.toolFailureResult(taskKey, toolName, fmt.Sprintf("Error executing tool %s: %v", toolName, err))
+		errMsg := fmt.Sprintf("Error executing tool %s: %v", toolName, err)
+		if readEvidence != nil && readEvidence.CandidatePath != "" {
+			errMsg += fmt.Sprintf("\nThe requested path is absent from target commit %s. Candidate: %q. Call file_read with this path if it is the file you intended to read.",
+				readEvidence.TargetCommit, readEvidence.CandidatePath)
+		}
+		return r.toolFailureResult(taskKey, toolName, errMsg)
 	}
+	r.recordFileReadSuccess(toolCallNumber, taskKey, call.Function.Arguments, readEvidence)
 	telemetry.PrintToolCallFinished(toolName, dur)
 	if rec != nil {
 		rec.AddToolResult(toolName, call.Function.Arguments, result)
