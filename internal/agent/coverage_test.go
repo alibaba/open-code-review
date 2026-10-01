@@ -283,8 +283,8 @@ func TestExecuteReviewFilter_OmitsToolChoiceAndFailsOpenWithoutToolCall(t *testi
 
 	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
 
-	if client.calls != 1 {
-		t.Fatalf("LLM calls = %d, want 1", client.calls)
+	if client.calls != 2 {
+		t.Fatalf("LLM calls = %d, want 2", client.calls)
 	}
 	if client.request.ToolChoice != "" {
 		t.Errorf("ToolChoice = %q, want provider default", client.request.ToolChoice)
