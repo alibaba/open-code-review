@@ -114,6 +114,9 @@ type Runner struct {
 	// toolFailureStreak counts each (taskKey, toolName) pair's consecutive
 	// failures; see tool_failure_streak.go.
 	toolFailureStreak toolFailureStreakState
+	// toolRepeat keeps each task's recent tool calls, to refuse one the model
+	// keeps repeating; see tool_repeat_guard.go.
+	toolRepeat toolRepeatState
 	// bg tracks every background goroutine that can still issue an LLM
 	// request after RunMainTask returned. WaitBackground joins them so a
 	// retry-report Freeze at the run boundary cannot observe an
@@ -671,6 +674,16 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		return r.toolFailureResult(taskKey, toolName, errMsg)
 	}
 
+	// Before anything runs: a call the model has made too many times already
+	// in this task is answered, not executed (tool_repeat_guard.go).
+	if cp, repeated := r.toolRepeatResult(taskKey, toolName, args); repeated {
+		telemetry.PrintToolCallStarted(toolName, args)
+		if rec != nil {
+			rec.AddToolResult(toolName, call.Function.Arguments, cp.Data)
+		}
+		return cp
+	}
+
 	startTime := time.Now()
 
 	if t == tool.CodeComment {
@@ -786,6 +799,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 			})
 			telemetry.RecordToolCall(asyncCtx, toolName, time.Since(startTime), true)
 			r.resetToolFailureStreak(taskKey, t.Name())
+			r.recordToolRepeat(taskKey, toolCallKey(t.Name(), args))
 			return tool.Of(tool.CommentSucceed)
 		}
 
@@ -799,6 +813,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 			rec.AddToolResult(t.Name(), call.Function.Arguments, tool.CommentSucceed)
 		}
 		r.resetToolFailureStreak(taskKey, t.Name())
+		r.recordToolRepeat(taskKey, toolCallKey(t.Name(), args))
 		return tool.Of(tool.CommentSucceed)
 	}
 
@@ -823,6 +838,10 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		rec.AddToolResult(toolName, call.Function.Arguments, result)
 	}
 	r.resetToolFailureStreak(taskKey, toolName)
+	// An empty result is the empty-rounds stop's business, not a repeat.
+	if result != "" {
+		r.recordToolRepeat(taskKey, toolCallKey(toolName, args))
+	}
 	return tool.Of(result)
 }
 
