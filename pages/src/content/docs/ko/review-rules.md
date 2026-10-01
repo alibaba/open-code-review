@@ -294,6 +294,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.astro`                        | `astro.md` — Astro 컴포넌트와 아일랜드.                                          |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                               |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                      |
+| `**/*.scala`                        | `scala.md`                                                                       |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — F# 구현, 시그니처, 스크립트 파일.                                              |
 | `**/*.rs`                           | `rust.md`                                                                        |
 | `**/*.R`                            | `r.md`                                                                           |
