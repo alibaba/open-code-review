@@ -319,6 +319,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// Build the read-only DiffMap from ALL parsed diffs (before filtering)
 	// so the LLM can query diffs of related but filtered-out files.
 	a.injectDiffMap()
+	a.bindFileReaderTarget()
 	a.args.Tools.Freeze()
 
 	// Apply the one pre-dispatch selection — the same call `--preview` makes —
@@ -624,6 +625,26 @@ func (a *Agent) injectDiffMap() {
 		if frd, ok := p.(*tool.FileReadDiffProvider); ok {
 			frd.SetDiffMap(dm)
 		}
+	}
+}
+
+func (a *Agent) bindFileReaderTarget() {
+	if a.inputResolution.ResolvedHead == "" || a.args.Tools == nil {
+		return
+	}
+	p, ok := a.args.Tools.Get(tool.FileRead.Name())
+	if !ok {
+		return
+	}
+	fileRead, ok := p.(*tool.FileReadProvider)
+	if !ok || fileRead.FileReader == nil {
+		return
+	}
+	reader := fileRead.FileReader
+	if reader.Mode == tool.ModeRange || reader.Mode == tool.ModeCommit {
+		// The built-in read/find/search tools share this reader. Freeze its
+		// target before dispatch so a moving ref cannot change their evidence.
+		reader.Ref = a.inputResolution.ResolvedHead
 	}
 }
 
