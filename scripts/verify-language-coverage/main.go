@@ -17,6 +17,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -77,13 +78,16 @@ func run(out io.Writer, root string, check, allowUnrouted bool) error {
 	if !check {
 		return nil
 	}
+	// Collect every finding rather than returning on the first one, so one run
+	// reports all of them instead of hiding the rest behind an early return.
+	var findings []error
 	if len(rep.unrouted) > 0 && !allowUnrouted {
-		return fmt.Errorf("%d allowlisted extensions fall back to the default rule", len(rep.unrouted))
+		findings = append(findings, fmt.Errorf("%d allowlisted extensions fall back to the default rule", len(rep.unrouted)))
 	}
 	if len(rep.unreachable) > 0 {
-		return fmt.Errorf("%d rule docs are unreachable", len(rep.unreachable))
+		findings = append(findings, fmt.Errorf("%d rule docs are unreachable", len(rep.unreachable)))
 	}
-	return nil
+	return errors.Join(findings...)
 }
 
 func configFor(root string) config {
@@ -200,8 +204,9 @@ func render(rep *report) string {
 
 // literalProbes turns a pattern into one concrete path, so that rules keyed on a
 // file name rather than an extension are exercised too. A leading "**/" needs no
-// directory, "**" elsewhere becomes a segment, and a segment that names a file
-// (with or without a leading "*") keeps that name.
+// directory, "**" elsewhere becomes a segment, and every other segment becomes a
+// literal with its wildcards replaced by "probe", so "*{mapper,dao}*.xml" yields
+// "probemapperprobe.xml" rather than leaving a glob character in the probe.
 func literalProbes(pathRuleMap map[string]string) []string {
 	out := make([]string, 0, len(pathRuleMap))
 	for pattern := range pathRuleMap {
@@ -221,17 +226,43 @@ func probeForPattern(pattern string) string {
 				continue
 			}
 			parts = append(parts, "probe")
-		case segment == "*":
-			parts = append(parts, "probe")
 		case segment == "":
 			continue
-		case strings.HasPrefix(segment, "*"):
-			parts = append(parts, "probe"+segment[1:])
+		case strings.ContainsAny(segment, "*?"):
+			parts = append(parts, wildcardsToProbe(segment))
 		default:
 			parts = append(parts, segment)
 		}
 	}
 	return strings.Join(parts, "/")
+}
+
+// wildcardsToProbe replaces each run of glob metacharacters with "probe", keeping
+// the literal part of the segment so the probe still ends in the right extension.
+func wildcardsToProbe(segment string) string {
+	parts := make([]string, 0, 4)
+	literal := strings.Builder{}
+	flush := func() {
+		if literal.Len() > 0 {
+			parts = append(parts, literal.String())
+			literal.Reset()
+		}
+	}
+	inWildcard := false
+	for _, r := range segment {
+		if r == '*' || r == '?' {
+			if !inWildcard {
+				flush()
+				parts = append(parts, "probe")
+				inWildcard = true
+			}
+			continue
+		}
+		inWildcard = false
+		literal.WriteRune(r)
+	}
+	flush()
+	return strings.Join(parts, "")
 }
 
 func extensionOf(path string) string {
@@ -294,6 +325,12 @@ func matchesAny(pattern, path string) bool {
 	return false
 }
 
+// expandBraces expands one brace group per call, which is exactly what the
+// resolver's own helper in internal/config/rules does. A pattern with two groups,
+// such as "**/{src,test}/*.{java,kt}", is therefore only partly literal here; no
+// pattern in system_rules.json currently nests groups, and staying non-recursive
+// keeps this probe generator matching the resolver's semantics instead of
+// diverging from them.
 func expandBraces(pattern string) []string {
 	open := strings.IndexByte(pattern, '{')
 	if open < 0 {

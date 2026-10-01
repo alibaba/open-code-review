@@ -122,10 +122,42 @@ func TestProbeForPattern(t *testing.T) {
 		{"**", "probe"},
 		{"dir/**", "dir/probe"},
 		{"/probe.go", "probe.go"},
+		// A wildcard can sit inside a segment, which is how the real
+		// "*{mapper,dao}*.xml" pattern is written. No glob metacharacter may
+		// survive into the probe, or matchesAny would treat it as a pattern.
+		{"**/*mapper*.xml", "dir/probemapperprobe.xml"},
+		{"**/tb_*.v", "dir/tb_probe.v"},
+		{"**/*.test.ets", "dir/probe.test.ets"},
+		{"**/?oo.go", "dir/probeoo.go"},
 	}
 	for _, tt := range tests {
-		if got := probeForPattern(tt.pattern); got != tt.want {
+		got := probeForPattern(tt.pattern)
+		if got != tt.want {
 			t.Errorf("probeForPattern(%q) = %q, want %q", tt.pattern, got, tt.want)
+		}
+		if strings.ContainsAny(got, "*?") {
+			t.Errorf("probeForPattern(%q) = %q, which still contains a glob metacharacter", tt.pattern, got)
+		}
+	}
+}
+
+func TestWildcardsToProbe(t *testing.T) {
+	tests := []struct {
+		segment string
+		want    string
+	}{
+		{"*", "probe"},
+		{"**", "probe"},
+		{"*.go", "probe.go"},
+		{"*mapper*.xml", "probemapperprobe.xml"},
+		{"tb_*.v", "tb_probe.v"},
+		{"literal.go", "literal.go"},
+		{"?oo.go", "probeoo.go"},
+		{"*.*", "probe.probe"},
+	}
+	for _, tt := range tests {
+		if got := wildcardsToProbe(tt.segment); got != tt.want {
+			t.Errorf("wildcardsToProbe(%q) = %q, want %q", tt.segment, got, tt.want)
 		}
 	}
 }
@@ -385,6 +417,39 @@ func TestRun_PropagatesConfigErrors(t *testing.T) {
 	var buf bytes.Buffer
 	if err := run(&buf, t.TempDir(), false, true); err == nil {
 		t.Error("run on an empty directory returned nil, want an error")
+	}
+}
+
+func TestRun_ReportsEveryFindingNotJustTheFirst(t *testing.T) {
+	// Both a fallback and an unreachable doc at once. The tightest check must
+	// report both: a caller reading only the first message would otherwise miss
+	// the second problem entirely.
+	//
+	// unreachable.md is reached by "**/nothing", whose probe carries no
+	// extension, so the pattern contributes no route and the doc stays
+	// unreachable. ".txt" is allowlisted with no pattern, so it falls back.
+	allow := []byte(`[".go", ".txt"]`)
+	rules := []byte(`{
+  "default_rule": "default.md",
+  "path_rule_map": {
+    "**/*.go": "go.md",
+    "**/nothing": "unreachable.md"
+  }
+}`)
+	cfg := writeConfig(t, allow, rules, "default.md", "go.md", "unreachable.md")
+	root := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(cfg.allowPath))))
+
+	var buf bytes.Buffer
+	err := run(&buf, root, true, false)
+	if err == nil {
+		t.Fatal("-check -allow-unrouted=false returned nil, want an error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "fall back to the default rule") {
+		t.Errorf("error does not mention the unrouted extension: %q", msg)
+	}
+	if !strings.Contains(msg, "unreachable") {
+		t.Errorf("error does not mention the unreachable doc: %q", msg)
 	}
 }
 
