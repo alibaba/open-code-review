@@ -38,14 +38,15 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ### Built-in providers
 
 The following providers ship with OCR, with the Base URL and protocol
-preset — once selected, you only need to fill in the API key. If
-`providers.<name>.api_key` is unset, OCR falls back to the corresponding
-environment variable.
+preset. Most require an API key. If `providers.<name>.api_key` is unset,
+OCR falls back to the corresponding environment variable. The `chatgpt`
+provider instead uses the ChatGPT credentials created by `ocr auth login`.
 
 | Name | Protocol | Base URL | API key env var |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
+| `chatgpt` | openai-responses | `https://api.openai.com/v1` | not applicable (Sign in with ChatGPT) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -69,12 +70,30 @@ environment variable.
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
+## Sign in with ChatGPT preview
+
+This preview adds the `chatgpt` built-in provider for the public Responses API. It has no API-key environment variable. See the [ChatGPT preview guide](../chatgpt-preview/) for sign-in, consent and usage restrictions.
+
+Configure the provider and optional supported request fields with `ocr config set`. Choose a model from `ocr llm models` or set an explicit model slug:
+
+```bash
+ocr auth login --provider chatgpt
+ocr config set provider chatgpt
+ocr config set providers.chatgpt.model <model-slug>
+ocr config set providers.chatgpt.extra_body '{"reasoning":{"effort":"low"}}'
+ocr llm test
+```
+
+The provider accepts explicit model values even if the account-specific catalog omits them. It accepts `extra_body` fields `reasoning`, `text` and `prompt_cache_key`; it rejects endpoint, protocol and credential overrides.
+
 ### Overriding a built-in provider's Base URL
 
 Every built-in provider has a preset Base URL (shown in the table above).
 To point a built-in provider at a different endpoint — for example a
 self-hosted LiteLLM gateway that is rarely at the preset default
 `http://localhost:4000/v1` — set `providers.<name>.url`:
+
+The `chatgpt` preview is an exception: its public endpoint is fixed and URL overrides are rejected.
 
 ```bash
 ocr config set provider                   litellm

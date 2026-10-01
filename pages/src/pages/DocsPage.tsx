@@ -74,6 +74,7 @@ const sidebarTree: SidebarGroup[] = [
     groupLabelKey: 'docs.sidebar.userGuide',
     items: [
       { id: 'sb-cli', labelKey: 'docs.sidebar.cliReference', slug: 'cli-reference' },
+      { id: 'sb-chatgpt-preview', labelKey: 'docs.sidebar.chatgptPreview', slug: 'chatgpt-preview' },
       { id: 'sb-rules', labelKey: 'docs.sidebar.reviewRules', slug: 'review-rules' },
       { id: 'sb-arch', labelKey: 'docs.sidebar.architecture', slug: 'architecture' },
       { id: 'sb-tools', labelKey: 'docs.sidebar.tools', slug: 'tools' },

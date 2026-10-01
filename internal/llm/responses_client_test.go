@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3/responses"
@@ -335,7 +336,7 @@ func TestBuildResponsesParams_MaxTokensAndTemperature(t *testing.T) {
 	})
 
 	temp := 0.7
-	req := ChatRequest{Messages: []Message{{Role: "user", Content: "hi"}}, Temperature: &temp}
+	req := ChatRequest{Messages: []Message{{Role: "user", Content: "hi"}}, Temperature: &temp, MaxTokens: 512}
 	params := client.buildResponsesParams("gpt-5.4", req)
 	if !params.Temperature.Valid() {
 		t.Fatal("expected Temperature to be set")
@@ -343,6 +344,18 @@ func TestBuildResponsesParams_MaxTokensAndTemperature(t *testing.T) {
 	gotTemp := params.Temperature.Value
 	if gotTemp != 0.7 {
 		t.Errorf("Temperature = %v, want 0.7", gotTemp)
+	}
+
+	plan := NewOpenAIResponsesClient(ClientConfig{
+		URL:                   "https://api.openai.com/v1",
+		RejectsSamplingParams: true,
+	})
+	planParams := plan.buildResponsesParams("gpt-5.6-luna", req)
+	if planParams.Temperature.Valid() {
+		t.Errorf("ChatGPT plan Temperature = %v, want unset", planParams.Temperature.Value)
+	}
+	if planParams.MaxOutputTokens.Valid() {
+		t.Errorf("ChatGPT plan MaxOutputTokens = %v, want unset", planParams.MaxOutputTokens.Value)
 	}
 }
 
@@ -610,6 +623,33 @@ func TestOpenAIResponsesClient_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesClient_StatuslessResponseSucceeds(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{
+			"id":"resp_statusless",
+			"object":"response",
+			"model":"gateway-model",
+			"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
+			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+		}`)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL: server.URL + "/v1", APIKey: "test-key", Model: "gateway-model",
+	})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if resp.Content() != "ok" || resp.Choices[0].FinishReason != "stop" {
+		t.Errorf("response = %+v, want content ok and finish reason stop", resp)
+	}
+}
+
 // TestOpenAIResponsesClient_ExtraBodyStreamDropped verifies that an
 // extra_body.stream=true (valid for the Chat Completions client) is NOT
 // forwarded to the Responses API. Forwarding it makes the API answer with SSE
@@ -702,7 +742,218 @@ func TestOpenAIResponsesClient_NonSuccessStatusReturnsError(t *testing.T) {
 	}
 }
 
+func TestAccumulateResponseStream(t *testing.T) {
+	t.Run("sorts output items and preserves terminal raw JSON", func(t *testing.T) {
+		events := responseStreamEvents(t,
+			`{"type":"response.output_item.done","output_index":1,"sequence_number":2,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"inspect","arguments":"{}","status":"completed"}}`,
+			`{"type":"response.output_item.done","output_index":0,"sequence_number":1,"item":{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"ciphertext","status":"completed"}}`,
+			`{"type":"response.completed","sequence_number":3,"response":{"id":"resp_stream","object":"response","model":"gpt-5.6-luna","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14,"cache_creation_input_tokens":3}}}`,
+		)
+
+		resp, err := accumulateResponseStream(events)
+		if err != nil {
+			t.Fatalf("accumulateResponseStream: %v", err)
+		}
+		if len(resp.Output) != 2 {
+			t.Fatalf("output items = %d, want 2", len(resp.Output))
+		}
+		if resp.Output[0].Type != "reasoning" || resp.Output[1].Type != "function_call" {
+			t.Errorf("output order = [%s, %s], want [reasoning, function_call]", resp.Output[0].Type, resp.Output[1].Type)
+		}
+		if !strings.Contains(resp.RawJSON(), `"cache_creation_input_tokens":3`) {
+			t.Errorf("RawJSON() did not preserve terminal usage: %s", resp.RawJSON())
+		}
+	})
+
+	t.Run("returns a mid-stream error event", func(t *testing.T) {
+		events := responseStreamEvents(t,
+			`{"type":"response.created","sequence_number":1,"response":{"id":"resp_error","status":"in_progress"}}`,
+			`{"type":"error","sequence_number":2,"code":"rate_limit","message":"quota exhausted","param":"model"}`,
+		)
+		_, err := accumulateResponseStream(events)
+		if err == nil || !strings.Contains(err.Error(), "quota exhausted") {
+			t.Fatalf("error = %v, want legible stream error", err)
+		}
+	})
+
+	t.Run("rejects a truncated stream", func(t *testing.T) {
+		events := responseStreamEvents(t,
+			`{"type":"response.output_item.done","output_index":0,"sequence_number":1,"item":{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[]}}`,
+		)
+		_, err := accumulateResponseStream(events)
+		if err == nil || !strings.Contains(err.Error(), "terminal event") {
+			t.Fatalf("error = %v, want missing terminal event error", err)
+		}
+	})
+
+	t.Run("rejects a failed terminal response", func(t *testing.T) {
+		events := responseStreamEvents(t,
+			`{"type":"response.failed","sequence_number":1,"response":{"id":"resp_failed","object":"response","model":"gpt-5.6-luna","status":"failed","output":[],"usage":{"input_tokens":1,"output_tokens":0,"total_tokens":1}}}`,
+		)
+		_, err := accumulateResponseStream(events)
+		if err == nil || !strings.Contains(err.Error(), "status=failed") {
+			t.Fatalf("error = %v, want failed response status", err)
+		}
+	})
+
+	t.Run("rejects an unexpected terminal status", func(t *testing.T) {
+		events := responseStreamEvents(t,
+			`{"type":"response.completed","sequence_number":1,"response":{"id":"resp_unknown","object":"response","model":"gpt-5.6-luna","status":"vendor_done","output":[]}}`,
+		)
+		_, err := accumulateResponseStream(events)
+		if err == nil || !strings.Contains(err.Error(), "unexpected status") {
+			t.Fatalf("error = %v, want unexpected terminal status", err)
+		}
+	})
+}
+
+func TestAccumulateResponseStreamRejectsExcessOutput(t *testing.T) {
+	item := `{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"` + strings.Repeat("x", 1024) + `"}]}`
+	event := responseStreamEvents(t, `{"type":"response.output_item.done","output_index":0,"item":`+item+`}`)[0]
+	var accumulator responseStreamAccumulator
+	for accumulator.outputBytes+len(event.AsResponseOutputItemDone().Item.RawJSON())+64 <= maxResponseStreamOutputBytes {
+		if err := accumulator.add(event); err != nil {
+			t.Fatalf("add item below limit: %v", err)
+		}
+	}
+	before := len(accumulator.items)
+	err := accumulator.add(event)
+	if err == nil || !strings.Contains(err.Error(), "output exceeds") {
+		t.Fatalf("add item above limit = %v, want output limit error", err)
+	}
+	if len(accumulator.items) != before {
+		t.Errorf("items after rejected item = %d, want %d", len(accumulator.items), before)
+	}
+	if class, phase := classifyStreamError(err); class != ErrorClassProvider || phase != FailurePhaseStream {
+		t.Errorf("classification = %s/%s, want provider/stream", class, phase)
+	}
+}
+
+func TestAccumulateResponseStreamRejectsOversizedItem(t *testing.T) {
+	item := `{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"` + strings.Repeat("x", maxResponseStreamOutputBytes) + `"}]}`
+	_, err := accumulateResponseStream(responseStreamEvents(t, `{"type":"response.output_item.done","output_index":0,"item":`+item+`}`))
+	if err == nil || !strings.Contains(err.Error(), "output exceeds") {
+		t.Fatalf("oversized output error = %v, want output limit error", err)
+	}
+}
+
+func TestAccumulateResponseStreamRejectsTerminalBeyondLimit(t *testing.T) {
+	terminal := responseStreamEvents(t, `{"type":"response.completed","response":{"id":"resp_stream","status":"completed","output":[]}}`)[0]
+	accumulator := responseStreamAccumulator{outputBytes: maxResponseStreamOutputBytes - 1}
+	if err := accumulator.add(terminal); err == nil || !strings.Contains(err.Error(), "output exceeds") {
+		t.Fatalf("terminal error = %v, want output limit error", err)
+	}
+	if accumulator.terminal != nil {
+		t.Fatal("oversized terminal was retained")
+	}
+}
+
+func TestOpenAIResponsesClient_StreamingIncompleteContract(t *testing.T) {
+	for _, status := range []string{"incomplete", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			events := responseStreamEvents(t,
+				`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_partial","role":"assistant","status":"completed","content":[{"type":"output_text","text":"partial","annotations":[]}]}}`,
+				`{"type":"response.`+status+`","response":{"id":"resp_partial","status":"`+status+`","output":[]}}`,
+			)
+			accumulated, err := accumulateResponseStream(events)
+			if (err != nil) != (status == "failed") {
+				t.Fatal("ordinary accumulator terminal contract changed", err)
+			}
+			if status == "incomplete" && (accumulated == nil || accumulated.Status != responses.ResponseStatusIncomplete || accumulated.OutputText() != "partial") {
+				t.Fatal("incomplete accumulator discarded output")
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				for _, event := range events {
+					io.WriteString(w, "data: "+event.RawJSON()+"\n\n")
+				}
+				io.WriteString(w, "data: [DONE]\n\n")
+			}))
+			defer server.Close()
+			client := NewOpenAIResponsesClient(ClientConfig{URL: server.URL + "/v1", APIKey: "fixture-key", Model: "fixture-model", RequiresStreaming: true})
+			resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{Messages: []Message{NewTextMessage("user", "test")}})
+			if status == "failed" {
+				if err == nil || resp != nil {
+					t.Fatal("failed ordinary Responses stream returned success")
+				}
+				return
+			}
+			if err != nil || resp == nil || len(resp.Choices) != 1 || resp.Choices[0].FinishReason != "length" || resp.Choices[0].Message.Content == nil || *resp.Choices[0].Message.Content != "partial" {
+				t.Fatal("ordinary incomplete stream lost the length finish reason or partial output", err)
+			}
+		})
+	}
+}
+
+func TestOpenAIResponsesClient_StreamingSSEPreservesNativeReasoning(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"sequence_number\":2,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"inspect\",\"arguments\":\"{}\",\"status\":\"completed\"}}\n\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"sequence_number\":1,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"summary\":[],\"encrypted_content\":\"ciphertext\",\"status\":\"completed\"}}\n\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"sequence_number\":3,\"response\":{\"id\":\"resp_sse\",\"object\":\"response\",\"model\":\"gpt-5.6-luna\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":4,\"total_tokens\":14,\"cache_creation_input_tokens\":3}}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	temperature := 0.7
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL:                   server.URL + "/v1",
+		APIKey:                "subscription-token",
+		Model:                 "gpt-5.6-luna",
+		RequiresStreaming:     true,
+		RejectsSamplingParams: true,
+	})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:    []Message{{Role: "user", Content: "inspect"}},
+		MaxTokens:   2048,
+		Temperature: &temperature,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotBody["stream"] != true {
+		t.Errorf("stream = %v, want true", gotBody["stream"])
+	}
+	if _, ok := gotBody["temperature"]; ok {
+		t.Errorf("ChatGPT plan request included temperature: %v", gotBody["temperature"])
+	}
+	if _, ok := gotBody["max_output_tokens"]; ok {
+		t.Errorf("ChatGPT plan request included max_output_tokens: %v", gotBody["max_output_tokens"])
+	}
+	if resp.Usage == nil || resp.Usage.CacheWriteTokens != 3 {
+		t.Fatalf("usage = %+v, want raw cache_creation_input_tokens=3", resp.Usage)
+	}
+	payload, ok := resp.Native().Payload.([]responses.ResponseInputItemUnionParam)
+	if !ok {
+		t.Fatalf("Native payload type = %T, want []responses.ResponseInputItemUnionParam", resp.Native().Payload)
+	}
+	if len(payload) != 2 || payload[0].OfReasoning == nil || payload[1].OfFunctionCall == nil {
+		t.Fatalf("Native payload = %#v, want ordered reasoning and function call", payload)
+	}
+	rawPayload, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal Native payload: %v", err)
+	}
+	if !strings.Contains(string(rawPayload), `"encrypted_content":"ciphertext"`) {
+		t.Errorf("Native payload lost encrypted_content: %s", rawPayload)
+	}
+}
+
 // --- helpers ---
+
+func responseStreamEvents(t *testing.T, bodies ...string) []responses.ResponseStreamEventUnion {
+	t.Helper()
+	events := make([]responses.ResponseStreamEventUnion, len(bodies))
+	for i, body := range bodies {
+		if err := events[i].UnmarshalJSON([]byte(body)); err != nil {
+			t.Fatalf("unmarshal stream event %d: %v", i, err)
+		}
+	}
+	return events
+}
 
 func unmarshalResponsesBody(t *testing.T, body string) *responses.Response {
 	t.Helper()

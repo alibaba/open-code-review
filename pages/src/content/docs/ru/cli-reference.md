@@ -574,9 +574,30 @@ ocr config model                           Interactive model selection
 Полный справочник по ключам, схемы и примеры приведены в разделе
 [Конфигурация](../configuration/).
 
+
+
+## `ocr auth`
+
+`ocr auth login`, `status` и `logout` по умолчанию используют Sign in with ChatGPT. Явный параметр `--provider chatgpt` также поддерживается.
+
+Провайдер `chatgpt` использует документированный процесс Sign in with ChatGPT. См. [руководство по предварительной версии ChatGPT](../chatgpt-preview/).
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` принимает `--provider chatgpt` и `--account <client-id>`, а `login` также принимает `--no-browser`, `--new-account` и `--enable-plan`. Для ChatGPT параметр `--device` не поддерживается. `--enable-plan` запрашивает согласие для сохраненной регистрации и несовместим с `--new-account`. Список моделей зависит от аккаунта; явно заданная модель допустима, даже если ее нет в списке. Этот провайдер принимает в `extra_body` только `reasoning`, `text` и `prompt_cache_key`. Управление аккаунтами, права и ограничения описаны в [руководстве по предварительной версии ChatGPT](../chatgpt-preview/).
+
 ## `ocr llm`
 
-Служебные команды LLM. Доступны две подкоманды:
+Служебные команды LLM. Доступны три подкоманды:
 
 ```text
 ocr llm <sub-command>
@@ -584,6 +605,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`

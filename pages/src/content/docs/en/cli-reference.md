@@ -591,9 +591,30 @@ ocr config model                           Interactive model selection
 See [Configuration](../configuration/) for the full key reference,
 schemas, and examples.
 
+
+
+## `ocr auth`
+
+Sign in with ChatGPT is the default for `ocr auth login`, `status` and `logout`. Explicit `--provider chatgpt` remains supported.
+
+Use the documented Sign in with ChatGPT flow with the `chatgpt` provider. See the [ChatGPT preview guide](../chatgpt-preview/).
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` accepts `--provider chatgpt` and `--account <client-id>`; `login` also accepts `--no-browser`, `--new-account` and `--enable-plan`. ChatGPT does not support `--device`. `--enable-plan` requests consent for a saved registration and cannot be combined with `--new-account`. The model list is account-specific; an explicit model is accepted even if the list omits it. This provider accepts `extra_body` only for `reasoning`, `text` and `prompt_cache_key`. See the [ChatGPT preview guide](../chatgpt-preview/) for account handling, permissions and restrictions.
+
 ## `ocr llm`
 
-LLM utility commands. Two subcommands:
+LLM utility commands. Three subcommands:
 
 ```text
 ocr llm <sub-command>
@@ -601,6 +622,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`
