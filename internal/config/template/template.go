@@ -40,9 +40,7 @@ type ScanTemplate struct {
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	MaxTokens             int              `json:"MAX_TOKENS"`
 	MaxCompletionTokens   int              `json:"MAX_COMPLETION_TOKENS,omitempty"`
-	ToolRequestWaitTimeMs int              `json:"TOOL_REQUEST_WAIT_TIME_MS"`
 	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
-	MaxSubtaskExecMinutes int              `json:"MAX_SUBTASK_EXECUTION_TIME_MINUTES"`
 	MaxFileSizeBytes      int64            `json:"MAX_FILE_SIZE_BYTES,omitempty"`
 	MaxTokensBudget       int64            `json:"MAX_TOKENS_BUDGET,omitempty"`
 	BatchStrategy         string           `json:"BATCH_STRATEGY,omitempty"`

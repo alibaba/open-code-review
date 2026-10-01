@@ -8,7 +8,7 @@ import { parseEnvBlock, getShellEnv } from '../shellEnv';
 const DELIM = '_OCR_ENV_DELIM_';
 
 describe('parseEnvBlock', () => {
-  it('解析分隔标记之间的 key=value', () => {
+  it('parses key=value pairs between delimiter markers', () => {
     const stdout = `noise\n${DELIM}\nPATH=/usr/local/bin:/usr/bin\nFOO=bar\n${DELIM}\ntrailing`;
     expect(parseEnvBlock(stdout)).toEqual({
       PATH: '/usr/local/bin:/usr/bin',
@@ -16,18 +16,18 @@ describe('parseEnvBlock', () => {
     });
   });
 
-  it('value 中含 = 时只按首个 = 切分', () => {
+  it('splits at the first = when the value contains =', () => {
     const stdout = `${DELIM}\nKEY=a=b=c\n${DELIM}`;
     expect(parseEnvBlock(stdout)).toEqual({ KEY: 'a=b=c' });
   });
 
-  it('无分隔标记 → 空对象', () => {
+  it('returns an empty object when delimiter markers are missing', () => {
     expect(parseEnvBlock('PATH=/usr/bin')).toEqual({});
   });
 });
 
 describe('getShellEnv', () => {
-  it('总是包含 PATH', () => {
+  it('always includes PATH', () => {
     expect(getShellEnv().PATH).toBeDefined();
   });
 });

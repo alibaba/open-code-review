@@ -16,15 +16,17 @@
     "**/*.go": "go.md",
     "**/*.{ftl,ftlh,ftlx}": "freemarker.md",
     "**/*.{hbs,mustache}": "handlebars_mustache.md",
+    "**/*.{jinja2,j2}": "jinja.md",
     "**/*.pug": "pug.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
     "**/*.{ts,js,tsx,jsx,mjs,cjs}": "ts_js_tsx_jsx.md",
     "**/*.{kt,kts}": "kotlin.md",
+    "**/*.{fs,fsi,fsx}": "fsharp.md",
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,cxx,hpp,hxx}": "cpp.md",
     "**/*.c": "c.md",
-    "**/*.{py,ipynb}": "python.md",
+    "**/*.{py,pyi,ipynb}": "python.md",
     "**/*.{php,phtml}": "php.md",
     "**/*.proto": "protobuf.md",
     "**/*.po": "po.md",
@@ -52,6 +54,7 @@
     "**/*.m": "matlab.md",
     "**/*.mm": "objc.md",
     "**/*.sol": "solidity.md",
-    "**/*.vy": "vyper.md"
+    "**/*.vy": "vyper.md",
+    "**/*.rego": "rego.md"
   }
 }

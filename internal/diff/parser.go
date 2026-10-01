@@ -25,13 +25,44 @@ var (
 	binaryRe = regexp.MustCompile(`^Binary files `)
 )
 
+// splitDiffLines splits unified diff text on "\n" and drops the carriage
+// return that CRLF-terminated diff text leaves at the end of every line.
+//
+// Git writes its own structural lines with "\n", but the diff text can reach
+// us already converted: a .patch checked out under core.autocrlf=true, or
+// output captured through a Windows shell. Left in place, that "\r" is not
+// cosmetic. It rides into the "diff --git a/(.+?) b/(.+)$" capture, so NewPath
+// becomes "file.go\r" and the file can no longer be opened for review; and it
+// defeats the exact comparisons against "--- /dev/null" and "+++ /dev/null",
+// which silently costs a diff its IsNew or IsDeleted flag.
+//
+// Stripping it matches how the rest of the package already treats a trailing
+// carriage return: resolver.go trims it before matching lines, and filereader
+// and viewer do the same when reading file content.
+func splitDiffLines(text string) []string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSuffix(line, "\r")
+	}
+	return lines
+}
+
+// parseDiffHeaderLine extracts the two pathnames from a "diff --git" line,
+// falling back to parseQuotedDiffHeader when git has quoted a side (see there).
+func parseDiffHeaderLine(line string) (oldPath string, newPath string, ok bool) {
+	if m := diffHeaderRe.FindStringSubmatch(line); m != nil {
+		return m[1], m[2], true
+	}
+	return parseQuotedDiffHeader(line)
+}
+
 // ParseDiffText splits the unified diff text into per-file Diff structs.
 // ref, if non-empty, is a git ref used to read new-file content via
 // git show instead of reading from the working tree.
 // runner, if non-nil, is used to execute git subprocesses through a
 // shared concurrency limiter.
 func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref string, runner *gitcmd.Runner) ([]model.Diff, error) {
-	lines := strings.Split(diffText, "\n")
+	lines := splitDiffLines(diffText)
 	var diffs []model.Diff
 	var current *model.Diff
 	var buf strings.Builder
@@ -47,7 +78,7 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	defer cancel()
 
 	for _, line := range lines {
-		if m := diffHeaderRe.FindStringSubmatch(line); m != nil {
+		if oldPath, newPath, ok := parseDiffHeaderLine(line); ok {
 			// Flush previous diff
 			if current != nil {
 				current.Diff = strings.TrimSuffix(buf.String(), "\n")
@@ -56,8 +87,8 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 				buf.Reset()
 			}
 			current = &model.Diff{
-				OldPath: m[1],
-				NewPath: m[2],
+				OldPath: oldPath,
+				NewPath: newPath,
 			}
 			inHunk = false
 		}
@@ -84,10 +115,10 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 		case strings.HasPrefix(line, "rename from "):
 			// Authoritative old path for renames; more reliable than the
 			// "diff --git" header when paths contain spaces.
-			current.OldPath = strings.TrimPrefix(line, "rename from ")
+			current.OldPath = unquoteRenamePath(strings.TrimPrefix(line, "rename from "))
 			current.IsRenamed = true
 		case strings.HasPrefix(line, "rename to "):
-			current.NewPath = strings.TrimPrefix(line, "rename to ")
+			current.NewPath = unquoteRenamePath(strings.TrimPrefix(line, "rename to "))
 			current.IsRenamed = true
 		// git emits "--- /dev/null" / "+++ /dev/null" without a/ b/ prefixes.
 		// Guarded by inHunk: inside a hunk the same strings can be content
@@ -120,6 +151,9 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 func finalizeDiff(ctx context.Context, d *model.Diff, repoDir string, ref string, runner *gitcmd.Runner) {
 	if d.IsDeleted || d.NewPath == "/dev/null" {
 		d.NewPath = "/dev/null"
+		return
+	}
+	if d.IsBinary {
 		return
 	}
 	if ref != "" {

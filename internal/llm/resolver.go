@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -209,16 +210,16 @@ func parseTimeoutEnv() (time.Duration, bool, error) {
 	if err != nil {
 		return 0, false, fmt.Errorf("OCR_LLM_TIMEOUT must be an integer (seconds): %w", err)
 	}
-	d, err := validateTimeoutSec(sec)
+	d, err := ValidateTimeoutSec(sec)
 	if err != nil {
 		return 0, false, fmt.Errorf("OCR_LLM_TIMEOUT: %w", err)
 	}
 	return d, true, nil
 }
 
-// validateTimeoutSec converts a config-file timeout (in seconds) to time.Duration.
+// ValidateTimeoutSec converts a config-file timeout (in seconds) to time.Duration.
 // Returns 0 for zero input (use default). Rejects negative values and overflow.
-func validateTimeoutSec(sec int) (time.Duration, error) {
+func ValidateTimeoutSec(sec int) (time.Duration, error) {
 	if sec == 0 {
 		return 0, nil
 	}
@@ -233,6 +234,10 @@ func validateTimeoutSec(sec int) (time.Duration, error) {
 	return time.Duration(sec) * time.Second, nil
 }
 
+func validateTimeoutSec(sec int) (time.Duration, error) {
+	return ValidateTimeoutSec(sec)
+}
+
 // errBedrockNotConfigurable explains why the two url+token strategies reject the
 // bedrock protocol. Both describe a single HTTP endpoint and carry no place for
 // a region or a profile, and bedrock uses neither the url nor the token they do
@@ -243,16 +248,35 @@ func errBedrockNotConfigurable(key string) error {
 		key, ProtocolAnthropicBedrock)
 }
 
+// validateEndpointURL reports URL parse failures before the SDK can turn them
+// into request errors that no longer identify the configuration variable.
+func validateEndpointURL(variable, value string) error {
+	if _, err := neturl.Parse(value); err != nil {
+		return fmt.Errorf("invalid %s: %w", variable, err)
+	}
+	return nil
+}
+
 // tryOCREnv reads OCR-specific environment variables.
+//
+// The values are trimmed because an environment can carry a trailing "\r" —
+// a .env file or a shell wrapper generated with CRLF line endings is the usual
+// source on Windows. A URL with a control character fails url.Parse inside the
+// SDK before any request is sent, and the resulting message names neither the
+// environment nor the variable. Every other OCR_LLM_* reader trims
+// (OCR_LLM_TIMEOUT, OCR_LLM_PROTOCOL); these must behave the same way.
 func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
-	url := os.Getenv(envOCRLLMURL)
-	token := os.Getenv(envOCRLLMToken)
-	model := os.Getenv(envOCRLLMModel)
+	url := strings.TrimSpace(os.Getenv(envOCRLLMURL))
+	token := strings.TrimSpace(os.Getenv(envOCRLLMToken))
+	model := strings.TrimSpace(os.Getenv(envOCRLLMModel))
 	if modelOverride != "" {
 		model = modelOverride
 	}
 	if url == "" || token == "" || model == "" {
 		return ResolvedEndpoint{}, false, nil
+	}
+	if err := validateEndpointURL(envOCRLLMURL, url); err != nil {
+		return ResolvedEndpoint{}, false, err
 	}
 
 	// OCR_LLM_PROTOCOL (normalized) wins over OCR_USE_ANTHROPIC when set.
@@ -268,7 +292,10 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	}
 	if protocol == "" {
 		useAnthropic := true // default true
-		if v := os.Getenv(envOCRUseAnthropic); v != "" {
+		// Trimmed so a "\r" from a CRLF-generated environment cannot silently
+		// turn "true" into an unrecognized value and flip the protocol to
+		// OpenAI below.
+		if v := strings.TrimSpace(os.Getenv(envOCRUseAnthropic)); v != "" {
 			lower := strings.ToLower(v)
 			useAnthropic = lower == "true" || lower == "1" || lower == "yes"
 		}
@@ -418,8 +445,10 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		// is set, and only for preset providers (custom ones have no fallback).
 		// Same whitespace rule as the static key above, so `export
 		// ANTHROPIC_API_KEY="  "` reports "no api_key configured" instead of
-		// sending `Authorization: Bearer  ` and getting an opaque 401.
-		if v := os.Getenv(preset.EnvVar); strings.TrimSpace(v) != "" {
+		// sending `Authorization: Bearer  ` and getting an opaque 401. Trim the
+		// stored value too, not just the emptiness check, or a key carrying a
+		// trailing "\r" reaches the auth header.
+		if v := strings.TrimSpace(os.Getenv(preset.EnvVar)); v != "" {
 			apiKey = v
 		}
 	}
@@ -546,7 +575,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	extraBody = entry.ExtraBody
 	extraHeaders := entry.ExtraHeaders
 
-	timeout, err := validateTimeoutSec(entry.TimeoutSec)
+	timeout, err := ValidateTimeoutSec(entry.TimeoutSec)
 	if err != nil {
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
 	}
@@ -658,7 +687,7 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		}
 	}
 
-	timeout, err := validateTimeoutSec(cfg.Llm.TimeoutSec)
+	timeout, err := ValidateTimeoutSec(cfg.Llm.TimeoutSec)
 	if err != nil {
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
 	}
@@ -696,14 +725,20 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 
 // tryCCEnv reads Claude Code environment variables.
 func tryCCEnv(modelOverride string) (ResolvedEndpoint, bool, error) {
-	baseURL := os.Getenv(envCCBaseURL)
-	token := os.Getenv(envCCToken)
-	model := os.Getenv(envCCModel)
+	// Trim here rather than in finalizeResolvedEndpoint: ensureMessagesSuffix
+	// below appends "/v1/messages", which would bury a trailing "\r" in the
+	// middle of the URL where a later TrimSpace can no longer reach it.
+	baseURL := strings.TrimSpace(os.Getenv(envCCBaseURL))
+	token := strings.TrimSpace(os.Getenv(envCCToken))
+	model := strings.TrimSpace(os.Getenv(envCCModel))
 	if modelOverride != "" {
 		model = modelOverride
 	}
 	if baseURL == "" || token == "" || model == "" {
 		return ResolvedEndpoint{}, false, nil
+	}
+	if err := validateEndpointURL(envCCBaseURL, baseURL); err != nil {
+		return ResolvedEndpoint{}, false, err
 	}
 
 	url := ensureMessagesSuffix(baseURL)

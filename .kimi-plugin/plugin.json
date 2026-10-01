@@ -1,0 +1,19 @@
+{
+  "name": "open-code-review",
+  "version": "1.0.0",
+  "description": "Use Alibaba Open Code Review from Kimi Code.",
+  "author": { "name": "Alibaba" },
+  "homepage": "https://github.com/alibaba/open-code-review",
+  "repository": "https://github.com/alibaba/open-code-review",
+  "license": "Apache-2.0",
+  "keywords": ["code-review", "kimi-code", "ocr", "open-code-review"],
+  "skills": "./plugins/open-code-review/skills/",
+  "commands": "./plugins/open-code-review/kimi-code/commands/",
+  "interface": {
+    "displayName": "Open Code Review",
+    "shortDescription": "Run structured code reviews from Kimi Code.",
+    "longDescription": "Adds Kimi Code skills and slash commands that invoke the local Open Code Review CLI to review Git workspace changes, commits, and branch comparisons.",
+    "developerName": "Alibaba",
+    "websiteURL": "https://github.com/alibaba/open-code-review"
+  }
+}

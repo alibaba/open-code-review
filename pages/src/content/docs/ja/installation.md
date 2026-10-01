@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-`ocr` CLI をインストールするには、サポートされた 6 つの方法があります。
+`ocr` CLI をインストールするには、サポートされた 5 つの方法があります。
 
 ## NPM（推奨）
 
@@ -52,20 +52,6 @@ brew install open-code-review
 
 ```bash
 brew upgrade open-code-review
-```
-
-## MacPorts（macOS）
-
-```bash
-sudo port install open-code-review
-```
-
-この port はソースからビルドして `ocr` バイナリをインストールします。
-
-後でアップグレードするには：
-
-```bash
-sudo port upgrade open-code-review
 ```
 
 ## インストールスクリプト（curl | sh）
@@ -170,7 +156,7 @@ OCR 自体を変更する場合、またはプリコンパイル済みバイナ�
 ```bash
 git clone https://github.com/alibaba/open-code-review.git
 cd open-code-review
-make build              # dist/opencodereview を生成
+make build              # dist/opencodereview を生成（Windows では dist/opencodereview.exe）
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 

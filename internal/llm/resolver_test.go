@@ -2622,3 +2622,154 @@ func TestResolveEndpoint_RedundantRetryCodesFiltered(t *testing.T) {
 		t.Errorf("RetryCodes = %v, want [403] (429 should be filtered)", ep.RetryCodes)
 	}
 }
+
+// Issue #1395: an environment generated with CRLF line endings (a .env file, a
+// Windows shell wrapper, a CI variable) can carry a trailing "\r". Endpoint
+// values used to reach url.Parse and the auth header verbatim, so a single
+// stray CR failed every file of a review with an opaque
+// "net/url: invalid control character in URL" that named neither the
+// environment nor the variable. Every subtest here fails on the pre-fix code.
+func TestResolveEndpoint_EnvValuesAreTrimmed(t *testing.T) {
+	const cr = "\r"
+
+	t.Run("OCR environment", func(t *testing.T) {
+		clearAllEnv(t)
+		t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/messages"+cr)
+		t.Setenv("OCR_LLM_TOKEN", "ocr-token"+cr)
+		t.Setenv("OCR_LLM_MODEL", "claude-opus-4-7"+cr)
+
+		ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ep.Source != "OCR environment" {
+			t.Fatalf("Source = %q, want %q", ep.Source, "OCR environment")
+		}
+		if ep.URL != "https://api.example.com/v1/messages" {
+			t.Errorf("URL = %q, want the value with the CR trimmed", ep.URL)
+		}
+		if ep.Token != "ocr-token" {
+			t.Errorf("Token = %q, want %q", ep.Token, "ocr-token")
+		}
+		if ep.Model != "claude-opus-4-7" {
+			t.Errorf("Model = %q, want %q", ep.Model, "claude-opus-4-7")
+		}
+	})
+
+	t.Run("Claude Code environment", func(t *testing.T) {
+		clearAllEnv(t)
+		t.Setenv("ANTHROPIC_BASE_URL", "https://api.example.com"+cr)
+		t.Setenv("ANTHROPIC_AUTH_TOKEN", "cc-token"+cr)
+		t.Setenv("ANTHROPIC_MODEL", "claude-opus-4-7"+cr)
+
+		ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ep.Source != "Claude Code environment" {
+			t.Fatalf("Source = %q, want %q", ep.Source, "Claude Code environment")
+		}
+		// ensureMessagesSuffix appends "/v1/messages" to the value as read, so a
+		// CR that survives the read lands in the middle of the URL — a
+		// TrimSpace applied afterwards could no longer repair it.
+		if strings.ContainsRune(ep.URL, '\r') {
+			t.Errorf("URL = %q, still contains a CR", ep.URL)
+		}
+		if ep.URL != "https://api.example.com/v1/messages" {
+			t.Errorf("URL = %q, want %q", ep.URL, "https://api.example.com/v1/messages")
+		}
+		if ep.Token != "cc-token" {
+			t.Errorf("Token = %q, want %q", ep.Token, "cc-token")
+		}
+		if ep.Model != "claude-opus-4-7" {
+			t.Errorf("Model = %q, want %q", ep.Model, "claude-opus-4-7")
+		}
+	})
+
+	// A trailing CR used to make "true" unrecognized, silently selecting the
+	// OpenAI protocol instead of the default Anthropic one.
+	t.Run("OCR_USE_ANTHROPIC", func(t *testing.T) {
+		clearAllEnv(t)
+		t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/messages")
+		t.Setenv("OCR_LLM_TOKEN", "ocr-token")
+		t.Setenv("OCR_LLM_MODEL", "claude-opus-4-7")
+		t.Setenv("OCR_USE_ANTHROPIC", "true"+cr)
+
+		ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ep.Protocol != ProtocolAnthropic {
+			t.Errorf("Protocol = %q, want %q", ep.Protocol, ProtocolAnthropic)
+		}
+	})
+
+	// The preset provider key fallback checked the trimmed value but stored the
+	// raw one, so the CR reached the auth header.
+	t.Run("preset provider api key fallback", func(t *testing.T) {
+		clearAllEnv(t)
+		t.Setenv("ANTHROPIC_API_KEY", "env-api-key"+cr)
+
+		cfgPath, _ := writeResolverConfig(t, configFile{
+			Provider: "anthropic",
+			Providers: map[string]providerEntryConfig{
+				"anthropic": {Model: "claude-sonnet-4-6"},
+			},
+		})
+
+		ep, err := ResolveEndpoint(cfgPath)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ep.Token != "env-api-key" {
+			t.Errorf("Token = %q, want %q", ep.Token, "env-api-key")
+		}
+	})
+}
+
+func TestResolveEndpoint_InvalidEnvURLNamesSourceAndVariable(t *testing.T) {
+	tests := []struct {
+		name       string
+		configure  func(*testing.T)
+		wantSource string
+		wantVar    string
+	}{
+		{
+			name: "OCR environment",
+			configure: func(t *testing.T) {
+				t.Setenv(envOCRLLMURL, "https://api.example.com/\rbad")
+				t.Setenv(envOCRLLMToken, "ocr-token")
+				t.Setenv(envOCRLLMModel, "test-model")
+			},
+			wantSource: "OCR environment",
+			wantVar:    envOCRLLMURL,
+		},
+		{
+			name: "Claude Code environment",
+			configure: func(t *testing.T) {
+				t.Setenv(envCCBaseURL, "https://api.example.com/\rbad")
+				t.Setenv(envCCToken, "cc-token")
+				t.Setenv(envCCModel, "test-model")
+			},
+			wantSource: "Claude Code environment",
+			wantVar:    envCCBaseURL,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllEnv(t)
+			tt.configure(t)
+
+			_, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+			if err == nil {
+				t.Fatal("expected invalid URL error")
+			}
+			for _, want := range []string{tt.wantSource, tt.wantVar, "invalid control character in URL"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			}
+		})
+	}
+}

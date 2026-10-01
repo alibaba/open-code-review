@@ -40,6 +40,9 @@ func TestLoadLLMRuntime_Success(t *testing.T) {
 	if rt.Model != "test-model" {
 		t.Errorf("model = %q, want test-model", rt.Model)
 	}
+	if rt.Source != "OCR environment" {
+		t.Errorf("source = %q, want OCR environment", rt.Source)
+	}
 	if rt.Client == nil {
 		t.Error("expected non-nil client")
 	}

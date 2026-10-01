@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-安装 `ocr` CLI 有六种受支持的方式。
+安装 `ocr` CLI 有五种受支持的方式。
 
 ## NPM（推荐）
 
@@ -50,20 +50,6 @@ brew install open-code-review
 
 ```bash
 brew upgrade open-code-review
-```
-
-## MacPorts（macOS）
-
-```bash
-sudo port install open-code-review
-```
-
-该 port 会从源码构建并安装 `ocr` 二进制。
-
-后续升级：
-
-```bash
-sudo port upgrade open-code-review
 ```
 
 ## 安装脚本（curl | sh）
@@ -167,7 +153,7 @@ shasum -a 256 -c sha256sum.txt --ignore-missing
 ```bash
 git clone https://github.com/alibaba/open-code-review.git
 cd open-code-review
-make build              # 产出 dist/opencodereview
+make build              # 产出 dist/opencodereview（Windows 上是 dist/opencodereview.exe）
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 
