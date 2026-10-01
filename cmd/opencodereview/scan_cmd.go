@@ -25,6 +25,7 @@ import (
 )
 
 type scanOptions struct {
+	scanTemplatePath      string
 	toolConfigPath        string
 	rulePath              string
 	repoDir               string
@@ -128,7 +129,7 @@ func executeScan(opts scanOptions) (retErr error) {
 	// scan owns its own template (scan_template.json) independent from the
 	// diff-review template loaded by loadCommonContext above. Apply --max-tools
 	// as an "only raise" override to the scan template's per-file budget.
-	scanTpl, err := template.LoadScanDefault()
+	scanTpl, err := loadScanTemplate(opts.scanTemplatePath)
 	if err != nil {
 		return fmt.Errorf("load scan template: %w", err)
 	}
@@ -288,4 +289,15 @@ func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths
 		return fmt.Errorf("scan preview failed: %w", err)
 	}
 	return outputPreview(preview, outputFormat, out)
+}
+
+func loadScanTemplate(path string) (*template.ScanTemplate, error) {
+	if path == "" {
+		return template.LoadScanDefault()
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read scan prompt override: %w", err)
+	}
+	return template.LoadScanOverride(data)
 }

@@ -4,6 +4,7 @@
 package template
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -474,5 +475,48 @@ func TestPlanRequired(t *testing.T) {
 					tt.fileCount, tt.total, tt.maxFile, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoadScanOverride(t *testing.T) {
+	raw := `{"MAIN_TASK":{"messages":[{"role":"system","content":"Review the supplied function only."},{"role":"user","content":"{{file_content}} {{plan_guidance}}"}]},"PLAN_TASK":null,"NO_PLAN_GUIDANCE":"No plan; use only the supplied function."}`
+	tpl, err := LoadScanOverride([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults, err := LoadScanDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tpl.PlanTask != nil || tpl.MainTask.Messages[0].Content != "Review the supplied function only." || tpl.NoPlanInstruction() != "No plan; use only the supplied function." {
+		t.Fatalf("override not applied: %+v", tpl)
+	}
+	// Replacing only the contract must preserve every other setting and phase.
+	tpl.MainTask = defaults.MainTask
+	tpl.PlanTask = defaults.PlanTask
+	tpl.NoPlanGuidance = defaults.NoPlanGuidance
+	if !reflect.DeepEqual(tpl, defaults) {
+		t.Fatal("override changed budgets or auxiliary tasks")
+	}
+	for _, bad := range []string{
+		`{}`, `null`, raw + `{}`,
+		strings.Replace(raw, `"PLAN_TASK":null,`, "", 1),
+		strings.Replace(raw, `"PLAN_TASK":null`, `"PLAN_TASK":{"messages":[]}`, 1),
+		strings.Replace(raw, `"PLAN_TASK":null`, `"PLAN_TASK":{"messages":[{"role":"system","content":"plan"},{"role":"user","content":"file","extra":true}]}`, 1),
+		strings.Replace(raw, `"MAIN_TASK":`, `"TYPO":`, 1),
+		strings.Replace(raw, `"role":"system"`, `"role":"assistant"`, 1),
+		strings.Replace(raw, `Review the supplied function only.`, " ", 1),
+		strings.Replace(raw, `No plan; use only the supplied function.`, "", 1),
+		strings.Replace(raw, `"PLAN_TASK":null`, `"MAX_TOKENS":10,"PLAN_TASK":null`, 1),
+		strings.Replace(raw, `"content":"Review`, `"extra":true,"content":"Review`, 1),
+	} {
+		if _, err := LoadScanOverride([]byte(bad)); err == nil {
+			t.Errorf("accepted invalid override: %s", bad)
+		}
+	}
+	planRaw := strings.Replace(raw, `"PLAN_TASK":null`, `"PLAN_TASK":{"messages":[{"role":"system","content":"Plan bounded review."},{"role":"user","content":"{{file_content}}"}]}`, 1)
+	planned, err := LoadScanOverride([]byte(planRaw))
+	if err != nil || planned.PlanTask == nil {
+		t.Fatalf("valid plan: %v", err)
 	}
 }

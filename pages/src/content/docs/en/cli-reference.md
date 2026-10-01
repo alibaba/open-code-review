@@ -383,6 +383,49 @@ ocr scan --path internal/agent,internal/llm/client.go
 ocr scan --exclude '**/generated/*,*.pb.go'
 ```
 
+### Custom scan prompt contract
+
+Use `--scan-template bounded-scan.json` to replace the complete scan system/user
+messages. `--background` and `--rule` fill placeholders; they do not replace the
+embedded instructions. The override requires exactly these three fields:
+
+```json
+{
+  "MAIN_TASK": {
+    "messages": [
+      {"role": "system", "content": "Review only the supplied function. Do not request other files. Report confirmed findings with code_comment, then call task_done."},
+      {"role": "user", "content": "Path: {{current_file_path}}\n{{file_content}}\n{{plan_guidance}}\n{{requirement_background}}\n{{system_rule}}"}
+    ]
+  },
+  "PLAN_TASK": null,
+  "NO_PLAN_GUIDANCE": "No planning pass; stay within the supplied function."
+}
+```
+
+```bash
+ocr scan --path path/to/bounded-file.py --scan-template bounded-scan.json
+```
+
+`PLAN_TASK: null` disables the planner. To use a custom planner, supply the same
+`messages` shape (a non-empty system message followed by a non-empty user message).
+The planner must return the existing JSON format: `summary` plus `checkpoints`
+entries with `focus`, optional `lines`, and `why`.
+`NO_PLAN_GUIDANCE` replaces the sentinel whenever planning is skipped, including
+`--no-plan` and failed planning. All three fields are required; unknown fields,
+empty messages and invalid JSON fail before any LLM request. Budget settings are
+not accepted in this file: existing token/tool limits and their explicit CLI/config
+overrides retain their usual behavior. Compression, deduplication and project
+summary prompts also retain their defaults; `--no-dedup` and `--no-summary` disable
+the latter phases when needed. This is a prompt contract, not a tool sandbox: use
+`--tools` for the integration's permitted tools. The selected files are still read
+in full, so the caller must supply bounded source content when required.
+
+Supported MAIN_TASK placeholders are `{{current_file_path}}`, `{{file_content}}`,
+`{{current_system_date_time}}`, `{{system_rule}}`, `{{requirement_background}}`,
+`{{plan_guidance}}` and `{{change_files}}` (the scan-mode literal). Keep output
+instructions compatible with `code_comment` and `task_done`. Pass the same override
+file again when resuming a scan. Without `--scan-template`, behavior is unchanged.
+
 See `ocr scan -h` for the full flag list.
 
 ## `ocr session`
