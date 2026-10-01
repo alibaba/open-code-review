@@ -113,5 +113,9 @@
   ".vhdl",
   ".sol",
   ".vy",
-  ".rego"
+  ".rego",
+  ".glsl",
+  ".hlsl",
+  ".wgsl",
+  ".metal"
 ]

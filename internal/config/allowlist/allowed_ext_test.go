@@ -130,6 +130,14 @@ func TestIsAllowedExt(t *testing.T) {
 		{".VY", true},
 		{".rego", true},
 		{".REGO", true},
+		{".glsl", true},
+		{".GLSL", true},
+		{".hlsl", true},
+		{".HLSL", true},
+		{".wgsl", true},
+		{".WGSL", true},
+		{".metal", true},
+		{".METAL", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -344,6 +352,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"solidity deploy script", "script/Deploy.s.sol", false},
 		{"vyper non-test", "src/token.vy", false},
 		{"vyper test in filename only", "src/test_helpers.vy", false},
+
+		// Shader languages have no conventional default test-file exclusion.
+		{"glsl shader", "shaders/fragment.glsl", false},
+		{"hlsl shader", "shaders/lighting.hlsl", false},
+		{"wgsl shader", "shaders/compute.wgsl", false},
+		{"metal shader", "shaders/blur.metal", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},
