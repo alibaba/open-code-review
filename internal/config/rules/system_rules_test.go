@@ -76,6 +76,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"templates/account.HBS", "Handlebars/Mustache Escaping Boundaries"},
 		{"templates/email.mustache", "Handlebars/Mustache Escaping Boundaries"},
 		{"templates/email.MUSTACHE", "Handlebars/Mustache Escaping Boundaries"},
+		{"templates/account.jinja2", "Jinja Escaping Boundaries"},
+		{"templates/email.j2", "Jinja Escaping Boundaries"},
+		{"templates/account.JINJA2", "Jinja Escaping Boundaries"},
+		{"templates/email.J2", "Jinja Escaping Boundaries"},
 		{"templates/account.pug", "Pug Escaping and Output Contexts"},
 		{"templates/account.PUG", "Pug Escaping and Output Contexts"},
 		{"src/main/resources/mapper/usermapper.xml", "SQL Logic Error Detection"},
@@ -95,6 +99,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"server/bootstrap.cjs", "TypeScript"},
 		{"app.kt", "Null Safety"},
 		{"scripts/setup.kts", "Null Safety"},
+		{"src/domain/Order.fs", "Discriminated Unions and Pattern Matching"},
+		{"src/domain/Order.fsi", "Discriminated Unions and Pattern Matching"},
+		{"scripts/migrate.fsx", "Discriminated Unions and Pattern Matching"},
 		{"src/main/handler.cpp", "Smart Pointer"},
 		{"src/main/handler.cxx", "Smart Pointer"},
 		{"include/handler.hxx", "Smart Pointer"},
@@ -108,6 +115,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"crates/service/Cargo.toml", "Cargo Manifest Hygiene"},
 		{"scripts/deploy.py", "Mutable Default Arguments"},
 		{"src/app/main.py", "Mutable Default Arguments"},
+		{"stubs/example.pyi", "Mutable Default Arguments"},
+		{"src/app/main.pyi", "Mutable Default Arguments"},
 		{"notebook.ipynb", "Mutable Default Arguments"},
 		{"src/notebooks/data.ipynb", "Mutable Default Arguments"},
 		{"public/index.php", "PHP Review Principles"},
@@ -167,6 +176,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
 		{"contracts/token.vy", "Language Restrictions"},
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
+		{"policies/authz.rego", "Default Posture"},
+		{"policies/authz.REGO", "Default Posture"},
 	}
 
 	for _, tt := range tests {

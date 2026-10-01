@@ -39,6 +39,8 @@ function createMockProcess() {
 
 describe('CliService.cancel', () => {
   beforeEach(() => {
+    // POSIX cases use Linux; Windows cases override this explicitly.
+    setPlatform('linux');
     jest.spyOn(process, 'kill').mockImplementation(() => true);
   });
 
@@ -49,7 +51,7 @@ describe('CliService.cancel', () => {
     if (platformDescriptor) Object.defineProperty(process, 'platform', platformDescriptor);
   });
 
-  it('子进程忽略 SIGTERM 时，超时后发送 SIGKILL', () => {
+  it('sends SIGKILL after a timeout when the child ignores SIGTERM', () => {
     jest.useFakeTimers();
     const proc = createMockProcess();
     mockedSpawn.mockReturnValue(proc as unknown as ReturnType<typeof spawn>);
@@ -70,7 +72,7 @@ describe('CliService.cancel', () => {
     expect(process.kill).toHaveBeenCalledWith(-123, 'SIGKILL');
   });
 
-  it('子进程已正常退出时，不再发送 SIGKILL', async () => {
+  it('does not send SIGKILL after the child exits normally', async () => {
     jest.useFakeTimers();
     const proc = createMockProcess();
     mockedSpawn.mockReturnValue(proc as unknown as ReturnType<typeof spawn>);

@@ -96,7 +96,7 @@ func TestSealedInputPinsRunToAdmittedCommits(t *testing.T) {
 }
 
 // runPathIdentity replays what the run itself selects — the same diff load
-// followed by the same two filter passes — and reads the identity off that
+// followed by the same selectFiles pass — and reads the identity off that
 // selection. Going through the Agent rather than through ResolveIdentity is the
 // point: it is the run's own load that the seal has to steer.
 func runPathIdentity(t *testing.T, args Args) session.RunIdentity {
@@ -105,6 +105,6 @@ func runPathIdentity(t *testing.T, args Args) session.RunIdentity {
 	if err := a.loadDiffs(context.Background()); err != nil {
 		t.Fatalf("loadDiffs: %v", err)
 	}
-	a.diffs = a.filterLargeDiffs(a.filterDiffs(a.diffs))
+	a.diffs, _ = summarizeSelection(a.selectFiles(a.diffs))
 	return a.runIdentity()
 }

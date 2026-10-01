@@ -48,6 +48,7 @@ environment variable.
 | `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
@@ -202,8 +203,7 @@ increasing scope:
 - `OCR_LLM_TIMEOUT` environment variable — integer seconds; overrides
   the config-file value for every resolution path.
 
-The `timeout_sec` keys are not supported by `ocr config set` — edit
-`~/.opencodereview/config.json` directly:
+Both `timeout_sec` keys can be set with `ocr config set`:
 
 ```json
 {
@@ -284,8 +284,8 @@ SDK and cannot be added to `retry_codes`.
 
 ### Prompt limit
 
-`max_tokens` is the **prompt** (input) ceiling for a single review unit:
-a file group for `ocr review`, a file for `ocr scan`. The embedded
+`max_tokens` is the **prompt** (input) ceiling for a single subtask
+(one file or a bundle of related files). The embedded
 templates default to 200,000 tokens for `ocr review` and 58,888 for
 `ocr scan`. Change it for a model with a different context window by
 saving `max_tokens`:
@@ -310,7 +310,7 @@ Restore the embedded default with `ocr config unset max_tokens`.
 
 ### Review effort
 
-`effort` sets how many review rounds each file group gets: `low` = 1,
+`effort` sets how many review rounds each subtask gets: `low` = 1,
 `medium` (the default) = 2, `high` = 3. More rounds find more issues at
 proportionally higher cost.
 

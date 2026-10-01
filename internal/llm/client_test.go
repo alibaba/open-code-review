@@ -11,12 +11,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 func TestNewOpenAIClient_URLNormalization(t *testing.T) {
@@ -845,6 +847,139 @@ func TestOpenAIClient_StreamOnlyGateway(t *testing.T) {
 	}
 	if resp.Choices[0].FinishReason != "stop" {
 		t.Errorf("finish reason = %q, want %q", resp.Choices[0].FinishReason, "stop")
+	}
+}
+
+// TestOpenAIClient_StreamingRequestsUsageByDefault verifies that streaming
+// requests ask for the final usage chunk via stream_options.include_usage
+// when the provider config does not set stream_options itself.
+// OpenAI-compatible servers omit usage from streams unless asked, silently
+// losing token accounting for every streamed request.
+func TestOpenAIClient_StreamingRequestsUsageByDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		streamOptions, ok := body["stream_options"].(map[string]any)
+		if !ok || streamOptions["include_usage"] != true {
+			t.Errorf("stream_options = %#v, want include_usage true", body["stream_options"])
+			http.Error(w, "usage request required", http.StatusBadRequest)
+			return
+		}
+
+		writeOpenAISSE(t, w,
+			`{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":null}]}`,
+			`{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:       server.URL + "/v1",
+		APIKey:    "test-key",
+		Model:     "gpt-stream",
+		ExtraBody: map[string]any{"stream": true},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if resp.Usage == nil {
+		t.Fatal("Usage = nil, want usage from the final stream chunk")
+	}
+	if resp.Usage.PromptTokens != 12 || resp.Usage.CompletionTokens != 3 || resp.Usage.TotalTokens != 15 {
+		t.Errorf("Usage = %+v, want prompt 12 / completion 3 / total 15", resp.Usage)
+	}
+}
+
+// TestOpenAIClient_StreamOptionsConfigOverrides verifies the
+// extra_body.stream_options states: an explicit include_usage value is
+// respected, an object configuring only unrelated options keeps the usage
+// default merged in, an explicit null suppresses the field entirely (for
+// gateways that reject stream_options), and non-streaming requests never
+// carry the field regardless of config.
+func TestOpenAIClient_StreamOptionsConfigOverrides(t *testing.T) {
+	tests := []struct {
+		name       string
+		extraBody  map[string]any
+		want       any
+		wantAbsent bool
+	}{
+		{
+			name:      "explicit include_usage false is respected",
+			extraBody: map[string]any{"stream": true, "stream_options": map[string]any{"include_usage": false}},
+			want:      map[string]any{"include_usage": false},
+		},
+		{
+			name:      "unrelated option keeps the usage default",
+			extraBody: map[string]any{"stream": true, "stream_options": map[string]any{"continuous_usage_stats": true}},
+			want:      map[string]any{"continuous_usage_stats": true, "include_usage": true},
+		},
+		{
+			name:       "explicit null suppresses field",
+			extraBody:  map[string]any{"stream": true, "stream_options": nil},
+			wantAbsent: true,
+		},
+		{
+			name:       "non-streaming never sends stream_options",
+			extraBody:  map[string]any{"stream_options": map[string]any{"include_usage": true}},
+			wantAbsent: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			streaming, _ := tt.extraBody["stream"].(bool)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode request body: %v", err)
+					http.Error(w, "invalid request body", http.StatusBadRequest)
+					return
+				}
+
+				value, present := body["stream_options"]
+				if tt.wantAbsent {
+					if present {
+						t.Errorf("stream_options = %#v, want absent", value)
+					}
+				} else if !reflect.DeepEqual(value, tt.want) {
+					t.Errorf("stream_options = %#v, want %#v", value, tt.want)
+				}
+
+				if streaming {
+					writeOpenAISSE(t, w,
+						`{"id":"chatcmpl-s","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}`,
+						`{"id":"chatcmpl-s","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+					)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"id":"chatcmpl-n","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+			}))
+			defer server.Close()
+
+			client := NewOpenAIClient(ClientConfig{
+				URL:       server.URL + "/v1",
+				APIKey:    "test-key",
+				Model:     "m",
+				ExtraBody: tt.extraBody,
+			})
+
+			if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages: []Message{{Role: "user", Content: "ping"}},
+			}); err != nil {
+				t.Fatalf("CompletionsWithCtx: %v", err)
+			}
+		})
 	}
 }
 
@@ -2043,4 +2178,219 @@ func TestAnthropicClient_RetryCodesTriggersRetry(t *testing.T) {
 	if got := resp.Content(); got != "success" {
 		t.Errorf("Content() = %q, want %q", got, "success")
 	}
+}
+
+func TestToolCall_EstimatedTokens(t *testing.T) {
+	tests := []struct {
+		name string
+		tc   ToolCall
+		want int
+	}{
+		{
+			name: "empty tool call",
+			tc:   ToolCall{},
+			want: 0,
+		},
+		{
+			name: "short tool call",
+			tc: ToolCall{
+				ID: "call_1",
+				Function: FunctionCall{
+					Name:      "read",
+					Arguments: "{}",
+				},
+			},
+			want: (len("call_1") + len("read") + len("{}")) / 4,
+		},
+		{
+			name: "large tool call arguments",
+			tc: ToolCall{
+				ID: "call_large",
+				Function: FunctionCall{
+					Name:      "file_write",
+					Arguments: strings.Repeat("x", 400),
+				},
+			},
+			want: (len("call_large") + len("file_write") + 400) / 4,
+		},
+		{
+			name: "tool call with extra content",
+			tc: ToolCall{
+				ID: "call_extra",
+				Function: FunctionCall{
+					Name:      "read_file",
+					Arguments: `{"path":"main.go"}`,
+				},
+				ExtraContent: json.RawMessage(`{"google":{"thought_signature":"sig-abc-123"}}`),
+			},
+			want: (len("call_extra") + len("read_file") + len(`{"path":"main.go"}`) + len(`{"google":{"thought_signature":"sig-abc-123"}}`)) / 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.tc.EstimatedTokens()
+			if got != tt.want {
+				t.Errorf("ToolCall.EstimatedTokens() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMessage_EstimatedTokens(t *testing.T) {
+	t.Run("text only message", func(t *testing.T) {
+		m := Message{Role: "user", Content: "hello world"}
+		if got := m.EstimatedTokens(); got != 0 {
+			t.Errorf("EstimatedTokens() = %d, want 0 for text-only message", got)
+		}
+	})
+
+	t.Run("message with tool calls", func(t *testing.T) {
+		m := Message{
+			Role: "assistant",
+			ToolCalls: []ToolCall{
+				{
+					ID: "call_1",
+					Function: FunctionCall{
+						Name:      "file_read",
+						Arguments: `{"path":"main.go"}`,
+					},
+				},
+			},
+		}
+		expected := m.ToolCalls[0].EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected || got == 0 {
+			t.Errorf("EstimatedTokens() = %d, want %d", got, expected)
+		}
+	})
+
+	t.Run("message with reasoning payload and tool calls", func(t *testing.T) {
+		reasoning := ReasoningPayload(strings.Repeat("thinking ", 50))
+		m := Message{
+			Role: "assistant",
+			Native: NativeTurn{
+				Family:  "openai-chat-completions",
+				Payload: reasoning,
+			},
+			ToolCalls: []ToolCall{
+				{
+					ID: "call_1",
+					Function: FunctionCall{
+						Name:      "code_search",
+						Arguments: `{"query":"func Test"}`,
+					},
+				},
+			},
+		}
+		expected := m.Native.EstimatedTokens() + m.ToolCalls[0].EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected {
+			t.Errorf("EstimatedTokens() = %d, want %d", got, expected)
+		}
+	})
+
+	t.Run("anthropic message param with tool use does not double count", func(t *testing.T) {
+		toolUseParam := anthropic.ToolUseBlockParam{
+			ID:    "tool_1",
+			Name:  "file_read",
+			Input: map[string]any{"path": "foo.go"},
+		}
+		p := anthropic.MessageParam{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				{OfToolUse: &toolUseParam},
+			},
+		}
+		m := Message{
+			Role: "assistant",
+			Native: NativeTurn{
+				Family:  "anthropic-messages",
+				Payload: p,
+			},
+			ToolCalls: []ToolCall{
+				{
+					ID: "tool_1",
+					Function: FunctionCall{
+						Name:      "file_read",
+						Arguments: `{"path":"foo.go"}`,
+					},
+				},
+			},
+		}
+		expected := m.Native.EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected {
+			t.Errorf("EstimatedTokens() = %d, want %d (should not double-count)", got, expected)
+		}
+	})
+
+	t.Run("empty anthropic message param falls back to tool calls", func(t *testing.T) {
+		m := Message{
+			Role: "assistant",
+			Native: NativeTurn{
+				Family:  "anthropic-messages",
+				Payload: anthropic.MessageParam{},
+			},
+			ToolCalls: []ToolCall{
+				{
+					ID: "tool_1",
+					Function: FunctionCall{
+						Name:      "file_read",
+						Arguments: `{"path":"foo.go"}`,
+					},
+				},
+			},
+		}
+		expected := m.ToolCalls[0].EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected || got == 0 {
+			t.Errorf("EstimatedTokens() = %d, want %d", got, expected)
+		}
+	})
+
+	t.Run("empty responses items param falls back to tool calls", func(t *testing.T) {
+		m := Message{
+			Role: "assistant",
+			Native: NativeTurn{
+				Family:  "openai-responses",
+				Payload: []responses.ResponseInputItemUnionParam{},
+			},
+			ToolCalls: []ToolCall{
+				{
+					ID: "call_1",
+					Function: FunctionCall{
+						Name:      "file_read",
+						Arguments: `{"path":"foo.go"}`,
+					},
+				},
+			},
+		}
+		expected := m.ToolCalls[0].EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected || got == 0 {
+			t.Errorf("EstimatedTokens() = %d, want %d", got, expected)
+		}
+	})
+
+	t.Run("responses item param with function call does not double count", func(t *testing.T) {
+		p := []responses.ResponseInputItemUnionParam{
+			responses.ResponseInputItemParamOfFunctionCall(`{"path":"foo.go"}`, "call_1", "file_read"),
+		}
+		m := Message{
+			Role: "assistant",
+			Native: NativeTurn{
+				Family:  "openai-responses",
+				Payload: p,
+			},
+			ToolCalls: []ToolCall{
+				{
+					ID: "call_1",
+					Function: FunctionCall{
+						Name:      "file_read",
+						Arguments: `{"path":"foo.go"}`,
+					},
+				},
+			},
+		}
+		expected := m.Native.EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected || got == 0 {
+			t.Errorf("EstimatedTokens() = %d, want %d (should not double-count)", got, expected)
+		}
+	})
 }

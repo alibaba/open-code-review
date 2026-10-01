@@ -39,6 +39,7 @@ func TestCompare(t *testing.T) {
 		before          []model.LlmComment
 		after           []model.LlmComment
 		reviewed        map[string]bool
+		manifest        *RunManifest
 		wantNew         []string
 		wantPersisting  []string
 		wantResolved    []string
@@ -189,6 +190,32 @@ func TestCompare(t *testing.T) {
 			wantResolved:   []string{"./pkg/../pkg/a.go:5"},
 		},
 		{
+			name:           "renamed file keeps the finding persisting",
+			before:         []model.LlmComment{cmt("old/a.go", 5, "bug", "x := 1", "unused")},
+			after:          []model.LlmComment{cmt("new/a.go", 12, "bug", "x := 1", "unused")},
+			manifest:       reviewedManifest(CoverageItem{Path: "new/a.go", OldPath: "old/a.go"}),
+			wantNew:        []string{},
+			wantPersisting: []string{"new/a.go:12"},
+			wantResolved:   []string{},
+		},
+		{
+			name:           "fixed finding in a renamed file is resolved",
+			before:         []model.LlmComment{cmt("old/a.go", 5, "bug", "x := 1", "unused")},
+			manifest:       reviewedManifest(CoverageItem{Path: "new/a.go", OldPath: "old/a.go"}),
+			wantNew:        []string{},
+			wantResolved:   []string{"old/a.go:5"},
+			wantPersisting: []string{},
+		},
+		{
+			name:            "failed rename remains not reviewed",
+			before:          []model.LlmComment{cmt("old/a.go", 5, "bug", "x := 1", "unused")},
+			manifest:        &RunManifest{Coverage: Coverage{Failed: []CoverageItem{{Path: "new/a.go", OldPath: "old/a.go"}}}},
+			wantNew:         []string{},
+			wantPersisting:  []string{},
+			wantResolved:    []string{},
+			wantNotReviewed: []string{"old/a.go:5"},
+		},
+		{
 			name:            "a path-less finding is never claimed as resolved",
 			before:          []model.LlmComment{cmt("", 5, "bug", "x := 1", "unplaceable")},
 			reviewed:        map[string]bool{"a.go": true},
@@ -218,7 +245,15 @@ func TestCompare(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Compare(tt.before, tt.after, tt.reviewed)
+			manifest := tt.manifest
+			if manifest == nil && tt.reviewed != nil {
+				items := make([]CoverageItem, 0, len(tt.reviewed))
+				for path := range tt.reviewed {
+					items = append(items, CoverageItem{Path: path})
+				}
+				manifest = &RunManifest{Coverage: Coverage{Completed: items}}
+			}
+			got := Compare(tt.before, tt.after, manifest)
 			want := map[string][]string{
 				"new":          tt.wantNew,
 				"persisting":   tt.wantPersisting,
@@ -249,6 +284,10 @@ func TestCompare(t *testing.T) {
 			}
 		})
 	}
+}
+
+func reviewedManifest(items ...CoverageItem) *RunManifest {
+	return &RunManifest{Coverage: Coverage{Completed: items}}
 }
 
 // TestCompare_SortedOrderIsStableAcrossInputOrder pins that shuffling the
@@ -290,5 +329,75 @@ func TestCompare_SortBreaksTiesOnSnippet(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("run %d: new = %v, want %v", i, got, want)
 		}
+	}
+}
+
+// TestReviewedPaths pins the partition choice the CLI and the web viewer share.
+// The nil-vs-empty distinction is asserted explicitly: reflect.DeepEqual(nil,
+// map[string]bool{}) is false, and the two mean different things to Compare - a
+// nil map sends every unmatched before-finding to Resolved, an empty one sends
+// them all to NotReviewed.
+func TestReviewedPaths(t *testing.T) {
+	t.Parallel() // pure function: no shared state, no t.Setenv, no temp dirs
+	item := func(path string) CoverageItem { return CoverageItem{ItemID: path, Path: path} }
+	tests := []struct {
+		name     string
+		manifest *RunManifest
+		want     map[string]bool
+		wantNil  bool
+	}{
+		{name: "nil manifest is nil not empty", manifest: nil, wantNil: true},
+		{name: "empty coverage is empty non-nil", manifest: &RunManifest{}, want: map[string]bool{}},
+		{
+			name:     "completed only",
+			manifest: &RunManifest{Coverage: Coverage{Completed: []CoverageItem{item("a.go")}}},
+			want:     map[string]bool{"a.go": true},
+		},
+		{
+			name:     "reused only",
+			manifest: &RunManifest{Coverage: Coverage{Reused: []CoverageItem{item("b.go")}}},
+			want:     map[string]bool{"b.go": true},
+		},
+		{
+			name: "completed and reused union",
+			manifest: &RunManifest{Coverage: Coverage{
+				Completed: []CoverageItem{item("a.go")},
+				Reused:    []CoverageItem{item("b.go")},
+			}},
+			want: map[string]bool{"a.go": true, "b.go": true},
+		},
+		{
+			name: "selected failed waived are excluded",
+			manifest: &RunManifest{Coverage: Coverage{
+				Selected:  []CoverageItem{item("a.go"), item("s.go"), item("f.go"), item("w.go")},
+				Completed: []CoverageItem{item("a.go")},
+				Failed:    []CoverageItem{item("f.go")},
+				Waived:    []CoverageItem{item("w.go")},
+			}},
+			want: map[string]bool{"a.go": true},
+		},
+		{
+			name: "duplicate path across completed and reused collapses",
+			manifest: &RunManifest{Coverage: Coverage{
+				Completed: []CoverageItem{item("a.go")},
+				Reused:    []CoverageItem{item("a.go")},
+			}},
+			want: map[string]bool{"a.go": true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ReviewedPaths(tt.manifest)
+			if tt.wantNil {
+				if got != nil {
+					t.Fatalf("ReviewedPaths = %v, want nil", got)
+				}
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("ReviewedPaths = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

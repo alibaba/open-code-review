@@ -466,6 +466,34 @@ function testRealCursorEntryCarriesTheUnverifiedFlag() {
   );
 }
 
+function testRealKimiEntriesResolveFromTheRepoRoot() {
+  // Guards the layout the Kimi plugin depends on: Kimi's GitHub install makes
+  // the repository root the plugin root, so the manifest must live at the repo
+  // root and its paths must resolve from there down into plugins/.
+  const kimi = PLUGIN_DECLARATIONS.filter((d) => d.host === "Kimi Code");
+  assert.strictEqual(kimi.length, 2);
+  for (const d of kimi) {
+    assert.strictEqual(d.file, ".kimi-plugin/plugin.json");
+    assert.strictEqual(d.base, "plugin-root");
+  }
+  assert.strictEqual(
+    resolveDeclaredPath(
+      ".kimi-plugin/plugin.json",
+      "plugin-root",
+      "./plugins/open-code-review/skills/"
+    ),
+    "plugins/open-code-review/skills"
+  );
+  assert.strictEqual(
+    resolveDeclaredPath(
+      ".kimi-plugin/plugin.json",
+      "plugin-root",
+      "./plugins/open-code-review/kimi-code/commands/"
+    ),
+    "plugins/open-code-review/kimi-code/commands"
+  );
+}
+
 function testCheckPluginDeclarationsCatchesDrift() {
   const specs = [CODEX_SPEC];
   // Someone renamed the tree in the manifest but not on disk (or vice versa).
@@ -803,6 +831,7 @@ function main_() {
   testCheckPluginDeclarationsHappyPath();
   testUnverifiedBaseAlwaysWarnsButNeverBlocks();
   testRealCursorEntryCarriesTheUnverifiedFlag();
+  testRealKimiEntriesResolveFromTheRepoRoot();
   testCheckPluginDeclarationsCatchesDrift();
   testPluginEntriesToleratesMalformedShapes();
   testMarketplaceReadersDoNotThrowOnMalformedInput();

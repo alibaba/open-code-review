@@ -97,7 +97,7 @@ composite action
 | Input | 默认值 | 说明 |
 |---|---|---|
 | `effort` | `''` | 传给 `ocr review --effort` 的评审强度预设：`low`、`medium` 或 `high`（不区分大小写）。留空则沿用 CLI 默认值（已配置的值，否则为 medium）。需要 OCR v1.10.0 或更新版本；在更旧版本上 action 会提前以明确报错失败。 |
-| `max_tokens_budget` | `''` | 传给 `ocr review --max-tokens-budget` 的 token 总量上限（输入 + 输出）。留空或 `'0'` 表示不限。超过上限后停止派发，被跳过的文件记为 `failed(budget)`，已产生的部分结果仍会发布，评审以 0 退出。 |
+| `max_tokens_budget` | `''` | 传给 `ocr review --max-tokens-budget` 的 token 总量上限（输入 + 输出）。留空或 `'0'` 表示不限。每次 LLM 轮次前都会检查：已超出上限的子任务会获得最后一轮来提交发现，不再派发新的子任务，超出预算和被跳过的文件记为 `failed(budget)`，已产生的部分结果仍会发布，评审以 0 退出。 |
 | `llm_reasoning_effort` | `''` | 面向支持 `reasoning_effort` 请求字段的模型（如 GLM-5.x、OpenAI reasoning 模型）的推理深度：`minimal`、`low`、`medium`、`high`、`max`（不区分大小写）。经 `llm_extra_body` 合并进请求体，因此所有已发布的 CLI 版本均可使用；`llm_extra_body` 中显式的 `reasoning_effort` 键优先于此 input。留空（默认）则不发送。仅适用于 OpenAI 兼容协议——Anthropic API 会拒绝未知请求体字段，action 在该协议下会快速失败；Anthropic 的 thinking 控制请改用 `llm_extra_body` 中的显式键。 |
 | `stream_progress` | `'false'` | 设为 `'true'` 时，把 `[ocr]` 实时进度行流入工作流日志（stderr 上的 human audience），而不是在评审结束前保持静默。仅影响展示：stderr 仍会写入文件，供产物上传与评论张贴使用。 |
 
@@ -168,7 +168,7 @@ schema 见[评审规则](../../review-rules/)。
 
 #### 并发
 
-默认 8 个并行子 agent——每个文件组一个。大 PR 上调低，以免触发 LLM provider 速率限制：
+默认 8 个并行子 agent——每个子任务一个。大 PR 上调低，以免触发 LLM provider 速率限制：
 
 ```yaml
 - name: Run OCR review
@@ -377,7 +377,7 @@ script:
 #### 自定义规则与并发
 
 与 GitHub Actions 配方相同的参数——`--rule` 传项目专属规则文件，
-`--concurrency` 限制并行子 agent（默认 8，每个文件组一个）：
+`--concurrency` 限制并行子 agent（默认 8，每个子任务一个）：
 
 ```yaml
 script:
