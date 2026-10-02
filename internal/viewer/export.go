@@ -53,15 +53,20 @@ func ExportSession(out io.Writer, root, encodedRepo, sessionID string) error {
 	if err != nil {
 		return fmt.Errorf("read embedded pager script: %w", err)
 	}
-	// The live-duration ticker is part of the page, so an exported copy has to
-	// carry it too. live.js is harmless on a finished session - it finds no live
-	// elements and stops.
+	// The per-finding agent handoff and the live-duration ticker are part of the
+	// page, so an exported copy has to carry them too. live.js is harmless on a
+	// finished session - it finds no live elements and stops.
+	agentJS, err := assets.ReadFile("static/agent.js")
+	if err != nil {
+		return fmt.Errorf("read embedded agent script: %w", err)
+	}
 	liveJS, err := assets.ReadFile("static/live.js")
 	if err != nil {
 		return fmt.Errorf("read embedded live script: %w", err)
 	}
 	js := append(append(append([]byte(nil), a11y...), '\n'), pagerJS...)
 	js = append(append(js, '\n'), sessionJS...)
+	js = append(append(js, '\n'), agentJS...)
 	js = append(append(js, '\n'), liveJS...)
 
 	tmpl, err := parseTemplate("session.html")

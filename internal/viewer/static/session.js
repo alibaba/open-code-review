@@ -105,6 +105,27 @@ document.querySelectorAll('.response-text').forEach(function(el) {
         }
     }
 
+    // Collapses or expands every per-file comment group at once. A session with
+    // hundreds of findings renders one open group per file, which buries the
+    // page; collapsing gives a scannable index of files and their counts.
+    function initCollapseAll() {
+        var button = document.querySelector('[data-collapse-all]');
+        if (!button) return;
+
+        button.addEventListener('click', function() {
+            var collapsing = button.getAttribute('aria-pressed') !== 'true';
+
+            groups.forEach(function(group) {
+                // Skip a group the filters have hidden: toggling it would leave
+                // its open state out of step with what the user can see.
+                if (!group.hidden) group.open = !collapsing;
+            });
+
+            button.setAttribute('aria-pressed', String(collapsing));
+            button.textContent = collapsing ? 'Expand all' : 'Collapse all';
+        });
+    }
+
     function renderCommentState(state) {
         const visibleCards = new Set(state.visible);
         const matchingCards = new Set(state.filtered);
@@ -313,6 +334,8 @@ document.querySelectorAll('.response-text').forEach(function(el) {
             applyMarkState(card, marks[card.dataset.markId]);
         }
     });
+
+    initCollapseAll();
 
     commentsPager = window.ocrPager({
         rows: cards,

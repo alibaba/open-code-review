@@ -1751,6 +1751,156 @@ nav.breadcrumb a:focus-visible {
     border-style: dashed;
 }
 
+/* ── Fix with agent ──
+   Sits at the end of the existing mark row, so it is pushed right: marking a
+   finding and handing it to an agent are the same intent, and the two action
+   groups should not read as one list of equal peers. */
+.agent-actions {
+    position: relative;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.agent-btn {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    border: 1px solid var(--link);
+    border-radius: 6px;
+    background: transparent;
+    padding: 0.2em 0.7em;
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--link);
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+}
+
+.agent-btn:hover {
+    background: color-mix(in srgb, var(--link) 10%, transparent);
+}
+
+.agent-btn:focus-visible,
+.agent-menu-item:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+
+.agent-btn .chevron-sm svg {
+    width: 10px;
+    height: 10px;
+}
+
+.agent-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 20;
+    min-width: 15rem;
+    display: flex;
+    flex-direction: column;
+    padding: 0.25rem;
+    background: var(--surface);
+    border: 1px solid var(--border, #d0d7de);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.agent-menu[hidden] { display: none; }
+
+.agent-menu-item {
+    appearance: none;
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    padding: 0.4em 0.6em;
+    font: inherit;
+    font-size: 0.78rem;
+    color: var(--text-strong);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.agent-menu-item:hover {
+    background: var(--surface-inset);
+    color: var(--link);
+}
+
+.agent-menu-sep {
+    height: 1px;
+    margin: 0.25rem 0.2rem;
+    background: var(--border, #d0d7de);
+}
+
+.agent-copied {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+/* ── Collapse all ──
+   The heading is a flex row so the control sits opposite the title rather than
+   on a line of its own. */
+.comments-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.collapse-all-btn {
+    appearance: none;
+    border: 1px solid var(--border, #d0d7de);
+    border-radius: 6px;
+    background: transparent;
+    padding: 0.2em 0.7em;
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: color var(--transition), border-color var(--transition);
+}
+
+.collapse-all-btn:hover {
+    border-color: var(--link);
+    color: var(--text-strong);
+}
+
+.collapse-all-btn:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+
+/* The menu lists targets app -> CLI -> extension, so each group needs a label
+   rather than relying on the item order alone. */
+.agent-menu-label {
+    padding: 0.5em 0.6em 0.2em;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+@media (max-width: 640px) {
+    /* The row would otherwise wrap the agent button under the mark buttons and
+       let the absolutely positioned menu overflow the card. */
+    .comment-actions { flex-wrap: wrap; }
+    .agent-actions { margin-left: 0; width: 100%; }
+    .agent-btn { width: 100%; justify-content: center; }
+    .agent-menu { right: auto; left: 0; width: 100%; }
+}
+
 /* ── Repositories Page ── */
 .repos-page .page-heading {
     align-items: center;
