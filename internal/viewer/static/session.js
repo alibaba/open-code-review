@@ -109,11 +109,11 @@ document.querySelectorAll('.response-text').forEach(function(el) {
     // hundreds of findings renders one open group per file, which buries the
     // page; collapsing gives a scannable index of files and their counts.
     function initCollapseAll() {
-        var button = document.querySelector('[data-collapse-all]');
+        const button = document.querySelector('[data-collapse-all]');
         if (!button) return;
 
         button.addEventListener('click', function() {
-            var collapsing = button.getAttribute('aria-pressed') !== 'true';
+            const collapsing = button.getAttribute('aria-pressed') !== 'true';
 
             groups.forEach(function(group) {
                 // Skip a group the filters have hidden: toggling it would leave

@@ -91,15 +91,25 @@
         watchForCompletion();
     }
 
-    // The repositories page has no session rows, so it polls for a different
-    // transition: a run that was not running when the page loaded has started.
-    // Reloading then is what puts the badge and the new session on screen.
+    // The repositories page has no session rows to tick, so it polls for a
+    // change in whether any repository is running at all - in either direction.
+    //
+    // Both directions matter, and the idle one matters most: opening the viewer
+    // and only then starting a review is the ordinary workflow, so a page that
+    // only noticed runs *ending* would never show the badge for the run the
+    // user just launched. The state is therefore captured once up front and
+    // compared against the server on every poll, rather than gated on a marker
+    // that only exists in the active case.
     function watchRepoActivity() {
-        const marker = document.querySelector("[data-repo-active]");
-        if (!marker) return;
-        if (document.hidden) return;
+        if (!document.querySelector(".repos-page")) return;
+
+        let wasActive = hasActiveRepo();
 
         setInterval(async () => {
+            // Checked per tick, not once at setup: a page opened in a background
+            // tab reports document.hidden at setup, and returning there would
+            // mean polling never begins at all - the tab that needs it most is
+            // exactly the one that would never start.
             if (document.hidden) return;
             try {
                 const res = await fetch(window.location.href, {
@@ -107,8 +117,11 @@
                     cache: "no-store",
                 });
                 if (!res.ok) return;
-                const html = await res.text();
-                if (hasActiveRepo(html) !== !!marker) window.location.reload();
+                const isActive = hasActiveRepo(await res.text());
+                if (isActive !== wasActive) {
+                    wasActive = isActive;
+                    window.location.reload();
+                }
             } catch {
                 /* try again next tick */
             }
@@ -116,6 +129,7 @@
     }
 
     function hasActiveRepo(html) {
+        if (html === undefined) return !!document.querySelector("[data-repo-active]");
         const doc = new DOMParser().parseFromString(html, "text/html");
         return !!doc.querySelector("[data-repo-active]");
     }

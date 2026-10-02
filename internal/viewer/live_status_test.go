@@ -272,6 +272,34 @@ func mustSessionsDir(t *testing.T) string {
 	return dir
 }
 
+// The repositories page must notice a run *starting*, not only one ending.
+// Opening the viewer and only then launching a review is the ordinary workflow,
+// so a page gated on a currently-present active marker would never show the
+// badge for the run the user just started.
+func TestLiveScript_WatchesForRunsStarting(t *testing.T) {
+	src, err := assets.ReadFile("static/live.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(src)
+
+	// Gating on an existing marker is the bug: when no repo is active there is
+	// no marker, so the poller would never start and idle -> active is invisible.
+	if strings.Contains(js, "if (!marker) return;") {
+		t.Error("watchRepoActivity returns early without a marker, so it can never detect a run starting")
+	}
+	// The comparison has to be against a captured initial state, not against
+	// the marker element, which is truthy on every code path that reaches it.
+	if !strings.Contains(js, "wasActive") {
+		t.Error("watchRepoActivity does not track the previous state, so only one direction is detected")
+	}
+	// A tab opened in the background reports document.hidden at setup time;
+	// returning there would mean polling never begins.
+	if strings.Contains(js, "if (document.hidden) return;\n\n        setInterval") {
+		t.Error("watchRepoActivity checks document.hidden at setup, so a background tab never starts polling")
+	}
+}
+
 func TestReposPage_NoActiveSessionWhenFinished(t *testing.T) {
 	root := t.TempDir()
 	repoDir := filepath.Join(root, "repo")

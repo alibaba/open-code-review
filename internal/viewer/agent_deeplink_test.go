@@ -38,6 +38,25 @@ func TestAgentScript_DoesNotRedispatchClicks(t *testing.T) {
 	}
 }
 
+// A document-level listener per finding would mean a session with hundreds of
+// findings registers hundreds of them, all of which run on every click anywhere
+// in the viewer. The dismiss handler must be installed once for the whole page.
+func TestAgentScript_DismissListenerIsNotPerFinding(t *testing.T) {
+	src, err := assets.ReadFile("static/agent.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(src)
+
+	if strings.Count(js, `document.addEventListener("click"`) > 1 {
+		t.Errorf("agent.js registers %d document click listeners; it must register exactly one",
+			strings.Count(js, `document.addEventListener("click"`))
+	}
+	if !strings.Contains(js, "bindDismiss") {
+		t.Error("agent.js no longer installs the dismiss listener once per page")
+	}
+}
+
 // A link whose shipped href is "#" would scroll the page if the script ever
 // failed to replace it, and would look like a working link while doing nothing.
 func TestAgentMenu_PlaceholderHrefIsInert(t *testing.T) {

@@ -52,7 +52,7 @@ func holdActiveLock(sessionFilePath string) (*activeLock, error) {
 		f.Close()
 		return nil, err
 	}
-	return &activeLock{file: f, path: path}, nil
+	return &activeLock{file: f}, nil
 }
 
 // SessionIsActive reports whether a run currently holds the lock for the
@@ -84,7 +84,6 @@ func SessionIsActive(sessionFilePath string) bool {
 // activeLock keeps a session's liveness sidecar locked for the run's lifetime.
 type activeLock struct {
 	file *os.File
-	path string
 }
 
 // Close releases the lock. The sidecar is intentionally left in place; see the

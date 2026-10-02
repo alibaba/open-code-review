@@ -50,7 +50,40 @@
         }
         lines.push("");
         lines.push("Make the change in the repository above. Keep it minimal and match the surrounding style.");
-        return lines.join("\n").slice(0, MAX_PROMPT);
+        return clampPrompt(lines.join("\n"));
+    }
+
+    // Cuts an over-long prompt to MAX_PROMPT without producing malformed text.
+    //
+    // A plain slice does damage in two ways that matter to the agent receiving
+    // it: it can land inside a fenced code block and leave the fence unclosed,
+    // so the rest of the prompt renders as code; and it can land between the
+    // halves of a surrogate pair, so the last character is invalid UTF-16 and
+    // decodes to a replacement character.
+    //
+    // So the cut is walked back to a line boundary, never between a high and low
+    // surrogate, and an unbalanced fence is closed.
+    function clampPrompt(text) {
+        if (text.length <= MAX_PROMPT) return text;
+
+        let cut = MAX_PROMPT;
+        // Never split a surrogate pair: a high surrogate at the cut point means
+        // its partner was cut off.
+        if (cut > 0 && isHighSurrogate(text.charCodeAt(cut - 1))) cut--;
+        // Prefer a line boundary so the prompt stays readable and a fence is
+        // never cut in half.
+        const lastNewline = text.lastIndexOf("\n", cut);
+        if (lastNewline > text.length * 0.5) cut = lastNewline;
+
+        let out = text.slice(0, cut).trimEnd();
+        // An odd number of fences means the cut landed inside a block.
+        if ((out.match(/```/g) || []).length % 2 !== 0) out += "\n```";
+        out += "\n\n[truncated]";
+        return out;
+    }
+
+    function isHighSurrogate(code) {
+        return code >= 0xd800 && code <= 0xdbff;
     }
 
     function lineRange(ctx) {
@@ -229,10 +262,11 @@
             });
         }
 
-        // A click anywhere else, or Escape, dismisses the menu.
-        document.addEventListener("click", (e) => {
-            if (!root.contains(e.target)) close();
-        });
+        // A click anywhere else, or Escape, dismisses the menu. Both are
+        // handled by one delegated listener installed once for the whole page,
+        // not one per finding: a session with hundreds of findings would
+        // otherwise register hundreds of document-level listeners, all of which
+        // run on every click anywhere in the viewer.
         root.addEventListener("keydown", (e) => {
             if (e.key === "Escape") {
                 close();
@@ -241,7 +275,33 @@
         });
     }
 
+    // One document-level listener for every menu on the page, installed on
+    // first use and reused thereafter.
+    let dismissBound = false;
+
+    function bindDismiss() {
+        if (dismissBound) return;
+        dismissBound = true;
+        document.addEventListener("click", (e) => {
+            // Any click outside an open menu closes it. Only menus that are
+            // actually open are touched, so a click on the page cannot walk
+            // hundreds of closed cards.
+            document.querySelectorAll('[data-agent-actions] .agent-menu:not([hidden])').forEach((menu) => {
+                const root = menu.closest("[data-agent-actions]");
+                if (root && !root.contains(e.target)) closeMenu(root);
+            });
+        });
+    }
+
+    function closeMenu(root) {
+        const menu = root.querySelector(".agent-menu");
+        const toggle = root.querySelector("[data-agent-menu-toggle]");
+        if (menu) menu.hidden = true;
+        if (toggle) toggle.setAttribute("aria-expanded", "false");
+    }
+
     function initAll() {
+        bindDismiss();
         document.querySelectorAll("[data-agent-actions]").forEach(initActions);
     }
 
