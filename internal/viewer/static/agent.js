@@ -165,11 +165,37 @@
         const toggle = root.querySelector("[data-agent-menu-toggle]");
         if (!menu || !toggle) return;
 
+        const links = Array.from(menu.querySelectorAll("[data-agent-open]"));
+
+        // Build each anchor's real href as the menu opens.
+        //
+        // The href has to be in place before the click is dispatched, and the
+        // browser has to be the one performing the navigation. Both matter: an
+        // anchor whose href is assigned from inside its own click handler needs
+        // either a re-dispatched click or a manual location change, and both of
+        // those run outside the transient user activation that every current
+        // browser requires before it will hand an external protocol
+        // (claude-cli:, codex:, cursor:) to the desktop. The result is a click
+        // that does nothing at all, with no error to show for it.
+        //
+        // So the URL is built here, while the menu is being opened by a real
+        // click, and the click handler below only closes the menu - the browser
+        // follows the href itself, carrying the user's gesture with it.
+        const buildLinks = () => {
+            const ctx = readContext(root);
+            const prompt = buildPrompt(ctx);
+            links.forEach((item) => {
+                const build = TARGETS[item.dataset.agentOpen];
+                if (build) item.href = build(prompt, ctx);
+            });
+        };
+
         const close = () => {
             menu.hidden = true;
             toggle.setAttribute("aria-expanded", "false");
         };
         const open = () => {
+            buildLinks();
             menu.hidden = false;
             toggle.setAttribute("aria-expanded", "true");
         };
@@ -179,18 +205,11 @@
             menu.hidden ? open() : close();
         });
 
-        menu.querySelectorAll("[data-agent-open]").forEach((item) => {
-            item.addEventListener("click", (e) => {
-                e.preventDefault();
-                const build = TARGETS[item.dataset.agentOpen];
-                if (!build) return;
-                const ctx = readContext(root);
-                item.href = build(buildPrompt(ctx), ctx);
-                close();
-                // Let the href assignment above land before the browser acts on
-                // the click; without the defer some engines read the old value.
-                setTimeout(() => item.click(), 0);
-            });
+        // No preventDefault here: the default action IS the handoff. Keyboard
+        // activation lands on the anchor as a real click too, so it needs
+        // nothing extra.
+        links.forEach((item) => {
+            item.addEventListener("click", close);
         });
 
         const copyBtn = root.querySelector("[data-agent-copy]");

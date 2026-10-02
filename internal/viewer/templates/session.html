@@ -297,13 +297,18 @@
     </button>
     <div class="agent-menu" role="menu" hidden>
         <div class="agent-menu-label">App</div>
-        <a class="agent-menu-item" role="menuitem" data-agent-open="claude-app" href="#">Claude Code</a>
-        <a class="agent-menu-item" role="menuitem" data-agent-open="codex" href="#">Codex</a>
-        <a class="agent-menu-item" role="menuitem" data-agent-open="cursor" href="#">Cursor</a>
+        {{/* href is a placeholder that agent.js overwrites with the real deep
+             link when the menu opens. An anchor without href is not focusable,
+             so the attribute stays - the value just must never be followed as
+             shipped, hence the inert scheme rather than "#", which would scroll
+             the page if it ever were. */}}
+        <a class="agent-menu-item" role="menuitem" data-agent-open="claude-app" href="about:blank">Claude Code</a>
+        <a class="agent-menu-item" role="menuitem" data-agent-open="codex" href="about:blank">Codex</a>
+        <a class="agent-menu-item" role="menuitem" data-agent-open="cursor" href="about:blank">Cursor</a>
         <div class="agent-menu-sep" role="separator"></div>
         <div class="agent-menu-label">Editor extension</div>
-        <a class="agent-menu-item" role="menuitem" data-agent-open="claude-vscode" href="#">Claude Code (VS Code)</a>
-        <a class="agent-menu-item" role="menuitem" data-agent-open="vscode-agents" href="#">VS Code agent</a>
+        <a class="agent-menu-item" role="menuitem" data-agent-open="claude-vscode" href="about:blank">Claude Code (VS Code)</a>
+        <a class="agent-menu-item" role="menuitem" data-agent-open="vscode-agents" href="about:blank">VS Code agent</a>
         <div class="agent-menu-sep" role="separator"></div>
         <button type="button" class="agent-menu-item" role="menuitem" data-agent-copy>Copy prompt for agent</button>
     </div>
