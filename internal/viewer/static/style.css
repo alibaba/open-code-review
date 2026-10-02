@@ -1924,6 +1924,70 @@ nav.breadcrumb a:focus-visible {
     font-weight: 500;
 }
 
+/* ── Live run status ──
+   A running review is the one state the page keeps changing under the user, so
+   it gets a pulsing dot in addition to the word. The pulse is suppressed under
+   prefers-reduced-motion, where the colour alone carries the meaning. */
+.status-running {
+    color: var(--link);
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.status-running::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: ocr-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ocr-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .status-running::before { animation: none; }
+}
+
+/* The sessions table has no .meta wrapper, so the cell text is styled here. */
+.session-status {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.session-status.status-running { color: var(--link); }
+.session-status.status-aborted { color: var(--badge-duration-fg); }
+.session-status.status-legacy { color: var(--text-muted); font-weight: 500; }
+.session-status.status-complete { color: var(--link); }
+.session-status.status-failed { color: var(--danger); }
+
+.repo-active {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--link);
+    font-weight: 600;
+}
+
+.repo-active .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: ocr-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .repo-active .status-dot { animation: none; }
+}
+
+.repo-idle { color: var(--text-muted); }
+
 /* ── Pagination (shared) ── */
 /* The repositories and sessions pages drive one pager markup, so its rules
    are unscoped; only the .pagination, .page-numbers, .page-step,

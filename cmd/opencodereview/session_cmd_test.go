@@ -376,6 +376,16 @@ func TestSessionDisplayDoesNotInferLegacyComplete(t *testing.T) {
 	}
 }
 
+// A run in progress has written no session_end, so Aborted is also true for it.
+// Reporting "aborted" for a live review is the one answer that cannot be true
+// yet, so Running has to win.
+func TestDescribeStatus_RunningBeatsAborted(t *testing.T) {
+	summary := session.Summary{Running: true, Aborted: true}
+	if got := describeStatus(summary); got != "running" {
+		t.Fatalf("status = %q, want %q", got, "running")
+	}
+}
+
 // newCompareSession records one session with the given findings and returns it.
 func newCompareSession(t *testing.T, repoDir string, opts session.SessionOptions, comments []model.LlmComment) *session.SessionHistory {
 	t.Helper()

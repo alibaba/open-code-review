@@ -769,6 +769,12 @@ func describeFiles(s session.Summary) string {
 }
 
 func describeStatus(s session.Summary) string {
+	// Checked before Aborted: a run in progress has no session_end either, so
+	// Aborted is true for it too, and reporting "aborted" for a live review is
+	// the one answer that cannot be true yet.
+	if s.Running {
+		return "running"
+	}
 	if s.Aborted {
 		return "aborted"
 	}
