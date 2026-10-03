@@ -610,6 +610,30 @@ function testLlmTimeoutInputDefault() {
   assert.strictEqual(INPUTS.llm_timeout.default, "300", "llm_timeout default must match the CLI's 5-minute timeout");
 }
 
+function testReviewStepTimeoutScopedToInstallationTokens() {
+  const marker = "    - name: Run OpenCodeReview\n";
+  const start = ACTION_TEXT.indexOf(marker);
+  assert.ok(start >= 0, "action.yml must retain the Run OpenCodeReview step");
+  const body = ACTION_TEXT.slice(start + marker.length);
+  const nextStep = body.indexOf("\n    - name: ");
+  const block = nextStep >= 0 ? body.slice(0, nextStep) : body;
+  const timeout = block.match(/^      timeout-minutes:\s*\$\{\{\s*(.+?)\s*\}\}\s*$/m);
+  assert.ok(timeout, "Run OpenCodeReview must bound its own wall clock");
+  const expression = timeout[1];
+  assert.match(
+    expression,
+    /startsWith\(inputs\.github_token,\s*'ghs_'\)/,
+    "the cap must key off GitHub's installation-token format"
+  );
+  assert.match(
+    expression,
+    /inputs\.github_token\s*!=\s*github\.token/,
+    "the default token must stay exempt because Actions keeps it valid for the job"
+  );
+  assert.match(expression, /\b60\b/, "installation tokens must be capped at the one-hour lifetime");
+  assert.match(expression, /\b360\b/, "every other token must keep the longer bound");
+}
+
 function testReviewTimeoutValidationAcceptsBoundaries() {
   for (const value of ["1", "10", "120"]) assertValidation(value, true);
 }
@@ -1943,6 +1967,11 @@ function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
   );
   assert.match(
     EXAMPLE_README_TEXT,
+    /installation tokens?[^.]*one hour/i,
+    "GitHub Actions README must document the installation-token review cap"
+  );
+  assert.match(
+    EXAMPLE_README_TEXT,
     /ocr_version[^\n]*1\.9\.6/i,
     "GitHub Actions README must document the minimum compatible OCR version"
   );
@@ -1960,6 +1989,7 @@ function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
 const TESTS = [
   ["review_task_timeout names and describes the CLI task deadline", testReviewTaskTimeoutInputNameAndScope],
   ["llm_timeout defaults to the CLI's 5-minute timeout", testLlmTimeoutInputDefault],
+  ["the review step timeout is scoped to installation tokens", testReviewStepTimeoutScopedToInstallationTokens],
   ["review_task_timeout accepts 1/10/120", testReviewTimeoutValidationAcceptsBoundaries],
   ["review_task_timeout rejects malformed values", testReviewTimeoutValidationRejectsMalformedValues],
   ["review_task_timeout validation runs before NPM install", testValidationPrecedesNpmInstall],

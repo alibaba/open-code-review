@@ -209,6 +209,14 @@ The task and request timeouts are independent:
     llm_timeout: '900'
 ```
 
+The action also bounds the review step itself: 360 minutes normally, and 60 when
+`github_token` is a GitHub App installation token (`ghs_`). Installation tokens
+expire one hour after creation, and "Post review comments" reuses the same token
+after the review, so a run that outlived the hour could never publish and is
+stopped early instead. The default `github.token` is a `ghs_` token too, but
+Actions keeps it valid for the whole job, so it keeps the 360-minute bound; a PAT
+or another custom token is not tied to the hour and keeps it as well.
+
 ### Control review effort and token budget
 
 | Input | Default | Description |
