@@ -196,6 +196,10 @@ from the diff hunk header `@@ -x,y +m,n @@` — typically `m-50` to
 Read the diff for one or more *other* files in the same change set —
 useful when a comment hinges on whether a related file was updated.
 
+Every read is **bounded**: one result never exceeds the run's read budget.
+Whatever falls outside that budget is named in the result, never silently
+cut, so a bounded read is never mistaken for the whole change.
+
 ### Schema
 
 ```json
@@ -207,10 +211,19 @@ useful when a comment hinges on whether a related file was updated.
 }
 ```
 
+| Field | Meaning |
+|---|---|
+| `chunk_id` | Exactly one chunk, addressed by the id the manifest gave it. |
+| `path` | One file's **chunk index** — ids, line ranges and token cost, no content. This is how you page through a file whose rows the manifest could not afford to list. |
+| `path_array` | The chunks of several files, in order, up to the read budget. |
+| `max_tokens` | Lower the ceiling for this call. It can only *lower* the run's read budget, never raise it. |
+
+`chunk_id`, then `path`, then `path_array`: the first applicable shape wins.
+
 ### Output
 
 ```
-==== FILE: src/api/handler.go ====
+==== CHUNK c3f9a1b20e41 FILE: src/api/handler.go LINES: 1-84 TOKENS: 712 ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
 @@ -10,1 +10,2 @@
@@ -218,16 +231,52 @@ useful when a comment hinges on whether a related file was updated.
 + new line 1
 + new line 2
 
-==== FILE: src/db/queries.go ====
-@@ -5,1 +5,1 @@
-- query := "SELECT *"
-+ query := "SELECT id"
+[context read bounded] 3 chunk(s) served, 5 not served within the 3200-token read budget. Not served: c1b2..., and 4 more. The diff is NOT fully read; fetch the rest with file_read_diff {"chunk_id": "..."}.
 ```
 
 If a path isn't in the change set, that entry is silently omitted. If
 **none** of the requested paths are in the change set the tool returns
 `Error: diff not found for the requested paths`; an empty `path_array`
 returns `Error: no files found`.
+
+### `<context_manifest>`
+
+A change too large to inline does not arrive as a diff. It arrives as a
+bounded index — one row per **chunk** of context, each with a stable id, its
+line range and its token cost:
+
+```
+<context_manifest chunk_count="7" file_count="2" pack_count="2" chunk_budget="3200">
+  <file path="src/api/handler.go" chunks="4" tokens="2410">
+    <chunk id="c3f9a1b20e41" kind="hunk" part="1/4" lines="1-84" tokens="712" hunk="@@ -10,1 +10,2 @@"/>
+    ...
+  </file>
+</context_manifest>
+```
+
+Chunk ids are derived from the path, line range and content, so the same
+change always produces the same ids. Chunks are cut at diff hunk boundaries;
+a single hunk larger than the budget is cut into overlapping line windows, so
+no line of the change is ever left unreadable.
+
+Every chunk is either read or declared. What you deliberately skip goes in
+`task_done`:
+
+```json
+{
+  "name": "task_done",
+  "input": {
+    "state": "DONE",
+    "skipped_chunks": [
+      { "chunk_id": "c3f9a1b20e41", "reason": "generated code" }
+    ]
+  }
+}
+```
+
+A chunk you neither read nor declared is reported as *uninspected* at the end
+of the run. Reading a chunk again is allowed and recorded as a refetch, so a
+second look is visible rather than free.
 
 ## `file_find`
 

@@ -79,6 +79,12 @@ type TraceSummary struct {
 	CacheWriteTokens  int64
 	Duration          time.Duration
 	SessionID         string
+	// ContextChunks is the number of distinct review-context chunks the run
+	// sharded, and ContextReceipts how many large tool results were replaced by
+	// a receipt before leaving the process. Printed only when the run actually
+	// sharded, so a run that never did keeps its previous summary line.
+	ContextChunks   int64
+	ContextReceipts int64
 }
 
 // PrintTraceSummary prints a one-line summary of the review to stdout.
@@ -95,6 +101,10 @@ func PrintTraceSummary(s TraceSummary) {
 	} else {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Summary: %d file(s) reviewed, %d comment(s), ~%d token(s) used, %s elapsed\n",
 			s.FilesReviewed, s.CommentsGenerated, s.TotalTokens, elapsed)
+	}
+	if s.ContextChunks > 0 || s.ContextReceipts > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Context: %d chunk(s), %d receipt(s) replacing re-sent payloads\n",
+			s.ContextChunks, s.ContextReceipts)
 	}
 	if s.SessionID != "" {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Session: %s\n", s.SessionID)

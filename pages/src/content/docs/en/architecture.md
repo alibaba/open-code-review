@@ -209,6 +209,97 @@ obvious issues are found. Rounds stop early when a round adds no new
 findings, when the confirmed-comment cap is reached, or when the
 aggregate token budget (`--max-tokens-budget`) is exhausted.
 
+## Context sharding and ephemeral context
+
+A change set that does not fit one request is delivered in bounded pieces
+rather than sent whole. Two mechanisms do this, and they address two
+different costs.
+
+### Sharding — bounded units of context
+
+The first user message of `MAIN_TASK` carries the change. Below the
+request budget it carries it inline, exactly as it always has. Above it,
+the diff is replaced by a **`<context_manifest>`**: one row per *chunk* of
+context, each with a stable id, line range and token cost, and no content.
+
+A chunk is cut hierarchically and never lossy:
+
+| Kind | When | Cut at |
+|---|---|---|
+| `file` | the file fits the budget | nothing — the whole file |
+| `hunk` | the file does not | diff hunk boundaries, greedily packed |
+| `window` | a single hunk does not | bounded line windows, overlapping |
+
+A window that cannot shrink — one source line whose own token count
+exceeds the budget — is served whole and flagged `oversized`. It is the
+one case the bound cannot hold, and it is reported rather than truncated.
+
+The budget is derived, not chosen:
+
+```
+chunk_budget = request_limit - fixed_overhead - conversation_reserve - output_reserve
+```
+
+`fixed_overhead` is **measured** by rendering the prompt with an empty
+context, so a template edit moves the number. `request_limit` is the
+provider-aware prompt ceiling. Nothing here is a constant that can drift
+away from configuration.
+
+The model reads chunks on demand through `file_read_diff`, which is
+bounded the same way and names whatever it did not serve. Coverage is
+tracked per chunk: read, declared skipped with a cause, or uninspected —
+the last of which is reported as a warning at the end of the run. An
+uninspected chunk is a fact about coverage, not a failure: the model
+chooses the order it reads in and may legitimately stop on a round budget.
+
+When the fixed overhead alone exhausts the request limit, sharding cannot
+help — a chunk needs room too — so the diff is inlined unchanged and the
+run reports why. Never dropping content wins over bounded delivery.
+
+### Ephemeral context — sent once, then receipted
+
+The main loop re-sends its whole conversation on every round, so a chunk
+that was read in round *R* stays in every request after it. Prompt caches
+make the repeat cheap, but not free, and replay is not a safety mechanism.
+
+So a tool result above the context threshold is **projected out** of the
+request the round after the model has answered with it, and replaced by a
+compact receipt naming what it stood for:
+
+```
+[context receipt] ~712 tokens were fetched previously; raw content
+omitted to keep this request bounded (call call_1, sent 2 times).
+Re-issue the same tool call if you need this content again.
+```
+
+The local conversation is never rewritten: async memory compression still
+summarizes the history the run actually had, and a resumed or inspected
+session still shows what was read. Re-reading a chunk is always possible
+and always recorded as a refetch.
+
+The same reasoning applies to the review filter, which after this change
+receives only the chunks its candidate comments point at rather than the
+whole change set again.
+
+### Observability
+
+Every run reports its context accounting, in `--format json` under
+`context`, in the trace summary, and in telemetry events:
+
+| Field | Meaning |
+|---|---|
+| `unique_context_chunks` | distinct chunks the manifest offered |
+| `chunk_fetch_count` | chunk reads served |
+| `chunk_refetch_count` | reads beyond the first for a chunk |
+| `raw_context_tokens_sent` | tool-result tokens sent raw, first time |
+| `raw_context_resend_tokens` | chunk content read more than once (0 on a nominal run) |
+| `context_receipts` | payloads replaced by a receipt before leaving the process |
+| `max_estimated_request_tokens` | largest estimated input size of a request |
+
+These are the tool's own estimates of what it handed to the client. They
+are **not** provider-reported usage, which is reported separately as
+`input_tokens`, and the two are never added together.
+
 ## Memory compression
 
 A long tool-use loop will eventually overflow the context window. OCR

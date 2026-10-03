@@ -326,6 +326,7 @@ Top-level fields:
 | `comments` | Always present, possibly empty. Per-comment fields are the ones in the example above. |
 | `warnings` | Optional. Present when one or more sub-agents failed; each entry describes the affected file and the error. |
 | `session_id` | Optional. Present on persisted review runs; pass this to `ocr review --resume <session-id>` when retrying compatible range or commit reviews. |
+| `context` | Optional. `unique_context_chunks`, `chunk_fetch_count`, `chunk_refetch_count`, `raw_context_tokens_sent`, `raw_context_resend_tokens`, `context_receipts`, `max_estimated_request_tokens`, `last_estimated_request_tokens`. These are estimates of what the tool handed to the client — not provider-reported usage, which is in `summary.input_tokens`. |
 | `resume` | Optional. Present on resumed runs with `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, and `current_model`. |
 
 When no files were eligible for review, JSON mode emits a `skipped`

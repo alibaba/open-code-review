@@ -775,6 +775,9 @@ type ResultProvider interface {
 	TotalTokensUsed() int64
 	TotalCacheReadTokens() int64
 	TotalCacheWriteTokens() int64
+	// ContextStats returns the review-context accounting: chunks offered,
+	// reads served, raw tokens sent, payloads replaced by a receipt.
+	ContextStats() llmloop.RunContextStats
 	Warnings() []agent.AgentWarning
 	// ProjectSummary is the markdown project-level summary produced by
 	// scan's PROJECT_SUMMARY_TASK. Empty for review mode and for scans
@@ -868,6 +871,8 @@ func emitRunResult(
 			CacheWriteTokens:  ag.TotalCacheWriteTokens(),
 			Duration:          duration,
 			SessionID:         ag.SessionID(),
+			ContextChunks:     ag.ContextStats().UniqueContextChunks,
+			ContextReceipts:   ag.ContextStats().ContextReceipts,
 		})
 	}
 
@@ -883,7 +888,7 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, ag.ContextStats())
 	}
 	if outputFormat == "sarif" {
 		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)

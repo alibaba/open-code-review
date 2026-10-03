@@ -279,6 +279,41 @@ type jsonSummary struct {
 	BudgetExceeded   bool   `json:"budget_exceeded,omitempty"`
 }
 
+// jsonContextStats is the machine-readable form of llmloop.RunContextStats. It
+// answers, for one run: how many distinct context units existed, how many reads
+// served them, how many of those were repeats, and how much raw content left
+// the process - plus the same count for content replaced by a receipt rather
+// than replayed.
+type jsonContextStats struct {
+	UniqueContextChunks        int64 `json:"unique_context_chunks"`
+	ChunkFetchCount            int64 `json:"chunk_fetch_count"`
+	ChunkRefetchCount          int64 `json:"chunk_refetch_count"`
+	RawContextTokensSent       int64 `json:"raw_context_tokens_sent"`
+	RawContextResendTokens     int64 `json:"raw_context_resend_tokens"`
+	ContextReceipts            int64 `json:"context_receipts"`
+	MaxEstimatedRequestTokens  int64 `json:"max_estimated_request_tokens"`
+	LastEstimatedRequestTokens int64 `json:"last_estimated_request_tokens"`
+}
+
+// newJSONContextStats converts the run accounting, returning nil when the run
+// sharded nothing and replaced nothing - there is no such thing as a context
+// report with nothing in it.
+func newJSONContextStats(st llmloop.RunContextStats) *jsonContextStats {
+	if st.UniqueContextChunks == 0 && st.ContextReceipts == 0 {
+		return nil
+	}
+	return &jsonContextStats{
+		UniqueContextChunks:        st.UniqueContextChunks,
+		ChunkFetchCount:            st.ChunkFetchCount,
+		ChunkRefetchCount:          st.ChunkRefetchCount,
+		RawContextTokensSent:       st.RawContextTokensSent,
+		RawContextResendTokens:     st.RawContextResendTokens,
+		ContextReceipts:            st.ContextReceipts,
+		MaxEstimatedRequestTokens:  st.MaxEstimatedRequestTokens,
+		LastEstimatedRequestTokens: st.LastEstimatedRequestTokens,
+	}
+}
+
 type jsonToolCalls struct {
 	Total          int64                       `json:"total"`
 	ByTool         map[string]int64            `json:"by_tool"`
@@ -330,6 +365,11 @@ type jsonOutput struct {
 	Resume         *agent.ResumeInfo     `json:"resume,omitempty"`
 	SessionID      string                `json:"session_id,omitempty"`
 	Manifest       *session.RunManifest  `json:"manifest,omitempty"`
+	// Context is the review-context accounting: how the change was sharded,
+	// how much raw content was actually sent, and what was replaced by a
+	// receipt. Present only when the run sharded or issued receipts, so a run
+	// that did neither emits the same JSON as before.
+	Context *jsonContextStats `json:"context,omitempty"`
 	// RetryReport is the frozen LLM retry report (ocr.llm-retry-report/v1).
 	// Reuses llm.RetryReport's own field/tag definitions rather than mirroring
 	// them here, and sits last with omitempty so a first-try-success run emits
@@ -356,7 +396,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, toolFailures []llmloop.ToolFailureDetail,
 	traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
-	retryReport *llm.RetryReport, groups []agent.FileGroupInfo) error {
+	retryReport *llm.RetryReport, groups []agent.FileGroupInfo, contextStats llmloop.RunContextStats) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	payload := jsonOutput{
 		Status:   "success",
@@ -380,6 +420,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		SessionID:      sessionID,
 		Manifest:       manifest,
 		RetryReport:    retryReport,
+		Context:        newJSONContextStats(contextStats),
 	}
 	payload.ToolCalls = newJSONToolCalls(toolCalls, toolFailures)
 	if manifest != nil {

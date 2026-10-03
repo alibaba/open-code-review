@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/chunk"
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
@@ -202,6 +203,13 @@ type Agent struct {
 	// and consumed by finalizeManifest to fill the manifest input/repository.
 	inputResolution    diff.InputResolution
 	repoRemoteIdentity string
+
+	// chunks holds the run's review context as bounded, identified units. It
+	// is created in New and shared by every group: groups are dispatched
+	// concurrently, and chunk identity is content-derived, so two groups never
+	// address the same unit. Nil coverage accounting is the normal case - a
+	// run whose groups all fit the budget never registers a chunk.
+	chunks *chunk.Store
 }
 
 // ResumeInfo summarizes file-level reuse for a resumed review.
@@ -234,6 +242,11 @@ func New(args Args) *Agent {
 	a := &Agent{
 		args:    args,
 		session: args.Session,
+		// The chunk store is seeded with a placeholder budget; each group's
+		// plan replaces it with the budget derived from that group's rendered
+		// prompt (see Agent.planReviewContext). Reads are served with the
+		// budget in force when the group started.
+		chunks: chunk.NewStore(0),
 	}
 	a.initManifest()
 	// DiffLookup closure captures a so the runner can resolve per-file
@@ -254,6 +267,9 @@ func New(args Args) *Agent {
 		// stay out of the retry report. See newRequestMeta.
 		NewRequestMeta:  a.newRequestMeta,
 		MaxTokensBudget: args.MaxTokensBudget,
+		// Close the coverage loop when a model declares context it did not
+		// read; the agent owns the chunk store, so it owns this mapping.
+		OnTaskDone: a.markChunksSkipped,
 	})
 	return a
 }
@@ -509,6 +525,10 @@ func (a *Agent) TotalTokensUsed() int64 { return a.runner.TotalTokensUsed() }
 // TotalInputTokens returns the accumulated input/prompt tokens from all LLM calls.
 func (a *Agent) TotalInputTokens() int64 { return a.runner.TotalInputTokens() }
 
+// ContextStats returns the run's review-context accounting: chunks offered,
+// reads served, raw tokens actually sent, and payloads replaced by receipts.
+func (a *Agent) ContextStats() llmloop.RunContextStats { return a.runner.ContextStats() }
+
 // TotalOutputTokens returns the accumulated completion tokens from all LLM calls.
 func (a *Agent) TotalOutputTokens() int64 { return a.runner.TotalOutputTokens() }
 
@@ -623,6 +643,12 @@ func (a *Agent) injectDiffMap() {
 	if p, ok := a.args.Tools.Get(tool.FileReadDiff.Name()); ok {
 		if frd, ok := p.(*tool.FileReadDiffProvider); ok {
 			frd.SetDiffMap(dm)
+			// Reads are served from the run's chunk store, so they are counted
+			// and bounded. The budget starts closed and is tightened by each
+			// group as it plans its own context (see planReviewContext): until
+			// a group has planned, a read is refused rather than served
+			// unbounded.
+			frd.SetContextStore(a.chunks, 0)
 		}
 	}
 }
@@ -1448,6 +1474,14 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		completed bool
 	)
 
+	// The change context is planned once, before the rounds: the manifest and
+	// its chunk ids must stay identical across rounds, or a chunk fetched in
+	// round 1 would name a unit the round-2 manifest never shows.
+	budget := a.contextBudget(a.measureFixedOverhead(rule, changeFilesExcludingGroup, planResult, ""))
+	rc := a.planReviewContext(ctx, groupKey, g.Diffs, budget)
+	coverageFolded := false
+	defer func() { a.finalizeContextCoverage(ctx, groupKey, rc, &coverageFolded) }()
+
 	for round := 1; round <= maxRounds; round++ {
 		if ctx.Err() != nil {
 			return false, nil, ctx.Err()
@@ -1471,7 +1505,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		}
 
 		confirmedText := buildConfirmedCommentsBlock(confirmed)
-		messages := a.buildMainTaskMessages(rule, changeFilesExcludingGroup, concatenatedDiffs, roundPlan, confirmedText)
+		messages := a.buildMainTaskMessages(rule, changeFilesExcludingGroup, rc.Text, roundPlan, confirmedText)
 
 		if stop := a.checkPromptBudget(ctx, messages, groupKey, round); stop != nil {
 			if round == 1 {
@@ -1507,7 +1541,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		if a.args.CommentWorkerPool != nil {
 			a.args.CommentWorkerPool.AwaitKey(groupKey)
 		}
-		a.executeGroupReviewFilter(ctx, g, baseline)
+		a.executeGroupReviewFilter(ctx, g, baseline, budget)
 
 		// Compute newly confirmed comments from this round.
 		var newlyConfirmed []model.LlmComment
@@ -1795,7 +1829,7 @@ func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concaten
 // When from is non-nil, only comments at indices >= from[path] for each path
 // are candidates for filtering (per-round isolation). When from is nil, all
 // comments for the group's paths are filtered (legacy full-group behavior).
-func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from map[string]int) {
+func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from map[string]int, budget chunk.Budget) {
 	groupKey := fileGroupKey(g.Diffs)
 	ctx, span := telemetry.StartSpan(ctx, "review_filter.execute")
 	defer span.End()
@@ -1842,13 +1876,19 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		candidateComments[i] = c.cm
 	}
 	commentsJSON := buildGroupFilterCommentsJSON(candidateComments)
-	concatenatedDiffs := buildConcatenatedDiffs(g.Diffs)
+	// The filter is shown the chunks its candidates point at rather than the
+	// whole change again: see Agent.reviewFilterContext.
+	filterPaths := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		filterPaths = append(filterPaths, c.cm.Path)
+	}
+	filterContext := a.reviewFilterContext(groupKey, g, filterPaths, budget)
 
 	messages := make([]llm.Message, 0, len(ft.Messages))
 	for _, m := range ft.Messages {
 		content := m.Content
 		content = strings.ReplaceAll(content, "{{path}}", groupKey)
-		content = strings.ReplaceAll(content, "{{diff}}", concatenatedDiffs)
+		content = strings.ReplaceAll(content, "{{diff}}", filterContext)
 		content = strings.ReplaceAll(content, "{{comments}}", commentsJSON)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
