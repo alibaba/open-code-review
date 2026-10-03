@@ -363,6 +363,7 @@ func TestMux_HasNoWriteRoutes(t *testing.T) {
 		{"HEAD session route still served", http.MethodHead, "/r/repo/s1", http.StatusOK},
 		{"GET repo route still served", http.MethodGet, "/r/repo", http.StatusOK},
 		{"GET static asset still served", http.MethodGet, "/static/session.js", http.StatusOK},
+		{"GET sessions list script still served", http.MethodGet, "/static/sessions.js", http.StatusOK},
 		{"POST to unknown write-looking path stays 404", http.MethodPost, "/r/repo/s1/marks", http.StatusNotFound},
 		{"GET unknown path stays 404", http.MethodGet, "/nope", http.StatusNotFound},
 	}

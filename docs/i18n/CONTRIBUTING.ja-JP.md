@@ -92,7 +92,7 @@ docs(README): update configuration examples
 
 ### ライセンスヘッダー
 
-すべてのソースファイル（`.go`、`.sh`、`.js`、`.mjs`、`.ts`、`.tsx`）にはSPDXライセンスヘッダーが必要です。新しいファイルを作成した後、以下を実行してください：
+すべてのソースファイル（`.go`、`.js`、`.mjs`、`.ts`、`.tsx`、`.kt`、`.kts`、`.sh`、`.py`、`.css`）にはSPDXライセンスヘッダーが必要です。新しいファイルを作成した後、以下を実行してください：
 
 ```bash
 make license-add

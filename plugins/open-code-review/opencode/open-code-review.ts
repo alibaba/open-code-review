@@ -2,9 +2,15 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import { spawn } from "node:child_process"
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type Plugin, tool } from "@opencode-ai/plugin"
 import type { Plugin as PluginV2 } from "@opencode/plugin"
+
+// Retry cleanup long enough for transient file locks, such as antivirus scans, to clear.
+const backgroundCleanupMaxRetries = 20
+const backgroundCleanupRetryDelayMs = 50
 
 interface ReviewInput {
   commit?: string
@@ -39,7 +45,8 @@ interface RunOptions {
 interface RunResult {
   stdout: string
   stderr: string
-  exitCode: number
+  exitCode: number | null
+  signal: NodeJS.Signals | null
 }
 
 class OcrExecutionError extends Error {
@@ -69,7 +76,7 @@ function pushValue(args: string[], flag: string, value: string | number | undefi
   }
 }
 
-function buildReviewArgs(input: ReviewInput, repo: string): string[] {
+function buildReviewArgs(input: ReviewInput, repo: string, backgroundFile?: string): string[] {
   const hasRange = input.from !== undefined || input.to !== undefined
   if (hasRange && (!input.from || !input.to)) {
     throw new Error("Both 'from' and 'to' are required for a branch comparison.")
@@ -99,8 +106,12 @@ function buildReviewArgs(input: ReviewInput, repo: string): string[] {
   pushValue(args, "--from", input.from)
   pushValue(args, "--to", input.to)
   pushValue(args, "--resume", input.resume)
-  pushValue(args, "--background", input.background)
-  pushValue(args, "--background-file", input.backgroundFile)
+  if (backgroundFile !== undefined) {
+    pushValue(args, "--background-file", backgroundFile)
+  } else {
+    pushValue(args, "--background", input.background)
+    pushValue(args, "--background-file", input.backgroundFile)
+  }
   pushValue(args, "--exclude", input.exclude)
   pushValue(args, "--model", input.model)
   pushValue(args, "--concurrency", input.concurrency)
@@ -112,6 +123,32 @@ function buildReviewArgs(input: ReviewInput, repo: string): string[] {
     args.push("--preview")
   }
   return args
+}
+
+async function withTemporaryBackgroundFile<T>(
+  background: string,
+  callback: (path: string) => Promise<T>,
+): Promise<T> {
+  const directory = await mkdtemp(join(tmpdir(), "ocr-opencode-background-"))
+  try {
+    if (process.platform !== "win32") {
+      await chmod(directory, 0o700)
+    }
+    const path = join(directory, "background.md")
+    await writeFile(path, background, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    })
+    return await callback(path)
+  } finally {
+    await rm(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: backgroundCleanupMaxRetries,
+      retryDelay: backgroundCleanupRetryDelayMs,
+    })
+  }
 }
 
 function appendChunk(
@@ -222,7 +259,7 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
         const stdout = Buffer.concat(stdoutChunks).toString("utf8").trim()
         const stderr = Buffer.concat(stderrChunks).toString("utf8").trim()
         if (exitCode === 0) {
-          resolve({ stdout, stderr, exitCode })
+          resolve({ stdout, stderr, exitCode, signal: signal ?? null })
           return
         }
         // A signal kill reports a null exit code. Naming the signal keeps it
@@ -356,6 +393,11 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
         args: reviewArgs,
         async execute(args, context) {
           const input = args as ReviewInput
+          const { background, ...inputWithoutBackground } = input
+          const normalizedBackground = background?.trim()
+          const normalizedInput: ReviewInput = normalizedBackground
+            ? { ...inputWithoutBackground, background: normalizedBackground }
+            : inputWithoutBackground
           const cwd = context.worktree || context.directory || worktree
           const defaultOverallMs = 30 * 60 * 1000
           const options: RunOptions = {
@@ -365,8 +407,17 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
               ? input.overallTimeoutMinutes * 60 * 1000
               : defaultOverallMs,
           }
-          const result = await runOcr(buildReviewArgs(input, cwd), options)
-          return formatReviewResult(result, input.preview === true)
+          const runReview = async (backgroundFile?: string): Promise<string> => {
+            const result = await runOcr(
+              buildReviewArgs(normalizedInput, cwd, backgroundFile),
+              options,
+            )
+            return formatReviewResult(result, normalizedInput.preview === true)
+          }
+          if (normalizedInput.background !== undefined) {
+            return await withTemporaryBackgroundFile(normalizedInput.background, runReview)
+          }
+          return await runReview()
         },
       }),
       ocr_health: tool({

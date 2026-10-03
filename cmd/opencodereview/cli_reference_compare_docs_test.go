@@ -10,11 +10,6 @@ import (
 	"testing"
 )
 
-// TestCLIReferenceDocumentsSessionCompare pins that every locale of the CLI
-// reference documents `ocr session compare`. The four files are hand-synced
-// (see PR #920), so the usual failure is a new command landing in `en` only.
-// ponytail: substring checks, not a markdown parse - the whole point is to
-// catch a missing file, and a parser would not catch it any better.
 func TestCLIReferenceDocumentsSessionCompare(t *testing.T) {
 	for _, locale := range []string{"en", "zh", "ja", "ru"} {
 		t.Run(locale, func(t *testing.T) {
@@ -37,10 +32,28 @@ func TestCLIReferenceDocumentsSessionCompare(t *testing.T) {
 	}
 }
 
-// TestCLIReferenceUsesSubtaskUnit pins that every locale of the CLI reference
-// describes --concurrency/--timeout/--max-tools/--max-tokens/--no-filter in
-// terms of a subtask, not a file or file group. The five files are
-// hand-synced; the usual failure is one locale keeping the old unit.
+func TestCLIReferenceDocumentsSessionExport(t *testing.T) {
+	for _, locale := range []string{"en", "zh", "ja", "ru", "ko"} {
+		t.Run(locale, func(t *testing.T) {
+			path := filepath.Join("..", "..", "pages", "src", "content", "docs", locale, "cli-reference.md")
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			for _, want := range []string{
+				"`ocr session export [id]`",         // command-summary table row
+				"### `ocr session export`",          // reference section
+				"ocr session export -o review.html", // the no-id form, which is the default
+				"`--output <path>`",                 // the flag that makes it archivable
+			} {
+				if !strings.Contains(string(body), want) {
+					t.Errorf("%s: missing %q", path, want)
+				}
+			}
+		})
+	}
+}
+
 func TestCLIReferenceUsesSubtaskUnit(t *testing.T) {
 	type localePin struct {
 		locale string
@@ -104,4 +117,29 @@ func firstLineContaining(body, marker string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func TestCLIReferenceDocumentsSessionRm(t *testing.T) {
+	for _, locale := range []string{"en", "zh", "ja", "ru", "ko"} {
+		t.Run(locale, func(t *testing.T) {
+			path := filepath.Join("..", "..", "pages", "src", "content", "docs", locale, "cli-reference.md")
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			for _, want := range []string{
+				"`ocr session rm <id>`",                                     // command-summary table row
+				"### `ocr session rm`",                                      // reference section
+				"`ocr session delete <id>`",                                 // alias
+				"ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --yes", // the flag in use, with an id shaped like a real one
+				"`--yes`", // the flag itself, however the locale punctuates the row
+				"`-y`",    // and its shorthand
+				"stdin",   // the non-interactive rule
+			} {
+				if !strings.Contains(string(body), want) {
+					t.Errorf("%s: missing %q", path, want)
+				}
+			}
+		})
+	}
 }

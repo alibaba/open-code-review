@@ -54,6 +54,7 @@ type Args struct {
 	MaxConcurrency        int
 	ConcurrentTaskTimeout int
 	Model                 string
+	EndpointSource        string
 	Background            string
 	GitRunner             *gitcmd.Runner
 	Session               *session.SessionHistory
@@ -128,6 +129,7 @@ func NewAgent(args Args) *Agent {
 			ReviewMode:  session.ReviewModeFullScan,
 			ScanPaths:   args.Paths,
 			ResumedFrom: resumedFromSession(args.Resume),
+			LLMSource:   args.EndpointSource,
 		})
 	}
 	a := &Agent{
@@ -146,7 +148,8 @@ func NewAgent(args Args) *Agent {
 		// DiffLookup returns a synthetic Diff so the code_comment tool's
 		// line-number resolver (resolveFromFileContent) can match against
 		// the full file content of the scanned file.
-		DiffLookup: a.lookupDiff,
+		DiffLookup:      a.lookupDiff,
+		MaxTokensBudget: args.MaxTokensBudget,
 		// NewRequestMeta is deliberately left nil. The retry report describes
 		// ocr review; scan shares this Runner, and a nil factory is what keeps
 		// scan's requests out of the report. See llmloop.Deps.NewRequestMeta.

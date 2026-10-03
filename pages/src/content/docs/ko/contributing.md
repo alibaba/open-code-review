@@ -40,7 +40,7 @@ git clone https://github.com/<your-username>/open-code-review.git
 cd open-code-review
 git remote add upstream https://github.com/alibaba/open-code-review.git
 
-make build       # writes dist/opencodereview
+make build       # writes dist/opencodereview (dist/opencodereview.exe on Windows)
 make test        # LC_ALL=C go test -v -race -count=1 ./...
 ```
 
@@ -50,7 +50,8 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 ### 로컬 빌드 실행하기 {#running-your-local-build}
 
 ```bash
-./dist/opencodereview review --preview
+./dist/opencodereview review --preview        # macOS / Linux
+.\dist\opencodereview.exe review --preview   # Windows (PowerShell / cmd)
 ```
 
 편하게 쓰려면 `dist/opencodereview`를 가리키는 심볼릭 링크를 `~/bin/ocr-dev`에
@@ -60,7 +61,7 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 
 | 타깃 | 하는 일 |
 |---|---|
-| `make build` | 현재 플랫폼용으로 빌드해 `dist/opencodereview`에 씁니다. |
+| `make build` | 현재 플랫폼용으로 빌드해 `dist/opencodereview`(Windows에서는 `dist/opencodereview.exe`)에 씁니다. |
 | `make build-darwin-amd64` | macOS Intel용 크로스 컴파일. |
 | `make build-darwin-arm64` | macOS Apple Silicon용 크로스 컴파일. |
 | `make build-linux-amd64` | Linux x86_64용 크로스 컴파일. |
@@ -169,8 +170,8 @@ AI가 개발 과정에 관여했다면 아래 규칙을 따라 주세요.
 
 ## 라이선스 헤더 {#license-headers}
 
-모든 소스 파일(`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`)에는 SPDX 라이선스
-헤더가 있어야 합니다. 파일을 새로 만들었다면 다음을 실행하세요.
+모든 소스 파일(`.go`, `.js`, `.mjs`, `.ts`, `.tsx`, `.kt`, `.kts`, `.sh`, `.py`,
+`.css`)에는 SPDX 라이선스 헤더가 있어야 합니다. 파일을 새로 만들었다면 다음을 실행하세요.
 
 ```bash
 make license-add

@@ -2,27 +2,27 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import * as vscode from 'vscode';
-import { ReviewComment, ReviewContext, ReviewMode } from '../../shared/types';
+import { ReviewComment, ReviewContext, ReviewMode } from '@shared/types';
 
 export type CommentMountSide = 'left' | 'right' | 'workspace';
 
-/** 可挂载到编辑器 / diff 的定位结果。 */
+/** A resolved anchor that can be attached to an editor or diff. */
 export interface MountableCommentAnchor {
   kind: 'mountable';
   uri: vscode.Uri;
   range: vscode.Range;
   side: CommentMountSide;
-  /** commit/branch 模式跳转时打开原生 diff。 */
+  /** Open the native diff when navigating in commit or branch mode. */
   diff?: {
     left: vscode.Uri;
     right: vscode.Uri;
     title: string;
   };
-  /** 行号经 existingCode 重新定位时附带说明。 */
+  /** Explanation shown when line numbers are relocated using existingCode. */
   locateNote?: string;
 }
 
-/** 无法在快照中定位，仅侧边栏展示。 */
+/** An anchor that cannot be resolved in a snapshot and is shown only in the sidebar. */
 export interface SidebarOnlyCommentAnchor {
   kind: 'sidebar';
   reason: 'binary' | 'unresolved' | 'missing-file';
@@ -67,7 +67,7 @@ export function splitAndNormalize(code: string): string[] {
   return result;
 }
 
-/** 在文件内容中滑动匹配 existingCode，返回 1-based 行号。 */
+/** Find existingCode in the file content using a sliding-window match and return 1-based line numbers. */
 export function findLinesByExistingCode(content: string, existingCode: string): { start: number; end: number } | null {
   const targetLines = splitAndNormalize(existingCode);
   if (targetLines.length === 0) return null;

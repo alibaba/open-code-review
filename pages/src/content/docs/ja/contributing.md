@@ -37,7 +37,7 @@ git clone https://github.com/<your-username>/open-code-review.git
 cd open-code-review
 git remote add upstream https://github.com/alibaba/open-code-review.git
 
-make build       # dist/opencodereview を書き出す
+make build       # dist/opencodereview を書き出す（Windows では dist/opencodereview.exe）
 make test        # LC_ALL=C go test -v -race -count=1 ./...
 ```
 
@@ -46,7 +46,8 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 ### ローカルビルドの実行
 
 ```bash
-./dist/opencodereview review --preview
+./dist/opencodereview review --preview        # macOS / Linux
+.\dist\opencodereview.exe review --preview   # Windows (PowerShell / cmd)
 ```
 
 便宜のため、`dist/opencodereview` を指すシンボリックリンクを `~/bin/ocr-dev` に置いておくと、
@@ -56,7 +57,7 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 
 | Target | 作用 |
 |---|---|
-| `make build` | 現在のプラットフォーム向けにビルド → `dist/opencodereview`。 |
+| `make build` | 現在のプラットフォーム向けにビルド → `dist/opencodereview`（Windows では `dist/opencodereview.exe`）。 |
 | `make build-darwin-amd64` | macOS Intel 向けのクロスコンパイル。 |
 | `make build-darwin-arm64` | macOS Apple Silicon 向けのクロスコンパイル。 |
 | `make build-linux-amd64` | Linux x86_64 向けのクロスコンパイル。 |
@@ -164,7 +165,7 @@ AI を開発に使った場合は、下記のルールに従ってください�
 
 ## ライセンスヘッダー
 
-すべてのソースファイル（`.go`、`.sh`、`.js`、`.mjs`、`.ts`、`.tsx`）にはSPDXライセンスヘッダーが必要です。新しいファイルを作成した後、以下を実行してください：
+すべてのソースファイル（`.go`、`.js`、`.mjs`、`.ts`、`.tsx`、`.kt`、`.kts`、`.sh`、`.py`、`.css`）にはSPDXライセンスヘッダーが必要です。新しいファイルを作成した後、以下を実行してください：
 
 ```bash
 make license-add
