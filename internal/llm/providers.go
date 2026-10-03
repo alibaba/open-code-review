@@ -28,6 +28,7 @@ type Provider struct {
 	AuthHeader  string // Anthropic-only; empty for OpenAI-compatible
 	EnvVar      string // environment variable name for API key fallback
 	Models      []string
+	OAuth       bool // ChatGPT plan credentials are managed by the local OAuth store.
 
 	// AmbientAuth marks a provider whose credentials come from the
 	// environment's own chain rather than an api_key — AWS SigV4, for
@@ -107,6 +108,13 @@ var registry = []Provider{
 			"gpt-5.6-terra",
 			"gpt-5.6-luna",
 		},
+	},
+	{
+		Name:        "openai-chatgpt",
+		DisplayName: "OpenAI ChatGPT subscription",
+		Protocol:    ProtocolOpenAIResponses,
+		BaseURL:     "https://api.openai.com/v1",
+		OAuth:       true,
 	},
 	{
 		Name:        "openrouter",
