@@ -4,6 +4,10 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -212,5 +216,102 @@ func TestLLMTestCommand_UsesDefaultConfigPath(t *testing.T) {
 	}
 	if want := filepath.Join(home, ".opencodereview", "config.json"); gotPath != want {
 		t.Fatalf("config path = %q, want %q", gotPath, want)
+	}
+}
+
+type connectionTestClient struct {
+	requests  []llm.ChatRequest
+	responses []*llm.ChatResponse
+	err       error
+}
+
+func (c *connectionTestClient) CompletionsWithCtx(_ context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.requests = append(c.requests, request)
+	if c.err != nil {
+		return nil, c.err
+	}
+	i := len(c.requests) - 1
+	if i >= len(c.responses) {
+		return nil, nil
+	}
+	return c.responses[i], nil
+}
+
+func TestChatGPTConnectionTestRequiresToolAndVisibleAnswer(t *testing.T) {
+	text := "Self-test verified."
+	tool := &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{ToolCalls: []llm.ToolCall{{ID: "call_1", Function: llm.FunctionCall{Name: "ocr_selftest", Arguments: `{"note":"hello"}`}}}}}}}
+	answer := &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &text}}}}
+	for _, test := range []struct {
+		name      string
+		responses []*llm.ChatResponse
+		err       error
+		success   bool
+	}{
+		{"verified", []*llm.ChatResponse{tool, answer}, nil, true},
+		{"no tool", []*llm.ChatResponse{answer}, nil, false},
+		{"empty final answer", []*llm.ChatResponse{tool, {}}, nil, false},
+		{"reasoning is not an answer", []*llm.ChatResponse{tool, {Choices: []llm.Choice{{Message: llm.ResponseMessage{ReasoningContent: "reasoning only"}}}}}, nil, false},
+		{"nil response", nil, nil, false},
+		{"request failure", nil, errors.New("request failed"), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, key := range []string{"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_PROTOCOL"} {
+				t.Setenv(key, "")
+			}
+			path := filepath.Join(t.TempDir(), "config.json")
+			data, _ := json.Marshal(map[string]any{"provider": "openai-chatgpt", "providers": map[string]any{"openai-chatgpt": map[string]any{"model": "account-model"}}})
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			client := &connectionTestClient{responses: test.responses, err: test.err}
+			previous := newLLMTestClient
+			newLLMTestClient = func(ep llm.ResolvedEndpoint, _ *llm.RetryCollector, _ *llm.RawHolder) llm.LLMClient {
+				if !ep.ChatGPT {
+					t.Fatal("wrong provider")
+				}
+				return client
+			}
+			t.Cleanup(func() { newLLMTestClient = previous })
+			var err error
+			output := captureStdout(t, func() { err = runLLMTestWithConfigPath(path) })
+			if (err == nil) != test.success {
+				t.Fatalf("test result: %v, output: %s", err, output)
+			}
+			if !test.success && strings.Contains(output, "Connection test successful") {
+				t.Fatal("failure was reported as successful")
+			}
+			if client.requests[0].ToolChoice != "required" {
+				t.Fatal("self-test must request a tool call")
+			}
+			if test.success {
+				if len(client.requests) != 2 || client.requests[1].ToolChoice != "none" || !strings.Contains(output, "Tool-call round trip verified") || !strings.Contains(output, text) {
+					t.Fatalf("incomplete probe: %s", output)
+				}
+			}
+		})
+	}
+}
+
+func TestConnectionTestKeepsLenientAnswerCheckForOtherProviders(t *testing.T) {
+	for _, key := range []string{"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_PROTOCOL"} {
+		t.Setenv(key, "")
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	data, _ := json.Marshal(map[string]any{"provider": "openai", "providers": map[string]any{"openai": map[string]any{"model": "gpt-test", "api_key": "sk-test"}}})
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reasoningOnly := &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{ReasoningContent: "thinking"}}}}
+	client := &connectionTestClient{responses: []*llm.ChatResponse{reasoningOnly}}
+	previous := newLLMTestClient
+	newLLMTestClient = func(llm.ResolvedEndpoint, *llm.RetryCollector, *llm.RawHolder) llm.LLMClient { return client }
+	t.Cleanup(func() { newLLMTestClient = previous })
+	var err error
+	output := captureStdout(t, func() { err = runLLMTestWithConfigPath(path) })
+	if err != nil || !strings.Contains(output, "Connection test successful") || !strings.Contains(output, "thinking") {
+		t.Fatalf("reasoning-only reply must still pass for non-ChatGPT providers: %v\n%s", err, output)
+	}
+	if client.requests[0].ToolChoice != "" {
+		t.Fatal("only the ChatGPT route forces a tool call")
 	}
 }

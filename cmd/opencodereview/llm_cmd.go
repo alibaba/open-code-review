@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -20,7 +21,10 @@ var llmCmd = &cobra.Command{
 	Short: "LLM utility commands",
 	Long:  "LLM utility commands.",
 	Example: `  ocr llm test                   Verify LLM connectivity and configuration
-  ocr llm providers              List available built-in providers`,
+  ocr llm providers              List available built-in providers
+  ocr llm login openai-chatgpt    Connect an eligible ChatGPT plan
+  ocr llm status openai-chatgpt   Show account and plan permission
+  ocr llm logout openai-chatgpt   Revoke the active ChatGPT session`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -51,6 +55,7 @@ func init() {
 }
 
 var runLLMTestPath = runLLMTestWithConfigPath
+var newLLMTestClient = llm.NewLLMClient
 
 func runLLMTest() error {
 	cfgPath, err := defaultConfigPath()
@@ -88,7 +93,7 @@ func runLLMTestWithConfigPath(configPath string) error {
 
 	// No retry collector: llm test is a connectivity probe, not a review, and the
 	// retry report only describes ocr review.
-	llmClient := llm.NewLLMClient(ep, nil, nil)
+	llmClient := newLLMTestClient(ep, nil, nil)
 
 	messages := make([]llm.Message, 0, len(task.Messages))
 	for _, m := range task.Messages {
@@ -101,20 +106,28 @@ func runLLMTestWithConfigPath(configPath string) error {
 	// one. A second turn inheriting an exhausted deadline would fail exactly the
 	// way a provider rejecting that turn does, which is the distinction the tool
 	// round trip exists to draw.
-	send := func(msgs []llm.Message) (*llm.ChatResponse, error) {
+	send := func(msgs []llm.Message, toolChoice string) (*llm.ChatResponse, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		return llmClient.CompletionsWithCtx(ctx, llm.ChatRequest{
-			Model:     ep.Model,
-			Messages:  msgs,
-			Tools:     tools,
-			MaxTokens: 2048,
+			Model:      ep.Model,
+			Messages:   msgs,
+			Tools:      tools,
+			MaxTokens:  2048,
+			ToolChoice: toolChoice,
 		})
 	}
 
-	resp, err := send(messages)
+	firstChoice := ""
+	if ep.ChatGPT && len(tools) > 0 {
+		firstChoice = "required"
+	}
+	resp, err := send(messages, firstChoice)
 	if err != nil {
 		return fmt.Errorf("llm request failed: %w", err)
+	}
+	if resp == nil {
+		return fmt.Errorf("LLM connectivity test returned no response")
 	}
 
 	// A single request never exercises the turn that follows a tool call, which
@@ -127,9 +140,27 @@ func runLLMTestWithConfigPath(configPath string) error {
 			toolCalled = true
 			messages = append(messages, llm.NewToolCallMessage(resp.VisibleContent(), resp.ToolCalls(), resp.Native(), resp.ReasoningContent()))
 			messages = append(messages, toolResultMessages(resp, task.Tool)...)
-			if resp, err = send(messages); err != nil {
+			secondChoice := ""
+			if ep.ChatGPT {
+				secondChoice = "none"
+			}
+			if resp, err = send(messages, secondChoice); err != nil {
 				return fmt.Errorf("llm request after tool call failed: %w", err)
 			}
+		}
+	}
+	if resp == nil {
+		return fmt.Errorf("LLM connectivity test returned no response")
+	}
+	// The ChatGPT route forces the tool round trip, so a missing call or answer
+	// is a failure there. Other providers keep the lenient check: a reasoning-only
+	// or empty reply still proves the endpoint and credentials work.
+	if ep.ChatGPT {
+		if len(tools) > 0 && !toolCalled {
+			return fmt.Errorf("ChatGPT did not call the required self-test tool; tool-call round trip could not be verified")
+		}
+		if strings.TrimSpace(resp.VisibleContent()) == "" {
+			return fmt.Errorf("LLM connectivity test returned no visible answer; connection verification failed")
 		}
 	}
 
@@ -154,6 +185,9 @@ func runLLMTestWithConfigPath(configPath string) error {
 	fmt.Printf("Model:  %s\n", model)
 
 	content := resp.Content()
+	if ep.ChatGPT {
+		content = resp.VisibleContent()
+	}
 	if content == "" {
 		content = "(empty response)"
 	}

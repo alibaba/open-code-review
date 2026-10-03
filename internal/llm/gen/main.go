@@ -24,6 +24,7 @@ type preset struct {
 	AuthHeader  string   `json:"authHeader,omitempty"`
 	EnvVar      string   `json:"envVar"`
 	AmbientAuth bool     `json:"ambientAuth,omitempty"`
+	OAuth       bool     `json:"oauth,omitempty"`
 	Models      []string `json:"models"`
 }
 
@@ -117,6 +118,7 @@ func render(providers []llm.Provider) ([]byte, error) {
 			AuthHeader:  p.AuthHeader,
 			EnvVar:      p.EnvVar,
 			AmbientAuth: p.AmbientAuth,
+			OAuth:       p.OAuth,
 			Models:      models,
 		})
 	}

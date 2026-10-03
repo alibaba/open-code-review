@@ -82,6 +82,9 @@ func checkPresets(data []byte, providers []llm.Provider) error {
 		if actual.AmbientAuth != provider.AmbientAuth {
 			return fmt.Errorf("ambientAuth for provider %q is %t, want %t", provider.Name, actual.AmbientAuth, provider.AmbientAuth)
 		}
+		if actual.OAuth != provider.OAuth {
+			return fmt.Errorf("oauth for provider %q is %t, want %t", provider.Name, actual.OAuth, provider.OAuth)
+		}
 	}
 	return nil
 }
@@ -123,6 +126,7 @@ func decodePresets(data []byte) ([]preset, error) {
 			{"models", true, &models},
 			{"authHeader", false, &actual.AuthHeader},
 			{"ambientAuth", false, &actual.AmbientAuth},
+			{"oauth", false, &actual.OAuth},
 		} {
 			value, exists := record[field.name]
 			if !exists {

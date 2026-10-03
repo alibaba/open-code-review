@@ -199,8 +199,8 @@ func runBrowserCmd(cmd *exec.Cmd) error {
 	}
 }
 
-// openBrowser resolves the candidate list for this host and runs it.
-func openBrowser(url string) error {
+// OpenBrowser resolves the candidate list for this host and runs it.
+func OpenBrowser(url string) error {
 	return openBrowserCandidates(browserCandidates(runtime.GOOS, os.Getenv("BROWSER"), url))
 }
 
