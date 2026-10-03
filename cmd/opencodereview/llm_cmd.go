@@ -153,8 +153,11 @@ func runLLMTestWithConfigPath(configPath string) error {
 		return fmt.Errorf("LLM connectivity test returned no response")
 	}
 	// The ChatGPT route forces the tool round trip, so a missing call or answer
-	// is a failure there. Other providers keep the lenient check: a reasoning-only
-	// or empty reply still proves the endpoint and credentials work.
+	// is a failure there. The answer is required even when the task offers no
+	// tool, since the self-test prompt asks for one and a stream that parses to
+	// nothing visible is exactly what this check exists to catch. Other providers keep
+	// the lenient check: a reasoning-only or empty reply still proves the
+	// endpoint and credentials work.
 	if ep.ChatGPT {
 		if len(tools) > 0 && !toolCalled {
 			return fmt.Errorf("ChatGPT did not call the required self-test tool; tool-call round trip could not be verified")

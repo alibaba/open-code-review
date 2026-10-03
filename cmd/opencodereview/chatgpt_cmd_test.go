@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -51,8 +52,12 @@ func installFakeChatGPT(t *testing.T) *fakeChatGPTClient {
 func TestChatGPTLoginConfiguresProviderWithoutSecrets(t *testing.T) {
 	freshOCRHome(t)
 	f := installFakeChatGPT(t)
-	if err := runChatGPTLogin(context.Background(), "", false, ""); err != nil {
+	var out bytes.Buffer
+	if err := runChatGPTLogin(context.Background(), &out, "", false, ""); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "ChatGPT connected") {
+		t.Fatalf("login output must go to the given writer: %q", out.String())
 	}
 	if f.loginID != "saved" {
 		t.Fatal("active registration must be reused")
@@ -69,28 +74,28 @@ func TestChatGPTLoginConfiguresProviderWithoutSecrets(t *testing.T) {
 	if cfg.Provider != chatgpt.ProviderName || entry.Model != "account-model" || entry.APIKey != "" || len(entry.Models) != 1 {
 		t.Fatalf("invalid config: %+v", entry)
 	}
-	if err := runChatGPTLogin(context.Background(), "", true, "account-model"); err != nil {
+	if err := runChatGPTLogin(context.Background(), io.Discard, "", true, "account-model"); err != nil {
 		t.Fatal(err)
 	}
 	if f.loginID != "" {
 		t.Fatal("new-account must start a fresh registration")
 	}
-	if err := runChatGPTLogin(context.Background(), "explicit", false, "account-model"); err != nil {
+	if err := runChatGPTLogin(context.Background(), io.Discard, "explicit", false, "account-model"); err != nil {
 		t.Fatal(err)
 	}
 	if f.loginID != "explicit" {
 		t.Fatal("selected registration was ignored")
 	}
-	if err := runChatGPTLogin(context.Background(), "", false, "missing-model"); err == nil {
+	if err := runChatGPTLogin(context.Background(), io.Discard, "", false, "missing-model"); err == nil {
 		t.Fatal("unavailable model accepted")
 	}
 	f.profile.PlanEnabled = false
-	if err := runChatGPTLogin(context.Background(), "", false, ""); err == nil {
+	if err := runChatGPTLogin(context.Background(), io.Discard, "", false, ""); err == nil {
 		t.Fatal("identity-only grant accepted")
 	}
 	f.profile.PlanEnabled = true
 	f.loginErr = errors.New("declined")
-	if err := runChatGPTLogin(context.Background(), "", false, ""); err == nil {
+	if err := runChatGPTLogin(context.Background(), io.Discard, "", false, ""); err == nil {
 		t.Fatal("login failure ignored")
 	}
 }

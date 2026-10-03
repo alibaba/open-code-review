@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/chatgpt"
@@ -41,7 +42,7 @@ func init() {
 Credentials are stored separately from provider configuration and renewed automatically.
 The subscription route uses OpenAI's output limits; max_tokens and temperature are not sent.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChatGPTLogin(cmd.Context(), accountID, newAccount, model)
+			return runChatGPTLogin(cmd.Context(), cmd.OutOrStdout(), accountID, newAccount, model)
 		}}
 	login.Flags().StringVar(&accountID, "account", "", "Reuse a saved client ID shown by 'ocr llm status openai-chatgpt'")
 	login.Flags().BoolVar(&newAccount, "new-account", false, "Register another ChatGPT account or workspace")
@@ -112,7 +113,7 @@ The subscription route uses OpenAI's output limits; max_tokens and temperature a
 	llmCmd.AddCommand(login, logout, status, models, selectAccount)
 }
 
-func runChatGPTLogin(ctx context.Context, accountID string, newAccount bool, model string) error {
+func runChatGPTLogin(ctx context.Context, out io.Writer, accountID string, newAccount bool, model string) error {
 	path, err := defaultConfigPath()
 	if err != nil {
 		return err
@@ -138,9 +139,9 @@ func runChatGPTLogin(ctx context.Context, accountID string, newAccount bool, mod
 		}
 	}
 	profile, err := c.Login(ctx, accountID, func(authURL string) error {
-		fmt.Printf("Continue with ChatGPT:\n%s\n", authURL)
+		fmt.Fprintf(out, "Continue with ChatGPT:\n%s\n", authURL)
 		if err := openChatGPTBrowser(authURL); err != nil {
-			fmt.Println("Could not open a browser automatically. Open the sign-in URL above.")
+			fmt.Fprintln(out, "Could not open a browser automatically. Open the sign-in URL above.")
 		}
 		return nil
 	})
@@ -173,7 +174,7 @@ func runChatGPTLogin(ctx context.Context, accountID string, newAccount bool, mod
 	if err := saveConfig(path, cfg); err != nil {
 		return err
 	}
-	fmt.Printf("ChatGPT connected: %s\nProvider: %s\nModel: %s\nRun 'ocr llm test' to verify inference and tool calls.\n", profile.Email, chatgpt.ProviderName, model)
+	fmt.Fprintf(out, "ChatGPT connected: %s\nProvider: %s\nModel: %s\nRun 'ocr llm test' to verify inference and tool calls.\n", profile.Email, chatgpt.ProviderName, model)
 	return nil
 }
 

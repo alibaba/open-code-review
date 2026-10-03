@@ -412,7 +412,7 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
       </FormItem>
 
       {preset.oauth && (
-        <p class="form-hint">{t('view.config.chatgptLoginHint')} <code>ocr llm login openai-chatgpt</code></p>
+        <p class="form-hint">{t('view.config.chatgptLoginHint')} <code>ocr llm login {preset.name}</code></p>
       )}
       {!ambientAuth && !preset.oauth && (
         <FormItem

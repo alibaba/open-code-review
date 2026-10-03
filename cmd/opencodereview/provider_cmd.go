@@ -46,7 +46,7 @@ func runConfigProvider() error {
 
 	result := final.result()
 	if preset, ok := llm.LookupProvider(result.provider); ok && preset.OAuth && result.model == "" {
-		return runChatGPTLogin(context.Background(), "", false, "")
+		return runChatGPTLogin(context.Background(), os.Stdout, "", false, "")
 	}
 
 	if result.isManual {
