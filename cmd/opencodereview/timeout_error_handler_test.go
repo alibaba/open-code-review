@@ -28,9 +28,9 @@ func TestIsTimeoutError(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "error with deadline text",
+			name:     "unwrapped error with deadline text",
 			err:      fmt.Errorf("context deadline exceeded"),
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "non-timeout error",
@@ -79,9 +79,6 @@ func TestFormatTimeoutErrorMessage(t *testing.T) {
 		IsTimeout:       true,
 		ElapsedSeconds:  150.5,
 		TimeoutMinutes:  15,
-		TotalInputTokens: 180000,
-		TotalOutputTokens: 45000,
-		LastFile:        "src/processor.go",
 		SessionID:       "session-abc123",
 	}
 
@@ -89,11 +86,8 @@ func TestFormatTimeoutErrorMessage(t *testing.T) {
 
 	// Check for key components
 	checks := []string{
-		"⏱️  LLM timeout",
+		"⏱️  Review task timeout",
 		"15 minute",
-		"180000 input tokens",
-		"45000 output tokens",
-		"src/processor.go",
 		"--timeout",
 		"--concurrency",
 		"--exclude",
@@ -118,7 +112,7 @@ func TestFormatTimeoutErrorMessage_MinimalInfo(t *testing.T) {
 	msg := formatTimeoutErrorMessage(info)
 
 	// Should still contain suggestions even with minimal info
-	if !strings.Contains(msg, "⏱️  LLM timeout") {
+	if !strings.Contains(msg, "⏱️  Review task timeout") {
 		t.Errorf("Missing timeout indicator in message:\n%s", msg)
 	}
 	if !strings.Contains(msg, "--timeout") {
@@ -144,7 +138,7 @@ func TestEnhanceTimeoutError_Timeout(t *testing.T) {
 	result := enhanceTimeoutError(timeoutErr, startTime, 15, "session-xyz")
 
 	errMsg := result.Error()
-	if !strings.Contains(errMsg, "⏱️  LLM timeout") {
+	if !strings.Contains(errMsg, "⏱️  Review task timeout") {
 		t.Errorf("Enhanced error missing timeout indicator:\n%s", errMsg)
 	}
 	if !strings.Contains(errMsg, "session-xyz") {

@@ -284,8 +284,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 
 	// Enhanced timeout error handling: includes elapsed time, timeout limit, and session ID.
-	// Future enhancement: populate token usage from ag.TotalInputTokens() and ag.TotalOutputTokens()
-	// to show accumulated token consumption before timeout in error messages.
 	resultErr := reviewResultError(runErr, manifest, timeoutErrorParams{
 		startTime:      startTime,
 		timeoutMinutes: opts.concurrentTaskTimeout,

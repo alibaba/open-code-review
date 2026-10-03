@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"errors"
 	"strings"
 	"time"
 )
@@ -20,28 +19,13 @@ type TimeoutErrorInfo struct {
 	ElapsedSeconds float64
 	// TimeoutMinutes is the configured timeout limit
 	TimeoutMinutes int
-	// TotalInputTokens accumulated before timeout
-	// TODO: Populate from ag.TotalInputTokens() in review_cmd.go when enhanceTimeoutError is called
-	TotalInputTokens int64
-	// TotalOutputTokens accumulated before timeout
-	// TODO: Populate from ag.TotalOutputTokens() in review_cmd.go when enhanceTimeoutError is called
-	TotalOutputTokens int64
-	// LastFile is the last file being reviewed when timeout occurred
-	LastFile string
 	// SessionID for resuming the review
 	SessionID string
 }
 
 // isTimeoutError checks if an error is a context deadline exceeded error.
 func isTimeoutError(err error) bool {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	// Also detect deadline errors by string matching for wrapped errors
-	if err != nil && strings.Contains(err.Error(), "context deadline exceeded") {
-		return true
-	}
-	return false
+	return errors.Is(err, context.DeadlineExceeded)
 }
 
 // analyzeTimeoutError extracts details from a timeout error and returns
@@ -60,7 +44,7 @@ func analyzeTimeoutError(runErr error, startTime time.Time, timeoutMinutes int) 
 func formatTimeoutErrorMessage(info TimeoutErrorInfo) string {
 	var sb strings.Builder
 
-	sb.WriteString("⏱️  LLM timeout: Review exceeded ")
+	sb.WriteString("⏱️  Review task timeout: A task exceeded its configured ")
 	sb.WriteString(fmt.Sprintf("%d minute", info.TimeoutMinutes))
 	if info.TimeoutMinutes > 1 {
 		sb.WriteString("s")
@@ -75,39 +59,28 @@ func formatTimeoutErrorMessage(info TimeoutErrorInfo) string {
 	}
 	sb.WriteString("\n")
 
-	// Add token usage if available
-	totalTokens := info.TotalInputTokens + info.TotalOutputTokens
-	if totalTokens > 0 {
-		sb.WriteString(fmt.Sprintf("   → Used %d input tokens + %d output tokens so far\n",
-			info.TotalInputTokens, info.TotalOutputTokens))
-	}
-
-	if info.LastFile != "" {
-		sb.WriteString(fmt.Sprintf("   → Last file being reviewed: %s\n", info.LastFile))
-	}
-
 	sb.WriteString("\n📋 Suggestions to recover:\n")
 
 	// Suggestion 1: Increase timeout
 	newTimeout := info.TimeoutMinutes + 5
-	sb.WriteString(fmt.Sprintf("  1. Increase timeout limit:\n"))
+	sb.WriteString("  1. Increase timeout limit:\n")
 	sb.WriteString(fmt.Sprintf("     $ ocr review --timeout %d\n\n", newTimeout))
 
 	// Suggestion 2: Reduce concurrency
-	sb.WriteString(fmt.Sprintf("  2. Reduce concurrent tasks (use less memory/time per task):\n"))
-	sb.WriteString(fmt.Sprintf("     $ ocr review --concurrency 4\n\n"))
+	sb.WriteString("  2. Reduce concurrent tasks (use less memory/time per task):\n")
+	sb.WriteString("     $ ocr review --concurrency 4\n\n")
 
 	// Suggestion 3: Exclude large files
-	sb.WriteString(fmt.Sprintf("  3. Exclude large or auto-generated files:\n"))
-	sb.WriteString(fmt.Sprintf("     $ ocr review --exclude '**/dist/**,**/build/**,**/*.min.js'\n\n"))
+	sb.WriteString("  3. Exclude large or auto-generated files:\n")
+	sb.WriteString("     $ ocr review --exclude '**/dist/**,**/build/**,**/*.min.js'\n\n")
 
 	// Suggestion 4: Resume
 	if info.SessionID != "" {
-		sb.WriteString(fmt.Sprintf("  4. Resume this review to continue where it stopped:\n"))
-		sb.WriteString(fmt.Sprintf("     $ ocr review --resume %s\n\n", info.SessionID))
+		sb.WriteString("  4. Re-run your original command with --resume to continue where it stopped:\n")
+		sb.WriteString(fmt.Sprintf("     $ ocr review <original args> --resume %s\n\n", info.SessionID))
 	}
 
-	sb.WriteString(fmt.Sprintf("📖 Learn more: https://open-codereview.ai/docs\n"))
+	sb.WriteString("📖 Learn more: https://open-codereview.ai/docs\n")
 
 	return sb.String()
 }
