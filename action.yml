@@ -947,7 +947,16 @@ runs:
             emit({ mode: 'full', reason: 'resolver_error', from: '', to: process.env.OCR_HEAD_SHA || '' }, '', '');
           }
 
+    # A GitHub App installation token (`ghs_`) expires one hour after it is
+    # minted, and "Post review comments" reuses that same token after this step,
+    # so a review that outlives the hour can never be published. Cap the step so
+    # the run stops there instead of paying for the rest of a doomed review. The
+    # default `github.token` is a `ghs_` token too, but Actions keeps it valid
+    # for the job; any other custom token (a PAT, an OAuth token) has a lifetime
+    # this action cannot know, and capping it would kill runs that can still
+    # post, so only a positively identified installation token is capped.
     - name: Run OpenCodeReview
+      timeout-minutes: ${{ startsWith(inputs.github_token, 'ghs_') && inputs.github_token != github.token && 60 || 360 }}
       env:
         OCR_LLM_URL: ${{ inputs.llm_url }}
         OCR_LLM_TOKEN: ${{ inputs.llm_auth_token }}
