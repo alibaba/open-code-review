@@ -76,10 +76,10 @@ func TestAnalyzeTimeoutError(t *testing.T) {
 
 func TestFormatTimeoutErrorMessage(t *testing.T) {
 	info := TimeoutErrorInfo{
-		IsTimeout:       true,
-		ElapsedSeconds:  150.5,
-		TimeoutMinutes:  15,
-		SessionID:       "session-abc123",
+		IsTimeout:      true,
+		ElapsedSeconds: 150.5,
+		TimeoutMinutes: 15,
+		SessionID:      "session-abc123",
 	}
 
 	msg := formatTimeoutErrorMessage(info)
