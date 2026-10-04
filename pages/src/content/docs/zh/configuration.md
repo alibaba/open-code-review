@@ -297,6 +297,19 @@ ocr config unset effort        # 恢复默认的 medium
 
 优先级为：`--effort` 参数 > 已保存的 `effort` > 默认 `medium`。
 
+### 按任务指定模型
+
+一次评审运行会发出多种类型的 LLM 请求。`task_models` 可以把廉价、机械性的任务交给更小的模型，而主评审循环继续使用强模型：
+
+```bash
+ocr config set task_models.plan_task deepseek-v4-flash
+ocr config set task_models.memory_compression_task deepseek-v4-flash
+```
+
+有效的键是 OCR 记录在会话中的任务 ID：`plan_task`、`main_task`、`memory_compression_task`、`re_location_task`、`review_filter_task` 和 `grouping_task`。在 `ocr scan` 中，去重和项目总结阶段同样跟随 `memory_compression_task`。未知的任务 ID 会被拒绝；值会原样发送给提供商，因此必须是提供商能解析的模型名称。
+
+每个任务的优先级为：`task_models.<task>` 高于 `--model`，`--model` 高于提供商配置的模型。没有条目的任务使用本次运行的全局模型，因此可以逐个任务逐步填写。删除单个覆盖项：`ocr config unset task_models.plan_task`。
+
 ### 验证连通性
 
 ```bash

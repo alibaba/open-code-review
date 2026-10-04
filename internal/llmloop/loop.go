@@ -29,6 +29,7 @@ import (
 type Deps struct {
 	LLMClient         llm.LLMClient
 	Model             string
+	TaskModels        llm.TaskModels
 	Template          template.Template
 	Tools             *tool.Registry
 	MainToolDefs      []llm.ToolDef
@@ -72,6 +73,15 @@ type Deps struct {
 	// unlimited, which is also what scan and every existing caller get by
 	// default.
 	MaxTokensBudget int64
+}
+
+// ModelForTask returns the model override configured for task, or Model when
+// task_models has no entry for it. MAIN rounds pass main_task and compression
+// passes memory_compression_task; scan shares this Runner and its dedup/summary
+// calls also pass memory_compression_task, mirroring how they are recorded in
+// the session history.
+func (d Deps) ModelForTask(task session.TaskType) string {
+	return d.TaskModels.ModelFor(string(task), d.Model)
 }
 
 // requestCtx returns ctx carrying the identity of one logical LLM request, or
@@ -418,10 +428,11 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		// Scoped to this round: ctx itself must stay identity-free so each
 		// iteration's meta replaces the previous one instead of nesting.
 		reqCtx := r.requestCtx(ctx, taskKey, session.MainTask, rec.RequestNo)
+		taskModel := r.deps.ModelForTask(session.MainTask)
 
-		_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+		_, llmSpan := telemetry.StartLLMSpan(ctx, taskModel)
 		resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-			Model:     r.deps.Model,
+			Model:     taskModel,
 			Messages:  messages,
 			Tools:     r.deps.MainToolDefs,
 			MaxTokens: r.deps.Template.CompletionTokenLimit(),
@@ -432,7 +443,7 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 			rec.SetError(err, duration)
 			telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 			llmSpan.End()
-			telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
+			telemetry.RecordLLMRequest(ctx, taskModel, duration, 0, "error")
 			return false, StopNone, fmt.Errorf("LLM completion error: %w", err)
 		}
 		rec.SetResponse(resp, duration)
@@ -446,7 +457,7 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		}
 		telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
 		llmSpan.End()
-		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
+		telemetry.RecordLLMRequest(ctx, taskModel, duration, totalTokens, "ok")
 
 		content := resp.VisibleContent()
 		calls := resp.ToolCalls()
@@ -564,9 +575,10 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	startTime := time.Now()
 	reqCtx := r.requestCtx(ctx, taskKey, session.MainTask, rec.RequestNo)
 
-	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+	taskModel := r.deps.ModelForTask(session.MainTask)
+	_, llmSpan := telemetry.StartLLMSpan(ctx, taskModel)
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-		Model:     r.deps.Model,
+		Model:     taskModel,
 		Messages:  messages,
 		Tools:     graceDefs,
 		MaxTokens: r.deps.Template.CompletionTokenLimit(),
@@ -577,7 +589,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 		rec.SetError(err, duration)
 		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 		llmSpan.End()
-		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
+		telemetry.RecordLLMRequest(ctx, taskModel, duration, 0, "error")
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", taskKey, err)
 		return
 	}
@@ -593,7 +605,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	}
 	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
 	llmSpan.End()
-	telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
+	telemetry.RecordLLMRequest(ctx, taskModel, duration, totalTokens, "ok")
 
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
@@ -748,7 +760,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 							rlCtx := llm.ContextWithSessionKey(rctx,
 								llm.SessionTaskKey(r.deps.Session.SessionID, string(session.ReLocationTask), cm.Path))
 							reqCtx := r.requestCtx(rlCtx, cm.Path, session.ReLocationTask, rlRec.RequestNo)
-							_, resp := diff.ReLocateComment(reqCtx, cm, d, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
+							_, resp := diff.ReLocateComment(reqCtx, cm, d, r.deps.LLMClient, msgs, r.deps.ModelForTask(session.ReLocationTask), r.deps.Template.CompletionTokenLimit())
 							if resp != nil {
 								rlRec.SetResponse(resp, time.Since(rlStart))
 								if resp.Usage != nil {

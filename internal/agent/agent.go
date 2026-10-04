@@ -114,11 +114,14 @@ type Args struct {
 	// injected into plan and main_task prompts via {{requirement_background}}.
 	Background string
 
-	// Model is the resolved model name used by every LLM request this run
-	// makes. The template carries no per-phase model override, so plan,
-	// main_task, memory compression, re-location and review filter all send
-	// this value.
+	// Model is the resolved run-wide model name. It is the default for every
+	// LLM request this run makes; a task whose id appears in TaskModels sends
+	// that override instead (see ModelForTask).
 	Model string
+
+	// TaskModels carries the config file's task_models overrides resolved for
+	// this run. Nil when unset; ModelForTask falls back to Model.
+	TaskModels llm.TaskModels
 
 	// Provider is the configured provider name (e.g. "openai", "anthropic", or a
 	// custom-provider key) recorded in the manifest's execution.provider. It is a
@@ -177,6 +180,14 @@ type RuntimeConfig struct {
 	EndpointHost string        // endpoint host[:port] only, credential- and path-free
 	Language     string        // configured review output language
 	Timeout      time.Duration // per-request timeout (0 means client default)
+}
+
+// ModelForTask returns the model override configured for task, or the run-wide
+// Model when task_models has no entry for it. Every LLM call site routes its
+// ChatRequest.Model through this so a partially filled task_models map can
+// never send the wrong model to an unconfigured task.
+func (a Args) ModelForTask(task session.TaskType) string {
+	return a.TaskModels.ModelFor(string(task), a.Model)
 }
 
 // Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
@@ -242,6 +253,7 @@ func New(args Args) *Agent {
 	a.runner = llmloop.NewRunner(llmloop.Deps{
 		LLMClient:         args.LLMClient,
 		Model:             args.Model,
+		TaskModels:        args.TaskModels,
 		Template:          args.Template,
 		Tools:             args.Tools,
 		MainToolDefs:      args.MainToolDefs,
@@ -273,7 +285,7 @@ func New(args Args) *Agent {
 func (a *Agent) newRequestMeta(filePath string, taskType session.TaskType, requestNo int) llm.RequestMeta {
 	return llm.RequestMeta{
 		Provider:  a.args.Provider,
-		Model:     a.args.Model,
+		Model:     a.args.ModelForTask(taskType),
 		FilePath:  filePath,
 		TaskType:  string(taskType),
 		RequestNo: requestNo,
@@ -659,9 +671,10 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	// Group files semantically via LLM.
-	groupResult := groupDiffs(ctx, nonDeleted, a.args.LLMClient, a.args.Model,
+	groupModel := a.args.ModelForTask(session.GroupingTask)
+	groupResult := groupDiffs(ctx, nonDeleted, a.args.LLMClient, groupModel,
 		a.args.Template, llmloop.PromptTokenLimit(a.args.Template.MaxTokens),
-		&groupingSessionOpts{session: a.session, provider: a.args.Provider, model: a.args.Model})
+		&groupingSessionOpts{session: a.session, provider: a.args.Provider, model: groupModel})
 	groups := groupResult.groups
 	a.fileGroups = groups
 	if groupResult.usage != nil {
@@ -1084,6 +1097,10 @@ func (a *Agent) ruleConfigSHA256() string {
 // attempt: two otherwise-identical runs with different budgets are not
 // interchangeable when auditing why one stopped short.
 func (a *Agent) runtimeConfigSHA256() string {
+	// Deliberately run-wide only: task_models routing is a per-request model
+	// swap on the same endpoint, so two runs differing only in task_models
+	// share this hash. The per-task choices remain visible in the session
+	// history's per-task records instead.
 	r := a.args.RuntimeConfig
 	return hashFields(
 		"protocol", r.Protocol,
@@ -1764,9 +1781,10 @@ func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concaten
 	startTime := time.Now()
 	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(gk, session.PlanTask, rec.RequestNo))
 
-	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
+	planModel := a.args.ModelForTask(session.PlanTask)
+	_, llmSpan := telemetry.StartLLMSpan(ctx, planModel)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-		Model:     a.args.Model,
+		Model:     planModel,
 		Messages:  messages,
 		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
@@ -1860,9 +1878,10 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 	startTime := time.Now()
 	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(groupKey, session.ReviewFilterTask, rec.RequestNo))
 
-	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
+	filterModel := a.args.ModelForTask(session.ReviewFilterTask)
+	_, llmSpan := telemetry.StartLLMSpan(ctx, filterModel)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-		Model:     a.args.Model,
+		Model:     filterModel,
 		Messages:  messages,
 		Tools:     filterTools,
 		MaxTokens: a.args.Template.CompletionTokenLimit(),

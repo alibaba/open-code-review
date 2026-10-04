@@ -2773,3 +2773,124 @@ func TestResolveEndpoint_InvalidEnvURLNamesSourceAndVariable(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveEndpointWithOptions_TaskModelsParsedFromConfig(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	t.Setenv("OCR_LLM_MODEL", "env-model")
+	path, _ := writeResolverConfig(t, configFile{
+		TaskModels: map[string]string{
+			"plan_task":               " cheap-model ",
+			"memory_compression_task": "cheap-model",
+		},
+	})
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.TaskModels["plan_task"] != "cheap-model" {
+		t.Fatalf("plan_task override = %q, want trimmed %q", ep.TaskModels["plan_task"], "cheap-model")
+	}
+	if ep.TaskModels["memory_compression_task"] != "cheap-model" {
+		t.Fatalf("memory_compression_task override = %q", ep.TaskModels["memory_compression_task"])
+	}
+	if _, ok := ep.TaskModels["main_task"]; ok {
+		t.Fatalf("main_task should not be present, map = %v", ep.TaskModels)
+	}
+	if got := ep.TaskModels.ModelFor("plan_task", "run-model"); got != "cheap-model" {
+		t.Fatalf("ModelFor(plan_task) = %q, want override", got)
+	}
+	if got := ep.TaskModels.ModelFor("main_task", "run-model"); got != "run-model" {
+		t.Fatalf("ModelFor(main_task) = %q, want fallback", got)
+	}
+}
+
+func TestResolveEndpointWithOptions_TaskModelsUnknownKeyFailsFast(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	path, _ := writeResolverConfig(t, configFile{
+		TaskModels: map[string]string{"plan_tasks": "cheap-model"},
+	})
+	_, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err == nil {
+		t.Fatal("expected error for unknown task_models key")
+	}
+	if !strings.Contains(err.Error(), `unknown task "plan_tasks"`) {
+		t.Fatalf("error = %v, want unknown-task message", err)
+	}
+	for _, id := range ValidTaskModels() {
+		if !strings.Contains(err.Error(), id) {
+			t.Fatalf("error %v should list valid id %q", err, id)
+		}
+	}
+}
+
+func TestResolveEndpointWithOptions_TaskModelsEmptyValueFailsFast(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	path, _ := writeResolverConfig(t, configFile{
+		TaskModels: map[string]string{"plan_task": "   "},
+	})
+	_, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err == nil || !strings.Contains(err.Error(), "model must not be empty") {
+		t.Fatalf("error = %v, want empty-model message", err)
+	}
+}
+
+func TestResolveEndpointWithOptions_TaskModelsAbsentIsNil(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	t.Setenv("OCR_LLM_MODEL", "env-model")
+	path, _ := writeResolverConfig(t, configFile{})
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.TaskModels != nil {
+		t.Fatalf("TaskModels = %v, want nil", ep.TaskModels)
+	}
+}
+
+func TestResolveEndpointWithOptions_TaskModelsSurviveExplicitProviderPath(t *testing.T) {
+	clearAllEnv(t)
+	path, _ := writeResolverConfig(t, configFile{
+		Provider:   "anthropic",
+		TaskModels: map[string]string{"grouping_task": "cheap-model"},
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "tok", URL: "https://api.example.com", Model: "claude-opus-4-6"},
+		},
+	})
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.TaskModels["grouping_task"] != "cheap-model" {
+		t.Fatalf("TaskModels = %v, want grouping_task override preserved", ep.TaskModels)
+	}
+}
+
+func TestResolveEndpointWithOptions_TaskModelsApplyToEnvResolvedEndpoint(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	t.Setenv("OCR_LLM_MODEL", "env-model")
+	// Config file declares overrides but no usable endpoint; the endpoint must
+	// resolve from the environment and still carry the overrides.
+	path, _ := writeResolverConfig(t, configFile{
+		TaskModels: map[string]string{"memory_compression_task": "cheap-model"},
+	})
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Source != "OCR environment" {
+		t.Fatalf("Source = %q, want OCR environment", ep.Source)
+	}
+	if ep.TaskModels["memory_compression_task"] != "cheap-model" {
+		t.Fatalf("TaskModels = %v, want override carried onto env endpoint", ep.TaskModels)
+	}
+}

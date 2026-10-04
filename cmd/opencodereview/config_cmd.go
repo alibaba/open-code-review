@@ -36,7 +36,11 @@ Examples:
   # Custom provider
   ocr config set provider my-gateway
   ocr config set custom_providers.my-gateway.url https://gateway.internal.com/v1
-  ocr config set custom_providers.my-gateway.protocol openai`,
+  ocr config set custom_providers.my-gateway.protocol openai
+
+  # Per-task model overrides (cheap model for aux tasks)
+  ocr config set task_models.plan_task deepseek-v4-flash
+  ocr config unset task_models.plan_task`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -163,9 +167,65 @@ func runConfigUnset(key string) error {
 		return unsetCustomProvider(configPath, parts[1])
 	case "mcp_servers":
 		return unsetMCPServer(configPath, parts[1])
+	case "task_models":
+		return unsetTaskModel(configPath, parts[1])
 	default:
-		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, mcp_servers.<name>, and task_models.<task>")
 	}
+}
+
+// setTaskModelValue handles `ocr config set task_models.<task> <model>`.
+// The task id is validated against the resolver's accepted list so a typo
+// fails here instead of surfacing as a startup error on the next review.
+func setTaskModelValue(cfg *Config, key, value string) error {
+	task := strings.TrimPrefix(key, "task_models.")
+	valid := llm.ValidTaskModels()
+	if !containsString(valid, task) {
+		return fmt.Errorf("unknown task %q in %s (valid: %s)", task, key, strings.Join(valid, ", "))
+	}
+	model := strings.TrimSpace(value)
+	if model == "" {
+		return fmt.Errorf("invalid value for %s: model must not be empty (use `ocr config unset %s` to remove it)", key, key)
+	}
+	if cfg.TaskModels == nil {
+		cfg.TaskModels = make(map[string]string)
+	}
+	cfg.TaskModels[task] = model
+	return nil
+}
+
+// unsetTaskModel handles `ocr config unset task_models.<task>`. Removing a
+// missing entry is an error so a stale habit does not read as success.
+func unsetTaskModel(configPath, task string) error {
+	valid := llm.ValidTaskModels()
+	if !containsString(valid, task) {
+		return fmt.Errorf("unknown task %q in task_models.<task> (valid: %s)", task, strings.Join(valid, ", "))
+	}
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if _, ok := cfg.TaskModels[task]; !ok {
+		return fmt.Errorf("task_models.%s is not set", task)
+	}
+	delete(cfg.TaskModels, task)
+	if len(cfg.TaskModels) == 0 {
+		cfg.TaskModels = nil
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+	fmt.Printf("Unset task_models.%s\n", task)
+	return nil
+}
+
+func containsString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 func unsetMaxTokens(configPath string) error {
@@ -349,6 +409,7 @@ type MCPServerConfig struct {
 type Config struct {
 	Provider        string                     `json:"provider,omitempty"`
 	Model           string                     `json:"model,omitempty"`
+	TaskModels      map[string]string          `json:"task_models,omitempty"`
 	MaxTokens       int                        `json:"max_tokens,omitempty"`
 	Effort          string                     `json:"effort,omitempty"`
 	Providers       map[string]ProviderEntry   `json:"providers,omitempty"`
@@ -609,6 +670,7 @@ var supportedConfigKeys = []string{
 	"providers.<name>.<field>",
 	"custom_providers.<name>.<field>",
 	"mcp_servers.<name>.<field>",
+	"task_models.<task>",
 	"llm.url",
 	"llm.auth_token",
 	"llm.auth_token_cmd",
@@ -631,6 +693,9 @@ func setConfigValue(cfg *Config, key, value string) error {
 	// Handle providers.<name>.<field> paths.
 	if strings.HasPrefix(key, "providers.") {
 		return setProviderValue(cfg, key, value)
+	}
+	if strings.HasPrefix(key, "task_models.") {
+		return setTaskModelValue(cfg, key, value)
 	}
 	if strings.HasPrefix(key, "custom_providers.") {
 		return setCustomProviderValue(cfg, key, value)

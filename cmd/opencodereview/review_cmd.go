@@ -231,6 +231,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		MaxConcurrency:        opts.concurrency,
 		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
+		TaskModels:            rt.TaskModels,
 		Provider:              rt.Provider,
 		EndpointSource:        rt.Source,
 		Background:            opts.background,
