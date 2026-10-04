@@ -94,8 +94,11 @@ private fun applyProviderField(entry: MutableMap<String, JsonElement>, field: St
         "url" -> entry["url"] = JsonPrimitive(value)
         "protocol" -> entry["protocol"] = JsonPrimitive(value)
         "model" -> entry["model"] = JsonPrimitive(value)
-        "models" -> entry["models"] = JsonArray(parseModelList(value).map(::JsonPrimitive))
-        "auth_header" -> entry["auth_header"] = JsonPrimitive(value)
+        "models" -> {
+            val models = parseModelList(value)
+            if (models.isEmpty()) entry.remove("models") else entry["models"] = JsonArray(models.map(::JsonPrimitive))
+        }
+        "auth_header" -> if (value.isBlank()) entry.remove("auth_header") else entry["auth_header"] = JsonPrimitive(value.trim())
         else -> Unit
     }
 }

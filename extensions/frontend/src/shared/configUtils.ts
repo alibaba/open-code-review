@@ -153,15 +153,12 @@ export function buildCustomUpdateSaveEntries(params: {
     { key: 'provider', value: params.name },
   ];
   const models = params.models.trim();
-  if (models) {
-    entries.splice(3, 0, { key: `custom_providers.${params.name}.models`, value: models });
-  }
+  // Always emitted so an emptied optional field clears the previously saved value.
+  entries.splice(3, 0, { key: `custom_providers.${params.name}.models`, value: models });
   if (params.apiKeyChanged && params.apiKey.trim()) {
     entries.push({ key: `custom_providers.${params.name}.api_key`, value: params.apiKey.trim() });
   }
-  if (params.authHeader.trim()) {
-    entries.push({ key: `custom_providers.${params.name}.auth_header`, value: params.authHeader.trim() });
-  }
+  entries.push({ key: `custom_providers.${params.name}.auth_header`, value: params.authHeader.trim() });
   return entries;
 }
 
