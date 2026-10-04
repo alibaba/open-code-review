@@ -114,6 +114,7 @@ When posting review discussions, the script includes rate-limit handling with ex
 | `OCR_RATE_LIMIT_THRESHOLD` | `10` | Proactively slow down when GitLab `RateLimit-Remaining` is at/below this value (set `0` to disable). Applies to both writes (doubles the pacing delay) and reads (switches to the longer read spacing). |
 | `OCR_READ_SUCCESS_DELAY` | `500` | Delay (ms) after a successful read (`list_notes`/`list_discussions`/`get_mr_diffs`) to pace read API calls, mirroring the GitHub Action's `readWithPacing`. |
 | `OCR_READ_LOW_REMAINING_SPACING` | `5000` | Longer delay (ms) used after a read when the remaining quota is at/below `OCR_RATE_LIMIT_THRESHOLD`. |
+| `OCR_NOTE_BODY_LIMIT` | `990000` | Character cap per note body (comments and the summary). Oversized comments drop their suggestion block first, then truncate the finding text; values `<= 0` fall back to the default. Lower it for self-hosted instances with a smaller note cap. |
 | `OCR_ROUTE_SEVERITY_BELOW` | _(empty)_ | Optional severity threshold (`critical`, `high`, `medium`, `low`) that routes findings at-or-below it from inline comments to summary notes (fail-open: never drops a finding). Empty or unknown values disable severity routing. |
 | `OCR_ROUTE_CATEGORIES` | _(empty)_ | Optional comma-separated categories (`bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other`) routed from inline to summary notes. Unknown tokens are ignored. Combine with `OCR_ROUTE_SEVERITY_BELOW` to route on either condition. |
 
