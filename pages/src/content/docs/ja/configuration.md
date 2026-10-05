@@ -324,6 +324,19 @@ ocr config unset effort        # デフォルトの medium に戻す
 
 優先順位は `--effort` フラグ > 保存済みの `effort` > デフォルトの `medium` です。
 
+### タスク別モデルの指定
+
+1 回のレビュー実行では、複数種類の LLM リクエストが発行されます。`task_models` を使うと、定型的で軽いタスクを小さなモデルに回し、メインのレビューループは強力なモデルのままにできます:
+
+```bash
+ocr config set task_models.plan_task deepseek-v4-flash
+ocr config set task_models.memory_compression_task deepseek-v4-flash
+```
+
+指定できるキーは、OCR がセッションに記録するタスク ID です: `plan_task`、`main_task`、`memory_compression_task`、`re_location_task`、`review_filter_task`、`grouping_task`。`ocr scan` の重複排除とプロジェクト要約も `memory_compression_task` に従います。未知のタスク ID は拒否され、値はプロバイダーにそのまま送信されるため、プロバイダーが解決できるモデル名である必要があります。
+
+タスクごとの優先順位は、`task_models.<task>` が `--model` より強く、`--model` はプロバイダーに設定したモデルより強くなります。エントリのないタスクは実行全体のモデルを使うため、1 タスクずつ設定できます。1 つだけ解除するには `ocr config unset task_models.plan_task` を実行します。
+
 ### 接続性を検証する
 
 ```bash

@@ -249,6 +249,19 @@ ocr config unset effort      # 기본값 medium으로 복귀
 
 `--effort low|medium|high`는 한 번의 실행에 한해 저장된 값을 재정의합니다.
 
+### 작업별 모델
+
+한 번의 리뷰 실행은 여러 종류의 LLM 요청을 만듭니다. `task_models`를 사용하면 가볍고 기계적인 작업을 작은 모델로 보내고 메인 리뷰 루프는 강력한 모델을 유지할 수 있습니다:
+
+```bash
+ocr config set task_models.plan_task deepseek-v4-flash
+ocr config set task_models.memory_compression_task deepseek-v4-flash
+```
+
+유효한 키는 OCR이 세션에 기록하는 작업 ID입니다: `plan_task`, `main_task`, `memory_compression_task`, `re_location_task`, `review_filter_task`, `grouping_task`. `ocr scan`의 중복 제거와 프로젝트 요약 단계도 `memory_compression_task`를 따릅니다. 알 수 없는 작업 ID는 거부되며, 값은 프로바이더에 그대로 전송되므로 프로바이더가 해석할 수 있는 모델 이름이어야 합니다.
+
+작업별 우선순위: `task_models.<task>`가 `--model`보다 우선하고, `--model`은 프로바이더에 설정된 모델보다 우선합니다. 항목이 없는 작업은 실행 전체 모델을 사용하므로 한 번에 하나의 작업씩 채울 수 있습니다. 하나만 제거하려면 `ocr config unset task_models.plan_task`를 사용합니다.
+
 ### 연결 검증 {#verify-connectivity}
 
 ```bash

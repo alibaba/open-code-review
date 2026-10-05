@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -45,6 +46,102 @@ type ResolvedEndpoint struct {
 	// providers. Empty means "let the AWS SDK decide".
 	AWSProfile string
 	AWSRegion  string
+
+	// TaskModels carries per-task model overrides parsed from the OCR config
+	// file's task_models map. It rides on whichever endpoint wins resolution —
+	// including endpoints resolved from the environment — because the map only
+	// swaps the per-request model string, never the endpoint or credentials.
+	// Call sites consult it via ModelForTask; a nil map means every task uses
+	// the run-wide Model. Not serialized.
+	TaskModels TaskModels
+}
+
+// TaskModels maps a task id (the session.TaskType strings, e.g. "plan_task")
+// to the model that should serve that task, overriding the run-wide model for
+// that task only. The endpoint, credentials, and client stay shared: only the
+// per-request ChatRequest.Model changes.
+type TaskModels map[string]string
+
+// validTaskModels lists the task ids a config file may name in task_models.
+// They mirror the session.TaskType constants in internal/session/history.go;
+// internal/session keeps a drift-guard test because llm cannot import session.
+var validTaskModels = map[string]struct{}{
+	"plan_task":               {},
+	"main_task":               {},
+	"memory_compression_task": {},
+	"re_location_task":        {},
+	"review_filter_task":      {},
+	"grouping_task":           {},
+}
+
+// ValidTaskModels returns the task ids accepted in the task_models config map.
+func ValidTaskModels() []string {
+	ids := make([]string, 0, len(validTaskModels))
+	for id := range validTaskModels {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// ModelFor returns the override configured for task, or fallback when the map
+// is nil or has no entry for it. Call sites pass the run-wide model as
+// fallback so an absent key is byte-identical to the previous behavior.
+func (tm TaskModels) ModelFor(task, fallback string) string {
+	if model := tm[task]; model != "" {
+		return model
+	}
+	return fallback
+}
+
+// parseTaskModels validates the raw config map: unknown task ids fail fast
+// (the same contract as an unknown provider name) and an empty model string is
+// rejected so a typo cannot silently fall back to the run model.
+func parseTaskModels(raw map[string]string) (TaskModels, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	tm := make(TaskModels, len(raw))
+	// Iterate ids in sorted order so a config naming several bad keys always
+	// fails with the same error text.
+	keys := make([]string, 0, len(raw))
+	for task := range raw {
+		keys = append(keys, task)
+	}
+	sort.Strings(keys)
+	for _, task := range keys {
+		if _, ok := validTaskModels[task]; !ok {
+			return nil, fmt.Errorf("unknown task %q in task_models (valid: %s)", task, strings.Join(ValidTaskModels(), ", "))
+		}
+		// Same normalization as --model: a model name pasted with a terminal
+		// color-code suffix must not reach the wire verbatim.
+		model := stripModelSuffix(strings.TrimSpace(raw[task]))
+		if model == "" {
+			return nil, fmt.Errorf("task_models[%q]: model must not be empty", task)
+		}
+		tm[task] = model
+	}
+	return tm, nil
+}
+
+// loadTaskModelOverrides reads task_models from the OCR config file without
+// resolving an endpoint. It is called before any strategy runs so an invalid
+// map aborts resolution before credential prompting, and so overrides declared
+// in the config file still apply when the endpoint itself resolves from the
+// environment. A missing config file yields a nil map.
+func loadTaskModelOverrides(configPath string) (TaskModels, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var cfg configFile
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	return parseTaskModels(cfg.TaskModels)
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -98,6 +195,17 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 	opts.Provider = strings.TrimSpace(opts.Provider)
 	opts.Model = strings.TrimSpace(opts.Model)
 
+	// Task-model overrides are validated before any strategy runs, for the same
+	// reason the env overrides below are: an invalid map must abort resolution
+	// before api_key_cmd gets prompted and the result discarded. They attach to
+	// whichever endpoint wins — the config file may declare overrides while the
+	// endpoint itself resolves from the environment, and the map only swaps
+	// per-request model strings.
+	taskModels, err := loadTaskModelOverrides(configPath)
+	if err != nil {
+		return ResolvedEndpoint{}, fmt.Errorf("resolve OCR config file: %w", err)
+	}
+
 	// The global env overrides are parsed before any strategy runs, even though
 	// they are applied to the endpoint afterwards. Parsing them inside
 	// finalizeResolvedEndpoint would let a typo'd OCR_LLM_TIMEOUT ("30s") or an
@@ -121,7 +229,9 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 			}
 			return ResolvedEndpoint{}, fmt.Errorf("resolve OCR config file: provider %q is not configured in %s section because the config file does not exist", opts.Provider, section)
 		}
-		return finalizeResolvedEndpoint("OCR config file", ep, env), nil
+		ep = finalizeResolvedEndpoint("OCR config file", ep, env)
+		ep.TaskModels = taskModels
+		return ep, nil
 	}
 
 	strategies := []struct {
@@ -143,7 +253,9 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 		// transport supplies both. Everything else still needs all three.
 		complete := ep.Model != "" && (ep.AmbientAuth || (ep.URL != "" && ep.Token != ""))
 		if ok && complete {
-			return finalizeResolvedEndpoint(strategy.name, ep, env), nil
+			ep = finalizeResolvedEndpoint(strategy.name, ep, env)
+			ep.TaskModels = taskModels
+			return ep, nil
 		}
 	}
 
@@ -361,6 +473,7 @@ type providerEntryConfig struct {
 type configFile struct {
 	Provider        string                         `json:"provider,omitempty"`
 	Model           string                         `json:"model,omitempty"`
+	TaskModels      map[string]string              `json:"task_models,omitempty"`
 	Providers       map[string]providerEntryConfig `json:"providers,omitempty"`
 	CustomProviders map[string]providerEntryConfig `json:"custom_providers,omitempty"`
 	Llm             llmFileConfig                  `json:"llm,omitempty"`

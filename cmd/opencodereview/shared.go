@@ -199,8 +199,9 @@ func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 type llmRuntime struct {
 	Client       llm.LLMClient
 	Model        string
-	Provider     string // resolved provider name (non-secret label; empty for non-provider endpoints)
-	Source       string // resolved configuration source (non-secret label)
+	Provider     string         // resolved provider name (non-secret label; empty for non-provider endpoints)
+	Source       string         // resolved configuration source (non-secret label)
+	TaskModels   llm.TaskModels // per-task model overrides from the config file; nil when unset
 	PlanToolDefs []llm.ToolDef
 	MainToolDefs []llm.ToolDef
 	Collector    *tool.CommentCollector
@@ -276,6 +277,7 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 		Model:          ep.Model,
 		Provider:       ep.Provider,
 		Source:         ep.Source,
+		TaskModels:     ep.TaskModels,
 		PlanToolDefs:   planToolDefs,
 		MainToolDefs:   mainToolDefs,
 		Collector:      tool.NewCommentCollector(),

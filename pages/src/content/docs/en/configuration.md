@@ -327,6 +327,29 @@ ocr config unset effort      # back to the default medium
 
 `--effort low|medium|high` overrides the saved value for a single run.
 
+### Per-task models
+
+A review run issues several kinds of LLM request. `task_models` routes the
+cheap, mechanical ones to a smaller model while the main review loop keeps
+the strong one:
+
+```bash
+ocr config set task_models.plan_task deepseek-v4-flash
+ocr config set task_models.memory_compression_task deepseek-v4-flash
+```
+
+Valid keys are the task ids OCR records in its sessions: `plan_task`,
+`main_task`, `memory_compression_task`, `re_location_task`,
+`review_filter_task`, and `grouping_task`. In `ocr scan`, the dedup and
+project-summary passes follow `memory_compression_task` too. Unknown task
+ids are rejected, and the value is sent to the provider as-is, so it must
+be a model name the provider resolves.
+
+Precedence per task: `task_models.<task>` wins over `--model`, which wins
+over the provider's configured model. Tasks without an entry use the
+run-wide model, so the map can be filled one task at a time. Remove a
+single override with `ocr config unset task_models.plan_task`.
+
 ### Verify connectivity
 
 ```bash
