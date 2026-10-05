@@ -149,6 +149,10 @@ ocr scan --provider openai --model gpt-5.4 --format json
 最终选中来源中的 model，但不会改变来源顺序。不完整的策略会继续回退，而不会与其他策略
 混合。选中的内置 provider 仍可从其支持的环境变量读取凭据。
 
+对于内置 provider，`--model` 不受 `ocr config model` 的建议模型列表限制。
+如果模型既不在内置列表中，也不在 `providers.<name>.models` 中，OCR 会向 stderr
+输出警告，并交由 provider 验证。自定义 provider 仍遵循原有的 `--model` 校验规则。
+
 ### 模式
 
 #### 工作区模式（默认）
