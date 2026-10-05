@@ -289,7 +289,7 @@ review（或 `ocr scan`）来生成报告。
 
 | 症状 | 原因 / 修复 |
 |---|---|
-| `Cannot find merge-base` | checkout 步骤用了浅克隆，但区间模式评审需要完整历史。上游工作流在 `actions/checkout` 上设 `fetch-depth: 0`——编辑文件时保留该设置。 |
+| `Cannot find merge-base` | Action 在浅克隆基础分支后，仅获取基础分支和 PR 引用的完整历史。请保留此 fetch 步骤，并确认基础分支和固定 head SHA 可访问。 |
 | `Failed to parse OCR output` | `OCR_LLM_URL` 或 `OCR_LLM_AUTH_TOKEN` 缺失或错误。在 *Settings → Secrets and variables → Actions* 下复查值。 |
 | 评审评论落到错误行 | 通常意味着评审开始到评论张贴之间 diff 发生了偏移。张贴脚本此时回退为普通 issue 评论——无需处理。 |
 

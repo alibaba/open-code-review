@@ -265,7 +265,7 @@ review（または `ocr scan`）を実行してください。
 
 | 症状 | 原因 / 修正 |
 |---|---|
-| `Cannot find merge-base` | checkout 手順が浅いクローンを使っていますが、区間モードのレビューには完全な履歴が必要です。上流のワークフローは `actions/checkout` に `fetch-depth: 0` を設定しています——ファイルを編集する際はこの設定を保持してください。 |
+| `Cannot find merge-base` | Action はベースの浅い checkout 後に、ベースと PR の参照に必要な完全な履歴を取得します。この fetch 手順を保持し、ベースブランチと固定 head SHA が取得可能か確認してください。 |
 | `Failed to parse OCR output` | `OCR_LLM_URL` または `OCR_LLM_AUTH_TOKEN` が欠落しているか誤っています。*Settings → Secrets and variables → Actions* で値を再確認してください。 |
 | レビューコメントが誤った行に付く | 通常、レビュー開始からコメント貼り付けの間に diff がずれたことを意味します。貼り付けスクリプトはこの場合、通常の issue コメントにフォールバックします——対処は不要です。 |
 

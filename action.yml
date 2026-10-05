@@ -414,7 +414,9 @@ runs:
         # base-to-head diff from git objects; the head commit's blobs are
         # fetched separately so they are resolvable without materializing
         # untrusted PR files into the working tree.
-        fetch-depth: 0
+        ref: refs/heads/${{ env.BASE_REF }}
+        fetch-depth: 1
+        fetch-tags: false
 
     - name: Fetch PR head (fork-safe)
       if: env.HEAD_SHA != ''
@@ -423,14 +425,25 @@ runs:
         PR_NUM: ${{ env.PR_NUMBER }}
       run: |
         if [ -n "$PR_NUM" ]; then
-          git fetch origin "pull/${PR_NUM}/head"
+          FETCH_ARGS=(--no-tags)
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            FETCH_ARGS+=(--unshallow)
+          fi
+          # Full ancestry is required, but unrelated branches and tags are not.
+          # Fetch the fixed SHA as well: the PR ref may move after the event.
+          git fetch "${FETCH_ARGS[@]}" origin \
+            "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}" \
+            "+refs/pull/${PR_NUM}/head:refs/remotes/origin/pull/${PR_NUM}/head" \
+            "${HEAD_SHA}"
         fi
 
     - name: Compute merge-base
       shell: bash
       run: |
-        git fetch origin "${BASE_REF}" 2>/dev/null || true
-        MERGE_BASE=$(git merge-base "origin/${BASE_REF}" "${HEAD_SHA}" 2>/dev/null || echo "${HEAD_SHA}")
+        MERGE_BASE=$(git merge-base "origin/${BASE_REF}" "${HEAD_SHA}") || {
+          echo "::error::Cannot find merge-base for base '${BASE_REF}' and head '${HEAD_SHA}'"
+          exit 1
+        }
         echo "MERGE_BASE=$MERGE_BASE" >> "$GITHUB_ENV"
         echo "Reviewing ${HEAD_SHA} from merge-base ${MERGE_BASE} (base origin/${BASE_REF})"
 

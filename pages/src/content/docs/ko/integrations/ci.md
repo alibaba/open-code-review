@@ -306,7 +306,7 @@ SARIF는 기계가 읽는 형식이므로 OCR은 stdout에 진행 상황을 출�
 
 | 증상 | 원인 / 해결 |
 |---|---|
-| `Cannot find merge-base` | 체크아웃 단계가 shallow clone을 썼는데, range 모드 리뷰에는 전체 히스토리가 필요합니다. 업스트림 워크플로는 `actions/checkout`에 `fetch-depth: 0`을 설정해 둡니다. 파일을 고치더라도 이 설정은 남겨 두세요. |
+| `Cannot find merge-base` | Action은 베이스의 shallow checkout 후 베이스와 PR 참조에 필요한 전체 히스토리를 가져옵니다. 이 fetch 단계를 유지하고 베이스 브랜치와 고정 head SHA에 접근할 수 있는지 확인하세요. |
 | `Failed to parse OCR output` | `OCR_LLM_URL`이나 `OCR_LLM_AUTH_TOKEN`이 없거나 잘못됐습니다. *Settings → Secrets and variables → Actions*에서 값을 다시 확인하세요. |
 | 리뷰 코멘트가 엉뚱한 줄에 달림 | 대개 리뷰를 시작한 시점과 코멘트를 게시한 시점 사이에 diff가 밀린 경우입니다. 게시 스크립트가 일반 이슈 코멘트로 대체하므로 따로 할 일은 없습니다. |
 

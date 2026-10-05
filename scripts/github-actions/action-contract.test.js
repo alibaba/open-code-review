@@ -532,15 +532,100 @@ require("fs").appendFileSync(process.env.OCR_GIT_CALLS, JSON.stringify(process.a
     );
     const result = runShell(
       renderedRun(step, inputValues()),
-      { PR_NUM: "4242", OCR_GIT_CALLS: gitCalls },
+      { PR_NUM: "4242", BASE_REF: "main", HEAD_SHA: "a".repeat(40), OCR_GIT_CALLS: gitCalls },
       fixture
     );
     assert.strictEqual(result.status, 0, resultDescription(result));
     assert.deepStrictEqual(
       readJsonLines(gitCalls),
-      [["fetch", "origin", "pull/4242/head"]],
+      [
+        ["rev-parse", "--is-shallow-repository"],
+        ["fetch", "--no-tags", "origin",
+          "+refs/heads/main:refs/remotes/origin/main",
+          "+refs/pull/4242/head:refs/remotes/origin/pull/4242/head", "a".repeat(40)],
+      ],
       "the head fetch must name the resolved PR"
     );
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testTargetedFetchPreservesReviewRange() {
+  const fixture = makeFixture();
+  const source = path.join(fixture.dir, "source");
+  const remote = path.join(fixture.dir, "remote.git");
+  fs.mkdirSync(source);
+  function git(cwd, ...args) {
+    const result = spawnSync("git", args, {
+      cwd, encoding: "utf8",
+      env: Object.assign({}, process.env, { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" }),
+    });
+    assert.strictEqual(result.status, 0, resultDescription(result));
+    return result.stdout.trim();
+  }
+  function commit(name) {
+    fs.writeFileSync(path.join(source, name), name);
+    git(source, "add", name);
+    git(source, "commit", "-m", name);
+    return git(source, "rev-parse", "HEAD");
+  }
+  try {
+    git(source, "init", "-b", "main");
+    git(source, "config", "user.name", "Action contract");
+    git(source, "config", "user.email", "action@example.invalid");
+    const ancestor = commit("ancestor");
+    git(source, "checkout", "-b", "fork-head");
+    const fixedHead = commit("reviewed-file");
+    git(source, "checkout", "-b", "moved-head", ancestor);
+    const movedHead = commit("replacement-file");
+    git(source, "checkout", "main");
+    for (let i = 0; i < 8; i += 1) commit(`base-${i}`);
+    const baseTip = git(source, "rev-parse", "HEAD");
+    git(source, "checkout", "--orphan", "unrelated");
+    git(source, "rm", "-rf", ".");
+    const unrelated = commit("unrelated-file");
+    git(source, "tag", "unrelated-tag");
+    git(source, "init", "--bare", remote);
+    git(source, "push", remote,
+      "main:refs/heads/main", "unrelated:refs/heads/unrelated", "refs/tags/unrelated-tag",
+      `${movedHead}:refs/pull/4242/head`, `${fixedHead}:refs/pull/4243/head`);
+
+    for (const shallow of [true, false]) {
+      const checkout = path.join(fixture.dir, shallow ? "shallow" : "full");
+      fs.mkdirSync(checkout);
+      git(checkout, "init");
+      git(checkout, "remote", "add", "origin", `file://${remote}`);
+      git(checkout, "fetch", "--no-tags", ...(shallow ? ["--depth=1"] : []),
+        "origin", "+refs/heads/main:refs/remotes/origin/main");
+      git(checkout, "checkout", "--detach", "origin/main");
+      const envPath = path.join(checkout, "github-env");
+      const env = Object.assign({}, process.env, {
+        PR_NUM: "4242", BASE_REF: "main", HEAD_SHA: fixedHead, GITHUB_ENV: envPath,
+        GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null",
+      });
+      for (const name of ["Fetch PR head (fork-safe)", "Compute merge-base"]) {
+        const result = spawnSync("/bin/bash", ["-eo", "pipefail", "-c", stepNamed(name).run], {
+          cwd: checkout, env, encoding: "utf8",
+        });
+        assert.strictEqual(result.status, 0, `${name} (shallow=${shallow}); ${resultDescription(result)}`);
+      }
+      assert.strictEqual(readEnvAssignments(envPath).MERGE_BASE, ancestor);
+      assert.strictEqual(git(checkout, "rev-parse", "--is-shallow-repository"), "false");
+      assert.strictEqual(git(checkout, "rev-parse", "HEAD"), baseTip, "PR code must not be checked out");
+      assert.strictEqual(git(checkout, "diff", "--name-only", ancestor, fixedHead), "reviewed-file");
+      assert.strictEqual(git(checkout, "rev-parse", "origin/pull/4242/head"), movedHead);
+      assert.strictEqual(git(checkout, "tag", "--list"), "", "tags must not be fetched");
+      assert.strictEqual(git(checkout, "branch", "-r"), "origin/main\n  origin/pull/4242/head");
+      assert.notStrictEqual(spawnSync("git", ["cat-file", "-e", unrelated], { cwd: checkout }).status, 0,
+        "unrelated branch objects must not be fetched");
+
+      const result = spawnSync("/bin/bash", ["-eo", "pipefail", "-c", stepNamed("Compute merge-base").run], {
+        cwd: checkout, env: Object.assign({}, env, { HEAD_SHA: unrelated }), encoding: "utf8",
+      });
+      assert.notStrictEqual(result.status, 0, "a missing merge-base must not become an empty review");
+      assert.match(result.stdout, /::error::Cannot find merge-base/);
+    }
   } finally {
     removeFixture(fixture);
   }
@@ -2005,6 +2090,7 @@ const TESTS = [
   ["an unresolvable PR number fails before any review work", testPrNumberFailsBeforeAnyReviewWork],
   ["pr_number rejects values that are not a PR number", testPrNumberRejectsValuesThatAreNotAPrNumber],
   ["the resolved PR number reaches the fork-safe head fetch", testResolvedPrNumberReachesTheHeadFetch],
+  ["targeted fetch preserves fork and fixed-head review ranges without unrelated refs", testTargetedFetchPreservesReviewRange],
   ["both github-script steps read the resolved PR number", testPrNumberWiredIntoBothGithubScriptSteps],
   ["GitHub Actions README documents PR number resolution", testExampleReadmeDocumentsPrNumberResolution],
 ];

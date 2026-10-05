@@ -50,7 +50,7 @@ See [`.github/workflows/ocr-review.yml`](../../.github/workflows/ocr-review.yml)
 - Marking the workspace as a trusted git `safe.directory` when running inside a container (e.g. `git config --global --replace-all safe.directory '*'`) to avoid "dubious ownership" errors. Use `--replace-all` (not `--add`) so repeated runs across multiple self-hosted actions replace rather than accumulate entries in the global git config.
 - Pinning action inputs explicitly (`sticky_summary`, `incremental`, `upload_artifacts`, `llm_extra_body`, etc.).
 
-The action performs its own full `fetch-depth: 0` checkout of the PR internally, so no extra checkout step is needed for the review diff. Adapt the runner settings to your environment and secret layout.
+The action checks out only the trusted base branch tip, then fetches full ancestry for the base branch, PR head ref, and fixed review head SHA, without unrelated branches or tags. PR head files are not checked out. No extra checkout step is needed for the review diff. Adapt the runner settings to your environment and secret layout.
 
 ## How It Works
 
@@ -610,7 +610,7 @@ OCR supports both OpenAI and Anthropic API formats:
 ### Common Issues
 
 1. **Job fails / "Failed to parse OCR output"**: When `ocr review` exits non-zero the action fails the job with that exit code (the comment-posting step is skipped); a zero exit with malformed JSON surfaces as a parse error in the summary. In both cases, check that `OCR_LLM_URL` and `OCR_LLM_AUTH_TOKEN` are set correctly, then inspect the uploaded `ocr-stderr.log` artifact (also printed in the "Run OpenCodeReview" step log) for the underlying error.
-2. **"Cannot find merge-base"**: The action fetches full history (`fetch-depth: 0`) and the PR head (`git fetch origin pull/<n>/head`); if this still fails, ensure `permissions: contents: read` is set and the base branch is accessible (e.g., not deleted).
+2. **"Cannot find merge-base"**: The action starts with a shallow base checkout, then fetches full ancestry for the base and PR refs before computing the merge-base. If this fails, ensure `permissions: contents: read` is set and the base branch and fixed head SHA are accessible (e.g., not deleted). It fails rather than treating a missing merge-base as an empty review.
 3. **Review comments not on the expected lines**: Comments are attached to the PR head commit. If a comment's line falls outside the current diff (the PR was force-pushed or updated mid-review), GitHub rejects the inline post and the comment is rendered in the summary instead. The workflow's concurrency group cancels stale runs on new pushes.
 4. **No summary or comments at all**: Confirm the job's `permissions` include `pull-requests: write`, and that `github_token` (defaults to `${{ github.token }}`) is not overridden with a token lacking those scopes.
 

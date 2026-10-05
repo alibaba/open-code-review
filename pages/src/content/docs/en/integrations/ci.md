@@ -323,7 +323,7 @@ produce a report.
 
 | Symptom | Cause / Fix |
 |---|---|
-| `Cannot find merge-base` | The checkout step used a shallow clone, but range-mode review needs full history. The upstream workflow sets `fetch-depth: 0` on `actions/checkout` — preserve that setting if you edit the file. |
+| `Cannot find merge-base` | The Action fetches full ancestry for only the base and PR refs after a shallow base checkout. Preserve that fetch step; ensure the base branch and fixed head SHA are accessible. |
 | `Failed to parse OCR output` | `OCR_LLM_URL` or `OCR_LLM_AUTH_TOKEN` is missing or wrong. Re-check the values under *Settings → Secrets and variables → Actions*. |
 | Review comments land on the wrong lines | Usually means the diff shifted between the moment the review started and when comments were posted. The posting script falls back to a plain issue comment in that case — no action needed. |
 
