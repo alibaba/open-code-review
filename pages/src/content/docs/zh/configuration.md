@@ -68,6 +68,11 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
+内置 provider 的模型列表只为 `ocr config model` 提供选择建议，不限制 `--model`。
+如果指定的模型既不在内置列表中，也不在 `providers.<name>.models` 中，OCR 会向
+stderr 输出警告；发送请求时由 provider 验证模型。自定义 provider 仍遵循原有的
+`--model` 校验规则。
+
 ## ChatGPT 登录预览版
 
 此预览版新增通过公开 Responses API 使用的内置 `chatgpt` provider，没有 API key 环境变量。 请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)了解登录、同意和使用限制。

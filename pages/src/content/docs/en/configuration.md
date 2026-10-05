@@ -70,6 +70,12 @@ provider instead uses the ChatGPT credentials created by `ocr auth login`.
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
+Built-in providers' model lists are suggestions for `ocr config model`, not
+restrictions on `--model`. An override absent from both the built-in list and
+`providers.<name>.models` produces a warning on stderr; the provider validates
+the model when the request is sent. Custom providers retain their existing
+`--model` validation rules.
+
 ## Sign in with ChatGPT preview
 
 This preview adds the `chatgpt` built-in provider for the public Responses API. It has no API-key environment variable. See the [ChatGPT preview guide](../chatgpt-preview/) for sign-in, consent and usage restrictions.

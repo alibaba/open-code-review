@@ -5,12 +5,16 @@ package llm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/chatgptauth"
 )
 
 func TestStripModelSuffix(t *testing.T) {
@@ -532,12 +536,15 @@ func TestResolveEndpointWithOptions_ExplicitProviderAndModel(t *testing.T) {
 		t.Fatalf("endpoint = %+v", ep)
 	}
 
-	_, err = ResolveEndpointWithOptions(path, ResolveOptions{
-		Provider: "anthropic",
-		Model:    "not-a-registered-model",
+	var unknown ResolvedEndpoint
+	stderr := captureStderr(t, func() {
+		unknown, err = ResolveEndpointWithOptions(path, ResolveOptions{
+			Provider: "anthropic",
+			Model:    "not-a-registered-model",
+		})
 	})
-	if err == nil || !strings.Contains(err.Error(), `model "not-a-registered-model" is not available for provider "anthropic"`) {
-		t.Fatalf("error = %v", err)
+	if err != nil || unknown.Model != "not-a-registered-model" || !strings.Contains(stderr, `model "not-a-registered-model" is not in the suggested models for provider "anthropic"`) {
+		t.Fatalf("endpoint = %+v, error = %v, stderr = %q", unknown, err, stderr)
 	}
 }
 
@@ -1146,7 +1153,7 @@ func TestResolveEndpointWithModelOverride_ValidModelInPresetList(t *testing.T) {
 	}
 }
 
-func TestResolveEndpointWithModelOverride_InvalidModelInPresetList(t *testing.T) {
+func TestResolveEndpointWithModelOverride_UnlistedPresetModelWarns(t *testing.T) {
 	clearAllEnv(t)
 
 	cfg := configFile{
@@ -1161,24 +1168,22 @@ func TestResolveEndpointWithModelOverride_InvalidModelInPresetList(t *testing.T)
 		t.Fatalf("write config: %v", err)
 	}
 
-	_, err := ResolveEndpointWithModelOverride(cfgPath, "claude-opsu-4-6")
-	if err == nil {
-		t.Fatal("expected error for invalid model override")
+	var ep ResolvedEndpoint
+	var err error
+	stderr := captureStderr(t, func() {
+		ep, err = ResolveEndpointWithModelOverride(cfgPath, "claude-opsu-4-6")
+	})
+	if err != nil || ep.Model != "claude-opsu-4-6" {
+		t.Fatalf("endpoint = %+v, error = %v", ep, err)
 	}
-	if !strings.Contains(err.Error(), "not available for provider") {
-		t.Errorf("error message should mention model unavailability, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "available models:") {
-		t.Errorf("error message should list available models, got: %v", err)
+	if !strings.Contains(stderr, `model "claude-opsu-4-6" is not in the suggested models for provider "anthropic"`) || !strings.Contains(stderr, "the provider will validate it") {
+		t.Errorf("stderr = %q, want model warning and provider validation guidance", stderr)
 	}
 }
 
-func TestResolveEndpointWithModelOverride_InvalidModelDoesNotRunAPIKeyCmd(t *testing.T) {
+func TestResolveEndpointWithModelOverride_UnlistedModelStillRunsAPIKeyCmd(t *testing.T) {
 	clearAllEnv(t)
 
-	// The command is guaranteed to fail, so the error it would produce doubles as
-	// a witness that it ran: a bad --model must fail on validation instead, with
-	// no secret-manager prompt.
 	cfg := configFile{
 		Provider: "anthropic",
 		Providers: map[string]providerEntryConfig{
@@ -1191,23 +1196,22 @@ func TestResolveEndpointWithModelOverride_InvalidModelDoesNotRunAPIKeyCmd(t *tes
 		t.Fatalf("write config: %v", err)
 	}
 
-	_, err := ResolveEndpointWithModelOverride(cfgPath, "claude-opsu-4-6")
-	if err == nil {
-		t.Fatal("expected error for invalid model override")
+	var err error
+	stderr := captureStderr(t, func() {
+		_, err = ResolveEndpointWithModelOverride(cfgPath, "claude-opsu-4-6")
+	})
+	if err == nil || !strings.Contains(err.Error(), "api_key_cmd") {
+		t.Fatalf("error = %v, want api_key_cmd failure", err)
 	}
-	if !strings.Contains(err.Error(), "not available for provider") {
-		t.Errorf("error message should mention model unavailability, got: %v", err)
-	}
-	if strings.Contains(err.Error(), "api_key_cmd") {
-		t.Errorf("api_key_cmd ran before model validation, got: %v", err)
+	if !strings.Contains(stderr, `model "claude-opsu-4-6" is not in the suggested models`) {
+		t.Errorf("stderr = %q, want warning before api_key_cmd runs", stderr)
 	}
 }
 
-// A bad global env override must be rejected before any strategy runs, for the
-// same reason as the model check above: OCR_LLM_TIMEOUT="30s" (the field wants a
-// bare integer) used to be parsed only after an endpoint resolved, so the user
-// authenticated to 1Password/Touch ID and then got a config error. Same witness
-// trick: the command cannot succeed, so its error proves it ran.
+// A bad global env override must be rejected before any strategy runs:
+// OCR_LLM_TIMEOUT="30s" (the field wants a bare integer) used to be parsed only
+// after an endpoint resolved, so the user authenticated to 1Password/Touch ID
+// and then got a config error. A failing command proves it ran when it should not.
 func TestResolveEndpointWithModelOverride_BadEnvOverrideDoesNotRunAPIKeyCmd(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1364,6 +1368,105 @@ func TestResolveEndpointWithModelOverride_NoValidationWhenNoModelList(t *testing
 	}
 }
 
+func TestResolveEndpointWithModelOverride_OpenRouterAcceptsUnlistedModel(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "openrouter",
+		Providers: map[string]providerEntryConfig{
+			"openrouter": {
+				APIKey: "test-key",
+				Models: []string{"custom-picker-suggestion"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	const model = "deepseek/deepseek-v4.1-flash"
+	var ep ResolvedEndpoint
+	var err error
+	stderr := captureStderr(t, func() {
+		ep, err = ResolveEndpointWithOptions(cfgPath, ResolveOptions{Provider: "openrouter", Model: model})
+	})
+	if err != nil {
+		t.Fatalf("OpenRouter rejected an unlisted model: %v", err)
+	}
+	if ep.Model != model || ep.Provider != "openrouter" {
+		t.Fatalf("resolved model/provider = %q/%q, want %q/openrouter", ep.Model, ep.Provider, model)
+	}
+	if !strings.Contains(stderr, `model "`+model+`" is not in the suggested models for provider "openrouter"`) {
+		t.Errorf("stderr = %q, want unlisted model warning", stderr)
+	}
+}
+
+func TestResolveEndpointWithModelOverride_AllBuiltInProvidersAcceptUnlistedModel(t *testing.T) {
+	clearAllEnv(t)
+	const model = "unlisted-model-for-test"
+	for _, provider := range ListProviders() {
+		t.Run(provider.Name, func(t *testing.T) {
+			entry := providerEntryConfig{APIKey: "test-key", AWSRegion: "us-west-2"}
+			var credentialCalls int
+			if provider.Name == "chatgpt" {
+				entry = providerEntryConfig{}
+				oldCredentials, oldModels := chatGPTCredentials, chatGPTModels
+				t.Cleanup(func() { chatGPTCredentials, chatGPTModels = oldCredentials, oldModels })
+				chatGPTCredentials = func(context.Context, string) (*chatgptauth.Auth, error) {
+					credentialCalls++
+					return &chatgptauth.Auth{ClientID: "account-fixture", AccessToken: "siwc-fixture"}, nil
+				}
+				chatGPTModels = func(context.Context, *chatgptauth.Auth) ([]chatgptauth.Model, error) {
+					t.Fatal("explicit ChatGPT model queried the catalog")
+					return nil, nil
+				}
+			}
+			path, _ := writeResolverConfig(t, configFile{
+				Provider: provider.Name,
+				Providers: map[string]providerEntryConfig{
+					provider.Name: entry,
+				},
+			})
+			var ep ResolvedEndpoint
+			var err error
+			stderr := captureStderr(t, func() {
+				ep, err = ResolveEndpointWithModelOverride(path, model)
+			})
+			if err != nil || ep.Model != model || ep.Provider != provider.Name {
+				t.Fatalf("endpoint = %+v, error = %v", ep, err)
+			}
+			if provider.Name == "chatgpt" {
+				if credentialCalls != 1 || !ep.ChatGPTPlan || !ep.RequiresStreaming || !ep.RejectsSamplingParams || ep.URL != chatgptauth.Resource || ep.Token != "siwc-fixture" || ep.ChatGPTAccount != "account-fixture" || stderr != "" {
+					t.Fatalf("endpoint = %+v, credential calls = %d, stderr = %q", ep, credentialCalls, stderr)
+				}
+			} else if strings.Count(stderr, "[ocr] WARNING: model") != 1 || !strings.Contains(stderr, fmt.Sprintf("for provider %q", provider.Name)) {
+				t.Errorf("stderr = %q, want one warning for %s", stderr, provider.Name)
+			}
+		})
+	}
+}
+
+func TestResolveEndpoint_UnlistedConfiguredModelDoesNotWarn(t *testing.T) {
+	clearAllEnv(t)
+	path, _ := writeResolverConfig(t, configFile{
+		Provider: "anthropic",
+		Model:    "unlisted-configured-model",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "test-key"},
+		},
+	})
+	var ep ResolvedEndpoint
+	var err error
+	stderr := captureStderr(t, func() {
+		ep, err = ResolveEndpoint(path)
+	})
+	if err != nil || ep.Model != "unlisted-configured-model" || stderr != "" {
+		t.Fatalf("endpoint = %+v, error = %v, stderr = %q", ep, err, stderr)
+	}
+}
+
 func TestResolveEndpointWithModelOverride_MergesPresetAndEntryModels(t *testing.T) {
 	clearAllEnv(t)
 
@@ -1382,27 +1485,42 @@ func TestResolveEndpointWithModelOverride_MergesPresetAndEntryModels(t *testing.
 		t.Fatalf("write config: %v", err)
 	}
 
-	// Should accept both preset models and entry models.
-	ep1, err := ResolveEndpointWithModelOverride(cfgPath, "claude-opus-4-8")
+	var ep1 ResolvedEndpoint
+	var err error
+	stderr := captureStderr(t, func() {
+		ep1, err = ResolveEndpointWithModelOverride(cfgPath, "claude-opus-4-8")
+	})
 	if err != nil {
 		t.Fatalf("unexpected error for preset model: %v", err)
 	}
-	if ep1.Model != "claude-opus-4-8" {
-		t.Errorf("Model = %q, want %q", ep1.Model, "claude-opus-4-8")
+	if ep1.Model != "claude-opus-4-8" || stderr != "" {
+		t.Errorf("endpoint = %+v, stderr = %q, want listed model without warning", ep1, stderr)
 	}
 
-	ep2, err := ResolveEndpointWithModelOverride(cfgPath, "custom-model-1")
+	var ep2 ResolvedEndpoint
+	stderr = captureStderr(t, func() {
+		ep2, err = ResolveEndpointWithModelOverride(cfgPath, "custom-model-1")
+	})
 	if err != nil {
 		t.Fatalf("unexpected error for entry model: %v", err)
 	}
-	if ep2.Model != "custom-model-1" {
-		t.Errorf("Model = %q, want %q", ep2.Model, "custom-model-1")
+	if ep2.Model != "custom-model-1" || stderr != "" {
+		t.Errorf("endpoint = %+v, stderr = %q, want user-added model without warning", ep2, stderr)
 	}
 
-	// Should reject models not in either list.
-	_, err = ResolveEndpointWithModelOverride(cfgPath, "invalid-model")
-	if err == nil {
-		t.Fatal("expected error for model not in preset or entry lists")
+	var ep3 ResolvedEndpoint
+	stderr = captureStderr(t, func() {
+		ep3, err = ResolveEndpointWithModelOverride(cfgPath, "unknown-model")
+	})
+	if err != nil || ep3.Model != "unknown-model" || !strings.Contains(stderr, `model "unknown-model" is not in the suggested models`) {
+		t.Fatalf("endpoint = %+v, error = %v, stderr = %q", ep3, err, stderr)
+	}
+
+	stderr = captureStderr(t, func() {
+		_, err = ResolveEndpoint(cfgPath)
+	})
+	if err == nil || !strings.Contains(err.Error(), "has no model configured") || stderr != "" {
+		t.Fatalf("error = %v, stderr = %q, want no warning without --model", err, stderr)
 	}
 }
 

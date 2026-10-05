@@ -66,6 +66,12 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
+내장 프로바이더의 모델 목록은 `ocr config model`에서 선택할 때 제안하는 목록이며
+`--model`을 제한하지 않습니다. 지정한 모델이 내장 목록과
+`providers.<name>.models` 모두에 없으면 OCR은 stderr에 경고를 출력합니다.
+모델의 유효성은 요청을 보낼 때 프로바이더가 확인합니다. 사용자 정의 프로바이더에는
+기존 `--model` 검증 규칙이 적용됩니다.
+
 ## ChatGPT 로그인 미리보기
 
 이 미리보기는 공개 Responses API용 내장 `chatgpt` provider를 추가합니다. API 키 환경 변수는 없습니다. 로그인, 동의 및 사용 제한은 [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.

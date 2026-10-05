@@ -69,6 +69,11 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
+組み込み provider のモデル一覧は `ocr config model` の選択候補であり、`--model`
+の制限には使われません。組み込み一覧にも `providers.<name>.models` にもないモデルを
+指定すると、OCR は stderr に警告を出します。モデルはリクエスト送信時に provider が
+検証します。カスタム provider には従来の `--model` 検証ルールが適用されます。
+
 ## ChatGPT サインインのプレビュー
 
 このプレビューでは公開 Responses API 用の組み込み `chatgpt` provider が追加されます。API key 環境変数はありません。 サインイン、同意、利用制限は[ChatGPT プレビューガイド](../chatgpt-preview/)を参照してください。
