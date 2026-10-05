@@ -72,6 +72,75 @@ func TestOpenAIChatCompletions_ReplaysReasoningContentAcrossTurns(t *testing.T) 
 	}
 }
 
+// Vercel AI Gateway normalizes reasoning across providers and returns GLM and
+// DeepSeek reasoning as "reasoning", with no reasoning_content. It must still
+// reach the next request.
+func TestOpenAIChatCompletions_ReplaysGatewayReasoningAcrossTurns(t *testing.T) {
+	client := NewOpenAIClient(ClientConfig{URL: "https://ai-gateway.vercel.sh/v1"})
+	body := `{
+		"id":"chatcmpl_1",
+		"object":"chat.completion",
+		"model":"deepseek/deepseek-v4.1-flash",
+		"choices":[{
+			"index":0,
+			"message":{
+				"role":"assistant",
+				"content":"",
+				"reasoning":"read cache.py before judging eviction",
+				"reasoning_details":[{"type":"reasoning.text","text":"read cache.py before judging eviction","format":"unknown","index":0}],
+				"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":"{}"}}]
+			},
+			"finish_reason":"tool_calls"
+		}]
+	}`
+	resp := client.mapOpenAIResponse(unmarshalChatCompletionBody(t, body))
+	if got := resp.ReasoningContent(); got != "read cache.py before judging eviction" {
+		t.Fatalf("ReasoningContent = %q, want the gateway reasoning text", got)
+	}
+
+	historyMsg := NewToolCallMessage(resp.Content(), resp.ToolCalls(), resp.Native(), resp.ReasoningContent())
+	params := client.buildOpenAIParams("deepseek/deepseek-v4.1-flash", ChatRequest{Messages: []Message{historyMsg}})
+	payload, err := json.Marshal(params.Messages[0])
+	if err != nil {
+		t.Fatalf("marshal assistant message: %v", err)
+	}
+	if !bytes.Contains(payload, []byte(`"reasoning_content":"read cache.py before judging eviction"`)) {
+		t.Fatalf("assistant tool-call history dropped gateway reasoning: %s", payload)
+	}
+}
+
+func TestReasoningText(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields string
+		want   string
+	}{
+		{"reasoning_content", `"reasoning_content":"a"`, "a"},
+		{"gateway reasoning", `"reasoning":"b"`, "b"},
+		// Both present: one text, never both concatenated.
+		{"reasoning_content wins", `"reasoning_content":"a","reasoning":"b"`, "a"},
+		{"empty reasoning_content falls back", `"reasoning_content":"","reasoning":"b"`, "b"},
+		{"non-string reasoning ignored", `"reasoning":{"effort":"high"}`, ""},
+		{"null reasoning", `"reasoning":null`, ""},
+		{"absent", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"role":"assistant","content":""`
+			if tt.fields != "" {
+				body += "," + tt.fields
+			}
+			var msg openai.ChatCompletionMessage
+			if err := json.Unmarshal([]byte(body+"}"), &msg); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if got := reasoningText(msg.JSON.ExtraFields); got != tt.want {
+				t.Errorf("reasoningText = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestOpenAIChatCompletions_ReplaysReasoningContentWithEmptyVisibleContent
 // guards the specific regression called out in issue #805: when visible
 // content is empty, Content() falls back to returning the reasoning text as
