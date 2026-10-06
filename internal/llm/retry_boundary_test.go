@@ -713,6 +713,59 @@ func TestFinalizeRequestWithPanicSentinel(t *testing.T) {
 	}
 }
 
+func TestFinalizeOnExitFinalizesAndRepanics(t *testing.T) {
+	c := NewRetryCollector()
+	m := testMeta()
+	ctx := metaCtx(m)
+	c.RecordAttempt(m, AttemptRecord{StatusCode: http.StatusOK}, time.Time{}, time.Time{})
+
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		var err error
+		defer finalizeOnExit(ctx, c, &err)
+		panic("boom")
+	}()
+
+	if recovered != "boom" {
+		t.Errorf("recovered %v, want the original panic value", recovered)
+	}
+	if req := freezeOne(t, c); req.Outcome != OutcomeFailed {
+		t.Errorf("outcome = %s, want failed", req.Outcome)
+	}
+}
+
+// &err is taken at defer time, so this checks the returned error is what gets
+// finalized. A clean success is omitted from the report entirely.
+func TestFinalizeOnExitReadsReturnedError(t *testing.T) {
+	finalize := func(retErr error) *RetryReport {
+		c := NewRetryCollector()
+		m := testMeta()
+		ctx := metaCtx(m)
+		c.RecordAttempt(m, AttemptRecord{StatusCode: http.StatusOK}, time.Time{}, time.Time{})
+
+		call := func() (err error) {
+			defer finalizeOnExit(ctx, c, &err)
+			return retErr
+		}
+		_ = call()
+
+		rep, err := c.Freeze("test-run-id")
+		if err != nil {
+			t.Fatalf("Freeze: %v", err)
+		}
+		return rep
+	}
+
+	if rep := finalize(nil); rep != nil {
+		t.Errorf("successful request produced a report: %+v", rep)
+	}
+	rep := finalize(errors.New("boom"))
+	if rep == nil || len(rep.Requests) != 1 || rep.Requests[0].Outcome != OutcomeFailed {
+		t.Errorf("failed request report = %+v, want one failed request", rep)
+	}
+}
+
 // A nil collector and a context without identity are both no-ops, so no call
 // site in the three clients needs to guard either.
 func TestBoundaryHelpersAreInertWithoutCollectorOrMeta(t *testing.T) {

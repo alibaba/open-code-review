@@ -139,3 +139,14 @@ func finalizeRequest(ctx context.Context, collector *RetryCollector, reqErr erro
 	}
 	collector.Finalize(meta, reqErr, errors.Is(ctx.Err(), context.Canceled))
 }
+
+// finalizeOnExit must be deferred directly, not wrapped in a closure, or its
+// recover never sees the panic. The panic is re-raised after finalizing; see
+// errRequestPanicked for why it has to finalize at all.
+func finalizeOnExit(ctx context.Context, collector *RetryCollector, err *error) {
+	if r := recover(); r != nil {
+		finalizeRequest(ctx, collector, errRequestPanicked)
+		panic(r)
+	}
+	finalizeRequest(ctx, collector, *err)
+}
