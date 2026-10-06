@@ -53,4 +53,5 @@ stages:
                 OCR_LLM_TOKEN: ${OCR_LLM_TOKEN}
                 OCR_LLM_MODEL: ${OCR_LLM_MODEL}
                 OCR_USE_ANTHROPIC: ${OCR_USE_ANTHROPIC}
+                OCR_LANGUAGE: ${OCR_LANGUAGE}
               run: python3 post_review.py

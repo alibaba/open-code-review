@@ -23,6 +23,30 @@ func loadTestTemplate(t *testing.T) *template.Template {
 	return tpl
 }
 
+func TestConfiguredLanguage(t *testing.T) {
+	tests := []struct {
+		name   string
+		config *Config
+		env    string
+		want   string
+	}{
+		{name: "config wins", config: &Config{Language: "Chinese"}, env: "English", want: "Chinese"},
+		{name: "environment supplies missing config", config: &Config{}, env: "Chinese", want: "Chinese"},
+		{name: "environment supplies missing file", env: "English", want: "English"},
+		{name: "empty environment preserves default", config: &Config{Language: "Chinese"}, env: "", want: "Chinese"},
+		{name: "unset environment preserves missing config", config: &Config{}, want: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("OCR_LANGUAGE", test.env)
+			if got := configuredLanguage(test.config); got != test.want {
+				t.Errorf("configuredLanguage() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 // TestLoadLLMRuntime_Success resolves an endpoint via OCR_LLM_* env vars (no
 // config file on disk, so LoadAppConfig returns nil,nil) and asserts the
 // runtime bundle is fully populated.
