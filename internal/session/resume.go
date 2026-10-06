@@ -45,6 +45,18 @@ type ResumeState struct {
 	// built on first use by ReusableItem. Reuse is decided on one goroutine
 	// before any dispatch begins, so this needs no lock.
 	reusable map[string]bool
+
+	// Recovered reports that replay had to discard a final record fragment the
+	// previous run left mid-append (a process killed during a write). Such a
+	// fragment never parses, so it was never a durably committed checkpoint:
+	// dropping it restores the run's last valid checkpoint without inventing
+	// state or silently skipping a line, and the flag lets the caller surface
+	// the interruption instead of resuming as if nothing was lost.
+	Recovered bool
+	// RecoveredFragment, set only when Recovered is true, is a shortened copy of
+	// the discarded bytes so the torn record can be inspected when diagnosing
+	// why a session ended mid-write.
+	RecoveredFragment string
 }
 
 // ResumeItem is a completed file-level checkpoint, keyed by diff fingerprint.
@@ -128,8 +140,14 @@ func loadResumeState(repoDir, sessionID string, skipUnparseable bool) (*ResumeSt
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if readErr == io.EOF {
-			// Bytes returned alongside EOF have no trailing newline: they are an
-			// unterminated record from a torn write. Drop and stop without parsing.
+			// Bytes returned alongside EOF have no trailing newline: they are
+			// the file's final fragment. A fragment that parses as a complete
+			// record is folded in (a well-formed final record that simply
+			// omitted its newline); one that does not parse is the torn tail of
+			// a write interrupted mid-append and is dropped, with the recovery
+			// reported so an interrupted run is not silently resumed as if
+			// nothing was lost (see applyTrailingFragment).
+			state.applyTrailingFragment(line)
 			break
 		}
 
@@ -188,6 +206,32 @@ func (s *ResumeState) applyResumeLine(line []byte) error {
 		}
 	}
 	return nil
+}
+
+// applyTrailingFragment handles the final bytes of a session file that ended
+// without a newline. A fragment that parses as a complete record is folded in:
+// it may be a hand-written or externally produced file that simply omitted the
+// trailing newline. A fragment that does not parse was never a durably
+// committed record — this project only appends newline-terminated lines through
+// a single fd, so an interrupted write tears the tail, never the middle — and
+// is dropped. The recovery is then reported so an interrupted run is not
+// silently resumed as if nothing was lost, while a corrupt newline-terminated
+// line stays fatal (or is skipped) under the caller's strict/lenient policy.
+func (s *ResumeState) applyTrailingFragment(fragment []byte) {
+	if len(fragment) == 0 {
+		return
+	}
+	if err := s.applyResumeLine(fragment); err == nil {
+		return
+	}
+	s.Recovered = true
+	const maxFragment = 256
+	if len(fragment) > maxFragment {
+		fragment = fragment[:maxFragment]
+	}
+	if s.RecoveredFragment == "" {
+		s.RecoveredFragment = string(fragment)
+	}
 }
 
 func (s *ResumeState) applySessionStart(rec resumeRecord) {
