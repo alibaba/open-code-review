@@ -220,6 +220,64 @@ func TestSetConfigValueProviderEntryNonPresetWritesCustomProvider(t *testing.T) 
 	}
 }
 
+func TestSetConfigValueDottedProviderName(t *testing.T) {
+	fields := []struct {
+		field string
+		value string
+	}{
+		{"url", "https://example.invalid/v1"},
+		{"protocol", llm.ProtocolAnthropicBedrock},
+		{"model", "some-model"},
+		{"api_key", "test-key"},
+		{"api_key_cmd", "secret-tool lookup service x"},
+		{"models", `["some-model","other-model"]`},
+		{"auth_header", "authorization"},
+		{"timeout_sec", "120"},
+		{"extra_body", `{"temperature":0.2}`},
+		{"extra_headers", "X-Gateway=test"},
+		{"retry_codes", "400,403"},
+		{"aws_region", "us-west-2"},
+		{"aws_profile", "test-profile"},
+	}
+	want := ProviderEntry{
+		URL:          "https://example.invalid/v1",
+		Protocol:     llm.ProtocolAnthropicBedrock,
+		Model:        "some-model",
+		APIKey:       "test-key",
+		APIKeyCmd:    "secret-tool lookup service x",
+		Models:       []string{"some-model", "other-model"},
+		AuthHeader:   "authorization",
+		TimeoutSec:   120,
+		ExtraBody:    map[string]any{"temperature": 0.2},
+		ExtraHeaders: map[string]string{"X-Gateway": "test"},
+		RetryCodes:   []int{400, 403},
+		AWSRegion:    "us-west-2",
+		AWSProfile:   "test-profile",
+	}
+	for _, prefix := range []string{"providers", "custom_providers"} {
+		for _, name := range []string{"mimo-v2.6-flash", "openai.gateway.v2", "foo.api_key"} {
+			t.Run(prefix+"."+name, func(t *testing.T) {
+				cfg := &Config{}
+				if err := setConfigValue(cfg, "provider", name); err != nil {
+					t.Fatal(err)
+				}
+				for _, tt := range fields {
+					key := prefix + "." + name + "." + tt.field
+					if err := setConfigValue(cfg, key, tt.value); err != nil {
+						t.Fatalf("setConfigValue(%q): %v", key, err)
+					}
+				}
+				if !reflect.DeepEqual(cfg.CustomProviders, map[string]ProviderEntry{name: want}) {
+					t.Errorf("CustomProviders = %#v, want only %q with %#v", cfg.CustomProviders, name, want)
+				}
+				if len(cfg.Providers) != 0 || cfg.Provider != name {
+					t.Errorf("Providers = %#v, Provider = %q", cfg.Providers, cfg.Provider)
+				}
+			})
+		}
+	}
+}
+
 func TestSetConfigValueProviderEntryModelsJSON(t *testing.T) {
 	cfg := &Config{}
 
@@ -364,10 +422,15 @@ func TestSetConfigValueProviderEntryInvalidKey(t *testing.T) {
 }
 
 func TestSetConfigValueProviderEntryInvalidPath(t *testing.T) {
-	cfg := &Config{}
-
-	if err := setConfigValue(cfg, "providers.anthropic", "value"); err == nil {
-		t.Fatal("expected error for incomplete provider path")
+	for _, prefix := range []string{"providers", "custom_providers"} {
+		for _, suffix := range []string{"", "anthropic", ".url", "anthropic.", "mimo-v2.6-flash."} {
+			key := prefix + "." + suffix
+			t.Run(key, func(t *testing.T) {
+				if err := setConfigValue(&Config{}, key, "value"); err == nil || !strings.Contains(err.Error(), "invalid") {
+					t.Fatalf("setConfigValue(%q) = %v, want invalid path error", key, err)
+				}
+			})
+		}
 	}
 }
 
