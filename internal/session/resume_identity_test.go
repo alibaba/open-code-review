@@ -165,6 +165,36 @@ func TestValidateResume(t *testing.T) {
 			wantErr: "reviewed input changed",
 		},
 		{
+			// The point of --delta-from: a new version of the change is a new
+			// source artifact, and per-file fingerprints decide what is reused.
+			name:  "delta accepts a changed input",
+			state: func(s *ResumeState) { s.Delta = true },
+			req:   func(r *ResumeRequest) { r.Identity.SourceArtifactSHA256 = "artifact-next-version" },
+		},
+		{
+			// Reused findings were produced under the parent's rules; a delta
+			// must not carry them into a run reviewing under different ones.
+			name:  "delta still rejects a rule change",
+			state: func(s *ResumeState) { s.Delta = true },
+			req: func(r *ResumeRequest) {
+				r.Identity.SourceArtifactSHA256 = "artifact-next-version"
+				r.Identity.RuleConfigSHA256 = "rules-other"
+			},
+			wantErr: "rule identity changed",
+		},
+		{
+			name:    "delta still rejects another repository",
+			state:   func(s *ResumeState) { s.Delta = true },
+			req:     func(r *ResumeRequest) { r.Identity.RepositorySHA256 = "repo-other" },
+			wantErr: "repository identity changed",
+		},
+		{
+			name:    "delta still rejects an implicit model change",
+			state:   func(s *ResumeState) { s.Delta = true },
+			req:     func(r *ResumeRequest) { r.Model = "claude-next" },
+			wantErr: "model changed",
+		},
+		{
 			name:    "implicit provider change is rejected",
 			req:     func(r *ResumeRequest) { r.Provider = "openai" },
 			wantErr: "provider changed",
@@ -300,6 +330,18 @@ func TestNewResumeLineage(t *testing.T) {
 		}
 	})
 
+	t.Run("delta parent marks the lineage", func(t *testing.T) {
+		parent := parentState(nil)
+		parent.Delta = true
+		l := NewResumeLineage(parent, "run-child", "anthropic", "claude")
+		if l == nil || !l.Delta {
+			t.Fatalf("want a delta lineage, got %+v", l)
+		}
+		if l.IsTransition() {
+			t.Error("a delta on the same target is not a transition")
+		}
+	})
+
 	t.Run("nil lineage is not a transition", func(t *testing.T) {
 		var l *ResumeLineage
 		if l.IsTransition() {
@@ -321,7 +363,9 @@ func TestResumeLineageRoundTripsThroughSessionFile(t *testing.T) {
 		ResumedFrom: "parent-session",
 		Operation:   OperationReview,
 	})
-	want := NewResumeLineage(parentState(nil), sh.SessionID, "openai", "gpt-5")
+	parent := parentState(nil)
+	parent.Delta = true
+	want := NewResumeLineage(parent, sh.SessionID, "openai", "gpt-5")
 	sh.RecordResumeLineage(want)
 	if err := sh.Finalize(); err != nil {
 		t.Fatalf("finalize session: %v", err)

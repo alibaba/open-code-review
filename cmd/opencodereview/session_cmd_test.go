@@ -354,6 +354,19 @@ func TestSessionDisplayUsesManifestStatusAndCoverage(t *testing.T) {
 	}
 }
 
+func TestSessionDetailMarksDeltaParent(t *testing.T) {
+	for _, delta := range []bool{false, true} {
+		summary := session.Summary{
+			SessionID:     "run-2",
+			ResumeLineage: &session.ResumeLineage{ParentRunID: "run-1", Delta: delta},
+		}
+		got := captureStdout(t, func() { printSessionDetail(os.Stdout, &summary, nil) })
+		if marked := strings.Contains(got, "run run-1 (delta)"); marked != delta {
+			t.Errorf("delta=%v: detail = %q", delta, got)
+		}
+	}
+}
+
 func TestSessionDisplayUsesUnknownForInvalidManifestStatus(t *testing.T) {
 	for _, state := range []session.TerminalState{"", "bogus"} {
 		summary := session.Summary{

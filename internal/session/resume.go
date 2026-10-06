@@ -41,6 +41,11 @@ type ResumeState struct {
 	// interrupted parent apart from one that closed with nothing to verify.
 	Closed bool
 
+	// Delta is set by the caller for --delta-from: the parent's results are
+	// reused for a changed input, so ValidateResume does not require the same
+	// source artifact. It is never read from the session file.
+	Delta bool
+
 	// reusable caches the parent manifest's completed and reused fingerprints,
 	// built on first use by ReusableItem. Reuse is decided on one goroutine
 	// before any dispatch begins, so this needs no lock.

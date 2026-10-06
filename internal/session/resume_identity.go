@@ -113,7 +113,10 @@ func (s *ResumeState) validateInputIdentity(id RunIdentity) error {
 	if m.Repository.IdentitySHA256 != id.RepositorySHA256 {
 		return fmt.Errorf("resume rejected: repository identity changed, so this is not the repository the parent run reviewed; %s", resumeHint)
 	}
-	if m.Input.SourceArtifactSHA256 != id.SourceArtifactSHA256 {
+	// A delta run exists to review a changed input, so this is the one check it
+	// skips. What it reuses stays exact: ReusableItem matches on each file's own
+	// diff fingerprint, so only files whose diff is byte-identical carry over.
+	if !s.Delta && m.Input.SourceArtifactSHA256 != id.SourceArtifactSHA256 {
 		return fmt.Errorf("resume rejected: the reviewed input changed since session %q — a ref may now point at a different commit, or the selected file set changed; %s", s.SessionID, resumeHint)
 	}
 	if m.Execution.RuleConfigSHA256 == "" {
@@ -159,6 +162,10 @@ type ResumeLineage struct {
 	SourceModel    string `json:"source_model"`
 	TargetProvider string `json:"target_provider"`
 	TargetModel    string `json:"target_model"`
+	// Delta marks a run that reused its parent's results for a changed input
+	// (--delta-from) rather than resuming the same input. Unlike a transition,
+	// it cannot be derived from the other fields.
+	Delta bool `json:"delta,omitempty"`
 }
 
 // NewResumeLineage builds the lineage for an accepted resume of parent. It
@@ -178,6 +185,7 @@ func NewResumeLineage(parent *ResumeState, runID, targetProvider, targetModel st
 		SourceModel:    parent.Manifest.Execution.Model,
 		TargetProvider: targetProvider,
 		TargetModel:    targetModel,
+		Delta:          parent.Delta,
 	}
 }
 
