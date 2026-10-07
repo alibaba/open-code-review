@@ -840,7 +840,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 
 	// A conversation can already be over the warning threshold before this
 	// round's messages are appended (e.g. an oversized initial prompt).
-	if CountMessagesTokens(*messages) > warnLimit {
+	if st.tokens.count(*messages) > warnLimit {
 		r.cancelPendingCompression(st)
 		var err error
 		if *messages, err = r.runCompression(ctx, *messages, taskKey); err != nil {
@@ -848,6 +848,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 			// post-append check below will retry.
 			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
 		}
+		st.tokens.reset()
 	}
 
 	if len(toolCalls) > 0 {
@@ -860,14 +861,15 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 		*messages = append(*messages, llm.NewToolResultMessage(rs.ToolCallID, rs.Result))
 	}
 
-	finalCount := CountMessagesTokens(*messages)
+	finalCount := st.tokens.count(*messages)
 	if finalCount > warnLimit {
 		r.cancelPendingCompression(st)
 		var err error
 		if *messages, err = r.runCompression(ctx, *messages, taskKey); err != nil {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
 		}
-		finalCount = CountMessagesTokens(*messages)
+		st.tokens.reset()
+		finalCount = st.tokens.count(*messages)
 	}
 
 	// Trigger async compression only after all appends for this update, so
