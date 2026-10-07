@@ -123,6 +123,20 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:        "opper",
+		DisplayName: "Opper",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.opper.ai/v3/compat",
+		EnvVar:      "OPPER_API_KEY",
+		Models: []string{
+			"claude-fable-5-1",
+			"gpt-5.6-sol",
+			"claude-opus-5",
+			"gpt-6-astra",
+			"qwen3.8-max",
+		},
+	},
+	{
 		Name:        "edenai",
 		DisplayName: "Eden AI",
 		Protocol:    ProtocolOpenAIChatCompletions,

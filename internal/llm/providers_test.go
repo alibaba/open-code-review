@@ -10,7 +10,7 @@ import (
 )
 
 func TestLookupProvider_KnownProviders(t *testing.T) {
-	names := []string{"anthropic", "openai", "openrouter", "dashscope", "edenai"}
+	names := []string{"anthropic", "openai", "openrouter", "opper", "dashscope", "edenai"}
 	for _, name := range names {
 		p, ok := LookupProvider(name)
 		if !ok {
@@ -76,7 +76,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "opper", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -198,6 +198,22 @@ func TestLookupProvider_OpenRouterDetails(t *testing.T) {
 	}
 	if p.EnvVar != "OPENROUTER_API_KEY" {
 		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "OPENROUTER_API_KEY")
+	}
+}
+
+func TestLookupProvider_OpperDetails(t *testing.T) {
+	p, ok := LookupProvider("opper")
+	if !ok {
+		t.Fatal("opper not found")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://api.opper.ai/v3/compat" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://api.opper.ai/v3/compat")
+	}
+	if p.EnvVar != "OPPER_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "OPPER_API_KEY")
 	}
 }
 
