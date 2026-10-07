@@ -8,8 +8,10 @@ package com.alibaba.opencodereview.idea.services
 
 internal fun generatedPresetProviderNames(): Set<String> = setOf(
     "anthropic",
+    "anthropic-oauth",
     "baidu-qianfan",
     "bedrock",
+    "codex-oauth",
     "dashscope",
     "dashscope-tokenplan",
     "deepseek",

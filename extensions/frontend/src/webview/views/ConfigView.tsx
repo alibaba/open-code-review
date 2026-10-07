@@ -411,6 +411,11 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
         )}
       </FormItem>
 
+      {(preset.protocol === 'codex-oauth' || preset.protocol === 'anthropic-oauth') && (
+        <FormItem label="OAuth sign-in" hint={`Run ocr auth login ${preset.name} in a terminal on the machine running OCR.`}>
+          <span>{preset.protocol === 'anthropic-oauth' ? 'Uses your local Claude Code CLI and Claude subscription login.' : 'Uses your ChatGPT account and Codex access.'}</span>
+        </FormItem>
+      )}
       {!ambientAuth && (
         <FormItem
           label={t('view.config.apiKey')}
