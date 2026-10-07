@@ -57,6 +57,10 @@ func NormalizeProtocol(raw string) string {
 		return ProtocolOpenAIResponses
 	case ProtocolAnthropicBedrock:
 		return ProtocolAnthropicBedrock
+	case ProtocolCodexOAuth:
+		return ProtocolCodexOAuth
+	case ProtocolAnthropicOAuth:
+		return ProtocolAnthropicOAuth
 	default:
 		return normalized
 	}

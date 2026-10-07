@@ -11,17 +11,37 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
+	"sync"
 	"time"
 )
 
-type CodexOAuthClient struct{ cfg ClientConfig }
+type CodexOAuthClient struct {
+	cfg      ClientConfig
+	mu       sync.Mutex
+	sessions map[string]*codexSession
+}
+
+type codexSession struct {
+	rpc        *codexRPC
+	requestIDs map[string]json.RawMessage
+	callIDs    map[string]struct{}
+	expiry     *time.Timer
+	expiryGen  uint64
+	closed     bool
+	requestEnd func() bool
+	base       []Message
+	tools      []ToolDef
+	model      string
+	toolChoice string
+}
 
 func NewCodexOAuthClient(cfg ClientConfig) *CodexOAuthClient {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Minute
 	}
-	return &CodexOAuthClient{cfg: cfg}
+	return &CodexOAuthClient{cfg: cfg, sessions: make(map[string]*codexSession)}
 }
 
 type codexPacket struct {
@@ -170,6 +190,64 @@ func (r *codexRPC) event(ctx context.Context) (codexPacket, error) {
 	return r.read(ctx)
 }
 
+func (r *codexRPC) availableEvents() ([]codexPacket, error) {
+	packets := r.pending
+	r.pending = nil
+	for {
+		select {
+		case got, ok := <-r.reads:
+			if !ok {
+				return packets, nil
+			}
+			if got.err != nil {
+				return nil, fmt.Errorf("decode Codex app-server event: %w", got.err)
+			}
+			packets = append(packets, got.packet)
+		default:
+			return packets, nil
+		}
+	}
+}
+
+func parseCodexToolCall(packet codexPacket, req ChatRequest, session *codexSession) (ToolCall, error) {
+	var call struct {
+		CallID    string          `json:"callId"`
+		Tool      string          `json:"tool"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(packet.Params, &call); err != nil {
+		return ToolCall{}, err
+	}
+	for _, tool := range req.Tools {
+		if tool.Function.Name == call.Tool && req.ToolChoice != "none" && call.CallID != "" && json.Valid(call.Arguments) {
+			if len(packet.ID) == 0 {
+				return ToolCall{}, fmt.Errorf("Codex dynamic tool call is missing its RPC id")
+			}
+			session.requestIDs[call.CallID] = append(json.RawMessage(nil), packet.ID...)
+			return ToolCall{ID: call.CallID, Type: "function", Function: FunctionCall{Name: call.Tool, Arguments: string(call.Arguments)}}, nil
+		}
+	}
+	return ToolCall{}, fmt.Errorf("Codex requested an invalid or unavailable OCR tool")
+}
+
+func parseCodexUsage(packet codexPacket) (*UsageInfo, error) {
+	var event struct {
+		TokenUsage struct {
+			Last struct {
+				Input  int64 `json:"inputTokens"`
+				Output int64 `json:"outputTokens"`
+				Cached int64 `json:"cachedInputTokens"`
+				Total  int64 `json:"totalTokens"`
+			} `json:"last"`
+		} `json:"tokenUsage"`
+	}
+	if err := json.Unmarshal(packet.Params, &event); err != nil {
+		return nil, err
+	}
+	u := event.TokenUsage.Last
+	return &UsageInfo{PromptTokens: u.Input, CompletionTokens: u.Output, CacheReadTokens: u.Cached, TotalTokens: u.Total}, nil
+}
+
 func (c *CodexOAuthClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	if req.Temperature != nil {
 		return nil, fmt.Errorf("Codex app-server does not support temperature overrides")
@@ -179,16 +257,71 @@ func (c *CodexOAuthClient) CompletionsWithCtx(ctx context.Context, req ChatReque
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
 	defer cancel()
-	rpc, err := startCodexRPC(ctx)
+	model := req.Model
+	if model == "" {
+		model = c.cfg.Model
+	}
+	session := c.takeSession(req.Messages)
+	if session != nil && !session.compatible(req, model) {
+		c.closeSession(session)
+		session = nil
+	}
+	if session == nil {
+		var err error
+		session, err = c.startSession(ctx, req, model)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		session.requestEnd = context.AfterFunc(ctx, func() { c.closeSession(session) })
+		if err := c.sendToolResults(session, req.Messages); err != nil {
+			c.stopRequestCleanup(session)
+			c.closeSession(session)
+			return nil, err
+		}
+	}
+	resp, err := readCodexTurn(ctx, session.rpc, req, model, session)
+	if err != nil {
+		c.stopRequestCleanup(session)
+		c.closeSession(session)
+		return nil, err
+	}
+	if len(resp.ToolCalls()) > 0 {
+		if !c.stopRequestCleanup(session) || !c.keepSession(session, resp.ToolCalls()) {
+			c.closeSession(session)
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("Codex session expired before returning tool calls")
+		}
+		return resp, nil
+	}
+	c.stopRequestCleanup(session)
+	c.closeSession(session)
+	return resp, nil
+}
+
+func (c *CodexOAuthClient) startSession(ctx context.Context, req ChatRequest, model string) (*codexSession, error) {
+	rpc, err := startCodexRPC(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rpc.close()
-	if err := rpc.call(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "open_code_review", "version": AppVersion}, "capabilities": map[string]any{"experimentalApi": true}}, nil); err != nil {
+	session := &codexSession{rpc: rpc, requestIDs: make(map[string]json.RawMessage), callIDs: make(map[string]struct{})}
+	session.base = append([]Message(nil), req.Messages...)
+	session.tools = append([]ToolDef(nil), req.Tools...)
+	session.model = model
+	session.toolChoice = req.ToolChoice
+	session.requestEnd = context.AfterFunc(ctx, func() { c.closeSession(session) })
+	fail := func(err error) (*codexSession, error) {
+		c.stopRequestCleanup(session)
+		c.closeSession(session)
 		return nil, err
 	}
+	if err := rpc.call(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "open_code_review", "version": AppVersion}, "capabilities": map[string]any{"experimentalApi": true}}, nil); err != nil {
+		return fail(err)
+	}
 	if err := rpc.send(map[string]any{"method": "initialized"}); err != nil {
-		return nil, err
+		return fail(err)
 	}
 	var account struct {
 		Account *struct {
@@ -196,14 +329,13 @@ func (c *CodexOAuthClient) CompletionsWithCtx(ctx context.Context, req ChatReque
 		} `json:"account"`
 	}
 	if err := rpc.call(ctx, "account/read", map[string]any{"refreshToken": false}, &account); err != nil {
-		return nil, err
+		return fail(err)
 	}
 	if account.Account == nil || account.Account.Type != "chatgpt" {
-		return nil, fmt.Errorf("Codex OAuth requires a ChatGPT account; run 'ocr auth login codex-oauth'")
+		return fail(fmt.Errorf("Codex OAuth requires a ChatGPT account; run 'ocr auth login codex-oauth'"))
 	}
-	model := req.Model
-	if model == "" {
-		model = c.cfg.Model
+	if req.ToolChoice == "required" && len(req.Tools) == 0 {
+		return fail(fmt.Errorf("Codex tool_choice required needs at least one tool"))
 	}
 	replay := req
 	replay.Messages = append([]Message(nil), req.Messages...)
@@ -221,35 +353,160 @@ func (c *CodexOAuthClient) CompletionsWithCtx(ctx context.Context, req ChatReque
 			tools = append(tools, map[string]any{"type": "function", "name": tool.Function.Name, "description": tool.Function.Description, "inputSchema": tool.Function.Parameters})
 		}
 	}
-	if req.ToolChoice == "required" && len(tools) == 0 {
-		return nil, fmt.Errorf("Codex tool_choice required needs at least one tool")
-	}
 	var thread struct {
 		Thread struct {
 			ID string `json:"id"`
 		} `json:"thread"`
 	}
 	if err := rpc.call(ctx, "thread/start", map[string]any{"model": model, "modelProvider": "openai", "approvalPolicy": "never", "sandbox": "read-only", "ephemeral": true, "environments": []any{}, "baseInstructions": instructions, "dynamicTools": tools}, &thread); err != nil {
-		return nil, err
+		return fail(err)
 	}
 	if thread.Thread.ID == "" {
-		return nil, fmt.Errorf("Codex returned an empty thread id")
+		return fail(fmt.Errorf("Codex returned an empty thread id"))
 	}
 	// OCR owns history and tool execution. Fresh ephemeral threads let concurrent
 	// file reviews and resumed sessions replay the same complete input snapshot.
 	if len(params.Input.OfInputItemList) > 0 {
 		items, err := codexHistoryItems(params.Input.OfInputItemList)
 		if err != nil {
-			return nil, err
+			return fail(err)
 		}
 		if err := rpc.call(ctx, "thread/inject_items", map[string]any{"threadId": thread.Thread.ID, "items": items}, nil); err != nil {
-			return nil, err
+			return fail(err)
 		}
 	}
 	if err := rpc.call(ctx, "turn/start", map[string]any{"threadId": thread.Thread.ID, "input": []map[string]any{{"type": "text", "text": "Continue the supplied conversation with the next assistant response.", "text_elements": []any{}}}}, nil); err != nil {
-		return nil, err
+		return fail(err)
 	}
-	return readCodexTurn(ctx, rpc, req, model)
+	return session, nil
+}
+
+func (c *CodexOAuthClient) takeSession(messages []Message) *codexSession {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, message := range messages {
+		if message.Role == "tool" {
+			if session := c.sessions[message.ToolCallID]; session != nil && !session.closed {
+				if session.expiry != nil {
+					session.expiry.Stop()
+					session.expiry = nil
+					session.expiryGen++
+				}
+				return session
+			}
+		}
+	}
+	return nil
+}
+
+func (c *CodexOAuthClient) keepSession(session *codexSession, calls []ToolCall) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if session.closed {
+		return false
+	}
+	for _, call := range calls {
+		session.callIDs[call.ID] = struct{}{}
+		c.sessions[call.ID] = session
+	}
+	session.expiryGen++
+	generation := session.expiryGen
+	session.expiry = time.AfterFunc(c.cfg.Timeout, func() { c.expireSession(session, generation) })
+	return true
+}
+
+func (c *CodexOAuthClient) closeSession(session *codexSession) {
+	c.mu.Lock()
+	if session.closed {
+		c.mu.Unlock()
+		return
+	}
+	session.closed = true
+	session.expiryGen++
+	if session.expiry != nil {
+		session.expiry.Stop()
+	}
+	for callID := range session.callIDs {
+		delete(c.sessions, callID)
+	}
+	c.mu.Unlock()
+	session.rpc.close()
+}
+
+func (c *CodexOAuthClient) expireSession(session *codexSession, generation uint64) {
+	c.mu.Lock()
+	if session.closed || session.expiryGen != generation {
+		c.mu.Unlock()
+		return
+	}
+	session.closed = true
+	session.expiry = nil
+	for callID := range session.callIDs {
+		delete(c.sessions, callID)
+	}
+	c.mu.Unlock()
+	session.rpc.close()
+}
+
+func (c *CodexOAuthClient) stopRequestCleanup(session *codexSession) bool {
+	if session.requestEnd == nil {
+		return true
+	}
+	stop := session.requestEnd
+	session.requestEnd = nil
+	return stop()
+}
+
+func (session *codexSession) compatible(req ChatRequest, model string) bool {
+	if session.model != model || session.toolChoice != req.ToolChoice || !reflect.DeepEqual(session.tools, req.Tools) || len(req.Messages) < len(session.base) {
+		return false
+	}
+	for i, message := range session.base {
+		if !reflect.DeepEqual(message, req.Messages[i]) {
+			return false
+		}
+	}
+	for _, message := range req.Messages[len(session.base):] {
+		switch message.Role {
+		case "assistant":
+			for _, call := range message.ToolCalls {
+				if _, ok := session.callIDs[call.ID]; !ok {
+					return false
+				}
+			}
+		case "tool":
+			if _, ok := session.callIDs[message.ToolCallID]; !ok {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (c *CodexOAuthClient) sendToolResults(session *codexSession, messages []Message) error {
+	for _, message := range messages {
+		if message.Role != "tool" {
+			continue
+		}
+		requestID, ok := session.requestIDs[message.ToolCallID]
+		if !ok {
+			continue
+		}
+		content := message.ExtractText()
+		if err := session.rpc.send(map[string]any{
+			"id": requestID,
+			"result": map[string]any{
+				"contentItems": []map[string]string{{"type": "inputText", "text": content}},
+				"success":      !strings.HasPrefix(strings.TrimSpace(content), "Error:"),
+			},
+		}); err != nil {
+			return err
+		}
+		delete(session.requestIDs, message.ToolCallID)
+	}
+	return nil
 }
 
 func codexHistoryItems(input any) ([]map[string]any, error) {
@@ -276,9 +533,10 @@ func codexHistoryItems(input any) ([]map[string]any, error) {
 	return items, nil
 }
 
-func readCodexTurn(ctx context.Context, rpc *codexRPC, req ChatRequest, model string) (*ChatResponse, error) {
+func readCodexTurn(ctx context.Context, rpc *codexRPC, req ChatRequest, model string, session *codexSession) (*ChatResponse, error) {
 	var textParts []string
 	var finalParts []string
+	var toolCalls []ToolCall
 	var usage *UsageInfo
 	for {
 		p, err := rpc.event(ctx)
@@ -300,26 +558,35 @@ func readCodexTurn(ctx context.Context, rpc *codexRPC, req ChatRequest, model st
 				return nil, fmt.Errorf("Codex attempted a built-in tool outside OCR's tool loop")
 			}
 		case "item/tool/call":
-			var call struct {
-				CallID    string          `json:"callId"`
-				Tool      string          `json:"tool"`
-				Arguments json.RawMessage `json:"arguments"`
-			}
-			if err := json.Unmarshal(p.Params, &call); err != nil {
+			call, err := parseCodexToolCall(p, req, session)
+			if err != nil {
 				return nil, err
 			}
-			known := false
-			for _, tool := range req.Tools {
-				if tool.Function.Name == call.Tool {
-					known = true
-					break
-				}
+			toolCalls = append(toolCalls, call)
+			buffered, err := rpc.availableEvents()
+			if err != nil {
+				return nil, err
 			}
-			if !known || req.ToolChoice == "none" || call.CallID == "" || !json.Valid(call.Arguments) {
-				return nil, fmt.Errorf("Codex requested an invalid or unavailable OCR tool")
+			for _, next := range buffered {
+				if next.Method == "item/tool/call" {
+					call, err := parseCodexToolCall(next, req, session)
+					if err != nil {
+						return nil, err
+					}
+					toolCalls = append(toolCalls, call)
+					continue
+				}
+				if next.Method == "thread/tokenUsage/updated" {
+					usage, err = parseCodexUsage(next)
+					if err != nil {
+						return nil, err
+					}
+					continue
+				}
+				rpc.pending = append(rpc.pending, next)
 			}
 			content := strings.Join(textParts, "\n")
-			return &ChatResponse{Model: model, Usage: usage, Choices: []Choice{{FinishReason: "tool_calls", Message: ResponseMessage{Role: "assistant", Content: &content, ToolCalls: []ToolCall{{ID: call.CallID, Type: "function", Function: FunctionCall{Name: call.Tool, Arguments: string(call.Arguments)}}}}}}}, nil
+			return &ChatResponse{Model: model, Usage: usage, Choices: []Choice{{FinishReason: "tool_calls", Message: ResponseMessage{Role: "assistant", Content: &content, ToolCalls: toolCalls}}}}, nil
 		case "item/completed":
 			var event struct {
 				Item struct {
@@ -338,21 +605,10 @@ func readCodexTurn(ctx context.Context, rpc *codexRPC, req ChatRequest, model st
 				}
 			}
 		case "thread/tokenUsage/updated":
-			var event struct {
-				TokenUsage struct {
-					Last struct {
-						Input  int64 `json:"inputTokens"`
-						Output int64 `json:"outputTokens"`
-						Cached int64 `json:"cachedInputTokens"`
-						Total  int64 `json:"totalTokens"`
-					} `json:"last"`
-				} `json:"tokenUsage"`
-			}
-			if err := json.Unmarshal(p.Params, &event); err != nil {
+			usage, err = parseCodexUsage(p)
+			if err != nil {
 				return nil, err
 			}
-			u := event.TokenUsage.Last
-			usage = &UsageInfo{PromptTokens: u.Input, CompletionTokens: u.Output, CacheReadTokens: u.Cached, TotalTokens: u.Total}
 		case "turn/completed":
 			var event struct {
 				Turn struct {
@@ -371,7 +627,7 @@ func readCodexTurn(ctx context.Context, rpc *codexRPC, req ChatRequest, model st
 				}
 				return nil, fmt.Errorf("Codex turn %s", event.Turn.Status)
 			}
-			if req.ToolChoice == "required" {
+			if req.ToolChoice == "required" && len(session.callIDs) == 0 {
 				return nil, fmt.Errorf("Codex did not invoke the required OCR tool")
 			}
 			if len(finalParts) > 0 {

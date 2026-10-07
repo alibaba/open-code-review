@@ -34,6 +34,7 @@ func init() {
 
 func fakeCodexServer(mode string) {
 	decoder, encoder := json.NewDecoder(os.Stdin), json.NewEncoder(os.Stdout)
+	toolResults := 0
 	respond := func(p codexPacket, result any) { _ = encoder.Encode(map[string]any{"id": p.ID, "result": result}) }
 	notify := func(method string, params any) {
 		_ = encoder.Encode(map[string]any{"method": method, "params": params})
@@ -42,6 +43,19 @@ func fakeCodexServer(mode string) {
 		var p codexPacket
 		if decoder.Decode(&p) != nil {
 			return
+		}
+		if p.Method == "" && (mode == "tool" || mode == "multi-tool") {
+			toolResults++
+			wantResults := 1
+			if mode == "multi-tool" {
+				wantResults = 2
+			}
+			if toolResults == wantResults {
+				notify("thread/tokenUsage/updated", map[string]any{"tokenUsage": map[string]any{"last": map[string]any{"inputTokens": 10, "outputTokens": 5, "cachedInputTokens": 3, "totalTokens": 15}}})
+				notify("item/completed", map[string]any{"item": map[string]any{"type": "agentMessage", "text": "review complete", "phase": "final_answer"}})
+				notify("turn/completed", map[string]any{"turn": map[string]any{"status": "completed"}})
+			}
+			continue
 		}
 		switch p.Method {
 		case "initialize":
@@ -95,12 +109,15 @@ func fakeCodexServer(mode string) {
 				fmt.Fprintln(os.Stdout, "invalid-json")
 				return
 			}
-			if mode == "tool" || mode == "unknown-tool" {
+			if mode == "tool" || mode == "multi-tool" || mode == "unknown-tool" {
 				name := "search_code"
 				if mode == "unknown-tool" {
 					name = "unavailable"
 				}
 				_ = encoder.Encode(map[string]any{"id": "server-call", "method": "item/tool/call", "params": map[string]any{"callId": "call-123", "tool": name, "arguments": map[string]any{"query": "auth"}}})
+				if mode == "multi-tool" {
+					_ = encoder.Encode(map[string]any{"id": "server-call-2", "method": "item/tool/call", "params": map[string]any{"callId": "call-456", "tool": name, "arguments": map[string]any{"query": "providers"}}})
+				}
 				respond(p, map[string]any{"turn": map[string]any{"id": "turn-test"}})
 				continue
 			}
@@ -132,7 +149,7 @@ func fakeOAuthExecutable(t *testing.T, mode string) {
 }
 
 func TestCodexOAuthRoundTrip(t *testing.T) {
-	for _, mode := range []string{"text", "tool", "replay"} {
+	for _, mode := range []string{"text", "tool", "multi-tool", "replay"} {
 		t.Run(mode, func(t *testing.T) {
 			fakeOAuthExecutable(t, mode)
 			t.Setenv("OPENAI_API_KEY", "must-not-reach-codex")
@@ -141,13 +158,37 @@ func TestCodexOAuthRoundTrip(t *testing.T) {
 			if mode == "replay" {
 				req.Messages = append(req.Messages, Message{Role: "assistant", ToolCalls: []ToolCall{{ID: "call-123", Type: "function", Function: FunctionCall{Name: "search_code", Arguments: `{}`}}}}, Message{Role: "tool", ToolCallID: "call-123", Content: "result-of-test-call"})
 			}
-			resp, err := NewCodexOAuthClient(ClientConfig{Model: "test-model"}).CompletionsWithCtx(context.Background(), req)
+			client := NewCodexOAuthClient(ClientConfig{Model: "test-model"})
+			resp, err := client.CompletionsWithCtx(context.Background(), req)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if mode == "tool" {
-				if len(resp.ToolCalls()) != 1 || resp.ToolCalls()[0].ID != "call-123" || resp.ToolCalls()[0].Function.Arguments != `{"query":"auth"}` {
-					t.Fatalf("unexpected tool calls: %+v", resp.ToolCalls())
+			if mode == "tool" || mode == "multi-tool" {
+				calls := resp.ToolCalls()
+				wantCalls := 1
+				if mode == "multi-tool" {
+					wantCalls = 2
+				}
+				if len(calls) != wantCalls || calls[0].ID != "call-123" || calls[0].Function.Arguments != `{"query":"auth"}` {
+					t.Fatalf("unexpected tool calls: %+v", calls)
+				}
+				if mode == "multi-tool" {
+					if calls[1].ID != "call-456" || calls[1].Function.Arguments != `{"query":"providers"}` {
+						t.Fatalf("unexpected second tool call: %+v", resp)
+					}
+				}
+				toolResults := make([]Message, 0, len(calls)*2)
+				toolResults = append(toolResults, Message{Role: "assistant", Content: resp.Content(), ToolCalls: calls})
+				for _, call := range calls {
+					toolResults = append(toolResults, Message{Role: "tool", ToolCallID: call.ID, Content: "result-of-" + call.ID})
+				}
+				followup := ChatRequest{Messages: append(req.Messages, toolResults...), Tools: req.Tools}
+				next, err := client.CompletionsWithCtx(context.Background(), followup)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if next.Content() != "review complete" || next.Usage == nil || next.Usage.TotalTokens != 15 {
+					t.Fatalf("unexpected follow-up response: %+v", next)
 				}
 			} else if resp.Content() != "review complete" || resp.Usage == nil || resp.Usage.TotalTokens != 15 || resp.Usage.CacheReadTokens != 3 {
 				t.Fatalf("unexpected response: %+v", resp)

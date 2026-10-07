@@ -334,7 +334,8 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
   const [providerName, setProviderName] = useState(initialProvider);
   const preset = PROVIDER_PRESETS.find((p) => p.name === providerName) ?? PROVIDER_PRESETS[0];
   const savedEntry = config?.providers[providerName];
-  const ambientAuth = usesAmbientAuth(preset, savedEntry?.protocol);
+  const resolvedProtocol = savedEntry?.protocol?.trim().toLowerCase() || preset.protocol;
+  const ambientAuth = usesAmbientAuth(preset, resolvedProtocol);
 
   const modelOptions = useMemo(
     () => mergeModelLists(preset.models, savedEntry?.models ?? []),
@@ -411,9 +412,9 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
         )}
       </FormItem>
 
-      {(preset.protocol === 'codex-oauth' || preset.protocol === 'anthropic-oauth') && (
+      {(resolvedProtocol === 'codex-oauth' || resolvedProtocol === 'anthropic-oauth') && (
         <FormItem label="OAuth sign-in" hint={`Run ocr auth login ${preset.name} in a terminal on the machine running OCR.`}>
-          <span>{preset.protocol === 'anthropic-oauth' ? 'Uses your local Claude Code CLI and Claude subscription login.' : 'Uses your ChatGPT account and Codex access.'}</span>
+          <span>{resolvedProtocol === 'anthropic-oauth' ? 'Uses your local Claude Code CLI and Claude subscription login.' : 'Uses your ChatGPT account and Codex access.'}</span>
         </FormItem>
       )}
       {!ambientAuth && (

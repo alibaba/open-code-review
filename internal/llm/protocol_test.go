@@ -18,8 +18,12 @@ func TestNormalizeProtocol(t *testing.T) {
 		{"canonical anthropic is idempotent", ProtocolAnthropic, ProtocolAnthropic},
 		{"canonical openai is idempotent", ProtocolOpenAIChatCompletions, ProtocolOpenAIChatCompletions},
 		{"canonical openai-responses is idempotent", ProtocolOpenAIResponses, ProtocolOpenAIResponses},
+		{"canonical codex OAuth is idempotent", ProtocolCodexOAuth, ProtocolCodexOAuth},
+		{"canonical anthropic OAuth is idempotent", ProtocolAnthropicOAuth, ProtocolAnthropicOAuth},
 		{"anthropic case-insensitive", "ANTHROPIC", ProtocolAnthropic},
 		{"openai-responses case-insensitive", "OpenAI-Responses", ProtocolOpenAIResponses},
+		{"codex OAuth case-insensitive", "CODEX-OAUTH", ProtocolCodexOAuth},
+		{"anthropic OAuth case-insensitive", "Anthropic-OAuth", ProtocolAnthropicOAuth},
 		{"unknown passthrough lowercased", "gRPC", "grpc"},
 		{"unknown anthropic-vertex preserved", "anthropic-vertex", "anthropic-vertex"},
 	}
