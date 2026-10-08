@@ -949,6 +949,7 @@ func TestClassifyItemError(t *testing.T) {
 	}{
 		{"deadline", context.DeadlineExceeded, session.FailureTimeout},
 		{"deadline_wrapped", fmt.Errorf("review %s: %w", secret, context.DeadlineExceeded), session.FailureTimeout},
+		{"request_timeout", fmt.Errorf("%w: %w", llm.ErrRequestTimeout, context.DeadlineExceeded), session.FailureTimeout},
 		{"cancelled", context.Canceled, session.FailureCancelled},
 		{"cancelled_wrapped", fmt.Errorf("aborted %s: %w", secret, context.Canceled), session.FailureCancelled},
 		{"main_task_empty", errMainTaskEmpty, session.FailureConfiguration},
@@ -962,6 +963,12 @@ func TestClassifyItemError(t *testing.T) {
 			}
 			if reason == "" {
 				t.Error("reason is empty; a static safe reason is required")
+			}
+			if errors.Is(tc.err, llm.ErrRequestTimeout) && !strings.Contains(reason, "OCR_LLM_TIMEOUT") {
+				t.Errorf("request timeout reason = %q", reason)
+			}
+			if errors.Is(tc.err, context.DeadlineExceeded) && !errors.Is(tc.err, llm.ErrRequestTimeout) && !strings.Contains(reason, "--timeout") {
+				t.Errorf("task deadline reason = %q", reason)
 			}
 			if strings.Contains(reason, "sk-LEAKED-SECRET") || strings.Contains(reason, "/home/alice") {
 				t.Errorf("reason leaked raw error text: %q", reason)
