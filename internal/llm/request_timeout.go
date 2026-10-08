@@ -16,7 +16,7 @@ func describeTimeout(ctx context.Context, err error) error {
 		return err
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Errorf("task deadline exhausted (review/scan: --timeout): %w", err)
+		return fmt.Errorf("caller deadline exceeded: %w", err)
 	}
 	return fmt.Errorf("%w: %w", ErrRequestTimeout, err)
 }

@@ -239,7 +239,10 @@ Ollama は API key を無視しますが、カスタム provider は空でない
 リクエストと再試行の待機の両方が停止します。
 
 診断メッセージでは `LLM request timeout`（`OCR_LLM_TIMEOUT` または provider の
-`timeout_sec` を確認）と `task deadline exhausted`（`--timeout` を確認）を区別します。
+`timeout_sec` を確認）と `caller deadline exceeded` を区別します。後者は呼び出し元の
+処理のコンテキストの期限が切れたことを示します。review/scan タスクの期限切れなら
+`--timeout` を確認してください。バックグラウンドのメモリ圧縮や `ocr llm test` などの
+処理には、それぞれ独立した期限があります。
 
 ### API key をコマンドで取得する
 

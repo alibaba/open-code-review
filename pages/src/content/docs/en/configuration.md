@@ -243,7 +243,10 @@ hints. The SDK's per-attempt deadline also bounds its retry wait. Cancellation
 or an exhausted task deadline stops both requests and retry waits.
 
 Diagnostics distinguish `LLM request timeout` (check `OCR_LLM_TIMEOUT` or
-provider `timeout_sec`) from `task deadline exhausted` (check `--timeout`).
+provider `timeout_sec`) from `caller deadline exceeded`, which means the
+calling operation's context has expired. For a review/scan task deadline,
+check `--timeout`; other operations, such as background memory compression
+and `ocr llm test`, have their own deadlines.
 
 ### API key from a command
 

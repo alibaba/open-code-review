@@ -203,7 +203,9 @@ LLM 요청마다 HTTP 타임아웃이 있으며 기본값은 **300초**입니다
 모두 중단됩니다.
 
 진단 메시지는 `LLM request timeout`(`OCR_LLM_TIMEOUT` 또는 프로바이더의 `timeout_sec` 확인)과
-`task deadline exhausted`(`--timeout` 확인)를 구분합니다.
+`caller deadline exceeded`를 구분합니다. 후자는 호출한 작업의 컨텍스트 기한이 만료되었다는
+뜻입니다. review/scan 태스크 기한이 만료된 경우에는 `--timeout`을 확인하세요.
+백그라운드 메모리 압축이나 `ocr llm test` 같은 다른 작업에는 각각 독립적인 기한이 있습니다.
 
 ### 명령으로 API 키 가져오기 {#api-key-from-a-command}
 

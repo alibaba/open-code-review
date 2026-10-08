@@ -119,8 +119,11 @@ func TestRequestTimeoutAndSDKRetryBehavior(t *testing.T) {
 						t.Fatalf("error = %v, want request timeout", err)
 					}
 				case "task":
-					if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrRequestTimeout) || !strings.Contains(err.Error(), "task deadline exhausted") {
-						t.Fatalf("error = %v, want task deadline", err)
+					if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrRequestTimeout) || !strings.Contains(err.Error(), "caller deadline exceeded") {
+						t.Fatalf("error = %v, want caller deadline", err)
+					}
+					if strings.Contains(err.Error(), "--timeout") {
+						t.Fatalf("caller deadline attributed to a CLI flag: %v", err)
 					}
 				case "cancel":
 					if !errors.Is(err, context.Canceled) || errors.Is(err, ErrRequestTimeout) {
@@ -155,6 +158,34 @@ func TestRequestTimeoutAndSDKRetryBehavior(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestDescribeTimeoutIndependentCallerDeadline(t *testing.T) {
+	reviewCtx, cancelReview := context.WithTimeout(context.Background(), time.Hour)
+	defer cancelReview()
+	for _, scenario := range []struct {
+		name   string
+		parent context.Context
+	}{
+		{name: "background_compression", parent: context.WithoutCancel(reviewCtx)},
+		{name: "connection_test", parent: context.Background()},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			callerCtx, cancelCaller := context.WithDeadline(scenario.parent, time.Now().Add(-time.Second))
+			defer cancelCaller()
+			originalErr := fmt.Errorf("operation failed: %w", callerCtx.Err())
+			err := describeTimeout(callerCtx, originalErr)
+			if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, originalErr) || errors.Is(err, ErrRequestTimeout) {
+				t.Fatalf("error = %v, want wrapped caller deadline", err)
+			}
+			if !strings.Contains(err.Error(), "caller deadline exceeded") || strings.Contains(err.Error(), "--timeout") {
+				t.Fatalf("incorrect caller deadline diagnostic: %v", err)
+			}
+			if reviewCtx.Err() != nil {
+				t.Fatalf("main review context must remain active: %v", reviewCtx.Err())
+			}
+		})
 	}
 }
 

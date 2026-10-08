@@ -224,7 +224,9 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
 取消任务或任务期限耗尽时，请求和重试等待都会停止。
 
 诊断信息会区分 `LLM request timeout`（检查 `OCR_LLM_TIMEOUT` 或 provider 的
-`timeout_sec`）和 `task deadline exhausted`（检查 `--timeout`）。
+`timeout_sec`）和 `caller deadline exceeded`，后者表示调用方操作的上下文期限已耗尽。
+如果耗尽的是 review/scan 任务期限，应检查 `--timeout`；后台内存压缩、`ocr llm test`
+等其他操作有各自独立的期限。
 
 ### 通过命令获取 API key
 
