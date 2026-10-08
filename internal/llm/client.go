@@ -5,6 +5,7 @@
 // Supported protocols (canonical names, see protocol.go):
 //   - "anthropic" — Anthropic Messages API
 //   - "anthropic-bedrock" — the same API served by AWS Bedrock, SigV4-signed
+//   - "anthropic-vertex" — the same API served by Google Cloud Vertex AI, OAuth2-authorized
 //   - "openai" — OpenAI Chat Completions API
 //   - "openai-responses" — OpenAI Responses API
 package llm
@@ -26,12 +27,15 @@ import (
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/vertex"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	openai "github.com/openai/openai-go/v3"
 	openaiopt "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 	tiktoken "github.com/pkoukk/tiktoken-go"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 )
 
 var AppVersion = "dev"
@@ -44,6 +48,35 @@ var AppVersion = "dev"
 // solely on the AWS SDK's own defaults. Package var, not const, so tests can
 // shrink it, same as keyCmdTimeout.
 var bedrockConfigLoadTimeout = 60 * time.Second
+
+// vertexTokenRefreshTimeout bounds each OAuth2 token exchange with Google. The
+// credential source outlives the constructor, so its HTTP client carries this
+// timeout instead of a context deadline. Package var so tests can shrink it.
+var vertexTokenRefreshTimeout = 30 * time.Second
+
+const vertexCloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
+
+// vertexCredentials resolves Application Default Credentials. The context given
+// to google.FindDefaultCredentials is embedded in the returned TokenSource and
+// reused for every later refresh, so it must never be canceled; each refresh is
+// bounded by the oauth2.HTTPClient timeout instead.
+func vertexCredentials() (*google.Credentials, error) {
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{Timeout: vertexTokenRefreshTimeout})
+	return google.FindDefaultCredentials(ctx, vertexCloudPlatformScope)
+}
+
+// vertexSetting returns configured, or the first non-empty environment variable.
+func vertexSetting(configured string, envVars ...string) string {
+	if configured != "" {
+		return configured
+	}
+	for _, name := range envVars {
+		if v := os.Getenv(name); v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 // responseHeaderTimeoutMargin is added to the request timeout when setting
 // ResponseHeaderTimeout so the per-request context deadline (WithRequestTimeout),
@@ -434,6 +467,13 @@ type ClientConfig struct {
 	// Empty means the standard AWS credential chain decides.
 	AWSProfile string
 	AWSRegion  string
+
+	// GCPProject and GCPRegion are used only by the vertex protocol. Unlike
+	// AWSRegion, both are required: Vertex AI requests are scoped to a project
+	// as well as a region, and neither can be safely defaulted — a wrong
+	// project fails closed rather than silently billing someone else's.
+	GCPProject string
+	GCPRegion  string
 }
 
 // retryCodesMiddleware returns an HTTP middleware that forces the SDK to retry
@@ -492,12 +532,16 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		rawHolder:      raw,
 		AWSProfile:     ep.AWSProfile,
 		AWSRegion:      ep.AWSRegion,
+		GCPProject:     ep.GCPProject,
+		GCPRegion:      ep.GCPRegion,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
 		return NewAnthropicClient(cfg)
 	case ProtocolAnthropicBedrock:
 		return NewAnthropicBedrockClient(cfg)
+	case ProtocolAnthropicVertex:
+		return NewAnthropicVertexClient(cfg)
 	case ProtocolOpenAIResponses:
 		return NewOpenAIResponsesClient(cfg)
 	default:
@@ -1142,6 +1186,15 @@ type AnthropicClient struct {
 	bedrock    bool
 	awsRegion  string
 	awsProfile string
+
+	// vertex marks a client whose requests are OAuth2-authorized for Google
+	// Cloud Vertex AI, along with the region and project that were actually
+	// resolved. The resolved project is worth showing for the same reason as
+	// Bedrock's region: a request sent to the wrong one fails in a way that
+	// looks unrelated to configuration.
+	vertex     bool
+	gcpRegion  string
+	gcpProject string
 }
 
 // NewAnthropicClient creates a new Anthropic Messages API client.
@@ -1340,6 +1393,132 @@ func (c *AnthropicClient) BedrockContext() (region, profile string, ok bool) {
 		return "", "", false
 	}
 	return c.awsRegion, c.awsProfile, true
+}
+
+// NewAnthropicVertexClient creates a client for Anthropic models served by
+// Google Cloud Vertex AI.
+//
+// The wire format is the Messages API, so this reuses AnthropicClient
+// wholesale; the vertex middleware from the official SDK handles what
+// differs — OAuth2 authorization from Application Default Credentials,
+// moving the model from the body into the URL path, injecting
+// anthropic_version, and deriving the host from the region.
+//
+// No api_key is involved. Credentials come from Application Default
+// Credentials — `gcloud auth application-default login`, a service account
+// key via GOOGLE_APPLICATION_CREDENTIALS, or the ambient metadata server on
+// GCE/GKE/Cloud Run. Region (gcp_region, else VERTEX_LOCATION) and project
+// (gcp_project, else GCLOUD_PROJECT) must both resolve: the SDK panics on an
+// empty region, so both are validated here before it is touched.
+func NewAnthropicVertexClient(cfg ClientConfig) *AnthropicClient {
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.SessionKey == "" {
+		cfg.SessionKey = NewSessionKey()
+	}
+
+	// cfg.URL is deliberately unused: the vertex option is appended last
+	// and installs its own base URL from the resolved region, so anything set
+	// here would be overwritten rather than honoured.
+	region := vertexSetting(cfg.GCPRegion, "VERTEX_LOCATION")
+	if region == "" {
+		return &AnthropicClient{
+			cfg:    cfg,
+			vertex: true,
+			initErr: fmt.Errorf("vertex: no region configured\n" +
+				"  set gcp_region on the provider or export VERTEX_LOCATION — the region decides which Vertex AI host is used and which models are available there"),
+		}
+	}
+	projectID := vertexSetting(cfg.GCPProject, "GCLOUD_PROJECT")
+	if projectID == "" {
+		return &AnthropicClient{
+			cfg:       cfg,
+			vertex:    true,
+			gcpRegion: region,
+			initErr: fmt.Errorf("vertex: no project configured\n" +
+				"  set gcp_project on the provider or export GCLOUD_PROJECT — Vertex AI requests are scoped to a project and none could be resolved"),
+		}
+	}
+
+	opts := []option.RequestOption{
+		option.WithMaxRetries(5),
+		option.WithHeader("User-Agent", userAgent("claude")),
+		option.WithRequestTimeout(cfg.Timeout),
+		// No httpClientWithHeaderTimeout here (unlike NewAnthropicClient): like
+		// bedrock.WithConfig, the vertex option is an option.Join carrying
+		// WithoutEnvironmentDefaults, so NewClient skips DefaultClientOptions and
+		// never installs the SDK's 10-minute-header-timeout default client.
+		// Vertex authenticates by OAuth2 bearer token, added by the middleware
+		// below at transport time. Any API-key header the SDK would otherwise
+		// attach is meaningless to Vertex, so both are removed here.
+		option.WithHeaderDel("Authorization"),
+		option.WithHeaderDel("X-Api-Key"),
+	}
+	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
+		opts = append(opts, option.WithMiddleware(mw))
+	}
+	// Raw before the retry observer; see NewOpenAIClient for why order matters.
+	if cfg.rawHolder != nil {
+		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
+	}
+
+	var vertexOpt option.RequestOption
+	var authErr error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				if e, ok := r.(error); ok {
+					authErr = e
+				} else {
+					authErr = fmt.Errorf("%v", r)
+				}
+			}
+		}()
+		creds, err := vertexCredentials()
+		if err != nil {
+			authErr = err
+			return
+		}
+		vertexOpt = vertex.WithCredentials(context.Background(), region, projectID, creds)
+	}()
+	if authErr != nil {
+		return &AnthropicClient{
+			cfg:        cfg,
+			vertex:     true,
+			gcpRegion:  region,
+			gcpProject: projectID,
+			initErr: fmt.Errorf("vertex: could not load Google Cloud credentials: %w\n"+
+				"  vertex uses Application Default Credentials — run `gcloud auth application-default login`, or set GOOGLE_APPLICATION_CREDENTIALS to a service account key", authErr),
+		}
+	}
+
+	// Appended last on purpose, same reasoning as bedrock.WithConfig in
+	// NewAnthropicBedrockClient: each option wraps the ones before it, so the
+	// last appended middleware ends up innermost — OAuth2 authorization runs
+	// closest to the wire, after any header the earlier options set.
+	opts = append(opts, vertexOpt)
+
+	return &AnthropicClient{
+		cfg:        cfg,
+		sdk:        anthropic.NewClient(opts...),
+		vertex:     true,
+		gcpRegion:  region,
+		gcpProject: projectID,
+	}
+}
+
+// VertexContext reports the GCP region and project a Vertex client resolved,
+// so callers can show what a request actually used. ok is false for every
+// other protocol.
+func (c *AnthropicClient) VertexContext() (region, project string, ok bool) {
+	if !c.vertex {
+		return "", "", false
+	}
+	return c.gcpRegion, c.gcpProject, true
 }
 
 func ssoLoginProfileArg(profile string) string {

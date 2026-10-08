@@ -35,6 +35,15 @@ const (
 	// official SDK's bedrock middleware performs that rewriting, so this
 	// shares the Anthropic client rather than reimplementing the protocol.
 	ProtocolAnthropicBedrock = "anthropic-bedrock"
+	// ProtocolAnthropicVertex is the Anthropic Messages API served by Google
+	// Cloud Vertex AI. The request body is the same as ProtocolAnthropic — the
+	// difference is transport: requests are authorized with an OAuth2 token
+	// from Application Default Credentials rather than an API key, the model
+	// moves from the body into the URL path, and the region and project
+	// together determine the host. The official SDK's vertex middleware
+	// performs that rewriting, so this shares the Anthropic client rather than
+	// reimplementing the protocol.
+	ProtocolAnthropicVertex = "anthropic-vertex"
 )
 
 // NormalizeProtocol canonicalizes protocol names. It is case-insensitive and
@@ -55,18 +64,20 @@ func NormalizeProtocol(raw string) string {
 		return ProtocolOpenAIResponses
 	case ProtocolAnthropicBedrock:
 		return ProtocolAnthropicBedrock
+	case ProtocolAnthropicVertex:
+		return ProtocolAnthropicVertex
 	default:
 		return normalized
 	}
 }
 
-// ValidateProtocol accepts the four canonical protocol names and rejects
+// ValidateProtocol accepts the five canonical protocol names and rejects
 // everything else.
 func ValidateProtocol(p string) error {
 	switch p {
-	case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock:
+	case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock, ProtocolAnthropicVertex:
 		return nil
 	default:
-		return fmt.Errorf("unsupported protocol %q; supported protocols are %q, %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock)
+		return fmt.Errorf("unsupported protocol %q; supported protocols are %q, %q, %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock, ProtocolAnthropicVertex)
 	}
 }

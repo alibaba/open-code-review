@@ -2764,13 +2764,15 @@ func TestApplyCustomProviderConfigNormalizesAuthHeader(t *testing.T) {
 func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {
 	// The Custom form offers every canonical protocol, in canonical order, so
 	// result() picks up the right string for each index. The Manual form writes
-	// llm.url + llm.auth_token and so omits bedrock, which uses neither; the two
-	// lists share their prefix, which is what keeps a single index helper honest.
+	// llm.url + llm.auth_token and so omits bedrock and vertex, which use
+	// neither; the two lists share their prefix, which is what keeps a single
+	// index helper honest.
 	want := []string{
 		llm.ProtocolAnthropic,
 		llm.ProtocolOpenAIChatCompletions,
 		llm.ProtocolOpenAIResponses,
 		llm.ProtocolAnthropicBedrock,
+		llm.ProtocolAnthropicVertex,
 	}
 	if len(cpProtocols) != len(want) {
 		t.Fatalf("cpProtocols has %d entries, want %d", len(cpProtocols), len(want))
@@ -2781,7 +2783,7 @@ func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {
 		}
 	}
 
-	wantManual := want[:len(want)-1]
+	wantManual := want[:len(want)-2]
 	if len(manualProtocols) != len(wantManual) {
 		t.Fatalf("manualProtocols has %d entries, want %d", len(manualProtocols), len(wantManual))
 	}
@@ -2793,6 +2795,9 @@ func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {
 	for _, p := range manualProtocols {
 		if p == llm.ProtocolAnthropicBedrock {
 			t.Error("manualProtocols offers bedrock; the llm block has no region, profile or use for its url and token")
+		}
+		if p == llm.ProtocolAnthropicVertex {
+			t.Error("manualProtocols offers vertex; the llm block has no region, project or use for its url and token")
 		}
 	}
 }

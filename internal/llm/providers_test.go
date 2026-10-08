@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -76,7 +77,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "vertex", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -208,6 +209,26 @@ func TestLookupProvider_DeepSeekFlash(t *testing.T) {
 	}
 	if !ModelListContains(p.Models, "deepseek-flash") {
 		t.Error(`deepseek models do not contain "deepseek-flash"`)
+	}
+}
+
+func TestLookupProvider_VertexDetails(t *testing.T) {
+	p, ok := LookupProvider("vertex")
+	if !ok {
+		t.Fatal("vertex not found")
+	}
+	if p.Protocol != ProtocolAnthropicVertex {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolAnthropicVertex)
+	}
+	if p.BaseURL != "" || p.EnvVar != "" {
+		t.Errorf("BaseURL/EnvVar = %q/%q, want both empty", p.BaseURL, p.EnvVar)
+	}
+	if !p.AmbientAuth {
+		t.Error("AmbientAuth = false, want true")
+	}
+	want := []string{"claude-opus-5", "claude-sonnet-5", "claude-sonnet-5-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"}
+	if !reflect.DeepEqual(p.Models, want) {
+		t.Errorf("Models = %v, want %v", p.Models, want)
 	}
 }
 

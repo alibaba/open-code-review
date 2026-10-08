@@ -49,6 +49,7 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
+| `vertex` | anthropic-vertex | определяется `gcp_region` | — (Application Default Credentials) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -145,12 +146,62 @@ Model:  claude-sonnet-5
 эти значения bedrock не использует, поэтому такая комбинация отклоняется, а не
 принимается и молча игнорируется.
 
+### Google Vertex AI
+
+`vertex` использует тот же Messages API, что и `anthropic`, но запросы
+авторизуются через [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials)
+вместо передачи API-ключа, а хост определяется регионом и проектом. Задавать
+`api_key` не нужно, и он не принимается как замена учётным данным:
+
+```bash
+gcloud auth application-default login
+
+ocr config set provider                       vertex
+ocr config set model                          claude-sonnet-5
+ocr config set providers.vertex.gcp_region    global
+ocr config set providers.vertex.gcp_project   my-project
+```
+
+Вместо `ocr config set` можно использовать переменные окружения:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
+export GCLOUD_PROJECT=my-project
+export VERTEX_LOCATION=global
+```
+
+| Поле | Значение |
+|---|---|
+| `providers.vertex.gcp_region` | Регион или мультирегион (`global`, `us`, `eu`), чей хост Vertex AI обслуживает запрос. По умолчанию — `VERTEX_LOCATION`; без него запуск ревью завершится ошибкой при старте. |
+| `providers.vertex.gcp_project` | Проект, к которому относятся и по которому тарифицируются запросы. По умолчанию — `GCLOUD_PROJECT`. |
+
+Новые модели, например `claude-sonnet-5`, доступны только через `global` или мультирегионы `us`/`eu`; конкретный регион вроде `us-east5` обслуживает только более старые модели.
+
+Учётные данные берутся из `gcloud auth application-default login`, ключа сервисного
+аккаунта, на который указывает `GOOGLE_APPLICATION_CREDENTIALS`, или сервера
+метаданных в GCE/GKE/Cloud Run — та же цепочка, что и у остальных Google Cloud SDK.
+
+У vertex нет настроенного URL — хост определяют регион и проект, — поэтому
+`ocr llm test` показывает регион и проект вместо URL:
+
+```
+Source: provider:vertex
+Region:  global
+Project: my-project
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+Через `llm.protocol` и `OCR_LLM_PROTOCOL` vertex **недоступен** по той же причине,
+что и bedrock: этот блок описывает один URL и один токен, а vertex не использует
+ни то, ни другое.
+
 ### Пользовательские провайдеры
 
 Любое имя провайдера, которого нет в таблице выше, считается
 пользовательским. Для него необходимо задать как минимум `url` и `protocol`
 (`protocol` может принимать значения `anthropic`, `openai`,
-`openai-responses` или `anthropic-bedrock`):
+`openai-responses`, `anthropic-bedrock` или `anthropic-vertex`):
 
 ```bash
 ocr config set provider                             my-gateway
@@ -181,6 +232,17 @@ ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
 ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
 ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
 ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
+```
+
+Пользовательскому провайдеру на протоколе `anthropic-vertex` тоже не нужен `url`, и он
+принимает те же поля GCP, что и встроенный — удобно для второго региона или проекта:
+
+```bash
+ocr config set provider                                vertex-eu
+ocr config set custom_providers.vertex-eu.protocol     anthropic-vertex
+ocr config set custom_providers.vertex-eu.gcp_region   eu
+ocr config set custom_providers.vertex-eu.gcp_project  my-eu-project
+ocr config set custom_providers.vertex-eu.model        claude-sonnet-5
 ```
 
 В качестве `url` можно указать как базовый URL API, так и полный эндпоинт

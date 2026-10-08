@@ -63,6 +63,8 @@ describe('generated provider presets', () => {
     expect(usesAmbientAuth(bedrock!)).toBe(true);
     expect(usesAmbientAuth(bedrock!, 'openai')).toBe(false);
     expect(usesAmbientAuth(openai!, 'anthropic-bedrock')).toBe(true);
+    expect(usesAmbientAuth(openai!, 'anthropic-vertex')).toBe(true);
+    expect(usesAmbientAuth(lookupPreset('vertex')!)).toBe(true);
     expect(usesAmbientAuth(openai!, ' OPENAI ')).toBe(false);
   });
 

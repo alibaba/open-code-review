@@ -298,6 +298,8 @@ func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
 		unknownJSONFields: map[string]json.RawMessage{
 			"future_provider": json.RawMessage(`{"value":"preserve-me"}`),
 		},
+		GCPRegion:  "us-east5",
+		GCPProject: "example-project",
 	}
 
 	rv := reflect.ValueOf(orig)

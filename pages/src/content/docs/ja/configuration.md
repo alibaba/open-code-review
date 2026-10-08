@@ -44,6 +44,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region` から決定 | —（AWS 認証情報チェーン） |
+| `vertex` | anthropic-vertex | `gcp_region` から決定 | —（Application Default Credentials） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -136,11 +137,61 @@ Model:  claude-sonnet-5
 置く場所がなく、bedrock はそこにある値をどちらも使いません。そのため黙って
 無視するのではなく、明示的に拒否されます。
 
+### Google Vertex AI
+
+`vertex` は `anthropic` と同じ Messages API を話しますが、API key を持たせる
+代わりに [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials)
+でリクエストを認可し、ホストはリージョンとプロジェクトが決めます。設定すべき
+`api_key` はなく、認証情報の代わりとしても受け付けられません。
+
+```bash
+gcloud auth application-default login
+
+ocr config set provider                       vertex
+ocr config set model                          claude-sonnet-5
+ocr config set providers.vertex.gcp_region    global
+ocr config set providers.vertex.gcp_project   my-project
+```
+
+`ocr config set` の代わりに環境変数でも指定できます。
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
+export GCLOUD_PROJECT=my-project
+export VERTEX_LOCATION=global
+```
+
+| フィールド | 意味 |
+|---|---|
+| `providers.vertex.gcp_region` | リクエストを処理する Vertex AI ホストのリージョンまたはマルチリージョン（`global`、`us`、`eu`）。未設定なら `VERTEX_LOCATION` にフォールバックします。どちらもなければレビュー実行は起動時に失敗します。 |
+| `providers.vertex.gcp_project` | リクエストの課金とスコープの対象となるプロジェクト。未設定なら `GCLOUD_PROJECT` にフォールバックします。 |
+
+`claude-sonnet-5` のような新しいモデルは `global` または `us`/`eu` マルチリージョンでのみ提供されます。`us-east5` のような個別リージョンでは古いモデルのみ提供されます。
+
+認証情報は `gcloud auth application-default login`、`GOOGLE_APPLICATION_CREDENTIALS`
+が指すサービスアカウントキー、または GCE/GKE/Cloud Run 上のメタデータサーバーから
+取得されます。他の Google Cloud SDK が読むのと同じチェーンです。
+
+vertex には設定された URL がなく、ホストはリージョンとプロジェクトが決めるため、
+`ocr llm test` は URL の代わりにリージョンとプロジェクトを表示します。
+
+```
+Source: provider:vertex
+Region:  global
+Project: my-project
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+`llm.protocol` および `OCR_LLM_PROTOCOL` では vertex を選べ**ません**。bedrock と同じ
+理由で、そのブロックは 1 つの URL と 1 つのトークンを記述するもので、vertex はどちらも
+使いません。
+
 ### カスタム provider
 
 上記の表にない provider 名はすべてカスタムとみなされ、少なくとも `url` と
 `protocol` を指定する必要があります（`protocol` は `anthropic`、`openai`、
-`openai-responses`、または `anthropic-bedrock`）。
+`openai-responses`、`anthropic-bedrock`、または `anthropic-vertex`）。
 
 ```bash
 ocr config set provider                             my-gateway
@@ -171,6 +222,17 @@ ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
 ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
 ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
 ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
+```
+
+`anthropic-vertex` プロトコルのカスタム provider にも `url` は不要で、組み込みと同じ GCP
+フィールドを取れます。2 つめのリージョンやプロジェクトに便利です。
+
+```bash
+ocr config set provider                                vertex-eu
+ocr config set custom_providers.vertex-eu.protocol     anthropic-vertex
+ocr config set custom_providers.vertex-eu.gcp_region   eu
+ocr config set custom_providers.vertex-eu.gcp_project  my-eu-project
+ocr config set custom_providers.vertex-eu.model        claude-sonnet-5
 ```
 
 `url` には API の Base URL または完全な `/responses` エンドポイントのどちらを指定してもよく、OCR がどちらの形式も正規化します。

@@ -43,6 +43,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
+| `vertex` | anthropic-vertex | 由 `gcp_region` 决定 | —（Application Default Credentials） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -129,11 +130,59 @@ Model:  claude-sonnet-5
 URL 加一个 token，没有地方放区域或 profile，而 bedrock 这两个值都不使用，因此
 会被明确拒绝，而不是接受后悄悄忽略。
 
+### Google Vertex AI
+
+`vertex` 使用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
+使用 [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials)
+授权，主机由区域和项目决定。无需设置 `api_key`，也不接受用它来代替凭证：
+
+```bash
+gcloud auth application-default login
+
+ocr config set provider                       vertex
+ocr config set model                          claude-sonnet-5
+ocr config set providers.vertex.gcp_region    global
+ocr config set providers.vertex.gcp_project   my-project
+```
+
+也可以用环境变量代替 `ocr config set`：
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
+export GCLOUD_PROJECT=my-project
+export VERTEX_LOCATION=global
+```
+
+| 字段 | 含义 |
+|---|---|
+| `providers.vertex.gcp_region` | 处理请求的 Vertex AI 主机所在的区域或多区域（`global`、`us`、`eu`）。未设置时回退到 `VERTEX_LOCATION`；两者都没有时，评审运行会在启动时失败。 |
+| `providers.vertex.gcp_project` | 请求计费并限定范围的项目。未设置时回退到 `GCLOUD_PROJECT`。 |
+
+`claude-sonnet-5` 等较新的模型只在 `global` 或 `us`/`eu` 多区域提供；`us-east5` 这类具体区域只提供较旧的模型。
+
+凭证来自 `gcloud auth application-default login`、由 `GOOGLE_APPLICATION_CREDENTIALS`
+指向的服务账号密钥，或 GCE/GKE/Cloud Run 上的元数据服务器——与其他 Google Cloud
+SDK 读取的凭证链相同。
+
+vertex 没有配置的 URL——主机由区域和项目决定——所以 `ocr llm test` 显示区域和项目
+而不是 URL：
+
+```
+Source: provider:vertex
+Region:  global
+Project: my-project
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+`llm.protocol` 和 `OCR_LLM_PROTOCOL` **不支持** vertex，原因与 bedrock 相同：该配置块
+描述的是一个 URL 加一个 token，而 vertex 这两个值都不使用。
+
 ### 自定义 provider
 
 任何不在上表中的 provider 名都视为自定义，至少要提供 `url` 和 `protocol`
 （`protocol` 取 `anthropic`、`openai`、`openai-responses` 或
-`anthropic-bedrock`）：
+`anthropic-bedrock`、`anthropic-vertex`）：
 
 ```bash
 ocr config set provider                             my-gateway
@@ -164,6 +213,17 @@ ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
 ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
 ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
 ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
+```
+
+使用 `anthropic-vertex` 协议的自定义 provider 同样不需要 `url`，并且可以使用与内置
+provider 相同的 GCP 字段——适合第二个区域或项目：
+
+```bash
+ocr config set provider                                vertex-eu
+ocr config set custom_providers.vertex-eu.protocol     anthropic-vertex
+ocr config set custom_providers.vertex-eu.gcp_region   eu
+ocr config set custom_providers.vertex-eu.gcp_project  my-eu-project
+ocr config set custom_providers.vertex-eu.model        claude-sonnet-5
 ```
 
 `url` 既可以填 API 的 Base URL，也可以填完整的 `/responses` 端点，OCR 会自动归一化处理。

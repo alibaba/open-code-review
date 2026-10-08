@@ -32,6 +32,7 @@ internal fun generatedPresetProviderNames(): Set<String> = setOf(
     "siliconflow",
     "siliconflow-cn",
     "tencent-tokenhub",
+    "vertex",
     "volcengine",
     "xai",
     "z-ai",

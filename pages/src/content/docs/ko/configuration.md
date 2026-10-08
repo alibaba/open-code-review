@@ -42,6 +42,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region`에서 결정 | — (AWS 자격 증명 체인) |
+| `vertex` | anthropic-vertex | `gcp_region`에서 결정 | — (Application Default Credentials) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -116,9 +117,51 @@ Model:  claude-sonnet-5
 
 Bedrock은 `llm.protocol`이나 `OCR_LLM_PROTOCOL`로는 사용할 수 **없습니다**. 이 블록은 URL 하나와 토큰 하나를 기술하는 구조라 리전이나 프로필을 담을 자리가 없고, bedrock은 이 블록이 담는 두 값 중 어느 것도 쓰지 않습니다. 그래서 이 조합은 받아들인 뒤 무시하는 대신 거부합니다.
 
+### Google Vertex AI {#google-vertex-ai}
+
+`vertex`는 `anthropic`과 같은 Messages API를 사용하지만, 요청에 API 키를 싣는 대신 [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials)로 인증하며 호스트는 리전과 프로젝트가 결정합니다. 설정할 `api_key`가 없고, 자격 증명을 대신할 키도 받지 않습니다:
+
+```bash
+gcloud auth application-default login
+
+ocr config set provider                       vertex
+ocr config set model                          claude-sonnet-5
+ocr config set providers.vertex.gcp_region    global
+ocr config set providers.vertex.gcp_project   my-project
+```
+
+`ocr config set` 대신 환경 변수로도 지정할 수 있습니다:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
+export GCLOUD_PROJECT=my-project
+export VERTEX_LOCATION=global
+```
+
+| 필드 | 의미 |
+|---|---|
+| `providers.vertex.gcp_region` | 요청을 처리할 Vertex AI 호스트의 리전 또는 멀티 리전(`global`, `us`, `eu`). 비어 있으면 `VERTEX_LOCATION`으로 대체하며, 둘 다 없으면 리뷰 실행이 시작 시 실패합니다. |
+| `providers.vertex.gcp_project` | 요청이 청구되고 범위가 정해지는 프로젝트. 비어 있으면 `GCLOUD_PROJECT`로 대체합니다. |
+
+`claude-sonnet-5` 같은 최신 모델은 `global` 또는 `us`/`eu` 멀티 리전에서만 제공되며, `us-east5` 같은 개별 리전은 이전 모델만 제공합니다.
+
+자격 증명은 `gcloud auth application-default login`, `GOOGLE_APPLICATION_CREDENTIALS`가 가리키는 서비스 계정 키, 또는 GCE/GKE/Cloud Run의 메타데이터 서버에서 가져옵니다. 다른 Google Cloud SDK가 읽는 체인과 같습니다.
+
+vertex에는 설정된 URL이 없고 호스트를 리전과 프로젝트가 결정하므로, `ocr llm test`는 URL 대신 리전과 프로젝트를 표시합니다:
+
+```
+Source: provider:vertex
+Region:  global
+Project: my-project
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+vertex는 `llm.protocol`이나 `OCR_LLM_PROTOCOL`로는 사용할 수 **없습니다**. bedrock과 같은 이유로, 이 블록은 URL 하나와 토큰 하나를 기술하는 구조인데 vertex는 둘 다 쓰지 않습니다.
+
 ### 커스텀 프로바이더 {#custom-providers}
 
-위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock` 중 하나):
+위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock`, `anthropic-vertex` 중 하나):
 
 ```bash
 ocr config set provider                             my-gateway
@@ -146,6 +189,16 @@ ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
 ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
 ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
 ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
+```
+
+`anthropic-vertex` 프로토콜을 쓰는 커스텀 프로바이더도 `url`이 필요 없고 내장 프로바이더와 같은 GCP 필드를 받습니다. 두 번째 리전이나 프로젝트에 유용합니다:
+
+```bash
+ocr config set provider                                vertex-eu
+ocr config set custom_providers.vertex-eu.protocol     anthropic-vertex
+ocr config set custom_providers.vertex-eu.gcp_region   eu
+ocr config set custom_providers.vertex-eu.gcp_project  my-eu-project
+ocr config set custom_providers.vertex-eu.model        claude-sonnet-5
 ```
 
 `url`은 API Base URL이든 전체 `/responses` 엔드포인트든 상관없습니다. OCR이 어느 쪽이든 정규화합니다.
