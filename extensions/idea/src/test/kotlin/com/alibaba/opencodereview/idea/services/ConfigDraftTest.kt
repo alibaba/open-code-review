@@ -176,6 +176,17 @@ class ConfigDraftTest {
     }
 
     @Test
+    fun `empty models and auth_header clear previously saved values`() {
+        val d = draft(
+            """{"custom_providers":{"my-llm":{"model":"gpt-4","models":["a","b"],"auth_header":"x-api-key"}}}""",
+            "custom_providers.my-llm.models" to "",
+            "custom_providers.my-llm.auth_header" to "",
+        )
+        assertNull(d.obj("custom_providers", "my-llm")!!["models"])
+        assertNull(d.obj("custom_providers", "my-llm")!!["auth_header"])
+    }
+
+    @Test
     fun `models is stored in the entry as a JSON array`() {
         val d = draft("{}", "providers.openai.models" to "a,b")
         assertEquals(

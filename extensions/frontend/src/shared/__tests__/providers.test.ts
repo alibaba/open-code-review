@@ -3,7 +3,7 @@
 
 import { PROVIDER_PRESETS as generatedPresets } from '../providers.generated';
 import { isPresetProvider, lookupPreset, mergeModelLists, PROVIDER_PRESETS, usesAmbientAuth } from '../providers';
-import { buildOfficialSaveEntries, detectInitialTab, isConfigReady } from '../configUtils';
+import { buildCustomUpdateSaveEntries, buildOfficialSaveEntries, detectInitialTab, isConfigReady } from '../configUtils';
 import { OcrConfig } from '../types';
 
 describe('generated provider presets', () => {
@@ -45,6 +45,21 @@ describe('generated provider presets', () => {
       { key: 'provider', value: name },
       { key: `providers.${name}.model`, value: model },
     ]);
+  });
+
+  it('emits empty models and auth_header on update so cleared fields can be removed', () => {
+    const entries = buildCustomUpdateSaveEntries({
+      name: 'my-llm',
+      protocol: 'openai',
+      url: 'https://api.example.com/v1',
+      model: 'gpt-4',
+      models: '',
+      apiKey: '',
+      apiKeyChanged: false,
+      authHeader: '',
+    });
+    expect(entries).toContainEqual({ key: 'custom_providers.my-llm.models', value: '' });
+    expect(entries).toContainEqual({ key: 'custom_providers.my-llm.auth_header', value: '' });
   });
 
   it('preserves the Bedrock authentication and Responses protocol metadata', () => {
