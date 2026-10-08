@@ -69,6 +69,12 @@ environment variable.
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
+Built-in providers' model lists are suggestions for `ocr config model`, not
+restrictions on `--model`. An override absent from both the built-in list and
+`providers.<name>.models` produces a warning on stderr; the provider validates
+the model when the request is sent. Custom providers retain their existing
+`--model` validation rules.
+
 ### Overriding a built-in provider's Base URL
 
 Every built-in provider has a preset Base URL (shown in the table above).

@@ -155,6 +155,11 @@ ocr scan --provider openai --model gpt-5.4 --format json
 섞이지 않고 그대로 다음으로 넘어갑니다. 내장 프로바이더를 골랐다면 자격 증명은
 여전히 해당 프로바이더가 지원하는 환경 변수에서 올 수 있습니다.
 
+내장 프로바이더에서는 `--model`로 `ocr config model`의 제안 목록에 없는 모델도
+지정할 수 있습니다. 모델이 내장 목록과 `providers.<name>.models` 모두에 없으면
+OCR은 stderr에 경고를 출력하고 검증은 프로바이더에 맡깁니다. 사용자 정의
+프로바이더에는 기존 `--model` 검증 규칙이 적용됩니다.
+
 ### 모드 {#modes}
 
 #### 워크스페이스 모드(기본값) {#workspace-mode-default}

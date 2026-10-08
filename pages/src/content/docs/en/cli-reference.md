@@ -158,6 +158,11 @@ does not change that source order. Incomplete strategies fall through without
 being mixed. A selected built-in provider's credentials may still come from its
 supported environment variable.
 
+For built-in providers, `--model` accepts IDs outside the suggested models in
+`ocr config model`. If the ID is absent from both the built-in list and
+`providers.<name>.models`, OCR warns on stderr and leaves validation to the
+provider. Custom providers retain their existing `--model` validation rules.
+
 ### Modes
 
 #### Workspace mode (default)

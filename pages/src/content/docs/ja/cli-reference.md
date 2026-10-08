@@ -149,6 +149,11 @@ ocr scan --provider openai --model gpt-5.4 --format json
 ソース順序は変更しません。不完全な戦略は別の戦略と混合されず、次へフォールバックします。
 選択された組み込み provider の認証情報は、対応する環境変数から引き続き取得できます。
 
+組み込み provider の `--model` は、`ocr config model` の選択候補以外も受け付けます。
+組み込み一覧にも `providers.<name>.models` にもないモデルを指定すると、OCR は
+stderr に警告を出し、検証は provider に任せます。カスタム provider には
+従来の `--model` 検証ルールが適用されます。
+
 ### モード
 
 #### ワークスペースモード（デフォルト）

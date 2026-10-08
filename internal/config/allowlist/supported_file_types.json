@@ -51,6 +51,8 @@
   ".ftlx",
   ".hbs",
   ".mustache",
+  ".jinja2",
+  ".j2",
   ".pug",
   ".astro",
   ".vue",
