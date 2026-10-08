@@ -295,6 +295,7 @@ export const en = {
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.contributing': 'Contributing',
   'docs.sidebar.faq': 'FAQ',
+  'docs.sidebar.chatgptPreview': 'Sign in with ChatGPT preview',
   'docs.search.placeholder': 'Search...',
   'docs.search.noResults': 'No results found',
   'docs.search.hint.select': 'Select',

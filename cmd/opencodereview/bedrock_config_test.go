@@ -281,9 +281,16 @@ func TestCheckAPIKeyRequirement(t *testing.T) {
 	if !ok {
 		t.Fatal("anthropic preset not registered")
 	}
+	chatgpt, ok := llm.LookupProvider("chatgpt")
+	if !ok {
+		t.Fatal("chatgpt preset not registered")
+	}
 
 	if err := checkAPIKeyRequirement("bedrock", "", "", bedrock, true); err != nil {
 		t.Errorf("ambient provider with no api_key = %v, want nil", err)
+	}
+	if err := checkAPIKeyRequirement("chatgpt", "", "", chatgpt, true); err != nil {
+		t.Errorf("external-auth provider with no api_key = %v, want nil", err)
 	}
 
 	t.Setenv(anthropic.EnvVar, "")
@@ -295,48 +302,114 @@ func TestCheckAPIKeyRequirement(t *testing.T) {
 	}
 }
 
-// TestProviderTUIAmbientProviderSkipsAPIKeyStep pins the wizard flow: the model
-// step is the last one for a provider with no key to collect. An API-key prompt
-// that must be left blank reads as a step the user failed to complete.
-func TestProviderTUIAmbientProviderSkipsAPIKeyStep(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	idx := -1
-	for i, p := range m.providers {
-		if p.Name == "bedrock" {
-			idx = i
-			break
+// TestProviderTUINonConfigCredentialProviderSkipsAPIKeyStep pins the wizard
+// flow: the model step is the last one for a provider with no key to collect.
+func TestProviderTUINonConfigCredentialProviderSkipsAPIKeyStep(t *testing.T) {
+	for _, provider := range []string{"bedrock", "chatgpt"} {
+		t.Run(provider, func(t *testing.T) {
+			m := newProviderTUI(&Config{Providers: map[string]ProviderEntry{
+				"chatgpt": {Models: []string{"fixture-model"}},
+			}}, "")
+			idx := -1
+			for i, p := range m.providers {
+				if p.Name == provider {
+					idx = i
+					break
+				}
+			}
+			if idx < 0 {
+				t.Fatalf("%s not offered in the official provider list", provider)
+			}
+			m.officialIdx = idx
+
+			result, _ := m.Update(enterKey())
+			atModel := result.(providerTUIModel)
+			if atModel.step != stepModel {
+				t.Fatalf("after Enter on provider, step = %d, want %d (stepModel)", atModel.step, stepModel)
+			}
+
+			result, cmd := atModel.Update(enterKey())
+			done := result.(providerTUIModel)
+			if done.step == stepAPIKey {
+				t.Error("provider advanced to stepAPIKey; want the model step to be final")
+			}
+			if !done.confirmed {
+				t.Error("confirmed = false; want the selection confirmed from the model step")
+			}
+			if cmd == nil {
+				t.Error("no command returned; want tea.Quit")
+			}
+			res := done.result()
+			if res.provider != provider {
+				t.Errorf("result provider = %q, want %q", res.provider, provider)
+			}
+			if res.apiKey != "" {
+				t.Errorf("result apiKey = %q, want empty", res.apiKey)
+			}
+			if got := res.resolvedModel(); got == "" {
+				t.Error("resolvedModel is empty; want the model selected on the model step")
+			}
+		})
+	}
+}
+
+func TestProviderTUINonConfigCredentialProviderDropsPreviousKey(t *testing.T) {
+	original := runLLMTestPath
+	t.Cleanup(func() { runLLMTestPath = original })
+	runLLMTestPath = func(string) error { return nil }
+	for _, provider := range []string{"bedrock", "chatgpt"} {
+		for _, typed := range []bool{false, true} {
+			name := provider + "/saved"
+			if typed {
+				name = provider + "/typed"
+			}
+			t.Run(name, func(t *testing.T) {
+				cfg := &Config{Provider: "openai", Providers: map[string]ProviderEntry{
+					"openai":  {APIKey: "openai-fixture-key"},
+					"chatgpt": {Models: []string{"fixture-model"}},
+				}}
+				path := filepath.Join(t.TempDir(), "config.json")
+				m := newProviderTUI(cfg, path)
+				if m.apiKeyOriginal != "openai-fixture-key" || !m.apiKeyMasked {
+					t.Fatal("previous provider did not seed the saved key")
+				}
+				if typed {
+					result, _ := m.Update(enterKey())
+					m = result.(providerTUIModel)
+					result, _ = m.Update(enterKey())
+					m = result.(providerTUIModel)
+					if m.step != stepAPIKey {
+						t.Fatal("key-based provider skipped the key step")
+					}
+					m.beginAPIKeyReplace()
+					m.apiKeyInput.SetValue("typed-fixture-key")
+					result, _ = m.Update(escKey())
+					m = result.(providerTUIModel)
+					result, _ = m.Update(escKey())
+					m = result.(providerTUIModel)
+				}
+				for i, p := range m.providers {
+					if p.Name == provider {
+						m.officialIdx = i
+					}
+				}
+				result, _ := m.Update(enterKey())
+				m = result.(providerTUIModel)
+				result, cmd := m.Update(enterKey())
+				m = result.(providerTUIModel)
+				if !m.confirmed || cmd == nil || m.step == stepAPIKey {
+					t.Fatal("non-config credential provider did not finish at model selection")
+				}
+				if m.apiKeyOriginal != "" || m.apiKeyMasked || m.apiKeyInput.Value() != "" || m.result().apiKey != "" {
+					t.Fatal("previous provider's key survived selection")
+				}
+				if err := applyOfficialProviderConfig(path, cfg, m.result()); err != nil {
+					t.Fatal(err)
+				}
+				if cfg.Providers[provider].APIKey != "" || cfg.Providers["openai"].APIKey != "openai-fixture-key" {
+					t.Fatal("cross-provider key leaked or the original provider key changed")
+				}
+			})
 		}
-	}
-	if idx < 0 {
-		t.Fatal("bedrock not offered in the official provider list")
-	}
-	m.officialIdx = idx
-
-	result, _ := m.Update(enterKey())
-	atModel := result.(providerTUIModel)
-	if atModel.step != stepModel {
-		t.Fatalf("after Enter on provider, step = %d, want %d (stepModel)", atModel.step, stepModel)
-	}
-
-	result, cmd := atModel.Update(enterKey())
-	done := result.(providerTUIModel)
-	if done.step == stepAPIKey {
-		t.Error("ambient provider advanced to stepAPIKey; want the model step to be final")
-	}
-	if !done.confirmed {
-		t.Error("confirmed = false; want the selection confirmed from the model step")
-	}
-	if cmd == nil {
-		t.Error("no command returned; want tea.Quit")
-	}
-	res := done.result()
-	if res.provider != "bedrock" {
-		t.Errorf("result provider = %q, want bedrock", res.provider)
-	}
-	if res.apiKey != "" {
-		t.Errorf("result apiKey = %q, want empty for an ambient provider", res.apiKey)
-	}
-	if got := res.resolvedModel(); got == "" {
-		t.Error("resolvedModel is empty; want the model selected on the model step")
 	}
 }

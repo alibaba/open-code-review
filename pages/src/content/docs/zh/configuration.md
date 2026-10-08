@@ -36,13 +36,15 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 ### 内置 provider
 
-下列 provider 随 OCR 发布，已预置 Base URL 与协议，选中后只需填 API key。
-若 `providers.<name>.api_key` 未设置，会自动回退到对应的环境变量。
+下列 provider 随 OCR 发布，并已预置 Base URL 与协议。多数 provider 需要 API key；
+若 `providers.<name>.api_key` 未设置，会自动回退到对应的环境变量。`chatgpt`
+改用 `ocr auth login` 创建的 ChatGPT 凭证。
 
 | 名称 | 协议 | Base URL | API key 环境变量 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
+| `chatgpt` | openai-responses | `https://api.openai.com/v1` | 不适用（Sign in with ChatGPT） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -71,11 +73,29 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 stderr 输出警告；发送请求时由 provider 验证模型。自定义 provider 仍遵循原有的
 `--model` 校验规则。
 
+## ChatGPT 登录预览版
+
+此预览版新增通过公开 Responses API 使用的内置 `chatgpt` provider，没有 API key 环境变量。 请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)了解登录、同意和使用限制。
+
+使用 `ocr config set` 配置 provider 和可选请求字段。可从 `ocr llm models` 选择模型，也可显式设置模型 slug：
+
+```bash
+ocr auth login --provider chatgpt
+ocr config set provider chatgpt
+ocr config set providers.chatgpt.model <model-slug>
+ocr config set providers.chatgpt.extra_body '{"reasoning":{"effort":"low"}}'
+ocr llm test
+```
+
+即使账户模型目录没有列出，显式模型仍会传递。`extra_body` 仅接受 `reasoning`、`text` 和 `prompt_cache_key`；端点、协议和凭证覆盖会被拒绝。
+
 ### 覆盖内置 provider 的 Base URL
 
 每个内置 provider 都有一个预设 Base URL（见上表）。要将内置 provider
 指向不同的端点——例如自建的 LiteLLM 网关，其地址很少是预设默认值
 `http://localhost:4000/v1`——设置 `providers.<name>.url`：
+
+`chatgpt` 预览版例外：其公开端点固定，不接受 URL 覆盖。
 
 ```bash
 ocr config set provider                   litellm

@@ -580,9 +580,30 @@ ocr config model                           Interactive model selection
 
 키 전체 목록과 스키마, 예시는 [설정](../configuration/)을 참고하세요.
 
+
+
+## `ocr auth` {#ocr-auth}
+
+`ocr auth login`, `status`, `logout`은 기본적으로 Sign in with ChatGPT를 사용합니다. 명시적인 `--provider chatgpt`도 계속 지원합니다.
+
+`chatgpt` provider는 공개 Sign in with ChatGPT 흐름을 사용합니다. [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth`는 `--provider chatgpt` 및 `--account <client-id>`를 받으며 `login`은 `--no-browser`, `--new-account`, `--enable-plan`도 받습니다. ChatGPT는 `--device`를 지원하지 않습니다. `--enable-plan`은 저장된 등록에 대한 동의를 요청하며 `--new-account`와 함께 사용할 수 없습니다. 모델 목록은 계정별로 다르며 목록에 없어도 명시적 모델을 사용할 수 있습니다. 이 provider의 `extra_body`는 `reasoning`, `text`, `prompt_cache_key`만 지원합니다. 계정 관리, 권한 및 제한은 [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.
+
 ## `ocr llm` {#ocr-llm}
 
-LLM 유틸리티 명령입니다. 하위 명령은 두 가지입니다:
+LLM 유틸리티 명령입니다. 하위 명령은 세 가지입니다:
 
 ```text
 ocr llm <sub-command>
@@ -590,6 +611,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test` {#ocr-llm-test}

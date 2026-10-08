@@ -36,12 +36,13 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 ### 내장 프로바이더 {#built-in-providers}
 
-다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 선택한 뒤 API 키만 채우면 됩니다. `providers.<name>.api_key`가 비어 있으면 OCR은 해당 환경 변수로 대체합니다.
+다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 대부분은 API 키가 필요하며, `providers.<name>.api_key`가 비어 있으면 OCR은 해당 환경 변수로 대체합니다. `chatgpt`는 대신 `ocr auth login`이 만든 ChatGPT 자격 증명을 사용합니다.
 
 | 이름 | 프로토콜 | Base URL | API 키 환경 변수 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region`에서 결정 | — (AWS 자격 증명 체인) |
+| `chatgpt` | openai-responses | `https://api.openai.com/v1` | 해당 없음 (Sign in with ChatGPT) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -71,9 +72,27 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 모델의 유효성은 요청을 보낼 때 프로바이더가 확인합니다. 사용자 정의 프로바이더에는
 기존 `--model` 검증 규칙이 적용됩니다.
 
+## ChatGPT 로그인 미리보기
+
+이 미리보기는 공개 Responses API용 내장 `chatgpt` provider를 추가합니다. API 키 환경 변수는 없습니다. 로그인, 동의 및 사용 제한은 [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.
+
+`ocr config set`으로 provider와 선택적 요청 필드를 설정합니다. `ocr llm models`에서 모델을 선택하거나 모델 slug를 직접 지정할 수 있습니다.
+
+```bash
+ocr auth login --provider chatgpt
+ocr config set provider chatgpt
+ocr config set providers.chatgpt.model <model-slug>
+ocr config set providers.chatgpt.extra_body '{"reasoning":{"effort":"low"}}'
+ocr llm test
+```
+
+계정별 목록에 없는 모델도 명시하면 전송됩니다. `extra_body`는 `reasoning`, `text`, `prompt_cache_key`만 받으며 엔드포인트, 프로토콜, 자격 증명 재정의는 거부됩니다.
+
 ### 내장 프로바이더의 Base URL 재정의 {#overriding-a-built-in-provider-s-base-url}
 
 모든 내장 프로바이더에는 미리 설정된 Base URL이 있습니다(위 표 참고). 내장 프로바이더를 다른 엔드포인트로 보내려면 `providers.<name>.url`을 설정합니다(예: 자체 호스팅 LiteLLM 게이트웨이는 미리 설정된 기본값 `http://localhost:4000/v1`에 있는 경우가 드뭅니다):
+
+`chatgpt` 미리보기는 예외입니다. 공개 엔드포인트는 고정되어 있으며 URL 재정의를 거부합니다.
 
 ```bash
 ocr config set provider                   litellm
