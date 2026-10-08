@@ -257,6 +257,20 @@ func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.P
 	}
 }
 
+// firstStaticKey returns apiKey, or when it is empty the first usable entry of
+// apiKeys, which the resolver then promotes to the primary key.
+func firstStaticKey(apiKey string, apiKeys []string) string {
+	if apiKey != "" {
+		return apiKey
+	}
+	for _, k := range apiKeys {
+		if strings.TrimSpace(k) != "" {
+			return k
+		}
+	}
+	return ""
+}
+
 func applyOfficialProviderConfig(configPath string, cfg *Config, result providerTUIResult) error {
 	if result.provider == "" {
 		return fmt.Errorf("provider and model are required")
@@ -268,7 +282,8 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 
 	preset, isPreset := llm.LookupProvider(result.provider)
 
-	if err := checkAPIKeyRequirement(result.provider, result.apiKey, cfg.Providers[result.provider].APIKeyCmd, preset, isPreset); err != nil {
+	existing := cfg.Providers[result.provider]
+	if err := checkAPIKeyRequirement(result.provider, firstStaticKey(result.apiKey, existing.APIKeys), existing.APIKeyCmd, preset, isPreset); err != nil {
 		return err
 	}
 
