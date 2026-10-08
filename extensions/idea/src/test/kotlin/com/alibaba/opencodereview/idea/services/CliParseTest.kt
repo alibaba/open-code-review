@@ -71,7 +71,7 @@ class CliParseTest {
     }
 
     @Test
-    fun `workspace 模式不带 ref 参数`() {
+    fun `workspace mode has no ref arguments`() {
         assertEquals(
             listOf("review", "--format", "json"),
             buildReviewArgs(CliRunOptions(mode = ReviewMode.WORKSPACE)),
@@ -79,7 +79,7 @@ class CliParseTest {
     }
 
     @Test
-    fun `branch 模式带 from 和 to`() {
+    fun `branch mode includes from and to`() {
         assertEquals(
             listOf("review", "--from", "main", "--to", "dev", "--format", "json"),
             buildReviewArgs(CliRunOptions(mode = ReviewMode.BRANCH, from = "main", to = "dev")),
@@ -87,7 +87,7 @@ class CliParseTest {
     }
 
     @Test
-    fun `commit 模式带 commit`() {
+    fun `commit mode includes commit`() {
         assertEquals(
             listOf("review", "--commit", "abc1234", "--format", "json"),
             buildReviewArgs(CliRunOptions(mode = ReviewMode.COMMIT, commit = "abc1234")),
@@ -95,7 +95,7 @@ class CliParseTest {
     }
 
     @Test
-    fun `空白的 from 和 customPrompt 不进参数表`() {
+    fun `blank from and customPrompt are omitted from arguments`() {
         val args = buildReviewArgs(
             CliRunOptions(mode = ReviewMode.BRANCH, from = "   ", to = "dev", customPrompt = "  "),
         )
@@ -103,18 +103,20 @@ class CliParseTest {
     }
 
     @Test
-    fun `customPrompt 和 concurrency 追加在末尾`() {
+    fun `customPrompt and concurrency are appended at the end`() {
         val args = buildReviewArgs(
-            CliRunOptions(mode = ReviewMode.WORKSPACE, customPrompt = "  只看安全问题  ", concurrency = 4),
+            CliRunOptions(mode = ReviewMode.WORKSPACE, customPrompt = "  只看安全问题  ", concurrency = 4), // allow-non-english: fixture verifies Unicode CLI input and output
         )
         assertEquals(
-            listOf("review", "--format", "json", "--background", "只看安全问题", "--concurrency", "4"),
+            listOf("review", "--format", "json", "--background", "只看安全问题", "--concurrency", "4"), // allow-non-english: fixture verifies Unicode CLI input and output
             args,
         )
     }
 
     @Test
-    fun `snake_case 的 CLI 输出转换成 camelCase 领域模型`() {
+    fun `snake_case CLI output becomes a camelCase domain model`() {
+        val content = "问题描述" // allow-non-english: fixture verifies Unicode CLI output
+        val thinking = "推理过程" // allow-non-english: fixture verifies Unicode CLI output
         val result = parseCliResult(
             """
             {
@@ -122,12 +124,12 @@ class CliParseTest {
               "comments": [
                 {
                   "path": "src/a.kt",
-                  "content": "问题描述",
+                  "content": "$content",
                   "suggestion_code": "val a = 1",
                   "existing_code": "val a = 2",
                   "start_line": 10,
                   "end_line": 12,
-                  "thinking": "推理过程"
+                  "thinking": "$thinking"
                 }
               ],
               "warnings": [{ "type": "skip", "file": "b.bin", "message": "binary" }],
@@ -150,7 +152,7 @@ class CliParseTest {
         assertEquals("val a = 2", comment.existingCode)
         assertEquals(10, comment.startLine)
         assertEquals(12, comment.endLine)
-        assertEquals("推理过程", comment.thinking)
+        assertEquals("推理过程", comment.thinking) // allow-non-english: fixture verifies Unicode CLI input and output
         assertEquals("b.bin", result.warnings.single().file)
         assertEquals(3, result.summary?.filesReviewed)
         assertEquals(900, result.summary?.totalTokens)
@@ -159,7 +161,7 @@ class CliParseTest {
     }
 
     @Test
-    fun `空字符串的可选字段归一成 null`() {
+    fun `empty optional strings are normalized to null`() {
         val result = parseCliResult(
             """{"status":"success","comments":[{"path":"a","content":"c","suggestion_code":"","existing_code":"","thinking":""}]}""",
         )
@@ -170,26 +172,26 @@ class CliParseTest {
     }
 
     @Test
-    fun `缺失行号回落到 0 哨兵值`() {
+    fun `missing line numbers fall back to the zero sentinel`() {
         val result = parseCliResult("""{"status":"success","comments":[{"path":"a","content":"c"}]}""")
         assertEquals(0, result.comments.single().startLine)
         assertEquals(0, result.comments.single().endLine)
     }
 
     @Test
-    fun `CLI 未知字段不影响解析`() {
+    fun `unknown CLI fields do not affect parsing`() {
         val result = parseCliResult("""{"status":"success","future_field":1,"comments":[]}""")
         assertEquals("success", result.status)
     }
 
     @Test
-    fun `JSON 前后的日志噪声会被裁掉`() {
+    fun `log noise before and after JSON is trimmed`() {
         val result = parseCliResult("reviewing 3 files...\n{\"status\":\"skipped\",\"comments\":[]}\ndone\n")
         assertEquals("skipped", result.status)
     }
 
     @Test
-    fun `前置日志里混进花括号也能找到真正的 JSON`() {
+    fun `finds the real JSON when preceding logs contain braces`() {
         val result = parseCliResult(
             "config: {legacy: true}\n{\"status\":\"success\",\"comments\":[]}\n",
         )
@@ -197,12 +199,12 @@ class CliParseTest {
     }
 
     @Test
-    fun `没有 JSON 时抛异常`() {
+    fun `throws when no JSON is present`() {
         assertFailsWith<IllegalArgumentException> { parseCliResult("nothing here") }
     }
 
     @Test
-    fun `extractCliError 优先取最后一条 error 行`() {
+    fun `extractCliError prefers the last error line`() {
         val stderr = """
             error: first failure
             some noise
@@ -213,48 +215,48 @@ class CliParseTest {
     }
 
     @Test
-    fun `extractCliError 没有 error 行时取最后一行非空内容`() {
+    fun `extractCliError uses the last non-empty line when no error line exists`() {
         assertEquals("last line", extractCliError("first\n\nlast line\n\n"))
     }
 
     @Test
-    fun `extractCliError 空输入返回空串`() {
+    fun `extractCliError returns an empty string for empty input`() {
         assertEquals("", extractCliError("   \n\n"))
     }
 
     @Test
-    fun `parseLogLine 识别 warn 级别`() {
+    fun `parseLogLine recognizes the warn level`() {
         assertEquals(LogLevel.WARN, parseLogLine("retrying request 2/3")?.level)
         assertEquals(LogLevel.WARN, parseLogLine("WARNING: model fallback")?.level)
         assertEquals(LogLevel.INFO, parseLogLine("reviewing src/a.kt")?.level)
     }
 
     @Test
-    fun `parseLogLine 丢弃空行并裁掉行尾空白`() {
+    fun `parseLogLine drops blank lines and trims trailing whitespace`() {
         assertNull(parseLogLine("   "))
         assertEquals("text", parseLogLine("text   \t")?.text)
     }
 
     @Test
-    fun `resultToState 有评论就是 done`() {
+    fun `resultToState returns done when comments exist`() {
         val result = parseCliResult("""{"status":"success","comments":[{"path":"a","content":"c"}]}""")
         assertEquals(ReviewState.DONE, resultToState(result))
     }
 
     @Test
-    fun `resultToState 无评论且 completed_with_errors 是 failed`() {
+    fun `resultToState returns failed for completed_with_errors without comments`() {
         val result = parseCliResult("""{"status":"completed_with_errors","comments":[]}""")
         assertEquals(ReviewState.FAILED, resultToState(result))
     }
 
     @Test
-    fun `resultToState 无评论且无错误是 empty`() {
+    fun `resultToState returns empty without comments or errors`() {
         val result = parseCliResult("""{"status":"success","comments":[]}""")
         assertEquals(ReviewState.EMPTY, resultToState(result))
     }
 
     @Test
-    fun `有评论时即使 completed_with_errors 也是 done`() {
+    fun `completed_with_errors still returns done when comments exist`() {
         val result = parseCliResult(
             """{"status":"completed_with_errors","comments":[{"path":"a","content":"c"}]}""",
         )

@@ -19,15 +19,17 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 
 /**
- * 入站消息集合，分为侧栏通道使用的 `WebviewToHost` 侧栏 10 条与配置面板 11 条，共 21 条，
- * 按来源分派处理（参见 SidebarRouter / ConfigPanelRouter）。
+ * Inbound messages: 10 for the sidebar channel and 11 for the config panel, 21 in total,
+ * dispatched by origin (see SidebarRouter / ConfigPanelRouter).
  *
- * 刻意不采用 kotlinx 多态反序列化：该方式遇到未识别的 `type` 会抛异常，而前端版本较新时发送新增类型属正常情形，
- * 不应导致通道中断。手写解析还使本层不依赖 IDE API，21 个类型均可直接进行单元测试。
+ * kotlinx polymorphic deserialization is deliberately avoided: it throws on an unrecognised `type`,
+ * whereas a newer frontend sending a newly added type is normal and must not break the channel.
+ * Hand-written parsing also keeps this layer free of IDE APIs, so all 21 types are directly
+ * unit-testable.
  */
 sealed class WebviewToHost {
 
-    // ------------------------------------------------------------ 侧栏
+    // ------------------------------------------------------------ Sidebar
 
     data object Ready : WebviewToHost()
     data class GetGitState(val mode: ReviewMode) : WebviewToHost()
@@ -53,10 +55,10 @@ sealed class WebviewToHost {
     data class JumpToComment(val index: Int) : WebviewToHost()
     data class CommentAction(val index: Int, val action: CommentActionKind) : WebviewToHost()
 
-    /** [focus] 表示前端自定义的焦点描述，宿主仅透传，不解释其内容。 */
+    /** [focus] is a frontend-defined focus description; the host relays it without interpreting it. */
     data class OpenConfigPanel(val focus: JsonElement? = null) : WebviewToHost()
 
-    // ------------------------------------------------------------ 配置面板
+    // ------------------------------------------------------------ Config panel
 
     data object ReadyConfigPanel : WebviewToHost()
     data object CloseConfigPanel : WebviewToHost()
@@ -70,16 +72,19 @@ sealed class WebviewToHost {
     data object InstallCli : WebviewToHost()
     data class CopyToClipboard(val text: String) : WebviewToHost()
 
-    // ------------------------------------------------------------ 兜底
+    // ------------------------------------------------------------ Fallback
 
-    /** 无法识别的 `type`。保留原值仅供日志记录——路由层将其忽略，不视为错误。 */
+    /** An unrecognised `type`. The original value is kept only for logging — the routing layer
+     *  ignores it rather than treating it as an error. */
     data class Unknown(val type: String) : WebviewToHost()
 
-    /** JSON 本身解析失败，或必填字段缺失、类型不符。[reason] 将展示给用户。 */
+    /** JSON failed to parse, a required field is missing, or a field has the wrong type. [reason] is
+     *  shown to the user. */
     data class Malformed(val reason: String) : WebviewToHost()
 }
 
-/** `commentAction` 的三种动作，取值为 `'apply' | 'discard' | 'falsePositive'`，与前端约定一致。 */
+/** The three `commentAction` actions, valued `'apply' | 'discard' | 'falsePositive'` as agreed with
+ *  the frontend. */
 enum class CommentActionKind { APPLY, DISCARD, FALSE_POSITIVE }
 
 private fun JsonObject.str(name: String): String? {
@@ -87,7 +92,8 @@ private fun JsonObject.str(name: String): String? {
     return if (prim.isString) prim.content else null
 }
 
-/** 空串视为"未填写"：前端表单中未选择分支时发送的是 `""` 而非省略字段。 */
+/** An empty string means "not filled in": the frontend form sends `""`, not an omitted field, when
+ *  no branch is selected. */
 private fun JsonObject.optStr(name: String): String? = str(name)?.takeIf { it.isNotBlank() }
 
 private fun JsonObject.int(name: String): Int? = (this[name] as? JsonPrimitive)?.intOrNull
@@ -111,18 +117,22 @@ private fun JsonObject.entries(name: String): List<ConfigEntry> {
     return array.mapNotNull { item ->
         val obj = item as? JsonObject ?: return@mapNotNull null
         val key = obj.str("key") ?: return@mapNotNull null
-        // value 允许为空串（清空某字段即以空串表达），因此此处不能使用 optStr。
+        // value may be an empty string (clearing a field is expressed as an empty string), so
+        // optStr cannot be used here.
         ConfigEntry(key, obj.str("value") ?: "")
     }
 }
 
-/** 「{type} 缺少 {field}」这类提示仅差两个参数，统一由本函数生成，避免各处重复构造文案。 */
+/** Messages like "{type} is missing {field}" differ only in two arguments and are all built here,
+ *  avoiding repeated copy construction at each call site. */
 private fun missingField(locale: SupportedLocale, type: String, field: String): WebviewToHost.Malformed =
     WebviewToHost.Malformed(HostStrings.t(locale, "ext.message.missingField", "type" to type, "field" to field))
 
 /**
- * 解析一条前端消息，过程中不抛出异常：解析失败返回 [WebviewToHost.Malformed]，未识别类型返回 [WebviewToHost.Unknown]。
- * [locale] 仅影响 `Malformed` 的提示文案（这些字符串原样回传前端展示，故随 IDE 界面语言而定）。
+ * Parses one frontend message and never throws: a parse failure yields [WebviewToHost.Malformed] and
+ * an unrecognised type yields [WebviewToHost.Unknown].
+ * [locale] affects only the `Malformed` message text (these strings are passed back to the frontend
+ * verbatim for display, so they follow the IDE UI language).
  */
 fun parseWebviewMessage(raw: String, locale: SupportedLocale): WebviewToHost {
     val msg = runCatching { OcrJson.parseToJsonElement(raw).jsonObject }.getOrElse {
@@ -144,8 +154,9 @@ fun parseWebviewMessage(raw: String, locale: SupportedLocale): WebviewToHost {
         "installCli" -> WebviewToHost.InstallCli
 
         "openConfigPanel" -> {
-            // "focus": null（JSON null 字面量）时 msg["focus"] 返回 JsonNull 而非 Kotlin null；
-            // 过滤掉，使"字段缺省"与"显式 null"在下游语义一致。
+            // For "focus": null (the JSON null literal) msg["focus"] returns JsonNull, not Kotlin
+            // null; filter it out so that an absent field and an explicit null mean the same
+            // downstream.
             val focus = msg["focus"]?.takeIf { it !is JsonNull }
             WebviewToHost.OpenConfigPanel(focus)
         }
@@ -206,7 +217,8 @@ fun parseWebviewMessage(raw: String, locale: SupportedLocale): WebviewToHost {
             WebviewToHost.ActivateCustomProvider(name)
         }
 
-        // text 可为空串（复制空字段属合法操作）；字段缺省时亦视为空串。
+        // text may be an empty string (copying an empty field is legitimate); a missing field counts
+        // as an empty string too.
         "copyToClipboard" -> WebviewToHost.CopyToClipboard(msg.str("text") ?: "")
 
         "jumpToComment" -> {

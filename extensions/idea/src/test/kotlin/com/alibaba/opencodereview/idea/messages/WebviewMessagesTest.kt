@@ -14,20 +14,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 入站消息契约的单测。此层不涉及任何 IDE API，因此 21 个类型可全部直接测试。
+ * Inbound message contract tests. This layer has no IDE API dependencies, so all 21 types can be tested directly.
  *
- * 重点不在于"能否解析"，而在于**解析失败时不得抛出异常**——前端版本领先宿主一个版本、
- * 或某字段临时缺失时，都不应导致整条消息通道中断。
+ * The key requirement is that parsing failures never throw: a newer frontend version or a temporarily missing
+ * field must not interrupt the entire message channel.
  */
 class WebviewMessagesTest {
 
-    /** locale 仅影响 Malformed 的提示文案，绝大多数用例不关心，固定使用中文即可。 */
+    /** Locale affects only Malformed messages; most tests do not care, so use Chinese consistently. */
     private fun parse(raw: String): WebviewToHost = parseWebviewMessage(raw, SupportedLocale.ZH_CN)
 
-    // ------------------------------------------------------------ 无参数类型
+    // ------------------------------------------------------------ Parameterless types
 
     @Test
-    fun `无参数的消息类型逐一命中`() {
+    fun `each parameterless message type is recognized`() {
         val cases = mapOf(
             "ready" to WebviewToHost.Ready,
             "readyConfigPanel" to WebviewToHost.ReadyConfigPanel,
@@ -43,10 +43,10 @@ class WebviewMessagesTest {
         }
     }
 
-    // ------------------------------------------------------------ 侧栏
+    // ------------------------------------------------------------ Sidebar
 
     @Test
-    fun `getGitState 解析模式`() {
+    fun `getGitState parses the mode`() {
         assertEquals(
             WebviewToHost.GetGitState(ReviewMode.BRANCH),
             parse("""{"type":"getGitState","mode":"branch"}"""),
@@ -58,7 +58,7 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `未知模式退回 workspace`() {
+    fun `unknown modes fall back to workspace`() {
         assertEquals(
             WebviewToHost.GetGitState(ReviewMode.WORKSPACE),
             parse("""{"type":"getGitState","mode":"nonsense"}"""),
@@ -70,7 +70,7 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `getModeFiles 带分支两端`() {
+    fun `getModeFiles includes both branch endpoints`() {
         val msg = parse(
             """{"type":"getModeFiles","mode":"branch","from":"main","to":"dev"}""",
         )
@@ -78,8 +78,8 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `getModeFiles 的空串等于没填`() {
-        // 表单未选择分支时发送的是空串而非省略字段；若按空串传递给 git 会被解析为非法 ref。
+    fun `empty getModeFiles strings are treated as missing`() {
+        // The form sends an empty string for an unselected branch; passing it to git would produce an invalid ref.
         val msg = parse(
             """{"type":"getModeFiles","mode":"branch","from":"","to":"  "}""",
         ) as WebviewToHost.GetModeFiles
@@ -88,7 +88,7 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `openFileDiff 全字段`() {
+    fun `openFileDiff parses all fields`() {
         val msg = parse(
             """{"type":"openFileDiff","path":"src/a.kt","status":"deleted","mode":"commit","commit":"abc1234"}""",
         )
@@ -99,7 +99,7 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `openFileDiff 的未知状态退回 modified`() {
+    fun `unknown openFileDiff status falls back to modified`() {
         val msg = parse(
             """{"type":"openFileDiff","path":"a.kt","status":"copied","mode":"workspace"}""",
         ) as WebviewToHost.OpenFileDiff
@@ -107,13 +107,13 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `openFileDiff 缺 path 是 Malformed`() {
+    fun `openFileDiff without path is Malformed`() {
         val msg = parse("""{"type":"openFileDiff","status":"added","mode":"workspace"}""")
         assertTrue(msg is WebviewToHost.Malformed)
     }
 
     @Test
-    fun `startReview 解析审查参数`() {
+    fun `startReview parses review options`() {
         val msg = parse(
             """{"type":"startReview","options":{"mode":"branch","from":"main","to":"dev","concurrency":4}}""",
         ) as WebviewToHost.StartReview
@@ -125,16 +125,16 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `startReview 缺 options 是 Malformed`() {
+    fun `startReview without options is Malformed`() {
         assertTrue(parse("""{"type":"startReview"}""") is WebviewToHost.Malformed)
     }
 
     @Test
-    fun `startReview 的 options 类型不对是 Malformed 而不是抛异常`() {
+    fun `startReview with the wrong options type is Malformed instead of throwing`() {
         assertTrue(
             parse("""{"type":"startReview","options":"workspace"}""") is WebviewToHost.Malformed,
         )
-        // 字段类型错至反序列化失败时同样必须降级，不得让异常穿出解析层。
+        // Invalid field types that fail deserialization must also degrade gracefully without escaping the parser.
         assertTrue(
             parse("""{"type":"startReview","options":{"concurrency":"many"}}""")
                 is WebviewToHost.Malformed,
@@ -142,7 +142,7 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `jumpToComment 与 commentAction`() {
+    fun `jumpToComment and commentAction parse correctly`() {
         assertEquals(
             WebviewToHost.JumpToComment(3),
             parse("""{"type":"jumpToComment","index":3}"""),
@@ -162,7 +162,7 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `index 缺失或非数字都是 Malformed`() {
+    fun `missing or non-numeric index is Malformed`() {
         assertTrue(parse("""{"type":"jumpToComment"}""") is WebviewToHost.Malformed)
         assertTrue(parse("""{"type":"jumpToComment","index":"abc"}""") is WebviewToHost.Malformed)
         assertTrue(parse("""{"type":"jumpToComment","index":null}""") is WebviewToHost.Malformed)
@@ -173,9 +173,9 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `数字字符串形式的 index 照样接受`() {
-        // 与 JavaScript 行为一致：`comments["3"]` 在 JS 中也能取到第 4 个元素，
-        // 此处同样保持宽松处理，不为前端不会发送的形态生成 Malformed。
+    fun `numeric string index is also accepted`() {
+        // Match JavaScript, where `comments["3"]` also returns the fourth element.
+        // Keep parsing permissive rather than generating Malformed for a shape the frontend does not send.
         assertEquals(
             WebviewToHost.JumpToComment(3),
             parse("""{"type":"jumpToComment","index":"3"}"""),
@@ -183,7 +183,7 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `openConfigPanel 原样透传 focus`() {
+    fun `openConfigPanel forwards focus unchanged`() {
         val msg = parse(
             """{"type":"openConfigPanel","focus":{"step":2,"tab":"custom"}}""",
         ) as WebviewToHost.OpenConfigPanel
@@ -193,16 +193,16 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `openConfigPanel 可以不带 focus`() {
+    fun `openConfigPanel allows missing focus`() {
         val msg = parse("""{"type":"openConfigPanel"}""") as WebviewToHost.OpenConfigPanel
         assertNull(msg.focus)
     }
 
-    // ------------------------------------------------------------ 配置面板
+    // ------------------------------------------------------------ Configuration panel
 
     @Test
-    fun `setConfig 允许空值`() {
-        // 清空某个字段即发送空串，不得当作缺字段处理。
+    fun `setConfig allows empty values`() {
+        // Clearing a field sends an empty string, which must not be treated as a missing field.
         assertEquals(
             WebviewToHost.SetConfig("llm.url", ""),
             parse("""{"type":"setConfig","key":"llm.url","value":""}"""),
@@ -210,12 +210,12 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `setConfig 缺 key 是 Malformed`() {
+    fun `setConfig without key is Malformed`() {
         assertTrue(parse("""{"type":"setConfig","value":"x"}""") is WebviewToHost.Malformed)
     }
 
     @Test
-    fun `setConfigBatch 与 testConnection 解析条目`() {
+    fun `setConfigBatch and testConnection parse entries`() {
         val json = """{"type":"%s","entries":[{"key":"provider","value":"kimi"},{"key":"model","value":""}]}"""
         val batch = parse(json.format("setConfigBatch")) as WebviewToHost.SetConfigBatch
         assertEquals(2, batch.entries.size)
@@ -228,22 +228,22 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `entries 里的坏条目被丢掉而不是整条消息失败`() {
+    fun `invalid entries are discarded without failing the whole message`() {
         val msg = parse(
-            """{"type":"setConfigBatch","entries":[{"value":"没有key"},"字符串",{"key":"model","value":"m"}]}""",
+            """{"type":"setConfigBatch","entries":[{"value":"没有key"},"字符串",{"key":"model","value":"m"}]}""", // allow-non-english: fixture verifies malformed Unicode message handling
         ) as WebviewToHost.SetConfigBatch
         assertEquals(1, msg.entries.size)
         assertEquals("model", msg.entries[0].key)
     }
 
     @Test
-    fun `entries 缺失时是空列表`() {
+    fun `missing entries become an empty list`() {
         val msg = parse("""{"type":"setConfigBatch"}""") as WebviewToHost.SetConfigBatch
         assertTrue(msg.entries.isEmpty())
     }
 
     @Test
-    fun `自定义 provider 的删除与激活`() {
+    fun `custom provider deletion and activation parse correctly`() {
         assertEquals(
             WebviewToHost.DeleteCustomProvider("my-llm"),
             parse("""{"type":"deleteCustomProvider","name":"my-llm"}"""),
@@ -259,7 +259,7 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `copyToClipboard 允许空文本`() {
+    fun `copyToClipboard allows empty text`() {
         assertEquals(
             WebviewToHost.CopyToClipboard(""),
             parse("""{"type":"copyToClipboard"}"""),
@@ -270,11 +270,11 @@ class WebviewMessagesTest {
         )
     }
 
-    // ------------------------------------------------------------ 兜底
+    // ------------------------------------------------------------ Fallbacks
 
     @Test
-    fun `不认识的类型是 Unknown 而不是 Malformed`() {
-        // 前端版本领先宿主时会多发类型，此为正常情况，不应向用户报错。
+    fun `unrecognized types are Unknown rather than Malformed`() {
+        // A newer frontend may send additional types; this is normal and should not show a user-facing error.
         assertEquals(
             WebviewToHost.Unknown("somethingNew"),
             parse("""{"type":"somethingNew","x":1}"""),
@@ -282,21 +282,21 @@ class WebviewMessagesTest {
     }
 
     @Test
-    fun `坏 JSON 与缺 type 都是 Malformed 且不抛异常`() {
-        assertTrue(parse("{不是json") is WebviewToHost.Malformed)
+    fun `invalid JSON and missing type are Malformed without throwing`() {
+        assertTrue(parse("{不是json") is WebviewToHost.Malformed) // allow-non-english: fixture verifies malformed Unicode message handling
         assertTrue(parse("") is WebviewToHost.Malformed)
         assertTrue(parse("[1,2,3]") is WebviewToHost.Malformed)
         assertTrue(parse("""{"foo":"bar"}""") is WebviewToHost.Malformed)
-        // type 不是字符串时同样只能降级。
+        // A non-string type must also degrade gracefully.
         assertTrue(parse("""{"type":42}""") is WebviewToHost.Malformed)
     }
 
     @Test
-    fun `Malformed 的提示文案跟着 locale 走`() {
-        // reason 会原样回传给前端展示，因此必须使用 IDE 界面语言，不得写死中文。
+    fun `Malformed messages follow the locale`() {
+        // The reason is displayed unchanged by the frontend, so use the IDE language rather than hardcoding Chinese.
         val raw = """{"type":"setConfig","value":"x"}"""
         assertEquals(
-            "setConfig 缺少 key",
+            "setConfig 缺少 key", // allow-non-english: assertion verifies Chinese UI translations
             (parseWebviewMessage(raw, SupportedLocale.ZH_CN) as WebviewToHost.Malformed).reason,
         )
         assertEquals(

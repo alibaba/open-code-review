@@ -79,6 +79,8 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session show <id>` | `ocr sessions show <id>` | 1つのセッションとファイル単位のチェックポイントを表示します。 |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | 1つのセッションに記録されたレビューコメントを表示します。 |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 2つのセッションの指摘を比較します：新規・継続・解決済み・未レビュー。 |
+| `ocr session export [id]` | — | 1つのセッションを自己完結型の HTML ファイルとしてエクスポートします。 |
+| `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | 保存済みのレビューセッションを1つ削除します。 |
 | `ocr viewer` | — | 過去のレビューセッション用のローカル Web UI を起動します（`localhost:5483`）。 |
 | `ocr version` | — | バージョン、commit、プラットフォーム、ビルド日、GitHub URL を出力します。 |
 
@@ -115,7 +117,7 @@ ocr r      [flags]   (alias)
 | `--background-file <path>` | `-B` | — | レビューの背景として使用する Markdown ファイルのパス。`--background` も指定した場合は両方を結合します。 |
 | `--exclude <patterns>` | — | — | 除外する gitignore 形式のパターン（カンマ区切り）。`rule.json` の excludes とマージされます。 |
 | `--concurrency <n>` | — | `8` | 並行してレビューするサブタスクの最大数。 |
-| `--timeout <minutes>` | — | `15` | サブタスクごとの締め切り時間。`0` でタイムアウトを無効化します。effort ラウンド数に応じて線形にスケールします（例: low/medium/high で 15/30/45 分）。 |
+| `--timeout <minutes>` | — | `15` | LLM 呼び出し、ツール実行、再試行の待機を含むサブタスクごとの制限時間。`0` でタスクの期限を無効化しますが、リクエストのタイムアウトは無効化しません。リクエスト単位のタイムアウトは `OCR_LLM_TIMEOUT` または provider の `timeout_sec` で独立して設定し、秒単位です（デフォルト `300`）。effort のレビューラウンド数に応じて線形にスケールします（例: low/medium/high で 15/30/45 分）。 |
 | `--rule <path>` | — | — | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。 |
 | `--max-tools <n>` | — | テンプレートのデフォルト | サブタスクごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`100`）を使用します。1〜49 は `50` に引き上げられます。解決後の値はテンプレートのデフォルトを**上回る場合にのみ**適用されます（引き上げのみ可能で、引き下げはできません）。 |
 | `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | サブタスクごとの**プロンプト**トークン上限（review のデフォルトは `200000`）。この実行で保存済みの `max_tokens` 設定を上書きします。出力の上限には影響しません。そちらは `MAX_COMPLETION_TOKENS`（`16384`）が個別に制御します。 |
@@ -146,6 +148,11 @@ ocr scan --provider openai --model gpt-5.4 --format json
 環境設定、shell rc ファイルの順です。`--model` は選ばれたソース内の model を上書きしますが、
 ソース順序は変更しません。不完全な戦略は別の戦略と混合されず、次へフォールバックします。
 選択された組み込み provider の認証情報は、対応する環境変数から引き続き取得できます。
+
+組み込み provider の `--model` は、`ocr config model` の選択候補以外も受け付けます。
+組み込み一覧にも `providers.<name>.models` にもないモデルを指定すると、OCR は
+stderr に警告を出し、検証は provider に任せます。カスタム provider には
+従来の `--model` 検証ルールが適用されます。
 
 ### モード
 
@@ -298,7 +305,7 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
 
 | フィールド | 説明 |
 |---|---|
-| `status` | `success`、`completed_with_warnings`、`completed_with_errors`、または `skipped`。 |
+| `status` | 出力に `manifest` フィールドが含まれる場合はその終端状態（`complete`、`partial`、`failed`、`skipped`）。含まれない場合は `success`、`completed_with_warnings`、`completed_with_errors`。`skipped` はレビュー対象ファイルがない場合にも使われます。 |
 | `llm` | 解決された LLM の識別情報。正規化済みの `model` は常に含まれ、`provider` は名前付きの設定済み provider の場合だけ含まれます。 |
 | `message` | 任意。人間が読みやすいサマリー（例: `"No comments generated. Looks good to me."`）。 |
 | `summary` | 任意。実行の集計: `files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` の実行時は省略されます。 |
@@ -432,7 +439,8 @@ ocr session comments --severity critical,high --category bug,security <session-i
 レビューしていないため解決済みとは数えないもの）。
 
 照合はパス・カテゴリ・該当コード片で行い、行番号は使いません。そのため行が
-ずれただけの指摘は persisting のままになります。
+ずれただけの指摘は persisting のままになります。after セッションのランマニフェストに
+ファイル名変更が記録されている場合、照合前に旧パスを新パスへ対応付けます。
 
 ```bash
 ocr session compare <before-session-id> <after-session-id>
@@ -448,6 +456,58 @@ ocr session compare --json <before-session-id> <after-session-id>
 |---|---|---|
 | `--repo <path>` | カレントディレクトリ | 比較するセッションが属するリポジトリ。 |
 | `--json` | `false` | 比較結果を JSON で出力します（`new`、`persisting`、`resolved`、`not_reviewed`）。 |
+
+### `ocr session export`
+
+1つのセッションを自己完結型の HTML ファイル 1 つとしてレンダリングします。
+ビューアのスタイルシートとスクリプトはインライン化されるため、生成された
+ファイルはネットワークアクセスなしで `file://` から開け、CI がレビュー結果を
+ビルド成果物として保存できます。
+
+```bash
+ocr session export -o review.html
+ocr session export 20250601-100000-abc123 -o review.html
+```
+
+セッション id を指定しない場合は、そのリポジトリの最新セッションをエクスポートします。
+成功した `ocr review` はセッション id を出力しないため、これが既定の動作です。
+`-o` を指定しない場合、HTML は標準出力に書き出されます。
+
+エクスポートされたページにはセッションが記録したレビュー対象のソース抜粋が
+含まれます。公開する前に、リポジトリ自体と同じように慎重に取り扱ってください。
+
+| フラグ | デフォルト | 説明 |
+|---|---|---|
+| `--repo <path>` | カレントディレクトリ | エクスポートするセッションが属するリポジトリ。 |
+| `--output <path>`、`-o` | 標準出力 | HTML を標準出力ではなくファイルに書き出します。 |
+
+### `ocr session rm`
+
+`~/.opencodereview/sessions/` から保存済みのセッションを1つ削除します。
+
+```bash
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --yes
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --repo ~/work/my-project
+```
+
+id だけで十分なので、どのディレクトリからでも実行できます。同じ id が複数の
+リポジトリに保存されている場合は、候補を一覧表示して何も削除しません。`--repo`
+で1つを指定してください。
+
+セッションのリポジトリ、ブランチ、開始時刻、ファイル数、コメント数を表示し、
+確認を求めます。**非対話的な stdin は「いいえ」として扱われる**ため、パイプラインや
+CI ジョブで確認を省略するには `--yes`（`-y`）を渡してください。
+
+メタデータを解析できないセッションも削除できます。まったく読み取れない場合は、
+削除せずにエラーを報告します。`--repo` を指定した場合、別のリポジトリを記録している
+セッションや、リポジトリを記録していないセッションは拒否されます。その場合は id
+だけで削除してください。
+
+| フラグ | デフォルト | 説明 |
+|---|---|---|
+| `--repo <path>` | すべてのリポジトリ | このリポジトリの下だけでセッションを探します。 |
+| `--yes`、`-y` | `false` | 確認プロンプトを省略します。 |
 
 ## `ocr rules`
 

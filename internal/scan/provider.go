@@ -53,6 +53,7 @@ type Provider struct {
 // back to DefaultMaxFileSizeBytes.
 func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileSizeBytes int64) *Provider {
 	cleaned := make([]string, 0, len(paths))
+	rootSelected := false
 	for _, p := range paths {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -60,9 +61,27 @@ func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileS
 		}
 		// Normalize: strip leading "./" and trailing "/" so prefix matching
 		// against `git ls-files` output (which never has leading "./") works.
-		p = strings.TrimPrefix(p, "./")
+		// ToSlash runs first: on Windows `.\dir` only becomes `./dir` here, and
+		// trimming the prefix before the conversion leaves it in place to match
+		// nothing.
+		p = filepath.ToSlash(p)
+		for strings.HasPrefix(p, "./") {
+			p = strings.TrimPrefix(p, "./")
+		}
 		p = strings.TrimSuffix(p, "/")
-		cleaned = append(cleaned, filepath.ToSlash(p))
+		// "." and "./" name the repository root, which is what an omitted --path
+		// already means. Kept as a selector they match nothing, because
+		// `git ls-files` prints `main.go` and never `./main.go`.
+		if p == "" || p == "." {
+			rootSelected = true
+			continue
+		}
+		cleaned = append(cleaned, p)
+	}
+	// A root selector widens the scan to the whole repository, so any narrower
+	// selector alongside it is already covered.
+	if rootSelected {
+		cleaned = nil
 	}
 	if maxFileSizeBytes <= 0 {
 		maxFileSizeBytes = DefaultMaxFileSizeBytes
@@ -244,26 +263,29 @@ func (p *Provider) listFilesViaWalk(ctx context.Context) ([]string, error) {
 
 func (p *Provider) gitLs(ctx context.Context, args ...string) ([]string, error) {
 	cmdArgs := append([]string{"-c", "core.quotepath=false", "ls-files"}, args...)
-	var out string
+	// Both branches take stdout only, never stdout+stderr combined: with -z,
+	// git emits NUL-delimited paths on stdout, and a warning written to stderr
+	// would be spliced into the middle of a pathname by the parsing below.
+	var raw []byte
 	var err error
 	if p.runner != nil {
-		out, err = p.runner.Run(ctx, p.repoDir, cmdArgs...)
+		raw, err = p.runner.Output(ctx, p.repoDir, cmdArgs...)
 	} else {
 		cmd := exec.CommandContext(ctx, "git", cmdArgs...)
 		cmd.Dir = p.repoDir
-		// Use Output (stdout only), not CombinedOutput: with -z, git emits
-		// NUL-delimited paths on stdout, and merging stderr in would corrupt
-		// the filename parsing below.
-		raw, runErr := cmd.Output()
-		out, err = string(raw), runErr
+		raw, err = cmd.Output()
 	}
 	if err != nil {
 		return nil, err
 	}
-	raw := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
-	files := make([]string, 0, len(raw))
-	for _, f := range raw {
-		f = strings.TrimSpace(f)
+	// Do not trim the records. Leading and trailing whitespace are valid
+	// filename bytes, and -z exists precisely so that they need no escaping:
+	// trimming " normal.go" to "normal.go" points every later Lstat at a path
+	// that does not exist, and the tracked file drops out of the scan with no
+	// error. Only genuinely empty records are discarded.
+	records := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
+	files := make([]string, 0, len(records))
+	for _, f := range records {
 		if f != "" {
 			files = append(files, f)
 		}

@@ -24,11 +24,14 @@ import java.awt.datatransfer.StringSelection
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 配置面板的消息路由，按消息类型分派处理。
+ * Message routing for the config panel; dispatches by message type.
  *
- * 两个关键行为，变更前需确认：
- * 1. 处理逻辑都包在 try/catch 里，异常统一转 `panelError` 发回前端（前端有专门错误条渲染；只写日志用户看到的是"点了保存无响应"）。
- * 2. 每次写配置后 `notifyConfig`——既回 `config` 给面板，又推给侧栏，否则侧栏仍以旧配置判断能否开始审查。
+ * Two key behaviours to confirm before changing:
+ * 1. Every handler wraps its work in try/catch and turns the exception into a `panelError` sent back
+ *    to the frontend (which renders a dedicated error bar; logging alone leaves the user seeing
+ *    "I clicked save and nothing happened").
+ * 2. Every config write is followed by `notifyConfig` — returning `config` to the panel and pushing
+ *    it to the sidebar, which would otherwise keep judging readiness from the old config.
  */
 class ConfigPanelRouter(
     private val project: Project,
@@ -36,13 +39,13 @@ class ConfigPanelRouter(
     private val config: ConfigService,
     private val locale: () -> SupportedLocale,
     private val post: (ConfigPanelHostToWebview) -> Unit,
-    /** 关闭面板窗口。 */
+    /** Closes the panel window. */
     private val closePanel: () -> Unit,
-    /** 配置变化后通知侧栏。 */
+    /** Notifies the sidebar after a config change. */
     private val onConfigChanged: (OcrConfig?) -> Unit,
 ) {
 
-    /** `open(focus)` 与 `readyConfigPanel` 之间暂存的 focus。 */
+    /** The focus held between `open(focus)` and `readyConfigPanel`. */
     private val pendingFocus = AtomicReference<JsonElement?>(null)
 
     fun setPendingFocus(focus: JsonElement?) {
@@ -52,7 +55,8 @@ class ConfigPanelRouter(
     fun takePendingFocus(): JsonElement? = pendingFocus.getAndSet(null)
 
     fun handle(msg: WebviewToHost) {
-        // closeConfigPanel 只是关窗口，切到后台线程反而会与 dispose 竞争，直接同步处理。
+        // closeConfigPanel only closes the window; moving it to a background thread would race with
+        // dispose, so handle it synchronously.
         if (msg is WebviewToHost.CloseConfigPanel) {
             invokeOnEdt { closePanel() }
             return
@@ -87,7 +91,7 @@ class ConfigPanelRouter(
             }
 
             is WebviewToHost.DeleteCustomProvider -> {
-                // 删除配置不可撤销，需以模态确认框拦截一次。
+                // Deleting a config cannot be undone, so a modal confirmation intercepts it first.
                 if (!confirmDelete(msg.name)) return
                 notifyConfig(config.deleteCustomProvider(msg.name))
             }
@@ -97,13 +101,14 @@ class ConfigPanelRouter(
                 notifyConfig(config.read())
             }
 
-            // checkCli 和 checkEnvironment 合到同一分支，均为强制重新探测。
+            // checkCli and checkEnvironment share a branch: both force a fresh probe.
             WebviewToHost.CheckCli, WebviewToHost.CheckEnvironment ->
                 post(ConfigPanelHostToWebview.EnvironmentResult(cli.checkEnvironment(force = true)))
 
             is WebviewToHost.CopyToClipboard -> {
-                // 写剪贴板与回执都在 EDT 内完成：否则 post(CopyDone) 在写盘前就到前端，
-                // 用户看到"已复制"立即切走应用去粘贴时，剪贴板里可能还没有内容。
+                // The clipboard write and the acknowledgement both happen on the EDT: otherwise
+                // post(CopyDone) reaches the frontend before the write, and a user who sees "copied",
+                // switches away and pastes may find nothing on the clipboard.
                 invokeOnEdt {
                     CopyPasteManager.getInstance().setContents(StringSelection(msg.text))
                     post(ConfigPanelHostToWebview.CopyDone)
@@ -113,20 +118,23 @@ class ConfigPanelRouter(
             WebviewToHost.InstallCli -> {
                 val ok = cli.install { line -> post(ConfigPanelHostToWebview.InstallLog(line)) }
                 post(ConfigPanelHostToWebview.InstallDone(ok))
-                // 安装成功时已清环境缓存，此处不带 force 也会重新探测一次。
+                // A successful install clears the environment cache, so this re-probes even without
+                // force.
                 post(ConfigPanelHostToWebview.EnvironmentResult(cli.checkEnvironment()))
             }
 
             is WebviewToHost.Malformed -> post(ConfigPanelHostToWebview.PanelError(msg.reason))
 
-            // 侧栏的消息不应经此通道投递；无法识别的类型可能来自更新的前端，忽略即可。
+            // Sidebar messages should not be delivered through this channel; an unrecognised type
+            // may come from a newer frontend, so ignoring it is enough.
             else -> thisLogger().debug("[ocr] Config panel ignoring message: $msg")
         }
     }
 
     /**
-     * `readyConfigPanel` 的响应。`env` 刻意只取缓存而不主动探测：
-     * 面板需要时会自行发 `checkEnvironment`，此处同步探测会把首屏阻塞数秒。
+     * Response to `readyConfigPanel`. `env` deliberately comes from the cache rather than a fresh
+     * probe: the panel sends `checkEnvironment` itself when it needs one, and probing here would
+     * block the first paint for seconds.
      */
     private fun sendInit() {
         val focus = takePendingFocus()
@@ -136,7 +144,8 @@ class ConfigPanelRouter(
                 config = current,
                 focus = focus,
                 env = cli.getCachedEnvironment(),
-                // 直接跳到第 2 步、或者配置本就齐备，则无需再走环境检查引导。
+                // Jumping straight to step 2, or an already complete config, means the environment
+                // check walkthrough is not needed.
                 skipEnvCheck = focus.step() == 2 || isConfigReady(current),
                 locale = locale(),
             ),
@@ -149,7 +158,8 @@ class ConfigPanelRouter(
     }
 
     private fun confirmDelete(name: String): Boolean {
-        // 在 pooled 线程上走到这里时项目可能已被关闭：对已释放 project 调 invokeAndWait 弹模态框可能死锁。
+        // The project may already be closed by the time a pooled thread reaches here: invokeAndWait
+        // for a modal dialog on a disposed project can deadlock.
         if (project.isDisposed) return false
         var confirmed = false
         val loc = locale()
@@ -182,6 +192,7 @@ class ConfigPanelRouter(
     }
 }
 
-/** 读取 `ConfigPanelFocus.step`。宿主不解释 focus 的其余字段，只需要这一个数字。 */
+/** Reads `ConfigPanelFocus.step`. The host does not interpret the rest of the focus, only this
+ *  number. */
 private fun JsonElement?.step(): Int? =
     ((this as? JsonObject)?.get("step") as? JsonPrimitive)?.intOrNull

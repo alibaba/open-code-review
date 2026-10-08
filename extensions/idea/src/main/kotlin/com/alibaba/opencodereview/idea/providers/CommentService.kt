@@ -56,14 +56,14 @@ import javax.swing.JPanel
 import javax.swing.JTextArea
 
 /**
- * 评论挂载与操作。三级定位回退（行号可用 → existingCode 滑窗重定位 → 仅侧栏）
- * 见 [resolveCommentAnchor]。
+ * Comment mounting and actions. The three-stage fallback uses valid line numbers, then an existingCode sliding-window match,
+ * then sidebar-only display; see [resolveCommentAnchor].
  *
- * workspace 模式：RangeHighlighter 本身是 RangeMarker，文档编辑后 offset 自行调整，
- * apply 与 jumpTo 直接问它当前行号。
+ * Workspace mode: RangeHighlighter is itself a RangeMarker, so offsets adjust automatically after document edits.
+ * [apply] reads the current line range from the anchor; [jumpTo] reads its current start line.
  *
- * branch/commit 模式：内容为 git 引用只读快照，mounts 仅记录跳转所需的侧与行号，
- * 编辑器内标记由 GitService.diffDecorator 在文档创建时回调挂载。
+ * Branch/commit mode: content is a read-only Git snapshot; [mounts] stores only the side and line numbers needed for navigation.
+ * GitService.diffDecorator attaches editor markers through a callback when the document is created.
  */
 class CommentService(
     private val project: Project,
@@ -73,11 +73,11 @@ class CommentService(
 ) : Disposable {
 
     /**
-     * 评论落点，两模式共用完整行范围（startLine/endLine，1-based 闭区间）。
-     * 取范围统一走 lineRangeIn，不各自读取字段。
+     * Comment anchor. Both modes use the full line range (startLine/endLine, 1-based and inclusive).
+     * Always obtain the range through lineRangeIn instead of reading the fields independently.
      *
-     * workspace 以 RangeHighlighter（RangeMarker）为当前位置真相。
-     * branch/commit 以存下的行号为真相，不需要活锚点。
+     * Workspace mode uses the live RangeHighlighter (RangeMarker) as the source of the current position.
+     * Branch/commit mode uses the stored line numbers and does not need a live anchor.
      */
     private sealed class MountTarget {
         abstract val startLine: Int
@@ -96,12 +96,12 @@ class CommentService(
         ) : MountTarget()
     }
 
-    /** 评论状态变化时的回调，载荷即发给前端的 commentSync 内容。 */
+    /** Callback for comment state changes, carrying the commentSync payload sent to the frontend. */
     var onSync: ((List<CommentSyncState>) -> Unit)? = null
 
     /**
-     * workspace 模式对齐 VS Code：文件打开时，该文件所有已挂载评论立即在各自代码行下方展开。
-     * 文件未打开时不主动打开，靠 FileEditorManagerListener 补挂。
+     * Match VS Code in workspace mode: opening a file expands all mounted comments below their respective code lines.
+     * Do not open closed files proactively; FileEditorManagerListener mounts their comments when opened.
      */
     init {
         project.messageBus.connect(this).subscribe(
@@ -121,19 +121,19 @@ class CommentService(
     private val mounts = mutableMapOf<Int, MountTarget>()
     private val jumpBlockReasons = mutableMapOf<Int, SidebarOnlyReason>()
 
-    /** diff 视图的标记，随每次 diff 打开临时文档重建。 */
+    /** Diff markers, rebuilt for the temporary documents each time a diff is opened. */
     private val diffHighlighters = mutableMapOf<Int, RangeHighlighter>()
 
     /**
-     * workspace 模式评论下方展开的内嵌面板。key 带 EditorEx 因 Inlay 挂在编辑器实例上
-     * 而非 Document——同一文件分两窗格时各需独立面板。
+     * Inline panels expanded below workspace comments. The key includes EditorEx because an Inlay belongs to an editor
+     * rather than a Document; two panes showing the same file need independent panels.
      */
     private val panels = mutableMapOf<Pair<Int, EditorEx>, Inlay<*>>()
 
-    /** 内嵌面板展开/折叠状态。setStatus 处理后折叠，jumpTo 重新展开。 */
+    /** Inline panel expansion state. setStatus collapses handled comments; jumpTo expands them again. */
     private val expanded = mutableMapOf<Int, Boolean>()
 
-    /** 三级回退时「行号被重定位过」的提示，展示在评论正文前面。 */
+    /** The relocation note from the three-stage fallback, displayed before the comment body. */
     private val locateNotes = mutableMapOf<Int, String>()
 
     fun show(comments: List<ReviewComment>, context: ReviewContext) {
@@ -185,7 +185,7 @@ class CommentService(
         }
     }
 
-    /** 挂载完成后自动跳到第一条挂上的评论。 */
+    /** Automatically navigate to the first mounted comment after mounting finishes. */
     private fun jumpToFirstMounted() {
         val first = synchronized(lock) { mounts.keys.minOrNull() } ?: return
         if (ApplicationManager.getApplication().isDispatchThread) {
@@ -197,7 +197,7 @@ class CommentService(
         }
     }
 
-    /** 清空所有评论与高亮。 */
+    /** Clear all comments and highlights. */
     fun clear() {
         synchronized(lock) {
             comments = emptyList()
@@ -240,7 +240,7 @@ class CommentService(
     }
 
     /**
-     * 采纳建议。只有 workspace 模式允许 apply。无 suggestionCode 时删除被标记范围。
+     * Apply a suggestion, allowed only in workspace mode. Delete the marked range when suggestionCode is absent.
      */
     fun apply(index: Int) {
         val (comment, ctx) = snapshot(index) ?: return
@@ -262,7 +262,7 @@ class CommentService(
             val startLine = range.first
             val endLine = range.last
 
-            // ensureFilesWritable 放在 isWritable 前：它会弹 IDEA「从版本控制签出」对话框。
+            // Call ensureFilesWritable before isWritable so IDEA can show its version-control checkout dialog.
             val writable = ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(listOf(file))
             if (writable.hasReadonlyFiles() || !document.isWritable) {
                 notify(HostStrings.t(locale(), "ext.comment.applyFailedLocked"), NotificationType.ERROR)
@@ -302,7 +302,7 @@ class CommentService(
 
     fun falsePositive(index: Int) = setStatus(index, CommentStatus.FALSE_POSITIVE)
 
-    // ---------------------------------------------------------------- 内部
+    // ---------------------------------------------------------------- Internal helpers
 
     private fun snapshot(index: Int): Pair<ReviewComment, ReviewContext>? = synchronized(lock) {
         val comment = comments.getOrNull(index) ?: return null
@@ -311,11 +311,11 @@ class CommentService(
     }
 
     /**
-     * 第 index 条评论此刻在 document 里占哪几行（0-based 闭区间）。
-     * 画行底色、挂内嵌面板、跳转、采纳均从此统一出口。
+     * The lines currently occupied by the comment at [index] in the document (0-based inclusive range).
+     * Line backgrounds, inline panels, navigation, and applying suggestions all use this single entry point.
      *
-     * workspace 优先问活锚点（RangeHighlighter 跟随用户编辑移动）；
-     * 锚点失效退回解析阶段行号。返回 null 表示无落点（仅侧栏展示）。
+     * In workspace mode, prefer the live anchor (RangeHighlighter follows user edits).
+     * If it is invalid, use the originally resolved lines. Null means no anchor, so display only in the sidebar.
      */
     private fun lineRangeIn(index: Int, document: Document): IntRange? {
         if (document.lineCount == 0) return null
@@ -341,7 +341,7 @@ class CommentService(
         publishSync()
     }
 
-    /** 状态变化时刷新 gutter 图标、tooltip、error stripe 和内嵌面板。 */
+    /** Refresh gutter icons, tooltips, error stripes, and inline panels when status changes. */
     private fun refreshGutter(index: Int, comment: ReviewComment, status: CommentStatus) {
         val loc = locale()
         val targets = synchronized(lock) {
@@ -369,7 +369,7 @@ class CommentService(
         rebuildInlinePanels(index, comment)
     }
 
-    /** 按最新状态/展开状态重建内嵌面板。找不到旧面板则跳过。 */
+    /** Rebuild the inline panel with the latest status and expansion state; skip if no existing panel is found. */
     private fun rebuildInlinePanels(index: Int, comment: ReviewComment) {
         val stale = synchronized(lock) { panels.keys.filter { it.first == index } }
         if (stale.isEmpty()) return
@@ -469,8 +469,8 @@ class CommentService(
     }
 
     /**
-     * 给 diff 文档挂属于这一侧的评论标记（RangeHighlighter + 装订线图标）。
-     * 由 GitService.openDiff 在 EDT 回调、左右两侧各一次。
+     * Attach comment markers (RangeHighlighter and gutter icons) belonging to this side of a diff document.
+     * Called by GitService.openDiff on the EDT, once for each side.
      */
     fun decorateDiff(relPath: String, side: Side, document: Document) {
         val anchorSide = if (side == Side.LEFT) AnchorSide.LEFT else AnchorSide.RIGHT
@@ -503,9 +503,9 @@ class CommentService(
     }
 
     /**
-     * 装订线图标，点击展开/收起内嵌面板。
-     * 不跳转到该行：图标就在该行旁边，已可见无需再跳。
-     * 跨位置导航走侧栏卡片「查看」按钮 → jumpTo。
+     * A gutter icon that toggles the inline panel when clicked.
+     * Do not navigate to the line: the icon is already beside it, so the line is visible.
+     * Navigation to other locations uses the sidebar card View button, which calls jumpTo.
      */
     private inner class CommentGutterIconRenderer(
         private val index: Int,
@@ -542,8 +542,8 @@ class CommentService(
     }
 
     /**
-     * 把评论的内嵌面板挂进 editor 的 offset 下方。
-     * 已挂过则跳过（panels 按 (index, editor) 去重）。
+     * Attach the inline comment panel below the given [offset] in the editor.
+     * Skip existing panels; panels are deduplicated by (index, editor).
      */
     private fun mountInlineComment(index: Int, comment: ReviewComment, editor: EditorEx, offset: Int) {
         val key = index to editor
@@ -574,8 +574,8 @@ class CommentService(
     }
 
     /**
-     * 给 diff 视图挂内嵌评论面板。由 GitService.diffViewerReady 在 showDiff 之后回调。
-     * 通过 EditorFactory 查询 document 对应的编辑器实例。
+     * Attach inline comment panels to a diff view. Called by GitService.diffViewerReady after showDiff.
+     * Find editor instances for the document through EditorFactory.
      */
     fun mountDiffPanels(relPath: String, side: Side, document: Document, clickedIndex: Int? = null) {
         val anchorSide = if (side == Side.LEFT) AnchorSide.LEFT else AnchorSide.RIGHT
@@ -588,7 +588,7 @@ class CommentService(
             .filterIsInstance<EditorEx>()
         if (editors.isEmpty()) return
 
-        // 被点击的评论放到最后挂，使滚入目标落在点击行。
+        // Mount the clicked comment last so scrolling targets the clicked line.
         val ordered = if (clickedIndex == null) targets
             else targets.sortedBy { it.index == clickedIndex }
 
@@ -616,7 +616,7 @@ class CommentService(
         dead.forEach { runCatching { it.dispose() } }
     }
 
-    /** 补挂 file 里所有已定位但未展开的评论面板。 */
+    /** Attach panels for resolved comments in [file], skipping any that already have a panel in the same editor. */
     private fun mountInlineCommentsForFile(file: VirtualFile) {
         val toMount = synchronized(lock) {
             mounts.entries.mapNotNull { (index, target) ->
@@ -641,8 +641,8 @@ class CommentService(
     }
 
     /**
-     * 内嵌面板内容：定位提示 + 正文 + 分隔线 + suggestion + 按钮。
-     * expanded 为 false 时只画标题行（折叠态）。
+     * Inline panel content: relocation note, body, separator, suggestion, and buttons.
+     * When expanded is false, render only the title row (collapsed state).
      */
     private fun buildCommentPanel(
         index: Int, comment: ReviewComment, status: CommentStatus, expanded: Boolean,
@@ -690,7 +690,7 @@ class CommentService(
         })
         panel.add(centerPanel, BorderLayout.CENTER)
 
-        // 已处理的评论不再给操作按钮。
+        // Do not show action buttons for comments that have already been handled.
         if (status == CommentStatus.PENDING) {
             val buttons = JPanel()
             val workspace = snapshot(index)?.second?.mode == ReviewMode.WORKSPACE
@@ -726,7 +726,11 @@ class CommentService(
         }
     }
 
-    /** 把 CLI 给的相对路径解析成项目内文件；越出仓库根的路径一律拒绝。基准用 repoRoot：评论路径是仓库根相对（git diff 默认），子目录打开项目时 basePath≠repoRoot 会导致双重嵌套找不到文件。 */
+    /**
+     * Resolve a CLI path within the repository, rejecting paths outside repoRoot.
+     * Git diff comment paths are repository-relative. If the project is opened in a subdirectory,
+     * resolving them against basePath would repeat the subdirectory and fail to find the file.
+     */
     private fun resolveProjectFile(relative: String): VirtualFile? {
         val base = git.repoRoot()?.toPath()?.toRealPath() ?: return null
         val target = runCatching { base.resolve(relative).toRealPath() }.getOrNull() ?: return null

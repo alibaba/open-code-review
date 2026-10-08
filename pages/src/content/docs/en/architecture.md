@@ -63,7 +63,7 @@ The function returns one of:
 binary          — file is binary
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
-default_path    — matched a built-in test-file exclude pattern
+default_path    — matched a built-in exclude pattern
 ```
 
 …or empty if the file is kept. `deleted` and `too_large` are **not**
@@ -78,16 +78,21 @@ order:
    matches one, it's kept immediately (returns empty), bypassing the
    `unsupported_ext` and `default_path` gates below.
 4. `unsupported_ext` filters by extension allowlist.
-5. `default_path` is the last gate: it matches built-in **test-file**
-   exclude patterns (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`,
-   `**/__tests__/**`, `**/*_test.py`, `**/*_spec.rb`, `**/*.test.ets`, …).
-   Every pattern is rooted with a `**/` prefix.
+5. `default_path` is the last gate: it matches built-in exclude patterns,
+   both test files (`**/*_test.go`, `**/__tests__/**`, `**/*_spec.rb`, …)
+   and dependency or build-output directories (`**/node_modules/**`,
+   `**/vendor/**`, `**/target/**`, `**/__pycache__/**`, …). Every pattern
+   is rooted with a `**/` prefix.
 
-The noisy-directory filtering (`vendor/`, `node_modules/`, `target/`, …)
-happens earlier, at the diff-provider level, via the
-`providerDirIgnoreDirs` list in `internal/diff/git.go`. Preview reports these
-files as `provider_directory`; they never reach the per-file filter, and an
-`include` rule cannot make them reviewable.
+The same noisy directories are also filtered earlier, at the diff-provider
+level, via the `providerDirIgnoreDirs` list in `internal/diff/git.go`. That
+list matches by path prefix, so it catches only a directory at the
+**repository root**: `vendor/pkg/x.go` never reaches the per-file filter,
+while `api/vendor/pkg/x.go` does and is excluded by `default_path` instead.
+
+The difference is user-visible. Preview reports the first as
+`provider_directory` and an `include` rule cannot make it reviewable; it
+reports the second as `default_path`, which an `include` rule can override.
 
 Run `ocr review --preview` to see the full filter result without spending
 a token. See [Review Rules](../review-rules/#how-files-are-filtered) for

@@ -37,7 +37,7 @@ git clone https://github.com/<your-username>/open-code-review.git
 cd open-code-review
 git remote add upstream https://github.com/alibaba/open-code-review.git
 
-make build       # writes dist/opencodereview
+make build       # writes dist/opencodereview (dist/opencodereview.exe on Windows)
 make test        # LC_ALL=C go test -v -race -count=1 ./...
 ```
 
@@ -46,7 +46,8 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 ### 运行本地构建
 
 ```bash
-./dist/opencodereview review --preview
+./dist/opencodereview review --preview        # macOS / Linux
+.\dist\opencodereview.exe review --preview   # Windows (PowerShell / cmd)
 ```
 
 为方便起见，在 `~/bin/ocr-dev` 放一个指向 `dist/opencodereview` 的符号链接，即可在
@@ -56,7 +57,7 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 
 | Target | 作用 |
 |---|---|
-| `make build` | 为当前平台构建 → `dist/opencodereview`。 |
+| `make build` | 为当前平台构建 → `dist/opencodereview`（Windows 上是 `dist/opencodereview.exe`）。 |
 | `make build-darwin-amd64` | 交叉编译 macOS Intel。 |
 | `make build-darwin-arm64` | 交叉编译 macOS Apple Silicon。 |
 | `make build-linux-amd64` | 交叉编译 Linux x86_64。 |

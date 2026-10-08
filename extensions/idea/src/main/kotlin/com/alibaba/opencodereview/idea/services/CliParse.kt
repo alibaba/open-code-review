@@ -21,8 +21,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * CLI snake_case JSON 与插件 camelCase 契约之间的唯一转换点。
- * 下列 Dto 仅用于反序列化，不暴露到 model 包之外。
+ * The single conversion point between the CLI's snake_case JSON and the plugin's camelCase contract.
+ * The DTOs below are deserialization-only and never leave the model package.
  */
 
 @Serializable
@@ -66,7 +66,7 @@ fun buildReviewArgs(opts: CliRunOptions): List<String> = buildList {
         ReviewMode.COMMIT -> opts.commit?.takeIf(String::isNotBlank)?.let { addAll(listOf("--commit", it.trim())) }
     }
     addAll(listOf("--format", "json"))
-    // JSON 结果走 stdout，进度日志走 stderr，供插件实时回显。
+    // The CLI writes the JSON result to stdout and progress logs to stderr, so the plugin can stream them live.
     opts.customPrompt?.takeIf(String::isNotBlank)?.let { addAll(listOf("--background", it.trim())) }
     opts.concurrency?.let { addAll(listOf("--concurrency", it.toString())) }
 }
@@ -74,7 +74,8 @@ fun buildReviewArgs(opts: CliRunOptions): List<String> = buildList {
 private fun CliCommentDto.toComment(): ReviewComment = ReviewComment(
     path = path,
     content = content,
-    // 将空白串归一为缺失：若直接透传空/空白串，调用方会把其当作"存在建议/原码"。
+    // Normalize blank strings to missing: passed through as-is, an empty/blank string would make callers
+    // treat it as "a suggestion/existing code is present".
     suggestionCode = suggestionCode?.takeIf(String::isNotBlank),
     existingCode = existingCode?.takeIf(String::isNotBlank),
     startLine = startLine,
@@ -172,10 +173,10 @@ fun parseCliResult(stdout: String): CliResult {
     )
 }
 
-/** `error:` 前缀正则，提取报错文本时剥离用。 */
+/** Regex for the `error:` prefix, stripped when extracting the error text. */
 private val ERROR_PREFIX_REGEX = Regex("^error:\\s*", RegexOption.IGNORE_CASE)
 
-/** 从 CLI stderr 中提取最有用的报错文本：优先最后一条 `error:` 行，否则取最后一行非空内容。 */
+/** Extracts the most useful error text from the CLI's stderr: prefer the last `error:` line, otherwise the last non-empty line. */
 fun extractCliError(stderr: String): String {
     val lines = stderr.lineSequence().map(String::trim).filter(String::isNotEmpty)
     val errLine = lines.lastOrNull { it.startsWith("error:", ignoreCase = true) }
