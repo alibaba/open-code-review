@@ -819,7 +819,10 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 			telemetry.AnyToAttr("file.path", it.Path),
 			telemetry.AnyToAttr("tokens", tokenCount),
 			telemetry.AnyToAttr("max_tokens", maxAllowed))
-		return false, "", nil
+		// The reason must be non-empty so dispatchBatch's failure accounting
+		// records the item; an empty one leaves it neither completed nor
+		// failed, and the all-files-failed guard cannot fire.
+		return false, msg, nil
 	}
 
 	completed, stop, err := a.runner.RunMainTask(ctx, messages, it.Path)
