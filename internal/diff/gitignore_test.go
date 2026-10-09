@@ -266,3 +266,48 @@ func TestIsCommitMode(t *testing.T) {
 		t.Error("expected IsCommitMode() = false for ModeWorkspace")
 	}
 }
+
+// anchoredAllowListGitignore mirrors the repository-root allowlist idiom:
+// "/*" ignores every root entry, "!/dir/" and "!/file" re-admit specific
+// trees and files. Git resolves "/*" with "*" NOT crossing separators, so
+// only root-level entries are ignored — nested files under re-admitted
+// directories are not.
+//
+// Regression guard for Windows: matchGitignoreBody must match git-relative
+// paths with slash semantics ("path.Match"), never the host separator
+// ("filepath.Match"). On Windows filepath.Match treats "/" as an ordinary
+// character, so the anchored "*" crossed directory boundaries and marked
+// EVERY nested file excluded, leaving a review of such a repository with
+// nothing but the exactly-negated root files.
+var anchoredAllowListGitignore = []string{
+	"/*",
+	"!/.gitignore",
+	"!/CHANGELOG.md",
+	"!/crates/",
+	"!/web/",
+	"target/",
+	"*.log",
+}
+
+func TestIsPathExcluded_AnchoredAllowListGitignore(t *testing.T) {
+	tests := []struct {
+		name    string
+		relPath string
+		want    bool
+	}{
+		{"re-admitted root file", "CHANGELOG.md", false},
+		{"nested file under re-admitted dir", "crates/admin/src/app.rs", false},
+		{"deeply nested file under re-admitted dir", "web/src/views/ConfigView.vue", false},
+		{"root file without negation stays ignored", "README.md", true},
+		{"deny pattern still applies inside re-admitted tree", "crates/debug.log", true},
+		{"root-anchored pattern does not match nested path", "src/generated", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsPathExcluded(".", tt.relPath, anchoredAllowListGitignore)
+			if got != tt.want {
+				t.Errorf("IsPathExcluded(%q) = %v, want %v", tt.relPath, got, tt.want)
+			}
+		})
+	}
+}
