@@ -897,13 +897,11 @@ func TestRawHolder_ConcurrentSetAndWrite(t *testing.T) {
 	mw := newRawMiddleware(holder)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 32 {
+		wg.Go(func() {
 			req := rawRequest(t, context.Background(), `{"model":"m"}`, nil)
 			_, _ = mw(req, func(*http.Request) (*http.Response, error) { return jsonResponse(`{}`), nil })
-		}()
+		})
 	}
 	holder.Set(tw)
 	wg.Wait()

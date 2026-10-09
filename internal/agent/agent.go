@@ -1824,10 +1824,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		all := a.args.CommentCollector.CommentsForPath(d.NewPath)
 		start := 0
 		if from != nil {
-			start = from[d.NewPath]
-			if start > len(all) {
-				start = len(all)
-			}
+			start = min(from[d.NewPath], len(all))
 		}
 		for i := start; i < len(all); i++ {
 			candidates = append(candidates, filterCandidate{cm: all[i], pathIdx: i})

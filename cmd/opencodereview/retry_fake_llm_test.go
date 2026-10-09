@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,9 +96,7 @@ func (f *fakeLLM) attemptCounts() map[string]int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make(map[string]int, len(f.attemptsByFile))
-	for k, v := range f.attemptsByFile {
-		out[k] = v
-	}
+	maps.Copy(out, f.attemptsByFile)
 	return out
 }
 
