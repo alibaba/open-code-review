@@ -210,12 +210,16 @@ const ruDocs: LocalizedDocs = {
   'faq': ruFaq,
 };
 
+// Azerbaijani ships UI copy only, so every doc page falls back to English.
+const azDocs: LocalizedDocs = {};
+
 const docsMap: Record<Language, LocalizedDocs> = {
   en: enDocs,
   zh: zhDocs,
   ja: jaDocs,
   ko: koDocs,
   ru: ruDocs,
+  az: azDocs,
 };
 
 /**
