@@ -169,26 +169,10 @@ func TestBuildDiffLines(t *testing.T) {
 }
 
 func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "fail"}}
-	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, nil, "abc123trace", nil, "", nil, false, nil, os.Stdout, nil, nil)
-	_ = w.Close()
-	os.Stdout = old
-
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
-
-	var out jsonOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	out, _ := captureJSONOutput(t, func() error {
+		return outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, nil, "abc123trace", nil, "", nil, false, nil, os.Stdout, nil, nil)
+	})
 	if out.Status != "completed_with_errors" {
 		t.Errorf("status = %q, want completed_with_errors", out.Status)
 	}
@@ -222,30 +206,12 @@ func TestStatusBadge(t *testing.T) {
 }
 
 func TestOutputJSON(t *testing.T) {
-	// Redirect stdout to capture output
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
 	comments := []model.LlmComment{
 		{Path: "a.go", Content: "fix bug", StartLine: 1, EndLine: 5},
 	}
-	err := outputJSON(comments)
-
-	_ = w.Close()
-	os.Stdout = old
-
-	if err != nil {
-		t.Fatalf("outputJSON error: %v", err)
-	}
-
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
-
-	var out jsonOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("unmarshal output: %v", err)
-	}
+	out, _ := captureJSONOutput(t, func() error {
+		return outputJSON(comments)
+	})
 	if out.Status != "success" {
 		t.Errorf("status = %q, want success", out.Status)
 	}
@@ -255,36 +221,15 @@ func TestOutputJSON(t *testing.T) {
 }
 
 func TestOutputJSON_NoComments(t *testing.T) {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	err := outputJSON(nil)
-
-	_ = w.Close()
-	os.Stdout = old
-
-	if err != nil {
-		t.Fatalf("outputJSON error: %v", err)
-	}
-
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
-
-	var out jsonOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	out, _ := captureJSONOutput(t, func() error {
+		return outputJSON(nil)
+	})
 	if out.Message == "" {
 		t.Error("expected non-empty message when no comments")
 	}
 }
 
 func TestOutputJSONWithWarnings(t *testing.T) {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
 	comments := []model.LlmComment{{Path: "b.go", Content: "test"}}
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "c.go", Message: "failed"}}
 	failures := []llmloop.ToolFailureDetail{{
@@ -294,26 +239,14 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 		Arguments:      `{"path":"missing.go"}`,
 		Error:          "file not found",
 	}}
-	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, failures, "trace-xyz-789", nil, "", nil, false, nil, os.Stdout, nil, nil)
-	_ = w.Close()
-	os.Stdout = old
-
-	if err != nil {
-		t.Fatalf("error: %v", err)
+	out, raw := captureJSONOutput(t, func() error {
+		return outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, failures, "trace-xyz-789", nil, "", nil, false, nil, os.Stdout, nil, nil)
+	})
+	if !strings.Contains(raw, `"failure"`) {
+		t.Fatalf("tool_calls must use the failure field: %s", raw)
 	}
-
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
-	if !bytes.Contains(buf.Bytes(), []byte(`"failure"`)) {
-		t.Fatalf("tool_calls must use the failure field: %s", buf.String())
-	}
-	if bytes.Contains(buf.Bytes(), []byte(`"failure_count"`)) {
-		t.Fatalf("tool_calls must not emit the legacy failure_count field: %s", buf.String())
-	}
-
-	var out jsonOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	if strings.Contains(raw, `"failure_count"`) {
+		t.Fatalf("tool_calls must not emit the legacy failure_count field: %s", raw)
 	}
 	if out.Status != "completed_with_errors" {
 		t.Errorf("status = %q, want completed_with_errors", out.Status)
@@ -344,26 +277,10 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 }
 
 func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
 	warnings := []agent.AgentWarning{{Type: "warning", Message: "something"}}
-	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, nil, "", nil, "", nil, false, nil, os.Stdout, nil, nil)
-	_ = w.Close()
-	os.Stdout = old
-
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
-
-	var out jsonOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	out, _ := captureJSONOutput(t, func() error {
+		return outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, nil, "", nil, "", nil, false, nil, os.Stdout, nil, nil)
+	})
 	if out.Status != "completed_with_warnings" {
 		t.Errorf("status = %q, want completed_with_warnings", out.Status)
 	}
@@ -373,27 +290,10 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 }
 
 func TestOutputJSONNoFiles(t *testing.T) {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
 	identity := &jsonLLMIdentity{Provider: "anthropic", Model: "claude-opus-4-6"}
-	err := outputJSONNoFiles("test-trace-id-456", identity, os.Stdout)
-
-	_ = w.Close()
-	os.Stdout = old
-
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
-
-	var out jsonOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	out, _ := captureJSONOutput(t, func() error {
+		return outputJSONNoFiles("test-trace-id-456", identity, os.Stdout)
+	})
 	if out.Status != "skipped" {
 		t.Errorf("status = %q, want skipped", out.Status)
 	}
@@ -432,12 +332,24 @@ func TestNewJSONToolCalls_FailureByTool(t *testing.T) {
 
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
-	old := os.Stdout
+	return captureStream(t, &os.Stdout, fn)
+}
+
+// captureStderr captures everything written to os.Stderr during fn; used to
+// assert structured usage emitted on the failure path.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	return captureStream(t, &os.Stderr, fn)
+}
+
+func captureStream(t *testing.T, stream **os.File, fn func()) string {
+	t.Helper()
+	old := *stream
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	os.Stdout = w
+	*stream = w
 	// Drain while fn runs. Reading only after fn returns caps the capture at
 	// whatever the pipe buffer holds: 64 KiB on Linux, far less on a Windows
 	// anonymous pipe, and a payload past that blocks the writer forever.
@@ -449,36 +361,24 @@ func captureStdout(t *testing.T, fn func()) string {
 	}()
 	fn()
 	_ = w.Close()
-	os.Stdout = old
+	*stream = old
 	<-done
 	_ = r.Close()
 	return buf.String()
 }
 
-// captureStderr captures everything written to os.Stderr during fn. Mirrors
-// captureStdout; used to assert structured usage emitted on the failure path.
-func captureStderr(t *testing.T, fn func()) string {
+func captureJSONOutput(t *testing.T, fn func() error) (jsonOutput, string) {
 	t.Helper()
-	old := os.Stderr
-	r, w, err := os.Pipe()
+	var err error
+	raw := captureStdout(t, func() { err = fn() })
 	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
+		t.Fatalf("error: %v", err)
 	}
-	os.Stderr = w
-	// Drained concurrently for the same reason as captureStdout: an undrained
-	// pipe deadlocks fn once its output exceeds the OS pipe buffer.
-	var buf bytes.Buffer
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_, _ = buf.ReadFrom(r)
-	}()
-	fn()
-	_ = w.Close()
-	os.Stderr = old
-	<-done
-	_ = r.Close()
-	return buf.String()
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("unmarshal: %v\noutput was:\n%s", err, raw)
+	}
+	return out, raw
 }
 
 func TestOutputText_NoComments(t *testing.T) {
