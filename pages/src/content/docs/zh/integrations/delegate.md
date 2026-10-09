@@ -83,21 +83,31 @@ ocr delegate rule <path1> <path2> ...
 
 根据第 1 步的 mode/ref 信息，使用 git 直接获取：
 
+始终传入 `--no-pager`、`--no-ext-diff`、`--no-textconv` 和 `--no-color`，防止交互式分页器阻塞，并保留纯文本 unified patch。
+
 **Range 模式**（有 merge\_base）：
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Commit 模式**：
 ```bash
-git show <commit> -- <path>
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Workspace 模式**：
 ```bash
-git diff HEAD -- <path>        # 已跟踪文件
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # 已跟踪文件
 cat <path>                     # 新的未跟踪文件
 ```
+
+对于较大的 diff，在仓库外选择一个唯一的临时文件绝对路径。将下方的 `<absolute-diff-file>` 替换为该路径字面量，并在后续文件读取工具调用中使用相同路径。Git 的 `--output` 在 Bash 和 PowerShell 中均可使用，无需 shell 变量或重定向；它不限制文件大小：
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+按需为 commit 或 workspace 命令添加 `--output="<absolute-diff-file>"`。读取结果前必须确认退出码为 0。退出码非零或超时时，重试或将文件标为 `skipped` 并记录错误；绝不能将其标为 `reviewed`，或从空文件、部分文件推断“无变更”。如果成功输出意外为空，应重新运行 preview 并核对。分块读取必须覆盖到文件末尾，之后才能标为 `reviewed`，再删除临时文件。
 
 ### 第 4 步：审查每个文件
 
@@ -106,6 +116,8 @@ cat <path>                     # 新的未跟踪文件
 1. 获取其 diff（第 3 步）
 2. 参照匹配的规则组（第 2 步）作为审查清单
 3. 进行深入审查，按需探索上下文
+
+每个 preview 中的 `(path, status)` 条目都必须标为 `reviewed`，或标为 `skipped` 并说明原因。报告中包含 `total_files`、`reviewed_files`、`skipped_files` 和 `coverage_rate`。
 
 ### 第 5 步：报告
 

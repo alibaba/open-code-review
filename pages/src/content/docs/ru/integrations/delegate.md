@@ -95,21 +95,31 @@ ocr delegate rule <path1> <path2> ...
 
 Используйте Git напрямую на основе режима и сведений о ссылках из шага 1:
 
+Всегда передавайте `--no-pager`, `--no-ext-diff`, `--no-textconv` и `--no-color`, чтобы избежать ожидания интерактивного пейджера и сохранить текстовый unified patch.
+
 **Режим диапазона** (предоставлен merge\_base):
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Режим коммита**:
 ```bash
-git show <commit> -- <path>
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Режим рабочей области**:
 ```bash
-git diff HEAD -- <path>        # tracked files
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # tracked files
 cat <path>                     # new untracked files
 ```
+
+Для больших diff выберите уникальный абсолютный путь временного файла вне репозитория. Замените `<absolute-diff-file>` ниже буквальным значением этого пути и используйте тот же путь в последующих вызовах инструмента чтения файлов. Параметр Git `--output` работает в Bash и PowerShell без переменных оболочки и перенаправления; размер файла не ограничивается:
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+При необходимости добавьте `--output="<absolute-diff-file>"` также в команду commit или workspace. Перед чтением результата убедитесь, что код выхода равен 0. При ненулевом коде или тайм-ауте повторите попытку либо отметьте файл как `skipped`, указав ошибку. Никогда не отмечайте его как `reviewed` и не делайте вывод «изменений нет» по пустому или неполному файлу. Если успешный вывод неожиданно пуст, повторите preview и сопоставьте результаты. Прочитайте все части до конца файла, затем отметьте его как `reviewed` и удалите временный файл.
 
 ### Шаг 4. Проверить каждый файл
 
@@ -118,6 +128,8 @@ cat <path>                     # new untracked files
 1. Получить его diff (шаг 3).
 2. Использовать подходящую группу правил (шаг 2) как контрольный список ревью.
 3. Провести тщательное ревью, при необходимости исследуя контекст.
+
+Учтите каждый элемент `(path, status)` из preview как `reviewed` либо `skipped` с явной причиной. Включите в отчёт `total_files`, `reviewed_files`, `skipped_files` и `coverage_rate`.
 
 ### Шаг 5. Подготовить отчёт
 

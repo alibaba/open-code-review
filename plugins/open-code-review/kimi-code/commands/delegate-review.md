@@ -31,9 +31,19 @@ ocr delegate rule <path1> <path2> ...
 ### Step 3: Get Diffs and Review
 
 For each reviewable file, get its diff using git (based on mode/ref from Step 1):
-- Range: `git diff <merge_base>..<to> -- <path>`
-- Commit: `git show <commit> -- <path>`
-- Workspace: `git diff HEAD -- <path>` (or read directly for untracked files)
+- Range: `git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"`
+- Commit: `git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"`
+- Workspace: `git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"` (or read directly for untracked files)
+
+Keep all four flags to prevent interactive pagers and preserve plain unified patches. For large diffs, choose a unique absolute temporary file path outside the repository, substitute it literally below, and use that same path in subsequent file-reading tool calls. Git's `--output` works in Bash and PowerShell without shell variables or redirection:
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+Add `--output="<absolute-diff-file>"` to the commit or workspace command when needed. Require exit code 0 before reading the result. On a nonzero exit or timeout, retry or mark the file `skipped` with the error; never mark it `reviewed` or infer "no changes" from an empty or partial file. If successful output is unexpectedly empty, reconcile it with a fresh preview. Read every chunk through the end before marking the file `reviewed`, then remove the temporary file.
+
+Account for every previewed `(path, status)` entry as `reviewed` or explicitly `skipped` with a reason. Include `total_files`, `reviewed_files`, `skipped_files`, and `coverage_rate` in the report.
 
 Then review focusing on: correctness, security, performance, error handling, concurrency, maintainability. Only comment on changed code (+ lines).
 

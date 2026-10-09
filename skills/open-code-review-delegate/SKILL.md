@@ -56,31 +56,30 @@ Pass the reviewable file paths from Step 1. Output is grouped by rule content â€
 
 Use git directly based on the mode/ref info from Step 1:
 
-Always pass `--no-pager` when reading diffs or file content through Git. Otherwise, in an agent environment that allocates a pseudo-terminal (PTY), Git may launch an interactive pager that waits for input.
+Always pass `--no-pager`, `--no-ext-diff`, `--no-textconv`, and `--no-color` to prevent interactive pagers and preserve plain unified patches.
 
-`--no-pager` does not bound the amount of output captured by the host. For a potentially large diff, inspect the `--stat` output first, redirect the full diff to a temporary file, and read it in bounded chunks:
+For large diffs, choose a unique absolute temporary file path outside the repository. Substitute that literal path for `<absolute-diff-file>` below and use the same path in subsequent file-reading tool calls. Git's `--output` works in Bash and PowerShell without shell variables or redirection; it does not limit file size:
 
 ```bash
-git --no-pager diff --stat <merge_base>..<to> -- <path>
-diff_file=$(mktemp)
-git --no-pager diff <merge_base>..<to> -- <path> > "$diff_file"
-# Read "$diff_file" with a file-reading tool in bounded chunks, then remove it.
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
 ```
+
+Add `--output="<absolute-diff-file>"` to the commit or workspace command below when needed. Require exit code 0 before reading the result. On a nonzero exit or timeout, retry or mark the file `skipped` with the error; never mark it `reviewed` or infer "no changes" from an empty or partial file. If successful output is unexpectedly empty, reconcile it with a fresh preview. Read every chunk through the end before marking the file `reviewed`, then remove the temporary file.
 
 **Range mode** (merge_base provided in preview output):
 ```bash
-git --no-pager diff <merge_base>..<to> -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Commit mode**:
 ```bash
-git --no-pager show <commit> -- <path>
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Workspace mode**:
 ```bash
 # Tracked files
-git --no-pager diff HEAD -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"
 # New untracked files â€” read directly (entire file is new code)
 cat <path>
 ```

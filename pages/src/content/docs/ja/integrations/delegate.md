@@ -83,21 +83,31 @@ ocr delegate rule <path1> <path2> ...
 
 ステップ 1 の mode/ref 情報に基づき、git を直接使用：
 
+対話型ページャーによる停止を防ぎ、プレーンテキストの unified patch を保持するため、常に `--no-pager`、`--no-ext-diff`、`--no-textconv`、`--no-color` を指定します。
+
 **Range モード**（merge\_base あり）：
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Commit モード**：
 ```bash
-git show <commit> -- <path>
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Workspace モード**：
 ```bash
-git diff HEAD -- <path>        # 追跡ファイル
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # 追跡ファイル
 cat <path>                     # 新規未追跡ファイル
 ```
+
+大きな diff には、リポジトリ外で一意の一時ファイルの絶対パスを選びます。以下の `<absolute-diff-file>` をそのパスのリテラル値に置き換え、後続のファイル読み取りツールでも同じパスを使います。Git の `--output` は Bash と PowerShell の両方で使え、シェル変数やリダイレクトは不要です。ファイルサイズは制限されません：
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+必要に応じて commit または workspace コマンドにも `--output="<absolute-diff-file>"` を追加します。結果を読む前に終了コードが 0 であることを確認してください。非ゼロ終了やタイムアウト時は再試行するか、エラーを理由として `skipped` にします。`reviewed` にしたり、空または不完全なファイルから「変更なし」と判断したりしてはいけません。正常終了した出力が予期せず空なら、preview を再実行して照合します。末尾まで全チャンクを読んでから `reviewed` にし、一時ファイルを削除します。
 
 ### ステップ 4：各ファイルのレビュー
 
@@ -106,6 +116,8 @@ cat <path>                     # 新規未追跡ファイル
 1. diff を取得（ステップ 3）
 2. 対応するルールグループ（ステップ 2）をレビューチェックリストとして参照
 3. コンテキスト探索を必要に応じて行い、徹底的にレビュー
+
+preview のすべての `(path, status)` 項目を `reviewed`、または理由付きの `skipped` として記録します。レポートには `total_files`、`reviewed_files`、`skipped_files`、`coverage_rate` を含めます。
 
 ### ステップ 5：レポート
 

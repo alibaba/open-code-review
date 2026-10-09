@@ -97,21 +97,31 @@ repetition.
 
 Use git directly, based on the mode/ref info from Step 1:
 
+Always pass `--no-pager`, `--no-ext-diff`, `--no-textconv`, and `--no-color` to prevent interactive pagers and preserve plain unified patches.
+
 **Range mode** (merge\_base provided):
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Commit mode**:
 ```bash
-git show <commit> -- <path>
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Workspace mode**:
 ```bash
-git diff HEAD -- <path>        # tracked files
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # tracked files
 cat <path>                     # new untracked files
 ```
+
+For large diffs, choose a unique absolute temporary file path outside the repository. Substitute that literal path for `<absolute-diff-file>` below and use the same path in subsequent file-reading tool calls. Git's `--output` works in Bash and PowerShell without shell variables or redirection; it does not limit file size:
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+Add `--output="<absolute-diff-file>"` to the commit or workspace command when needed. Require exit code 0 before reading the result. On a nonzero exit or timeout, retry or mark the file `skipped` with the error; never mark it `reviewed` or infer "no changes" from an empty or partial file. If successful output is unexpectedly empty, reconcile it with a fresh preview. Read every chunk through the end before marking the file `reviewed`, then remove the temporary file.
 
 ### Step 4: Review each file
 
@@ -120,6 +130,8 @@ For each reviewable file:
 1. Get its diff (Step 3)
 2. Consult the matching Rule Group (Step 2) as the review checklist
 3. Conduct a thorough review, using context exploration as needed
+
+Account for every previewed `(path, status)` entry as `reviewed` or explicitly `skipped` with a reason. Include `total_files`, `reviewed_files`, `skipped_files`, and `coverage_rate` in the report.
 
 ### Step 5: Report
 

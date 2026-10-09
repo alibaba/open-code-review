@@ -93,21 +93,31 @@ ocr delegate rule <path1> <path2> ...
 
 1단계에서 얻은 모드와 ref 정보를 바탕으로 git을 직접 씁니다.
 
+대화형 페이저의 대기를 방지하고 일반 텍스트 unified patch를 유지하려면 항상 `--no-pager`, `--no-ext-diff`, `--no-textconv`, `--no-color`를 지정하세요.
+
 **range 모드**(merge\_base가 제공됨):
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **commit 모드**:
 ```bash
-git show <commit> -- <path>
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **workspace 모드**:
 ```bash
-git diff HEAD -- <path>        # 추적 중인 파일
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # 추적 중인 파일
 cat <path>                     # 새로 추가된 추적되지 않은 파일
 ```
+
+큰 diff에는 저장소 밖에서 고유한 임시 파일의 절대 경로를 선택하세요. 아래의 `<absolute-diff-file>`을 해당 경로의 리터럴 값으로 바꾸고, 이후 파일 읽기 도구 호출에서도 같은 경로를 사용하세요. Git의 `--output`은 Bash와 PowerShell에서 모두 작동하며 셸 변수나 리다이렉션이 필요 없습니다. 파일 크기는 제한하지 않습니다:
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+필요하면 commit 또는 workspace 명령에도 `--output="<absolute-diff-file>"`을 추가하세요. 결과를 읽기 전에 종료 코드가 0인지 확인해야 합니다. 종료 코드가 0이 아니거나 시간 초과가 발생하면 재시도하거나 오류를 사유로 `skipped` 처리하세요. `reviewed`로 표시하거나 빈 파일 또는 불완전한 파일을 보고 "변경 없음"으로 판단하면 안 됩니다. 성공한 출력이 예상과 달리 비어 있으면 preview를 다시 실행해 대조하세요. 모든 청크를 파일 끝까지 읽은 뒤 `reviewed`로 표시하고 임시 파일을 삭제하세요.
 
 ### 4단계: 파일별 리뷰 {#step-4-review-each-file}
 
@@ -116,6 +126,8 @@ cat <path>                     # 새로 추가된 추적되지 않은 파일
 1. 해당 파일의 diff를 가져옵니다(3단계).
 2. 대응하는 Rule Group(2단계)을 리뷰 체크리스트로 삼습니다.
 3. 필요한 만큼 맥락을 탐색하며 꼼꼼히 리뷰합니다.
+
+preview의 모든 `(path, status)` 항목을 `reviewed` 또는 사유가 명시된 `skipped`로 기록하세요. 보고서에는 `total_files`, `reviewed_files`, `skipped_files`, `coverage_rate`를 포함하세요.
 
 ### 5단계: 보고 {#step-5-report}
 
