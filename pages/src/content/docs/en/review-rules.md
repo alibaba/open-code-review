@@ -199,6 +199,8 @@ snapshots, and generated code:
 - `**/src/test/java/**/*.java`
 - `**/src/test/**/*.{kt,kts}`
 - `**/*Test.fs`
+- `**/*Test.cs`
+- `**/*Tests.cs`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`
@@ -314,6 +316,7 @@ matching order:
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                                    |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                                           |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — F# implementation, signature, and script files.                                         |
+| `**/*.cs`                           | `csharp.md` — C# source files across modern .NET and ASP.NET Core applications.                       |
 | `**/*.rs`                           | `rust.md`                                                                                             |
 | `**/*.R`                            | `r.md`                                                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                              |

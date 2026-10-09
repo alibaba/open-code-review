@@ -41,6 +41,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".FSI", true},
 		{".fsx", true},
 		{".FSX", true},
+		{".cs", true},
+		{".CS", true},
 		{".ftl", true},
 		{".FTL", true},
 		{".ftlh", true},
@@ -177,6 +179,13 @@ func TestIsExcludedPath(t *testing.T) {
 		{"fsharp Test suffix", "src/Domain/OrderTest.fs", true},
 		{"fsharp Test suffix at root", "OrderTest.fs", true},
 		{"fsharp non-test", "src/Domain/TestSupport.fs", false},
+
+		// C# test files
+		{"csharp Test suffix", "src/Domain/OrderTest.cs", true},
+		{"csharp Tests suffix", "src/Domain/OrderTests.cs", true},
+		{"csharp Test suffix at root", "OrderTest.cs", true},
+		{"csharp Tests suffix at root", "OrderTests.cs", true},
+		{"csharp non-test", "src/Domain/TestSupport.cs", false},
 
 		// JS/TS test files
 		{"js test file", "src/utils.test.js", true},
