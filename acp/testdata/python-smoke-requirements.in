@@ -1,0 +1,2 @@
+# Regenerate python-smoke-requirements.txt with the command in its header.
+agent-client-protocol==0.12.1
