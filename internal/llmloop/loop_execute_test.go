@@ -6,6 +6,7 @@ package llmloop
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -28,6 +29,12 @@ func (p *erroringProvider) Tool() tool.Tool { return p.tool }
 func (p *erroringProvider) Execute(_ context.Context, _ map[string]any) (string, error) {
 	return "", errors.New("boom")
 }
+
+type sensitiveArgsProvider struct {
+	argsCapturingProvider
+}
+
+func (p *sensitiveArgsProvider) SensitiveToolCall() bool { return true }
 
 // TestExecuteToolCall_DynamicNotRegistered covers the path where the LLM calls
 // a name that is neither a built-in tool nor present in the registry.
@@ -105,6 +112,85 @@ func TestExecuteToolCall_DynamicSuccessRecordsResult(t *testing.T) {
 	}
 	if !rec.ToolResults[0].OK {
 		t.Errorf("successful result marked failed: %+v", rec.ToolResults[0])
+	}
+}
+
+func TestExecuteToolCall_SensitiveProviderRedactsPersistedArguments(t *testing.T) {
+	reg := tool.NewRegistry()
+	provider := &sensitiveArgsProvider{argsCapturingProvider: argsCapturingProvider{
+		tool: tool.Dynamic("mcp_sensitive"),
+	}}
+	reg.Register(provider)
+	reg.Freeze()
+	r := NewRunner(Deps{Tools: reg, CommentCollector: tool.NewCommentCollector()})
+
+	rec := &session.TaskRecord{}
+	cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
+		Function: llm.FunctionCall{Name: "mcp_sensitive", Arguments: `{"token":"top-secret"}`},
+	}, rec, "")
+
+	if cp.Data != "ok" {
+		t.Fatalf("cp.Data = %q, want ok", cp.Data)
+	}
+	if !provider.captured || provider.gotArgs["token"] != "top-secret" {
+		t.Fatalf("provider args = %#v, want original invocation arguments", provider.gotArgs)
+	}
+	if len(rec.ToolResults) != 1 {
+		t.Fatalf("recorded results = %d, want 1", len(rec.ToolResults))
+	}
+	if got := rec.ToolResults[0].Arguments; got != `{"redacted":true}` {
+		t.Fatalf("persisted arguments = %q, want redacted marker", got)
+	}
+}
+
+func TestExecuteToolCall_SensitiveParseFailureBackoffAndRecovery(t *testing.T) {
+	reg := tool.NewRegistry()
+	provider := &sensitiveArgsProvider{argsCapturingProvider: argsCapturingProvider{
+		tool: tool.Dynamic("mcp_sensitive"),
+	}}
+	reg.Register(provider)
+	reg.Freeze()
+	r := NewRunner(Deps{Tools: reg, CommentCollector: tool.NewCommentCollector()})
+	rec := &session.TaskRecord{}
+	const secret = "sensitive-parse-sentinel"
+	call := func(arguments string) string {
+		return r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
+			Function: llm.FunctionCall{Name: provider.Tool().Name(), Arguments: arguments},
+		}, rec, "").Data
+	}
+	malformed := `{"token":"` + secret + `"`
+	for _, want := range []string{"Error parsing sensitive tool arguments", "second consecutive failure", "has been skipped"} {
+		got := call(malformed)
+		if !strings.Contains(got, want) || strings.Contains(got, secret) {
+			t.Fatalf("failure response = %q, want %q without secret", got, want)
+		}
+	}
+	if provider.captured {
+		t.Fatal("malformed arguments reached provider")
+	}
+	// Upstream JSON recovery must preserve execution and still redact history.
+	if got := call(`{"token":"` + secret + `"} trailing content`); got != "ok" {
+		t.Fatalf("recovered call = %q, want ok", got)
+	}
+	if !provider.captured || provider.gotArgs["token"] != secret {
+		t.Fatal("valid recovered arguments did not reach provider")
+	}
+	if got := call(malformed); got != "Error parsing sensitive tool arguments" {
+		t.Fatalf("success did not reset failure streak: %q", got)
+	}
+	if len(rec.ToolResults) != 5 || len(r.ToolFailures()) != 4 {
+		t.Fatal("tool results or failure records missing")
+	}
+	for _, result := range rec.ToolResults {
+		if result.Arguments != redactedToolArguments {
+			t.Fatal("session arguments were not redacted")
+		}
+	}
+	for _, records := range []any{rec.ToolResults, r.ToolFailures()} {
+		data, err := json.Marshal(records)
+		if err != nil || bytes.Contains(data, []byte(secret)) {
+			t.Fatal("failed to serialize safe history or leaked sensitive arguments")
+		}
 	}
 }
 

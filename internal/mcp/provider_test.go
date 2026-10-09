@@ -4,242 +4,417 @@
 package mcp
 
 import (
+	"context"
+	"errors"
+	"io"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/tool"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func newTestClient(name string, tools []*mcp.Tool) *Client {
-	return &Client{name: name, tools: tools}
+type authorizerFunc func(context.Context, Invocation) (Decision, error)
+
+func (f authorizerFunc) Authorize(ctx context.Context, invocation Invocation) (Decision, error) {
+	return f(ctx, invocation)
 }
 
-func TestProvider_Tool(t *testing.T) {
-	c := newTestClient("srv", nil)
-	p := &Provider{toolName: "my_tool", client: c}
-	got := p.Tool()
-	if got.Name() != "my_tool" {
-		t.Errorf("Tool().Name() = %q, want %q", got.Name(), "my_tool")
-	}
-}
+func TestProviderAuthorizesImmediatelyBeforeCall(t *testing.T) {
+	t.Parallel()
 
-func TestRegisterAll_Basic(t *testing.T) {
-	tools := []*mcp.Tool{
-		{Name: "alpha"},
-		{Name: "beta"},
-	}
-	c := newTestClient("srv", tools)
-	reg := tool.NewRegistry()
-
-	RegisterAll(reg, c, nil)
-
-	for _, name := range []string{"alpha", "beta"} {
-		if _, ok := reg.Get(name); !ok {
-			t.Errorf("expected tool %q to be registered", name)
+	var calls atomic.Int32
+	client := &Client{callToolFunc: func(_ context.Context, params *sdkmcp.CallToolParams) (*sdkmcp.CallToolResult, error) {
+		calls.Add(1)
+		if params.Name != "raw-name" {
+			t.Errorf("called raw name %q, want raw-name", params.Name)
 		}
+		return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "ok"}}}, nil
+	}}
+	grant := ToolGrant{
+		ID: ToolID{Server: "server", Name: "raw-name"}, ModelAlias: ModelAlias(ToolID{Server: "server", Name: "raw-name"}),
+		Permission: PermissionAsk,
+	}
+
+	t.Run("allow", func(t *testing.T) {
+		before := calls.Load()
+		provider := &Provider{grant: grant, client: client, authorizer: authorizerFunc(func(_ context.Context, invocation Invocation) (Decision, error) {
+			if invocation.Grant.ID != grant.ID {
+				t.Fatalf("authorized grant = %#v, want %#v", invocation.Grant.ID, grant.ID)
+			}
+			return DecisionAllowOnce, nil
+		})}
+		got, err := provider.Execute(context.Background(), map[string]any{"q": "value"})
+		if err != nil || got != "ok" || calls.Load() != before+1 {
+			t.Fatalf("Execute() = (%q, %v), calls=%d", got, err, calls.Load())
+		}
+		if provider.Tool().Name() != grant.ModelAlias || !provider.SensitiveToolCall() {
+			t.Fatal("provider alias or sensitive marker is incorrect")
+		}
+	})
+
+	for _, tt := range []struct {
+		name       string
+		authorizer Authorizer
+		wantErr    error
+	}{
+		{name: "nil authorizer", wantErr: ErrInteractionUnavailable},
+		{name: "authorization error", authorizer: authorizerFunc(func(context.Context, Invocation) (Decision, error) {
+			return DecisionDenyOnce, ErrPermissionDenied
+		}), wantErr: ErrPermissionDenied},
+		{name: "non-allow decision", authorizer: authorizerFunc(func(context.Context, Invocation) (Decision, error) {
+			return DecisionDenyOnce, nil
+		}), wantErr: ErrPermissionDenied},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			before := calls.Load()
+			provider := &Provider{grant: grant, client: client, authorizer: tt.authorizer}
+			got, err := provider.Execute(context.Background(), nil)
+			if got != "" || !errors.Is(err, tt.wantErr) || calls.Load() != before {
+				t.Fatalf("Execute() = (%q, %v), calls=%d; tool must not execute", got, err, calls.Load())
+			}
+		})
 	}
 }
 
-func TestRegisterAll_AllowedFilter(t *testing.T) {
-	tools := []*mcp.Tool{
-		{Name: "alpha"},
-		{Name: "beta"},
-		{Name: "gamma"},
-	}
-	c := newTestClient("srv", tools)
-	reg := tool.NewRegistry()
+func TestProviderExecutesTheExactAuthorizedArgumentSnapshot(t *testing.T) {
+	t.Parallel()
 
-	RegisterAll(reg, c, []string{"alpha", "gamma"})
-
-	if _, ok := reg.Get("alpha"); !ok {
-		t.Error("expected alpha to be registered")
+	arguments := map[string]any{"nested": map[string]any{"value": "original"}}
+	client := &Client{callToolFunc: func(_ context.Context, params *sdkmcp.CallToolParams) (*sdkmcp.CallToolResult, error) {
+		nested := params.Arguments.(map[string]any)["nested"].(map[string]any)
+		if nested["value"] != "original" {
+			t.Fatalf("executed arguments = %#v, want authorized snapshot", params.Arguments)
+		}
+		return &sdkmcp.CallToolResult{}, nil
+	}}
+	provider := &Provider{
+		grant:  ToolGrant{ID: ToolID{Server: "server", Name: "tool"}, Permission: PermissionAsk},
+		client: client,
+		authorizer: authorizerFunc(func(_ context.Context, invocation Invocation) (Decision, error) {
+			invocation.Arguments["nested"].(map[string]any)["value"] = "tampered"
+			return DecisionAllowOnce, nil
+		}),
 	}
-	if _, ok := reg.Get("beta"); ok {
-		t.Error("expected beta to be filtered out")
+	if _, err := provider.Execute(context.Background(), arguments); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := reg.Get("gamma"); !ok {
-		t.Error("expected gamma to be registered")
-	}
-}
-
-func TestRegisterAll_SkipsReservedTools(t *testing.T) {
-	tools := []*mcp.Tool{
-		{Name: "file_read"},
-		{Name: "custom_tool"},
-	}
-	c := newTestClient("srv", tools)
-	reg := tool.NewRegistry()
-
-	RegisterAll(reg, c, nil)
-
-	if _, ok := reg.Get("file_read"); ok {
-		t.Error("reserved tool file_read should not be registered")
-	}
-	if _, ok := reg.Get("custom_tool"); !ok {
-		t.Error("expected custom_tool to be registered")
+	if got := arguments["nested"].(map[string]any)["value"]; got != "original" {
+		t.Fatalf("caller arguments were mutated: %v", got)
 	}
 }
 
-func TestRegisterAll_SkipsDuplicateTools(t *testing.T) {
-	tools := []*mcp.Tool{{Name: "dup_tool"}}
-	c := newTestClient("srv", tools)
-	reg := tool.NewRegistry()
+func TestProviderCancellationChecksBeforeAndAfterAuthorizationAndCall(t *testing.T) {
+	t.Parallel()
 
-	stub := tool.NewStub(tool.Dynamic("dup_tool"))
-	reg.Register(stub)
+	t.Run("before authorization", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		var authorizations atomic.Int32
+		provider := &Provider{authorizer: authorizerFunc(func(context.Context, Invocation) (Decision, error) {
+			authorizations.Add(1)
+			return DecisionAllowOnce, nil
+		}), client: &Client{}}
+		if _, err := provider.Execute(ctx, nil); !errors.Is(err, context.Canceled) || authorizations.Load() != 0 {
+			t.Fatalf("Execute() error = %v, authorizations=%d", err, authorizations.Load())
+		}
+	})
 
-	RegisterAll(reg, c, nil)
+	t.Run("after authorization", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		var calls atomic.Int32
+		provider := &Provider{
+			client: &Client{callToolFunc: func(context.Context, *sdkmcp.CallToolParams) (*sdkmcp.CallToolResult, error) {
+				calls.Add(1)
+				return &sdkmcp.CallToolResult{}, nil
+			}},
+			authorizer: authorizerFunc(func(context.Context, Invocation) (Decision, error) {
+				cancel()
+				return DecisionAllowOnce, nil
+			}),
+		}
+		if _, err := provider.Execute(ctx, nil); !errors.Is(err, context.Canceled) || calls.Load() != 0 {
+			t.Fatalf("Execute() error = %v, calls=%d", err, calls.Load())
+		}
+	})
 
-	got, ok := reg.Get("dup_tool")
-	if !ok {
-		t.Fatal("expected dup_tool to be registered")
-	}
-	if _, isProvider := got.(*Provider); isProvider {
-		t.Error("expected dup_tool to remain the original stub, not MCP provider")
-	}
+	t.Run("after call", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		provider := &Provider{
+			client: &Client{callToolFunc: func(context.Context, *sdkmcp.CallToolParams) (*sdkmcp.CallToolResult, error) {
+				cancel()
+				return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "discard"}}}, nil
+			}},
+			authorizer: authorizerFunc(func(context.Context, Invocation) (Decision, error) {
+				return DecisionAllowOnce, nil
+			}),
+		}
+		if got, err := provider.Execute(ctx, nil); got != "" || !errors.Is(err, context.Canceled) {
+			t.Fatalf("Execute() = (%q, %v), want canceled without output", got, err)
+		}
+	})
 }
 
-func TestRegisterAll_WarnsUnmatchedAllowed(t *testing.T) {
-	tools := []*mcp.Tool{{Name: "alpha"}}
-	c := newTestClient("srv", tools)
-	reg := tool.NewRegistry()
+func TestProviderBrokerFailuresNeverReachCallTool(t *testing.T) {
+	t.Parallel()
 
-	RegisterAll(reg, c, []string{"alpha", "nonexistent"})
-
-	if _, ok := reg.Get("alpha"); !ok {
-		t.Error("expected alpha to be registered")
-	}
-}
-
-func TestToToolDef_MapSchema(t *testing.T) {
-	mt := &mcp.Tool{
-		Name:        "search",
-		Description: "Search things",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string"},
+	grant := testInvocation(PermissionAsk, "tool").Grant
+	var calls atomic.Int32
+	client := &Client{callToolFunc: func(context.Context, *sdkmcp.CallToolParams) (*sdkmcp.CallToolResult, error) {
+		calls.Add(1)
+		return &sdkmcp.CallToolResult{}, nil
+	}}
+	tests := []struct {
+		name    string
+		broker  *ApprovalBroker
+		context func() (context.Context, context.CancelFunc)
+	}{
+		{
+			name:   "non-interactive",
+			broker: NewRuntimeAuthorizer(false, time.Second, nil),
+		},
+		{
+			name: "terminal EOF",
+			broker: NewRuntimeAuthorizer(true, time.Second, PromptFunc(func(context.Context, Invocation) (Decision, error) {
+				return DecisionDenyOnce, io.EOF
+			})),
+		},
+		{
+			name: "explicit denial",
+			broker: NewRuntimeAuthorizer(true, time.Second, PromptFunc(func(context.Context, Invocation) (Decision, error) {
+				return DecisionDenyOnce, nil
+			})),
+		},
+		{
+			name: "approval timeout",
+			broker: NewRuntimeAuthorizer(true, time.Second, PromptFunc(func(ctx context.Context, _ Invocation) (Decision, error) {
+				<-ctx.Done()
+				return DecisionAllowOnce, ctx.Err()
+			})),
+			context: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 15*time.Millisecond)
 			},
 		},
 	}
-
-	got := ToToolDef(mt)
-
-	want := llm.ToolDef{
-		Type: "function",
-		Function: llm.FunctionDef{
-			Name:        "search",
-			Description: "Search things",
-		},
-	}
-	if got.Type != want.Type || got.Function.Name != want.Function.Name || got.Function.Description != want.Function.Description {
-		t.Errorf("ToToolDef() basic fields mismatch: got %+v", got)
-	}
-	if got.Function.Parameters["type"] != "object" {
-		t.Errorf("expected type=object, got %v", got.Function.Parameters["type"])
-	}
-	if got.Function.Parameters["properties"] == nil {
-		t.Error("expected properties to be set")
-	}
-}
-
-func TestToToolDef_NilSchema(t *testing.T) {
-	mt := &mcp.Tool{
-		Name:        "noop",
-		InputSchema: nil,
-	}
-
-	got := ToToolDef(mt)
-
-	if got.Function.Parameters["type"] != "object" {
-		t.Errorf("expected default type=object, got %v", got.Function.Parameters["type"])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			cancel := func() {}
+			if tt.context != nil {
+				ctx, cancel = tt.context()
+			}
+			defer cancel()
+			before := calls.Load()
+			provider := &Provider{grant: grant, client: client, authorizer: tt.broker}
+			if _, err := provider.Execute(ctx, nil); err == nil {
+				t.Fatal("fail-closed broker outcome returned no error")
+			}
+			if got := calls.Load(); got != before {
+				t.Fatalf("tools/call count changed from %d to %d", before, got)
+			}
+		})
 	}
 }
 
-func TestToToolDef_UnexpectedSchemaType(t *testing.T) {
-	mt := &mcp.Tool{
-		Name:        "weird",
-		InputSchema: "not-a-map",
-	}
+func TestRegisterSelectedScopesVisibilityAndNames(t *testing.T) {
+	t.Parallel()
 
-	got := ToToolDef(mt)
-
-	if got.Function.Parameters["type"] != "object" {
-		t.Errorf("expected fallback type=object, got %v", got.Function.Parameters["type"])
-	}
-}
-
-func TestCollectToolDefs_Basic(t *testing.T) {
-	tools := []*mcp.Tool{
-		{Name: "alpha", Description: "A"},
-		{Name: "beta", Description: "B"},
-	}
-	c := newTestClient("srv", tools)
+	clientOne, serverOne := testCatalogClient(t, "one", "shared", "first description")
+	clientTwo, serverTwo := testCatalogClient(t, "two", "shared", "second description")
+	clientBuiltIn, serverBuiltIn := testCatalogClient(t, "three", "file_read", "looks built in")
 	reg := tool.NewRegistry()
-	RegisterAll(reg, c, nil)
-
-	defs := CollectToolDefs([]*Client{c}, reg)
-
-	if len(defs) != 2 {
-		t.Fatalf("expected 2 defs, got %d", len(defs))
+	authorizer := NewRuntimeAuthorizer(false, time.Second, nil)
+	registration, err := RegisterSelected(
+		reg, []*Client{clientTwo, clientBuiltIn, clientOne},
+		MCPConfig{Version: 1, DefaultPermission: PermissionAllow},
+		map[string]MCPServerConfig{"one": serverOne, "two": serverTwo, "three": serverBuiltIn},
+		authorizer, false,
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
-	names := map[string]bool{}
-	for _, d := range defs {
-		names[d.Function.Name] = true
+	if len(registration.Bindings) != 3 || len(registration.ToolDefs) != 3 || len(registration.Skipped) != 0 {
+		t.Fatalf("registration sizes = %d/%d/%d", len(registration.Bindings), len(registration.ToolDefs), len(registration.Skipped))
 	}
-	if !names["alpha"] || !names["beta"] {
-		t.Errorf("expected alpha and beta in defs, got %v", names)
-	}
-}
-
-func TestCollectToolDefs_FiltersReserved(t *testing.T) {
-	tools := []*mcp.Tool{
-		{Name: "file_read"},
-		{Name: "custom"},
-	}
-	c := newTestClient("srv", tools)
-	reg := tool.NewRegistry()
-	RegisterAll(reg, c, nil)
-
-	defs := CollectToolDefs([]*Client{c}, reg)
-
-	for _, d := range defs {
-		if d.Function.Name == "file_read" {
-			t.Error("reserved tool file_read should not appear in defs")
+	aliases := make(map[string]struct{})
+	for i, binding := range registration.Bindings {
+		alias := binding.Grant.ModelAlias
+		if alias == binding.Grant.ID.Name || binding.Definition.Function.Name != alias || registration.ToolDefs[i].Function.Name != alias {
+			t.Fatalf("binding/definition alias mismatch: %#v / %#v", binding, registration.ToolDefs[i])
+		}
+		if _, duplicate := aliases[alias]; duplicate {
+			t.Fatalf("cross-server tools collided on alias %q", alias)
+		}
+		aliases[alias] = struct{}{}
+		if _, ok := reg.Get(alias); !ok {
+			t.Fatalf("alias %q not registered", alias)
+		}
+		if !strings.Contains(binding.Definition.Function.Description, "UNTRUSTED") || binding.Grant.UntrustedDescription == "" {
+			t.Fatalf("untrusted metadata was not labeled/preserved: %#v", binding)
 		}
 	}
-}
-
-func TestCollectToolDefs_FiltersUnregistered(t *testing.T) {
-	tools := []*mcp.Tool{
-		{Name: "registered_tool"},
-		{Name: "unregistered_tool"},
+	if _, ok := reg.Get("shared"); ok {
+		t.Fatal("raw MCP name was registered")
 	}
-	c := newTestClient("srv", tools)
-	reg := tool.NewRegistry()
-	reg.Register(&Provider{toolName: "registered_tool", client: c})
-
-	defs := CollectToolDefs([]*Client{c}, reg)
-
-	if len(defs) != 1 {
-		t.Fatalf("expected 1 def, got %d", len(defs))
-	}
-	if defs[0].Function.Name != "registered_tool" {
-		t.Errorf("expected registered_tool, got %s", defs[0].Function.Name)
+	if _, ok := reg.Get("file_read"); ok {
+		t.Fatal("MCP tool shadowed a built-in name")
 	}
 }
 
-func TestCollectToolDefs_Dedup(t *testing.T) {
-	tools := []*mcp.Tool{{Name: "shared", Description: "A"}}
-	c1 := newTestClient("srv1", tools)
-	c2 := newTestClient("srv2", tools)
-	reg := tool.NewRegistry()
-	reg.Register(&Provider{toolName: "shared", client: c1})
+func TestRegisterSelectedVisibilityAndDrift(t *testing.T) {
+	t.Parallel()
 
-	defs := CollectToolDefs([]*Client{c1, c2}, reg)
+	t.Run("empty allowlist exposes nothing", func(t *testing.T) {
+		client, server := testCatalogClient(t, "server", "tool", "description")
+		server.Tools = nil
+		server.ToolDefinitionSHA256 = nil
+		registration, err := RegisterSelected(
+			tool.NewRegistry(), []*Client{client}, MCPConfig{Version: 1},
+			map[string]MCPServerConfig{"server": server}, NewRuntimeAuthorizer(true, time.Second, nil), true,
+		)
+		if err != nil || len(registration.ToolDefs) != 0 {
+			t.Fatalf("registration = %#v, error=%v", registration, err)
+		}
+	})
 
-	if len(defs) != 1 {
-		t.Errorf("expected 1 deduped def, got %d", len(defs))
+	t.Run("ask hidden in CI", func(t *testing.T) {
+		client, server := testCatalogClient(t, "server", "tool", "description")
+		registration, err := RegisterSelected(
+			tool.NewRegistry(), []*Client{client}, MCPConfig{Version: 1},
+			map[string]MCPServerConfig{"server": server}, NewRuntimeAuthorizer(false, time.Second, nil), false,
+		)
+		if err != nil || len(registration.ToolDefs) != 0 || len(registration.Skipped) != 1 {
+			t.Fatalf("registration = %#v, error=%v", registration, err)
+		}
+	})
+
+	t.Run("legacy missing fingerprint is forced to ask", func(t *testing.T) {
+		client, server := testCatalogClient(t, "server", "tool", "description")
+		server.ToolDefinitionSHA256 = nil
+		server.DefaultPermission = PermissionAllow
+		registration, err := RegisterSelected(
+			tool.NewRegistry(), []*Client{client}, MCPConfig{Version: 0, DefaultPermission: PermissionAllow},
+			map[string]MCPServerConfig{"server": server}, NewRuntimeAuthorizer(true, time.Second, nil), true,
+		)
+		if err != nil || len(registration.Bindings) != 1 || registration.Bindings[0].Grant.Permission != PermissionAsk {
+			t.Fatalf("legacy registration = %#v, error=%v", registration, err)
+		}
+	})
+
+	for _, tt := range []struct {
+		name   string
+		mutate func(*Client, *MCPServerConfig)
+	}{
+		{name: "missing v1 fingerprint", mutate: func(_ *Client, server *MCPServerConfig) { server.ToolDefinitionSHA256 = nil }},
+		{name: "changed fingerprint", mutate: func(_ *Client, server *MCPServerConfig) {
+			server.ToolDefinitionSHA256["tool"] = strings.Repeat("b", 64)
+		}},
+		{name: "selected tool disappeared", mutate: func(client *Client, _ *MCPServerConfig) { client.discovered = nil }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			client, server := testCatalogClient(t, "server", "tool", "description")
+			tt.mutate(client, &server)
+			registration, err := RegisterSelected(
+				tool.NewRegistry(), []*Client{client}, MCPConfig{Version: 1, DefaultPermission: PermissionAllow},
+				map[string]MCPServerConfig{"server": server}, NewRuntimeAuthorizer(false, time.Second, nil), false,
+			)
+			if err != nil || len(registration.ToolDefs) != 0 || len(registration.Skipped) != 1 || !registration.Skipped[0].NeedsReview {
+				t.Fatalf("drift registration = %#v, error=%v", registration, err)
+			}
+		})
 	}
+}
+
+func TestRegisterSelectedIsAtomicAndBindsConnectionIdentity(t *testing.T) {
+	t.Parallel()
+
+	t.Run("connection mismatch", func(t *testing.T) {
+		client, server := testCatalogClient(t, "server", "tool", "description")
+		server.Command = "different-command"
+		reg := tool.NewRegistry()
+		_, err := RegisterSelected(
+			reg, []*Client{client}, MCPConfig{Version: 1, DefaultPermission: PermissionAllow},
+			map[string]MCPServerConfig{"server": server}, NewRuntimeAuthorizer(false, time.Second, nil), false,
+		)
+		if err == nil {
+			t.Fatal("expected connection identity mismatch")
+		}
+		if _, ok := reg.Get(ModelAlias(ToolID{Server: "server", Name: "tool"})); ok {
+			t.Fatal("registry was mutated after failed validation")
+		}
+	})
+
+	t.Run("existing definition collision", func(t *testing.T) {
+		client, server := testCatalogClient(t, "server", "tool", "description")
+		alias := ModelAlias(ToolID{Server: "server", Name: "tool"})
+		reg := tool.NewRegistry()
+		_, err := RegisterSelected(
+			reg, []*Client{client}, MCPConfig{Version: 1, DefaultPermission: PermissionAllow},
+			map[string]MCPServerConfig{"server": server}, NewRuntimeAuthorizer(false, time.Second, nil), false,
+			[]llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: alias}}},
+		)
+		if err == nil {
+			t.Fatal("expected definition collision")
+		}
+		if _, ok := reg.Get(alias); ok {
+			t.Fatal("registry was mutated after collision")
+		}
+	})
+}
+
+func TestRegisteredProviderExecutesExactGrantedTool(t *testing.T) {
+	t.Parallel()
+
+	client, server := testCatalogClient(t, "server", "tool", "description")
+	client.callToolFunc = func(_ context.Context, params *sdkmcp.CallToolParams) (*sdkmcp.CallToolResult, error) {
+		if params.Name != "tool" {
+			t.Fatalf("CallTool name = %q, want exact raw name", params.Name)
+		}
+		return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "executed"}}}, nil
+	}
+	reg := tool.NewRegistry()
+	registration, err := RegisterSelected(
+		reg, []*Client{client}, MCPConfig{Version: 1, DefaultPermission: PermissionAllow},
+		map[string]MCPServerConfig{"server": server}, NewRuntimeAuthorizer(false, time.Second, nil), false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, ok := reg.Get(registration.ToolDefs[0].Function.Name)
+	if !ok {
+		t.Fatal("registered provider not found")
+	}
+	got, err := provider.Execute(context.Background(), nil)
+	if err != nil || got != "executed" {
+		t.Fatalf("Execute() = (%q, %v)", got, err)
+	}
+}
+
+func testCatalogClient(t *testing.T, serverName, toolName, description string) (*Client, MCPServerConfig) {
+	t.Helper()
+	server := MCPServerConfig{
+		Type: "stdio", Command: "test-command", Tools: []string{toolName},
+		ToolDefinitionSHA256: make(map[string]string),
+	}
+	schema, err := canonicalInputSchema(map[string]any{
+		"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := definitionFingerprint(serverName, server, toolName, description, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.ToolDefinitionSHA256[toolName] = fingerprint
+	client := &Client{
+		name: serverName, connection: cloneServerConfig(server),
+		discovered: []DiscoveredTool{{
+			Name: toolName, Description: description, InputSchema: schema, DefinitionSHA256: fingerprint,
+		}},
+	}
+	return client, server
 }

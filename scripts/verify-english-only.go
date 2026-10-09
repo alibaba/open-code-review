@@ -74,6 +74,7 @@ var scannedNames = map[string]bool{"Makefile": true}
 // each entry narrow and justified; a temporary entry must say what removes it.
 var allowedPrefixes = []struct{ prefix, reason string }{
 	{"pages/src/i18n/", "translated UI copy for the docs site"},
+	{"scripts/github-actions/check-mcp-docs.test.js", "localized documentation contract regex fixtures"},
 	{"extensions/vscode/package.nls.", "translated UI copy for the extension manifest bundles"},
 	{"extensions/frontend/src/shared/i18n.ts", "translated UI copy for the extension webview"},
 	{"extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/model/HostStrings.kt", "host-side mirror of the webview i18n table"},
