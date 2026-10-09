@@ -562,3 +562,26 @@ func TestScanAgent_WaitBackground_NoLeakOnRun(t *testing.T) {
 		t.Errorf("last session JSONL record type = %q, want session_end", lastRec["type"])
 	}
 }
+
+func TestScanPromptOverride_BoundedNoPlan(t *testing.T) {
+	tpl, err := template.LoadScanOverride([]byte(`{"MAIN_TASK":{"messages":[{"role":"system","content":"Review only the supplied function; no context tools."},{"role":"user","content":"{{current_file_path}} {{file_content}} {{plan_guidance}} {{requirement_background}} {{system_rule}}"}]},"PLAN_TASK":null,"NO_PLAN_GUIDANCE":"No plan; bounded scope only."}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := newAgentForTest(t, *tpl)
+	a.args.Background = "bounded background"
+	it := model.ScanItem{Path: "x.go", Content: "func X() {}"}
+	guidance := a.maybeRunPlan(t.Context(), it, "bounded rule")
+	msgs := a.renderMessages(it, "bounded rule", guidance)
+	if msgs[0].ExtractText() != "Review only the supplied function; no context tools." {
+		t.Fatal("system contract was not replaced")
+	}
+	want := "x.go func X() {} No plan; bounded scope only. bounded background bounded rule"
+	if msgs[1].ExtractText() != want {
+		t.Fatalf("user contract: %q", msgs[1].ExtractText())
+	}
+	a.args.SkipPlan = true
+	if got := a.maybeRunPlan(t.Context(), it, "rule"); got != guidance {
+		t.Fatalf("--no-plan ignored override: %q", got)
+	}
+}

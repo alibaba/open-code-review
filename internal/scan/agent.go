@@ -846,7 +846,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 // surrounding "### Pre-scan Focus Areas" header in MAIN_TASK has content
 // instead of dangling.
 func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string) string {
-	const noPlan = "(no pre-scan plan; review the entire file as usual)"
+	noPlan := a.args.Template.NoPlanInstruction()
 
 	if !a.planEnabled() {
 		return noPlan

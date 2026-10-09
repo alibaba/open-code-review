@@ -5,9 +5,11 @@
 package template
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -34,6 +36,7 @@ type Template struct {
 // from scan_template.json. Kept entirely separate from Template so the two
 // pipelines can evolve their prompts and budgets independently.
 type ScanTemplate struct {
+	NoPlanGuidance        string           `json:"NO_PLAN_GUIDANCE,omitempty"`
 	MainTask              LlmConversation  `json:"MAIN_TASK"`
 	PlanTask              *LlmConversation `json:"PLAN_TASK,omitempty"`
 	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
@@ -259,6 +262,72 @@ func LoadScanDefault() (*ScanTemplate, error) {
 		return nil, fmt.Errorf("unmarshal default scan template: %w", err)
 	}
 	return &tpl, nil
+}
+
+// LoadScanOverride replaces the scan prompt contract without changing budgets
+// or auxiliary tasks. All three fields are required to avoid inheriting a
+// whole-file planner or no-plan instruction into a bounded review.
+func LoadScanOverride(data []byte) (*ScanTemplate, error) {
+	var override struct {
+		MainTask       *LlmConversation `json:"MAIN_TASK"`
+		PlanTask       json.RawMessage  `json:"PLAN_TASK"`
+		NoPlanGuidance *string          `json:"NO_PLAN_GUIDANCE"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&override); err != nil {
+		return nil, fmt.Errorf("decode scan prompt override: %w", err)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, fmt.Errorf("scan prompt override must contain exactly one JSON object")
+	}
+	if override.MainTask == nil || override.PlanTask == nil || override.NoPlanGuidance == nil || strings.TrimSpace(*override.NoPlanGuidance) == "" {
+		return nil, fmt.Errorf("scan prompt override requires MAIN_TASK, PLAN_TASK (null disables planning), and non-empty NO_PLAN_GUIDANCE")
+	}
+	if err := validateScanPrompt(*override.MainTask); err != nil {
+		return nil, fmt.Errorf("MAIN_TASK: %w", err)
+	}
+	var plan *LlmConversation
+	if !bytes.Equal(bytes.TrimSpace(override.PlanTask), []byte("null")) {
+		plan = new(LlmConversation)
+		decoder := json.NewDecoder(bytes.NewReader(override.PlanTask))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(plan); err != nil {
+			return nil, fmt.Errorf("PLAN_TASK: %w", err)
+		}
+		if err := validateScanPrompt(*plan); err != nil {
+			return nil, fmt.Errorf("PLAN_TASK: %w", err)
+		}
+	}
+	tpl, err := LoadScanDefault()
+	if err != nil {
+		return nil, err
+	}
+	tpl.MainTask = *override.MainTask
+	tpl.PlanTask = plan
+	tpl.NoPlanGuidance = *override.NoPlanGuidance
+	return tpl, tpl.Validate()
+}
+
+func validateScanPrompt(conv LlmConversation) error {
+	if len(conv.Messages) != 2 || conv.Messages[0].Role != "system" || conv.Messages[1].Role != "user" {
+		return fmt.Errorf("messages must contain a system message followed by a user message")
+	}
+	for _, msg := range conv.Messages {
+		if strings.TrimSpace(msg.Content) == "" {
+			return fmt.Errorf("message content must not be empty")
+		}
+	}
+	return nil
+}
+
+// NoPlanInstruction preserves the default contract for callers that construct
+// a ScanTemplate directly, while allowing overrides to supply their own scope.
+func (t ScanTemplate) NoPlanInstruction() string {
+	if t.NoPlanGuidance != "" {
+		return t.NoPlanGuidance
+	}
+	return "(no pre-scan plan; review the entire file as usual)"
 }
 
 // applyLanguage appends instruction to all system-role messages in conv.
