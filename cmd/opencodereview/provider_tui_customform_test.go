@@ -203,8 +203,7 @@ func TestCustomFormEndsAtProtocolForBedrock(t *testing.T) {
 	setup := func(t *testing.T) providerTUIModel {
 		t.Helper()
 		cfg := &Config{}
-		m := newProviderTUI(cfg, filepath.Join(t.TempDir(), "c.json"))
-		m.activeTab = tabCustom
+		m := newProviderTUIOnTab(cfg, filepath.Join(t.TempDir(), "c.json"), tabCustom)
 		m.creatingCustom = true
 		m.cpStep = cpStepProtocol
 		m.cpProtocolIdx = cpProtocolIndex(llm.ProtocolAnthropicBedrock)

@@ -60,13 +60,7 @@ func TestOfficialProviderActiveModel_NilCfg(t *testing.T) {
 }
 
 func TestOfficialProviderActiveModel_DifferentProvider(t *testing.T) {
-	cfg := &Config{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-flash",
-		Providers: map[string]ProviderEntry{
-			"deepseek": {Model: "deepseek-v4-flash"},
-		},
-	}
+	cfg := activeDeepseekConfig()
 	m := newProviderTUI(cfg, "")
 	got := m.officialProviderActiveModel(llm.Provider{Name: "anthropic", DisplayName: "Anthropic Claude API"})
 	if got != "" {
@@ -136,8 +130,7 @@ func TestModelProviderName_CustomTab(t *testing.T) {
 			"my-llm": {URL: "http://localhost", Model: "m"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.customIdx = 0
 	name := m.modelProviderName()
 	if !strings.Contains(name, "(custom)") {
@@ -146,8 +139,7 @@ func TestModelProviderName_CustomTab(t *testing.T) {
 }
 
 func TestModelProviderName_CustomTab_NoSelection(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(&Config{}, "", tabCustom)
 	m.customIdx = 999
 	name := m.modelProviderName()
 	if name != "" {
@@ -423,8 +415,7 @@ func TestHandleUp_CustomTab(t *testing.T) {
 			"b": {URL: "http://b"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.customIdx = 1
 	result, _ := m.Update(upKey())
 	m2 := result.(providerTUIModel)
@@ -535,8 +526,7 @@ func TestCurrentProvider_OutOfBounds(t *testing.T) {
 }
 
 func TestCurrentProvider_WrongTab(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(&Config{}, "", tabCustom)
 	p := m.currentProvider()
 	if p.Name != "" {
 		t.Errorf("expected empty provider for non-official tab, got %q", p.Name)
@@ -552,8 +542,7 @@ func TestSelectedCustomProvider_NotCustomTab(t *testing.T) {
 }
 
 func TestSelectedCustomProvider_OutOfBounds(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(&Config{}, "", tabCustom)
 	m.customIdx = 9999
 	_, ok := m.selectedCustomProvider()
 	if ok {
@@ -618,8 +607,7 @@ func TestHandleDown_CustomTab(t *testing.T) {
 			"b": {URL: "http://b"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.customIdx = 0
 	result, _ := m.Update(downKey())
 	m2 := result.(providerTUIModel)
@@ -634,8 +622,7 @@ func TestHandleDown_CustomTab_Wraps(t *testing.T) {
 			"a": {URL: "http://a"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.customIdx = m.customListCount() - 1
 	result, _ := m.Update(downKey())
 	m2 := result.(providerTUIModel)
@@ -727,11 +714,8 @@ func TestCustomProviderEntry_Fallback(t *testing.T) {
 }
 
 func TestNewModelTUI(t *testing.T) {
-	p := llm.ListProviders()
-	if len(p) == 0 {
-		t.Skip("no providers")
-	}
-	m := newModelTUI(p[0], "")
+	p := firstRegistryProvider(t, 0)
+	m := newModelTUI(p, "")
 	if m.isCustomProvider {
 		t.Error("preset provider test helper should set isCustomProvider=false")
 	}
@@ -748,12 +732,9 @@ func TestNewModelTUI(t *testing.T) {
 }
 
 func TestNewModelTUI_WithCurrentModel(t *testing.T) {
-	p := llm.ListProviders()
-	if len(p) == 0 || len(p[0].Models) == 0 {
-		t.Skip("need provider with models")
-	}
-	current := p[0].Models[0]
-	m := newModelTUI(p[0], current)
+	p := firstRegistryProvider(t, 1)
+	current := p.Models[0]
+	m := newModelTUI(p, current)
 	if m.modelIdx != 0 {
 		t.Errorf("modelIdx = %d, want 0 for first model", m.modelIdx)
 	}
@@ -763,23 +744,17 @@ func TestNewModelTUI_WithCurrentModel(t *testing.T) {
 }
 
 func TestNewModelTUI_CustomModel(t *testing.T) {
-	p := llm.ListProviders()
-	if len(p) == 0 {
-		t.Skip("no providers")
-	}
-	m := newModelTUI(p[0], "custom-model-xyz")
-	if m.modelIdx != len(p[0].Models) {
-		t.Errorf("modelIdx = %d, want %d for custom model", m.modelIdx, len(p[0].Models))
+	p := firstRegistryProvider(t, 0)
+	m := newModelTUI(p, "custom-model-xyz")
+	if m.modelIdx != len(p.Models) {
+		t.Errorf("modelIdx = %d, want %d for custom model", m.modelIdx, len(p.Models))
 	}
 }
 
 func TestModelTUI_IsCustomItem(t *testing.T) {
-	p := llm.ListProviders()
-	if len(p) == 0 {
-		t.Skip("no providers")
-	}
-	m := newModelTUI(p[0], "")
-	if !m.isCustomItem(len(p[0].Models)) {
+	p := firstRegistryProvider(t, 0)
+	m := newModelTUI(p, "")
+	if !m.isCustomItem(len(p.Models)) {
 		t.Error("expected true for custom item index")
 	}
 	if m.isCustomItem(0) {
@@ -788,34 +763,25 @@ func TestModelTUI_IsCustomItem(t *testing.T) {
 }
 
 func TestModelTUI_ItemCount(t *testing.T) {
-	p := llm.ListProviders()
-	if len(p) == 0 {
-		t.Skip("no providers")
-	}
-	m := newModelTUI(p[0], "")
-	if m.itemCount() != len(p[0].Models)+1 {
-		t.Errorf("itemCount() = %d, want %d", m.itemCount(), len(p[0].Models)+1)
+	p := firstRegistryProvider(t, 0)
+	m := newModelTUI(p, "")
+	if m.itemCount() != len(p.Models)+1 {
+		t.Errorf("itemCount() = %d, want %d", m.itemCount(), len(p.Models)+1)
 	}
 }
 
 func TestModelTUI_SelectedModel(t *testing.T) {
-	p := llm.ListProviders()
-	if len(p) == 0 || len(p[0].Models) == 0 {
-		t.Skip("need provider with models")
-	}
-	m := newModelTUI(p[0], "")
+	p := firstRegistryProvider(t, 1)
+	m := newModelTUI(p, "")
 	got := m.selectedModel()
-	if got != p[0].Models[0] {
-		t.Errorf("selectedModel() = %q, want %q", got, p[0].Models[0])
+	if got != p.Models[0] {
+		t.Errorf("selectedModel() = %q, want %q", got, p.Models[0])
 	}
 }
 
 func TestModelTUI_SelectedModel_OutOfBounds(t *testing.T) {
-	p := llm.ListProviders()
-	if len(p) == 0 {
-		t.Skip("no providers")
-	}
-	m := newModelTUI(p[0], "")
+	p := firstRegistryProvider(t, 0)
+	m := newModelTUI(p, "")
 	m.modelIdx = 9999
 	got := m.selectedModel()
 	if got != "" {
@@ -824,11 +790,8 @@ func TestModelTUI_SelectedModel_OutOfBounds(t *testing.T) {
 }
 
 func TestModelTUI_Update_UpDown(t *testing.T) {
-	p := llm.ListProviders()
-	if len(p) == 0 || len(p[0].Models) < 2 {
-		t.Skip("need provider with at least 2 models")
-	}
-	m := newModelTUI(p[0], "")
+	p := firstRegistryProvider(t, 2)
+	m := newModelTUI(p, "")
 	result, _ := m.Update(downKey())
 	m2 := result.(modelTUIModel)
 	if m2.modelIdx != 1 {
@@ -842,11 +805,8 @@ func TestModelTUI_Update_UpDown(t *testing.T) {
 }
 
 func TestModelTUI_Update_WindowSize(t *testing.T) {
-	p := llm.ListProviders()
-	if len(p) == 0 {
-		t.Skip("no providers")
-	}
-	m := newModelTUI(p[0], "")
+	p := firstRegistryProvider(t, 0)
+	m := newModelTUI(p, "")
 	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 50})
 	m2 := result.(modelTUIModel)
 	if m2.width != 100 || m2.height != 50 {
@@ -855,11 +815,8 @@ func TestModelTUI_Update_WindowSize(t *testing.T) {
 }
 
 func TestModelTUI_Update_EscCancels(t *testing.T) {
-	p := llm.ListProviders()
-	if len(p) == 0 {
-		t.Skip("no providers")
-	}
-	m := newModelTUI(p[0], "")
+	p := firstRegistryProvider(t, 0)
+	m := newModelTUI(p, "")
 	result, _ := m.Update(escKey())
 	m2 := result.(modelTUIModel)
 	if !m2.cancelled {
@@ -883,8 +840,7 @@ func TestProviderTUIView_StepProvider_CustomTab(t *testing.T) {
 			"my-llm": {URL: "http://localhost", Model: "m"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	v := m.View()
 	if !strings.Contains(v.Content, "my-llm") {
 		t.Errorf("expected custom provider name in view, got %q", v.Content)
@@ -892,8 +848,7 @@ func TestProviderTUIView_StepProvider_CustomTab(t *testing.T) {
 }
 
 func TestProviderTUIView_StepProvider_CustomTab_CreatingCustom(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(&Config{}, "", tabCustom)
 	m.creatingCustom = true
 	v := m.View()
 	if !strings.Contains(v.Content, "Add Custom Provider") {
@@ -907,8 +862,7 @@ func TestProviderTUIView_StepProvider_CustomTab_EditingCustom(t *testing.T) {
 			"ed": {URL: "http://ed"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.editingCustom = true
 	m.editTargetName = "ed"
 	v := m.View()
@@ -918,8 +872,7 @@ func TestProviderTUIView_StepProvider_CustomTab_EditingCustom(t *testing.T) {
 }
 
 func TestProviderTUIView_StepProvider_ManualTab(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabManual
+	m := newProviderTUIOnTab(&Config{}, "", tabManual)
 	v := m.View()
 	if !strings.Contains(v.Content, "Manual") {
 		t.Errorf("expected 'Manual' in view")
@@ -927,8 +880,7 @@ func TestProviderTUIView_StepProvider_ManualTab(t *testing.T) {
 }
 
 func TestProviderTUIView_StepProvider_ManualTab_InForm(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabManual
+	m := newProviderTUIOnTab(&Config{}, "", tabManual)
 	m.inManualForm = true
 	v := m.View()
 	if !strings.Contains(v.Content, "Manual Configuration") {
@@ -942,8 +894,7 @@ func TestProviderTUIView_StepProvider_ConfirmingDelete(t *testing.T) {
 			"del": {URL: "http://del"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.confirmingDelete = true
 	m.deleteTargetName = "del"
 	v := m.View()
@@ -1028,11 +979,8 @@ func TestRenderTabBar_AllTabs(t *testing.T) {
 }
 
 func TestModelTUI_View(t *testing.T) {
-	p := llm.ListProviders()
-	if len(p) == 0 {
-		t.Skip("no providers")
-	}
-	m := newModelTUI(p[0], "")
+	p := firstRegistryProvider(t, 0)
+	m := newModelTUI(p, "")
 	v := m.View()
 	if !strings.Contains(v.Content, "Select a model") {
 		t.Errorf("expected 'Select a model' in view, got %q", v.Content)
@@ -1040,16 +988,60 @@ func TestModelTUI_View(t *testing.T) {
 }
 
 func TestModelTUI_View_CustomModel(t *testing.T) {
-	p := llm.ListProviders()
-	if len(p) == 0 {
-		t.Skip("no providers")
-	}
-	m := newModelTUI(p[0], "")
+	p := firstRegistryProvider(t, 0)
+	m := newModelTUI(p, "")
 	m.customModel = true
 	v := m.View()
 	if v.Content == "" {
 		t.Error("expected non-empty view")
 	}
+}
+
+func newProviderTUIOnTab(cfg *Config, configPath string, tab providerTab) providerTUIModel {
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tab
+	return m
+}
+
+func firstRegistryProvider(t *testing.T, minModels int) llm.Provider {
+	t.Helper()
+	p := llm.ListProviders()
+	if len(p) == 0 || len(p[0].Models) < minModels {
+		t.Skipf("need a registry provider with at least %d models", minModels)
+	}
+	return p[0]
+}
+
+func activeDeepseekConfig() *Config {
+	return &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+}
+
+func selectOfficialProvider(t *testing.T, m *providerTUIModel, name string) {
+	t.Helper()
+	for i, p := range m.providers {
+		if p.Name == name {
+			m.officialIdx = i
+			return
+		}
+	}
+	t.Fatalf("official provider %q not found", name)
+}
+
+func selectCustomProvider(t *testing.T, m *providerTUIModel, name string) {
+	t.Helper()
+	for i, cp := range m.customProviders {
+		if cp.name == name {
+			m.customIdx = i
+			return
+		}
+	}
+	t.Fatalf("custom provider %q not found", name)
 }
 
 func officialConfigModelTUI(t *testing.T, configPath string, extraModels []string) modelTUIModel {
@@ -1167,12 +1159,8 @@ func TestModelTUI_Official_AddCustomModelStaysOnList(t *testing.T) {
 	if m3.existingCfg.Model != "qwen3.7-max" {
 		t.Errorf("cfg.Model = %q, want active model unchanged", m3.existingCfg.Model)
 	}
-	diskCfg, err := loadOrCreateConfig(configPath)
-	if err != nil {
-		t.Fatalf("load disk config: %v", err)
-	}
-	if !llm.ModelListContains(diskCfg.Providers["dashscope"].Models, "new-model") {
-		t.Errorf("disk Models = %v, want new-model persisted", diskCfg.Providers["dashscope"].Models)
+	if disk := loadDiskConfig(t, configPath).Providers["dashscope"].Models; !llm.ModelListContains(disk, "new-model") {
+		t.Errorf("disk Models = %v, want new-model persisted", disk)
 	}
 }
 
@@ -1230,7 +1218,7 @@ func TestModelTUI_DeleteSetsSavedInSession(t *testing.T) {
 	m.deleteModelName = "aaa"
 	m.confirmingDeleteModel = true
 
-	result, _ := m.confirmDeleteCustomProviderModel()
+	result, _ := m.confirmDeleteModel()
 	m2 := asModelTUIModel(t, result)
 	if !m2.savedInSession {
 		t.Error("savedInSession should be true after delete")
@@ -1267,29 +1255,8 @@ func TestModelTUI_Official_DeleteUserAddedModel(t *testing.T) {
 
 	result, _ = m2.Update(yKey())
 	m3 := result.(modelTUIModel)
-	got := m3.existingCfg.Providers["dashscope"].Models
-	if len(got) != 1 || got[0] != "qwen3.7-max" {
-		t.Errorf("Models = %v, want [qwen3.7-max]", got)
-	}
-
-	diskCfg, err := loadOrCreateConfig(configPath)
-	if err != nil {
-		t.Fatalf("load disk config: %v", err)
-	}
-	if len(diskCfg.Providers["dashscope"].Models) != 1 {
-		t.Errorf("disk Models = %v, want [qwen3.7-max]", diskCfg.Providers["dashscope"].Models)
-	}
-}
-
-func TestModelTUI_Official_DeleteBuiltInModelIgnored(t *testing.T) {
-	m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
-	m.modelIdx = modelTUIIdxForName(t, m, "qwen3.7-max")
-
-	result, _ := m.Update(dKey())
-	m2 := result.(modelTUIModel)
-	if m2.confirmingDeleteModel {
-		t.Error("pressing d on built-in model should not trigger delete confirmation")
-	}
+	assertModels(t, "Models", m3.existingCfg.Providers["dashscope"].Models, "qwen3.7-max")
+	assertModels(t, "disk Models", loadDiskConfig(t, configPath).Providers["dashscope"].Models, "qwen3.7-max")
 }
 
 func TestIsUserAddedOfficialModelName_RegistryDuplicateNotUserAdded(t *testing.T) {
@@ -1310,32 +1277,6 @@ func TestIsUserAddedOfficialModelName_RegistryDuplicateNotUserAdded(t *testing.T
 	}
 }
 
-func TestModelTUI_Official_RegistryModelNotDeletable(t *testing.T) {
-	m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
-	m.modelIdx = modelTUIIdxForName(t, m, "qwen3.7-max")
-
-	if m.isUserAddedModel("qwen3.7-max") {
-		t.Error("qwen3.7-max should not be user-added when it is in the registry")
-	}
-
-	result, _ := m.Update(dKey())
-	m2 := result.(modelTUIModel)
-	if m2.confirmingDeleteModel {
-		t.Error("pressing d on registry model should not trigger delete confirmation")
-	}
-}
-
-func TestModelTUI_Official_DeleteOnCustomModelInputIgnored(t *testing.T) {
-	m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
-	m.modelIdx = len(m.displayModels())
-
-	result, _ := m.Update(dKey())
-	m2 := result.(modelTUIModel)
-	if m2.confirmingDeleteModel {
-		t.Error("pressing d on Enter custom model name... should not trigger delete confirmation")
-	}
-}
-
 func TestModelTUI_CustomProvider_DeleteOnCustomModelInputIgnored(t *testing.T) {
 	m := customConfigModelTUI(t, "", []string{"m1", "aaa"})
 	m.modelIdx = len(m.displayModels())
@@ -1344,38 +1285,6 @@ func TestModelTUI_CustomProvider_DeleteOnCustomModelInputIgnored(t *testing.T) {
 	m2 := result.(modelTUIModel)
 	if m2.confirmingDeleteModel {
 		t.Error("pressing d on Enter custom model name... should not trigger delete confirmation")
-	}
-}
-
-func TestModelTUI_Official_UserAddedModelShowsDeleteHint(t *testing.T) {
-	m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
-
-	m.modelIdx = modelTUIIdxForName(t, m, "qwen3.7-max")
-	got := stripANSI(m.View().Content)
-	if strings.Contains(got, "d Delete") {
-		t.Errorf("built-in model should not show d Delete hint; got:\n%s", got)
-	}
-
-	m.modelIdx = modelTUIIdxForName(t, m, "my-custom-model")
-	got = stripANSI(m.View().Content)
-	if !strings.Contains(got, "d Delete") {
-		t.Errorf("user-added model should show d Delete hint; got:\n%s", got)
-	}
-}
-
-func TestModelTUI_CustomProvider_ShowsDeleteHint(t *testing.T) {
-	m := customConfigModelTUI(t, "", []string{"m1", "aaa"})
-
-	m.modelIdx = len(m.displayModels())
-	got := stripANSI(m.View().Content)
-	if strings.Contains(got, "d Delete") {
-		t.Errorf("custom input row should not show d Delete hint; got:\n%s", got)
-	}
-
-	m.modelIdx = modelTUIIdxForName(t, m, "aaa")
-	got = stripANSI(m.View().Content)
-	if !strings.Contains(got, "d Delete") {
-		t.Errorf("custom model row should show d Delete hint; got:\n%s", got)
 	}
 }
 
@@ -1389,7 +1298,7 @@ func TestModelTUI_CustomProvider_DeleteClearsCustomInput(t *testing.T) {
 	m.deleteModelName = "aaa"
 	m.confirmingDeleteModel = true
 
-	result, _ := m.confirmDeleteCustomProviderModel()
+	result, _ := m.confirmDeleteModel()
 	m2 := asModelTUIModel(t, result)
 
 	if m2.customModel {
@@ -1414,10 +1323,7 @@ func TestModelTUI_CustomProvider_DeleteModelViaDKey(t *testing.T) {
 
 	result, _ = m2.Update(yKey())
 	m3 := result.(modelTUIModel)
-	got := m3.existingCfg.CustomProviders["my-llm"].Models
-	if len(got) != 1 || got[0] != "m1" {
-		t.Errorf("Models = %v, want [m1]", got)
-	}
+	assertModels(t, "Models", m3.existingCfg.CustomProviders["my-llm"].Models, "m1")
 }
 
 func TestModelTUI_CustomProvider_DeleteCancel(t *testing.T) {
@@ -1434,62 +1340,6 @@ func TestModelTUI_CustomProvider_DeleteCancel(t *testing.T) {
 	got := m3.existingCfg.CustomProviders["my-llm"].Models
 	if len(got) != 2 {
 		t.Errorf("Models = %v, want unchanged", got)
-	}
-}
-
-func TestModelTUI_Official_DeleteCancel(t *testing.T) {
-	cancelKeys := []struct {
-		name string
-		key  tea.KeyPressMsg
-	}{
-		{"n", nKey()},
-		{"esc", escKey()},
-	}
-	for _, tc := range cancelKeys {
-		t.Run(tc.name, func(t *testing.T) {
-			m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
-			m.modelIdx = modelTUIIdxForName(t, m, "my-custom-model")
-
-			result, _ := m.Update(dKey())
-			m2 := result.(modelTUIModel)
-			if !m2.confirmingDeleteModel {
-				t.Fatal("expected confirmingDeleteModel after d")
-			}
-
-			result, _ = m2.Update(tc.key)
-			m3 := result.(modelTUIModel)
-			if m3.confirmingDeleteModel {
-				t.Error("confirmingDeleteModel should be false after cancel")
-			}
-			got := m3.existingCfg.Providers["dashscope"].Models
-			if len(got) != 2 || got[1] != "my-custom-model" {
-				t.Errorf("Models = %v, want model unchanged", got)
-			}
-		})
-	}
-}
-
-func TestModelTUI_Official_DeleteActiveUserModelClearsCfg(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	m := officialConfigModelTUI(t, configPath, []string{"my-custom-model"})
-	m.existingCfg.Model = "my-custom-model"
-	m.existingCfg.Providers["dashscope"] = ProviderEntry{
-		Model:  "my-custom-model",
-		Models: []string{"qwen3.7-max", "my-custom-model"},
-	}
-	m.modelIdx = modelTUIIdxForName(t, m, "my-custom-model")
-
-	result, _ := m.Update(dKey())
-	m2 := result.(modelTUIModel)
-	result, _ = m2.Update(yKey())
-	m3 := result.(modelTUIModel)
-
-	if m3.existingCfg.Providers["dashscope"].Model != "" {
-		t.Errorf("entry.Model = %q, want empty", m3.existingCfg.Providers["dashscope"].Model)
-	}
-	if m3.existingCfg.Model != "" {
-		t.Errorf("cfg.Model = %q, want empty", m3.existingCfg.Model)
 	}
 }
 
@@ -1514,8 +1364,7 @@ func TestResult_OfficialTab_WithMaskedKey(t *testing.T) {
 }
 
 func TestResult_CustomTab_Creating(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(&Config{}, "", tabCustom)
 	m.creatingCustom = true
 	m.cpNameInput.SetValue("new-prov")
 	m.cpURLInput.SetValue("http://url")
@@ -1534,8 +1383,7 @@ func TestResult_CustomTab_Editing(t *testing.T) {
 			"ed": {URL: "http://ed", Model: "m1", Models: []string{"m1", "m2"}},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.editingCustom = true
 	m.editTargetName = "ed"
 	m.cpNameInput.SetValue("ed")
@@ -1555,8 +1403,7 @@ func TestResult_CustomTab_Selected(t *testing.T) {
 			"sel": {URL: "http://sel", Model: "gpt", Models: []string{"gpt"}},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.customIdx = 0
 	r := m.result()
 	if !r.isCustom {
@@ -1568,8 +1415,7 @@ func TestResult_CustomTab_Selected(t *testing.T) {
 }
 
 func TestResult_CustomTab_OutOfBounds(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(&Config{}, "", tabCustom)
 	m.customIdx = 999
 	r := m.result()
 	if r.provider != "" {
@@ -1578,8 +1424,7 @@ func TestResult_CustomTab_OutOfBounds(t *testing.T) {
 }
 
 func TestResult_ManualTab(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabManual
+	m := newProviderTUIOnTab(&Config{}, "", tabManual)
 	m.manualURLInput.SetValue("http://manual")
 	m.manualModelInput.SetValue("model-x")
 	r := m.result()
@@ -1595,8 +1440,7 @@ func TestResult_ManualTab(t *testing.T) {
 }
 
 func TestResult_ManualTab_MaskedToken(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabManual
+	m := newProviderTUIOnTab(&Config{}, "", tabManual)
 	m.manualTokenMasked = true
 	m.manualTokenOriginal = "tok-secret"
 	r := m.result()
@@ -1613,8 +1457,7 @@ func TestLoadExistingAPIKey_CustomTab_HasKey(t *testing.T) {
 			"cp": {URL: "http://cp", APIKey: "sk-key"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.customIdx = 0
 	m.loadExistingAPIKey()
 	if !m.apiKeyMasked {
@@ -1631,8 +1474,7 @@ func TestLoadExistingAPIKey_CustomTab_NoKey(t *testing.T) {
 			"cp": {URL: "http://cp"},
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, "", tabCustom)
 	m.customIdx = 0
 	m.loadExistingAPIKey()
 	if m.apiKeyMasked {
@@ -1712,28 +1554,10 @@ func TestSyncSessionModelSelection_EmptyModel(t *testing.T) {
 func TestSyncSessionModelSelection_CrossOfficialProviderNoPersist(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-flash",
-		Providers: map[string]ProviderEntry{
-			"deepseek": {Model: "deepseek-v4-flash"},
-		},
-	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "baidu-qianfan" {
-			m.officialIdx = i
-			break
-		}
-	}
-	m.modelIdx = 0
-	for i, name := range m.models() {
-		if name == "glm-5" {
-			m.modelIdx = i
-			break
-		}
-	}
+	cfg := activeDeepseekConfig()
+	m := newProviderTUIOnTab(cfg, configPath, tabOfficial)
+	selectOfficialProvider(t, &m, "baidu-qianfan")
+	m.modelIdx = modelIdxForName(t, m, "glm-5")
 
 	if err := m.syncSessionModelSelection(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1752,21 +1576,9 @@ func TestSyncSessionModelSelection_CrossOfficialProviderNoPersist(t *testing.T) 
 func TestSyncSessionModelSelection_ActiveOfficialProviderDefersPersist(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-flash",
-		Providers: map[string]ProviderEntry{
-			"deepseek": {Model: "deepseek-v4-flash"},
-		},
-	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabOfficial
-	for i, name := range m.models() {
-		if name == "deepseek-v4-pro" {
-			m.modelIdx = i
-			break
-		}
-	}
+	cfg := activeDeepseekConfig()
+	m := newProviderTUIOnTab(cfg, configPath, tabOfficial)
+	m.modelIdx = modelIdxForName(t, m, "deepseek-v4-pro")
 
 	if err := m.syncSessionModelSelection(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1804,14 +1616,8 @@ func TestSyncSessionModelSelection_CrossCustomProviderNoPersist(t *testing.T) {
 			},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
-	for i, cp := range m.customProviders {
-		if cp.name == "other" {
-			m.customIdx = i
-			break
-		}
-	}
+	m := newProviderTUIOnTab(cfg, configPath, tabCustom)
+	selectCustomProvider(t, &m, "other")
 	m.modelIdx = 0
 
 	if err := m.syncSessionModelSelection(); err != nil {
@@ -1828,27 +1634,10 @@ func TestSyncSessionModelSelection_CrossCustomProviderNoPersist(t *testing.T) {
 func TestSyncSessionModelSelection_RecordsSessionPickForInactiveOfficialProvider(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-flash",
-		Providers: map[string]ProviderEntry{
-			"deepseek": {Model: "deepseek-v4-flash"},
-		},
-	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "baidu-qianfan" {
-			m.officialIdx = i
-			break
-		}
-	}
-	for i, name := range m.models() {
-		if name == "glm-5" {
-			m.modelIdx = i
-			break
-		}
-	}
+	cfg := activeDeepseekConfig()
+	m := newProviderTUIOnTab(cfg, configPath, tabOfficial)
+	selectOfficialProvider(t, &m, "baidu-qianfan")
+	m.modelIdx = modelIdxForName(t, m, "glm-5")
 
 	if err := m.syncSessionModelSelection(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1865,21 +1654,9 @@ func TestSyncSessionModelSelection_RecordsSessionPickForInactiveOfficialProvider
 }
 
 func TestProviderTUI_ResultUsesSessionModelPickWhenSelectionEmpty(t *testing.T) {
-	cfg := &Config{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-flash",
-		Providers: map[string]ProviderEntry{
-			"deepseek": {Model: "deepseek-v4-flash"},
-		},
-	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "baidu-qianfan" {
-			m.officialIdx = i
-			break
-		}
-	}
+	cfg := activeDeepseekConfig()
+	m := newProviderTUIOnTab(cfg, "", tabOfficial)
+	selectOfficialProvider(t, &m, "baidu-qianfan")
 	m.sessionModelPick = map[string]string{"baidu-qianfan": "glm-5"}
 	m.modelIdx = 9999 // force selectedModelFromState() empty
 
@@ -2077,8 +1854,7 @@ func TestHandleManualFormEnter_AuthTokenGate(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newProviderTUI(&Config{Llm: tc.llmCfg}, "")
-			m.activeTab = tabManual
+			m := newProviderTUIOnTab(&Config{Llm: tc.llmCfg}, "", tabManual)
 			m.inManualForm = true
 			m.manualStep = manualStepAuthToken
 			if tc.typedToken != "" {
@@ -2118,8 +1894,7 @@ func TestHandleManualFormEnter_AuthTokenGate(t *testing.T) {
 // --- viewCustomProviderForm field steps ---
 
 func TestProviderTUIView_CustomForm_AllSteps(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(&Config{}, "", tabCustom)
 	m.creatingCustom = true
 	for _, step := range []customProviderStep{cpStepName, cpStepBaseURL, cpStepAPIKey, cpStepAuthHeader, cpStepProtocol} {
 		m.cpStep = step
@@ -2131,8 +1906,7 @@ func TestProviderTUIView_CustomForm_AllSteps(t *testing.T) {
 }
 
 func TestProviderTUIView_CustomForm_WithError(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(&Config{}, "", tabCustom)
 	m.creatingCustom = true
 	m.formError = "name is required"
 	v := m.View()
@@ -2144,8 +1918,7 @@ func TestProviderTUIView_CustomForm_WithError(t *testing.T) {
 // --- viewManualTab field steps ---
 
 func TestProviderTUIView_ManualForm_AllSteps(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabManual
+	m := newProviderTUIOnTab(&Config{}, "", tabManual)
 	m.inManualForm = true
 	for _, step := range []manualStep{manualStepURL, manualStepProtocol, manualStepModel, manualStepAuthToken, manualStepAuthHeader} {
 		m.manualStep = step
@@ -2157,8 +1930,7 @@ func TestProviderTUIView_ManualForm_AllSteps(t *testing.T) {
 }
 
 func TestProviderTUIView_ManualForm_WithError(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabManual
+	m := newProviderTUIOnTab(&Config{}, "", tabManual)
 	m.inManualForm = true
 	m.formError = "URL required"
 	v := m.View()
@@ -2171,8 +1943,7 @@ func TestProviderTUIView_ManualTab_WithExistingConfig(t *testing.T) {
 	cfg := &Config{
 		Llm: LlmConfig{URL: "http://existing", Model: "old-model"},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabManual
+	m := newProviderTUIOnTab(cfg, "", tabManual)
 	v := m.View()
 	if !strings.Contains(v.Content, "http://existing") {
 		t.Errorf("expected existing URL in manual tab")

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 // unwritableConfigPath returns a config path that is itself a directory, so any
@@ -41,8 +43,7 @@ func TestUpdateDeleteConfirm_SaveFailure(t *testing.T) {
 			"cp": {URL: "https://x.example", Protocol: "openai", Models: []string{"m1"}},
 		},
 	}
-	m := newProviderTUI(cfg, unwritableConfigPath(t))
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, unwritableConfigPath(t), tabCustom)
 	m.confirmingDelete = true
 	m.deleteTargetIdx = 0
 	m.deleteTargetName = "cp"
@@ -50,12 +51,7 @@ func TestUpdateDeleteConfirm_SaveFailure(t *testing.T) {
 	out, _ := m.updateDeleteConfirm("y")
 	got := out.(providerTUIModel)
 
-	if !strings.Contains(got.formError, "failed to save") {
-		t.Errorf("formError = %q, want save-failure message", got.formError)
-	}
-	if got.savedInSession {
-		t.Error("savedInSession should be false after save failure")
-	}
+	assertSaveFailed(t, got.formError, got.savedInSession)
 	if got.confirmingDelete {
 		t.Error("confirmingDelete should be cleared after handling")
 	}
@@ -77,8 +73,7 @@ func TestConfirmDeleteCustomModel_SaveFailureRollback(t *testing.T) {
 			},
 		},
 	}
-	m := newProviderTUI(cfg, unwritableConfigPath(t))
-	m.activeTab = tabCustom
+	m := newProviderTUIOnTab(cfg, unwritableConfigPath(t), tabCustom)
 	m.customIdx = 0
 	m.step = stepModel
 	m.modelIdx = 1
@@ -88,12 +83,7 @@ func TestConfirmDeleteCustomModel_SaveFailureRollback(t *testing.T) {
 	out, _ := m.confirmDeleteCustomModel()
 	got := out.(providerTUIModel)
 
-	if !strings.Contains(got.formError, "failed to save") {
-		t.Errorf("formError = %q, want save-failure message", got.formError)
-	}
-	if got.savedInSession {
-		t.Error("savedInSession should be false after save failure")
-	}
+	assertSaveFailed(t, got.formError, got.savedInSession)
 	// Rollback restored the model list in the in-memory config.
 	entry := got.existingCfg.CustomProviders["cp"]
 	if len(entry.Models) != 2 {
@@ -108,12 +98,8 @@ func TestConfirmDeleteCustomModel_SaveFailureRollback(t *testing.T) {
 // delete handler down its save-failure branch for a user-added model and asserts
 // the provider entry is rolled back.
 func TestConfirmDeleteOfficialModel_SaveFailureRollback(t *testing.T) {
-	m := newProviderTUI(&Config{}, unwritableConfigPath(t))
-	m.activeTab = tabOfficial
-	provider := m.currentProvider()
-	if provider.Name == "" {
-		t.Skip("no official provider available")
-	}
+	m := newProviderTUIOnTab(&Config{}, unwritableConfigPath(t), tabOfficial)
+	provider := currentProviderOrSkip(t, m)
 	userModel := "user-added-model-xyz"
 	cfg := &Config{
 		Provider: provider.Name,
@@ -134,17 +120,77 @@ func TestConfirmDeleteOfficialModel_SaveFailureRollback(t *testing.T) {
 	out, _ := m.confirmDeleteOfficialModel()
 	got := out.(providerTUIModel)
 
-	if !strings.Contains(got.formError, "failed to save") {
-		t.Errorf("formError = %q, want save-failure message", got.formError)
-	}
-	if got.savedInSession {
-		t.Error("savedInSession should be false after save failure")
-	}
+	assertSaveFailed(t, got.formError, got.savedInSession)
 	// Rollback restored the user-added model.
 	entry := got.existingCfg.Providers[provider.Name]
 	if !containsStr(entry.Models, userModel) {
 		t.Errorf("rolled-back models = %v, want to contain %q", entry.Models, userModel)
 	}
+}
+
+// modelTUIModel.confirmDeleteModel serves official and custom providers from
+// one body, so a failed save has to roll back whichever config map the
+// provider lives in, along with the active model.
+func TestModelTUIConfirmDeleteModel_SaveFailureRollback(t *testing.T) {
+	for _, custom := range []bool{false, true} {
+		name := "official"
+		if custom {
+			name = "custom"
+		}
+		t.Run(name, func(t *testing.T) {
+			const provider, userModel = "prov", "user-added"
+			entries := map[string]ProviderEntry{provider: {Models: []string{userModel}}}
+			cfg := &Config{Provider: provider, Model: userModel}
+			if custom {
+				cfg.CustomProviders = entries
+			} else {
+				cfg.Providers = entries
+			}
+			m := newModelTUIConfig(modelTUIConfig{
+				Provider:       llm.Provider{Name: provider, DisplayName: "Prov", Models: []string{userModel}},
+				ProviderName:   provider,
+				RegistryModels: []string{"registry-model"},
+				ExistingCfg:    cfg,
+				ConfigPath:     unwritableConfigPath(t),
+				IsCustom:       custom,
+			})
+			m.deleteModelName = userModel
+			m.confirmingDeleteModel = true
+			if !m.isUserAddedModel(userModel) {
+				t.Fatalf("test setup: %q not recognized as user-added", userModel)
+			}
+
+			out, _ := m.confirmDeleteModel()
+			got := out.(modelTUIModel)
+
+			assertSaveFailed(t, got.formError, got.savedInSession)
+			if !containsStr(entries[provider].Models, userModel) {
+				t.Errorf("rolled-back models = %v, want to contain %q", entries[provider].Models, userModel)
+			}
+			if cfg.Model != userModel {
+				t.Errorf("active model = %q, want %q restored", cfg.Model, userModel)
+			}
+		})
+	}
+}
+
+func assertSaveFailed(t *testing.T, formError string, savedInSession bool) {
+	t.Helper()
+	if !strings.Contains(formError, "failed to save") {
+		t.Errorf("formError = %q, want save-failure message", formError)
+	}
+	if savedInSession {
+		t.Error("savedInSession should be false after save failure")
+	}
+}
+
+func currentProviderOrSkip(t *testing.T, m providerTUIModel) llm.Provider {
+	t.Helper()
+	provider := m.currentProvider()
+	if provider.Name == "" {
+		t.Skip("no official provider available")
+	}
+	return provider
 }
 
 func containsStr(list []string, want string) bool {
