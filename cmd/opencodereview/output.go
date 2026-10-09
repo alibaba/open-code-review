@@ -720,6 +720,9 @@ func outputPreview(p *agent.DiffPreview, outputFormat string, out io.Writer) err
 	if outputFormat == "sarif" {
 		return fmt.Errorf("--format sarif is not supported with --preview: SARIF output requires completed review findings")
 	}
+	if outputFormat == "codequality" {
+		return fmt.Errorf("--format codequality is not supported with --preview: a Code Quality report requires completed review findings")
+	}
 	if outputFormat == "json" {
 		return outputPreviewJSON(p, out)
 	}
