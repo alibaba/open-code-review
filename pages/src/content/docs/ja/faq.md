@@ -110,6 +110,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | あなたの `exclude` リストからそのパターンを削除してください。 |
 | `unsupported_ext` | ホワイトリストゲートを回避するため、拡張子を `include` リストに追加してください。 |
 | `default_path` | ファイルを `include` に追加してください——組み込みのテストファイル除外パターンを上書きします。 |
+| `undecodable_encoding` | このファイルのバイト列は、サポート対象のどの文字コードでも有効なテキストではありません。UTF-8 に変換するか、生成物であれば `exclude` に追加してください。 |
 | `provider_directory` | 対応は不要です。`vendor/` や `node_modules/` などの provider ディレクトリは、`include` に一致してもレビュー対象にはなりません。 |
 | `deleted` | 対処不要——レビュー対象の新しい内容がありません。 |
 | `too_large` | diff だけで `max_tokens` の 80% を超えています。`--max-tokens`（または保存された `max_tokens`）を引き上げるか、変更をより小さな commit に分割してください。 |
