@@ -149,6 +149,15 @@ func TestLoadDefault_FieldsPopulated(t *testing.T) {
 	if tpl.ReviewFilterTask == nil {
 		t.Fatal("ReviewFilterTask is nil, expected non-nil")
 	}
+	if tpl.ChangeSummaryTask == nil {
+		t.Fatal("ChangeSummaryTask is nil, expected non-nil")
+	}
+	if tpl.ImpactAnalysisTask == nil {
+		t.Fatal("ImpactAnalysisTask is nil, expected non-nil")
+	}
+	if tpl.FlowDiagramTask == nil {
+		t.Fatal("FlowDiagramTask is nil, expected non-nil")
+	}
 	if tpl.MaxTokens != 200000 {
 		t.Errorf("MaxTokens = %d, want 200000", tpl.MaxTokens)
 	}

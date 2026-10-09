@@ -28,6 +28,9 @@ type Template struct {
 	ReLocationTask              *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask            *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 	GroupingTask                *LlmConversation `json:"GROUPING_TASK,omitempty"`
+	ChangeSummaryTask           *LlmConversation `json:"CHANGE_SUMMARY_TASK,omitempty"`
+	ImpactAnalysisTask          *LlmConversation `json:"IMPACT_ANALYSIS_TASK,omitempty"`
+	FlowDiagramTask             *LlmConversation `json:"FLOW_DIAGRAM_TASK,omitempty"`
 }
 
 // ScanTemplate holds the full-file scan task template configuration loaded
@@ -181,6 +184,9 @@ type templateManifest struct {
 	ReLocationTask              *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask            *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 	GroupingTask                *manifestConversation `json:"GROUPING_TASK,omitempty"`
+	ChangeSummaryTask           *manifestConversation `json:"CHANGE_SUMMARY_TASK,omitempty"`
+	ImpactAnalysisTask          *manifestConversation `json:"IMPACT_ANALYSIS_TASK,omitempty"`
+	FlowDiagramTask             *manifestConversation `json:"FLOW_DIAGRAM_TASK,omitempty"`
 }
 
 func resolveConversation(m manifestConversation) (LlmConversation, error) {
@@ -249,6 +255,15 @@ func LoadDefault() (*Template, error) {
 	if tpl.GroupingTask, err = resolveOptionalConversation(m.GroupingTask, "GROUPING_TASK"); err != nil {
 		return nil, err
 	}
+	if tpl.ChangeSummaryTask, err = resolveOptionalConversation(m.ChangeSummaryTask, "CHANGE_SUMMARY_TASK"); err != nil {
+		return nil, err
+	}
+	if tpl.ImpactAnalysisTask, err = resolveOptionalConversation(m.ImpactAnalysisTask, "IMPACT_ANALYSIS_TASK"); err != nil {
+		return nil, err
+	}
+	if tpl.FlowDiagramTask, err = resolveOptionalConversation(m.FlowDiagramTask, "FLOW_DIAGRAM_TASK"); err != nil {
+		return nil, err
+	}
 	return &tpl, nil
 }
 
@@ -287,6 +302,15 @@ func (t *Template) ApplyLanguage(lang string) {
 		applyLanguage(t.PlanTask, instruction)
 	}
 	applyLanguage(&t.MemoryCompressionTask, instruction)
+	if t.ChangeSummaryTask != nil {
+		applyLanguage(t.ChangeSummaryTask, instruction)
+	}
+	if t.ImpactAnalysisTask != nil {
+		applyLanguage(t.ImpactAnalysisTask, instruction)
+	}
+	if t.FlowDiagramTask != nil {
+		applyLanguage(t.FlowDiagramTask, instruction)
+	}
 }
 
 // ApplyLanguage injects a language directive into all system-role messages

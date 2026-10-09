@@ -4,6 +4,13 @@
 *.ipr
 *.iws
 
+# Editor / agent tooling directories — not part of the project
+.trae/
+.agents/
+.opencodereview/
+.zhanlu/
+.claude-plugin/
+
 dist/
 npm/*/bin/
 coverage.out
