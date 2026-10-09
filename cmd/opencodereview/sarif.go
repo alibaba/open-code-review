@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -239,11 +240,14 @@ func sarifResultFromComment(c model.LlmComment) sarifResult {
 	}
 
 	hasRegion := c.StartLine > 0 && c.EndLine >= c.StartLine
+	// SARIF locations are URI references, so filename characters such as '#',
+	// '?' and '%' must be escaped without changing the path's separators.
+	artifactURI := (&url.URL{Path: c.Path}).String()
 
 	if c.Path != "" {
 		loc := sarifLocation{
 			PhysicalLocation: sarifPhysicalLocation{
-				ArtifactLocation: sarifArtifactLocation{URI: c.Path},
+				ArtifactLocation: sarifArtifactLocation{URI: artifactURI},
 			},
 		}
 		if hasRegion {
@@ -268,7 +272,7 @@ func sarifResultFromComment(c model.LlmComment) sarifResult {
 		}
 		result.Fixes = []sarifFix{{
 			ArtifactChanges: []sarifArtifactChange{{
-				ArtifactLocation: sarifArtifactLocation{URI: c.Path},
+				ArtifactLocation: sarifArtifactLocation{URI: artifactURI},
 				Replacements:     []sarifReplacement{rep},
 			}},
 		}}

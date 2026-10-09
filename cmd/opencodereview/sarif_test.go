@@ -203,6 +203,54 @@ func TestOutputSARIF_FullFieldMapping(t *testing.T) {
 	}
 }
 
+func TestOutputSARIF_EscapesArtifactPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		uri  string
+	}{
+		{"plain", "src/main.go", "src/main.go"},
+		{"space", "src/my file.go", "src/my%20file.go"},
+		{"fragment", "src/report#1.go", "src/report%231.go"},
+		{"query", "src/file?draft.go", "src/file%3Fdraft.go"},
+		{"percent", "src/100%.go", "src/100%25.go"},
+		{"literal percent escape", "src/file%20name.go", "src/file%2520name.go"},
+		{"unicode", "src/\u6d4b\u8bd5.go", "src/%E6%B5%8B%E8%AF%95.go"},
+		{"brackets", "src/[id].ts", "src/%5Bid%5D.ts"},
+		{"colon in first segment", "generated:main.go", "./generated:main.go"},
+		{"plus", "src/a+b.go", "src/a+b.go"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			comment := model.LlmComment{
+				Path:           tc.path,
+				Content:        "Check the error before returning",
+				ExistingCode:   "return err",
+				SuggestionCode: "if err != nil { return err }",
+				StartLine:      1,
+				EndLine:        1,
+				Category:       "bug",
+				Severity:       "high",
+			}
+			var out strings.Builder
+			if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, &out); err != nil {
+				t.Fatal(err)
+			}
+			var report sarifReport
+			if err := json.Unmarshal([]byte(out.String()), &report); err != nil {
+				t.Fatal(err)
+			}
+			result := report.Runs[0].Results[0]
+			if got := result.Locations[0].PhysicalLocation.ArtifactLocation.URI; got != tc.uri {
+				t.Errorf("location URI = %q, want %q", got, tc.uri)
+			}
+			if got := result.Fixes[0].ArtifactChanges[0].ArtifactLocation.URI; got != tc.uri {
+				t.Errorf("fix URI = %q, want %q", got, tc.uri)
+			}
+		})
+	}
+}
+
 // --- AC-5 & AC-6: Severity → Level mapping ---
 
 func TestSarifSeverityLevel(t *testing.T) {
