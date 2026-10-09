@@ -10,7 +10,6 @@ package llm
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,31 +145,6 @@ func TestResolveEndpoint_LegacyWhitespaceOnlyCmdIsUnset(t *testing.T) {
 	if ep.Token != "sk-from-env" {
 		t.Errorf("Token = %q, want %q (whitespace-only auth_token_cmd must be treated as unset)", ep.Token, "sk-from-env")
 	}
-}
-
-// captureStderr swaps os.Stderr for a pipe around fn and returns what was written.
-// Output here is tiny, so reading after the writer is closed avoids any pipe-buffer
-// deadlock without a goroutine.
-func captureStderr(t *testing.T, fn func()) string {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	orig := os.Stderr
-	os.Stderr = w
-	defer func() { os.Stderr = orig }()
-
-	fn()
-
-	if err := w.Close(); err != nil {
-		t.Fatalf("close pipe writer: %v", err)
-	}
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read captured stderr: %v", err)
-	}
-	return string(out)
 }
 
 // (b2) when both api_key and api_key_cmd are set, a warning is emitted on stderr
