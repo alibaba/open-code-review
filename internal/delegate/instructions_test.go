@@ -6,7 +6,9 @@ package delegate
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 )
 
@@ -98,13 +101,24 @@ func delegateExamples(t *testing.T) []string {
 	for _, locale := range []string{"en", "zh", "ja", "ko", "ru"} {
 		docs = append(docs, "pages/src/content/docs/"+locale+"/integrations/delegate.md")
 	}
+	// Go runs package tests from the package directory, including with -trimpath.
+	examples, err := readDelegateExamples(os.DirFS(filepath.Join("..", "..")), docs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return examples
+}
+
+func readDelegateExamples(root fs.FS, docs []string) ([]string, error) {
+	if len(docs) == 0 {
+		return nil, fmt.Errorf("no delegate documents to check")
+	}
 	exampleRE := regexp.MustCompile("git [^`\r\n]*(?: -- \"?<path>\"?|\"?<ref>:<path>\"?)|cat \"?<path>\"?")
 	var canonical []string
-	for _, doc := range docs {
-		// Go runs package tests from the package directory, including with -trimpath.
-		content, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(doc)))
+	for i, doc := range docs {
+		content, err := fs.ReadFile(root, doc)
 		if err != nil {
-			t.Fatal(err)
+			return nil, fmt.Errorf("%s: %w", doc, err)
 		}
 		set := map[string]bool{}
 		for _, example := range exampleRE.FindAllString(string(content), -1) {
@@ -115,13 +129,65 @@ func delegateExamples(t *testing.T) []string {
 			examples = append(examples, example)
 		}
 		slices.Sort(examples)
-		if canonical == nil {
+		if len(examples) == 0 {
+			return nil, fmt.Errorf("%s contains no review command examples", doc)
+		}
+		if !slices.ContainsFunc(examples, func(example string) bool { return strings.HasPrefix(example, "git ") }) {
+			return nil, fmt.Errorf("%s contains no Git command examples", doc)
+		}
+		if i == 0 {
 			canonical = examples
 		} else if !slices.Equal(examples, canonical) {
-			t.Errorf("%s examples differ from %s:\n%q\nwant %q", doc, docs[0], examples, canonical)
+			return nil, fmt.Errorf("%s examples differ from %s:\n%q\nwant %q", doc, docs[0], examples, canonical)
 		}
 	}
-	return canonical
+	return canonical, nil
+}
+
+func TestReadDelegateExamples(t *testing.T) {
+	const diff = "git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- \"<path>\""
+	const cat = "cat \"<path>\""
+	for _, tc := range []struct {
+		name     string
+		contents []string
+		want     []string
+		wantErr  string
+	}{
+		{
+			name:     "matching sets with duplicates and different order",
+			contents: []string{diff + "\n" + cat + "\n" + diff, cat + "\n" + diff},
+			want:     []string{cat, diff},
+		},
+		{name: "empty first document", contents: []string{"# No examples", diff}, wantErr: "doc-0.md contains no review command examples"},
+		{name: "empty later document", contents: []string{diff, "# No examples"}, wantErr: "doc-1.md contains no review command examples"},
+		{name: "all documents empty", contents: []string{"", ""}, wantErr: "doc-0.md contains no review command examples"},
+		{name: "no documents", wantErr: "no delegate documents to check"},
+		{name: "no Git commands", contents: []string{cat, cat}, wantErr: "doc-0.md contains no Git command examples"},
+		{name: "different command sets", contents: []string{diff, diff + "\n" + cat}, wantErr: "doc-1.md examples differ from doc-0.md"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := fstest.MapFS{}
+			var docs []string
+			for i, content := range tc.contents {
+				name := fmt.Sprintf("doc-%d.md", i)
+				docs = append(docs, name)
+				root[name] = &fstest.MapFile{Data: []byte(content)}
+			}
+			got, err := readDelegateExamples(root, docs)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("examples = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
 
 func (r delegateRepo) args(example, patchPath string) []string {
@@ -136,9 +202,10 @@ func (r delegateRepo) args(example, patchPath string) []string {
 }
 
 func TestDelegateDiffExamples(t *testing.T) {
+	examples := delegateExamples(t)
 	r := newDelegateRepo(t)
 	modes := map[string]bool{}
-	for _, example := range delegateExamples(t) {
+	for _, example := range examples {
 		t.Run(example, func(t *testing.T) {
 			if strings.HasPrefix(example, "cat ") {
 				modes["untracked"] = true
@@ -308,6 +375,7 @@ func TestDelegatePagerProcess(t *testing.T) {
 }
 
 func TestDelegatePagerPTY(t *testing.T) {
+	examples := delegateExamples(t)
 	unavailable := func(reason string) {
 		t.Helper()
 		if os.Getenv("OCR_DELEGATE_REQUIRE_PTY") == "1" {
@@ -351,7 +419,7 @@ func TestDelegatePagerPTY(t *testing.T) {
 	if _, err := os.Stat(run(t, []string{"--paginate", "log", "--oneline"})); err != nil {
 		t.Fatal("positive control did not launch the pager:", err)
 	}
-	for _, example := range delegateExamples(t) {
+	for _, example := range examples {
 		if !strings.HasPrefix(example, "git ") {
 			continue
 		}
