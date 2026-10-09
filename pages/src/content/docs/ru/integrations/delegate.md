@@ -95,7 +95,15 @@ ocr delegate rule <path1> <path2> ...
 
 Используйте Git напрямую на основе режима и сведений о ссылках из шага 1:
 
-Эти команды отключают пейджер Git, внешние команды diff, преобразование текста и цветной вывод.
+Используйте `git --no-pager` при каждом вызове Git в этом ревью, включая получение контекста на следующих шагах:
+
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
+Команды diff также отключают внешние diff-команды, преобразование текста и цветной вывод.
 
 **Режим диапазона** (предоставлен merge\_base):
 ```bash
@@ -110,10 +118,10 @@ git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 **Режим рабочей области**:
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # tracked files
-cat <path>                     # new untracked files
+cat "<path>"                     # new untracked files
 ```
 
-Для больших diff добавьте `--output="<absolute-diff-file>"` в команду выбранного режима. Замените заполнитель уникальным абсолютным путём вне репозитория и используйте тот же путь в вызовах инструмента чтения файлов:
+Для больших diff добавьте `--output="<absolute-diff-file>"` в команду выбранного режима. Выберите уникальный абсолютный путь вне репозитория и создайте родительский каталог. Используйте тот же путь в вызовах инструмента чтения файлов:
 
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"

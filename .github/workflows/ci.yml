@@ -82,6 +82,8 @@ jobs:
           govulncheck ./...
 
       - name: Test with coverage
+        env:
+          OCR_DELEGATE_REQUIRE_PTY: '1'
         run: |
           go test -v -race -count=1 -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | grep total: | awk '{print $3}'

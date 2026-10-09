@@ -93,7 +93,15 @@ ocr delegate rule <path1> <path2> ...
 
 1단계에서 얻은 모드와 ref 정보를 바탕으로 git을 직접 씁니다.
 
-아래 명령은 Git 페이저, 외부 diff 명령, 텍스트 변환, 색상 출력을 끕니다.
+이 리뷰의 모든 Git 호출에 `git --no-pager`를 사용하세요. 이후 단계에서 컨텍스트를 조회할 때도 적용하세요:
+
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
+diff 명령은 외부 diff 명령, 텍스트 변환, 색상 출력도 끕니다.
 
 **range 모드**(merge\_base가 제공됨):
 ```bash
@@ -108,10 +116,10 @@ git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 **workspace 모드**:
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # 추적 중인 파일
-cat <path>                     # 새로 추가된 추적되지 않은 파일
+cat "<path>"                     # 새로 추가된 추적되지 않은 파일
 ```
 
-큰 diff에는 해당 모드의 명령에 `--output="<absolute-diff-file>"`을 추가하세요. 자리표시자를 저장소 밖의 고유한 절대 경로로 바꾸고 파일 읽기 도구 호출에서도 같은 경로를 사용하세요:
+큰 diff는 선택한 모드의 명령에 `--output="<absolute-diff-file>"`를 추가하세요. 저장소 밖의 고유한 절대 경로를 선택하고 상위 디렉터리를 만드세요. 파일 읽기 도구에서도 같은 경로를 사용하세요:
 
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"

@@ -22,7 +22,7 @@ OpenCodeReviewへのコントリビューションに興味を持っていただ
 
 ### 前提条件
 
-- [Go 1.26+](https://go.dev/dl/)
+- [Go 1.26.9+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 

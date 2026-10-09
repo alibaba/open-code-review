@@ -28,7 +28,7 @@ Go를 쓰지 않아도 도울 수 있습니다.
 
 ### 사전 요구 사항 {#prerequisites}
 
-- [Go 1.26 이상](https://go.dev/dl/)
+- [Go 1.26.9 이상](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 

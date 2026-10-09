@@ -83,7 +83,15 @@ ocr delegate rule <path1> <path2> ...
 
 根据第 1 步的 mode/ref 信息，使用 git 直接获取：
 
-以下命令关闭 Git 分页器、外部 diff 命令、文本转换和颜色输出。
+审查中的每次 Git 调用都使用 `git --no-pager`，后续步骤的上下文查询也遵循这条规则：
+
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
+diff 命令还关闭外部 diff、文本转换和颜色输出。
 
 **Range 模式**（有 merge\_base）：
 ```bash
@@ -98,10 +106,10 @@ git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 **Workspace 模式**：
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # 已跟踪文件
-cat <path>                     # 新的未跟踪文件
+cat "<path>"                     # 新的未跟踪文件
 ```
 
-较大的 diff 可在对应模式的命令中添加 `--output="<absolute-diff-file>"`。将占位符替换为仓库外唯一的绝对路径，并在文件读取工具调用中使用相同路径：
+较大的 diff 可在对应模式的命令中添加 `--output="<absolute-diff-file>"`。选择仓库外的唯一绝对路径，并先创建父目录。后续文件读取工具使用同一路径：
 
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"

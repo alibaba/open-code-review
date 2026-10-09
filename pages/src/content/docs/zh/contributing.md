@@ -25,7 +25,7 @@ OCR 是 Apache-2.0 许可下的开源项目。欢迎 bug 报告、文档修复�
 
 ### 前置条件
 
-- [Go ≥ 1.26](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 

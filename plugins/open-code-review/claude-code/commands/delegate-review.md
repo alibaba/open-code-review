@@ -33,11 +33,19 @@ ocr delegate rule <path1> <path2> ...
 For each reviewable file, get its diff using git (based on mode/ref from Step 1):
 - Range: `git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"`
 - Commit: `git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"`
-- Workspace: `git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"` (or read directly for untracked files)
+- Workspace: `git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"` (or `cat "<path>"` for untracked files)
 
-These commands disable Git's pager, external diff commands, text conversion, and color.
+Use `git --no-pager` for every Git command in this review, including context queries in later steps:
 
-For large diffs, add `--output="<absolute-diff-file>"` to the command for the selected mode. Replace the placeholder with a unique absolute path outside the repository and use the same path in file-reading tool calls:
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
+Diff commands also disable external diff commands, text conversion, and color.
+
+For large diffs, add `--output="<absolute-diff-file>"` to the command for the selected mode. Choose a unique absolute path outside the repository and create its parent directory. Use the same path in file-reading tool calls:
 
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"

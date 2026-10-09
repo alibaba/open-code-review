@@ -148,7 +148,7 @@ shasum -a 256 -c sha256sum.txt --ignore-missing
 
 #### Предварительные требования
 
-- [Go ≥ 1.26](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 

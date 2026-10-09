@@ -61,7 +61,15 @@ Pass the reviewable file paths from Step 1. Output is grouped by rule content â€
 
 Use git directly based on the mode/ref info from Step 1:
 
-These commands disable Git's pager, external diff commands, text conversion, and color.
+Use `git --no-pager` for every Git command in this review, including context queries in later steps:
+
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
+Diff commands also disable external diff commands, text conversion, and color.
 
 **Range mode** (merge_base provided in preview output):
 ```bash
@@ -78,10 +86,10 @@ git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 # Tracked files
 git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"
 # New untracked files â€” read directly (entire file is new code)
-cat <path>
+cat "<path>"
 ```
 
-For large diffs, add `--output="<absolute-diff-file>"` to the command for the selected mode. Replace the placeholder with a unique absolute path outside the repository and use the same path in file-reading tool calls:
+For large diffs, add `--output="<absolute-diff-file>"` to the command for the selected mode. Choose a unique absolute path outside the repository and create its parent directory. Use the same path in file-reading tool calls:
 
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"

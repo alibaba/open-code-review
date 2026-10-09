@@ -83,7 +83,15 @@ ocr delegate rule <path1> <path2> ...
 
 ステップ 1 の mode/ref 情報に基づき、git を直接使用：
 
-以下のコマンドは Git のページャー、外部 diff コマンド、テキスト変換、カラー出力を無効にします。
+このレビューでは、後続ステップのコンテキスト取得を含め、すべての Git 呼び出しで `git --no-pager` を使います：
+
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
+diff コマンドでは外部 diff、テキスト変換、カラー出力も無効にします。
 
 **Range モード**（merge\_base あり）：
 ```bash
@@ -98,10 +106,10 @@ git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 **Workspace モード**：
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # 追跡ファイル
-cat <path>                     # 新規未追跡ファイル
+cat "<path>"                     # 新規未追跡ファイル
 ```
 
-大きな diff には、対象モードのコマンドに `--output="<absolute-diff-file>"` を追加します。プレースホルダーをリポジトリ外の一意の絶対パスに置き換え、ファイル読み取りツールでも同じパスを使います：
+大きな diff では、選択したモードのコマンドに `--output="<absolute-diff-file>"` を追加します。リポジトリ外の一意な絶対パスを選び、親ディレクトリを作成します。ファイル読み取りツールでも同じパスを使います：
 
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
