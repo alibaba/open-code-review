@@ -4,11 +4,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -284,4 +286,30 @@ func TestResolveWorkingDir_GitRepo(t *testing.T) {
 		t.Error("expected non-empty absPath")
 	}
 	_ = isGit
+}
+
+func TestApplyCLIExcludes_WarnsWindowsSeparators(t *testing.T) {
+	var buf bytes.Buffer
+	cc := &commonContext{}
+	pattern := `src\gen\*`
+	applyCLIExcludesFor(&buf, "windows", cc, []string{pattern, "src/generated/**"})
+	if !strings.Contains(buf.String(), strconv.Quote(pattern)) {
+		t.Errorf("expected a warning naming the backslash pattern, got %q", buf.String())
+	}
+	// Behavior is unchanged: both patterns are appended verbatim.
+	if len(cc.FileFilter.Exclude) != 2 {
+		t.Errorf("expected 2 excludes appended verbatim, got %v", cc.FileFilter.Exclude)
+	}
+}
+
+func TestApplyCLIExcludes_NoSeparatorWarningOffWindows(t *testing.T) {
+	var buf bytes.Buffer
+	cc := &commonContext{}
+	applyCLIExcludesFor(&buf, "linux", cc, []string{`src\gen\*`})
+	if buf.Len() != 0 {
+		t.Errorf("expected no warning on linux, got %q", buf.String())
+	}
+	if len(cc.FileFilter.Exclude) != 1 {
+		t.Errorf("expected the pattern appended verbatim, got %v", cc.FileFilter.Exclude)
+	}
 }
