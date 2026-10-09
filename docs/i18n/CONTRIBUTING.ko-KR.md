@@ -22,7 +22,7 @@ OpenCodeReview에 기여해 주셔서 감사합니다. 오타 수정, bug report
 
 ### 전제 조건
 
-- [Go 1.25+](https://go.dev/dl/)
+- [Go 1.26+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 

@@ -14,8 +14,7 @@ import (
 	"time"
 )
 
-// Execute the published examples, so every skill, command, and translation
-// keeps producing readable patches even with hostile user Git configuration.
+// Check the published examples with external diff, textconv, and color configured.
 func TestDelegateDiffExamples(t *testing.T) {
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
@@ -137,8 +136,7 @@ func TestDelegateDiffExamples(t *testing.T) {
 						t.Fatal(err)
 					}
 					assertDelegatePatch(t, string(patch), want)
-					// A bad ref or an unwritable destination must remain a Git
-					// failure, rather than a successfully captured empty patch.
+					// Invalid refs and unwritable destinations must produce Git exit errors.
 					for _, failure := range []string{"invalid-ref", "output-is-directory"} {
 						badArgs := append([]string(nil), args...)
 						for i, arg := range badArgs {

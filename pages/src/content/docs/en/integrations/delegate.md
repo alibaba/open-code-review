@@ -97,7 +97,7 @@ repetition.
 
 Use git directly, based on the mode/ref info from Step 1:
 
-Always pass `--no-pager`, `--no-ext-diff`, `--no-textconv`, and `--no-color` to prevent interactive pagers and preserve plain unified patches.
+These commands disable Git's pager, external diff commands, text conversion, and color.
 
 **Range mode** (merge\_base provided):
 ```bash
@@ -115,13 +115,13 @@ git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"     
 cat <path>                     # new untracked files
 ```
 
-For large diffs, choose a unique absolute temporary file path outside the repository. Substitute that literal path for `<absolute-diff-file>` below and use the same path in subsequent file-reading tool calls. Git's `--output` works in Bash and PowerShell without shell variables or redirection; it does not limit file size:
+For large diffs, add `--output="<absolute-diff-file>"` to the command for the selected mode. Replace the placeholder with a unique absolute path outside the repository and use the same path in file-reading tool calls:
 
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
 ```
 
-Add `--output="<absolute-diff-file>"` to the commit or workspace command when needed. Require exit code 0 before reading the result. On a nonzero exit or timeout, retry or mark the file `skipped` with the error; never mark it `reviewed` or infer "no changes" from an empty or partial file. If successful output is unexpectedly empty, reconcile it with a fresh preview. Read every chunk through the end before marking the file `reviewed`, then remove the temporary file.
+Read the file in chunks after Git exits with code 0. Review all chunks, then remove the file. If Git fails or times out, retry or record `skipped` with the error. Check unexpectedly empty output against a fresh preview.
 
 ### Step 4: Review each file
 
@@ -131,7 +131,7 @@ For each reviewable file:
 2. Consult the matching Rule Group (Step 2) as the review checklist
 3. Conduct a thorough review, using context exploration as needed
 
-Account for every previewed `(path, status)` entry as `reviewed` or explicitly `skipped` with a reason. Include `total_files`, `reviewed_files`, `skipped_files`, and `coverage_rate` in the report.
+Record each previewed `(path, status)` as `reviewed` or `skipped`. Give a reason for every skipped entry, and report `total_files`, `reviewed_files`, `skipped_files`, and `coverage_rate`.
 
 ### Step 5: Report
 

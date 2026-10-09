@@ -29,7 +29,7 @@ OCR распространяется с открытым исходным код
 
 ### Предварительные требования
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 

@@ -28,7 +28,7 @@ You don't have to write Go to be useful:
 
 ### Prerequisites
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 

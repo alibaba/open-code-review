@@ -35,19 +35,21 @@ For each reviewable file, get its diff using git (based on mode/ref from Step 1)
 - Commit: `git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"`
 - Workspace: `git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"` (or read directly for untracked files)
 
-Keep all four flags to prevent interactive pagers and preserve plain unified patches. For large diffs, choose a unique absolute temporary file path outside the repository, substitute it literally below, and use that same path in subsequent file-reading tool calls. Git's `--output` works in Bash and PowerShell without shell variables or redirection:
+These commands disable Git's pager, external diff commands, text conversion, and color.
+
+For large diffs, add `--output="<absolute-diff-file>"` to the command for the selected mode. Replace the placeholder with a unique absolute path outside the repository and use the same path in file-reading tool calls:
 
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
 ```
 
-Add `--output="<absolute-diff-file>"` to the commit or workspace command when needed. Require exit code 0 before reading the result. On a nonzero exit or timeout, retry or mark the file `skipped` with the error; never mark it `reviewed` or infer "no changes" from an empty or partial file. If successful output is unexpectedly empty, reconcile it with a fresh preview. Read every chunk through the end before marking the file `reviewed`, then remove the temporary file.
-
-Account for every previewed `(path, status)` entry as `reviewed` or explicitly `skipped` with a reason. Include `total_files`, `reviewed_files`, `skipped_files`, and `coverage_rate` in the report.
+Read the file in chunks after Git exits with code 0. Review all chunks, then remove the file. If Git fails or times out, retry or record `skipped` with the error. Check unexpectedly empty output against a fresh preview.
 
 Then review focusing on: correctness, security, performance, error handling, concurrency, maintainability. Only comment on changed code (+ lines).
 
 ### Step 4: Report and Fix
+
+Record each previewed `(path, status)` as `reviewed` or `skipped`. Give a reason for every skipped entry, and report `total_files`, `reviewed_files`, `skipped_files`, and `coverage_rate`.
 
 Classify each issue by severity:
 

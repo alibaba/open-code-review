@@ -135,7 +135,7 @@ OCR 자체를 수정하거나 사전 빌드 바이너리가 없는 플랫폼에�
 
 #### 사전 요구 사항 {#prerequisites}
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 

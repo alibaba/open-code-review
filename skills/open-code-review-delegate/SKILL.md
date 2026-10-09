@@ -56,15 +56,7 @@ Pass the reviewable file paths from Step 1. Output is grouped by rule content â€
 
 Use git directly based on the mode/ref info from Step 1:
 
-Always pass `--no-pager`, `--no-ext-diff`, `--no-textconv`, and `--no-color` to prevent interactive pagers and preserve plain unified patches.
-
-For large diffs, choose a unique absolute temporary file path outside the repository. Substitute that literal path for `<absolute-diff-file>` below and use the same path in subsequent file-reading tool calls. Git's `--output` works in Bash and PowerShell without shell variables or redirection; it does not limit file size:
-
-```bash
-git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
-```
-
-Add `--output="<absolute-diff-file>"` to the commit or workspace command below when needed. Require exit code 0 before reading the result. On a nonzero exit or timeout, retry or mark the file `skipped` with the error; never mark it `reviewed` or infer "no changes" from an empty or partial file. If successful output is unexpectedly empty, reconcile it with a fresh preview. Read every chunk through the end before marking the file `reviewed`, then remove the temporary file.
+These commands disable Git's pager, external diff commands, text conversion, and color.
 
 **Range mode** (merge_base provided in preview output):
 ```bash
@@ -83,6 +75,14 @@ git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"
 # New untracked files â€” read directly (entire file is new code)
 cat <path>
 ```
+
+For large diffs, add `--output="<absolute-diff-file>"` to the command for the selected mode. Replace the placeholder with a unique absolute path outside the repository and use the same path in file-reading tool calls:
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+Read the file in chunks after Git exits with code 0. Review all chunks, then remove the file. If Git fails or times out, retry or record `skipped` with the error. Check unexpectedly empty output against a fresh preview.
 
 ### Step 4: Review Each File
 

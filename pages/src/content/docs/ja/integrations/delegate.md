@@ -83,7 +83,7 @@ ocr delegate rule <path1> <path2> ...
 
 ステップ 1 の mode/ref 情報に基づき、git を直接使用：
 
-対話型ページャーによる停止を防ぎ、プレーンテキストの unified patch を保持するため、常に `--no-pager`、`--no-ext-diff`、`--no-textconv`、`--no-color` を指定します。
+以下のコマンドは Git のページャー、外部 diff コマンド、テキスト変換、カラー出力を無効にします。
 
 **Range モード**（merge\_base あり）：
 ```bash
@@ -101,13 +101,13 @@ git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"     
 cat <path>                     # 新規未追跡ファイル
 ```
 
-大きな diff には、リポジトリ外で一意の一時ファイルの絶対パスを選びます。以下の `<absolute-diff-file>` をそのパスのリテラル値に置き換え、後続のファイル読み取りツールでも同じパスを使います。Git の `--output` は Bash と PowerShell の両方で使え、シェル変数やリダイレクトは不要です。ファイルサイズは制限されません：
+大きな diff には、対象モードのコマンドに `--output="<absolute-diff-file>"` を追加します。プレースホルダーをリポジトリ外の一意の絶対パスに置き換え、ファイル読み取りツールでも同じパスを使います：
 
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
 ```
 
-必要に応じて commit または workspace コマンドにも `--output="<absolute-diff-file>"` を追加します。結果を読む前に終了コードが 0 であることを確認してください。非ゼロ終了やタイムアウト時は再試行するか、エラーを理由として `skipped` にします。`reviewed` にしたり、空または不完全なファイルから「変更なし」と判断したりしてはいけません。正常終了した出力が予期せず空なら、preview を再実行して照合します。末尾まで全チャンクを読んでから `reviewed` にし、一時ファイルを削除します。
+Git が終了コード 0 で終了したら、ファイルを分割して読み取ります。全内容をレビューしてからファイルを削除します。コマンドが失敗またはタイムアウトした場合は、再試行するか、エラーを記録して `skipped` にします。出力が予期せず空の場合は、preview を再実行して照合します。
 
 ### ステップ 4：各ファイルのレビュー
 
@@ -117,7 +117,7 @@ git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-d
 2. 対応するルールグループ（ステップ 2）をレビューチェックリストとして参照
 3. コンテキスト探索を必要に応じて行い、徹底的にレビュー
 
-preview のすべての `(path, status)` 項目を `reviewed`、または理由付きの `skipped` として記録します。レポートには `total_files`、`reviewed_files`、`skipped_files`、`coverage_rate` を含めます。
+preview の各 `(path, status)` を `reviewed` または `skipped` として記録し、スキップした項目には理由を付けます。レポートには `total_files`、`reviewed_files`、`skipped_files`、`coverage_rate` を含めます。
 
 ### ステップ 5：レポート
 
