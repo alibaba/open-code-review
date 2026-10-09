@@ -30,12 +30,15 @@ ocr delegate rule <path1> <path2> ...
 
 ### Step 3: Get Diffs and Review
 
-For each reviewable file, get its diff using git (based on mode/ref from Step 1):
+Choose the diff command using the mode and refs from Step 1. Use `git --no-pager` for every Git call during the review.
+
+The diff commands disable external diff programs, text conversion, and color to produce plain patches.
+
 - Range: `git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"`
 - Commit: `git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"`
 - Workspace: `git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"` (or `cat "<path>"` for untracked files)
 
-Use `git --no-pager` for every Git command in this review, including context queries in later steps:
+To read context:
 
 ```bash
 git --no-pager log --no-color --oneline -- "<path>"
@@ -43,15 +46,13 @@ git --no-pager blame --no-textconv -- "<path>"
 git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
 ```
 
-Diff commands also disable external diff commands, text conversion, and color.
-
 For large diffs, add `--output="<absolute-diff-file>"` to the command for the selected mode. Choose a unique absolute path outside the repository and create its parent directory. Use the same path in file-reading tool calls:
 
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
 ```
 
-Read the file in chunks after Git exits with code 0. Review all chunks, then remove the file. If Git fails or times out, retry or record `skipped` with the error. Check unexpectedly empty output against a fresh preview.
+After Git exits with code 0, read and review the entire file in chunks, then remove it. If Git fails or times out, retry or record `skipped` with the error. Check unexpectedly empty output against a fresh preview.
 
 Then review focusing on: correctness, security, performance, error handling, concurrency, maintainability. Only comment on changed code (+ lines).
 

@@ -81,17 +81,9 @@ ocr delegate rule <path1> <path2> ...
 
 ### 第 3 步：获取 diff
 
-根据第 1 步的 mode/ref 信息，使用 git 直接获取：
+根据第 1 步的模式和引用信息选择 diff 命令。审查中的所有 Git 调用均使用 `git --no-pager`。
 
-审查中的每次 Git 调用都使用 `git --no-pager`，后续步骤的上下文查询也遵循这条规则：
-
-```bash
-git --no-pager log --no-color --oneline -- "<path>"
-git --no-pager blame --no-textconv -- "<path>"
-git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
-```
-
-diff 命令还关闭外部 diff、文本转换和颜色输出。
+以下 diff 命令关闭外部 diff 程序、文本转换和颜色输出，以获取纯文本补丁。
 
 **Range 模式**（有 merge\_base）：
 ```bash
@@ -109,13 +101,21 @@ git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"     
 cat "<path>"                     # 新的未跟踪文件
 ```
 
+查询上下文：
+
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
 较大的 diff 可在对应模式的命令中添加 `--output="<absolute-diff-file>"`。选择仓库外的唯一绝对路径，并先创建父目录。后续文件读取工具使用同一路径：
 
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
 ```
 
-Git 以退出码 0 结束后，分块读取文件。审查全部内容后删除文件。命令失败或超时时，重试或标为 `skipped` 并记录错误。输出意外为空时，重新运行 preview 并核对。
+Git 以退出码 0 结束后，分块读取并审查整个文件，再删除临时文件。命令失败或超时时，重试或标为 `skipped` 并记录错误。输出意外为空时，重新运行 preview 并核对。
 
 ### 第 4 步：审查每个文件
 
