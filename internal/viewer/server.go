@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-//go:embed templates/*.html static/style.css static/session.js static/repos.js static/icons/*.svg
+//go:embed templates/*.html static/style.css static/pager.js static/a11y.js static/session.js static/repos.js static/sessions.js static/icons/*.svg
 var assets embed.FS
 
 // iconNameRE guards the icon() template helper: names are hard-coded in
@@ -330,6 +330,7 @@ func parseTemplate(name string) (*template.Template, error) {
 		"truncate":       truncateText,
 		"formatNumber":   formatNumber,
 		"icon":           inlineIcon,
+		"dict":           dictKV,
 		"add":            func(a, b int) int { return a + b },
 		"countLabel": func(n int, singular, plural string) string {
 			if n == 1 {
@@ -454,7 +455,24 @@ func parseTemplate(name string) (*template.Template, error) {
 		"numberedCodeLines": numberedCodeLines,
 	}
 	// Keep page-specific breadcrumb definitions isolated from other pages.
-	return template.New(name).Funcs(funcMap).ParseFS(assets, "templates/"+name, "templates/app-header.html")
+	return template.New(name).Funcs(funcMap).ParseFS(assets, "templates/"+name, "templates/app-header.html", "templates/pager.html")
+}
+
+// dictKV builds a map from key/value pairs so pages can pass inline
+// arguments to a shared partial: {{template "pager" (dict "prefix" "repos")}}.
+func dictKV(keysAndValues ...any) (map[string]any, error) {
+	if len(keysAndValues)%2 != 0 {
+		return nil, fmt.Errorf("dict expects key and value pairs, got %d values", len(keysAndValues))
+	}
+	m := make(map[string]any, len(keysAndValues)/2)
+	for i := 0; i < len(keysAndValues); i += 2 {
+		key, ok := keysAndValues[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("dict keys must be strings, got %T", keysAndValues[i])
+		}
+		m[key] = keysAndValues[i+1]
+	}
+	return m, nil
 }
 
 func truncateText(n int, s string) string {

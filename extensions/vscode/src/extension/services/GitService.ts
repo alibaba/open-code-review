@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { t, resolveLocale } from '../../shared/i18n';
+import { t, resolveLocale } from '@shared/i18n';
 import * as vscode from 'vscode';
 import { readFile } from 'fs/promises';
 import { execFile } from 'child_process';
-import { GitState, FileChange, ReviewMode, ReviewContext } from '../../shared/types';
+import { GitState, FileChange, ReviewMode, ReviewContext } from '@shared/types';
 import { buildWorkspaceFiles, branchRefCandidates, parseNameStatus, pickRepoRoot } from './gitMap';
 
 const WORKSPACE_REFRESH_DEBOUNCE_MS = 300;
@@ -32,8 +32,8 @@ export class GitService {
   }
 
   /**
-   * 选出与 workspace 匹配的仓库。嵌套仓库场景下 repositories 顺序不稳定,
-   * 不能直接取 [0],否则会漂移到子仓库。
+   * Choose the repository matching the workspace. Nested repository ordering is unstable,
+   * so taking [0] directly may select a child repository.
    */
   private selectRepo(api: any): any | null {
     const repos: any[] = api.repositories;
@@ -43,7 +43,7 @@ export class GitService {
     return repos.find((r) => (r.rootUri?.fsPath ?? '') === root) ?? repos[0];
   }
 
-  /** 等待至少一个仓库就绪（git 扩展异步扫描，首次可能为空）。 */
+  /** Wait for at least one repository (the Git extension scans asynchronously and may initially return none). */
   private async waitForRepo(timeoutMs = 5000): Promise<any | null> {
     const api = await this.ensureApi();
     if (!api) return null;
@@ -95,8 +95,8 @@ export class GitService {
   }
 
   /**
-   * 订阅 VS Code Git 扩展的仓库状态变化，debounce 后刷新工作区文件列表。
-   * 用于侧边栏工作区模式实时反映暂存/工作区/未跟踪变更。
+   * Subscribe to VS Code Git repository state changes and debounce workspace file list refreshes.
+   * Keep staged, working tree, and untracked changes up to date in the sidebar workspace mode.
    */
   watchWorkspaceChanges(onUpdate: (state: GitState) => void): vscode.Disposable {
     const cleanups: vscode.Disposable[] = [];
@@ -142,7 +142,7 @@ export class GitService {
     });
   }
 
-  /** 工作区模式仅刷新变更文件，不等待 VS Code Git 扩展，也不拉分支/提交历史。 */
+  /** In workspace mode, refresh only changed files without waiting for the Git extension or fetching branches and history. */
   private async refreshWorkspaceFiles(): Promise<void> {
     const root = await this.repoRootFast();
     if (!root) {
@@ -168,7 +168,7 @@ export class GitService {
     }
   }
 
-  /** 通过 git rev-parse 解析仓库根，避免等待 VS Code Git 扩展初始化。 */
+  /** Resolve the repository root with git rev-parse without waiting for VS Code Git extension initialization. */
   private async repoRootFast(): Promise<string | null> {
     const ws = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
     if (!ws) return null;
@@ -203,7 +203,7 @@ export class GitService {
     }
   }
 
-  /** 分支对比：merge-base 三点 diff。 */
+  /** Compare branches using a three-dot diff from the merge base. */
   async getBranchDiff(from: string, to: string): Promise<FileChange[]> {
     const root = await this.repoRoot();
     if (!root || !from || !to) return [];
@@ -236,7 +236,7 @@ export class GitService {
     return null;
   }
 
-  /** 单次提交：该 commit 相对父提交的改动文件。 */
+  /** List files changed in a single commit relative to its parent. */
   async getCommitFiles(sha: string): Promise<FileChange[]> {
     const root = await this.repoRoot();
     if (!root || !sha) return [];
@@ -266,7 +266,7 @@ export class GitService {
       ?? process.cwd();
   }
 
-  /** 在 VSCode 原生 diff 视图中打开某个待审查文件。三种模式各自决定 diff 的左右两侧。 */
+  /** Open a review file in the native VS Code diff view. Each of the three modes determines its left and right sides. */
   async openDiff(opts: {
     path: string; status: FileChange['status'];
     mode: ReviewMode; from?: string; to?: string; commit?: string;
@@ -318,7 +318,7 @@ export class GitService {
     }
   }
 
-  /** 分支/提交模式：用 git ref 或空文件构造两侧，走 VS Code 原生 diff 编辑器。 */
+  /** In branch or commit mode, build both sides from Git refs or empty files for the native VS Code diff editor. */
   private async presentRefDiff(
     api: any,
     root: string,
@@ -351,7 +351,7 @@ export class GitService {
     return api.toGitUri(vscode.Uri.file(`${root}/${relPath}`), ref);
   }
 
-  /** 空侧占位（等同 /dev/null），用于新增/删除文件的单侧 diff。 */
+  /** Provide an empty side (equivalent to /dev/null) for diffs of added or deleted files. */
   private emptySideUri(): vscode.Uri {
     return vscode.Uri.file(process.platform === 'win32' ? '\\\\.\\NUL' : '/dev/null');
   }
@@ -370,7 +370,7 @@ export class GitService {
     }
   }
 
-  /** 最后兜底：原生 diff 失败时才展示补丁文本。 */
+  /** As a last resort, show patch text only when the native diff fails. */
   private async presentPatchDiff(
     root: string,
     range: string,
@@ -408,7 +408,7 @@ export class GitService {
     }
   }
 
-  /** 审查开始前缓存 commit/branch 模式下的文件状态，供评论挂载查询。 */
+  /** Cache file statuses before a commit or branch review for use when attaching comments. */
   async prepareReviewFileStatus(ctx: ReviewContext): Promise<void> {
     this.reviewFileStatus.clear();
     if (ctx.mode === ReviewMode.Commit && ctx.commit) {
@@ -444,7 +444,7 @@ export class GitService {
     }
   }
 
-  /** 构造评论挂载用的 diff 两侧 URI 与挂载 ref。 */
+  /** Build the URIs for both diff sides and the Git ref used to attach comments. */
   async buildCommentDiffUris(
     relPath: string,
     status: FileChange['status'],

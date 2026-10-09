@@ -98,6 +98,7 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
 			panic(r)
 		}
+		err = describeTimeout(ctx, err)
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
 
@@ -131,7 +132,7 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 
 	sdkResp, err := c.sdk.Responses.New(ctx, params, opts...)
 	if err != nil {
-		return nil, err
+		return nil, withProviderErrorBody(err)
 	}
 
 	// The Responses API returns HTTP 200 even when the response object is in a

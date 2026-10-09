@@ -7,7 +7,7 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { promisify } from 'util';
 import * as vscode from 'vscode';
-import { ReviewMode } from '../../../shared/types';
+import { ReviewMode } from '@shared/types';
 import { GitService } from '../GitService';
 
 const execFileAsync = promisify(execFile);

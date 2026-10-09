@@ -7,6 +7,7 @@
 BINARY_NAME := opencodereview
 GO          := go
 DIST_DIR    := ./dist
+EXE         := $(if $(filter Windows_NT,$(OS)),.exe,)
 
 # Version info — use git tag if available, fallback to short commit hash
 GIT_TAG     := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "")
@@ -30,7 +31,7 @@ endef
 
 # ── Development targets ──────────────────────────────────────────────────────
 build:
-	$(GO) build -ldflags "$(LD_FLAGS)" -o $(DIST_DIR)/$(BINARY_NAME) ./cmd/opencodereview
+	$(GO) build -ldflags "$(LD_FLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)$(EXE) ./cmd/opencodereview
 
 # No node_modules filter is needed for the docs site: pages/go.mod puts it in a
 # module of its own, so `go list ./...` skips that subtree entirely -- see that
@@ -59,10 +60,10 @@ clean:
 	rm -rf $(DIST_DIR) coverage.out
 
 run: build
-	$(DIST_DIR)/$(BINARY_NAME) --staged
+	$(DIST_DIR)/$(BINARY_NAME)$(EXE) --staged
 
 help: build
-	$(DIST_DIR)/$(BINARY_NAME) -h
+	$(DIST_DIR)/$(BINARY_NAME)$(EXE) -h
 
 fmt:
 	gofmt -s -w .

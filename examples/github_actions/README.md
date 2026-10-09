@@ -311,7 +311,7 @@ The action posts a summary issue comment plus inline review comments. Two inputs
 | `corrupt_checkpoint` | the summary carries no readable checkpoint marker (absent, malformed, or two of them) |
 | `schema_invalid` | the marker is for another PR, another marker version, or records a run that did not complete |
 | `base_changed` | the base ref or the merge-base moved, so the diff basis is no longer the one the checkpoint was taken against |
-| `config_changed` | the model, language, `llm_extra_body`, `llm_reasoning_effort`, `llm_extra_headers`, `llm_auth_header`, `llm_timeout`, `effort`, `max_tokens_budget`, `background`, routing inputs, the resolved OCR version, or the contents of `rule` / `.opencodereview/rule.json` changed — or `ocr version` printed nothing, so the version could not be established at all |
+| `config_changed` | the model, language, `llm_protocol` (or an inherited `OCR_LLM_PROTOCOL`), `llm_extra_body`, `llm_reasoning_effort`, `llm_extra_headers`, `llm_auth_header`, `llm_timeout`, `effort`, `max_tokens_budget`, `background`, routing inputs, the resolved OCR version, or the contents of `rule` / `.opencodereview/rule.json` changed — or `ocr version` printed nothing, so the version could not be established at all |
 | `not_ancestor` | the checkpoint commit is in this clone but is not on the new head's history (the branch was reset to an earlier commit) |
 | `unknown_object` | the checkpoint commit is not in this clone, so ancestry could not be checked — where a force-push usually lands, since the replaced commit is no longer fetched |
 | `rule_unreadable` | a rule file was given but could not be read, so no stored fingerprint can be trusted to mean "same rules" |
@@ -335,7 +335,7 @@ These outputs report what happened. All of them are empty when `checkpoint_range
 
 Three properties are worth knowing before you enable it:
 
-- **Widen-only.** The start of the range only ever moves back. An older checkpoint produces a wider review, never a narrower one, and a checkpoint only advances past a run whose manifest reported `terminal_state: complete`, whose findings all posted, and whose summary comment actually published. A run that fails halfway carries the previous checkpoint forward unchanged rather than skipping the range it did not review — and a run that cannot read the existing marker leaves it in place rather than erasing it.
+- **Widen-only.** The start of the range only ever moves back. An older checkpoint produces a wider review, never a narrower one, and a checkpoint only advances past a run whose manifest reported `terminal_state: complete`, with no blocking publication failures, and whose summary comment actually published. Findings proven to be outside the PR diff are included in that summary and do not block the checkpoint, even on the first run; they still count toward `comments_failed` because they could not be posted inline. API failures and unresolved locations without sufficient diff data still block advancement. A run that fails halfway carries the previous checkpoint forward unchanged rather than skipping the range it did not review — and a run that cannot read the existing marker leaves it in place rather than erasing it.
 - **Same-head reruns change nothing.** Re-running the workflow without pushing reports `same_head_noop` and leaves the previous run's summary untouched.
 - **The sticky summary shows the latest range, not the whole PR.** The summary comment is rewritten on every run, so findings it reported for an earlier range (findings with no line information, routed findings, warnings) are replaced by the new range's; a run that narrowed the range says so in one line at the end of the summary. Inline review comments are separate comments and stay. If you rely on the summary as a running list for the whole PR, use `full_review: 'true'` to rebuild it, or leave `checkpoint_range` off.
 
@@ -590,6 +590,20 @@ OCR supports both OpenAI and Anthropic API formats:
   - Self-hosted models (vLLM, Ollama, etc.)
 - **Anthropic APIs** (set variable `OCR_LLM_USE_ANTHROPIC=true`, i.e. `llm_use_anthropic: true`):
   - Anthropic Claude models
+- **OpenAI Responses API** (`llm_protocol: openai-responses`):
+  - Reasoning models used with function tools, or endpoints that only serve `/v1/responses`
+
+`llm_protocol` (`anthropic`, `openai` or `openai-responses`) takes precedence over `llm_use_anthropic` when set, and `llm.use_anthropic` is mirrored from it. An `OCR_LLM_PROTOCOL` variable in the job environment is honoured the same way when the input is empty.
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ vars.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: 'false'
+    llm_protocol: openai-responses
+```
 
 ## Troubleshooting
 

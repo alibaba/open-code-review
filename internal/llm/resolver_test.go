@@ -6,6 +6,7 @@ package llm
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -532,12 +533,15 @@ func TestResolveEndpointWithOptions_ExplicitProviderAndModel(t *testing.T) {
 		t.Fatalf("endpoint = %+v", ep)
 	}
 
-	_, err = ResolveEndpointWithOptions(path, ResolveOptions{
-		Provider: "anthropic",
-		Model:    "not-a-registered-model",
+	var unknown ResolvedEndpoint
+	stderr := captureStderr(t, func() {
+		unknown, err = ResolveEndpointWithOptions(path, ResolveOptions{
+			Provider: "anthropic",
+			Model:    "not-a-registered-model",
+		})
 	})
-	if err == nil || !strings.Contains(err.Error(), `model "not-a-registered-model" is not available for provider "anthropic"`) {
-		t.Fatalf("error = %v", err)
+	if err != nil || unknown.Model != "not-a-registered-model" || !strings.Contains(stderr, `model "not-a-registered-model" is not in the suggested models for provider "anthropic"`) {
+		t.Fatalf("endpoint = %+v, error = %v, stderr = %q", unknown, err, stderr)
 	}
 }
 
@@ -1146,7 +1150,7 @@ func TestResolveEndpointWithModelOverride_ValidModelInPresetList(t *testing.T) {
 	}
 }
 
-func TestResolveEndpointWithModelOverride_InvalidModelInPresetList(t *testing.T) {
+func TestResolveEndpointWithModelOverride_UnlistedPresetModelWarns(t *testing.T) {
 	clearAllEnv(t)
 
 	cfg := configFile{
@@ -1161,24 +1165,22 @@ func TestResolveEndpointWithModelOverride_InvalidModelInPresetList(t *testing.T)
 		t.Fatalf("write config: %v", err)
 	}
 
-	_, err := ResolveEndpointWithModelOverride(cfgPath, "claude-opsu-4-6")
-	if err == nil {
-		t.Fatal("expected error for invalid model override")
+	var ep ResolvedEndpoint
+	var err error
+	stderr := captureStderr(t, func() {
+		ep, err = ResolveEndpointWithModelOverride(cfgPath, "claude-opsu-4-6")
+	})
+	if err != nil || ep.Model != "claude-opsu-4-6" {
+		t.Fatalf("endpoint = %+v, error = %v", ep, err)
 	}
-	if !strings.Contains(err.Error(), "not available for provider") {
-		t.Errorf("error message should mention model unavailability, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "available models:") {
-		t.Errorf("error message should list available models, got: %v", err)
+	if !strings.Contains(stderr, `model "claude-opsu-4-6" is not in the suggested models for provider "anthropic"`) || !strings.Contains(stderr, "the provider will validate it") {
+		t.Errorf("stderr = %q, want model warning and provider validation guidance", stderr)
 	}
 }
 
-func TestResolveEndpointWithModelOverride_InvalidModelDoesNotRunAPIKeyCmd(t *testing.T) {
+func TestResolveEndpointWithModelOverride_UnlistedModelStillRunsAPIKeyCmd(t *testing.T) {
 	clearAllEnv(t)
 
-	// The command is guaranteed to fail, so the error it would produce doubles as
-	// a witness that it ran: a bad --model must fail on validation instead, with
-	// no secret-manager prompt.
 	cfg := configFile{
 		Provider: "anthropic",
 		Providers: map[string]providerEntryConfig{
@@ -1191,23 +1193,22 @@ func TestResolveEndpointWithModelOverride_InvalidModelDoesNotRunAPIKeyCmd(t *tes
 		t.Fatalf("write config: %v", err)
 	}
 
-	_, err := ResolveEndpointWithModelOverride(cfgPath, "claude-opsu-4-6")
-	if err == nil {
-		t.Fatal("expected error for invalid model override")
+	var err error
+	stderr := captureStderr(t, func() {
+		_, err = ResolveEndpointWithModelOverride(cfgPath, "claude-opsu-4-6")
+	})
+	if err == nil || !strings.Contains(err.Error(), "api_key_cmd") {
+		t.Fatalf("error = %v, want api_key_cmd failure", err)
 	}
-	if !strings.Contains(err.Error(), "not available for provider") {
-		t.Errorf("error message should mention model unavailability, got: %v", err)
-	}
-	if strings.Contains(err.Error(), "api_key_cmd") {
-		t.Errorf("api_key_cmd ran before model validation, got: %v", err)
+	if !strings.Contains(stderr, `model "claude-opsu-4-6" is not in the suggested models`) {
+		t.Errorf("stderr = %q, want warning before api_key_cmd runs", stderr)
 	}
 }
 
-// A bad global env override must be rejected before any strategy runs, for the
-// same reason as the model check above: OCR_LLM_TIMEOUT="30s" (the field wants a
-// bare integer) used to be parsed only after an endpoint resolved, so the user
-// authenticated to 1Password/Touch ID and then got a config error. Same witness
-// trick: the command cannot succeed, so its error proves it ran.
+// A bad global env override must be rejected before any strategy runs:
+// OCR_LLM_TIMEOUT="30s" (the field wants a bare integer) used to be parsed only
+// after an endpoint resolved, so the user authenticated to 1Password/Touch ID
+// and then got a config error. A failing command proves it ran when it should not.
 func TestResolveEndpointWithModelOverride_BadEnvOverrideDoesNotRunAPIKeyCmd(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1364,6 +1365,86 @@ func TestResolveEndpointWithModelOverride_NoValidationWhenNoModelList(t *testing
 	}
 }
 
+func TestResolveEndpointWithModelOverride_OpenRouterAcceptsUnlistedModel(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "openrouter",
+		Providers: map[string]providerEntryConfig{
+			"openrouter": {
+				APIKey: "test-key",
+				Models: []string{"custom-picker-suggestion"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	const model = "deepseek/deepseek-v4.1-flash"
+	var ep ResolvedEndpoint
+	var err error
+	stderr := captureStderr(t, func() {
+		ep, err = ResolveEndpointWithOptions(cfgPath, ResolveOptions{Provider: "openrouter", Model: model})
+	})
+	if err != nil {
+		t.Fatalf("OpenRouter rejected an unlisted model: %v", err)
+	}
+	if ep.Model != model || ep.Provider != "openrouter" {
+		t.Fatalf("resolved model/provider = %q/%q, want %q/openrouter", ep.Model, ep.Provider, model)
+	}
+	if !strings.Contains(stderr, `model "`+model+`" is not in the suggested models for provider "openrouter"`) {
+		t.Errorf("stderr = %q, want unlisted model warning", stderr)
+	}
+}
+
+func TestResolveEndpointWithModelOverride_AllBuiltInProvidersAcceptUnlistedModel(t *testing.T) {
+	clearAllEnv(t)
+	const model = "unlisted-model-for-test"
+	for _, provider := range ListProviders() {
+		t.Run(provider.Name, func(t *testing.T) {
+			path, _ := writeResolverConfig(t, configFile{
+				Provider: provider.Name,
+				Providers: map[string]providerEntryConfig{
+					provider.Name: {APIKey: "test-key", AWSRegion: "us-west-2"},
+				},
+			})
+			var ep ResolvedEndpoint
+			var err error
+			stderr := captureStderr(t, func() {
+				ep, err = ResolveEndpointWithModelOverride(path, model)
+			})
+			if err != nil || ep.Model != model || ep.Provider != provider.Name {
+				t.Fatalf("endpoint = %+v, error = %v", ep, err)
+			}
+			if strings.Count(stderr, "[ocr] WARNING: model") != 1 || !strings.Contains(stderr, fmt.Sprintf("for provider %q", provider.Name)) {
+				t.Errorf("stderr = %q, want one warning for %s", stderr, provider.Name)
+			}
+		})
+	}
+}
+
+func TestResolveEndpoint_UnlistedConfiguredModelDoesNotWarn(t *testing.T) {
+	clearAllEnv(t)
+	path, _ := writeResolverConfig(t, configFile{
+		Provider: "anthropic",
+		Model:    "unlisted-configured-model",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "test-key"},
+		},
+	})
+	var ep ResolvedEndpoint
+	var err error
+	stderr := captureStderr(t, func() {
+		ep, err = ResolveEndpoint(path)
+	})
+	if err != nil || ep.Model != "unlisted-configured-model" || stderr != "" {
+		t.Fatalf("endpoint = %+v, error = %v, stderr = %q", ep, err, stderr)
+	}
+}
+
 func TestResolveEndpointWithModelOverride_MergesPresetAndEntryModels(t *testing.T) {
 	clearAllEnv(t)
 
@@ -1382,27 +1463,42 @@ func TestResolveEndpointWithModelOverride_MergesPresetAndEntryModels(t *testing.
 		t.Fatalf("write config: %v", err)
 	}
 
-	// Should accept both preset models and entry models.
-	ep1, err := ResolveEndpointWithModelOverride(cfgPath, "claude-opus-4-8")
+	var ep1 ResolvedEndpoint
+	var err error
+	stderr := captureStderr(t, func() {
+		ep1, err = ResolveEndpointWithModelOverride(cfgPath, "claude-opus-4-8")
+	})
 	if err != nil {
 		t.Fatalf("unexpected error for preset model: %v", err)
 	}
-	if ep1.Model != "claude-opus-4-8" {
-		t.Errorf("Model = %q, want %q", ep1.Model, "claude-opus-4-8")
+	if ep1.Model != "claude-opus-4-8" || stderr != "" {
+		t.Errorf("endpoint = %+v, stderr = %q, want listed model without warning", ep1, stderr)
 	}
 
-	ep2, err := ResolveEndpointWithModelOverride(cfgPath, "custom-model-1")
+	var ep2 ResolvedEndpoint
+	stderr = captureStderr(t, func() {
+		ep2, err = ResolveEndpointWithModelOverride(cfgPath, "custom-model-1")
+	})
 	if err != nil {
 		t.Fatalf("unexpected error for entry model: %v", err)
 	}
-	if ep2.Model != "custom-model-1" {
-		t.Errorf("Model = %q, want %q", ep2.Model, "custom-model-1")
+	if ep2.Model != "custom-model-1" || stderr != "" {
+		t.Errorf("endpoint = %+v, stderr = %q, want user-added model without warning", ep2, stderr)
 	}
 
-	// Should reject models not in either list.
-	_, err = ResolveEndpointWithModelOverride(cfgPath, "invalid-model")
-	if err == nil {
-		t.Fatal("expected error for model not in preset or entry lists")
+	var ep3 ResolvedEndpoint
+	stderr = captureStderr(t, func() {
+		ep3, err = ResolveEndpointWithModelOverride(cfgPath, "unknown-model")
+	})
+	if err != nil || ep3.Model != "unknown-model" || !strings.Contains(stderr, `model "unknown-model" is not in the suggested models`) {
+		t.Fatalf("endpoint = %+v, error = %v, stderr = %q", ep3, err, stderr)
+	}
+
+	stderr = captureStderr(t, func() {
+		_, err = ResolveEndpoint(cfgPath)
+	})
+	if err == nil || !strings.Contains(err.Error(), "has no model configured") || stderr != "" {
+		t.Fatalf("error = %v, stderr = %q, want no warning without --model", err, stderr)
 	}
 }
 
@@ -2620,5 +2716,202 @@ func TestResolveEndpoint_RedundantRetryCodesFiltered(t *testing.T) {
 	}
 	if len(ep.RetryCodes) != 1 || ep.RetryCodes[0] != 403 {
 		t.Errorf("RetryCodes = %v, want [403] (429 should be filtered)", ep.RetryCodes)
+	}
+}
+
+// Issue #1395: an environment generated with CRLF line endings (a .env file, a
+// Windows shell wrapper, a CI variable) can carry a trailing "\r". Endpoint
+// values used to reach url.Parse and the auth header verbatim, so a single
+// stray CR failed every file of a review with an opaque
+// "net/url: invalid control character in URL" that named neither the
+// environment nor the variable. Every subtest here fails on the pre-fix code.
+func TestResolveEndpoint_EnvValuesAreTrimmed(t *testing.T) {
+	const cr = "\r"
+
+	t.Run("OCR environment", func(t *testing.T) {
+		clearAllEnv(t)
+		t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/messages"+cr)
+		t.Setenv("OCR_LLM_TOKEN", "ocr-token"+cr)
+		t.Setenv("OCR_LLM_MODEL", "claude-opus-4-7"+cr)
+
+		ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ep.Source != "OCR environment" {
+			t.Fatalf("Source = %q, want %q", ep.Source, "OCR environment")
+		}
+		if ep.URL != "https://api.example.com/v1/messages" {
+			t.Errorf("URL = %q, want the value with the CR trimmed", ep.URL)
+		}
+		if ep.Token != "ocr-token" {
+			t.Errorf("Token = %q, want %q", ep.Token, "ocr-token")
+		}
+		if ep.Model != "claude-opus-4-7" {
+			t.Errorf("Model = %q, want %q", ep.Model, "claude-opus-4-7")
+		}
+	})
+
+	t.Run("Claude Code environment", func(t *testing.T) {
+		clearAllEnv(t)
+		t.Setenv("ANTHROPIC_BASE_URL", "https://api.example.com"+cr)
+		t.Setenv("ANTHROPIC_AUTH_TOKEN", "cc-token"+cr)
+		t.Setenv("ANTHROPIC_MODEL", "claude-opus-4-7"+cr)
+
+		ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ep.Source != "Claude Code environment" {
+			t.Fatalf("Source = %q, want %q", ep.Source, "Claude Code environment")
+		}
+		// ensureMessagesSuffix appends "/v1/messages" to the value as read, so a
+		// CR that survives the read lands in the middle of the URL — a
+		// TrimSpace applied afterwards could no longer repair it.
+		if strings.ContainsRune(ep.URL, '\r') {
+			t.Errorf("URL = %q, still contains a CR", ep.URL)
+		}
+		if ep.URL != "https://api.example.com/v1/messages" {
+			t.Errorf("URL = %q, want %q", ep.URL, "https://api.example.com/v1/messages")
+		}
+		if ep.Token != "cc-token" {
+			t.Errorf("Token = %q, want %q", ep.Token, "cc-token")
+		}
+		if ep.Model != "claude-opus-4-7" {
+			t.Errorf("Model = %q, want %q", ep.Model, "claude-opus-4-7")
+		}
+	})
+
+	// A trailing CR used to make "true" unrecognized, silently selecting the
+	// OpenAI protocol instead of the default Anthropic one.
+	t.Run("OCR_USE_ANTHROPIC", func(t *testing.T) {
+		clearAllEnv(t)
+		t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/messages")
+		t.Setenv("OCR_LLM_TOKEN", "ocr-token")
+		t.Setenv("OCR_LLM_MODEL", "claude-opus-4-7")
+		t.Setenv("OCR_USE_ANTHROPIC", "true"+cr)
+
+		ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ep.Protocol != ProtocolAnthropic {
+			t.Errorf("Protocol = %q, want %q", ep.Protocol, ProtocolAnthropic)
+		}
+	})
+
+	// The preset provider key fallback checked the trimmed value but stored the
+	// raw one, so the CR reached the auth header.
+	t.Run("preset provider api key fallback", func(t *testing.T) {
+		clearAllEnv(t)
+		t.Setenv("ANTHROPIC_API_KEY", "env-api-key"+cr)
+
+		cfgPath, _ := writeResolverConfig(t, configFile{
+			Provider: "anthropic",
+			Providers: map[string]providerEntryConfig{
+				"anthropic": {Model: "claude-sonnet-4-6"},
+			},
+		})
+
+		ep, err := ResolveEndpoint(cfgPath)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ep.Token != "env-api-key" {
+			t.Errorf("Token = %q, want %q", ep.Token, "env-api-key")
+		}
+	})
+}
+
+func TestResolveEndpoint_InvalidEnvURLNamesSourceAndVariable(t *testing.T) {
+	tests := []struct {
+		name       string
+		configure  func(*testing.T)
+		wantSource string
+		wantVar    string
+	}{
+		{
+			name: "OCR environment",
+			configure: func(t *testing.T) {
+				t.Setenv(envOCRLLMURL, "https://api.example.com/\rbad")
+				t.Setenv(envOCRLLMToken, "ocr-token")
+				t.Setenv(envOCRLLMModel, "test-model")
+			},
+			wantSource: "OCR environment",
+			wantVar:    envOCRLLMURL,
+		},
+		{
+			name: "Claude Code environment",
+			configure: func(t *testing.T) {
+				t.Setenv(envCCBaseURL, "https://api.example.com/\rbad")
+				t.Setenv(envCCToken, "cc-token")
+				t.Setenv(envCCModel, "test-model")
+			},
+			wantSource: "Claude Code environment",
+			wantVar:    envCCBaseURL,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllEnv(t)
+			tt.configure(t)
+
+			_, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+			if err == nil {
+				t.Fatal("expected invalid URL error")
+			}
+			for _, want := range []string{tt.wantSource, tt.wantVar, "invalid control character in URL"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveEndpointWithOptions_DefaultRequestTimeout(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	path, _ := writeResolverConfig(t, configFile{Llm: llmFileConfig{Model: "config-model", URL: "https://config.example.com/v1", AuthToken: "config-token"}})
+
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{Model: "config-model"})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Timeout != 0 {
+		t.Fatalf("ep.Timeout = %v, want 0 (client default)", ep.Timeout)
+	}
+}
+
+func TestResolveEndpointWithOptions_EnvRequestTimeout(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	t.Setenv("OCR_LLM_TIMEOUT", "45")
+	path, _ := writeResolverConfig(t, configFile{Llm: llmFileConfig{Model: "config-model", URL: "https://config.example.com/v1", AuthToken: "config-token"}})
+
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Timeout != 45*time.Second {
+		t.Fatalf("ep.Timeout = %v, want env's 45s", ep.Timeout)
+	}
+}
+
+func TestResolveEndpointWithOptions_ConfigRequestTimeout(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	path, _ := writeResolverConfig(t, configFile{Llm: llmFileConfig{Model: "config-model", URL: "https://config.example.com/v1", AuthToken: "config-token", TimeoutSec: 60}})
+
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Timeout != 60*time.Second {
+		t.Fatalf("ep.Timeout = %v, want config's 60s", ep.Timeout)
 	}
 }

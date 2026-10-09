@@ -40,7 +40,7 @@ git clone https://github.com/<your-username>/open-code-review.git
 cd open-code-review
 git remote add upstream https://github.com/alibaba/open-code-review.git
 
-make build       # writes dist/opencodereview
+make build       # writes dist/opencodereview (dist/opencodereview.exe on Windows)
 make test        # LC_ALL=C go test -v -race -count=1 ./...
 ```
 
@@ -50,7 +50,8 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 ### Running your local build
 
 ```bash
-./dist/opencodereview review --preview
+./dist/opencodereview review --preview        # macOS / Linux
+.\dist\opencodereview.exe review --preview   # Windows (PowerShell / cmd)
 ```
 
 For convenience, drop a symlink at `~/bin/ocr-dev` pointing at
@@ -60,7 +61,7 @@ For convenience, drop a symlink at `~/bin/ocr-dev` pointing at
 
 | Target | What it does |
 |---|---|
-| `make build` | Build for current platform → `dist/opencodereview`. |
+| `make build` | Build for current platform → `dist/opencodereview` (`dist/opencodereview.exe` on Windows). |
 | `make build-darwin-amd64` | Cross-compile for macOS Intel. |
 | `make build-darwin-arm64` | Cross-compile for macOS Apple Silicon. |
 | `make build-linux-amd64` | Cross-compile for Linux x86_64. |
@@ -169,7 +170,7 @@ Thanks!
 
 ## License headers
 
-Every source file (`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`) must include an SPDX license header. After creating new files, run:
+Every source file (`.go`, `.js`, `.mjs`, `.ts`, `.tsx`, `.kt`, `.kts`, `.sh`, `.py`, `.css`) must include an SPDX license header. After creating new files, run:
 
 ```bash
 make license-add

@@ -5,19 +5,19 @@
 import { resultToState } from '../ReviewSession';
 
 describe('resultToState', () => {
-  it('有 comments → done', () => {
+  it('returns done when comments are present', () => {
     expect(resultToState({ status: 'success', comments: [{} as any], warnings: [] })).toBe('done');
   });
-  it('success 但无 comments → empty', () => {
+  it('returns empty for success without comments', () => {
     expect(resultToState({ status: 'success', comments: [], warnings: [] })).toBe('empty');
   });
-  it('skipped 无 comments → empty', () => {
+  it('returns empty for skipped without comments', () => {
     expect(resultToState({ status: 'skipped', comments: [], warnings: [] })).toBe('empty');
   });
-  it('completed_with_errors 无 comments → failed', () => {
+  it('returns failed for completed_with_errors without comments', () => {
     expect(resultToState({ status: 'completed_with_errors', comments: [], warnings: [] })).toBe('failed');
   });
-  it('completed_with_errors 有 comments → done', () => {
+  it('returns done for completed_with_errors with comments', () => {
     expect(resultToState({ status: 'completed_with_errors', comments: [{} as any], warnings: [] })).toBe('done');
   });
 });
