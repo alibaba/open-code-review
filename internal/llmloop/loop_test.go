@@ -721,6 +721,67 @@ func TestRunMainTask_GraceRoundSubmitsComment(t *testing.T) {
 	}
 }
 
+// The grace round is still a main-task round, so a task_done it carries is the
+// model declaring the subtask finished. Discarding it recorded a file the model
+// completed as incomplete, and a resume then re-ran that file.
+func TestRunMainTask_GraceRoundTaskDoneCompletes(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		taskDoneResponseWithArguments(`{"state":"DONE"}`),
+	}}
+	deps := newTestDeps(client)
+	deps.Template.MaxToolRequestTimes = 1
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if !completed {
+		t.Fatal("task_done DONE in the grace round must complete RunMainTask")
+	}
+	if stop != StopMaxRounds {
+		t.Fatalf("stop = %v, want StopMaxRounds", stop)
+	}
+	if client.calls != 2 {
+		t.Fatalf("LLM calls = %d, want 2 (1 main + 1 grace)", client.calls)
+	}
+}
+
+// Only task_done DONE reports completion, exactly as in the main loop. A FAILED
+// verdict in the grace round leaves the subtask incomplete.
+func TestRunMainTask_GraceRoundTaskDoneFailedStaysIncomplete(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		taskDoneResponseWithArguments(`{"state":"FAILED"}`),
+	}}
+	deps := newTestDeps(client)
+	deps.Template.MaxToolRequestTimes = 1
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if completed {
+		t.Fatal("task_done FAILED in the grace round must not complete RunMainTask")
+	}
+	if stop != StopMaxRounds {
+		t.Fatalf("stop = %v, want StopMaxRounds", stop)
+	}
+}
+
 func TestRunMainTask_GraceRoundSkippedWhenContextCancelled(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),

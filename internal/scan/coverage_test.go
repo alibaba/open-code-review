@@ -877,6 +877,79 @@ func TestDispatchSubtasks_WithoutTaskDoneIsAllFailed(t *testing.T) {
 	}
 }
 
+// A file whose tool budget runs out mid-review but which the model then marks
+// done in the grace round must be checkpointed as completed. Treating it as
+// failed both misreports the scan and makes the next resume re-run a file that
+// was already finished.
+func TestDispatchSubtasks_GraceRoundTaskDoneCheckpointed(t *testing.T) {
+	testHome := t.TempDir()
+	t.Setenv("HOME", testHome)
+	t.Setenv("USERPROFILE", testHome)
+	repoDir := t.TempDir()
+	items := []model.ScanItem{{Path: "a.go", Content: "package a\nfunc f() {}\n", LineCount: 2}}
+
+	tpl := makeTemplateWithFullScan()
+	tpl.MaxTokens = 100000
+	tpl.MaxToolRequestTimes = 1
+
+	collector := tool.NewCommentCollector()
+	registry := tool.NewRegistry()
+	registry.Register(&tool.CodeCommentProvider{Collector: collector})
+	registry.Freeze()
+
+	// Round 1 spends the only tool-request round on a finding; the grace round
+	// then declares the file done.
+	client := &fakeScanClient{responses: []*llm.ChatResponse{
+		scanCodeCommentResponse("found something"),
+		scanTaskDoneResponse(),
+	}}
+
+	a := NewAgent(Args{
+		Template:  tpl,
+		LLMClient: client,
+		Model:     "test",
+		Tools:     registry,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
+		CommentCollector: collector,
+		MaxConcurrency:   1,
+		SkipPlan:         true,
+		SkipDedup:        true,
+		SkipSummary:      true,
+		RepoDir:          repoDir,
+		Session: session.New(repoDir, "main", "test", session.SessionOptions{
+			ReviewMode: session.ReviewModeFullScan,
+		}),
+	})
+	a.items = items
+	a.currentDate = "2026-06-26"
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if len(comments) != 1 || comments[0].Content != "found something" {
+		t.Fatalf("comments = %+v, want the round 1 finding", comments)
+	}
+	for _, w := range a.Warnings() {
+		if w.Type == "scan_subtask_error" {
+			t.Fatalf("a file completed in the grace round must not warn as failed: %+v", w)
+		}
+	}
+	if err := a.Session().Finalize(); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+	state, err := session.LoadResumeState(repoDir, a.SessionID())
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if _, ok := state.Item(scanItemFingerprint(items[0])); !ok {
+		t.Fatal("a grace-round completion must persist a checkpoint that resume can reuse")
+	}
+}
+
 func TestPhaseEnabled(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	a := newAgentForTest(t, tpl)
