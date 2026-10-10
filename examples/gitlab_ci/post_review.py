@@ -256,7 +256,7 @@ def fenced_block(content, language=""):
     return block + fence
 
 
-def format_comment(comment, comment_id=None):
+def format_comment(comment, comment_id=None, note_body_limit=None):
     """Assemble the visible inline-discussion body.
 
     The per-comment id tag (when provided) is prepended as an HTML comment so
@@ -266,24 +266,38 @@ def format_comment(comment, comment_id=None):
     above the anchor covered by a multiline span (``0`` for a single line), so
     the "Apply suggestion" button rewrites the whole existing block.
     """
-    body = ""
+    limit = NOTE_BODY_LIMIT_DEFAULT if note_body_limit is None else note_body_limit
+    prefix = ""
     if comment_id:
-        body += "<!-- %s -->\n" % comment_id
+        prefix += "<!-- %s -->\n" % comment_id
     badge = build_badge(comment)
     if badge:
-        body += badge + "\n"
-    body += comment.get("content", "") or ""
+        prefix += badge + "\n"
+    content = comment.get("content", "") or ""
     suggestion = comment.get("suggestion_code", "")
     existing = comment.get("existing_code", "")
+    suffix = ""
     if suggestion and existing:
         span = comment_span(comment)
         suggestion_offset = span["end"] - span["start"] if span is not None and span["multiline"] else 0
-        body += "\n\n**Suggestion:**\n"
-        body += "```suggestion:-%d+0\n%s\n```" % (suggestion_offset, suggestion)
-    return body
+        suffix += "\n\n**Suggestion:**\n"
+        suffix += "```suggestion:-%d+0\n%s\n```" % (suggestion_offset, suggestion)
+    body = prefix + content
+    if len(body) + len(suffix) <= limit:
+        return body + suffix
+    # Over the limit: drop the suggestion block first - a truncated
+    # ``suggestion:`` fence would offer a broken "Apply suggestion" - then
+    # truncate the finding text itself. The prefix (reconcile comment +
+    # badge) is always preserved so idempotent re-posting keeps working.
+    if suffix:
+        body += "\n\n" + _SUGGESTION_OMITTED_MARK
+        if len(body) <= limit:
+            return body
+    budget = max(limit - len(prefix) - len(_TRUNCATION_MARK) - 2, 0)
+    return prefix + content[:budget] + "\n\n" + _TRUNCATION_MARK
 
 
-def format_comment_fallback(comment, reason=None):
+def format_comment_fallback(comment, reason=None, note_body_limit=None):
     """Format a comment for fallback (non-inline) display in a note.
 
     Uses ``<details><summary>`` HTML so the suggested change is collapsible.
@@ -295,26 +309,36 @@ def format_comment_fallback(comment, reason=None):
     end_line = comment.get("end_line", 0)
     content = comment.get("content", "")
 
-    md = ""
+    limit = NOTE_BODY_LIMIT_DEFAULT if note_body_limit is None else note_body_limit
+    prefix = ""
     badge = build_badge(comment)
     if badge:
-        md += badge + "\n"
-    md += "### 📄 `%s`" % path
+        prefix += badge + "\n"
+    prefix += "### 📄 `%s`" % path
     if start_line and end_line:
-        md += " (L%d-L%d)" % (start_line, end_line)
-    md += "\n\n"
+        prefix += " (L%d-L%d)" % (start_line, end_line)
+    prefix += "\n\n"
     if reason:
-        md += "⚠️ Could not be posted inline: %s\n\n" % reason
-    md += content
-
+        prefix += "⚠️ Could not be posted inline: %s\n\n" % reason
+    suffix = ""
     existing = comment.get("existing_code", "")
     suggestion = comment.get("suggestion_code", "")
     if suggestion and existing:
-        md += "\n\n<details><summary>💡 Suggested Change</summary>\n\n"
-        md += "**Before:**\n" + fenced_block(existing) + "\n\n"
-        md += "**After:**\n" + fenced_block(suggestion) + "\n\n"
-        md += "</details>"
-    return md
+        suffix += "\n\n<details><summary>💡 Suggested Change</summary>\n\n"
+        suffix += "**Before:**\n" + fenced_block(existing) + "\n\n"
+        suffix += "**After:**\n" + fenced_block(suggestion) + "\n\n"
+        suffix += "</details>"
+    md = prefix + content
+    if len(md) + len(suffix) <= limit:
+        return md + suffix
+    # Same two-stage capping as format_comment: drop the collapsible
+    # suggestion block before truncating the finding text.
+    if suffix:
+        md += "\n\n" + _SUGGESTION_OMITTED_MARK
+        if len(md) <= limit:
+            return md
+    budget = max(limit - len(prefix) - len(_TRUNCATION_MARK) - 2, 0)
+    return prefix + content[:budget] + "\n\n" + _TRUNCATION_MARK
 
 
 def format_warning_entry(w):
@@ -372,7 +396,7 @@ def build_summary_body(total, inline, summary, skipped, routed, failed, warnings
     return body
 
 
-def build_pre_review_summary_body(total, no_line, routed, warnings):
+def build_pre_review_summary_body(total, no_line, routed, warnings, note_body_limit=None):
     """Summary body shown in the sticky anchor while inline comments post."""
     body = "🔍 **OpenCodeReview** found **%d** issue(s) in this MR." % total
     if total > 0:
@@ -381,18 +405,18 @@ def build_pre_review_summary_body(total, no_line, routed, warnings):
             body += "\n- 📋 Routed to summary by policy: %d comment(s)" % len(routed)
     if warnings:
         body += "\n\n⚠️ %d warning(s) occurred during review." % len(warnings)
-    body += format_summary_comments(no_line)
-    body += format_summary_comments(routed)
+    body += format_summary_comments(no_line, note_body_limit)
+    body += format_summary_comments(routed, note_body_limit)
     body += format_warnings(warnings)
     return body
 
 
-def format_summary_comments(items):
+def format_summary_comments(items, note_body_limit=None):
     """Render a list of ``{comment, reason}`` as a continuous block."""
     body = ""
     for item in items:
         body += "\n\n---\n\n"
-        body += format_comment_fallback(item["comment"], item.get("reason"))
+        body += format_comment_fallback(item["comment"], item.get("reason"), note_body_limit)
     return body
 
 
@@ -1155,6 +1179,32 @@ def make_dry_run_poster():
 # --------------------------------------------------------------------------- #
 
 
+# GitLab rejects notes whose body exceeds the server's note-character cap
+# (1,000,000 by default) with a non-transient 400, so an oversized comment is
+# dropped into the summary - and an oversized summary then fails outright.
+# The client cap below keeps every assembled body under the server limit with
+# headroom; OCR_NOTE_BODY_LIMIT adapts to self-hosted instances with smaller
+# caps. Values <= 0 fall back to the default (a disable switch would just
+# move the failure to the server).
+NOTE_BODY_LIMIT_DEFAULT = 990000
+_SUGGESTION_OMITTED_MARK = "> \u26a0\ufe0f Suggestion omitted: the note exceeded the note size limit."
+_TRUNCATION_MARK = "> \u26a0\ufe0f Truncated: the note exceeded the note size limit."
+
+
+def cap_note_body(body, limit):
+    """Hard safety net: guarantee a note body fits the size limit.
+
+    The reconcile comment and badge live at the head of a body, so
+    head-truncation keeps them intact. Only reached for bodies assembled
+    without structured capping (the summary note).
+    """
+    if limit is None or limit <= 0 or len(body) <= limit:
+        return body
+    mark = "\n\n" + _TRUNCATION_MARK
+    keep = max(limit - len(mark), 0)
+    return body[:keep] + mark
+
+
 def _truncate_error(body, limit=300):
     """Collapse whitespace and cap length so log lines stay readable."""
     if not body:
@@ -1271,8 +1321,10 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     # No comments: LGTM summary (sticky-aware).
     if not comments:
         message = result.get("message", "No comments generated. Looks good to me.")
-        body = wrap_summary_body("✅ **OpenCodeReview**: %s" % message,
-                                 config.get("run_tag", "0-0"))
+        body = cap_note_body(
+            wrap_summary_body("✅ **OpenCodeReview**: %s" % message,
+                              config.get("run_tag", "0-0")),
+            config.get("note_body_limit"))
         stats["summary_url"] = upsert_summary(poster, body, sticky,
                                              tag=summary_tag_for(config.get("run_tag", "0-0")))
         return stats
@@ -1297,7 +1349,8 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
             routed.append({"comment": comment, "reason": route["reason"]})
             continue
         cid = new_comment_id(config.get("run_tag", "0-0"))
-        inline_items.append({"comment": comment, "body": format_comment(comment, cid),
+        inline_items.append({"comment": comment,
+                             "body": format_comment(comment, cid, config.get("note_body_limit")),
                              "id": cid})
 
     stats["summary"] = len(no_line)
@@ -1329,9 +1382,13 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     # same note at finalize instead of creating a duplicate.
     run_tag = config.get("run_tag", "0-0")
     anchor_id = None
-    anchor_body = wrap_summary_body(
-        build_pre_review_summary_body(stats["total"], no_line, routed, warnings),
-        run_tag,
+    anchor_body = cap_note_body(
+        wrap_summary_body(
+            build_pre_review_summary_body(stats["total"], no_line, routed, warnings,
+                                          config.get("note_body_limit")),
+            run_tag,
+        ),
+        config.get("note_body_limit"),
     )
     anchor_id = ensure_summary_anchor(poster, anchor_body, sticky,
                                       tag=summary_tag_for(run_tag))
@@ -1404,14 +1461,16 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         stats["total"], stats["inline"], stats["summary"],
         stats["skipped"], stats["routed"], stats["failed"], warnings,
     )
-    summary_body += format_summary_comments(no_line)
-    summary_body += format_summary_comments(routed)
-    summary_body += format_summary_comments(failed_comments)
+    summary_body += format_summary_comments(no_line, config.get("note_body_limit"))
+    summary_body += format_summary_comments(routed, config.get("note_body_limit"))
+    summary_body += format_summary_comments(failed_comments, config.get("note_body_limit"))
     if not inline_items and stats["skipped"] > 0:
         summary_body += "\n\n---\n\nℹ️ All inline comments overlapped with existing reviews; nothing new was posted."
     summary_body += format_warnings(warnings)
+    summary_body = cap_note_body(summary_body, config.get("note_body_limit"))
     run_tag = config.get("run_tag", "0-0")
-    full_body = wrap_summary_body(summary_body, run_tag)
+    full_body = cap_note_body(wrap_summary_body(summary_body, run_tag),
+                              config.get("note_body_limit"))
     stats["summary_url"] = finalize_summary(poster, full_body, sticky, anchor_id,
                                            tag=summary_tag_for(run_tag))
     if not stats["summary_url"]:
@@ -1478,6 +1537,20 @@ ZERO_STATS = {"total": 0, "inline": 0, "summary": 0,
               "routed": 0, "skipped": 0, "failed": 0, "summary_url": None}
 
 
+def _parse_note_body_limit(env):
+    """OCR_NOTE_BODY_LIMIT as an int; unset, invalid, or <= 0 uses the default.
+
+    A disable switch would just move the failure to the server's own cap, so
+    there is deliberately no way to turn the client cap off.
+    """
+    raw = env.get("OCR_NOTE_BODY_LIMIT", "")
+    try:
+        limit = int(raw)
+    except ValueError:
+        return NOTE_BODY_LIMIT_DEFAULT
+    return limit if limit > 0 else NOTE_BODY_LIMIT_DEFAULT
+
+
 def build_config(env):
     """Build the config dict from environment variables (with defaults)."""
     return {
@@ -1493,6 +1566,7 @@ def build_config(env):
         # Retry (used by make_poster / fetch_diff_refs).
         "retry_base_delay": int(env.get("OCR_RETRY_BASE_DELAY", "2000")) / 1000,
         "max_retries": int(env.get("OCR_MAX_RETRIES", "3")),
+        "note_body_limit": _parse_note_body_limit(env),
         "max_retry_delay": int(env.get("OCR_MAX_RETRY_DELAY", "60000")) / 1000,
         "transient_base_delay": 2.0,
         # Publication policy + summary + incremental.
@@ -1618,10 +1692,17 @@ def main(argv=None):
         if stderr_content:
             poster = make_poster(api_base, api_token, auth_header, config)
             run_tag = config.get("run_tag", "0-0")
-            body = wrap_summary_body(
-                "⚠️ **OpenCodeReview** encountered an error:\n%s" % fenced_block(stderr_content),
-                run_tag,
-            )
+            # Cap the raw stderr before fencing: fenced_block closes its own
+            # fence, so a head-truncation here keeps the note well-formed.
+            stderr_budget = max((config.get("note_body_limit") or NOTE_BODY_LIMIT_DEFAULT) - 300, 0)
+            if len(stderr_content) > stderr_budget:
+                stderr_content = stderr_content[:stderr_budget] + "\n… (truncated)"
+            body = cap_note_body(
+                wrap_summary_body(
+                    "⚠️ **OpenCodeReview** encountered an error:\n%s" % fenced_block(stderr_content),
+                    run_tag,
+                ),
+                config.get("note_body_limit"))
             upsert_summary(poster, body, config.get("sticky_summary", True),
                            tag=summary_tag_for(run_tag))
         return 0
