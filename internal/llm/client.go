@@ -29,6 +29,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	openai "github.com/openai/openai-go/v3"
 	openaiopt "github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/respjson"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 	tiktoken "github.com/pkoukk/tiktoken-go"
@@ -816,14 +817,9 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 				byTool[clampToZero(toolDelta.Index)] = value
 			}
 
-			extra, ok := choice.Delta.JSON.ExtraFields["reasoning_content"]
-			if !ok {
+			reasoningContent := reasoningText(choice.Delta.JSON.ExtraFields)
+			if reasoningContent == "" {
 				continue
-			}
-
-			var reasoningContent string
-			if err := json.Unmarshal([]byte(extra.Raw()), &reasoningContent); err != nil {
-				reasoningContent = extra.Raw()
 			}
 			builder := reasoningByChoice[choice.Index]
 			if builder == nil {
@@ -1051,6 +1047,30 @@ func normalizeExtraContent(ec json.RawMessage) json.RawMessage {
 	return trimmed
 }
 
+// reasoningText returns the reasoning text of a chat-completions message or
+// delta. Providers such as DeepSeek send it as reasoning_content; gateways that
+// normalize reasoning across providers (e.g. Vercel AI Gateway) send it as
+// reasoning instead, and dropping that field loses the model's reasoning
+// between tool-call turns. Presence is the only signal; Valid() is always false
+// for extra fields.
+func reasoningText(fields map[string]respjson.Field) string {
+	if extra, ok := fields["reasoning_content"]; ok {
+		var text string
+		if err := json.Unmarshal([]byte(extra.Raw()), &text); err != nil {
+			return extra.Raw()
+		}
+		if text != "" {
+			return text
+		}
+	}
+	// Only a string is reasoning text here; other shapes are not ours to replay.
+	var text string
+	if extra, ok := fields["reasoning"]; ok && json.Unmarshal([]byte(extra.Raw()), &text) == nil {
+		return text
+	}
+	return ""
+}
+
 // mapOpenAIResponse converts the SDK response into ChatResponse.
 func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatResponse {
 	rawJSON := sdkResp.RawJSON()
@@ -1088,13 +1108,7 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 			contentPtr = &content
 		}
 
-		var reasoningContent string
-		// Presence (ok) is the only signal; Valid() is always false for extra fields.
-		if extra, ok := ch.Message.JSON.ExtraFields["reasoning_content"]; ok {
-			if err := json.Unmarshal([]byte(extra.Raw()), &reasoningContent); err != nil {
-				reasoningContent = extra.Raw()
-			}
-		}
+		reasoningContent := reasoningText(ch.Message.JSON.ExtraFields)
 
 		var native NativeTurn
 		if reasoningContent != "" {
