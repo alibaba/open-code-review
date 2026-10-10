@@ -27,6 +27,22 @@ OpenCodeReview currently provides:
 
 ## Planned — H2 2026
 
+### ACP Server Adapter
+
+- **Experimental: local source builds only** — Expose OCR as a dedicated review
+  agent through an independent ACP v1 stdio adapter, keeping protocol handling
+  outside the core review engine. Review/scan, command discovery, progress,
+  findings and cancellation are implemented. Linux ACP CI passed at `aa7d4e7`;
+  the author confirmed full manual acceptance in Zed and a VSCode ACP extension
+  on 2026-09-15. The adapter is currently unstable and is not included in
+  GitHub Releases or the OCR npm package. Users must compile it locally from
+  source and rebuild to update. Compatibility evidence for a released OCR CLI
+  remains to be finalized.
+  See the [adapter documentation](acp/README.md) for configuration and support
+  boundaries. HTTP transport is not supported. Windows uses Job Objects and
+  cancellable stdio; see the adapter documentation for the CTRL_BREAK grace-period
+  limits.
+
 ### IDE Plugins
 
 - **JetBrains plugin** — Bring AI code review to IntelliJ IDEA, GoLand,

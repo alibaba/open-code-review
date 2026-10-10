@@ -88,6 +88,7 @@ const sidebarTree: SidebarGroup[] = [
           { id: 'sb-claude-code', labelKey: 'docs.sidebar.claudeCode', slug: 'claude-code' },
           { id: 'sb-delegate', labelKey: 'docs.sidebar.delegate', slug: 'delegate' },
           { id: 'sb-cicd', labelKey: 'docs.sidebar.cicd', slug: 'cicd' },
+          { id: 'sb-acp', labelKey: 'docs.sidebar.acp', slug: 'acp' },
         ],
       },
       { id: 'sb-contributing', labelKey: 'docs.sidebar.contributing', slug: 'contributing' },
