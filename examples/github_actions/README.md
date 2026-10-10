@@ -40,6 +40,50 @@ The Action is an orchestrator: it installs the OCR CLI from npm at run time (`oc
 
 Take the commit SHA from the [releases page](https://github.com/alibaba/open-code-review/releases) and keep the `# vX.Y.Z` comment next to it so update tooling (Dependabot, Renovate) can track it. Every action referenced *inside* [`action.yml`](../../action.yml) is itself pinned to a full commit SHA (enforced by `scripts/verify-action-pins.sh` in CI), so the outer SHA transitively freezes the whole workflow — only the two coordinates above are yours to choose.
 
+## Refreshing a GitHub App token after a long review
+
+Installation tokens expire after one hour. Split a long review from publication
+so the caller can mint a fresh token between action calls in the same job:
+
+```yaml
+- uses: alibaba/open-code-review@<full-commit-sha>
+  with:
+    mode: review
+    github_token: ${{ steps.review-token.outputs.token }}
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+
+- id: post-token
+  uses: actions/create-github-app-token@<full-commit-sha>
+  with:
+    app-id: ${{ vars.REVIEW_APP_ID }}
+    private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+    permission-pull-requests: write
+    permission-contents: read
+
+- uses: alibaba/open-code-review@<full-commit-sha>
+  with:
+    mode: post
+    github_token: ${{ steps.post-token.outputs.token }}
+```
+
+Mint `review-token` before the first call in the same way. `mode: all` is the
+default and preserves the single-call workflow. `review` runs the review and
+fails on an OCR error but posts nothing. It saves the result, stderr and
+publication/checkpoint options without tokens to `state_path` (default:
+`${{ runner.temp }}/ocr-review-state.json`). `post` needs no model credentials,
+checkout or OCR installation and uses the saved publication settings; only its
+`github_token` is new. Both tokens should belong to the same GitHub App so
+checkpoint and comment ownership remain consistent.
+
+The calls must share the same repository, workflow run, attempt and job.
+Posting refuses a saved review if the PR head has changed. For multiple review
+pairs in one job, pass a distinct `state_path` to each pair. The state contains
+reviewed source excerpts: keep it in the trusted job's temporary storage, never
+check it into the repository or accept it from an untrusted PR artifact.
+
 ## Running on a self-hosted runner
 
 The demo above runs on GitHub-hosted runners (`runs-on: ubuntu-latest`) and pulls the action from `alibaba/open-code-review@main`. If you prefer to run OCR on your own self-hosted runner — to reach private network resources, keep LLM traffic on-prem, or avoid runner-minute costs — the OCR project itself does exactly this in its own CI.
