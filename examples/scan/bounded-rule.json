@@ -1,0 +1,8 @@
+{
+  "rules": [
+    {
+      "path": "**",
+      "rule": "Review only the function selected in the requirement background. Use only the supplied evidence. Report concrete defects in that function; omit claims that require unavailable dependencies. Do not call context-acquisition tools."
+    }
+  ]
+}

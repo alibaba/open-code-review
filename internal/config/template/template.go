@@ -34,8 +34,11 @@ type Template struct {
 // from scan_template.json. Kept entirely separate from Template so the two
 // pipelines can evolve their prompts and budgets independently.
 type ScanTemplate struct {
-	MainTask              LlmConversation  `json:"MAIN_TASK"`
-	PlanTask              *LlmConversation `json:"PLAN_TASK,omitempty"`
+	MainTask       LlmConversation  `json:"MAIN_TASK"`
+	PlanTask       *LlmConversation `json:"PLAN_TASK,omitempty"`
+	NoPlanGuidance string           `json:"NO_PLAN_GUIDANCE,omitempty"`
+	// PromptOverrideSHA256 identifies validated custom prompts before runtime inputs are applied.
+	PromptOverrideSHA256  string           `json:"-"`
 	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	MaxTokens             int              `json:"MAX_TOKENS"`

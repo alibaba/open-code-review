@@ -223,6 +223,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 
 // registerScanFlags registers all scan command flags on cmd, binding to opts.
 func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
+	cmd.Flags().StringVar(&opts.scanTemplatePath, "scan-template", "", "path to a prompt-only JSON override for MAIN_TASK, optional PLAN_TASK, and NO_PLAN_GUIDANCE")
 	addToolsFlag(cmd, &opts.toolConfigPath)
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
