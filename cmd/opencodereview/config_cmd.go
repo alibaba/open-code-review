@@ -995,33 +995,35 @@ func ensureModelInList(models []string, model string) []string {
 }
 
 func setProviderValue(cfg *Config, key, value string) error {
-	parts := strings.SplitN(key, ".", 3)
-	if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
+	dot := strings.LastIndex(key, ".")
+	if dot <= len("providers.") || dot == len(key)-1 {
 		return fmt.Errorf("invalid provider key %q: expected providers.<name>.<field>", key)
 	}
-	if _, isPreset := llm.LookupProvider(parts[1]); !isPreset {
-		return setCustomProviderField(cfg, parts[1], parts[2], key, value)
+	name, field := key[len("providers."):dot], key[dot+1:]
+	if _, isPreset := llm.LookupProvider(name); !isPreset {
+		return setCustomProviderField(cfg, name, field, key, value)
 	}
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]ProviderEntry)
 	}
-	entry := cfg.Providers[parts[1]]
-	if err := applyProviderField(parts[1], &entry, parts[2], key, value); err != nil {
+	entry := cfg.Providers[name]
+	if err := applyProviderField(name, &entry, field, key, value); err != nil {
 		return err
 	}
-	cfg.Providers[parts[1]] = entry
+	cfg.Providers[name] = entry
 	return nil
 }
 
 func setCustomProviderValue(cfg *Config, key, value string) error {
-	parts := strings.SplitN(key, ".", 3)
-	if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
+	dot := strings.LastIndex(key, ".")
+	if dot <= len("custom_providers.") || dot == len(key)-1 {
 		return fmt.Errorf("invalid custom provider key %q: expected custom_providers.<name>.<field>", key)
 	}
-	if preset, isPreset := llm.LookupProvider(parts[1]); isPreset {
-		return fmt.Errorf("custom provider name %q conflicts with a preset provider; use providers.%s.%s to configure the preset or choose a different custom provider name", parts[1], preset.Name, parts[2])
+	name, field := key[len("custom_providers."):dot], key[dot+1:]
+	if preset, isPreset := llm.LookupProvider(name); isPreset {
+		return fmt.Errorf("custom provider name %q conflicts with a preset provider; use providers.%s.%s to configure the preset or choose a different custom provider name", name, preset.Name, field)
 	}
-	return setCustomProviderField(cfg, parts[1], parts[2], key, value)
+	return setCustomProviderField(cfg, name, field, key, value)
 }
 
 func isAuxiliaryProviderField(field string) bool {
