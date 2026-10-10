@@ -69,6 +69,12 @@ environment variable.
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
+Built-in providers' model lists are suggestions for `ocr config model`, not
+restrictions on `--model`. An override absent from both the built-in list and
+`providers.<name>.models` produces a warning on stderr; the provider validates
+the model when the request is sent. Custom providers retain their existing
+`--model` validation rules.
+
 ### Overriding a built-in provider's Base URL
 
 Every built-in provider has a preset Base URL (shown in the table above).
@@ -193,6 +199,16 @@ in the FAQ before picking one.
 
 ### Timeouts
 
+Task and request timeouts are independent:
+
+- `ocr review --timeout` and `ocr scan --timeout` set the concurrent-task
+  budget in **minutes** (default **15**; `0` disables the task deadline).
+  This budget includes all LLM calls, tool work, and retry waits for the task.
+  Review scales it by the number of effort rounds.
+- The per-request HTTP timeout is in **seconds** (default **300**).
+  Raising `--timeout` does not change it; disabling the task deadline does
+  not disable request timeouts. A shorter remaining task budget always wins.
+
 Each LLM request has an HTTP timeout, defaulting to **300 seconds**.
 Slow local models (or large files) can need more. Three knobs, in
 increasing scope:
@@ -212,6 +228,25 @@ Both `timeout_sec` keys can be set with `ocr config set`:
   }
 }
 ```
+
+For example, `OCR_LLM_TIMEOUT=900 ocr review --timeout 30` allows an
+individual request up to 15 minutes within the task budget. Without the
+environment variable or a configured `timeout_sec`, requests still time
+out after 5 minutes even with `--timeout 30`.
+
+An expired per-request deadline ends the call without automatically replaying
+it, including when reading a response body or stream. For consistently slow
+requests, increase the request timeout rather than retrying with the same
+limit. The existing SDK retry policy is unchanged: retryable connection and
+HTTP failures use up to 5 retries with backoff and provider `Retry-After`
+hints. The SDK's per-attempt deadline also bounds its retry wait. Cancellation
+or an exhausted task deadline stops both requests and retry waits.
+
+Diagnostics distinguish `LLM request timeout` (check `OCR_LLM_TIMEOUT` or
+provider `timeout_sec`) from `caller deadline exceeded`, which means the
+calling operation's context has expired. For a review/scan task deadline,
+check `--timeout`; other operations, such as background memory compression
+and `ocr llm test`, have their own deadlines.
 
 ### API key from a command
 

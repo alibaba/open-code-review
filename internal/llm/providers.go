@@ -3,6 +3,8 @@
 
 package llm
 
+//go:generate go run ./gen -output ../../extensions/frontend/src/shared/providers.generated.ts -kotlin-output ../../extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/ProviderNames.generated.kt
+
 import (
 	"sort"
 	"strings"
@@ -35,6 +37,8 @@ type Provider struct {
 	AmbientAuth bool
 }
 
+// After modifying the built-in provider registry, run `go generate ./internal/llm`
+// and commit both generated catalogs. See the root AGENTS.md for paths and verification.
 var registry = []Provider{
 	{
 		Name:        "anthropic",

@@ -122,7 +122,7 @@ ocr r      [flags]   (alias)
 | `--background-file <path>` | `-B` | — | 리뷰 배경으로 쓸 Markdown 파일 경로. `--background`와 함께 지정하면 이쪽이 우선합니다. |
 | `--exclude <patterns>` | — | — | 제외할 gitignore 형식 패턴(쉼표 구분). `rule.json`의 `excludes` 항목과 합쳐집니다. |
 | `--concurrency <n>` | — | `8` | 병렬로 리뷰할 서브태스크의 최대 개수. |
-| `--timeout <minutes>` | — | `15` | 서브태스크당 제한 시간. `0`이면 타임아웃을 끕니다. effort 라운드 수에 비례해 선형 확장됩니다(예: low/medium/high에서 15/30/45분). |
+| `--timeout <minutes>` | — | `15` | LLM 호출, 도구 실행, 재시도 대기를 포함한 서브태스크별 시간 예산. `0`이면 태스크 기한을 비활성화하지만 요청 타임아웃은 끄지 않습니다. 개별 요청 타임아웃은 `OCR_LLM_TIMEOUT` 또는 프로바이더의 `timeout_sec`로 독립적으로 설정하며 초 단위입니다(기본값 `300`). effort의 리뷰 라운드 수에 비례해 선형 확장됩니다(예: low/medium/high에서 15/30/45분). |
 | `--effort <level>` | — | `medium` | 리뷰 강도 프리셋: `low`(라운드 1회), `medium`(2회), `high`(3회). 라운드를 늘리면 놓치는 지적이 줄지만 비용도 그만큼 늘어납니다. 이 실행에 한해 저장된 `effort` 설정을 덮어씁니다. |
 | `--rule <path>` | — | — | 커스텀 JSON 리뷰 규칙 파일 경로. 프로젝트 수준과 전역 `rule.json`을 덮어씁니다. |
 | `--max-tools <n>` | — | 템플릿 기본값 | 서브태스크당 최대 도구 호출 라운드 수. `0`이면 템플릿 기본값(`100`)을 쓰고, 1~49는 `50`으로 올려 맞춥니다. 이 플래그는 상한을 *올리기만* 합니다. 템플릿 기본값보다 낮은 값은 무시됩니다. |
@@ -154,6 +154,11 @@ ocr scan --provider openai --model gpt-5.4 --format json
 모델만 덮어쓰며, 소스 순서 자체는 바꾸지 않습니다. 조건을 다 갖추지 못한 방식은
 섞이지 않고 그대로 다음으로 넘어갑니다. 내장 프로바이더를 골랐다면 자격 증명은
 여전히 해당 프로바이더가 지원하는 환경 변수에서 올 수 있습니다.
+
+내장 프로바이더에서는 `--model`로 `ocr config model`의 제안 목록에 없는 모델도
+지정할 수 있습니다. 모델이 내장 목록과 `providers.<name>.models` 모두에 없으면
+OCR은 stderr에 경고를 출력하고 검증은 프로바이더에 맡깁니다. 사용자 정의
+프로바이더에는 기존 `--model` 검증 규칙이 적용됩니다.
 
 ### 모드 {#modes}
 
@@ -313,7 +318,7 @@ ocr review --format json | jq .summary   # stdout은 JSON 문서 하나입니다
 
 | 필드 | 설명 |
 |---|---|
-| `status` | `success`, `completed_with_warnings`, `completed_with_errors`, `skipped` 중 하나입니다. |
+| `status` | 출력에 `manifest` 필드가 있으면 그 터미널 상태입니다: `complete`, `partial`, `failed`, `skipped`. 없으면 `success`, `completed_with_warnings`, `completed_with_errors` 중 하나입니다. `skipped`는 리뷰할 파일이 없는 경우에도 사용됩니다. |
 | `llm` | 해석된 LLM 정보입니다. 정규화한 `model`은 항상 있고, `provider`는 이름이 있는 설정된 프로바이더일 때만 나옵니다. |
 | `message` | 선택. 사람이 읽는 요약입니다(예: `"No comments generated. Looks good to me."`). |
 | `summary` | 선택. 실행 집계입니다: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens`(omitempty), `cache_write_tokens`(omitempty), `elapsed`. `skipped` 실행에서는 나오지 않습니다. |
