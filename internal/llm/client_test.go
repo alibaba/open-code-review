@@ -174,6 +174,32 @@ func TestBuildAnthropicParams_CacheControl(t *testing.T) {
 	})
 }
 
+func TestBuildAnthropicParams_PromptCachingDisabled(t *testing.T) {
+	disabled := false
+	client := NewAnthropicClient(ClientConfig{URL: "https://api.anthropic.com", PromptCaching: &disabled})
+	params, err := client.buildAnthropicParams("claude-sonnet-4-20250514", ChatRequest{
+		Messages: []Message{
+			{Role: "system", Content: "Review this code."},
+			{Role: "user", Content: "Hello"},
+		},
+		Tools: []ToolDef{{Type: "function", Function: FunctionDef{Name: "tool", Parameters: map[string]any{"type": "object"}}}},
+	})
+	if err != nil {
+		t.Fatalf("buildAnthropicParams: %v", err)
+	}
+	if params.System[0].CacheControl.Type != "" {
+		t.Errorf("system CacheControl.Type = %q, want empty", params.System[0].CacheControl.Type)
+	}
+	if params.Tools[0].OfTool.CacheControl.Type != "" {
+		t.Errorf("tool CacheControl.Type = %q, want empty", params.Tools[0].OfTool.CacheControl.Type)
+	}
+	lastMessage := params.Messages[len(params.Messages)-1]
+	lastBlock := lastMessage.Content[len(lastMessage.Content)-1]
+	if lastBlock.OfText.CacheControl.Type != "" {
+		t.Errorf("message CacheControl.Type = %q, want empty", lastBlock.OfText.CacheControl.Type)
+	}
+}
+
 func TestBuildAnthropicParams_CacheControl_NoTools(t *testing.T) {
 	client := NewAnthropicClient(ClientConfig{URL: "https://api.anthropic.com"})
 

@@ -33,6 +33,9 @@ type ResolvedEndpoint struct {
 	// knob; users can still override via OCR_LLM_TIMEOUT.
 	Timeout    time.Duration
 	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
+	// PromptCaching controls Anthropic cache_control breakpoints. Nil preserves
+	// the historical default of enabling prompt caching.
+	PromptCaching *bool
 
 	// AmbientAuth marks an endpoint that carries no token and needs no base
 	// URL, because the transport supplies both — AWS SigV4 signing derives the
@@ -334,6 +337,7 @@ type llmFileConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	PromptCaching *bool            `json:"prompt_caching,omitempty"`
 }
 
 // providerEntryConfig represents a single provider entry in config.json.
@@ -349,6 +353,7 @@ type providerEntryConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	PromptCaching *bool            `json:"prompt_caching,omitempty"`
 
 	// AWSProfile and AWSRegion apply to ambient-auth providers that sign with
 	// SigV4 (currently bedrock). Both are optional: without them the standard
@@ -571,6 +576,10 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 
 	extraBody = entry.ExtraBody
 	extraHeaders := entry.ExtraHeaders
+	promptCaching := cfg.Llm.PromptCaching
+	if entry.PromptCaching != nil {
+		promptCaching = entry.PromptCaching
+	}
 
 	timeout, err := ValidateTimeoutSec(entry.TimeoutSec)
 	if err != nil {
@@ -612,6 +621,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		ExtraHeaders: extraHeaders,
 		Timeout:      timeout,
 		RetryCodes:   retryCodes,
+		PromptCaching: promptCaching,
 		AmbientAuth:  ambientAuth,
 		AWSProfile:   entry.AWSProfile,
 		AWSRegion:    entry.AWSRegion,
@@ -717,6 +727,7 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		ExtraHeaders: cfg.Llm.ExtraHeaders,
 		Timeout:      timeout,
 		RetryCodes:   retryCodes,
+		PromptCaching: cfg.Llm.PromptCaching,
 	}, true, nil
 }
 

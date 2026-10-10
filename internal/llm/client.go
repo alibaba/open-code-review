@@ -405,6 +405,9 @@ type ClientConfig struct {
 	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
 	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
 	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+	// PromptCaching controls Anthropic cache_control breakpoints. Nil preserves
+	// the historical default of enabling prompt caching.
+	PromptCaching *bool
 	// SessionKey is the fallback prompt-cache affinity key
 	// for requests whose context carries none (see ContextWithSessionKey).
 	//
@@ -488,6 +491,7 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		ExtraBody:      ep.ExtraBody,
 		ExtraHeaders:   ep.ExtraHeaders,
 		RetryCodes:     ep.RetryCodes,
+		PromptCaching:  ep.PromptCaching,
 		retryCollector: collector,
 		rawHolder:      raw,
 		AWSProfile:     ep.AWSProfile,
@@ -1625,11 +1629,11 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 		Messages:  messages,
 	}
 
-	if len(systemBlocks) > 0 {
+	if c.promptCachingEnabled() && len(systemBlocks) > 0 {
 		systemBlocks[len(systemBlocks)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
 		params.System = systemBlocks
 	}
-	if len(tools) > 0 {
+	if c.promptCachingEnabled() && len(tools) > 0 {
 		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
 		params.Tools = tools
 		if req.ToolChoice == "required" {
@@ -1640,7 +1644,7 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	}
 	// Dynamic breakpoint on the latest message so multi-turn history is
 	// cached incrementally: read the full previous prefix, write only the delta.
-	if len(messages) > 0 {
+	if c.promptCachingEnabled() && len(messages) > 0 {
 		last := &messages[len(messages)-1]
 		if n := len(last.Content); n > 0 {
 			lastIdx := n - 1
@@ -1659,6 +1663,10 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	}
 
 	return params, nil
+}
+
+func (c *AnthropicClient) promptCachingEnabled() bool {
+	return c.cfg.PromptCaching == nil || *c.cfg.PromptCaching
 }
 
 // cloneContentBlockParam deep-copies a content block via JSON round trip.
