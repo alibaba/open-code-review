@@ -2330,6 +2330,132 @@ async function testRoutedFindingsCarryNoIdempotencyId() {
   assert.doesNotMatch(body, /ocr-\d+-\d+-[a-f0-9]+/, "routed summary body carries no idempotency id");
 }
 
+// #1557: the sticky summary anchor used to be located by substring alone, so a
+// HUMAN comment that merely quoted the marker was returned as "the existing
+// summary" and its body was overwritten in place. Quoting a marker is a normal
+// thing for a human (or another tool) to do when discussing a prior review, and
+// the destroyed comment was the evidence artifact of a downstream merge gate —
+// silent data loss with no way to tell an overwrite from a comment that never
+// existed. The anchor must therefore be restricted to a comment GitHub
+// attributes to a bot writer.
+async function testSummaryAnchorSkipsHumanCommentQuotingTheMarker() {
+  // Bot summary posted first, then the human quotes it (the timeline order the
+  // bug needs: the human's is the NEWEST matching comment).
+  const botSummary = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const humanQuotingMarker = {
+    id: 77,
+    html_url: "http://ex/77",
+    user: { login: "human-reviewer", type: "User" },
+    body: `Review-feedback disposition: addressed.\n\nQuoting the earlier review for context:\n${SUMMARY_MARKER}`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [botSummary, humanQuotingMarker] },
+    opts: { stickySummary: true },
+  });
+
+  const updatedIds = github.updatedComments.map((c) => c.comment_id);
+  assert.deepStrictEqual(
+    updatedIds,
+    [42],
+    `only the bot's own summary may be rewritten; got ${JSON.stringify(updatedIds)}`
+  );
+  assert.doesNotMatch(github.updatedComments[0].body, /Review-feedback disposition/, "the human comment's text must survive");
+}
+
+// The other half of the contract: tightening the anchor must not stop the bot
+// from finding its own summary, or every run would post a second summary and
+// the checkpoint marker would stop advancing.
+async function testSummaryAnchorStillFindsTheBotsOwnSummary() {
+  const botSummary = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [botSummary] },
+    opts: { stickySummary: true },
+  });
+
+  assert.strictEqual(github.updatedComments.length, 1, "the bot's own summary is still updated in place");
+  assert.strictEqual(github.updatedComments[0].comment_id, 42);
+  assert.deepStrictEqual(github.issueComments, [], "and no duplicate summary is posted");
+}
+
+// Review follow-up on #1560: restricting the anchor to "a writer GitHub
+// attributes to a bot" still leaves the destructive rewrite one notch too wide.
+// isCheckpointAuthorOurs with an EMPTY appSlug accepts ANY bot-typed writer, so
+// a different bot or GitHub App that quotes the marker is still selected and
+// rewritten in place — the same silent data loss, just from a machine instead
+// of a human. The summary finders must pin the identity to the app that owns
+// the OCR summary when that identity is known.
+async function testSummaryAnchorSkipsAnotherAppsComment() {
+  // Newest matching comment belongs to a DIFFERENT app; ours is older.
+  const ours = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const otherApp = {
+    id: 77,
+    html_url: "http://ex/77",
+    user: { login: "someone-elses-bot[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "some-other-app" },
+    body: `Cited for the record:\n${SUMMARY_MARKER}`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [ours, otherApp] },
+    opts: { stickySummary: true, appSlug: "github-actions" },
+  });
+
+  const updatedIds = github.updatedComments.map((c) => c.comment_id);
+  assert.deepStrictEqual(
+    updatedIds,
+    [42],
+    `only this action's own summary may be rewritten; got ${JSON.stringify(updatedIds)}`
+  );
+  assert.doesNotMatch(github.updatedComments[0].body, /Cited for the record/, "the other app's text must survive");
+}
+
+// The other half of the pinning contract, and the reason pinning cannot simply
+// be unconditional: an installation token cannot ask GitHub which app it is
+// (GET /app needs a JWT), so on a caller-supplied token the app identity is
+// genuinely unknown. There the old wider check still holds — but it must be
+// the WIDER check, not a pin that rejects every comment including our own, or
+// every run would post a duplicate summary and the checkpoint would stop
+// advancing.
+async function testSummaryAnchorStillFindsOurSummaryWhenAppIsUnknown() {
+  const botSummary = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [botSummary] },
+    // No appSlug: the caller supplied its own token, so no slug is known.
+    opts: { stickySummary: true },
+  });
+
+  assert.strictEqual(github.updatedComments.length, 1, "an unknown app identity keeps the wider bot check");
+  assert.strictEqual(github.updatedComments[0].comment_id, 42);
+  assert.deepStrictEqual(github.issueComments, [], "and still does not post a duplicate summary");
+}
+
 async function main() {
   await testFailedInlineCommentsAreSummarized();
   await testWarningsListedAfterSummaryComments();
@@ -2511,6 +2637,10 @@ async function main() {
   await testResolveCleanupNeverBreaksOutputs();
   await testResolvePacingUsesSuccessDelay();
   testActionYmlDoesNotPromiseTheIoUThresholdToResolveOutdated();
+  await testSummaryAnchorSkipsHumanCommentQuotingTheMarker();
+  await testSummaryAnchorStillFindsTheBotsOwnSummary();
+  await testSummaryAnchorSkipsAnotherAppsComment();
+  await testSummaryAnchorStillFindsOurSummaryWhenAppIsUnknown();
   console.log("All post-review-comments tests passed.");
 }
 function testParseDiffHunkRanges() {
