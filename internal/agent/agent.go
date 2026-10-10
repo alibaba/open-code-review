@@ -751,75 +751,7 @@ dispatchLoop:
 				}
 			}()
 
-			var groupCtx context.Context
-			var cancel context.CancelFunc
-			if timeout > 0 {
-				groupCtx, cancel = context.WithTimeout(ctx, timeout)
-				defer cancel()
-			} else {
-				groupCtx = ctx
-			}
-
-			completed, stop, err := a.executeGroupSubtask(groupCtx, g)
-			if err != nil {
-				atomic.AddInt64(&a.subtaskFailed, int64(len(g.Diffs)))
-				class, reason := classifyItemError(err)
-				for _, d := range g.Diffs {
-					fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-					a.markFailed(d, class, reason)
-					a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, err.Error())
-				}
-				fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for group %q: %v\n", g.Label, err)
-				telemetry.ErrorEvent(groupCtx, "subtask.error", err,
-					telemetry.AnyToAttr("group.label", g.Label))
-				a.recordWarning("subtask_error", g.Label, err.Error())
-				return
-			}
-			if !completed {
-				if stop != nil {
-					// A group that stopped short of task_done may still have produced
-					// usable output for some of its files before the round/token
-					// budget ran out. Classify per file rather than per group so a
-					// file that already has comments lands in Completed instead of
-					// Failed — otherwise a single stuck file drags its whole group
-					// (and, when nothing else was dispatched, the whole run) down to
-					// terminal_state=failed even though real coverage exists.
-					var failedCount int64
-					for _, d := range g.Diffs {
-						fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 {
-							a.markCompleted(d)
-							a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
-							continue
-						}
-						a.markFailed(d, stop.class, stop.reason)
-						if stop.checkpoint != "" {
-							a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, stop.checkpoint)
-						}
-						failedCount++
-					}
-					// subtaskFailed must count only the files actually marked failed
-					// above, not the whole group — a group can mix Completed and
-					// Failed files, and reportAsError itself is a group-level signal
-					// (any file with comments suppresses it) that must not be assumed
-					// to imply failedCount == len(g.Diffs).
-					if stop.reportAsError && failedCount > 0 {
-						atomic.AddInt64(&a.subtaskFailed, failedCount)
-						stopErr := errors.New(stop.checkpoint)
-						fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for group %q: %v\n", g.Label, stopErr)
-						telemetry.ErrorEvent(groupCtx, "subtask.error", stopErr,
-							telemetry.AnyToAttr("group.label", g.Label))
-						a.recordWarning("subtask_error", g.Label, stopErr.Error())
-					}
-				}
-				return
-			}
-			for _, d := range g.Diffs {
-				fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-				comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
-				a.markCompleted(d)
-				a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
-			}
+			a.executeGroupResilient(ctx, g, timeout, a.executeGroupSubtask)
 		}(group)
 	}
 
@@ -1195,6 +1127,152 @@ var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 // separately in the session checkpoint. Context deadline/cancel are recognized
 // via errors.Is, and the
 // empty-template precondition is a configuration failure.
+// executeGroupResilient runs one group's subtask with deadline resilience: a
+// transient stall must not permanently drop the group's coverage. On a
+// deadline-class failure while the run is still alive it retries the group
+// once; if the retry also exceeds its deadline and the group bundles more
+// than one file, it splits into single-file groups and gives each file its
+// own fresh attempt, so one stuck file cannot drag its peers down with it.
+// Recovery only fires while the collector holds no comments for the group's
+// files: a fresh attempt starts a new conversation and would re-file
+// anything the failed attempt already submitted, so a comment-free group is
+// retried and a group that already produced output keeps the previous
+// behavior. Every attempt's outcome funnels through finishGroupOutcome, so
+// coverage, counters, stderr and telemetry behave identically for the
+// whole-group path and for split parts.
+func (a *Agent) executeGroupResilient(ctx context.Context, g FileGroup, timeout time.Duration, exec func(context.Context, FileGroup) (bool, *subtaskStop, error)) {
+	attempt := func(g FileGroup) (context.Context, bool, *subtaskStop, error) {
+		runCtx := ctx
+		if timeout > 0 {
+			var cancel context.CancelFunc
+			runCtx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
+		}
+		completed, stop, err := exec(runCtx, g)
+		return runCtx, completed, stop, err
+	}
+
+	runCtx, completed, stop, err := attempt(g)
+	if a.canRetryGroupDeadline(ctx, err, g) {
+		a.recordWarning("group_retry", g.Label,
+			fmt.Sprintf("group exceeded its deadline; retrying once (%d files)", len(g.Diffs)))
+		runCtx, completed, stop, err = attempt(g)
+		if a.canRetryGroupDeadline(ctx, err, g) && len(g.Diffs) > 1 {
+			a.recordWarning("group_split", g.Label,
+				fmt.Sprintf("group still exceeded its deadline after retry; splitting %d files into single-file groups", len(g.Diffs)))
+			for _, part := range toSingleFileGroups(g.Diffs) {
+				if ctx.Err() != nil {
+					// The run is shutting down mid-split: give the remaining
+					// files a terminal cancelled outcome instead of leaving
+					// them undecided for the Finalize sweep.
+					a.finishGroupOutcome(ctx, part, false, &subtaskStop{
+						class:  session.FailureCancelled,
+						reason: "run cancelled during group split",
+					}, nil)
+					continue
+				}
+				partCtx, pCompleted, pStop, pErr := attempt(part)
+				a.finishGroupOutcome(partCtx, part, pCompleted, pStop, pErr)
+			}
+			return
+		}
+	}
+	a.finishGroupOutcome(runCtx, g, completed, stop, err)
+}
+
+// canRetryGroupDeadline reports whether err is a deadline failure worth
+// recovering from: the run itself must still be alive (a cancelled run is
+// shutting down, not stalling), the error must be a deadline, and the failed
+// attempt must have filed no comments yet.
+func (a *Agent) canRetryGroupDeadline(ctx context.Context, err error, g FileGroup) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	// A deadline-failed attempt returns before its round-end async-comment
+	// drain, and those code_comment jobs run under context.WithoutCancel —
+	// they land in the collector after the failure surfaces. Await them so
+	// the gate below sees what the attempt actually filed; otherwise a retry
+	// would re-file the same findings.
+	if a.args.CommentWorkerPool != nil {
+		a.args.CommentWorkerPool.AwaitKey(fileGroupKey(g.Diffs))
+	}
+	for _, d := range g.Diffs {
+		if len(a.args.CommentCollector.CommentsForPath(d.NewPath)) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// finishGroupOutcome applies one attempt's outcome to coverage, counters,
+// stderr and telemetry. It is the single terminal-marking site for a group so
+// the whole-group path and split parts cannot drift apart.
+func (a *Agent) finishGroupOutcome(ctx context.Context, g FileGroup, completed bool, stop *subtaskStop, err error) {
+	if err != nil {
+		atomic.AddInt64(&a.subtaskFailed, int64(len(g.Diffs)))
+		class, reason := classifyItemError(err)
+		for _, d := range g.Diffs {
+			fingerprint := reviewItemFingerprint(a.reviewMode(), d)
+			a.markFailed(d, class, reason)
+			a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, err.Error())
+		}
+		fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for group %q: %v\n", g.Label, err)
+		telemetry.ErrorEvent(ctx, "subtask.error", err,
+			telemetry.AnyToAttr("group.label", g.Label))
+		a.recordWarning("subtask_error", g.Label, err.Error())
+		return
+	}
+	if !completed {
+		if stop == nil {
+			return
+		}
+		// A group that stopped short of task_done may still have produced
+		// usable output for some of its files before the round/token
+		// budget ran out. Classify per file rather than per group so a
+		// file that already has comments lands in Completed instead of
+		// Failed — otherwise a single stuck file drags its whole group
+		// (and, when nothing else was dispatched, the whole run) down to
+		// terminal_state=failed even though real coverage exists.
+		var failedCount int64
+		for _, d := range g.Diffs {
+			fingerprint := reviewItemFingerprint(a.reviewMode(), d)
+			if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 {
+				a.markCompleted(d)
+				a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+				continue
+			}
+			a.markFailed(d, stop.class, stop.reason)
+			if stop.checkpoint != "" {
+				a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, stop.checkpoint)
+			}
+			failedCount++
+		}
+		// subtaskFailed must count only the files actually marked failed
+		// above, not the whole group — a group can mix Completed and
+		// Failed files, and reportAsError itself is a group-level signal
+		// (any file with comments suppresses it) that must not be assumed
+		// to imply failedCount == len(g.Diffs).
+		if stop.reportAsError && failedCount > 0 {
+			atomic.AddInt64(&a.subtaskFailed, failedCount)
+			stopErr := errors.New(stop.checkpoint)
+			fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for group %q: %v\n", g.Label, stopErr)
+			telemetry.ErrorEvent(ctx, "subtask.error", stopErr,
+				telemetry.AnyToAttr("group.label", g.Label))
+			a.recordWarning("subtask_error", g.Label, stopErr.Error())
+		}
+		return
+	}
+	for _, d := range g.Diffs {
+		fingerprint := reviewItemFingerprint(a.reviewMode(), d)
+		comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
+		a.markCompleted(d)
+		a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+	}
+}
+
 func classifyItemError(err error) (session.FailureClass, string) {
 	switch {
 	case errors.Is(err, llm.ErrRequestTimeout):
