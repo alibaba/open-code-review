@@ -53,10 +53,74 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 	if err != nil {
 		return "", err
 	}
+	if result == noMatchesResult && !usePerlRegexp {
+		if alts := literalAlternatives(searchText); alts != nil {
+			return p.searchAlternatives(ctx, searchText, alts, caseSensitive, patterns)
+		}
+	}
 	return result, nil
 }
 
+const noMatchesResult = "No matches found"
+
+// literalAlternatives splits a literal search_text on '|' when that yields at
+// least two non-blank alternatives. Models routinely write "a|b" expecting
+// alternation while use_perl_regexp is off; the literal search then finds
+// nothing and the model concludes the code does not exist.
+func literalAlternatives(searchText string) []string {
+	if !strings.Contains(searchText, "|") {
+		return nil
+	}
+	var alts []string
+	for _, part := range strings.Split(searchText, "|") {
+		if t := strings.TrimSpace(part); t != "" {
+			alts = append(alts, t)
+		}
+	}
+	if len(alts) < 2 {
+		return nil
+	}
+	return alts
+}
+
+// searchAlternatives re-runs a literal search that found nothing as a search
+// for any of its '|'-separated parts, and says so in the result, so the model
+// learns both the answer and the tool's literal semantics.
+func (p *CodeSearchProvider) searchAlternatives(ctx context.Context, searchText string, alts []string, caseSensitive bool, pathspec []string) (string, error) {
+	quoted := make([]string, len(alts))
+	for i, a := range alts {
+		quoted[i] = strconv.Quote(a)
+	}
+	list := strings.Join(quoted, ", ")
+	result, err := p.gitGrepPatterns(ctx, alts, caseSensitive, false, pathspec)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", err
+		}
+		// The literal search already answered; a failed retry must not turn
+		// that answer into an error about a query the model never wrote, but
+		// the model must not read it as "none of the alternatives exist".
+		return fmt.Sprintf("No matches found. search_text %q is literal text unless use_perl_regexp is true, so '|' is not alternation. Note: the retry as alternatives %s did not complete (%s); set use_perl_regexp: true to search for any of them.", searchText, list, retryFailureClass(err)), nil
+	}
+	if result == noMatchesResult {
+		return fmt.Sprintf("No matches found. search_text %q is literal text unless use_perl_regexp is true, so '|' is not alternation; none of the alternatives %s match either.", searchText, list), nil
+	}
+	return fmt.Sprintf("Note: no line contains the literal text %q (search_text is literal unless use_perl_regexp is true, so '|' is not alternation). Showing lines that contain any of %s instead.\n", searchText, list) + result, nil
+}
+
+func retryFailureClass(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timed out"
+	}
+	return "failed"
+}
+
 func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool, usePerlRegexp bool, noIndex bool, pathspec []string) []string {
+	return p.buildGrepArgsPatterns([]string{searchText}, caseSensitive, usePerlRegexp, noIndex, pathspec)
+}
+
+// buildGrepArgsPatterns builds a git grep invocation matching any of patterns.
+func (p *CodeSearchProvider) buildGrepArgsPatterns(patterns []string, caseSensitive bool, usePerlRegexp bool, noIndex bool, pathspec []string) []string {
 	// core.quotepath=false reports non-ASCII paths literally instead of as
 	// quoted octal escapes, which file_read cannot open.
 	cmdArgs := []string{"--no-pager", "-c", "core.quotepath=false", "grep"}
@@ -83,7 +147,9 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	// limit from truncated results, then enforce the global limit below.
 	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount+1))
 
-	cmdArgs = append(cmdArgs, "-e", searchText)
+	for _, pattern := range patterns {
+		cmdArgs = append(cmdArgs, "-e", pattern)
+	}
 
 	if ref := p.FileReader.Ref; ref != "" {
 		if strings.HasPrefix(ref, "-") {
@@ -140,7 +206,11 @@ func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []str
 }
 
 func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, caseSensitive bool, usePerlRegexp bool, pathspec []string) (string, error) {
-	cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, false, pathspec)
+	return p.gitGrepPatterns(ctx, []string{searchText}, caseSensitive, usePerlRegexp, pathspec)
+}
+
+func (p *CodeSearchProvider) gitGrepPatterns(ctx context.Context, patterns []string, caseSensitive bool, usePerlRegexp bool, pathspec []string) (string, error) {
+	cmdArgs := p.buildGrepArgsPatterns(patterns, caseSensitive, usePerlRegexp, false, pathspec)
 	if cmdArgs == nil {
 		return "Error: ref must not start with '-'", nil
 	}
@@ -152,7 +222,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	// searches the working tree directly while still honoring .gitignore.
 	// Ref-based search needs a real repo, so it is not retried.
 	if err != nil && p.FileReader.Ref == "" && isNotGitRepoError(err, errStr) {
-		cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, true, pathspec)
+		cmdArgs = p.buildGrepArgsPatterns(patterns, caseSensitive, usePerlRegexp, true, pathspec)
 		outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
 	}
 
@@ -170,7 +240,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 				exitCode = exitErr.ExitCode()
 			}
 			if errStr == "" && exitCode == 1 {
-				return "No matches found", nil
+				return noMatchesResult, nil
 			}
 			trimmedErr := trimGitUsage(errStr, exitCode)
 			if trimmedErr == "" {

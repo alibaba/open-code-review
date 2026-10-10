@@ -269,7 +269,7 @@ src/main/java/com/example/internal/UserServiceImpl.java
 | `search_text` | はい | — | リテラル文字列または PCRE パターン（`use_perl_regexp` を参照）。 |
 | `file_patterns` | いいえ | リポジトリ全体 | pathspec エントリの配列。除外には `:(exclude)pat` を使用します。 |
 | `case_sensitive` | いいえ | `false` | — |
-| `use_perl_regexp` | いいえ | `false` | `true` の場合、`search_text` は正規表現として扱われます。 |
+| `use_perl_regexp` | いいえ | `false` | `true` の場合、`search_text` は正規表現として扱われます。それ以外はリテラルなので `a\|b` はその文字列そのものを探します。このリテラル検索で何も見つからない場合は、`\|` で区切った各部分で再検索し、結果にその旨を明記します。 |
 
 ### 出力
 

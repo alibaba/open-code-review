@@ -281,7 +281,7 @@ src/main/java/com/example/internal/UserServiceImpl.java
 | `search_text` | 예 | — | 문자열 그대로이거나 PCRE 패턴입니다(`use_perl_regexp` 참고). |
 | `file_patterns` | 아니요 | 저장소 전체 | pathspec 항목의 배열입니다. 빼려면 `:(exclude)pat`을 쓰세요. |
 | `case_sensitive` | 아니요 | `false` | — |
-| `use_perl_regexp` | 아니요 | `false` | `true`면 `search_text`를 정규식으로 다룹니다. |
+| `use_perl_regexp` | 아니요 | `false` | `true`면 `search_text`를 정규식으로 다룹니다. 아니면 리터럴이라 `a\|b`는 그 문자열 자체를 찾습니다. 이런 리터럴 검색이 아무것도 못 찾으면 `\|`로 나눈 각 부분으로 다시 찾고 결과에 그렇게 표시합니다. |
 
 ### 출력 {#output}
 
