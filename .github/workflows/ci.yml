@@ -26,7 +26,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 15
     container:
-      image: golang:1.26.6
+      image: golang:1.26.9
       options: --cpus=2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -82,6 +82,8 @@ jobs:
           govulncheck ./...
 
       - name: Test with coverage
+        env:
+          OCR_DELEGATE_REQUIRE_PTY: '1'
         run: |
           go test -v -race -count=1 -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | grep total: | awk '{print $3}'
@@ -119,7 +121,7 @@ jobs:
   # do: it only proves the windows arms of the build-tag splits compile. GitHub
   # does not support `container:` on Windows runners
   # (actions/runner#904), so this job installs Go directly instead of reusing the
-  # golang:1.26.5 image the other jobs share.
+  # golang:1.26.9 image the other jobs share.
   windows:
     runs-on: windows-latest
     timeout-minutes: 20
@@ -128,7 +130,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.5'
+          go-version: '1.26.9'
           cache: true
 
       - name: Vet
@@ -171,7 +173,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 10
     container:
-      image: golang:1.26.6
+      image: golang:1.26.9
       options: --cpus=2
     strategy:
       fail-fast: false

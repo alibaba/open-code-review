@@ -178,7 +178,7 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
         cwd: options.cwd,
         env: process.env,
         shell: false,
-        detached: true,
+        detached: process.platform !== "win32",
       },
     )
     child.stdin.end()
