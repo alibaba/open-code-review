@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
-	err := validateReviewRefs(t.TempDir(), reviewOptions{commit: "-O./pwn.sh"})
+	err := validateReviewRefs(context.Background(), nil, t.TempDir(), &reviewOptions{commit: "-O./pwn.sh"})
 	if err == nil {
 		t.Fatal("expected option-like --commit ref to be rejected")
 	}
@@ -87,7 +88,7 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 }
 
 func TestValidateReviewRefsRejectsOptionLikeRangeRef(t *testing.T) {
-	err := validateReviewRefs(t.TempDir(), reviewOptions{to: "-O./pwn.sh"})
+	err := validateReviewRefs(context.Background(), nil, t.TempDir(), &reviewOptions{to: "-O./pwn.sh"})
 	if err == nil {
 		t.Fatal("expected option-like --to ref to be rejected")
 	}
