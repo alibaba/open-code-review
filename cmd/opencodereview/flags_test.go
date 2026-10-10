@@ -4,11 +4,31 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 )
+
+func TestReviewIntraGroupConcurrency(t *testing.T) {
+	opts, err := parseReviewFlags(nil)
+	if err != nil || opts.intraGroupConcurrency != 1 {
+		t.Fatalf("default=%d err=%v", opts.intraGroupConcurrency, err)
+	}
+	for _, n := range []int{-1, 0, 1, 2, 3, 4} {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			opts, err := parseReviewFlags([]string{"--intra-group-concurrency", strconv.Itoa(n)})
+			if n < 1 || n > 3 {
+				if err == nil || !strings.Contains(err.Error(), "--intra-group-concurrency") {
+					t.Fatalf("expected range validation error, got %v", err)
+				}
+			} else if err != nil || opts.intraGroupConcurrency != n {
+				t.Fatalf("value=%d err=%v", opts.intraGroupConcurrency, err)
+			}
+		})
+	}
+}
 
 func TestParseReviewFlagsBackgroundFile(t *testing.T) {
 	for _, flag := range []string{"--background-file", "-B"} {
