@@ -135,7 +135,7 @@ OCR 자체를 수정하거나 사전 빌드 바이너리가 없는 플랫폼에�
 
 #### 사전 요구 사항 {#prerequisites}
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -144,7 +144,7 @@ OCR 자체를 수정하거나 사전 빌드 바이너리가 없는 플랫폼에�
 ```bash
 git clone https://github.com/alibaba/open-code-review.git
 cd open-code-review
-make build              # dist/opencodereview 생성
+make build              # dist/opencodereview 생성 (Windows에서는 dist/opencodereview.exe)
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 

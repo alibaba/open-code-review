@@ -29,7 +29,7 @@ OCR распространяется с открытым исходным код
 
 ### Предварительные требования
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -41,7 +41,7 @@ git clone https://github.com/<your-username>/open-code-review.git
 cd open-code-review
 git remote add upstream https://github.com/alibaba/open-code-review.git
 
-make build       # writes dist/opencodereview
+make build       # writes dist/opencodereview (dist/opencodereview.exe on Windows)
 make test        # LC_ALL=C go test -v -race -count=1 ./...
 ```
 
@@ -51,7 +51,8 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 ### Запуск локальной сборки
 
 ```bash
-./dist/opencodereview review --preview
+./dist/opencodereview review --preview        # macOS / Linux
+.\dist\opencodereview.exe review --preview   # Windows (PowerShell / cmd)
 ```
 
 Для удобства создайте в `~/bin/ocr-dev` символическую ссылку на
@@ -61,7 +62,7 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 
 | Цель | Назначение |
 |---|---|
-| `make build` | Собирает бинарный файл для текущей платформы → `dist/opencodereview`. |
+| `make build` | Собирает бинарный файл для текущей платформы → `dist/opencodereview` (`dist/opencodereview.exe` в Windows). |
 | `make build-darwin-amd64` | Кросс-компиляция для macOS Intel. |
 | `make build-darwin-arm64` | Кросс-компиляция для macOS Apple Silicon. |
 | `make build-linux-amd64` | Кросс-компиляция для Linux x86_64. |

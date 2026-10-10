@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -247,16 +248,35 @@ func errBedrockNotConfigurable(key string) error {
 		key, ProtocolAnthropicBedrock)
 }
 
+// validateEndpointURL reports URL parse failures before the SDK can turn them
+// into request errors that no longer identify the configuration variable.
+func validateEndpointURL(variable, value string) error {
+	if _, err := neturl.Parse(value); err != nil {
+		return fmt.Errorf("invalid %s: %w", variable, err)
+	}
+	return nil
+}
+
 // tryOCREnv reads OCR-specific environment variables.
+//
+// The values are trimmed because an environment can carry a trailing "\r" —
+// a .env file or a shell wrapper generated with CRLF line endings is the usual
+// source on Windows. A URL with a control character fails url.Parse inside the
+// SDK before any request is sent, and the resulting message names neither the
+// environment nor the variable. Every other OCR_LLM_* reader trims
+// (OCR_LLM_TIMEOUT, OCR_LLM_PROTOCOL); these must behave the same way.
 func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
-	url := os.Getenv(envOCRLLMURL)
-	token := os.Getenv(envOCRLLMToken)
-	model := os.Getenv(envOCRLLMModel)
+	url := strings.TrimSpace(os.Getenv(envOCRLLMURL))
+	token := strings.TrimSpace(os.Getenv(envOCRLLMToken))
+	model := strings.TrimSpace(os.Getenv(envOCRLLMModel))
 	if modelOverride != "" {
 		model = modelOverride
 	}
 	if url == "" || token == "" || model == "" {
 		return ResolvedEndpoint{}, false, nil
+	}
+	if err := validateEndpointURL(envOCRLLMURL, url); err != nil {
+		return ResolvedEndpoint{}, false, err
 	}
 
 	// OCR_LLM_PROTOCOL (normalized) wins over OCR_USE_ANTHROPIC when set.
@@ -272,7 +292,10 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	}
 	if protocol == "" {
 		useAnthropic := true // default true
-		if v := os.Getenv(envOCRUseAnthropic); v != "" {
+		// Trimmed so a "\r" from a CRLF-generated environment cannot silently
+		// turn "true" into an unrecognized value and flip the protocol to
+		// OpenAI below.
+		if v := strings.TrimSpace(os.Getenv(envOCRUseAnthropic)); v != "" {
 			lower := strings.ToLower(v)
 			useAnthropic = lower == "true" || lower == "1" || lower == "yes"
 		}
@@ -422,8 +445,10 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		// is set, and only for preset providers (custom ones have no fallback).
 		// Same whitespace rule as the static key above, so `export
 		// ANTHROPIC_API_KEY="  "` reports "no api_key configured" instead of
-		// sending `Authorization: Bearer  ` and getting an opaque 401.
-		if v := os.Getenv(preset.EnvVar); strings.TrimSpace(v) != "" {
+		// sending `Authorization: Bearer  ` and getting an opaque 401. Trim the
+		// stored value too, not just the emptiness check, or a key carrying a
+		// trailing "\r" reaches the auth header.
+		if v := strings.TrimSpace(os.Getenv(preset.EnvVar)); v != "" {
 			apiKey = v
 		}
 	}
@@ -500,24 +525,21 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	}
 	availableModels = append(availableModels, entry.Models...)
 
-	// A preset's Models list doubles as an allowlist for --model. For an
-	// ambient-auth provider it cannot: Bedrock identifiers are scoped to an
-	// account and a region, and an application inference profile ARN — a
-	// supported value, and the one to use when spend has to be attributed — can
-	// never appear in a list compiled upstream. The list stays a picker for
-	// `ocr config model`; it does not gate an override.
-	gateOverrideOnModelList := !ambientAuth
-
-	// Apply model override with validation.
+	// Preset lists can lag provider catalogs, so they guide interactive selection
+	// without preventing a per-run override. A custom provider's configured list
+	// remains a constraint except with ambient, account-scoped authentication.
 	if modelOverride != "" {
-		if gateOverrideOnModelList && len(availableModels) > 0 {
-			if !ModelListContains(availableModels, modelOverride) {
+		if len(availableModels) > 0 && !ModelListContains(availableModels, modelOverride) {
+			if !isPreset && !ambientAuth {
 				return ResolvedEndpoint{}, false, fmt.Errorf(
 					"model %q is not available for provider %q; available models: %s",
 					modelOverride,
 					cfg.Provider,
 					strings.Join(availableModels, ", "),
 				)
+			}
+			if isPreset {
+				fmt.Fprintf(os.Stderr, "[ocr] WARNING: model %q is not in the suggested models for provider %q; the provider will validate it\n", modelOverride, cfg.Provider)
 			}
 		}
 		model = modelOverride
@@ -700,14 +722,20 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 
 // tryCCEnv reads Claude Code environment variables.
 func tryCCEnv(modelOverride string) (ResolvedEndpoint, bool, error) {
-	baseURL := os.Getenv(envCCBaseURL)
-	token := os.Getenv(envCCToken)
-	model := os.Getenv(envCCModel)
+	// Trim here rather than in finalizeResolvedEndpoint: ensureMessagesSuffix
+	// below appends "/v1/messages", which would bury a trailing "\r" in the
+	// middle of the URL where a later TrimSpace can no longer reach it.
+	baseURL := strings.TrimSpace(os.Getenv(envCCBaseURL))
+	token := strings.TrimSpace(os.Getenv(envCCToken))
+	model := strings.TrimSpace(os.Getenv(envCCModel))
 	if modelOverride != "" {
 		model = modelOverride
 	}
 	if baseURL == "" || token == "" || model == "" {
 		return ResolvedEndpoint{}, false, nil
+	}
+	if err := validateEndpointURL(envCCBaseURL, baseURL); err != nil {
+		return ResolvedEndpoint{}, false, err
 	}
 
 	url := ensureMessagesSuffix(baseURL)

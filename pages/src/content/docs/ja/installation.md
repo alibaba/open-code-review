@@ -147,7 +147,7 @@ OCR 自体を変更する場合、またはプリコンパイル済みバイナ�
 
 #### 前提条件
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -156,7 +156,7 @@ OCR 自体を変更する場合、またはプリコンパイル済みバイナ�
 ```bash
 git clone https://github.com/alibaba/open-code-review.git
 cd open-code-review
-make build              # dist/opencodereview を生成
+make build              # dist/opencodereview を生成（Windows では dist/opencodereview.exe）
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 

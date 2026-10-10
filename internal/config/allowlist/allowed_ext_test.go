@@ -4,6 +4,9 @@
 package allowedext
 
 import (
+	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -51,6 +54,10 @@ func TestIsAllowedExt(t *testing.T) {
 		{".HBS", true},
 		{".mustache", true},
 		{".MUSTACHE", true},
+		{".jinja2", true},
+		{".JINJA2", true},
+		{".j2", true},
+		{".J2", true},
 		{".pug", true},
 		{".PUG", true},
 		{".graphql", true},
@@ -138,6 +145,67 @@ func TestIsAllowedExt(t *testing.T) {
 				t.Errorf("IsAllowedExt(%q) = %v, want %v", tt.ext, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestAllowlistKeepsEveryTestedExtension ties the explicit table in
+// TestIsAllowedExt to supported_file_types.json. The table above can only test
+// what it lists, so on its own it keeps passing when an entry disappears from the
+// file: the case simply stops being exercised, and the suite gets greener while
+// the allowlist gets smaller. Dropping a listed extension from the file is the
+// shape an accidental deletion takes, so that direction is asserted here.
+//
+// The reverse direction, an allowlisted extension with no case in the table, is
+// deliberately not a failure: the table is far smaller than the allowlist, and
+// requiring a case for every entry would mean touching this test for every
+// language PR. What is guaranteed here is that nothing the table covers can be
+// removed unnoticed.
+func TestAllowlistKeepsEveryTestedExtension(t *testing.T) {
+	raw, err := os.ReadFile("supported_file_types.json")
+	if err != nil {
+		t.Fatalf("read supported_file_types.json: %v", err)
+	}
+	var exts []string
+	if err := json.Unmarshal(raw, &exts); err != nil {
+		t.Fatalf("parse supported_file_types.json: %v", err)
+	}
+	if len(exts) == 0 {
+		t.Fatal("supported_file_types.json has no extensions")
+	}
+
+	allowed := make(map[string]bool, len(exts))
+	for _, ext := range exts {
+		if ext != strings.ToLower(ext) {
+			t.Errorf("allowlist entry %q is not lower case; matching lowercases the input, so a mixed-case entry can never be hit", ext)
+		}
+		if !strings.HasPrefix(ext, ".") {
+			t.Errorf("allowlist entry %q does not start with a dot", ext)
+		}
+		if allowed[ext] {
+			t.Errorf("allowlist entry %q is listed more than once", ext)
+		}
+		allowed[ext] = true
+	}
+
+	tested := []string{
+		".go", ".java", ".ts", ".tsx", ".astro", ".py", ".pyi", ".php", ".phtml",
+		".rs", ".r", ".ets", ".json5", ".kt", ".kts", ".fs", ".fsi", ".fsx",
+		".ftl", ".ftlh", ".ftlx", ".hbs", ".mustache", ".jinja2", ".j2", ".pug", ".graphql",
+		".js", ".jsx", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".cs",
+		".rb", ".sh", ".bash", ".zsh", ".sql", ".css", ".scss", ".html", ".xml", ".yaml",
+		".yml", ".json", ".toml", ".lua", ".swift",
+	}
+	for _, ext := range tested {
+		if !allowed[ext] {
+			t.Errorf("supported_file_types.json no longer lists %q, but TestIsAllowedExt expects it to be allowed", ext)
+			continue
+		}
+		if !IsAllowedExt(ext) {
+			t.Errorf("IsAllowedExt(%q) = false for an extension listed in supported_file_types.json", ext)
+		}
+		if upper := strings.ToUpper(ext); !IsAllowedExt(upper) {
+			t.Errorf("IsAllowedExt(%q) = false: matching must be case-insensitive", upper)
+		}
 	}
 }
 

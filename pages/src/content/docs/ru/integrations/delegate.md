@@ -93,23 +93,41 @@ ocr delegate rule <path1> <path2> ...
 
 ### Шаг 3. Получить diff
 
-Используйте Git напрямую на основе режима и сведений о ссылках из шага 1:
+Выберите команду diff по режиму и ссылкам из шага 1. При каждом вызове Git во время ревью используйте `git --no-pager`.
+
+Следующие команды diff отключают внешние diff-программы, преобразование текста и цветной вывод, чтобы получить патчи в виде обычного текста.
 
 **Режим диапазона** (предоставлен merge\_base):
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Режим коммита**:
 ```bash
-git show <commit> -- <path>
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Режим рабочей области**:
 ```bash
-git diff HEAD -- <path>        # tracked files
-cat <path>                     # new untracked files
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # tracked files
+cat "<path>"                     # new untracked files
 ```
+
+Для получения контекста:
+
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
+Для больших diff добавьте `--output="<absolute-diff-file>"` в команду выбранного режима. Выберите уникальный абсолютный путь вне репозитория и создайте родительский каталог. Используйте тот же путь в вызовах инструмента чтения файлов:
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+После завершения Git с кодом 0 прочитайте и проверьте весь файл по частям, затем удалите его. При ошибке или тайм-ауте повторите попытку либо отметьте файл как `skipped`, указав ошибку. Если вывод неожиданно пуст, повторите preview и сопоставьте результаты.
 
 ### Шаг 4. Проверить каждый файл
 
@@ -118,6 +136,8 @@ cat <path>                     # new untracked files
 1. Получить его diff (шаг 3).
 2. Использовать подходящую группу правил (шаг 2) как контрольный список ревью.
 3. Провести тщательное ревью, при необходимости исследуя контекст.
+
+Запишите каждый элемент `(path, status)` из preview как `reviewed` или `skipped`. Укажите причину для каждого пропущенного элемента и включите в отчёт `total_files`, `reviewed_files`, `skipped_files`, `coverage_rate`.
 
 ### Шаг 5. Подготовить отчёт
 

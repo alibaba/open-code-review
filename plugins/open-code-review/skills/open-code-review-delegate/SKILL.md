@@ -59,25 +59,43 @@ Pass the reviewable file paths from Step 1. Output is grouped by rule content â€
 
 ### Step 3: Get Diffs
 
-Use git directly based on the mode/ref info from Step 1:
+Choose the diff command using the mode and refs from Step 1. Use `git --no-pager` for every Git call during the review.
+
+The diff commands disable external diff programs, text conversion, and color to produce plain patches.
 
 **Range mode** (merge_base provided in preview output):
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Commit mode**:
 ```bash
-git show <commit> -- <path>
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Workspace mode**:
 ```bash
 # Tracked files
-git diff HEAD -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"
 # New untracked files â€” read directly (entire file is new code)
-cat <path>
+cat "<path>"
 ```
+
+To read context:
+
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
+For large diffs, add `--output="<absolute-diff-file>"` to the command for the selected mode. Choose a unique absolute path outside the repository and create its parent directory. Use the same path in file-reading tool calls:
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+After Git exits with code 0, read and review the entire file in chunks, then remove it. If Git fails or times out, retry or record `skipped` with the error. Check unexpectedly empty output against a fresh preview.
 
 ### Step 4: Review Each File
 

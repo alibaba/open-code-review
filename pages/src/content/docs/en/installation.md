@@ -163,7 +163,7 @@ without a pre-built binary.
 
 #### Prerequisites
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -172,7 +172,7 @@ without a pre-built binary.
 ```bash
 git clone https://github.com/alibaba/open-code-review.git
 cd open-code-review
-make build              # writes dist/opencodereview
+make build              # writes dist/opencodereview (dist/opencodereview.exe on Windows)
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 

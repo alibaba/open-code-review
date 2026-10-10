@@ -215,6 +215,7 @@ func executeScan(opts scanOptions) (retErr error) {
 		MaxConcurrency:        opts.concurrency,
 		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
+		EndpointSource:        rt.Source,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		MaxFileSizeBytes:      scanTpl.MaxFileSizeBytes,

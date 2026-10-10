@@ -13,4 +13,4 @@
 // becomes a real module and should be treated as one.
 module github.com/alibaba/open-code-review/pages
 
-go 1.25.5
+go 1.26.9
