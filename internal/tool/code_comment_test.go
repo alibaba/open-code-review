@@ -361,3 +361,60 @@ func TestParseComments_NormalizePath(t *testing.T) {
 		}
 	}
 }
+
+func TestParseComments_SingleCommentShapes(t *testing.T) {
+	const want = "retry is missing"
+	ok := []struct {
+		name string
+		args map[string]any
+	}{
+		{"comments as a single object", map[string]any{"comments": map[string]any{"content": want, "path": "a.js"}}},
+		{"flat content", map[string]any{"path": "a.js", "content": want}},
+		{"flat comment alias", map[string]any{"path": "a.js", "category": "maintainability", "comment": want}},
+	}
+	for _, tc := range ok {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _, errMsg := ParseCommentsWithPath(tc.args, "")
+			if errMsg != "" {
+				t.Fatalf("unexpected error: %s", errMsg)
+			}
+			if len(got) != 1 || got[0].Content != want || got[0].Path != "a.js" {
+				t.Fatalf("got %+v, want one comment %q on a.js", got, want)
+			}
+		})
+	}
+
+	// Anything that is not a recognised single-comment shape stays an error.
+	bad := []struct {
+		name string
+		args map[string]any
+	}{
+		{"no comments and no content", map[string]any{"path": "a.js", "category": "bug"}},
+		{"empty comments array", map[string]any{"path": "a.js", "comments": []any{}}},
+		{"comments is a number", map[string]any{"path": "a.js", "comments": float64(3), "content": want}},
+		{"content is not a string", map[string]any{"path": "a.js", "content": float64(3)}},
+	}
+	for _, tc := range bad {
+		t.Run("error/"+tc.name, func(t *testing.T) {
+			got, _, errMsg := ParseCommentsWithPath(tc.args, "")
+			if errMsg == "" {
+				t.Fatalf("expected an error, got %+v", got)
+			}
+		})
+	}
+}
+
+func TestParseComments_SingleCommentFieldsKept(t *testing.T) {
+	got, _, errMsg := ParseCommentsWithPath(map[string]any{
+		"path": "a.js", "comment": "c", "category": "BUG", "severity": "High",
+		"existing_code": "old", "suggestion_code": "new", "thinking": "t",
+	}, "")
+	if errMsg != "" || len(got) != 1 {
+		t.Fatalf("got %+v err %q", got, errMsg)
+	}
+	c := got[0]
+	if c.Content != "c" || c.Category != "bug" || c.Severity != "high" ||
+		c.ExistingCode != "old" || c.SuggestionCode != "new" || c.Thinking != "t" {
+		t.Fatalf("fields altered: %+v", c)
+	}
+}
