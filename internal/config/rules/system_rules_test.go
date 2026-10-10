@@ -174,6 +174,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
 		{"policies/authz.rego", "Default Posture"},
 		{"policies/authz.REGO", "Default Posture"},
+		{"src/server.cr", "Fibers, Concurrency, and Channels"},
+		{"shard/src/client.cr", "Fibers, Concurrency, and Channels"},
 	}
 
 	for _, tt := range tests {
