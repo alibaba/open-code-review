@@ -353,20 +353,25 @@ func TestExecute_EmptyFilePath(t *testing.T) {
 	}
 }
 
-func TestExecute_InvalidLineRange(t *testing.T) {
+func TestExecute_SwappedLineRange(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "test.txt", "a\nb\nc\n")
 
 	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
 	p := NewFileRead(fr)
 
-	_, err := p.Execute(context.Background(), map[string]any{
+	// An inverted range is a common model slip (start from the old hunk side,
+	// end from the new file). The tool swaps it instead of erroring.
+	got, err := p.Execute(context.Background(), map[string]any{
 		"file_path":  "test.txt",
-		"start_line": float64(5),
+		"start_line": float64(3),
 		"end_line":   float64(2),
 	})
-	if err == nil {
-		t.Error("expected error for invalid line range")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "2|b\n3|c\n") {
+		t.Errorf("Execute() = %q, want swapped range 2-3", got)
 	}
 }
 
