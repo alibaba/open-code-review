@@ -90,6 +90,72 @@ index 1234567..89abcde 100644
 	}
 }
 
+// TestParseDiffText_SamePathHeaderWithDelimiterInPath covers a bare "diff --git"
+// header whose only delimiter-looking " b/" sits inside the pathname itself.
+// Git writes the same path on both sides of a non-rename header, so the split
+// whose sides agree is the one it wrote; reading the first delimiter instead
+// turns "x b/y.go" into a rename to "y.go b/x b/y.go", and nothing can be read
+// from a path that does not exist.
+func TestParseDiffText_SamePathHeaderWithDelimiterInPath(t *testing.T) {
+	diffText := `diff --git a/x b/y.go b/x b/y.go
+index 789ca71..aa33d82 100644
+--- a/x b/y.go
++++ b/x b/y.go
+@@ -1,1 +1,2 @@
+ package y
++var Changed = true
+`
+	diffs, err := ParseDiffText(context.Background(), diffText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d", len(diffs))
+	}
+	d := diffs[0]
+	if d.OldPath != "x b/y.go" || d.NewPath != "x b/y.go" {
+		t.Errorf("paths = %q / %q, want %q on both sides", d.OldPath, d.NewPath, "x b/y.go")
+	}
+	if d.IsRenamed {
+		t.Error("IsRenamed = true, want false: a header naming one path on both sides is not a rename")
+	}
+	if d.Insertions != 1 {
+		t.Errorf("Insertions = %d, want 1", d.Insertions)
+	}
+}
+
+// TestParseDiffText_AmbiguousRenameHeaderStillUsesRenameLines pins that a
+// rename whose two paths both contain " b/" keeps taking its paths from the
+// "rename from"/"rename to" lines, which stay authoritative when no split of
+// the header names the same path twice.
+func TestParseDiffText_AmbiguousRenameHeaderStillUsesRenameLines(t *testing.T) {
+	diffText := `diff --git a/x b/old.go b/x b/new.go
+similarity index 90%
+rename from x b/old.go
+rename to x b/new.go
+index 789ca71..aa33d82 100644
+--- a/x b/old.go
++++ b/x b/new.go
+@@ -1,1 +1,1 @@
+-package old
++package new
+`
+	diffs, err := ParseDiffText(context.Background(), diffText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d", len(diffs))
+	}
+	d := diffs[0]
+	if d.OldPath != "x b/old.go" || d.NewPath != "x b/new.go" {
+		t.Errorf("paths = %q / %q, want %q / %q", d.OldPath, d.NewPath, "x b/old.go", "x b/new.go")
+	}
+	if !d.IsRenamed {
+		t.Error("IsRenamed = false, want true")
+	}
+}
+
 // TestParseDiffText_PureRename covers a 100% similarity rename, which carries
 // no hunks and no ---/+++ lines at all.
 func TestParseDiffText_PureRename(t *testing.T) {
