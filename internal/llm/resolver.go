@@ -147,7 +147,7 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 		}
 	}
 
-	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
+	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, config.json under $OCR_HOME (default ~/.opencodereview), or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
 }
 
 // envOverrides holds the global OCR_LLM_* overrides that apply to whichever

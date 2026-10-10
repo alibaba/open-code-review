@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/pathutil"
 )
 
 // Summary is a compact digest of one persisted session, suitable for
@@ -96,11 +98,11 @@ type summaryRecord struct {
 // SessionsDir returns the on-disk directory that holds JSONL session files
 // for a given repository. It does not create the directory.
 func SessionsDir(repoDir string) (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := pathutil.OCRHome()
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
-	return filepath.Join(home, ".opencodereview", sessionSubDir, encodeRepoPath(repoDir)), nil
+	return filepath.Join(home, sessionSubDir, encodeRepoPath(repoDir)), nil
 }
 
 // ListSessions enumerates all persisted sessions for the given repository
