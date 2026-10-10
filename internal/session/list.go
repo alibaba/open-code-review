@@ -114,7 +114,7 @@ func ListSessions(repoDir string) ([]Summary, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return []Summary{}, nil
 		}
 		return nil, fmt.Errorf("read sessions dir %q: %w", dir, err)
 	}
