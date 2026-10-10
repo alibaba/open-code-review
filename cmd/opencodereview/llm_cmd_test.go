@@ -4,6 +4,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +13,51 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/testconnection"
 	"github.com/alibaba/open-code-review/internal/llm"
 )
+
+func TestRunLLMProvidersJSON(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := runLLMProvidersTo(&out, &errOut, true); err != nil {
+		t.Fatalf("runLLMProvidersTo: %v", err)
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", errOut.String())
+	}
+
+	var got []llmProviderJSON
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("JSON output: %v\n%s", err, out.String())
+	}
+	providers := llm.ListProviders()
+	if len(got) != len(providers) {
+		t.Fatalf("provider count = %d, want %d", len(got), len(providers))
+	}
+	for i, want := range providers {
+		if got[i].Name != want.Name || got[i].DisplayName != want.DisplayName || got[i].Protocol != want.Protocol || got[i].BaseURL != want.BaseURL {
+			t.Errorf("provider[%d] = %+v, want metadata from %+v", i, got[i], want)
+		}
+		if len(got[i].Models) != len(want.Models) {
+			t.Errorf("provider[%d] models = %d, want %d", i, len(got[i].Models), len(want.Models))
+		}
+	}
+	if strings.Contains(out.String(), "Built-in providers:") {
+		t.Error("JSON output contains the human-readable table header")
+	}
+}
+
+func TestRunLLMProvidersTable(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := runLLMProvidersTo(&out, &errOut, false); err != nil {
+		t.Fatalf("runLLMProvidersTo: %v", err)
+	}
+	for _, want := range []string{"Built-in providers:", "NAME", "PROTOCOL", "BASE URL", "ocr config provider"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("table output missing %q", want)
+		}
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", errOut.String())
+	}
+}
 
 // TestToolRoundTripNote guards the reporting contract for #1357: a provider that
 // never calls the test tool leaves the round trip unproven, and saying so is the
