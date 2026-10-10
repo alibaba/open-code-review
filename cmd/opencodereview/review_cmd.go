@@ -179,10 +179,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 	cc.Template.ApplyEffort(effort)
 
-	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
-	// input it returns pins the run to the very commits this check passed on, so
-	// the decision cannot be undone by a ref moving afterwards.
-	sealed, err := validateResumeIdentity(ctx, cc, opts, rt, resumeState)
+	// Freeze commit-backed input before constructing readers or creating a session.
+	// A rejected resume still persists nothing, and every later read uses the
+	// same commits even if the requested refs move.
+	sealedInput, err := prepareReviewInput(ctx, cc, opts, rt, resumeState)
 	if err != nil {
 		return err
 	}
@@ -190,11 +190,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,
-	}
-
-	var sealedInput *diff.InputResolution
-	if sealed != nil {
-		sealedInput = &sealed.Resolution
 	}
 
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
@@ -376,6 +371,29 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 	// Whether the checkpoints may be reused at all is decided later, by
 	// validateResumeIdentity, once the input identity is known.
 	return state, nil
+}
+
+// prepareReviewInput fixes commit-backed input before session creation, while
+// resume admission also checks the identity of the selected input.
+func prepareReviewInput(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState) (*diff.InputResolution, error) {
+	if state == nil {
+		resolution, err := agent.ResolveInput(ctx, agent.Args{
+			RepoDir:   cc.RepoDir,
+			From:      opts.from,
+			To:        opts.to,
+			Commit:    opts.commit,
+			GitRunner: cc.GitRunner,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("resolve review input: %w", err)
+		}
+		return resolution, nil
+	}
+	sealed, err := validateResumeIdentity(ctx, cc, opts, rt, state)
+	if err != nil || sealed == nil {
+		return nil, err
+	}
+	return &sealed.Resolution, nil
 }
 
 // validateResumeIdentity rejects a resume whose input, rules, provider or model

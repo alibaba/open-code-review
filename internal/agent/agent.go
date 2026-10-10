@@ -141,12 +141,9 @@ type Args struct {
 	// Resume is an optional read-only checkpoint index from a previous review session.
 	Resume *session.ResumeState
 
-	// SealedInput pins this run to commit endpoints a pre-flight resolve already
-	// froze, instead of resolving From/To/Commit again. Set only on the resume
-	// path, where admission compared an identity derived from those endpoints:
-	// re-resolving a raw ref here could read a commit the admitted identity never
-	// covered, and the mismatch would surface only after the child session and
-	// manifest existed. Nil means resolve normally, which is every non-resume run.
+	// SealedInput pins the diff and full-file content to endpoints resolved before
+	// session creation. CLI commit/range reviews carry this seal, including resume
+	// admission; callers leaving it nil resolve From/To/Commit during diff loading.
 	SealedInput *diff.InputResolution
 
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
