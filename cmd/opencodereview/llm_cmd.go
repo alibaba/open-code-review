@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"text/tabwriter"
 	"time"
@@ -40,14 +42,17 @@ var llmProvidersCmd = &cobra.Command{
 	Use:   "providers",
 	Short: "List all built-in LLM providers",
 	Args:  cobra.NoArgs,
-	Run: func(cmd *cobra.Command, args []string) {
-		runLLMProviders()
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runLLMProvidersTo(cmd.OutOrStdout(), cmd.ErrOrStderr(), llmProvidersJSON)
 	},
 }
+
+var llmProvidersJSON bool
 
 func init() {
 	llmCmd.AddCommand(llmTestCmd)
 	llmCmd.AddCommand(llmProvidersCmd)
+	llmProvidersCmd.Flags().BoolVar(&llmProvidersJSON, "json", false, "Output provider data as JSON")
 }
 
 var runLLMTestPath = runLLMTestWithConfigPath
@@ -245,17 +250,49 @@ func bedrockContext(client llm.LLMClient) (region, profile string, ok bool) {
 }
 
 func runLLMProviders() {
+	_ = runLLMProvidersTo(os.Stdout, os.Stderr, false)
+}
+
+type llmProviderJSON struct {
+	Name        string   `json:"name"`
+	DisplayName string   `json:"displayName"`
+	Protocol    string   `json:"protocol"`
+	BaseURL     string   `json:"baseUrl"`
+	Models      []string `json:"models"`
+}
+
+func runLLMProvidersTo(out, errOut io.Writer, jsonOutput bool) error {
 	providers := llm.ListProviders()
-	fmt.Println("\nBuilt-in providers:")
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	if jsonOutput {
+		items := make([]llmProviderJSON, 0, len(providers))
+		for _, p := range providers {
+			models := append([]string(nil), p.Models...)
+			if models == nil {
+				models = []string{}
+			}
+			items = append(items, llmProviderJSON{
+				Name:        p.Name,
+				DisplayName: p.DisplayName,
+				Protocol:    p.Protocol,
+				BaseURL:     p.BaseURL,
+				Models:      models,
+			})
+		}
+		return json.NewEncoder(out).Encode(items)
+	}
+
+	fmt.Fprintln(out, "\nBuilt-in providers:")
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "  NAME\tPROTOCOL\tBASE URL\n")
 	fmt.Fprintf(w, "  ----\t--------\t--------\n")
 	for _, p := range providers {
 		fmt.Fprintf(w, "  %s\t%s\t%s\n", p.Name, p.Protocol, p.BaseURL)
 	}
 	if err := w.Flush(); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to flush output: %v\n", err)
+		fmt.Fprintf(errOut, "warning: failed to flush output: %v\n", err)
+		return err
 	}
-	fmt.Println("\nUse 'ocr config provider' to configure a provider interactively.")
-	fmt.Println("Use 'ocr config set provider <name>' to switch providers non-interactively.")
+	fmt.Fprintln(out, "\nUse 'ocr config provider' to configure a provider interactively.")
+	fmt.Fprintln(out, "Use 'ocr config set provider <name>' to switch providers non-interactively.")
+	return nil
 }
