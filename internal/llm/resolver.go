@@ -121,6 +121,9 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 			}
 			return ResolvedEndpoint{}, fmt.Errorf("resolve OCR config file: provider %q is not configured in %s section because the config file does not exist", opts.Provider, section)
 		}
+		if IsOAuthProtocol(ep.Protocol) && len(env.headers) > 0 {
+			return ResolvedEndpoint{}, fmt.Errorf("OCR_LLM_EXTRA_HEADERS cannot override official OAuth authentication")
+		}
 		return finalizeResolvedEndpoint("OCR config file", ep, env), nil
 	}
 
@@ -143,6 +146,9 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 		// transport supplies both. Everything else still needs all three.
 		complete := ep.Model != "" && (ep.AmbientAuth || (ep.URL != "" && ep.Token != ""))
 		if ok && complete {
+			if IsOAuthProtocol(ep.Protocol) && len(env.headers) > 0 {
+				return ResolvedEndpoint{}, fmt.Errorf("OCR_LLM_EXTRA_HEADERS cannot override official OAuth authentication")
+			}
 			return finalizeResolvedEndpoint(strategy.name, ep, env), nil
 		}
 	}
@@ -288,6 +294,9 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 		}
 		if protocol == ProtocolAnthropicBedrock {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", errBedrockNotConfigurable(envOCRLLMProtocol))
+		}
+		if IsOAuthProtocol(protocol) {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: OAuth requires a configured provider; set provider to %q", protocol)
 		}
 	}
 	if protocol == "" {
@@ -485,7 +494,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		if err := ValidateProtocol(normalized); err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q: %w", cfg.Provider, err)
 		}
-		if normalized != ProtocolAnthropicBedrock && entry.URL == "" {
+		if !usesAmbientAuth(normalized) && entry.URL == "" {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires a url field for protocol %q", cfg.Provider, normalized)
 		}
 		url = entry.URL
@@ -499,8 +508,15 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	// SigV4 signing and needs a token like anything else. Conversely an entry
 	// that selects the bedrock protocol explicitly signs its requests whatever
 	// the preset says.
-	ambientAuth := protocol == ProtocolAnthropicBedrock ||
+	ambientAuth := usesAmbientAuth(protocol) ||
 		(isPreset && preset.AmbientAuth && entry.Protocol == "")
+	if IsOAuthProtocol(protocol) {
+		if entry.APIKey != "" || entry.APIKeyCmd != "" || entry.URL != "" || entry.AuthHeader != "" || len(entry.ExtraHeaders) > 0 || len(entry.ExtraBody) > 0 || len(entry.RetryCodes) > 0 {
+			return ResolvedEndpoint{}, false, fmt.Errorf("provider %q uses official OAuth credentials; api_key, api_key_cmd, url, auth_header, extra_headers, extra_body and retry_codes overrides are not supported", cfg.Provider)
+		}
+		apiKey = ""
+		url = ""
+	}
 
 	// No credential at all is an error, and it is reported before api_key_cmd
 	// runs: only the command's *execution* is deferred, not the emptiness check.
@@ -658,6 +674,9 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		}
 		if protocol == ProtocolAnthropicBedrock {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", errBedrockNotConfigurable("llm.protocol"))
+		}
+		if IsOAuthProtocol(protocol) {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: OAuth requires a configured provider; set provider to %q", protocol)
 		}
 	}
 	if protocol == "" {

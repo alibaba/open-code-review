@@ -41,6 +41,20 @@ type Provider struct {
 // and commit both generated catalogs. See the root AGENTS.md for paths and verification.
 var registry = []Provider{
 	{
+		Name:        "codex-oauth",
+		DisplayName: "OpenAI Codex (ChatGPT OAuth)",
+		Protocol:    ProtocolCodexOAuth,
+		AmbientAuth: true,
+		Models:      []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol"},
+	},
+	{
+		Name:        "anthropic-oauth",
+		DisplayName: "Anthropic Claude (Subscription OAuth)",
+		Protocol:    ProtocolAnthropicOAuth,
+		AmbientAuth: true,
+		Models:      []string{"sonnet", "opus", "claude-opus-5-5", "claude-sonnet-5-5"},
+	},
+	{
 		Name:        "anthropic",
 		DisplayName: "Anthropic Claude API",
 		Protocol:    ProtocolAnthropic,

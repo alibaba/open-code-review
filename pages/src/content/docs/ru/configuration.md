@@ -49,6 +49,8 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
+| `codex-oauth` | codex-oauth | управляется Codex app-server | ChatGPT OAuth |
+| `anthropic-oauth` | anthropic-oauth | управляется Claude Code | OAuth подписки Claude |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |

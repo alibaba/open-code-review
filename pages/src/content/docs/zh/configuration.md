@@ -43,6 +43,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
+| `codex-oauth` | codex-oauth | 由 Codex app-server 管理 | ChatGPT OAuth |
+| `anthropic-oauth` | anthropic-oauth | 由 Claude Code 管理 | Claude 订阅 OAuth |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |

@@ -44,6 +44,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region` から決定 | —（AWS 認証情報チェーン） |
+| `codex-oauth` | codex-oauth | Codex app-server が管理 | ChatGPT OAuth |
+| `anthropic-oauth` | anthropic-oauth | Claude Code が管理 | Claude サブスクリプション OAuth |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
