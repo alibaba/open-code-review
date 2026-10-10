@@ -972,3 +972,19 @@ func TestRunSessionExport_Errors(t *testing.T) {
 		})
 	}
 }
+
+func TestRunSessionList_JSON_MissingSessionsDirReturnsEmptyArray(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	got := captureStdout(t, func() {
+		if err := runSessionListCompat([]string{"--repo", repoDir, "--json"}); err != nil {
+			t.Fatalf("runSessionList: %v", err)
+		}
+	})
+
+	if strings.TrimSpace(got) != "[]" {
+		t.Fatalf("expected '[]', got %q", got)
+	}
+}
