@@ -302,18 +302,18 @@ func deleteCustomProvider(cfg *Config, name string) (bool, error) {
 
 // ProviderEntry holds per-provider configuration in the providers map.
 type ProviderEntry struct {
-	APIKey       string            `json:"api_key,omitempty"`
-	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
-	URL          string            `json:"url,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Models       []string          `json:"models,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
+	APIKey        string            `json:"api_key,omitempty"`
+	APIKeyCmd     string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
+	URL           string            `json:"url,omitempty"`
+	Protocol      string            `json:"protocol,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	Models        []string          `json:"models,omitempty"`
+	AuthHeader    string            `json:"auth_header,omitempty"`
 	TimeoutSec    int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
 	ExtraBody     map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders  map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes    []int             `json:"retry_codes,omitempty"`
-	PromptCaching *bool            `json:"prompt_caching,omitempty"`
+	PromptCaching *bool             `json:"prompt_caching,omitempty"`
 
 	// AWSProfile and AWSRegion pin the credentials and region for providers that
 	// authenticate from the AWS chain (bedrock). Both are optional — without
@@ -363,13 +363,13 @@ type Config struct {
 }
 
 type LlmConfig struct {
-	URL          string            `json:"url,omitempty"`
-	AuthToken    string            `json:"auth_token,omitempty"`
-	AuthTokenCmd string            `json:"auth_token_cmd,omitempty"` // shell command whose stdout is the auth token; used when auth_token is empty
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`      // canonical protocol name; takes priority over UseAnthropic
-	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol (legacy fallback)
+	URL           string            `json:"url,omitempty"`
+	AuthToken     string            `json:"auth_token,omitempty"`
+	AuthTokenCmd  string            `json:"auth_token_cmd,omitempty"` // shell command whose stdout is the auth token; used when auth_token is empty
+	AuthHeader    string            `json:"auth_header,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	Protocol      string            `json:"protocol,omitempty"`      // canonical protocol name; takes priority over UseAnthropic
+	UseAnthropic  *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol (legacy fallback)
 	TimeoutSec    int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
 	ExtraBody     map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders  map[string]string `json:"extra_headers,omitempty"`
