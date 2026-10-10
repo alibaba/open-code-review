@@ -1253,6 +1253,10 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 		AuthHeader: r.authHeader,
 		APIKey:     strings.TrimSpace(m.apiKeyInput.Value()),
 	}
+	if r.protocol == llm.ProtocolAnthropic {
+		enabled := true
+		entry.PromptCaching = &enabled
+	}
 	if r.protocol == llm.ProtocolAnthropicBedrock {
 		entry.APIKey = ""
 	}
@@ -1289,17 +1293,18 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 // original's slice or map fields.
 func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 	out := ProviderEntry{
-		APIKey:     v.APIKey,
-		APIKeyCmd:  v.APIKeyCmd,
-		URL:        v.URL,
-		Protocol:   v.Protocol,
-		Model:      v.Model,
-		Models:     append([]string(nil), v.Models...),
-		AuthHeader: v.AuthHeader,
-		TimeoutSec: v.TimeoutSec,
-		RetryCodes: append([]int(nil), v.RetryCodes...),
-		AWSProfile: v.AWSProfile,
-		AWSRegion:  v.AWSRegion,
+		APIKey:        v.APIKey,
+		APIKeyCmd:     v.APIKeyCmd,
+		URL:           v.URL,
+		Protocol:      v.Protocol,
+		Model:         v.Model,
+		Models:        append([]string(nil), v.Models...),
+		AuthHeader:    v.AuthHeader,
+		TimeoutSec:    v.TimeoutSec,
+		RetryCodes:    append([]int(nil), v.RetryCodes...),
+		PromptCaching: cloneBoolPointer(v.PromptCaching),
+		AWSProfile:    v.AWSProfile,
+		AWSRegion:     v.AWSRegion,
 	}
 	out.unknownJSONFields = cloneUnknownJSONFields(v.unknownJSONFields)
 	if v.ExtraBody != nil {
@@ -1315,6 +1320,14 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		}
 	}
 	return out
+}
+
+func cloneBoolPointer(v *bool) *bool {
+	if v == nil {
+		return nil
+	}
+	b := *v
+	return &b
 }
 
 func cloneUnknownJSONFields(src map[string]json.RawMessage) map[string]json.RawMessage {

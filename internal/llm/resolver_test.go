@@ -157,6 +157,70 @@ func TestResolveEndpoint_ConfigAnthropicDefaultsToAuthorization(t *testing.T) {
 	}
 }
 
+func TestResolveEndpoint_ConfigPromptCaching(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "")
+	t.Setenv("OCR_LLM_TOKEN", "")
+	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_MODEL", "")
+
+	disabled := false
+	cfg := configFile{Llm: llmFileConfig{
+		URL: "https://api.anthropic.com", AuthToken: "test-token", Model: "claude-sonnet-4-6",
+		PromptCaching: &disabled,
+	}}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ep, err := ResolveEndpoint(path)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if ep.PromptCaching == nil || *ep.PromptCaching {
+		t.Fatalf("PromptCaching = %v, want false", ep.PromptCaching)
+	}
+}
+
+func TestResolveEndpoint_ProviderPromptCachingOverridesLegacyLlm(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "")
+	t.Setenv("OCR_LLM_TOKEN", "")
+	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_MODEL", "")
+
+	enabled := true
+	disabled := false
+	cfg := configFile{
+		Provider: "anthropic",
+		Llm:      llmFileConfig{PromptCaching: &enabled},
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "test-token", Model: "claude-sonnet-4-6", PromptCaching: &disabled},
+		},
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ep, err := ResolveEndpoint(path)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if ep.PromptCaching == nil || *ep.PromptCaching {
+		t.Fatalf("PromptCaching = %v, want provider override false", ep.PromptCaching)
+	}
+}
+
 func TestResolveEndpoint_ConfigAuthHeaderOverrideToXAPIKey(t *testing.T) {
 	t.Setenv("OCR_LLM_URL", "")
 	t.Setenv("OCR_LLM_TOKEN", "")

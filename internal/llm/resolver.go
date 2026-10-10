@@ -33,6 +33,9 @@ type ResolvedEndpoint struct {
 	// knob; users can still override via OCR_LLM_TIMEOUT.
 	Timeout    time.Duration
 	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
+	// PromptCaching controls Anthropic cache_control breakpoints. Nil preserves
+	// the historical default of enabling prompt caching.
+	PromptCaching *bool
 
 	// AmbientAuth marks an endpoint that carries no token and needs no base
 	// URL, because the transport supplies both — AWS SigV4 signing derives the
@@ -323,32 +326,34 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 
 // llmFileConfig represents the llm section in config.json.
 type llmFileConfig struct {
-	URL          string            `json:"url,omitempty"`
-	AuthToken    string            `json:"auth_token,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	AuthTokenCmd string            `json:"auth_token_cmd,omitempty"` // shell command whose stdout is the auth token; used when auth_token is empty
-	Protocol     string            `json:"protocol,omitempty"`       // anthropic|openai|openai-responses; takes priority over use_anthropic
-	UseAnthropic *bool             `json:"use_anthropic,omitempty"`  // pointer to distinguish unset from false; legacy fallback when protocol is empty
-	TimeoutSec   int               `json:"timeout_sec,omitempty"`    // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	URL           string            `json:"url,omitempty"`
+	AuthToken     string            `json:"auth_token,omitempty"`
+	AuthHeader    string            `json:"auth_header,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	AuthTokenCmd  string            `json:"auth_token_cmd,omitempty"` // shell command whose stdout is the auth token; used when auth_token is empty
+	Protocol      string            `json:"protocol,omitempty"`       // anthropic|openai|openai-responses; takes priority over use_anthropic
+	UseAnthropic  *bool             `json:"use_anthropic,omitempty"`  // pointer to distinguish unset from false; legacy fallback when protocol is empty
+	TimeoutSec    int               `json:"timeout_sec,omitempty"`    // per-request HTTP timeout in seconds
+	ExtraBody     map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders  map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes    []int             `json:"retry_codes,omitempty"`
+	PromptCaching *bool             `json:"prompt_caching,omitempty"`
 }
 
 // providerEntryConfig represents a single provider entry in config.json.
 type providerEntryConfig struct {
-	APIKey       string            `json:"api_key,omitempty"`
-	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
-	URL          string            `json:"url,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Models       []string          `json:"models,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	APIKey        string            `json:"api_key,omitempty"`
+	APIKeyCmd     string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
+	URL           string            `json:"url,omitempty"`
+	Protocol      string            `json:"protocol,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	Models        []string          `json:"models,omitempty"`
+	AuthHeader    string            `json:"auth_header,omitempty"`
+	TimeoutSec    int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
+	ExtraBody     map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders  map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes    []int             `json:"retry_codes,omitempty"`
+	PromptCaching *bool             `json:"prompt_caching,omitempty"`
 
 	// AWSProfile and AWSRegion apply to ambient-auth providers that sign with
 	// SigV4 (currently bedrock). Both are optional: without them the standard
@@ -571,6 +576,10 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 
 	extraBody = entry.ExtraBody
 	extraHeaders := entry.ExtraHeaders
+	promptCaching := cfg.Llm.PromptCaching
+	if entry.PromptCaching != nil {
+		promptCaching = entry.PromptCaching
+	}
 
 	timeout, err := ValidateTimeoutSec(entry.TimeoutSec)
 	if err != nil {
@@ -601,20 +610,21 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	}
 
 	return ResolvedEndpoint{
-		URL:          url,
-		Token:        apiKey,
-		Model:        model,
-		Provider:     cfg.Provider,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "provider:" + cfg.Provider,
-		ExtraBody:    extraBody,
-		ExtraHeaders: extraHeaders,
-		Timeout:      timeout,
-		RetryCodes:   retryCodes,
-		AmbientAuth:  ambientAuth,
-		AWSProfile:   entry.AWSProfile,
-		AWSRegion:    entry.AWSRegion,
+		URL:           url,
+		Token:         apiKey,
+		Model:         model,
+		Provider:      cfg.Provider,
+		Protocol:      protocol,
+		AuthHeader:    authHeader,
+		Source:        "provider:" + cfg.Provider,
+		ExtraBody:     extraBody,
+		ExtraHeaders:  extraHeaders,
+		Timeout:       timeout,
+		RetryCodes:    retryCodes,
+		PromptCaching: promptCaching,
+		AmbientAuth:   ambientAuth,
+		AWSProfile:    entry.AWSProfile,
+		AWSRegion:     entry.AWSRegion,
 	}, true, nil
 }
 
@@ -707,16 +717,17 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 	}
 
 	return ResolvedEndpoint{
-		URL:          cfg.Llm.URL,
-		Token:        token,
-		Model:        model,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "OCR config file",
-		ExtraBody:    cfg.Llm.ExtraBody,
-		ExtraHeaders: cfg.Llm.ExtraHeaders,
-		Timeout:      timeout,
-		RetryCodes:   retryCodes,
+		URL:           cfg.Llm.URL,
+		Token:         token,
+		Model:         model,
+		Protocol:      protocol,
+		AuthHeader:    authHeader,
+		Source:        "OCR config file",
+		ExtraBody:     cfg.Llm.ExtraBody,
+		ExtraHeaders:  cfg.Llm.ExtraHeaders,
+		Timeout:       timeout,
+		RetryCodes:    retryCodes,
+		PromptCaching: cfg.Llm.PromptCaching,
 	}, true, nil
 }
 
