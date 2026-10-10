@@ -150,17 +150,12 @@ export function buildCustomUpdateSaveEntries(params: {
     { key: `custom_providers.${params.name}.protocol`, value: params.protocol },
     { key: `custom_providers.${params.name}.url`, value: params.url.trim() },
     { key: `custom_providers.${params.name}.model`, value: params.model.trim() },
+    { key: `custom_providers.${params.name}.models`, value: params.models.trim() },
+    { key: `custom_providers.${params.name}.auth_header`, value: params.authHeader.trim() },
     { key: 'provider', value: params.name },
   ];
-  const models = params.models.trim();
-  if (models) {
-    entries.splice(3, 0, { key: `custom_providers.${params.name}.models`, value: models });
-  }
   if (params.apiKeyChanged && params.apiKey.trim()) {
     entries.push({ key: `custom_providers.${params.name}.api_key`, value: params.apiKey.trim() });
-  }
-  if (params.authHeader.trim()) {
-    entries.push({ key: `custom_providers.${params.name}.auth_header`, value: params.authHeader.trim() });
   }
   return entries;
 }
