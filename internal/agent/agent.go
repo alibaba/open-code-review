@@ -1643,7 +1643,7 @@ func formatDiffEntry(d model.Diff) string {
 	case d.IsRenamed:
 		status = "RENAMED"
 	}
-	return fmt.Sprintf("%s   %s (+%d/-%d)", status, d.NewPath, d.Insertions, d.Deletions)
+	return fmt.Sprintf("%s   %s (+%d/-%d)", status, effectivePath(d), d.Insertions, d.Deletions)
 }
 
 // buildChangeFilesExceptGroup returns a formatted list of changed files excluding all group members.
