@@ -1629,12 +1629,16 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 		Messages:  messages,
 	}
 
-	if c.promptCachingEnabled() && len(systemBlocks) > 0 {
-		systemBlocks[len(systemBlocks)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
+	if len(systemBlocks) > 0 {
+		if c.promptCachingEnabled() {
+			systemBlocks[len(systemBlocks)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
+		}
 		params.System = systemBlocks
 	}
-	if c.promptCachingEnabled() && len(tools) > 0 {
-		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+	if len(tools) > 0 {
+		if c.promptCachingEnabled() {
+			tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+		}
 		params.Tools = tools
 		if req.ToolChoice == "required" {
 			params.ToolChoice = anthropic.ToolChoiceUnionParam{

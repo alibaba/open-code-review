@@ -374,7 +374,7 @@ type LlmConfig struct {
 	ExtraBody     map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders  map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes    []int             `json:"retry_codes,omitempty"`
-	PromptCaching *bool            `json:"prompt_caching,omitempty"`
+	PromptCaching *bool             `json:"prompt_caching,omitempty"`
 
 	unknownJSONFields map[string]json.RawMessage
 }
