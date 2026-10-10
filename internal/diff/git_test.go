@@ -108,6 +108,35 @@ func TestGetDiffSetRetainsBuiltInDirectoryExclusionsForReporting(t *testing.T) {
 	}
 }
 
+func TestGetDiffSetKeepsRootPackageSourceDir(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+
+	relPath := "pkgs/foo/default.nix"
+	path := filepath.Join(repo, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create pkgs directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("{ }: { }\n"), 0o644); err != nil {
+		t.Fatalf("write pkgs file: %v", err)
+	}
+	runGitTest(t, repo, "add", relPath)
+	runGitTest(t, repo, "commit", "-q", "-m", "add tracked pkgs file")
+	if err := os.WriteFile(path, []byte("{ }: { }\n# change\n"), 0o644); err != nil {
+		t.Fatalf("modify pkgs file: %v", err)
+	}
+
+	set, err := NewWorkspaceProvider(repo, gitcmd.New(0)).GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet returned error: %v", err)
+	}
+	if len(set.Excluded) != 0 || len(set.Included) != 1 || set.Included[0].NewPath != relPath {
+		t.Fatalf("GetDiffSet = %+v, want %q included and nothing excluded", set, relPath)
+	}
+}
+
 func TestGetDiffSetWalksChangesetOrder(t *testing.T) {
 	repo := t.TempDir()
 	runGitTest(t, repo, "init", "-q")
