@@ -350,6 +350,20 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     ]
   },
   {
+    "name": "opper",
+    "displayName": "Opper",
+    "protocol": "openai",
+    "baseUrl": "https://api.opper.ai/v3/compat",
+    "envVar": "OPPER_API_KEY",
+    "models": [
+      "claude-fable-5-1",
+      "gpt-5.6-sol",
+      "claude-opus-5",
+      "gpt-6-astra",
+      "qwen3.8-max"
+    ]
+  },
+  {
     "name": "siliconflow",
     "displayName": "SiliconFlow API",
     "protocol": "openai",
