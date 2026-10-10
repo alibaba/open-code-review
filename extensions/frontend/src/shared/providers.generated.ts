@@ -350,6 +350,24 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     ]
   },
   {
+    "name": "qwen-cloud",
+    "displayName": "QwenCloud Token Plan API",
+    "protocol": "openai",
+    "baseUrl": "https://token-plan.maas.qwencloudapi.com/compatible-mode/v1",
+    "envVar": "QWEN_CLOUD_API_KEY",
+    "models": [
+      "qwen3.8-max",
+      "qwen3.8-flash",
+      "qwen3.7-max",
+      "qwen3.7-plus",
+      "qwen3.6-flash",
+      "deepseek-v4-pro",
+      "deepseek-v4-pro-0813",
+      "deepseek-v4-flash-0731",
+      "glm-5.2"
+    ]
+  },
+  {
     "name": "siliconflow",
     "displayName": "SiliconFlow API",
     "protocol": "openai",
