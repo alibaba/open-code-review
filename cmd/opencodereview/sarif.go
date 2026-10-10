@@ -71,6 +71,7 @@ type sarifResult struct {
 
 type sarifLocation struct {
 	PhysicalLocation sarifPhysicalLocation `json:"physicalLocation"`
+	Properties       map[string]string     `json:"properties,omitempty"`
 }
 
 type sarifPhysicalLocation struct {
@@ -214,17 +215,18 @@ func sarifResults(comments []model.LlmComment) []sarifResult {
 // mapping follows FR-3 in the requirements spec:
 //   - Path          → locations[].physicalLocation.artifactLocation.uri
 //   - StartLine/EndLine (valid range) → locations[].physicalLocation.region
+//   - Side          → locations[].properties.side (LEFT or RIGHT)
 //   - Content       → message.text
 //   - Category (or "other") → ruleId
 //   - Severity      → level
 //   - SuggestionCode + ExistingCode + valid region → fixes
 //   - Path + Category + ExistingCode → partialFingerprints (stable fingerprint)
 //
-// Fixes are only emitted when a valid region exists (StartLine > 0 &&
-// EndLine >= StartLine), because replacement.deletedRegion is required by
-// the SARIF schema and cannot be omitted. When the region is invalid (zero
-// or inverted), the suggestion is still conveyed in message.text but no
-// machine-readable fix is emitted.
+// Fixes are only emitted for a valid RIGHT-side region (StartLine > 0 &&
+// EndLine >= StartLine), because replacement.deletedRegion describes the
+// current artifact and cannot safely represent code that only exists on the
+// LEFT side. When the region is invalid or LEFT-sided, the suggestion is
+// still conveyed in message.text but no machine-readable fix is emitted.
 func sarifResultFromComment(c model.LlmComment) sarifResult {
 	category := c.Category
 	if category == "" {
@@ -246,6 +248,9 @@ func sarifResultFromComment(c model.LlmComment) sarifResult {
 				ArtifactLocation: sarifArtifactLocation{URI: c.Path},
 			},
 		}
+		if c.Side != "" {
+			loc.Properties = map[string]string{"side": c.Side}
+		}
 		if hasRegion {
 			loc.PhysicalLocation.Region = &sarifRegion{
 				StartLine: c.StartLine,
@@ -258,7 +263,7 @@ func sarifResultFromComment(c model.LlmComment) sarifResult {
 	// Fixes require: non-empty SuggestionCode, non-empty ExistingCode, non-empty
 	// Path, AND a valid region. The region is needed because deletedRegion is
 	// required by the SARIF schema — omitting it invalidates the entire document.
-	if c.SuggestionCode != "" && c.ExistingCode != "" && c.Path != "" && hasRegion {
+	if c.Side != model.CommentSideLeft && c.SuggestionCode != "" && c.ExistingCode != "" && c.Path != "" && hasRegion {
 		rep := sarifReplacement{
 			DeletedRegion: sarifRegion{
 				StartLine: c.StartLine,

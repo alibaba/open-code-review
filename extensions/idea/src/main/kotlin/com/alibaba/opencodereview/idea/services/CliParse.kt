@@ -4,6 +4,8 @@
 package com.alibaba.opencodereview.idea.services
 
 import com.alibaba.opencodereview.idea.model.AgentWarning
+import com.alibaba.opencodereview.idea.model.COMMENT_SIDE_LEFT
+import com.alibaba.opencodereview.idea.model.COMMENT_SIDE_RIGHT
 import com.alibaba.opencodereview.idea.model.CliResult
 import com.alibaba.opencodereview.idea.model.CliRunOptions
 import com.alibaba.opencodereview.idea.model.LogLevel
@@ -34,6 +36,7 @@ private data class CliCommentDto(
     @SerialName("start_line") val startLine: Int = 0,
     @SerialName("end_line") val endLine: Int = 0,
     val thinking: String? = null,
+    val side: String? = null,
 )
 
 @Serializable
@@ -81,6 +84,7 @@ private fun CliCommentDto.toComment(): ReviewComment = ReviewComment(
     startLine = startLine,
     endLine = endLine,
     thinking = thinking?.takeIf(String::isNotEmpty),
+    side = side?.takeIf { it == COMMENT_SIDE_LEFT || it == COMMENT_SIDE_RIGHT },
 )
 
 /** Find complete top-level values without interpreting braces inside JSON strings. */

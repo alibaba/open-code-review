@@ -249,6 +249,7 @@ type ReviewComment struct {
 	ExistingCode   string
 	StartLine      int
 	EndLine        int
+	Side           string
 	Category       string // bug, security, performance, maintainability, test, style, documentation, other
 	Severity       string // critical, high, medium, low
 	MarkID         string `json:"-"`
@@ -707,6 +708,9 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 					}
 					if v, ok := cm["end_line"].(float64); ok {
 						rc.EndLine = int(v)
+					}
+					if v, ok := cm["side"].(string); ok {
+						rc.Side = v
 					}
 					if v, ok := cm["category"].(string); ok {
 						rc.Category = v

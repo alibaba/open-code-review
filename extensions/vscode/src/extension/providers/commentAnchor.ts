@@ -137,6 +137,8 @@ export async function resolveCommentAnchor(
   const effectiveStatus = status ?? 'modified';
 
   if (ctx.mode === ReviewMode.Workspace) {
+    // Old-file coordinates must never be applied to the current workspace.
+    if (comment.side === 'LEFT') return { kind: 'sidebar', reason: 'unresolved' };
     const content = await deps.readWorkspace(comment.path);
     if (content === null) return { kind: 'sidebar', reason: 'missing-file' };
     const lines = resolveLinesInContent(content, comment.startLine, comment.endLine, comment.existingCode);
@@ -154,16 +156,27 @@ export async function resolveCommentAnchor(
   const diff = await deps.buildDiffUris(comment.path, effectiveStatus);
   if (!diff) return { kind: 'sidebar', reason: 'missing-file' };
 
-  const primaryRef = diff.mountRef;
+  // An explicit side is authoritative. Keep the legacy heuristic only for
+  // results from older CLIs that did not provide side metadata.
+  let explicitSide: 'left' | 'right' | undefined;
+  if (comment.side === 'LEFT') {
+    explicitSide = 'left';
+  } else if (comment.side === 'RIGHT') {
+    explicitSide = 'right';
+  }
+  const primarySide = explicitSide ?? diff.mountSide;
+  const refsBySide = { left: diff.leftRef, right: diff.rightRef };
+  const primaryRef = explicitSide ? refsBySide[explicitSide] : diff.mountRef;
+  if (!primaryRef) return { kind: 'sidebar', reason: 'missing-file' };
   const primaryContent = await deps.readAtRef(primaryRef, comment.path);
   let lines = primaryContent
     ? resolveLinesInContent(primaryContent, comment.startLine, comment.endLine, comment.existingCode)
     : null;
 
   let mountRef = primaryRef;
-  let mountSide = diff.mountSide;
+  let mountSide = primarySide;
 
-  if (!lines && effectiveStatus !== 'added') {
+  if (!lines && !explicitSide && effectiveStatus !== 'added') {
     const altRef = diff.mountSide === 'right' ? diff.leftRef : diff.rightRef;
     const altSide: CommentMountSide = diff.mountSide === 'right' ? 'left' : 'right';
     if (altRef) {

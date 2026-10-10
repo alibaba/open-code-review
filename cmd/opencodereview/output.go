@@ -98,7 +98,11 @@ func renderComment(comment model.LlmComment, out io.Writer) {
 		return
 	}
 
-	fmt.Fprintf(out, "\n%s\n", colorf("\033[2m", "─── %s:%d-%d ───", sanitizeTerminal(comment.Path), comment.StartLine, comment.EndLine))
+	location := fmt.Sprintf("%s:%d-%d", sanitizeTerminal(comment.Path), comment.StartLine, comment.EndLine)
+	if comment.Side == model.CommentSideLeft {
+		location += " [LEFT]"
+	}
+	fmt.Fprintf(out, "\n%s\n", colorf("\033[2m", "─── %s ───", location))
 
 	if comment.Content != "" {
 		badge := buildBadge(comment)

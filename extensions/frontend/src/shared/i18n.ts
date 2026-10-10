@@ -137,6 +137,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     // ── CommentCard ──
     'cmp.comment.view': 'View',
     'cmp.comment.discard': 'Discard',
+    'cmp.comment.sideLeft': '[LEFT]',
 
     // ── PasswordInput ──
     'cmp.password.hideSecret': 'Hide secret',
@@ -153,6 +154,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'ext.comment.pending': '⏳ [Pending]',
     'ext.comment.noSuggestion': '_💡 No code suggestion, please handle manually_',
     'ext.comment.applyFailedStale': 'Apply failed: code location is stale, please refresh and retry.',
+    'ext.comment.applyOldSide': 'Apply failed: this comment points to the old side of the diff and cannot be applied.',
     'ext.comment.applyFailedLocked': 'Apply failed: cannot modify file, check if it is read-only or locked.',
     'ext.comment.statusApplied': '✅ [Applied]',
     'ext.comment.statusDiscarded': '✅ [Discarded]',
@@ -285,6 +287,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
 
     'cmp.comment.view': '查看',
     'cmp.comment.discard': '忽略',
+    'cmp.comment.sideLeft': '[左侧]',
 
     'cmp.password.hideSecret': '隐藏密钥',
     'cmp.password.showSecret': '显示密钥',
@@ -298,6 +301,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'ext.comment.pending': '⏳ [未处理]',
     'ext.comment.noSuggestion': '_💡 无代码建议，请手动处理_',
     'ext.comment.applyFailedStale': '应用失败：代码位置已失效，请刷新后重试。',
+    'ext.comment.applyOldSide': '应用失败：该评论指向 diff 的旧文件侧，无法直接应用。',
     'ext.comment.applyFailedLocked': '应用失败：无法修改文件，请检查文件是否被占用或处于只读状态。',
     'ext.comment.statusApplied': '✅ [已应用]',
     'ext.comment.statusDiscarded': '✅ [已忽略]',

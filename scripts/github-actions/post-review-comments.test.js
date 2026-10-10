@@ -487,6 +487,33 @@ async function testFailedInlineCommentsAreSummarized() {
   assert.ok(statsIdx < failedIdx, "merged stats rendered before failed comment");
 }
 
+// Mirrors the resolver output from
+// TestResolveLineNumbers_OldSideRangeAcrossContextAndDeletedLines: the range
+// starts on a context line and ends on a deleted line, but both coordinates are
+// deliberately expressed on the old side for GitHub's multi-line API.
+async function testResolvedOldSideContextDeletedRangeUsesOldDiffSide() {
+  const { github } = await run({
+    result: {
+      comments: [{
+        path: "src/app.js",
+        content: "The deleted call still needs handling.",
+        existing_code: "keepBefore()\nlegacyCall()",
+        start_line: 1,
+        end_line: 2,
+        side: "LEFT",
+      }],
+      warnings: [],
+    },
+  });
+
+  assert.strictEqual(github.createReviewCalls.length, 1, "one review batch is posted");
+  const posted = github.createReviewCalls[0].comments[0];
+  assert.strictEqual(posted.start_line, 1);
+  assert.strictEqual(posted.line, 2);
+  assert.strictEqual(posted.start_side, "LEFT");
+  assert.strictEqual(posted.side, "LEFT");
+}
+
 async function testWarningsListedAfterSummaryComments() {
   const result = {
     comments: [
@@ -1478,10 +1505,12 @@ function testOverlapsHistory() {
   assert.strictEqual(overlapsHistory({ path: "a.js", line: 9, start_line: 8, side: "RIGHT" }, ml), true);
   // Threshold argument lowers the bar (IoU 0.5 > 0.4).
   assert.strictEqual(overlapsHistory({ path: "a.js", line: 11, start_line: 9, side: "RIGHT" }, ml, 0.4), true);
-  // Different path and LEFT-side history are still ignored.
+  // Different paths never overlap, and comments on opposite diff sides do
+  // not suppress one another.
   assert.strictEqual(overlapsHistory({ path: "b.js", line: 10, start_line: 8, side: "RIGHT" }, ml), false);
   const leftHist = [{ path: "a.js", line: 10, start_line: 8, side: "LEFT" }];
   assert.strictEqual(overlapsHistory({ path: "a.js", line: 10, start_line: 8, side: "RIGHT" }, leftHist), false);
+  assert.strictEqual(overlapsHistory({ path: "a.js", line: 10, start_line: 8, side: "LEFT" }, leftHist), true);
   // An unresolvable current comment (no usable line) never overlaps.
   assert.strictEqual(overlapsHistory({ path: "a.js", side: "RIGHT" }, ml), false);
   // Unresolvable history entries are skipped, not fatal: a later valid entry
@@ -2332,6 +2361,7 @@ async function testRoutedFindingsCarryNoIdempotencyId() {
 
 async function main() {
   await testFailedInlineCommentsAreSummarized();
+  await testResolvedOldSideContextDeletedRangeUsesOldDiffSide();
   await testWarningsListedAfterSummaryComments();
   await testErrorCommentUsesSafeFence();
   await testStickyUpdatesExistingSummary();
