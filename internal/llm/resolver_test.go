@@ -199,7 +199,7 @@ func TestResolveEndpoint_ProviderPromptCachingOverridesLegacyLlm(t *testing.T) {
 	disabled := false
 	cfg := configFile{
 		Provider: "anthropic",
-		Llm: llmFileConfig{PromptCaching: &enabled},
+		Llm:      llmFileConfig{PromptCaching: &enabled},
 		Providers: map[string]providerEntryConfig{
 			"anthropic": {APIKey: "test-token", Model: "claude-sonnet-4-6", PromptCaching: &disabled},
 		},

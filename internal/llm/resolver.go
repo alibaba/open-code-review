@@ -333,10 +333,10 @@ type llmFileConfig struct {
 	AuthTokenCmd string            `json:"auth_token_cmd,omitempty"` // shell command whose stdout is the auth token; used when auth_token is empty
 	Protocol     string            `json:"protocol,omitempty"`       // anthropic|openai|openai-responses; takes priority over use_anthropic
 	UseAnthropic *bool             `json:"use_anthropic,omitempty"`  // pointer to distinguish unset from false; legacy fallback when protocol is empty
-	TimeoutSec   int               `json:"timeout_sec,omitempty"`    // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	TimeoutSec    int               `json:"timeout_sec,omitempty"`    // per-request HTTP timeout in seconds
+	ExtraBody     map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders  map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes    []int             `json:"retry_codes,omitempty"`
 	PromptCaching *bool            `json:"prompt_caching,omitempty"`
 }
 
@@ -349,10 +349,10 @@ type providerEntryConfig struct {
 	Model        string            `json:"model,omitempty"`
 	Models       []string          `json:"models,omitempty"`
 	AuthHeader   string            `json:"auth_header,omitempty"`
-	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	TimeoutSec    int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
+	ExtraBody     map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders  map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes    []int             `json:"retry_codes,omitempty"`
 	PromptCaching *bool            `json:"prompt_caching,omitempty"`
 
 	// AWSProfile and AWSRegion apply to ambient-auth providers that sign with
@@ -622,9 +622,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		Timeout:      timeout,
 		RetryCodes:   retryCodes,
 		PromptCaching: promptCaching,
-		AmbientAuth:  ambientAuth,
-		AWSProfile:   entry.AWSProfile,
-		AWSRegion:    entry.AWSRegion,
+		AmbientAuth:   ambientAuth,
+		AWSProfile:    entry.AWSProfile,
+		AWSRegion:     entry.AWSRegion,
 	}, true, nil
 }
 
