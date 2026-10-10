@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -44,6 +45,9 @@ func runConfigProvider() error {
 	}
 
 	result := final.result()
+	if preset, ok := llm.LookupProvider(result.provider); ok && preset.OAuth && result.model == "" {
+		return runChatGPTLogin(context.Background(), os.Stdout, "", false, "")
+	}
 
 	if result.isManual {
 		return applyManualConfig(configPath, cfg, result)
@@ -241,6 +245,12 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 // make it impossible to configure, since the credentials live in the AWS chain
 // rather than the config file.
 func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.Provider, isPreset bool) error {
+	if isPreset && preset.OAuth {
+		if apiKey != "" || strings.TrimSpace(apiKeyCmd) != "" {
+			return fmt.Errorf("provider %s uses OAuth; run 'ocr llm login openai-chatgpt' instead of configuring an API key", providerName)
+		}
+		return nil
+	}
 	if apiKey != "" || strings.TrimSpace(apiKeyCmd) != "" {
 		return nil
 	}

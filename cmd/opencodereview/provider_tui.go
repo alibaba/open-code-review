@@ -1824,6 +1824,14 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 	case stepProvider:
 		switch m.activeTab {
 		case tabOfficial:
+			if m.currentProvider().OAuth && len(m.models()) == 0 {
+				// Esc from another provider's model step leaves its selection
+				// behind; with an empty list that would read back as a custom
+				// model and skip the login.
+				m.prepareModelSelection("", "")
+				m.confirmed = true
+				return m, tea.Quit
+			}
 			m.step = stepModel
 			currentModel := ""
 			if m.existingCfg != nil {
@@ -1869,7 +1877,7 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.formError = err.Error()
 			return m, nil
 		}
-		if m.activeTab == tabOfficial && m.currentProvider().AmbientAuth {
+		if m.activeTab == tabOfficial && (m.currentProvider().AmbientAuth || m.currentProvider().OAuth) {
 			// An ambient-auth provider has no key to collect, so the model step
 			// is the last one. Showing an API-key prompt that must be left blank
 			// would read as a step the user failed to complete.
@@ -1983,9 +1991,9 @@ func (m providerTUIModel) result() providerTUIResult {
 		}
 
 		apiKey := ""
-		if m.apiKeyMasked {
+		if !p.OAuth && m.apiKeyMasked {
 			apiKey = m.apiKeyOriginal
-		} else {
+		} else if !p.OAuth {
 			apiKey = strings.TrimSpace(m.apiKeyInput.Value())
 		}
 

@@ -76,7 +76,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-chatgpt", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -208,6 +208,28 @@ func TestLookupProvider_DeepSeekFlash(t *testing.T) {
 	}
 	if !ModelListContains(p.Models, "deepseek-flash") {
 		t.Error(`deepseek models do not contain "deepseek-flash"`)
+	}
+}
+
+func TestLookupProvider_OpenAIChatGPTDetails(t *testing.T) {
+	p, ok := LookupProvider("openai-chatgpt")
+	if !ok {
+		t.Fatal("openai-chatgpt not found")
+	}
+	if p.Protocol != ProtocolOpenAIResponses {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIResponses)
+	}
+	if p.BaseURL != "https://api.openai.com/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://api.openai.com/v1")
+	}
+	if !p.OAuth {
+		t.Error("OAuth = false, want true (credentials come from 'ocr llm login')")
+	}
+	if p.EnvVar != "" {
+		t.Errorf("EnvVar = %q, want empty (OAuth providers take no API key)", p.EnvVar)
+	}
+	if len(p.Models) != 0 {
+		t.Errorf("Models = %v, want empty (models are discovered per account)", p.Models)
 	}
 }
 

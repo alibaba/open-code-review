@@ -53,6 +53,9 @@ describe('generated provider presets', () => {
     });
     expect(lookupPreset('openai-responses')?.protocol).toBe('openai-responses');
     expect(lookupPreset('anthropic')?.authHeader).toBe('x-api-key');
+    expect(lookupPreset('openai-chatgpt')).toMatchObject({
+      protocol: 'openai-responses', oauth: true, envVar: '', models: [],
+    });
   });
 
   it('derives ambient authentication from the effective protocol', () => {

@@ -40,6 +40,7 @@ type ResolvedEndpoint struct {
 	// chain. Completeness checks must treat an empty URL and Token as valid for
 	// these; requiring either would reject a correctly configured endpoint.
 	AmbientAuth bool
+	ChatGPT     bool
 
 	// AWSProfile and AWSRegion override the ambient AWS chain for SigV4
 	// providers. Empty means "let the AWS SDK decide".
@@ -141,7 +142,7 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 		}
 		// An ambient-auth endpoint is complete without a URL or token: the
 		// transport supplies both. Everything else still needs all three.
-		complete := ep.Model != "" && (ep.AmbientAuth || (ep.URL != "" && ep.Token != ""))
+		complete := ep.Model != "" && (ep.AmbientAuth || (ep.URL != "" && (ep.Token != "" || ep.ChatGPT)))
 		if ok && complete {
 			return finalizeResolvedEndpoint(strategy.name, ep, env), nil
 		}
@@ -397,6 +398,9 @@ func tryOCRConfig(path string, opts ResolveOptions) (ResolvedEndpoint, bool, err
 // tryProviderConfig resolves an endpoint from the provider-based configuration.
 func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, bool, error) {
 	preset, isPreset := LookupProvider(cfg.Provider)
+	if isPreset && preset.OAuth {
+		return resolveChatGPTProvider(cfg, modelOverride, preset)
+	}
 
 	var entry providerEntryConfig
 	var ok bool

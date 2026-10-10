@@ -5,9 +5,13 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/chatgpt"
 
 	openai "github.com/openai/openai-go/v3"
 	openaiopt "github.com/openai/openai-go/v3/option"
@@ -49,6 +53,9 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 		openaiopt.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
+	}
+	if cfg.ChatGPT {
+		opts = append(opts, openaiopt.WithMaxRetries(0))
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
@@ -112,6 +119,9 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 	sessionKey := c.cfg.SessionKey
 	if k := SessionKeyFromContext(ctx); k != "" {
 		sessionKey = k
+	}
+	if c.cfg.ChatGPT {
+		return c.chatGPTCompletion(ctx, params, sessionKey)
 	}
 
 	var opts []openaiopt.RequestOption
@@ -198,7 +208,11 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 				input = append(input, responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleAssistant))
 			}
 			for _, tc := range msg.ToolCalls {
-				input = append(input, responses.ResponseInputItemParamOfFunctionCall(tc.Function.Arguments, tc.ID, tc.Function.Name))
+				item := responses.ResponseInputItemParamOfFunctionCall(tc.Function.Arguments, tc.ID, tc.Function.Name)
+				if c.cfg.ChatGPT {
+					item.OfFunctionCall.Namespace = openai.String(chatGPTToolNamespace)
+				}
+				input = append(input, item)
 			}
 		case "tool":
 			input = append(input, responses.ResponseInputItemParamOfFunctionCallOutput(msg.ToolCallID, content))
@@ -210,14 +224,24 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 	instructions := strings.Join(systemParts, "\n\n")
 
 	var tools []responses.ToolUnionParam
-	for _, t := range req.Tools {
-		tool := responses.FunctionToolParam{
-			Name:        t.Function.Name,
-			Parameters:  t.Function.Parameters,
-			Strict:      openai.Bool(false),
-			Description: openai.String(t.Function.Description),
+	if c.cfg.ChatGPT && len(req.Tools) > 0 {
+		var functions []responses.NamespaceToolToolUnionParam
+		for _, t := range req.Tools {
+			functions = append(functions, responses.NamespaceToolToolUnionParam{OfFunction: &responses.NamespaceToolToolFunctionParam{
+				Name: t.Function.Name, Parameters: t.Function.Parameters, Description: openai.String(t.Function.Description), Strict: openai.Bool(false),
+			}})
 		}
-		tools = append(tools, responses.ToolUnionParam{OfFunction: &tool})
+		tools = []responses.ToolUnionParam{responses.ToolParamOfNamespace("Local code review tools", chatGPTToolNamespace, functions)}
+	} else {
+		for _, t := range req.Tools {
+			tool := responses.FunctionToolParam{
+				Name:        t.Function.Name,
+				Parameters:  t.Function.Parameters,
+				Strict:      openai.Bool(false),
+				Description: openai.String(t.Function.Description),
+			}
+			tools = append(tools, responses.ToolUnionParam{OfFunction: &tool})
+		}
 	}
 
 	params := responses.ResponseNewParams{
@@ -237,20 +261,157 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 	}
 	if len(tools) > 0 {
 		params.Tools = tools
-		if req.ToolChoice == "required" {
+		if req.ToolChoice == "required" || req.ToolChoice == "none" {
 			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
-				OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsRequired),
+				OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptions(req.ToolChoice)),
 			}
 		}
 	}
-	if req.MaxTokens > 0 {
+	if req.MaxTokens > 0 && !c.cfg.ChatGPT {
 		params.MaxOutputTokens = openai.Int(int64(req.MaxTokens))
 	}
-	if req.Temperature != nil {
+	if req.Temperature != nil && !c.cfg.ChatGPT {
 		params.Temperature = openai.Float(*req.Temperature)
 	}
 
 	return params
+}
+
+func (c *OpenAIResponsesClient) chatGPTCompletion(ctx context.Context, params responses.ResponseNewParams, sessionKey string) (*ChatResponse, error) {
+	if c.cfg.tokenSource == nil {
+		return nil, fmt.Errorf("ChatGPT OAuth token source is unavailable; run 'ocr llm login openai-chatgpt'")
+	}
+	if err := checkChatGPTExtraBody(c.cfg.ExtraBody); err != nil {
+		return nil, err
+	}
+	token, err := c.cfg.tokenSource(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// The SDK picks up OPENAI_ORG_ID / OPENAI_PROJECT_ID from the environment for
+	// API-key users; those platform scopes must not ride along with a plan token.
+	opts := []openaiopt.RequestOption{
+		openaiopt.WithAPIKey(token),
+		openaiopt.WithHeaderDel("OpenAI-Organization"),
+		openaiopt.WithHeaderDel("OpenAI-Project"),
+	}
+	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
+		opts = append(opts, openaiopt.WithJSONSet(k, v))
+	}
+	stream := c.sdk.Responses.NewStreaming(ctx, params, opts...)
+	defer stream.Close()
+	var completed *responses.Response
+	items := make(map[int64]responses.ResponseOutputItemUnion)
+	for stream.Next() {
+		event := stream.Current()
+		switch event.Type {
+		case "response.output_item.done":
+			done := event.AsResponseOutputItemDone()
+			if done.OutputIndex < 0 {
+				return nil, c.chatGPTStreamFailure(ctx, "returned an invalid output index")
+			}
+			items[done.OutputIndex] = done.Item
+		case "response.completed":
+			r := event.AsResponseCompleted().Response
+			if r.Status != responses.ResponseStatusCompleted || r.ID == "" {
+				return nil, c.chatGPTStreamFailure(ctx, "returned an invalid completed response")
+			}
+			completed = &r
+		case "response.failed", "response.incomplete", "error":
+			code, detail := chatGPTStreamEventDetail(event)
+			failure := c.chatGPTStreamFailure(ctx, "did not complete ("+detail+")")
+			if mapped := chatGPTSubscriptionError(code, failure); mapped != nil {
+				return nil, mapped
+			}
+			return nil, failure
+		}
+	}
+	if err := stream.Err(); err != nil {
+		class, phase := classifyStreamError(err)
+		reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
+		return nil, chatGPTRequestError(err)
+	}
+	if completed == nil {
+		return nil, c.chatGPTStreamFailure(ctx, "ended before response.completed")
+	}
+	// Subscription streams can leave output empty on the terminal response.
+	// Only finalized items carry complete tool arguments and encrypted reasoning.
+	if len(items) > 0 {
+		for i, item := range completed.Output {
+			if _, exists := items[int64(i)]; !exists {
+				items[int64(i)] = item
+			}
+		}
+		indices := make([]int64, 0, len(items))
+		for index := range items {
+			indices = append(indices, index)
+		}
+		slices.Sort(indices)
+		completed.Output = nil
+		for position, index := range indices {
+			if index != int64(position) {
+				return nil, c.chatGPTStreamFailure(ctx, "returned non-contiguous output items")
+			}
+			completed.Output = append(completed.Output, items[index])
+		}
+	}
+	if len(completed.Output) == 0 {
+		return nil, c.chatGPTStreamFailure(ctx, "completed without any output items")
+	}
+	return c.mapResponsesResponse(completed), nil
+}
+
+func (c *OpenAIResponsesClient) chatGPTStreamFailure(ctx context.Context, reason string) error {
+	reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassProvider, FailurePhaseStream)
+	return &streamIntegrityError{reason: reason}
+}
+
+// chatGPTStreamEventDetail extracts the provider's reason from a terminal
+// failure event, so an in-stream quota or eligibility error is not reduced to
+// its event type.
+func chatGPTStreamEventDetail(event responses.ResponseStreamEventUnion) (code, detail string) {
+	var message string
+	switch event.Type {
+	case "error":
+		e := event.AsError()
+		code, message = e.Code, e.Message
+	case "response.failed":
+		e := event.AsResponseFailed().Response.Error
+		code, message = string(e.Code), e.Message
+	case "response.incomplete":
+		message = event.AsResponseIncomplete().Response.IncompleteDetails.Reason
+	}
+	detail = event.Type
+	for _, part := range []string{code, message} {
+		if part != "" {
+			detail += ": " + part
+		}
+	}
+	return code, detail
+}
+
+func chatGPTRequestError(err error) error {
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		if mapped := chatGPTSubscriptionError(apiErr.Code, err); mapped != nil {
+			return mapped
+		}
+	}
+	return withProviderErrorBody(err)
+}
+
+// chatGPTSubscriptionError turns a plan-usage error code into an actionable
+// message, or returns nil for any other code.
+func chatGPTSubscriptionError(code string, err error) error {
+	switch code {
+	case "subscription_sharing_usage_limit_exceeded":
+		return fmt.Errorf("ChatGPT plan usage limit reached; manage app usage at %s: %w", chatgpt.UsageURL, err)
+	case "subscription_sharing_user_not_eligible":
+		return fmt.Errorf("this ChatGPT account or workspace is not eligible for plan usage: %w", err)
+	case "subscription_sharing_invalid_user":
+		return fmt.Errorf("ChatGPT could not validate this session; run 'ocr llm login openai-chatgpt': %w", err)
+	}
+	return nil
 }
 
 // mapResponsesResponse converts the SDK Response into the shared ChatResponse.
