@@ -17,10 +17,10 @@ func TestReviewOutputCommittedBeforeMCPShutdown(t *testing.T) {
 	startFakeLLM(t, newFakeLLM())
 	outputPath := filepath.Join(t.TempDir(), "review.json")
 
-	originalClose := closeReviewMCPClients
-	t.Cleanup(func() { closeReviewMCPClients = originalClose })
+	originalClose := closeMCPClients
+	t.Cleanup(func() { closeMCPClients = originalClose })
 	shutdownObserved := false
-	closeReviewMCPClients = func(clients []*mcp.Client) {
+	closeMCPClients = func(clients []*mcp.Client) {
 		shutdownObserved = true
 		data, err := os.ReadFile(outputPath)
 		if err != nil {
