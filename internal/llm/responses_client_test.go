@@ -449,6 +449,31 @@ func TestMapResponsesResponse_StatusIncomplete(t *testing.T) {
 	if resp.Choices[0].FinishReason != "length" {
 		t.Errorf("FinishReason = %q, want %q for incomplete status", resp.Choices[0].FinishReason, "length")
 	}
+	if !resp.IsTruncated() {
+		t.Fatal("incomplete response must be truncated")
+	}
+}
+
+func TestMapResponsesResponse_IncompleteWithToolCalls(t *testing.T) {
+	client := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
+	sdkResp := unmarshalResponsesBody(t, `{
+		"id":"resp_truncated",
+		"object":"response",
+		"model":"gpt-5.4",
+		"status":"incomplete",
+		"incomplete_details":{"reason":"max_output_tokens"},
+		"output":[
+			{"type":"function_call","id":"fc_done","call_id":"call_done","name":"task_done","arguments":"{}","status":"completed"}
+		]
+	}`)
+	resp := client.mapResponsesResponse(sdkResp)
+	if resp.FinishReason() != "length" || !resp.IsTruncated() {
+		t.Fatalf("incomplete response with tool calls lost truncation: %+v", resp)
+	}
+	calls := resp.ToolCalls()
+	if len(calls) != 1 || calls[0].ID != "call_done" || calls[0].Function.Name != "task_done" || calls[0].Function.Arguments != "{}" {
+		t.Fatalf("tool calls were not preserved: %+v", calls)
+	}
 }
 
 func TestMapResponsesResponse_StatusFailedAndCancelled(t *testing.T) {

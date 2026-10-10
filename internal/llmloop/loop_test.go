@@ -6,6 +6,7 @@ package llmloop
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -106,8 +107,226 @@ func newTestDeps(client llm.LLMClient) Deps {
 	}
 }
 
+func assertToolTurnHistory(t *testing.T, messages []llm.Message, resp *llm.ChatResponse, wantResults map[string]string) {
+	t.Helper()
+	calls := resp.ToolCalls()
+	if len(messages) != 1+len(calls) {
+		t.Fatalf("history has %d messages, want assistant plus %d tool results", len(messages), len(calls))
+	}
+	wantAssistant := llm.NewToolCallMessage(resp.VisibleContent(), calls, resp.Native(), resp.ReasoningContent())
+	if !reflect.DeepEqual(messages[0], wantAssistant) {
+		t.Fatalf("assistant history = %+v, want %+v", messages[0], wantAssistant)
+	}
+	for i, call := range calls {
+		result := messages[i+1]
+		if result.Role != "tool" || result.ToolCallID != call.ID {
+			t.Errorf("result %d = %+v, want tool result for %s", i, result, call.ID)
+		}
+		want, ok := wantResults[call.ID]
+		if !ok || !strings.Contains(result.ExtractText(), want) {
+			t.Errorf("result for %s = %q, want %q", call.ID, result.ExtractText(), want)
+		}
+	}
+}
+
+func TestRunMainTask_TruncatedTaskDoneContinues(t *testing.T) {
+	for _, reason := range []string{"length", "max_tokens"} {
+		for _, tt := range []struct {
+			args       string
+			wantResult string
+		}{
+			{`{}`, "call task_done again in a complete response"},
+			{`{"state":"DONE"}`, "call task_done again in a complete response"},
+			{`{"state":`, "Error parsing tool arguments"},
+		} {
+			t.Run(reason+"/"+tt.args, func(t *testing.T) {
+				resp := taskDoneResponseWithArguments(tt.args)
+				resp.Choices[0].FinishReason = reason
+				client := &fakeClient{responses: []*llm.ChatResponse{resp, taskDoneResponse()}}
+				runner := NewRunner(newTestDeps(client))
+				msgs := []llm.Message{msg("system", "review"), msg("user", "main.go")}
+				completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+				if err != nil || !completed || stop != StopNone {
+					t.Fatalf("RunMainTask = (%v, %v, %v), want completion after continuation", completed, stop, err)
+				}
+				if len(client.requests) != 2 {
+					t.Fatalf("LLM requests = %d, want 2", len(client.requests))
+				}
+				assertToolTurnHistory(t, client.requests[1].Messages[2:], resp, map[string]string{
+					"call_1": tt.wantResult,
+				})
+				warnings := runner.Warnings()
+				if len(warnings) != 1 || warnings[0].Type != "response_truncated" || warnings[0].File != "main.go" || !strings.Contains(warnings[0].Message, reason) {
+					t.Fatalf("warnings = %+v, want one truncation warning", warnings)
+				}
+			})
+		}
+	}
+}
+
+func TestRunMainTask_TruncatedTaskDoneFailed(t *testing.T) {
+	resp := taskDoneResponseWithArguments(`{"state":"FAILED"}`)
+	resp.Choices[0].FinishReason = "length"
+	client := &fakeClient{responses: []*llm.ChatResponse{resp}}
+	runner := NewRunner(newTestDeps(client))
+	completed, stop, err := runner.RunMainTask(context.Background(), []llm.Message{msg("user", "review")}, "main.go")
+	if completed || stop != StopNone || err == nil || !strings.Contains(err.Error(), "task_done reported FAILED") {
+		t.Fatalf("RunMainTask = (%v, %v, %v), want terminal failure", completed, stop, err)
+	}
+	if len(client.requests) != 1 {
+		t.Fatalf("LLM requests = %d, want no retry after FAILED", len(client.requests))
+	}
+}
+
+func TestRunMainTask_TruncatedToolsExecuteOnce(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		doneFirst bool
+		async     bool
+	}{
+		{name: "comment first"},
+		{name: "done first", doneFirst: true},
+		{name: "async comment first", async: true},
+		{name: "async done first", doneFirst: true, async: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := codeCommentResponse("review reasoning", "Submitting a finding")
+			resp.Choices[0].FinishReason = "length"
+			resp.Choices[0].Message.Native = llm.NativeTurn{Family: "openai-chat-completions", Payload: llm.ReasoningPayload("review reasoning")}
+			calls := resp.ToolCalls()
+			calls[0].ExtraContent = json.RawMessage(`{"signature":"preserved"}`)
+			done := taskDoneResponse().ToolCalls()[0]
+			if tt.doneFirst {
+				calls = append([]llm.ToolCall{done}, calls...)
+			} else {
+				calls = append(calls, done)
+			}
+			done.ID = "call_done_2"
+			calls = append(calls, done, fileReadToolCallResponse("call_read", `{"path":"main.go"}`).ToolCalls()[0])
+			resp.Choices[0].Message.ToolCalls = calls
+			client := &fakeClient{responses: []*llm.ChatResponse{resp, taskDoneResponse()}}
+			deps := newTestDeps(client)
+			deps.Tools.Register(&tool.CodeCommentProvider{Collector: deps.CommentCollector})
+			if tt.async {
+				deps.CommentWorkerPool = NewCommentWorkerPool(1)
+				t.Cleanup(func() { deps.CommentWorkerPool.Await() })
+			}
+			runner := NewRunner(deps)
+			msgs := []llm.Message{msg("system", "review"), msg("user", "main.go")}
+			completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+			if deps.CommentWorkerPool != nil {
+				deps.CommentWorkerPool.AwaitKey("main.go")
+			}
+			if err != nil || !completed || stop != StopNone {
+				t.Fatalf("RunMainTask = (%v, %v, %v), want completion after continuation", completed, stop, err)
+			}
+			if len(client.requests) != 2 {
+				t.Fatalf("LLM requests = %d, want 2", len(client.requests))
+			}
+			assertToolTurnHistory(t, client.requests[1].Messages[2:], resp, map[string]string{
+				"call_comment": tool.CommentSucceed,
+				"call_read":    "package main",
+				"call_1":       "without repeating successful tool calls",
+				"call_done_2":  "without repeating successful tool calls",
+			})
+			if got := runner.ToolCalls(); got["code_comment"] != 1 || got["file_read"] != 1 {
+				t.Fatalf("tool calls = %+v, want each ordinary tool executed once", got)
+			}
+			if comments := deps.CommentCollector.Comments(); len(comments) != 1 || comments[0].Content != "issue" {
+				t.Fatalf("comments = %+v, want one saved finding", comments)
+			}
+			if warnings := runner.Warnings(); len(warnings) != 1 || warnings[0].Type != "response_truncated" {
+				t.Fatalf("warnings = %+v, want one warning per response", warnings)
+			}
+		})
+	}
+}
+
+func TestRunMainTask_TruncatedWithoutToolsContinues(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		content   string
+		reasoning string
+	}{
+		{name: "text", content: "Partial review"},
+		{name: "empty"},
+		{name: "reasoning", reasoning: "Partial reasoning"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &llm.ChatResponse{Choices: []llm.Choice{{
+				FinishReason: "max_tokens",
+				Message:      llm.ResponseMessage{Content: &tt.content, ReasoningContent: tt.reasoning},
+			}}}
+			client := &fakeClient{responses: []*llm.ChatResponse{resp, taskDoneResponse()}}
+			runner := NewRunner(newTestDeps(client))
+			msgs := []llm.Message{msg("system", "review"), msg("user", "main.go")}
+			completed, _, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+			if err != nil || !completed || len(client.requests) != 2 {
+				t.Fatalf("completed=%v err=%v requests=%d, want continuation then completion", completed, err, len(client.requests))
+			}
+			history := client.requests[1].Messages[2:]
+			if tt.content != "" || tt.reasoning != "" {
+				assertToolTurnHistory(t, history[:len(history)-1], resp, nil)
+			} else if len(history) != 1 {
+				t.Fatalf("empty response history = %+v, want only continuation prompt", history)
+			}
+			prompt := history[len(history)-1]
+			if prompt.Role != "user" || !strings.Contains(prompt.ExtractText(), "truncated") || !strings.Contains(prompt.ExtractText(), "Continue the review from where you stopped") {
+				t.Fatalf("missing truncation continuation prompt: %+v", prompt)
+			}
+		})
+	}
+}
+
+func TestRunMainTask_TruncatedResponsesRespectLimits(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		noTools      bool
+		maxRounds    int
+		budget       int64
+		wantStop     MainLoopStop
+		wantRequests int
+	}{
+		{name: "empty rounds", maxRounds: 10, wantStop: StopEmptyRounds, wantRequests: 3},
+		{name: "round limit", maxRounds: 1, wantStop: StopMaxRounds, wantRequests: 2},
+		{name: "token budget", maxRounds: 10, budget: 1, wantStop: StopTokenBudget, wantRequests: 2},
+		{name: "no tools round limit", noTools: true, maxRounds: 2, wantStop: StopMaxRounds, wantRequests: 3},
+		{name: "no tools token budget", noTools: true, maxRounds: 10, budget: 1, wantStop: StopTokenBudget, wantRequests: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := taskDoneResponse()
+			resp.Choices[0].FinishReason = "length"
+			if tt.noTools {
+				resp.Choices[0].Message.ToolCalls = nil
+			}
+			responses := make([]*llm.ChatResponse, tt.wantRequests)
+			for i := range responses {
+				responses[i] = resp
+			}
+			if tt.wantStop != StopEmptyRounds {
+				responses[len(responses)-1] = taskDoneResponse()
+			}
+			client := &fakeClient{responses: responses}
+			deps := newTestDeps(client)
+			deps.Template.MaxToolRequestTimes = tt.maxRounds
+			deps.MaxTokensBudget = tt.budget
+			deps.MainToolDefs = []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}}
+			runner := NewRunner(deps)
+			completed, stop, err := runner.RunMainTask(context.Background(), []llm.Message{msg("system", "review"), msg("user", "main.go")}, "main.go")
+			if err != nil || completed || stop != tt.wantStop {
+				t.Fatalf("RunMainTask = (%v, %v, %v), want (false, %v, nil)", completed, stop, err, tt.wantStop)
+			}
+			if len(client.requests) != tt.wantRequests {
+				t.Fatalf("LLM requests = %d, want %d including any grace round", len(client.requests), tt.wantRequests)
+			}
+		})
+	}
+}
+
 func TestRunMainTask_TaskDoneImmediately(t *testing.T) {
-	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
+	resp := taskDoneResponse()
+	resp.Choices[0].FinishReason = "tool_calls"
+	client := &fakeClient{responses: []*llm.ChatResponse{resp}}
 	deps := newTestDeps(client)
 	runner := NewRunner(deps)
 
@@ -127,6 +346,9 @@ func TestRunMainTask_TaskDoneImmediately(t *testing.T) {
 	}
 	if runner.TotalOutputTokens() != 5 {
 		t.Errorf("TotalOutputTokens = %d, want 5", runner.TotalOutputTokens())
+	}
+	if warnings := runner.Warnings(); len(warnings) != 0 {
+		t.Errorf("unexpected warnings: %+v", warnings)
 	}
 }
 

@@ -381,6 +381,20 @@ func (r *ChatResponse) Native() NativeTurn {
 	return r.Choices[0].Message.Native
 }
 
+// FinishReason returns the first choice's finish reason, or an empty string if absent.
+func (r *ChatResponse) FinishReason() string {
+	if r == nil || len(r.Choices) == 0 {
+		return ""
+	}
+	return r.Choices[0].FinishReason
+}
+
+// IsTruncated reports whether generation stopped at the completion token limit.
+func (r *ChatResponse) IsTruncated() bool {
+	reason := r.FinishReason()
+	return strings.EqualFold(reason, "length") || strings.EqualFold(reason, "max_tokens")
+}
+
 // ToolDef defines a tool/function available to the model.
 type ToolDef struct {
 	Type     string      `json:"type"`
