@@ -615,9 +615,7 @@ func (a *Agent) injectDiffMap() {
 	m := make(map[string]string, len(a.diffs))
 	for i := range a.diffs {
 		d := &a.diffs[i]
-		if d.NewPath != "/dev/null" {
-			m[d.NewPath] = d.Diff
-		}
+		m[effectivePath(*d)] = d.Diff
 	}
 	dm := tool.NewDiffMap(m)
 	if p, ok := a.args.Tools.Get(tool.FileReadDiff.Name()); ok {
