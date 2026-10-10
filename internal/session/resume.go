@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/model"
+
+	"github.com/alibaba/open-code-review/internal/pathutil"
 )
 
 // ResumeState is the replayed, read-only checkpoint index for one prior session.
@@ -82,11 +84,11 @@ func SessionFilePath(repoDir, sessionID string) (string, error) {
 	if sessionID == "" {
 		return "", fmt.Errorf("session id is required")
 	}
-	home, err := os.UserHomeDir()
+	home, err := pathutil.OCRHome()
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
-	return filepath.Join(home, ".opencodereview", sessionSubDir, encodeRepoPath(repoDir), sessionID+".jsonl"), nil
+	return filepath.Join(home, sessionSubDir, encodeRepoPath(repoDir), sessionID+".jsonl"), nil
 }
 
 // LoadResumeState replays a previous session JSONL into a fingerprint index. A
