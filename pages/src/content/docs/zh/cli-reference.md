@@ -118,6 +118,7 @@ unstaged + untracked 变更。
 | `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。 |
 | `--exclude <patterns>` | — | — | 逗号分隔的 gitignore 风格排除模式；与 `rule.json` 的 excludes 合并。 |
 | `--concurrency <n>` | — | `8` | 并行评审的最大子任务数。 |
+| `--intra-group-concurrency <n>` | — | `1` | 实验功能：每组首轮按不同重点并行评审（`1`–`3` 路），后续 effort 轮次仍顺序执行。`1` 保持原有行为；`2` 分为安全与其他缺陷，`3` 再分出并发、资源生命周期和性能。合并完全相同的评论后运行过滤器，措辞不同的评论保留。主审查请求上限为此值乘以 `--concurrency`，后台请求另计；共享 token 预算和组超时。可能增加 token 消耗，不保证提速或相同召回率，启用前请多次对比测试。 |
 | `--timeout <minutes>` | — | `15` | 每个子任务的时间预算，包括 LLM 调用、工具执行和重试等待。`0` 关闭任务期限，但不关闭请求超时。单次请求超时独立设置：`OCR_LLM_TIMEOUT` 或 provider 的 `timeout_sec`，单位秒（默认 `300`）。按 effort 评审轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
 | `--max-tools <n>` | — | 模板默认 | 每个子任务的最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。 |

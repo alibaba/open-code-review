@@ -104,6 +104,10 @@ type Args struct {
 	// Concurrency limit for per-group subtasks. MaxConcurrency <= 0 defaults to 8.
 	MaxConcurrency int
 
+	// IntraGroupConcurrency partitions the first round into focused conversations.
+	// Values <= 1 preserve sequential review; values above 3 are capped at 3.
+	IntraGroupConcurrency int
+
 	// Concurrent task timeout in minutes. 0 means no timeout.
 	ConcurrentTaskTimeout int
 
@@ -396,6 +400,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// unchanged for the common unlimited path.
 	if a.args.MaxTokensBudget > 0 {
 		est := estimateDiffCost(a.diffs)
+		est.InputTokens *= int64(a.reviewFocusCount())
+		est.OutputTokens *= int64(a.reviewFocusCount())
+		est.TotalTokens = est.InputTokens + est.OutputTokens
 		fmt.Fprintf(stdout.Writer(), "[ocr] estimated cost: %s\n", est)
 		fmt.Fprintf(stdout.Writer(), "[ocr] token budget: %s (dispatch stops once exceeded)\n", humanTokens(a.args.MaxTokensBudget))
 		if est.TotalTokens > a.args.MaxTokensBudget {
@@ -694,6 +701,7 @@ dispatchLoop:
 			for _, d := range group.Diffs {
 				groupEst += estimateDiffFileTokens(d)
 			}
+			groupEst *= int64(a.reviewFocusCount())
 			projected := used + groupEst
 			if projected > a.args.MaxTokensBudget {
 				firstPath := group.Diffs[0].NewPath
@@ -787,7 +795,7 @@ dispatchLoop:
 					var failedCount int64
 					for _, d := range g.Diffs {
 						fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 {
+						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 && !stop.requireComplete {
 							a.markCompleted(d)
 							a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
 							continue
@@ -1092,6 +1100,7 @@ func (a *Agent) runtimeConfigSHA256() string {
 		"language", r.Language,
 		"timeout", r.Timeout.String(),
 		"concurrency", strconv.Itoa(a.args.MaxConcurrency),
+		"intra_group_concurrency", strconv.Itoa(a.reviewFocusCount()),
 		"max_tokens_budget", strconv.FormatInt(a.args.MaxTokensBudget, 10),
 	)
 }
@@ -1205,6 +1214,8 @@ func classifyItemError(err error) (session.FailureClass, string) {
 		return session.FailureCancelled, "file review was cancelled"
 	case errors.Is(err, errMainTaskEmpty):
 		return session.FailureConfiguration, "review template main_task is empty"
+	case errors.Is(err, errFocusedReviewPanic):
+		return session.FailurePanic, "subtask panicked during review"
 	default:
 		return session.FailureProvider, "provider or subtask request failed"
 	}
@@ -1241,6 +1252,8 @@ type subtaskStop struct {
 	reason        string
 	checkpoint    string
 	reportAsError bool
+	// Partial findings do not prove that all parallel focuses were covered.
+	requireComplete bool
 }
 
 // registerCoverage freezes the coverage denominator before any reuse or
@@ -1482,12 +1495,21 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 			break
 		}
 
+		var focusPromptStop *subtaskStop
 		mainCompleted, mainStop, err := func() (bool, llmloop.MainLoopStop, error) {
 			ctx, mainSpan := telemetry.StartSpan(ctx, "main.loop")
 			defer mainSpan.End()
 			telemetry.SetAttr(mainSpan, "group.label", groupKey)
 			telemetry.SetAttr(mainSpan, "round", round)
-			completed, stop, err := a.runner.RunMainTask(ctx, messages, groupKey)
+			var completed bool
+			var stop llmloop.MainLoopStop
+			var err error
+			if round == 1 && a.reviewFocusCount() > 1 {
+				completed, stop, focusPromptStop, err = a.runFocusedReview(ctx, messages, groupKey)
+				a.removeExactGroupDuplicates(g, baseline)
+			} else {
+				completed, stop, err = a.runner.RunMainTask(ctx, messages, groupKey)
+			}
 			if err != nil {
 				mainSpan.SetStatus(codes.Error, err.Error())
 				mainSpan.RecordError(err)
@@ -1495,6 +1517,9 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 			}
 			return completed, stop, nil
 		}()
+		if focusPromptStop != nil {
+			return false, focusPromptStop, nil
+		}
 
 		if err != nil {
 			if round == 1 {
@@ -1534,16 +1559,17 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 			}
 			class, reason := classifyMainLoopStop(mainStop)
 			lastStop = &subtaskStop{
-				class:         class,
-				reason:        reason,
-				checkpoint:    fmt.Sprintf("main_task did not complete before stopping (round %d/%d)", round, maxRounds),
-				reportAsError: !a.groupHasComments(g),
+				class:           class,
+				reason:          reason,
+				checkpoint:      fmt.Sprintf("main_task did not complete before stopping (round %d/%d)", round, maxRounds),
+				reportAsError:   !a.groupHasComments(g) || (round == 1 && a.reviewFocusCount() > 1),
+				requireComplete: round == 1 && a.reviewFocusCount() > 1,
 			}
 			break
 		}
 		completed = true
 
-		if len(newlyConfirmed) == 0 {
+		if len(newlyConfirmed) == 0 && !(round == 1 && a.reviewFocusCount() > 1) {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Round %d/%d added no new findings for group %q; stopping early\n", round, maxRounds, groupKey)
 			break
 		}

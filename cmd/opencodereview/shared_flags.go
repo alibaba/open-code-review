@@ -160,6 +160,9 @@ func validateReviewOptions(opts *reviewOptions) error {
 			return fmt.Errorf("--effort: %w", err)
 		}
 	}
+	if opts.intraGroupConcurrency < 1 || opts.intraGroupConcurrency > 3 {
+		return fmt.Errorf("--intra-group-concurrency must be between 1 and 3")
+	}
 	return nil
 }
 
@@ -217,6 +220,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addModelFlag(cmd, &opts.model)
 	cmd.Flags().StringVar(&opts.effort, "effort", "", "review effort preset: low | medium | high (\"\" = configured or default medium)")
 	cmd.RegisterFlagCompletionFunc("effort", completeEnum(template.EffortNames()...))
+	cmd.Flags().IntVar(&opts.intraGroupConcurrency, "intra-group-concurrency", 1, "experimental focused first-round conversations per group (1-3); later effort rounds remain sequential")
 	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
 	addPreviewFlag(cmd, &opts.preview)
 }
