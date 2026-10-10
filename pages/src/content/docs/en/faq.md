@@ -143,6 +143,53 @@ fails to match `tsx`.
 
 ## Reviews
 
+### Can I review code against a requirements or design document?
+
+Use `--background-file` to give the review shared context from a local
+Markdown file:
+
+```bash
+ocr review --repo /path/to/repo --background-file docs/requirements.md
+```
+
+Relative paths resolve against the selected repository root. The content
+is included in the plan and main review prompts. For a short requirement,
+use `--background "Reject requests with an expired token"` instead. If
+both flags are set, the file wins and the inline text is ignored.
+
+Keep the document focused on the changed behavior and acceptance criteria.
+The raw file limit is **1 MiB**. After sanitization, OCR warns above
+**2,000 characters** and rejects more than **8,000 characters** (not
+tokens). For an internal knowledge base, export the relevant excerpt to
+a local Markdown file first; this flag does not fetch document URLs.
+
+To associate requirements with particular files, use the existing
+[project review rules](../review-rules/). For example, save this as
+`<repo>/.opencodereview/rule.json`:
+
+```json
+{
+  "rules": [
+    {
+      "path": "src/auth/**/*.go",
+      "rule": "docs/requirements/auth.md",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+Here OCR reads `<repo>/docs/requirements/auth.md` as rule text for matching
+paths, alongside the built-in rule. Rule file references accept single-line
+paths without spaces ending in `.md`, `.txt`, or `.markdown`, up to
+**512 KiB**; project rule files must remain inside the repository.
+The first matching rule entry wins. Run `ocr rules check src/auth/login.go`
+from the repository root to inspect the resolved text without an LLM call.
+
+This mapping is explicit: OCR does not automatically load `AGENTS.md` or
+discover which spec applies to each file. Supplying context helps the model
+check requirements; it does not guarantee complete requirements verification.
+
 ### A file shows zero comments — was it actually reviewed?
 
 Open the [Session Viewer](../viewer/) (`ocr viewer`), find the session,
