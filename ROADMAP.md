@@ -27,6 +27,15 @@ OpenCodeReview currently provides:
 
 ## Planned — H2 2026
 
+### ACP Server Adapter
+
+- **Experimental: local source builds only** — Expose OCR as a dedicated review
+  agent through an independent ACP v1 stdio adapter, keeping protocol handling
+  outside the core review engine. Review/scan, command discovery, progress,
+  findings and cancellation are implemented.
+  See the [adapter documentation](acp/README.md) for configuration and support
+  boundaries.
+
 ### IDE Plugins
 
 - **JetBrains plugin** — Bring AI code review to IntelliJ IDEA, GoLand,

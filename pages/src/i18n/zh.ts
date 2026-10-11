@@ -298,6 +298,7 @@ export const zh: TranslationKeys = {
   'docs.sidebar.claudeCode': 'Command（Claude Code）',
   'docs.sidebar.delegate': '委托模式',
   'docs.sidebar.cicd': 'CI/CD',
+  'docs.sidebar.acp': 'ACP',
   'docs.sidebar.contributing': '贡献',
   'docs.sidebar.faq': 'FAQ',
   'docs.search.placeholder': '搜索...',
