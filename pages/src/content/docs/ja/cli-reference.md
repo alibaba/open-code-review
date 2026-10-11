@@ -387,6 +387,7 @@ Sub-commands:
 ```bash
 ocr session list
 ocr session list --limit 50
+ocr session list --branch feat/my-feature
 ocr session list --json
 ```
 
@@ -395,6 +396,11 @@ ocr session list --json
 | `--repo <path>` | カレントディレクトリ | セッションを一覧表示するリポジトリ。 |
 | `--json` | `false` | セッションサマリーを JSON として出力します。 |
 | `--limit <n>` | `20` | 一覧表示するセッション数を制限します。`0` は無制限です。 |
+| `--branch <name>` | すべてのブランチ | 記録されたブランチ名が指定した名前と完全一致するセッションのみ表示します（大文字と小文字を区別）。 |
+
+ブランチの絞り込みは `--limit` より先に適用されます。保存されたメタデータを使うため、
+`--repo` でアーカイブ済みのチェックアウトも指定できます。ブランチの存在やセッションの
+再開可否は確認しません。ブランチが記録されていないセッションは絞り込み時に除外されます。
 
 ### `ocr session show`
 
