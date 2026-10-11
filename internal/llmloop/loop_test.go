@@ -23,6 +23,15 @@ type fakeClient struct {
 	sessionKeys []string
 }
 
+type closingFakeClient struct {
+	fakeClient
+	closed []string
+}
+
+func (c *closingFakeClient) CloseSession(id string) {
+	c.closed = append(c.closed, id)
+}
+
 func (f *fakeClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	f.requests = append(f.requests, req)
 	f.sessionKeys = append(f.sessionKeys, llm.SessionKeyFromContext(ctx))
@@ -127,6 +136,18 @@ func TestRunMainTask_TaskDoneImmediately(t *testing.T) {
 	}
 	if runner.TotalOutputTokens() != 5 {
 		t.Errorf("TotalOutputTokens = %d, want 5", runner.TotalOutputTokens())
+	}
+}
+
+func TestRunMainTask_ClosesProviderSession(t *testing.T) {
+	client := &closingFakeClient{fakeClient: fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}}
+	runner := NewRunner(newTestDeps(client))
+	completed, _, err := runner.RunMainTask(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "main.go")
+	if err != nil || !completed {
+		t.Fatalf("review result = (completed=%v, err=%v)", completed, err)
+	}
+	if len(client.closed) != 1 || client.closed[0] == "" || client.closed[0] != client.requests[0].SessionID {
+		t.Fatalf("closed sessions = %#v, request session = %q", client.closed, client.requests[0].SessionID)
 	}
 }
 

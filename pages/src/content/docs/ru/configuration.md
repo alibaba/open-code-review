@@ -44,11 +44,13 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 заданы базовый URL и протокол, поэтому после выбора достаточно указать
 API-ключ. Если `providers.<name>.api_key` не задан, OCR использует
 соответствующую переменную окружения.
+Copilot и Bedrock используют собственные цепочки аутентификации без API-ключа.
 
 | Имя | Протокол | Базовый URL | Переменная окружения для API-ключа |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
+| `copilot` | copilot | управляется Copilot CLI | — (аутентификация Copilot) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -97,6 +99,27 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 `providers.<name>.url` не задан (или очищен), OCR возвращается к
 предустановленному значению по умолчанию — поэтому его нужно задавать только
 когда ваша конечная точка отличается.
+
+### GitHub Copilot SDK (экспериментальный)
+
+Установите [Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli),
+выполните `copilot login` и завершите вход в браузере. Для одного ревью
+сохранённую конфигурацию менять не нужно:
+
+```bash
+ocr review --provider copilot --model auto
+```
+
+OCR ищет CLI в `PATH` или использует `COPILOT_CLI_PATH`. Модель получает только
+инструменты ревью OCR; выполняет их сам OCR. Обычные вызовы продолжают одну
+SDK-сессию. При сжатии истории или ограничении инструментов в последнем раунде
+сессия создаётся заново с историей в JSON. OCR сохраняет ограничения раундов,
+времени, контекста и общего числа токенов. Строгий предел выходных токенов для
+одного запроса пока не подтверждён. Если SDK не сообщает расход, OCR оценивает его.
+Вызовы расходуют лимит Copilot аккаунта, поэтому начните с небольшого ревью.
+Провайдер принимает только модель и необязательный таймаут; URL, API-ключи,
+пользовательские заголовки, тело запроса и переопределение протокола не поддерживаются.
+Copilot и Bedrock не принимают переопределение URL.
 
 ### AWS Bedrock
 
