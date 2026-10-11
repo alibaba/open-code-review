@@ -202,7 +202,9 @@ useful when a comment hinges on whether a related file was updated.
 {
   "name": "file_read_diff",
   "input": {
-    "path_array": ["src/api/handler.go", "src/db/queries.go"]
+    "path_array": ["src/api/handler.go", "src/db/queries.go"],
+    "max_lines": 500,
+    "offset": 0
   }
 }
 ```
@@ -210,6 +212,7 @@ useful when a comment hinges on whether a related file was updated.
 ### Output
 
 ```
+IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -223,6 +226,12 @@ useful when a comment hinges on whether a related file was updated.
 - query := "SELECT *"
 + query := "SELECT id"
 ```
+
+Output is bounded per call: at most `max_lines` lines (default 500, hard
+ceiling 5000). When the output is capped the response starts with
+`IS_TRUNCATED: true` and `NEXT_OFFSET: <n>`; pass that value back as
+`offset` to read the next page. A page that opens in the middle of a
+file repeats that file's `==== FILE: ... ====` header line.
 
 If a path isn't in the change set, that entry is silently omitted. If
 **none** of the requested paths are in the change set the tool returns
