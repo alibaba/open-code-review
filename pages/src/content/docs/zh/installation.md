@@ -144,7 +144,7 @@ shasum -a 256 -c sha256sum.txt --ignore-missing
 
 #### 前置条件
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -153,7 +153,7 @@ shasum -a 256 -c sha256sum.txt --ignore-missing
 ```bash
 git clone https://github.com/alibaba/open-code-review.git
 cd open-code-review
-make build              # 产出 dist/opencodereview
+make build              # 产出 dist/opencodereview（Windows 上是 dist/opencodereview.exe）
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 
