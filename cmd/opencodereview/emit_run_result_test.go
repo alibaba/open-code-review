@@ -19,6 +19,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/scan"
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
@@ -38,6 +39,7 @@ type mockResultProvider struct {
 	sessionID        string
 	budgetExceeded   bool
 	manifest         *session.RunManifest
+	delivery         *llmloop.CommentDeliveryReport
 }
 
 func (m *mockResultProvider) Diffs() []model.Diff            { return m.diffs }
@@ -57,6 +59,9 @@ func (m *mockResultProvider) ResumeInfo() *agent.ResumeInfo     { return m.resum
 func (m *mockResultProvider) SessionID() string                 { return m.sessionID }
 func (m *mockResultProvider) BudgetExceeded() bool              { return m.budgetExceeded }
 func (m *mockResultProvider) RunManifest() *session.RunManifest { return m.manifest }
+func (m *mockResultProvider) CommentDelivery() *llmloop.CommentDeliveryReport {
+	return m.delivery
+}
 
 func mockManifest(state session.TerminalState) *session.RunManifest {
 	a := session.CoverageItem{ItemID: "a", Path: "a.go", Fingerprint: "fp-a"}
@@ -634,6 +639,232 @@ func TestEmitRunResult_JSONOmitsRetryReportWhenNil(t *testing.T) {
 	})
 	if strings.Contains(got, "retry_report") {
 		t.Errorf("nil report must not appear in JSON, got %s", got)
+	}
+}
+
+// --- comment delivery record at the emit boundary ---
+// These cases pin how the reconciled code_comment delivery record reaches
+// the run exits, mirroring the retry_report carry/omit pair above.
+
+func TestEmitRunResult_JSONCarriesCommentDelivery(t *testing.T) {
+	ag := &mockResultProvider{
+		filesReviewed: 2,
+		manifest:      mockManifest(session.StateComplete),
+		toolFailures: []llmloop.ToolFailureDetail{
+			{ToolCallNumber: 5, ToolName: "code_comment", FilePath: "group-a", Arguments: `{}`, Error: "Error: 'comments' array is required. Got args: {}"},
+		},
+		delivery: &llmloop.CommentDeliveryReport{Unrecovered: 1, ToolCallNumbers: []int64{5}},
+	}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// Failures recorded, terminal complete: the record must ride along
+	// without disturbing the frozen status.
+	if out.Status != string(session.StateComplete) {
+		t.Fatalf("status = %q, want complete", out.Status)
+	}
+	if out.ToolCalls == nil || out.ToolCalls.Failure != 1 {
+		t.Fatalf("tool_calls.failure not carried: %+v", out.ToolCalls)
+	}
+	if out.CommentDelivery == nil {
+		t.Fatalf("comment_delivery missing from JSON output: %s", got)
+	}
+	if out.CommentDelivery.Unrecovered != 1 || len(out.CommentDelivery.ToolCallNumbers) != 1 || out.CommentDelivery.ToolCallNumbers[0] != 5 {
+		t.Errorf("comment_delivery not carried through: %+v", out.CommentDelivery)
+	}
+	// No-conflation: the generation-side record must never read as the
+	// action's posting-failure output, and it must not leak into the
+	// persisted-shape manifest (emit-only, like retry_report).
+	if strings.Contains(got, "comments_failed") {
+		t.Errorf("comment_delivery conflated with comments_failed: %s", got)
+	}
+	manifestJSON, err := json.Marshal(out.Manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if strings.Contains(string(manifestJSON), "comment_delivery") {
+		t.Errorf("comment_delivery leaked into manifest: %s", manifestJSON)
+	}
+}
+
+func TestEmitRunResult_AgentJSONCarriesCommentDelivery(t *testing.T) {
+	// Quiet-mode pin: machine consumers read agent-audience JSON, so the
+	// record must survive quiet handling, not just developer output.
+	ag := &mockResultProvider{
+		filesReviewed: 2,
+		manifest:      mockManifest(session.StateComplete),
+		delivery:      &llmloop.CommentDeliveryReport{Unrecovered: 1, ToolCallNumbers: []int64{5}},
+	}
+	q := newQuietHandle("json", "agent")
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "agent", q, nil, os.Stdout, nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	q.Restore()
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.CommentDelivery == nil || out.CommentDelivery.Unrecovered != 1 {
+		t.Errorf("agent JSON lost comment_delivery: %s", got)
+	}
+}
+
+func TestEmitRunResult_JSONCarriesRecoveredDelivery(t *testing.T) {
+	// A fully recovered run still carries the record: present-with-zero is
+	// how a consumer tells "rejected then resubmitted" from "never rejected".
+	ag := &mockResultProvider{
+		filesReviewed: 2,
+		manifest:      mockManifest(session.StateComplete),
+		delivery:      &llmloop.CommentDeliveryReport{Unrecovered: 0, ToolCallNumbers: []int64{}},
+	}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.CommentDelivery == nil {
+		t.Fatalf("recovered comment_delivery missing from JSON: %s", got)
+	}
+	if out.CommentDelivery.Unrecovered != 0 || out.CommentDelivery.ToolCallNumbers == nil {
+		t.Errorf("recovered record must read {unrecovered:0, tool_call_numbers:[]}, got %+v", out.CommentDelivery)
+	}
+}
+
+func TestEmitRunResult_SARIFOmitsDeliveryRecord(t *testing.T) {
+	// SARIF carries warnings + manifest only: delivery must neither appear
+	// nor break the SARIF exit when a provider has a record.
+	ag := &mockResultProvider{
+		filesReviewed: 2,
+		manifest:      mockManifest(session.StateComplete),
+		delivery:      &llmloop.CommentDeliveryReport{Unrecovered: 1, ToolCallNumbers: []int64{5}},
+	}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "sarif", "developer", nil, nil, os.Stdout, nil); err != nil {
+			t.Fatalf("emitRunResult sarif: %v", err)
+		}
+	})
+	if strings.Contains(got, "comment_delivery") {
+		t.Errorf("comment_delivery must not appear in SARIF: %s", got)
+	}
+}
+
+func TestCommentDeliveryProviderWiring(t *testing.T) {
+	// The review agent must expose the record while scan stays without it;
+	// zero values suffice — only the method sets are asserted, nothing runs.
+	var review ResultProvider = &agent.Agent{}
+	if _, ok := any(review).(commentDeliveryProvider); !ok {
+		t.Error("review Agent must implement commentDeliveryProvider")
+	}
+	var sc ResultProvider = &scan.Agent{}
+	if _, ok := any(sc).(commentDeliveryProvider); ok {
+		t.Error("scan Agent must not implement commentDeliveryProvider")
+	}
+}
+
+func TestEmitRunResult_JSONOmitsCommentDeliveryWhenNil(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 2, manifest: mockManifest(session.StateComplete)}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	if strings.Contains(got, "comment_delivery") {
+		t.Errorf("nil record must not appear in JSON, got %s", got)
+	}
+}
+
+// deliveryLessProvider embeds ResultProvider without the optional
+// commentDeliveryProvider, standing in for agents like scan.
+type deliveryLessProvider struct{ ResultProvider }
+
+func TestEmitRunResult_JSONOmitsCommentDeliveryWithoutProvider(t *testing.T) {
+	// Inner delivery is non-nil on purpose: omit must follow from the
+	// failed optional-interface assertion, not from a nil record.
+	ag := deliveryLessProvider{&mockResultProvider{
+		filesReviewed: 2,
+		manifest:      mockManifest(session.StateComplete),
+		delivery:      &llmloop.CommentDeliveryReport{Unrecovered: 1, ToolCallNumbers: []int64{5}},
+	}}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	if strings.Contains(got, "comment_delivery") {
+		t.Errorf("provider without the record must not emit it, got %s", got)
+	}
+}
+
+func TestEmitRunResult_TextDeliveryOrder(t *testing.T) {
+	ag := &mockResultProvider{
+		filesReviewed:  2,
+		manifest:       mockManifest(session.StateComplete),
+		projectSummary: "PROJECT-SUMMARY-MARKER",
+		delivery:       &llmloop.CommentDeliveryReport{Unrecovered: 1, ToolCallNumbers: []int64{5}},
+	}
+	comments := []model.LlmComment{{Path: "a.go", Content: "COMMENT-MARKER", StartLine: 5, EndLine: 10}}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, comments, time.Now(), "text", "developer", nil, nil, os.Stdout, retryReportFixture()); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	comment := strings.Index(got, "COMMENT-MARKER")
+	report := strings.Index(got, "LLM retry report summary:")
+	delivery := strings.Index(got, "Comment delivery:")
+	summary := strings.Index(got, "PROJECT-SUMMARY-MARKER")
+	if comment < 0 || report < 0 || delivery < 0 {
+		t.Fatalf("comment/report/delivery blocks missing from text output: %s", got)
+	}
+	if !(comment < report && report < delivery) {
+		t.Errorf("want comments, then retry report, then delivery block\n%s", got)
+	}
+	if summary < 0 || delivery > summary {
+		t.Errorf("delivery block must precede the project summary\n%s", got)
+	}
+	if !strings.Contains(got, "1 unrecovered rejected submission (tool calls: 5)") {
+		t.Errorf("delivery line missing or malformed: %s", got)
+	}
+}
+
+func TestEmitRunResult_TextRendersRecoveredDelivery(t *testing.T) {
+	// A fully recovered run prints its recovery line: visible recovery,
+	// never inferred from an absent line.
+	ag := &mockResultProvider{
+		filesReviewed: 2,
+		manifest:      mockManifest(session.StateComplete),
+		delivery:      &llmloop.CommentDeliveryReport{Unrecovered: 0, ToolCallNumbers: []int64{}},
+	}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil, nil, os.Stdout, nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	if !strings.Contains(got, "every rejected submission was superseded") {
+		t.Errorf("recovered delivery line missing: %s", got)
+	}
+}
+
+func TestEmitRunResult_TextOmitsDeliveryWhenNil(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 2, manifest: mockManifest(session.StateComplete)}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil, nil, os.Stdout, nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	if strings.Contains(got, "Comment delivery:") {
+		t.Errorf("nil record must not appear in text, got %s", got)
 	}
 }
 
