@@ -337,7 +337,9 @@ rm -rf ~/.opencodereview                                # all state
 ```
 
 OCR 不在 `~/.opencodereview` 之外写入（NPM 下载二进制除外），因此删除该目录即可
-清除历史、配置与每用户规则。
+清除历史、配置与每用户规则。`ocr review --fetch` 还会写入你的仓库：与 `git fetch`
+一样，它会写入拉取到的 Git 对象并更新所选的远程跟踪分支（及其 reflog），本地分支与
+工作区保持不变。
 
 ## 另见
 

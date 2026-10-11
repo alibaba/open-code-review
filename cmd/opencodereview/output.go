@@ -716,10 +716,10 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 // review findings — there is no SARIF result to emit, and a differently-shaped
 // document would confuse consumers expecting a SARIF report.
 func outputPreview(p *agent.DiffPreview, outputFormat string, out io.Writer) error {
-	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
-	if outputFormat == "sarif" {
-		return fmt.Errorf("--format sarif is not supported with --preview: SARIF output requires completed review findings")
+	if err := previewFormatError(outputFormat); err != nil {
+		return err
 	}
+	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
 	if outputFormat == "json" {
 		return outputPreviewJSON(p, out)
 	}
@@ -727,6 +727,15 @@ func outputPreview(p *agent.DiffPreview, outputFormat string, out io.Writer) err
 	// outputPreviewText drops fmt.Fprintf write errors; surface deferred
 	// writer errors so a failed --output write fails the command non-zero.
 	return writeOutError(out)
+}
+
+// previewFormatError rejects the formats a preview can never produce, so a
+// caller can refuse them before doing any work.
+func previewFormatError(outputFormat string) error {
+	if strings.ToLower(strings.TrimSpace(outputFormat)) == "sarif" {
+		return fmt.Errorf("--format sarif is not supported with --preview: SARIF output requires completed review findings")
+	}
+	return nil
 }
 
 func outputPreviewJSON(p *agent.DiffPreview, out io.Writer) error {

@@ -17,7 +17,7 @@ import (
 )
 
 func runPreview(cc *commonContext, opts reviewOptions, out io.Writer) error {
-	return runPreviewContext(context.Background(), cc, opts, out)
+	return runPreviewContext(context.Background(), cc, opts, out, nil)
 }
 
 func TestRunPreview(t *testing.T) {
