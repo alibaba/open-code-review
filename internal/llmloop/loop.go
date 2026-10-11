@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -64,6 +65,24 @@ type Deps struct {
 	// for this request, so the report joins against the session JSONL.
 	NewRequestMeta func(filePath string, taskType session.TaskType, requestNo int) llm.RequestMeta
 
+	// ContextResultThreshold is the tool-result size, in tokens, at or above
+	// which a result is treated as review context: sent once for the round
+	// that consumes it, then replaced by a receipt. 0 selects
+	// DefaultContextResultThreshold. The caller derives it from the run's
+	// context budget, which this package deliberately does not know about -
+	// the loop only needs to know where the line is.
+	ContextResultThreshold int
+
+	// OnTaskDone is called when a model ends the task, with the chunks it
+	// declared skipped and the causes it gave. Nil disables the declaration
+	// entirely; the tool schema still offers it, and an unrecorded declaration
+	// simply leaves those chunks reported as uninspected.
+	//
+	// The declaration exists because a chunk the model chose not to read and a
+	// chunk it forgot to read are different facts, and only the model can tell
+	// them apart.
+	OnTaskDone func(taskKey string, skipped []SkippedChunk)
+
 	// MaxTokensBudget, when > 0, is the run's aggregate token budget
 	// (input+output across every LLM call on this Runner). RunMainTask checks
 	// it before each round and stops with StopTokenBudget once the running
@@ -72,6 +91,39 @@ type Deps struct {
 	// unlimited, which is also what scan and every existing caller get by
 	// default.
 	MaxTokensBudget int64
+}
+
+// SkippedChunk is one unit of review context the model declared it did not
+// read, with the cause it gave for skipping it.
+type SkippedChunk struct {
+	ID     string
+	Reason string
+}
+
+// parseSkippedChunks reads the skipped_chunks array of a task_done call. A
+// malformed entry is dropped rather than failing the task: the declaration is
+// bookkeeping, and a bookkeeping mistake must not end a review that is
+// otherwise fine.
+func parseSkippedChunks(args map[string]any) []SkippedChunk {
+	raw, ok := args["skipped_chunks"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]SkippedChunk, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := m["chunk_id"].(string)
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		reason, _ := m["reason"].(string)
+		out = append(out, SkippedChunk{ID: id, Reason: strings.TrimSpace(reason)})
+	}
+	return out
 }
 
 // requestCtx returns ctx carrying the identity of one logical LLM request, or
@@ -111,6 +163,18 @@ type Runner struct {
 	toolCalls             map[string]int64
 	toolCallSequence      int64
 	toolFailures          []ToolFailureDetail
+	// Context accounting, aggregated across every RunMainTask call. The
+	// per-conversation ledgers are folded into these on return; the chunk
+	// store folds its own half (unique chunks, fetches, refetches) through
+	// RecordChunkStats.
+	rawContextTokensSent       int64
+	rawContextResendTokens     int64
+	uniqueContextChunks        int64
+	chunkFetchCount            int64
+	chunkRefetchCount          int64
+	contextReceipts            int64
+	maxEstimatedRequestTokens  int64
+	lastEstimatedRequestTokens int64
 	// toolFailureStreak counts each (taskKey, toolName) pair's consecutive
 	// failures; see tool_failure_streak.go.
 	toolFailureStreak toolFailureStreakState
@@ -176,6 +240,70 @@ func (r *Runner) TotalCacheWriteTokens() int64 { return atomic.LoadInt64(&r.tota
 // TotalTokensUsed returns input + output.
 func (r *Runner) TotalTokensUsed() int64 {
 	return r.TotalInputTokens() + r.TotalOutputTokens()
+}
+
+// RunContextStats is the run-wide context accounting: what was offered to the
+// model, what was actually sent, and what was sent twice. It answers the
+// question the ticket poses directly - how many times did this raw diff reach a
+// provider - and separates this tool's own estimate from provider-reported
+// usage, which lives in TotalInputTokens.
+type RunContextStats struct {
+	// UniqueContextChunks is the number of distinct chunks the manifest
+	// offered.
+	UniqueContextChunks int64
+	// ChunkFetchCount is the number of chunk reads served.
+	ChunkFetchCount int64
+	// ChunkRefetchCount is the number of reads beyond the first for a chunk.
+	ChunkRefetchCount int64
+	// RawContextTokensSent is the token count of tool results sent raw for the
+	// first time, in the loop's own estimate.
+	RawContextTokensSent int64
+	// RawContextResendTokens is the token count of chunk content read more than
+	// once. Zero on a nominal run.
+	RawContextResendTokens int64
+	// ContextReceipts counts the payloads replaced by a receipt before leaving
+	// the process.
+	ContextReceipts int64
+	// MaxEstimatedRequestTokens and LastEstimatedRequestTokens bound the
+	// estimated input size of the requests issued. The estimate covers
+	// messages; tool definitions add a fixed per-request term.
+	MaxEstimatedRequestTokens  int64
+	LastEstimatedRequestTokens int64
+}
+
+// ContextStats returns the run's context accounting.
+func (r *Runner) ContextStats() RunContextStats {
+	return RunContextStats{
+		UniqueContextChunks:        atomic.LoadInt64(&r.uniqueContextChunks),
+		ChunkFetchCount:            atomic.LoadInt64(&r.chunkFetchCount),
+		ChunkRefetchCount:          atomic.LoadInt64(&r.chunkRefetchCount),
+		RawContextTokensSent:       atomic.LoadInt64(&r.rawContextTokensSent),
+		RawContextResendTokens:     atomic.LoadInt64(&r.rawContextResendTokens),
+		ContextReceipts:            atomic.LoadInt64(&r.contextReceipts),
+		MaxEstimatedRequestTokens:  atomic.LoadInt64(&r.maxEstimatedRequestTokens),
+		LastEstimatedRequestTokens: atomic.LoadInt64(&r.lastEstimatedRequestTokens),
+	}
+}
+
+// RecordChunkStats folds the chunk store's accounting into the run-wide
+// counters. It is additive because the store is shared across subtasks that
+// fold their own slice of it as they finish.
+func (r *Runner) RecordChunkStats(st ChunkRunStats) {
+	atomic.AddInt64(&r.uniqueContextChunks, st.UniqueChunks)
+	atomic.AddInt64(&r.chunkFetchCount, st.FetchCount)
+	atomic.AddInt64(&r.chunkRefetchCount, st.RefetchCount)
+	atomic.AddInt64(&r.rawContextResendTokens, st.ResendTokens)
+}
+
+// ChunkRunStats is the projection of the chunk store's accounting that the
+// Runner consumes. Declaring it here keeps internal/llmloop free of a chunk
+// import, so the loop stays independent of how review context is chunked, and
+// lets a caller fold each group's slice in exactly once.
+type ChunkRunStats struct {
+	UniqueChunks int64
+	FetchCount   int64
+	RefetchCount int64
+	ResendTokens int64
 }
 
 // Warnings returns a copy of the accumulated warnings.
@@ -389,6 +517,14 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 	st := &compressionState{}
 	defer r.cancelPendingCompression(st)
 
+	// The context ledger is owned by this conversation for the same reason:
+	// it decides which payloads leave the request, and one subtask must never
+	// strip a payload another subtask's model still needs. Folding into the
+	// run-wide counters happens on every exit path, including the error
+	// returns, so an aborted conversation still reports what it sent.
+	ledger := newContextLedger(r.deps.ContextResultThreshold)
+	defer ledger.fold(r)
+
 	// stop defaults to StopMaxRounds: if the for-loop exits because toolReqCount
 	// reached zero, the run stopped on the round budget. The empty-round,
 	// compression and token-budget breaks overwrite it at their trigger points.
@@ -421,8 +557,12 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 
 		_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
 		resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-			Model:     r.deps.Model,
-			Messages:  messages,
+			Model: r.deps.Model,
+			// The wire gets the projected conversation: payloads the model has
+			// already answered are replaced by their receipt. The local history
+			// in messages is untouched, so session records and async
+			// compression still see what actually happened.
+			Messages:  ledger.prepare(messages),
 			Tools:     r.deps.MainToolDefs,
 			MaxTokens: r.deps.Template.CompletionTokenLimit(),
 			SessionID: sessionID,
@@ -633,6 +773,9 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		args, err := parseToolArgs(call.Function.Arguments)
 		if err != nil {
 			return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
+		}
+		if r.deps.OnTaskDone != nil {
+			r.deps.OnTaskDone(taskKey, parseSkippedChunks(args))
 		}
 		rawState, hasState := args["state"]
 		if !hasState {

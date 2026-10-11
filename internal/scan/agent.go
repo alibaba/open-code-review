@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/chunk"
 	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -213,10 +214,16 @@ func (a *Agent) Diffs() []model.Diff {
 }
 
 // TotalTokensUsed / TotalInputTokens / ... delegate to the underlying runner.
-func (a *Agent) TotalTokensUsed() int64      { return a.runner.TotalTokensUsed() }
-func (a *Agent) TotalInputTokens() int64     { return a.runner.TotalInputTokens() }
-func (a *Agent) TotalOutputTokens() int64    { return a.runner.TotalOutputTokens() }
-func (a *Agent) TotalCacheReadTokens() int64 { return a.runner.TotalCacheReadTokens() }
+func (a *Agent) TotalTokensUsed() int64  { return a.runner.TotalTokensUsed() }
+func (a *Agent) TotalInputTokens() int64 { return a.runner.TotalInputTokens() }
+
+// ContextStats returns the run's review-context accounting. Scan registers no
+// chunk manifest - it serves whole files through the same bounded read tool -
+// so the chunk counters stay zero while the ledger half (raw tokens sent,
+// receipts issued) remains meaningful.
+func (a *Agent) ContextStats() llmloop.RunContextStats { return a.runner.ContextStats() }
+func (a *Agent) TotalOutputTokens() int64              { return a.runner.TotalOutputTokens() }
+func (a *Agent) TotalCacheReadTokens() int64           { return a.runner.TotalCacheReadTokens() }
 func (a *Agent) TotalCacheWriteTokens() int64 {
 	return a.runner.TotalCacheWriteTokens()
 }
@@ -425,6 +432,17 @@ func (a *Agent) injectScanContentMap() {
 	if p, ok := a.args.Tools.Get(tool.FileReadDiff.Name()); ok {
 		if frd, ok := p.(*tool.FileReadDiffProvider); ok {
 			frd.SetDiffMap(dm)
+			// Scan serves whole files rather than diffs, so a multi-path read
+			// could concatenate several of them at once. Bound it from the
+			// scan template's own prompt ceiling: scan has no per-group plan
+			// phase, so there is no measured fixed overhead to subtract, and
+			// the resulting budget is the conservative one - reads are capped
+			// well below the conversation limit rather than just under it.
+			frd.SetContextStore(nil, chunk.DeriveBudget(
+				llmloop.PromptTokenLimit(a.args.Template.MaxTokens),
+				0,
+				a.args.Template.CompletionTokenLimit(),
+			).Read())
 		}
 	}
 }
