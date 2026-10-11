@@ -324,6 +324,12 @@ func TestPagerCSS_StaysHiddenUntilScripted(t *testing.T) {
 			"the pager's own display: flex is an author rule, so it outranks the UA [hidden] rule " +
 			"and the control would paint before the page script reveals it, and stay up with scripting off")
 	}
+	rowGuard := regexp.MustCompile(`\.file-list li\[hidden\] \{\s*display: none;`)
+	if !rowGuard.Match(css) {
+		t.Error("style.css lost the .file-list li[hidden] { display: none } guard: " +
+			"the row's display: flex is an author rule, so it outranks the UA [hidden] rule " +
+			"and the Files Reviewed list would paint every page's rows at once")
+	}
 }
 
 func TestSurfaceCSS_LightSurfaceIsWhite(t *testing.T) {

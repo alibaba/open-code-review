@@ -81,23 +81,41 @@ ocr delegate rule <path1> <path2> ...
 
 ### ステップ 3：diff の取得
 
-ステップ 1 の mode/ref 情報に基づき、git を直接使用：
+ステップ 1 のモードと参照情報に応じて diff コマンドを選びます。レビュー中のすべての Git 呼び出しで `git --no-pager` を使います。
+
+以下の diff コマンドは外部 diff プログラム、テキスト変換、カラー出力を無効にして、プレーンテキストのパッチを取得します。
 
 **Range モード**（merge\_base あり）：
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Commit モード**：
 ```bash
-git show <commit> -- <path>
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Workspace モード**：
 ```bash
-git diff HEAD -- <path>        # 追跡ファイル
-cat <path>                     # 新規未追跡ファイル
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # 追跡ファイル
+cat "<path>"                     # 新規未追跡ファイル
 ```
+
+コンテキストを取得するには：
+
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
+大きな diff では、選択したモードのコマンドに `--output="<absolute-diff-file>"` を追加します。リポジトリ外の一意な絶対パスを選び、親ディレクトリを作成します。ファイル読み取りツールでも同じパスを使います：
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+Git が終了コード 0 で終了したら、ファイル全体を分割して読み取り、レビューを終えてから削除します。コマンドが失敗またはタイムアウトした場合は、再試行するか、エラーを記録して `skipped` にします。出力が予期せず空の場合は、preview を再実行して照合します。
 
 ### ステップ 4：各ファイルのレビュー
 
@@ -106,6 +124,8 @@ cat <path>                     # 新規未追跡ファイル
 1. diff を取得（ステップ 3）
 2. 対応するルールグループ（ステップ 2）をレビューチェックリストとして参照
 3. コンテキスト探索を必要に応じて行い、徹底的にレビュー
+
+preview の各 `(path, status)` を `reviewed` または `skipped` として記録し、スキップした項目には理由を付けます。レポートには `total_files`、`reviewed_files`、`skipped_files`、`coverage_rate` を含めます。
 
 ### ステップ 5：レポート
 

@@ -181,6 +181,18 @@ fun unquoteGitPath(path: String): String {
 }
 
 /**
+ * Arguments for `git show --name-status` when listing files changed by one commit.
+ *
+ * `--diff-merges=first-parent` is required: a plain `git show` of a merge commit
+ * emits a combined diff, which is empty for a clean merge. The IDE then lists
+ * no files for that commit. The CLI and the VS Code extension already pass this
+ * flag; the SHA is the last operand, after `--end-of-options`, and callers must
+ * already have rejected option-like refs.
+ */
+fun commitShowNameStatusArgs(sha: String): Array<String> =
+    arrayOf("show", "--diff-merges=first-parent", "--name-status", "--format=", "--end-of-options", sha)
+
+/**
  * Parses `git diff --name-status` / `git show --name-status` output.
  * Tab-separated: `status<TAB>path`; a rename is `R<score><TAB>old<TAB>new`, take new.
  */
