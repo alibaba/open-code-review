@@ -126,6 +126,10 @@ type Args struct {
 	// variables with no named provider.
 	Provider string
 
+	// EndpointSource is the non-secret label for the configuration source that
+	// resolved the endpoint. It is persisted with the session for diagnostics.
+	EndpointSource string
+
 	// GitRunner limits the total number of concurrent git subprocesses.
 	// When nil, subprocesses are spawned without a global limit.
 	GitRunner *gitcmd.Runner
@@ -224,6 +228,7 @@ func New(args Args) *Agent {
 			DiffCommit:  args.Commit,
 			ResumedFrom: resumedFromSession(args.Resume),
 			Operation:   session.OperationReview,
+			LLMSource:   args.EndpointSource,
 		})
 	}
 	a := &Agent{
@@ -1188,12 +1193,14 @@ var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 // safe, generic reason. It never returns the raw error text (which may embed a
 // provider payload, credentials or absolute paths); the full error is persisted
 // separately in the session checkpoint. Context deadline/cancel are recognized
-// via errors.Is (the per-group subtask timeout is the only deadline in play), and the
+// via errors.Is, and the
 // empty-template precondition is a configuration failure.
 func classifyItemError(err error) (session.FailureClass, string) {
 	switch {
+	case errors.Is(err, llm.ErrRequestTimeout):
+		return session.FailureTimeout, "LLM request timed out; configure OCR_LLM_TIMEOUT or provider timeout_sec"
 	case errors.Is(err, context.DeadlineExceeded):
-		return session.FailureTimeout, "file review exceeded its time limit"
+		return session.FailureTimeout, "file review exhausted its task deadline (--timeout)"
 	case errors.Is(err, context.Canceled):
 		return session.FailureCancelled, "file review was cancelled"
 	case errors.Is(err, errMainTaskEmpty):

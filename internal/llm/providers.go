@@ -3,6 +3,8 @@
 
 package llm
 
+//go:generate go run ./gen -output ../../extensions/frontend/src/shared/providers.generated.ts -kotlin-output ../../extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/ProviderNames.generated.kt
+
 import (
 	"sort"
 	"strings"
@@ -35,6 +37,8 @@ type Provider struct {
 	AmbientAuth bool
 }
 
+// After modifying the built-in provider registry, run `go generate ./internal/llm`
+// and commit both generated catalogs. See the root AGENTS.md for paths and verification.
 var registry = []Provider{
 	{
 		Name:        "anthropic",
@@ -102,6 +106,20 @@ var registry = []Provider{
 			"gpt-5.6-sol",
 			"gpt-5.6-terra",
 			"gpt-5.6-luna",
+		},
+	},
+	{
+		Name:        "openrouter",
+		DisplayName: "OpenRouter",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://openrouter.ai/api/v1",
+		EnvVar:      "OPENROUTER_API_KEY",
+		Models: []string{
+			"anthropic/claude-fable-5.1",
+			"openai/gpt-5.6-sol",
+			"anthropic/claude-opus-5",
+			"openai/gpt-6-astra",
+			"moonshotai/kimi-k3",
 		},
 	},
 	{

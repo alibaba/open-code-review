@@ -378,7 +378,7 @@ JSONL과 규칙 파일은 로컬에만 있습니다.
 
 릴리스에 올라가는 정적 바이너리는 프로젝트 이름을 따 `opencodereview`이고, NPM
 래퍼는 쓰기 편하도록 `ocr`이라는 이름으로 설치합니다. 소스에서 빌드하면
-`dist/opencodereview`가 나옵니다. `$PATH`에 `ocr`로 복사해 두세요.
+`dist/opencodereview`(Windows에서는 `dist/opencodereview.exe`)가 나옵니다. `$PATH`에 `ocr`로 복사해 두세요.
 
 ### 어떻게 제거하나요? {#how-do-i-uninstall}
 

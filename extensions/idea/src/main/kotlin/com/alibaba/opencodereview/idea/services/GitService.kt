@@ -181,7 +181,7 @@ class GitService(private val project: Project) {
     fun getCommitFiles(sha: String): List<FileChange> {
         val root = repoRoot() ?: return emptyList()
         val safeSha = safeRef(sha) ?: return emptyList() // safeRef has already rejected empty/blank input
-        val out = runGitOrNull(root, "show", "--name-status", "--format=", safeSha) ?: return emptyList()
+        val out = runGitOrNull(root, *commitShowNameStatusArgs(safeSha)) ?: return emptyList()
         return parseNameStatus(out)
     }
 

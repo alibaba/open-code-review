@@ -46,6 +46,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `bedrock` | anthropic-bedrock | `aws_region` から決定 | —（AWS 認証情報チェーン） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
@@ -65,6 +66,11 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+組み込み provider のモデル一覧は `ocr config model` の選択候補であり、`--model`
+の制限には使われません。組み込み一覧にも `providers.<name>.models` にもないモデルを
+指定すると、OCR は stderr に警告を出します。モデルはリクエスト送信時に provider が
+検証します。カスタム provider には従来の `--model` 検証ルールが適用されます。
 
 ### 組み込み provider の Base URL を上書きする
 
@@ -189,6 +195,16 @@ Ollama は API key を無視しますが、カスタム provider は空でない
 
 ### タイムアウト（Timeouts）
 
+タスクの制限時間とリクエスト単位のタイムアウトは独立しています。
+
+- `ocr review --timeout` と `ocr scan --timeout` は並行タスクの制限時間を
+  **分**単位で設定します（デフォルトは **15**、`0` でタスクの期限を無効化）。
+  この時間には、タスク内のすべての LLM 呼び出し、ツール実行、再試行の待機が含まれます。
+  review では effort に応じたレビューラウンド数を掛けた時間になります。
+- HTTP リクエスト単位のタイムアウトは**秒**単位です（デフォルトは **300**）。
+  `--timeout` を増やしても変更されず、タスクの期限を無効にしてもリクエストの
+  タイムアウトは無効になりません。タスクの残り時間の方が短い場合は、その時間が優先されます。
+
 各 LLM リクエストには HTTP タイムアウトがあり、デフォルトは **300 秒**です。
 遅いローカルモデル（あるいは大きなファイル）では、それ以上の時間が必要になることがあります。
 スコープの狭い順に、3 つの設定があります。
@@ -208,6 +224,25 @@ Ollama は API key を無視しますが、カスタム provider は空でない
   }
 }
 ```
+
+例えば、`OCR_LLM_TIMEOUT=900 ocr review --timeout 30` では、タスクの制限時間内で
+単一のリクエストを最大 15 分間実行できます。この環境変数も `timeout_sec` も
+設定しなければ、`--timeout 30` を指定してもリクエストは 5 分でタイムアウトします。
+
+リクエスト単位の期限を超えると、自動的に再送せずに呼び出しを終了します。
+レスポンス本文やストリームの読み取り中にタイムアウトした場合も同様です。
+常に時間がかかるリクエストでは、同じ制限時間で再試行するのではなく、リクエストの
+タイムアウトを延ばしてください。既存の SDK の再試行ポリシーは変わりません。
+再試行可能な接続エラーや HTTP エラーに対しては、バックオフとプロバイダーの
+`Retry-After` 指示に従って最大 5 回再試行します。SDK の試行ごとの期限は、
+再試行の待機時間にも適用されます。キャンセルまたはタスクの期限切れにより、
+リクエストと再試行の待機の両方が停止します。
+
+診断メッセージでは `LLM request timeout`（`OCR_LLM_TIMEOUT` または provider の
+`timeout_sec` を確認）と `caller deadline exceeded` を区別します。後者は呼び出し元の
+処理のコンテキストの期限が切れたことを示します。review/scan タスクの期限切れなら
+`--timeout` を確認してください。バックグラウンドのメモリ圧縮や `ocr llm test` などの
+処理には、それぞれ独立した期限があります。
 
 ### API key をコマンドで取得する
 

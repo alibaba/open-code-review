@@ -53,6 +53,7 @@ type Provider struct {
 // back to DefaultMaxFileSizeBytes.
 func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileSizeBytes int64) *Provider {
 	cleaned := make([]string, 0, len(paths))
+	rootSelected := false
 	for _, p := range paths {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -60,9 +61,27 @@ func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileS
 		}
 		// Normalize: strip leading "./" and trailing "/" so prefix matching
 		// against `git ls-files` output (which never has leading "./") works.
-		p = strings.TrimPrefix(p, "./")
+		// ToSlash runs first: on Windows `.\dir` only becomes `./dir` here, and
+		// trimming the prefix before the conversion leaves it in place to match
+		// nothing.
+		p = filepath.ToSlash(p)
+		for strings.HasPrefix(p, "./") {
+			p = strings.TrimPrefix(p, "./")
+		}
 		p = strings.TrimSuffix(p, "/")
-		cleaned = append(cleaned, filepath.ToSlash(p))
+		// "." and "./" name the repository root, which is what an omitted --path
+		// already means. Kept as a selector they match nothing, because
+		// `git ls-files` prints `main.go` and never `./main.go`.
+		if p == "" || p == "." {
+			rootSelected = true
+			continue
+		}
+		cleaned = append(cleaned, p)
+	}
+	// A root selector widens the scan to the whole repository, so any narrower
+	// selector alongside it is already covered.
+	if rootSelected {
+		cleaned = nil
 	}
 	if maxFileSizeBytes <= 0 {
 		maxFileSizeBytes = DefaultMaxFileSizeBytes

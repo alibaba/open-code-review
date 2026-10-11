@@ -223,6 +223,7 @@ type llmRuntime struct {
 	Client       llm.LLMClient
 	Model        string
 	Provider     string // resolved provider name (non-secret label; empty for non-provider endpoints)
+	Source       string // resolved configuration source (non-secret label)
 	PlanToolDefs []llm.ToolDef
 	MainToolDefs []llm.ToolDef
 	Collector    *tool.CommentCollector
@@ -297,6 +298,7 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 		Client:         llm.NewLLMClient(ep, retryCollector, rawHolder),
 		Model:          ep.Model,
 		Provider:       ep.Provider,
+		Source:         ep.Source,
 		PlanToolDefs:   planToolDefs,
 		MainToolDefs:   mainToolDefs,
 		Collector:      tool.NewCommentCollector(),
