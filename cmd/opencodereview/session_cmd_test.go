@@ -87,6 +87,47 @@ func TestRunSessionList_EmptyRepo(t *testing.T) {
 	}
 }
 
+func TestRunSessionList_BranchFilterBeforeLimit(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	old := session.New(repoDir, "main", "test-model", session.SessionOptions{})
+	old.RecordReviewItemDone("old.go", "old.go", "old.go", "fp-old", nil)
+	old.Finalize()
+	newer := session.New(repoDir, "feature", "test-model", session.SessionOptions{})
+	newer.RecordReviewItemDone("new.go", "new.go", "new.go", "fp-new", nil)
+	newer.Finalize()
+
+	got := captureStdout(t, func() {
+		if err := runSessionListCompat([]string{"--repo", repoDir, "--branch", "feature", "--limit", "1", "--json"}); err != nil {
+			t.Fatalf("runSessionList: %v", err)
+		}
+	})
+	var decoded []session.Summary
+	if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+		t.Fatalf("unmarshal: %v (out=%q)", err, got)
+	}
+	if len(decoded) != 1 || decoded[0].GitBranch != "feature" {
+		t.Fatalf("decoded = %+v", decoded)
+	}
+}
+
+func TestRunSessionList_BranchFilterEmptyMessage(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	got := captureStdout(t, func() {
+		if err := runSessionListCompat([]string{"--repo", repoDir, "--branch", "missing"}); err != nil {
+			t.Fatalf("runSessionList: %v", err)
+		}
+	})
+	if !strings.Contains(got, "on branch missing") {
+		t.Errorf("expected branch in empty message, got %q", got)
+	}
+}
+
 func TestRunSessionShow_Text(t *testing.T) {
 	tmpHome := t.TempDir()
 	setTestHome(t, tmpHome)

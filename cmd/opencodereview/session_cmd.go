@@ -35,6 +35,7 @@ var sessionCmd = &cobra.Command{
 var sessionListRepoDir string
 var sessionListJSON bool
 var sessionListLimit int
+var sessionListBranch string
 
 var sessionListCmd = &cobra.Command{
 	Use:     "list [flags]",
@@ -199,6 +200,7 @@ func init() {
 	sessionListCmd.Flags().StringVar(&sessionListRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
 	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "emit JSON instead of a table")
 	sessionListCmd.Flags().IntVar(&sessionListLimit, "limit", 20, "cap the number of listed sessions (0 = unlimited)")
+	sessionListCmd.Flags().StringVar(&sessionListBranch, "branch", "", "only list sessions recorded on this branch")
 
 	sessionShowCmd.Flags().StringVar(&sessionShowRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
 	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "emit JSON instead of a table")
@@ -276,6 +278,15 @@ func runSessionList() error {
 	if err != nil {
 		return fmt.Errorf("list sessions: %w", err)
 	}
+	if sessionListBranch != "" {
+		filtered := summaries[:0]
+		for _, summary := range summaries {
+			if summary.GitBranch == sessionListBranch {
+				filtered = append(filtered, summary)
+			}
+		}
+		summaries = filtered
+	}
 	if sessionListLimit > 0 && len(summaries) > sessionListLimit {
 		summaries = summaries[:sessionListLimit]
 	}
@@ -287,6 +298,10 @@ func runSessionList() error {
 	}
 
 	if len(summaries) == 0 {
+		if sessionListBranch != "" {
+			fmt.Printf("No sessions found for %s on branch %s\n", resolvedRepo, sessionListBranch)
+			return nil
+		}
 		fmt.Printf("No sessions found for %s\n", resolvedRepo)
 		return nil
 	}
