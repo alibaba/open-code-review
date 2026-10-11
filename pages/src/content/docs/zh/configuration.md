@@ -66,6 +66,11 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
+内置 provider 的模型列表只为 `ocr config model` 提供选择建议，不限制 `--model`。
+如果指定的模型既不在内置列表中，也不在 `providers.<name>.models` 中，OCR 会向
+stderr 输出警告；发送请求时由 provider 验证模型。自定义 provider 仍遵循原有的
+`--model` 校验规则。
+
 ### 覆盖内置 provider 的 Base URL
 
 每个内置 provider 都有一个预设 Base URL（见上表）。要将内置 provider
@@ -180,6 +185,15 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
 
 ### 超时
 
+任务超时和单次请求超时相互独立：
+
+- `ocr review --timeout` 和 `ocr scan --timeout` 以**分钟**为单位设置并发任务的
+  时间预算（默认 **15**；`0` 关闭任务期限）。预算包括任务中的所有 LLM 调用、
+  工具执行和重试等待。review 会按 effort 的评审轮数放大预算。
+- 单次 HTTP 请求超时以**秒**为单位（默认 **300**）。调大 `--timeout` 不会改变
+  请求超时，关闭任务期限也不会关闭请求超时。如果任务的剩余预算更短，则以
+  剩余任务预算为限。
+
 每个 LLM 请求都有 HTTP 超时，默认 **300 秒**。慢的本地模型（或大文件）可能
 需要更长的时间。三个配置项，作用域递增：
 
@@ -198,6 +212,21 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
   }
 }
 ```
+
+例如，`OCR_LLM_TIMEOUT=900 ocr review --timeout 30` 允许单次请求在任务预算内
+最多运行 15 分钟。如果没有设置该环境变量或 `timeout_sec`，即使使用
+`--timeout 30`，请求仍会在 5 分钟后超时。
+
+单次请求期限耗尽后会结束调用，不会自动重放请求，包括在读取响应体或流式响应时
+超时的情况。对于持续较慢的请求，应调大请求超时，而不是用相同的时限重试。
+现有 SDK 重试策略保持不变：可重试的连接和 HTTP 错误最多重试 5 次，采用退避
+等待并遵守服务端的 `Retry-After` 提示。SDK 的单次尝试期限也会约束重试等待。
+取消任务或任务期限耗尽时，请求和重试等待都会停止。
+
+诊断信息会区分 `LLM request timeout`（检查 `OCR_LLM_TIMEOUT` 或 provider 的
+`timeout_sec`）和 `caller deadline exceeded`，后者表示调用方操作的上下文期限已耗尽。
+如果耗尽的是 review/scan 任务期限，应检查 `--timeout`；后台内存压缩、`ocr llm test`
+等其他操作有各自独立的期限。
 
 ### 通过命令获取 API key
 

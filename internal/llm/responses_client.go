@@ -98,6 +98,7 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
 			panic(r)
 		}
+		err = describeTimeout(ctx, err)
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
 

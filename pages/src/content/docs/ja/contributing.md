@@ -25,7 +25,7 @@ Go を書かなくても貢献できます。
 
 ### 前提条件
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -37,7 +37,7 @@ git clone https://github.com/<your-username>/open-code-review.git
 cd open-code-review
 git remote add upstream https://github.com/alibaba/open-code-review.git
 
-make build       # dist/opencodereview を書き出す
+make build       # dist/opencodereview を書き出す（Windows では dist/opencodereview.exe）
 make test        # LC_ALL=C go test -v -race -count=1 ./...
 ```
 
@@ -46,7 +46,8 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 ### ローカルビルドの実行
 
 ```bash
-./dist/opencodereview review --preview
+./dist/opencodereview review --preview        # macOS / Linux
+.\dist\opencodereview.exe review --preview   # Windows (PowerShell / cmd)
 ```
 
 便宜のため、`dist/opencodereview` を指すシンボリックリンクを `~/bin/ocr-dev` に置いておくと、
@@ -56,7 +57,7 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 
 | Target | 作用 |
 |---|---|
-| `make build` | 現在のプラットフォーム向けにビルド → `dist/opencodereview`。 |
+| `make build` | 現在のプラットフォーム向けにビルド → `dist/opencodereview`（Windows では `dist/opencodereview.exe`）。 |
 | `make build-darwin-amd64` | macOS Intel 向けのクロスコンパイル。 |
 | `make build-darwin-arm64` | macOS Apple Silicon 向けのクロスコンパイル。 |
 | `make build-linux-amd64` | Linux x86_64 向けのクロスコンパイル。 |
