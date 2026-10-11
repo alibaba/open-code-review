@@ -769,6 +769,9 @@ func describeFiles(s session.Summary) string {
 }
 
 func describeStatus(s session.Summary) string {
+	if s.Running {
+		return "running"
+	}
 	if s.Aborted {
 		return "aborted"
 	}

@@ -396,6 +396,14 @@ ocr session list --json
 | `--json` | `false` | 以 JSON 输出会话摘要。 |
 | `--limit <n>` | `20` | 限制列出的会话数量。使用 `0` 表示不限制。 |
 
+STATUS 列区分"未完结但仍在运行"、"已死亡"和"已完结"三类会话：
+
+- `running` — 未完结，且 writer 仍在证明自身存活：心跳记录（对于旧版本写入的会话文件，则是记录追加）在新鲜度窗口内落盘——带心跳的文件约为 3 分钟，旧版文件约为 10 分钟。这只是新鲜度证据，不是租约：刚被杀死的 writer 在窗口过期前仍会显示 `running`。
+- `aborted` — 未完结，且窗口内没有任何心跳或追加：该运行很可能在没有写出 `session_end` 记录的情况下死亡。
+- `complete` / `partial` / `failed` / `skipped` / `legacy` — 已完结的运行；磁盘上已有 `session_end` 记录。
+
+使用 `--json` 时，`aborted` 保持其基于文件的含义——只要 `session_end` 记录尚不存在就为 `true`——因此一个正在运行的会话会同时输出 `"running": true` 和 `"aborted": true`。这两个字段并不互斥：当两者同时为 `true` 时，`running` 优先，与 STATUS 列的处理方式一致。
+
 ### `ocr session show`
 
 恢复的运行还会打印它所继续的父运行，若这次恢复跨了 provider 或 model，也会打印这次切换。

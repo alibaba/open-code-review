@@ -376,6 +376,19 @@ func TestSessionDisplayDoesNotInferLegacyComplete(t *testing.T) {
 	}
 }
 
+func TestSessionDisplayMarksRunningBeforeAborted(t *testing.T) {
+	// A session with no session_end whose file is still being appended to is
+	// running, not aborted: the running state must win over the flag.
+	summary := session.Summary{Aborted: true, Running: true}
+	if got := describeStatus(summary); got != "running" {
+		t.Fatalf("status = %q, want running", got)
+	}
+	summary.Running = false
+	if got := describeStatus(summary); got != "aborted" {
+		t.Fatalf("status = %q, want aborted", got)
+	}
+}
+
 // newCompareSession records one session with the given findings and returns it.
 func newCompareSession(t *testing.T, repoDir string, opts session.SessionOptions, comments []model.LlmComment) *session.SessionHistory {
 	t.Helper()
