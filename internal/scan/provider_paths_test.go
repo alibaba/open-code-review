@@ -120,3 +120,103 @@ func requireWhitespaceFilenames(t *testing.T) {
 		t.Skip("windows normalises away the filenames these fixtures depend on")
 	}
 }
+
+// enumeratePaths returns the sorted paths NewProvider selects for the given
+// --path selectors, so a case reads as selector in, file list out.
+func enumeratePaths(t *testing.T, repo string, selectors []string) []string {
+	t.Helper()
+	got, err := NewProvider(repo, selectors, gitcmd.New(2), 0).Enumerate(context.Background())
+	if err != nil {
+		t.Fatalf("Enumerate(%q): %v", selectors, err)
+	}
+	paths := make([]string, 0, len(got))
+	for _, it := range got {
+		paths = append(paths, it.Path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func pathSelectorRepo(t *testing.T) string {
+	t.Helper()
+	repo := initTestRepo(t)
+	writeFile(t, repo, "main.go", []byte("package main\n"))
+	writeFile(t, repo, filepath.Join("internal", "scan", "provider.go"), []byte("package scan\n"))
+	gitCommit(t, repo, "init")
+	return repo
+}
+
+// TestProvider_Enumerate_RootSelectorScansRepository pins the root selector.
+//
+// `git ls-files` prints repository-relative names such as `main.go`, never
+// `./main.go`, and filterByPaths matches an exact path or a `<selector>/`
+// prefix. A selector left as "." therefore matches nothing, so `ocr scan
+// --path .` reported an empty selection and exited 0 while the same repository
+// scanned fine with --path omitted. The failure is silent, which is what makes
+// it costly: a review that covered no files still looks like a clean run.
+func TestProvider_Enumerate_RootSelectorScansRepository(t *testing.T) {
+	repo := pathSelectorRepo(t)
+	want := enumeratePaths(t, repo, nil)
+	if len(want) == 0 {
+		t.Fatal("baseline scan enumerated no files")
+	}
+
+	for _, selector := range []string{".", "./", " . ", "././"} {
+		got := enumeratePaths(t, repo, []string{selector})
+		if len(got) != len(want) {
+			t.Errorf("--path %q enumerated %q, want the full scan %q", selector, got, want)
+			continue
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("--path %q file %d = %q, want %q", selector, i, got[i], want[i])
+			}
+		}
+	}
+}
+
+// TestProvider_Enumerate_RootSelectorWidensANarrowerOne pins the union rule: a
+// root selector covers the whole repository, so a subdirectory named beside it
+// must not narrow the scan back down.
+func TestProvider_Enumerate_RootSelectorWidensANarrowerOne(t *testing.T) {
+	repo := pathSelectorRepo(t)
+	want := enumeratePaths(t, repo, nil)
+
+	got := enumeratePaths(t, repo, []string{"internal/scan", "."})
+	if len(got) != len(want) {
+		t.Fatalf("enumerated %q, want the full scan %q", got, want)
+	}
+}
+
+// TestProvider_Enumerate_DotSlashPrefixSelectsSubdirectory pins the normalization
+// order. filepath.ToSlash has to run before the "./" trim, or a selector that
+// only becomes "./dir" during conversion keeps its prefix and matches nothing.
+// This case exercises the order on any platform; the backslash spelling itself
+// is covered below, on Windows only.
+func TestProvider_Enumerate_DotSlashPrefixSelectsSubdirectory(t *testing.T) {
+	repo := pathSelectorRepo(t)
+
+	for _, selector := range []string{"./internal/scan", "internal/scan/", "./internal/scan/"} {
+		got := enumeratePaths(t, repo, []string{selector})
+		want := []string{filepath.ToSlash(filepath.Join("internal", "scan", "provider.go"))}
+		if len(got) != len(want) || got[0] != want[0] {
+			t.Errorf("--path %q enumerated %q, want %q", selector, got, want)
+		}
+	}
+}
+
+// TestProvider_Enumerate_WindowsBackslashSelector pins the Windows spelling.
+// filepath.ToSlash only rewrites separators on Windows, and a backslash is a
+// legal filename byte on POSIX, so this case cannot run anywhere else.
+func TestProvider_Enumerate_WindowsBackslashSelector(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("filepath.ToSlash only rewrites separators on Windows")
+	}
+	repo := pathSelectorRepo(t)
+
+	got := enumeratePaths(t, repo, []string{`.\internal\scan`})
+	want := []string{"internal/scan/provider.go"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf(`--path '.\internal\scan' enumerated %q, want %q`, got, want)
+	}
+}

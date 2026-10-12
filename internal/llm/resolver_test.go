@@ -2869,3 +2869,49 @@ func TestResolveEndpoint_InvalidEnvURLNamesSourceAndVariable(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveEndpointWithOptions_DefaultRequestTimeout(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	path, _ := writeResolverConfig(t, configFile{Llm: llmFileConfig{Model: "config-model", URL: "https://config.example.com/v1", AuthToken: "config-token"}})
+
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{Model: "config-model"})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Timeout != 0 {
+		t.Fatalf("ep.Timeout = %v, want 0 (client default)", ep.Timeout)
+	}
+}
+
+func TestResolveEndpointWithOptions_EnvRequestTimeout(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	t.Setenv("OCR_LLM_TIMEOUT", "45")
+	path, _ := writeResolverConfig(t, configFile{Llm: llmFileConfig{Model: "config-model", URL: "https://config.example.com/v1", AuthToken: "config-token"}})
+
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Timeout != 45*time.Second {
+		t.Fatalf("ep.Timeout = %v, want env's 45s", ep.Timeout)
+	}
+}
+
+func TestResolveEndpointWithOptions_ConfigRequestTimeout(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	path, _ := writeResolverConfig(t, configFile{Llm: llmFileConfig{Model: "config-model", URL: "https://config.example.com/v1", AuthToken: "config-token", TimeoutSec: 60}})
+
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Timeout != 60*time.Second {
+		t.Fatalf("ep.Timeout = %v, want config's 60s", ep.Timeout)
+	}
+}
