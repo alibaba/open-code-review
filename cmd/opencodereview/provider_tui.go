@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -121,9 +122,7 @@ func (m providerTUIModel) sessionModelPickSnapshot() map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(m.sessionModelPick))
-	for k, v := range m.sessionModelPick {
-		out[k] = v
-	}
+	maps.Copy(out, m.sessionModelPick)
 	return out
 }
 
@@ -1304,15 +1303,11 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 	out.unknownJSONFields = cloneUnknownJSONFields(v.unknownJSONFields)
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
-		for k, val := range v.ExtraBody {
-			out.ExtraBody[k] = val
-		}
+		maps.Copy(out.ExtraBody, v.ExtraBody)
 	}
 	if v.ExtraHeaders != nil {
 		out.ExtraHeaders = make(map[string]string, len(v.ExtraHeaders))
-		for k, val := range v.ExtraHeaders {
-			out.ExtraHeaders[k] = val
-		}
+		maps.Copy(out.ExtraHeaders, v.ExtraHeaders)
 	}
 	return out
 }
