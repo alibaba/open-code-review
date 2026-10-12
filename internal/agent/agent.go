@@ -288,8 +288,8 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
 	// Step 1: Parse diffs
-	ctx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
-	if err := a.loadDiffs(ctx); err != nil {
+	diffCtx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
+	if err := a.loadDiffs(diffCtx); err != nil {
 		diffSpan.End()
 		// The builder already exists (agent.New created session + manifest), but
 		// no item was selected yet. Record the run-level input failure at this
