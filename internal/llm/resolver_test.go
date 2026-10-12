@@ -1405,11 +1405,14 @@ func TestResolveEndpointWithModelOverride_AllBuiltInProvidersAcceptUnlistedModel
 	const model = "unlisted-model-for-test"
 	for _, provider := range ListProviders() {
 		t.Run(provider.Name, func(t *testing.T) {
+			entry := providerEntryConfig{APIKey: "test-key", AWSRegion: "us-west-2"}
+			if provider.OAuth {
+				// OAuth providers reject a static API key as a token override.
+				entry.APIKey = ""
+			}
 			path, _ := writeResolverConfig(t, configFile{
-				Provider: provider.Name,
-				Providers: map[string]providerEntryConfig{
-					provider.Name: {APIKey: "test-key", AWSRegion: "us-west-2"},
-				},
+				Provider:  provider.Name,
+				Providers: map[string]providerEntryConfig{provider.Name: entry},
 			})
 			var ep ResolvedEndpoint
 			var err error
@@ -1418,6 +1421,14 @@ func TestResolveEndpointWithModelOverride_AllBuiltInProvidersAcceptUnlistedModel
 			})
 			if err != nil || ep.Model != model || ep.Provider != provider.Name {
 				t.Fatalf("endpoint = %+v, error = %v", ep, err)
+			}
+			// Providers without a suggested list discover models per account, so
+			// there is nothing to warn against.
+			if len(provider.Models) == 0 {
+				if stderr != "" {
+					t.Errorf("stderr = %q, want no warning for %s", stderr, provider.Name)
+				}
+				return
 			}
 			if strings.Count(stderr, "[ocr] WARNING: model") != 1 || !strings.Contains(stderr, fmt.Sprintf("for provider %q", provider.Name)) {
 				t.Errorf("stderr = %q, want one warning for %s", stderr, provider.Name)
