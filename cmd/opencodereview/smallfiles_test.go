@@ -126,6 +126,18 @@ func TestRunLLMProviders(t *testing.T) {
 	}
 }
 
+func TestRunLLMProvidersCapabilities(t *testing.T) {
+	got := captureStdout(t, func() {
+		runLLMProviders(true)
+	})
+	if !strings.Contains(got, "CLOUD AUTH") {
+		t.Errorf("expected capabilities listing, got %q", got)
+	}
+	if !strings.Contains(got, "openai-responses") {
+		t.Errorf("expected openai-responses provider, got %q", got)
+	}
+}
+
 func TestRootCmd_Help(t *testing.T) {
 	got := captureStdout(t, func() {
 		rootCmd.SetArgs([]string{"--help"})

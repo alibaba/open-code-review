@@ -306,6 +306,7 @@ type ProviderEntry struct {
 	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
 	URL          string            `json:"url,omitempty"`
 	Protocol     string            `json:"protocol,omitempty"`
+	AuthMode     string            `json:"auth_mode,omitempty"`
 	Model        string            `json:"model,omitempty"`
 	Models       []string          `json:"models,omitempty"`
 	AuthHeader   string            `json:"auth_header,omitempty"`
@@ -321,8 +322,10 @@ type ProviderEntry struct {
 	// unmarshalled into this struct and marshalled back on every write, so a
 	// field missing from it is silently dropped from a hand-written config the
 	// first time any config command runs.
-	AWSProfile string `json:"aws_profile,omitempty"`
-	AWSRegion  string `json:"aws_region,omitempty"`
+	AWSProfile        string `json:"aws_profile,omitempty"`
+	AWSRegion         string `json:"aws_region,omitempty"`
+	IdentityTokenFile string `json:"identity_token_file,omitempty"`
+	TokenExchangeURL  string `json:"token_exchange_url,omitempty"`
 
 	// unknownJSONFields keeps JSON keys with no matching struct field alive across
 	// a load/save cycle. Unexported: any struct-literal rebuild must copy it
@@ -793,7 +796,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, auth_mode, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile, identity_token_file, token_exchange_url\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nAuth mode values: api_key, api_key_cmd, env, ambient, workload_identity, unsupported\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -827,6 +830,19 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 			entry.AWSRegion = ""
 			entry.AWSProfile = ""
 		}
+		if normalized != llm.ProtocolAnthropicBedrock && entry.AuthMode == string(llm.AuthModeAmbient) {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: clearing auth_mode on %q: protocol %q does not use an ambient credential chain\n", providerName, normalized)
+			entry.AuthMode = ""
+		}
+	case "auth_mode":
+		mode := llm.NormalizeAuthMode(value)
+		if err := llm.ValidateAuthMode(mode); err != nil {
+			return err
+		}
+		if mode == llm.AuthModeAmbient && !providerAcceptsAWSSettings(providerName, entry) {
+			return fmt.Errorf("%s does not apply to provider %q: auth_mode %q is only valid for providers that authenticate from an ambient credential chain", field, providerName, mode)
+		}
+		entry.AuthMode = string(mode)
 	case "model":
 		entry.Model = value
 	case "models":
@@ -881,8 +897,18 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 		} else {
 			entry.AWSProfile = normalized
 		}
+	case "identity_token_file":
+		entry.IdentityTokenFile = strings.TrimSpace(value)
+	case "token_exchange_url":
+		trimmedURL := strings.TrimSpace(value)
+		if trimmedURL != "" {
+			if err := validateBaseURL(trimmedURL); err != nil {
+				return fmt.Errorf("invalid URL for %s: %w", key, err)
+			}
+		}
+		entry.TokenExchangeURL = trimmedURL
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, auth_mode, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile, identity_token_file, token_exchange_url", field)
 	}
 	return nil
 }
@@ -1026,7 +1052,7 @@ func setCustomProviderValue(cfg *Config, key, value string) error {
 
 func isAuxiliaryProviderField(field string) bool {
 	switch field {
-	case "extra_body", "extra_headers", "retry_codes", "timeout_sec":
+	case "extra_body", "extra_headers", "retry_codes", "timeout_sec", "auth_mode", "identity_token_file", "token_exchange_url":
 		return true
 	default:
 		return false
