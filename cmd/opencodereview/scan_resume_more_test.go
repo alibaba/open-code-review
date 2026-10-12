@@ -4,6 +4,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -24,6 +25,62 @@ func writeScanResumeSession(t *testing.T, repoDir string, files ...string) strin
 		t.Fatalf("finalize session: %v", err)
 	}
 	return sh.SessionID
+}
+
+// appendTornTail writes the on-disk bytes a SIGINT-killed scan leaves: a final
+// record whose closing bytes never reached disk. Returns the new session path.
+func appendTornTail(t *testing.T, repoDir, sessionID string) string {
+	t.Helper()
+	path, err := session.SessionFilePath(repoDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open session for torn append: %v", err)
+	}
+	if _, err := f.Write([]byte(`{"type":"review_item_done","filePath":"torn.go","fingerprint":`)); err != nil {
+		t.Fatalf("append torn record: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	return path
+}
+
+// TestLoadScanResumeState_TornTailRecovered is the end-to-end rendering of the
+// reported bug: a scan killed before its last checkpoint reached disk must
+// resume from the last complete checkpoint and tell the user a record was
+// recovered — not fail with "unexpected end of JSON input".
+func TestLoadScanResumeState_TornTailRecovered(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	id := writeScanResumeSession(t, repoDir, "a.go")
+	appendTornTail(t, repoDir, id)
+
+	var stderr string
+	var state *session.ResumeState
+	stderr = captureStderr(t, func() {
+		var err error
+		state, err = loadScanResumeState(repoDir, scanOptions{resume: id}, nil)
+		if err != nil {
+			t.Fatalf("loadScanResumeState: %v", err)
+		}
+	})
+	if state == nil || state.CompletedCount() != 1 {
+		t.Fatalf("got state=%v completed=%v, want 1 completed item after torn-tail recovery", state, state.CompletedCount())
+	}
+	if !state.Recovered {
+		t.Error("state.Recovered = false, want true")
+	}
+	for _, want := range []string{"ended mid-write", "last complete checkpoint"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want recovery warning containing %q", stderr, want)
+		}
+	}
+	if strings.Contains(stderr, "unexpected end of JSON input") {
+		t.Errorf("stderr still reports the corruption after recovery: %q", stderr)
+	}
 }
 
 // TestLoadScanResumeState_WithSession drives the fixture-backed branches of

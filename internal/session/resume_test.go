@@ -5,9 +5,11 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -835,6 +837,255 @@ func TestLoadResumeState_MalformedTerminatedFinalRecord_Fails(t *testing.T) {
 
 	if _, err := LoadResumeState(repoDir, sessionID); err == nil {
 		t.Fatal("a malformed newline-terminated record must still be fatal")
+	}
+}
+
+// --- torn trailing record recovery on top of the tolerant tail ---
+
+// writeSessionFile writes raw bytes as a session JSONL file under the test home.
+func writeSessionFile(t *testing.T, repoDir, sessionID string, content []byte) string {
+	t.Helper()
+	path, err := SessionFilePath(repoDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// scanSessionContent renders a full-scan session_start plus one
+// review_item_done line per done file, all newline-terminated, ready for tests
+// that append a torn trailing fragment.
+func scanSessionContent(t *testing.T, sessionID string, done []string) []byte {
+	t.Helper()
+	var buf []byte
+	buf = append(buf, mustJSON(t, resumeRecord{
+		Type:       "session_start",
+		SessionID:  sessionID,
+		Cwd:        "/repo",
+		ReviewMode: ReviewModeFullScan,
+	})...)
+	buf = append(buf, '\n')
+	for _, filePath := range done {
+		buf = append(buf, mustJSON(t, resumeRecord{
+			Type:        "review_item_done",
+			FilePath:    filePath,
+			NewPath:     filePath,
+			Fingerprint: "fp-" + filePath,
+		})...)
+		buf = append(buf, '\n')
+	}
+	return buf
+}
+
+// TestLoadResumeState_TornTailIsRecovered covers the bug's exact shape: a scan
+// killed by SIGINT mid-append leaves a final record without its closing bytes.
+// The strict loader must not fail on it — every newline-terminated record before
+// the tear is the run's last valid checkpoint, and the fragment itself was never
+// durably committed. It must be recovered from, reported, and preserved in
+// shortened form for diagnostics.
+func TestLoadResumeState_TornTailIsRecovered(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := "/repo"
+	sessionID := "torn-tail-session"
+	content := scanSessionContent(t, sessionID, []string{"a.go", "b.go"})
+	content = append(content, []byte(`{"type":"review_item_done","filePath":"c.go","newPath":"c.go","fingerprint":`)...)
+	writeSessionFile(t, repoDir, sessionID, content)
+
+	state, err := LoadResumeState(repoDir, sessionID)
+	if err != nil {
+		t.Fatalf("a torn trailing record must not fail the strict loader: %v", err)
+	}
+	if !state.Recovered {
+		t.Error("Recovered = false, want true for a torn trailing record")
+	}
+	if !strings.Contains(state.RecoveredFragment, `"c.go"`) {
+		t.Errorf("RecoveredFragment = %q, want the torn record preserved for diagnostics", state.RecoveredFragment)
+	}
+	if state.CompletedCount() != 2 {
+		t.Fatalf("CompletedCount = %d, want 2 (the torn record must not count)", state.CompletedCount())
+	}
+	for _, fp := range []string{"fp-a.go", "fp-b.go"} {
+		if _, ok := state.Item(fp); !ok {
+			t.Errorf("%s (recorded before the tear) must survive", fp)
+		}
+	}
+	if _, ok := state.Item("fp-c.go"); ok {
+		t.Error("the torn record must not be reusable")
+	}
+}
+
+// TestLoadResumeState_NewlineLessFinalRecordIsAccepted tolerates a well-formed
+// final record that happens to lack a trailing newline, e.g. a file written by
+// hand or by an external tool. It parses, so it is folded in — not treated as a
+// torn write.
+func TestLoadResumeState_NewlineLessFinalRecordIsAccepted(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := "/repo"
+	sessionID := "nl-final-session"
+	content := scanSessionContent(t, sessionID, []string{"a.go"})
+	content = append(content, mustJSON(t, resumeRecord{
+		Type:        "review_item_done",
+		FilePath:    "b.go",
+		NewPath:     "b.go",
+		Fingerprint: "fp-b.go",
+	})...)
+	writeSessionFile(t, repoDir, sessionID, content)
+
+	state, err := LoadResumeState(repoDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Recovered {
+		t.Error("a well-formed final record must not be reported as recovered")
+	}
+	if state.CompletedCount() != 2 {
+		t.Errorf("CompletedCount = %d, want 2", state.CompletedCount())
+	}
+}
+
+// TestLoadResumeState_TornShapedMidFileLineStillFatal guards the other side of
+// the recovery: only the final, un-newline-terminated fragment is an interrupted
+// write. A torn-looking line that IS newline-terminated in the middle of the
+// stream cannot come from this writer (it only appends through a single fd), so
+// it is genuine corruption and the strict loader must keep refusing it.
+func TestLoadResumeState_TornShapedMidFileLineStillFatal(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := "/repo"
+	sessionID := "mid-tear-session"
+	content := scanSessionContent(t, sessionID, []string{"a.go"})
+	content = append(content, []byte(`{"type":"review_item_done","filePath":"b.go","fingerprint":`+"\n")...)
+	content = append(content, mustJSON(t, resumeRecord{
+		Type:        "review_item_done",
+		FilePath:    "c.go",
+		NewPath:     "c.go",
+		Fingerprint: "fp-c.go",
+	})...)
+	content = append(content, '\n')
+	writeSessionFile(t, repoDir, sessionID, content)
+
+	if _, err := LoadResumeState(repoDir, sessionID); err == nil {
+		t.Fatal("a torn-shaped newline-terminated line in the middle must stay fatal")
+	}
+}
+
+// TestLoadReviewResumeState_TornTailIsRecovered covers the review loader: it
+// recovers the same way, since dropping the torn fragment never loses a
+// checkpoint the parent stood behind.
+func TestLoadReviewResumeState_TornTailIsRecovered(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := "/repo"
+	sessionID := "torn-review-session"
+	content := scanSessionContent(t, sessionID, []string{"a.go"})
+	content = append(content, []byte(`{"type":"review_item_done","filePath":"b.go","fingerprint":`)...)
+	writeSessionFile(t, repoDir, sessionID, content)
+
+	state, err := LoadReviewResumeState(repoDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Recovered {
+		t.Error("Recovered = false, want true")
+	}
+	if _, ok := state.Item("fp-a.go"); !ok {
+		t.Error("checkpoint before the tear must survive")
+	}
+}
+
+// TestScanResumeAfterAbortTornTailRecovered models the reported end-to-end flow:
+// a scan started, persisted a completed-file checkpoint, then a SIGINT aborted
+// it mid-append. The resume loader must recover the durable checkpoint. The file
+// is written directly (rather than via session.New, whose open handle would keep
+// the file locked on Windows) to reproduce exactly the on-disk bytes a killed
+// process leaves behind.
+func TestScanResumeAfterAbortTornTailRecovered(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sessionID := "aborted-scan-session"
+	var content []byte
+	content = append(content, mustJSON(t, resumeRecord{
+		Type:       "session_start",
+		SessionID:  sessionID,
+		Cwd:        repoDir,
+		ReviewMode: ReviewModeFullScan,
+	})...)
+	content = append(content, '\n')
+	content = append(content, mustJSON(t, resumeRecord{
+		Type:        "review_item_done",
+		FilePath:    "already-done.go",
+		NewPath:     "already-done.go",
+		Fingerprint: "fp-done",
+		Comments:    []model.LlmComment{{Path: "already-done.go", Content: "keep me"}},
+	})...)
+	content = append(content, '\n')
+	// SIGINT kills the process while the next checkpoint's flush is in flight;
+	// the file ends mid-record.
+	content = append(content, []byte(`{"type":"review_item_done","filePath":"interrupted.go","fingerprint":"fp-torn","comments":[`)...)
+	writeSessionFile(t, repoDir, sessionID, content)
+
+	state, err := LoadResumeState(repoDir, sessionID)
+	if err != nil {
+		t.Fatalf("resume after abort must recover, got: %v", err)
+	}
+	if !state.Recovered {
+		t.Error("Recovered = false, want true")
+	}
+	item, ok := state.Item("fp-done")
+	if !ok {
+		t.Fatal("the completed checkpoint before the abort must be reusable")
+	}
+	if len(item.Comments) != 1 || item.Comments[0].Content != "keep me" {
+		t.Errorf("checkpoint comments changed: %+v", item.Comments)
+	}
+	if _, ok := state.Item("fp-torn"); ok {
+		t.Error("the interrupted file must be reviewed again on resume")
+	}
+	if err := state.ValidateScanOptions(nil); err != nil {
+		t.Errorf("recovered scan state must stay valid: %v", err)
+	}
+}
+
+// TestConcurrentCheckpointWritesDoNotCorrupt verifies that overlapping writes
+// into one session, as produced by MaxConcurrency > 1 scans, never leave a torn
+// record: the writer serializes appends and every persisted line is complete, so
+// the full file replays without recovery.
+func TestConcurrentCheckpointWritesDoNotCorrupt(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeFullScan})
+	const n = 64
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			filePath := fmt.Sprintf("f%02d.go", i%8)
+			sh.RecordReviewItemDone(filePath, filePath, filePath, fmt.Sprintf("fp-%03d", i), nil)
+		}(i)
+	}
+	wg.Wait()
+	// The concurrent writes serialize on the writer mutex; Finalize flushes the
+	// remaining buffered records and closes.
+	if err := sh.Finalize(); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+
+	state, err := LoadResumeState(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if state.Recovered {
+		t.Error("a clean session must not be reported as recovered")
+	}
+	for i := 0; i < n; i++ {
+		if _, ok := state.Item(fmt.Sprintf("fp-%03d", i)); !ok {
+			t.Errorf("fp-%03d missing after concurrent checkpoint writes", i)
+		}
 	}
 }
 
