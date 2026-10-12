@@ -23,6 +23,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/alibaba/open-code-review/internal/chatgpt"
+
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -397,6 +399,8 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
+	ChatGPT      bool
+	tokenSource  func(context.Context) (string, error)
 	URL          string            // Full API endpoint URL
 	APIKey       string            // Bearer token / API key
 	Model        string            // Default model override
@@ -480,6 +484,7 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // parameters rather than fields on ResolvedEndpoint.
 func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder) LLMClient {
 	cfg := ClientConfig{
+		ChatGPT:        ep.ChatGPT,
 		URL:            ep.URL,
 		APIKey:         ep.Token,
 		Model:          ep.Model,
@@ -492,6 +497,13 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		rawHolder:      raw,
 		AWSProfile:     ep.AWSProfile,
 		AWSRegion:      ep.AWSRegion,
+	}
+	if ep.ChatGPT {
+		if client, err := chatgpt.DefaultClient(); err != nil {
+			cfg.tokenSource = func(context.Context) (string, error) { return "", err }
+		} else {
+			cfg.tokenSource = client.TokenSource()
+		}
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:

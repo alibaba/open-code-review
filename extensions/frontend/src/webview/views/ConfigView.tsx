@@ -358,8 +358,8 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
   const buildEntries = () => buildOfficialSaveEntries(
     providerName,
     resolvedModel,
-    apiKey,
-    apiKeyTouched || !hasStoredKey,
+    preset.oauth ? '' : apiKey,
+    !preset.oauth && (apiKeyTouched || !hasStoredKey),
   );
 
   const save = () => {
@@ -411,7 +411,10 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
         )}
       </FormItem>
 
-      {!ambientAuth && (
+      {preset.oauth && (
+        <p class="form-hint">{t('view.config.chatgptLoginHint')} <code>ocr llm login {preset.name}</code></p>
+      )}
+      {!ambientAuth && !preset.oauth && (
         <FormItem
           label={t('view.config.apiKey')}
           hint={`${t('view.config.apiKeyEnvHint')} ${preset.envVar}`}

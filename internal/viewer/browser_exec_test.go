@@ -282,7 +282,7 @@ func TestOpenBrowserCandidates_Empty(t *testing.T) {
 
 // TestOpenBrowser covers the env-reading wrapper without launching a real
 // browser: $BROWSER is the first candidate on Unix, so pointing it at the helper
-// means openBrowser returns before it ever reaches the platform default.
+// means OpenBrowser returns before it ever reaches the platform default.
 func TestOpenBrowser(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("$BROWSER is not consulted on Windows, so the platform opener would really run")
@@ -295,8 +295,8 @@ func TestOpenBrowser(t *testing.T) {
 	setHelperEnv(t, 0, 0)
 	t.Setenv("BROWSER", self+" -test.run=^TestBrowserHelperProcess$ %s")
 
-	if err := openBrowser("http://localhost:5483"); err != nil {
-		t.Errorf("openBrowser = %v, want nil", err)
+	if err := OpenBrowser("http://localhost:5483"); err != nil {
+		t.Errorf("OpenBrowser = %v, want nil", err)
 	}
 }
 

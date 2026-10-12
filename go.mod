@@ -10,6 +10,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.35
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charmbracelet/x/term v0.2.2
+	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/gofrs/flock v0.13.1
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/openai/openai-go/v3 v3.51.0

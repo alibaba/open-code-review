@@ -52,6 +52,7 @@ func TestCheckPresets(t *testing.T) {
 		{"changed auth header", strings.Replace(valid, `"authHeader":"Authorization"`, `"authHeader":"x-api-key"`, 1), "authHeader"},
 		{"changed environment variable", strings.Replace(valid, `"envVar":"ALPHA_API_KEY"`, `"envVar":"OTHER_API_KEY"`, 1), "envVar"},
 		{"changed ambient authentication", strings.Replace(valid, `"ambientAuth":true`, `"ambientAuth":false`, 1), "ambientAuth"},
+		{"changed OAuth authentication", strings.Replace(valid, `"name":"alpha"`, `"name":"alpha","oauth":true`, 1), "oauth"},
 		{"unknown field", strings.Replace(valid, `"name":"alpha"`, `"name":"alpha","unknown":true`, 1), "unknown field"},
 		{"wrong case field", strings.Replace(valid, `"name":"alpha"`, `"Name":"alpha"`, 1), `missing required field "name"`},
 		{"wrong case extra field", strings.Replace(valid, `"name":"alpha"`, `"name":"alpha","Name":"alpha"`, 1), "unknown field"},

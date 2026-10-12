@@ -94,7 +94,7 @@ func StartServer(addr, openMode string) error {
 	}
 	if autoOpen {
 		go func() {
-			if err := openBrowser(url); err != nil {
+			if err := OpenBrowser(url); err != nil {
 				browserWarnf("could not open browser: %v", err)
 			}
 		}()

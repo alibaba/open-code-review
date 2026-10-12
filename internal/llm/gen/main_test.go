@@ -36,7 +36,7 @@ func TestRenderPreservesMetadataAndModelOrder(t *testing.T) {
 			Protocol: llm.ProtocolAnthropicBedrock, AmbientAuth: true,
 		},
 		{
-			Name: "responses", Protocol: llm.ProtocolOpenAIResponses,
+			Name: "responses", Protocol: llm.ProtocolOpenAIResponses, OAuth: true,
 			Models: []string{"responses-model"},
 		},
 	}
@@ -65,7 +65,7 @@ func TestRenderPreservesMetadataAndModelOrder(t *testing.T) {
 		},
 		{
 			"name": "responses", "displayName": "", "protocol": "openai-responses",
-			"baseUrl": "", "envVar": "", "models": []any{"responses-model"},
+			"baseUrl": "", "envVar": "", "models": []any{"responses-model"}, "oauth": true,
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
