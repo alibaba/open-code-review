@@ -109,7 +109,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock
 
-`bedrock` 使用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
+`bedrock` 默认使用 `anthropic-bedrock` 协议，调用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
 用标准 AWS 凭证链做 SigV4 签名，主机由区域决定。没有 `api_key` 需要设置，也不
 接受用它替代签名：
 
@@ -119,6 +119,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+如果将 `providers.bedrock.protocol` 设为 `openai` 来连接 OpenAI 兼容网关，请在 `providers.bedrock.url` 中配置网关地址，并通过 `providers.bedrock.api_key` 或 `providers.bedrock.api_key_cmd` 提供网关的 API key。在 `ocr config provider` 中切换模型会保留已保存的 API key。
 
 | 字段 | 含义 |
 |---|---|
@@ -134,7 +136,7 @@ ocr config set providers.bedrock.aws_profile example-profile
 会被接受。运行 `aws bedrock list-inference-profiles --region <region>` 可以查看
 账号提供了哪些；注意新系列不接受 `-v1:0` 这类版本后缀。
 
-bedrock 没有配置的 URL——主机由区域决定——所以 `ocr llm test` 显示区域和 profile
+使用默认的 `anthropic-bedrock` 协议时，主机由区域决定，`ocr llm test` 显示区域和 profile
 而不是 URL：
 
 ```

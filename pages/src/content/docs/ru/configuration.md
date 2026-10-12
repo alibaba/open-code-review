@@ -120,7 +120,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock
 
-`bedrock` использует тот же Messages API, что и `anthropic`, но запросы
+По умолчанию `bedrock` использует протокол `anthropic-bedrock` и тот же Messages API, что и `anthropic`, но запросы
 подписываются по SigV4 из стандартной цепочки учётных данных AWS вместо
 передачи API-ключа, а хост определяется регионом. Задавать `api_key` не нужно,
 и он не принимается как замена подписи:
@@ -131,6 +131,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+Если для подключения к OpenAI-совместимому шлюзу вы задаете `providers.bedrock.protocol` значение `openai`, укажите адрес шлюза в `providers.bedrock.url`, а его API-ключ — через `providers.bedrock.api_key` или `providers.bedrock.api_key_cmd`. При выборе другой модели в `ocr config provider` сохраненный API-ключ остается на месте.
 
 | Поле | Значение |
 |---|---|
@@ -149,8 +151,8 @@ ocr config set providers.bedrock.aws_profile example-profile
 `aws bedrock list-inference-profiles --region <region>`, чтобы увидеть, что
 доступно в аккаунте; суффикс версии вроде `-v1:0` недопустим для новых семейств.
 
-`ocr llm test` показывает регион и профиль вместо URL, потому что у bedrock нет
-настроенного URL — хост определяется регионом:
+При использовании протокола по умолчанию `anthropic-bedrock` команда `ocr llm test`
+показывает регион и профиль вместо URL. Хост определяется регионом:
 
 ```
 Source: provider:bedrock

@@ -105,7 +105,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock {#aws-bedrock}
 
-`bedrock`은 `anthropic`과 같은 Messages API를 사용하지만, 요청에 API 키를 싣는 대신 표준 AWS 자격 증명 체인으로 SigV4 서명을 하며 호스트는 리전이 결정합니다. 설정할 `api_key`가 없고, 서명을 대신할 키도 받지 않습니다:
+`bedrock`은 기본 `anthropic-bedrock` 프로토콜에서 `anthropic`과 같은 Messages API를 사용하지만, 요청에 API 키를 싣는 대신 표준 AWS 자격 증명 체인으로 SigV4 서명을 하며 호스트는 리전이 결정합니다. 설정할 `api_key`가 없고, 서명을 대신할 키도 받지 않습니다:
 
 ```bash
 ocr config set provider                      bedrock
@@ -113,6 +113,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+OpenAI 호환 게이트웨이에 연결하려고 `providers.bedrock.protocol`을 `openai`로 설정했다면, `providers.bedrock.url`에 게이트웨이 URL을 설정하고 `providers.bedrock.api_key` 또는 `providers.bedrock.api_key_cmd`로 게이트웨이의 API 키를 제공하세요. `ocr config provider`에서 모델을 변경해도 저장된 API 키는 유지됩니다.
 
 | 필드 | 의미 |
 |---|---|
@@ -123,7 +125,7 @@ ocr config set providers.bedrock.aws_profile example-profile
 
 모델 식별자는 계정 **과** 리전 단위로 정해지므로 OCR이 제공하는 목록은 닫힌 집합이 아니라 출발점입니다. 목록에 없더라도 계정에서 유효한 추론 프로필 ID나 애플리케이션 추론 프로필 ARN이면 그대로 받습니다. 계정에서 무엇을 쓸 수 있는지는 `aws bedrock list-inference-profiles --region <region>`으로 확인하세요. 최신 계열에서는 `-v1:0` 같은 버전 접미사가 유효하지 않습니다.
 
-bedrock에는 설정된 URL이 없고 호스트를 리전이 결정하므로, `ocr llm test`는 URL 대신 리전과 프로필을 표시합니다:
+기본 `anthropic-bedrock` 프로토콜에서는 리전이 호스트를 결정하므로, `ocr llm test`는 URL 대신 리전과 프로필을 표시합니다:
 
 ```
 Source: provider:bedrock

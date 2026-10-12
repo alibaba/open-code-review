@@ -114,7 +114,7 @@ preset default — so you only need to set it when your endpoint differs.
 
 ### AWS Bedrock
 
-`bedrock` speaks the same Messages API as `anthropic`, but requests are
+With its default `anthropic-bedrock` protocol, `bedrock` uses the same Messages API as `anthropic`, but requests are
 SigV4-signed from the standard AWS credential chain instead of carrying an API
 key, and the region decides the host. There is no `api_key` to set, and none is
 accepted as a substitute for a signature:
@@ -125,6 +125,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+If you set `providers.bedrock.protocol` to `openai` for an OpenAI-compatible gateway, configure the gateway URL in `providers.bedrock.url` and supply its API key through `providers.bedrock.api_key` or `providers.bedrock.api_key_cmd`. Selecting another model in `ocr config provider` preserves the saved API key.
 
 | Field | Meaning |
 |---|---|
@@ -143,8 +145,8 @@ when absent from it. Run `aws bedrock list-inference-profiles --region <region>`
 to see what an account offers; a version suffix such as `-v1:0` is invalid for
 the newer families.
 
-`ocr llm test` reports the region and profile in place of a URL, because bedrock
-has no configured URL — the region decides the host:
+With the default `anthropic-bedrock` protocol, `ocr llm test` reports the region
+and profile in place of a URL. The region determines the host:
 
 ```
 Source: provider:bedrock

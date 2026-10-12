@@ -112,7 +112,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock
 
-`bedrock` は `anthropic` と同じ Messages API を話しますが、API key を持たせる
+`bedrock` は既定の `anthropic-bedrock` プロトコルで `anthropic` と同じ Messages API を使いますが、API key を持たせる
 代わりに標準の AWS 認証情報チェーンから SigV4 署名を行い、ホストはリージョンが
 決めます。設定すべき `api_key` はなく、署名の代わりとして受け付けることも
 ありません。
@@ -123,6 +123,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+OpenAI 互換ゲートウェイに接続するために `providers.bedrock.protocol` を `openai` に設定する場合は、`providers.bedrock.url` にゲートウェイの URL を設定し、`providers.bedrock.api_key` または `providers.bedrock.api_key_cmd` でその API キーを指定してください。`ocr config provider` でモデルを変更しても、保存済みの API キーは保持されます。
 
 | フィールド | 意味 |
 |---|---|
@@ -140,7 +142,7 @@ ocr config set providers.bedrock.aws_profile example-profile
 そのアカウントが提供するものを確認できます。なお新しいファミリーでは
 `-v1:0` のようなバージョンサフィックスは無効です。
 
-bedrock には設定された URL がなく、ホストはリージョンが決めるため、
+既定の `anthropic-bedrock` プロトコルではホストがリージョンによって決まるため、
 `ocr llm test` は URL の代わりにリージョンとプロファイルを表示します。
 
 ```
