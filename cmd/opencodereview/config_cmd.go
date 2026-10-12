@@ -119,7 +119,7 @@ func runConfigSet(key, value string) error {
 
 	displayValue := value
 	if shouldMaskConfigValue(key) {
-		displayValue = maskKey(value)
+		displayValue = maskConfigValue(key, value)
 	}
 	fmt.Printf("Set %s = %s\n", key, displayValue)
 	if warning := legacyLLMShadowWarning(cfg.Provider, key); warning != "" {
@@ -134,7 +134,25 @@ func runConfigSet(key, value string) error {
 // while the *_cmd variants stay unmasked: a command line is not a secret.
 func shouldMaskConfigValue(key string) bool {
 	normalizedKey := strings.ToLower(strings.ReplaceAll(key, "_", ""))
-	return strings.HasSuffix(normalizedKey, "apikey") || strings.HasSuffix(normalizedKey, "authtoken")
+	return strings.HasSuffix(normalizedKey, "apikey") || strings.HasSuffix(normalizedKey, "apikeys") || strings.HasSuffix(normalizedKey, "authtoken")
+}
+
+// maskConfigValue masks a secret for echoing. A key list is masked entry by
+// entry, so the echo still shows how many keys were set.
+func maskConfigValue(key, value string) string {
+	normalizedKey := strings.ToLower(strings.ReplaceAll(key, "_", ""))
+	if !strings.HasSuffix(normalizedKey, "apikeys") {
+		return maskKey(value)
+	}
+	keys, err := parseModelListValue(value)
+	if err != nil || len(keys) == 0 {
+		return maskKey("")
+	}
+	masked := make([]string, len(keys))
+	for i, k := range keys {
+		masked[i] = maskKey(k)
+	}
+	return strings.Join(masked, ",")
 }
 
 func runConfigUnset(key string) error {
@@ -303,6 +321,7 @@ func deleteCustomProvider(cfg *Config, name string) (bool, error) {
 // ProviderEntry holds per-provider configuration in the providers map.
 type ProviderEntry struct {
 	APIKey       string            `json:"api_key,omitempty"`
+	APIKeys      []string          `json:"api_keys,omitempty"`    // further keys, tried in order after api_key when one hits a usage limit
 	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
 	URL          string            `json:"url,omitempty"`
 	Protocol     string            `json:"protocol,omitempty"`
@@ -793,7 +812,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_keys, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -802,6 +821,12 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 	switch field {
 	case "api_key":
 		entry.APIKey = value
+	case "api_keys":
+		keys, err := parseModelListValue(value)
+		if err != nil {
+			return fmt.Errorf("invalid key list for %s: %w", key, err)
+		}
+		entry.APIKeys = keys
 	case "api_key_cmd":
 		entry.APIKeyCmd = value
 	case "url":
@@ -882,7 +907,7 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 			entry.AWSProfile = normalized
 		}
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_keys, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
 	}
 	return nil
 }

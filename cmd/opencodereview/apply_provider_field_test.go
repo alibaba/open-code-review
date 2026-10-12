@@ -17,6 +17,7 @@ func TestApplyProviderField(t *testing.T) {
 			check        func(ProviderEntry) bool
 		}{
 			{"api_key", "sk-x", func(e ProviderEntry) bool { return e.APIKey == "sk-x" }},
+			{"api_keys", "k1, k2,k1", func(e ProviderEntry) bool { return len(e.APIKeys) == 2 && e.APIKeys[0] == "k1" && e.APIKeys[1] == "k2" }},
 			{"url", "https://x.example", func(e ProviderEntry) bool { return e.URL == "https://x.example" }},
 			{"model", "gpt-4", func(e ProviderEntry) bool { return e.Model == "gpt-4" }},
 			{"models", "a,b,a", func(e ProviderEntry) bool { return len(e.Models) == 2 }},

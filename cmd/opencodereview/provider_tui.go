@@ -983,6 +983,30 @@ func (m providerTUIModel) apiKeyCmdForStep() string {
 	return ""
 }
 
+// apiKeysForStep reports whether the entry the API-key step is editing already
+// holds a usable api_keys entry, which the resolver promotes to the primary key
+// when api_key is blank. The field stays blank for it: saving writes the field
+// into api_key, so preloading an api_keys entry would store it twice.
+func (m providerTUIModel) apiKeysForStep() bool {
+	var entry ProviderEntry
+	switch m.activeTab {
+	case tabOfficial:
+		if m.existingCfg == nil {
+			return false
+		}
+		entry = m.existingCfg.Providers[m.currentProvider().Name]
+	case tabCustom:
+		cp, ok := m.selectedCustomProvider()
+		if !ok {
+			return false
+		}
+		entry = m.customProviderEntry(cp.name, cp.entry)
+	default:
+		return false
+	}
+	return firstStaticKey("", entry.APIKeys) != ""
+}
+
 func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	if m.apiKeyOriginal != "" {
 		return true, ""
@@ -991,9 +1015,9 @@ func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 		return true, ""
 	}
 	// Resolver precedence is static key -> api_key_cmd -> env var, so an already
-	// configured command satisfies the requirement: the field renders blank for
-	// such a provider and must still be confirmable.
-	if m.apiKeyCmdForStep() != "" {
+	// configured command or api_keys list satisfies the requirement: the field
+	// renders blank for such a provider and must still be confirmable.
+	if m.apiKeyCmdForStep() != "" || m.apiKeysForStep() {
 		return true, ""
 	}
 	if m.activeTab == tabOfficial {
@@ -1290,6 +1314,7 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 	out := ProviderEntry{
 		APIKey:     v.APIKey,
+		APIKeys:    append([]string(nil), v.APIKeys...),
 		APIKeyCmd:  v.APIKeyCmd,
 		URL:        v.URL,
 		Protocol:   v.Protocol,
