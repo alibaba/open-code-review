@@ -5,7 +5,7 @@
 import { parseConfig, toConfigSetArgs } from '../configParse';
 
 describe('parseConfig', () => {
-  it('完整 config 转 camelCase', () => {
+  it('converts a complete config to camelCase', () => {
     const raw = JSON.stringify({
       provider: 'anthropic',
       providers: {
@@ -31,7 +31,7 @@ describe('parseConfig', () => {
     });
   });
 
-  it('缺字段时给默认值', () => {
+  it('provides defaults for missing fields', () => {
     const cfg = parseConfig('{}');
     expect(cfg?.llm.url).toBe('');
     expect(cfg?.llm.useAnthropic).toBe(true);
@@ -40,11 +40,11 @@ describe('parseConfig', () => {
     expect(cfg?.language).toBe('Chinese');
   });
 
-  it('空字符串 → null', () => {
+  it('returns null for an empty string', () => {
     expect(parseConfig('')).toBeNull();
   });
 
-  it('providers 为数组时忽略', () => {
+  it('ignores providers when it is an array', () => {
     const cfg = parseConfig(JSON.stringify({ providers: ['bad'], custom_providers: [] }));
     expect(cfg?.providers).toEqual({});
     expect(cfg?.customProviders).toEqual({});
@@ -52,7 +52,7 @@ describe('parseConfig', () => {
 });
 
 describe('toConfigSetArgs', () => {
-  it('生成 config set 参数', () => {
+  it('builds config set arguments', () => {
     expect(toConfigSetArgs('llm.model', 'opus')).toEqual(['config', 'set', 'llm.model', 'opus']);
     expect(toConfigSetArgs('providers.anthropic.api_key', 'sk')).toEqual(['config', 'set', 'providers.anthropic.api_key', 'sk']);
   });

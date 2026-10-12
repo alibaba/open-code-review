@@ -3,6 +3,8 @@
 
 package diff
 
+import "strings"
+
 // ExcludedDirs is the list of directory prefixes that scanners and diff
 // providers should always skip. Exposed so internal/scan and other consumers
 // can reuse the same blocklist.
@@ -10,6 +12,18 @@ func ExcludedDirs() []string {
 	out := make([]string, len(providerDirIgnoreDirs))
 	copy(out, providerDirIgnoreDirs)
 	return out
+}
+
+// ProviderDirPrefix returns the blocklist prefix that excludes relPath,
+// including the trailing slash (for example "vendor/"), or "" if none match.
+func ProviderDirPrefix(relPath string) string {
+	for _, prefix := range providerDirIgnoreDirs {
+		dirPart := strings.TrimSuffix(prefix, "/")
+		if relPath == dirPart || strings.HasPrefix(relPath, prefix) {
+			return prefix
+		}
+	}
+	return ""
 }
 
 // LoadGitignorePatterns reads and parses .gitignore patterns from the given

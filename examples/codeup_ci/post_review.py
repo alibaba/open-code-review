@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 alibaba/open-code-review Contributors
+
 """post_review.py
 
 Runs Open Code Review (`ocr review --format json`) against the current

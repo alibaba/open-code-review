@@ -10,6 +10,7 @@ on:
   pull_request:
     paths:
       - "README*.md"
+      - "docs/i18n/**"
       - "pages/src/content/docs/**"
       - "scripts/github-actions/check-translation-sync.*"
 
@@ -21,12 +22,11 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 10
     container:
-      # Pinned to an exact 24.x for reproducible builds, matching the
-      # golang:1.26.6 pin used by the other jobs (avoids the mutable node:24 tag).
+      # Pin Node to an exact version for reproducible builds.
       image: node:24.18.0
     steps:
       # fetch-depth: 0 so the non-blocking docs check can diff base...head.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 

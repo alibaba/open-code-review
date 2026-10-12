@@ -14,7 +14,10 @@ SPDX_REGEX="SPDX-License-Identifier: Apache-2.0"
 COPYRIGHT_REGEX="Copyright [0-9]{4} alibaba/open-code-review Contributors"
 YEAR_REGEX="Copyright ([0-9]{4})"
 
-LICENSE_EXTS=(go sh js mjs ts tsx)
+# Keep in step with LICENSE_EXTS in add-license.sh, which also records why each
+# extension is in or out. This side only greps for the header text, so the
+# comment syntax does not matter here.
+LICENSE_EXTS=(go js mjs ts tsx kt kts sh py css)
 
 IGNORED_PATHS=(
   "vendor/"

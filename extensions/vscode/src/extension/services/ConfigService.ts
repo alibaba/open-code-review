@@ -4,8 +4,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { dirname, join } from 'path';
-import { ConfigEntry } from '../../shared/configUtils';
-import { OcrConfig } from '../../shared/types';
+import { ConfigEntry } from '@shared/configUtils';
+import { OcrConfig } from '@shared/types';
 import { CliService } from './CliService';
 import { applyConfigEntries, RawConfig } from './configDraft';
 import { parseConfig, toConfigSetArgs } from './configParse';
@@ -70,7 +70,7 @@ export class ConfigService {
     return this.writeRaw(raw);
   }
 
-  /** 在隔离的临时 HOME 上运行 ocr llm test，不修改 ~/.opencodereview/config.json。 */
+  /** Run ocr llm test with an isolated temporary HOME without modifying ~/.opencodereview/config.json. */
   async testWithEntries(entries: ConfigEntry[]): Promise<{ ok: boolean; message?: string }> {
     const draft = applyConfigEntries(this.readRaw(), entries);
     const testHome = mkdtempSync(join(tmpdir(), 'ocr-test-home-'));
@@ -79,7 +79,7 @@ export class ConfigService {
     mkdirSync(configDir, { recursive: true, mode: 0o700 });
     writeFileSync(configPath, JSON.stringify(draft, null, 2), { encoding: 'utf8', mode: 0o600 });
     try {
-      return await this.cli.testConnection({ home: testHome, configPath });
+      return await this.cli.testConnection({ home: testHome });
     } finally {
       if (existsSync(testHome)) rmSync(testHome, { recursive: true, force: true });
     }

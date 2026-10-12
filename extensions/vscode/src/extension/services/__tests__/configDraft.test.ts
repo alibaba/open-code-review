@@ -4,7 +4,7 @@
 import { applyConfigEntries } from '../configDraft';
 
 describe('applyConfigEntries', () => {
-  it('合并官方 provider 条目', () => {
+  it('merges built-in provider entries', () => {
     const draft = applyConfigEntries({}, [
       { key: 'provider', value: 'anthropic' },
       { key: 'providers.anthropic.model', value: 'claude-opus-4-8' },
@@ -17,7 +17,7 @@ describe('applyConfigEntries', () => {
     });
   });
 
-  it('合并自定义 provider 条目', () => {
+  it('merges custom provider entries', () => {
     const draft = applyConfigEntries({}, [
       { key: 'custom_providers.my-llm.protocol', value: 'openai' },
       { key: 'custom_providers.my-llm.url', value: 'https://api.example.com/v1' },
@@ -34,7 +34,7 @@ describe('applyConfigEntries', () => {
     });
   });
 
-  it('合并 manual llm 条目并清空 provider', () => {
+  it('merges manual llm entries and clears the provider', () => {
     const draft = applyConfigEntries({ provider: 'anthropic' }, [
       { key: 'provider', value: '' },
       { key: 'model', value: '' },

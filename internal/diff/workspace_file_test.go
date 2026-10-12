@@ -4,11 +4,27 @@
 package diff
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestReadWorkspaceFileForDiffWithLimit(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "at-limit.txt"), []byte("text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	content, err := readWorkspaceFileForDiffWithLimit(repo, "at-limit.txt", 4)
+	if err != nil || string(content) != "text" {
+		t.Fatalf("file at limit: content = %q, error = %v", content, err)
+	}
+	_, err = readWorkspaceFileForDiffWithLimit(repo, "at-limit.txt", 3)
+	if !errors.Is(err, errWorkspaceFileTooLarge) {
+		t.Fatalf("file over limit: error = %v, want size limit error", err)
+	}
+}
 
 func TestReadWorkspaceFileForDiffRejectsAbsolutePath(t *testing.T) {
 	repo := t.TempDir()

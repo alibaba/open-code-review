@@ -44,6 +44,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `bedrock` | anthropic-bedrock | `aws_region`에서 결정 | — (AWS 자격 증명 체인) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
@@ -63,6 +64,12 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+내장 프로바이더의 모델 목록은 `ocr config model`에서 선택할 때 제안하는 목록이며
+`--model`을 제한하지 않습니다. 지정한 모델이 내장 목록과
+`providers.<name>.models` 모두에 없으면 OCR은 stderr에 경고를 출력합니다.
+모델의 유효성은 요청을 보낼 때 프로바이더가 확인합니다. 사용자 정의 프로바이더에는
+기존 `--model` 검증 규칙이 적용됩니다.
 
 ### 내장 프로바이더의 Base URL 재정의 {#overriding-a-built-in-provider-s-base-url}
 
@@ -157,13 +164,23 @@ Ollama는 API 키를 무시하지만 커스텀 프로바이더에는 비어 있�
 
 ### 타임아웃 {#timeouts}
 
+태스크 타임아웃과 개별 요청 타임아웃은 서로 독립적입니다:
+
+- `ocr review --timeout`과 `ocr scan --timeout`은 동시 실행 태스크의 시간 예산을
+  **분** 단위로 설정합니다(기본값 **15**, `0`이면 태스크 기한을 비활성화).
+  이 예산에는 태스크의 모든 LLM 호출, 도구 실행, 재시도 대기가 포함됩니다.
+  review에서는 effort의 리뷰 라운드 수만큼 예산을 늘립니다.
+- 개별 HTTP 요청 타임아웃은 **초** 단위입니다(기본값 **300**).
+  `--timeout`을 늘려도 요청 타임아웃은 바뀌지 않으며, 태스크 기한을 비활성화해도
+  요청 타임아웃은 비활성화되지 않습니다. 태스크의 남은 예산이 더 짧으면 그 예산이 우선합니다.
+
 LLM 요청마다 HTTP 타임아웃이 있으며 기본값은 **300초**입니다. 느린 로컬 모델(또는 큰 파일)에는 더 필요할 수 있습니다. 범위가 좁은 것부터 세 가지 설정이 있습니다:
 
 - `providers.<name>.timeout_sec` / `custom_providers.<name>.timeout_sec` — 프로바이더별, 초 단위.
 - `llm.timeout_sec` — 레거시 `llm` 섹션용, 초 단위.
 - `OCR_LLM_TIMEOUT` 환경 변수 — 정수 초. 모든 해석 경로에서 설정 파일 값보다 우선합니다.
 
-`timeout_sec` 키는 `ocr config set`이 지원하지 않으므로 `~/.opencodereview/config.json`을 직접 편집합니다:
+두 `timeout_sec` 키 모두 `ocr config set`으로 설정할 수 있습니다:
 
 ```json
 {
@@ -172,6 +189,23 @@ LLM 요청마다 HTTP 타임아웃이 있으며 기본값은 **300초**입니다
   }
 }
 ```
+
+예를 들어 `OCR_LLM_TIMEOUT=900 ocr review --timeout 30`은 태스크 예산 내에서
+개별 요청을 최대 15분까지 허용합니다. 이 환경 변수나 `timeout_sec`를 설정하지 않으면
+`--timeout 30`을 지정해도 요청은 5분 후에 타임아웃됩니다.
+
+개별 요청 기한이 만료되면 요청을 자동으로 다시 보내지 않고 호출을 종료합니다.
+응답 본문이나 스트림을 읽는 도중 타임아웃된 경우도 마찬가지입니다. 지속적으로 느린
+요청은 같은 제한 시간으로 재시도하기보다 요청 타임아웃을 늘려야 합니다.
+기존 SDK 재시도 정책은 바뀌지 않습니다. 재시도 가능한 연결 및 HTTP 오류는 백오프와
+프로바이더의 `Retry-After` 지시에 따라 최대 5회 재시도합니다. SDK의 각 시도 기한은
+재시도 대기 시간에도 적용됩니다. 취소되거나 태스크 기한이 만료되면 요청과 재시도 대기가
+모두 중단됩니다.
+
+진단 메시지는 `LLM request timeout`(`OCR_LLM_TIMEOUT` 또는 프로바이더의 `timeout_sec` 확인)과
+`caller deadline exceeded`를 구분합니다. 후자는 호출한 작업의 컨텍스트 기한이 만료되었다는
+뜻입니다. review/scan 태스크 기한이 만료된 경우에는 `--timeout`을 확인하세요.
+백그라운드 메모리 압축이나 `ocr llm test` 같은 다른 작업에는 각각 독립적인 기한이 있습니다.
 
 ### 명령으로 API 키 가져오기 {#api-key-from-a-command}
 
@@ -216,7 +250,7 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 
 ### 프롬프트 상한 {#prompt-limit}
 
-`max_tokens`는 리뷰 단위 하나에 대한 **프롬프트**(입력) 상한입니다. 그 단위는 `ocr review`에서는 파일 그룹, `ocr scan`에서는 파일 하나입니다. 내장 템플릿의 기본값은 `ocr review` 200,000토큰, `ocr scan` 58,888토큰입니다. 컨텍스트 윈도가 다른 모델에서는 `max_tokens`를 저장해 바꿉니다:
+`max_tokens`는 서브태스크 하나(파일 하나 또는 관련된 파일 묶음)에 대한 **프롬프트**(입력) 상한입니다. 내장 템플릿의 기본값은 `ocr review` 200,000토큰, `ocr scan` 58,888토큰입니다. 컨텍스트 윈도가 다른 모델에서는 `max_tokens`를 저장해 바꿉니다:
 
 ```bash
 ocr config set max_tokens 400000
@@ -233,7 +267,7 @@ ocr scan --max-tokens 400000
 
 ### 리뷰 강도 (effort) {#review-effort}
 
-`effort`는 파일 그룹마다 리뷰를 몇 라운드 돌릴지 정합니다. `low` = 1라운드, `medium`(기본값) = 2라운드, `high` = 3라운드입니다. 라운드가 늘어나면 더 많은 문제를 찾지만 비용도 그만큼 늘어납니다.
+`effort`는 서브태스크마다 리뷰를 몇 라운드 돌릴지 정합니다. `low` = 1라운드, `medium`(기본값) = 2라운드, `high` = 3라운드입니다. 라운드가 늘어나면 더 많은 문제를 찾지만 비용도 그만큼 늘어납니다.
 
 ```bash
 ocr config set effort high

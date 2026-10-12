@@ -66,15 +66,16 @@ argument. Otherwise the platform default runs — `open` on macOS, `xdg-open` on
 Linux and the BSDs, `rundll32` on Windows. Failing to open a browser is a
 warning on stderr and never fatal; the server keeps serving either way.
 
-## Three pages
+## Four pages
 
-The viewer has three URLs:
+The viewer has four URLs:
 
 | URL | What you see |
 |---|---|
 | `/` | List of all repositories that have sessions on disk. |
 | `/r/{repo}` | List of sessions for one repository, newest first. |
 | `/r/{repo}/{sessionID}` | Full detail for a single session. |
+| `/r/{repo}/compare` | Two sessions of one repository, compared. |
 
 `{repo}` is a path-encoded string (separators `/` and `\` replaced with
 `-`, colons replaced with `_` — the same encoding used to name the
@@ -83,13 +84,17 @@ on-disk directories). You don't usually type this — you click through.
 ### `/` — Repository list
 
 For each repo with at least one session you see the repo path, the
-total session count, and the most recent activity timestamp.
+total session count, the most recent activity timestamp, and a `Check`
+link to its sessions. The search box filters the list by repo path, and
+ten repositories fit on a page; the pager at the bottom right moves
+between pages.
 
 ### `/r/{repo}` — Session list for one repo
 
 For each session: ID (a UUID), branch name (when OCR was able to
 detect it), review mode, model, file count, duration, and a started-at
-timestamp.
+timestamp, and a `Check` link to the next-older session. Ten sessions
+fit on a page; the pager at the bottom right moves between pages.
 
 ### `/r/{repo}/{sessionID}` — Session detail
 
@@ -113,6 +118,47 @@ Each lane is a horizontal strip of **task cards** — one per LLM round
 trip. Cards are coloured by task type so you can see at a glance which
 phases dominated the run.
 
+Longer lists on this page — **File breakdown**, **Files Reviewed**,
+**Session Tasks**, and **Conversations** — show twenty items per page.
+The pager stays hidden while a section still fits on one page.
+
+### `/r/{repo}/compare` — Compare two sessions
+
+The same four buckets `ocr session compare` prints, rendered as a page.
+The session list's **Action** column carries a `Check` link: each row
+opens a comparison against the next-older session, so the newest row
+shows what changed since the run before it. The oldest row shows `-`,
+having no older run to compare against.
+
+Findings are sorted into four buckets:
+
+| Bucket | Meaning |
+|---|---|
+| New | Only the later run reported it. |
+| Persisting | Both runs reported it. |
+| Resolved | Only the earlier run reported it, and the later run did review that file. |
+| Not reviewed | Only the earlier run reported it, and the later run never looked at that file. Nobody re-checked it, so it is not resolved. |
+
+One thing the page does differently: the CLI omits a bucket that came
+out empty, the page always prints all four. `Resolved (0)` is an
+answer, and a section that silently vanished would read as a broken
+page.
+
+Each bucket shows twenty findings per page; the pager stays hidden
+when the bucket fits on one page.
+
+A run old enough to predate run manifests recorded no coverage, so
+every unmatched finding from it falls into Resolved rather than Not
+reviewed.
+
+To compare any other pair, edit the query string:
+`/r/{repo}/compare?before=<older session id>&after=<newer session id>`.
+Both ids must belong to the repository in the URL.
+
+If the two runs used different review modes, the page shows the same
+warning `ocr session compare` prints: they may not have looked at the
+same files, so the buckets are not directly comparable.
+
 ## What's in a task card
 
 Click a task card to expand. Each card has:
@@ -130,6 +176,43 @@ The full message list sent to the model and the in-scope tool
 definitions are **not** rendered in the card UI; if you need them,
 inspect the JSONL transcript directly (the `messages` field on each
 `llm_request` record).
+
+## Review comments
+
+Below the task lanes, the session page lists every finding the review
+produced as **comment cards**, grouped by file, showing the comment
+text, its existing/suggested code where present, and severity/category
+badges. Chips on the filter bar narrow the list by severity or category.
+Twenty comments fit on a page; the pager stays hidden when there is
+only one. Changing a severity or category filter returns to page 1;
+marking a finding, toggling **Hide marked**, or clearing marks keeps
+the current page where it still exists.
+
+### Marking findings as you fix them
+
+Each card carries three buttons — **Fixed** / **Ignored** /
+**Clear** — that set a per-comment mark:
+
+- Marks are mutually exclusive: setting one replaces another, and
+  **Clear** removes it. The current state shows as a colored chip on
+  the card.
+- **Hide marked** (on by default, remembered per browser) keeps marked
+  cards out of the way while you work through what is left. The toolbar
+  counts how many are marked and hidden; switch the toggle off any time
+  to see everything again.
+- **Clear all marks** resets the whole session at once.
+
+Marks are viewer state, not review data — the viewer itself stays
+read-only:
+
+- They are stored in your browser's `localStorage`, scoped to the
+  session page. Nothing is ever written next to the session JSONL, and
+  the viewer exposes no write API at all.
+- Marks belong to one session **and one browser**: another browser or
+  machine sees the session unmarked, and clearing the browser's storage
+  for the site starts it over.
+- Re-running a review of the same change produces a new session, which
+  starts unmarked.
 
 ## Use cases
 
@@ -186,8 +269,8 @@ reviewed together.
 Lines are append-only — a partial JSONL means a session was killed
 mid-run, and the viewer renders what it has.
 
-To free disk space, delete entire session files; the viewer regenerates
-its index on the next request.
+To free disk space, delete entire session files; the viewer
+regenerates its index on the next request.
 
 ## Privacy
 

@@ -299,3 +299,30 @@ func TestShouldSkipFile(t *testing.T) {
 		})
 	}
 }
+
+// TestFileFind_NonASCIIPath verifies that file_find reports non-ASCII paths
+// literally instead of as quoted octal escapes under git's default
+// core.quotepath=true configuration in both workspace and commit modes.
+func TestFileFind_NonASCIIPath(t *testing.T) {
+	dir, commit := setupNonASCIIPathRepo(t)
+	for _, tc := range []struct {
+		name string
+		mode ReviewMode
+		ref  string
+	}{
+		{name: "workspace", mode: ModeWorkspace},
+		{name: "commit", mode: ModeCommit, ref: commit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewFileFind(&FileReader{RepoDir: dir, Mode: tc.mode, Ref: tc.ref})
+			got, err := p.Execute(context.Background(), map[string]any{"query_name": "文件"}) // allow-non-english: fixture exercises non-ASCII query
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantBase := filepath.Base(nonASCIIPath)
+			if !strings.Contains(got, wantBase) {
+				t.Errorf("expected to find %q, but got: %q", wantBase, got)
+			}
+		})
+	}
+}

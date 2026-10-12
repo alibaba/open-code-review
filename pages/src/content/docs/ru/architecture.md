@@ -16,7 +16,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -30,7 +30,8 @@ flowchart TD
 
 - `agent.go` — диспетчеризация и оркестрация по группам;
 - `grouping.go` — семантическая группировка файлов;
-- `preview.go` — фильтр файлов;
+- `selection.go` — фильтр файлов;
+- `preview.go` — отчёт `--preview`;
 - `util.go` — вспомогательные функции.
 
 Цикл вызова инструментов и сжатие памяти находятся рядом, в пакете
@@ -64,7 +65,7 @@ flowchart TD
 ## Пятиступенчатый фильтр файлов
 
 После загрузки diff каждый файл проходит через функцию
-[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go).
+[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
 Она возвращает одно из следующих значений:
 
 ```
@@ -76,8 +77,10 @@ default_path    — совпадение со встроенным шаблон�
 
 Если файл не исключён, функция возвращает пустое значение.
 
-`deleted` **не** возвращается функцией `whyExcluded`: оно вычисляется позже в
-`Preview()`, когда diff оставленного файла сообщает `IsDeleted`.
+`deleted` и `too_large` **не** возвращаются функцией `whyExcluded`: их применяет
+`selectFiles` уже после проверок — `deleted`, когда diff оставленного файла
+сообщает `IsDeleted`, и `too_large`, когда один только diff превышает 80% от
+`max_tokens`.
 
 Проверки выполняются в таком порядке:
 
@@ -94,8 +97,15 @@ default_path    — совпадение со встроенным шаблон�
 
 Отсев нерелевантных каталогов (`vendor/`, `node_modules/`, `target/` и т. д.)
 происходит раньше, на уровне провайдера diff. Список
-`providerDirIgnoreDirs` в `internal/diff/git.go` определяет такие каталоги, а
-функция `filterDiffs` удаляет их diff до фильтрации отдельных файлов.
+`providerDirIgnoreDirs` в `internal/diff/git.go` определяет такие каталоги, и их
+diff удаляются до фильтрации отдельных файлов. Preview сообщает об этих файлах как
+о `provider_directory`; правило `include` не может вернуть их для проверки.
+
+Список сопоставляется по префиксу пути, поэтому охватывает только каталоги в
+**корне репозитория**. Вложенные каталоги с теми же именами доходят до файлового
+фильтра и исключаются как `default_path`: `vendor/pkg/x.go` отмечается как
+`provider_directory`, а `api/vendor/pkg/x.go` — как `default_path`, и вернуть
+правилом `include` можно только второй.
 
 Чтобы увидеть полный результат фильтрации, не потратив ни одного токена,
 запустите `ocr review --preview`. Полный алгоритм описан в разделе
@@ -309,10 +319,10 @@ if countMessagesTokens(messages) > tokenLimit {
 группа отмечается как некритическое предупреждение в stdout и добавляется в
 массив JSON `warnings`.
 
-Вторая проверка выполняется в `filterLargeDiffs`: если один diff превышает
+Вторая проверка выполняется в `selectFiles`: если один diff превышает
 80 % от `MAX_TOKENS`, он отбрасывается ещё до того, как выполняются группировка
-и диспетчеризация. Третья защита работает внутри группировки — см.
-`enforceGroupTokenBudget` выше.
+и диспетчеризация, и отмечается как `too_large`. Третья защита работает
+внутри группировки — см. `enforceGroupTokenBudget` выше.
 
 ## Шаблон и плейсхолдеры
 
@@ -386,8 +396,9 @@ if countMessagesTokens(messages) > tokenLimit {
 `review.run` охватывает всю задачу, `diff.parse` — загрузку diff, а для каждой
 проверяемой группы создаётся `subtask.execute.group.<group-key>`. Кроме того, в каждой
 точке принятия решения создаётся кратковременный span `event.<name>`
-(`plan.skipped`, `token.threshold.exceeded`, `subtask.error` и т. д.). Обращения
-к LLM и вызовы инструментов записываются только как метрики, а не как span.
+(`plan.skipped`, `token.threshold.exceeded`, `subtask.error` и т. д.). В основном цикле ревью
+обращения к LLM и вызовы инструментов создают спаны, а связанные с ними измерения
+также записываются в метрики.
 Содержимое промптов и ответов **никогда** не прикрепляется к телеметрии; флаг
 `OCR_CONTENT_LOGGING` подключён, но сейчас не действует. Полная схема приведена
 в разделе [Телеметрия](../telemetry/).
@@ -425,7 +436,7 @@ if countMessagesTokens(messages) > tokenLimit {
 | Семантическая группировка файлов | `internal/agent/grouping.go` |
 | Цикл вызова инструментов и сжатие памяти | `internal/llmloop/` (loop.go, compression.go) |
 | Пресеты effort | `internal/config/template/effort.go` |
-| Фильтр файлов / предварительный просмотр | `internal/agent/preview.go` |
+| Фильтр файлов / предварительный просмотр | `internal/agent/selection.go`, `internal/agent/preview.go` |
 | Загрузка diff (режимы Git) | `internal/diff/git.go` |
 | Цепочка разрешения правил | `internal/config/rules/system_rules.go` |
 | Реестр и реализации инструментов | `internal/tool/` |

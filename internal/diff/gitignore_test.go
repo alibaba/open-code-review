@@ -32,6 +32,24 @@ func TestExcludedDirs(t *testing.T) {
 	}
 }
 
+func TestProviderDirPrefix(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"vendor/pkg/keep.go", "vendor/"},
+		{"vendor", "vendor/"},
+		{"target/.pnpm/pkg/index.js", "target/"},
+		{"src/vendor/keep.go", ""},
+		{"main.go", ""},
+	}
+	for _, tc := range tests {
+		if got := ProviderDirPrefix(tc.path); got != tc.want {
+			t.Errorf("ProviderDirPrefix(%q) = %q, want %q", tc.path, got, tc.want)
+		}
+	}
+}
+
 func TestLoadGitignorePatterns(t *testing.T) {
 	t.Run("valid gitignore", func(t *testing.T) {
 		dir := t.TempDir()

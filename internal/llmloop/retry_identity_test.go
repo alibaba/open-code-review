@@ -91,12 +91,12 @@ func wantMeta(t *testing.T, got capturedRequest, want llm.RequestMeta) {
 	}
 }
 
-// TestRunPerFile_MainTaskIdentity checks that every main_task round carries the
+// TestRunMainTask_MainTaskIdentity checks that every main_task round carries the
 // identity of the TaskRecord created for it, including the per-round RequestNo.
 // An empty provider is covered as its own case: it is the real value for an
 // unnamed endpoint, so it must still produce identity rather than be read as
 // "no meta".
-func TestRunPerFile_MainTaskIdentity(t *testing.T) {
+func TestRunMainTask_MainTaskIdentity(t *testing.T) {
 	for _, provider := range []string{"openai", ""} {
 		name := provider
 		if name == "" {
@@ -115,12 +115,12 @@ func TestRunPerFile_MainTaskIdentity(t *testing.T) {
 			deps.NewRequestMeta = metaFactory(provider, deps.Model)
 			runner := NewRunner(deps)
 
-			if _, _, err := runner.RunPerFile(
+			if _, _, err := runner.RunMainTask(
 				context.Background(),
 				[]llm.Message{llm.NewTextMessage("user", "review this file")},
 				"main.go",
 			); err != nil {
-				t.Fatalf("RunPerFile: %v", err)
+				t.Fatalf("RunMainTask: %v", err)
 			}
 
 			reqs := client.requests()
@@ -152,9 +152,9 @@ func TestRunPerFile_MainTaskIdentity(t *testing.T) {
 	}
 }
 
-// TestRunPerFile_GraceRoundIsAMainTaskRound verifies that the grace round uses
+// TestRunMainTask_GraceRoundIsAMainTaskRound verifies that the grace round uses
 // the next main_task identity and records both responses and errors.
-func TestRunPerFile_GraceRoundIsAMainTaskRound(t *testing.T) {
+func TestRunMainTask_GraceRoundIsAMainTaskRound(t *testing.T) {
 	// Delay the grace response so duration assertions are stable across platforms.
 	const graceDelay = 20 * time.Millisecond
 
@@ -206,13 +206,13 @@ func TestRunPerFile_GraceRoundIsAMainTaskRound(t *testing.T) {
 			}
 			deps.NewRequestMeta = metaFactory("openai", deps.Model)
 
-			completed, stop, err := NewRunner(deps).RunPerFile(
+			completed, stop, err := NewRunner(deps).RunMainTask(
 				context.Background(),
 				[]llm.Message{llm.NewTextMessage("user", "review this file")},
 				"main.go",
 			)
 			if err != nil {
-				t.Fatalf("RunPerFile: %v", err)
+				t.Fatalf("RunMainTask: %v", err)
 			}
 			if completed || stop != StopMaxRounds {
 				t.Fatalf("completed = %v, stop = %v; want false, StopMaxRounds", completed, stop)
@@ -243,18 +243,18 @@ func TestRunPerFile_GraceRoundIsAMainTaskRound(t *testing.T) {
 	}
 }
 
-// TestRunPerFile_NoIdentityWhenFactoryNil is the scan guarantee: the Runner is
+// TestRunMainTask_NoIdentityWhenFactoryNil is the scan guarantee: the Runner is
 // shared, and with NewRequestMeta left nil no request may carry identity.
-func TestRunPerFile_NoIdentityWhenFactoryNil(t *testing.T) {
+func TestRunMainTask_NoIdentityWhenFactoryNil(t *testing.T) {
 	client := &metaCaptureClient{respond: func(int) *llm.ChatResponse { return taskDoneResponse() }}
 	runner := NewRunner(newTestDeps(client)) // NewRequestMeta unset, as scan leaves it
 
-	if _, _, err := runner.RunPerFile(
+	if _, _, err := runner.RunMainTask(
 		context.Background(),
 		[]llm.Message{llm.NewTextMessage("user", "review this file")},
 		"main.go",
 	); err != nil {
-		t.Fatalf("RunPerFile: %v", err)
+		t.Fatalf("RunMainTask: %v", err)
 	}
 
 	reqs := client.requests()
@@ -345,9 +345,10 @@ func TestRunCompression_NoIdentityWhenFactoryNil(t *testing.T) {
 
 // TestReLocation_Identity pins the field that is easy to get wrong: FilePath is
 // the comment's path, which is the file session the re-location record was
-// written to. It normally equals the tool loop's newPath, because executeToolCall
-// overrides the path argument with it — so the test leaves newPath empty, the one
-// case where the argument survives, to show which of the two identity follows.
+// written to — not the tool loop's taskKey, which is only the fallback for a
+// comment that named no path. The test passes an empty taskKey against a
+// comment that does name one, so a regression that switched the identity to
+// taskKey would show up as an empty FilePath rather than as other.go.
 func TestReLocation_Identity(t *testing.T) {
 	collector := tool.NewCommentCollector()
 	reg := tool.NewRegistry()
@@ -380,8 +381,8 @@ func TestReLocation_Identity(t *testing.T) {
 		NewRequestMeta: metaFactory("openai", "fake"),
 	})
 
-	// newPath is empty so the path override does not fire and the comment keeps
-	// the target the tool call named, other.go.
+	// taskKey is empty, so the fallback cannot supply a path and the comment
+	// keeps the target the tool call named, other.go.
 	cp := r.executeToolCall(context.Background(), "", llm.ToolCall{
 		Function: llm.FunctionCall{
 			Name:      tool.CodeComment.Name(),

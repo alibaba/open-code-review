@@ -127,14 +127,18 @@ func loadResumeState(repoDir, sessionID string, skipUnparseable bool) (*ResumeSt
 	reader := bufio.NewReader(f)
 	for {
 		line, readErr := reader.ReadBytes('\n')
+		if readErr == io.EOF {
+			// Bytes returned alongside EOF have no trailing newline: they are an
+			// unterminated record from a torn write. Drop and stop without parsing.
+			break
+		}
+
 		if len(line) > 0 {
 			if err := state.applyResumeLine(line); err != nil && !skipUnparseable {
 				return nil, err
 			}
 		}
-		if readErr == io.EOF {
-			break
-		}
+
 		if readErr != nil {
 			return nil, fmt.Errorf("read resume session %q: %w", sessionID, readErr)
 		}

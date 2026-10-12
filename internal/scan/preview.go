@@ -40,16 +40,18 @@ func (a *Agent) preview(ctx context.Context) (*model.Preview, error) {
 		Entries:    make([]model.PreviewEntry, 0, len(items)),
 	}
 
-	for _, it := range items {
+	decisions := a.selectScanItems(items)
+	for _, decision := range decisions {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		it := decision.item
 		entry := model.PreviewEntry{
 			Path:       it.Path,
 			Status:     "scan",
 			Insertions: int64(it.LineCount),
 		}
-		reason := a.whyExcluded(it)
+		reason := decision.reason
 		entry.WillReview = reason == model.ExcludeNone
 		entry.ExcludeReason = reason
 		if entry.WillReview {
