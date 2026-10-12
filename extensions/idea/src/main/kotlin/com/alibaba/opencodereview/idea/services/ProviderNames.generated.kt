@@ -29,6 +29,7 @@ internal fun generatedPresetProviderNames(): Set<String> = setOf(
     "openai",
     "openai-responses",
     "openrouter",
+    "opper",
     "siliconflow",
     "siliconflow-cn",
     "tencent-tokenhub",
