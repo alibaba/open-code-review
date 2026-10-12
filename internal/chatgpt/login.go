@@ -33,7 +33,7 @@ func randomValue() string {
 func (c *Client) Login(ctx context.Context, clientID string, open func(string) error) (Profile, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	host, selected, err := c.prepare(ctx, clientID)
+	host, selected, generations, err := c.prepare(ctx, clientID)
 	if err != nil {
 		return Profile{}, err
 	}
@@ -160,11 +160,18 @@ func (c *Client) Login(ctx context.Context, clientID string, open func(string) e
 	if err := c.applyToken(a, t, false); err != nil {
 		return Profile{}, err
 	}
-	active := false
+	active, superseded := false, false
 	err = c.withStore(ctx, func(s *store) error {
 		existing := s.Accounts[a.ClientID]
 		if existing != nil && existing.Subject != a.Subject {
 			return errors.New("ChatGPT registration identity changed")
+		}
+		if existing != nil {
+			if existing.Generation != generations[a.ClientID] {
+				superseded = true
+				return nil
+			}
+			a.Generation = existing.Generation
 		}
 		if existing != nil && slices.Contains(existing.Scopes, PlanScope) && !slices.Contains(a.Scopes, PlanScope) {
 			return errors.New("ChatGPT sign-in did not grant plan usage; the existing connection was kept")
@@ -181,6 +188,16 @@ func (c *Client) Login(ctx context.Context, clientID string, open func(string) e
 	})
 	if err != nil {
 		return Profile{}, err
+	}
+	if superseded {
+		// The browser wait may have used up most of the sign-in deadline, and a
+		// failed revocation leaves the discarded session usable.
+		revokeCtx, cancelRevoke := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancelRevoke()
+		if err := c.revoke(revokeCtx, a); err != nil {
+			return Profile{}, fmt.Errorf("ChatGPT was signed out during sign-in, so the new session was discarded but not revoked; disconnect the app in ChatGPT Settings: %w", err)
+		}
+		return Profile{}, errors.New("ChatGPT was signed out during sign-in; the new session was discarded, sign in again")
 	}
 	return Profile{ClientID: a.ClientID, Email: a.Email, Active: active, Connected: true, PlanEnabled: slices.Contains(a.Scopes, PlanScope), ExpiresAt: a.ExpiresAt}, nil
 }

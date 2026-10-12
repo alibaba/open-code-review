@@ -43,6 +43,9 @@ type account struct {
 	Scopes            []string  `json:"scopes,omitempty"`
 	ExpiresAt         time.Time `json:"expires_at"`
 	EarliestRefreshAt time.Time `json:"earliest_refresh_at,omitempty"`
+	// Generation advances on every logout so a sign-in that started before it
+	// cannot restore the session afterwards.
+	Generation uint64 `json:"generation,omitempty"`
 }
 
 type store struct {
@@ -405,41 +408,14 @@ func (c *Client) Logout(ctx context.Context) error {
 		if a == nil {
 			return nil
 		}
-		var remoteErr error
-		// Without offline_access there is no refresh token, but the access token
-		// stays usable until expiry unless it is revoked too.
-		token, hint := a.RefreshToken, "refresh_token"
-		if token == "" {
-			token, hint = a.AccessToken, "access_token"
-		}
-		if token != "" {
-			var revoke string
-			_, revoke, remoteErr = c.discovery(ctx)
-			if remoteErr == nil && revoke == "" {
-				remoteErr = errors.New("OpenAI did not publish a revocation endpoint")
-			}
-			if remoteErr == nil {
-				for attempt := 0; attempt < 3; attempt++ {
-					remoteErr = c.request(ctx, http.MethodPost, revoke, url.Values{"token": {token}, "token_type_hint": {hint}, "client_id": {a.ClientID}}, "", nil)
-					var oe *oauthError
-					if remoteErr == nil || (errors.As(remoteErr, &oe) && oe.status < 500) || ctx.Err() != nil || attempt == 2 {
-						break
-					}
-					timer := time.NewTimer(time.Duration(attempt+1) * 100 * time.Millisecond)
-					select {
-					case <-ctx.Done():
-					case <-timer.C:
-					}
-					timer.Stop()
-				}
-			}
-		}
+		remoteErr := c.revoke(ctx, a)
 		a.AccessToken = ""
 		a.RefreshToken = ""
 		a.IDToken = ""
 		a.Scopes = nil
 		a.ExpiresAt = time.Time{}
 		a.EarliestRefreshAt = time.Time{}
+		a.Generation++
 		if err := c.save(s); err != nil {
 			return err
 		}
@@ -450,9 +426,44 @@ func (c *Client) Logout(ctx context.Context) error {
 	})
 }
 
-func (c *Client) prepare(ctx context.Context, id string) (string, *account, error) {
+func (c *Client) revoke(ctx context.Context, a *account) error {
+	// Without offline_access there is no refresh token, but the access token
+	// stays usable until expiry unless it is revoked too.
+	token, hint := a.RefreshToken, "refresh_token"
+	if token == "" {
+		token, hint = a.AccessToken, "access_token"
+	}
+	if token == "" {
+		return nil
+	}
+	_, endpoint, err := c.discovery(ctx)
+	if err == nil && endpoint == "" {
+		err = errors.New("OpenAI did not publish a revocation endpoint")
+	}
+	if err != nil {
+		return err
+	}
+	for attempt := 0; ; attempt++ {
+		err = c.request(ctx, http.MethodPost, endpoint, url.Values{"token": {token}, "token_type_hint": {hint}, "client_id": {a.ClientID}}, "", nil)
+		var oe *oauthError
+		if err == nil || (errors.As(err, &oe) && oe.status < 500) || ctx.Err() != nil || attempt == 2 {
+			return err
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * 100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+		}
+		timer.Stop()
+	}
+}
+
+// prepare also snapshots each registration's generation, because a new sign-in
+// only learns which registration it targets from the callback.
+func (c *Client) prepare(ctx context.Context, id string) (string, *account, map[string]uint64, error) {
 	var host string
 	var selected *account
+	generations := map[string]uint64{}
 	err := c.withStore(ctx, func(s *store) error {
 		if s.HostID == "" {
 			s.HostID = "urn:uuid:" + uuid.NewString()
@@ -461,6 +472,9 @@ func (c *Client) prepare(ctx context.Context, id string) (string, *account, erro
 			}
 		}
 		host = s.HostID
+		for clientID, a := range s.Accounts {
+			generations[clientID] = a.Generation
+		}
 		if id != "" {
 			if s.Accounts[id] == nil {
 				return errors.New("unknown ChatGPT account registration")
@@ -470,5 +484,5 @@ func (c *Client) prepare(ctx context.Context, id string) (string, *account, erro
 		}
 		return nil
 	})
-	return host, selected, err
+	return host, selected, generations, err
 }

@@ -423,6 +423,56 @@ func TestLogoutRevokesAccessTokenWithoutRefreshToken(t *testing.T) {
 	if f.revokeCount.Load() != 1 || f.revokedHint.Load() != "access_token" {
 		t.Fatalf("access-only session was not revoked: %d %v", f.revokeCount.Load(), f.revokedHint.Load())
 	}
+	if err := f.client.Logout(context.Background()); err != nil || f.revokeCount.Load() != 1 {
+		t.Fatalf("signed-out session revoked again: %d %v", f.revokeCount.Load(), err)
+	}
+}
+
+func TestLogoutDuringLoginDiscardsTheNewSession(t *testing.T) {
+	for _, tc := range []struct {
+		name, clientID string
+		revokeStatus   int
+		wantErr        string
+	}{
+		{"returning registration", "oaiapp_test", 0, "sign in again"},
+		{"new registration", "", 0, "sign in again"},
+		{"revocation fails", "oaiapp_test", 400, "not revoked"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newIdentityFixture(t)
+			if _, err := f.client.Login(context.Background(), "", f.open(t, nil)); err != nil {
+				t.Fatal(err)
+			}
+			browser := f.open(t, nil)
+			_, err := f.client.Login(context.Background(), tc.clientID, func(u string) error {
+				if err := f.client.Logout(context.Background()); err != nil {
+					return err
+				}
+				f.revokeStatus = tc.revokeStatus
+				return browser(u)
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("stale sign-in was not rejected: %v", err)
+			}
+			if f.revokeCount.Load() != 2 || f.revokedHint.Load() != "refresh_token" {
+				t.Fatalf("discarded session was not revoked: %d", f.revokeCount.Load())
+			}
+			s, err := f.client.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a := s.Accounts["oaiapp_test"]; a == nil || a.AccessToken != "" || a.RefreshToken != "" || a.Generation != 1 {
+				t.Fatalf("logout was undone: %+v", a)
+			}
+			f.revokeStatus = 0
+			if p, err := f.client.Login(context.Background(), "oaiapp_test", f.open(t, nil)); err != nil || !p.Connected {
+				t.Fatalf("sign-in after logout: %+v %v", p, err)
+			}
+			if s, err = f.client.load(); err != nil || s.Accounts["oaiapp_test"].Generation != 1 {
+				t.Fatal("sign-in must keep the registration generation")
+			}
+		})
+	}
 }
 
 func TestCredentialStoreErrorsAndEmptyState(t *testing.T) {
