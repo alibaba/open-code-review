@@ -103,7 +103,7 @@ class ConfigDraftTest {
 
     @Test
     fun `new generated presets keep configuration in the built-in provider bucket`() {
-        for (name in listOf("bedrock", "openai-responses", "xai", "gemini", "ollama-cloud")) {
+        for (name in listOf("bedrock", "copilot", "openai-responses", "xai", "gemini", "ollama-cloud")) {
             val d = draft("{}", "provider" to name, "providers.$name.model" to "saved-model")
             assertEquals(name, d.str("provider"))
             assertEquals("saved-model", d.str("providers", name, "model"), name)

@@ -17,6 +17,7 @@ import (
 //   - ProtocolOpenAIChatCompletions ("openai")
 //   - ProtocolOpenAIResponses ("openai-responses")
 //   - ProtocolAnthropicBedrock ("anthropic-bedrock")
+//   - ProtocolCopilot ("copilot")
 //
 // To add a built-in provider that speaks a different protocol, set Protocol
 // accordingly and ensure NewLLMClient has a matching case.
@@ -29,17 +30,21 @@ type Provider struct {
 	EnvVar      string // environment variable name for API key fallback
 	Models      []string
 
-	// AmbientAuth marks a provider whose credentials come from the
-	// environment's own chain rather than an api_key — AWS SigV4, for
-	// instance. The resolver skips its api_key requirement for these, because
-	// there is no key to configure and demanding one would make the provider
-	// impossible to use.
+	// AmbientAuth marks a provider whose credentials come from its own auth
+	// chain rather than an OCR api_key.
 	AmbientAuth bool
 }
 
 // After modifying the built-in provider registry, run `go generate ./internal/llm`
 // and commit both generated catalogs. See the root AGENTS.md for paths and verification.
 var registry = []Provider{
+	{
+		Name:        "copilot",
+		DisplayName: "GitHub Copilot SDK (experimental)",
+		Protocol:    ProtocolCopilot,
+		AmbientAuth: true,
+		Models:      []string{"auto"},
+	},
 	{
 		Name:        "anthropic",
 		DisplayName: "Anthropic Claude API",

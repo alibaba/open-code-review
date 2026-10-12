@@ -27,7 +27,7 @@ describe('generated provider presets', () => {
     }
   });
 
-  it.each(['bedrock', 'openai-responses'])('uses the built-in configuration path for %s', (name) => {
+  it.each(['bedrock', 'openai-responses', 'copilot'])('uses the built-in configuration path for %s', (name) => {
     const preset = lookupPreset(name);
     expect(preset).toBeDefined();
     const model = preset?.models[0] ?? '';
@@ -58,8 +58,11 @@ describe('generated provider presets', () => {
   it('derives ambient authentication from the effective protocol', () => {
     const bedrock = lookupPreset('bedrock');
     const openai = lookupPreset('openai');
+    const copilot = lookupPreset('copilot');
     expect(bedrock).toBeDefined();
     expect(openai).toBeDefined();
+    expect(copilot).toBeDefined();
+    expect(usesAmbientAuth(copilot!)).toBe(true);
     expect(usesAmbientAuth(bedrock!)).toBe(true);
     expect(usesAmbientAuth(bedrock!, 'openai')).toBe(false);
     expect(usesAmbientAuth(openai!, 'anthropic-bedrock')).toBe(true);

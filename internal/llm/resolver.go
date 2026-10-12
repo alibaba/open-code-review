@@ -34,11 +34,8 @@ type ResolvedEndpoint struct {
 	Timeout    time.Duration
 	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
 
-	// AmbientAuth marks an endpoint that carries no token and needs no base
-	// URL, because the transport supplies both — AWS SigV4 signing derives the
-	// host from the region and the credentials from the environment's own
-	// chain. Completeness checks must treat an empty URL and Token as valid for
-	// these; requiring either would reject a correctly configured endpoint.
+	// AmbientAuth marks an endpoint whose transport supplies its destination
+	// and credentials. Completeness checks must accept an empty URL and token.
 	AmbientAuth bool
 
 	// AWSProfile and AWSRegion override the ambient AWS chain for SigV4
@@ -114,12 +111,21 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 		if err != nil {
 			return ResolvedEndpoint{}, fmt.Errorf("resolve OCR config file: %w", err)
 		}
+		if !ok && opts.Provider == "copilot" {
+			ep, ok, err = tryProviderConfig(configFile{Provider: "copilot"}, opts.Model)
+			if err != nil {
+				return ResolvedEndpoint{}, fmt.Errorf("resolve Copilot preset: %w", err)
+			}
+		}
 		if !ok {
 			section := "custom_providers"
 			if _, isPreset := LookupProvider(opts.Provider); isPreset {
 				section = "providers"
 			}
 			return ResolvedEndpoint{}, fmt.Errorf("resolve OCR config file: provider %q is not configured in %s section because the config file does not exist", opts.Provider, section)
+		}
+		if ep.Protocol == ProtocolCopilot && len(env.headers) > 0 {
+			return ResolvedEndpoint{}, fmt.Errorf("%s is not supported by the Copilot SDK provider", envOCRLLMExtraHeaders)
 		}
 		return finalizeResolvedEndpoint("OCR config file", ep, env), nil
 	}
@@ -143,6 +149,9 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 		// transport supplies both. Everything else still needs all three.
 		complete := ep.Model != "" && (ep.AmbientAuth || (ep.URL != "" && ep.Token != ""))
 		if ok && complete {
+			if ep.Protocol == ProtocolCopilot && len(env.headers) > 0 {
+				return ResolvedEndpoint{}, fmt.Errorf("%s is not supported by the Copilot SDK provider", envOCRLLMExtraHeaders)
+			}
 			return finalizeResolvedEndpoint(strategy.name, ep, env), nil
 		}
 	}
@@ -248,6 +257,10 @@ func errBedrockNotConfigurable(key string) error {
 		key, ProtocolAnthropicBedrock)
 }
 
+func errCopilotNotConfigurable(key string) error {
+	return fmt.Errorf("%s cannot be %q: the Copilot SDK uses a signed-in GitHub identity rather than an OCR URL or token; configure it as a provider instead (\"provider\": \"copilot\")", key, ProtocolCopilot)
+}
+
 // validateEndpointURL reports URL parse failures before the SDK can turn them
 // into request errors that no longer identify the configuration variable.
 func validateEndpointURL(variable, value string) error {
@@ -288,6 +301,9 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 		}
 		if protocol == ProtocolAnthropicBedrock {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", errBedrockNotConfigurable(envOCRLLMProtocol))
+		}
+		if protocol == ProtocolCopilot {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", errCopilotNotConfigurable(envOCRLLMProtocol))
 		}
 	}
 	if protocol == "" {
@@ -406,6 +422,12 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		entry, ok = cfg.CustomProviders[cfg.Provider]
 	}
 	if !ok {
+		if isPreset && cfg.Provider == "copilot" {
+			entry = providerEntryConfig{Model: "auto"}
+			ok = true
+		}
+	}
+	if !ok {
 		section := "providers"
 		if !isPreset {
 			section = "custom_providers"
@@ -466,6 +488,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 			url = entry.URL
 		}
 		if entry.Protocol != "" {
+			if cfg.Provider == "copilot" {
+				return ResolvedEndpoint{}, false, fmt.Errorf("provider %q does not support a protocol override", cfg.Provider)
+			}
 			normalized := NormalizeProtocol(entry.Protocol)
 			if err := ValidateProtocol(normalized); err != nil {
 				return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
@@ -485,6 +510,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		if err := ValidateProtocol(normalized); err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q: %w", cfg.Provider, err)
 		}
+		if normalized == ProtocolCopilot {
+			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q: %w", cfg.Provider, errCopilotNotConfigurable("custom provider protocol"))
+		}
 		if normalized != ProtocolAnthropicBedrock && entry.URL == "" {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires a url field for protocol %q", cfg.Provider, normalized)
 		}
@@ -501,6 +529,14 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	// the preset says.
 	ambientAuth := protocol == ProtocolAnthropicBedrock ||
 		(isPreset && preset.AmbientAuth && entry.Protocol == "")
+	if protocol == ProtocolCopilot {
+		if cfg.Provider != "copilot" || !isPreset {
+			return ResolvedEndpoint{}, false, fmt.Errorf("Copilot SDK protocol is available only through the copilot preset")
+		}
+		if entry.URL != "" || apiKey != "" || apiKeyCmd != "" || entry.AuthHeader != "" || len(entry.ExtraBody) > 0 || len(entry.ExtraHeaders) > 0 || len(entry.RetryCodes) > 0 || entry.AWSProfile != "" || entry.AWSRegion != "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf("provider %q accepts a model and timeout only; URL, key, headers, body, retries, and AWS settings do not apply", cfg.Provider)
+		}
+	}
 
 	// No credential at all is an error, and it is reported before api_key_cmd
 	// runs: only the command's *execution* is deferred, not the emptiness check.
@@ -658,6 +694,9 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		}
 		if protocol == ProtocolAnthropicBedrock {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", errBedrockNotConfigurable("llm.protocol"))
+		}
+		if protocol == ProtocolCopilot {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", errCopilotNotConfigurable("llm.protocol"))
 		}
 	}
 	if protocol == "" {

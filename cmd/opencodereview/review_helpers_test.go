@@ -20,6 +20,30 @@ func runPreview(cc *commonContext, opts reviewOptions, out io.Writer) error {
 	return runPreviewContext(context.Background(), cc, opts, out)
 }
 
+func TestReviewMaxToolsOverride(t *testing.T) {
+	freshOCRHome(t)
+	dir := initTestGitRepo(t)
+	for _, tc := range []struct {
+		name     string
+		override int
+		want     int
+	}{
+		{name: "default", override: 0, want: 100},
+		{name: "lower", override: 50, want: 50},
+		{name: "higher", override: 150, want: 150},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cc, err := loadCommonContext(dir, "", "", tc.override, 0, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cc.Template.MaxToolRequestTimes; got != tc.want {
+				t.Fatalf("max tool rounds = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunPreview(t *testing.T) {
 	freshOCRHome(t)
 	dir := initTestGitRepo(t)

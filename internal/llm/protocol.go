@@ -35,6 +35,9 @@ const (
 	// official SDK's bedrock middleware performs that rewriting, so this
 	// shares the Anthropic client rather than reimplementing the protocol.
 	ProtocolAnthropicBedrock = "anthropic-bedrock"
+	// ProtocolCopilot uses the official Copilot SDK and the signed-in user's
+	// Copilot identity instead of an HTTP endpoint configured in OCR.
+	ProtocolCopilot = "copilot"
 )
 
 // NormalizeProtocol canonicalizes protocol names. It is case-insensitive and
@@ -55,18 +58,19 @@ func NormalizeProtocol(raw string) string {
 		return ProtocolOpenAIResponses
 	case ProtocolAnthropicBedrock:
 		return ProtocolAnthropicBedrock
+	case ProtocolCopilot:
+		return ProtocolCopilot
 	default:
 		return normalized
 	}
 }
 
-// ValidateProtocol accepts the four canonical protocol names and rejects
-// everything else.
+// ValidateProtocol rejects unsupported canonical protocol names.
 func ValidateProtocol(p string) error {
 	switch p {
-	case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock:
+	case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock, ProtocolCopilot:
 		return nil
 	default:
-		return fmt.Errorf("unsupported protocol %q; supported protocols are %q, %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock)
+		return fmt.Errorf("unsupported protocol %q; supported protocols are %q, %q, %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock, ProtocolCopilot)
 	}
 }
