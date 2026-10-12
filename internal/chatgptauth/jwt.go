@@ -91,6 +91,10 @@ func (c *Client) signingKey(ctx context.Context, kid string) (*rsa.PublicKey, er
 	return &rsa.PublicKey{N: modulus, E: int(exponent)}, nil
 }
 func (c *Client) verify(ctx context.Context, token, clientID, nonce string) (identity, error) {
+	return c.verifyAt(ctx, token, clientID, nonce, time.Time{})
+}
+
+func (c *Client) verifyAt(ctx context.Context, token, clientID, nonce string, receivedAt time.Time) (identity, error) {
 	var claims identity
 	p := strings.Split(token, ".")
 	if len(p) != 3 || len(token) > 1<<20 {
@@ -138,6 +142,11 @@ func (c *Client) verify(ctx context.Context, token, clientID, nonce string) (ide
 		found = found || a == clientID
 	}
 	now := time.Now().Unix()
+	if !receivedAt.IsZero() {
+		// A persisted refresh response was received over the issuer's authenticated
+		// connection. Verify its lifetime at receipt, not after a network outage.
+		now = receivedAt.Unix()
+	}
 	if claims.Issuer != Issuer || claims.Subject == "" || !found || claims.Expires <= now || claims.Issued <= 0 || claims.Issued > now+5 || claims.NotBefore > now+5 || (claims.AuthorizedParty != "" && claims.AuthorizedParty != clientID) || (len(audiences) > 1 && claims.AuthorizedParty != clientID) {
 		return claims, errors.New("ID-token issuer, audience, subject or lifetime did not match")
 	}
