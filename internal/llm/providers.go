@@ -202,7 +202,7 @@ var registry = []Provider{
 		Name:        "qwen-cloud",
 		DisplayName: "Qwen Cloud Token Plan API",
 		Protocol:    ProtocolOpenAIChatCompletions,
-		BaseURL:     "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+		BaseURL:     "https://token-plan.maas.qwencloudapi.com/compatible-mode/v1",
 		EnvVar:      "QWEN_CLOUD_API_KEY",
 		Models: []string{
 			"qwen3.8-max",

@@ -448,8 +448,8 @@ func TestLookupProvider_QwenCloudDetails(t *testing.T) {
 	if p.Protocol != ProtocolOpenAIChatCompletions {
 		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
 	}
-	if p.BaseURL != "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1" {
-		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1")
+	if p.BaseURL != "https://token-plan.maas.qwencloudapi.com/compatible-mode/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://token-plan.maas.qwencloudapi.com/compatible-mode/v1")
 	}
 	if p.EnvVar != "QWEN_CLOUD_API_KEY" {
 		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "QWEN_CLOUD_API_KEY")
