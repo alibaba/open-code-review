@@ -6,6 +6,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -845,6 +846,30 @@ func TestAccumulateResponseStreamRejectsTerminalBeyondLimit(t *testing.T) {
 	}
 	if accumulator.terminal != nil {
 		t.Fatal("oversized terminal was retained")
+	}
+}
+
+func TestChatGPTStreamFailureDetails(t *testing.T) {
+	for _, tc := range []struct {
+		name, eventType, details, want string
+	}{
+		{"failed_missing", "failed", "", "response.failed: rate limited; Manage usage: "},
+		{"failed_null", "failed", `,"incomplete_details":null`, "response.failed: rate limited; Manage usage: "},
+		{"incomplete_null", "incomplete", `,"incomplete_details":null`, "response.incomplete: rate limited; Manage usage: "},
+		{"incomplete_reason", "incomplete", `,"incomplete_details":{"reason":"max_output_tokens"}`, `response.incomplete: rate limited {"reason":"max_output_tokens"}; Manage usage: `},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := responseStreamEvents(t, `{"type":"response.`+tc.eventType+`","response":{"id":"resp_failed","status":"`+tc.eventType+`","error":{"code":"rate_limit_exceeded","message":"rate limited","param":"model"}`+tc.details+`}}`)
+			accumulator := responseStreamAccumulator{requireCompleted: true}
+			err := accumulator.add(events[0])
+			var streamErr *responseStreamEventError
+			if !errors.As(err, &streamErr) || streamErr.code != "rate_limit_exceeded" || streamErr.param != "model" {
+				t.Fatal("structured error details were lost", err)
+			}
+			if streamErr.message != tc.want+"https://chatgpt.com/settings/usage" {
+				t.Fatalf("unexpected error message: %s", streamErr.message)
+			}
+		})
 	}
 }
 

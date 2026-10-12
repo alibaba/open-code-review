@@ -42,6 +42,10 @@ type keyCache struct {
 	until time.Time
 }
 
+type invalidIDTokenError string
+
+func (e invalidIDTokenError) Error() string { return string(e) }
+
 func (c *Client) signingKey(ctx context.Context, kid string) (*rsa.PublicKey, error) {
 	c.keys.mu.Lock()
 	defer c.keys.mu.Unlock()
@@ -98,7 +102,7 @@ func (c *Client) verifyAt(ctx context.Context, token, clientID, nonce string, re
 	var claims identity
 	p := strings.Split(token, ".")
 	if len(p) != 3 || len(token) > 1<<20 {
-		return claims, errors.New("invalid ID token")
+		return claims, invalidIDTokenError("invalid ID token")
 	}
 	decode := func(s string, v any) error {
 		b, err := base64.RawURLEncoding.DecodeString(s)
@@ -113,7 +117,7 @@ func (c *Client) verifyAt(ctx context.Context, token, clientID, nonce string, re
 		Crit []string `json:"crit"`
 	}
 	if err := decode(p[0], &header); err != nil || header.Alg != "RS256" || header.Kid == "" || len(header.Crit) > 0 {
-		return claims, errors.New("invalid ID-token signing header")
+		return claims, invalidIDTokenError("invalid ID-token signing header")
 	}
 	key, err := c.signingKey(ctx, header.Kid)
 	if err != nil {
@@ -121,21 +125,21 @@ func (c *Client) verifyAt(ctx context.Context, token, clientID, nonce string, re
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(p[2])
 	if err != nil {
-		return claims, errors.New("invalid ID-token signature")
+		return claims, invalidIDTokenError("invalid ID-token signature")
 	}
 	digest := sha256.Sum256([]byte(p[0] + "." + p[1]))
 	if rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], sig) != nil {
-		return claims, errors.New("invalid ID-token signature")
+		return claims, invalidIDTokenError("invalid ID-token signature")
 	}
 	if err := decode(p[1], &claims); err != nil {
-		return claims, errors.New("invalid ID-token claims")
+		return claims, invalidIDTokenError("invalid ID-token claims")
 	}
 	var audiences []string
 	var single string
 	if json.Unmarshal(claims.Audience, &single) == nil {
 		audiences = []string{single}
 	} else if json.Unmarshal(claims.Audience, &audiences) != nil {
-		return claims, errors.New("invalid ID-token audience")
+		return claims, invalidIDTokenError("invalid ID-token audience")
 	}
 	found := false
 	for _, a := range audiences {
@@ -148,10 +152,10 @@ func (c *Client) verifyAt(ctx context.Context, token, clientID, nonce string, re
 		now = receivedAt.Unix()
 	}
 	if claims.Issuer != Issuer || claims.Subject == "" || !found || claims.Expires <= now || claims.Issued <= 0 || claims.Issued > now+5 || claims.NotBefore > now+5 || (claims.AuthorizedParty != "" && claims.AuthorizedParty != clientID) || (len(audiences) > 1 && claims.AuthorizedParty != clientID) {
-		return claims, errors.New("ID-token issuer, audience, subject or lifetime did not match")
+		return claims, invalidIDTokenError("ID-token issuer, audience, subject or lifetime did not match")
 	}
 	if nonce != "" && claims.Nonce != nonce {
-		return claims, errors.New("ID-token nonce did not match")
+		return claims, invalidIDTokenError("ID-token nonce did not match")
 	}
 	return claims, nil
 }

@@ -37,8 +37,9 @@ type Auth struct {
 }
 
 type pendingRefresh struct {
-	Response   tokenResponse `json:"response"`
-	ReceivedAt time.Time     `json:"received_at"`
+	Response      tokenResponse `json:"response"`
+	ReceivedAt    time.Time     `json:"received_at"`
+	IdentityError string        `json:"identity_error,omitempty"`
 }
 
 func (a Auth) PlanEnabled() bool {

@@ -499,6 +499,12 @@ func (c *Client) credentials(ctx context.Context, s Store, account string) (*Aut
 		if err != nil {
 			return err
 		}
+		signInRequired := func(reason string) error {
+			return fmt.Errorf("%s; run ocr auth login --provider chatgpt --account %s", reason, auth.ClientID)
+		}
+		if auth.PendingRefresh != nil && auth.PendingRefresh.IdentityError != "" {
+			return signInRequired(auth.PendingRefresh.IdentityError)
+		}
 		if auth.AccessToken == "" {
 			return errors.New("ChatGPT account is signed out; run ocr auth login --provider chatgpt")
 		}
@@ -546,14 +552,24 @@ func (c *Client) credentials(ctx context.Context, s Store, account string) (*Aut
 				}
 			}
 			identity, err := c.verifyAt(ctx, t.ID, auth.ClientID, "", now)
+			if err == nil && (identity.Subject != auth.Subject || identity.Issuer != auth.Issuer) {
+				err = invalidIDTokenError("refresh changed ChatGPT identity")
+			}
+			if err == nil && identity.Nonce != "" && identity.Nonce != auth.Nonce {
+				err = invalidIDTokenError("refresh changed the original ID-token nonce")
+			}
 			if err != nil {
+				var invalid invalidIDTokenError
+				if errors.As(err, &invalid) {
+					// Retain the latest refresh token for logout, but stop retrying a rejected identity.
+					auth.PendingRefresh.IdentityError = invalid.Error()
+					auth.Revision++
+					if saveErr := s.save(d); saveErr != nil {
+						return saveErr
+					}
+					return signInRequired(invalid.Error())
+				}
 				return err
-			}
-			if identity.Subject != auth.Subject || identity.Issuer != auth.Issuer {
-				return errors.New("refresh changed ChatGPT identity")
-			}
-			if identity.Nonce != "" && identity.Nonce != auth.Nonce {
-				return errors.New("refresh changed the original ID-token nonce")
 			}
 			rotated.Email = identity.Email
 		}

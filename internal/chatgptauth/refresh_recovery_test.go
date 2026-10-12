@@ -15,7 +15,7 @@ import (
 )
 
 func TestRefreshRecoveryAfterVerificationFailure(t *testing.T) {
-	for _, scenario := range []string{"healthy_id_token", "no_id_token", "jwks_unavailable", "cancel_after_token_response"} {
+	for _, scenario := range []string{"healthy_id_token", "no_id_token", "jwks_unavailable", "jwks_missing_key", "cancel_after_token_response"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := fixture(t)
 			s := testStore(t)
@@ -58,10 +58,13 @@ func TestRefreshRecoveryAfterVerificationFailure(t *testing.T) {
 					failedJWKS++
 					return &http.Response{StatusCode: 503, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":"temporarily_unavailable"}`))}, nil
 				}
+				if r.URL.Path == "/.well-known/jwks.json" && scenario == "jwks_missing_key" && !recoverNetwork {
+					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"keys":[]}`))}, nil
+				}
 				return http.DefaultTransport.RoundTrip(r)
 			})}
 			first, firstErr := f.client.Credentials(ctx, s, "")
-			needsRecovery := scenario == "jwks_unavailable" || scenario == "cancel_after_token_response"
+			needsRecovery := scenario == "jwks_unavailable" || scenario == "jwks_missing_key" || scenario == "cancel_after_token_response"
 			if needsRecovery {
 				if firstErr == nil || first != nil || !rotated {
 					t.Fatalf("fault did not occur after rotation: rotated=%t err=%v", rotated, firstErr)
@@ -105,7 +108,7 @@ func TestRefreshRecoveryAfterVerificationFailure(t *testing.T) {
 }
 
 func TestPendingRefreshRejectsUnverifiedIdentity(t *testing.T) {
-	for _, invalid := range []string{"signature", "subject", "nonce", "expired_at_receipt"} {
+	for _, invalid := range []string{"malformed", "signature", "subject", "nonce", "expired_at_receipt"} {
 		t.Run(invalid, func(t *testing.T) {
 			f := fixture(t)
 			s := testStore(t)
@@ -130,15 +133,52 @@ func TestPendingRefreshRejectsUnverifiedIdentity(t *testing.T) {
 			if invalid == "signature" {
 				response.ID += "invalid"
 			}
+			if invalid == "malformed" {
+				response.ID = "malformed"
+			}
 			a.PendingRefresh = &pendingRefresh{Response: response, ReceivedAt: time.Now()}
 			saveTest(t, s, a)
 			got, err := f.client.Credentials(context.Background(), s, "")
 			if err == nil || got != nil || f.calls.Load() != 0 {
 				t.Fatal("unverified pending credentials were used", err)
 			}
+			wantRecovery := "ocr auth login --provider chatgpt --account " + a.ClientID
+			if !strings.Contains(err.Error(), wantRecovery) {
+				t.Fatalf("permanent identity failure needs sign-in guidance: %v", err)
+			}
+			firstError := err.Error()
 			saved, err := s.Selected("")
-			if err != nil || saved.AccessToken != a.AccessToken || saved.RefreshToken != a.RefreshToken || saved.PendingRefresh == nil {
+			if err != nil || saved.AccessToken != a.AccessToken || saved.RefreshToken != a.RefreshToken || saved.PendingRefresh == nil || saved.PendingRefresh.IdentityError == "" {
 				t.Fatal("active identity changed", err)
+			}
+			restarted := NewClient()
+			requests := 0
+			restarted.http.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
+				requests++
+				return nil, errors.New("unexpected network request")
+			})
+			if got, err := restarted.Credentials(context.Background(), s, ""); got != nil || err == nil || err.Error() != firstError || requests != 0 {
+				t.Fatal("permanent failure was retried after restart", requests, err)
+			}
+
+			f.claims["sub"], f.claims["exp"] = a.Subject, time.Now().Add(time.Hour).Unix()
+			previous := openBrowser
+			defer func() { openBrowser = previous }()
+			openBrowser = func(_ context.Context, local string) error {
+				q, err := localAuthorization(local)
+				if err != nil {
+					return err
+				}
+				f.claims["nonce"] = q.Get("nonce")
+				return sendCallback(q, a.ClientID)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if _, err := f.client.Login(ctx, s, "", false, false, false, io.Discard); err != nil {
+				t.Fatal("could not sign in after permanent refresh failure", err)
+			}
+			if got, err := f.client.Credentials(ctx, s, ""); err != nil || got == nil || got.PendingRefresh != nil || got.AccessToken != "access-new" {
+				t.Fatal("sign-in did not restore usable credentials", err)
 			}
 		})
 	}
@@ -150,7 +190,7 @@ func TestPendingRefreshLogoutAndClear(t *testing.T) {
 			f := fixture(t)
 			s := testStore(t)
 			a := testAuth()
-			a.PendingRefresh = &pendingRefresh{Response: tokenResponse{Refresh: "pending-refresh"}, ReceivedAt: time.Now()}
+			a.PendingRefresh = &pendingRefresh{Response: tokenResponse{Refresh: "pending-refresh"}, ReceivedAt: time.Now(), IdentityError: "invalid ID token"}
 			saveTest(t, s, a)
 			transport := f.client.http.Transport
 			revoked := false
