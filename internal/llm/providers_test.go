@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -76,7 +77,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "qwen-cloud", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -182,6 +183,36 @@ func TestLookupProvider_OpenAIDetails(t *testing.T) {
 		if p.Models[i] != model {
 			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
 		}
+	}
+}
+
+func TestLookupProvider_QwenCloudDetails(t *testing.T) {
+	p, ok := LookupProvider("qwen-cloud")
+	if !ok {
+		t.Fatal("qwen-cloud not found")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://token-plan.maas.qwencloudapi.com/compatible-mode/v1" {
+		t.Errorf("BaseURL = %q, want current QwenCloud Token Plan endpoint", p.BaseURL)
+	}
+	if p.EnvVar != "QWEN_CLOUD_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "QWEN_CLOUD_API_KEY")
+	}
+	expectedModels := []string{
+		"qwen3.8-max",
+		"qwen3.8-flash",
+		"qwen3.7-max",
+		"qwen3.7-plus",
+		"qwen3.6-flash",
+		"deepseek-v4-pro",
+		"deepseek-v4-pro-0813",
+		"deepseek-v4-flash-0731",
+		"glm-5.2",
+	}
+	if !slices.Equal(p.Models, expectedModels) {
+		t.Errorf("Models = %v, want %v", p.Models, expectedModels)
 	}
 }
 
