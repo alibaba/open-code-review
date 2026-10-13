@@ -72,7 +72,7 @@ if (command === "npm") {
 } else {
   if (process.env.TEST_CURL_FAILURE === "1") process.exit(7);
   const failed = process.env.TEST_FAILED_PACKAGE &&
-    args[args.length - 1].endsWith(process.env.TEST_FAILED_PACKAGE.replace("/", "%2f"));
+    args[args.length - 1].endsWith(process.env.TEST_FAILED_PACKAGE.split("/").join("%2f"));
   const body = failed ? JSON.stringify({ message: "Not authorized" }) : process.env.TEST_RESPONSE;
   const outputIndex = args.indexOf("-o");
   if (outputIndex < 0) throw new Error("Expected a curl output file");
@@ -160,7 +160,7 @@ test("HTTP 201 validates all seven packages without publishing", () => {
   const requests = result.calls.map((call) => call.args[call.args.length - 1]);
   assert.strictEqual(requests[0], "https://oidc.invalid/?request=fixture&audience=npm:registry.npmjs.org");
   assert.deepStrictEqual(requests.slice(1).sort(), PACKAGES.map((name) =>
-    `https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${name.replace("/", "%2f")}`
+    `https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${name.split("/").join("%2f")}`
   ).sort());
   assert.ok(!result.stdout.includes("fixture-npm-token"));
 });
