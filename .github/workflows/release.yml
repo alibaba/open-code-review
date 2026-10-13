@@ -33,6 +33,7 @@ jobs:
         run: apt-get update && apt-get install -y jq
 
       - name: Exchange OIDC token for every package
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -77,7 +78,7 @@ jobs:
               -H 'Accept: application/json' \
               "https://${REGISTRY_HOST}/-/npm/v1/oidc/token/exchange/package/${escaped}")
 
-            if [ "$body" = "200" ] && [ "$(jq -r 'has("token")' exchange.json)" = "true" ]; then
+            if [ "$body" = "201" ] && jq -e '.token | strings | select(length > 0)' exchange.json > /dev/null; then
               echo "OK       ${pkg}"
             else
               failed=1
@@ -265,17 +266,16 @@ jobs:
       - name: Install jq
         run: apt-get update && apt-get install -y jq
 
-      # npm documents 11.15.0 as the floor for trusted publishing, and the
-      # version bundled with the node image is not guaranteed to be newer.
-      # Upgrade only when it is too old, so a newer bundled npm is left alone.
+      # Keep a tested npm baseline without downgrading a newer bundled version.
       - name: Ensure npm supports trusted publishing
+        shell: bash
         run: |
           set -euo pipefail
           REQUIRED=11.15.0
           CURRENT=$(npm --version)
           if [ "$(printf '%s\n%s\n' "$REQUIRED" "$CURRENT" | sort -V | head -1)" != "$REQUIRED" ]; then
-            echo "npm ${CURRENT} predates trusted publishing, upgrading"
-            npm install -g "npm@>=${REQUIRED}"
+            echo "npm ${CURRENT} is below the tested baseline ${REQUIRED}, upgrading"
+            npm install -g "npm@${REQUIRED}"
           fi
           npm --version
 
@@ -312,7 +312,7 @@ jobs:
             if [ "$already" = "$VERSION" ]; then
               echo "Skip: ${pkg_name}@${VERSION} already published"
             else
-              npm publish "$pkg_dir" --access public
+              npm publish "$pkg_dir" --access public --provenance
               echo "Published: ${pkg_name}@${VERSION}"
             fi
           done
@@ -333,6 +333,6 @@ jobs:
           if [ "$already" = "$VERSION" ]; then
             echo "Skip: ${pkg_name}@${VERSION} already published"
           else
-            npm publish --access public
+            npm publish --access public --provenance
             echo "Published: ${pkg_name}@${VERSION}"
           fi
