@@ -476,3 +476,24 @@ func TestPlanRequired(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultMainTaskForbidsSummaryComments(t *testing.T) {
+	// #1711: weak endpoints emit one summary comment per file, which inflates
+	// the comment count to the file count. The system prompt must state the
+	// prohibition explicitly, not only the positive "confirmed issue" rule.
+	const marker = `Summary, acknowledgment, or "no issues found" comments are not findings`
+	tpl, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+	if !strings.Contains(tpl.MainTask.Messages[0].Content, marker) {
+		t.Error("MainTask system prompt missing the no-summary-comment prohibition")
+	}
+	stpl, err := LoadScanDefault()
+	if err != nil {
+		t.Fatalf("LoadScanDefault: %v", err)
+	}
+	if !strings.Contains(stpl.MainTask.Messages[0].Content, marker) {
+		t.Error("Scan MainTask system prompt missing the no-summary-comment prohibition")
+	}
+}
