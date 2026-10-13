@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -156,6 +157,19 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
 	}
 
+	// An invalid PCRE (for example an unbalanced parenthesis) makes git exit
+	// 128 before searching. Retry as a literal so the model still gets results.
+	literalNote := ""
+	if err != nil && usePerlRegexp && outStr == "" && isPatternCompileError(err, errStr, searchText) {
+		noIndex := slices.Contains(cmdArgs, "--no-index")
+		retryArgs := p.buildGrepArgs(searchText, caseSensitive, false, noIndex, pathspec)
+		litOut, litErrStr, litErr := p.runGitGrep(ctx, retryArgs)
+		if litErr == nil || exitCodeOf(litErr) == 1 && litErrStr == "" {
+			outStr, errStr, err = litOut, litErrStr, litErr
+			literalNote = "Note: search_text is not a valid regular expression; searched as literal text instead.\n"
+		}
+	}
+
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return "", fmt.Errorf("git grep timed out; try narrowing file_patterns to a more specific path: %w", err)
@@ -170,7 +184,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 				exitCode = exitErr.ExitCode()
 			}
 			if errStr == "" && exitCode == 1 {
-				return "No matches found", nil
+				return literalNote + "No matches found", nil
 			}
 			trimmedErr := trimGitUsage(errStr, exitCode)
 			if trimmedErr == "" {
@@ -233,6 +247,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	var sb strings.Builder
+	sb.WriteString(literalNote)
 	if truncated {
 		sb.WriteString(fmt.Sprintf("Note: Showing the first %d matches across %d matching files. Some files are partially shown or omitted entirely. Narrow file_patterns to see the rest.\n", gitGrepMaxCount, len(matchedFiles)))
 	}
@@ -251,6 +266,20 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	return sb.String(), nil
+}
+
+func exitCodeOf(err error) int {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
+}
+
+// isPatternCompileError reports whether git failed because it could not
+// compile the pattern; git names the offending pattern in that message.
+func isPatternCompileError(err error, stderr, searchText string) bool {
+	return exitCodeOf(err) == 128 && strings.Contains(stderr, "'"+searchText+"': ")
 }
 
 func trimGitUsage(stderr string, exitCode int) string {
