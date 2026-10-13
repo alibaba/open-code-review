@@ -60,10 +60,22 @@ func setupRecordingTelemetry(t *testing.T) *tracetest.SpanRecorder {
 	t.Setenv("OCR_ENABLE_TELEMETRY", "1")
 	telemetry.Init(context.Background())
 	recorder := tracetest.NewSpanRecorder()
-	prev := otel.GetTracerProvider()
+	prevTP := otel.GetTracerProvider()
+	prevMP := otel.GetMeterProvider()
+	prevProp := otel.GetTextMapPropagator()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
 	otel.SetTracerProvider(tp)
-	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+	// Full global-state restore (#1713 review): shutting down the providers
+	// Init registered flushes and releases exporter resources, and every
+	// global Init replaced goes back to its pre-test value. Shutdown re-arms
+	// Init, so a later test in the same process initializes fresh providers
+	// instead of inheriting a no-op.
+	t.Cleanup(func() {
+		_ = telemetry.Shutdown(context.Background())
+		otel.SetTracerProvider(prevTP)
+		otel.SetMeterProvider(prevMP)
+		otel.SetTextMapPropagator(prevProp)
+	})
 	return recorder
 }
 
@@ -108,12 +120,18 @@ func TestRunPipelineSpansDoNotParentToDiffParse(t *testing.T) {
 	})
 	a.currentDate = "2026-07-26 12:00"
 
-	if _, err := a.Run(context.Background()); err != nil {
+	// The review command wraps the agent in a review.run root span; mirror
+	// that here so the expected hierarchy can be asserted (#1713 review).
+	runCtx, runSpan := telemetry.StartSpan(context.Background(), "review.run")
+	if _, err := a.Run(runCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
+	runSpan.End()
 
 	var diffParseID trace.SpanID
 	haveParse := false
+	var runSpanID trace.SpanID
+	haveRun := false
 	var pipeline []sdktrace.ReadOnlySpan
 	for _, span := range recorder.Ended() {
 		name := span.Name()
@@ -121,6 +139,9 @@ func TestRunPipelineSpansDoNotParentToDiffParse(t *testing.T) {
 		case name == "diff.parse":
 			diffParseID = span.SpanContext().SpanID()
 			haveParse = true
+		case name == "review.run":
+			runSpanID = span.SpanContext().SpanID()
+			haveRun = true
 		case strings.HasPrefix(name, "subtask.execute.group."),
 			name == "main.loop",
 			name == "review_filter.execute",
@@ -131,13 +152,31 @@ func TestRunPipelineSpansDoNotParentToDiffParse(t *testing.T) {
 	if !haveParse {
 		t.Fatal("expected a diff.parse span to be exported")
 	}
+	if !haveRun {
+		t.Fatal("expected a review.run span to be exported")
+	}
 	if len(pipeline) == 0 {
 		t.Fatal("expected review pipeline spans (subtask.execute.group.*, main.loop, ...) to be exported")
+	}
+	// The group subtasks parent directly to the review.run root; main.loop and
+	// review_filter.execute run inside their group's subtask span. Both shapes
+	// must stay rooted in review.run (transitively), never in the ended
+	// diff.parse span.
+	rooted := map[string]bool{runSpanID.String(): true}
+	for _, span := range recorder.Ended() {
+		if strings.HasPrefix(span.Name(), "subtask.execute.group.") &&
+			span.Parent().SpanID() == runSpanID {
+			rooted[span.SpanContext().SpanID().String()] = true
+		}
 	}
 	for _, span := range pipeline {
 		if span.Parent().SpanID() == diffParseID {
 			t.Errorf("%s parents to the ended diff.parse span (parent=%s); the review pipeline must not inherit the parse span's context",
 				span.Name(), span.Parent().SpanID())
+		}
+		if !rooted[span.Parent().SpanID().String()] {
+			t.Errorf("%s has parent %s; the review pipeline must stay rooted in the review.run span (rooted=%v)",
+				span.Name(), span.Parent().SpanID(), rooted)
 		}
 	}
 }
