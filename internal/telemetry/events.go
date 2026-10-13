@@ -130,6 +130,10 @@ func PrintToolCallError(toolName string, err error) {
 func summarizeArgs(args map[string]any) string {
 	parts := make([]string, 0, len(args))
 	for k, v := range args {
+		if isSensitiveArgKey(k) {
+			parts = append(parts, fmt.Sprintf("%s=<redacted>", k))
+			continue
+		}
 		s := fmt.Sprint(v)
 		switch k {
 		case "path":
@@ -146,4 +150,20 @@ func summarizeArgs(args map[string]any) string {
 		return ""
 	}
 	return strings.Join(parts, " ")
+}
+
+func isSensitiveArgKey(key string) bool {
+	normalized := strings.ToLower(strings.NewReplacer("_", "", "-", "", ".", "").Replace(key))
+	if normalized == "key" || normalized == "env" || normalized == "headers" {
+		return true
+	}
+	for _, marker := range []string{
+		"token", "secret", "password", "passwd", "authorization", "cookie",
+		"apikey", "privatekey", "credential", "clientsecret",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }

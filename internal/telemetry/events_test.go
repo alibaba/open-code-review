@@ -266,6 +266,9 @@ func TestSummarizeArgs(t *testing.T) {
 		{"query key returns quoted", map[string]any{"query": "world"}, `"world"`},
 		{"pattern key returns quoted", map[string]any{"pattern": "*.go"}, `"*.go"`},
 		{"generic short value", map[string]any{"foo": "bar"}, "foo=bar"},
+		{"token is redacted", map[string]any{"access_token": "top-secret"}, "access_token=<redacted>"},
+		{"authorization is redacted", map[string]any{"Authorization": "Bearer secret"}, "Authorization=<redacted>"},
+		{"ordinary key suffix is visible", map[string]any{"monkey": "banana"}, "monkey=banana"},
 		{"long value skipped", map[string]any{"data": string(make([]byte, 60))}, ""},
 	}
 	for _, tc := range tests {

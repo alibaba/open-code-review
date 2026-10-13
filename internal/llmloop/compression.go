@@ -230,7 +230,8 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 		return msgs, nil
 	}
 
-	contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
+	contextXML := buildMessageXML(session.SanitizedMessages(
+		msgs[part.frozenEnd:part.compressEnd], r.sessionToolCallSanitizer(r.deps.MainToolDefs)))
 
 	compressionMsgs := make([]llm.Message, 0, len(r.deps.Template.MemoryCompressionTask.Messages))
 	for _, m := range r.deps.Template.MemoryCompressionTask.Messages {
@@ -245,7 +246,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 	// killed mid-request now leaves an llm_request with no response, which
 	// resume ignores (applyResumeLine has no case for it).
 	fs := r.deps.Session.GetOrCreateFileSession(taskKey)
-	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, compressionMsgs)
+	rec := fs.AppendTaskRecordSanitized(session.MemoryCompressionTask, compressionMsgs, r.sessionToolCallSanitizer(r.deps.MainToolDefs))
 
 	ctx = llm.ContextWithSessionKey(ctx,
 		llm.SessionTaskKey(r.deps.Session.SessionID, string(session.MemoryCompressionTask), taskKey))

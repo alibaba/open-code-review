@@ -130,10 +130,12 @@ type ToolFailureDetail struct {
 	// field reaches --format json as file_path, so a consumer must not assume
 	// it parses as a single path.
 	FilePath string `json:"file_path,omitempty"`
-	// Arguments is the raw tool-call argument string returned by the LLM.
+	// Arguments is redacted for sensitive providers, raw for ordinary tools.
 	Arguments string `json:"arguments"`
 	Error     string `json:"error"`
 }
+
+const redactedToolArguments = `{"redacted":true}`
 
 // NewRunner returns a Runner bound to the given dependencies.
 func NewRunner(deps Deps) *Runner {
@@ -412,7 +414,7 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		toolReqCount--
 
 		fs := r.deps.Session.GetOrCreateFileSession(taskKey)
-		rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
+		rec := fs.AppendTaskRecordSanitized(session.MainTask, messages, r.sessionToolCallSanitizer(r.deps.MainToolDefs))
 		startTime := time.Now()
 
 		// Scoped to this round: ctx itself must stay identity-free so each
@@ -435,7 +437,7 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 			telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
 			return false, StopNone, fmt.Errorf("LLM completion error: %w", err)
 		}
-		rec.SetResponse(resp, duration)
+		rec.SetResponseSanitized(resp, duration, r.sessionToolCallSanitizer(r.deps.MainToolDefs))
 		totalTokens := int64(0)
 		if resp.Usage != nil {
 			totalTokens = resp.Usage.TotalTokens
@@ -560,7 +562,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	}
 
 	fs := r.deps.Session.GetOrCreateFileSession(taskKey)
-	rec := fs.AppendTaskRecord(session.MainTask, messages)
+	rec := fs.AppendTaskRecordSanitized(session.MainTask, messages, r.sessionToolCallSanitizer(r.deps.MainToolDefs))
 	startTime := time.Now()
 	reqCtx := r.requestCtx(ctx, taskKey, session.MainTask, rec.RequestNo)
 
@@ -582,7 +584,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 		return
 	}
 
-	rec.SetResponse(resp, duration)
+	rec.SetResponseSanitized(resp, duration, r.sessionToolCallSanitizer(graceDefs))
 	totalTokens := int64(0)
 	if resp.Usage != nil {
 		totalTokens = resp.Usage.TotalTokens
@@ -601,9 +603,48 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	}
 
 	thinking := resp.ReasoningContent()
+	allowed := toolDefinitionNameSet(graceDefs)
 	for _, call := range calls {
+		if _, ok := allowed[call.Function.Name]; !ok {
+			continue
+		}
 		r.executeToolCall(ctx, taskKey, call, rec, thinking)
 	}
+}
+
+// sessionToolCallSanitizer redacts arguments for sensitive providers and for
+// tools that were not advertised in the request which produced the response.
+// This happens before SetResponse writes either memory or JSONL, while the
+// original response remains available for authorized execution.
+func (r *Runner) sessionToolCallSanitizer(defs []llm.ToolDef) session.ToolCallArgumentSanitizer {
+	allowed := toolDefinitionNameSet(defs)
+	return func(name, arguments string) string {
+		if _, ok := allowed[name]; !ok {
+			return redactedToolArguments
+		}
+		if r == nil || r.deps.Tools == nil {
+			return arguments
+		}
+		provider, ok := r.deps.Tools.Get(name)
+		if !ok {
+			return arguments
+		}
+		sensitive, ok := provider.(tool.SensitiveProvider)
+		if ok && sensitive.SensitiveToolCall() {
+			return redactedToolArguments
+		}
+		return arguments
+	}
+}
+
+func toolDefinitionNameSet(defs []llm.ToolDef) map[string]struct{} {
+	allowed := make(map[string]struct{}, len(defs))
+	for _, definition := range defs {
+		if definition.Function.Name != "" {
+			allowed[definition.Function.Name] = struct{}{}
+		}
+	}
+	return allowed
 }
 
 // graceRoundToolDefs returns the subset of tool definitions containing only
@@ -660,14 +701,22 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 
 	toolCallNumber := r.recordToolCall(toolName)
 	callStarted := time.Now()
+	loggedArguments := call.Function.Arguments
+	sensitive, isSensitive := p.(tool.SensitiveProvider)
+	if isSensitive && sensitive.SensitiveToolCall() {
+		loggedArguments = redactedToolArguments
+	}
 
 	args, err := parseToolArgs(call.Function.Arguments)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error parsing tool arguments for %s: %v", toolName, err)
+		if loggedArguments == redactedToolArguments {
+			errMsg = "Error parsing sensitive tool arguments"
+		}
 		telemetry.PrintToolCallStarted(toolName, nil)
 		telemetry.PrintToolCallError(toolName, fmt.Errorf("%s", errMsg))
 		r.recordToolFailure(toolCallNumber, toolName, taskKey, errMsg,
-			rec, call.Function.Arguments, time.Since(callStarted))
+			rec, loggedArguments, time.Since(callStarted))
 		return r.toolFailureResult(taskKey, toolName, errMsg)
 	}
 
@@ -803,7 +852,11 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 	}
 
 	// Synchronous path for all other tools
-	telemetry.PrintToolCallStarted(toolName, args)
+	logArgs := args
+	if loggedArguments == redactedToolArguments {
+		logArgs = nil
+	}
+	telemetry.PrintToolCallStarted(toolName, logArgs)
 	_, toolSpan := telemetry.StartToolSpan(ctx, toolName)
 	result, err := p.Execute(ctx, args)
 	dur := time.Since(startTime)
@@ -814,13 +867,13 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 
 	if err != nil {
 		r.recordToolFailure(toolCallNumber, toolName, taskKey, err.Error(),
-			rec, call.Function.Arguments, dur)
+			rec, loggedArguments, dur)
 		telemetry.PrintToolCallError(toolName, err)
 		return r.toolFailureResult(taskKey, toolName, fmt.Sprintf("Error executing tool %s: %v", toolName, err))
 	}
 	telemetry.PrintToolCallFinished(toolName, dur)
 	if rec != nil {
-		rec.AddToolResult(toolName, call.Function.Arguments, result)
+		rec.AddToolResult(toolName, loggedArguments, result)
 	}
 	r.resetToolFailureStreak(taskKey, toolName)
 	return tool.Of(result)
