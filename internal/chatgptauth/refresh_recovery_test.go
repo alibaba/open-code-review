@@ -249,3 +249,82 @@ func TestPendingRefreshRecoversAfterIDAndAccessExpiry(t *testing.T) {
 		t.Fatal("verified replacement could not refresh again", err)
 	}
 }
+
+func TestCredentialsRefreshWindow(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		t.Run(map[bool]string{false: "verified", true: "pending"}[pending], func(t *testing.T) {
+			for _, tc := range []struct {
+				name              string
+				remaining         time.Duration
+				earliest          time.Duration
+				refreshCalls      int32
+				refreshedLifetime int
+			}{
+				{name: "outside_window", remaining: 10 * time.Minute},
+				{name: "two_minutes", remaining: 2 * time.Minute, refreshCalls: 1},
+				{name: "seconds_remaining", remaining: 15 * time.Second, refreshCalls: 1},
+				{name: "before_earliest", remaining: 2 * time.Minute, earliest: time.Minute},
+				{name: "after_earliest", remaining: 2 * time.Minute, earliest: -time.Minute, refreshCalls: 1},
+				{name: "short_lived_replacement", remaining: 2 * time.Minute, refreshCalls: 1, refreshedLifetime: 120},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					f := fixture(t)
+					s := testStore(t)
+					a := testAuth()
+					now := time.Now()
+					expiry := now.Add(tc.remaining)
+					a.ExpiresAt = expiry
+					if tc.earliest != 0 {
+						a.EarliestRefreshAt = now.Add(tc.earliest).Truncate(time.Second)
+					}
+					wantAccess, wantRefresh := a.AccessToken, a.RefreshToken
+					if pending {
+						received := now.Add(-10 * time.Minute)
+						f.claims["iat"] = received.Unix()
+						response := tokenResponse{Access: "access-pending", Refresh: "refresh-pending", ID: f.jwt(), Type: "Bearer", Expires: int64(expiry.Sub(received) / time.Second)}
+						if tc.earliest != 0 {
+							response.Earliest, _ = json.Marshal(a.EarliestRefreshAt.Unix())
+						}
+						a.PendingRefresh = &pendingRefresh{Response: response, ReceivedAt: received}
+						a.ExpiresAt = now.Add(-time.Minute)
+						wantAccess, wantRefresh = response.Access, response.Refresh
+					}
+					saveTest(t, s, a)
+					f.token = func(r *http.Request) any {
+						if r.Form.Get("refresh_token") != wantRefresh {
+							t.Error("refresh did not use the latest verified token")
+						}
+						stored, err := s.Selected("")
+						if err != nil || stored.PendingRefresh != nil || stored.AccessToken != wantAccess || !stored.ExpiresAt.Equal(expiry) {
+							t.Error("credentials were not persisted before refreshing", err)
+						}
+						tokens := f.tokens()
+						if tc.refreshedLifetime != 0 {
+							tokens["expires_in"] = tc.refreshedLifetime
+						}
+						return tokens
+					}
+					got, err := f.client.Credentials(context.Background(), s, "")
+					if err != nil || got == nil {
+						t.Fatal("credentials unavailable", err)
+					}
+					if calls := f.calls.Load(); calls != tc.refreshCalls {
+						t.Fatalf("refresh calls = %d, want %d", calls, tc.refreshCalls)
+					}
+					if tc.refreshCalls > 0 {
+						wantAccess, wantRefresh = "access-new", "refresh-new"
+					} else if !got.ExpiresAt.Equal(expiry) || !got.EarliestRefreshAt.Equal(a.EarliestRefreshAt) {
+						t.Fatal("recovery changed the token refresh times")
+					}
+					if got.AccessToken != wantAccess || got.RefreshToken != wantRefresh || got.PendingRefresh != nil {
+						t.Fatal("unexpected credentials returned")
+					}
+					stored, err := s.Selected("")
+					if err != nil || stored.AccessToken != got.AccessToken || stored.RefreshToken != got.RefreshToken || stored.PendingRefresh != nil {
+						t.Fatal("returned credentials were not persisted", err)
+					}
+				})
+			}
+		})
+	}
+}

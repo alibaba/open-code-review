@@ -478,11 +478,18 @@ func terminalRefresh(err error) bool {
 	return false
 }
 
-var errAccessExpiredDuringVerification = errors.New("ChatGPT access token expired during verification; retry the request to refresh it")
+var errAccessNeedsRefresh = errors.New("ChatGPT access token needs refresh after verification; retry the request")
+
+func (a *Auth) refreshDue(now time.Time) bool {
+	if !now.Before(a.ExpiresAt) {
+		return true
+	}
+	return !a.ExpiresAt.After(now.Add(5*time.Minute)) && !now.Before(a.EarliestRefreshAt)
+}
 
 func (c *Client) Credentials(ctx context.Context, s Store, account string) (*Auth, error) {
 	auth, err := c.credentials(ctx, s, account)
-	if errors.Is(err, errAccessExpiredDuringVerification) {
+	if errors.Is(err, errAccessNeedsRefresh) {
 		return c.credentials(ctx, s, account)
 	}
 	return auth, err
@@ -512,7 +519,8 @@ func (c *Client) credentials(ctx context.Context, s Store, account string) (*Aut
 			return fmt.Errorf("ChatGPT plan usage is disabled; run ocr auth login --provider chatgpt --enable-plan --account %s or select an API-key provider", auth.ClientID)
 		}
 		now := time.Now()
-		if auth.PendingRefresh == nil && (auth.ExpiresAt.After(now.Add(5*time.Minute)) || (!auth.EarliestRefreshAt.IsZero() && now.Before(auth.EarliestRefreshAt) && now.Before(auth.ExpiresAt))) {
+		recoveringPending := auth.PendingRefresh != nil
+		if !recoveringPending && !auth.refreshDue(now) {
 			copy := *auth
 			result = &copy
 			return nil
@@ -586,8 +594,9 @@ func (c *Client) credentials(ctx context.Context, s Store, account string) (*Aut
 		if !rotated.PlanEnabled() {
 			return fmt.Errorf("refreshed ChatGPT grant does not permit plan usage; run ocr auth login --provider chatgpt --enable-plan --account %s", auth.ClientID)
 		}
-		if !rotated.ExpiresAt.After(time.Now()) {
-			return errAccessExpiredDuringVerification
+		now = time.Now()
+		if !rotated.ExpiresAt.After(now) || (recoveringPending && rotated.refreshDue(now)) {
+			return errAccessNeedsRefresh
 		}
 		result = &rotated
 		return nil
