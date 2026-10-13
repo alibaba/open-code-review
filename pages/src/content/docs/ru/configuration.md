@@ -41,14 +41,16 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ### Встроенные провайдеры
 
 Перечисленные ниже провайдеры поставляются вместе с OCR; для них заранее
-заданы базовый URL и протокол, поэтому после выбора достаточно указать
-API-ключ. Если `providers.<name>.api_key` не задан, OCR использует
-соответствующую переменную окружения.
+заданы базовый URL и протокол. Большинству нужен API-ключ. Если
+`providers.<name>.api_key` не задан, OCR использует соответствующую переменную
+окружения. Провайдер `chatgpt` вместо этого использует учётные данные ChatGPT,
+созданные командой `ocr auth login`.
 
 | Имя | Протокол | Базовый URL | Переменная окружения для API-ключа |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
+| `chatgpt` | openai-responses | `https://api.openai.com/v1` | не применяется (Sign in with ChatGPT) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -78,6 +80,22 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 проверит модель при отправке запроса. Для пользовательских провайдеров действуют
 прежние правила проверки `--model`.
 
+## Предварительная версия входа через ChatGPT
+
+В предварительной версии добавлен встроенный провайдер `chatgpt` для публичного API Responses. Переменной окружения API-ключа нет. Условия входа, согласия и использования описаны в [руководстве по предварительной версии ChatGPT](../chatgpt-preview/).
+
+Настройте провайдер и необязательные поля запроса с помощью `ocr config set`. Выберите модель через `ocr llm models` или задайте ее идентификатор явно:
+
+```bash
+ocr auth login --provider chatgpt
+ocr config set provider chatgpt
+ocr config set providers.chatgpt.model <model-slug>
+ocr config set providers.chatgpt.extra_body '{"reasoning":{"effort":"low"}}'
+ocr llm test
+```
+
+Явно заданная модель отправляется, даже если ее нет в списке аккаунта. `extra_body` принимает только `reasoning`, `text` и `prompt_cache_key`; переопределение URL, протокола и учетных данных отклоняется.
+
 ### Переопределение Base URL встроенного провайдера
 
 У каждого встроенного провайдера есть предустановленный Base URL
@@ -85,6 +103,8 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 точку — например, на собственный шлюз LiteLLM, который редко находится по
 предустановленному адресу `http://localhost:4000/v1` — задайте
 `providers.<name>.url`:
+
+Предварительная версия `chatgpt` является исключением: публичный адрес фиксирован, переопределение URL отклоняется.
 
 ```bash
 ocr config set provider                   litellm
@@ -100,7 +120,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock
 
-`bedrock` использует тот же Messages API, что и `anthropic`, но запросы
+По умолчанию `bedrock` использует протокол `anthropic-bedrock` и тот же Messages API, что и `anthropic`, но запросы
 подписываются по SigV4 из стандартной цепочки учётных данных AWS вместо
 передачи API-ключа, а хост определяется регионом. Задавать `api_key` не нужно,
 и он не принимается как замена подписи:
@@ -111,6 +131,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+Если для подключения к OpenAI-совместимому шлюзу вы задаете `providers.bedrock.protocol` значение `openai`, укажите адрес шлюза в `providers.bedrock.url`, а его API-ключ — через `providers.bedrock.api_key` или `providers.bedrock.api_key_cmd`. При выборе другой модели в `ocr config provider` сохраненный API-ключ остается на месте.
 
 | Поле | Значение |
 |---|---|
@@ -129,8 +151,8 @@ ocr config set providers.bedrock.aws_profile example-profile
 `aws bedrock list-inference-profiles --region <region>`, чтобы увидеть, что
 доступно в аккаунте; суффикс версии вроде `-v1:0` недопустим для новых семейств.
 
-`ocr llm test` показывает регион и профиль вместо URL, потому что у bedrock нет
-настроенного URL — хост определяется регионом:
+При использовании протокола по умолчанию `anthropic-bedrock` команда `ocr llm test`
+показывает регион и профиль вместо URL. Хост определяется регионом:
 
 ```
 Source: provider:bedrock

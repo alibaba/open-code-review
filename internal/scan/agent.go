@@ -565,7 +565,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	batches := groupBatches(a.items, strategy, a.args.Template.BatchSize)
 	fmt.Fprintf(stdout.Writer(), "[ocr] scan dispatch: %d batch(es) by %s strategy\n", len(batches), strategy)
 
-	var dispatched int64
+	var dispatched, reused int64
 	for bi, batch := range batches {
 		if err := ctx.Err(); err != nil {
 			return a.args.CommentCollector.Comments(), err
@@ -576,6 +576,11 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 
 		n, budgetHit, checkpoints, err := a.dispatchBatch(ctx, bi, batch)
 		dispatched += n
+		for _, checkpoint := range checkpoints {
+			if checkpoint.reused {
+				reused++
+			}
+		}
 		if err != nil {
 			// ctx cancelled mid-batch: stop scheduling further batches but
 			// still return whatever we've collected so far.
@@ -604,8 +609,8 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	failed := atomic.LoadInt64(&a.subtaskFailed)
-	if failed > 0 && failed == dispatched {
-		return nil, fmt.Errorf("all %d file scan(s) failed — check your LLM configuration and API key", dispatched)
+	if failed > 0 && failed == dispatched && reused == 0 {
+		return a.args.CommentCollector.Comments(), fmt.Errorf("all %d file scan(s) failed — check your LLM configuration and API key", dispatched)
 	}
 	return a.args.CommentCollector.Comments(), nil
 }
@@ -819,7 +824,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 			telemetry.AnyToAttr("file.path", it.Path),
 			telemetry.AnyToAttr("tokens", tokenCount),
 			telemetry.AnyToAttr("max_tokens", maxAllowed))
-		return false, "", nil
+		return false, msg, nil
 	}
 
 	completed, stop, err := a.runner.RunMainTask(ctx, messages, it.Path)

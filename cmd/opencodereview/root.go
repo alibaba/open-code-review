@@ -59,6 +59,7 @@ func init() {
 	rootCmd.AddCommand(delegateCmd)
 	rootCmd.AddCommand(sessionCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(authCmd)
 	rootCmd.AddCommand(llmCmd)
 	rootCmd.AddCommand(rulesCmd)
 	rootCmd.AddCommand(viewerCmd)

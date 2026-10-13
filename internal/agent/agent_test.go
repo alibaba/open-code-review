@@ -905,7 +905,9 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 		{NewPath: "main.go", OldPath: "main.go", Insertions: 4, Deletions: 2},
 		{NewPath: "moved_new.go", OldPath: "moved_old.go", IsRenamed: true},
 		{NewPath: "helper.go", OldPath: "helper.go", IsNew: true, Insertions: 12},
-		{NewPath: "removed.go", OldPath: "removed.go", IsDeleted: true, Deletions: 30},
+		// A deletion as ParseDiffText produces it: NewPath is the sentinel and
+		// the name is in OldPath.
+		{NewPath: "/dev/null", OldPath: "removed.go", IsDeleted: true, Deletions: 30},
 		{NewPath: "renamed.go", OldPath: "old_name.go", IsRenamed: true, Insertions: 5, Deletions: 5},
 		{NewPath: "bin.dat", OldPath: "bin.dat", IsBinary: true},
 	}
@@ -952,6 +954,9 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 	}
 	if strings.Contains(got, "bin.dat") {
 		t.Error("binary files should be skipped")
+	}
+	if strings.Contains(got, "/dev/null") {
+		t.Errorf("a deletion must be listed under its own path, not the /dev/null sentinel; got:\n%s", got)
 	}
 
 	// The separator is emitted before each entry, so a skipped final diff cannot

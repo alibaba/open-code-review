@@ -36,13 +36,15 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 ### 内置 provider
 
-下列 provider 随 OCR 发布，已预置 Base URL 与协议，选中后只需填 API key。
-若 `providers.<name>.api_key` 未设置，会自动回退到对应的环境变量。
+下列 provider 随 OCR 发布，并已预置 Base URL 与协议。多数 provider 需要 API key；
+若 `providers.<name>.api_key` 未设置，会自动回退到对应的环境变量。`chatgpt`
+改用 `ocr auth login` 创建的 ChatGPT 凭证。
 
 | 名称 | 协议 | Base URL | API key 环境变量 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
+| `chatgpt` | openai-responses | `https://api.openai.com/v1` | 不适用（Sign in with ChatGPT） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -71,11 +73,29 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 stderr 输出警告；发送请求时由 provider 验证模型。自定义 provider 仍遵循原有的
 `--model` 校验规则。
 
+## ChatGPT 登录预览版
+
+此预览版新增通过公开 Responses API 使用的内置 `chatgpt` provider，没有 API key 环境变量。 请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)了解登录、同意和使用限制。
+
+使用 `ocr config set` 配置 provider 和可选请求字段。可从 `ocr llm models` 选择模型，也可显式设置模型 slug：
+
+```bash
+ocr auth login --provider chatgpt
+ocr config set provider chatgpt
+ocr config set providers.chatgpt.model <model-slug>
+ocr config set providers.chatgpt.extra_body '{"reasoning":{"effort":"low"}}'
+ocr llm test
+```
+
+即使账户模型目录没有列出，显式模型仍会传递。`extra_body` 仅接受 `reasoning`、`text` 和 `prompt_cache_key`；端点、协议和凭证覆盖会被拒绝。
+
 ### 覆盖内置 provider 的 Base URL
 
 每个内置 provider 都有一个预设 Base URL（见上表）。要将内置 provider
 指向不同的端点——例如自建的 LiteLLM 网关，其地址很少是预设默认值
 `http://localhost:4000/v1`——设置 `providers.<name>.url`：
+
+`chatgpt` 预览版例外：其公开端点固定，不接受 URL 覆盖。
 
 ```bash
 ocr config set provider                   litellm
@@ -89,7 +109,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock
 
-`bedrock` 使用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
+`bedrock` 默认使用 `anthropic-bedrock` 协议，调用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
 用标准 AWS 凭证链做 SigV4 签名，主机由区域决定。没有 `api_key` 需要设置，也不
 接受用它替代签名：
 
@@ -99,6 +119,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+如果将 `providers.bedrock.protocol` 设为 `openai` 来连接 OpenAI 兼容网关，请在 `providers.bedrock.url` 中配置网关地址，并通过 `providers.bedrock.api_key` 或 `providers.bedrock.api_key_cmd` 提供网关的 API key。在 `ocr config provider` 中切换模型会保留已保存的 API key。
 
 | 字段 | 含义 |
 |---|---|
@@ -114,7 +136,7 @@ ocr config set providers.bedrock.aws_profile example-profile
 会被接受。运行 `aws bedrock list-inference-profiles --region <region>` 可以查看
 账号提供了哪些；注意新系列不接受 `-v1:0` 这类版本后缀。
 
-bedrock 没有配置的 URL——主机由区域决定——所以 `ocr llm test` 显示区域和 profile
+使用默认的 `anthropic-bedrock` 协议时，主机由区域决定，`ocr llm test` 显示区域和 profile
 而不是 URL：
 
 ```

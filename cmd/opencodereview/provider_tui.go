@@ -983,6 +983,15 @@ func (m providerTUIModel) apiKeyCmdForStep() string {
 	return ""
 }
 
+func (m providerTUIModel) officialProviderUsesExternalCredentials() bool {
+	p := m.currentProvider()
+	var entry ProviderEntry
+	if m.existingCfg != nil {
+		entry = m.existingCfg.Providers[p.Name]
+	}
+	return providerUsesExternalCredentials(p, entry)
+}
+
 func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	if m.apiKeyOriginal != "" {
 		return true, ""
@@ -998,9 +1007,9 @@ func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	}
 	if m.activeTab == tabOfficial {
 		p := m.currentProvider()
-		if p.AmbientAuth {
+		if m.officialProviderUsesExternalCredentials() {
 			// Reachable when an existing config is edited: an empty key is the
-			// correct state for a provider that signs from the AWS chain.
+			// correct state when credentials are supplied outside the config.
 			return true, ""
 		}
 		if officialProviderEnvKeySet(p) {
@@ -1869,10 +1878,17 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.formError = err.Error()
 			return m, nil
 		}
-		if m.activeTab == tabOfficial && m.currentProvider().AmbientAuth {
-			// An ambient-auth provider has no key to collect, so the model step
-			// is the last one. Showing an API-key prompt that must be left blank
-			// would read as a step the user failed to complete.
+		if m.activeTab == tabOfficial && m.officialProviderUsesExternalCredentials() {
+			// This provider has no key to collect, so the model step is the last
+			// one. Showing an API-key prompt that must be left blank would read as
+			// a step the user failed to complete.
+			//
+			// The api-key state still carries whatever the previously active
+			// provider seeded (or the user typed before backing out), and
+			// result() would report it as this provider's key — drop it.
+			m.apiKeyOriginal = ""
+			m.apiKeyMasked = false
+			m.apiKeyInput.SetValue("")
 			m.formError = ""
 			m.confirmed = true
 			return m, tea.Quit

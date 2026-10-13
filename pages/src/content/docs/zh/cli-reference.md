@@ -558,9 +558,30 @@ ocr config model                           Interactive model selection
 
 完整的 key 参考、schema 与示例见[配置](../configuration/)。
 
+
+
+## `ocr auth`
+
+`ocr auth login`、`status` 和 `logout` 默认使用 Sign in with ChatGPT。仍支持显式指定 `--provider chatgpt`。
+
+`chatgpt` provider 使用公开的 Sign in with ChatGPT 流程。请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)。
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` 支持 `--provider chatgpt` 和 `--account <client-id>`；`login` 还支持 `--no-browser`、`--new-account` 和 `--enable-plan`。ChatGPT 不支持 `--device`。`--enable-plan` 会针对已保存的注册请求同意，不能与 `--new-account` 同时使用。模型目录按账户显示；即使目录中没有，显式模型也会被接受。此 provider 的 `extra_body` 仅支持 `reasoning`、`text` 和 `prompt_cache_key`。账户管理、权限和限制请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)。
+
 ## `ocr llm`
 
-LLM 工具命令。两个子命令：
+LLM 工具命令。三个子命令：
 
 ```text
 ocr llm <sub-command>
@@ -568,6 +589,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`
