@@ -164,7 +164,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		noIndex := slices.Contains(cmdArgs, "--no-index")
 		retryArgs := p.buildGrepArgs(searchText, caseSensitive, false, noIndex, pathspec)
 		litOut, litErrStr, litErr := p.runGitGrep(ctx, retryArgs)
-		if litErr == nil || exitCodeOf(litErr) == 1 && litErrStr == "" {
+		if litErr == nil || (exitCodeOf(litErr) == 1 && litErrStr == "") {
 			outStr, errStr, err = litOut, litErrStr, litErr
 			literalNote = "Note: search_text is not a valid regular expression; searched as literal text instead.\n"
 		}
