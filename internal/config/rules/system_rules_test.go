@@ -92,6 +92,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"packages/library/composer.json", "Dependency Constraints and Resolution"},
 		{"config/app.yaml", "yaml-key"},
 		{"deploy/values.yml", "yaml-key"},
+		{"README.md", "technically verifiable defects"},
+		{"docs/architecture.MD", "local links"},
 		{"src/pages/index.astro", "client:*"},
 		{"src/components/app.tsx", "React"},
 		{"lib/utils.ts", "TypeScript"},
@@ -194,7 +196,6 @@ func TestResolve_FallbackToDefault(t *testing.T) {
 	}
 
 	paths := []string{
-		"readme.md",
 		"docs/architecture.txt",
 		"Makefile",
 	}
@@ -312,7 +313,7 @@ func TestNewResolver_ProjectFileMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewResolver should not fail when project rule is missing: %v", err)
 	}
-	got := resolver.Resolve("readme.md")
+	got := resolver.Resolve("readme.txt")
 	if got == "" {
 		t.Errorf("expected non-empty default rule")
 	}
@@ -422,7 +423,7 @@ func TestNewResolver_CustomRuleOverridesDefault(t *testing.T) {
 		t.Errorf("expected custom-go-rule, got %q", got)
 	}
 	// --rule not matched → falls through to system default
-	got = resolver.Resolve("readme.md")
+	got = resolver.Resolve("readme.txt")
 	if !strings.Contains(got, "Correctness") {
 		t.Errorf("expected system default rule, got %q", truncate(got, 80))
 	}
@@ -648,7 +649,7 @@ func TestNewResolver_CustomOverridesProject(t *testing.T) {
 		{"force-api/src/foo.java", "custom-java-rule"}, // --rule wins (highest priority)
 		{"other/src/bar.java", "custom-java-rule"},     // --rule wins
 		{"main.go", "project-go-rule"},                 // --rule misses → project wins
-		{"readme.md", "Correctness"},                   // all miss → system default
+		{"readme.txt", "Correctness"},                  // all miss → system default
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -877,7 +878,7 @@ func TestResolveDetail_SystemDefault(t *testing.T) {
 	}
 	dr := resolver.(DetailResolver)
 
-	detail := dr.ResolveDetail("readme.md")
+	detail := dr.ResolveDetail("readme.txt")
 	if detail.Source != "system" {
 		t.Errorf("expected source 'system', got %q", detail.Source)
 	}

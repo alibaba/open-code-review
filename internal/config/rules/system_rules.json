@@ -12,6 +12,7 @@
     ".github/workflows/**/*.{yaml,yml}": "github_workflows.md",
     ".github/**/*.{yaml,yml}": "github_config.md",
     "**/*.{yaml,yml}": "yaml.md",
+    "**/*.md": "markdown.md",
     "**/*.java": "java.md",
     "**/*.go": "go.md",
     "**/*.{ftl,ftlh,ftlx}": "freemarker.md",
