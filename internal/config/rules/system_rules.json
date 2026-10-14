@@ -25,7 +25,7 @@
     "**/*.{fs,fsi,fsx}": "fsharp.md",
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,cxx,hpp,hxx}": "cpp.md",
-    "**/*.c": "c.md",
+    "**/*.{c,h}": "c.md",
     "**/*.{py,pyi,ipynb}": "python.md",
     "**/*.{php,phtml}": "php.md",
     "**/*.proto": "protobuf.md",

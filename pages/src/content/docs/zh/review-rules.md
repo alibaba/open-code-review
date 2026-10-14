@@ -286,7 +286,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.rs`                           | `rust.md`                                                             |
 | `**/*.R`                            | `r.md`                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                              |
-| `**/*.c`                            | `c.md`                                                                |
+| `**/*.{c,h}`                        | `c.md`                                                                |
 | `**/*.{py,pyi,ipynb}`               | `python.md`——Python 源代码。                                          |
 | `**/*.{php,phtml}`                  | `php.md`——PHP 源代码和 PHP 模板。                                     |
 | `**/*.proto`                        | `protobuf.md`——Protocol Buffers 线协议兼容性。                        |

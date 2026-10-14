@@ -317,7 +317,7 @@ matching order:
 | `**/*.rs`                           | `rust.md`                                                                                             |
 | `**/*.R`                            | `r.md`                                                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                              |
-| `**/*.c`                            | `c.md`                                                                                                |
+| `**/*.{c,h}`                        | `c.md`                                                                                                |
 | `**/*.{py,pyi,ipynb}`               | `python.md` — Python source.                                                                          |
 | `**/*.{php,phtml}`                  | `php.md` — PHP source and PHP templates.                                                              |
 | `**/*.proto`                        | `protobuf.md` — Protocol Buffers wire compatibility.                                                  |

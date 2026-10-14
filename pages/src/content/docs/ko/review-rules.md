@@ -298,7 +298,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.rs`                           | `rust.md`                                                                        |
 | `**/*.R`                            | `r.md`                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                         |
-| `**/*.c`                            | `c.md`                                                                           |
+| `**/*.{c,h}`                        | `c.md`                                                                           |
 | `**/*.{py,pyi,ipynb}`               | `python.md` — Python 소스.                                                       |
 | `**/*.{php,phtml}`                  | `php.md` — PHP 소스와 PHP 템플릿.                                                |
 | `**/*.proto`                        | `protobuf.md` — Protocol Buffers 통신 호환성.                                    |

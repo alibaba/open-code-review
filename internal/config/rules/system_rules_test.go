@@ -106,6 +106,7 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/main/handler.cxx", "Smart Pointer"},
 		{"include/handler.hxx", "Smart Pointer"},
 		{"driver.c", "malloc"},
+		{"include/driver.h", "malloc"},
 		{"pages/Index.ets", "State Decorator"},
 		{"components/Button.ets", "State Decorator"},
 		{"entry/src/main/module.json5", "json-key"},

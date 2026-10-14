@@ -316,7 +316,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.rs`                           | `rust.md`                                                                                        |
 | `**/*.R`                            | `r.md`                                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                         |
-| `**/*.c`                            | `c.md`                                                                                           |
+| `**/*.{c,h}`                        | `c.md`                                                                                           |
 | `**/*.{py,pyi,ipynb}`               | `python.md` — исходный код Python.                                                               |
 | `**/*.{php,phtml}`                  | `php.md` — исходный код PHP и шаблоны PHP.                                                       |
 | `**/*.proto`                        | `protobuf.md` — совместимость Protocol Buffers на уровне wire.                                   |
