@@ -355,7 +355,7 @@ provider が必要です。Hg サポートの issue は[こちら](https://githu
 ### なぜバイナリは `opencodereview` なのに CLI は `ocr` なのか？
 
 release で配布される静的バイナリはプロジェクト名（`opencodereview`）を持ちます。NPM wrapper は
-使いやすさのため `ocr` としてインストールされます。ソースからビルドすると `dist/opencodereview` が
+使いやすさのため `ocr` としてインストールされます。ソースからビルドすると `dist/opencodereview`（Windows では `dist/opencodereview.exe`）が
 得られます——`$PATH` 上の `ocr` としてコピーしてください。
 
 ### アンインストールするには？

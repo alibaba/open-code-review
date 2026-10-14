@@ -111,7 +111,7 @@ func splitPaths(raw string) []string {
 	return out
 }
 
-func executeScan(opts scanOptions) (retErr error) {
+func executeScan(opts scanOptions) error {
 	return executeScanContext(context.Background(), opts)
 }
 
@@ -176,6 +176,7 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
+		Context:  ctx,
 	})
 	if err != nil {
 		return err

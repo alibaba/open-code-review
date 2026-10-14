@@ -102,6 +102,16 @@ class ConfigDraftTest {
     // ------------------------------------------------------------ providers.<name>.<field>
 
     @Test
+    fun `new generated presets keep configuration in the built-in provider bucket`() {
+        for (name in listOf("bedrock", "openai-responses", "xai", "gemini", "ollama-cloud")) {
+            val d = draft("{}", "provider" to name, "providers.$name.model" to "saved-model")
+            assertEquals(name, d.str("provider"))
+            assertEquals("saved-model", d.str("providers", name, "model"), name)
+            assertNull(d.obj("custom_providers"), name)
+        }
+    }
+
+    @Test
     fun `the providers prefix routes by name to built-in or custom containers`() {
         val preset = draft("{}", "providers.anthropic.api_key" to "sk-1")
         assertEquals("sk-1", preset.str("providers", "anthropic", "api_key"))
