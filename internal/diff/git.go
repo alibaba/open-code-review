@@ -276,7 +276,19 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 	if err != nil {
 		return DiffSet{}, err
 	}
-	return p.partitionDiffs(diffs), nil
+	if p.mode == ModeWorkspace {
+		// The working tree IS under review here, so its own ignore rules apply.
+		return p.partitionDiffs(diffs), nil
+	}
+	// History modes filter with the ignore rules the reviewed ref carries, not
+	// with whatever the local checkout happens to ignore: a range review answers
+	// "what did this ref change", so a rule that exists only locally has nothing
+	// to say about it.
+	patterns, err := p.loadGitignorePatternsAtRef(ctx, ref)
+	if err != nil {
+		return DiffSet{}, err
+	}
+	return p.partitionDiffsWithPatterns(diffs, patterns), nil
 }
 
 // loadGitignorePatterns reads and parses .gitignore patterns from the repo root.
@@ -285,8 +297,40 @@ func (p *Provider) loadGitignorePatterns() []string {
 	if err != nil {
 		return nil
 	}
+	return parseGitignorePatterns(string(data))
+}
+
+// loadGitignorePatternsAtRef reads and parses the .gitignore as it exists in
+// ref, rather than in the working tree.
+//
+// Range and commit modes review history, so the ignore rules that apply are the
+// ones the reviewed ref actually carries. Reading the working tree instead let a
+// local, uncommitted .gitignore — or one that exists on the checked-out branch
+// but not on the reviewed one — silently drop files out of the review while the
+// run still exited 0. A missing or unreadable .gitignore in ref yields nil,
+// which is the correct answer for a ref that simply has none.
+//
+// Fail-open is deliberate: over-reviewing beats silently dropping a file the
+// user asked about. A cancelled or timed-out run is not that trade — it is a
+// run that must stop, so ctx.Err() is propagated rather than swallowed.
+func (p *Provider) loadGitignorePatternsAtRef(ctx context.Context, ref string) ([]string, error) {
+	out, _, err := p.runGitSplit(ctx, "show", "--end-of-options", ref+":.gitignore")
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		// Not present in ref (or not readable): treat as "no ignore rules",
+		// which is what the reviewed history says.
+		return nil, nil
+	}
+	return parseGitignorePatterns(out), nil
+}
+
+// parseGitignorePatterns splits .gitignore file content into the pattern bodies
+// the matcher understands, dropping blank lines and comments.
+func parseGitignorePatterns(content string) []string {
 	var patterns []string
-	for line := range strings.SplitSeq(string(data), "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -433,7 +477,13 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 // partitionDiffs keeps diffs filtered by built-in directory rules available
 // for reporting while preserving the review input as the Included slice.
 func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
-	patterns := p.loadGitignorePatterns()
+	return p.partitionDiffsWithPatterns(diffs, p.loadGitignorePatterns())
+}
+
+// partitionDiffsWithPatterns is partitionDiffs with the ignore patterns supplied
+// by the caller, so a history-mode review can pass the ones its reviewed ref
+// carries instead of the working tree's.
+func (p *Provider) partitionDiffsWithPatterns(diffs []model.Diff, patterns []string) DiffSet {
 	result := DiffSet{
 		Included: make([]model.Diff, 0, len(diffs)),
 		Excluded: make([]model.Diff, 0),
