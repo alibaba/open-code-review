@@ -1,0 +1,16 @@
+{
+  "MAIN_TASK": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "Review only the function selected in the requirement background, using only the supplied source and review rules. Do not request other files or call context-acquisition tools. Report supported findings via code_comment, then call task_done."
+      },
+      {
+        "role": "user",
+        "content": "File: {{current_file_path}}\n\nSource:\n{{file_content}}\n\nSelected scope:\n{{requirement_background}}\n\nReview rules:\n{{system_rule}}\n\nPlanning guidance:\n{{plan_guidance}}\n\nReview only the selected function."
+      }
+    ]
+  },
+  "PLAN_TASK": null,
+  "NO_PLAN_GUIDANCE": "No pre-scan plan. Keep the selected review scope and use only the supplied evidence."
+}
