@@ -47,11 +47,8 @@ sealed class CommentAnchorResult {
     data class SidebarOnly(val reason: SidebarOnlyReason) : CommentAnchorResult()
 }
 
-/** Remove leading diff markers (`+`/`-`) and surrounding whitespace for lenient comparison of existingCode with file content. */
-internal fun normalizeLine(line: String): String {
-    val s = line.trim()
-    return if (s.startsWith("+") || s.startsWith("-")) s.substring(1).trim() else s
-}
+/** Remove surrounding whitespace for lenient comparison of existingCode with file content. */
+internal fun normalizeLine(line: String): String = line.trim()
 
 /** Split into lines and apply [normalizeLine]. Discard blank lines so changes in blank lines between revisions do not prevent a match. */
 internal fun splitAndNormalize(code: String): List<String> {
@@ -63,7 +60,33 @@ internal fun splitAndNormalize(code: String): List<String> {
     return result
 }
 
+internal fun splitAndNormalizeDiffSnippet(code: String): List<String> {
+    val result = mutableListOf<String>()
+    for (raw in code.split("\n")) {
+        var n = normalizeLine(raw)
+        if (n.startsWith("+") || n.startsWith("-")) n = normalizeLine(n.substring(1))
+        if (n.isNotEmpty()) result += n
+    }
+    return result
+}
+
 internal data class LineSpan(val start: Int, val end: Int)
+
+private fun findNormalizedLines(normalized: List<String>, lineNums: List<Int>, target: List<String>): LineSpan? {
+    if (target.isEmpty() || normalized.size < target.size) return null
+
+    for (i in 0..(normalized.size - target.size)) {
+        var matched = true
+        for (j in target.indices) {
+            if (normalized[i + j] != target[j]) {
+                matched = false
+                break
+            }
+        }
+        if (matched) return LineSpan(lineNums[i], lineNums[i + target.size - 1])
+    }
+    return null
+}
 
 /** Find [existingCode] in file content with a sliding window; return 1-based line numbers, or null when no match exists. */
 internal fun findLinesByExistingCode(content: String, existingCode: String): LineSpan? {
@@ -79,19 +102,12 @@ internal fun findLinesByExistingCode(content: String, existingCode: String): Lin
             lineNums += index + 1
         }
     }
-    if (normalized.size < target.size) return null
+    val literalMatch = findNormalizedLines(normalized, lineNums, target)
+    if (literalMatch != null) return literalMatch
 
-    for (i in 0..(normalized.size - target.size)) {
-        var matched = true
-        for (j in target.indices) {
-            if (normalized[i + j] != target[j]) {
-                matched = false
-                break
-            }
-        }
-        if (matched) return LineSpan(lineNums[i], lineNums[i + target.size - 1])
-    }
-    return null
+    val diffStyleTarget = splitAndNormalizeDiffSnippet(existingCode)
+    if (target == diffStyleTarget) return null
+    return findNormalizedLines(normalized, lineNums, diffStyleTarget)
 }
 
 internal data class ResolvedLines(val start: Int, val end: Int, val relocated: Boolean)
