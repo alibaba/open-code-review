@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -152,8 +151,10 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	// `ocr scan` supports plain directories, so retry in --no-index mode, which
 	// searches the working tree directly while still honoring .gitignore.
 	// Ref-based search needs a real repo, so it is not retried.
+	noIndex := false
 	if err != nil && p.FileReader.Ref == "" && isNotGitRepoError(err, errStr) {
-		cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, true, pathspec)
+		noIndex = true
+		cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, noIndex, pathspec)
 		outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
 	}
 
@@ -161,7 +162,6 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	// 128 before searching. Retry as a literal so the model still gets results.
 	literalNote := ""
 	if err != nil && usePerlRegexp && outStr == "" && isPatternCompileError(err, errStr, searchText) {
-		noIndex := slices.Contains(cmdArgs, "--no-index")
 		retryArgs := p.buildGrepArgs(searchText, caseSensitive, false, noIndex, pathspec)
 		litOut, litErrStr, litErr := p.runGitGrep(ctx, retryArgs)
 		if litErr == nil || (exitCodeOf(litErr) == 1 && litErrStr == "") {
