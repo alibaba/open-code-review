@@ -234,7 +234,6 @@ snapshots, and generated code:
 - `**/*Tests.swift`
 - `**/Tests/**/*.swift`
 - `**/tests/**/*.elm`
-- `**/vendor/**/*.{jsonnet,libsonnet}`
 - `**/test/**/*.zig`
 - `**/*_test.zig`
 - `**/kitex_gen/**/*.go`
@@ -252,17 +251,47 @@ snapshots, and generated code:
 - `**/tests/**/*.sol`
 - `**/test/**/*.vy`
 - `**/tests/**/*.vy`
-
-…and dependency or build-output directories:
-
 - `**/node_modules/**`
 - `**/bower_components/**`
-- `**/vendor/**`
-- `**/target/**`
+- `**/.pnpm-store/**`
+- `**/.yarn/{cache,unplugged,releases,sdks,patches}/**`
+- `**/.pnp.cjs`
+- `**/.pnp.loader.mjs`
+- `**/package-lock.json`
+- `**/pnpm-lock.yaml`
+- `**/npm-shrinkwrap.json`
+- `**/*.min.{js,css}`
 - `**/dist/**`
-- `**/__pycache__/**`, `**/.venv/**`, `**/site-packages/**`
-- `**/Pods/**`, `**/Carthage/**`
-- `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
+- `**/.next/**`
+- `**/.nuxt/**`
+- `**/.svelte-kit/**`
+- `**/.astro/**`
+- `**/.turbo/**`
+- `**/.angular/**`
+- `**/.parcel-cache/**`
+- `**/.docusaurus/**`
+- `**/vendor/**`
+- `**/.bundle/**`
+- `**/target/**`
+- `**/.gradle/**`
+- `**/__pycache__/**`
+- `**/.venv/**`
+- `**/venv/**`
+- `**/site-packages/**`
+- `**/*.egg-info/**`
+- `**/.tox/**`
+- `**/.mypy_cache/**`
+- `**/.pytest_cache/**`
+- `**/.ruff_cache/**`
+- `**/Pods/**`
+- `**/Carthage/**`
+- `**/.build/**`
+- `**/obj/**`
+- `**/.dart_tool/**`
+- `**/.terraform/**`
+- `**/.terraform.lock.hcl`
+- `**/.stack-work/**`
+- `**/coverage/lcov-report/**`
 
 `**/build/**` and `**/bin/**` are deliberately absent: projects keep
 hand-written sources in both.
