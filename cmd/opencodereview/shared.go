@@ -336,14 +336,33 @@ func sanitizeEndpointHost(rawURL string) string {
 // applyCLIExcludes appends user-supplied --exclude patterns (already split
 // into a []string) onto cc.FileFilter.Exclude. Creates the FileFilter if
 // none was returned by rule.json layers. Idempotent on empty input.
+//
+// Every command loader calls this even when no --exclude was given, which
+// makes it the one point where all sources have been merged and the right
+// place to report. Returning early on empty input would leave a filter that
+// rule.json built on its own unreported.
 func applyCLIExcludes(cc *commonContext, patterns []string) {
-	if len(patterns) == 0 {
+	if len(patterns) > 0 {
+		if cc.FileFilter == nil {
+			cc.FileFilter = &rules.FileFilter{}
+		}
+		cc.FileFilter.Exclude = append(cc.FileFilter.Exclude, patterns...)
+	}
+	warnWindowsPathPatterns(cc)
+}
+
+// warnWindowsPathPatterns reports every include/exclude pattern on the final
+// merged filter that looks like a Windows path.
+//
+// It is called once per run, after the rule layers and the CLI --exclude
+// patterns have both been merged, because the filter is only complete at that
+// point. Reporting the merged filter rather than each source in turn is what
+// keeps a project-rule pattern from being named twice.
+func warnWindowsPathPatterns(cc *commonContext) {
+	if cc == nil {
 		return
 	}
-	if cc.FileFilter == nil {
-		cc.FileFilter = &rules.FileFilter{}
-	}
-	cc.FileFilter.Exclude = append(cc.FileFilter.Exclude, patterns...)
+	rules.WarnAboutWindowsPatterns(cc.FileFilter)
 }
 
 // excludeToolDef returns a copy of defs with any entries whose function name
