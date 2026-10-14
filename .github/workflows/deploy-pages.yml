@@ -20,9 +20,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Lint Powershell script
+        shell: pwsh
+        continue-on-error: false
+        run: pwsh -Command "[ScriptBlock]::Create((Get-Content install.ps1 -Raw)) | Out-Null"
+
   build:
     if: github.repository == 'alibaba/open-code-review'
     runs-on: self-hosted
+    needs: lint
     timeout-minutes: 10
     container:
       image: node:24
