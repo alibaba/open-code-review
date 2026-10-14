@@ -180,7 +180,7 @@ Beyond the common flags above, `ocr review` exposes a few groups of controls. Ru
 
 **Output**
 
-- `--format text|json|sarif` — `text` (default) for humans; `json` for machine-readable findings; `sarif` for code-scanning integrations such as GitHub Code Scanning.
+- `--format text|json|sarif|codequality` — `text` (default) for humans; `json` for machine-readable findings; `sarif` for code-scanning integrations such as GitHub Code Scanning; `codequality` for a GitLab Code Quality report.
 
 **Model**
 
