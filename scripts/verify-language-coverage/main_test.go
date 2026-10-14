@@ -251,6 +251,32 @@ func TestAudit_ReportsUnreachableDoc(t *testing.T) {
 	}
 }
 
+func TestAudit_ReportsUnreachableDocForANonAllowlistedLanguage(t *testing.T) {
+	// The same rule set as above, with ".rs" dropped from the allowlist: nothing
+	// reviews a Rust file, so "**/*.rs" never runs and rust.md is unreachable even
+	// though a probe matches it. Reachability has to follow allowlist eligibility.
+	allow := []byte(`[".go"]`)
+	rules := []byte(`{
+  "default_rule": "default.md",
+  "path_rule_map": {
+    "**/*.go": "go.md",
+    "**/*.rs": "rust.md"
+  }
+}`)
+	cfg := writeConfig(t, allow, rules, "default.md", "go.md", "rust.md")
+
+	rep, err := audit(cfg)
+	if err != nil {
+		t.Fatalf("audit: %v", err)
+	}
+	if len(rep.routes[".rs"]) != 0 {
+		t.Errorf("routes[.rs] = %v, want none (.rs is not allowlisted)", rep.routes[".rs"])
+	}
+	if got := strings.Join(rep.unreachable, " "); got != "rust.md" {
+		t.Errorf("unreachable = %q, want rust.md", got)
+	}
+}
+
 func TestAudit_ReportsUnroutedExtensionForUnnamedLanguage(t *testing.T) {
 	// ".v" belongs to the language whose rule is registered, ".vsh" belongs to a
 	// language with no rule: the second one is the finding this command exists to

@@ -132,6 +132,14 @@ func audit(cfg config) (*report, error) {
 	// independent of that order.
 	patterns := sortedKeys(rules.PathRuleMap)
 
+	// A file only reaches the resolver when its extension is allowlisted, so a probe
+	// for any other extension proves nothing: nothing reviews it. Without this filter
+	// a rule for **/*.rs would mark rust.md reachable on an allowlist of [".go"].
+	eligible := make(map[string]bool, len(allowed))
+	for _, ext := range allowed {
+		eligible[strings.ToLower(ext)] = true
+	}
+
 	routes := map[string][]string{}
 	for _, pattern := range patterns {
 		for _, probe := range probes {
@@ -139,7 +147,7 @@ func audit(cfg config) (*report, error) {
 				continue
 			}
 			ext := extensionOf(probe)
-			if ext == "" {
+			if !eligible[strings.ToLower(ext)] {
 				continue
 			}
 			if doc := rules.PathRuleMap[pattern]; !contains(routes[ext], doc) {
