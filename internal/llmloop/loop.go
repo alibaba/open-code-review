@@ -358,9 +358,9 @@ func (s MainLoopStop) Reason() string {
 // returned by the model, and collects review comments until task_done is
 // called or limits are reached. Token usage and warnings are aggregated on the
 // Runner across every call. The returned bool is true only when the model
-// explicitly calls task_done with a successful state. The MainLoopStop return
-// classifies a non-completed, non-error stop at its trigger point so the caller
-// never has to infer the cause from text or context state.
+// explicitly calls task_done with a successful state in a non-truncated response.
+// The MainLoopStop return classifies a non-completed, non-error stop at its
+// trigger point so the caller never has to infer the cause from text or context state.
 //
 // taskKey identifies the subtask this conversation belongs to, and is not
 // necessarily a file path: scan passes one file's path, while review passes the
@@ -448,12 +448,22 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		llmSpan.End()
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
+		truncated := resp.IsTruncated()
+		if truncated {
+			r.RecordWarning("response_truncated", taskKey, fmt.Sprintf(
+				"LLM response was truncated (finish_reason: %s); task completion from this response will not be accepted.", resp.FinishReason()))
+		}
+
 		content := resp.VisibleContent()
 		calls := resp.ToolCalls()
 
 		if len(calls) == 0 {
 			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", taskKey)
-			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
+			prompt := "You did not successfully call any tools. Please try again or use task_done if finished."
+			if truncated {
+				prompt = "Your previous response was truncated before completion. Continue the review from where you stopped and issue the necessary tool calls. Do not call task_done until the review is fully complete."
+			}
+			messages = append(messages, llm.NewTextMessage("user", prompt))
 			native := resp.Native()
 			reasoning := resp.ReasoningContent()
 			if content != "" || native.Payload != nil || reasoning != "" {
@@ -475,12 +485,18 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 			if cp.Failed {
 				return false, StopNone, fmt.Errorf("task failed: %s", cp.Data)
 			} else if cp.Completed {
+				result := "Task completed successfully."
+				if truncated {
+					// A rejection must not count as progress toward completion.
+					result = "Task completion was rejected because the model response was truncated. Continue the review without repeating successful tool calls, and call task_done again in a complete response."
+				} else {
+					taskCompleted = true
+				}
 				results = append(results, tool.ToolCallResult{
 					ToolCallID: call.ID,
 					Name:       call.Function.Name,
-					Result:     "Task completed successfully.",
+					Result:     result,
 				})
-				taskCompleted = true
 			} else if cp.Data != "" {
 				results = append(results, tool.ToolCallResult{
 					ToolCallID: call.ID,

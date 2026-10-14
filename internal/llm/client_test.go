@@ -21,6 +21,44 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 )
 
+func TestChatResponse_FinishReasonAndIsTruncated(t *testing.T) {
+	type testCase struct {
+		name      string
+		response  *ChatResponse
+		reason    string
+		truncated bool
+	}
+	tests := []testCase{
+		{name: "nil"},
+		{name: "empty choices", response: &ChatResponse{}},
+		{name: "first choice only", response: &ChatResponse{Choices: []Choice{{FinishReason: "stop"}, {FinishReason: "length"}}}, reason: "stop"},
+	}
+	for _, tt := range []struct {
+		reason    string
+		truncated bool
+	}{
+		{"length", true}, {"max_tokens", true}, {"LENGTH", true}, {"MAX_TOKENS", true},
+		{"stop", false}, {"tool_calls", false}, {"end_turn", false}, {"tool_use", false}, {"error", false}, {"", false},
+	} {
+		tests = append(tests, testCase{
+			name:      "reason=" + tt.reason,
+			response:  &ChatResponse{Choices: []Choice{{FinishReason: tt.reason}}},
+			reason:    tt.reason,
+			truncated: tt.truncated,
+		})
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.response.FinishReason(); got != tt.reason {
+				t.Errorf("FinishReason = %q, want %q", got, tt.reason)
+			}
+			if got := tt.response.IsTruncated(); got != tt.truncated {
+				t.Errorf("IsTruncated = %v, want %v", got, tt.truncated)
+			}
+		})
+	}
+}
+
 func TestNewOpenAIClient_URLNormalization(t *testing.T) {
 	tests := []struct {
 		name     string
