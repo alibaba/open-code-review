@@ -641,6 +641,11 @@ func setConfigValue(cfg *Config, key, value string) error {
 
 	switch key {
 	case "provider":
+		if value != "" {
+			if err := validateProviderName(value); err != nil {
+				return err
+			}
+		}
 		if cfg.Provider != value {
 			cfg.Model = ""
 		}
@@ -1003,12 +1008,12 @@ func setProviderValue(cfg *Config, key, value string) error {
 	if _, isPreset := llm.LookupProvider(name); !isPreset {
 		return setCustomProviderField(cfg, name, field, key, value)
 	}
-	if cfg.Providers == nil {
-		cfg.Providers = make(map[string]ProviderEntry)
-	}
 	entry := cfg.Providers[name]
 	if err := applyProviderField(name, &entry, field, key, value); err != nil {
 		return err
+	}
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[string]ProviderEntry)
 	}
 	cfg.Providers[name] = entry
 	return nil
@@ -1035,17 +1040,32 @@ func isAuxiliaryProviderField(field string) bool {
 	}
 }
 
+func validateProviderName(name string) error {
+	for _, segment := range strings.Split(name, ".") {
+		if strings.TrimSpace(segment) == "" {
+			return fmt.Errorf("invalid provider name %q: dot-separated segments must not be empty or whitespace", name)
+		}
+	}
+	return nil
+}
+
 func setCustomProviderField(cfg *Config, name, field, key, value string) error {
+	if err := validateProviderName(name); err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	if _, exists := cfg.CustomProviders[name]; strings.Contains(name, ".") && !exists {
+		return fmt.Errorf("provider %q is not configured for key %q; create or select it first:\n  ocr config set provider %s", name, key, name)
+	}
 	if _, exists := cfg.CustomProviders[name]; isAuxiliaryProviderField(field) && !exists {
 		providerKey := strings.TrimSuffix(key, "."+field)
 		return fmt.Errorf("provider %q is not configured; set a core field first (protocol is required for every custom provider):\n  ocr config set %s.protocol <protocol>", name, providerKey)
 	}
-	if cfg.CustomProviders == nil {
-		cfg.CustomProviders = make(map[string]ProviderEntry)
-	}
 	entry := cfg.CustomProviders[name]
 	if err := applyProviderField(name, &entry, field, key, value); err != nil {
 		return err
+	}
+	if cfg.CustomProviders == nil {
+		cfg.CustomProviders = make(map[string]ProviderEntry)
 	}
 	cfg.CustomProviders[name] = entry
 	return nil

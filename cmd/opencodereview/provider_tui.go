@@ -1237,6 +1237,11 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 		m.cpStep = cpStepName
 		return m, m.cpNameInput.Focus()
 	}
+	if err := validateProviderName(r.provider); err != nil {
+		m.formError = err.Error()
+		m.cpStep = cpStepName
+		return m, m.cpNameInput.Focus()
+	}
 	if m.customProviderNameTaken(r.provider) {
 		m.formError = fmt.Sprintf(`Provider "%s" already exists`, r.provider)
 		m.cpStep = cpStepName

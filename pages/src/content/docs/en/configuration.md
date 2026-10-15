@@ -142,6 +142,14 @@ rather than accepted and ignored.
 
 ### Custom providers
 
+Names such as `mimo-v2.6-flash` and `foo.api_key` are supported. Before
+setting fields on a new name containing dots, create and select it with
+`ocr config set provider <name>`; this changes the active provider. Existing
+dotted entries can be edited without selecting them, through either
+`providers.<name>.<field>` or `custom_providers.<name>.<field>`. Names must
+not start or end with a dot, contain consecutive dots, or have empty or
+whitespace-only segments. Dot-free names still support implicit creation.
+
 Any provider name not in the table above is treated as custom and must
 supply at least `url` and `protocol` (`protocol` is `anthropic`,
 `openai`, `openai-responses`, or `anthropic-bedrock`):

@@ -118,6 +118,8 @@ Bedrock은 `llm.protocol`이나 `OCR_LLM_PROTOCOL`로는 사용할 수 **없습�
 
 ### 커스텀 프로바이더 {#custom-providers}
 
+`mimo-v2.6-flash`, `foo.api_key`처럼 점이 포함된 이름을 사용할 수 있습니다. 새로운 이름에 점이 있다면 필드를 설정하기 전에 `ocr config set provider <name>`으로 생성하고 선택하세요. 이 명령은 현재 프로바이더를 변경합니다. 기존 항목은 선택하지 않고도 `providers.<name>.<field>` 또는 `custom_providers.<name>.<field>`로 수정할 수 있습니다. 이름의 처음이나 끝에 점이 있거나, 점이 연속되거나, 구분된 부분이 비어 있거나 공백으로만 구성된 이름은 허용되지 않습니다. 점이 없는 이름은 필드 설정 시 계속 자동으로 생성됩니다.
+
 위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock` 중 하나):
 
 ```bash

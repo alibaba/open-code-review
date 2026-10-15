@@ -131,6 +131,12 @@ URL 加一个 token，没有地方放区域或 profile，而 bedrock 这两个�
 
 ### 自定义 provider
 
+支持 `mimo-v2.6-flash` 和 `foo.api_key` 这样的名称。为新的含点名称设置字段前，
+请先运行 `ocr config set provider <name>` 创建并选中它；这会更改当前 provider。
+已有的含点条目无需选中即可通过 `providers.<name>.<field>` 或
+`custom_providers.<name>.<field>` 编辑。名称不能以点开头或结尾、包含连续的点，
+也不能包含空白或仅由空白字符组成的分段。不含点的名称仍支持隐式创建。
+
 任何不在上表中的 provider 名都视为自定义，至少要提供 `url` 和 `protocol`
 （`protocol` 取 `anthropic`、`openai`、`openai-responses` 或
 `anthropic-bedrock`）：

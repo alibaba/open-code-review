@@ -278,6 +278,60 @@ func TestSetConfigValueDottedProviderName(t *testing.T) {
 	}
 }
 
+func TestSetConfigValueRejectsInvalidProviderNames(t *testing.T) {
+	for _, name := range []string{" ", ".a", "a.", "a..b", "a. .b", "anthropic."} {
+		for _, key := range []string{"provider", "providers." + name + ".url", "custom_providers." + name + ".url"} {
+			t.Run(key+"/"+name, func(t *testing.T) {
+				cfg := &Config{Provider: "openai", Model: "saved-model", CustomProviders: map[string]ProviderEntry{name: {}}}
+				before, err := json.Marshal(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				value := "https://example.invalid/v1"
+				if key == "provider" {
+					value = name
+				}
+				if err := setConfigValue(cfg, key, value); err == nil || !strings.Contains(err.Error(), "invalid provider name") {
+					t.Fatalf("setConfigValue(%q, %q) = %v, want invalid provider name", key, value, err)
+				}
+				after, err := json.Marshal(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(after) != string(before) {
+					t.Fatalf("configuration changed after rejected write: %s", after)
+				}
+			})
+		}
+	}
+}
+
+func TestSetConfigValueDottedProviderRequiresExistingEntry(t *testing.T) {
+	for _, prefix := range []string{"providers", "custom_providers"} {
+		for _, name := range []string{"mimo-v2.6-flash", "foo.api_key", "openai.extra_body"} {
+			key := prefix + "." + name + ".model"
+			t.Run(key, func(t *testing.T) {
+				cfg := &Config{Provider: "openai", Model: "saved-model"}
+				want := *cfg
+				err := setConfigValue(cfg, key, "some-model")
+				if err == nil || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "ocr config set provider "+name) {
+					t.Fatalf("setConfigValue(%q) = %v, want explicit creation guidance", key, err)
+				}
+				if !reflect.DeepEqual(*cfg, want) {
+					t.Fatalf("configuration changed after rejected write: %#v", cfg)
+				}
+				cfg.CustomProviders = map[string]ProviderEntry{name: {}}
+				if err := setConfigValue(cfg, key, "some-model"); err != nil {
+					t.Fatal(err)
+				}
+				if cfg.Provider != "openai" || cfg.CustomProviders[name].Model != "some-model" {
+					t.Fatalf("unexpected configuration: %#v", cfg)
+				}
+			})
+		}
+	}
+}
+
 func TestSetConfigValueProviderEntryModelsJSON(t *testing.T) {
 	cfg := &Config{}
 

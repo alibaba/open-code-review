@@ -138,6 +138,13 @@ Model:  claude-sonnet-5
 
 ### カスタム provider
 
+`mimo-v2.6-flash` や `foo.api_key` のような名前を使用できます。ドットを含む新しい
+名前のフィールドを設定する前に、`ocr config set provider <name>` で作成して選択してください。
+この操作は現在の provider を変更します。既存のエントリは選択せずに
+`providers.<name>.<field>` または `custom_providers.<name>.<field>` で編集できます。
+名前の先頭・末尾のドット、連続したドット、空または空白のみの区切り部分は使用できません。
+ドットを含まない名前は引き続きフィールドの設定時に自動作成されます。
+
 上記の表にない provider 名はすべてカスタムとみなされ、少なくとも `url` と
 `protocol` を指定する必要があります（`protocol` は `anthropic`、`openai`、
 `openai-responses`、または `anthropic-bedrock`）。
