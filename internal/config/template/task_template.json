@@ -35,6 +35,24 @@
       { "role": "user", "prompt_file": "grouping_task_user.md" }
     ]
   },
+  "CHANGE_SUMMARY_TASK": {
+    "messages": [
+      { "role": "system", "prompt_file": "change_summary_task_system.md" },
+      { "role": "user", "prompt_file": "change_summary_task_user.md" }
+    ]
+  },
+  "IMPACT_ANALYSIS_TASK": {
+    "messages": [
+      { "role": "system", "prompt_file": "impact_analysis_task_system.md" },
+      { "role": "user", "prompt_file": "impact_analysis_task_user.md" }
+    ]
+  },
+  "FLOW_DIAGRAM_TASK": {
+    "messages": [
+      { "role": "system", "prompt_file": "flow_diagram_task_system.md" },
+      { "role": "user", "prompt_file": "flow_diagram_task_user.md" }
+    ]
+  },
   "MAX_TOOL_REQUEST_TIMES": 100,
   "PLAN_MODE_LINE_THRESHOLD": 50,
   "PLAN_MODE_GROUP_LINE_THRESHOLD": 100,

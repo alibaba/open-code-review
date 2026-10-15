@@ -345,6 +345,9 @@ type jsonOutput struct {
 	Groups         []agent.FileGroupInfo `json:"groups,omitempty"`
 	Warnings       []agent.AgentWarning  `json:"warnings,omitempty"`
 	ProjectSummary string                `json:"project_summary,omitempty"`
+	ChangeSummary  string                `json:"change_summary,omitempty"`
+	ImpactAnalysis string                `json:"impact_analysis,omitempty"`
+	FlowDiagram    string                `json:"flow_diagram,omitempty"`
 	Resume         *agent.ResumeInfo     `json:"resume,omitempty"`
 	SessionID      string                `json:"session_id,omitempty"`
 	Manifest       *session.RunManifest  `json:"manifest,omitempty"`
@@ -371,7 +374,8 @@ func outputJSON(comments []model.LlmComment) error {
 
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
-	duration time.Duration, projectSummary string, toolCalls map[string]int64, toolFailures []llmloop.ToolFailureDetail,
+	duration time.Duration, projectSummary, changeSummary, impactAnalysis, flowDiagram string,
+	toolCalls map[string]int64, toolFailures []llmloop.ToolFailureDetail,
 	traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
 	retryReport *llm.RetryReport, groups []agent.FileGroupInfo) error {
@@ -394,6 +398,9 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		},
 		Groups:         groups,
 		ProjectSummary: projectSummary,
+		ChangeSummary:  changeSummary,
+		ImpactAnalysis: impactAnalysis,
+		FlowDiagram:    flowDiagram,
 		Resume:         resumeInfo,
 		SessionID:      sessionID,
 		Manifest:       manifest,
