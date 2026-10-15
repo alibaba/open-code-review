@@ -52,6 +52,16 @@ example:
 @Open Code Review review and fix high-confidence issues
 ```
 
+The default review skill runs `ocr review`, which calls the LLM configured for
+`ocr`, not the Codex session. To review with your existing Codex quota and no
+OCR LLM setup, use the delegate skill. It runs `ocr delegate preview` and
+`ocr delegate rule` for file selection and rules, and Codex itself performs the
+review:
+
+```text
+@Open Code Review delegate review my current changes
+```
+
 ## Cursor
 
 This repository includes a Cursor plugin manifest at
