@@ -45,11 +45,21 @@ function applyProviderField(entry: RawProviderEntry, field: string, value: strin
     case 'model':
       entry.model = value;
       break;
-    case 'models':
-      entry.models = parseModelList(value);
+    case 'models': {
+      const models = parseModelList(value);
+      if (models.length === 0) {
+        delete entry.models;
+      } else {
+        entry.models = models;
+      }
       break;
+    }
     case 'auth_header':
-      entry.auth_header = value;
+      if (value.trim() === '') {
+        delete entry.auth_header;
+      } else {
+        entry.auth_header = value.trim();
+      }
       break;
     default:
       break;
