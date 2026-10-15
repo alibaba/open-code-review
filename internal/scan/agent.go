@@ -869,6 +869,22 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
+	// Same local pre-flight gate as MAIN_TASK below: a plan prompt that
+	// already exceeds the limit cannot succeed at the provider, and sending
+	// it burns one doomed request before the main-task guard rejects the
+	// file locally anyway.
+	planTokens := llmloop.CountMessagesTokens(messages)
+	if planTokens > llmloop.PromptTokenLimit(a.args.Template.MaxTokens) {
+		msg := fmt.Sprintf("plan prompt tokens (%d) exceed %d%% of max_tokens(%d)", planTokens, 80, a.args.Template.MaxTokens)
+		fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: %s for %s (skipping plan)\n", msg, it.Path)
+		a.recordWarning("token_threshold_exceeded", it.Path, msg)
+		telemetry.Event(ctx, "token.threshold.exceeded",
+			telemetry.AnyToAttr("file.path", it.Path),
+			telemetry.AnyToAttr("tokens", planTokens),
+			telemetry.AnyToAttr("max_tokens", a.args.Template.MaxTokens))
+		return noPlan
+	}
+
 	fs := a.session.GetOrCreateFileSession(it.Path)
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
 	ctx = llm.ContextWithSessionKey(ctx,

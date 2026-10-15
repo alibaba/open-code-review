@@ -152,3 +152,67 @@ func TestRun_PromptOverflowRecordsFailure(t *testing.T) {
 		})
 	}
 }
+
+// TestRun_PromptOverflowSkipsDoomedPlanRequest verifies the plan phase gets
+// the same local pre-flight token gate as MAIN_TASK: a plan prompt that
+// already exceeds the limit is rejected locally instead of burning a doomed
+// provider request before the main-task guard rejects the file.
+func TestRun_PromptOverflowSkipsDoomedPlanRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		planWords   int
+		mainWords   int
+		wantCalls   int64
+		wantFailure bool
+	}{
+		{name: "plan overflows, main fits: plan skipped, file still reviewed", planWords: 100, mainWords: 5, wantCalls: 1},
+		{name: "plan and main overflow: zero provider requests", planWords: 100, mainWords: 100, wantCalls: 0, wantFailure: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := initTestRepo(t)
+			writeFile(t, repo, "overflow.go", []byte("package main\n"))
+			gitCommit(t, repo, "init")
+			tpl := budgetTestTemplate()
+			tpl.MaxTokens = 100
+			tpl.PlanTask = &template.LlmConversation{
+				Messages: []template.ChatMessage{
+					{Role: "system", Content: strings.Repeat("plan ", tc.planWords)},
+					{Role: "user", Content: "plan {{file_content}}"},
+				},
+			}
+			tpl.MainTask.Messages = []template.ChatMessage{
+				{Role: "system", Content: strings.Repeat("review ", tc.mainWords)},
+				{Role: "user", Content: "review {{file_content}}"},
+			}
+			client := &fakeBudgetClient{}
+			a := NewAgent(Args{
+				RepoDir:        repo,
+				Template:       tpl,
+				LLMClient:      client,
+				MaxConcurrency: 1,
+				SkipDedup:      true,
+				SkipSummary:    true,
+				Session:        session.New(repo, "main", "test", session.SessionOptions{ReviewMode: session.ReviewModeFullScan}),
+			})
+			_, err := a.Run(context.Background())
+			if tc.wantFailure && (err == nil || !strings.Contains(err.Error(), "all 1 file scan(s) failed")) {
+				t.Fatalf("expected all-files-failed error, got %v", err)
+			}
+			if !tc.wantFailure && err != nil {
+				t.Fatalf("skipping an oversized plan must not fail the file: %v", err)
+			}
+			if calls := atomic.LoadInt64(&client.calls); calls != tc.wantCalls {
+				t.Fatalf("MAIN_TASK/PLAN calls = %d, want %d (a doomed plan request must not be sent)", calls, tc.wantCalls)
+			}
+			var foundWarning bool
+			for _, warning := range a.Warnings() {
+				if warning.Type == "token_threshold_exceeded" && warning.File == "overflow.go" && strings.Contains(warning.Message, "plan prompt tokens") {
+					foundWarning = true
+				}
+			}
+			if !foundWarning {
+				t.Fatalf("missing plan-overflow warning: %+v", a.Warnings())
+			}
+		})
+	}
+}
