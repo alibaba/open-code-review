@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"github.com/alibaba/open-code-review/internal/chunk"
 	"sync"
 	"testing"
 
@@ -141,7 +142,7 @@ func TestExecuteReviewFilter_Identity(t *testing.T) {
 		},
 	})
 
-	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil, chunk.Budget{})
 
 	meta, ok := client.only(t)
 	if !ok {

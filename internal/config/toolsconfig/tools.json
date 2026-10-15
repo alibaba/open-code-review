@@ -16,6 +16,27 @@
               "FAILED"
             ],
             "description": "Defaults to DONE. Return FAILED if the task cannot be completed using available tools."
+          },
+          "skipped_chunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "chunk_id": {
+                  "type": "string",
+                  "description": "The id of a manifest chunk you deliberately did not read."
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Short structured cause, e.g. 'generated code', 'vendor lockfile', 'out of scope for this group'."
+                }
+              },
+              "required": [
+                "chunk_id",
+                "reason"
+              ]
+            },
+            "description": "Chunks listed in <context_manifest> that you intentionally skipped. Every chunk is either read or declared here; a chunk you neither read nor declared is reported as uninspected."
           }
         },
         "required": [
@@ -168,7 +189,7 @@
     "main_task": true,
     "definition": {
       "name": "file_read_diff",
-      "description": "The tool is used to view the changes made to other files in the list of modifications. Call this tool when you discover suspected code issues but need to check changes in other files to confirm whether the problem actually exists. This tool will respond in git diff format.\n\nOutput example:\n==== FILE: path/to/file1.txt ====\n--- a/path/to/file1.txt\n+++ b/path/to/file1.txt\n@@ -10,1 +10,1 @@\n- old content\n+ new content\n\n==== FILE: path/to/file2.txt ====\n@@ -5,1 +5,2 @@\n  - old content\n  + new content1\n  + new content2",
+      "description": "The tool is used to view the changes made to other files in the list of modifications. Call this tool when you discover suspected code issues but need to check changes in other files to confirm whether the problem actually exists. This tool will respond in git diff format.\n\nOutput example:\n==== FILE: path/to/file1.txt ====\n--- a/path/to/file1.txt\n+++ b/path/to/file1.txt\n@@ -10,1 +10,1 @@\n- old content\n+ new content\n\n==== FILE: path/to/file2.txt ====\n@@ -5,1 +5,2 @@\n  - old content\n  + new content1\n  + new content2\n\nReads are bounded. When several chunks are requested at once, the ones past the read budget are NOT returned and the result says exactly which chunk ids were omitted - read them with chunk_id. Nothing is ever silently truncated.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -178,6 +199,18 @@
               "type": "string"
             },
             "description": "List of file paths to view diff content."
+          },
+          "chunk_id": {
+            "type": "string",
+            "description": "The id of one chunk from <context_manifest>. Returns exactly that chunk."
+          },
+          "path": {
+            "type": "string",
+            "description": "A single file path. Returns that file's chunk index (ids, line ranges, token cost) without content, so you can page through a file the manifest could not list in full."
+          },
+          "max_tokens": {
+            "type": "integer",
+            "description": "Lower the token ceiling for this call. It can only lower the run's read budget, never raise it."
           }
         },
         "required": [
