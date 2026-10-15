@@ -163,11 +163,24 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// Streaming is selected only by the resolved provider. Forwarding an
-		// extra_body.stream setting could conflict with that selection or make an
-		// ordinary Responses.New call receive SSE, so it is always dropped here.
+		// "stream" is handled case-by-case. The non-streaming Responses.New
+		// call expects a single JSON body, so an explicit stream=true (valid
+		// on the Chat Completions client, which switches to a streaming
+		// path) or a non-boolean value would make the API answer with SSE
+		// and the JSON decoder would fail (issue #647): drop them. An
+		// explicit stream=false is safe to forward there and is the
+		// documented merge semantics of extra_body (issue #1527): some
+		// Responses-compatible gateways default to SSE when the stream
+		// field is absent, and the only way to force a JSON body on the
+		// wire is to write "stream": false explicitly. The streaming path
+		// (RequiresStreaming) puts stream=true on the wire itself, so any
+		// extra_body.stream value is dropped there to avoid contradicting
+		// the SDK's own field.
 		if k == "stream" {
-			continue
+			b, isBool := v.(bool)
+			if !isBool || b || c.cfg.RequiresStreaming {
+				continue
+			}
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}

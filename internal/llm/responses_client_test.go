@@ -654,9 +654,23 @@ func TestOpenAIResponsesClient_StatuslessResponseSucceeds(t *testing.T) {
 // TestOpenAIResponsesClient_ExtraBodyStreamDropped verifies that an
 // extra_body.stream=true (valid for the Chat Completions client) is NOT
 // forwarded to the Responses API. Forwarding it makes the API answer with SSE
-// while Responses.New expects a JSON body, breaking every call. Other
+// while Responses.New expects a JSON body, breaking every call. Non-boolean
+// values fall in the same bucket: a clean bool is what the streaming branch
+// expects, and a malformed value that reaches the wire trips the server or
+// breaks the non-streaming decoder. An explicit boolean false is the one
+// shape worth forwarding on the wire (see issue #1527 and the matching
+// TestOpenAIResponsesClient_ExtraBodyStreamFalseForwarded test below). Other
 // extra_body keys must still be forwarded.
 func TestOpenAIResponsesClient_ExtraBodyStreamDropped(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+	}{
+		{name: "boolean true", value: true},
+		{name: "string true", value: "true"},
+		{name: "null", value: nil},
+	}
+
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -674,14 +688,72 @@ func TestOpenAIResponsesClient_ExtraBodyStreamDropped(t *testing.T) {
 	}))
 	defer server.Close()
 
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotBody = nil
+			client := NewOpenAIResponsesClient(ClientConfig{
+				URL:    server.URL + "/v1",
+				APIKey: "test-key",
+				Model:  "gpt-5.4",
+				ExtraBody: map[string]any{
+					"stream":               tt.value,
+					"keep_me":              "yes",
+					"temperature_override": 0.1,
+				},
+			})
+
+			resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages: []Message{{Role: "user", Content: "hi"}},
+			})
+			if err != nil {
+				t.Fatalf("CompletionsWithCtx: %v", err)
+			}
+
+			if _, present := gotBody["stream"]; present {
+				t.Errorf("request body should NOT contain a stream field, got %v", gotBody["stream"])
+			}
+			if gotBody["keep_me"] != "yes" {
+				t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
+			}
+			if resp.Content() != "ok" {
+				t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+			}
+		})
+	}
+}
+
+// TestOpenAIResponsesClient_ExtraBodyStreamFalseForwarded verifies that an
+// explicit extra_body.stream=false is forwarded on the wire for a
+// non-streaming Responses API request (issue #1527). Some Responses-compatible
+// gateways default to text/event-stream when the stream field is absent; the
+// only way to force a non-streaming JSON response is to write "stream": false
+// explicitly. Other extra_body keys continue to flow through.
+func TestOpenAIResponsesClient_ExtraBodyStreamFalseForwarded(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"resp_no_stream",
+			"object":"response",
+			"model":"gpt-5.4",
+			"status":"completed",
+			"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
+			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer server.Close()
+
 	client := NewOpenAIResponsesClient(ClientConfig{
 		URL:    server.URL + "/v1",
 		APIKey: "test-key",
 		Model:  "gpt-5.4",
 		ExtraBody: map[string]any{
-			"stream":               true,
-			"keep_me":              "yes",
-			"temperature_override": 0.1,
+			"stream":      false,
+			"keep_me":     "yes",
+			"vendor_flag": "keep-me",
 		},
 	})
 
@@ -692,14 +764,72 @@ func TestOpenAIResponsesClient_ExtraBodyStreamDropped(t *testing.T) {
 		t.Fatalf("CompletionsWithCtx: %v", err)
 	}
 
-	if _, present := gotBody["stream"]; present {
-		t.Errorf("request body should NOT contain a stream field, got %v", gotBody["stream"])
+	stream, present := gotBody["stream"]
+	if !present {
+		t.Fatalf("request body must contain stream field; got %#v", gotBody)
+	}
+	if stream != false {
+		t.Errorf("stream field = %#v, want false", stream)
 	}
 	if gotBody["keep_me"] != "yes" {
 		t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
 	}
+	if gotBody["vendor_flag"] != "keep-me" {
+		t.Errorf("vendor_flag must be forwarded; got %v", gotBody["vendor_flag"])
+	}
 	if resp.Content() != "ok" {
 		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+	}
+}
+
+// TestOpenAIResponsesClient_ExtraBodyStreamDroppedOnStreamingPath verifies
+// that extra_body.stream never reaches the wire when the client uses the
+// streaming path (RequiresStreaming): the SDK's NewStreaming call owns the
+// stream field there, and a forwarded "stream": false would contradict it
+// and make the server answer with a plain JSON body that the SSE reader
+// cannot consume. Other extra_body keys are still forwarded.
+func TestOpenAIResponsesClient_ExtraBodyStreamDroppedOnStreamingPath(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"resp_sse\",\"object\":\"response\",\"model\":\"gpt-5.4\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL:               server.URL + "/v1",
+		APIKey:            "test-key",
+		Model:             "gpt-5.4",
+		RequiresStreaming: true,
+		ExtraBody: map[string]any{
+			"stream":      false,
+			"keep_me":     "yes",
+			"vendor_flag": "keep-me",
+		},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	if gotBody["stream"] != true {
+		t.Errorf("stream field = %#v, want the SDK's true; extra_body.stream must not override it", gotBody["stream"])
+	}
+	if gotBody["keep_me"] != "yes" {
+		t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
+	}
+	if gotBody["vendor_flag"] != "keep-me" {
+		t.Errorf("vendor_flag must be forwarded; got %v", gotBody["vendor_flag"])
+	}
+	if resp.Content() != "" {
+		t.Errorf("Content() = %q, want empty", resp.Content())
 	}
 }
 
