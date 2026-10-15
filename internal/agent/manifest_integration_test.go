@@ -871,3 +871,52 @@ func TestManifestFlowResumeWithProviderTransition(t *testing.T) {
 		t.Fatal("child source_artifact_sha256 must be populated")
 	}
 }
+
+// lateCrossFileClient files a finding against alpha.go while reviewing beta.go,
+// standing in for a cross-file relocation that lands after alpha.go's own group
+// has already finished and written its checkpoint.
+type lateCrossFileClient struct {
+	collector *tool.CommentCollector
+}
+
+func (c *lateCrossFileClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	var prompt string
+	for _, message := range req.Messages {
+		if text, ok := message.Content.(string); ok {
+			prompt += text
+		}
+	}
+	if strings.Contains(prompt, "beta.go") {
+		c.collector.Add(model.LlmComment{Path: "alpha.go", Content: "LATE_FINDING_ON_ALPHA_GO", StartLine: 1, EndLine: 1})
+	}
+	return agentTaskDoneResponse(), nil
+}
+
+func TestManifestFlowCheckpointKeepsFindingFiledByLaterGroup(t *testing.T) {
+	alpha := model.Diff{OldPath: "alpha.go", NewPath: "alpha.go", Diff: "+alpha", Insertions: 1}
+	beta := model.Diff{OldPath: "beta.go", NewPath: "beta.go", Diff: "+beta", Insertions: 1}
+	client := &lateCrossFileClient{}
+	a := newManifestFlowAgentWithClient(t, []model.Diff{alpha, beta}, nil, client)
+	client.collector = a.args.CommentCollector
+	a.args.MaxConcurrency = 1
+
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(a.fileGroups) != 2 || a.fileGroups[0].Diffs[0].NewPath != "alpha.go" {
+		t.Fatalf("groups = %+v, want alpha.go reviewed alone before beta.go", a.fileGroups)
+	}
+	finishManifestFlow(t, a)
+
+	state, err := session.LoadReviewResumeState(a.args.RepoDir, a.session.SessionID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	item, ok := state.ReusableItem(reviewItemFingerprint(a.reviewMode(), alpha))
+	if !ok {
+		t.Fatal("alpha.go checkpoint is not reusable")
+	}
+	if len(item.Comments) != 1 || item.Comments[0].Content != "LATE_FINDING_ON_ALPHA_GO" {
+		t.Fatalf("alpha.go checkpoint comments = %+v, want the finding filed by beta.go's group", item.Comments)
+	}
+}
