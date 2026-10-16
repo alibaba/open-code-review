@@ -398,14 +398,17 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
-	URL                   string            // Full API endpoint URL
-	APIKey                string            // Bearer token / API key
-	Model                 string            // Default model override
-	AuthHeader            string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
-	Timeout               time.Duration     // Request timeout
-	ExtraBody             map[string]any    // Vendor-specific fields merged into every request body
-	ExtraHeaders          map[string]string // Extra HTTP headers sent with every request
-	RetryCodes            []int             // Additional HTTP status codes that trigger retry
+	URL          string            // Full API endpoint URL
+	APIKey       string            // Bearer token / API key
+	Model        string            // Default model override
+	AuthHeader   string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
+	Timeout      time.Duration     // Request timeout
+	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
+	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
+	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+	// PromptCaching controls Anthropic cache_control breakpoints. Nil preserves
+	// the historical default of enabling prompt caching.
+	PromptCaching         *bool
 	RequiresStreaming     bool
 	RejectsSamplingParams bool
 	ChatGPTPlan           bool
@@ -493,14 +496,15 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		ExtraBody:             ep.ExtraBody,
 		ExtraHeaders:          ep.ExtraHeaders,
 		RetryCodes:            ep.RetryCodes,
-		RequiresStreaming:     ep.RequiresStreaming,
-		RejectsSamplingParams: ep.RejectsSamplingParams,
-		ChatGPTPlan:           ep.ChatGPTPlan,
-		ChatGPTAccount:        ep.ChatGPTAccount,
+		PromptCaching:         ep.PromptCaching,
 		retryCollector:        collector,
 		rawHolder:             raw,
 		AWSProfile:            ep.AWSProfile,
 		AWSRegion:             ep.AWSRegion,
+		RequiresStreaming:     ep.RequiresStreaming,
+		RejectsSamplingParams: ep.RejectsSamplingParams,
+		ChatGPTPlan:           ep.ChatGPTPlan,
+		ChatGPTAccount:        ep.ChatGPTAccount,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -1635,11 +1639,15 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	}
 
 	if len(systemBlocks) > 0 {
-		systemBlocks[len(systemBlocks)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
+		if c.promptCachingEnabled() {
+			systemBlocks[len(systemBlocks)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
+		}
 		params.System = systemBlocks
 	}
 	if len(tools) > 0 {
-		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+		if c.promptCachingEnabled() {
+			tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+		}
 		params.Tools = tools
 		if req.ToolChoice == "required" {
 			params.ToolChoice = anthropic.ToolChoiceUnionParam{
@@ -1649,7 +1657,7 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	}
 	// Dynamic breakpoint on the latest message so multi-turn history is
 	// cached incrementally: read the full previous prefix, write only the delta.
-	if len(messages) > 0 {
+	if c.promptCachingEnabled() && len(messages) > 0 {
 		last := &messages[len(messages)-1]
 		if n := len(last.Content); n > 0 {
 			lastIdx := n - 1
@@ -1668,6 +1676,10 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	}
 
 	return params, nil
+}
+
+func (c *AnthropicClient) promptCachingEnabled() bool {
+	return c.cfg.PromptCaching == nil || *c.cfg.PromptCaching
 }
 
 // cloneContentBlockParam deep-copies a content block via JSON round trip.
