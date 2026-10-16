@@ -106,6 +106,8 @@ ocr r      [flags]   (alias)
 | `--repo <path>` | — | カレントディレクトリ | Git リポジトリのルート。 |
 | `--from <ref>` | — | — | diff の開始 ref（例: `main`）。 |
 | `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
+| `--fetch` | — | `false` | 範囲を解決する前に `--remote` から `--from` ブランチを fetch し、ローカルブランチではなく fetch したリモート追跡ブランチを基準にレビューします（`--from origin/main` は `origin` の `main` ブランチを指します）。`--to` は fetch しないため、未 push のコミットもレビュー対象に残ります。更新されるのはそのリモート追跡ブランチだけで、fetch に失敗した場合は LLM を呼び出す前にレビューを中止します。`--from`/`--to` が必要で、`--from` にはブランチ名を指定します（タグ、コミット、`HEAD`、`refs/...` 形式の ref は不可）。 |
+| `--remote <name>` | — | `origin` | `--fetch` が fetch するリモート。指定すると、`--from` は別のリモート名で始まっていても常にこのリモート上のブランチとして扱われます（先頭の `<name>/` は省略可）。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、サブタスクごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。サブタスクは単一ファイル、または関連ファイルのまとまりをレビューします。 |
@@ -131,6 +133,7 @@ ocr r      [flags]   (alias)
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
 > `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
+> `--fetch` は `--from`/`--to` と、`--remote` は `--fetch` と組み合わせた場合にのみ使えます。
 
 ### 実行単位の LLM 選択
 
@@ -176,6 +179,14 @@ ocr review --from main --to feature-branch
 ```
 
 OCR は `merge-base(main, feature-branch)..feature-branch` を計算するため、feature ブランチが*導入した* diff だけが表示されます。ブランチを切ったあとに `main` へ入った無関係な変更は含まれません。
+
+ローカルの基準ブランチがリモートより古い可能性がある場合は `--fetch` を付けます:
+
+```bash
+ocr review --fetch --from main --to HEAD
+```
+
+OCR は `origin` から `main` を `origin/main` に fetch し（`--remote <name>` を指定した場合は `<name>` から `<name>/main` に fetch し）、その最新のリモート追跡ブランチを基準にレビューします。範囲の両端は解決したコミットに固定されるため、レビュー中に ref が動いてもレビュー内容は変わりません。更新されるのはそのリモート追跡ブランチだけで、ローカルブランチと作業ツリーには触れません。`--fetch` を付けない限り、OCR がリモート ref を更新することはありません。
 
 #### Commit モード
 
