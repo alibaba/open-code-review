@@ -86,11 +86,38 @@ func TestResolveEnv(t *testing.T) {
 			},
 		},
 		{
+			name: "otlp headers parsed",
+			envs: map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "authorization=Basic abc123, x-custom = v2 "},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.OTLPHeaders["authorization"] != "Basic abc123" {
+					t.Errorf("expected authorization header, got %v", cfg.OTLPHeaders)
+				}
+				if cfg.OTLPHeaders["x-custom"] != "v2" {
+					t.Errorf("expected x-custom=v2, got %v", cfg.OTLPHeaders)
+				}
+			},
+		},
+		{
+			name: "otlp headers url-decoded",
+			envs: map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "authorization=Basic%20abc%2B123,x-list=a%2Cb"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.OTLPHeaders["authorization"] != "Basic abc+123" {
+					t.Errorf("expected decoded 'Basic abc+123', got %q", cfg.OTLPHeaders["authorization"])
+				}
+				if cfg.OTLPHeaders["x-list"] != "a,b" {
+					t.Errorf("expected decoded 'a,b', got %q", cfg.OTLPHeaders["x-list"])
+				}
+			},
+		},
+		{
 			name: "no env vars leaves defaults",
 			envs: map[string]string{},
 			check: func(t *testing.T, cfg Config) {
 				if cfg.Enabled {
 					t.Error("expected Enabled=false")
+				}
+				if len(cfg.OTLPHeaders) != 0 {
+					t.Errorf("expected no headers, got %v", cfg.OTLPHeaders)
 				}
 			},
 		},
@@ -102,7 +129,7 @@ func TestResolveEnv(t *testing.T) {
 			envKeys := []string{
 				"OCR_ENABLE_TELEMETRY", "OTEL_SERVICE_NAME",
 				"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_PROTOCOL",
-				"OCR_CONTENT_LOGGING",
+				"OTEL_EXPORTER_OTLP_HEADERS", "OCR_CONTENT_LOGGING",
 			}
 			for _, k := range envKeys {
 				t.Setenv(k, "")
