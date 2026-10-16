@@ -11,6 +11,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -55,8 +56,23 @@ func ReLocateComment(
 	modelName string,
 	maxTokens int,
 ) (bool, *llm.ChatResponse) {
+	side, response := ReLocateCommentSide(ctx, cm, d, client, messages, modelName, maxTokens)
+	return side != location.SideUnknown, response
+}
+
+// ReLocateCommentSide is ReLocateComment with the resolved source side
+// included in its result.
+func ReLocateCommentSide(
+	ctx context.Context,
+	cm *model.LlmComment,
+	d *model.Diff,
+	client llm.LLMClient,
+	messages []llm.Message,
+	modelName string,
+	maxTokens int,
+) (location.Side, *llm.ChatResponse) {
 	if len(messages) == 0 {
-		return false, nil
+		return location.SideUnknown, nil
 	}
 
 	startTime := time.Now()
@@ -71,7 +87,7 @@ func ReLocateComment(
 		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 		llmSpan.End()
 		fmt.Fprintf(stdout.Writer(), "[ocr] Re-location LLM call failed for %s: %v\n", cm.Path, err)
-		return false, nil
+		return location.SideUnknown, nil
 	}
 	var totalTokens int64
 	if resp.Usage != nil {
@@ -82,16 +98,16 @@ func ReLocateComment(
 
 	code := extractCodeBlock(resp.Content())
 	if code == "" {
-		return false, resp
+		return location.SideUnknown, resp
 	}
 
 	original := cm.ExistingCode
 	cm.ExistingCode = code
-	if ResolveComment(cm, d) {
-		return true, resp
+	if side, ok := ResolveCommentSide(cm, d); ok {
+		return side, resp
 	}
 	cm.ExistingCode = original
-	return false, resp
+	return location.SideUnknown, resp
 }
 
 // extractCodeBlock extracts the content of the first fenced code block from text.
