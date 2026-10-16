@@ -356,18 +356,22 @@ async function runPostReviewComments({
       continue;
     }
     const id = newCommentId(RUN_TAG);
+    // RIGHT is the backward-compatible default for results produced before
+    // side-aware resolution. LEFT is used for comments matched on deleted
+    // lines, whose line number belongs to the old file.
+    const side = comment.side === "LEFT" ? "LEFT" : "RIGHT";
     const reviewComment = { path: comment.path, body: formatComment(comment, id) };
     if (comment.start_line >= 1 && comment.end_line >= 1 && comment.start_line !== comment.end_line) {
       reviewComment.start_line = comment.start_line;
       reviewComment.line = comment.end_line;
-      reviewComment.start_side = "RIGHT";
-      reviewComment.side = "RIGHT";
+      reviewComment.start_side = side;
+      reviewComment.side = side;
     } else if (comment.end_line >= 1) {
       reviewComment.line = comment.end_line;
-      reviewComment.side = "RIGHT";
+      reviewComment.side = side;
     } else if (comment.start_line >= 1) {
       reviewComment.line = comment.start_line;
-      reviewComment.side = "RIGHT";
+      reviewComment.side = side;
     }
     reviewComments.push({ comment, reviewComment, id });
   }
@@ -1245,7 +1249,7 @@ function isBotComment(comment, botLogin) {
 
 // Incremental overlap test. The current comment is considered a duplicate of
 // an existing bot comment (and thus skipped) when they target the same path
-// and RIGHT side AND one of these holds:
+// and side AND one of these holds:
 //   1. both are single-line comments on the same line;
 //   2. both are multi-line comments whose line-range IoU (intersection over
 //      union) exceeds `threshold`.
@@ -1259,7 +1263,9 @@ function overlapsComments(reviewComment, comments, threshold = DEFAULT_OVERLAP_T
   if (!cur) return false;
   for (const comment of comments) {
     if (comment.path !== path) continue;
-    if (comment.side && comment.side !== "RIGHT") continue;
+    const currentSide = reviewComment.side || "RIGHT";
+    const historySide = comment.side || "RIGHT";
+    if (historySide !== currentSide) continue;
     const other = lineSpan(comment);
     if (!other) continue;
     if (sameCommentSpan(cur, other, t)) return true;

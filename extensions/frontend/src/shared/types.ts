@@ -19,6 +19,7 @@ export interface ReviewComment {
   existingCode?: string;
   startLine: number;
   endLine: number;
+  side?: 'LEFT' | 'RIGHT';
   thinking?: string;
 }
 
