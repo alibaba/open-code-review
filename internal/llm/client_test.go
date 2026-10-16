@@ -1322,6 +1322,37 @@ func TestOpenAIClient_StreamingReasoningContent(t *testing.T) {
 	}
 }
 
+func TestOpenAIClient_StreamingGatewayReasoning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeOpenAISSE(t, w,
+			`{"id":"chatcmpl-gw","object":"chat.completion.chunk","created":1,"model":"zai/glm-5.3-flash","choices":[{"index":0,"delta":{"role":"assistant","reasoning":"first ","reasoning_details":[{"type":"reasoning.text","text":"first ","index":0}]},"finish_reason":null}]}`,
+			`{"id":"chatcmpl-gw","object":"chat.completion.chunk","created":1,"model":"zai/glm-5.3-flash","choices":[{"index":0,"delta":{"reasoning":"second","content":"answer"},"finish_reason":null}]}`,
+			`{"id":"chatcmpl-gw","object":"chat.completion.chunk","created":1,"model":"zai/glm-5.3-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:       server.URL + "/v1",
+		APIKey:    "test-key",
+		Model:     "zai/glm-5.3-flash",
+		ExtraBody: map[string]any{"stream": true},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := resp.Choices[0].Message.ReasoningContent; got != "first second" {
+		t.Errorf("ReasoningContent = %q, want %q", got, "first second")
+	}
+	if payload, ok := resp.Choices[0].Message.Native.Payload.(ReasoningPayload); !ok || payload != "first second" {
+		t.Errorf("Native payload = %#v, want replayable reasoning", resp.Choices[0].Message.Native.Payload)
+	}
+}
+
 func TestOpenAIClient_StreamingIncomplete(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeOpenAISSE(t, w,
