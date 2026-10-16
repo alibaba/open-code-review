@@ -8,8 +8,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 )
+
+func TestScanTemplateUsesEnvironmentLanguageWithoutConfig(t *testing.T) {
+	t.Setenv("OCR_LANGUAGE", "Chinese")
+
+	scanTpl, err := template.LoadScanDefault()
+	if err != nil {
+		t.Fatalf("LoadScanDefault: %v", err)
+	}
+	scanTpl.ApplyLanguage(configuredLanguage(nil))
+
+	if !strings.Contains(scanTpl.MainTask.Messages[0].Content, "Chinese") {
+		t.Fatal("scan template did not apply OCR_LANGUAGE without a config file")
+	}
+}
 
 func TestExcludeToolDef(t *testing.T) {
 	defs := []llm.ToolDef{

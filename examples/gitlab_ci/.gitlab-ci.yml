@@ -17,7 +17,7 @@
 #                        Claude, edit that line in the Configure OCR step to `true`.
 #
 # Optional CI/CD Variables (LLM provider configuration):
-#   OCR_LANGUAGE          - Review output language, written via `ocr config set language`
+#   OCR_LANGUAGE          - Review output language, resolved as the `language` setting
 #                          (e.g. English, Chinese). Defaults to OCR's built-in default (English).
 #   OCR_LLM_AUTH_HEADER   - Custom auth header name, written via `ocr config set llm.auth_header`
 #                          (e.g. "x-api-key" for some providers).
