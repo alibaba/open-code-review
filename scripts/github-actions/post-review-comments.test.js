@@ -613,7 +613,7 @@ async function testNonStickyCreatesNewCommentOnFallback() {
 
 async function testNoCommentsStickyUpdate() {
   const existing = [{ id: 7, body: "<!-- ocr-summary -->\nold good", user: { login: "github-actions[bot]" } }];
-  const result = { comments: [], message: "All clear." };
+  const result = { comments: [], warnings: [], message: "All clear." };
 
   const { github } = await run({
     result,
@@ -623,7 +623,46 @@ async function testNoCommentsStickyUpdate() {
 
   assert.strictEqual(github.updatedComments.length, 1);
   assert.strictEqual(github.issueComments.length, 0);
-  assert.match(github.updatedComments[0].body, /All clear\./);
+  assert.strictEqual(github.updatedComments[0].body, `${SUMMARY_MARKER}\n✅ **OpenCodeReview**: All clear.`);
+}
+
+async function testNoCommentsWarningsPreserved() {
+  const result = {
+    status: "complete",
+    comments: [],
+    message: "Review complete: 0 finding(s) across 1 selected item(s).",
+    warnings: [
+      "file too large to review fully",
+      { file: "src/a.js", type: "review_limit_reached", message: "max tool requests reached; the grace round completed the task" },
+    ],
+    manifest: ckManifest(),
+  };
+  for (const existingSummary of [
+    [],
+    [{ id: 7, body: `${SUMMARY_MARKER}\nold summary`, user: { login: "github-actions[bot]" } }],
+  ]) {
+    const { github, outputs } = await run({ result, githubOpts: { existingSummary } });
+    const updating = existingSummary.length > 0;
+    assert.strictEqual(github.issueComments.length, updating ? 0 : 1);
+    assert.strictEqual(github.updatedComments.length, updating ? 1 : 0);
+    if (updating) assert.strictEqual(github.updatedComments[0].comment_id, 7);
+    const body = lastSummaryBody(github);
+    assert.strictEqual(body.startsWith(`${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: ${result.message}`), true);
+    assert.match(body, /⚠️ \*\*Warnings:\*\*/);
+    assert.match(body, /\n- file too large to review fully/);
+    assert.match(body, /\n- `src\/a\.js` \(`review_limit_reached`\): max tool requests reached; the grace round completed the task/);
+    assert.strictEqual(github.createReviewCalls.length, 0);
+    assert.strictEqual(outputs.comments_total, "0");
+  }
+}
+
+async function testNoCommentsWarningsUseNeutralFallback() {
+  const { github } = await run({ result: { comments: [], warnings: ["file too large to review fully"] } });
+  assert.strictEqual(
+    lastSummaryBody(github),
+    `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: No comments generated. See warnings below.` +
+      "\n\n---\n\n⚠️ **Warnings:**\n- file too large to review fully"
+  );
 }
 
 async function testIncrementalSkipsOverlapping() {
@@ -2338,6 +2377,8 @@ async function main() {
   await testNonStickyCreatesNewCommentOnFallback();
   await testNonStickyFallbackAllSuccessStillPostsSummary();
   await testNoCommentsStickyUpdate();
+  await testNoCommentsWarningsPreserved();
+  await testNoCommentsWarningsUseNeutralFallback();
   await testIncrementalSkipsOverlapping();
   await testIncrementalSkipsSameRunOverlapping();
   await testIncrementalSkipsSameRunIoUOverlapping();
@@ -2449,7 +2490,7 @@ async function main() {
   await testIssueCommentRejectsMissingOrMalformedManifestHead();
   await testLegacyPullRequestEventRejectsMissingSnapshotHead();
   await testCheckpointCarryForwardOnEveryBodyPath();
-  await testCheckpointAdvancesOnZeroFindings();
+  await testCheckpointZeroFindingsAdvanceGate();
   await testCheckpointNeverAdvancesWithoutSticky();
   await testCheckpointCarryIsGatedLikeTheAdvance();
   await testCheckpointResolverUsesPreReadComment();
@@ -4261,27 +4302,27 @@ async function testCheckpointCarryForwardOnEveryBodyPath() {
   }
 }
 
-// C8: a clean run with no findings is the most common complete run there is; it
-// must advance the checkpoint through the zero-findings early return.
-async function testCheckpointAdvancesOnZeroFindings() {
-  const gh = makeGithub({});
-  const outputs = {};
-  await runPostReviewComments(
-    Object.assign(
-      {
-        github: gh,
-        context,
-        core: { setOutput: (k, v) => { outputs[k] = v; } },
-        fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest() }), ""),
-      },
-      ckRunOptions({ checkpointCarry: CARRY })
-    )
-  );
-  const body = lastSummaryBody(gh);
-  const payload = parseCheckpointMarker(body);
-  assert.strictEqual(payload.head, CK_RESOLVED, "the zero-findings path must advance");
-  assert.strictEqual(body.includes(CARRY), false, "advancing replaces the carried marker, never duplicates it");
-  assert.strictEqual(outputs.checkpoint_after, CK_RESOLVED);
+// Warnings do not change completion eligibility on the zero-findings early return.
+async function testCheckpointZeroFindingsAdvanceGate() {
+  const warning = { file: "src/a.js", type: "review_limit_reached", message: "max tool requests reached" };
+  for (const [terminal, warnings] of [
+    ["complete", []],
+    ["complete", [warning]],
+    ["partial", [warning]],
+    ["failed", [warning]],
+  ]) {
+    const { github, outputs } = await run({
+      result: { comments: [], warnings, manifest: ckManifest({ terminal_state: terminal }) },
+      opts: ckRunOptions({ checkpointCarry: CARRY }),
+    });
+    const body = lastSummaryBody(github);
+    const payload = parseCheckpointMarker(body);
+    const advances = terminal === "complete";
+    const label = `terminal=${terminal} warnings=${warnings.length}`;
+    assert.strictEqual(payload.head, advances ? CK_RESOLVED : CK_OLD, label);
+    assert.strictEqual(body.includes(CARRY), !advances, `${label}: replace the carry only when advancing`);
+    assert.strictEqual(outputs.checkpoint_after, advances ? CK_RESOLVED : "", label);
+  }
 }
 
 // A non-sticky run has nowhere durable to keep a checkpoint, so it must never
@@ -5070,9 +5111,13 @@ async function testSummaryShowsNarrowedRangeLabel() {
   // likely to be mistaken for "the whole PR is clean".
   const clean = await withRange({ rangeMode: "checkpoint", rangeFrom: CK_OLD, rangeTo: CK_NEW }, {
     comments: [],
+    warnings: ["file too large to review fully"],
     manifest: ckManifest(),
   });
   assert.strictEqual(clean.includes(label), true);
+  assert.match(clean, /file too large to review fully/);
+  const warningsIdx = clean.indexOf("⚠️ **Warnings:**");
+  assert.ok(warningsIdx !== -1 && warningsIdx < clean.indexOf(label), "warnings precede the range note");
 
   const full = await withRange({ rangeMode: "full", rangeFrom: "", rangeTo: CK_NEW }, findings);
   assert.strictEqual(full.includes("Reviewed `"), false, "a full run must not claim a narrowed range");
