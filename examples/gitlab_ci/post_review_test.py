@@ -64,7 +64,13 @@ DIFF_REFS = {
 def diff_inventory(path, lines):
     """Build a diff inventory for ``path`` from ``{new_line: (type, old_line)}``."""
     positions = {n: {"type": t, "old_line": o} for n, (t, o) in lines.items()}
-    return {"files": {path: []}, "known": {path},
+    ranges = []
+    for line in sorted(lines):
+        if ranges and line == ranges[-1]["end"] + 1:
+            ranges[-1]["end"] = line
+        else:
+            ranges.append({"start": line, "end": line})
+    return {"files": {path: ranges}, "known": {path},
             "positions": {path: positions}, "complete": True}
 
 DEFAULT_CONFIG = {
@@ -455,15 +461,14 @@ class PublishTest(unittest.TestCase):
         self.assertEqual(line_range["end"]["line_code"], f"{expected_path_sha1}_0_6")
         self.assertEqual(line_range["end"]["type"], "new")
 
-    def test_inline_multiline_unresolvable_omits_line_range(self):
-        # With no diff positions for the file, we must not emit a bogus code;
-        # the comment still posts, anchored on the single end_line.
+    def test_inline_multiline_unresolvable_goes_to_summary(self):
         stats, rec = run_publish({"comments": [comment(start_line=5, end_line=10)]})
-        self.assertEqual(stats["inline"], 1)
+        self.assertEqual(stats["inline"], 0)
+        self.assertEqual(stats["summary"], 1)
         self.assertEqual(stats["failed"], 0)
-        inline = rec.disc_calls[0]
-        self.assertEqual(inline["position"]["new_line"], 10)
-        self.assertNotIn("line_range", inline["position"])
+        self.assertEqual(rec.disc_calls, [])
+        self.assertIn("L5-L10", rec.final_summary_body)
+        self.assertIn("diff hunk coverage unavailable", rec.final_summary_body)
 
     def test_fallback_when_diff_refs_none(self):
         stats, rec = run_publish({"comments": [comment()]}, diff_refs=None)
@@ -549,9 +554,9 @@ class PublishTest(unittest.TestCase):
 
     def test_multiple_comments_some_fail(self):
         result = {"comments": [
-            comment(path="a.py", end_line=1),
-            comment(path="b.py", end_line=2),
-            comment(path="c.py", end_line=3),
+            comment(path="a.py", start_line=1, end_line=1),
+            comment(path="b.py", start_line=2, end_line=2),
+            comment(path="c.py", start_line=3, end_line=3),
         ]}
         stats, rec = run_publish(
             result,
@@ -601,6 +606,130 @@ class PublishTest(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 # Sticky summary (Group B1)
 # --------------------------------------------------------------------------- #
+
+
+class DiffHunkPublishTest(unittest.TestCase):
+    def setUp(self):
+        patch = "@@ -10,16 +11,16 @@\n"
+        patch += "\n".join("-old line\n+new line" if n == 21 else " context %d" % n
+                           for n in range(11, 27))
+        patch += "\n@@ -119,4 +120,4 @@\n-old line\n+new line\n context\n context\n context\n"
+        ranges, complete = pr.parse_diff_hunk_inventory(patch)
+        self.diffs = {"files": {"main.py": ranges}, "known": {"main.py"},
+                      "positions": {"main.py": pr.build_new_line_positions(patch)},
+                      "complete": complete}
+
+    def test_partial_range_is_clipped_before_posting(self):
+        for start, end, expected_start, expected_end in [
+            (21, 28, 21, 26), (9, 14, 11, 14), (9, 30, 11, 26), (26, 28, 26, 26),
+        ]:
+            with self.subTest(start=start, end=end):
+                finding = comment(start_line=start, end_line=end)
+                original = dict(finding)
+                stats, rec = run_publish({"comments": [finding]}, poster=Recorder(diffs=self.diffs))
+                self.assertEqual(stats["inline"], 1)
+                self.assertEqual(stats["failed"], 0)
+                self.assertEqual(stats["summary"], 0)
+                position = rec.disc_calls[0]["position"]
+                self.assertEqual(position["new_line"], expected_end)
+                self.assertEqual(position["old_line"], expected_end - 1)
+                if expected_start != expected_end:
+                    self.assertEqual(position["line_range"]["start"]["new_line"], expected_start)
+                    self.assertEqual(position["line_range"]["end"]["new_line"], expected_end)
+                else:
+                    self.assertNotIn("line_range", position)
+                self.assertIn("Original finding range: L%d-L%d" % (start, end), rec.disc_calls[0]["body"])
+                self.assertEqual(finding, original)
+
+    def test_range_crossing_hunks_uses_one_contiguous_intersection(self):
+        for start, end, expected_start, expected_end in [
+            (21, 122, 21, 26), (24, 122, 120, 122), (26, 120, 120, 120),
+        ]:
+            with self.subTest(start=start, end=end):
+                stats, rec = run_publish(
+                    {"comments": [comment(start_line=start, end_line=end)]},
+                    poster=Recorder(diffs=self.diffs),
+                )
+                self.assertEqual(stats["inline"], 1)
+                position = rec.disc_calls[0]["position"]
+                self.assertEqual(position["new_line"], expected_end)
+                if expected_start == expected_end:
+                    self.assertNotIn("line_range", position)
+                    self.assertNotIn("old_line", position)
+                else:
+                    self.assertEqual(position["line_range"]["start"]["new_line"], expected_start)
+
+    def test_no_intersection_keeps_finding_in_summary(self):
+        for finding in [comment(start_line=27, end_line=28),
+                        comment(path="missing.py", start_line=21, end_line=28)]:
+            with self.subTest(finding=finding):
+                stats, rec = run_publish({"comments": [finding]}, poster=Recorder(diffs=self.diffs))
+                self.assertEqual(stats["summary"], 1)
+                self.assertEqual(stats["failed"], 0)
+                self.assertEqual(rec.disc_calls, [])
+                self.assertIn(finding["content"], rec.final_summary_body)
+                self.assertIn("out of diff", rec.final_summary_body)
+
+    def test_incomplete_or_missing_patch_keeps_finding_in_summary(self):
+        for diffs in [dict(self.diffs, complete=False), dict(self.diffs, files={}),
+                      dict(self.diffs, positions={})]:
+            with self.subTest(diffs=diffs):
+                stats, rec = run_publish(
+                    {"comments": [comment(start_line=21, end_line=28)]},
+                    poster=Recorder(diffs=diffs),
+                )
+                self.assertEqual(stats["summary"], 1)
+                self.assertEqual(stats["failed"], 0)
+                self.assertEqual(rec.disc_calls, [])
+                self.assertIn("L21-L28", rec.final_summary_body)
+
+    def test_clipped_suggestion_preserves_full_replacement_in_summary(self):
+        finding = comment(start_line=21, end_line=28, existing_code="before\nwhole block",
+                          suggestion_code="after\nwhole block")
+        stats, rec = run_publish({"comments": [finding]}, poster=Recorder(diffs=self.diffs))
+        self.assertEqual(stats["summary"], 1)
+        self.assertEqual(stats["failed"], 0)
+        self.assertEqual(rec.disc_calls, [])
+        self.assertIn("L21-L28", rec.final_summary_body)
+        self.assertIn(finding["existing_code"], rec.final_summary_body)
+        self.assertIn(finding["suggestion_code"], rec.final_summary_body)
+        self.assertNotIn("```suggestion", rec.final_summary_body)
+
+    def test_valid_ranges_keep_suggestions_and_share_diff_inventory(self):
+        findings = [comment(start_line=21, end_line=26, existing_code="before", suggestion_code="after"),
+                    comment(start_line=120, end_line=123)]
+        stats, rec = run_publish({"comments": findings}, poster=Recorder(diffs=self.diffs))
+        self.assertEqual(stats["inline"], 2)
+        self.assertEqual(stats["summary"], 0)
+        self.assertEqual(rec.diff_calls, 1)
+        self.assertIn("```suggestion:-5+0\nafter\n```", rec.disc_calls[0]["body"])
+        self.assertNotIn("Original finding range", rec.disc_calls[0]["body"])
+
+    def test_incremental_filter_uses_clipped_position(self):
+        config = dict(DEFAULT_CONFIG, incremental=True)
+        history = [{"notes": [{"body": "<!-- ocr-old -->", "position": {
+            "new_path": "main.py", "line_range": {
+                "start": {"new_line": 11}, "end": {"new_line": 26},
+            },
+        }}]}]
+        stats, rec = run_publish(
+            {"comments": [comment(start_line=1, end_line=100)]}, config=config,
+            poster=Recorder(diffs=self.diffs, discussions=history),
+        )
+        self.assertEqual(stats["skipped"], 1)
+        self.assertEqual(stats["summary"], 0)
+        self.assertEqual(rec.disc_calls, [])
+
+    def test_clipped_position_failure_uses_cached_diff_and_preserves_original(self):
+        rec = Recorder(diffs=self.diffs, disc_outcomes=[{
+            "success": False, "failed_reason": "new_line invalid", "http_status": 400,
+            "error_body": "new_line invalid", "is_rate_limit_exhausted": False,
+        }])
+        stats, rec = run_publish({"comments": [comment(start_line=21, end_line=28)]}, poster=rec)
+        self.assertEqual(stats["failed"], 1)
+        self.assertEqual(rec.diff_calls, 1)
+        self.assertIn("line resolution failure (valid)", rec.final_summary_body)
+        self.assertIn("L21-L28", rec.final_summary_body)
 
 
 class StickySummaryTest(unittest.TestCase):
