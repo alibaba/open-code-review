@@ -138,6 +138,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err != nil {
 		return err
 	}
+	applyMaxToolsCap(cc.Template, opts.maxTools)
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security (#112): reject ref-option injection before any git invocation.
