@@ -118,6 +118,8 @@ func setupFileFindRepo(t *testing.T) string {
 	write("Makefile", "all:\n")
 	write("Dockerfile", "FROM scratch\n")
 	write("LICENSE", "MIT\n")
+	write("pkg/BUILD", "filegroup(name = \"all\")\n")
+	write("WORKSPACE", "workspace(name = \"example\")\n")
 	write("data_binary", "binary\n")
 
 	run("git", "add", ".")
@@ -135,6 +137,30 @@ func TestFileFind_GitRepo_WorkspaceMode(t *testing.T) {
 	}
 	if !strings.Contains(got, "main.go") || !strings.Contains(got, "util.go") {
 		t.Errorf("expected .go files, got: %s", got)
+	}
+}
+
+func TestFileFind_GitRepo_StarlarkBuildFiles(t *testing.T) {
+	dir := setupFileFindRepo(t)
+	p := NewFileFind(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	tests := []struct {
+		query string
+		want  string
+	}{
+		{query: "BUILD", want: "pkg/BUILD"},
+		{query: "WORKSPACE", want: "WORKSPACE"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			got, err := p.Execute(context.Background(), map[string]any{"query_name": tt.query})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("expected %s, got: %s", tt.want, got)
+			}
+		})
 	}
 }
 
@@ -287,6 +313,9 @@ func TestShouldSkipFile(t *testing.T) {
 		{"LICENSE", false},
 		{"Vagrantfile", false},
 		{"Containerfile", false},
+		{"BUILD", false},
+		{"pkg/BUILD", false},
+		{"WORKSPACE", false},
 		{"some_binary", true},
 		{"dir/unknown_file", true},
 	}
