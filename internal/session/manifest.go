@@ -96,13 +96,14 @@ const (
 	RunFailureBudget        RunFailureClass = "budget"
 	RunFailureInternal      RunFailureClass = "internal"
 	RunFailureUnknown       RunFailureClass = "unknown"
+	RunFailureVerification  RunFailureClass = "verification"
 )
 
 // valid reports whether c is one of the fixed run failure classes.
 func (c RunFailureClass) valid() bool {
 	switch c {
 	case RunFailureInput, RunFailureConfiguration, RunFailureTimeout,
-		RunFailureCancelled, RunFailureBudget, RunFailureInternal, RunFailureUnknown:
+		RunFailureCancelled, RunFailureBudget, RunFailureInternal, RunFailureUnknown, RunFailureVerification:
 		return true
 	default:
 		return false
@@ -118,6 +119,8 @@ func (c RunFailureClass) valid() bool {
 // precise cause.
 func itemFailureForRunClass(c RunFailureClass) FailureClass {
 	switch c {
+	case RunFailureVerification:
+		return FailureProvider
 	case RunFailureInput:
 		return FailureInput
 	case RunFailureConfiguration:
