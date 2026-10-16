@@ -45,7 +45,7 @@ type SealedInput struct {
 func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	defer stdout.Quiet()()
 
-	resolution, err := resolveInputBeforeDiff(ctx, args)
+	resolution, err := ResolveInput(ctx, args)
 	if err != nil {
 		return nil, err
 	}
@@ -61,10 +61,10 @@ func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	return &SealedInput{Identity: a.runIdentity(), Resolution: a.inputResolution}, nil
 }
 
-// resolveInputBeforeDiff turns every moving head ref into an immutable commit
-// before the diff used for admission is loaded. Range mode then computes its
+// ResolveInput turns every moving head ref into an immutable commit
+// before any review diff is loaded. Range mode then computes its
 // merge-base against that frozen head; commit mode needs only the frozen head.
-func resolveInputBeforeDiff(ctx context.Context, args Args) (*diff.InputResolution, error) {
+func ResolveInput(ctx context.Context, args Args) (*diff.InputResolution, error) {
 	switch {
 	case args.Commit != "":
 		head, err := resolveCommitHead(ctx, args, args.Commit)
