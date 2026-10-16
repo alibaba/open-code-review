@@ -73,6 +73,7 @@ func runSessionListCompat(args []string) error {
 	cmd.Flags().StringVar(&sessionListRepoDir, "repo", "", "")
 	cmd.Flags().BoolVar(&sessionListJSON, "json", false, "")
 	cmd.Flags().IntVar(&sessionListLimit, "limit", 20, "")
+	cmd.Flags().StringVar(&sessionListBranch, "branch", "", "")
 	cmd.SetArgs(args)
 	return cmd.Execute()
 }
@@ -124,6 +125,7 @@ func runSession(args []string) error {
 	listCmd.Flags().StringVar(&sessionListRepoDir, "repo", "", "")
 	listCmd.Flags().BoolVar(&sessionListJSON, "json", false, "")
 	listCmd.Flags().IntVar(&sessionListLimit, "limit", 20, "")
+	listCmd.Flags().StringVar(&sessionListBranch, "branch", "", "")
 	showCmd := &cobra.Command{
 		Use: "show", Args: cobra.ExactArgs(1),
 		SilenceUsage: true, SilenceErrors: true,
