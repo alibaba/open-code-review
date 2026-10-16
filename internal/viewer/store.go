@@ -158,6 +158,7 @@ func peekSession(path string) (SessionSummary, error) {
 	defer f.Close()
 
 	summary := SessionSummary{Aborted: true}
+	commentCounts := make(map[string]int)
 	var lastLine []byte
 	readErr := readJSONLLines(f, func(line []byte) {
 		lastLine = append([]byte(nil), line...)
@@ -194,13 +195,22 @@ func peekSession(path string) (SessionSummary, error) {
 			return
 		}
 
-		// Count comments from review_item_done/reused records
-		if len(line) > 0 && (bytes.Contains(line, []byte(`"review_item_done"`)) || bytes.Contains(line, []byte(`"review_item_reused"`))) {
+		if bytes.Contains(line, []byte(`"review_item_`)) {
 			var rec map[string]any
 			if err := json.Unmarshal(line, &rec); err == nil {
-				if comments, ok := rec["comments"].([]any); ok {
-					summary.CommentCount += len(comments)
+				typ, _ := rec["type"].(string)
+				if typ != "review_item_done" && typ != "review_item_reused" && typ != "review_item_failed" {
+					return
 				}
+				count := 0
+				if comments, ok := rec["comments"].([]any); ok && typ != "review_item_failed" {
+					count = len(comments)
+				}
+				if fingerprint, _ := rec["fingerprint"].(string); fingerprint != "" {
+					summary.CommentCount -= commentCounts[fingerprint]
+					commentCounts[fingerprint] = count
+				}
+				summary.CommentCount += count
 			}
 		}
 	})
@@ -504,6 +514,8 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	vs.Summary.Aborted = true
 	fileIndex := make(map[string]*FileGroup)
 	markOccurrences := make(map[string]int)
+	var commentGroups [][]*ReviewComment
+	checkpointIndex := make(map[string]int)
 
 	readErr := readJSONLLines(f, func(line []byte) {
 		var rec map[string]any
@@ -680,10 +692,14 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 				}
 			}
 
-		case "review_item_done", "review_item_reused":
+		case "review_item_done", "review_item_reused", "review_item_failed":
 			fp, _ := rec["filePath"].(string)
+			if fp == "" {
+				fp, _ = rec["newPath"].(string)
+			}
 			recUUID, _ := rec["uuid"].(string)
-			if comments, ok := rec["comments"].([]any); ok {
+			var group []*ReviewComment
+			if comments, ok := rec["comments"].([]any); ok && typ != "review_item_failed" {
 				for ci, c := range comments {
 					cm, ok := c.(map[string]any)
 					if !ok {
@@ -715,14 +731,26 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 						rc.Severity = v
 					}
 					rc.MarkID = commentMarkID(recUUID, ci, rc, markOccurrences)
-					vs.Comments = append(vs.Comments, rc)
+					group = append(group, rc)
 				}
 			}
+			if fingerprint, _ := rec["fingerprint"].(string); fingerprint != "" {
+				if index, exists := checkpointIndex[fingerprint]; exists {
+					commentGroups[index] = group
+					return
+				}
+				checkpointIndex[fingerprint] = len(commentGroups)
+			}
+			commentGroups = append(commentGroups, group)
 
 		case "session_end":
 			applySessionEnd(&vs.Summary, rec)
 		}
 	})
+
+	for _, group := range commentGroups {
+		vs.Comments = append(vs.Comments, group...)
+	}
 
 	// Aggregate token usage across all task cards
 	fileBreakdown := make([]FileTokenUsage, 0, len(vs.Files))
