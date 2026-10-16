@@ -353,7 +353,7 @@ ocr s      [flags]   (alias)
 
 | 参数 | 简写 | 默认 | 说明 |
 |---|---|---|---|
-| `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。 |
+| `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。选择器按工作树中的实际路径解析：原拼写优先，因此 `src` 不会同时选中同级的 `SRC/`；在不区分大小写的文件系统（Windows、默认 macOS）上，用其他大小写拼写、但文件系统能解析时，仍会选中对应文件；若选择器指向的路径不存在，则报错而不是得到空扫描。 |
 | `--exclude <patterns>` | - | - | 逗号分隔的 gitignore 风格排除模式（如 `**/generated/*,*.pb.go`）；与 `rule.json` 的 excludes 合并。 |
 | `--output <path>` | `-o` | 标准输出 | 将扫描结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
 | `--preview` | `-p` | `false` | 枚举并过滤文件但跳过 LLM。打印文件列表、可评审/排除数量、总行数及每个文件的排除原因。支持 `--format json`；不支持 `--format sarif`。 |
