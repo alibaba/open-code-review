@@ -960,6 +960,26 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 		t.Errorf("a deletion must be listed under its own path, not the /dev/null sentinel; got:\n%s", got)
 	}
 
+	// A deleted group member excludes only itself: with the exclude map keyed on
+	// effectivePath, the /dev/null sentinel must not swallow every other
+	// deletion in the same run.
+	t.Run("a deleted group member does not hide other deletions", func(t *testing.T) {
+		a := New(Args{})
+		a.diffs = []model.Diff{
+			{NewPath: "kept.go", OldPath: "kept.go", Insertions: 1},
+			{NewPath: "/dev/null", OldPath: "removed.go", IsDeleted: true, Deletions: 5},
+			{NewPath: "/dev/null", OldPath: "other_removed.go", IsDeleted: true, Deletions: 7},
+		}
+		group := []model.Diff{{NewPath: "/dev/null", OldPath: "removed.go", IsDeleted: true, Deletions: 5}}
+		got := a.buildChangeFilesExceptGroup(group)
+		if !strings.Contains(got, "DELETED   other_removed.go (+0/-7)") {
+			t.Errorf("the non-member deletion must still be listed; got:\n%s", got)
+		}
+		if strings.Contains(got, "DELETED   removed.go") {
+			t.Errorf("the group member deletion must not appear; got:\n%s", got)
+		}
+	})
+
 	// The separator is emitted before each entry, so a skipped final diff cannot
 	// leave a trailing newline behind. Excluding an entire group (plus binaries)
 	// makes "the last diff is skipped" the common case, so assert the exact string
@@ -1315,5 +1335,29 @@ func TestAgent_TokenAccumulation(t *testing.T) {
 	}
 	if a.TotalOutputTokens() != 5 {
 		t.Errorf("TotalOutputTokens = %d, want 5", a.TotalOutputTokens())
+	}
+}
+
+func TestBuildConcatenatedDiffs_DeletedFileUsesRealPath(t *testing.T) {
+	got := buildConcatenatedDiffs([]model.Diff{
+		{NewPath: "/dev/null", OldPath: "deleted.go", IsDeleted: true, Diff: "-gone"},
+	})
+	if !strings.Contains(got, `<file path="deleted.go">`) {
+		t.Errorf("a deletion must be framed by its real path so comments land on it, got:\n%s", got)
+	}
+	if strings.Contains(got, "/dev/null") {
+		t.Errorf("the /dev/null sentinel must not leak into the prompt, got:\n%s", got)
+	}
+}
+
+func TestGroupHasComments_DeletedFile(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	collector.Add(model.LlmComment{Path: "deleted.go", Content: "stale API"})
+	a := New(Args{CommentCollector: collector})
+	g := FileGroup{Label: "deleted.go", Diffs: []model.Diff{
+		{NewPath: "/dev/null", OldPath: "deleted.go", IsDeleted: true},
+	}}
+	if !a.groupHasComments(g) {
+		t.Error("comments on a deleted file must be found under its real path")
 	}
 }
