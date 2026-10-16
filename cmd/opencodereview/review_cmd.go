@@ -51,6 +51,7 @@ type reviewOptions struct {
 	effort                string
 	noFilter              bool
 	preview               bool
+	tuiControlAddress     string
 }
 
 var reviewOpts reviewOptions
@@ -103,12 +104,23 @@ var reviewCmd = &cobra.Command{
 		// for the whole shutdown window (see interrupt.go).
 		ctx, stop := interruptContextWithForcedExit(cmd.Context())
 		defer stop()
+		controlToken := ""
+		if reviewOpts.tuiControlAddress != "" {
+			controlToken = os.Getenv(tuiControlTokenEnv)
+		}
+		ctx, closeControl, err := tuiChildContext(ctx, reviewOpts.tuiControlAddress, controlToken)
+		if err != nil {
+			return err
+		}
+		defer closeControl()
 		return executeReviewContext(ctx, reviewOpts)
 	},
 }
 
 func init() {
 	registerReviewFlags(reviewCmd, &reviewOpts)
+	reviewCmd.Flags().StringVar(&reviewOpts.tuiControlAddress, "tui-control-address", "", "internal TUI cancellation connection")
+	_ = reviewCmd.Flags().MarkHidden("tui-control-address")
 }
 
 func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error) {
@@ -315,7 +327,12 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		if emitted {
 			failureReport = nil
 		}
-		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
+		failureUsageFormat := opts.outputFormat
+		if opts.tuiControlAddress != "" {
+			// The report file carries structured results; stderr supplies TUI diagnostics.
+			failureUsageFormat = "text"
+		}
+		emitFailureUsage(ag, time.Since(startTime), failureUsageFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}

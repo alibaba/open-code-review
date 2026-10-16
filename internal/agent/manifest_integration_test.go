@@ -328,6 +328,43 @@ func TestManifestFlowRunInputFailureIsPersisted(t *testing.T) {
 	}
 }
 
+func TestManifestFlowInputCancellationPreservesDiagnostic(t *testing.T) {
+	for _, mode := range []string{session.ReviewModeRange, session.ReviewModeWorkspace} {
+		for _, deadline := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/deadline=%v", mode, deadline), func(t *testing.T) {
+				setTestHome(t, t.TempDir())
+				repoDir := t.TempDir()
+				sh := session.New(repoDir, "feature", "fake", session.SessionOptions{ReviewMode: mode, Operation: session.OperationReview})
+				a := New(Args{RepoDir: repoDir, ReviewMode: mode, Session: sh, GitRunner: gitcmd.New(1)})
+				wantDiagnostic := "workspace tracked diff failed"
+				if mode == session.ReviewModeRange {
+					a.args.From, a.args.To = "main", "feature"
+					wantDiagnostic = "cannot find merge-base between main and feature"
+				}
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				wantErr, wantClass := context.Canceled, session.RunFailureCancelled
+				if deadline {
+					ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+					defer cancel()
+					wantErr, wantClass = context.DeadlineExceeded, session.RunFailureTimeout
+				}
+				_, err := a.Run(ctx)
+				if !errors.Is(err, wantErr) || !strings.Contains(err.Error(), wantDiagnostic) {
+					t.Fatalf("input diagnostic or context cause lost: %v", err)
+				}
+				if count := strings.Count(err.Error(), wantErr.Error()); count != 1 {
+					t.Fatalf("context cause appears %d times in %v", count, err)
+				}
+				manifest := a.RunManifest()
+				if manifest == nil || manifest.RunFailure == nil || manifest.RunFailure.Classification != wantClass {
+					t.Fatalf("input failure classification = %+v, want %s", manifest, wantClass)
+				}
+			})
+		}
+	}
+}
+
 func TestManifestFlowAllFailedTimeoutAndPanic(t *testing.T) {
 	tests := []struct {
 		name      string
