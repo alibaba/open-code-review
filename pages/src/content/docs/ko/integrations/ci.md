@@ -47,6 +47,28 @@ GitLab은 `GITLAB_API_TOKEN`을 명시적으로 두기를 권장하지만, fork 
 `CI_JOB_TOKEN`이 대체 수단으로 쓰입니다(`/discussions`로 디스커션을 남길 수
 있습니다). 안정적으로 쓰려면 전용 토큰을 권장합니다.
 
+## 선택적 CI 게이트 {#optional-ci-gate}
+
+두 통합 모두 리뷰 게시 후 [`ocr gate`](../cli-reference/#ocr-gate)를 실행할 수 있습니다.
+게이트는 기본적으로 꺼져 있습니다. 사용하려면 `ocr gate`가 포함된 OCR 빌드를 GitHub의
+`ocr_version` 또는 GitLab의 `OCR_VERSION`으로 지정합니다. 게이트를 켜면 모델 호출 전에
+명령을 사용할 수 있는지 확인합니다.
+
+| 판정 | 의미 | 종료 코드 |
+|---|---|---|
+| `pass` | 선택된 모든 파일의 리뷰 기록이 완전하고, 활성화한 검사를 모두 통과했습니다. | `0` |
+| `fail` | 발견된 문제의 심각도가 설정한 임계값 이상입니다. | `1` |
+| `inconclusive` | 리뷰 완료 여부, 대상 커밋, 코멘트 도구의 실행 결과 등을 확인할 정보가 부족합니다. | `1` |
+
+리뷰 전에 merge base와 head의 커밋 ID를 고정하고 리뷰와 게이트에 같은 ID를 전달합니다.
+게이트는 원본 JSON에 기록된 모든 문제를 평가하며, 요약에 포함되거나 중복 게시가 생략된
+문제도 검사합니다. 예산 제한으로 중단된 리뷰, `waived` 항목, 선택된 파일이 없는 결과,
+리뷰 기록 누락, `code_comment` 호출 실패, 지원되지 않는 manifest 버전은 통과하지 않습니다.
+
+작업이 성공하려면 리뷰 실행과 게시가 성공하고 게이트가 `pass`로 판정해야 합니다.
+결과 게시와 게이트 판정을 시도한 뒤 작업의 최종 상태를 결정합니다. 인라인 게시에
+실패해 요약으로 대체한 경우 작업은 실패로 처리됩니다. 최종 요약 게시도 확인되어야 합니다.
+
 ## GitHub Actions {#github-actions}
 
 업스트림 워크플로는
@@ -110,6 +132,8 @@ curl -o .github/workflows/ocr-review.yml \
 | `max_tokens_budget` | `''` | `ocr review --max-tokens-budget`으로 전달되는 총 토큰(입력 + 출력) 상한. 비어 있거나 `'0'`이면 무제한입니다. LLM 라운드마다 먼저 확인하며, 이미 상한을 넘긴 하위 작업은 발견 사항을 제출할 마지막 라운드를 한 번 받고, 이후 하위 작업은 디스패치되지 않으며, 예산을 넘기거나 건너뛴 파일은 `failed(budget)`로 보고되고, 부분 결과는 그대로 게시되며, 리뷰는 0으로 종료합니다. |
 | `llm_reasoning_effort` | `''` | `reasoning_effort` 요청 필드를 조절할 수 있는 모델(예: GLM-5.x, OpenAI reasoning 모델)의 추론 깊이: `minimal`, `low`, `medium`, `high`, `max`(대소문자 무시). `llm_extra_body`를 통해 요청 본문에 병합되므로 이미 배포된 모든 CLI 버전에서 동작합니다. `llm_extra_body` 안의 명시적 `reasoning_effort` 키가 이 입력보다 우선합니다. 비어 있으면(기본값) 아무것도 보내지 않습니다. OpenAI 호환 프로토콜 전용입니다 — Anthropic API는 알 수 없는 본문 필드를 거부하므로 해당 프로토콜에서는 액션이 즉시 실패합니다. Anthropic의 thinking 제어는 `llm_extra_body`의 명시적 키를 사용하세요. |
 | `stream_progress` | `'false'` | `'true'`로 설정하면 실행이 끝날 때까지 조용히 기다리는 대신 `[ocr]` 진행 라인을 워크플로 로그에 실시간으로 흘려보냅니다(stderr의 human audience). 표시 전용 토글이며 stderr는 여전히 파일에 캡처되어 아티팩트와 코멘트 게시에 사용됩니다. |
+| `gate` | `'false'` | 공유 CI 게이트를 켭니다. `true` / `false`는 대소문자를 구분하지 않습니다. |
+| `fail_on_severity` | `''` | 발견된 문제의 심각도가 `critical`, `high`, `medium`, `low` 중 지정한 값 이상이면 작업이 실패합니다. `gate: 'true'`가 필요합니다. 빈 값은 심각도 검사를 끕니다. 대소문자와 앞뒤 공백은 무시합니다. |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -128,6 +152,26 @@ curl -o .github/workflows/ocr-review.yml \
 [`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)을
 참고하세요 — 게시 모드(`sticky_summary`, `incremental`), 심각도/카테고리 라우팅,
 푸시 간 체크포인트 등을 포함합니다.
+
+### 게이트 켜기 {#enable-the-github-gate}
+
+기존 액션 단계의 `with:`에 추가합니다.
+
+```yaml
+with:
+  gate: 'true'
+  fail_on_severity: high
+```
+
+게이트를 켜면 merge base부터 head까지 전체 범위를 리뷰합니다. `checkpoint_range` 설정과
+관계없이 체크포인트 읽기와 갱신을 생략합니다. 오래 열린 PR은 같은 범위를 반복해서 리뷰하므로
+토큰 비용이 늘어날 수 있습니다. 코멘트 라우팅과 증분 게시는 계속 사용할 수 있습니다.
+
+`gate_exit_code`는 게이트 명령의 종료 코드입니다. 게이트가 꺼져 있거나 해당 단계에 도달하지
+못하면 빈 값입니다.
+`upload_artifacts: 'true'`(기본값)이면 `ocr-result.json`과 `ocr-stderr.log`를 저장합니다.
+게이트를 실행하면 `ocr-gate.json`과 `ocr-gate-stderr.log`도 포함됩니다.
+각 액션 호출은 별도의 임시 디렉터리를 사용합니다.
 
 ### 커스터마이즈 {#customization}
 
@@ -308,13 +352,10 @@ SARIF는 기계가 읽는 형식이므로 OCR은 stdout에 진행 상황을 출�
 |---|---|
 | `Cannot find merge-base` | 체크아웃 단계가 shallow clone을 썼는데, range 모드 리뷰에는 전체 히스토리가 필요합니다. 업스트림 워크플로는 `actions/checkout`에 `fetch-depth: 0`을 설정해 둡니다. 파일을 고치더라도 이 설정은 남겨 두세요. |
 | `Failed to parse OCR output` | `OCR_LLM_URL`이나 `OCR_LLM_AUTH_TOKEN`이 없거나 잘못됐습니다. *Settings → Secrets and variables → Actions*에서 값을 다시 확인하세요. |
-| 리뷰 코멘트가 엉뚱한 줄에 달림 | 대개 리뷰를 시작한 시점과 코멘트를 게시한 시점 사이에 diff가 밀린 경우입니다. 게시 스크립트가 일반 이슈 코멘트로 대체하므로 따로 할 일은 없습니다. |
+| 리뷰 코멘트가 엉뚱한 줄에 달림 | 리뷰 중 PR head나 diff가 변경되었을 수 있습니다. 인라인으로 게시하지 못한 지적은 요약 코멘트에 포함됩니다. `gate: 'true'`에서는 인라인 게시 실패가 남아 있으면 작업이 실패합니다. 리뷰한 head와 diff 위치를 확인한 후 다시 실행하세요. |
 
-> **참고.** `OCR_DEBUG` 환경 변수는 **아직 구현되어 있지 않습니다.**
-> `OCR_DEBUG: "1"`을 설정해도 아무 효과가 없습니다. 나중에 연결될 경우를 대비해
-> 여기 적어 둡니다. 지금 자세한 출력을 보려면 워크플로가
-> `/tmp/ocr-result.json`과 `/tmp/ocr-stderr.log`에 남기는 원본 리뷰 JSON과 stderr를
-> 확인하거나(아래 문제 해결 참고), `ocr review`를 로컬에서 실행하세요.
+진단에는 업로드된 `ocr-result.json`과 `ocr-stderr.log`를 확인하세요. 게이트를 실행하면
+`ocr-gate.json`과 `ocr-gate-stderr.log`도 포함됩니다.
 
 ## GitLab CI {#gitlab-ci}
 
@@ -327,18 +368,20 @@ SARIF는 기계가 읽는 형식이므로 OCR은 stdout에 진행 상황을 출�
 - `merge_requests` 이벤트에서 트리거합니다(생성·수정·재오픈 등 모든 MR 이벤트).
 - `node:20` 이미지에서 실행하며, OCR을 설치하고 `ocr config set`으로 설정한 뒤 MR
   diff 모드로 핵심 명령을 실행합니다.
-- 인라인 Python 스크립트로 JSON 응답을 파싱해 각 지적을 GitLab 디스커션(diff 위
+- `post_review.py`로 JSON 응답을 파싱해 각 지적을 GitLab 디스커션(diff 위
   인라인)으로 게시합니다. 위치를 정확히 잡기 위해 MR의 `versions` 엔드포인트로
   올바른 `base_sha` / `start_sha` / `head_sha`를 계산합니다. 인라인으로 달 수 없는
   코멘트는 일반 MR 노트로 대체하고, 마지막에 요약 노트를 남깁니다.
 
 ### 설치 {#install}
 
-파이프라인 파일을 저장소 루트에 넣으세요:
+파이프라인과 게시 스크립트를 저장소 루트에 복사하세요:
 
 ```bash
 curl -o .gitlab-ci.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/gitlab_ci/.gitlab-ci.yml
+curl -o post_review.py \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/gitlab_ci/post_review.py
 ```
 
 이미 `.gitlab-ci.yml`이 있고 그대로 두고 싶다면, 레시피를 다른 경로에 넣고
@@ -348,6 +391,8 @@ curl -o .gitlab-ci.yml \
 include:
   - local: 'ci/ocr-review.gitlab-ci.yml'
 ```
+
+`post_review.py`는 저장소 루트에 둡니다. 다른 위치에 두려면 파이프라인의 스크립트 경로도 수정하세요.
 
 ### 필요한 CI/CD 변수 {#required-ci-cd-variables}
 
@@ -360,9 +405,9 @@ include:
 | `OCR_LLM_MODEL` | 아니요 | 아니요 | 모델 이름. 기본값이 없으므로 반드시 지정해야 합니다. |
 | `GITLAB_API_TOKEN` | 아니요 | 예 | `api` 스코프를 가진 프로젝트 / 개인 / 그룹 액세스 토큰. 없으면 내장 `CI_JOB_TOKEN`이 대신 쓰입니다(예: fork MR). 안정적으로 쓰려면 전용 `GITLAB_API_TOKEN`을 권장합니다. |
 
-> GitLab은 8자보다 짧은 변수를 거부하므로 파이프라인에서 `llm.use_anthropic`을
-> `false`로 하드코딩해 두었습니다. Anthropic Claude 모델을 쓰려면 스크립트를 직접
-> 고치세요.
+> GitLab의 8자 이상 조건은 마스킹된 변수에 적용됩니다. `OCR_GATE` 같은 정책 값은
+> 마스킹을 끈 변수로 설정하세요. 이 예제의 `llm.use_anthropic`은 `false`입니다.
+> Anthropic Claude 모델을 사용하려면 해당 설정 줄을 수정하세요.
 
 > 파이프라인도 시작할 때
 > `ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'`를
@@ -375,6 +420,20 @@ include:
 > 지으면 다른 설정 없이 리뷰어 이름에 브랜드를 입힐 수 있습니다.
 > [서비스 계정 명의로 게시하기](#post-under-a-service-account-identity)에 적힌 더
 > 견고한 서비스 계정 설정까지는 필요 없을 때 쓸 만합니다.
+
+### 게이트 켜기 {#enable-the-gitlab-gate}
+
+```yaml
+variables:
+  OCR_GATE: 'true'
+  OCR_FAIL_ON_SEVERITY: high
+```
+
+이 값은 마스킹을 끈 변수로 설정합니다. `OCR_GATE`의 기본값은 `false`이며
+`true` / `false`의 대소문자를 구분하지 않습니다. 심각도는 `critical`, `high`, `medium`,
+`low`를 지원하고 대소문자와 앞뒤 공백은 무시합니다. 빈 값은 심각도 검사를 생략합니다.
+잘못된 값은 설치나 모델 호출 전에 오류를 발생시킵니다. 게이트를 끄면
+`OCR_FAIL_ON_SEVERITY`는 기존 게시 스크립트의 판정을 유지합니다.
 
 ### 커스터마이즈 {#customization}
 
@@ -412,17 +471,20 @@ script:
 
 #### OCR 버전 고정 {#pin-the-ocr-version}
 
+설치할 npm 버전을 `OCR_VERSION`으로 지정합니다. 게이트를 켜려면 `ocr gate`가 포함된 버전이 필요합니다.
+
 ```yaml
-script:
-  - npm install -g @alibaba-group/open-code-review@1.0.0
+variables:
+  OCR_VERSION: '<version>'
 ```
 
 #### 푸시할 때마다 다시 리뷰하지 않기 {#avoid-re-reviewing-on-every-push}
 
-`only: [merge_requests]`는 **모든** MR 갱신에서 트리거하므로, 오래 열려 있는 MR에서는
-LLM 토큰을 많이 쓰게 됩니다. GitLab에는 "생성 시에만" 같은 이벤트가 없으므로, 리뷰를
-실행하기 전에 기존 OCR 노트가 있는지 확인하고 있으면 빠져나오는 방식을 권장합니다.
-`ocr review` 호출을 다음 Python 래퍼로 바꾸세요:
+`only: [merge_requests]`는 MR이 갱신될 때마다 실행됩니다. `OCR_GATE=false`에서
+비용을 줄이려면 기존 OCR 노트를 확인하고 리뷰를 생략할 수 있습니다. `OCR_GATE=true`는
+매 실행의 리뷰, 게시, 게이트 판정이 필요합니다. 다음 예제는 게이트가 꺼져 있을 때만
+기존 노트에 따른 건너뛰기를 적용합니다.
+이 설정을 사용하면 이후 변경은 다음 리뷰를 요청할 때까지 미검토 상태로 남습니다.
 
 ```python
 import json, os, sys, urllib.request
@@ -440,7 +502,10 @@ req = urllib.request.Request(url, headers={"PRIVATE-TOKEN": API_TOKEN})
 with urllib.request.urlopen(req) as resp:
     notes = json.loads(resp.read().decode())
 
-if any("OpenCodeReview" in n.get("body", "") for n in notes):
+if (
+    os.environ.get("OCR_GATE", "false").lower() == "false"
+    and any("OpenCodeReview" in n.get("body", "") for n in notes)
+):
     print("OCR already reviewed this MR. Skipping to save tokens.")
     sys.exit(0)
 
@@ -489,14 +554,18 @@ if any("OpenCodeReview" in n.get("body", "") for n in notes):
 | `Failed to parse OCR output` | `OCR_LLM_URL`이나 `OCR_LLM_AUTH_TOKEN`이 잘못됐습니다. *Settings → CI/CD → Variables*에서 값을 다시 확인하세요. |
 | 인라인 코멘트가 엉뚱한 줄에 달림 | GitLab은 인라인 디스커션에 정확한 SHA 일치를 요구하므로, 게시 스크립트가 `versions` 메타데이터를 가져와 올바른 `base_sha` / `start_sha` / `head_sha`를 씁니다. 그래도 위치를 잡지 못한 지적은 일반 MR 노트로 대체됩니다. |
 
-파이프라인은 원본 리뷰 JSON을 `/tmp/ocr-result.json`에, stderr를
-`/tmp/ocr-stderr.log`에 남깁니다. OCR이 무엇을 반환했는지 보려면 디버그 단계에서
-두 파일을 출력하세요:
+파이프라인은 `when: always`로 프로젝트 상대 경로의 아티팩트를 보관합니다.
+`.ocr/ocr-result.json`, `.ocr/ocr-stderr.log`, `.ocr/ocr-gate.json`,
+`.ocr/ocr-gate-stderr.log`가 대상입니다. 게이트가 꺼져 있거나 해당 단계에 도달하지 못하면
+게이트 파일은 비어 있습니다. 게시 통계는 `.ocr/ocr-stats.env` dotenv 보고서에서 확인할 수
+있습니다. 디버그 단계에서 다음 파일을 확인하세요:
 
 ```yaml
 script:
-  - cat /tmp/ocr-result.json
-  - cat /tmp/ocr-stderr.log
+  - cat .ocr/ocr-result.json
+  - cat .ocr/ocr-stderr.log
+  - cat .ocr/ocr-gate.json
+  - cat .ocr/ocr-gate-stderr.log
 ```
 
 ## 관련 문서 {#see-also}
