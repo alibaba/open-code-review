@@ -564,7 +564,7 @@ function testPrNumberWiredIntoBothGithubScriptSteps() {
   assert.strictEqual(
     (ACTION_TEXT.match(/prNumber: Number\(process\.env\.OCR_PR_NUMBER\)/g) || []).length,
     2,
-    "both github-script steps must pass the resolved number"
+    "range and shared publication/state step must pass the resolved number"
   );
 }
 
@@ -1957,7 +1957,79 @@ function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
   );
 }
 
+function testSplitReviewModes() {
+  assert.strictEqual(INPUTS.mode.default, "all");
+  assert.match(INPUTS.state_path.default, /runner.temp/);
+  const mode = STEPS.find((step) => step.name === "Validate mode");
+  for (const value of ["all", "review", "post", "invalid", ""]) {
+    const fixture = makeFixture();
+    try {
+      const result = runShell(renderedRun(mode, inputValues()), { OCR_ACTION_MODE: value }, fixture);
+      assert.strictEqual(result.status === 0, ["all", "review", "post"].includes(value));
+    } finally { removeFixture(fixture); }
+  }
+  for (const name of ["Resolve PR refs", "Checkout base", "Fetch PR head (fork-safe)", "Compute merge-base", "Validate inputs", "Install OpenCodeReview", "Configure OCR", "Resolve review range", "Run OpenCodeReview", "Fail job on OCR error"]) {
+    const step = STEPS.find((step) => step.name === name);
+    const end = STEPS.find((next) => next.index > step.index)?.index || ACTION_TEXT.split("\n").length;
+    assert.match(ACTION_TEXT.split("\n").slice(step.index, end).join("\n"), /if: inputs.mode != 'post'/, name);
+  }
+  assert.match(ACTION_TEXT, /name: Post review comments\n\s+if: inputs.mode != 'post' && env.OCR_EXIT_CODE == '0'/);
+  assert.match(ACTION_TEXT, /name: Post saved review\n\s+if: inputs.mode == 'post'/);
+  assert.ok(STEPS.findIndex((step) => step.name === "Clear previous review state") < STEPS.findIndex((step) => step.name === "Run OpenCodeReview"));
+  assert.strictEqual(stepNamed('Post review comments').env.OCR_ACTION_MODE, '${{ inputs.mode }}');
+  assert.ok(!stepNamed('Save review state'), 'review and all must share one publication options mapping');
+}
+
+function testSharedPublicationOptions() {
+  const start = ACTION_TEXT.indexOf("    - name: Post review comments\n");
+  const block = ACTION_TEXT.slice(start, ACTION_TEXT.indexOf("    - name: Post saved review\n", start));
+  const script = block.slice(block.indexOf("        script: |\n") + "        script: |\n".length)
+    .split("\n").map((line) => line.slice(10)).join("\n")
+    .replace(/\$\{\{ inputs\.([a-z_]+) == 'true' \}\}/g, (_, name) => String(INPUTS[name].default === "true"));
+  const env = {
+    ...process.env, GITHUB_ACTION_PATH: ROOT, OCR_PR_NUMBER: "4242",
+    OCR_INCREMENTAL_OVERLAP_THRESHOLD: "0.7", OCR_REVIEW_COMMENT_BATCH_SIZE: "30",
+    OCR_RANGE_MODE: "checkpoint", OCR_RANGE_FROM: "old", OCR_RANGE_TO: "head",
+    OCR_RANGE_REASON: "same_head_noop", OCR_STATE_HEAD: "head", OCR_STATE_PATH: "/unused",
+  };
+  const program = `
+    const assert = require('assert');
+    const path = require('path');
+    const calls = [];
+    const helperRequire = (name) => {
+      if (path.basename(name) === 'post-review-comments.js') return { runPostReviewComments: (options) => calls.push(['post', options]) };
+      if (path.basename(name) === 'review-state.js') return { saveReviewState: (options) => calls.push(['save', options]) };
+      return require(name);
+    };
+    const run = new (Object.getPrototypeOf(async function() {}).constructor)('require', 'github', 'context', 'core', ${JSON.stringify(script)});
+    (async () => {
+      process.env.OCR_ACTION_MODE = 'review';
+      await run(helperRequire, {}, {}, {});
+      assert.strictEqual(calls.length, 1);
+      assert.strictEqual(calls[0][0], 'save');
+      const saved = calls[0][1];
+      assert.strictEqual(saved.outputs.range_mode, 'checkpoint');
+      assert.strictEqual(saved.headSha, 'head');
+      process.env.OCR_ACTION_MODE = 'all';
+      await run(helperRequire, {}, {}, {});
+      assert.strictEqual(calls.length, 2);
+      assert.strictEqual(calls[1][0], 'post');
+      for (const [key, value] of Object.entries(saved.options)) assert.deepStrictEqual(calls[1][1][key], value, key);
+      assert.strictEqual(saved.options.prNumber, 4242);
+      assert.strictEqual(saved.options.checkpointNoop, true);
+      assert.strictEqual(saved.options.incrementalOverlapThreshold, 0.7);
+      assert.strictEqual(saved.options.reviewCommentBatchSize, 30);
+      assert.strictEqual(saved.resultPath, calls[1][1].resultPath);
+      assert.strictEqual(saved.stderrPath, calls[1][1].stderrPath);
+    })().catch((error) => { console.error(error); process.exitCode = 1; });
+  `;
+  const result = spawnSync(process.execPath, ['-e', program], { env, encoding: 'utf8' });
+  assert.strictEqual(result.status, 0, resultDescription(result));
+}
+
 const TESTS = [
+  ["review and all dispatch shared publication options", testSharedPublicationOptions],
+  ["split modes validate and isolate review/post phases", testSplitReviewModes],
   ["review_task_timeout names and describes the CLI task deadline", testReviewTaskTimeoutInputNameAndScope],
   ["llm_timeout defaults to the CLI's 5-minute timeout", testLlmTimeoutInputDefault],
   ["review_task_timeout accepts 1/10/120", testReviewTimeoutValidationAcceptsBoundaries],
