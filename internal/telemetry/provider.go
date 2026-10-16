@@ -40,6 +40,7 @@ func Init(ctx context.Context) bool {
 	if !cfg.Enabled {
 		return false
 	}
+	activeCfg.Store(&cfg)
 
 	res, err := resource.New(ctx,
 		resource.WithFromEnv(),
@@ -79,6 +80,5 @@ func ContentLogging() bool {
 	if !IsEnabled() {
 		return false
 	}
-	cfg := ResolveConfig("")
-	return cfg.ContentLog
+	return resolvedConfig().ContentLog
 }
