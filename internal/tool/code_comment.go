@@ -114,6 +114,9 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 		}
 	}
 	if len(rawComments) == 0 {
+		rawComments = singleCommentShape(args)
+	}
+	if len(rawComments) == 0 {
 		raw, _ := json.Marshal(args)
 		return nil, nil, fmt.Sprintf("Error: 'comments' array is required. Got args: %s", string(raw))
 	}
@@ -128,6 +131,8 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 		cm := model.LlmComment{}
 
 		if content, ok := obj["content"].(string); ok {
+			cm.Content = content
+		} else if content, ok := obj["comment"].(string); ok {
 			cm.Content = content
 		}
 		if suggestion, ok := obj["suggestion_code"].(string); ok {
@@ -159,6 +164,27 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 		comments = append(comments, cm)
 	}
 	return comments, repair, ""
+}
+
+// singleCommentShape recovers a code_comment call that carries one comment
+// without the "comments" array: either "comments" holds a single object, or the
+// comment fields sit at the top level of the arguments. Both are complete,
+// well-formed calls in the wrong shape, so the content is used as given and
+// nothing is guessed. Any other shape returns nil and keeps the existing error.
+func singleCommentShape(args map[string]any) []any {
+	if obj, ok := args["comments"].(map[string]any); ok {
+		return []any{obj}
+	}
+	if _, present := args["comments"]; present {
+		return nil
+	}
+	if _, ok := args["content"].(string); ok {
+		return []any{args}
+	}
+	if _, ok := args["comment"].(string); ok {
+		return []any{args}
+	}
+	return nil
 }
 
 func normalizeCommentPath(p string) string {
