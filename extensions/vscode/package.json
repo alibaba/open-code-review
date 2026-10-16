@@ -98,7 +98,7 @@
     "@types/vscode": "^1.74.0",
     "@typescript-eslint/eslint-plugin": "^6.18.0",
     "@typescript-eslint/parser": "^6.18.0",
-    "@vscode/vsce": "^3.0.0",
+    "@vscode/vsce": "^4.0.0",
     "css-loader": "^7.1.5",
     "eslint": "^8.56.0",
     "jest": "^30.5.0",
