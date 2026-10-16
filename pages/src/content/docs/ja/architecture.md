@@ -21,7 +21,7 @@ flowchart TD
     A --> B --> C --> D --> D2 --> E --> F
 ```
 
-オーケストレーションのロジックは [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/) パッケージにあり、主要なファイルは `agent.go`（ディスパッチとグループごとのオーケストレーション）、`grouping.go`（セマンティックなファイルグルーピング）、`selection.go`（ファイルフィルタリング）、`preview.go`（`--preview` のレポート）、`util.go`（ヘルパー）です。ツール呼び出しループとメモリ圧縮は、その隣にある [`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/) にあります。注目すべきエントリポイントは 2 つです: `Agent.Run`（パイプラインの最上部）と `Agent.dispatchSubtasks`（グループごとのファンアウト）。
+オーケストレーションのロジックは [`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/) パッケージにあり、主要なファイルは `agent.go`（ディスパッチとグループごとのオーケストレーション）、`grouping.go`（セマンティックなファイルグルーピング）、`selection.go`（ファイルフィルタリング）、`preview.go`（`--preview` のレポート）、`util.go`（ヘルパー）です。ツール呼び出しループとメモリ圧縮は、その隣にある [`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/) にあります。注目すべきエントリポイントは 2 つです: `Agent.Run`（パイプラインの最上部）と `Agent.dispatchSubtasks`（グループごとのファンアウト）。
 
 ## diff provider
 

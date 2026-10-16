@@ -2179,6 +2179,131 @@ func TestAnthropicClient_RetryCodesTriggersRetry(t *testing.T) {
 		t.Errorf("Content() = %q, want %q", got, "success")
 	}
 }
+func TestChatResponse_FinishReason_And_IsTruncated(t *testing.T) {
+	tests := []struct {
+		name             string
+		resp             *ChatResponse
+		wantFinishReason string
+		wantIsTruncated  bool
+	}{
+		{
+			name:             "nil response",
+			resp:             nil,
+			wantFinishReason: "",
+			wantIsTruncated:  false,
+		},
+		{
+			name:             "empty choices",
+			resp:             &ChatResponse{Choices: []Choice{}},
+			wantFinishReason: "",
+			wantIsTruncated:  false,
+		},
+		{
+			name: "finish_reason length",
+			resp: &ChatResponse{
+				Choices: []Choice{
+					{FinishReason: "length"},
+				},
+			},
+			wantFinishReason: "length",
+			wantIsTruncated:  true,
+		},
+		{
+			name: "finish_reason max_tokens",
+			resp: &ChatResponse{
+				Choices: []Choice{
+					{FinishReason: "max_tokens"},
+				},
+			},
+			wantFinishReason: "max_tokens",
+			wantIsTruncated:  true,
+		},
+		{
+			name: "finish_reason stop",
+			resp: &ChatResponse{
+				Choices: []Choice{
+					{FinishReason: "stop"},
+				},
+			},
+			wantFinishReason: "stop",
+			wantIsTruncated:  false,
+		},
+		{
+			name: "finish_reason tool_calls",
+			resp: &ChatResponse{
+				Choices: []Choice{
+					{FinishReason: "tool_calls"},
+				},
+			},
+			wantFinishReason: "tool_calls",
+			wantIsTruncated:  false,
+		},
+		{
+			name: "finish_reason end_turn",
+			resp: &ChatResponse{
+				Choices: []Choice{
+					{FinishReason: "end_turn"},
+				},
+			},
+			wantFinishReason: "end_turn",
+			wantIsTruncated:  false,
+		},
+		{
+			name: "finish_reason uppercase LENGTH",
+			resp: &ChatResponse{
+				Choices: []Choice{
+					{FinishReason: "LENGTH"},
+				},
+			},
+			wantFinishReason: "LENGTH",
+			wantIsTruncated:  true,
+		},
+		{
+			name: "finish_reason uppercase MAX_TOKENS",
+			resp: &ChatResponse{
+				Choices: []Choice{
+					{FinishReason: "MAX_TOKENS"},
+				},
+			},
+			wantFinishReason: "MAX_TOKENS",
+			wantIsTruncated:  true,
+		},
+		{
+			name: "multiple choices uses first choice",
+			resp: &ChatResponse{
+				Choices: []Choice{
+					{FinishReason: "length"},
+					{FinishReason: "stop"},
+				},
+			},
+			wantFinishReason: "length",
+			wantIsTruncated:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.resp == nil {
+				// Safe invocation on nil receiver
+				var nilResp *ChatResponse
+				if got := nilResp.FinishReason(); got != tc.wantFinishReason {
+					t.Errorf("nil.FinishReason() = %q, want %q", got, tc.wantFinishReason)
+				}
+				if got := nilResp.IsTruncated(); got != tc.wantIsTruncated {
+					t.Errorf("nil.IsTruncated() = %v, want %v", got, tc.wantIsTruncated)
+				}
+				return
+			}
+
+			if got := tc.resp.FinishReason(); got != tc.wantFinishReason {
+				t.Errorf("FinishReason() = %q, want %q", got, tc.wantFinishReason)
+			}
+			if got := tc.resp.IsTruncated(); got != tc.wantIsTruncated {
+				t.Errorf("IsTruncated() = %v, want %v", got, tc.wantIsTruncated)
+			}
+		})
+	}
+}
 
 func TestToolCall_EstimatedTokens(t *testing.T) {
 	tests := []struct {
