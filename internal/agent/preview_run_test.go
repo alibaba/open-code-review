@@ -299,7 +299,7 @@ func TestPreviewMatchesRunSelectedCoverage(t *testing.T) {
 		}
 	}
 	write("main.go", "package main\n")
-	write("notes.md", "# notes\n")
+	write("notes.txt", "notes\n")
 	write("huge.go", strings.Repeat("token ", 2000))
 	if err := os.Remove(filepath.Join(dir, "gone.go")); err != nil {
 		t.Fatalf("remove gone.go: %v", err)
@@ -342,9 +342,9 @@ func TestPreviewMatchesRunSelectedCoverage(t *testing.T) {
 	// Pin the fixture itself: the comparison below is only meaningful while each
 	// exclusion path is actually represented.
 	for path, want := range map[string]ExcludeReason{
-		"notes.md": ExcludeExtension,
-		"gone.go":  ExcludeDeleted,
-		"huge.go":  ExcludeTooLarge,
+		"notes.txt": ExcludeExtension,
+		"gone.go":   ExcludeDeleted,
+		"huge.go":   ExcludeTooLarge,
 	} {
 		if got := byPath[path].ExcludeReason; got != want {
 			t.Fatalf("%s exclude_reason = %q, want %q", path, got, want)

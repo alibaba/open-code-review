@@ -62,6 +62,7 @@
   ".yaml",
   ".yml",
   ".json",
+  ".md",
   ".toml",
   ".ini",
   ".env",

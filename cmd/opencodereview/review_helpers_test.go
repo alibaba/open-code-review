@@ -39,7 +39,7 @@ func TestRunPreviewJSONFormat(t *testing.T) {
 	freshOCRHome(t)
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "main.go", "package main\n", "add main")
-	gitCommitFile(t, dir, "notes.md", "# notes\n", "add notes")
+	gitCommitFile(t, dir, "notes.txt", "notes\n", "add notes")
 	cc, err := loadCommonContext(dir, "", "", 0, 0, true)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
@@ -53,13 +53,13 @@ func TestRunPreviewJSONFormat(t *testing.T) {
 
 	got := decodeSinglePreviewJSON(t, out)
 	if got.TotalFiles != 1 {
-		t.Fatalf("total_files = %d, want 1 (HEAD adds notes.md only)", got.TotalFiles)
+		t.Fatalf("total_files = %d, want 1 (HEAD adds notes.txt only)", got.TotalFiles)
 	}
-	if got.Entries[0].Path != "notes.md" {
-		t.Errorf("path = %q, want notes.md", got.Entries[0].Path)
+	if got.Entries[0].Path != "notes.txt" {
+		t.Errorf("path = %q, want notes.txt", got.Entries[0].Path)
 	}
 	if got.Entries[0].WillReview {
-		t.Error("notes.md should be excluded by the extension allowlist")
+		t.Error("notes.txt should be excluded by the extension allowlist")
 	}
 	if got.Entries[0].ExcludeReason != model.ExcludeExtension {
 		t.Errorf("exclude_reason = %q, want %q", got.Entries[0].ExcludeReason, model.ExcludeExtension)

@@ -55,7 +55,7 @@ func TestWhyExcluded_BinaryFile(t *testing.T) {
 func TestWhyExcluded_UserExcludePattern(t *testing.T) {
 	agent := New(Args{
 		FileFilter: &rules.FileFilter{
-			Exclude: []string{"vendor/**", "*.gen.go"},
+			Exclude: []string{"vendor/**", "*.gen.go", "docs/generated/**"},
 		},
 	})
 
@@ -64,6 +64,13 @@ func TestWhyExcluded_UserExcludePattern(t *testing.T) {
 		diff     model.Diff
 		expected ExcludeReason
 	}{
+		{
+			name: "Markdown file matching exclude pattern",
+			diff: model.Diff{
+				NewPath: "docs/generated/reference.md",
+			},
+			expected: ExcludeUserRule,
+		},
 		{
 			name: "file matching exclude pattern",
 			diff: model.Diff{
@@ -113,11 +120,18 @@ func TestWhyExcluded_ExtensionFilter(t *testing.T) {
 			expected: ExcludeExtension,
 		},
 		{
-			name: "unsupported extension md",
+			name: "supported Markdown at repository root",
 			diff: model.Diff{
-				NewPath: "docs/guide.md",
+				NewPath: "README.md",
 			},
-			expected: ExcludeExtension,
+			expected: ExcludeNone,
+		},
+		{
+			name: "supported nested uppercase Markdown",
+			diff: model.Diff{
+				NewPath: "docs/guide.MD",
+			},
+			expected: ExcludeNone,
 		},
 		{
 			name: "supported extension go",
