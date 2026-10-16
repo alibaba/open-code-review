@@ -615,9 +615,7 @@ func (a *Agent) injectDiffMap() {
 	m := make(map[string]string, len(a.diffs))
 	for i := range a.diffs {
 		d := &a.diffs[i]
-		if d.NewPath != "/dev/null" {
-			m[d.NewPath] = d.Diff
-		}
+		m[effectivePath(*d)] = d.Diff
 	}
 	dm := tool.NewDiffMap(m)
 	if p, ok := a.args.Tools.Get(tool.FileReadDiff.Name()); ok {
@@ -1193,12 +1191,14 @@ var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 // safe, generic reason. It never returns the raw error text (which may embed a
 // provider payload, credentials or absolute paths); the full error is persisted
 // separately in the session checkpoint. Context deadline/cancel are recognized
-// via errors.Is (the per-group subtask timeout is the only deadline in play), and the
+// via errors.Is, and the
 // empty-template precondition is a configuration failure.
 func classifyItemError(err error) (session.FailureClass, string) {
 	switch {
+	case errors.Is(err, llm.ErrRequestTimeout):
+		return session.FailureTimeout, "LLM request timed out; configure OCR_LLM_TIMEOUT or provider timeout_sec"
 	case errors.Is(err, context.DeadlineExceeded):
-		return session.FailureTimeout, "file review exceeded its time limit"
+		return session.FailureTimeout, "file review exhausted its task deadline (--timeout)"
 	case errors.Is(err, context.Canceled):
 		return session.FailureCancelled, "file review was cancelled"
 	case errors.Is(err, errMainTaskEmpty):
@@ -1641,7 +1641,7 @@ func formatDiffEntry(d model.Diff) string {
 	case d.IsRenamed:
 		status = "RENAMED"
 	}
-	return fmt.Sprintf("%s   %s (+%d/-%d)", status, d.NewPath, d.Insertions, d.Deletions)
+	return fmt.Sprintf("%s   %s (+%d/-%d)", status, effectivePath(d), d.Insertions, d.Deletions)
 }
 
 // buildChangeFilesExceptGroup returns a formatted list of changed files excluding all group members.

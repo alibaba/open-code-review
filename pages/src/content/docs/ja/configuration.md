@@ -37,13 +37,15 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ### 組み込み provider
 
 以下の provider が OCR に同梱されており、Base URL とプロトコルがプリセット
-されています——選択後は API key を入力するだけです。`providers.<name>.api_key`
-が未設定の場合は、対応する環境変数に自動的にフォールバックします。
+されています。多くは API key が必要です。`providers.<name>.api_key` が未設定の
+場合は対応する環境変数を使用します。`chatgpt` は代わりに `ocr auth login` で
+作成した ChatGPT 認証情報を使用します。
 
 | 名称 | プロトコル | Base URL | API key 環境変数 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region` から決定 | —（AWS 認証情報チェーン） |
+| `chatgpt` | openai-responses | `https://api.openai.com/v1` | 該当なし（Sign in with ChatGPT） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -72,12 +74,30 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 指定すると、OCR は stderr に警告を出します。モデルはリクエスト送信時に provider が
 検証します。カスタム provider には従来の `--model` 検証ルールが適用されます。
 
+## ChatGPT サインインのプレビュー
+
+このプレビューでは公開 Responses API 用の組み込み `chatgpt` provider が追加されます。API key 環境変数はありません。 サインイン、同意、利用制限は[ChatGPT プレビューガイド](../chatgpt-preview/)を参照してください。
+
+`ocr config set` で provider と任意のリクエストフィールドを設定します。`ocr llm models` から選ぶか、モデル slug を明示します:
+
+```bash
+ocr auth login --provider chatgpt
+ocr config set provider chatgpt
+ocr config set providers.chatgpt.model <model-slug>
+ocr config set providers.chatgpt.extra_body '{"reasoning":{"effort":"low"}}'
+ocr llm test
+```
+
+アカウント別一覧にないモデルも明示すれば送信されます。`extra_body` は `reasoning`、`text`、`prompt_cache_key` のみ受け付けます。エンドポイント、プロトコル、資格情報の上書きは拒否されます。
+
 ### 組み込み provider の Base URL を上書きする
 
 各組み込み provider にはプリセット Base URL があります（上表を参照）。
 組み込み provider を別のエンドポイントに向けるには——例えば、プリセット
 デフォルト `http://localhost:4000/v1` とは異なることが多い自前 LiteLLM
 ゲートウェイなど——`providers.<name>.url` を設定します：
+
+`chatgpt` プレビューは例外です。公開エンドポイントは固定されており、URL の上書きは拒否されます。
 
 ```bash
 ocr config set provider                   litellm
@@ -92,7 +112,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock
 
-`bedrock` は `anthropic` と同じ Messages API を話しますが、API key を持たせる
+`bedrock` は既定の `anthropic-bedrock` プロトコルで `anthropic` と同じ Messages API を使いますが、API key を持たせる
 代わりに標準の AWS 認証情報チェーンから SigV4 署名を行い、ホストはリージョンが
 決めます。設定すべき `api_key` はなく、署名の代わりとして受け付けることも
 ありません。
@@ -103,6 +123,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+OpenAI 互換ゲートウェイに接続するために `providers.bedrock.protocol` を `openai` に設定する場合は、`providers.bedrock.url` にゲートウェイの URL を設定し、`providers.bedrock.api_key` または `providers.bedrock.api_key_cmd` でその API キーを指定してください。`ocr config provider` でモデルを変更しても、保存済みの API キーは保持されます。
 
 | フィールド | 意味 |
 |---|---|
@@ -120,7 +142,7 @@ ocr config set providers.bedrock.aws_profile example-profile
 そのアカウントが提供するものを確認できます。なお新しいファミリーでは
 `-v1:0` のようなバージョンサフィックスは無効です。
 
-bedrock には設定された URL がなく、ホストはリージョンが決めるため、
+既定の `anthropic-bedrock` プロトコルではホストがリージョンによって決まるため、
 `ocr llm test` は URL の代わりにリージョンとプロファイルを表示します。
 
 ```
@@ -202,6 +224,16 @@ Ollama は API key を無視しますが、カスタム provider は空でない
 
 ### タイムアウト（Timeouts）
 
+タスクの制限時間とリクエスト単位のタイムアウトは独立しています。
+
+- `ocr review --timeout` と `ocr scan --timeout` は並行タスクの制限時間を
+  **分**単位で設定します（デフォルトは **15**、`0` でタスクの期限を無効化）。
+  この時間には、タスク内のすべての LLM 呼び出し、ツール実行、再試行の待機が含まれます。
+  review では effort に応じたレビューラウンド数を掛けた時間になります。
+- HTTP リクエスト単位のタイムアウトは**秒**単位です（デフォルトは **300**）。
+  `--timeout` を増やしても変更されず、タスクの期限を無効にしてもリクエストの
+  タイムアウトは無効になりません。タスクの残り時間の方が短い場合は、その時間が優先されます。
+
 各 LLM リクエストには HTTP タイムアウトがあり、デフォルトは **300 秒**です。
 遅いローカルモデル（あるいは大きなファイル）では、それ以上の時間が必要になることがあります。
 スコープの狭い順に、3 つの設定があります。
@@ -221,6 +253,25 @@ Ollama は API key を無視しますが、カスタム provider は空でない
   }
 }
 ```
+
+例えば、`OCR_LLM_TIMEOUT=900 ocr review --timeout 30` では、タスクの制限時間内で
+単一のリクエストを最大 15 分間実行できます。この環境変数も `timeout_sec` も
+設定しなければ、`--timeout 30` を指定してもリクエストは 5 分でタイムアウトします。
+
+リクエスト単位の期限を超えると、自動的に再送せずに呼び出しを終了します。
+レスポンス本文やストリームの読み取り中にタイムアウトした場合も同様です。
+常に時間がかかるリクエストでは、同じ制限時間で再試行するのではなく、リクエストの
+タイムアウトを延ばしてください。既存の SDK の再試行ポリシーは変わりません。
+再試行可能な接続エラーや HTTP エラーに対しては、バックオフとプロバイダーの
+`Retry-After` 指示に従って最大 5 回再試行します。SDK の試行ごとの期限は、
+再試行の待機時間にも適用されます。キャンセルまたはタスクの期限切れにより、
+リクエストと再試行の待機の両方が停止します。
+
+診断メッセージでは `LLM request timeout`（`OCR_LLM_TIMEOUT` または provider の
+`timeout_sec` を確認）と `caller deadline exceeded` を区別します。後者は呼び出し元の
+処理のコンテキストの期限が切れたことを示します。review/scan タスクの期限切れなら
+`--timeout` を確認してください。バックグラウンドのメモリ圧縮や `ocr llm test` などの
+処理には、それぞれ独立した期限があります。
 
 ### API key をコマンドで取得する
 

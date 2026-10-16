@@ -106,8 +106,8 @@ type Agent struct {
 	runner           *llmloop.Runner
 	resumeInfo       *session.ResumeInfo
 	scanFingerprints map[string]string
-	projectSummary   string // populated post-run by maybeRunProjectSummary
-	budgetExceeded   bool   // set when the token budget gate stopped dispatch; written only by dispatchBatch's loop
+	projectSummary   string      // populated post-run by maybeRunProjectSummary
+	budgetExceeded   atomic.Bool // set when the aggregate token budget stops dispatch or an in-flight task
 }
 
 // ProjectSummary returns the markdown project-level summary produced after
@@ -235,7 +235,7 @@ func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.Too
 // its partial comments and a nil error, and the value reaches output solely as
 // summary.budget_exceeded. Per-file MaxToolRequestTimes exhaustion does NOT set
 // it — that is an item-level outcome, not a run-level budget stop.
-func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded }
+func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded.Load() }
 
 func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
@@ -565,7 +565,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	batches := groupBatches(a.items, strategy, a.args.Template.BatchSize)
 	fmt.Fprintf(stdout.Writer(), "[ocr] scan dispatch: %d batch(es) by %s strategy\n", len(batches), strategy)
 
-	var dispatched int64
+	var dispatched, reused int64
 	for bi, batch := range batches {
 		if err := ctx.Err(); err != nil {
 			return a.args.CommentCollector.Comments(), err
@@ -576,6 +576,11 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 
 		n, budgetHit, checkpoints, err := a.dispatchBatch(ctx, bi, batch)
 		dispatched += n
+		for _, checkpoint := range checkpoints {
+			if checkpoint.reused {
+				reused++
+			}
+		}
 		if err != nil {
 			// ctx cancelled mid-batch: stop scheduling further batches but
 			// still return whatever we've collected so far.
@@ -604,8 +609,8 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	failed := atomic.LoadInt64(&a.subtaskFailed)
-	if failed > 0 && failed == dispatched {
-		return nil, fmt.Errorf("all %d file scan(s) failed — check your LLM configuration and API key", dispatched)
+	if failed > 0 && failed == dispatched && reused == 0 {
+		return a.args.CommentCollector.Comments(), fmt.Errorf("all %d file scan(s) failed — check your LLM configuration and API key", dispatched)
 	}
 	return a.args.CommentCollector.Comments(), nil
 }
@@ -724,7 +729,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 				budgetHit = true
 				// budgetHit is per-batch and dies with this call; the field is
 				// the run-level signal emitRunResult reads after Run returns.
-				a.budgetExceeded = true
+				a.budgetExceeded.Store(true)
 				break
 			}
 		}
@@ -819,7 +824,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 			telemetry.AnyToAttr("file.path", it.Path),
 			telemetry.AnyToAttr("tokens", tokenCount),
 			telemetry.AnyToAttr("max_tokens", maxAllowed))
-		return false, "", nil
+		return false, msg, nil
 	}
 
 	completed, stop, err := a.runner.RunMainTask(ctx, messages, it.Path)
@@ -827,6 +832,15 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 		return false, "", err
 	}
 	if !completed {
+		// Mirror the review path: an in-flight token-budget stop must surface
+		// on the run-level BudgetExceeded() / token_budget_reached warning,
+		// not only on the per-item failure record. Without this, --format json
+		// reports budget_exceeded: false after llmloop's StopTokenBudget fired
+		// and the stderr "budget_exceeded=..." line lies too.
+		if stop == llmloop.StopTokenBudget && a.budgetExceeded.CompareAndSwap(false, true) {
+			a.recordWarning("token_budget_reached", it.Path,
+				fmt.Sprintf("stopped mid-task: used %d tokens exceeds budget %d", a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
+		}
 		// Scan sessions opt out of the run manifest, so this one string is the
 		// whole diagnostic: it feeds both RecordReviewItemFailed and the
 		// scan_subtask_error warning, and under --format json the [ocr] progress

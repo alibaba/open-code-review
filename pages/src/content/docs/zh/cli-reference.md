@@ -118,7 +118,7 @@ unstaged + untracked 变更。
 | `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。 |
 | `--exclude <patterns>` | — | — | 逗号分隔的 gitignore 风格排除模式；与 `rule.json` 的 excludes 合并。 |
 | `--concurrency <n>` | — | `8` | 并行评审的最大子任务数。 |
-| `--timeout <minutes>` | — | `15` | 每个子任务的截止时间。`0` 关闭超时。按 effort 轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。 |
+| `--timeout <minutes>` | — | `15` | 每个子任务的时间预算，包括 LLM 调用、工具执行和重试等待。`0` 关闭任务期限，但不关闭请求超时。单次请求超时独立设置：`OCR_LLM_TIMEOUT` 或 provider 的 `timeout_sec`，单位秒（默认 `300`）。按 effort 评审轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
 | `--max-tools <n>` | — | 模板默认 | 每个子任务的最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。 |
 | `--max-tokens <n>` | — | 配置或模板默认 | 每个子任务的**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。 |
@@ -558,9 +558,30 @@ ocr config model                           Interactive model selection
 
 完整的 key 参考、schema 与示例见[配置](../configuration/)。
 
+
+
+## `ocr auth`
+
+`ocr auth login`、`status` 和 `logout` 默认使用 Sign in with ChatGPT。仍支持显式指定 `--provider chatgpt`。
+
+`chatgpt` provider 使用公开的 Sign in with ChatGPT 流程。请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)。
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` 支持 `--provider chatgpt` 和 `--account <client-id>`；`login` 还支持 `--no-browser`、`--new-account` 和 `--enable-plan`。ChatGPT 不支持 `--device`。`--enable-plan` 会针对已保存的注册请求同意，不能与 `--new-account` 同时使用。模型目录按账户显示；即使目录中没有，显式模型也会被接受。此 provider 的 `extra_body` 仅支持 `reasoning`、`text` 和 `prompt_cache_key`。账户管理、权限和限制请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)。
+
 ## `ocr llm`
 
-LLM 工具命令。两个子命令：
+LLM 工具命令。三个子命令：
 
 ```text
 ocr llm <sub-command>
@@ -568,6 +589,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`
