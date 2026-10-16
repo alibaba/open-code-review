@@ -549,18 +549,20 @@ func TestRenderTemplate_SessionHeaderMockup(t *testing.T) {
 func TestRenderTemplate_SessionHeaderStatusClasses(t *testing.T) {
 	cases := []struct {
 		name      string
+		running   bool
 		aborted   bool
 		legacy    bool
 		termState string
 		wantClass string
 	}{
-		{"complete", false, false, "complete", "status-complete"},
-		{"partial", false, false, "partial", "status-partial"},
-		{"failed", false, false, "failed", "status-failed"},
-		{"skipped", false, false, "skipped", "status-legacy"},
-		{"aborted", true, false, "complete", "status-aborted"},
-		{"legacy", false, true, "complete", "status-legacy"},
-		{"unknown state stays unclassed", false, false, "odd state", `>odd state</span>`},
+		{"complete", false, false, false, "complete", "status-complete"},
+		{"partial", false, false, false, "partial", "status-partial"},
+		{"failed", false, false, false, "failed", "status-failed"},
+		{"skipped", false, false, false, "skipped", "status-legacy"},
+		{"running", true, false, false, "", "status-running"},
+		{"aborted", false, true, false, "complete", "status-aborted"},
+		{"legacy", false, false, true, "complete", "status-legacy"},
+		{"unknown state stays unclassed", false, false, false, "odd state", `>odd state</span>`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -572,6 +574,7 @@ func TestRenderTemplate_SessionHeaderStatusClasses(t *testing.T) {
 					Summary: SessionSummary{
 						SessionID:     "abc",
 						CWD:           "/test",
+						Running:       tc.running,
 						Aborted:       tc.aborted,
 						Legacy:        tc.legacy,
 						TerminalState: tc.termState,

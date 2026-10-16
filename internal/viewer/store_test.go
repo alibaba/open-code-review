@@ -6,8 +6,11 @@ package viewer
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func writeJSONL(t *testing.T, path string, lines ...string) {
@@ -387,6 +390,86 @@ func TestPeekSession_NoSessionEnd(t *testing.T) {
 	if !s.Aborted || s.Legacy {
 		t.Fatalf("unfinished session flags = aborted:%v legacy:%v", s.Aborted, s.Legacy)
 	}
+}
+
+func TestPeekAndLoadSessionLiveness(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	repoDir := t.TempDir()
+
+	t.Run("running", func(t *testing.T) {
+		sh := session.New(repoDir, "main", "test-model", session.SessionOptions{})
+		path := sessionFilePath(t, repoDir, sh.SessionID)
+		s, err := peekSession(path)
+		if err != nil {
+			t.Fatalf("peekSession: %v", err)
+		}
+		if s.Aborted || !s.Running {
+			t.Fatalf("live peek flags = aborted:%v running:%v", s.Aborted, s.Running)
+		}
+		if s.Model != "test-model" {
+			t.Fatalf("live peek model = %q", s.Model)
+		}
+		root, encoded := splitSessionPath(path)
+		vs, err := LoadSession(root, encoded, sh.SessionID)
+		if err != nil {
+			t.Fatalf("LoadSession: %v", err)
+		}
+		if vs.Summary.Aborted || !vs.Summary.Running {
+			t.Fatalf("live load flags = aborted:%v running:%v", vs.Summary.Aborted, vs.Summary.Running)
+		}
+		runtime.KeepAlive(sh)
+	})
+
+	t.Run("aborted", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "partial.jsonl")
+		writeJSONL(t, path, `{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`)
+		s, err := peekSession(path)
+		if err != nil {
+			t.Fatalf("peekSession: %v", err)
+		}
+		if !s.Aborted || s.Running {
+			t.Fatalf("interrupted peek flags = aborted:%v running:%v", s.Aborted, s.Running)
+		}
+		root, encoded := splitSessionPath(path)
+		vs, err := LoadSession(root, encoded, "partial")
+		if err != nil {
+			t.Fatalf("LoadSession: %v", err)
+		}
+		if !vs.Summary.Aborted || vs.Summary.Running {
+			t.Fatalf("interrupted load flags = aborted:%v running:%v", vs.Summary.Aborted, vs.Summary.Running)
+		}
+	})
+
+	t.Run("completed", func(t *testing.T) {
+		sh := session.New(repoDir, "main", "test-model", session.SessionOptions{})
+		if err := sh.Finalize(); err != nil {
+			t.Fatalf("Finalize: %v", err)
+		}
+		path := sessionFilePath(t, repoDir, sh.SessionID)
+		s, err := peekSession(path)
+		if err != nil {
+			t.Fatalf("peekSession: %v", err)
+		}
+		if s.Aborted || s.Running {
+			t.Fatalf("completed peek flags = aborted:%v running:%v", s.Aborted, s.Running)
+		}
+	})
+}
+
+func sessionFilePath(t *testing.T, repoDir, sessionID string) string {
+	t.Helper()
+	summary, err := session.LoadSummary(repoDir, sessionID)
+	if err != nil {
+		t.Fatalf("LoadSummary: %v", err)
+	}
+	return summary.FilePath
+}
+
+func splitSessionPath(path string) (root, encoded string) {
+	dir := filepath.Dir(path)
+	return filepath.Dir(dir), filepath.Base(dir)
 }
 
 func TestPeekSessionUsesV1ManifestCoverage(t *testing.T) {
