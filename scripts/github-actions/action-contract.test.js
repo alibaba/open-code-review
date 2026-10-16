@@ -127,7 +127,26 @@ function parseSteps(text) {
       }
     }
 
-    steps.push({ name: current.name, run, env, index: current.index });
+    // actions/github-script steps keep their JS under `with: script: |`
+    // (10-space body), not under `run:`.
+    let script;
+    const scriptMarker = rawLines.findIndex((line) => /^        script:\s*\|\s*$/.test(line));
+    if (scriptMarker >= 0) {
+      const body = [];
+      for (let index = scriptMarker + 1; index < rawLines.length; index += 1) {
+        const line = rawLines[index];
+        if (line.trim() === "") {
+          body.push("");
+        } else if (/^          /.test(line)) {
+          body.push(line.slice(10));
+        } else {
+          break;
+        }
+      }
+      script = body.join("\n");
+    }
+
+    steps.push({ name: current.name, run, script, env, index: current.index });
     current = undefined;
   }
 
@@ -1957,6 +1976,28 @@ function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
   );
 }
 
+function testPostReviewCommentsWiresAppSlug() {
+  const post = stepNamed("Post review comments");
+  assert.ok(post, "action.yml must retain the Post review comments step");
+
+  // 1. The step exposes the env value.
+  assert.strictEqual(
+    post.env.OCR_CHECKPOINT_APP_SLUG,
+    "${{ inputs.github_token == github.token && 'github-actions' || '' }}",
+    "Post review comments must resolve and expose OCR_CHECKPOINT_APP_SLUG in its env block"
+  );
+
+  // 2. The github-script body forwards it into the runPostReviewComments({...}) call.
+  assert.ok(post.script, "Post review comments must define a github-script `with: script:` body");
+  const call = post.script.match(/runPostReviewComments\(\{[\s\S]*?\n\}\);/);
+  assert.ok(call, "Post review comments script must call runPostReviewComments({...})");
+  assert.match(
+    call[0],
+    /^\s*appSlug:\s*process\.env\.OCR_CHECKPOINT_APP_SLUG\s*\|\|\s*(['"])\1\s*,?\s*$/m,
+    "runPostReviewComments must be passed the appSlug from process.env"
+  );
+}
+
 const TESTS = [
   ["review_task_timeout names and describes the CLI task deadline", testReviewTaskTimeoutInputNameAndScope],
   ["llm_timeout defaults to the CLI's 5-minute timeout", testLlmTimeoutInputDefault],
@@ -2007,6 +2048,10 @@ const TESTS = [
   ["the resolved PR number reaches the fork-safe head fetch", testResolvedPrNumberReachesTheHeadFetch],
   ["both github-script steps read the resolved PR number", testPrNumberWiredIntoBothGithubScriptSteps],
   ["GitHub Actions README documents PR number resolution", testExampleReadmeDocumentsPrNumberResolution],
+  ["the resolved PR number reaches the fork-safe head fetch", testResolvedPrNumberReachesTheHeadFetch],
+  ["both github-script steps read the resolved PR number", testPrNumberWiredIntoBothGithubScriptSteps],
+  ["GitHub Actions README documents PR number resolution", testExampleReadmeDocumentsPrNumberResolution],
+  ["Post review comments step wires appSlug into runPostReviewComments", testPostReviewCommentsWiresAppSlug],
 ];
 
 function main() {
