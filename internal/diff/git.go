@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -367,7 +368,7 @@ func matchGitignoreBody(relPath, body string) bool {
 		body, anchored = trimmed, true
 	}
 
-	// "**" is not expressible with filepath.Match, so patterns containing it go
+	// "**" is not expressible with path.Match, so patterns containing it go
 	// through doublestar, which implements gitignore's globstar semantics.
 	if strings.Contains(body, "**") {
 		matched, err := doublestar.Match(body, relPath)
@@ -377,16 +378,24 @@ func matchGitignoreBody(relPath, body string) bool {
 	// Patterns without / match basename — unless anchored, where the pattern
 	// addresses that name at the root only.
 	if !strings.Contains(body, "/") {
-		target := filepath.Base(relPath)
+		target := path.Base(relPath)
 		if anchored {
 			target = relPath
 		}
-		matched, _ := filepath.Match(body, target)
+		matched, _ := path.Match(body, target)
 		return matched
 	}
 
-	// Patterns with / match against the full relative path
-	if matched, _ := filepath.Match(body, relPath); matched {
+	// Patterns with / match against the full relative path.
+	//
+	// relPath is a git-relative path and always uses "/", so the matching must
+	// use slash semantics ("path.Match"), not the host separator
+	// ("filepath.Match"). On Windows filepath.Match treats "/" as an ordinary
+	// character: "*" then crosses directory boundaries, and a root-anchored
+	// allowlist pattern like "/*" (which must ignore root entries only)
+	// swallows every nested file, silently reducing the review to the few
+	// exactly-negated root files.
+	if matched, _ := path.Match(body, relPath); matched {
 		return true
 	}
 	// Also try matching against suffix of path, but not for anchored patterns:
