@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/llm"
+
+	"github.com/alibaba/open-code-review/internal/pathutil"
 )
 
 // rawSubDir is the subdirectory of ~/.opencodereview that holds the raw LLM
@@ -47,11 +49,11 @@ type RawFileWriter struct {
 // file. Each run — resumed or not — gets a fresh session ID, so it owns a
 // fresh file.
 func NewRawFileWriter(repoDir, sessionID string) (*RawFileWriter, error) {
-	home, err := os.UserHomeDir()
+	home, err := pathutil.OCRHome()
 	if err != nil {
 		return nil, fmt.Errorf("resolve home dir: %w", err)
 	}
-	dir := filepath.Join(home, ".opencodereview", rawSubDir, encodeRepoPath(repoDir))
+	dir := filepath.Join(home, rawSubDir, encodeRepoPath(repoDir))
 	path := filepath.Join(dir, sessionID+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, fmt.Errorf("create raw dir: %w", err)
