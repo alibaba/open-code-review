@@ -9,6 +9,7 @@ import type { Language } from '../../i18n/types';
 import enQuickstart from './en/quickstart.md';
 import enInstallation from './en/installation.md';
 import enConfiguration from './en/configuration.md';
+import enChatGPTPreview from './en/chatgpt-preview.md';
 import enCliReference from './en/cli-reference.md';
 import enReviewRules from './en/review-rules.md';
 import enArchitecture from './en/architecture.md';
@@ -20,6 +21,7 @@ import enAgentSkill from './en/integrations/agent-skill.md';
 import enClaudeCode from './en/integrations/claude-code.md';
 import enCicd from './en/integrations/ci.md';
 import enDelegate from './en/integrations/delegate.md';
+import enAcp from './en/integrations/acp.md';
 import enContributing from './en/contributing.md';
 import enFaq from './en/faq.md';
 
@@ -27,6 +29,7 @@ import enFaq from './en/faq.md';
 import zhQuickstart from './zh/quickstart.md';
 import zhInstallation from './zh/installation.md';
 import zhConfiguration from './zh/configuration.md';
+import zhChatGPTPreview from './zh/chatgpt-preview.md';
 import zhCliReference from './zh/cli-reference.md';
 import zhReviewRules from './zh/review-rules.md';
 import zhArchitecture from './zh/architecture.md';
@@ -38,6 +41,7 @@ import zhAgentSkill from './zh/integrations/agent-skill.md';
 import zhClaudeCode from './zh/integrations/claude-code.md';
 import zhCicd from './zh/integrations/ci.md';
 import zhDelegate from './zh/integrations/delegate.md';
+import zhAcp from './zh/integrations/acp.md';
 import zhContributing from './zh/contributing.md';
 import zhFaq from './zh/faq.md';
 
@@ -45,6 +49,7 @@ import zhFaq from './zh/faq.md';
 import jaQuickstart from './ja/quickstart.md';
 import jaInstallation from './ja/installation.md';
 import jaConfiguration from './ja/configuration.md';
+import jaChatGPTPreview from './ja/chatgpt-preview.md';
 import jaCliReference from './ja/cli-reference.md';
 import jaReviewRules from './ja/review-rules.md';
 import jaArchitecture from './ja/architecture.md';
@@ -56,6 +61,7 @@ import jaAgentSkill from './ja/integrations/agent-skill.md';
 import jaClaudeCode from './ja/integrations/claude-code.md';
 import jaCicd from './ja/integrations/ci.md';
 import jaDelegate from './ja/integrations/delegate.md';
+import jaAcp from './ja/integrations/acp.md';
 import jaContributing from './ja/contributing.md';
 import jaFaq from './ja/faq.md';
 
@@ -63,6 +69,7 @@ import jaFaq from './ja/faq.md';
 import koQuickstart from './ko/quickstart.md';
 import koInstallation from './ko/installation.md';
 import koConfiguration from './ko/configuration.md';
+import koChatGPTPreview from './ko/chatgpt-preview.md';
 import koCliReference from './ko/cli-reference.md';
 import koReviewRules from './ko/review-rules.md';
 import koArchitecture from './ko/architecture.md';
@@ -74,6 +81,7 @@ import koAgentSkill from './ko/integrations/agent-skill.md';
 import koClaudeCode from './ko/integrations/claude-code.md';
 import koCicd from './ko/integrations/ci.md';
 import koDelegate from './ko/integrations/delegate.md';
+import koAcp from './ko/integrations/acp.md';
 import koContributing from './ko/contributing.md';
 import koFaq from './ko/faq.md';
 
@@ -81,6 +89,7 @@ import koFaq from './ko/faq.md';
 import ruQuickstart from './ru/quickstart.md';
 import ruInstallation from './ru/installation.md';
 import ruConfiguration from './ru/configuration.md';
+import ruChatGPTPreview from './ru/chatgpt-preview.md';
 import ruCliReference from './ru/cli-reference.md';
 import ruReviewRules from './ru/review-rules.md';
 import ruArchitecture from './ru/architecture.md';
@@ -92,6 +101,7 @@ import ruAgentSkill from './ru/integrations/agent-skill.md';
 import ruClaudeCode from './ru/integrations/claude-code.md';
 import ruCicd from './ru/integrations/ci.md';
 import ruDelegate from './ru/integrations/delegate.md';
+import ruAcp from './ru/integrations/acp.md';
 import ruContributing from './ru/contributing.md';
 import ruFaq from './ru/faq.md';
 
@@ -110,8 +120,10 @@ export type DocSlug =
   | 'claude-code'
   | 'cicd'
   | 'delegate'
+  | 'acp'
   | 'contributing'
-  | 'faq';
+  | 'faq'
+  | 'chatgpt-preview';
 
 type LocalizedDocs = Partial<Record<DocSlug, string>>;
 
@@ -119,6 +131,7 @@ const enDocs: Record<DocSlug, string> = {
   'quickstart': enQuickstart,
   'installation': enInstallation,
   'configuration': enConfiguration,
+  'chatgpt-preview': enChatGPTPreview,
   'cli-reference': enCliReference,
   'review-rules': enReviewRules,
   'architecture': enArchitecture,
@@ -130,6 +143,7 @@ const enDocs: Record<DocSlug, string> = {
   'claude-code': enClaudeCode,
   'cicd': enCicd,
   'delegate': enDelegate,
+  'acp': enAcp,
   'contributing': enContributing,
   'faq': enFaq,
 };
@@ -138,6 +152,7 @@ const zhDocs: Record<DocSlug, string> = {
   'quickstart': zhQuickstart,
   'installation': zhInstallation,
   'configuration': zhConfiguration,
+  'chatgpt-preview': zhChatGPTPreview,
   'cli-reference': zhCliReference,
   'review-rules': zhReviewRules,
   'architecture': zhArchitecture,
@@ -149,6 +164,7 @@ const zhDocs: Record<DocSlug, string> = {
   'claude-code': zhClaudeCode,
   'cicd': zhCicd,
   'delegate': zhDelegate,
+  'acp': zhAcp,
   'contributing': zhContributing,
   'faq': zhFaq,
 };
@@ -157,6 +173,7 @@ const jaDocs: Record<DocSlug, string> = {
   'quickstart': jaQuickstart,
   'installation': jaInstallation,
   'configuration': jaConfiguration,
+  'chatgpt-preview': jaChatGPTPreview,
   'cli-reference': jaCliReference,
   'review-rules': jaReviewRules,
   'architecture': jaArchitecture,
@@ -168,6 +185,7 @@ const jaDocs: Record<DocSlug, string> = {
   'claude-code': jaClaudeCode,
   'cicd': jaCicd,
   'delegate': jaDelegate,
+  'acp': jaAcp,
   'contributing': jaContributing,
   'faq': jaFaq,
 };
@@ -176,6 +194,7 @@ const koDocs: Record<DocSlug, string> = {
   'quickstart': koQuickstart,
   'installation': koInstallation,
   'configuration': koConfiguration,
+  'chatgpt-preview': koChatGPTPreview,
   'cli-reference': koCliReference,
   'review-rules': koReviewRules,
   'architecture': koArchitecture,
@@ -187,6 +206,7 @@ const koDocs: Record<DocSlug, string> = {
   'claude-code': koClaudeCode,
   'cicd': koCicd,
   'delegate': koDelegate,
+  'acp': koAcp,
   'contributing': koContributing,
   'faq': koFaq,
 };
@@ -195,6 +215,7 @@ const ruDocs: LocalizedDocs = {
   'quickstart': ruQuickstart,
   'installation': ruInstallation,
   'configuration': ruConfiguration,
+  'chatgpt-preview': ruChatGPTPreview,
   'cli-reference': ruCliReference,
   'review-rules': ruReviewRules,
   'architecture': ruArchitecture,
@@ -206,6 +227,7 @@ const ruDocs: LocalizedDocs = {
   'claude-code': ruClaudeCode,
   'cicd': ruCicd,
   'delegate': ruDelegate,
+  'acp': ruAcp,
   'contributing': ruContributing,
   'faq': ruFaq,
 };

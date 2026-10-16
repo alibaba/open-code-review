@@ -42,6 +42,16 @@ open-code-review (`ocr`) is an AI-powered code review CLI tool written in Go (mo
 - **Translated prose has its own homes, none of them scanned.** `docs/i18n/README.<locale>.md` and `docs/i18n/CONTRIBUTING.<locale>.md` (`zh-CN`, `ja-JP`, `ko-KR`, `ru-RU`); the doc pages under `pages/src/content/docs/<locale>/` (`en`, `zh`, `ja`, `ru`, Markdown throughout); and the UI copy tables in `pages/src/i18n/<locale>.ts`. Markdown is out of scope by extension, so translations go there freely. The i18n tables are `.ts` and would be scanned, so they are exempt by prefix instead — translated UI strings belong in those tables rather than inline in a component.
 - **Two escape hatches for the exceptional case, narrower one preferred.** Append an `allow-non-english: <reason>` marker comment to the offending line — the right choice for a handful of lines, such as an encoding fixture or a language-switcher label, and it leaves the rest of the file protected. Only for a whole tree that is inherently non-English, add a prefix to `allowedPrefixes` in `scripts/verify-english-only.go`; that list records each exemption's reason and the removal conditions for temporary translation exemptions.
 
+## Provider Presets
+
+When changing built-in provider metadata or model lists in
+`internal/llm/providers.go`, run `go generate ./internal/llm` from the
+repository root. Commit both generated files with the registry change;
+do not edit them by hand:
+
+- `extensions/frontend/src/shared/providers.generated.ts`
+- `extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/ProviderNames.generated.kt`
+
 ## Testing
 
 - Run unit tests with `make test`, not `go test` directly.

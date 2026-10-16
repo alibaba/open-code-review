@@ -295,12 +295,8 @@ func TestCustomProviderCanSelectBedrock(t *testing.T) {
 	})
 }
 
-// TestBedrockModelOverrideIsNotGatedByThePresetList covers what the preset's
-// own documentation promises: any identifier Bedrock will route. A preset's
-// Models list otherwise acts as an allowlist for --model, which cannot work for
-// identifiers scoped to an account and a region — an application inference
-// profile ARN, the value to use when spend has to be attributed, can never
-// appear in a list compiled upstream.
+// TestBedrockModelOverrideIsNotGatedByThePresetList covers identifiers scoped
+// to an account and region that cannot appear in a list compiled upstream.
 func TestBedrockModelOverrideIsNotGatedByThePresetList(t *testing.T) {
 	path := writeConfig(t, map[string]any{
 		"provider":  "bedrock",
@@ -323,22 +319,46 @@ func TestBedrockModelOverrideIsNotGatedByThePresetList(t *testing.T) {
 	}
 }
 
-// TestModelOverrideStillGatedForKeyBasedProviders keeps the relaxation scoped to
-// ambient auth: a typo against a hosted API should still be caught locally.
-func TestModelOverrideStillGatedForKeyBasedProviders(t *testing.T) {
+func TestCustomBedrockModelListDoesNotGateOverride(t *testing.T) {
+	path := writeConfig(t, map[string]any{
+		"provider": "mine",
+		"custom_providers": map[string]any{
+			"mine": map[string]any{
+				"protocol":   "anthropic-bedrock",
+				"aws_region": "us-west-2",
+				"models":     []string{"listed-model"},
+			},
+		},
+	})
+	var ep ResolvedEndpoint
+	var err error
+	stderr := captureStderr(t, func() {
+		ep, err = ResolveEndpointWithModelOverride(path, "account-specific-model")
+	})
+	if err != nil || ep.Model != "account-specific-model" || stderr != "" {
+		t.Errorf("endpoint = %+v, error = %v, stderr = %q", ep, err, stderr)
+	}
+}
+
+func TestModelOverrideWarnsForKeyBasedProviders(t *testing.T) {
 	path := writeConfig(t, map[string]any{
 		"provider":  "anthropic",
 		"model":     "claude-sonnet-5",
 		"providers": map[string]any{"anthropic": map[string]any{"api_key": "sk-test-not-a-real-key"}},
 	})
 
-	if _, err := ResolveEndpointWithModelOverride(path, "claude-sonnet-5-typo"); err == nil {
-		t.Error("an unlisted model was accepted for a key-based provider; want an error")
+	var ep ResolvedEndpoint
+	var err error
+	stderr := captureStderr(t, func() {
+		ep, err = ResolveEndpointWithModelOverride(path, "claude-sonnet-5-typo")
+	})
+	if err != nil || ep.Model != "claude-sonnet-5-typo" || !strings.Contains(stderr, `model "claude-sonnet-5-typo" is not in the suggested models`) {
+		t.Errorf("endpoint = %+v, error = %v, stderr = %q", ep, err, stderr)
 	}
 }
 
-// TestNonAmbientProviderStillRequiresAPIKey makes sure relaxing the gate for
-// ambient auth did not relax it for everyone.
+// TestNonAmbientProviderStillRequiresAPIKey makes sure open model lists do not
+// relax credential requirements.
 func TestNonAmbientProviderStillRequiresAPIKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	path := writeConfig(t, map[string]any{

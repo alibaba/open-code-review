@@ -169,6 +169,36 @@ func (n NativeTurn) EstimatedTokens() int {
 	}
 }
 
+// countsToolCalls reports whether the NativeTurn payload already accounts for
+// tool invocations (such as Anthropic MessageParam content blocks or Responses
+// API function call items), avoiding double-counting with Message.ToolCalls.
+// It follows the same fallback conditions as buildAnthropicParams and
+// buildResponsesParams, falling back to Message.ToolCalls when the native
+// content or item slice is structurally empty.
+func (n NativeTurn) countsToolCalls() bool {
+	switch p := n.Payload.(type) {
+	case anthropic.MessageParam:
+		return len(p.Content) > 0
+	case []responses.ResponseInputItemUnionParam:
+		return len(p) > 0
+	default:
+		return false
+	}
+}
+
+// EstimatedTokens returns a rough token estimate for the portion of Message
+// not already counted by ExtractText() (thinking blocks, reasoning items,
+// and tool-call arguments/names). Uses bytes/4 as the heuristic.
+func (m Message) EstimatedTokens() int {
+	total := m.Native.EstimatedTokens()
+	if !m.Native.countsToolCalls() {
+		for _, tc := range m.ToolCalls {
+			total += tc.EstimatedTokens()
+		}
+	}
+	return total
+}
+
 func marshaledLen(v any) int {
 	if v == nil {
 		return 0
@@ -267,6 +297,21 @@ type FunctionCall struct {
 	Arguments string `json:"arguments"` // JSON-encoded string
 }
 
+// EstimatedTokens returns a rough token estimate for the tool call (function
+// name, arguments, ID framing, and opaque provider metadata) using the
+// bytes/4 heuristic.
+func (tc ToolCall) EstimatedTokens() int {
+	b := len(tc.ID) + len(tc.Function.Name) + len(tc.Function.Arguments) + len(tc.ExtraContent)
+	if b == 0 {
+		return 0
+	}
+	t := b / 4
+	if t == 0 {
+		return 1
+	}
+	return t
+}
+
 // ResponseMessage extends Message with optional reasoning content.
 type ResponseMessage struct {
 	Role             string     `json:"role"`
@@ -279,10 +324,11 @@ type ResponseMessage struct {
 
 // ChatResponse is the parsed result of a completion request.
 type ChatResponse struct {
-	ID      string     `json:"-"`
-	Model   string     `json:"-"`
-	Choices []Choice   `json:"-"`
-	Usage   *UsageInfo `json:"-"` // Token usage extracted from API response
+	ID       string          `json:"-"`
+	Model    string          `json:"-"`
+	Choices  []Choice        `json:"-"`
+	Usage    *UsageInfo      `json:"-"` // Token usage extracted from API response
+	RawUsage json.RawMessage `json:"-"`
 }
 
 // Content extracts the text content from the first choice, falling back to reasoning content.
@@ -352,14 +398,18 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
-	URL          string            // Full API endpoint URL
-	APIKey       string            // Bearer token / API key
-	Model        string            // Default model override
-	AuthHeader   string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
-	Timeout      time.Duration     // Request timeout
-	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
-	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
-	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+	URL                   string            // Full API endpoint URL
+	APIKey                string            // Bearer token / API key
+	Model                 string            // Default model override
+	AuthHeader            string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
+	Timeout               time.Duration     // Request timeout
+	ExtraBody             map[string]any    // Vendor-specific fields merged into every request body
+	ExtraHeaders          map[string]string // Extra HTTP headers sent with every request
+	RetryCodes            []int             // Additional HTTP status codes that trigger retry
+	RequiresStreaming     bool
+	RejectsSamplingParams bool
+	ChatGPTPlan           bool
+	ChatGPTAccount        string
 	// SessionKey is the fallback prompt-cache affinity key
 	// for requests whose context carries none (see ContextWithSessionKey).
 	//
@@ -435,18 +485,22 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // parameters rather than fields on ResolvedEndpoint.
 func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder) LLMClient {
 	cfg := ClientConfig{
-		URL:            ep.URL,
-		APIKey:         ep.Token,
-		Model:          ep.Model,
-		AuthHeader:     ep.AuthHeader,
-		Timeout:        ep.Timeout,
-		ExtraBody:      ep.ExtraBody,
-		ExtraHeaders:   ep.ExtraHeaders,
-		RetryCodes:     ep.RetryCodes,
-		retryCollector: collector,
-		rawHolder:      raw,
-		AWSProfile:     ep.AWSProfile,
-		AWSRegion:      ep.AWSRegion,
+		URL:                   ep.URL,
+		APIKey:                ep.Token,
+		Model:                 ep.Model,
+		AuthHeader:            ep.AuthHeader,
+		Timeout:               ep.Timeout,
+		ExtraBody:             ep.ExtraBody,
+		ExtraHeaders:          ep.ExtraHeaders,
+		RetryCodes:            ep.RetryCodes,
+		RequiresStreaming:     ep.RequiresStreaming,
+		RejectsSamplingParams: ep.RejectsSamplingParams,
+		ChatGPTPlan:           ep.ChatGPTPlan,
+		ChatGPTAccount:        ep.ChatGPTAccount,
+		retryCollector:        collector,
+		rawHolder:             raw,
+		AWSProfile:            ep.AWSProfile,
+		AWSRegion:             ep.AWSRegion,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -604,6 +658,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
 			panic(r)
 		}
+		err = describeTimeout(ctx, err)
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
 
@@ -1410,6 +1465,7 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
 			panic(r)
 		}
+		err = describeTimeout(ctx, err)
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
 
