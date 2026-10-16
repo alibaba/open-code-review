@@ -35,7 +35,7 @@ func okAttempt() AttemptRecord {
 	return AttemptRecord{StatusCode: 200}
 }
 
-// The enum sets are fixed by the report contract: 8 error classes and 6 failure
+// The enum sets are fixed by the report contract: 8 error classes and 7 failure
 // phases. Enumerating them pins both the membership and the size, so adding a
 // class or a phase has to come with a deliberate edit here rather than silently
 // widening what the report can emit.
@@ -61,10 +61,10 @@ func TestErrorClassAndFailurePhaseSets(t *testing.T) {
 
 	phases := []FailurePhase{
 		FailurePhaseTransport, FailurePhaseHTTP, FailurePhaseResponseDecode,
-		FailurePhaseStream, FailurePhaseResponseStatus, FailurePhaseContext,
+		FailurePhaseStream, FailurePhaseResponseStatus, FailurePhaseContext, FailurePhaseVerification,
 	}
-	if len(phases) != 6 {
-		t.Fatalf("the contract fixes 6 failure phases, enumerated %d", len(phases))
+	if len(phases) != 7 {
+		t.Fatalf("the contract fixes 7 failure phases, enumerated %d", len(phases))
 	}
 	for _, p := range phases {
 		if !p.valid() {

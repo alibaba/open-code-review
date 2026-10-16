@@ -55,13 +55,14 @@ const (
 	FailurePhaseStream         FailurePhase = "stream"
 	FailurePhaseResponseStatus FailurePhase = "response_status"
 	FailurePhaseContext        FailurePhase = "context"
+	FailurePhaseVerification   FailurePhase = "verification"
 )
 
 // valid reports whether p is one of the fixed failure phases.
 func (p FailurePhase) valid() bool {
 	switch p {
 	case FailurePhaseTransport, FailurePhaseHTTP, FailurePhaseResponseDecode,
-		FailurePhaseStream, FailurePhaseResponseStatus, FailurePhaseContext:
+		FailurePhaseStream, FailurePhaseResponseStatus, FailurePhaseContext, FailurePhaseVerification:
 		return true
 	}
 	return false

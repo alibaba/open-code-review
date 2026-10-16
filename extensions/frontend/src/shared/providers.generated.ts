@@ -281,6 +281,16 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     ]
   },
   {
+    "name": "nearai",
+    "displayName": "NEAR AI (verified)",
+    "protocol": "openai",
+    "baseUrl": "https://cloud-api.near.ai/v1",
+    "envVar": "NEARAI_API_KEY",
+    "models": [
+      "z-ai/glm-5.3-flash"
+    ]
+  },
+  {
     "name": "novita",
     "displayName": "Novita API",
     "protocol": "openai",
