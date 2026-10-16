@@ -106,6 +106,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/main/handler.cxx", "Smart Pointer"},
 		{"include/handler.hxx", "Smart Pointer"},
 		{"driver.c", "malloc"},
+		{"scripts/deploy.sh", "Shell Dialect and Execution Context"},
+		{"scripts/helpers.bash", "Shell Dialect and Execution Context"},
+		{"scripts/DEPLOY.SH", "Shell Dialect and Execution Context"},
 		{"pages/Index.ets", "State Decorator"},
 		{"components/Button.ets", "State Decorator"},
 		{"entry/src/main/module.json5", "json-key"},
@@ -401,6 +404,31 @@ func TestNewResolver_ProjectRuleFallsBackToSystem(t *testing.T) {
 	got := resolver.Resolve("other/main.go")
 	if !strings.Contains(got, "Go Review Principles") {
 		t.Errorf("expected system Go rule, got %q", truncate(got, 80))
+	}
+}
+
+func TestNewResolver_ProjectRuleOverridesShellRule(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	dir := t.TempDir()
+	ocrDir := filepath.Join(dir, ".opencodereview")
+	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"scripts/**/*.sh","rule":"project-shell-rule"}]}`
+	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	if got := resolver.Resolve("scripts/deploy.sh"); got != "project-shell-rule" {
+		t.Fatalf("expected project shell rule, got %q", truncate(got, 80))
+	}
+	if got := resolver.Resolve("tools/deploy.sh"); !strings.Contains(got, "Shell Dialect and Execution Context") {
+		t.Fatalf("expected system shell rule outside project pattern, got %q", truncate(got, 80))
 	}
 }
 
