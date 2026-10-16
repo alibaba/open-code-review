@@ -55,6 +55,7 @@ func init() {
 
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(reviewCmd)
+	rootCmd.AddCommand(newGateCmd())
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(delegateCmd)
 	rootCmd.AddCommand(sessionCmd)
