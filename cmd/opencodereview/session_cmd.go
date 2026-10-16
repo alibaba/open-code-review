@@ -365,7 +365,11 @@ func runSessionCompare(beforeID, afterID string) error {
 	if err != nil {
 		return fmt.Errorf("load session %q: %w", afterID, err)
 	}
-	if beforeSummary.RepoDir != afterSummary.RepoDir {
+	// Not an exact string compare: the two sessions may have been recorded from
+	// different spellings of this one directory (`C:\repo` from a resolved path,
+	// `C:/repo` from --repo), and splitting a repository across its own spellings
+	// is what made compare refuse the pair it was asked about.
+	if !session.SameRepoPath(beforeSummary.RepoDir, afterSummary.RepoDir) {
 		return fmt.Errorf("sessions belong to different repositories: %s was recorded in %s, %s in %s",
 			beforeID, beforeSummary.RepoDir, afterID, afterSummary.RepoDir)
 	}
