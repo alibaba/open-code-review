@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -89,7 +90,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "chatgpt", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "anthropic-oauth", "baidu-qianfan", "bedrock", "chatgpt", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -462,6 +463,23 @@ func TestProviders_AllProtocolsCanonical(t *testing.T) {
 		}
 		if err := ValidateProtocol(p.Protocol); err != nil {
 			t.Errorf("provider %q has non-canonical Protocol %q: %v", p.Name, p.Protocol, err)
+		}
+	}
+}
+
+func TestLookupProvider_AnthropicOAuthDetails(t *testing.T) {
+	provider, ok := LookupProvider(ProtocolAnthropicOAuth)
+	if !ok {
+		t.Fatalf("provider %q was not found", ProtocolAnthropicOAuth)
+	}
+	models := []string{"sonnet", "opus", "claude-opus-5-5", "claude-sonnet-5-5"}
+	if provider.Protocol != ProtocolAnthropicOAuth || !provider.AmbientAuth || provider.BaseURL != "" || provider.EnvVar != "" || !slices.Equal(provider.Models, models) {
+		t.Fatalf("unexpected OAuth provider: %+v", provider)
+	}
+	for _, model := range provider.Models {
+		client := NewLLMClient(ResolvedEndpoint{Protocol: provider.Protocol, Model: model, AmbientAuth: provider.AmbientAuth}, nil, nil)
+		if _, ok := client.(*ClaudeOAuthClient); !ok {
+			t.Fatalf("model %q selected %T", model, client)
 		}
 	}
 }

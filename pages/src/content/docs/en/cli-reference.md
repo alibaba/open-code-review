@@ -617,6 +617,14 @@ ocr llm models
 
 `ocr auth` accepts `--provider chatgpt` and `--account <client-id>`; `login` also accepts `--no-browser`, `--new-account` and `--enable-plan`. ChatGPT does not support `--device`. `--enable-plan` requests consent for a saved registration and cannot be combined with `--new-account`. The model list is account-specific; an explicit model is accepted even if the list omits it. This provider accepts `extra_body` only for `reasoning`, `text` and `prompt_cache_key`. See the [ChatGPT preview guide](../chatgpt-preview/) for account handling, permissions and restrictions.
 
+`--provider anthropic-oauth` delegates `login`, `status` and `logout` to the official Claude Code CLI, which owns the credential store. The ChatGPT flags (`--account`, `--new-account`, `--enable-plan`, `--no-browser` and `--device`) and `ocr auth select` do not apply to it. See [Claude subscription provider](../configuration/#claude-subscription-provider).
+
+```bash
+ocr auth login --provider anthropic-oauth
+ocr auth status --provider anthropic-oauth
+ocr auth logout --provider anthropic-oauth
+```
+
 ## `ocr llm`
 
 LLM utility commands. Three subcommands:
