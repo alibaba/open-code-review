@@ -328,10 +328,76 @@ Top-level fields:
 | `llm` | Resolved LLM identity. The normalized `model` is always present; `provider` is present only for a named configured provider. |
 | `message` | Optional. Human-readable summary, e.g. `"No comments generated. Looks good to me."`. |
 | `summary` | Optional. Run aggregates: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (omitempty), `cache_write_tokens` (omitempty), `elapsed`. Omitted for `skipped` runs. |
+| `tool_calls` | Registered-tool invocation counts: `total`, `by_tool`, `failure`, `failure_by_tool`, and `failure_details`. Failures remain counted even when a later call supplies recovery evidence. |
 | `comments` | Always present, possibly empty. Per-comment fields are the ones in the example above. |
 | `warnings` | Optional. Present when one or more sub-agents failed; each entry describes the affected file and the error. |
 | `session_id` | Optional. Present on persisted review runs; pass this to `ocr review --resume <session-id>` when retrying compatible range or commit reviews. |
 | `resume` | Optional. Present on resumed runs with `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, and `current_model`. |
+
+##### File-read recovery evidence
+
+Each `tool_calls.failure_details` entry preserves the failed invocation's
+`tool_call_number`, `tool_name`, raw `arguments`, and `error`. Its outer
+`file_path` identifies the review subtask, which may be a group key; the
+requested file path is inside `arguments`.
+
+For `file_read` failures, the optional `recovery` object distinguishes an
+observed candidate read from a failure with no such evidence:
+
+| `recovery.status` | Meaning |
+|---|---|
+| `not_observed` | No qualifying subsequent candidate read was observed in this run. This does not prove that the model failed to recover by another means. |
+| `candidate_read` | A later built-in `file_read` in the same subtask successfully read the recorded candidate at the same immutable target commit. |
+
+Candidate matching is limited to a confirmed missing `.ts` or `.tsx` path
+whose counterpart has the same directory and filename stem in the reviewed
+commit. A successful read of an unrelated file does not qualify. For example,
+this failure detail links the missing path to the later corrected read:
+
+```json
+{
+  "tool_call_number": 1,
+  "tool_name": "file_read",
+  "file_path": "review-group",
+  "arguments": "{\"file_path\":\"src/use-toggle.ts\"}",
+  "error": "file not found",
+  "recovery": {
+    "status": "candidate_read",
+    "target_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "candidate_path": "src/use-toggle.tsx",
+    "successful_read": {
+      "tool_call_number": 2,
+      "arguments": "{\"file_path\":\"src/use-toggle.tsx\",\"start_line\":10}",
+      "file_path": "src/use-toggle.tsx",
+      "start_line": 10,
+      "end_line": 509,
+      "total_lines": 700,
+      "is_truncated": true
+    }
+  }
+}
+```
+
+`successful_read` records the actual returned range and truncation state.
+An empty file has `total_lines: 0` and an empty returned range.
+`candidate_read` confirms that the read succeeded; it does not establish that
+the whole file was read, that the model understood it, or that the review
+found every defect. `target_commit` and `candidate_path` can also accompany
+`not_observed` when a candidate was identified but no qualifying read followed.
+
+Recovery evidence does not change historical failure counts, coverage,
+top-level status, or exit codes. A `complete` review can therefore retain
+failed tool calls with either recovery status. Evidence belongs only to the
+current run; parent sessions are not replayed to infer it. Older output and
+other tools may omit `recovery`; omission means no recorded evidence, not
+successful recovery. The same fields appear in JSON usage output on failure.
+
+An admission gate should evaluate coverage and read evidence separately.
+If the gate requires particular context, inspect the candidate path and actual
+returned range instead of accepting `complete` alone or rejecting every
+historical tool failure. `not_observed` or omitted evidence may require session
+inspection; neither proves that recovery was impossible. Workspace reads and
+reads without a resolved target commit cannot establish this association.
 
 When no files were eligible for review, JSON mode emits a `skipped`
 envelope instead so callers can distinguish "no changes" from "no findings":
