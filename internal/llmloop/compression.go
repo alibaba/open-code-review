@@ -127,16 +127,20 @@ func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int
 }
 
 // partitionMessages divides messages into frozen, compress, and active zones.
-// Frozen zone is always messages[0:2]. Active zone preserves the K most
-// recent complete rounds based on available token budget.
-func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEstimate int) partitionResult {
-	result := partitionResult{frozenEnd: 2}
-	if len(messages) <= 2 {
+// The caller can preserve a longer initial prefix for scoped task inputs.
+// Active zone preserves the K most recent complete rounds based on the budget.
+func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEstimate int, frozenMessages ...int) partitionResult {
+	frozenMessageCount := 2
+	if len(frozenMessages) > 0 {
+		frozenMessageCount = frozenMessages[0]
+	}
+	result := partitionResult{frozenEnd: min(len(messages), max(2, frozenMessageCount))}
+	if len(messages) <= result.frozenEnd {
 		result.compressEnd = len(messages)
 		return result
 	}
 
-	result.rounds = groupIntoRounds(messages, 2)
+	result.rounds = groupIntoRounds(messages, result.frozenEnd)
 	if len(result.rounds) == 0 {
 		result.compressEnd = len(messages)
 		return result
@@ -217,15 +221,19 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 }
 
 // runCompression performs three-zone memory compression on the given
-// messages, summarizing the compress zone while preserving the active zone
-// intact. Returns rebuilt as [frozen] + [compressed_summary appended to
-// the user prompt] + [active].
+// messages, summarizing history while preserving the frozen inputs and active
+// zone. Scoped tasks keep the summary outside their immutable input prefix.
 func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey string) ([]llm.Message, error) {
-	if len(r.deps.Template.MemoryCompressionTask.Messages) == 0 || len(msgs) <= 2 {
-		return msgs[:min(len(msgs), 2)], nil
+	frozenEnd := min(len(msgs), 2)
+	opts, _ := ctx.Value(taskOptionsKey{}).(*TaskOptions)
+	if opts != nil {
+		frozenEnd = min(len(msgs), max(frozenEnd, opts.FrozenMessageCount))
+	}
+	if len(r.deps.Template.MemoryCompressionTask.Messages) == 0 || len(msgs) <= frozenEnd {
+		return msgs[:frozenEnd], nil
 	}
 
-	part := partitionMessages(msgs, r.deps.Template.MaxTokens, 0)
+	part := partitionMessages(msgs, r.deps.Template.MaxTokens, 0, frozenEnd)
 	if part.compressEnd <= part.frozenEnd {
 		return msgs, nil
 	}
@@ -281,12 +289,18 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 		return msgs, nil
 	}
 
-	rebuilt := make([]llm.Message, 2)
-	copy(rebuilt, msgs[:2])
+	rebuilt := make([]llm.Message, part.frozenEnd)
+	copy(rebuilt, msgs[:part.frozenEnd])
 
-	userMsg := rebuilt[1]
-	currentText := userMsg.ExtractText()
-	rebuilt[1] = llm.NewTextMessage(userMsg.Role, currentText+"\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
+	summary := "<previous_review_summary>\n" + rawSummary + "\n</previous_review_summary>"
+	if opts != nil && opts.FrozenMessageCount > 0 {
+		// Keep scoped inputs byte-for-byte intact. The summary remains history
+		// and can be compressed again; it must not inherit a policy's role.
+		rebuilt = append(rebuilt, llm.NewTextMessage("user", summary))
+	} else {
+		userMsg := rebuilt[1]
+		rebuilt[1] = llm.NewTextMessage(userMsg.Role, userMsg.ExtractText()+"\n\n"+summary)
+	}
 
 	for i := part.compressEnd; i < len(msgs); i++ {
 		rebuilt = append(rebuilt, msgs[i])

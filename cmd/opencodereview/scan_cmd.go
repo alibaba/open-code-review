@@ -15,6 +15,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
+	"github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/alibaba/open-code-review/internal/scan"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -205,6 +206,21 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 		Runner:  cc.GitRunner,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
+	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(ctx), "scan.run")
+	defer span.End()
+	if err := ctx.Err(); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		return err
+	}
+	mcpClients, err := initRuntimeMCPClients(ctx, rt.AppCfg, cc.Resolver, tools, cc.RepoDir, Version)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		return err
+	}
+	defer closeReviewMCPClients(mcpClients)
+	scanToolDefs = append(scanToolDefs, mcp.CollectToolDefs(mcpClients, tools)...)
 
 	ag := scan.NewAgent(scan.Args{
 		RepoDir:               cc.RepoDir,
@@ -237,8 +253,6 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
 
-	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(ctx), "scan.run")
-	defer span.End()
 	var traceID string
 	if telemetry.IsEnabled() {
 		traceID = telemetry.TraceIDFromContext(ctx)

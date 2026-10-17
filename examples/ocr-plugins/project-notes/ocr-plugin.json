@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "project-notes",
+  "name": "Project Notes",
+  "version": "1.0.0",
+  "description": "Read bounded REVIEW_NOTES.md content from the reviewed repository. Requires Node.js on PATH.",
+  "mcp_servers": {
+    "notes": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${plugin_dir}/server.mjs"],
+      "tools": ["project_review_notes"]
+    }
+  },
+  "rules": ["rules.json"]
+}

@@ -305,10 +305,15 @@ func runSessionShow(sessionID string) error {
 	}
 
 	if sessionShowJSON {
+		reports, err := session.LoadPluginReviewReports(resolvedRepo, sessionID)
+		if err != nil {
+			return fmt.Errorf("load plugin reports for session %q: %w", sessionID, err)
+		}
 		payload := struct {
-			Summary *session.Summary     `json:"summary"`
-			Items   []session.ItemDetail `json:"items"`
-		}{Summary: summary, Items: items}
+			Summary      *session.Summary             `json:"summary"`
+			Items        []session.ItemDetail         `json:"items"`
+			ReviewPlugin []session.PluginReviewReport `json:"review_plugin,omitempty"`
+		}{Summary: summary, Items: items, ReviewPlugin: reports}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)

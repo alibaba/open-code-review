@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "single-pass",
+  "name": "Single Pass Review Example",
+  "version": "1.0.0",
+  "description": "A minimal one-stage review workflow using Python 3.",
+  "review": {
+    "protocol": "stdio-v1",
+    "command": "python",
+    "args": ["${plugin_dir}/review.py"],
+    "stages": ["review"]
+  }
+}

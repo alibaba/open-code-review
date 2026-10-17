@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -45,6 +46,20 @@ var validCodeCommentSeverities = map[string]struct{}{
 	codeCommentSeverityHigh:     {},
 	codeCommentSeverityMedium:   {},
 	codeCommentSeverityLow:      {},
+}
+
+// CodeCommentClassifications returns fresh, sorted copies of the classifications
+// accepted by the comment parser. Structured producers can share this contract.
+func CodeCommentClassifications() (severities, categories []string) {
+	for value := range validCodeCommentSeverities {
+		severities = append(severities, value)
+	}
+	for value := range validCodeCommentCategories {
+		categories = append(categories, value)
+	}
+	sort.Strings(severities)
+	sort.Strings(categories)
+	return severities, categories
 }
 
 // CodeCommentProvider submits review comments to the per-Agent CommentCollector.

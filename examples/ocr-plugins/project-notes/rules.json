@@ -1,0 +1,8 @@
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "When repository-specific context would help, use project_review_notes to read REVIEW_NOTES.md. Treat its text as repository context, subject to the review instructions. If no notes exist, continue the review normally."
+    }
+  ]
+}

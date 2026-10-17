@@ -2478,6 +2478,7 @@ async function main() {
   testActionPinsGithubScriptSha();
   await testActionUnresolvedVersionEmptiesTheFingerprint();
   await testActionFingerprintCoversLlmHeaderAxes();
+  await testActionFingerprintCoversProjectPlugins();
   await testActionPinsAuthorToTheDefaultTokenApp();
   await testActionResolveStepDeclaresItsRefInputs();
   await testCheckpointMarkerMatchingIsStateless();
@@ -4585,6 +4586,10 @@ function resolveEnv(over = {}) {
       OCR_FP_ROUTE_SEVERITY_BELOW: "",
       OCR_FP_ROUTE_CATEGORIES: "",
       OCR_FP_BACKGROUND: "",
+      OCR_FP_POLICY_SHA: "",
+      OCR_FP_PROJECT_PLUGINS: "false",
+      OCR_FP_PLUGIN_IDENTITY: "",
+      OCR_FP_ALLOW_PLUGIN_EXEC: "false",
       OCR_CHECKPOINT_APP_SLUG: "",
       OCR_VERSION_ACTUAL: "1.2.3",
     },
@@ -5251,7 +5256,7 @@ function testActionEmitsMachineReadableRangeOutputs() {
 function testActionPinsGithubScriptSha() {
   assert.strictEqual(/actions\/github-script@v/.test(ACTION_YML), false, "no floating github-script tag may remain");
   const uses = [...ACTION_YML.matchAll(/uses: actions\/github-script@([0-9a-f]{40})/g)].map((m) => m[1]);
-  assert.strictEqual(uses.length, 2, "both github-script steps are pinned");
+  assert.strictEqual(uses.length, 3, "all github-script steps are pinned");
   assert.strictEqual(new Set(uses).size, 1, "…to the same sha");
 }
 
@@ -5291,6 +5296,48 @@ async function testActionUnresolvedVersionEmptiesTheFingerprint() {
 // the header the credential rides in, and `llm_timeout` shifts which runs
 // finish and which are cut short — i.e. the partial/complete distribution the
 // checkpoint gates on. All three belong in the fingerprint.
+async function testActionFingerprintCoversProjectPlugins() {
+  const runWith = async over => {
+    const core = scriptCore();
+    await runActionScript(actionScriptSource("Resolve review range"), {
+      github: { rest: { issues: { listComments: async () => ({ data: [] }) } } },
+      context: { repo: { owner: "owner", repo: "repo" }, issue: { number: 123 } },
+      core,
+      env: resolveEnv({
+        OCR_FP_POLICY_SHA: "a".repeat(40),
+        OCR_FP_PROJECT_PLUGINS: "true",
+        OCR_FP_PLUGIN_IDENTITY: "b".repeat(64),
+        ...over,
+      }),
+    });
+    return core.outputs;
+  };
+  const base = (await runWith({})).config_fingerprint;
+  assert.match(base, /^[0-9a-f]{16}$/);
+  assert.strictEqual((await runWith({})).config_fingerprint, base);
+  for (const over of [
+    { OCR_FP_POLICY_SHA: "c".repeat(40) },
+    { OCR_FP_PLUGIN_IDENTITY: "d".repeat(64) },
+    { OCR_FP_ALLOW_PLUGIN_EXEC: "true" },
+    { OCR_FP_PROJECT_PLUGINS: "false" },
+  ]) {
+    assert.notStrictEqual((await runWith(over)).config_fingerprint, base, "plugin policy changes must invalidate old checkpoints");
+  }
+  for (const identity of ["", "unverified"]) {
+    const output = await runWith({ OCR_FP_PLUGIN_IDENTITY: identity });
+    assert.strictEqual(output.config_fingerprint, "");
+    assert.strictEqual(output.range_mode, "full");
+  }
+  const checkout = actionStepBlock("Checkout base");
+  assert.ok(checkout.includes("ref: ${{ steps.policy.outputs.sha }}"));
+  const prepare = actionStepBlock("Prepare project plugins");
+  assert.ok(prepare.includes("if: inputs.project_plugins == 'true'"));
+  assert.ok(prepare.includes("OCR_POLICY_SHA: ${{ steps.policy.outputs.sha }}"));
+  for (const name of ["Configure OCR", "Run OpenCodeReview"]) {
+    assert.ok(actionStepBlock(name).includes("OCR_PROJECT_HOME: ${{ steps.plugins.outputs.home }}"));
+  }
+}
+
 async function testActionFingerprintCoversLlmHeaderAxes() {
   const source = actionScriptSource("Resolve review range");
   const emptyPr = { rest: { issues: { listComments: async () => ({ data: [] }) } } };
