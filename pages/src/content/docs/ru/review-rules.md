@@ -197,6 +197,8 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/src/test/java/**/*.java`
 - `**/src/test/**/*.{kt,kts}`
 - `**/*Test.fs`
+- `**/*Test.cs`
+- `**/*Tests.cs`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`
@@ -313,6 +315,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                               |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                                      |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — файлы реализации, сигнатур и скриптов F#.                                          |
+| `**/*.cs`                           | `csharp.md` — исходные файлы C# для современного .NET и ASP.NET Core.                           |
 | `**/*.rs`                           | `rust.md`                                                                                        |
 | `**/*.R`                            | `r.md`                                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                         |

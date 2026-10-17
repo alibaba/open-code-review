@@ -183,6 +183,8 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/src/test/java/**/*.java`
 - `**/src/test/**/*.{kt,kts}`
 - `**/*Test.fs`
+- `**/*Test.cs`
+- `**/*Tests.cs`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`
@@ -295,6 +297,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                               |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                      |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — F# 구현, 시그니처, 스크립트 파일.                                              |
+| `**/*.cs`                           | `csharp.md` — 최신 .NET 및 ASP.NET Core 애플리케이션의 C# 소스 파일.                           |
 | `**/*.rs`                           | `rust.md`                                                                        |
 | `**/*.R`                            | `r.md`                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                         |

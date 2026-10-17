@@ -145,6 +145,8 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/src/test/java/**/*.java`
 - `**/src/test/**/*.{kt,kts}`
 - `**/*Test.fs`
+- `**/*Test.cs`
+- `**/*Tests.cs`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`
@@ -250,6 +252,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                              |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                                     |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md`: F# の実装、シグネチャ、スクリプトファイル。                                                            |
+| `**/*.cs`                           | `csharp.md`: モダン .NET および ASP.NET Core アプリケーション向けの C# ソースファイル。                                |
 | `**/*.rs`                           | `rust.md`                                                                                       |
 | `**/*.R`                            | `r.md`                                                                                          |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                        |

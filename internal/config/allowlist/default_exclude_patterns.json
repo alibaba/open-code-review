@@ -3,6 +3,8 @@
   "**/src/test/java/**/*.java",
   "**/src/test/**/*.{kt,kts}",
   "**/*Test.fs",
+  "**/*Test.cs",
+  "**/*Tests.cs",
   "**/*.test.{js,jsx,ts,tsx}",
   "**/*.spec.{js,jsx,ts,tsx}",
   "**/__tests__/**",

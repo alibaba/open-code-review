@@ -172,6 +172,8 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/src/test/java/**/*.java`
 - `**/src/test/**/*.{kt,kts}`
 - `**/*Test.fs`
+- `**/*Test.cs`
+- `**/*Tests.cs`
 - `**/*.test.{js,jsx,ts,tsx}`
 - `**/*.spec.{js,jsx,ts,tsx}`
 - `**/__tests__/**`
@@ -283,6 +285,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                    |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                           |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md`——F# 实现、签名和脚本文件。                                           |
+| `**/*.cs`                           | `csharp.md`——现代 .NET 和 ASP.NET Core 应用程序的 C# 源文件。                     |
 | `**/*.rs`                           | `rust.md`                                                             |
 | `**/*.R`                            | `r.md`                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                              |
