@@ -133,6 +133,12 @@ func TestIsAllowedExt(t *testing.T) {
 		{".VY", true},
 		{".rego", true},
 		{".REGO", true},
+		{".ps1", true},
+		{".PS1", true},
+		{".psm1", true},
+		{".PSM1", true},
+		{".psd1", true},
+		{".PSD1", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -282,6 +288,14 @@ func TestIsExcludedPath(t *testing.T) {
 
 		// Prisma schemas have no conventional default test-file exclusion.
 		{"prisma schema", "prisma/schema.prisma", false},
+
+		{"powershell script", "scripts/Deploy.ps1", false},
+		{"powershell module", "modules/Deploy/Deploy.psm1", false},
+		{"powershell manifest", "modules/Deploy/Deploy.psd1", false},
+		{"pester root", "Deploy.Tests.ps1", false},
+		{"pester nested", "tests/unit/Deploy.Tests.ps1", false},
+		{"pester uppercase", "tests/unit/DEPLOY.TESTS.PS1", false},
+		{"powershell fixture", "tests/fixtures/Deploy.ps1", true},
 
 		// Handlebars/Mustache have no extension-specific test-path convention;
 		// generic fixture directories remain excluded.

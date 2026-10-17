@@ -174,6 +174,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
 		{"policies/authz.rego", "Default Posture"},
 		{"policies/authz.REGO", "Default Posture"},
+		{"scripts/deploy.ps1", "PowerShell Review Principles"},
+		{"modules/Build/Build.psm1", "PowerShell Review Principles"},
+		{"modules/Build/Build.psd1", "PowerShell Review Principles"},
 	}
 
 	for _, tt := range tests {
@@ -906,6 +909,32 @@ func TestResolveDetail_SystemPatternMatch(t *testing.T) {
 	}
 	if !strings.Contains(detail.Rule, "Logic Error Detection") {
 		t.Errorf("expected java rule, got %q", truncate(detail.Rule, 80))
+	}
+}
+
+func TestResolveDetail_SystemPowerShellPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, name := range []string{"Deploy.ps1", "Build.psm1", "Build.psd1", "Deploy.Tests.ps1"} {
+		for _, path := range []string{name, "scripts/" + name, "tests/unit/" + strings.ToUpper(name)} {
+			t.Run(path, func(t *testing.T) {
+				if !allowedext.IsAllowedExt(filepath.Ext(path)) || allowedext.IsExcludedPath(path) {
+					t.Fatalf("PowerShell file %q must remain reviewable", path)
+				}
+				detail := dr.ResolveDetail(path)
+				if detail.Source != "system" || detail.Pattern != "**/*.{ps1,psm1,psd1}" {
+					t.Errorf("unexpected rule source/pattern: %q / %q", detail.Source, detail.Pattern)
+				}
+				if !strings.Contains(detail.Rule, "PowerShell Review Principles") {
+					t.Errorf("expected PowerShell rule, got %q", truncate(detail.Rule, 80))
+				}
+			})
+		}
 	}
 }
 
