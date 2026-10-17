@@ -339,8 +339,8 @@ matching order:
 | `**/*.sol`                          | `solidity.md` — Solidity smart contracts.                                                             |
 | `**/*.vy`                           | `vyper.md` — Vyper smart contracts.                                                                   |
 | `**/*.rego`                         | `rego.md` — Rego policy (OPA).                                                                        |
-| _(fallback)_                        | `default.md`                                                                                          |
 | `**/*.{ps1,psm1,psd1}` | `powershell.md` — PowerShell scripts, modules, and data/manifest files. |
+| _(fallback)_                        | `default.md`                                                                                          |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
 plan and main task prompts.

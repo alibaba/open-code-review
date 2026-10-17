@@ -320,8 +320,8 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.sol`                          | `solidity.md` — Solidity 스마트 컨트랙트.                                        |
 | `**/*.vy`                           | `vyper.md` — Vyper 스마트 컨트랙트.                                              |
 | `**/*.rego`                         | `rego.md` — Rego 정책 (OPA).                                                     |
-| _(대체값)_                          | `default.md`                                                                     |
 | `**/*.{ps1,psm1,psd1}` | `powershell.md` — PowerShell 스크립트, 모듈 및 데이터/매니페스트 파일. |
+| _(대체값)_                          | `default.md`                                                                     |
 
 해석된 규칙 본문은 plan과 main 작업 프롬프트에서 `{{system_rule}}` 자리에 들어갑니다.
 
