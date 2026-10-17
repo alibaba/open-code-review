@@ -78,8 +78,7 @@ type DiffSet struct {
 }
 
 // ForEachInOrder visits Included and Excluded in the original changeset order.
-// providerExcluded is true for built-in directory exclusions. Files dropped by
-// .gitignore are not visited.
+// providerExcluded is true for built-in directory exclusions.
 func (s DiffSet) ForEachInOrder(visit func(d model.Diff, providerExcluded bool)) {
 	next := 0
 	for i, d := range s.Excluded {
@@ -433,7 +432,7 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 // partitionDiffs keeps diffs filtered by built-in directory rules available
 // for reporting while preserving the review input as the Included slice.
 func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
-	patterns := p.loadGitignorePatterns()
+	// Git already selected these diffs; do not reapply .gitignore here.
 	result := DiffSet{
 		Included: make([]model.Diff, 0, len(diffs)),
 		Excluded: make([]model.Diff, 0),
@@ -446,7 +445,7 @@ func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 		if isProviderDirExcluded(path) {
 			result.excludedAt = append(result.excludedAt, len(result.Included)+len(result.Excluded))
 			result.Excluded = append(result.Excluded, d)
-		} else if !p.isPathExcluded(path, patterns) {
+		} else {
 			result.Included = append(result.Included, d)
 		}
 	}
