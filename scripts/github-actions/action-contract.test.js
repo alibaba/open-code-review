@@ -222,7 +222,7 @@ function makeFixture() {
 const fs = require("fs");
 const args = process.argv.slice(2);
 const env = {};
-for (const name of ["OCR_LLM_TIMEOUT", "OCR_LLM_EXTRA_HEADERS", "REVIEW_TASK_TIMEOUT", "OCR_TIMEOUT"]) {
+for (const name of ["OCR_LLM_TIMEOUT", "OCR_LLM_EXTRA_HEADERS", "REVIEW_TASK_TIMEOUT", "OCR_TIMEOUT", "HOME", "USERPROFILE"]) {
   if (process.env[name] !== undefined) env[name] = process.env[name];
 }
 const record = { args, env };
@@ -250,7 +250,7 @@ if (args[0] === "config" && args[1] === "set") {
 const fs = require("fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.OCR_NPM_CALLS, JSON.stringify(args) + "\\n");
-process.stdout.write("npm " + args.join(" ") + "\\n");
+process.stdout.write(args[0] === "root" ? process.env.OCR_FAKE_NPM_ROOT + "\\n" : "npm " + args.join(" ") + "\\n");
 `;
   for (const [name, body] of [["ocr", ocrScript], ["npm", npmScript]]) {
     const file = path.join(bin, name);
@@ -1957,7 +1957,66 @@ function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
   );
 }
 
+function testProjectPluginExecutionInputsAndHome() {
+  for (const [values, valid] of [
+    [inputValues(), true],
+    [inputValues({ project_plugins: "true", allow_plugin_exec: "true" }), true],
+    [inputValues({ allow_plugin_exec: "true" }), false],
+    [inputValues({ project_plugins: "yes" }), false],
+    [inputValues({ project_plugins: "true", allow_plugin_exec: "TRUE" }), false],
+  ]) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validationStep(), values, fixture);
+      assert.strictEqual(result.status === 0, valid, resultDescription(result));
+    } finally { removeFixture(fixture); }
+  }
+  const fixture = makeFixture();
+  try {
+    const home = path.join(fixture.dir, "private home");
+    fs.mkdirSync(home);
+    const env = { OCR_PROJECT_HOME: home, REVIEW_TASK_TIMEOUT: "15" };
+    for (const name of ["Configure OCR", "Run OpenCodeReview"]) {
+      const result = runStep(stepNamed(name), inputValues(), fixture, env, { replaceResultPaths: true });
+      assert.strictEqual(result.status, 0, resultDescription(result));
+    }
+    const calls = readJsonLines(fixture.callsPath);
+    assert.ok(calls.some(call => call.args[0] === "config"));
+    assert.ok(calls.some(call => call.args[0] === "review"));
+    for (const call of calls) {
+      assert.strictEqual(call.env.HOME, home);
+      assert.strictEqual(call.env.USERPROFILE, home);
+    }
+  } finally { removeFixture(fixture); }
+}
+
+function testProjectPluginNativeBinaryResolution() {
+  const fixture = makeFixture();
+  try {
+    const root = path.join(fixture.dir, "npm root & literal $VALUE");
+    const pkg = path.join(root, "@alibaba-group/open-code-review");
+    fs.mkdirSync(path.join(pkg, "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(pkg, "bin"));
+    fs.copyFileSync(path.join(ROOT, "scripts/platform.js"), path.join(pkg, "scripts/platform.js"));
+    fs.writeFileSync(path.join(pkg, "package.json"), "{}");
+    const binary = path.join(pkg, "bin", process.platform === "win32" ? "opencodereview.exe" : "opencodereview");
+    fs.writeFileSync(binary, "native binary fixture");
+    const env = { OCR_FAKE_NPM_ROOT: root };
+    const result = runStep(stepNamed("Install OpenCodeReview"), inputValues({ project_plugins: "true" }), fixture, env);
+    assert.strictEqual(result.status, 0, resultDescription(result));
+    const exported = fs.readFileSync(path.join(fixture.dir, "github-env"), "utf8");
+    assert.ok(exported.includes(`OCR_NATIVE_BINARY=${binary}\n`), exported);
+    assert.ok(readJsonLines(fixture.npmCallsPath).some(args => args.join(" ") === "root -g"));
+    fs.unlinkSync(binary);
+    const missing = runStep(stepNamed("Install OpenCodeReview"), inputValues({ project_plugins: "true" }), fixture, env);
+    assert.notStrictEqual(missing.status, 0, "missing native binary must stop plugin preparation");
+    assert.match(missing.stderr, /native binary was not found/);
+  } finally { removeFixture(fixture); }
+}
+
 const TESTS = [
+  ["project plugins use the installed package's native binary resolver", testProjectPluginNativeBinaryResolution],
+  ["project plugin authorization is explicit and OCR uses its private home", testProjectPluginExecutionInputsAndHome],
   ["review_task_timeout names and describes the CLI task deadline", testReviewTaskTimeoutInputNameAndScope],
   ["llm_timeout defaults to the CLI's 5-minute timeout", testLlmTimeoutInputDefault],
   ["review_task_timeout accepts 1/10/120", testReviewTimeoutValidationAcceptsBoundaries],
