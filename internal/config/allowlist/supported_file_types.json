@@ -121,5 +121,8 @@
   ".glsl",
   ".hlsl",
   ".wgsl",
-  ".metal"
+  ".metal",
+  ".ejs",
+  ".liquid",
+  ".njk"
 ]
