@@ -309,6 +309,7 @@ matching order:
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling).                                  |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — Handlebars and Mustache templates.                                         |
 | `**/*.{jinja2,j2}`                  | `jinja.md` — Jinja templates                                                                          |
+| `**/*.{ejs,liquid,njk}`             | `ejs_liquid_njk.md` — EJS, Liquid and Nunjucks templates (SSTI / XSS / escaping).                     |
 | `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                                       |
 | `**/*.astro`                        | `astro.md` — Astro components and islands.                                                            |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                                    |
