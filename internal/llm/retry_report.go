@@ -461,8 +461,9 @@ func (c *RetryCollector) Finalize(m RequestMeta, reqErr error, parentCancelled b
 	}
 }
 
-// Freeze builds the immutable report. It must be called once, after the run is
-// done, and runID is the review session ID.
+// Freeze builds an immutable report after the run is done. It is a deterministic
+// read and may be called again with the same runID to give independent consumers
+// equal snapshots. runID is the review session ID.
 //
 // The three return shapes are distinct and callers must handle all of them:
 //
