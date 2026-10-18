@@ -42,6 +42,8 @@ func TestProviderDirPrefix(t *testing.T) {
 		{"target/.pnpm/pkg/index.js", "target/"},
 		{"src/vendor/keep.go", ""},
 		{"main.go", ""},
+		{"pkgs/foo/default.nix", ""},
+		{"pkgs", ""},
 	}
 	for _, tc := range tests {
 		if got := ProviderDirPrefix(tc.path); got != tc.want {

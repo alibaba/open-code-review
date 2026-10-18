@@ -25,6 +25,10 @@ import (
 const DiffContextLines = 3
 
 // providerDirIgnoreDirs: directory prefixes to always exclude from diff results.
+//
+// Each entry names a directory a build tool or dependency manager populates,
+// which is why the exclusion is unconditional. `pkgs/` is deliberately absent:
+// in Nix and pkgsrc-style repositories it holds first-party sources.
 var providerDirIgnoreDirs = []string{
 	".idea/",
 	".vscode/",
@@ -37,7 +41,6 @@ var providerDirIgnoreDirs = []string{
 	".cachefile/",
 	"_packages/",
 	"rpm/",
-	"pkgs/",
 }
 
 // Mode defines how the diff is retrieved.

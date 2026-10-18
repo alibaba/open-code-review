@@ -108,6 +108,47 @@ func TestGetDiffSetRetainsBuiltInDirectoryExclusionsForReporting(t *testing.T) {
 	}
 }
 
+// A repository-root pkgs/ holds first-party sources in Nix and pkgsrc-style
+// layouts, so a change under it has to be reviewable rather than reported as a
+// provider directory.
+func TestGetDiffSetReviewsRootPkgsDirectory(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+
+	relPath := "pkgs/example/default.nix"
+	path := filepath.Join(repo, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create pkgs directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("{ }: { }\n"), 0o644); err != nil {
+		t.Fatalf("write pkgs file: %v", err)
+	}
+	runGitTest(t, repo, "add", relPath)
+	runGitTest(t, repo, "commit", "-q", "-m", "add tracked pkgs file")
+	if err := os.WriteFile(path, []byte("{ }: { }\n# change\n"), 0o644); err != nil {
+		t.Fatalf("modify pkgs file: %v", err)
+	}
+
+	provider := NewWorkspaceProvider(repo, gitcmd.New(0))
+	set, err := provider.GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet returned error: %v", err)
+	}
+	if len(set.Excluded) != 0 || len(set.Included) != 1 || set.Included[0].NewPath != relPath {
+		t.Fatalf("GetDiffSet = %+v, want %q included and nothing excluded", set, relPath)
+	}
+
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff returned error: %v", err)
+	}
+	if len(diffs) != 1 || diffs[0].NewPath != relPath {
+		t.Fatalf("GetDiff = %+v, want the pkgs diff to be reviewable", diffs)
+	}
+}
+
 func TestGetDiffSetWalksChangesetOrder(t *testing.T) {
 	repo := t.TempDir()
 	runGitTest(t, repo, "init", "-q")
