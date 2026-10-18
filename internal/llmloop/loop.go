@@ -447,11 +447,9 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		// and the only giveaway was out_tokens == the cap && tool_calls == 0
 		// buried in the session JSONL. Surfacing it through the warnings channel
 		// every agent already publishes (json/sarif/text) costs one entry in the
-		// output contract and no new field. All three clients populate
-		// FinishReason — openai-compatible per choice (streamed or not),
-		// anthropic from stop_reason, responses via mapResponsesFinishReason's
-		// incomplete -> length — so one check covers every backend.
-		if len(resp.Choices) > 0 && resp.Choices[0].FinishReason == "length" {
+		// output contract and no new field. The plan phase and memory
+		// compression record the same warning through the same predicate.
+		if resp.TruncatedAtOutputCap() {
 			r.RecordWarning("response_truncated", taskKey, fmt.Sprintf(
 				"round %d hit the output cap (%d tokens) with %d tool call(s); "+
 					"the analysis may be incomplete - consider raising --max-completion-tokens",
