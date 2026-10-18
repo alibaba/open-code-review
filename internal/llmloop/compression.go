@@ -267,6 +267,16 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 		return msgs, fmt.Errorf("memory compression: %w", err)
 	}
 	rec.SetResponse(resp, duration)
+	// The compressed summary is the only trace left of everything below the
+	// active zone, so a cap-truncated reply silently loses conversation detail:
+	// the rebuilt conversation still parses and the run continues. Record it
+	// rather than let the cut look like a complete summary.
+	if resp.TruncatedAtOutputCap() {
+		r.RecordWarning("response_truncated", taskKey, fmt.Sprintf(
+			"memory compression hit the output cap (%d tokens); the summary was cut "+
+				"and the conversation may lose detail - consider raising --max-completion-tokens",
+			r.deps.Template.CompletionTokenLimit()))
+	}
 	if resp.Usage != nil {
 		atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
 		atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)

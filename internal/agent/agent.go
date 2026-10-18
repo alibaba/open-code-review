@@ -1787,6 +1787,16 @@ func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concaten
 	llmSpan.End()
 	rec.SetResponse(resp, duration)
 	a.runner.RecordUsage(resp.Usage)
+	// The plan is a single shot with no round after it, so a reply cut at the
+	// output cap fails the whole group with no trace of why: the error the
+	// caller sees is whatever the truncated plan breaks, not the cut itself.
+	// The main loop and memory compression record the same warning.
+	if resp.TruncatedAtOutputCap() {
+		a.runner.RecordWarning("response_truncated", gk, fmt.Sprintf(
+			"plan request hit the output cap (%d tokens); the plan may be incomplete - "+
+				"consider raising --max-completion-tokens",
+			a.args.Template.CompletionTokenLimit()))
+	}
 	fmt.Fprintf(stdout.Writer(), "[ocr] Plan completed for group %q\n", gk)
 	return resp.Content(), nil
 }

@@ -231,14 +231,19 @@ func TestRunMainTask_WarnsOnTruncatedResponse(t *testing.T) {
 		t.Fatalf("RunMainTask: %v", err)
 	}
 
-	warnings := runner.Warnings()
+	// Filtered by type, not by total: the loop also records review_limit_reached
+	// once the tool-request budget is spent, and a test that counted every
+	// warning would break on the next legitimate one being added beside this.
+	var warnings []AgentWarning
+	for _, w := range runner.Warnings() {
+		if w.Type == "response_truncated" {
+			warnings = append(warnings, w)
+		}
+	}
 	if len(warnings) != 3 {
-		t.Fatalf("warnings = %d, want one per clipped request (3)", len(warnings))
+		t.Fatalf("response_truncated warnings = %d, want one per clipped request (3)", len(warnings))
 	}
 	for i, w := range warnings {
-		if w.Type != "response_truncated" {
-			t.Errorf("warning %d type = %q, want response_truncated", i, w.Type)
-		}
 		if w.File != "main.go" {
 			t.Errorf("warning %d file = %q, want the subtask key main.go", i, w.File)
 		}
