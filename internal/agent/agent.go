@@ -423,6 +423,14 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// and be discarded wholesale. Cheap in the normal case — every job has
 	// already been cancelled by now.
 	a.runner.WaitBackground()
+	// A run that ended because its context was cancelled — Ctrl-C, or the caller's
+	// deadline — will finalize on a normal path below. Record why before that, so
+	// session_end says "cancelled" instead of the session reading as one whose
+	// process was killed. This is a reason label only: coverage, exit status and
+	// the manifest are untouched.
+	if ctx.Err() != nil {
+		a.session.RecordInterrupted(session.InterruptReasonCancelled)
+	}
 	// Freeze coverage into the immutable manifest before session_end embeds it,
 	// so the CLI and the persisted session serialize the identical object. A
 	// persistence failure is a delivery error in its own right: when the review

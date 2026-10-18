@@ -420,6 +420,8 @@ ocr session list --json
 | `--json` | `false` | Emit session summaries as JSON. |
 | `--limit <n>` | `20` | Cap the number of listed sessions. Use `0` for unlimited. |
 
+The `Status` column reports `aborted` for a session whose `session_end` record was never written, so the process was interrupted before it could finish. When the run itself recorded why it stopped, the reason is appended — `aborted (cancelled)` for a run ended by Ctrl-C, SIGTERM, or a caller deadline. `--json` exposes the same value as `interrupted_by`, omitted entirely when the run reached a terminal state.
+
 ### `ocr session show`
 
 A resumed run also prints the run it continued, and the provider/model

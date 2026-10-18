@@ -396,6 +396,8 @@ ocr session list --json
 | `--json` | `false` | セッションサマリーを JSON として出力します。 |
 | `--limit <n>` | `20` | 一覧表示するセッション数を制限します。`0` は無制限です。 |
 
+`Status` 列は、`session_end` レコードが書き込まれなかったセッションを `aborted` と表示します（プロセスが完了前に中断された状態）。実行自体が停止理由を記録している場合は理由が付記され、Ctrl-C・SIGTERM・呼び出し側の期限で終了した実行は `aborted (cancelled)` となります。`--json` は同じ値を `interrupted_by` として出力し、実行が正常に終端状態へ到達した場合は出力しません。
+
 ### `ocr session show`
 
 再開した実行では、継続元の実行も表示されます。provider や model をまたいだ

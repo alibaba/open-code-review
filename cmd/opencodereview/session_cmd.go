@@ -769,7 +769,12 @@ func describeFiles(s session.Summary) string {
 }
 
 func describeStatus(s session.Summary) string {
+	// Aborted only says no session_end arrived; when the run recorded why, name
+	// it — "aborted (cancelled)" is diagnosable, bare "aborted" is not.
 	if s.Aborted {
+		if s.InterruptedBy != "" {
+			return "aborted (" + s.InterruptedBy + ")"
+		}
 		return "aborted"
 	}
 	if s.RunManifest != nil {

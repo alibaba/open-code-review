@@ -376,6 +376,26 @@ func TestSessionDisplayDoesNotInferLegacyComplete(t *testing.T) {
 	}
 }
 
+// TestSessionStatusNamesTheInterruption covers the reason a cancelled run exists in
+// the listing at all: "aborted" alone cannot be told apart from a session whose
+// process was killed, while the reason the run recorded can.
+func TestSessionStatusNamesTheInterruption(t *testing.T) {
+	summary := session.Summary{Aborted: true, InterruptedBy: session.InterruptReasonCancelled}
+	if got := describeStatus(summary); got != "aborted (cancelled)" {
+		t.Fatalf("status = %q, want %q", got, "aborted (cancelled)")
+	}
+
+	// A finalized interrupted run is not Aborted, so its interruptions must not
+	// leak into a status line that already has a terminal state to report.
+	summary = session.Summary{
+		InterruptedBy: session.InterruptReasonCancelled,
+		RunManifest:   &session.RunManifest{TerminalState: session.StatePartial},
+	}
+	if got := describeStatus(summary); got != "partial" {
+		t.Fatalf("status = %q, want partial", got)
+	}
+}
+
 // newCompareSession records one session with the given findings and returns it.
 func newCompareSession(t *testing.T, repoDir string, opts session.SessionOptions, comments []model.LlmComment) *session.SessionHistory {
 	t.Helper()
