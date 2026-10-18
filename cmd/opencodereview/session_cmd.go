@@ -769,14 +769,20 @@ func describeFiles(s session.Summary) string {
 }
 
 func describeStatus(s session.Summary) string {
-	// Aborted only says no session_end arrived; when the run recorded why, name
-	// it — "aborted (cancelled)" is diagnosable, bare "aborted" is not.
 	if s.Aborted {
-		if s.InterruptedBy != "" {
-			return "aborted (" + s.InterruptedBy + ")"
-		}
 		return "aborted"
 	}
+	status := sessionTerminalStatus(s)
+	// A run that was interrupted still finalized, so Aborted is false and it has
+	// a terminal state below; the reason is appended because "partial" alone does
+	// not say that the missing coverage is a cancellation rather than a failure.
+	if s.InterruptedBy != "" {
+		return status + " (interrupted: " + s.InterruptedBy + ")"
+	}
+	return status
+}
+
+func sessionTerminalStatus(s session.Summary) string {
 	if s.RunManifest != nil {
 		switch s.RunManifest.TerminalState {
 		case session.StateComplete, session.StatePartial, session.StateFailed, session.StateSkipped:

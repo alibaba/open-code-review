@@ -376,23 +376,23 @@ func TestSessionDisplayDoesNotInferLegacyComplete(t *testing.T) {
 	}
 }
 
-// TestSessionStatusNamesTheInterruption covers the reason a cancelled run exists in
-// the listing at all: "aborted" alone cannot be told apart from a session whose
-// process was killed, while the reason the run recorded can.
+// TestSessionStatusNamesTheInterruption covers the case the reason exists for: a
+// cancelled run still finalizes, so it is not Aborted and has a real terminal
+// state — the reason is what tells "partial because I stopped it" apart from
+// "partial because files failed".
 func TestSessionStatusNamesTheInterruption(t *testing.T) {
-	summary := session.Summary{Aborted: true, InterruptedBy: session.InterruptReasonCancelled}
-	if got := describeStatus(summary); got != "aborted (cancelled)" {
-		t.Fatalf("status = %q, want %q", got, "aborted (cancelled)")
-	}
-
-	// A finalized interrupted run is not Aborted, so its interruptions must not
-	// leak into a status line that already has a terminal state to report.
-	summary = session.Summary{
+	summary := session.Summary{
 		InterruptedBy: session.InterruptReasonCancelled,
 		RunManifest:   &session.RunManifest{TerminalState: session.StatePartial},
 	}
-	if got := describeStatus(summary); got != "partial" {
-		t.Fatalf("status = %q, want partial", got)
+	if got := describeStatus(summary); got != "partial (interrupted: cancelled)" {
+		t.Fatalf("status = %q, want %q", got, "partial (interrupted: cancelled)")
+	}
+
+	// The unclosed-session case keeps its own label: there is no terminal state
+	// to qualify, and nothing recorded the reason.
+	if got := describeStatus(session.Summary{Aborted: true}); got != "aborted" {
+		t.Fatalf("status = %q, want aborted", got)
 	}
 }
 
