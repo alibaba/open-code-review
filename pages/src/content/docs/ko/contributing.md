@@ -115,6 +115,14 @@ refactor(viewer): extract task-card rendering into helper
 **PR 제목**에도 같은 형식을 씁니다. 그래야 생성되는 변경 로그에 깔끔하게
 들어갑니다.
 
+`PR Commit Policy`는 PR 제목과 본문을 포함한 모든 커밋 메시지를 대소문자 구분 없이 검사합니다.
+`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]` 또는
+`skip-checks: true` / `skip-checks:true`만 있는 줄을 포함하지 마세요.
+
+검사에 실패하면 PR 제목을 수정하거나 자신의 기여 브랜치에서 해당 커밋 메시지를 다시 작성하세요.
+이러한 지시가 없는 새 커밋을 추가해도 이전 커밋의 위반 사항은 해결되지 않습니다.
+PR 설명에서는 이러한 지시를 논의할 수 있으며 검사 대상이 아닙니다.
+
 ## 프로젝트 구조 {#project-layout}
 
 ```

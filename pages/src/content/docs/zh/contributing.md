@@ -110,6 +110,14 @@ refactor(viewer): extract task-card rendering into helper
 
 **PR 标题**也用相同格式，以便在生成的 changelog 中整洁显示。
 
+`PR Commit Policy` 会检查 PR 标题以及每条提交的完整信息（包括正文），不区分大小写。
+请勿包含 `[skip ci]`、`[ci skip]`、`[no ci]`、`[skip actions]`、`[actions skip]`，
+或单独一行的 `skip-checks: true` / `skip-checks:true`。
+
+检查失败时，请修改 PR 标题，或在你的贡献分支上重写相关提交的信息。
+新增一条不含这些指令的提交，无法消除历史提交中的违规内容。
+PR 描述可以讨论这些指令，不在检查范围内。
+
 ## 项目结构
 
 ```

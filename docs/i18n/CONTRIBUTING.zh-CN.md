@@ -90,6 +90,14 @@ fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
 
+`PR Commit Policy` 会检查 PR 标题以及每条提交的完整信息（包括正文），不区分大小写。
+请勿包含 `[skip ci]`、`[ci skip]`、`[no ci]`、`[skip actions]`、`[actions skip]`，
+或单独一行的 `skip-checks: true` / `skip-checks:true`。
+
+检查失败时，请修改 PR 标题，或在你的贡献分支上重写相关提交的信息。
+新增一条不含这些指令的提交，无法消除历史提交中的违规内容。
+PR 描述可以讨论这些指令，不在检查范围内。
+
 ### 许可证头
 
 每个源文件（`.go`、`.js`、`.mjs`、`.ts`、`.tsx`、`.kt`、`.kts`、`.sh`、`.py`、`.css`）都必须包含 SPDX 许可证头。创建新文件后请运行：

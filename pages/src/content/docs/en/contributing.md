@@ -115,6 +115,14 @@ refactor(viewer): extract task-card rendering into helper
 The same format is used for **PR titles** so they show up cleanly in the
 generated changelog.
 
+`PR Commit Policy` checks the PR title and every commit's full message, including
+the body, case-insensitively. Do not include `[skip ci]`, `[ci skip]`, `[no ci]`,
+`[skip actions]`, `[actions skip]`, or a `skip-checks: true` / `skip-checks:true` line.
+
+To fix failures, edit the PR title or rewrite affected commit messages on your
+contribution branch. Adding a clean commit does not remove earlier violations.
+PR descriptions may discuss these instructions and are not checked.
+
 ## Project layout
 
 ```
