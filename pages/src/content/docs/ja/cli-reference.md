@@ -117,7 +117,7 @@ ocr r      [flags]   (alias)
 | `--background-file <path>` | `-B` | — | レビューの背景として使用する Markdown ファイルのパス。`--background` も指定した場合は両方を結合します。 |
 | `--exclude <patterns>` | — | — | 除外する gitignore 形式のパターン（カンマ区切り）。`rule.json` の excludes とマージされます。 |
 | `--concurrency <n>` | — | `8` | 並行してレビューするサブタスクの最大数。 |
-| `--timeout <minutes>` | — | `15` | サブタスクごとの締め切り時間。`0` でタイムアウトを無効化します。effort ラウンド数に応じて線形にスケールします（例: low/medium/high で 15/30/45 分）。 |
+| `--timeout <minutes>` | — | `15` | LLM 呼び出し、ツール実行、再試行の待機を含むサブタスクごとの制限時間。`0` でタスクの期限を無効化しますが、リクエストのタイムアウトは無効化しません。リクエスト単位のタイムアウトは `OCR_LLM_TIMEOUT` または provider の `timeout_sec` で独立して設定し、秒単位です（デフォルト `300`）。effort のレビューラウンド数に応じて線形にスケールします（例: low/medium/high で 15/30/45 分）。 |
 | `--rule <path>` | — | — | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。 |
 | `--max-tools <n>` | — | テンプレートのデフォルト | サブタスクごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`100`）を使用します。1〜49 は `50` に引き上げられます。解決後の値はテンプレートのデフォルトを**上回る場合にのみ**適用されます（引き上げのみ可能で、引き下げはできません）。 |
 | `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | サブタスクごとの**プロンプト**トークン上限（review のデフォルトは `200000`）。この実行で保存済みの `max_tokens` 設定を上書きします。出力の上限には影響しません。そちらは `MAX_COMPLETION_TOKENS`（`16384`）が個別に制御します。 |
@@ -148,6 +148,11 @@ ocr scan --provider openai --model gpt-5.4 --format json
 環境設定、shell rc ファイルの順です。`--model` は選ばれたソース内の model を上書きしますが、
 ソース順序は変更しません。不完全な戦略は別の戦略と混合されず、次へフォールバックします。
 選択された組み込み provider の認証情報は、対応する環境変数から引き続き取得できます。
+
+組み込み provider の `--model` は、`ocr config model` の選択候補以外も受け付けます。
+組み込み一覧にも `providers.<name>.models` にもないモデルを指定すると、OCR は
+stderr に警告を出し、検証は provider に任せます。カスタム provider には
+従来の `--model` 検証ルールが適用されます。
 
 ### モード
 
@@ -553,9 +558,30 @@ ocr config model                           Interactive model selection
 
 key の完全なリファレンス、schema、例は[設定](../configuration/)を参照してください。
 
+
+
+## `ocr auth`
+
+`ocr auth login`、`status`、`logout` は既定で Sign in with ChatGPT を使用します。明示的な `--provider chatgpt` も引き続き使用できます。
+
+`chatgpt` provider では公開された Sign in with ChatGPT フローを使用します。[ChatGPT プレビューガイド](../chatgpt-preview/)を参照してください。
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` は `--provider chatgpt` と `--account <client-id>` を受け付けます。`login` はさらに `--no-browser`、`--new-account`、`--enable-plan` を受け付けます。ChatGPT では `--device` をサポートしません。`--enable-plan` は保存済み登録の同意を要求し、`--new-account` とは併用できません。モデル一覧はアカウントごとに異なります。一覧にないモデルも明示すれば使用できます。この provider の `extra_body` は `reasoning`、`text`、`prompt_cache_key` のみ対応します。アカウント管理、権限、制限は[ChatGPT プレビューガイド](../chatgpt-preview/)を参照してください。
+
 ## `ocr llm`
 
-LLM ユーティリティコマンドです。2 つのサブコマンドがあります:
+LLM ユーティリティコマンドです。3 つのサブコマンドがあります:
 
 ```text
 ocr llm <sub-command>
@@ -563,6 +589,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`

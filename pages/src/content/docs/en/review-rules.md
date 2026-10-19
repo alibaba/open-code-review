@@ -219,6 +219,11 @@ snapshots, and generated code:
 - `**/test/**/*.lhs`
 - `**/*Spec.lhs`
 - `**/tests/**/*.nim`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 - `**/tests/**/*.R`
 - `**/__snapshots__/**`
 - `**/*.snap`
@@ -326,8 +331,9 @@ matching order:
 | `**/*.{graphql,gql}`                | `graphql.md` — GraphQL schema and operations.                                                         |
 | `**/*.prisma`                       | `prisma.md` — Prisma schema.                                                                          |
 | `**/*.jl`                           | `julia.md` — Julia source.                                                                            |
-| `**/*.{tf,hcl,tfvars}`              | `terraform.md` — Terraform / HCL.                                                                     |
+| `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md` — Terraform / HCL.                                                                     |
 | `**/*.bicep`                        | `bicep.md` — Bicep (Azure) templates.                                                                 |
+| `**/*.nu`                           | `nushell.md` — Nushell scripts.                                                                       |
 | `**/*.elm`                          | `elm.md` - Elm source.                                                                                |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — Jsonnet configuration templates and libraries.                                         |
 | `**/*.thrift`                       | `thrift.md` — Apache Thrift IDL wire compatibility.                                                   |
@@ -340,6 +346,7 @@ matching order:
 | `**/*.sol`                          | `solidity.md` — Solidity smart contracts.                                                             |
 | `**/*.vy`                           | `vyper.md` — Vyper smart contracts.                                                                   |
 | `**/*.rego`                         | `rego.md` — Rego policy (OPA).                                                                        |
+| `**/*.{ps1,psm1,psd1}` | `powershell.md` — PowerShell scripts, modules, and data/manifest files. |
 | _(fallback)_                        | `default.md`                                                                                          |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

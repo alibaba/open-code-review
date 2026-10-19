@@ -25,7 +25,7 @@ OCR 是 Apache-2.0 许可下的开源项目。欢迎 bug 报告、文档修复�
 
 ### 前置条件
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -114,34 +114,42 @@ refactor(viewer): extract task-card rendering into helper
 
 ```
 open-code-review/
+├── acp/                       # 独立的 CLI ACP（Agent Client Protocol）适配器
 ├── cmd/opencodereview/        # CLI 入口——参数解析、分发
+├── docs/                      # 本地化 README 与贡献指南
+├── imgs/                      # README 图片与标志
 ├── internal/
 │   ├── agent/                 # 评审 agent 逻辑、子 agent 分发
+│   ├── chatgptauth/           # ChatGPT OAuth 与凭据管理
 │   ├── config/                # 模板、规则、白名单、内嵌 JSON
-│   ├── diff/                  # Git diff 解析、三种模式
+│   ├── delegate/              # 无需调用 LLM 的审查规范生成
+│   ├── diff/                  # Git diff 解析
 │   ├── gitcmd/                # Git 子进程运行器
-│   ├── llm/                   # LLM client（Anthropic 与 OpenAI）、端点解析器
+│   ├── llm/                   # LLM 客户端与端点解析
+│   ├── llmloop/               # Review 与 Scan 共用的 LLM 工具调用循环
+│   ├── mcp/                   # MCP 客户端与工具适配器
 │   ├── model/                 # 数据结构（LlmComment、Diff……）
 │   ├── pathutil/              # 路径工具
-│   ├── release/               # Release notes 生成
+│   ├── release/               # 发布产物命名一致性检查
+│   ├── scan/                  # 全文件代码审查
 │   ├── session/               # JSONL 会话写入器
 │   ├── stdout/                # 可静音的 stdout writer
 │   ├── suggestdiff/           # 建议 diff 渲染
 │   ├── telemetry/             # OpenTelemetry 配置 + 辅助
 │   ├── tool/                  # 工具注册表 + provider 实现
-│   └── viewer/                # 内嵌 HTTP UI
-├── pages/                     # WebUI 营销页（独立 React app）
-├── plugins/                   # Claude Code slash 命令
-├── extensions/                # 编辑器扩展（VS Code）
+│   └── viewer/                # 浏览审查会话的内嵌 HTTP UI
+├── pages/                     # 官网 Landing Page 与文档（独立 React app）
+├── plugins/                   # 编码代理集成（Claude Code、Codex、OpenCode 等）
+├── extensions/                # VS Code 与 IntelliJ IDEA 扩展、共享前端
 ├── examples/                  # CI 配方（GitHub Actions、GitLab CI）
-├── skills/                    # Agent SDK skill manifest
-├── scripts/                   # NPM postinstall + 跨平台构建脚本
+├── skills/                    # 审查与委托技能定义
+├── scripts/                   # 安装、发布与仓库检查脚本
 ├── npm/                       # 各平台 optional dependency 包
 └── bin/                       # NPM wrapper（Node）
 ```
 
 多数贡献触及 `internal/agent/`、`internal/tool/` 或 `internal/llm/`。
-`cmd/opencodereview/` 中的 CLI 层有意保持精简——参数解析后分发到 agent 包。
+`cmd/opencodereview/` 中的 CLI 层有意保持精简——负责参数解析与命令分发。
 
 ## AI 参与辅助开发
 

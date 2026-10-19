@@ -12,19 +12,19 @@
 
 #### Texture and Buffer Access Safety
 - Texture, buffer, or resource array indices computed from vertex/instance/thread IDs or user data without a bounds check, particularly on `RWStructuredBuffer`/`RWBuffer`/`ssbo`/`storage` writes
-- Texture sampling (`tex2D`, `sample`, `textureLod`) called inside non-uniform control flow (e.g. inside an `if` that diverges per-lane) without an explicit LOD, which is undefined or produces incorrect derivatives on some hardware
+- Implicit-derivative texture sampling (GLSL `texture`, HLSL `tex2D`/`Sample`, WGSL `textureSample`, or Metal `sample`) in non-uniform control flow where implicit derivatives are undefined; do not flag explicit-LOD sampling such as `textureLod` for this reason
 - Mismatched texture format, channel count, or sRGB/linear color space assumptions between the shader and the resource binding declared on the host side
 - Out-of-bounds writes to shared/groupshared/threadgroup memory in compute shaders, or missing barriers (`GroupMemoryBarrierWithGroupSync`, `barrier()`, `workgroupBarrier()`) before reading data another invocation wrote
 
 #### Binding, Layout, and Cross-Stage Contracts
 - Uniform/constant buffer, descriptor set, or binding-slot indices that do not match the layout the host application (or a companion shader stage) expects, since mismatches fail silently at runtime rather than at compile time
-- Struct layout (`std140`/`std430` in GLSL, register/space in HLSL, `@binding`/`@group` in WGSL) whose field alignment or padding does not match the CPU-side struct, causing misread values
+- Struct memory layout (`std140`/`std430` in GLSL, constant-buffer packing in HLSL, host-shareable type alignment and member offsets in WGSL) whose field alignment or padding does not match the CPU-side struct, causing misread values
 - Vertex output / fragment input (varyings, `SV_Position`, `[[stage_in]]`) whose interpolation qualifiers (`flat`, `noperspective`, `centroid`) are inconsistent with how the value is used downstream
 - Shader variants driven by preprocessor defines or pipeline permutations where a new code path is not covered by all defined permutations, leaving some variants uncompiled or behaviorally inconsistent
 
 #### Concurrency and Compute Correctness (Compute/Kernel Shaders)
 - Race conditions on shared/groupshared/threadgroup memory or storage buffers written by multiple invocations without atomics or synchronization
-- Workgroup/threadgroup size assumptions hardcoded in the shader that do not match the dispatch size declared on the host side
+- Hardcoded indexing, tile-size, or shared-memory assumptions that disagree with the actual local workgroup size or dispatch coverage; distinguish threads per workgroup (`local_size_*`, `[numthreads]`, `@workgroup_size`, or Metal's host-supplied threads-per-threadgroup) from the number of workgroups dispatched
 - Atomic operations used on types or backends that do not actually support atomics for that format, or atomics used where a simple reduction would be both correct and faster
 - Divergent branches or early `return`/`discard` inside a compute kernel placed before a required barrier, causing a deadlock or undefined synchronization on affected lanes
 

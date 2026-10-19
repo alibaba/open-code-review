@@ -123,7 +123,7 @@ ocr r      [flags]   (alias)
 | `--background-file <path>` | `-B` | — | Путь к Markdown-файлу с контекстом ревью. Если также задан `--background`, используются оба источника. |
 | `--exclude <patterns>` | — | — | Разделённые запятыми шаблоны исключения в стиле gitignore; объединяются с excludes из `rule.json`. |
 | `--concurrency <n>` | — | `8` | Максимальное число подзадач, проверяемых параллельно. |
-| `--timeout <minutes>` | — | `15` | Срок выполнения для каждой подзадачи. `0` отключает тайм-аут. Масштабируется линейно по числу раундов effort (например, 15/30/45 мин для low/medium/high). |
+| `--timeout <minutes>` | — | `15` | Бюджет времени каждой подзадачи, включая вызовы LLM, инструменты и ожидание повторов. `0` отключает срок выполнения задачи, но не тайм-ауты запросов. Независимый тайм-аут запроса задаётся через `OCR_LLM_TIMEOUT` или `timeout_sec` провайдера, в секундах (по умолчанию `300`). Масштабируется линейно по числу раундов проверки effort (например, 15/30/45 мин для low/medium/high). |
 | `--rule <path>` | — | — | Путь к пользовательскому JSON-файлу правил ревью. Переопределяет проектный и глобальный `rule.json`. |
 | `--max-tools <n>` | — | значение шаблона | Максимальное число раундов вызова инструментов для каждой подзадачи. `0` использует значение шаблона (`100`); значения 1–49 повышаются до `50`; итоговое значение применяется только если оно **больше** значения шаблона (предел можно лишь повысить, но не понизить). |
 | `--max-tokens <n>` | — | значение конфигурации или шаблона | Предел токенов **промпта** для каждой подзадачи (по умолчанию `200000` для review). Переопределяет сохранённое значение `max_tokens` для этого запуска. На предел вывода не влияет — он задаётся отдельно параметром `MAX_COMPLETION_TOKENS` (`16384`). |
@@ -138,6 +138,19 @@ ocr r      [flags]   (alias)
 > `--commit`, либо не передавайте ни одного из них (режим рабочей области).
 > Их сочетание приводит к ошибке. `--resume` поддерживает только ревью
 > диапазона или коммита и несовместим с `--preview`.
+
+### Выбор LLM для одного запуска
+
+Команды `review` и `scan` принимают `--provider` и `--model` для текущего
+запуска, не изменяя сохранённую конфигурацию. `--provider` выбирает запись из
+`providers` или `custom_providers`; `--model` переопределяет модель выбранного
+источника.
+
+Для встроенных провайдеров `--model` принимает модели вне списка предложений
+`ocr config model`. Если модель отсутствует и во встроенном списке, и в
+`providers.<name>.models`, OCR выводит предупреждение в stderr и оставляет
+проверку провайдеру. Для пользовательских провайдеров действуют прежние правила
+проверки `--model`.
 
 ### Режимы
 
@@ -574,9 +587,30 @@ ocr config model                           Interactive model selection
 Полный справочник по ключам, схемы и примеры приведены в разделе
 [Конфигурация](../configuration/).
 
+
+
+## `ocr auth`
+
+`ocr auth login`, `status` и `logout` по умолчанию используют Sign in with ChatGPT. Явный параметр `--provider chatgpt` также поддерживается.
+
+Провайдер `chatgpt` использует документированный процесс Sign in with ChatGPT. См. [руководство по предварительной версии ChatGPT](../chatgpt-preview/).
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` принимает `--provider chatgpt` и `--account <client-id>`, а `login` также принимает `--no-browser`, `--new-account` и `--enable-plan`. Для ChatGPT параметр `--device` не поддерживается. `--enable-plan` запрашивает согласие для сохраненной регистрации и несовместим с `--new-account`. Список моделей зависит от аккаунта; явно заданная модель допустима, даже если ее нет в списке. Этот провайдер принимает в `extra_body` только `reasoning`, `text` и `prompt_cache_key`. Управление аккаунтами, права и ограничения описаны в [руководстве по предварительной версии ChatGPT](../chatgpt-preview/).
+
 ## `ocr llm`
 
-Служебные команды LLM. Доступны две подкоманды:
+Служебные команды LLM. Доступны три подкоманды:
 
 ```text
 ocr llm <sub-command>
@@ -584,6 +618,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`
