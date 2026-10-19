@@ -2,7 +2,7 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs';
-import { homedir, tmpdir } from 'os';
+import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { ConfigEntry } from '@shared/configUtils';
 import { OcrConfig } from '@shared/types';
@@ -14,13 +14,13 @@ export class ConfigService {
   constructor(private cli: CliService) {}
 
   private configPath(): string {
-    return join(homedir(), '.opencodereview', 'config.json');
+    return this.cli.configPath();
   }
 
   read(): OcrConfig | null {
-    const p = this.configPath();
-    if (!existsSync(p)) return null;
     try {
+      const p = this.configPath();
+      if (!existsSync(p)) return null;
       return parseConfig(readFileSync(p, 'utf8'));
     } catch {
       return null;
@@ -86,11 +86,13 @@ export class ConfigService {
   }
 
   async set(key: string, value: string): Promise<OcrConfig | null> {
+    this.configPath();
     await this.cli.runRaw(toConfigSetArgs(key, value), process.cwd(), () => {});
     return this.read();
   }
 
   async setMany(entries: { key: string; value: string }[]): Promise<OcrConfig | null> {
+    this.configPath();
     for (const entry of entries) {
       await this.cli.runRaw(toConfigSetArgs(entry.key, entry.value), process.cwd(), () => {});
     }

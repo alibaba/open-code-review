@@ -84,10 +84,39 @@ var configModelCmd = &cobra.Command{
 }
 
 func init() {
+	configCmd.AddCommand(newConfigPathCommand())
 	configCmd.AddCommand(configSetCmd)
 	configCmd.AddCommand(configUnsetCmd)
 	configCmd.AddCommand(configProviderCmd)
 	configCmd.AddCommand(configModelCmd)
+}
+
+func newConfigPathCommand() *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "path",
+		Short: "Print the resolved configuration file path",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path, err := defaultConfigPath()
+			if err != nil {
+				return err
+			}
+			path, err = filepath.Abs(path)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+					Path string `json:"path"`
+				}{Path: path})
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), path)
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "output the path as JSON")
+	return cmd
 }
 
 // Default config file location: ~/.opencodereview/config.json
