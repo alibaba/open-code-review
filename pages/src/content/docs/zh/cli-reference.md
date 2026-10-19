@@ -396,7 +396,7 @@ ocr session list --json
 | `--json` | `false` | 以 JSON 输出会话摘要。 |
 | `--limit <n>` | `20` | 限制列出的会话数量。使用 `0` 表示不限制。 |
 
-`Status` 列会为没有写入 `session_end` 记录的会话显示 `aborted`，说明进程在完成前被中断。如果该运行自己记录了中断原因，则会在后面标注原因 —— 例如被 Ctrl-C、SIGTERM 或调用方超时结束的运行显示为 `aborted (cancelled)`。`--json` 以 `interrupted_by` 字段暴露同一取值；运行正常到达终态时不输出该字段。
+`Status` 列会为没有写入 `session_end` 记录的会话显示 `aborted`，说明进程在完成前被杀掉 —— 这种情况下也没有记录能说明更多。被 Ctrl-C、SIGTERM 或调用方超时取消的运行仍会写入 `session_end`：它保留真实的终态，并在终态之后标注原因，例如 `partial (interrupted: cancelled)`。`--json` 以 `interrupted_by` 字段暴露同一取值；运行自行结束时该字段不输出。
 
 ### `ocr session show`
 

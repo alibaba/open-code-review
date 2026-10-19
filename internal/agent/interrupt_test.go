@@ -58,14 +58,7 @@ func TestRunRecordsCancellationInSession(t *testing.T) {
 		t.Fatal("a cancelled run must report an error")
 	}
 
-	summaries, err := session.ListSessions(dir)
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	if len(summaries) != 1 {
-		t.Fatalf("got %d sessions, want 1", len(summaries))
-	}
-	got := summaries[0]
+	got := singleSessionSummary(t, dir)
 	if got.InterruptedBy != session.InterruptReasonCancelled {
 		t.Fatalf("InterruptedBy = %q, want %q", got.InterruptedBy, session.InterruptReasonCancelled)
 	}
@@ -80,6 +73,64 @@ func TestRunRecordsCancellationInSession(t *testing.T) {
 	if got.RunManifest.TerminalState == session.StateComplete {
 		t.Errorf("terminal state = %q, want the run's real coverage outcome", got.RunManifest.TerminalState)
 	}
+}
+
+// TestRunLabelsCancellationBeforeDispatch covers the paths that finalize before
+// any subtask starts. A cancel landing while the diffs are still being resolved
+// ends in an input-failure session_end, and that record has to carry the reason
+// too — otherwise the status reads like a plain load failure and the one thing
+// the run knows for certain is missing again.
+func TestRunLabelsCancellationBeforeDispatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	dir := initPreviewRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "early.go"), []byte("package early\n"), 0o644); err != nil {
+		t.Fatalf("write early.go: %v", err)
+	}
+
+	a := New(Args{
+		RepoDir: dir,
+		Model:   "fake",
+		Template: template.Template{
+			MaxTokens:           100000,
+			MaxToolRequestTimes: 3,
+			MainTask: template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diffs}}"}},
+			},
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := a.Run(ctx); err == nil {
+		t.Fatal("a cancelled run must report an error")
+	}
+
+	got := singleSessionSummary(t, dir)
+	if got.InterruptedBy != session.InterruptReasonCancelled {
+		t.Fatalf("InterruptedBy = %q, want %q", got.InterruptedBy, session.InterruptReasonCancelled)
+	}
+	if got.Aborted {
+		t.Error("the cancelled run still finalized, so it must not report Aborted")
+	}
+	// The cancel lands in diff resolution, so the manifest is the input failure
+	// this path has always written — the reason is added to it, not substituted
+	// for it.
+	if got.RunManifest == nil || got.RunManifest.TerminalState != session.StateFailed {
+		t.Fatalf("terminal state = %+v, want failed load", got.RunManifest)
+	}
+}
+
+// singleSessionSummary reads back the one session a run left on disk.
+func singleSessionSummary(t *testing.T, repo string) session.Summary {
+	t.Helper()
+	summaries, err := session.ListSessions(repo)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(summaries))
+	}
+	return summaries[0]
 }
 
 // TestRunDoesNotLabelCompletedRun is the other half of the contract: a run that
@@ -108,14 +159,7 @@ func TestRunDoesNotLabelCompletedRun(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 
-	summaries, err := session.ListSessions(dir)
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	if len(summaries) != 1 {
-		t.Fatalf("got %d sessions, want 1", len(summaries))
-	}
-	if got := summaries[0].InterruptedBy; got != "" {
+	if got := singleSessionSummary(t, dir).InterruptedBy; got != "" {
 		t.Fatalf("InterruptedBy = %q, want empty for a completed run", got)
 	}
 }

@@ -280,6 +280,21 @@ func (a *Agent) newRequestMeta(filePath string, taskType session.TaskType, reque
 	}
 }
 
+// recordInterruptionIfCancelled records why this run is stopping when its
+// context is already cancelled: Ctrl-C, or the caller's deadline.
+//
+// Every path that finalizes the session calls it first, including the ones that
+// return before dispatch. The label is written into that path's session_end, so
+// a cancel during diff resolution reads as a cancellation instead of an
+// anonymous input failure — the same misreading this feature removes from the
+// dispatched case. It is a reason label only: coverage, exit status and the
+// manifest are untouched.
+func (a *Agent) recordInterruptionIfCancelled(ctx context.Context) {
+	if ctx.Err() != nil {
+		a.session.RecordInterrupted(session.InterruptReasonCancelled)
+	}
+}
+
 // Run executes the full review pipeline: parse diffs -> group -> plan per group -> LLM tool-loop -> collect comments.
 func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// Base prompt-cache affinity key for any LLM request in this run that a task doesn't re-scope.
@@ -291,6 +306,10 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	ctx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
 	if err := a.loadDiffs(ctx); err != nil {
 		diffSpan.End()
+		// A cancel that lands here never reaches the post-dispatch check below,
+		// so the reason has to be recorded on this path as well or the cancelled
+		// load persists as a bare input failure.
+		a.recordInterruptionIfCancelled(ctx)
 		// The builder already exists (agent.New created session + manifest), but
 		// no item was selected yet. Record the run-level input failure at this
 		// trigger point, then finalize and persist so the run still emits a
@@ -366,6 +385,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		// run_failure), which is the correct terminal state for "nothing to do".
 		// A persistence failure here is still a delivery error — a clean skip
 		// cannot be claimed if its session_end never reached disk.
+		a.recordInterruptionIfCancelled(ctx)
 		manifestErr := a.finalizeManifest()
 		if ferr := a.session.Finalize(); ferr != nil {
 			manifestErr = errors.Join(manifestErr, fmt.Errorf("finalize session: %w", ferr))
@@ -426,11 +446,8 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// A run that ended because its context was cancelled — Ctrl-C, or the caller's
 	// deadline — will finalize on a normal path below. Record why before that, so
 	// session_end says "cancelled" instead of the session reading as one whose
-	// process was killed. This is a reason label only: coverage, exit status and
-	// the manifest are untouched.
-	if ctx.Err() != nil {
-		a.session.RecordInterrupted(session.InterruptReasonCancelled)
-	}
+	// process was killed.
+	a.recordInterruptionIfCancelled(ctx)
 	// Freeze coverage into the immutable manifest before session_end embeds it,
 	// so the CLI and the persisted session serialize the identical object. A
 	// persistence failure is a delivery error in its own right: when the review
