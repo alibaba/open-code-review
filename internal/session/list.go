@@ -7,13 +7,14 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/alibaba/open-code-review/internal/ocrhome"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/ocrhome"
 )
 
 // Summary is a compact digest of one persisted session, suitable for
