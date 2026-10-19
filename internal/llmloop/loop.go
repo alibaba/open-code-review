@@ -386,6 +386,10 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		llm.SessionTaskKey(r.deps.Session.SessionID, string(session.MainTask), taskKey))
 
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
+	// Both kinds of round that produced nothing usable share this cap: one whose
+	// tool results carried no data, and one that called no tool at all. Neither
+	// lets the model make progress, and the second still spends a full request
+	// of the round budget while the conversation it re-sends keeps growing.
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
 	sessionID := uuid.NewString()
@@ -458,6 +462,12 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		calls := resp.ToolCalls()
 
 		if len(calls) == 0 {
+			consecutiveEmptyRounds++
+			if consecutiveEmptyRounds >= maxConsecutiveEmptyRounds {
+				fmt.Fprintf(stdout.Writer(), "[ocr] Too many empty retries for %s, stopping.\n", taskKey)
+				stop = StopEmptyRounds
+				break
+			}
 			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", taskKey)
 			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
 			native := resp.Native()

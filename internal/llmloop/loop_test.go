@@ -400,6 +400,50 @@ func TestRunMainTask_EmptyToolResultsStopWithEmptyRounds(t *testing.T) {
 	}
 }
 
+// A response that carries prose but no tool call leaves the round with nothing
+// usable, exactly like a tool that returns an empty result, so both have to
+// count against the same consecutive-empty-round cap. Otherwise a model that
+// never calls a tool (a provider ignoring the tool definitions, a wrong model)
+// spends the whole tool-request budget one growing-conversation request at a
+// time instead of tripping the cap on the third round.
+func TestRunMainTask_NoToolCallsStopWithEmptyRounds(t *testing.T) {
+	client := &textOnlyClient{content: "I reviewed the change and found nothing to report."}
+	deps := newTestDeps(client)
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if completed {
+		t.Fatal("RunMainTask completed without task_done")
+	}
+	if stop != StopEmptyRounds {
+		t.Fatalf("stop = %v, want StopEmptyRounds", stop)
+	}
+	if client.calls != 3 {
+		t.Fatalf("LLM calls = %d, want 3 (the empty-round cap, not the %d-round budget)",
+			client.calls, deps.Template.MaxToolRequestTimes)
+	}
+}
+
+// textOnlyClient answers every request with prose and no tool calls.
+type textOnlyClient struct {
+	content string
+	calls   int
+}
+
+func (c *textOnlyClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.calls++
+	content := c.content
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
+		Model:   "fake",
+		Usage:   &llm.UsageInfo{PromptTokens: 5, CompletionTokens: 5},
+	}, nil
+}
+
 func TestRunMainTask_UncompressibleContextStopsWithCompression(t *testing.T) {
 	emptySummary := ""
 	client := &fakeClient{responses: []*llm.ChatResponse{
