@@ -6,6 +6,7 @@ package session
 import (
 	"errors"
 	"fmt"
+	"github.com/alibaba/open-code-review/internal/ocrhome"
 	"os"
 	"path/filepath"
 	"sort"
@@ -136,11 +137,11 @@ func FindSessionsByID(sessionID string) ([]Location, error) {
 	if err := ValidateSessionID(sessionID); err != nil {
 		return nil, err
 	}
-	home, err := os.UserHomeDir()
+	home, err := ocrhome.Dir()
 	if err != nil {
-		return nil, fmt.Errorf("resolve home dir: %w", err)
+		return nil, fmt.Errorf("resolve OCR home: %w", err)
 	}
-	root := filepath.Join(home, ".opencodereview", sessionSubDir)
+	root := filepath.Join(home, sessionSubDir)
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -184,11 +185,11 @@ func FindSessionsByID(sessionID string) ([]Location, error) {
 
 // sessionsRoot returns the directory that holds every repository's sessions.
 func sessionsRoot() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := ocrhome.Dir()
 	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
+		return "", fmt.Errorf("resolve OCR home: %w", err)
 	}
-	return filepath.Join(home, ".opencodereview", sessionSubDir), nil
+	return filepath.Join(home, sessionSubDir), nil
 }
 
 // DeleteSessionAt removes one session file found by FindSessionsByID.

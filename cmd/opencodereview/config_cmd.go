@@ -15,6 +15,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/ocrhome"
 	"github.com/spf13/cobra"
 )
 
@@ -91,11 +92,11 @@ func init() {
 
 // Default config file location: ~/.opencodereview/config.json
 func defaultConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := ocrhome.Dir()
 	if err != nil {
-		return "", fmt.Errorf("cannot determine home directory: %w", err)
+		return "", fmt.Errorf("cannot determine OCR home: %w", err)
 	}
-	return filepath.Join(home, ".opencodereview", "config.json"), nil
+	return filepath.Join(home, "config.json"), nil
 }
 
 func runConfigSet(key, value string) error {

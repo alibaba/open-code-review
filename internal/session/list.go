@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/alibaba/open-code-review/internal/ocrhome"
 	"io"
 	"os"
 	"path/filepath"
@@ -96,11 +97,11 @@ type summaryRecord struct {
 // SessionsDir returns the on-disk directory that holds JSONL session files
 // for a given repository. It does not create the directory.
 func SessionsDir(repoDir string) (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := ocrhome.Dir()
 	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
+		return "", fmt.Errorf("resolve OCR home: %w", err)
 	}
-	return filepath.Join(home, ".opencodereview", sessionSubDir, encodeRepoPath(repoDir)), nil
+	return filepath.Join(home, sessionSubDir, encodeRepoPath(repoDir)), nil
 }
 
 // ListSessions enumerates all persisted sessions for the given repository
