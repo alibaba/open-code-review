@@ -114,5 +114,6 @@
   ".vhdl",
   ".sol",
   ".vy",
-  ".rego"
+  ".rego",
+  ".cr"
 ]
