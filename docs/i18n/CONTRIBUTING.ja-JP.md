@@ -118,20 +118,38 @@ make build
 ### プロジェクト構成
 
 ```
+├── acp/                  # CLI 向け ACP アダプター
+├── bin/                  # NPMラッパー
 ├── cmd/opencodereview/   # CLIエントリーポイント
+├── docs/                 # ローカライズ版 README と CONTRIBUTING
+├── examples/             # CI/CD 連携のサンプル
+├── extensions/           # エディタ拡張（VS Code と IDEA）
+├── imgs/                 # ロゴ、ベンチマーク、ハイライト画像
 ├── internal/
 │   ├── agent/            # レビューエージェントのロジック
+│   ├── chatgptauth/      # ChatGPT の OAuth と認証情報管理
 │   ├── config/           # 設定管理
+│   ├── delegate/         # 委任モードのレビュー仕様（LLM なし）
 │   ├── diff/             # Git diffのパース
-│   ├── llm/              # LLM APIクライアント（Anthropic & OpenAI）
+│   ├── gitcmd/           # 同時実行数を制限する git サブプロセスランナー
+│   ├── llm/              # LLM APIクライアント（Anthropic、Bedrock、OpenAI）
+│   ├── llmloop/          # サブタスク共有のツール使用ループ
+│   ├── mcp/              # MCP サーバークライアントとツールアダプター
 │   ├── model/            # データモデル
+│   ├── pathutil/         # 正規化パスと包含チェック
+│   ├── release/          # リリース資産 URL の命名チェック
+│   ├── scan/             # ファイル全体のコードレビュー（ocr scan）
 │   ├── session/          # レビューセッション管理
-│   ├── tool/             # 組み込みツール（file_read、code_searchなど）
+│   ├── stdout/           # 切り替え可能な stdout ライター
+│   ├── suggestdiff/      # 提案表示用の行単位 diff
 │   ├── telemetry/        # OpenTelemetry統合
+│   ├── tool/             # 組み込みツール（file_read、code_searchなど）
 │   └── viewer/           # WebUIセッションビューアー
-├── pages/                # WebUIフロントエンド
-├── scripts/              # ビルド & インストールスクリプト
-└── bin/                  # NPMラッパー
+├── npm/                  # プラットフォーム別の optional バイナリパッケージ
+├── pages/                # ランディングページ
+├── plugins/              # コーディングエージェント向けプラグイン
+├── scripts/              # インストール、公開、チェック用スクリプト
+└── skills/               # エージェントスキルのマニフェスト
 ```
 
 ## AI支援開発
