@@ -4,11 +4,27 @@ sidebar:
   order: 5
 ---
 
-설정 파일은 `~/.opencodereview/config.json`에 있습니다. 편집하는 방법은 세 가지입니다:
+설정 파일은 기본적으로 `~/.opencodereview/config.json`에 있습니다. 편집하는 방법은 세 가지입니다:
 
 - **대화형 TUI** — `ocr config provider` / `ocr config model`. 메뉴가 안내합니다.
 - **커맨드라인** — `ocr config set <key> <value>`. 스크립트와 CI에 적합합니다.
 - **직접 편집(권장하지 않음)** — JSON 파일을 직접 수정합니다(다음 `ocr config set` 기록 때 다시 포맷됩니다).
+
+## 저장 디렉터리 {#storage-directory}
+
+`OCR_HOME`을 설정하면 구성, 세션, 원본 LLM 기록, 전역 규칙 및 인증 데이터를 다른 디렉터리에 저장할 수 있습니다.
+설정하지 않았거나 값이 비어 있으면 `~/.opencodereview`를 사용합니다. 기존 파일은 자동으로 이동하지 않습니다.
+
+```bash
+export OCR_HOME=/data/ocr
+ocr config path --json   # {"path":"/data/ocr/config.json"}
+ocr review
+ocr viewer --open=never
+```
+
+상대 경로는 CLI의 작업 디렉터리를 기준으로 해석됩니다. 프로세스나 컨테이너 간에 저장소를 공유할 때는 절대 경로를 사용하세요.
+IDE 확장은 `ocr config path --json`을 실행하고, 반환된 경로의 절대 부모 디렉터리를 이후 CLI 호출의 저장 위치로 고정합니다.
+프로젝트의 `.opencodereview/rule.json` 위치는 바뀌지 않습니다.
 
 ## 모델 설정 {#configuring-a-model}
 
