@@ -81,6 +81,19 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 对比两个会话的问题：新增、仍存在、已解决、未评审。 |
 | `ocr session export [id]` | — | 将单个会话导出为自包含的 HTML 文件。 |
 | `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | 删除一个已保存的评审会话。 |
+| `ocr plugin install <url\|path>` | — | 从 URL 或本地路径安装 OCR 原生插件。 |
+| `ocr plugin list` | `ocr plugins list` | 列出已安装的插件及其启用状态。 |
+| `ocr plugin show <id>` | — | 查看已安装插件的详细信息与声明能力。 |
+| `ocr plugin update <id>` | — | 从原始源更新插件（`--source`, `--accept-permissions` 确认权限）。 |
+| `ocr plugin enable <id>` / `disable <id>` | — | 启用或禁用指定的已安装插件。 |
+| `ocr plugin remove <id>` | — | 注销并删除已安装的插件。 |
+| `ocr plugin add <source>` | — | 为当前项目声明并锁定插件依赖。 |
+| `ocr plugin lock` | — | 解析依赖并更新项目的平台锁文件。 |
+| `ocr plugin sync --frozen` | — | 严格按锁文件同步安装项目插件，不执行代码。 |
+| `ocr plugin trust` | — | 在本地为当前项目锁定的 MCP 服务（包括远程端点）授权（`--revoke` 撤销）。 |
+| `ocr plugin project` | — | 检查当前项目的插件声明与锁文件状态。 |
+| `ocr plugin preflight` | — | 预检验证项目锁文件依赖与执行授权（`--fingerprint` 输出指纹）。 |
+| `ocr mcp list` | — | 查看所有已配置的 MCP 服务器及其授权状态（不建立连接）。 |
 | `ocr viewer` | — | 启动用于历史评审会话的本地 Web UI（`localhost:5483`）。 |
 | `ocr version` | — | 打印版本、commit、平台、构建日期与 GitHub URL。 |
 
@@ -108,9 +121,10 @@ unstaged + untracked 变更。
 | `--from <ref>` | — | — | diff 起始 ref（如 `main`）。 |
 | `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
-| `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
+| `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 结合 `--review-plugin` 时只检查工作流清单，不启动可执行程序。 |
+| `--review-plugin <id>` | — | — | 选取并运行已安装且授权的原生插件所定义的审查工作流。参阅[审查工作流插件](https://github.com/alibaba/open-code-review/blob/main/docs/i18n/review-workflow-plugins.zh-CN.md)。 |
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个子任务的 `REVIEW_FILTER_TASK` LLM 后处理调用。子任务评审单个文件或一组相关文件。 |
-| `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
+| `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 不能与 `--review-plugin` 同用。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
 | `--output <path>` | `-o` | 标准输出 | 将评审结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
 | `--audience <who>` | — | `human` | `human` 流式输出进度行（`--format` 为 `json`/`sarif` 时输出到 stderr，使 stdout 保持为单个可解析文档）；`agent` 完全抑制进度行，只打印最终摘要 / JSON。 |
@@ -737,6 +751,43 @@ ocr completion powershell > ocr.ps1
 ```
 
 然后在 PowerShell 配置文件中添加一行以加载 `ocr.ps1`。
+
+
+## `ocr plugin`
+
+管理为 OCR 注入评审规则和 MCP 上下文工具的原生插件。完整指南与架构请参阅[原生 OCR 插件](https://github.com/alibaba/open-code-review/blob/main/docs/i18n/native-plugins.zh-CN.md)。
+
+### 全局插件管理
+
+- `ocr plugin install <url|path>`：从公开 GitHub 链接、远程 HTTPS 归档（`.tar.gz`/`.zip`）或本地目录/归档安装插件。选项：`--enable`（安装后启用）、`--dry-run`（仅预览检查）、`--plugin <id>`（多插件来源中选择 ID）、`--json`。
+- `ocr plugin list`：列出所有已安装的全局插件、版本与启用状态。
+- `ocr plugin show <id>`：查看指定插件的详细配置、规则与 MCP 工具（自动脱敏凭证）。
+- `ocr plugin update <id>`: 从记录的来源更新，也可用 `--source <url|path>` 更换来源。成功后保存新来源并保留启停状态；失败保留原插件和来源。MCP 执行配置变更仍需 `--accept-permissions` 确认。
+- `ocr plugin enable <id>` / `disable <id>`：启用或禁用指定的全局插件。
+- `ocr plugin remove <id>`：注销并删除指定的插件。
+
+### 项目级插件管理
+
+- `ocr plugin add <source>`：在 `.opencodereview/plugins.json` 声明依赖并更新锁文件。
+- `ocr plugin lock`：为当前系统平台解析依赖并更新 `.opencodereview/plugins.lock.json`。
+- `ocr plugin sync --frozen`：严格按锁文件同步安装构件快照，不执行任何代码（支持 `--offline`）。
+- `ocr plugin trust`：在当前机器上对锁定的 MCP 服务（包括远程端点）授予本地执行信任（`--revoke` 撤销）。
+- `ocr plugin project`：只读检查当前项目的依赖声明与锁文件状态。
+- `ocr plugin preflight`：执行前预检验证依赖安装与授权（`--fingerprint` 输出确定性指纹）。
+
+
+## `ocr mcp`
+
+统一管理与只读检查所有 MCP（Model Context Protocol）服务器配置。
+
+### `ocr mcp list`
+
+汇总查看来自用户配置（`config.json`）、全局插件以及项目插件的所有 MCP 服务器及其授权状态，绝不启动进程或建立网络连接：
+
+```bash
+ocr mcp list
+ocr mcp list --repo /path/to/project --json
+```
 
 
 ## 提示与注意

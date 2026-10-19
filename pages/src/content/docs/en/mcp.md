@@ -26,6 +26,26 @@ cover it — MCP is for reaching beyond the checkout.
 
 ## Configuration
 
+### Inspect configured servers
+
+```bash
+ocr mcp list
+ocr mcp list --repo /path/to/project --json
+```
+
+The read-only list combines your existing manual configuration with native
+plugin MCP declarations, showing their source, plugin/version, execution type,
+configuration state, and authorization state. Existing manual servers do not
+need to be converted into plugins. A project plugin declaration selects locked
+project plugins instead of global plugins; manual servers still apply.
+
+`configured` means selected configuration, not a successful connection check.
+Listing does not run setup hooks, start servers, contact remote endpoints, or
+grant authorization. Project snapshots must already be installed; an untrusted
+snapshot is shown as `authorization_required`. JSON reports
+`connection_status: "not_checked"` and omits commands, arguments, URLs,
+environment values, and authentication headers.
+
 #### Adding a local MCP server
 
 The `ocr config set` command writes these fields non-interactively. Array

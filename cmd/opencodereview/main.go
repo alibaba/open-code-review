@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/plugin"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 )
 
 func main() {
 	llm.AppVersion = Version
+	plugin.HostVersion = Version
 	os.Exit(run())
 }
 

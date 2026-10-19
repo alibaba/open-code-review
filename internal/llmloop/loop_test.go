@@ -1030,6 +1030,8 @@ func TestMainLoopStopStringAndReason(t *testing.T) {
 		{StopMaxRounds, "max_rounds"},
 		{StopEmptyRounds, "empty_rounds"},
 		{StopCompression, "compression"},
+		{StopTokenBudget, "token_budget"},
+		{StopCompletionBudget, "completion_budget"},
 	} {
 		t.Run(tc.wantName, func(t *testing.T) {
 			name := tc.stop.String()
@@ -1058,12 +1060,12 @@ func TestMainLoopStopStringAndReason(t *testing.T) {
 // stop its own String() and Reason() case instead of letting it fall through to
 // a message that says nothing.
 func TestMainLoopStopUnknownValue(t *testing.T) {
-	unknown := StopTokenBudget + 1
+	unknown := StopCompletionBudget + 1
 
-	if got, want := unknown.String(), "MainLoopStop(5)"; got != want {
+	if got, want := unknown.String(), "MainLoopStop(6)"; got != want {
 		t.Errorf("String() = %q, want %q; a new constant needs its own case in String() and Reason()", got, want)
 	}
-	if got, want := unknown.Reason(), "main task stopped for an unrecognized reason (stop=5)"; got != want {
+	if got, want := unknown.Reason(), "main task stopped for an unrecognized reason (stop=6)"; got != want {
 		t.Errorf("Reason() = %q, want %q; a new constant needs its own case in String() and Reason()", got, want)
 	}
 	if unknown.Reason() == StopNone.Reason() {

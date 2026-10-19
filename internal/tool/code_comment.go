@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -47,6 +48,20 @@ var validCodeCommentSeverities = map[string]struct{}{
 	codeCommentSeverityLow:      {},
 }
 
+// CodeCommentClassifications returns fresh, sorted copies of the classifications
+// accepted by the comment parser. Structured producers can share this contract.
+func CodeCommentClassifications() (severities, categories []string) {
+	for value := range validCodeCommentSeverities {
+		severities = append(severities, value)
+	}
+	for value := range validCodeCommentCategories {
+		categories = append(categories, value)
+	}
+	sort.Strings(severities)
+	sort.Strings(categories)
+	return severities, categories
+}
+
 // CodeCommentProvider submits review comments to the per-Agent CommentCollector.
 type CodeCommentProvider struct {
 	Collector *CommentCollector
@@ -78,7 +93,13 @@ func (p *CodeCommentProvider) Execute(_ context.Context, args map[string]any) (s
 // schema violation, not a change to the findings: a repair is accepted only when
 // no recovered value looks cut short.
 func ParseCommentsWithPath(args map[string]any, defaultPath string) (comments []model.LlmComment, repair *CommentRepair, errMsg string) {
-	return parseCommentsInner(args, defaultPath)
+	return parseCommentsInner(args, defaultPath, false)
+}
+
+// ParseAcceptedCommentsWithPath preserves valid line ranges supplied by a
+// structured completion validator, alongside the ordinary comment parsing rules.
+func ParseAcceptedCommentsWithPath(args map[string]any, defaultPath string) (comments []model.LlmComment, repair *CommentRepair, errMsg string) {
+	return parseCommentsInner(args, defaultPath, true)
 }
 
 // ParseComments extracts LlmComment entries from tool call arguments without writing
@@ -88,11 +109,11 @@ func ParseCommentsWithPath(args map[string]any, defaultPath string) (comments []
 // today. A future caller that starts carrying real traffic should switch to
 // ParseCommentsWithPath rather than inherit silent repairs.
 func ParseComments(args map[string]any) ([]model.LlmComment, string) {
-	comments, _, errMsg := parseCommentsInner(args, "")
+	comments, _, errMsg := parseCommentsInner(args, "", false)
 	return comments, errMsg
 }
 
-func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmComment, *CommentRepair, string) {
+func parseCommentsInner(args map[string]any, defaultPath string, accepted bool) ([]model.LlmComment, *CommentRepair, string) {
 	var rawComments []any
 	var repair *CommentRepair
 	if arr, ok := args["comments"].([]any); ok && len(arr) > 0 {
@@ -154,6 +175,14 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 
 		if cm.Path == "" || cm.Content == "" {
 			continue
+		}
+		if accepted {
+			start, startOK := obj["start_line"].(float64)
+			end, endOK := obj["end_line"].(float64)
+			startLine, endLine := int(start), int(end)
+			if startOK && endOK && startLine > 0 && endLine >= startLine && float64(startLine) == start && float64(endLine) == end {
+				cm.StartLine, cm.EndLine = startLine, endLine
+			}
 		}
 
 		comments = append(comments, cm)

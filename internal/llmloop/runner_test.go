@@ -5,7 +5,9 @@ package llmloop
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -421,6 +423,81 @@ func TestRunCompression_Success(t *testing.T) {
 	}
 	if r.TotalInputTokens() != 100 {
 		t.Errorf("TotalInputTokens = %d, want 100", r.TotalInputTokens())
+	}
+}
+
+func TestRunCompression_WorkflowFrozenPrefixAcrossCompressions(t *testing.T) {
+	t_tempDir = t.TempDir()
+	summaries := []string{"First workflow summary", "Second workflow summary"}
+	client := &fakeClient{}
+	for _, summary := range summaries {
+		client.responses = append(client.responses, &llm.ChatResponse{
+			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summary}}},
+		})
+	}
+	r := newTestRunner(client, template.Template{
+		MemoryCompressionTask: template.LlmConversation{
+			Messages: []template.ChatMessage{{Role: "user", Content: "Summarize: {{context}}"}},
+		},
+		MaxTokens: 80,
+	})
+	frozen := []llm.Message{
+		msg("system", "Immutable review system"),
+		msg("user", "Immutable original diff"),
+		msg("system", "Immutable workflow policy"),
+		msg("user", "Immutable workflow input"),
+	}
+	frozenJSON, err := json.Marshal(frozen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(context.Background(), taskOptionsKey{}, &TaskOptions{FrozenMessageCount: len(frozen)})
+	messages := copyMessages(frozen)
+	for pass, summary := range summaries {
+		history := fmt.Sprintf("Old investigation pass %d: ", pass) + strings.Repeat("details ", 200)
+		active := []llm.Message{
+			msg("assistant", fmt.Sprintf("Latest investigation pass %d", pass)),
+			msg("tool", fmt.Sprintf("Latest evidence pass %d", pass)),
+		}
+		messages = append(messages, msg("assistant", history), msg("tool", strings.Repeat("evidence ", 200)))
+		messages = append(messages, active...)
+		got, err := r.runCompression(ctx, messages, "workflow-group")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(frozen)+1+len(active) {
+			t.Fatalf("pass %d rebuilt %d messages", pass, len(got))
+		}
+		gotFrozenJSON, err := json.Marshal(got[:len(frozen)])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(gotFrozenJSON) != string(frozenJSON) {
+			t.Fatalf("pass %d changed frozen inputs: %s", pass, gotFrozenJSON)
+		}
+		gotSummary := got[len(frozen)]
+		if gotSummary.Role != "user" || gotSummary.ExtractText() != "<previous_review_summary>\n"+summary+"\n</previous_review_summary>" {
+			t.Fatalf("pass %d summary outside frozen inputs = %+v", pass, gotSummary)
+		}
+		if !reflect.DeepEqual(got[len(frozen)+1:], active) {
+			t.Fatalf("pass %d changed the active round", pass)
+		}
+		if len(client.requests) != pass+1 {
+			t.Fatalf("pass %d compression requests = %d", pass, len(client.requests))
+		}
+		compressedHistory := client.requests[pass].Messages[0].ExtractText()
+		for _, input := range frozen {
+			if strings.Contains(compressedHistory, input.ExtractText()) {
+				t.Fatalf("pass %d summarized frozen input %q", pass, input.ExtractText())
+			}
+		}
+		if !strings.Contains(compressedHistory, history) || strings.Contains(compressedHistory, active[0].ExtractText()) {
+			t.Fatalf("pass %d summarized the wrong history", pass)
+		}
+		if pass > 0 && !strings.Contains(compressedHistory, summaries[pass-1]) {
+			t.Fatal("second compression omitted the preceding summary")
+		}
+		messages = got
 	}
 }
 

@@ -62,35 +62,36 @@ type ItemDetail struct {
 
 // summaryRecord is a superset of resumeRecord that also carries session_end fields.
 type summaryRecord struct {
-	Type            string          `json:"type"`
-	SessionID       string          `json:"sessionId"`
-	Timestamp       string          `json:"timestamp"`
-	Cwd             string          `json:"cwd"`
-	GitBranch       string          `json:"gitBranch"`
-	Model           string          `json:"model"`
-	ReviewMode      string          `json:"reviewMode"`
-	DiffFrom        string          `json:"diffFrom"`
-	DiffTo          string          `json:"diffTo"`
-	DiffCommit      string          `json:"diffCommit"`
-	ResumedFrom     string          `json:"resumedFrom"`
-	FilePath        string          `json:"filePath"`
-	OldPath         string          `json:"oldPath"`
-	NewPath         string          `json:"newPath"`
-	Fingerprint     string          `json:"fingerprint"`
-	SourceSessionID string          `json:"sourceSessionId"`
-	Error           string          `json:"error"`
-	Comments        json.RawMessage `json:"comments"`
-	FilesReviewed   []string        `json:"files_reviewed"`
-	DurationSeconds float64         `json:"duration_seconds"`
-	LLMFailures     int64           `json:"llm_failures"`
-	RunManifest     *RunManifest    `json:"run_manifest"`
-	SchemaVersion   string          `json:"schema_version"`
-	RunID           string          `json:"run_id"`
-	ParentRunID     string          `json:"parent_run_id"`
-	SourceProvider  string          `json:"source_provider"`
-	SourceModel     string          `json:"source_model"`
-	TargetProvider  string          `json:"target_provider"`
-	TargetModel     string          `json:"target_model"`
+	Type            string              `json:"type"`
+	SessionID       string              `json:"sessionId"`
+	Timestamp       string              `json:"timestamp"`
+	Cwd             string              `json:"cwd"`
+	GitBranch       string              `json:"gitBranch"`
+	Model           string              `json:"model"`
+	ReviewMode      string              `json:"reviewMode"`
+	DiffFrom        string              `json:"diffFrom"`
+	DiffTo          string              `json:"diffTo"`
+	DiffCommit      string              `json:"diffCommit"`
+	ResumedFrom     string              `json:"resumedFrom"`
+	FilePath        string              `json:"filePath"`
+	OldPath         string              `json:"oldPath"`
+	NewPath         string              `json:"newPath"`
+	Fingerprint     string              `json:"fingerprint"`
+	SourceSessionID string              `json:"sourceSessionId"`
+	Error           string              `json:"error"`
+	Comments        json.RawMessage     `json:"comments"`
+	FilesReviewed   []string            `json:"files_reviewed"`
+	DurationSeconds float64             `json:"duration_seconds"`
+	LLMFailures     int64               `json:"llm_failures"`
+	RunManifest     *RunManifest        `json:"run_manifest"`
+	ReviewPlugin    *PluginReviewReport `json:"review_plugin"`
+	SchemaVersion   string              `json:"schema_version"`
+	RunID           string              `json:"run_id"`
+	ParentRunID     string              `json:"parent_run_id"`
+	SourceProvider  string              `json:"source_provider"`
+	SourceModel     string              `json:"source_model"`
+	TargetProvider  string              `json:"target_provider"`
+	TargetModel     string              `json:"target_model"`
 }
 
 // SessionsDir returns the on-disk directory that holds JSONL session files

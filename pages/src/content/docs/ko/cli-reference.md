@@ -82,6 +82,19 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 두 세션의 지적을 비교합니다: 새로 생긴 것, 남아 있는 것, 해결된 것, 리뷰하지 않은 것. |
 | `ocr session export [id]` | — | 세션 하나를 단일 HTML 파일로 내보냅니다. |
 | `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | 저장된 리뷰 세션 하나를 삭제합니다. |
+| `ocr plugin install <url\|path>` | — | URL 또는 로컬 경로에서 OCR 네이티브 플러그인을 설치합니다. |
+| `ocr plugin list` | `ocr plugins list` | 설치된 플러그인 목록과 활성화 상태를 나열합니다. |
+| `ocr plugin show <id>` | — | 설치된 플러그인의 상세 정보와 기여 기능을 검사합니다. |
+| `ocr plugin update <id>` | — | 원래 소스에서 플러그인을 업데이트합니다(`--source`, `--accept-permissions`). |
+| `ocr plugin enable <id>` / `disable <id>` | — | 설치된 플러그인을 활성화하거나 비활성화합니다. |
+| `ocr plugin remove <id>` | — | 설치된 플러그인 등록을 해제하고 삭제합니다. |
+| `ocr plugin add <source>` | — | 프로젝트의 플러그인 의존성을 선언하고 잠금 파일에 기록합니다. |
+| `ocr plugin lock` | — | 의존성을 해석하고 프로젝트 잠금 파일을 업데이트합니다. |
+| `ocr plugin sync --frozen` | — | 코드 실행 없이 잠금 파일에 지정된 정확한 플러그인을 설치합니다. |
+| `ocr plugin trust` | — | 잠긴 MCP 서버(원격 엔드포인트 포함)에 로컬 실행 권한을 부여합니다(`--revoke`). |
+| `ocr plugin project` | — | 프로젝트 플러그인 선언 및 잠금 파일 상태를 검사합니다. |
+| `ocr plugin preflight` | — | 프로젝트 플러그인 설치 및 실행 권한 상태를 사전 검증합니다(`--fingerprint`). |
+| `ocr mcp list` | — | 연결 없이 구성된 모든 MCP 서버와 승인 상태를 검사합니다. |
 | `ocr viewer` | — | 지난 리뷰 세션을 볼 수 있는 로컬 웹 UI를 띄웁니다(`localhost:5483`). |
 | `ocr version` | — | 버전, 커밋, 플랫폼, 빌드 날짜, GitHub URL을 출력합니다. |
 
@@ -112,9 +125,10 @@ ocr r      [flags]   (alias)
 | `--from <ref>` | — | — | diff를 시작할 원본 ref(예: `main`). |
 | `--to <ref>` | — | — | diff가 끝나는 대상 ref(예: `feature-branch`). 지정하면 OCR이 `merge-base(from, to)..to`를 계산합니다. |
 | `--commit <sha>` | `-c` | — | 리뷰할 단일 커밋(부모 커밋과의 diff). |
-| `--preview` | `-p` | `false` | 필터 파이프라인만 돌리고 LLM은 호출하지 않습니다. 파일 목록과 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다(미리 보기에는 내보낼 완료된 지적이 없습니다). |
+| `--preview` | `-p` | `false` | 필터 파이프라인만 돌리고 LLM은 호출하지 않습니다. 파일 목록과 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다(미리 보기에는 내보낼 완료된 지적이 없습니다). `--review-plugin`과 함께 사용하면 실행 파일을 시작하지 않고 워크플로 매니페스트만 검사합니다. |
+| `--review-plugin <id>` | — | — | 설치 및 승인된 네이티브 플러그인에서 정의한 리뷰 워크플로를 선택하여 실행합니다. [리뷰 워크플로 플러그인 가이드](https://github.com/alibaba/open-code-review/blob/main/docs/i18n/review-workflow-plugins.ko-KR.md)를 참조하십시오. |
 | `--no-filter` | — | `false` | 리뷰 코멘트를 모두 남기고 서브태스크 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. 서브태스크는 파일 하나 또는 관련된 파일 묶음을 리뷰합니다. |
-| `--resume <session-id>` | — | — | 호환되는 이전 range 또는 commit 리뷰 세션에서 이어서 실행합니다. |
+| `--resume <session-id>` | — | — | 호환되는 이전 range 또는 commit 리뷰 세션에서 이어서 실행합니다. `--review-plugin`과 함께 사용할 수 없습니다. |
 | `--format <fmt>` | `-f` | `text` | `text`(사람이 읽는 형식), `json`(기계가 읽는 코멘트 배열), `sarif`(GitHub Code Scanning용 SARIF 2.1.0 리포트). |
 | `--output <path>` | `-o` | stdout | 리뷰 결과를 UTF-8 파일로 씁니다(`-`는 stdout). 첫 쓰기 시점에 파일을 만들므로 실패한 실행은 기존 파일을 건드리지 않습니다. text 형식에서는 ANSI 색 코드를 자동으로 제거합니다. |
 | `--audience <who>` | — | `human` | `human`은 진행 상황을 흘려보냅니다(`--format`이 `json`/`sarif`이면 stderr로 보내 stdout이 파싱 가능한 문서 하나로 유지됩니다). `agent`는 진행 상황을 아예 끄고 최종 요약이나 JSON만 출력합니다. |
@@ -760,6 +774,43 @@ ocr completion powershell > ocr.ps1
 ```
 
 PowerShell 프로필에 `ocr.ps1`을 점으로 불러오는 줄을 추가하세요.
+
+
+## `ocr plugin` {#ocr-plugin}
+
+리뷰 규칙 및 MCP 도구를 제공하는 OCR 네이티브 플러그인을 관리합니다. 지원되는 소스와 아키텍처에 대한 자세한 내용은 [네이티브 OCR 플러그인 가이드](https://github.com/alibaba/open-code-review/blob/main/docs/i18n/native-plugins.ko-KR.md)를 참조하십시오.
+
+### 전역 플러그인 관리
+
+- `ocr plugin install <url|path>`: 공개 GitHub URL, 원격 HTTPS 아카이브(`.tar.gz`/`.zip`) 또는 로컬 디렉터리/아카이브에서 설치합니다. 플래그: `--enable`(설치 후 활성화), `--dry-run`(저장 없이 미리보기 검사), `--plugin <id>`(다중 플러그인 소스에서 선택), `--json`.
+- `ocr plugin list`: 설치된 전역 플러그인 목록, 버전 및 활성화 상태를 표시합니다.
+- `ocr plugin show <id>`: 플러그인 세부 정보, 스냅샷 경로, 규칙 및 MCP 서버를 표시합니다(인증 정보 자동 마스킹).
+- `ocr plugin update <id>`: 기록된 소스에서 업데이트하거나 `--source <url|path>`로 소스를 변경합니다. 성공하면 새 소스를 저장하고 활성화 상태를 유지하며, 실패하면 기존 패키지와 소스를 유지합니다. MCP 실행 구성이 변경되면 `--accept-permissions`가 필요합니다.
+- `ocr plugin enable <id>` / `disable <id>`: 지정된 플러그인을 활성화하거나 비활성화합니다.
+- `ocr plugin remove <id>`: 플러그인 등록을 해제하고 삭제합니다.
+
+### 프로젝트 플러그인 관리
+
+- `ocr plugin add <source>`: `.opencodereview/plugins.json`에 의존성을 선언하고 잠금 파일을 업데이트합니다.
+- `ocr plugin lock`: 현재 플랫폼용으로 의존성을 해석하고 `.opencodereview/plugins.lock.json`을 업데이트합니다.
+- `ocr plugin sync --frozen`: 코드를 실행하지 않고 잠금 파일의 정확한 스냅샷을 설치합니다(`--offline` 지원).
+- `ocr plugin trust`: 현재 머신에서 잠긴 MCP 서버(원격 엔드포인트 포함)에 로컬 실행 신뢰를 부여합니다(`--revoke`로 취소).
+- `ocr plugin project`: 프로젝트 선언 및 잠금 상태를 읽기 전용으로 검사합니다.
+- `ocr plugin preflight`: 리뷰 실행 전 플러그인 설치 및 실행 권한 상태를 사전 검증합니다(`--fingerprint`로 결정론적 지문 출력).
+
+
+## `ocr mcp` {#ocr-mcp}
+
+사용자 설정(`config.json`), 전역 플러그인, 프로젝트 플러그인에 걸친 MCP 서버를 통합 검사합니다.
+
+### `ocr mcp list`
+
+프로세스를 시작하거나 네트워크에 연결하지 않고 구성된 모든 MCP 서버와 승인 상태를 나열합니다:
+
+```bash
+ocr mcp list
+ocr mcp list --repo /path/to/project --json
+```
 
 
 ## 팁과 주의점 {#tips-gotchas}

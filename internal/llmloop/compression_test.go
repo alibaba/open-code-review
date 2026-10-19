@@ -199,6 +199,26 @@ func TestPartitionMessages_EverythingFits(t *testing.T) {
 	}
 }
 
+func TestPartitionMessages_WorkflowFrozenPrefix(t *testing.T) {
+	messages := []llm.Message{
+		msg("system", "Review system"),
+		msg("user", "Original diff"),
+		msg("system", "Workflow policy"),
+		msg("user", "Workflow input"),
+		msg("assistant", strings.Repeat("old investigation ", 200)),
+		msg("tool", strings.Repeat("old evidence ", 200)),
+		msg("assistant", "Latest investigation"),
+		msg("tool", "Latest evidence"),
+	}
+	result := partitionMessages(messages, 80, 0, 4)
+	if result.frozenEnd != 4 || result.compressEnd != 6 || result.activeCount != 1 {
+		t.Fatalf("workflow partition = %+v", result)
+	}
+	if len(result.rounds) != 2 || result.rounds[0].assistantIdx != 4 || result.rounds[1].assistantIdx != 6 {
+		t.Fatalf("workflow history rounds = %+v", result.rounds)
+	}
+}
+
 func TestStripMarkdownFences(t *testing.T) {
 	tests := []struct {
 		name  string

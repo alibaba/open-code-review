@@ -129,6 +129,8 @@ type RuleDetail struct {
 	Rule    string // rule text
 	Source  string // "custom" | "project" | "global" | "system"
 	Pattern string // glob pattern that matched, or "default" for fallback — always a plain glob, never annotated
+	// PluginRules identifies the additive rule packs that matched this path.
+	PluginRules []PluginRuleDetail `json:"plugin_rules,omitempty"`
 	// SniffedAs is "" for a plain path match, or the sniffed language (e.g.
 	// "objc") when content sniffing overrode the path-based rule. Internal
 	// only: callers that serialize RuleDetail (e.g. delegateRuleGroupJSON)
@@ -275,6 +277,9 @@ type composedResolver struct {
 // (currently only ".m": MATLAB vs Objective-C). The zero value is valid and
 // makes content reads fall back to the working tree.
 type ResolverOptions struct {
+	// ReviewPlugin opts into one installed review contribution without changing its saved state.
+	ReviewPlugin string
+
 	// Ref is the git ref whose content should be inspected — the review head
 	// (--to) in range mode, or --commit in commit mode. Empty reads the
 	// working tree, which is what `ocr scan` and `ocr rules check` want.
@@ -332,7 +337,7 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 
 	filter := buildFileFilter(customRule, projectRule, globalRule)
 
-	return &composedResolver{
+	resolver := &composedResolver{
 		custom:  customRule,
 		project: projectRule,
 		global:  globalRule,
@@ -343,7 +348,12 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 			runner:   opts.Runner,
 			objcRule: objcRule,
 		},
-	}, filter, nil
+	}
+	withPlugins, err := loadPluginRules(resolver, repoDir, opts.ReviewPlugin)
+	if err != nil {
+		return nil, nil, err
+	}
+	return withPlugins, filter, nil
 }
 
 // buildFileFilter picks the highest-priority layer that has any include/exclude

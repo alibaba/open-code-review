@@ -277,8 +277,8 @@ func (r *Runner) CollectPendingComments() []model.LlmComment {
 
 // MainLoopStop classifies why RunMainTask stopped without an explicit task_done
 // and without a Go error. It lets the caller attribute a precise, honest failure
-// classification instead of guessing from free text: only a configured limit
-// (max tool-request rounds) is a budget stop; the empty-round and compression
+// classification instead of guessing from free text: configured limits and
+// the scoped closing allowance are budget stops; empty-round and compression
 // exits are genuine but unclassifiable, so they map to the unknown catch-all.
 // StopNone means the loop returned via task_done in a normal round or via an
 // error. A task_done carried by the grace round is the exception: it completes
@@ -303,6 +303,9 @@ const (
 	// was already exceeded when the next round was about to start. This is a
 	// declared budget limit, like StopMaxRounds.
 	StopTokenBudget
+	// StopCompletionBudget — the bounded scoped closing window ended before a
+	// valid report. The run's aggregate budget may still have room.
+	StopCompletionBudget
 )
 
 // String names the stop for diagnostics — telemetry attributes, log lines and
@@ -320,6 +323,8 @@ func (s MainLoopStop) String() string {
 		return "compression"
 	case StopTokenBudget:
 		return "token_budget"
+	case StopCompletionBudget:
+		return "completion_budget"
 	default:
 		return fmt.Sprintf("MainLoopStop(%d)", int(s))
 	}
@@ -351,6 +356,8 @@ func (s MainLoopStop) Reason() string {
 		return "stopped because context compression exceeded its threshold"
 	case StopTokenBudget:
 		return "reached the aggregate token budget before finishing"
+	case StopCompletionBudget:
+		return "exhausted the scoped completion requests before finishing"
 	default:
 		return fmt.Sprintf("main task stopped for an unrecognized reason (stop=%d)", int(s))
 	}
@@ -389,6 +396,8 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
 	sessionID := uuid.NewString()
+	closing := false
+	var lastPromptTokens int64
 
 	// Async compression is owned by this conversation alone; the deferred
 	// cancel aborts any job still in flight when the conversation ends.
@@ -414,6 +423,17 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 			stop = StopTokenBudget
 			break
 		}
+		if !closing && r.completionDue(ctx, toolReqCount, lastPromptTokens, messages) {
+			closing = true
+			// Spend only the reserved closing opportunities, even when the
+			// stage's token share ends before its ordinary request allowance.
+			if toolReqCount >= scopedClosingRequests {
+				stop = StopCompletionBudget
+			}
+			toolReqCount = min(toolReqCount, scopedClosingRequests-1)
+			ctx = completionContext(ctx)
+			messages = append(messages, llm.NewTextMessage("user", scopedCompletionPrompt))
+		}
 
 		toolReqCount--
 
@@ -429,7 +449,7 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 			Model:     r.deps.Model,
 			Messages:  messages,
-			Tools:     r.deps.MainToolDefs,
+			Tools:     r.taskToolDefs(ctx),
 			MaxTokens: r.deps.Template.CompletionTokenLimit(),
 			SessionID: sessionID,
 		})
@@ -445,6 +465,7 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		totalTokens := int64(0)
 		if resp.Usage != nil {
 			totalTokens = resp.Usage.TotalTokens
+			lastPromptTokens = resp.Usage.PromptTokens
 			atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
 			atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
 			atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
@@ -487,6 +508,9 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 					Result:     "Task completed successfully.",
 				})
 				taskCompleted = true
+				if opts, _ := ctx.Value(taskOptionsKey{}).(*TaskOptions); opts != nil {
+					break
+				}
 			} else if cp.Data != "" {
 				results = append(results, tool.ToolCallResult{
 					ToolCallID: call.ID,
@@ -526,25 +550,32 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		}
 	}
 
-	// The grace round after a spent budget is the last chance to finish the
-	// task, so a task_done it carries counts as completion. The caller records
-	// the subtask as incomplete otherwise, and a resume re-runs a file the
-	// model already declared done.
-	completed := false
+	var grace tool.TaskCheckpoint
+	var graceErr error
 	switch stop {
 	case StopMaxRounds:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", taskKey)
-		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
+		grace, graceErr = r.runGraceRound(ctx, messages, taskKey, sessionID)
+	case StopCompletionBudget:
+		fmt.Fprintf(stdout.Writer(), "[ocr] Scoped completion requests reached for %s.\n", taskKey)
+		grace, graceErr = r.runGraceRound(ctx, messages, taskKey, sessionID)
 	case StopTokenBudget:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Token budget exceeded (used %d > budget %d) for %s.\n",
 			r.TotalTokensUsed(), r.deps.MaxTokensBudget, taskKey)
-		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
+		grace, graceErr = r.runGraceRound(ctx, messages, taskKey, sessionID)
 	}
-	// Both budget stops above ran the grace round, and completion is the only
-	// other trace it leaves: without this warning a caller would see a
-	// completed task and never learn that its budget ran out mid-review.
-	if stop == StopMaxRounds || stop == StopTokenBudget {
+	completed := grace.Completed && !grace.Failed && graceErr == nil
+	// Completion must not hide that a budget truncated the review.
+	if stop == StopMaxRounds || stop == StopTokenBudget || stop == StopCompletionBudget {
 		r.recordGraceRoundLimit(taskKey, stop, completed)
+	}
+	if opts, _ := ctx.Value(taskOptionsKey{}).(*TaskOptions); opts != nil {
+		if graceErr != nil {
+			return false, stop, graceErr
+		}
+		if grace.Failed {
+			return false, stop, fmt.Errorf("task failed: %s", grace.Data)
+		}
 	}
 	return completed, stop, nil
 }
@@ -558,24 +589,26 @@ func (r *Runner) tokenBudgetExceeded() bool {
 
 // runGraceRound performs one final LLM call after the tool-request budget is
 // exhausted, giving the model a chance to submit any findings it identified
-// but did not yet report via code_comment. It reports whether the model called
-// task_done with a successful state in that round: the grace round is a regular
-// main-task round, so its verdict on the subtask has to count.
-func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID string) bool {
-	graceDefs := graceRoundToolDefs(r.deps.MainToolDefs)
+// but did not yet report via code_comment.
+func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID string) (tool.TaskCheckpoint, error) {
+	ctx = completionContext(ctx)
+	graceDefs := graceRoundToolDefs(r.taskToolDefs(ctx))
 	if len(graceDefs) == 0 {
-		return false
+		return tool.Of(""), nil
 	}
 
-	messages = append(messages, llm.NewTextMessage("user",
-		"Your review budget is exhausted. This is your FINAL round. You may ONLY:\n"+
-			"- Call code_comment to submit any findings you have identified but not yet reported.\n"+
-			"- Call task_done if you have nothing more to report.\n"+
-			"No other tools are available. Do not attempt further analysis."))
+	instruction := "Your review budget is exhausted. This is your FINAL round. You may ONLY:\n" +
+		"- Call code_comment to submit any findings you have identified but not yet reported.\n" +
+		"- Call task_done if you have nothing more to report.\n" +
+		"No other tools are available. Do not attempt further analysis."
+	if opts, _ := ctx.Value(taskOptionsKey{}).(*TaskOptions); opts != nil {
+		instruction = "This is the final completion opportunity. " + scopedCompletionPrompt
+	}
+	messages = append(messages, llm.NewTextMessage("user", instruction))
 
 	if ctx.Err() != nil {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round skipped for %s: context cancelled\n", taskKey)
-		return false
+		return tool.Of(""), ctx.Err()
 	}
 
 	fs := r.deps.Session.GetOrCreateFileSession(taskKey)
@@ -598,7 +631,9 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 		llmSpan.End()
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", taskKey, err)
-		return false
+		// Keep context error identity for the caller's timeout/cancellation
+		// classification; a string checkpoint would erase that distinction.
+		return tool.Of(""), fmt.Errorf("grace round LLM completion error: %w", err)
 	}
 
 	rec.SetResponse(resp, duration)
@@ -616,7 +651,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
-		return false
+		return tool.Of(""), nil
 	}
 
 	// Only task_done reports completion; code_comment records findings. A FAILED
@@ -625,16 +660,22 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	failed := false
 	thinking := resp.ReasoningContent()
 	for _, call := range calls {
-		checkpoint := r.executeToolCall(ctx, taskKey, call, rec, thinking)
-		completed = completed || checkpoint.Completed
-		failed = failed || checkpoint.Failed
+		cp := r.executeToolCall(ctx, taskKey, call, rec, thinking)
+		if opts, _ := ctx.Value(taskOptionsKey{}).(*TaskOptions); opts != nil && (cp.Completed || cp.Failed) {
+			return cp, nil
+		}
+		completed = completed || cp.Completed
+		failed = failed || cp.Failed
 	}
-	return completed && !failed
+	if completed && !failed {
+		return tool.Complete(), nil
+	}
+	return tool.Of(""), nil
 }
 
 // WarningReviewLimitReached is the warning type RunMainTask records when a
-// declared budget — the tool-request rounds (StopMaxRounds) or the aggregate
-// token budget (StopTokenBudget) — spends the main loop's last round and sends
+// declared budget — tool-request rounds (StopMaxRounds), aggregate tokens
+// (StopTokenBudget), or scoped completion (StopCompletionBudget) — sends
 // the task into its grace round. Callers publish warnings in their JSON and
 // terminal output, and the warning keeps a spent limit visible even when the
 // grace round completes the task: by design the completion alone would look
@@ -674,6 +715,19 @@ func graceRoundToolDefs(defs []llm.ToolDef) []llm.ToolDef {
 // session/telemetry records and the worker-pool submission, and stands in as a
 // code_comment's path when the model omitted one.
 func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.ToolCall, rec *session.TaskRecord, thinking string) tool.TaskCheckpoint {
+	if opts, _ := ctx.Value(taskOptionsKey{}).(*TaskOptions); opts != nil {
+		allowed := false
+		for _, def := range opts.Tools {
+			allowed = allowed || def.Function.Name == call.Function.Name
+		}
+		if !allowed {
+			message := "Error: tool is not available in this review stage."
+			if rec != nil {
+				rec.AddToolResult(call.Function.Name, call.Function.Arguments, message)
+			}
+			return tool.Of(message)
+		}
+	}
 	t := tool.OfName(call.Function.Name)
 
 	if t == tool.TaskDone {
@@ -681,9 +735,12 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		if err != nil {
 			return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
 		}
+		if opts, _ := ctx.Value(taskOptionsKey{}).(*TaskOptions); opts != nil && opts.Complete != nil {
+			return r.completeTask(ctx, taskKey, args, rec, thinking)
+		}
 		rawState, hasState := args["state"]
 		if !hasState {
-			return tool.Complete()
+			return r.completeTask(ctx, taskKey, args, rec, thinking)
 		}
 		state, ok := rawState.(string)
 		if !ok {
@@ -691,7 +748,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		}
 		switch state {
 		case "DONE":
-			return tool.Complete()
+			return r.completeTask(ctx, taskKey, args, rec, thinking)
 		case "FAILED":
 			return tool.Fail("task_done reported FAILED")
 		default:
@@ -724,7 +781,11 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		telemetry.PrintToolCallStarted(t.Name(), args)
 		_, toolSpan := telemetry.StartToolSpan(ctx, t.Name())
 
-		comments, repair, errMsg := tool.ParseCommentsWithPath(args, taskKey)
+		parseComments := tool.ParseCommentsWithPath
+		if accepted, _ := ctx.Value(acceptedCommentsKey{}).(bool); accepted {
+			parseComments = tool.ParseAcceptedCommentsWithPath
+		}
+		comments, repair, errMsg := parseComments(args, taskKey)
 		if repair != nil {
 			// The model sees a plain success, so this warning is the only record
 			// that its `comments` violated the array schema — without it the

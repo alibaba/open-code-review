@@ -30,6 +30,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/plugin"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -53,6 +54,9 @@ func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
 
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
+	// ReviewPlugin is the explicitly selected package snapshot for this invocation.
+	ReviewPlugin *plugin.Installed
+
 	// RepoDir is the root of the git repository.
 	RepoDir string
 
@@ -183,16 +187,18 @@ type RuntimeConfig struct {
 // compression / token aggregation now live in internal/llmloop.Runner; this
 // struct holds the diff-side state and orchestrates per-group subtasks.
 type Agent struct {
-	args            Args
-	diffs           []model.Diff // parsed diffs
-	totalInsertions int64
-	totalDeletions  int64
-	currentDate     string
-	session         *session.SessionHistory
-	subtaskFailed   int64 // count of failed subtasks, accessed atomically
-	runner          *llmloop.Runner
-	resumeInfo      *ResumeInfo
-	budgetExceeded  atomic.Bool // set when a token/tool-call budget gate stopped dispatch
+	pluginReviewMu      sync.Mutex
+	pluginReviewReports []PluginReviewReport
+	args                Args
+	diffs               []model.Diff // parsed diffs
+	totalInsertions     int64
+	totalDeletions      int64
+	currentDate         string
+	session             *session.SessionHistory
+	subtaskFailed       int64 // count of failed subtasks, accessed atomically
+	runner              *llmloop.Runner
+	resumeInfo          *ResumeInfo
+	budgetExceeded      atomic.Bool // set when a token/tool-call budget gate stopped dispatch
 
 	fileGroups []FileGroup // semantic grouping result, stored for JSON output
 
@@ -674,7 +680,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	sem := make(chan struct{}, concurrency)
-	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute * time.Duration(a.args.Template.ReviewRounds())
+	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute * time.Duration(a.reviewRounds())
 
 	var dispatched int64
 dispatchLoop:
@@ -697,9 +703,10 @@ dispatchLoop:
 				firstPath := group.Diffs[0].NewPath
 				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + group est %s = projected %s > budget %s) — skipping group %q and remaining\n",
 					humanTokens(used), humanTokens(groupEst), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), group.Label)
-				a.recordWarning("token_budget_reached", firstPath,
-					fmt.Sprintf("stopped dispatch: used %d tokens + group estimate %d = projected %d exceeds budget %d", used, groupEst, projected, a.args.MaxTokensBudget))
-				a.budgetExceeded.Store(true)
+				if a.budgetExceeded.CompareAndSwap(false, true) {
+					a.recordWarning("token_budget_reached", firstPath,
+						fmt.Sprintf("stopped dispatch: used %d tokens + group estimate %d = projected %d exceeds budget %d", used, groupEst, projected, a.args.MaxTokensBudget))
+				}
 				// Deliberately NOT SetRunFailure: budget exhaustion is a controlled
 				// coverage truncation, not a run-level failure. SetRunFailure would
 				// force terminal_state=failed regardless of coverage, and claim the
@@ -785,7 +792,7 @@ dispatchLoop:
 					var failedCount int64
 					for _, d := range g.Diffs {
 						fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 {
+						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 && !stop.required {
 							a.markCompleted(d)
 							a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
 							continue
@@ -1057,6 +1064,10 @@ func (a *Agent) sourceArtifactSHA256() string {
 // digest. Rule order is significant (first match wins) and never sorted.
 func (a *Agent) ruleConfigSHA256() string {
 	var fields []string
+	if a.args.ReviewPlugin != nil {
+		manifest, _ := json.Marshal(a.args.ReviewPlugin.Manifest)
+		fields = append(fields, "review_plugin", string(manifest), "directory", a.args.ReviewPlugin.Dir, "content", a.args.ReviewPlugin.ContentSHA256)
+	}
 	if cc, ok := a.args.SystemRule.(interface{ CanonicalConfig() []string }); ok {
 		fields = append(fields, cc.CanonicalConfig()...)
 	}
@@ -1203,6 +1214,8 @@ func classifyItemError(err error) (session.FailureClass, string) {
 		return session.FailureCancelled, "file review was cancelled"
 	case errors.Is(err, errMainTaskEmpty):
 		return session.FailureConfiguration, "review template main_task is empty"
+	case errors.Is(err, errReviewPlugin):
+		return session.FailureUnknown, "review plugin execution or protocol failed"
 	default:
 		return session.FailureProvider, "provider or subtask request failed"
 	}
@@ -1222,7 +1235,7 @@ func classifyItemError(err error) (session.FailureClass, string) {
 // json runs the progress lines that would say why an item stopped are discarded,
 // so that string is the only stop diagnostic that leaves a CI runner.
 func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, string) {
-	if stop == llmloop.StopMaxRounds || stop == llmloop.StopTokenBudget {
+	if stop == llmloop.StopMaxRounds || stop == llmloop.StopTokenBudget || stop == llmloop.StopCompletionBudget {
 		return session.FailureBudget, stop.Reason()
 	}
 	return session.FailureUnknown, stop.Reason()
@@ -1235,6 +1248,8 @@ func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, stri
 // detailed human-facing text preserved for the legacy RecordReviewItemFailed
 // resume record (unchanged behavior).
 type subtaskStop struct {
+	// Findings do not complete missing required stages.
+	required      bool
 	class         session.FailureClass
 	reason        string
 	checkpoint    string
@@ -1377,6 +1392,9 @@ func diffsChurn(diffs []model.Diff) (total, maxFile int64) {
 // for a non-error early exit (token budget, main-loop stop) carrying the manifest
 // class recorded at its trigger point. A completed review returns (true, nil, nil).
 func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *subtaskStop, error) {
+	if a.args.ReviewPlugin != nil {
+		return a.executePluginReview(ctx, g)
+	}
 	groupKey := fileGroupKey(g.Diffs)
 	ctx, span := telemetry.StartSpan(ctx, "subtask.execute.group."+groupKey)
 	defer span.End()

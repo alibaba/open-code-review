@@ -124,6 +124,9 @@ func validateOutputFormat(format string) (string, error) {
 }
 
 func validateReviewOptions(opts *reviewOptions) error {
+	if opts.reviewPlugin != "" && opts.resume != "" {
+		return fmt.Errorf("review plugins require a fresh run; omit --resume")
+	}
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
@@ -202,6 +205,7 @@ func validateDelegateOptions(opts *delegateOptions) error {
 
 // registerReviewFlags registers all review command flags on cmd, binding to opts.
 func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
+	cmd.Flags().StringVar(&opts.reviewPlugin, "review-plugin", "", "use an installed review policy for this run only")
 	addToolsFlag(cmd, &opts.toolConfigPath)
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)

@@ -136,6 +136,52 @@ func TestParseComments_Fields(t *testing.T) {
 	}
 }
 
+func TestAcceptedCommentRangesKeepNativeParsingRules(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		lines      string
+		start, end int
+	}{
+		{"valid range", `"start_line":3,"end_line":5`, 3, 5},
+		{"missing end", `"start_line":3`, 0, 0},
+		{"reversed range", `"start_line":5,"end_line":3`, 0, 0},
+		{"negative start", `"start_line":-1,"end_line":3`, 0, 0},
+		{"fractional line", `"start_line":3.5,"end_line":5`, 0, 0},
+		{"string line", `"start_line":"3","end_line":5`, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `[{"path":"src\\main.go","content":"Issue","severity":"HIGH","category":"BUG",` + tc.lines + `},{"path":"empty.go"},{"content":"Default path"}]`
+			var entries []any
+			if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+				t.Fatal(err)
+			}
+			for _, value := range []any{entries, raw} {
+				args := map[string]any{"comments": value}
+				native, _, nativeErr := ParseCommentsWithPath(args, "fallback.go")
+				accepted, _, acceptedErr := ParseAcceptedCommentsWithPath(args, "fallback.go")
+				if nativeErr != "" || acceptedErr != "" || len(native) != 2 || len(accepted) != 2 {
+					t.Fatalf("native=%+v error=%q accepted=%+v error=%q", native, nativeErr, accepted, acceptedErr)
+				}
+				if native[0].StartLine != 0 || native[0].EndLine != 0 {
+					t.Fatalf("native model call trusted supplied line numbers: %+v", native[0])
+				}
+				if accepted[0].StartLine != tc.start || accepted[0].EndLine != tc.end {
+					t.Fatalf("accepted range = %d..%d, want %d..%d", accepted[0].StartLine, accepted[0].EndLine, tc.start, tc.end)
+				}
+				accepted[0].StartLine, accepted[0].EndLine = 0, 0
+				for i := range native {
+					if accepted[i] != native[i] {
+						t.Fatalf("accepted comments changed native parsing: accepted=%+v native=%+v", accepted, native)
+					}
+				}
+				if accepted[0].Path != "src/main.go" || accepted[0].Severity != "high" || accepted[0].Category != "bug" || accepted[1].Path != "fallback.go" {
+					t.Fatalf("ordinary normalization or default path lost: %+v", accepted)
+				}
+			}
+		})
+	}
+}
+
 // TestParseComments_CategorySeverity verifies the structured category and severity
 // fields are read off each comment object when present, and left zero-valued when
 // absent (older/less-capable models that omit them still produce valid comments).
