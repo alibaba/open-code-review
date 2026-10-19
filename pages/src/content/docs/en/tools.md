@@ -253,7 +253,8 @@ Find files in the repo by repository-relative path or filename keyword (substrin
 The candidate set comes from `git ls-files --cached --others
 --exclude-standard` in workspace mode, or `git ls-tree -r --name-only
 <ref>` in range / commit mode. Extensionless files are skipped except
-for `Makefile`, `Dockerfile`, `LICENSE`, `Vagrantfile`, `Containerfile`.
+for `Makefile`, `Dockerfile`, `LICENSE`, `Vagrantfile`, `Containerfile`,
+`BUILD`, and `WORKSPACE`.
 
 ### Output
 
