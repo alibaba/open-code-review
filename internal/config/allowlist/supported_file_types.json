@@ -103,6 +103,8 @@
   ".zig",
   ".thrift",
   ".capnp",
+  ".mojo",
+  ".🔥",
   ".ml",
   ".mli",
   ".re",
