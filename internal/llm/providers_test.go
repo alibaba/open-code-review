@@ -32,6 +32,25 @@ func TestLookupProvider_KnownProviders(t *testing.T) {
 	}
 }
 
+func TestLookupProvider_NearAIDetails(t *testing.T) {
+	p, ok := LookupProvider("nearai")
+	if !ok {
+		t.Fatal("nearai preset not found")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://cloud-api.near.ai/v1" {
+		t.Errorf("BaseURL = %q, want https://cloud-api.near.ai/v1", p.BaseURL)
+	}
+	if p.EnvVar != "NEARAI_API_KEY" {
+		t.Errorf("EnvVar = %q, want NEARAI_API_KEY", p.EnvVar)
+	}
+	if len(p.Models) != 1 || p.Models[0] != "z-ai/glm-5.3-flash" {
+		t.Errorf("Models = %v, want [z-ai/glm-5.3-flash]", p.Models)
+	}
+}
+
 func TestLookupProvider_ChatGPTDetails(t *testing.T) {
 	if _, ok := LookupProvider("codex"); ok {
 		t.Fatal("undocumented Codex preset must not ship")

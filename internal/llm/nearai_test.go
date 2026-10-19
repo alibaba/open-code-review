@@ -548,6 +548,22 @@ func TestNearAIProviderConfiguration(t *testing.T) {
 	}
 }
 
+func TestNewLLMClient_NearAIDefaultPolicy(t *testing.T) {
+	client := NewLLMClient(ResolvedEndpoint{
+		Provider: "nearai", Protocol: ProtocolOpenAIChatCompletions,
+		URL: "https://cloud-api.near.ai/v1", Token: "test", Model: "canonical/model",
+	}, nil, nil)
+	defer CloseClient(client)
+	c, ok := client.(*nearAIClient)
+	if !ok || c.initErr != nil {
+		t.Fatalf("client: %+v", client)
+	}
+	report := ClientVerificationReport(client)
+	if report == nil || !report.E2EE || report.VerificationLevel != "model-tee" {
+		t.Fatalf("factory weakened the default verification policy: %+v", report)
+	}
+}
+
 func TestNearAITimeoutIncludesVerification(t *testing.T) {
 	for _, callerDeadline := range []bool{false, true} {
 		t.Run(fmt.Sprint(callerDeadline), func(t *testing.T) {
@@ -574,7 +590,10 @@ func TestNearAITimeoutIncludesVerification(t *testing.T) {
 }
 
 func TestNearAIProductionOptionsDoNotBypassVerification(t *testing.T) {
-	s, _ := ResolveNearAISettings(nil, "")
+	s, err := ResolveNearAISettings(nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	opts := nearAIOptions(ClientConfig{URL: "https://cloud-api.near.ai/v1/chat/completions"}, s)
 	if !opts.E2EE || opts.DisableTLSBinding || opts.GatewayVerification.QuoteVerifier != nil || opts.ModelVerification.QuoteVerifier != nil || len(opts.ModelVerification.Policy.AcceptedTCBStatuses) != 2 {
 		t.Fatal("production verification defaults changed")

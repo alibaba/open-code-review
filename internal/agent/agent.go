@@ -1285,7 +1285,7 @@ func (a *Agent) finalizeManifest() error {
 		return nil
 	}
 	if err := llm.ClientVerificationError(a.args.LLMClient); err != nil {
-		_ = b.SetRunFailure(session.RunFailureVerification, "NEAR AI verification failed; see verification records")
+		_ = b.SetRunFailure(session.RunFailureVerification, "LLM verification failed; see verification records")
 	}
 	// Freeze the input/repository identity from this run's captured resolution and
 	// current selected set before the manifest closes. Done here (not in New) so

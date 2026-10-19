@@ -77,7 +77,8 @@ func (c FailureClass) valid() bool {
 // RunFailureClass classifies why the whole run stopped. It is a distinct
 // enumeration from the per-item FailureClass: a run never fails with "provider"
 // or "panic" (those are always attributed to a single item), and it adds
-// "internal" for scheduler/invariant failures. Its values are:
+// "internal" for scheduler/invariant failures and "verification" for failures
+// that invalidate the run's verification policy. Its values are:
 //
 //	input         — diff resolution / input freezing failed
 //	configuration — an in-run configuration failure after the builder existed
@@ -85,6 +86,7 @@ func (c FailureClass) valid() bool {
 //	cancelled     — the user actively cancelled the run
 //	budget        — an aggregate token/round budget pool was exhausted
 //	internal      — scheduler failure or an internal invariant was violated
+//	verification  — LLM attestation or response verification failed
 //	unknown       — confirmed run-level failure that cannot be classified
 type RunFailureClass string
 

@@ -24,8 +24,12 @@ type NearAISettings struct {
 	VerificationLevel string `json:"verification_level"`
 }
 
+func defaultNearAISettings() NearAISettings {
+	return NearAISettings{E2EE: true, VerificationLevel: "model-tee"}
+}
+
 func ResolveNearAISettings(e2ee *bool, level string) (NearAISettings, error) {
-	s := NearAISettings{E2EE: true, VerificationLevel: "model-tee"}
+	s := defaultNearAISettings()
 	if e2ee != nil {
 		s.E2EE = *e2ee
 	}

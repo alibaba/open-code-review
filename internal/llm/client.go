@@ -507,7 +507,7 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		AWSRegion:             ep.AWSRegion,
 	}
 	if ep.Provider == "nearai" {
-		settings, _ := ResolveNearAISettings(nil, "")
+		settings := defaultNearAISettings()
 		if ep.NearAI != nil {
 			settings = *ep.NearAI
 		}
