@@ -83,6 +83,19 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | Compare two sessions' findings: new, persisting, resolved, not reviewed. |
 | `ocr session export [id]` | — | Export one session as a self-contained HTML file. |
 | `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | Delete one saved review session. |
+| `ocr plugin install <url\|path>` | — | Install an OCR native plugin from a URL or local path. |
+| `ocr plugin list` | `ocr plugins list` | List installed plugins and their enabled status. |
+| `ocr plugin show <id>` | — | Inspect an installed plugin and its capabilities. |
+| `ocr plugin update <id>` | — | Refresh a plugin from source (`--source`, `--accept-permissions`). |
+| `ocr plugin enable <id>` / `disable <id>` | — | Enable or disable an installed plugin. |
+| `ocr plugin remove <id>` | — | Unregister and remove an installed plugin. |
+| `ocr plugin add <source>` | — | Declare and lock a plugin dependency for the project. |
+| `ocr plugin lock` | — | Resolve dependencies and update project lockfile. |
+| `ocr plugin sync --frozen` | — | Install exact locked project plugins without executing code. |
+| `ocr plugin trust` | — | Authorize locked project MCP servers (including remote endpoints) locally (`--revoke`). |
+| `ocr plugin project` | — | Inspect project plugin declaration and lockfile status. |
+| `ocr plugin preflight` | — | Verify locked project plugins and authorization (`--fingerprint`). |
+| `ocr mcp list` | — | Inspect all configured MCP servers without connecting. |
 | `ocr viewer` | — | Launch the local web UI for past review sessions (`localhost:5483`). |
 | `ocr version` | — | Print version, commit, platform, build date, and GitHub URL. |
 
@@ -781,6 +794,43 @@ ocr completion powershell > ocr.ps1
 ```
 
 Add a line to your PowerShell profile that dot-sources `ocr.ps1`.
+
+
+## `ocr plugin`
+
+Manage OCR native plugins that contribute review rules and MCP tools. For a comprehensive guide covering supported sources and architecture, see [Native OCR plugins](https://github.com/alibaba/open-code-review/blob/main/docs/native-plugins.md).
+
+### Global plugin management
+
+- `ocr plugin install <url|path>`: Install from a public GitHub URL, remote HTTPS archive (`.tar.gz`/`.zip`), or local directory/archive. Flags: `--enable` (enable after install), `--dry-run` (preview without saving), `--plugin <id>` (select plugin from multi-plugin source), `--json`.
+- `ocr plugin list`: List installed global plugins, version, and enabled status.
+- `ocr plugin show <id>`: Show plugin details, snapshot path, rules, and MCP servers (sensitive credentials redacted).
+- `ocr plugin update <id>`: Update from the recorded source, or use `--source <url|path>` to replace it. A successful update saves the new source and preserves the enabled state; failure keeps the previous package and source. MCP execution changes require `--accept-permissions`.
+- `ocr plugin enable <id>` / `disable <id>`: Enable or disable a plugin for subsequent reviews.
+- `ocr plugin remove <id>`: Unregister a plugin.
+
+### Project plugin management
+
+- `ocr plugin add <source>`: Declare a plugin dependency in `.opencodereview/plugins.json` and lock it.
+- `ocr plugin lock`: Resolve declared dependencies for the host platform and update `.opencodereview/plugins.lock.json`.
+- `ocr plugin sync --frozen`: Deterministically install exact locked snapshots without executing code (`--offline` supported).
+- `ocr plugin trust`: Authorize locked MCP servers (including remote endpoints) locally on this machine (`--revoke` to withdraw).
+- `ocr plugin project`: Inspect project declaration and lockfile status without downloading.
+- `ocr plugin preflight`: Verify locked plugin installation and execution authorization (`--fingerprint` prints deterministic identity hash).
+
+
+## `ocr mcp`
+
+Unified inspection of Model Context Protocol (MCP) servers across user config (`config.json`), global plugins, and project plugins.
+
+### `ocr mcp list`
+
+List all configured MCP servers and their authorization status without connecting or launching processes:
+
+```bash
+ocr mcp list
+ocr mcp list --repo /path/to/project --json
+```
 
 
 ## Tips & gotchas

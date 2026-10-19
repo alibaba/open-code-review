@@ -101,6 +101,11 @@ jobs:
       - name: Build
         run: go build -o ./opencodereview ./cmd/opencodereview
 
+      - name: Test project plugin policy integration
+        run: |
+          apt-get update && apt-get install -y nodejs
+          OCR_TEST_BINARY="$PWD/opencodereview" node scripts/github-actions/project-plugins.integration.test.js
+
       - name: Smoke test
         run: |
           ./opencodereview --version
@@ -150,6 +155,10 @@ jobs:
 
       - name: Build
         run: go build -o opencodereview.exe ./cmd/opencodereview
+
+      - name: Test project plugin policy integration
+        shell: bash
+        run: OCR_TEST_BINARY="$(cygpath -w "$PWD/opencodereview.exe")" npm run test:project-plugins-integration
 
       # Same assertions as the Linux smoke test, under git-bash so the script is
       # shared verbatim rather than reimplemented in PowerShell.

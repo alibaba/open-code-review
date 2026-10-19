@@ -89,11 +89,18 @@ MCP server はユーザー設定ファイル（`~/.opencodereview/config.json`�
 | `type` | string | | ローカルのサブプロセスなら `stdio`（デフォルト）、Streamable HTTP なら `remote`。 |
 | `command` | string | `stdio` では必須 | MCP server を起動する実行ファイル（`npx`、`uvx`、絶対パスなど）。 |
 | `args` | string 配列 | | `command` に渡す引数（`stdio` のみ）。 |
-| `url` | string | `remote` では必須 | HTTP または HTTPS の MCP エンドポイント。 |
+| `url` | string | `remote` では必須 | HTTPS MCP エンドポイント。HTTP は localhost またはループバック IP のみ。 |
 | `headers` | object | | HTTP ヘッダー名と文字列値（`remote` のみ）。値は接続時に OCR の環境から `$VAR` または `${VAR}` を展開します。空文字列に展開された値は、空のまま送信されたり無視されたりせず、**接続を失敗させます**。匿名アクセスでは省略します。 |
 | `tools` | string 配列 | | 登録するツール名の許可リスト。空 = server が提供する全ツールを登録。 |
 | `setup` | string | | server 起動前に一度実行される shell コマンド（`stdio` のみ、依存関係のインストールなど）。リポジトリのルートで実行、タイムアウト 5 分。 |
 | `env` | string 配列 | | サブプロセスへの追加の環境変数、`KEY=VALUE` 形式（`stdio` のみ）。 |
+
+リモート MCP URL には HTTPS が必要です。HTTP はローカル開発に限り、`localhost` または `127.0.0.1`、`[::1]` などのループバック IP リテラルで利用できます。プライベート LAN アドレスやワイルドカードの待受アドレスを使う HTTP エンドポイントは拒否されます。リダイレクトでは元のスキーム、ホスト、ポートを維持する必要があり、認証情報が HTTP への降格や別オリジンへの転送に伴って送信されることを防ぎます。プラグインのマニフェストと手動 MCP 設定からの接続の両方に適用されます。既存の非ループバック HTTP エンドポイントは HTTPS に移行してください。パッケージのダウンロードには、ローカルホストでも HTTPS が必要です。
+
+```bash
+ocr config set mcp_servers.dev.type remote
+ocr config set mcp_servers.dev.url http://127.0.0.1:8080/mcp
+```
 
 認証が必要なリモート server では、その server の指示に従って `headers` を設定して
 ください。`ocr config set` に渡す JSON に環境変数の参照が含まれる場合は、OCR が

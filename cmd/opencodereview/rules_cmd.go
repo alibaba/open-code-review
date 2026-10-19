@@ -70,6 +70,9 @@ func runRulesCheck(filePath string) error {
 	fmt.Printf("File: %s\n", filePath)
 	fmt.Printf("Source: %s\n", sourceLabel[detail.Source])
 	fmt.Printf("Pattern: %s\n", detail.Pattern)
+	for _, pack := range detail.PluginRules {
+		fmt.Printf("Plugin: %s@%s (%s, pattern %s)\n", pack.ID, pack.Version, pack.File, pack.Pattern)
+	}
 	if detail.SniffedAs != "" {
 		fmt.Printf("Note:    rule selected by file content (%s), not by path alone\n", detail.SniffedAs)
 	}

@@ -81,6 +81,19 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 2つのセッションの指摘を比較します：新規・継続・解決済み・未レビュー。 |
 | `ocr session export [id]` | — | 1つのセッションを自己完結型の HTML ファイルとしてエクスポートします。 |
 | `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | 保存済みのレビューセッションを1つ削除します。 |
+| `ocr plugin install <url\|path>` | — | URL またはローカルパスから OCR ネイティブプラグインをインストールします。 |
+| `ocr plugin list` | `ocr plugins list` | インストールされたプラグインと有効化状態を一覧表示します。 |
+| `ocr plugin show <id>` | — | インストールされたプラグインの詳細情報と機能を検査します。 |
+| `ocr plugin update <id>` | — | 元のソースからプラグインを更新します（`--source`, `--accept-permissions`）。 |
+| `ocr plugin enable <id>` / `disable <id>` | — | プラグインを有効化または無効化します。 |
+| `ocr plugin remove <id>` | — | プラグインの登録を解除して削除します。 |
+| `ocr plugin add <source>` | — | プロジェクトのプラグイン依存関係を宣言してロックします。 |
+| `ocr plugin lock` | — | 依存関係を解決し、プロジェクトのロックファイルを更新します。 |
+| `ocr plugin sync --frozen` | — | コードを実行せずにロックファイルから正確なプラグインをインストールします。 |
+| `ocr plugin trust` | — | ロックされた MCP サーバー（リモート接続を含む）にローカル実行権限を付与します（`--revoke`）。 |
+| `ocr plugin project` | — | プロジェクトのプラグイン宣言とロック状態を検査します。 |
+| `ocr plugin preflight` | — | プロジェクトのプラグイン検証と実行承認状態を確認します（`--fingerprint`）。 |
+| `ocr mcp list` | — | 接続せずに設定済みの全 MCP サーバーとその承認状態を検査します。 |
 | `ocr viewer` | — | 過去のレビューセッション用のローカル Web UI を起動します（`localhost:5483`）。 |
 | `ocr version` | — | バージョン、commit、プラットフォーム、ビルド日、GitHub URL を出力します。 |
 
@@ -730,6 +743,44 @@ ocr completion powershell > ocr.ps1
 ```
 
 その後、`ocr.ps1` を読み込む行を PowerShell プロファイルに追加してください。
+
+
+## `ocr plugin`
+
+レビュー規則や MCP ツールを提供する OCR ネイティブプラグインを管理します。サポートされているソースやアーキテクチャの詳細は、[ネイティブ OCR プラグイン](https://github.com/alibaba/open-code-review/blob/main/docs/i18n/native-plugins.ja-JP.md) を参照してください。
+
+### グローバルプラグイン管理
+
+- `ocr plugin install <url|path>`: パブリック GitHub URL、リモート HTTPS アーカイブ（`.tar.gz`/`.zip`）、またはローカルディレクトリ/アーカイブからインストールします。フラグ: `--enable`（インストール後に有効化）、`--dry-run`（保存せずに検査プレビュー）、`--plugin <id>`（複数パッケージから選択）、`--json`。
+- `ocr plugin list`: インストールされているグローバルプラグイン一覧と有効化状態を表示します。
+- `ocr plugin show <id>`: プラグインの詳細情報、スナップショットパス、規則、MCP サーバーを表示します（認証情報は自動的に除外）。
+- `ocr plugin update <id>`: 記録されたソースから更新します。`--source <url|path>` でソースを変更できます。成功時は新しいソースを保存して有効/無効状態を維持し、失敗時は以前のパッケージとソースを保持します。MCP 実行設定の変更には `--accept-permissions` が必要です。
+- `ocr plugin enable <id>` / `disable <id>`: プラグインを有効化または無効化します。
+- `ocr plugin remove <id>`: プラグインの登録を解除して削除します。
+
+### プロジェクトプラグイン管理
+
+- `ocr plugin add <source>`: `.opencodereview/plugins.json` に依存関係を宣言し、ロックファイルを更新します。
+- `ocr plugin lock`: 現在のプラットフォーム向けに依存関係を解決し、`.opencodereview/plugins.lock.json` を更新します。
+- `ocr plugin sync --frozen`: コードを実行することなく、ロックファイルで指定された厳密なスナップショットをインストールします（`--offline` 対応）。
+- `ocr plugin trust`: 現在のマシン上でロックされた MCP サーバー（リモート接続を含む）にローカル実行権限を付与します（`--revoke` で取り消し）。
+- `ocr plugin project`: プロジェクトの依存関係宣言とロック状態を読み取り専用で検査します。
+- `ocr plugin preflight`: レビュー実行前に依存関係のインストールと実行承認状態を検証します（`--fingerprint` で決定論的指紋を出力）。
+
+
+## `ocr mcp`
+
+ユーザー設定（`config.json`）、グローバルプラグイン、プロジェクトプラグインにまたがる MCP サーバーの統合インベントリを検査します。
+
+### `ocr mcp list`
+
+プロセスを起動したりネットワーク接続を確立することなく、設定されている全 MCP サーバーとその承認ステータスを一覧表示します：
+
+```bash
+ocr mcp list
+ocr mcp list --repo /path/to/project --json
+```
+
 
 ## ヒントと注意点
 

@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "id": "review-checklist",
+  "name": "Review Checklist",
+  "version": "1.0.0",
+  "description": "Additional review checks for error handling and resource ownership.",
+  "rules": ["rules.json"]
+}

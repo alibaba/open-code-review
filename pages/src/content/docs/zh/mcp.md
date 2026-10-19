@@ -82,11 +82,18 @@ MCP server 配置在用户配置文件（`~/.opencodereview/config.json`）的 `
 | `type` | string | | `stdio`（默认）表示本地子进程，`remote` 表示 Streamable HTTP。 |
 | `command` | string | `stdio` 必填 | 启动 MCP server 的可执行文件（如 `npx`、`uvx`、绝对路径）。 |
 | `args` | string 数组 | | 传给 `command` 的参数（仅 `stdio`）。 |
-| `url` | string | `remote` 必填 | HTTP 或 HTTPS 的 MCP 端点。 |
+| `url` | string | `remote` 必填 | HTTPS MCP 端点；HTTP 仅限 localhost 或回环 IP。 |
 | `headers` | object | | HTTP 请求头名称与字符串值（仅 `remote`）。值在连接时会从 OCR 的环境中展开 `$VAR` 或 `${VAR}`；若某个值展开为空，会**导致连接失败**，而不是发送空值或丢弃该请求头。匿名访问时省略。 |
 | `tools` | string 数组 | | 要注册的工具名白名单。为空 = 注册该 server 提供的全部工具。 |
 | `setup` | string | | server 启动前运行一次的 shell 命令（仅 `stdio`，如安装依赖）。在仓库根目录运行，超时 5 分钟。 |
 | `env` | string 数组 | | 额外的子进程环境变量，`KEY=VALUE` 形式（仅 `stdio`）。 |
+
+远程 MCP URL 必须使用 HTTPS。只有本机开发场景允许 HTTP，主机必须是 `localhost` 或回环 IP 字面量（如 `127.0.0.1`、`[::1]`）；使用局域网地址或通配监听地址的 HTTP 端点均不允许。重定向必须保持原来的协议、主机和端口，避免凭证随连接降级或转发至其他来源。这些检查同时适用于插件清单和手动 MCP 配置建立的连接。已有的非回环 HTTP 端点需要迁移到 HTTPS。插件包下载仍强制要求 HTTPS，包括本机地址。
+
+```bash
+ocr config set mcp_servers.dev.type remote
+ocr config set mcp_servers.dev.url http://127.0.0.1:8080/mcp
+```
 
 对于需要认证的远程 server，请按该 server 的说明配置 `headers`。当传给
 `ocr config set` 的 JSON 中含有环境变量引用时，请用单引号包裹，以免 shell 在 OCR

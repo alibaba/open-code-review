@@ -1,0 +1,8 @@
+{
+  "rules": [
+    {
+      "path": "**/*.{go,js,mjs,ts,tsx,py}",
+      "rule": "Report lost error causes, failed cleanup, and resource ownership mistakes only when the changed code exposes a concrete failure path. Verify the relevant caller before reporting. Include the triggering condition and user-visible consequence."
+    }
+  ]
+}

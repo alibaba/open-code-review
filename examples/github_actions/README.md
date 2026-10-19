@@ -40,6 +40,75 @@ The Action is an orchestrator: it installs the OCR CLI from npm at run time (`oc
 
 Take the commit SHA from the [releases page](https://github.com/alibaba/open-code-review/releases) and keep the `# vX.Y.Z` comment next to it so update tooling (Dependabot, Renovate) can track it. Every action referenced *inside* [`action.yml`](../../action.yml) is itself pinned to a full commit SHA (enforced by `scripts/verify-action-pins.sh` in CI), so the outer SHA transitively freezes the whole workflow — only the two coordinates above are yours to choose.
 
+## Project plugins in CI
+
+Commit `.opencodereview/plugins.json` and `plugins.lock.json` to the trusted base
+branch after resolving and inspecting the packages locally. Include a lock for
+the runner's OS/architecture. Enable frozen installation in the workflow:
+
+```yaml
+- uses: alibaba/open-code-review@<full-commit-sha>
+  with:
+    ocr_version: '<version-with-project-plugin-support>'
+    project_plugins: 'true'
+    allow_plugin_exec: 'false'
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+```
+
+| Input | Default | Effect |
+|-------|---------|--------|
+| `policy_sha` | PR base SHA | Full trusted commit SHA supplying rules and plugin configuration; also resolved from the PR for comment-triggered runs. |
+| `project_plugins` | `'false'` | Install the committed project lock with `sync --frozen`, then verify contents, compatibility, and execution authorization. |
+| `allow_plugin_exec` | `'false'` | Authorize the trusted lock's MCP contributions for this run. Requires `project_plugins: 'true'`. |
+
+Choose an Action and CLI release containing these commands; the version above
+is a placeholder, not a published release. Plugin preparation runs before model
+configuration in a fresh private OCR home. Missing/changed packages, invalid
+locks, or executable contributions without authorization stop the run. Personal
+global plugins and trust are not inherited.
+
+`policy_sha` must come from the trusted workflow, never the PR head. Rules and
+referenced rule files must be committed inside the checkout and unchanged under
+Git's checkout transformations. Keep repository-local package bytes stable, for
+example with `eol=lf`, to match the lock's content digests. The head is
+fetched separately for the review diff. Set `allow_plugin_exec: 'true'` only for
+packages you authorize to run with the runner's permissions and review secrets.
+Changes to the policy SHA, plugin fingerprint, or execution input invalidate
+incremental checkpoints and trigger a full review.
+
+See [project plugins](../../docs/native-plugins.md#project-plugins) for lock
+generation, local preflight, offline installation, and authorization.
+
+### Testing project plugin policy
+
+The CI workflow runs an integration test on Linux and Windows using real Git
+commits and the OCR binary built from the current source. Run it locally with
+Go, Node.js, Git and Bash installed:
+
+```sh
+go build -o ./dist/ocr ./cmd/opencodereview
+OCR_TEST_BINARY="$PWD/dist/ocr" npm run test:project-plugins-integration
+```
+
+In PowerShell (with Git Bash on `PATH`):
+
+```powershell
+go build -o ./dist/ocr.exe ./cmd/opencodereview
+$env:OCR_TEST_BINARY = (Resolve-Path ./dist/ocr.exe).Path
+npm run test:project-plugins-integration
+```
+
+The test executes the policy-resolution script and preparation shell step from
+`action.yml`. Simulated fork `pull_request`, `pull_request_target`, and
+`issue_comment` events select a trusted commit, then frozen installation and
+preflight verify its actual rules and MCP authorization. Different PR-head
+declarations, locks, and package contents must not become active. It also checks
+explicit policy overrides and rejects a mismatched checkout or changed policy
+files. GitHub event delivery and API responses are simulated; no live GitHub
+token, model credentials, or plugin server execution is needed.
+
 ## Running on a self-hosted runner
 
 The demo above runs on GitHub-hosted runners (`runs-on: ubuntu-latest`) and pulls the action from `alibaba/open-code-review@main`. If you prefer to run OCR on your own self-hosted runner — to reach private network resources, keep LLM traffic on-prem, or avoid runner-minute costs — the OCR project itself does exactly this in its own CI.
@@ -50,7 +119,7 @@ See [`.github/workflows/ocr-review.yml`](../../.github/workflows/ocr-review.yml)
 - Marking the workspace as a trusted git `safe.directory` when running inside a container (e.g. `git config --global --replace-all safe.directory '*'`) to avoid "dubious ownership" errors. Use `--replace-all` (not `--add`) so repeated runs across multiple self-hosted actions replace rather than accumulate entries in the global git config.
 - Pinning action inputs explicitly (`sticky_summary`, `incremental`, `upload_artifacts`, `llm_extra_body`, etc.).
 
-The action performs its own full `fetch-depth: 0` checkout of the PR internally, so no extra checkout step is needed for the review diff. Adapt the runner settings to your environment and secret layout.
+The action performs its own `fetch-depth: 0` checkout of the trusted policy commit and separately fetches the PR head, so no extra checkout step is needed for the review diff. Adapt the runner settings to your environment and secret layout.
 
 ## How It Works
 

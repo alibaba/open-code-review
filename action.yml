@@ -94,6 +94,26 @@ inputs:
   rule:
     description: Path to a custom rules JSON file passed to `ocr review --rule`.
     required: false
+  policy_sha:
+    description: >-
+      Full trusted commit SHA to check out for rules and plugin configuration.
+      Empty uses the PR's base SHA, including for comment-triggered runs.
+      Never derive this input from the untrusted PR head.
+    required: false
+    default: ''
+  project_plugins:
+    description: >-
+      Install and verify the trusted checkout's project plugin lock before review.
+      Requires an OCR build supporting plugin sync --frozen and preflight --fingerprint.
+      Missing declarations, unavailable artifacts, or mismatched locks fail the run.
+    required: false
+    default: 'false'
+  allow_plugin_exec:
+    description: >-
+      Authorize executable plugin contributions from the trusted project lock for
+      this run. Requires project_plugins: 'true'. Default false permits only data plugins.
+    required: false
+    default: 'false'
   effort:
     description: >-
       Review effort preset passed to `ocr review --effort`. One of: low,
@@ -407,6 +427,26 @@ runs:
         echo "PR head sha: $HEAD_SHA"
         echo "PR number: $PR_NUMBER"
 
+    - name: Resolve trusted policy
+      id: policy
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        OCR_POLICY_SHA: ${{ inputs.policy_sha }}
+        OCR_PR_NUMBER: ${{ env.PR_NUMBER }}
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const path = require('path');
+          const fs = require('fs');
+          const roots = [process.env.GITHUB_ACTION_PATH, process.env.GITHUB_WORKSPACE].filter(Boolean);
+          const relative = 'scripts/github-actions/project-plugins.js';
+          const root = roots.find(root => fs.existsSync(path.join(root, relative)));
+          if (!root) throw new Error('Cannot locate the trusted policy helper');
+          const { resolvePolicySHA, preserveActionScripts } = require(path.join(root, relative));
+          const sha = await resolvePolicySHA({ github, context, policySHA: process.env.OCR_POLICY_SHA, prNumber: process.env.OCR_PR_NUMBER });
+          core.setOutput('sha', sha);
+          core.setOutput('script_root', preserveActionScripts(root, process.env.RUNNER_TEMP));
+
     - name: Checkout base
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -415,6 +455,7 @@ runs:
         # fetched separately so they are resolvable without materializing
         # untrusted PR files into the working tree.
         fetch-depth: 0
+        ref: ${{ steps.policy.outputs.sha }}
 
     - name: Fetch PR head (fork-safe)
       if: env.HEAD_SHA != ''
@@ -442,8 +483,20 @@ runs:
         LLM_REASONING_EFFORT_INPUT: ${{ inputs.llm_reasoning_effort }}
         STREAM_PROGRESS_INPUT: ${{ inputs.stream_progress }}
         RESOLVE_OUTDATED_INPUT: ${{ inputs.resolve_outdated }}
+        PROJECT_PLUGINS_INPUT: ${{ inputs.project_plugins }}
+        ALLOW_PLUGIN_EXEC_INPUT: ${{ inputs.allow_plugin_exec }}
       shell: bash
       run: |
+        for value in "$PROJECT_PLUGINS_INPUT" "$ALLOW_PLUGIN_EXEC_INPUT"; do
+          case "$value" in
+            true|false) ;;
+            *) echo "::error::project_plugins and allow_plugin_exec must be 'true' or 'false'"; exit 1 ;;
+          esac
+        done
+        if [ "$ALLOW_PLUGIN_EXEC_INPUT" = "true" ] && [ "$PROJECT_PLUGINS_INPUT" != "true" ]; then
+          echo "::error::allow_plugin_exec requires project_plugins: 'true'"
+          exit 1
+        fi
         if [[ ! "$REVIEW_TASK_TIMEOUT" =~ ^[0-9]+$ ]]; then
           echo "::error::review_task_timeout must be a base-10 integer from 1 through 120 minutes"
           exit 1
@@ -540,6 +593,7 @@ runs:
       shell: bash
       env:
         OCR_VERSION: ${{ inputs.ocr_version }}
+        OCR_PROJECT_PLUGINS: ${{ inputs.project_plugins }}
       run: |
         npm install -g "@alibaba-group/open-code-review@${OCR_VERSION}"
         echo "OpenCodeReview installed:"
@@ -591,6 +645,27 @@ runs:
         VERSION_ACTUAL="${OCR_VERSION_LINE//$'\r'/}"
         echo "OCR_VERSION_ACTUAL=${VERSION_ACTUAL}" >> "$GITHUB_ENV"
 
+        if [ "$OCR_PROJECT_PLUGINS" = "true" ]; then
+          OCR_NATIVE_BINARY="$(node -e '
+            const binary = require(process.argv[1]).resolveNativeBinary();
+            if (!binary) throw new Error("Installed OCR native binary was not found");
+            process.stdout.write(binary.path);
+          ' "$(npm root -g)/@alibaba-group/open-code-review/scripts/platform.js")"
+          printf 'OCR_NATIVE_BINARY=%s\n' "$OCR_NATIVE_BINARY" >> "$GITHUB_ENV"
+        fi
+
+    - name: Prepare project plugins
+      if: inputs.project_plugins == 'true'
+      id: plugins
+      shell: bash
+      env:
+        OCR_POLICY_SHA: ${{ steps.policy.outputs.sha }}
+        OCR_ALLOW_PLUGIN_EXEC: ${{ inputs.allow_plugin_exec }}
+        OCR_RULE: ${{ inputs.rule }}
+        OCR_ACTION_SCRIPTS: ${{ steps.policy.outputs.script_root }}
+      run: |
+        node "$OCR_ACTION_SCRIPTS/scripts/github-actions/project-plugins.js"
+
     - name: Configure OCR
       env:
         OCR_LLM_URL: ${{ inputs.llm_url }}
@@ -600,8 +675,12 @@ runs:
         OCR_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
         OCR_EXTRA_BODY: ${{ inputs.llm_extra_body }}
         OCR_LANGUAGE: ${{ inputs.language }}
+        OCR_PROJECT_HOME: ${{ steps.plugins.outputs.home }}
       shell: bash
       run: |
+        if [ -n "${OCR_PROJECT_HOME:-}" ]; then
+          ocr() { env HOME="$OCR_PROJECT_HOME" USERPROFILE="$OCR_PROJECT_HOME" ocr "$@"; }
+        fi
         # An explicit protocol wins over llm_use_anthropic: the input first,
         # then OCR_LLM_PROTOCOL inherited from the job or step environment.
         # Read it before the derivation below reuses that variable name.
@@ -757,6 +836,11 @@ runs:
         OCR_FP_ROUTE_SEVERITY_BELOW: ${{ inputs.route_severity_below }}
         OCR_FP_ROUTE_CATEGORIES: ${{ inputs.route_categories }}
         OCR_FP_BACKGROUND: ${{ inputs.background }}
+        OCR_FP_POLICY_SHA: ${{ steps.policy.outputs.sha }}
+        OCR_FP_PROJECT_PLUGINS: ${{ inputs.project_plugins }}
+        OCR_FP_PLUGIN_IDENTITY: ${{ steps.plugins.outputs.fingerprint }}
+        OCR_FP_ALLOW_PLUGIN_EXEC: ${{ inputs.allow_plugin_exec }}
+        OCR_ACTION_SCRIPTS: ${{ steps.policy.outputs.script_root }}
         OCR_RULE_PATH: ${{ inputs.rule }}
         # `github.token` is always the "github-actions" app, so when the caller
         # did not override the token we know exactly which app wrote our summary
@@ -803,7 +887,7 @@ runs:
           try {
             // Same helper lookup as the posting step below.
             const REL = 'scripts/github-actions/post-review-comments.js';
-            const roots = [process.env.GITHUB_ACTION_PATH, process.env.GITHUB_WORKSPACE].filter(Boolean);
+            const roots = [process.env.OCR_ACTION_SCRIPTS, process.env.GITHUB_ACTION_PATH, process.env.GITHUB_WORKSPACE].filter(Boolean);
             const helper = roots.map(r => path.resolve(r, REL)).find(p => fs.existsSync(p));
             if (!helper) throw new Error(`Could not locate ${REL}; searched roots: ${roots.join(', ')}`);
             const { resolveCheckpointRange, readCheckpointComment } = require(helper);
@@ -866,7 +950,9 @@ runs:
             // JSON, not a joined string: it is length-delimited, so no input
             // value can shift a field boundary and make two different
             // configurations hash alike.
-            const fingerprint = !versionActual ? '' : crypto.createHash('sha256')
+            const pluginsUnverified = process.env.OCR_FP_PROJECT_PLUGINS === 'true' &&
+              !/^[0-9a-f]{64}$/.test(process.env.OCR_FP_PLUGIN_IDENTITY || '');
+            const fingerprint = !versionActual || pluginsUnverified ? '' : crypto.createHash('sha256')
               .update(JSON.stringify([
                 process.env.OCR_FP_LLM_URL,
                 process.env.OCR_FP_LLM_MODEL,
@@ -892,6 +978,10 @@ runs:
                 versionActual,
                 ruleDigest,
                 localRuleDigest,
+                process.env.OCR_FP_POLICY_SHA,
+                process.env.OCR_FP_PROJECT_PLUGINS,
+                process.env.OCR_FP_PLUGIN_IDENTITY,
+                process.env.OCR_FP_ALLOW_PLUGIN_EXEC,
               ].map((v) => v || '')))
               .digest('hex')
               .slice(0, 16);
@@ -963,8 +1053,12 @@ runs:
         # chose the full range, and never inherited from an earlier use of this
         # action in the same job.
         RANGE_FROM: ${{ steps.range.outputs.range_from }}
+        OCR_PROJECT_HOME: ${{ steps.plugins.outputs.home }}
       shell: bash
       run: |
+        if [ -n "${OCR_PROJECT_HOME:-}" ]; then
+          ocr() { env HOME="$OCR_PROJECT_HOME" USERPROFILE="$OCR_PROJECT_HOME" ocr "$@"; }
+        fi
         export OCR_LLM_TIMEOUT="${OCR_LLM_TIMEOUT:-300}"
         if [ -z "${REVIEW_TASK_TIMEOUT:-}" ]; then
           echo "::error::Validated review_task_timeout is missing; the Validate inputs step must complete first"
@@ -1042,6 +1136,7 @@ runs:
         OCR_RANGE_FROM: ${{ steps.range.outputs.range_from }}
         OCR_RANGE_TO: ${{ steps.range.outputs.range_to }}
         OCR_RANGE_REASON: ${{ steps.range.outputs.range_reason }}
+        OCR_ACTION_SCRIPTS: ${{ steps.policy.outputs.script_root }}
         OCR_BASE_REF: ${{ env.BASE_REF }}
         OCR_MERGE_BASE: ${{ env.MERGE_BASE }}
         # Resolved by "Resolve PR refs", which fails the job when no number is
@@ -1061,7 +1156,7 @@ runs:
           const fs = require('fs');
           const path = require('path');
           const REL = 'scripts/github-actions/post-review-comments.js';
-          const roots = [process.env.GITHUB_ACTION_PATH, process.env.GITHUB_WORKSPACE].filter(Boolean);
+          const roots = [process.env.OCR_ACTION_SCRIPTS, process.env.GITHUB_ACTION_PATH, process.env.GITHUB_WORKSPACE].filter(Boolean);
           const helper = roots.map(r => path.resolve(r, REL)).find(p => fs.existsSync(p));
           if (!helper) throw new Error(`Could not locate ${REL}; searched roots: ${roots.join(', ')}`);
           const { runPostReviewComments } = require(helper);
