@@ -110,13 +110,19 @@
     "webpack-cli": "^7.2.3"
   },
   "resolutions": {
-    "undici": ">=8.9.0",
+    "undici": "^8.10.2",
     "form-data": ">=4.0.6",
-    "js-yaml": ">=5.2.2",
+    "js-yaml": "^5.4.1",
     "minimatch": "^10.2.6",
     "@typescript-eslint/typescript-estree/minimatch": "^10.2.6",
-    "brace-expansion": ">=5.0.8 <6",
-    "fast-uri": ">=4.1.3",
+    "brace-expansion": "^5.0.12",
+    "fast-uri": "^4.1.5",
+    "handlebars": "^4.7.10",
+    "markdown-it": "^14.3.1",
+    "nanoid": "^3.3.18",
+    "postcss-selector-parser": "^7.1.6",
+    "qs": "^6.16.0",
+    "source-map-js": "^1.2.2",
     "postcss": ">=8.5.23",
     "linkify-it": ">=5.0.2 <6",
     "browserslist": ">=4.28.7 <5"

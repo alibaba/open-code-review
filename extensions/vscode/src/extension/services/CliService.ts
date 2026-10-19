@@ -145,13 +145,12 @@ export class CliService {
     return parseCliResult(stdout);
   }
 
-  async testConnection(options?: { configPath?: string; home?: string }): Promise<{ ok: boolean; message?: string }> {
+  async testConnection(options?: { home?: string }): Promise<{ ok: boolean; message?: string }> {
     const envExtra: Record<string, string> = {};
     if (options?.home) {
       envExtra.HOME = options.home;
       if (process.platform === 'win32') envExtra.USERPROFILE = options.home;
     }
-    if (options?.configPath) envExtra.OCR_CONFIG_PATH = options.configPath;
     const env = Object.keys(envExtra).length > 0 ? envExtra : undefined;
     try {
       await this.runRaw(['llm', 'test'], process.cwd(), () => {}, env);

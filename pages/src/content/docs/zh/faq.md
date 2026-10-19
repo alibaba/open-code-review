@@ -325,7 +325,7 @@ issue 已在[此](https://github.com/alibaba/open-code-review/issues)开放。
 
 ### 为什么二进制叫 `opencodereview` 而 CLI 是 `ocr`？
 
-release 中发布的静态二进制以项目命名（`opencodereview`）；NPM wrapper 为了便于使用而安装为 `ocr`。从源码构建得到 `dist/opencodereview`——复制为 `$PATH` 上的
+release 中发布的静态二进制以项目命名（`opencodereview`）；NPM wrapper 为了便于使用而安装为 `ocr`。从源码构建得到 `dist/opencodereview`（Windows 上是 `dist/opencodereview.exe`）——复制为 `$PATH` 上的
 `ocr`。
 
 ### 如何卸载？

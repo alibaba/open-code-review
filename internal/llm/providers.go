@@ -3,6 +3,8 @@
 
 package llm
 
+//go:generate go run ./gen -output ../../extensions/frontend/src/shared/providers.generated.ts -kotlin-output ../../extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/ProviderNames.generated.kt
+
 import (
 	"sort"
 	"strings"
@@ -25,16 +27,21 @@ type Provider struct {
 	BaseURL     string
 	AuthHeader  string // Anthropic-only; empty for OpenAI-compatible
 	EnvVar      string // environment variable name for API key fallback
-	Models      []string
 
 	// AmbientAuth marks a provider whose credentials come from the
 	// environment's own chain rather than an api_key — AWS SigV4, for
 	// instance. The resolver skips its api_key requirement for these, because
 	// there is no key to configure and demanding one would make the provider
 	// impossible to use.
-	AmbientAuth bool
+	AmbientAuth           bool
+	ExternalAuth          bool
+	RequiresStreaming     bool
+	RejectsSamplingParams bool
+	Models                []string
 }
 
+// After modifying the built-in provider registry, run `go generate ./internal/llm`
+// and commit both generated catalogs. See the root AGENTS.md for paths and verification.
 var registry = []Provider{
 	{
 		Name:        "anthropic",
@@ -81,6 +88,16 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:                  "chatgpt",
+		DisplayName:           "ChatGPT plan (Sign in with ChatGPT preview)",
+		Protocol:              ProtocolOpenAIResponses,
+		BaseURL:               "https://api.openai.com/v1",
+		ExternalAuth:          true,
+		RequiresStreaming:     true,
+		RejectsSamplingParams: true,
+		Models:                []string{},
+	},
+	{
 		Name:        "openai",
 		DisplayName: "OpenAI API",
 		Protocol:    ProtocolOpenAIChatCompletions,
@@ -102,6 +119,20 @@ var registry = []Provider{
 			"gpt-5.6-sol",
 			"gpt-5.6-terra",
 			"gpt-5.6-luna",
+		},
+	},
+	{
+		Name:        "openrouter",
+		DisplayName: "OpenRouter",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://openrouter.ai/api/v1",
+		EnvVar:      "OPENROUTER_API_KEY",
+		Models: []string{
+			"anthropic/claude-fable-5.1",
+			"openai/gpt-5.6-sol",
+			"anthropic/claude-opus-5",
+			"openai/gpt-6-astra",
+			"moonshotai/kimi-k3",
 		},
 	},
 	{

@@ -22,7 +22,7 @@ There are many ways to contribute beyond writing code:
 
 ### Prerequisites
 
-- [Go 1.25+](https://go.dev/dl/)
+- [Go 1.26.9+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -128,20 +128,38 @@ make build
 ### Project Structure
 
 ```
+├── acp/                  # ACP adapter for the CLI
+├── bin/                  # NPM wrapper
 ├── cmd/opencodereview/   # CLI entry point
+├── docs/                 # Localized README and CONTRIBUTING
+├── examples/             # CI/CD integration examples
+├── extensions/           # Editor extensions (VS Code and IDEA)
+├── imgs/                 # Logo, benchmark, and highlight images
 ├── internal/
 │   ├── agent/            # Review agent logic
+│   ├── chatgptauth/      # ChatGPT OAuth and credential management
 │   ├── config/           # Configuration management
+│   ├── delegate/         # Delegation-mode review specs (no LLM)
 │   ├── diff/             # Git diff parsing
-│   ├── llm/              # LLM API client (Anthropic & OpenAI)
+│   ├── gitcmd/           # Bounded git subprocess runner
+│   ├── llm/              # LLM API client (Anthropic, Bedrock & OpenAI)
+│   ├── llmloop/          # Shared per-subtask tool-use loop
+│   ├── mcp/              # MCP server client and tool adapter
 │   ├── model/            # Data models
+│   ├── pathutil/         # Canonical paths and containment checks
+│   ├── release/          # Release asset URL naming checks
+│   ├── scan/             # Full-file code review (ocr scan)
 │   ├── session/          # Review session management
-│   ├── tool/             # Built-in tools (file_read, code_search, etc.)
+│   ├── stdout/           # Swappable stdout writer
+│   ├── suggestdiff/      # Line-level diffs for suggestion rendering
 │   ├── telemetry/        # OpenTelemetry integration
+│   ├── tool/             # Built-in tools (file_read, code_search, etc.)
 │   └── viewer/           # WebUI session viewer
-├── pages/                # WebUI frontend
-├── scripts/              # Build & install scripts
-└── bin/                  # NPM wrapper
+├── npm/                  # Per-platform optional binary packages
+├── pages/                # Landing page
+├── plugins/              # Coding agent plugins
+├── scripts/              # Install, publish, and check scripts
+└── skills/               # Agent skill manifests
 ```
 
 ## AI-Assisted Development

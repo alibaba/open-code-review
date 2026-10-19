@@ -324,6 +324,12 @@ func TestPagerCSS_StaysHiddenUntilScripted(t *testing.T) {
 			"the pager's own display: flex is an author rule, so it outranks the UA [hidden] rule " +
 			"and the control would paint before the page script reveals it, and stay up with scripting off")
 	}
+	rowGuard := regexp.MustCompile(`\.file-list li\[hidden\] \{\s*display: none;`)
+	if !rowGuard.Match(css) {
+		t.Error("style.css lost the .file-list li[hidden] { display: none } guard: " +
+			"the row's display: flex is an author rule, so it outranks the UA [hidden] rule " +
+			"and the Files Reviewed list would paint every page's rows at once")
+	}
 }
 
 func TestSurfaceCSS_LightSurfaceIsWhite(t *testing.T) {
@@ -1117,13 +1123,18 @@ func TestResponsiveCSS_MetaOverrideComesAfterBase(t *testing.T) {
 	}
 	text := string(css)
 	base := strings.Index(text, ".session-page .meta span {\n    white-space: nowrap;\n}")
-	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;\n    }")
-	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;\n    }")
+	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;")
+	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;")
 	if base == -1 || normal == -1 || truncate == -1 {
 		t.Fatal("style.css is missing the session meta rules or their 768px overrides")
 	}
 	if normal < base || truncate < base {
 		t.Error("the 768px session meta overrides must come after the base " +
 			".session-page .meta rules: equal specificity means source order decides")
+	}
+
+	narrow := regexp.MustCompile(`(?s)@media \(max-width: 768px\) \{.*?\.session-page \.meta span \{.*?white-space: normal;.*?flex-wrap: wrap;.*?overflow-wrap: anywhere;.*?\}.*?\.session-page \.meta \.meta-truncate \{.*?max-width: 100%;.*?overflow: visible;.*?text-overflow: clip;.*?\}`)
+	if !narrow.MatchString(text) {
+		t.Fatal("narrow-screen session metadata must wrap long values without clipping")
 	}
 }
