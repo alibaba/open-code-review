@@ -120,7 +120,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock
 
-`bedrock` использует тот же Messages API, что и `anthropic`, но запросы
+По умолчанию `bedrock` использует протокол `anthropic-bedrock` и тот же Messages API, что и `anthropic`, но запросы
 подписываются по SigV4 из стандартной цепочки учётных данных AWS вместо
 передачи API-ключа, а хост определяется регионом. Задавать `api_key` не нужно,
 и он не принимается как замена подписи:
@@ -131,6 +131,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+Если для подключения к OpenAI-совместимому шлюзу вы задаете `providers.bedrock.protocol` значение `openai`, укажите адрес шлюза в `providers.bedrock.url`, а его API-ключ — через `providers.bedrock.api_key` или `providers.bedrock.api_key_cmd`. При выборе другой модели в `ocr config provider` сохраненный API-ключ остается на месте.
 
 | Поле | Значение |
 |---|---|
@@ -149,8 +151,8 @@ ocr config set providers.bedrock.aws_profile example-profile
 `aws bedrock list-inference-profiles --region <region>`, чтобы увидеть, что
 доступно в аккаунте; суффикс версии вроде `-v1:0` недопустим для новых семейств.
 
-`ocr llm test` показывает регион и профиль вместо URL, потому что у bedrock нет
-настроенного URL — хост определяется регионом:
+При использовании протокола по умолчанию `anthropic-bedrock` команда `ocr llm test`
+показывает регион и профиль вместо URL. Хост определяется регионом:
 
 ```
 Source: provider:bedrock
@@ -166,6 +168,15 @@ Model:  claude-sonnet-5
 принимается и молча игнорируется.
 
 ### Пользовательские провайдеры
+
+Поддерживаются имена вида `mimo-v2.6-flash` и `foo.api_key`. Прежде чем
+задавать поля нового имени с точками, создайте и выберите его командой
+`ocr config set provider <name>`; она меняет активного провайдера.
+Существующие записи можно редактировать без выбора через
+`providers.<name>.<field>` или `custom_providers.<name>.<field>`.
+Имя не должно начинаться или заканчиваться точкой, содержать несколько
+точек подряд, пустые части или части только из пробелов. Имена без точек
+по-прежнему создаются неявно при настройке полей.
 
 Любое имя провайдера, которого нет в таблице выше, считается
 пользовательским. Для него необходимо задать как минимум `url` и `protocol`

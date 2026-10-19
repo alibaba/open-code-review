@@ -118,20 +118,38 @@ make build
 ### Структура проекта
 
 ```
+├── acp/                  # ACP-адаптер для CLI
+├── bin/                  # NPM-обёртка
 ├── cmd/opencodereview/   # Точка входа CLI
+├── docs/                 # Локализованные README и CONTRIBUTING
+├── examples/             # Примеры интеграции с CI/CD
+├── extensions/           # Расширения редактора (VS Code и IDEA)
+├── imgs/                 # Изображения логотипа, бенчмарков и обзора
 ├── internal/
 │   ├── agent/            # Логика ревью-агента
+│   ├── chatgptauth/      # OAuth и управление учётными данными ChatGPT
 │   ├── config/           # Управление конфигурацией
+│   ├── delegate/         # Спеки ревью для режима делегирования (без LLM)
 │   ├── diff/             # Разбор git-диффов
-│   ├── llm/              # Клиент LLM API (Anthropic и OpenAI)
+│   ├── gitcmd/           # Ограниченный запуск git-подпроцессов
+│   ├── llm/              # Клиент LLM API (Anthropic, Bedrock и OpenAI)
+│   ├── llmloop/          # Общий цикл вызова инструментов для подзадач
+│   ├── mcp/              # Клиент MCP-сервера и адаптер инструментов
 │   ├── model/            # Модели данных
+│   ├── pathutil/         # Канонические пути и проверка вложенности
+│   ├── release/          # Проверки имён URL артефактов релиза
+│   ├── scan/             # Пофайловое ревью кода (ocr scan)
 │   ├── session/          # Управление сессиями ревью
-│   ├── tool/             # Встроенные инструменты (file_read, code_search и др.)
+│   ├── stdout/           # Подменяемый writer для stdout
+│   ├── suggestdiff/      # Построчные diff для отрисовки предложений
 │   ├── telemetry/        # Интеграция с OpenTelemetry
+│   ├── tool/             # Встроенные инструменты (file_read, code_search и др.)
 │   └── viewer/           # WebUI-просмотрщик сессий
-├── pages/                # Фронтенд WebUI
-├── scripts/              # Скрипты сборки и установки
-└── bin/                  # NPM-обёртка
+├── npm/                  # Опциональные бинарные пакеты по платформам
+├── pages/                # Лендинг
+├── plugins/              # Плагины для coding-агентов
+├── scripts/              # Скрипты установки, публикации и проверок
+└── skills/               # Манифесты agent skill
 ```
 
 ## Разработка с помощью ИИ

@@ -109,7 +109,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock
 
-`bedrock` 使用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
+`bedrock` 默认使用 `anthropic-bedrock` 协议，调用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
 用标准 AWS 凭证链做 SigV4 签名，主机由区域决定。没有 `api_key` 需要设置，也不
 接受用它替代签名：
 
@@ -119,6 +119,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+如果将 `providers.bedrock.protocol` 设为 `openai` 来连接 OpenAI 兼容网关，请在 `providers.bedrock.url` 中配置网关地址，并通过 `providers.bedrock.api_key` 或 `providers.bedrock.api_key_cmd` 提供网关的 API key。在 `ocr config provider` 中切换模型会保留已保存的 API key。
 
 | 字段 | 含义 |
 |---|---|
@@ -134,7 +136,7 @@ ocr config set providers.bedrock.aws_profile example-profile
 会被接受。运行 `aws bedrock list-inference-profiles --region <region>` 可以查看
 账号提供了哪些；注意新系列不接受 `-v1:0` 这类版本后缀。
 
-bedrock 没有配置的 URL——主机由区域决定——所以 `ocr llm test` 显示区域和 profile
+使用默认的 `anthropic-bedrock` 协议时，主机由区域决定，`ocr llm test` 显示区域和 profile
 而不是 URL：
 
 ```
@@ -150,6 +152,12 @@ URL 加一个 token，没有地方放区域或 profile，而 bedrock 这两个�
 会被明确拒绝，而不是接受后悄悄忽略。
 
 ### 自定义 provider
+
+支持 `mimo-v2.6-flash` 和 `foo.api_key` 这样的名称。为新的含点名称设置字段前，
+请先运行 `ocr config set provider <name>` 创建并选中它；这会更改当前 provider。
+已有的含点条目无需选中即可通过 `providers.<name>.<field>` 或
+`custom_providers.<name>.<field>` 编辑。名称不能以点开头或结尾、包含连续的点，
+也不能包含空白或仅由空白字符组成的分段。不含点的名称仍支持隐式创建。
 
 任何不在上表中的 provider 名都视为自定义，至少要提供 `url` 和 `protocol`
 （`protocol` 取 `anthropic`、`openai`、`openai-responses` 或

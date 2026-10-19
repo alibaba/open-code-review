@@ -19,20 +19,27 @@ import (
 var ErrNotFound = errors.New("no ChatGPT registration found; run ocr auth login --provider chatgpt")
 
 type Auth struct {
-	Revision          uint64    `json:"revision,omitempty"`
-	ClientID          string    `json:"client_id"`
-	Issuer            string    `json:"issuer"`
-	Subject           string    `json:"subject"`
-	Email             string    `json:"email,omitempty"`
-	AccessToken       string    `json:"access_token,omitempty"`
-	RefreshToken      string    `json:"refresh_token,omitempty"`
-	IDToken           string    `json:"id_token,omitempty"`
-	TokenType         string    `json:"token_type,omitempty"`
-	Scopes            []string  `json:"scopes,omitempty"`
-	ExpiresAt         time.Time `json:"expires_at"`
-	EarliestRefreshAt time.Time `json:"earliest_refresh_at,omitempty"`
-	Welcomed          bool      `json:"welcomed,omitempty"`
-	Nonce             string    `json:"nonce,omitempty"`
+	Revision          uint64          `json:"revision,omitempty"`
+	ClientID          string          `json:"client_id"`
+	Issuer            string          `json:"issuer"`
+	Subject           string          `json:"subject"`
+	Email             string          `json:"email,omitempty"`
+	AccessToken       string          `json:"access_token,omitempty"`
+	RefreshToken      string          `json:"refresh_token,omitempty"`
+	IDToken           string          `json:"id_token,omitempty"`
+	TokenType         string          `json:"token_type,omitempty"`
+	Scopes            []string        `json:"scopes,omitempty"`
+	ExpiresAt         time.Time       `json:"expires_at"`
+	EarliestRefreshAt time.Time       `json:"earliest_refresh_at,omitempty"`
+	Welcomed          bool            `json:"welcomed,omitempty"`
+	Nonce             string          `json:"nonce,omitempty"`
+	PendingRefresh    *pendingRefresh `json:"pending_refresh,omitempty"`
+}
+
+type pendingRefresh struct {
+	Response      tokenResponse `json:"response"`
+	ReceivedAt    time.Time     `json:"received_at"`
+	IdentityError string        `json:"identity_error,omitempty"`
 }
 
 func (a Auth) PlanEnabled() bool {
@@ -53,6 +60,7 @@ func (a *Auth) clear() {
 	a.Scopes = nil
 	a.ExpiresAt = time.Time{}
 	a.EarliestRefreshAt = time.Time{}
+	a.PendingRefresh = nil
 }
 
 type Database struct {

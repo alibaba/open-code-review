@@ -310,7 +310,12 @@ func (a *responseStreamAccumulator) add(event responses.ResponseStreamEventUnion
 			if err := json.Unmarshal([]byte(event.Response.RawJSON()), &envelope); err != nil {
 				return err
 			}
-			return &responseStreamEventError{code: string(event.Response.Error.Code), param: envelope.Error.Param, message: fmt.Sprintf("%s: %s %s; Manage usage: %s", event.Type, event.Response.Error.Message, envelope.Incomplete, chatgptauth.UsageURL)}
+			message := fmt.Sprintf("%s: %s", event.Type, event.Response.Error.Message)
+			if len(envelope.Incomplete) > 0 && string(envelope.Incomplete) != "null" {
+				message += " " + string(envelope.Incomplete)
+			}
+			message += "; Manage usage: " + chatgptauth.UsageURL
+			return &responseStreamEventError{code: string(event.Response.Error.Code), param: envelope.Error.Param, message: message}
 		}
 		a.terminalType = event.Type
 		response := event.Response

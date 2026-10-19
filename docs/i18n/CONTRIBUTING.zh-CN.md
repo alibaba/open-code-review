@@ -118,20 +118,38 @@ make build
 ### 项目结构
 
 ```
+├── acp/                  # CLI 的 ACP 适配器
+├── bin/                  # NPM 包装器
 ├── cmd/opencodereview/   # CLI 入口
+├── docs/                 # 本地化的 README 与 CONTRIBUTING
+├── examples/             # CI/CD 集成示例
+├── extensions/           # 编辑器扩展（VS Code 与 IDEA）
+├── imgs/                 # 徽标、基准与亮点图片
 ├── internal/
 │   ├── agent/            # 评审 Agent 逻辑
+│   ├── chatgptauth/      # ChatGPT OAuth 与凭证管理
 │   ├── config/           # 配置管理
+│   ├── delegate/         # 委托模式评审规格（不调用 LLM）
 │   ├── diff/             # Git diff 解析
-│   ├── llm/              # LLM API 客户端（Anthropic & OpenAI）
+│   ├── gitcmd/           # 有界并发的 git 子进程运行器
+│   ├── llm/              # LLM API 客户端（Anthropic、Bedrock 与 OpenAI）
+│   ├── llmloop/          # 共享的子任务工具调用循环
+│   ├── mcp/              # MCP 服务客户端与工具适配器
 │   ├── model/            # 数据模型
+│   ├── pathutil/         # 规范路径与包含关系检查
+│   ├── release/          # 发布产物 URL 命名检查
+│   ├── scan/             # 全文件代码评审（ocr scan）
 │   ├── session/          # 评审会话管理
-│   ├── tool/             # 内置工具（file_read, code_search 等）
+│   ├── stdout/           # 可切换的 stdout 写入器
+│   ├── suggestdiff/      # 建议渲染用的行级 diff
 │   ├── telemetry/        # OpenTelemetry 集成
+│   ├── tool/             # 内置工具（file_read, code_search 等）
 │   └── viewer/           # WebUI 会话查看器
-├── pages/                # WebUI 前端
-├── scripts/              # 构建和安装脚本
-└── bin/                  # NPM 包装器
+├── npm/                  # 各平台可选二进制包
+├── pages/                # 落地页
+├── plugins/              # 编程 Agent 插件
+├── scripts/              # 安装、发布与检查脚本
+└── skills/               # Agent skill 清单
 ```
 
 ## AI 参与辅助开发
