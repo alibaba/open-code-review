@@ -12,9 +12,13 @@ import (
 )
 
 func openBrowserURL(ctx context.Context, target string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	cmd := "xdg-open"
 	if runtime.GOOS == "darwin" {
 		cmd = "open"
 	}
-	return exec.CommandContext(ctx, cmd, target).Run()
+	// A browser may outlive the login; cancelling the callback must not close it.
+	return exec.Command(cmd, target).Run()
 }

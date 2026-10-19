@@ -112,7 +112,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock
 
-`bedrock` は `anthropic` と同じ Messages API を話しますが、API key を持たせる
+`bedrock` は既定の `anthropic-bedrock` プロトコルで `anthropic` と同じ Messages API を使いますが、API key を持たせる
 代わりに標準の AWS 認証情報チェーンから SigV4 署名を行い、ホストはリージョンが
 決めます。設定すべき `api_key` はなく、署名の代わりとして受け付けることも
 ありません。
@@ -123,6 +123,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+OpenAI 互換ゲートウェイに接続するために `providers.bedrock.protocol` を `openai` に設定する場合は、`providers.bedrock.url` にゲートウェイの URL を設定し、`providers.bedrock.api_key` または `providers.bedrock.api_key_cmd` でその API キーを指定してください。`ocr config provider` でモデルを変更しても、保存済みの API キーは保持されます。
 
 | フィールド | 意味 |
 |---|---|
@@ -140,7 +142,7 @@ ocr config set providers.bedrock.aws_profile example-profile
 そのアカウントが提供するものを確認できます。なお新しいファミリーでは
 `-v1:0` のようなバージョンサフィックスは無効です。
 
-bedrock には設定された URL がなく、ホストはリージョンが決めるため、
+既定の `anthropic-bedrock` プロトコルではホストがリージョンによって決まるため、
 `ocr llm test` は URL の代わりにリージョンとプロファイルを表示します。
 
 ```
@@ -157,6 +159,13 @@ Model:  claude-sonnet-5
 無視するのではなく、明示的に拒否されます。
 
 ### カスタム provider
+
+`mimo-v2.6-flash` や `foo.api_key` のような名前を使用できます。ドットを含む新しい
+名前のフィールドを設定する前に、`ocr config set provider <name>` で作成して選択してください。
+この操作は現在の provider を変更します。既存のエントリは選択せずに
+`providers.<name>.<field>` または `custom_providers.<name>.<field>` で編集できます。
+名前の先頭・末尾のドット、連続したドット、空または空白のみの区切り部分は使用できません。
+ドットを含まない名前は引き続きフィールドの設定時に自動作成されます。
 
 上記の表にない provider 名はすべてカスタムとみなされ、少なくとも `url` と
 `protocol` を指定する必要があります（`protocol` は `anthropic`、`openai`、
