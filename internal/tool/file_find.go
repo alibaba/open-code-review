@@ -105,11 +105,13 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 	var output []byte
 	var err error
 
+	// core.quotepath=false reports non-ASCII paths literally instead of as
+	// quoted octal escapes, which file_find cannot match and file_read cannot open.
 	var args []string
 	if ref := p.FileReader.Ref; ref != "" {
-		args = []string{"ls-tree", "-r", "--name-only", "--end-of-options", ref}
+		args = []string{"-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "--end-of-options", ref}
 	} else {
-		args = []string{"ls-files", "--cached", "--others", "--exclude-standard"}
+		args = []string{"-c", "core.quotepath=false", "ls-files", "--cached", "--others", "--exclude-standard"}
 	}
 
 	if p.FileReader.Runner != nil {

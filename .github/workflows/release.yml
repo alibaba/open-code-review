@@ -3,16 +3,103 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # Exchanges a GitHub OIDC token for an npm publish token for every package
+  # without publishing anything, so a trusted publisher misconfiguration is
+  # caught before a tag is cut. Manual runs stop here.
+  verify-trusted-publishing:
+    if: github.event_name == 'workflow_dispatch'
+    # npm trusted publishing rejects self-hosted runners, so this job and
+    # npm-publish are cloud-hosted while the rest of the workflow is not.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: node:24
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+
+      - name: Install jq
+        run: apt-get update && apt-get install -y jq
+
+      - name: Exchange OIDC token for every package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "::error::OIDC is unavailable. The job needs 'id-token: write'."
+            exit 1
+          fi
+
+          REGISTRY_HOST=registry.npmjs.org
+          ID_TOKEN=$(curl -sSf \
+            -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            -H 'Accept: application/json' \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:${REGISTRY_HOST}" | jq -r '.value')
+
+          if [ -z "$ID_TOKEN" ] || [ "$ID_TOKEN" = "null" ]; then
+            echo "::error::Failed to obtain a GitHub OIDC token."
+            exit 1
+          fi
+
+          echo "Presenting claims:"
+          printf '%s' "$ID_TOKEN" | node -e '
+            let raw = ""
+            process.stdin.on("data", c => raw += c).on("end", () => {
+              const p = JSON.parse(Buffer.from(raw.trim().split(".")[1], "base64url"))
+              console.log(JSON.stringify({
+                repository: p.repository,
+                workflow_ref: p.workflow_ref,
+                environment: p.environment,
+                repository_visibility: p.repository_visibility,
+              }, null, 2))
+            })'
+          echo
+
+          # The main package plus every platform package it pulls in.
+          PACKAGES=$(jq -r '[.name] + (.optionalDependencies // {} | keys) | .[]' package.json)
+
+          failed=0
+          for pkg in $PACKAGES; do
+            escaped=$(printf '%s' "$pkg" | sed 's|/|%2f|')
+            body=$(curl -s -o exchange.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer ${ID_TOKEN}" \
+              -H 'Accept: application/json' \
+              "https://${REGISTRY_HOST}/-/npm/v1/oidc/token/exchange/package/${escaped}")
+
+            if [ "$body" = "201" ] && jq -e '.token | strings | select(length > 0)' exchange.json > /dev/null; then
+              echo "OK       ${pkg}"
+            else
+              failed=1
+              echo "FAILED   ${pkg} (HTTP ${body}): $(jq -r '.message // .error // "unknown error"' exchange.json 2>/dev/null)"
+            fi
+            rm -f exchange.json
+          done
+
+          echo
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::At least one package is not configured for trusted publishing from this workflow."
+            exit 1
+          fi
+          echo "All packages accept trusted publishing from this workflow."
+
   build:
+    if: github.event_name == 'push'
     runs-on: self-hosted
     timeout-minutes: 15
     container:
-      image: golang:1.26.6
+      image: golang:1.26.9
       options: --cpus=2
     strategy:
       matrix:
@@ -161,12 +248,15 @@ jobs:
 
   npm-publish:
     needs: release
-    runs-on: self-hosted
+    # Must stay cloud-hosted: npm refuses an OIDC exchange from a self-hosted
+    # runner. The heavy build matrix above is unaffected.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
       image: node:24
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -176,15 +266,23 @@ jobs:
       - name: Install jq
         run: apt-get update && apt-get install -y jq
 
+      # Keep a tested npm baseline without downgrading a newer bundled version.
+      - name: Ensure npm supports trusted publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQUIRED=11.15.0
+          CURRENT=$(npm --version)
+          if [ "$(printf '%s\n%s\n' "$REQUIRED" "$CURRENT" | sort -V | head -1)" != "$REQUIRED" ]; then
+            echo "npm ${CURRENT} is below the tested baseline ${REQUIRED}, upgrading"
+            npm install -g "npm@${REQUIRED}"
+          fi
+          npm --version
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: binary-*
           merge-multiple: true
-
-      - name: Configure npm registry
-        run: echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish platform packages
         run: |
@@ -214,12 +312,10 @@ jobs:
             if [ "$already" = "$VERSION" ]; then
               echo "Skip: ${pkg_name}@${VERSION} already published"
             else
-              npm publish "$pkg_dir" --access public
+              npm publish "$pkg_dir" --access public --provenance
               echo "Published: ${pkg_name}@${VERSION}"
             fi
           done
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Inject version and optionalDependencies
         run: |
@@ -237,8 +333,6 @@ jobs:
           if [ "$already" = "$VERSION" ]; then
             echo "Skip: ${pkg_name}@${VERSION} already published"
           else
-            npm publish --access public
+            npm publish --access public --provenance
             echo "Published: ${pkg_name}@${VERSION}"
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

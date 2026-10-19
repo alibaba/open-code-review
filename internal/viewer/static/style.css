@@ -609,6 +609,11 @@ h3 {
     gap: 0.5rem;
     transition: background var(--transition);
 }
+/* The pager toggles the hidden attribute on rows; the display: flex above is an
+   author rule that outranks the UA [hidden] rule, so rows need their own guard. */
+.file-list li[hidden] {
+    display: none;
+}
 .file-list-icon {
     display: inline-flex;
     flex-shrink: 0;

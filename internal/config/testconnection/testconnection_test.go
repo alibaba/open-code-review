@@ -93,3 +93,28 @@ func TestApplyLanguage_EmptyLang(t *testing.T) {
 		t.Errorf("content = %q, want %q", conv.Messages[0].Content, expected)
 	}
 }
+
+// TestLoadDefault_Tool guards the tool-call round trip added for #1357: the
+// connectivity test only exercises the request shape that actually breaks if it
+// offers a tool, so the embedded task must define one.
+func TestLoadDefault_Tool(t *testing.T) {
+	conv, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+	if conv.Tool == nil {
+		t.Fatal("expected the test task to define a tool")
+	}
+	if conv.Tool.Name == "" {
+		t.Error("tool name must not be empty")
+	}
+	if conv.Tool.Result == "" {
+		t.Error("tool must define the canned result sent back on the second turn")
+	}
+	if conv.Tool.Parameters == nil {
+		t.Fatal("tool must define a JSON Schema parameters object")
+	}
+	if got := conv.Tool.Parameters["type"]; got != "object" {
+		t.Errorf("tool parameters type = %v, want object", got)
+	}
+}
