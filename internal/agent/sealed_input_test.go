@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -107,4 +108,50 @@ func runPathIdentity(t *testing.T, args Args) session.RunIdentity {
 	}
 	a.diffs, _ = summarizeSelection(a.selectFiles(a.diffs))
 	return a.runIdentity()
+}
+
+func TestResolvedInputKeepsDiffContentAndManifestConsistent(t *testing.T) {
+	for _, commitMode := range []bool{false, true} {
+		name := "range"
+		if commitMode {
+			name = "commit"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := sealRepo(t)
+			args := Args{RepoDir: dir, From: "main", To: "feature"}
+			if commitMode {
+				args = Args{RepoDir: dir, Commit: "feature"}
+			}
+			resolution, err := ResolveInput(context.Background(), args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantBase := resolution.ResolvedBase
+			if commitMode {
+				out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD^").Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantBase = strings.TrimSpace(string(out))
+			}
+			args.SealedInput = resolution
+			commitIn(t, dir, "main.go", "package main\n\nfunc changed() {}\n", "move feature")
+			a := &Agent{args: args}
+			if err := a.loadDiffs(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if len(a.diffs) != 1 {
+				t.Fatalf("diffs = %d, want 1", len(a.diffs))
+			}
+			if got := a.diffs[0].NewFileContent; got != "package main\n\nfunc main() {}\n" {
+				t.Fatalf("full content followed moving ref: %q", got)
+			}
+			if !strings.Contains(a.diffs[0].Diff, "+func main() {}") || strings.Contains(a.diffs[0].Diff, "changed") {
+				t.Fatalf("diff followed moving ref: %s", a.diffs[0].Diff)
+			}
+			if got := a.inputResolution; got.ResolvedHead != resolution.ResolvedHead || got.ResolvedBase != wantBase || got.ExactRange != wantBase+".."+resolution.ResolvedHead {
+				t.Fatalf("manifest input = %+v, want %s..%s", got, wantBase, resolution.ResolvedHead)
+			}
+		})
+	}
 }
