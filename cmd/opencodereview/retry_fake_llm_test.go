@@ -294,7 +294,7 @@ func startFakeLLM(t *testing.T, srv *fakeLLM) {
 // an attempt and was never finalized, which is exactly the invariant violation
 // Freeze refuses to publish. It is the only way to reach the construction-error
 // branch from the outside: every production path finalizes on every exit.
-func poisonedRetryCollector() *llm.RetryCollector {
+func poisonedRetryCollector(_ time.Duration) *llm.RetryCollector {
 	c := llm.NewRetryCollector()
 	m := llm.RequestMeta{Model: "claude-test", FilePath: "ghost.go", TaskType: "main_task", RequestNo: 1}
 	base := retryTestFixedTime

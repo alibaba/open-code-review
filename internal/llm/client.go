@@ -770,11 +770,17 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 // error, and ReviseLastAttempt's precondition makes this a no-op.
 func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.ChatCompletionNewParams, opts ...openaiopt.RequestOption) (*ChatResponse, error) {
 	resp, err := c.completionsStreamingInner(ctx, params, opts...)
+	// The stream is over here, and that is the only moment the request's real
+	// end is knowable: the observer saw the response headers and nothing after
+	// them, so without this the wall clock of a streamed request would be the
+	// few milliseconds it took to open the stream.
+	endedAt := time.Now()
 	if err != nil {
 		class, phase := classifyStreamError(err)
-		reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
+		reviseAttemptAt(ctx, c.cfg.retryCollector, class, phase, endedAt)
 		return nil, err
 	}
+	extendLastAttempt(ctx, c.cfg.retryCollector, endedAt)
 	return resp, nil
 }
 
