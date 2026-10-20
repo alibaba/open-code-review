@@ -167,7 +167,10 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 		// extra_body.stream setting could conflict with that selection or make an
 		// ordinary Responses.New call receive SSE, so it is always dropped here.
 		if k == "stream" {
-			continue
+			stream, isBool := v.(bool)
+			if !isBool || stream {
+				continue
+			}
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
