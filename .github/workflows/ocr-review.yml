@@ -6,6 +6,7 @@
 #
 # Triggers:
 #   - PR opened (uses pull_request_target for fork secret access)
+#   - A comment on a PR starting with '@github-actions'
 #
 # Required secrets (mapped to action inputs):
 #   OCR_LLM_URL           - LLM API endpoint (e.g., https://api.openai.com/v1/chat/completions)
@@ -17,16 +18,36 @@
 
 name: OpenCodeReview PR Review
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 on:
   # Use pull_request_target instead of pull_request so that secrets are
   # available even for PRs from forks. This is safe because OCR only reads
   # the diff and does not execute any code from the PR.
   pull_request_target:
     types: [opened]
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: >-
+    ${{
+      (
+        github.event_name == 'pull_request_target'
+        || (
+          github.event_name == 'issue_comment'
+          && github.event.issue.pull_request
+          && github.event.comment.user.type != 'Bot'
+          && (
+            github.event.comment.author_association == 'MEMBER'
+            || github.event.comment.author_association == 'OWNER'
+            || github.event.comment.author_association == 'COLLABORATOR'
+          )
+          && startsWith(github.event.comment.body, '@github-actions')
+        )
+      )
+      && format('ocr-{0}', github.event.pull_request.number || github.event.issue.number)
+      || format('noop-{0}', github.run_id)
+    }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -38,12 +59,25 @@ jobs:
     timeout-minutes: 30
     container:
       image: node:24
-    if: github.event_name == 'pull_request_target'
+    if: |
+      github.event_name == 'pull_request_target'
+      || (
+        github.event_name == 'issue_comment'
+        && github.event.issue.pull_request
+        && github.event.comment.user.type != 'Bot'
+        && (
+          github.event.comment.author_association == 'MEMBER'
+          || github.event.comment.author_association == 'OWNER'
+          || github.event.comment.author_association == 'COLLABORATOR'
+        )
+        && startsWith(github.event.comment.body, '@github-actions')
+      )
     steps:
       # Materialize action.yml + scripts/ into the workspace so the local
       # `uses: ./` action below can be resolved and loaded. For
-      # pull_request_target this checks out the trusted base branch; the
-      # composite action performs its own full checkout (fetch-depth: 0) later.
+      # pull_request_target this checks out the trusted base branch, for
+      # issue_comment the default branch; the composite action performs its own
+      # full checkout (fetch-depth: 0) later.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -62,3 +96,6 @@ jobs:
           sticky_summary: 'true'
           incremental: 'false'
           upload_artifacts: 'true'
+          comment_trigger: 'true'
+          allowed_association: 'MEMBER,OWNER,COLLABORATOR'
+          comment_trigger_keyword: '@github-actions'

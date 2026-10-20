@@ -237,6 +237,21 @@ inputs:
       review work when no number resolves.
     required: false
     default: ''
+  comment_trigger:
+    description: >-
+      Enable on-demand review from a pull request comment by users with write access.
+    required: false
+    default: 'false'
+  allowed_association:
+    description: >-
+      User associations allowed to trigger a review from a comment. Comma-separated list.
+    required: false
+    default: 'MEMBER,OWNER,COLLABORATOR'
+  comment_trigger_keyword:
+    description: >-
+      A comment starts a review when its body begins with this prefix.
+    required: false
+    default: '@github-actions'
   node_version:
     description: Node.js version for actions/setup-node.
     required: false
@@ -325,8 +340,29 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Resolve review trigger
+      id: trigger
+      if: >-
+        github.event_name != 'issue_comment'
+        || (inputs.base_ref != '' && inputs.head_sha != '')
+        || (
+          inputs.comment_trigger == 'true'
+          && github.event.issue.pull_request
+          && github.event.comment.user.type != 'Bot'
+          && contains(format(',{0},', inputs.allowed_association), format(',{0},', github.event.comment.author_association))
+          && startsWith(github.event.comment.body, inputs.comment_trigger_keyword)
+        )
+      shell: bash
+      run: |
+        echo "review=true" >> "$GITHUB_OUTPUT"
+        if [ "$GITHUB_EVENT_NAME" = "issue_comment" ]; then
+          echo "comment=true" >> "$GITHUB_OUTPUT"
+        fi
+        echo "Reviewing on the ${GITHUB_EVENT_NAME} trigger."
+
     - name: Check git and Node.js
       id: check_deps
+      if: steps.trigger.outputs.review == 'true'
       shell: bash
       run: |
         if command -v git >/dev/null 2>&1; then
@@ -345,7 +381,7 @@ runs:
         fi
 
     - name: Install git
-      if: steps.check_deps.outputs.git_installed != 'true'
+      if: steps.trigger.outputs.review == 'true' && steps.check_deps.outputs.git_installed != 'true'
       shell: bash
       run: |
         if command -v apt-get >/dev/null 2>&1; then
@@ -364,17 +400,20 @@ runs:
         git --version
 
     - name: Setup Node.js
-      if: steps.check_deps.outputs.node_installed != 'true'
+      if: steps.trigger.outputs.review == 'true' && steps.check_deps.outputs.node_installed != 'true'
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ inputs.node_version }}
 
     - name: Resolve PR refs
+      if: steps.trigger.outputs.review == 'true'
       shell: bash
       env:
         INPUT_BASE_REF: ${{ inputs.base_ref }}
         INPUT_HEAD_SHA: ${{ inputs.head_sha }}
         INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+        COMMENT_TRIGGER: ${{ steps.trigger.outputs.comment }}
+        OCR_API_TOKEN: ${{ inputs.github_token }}
         EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
         EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         EVENT_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
@@ -400,6 +439,43 @@ runs:
           echo "::error::Resolved pull request number '${PR_NUMBER}' is not a positive integer; pr_number must be the PR's number alone."
           exit 1
         fi
+        if [ "$GITHUB_EVENT_NAME" = "issue_comment" ] && [ "$COMMENT_TRIGGER" = "true" ] && { [ -z "$BASE_REF" ] || [ -z "$HEAD_SHA" ]; }; then
+          if [ -z "$OCR_API_TOKEN" ]; then
+            echo "::error::comment_trigger needs github_token to read the pull request's base ref and head SHA."
+            exit 1
+          fi
+          COMMENT_REFS="$(OCR_API_TOKEN="$OCR_API_TOKEN" OCR_PR_NUMBER="$PR_NUMBER" node -e '
+          const https = require("https");
+          const options = {
+            headers: {
+              accept: "application/vnd.github+json",
+              authorization: "Bearer " + process.env.OCR_API_TOKEN,
+              "user-agent": "open-code-review-action",
+              "x-github-api-version": "2022-11-28",
+            },
+          };
+          https.get("https://api.github.com/repos/" + process.env.GITHUB_REPOSITORY + "/pulls/" + process.env.OCR_PR_NUMBER, options, (response) => {
+            let body = "";
+            response.on("data", (chunk) => { body += chunk; });
+            response.on("end", () => {
+              if (response.statusCode !== 200) {
+                console.error("GitHub API returned " + response.statusCode + " for pull request " + process.env.OCR_PR_NUMBER);
+                process.exit(1);
+              }
+              const pullRequest = JSON.parse(body);
+              process.stdout.write(pullRequest.base.ref + " " + pullRequest.head.sha + "\n");
+            });
+          }).on("error", (error) => {
+            console.error(error.message);
+            process.exit(1);
+          });
+          ')"
+          read -r BASE_REF HEAD_SHA <<< "$COMMENT_REFS"
+          if [ -z "$BASE_REF" ] || [ -z "$HEAD_SHA" ]; then
+            echo "::error::Could not read the base ref and head SHA for pull request #${PR_NUMBER}."
+            exit 1
+          fi
+        fi
         echo "BASE_REF=$BASE_REF" >> "$GITHUB_ENV"
         echo "HEAD_SHA=$HEAD_SHA" >> "$GITHUB_ENV"
         echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
@@ -408,6 +484,7 @@ runs:
         echo "PR number: $PR_NUMBER"
 
     - name: Checkout base
+      if: steps.trigger.outputs.review == 'true'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         # Checkout the trusted base, not the PR head. OCR reviews the
@@ -417,7 +494,7 @@ runs:
         fetch-depth: 0
 
     - name: Fetch PR head (fork-safe)
-      if: env.HEAD_SHA != ''
+      if: steps.trigger.outputs.review == 'true' && env.HEAD_SHA != ''
       shell: bash
       env:
         PR_NUM: ${{ env.PR_NUMBER }}
@@ -427,6 +504,7 @@ runs:
         fi
 
     - name: Compute merge-base
+      if: steps.trigger.outputs.review == 'true'
       shell: bash
       run: |
         git fetch origin "${BASE_REF}" 2>/dev/null || true
@@ -435,6 +513,7 @@ runs:
         echo "Reviewing ${HEAD_SHA} from merge-base ${MERGE_BASE} (base origin/${BASE_REF})"
 
     - name: Validate inputs
+      if: steps.trigger.outputs.review == 'true'
       env:
         REVIEW_TASK_TIMEOUT: ${{ inputs.review_task_timeout }}
         EFFORT_INPUT: ${{ inputs.effort }}
@@ -537,6 +616,7 @@ runs:
         echo "RESOLVE_OUTDATED=$NORMALIZED_RESOLVE_OUTDATED" >> "$GITHUB_ENV"
 
     - name: Install OpenCodeReview
+      if: steps.trigger.outputs.review == 'true'
       shell: bash
       env:
         OCR_VERSION: ${{ inputs.ocr_version }}
@@ -592,6 +672,7 @@ runs:
         echo "OCR_VERSION_ACTUAL=${VERSION_ACTUAL}" >> "$GITHUB_ENV"
 
     - name: Configure OCR
+      if: steps.trigger.outputs.review == 'true'
       env:
         OCR_LLM_URL: ${{ inputs.llm_url }}
         OCR_LLM_MODEL: ${{ inputs.llm_model }}
@@ -691,7 +772,7 @@ runs:
         ocr config set language "$OCR_LANGUAGE"
 
     - name: Resolve review range
-      if: inputs.checkpoint_range == 'true'
+      if: steps.trigger.outputs.review == 'true' && inputs.checkpoint_range == 'true'
       id: range
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       env:
@@ -948,6 +1029,7 @@ runs:
           }
 
     - name: Run OpenCodeReview
+      if: steps.trigger.outputs.review == 'true'
       env:
         OCR_LLM_URL: ${{ inputs.llm_url }}
         OCR_LLM_TOKEN: ${{ inputs.llm_auth_token }}
@@ -1008,7 +1090,7 @@ runs:
         cat /tmp/ocr-stderr.log
 
     - name: Upload review artifacts
-      if: ${{ always() && inputs.upload_artifacts == 'true' }}
+      if: ${{ always() && inputs.upload_artifacts == 'true' && steps.trigger.outputs.review == 'true' }}
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: ocr-review-result-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1018,14 +1100,14 @@ runs:
         if-no-files-found: warn
 
     - name: Fail job on OCR error
-      if: env.OCR_EXIT_CODE != '0'
+      if: steps.trigger.outputs.review == 'true' && env.OCR_EXIT_CODE != '0'
       shell: bash
       run: |
         echo "ocr review exited with code ${OCR_EXIT_CODE}; see uploaded artifacts for details."
         exit "${OCR_EXIT_CODE}"
 
     - name: Post review comments
-      if: env.OCR_EXIT_CODE == '0'
+      if: steps.trigger.outputs.review == 'true' && env.OCR_EXIT_CODE == '0'
       id: post
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       env:
