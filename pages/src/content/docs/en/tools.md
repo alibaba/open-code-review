@@ -297,7 +297,7 @@ understands `pathspec` syntax and respects `.gitignore`.
 | `search_text` | yes | — | Literal string or PCRE pattern (see `use_perl_regexp`). |
 | `file_patterns` | no | whole repo | Array of pathspec entries. Use `:(exclude)pat` to subtract. |
 | `case_sensitive` | no | `false` | — |
-| `use_perl_regexp` | no | `false` | When `true`, `search_text` is treated as a regex. |
+| `use_perl_regexp` | no | `false` | When `true`, `search_text` is treated as a regex. Otherwise it is literal, so `a\|b` searches for that exact text; when such a literal search finds nothing, the tool retries with each `\|`-separated part and labels the result. |
 
 ### Output
 
