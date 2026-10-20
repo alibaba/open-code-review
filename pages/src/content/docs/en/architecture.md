@@ -361,6 +361,13 @@ per-group:
 | `{{context}}` | (compression only) the XML-rendered messages to summarise. |
 | `{{path}}` | Group key (comma-joined sorted paths), used in `REVIEW_FILTER_TASK`. |
 | `{{comments}}` | Accumulated comments (JSON), used in `REVIEW_FILTER_TASK`. |
+| `{{review_context}}` | The group's plan and main-task tool results, including arguments and success status (JSON), used in `REVIEW_FILTER_TASK`. |
+
+The review filter also receives `{{requirement_background}}` and `{{system_rule}}`.
+It is instructed to retain actual defects and remove only evidence-backed
+incorrect claims or optional changes with no current defect. A filter report of
+missing required context, a failed filter request, or context exceeding the
+configured token budget fails the group without removing its findings.
 
 The placeholder substitution lives in
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go).

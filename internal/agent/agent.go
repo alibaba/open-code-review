@@ -111,7 +111,7 @@ type Args struct {
 	CommentCollector *tool.CommentCollector
 
 	// Background is an optional requirement/business context string
-	// injected into plan and main_task prompts via {{requirement_background}}.
+	// injected into plan, main_task and review-filter prompts via {{requirement_background}}.
 	Background string
 
 	// Model is the resolved model name used by every LLM request this run
@@ -1187,6 +1187,8 @@ func (a *Agent) markFailed(d model.Diff, class session.FailureClass, reason stri
 // matching error text, which silently breaks the moment the wording changes.
 var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 
+var errReviewFilterIncomplete = errors.New("review filter did not complete")
+
 // classifyItemError maps a subtask error to a stable item failure class and a
 // safe, generic reason. It never returns the raw error text (which may embed a
 // provider payload, credentials or absolute paths); the full error is persisted
@@ -1203,6 +1205,8 @@ func classifyItemError(err error) (session.FailureClass, string) {
 		return session.FailureCancelled, "file review was cancelled"
 	case errors.Is(err, errMainTaskEmpty):
 		return session.FailureConfiguration, "review template main_task is empty"
+	case errors.Is(err, errReviewFilterIncomplete):
+		return session.FailureUnknown, "review filter could not establish the required context"
 	default:
 		return session.FailureProvider, "provider or subtask request failed"
 	}
@@ -1507,7 +1511,9 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		if a.args.CommentWorkerPool != nil {
 			a.args.CommentWorkerPool.AwaitKey(groupKey)
 		}
-		a.executeGroupReviewFilter(ctx, g, baseline)
+		if err := a.executeGroupReviewFilter(ctx, g, baseline); err != nil {
+			return false, nil, err
+		}
 
 		// Compute newly confirmed comments from this round.
 		var newlyConfirmed []model.LlmComment
@@ -1558,17 +1564,16 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 	return completed, nil, nil
 }
 
-// filterTools defines the two mutually exclusive tools for the review filter.
-// The model MUST call exactly one: either report incorrect comments, or approve all.
+// The filter must retain findings and fail the review when required context is missing.
 var filterTools = []llm.ToolDef{
 	{
 		Type: "function",
 		Function: llm.FunctionDef{
 			Name: "report_incorrect_comments",
-			Description: "Report review comments that this diff proves to be factually wrong: either the code they target is absent from the diff, " +
-				"or one diff line literally contradicts their central claim. For every id listed you must be able to name that line. " +
-				"Do not use this for comments you merely find unconvincing, unverifiable, or low-value, nor for comments about memory safety, " +
-				"concurrency, linkage consistency, unused parameters, or behavioral changes.",
+			Description: "Report comments contradicted by the supplied source evidence or supported requirements, or comments that only propose an optional change " +
+				"without a concrete failure in supported use. Cite the evidence and requirement for each removal. " +
+				"Never remove a real correctness, security, performance or maintainability defect because it is minor or a limitation is documented. " +
+				"Missing required context means report_incomplete_review, not removal or approval.",
 			// Field order matters and is load-bearing. Go serializes these
 			// properties alphabetically, so "analysis" is emitted before
 			// "comment_ids" and the model reasons before it commits. With the
@@ -1583,8 +1588,8 @@ var filterTools = []llm.ToolDef{
 					"analysis": map[string]any{
 						"type": "array",
 						"description": "Work through every candidate comment BEFORE deciding. One entry per candidate: its id, " +
-							"whether its subject hits the protected-subject veto (Step 1) or the value veto (Step 2), " +
-							"the exact diff line that refutes it if any, and your final call. " +
+							"its supported trigger and violated requirement, the source evidence, " +
+							"whether required context is available, and your final call. " +
 							"Only ids you conclude here as removable may appear in comment_ids.",
 						"items": map[string]any{"type": "string"},
 					},
@@ -1602,11 +1607,24 @@ var filterTools = []llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
 			Name: "approve_all_comments",
-			Description: "Keep every review comment. Call this whenever no comment clears the removal bar — including when comments look doubtful, " +
-				"cannot be verified from the diff alone, or seem minor. This is the expected outcome for most files.",
+			Description: "Keep every review comment when no removal is justified by the supplied requirements and source context. " +
+				"Retain real defects regardless of severity. Use report_incomplete_review if required context is missing.",
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: llm.FunctionDef{
+			Name: "report_incomplete_review",
+			Description: "Stop this review as incomplete when required source or requirement context is missing, failed, truncated or contradictory. " +
+				"Retain all comments; do not infer that unavailable evidence disproves a finding.",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"reason": map[string]any{"type": "string", "description": "Identify the required missing context."}},
+				"required":   []any{"reason"},
 			},
 		},
 	},
@@ -1795,7 +1813,7 @@ func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concaten
 // When from is non-nil, only comments at indices >= from[path] for each path
 // are candidates for filtering (per-round isolation). When from is nil, all
 // comments for the group's paths are filtered (legacy full-group behavior).
-func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from map[string]int) {
+func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from map[string]int) error {
 	groupKey := fileGroupKey(g.Diffs)
 	ctx, span := telemetry.StartSpan(ctx, "review_filter.execute")
 	defer span.End()
@@ -1803,13 +1821,13 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 
 	ft := a.args.Template.ReviewFilterTask
 	if ft == nil || len(ft.Messages) == 0 {
-		return
+		return nil
 	}
 
 	if a.args.SkipFilter {
 		telemetry.SetAttr(span, "skipped", true)
 		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for group %q (--no-filter)\n", groupKey)
-		return
+		return nil
 	}
 
 	// Collect candidate comments with their true per-path indices.
@@ -1832,7 +1850,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		}
 	}
 	if len(candidates) == 0 {
-		return
+		return nil
 	}
 	telemetry.SetAttr(span, "comments.before", len(candidates))
 
@@ -1843,17 +1861,29 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 	}
 	commentsJSON := buildGroupFilterCommentsJSON(candidateComments)
 	concatenatedDiffs := buildConcatenatedDiffs(g.Diffs)
+	fs := a.session.GetOrCreateFileSession(groupKey)
+	contextResults := append(fs.ToolResults(session.PlanTask), fs.ToolResults(session.MainTask)...)
+	reviewContext, _ := json.Marshal(contextResults)
 
+	replacements := strings.NewReplacer(
+		"{{path}}", groupKey,
+		"{{diff}}", concatenatedDiffs,
+		"{{comments}}", commentsJSON,
+		"{{requirement_background}}", a.args.Background,
+		"{{system_rule}}", a.resolveGroupSystemRule(g.Diffs),
+		"{{review_context}}", string(reviewContext),
+	)
 	messages := make([]llm.Message, 0, len(ft.Messages))
 	for _, m := range ft.Messages {
-		content := m.Content
-		content = strings.ReplaceAll(content, "{{path}}", groupKey)
-		content = strings.ReplaceAll(content, "{{diff}}", concatenatedDiffs)
-		content = strings.ReplaceAll(content, "{{comments}}", commentsJSON)
-		messages = append(messages, llm.NewTextMessage(m.Role, content))
+		messages = append(messages, llm.NewTextMessage(m.Role, replacements.Replace(m.Content)))
 	}
 
-	fs := a.session.GetOrCreateFileSession(groupKey)
+	// Never truncate the evidence into a potentially false all-clear.
+	promptTokens := llmloop.CountMessagesTokens(messages)
+	if promptTokens > llmloop.PromptTokenLimit(a.args.Template.MaxTokens) ||
+		(a.args.MaxTokensBudget > 0 && a.TotalTokensUsed()+int64(promptTokens) > a.args.MaxTokensBudget) {
+		return fmt.Errorf("%w: context exceeds the configured token budget", errReviewFilterIncomplete)
+	}
 	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
 	ctx = llm.ContextWithSessionKey(ctx,
 		llm.SessionTaskKey(a.session.SessionID, string(session.ReviewFilterTask), groupKey))
@@ -1875,7 +1905,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter failed for group %q: %v\n", groupKey, err)
 		span.SetStatus(codes.Error, err.Error())
 		span.RecordError(err)
-		return
+		return err
 	}
 	var totalTokens int64
 	if resp.Usage != nil {
@@ -1885,6 +1915,11 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 	llmSpan.End()
 	rec.SetResponse(resp, duration)
 	a.runner.RecordUsage(resp.Usage)
+	for _, call := range resp.ToolCalls() {
+		if call.Function.Name == "report_incomplete_review" {
+			return errReviewFilterIncomplete
+		}
+	}
 
 	indices := parseFilterToolCalls(resp.ToolCalls(), len(candidates))
 	if indices == nil {
@@ -1896,7 +1931,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 			attribute.String("group.label", groupKey),
 			attribute.Int("total_comments", len(candidates)),
 			attribute.Int("removed", 0))
-		return
+		return nil
 	}
 
 	// Map candidate indices to per-path removals using the true pathIdx.
@@ -1920,6 +1955,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		attribute.Int("total_comments", len(candidates)),
 		attribute.Int("removed", totalRemoved))
 	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for group %q\n", totalRemoved, groupKey)
+	return nil
 }
 
 // buildGroupFilterCommentsJSON serializes comments with path info for group-level filtering.
