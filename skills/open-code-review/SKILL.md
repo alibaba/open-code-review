@@ -46,6 +46,7 @@ ocr review --audience agent --background "business context here" [user-args]
 - **Default** (no user arguments): reviews staged, unstaged, and untracked changes (workspace mode)
 - **Specific commit**: use `--commit` or `-c` to review a single commit against its parent
 - **Branch comparison**: use `--from <ref>` and `--to <ref>` to review diff between two refs
+- **Stale base branch**: add `--fetch` to a `--from`/`--to` review to fetch the `--from` branch from `origin` (or `--remote <name>`; a prefix such as `upstream/main` also picks that remote) first and review against the fresh remote-tracking branch; `--to` stays local. It contacts the remote, so only pass it when the user asks for a refreshed base
 - **Timeout**: effective timeout per review group = `--timeout` × review rounds. Default `--timeout 15` with default effort `medium` (2 rounds) gives 30 minutes; `low`/`high` give 15/45 minutes.
 - **Concurrency**: default concurrency is 8 file workers; reduce with `--concurrency <n>` if rate limits are hit
 - **Preview mode**: use `--preview` or `-p` to preview which files will be reviewed without running the LLM
