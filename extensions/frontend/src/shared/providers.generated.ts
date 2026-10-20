@@ -83,8 +83,7 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
       "deepseek-v4-pro",
       "deepseek-v4-flash",
       "kimi-k2.7-code",
-      "glm-5.2",
-      "MiniMax-M2.5"
+      "glm-5.2"
     ]
   },
   {
@@ -106,8 +105,7 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
       "kimi-k2.5",
       "glm-5.2",
       "glm-5.1",
-      "glm-5",
-      "MiniMax-M2.5"
+      "glm-5"
     ]
   },
   {
@@ -247,11 +245,8 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     "baseUrl": "https://api.minimax.io/v1",
     "envVar": "MINIMAX_GLOBAL_API_KEY",
     "models": [
-      "MiniMax-M3",
-      "MiniMax-M2.7",
-      "MiniMax-M2.7-highspeed",
-      "MiniMax-M2.5",
-      "MiniMax-M2.5-highspeed"
+      "MiniMax-M3.1-Flash",
+      "MiniMax-M3"
     ]
   },
   {
@@ -261,11 +256,8 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     "baseUrl": "https://api.minimaxi.com/v1",
     "envVar": "MINIMAX_API_KEY",
     "models": [
-      "MiniMax-M3",
-      "MiniMax-M2.7",
-      "MiniMax-M2.7-highspeed",
-      "MiniMax-M2.5",
-      "MiniMax-M2.5-highspeed"
+      "MiniMax-M3.1-Flash",
+      "MiniMax-M3"
     ]
   },
   {
@@ -309,8 +301,6 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
       "kimi-k2.5",
       "kimi-k2.6",
       "kimi-k2.7-code",
-      "minimax-m2.5",
-      "minimax-m2.7",
       "minimax-m3",
       "mistral-large-3:675b",
       "nemotron-3-nano:30b",
@@ -401,8 +391,7 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
       "kimi-k2.7-code",
       "kimi-k2.7-code-highspeed",
       "kimi-k2.6",
-      "minimax-m3",
-      "minimax-m2.7"
+      "minimax-m3"
     ]
   },
   {
