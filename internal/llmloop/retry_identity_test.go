@@ -289,7 +289,7 @@ func newCompressionRunner(t *testing.T, client llm.LLMClient, factory func(strin
 		llm.NewTextMessage("system", "sys"),
 		llm.NewTextMessage("user", "prompt"),
 	}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		msgs = append(msgs, llm.NewTextMessage("assistant", strings.Repeat("word ", 100)))
 		msgs = append(msgs, llm.NewTextMessage("tool", strings.Repeat("data ", 50)))
 	}
