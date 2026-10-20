@@ -40,13 +40,16 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 The following providers ship with OCR, with the Base URL and protocol
 preset. Most require an API key. If `providers.<name>.api_key` is unset,
 OCR falls back to the corresponding environment variable. The `chatgpt`
-provider instead uses the ChatGPT credentials created by `ocr auth login`.
+provider instead uses the ChatGPT credentials created by `ocr auth login`, and
+`anthropic-oauth` uses the Claude Code CLI login (see
+[Claude subscription provider](#claude-subscription-provider)).
 
 | Name | Protocol | Base URL | API key env var |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
 | `chatgpt` | openai-responses | `https://api.openai.com/v1` | not applicable (Sign in with ChatGPT) |
+| `anthropic-oauth` | anthropic-oauth | managed by Claude Code | Claude subscription OAuth |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -94,7 +97,7 @@ The provider accepts explicit model values even if the account-specific catalog 
 
 ### Overriding a built-in provider's Base URL
 
-Every built-in provider has a preset Base URL (shown in the table above).
+HTTP providers have a preset Base URL (shown in the table above).
 To point a built-in provider at a different endpoint — for example a
 self-hosted LiteLLM gateway that is rarely at the preset default
 `http://localhost:4000/v1` — set `providers.<name>.url`:
@@ -111,6 +114,66 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 The configured `url` takes precedence over the preset Base URL. When
 `providers.<name>.url` is unset (or cleared), OCR falls back to the
 preset default — so you only need to set it when your endpoint differs.
+
+### Claude subscription provider
+
+The `anthropic-oauth` provider uses a Claude or Claude Code subscription
+through the official Claude Code CLI. Credentials stay in Claude Code's
+credential store: OCR saves only the provider and model selection, and Claude
+Code refreshes credentials. The provider picker skips API-key entry for this
+provider. Install the
+[official Claude Code CLI](https://code.claude.com/docs/en/setup), then run:
+
+```bash
+ocr auth login --provider anthropic-oauth
+ocr config set provider anthropic-oauth
+ocr config set providers.anthropic-oauth.model sonnet
+ocr llm test
+```
+
+`ocr auth` defaults to the `chatgpt` provider, so pass
+`--provider anthropic-oauth`. The ChatGPT flags `--account`, `--new-account`,
+`--enable-plan`, `--no-browser` and `--device` are rejected for this provider.
+Login delegates to `claude auth login --claudeai`; an existing Claude Code
+subscription login is reused. `OCR_CLAUDE_PATH` can select an absolute Claude
+executable path, and `CLAUDE_CONFIG_DIR` selects its configuration directory.
+API-key, static token, and third-party endpoint environment variables do not
+override this provider. Claude Code has no device login flag; follow the
+URL/code instructions from its normal login command when browser launch is
+unavailable.
+
+OCR uses the documented
+[print-mode subprocess interface](https://code.claude.com/docs/en/headless)
+and structured JSON output, tested with Claude Code 2.1.286. Each completion
+replays OCR's logical conversation as JSON into a fresh CLI process, with a
+private working directory and native tools, MCP servers, customizations, and
+session persistence disabled. The structured response declares OCR tool calls;
+OCR validates and executes them through its existing tool loop, then includes
+the results in the next completion. This adapter does not preserve native
+Claude thinking blocks or native cache boundaries. The CLI manages retries and
+its inference loop; OCR's HTTP middleware cannot capture this transport.
+`ChatRequest.MaxTokens` sets the documented `CLAUDE_CODE_MAX_OUTPUT_TOKENS`
+budget, subject to the CLI's model limits and structured-output retries;
+temperature overrides are rejected. The CLI stdin limit is 10 MiB.
+
+Anthropic's [current subscription guidance](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
+says SDK, `claude -p`, and third-party app usage continue to draw from
+subscription limits. Account access and organization policy determine which
+models are available. Choose `sonnet`, `opus`, or an account-supported model ID.
+
+Use `ocr auth status --provider anthropic-oauth` and
+`ocr auth logout --provider anthropic-oauth` to inspect or clear the Claude Code
+login. These commands operate on Claude Code's selected credential store, which
+is shared with the CLI. Authentication status reports the local login; it is
+not a connectivity test. Use `ocr llm test` to verify inference. Login
+commands require user interaction; OCR never opens a login during a review.
+
+This provider requires provider configuration; `OCR_LLM_PROTOCOL` and the
+legacy `llm.protocol` URL/token path cannot select it. API-key, credential
+command, URL, authentication-header, extra-body/header, and retry-code
+overrides are rejected. The integration uses a local official CLI and
+interactive account login. Use API-key or federated providers when your
+deployment needs unattended service credentials.
 
 ### AWS Bedrock
 

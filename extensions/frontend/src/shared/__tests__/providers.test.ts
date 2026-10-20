@@ -6,6 +6,15 @@ import { isPresetProvider, lookupPreset, mergeModelLists, PROVIDER_PRESETS, uses
 import { buildOfficialSaveEntries, detectInitialTab, isConfigReady, isValidProviderName } from '../configUtils';
 import { OcrConfig } from '../types';
 
+test('anthropic-oauth uses official ambient OAuth credentials', () => {
+  const preset = lookupPreset('anthropic-oauth')!;
+  expect(preset.ambientAuth).toBe(true);
+  expect(usesAmbientAuth(preset)).toBe(true);
+  expect(usesAmbientAuth(preset, 'anthropic-oauth')).toBe(true);
+  expect(usesAmbientAuth(preset, 'openai')).toBe(false);
+  expect(preset.envVar).toBe('');
+});
+
 describe('generated provider presets', () => {
   it.each(['my-gateway', 'mimo-v2.6-flash', 'foo.api_key'])('accepts provider name %s', (name) => {
     expect(isValidProviderName(name)).toBe(true);

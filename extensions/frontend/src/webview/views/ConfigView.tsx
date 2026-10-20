@@ -334,7 +334,8 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
   const [providerName, setProviderName] = useState(initialProvider);
   const preset = PROVIDER_PRESETS.find((p) => p.name === providerName) ?? PROVIDER_PRESETS[0];
   const savedEntry = config?.providers[providerName];
-  const ambientAuth = usesAmbientAuth(preset, savedEntry?.protocol);
+  const resolvedProtocol = savedEntry?.protocol?.trim().toLowerCase() || preset.protocol;
+  const ambientAuth = usesAmbientAuth(preset, resolvedProtocol);
 
   const modelOptions = useMemo(
     () => mergeModelLists(preset.models, savedEntry?.models ?? []),
@@ -411,6 +412,11 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
         )}
       </FormItem>
 
+      {resolvedProtocol === 'anthropic-oauth' && (
+        <FormItem label="OAuth sign-in" hint="Run ocr auth login --provider anthropic-oauth in a terminal on the machine running OCR.">
+          <span>Uses your local Claude Code CLI and Claude subscription login.</span>
+        </FormItem>
+      )}
       {!ambientAuth && (
         <FormItem
           label={t('view.config.apiKey')}
