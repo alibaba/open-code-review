@@ -11,13 +11,16 @@ import (
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
-func TestListSessions_EmptyRepoReturnsNil(t *testing.T) {
+func TestListSessions_EmptyRepoReturnsEmptySlice(t *testing.T) {
 	tmpHome := t.TempDir()
 	setTestHome(t, tmpHome)
 
 	got, err := ListSessions(t.TempDir())
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil empty slice, got nil")
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty result, got %d entries", len(got))
