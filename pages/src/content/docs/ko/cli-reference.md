@@ -413,6 +413,8 @@ ocr session list --json
 | `--json` | `false` | 세션 요약을 JSON으로 출력합니다. |
 | `--limit <n>` | `20` | 나열할 세션 수를 제한합니다. `0`이면 제한이 없습니다. |
 
+`Status` 열은 `session_end` 레코드가 기록되지 않은 세션을 `aborted`로 표시합니다(프로세스가 완료 전에 강제 종료된 상태이며, 이유를 남길 레코드도 없습니다). Ctrl-C, SIGTERM 또는 호출자 기한으로 취소된 실행은 `session_end`를 기록하므로 실제 종료 상태를 유지한 채 그 뒤에 이유가 덧붙여지며, 예를 들어 `partial (interrupted: cancelled)`로 표시됩니다. `--json`은 같은 값을 `interrupted_by`로 출력하며, 실행이 스스로 종료된 경우에는 이 필드를 출력하지 않습니다.
+
 ### `ocr session show` {#ocr-session-show}
 
 이어서 한 실행이라면 어떤 실행을 이어받았는지, 그 과정에서 프로바이더나 모델이 바뀌었다면

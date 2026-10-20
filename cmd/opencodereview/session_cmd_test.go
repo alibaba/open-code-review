@@ -376,6 +376,26 @@ func TestSessionDisplayDoesNotInferLegacyComplete(t *testing.T) {
 	}
 }
 
+// TestSessionStatusNamesTheInterruption covers the case the reason exists for: a
+// cancelled run still finalizes, so it is not Aborted and has a real terminal
+// state — the reason is what tells "partial because I stopped it" apart from
+// "partial because files failed".
+func TestSessionStatusNamesTheInterruption(t *testing.T) {
+	summary := session.Summary{
+		InterruptedBy: session.InterruptReasonCancelled,
+		RunManifest:   &session.RunManifest{TerminalState: session.StatePartial},
+	}
+	if got := describeStatus(summary); got != "partial (interrupted: cancelled)" {
+		t.Fatalf("status = %q, want %q", got, "partial (interrupted: cancelled)")
+	}
+
+	// The unclosed-session case keeps its own label: there is no terminal state
+	// to qualify, and nothing recorded the reason.
+	if got := describeStatus(session.Summary{Aborted: true}); got != "aborted" {
+		t.Fatalf("status = %q, want aborted", got)
+	}
+}
+
 // newCompareSession records one session with the given findings and returns it.
 func newCompareSession(t *testing.T, repoDir string, opts session.SessionOptions, comments []model.LlmComment) *session.SessionHistory {
 	t.Helper()
