@@ -43,6 +43,7 @@ type reviewOptions struct {
 	provider              string
 	model                 string
 	concurrency           int
+	intraGroupConcurrency int
 	concurrentTaskTimeout int
 	maxTools              int
 	maxGitProcs           int
@@ -230,6 +231,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		CommentCollector:      rt.Collector,
 		CommentWorkerPool:     agent.NewCommentWorkerPool(opts.concurrency),
 		MaxConcurrency:        opts.concurrency,
+		IntraGroupConcurrency: opts.intraGroupConcurrency,
 		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
 		Provider:              rt.Provider,

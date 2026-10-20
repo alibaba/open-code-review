@@ -123,6 +123,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Takes precedence over `--background` when both are set. |
 | `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json` |
 | `--concurrency <n>` | — | `8` | Maximum number of subtasks reviewed in parallel. |
+| `--intra-group-concurrency <n>` | — | `1` | Experimental focused first-round conversations per review group (`1`–`3`). Later effort rounds remain sequential. |
 | `--timeout <minutes>` | — | `15` | Per-subtask budget, including LLM calls, tools, and retry waits. `0` disables the task deadline, not request timeouts. Independent request timeout: `OCR_LLM_TIMEOUT` or provider `timeout_sec`, in seconds (default `300`). Scaled linearly by the number of effort review rounds (e.g. 15/30/45 min for low/medium/high). |
 | `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
@@ -138,6 +139,41 @@ staged + unstaged + untracked changes in the current directory's repo.
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
 > `--resume` supports only range or commit reviews and cannot be combined
 > with `--preview`.
+
+### Concurrency within a review group
+
+For a backend with spare request capacity, try:
+
+```bash
+ocr review --commit HEAD --effort medium --concurrency 1 --intra-group-concurrency 3
+```
+
+The default, `1`, preserves the existing sequential review. With `2`, the first
+round separates security/authorization from correctness and other defects.
+With `3`, concurrency, resource lifecycle and performance get their own focus.
+Each conversation sees the full group diff and the shared plan, and can use
+the usual context tools. All focused conversations must finish before their
+findings are combined, exact duplicates are removed, and the normal review
+filter runs. Differently worded findings are retained; the filter is not a
+semantic deduplication pass.
+
+At `medium` or `high` effort, the next round receives the combined confirmed
+findings and searches for additional issues without the original plan or a
+restricted focus. This follow-up also runs when the focused first round finds
+nothing. `low` effort has no follow-up round.
+
+The main review loops can use up to `--concurrency` times
+`--intra-group-concurrency` simultaneous requests. Comment post-processing and
+background compression can make additional requests. All conversations share
+the run's token budget and their group's timeout; already in-flight requests
+can overshoot the token budget. A failed or incomplete focus is not treated as
+a successfully completed first round.
+
+This mode is experimental. Different focuses and a sequential follow-up avoid
+simply repeating identical first-round prompts, but do not establish equivalent
+recall or guarantee lower latency. Token use can increase. Compare repeated
+runs on representative diffs using wall time, input/output tokens and a fixed
+set of known defects before adopting it for a hosted or rate-limited backend.
 
 ### Per-run LLM selection
 
