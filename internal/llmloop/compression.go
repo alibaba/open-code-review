@@ -274,6 +274,12 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
 	}
 
+	if resp.IsTruncated() {
+		// Truncated summary: keep the original conversation rather than replacing
+		// history with an incomplete/malformed summary that drops context.
+		return msgs, fmt.Errorf("memory compression truncated: finish_reason is %q", resp.FinishReason())
+	}
+
 	rawSummary := stripMarkdownFences(resp.Content())
 	if rawSummary == "" {
 		// Empty summary: keep the original conversation rather than dropping
