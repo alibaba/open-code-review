@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -444,6 +445,56 @@ func TestRunSessionCompare_TextShowsCounts(t *testing.T) {
 	}
 	if strings.Contains(got, "did not review") {
 		t.Errorf("unexpected not-reviewed line for a legacy session pair: %q", got)
+	}
+}
+
+func TestRunSessionCompare_MixedRepoSpellings(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	opts := session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "abc123"}
+
+	before := newCompareSession(t, repoDir, opts, []model.LlmComment{
+		{Path: "a.go", StartLine: 40, EndLine: 40, Category: "bug", ExistingCode: "x := 1", Content: "one repository"},
+	})
+	before.Finalize()
+	after := newCompareSession(t, repoDir, opts, []model.LlmComment{
+		{Path: "a.go", StartLine: 40, EndLine: 40, Category: "bug", ExistingCode: "x := 1", Content: "one repository"},
+	})
+	after.Finalize()
+
+	// Re-record the second session the way another caller would have written it:
+	// the same directory, differently spelled. On Windows the split shows up as
+	// `C:\repo` versus `C:/repo`, depending on whether the OS resolved the path
+	// or --repo handed it over; a trailing separator is the portable stand-in for
+	// that class. An exact compare reads the two spellings as two repositories
+	// and refuses the only pair it can legitimately draw.
+	dir, err := session.SessionsDir(repoDir)
+	if err != nil {
+		t.Fatalf("SessionsDir: %v", err)
+	}
+	path := filepath.Join(dir, after.SessionID+".jsonl")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	from := `"cwd":` + strconv.Quote(repoDir)
+	to := `"cwd":` + strconv.Quote(repoDir+string(os.PathSeparator))
+	patched := strings.ReplaceAll(string(raw), from, to)
+	if patched == string(raw) {
+		t.Fatalf("the session recorded no cwd equal to %q; the test needs updating", repoDir)
+	}
+	if err := os.WriteFile(path, []byte(patched), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	useCompareRepo(t, repoDir, false)
+	got := captureStdout(t, func() {
+		if err := runSessionCompare(before.SessionID, after.SessionID); err != nil {
+			t.Fatalf("runSessionCompare across two spellings of one repository: %v", err)
+		}
+	})
+	if !strings.Contains(got, "1 persisting") {
+		t.Errorf("expected the pair to compare as one repository, got %q", got)
 	}
 }
 
