@@ -376,7 +376,7 @@ With no `--path`, the whole repository is scanned.
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--path <list>` | - | whole repo | Comma-separated repo-relative directories or files to scan (e.g., `internal/agent`, `internal/llm/client.go`). |
+| `--path <list>` | - | whole repo | Comma-separated repo-relative directories or files to scan (e.g., `internal/agent`, `internal/llm/client.go`). Selectors resolve against the working tree: the spelled path wins over a case-variant sibling, a differently-cased spelling that the filesystem resolves (Windows, default macOS) still selects the tracked files, and a selector that names no existing path is an error rather than an empty scan. |
 | `--exclude <patterns>` | - | - | Comma-separated gitignore-style patterns to skip (e.g., `**/generated/*,*.pb.go`); merged with `rule.json` excludes. |
 | `--output <path>` | `-o` | stdout | Write scan results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
 | `--preview` | `-p` | `false` | Enumerate and filter files without calling the LLM. Prints the file list, reviewable/excluded counts, total lines, and per-file exclusion reasons. Honors `--format json`; `--format sarif` is not supported. |

@@ -110,38 +110,54 @@ refactor(viewer): extract task-card rendering into helper
 
 **PR 标题**也用相同格式，以便在生成的 changelog 中整洁显示。
 
+`PR Commit Policy` 会检查 PR 标题以及每条提交的完整信息（包括正文），不区分大小写。
+请勿包含 `[skip ci]`、`[ci skip]`、`[no ci]`、`[skip actions]`、`[actions skip]`，
+或单独一行的 `skip-checks: true` / `skip-checks:true`。
+
+检查失败时，请修改 PR 标题，或在你的贡献分支上重写相关提交的信息。
+新增一条不含这些指令的提交，无法消除历史提交中的违规内容。
+PR 描述可以讨论这些指令，不在检查范围内。
+
 ## 项目结构
 
 ```
 open-code-review/
+├── acp/                       # 独立的 CLI ACP（Agent Client Protocol）适配器
 ├── cmd/opencodereview/        # CLI 入口——参数解析、分发
+├── docs/                      # 本地化 README 与贡献指南
+├── imgs/                      # README 图片与标志
 ├── internal/
 │   ├── agent/                 # 评审 agent 逻辑、子 agent 分发
+│   ├── chatgptauth/           # ChatGPT OAuth 与凭据管理
 │   ├── config/                # 模板、规则、白名单、内嵌 JSON
-│   ├── diff/                  # Git diff 解析、三种模式
+│   ├── delegate/              # 无需调用 LLM 的审查规范生成
+│   ├── diff/                  # Git diff 解析
 │   ├── gitcmd/                # Git 子进程运行器
-│   ├── llm/                   # LLM client（Anthropic 与 OpenAI）、端点解析器
+│   ├── llm/                   # LLM 客户端与端点解析
+│   ├── llmloop/               # Review 与 Scan 共用的 LLM 工具调用循环
+│   ├── mcp/                   # MCP 客户端与工具适配器
 │   ├── model/                 # 数据结构（LlmComment、Diff……）
 │   ├── pathutil/              # 路径工具
-│   ├── release/               # Release notes 生成
+│   ├── release/               # 发布产物命名一致性检查
+│   ├── scan/                  # 全文件代码审查
 │   ├── session/               # JSONL 会话写入器
 │   ├── stdout/                # 可静音的 stdout writer
 │   ├── suggestdiff/           # 建议 diff 渲染
 │   ├── telemetry/             # OpenTelemetry 配置 + 辅助
 │   ├── tool/                  # 工具注册表 + provider 实现
-│   └── viewer/                # 内嵌 HTTP UI
-├── pages/                     # WebUI 营销页（独立 React app）
-├── plugins/                   # Claude Code slash 命令
-├── extensions/                # 编辑器扩展（VS Code）
+│   └── viewer/                # 浏览审查会话的内嵌 HTTP UI
+├── pages/                     # 官网 Landing Page 与文档（独立 React app）
+├── plugins/                   # 编码代理集成（Claude Code、Codex、OpenCode 等）
+├── extensions/                # VS Code 与 IntelliJ IDEA 扩展、共享前端
 ├── examples/                  # CI 配方（GitHub Actions、GitLab CI）
-├── skills/                    # Agent SDK skill manifest
-├── scripts/                   # NPM postinstall + 跨平台构建脚本
+├── skills/                    # 审查与委托技能定义
+├── scripts/                   # 安装、发布与仓库检查脚本
 ├── npm/                       # 各平台 optional dependency 包
 └── bin/                       # NPM wrapper（Node）
 ```
 
 多数贡献触及 `internal/agent/`、`internal/tool/` 或 `internal/llm/`。
-`cmd/opencodereview/` 中的 CLI 层有意保持精简——参数解析后分发到 agent 包。
+`cmd/opencodereview/` 中的 CLI 层有意保持精简——负责参数解析与命令分发。
 
 ## AI 参与辅助开发
 

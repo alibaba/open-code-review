@@ -115,39 +115,55 @@ refactor(viewer): extract task-card rendering into helper
 **PR 제목**에도 같은 형식을 씁니다. 그래야 생성되는 변경 로그에 깔끔하게
 들어갑니다.
 
+`PR Commit Policy`는 PR 제목과 본문을 포함한 모든 커밋 메시지를 대소문자 구분 없이 검사합니다.
+`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]` 또는
+`skip-checks: true` / `skip-checks:true`만 있는 줄을 포함하지 마세요.
+
+검사에 실패하면 PR 제목을 수정하거나 자신의 기여 브랜치에서 해당 커밋 메시지를 다시 작성하세요.
+이러한 지시가 없는 새 커밋을 추가해도 이전 커밋의 위반 사항은 해결되지 않습니다.
+PR 설명에서는 이러한 지시를 논의할 수 있으며 검사 대상이 아닙니다.
+
 ## 프로젝트 구조 {#project-layout}
 
 ```
 open-code-review/
+├── acp/                       # CLI용 독립 ACP(Agent Client Protocol) 어댑터
 ├── cmd/opencodereview/        # CLI 진입점 — 플래그 파싱, 디스패치
+├── docs/                      # 현지화된 README와 기여 가이드
+├── imgs/                      # README 이미지와 로고
 ├── internal/
 │   ├── agent/                 # 리뷰 Agent 로직, 서브 Agent 디스패치
+│   ├── chatgptauth/           # ChatGPT OAuth와 자격 증명 관리
 │   ├── config/                # 템플릿, 규칙, 허용 목록, 내장 JSON
-│   ├── diff/                  # Git diff 파싱, 세 가지 모드
+│   ├── delegate/              # LLM 호출 없이 리뷰 명세 생성
+│   ├── diff/                  # Git diff 파싱
 │   ├── gitcmd/                # Git 하위 프로세스 실행기
-│   ├── llm/                   # LLM 클라이언트(Anthropic, OpenAI), 엔드포인트 해석기
+│   ├── llm/                   # LLM 클라이언트와 엔드포인트 해석
+│   ├── llmloop/               # Review와 Scan이 공유하는 LLM 도구 호출 루프
+│   ├── mcp/                   # MCP 클라이언트와 도구 어댑터
 │   ├── model/                 # 데이터 구조체(LlmComment, Diff 등)
 │   ├── pathutil/              # 경로 유틸리티
-│   ├── release/               # 릴리스 노트 생성
+│   ├── release/               # 릴리스 산출물 이름의 일관성 검사
+│   ├── scan/                  # 전체 파일 코드 리뷰
 │   ├── session/               # JSONL 세션 기록기
 │   ├── stdout/                # 조용히 만들 수 있는 stdout 기록기
 │   ├── suggestdiff/           # 제안 diff 렌더링
 │   ├── telemetry/             # OpenTelemetry 설정과 헬퍼
 │   ├── tool/                  # 도구 레지스트리와 프로바이더 구현
-│   └── viewer/                # 내장 HTTP UI
-├── pages/                     # WebUI 소개 페이지(별도 React 앱)
-├── plugins/                   # Claude Code 슬래시 명령
-├── extensions/                # 에디터 확장(VS Code)
+│   └── viewer/                # 리뷰 세션을 탐색하는 내장 HTTP UI
+├── pages/                     # 공식 웹사이트 랜딩 페이지와 문서(별도 React 앱)
+├── plugins/                   # 코딩 에이전트 통합(Claude Code, Codex, OpenCode 등)
+├── extensions/                # VS Code 및 IntelliJ IDEA 확장과 공유 프런트엔드
 ├── examples/                  # CI 레시피(GitHub Actions, GitLab CI)
-├── skills/                    # Agent SDK skill 매니페스트
-├── scripts/                   # NPM postinstall과 크로스 빌드 스크립트
+├── skills/                    # 리뷰 및 위임 스킬 정의
+├── scripts/                   # 설치, 배포 및 저장소 검사 스크립트
 ├── npm/                       # 플랫폼별 optional dependency 패키지
 └── bin/                       # NPM 래퍼(Node)
 ```
 
 기여는 대개 `internal/agent/`, `internal/tool/`, `internal/llm/`을 건드립니다.
-`cmd/opencodereview/`의 CLI 표면은 일부러 얇게 두었습니다. 플래그를 파싱한 뒤
-agent 패키지로 넘기는 것이 전부입니다.
+`cmd/opencodereview/`의 CLI 표면은 일부러 얇게 두었습니다. 플래그 파싱과
+명령 디스패치를 담당합니다.
 
 ## AI 지원 개발
 

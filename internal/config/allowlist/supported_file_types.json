@@ -39,6 +39,8 @@
   ".zsh",
   ".fish",
   ".ps1",
+  ".psm1",
+  ".psd1",
   ".sql",
   ".css",
   ".scss",
@@ -79,6 +81,7 @@
   ".json5",
   ".dart",
   ".tf",
+  ".tofu",
   ".graphql",
   ".gql",
   ".prisma",
@@ -93,6 +96,7 @@
   ".nim",
   ".nims",
   ".nimble",
+  ".nu",
   ".elm",
   ".properties",
   ".po",
@@ -113,5 +117,9 @@
   ".vhdl",
   ".sol",
   ".vy",
-  ".rego"
+  ".rego",
+  ".glsl",
+  ".hlsl",
+  ".wgsl",
+  ".metal"
 ]

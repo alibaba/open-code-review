@@ -116,39 +116,57 @@ refactor(viewer): extract task-card rendering into helper
 Тот же формат используется для **заголовков PR**, чтобы они аккуратно
 отображались в автоматически созданном журнале изменений.
 
+`PR Commit Policy` проверяет заголовок PR и полное сообщение каждого коммита,
+включая тело, без учёта регистра. Не добавляйте `[skip ci]`, `[ci skip]`, `[no ci]`,
+`[skip actions]`, `[actions skip]` или отдельную строку
+`skip-checks: true` / `skip-checks:true`.
+
+Если проверка не пройдена, измените заголовок PR или перепишите сообщения
+соответствующих коммитов в своей рабочей ветке. Новый коммит без этих инструкций
+не устраняет нарушения в предыдущих коммитах. Описание PR может содержать
+обсуждение этих инструкций и не проверяется.
+
 ## Структура проекта
 
 ```
 open-code-review/
-├── cmd/opencodereview/        # CLI entry point — flag parsing, dispatch
+├── acp/                       # Независимый адаптер ACP (Agent Client Protocol) для CLI
+├── cmd/opencodereview/        # Точка входа CLI — разбор флагов и диспетчеризация
+├── docs/                      # Локализованные README и руководства для участников
+├── imgs/                      # Изображения и логотипы для README
 ├── internal/
-│   ├── agent/                 # Review agent logic, sub-agent dispatch
-│   ├── config/                # Template, rules, allowlist, embedded JSON
-│   ├── diff/                  # Git diff parsing, three modes
-│   ├── gitcmd/                # Git subprocess runner
-│   ├── llm/                   # LLM client (Anthropic & OpenAI), endpoint resolver
-│   ├── model/                 # Data structs (LlmComment, Diff, …)
-│   ├── pathutil/              # Path utilities
-│   ├── release/               # Release-notes generation
-│   ├── session/               # JSONL session writer
-│   ├── stdout/                # Quiet-able stdout writer
-│   ├── suggestdiff/           # Suggestion diff rendering
-│   ├── telemetry/             # OpenTelemetry config + helpers
-│   ├── tool/                  # Tool registry + provider impls
-│   └── viewer/                # Embedded HTTP UI
-├── pages/                     # WebUI marketing page (separate React app)
-├── plugins/                   # Claude Code slash command
-├── extensions/                # Editor extensions (VS Code)
-├── examples/                  # CI recipes (GitHub Actions, GitLab CI)
-├── skills/                    # Agent SDK skill manifest
-├── scripts/                   # NPM postinstall + cross-build scripts
-├── npm/                       # Per-platform optional dependency packages
-└── bin/                       # NPM wrapper (Node)
+│   ├── agent/                 # Логика агента ревью и запуск подагентов
+│   ├── chatgptauth/           # ChatGPT OAuth и управление учётными данными
+│   ├── config/                # Шаблоны, правила, список разрешений, встроенный JSON
+│   ├── delegate/              # Генерация спецификаций ревью без вызовов LLM
+│   ├── diff/                  # Разбор Git diff
+│   ├── gitcmd/                # Запуск Git в дочерних процессах
+│   ├── llm/                   # Клиенты LLM и определение конечных точек API
+│   ├── llmloop/               # Общий цикл вызова инструментов LLM для review и scan
+│   ├── mcp/                   # Клиенты MCP и адаптеры инструментов
+│   ├── model/                 # Структуры данных (LlmComment, Diff, …)
+│   ├── pathutil/              # Утилиты для работы с путями
+│   ├── release/               # Проверки согласованности имён артефактов релиза
+│   ├── scan/                  # Ревью кода полных файлов
+│   ├── session/               # Запись сеансов в JSONL
+│   ├── stdout/                # Вывод в stdout с возможностью отключения
+│   ├── suggestdiff/           # Отображение diff предлагаемых изменений
+│   ├── telemetry/             # Настройка OpenTelemetry и вспомогательные функции
+│   ├── tool/                  # Реестр инструментов и реализации провайдеров
+│   └── viewer/                # Встроенный HTTP UI для просмотра сеансов ревью
+├── pages/                     # Главная страница сайта и документация (отдельное приложение React)
+├── plugins/                   # Интеграции с агентами для программирования (Claude Code, Codex, OpenCode, …)
+├── extensions/                # Расширения VS Code и IntelliJ IDEA, общий фронтенд
+├── examples/                  # Примеры CI (GitHub Actions, GitLab CI)
+├── skills/                    # Определения навыков для ревью и делегирования
+├── scripts/                   # Скрипты установки, публикации и проверки репозитория
+├── npm/                       # Необязательные пакеты зависимостей для каждой платформы
+└── bin/                       # Обёртка NPM (Node)
 ```
 
 Большинство изменений затрагивает `internal/agent/`, `internal/tool/` или
 `internal/llm/`. Интерфейс CLI в `cmd/opencodereview/` намеренно сделан
-тонким: он разбирает флаги, а затем передаёт управление пакету агента.
+тонким: он разбирает флаги и выполняет диспетчеризацию команд.
 
 ## Разработка с помощью ИИ
 
