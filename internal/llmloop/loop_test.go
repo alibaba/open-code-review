@@ -651,6 +651,44 @@ func TestExecuteToolCall_CodeCommentUsesPerItemPath(t *testing.T) {
 	}
 }
 
+func TestExecuteToolCall_CodeCommentWithNoUsableEntryIsReported(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	r := NewRunner(Deps{
+		Tools:            reg,
+		CommentCollector: collector,
+	})
+
+	argsJSON, err := json.Marshal(map[string]any{
+		"comments": []any{
+			map[string]any{"path": "main.go", "message": "nil dereference"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cp := r.executeToolCall(context.Background(), "main.go", llm.ToolCall{
+		Function: llm.FunctionCall{
+			Name:      "code_comment",
+			Arguments: string(argsJSON),
+		},
+	}, nil, "")
+
+	if cp.Data != tool.CommentNoneUsableMsg {
+		t.Fatalf("result = %q, want %q", cp.Data, tool.CommentNoneUsableMsg)
+	}
+	if len(collector.Comments()) != 0 {
+		t.Fatalf("collected %d comments, want 0", len(collector.Comments()))
+	}
+	if failures := r.ToolFailures(); len(failures) != 1 || failures[0].ToolName != "code_comment" {
+		t.Fatalf("ToolFailures() = %+v, want one code_comment failure", failures)
+	}
+}
+
 func graceRoundCommentResponse() *llm.ChatResponse {
 	content := ""
 	return &llm.ChatResponse{

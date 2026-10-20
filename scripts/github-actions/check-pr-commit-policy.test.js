@@ -5,7 +5,9 @@
 
 const assert = require("assert");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
+const { spawnSync } = require("child_process");
 const { findSkipDirectives, readPullRequest, run } = require("./check-pr-commit-policy.js");
 
 const ROOT = path.resolve(__dirname, "../..");
@@ -362,6 +364,78 @@ test("rejects cursor loops", async () => {
   await assert.rejects(readPullRequest(client([firstPage, secondPage]), VARIABLES), /Incomplete PR commit pagination/);
 });
 
+for (const initialState of ["fresh", "cleaned sparse"]) {
+  test(`policy checkout preserves source for later jobs in a ${initialState} workspace`, () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-pr-policy-checkout-"));
+    const git = (args, allowedStatuses = [0]) => {
+      const result = spawnSync("git", args, {
+        cwd: directory,
+        encoding: "utf8",
+        timeout: 10000,
+        env: {
+          ...process.env,
+          HOME: directory,
+          LC_ALL: "C",
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_CONFIG_GLOBAL: os.devNull,
+        },
+      });
+      assert.ifError(result.error);
+      assert.ok(allowedStatuses.includes(result.status), `git ${args.join(" ")}: ${result.stderr}`);
+      return result.stdout.trim();
+    };
+    const policyPath = "scripts/github-actions/check-pr-commit-policy.js";
+    const files = {
+      "go.mod": "module example.test/checkout\n",
+      "cmd/opencodereview/main.go": "package main\n\nfunc main() {}\n",
+      [policyPath]: "module.exports = {};\n",
+    };
+    try {
+      git(["init", "-q"]);
+      for (const [relativePath, content] of Object.entries(files)) {
+        const filename = path.join(directory, relativePath);
+        fs.mkdirSync(path.dirname(filename), { recursive: true });
+        fs.writeFileSync(filename, content);
+      }
+      git(["add", "."]);
+      git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "fixture"]);
+      const head = git(["rev-parse", "HEAD"]);
+      const checkoutWithPinnedActionCommands = (sparsePattern) => {
+        if (sparsePattern) {
+          git(["config", "core.sparseCheckout", "true"]);
+          fs.writeFileSync(path.join(directory, ".git/info/sparse-checkout"), `${sparsePattern}\n`);
+        } else {
+          git(["sparse-checkout", "disable"]);
+          git(["config", "--local", "--unset-all", "extensions.worktreeConfig"], [0, 5]);
+        }
+        git(["checkout", "--force", "--detach", head]);
+      };
+      if (initialState === "cleaned sparse") {
+        checkoutWithPinnedActionCommands(policyPath);
+        assert.ok(!fs.existsSync(path.join(directory, "go.mod")), "fixture must reproduce sparse source omission");
+        git(["config", "--local", "core.sparseCheckout", "false"]);
+        git(["sparse-checkout", "disable"]);
+      }
+
+      const workflow = fs.readFileSync(path.join(ROOT, ".github/workflows/pr-commit-policy.yml"), "utf8");
+      const sparsePattern = workflow.match(/^\s+sparse-checkout:\s*(.+)$/m)?.[1];
+      checkoutWithPinnedActionCommands(sparsePattern);
+      checkoutWithPinnedActionCommands();
+      checkoutWithPinnedActionCommands();
+
+      for (const [relativePath, content] of Object.entries(files)) {
+        assert.ok(fs.existsSync(path.join(directory, relativePath)), `${relativePath} must survive later checkouts`);
+        assert.strictEqual(fs.readFileSync(path.join(directory, relativePath), "utf8"), content);
+      }
+      assert.notStrictEqual(git(["config", "--local", "--bool", "core.sparseCheckout"], [0, 1]), "true");
+      assert.strictEqual(git(["rev-parse", "HEAD"]), head);
+      assert.strictEqual(git(["status", "--porcelain"]), "");
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}
+
 test("workflow preserves trust boundaries and runs the exported policy", async () => {
   const workflow = fs.readFileSync(path.join(ROOT, ".github/workflows/pr-commit-policy.yml"), "utf8");
   assert.match(workflow, /pull_request_target:\n    branches: \[main\]/);
@@ -371,8 +445,7 @@ test("workflow preserves trust boundaries and runs the exported policy", async (
   assert.match(workflow, /container:\n      image: node:24\.18\.0\n      options: --cpus=1 --memory=1g\n/);
   assert.match(workflow, /ref: \$\{\{ github.sha \}\}/);
   assert.match(workflow, /persist-credentials: false/);
-  assert.match(workflow, /sparse-checkout: scripts\/github-actions\/check-pr-commit-policy.js/);
-  assert.match(workflow, /sparse-checkout-cone-mode: false/);
+  assert.doesNotMatch(workflow, /^\s+sparse-checkout(?:-cone-mode)?:/m);
   assert.match(workflow, /cancel-in-progress: true/);
   assert.ok(!/\bwrite\b|\bsecrets\.|\bpaths(?:-ignore)?:|\bif:|\bcontinue-on-error:|\brun:|\buses:.*(?:cache|artifact)|pull_request\.(?:head|title|body)|--privileged|docker\.sock|\bvolumes:/.test(workflow));
   const script = workflow.split("          script: |\n")[1].trim();
