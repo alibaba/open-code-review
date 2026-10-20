@@ -26,11 +26,13 @@ func TestRunRulesCheck(t *testing.T) {
 		})
 	})
 
-	t.Run("non-git repo dir errors", func(t *testing.T) {
+	t.Run("non-git repo dir still resolves (#1704)", func(t *testing.T) {
 		rulesCheckRepoDir = t.TempDir()
 		defer func() { rulesCheckRepoDir = dir }()
-		if err := runRulesCheck("x.go"); err == nil {
-			t.Fatal("expected error for non-git repo dir")
-		}
+		silenceStdout(t, func() {
+			if err := runRulesCheck("x.go"); err != nil {
+				t.Fatalf("runRulesCheck error for non-git dir: %v", err)
+			}
+		})
 	})
 }
