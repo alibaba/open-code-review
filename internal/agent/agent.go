@@ -787,7 +787,7 @@ dispatchLoop:
 						fingerprint := reviewItemFingerprint(a.reviewMode(), d)
 						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 {
 							a.markCompleted(d)
-							a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+							a.recordReviewCheckpoint(d, false)
 							continue
 						}
 						a.markFailed(d, stop.class, stop.reason)
@@ -813,10 +813,8 @@ dispatchLoop:
 				return
 			}
 			for _, d := range g.Diffs {
-				fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-				comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
 				a.markCompleted(d)
-				a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+				a.recordReviewCheckpoint(d, false)
 			}
 		}(group)
 	}
@@ -897,8 +895,8 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 		for _, cm := range item.Comments {
 			a.args.CommentCollector.Add(cm)
 		}
-		a.session.RecordReviewItemReused(effectivePath(d), d.OldPath, d.NewPath, fingerprint, resume.SessionID, item.Comments)
 		a.markReused(d)
+		a.recordReviewCheckpoint(d, true)
 		reused++
 	}
 
@@ -1286,7 +1284,39 @@ func (a *Agent) finalizeManifest() error {
 		return fmt.Errorf("finalize run manifest: %w", err)
 	}
 	a.session.SetFinalManifest(&m)
+	a.persistFinalReviewCheckpoints(&m)
 	return nil
+}
+
+func (a *Agent) persistFinalReviewCheckpoints(m *session.RunManifest) {
+	completed := make(map[string]bool, len(m.Coverage.Completed))
+	for _, item := range m.Coverage.Completed {
+		completed[item.ItemID] = true
+	}
+	reused := make(map[string]bool, len(m.Coverage.Reused))
+	for _, item := range m.Coverage.Reused {
+		reused[item.ItemID] = true
+	}
+	// Final snapshots replace incremental ones after cross-file findings and
+	// filters settle, without promoting failed items to reusable checkpoints.
+	for _, d := range a.diffs {
+		id := a.manifestItemID(d)
+		if !completed[id] && !reused[id] {
+			continue
+		}
+		a.recordReviewCheckpoint(d, reused[id])
+	}
+}
+
+func (a *Agent) recordReviewCheckpoint(d model.Diff, reused bool) {
+	path := effectivePath(d)
+	fingerprint := reviewItemFingerprint(a.reviewMode(), d)
+	comments := a.args.CommentCollector.CommentsForPath(path)
+	if reused {
+		a.session.RecordReviewItemReused(path, d.OldPath, d.NewPath, fingerprint, resumedFromSession(a.args.Resume), comments)
+	} else {
+		a.session.RecordReviewItemDone(path, d.OldPath, d.NewPath, fingerprint, comments)
+	}
 }
 
 func resumedFromSession(resume *session.ResumeState) string {

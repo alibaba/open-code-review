@@ -24,6 +24,41 @@ func TestListSessions_EmptyRepoReturnsNil(t *testing.T) {
 	}
 }
 
+func TestCheckpointSnapshotsReplaceSummaryAndDetail(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repo := t.TempDir()
+	sh := New(repo, "main", "test", SessionOptions{ReviewMode: ReviewModeCommit})
+	t.Cleanup(func() { _ = sh.Finalize() })
+	sh.RecordReviewItemDone("a.go", "", "a.go", "a", []model.LlmComment{{Content: "early"}})
+	sh.RecordReviewItemReused("b.go", "", "b.go", "b", "parent", []model.LlmComment{{Content: "stale"}})
+	sh.RecordReviewItemDone("a.go", "", "a.go", "a", []model.LlmComment{{Content: "final"}, {Content: "late"}})
+	sh.RecordReviewItemFailed("b.go", "", "b.go", "b", "failed after reuse")
+	sh.RecordReviewItemFailed("c.go", "", "c.go", "c", "retryable")
+	sh.RecordReviewItemReused("c.go", "", "c.go", "c", "parent", nil)
+
+	for _, finalized := range []bool{false, true} {
+		if finalized {
+			if err := sh.Finalize(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		summary, err := LoadSummary(repo, sh.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if summary.CompletedFiles != 1 || summary.ReusedFiles != 1 || summary.FailedFiles != 1 || summary.TotalComments != 2 || summary.Aborted == finalized {
+			t.Fatalf("summary double-counted or retained superseded snapshots: %+v", summary)
+		}
+		detailSummary, items, err := LoadDetail(repo, sh.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if detailSummary.TotalComments != summary.TotalComments || len(items) != 3 || items[0].Comments != 2 || items[1].Type != "failed" || items[2].Type != "reused" {
+			t.Fatalf("detail retained superseded snapshots: %+v", items)
+		}
+	}
+}
+
 func TestListSessions_SortsAndAggregates(t *testing.T) {
 	tmpHome := t.TempDir()
 	setTestHome(t, tmpHome)
