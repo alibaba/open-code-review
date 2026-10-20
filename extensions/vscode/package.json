@@ -101,12 +101,12 @@
     "@vscode/vsce": "^3.0.0",
     "css-loader": "^7.1.5",
     "eslint": "^8.56.0",
-    "jest": "^30.5.0",
+    "jest": "^30.5.2",
     "style-loader": "^4.0.0",
-    "ts-jest": "^29.4.12",
+    "ts-jest": "^29.4.14",
     "ts-loader": "^9.5.0",
     "typescript": "^5.3.0",
-    "webpack": "^5.110.1",
+    "webpack": "^5.111.1",
     "webpack-cli": "^7.2.3"
   },
   "resolutions": {
