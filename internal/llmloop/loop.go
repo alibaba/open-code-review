@@ -389,6 +389,10 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
 	sessionID := uuid.NewString()
+	// Carry the per-run Langfuse session on the context so every span in this
+	// conversation — LLM rounds, grace round, tool calls — reports the same ID
+	// without racing other conversations through shared state.
+	ctx = telemetry.WithSessionID(ctx, sessionID)
 
 	// Async compression is owned by this conversation alone; the deferred
 	// cancel aborts any job still in flight when the conversation ends.
@@ -426,6 +430,7 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		reqCtx := r.requestCtx(ctx, taskKey, session.MainTask, rec.RequestNo)
 
 		_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+		telemetry.RecordLLMInput(llmSpan, sessionID, r.deps.Model, messages)
 		resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 			Model:     r.deps.Model,
 			Messages:  messages,
@@ -451,6 +456,7 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 			atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
 		}
 		telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+		telemetry.RecordLLMOutput(llmSpan, resp.VisibleContent(), resp.ToolCalls(), resp.ReasoningContent(), resp.Usage)
 		llmSpan.End()
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
@@ -584,6 +590,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	reqCtx := r.requestCtx(ctx, taskKey, session.MainTask, rec.RequestNo)
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+	telemetry.RecordLLMInput(llmSpan, sessionID, r.deps.Model, messages)
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  messages,
@@ -611,6 +618,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
 	}
 	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	telemetry.RecordLLMOutput(llmSpan, resp.VisibleContent(), resp.ToolCalls(), resp.ReasoningContent(), resp.Usage)
 	llmSpan.End()
 	telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
@@ -723,6 +731,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 	if t == tool.CodeComment {
 		telemetry.PrintToolCallStarted(t.Name(), args)
 		_, toolSpan := telemetry.StartToolSpan(ctx, t.Name())
+		telemetry.RecordToolInput(toolSpan, args)
 
 		comments, repair, errMsg := tool.ParseCommentsWithPath(args, taskKey)
 		if repair != nil {
@@ -738,6 +747,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		if errMsg != "" {
 			dur := time.Since(startTime)
 			toolErr := fmt.Errorf("%s", errMsg)
+			telemetry.RecordToolOutput(toolSpan, errMsg)
 			telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), toolErr)
 			toolSpan.End()
 			telemetry.RecordToolCall(ctx, t.Name(), dur, false)
@@ -829,6 +839,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 				defer func() {
 					dur := time.Since(startTime)
 					telemetry.RecordToolResult(toolSpan, toolName, dur.Milliseconds(), nil)
+					telemetry.RecordToolOutput(toolSpan, comments)
 					toolSpan.End()
 					telemetry.PrintToolCallFinished(toolName, dur)
 				}()
@@ -842,6 +853,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 
 		resolveAndCollect(ctx)
 		dur := time.Since(startTime)
+		telemetry.RecordToolOutput(toolSpan, comments)
 		telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), nil)
 		toolSpan.End()
 		telemetry.RecordToolCall(ctx, t.Name(), dur, true)
@@ -856,9 +868,15 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 	// Synchronous path for all other tools
 	telemetry.PrintToolCallStarted(toolName, args)
 	_, toolSpan := telemetry.StartToolSpan(ctx, toolName)
+	telemetry.RecordToolInput(toolSpan, args)
 	result, err := p.Execute(ctx, args)
 	dur := time.Since(startTime)
 	ok := err == nil
+	if err != nil {
+		telemetry.RecordToolOutput(toolSpan, err.Error())
+	} else {
+		telemetry.RecordToolOutput(toolSpan, result)
+	}
 	telemetry.RecordToolResult(toolSpan, toolName, dur.Milliseconds(), err)
 	toolSpan.End()
 	telemetry.RecordToolCall(ctx, toolName, dur, ok)
