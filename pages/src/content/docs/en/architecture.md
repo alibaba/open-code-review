@@ -16,7 +16,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (selection.go) — drop binaries, secret paths,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -53,7 +53,7 @@ the same default Git uses.
 Untracked files are read from disk and treated as full-file additions so
 they're reviewed pre-commit.
 
-## The five-gate file filter
+## The six-gate file filter
 
 Once diffs are loaded, every file passes through
 [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
@@ -61,6 +61,7 @@ The function returns one of:
 
 ```
 binary          — file is binary
+secret_exclude  — path matches a built-in secret pattern (.env, id_rsa, …)
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in exclude pattern
@@ -73,12 +74,15 @@ its raw diff alone exceeds 80% of `max_tokens`. The gates run in this
 order:
 
 1. `binary` — binary files are dropped first.
-2. `user_exclude` — your project's `exclude` always wins.
-3. `user_include` — if the filter has include patterns **and** the file
+2. `secret_exclude` — either path matches a built-in secret-path
+   protection (`.env`, `id_rsa`, `.netrc`, …). Like `provider_directory`,
+   no `include` rule can bring it back.
+3. `user_exclude` — your project's `exclude` always wins.
+4. `user_include` — if the filter has include patterns **and** the file
    matches one, it's kept immediately (returns empty), bypassing the
    `unsupported_ext` and `default_path` gates below.
-4. `unsupported_ext` filters by extension allowlist.
-5. `default_path` is the last gate: it matches built-in exclude patterns,
+5. `unsupported_ext` filters by extension allowlist.
+6. `default_path` is the last gate: it matches built-in exclude patterns,
    both test files (`**/*_test.go`, `**/__tests__/**`, `**/*_spec.rb`, …)
    and dependency or build-output directories (`**/node_modules/**`,
    `**/vendor/**`, `**/target/**`, `**/__pycache__/**`, …). Every pattern

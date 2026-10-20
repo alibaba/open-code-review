@@ -13,7 +13,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (selection.go) — drop binaries, secret paths,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -37,12 +37,13 @@ flowchart TD
 
 untracked ファイルはディスクから読み込まれ、ファイル全体の新規追加として扱われるため、commit 前にレビューできます。
 
-## 5 段階ゲートのファイルフィルタリング
+## 6 段階ゲートのファイルフィルタリング
 
 diff の読み込み後、各ファイルは [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go) を通過します。この関数は次のいずれかを返します:
 
 ```
 binary          — file is binary
+secret_exclude  — path matches a built-in secret pattern (.env, id_rsa, …)
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
@@ -51,10 +52,11 @@ default_path    — matched a built-in test-file exclude pattern
 ……またはファイルが保持される場合は空を返します。`deleted` と `too_large` は `whyExcluded` からは**返されません**。これらはゲートのあとに `selectFiles` が適用します。`deleted` は保持されたファイルの diff が `IsDeleted` を報告したとき、`too_large` は diff だけで `max_tokens` の 80% を超えるときです。各ゲートは以下の順序で実行されます:
 
 1. `binary`: バイナリファイルが最初に破棄されます。
-2. `user_exclude`: あなたのプロジェクトの `exclude` が常に優先されます。
-3. `user_include`: include パターンが設定されており**かつ**ファイルがそのいずれかに一致する場合、即座に保持され（空を返す）、下記の `unsupported_ext` と `default_path` のゲートをバイパスします。
-4. `unsupported_ext` は拡張子のホワイトリストでフィルタリングします。
-5. `default_path` は最後のゲートです: 組み込みの**テストファイル**除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、`**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）に一致します。各パターンはルートプレフィックスとして `**/` を付けます。
+2. `secret_exclude`: 新旧いずれかのパスが組み込みの**シークレットパス**保護（`.env`、`id_rsa`、`.netrc` など）に一致します。`provider_directory` と同様、`include` ルールでレビュー対象に戻すことはできません。
+3. `user_exclude`: あなたのプロジェクトの `exclude` が常に優先されます。
+4. `user_include`: include パターンが設定されており**かつ**ファイルがそのいずれかに一致する場合、即座に保持され（空を返す）、下記の `unsupported_ext` と `default_path` のゲートをバイパスします。
+5. `unsupported_ext` は拡張子のホワイトリストでフィルタリングします。
+6. `default_path` は最後のゲートです: 組み込みの**テストファイル**除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、`**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）に一致します。各パターンはルートプレフィックスとして `**/` を付けます。
 
 ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、diff-provider 層で、`internal/diff/git.go` の `providerDirIgnoreDirs` リストを通じて発生します。これらのディレクトリの diff は解析されたあと除去され、ファイルごとのフィルターに到達することは決してありません。Preview はこれらのファイルを `provider_directory` として報告します。`include` ルールでこれらをレビュー対象に戻すことはできません。
 
