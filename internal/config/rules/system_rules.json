@@ -26,6 +26,7 @@
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,cxx,hpp,hxx}": "cpp.md",
     "**/*.c": "c.md",
+    "**/*.{sh,bash}": "shell.md",
     "**/*.{py,pyi,ipynb}": "python.md",
     "**/*.{php,phtml}": "php.md",
     "**/*.proto": "protobuf.md",
