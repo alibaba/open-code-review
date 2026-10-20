@@ -65,7 +65,7 @@ func NewClient(ctx context.Context, name, command string, args, env []string, di
 		}
 	}()
 
-	toolsResult, err := session.ListTools(ctx, nil)
+	tools, err := listAllTools(ctx, session)
 	if err != nil {
 		return nil, fmt.Errorf("list tools from MCP server %q: %w", name, err)
 	}
@@ -74,7 +74,7 @@ func NewClient(ctx context.Context, name, command string, args, env []string, di
 	return &Client{
 		name:    name,
 		session: session,
-		tools:   toolsResult.Tools,
+		tools:   tools,
 	}, nil
 }
 
@@ -121,7 +121,7 @@ func NewRemoteClient(ctx context.Context, name, url string, headers map[string]s
 		}
 	}()
 
-	toolsResult, err := session.ListTools(ctx, nil)
+	tools, err := listAllTools(ctx, session)
 	if err != nil {
 		return nil, fmt.Errorf("list tools from remote MCP server %q: %w", name, err)
 	}
@@ -130,8 +130,25 @@ func NewRemoteClient(ctx context.Context, name, url string, headers map[string]s
 	return &Client{
 		name:    name,
 		session: session,
-		tools:   toolsResult.Tools,
+		tools:   tools,
 	}, nil
+}
+
+// listAllTools returns every tool the server publishes. tools/list is a
+// paginated method: a result carries at most one page plus a nextCursor, and a
+// client that issues a single ListTools call sees only that first page. The
+// SDK's iterator follows the cursor to exhaustion, so a server that pages its
+// catalog (any explicit PageSize, or more tools than the SDK's default page)
+// does not silently lose the tools past the first page.
+func listAllTools(ctx context.Context, session *mcp.ClientSession) ([]*mcp.Tool, error) {
+	var tools []*mcp.Tool
+	for tool, err := range session.Tools(ctx, nil) {
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, tool)
+	}
+	return tools, nil
 }
 
 // headerTransport injects custom headers into every HTTP request and surfaces
