@@ -4,6 +4,7 @@
 package session
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
-func TestListSessions_EmptyRepoReturnsNil(t *testing.T) {
+func TestListSessions_MissingDirReturnsEmptySlice(t *testing.T) {
 	tmpHome := t.TempDir()
 	setTestHome(t, tmpHome)
 
@@ -21,6 +22,15 @@ func TestListSessions_EmptyRepoReturnsNil(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty result, got %d entries", len(got))
+	}
+	// A nil slice marshals to JSON null, so a caller handing the result straight
+	// to an encoder could tell "no sessions directory" apart from "empty
+	// sessions directory" — the asymmetry this test exists to prevent.
+	if got == nil {
+		t.Error("expected a non-nil empty slice, got nil")
+	}
+	if b, err := json.Marshal(got); err != nil || string(b) != "[]" {
+		t.Errorf("json.Marshal = %s, %v; want [], nil", b, err)
 	}
 }
 
