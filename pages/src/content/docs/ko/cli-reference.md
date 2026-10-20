@@ -404,6 +404,7 @@ Sub-commands:
 ```bash
 ocr session list
 ocr session list --limit 50
+ocr session list --branch feat/my-feature
 ocr session list --json
 ```
 
@@ -412,6 +413,11 @@ ocr session list --json
 | `--repo <path>` | 현재 디렉터리 | 세션을 나열할 저장소. |
 | `--json` | `false` | 세션 요약을 JSON으로 출력합니다. |
 | `--limit <n>` | `20` | 나열할 세션 수를 제한합니다. `0`이면 제한이 없습니다. |
+| `--branch <name>` | 모든 브랜치 | 기록된 브랜치 이름이 지정한 이름과 정확히 일치하는 세션만 나열합니다(대소문자 구분). |
+
+브랜치 필터는 `--limit`보다 먼저 적용됩니다. 저장된 메타데이터를 사용하므로
+`--repo`로 보관된 체크아웃을 지정해도 작동합니다. 브랜치의 존재 여부나 세션의
+재개 가능 여부는 확인하지 않습니다. 브랜치가 기록되지 않은 세션은 필터링 시 제외됩니다.
 
 ### `ocr session show` {#ocr-session-show}
 
