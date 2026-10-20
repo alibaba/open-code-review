@@ -662,10 +662,6 @@ func TestExecuteToolCall_CodeCommentWithNoUsableEntryIsReported(t *testing.T) {
 		CommentCollector: collector,
 	})
 
-	// `content` is the only field carrying the finding text. An entry that
-	// names a path but no content is dropped by the parser, and a batch made
-	// only of such entries files nothing — which must not read back to the
-	// model as "Successfully commented."
 	argsJSON, err := json.Marshal(map[string]any{
 		"comments": []any{
 			map[string]any{"path": "main.go", "message": "nil dereference"},

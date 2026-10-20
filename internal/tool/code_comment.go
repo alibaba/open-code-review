@@ -47,15 +47,7 @@ var validCodeCommentSeverities = map[string]struct{}{
 	codeCommentSeverityLow:      {},
 }
 
-// CommentNoneUsableMsg is the second of the two verdicts the code_comment
-// tool returns without failing. It is returned when the `comments` array
-// parsed but every entry was dropped — each one lacked a non-empty `content`,
-// the only field carrying the finding text.
-//
-// Returning CommentSucceed there would tell the model the finding had been
-// filed while nothing reached the collector, so the loss would stay invisible
-// to both sides: the model moves on to task_done, and the run reports a review
-// that simply found less.
+// CommentNoneUsableMsg reports a parsed batch with no usable comments.
 const CommentNoneUsableMsg = "Error: none of the 'comments' entries could be filed; each entry needs a non-empty 'content' and a 'path' (or the reviewed file's path). Re-send the finding with those fields."
 
 // CodeCommentProvider submits review comments to the per-Agent CommentCollector.

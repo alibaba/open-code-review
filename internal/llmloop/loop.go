@@ -731,12 +731,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 			// repair would absorb an unbounded number of them unobserved.
 			r.RecordWarning("comment_args_repaired", taskKey, repair.Message())
 		}
-		// A batch that parsed but yielded no comment filed nothing: every entry
-		// was dropped for a missing non-empty `content`. Tolerating a partly-bad
-		// batch is deliberate (one malformed entry must not sink the good ones),
-		// but an empty result must not be reported as success — the model would
-		// move on believing the finding was filed, and the finding would be lost
-		// with neither side noticing.
+		// Report failure so the model can retry instead of assuming its findings were saved.
 		if errMsg == "" && len(comments) == 0 {
 			errMsg = tool.CommentNoneUsableMsg
 		}

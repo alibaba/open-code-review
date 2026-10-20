@@ -313,9 +313,6 @@ func TestCodeCommentProvider_Execute(t *testing.T) {
 	t.Run("all entries dropped returns error message", func(t *testing.T) {
 		collector := NewCommentCollector()
 		p := &CodeCommentProvider{Collector: collector}
-		// Each entry is missing `content` (the field the schema names), so
-		// every one of them is skipped. Reporting success here would tell the
-		// model the finding was filed while the collector stayed empty.
 		result, err := p.Execute(context.Background(), map[string]any{
 			"comments": []any{
 				map[string]any{"path": "main.go", "message": "nil dereference"},
