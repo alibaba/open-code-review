@@ -1853,42 +1853,12 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
-	fs := a.session.GetOrCreateFileSession(groupKey)
-	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
-	ctx = llm.ContextWithSessionKey(ctx,
-		llm.SessionTaskKey(a.session.SessionID, string(session.ReviewFilterTask), groupKey))
-	startTime := time.Now()
-	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(groupKey, session.ReviewFilterTask, rec.RequestNo))
-
-	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
-	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-		Model:     a.args.Model,
-		Messages:  messages,
-		Tools:     filterTools,
-		MaxTokens: a.args.Template.CompletionTokenLimit(),
-	})
-	duration := time.Since(startTime)
+	indices, err := a.requestFilterDecision(ctx, groupKey, messages, len(candidates))
 	if err != nil {
-		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
-		llmSpan.End()
-		rec.SetError(err, duration)
-		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter failed for group %q: %v\n", groupKey, err)
+		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter failed for group %q: %v; keeping all candidate comments\n", groupKey, err)
 		span.SetStatus(codes.Error, err.Error())
 		span.RecordError(err)
 		return
-	}
-	var totalTokens int64
-	if resp.Usage != nil {
-		totalTokens = resp.Usage.TotalTokens
-	}
-	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
-	llmSpan.End()
-	rec.SetResponse(resp, duration)
-	a.runner.RecordUsage(resp.Usage)
-
-	indices := parseFilterToolCalls(resp.ToolCalls(), len(candidates))
-	if indices == nil {
-		indices = parseFilterResponse(resp.Content(), len(candidates))
 	}
 	telemetry.SetAttr(span, "comments.filtered", len(indices))
 	if len(indices) == 0 {
@@ -1922,6 +1892,66 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for group %q\n", totalRemoved, groupKey)
 }
 
+// Retry only the filter so a formatting error never repeats the review itself.
+func (a *Agent) requestFilterDecision(ctx context.Context, groupKey string, messages []llm.Message, total int) (map[int]struct{}, error) {
+	fs := a.session.GetOrCreateFileSession(groupKey)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.ReviewFilterTask), groupKey))
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if attempt > 0 && a.args.MaxTokensBudget > 0 &&
+			(a.budgetExceeded.Load() || a.runner.TotalTokensUsed() >= a.args.MaxTokensBudget) {
+			if a.budgetExceeded.CompareAndSwap(false, true) {
+				a.recordWarning("token_budget_reached", groupKey,
+					fmt.Sprintf("skipped filter retry for group %q: used %d tokens reached budget %d", groupKey, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
+			}
+			return nil, fmt.Errorf("malformed filter output; token budget prevents retry")
+		}
+		rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
+		reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(groupKey, session.ReviewFilterTask, rec.RequestNo))
+		start := time.Now()
+		_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
+		resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
+			Model:     a.args.Model,
+			Messages:  messages,
+			Tools:     filterTools,
+			MaxTokens: a.args.Template.CompletionTokenLimit(),
+		})
+		duration := time.Since(start)
+		if err != nil {
+			telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+			llmSpan.End()
+			rec.SetError(err, duration)
+			return nil, err
+		}
+		var totalTokens int64
+		if resp.Usage != nil {
+			totalTokens = resp.Usage.TotalTokens
+		}
+		telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+		llmSpan.End()
+		rec.SetResponse(resp, duration)
+		a.runner.RecordUsage(resp.Usage)
+
+		indices := parseFilterToolCalls(resp.ToolCalls(), total)
+		if indices == nil {
+			indices = parseFilterResponse(resp.VisibleContent(), total)
+		}
+		if indices != nil {
+			return indices, nil
+		}
+		if attempt == 0 {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Review filter returned malformed output for group %q; retrying once\n", groupKey)
+			// Do not replay malformed tool calls without corresponding tool results.
+			messages = append(messages, llm.NewTextMessage("user",
+				"Your filter response was empty or malformed. Return the decision using approve_all_comments or report_incorrect_comments with valid JSON arguments, or return only a JSON array of comment IDs to remove (for example [\"c-0\"]). Use [] to keep all comments. Do not return prose."))
+		}
+	}
+	return nil, fmt.Errorf("malformed filter output after 2 attempts")
+}
+
 // buildGroupFilterCommentsJSON serializes comments with path info for group-level filtering.
 func buildGroupFilterCommentsJSON(comments []model.LlmComment) string {
 	type filterComment struct {
@@ -1951,6 +1981,13 @@ func parseFilterToolCalls(calls []llm.ToolCall, total int) map[int]struct{} {
 	for _, call := range calls {
 		switch call.Function.Name {
 		case "approve_all_comments":
+			// Providers can omit arguments for this parameterless tool.
+			if raw := strings.TrimSpace(call.Function.Arguments); raw != "" && raw != "null" {
+				var args map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(raw), &args); err != nil {
+					return nil
+				}
+			}
 			if indices == nil {
 				indices = make(map[int]struct{})
 			}
@@ -1958,9 +1995,8 @@ func parseFilterToolCalls(calls []llm.ToolCall, total int) map[int]struct{} {
 			var args struct {
 				CommentIDs []string `json:"comment_ids"`
 			}
-			if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Review filter: failed to parse tool call arguments: %v\n", err)
-				continue
+			if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil || args.CommentIDs == nil {
+				return nil
 			}
 			if indices == nil {
 				indices = make(map[int]struct{})
@@ -1981,12 +2017,7 @@ func parseFilterToolCalls(calls []llm.ToolCall, total int) map[int]struct{} {
 func parseFilterResponse(raw string, total int) map[int]struct{} {
 	raw = llmloop.StripMarkdownFences(raw)
 	var ids []string
-	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
-		preview := raw
-		if len(preview) > 200 {
-			preview = preview[:200] + "..."
-		}
-		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter: failed to parse LLM response: %v, raw: %s\n", err, preview)
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil || ids == nil {
 		return nil
 	}
 	indices := make(map[int]struct{})
