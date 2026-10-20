@@ -38,12 +38,17 @@ type mockResultProvider struct {
 	sessionID        string
 	budgetExceeded   bool
 	manifest         *session.RunManifest
+	contextChunks    int64
+	contextReceipts  int64
 }
 
-func (m *mockResultProvider) Diffs() []model.Diff            { return m.diffs }
-func (m *mockResultProvider) FilesReviewed() int64           { return m.filesReviewed }
-func (m *mockResultProvider) TotalInputTokens() int64        { return m.inputTokens }
-func (m *mockResultProvider) TotalOutputTokens() int64       { return m.outputTokens }
+func (m *mockResultProvider) Diffs() []model.Diff      { return m.diffs }
+func (m *mockResultProvider) FilesReviewed() int64     { return m.filesReviewed }
+func (m *mockResultProvider) TotalInputTokens() int64  { return m.inputTokens }
+func (m *mockResultProvider) TotalOutputTokens() int64 { return m.outputTokens }
+func (m *mockResultProvider) ContextStats() llmloop.RunContextStats {
+	return llmloop.RunContextStats{UniqueContextChunks: m.contextChunks, ContextReceipts: m.contextReceipts}
+}
 func (m *mockResultProvider) TotalTokensUsed() int64         { return m.totalTokens }
 func (m *mockResultProvider) TotalCacheReadTokens() int64    { return m.cacheReadTokens }
 func (m *mockResultProvider) TotalCacheWriteTokens() int64   { return m.cacheWriteTokens }
