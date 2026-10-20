@@ -4,6 +4,8 @@
 package llmloop
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -314,5 +316,56 @@ func TestPromptTokenLimitMatchesReplacedExpression(t *testing.T) {
 		if got, want := PromptTokenLimit(maxTokens), maxTokens*4/5; got != want {
 			t.Errorf("PromptTokenLimit(%d) = %d, want %d (maxTokens*4/5)", maxTokens, got, want)
 		}
+	}
+}
+
+// The compressed summary is the only remaining copy of everything below the
+// active zone, so a reply cut at the output cap silently loses conversation
+// detail: the rebuilt conversation still parses and the run carries on. Both
+// halves are pinned here — the cut is reported, an ordinary summary is not.
+func TestRunCompression_TruncatedSummaryIsReported(t *testing.T) {
+	cases := []struct {
+		name         string
+		finishReason string
+		wantWarnings int
+	}{
+		{"cut at the cap", "length", 1},
+		{"finished normally", "stop", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			summary := "compressed summary"
+			client := &metaCaptureClient{respond: func(int) *llm.ChatResponse {
+				return &llm.ChatResponse{Choices: []llm.Choice{{
+					Message:      llm.ResponseMessage{Content: &summary},
+					FinishReason: tc.finishReason,
+				}}}
+			}}
+			r, msgs := newCompressionRunner(t, client, nil)
+
+			if _, err := r.runCompression(context.Background(), msgs, "test.go"); err != nil {
+				t.Fatalf("runCompression: %v", err)
+			}
+
+			warnings := r.Warnings()
+			if len(warnings) != tc.wantWarnings {
+				t.Fatalf("warnings = %d, want %d", len(warnings), tc.wantWarnings)
+			}
+			if tc.wantWarnings == 0 {
+				return
+			}
+			w := warnings[0]
+			if w.Type != "response_truncated" {
+				t.Errorf("warning type = %q, want response_truncated", w.Type)
+			}
+			if w.File != "test.go" {
+				t.Errorf("warning file = %q, want the task key test.go", w.File)
+			}
+			// The reader has to learn what to raise without opening the session
+			// JSONL, so the message names the cap that was hit.
+			if cap := r.deps.Template.CompletionTokenLimit(); !strings.Contains(w.Message, fmt.Sprintf("%d tokens", cap)) {
+				t.Errorf("warning message %q must name the %d-token cap", w.Message, cap)
+			}
+		})
 	}
 }

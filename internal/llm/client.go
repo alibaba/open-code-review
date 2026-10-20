@@ -331,6 +331,23 @@ type ChatResponse struct {
 	RawUsage json.RawMessage `json:"-"`
 }
 
+// TruncatedAtOutputCap reports whether the backend stopped because the reply
+// reached the completion token cap rather than because the model was done.
+//
+// Every client populates Choice.FinishReason from its own protocol — the
+// openai-compatible ones per choice (streamed or not), anthropic from
+// stop_reason, responses by mapping incomplete to length — so this one
+// predicate covers all three. Callers need it because a cut reply is
+// otherwise indistinguishable from a complete one: the content parses, the
+// request succeeds, and the only trace is out_tokens sitting exactly on the
+// cap.
+func (r *ChatResponse) TruncatedAtOutputCap() bool {
+	if r == nil || len(r.Choices) == 0 {
+		return false
+	}
+	return r.Choices[0].FinishReason == "length"
+}
+
 // Content extracts the text content from the first choice, falling back to reasoning content.
 func (r *ChatResponse) Content() string {
 	if len(r.Choices) == 0 {
