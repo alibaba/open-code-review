@@ -51,3 +51,26 @@ func sameFileWithinBase(base, target string) bool {
 		cur = parent
 	}
 }
+
+// HomeEnvVar overrides where OCR keeps its config, rules and sessions.
+const HomeEnvVar = "OCR_HOME"
+
+// OCRHome returns the OCR home directory.
+//
+// It is $OCR_HOME when that is set, so a user can keep OCR out of $HOME, and
+// ~/.opencodereview otherwise. The default is unchanged, so existing installs
+// keep reading the config and sessions they already have.
+func OCRHome() (string, error) {
+	if dir := strings.TrimSpace(os.Getenv(HomeEnvVar)); dir != "" {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return "", err
+		}
+		return abs, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".opencodereview"), nil
+}
