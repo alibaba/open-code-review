@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -324,5 +325,85 @@ func TestFileFind_NonASCIIPath(t *testing.T) {
 				t.Errorf("expected to find %q, but got: %q", wantBase, got)
 			}
 		})
+	}
+}
+
+func TestFileFind_SpecialPaths(t *testing.T) {
+	dir := t.TempDir()
+	runGit := func(input string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Stdin = strings.NewReader(input)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("", "init", "-q")
+	runGit("", "config", "core.quotepath", "true")
+	content := "package example\n"
+	blob := runGit(content, "hash-object", "-w", "--stdin")
+	paths := []string{
+		"back\\slash.go",
+		"line\nbreak.go",
+		"plain.go",
+		`quote"file.go`,
+		"tab\tfile.go",
+		"unicode-\u6587\u4ef6.go",
+	}
+	slices.Sort(paths)
+	var entries strings.Builder
+	for _, path := range paths {
+		entries.WriteString("100644 blob " + blob + "\t" + path + "\x00")
+	}
+	// Populate Git objects and the index without creating names Windows rejects.
+	tree := runGit(entries.String(), "mktree", "-z")
+	runGit("", "-c", "core.protectNTFS=false", "read-tree", tree)
+
+	for _, tc := range []struct {
+		name string
+		mode ReviewMode
+		ref  string
+	}{
+		{name: "workspace", mode: ModeWorkspace},
+		{name: "range", mode: ModeRange, ref: tree},
+		{name: "commit", mode: ModeCommit, ref: tree},
+	} {
+		for _, withRunner := range []bool{false, true} {
+			name := tc.name
+			var runner *gitcmd.Runner
+			if withRunner {
+				name += "/runner"
+				runner = gitcmd.New(1)
+			}
+			t.Run(name, func(t *testing.T) {
+				fr := &FileReader{RepoDir: dir, Mode: tc.mode, Ref: tc.ref, Runner: runner}
+				p := NewFileFind(fr)
+				got, err := p.listGitFiles(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Equal(got, paths) {
+					t.Fatalf("listGitFiles() = %q, want %q", got, paths)
+				}
+				for _, path := range []string{`quote"file.go`, "tab\tfile.go", "plain.go"} {
+					found, err := p.Execute(context.Background(), map[string]any{"query_name": path})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if found != path {
+						t.Fatalf("file_find(%q) = %q, want literal path", path, found)
+					}
+					if tc.ref != "" {
+						read, err := fr.Read(context.Background(), found)
+						if err != nil || read != content {
+							t.Fatalf("Read(%q) = %q, %v; want %q", found, read, err, content)
+						}
+					}
+				}
+			})
+		}
 	}
 }
