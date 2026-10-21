@@ -193,7 +193,7 @@ func TestResolveLineNumbers_FallbackToFileContent_CRLF(t *testing.T) {
 	}
 }
 
-func TestResolveLineNumbers_FallbackToFileContent_FirstMatchWins(t *testing.T) {
+func TestResolveLineNumbers_FallbackToFileContent_AmbiguousMatchKeepsZero(t *testing.T) {
 	diffs := []model.Diff{{
 		NewPath:        "main.go",
 		NewFileContent: "x\ny\nx\ny\n",
@@ -206,8 +206,8 @@ func TestResolveLineNumbers_FallbackToFileContent_FirstMatchWins(t *testing.T) {
 
 	result := ResolveLineNumbers(comments, diffs)
 	cm := result[0]
-	if cm.StartLine != 1 || cm.EndLine != 2 {
-		t.Errorf("first match wins: expected 1..2, got %d..%d", cm.StartLine, cm.EndLine)
+	if cm.StartLine != 0 || cm.EndLine != 0 {
+		t.Errorf("ambiguous duplicate match: expected 0..0 (declined), got %d..%d", cm.StartLine, cm.EndLine)
 	}
 }
 
@@ -494,11 +494,19 @@ func TestMatchConsecutive_NoMatch(t *testing.T) {
 	}
 }
 
-func TestMatchConsecutive_FirstMatchWins(t *testing.T) {
+func TestMatchConsecutive_AmbiguousMatchDeclines(t *testing.T) {
 	lines := []indexedLine{{10, "x"}, {11, "y"}, {20, "x"}, {21, "y"}}
-	start, end, ok := matchConsecutive(lines, []string{"x", "y"})
-	if !ok || start != 10 || end != 11 {
-		t.Errorf("first match: got (%d, %d, %v), want (10, 11, true)", start, end, ok)
+	_, _, ok := matchConsecutive(lines, []string{"x", "y"})
+	if ok {
+		t.Errorf("expected ambiguous duplicate match to decline, got ok=true")
+	}
+}
+
+func TestMatchConsecutive_OverlappingDuplicateDeclines(t *testing.T) {
+	lines := []indexedLine{{1, "x"}, {2, "x"}, {3, "x"}}
+	_, _, ok := matchConsecutive(lines, []string{"x", "x"})
+	if ok {
+		t.Errorf("expected overlapping duplicate match to decline, got ok=true")
 	}
 }
 
@@ -745,6 +753,30 @@ func TestResolveFromHunk_NewSideAcrossDeletedLines(t *testing.T) {
 	// new-side: a:=1(5), b:=2(6), }(7) — deleted line skipped, consecutive
 	if cm.StartLine != 5 || cm.EndLine != 6 {
 		t.Errorf("new-side across deleted: expected 5..6, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveFromHunk_AmbiguousDuplicateDeclines(t *testing.T) {
+	// The same added line appears twice within one hunk's new-side lines.
+	raw := `diff --git a/test.go b/test.go
+--- a/test.go
++++ b/test.go
+@@ -3,3 +3,5 @@
+ func main() {
++    dup := 1
+     fmt.Println("hello")
++    dup := 1
+ }`
+
+	diffs := []model.Diff{{NewPath: "test.go", Diff: raw}}
+	comments := []model.LlmComment{
+		{Path: "test.go", ExistingCode: `    dup := 1`},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 0 || cm.EndLine != 0 {
+		t.Errorf("ambiguous duplicate in hunk: expected 0..0 (declined), got %d..%d", cm.StartLine, cm.EndLine)
 	}
 }
 
