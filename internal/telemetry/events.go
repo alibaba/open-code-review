@@ -6,7 +6,6 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/alibaba/open-code-review/internal/progress"
 	"github.com/alibaba/open-code-review/internal/stdout"
 )
 
@@ -107,22 +107,34 @@ func PrintTraceSummary(s TraceSummary) {
 func PrintToolCallStarted(toolName string, args map[string]any) {
 	summary := summarizeArgs(args)
 	if summary != "" {
-		fmt.Fprintf(stdout.Writer(), "[ocr]   ▶ %s %s\n", toolName, summary)
+		progress.Noticef("  ▶ %s %s\n", toolName, summary)
 	} else {
-		fmt.Fprintf(stdout.Writer(), "[ocr]   ▶ %s\n", toolName)
+		progress.Noticef("  ▶ %s\n", toolName)
 	}
 }
 
 // PrintToolCallFinished prints a line when a tool finishes successfully.
 // Example: [ocr]   ✔ file_read "internal/config/rules/loader.go" (12ms)
 func PrintToolCallFinished(toolName string, dur time.Duration) {
-	fmt.Fprintf(stdout.Writer(), "[ocr]   ✔ %s (%s)\n", toolName, FormatDuration(dur))
+	progress.Noticef("  ✔ %s (%s)\n", toolName, FormatDuration(dur))
 }
 
 // PrintToolCallError prints a line when a tool fails.
 // Example: [ocr]   ✘ file_read "internal/config/rules/loader.go" failed: permission denied
-func PrintToolCallError(toolName string, err error) {
-	fmt.Fprintf(os.Stderr, "[ocr]   ✘ %s failed: %v\n", toolName, err)
+//
+// group is the task the tool ran under, so a live dashboard can attribute the
+// failure to the row that was running it.
+func PrintToolCallError(group, toolName string, err error) {
+	// Published, not written through the diag writer: Stderr keeps the line on
+	// stderr while the text sink is installed, which is the same bytes this
+	// has always produced, and under the dashboard it becomes a tool-error row
+	// rather than a generic warning.
+	progress.Publish(progress.Event{
+		Kind:   progress.KindToolError,
+		Group:  group,
+		Text:   fmt.Sprintf("  ✘ %s failed: %v\n", toolName, err),
+		Stderr: true,
+	})
 }
 
 // summarizeArgs extracts a concise key=value summary from tool arguments for console display.

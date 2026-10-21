@@ -4,6 +4,7 @@
 package scan
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -34,6 +35,17 @@ func parseBatchStrategy(s string) BatchStrategy {
 	default:
 		return BatchNone
 	}
+}
+
+// batchLabel names the batch an item belongs to, as "2 of 5". It is empty
+// when the scan is not grouped: with the "none" strategy every file is its
+// own batch, so the number would only be the file's index and would say
+// nothing about where in the scan the work stands.
+func batchLabel(strategy BatchStrategy, idx, count int) string {
+	if strategy == BatchNone || count <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d of %d", idx+1, count)
 }
 
 // groupBatches partitions items according to strategy, then slices each

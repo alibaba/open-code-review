@@ -23,6 +23,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/progress"
 )
 
 // binarySniffWindow is the number of leading bytes inspected to decide
@@ -129,20 +130,20 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 		full := filepath.Join(p.repoDir, rel)
 		info, err := os.Lstat(full)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot stat %s: %v\n", rel, err)
+			fmt.Fprintf(progress.ErrWriter(), "[ocr] WARNING: cannot stat %s: %v\n", rel, err)
 			continue
 		}
 		if !info.Mode().IsRegular() {
 			continue
 		}
 		if info.Size() > p.maxFileSizeBytes {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: skipping %s (%d bytes exceeds %d-byte scan limit; raise MaxTokens if the real concern is token budget, not memory)\n",
+			fmt.Fprintf(progress.ErrWriter(), "[ocr] WARNING: skipping %s (%d bytes exceeds %d-byte scan limit; raise MaxTokens if the real concern is token budget, not memory)\n",
 				rel, info.Size(), p.maxFileSizeBytes)
 			continue
 		}
 		binary, err := isBinaryFile(full)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot sniff %s: %v\n", rel, err)
+			fmt.Fprintf(progress.ErrWriter(), "[ocr] WARNING: cannot sniff %s: %v\n", rel, err)
 			continue
 		}
 		if binary {
@@ -156,7 +157,7 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 		}
 		content, err := os.ReadFile(full)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read %s: %v\n", rel, err)
+			fmt.Fprintf(progress.ErrWriter(), "[ocr] WARNING: cannot read %s: %v\n", rel, err)
 			continue
 		}
 		out = append(out, model.ScanItem{
@@ -230,7 +231,7 @@ func (p *Provider) listFilesViaWalk(ctx context.Context) ([]string, error) {
 			return cerr
 		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: walk error at %s: %v\n", path, err)
+			fmt.Fprintf(progress.ErrWriter(), "[ocr] WARNING: walk error at %s: %v\n", path, err)
 			return nil // continue walking; skip this entry
 		}
 		if path == p.repoDir {

@@ -14,12 +14,11 @@
 package llmloop
 
 import (
-	"fmt"
 	"runtime/debug"
 	"sync"
 
 	"github.com/alibaba/open-code-review/internal/model"
-	"github.com/alibaba/open-code-review/internal/stdout"
+	"github.com/alibaba/open-code-review/internal/progress"
 )
 
 // AgentWarning describes a non-fatal warning recorded during one subtask's
@@ -103,13 +102,13 @@ func (p *CommentWorkerPool) submit(f func() ([]model.LlmComment, error), kwg *sy
 		// the semaphore is still released via the defer above.
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Fprintf(stdout.Writer(), "[ocr] CommentWorkerPool panic: %v\n%s\n", r, debug.Stack())
+				progress.Noticef("CommentWorkerPool panic: %v\n%s\n", r, debug.Stack())
 			}
 		}()
 
 		comments, err := f()
 		if err != nil {
-			fmt.Fprintf(stdout.Writer(), "[ocr] CommentWorkerPool error: %v\n", err)
+			progress.Noticef("CommentWorkerPool error: %v\n", err)
 		}
 		p.resultsMu.Lock()
 		p.results = append(p.results, comments...)

@@ -45,6 +45,14 @@ func addOutputPathFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVarP(target, "output", "o", "", "write results to a UTF-8 file (default: stdout; '-' also means stdout)")
 }
 
+// addTUIFlag registers --tui: opt into the live terminal dashboard. Without it
+// the run prints plain [ocr] progress lines instead of taking over the terminal.
+// The dashboard only starts on an interactive terminal for a human-readable run,
+// so piping, CI, and --format json/sarif already get the text path.
+func addTUIFlag(cmd *cobra.Command, target *bool) {
+	cmd.Flags().BoolVar(target, "tui", false, "show the live terminal dashboard instead of plain progress lines")
+}
+
 func addExcludeFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
 }
@@ -210,6 +218,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	cmd.RegisterFlagCompletionFunc("resume", completeSessionIDs)
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
+	addTUIFlag(cmd, &opts.tui)
 	addOutputPathFlag(cmd, &opts.outputPath)
 	addConcurrencyFlags(cmd, &opts.concurrency, &opts.concurrentTaskTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokens, &opts.maxTokensBudget)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
@@ -229,6 +238,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	cmd.Flags().StringVar(&opts.paths, "path", "", "comma-separated repo-relative directories or files to scan (default: whole repo; nonexistent paths are an error)")
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
+	addTUIFlag(cmd, &opts.tui)
 	addOutputPathFlag(cmd, &opts.outputPath)
 	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 8, "max concurrent subtasks")
 	cmd.Flags().IntVar(&opts.concurrentTaskTimeout, "timeout", 15, taskTimeoutHelp)
