@@ -34,6 +34,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".ETS", true},
 		{".json5", true},
 		{".JSON5", true},
+		{".jsonc", true},
+		{".JSONC", true},
 		{".kt", true},
 		{".KT", true},
 		{".kts", true},
@@ -205,7 +207,7 @@ func TestAllowlistKeepsEveryTestedExtension(t *testing.T) {
 
 	tested := []string{
 		".go", ".java", ".ts", ".tsx", ".astro", ".py", ".pyi", ".php", ".phtml",
-		".rs", ".r", ".ets", ".json5", ".kt", ".kts", ".fs", ".fsi", ".fsx",
+		".rs", ".r", ".ets", ".json5", ".jsonc", ".kt", ".kts", ".fs", ".fsi", ".fsx",
 		".ftl", ".ftlh", ".ftlx", ".hbs", ".mustache", ".jinja2", ".j2", ".pug", ".graphql",
 		".js", ".jsx", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".cs",
 		".rb", ".sh", ".bash", ".zsh", ".sql", ".css", ".scss", ".html", ".xml", ".yaml",

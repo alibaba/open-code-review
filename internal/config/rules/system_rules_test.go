@@ -110,6 +110,7 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"components/Button.ets", "State Decorator"},
 		{"entry/src/main/module.json5", "json-key"},
 		{"entry/oh-package.json5", "json-key"},
+		{"config/profile.jsonc", "json-key"},
 		{"src/lib.rs", "Ownership and Lifetime Correctness"},
 		{"crates/service/src/main.rs", "Unsafe Code Boundaries"},
 		{"crates/service/Cargo.toml", "Cargo Manifest Hygiene"},
