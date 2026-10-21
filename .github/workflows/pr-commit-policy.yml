@@ -1,0 +1,37 @@
+name: PR Commit Policy
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-commit-policy:
+    name: PR Commit Policy
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    container:
+      image: node:24.18.0
+      options: --cpus=1 --memory=1g
+    steps:
+      - name: Check out trusted policy script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Check PR title and commit messages
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          retries: 2
+          script: |
+            const { run } = require('./scripts/github-actions/check-pr-commit-policy.js');
+            await run({ github, context, core });

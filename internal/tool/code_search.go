@@ -57,7 +57,9 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 }
 
 func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool, usePerlRegexp bool, noIndex bool, pathspec []string) []string {
-	cmdArgs := []string{"--no-pager", "grep"}
+	// core.quotepath=false reports non-ASCII paths literally instead of as
+	// quoted octal escapes, which file_read cannot open.
+	cmdArgs := []string{"--no-pager", "-c", "core.quotepath=false", "grep"}
 
 	if noIndex {
 		// Non-git directory: search the working tree directly while still

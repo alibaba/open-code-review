@@ -78,6 +78,22 @@ func TestGetCommitMessage_InvalidCommit(t *testing.T) {
 	}
 }
 
+// TestGetCommitMessage_IgnoresGitStderr covers ocr review --commit, which
+// uses the commit message as review background. getCommitMessage used
+// CombinedOutput, so GIT_TRACE / git warnings were prepended to the message
+// and sent to the LLM. runGitCmdStdout already exists for this class of bug.
+func TestGetCommitMessage_IgnoresGitStderr(t *testing.T) {
+	dir := initTestGitRepo(t)
+	t.Setenv("GIT_TRACE", "1")
+	msg, err := getCommitMessage(dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg != "initial commit" {
+		t.Errorf("msg = %q, want %q (git stderr mixed into commit message?)", msg, "initial commit")
+	}
+}
+
 func TestResolveRepoDir_ValidGitRepo(t *testing.T) {
 	dir := initTestGitRepo(t)
 	resolved, err := resolveRepoDir(dir)

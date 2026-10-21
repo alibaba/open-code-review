@@ -250,9 +250,13 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 		{
 			name: "non-included file with valid extension still reviewed (additive semantics)",
 			diff: model.Diff{
-				NewPath: "vendor/baz.go",
+				// Was vendor/baz.go, chosen only as a path outside the include
+				// patterns that nothing else excluded. #1494 added **/vendor/**
+				// to the default list, so it needs a path that is still only
+				// non-included and not excluded on any other ground.
+				NewPath: "cmd/baz.go",
 			},
-			// .go is a supported extension and vendor/baz.go does not hit
+			// .go is a supported extension and cmd/baz.go does not hit
 			// IsExcludedPath, so it falls through to ExcludeNone.
 			expected: ExcludeNone,
 		},

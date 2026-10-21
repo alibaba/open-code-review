@@ -551,3 +551,151 @@ func TestAddToolFailure(t *testing.T) {
 		t.Errorf("persisted duration_ms = %d, want 25", got)
 	}
 }
+
+// TestAppendTaskRecord_PersistsToolCallExtraContent guards the request half of
+// the #1357 contract: a tool call's opaque provider metadata must survive into
+// the llm_request projection, so an exported session carries the same replay
+// state native_payload already preserves for the Anthropic path.
+func TestAppendTaskRecord_PersistsToolCallExtraContent(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	fs := sh.GetOrCreateFileSession("file.go")
+
+	toolCalls := []llm.ToolCall{{
+		ID:           "call_1",
+		Type:         "function",
+		Function:     llm.FunctionCall{Name: "file_read", Arguments: "{}"},
+		ExtraContent: json.RawMessage(`{"google":{"thought_signature":"sig-abc-123"}}`),
+	}}
+	msgs := []llm.Message{
+		llm.NewTextMessage("user", "hi"),
+		llm.NewToolCallMessage("", toolCalls, llm.NativeTurn{}, ""),
+	}
+	fs.AppendTaskRecord(MainTask, msgs)
+	sh.Finalize()
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	var found bool
+	for _, r := range records {
+		if r["type"] != "llm_request" {
+			continue
+		}
+		found = true
+		payload, err := json.Marshal(r["messages"])
+		if err != nil {
+			t.Fatalf("marshal request messages: %v", err)
+		}
+		if !bytes.Contains(payload, []byte(`"thought_signature":"sig-abc-123"`)) {
+			t.Errorf("extra_content not preserved in llm_request messages: %s", payload)
+		}
+	}
+	if !found {
+		t.Fatal("no llm_request record found in session JSONL")
+	}
+}
+
+// TestSetResponse_PersistsToolCallExtraContent guards the response half: the
+// llm_response record must carry the metadata that produced it, even when no
+// later request is ever made.
+func TestSetResponse_PersistsToolCallExtraContent(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	fs := sh.GetOrCreateFileSession("file.go")
+	rec := fs.AppendTaskRecord(MainTask, []llm.Message{llm.NewTextMessage("user", "hi")})
+
+	resp := &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{
+				Role: "assistant",
+				ToolCalls: []llm.ToolCall{{
+					ID:           "call_1",
+					Type:         "function",
+					Function:     llm.FunctionCall{Name: "file_read", Arguments: "{}"},
+					ExtraContent: json.RawMessage(`{"google":{"thought_signature":"sig-abc-123"}}`),
+				}},
+			},
+		}},
+		Model: "test-model",
+	}
+	rec.SetResponse(resp, time.Second)
+	sh.Finalize()
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	var found bool
+	for _, r := range records {
+		if r["type"] != "llm_response" {
+			continue
+		}
+		found = true
+		payload, err := json.Marshal(r["tool_calls"])
+		if err != nil {
+			t.Fatalf("marshal response tool_calls: %v", err)
+		}
+		if !bytes.Contains(payload, []byte(`"thought_signature":"sig-abc-123"`)) {
+			t.Errorf("extra_content not preserved in llm_response tool_calls: %s", payload)
+		}
+	}
+	if !found {
+		t.Fatal("no llm_response record found in session JSONL")
+	}
+}
+
+// TestAppendTaskRecord_CopiesToolCallExtraContent guards copyMessages' deep-copy
+// contract for the one tool-call field that is a byte slice: a plain element
+// copy aliases the caller's bytes, so a later mutation would rewrite the stored
+// signature and replay a value the provider never sent.
+func TestAppendTaskRecord_CopiesToolCallExtraContent(t *testing.T) {
+	sh := New("/tmp/repo", "main", "model", SessionOptions{})
+	fs := sh.GetOrCreateFileSession("file.go")
+
+	extra := json.RawMessage(`{"google":{"thought_signature":"sig-a"}}`)
+	toolCalls := []llm.ToolCall{{
+		ID:           "call_1",
+		Type:         "function",
+		Function:     llm.FunctionCall{Name: "file_read", Arguments: "{}"},
+		ExtraContent: extra,
+	}}
+	rec := fs.AppendTaskRecord(MainTask, []llm.Message{
+		llm.NewToolCallMessage("", toolCalls, llm.NativeTurn{}, ""),
+	})
+
+	copy(extra, json.RawMessage(`{"google":{"thought_signature":"sig-b"}}`))
+
+	got := rec.RequestMessages[0].ToolCalls[0].ExtraContent
+	if !bytes.Contains(got, []byte("sig-a")) {
+		t.Errorf("AppendTaskRecord should store a copy of ExtraContent, got %s", got)
+	}
+}
+
+// TestToolCallsForJSON_KeepsFieldOrder guards the llm_request byte format. A map
+// projection sorts its keys, which would silently reorder every tool call in
+// every record; the projection must serialize exactly as []llm.ToolCall did
+// before extra_content existed, and append extra_content only when present.
+func TestToolCallsForJSON_KeepsFieldOrder(t *testing.T) {
+	tc := llm.ToolCall{ID: "call_1", Type: "function", Function: llm.FunctionCall{Name: "file_read", Arguments: "{}"}}
+
+	// ExtraContent is json:"-", so marshaling ToolCall is the pre-change format.
+	want, err := json.Marshal([]llm.ToolCall{tc})
+	if err != nil {
+		t.Fatalf("marshal reference: %v", err)
+	}
+	got, err := json.Marshal(toolCallsForJSON([]llm.ToolCall{tc}))
+	if err != nil {
+		t.Fatalf("marshal projection: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("tool call without extra_content changed on the wire:\n got  %s\n want %s", got, want)
+	}
+
+	tc.ExtraContent = json.RawMessage(`{"google":{"thought_signature":"sig"}}`)
+	got, err = json.Marshal(toolCallsForJSON([]llm.ToolCall{tc}))
+	if err != nil {
+		t.Fatalf("marshal projection with extra_content: %v", err)
+	}
+	const wantWith = `[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":"{}"},"extra_content":{"google":{"thought_signature":"sig"}}}]`
+	if string(got) != wantWith {
+		t.Errorf("extra_content not appended after the existing fields:\n got  %s\n want %s", got, wantWith)
+	}
+}

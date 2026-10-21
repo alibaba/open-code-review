@@ -7,8 +7,11 @@
  *
  * - `en`    — English (default, fallback for all unrecognized locales)
  * - `zh-cn` — Simplified Chinese (matches VS Code `zh-cn` / `zh-CN`)
+ * - `ja-jp` — Japanese (matches VS Code `ja` / `ja-JP`)
+ * - `ko-kr` — Korean (matches VS Code `ko` / `ko-KR`)
+ * - `ru-ru` — Russian (matches VS Code `ru` / `ru-RU`)
  */
-export type SupportedLocale = 'en' | 'zh-cn';
+export type SupportedLocale = 'en' | 'zh-cn' | 'ja-jp' | 'ko-kr' | 'ru-ru';
 
 const messages: Record<SupportedLocale, Record<string, string>> = {
   en: {
@@ -315,6 +318,486 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'ext.cli.installOk': '✓ 安装完成',
     'ext.cli.installFail': '✗ 安装失败 (exit ',
   },
+
+  'ja-jp': {
+    // ── IdleView ──
+    'view.idle.configFirst': '先にモデルを設定してください',
+    'view.idle.reviewing': 'レビュー中…',
+    'view.idle.selectBranch': '比較するブランチを選択',
+    'view.idle.selectCommit': 'コミットを選択',
+    'view.idle.noFiles': 'レビュー対象のファイルがありません',
+    'view.idle.reviewAll': 'すべての変更をレビュー',
+    'view.idle.workspace': 'ワークスペース',
+    'view.idle.branch': 'ブランチ比較',
+    'view.idle.commit': '単一コミット',
+    'view.idle.baseRef': 'ベース参照',
+    'view.idle.targetRef': 'ターゲット参照',
+    'view.idle.chooseBranch': 'ブランチを選択',
+    'view.idle.commitHistory': 'コミット履歴',
+    'view.idle.customPrompt': 'カスタムレビュープロンプト（任意）',
+    'view.idle.manageCustom': 'カスタムプロバイダーを管理',
+    'view.idle.modelConfig': 'モデル設定',
+
+    // ── RunningView ──
+    'view.running.reviewLog': 'レビューログ',
+    'view.running.cancel': 'キャンセル',
+
+    // ── DoneView ──
+    'view.done.comments': '件のコメント',
+    'view.done.files': 'ファイル',
+    'view.done.processLog': '処理ログ',
+
+    // ── EmptyView ──
+    'view.empty.noIssues': '問題は見つかりませんでした · 合格',
+    'view.empty.processLog': '処理ログ',
+
+    // ── CancelledView ──
+    'view.cancelled.title': 'レビューをキャンセルしました',
+
+    // ── FailedView ──
+    'view.failed.title': 'レビューに失敗しました。',
+    'view.failed.checkConfig': 'モデル設定を確認して再試行してください。',
+    'view.failed.checkApiKey': 'API キーとネットワーク接続を確認してください。',
+    'view.failed.retry': '再試行',
+
+    // ── ConfigView ──
+    'view.config.title': 'モデル設定',
+    'view.config.desc': 'コードレビューを始めるには LLM プロバイダーを接続してください',
+    'view.config.close': '閉じる',
+    'view.config.step1': '環境のセットアップ',
+    'view.config.step2': 'プロバイダー設定',
+    'view.config.checking': 'ocr を確認中…',
+    'view.config.notInstalled': 'ocr がインストールされていません',
+    'view.config.official': '公式プロバイダー',
+    'view.config.custom': 'カスタムプロバイダー',
+    'view.config.currentUse': '現在使用中',
+    'view.config.notConfigured': 'プロバイダーが未設定です',
+    'view.config.officialLabel': '公式',
+    'view.config.customLabel': 'カスタム',
+    'view.config.legacyLabel': 'レガシー',
+    'view.config.model': 'モデル',
+    'view.config.customModel': 'カスタムモデルを入力…',
+    'view.config.apiKey': 'API キー',
+    'view.config.apiKeyEnvHint': '環境変数でも設定できます',
+    'view.config.apiKeySaved': '保存済み（空欄なら変更しません）',
+    'view.config.testing': '接続をテスト中…',
+    'view.config.testOk': '✓ 接続できました',
+    'view.config.testFail': '✗ 接続に失敗しました',
+    'view.config.previous': '前へ',
+    'view.config.testFailDetail': '✗ 接続に失敗しました: {message}',
+    'view.config.test': '接続をテスト',
+    'view.config.save': '保存',
+    'view.config.continueProvider': 'プロバイダー設定へ進む',
+    'view.config.providerName': 'プロバイダー名',
+    'view.config.protocol': 'プロトコル',
+    'view.config.baseUrl': 'Base URL',
+    'view.config.modelList': 'モデル一覧',
+    'view.config.modelListPlaceholder': 'カンマ区切り、例: model-a, model-b',
+    'view.config.authHeader': 'Auth ヘッダー',
+    'view.config.authHeaderHint': 'Anthropic プロトコルでは x-api-key または authorization を任意で指定',
+    'view.config.authHeaderDefault': 'デフォルト (Authorization)',
+    'view.config.backToList': '← 一覧に戻る',
+    'view.config.optional': '（任意）',
+    'view.config.ocrVersionTooltip': 'Open Code Review CLI のバージョン',
+
+    // ── EnvSetupGuide ──
+    'view.env.installing': 'ocr CLI をインストール中…',
+    'view.env.checking': '確認中です。しばらくお待ちください…',
+    'view.env.ready': '環境の準備ができました。プロバイダー設定へ進んでください。',
+    'view.env.stepLead': '各ステップを順番に完了し、合格したら次へ進んでください。',
+    'view.env.nodeHint': 'Node.js が見つかりません。nodejs.org から LTS 版をインストールし、VS Code を再起動してください。',
+    'view.env.npmHint': 'npm が見つかりません。npm は通常 Node.js に同梱されています。Node のインストールを確認してください。',
+    'view.env.ocrHint': 'ターミナルで open-code-review をグローバルにインストールするか、下の「ワンクリックインストール」をクリックしてください。',
+    'view.env.oneClickInstall': 'ワンクリックインストール',
+    'view.env.redetect': '再検出',
+    'view.env.checkingStatus': '確認中',
+    'view.env.readyStatus': '準備完了',
+    'view.env.notReady': '未準備',
+    'view.env.pass': '合格',
+    'view.env.fail': '不合格',
+    'view.env.waitPrev': '前のステップを待機中',
+    'view.env.copy': 'コピー',
+    'view.env.copiedToast': 'コピーしました ✓',
+
+    // ── CustomProviderManager ──
+    'cmp.custom.title': 'カスタムプロバイダー',
+    'cmp.custom.desc': 'セルフホスト型の LLM ゲートウェイや互換エンドポイントを管理し、使用するレビューモデルを切り替えます。',
+    'cmp.custom.add': '追加',
+    'cmp.custom.empty': 'カスタムプロバイダーはありません',
+    'cmp.custom.addFirst': 'カスタムプロバイダーを追加',
+    'cmp.custom.currentUse': '現在使用中',
+    'cmp.custom.model': 'モデル',
+    'cmp.custom.edit': '編集',
+    'cmp.custom.setCurrent': '現在の設定にする',
+    'cmp.custom.delete': '削除',
+
+    // ── FileList ──
+    'cmp.fileList.pending': 'レビュー待ちファイル',
+    'cmp.fileList.noChanges': '変更されたファイルはありません',
+    'cmp.fileList.viewDiff': 'クリックで差分を表示',
+
+    // ── LogViewer ──
+    'cmp.log.waiting': '出力を待機中',
+
+    // ── CommentCard ──
+    'cmp.comment.view': '表示',
+    'cmp.comment.discard': '無視',
+
+    // ── PasswordInput ──
+    'cmp.password.hideSecret': 'シークレットを隠す',
+    'cmp.password.showSecret': 'シークレットを表示',
+
+    // ── Select ──
+    'cmp.select.placeholder': '選択してください',
+
+    // ── Extension ──
+    'ext.commentController': 'Open Code Review',
+    'ext.configPanelTitle': 'モデル設定',
+    'ext.config.legacyDisplayName': 'レガシー LLM エンドポイント',
+    'ext.comment.threadLabel': 'Code Review',
+    'ext.comment.pending': '⏳ [未対応]',
+    'ext.comment.noSuggestion': '_💡 コード提案はありません。手動で対応してください_',
+    'ext.comment.applyFailedStale': '適用に失敗しました: コードの位置が古くなっています。更新して再試行してください。',
+    'ext.comment.applyFailedLocked': '適用に失敗しました: ファイルを変更できません。読み取り専用またはロックされていないか確認してください。',
+    'ext.comment.statusApplied': '✅ [適用済み]',
+    'ext.comment.statusDiscarded': '✅ [無視済み]',
+    'ext.comment.statusFalsePositive': '✅ [誤検出]',
+    'ext.comment.jumpFailed': '次の場所に移動できません: ',
+    'ext.comment.jumpNotAFile': ': 開けるファイルではありません。',
+    'ext.comment.jumpLineUnresolved': '{path} に移動できません: 行番号を特定できませんでした。',
+    'ext.comment.jumpFileMissing': '{path} に移動できません: レビューのスナップショットにファイルが見つかりません。',
+    'ext.comment.applyWorkspaceOnly': '適用はワークスペースレビューモードでのみ使用できます。',
+    'ext.deleteProviderConfirm': 'カスタムプロバイダー「{name}」を削除しますか？',
+    'ext.deleteProviderConfirmBtn': '削除',
+    'ext.git.justNow': 'たった今',
+    'ext.git.hoursAgo': '{h} 時間前',
+    'ext.git.hourAgo': '1 時間前',
+    'ext.git.yesterday': '昨日',
+    'ext.git.daysAgo': '{d} 日前',
+    'ext.git.workspaceVsHead': 'ワークスペース ↔ HEAD',
+    'ext.cli.installOk': '✓ インストールが完了しました',
+    'ext.cli.installFail': '✗ インストールに失敗しました (exit ',
+  },
+
+  'ko-kr': {
+    // ── IdleView ──
+    'view.idle.configFirst': '먼저 모델을 설정하세요',
+    'view.idle.reviewing': '검토 중…',
+    'view.idle.selectBranch': '비교할 브랜치 선택',
+    'view.idle.selectCommit': '커밋 선택',
+    'view.idle.noFiles': '검토할 파일이 없습니다',
+    'view.idle.reviewAll': '모든 변경 사항 검토',
+    'view.idle.workspace': '워크스페이스',
+    'view.idle.branch': '브랜치 비교',
+    'view.idle.commit': '단일 커밋',
+    'view.idle.baseRef': '기준 참조',
+    'view.idle.targetRef': '대상 참조',
+    'view.idle.chooseBranch': '브랜치 선택',
+    'view.idle.commitHistory': '커밋 기록',
+    'view.idle.customPrompt': '사용자 지정 검토 프롬프트(선택)',
+    'view.idle.manageCustom': '사용자 지정 프로바이더 관리',
+    'view.idle.modelConfig': '모델 설정',
+
+    // ── RunningView ──
+    'view.running.reviewLog': '검토 로그',
+    'view.running.cancel': '취소',
+
+    // ── DoneView ──
+    'view.done.comments': '개 댓글',
+    'view.done.files': '개 파일',
+    'view.done.processLog': '처리 로그',
+
+    // ── EmptyView ──
+    'view.empty.noIssues': '문제를 찾지 못했습니다 · 통과',
+    'view.empty.processLog': '처리 로그',
+
+    // ── CancelledView ──
+    'view.cancelled.title': '검토를 취소했습니다',
+
+    // ── FailedView ──
+    'view.failed.title': '검토에 실패했습니다.',
+    'view.failed.checkConfig': '모델 설정을 확인한 뒤 다시 시도하세요.',
+    'view.failed.checkApiKey': 'API 키와 네트워크 연결을 확인하세요.',
+    'view.failed.retry': '다시 시도',
+
+    // ── ConfigView ──
+    'view.config.title': '모델 설정',
+    'view.config.desc': '코드 검토를 시작하려면 LLM 프로바이더를 연결하세요',
+    'view.config.close': '닫기',
+    'view.config.step1': '환경 설정',
+    'view.config.step2': '프로바이더 설정',
+    'view.config.checking': 'ocr 확인 중…',
+    'view.config.notInstalled': 'ocr가 설치되지 않았습니다',
+    'view.config.official': '공식 프로바이더',
+    'view.config.custom': '사용자 지정 프로바이더',
+    'view.config.currentUse': '현재 사용 중',
+    'view.config.notConfigured': '설정된 프로바이더가 없습니다',
+    'view.config.officialLabel': '공식',
+    'view.config.customLabel': '사용자 지정',
+    'view.config.legacyLabel': '레거시',
+    'view.config.model': '모델',
+    'view.config.customModel': '사용자 지정 모델 입력…',
+    'view.config.apiKey': 'API 키',
+    'view.config.apiKeyEnvHint': '환경 변수로도 설정할 수 있습니다',
+    'view.config.apiKeySaved': '저장됨(비워 두면 유지)',
+    'view.config.testing': '연결을 테스트하는 중…',
+    'view.config.testOk': '✓ 연결되었습니다',
+    'view.config.testFail': '✗ 연결에 실패했습니다',
+    'view.config.previous': '이전',
+    'view.config.testFailDetail': '✗ 연결에 실패했습니다: {message}',
+    'view.config.test': '연결 테스트',
+    'view.config.save': '저장',
+    'view.config.continueProvider': '프로바이더 설정으로 계속',
+    'view.config.providerName': '프로바이더 이름',
+    'view.config.protocol': '프로토콜',
+    'view.config.baseUrl': 'Base URL',
+    'view.config.modelList': '모델 목록',
+    'view.config.modelListPlaceholder': '쉼표로 구분, 예: model-a, model-b',
+    'view.config.authHeader': 'Auth 헤더',
+    'view.config.authHeaderHint': 'Anthropic 프로토콜에서는 x-api-key 또는 authorization을 선택적으로 지정',
+    'view.config.authHeaderDefault': '기본값 (Authorization)',
+    'view.config.backToList': '← 목록으로 돌아가기',
+    'view.config.optional': '(선택)',
+    'view.config.ocrVersionTooltip': 'Open Code Review CLI 버전',
+
+    // ── EnvSetupGuide ──
+    'view.env.installing': 'ocr CLI 설치 중…',
+    'view.env.checking': '확인 중입니다. 잠시만 기다려 주세요…',
+    'view.env.ready': '환경이 준비되었습니다. 프로바이더 설정으로 계속하세요.',
+    'view.env.stepLead': '각 단계를 순서대로 완료하고, 통과한 뒤 다음 단계로 이동하세요.',
+    'view.env.nodeHint': 'Node.js를 찾을 수 없습니다. nodejs.org에서 LTS 버전을 설치한 뒤 VS Code를 다시 시작하세요.',
+    'view.env.npmHint': 'npm을 찾을 수 없습니다. npm은 보통 Node.js에 포함되어 있으니 Node 설치를 확인하세요.',
+    'view.env.ocrHint': '터미널에서 open-code-review를 전역 설치하거나 아래 "원클릭 설치"를 클릭하세요.',
+    'view.env.oneClickInstall': '원클릭 설치',
+    'view.env.redetect': '다시 감지',
+    'view.env.checkingStatus': '확인 중',
+    'view.env.readyStatus': '준비됨',
+    'view.env.notReady': '준비 안 됨',
+    'view.env.pass': '통과',
+    'view.env.fail': '실패',
+    'view.env.waitPrev': '이전 단계 대기 중',
+    'view.env.copy': '복사',
+    'view.env.copiedToast': '복사했습니다 ✓',
+
+    // ── CustomProviderManager ──
+    'cmp.custom.title': '사용자 지정 프로바이더',
+    'cmp.custom.desc': '자체 호스팅 LLM 게이트웨이와 호환 엔드포인트를 관리하고 사용할 검토 모델을 전환합니다.',
+    'cmp.custom.add': '추가',
+    'cmp.custom.empty': '사용자 지정 프로바이더가 없습니다',
+    'cmp.custom.addFirst': '사용자 지정 프로바이더 추가',
+    'cmp.custom.currentUse': '현재 사용 중',
+    'cmp.custom.model': '모델',
+    'cmp.custom.edit': '편집',
+    'cmp.custom.setCurrent': '현재로 설정',
+    'cmp.custom.delete': '삭제',
+
+    // ── FileList ──
+    'cmp.fileList.pending': '검토 대기 파일',
+    'cmp.fileList.noChanges': '변경된 파일이 없습니다',
+    'cmp.fileList.viewDiff': '클릭하여 diff 보기',
+
+    // ── LogViewer ──
+    'cmp.log.waiting': '출력을 기다리는 중',
+
+    // ── CommentCard ──
+    'cmp.comment.view': '보기',
+    'cmp.comment.discard': '무시',
+
+    // ── PasswordInput ──
+    'cmp.password.hideSecret': '시크릿 숨기기',
+    'cmp.password.showSecret': '시크릿 표시',
+
+    // ── Select ──
+    'cmp.select.placeholder': '선택하세요',
+
+    // ── Extension ──
+    'ext.commentController': 'Open Code Review',
+    'ext.configPanelTitle': '모델 설정',
+    'ext.config.legacyDisplayName': '레거시 LLM 엔드포인트',
+    'ext.comment.threadLabel': 'Code Review',
+    'ext.comment.pending': '⏳ [대기 중]',
+    'ext.comment.noSuggestion': '_💡 코드 제안이 없습니다. 직접 처리해 주세요_',
+    'ext.comment.applyFailedStale': '적용 실패: 코드 위치가 오래되었습니다. 새로 고친 뒤 다시 시도하세요.',
+    'ext.comment.applyFailedLocked': '적용 실패: 파일을 수정할 수 없습니다. 읽기 전용이거나 잠겨 있는지 확인하세요.',
+    'ext.comment.statusApplied': '✅ [적용됨]',
+    'ext.comment.statusDiscarded': '✅ [무시됨]',
+    'ext.comment.statusFalsePositive': '✅ [오탐]',
+    'ext.comment.jumpFailed': '위치를 찾을 수 없습니다: ',
+    'ext.comment.jumpNotAFile': ': 열 수 있는 파일이 아닙니다.',
+    'ext.comment.jumpLineUnresolved': '{path}(으)로 이동할 수 없습니다: 줄 번호를 확인할 수 없습니다.',
+    'ext.comment.jumpFileMissing': '{path}(으)로 이동할 수 없습니다: 검토 스냅샷에서 파일을 찾을 수 없습니다.',
+    'ext.comment.applyWorkspaceOnly': '적용은 워크스페이스 검토 모드에서만 사용할 수 있습니다.',
+    'ext.deleteProviderConfirm': '사용자 지정 프로바이더 "{name}"을(를) 삭제할까요?',
+    'ext.deleteProviderConfirmBtn': '삭제',
+    'ext.git.justNow': '방금',
+    'ext.git.hoursAgo': '{h}시간 전',
+    'ext.git.hourAgo': '1시간 전',
+    'ext.git.yesterday': '어제',
+    'ext.git.daysAgo': '{d}일 전',
+    'ext.git.workspaceVsHead': '워크스페이스 ↔ HEAD',
+    'ext.cli.installOk': '✓ 설치 완료',
+    'ext.cli.installFail': '✗ 설치 실패 (exit ',
+  },
+
+  'ru-ru': {
+    // ── IdleView ──
+    'view.idle.configFirst': 'Сначала настройте модель',
+    'view.idle.reviewing': 'Проверка…',
+    'view.idle.selectBranch': 'Выберите ветку для сравнения',
+    'view.idle.selectCommit': 'Выберите коммит',
+    'view.idle.noFiles': 'Нет файлов для проверки',
+    'view.idle.reviewAll': 'Проверить все изменения',
+    'view.idle.workspace': 'Рабочая копия',
+    'view.idle.branch': 'Сравнение веток',
+    'view.idle.commit': 'Один коммит',
+    'view.idle.baseRef': 'Базовая ссылка',
+    'view.idle.targetRef': 'Целевая ссылка',
+    'view.idle.chooseBranch': 'Выбрать ветку',
+    'view.idle.commitHistory': 'История коммитов',
+    'view.idle.customPrompt': 'Свой промпт для проверки (необязательно)',
+    'view.idle.manageCustom': 'Управление своими провайдерами',
+    'view.idle.modelConfig': 'Настройка модели',
+
+    // ── RunningView ──
+    'view.running.reviewLog': 'Журнал проверки',
+    'view.running.cancel': 'Отмена',
+
+    // ── DoneView ──
+    'view.done.comments': 'комм.',
+    'view.done.files': 'файл(ов)',
+    'view.done.processLog': 'Журнал выполнения',
+
+    // ── EmptyView ──
+    'view.empty.noIssues': 'Проблем не найдено · Проверка пройдена',
+    'view.empty.processLog': 'Журнал выполнения',
+
+    // ── CancelledView ──
+    'view.cancelled.title': 'Проверка отменена',
+
+    // ── FailedView ──
+    'view.failed.title': 'Проверка не удалась.',
+    'view.failed.checkConfig': 'Проверьте настройки модели и повторите попытку.',
+    'view.failed.checkApiKey': 'Проверьте API-ключ и сетевое подключение.',
+    'view.failed.retry': 'Повторить',
+
+    // ── ConfigView ──
+    'view.config.title': 'Настройка модели',
+    'view.config.desc': 'Подключите провайдера LLM, чтобы начать проверку кода',
+    'view.config.close': 'Закрыть',
+    'view.config.step1': 'Подготовка окружения',
+    'view.config.step2': 'Настройка провайдера',
+    'view.config.checking': 'Проверка ocr…',
+    'view.config.notInstalled': 'ocr не установлен',
+    'view.config.official': 'Официальный провайдер',
+    'view.config.custom': 'Свой провайдер',
+    'view.config.currentUse': 'Используется сейчас',
+    'view.config.notConfigured': 'Провайдер не настроен',
+    'view.config.officialLabel': 'Официальный',
+    'view.config.customLabel': 'Свой',
+    'view.config.legacyLabel': 'Устаревший',
+    'view.config.model': 'Модель',
+    'view.config.customModel': 'Введите свою модель…',
+    'view.config.apiKey': 'API-ключ',
+    'view.config.apiKeyEnvHint': 'Также задаётся переменной окружения',
+    'view.config.apiKeySaved': 'Сохранено (оставьте пустым, чтобы не менять)',
+    'view.config.testing': 'Проверка подключения…',
+    'view.config.testOk': '✓ Подключено',
+    'view.config.testFail': '✗ Не удалось подключиться',
+    'view.config.previous': 'Назад',
+    'view.config.testFailDetail': '✗ Не удалось подключиться: {message}',
+    'view.config.test': 'Проверить подключение',
+    'view.config.save': 'Сохранить',
+    'view.config.continueProvider': 'Перейти к настройке провайдера',
+    'view.config.providerName': 'Название провайдера',
+    'view.config.protocol': 'Протокол',
+    'view.config.baseUrl': 'Base URL',
+    'view.config.modelList': 'Список моделей',
+    'view.config.modelListPlaceholder': 'Через запятую, например: model-a, model-b',
+    'view.config.authHeader': 'Заголовок Auth',
+    'view.config.authHeaderHint': 'Для протокола Anthropic можно указать x-api-key или authorization',
+    'view.config.authHeaderDefault': 'По умолчанию (Authorization)',
+    'view.config.backToList': '← Назад к списку',
+    'view.config.optional': '(необязательно)',
+    'view.config.ocrVersionTooltip': 'Версия Open Code Review CLI',
+
+    // ── EnvSetupGuide ──
+    'view.env.installing': 'Установка ocr CLI…',
+    'view.env.checking': 'Идёт проверка, подождите…',
+    'view.env.ready': 'Окружение готово. Переходите к настройке провайдера.',
+    'view.env.stepLead': 'Выполняйте шаги по порядку и переходите к следующему после успешного прохождения.',
+    'view.env.nodeHint': 'Node.js не найден. Установите LTS-версию с сайта nodejs.org и перезапустите VS Code.',
+    'view.env.npmHint': 'npm не найден. Обычно npm устанавливается вместе с Node.js — проверьте установку Node.',
+    'view.env.ocrHint': 'Установите open-code-review глобально в терминале или нажмите «Установить в один клик» ниже.',
+    'view.env.oneClickInstall': 'Установить в один клик',
+    'view.env.redetect': 'Проверить снова',
+    'view.env.checkingStatus': 'Проверка',
+    'view.env.readyStatus': 'Готово',
+    'view.env.notReady': 'Не готово',
+    'view.env.pass': 'Пройдено',
+    'view.env.fail': 'Не пройдено',
+    'view.env.waitPrev': 'Ожидание предыдущего шага',
+    'view.env.copy': 'Копировать',
+    'view.env.copiedToast': 'Скопировано ✓',
+
+    // ── CustomProviderManager ──
+    'cmp.custom.title': 'Свои провайдеры',
+    'cmp.custom.desc': 'Управляйте собственными шлюзами LLM и совместимыми эндпоинтами. Переключайте модель, которой проверяется код.',
+    'cmp.custom.add': 'Добавить',
+    'cmp.custom.empty': 'Своих провайдеров нет',
+    'cmp.custom.addFirst': 'Добавить своего провайдера',
+    'cmp.custom.currentUse': 'Используется сейчас',
+    'cmp.custom.model': 'Модель',
+    'cmp.custom.edit': 'Изменить',
+    'cmp.custom.setCurrent': 'Сделать текущим',
+    'cmp.custom.delete': 'Удалить',
+
+    // ── FileList ──
+    'cmp.fileList.pending': 'Файлы для проверки',
+    'cmp.fileList.noChanges': 'Изменённых файлов нет',
+    'cmp.fileList.viewDiff': 'Нажмите, чтобы посмотреть diff',
+
+    // ── LogViewer ──
+    'cmp.log.waiting': 'Ожидание вывода',
+
+    // ── CommentCard ──
+    'cmp.comment.view': 'Открыть',
+    'cmp.comment.discard': 'Отклонить',
+
+    // ── PasswordInput ──
+    'cmp.password.hideSecret': 'Скрыть секрет',
+    'cmp.password.showSecret': 'Показать секрет',
+
+    // ── Select ──
+    'cmp.select.placeholder': 'Выберите',
+
+    // ── Extension ──
+    'ext.commentController': 'Open Code Review',
+    'ext.configPanelTitle': 'Настройка модели',
+    'ext.config.legacyDisplayName': 'Устаревший эндпоинт LLM',
+    'ext.comment.threadLabel': 'Code Review',
+    'ext.comment.pending': '⏳ [Ожидает]',
+    'ext.comment.noSuggestion': '_💡 Предложений по коду нет, обработайте вручную_',
+    'ext.comment.applyFailedStale': 'Не удалось применить: позиция кода устарела. Обновите и повторите попытку.',
+    'ext.comment.applyFailedLocked': 'Не удалось применить: файл нельзя изменить. Проверьте, не доступен ли он только для чтения и не заблокирован ли.',
+    'ext.comment.statusApplied': '✅ [Применено]',
+    'ext.comment.statusDiscarded': '✅ [Отклонено]',
+    'ext.comment.statusFalsePositive': '✅ [Ложное срабатывание]',
+    'ext.comment.jumpFailed': 'Не удалось найти ',
+    'ext.comment.jumpNotAFile': ': не является открываемым файлом.',
+    'ext.comment.jumpLineUnresolved': 'Не удалось перейти к {path}: не удалось определить номер строки.',
+    'ext.comment.jumpFileMissing': 'Не удалось перейти к {path}: файл не найден в снимке проверки.',
+    'ext.comment.applyWorkspaceOnly': 'Применение доступно только в режиме проверки рабочей копии.',
+    'ext.deleteProviderConfirm': 'Удалить своего провайдера "{name}"?',
+    'ext.deleteProviderConfirmBtn': 'Удалить',
+    'ext.git.justNow': 'только что',
+    'ext.git.hoursAgo': '{h} ч. назад',
+    'ext.git.hourAgo': '1 час назад',
+    'ext.git.yesterday': 'вчера',
+    'ext.git.daysAgo': '{d} дн. назад',
+    'ext.git.workspaceVsHead': 'Рабочая копия ↔ HEAD',
+    'ext.cli.installOk': '✓ Установка завершена',
+    'ext.cli.installFail': '✗ Не удалось установить (код ',
+  },
 };
 
 export function t(locale: SupportedLocale, key: string): string {
@@ -323,19 +806,36 @@ export function t(locale: SupportedLocale, key: string): string {
 
 /**
  * Resolve a VS Code locale string to a {@link SupportedLocale}.
- * Only `zh-cn` (case-insensitive) maps to Simplified Chinese;
- * other Chinese variants like `zh-tw` / `zh-hk` fall back to English
- * until their translations are added.
+ * VS Code reports the display language either as a plain language code
+ * (`ja`, `ko`, `ru`) or as a language/region pair (`zh-cn`), so both spellings
+ * map to the same translation. Matching is case-insensitive; variants without
+ * a translation, such as `zh-tw` / `zh-hk`, fall back to English until their
+ * translations are added.
  */
 export function resolveLocale(raw: string): SupportedLocale {
-  if (raw.toLowerCase() === 'zh-cn') return 'zh-cn';
-  return 'en';
+  switch (raw.toLowerCase()) {
+    case 'zh-cn':
+      return 'zh-cn';
+    case 'ja':
+    case 'ja-jp':
+      return 'ja-jp';
+    case 'ko':
+    case 'ko-kr':
+      return 'ko-kr';
+    case 'ru':
+    case 'ru-ru':
+      return 'ru-ru';
+    default:
+      return 'en';
+  }
 }
 
 /**
  * Convert a {@link SupportedLocale} to the BCP 47 HTML `lang` attribute value.
- * `zh-cn` → `zh-CN`, others stay as-is.
+ * The region subtag is upper-cased: `zh-cn` → `zh-CN`, `ja-jp` → `ja-JP`;
+ * a locale without a region (`en`) stays as-is.
  */
 export function toHtmlLang(locale: SupportedLocale): string {
-  return locale === 'zh-cn' ? 'zh-CN' : locale;
+  const [language, region] = locale.split('-');
+  return region ? `${language}-${region.toUpperCase()}` : language;
 }

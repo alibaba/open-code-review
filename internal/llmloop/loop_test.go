@@ -106,6 +106,19 @@ func newTestDeps(client llm.LLMClient) Deps {
 	}
 }
 
+// graceLimitWarnings returns the review-limit warnings recorded on the runner.
+// A limit is recorded once per grace round, however that round ended, so the
+// tests below assert on this filtered slice rather than on the full list.
+func graceLimitWarnings(r *Runner) []AgentWarning {
+	var out []AgentWarning
+	for _, w := range r.Warnings() {
+		if w.Type == WarningReviewLimitReached {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
 func TestRunMainTask_TaskDoneImmediately(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
 	deps := newTestDeps(client)
@@ -638,6 +651,44 @@ func TestExecuteToolCall_CodeCommentUsesPerItemPath(t *testing.T) {
 	}
 }
 
+func TestExecuteToolCall_CodeCommentWithNoUsableEntryIsReported(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	r := NewRunner(Deps{
+		Tools:            reg,
+		CommentCollector: collector,
+	})
+
+	argsJSON, err := json.Marshal(map[string]any{
+		"comments": []any{
+			map[string]any{"path": "main.go", "message": "nil dereference"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cp := r.executeToolCall(context.Background(), "main.go", llm.ToolCall{
+		Function: llm.FunctionCall{
+			Name:      "code_comment",
+			Arguments: string(argsJSON),
+		},
+	}, nil, "")
+
+	if cp.Data != tool.CommentNoneUsableMsg {
+		t.Fatalf("result = %q, want %q", cp.Data, tool.CommentNoneUsableMsg)
+	}
+	if len(collector.Comments()) != 0 {
+		t.Fatalf("collected %d comments, want 0", len(collector.Comments()))
+	}
+	if failures := r.ToolFailures(); len(failures) != 1 || failures[0].ToolName != "code_comment" {
+		t.Fatalf("ToolFailures() = %+v, want one code_comment failure", failures)
+	}
+}
+
 func graceRoundCommentResponse() *llm.ChatResponse {
 	content := ""
 	return &llm.ChatResponse{
@@ -718,6 +769,198 @@ func TestRunMainTask_GraceRoundSubmitsComment(t *testing.T) {
 	// Token usage should include grace round
 	if runner.TotalInputTokens() != 70 {
 		t.Errorf("TotalInputTokens = %d, want 70 (20+50)", runner.TotalInputTokens())
+	}
+	// The spent round budget is recorded even though the grace round did not
+	// complete the task.
+	if limit := graceLimitWarnings(runner); len(limit) != 1 ||
+		limit[0].File != "main.go" || !strings.Contains(limit[0].Message, "did not complete the task") {
+		t.Fatalf("limit warnings = %+v, want one incomplete verdict on main.go", limit)
+	}
+}
+
+// The grace round is still a main-task round, so a task_done it carries is the
+// model declaring the subtask finished. Discarding it recorded a file the model
+// completed as incomplete, and a resume then re-ran that file.
+func TestRunMainTask_GraceRoundTaskDoneCompletes(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		taskDoneResponseWithArguments(`{"state":"DONE"}`),
+	}}
+	deps := newTestDeps(client)
+	deps.Template.MaxToolRequestTimes = 1
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if !completed {
+		t.Fatal("task_done DONE in the grace round must complete RunMainTask")
+	}
+	if stop != StopMaxRounds {
+		t.Fatalf("stop = %v, want StopMaxRounds", stop)
+	}
+	if client.calls != 2 {
+		t.Fatalf("LLM calls = %d, want 2 (1 main + 1 grace)", client.calls)
+	}
+	// The spent round budget must survive a successful grace round: the
+	// completion alone would otherwise be the only trace of it.
+	if limit := graceLimitWarnings(runner); len(limit) != 1 ||
+		limit[0].File != "main.go" || !strings.Contains(limit[0].Message, "the grace round completed the task") {
+		t.Fatalf("limit warnings = %+v, want one completed verdict on main.go", limit)
+	}
+}
+
+// The aggregate token budget is the other declared limit that earns a grace
+// round, and a task it completes must stay warn-visible the same way.
+func TestRunMainTask_TokenBudgetGraceRoundTaskDoneCompletes(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		withUsage(fileReadToolCallResponse("call_1", `{"path":"main.go"}`), 600),
+		taskDoneResponseWithArguments(`{"state":"DONE"}`),
+	}}
+	deps := newTestDeps(client)
+	// Zero tokens admit round 1; its 600 then exceed the 500 budget, so the
+	// next round is refused and the grace round decides the task.
+	deps.MaxTokensBudget = 500
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "file_read", Description: "read"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if !completed {
+		t.Fatal("task_done DONE in the token-budget grace round must complete RunMainTask")
+	}
+	if stop != StopTokenBudget {
+		t.Fatalf("stop = %v, want StopTokenBudget", stop)
+	}
+	if client.calls != 2 {
+		t.Fatalf("LLM calls = %d, want 2 (1 round + 1 grace)", client.calls)
+	}
+	if limit := graceLimitWarnings(runner); len(limit) != 1 ||
+		!strings.Contains(limit[0].Message, "token budget") ||
+		!strings.Contains(limit[0].Message, "the grace round completed the task") {
+		t.Fatalf("limit warnings = %+v, want one completed token-budget verdict", limit)
+	}
+}
+
+// Only task_done DONE reports completion, exactly as in the main loop. A FAILED
+// verdict in the grace round leaves the subtask incomplete.
+func TestRunMainTask_GraceRoundTaskDoneFailedStaysIncomplete(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		taskDoneResponseWithArguments(`{"state":"FAILED"}`),
+	}}
+	deps := newTestDeps(client)
+	deps.Template.MaxToolRequestTimes = 1
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if completed {
+		t.Fatal("task_done FAILED in the grace round must not complete RunMainTask")
+	}
+	if stop != StopMaxRounds {
+		t.Fatalf("stop = %v, want StopMaxRounds", stop)
+	}
+}
+
+func TestRunMainTask_GraceRoundCompletionStates(t *testing.T) {
+	limits := []struct {
+		name            string
+		maxToolRequests int
+		tokenBudget     int64
+		wantStop        MainLoopStop
+	}{
+		{name: "max_tool_requests", maxToolRequests: 1, wantStop: StopMaxRounds},
+		{name: "token_budget", maxToolRequests: 5, tokenBudget: 500, wantStop: StopTokenBudget},
+	}
+	cases := []struct {
+		name          string
+		states        []string
+		wantCompleted bool
+	}{
+		{name: "done", states: []string{"DONE"}, wantCompleted: true},
+		{name: "failed", states: []string{"FAILED"}},
+		{name: "done_then_failed", states: []string{"DONE", "FAILED"}},
+		{name: "failed_then_done", states: []string{"FAILED", "DONE"}},
+		{name: "no_task_done"},
+	}
+	for _, limit := range limits {
+		for _, testCase := range cases {
+			t.Run(limit.name+"/"+testCase.name, func(t *testing.T) {
+				var calls []llm.ToolCall
+				for _, state := range testCase.states {
+					calls = append(calls, llm.ToolCall{
+						ID: state, Type: "function",
+						Function: llm.FunctionCall{Name: "task_done", Arguments: `{"state":"` + state + `"}`},
+					})
+				}
+				response := graceRoundCommentResponse()
+				response.Choices[0].Message.ToolCalls = append(calls, response.ToolCalls()...)
+				client := &fakeClient{responses: []*llm.ChatResponse{
+					withUsage(fileReadToolCallResponse("read", `{"path":"main.go"}`), 600),
+					response,
+				}}
+				deps := newTestDeps(client)
+				deps.Template.MaxToolRequestTimes = limit.maxToolRequests
+				deps.MaxTokensBudget = limit.tokenBudget
+				deps.Tools.Register(&tool.CodeCommentProvider{Collector: deps.CommentCollector})
+				deps.MainToolDefs = []llm.ToolDef{
+					{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
+					{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+					{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+				}
+				runner := NewRunner(deps)
+
+				completed, stop, err := runner.RunMainTask(context.Background(),
+					[]llm.Message{llm.NewTextMessage("user", "review")}, "main.go")
+				if err != nil {
+					t.Fatalf("RunMainTask: %v", err)
+				}
+				if completed != testCase.wantCompleted {
+					t.Errorf("completed = %v, want %v", completed, testCase.wantCompleted)
+				}
+				if stop != limit.wantStop {
+					t.Errorf("stop = %v, want %v", stop, limit.wantStop)
+				}
+				if client.calls != 2 {
+					t.Errorf("LLM calls = %d, want 2 (1 main + 1 grace)", client.calls)
+				}
+				comments := deps.CommentCollector.Comments()
+				if len(comments) != 1 || comments[0].Path != "main.go" || comments[0].Content != "found a bug" {
+					t.Errorf("comments = %+v, want the finding submitted after task_done", comments)
+				}
+				outcome := "the grace round did not complete the task"
+				if testCase.wantCompleted {
+					outcome = "the grace round completed the task"
+				}
+				warnings := graceLimitWarnings(runner)
+				if len(warnings) != 1 || warnings[0].File != "main.go" ||
+					warnings[0].Message != limit.wantStop.Reason()+"; "+outcome {
+					t.Errorf("limit warnings = %+v, want one warning with verdict %q", warnings, outcome)
+				}
+			})
+		}
 	}
 }
 
@@ -1039,6 +1282,9 @@ func TestRunMainTask_ZeroTokenBudgetNeverStops(t *testing.T) {
 	}
 	if !completed || stop != StopNone {
 		t.Fatalf("expected completion with StopNone, got completed=%v stop=%v", completed, stop)
+	}
+	if limit := graceLimitWarnings(runner); len(limit) != 0 {
+		t.Fatalf("completion in a normal round must not record a limit warning, got %+v", limit)
 	}
 }
 

@@ -61,11 +61,7 @@ func TestResolveEndpoint_CodingPlanCredentials(t *testing.T) {
 				}
 				for _, model := range []string{"qwen3-coder-next", "mimo-v2.5"} {
 					override, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: provider, Model: model})
-					if model == "mimo-v2.5" {
-						if err == nil || !strings.Contains(err.Error(), "not available for provider") {
-							t.Fatalf("unsupported model error = %v", err)
-						}
-					} else if err != nil || override.Model != model {
+					if err != nil || override.Model != model {
 						t.Fatalf("model override = %q, error = %v", override.Model, err)
 					}
 				}

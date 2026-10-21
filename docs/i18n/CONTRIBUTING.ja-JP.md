@@ -22,7 +22,7 @@ OpenCodeReviewへのコントリビューションに興味を持っていただ
 
 ### 前提条件
 
-- [Go 1.25+](https://go.dev/dl/)
+- [Go 1.26.9+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -90,6 +90,15 @@ fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
 
+`PR Commit Policy` は、PR タイトルと本文を含むすべてのコミットメッセージを、
+大文字・小文字を区別せずに検査します。`[skip ci]`、`[ci skip]`、`[no ci]`、
+`[skip actions]`、`[actions skip]`、または `skip-checks: true` / `skip-checks:true`
+だけの行を含めないでください。
+
+検査に失敗した場合は、PR タイトルを編集するか、自分の作業ブランチで該当するコミットメッセージを書き換えてください。
+これらの指示を含まないコミットを追加しても、過去のコミットの違反は解消されません。
+PR の説明ではこれらの指示について議論でき、検査の対象にはなりません。
+
 ### ライセンスヘッダー
 
 すべてのソースファイル（`.go`、`.js`、`.mjs`、`.ts`、`.tsx`、`.kt`、`.kts`、`.sh`、`.py`、`.css`）にはSPDXライセンスヘッダーが必要です。新しいファイルを作成した後、以下を実行してください：
@@ -118,20 +127,38 @@ make build
 ### プロジェクト構成
 
 ```
+├── acp/                  # CLI 向け ACP アダプター
+├── bin/                  # NPMラッパー
 ├── cmd/opencodereview/   # CLIエントリーポイント
+├── docs/                 # ローカライズ版 README と CONTRIBUTING
+├── examples/             # CI/CD 連携のサンプル
+├── extensions/           # エディタ拡張（VS Code と IDEA）
+├── imgs/                 # ロゴ、ベンチマーク、ハイライト画像
 ├── internal/
 │   ├── agent/            # レビューエージェントのロジック
+│   ├── chatgptauth/      # ChatGPT の OAuth と認証情報管理
 │   ├── config/           # 設定管理
+│   ├── delegate/         # 委任モードのレビュー仕様（LLM なし）
 │   ├── diff/             # Git diffのパース
-│   ├── llm/              # LLM APIクライアント（Anthropic & OpenAI）
+│   ├── gitcmd/           # 同時実行数を制限する git サブプロセスランナー
+│   ├── llm/              # LLM APIクライアント（Anthropic、Bedrock、OpenAI）
+│   ├── llmloop/          # サブタスク共有のツール使用ループ
+│   ├── mcp/              # MCP サーバークライアントとツールアダプター
 │   ├── model/            # データモデル
+│   ├── pathutil/         # 正規化パスと包含チェック
+│   ├── release/          # リリース資産 URL の命名チェック
+│   ├── scan/             # ファイル全体のコードレビュー（ocr scan）
 │   ├── session/          # レビューセッション管理
-│   ├── tool/             # 組み込みツール（file_read、code_searchなど）
+│   ├── stdout/           # 切り替え可能な stdout ライター
+│   ├── suggestdiff/      # 提案表示用の行単位 diff
 │   ├── telemetry/        # OpenTelemetry統合
+│   ├── tool/             # 組み込みツール（file_read、code_searchなど）
 │   └── viewer/           # WebUIセッションビューアー
-├── pages/                # WebUIフロントエンド
-├── scripts/              # ビルド & インストールスクリプト
-└── bin/                  # NPMラッパー
+├── npm/                  # プラットフォーム別の optional バイナリパッケージ
+├── pages/                # ランディングページ
+├── plugins/              # コーディングエージェント向けプラグイン
+├── scripts/              # インストール、公開、チェック用スクリプト
+└── skills/               # エージェントスキルのマニフェスト
 ```
 
 ## AI支援開発

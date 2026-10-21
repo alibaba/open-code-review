@@ -47,6 +47,15 @@ func splitDiffLines(text string) []string {
 	return lines
 }
 
+// parseDiffHeaderLine extracts the two pathnames from a "diff --git" line,
+// falling back to parseQuotedDiffHeader when git has quoted a side (see there).
+func parseDiffHeaderLine(line string) (oldPath string, newPath string, ok bool) {
+	if m := diffHeaderRe.FindStringSubmatch(line); m != nil {
+		return m[1], m[2], true
+	}
+	return parseQuotedDiffHeader(line)
+}
+
 // ParseDiffText splits the unified diff text into per-file Diff structs.
 // ref, if non-empty, is a git ref used to read new-file content via
 // git show instead of reading from the working tree.
@@ -69,7 +78,7 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	defer cancel()
 
 	for _, line := range lines {
-		if m := diffHeaderRe.FindStringSubmatch(line); m != nil {
+		if oldPath, newPath, ok := parseDiffHeaderLine(line); ok {
 			// Flush previous diff
 			if current != nil {
 				current.Diff = strings.TrimSuffix(buf.String(), "\n")
@@ -78,8 +87,8 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 				buf.Reset()
 			}
 			current = &model.Diff{
-				OldPath: m[1],
-				NewPath: m[2],
+				OldPath: oldPath,
+				NewPath: newPath,
 			}
 			inHunk = false
 		}
@@ -106,10 +115,10 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 		case strings.HasPrefix(line, "rename from "):
 			// Authoritative old path for renames; more reliable than the
 			// "diff --git" header when paths contain spaces.
-			current.OldPath = strings.TrimPrefix(line, "rename from ")
+			current.OldPath = unquoteRenamePath(strings.TrimPrefix(line, "rename from "))
 			current.IsRenamed = true
 		case strings.HasPrefix(line, "rename to "):
-			current.NewPath = strings.TrimPrefix(line, "rename to ")
+			current.NewPath = unquoteRenamePath(strings.TrimPrefix(line, "rename to "))
 			current.IsRenamed = true
 		// git emits "--- /dev/null" / "+++ /dev/null" without a/ b/ prefixes.
 		// Guarded by inHunk: inside a hunk the same strings can be content

@@ -16,11 +16,13 @@
     "**/*.go": "go.md",
     "**/*.{ftl,ftlh,ftlx}": "freemarker.md",
     "**/*.{hbs,mustache}": "handlebars_mustache.md",
+    "**/*.{jinja2,j2}": "jinja.md",
     "**/*.pug": "pug.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
     "**/*.{ts,js,tsx,jsx,mjs,cjs}": "ts_js_tsx_jsx.md",
     "**/*.{kt,kts}": "kotlin.md",
+    "**/*.{fs,fsi,fsx}": "fsharp.md",
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,cxx,hpp,hxx}": "cpp.md",
     "**/*.c": "c.md",
@@ -33,12 +35,13 @@
     "**/*.prisma": "prisma.md",
     "**/*.jl": "julia.md",
     "**/*.R": "r.md",
-    "**/*.{tf,hcl,tfvars}": "terraform.md",
+    "**/*.{tf,tofu,hcl,tfvars}": "terraform.md",
     "**/*.bicep": "bicep.md",
     "**/*.nix": "nix.md",
     "**/*.{hs,lhs}": "haskell.md",
     "**/*.{nim,nims,nimble}": "nim.md",
     "**/*.swift": "swift.md",
+    "**/*.nu": "nushell.md",
     "**/*.elm": "elm.md",
     "**/*.{jsonnet,libsonnet}": "jsonnet.md",
     "**/*.zig": "zig.md",
@@ -52,6 +55,8 @@
     "**/*.mm": "objc.md",
     "**/*.sol": "solidity.md",
     "**/*.vy": "vyper.md",
-    "**/*.rego": "rego.md"
+    "**/*.rego": "rego.md",
+    "**/*.{glsl,hlsl,wgsl,metal}": "shader.md",
+    "**/*.{ps1,psm1,psd1}": "powershell.md"
   }
 }

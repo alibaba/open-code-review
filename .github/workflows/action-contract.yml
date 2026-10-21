@@ -18,6 +18,8 @@ on:
       - 'scripts/github-actions/**'
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
+      - '.github/workflows/pr-commit-policy.yml'
+      - '.github/workflows/release.yml'
   pull_request:
     branches: [main]
     paths:
@@ -30,6 +32,8 @@ on:
       - 'scripts/github-actions/**'
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
+      - '.github/workflows/pr-commit-policy.yml'
+      - '.github/workflows/release.yml'
 
 permissions:
   contents: read
@@ -49,10 +53,13 @@ jobs:
     container:
       image: node:24
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
+
+      - name: Install release contract dependencies
+        run: apt-get update && apt-get install -y jq
 
       - name: Test GitHub Actions contracts
         run: npm run test:github-actions
