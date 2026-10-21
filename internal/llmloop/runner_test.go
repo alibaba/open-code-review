@@ -6,6 +6,7 @@ package llmloop
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -150,6 +151,147 @@ func TestToolFailures_AreOrderedAndSnapshotIsolated(t *testing.T) {
 	again := r.ToolFailures()
 	if again[0].Error != "first" || again[0].Arguments != `{}` {
 		t.Errorf("ToolFailures snapshot mutated internal state: %+v", again[0])
+	}
+}
+
+func TestCommentDelivery_NilWithoutCodeCommentRejection(t *testing.T) {
+	r := NewRunner(Deps{})
+	if got := r.CommentDelivery(); got != nil {
+		t.Fatalf("CommentDelivery() = %+v, want nil on a clean run", got)
+	}
+	// Exploration-tool failures never produce a delivery record.
+	r.recordToolFailure(1, "code_search", "a.go", "boom", nil, `{}`, 0)
+	if got := r.CommentDelivery(); got != nil {
+		t.Fatalf("CommentDelivery() = %+v, want nil without code_comment rejections", got)
+	}
+}
+
+func TestCommentDelivery_ReconcilesPerTask(t *testing.T) {
+	comment := tool.CodeComment.Name()
+	type op struct {
+		kind   string // "fail" or "ok"
+		number int64
+		task   string
+	}
+	cases := []struct {
+		name        string
+		ops         []op
+		unrecovered int
+		numbers     []int64
+	}{
+		{
+			name:        "rejection followed by same-task acceptance recovers",
+			ops:         []op{{"fail", 5, "group-a"}, {"ok", 9, "group-a"}},
+			unrecovered: 0,
+			numbers:     []int64{},
+		},
+		{
+			name:        "rejection after the only acceptance stays unrecovered",
+			ops:         []op{{"ok", 3, "group-a"}, {"fail", 7, "group-a"}},
+			unrecovered: 1,
+			numbers:     []int64{7},
+		},
+		{
+			name:        "no acceptance leaves every rejection unrecovered",
+			ops:         []op{{"fail", 2, "group-a"}, {"fail", 4, "group-a"}},
+			unrecovered: 2,
+			numbers:     []int64{2, 4},
+		},
+		{
+			name:        "one task cannot recover another",
+			ops:         []op{{"fail", 5, "group-a"}, {"ok", 9, "group-b"}},
+			unrecovered: 1,
+			numbers:     []int64{5},
+		},
+		{
+			name:        "completion order does not leak into the record",
+			ops:         []op{{"fail", 11, "group-a"}, {"fail", 4, "group-a"}},
+			unrecovered: 2,
+			numbers:     []int64{4, 11},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewRunner(Deps{})
+			for _, o := range tc.ops {
+				if o.kind == "fail" {
+					r.recordToolFailure(o.number, comment, o.task, "rejected", nil, `{}`, 0)
+				} else {
+					r.recordCodeCommentSuccess(o.number, o.task)
+				}
+			}
+			got := r.CommentDelivery()
+			if got == nil {
+				t.Fatal("CommentDelivery() = nil, want a record")
+			}
+			if got.Unrecovered != tc.unrecovered {
+				t.Errorf("Unrecovered = %d, want %d", got.Unrecovered, tc.unrecovered)
+			}
+			if !slices.Equal(got.ToolCallNumbers, tc.numbers) {
+				t.Errorf("ToolCallNumbers = %v, want %v", got.ToolCallNumbers, tc.numbers)
+			}
+		})
+	}
+}
+
+func TestCommentDelivery_LoopOrderRetryRecovers(t *testing.T) {
+	// Mirrors the tool-use loop: numbers come from recordToolCall, a
+	// rejection records a failure, and a later accepted submission for
+	// the same task clears it.
+	r := NewRunner(Deps{})
+	comment := tool.CodeComment.Name()
+	first := r.recordToolCall(comment)
+	r.recordToolFailure(first, comment, "group-a", "Error: 'comments' array is required. Got args: {}", nil, `{}`, 0)
+	if got := r.CommentDelivery(); got == nil || got.Unrecovered != 1 {
+		t.Fatalf("after rejection CommentDelivery() = %+v, want 1 unrecovered", got)
+	}
+	second := r.recordToolCall(comment)
+	r.recordCodeCommentSuccess(second, "group-a")
+	got := r.CommentDelivery()
+	if got == nil || got.Unrecovered != 0 {
+		t.Fatalf("after retry CommentDelivery() = %+v, want 0 unrecovered", got)
+	}
+	if len(got.ToolCallNumbers) != 0 {
+		t.Errorf("ToolCallNumbers = %v, want empty", got.ToolCallNumbers)
+	}
+}
+
+func TestCommentDelivery_ConcurrentRecord(t *testing.T) {
+	r := NewRunner(Deps{})
+	comment := tool.CodeComment.Name()
+	var wg sync.WaitGroup
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			task := fmt.Sprintf("group-%d", w)
+			for i := 0; i < 25; i++ {
+				n := r.recordToolCall(comment)
+				if i%2 == 0 {
+					r.recordToolFailure(n, comment, task, "rejected", nil, `{}`, 0)
+				} else {
+					r.recordCodeCommentSuccess(n, task)
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	got := r.CommentDelivery()
+	if got == nil {
+		t.Fatal("CommentDelivery() = nil, want a record after recorded failures")
+	}
+	// Each task alternates fail/ok starting and ending with fail, so exactly
+	// the trailing rejection per task is unrecovered — deterministic whatever
+	// the interleaving, since same-task numbers increase in call order.
+	if got.Unrecovered != 8 || len(got.ToolCallNumbers) != 8 {
+		t.Errorf("CommentDelivery() = %+v, want 8 unrecovered numbers", got)
+	}
+	if !slices.IsSorted(got.ToolCallNumbers) {
+		t.Errorf("ToolCallNumbers = %v, want sorted", got.ToolCallNumbers)
+	}
+	again := r.CommentDelivery()
+	if !slices.Equal(got.ToolCallNumbers, again.ToolCallNumbers) {
+		t.Errorf("record not deterministic across reads: %v vs %v", got.ToolCallNumbers, again.ToolCallNumbers)
 	}
 }
 
