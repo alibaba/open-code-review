@@ -39,6 +39,7 @@ limitation below.
    | `OCR_LLM_TOKEN` | Yes (secret) | API key for the LLM endpoint. |
    | `OCR_LLM_MODEL` | Yes | Model name, e.g. `<provider-model-name>`. |
    | `OCR_USE_ANTHROPIC` | If using Anthropic | Set to `true` when `OCR_LLM_URL` is an Anthropic-compatible endpoint. |
+   | `OCR_LANGUAGE` | No | Review output language, for example `Chinese` or `English`. |
 
    `CODEUP_MR_LOCAL_ID`, `CODEUP_TARGET_BRANCH`, and `CODEUP_SOURCE_BRANCH`
    are populated automatically from the merge request trigger context —
