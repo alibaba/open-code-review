@@ -84,6 +84,7 @@ func TestToLlmComments(t *testing.T) {
 		ExistingCode:   "existing",
 		StartLine:      3,
 		EndLine:        5,
+		Side:           "LEFT",
 		Category:       "bug",
 		Severity:       "high",
 	}
@@ -108,6 +109,7 @@ func TestToLlmComments(t *testing.T) {
 				ExistingCode:   "existing",
 				StartLine:      3,
 				EndLine:        5,
+				Side:           "LEFT",
 				Category:       "bug",
 				Severity:       "high",
 			}},

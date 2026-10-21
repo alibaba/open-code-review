@@ -109,8 +109,9 @@ OCR walks the diff looking for the text in `existing_code` using a
 
 1. **Hunk new-side** — a run of consecutive **context + added** lines
    (not deleted-only, not unchanged-only), yielding new-file line
-   numbers. If that fails, OCR retries the **hunk old-side** — context +
-   deleted lines — yielding old-file line numbers.
+   numbers and `side=RIGHT`. If that fails, OCR retries the **hunk
+   old-side** — context + deleted lines — yielding old-file line numbers
+   and `side=LEFT`.
 2. **Full new-file scan** — if no hunk matched, OCR scans the entire
    post-change file content line-by-line for consecutive matches
    (`resolveFromFileContent`).
@@ -123,6 +124,10 @@ Matching is **whitespace-insensitive**: lines are trimmed and diff
 match exactly. As a last resort the comment is delivered with
 `start_line=0`, telling the user "the issue is real but you'll need to
 find the spot yourself".
+
+The resolved `side` is included in machine-readable output. `RIGHT` refers
+to the post-change file; `LEFT` refers to the pre-change file and is used for
+comments on deleted code. Unresolved comments omit `side`.
 
 ### Example
 

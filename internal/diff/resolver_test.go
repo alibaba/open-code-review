@@ -748,6 +748,55 @@ func TestResolveFromHunk_NewSideAcrossDeletedLines(t *testing.T) {
 	}
 }
 
+func TestResolveLineNumbers_RecordsMatchedDiffSide(t *testing.T) {
+	raw := `diff --git a/test.go b/test.go
+--- a/test.go
++++ b/test.go
+@@ -1,4 +1,5 @@
+ package main
+-legacyCall()
++currentCall()
+ after()`
+
+	diffs := []model.Diff{{NewPath: "test.go", Diff: raw}}
+	comments := []model.LlmComment{
+		{Path: "test.go", ExistingCode: "legacyCall()"},
+		{Path: "test.go", ExistingCode: "currentCall()"},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	if result[0].Side != model.CommentSideLeft {
+		t.Errorf("deleted match side = %q, want %q", result[0].Side, model.CommentSideLeft)
+	}
+	if result[1].Side != model.CommentSideRight {
+		t.Errorf("added match side = %q, want %q", result[1].Side, model.CommentSideRight)
+	}
+}
+
+func TestResolveLineNumbers_OldSideRangeAcrossContextAndDeletedLines(t *testing.T) {
+	raw := `diff --git a/test.go b/test.go
+--- a/test.go
++++ b/test.go
+@@ -1,3 +1,2 @@
+ keepBefore()
+-legacyCall()
+ keepAfter()`
+
+	diffs := []model.Diff{{NewPath: "test.go", Diff: raw}}
+	comments := []model.LlmComment{{
+		Path:         "test.go",
+		ExistingCode: "keepBefore()\nlegacyCall()",
+	}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	if result[0].StartLine != 1 || result[0].EndLine != 2 {
+		t.Fatalf("old-side range = %d-%d, want 1-2", result[0].StartLine, result[0].EndLine)
+	}
+	if result[0].Side != model.CommentSideLeft {
+		t.Fatalf("old-side range side = %q, want %q", result[0].Side, model.CommentSideLeft)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ResolveLineNumbers integration tests (additional scenarios)
 // ---------------------------------------------------------------------------

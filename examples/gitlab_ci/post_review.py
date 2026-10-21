@@ -261,10 +261,9 @@ def format_comment(comment, comment_id=None):
 
     The per-comment id tag (when provided) is prepended as an HTML comment so
     :func:`reconcile_posted_id` can match it back on retry. The category/severity
-    badge is then prepended on its own line. The suggestion uses GitLab's
-    ``suggestion:-N+0`` info string, where ``N`` is the number of extra lines
-    above the anchor covered by a multiline span (``0`` for a single line), so
-    the "Apply suggestion" button rewrites the whole existing block.
+    badge is then prepended on its own line. RIGHT-side suggestions use
+    ``suggestion:-N+0`` to replace the full span above the anchor. LEFT-side
+    suggestions remain plain text because they cannot target current code.
     """
     body = ""
     if comment_id:
@@ -276,10 +275,14 @@ def format_comment(comment, comment_id=None):
     suggestion = comment.get("suggestion_code", "")
     existing = comment.get("existing_code", "")
     if suggestion and existing:
-        span = comment_span(comment)
-        suggestion_offset = span["end"] - span["start"] if span is not None and span["multiline"] else 0
-        body += "\n\n**Suggestion:**\n"
-        body += "```suggestion:-%d+0\n%s\n```" % (suggestion_offset, suggestion)
+        if str(comment.get("side", "")).upper() == "LEFT":
+            body += "\n\n**Suggested change (old-side comment):**\n"
+            body += fenced_block(suggestion)
+        else:
+            span = comment_span(comment)
+            suggestion_offset = span["end"] - span["start"] if span is not None and span["multiline"] else 0
+            body += "\n\n**Suggestion:**\n"
+            body += "```suggestion:-%d+0\n%s\n```" % (suggestion_offset, suggestion)
     return body
 
 
@@ -301,7 +304,8 @@ def format_comment_fallback(comment, reason=None):
         md += badge + "\n"
     md += "### 📄 `%s`" % path
     if start_line and end_line:
-        md += " (L%d-L%d)" % (start_line, end_line)
+        side_label = " (old file)" if str(comment.get("side", "")).upper() == "LEFT" else ""
+        md += " (L%d-L%d%s)" % (start_line, end_line, side_label)
     md += "\n\n"
     if reason:
         md += "⚠️ Could not be posted inline: %s\n\n" % reason
@@ -431,6 +435,22 @@ def comment_span(comment):
     return {"start": single, "end": single, "multiline": False}
 
 
+def _position_is_left(position):
+    """Return whether a GitLab position is anchored to the old/base side."""
+    if str(position.get("side", "")).upper() == "LEFT":
+        return True
+    # GitLab responses may omit an explicit side and identify LEFT by carrying
+    # old_line without new_line (the inverse is the usual RIGHT shape).
+    if position.get("old_line") is not None and position.get("new_line") is None:
+        return True
+    line_range = position.get("line_range") or {}
+    start = line_range.get("start") or {}
+    end = line_range.get("end") or {}
+    return (start.get("old_line") is not None or end.get("old_line") is not None) and (
+        start.get("new_line") is None and end.get("new_line") is None
+    )
+
+
 def position_span(position):
     """Resolve a GitLab discussion position into a line span (or None)."""
     if not position:
@@ -439,14 +459,16 @@ def position_span(position):
     if line_range:
         start = line_range.get("start") or {}
         end = line_range.get("end") or {}
-        s = _num(start.get("new_line"))
-        e = _num(end.get("new_line"))
+        line_key = "old_line" if _position_is_left(position) else "new_line"
+        s = _num(start.get(line_key))
+        e = _num(end.get(line_key))
         if s is not None and e is not None:
             if s != e:
                 return {"start": min(s, e), "end": max(s, e), "multiline": True}
             return {"start": s, "end": s, "multiline": False}
         return None
-    nl = _num(position.get("new_line"))
+    line_key = "old_line" if _position_is_left(position) else "new_line"
+    nl = _num(position.get(line_key))
     if nl is not None:
         return {"start": nl, "end": nl, "multiline": False}
     return None
@@ -471,8 +493,11 @@ def overlaps_history(comment, cur_span, history, threshold):
     """True when ``cur_span`` overlaps any prior bot discussion on the same path."""
     t = resolve_threshold(threshold)
     path = comment.get("path")
+    side = str(comment.get("side") or "RIGHT").upper()
     for h in history:
         if h.get("path") != path:
+            continue
+        if h.get("side", "RIGHT") != side:
             continue
         if same_comment_span(cur_span, h["span"], t):
             return True
@@ -492,8 +517,8 @@ def is_line_resolution_failure(error_body):
     return any(p.search(text) for p in LINE_RESOLUTION_PATTERNS)
 
 
-def parse_diff_hunk_inventory(patch):
-    """Parse a unified-diff patch into per-hunk new-file line ranges.
+def parse_diff_hunk_inventory(patch, side="RIGHT"):
+    """Parse a unified-diff patch into per-hunk ranges for ``side``.
 
     Returns ``(ranges, complete)``. ``complete`` is False when the patch looks
     truncated (observed hunk length != declared), so the caller declines to
@@ -502,8 +527,9 @@ def parse_diff_hunk_inventory(patch):
     if not patch:
         return [], False
     ranges = []
-    hunk_header_re = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+    hunk_header_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
     lines = str(patch).split("\n")
+    is_left = str(side or "RIGHT").upper() == "LEFT"
     current = None
     saw_hunk = False
     complete = True
@@ -521,17 +547,23 @@ def parse_diff_hunk_inventory(patch):
         match = hunk_header_re.match(line)
         if match:
             flush()
-            start = int(match.group(1))
-            expected = 1 if match.group(2) is None else int(match.group(2))
+            if is_left:
+                start = int(match.group(1))
+                expected = 1 if match.group(2) is None else int(match.group(2))
+            else:
+                start = int(match.group(3))
+                expected = 1 if match.group(4) is None else int(match.group(4))
             current = {"start": start, "end": start - 1, "next": start,
                        "expected": expected, "observed": 0}
             saw_hunk = True
             continue
         if not current:
             continue
-        if line.startswith("\\") or line.startswith("-"):
+        if line.startswith("\\"):
             continue
-        if line.startswith("+") or line.startswith(" "):
+        if (is_left and line.startswith("+")) or ((not is_left) and line.startswith("-")):
+            continue
+        if line.startswith("+") or line.startswith("-") or line.startswith(" "):
             current["end"] = current["next"]
             current["next"] += 1
             current["observed"] += 1
@@ -539,16 +571,8 @@ def parse_diff_hunk_inventory(patch):
     return ranges, (saw_hunk and complete)
 
 
-def build_new_line_positions(patch):
-    """Map each new-file line number to its diff position within a patch.
-
-    Returns ``{new_line: {"type": "new"|"context", "old_line": int|None}}``.
-    Added lines are ``"new"`` (no old-file counterpart, so ``old_line`` is
-    ``None``); unchanged context lines carry their real ``old_line``. Removed
-    lines have no new-file position and are omitted. Empty/blank patches yield
-    an empty map. Line classification mirrors :func:`parse_diff_hunk_inventory`
-    (only ``+`` and space-prefixed lines advance the new-file counter).
-    """
+def build_line_positions(patch):
+    """Map each new-file line number to its diff position within a patch."""
     positions = {}
     if not patch:
         return positions
@@ -634,7 +658,8 @@ def classify_comment_against_diff(comment, diff):
     known = diff.get("known") or set()
     if path not in known:
         return "invalid"
-    files = diff.get("files") or {}
+    side = str(comment.get("side", "")).upper()
+    files = (diff.get("files_old") if side == "LEFT" else diff.get("files")) or {}
     ranges = files.get(path)
     if not ranges:
         return "unknown"
@@ -1067,6 +1092,7 @@ class GitLabPoster:
         known = set()
         files = {}
         positions = {}
+        files_old = {}
         complete = True
         per_page = 100
         max_pages = 30
@@ -1087,7 +1113,10 @@ class GitLabPoster:
                     ranges, ok = parse_diff_hunk_inventory(patch)
                     if ok:
                         files[new_path] = ranges
-                    positions[new_path] = build_new_line_positions(patch)
+                        old_ranges, old_ok = parse_diff_hunk_inventory(patch, side="LEFT")
+                        if old_ok:
+                            files_old[new_path] = old_ranges
+                    positions[new_path] = build_line_positions(patch)
             if len(data) < per_page:
                 break
             page += 1
@@ -1097,8 +1126,8 @@ class GitLabPoster:
         if not known:
             complete = False
             log("[400-fallback] MR diff list came back empty; treating inventory as incomplete.")
-        return {"files": files, "known": known, "positions": positions,
-                "complete": complete}
+        return {"files": files, "files_old": files_old, "known": known,
+                "positions": positions, "complete": complete}
 
 
 def make_poster(api_base, token, auth_header, config):
@@ -1112,7 +1141,9 @@ class DryRunPoster:
     def _print(self, kind, discussion):
         if "position" in discussion:
             pos = discussion["position"]
-            location = "%s:%s" % (pos.get("new_path", ""), pos.get("new_line", ""))
+            line = pos.get("old_line") if pos.get("old_line") is not None else pos.get("new_line", "")
+            side_label = " (old side)" if pos.get("old_line") is not None and pos.get("new_line") is None else ""
+            location = "%s:%s%s" % (pos.get("new_path", ""), line, side_label)
         else:
             location = "general"
         print("--- dry-run %s [%s] ---\n%s\n" % (kind, location, discussion.get("body", "")))
@@ -1139,7 +1170,8 @@ class DryRunPoster:
                 "is_rate_limit_exhausted": False}
 
     def get_mr_diffs(self):
-        return {"files": {}, "known": set(), "positions": {}, "complete": False}
+        return {"files": {}, "files_old": {}, "known": set(),
+                "positions": {}, "complete": False}
 
     def mr_url(self):
         return None
@@ -1286,7 +1318,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         start_line = comment.get("start_line", 0)
         end_line = comment.get("end_line", 0)
         # Inline posting needs a valid end_line (it becomes the GitLab position's
-        # new_line). A start_line-only comment cannot be positioned and must land
+        # new_line or old_line according to side). A start_line-only comment cannot be positioned and must land
         # in the summary (no_line), not be misclassified as a posting failure.
         has_line = bool(end_line and end_line >= 1)
         if not has_line or not path:
@@ -1350,19 +1382,32 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         if not diff_refs:
             failed_comments.append({"comment": comment, "reason": DIFF_REFS_UNAVAILABLE_REASON})
             continue
+        side = str(comment.get("side", "")).upper()
+        position = {
+            "position_type": "text",
+            "new_path": path,
+            "old_path": path,
+            "base_sha": diff_refs["base_sha"],
+            "start_sha": diff_refs["start_sha"],
+            "head_sha": diff_refs["head_sha"],
+        }
+        # GitLab uses old_line for the left (base) side.  Missing/unknown side
+        # retains the historical right-side new_line behavior.
+        if side == "LEFT":
+            position["old_line"] = end_line
+            start_line = comment.get("start_line", 0)
+            if start_line and start_line != end_line:
+                position["line_range"] = {
+                    "start": {"old_line": start_line, "type": "old"},
+                    "end": {"old_line": end_line, "type": "old"},
+                }
+        else:
+            position["new_line"] = end_line
         discussion = {
             "body": it["body"],
-            "position": {
-                "position_type": "text",
-                "new_path": path,
-                "old_path": path,
-                "new_line": end_line,
-                "base_sha": diff_refs["base_sha"],
-                "start_sha": diff_refs["start_sha"],
-                "head_sha": diff_refs["head_sha"],
-            },
+            "position": position,
         }
-        if span is not None and span["multiline"]:
+        if side != "LEFT" and span is not None and span["multiline"]:
             # Resolve the range from the real MR diff: a boundary's line_code
             # needs the true old-file line unless the line is a pure addition.
             # If the diff is unavailable or a boundary cannot be resolved, we
@@ -1435,10 +1480,15 @@ def load_incremental_history(poster):
         if not any(_BOT_MARKER in (n.get("body") or "") for n in notes):
             continue
         for n in notes:
-            span = position_span(n.get("position"))
+            position = n.get("position") or {}
+            span = position_span(position)
             if span:
-                path = (n.get("position") or {}).get("new_path")
-                history.append({"path": path, "span": span})
+                path = position.get("new_path") or position.get("old_path")
+                history.append({
+                    "path": path,
+                    "span": span,
+                    "side": "LEFT" if _position_is_left(position) else "RIGHT",
+                })
     return history
 
 

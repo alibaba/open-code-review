@@ -275,8 +275,9 @@ func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath
 main 도구 호출 루프가 후처리 때문에 멈춰 서는 일이 없습니다.
 
 1. **라인 해석**(워커 안에서) — 슬라이딩 윈도 알고리즘으로 `existing_code`를
-   diff와 맞춰 보며 정확한 `start_line` / `end_line`을 계산합니다. 맞추기에
-   실패하면 둘 다 `0`이 됩니다. 라인 범위 `0`은 사용자가 직접 위치를 찾아야
+   diff와 맞춰 보며 정확한 `start_line` / `end_line`과 `side`(`RIGHT`는 변경 후,
+   `LEFT`는 삭제 코드의 변경 전 파일)를 계산합니다. 맞추기에 실패하면 둘 다 `0`이
+   되고 `side`는 생략됩니다. 라인 범위 `0`은 사용자가 직접 위치를 찾아야
    하는 "앵커 없는" 코멘트라는 뜻으로 통합니다(따로 저장하는 플래그는 없고,
    뒷단에서 `start_line == 0`인지 확인합니다).
 2. **재배치 작업** *(선택적 대안)* — 만만치 않은 diff에서 라인 해석이

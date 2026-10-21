@@ -27,7 +27,7 @@ export function CommentCard({ comment, index, status, canJump, onOpen, onAction 
         title={canJump ? t('cmp.comment.view') : undefined}
       >
         <span class="comment-file">{comment.path}</span>
-        <span class="comment-line">L{comment.startLine}</span>
+        <span class="comment-line">L{comment.startLine}{comment.side === 'LEFT' && ` ${t('cmp.comment.sideLeft')}`}</span>
       </div>
       <div class="comment-body">{comment.content}</div>
       <div class="comment-actions">

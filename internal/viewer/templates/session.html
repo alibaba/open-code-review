@@ -165,6 +165,7 @@
                     {{if .Category}}<span class="comment-badge {{categoryClass .Category}}">{{.Category}}</span>{{end}}
                     {{if .Severity}}<span class="comment-badge {{severityClass .Severity}}">{{.Severity}}</span>{{end}}
                     {{if .StartLine}}<span class="comment-lines{{if $numbered}} sr-only{{end}}">L{{.StartLine}}{{if and .EndLine (ne .EndLine .StartLine)}}-L{{.EndLine}}{{end}}</span>{{end}}
+                    {{if eq .Side "LEFT"}}<span class="comment-badge">LEFT (old file)</span>{{end}}
                     <span class="comment-badge mark-chip" data-mark-chip hidden></span>
                 </div>
                 <div class="comment-content">{{.Content}}</div>

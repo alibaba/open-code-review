@@ -702,7 +702,7 @@ func TestLoadSession_ReviewComments(t *testing.T) {
 
 	writeJSONL(t, filepath.Join(repoDir, "comments.jsonl"),
 		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`,
-		`{"type":"review_item_done","filePath":"main.go","comments":[{"path":"override.go","content":"use a constant","suggestion_code":"const N = 3","existing_code":"3","start_line":10,"end_line":12,"category":"style","severity":"minor"}]}`,
+		`{"type":"review_item_done","filePath":"main.go","comments":[{"path":"override.go","content":"use a constant","suggestion_code":"const N = 3","existing_code":"3","start_line":10,"end_line":12,"side":"LEFT","category":"style","severity":"minor"}]}`,
 		`{"type":"review_item_reused","filePath":"util.go","comments":[{"content":"reused finding"}]}`,
 		`{"type":"session_end","duration_seconds":5,"files_reviewed":["main.go"]}`,
 	)
@@ -735,6 +735,9 @@ func TestLoadSession_ReviewComments(t *testing.T) {
 	}
 	if c.StartLine != 10 || c.EndLine != 12 {
 		t.Errorf("lines = %d-%d, want 10-12", c.StartLine, c.EndLine)
+	}
+	if c.Side != "LEFT" {
+		t.Errorf("Side = %q, want LEFT", c.Side)
 	}
 	if c.Category != "style" {
 		t.Errorf("Category = %q", c.Category)
