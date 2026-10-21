@@ -24,10 +24,27 @@ func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
 }
 
 func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
-	for _, state := range []session.TerminalState{session.StateComplete, session.StatePartial, session.StateSkipped} {
+	for _, state := range []session.TerminalState{session.StateComplete, session.StateSkipped} {
 		if err := reviewResultError(nil, &session.RunManifest{TerminalState: state}); err != nil {
 			t.Errorf("state %q returned error: %v", state, err)
 		}
+	}
+	timeoutPartial := &session.RunManifest{
+		TerminalState: session.StatePartial,
+		Coverage: session.Coverage{
+			Selected:  []session.CoverageItem{{ItemID: "a"}, {ItemID: "b"}},
+			Completed: []session.CoverageItem{{ItemID: "a"}},
+			Failed:    []session.CoverageItem{{ItemID: "b", Classification: session.FailureTimeout}},
+		},
+	}
+	if err := reviewResultError(nil, timeoutPartial); err == nil ||
+		!strings.Contains(err.Error(), "1 of 2 selected item(s) failed") {
+		t.Fatalf("partial timeout must produce a process error with item counts: %v", err)
+	}
+	providerPartial := *timeoutPartial
+	providerPartial.Coverage.Failed = []session.CoverageItem{{ItemID: "b", Classification: session.FailureProvider}}
+	if err := reviewResultError(nil, &providerPartial); err == nil {
+		t.Fatal("partial provider failure must produce a process error")
 	}
 	if err := reviewResultError(nil, &session.RunManifest{TerminalState: session.StateFailed}); err == nil {
 		t.Fatal("failed manifest must produce a process error")
@@ -49,8 +66,8 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "2 of 2 selected item(s) failed") {
 		t.Fatalf("failed item counts missing from error: %v", err)
 	}
-	// A controlled budget stop records no run_failure, so coverage alone decides.
-	// With anything covered the manifest is partial and must exit 0.
+	// A controlled budget stop records no run_failure. It is the one partial
+	// outcome that remains successful when anything was covered.
 	budgetPartial := &session.RunManifest{
 		TerminalState: session.StatePartial,
 		Coverage: session.Coverage{
@@ -61,6 +78,14 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 	}
 	if err := reviewResultError(nil, budgetPartial); err != nil {
 		t.Fatalf("budget stop with usable coverage must not produce a process error: %v", err)
+	}
+	mixedPartial := *budgetPartial
+	mixedPartial.Coverage.Failed = append(mixedPartial.Coverage.Failed,
+		session.CoverageItem{ItemID: "c", Classification: session.FailureTimeout})
+	mixedPartial.Coverage.Selected = append(mixedPartial.Coverage.Selected,
+		session.CoverageItem{ItemID: "c"})
+	if err := reviewResultError(nil, &mixedPartial); err == nil {
+		t.Fatal("a timeout must make mixed budget coverage exit non-zero")
 	}
 	// When the cap stopped the run before any file completed, every selected item
 	// is failed(budget): no usable coverage, so it must exit non-zero even though
