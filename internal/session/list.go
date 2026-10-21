@@ -39,8 +39,29 @@ type Summary struct {
 	TotalComments  int           `json:"total_comments"`
 	LLMFailures    int64         `json:"llm_failures"`
 	Aborted        bool          `json:"aborted"`
-	Legacy         bool          `json:"legacy"`
-	RunManifest    *RunManifest  `json:"run_manifest,omitempty"`
+	// Running reports liveness evidence for an unfinished session: the
+	// writer's heartbeat loop (or, for files from pre-heartbeat versions, any
+	// record append) reached disk within the freshness window that applies to
+	// that file — see markRunning. It is evidence, not a lease: a writer
+	// killed moments ago still shows Running until the window lapses, and
+	// Running never promises a session_end will arrive. Aborted keeps its
+	// file-based meaning — true while no session_end record is on disk — so a
+	// live run reports running and aborted both true. Consumers must not
+	// treat the flags as mutually exclusive: running takes precedence over
+	// aborted, exactly like the status column does.
+	Running     bool         `json:"running,omitempty"`
+	Legacy      bool         `json:"legacy"`
+	RunManifest *RunManifest `json:"run_manifest,omitempty"`
+
+	// sawHeartbeat records whether the walk saw a heartbeat record in this
+	// file, which selects the freshness window markRunning applies: heartbeat
+	// files are held to the liveness window, files written by pre-heartbeat
+	// versions fall back to the wider activity window. Every file written by
+	// a heartbeat-capable version contains at least one heartbeat record from
+	// its synchronous initial beat, so absence of the record reliably means a
+	// pre-heartbeat version wrote the file. Unexported on purpose: an
+	// interpretation detail, not part of the JSON contract.
+	sawHeartbeat bool
 
 	// ResumeLineage is present only for a run that resumed another, and records
 	// which run it continued and across which provider and model.
@@ -172,7 +193,50 @@ func LoadDetail(repoDir, sessionID string) (*Summary, []ItemDetail, error) {
 	if summary.SessionID == "" {
 		summary.SessionID = sessionID
 	}
+	summary.markRunning(path)
 	return summary, items, nil
+}
+
+// livenessWindow is how fresh an unfinished session file must be to report
+// running when its writer emits heartbeats: three missed beats at
+// heartbeatInterval (60s each). The window only bounds how long a killed
+// writer can masquerade as running — a live writer keeps the file fresh
+// through heartbeats no matter how long its current provider request or
+// retry wait takes, so the window never has to cover request duration.
+const livenessWindow = 3 * time.Minute
+
+// legacyActivityWindow is the fallback freshness window for unfinished
+// session files with no heartbeat records — written by versions predating
+// heartbeats. For those, freshness only reflects observed activity (record
+// appends), which an old writer may legitimately pause for during one slow
+// request plus retries, so the window is wider and the conclusion weaker:
+// past it, the run is reported aborted although liveness was never verified.
+const legacyActivityWindow = 10 * time.Minute
+
+// markRunning separates an unfinished session whose writer is still proving
+// liveness from one whose evidence has gone stale. Freshness comes from the
+// writer's heartbeat loop for files that contain heartbeat records, and from
+// record appends for older files — the sawHeartbeat flag picked during the
+// walk selects which window applies. This is liveness evidence, not a lease:
+// a writer killed inside the window still reports Running until the window
+// lapses. Aborted keeps its file-based meaning — true whenever no session_end
+// reached disk — so resume logic and existing JSON consumers are unaffected;
+// Running only adds what the flag cannot express.
+func (s *Summary) markRunning(path string) {
+	if !s.Aborted {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	window := legacyActivityWindow
+	if s.sawHeartbeat {
+		window = livenessWindow
+	}
+	if time.Since(info.ModTime()) < window {
+		s.Running = true
+	}
 }
 
 func loadSummaryFromFile(path, sessionID, repoDir string) (*Summary, error) {
@@ -190,6 +254,7 @@ func loadSummaryFromFile(path, sessionID, repoDir string) (*Summary, error) {
 	if summary.SessionID == "" {
 		summary.SessionID = sessionID
 	}
+	summary.markRunning(path)
 	return summary, nil
 }
 
@@ -254,6 +319,8 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 			TargetProvider: rec.TargetProvider,
 			TargetModel:    rec.TargetModel,
 		}
+	case "heartbeat":
+		s.sawHeartbeat = true
 	case "review_item_done":
 		s.CompletedFiles++
 		s.TotalComments += countCommentsRaw(rec.Comments)

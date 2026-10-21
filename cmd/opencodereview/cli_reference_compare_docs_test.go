@@ -143,3 +143,26 @@ func TestCLIReferenceDocumentsSessionRm(t *testing.T) {
 		})
 	}
 }
+
+func TestCLIReferenceDocumentsSessionListStatus(t *testing.T) {
+	for _, locale := range []string{"en", "zh", "ja", "ru", "ko"} {
+		t.Run(locale, func(t *testing.T) {
+			path := filepath.Join("..", "..", "pages", "src", "content", "docs", locale, "cli-reference.md")
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			// The status vocabulary and the running/aborted precedence rule
+			// are contract for JSON consumers; identifiers are locale-neutral.
+			for _, want := range []string{
+				"`running`",     // the liveness-evidence status
+				"`aborted`",     // the stale-unfinished status
+				"`session_end`", // the on-disk record that flips aborted to false
+			} {
+				if !strings.Contains(string(body), want) {
+					t.Errorf("%s: missing %q", path, want)
+				}
+			}
+		})
+	}
+}
