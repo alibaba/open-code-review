@@ -1764,7 +1764,7 @@ func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concaten
 	startTime := time.Now()
 	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(gk, session.PlanTask, rec.RequestNo))
 
-	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
+	reqCtx, llmSpan := telemetry.StartLLMSpan(reqCtx, a.args.Model)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
@@ -1860,7 +1860,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 	startTime := time.Now()
 	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(groupKey, session.ReviewFilterTask, rec.RequestNo))
 
-	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
+	reqCtx, llmSpan := telemetry.StartLLMSpan(reqCtx, a.args.Model)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,

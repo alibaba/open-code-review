@@ -8,10 +8,18 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // --- helpers ---
@@ -689,3 +697,156 @@ func TestResponseRequestID(t *testing.T) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func TestObserverHTTPAttemptSpans(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		body  string
+		build func(string, *RetryCollector) LLMClient
+	}{
+		{"anthropic", anthropicOKBody, func(url string, c *RetryCollector) LLMClient { return anthropicClient(url, c, nil) }},
+		{"chat_completions", openAIOKBody, func(url string, c *RetryCollector) LLMClient {
+			return NewOpenAIClient(ClientConfig{URL: url + "/v1", APIKey: "test-key", Model: "gpt-test", retryCollector: c})
+		}},
+		{"responses", responsesOKBody, func(url string, c *RetryCollector) LLMClient {
+			return NewOpenAIResponsesClient(ClientConfig{URL: url + "/v1", APIKey: "test-key", Model: "gpt-test", retryCollector: c})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := tracetest.NewSpanRecorder()
+			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+			previous := otel.GetTracerProvider()
+			otel.SetTracerProvider(provider)
+			defer otel.SetTracerProvider(previous)
+			defer func() { _ = provider.Shutdown(context.Background()) }()
+			var count atomic.Int32
+			statuses := []int{429, 503, 200}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After-Ms", "1")
+				status := statuses[(count.Add(1)-1)%3]
+				w.WriteHeader(status)
+				if status == 200 {
+					_, _ = fmt.Fprint(w, tc.body)
+				} else {
+					_, _ = fmt.Fprint(w, `{"error":{"type":"rate_limit_error","message":"private response text"}}`)
+				}
+			}))
+			defer server.Close()
+			collector := NewRetryCollector()
+			client := tc.build(server.URL, collector)
+			// Reuse a client to verify numbering resets for each logical call.
+			for call := 1; call <= 2; call++ {
+				meta := testMeta()
+				meta.RequestNo = call
+				ctx, parent := provider.Tracer("test").Start(metaCtx(meta), "llm.request")
+				if _, err := ping(ctx, client); err != nil {
+					t.Fatal(err)
+				}
+				parent.End()
+				attempts := attemptsFor(t, collector, meta)
+				if len(attempts) != 3 {
+					t.Fatalf("retry report has %d attempts", len(attempts))
+				}
+				spans := recorder.Ended()
+				offset := (call - 1) * 4
+				for i, status := range statuses {
+					span := spans[offset+i]
+					if span.Name() != "llm.http_attempt" || span.Parent().SpanID() != parent.SpanContext().SpanID() || span.SpanContext().TraceID() != parent.SpanContext().TraceID() {
+						t.Fatalf("incorrect attempt parenting: %v", span)
+					}
+					attrs := map[string]attribute.Value{}
+					for _, attr := range span.Attributes() {
+						attrs[string(attr.Key)] = attr.Value
+					}
+					if attrs["llm.attempt"].AsInt64() != int64(i+1) || attrs["http.response.status_code"].AsInt64() != int64(status) {
+						t.Fatalf("attempt %d attrs: %v", i+1, attrs)
+					}
+					duration := span.EndTime().Sub(span.StartTime())
+					if duration < 0 || attrs["llm.duration_ms"].AsFloat64() != float64(duration)/float64(time.Millisecond) {
+						t.Fatalf("attempt duration mismatch: %v", attrs)
+					}
+					if i < 2 && (span.Status().Code != codes.Error || attrs["error.type"].AsString() == "") {
+						t.Fatalf("missing HTTP error: %v", span)
+					}
+					if i == 2 && span.Status().Code == codes.Error {
+						t.Fatal("success span marked error")
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestObserverTransportSpanWithoutCollector(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	defer otel.SetTracerProvider(previous)
+	defer func() { _ = provider.Shutdown(context.Background()) }()
+	ctx, parent := provider.Tracer("test").Start(withHTTPAttemptCounter(context.Background()), "llm.request")
+	defer parent.End()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://example.test", nil)
+	transportErr := fmt.Errorf("dial tcp: private credential")
+	_, err := newRetryObserver(nil)(req, func(r *http.Request) (*http.Response, error) {
+		if trace.SpanFromContext(r.Context()).SpanContext().SpanID() == parent.SpanContext().SpanID() {
+			t.Fatal("attempt context not propagated")
+		}
+		return nil, transportErr
+	})
+	if err != transportErr {
+		t.Fatal("transport error changed")
+	}
+	spans := recorder.Ended()
+	if len(spans) != 1 || spans[0].Status().Code != codes.Error {
+		t.Fatalf("missing transport span: %v", spans)
+	}
+	for _, attr := range spans[0].Attributes() {
+		if attr.Key == "http.response.status_code" || strings.Contains(attr.Value.AsString(), "private") {
+			t.Fatalf("unexpected attribute: %v", attr)
+		}
+	}
+	if len(spans[0].Events()) != 0 {
+		t.Fatal("raw transport error exported")
+	}
+}
+
+func TestObserverEndsSpanWhenTransportPanics(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	defer otel.SetTracerProvider(previous)
+	defer func() { _ = provider.Shutdown(context.Background()) }()
+	req, err := http.NewRequest(http.MethodPost, "https://example.test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const payload = "private transport panic"
+	func() {
+		defer func() {
+			if got := recover(); got != payload {
+				t.Fatalf("panic = %v, want original transport panic", got)
+			}
+		}()
+		_, _ = newRetryObserver(nil)(req, func(*http.Request) (*http.Response, error) {
+			panic(payload)
+		})
+	}()
+	spans := recorder.Ended()
+	if len(spans) != 1 || spans[0].Name() != "llm.http_attempt" {
+		t.Fatalf("ended spans = %v, want one HTTP attempt", spans)
+	}
+	if spans[0].EndTime().Before(spans[0].StartTime()) {
+		t.Fatal("attempt ended before it started")
+	}
+	if len(spans[0].Events()) != 0 {
+		t.Fatal("raw panic exported")
+	}
+	for _, attr := range spans[0].Attributes() {
+		if strings.Contains(attr.Value.AsString(), "private") {
+			t.Fatalf("private panic attribute: %v", attr)
+		}
+	}
+}
