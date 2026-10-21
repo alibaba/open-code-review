@@ -32,6 +32,30 @@ sidebar:
 
 常に 2 種類の認証情報が関わります。OCR が発見を生成するために使う **LLM 認証情報**と、貼り付け手順がコメントを貼り戻すために使う **PR/MR 書き込み token** です。GitHub のレシピは `GITHUB_TOKEN` を通じて後者を自動的に提供します。GitLab では `GITLAB_API_TOKEN` を明示的に設定することを推奨しますが、fork MR に対しては組み込みの `CI_JOB_TOKEN` にフォールバックします（これは `/discussions` を通じてディスカッションを開始できます）——信頼性のためには専用の token の使用を推奨します。
 
+## オプションの CI ゲート
+
+両方の統合で、レビューの投稿後に [`ocr gate`](../cli-reference/#ocr-gate) を実行できます。
+ゲートは既定で無効です。使用するには、`ocr gate` を含む OCR ビルドを GitHub の
+`ocr_version` または GitLab の `OCR_VERSION` で指定します。ゲートを有効にすると、
+モデルを呼び出す前にコマンドが利用可能か確認します。
+
+| 判定 | 意味 | 終了コード |
+|---|---|---|
+| `pass` | 選択した全ファイルのレビュー完了を確認でき、有効にしたチェックがすべて成功した。 | `0` |
+| `fail` | 指摘の重要度が設定したしきい値以上だった。 | `1` |
+| `inconclusive` | カバレッジ、対象リビジョン、コメントの投稿など、判定に必要な情報が不足している。 | `1` |
+
+レビュー前に merge base と head のコミット ID を確定し、レビューとゲートに同じ ID を
+渡します。ゲートは元の JSON に含まれるすべての指摘を評価し、サマリーに振り分けた指摘や
+重複投稿を省いた指摘も含みます。予算による中止や `waived` 項目、`code_comment` の
+失敗がある場合、ゲートは通過できません。対象ファイルが 0 件の場合や、manifest の
+バージョンが未対応の場合も同様です。
+
+ジョブの成功には、レビュー実行と投稿の成功、およびゲートの `pass` 判定が必要です。
+結果の投稿とゲート判定を試みてから、ジョブの最終状態を決めます。インライン投稿に
+失敗してサマリーへフォールバックした場合、ジョブは失敗として扱います。
+最終サマリーの投稿確認も必要です。
+
 ## GitHub Actions
 
 上流のワークフローは
@@ -82,6 +106,8 @@ curl -o .github/workflows/ocr-review.yml \
 | `max_tokens_budget` | `''` | `ocr review --max-tokens-budget` に渡すトークン総量（入力 + 出力）の上限。空または `'0'` は無制限です。LLM の各ラウンドの前に確認されます: すでに上限を超えたサブタスクには発見を提出するための最終ラウンドが 1 回与えられ、以降のサブタスクはディスパッチされず、予算超過およびスキップされたファイルは `failed(budget)` として報告され、部分的な結果は引き続き公開され、レビューは 0 で終了します。 |
 | `llm_reasoning_effort` | `''` | `reasoning_effort` リクエストフィールドを調整できるモデル（GLM-5.x、OpenAI reasoning モデルなど）の推論深度：`minimal`、`low`、`medium`、`high`、`max`（大文字小文字を区別しません）。`llm_extra_body` 経由でリクエストボディにマージされるため、公開済みのすべての CLI バージョンで動作します。`llm_extra_body` 内の明示的な `reasoning_effort` キーがこの入力より優先されます。空（デフォルト）の場合は送信しません。OpenAI 互換プロトコル専用です——Anthropic API は未知のボディフィールドを拒否するため、そのプロトコルではアクションが即座に失敗します。Anthropic の thinking 制御には `llm_extra_body` の明示的なキーを使ってください。 |
 | `stream_progress` | `'false'` | `'true'` にすると、レビューが終了するまで沈黙する代わりに、`[ocr]` の進捗行をワークフローログへライブで流します（stderr の human audience）。表示のみの切り替えで、stderr は引き続きファイルにキャプチャされ、アーティファクトとコメント投稿に使われます。 |
+| `gate` | `'false'` | 共有の CI ゲートを有効にします。`true` / `false` は大文字小文字を区別しません。 |
+| `fail_on_severity` | `''` | `critical`、`high`、`medium`、`low` の指定値以上の指摘があると失敗します。`gate: 'true'` が必要です。空の場合は重要度の検査を省略し、カバレッジと投稿の要件を検査します。値の大文字小文字と前後の空白は無視します。 |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -99,6 +125,27 @@ curl -o .github/workflows/ocr-review.yml \
 入力の完全な一覧は
 [`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)
 を参照してください——投稿モード（`sticky_summary`、`incremental`）、重要度/カテゴリのルーティング、プッシュをまたぐチェックポイントなどを含みます。
+
+### ゲートの有効化
+
+既存のアクションステップの `with:` に追加します。
+
+```yaml
+with:
+  gate: 'true'
+  fail_on_severity: high
+```
+
+有効時は merge base から head までの全範囲をレビューします。`checkpoint_range` の
+設定にかかわらず、チェックポイントの読み取りと更新を省略します。長期間開いている
+PR では同じ範囲を再レビューするため、トークン消費が増える場合があります。
+コメントの振り分けと、重複コメントを省く投稿は引き続き使用できます。
+
+`gate_exit_code` はゲートコマンドの終了コードです。ゲートが無効、またはその段階に
+到達しなかった場合は空です。
+`upload_artifacts: 'true'`（既定値）では、`ocr-result.json` と `ocr-stderr.log` を保存します。
+ゲートを実行した場合は `ocr-gate.json` と `ocr-gate-stderr.log` も含まれます。
+各アクション呼び出しは独立した一時ディレクトリを使用します。
 
 ### カスタマイズ
 
@@ -267,9 +314,10 @@ review（または `ocr scan`）を実行してください。
 |---|---|
 | `Cannot find merge-base` | checkout 手順が浅いクローンを使っていますが、区間モードのレビューには完全な履歴が必要です。上流のワークフローは `actions/checkout` に `fetch-depth: 0` を設定しています——ファイルを編集する際はこの設定を保持してください。 |
 | `Failed to parse OCR output` | `OCR_LLM_URL` または `OCR_LLM_AUTH_TOKEN` が欠落しているか誤っています。*Settings → Secrets and variables → Actions* で値を再確認してください。 |
-| レビューコメントが誤った行に付く | 通常、レビュー開始からコメント貼り付けの間に diff がずれたことを意味します。貼り付けスクリプトはこの場合、通常の issue コメントにフォールバックします——対処は不要です。 |
+| レビューコメントが誤った行に付く | レビュー中に PR の head や diff が変わった可能性があります。インライン投稿できない指摘はサマリーコメントに含まれます。`gate: 'true'` の場合、インライン投稿の失敗が残るとジョブは失敗します。レビュー対象の head と diff の位置を確認して再実行してください。 |
 
-> **注意。** `OCR_DEBUG` 環境変数は現在 OCR で**未実装**です——`OCR_DEBUG: "1"` を設定しても効果はありません。将来の対応に備えてここに記載しています。現時点で詳細な出力が必要な場合は、ワークフローが `/tmp/ocr-result.json` と `/tmp/ocr-stderr.log` に書き込む生のレビュー JSON と stderr を確認するか（下記のトラブルシューティングを参照）、ローカルで `ocr review` を実行してください。
+診断には、アップロードされた `ocr-result.json` と `ocr-stderr.log` を確認してください。
+ゲートを実行した場合は `ocr-gate.json` と `ocr-gate-stderr.log` も含まれます。
 
 ## GitLab CI
 
@@ -281,16 +329,18 @@ review（または `ocr scan`）を実行してください。
 
 - `merge_requests` イベント（作成、更新、再オープンといったすべての MR イベント）でトリガーします。
 - `node:20` イメージで実行し、OCR をインストールし、`ocr config set` で設定し、MR diff モードで中核コマンドを実行します。
-- インラインの Python スクリプトで JSON の外殻を解析し、各発見を GitLab Discussion として（diff 上にインラインで）投稿します。MR の `versions` エンドポイントを使って正しい `base_sha` / `start_sha` /
+- `post_review.py` で JSON 形式のレビュー結果を解析し、各指摘を GitLab Discussion として diff 上に投稿します。MR の `versions` エンドポイントを使って正しい `base_sha` / `start_sha` /
   `head_sha` を計算し、正確に位置決めします。インラインで投稿できないコメントは通常の MR note にフォールバックし、最後にサマリー note で締めくくります。
 
 ### インストール
 
-パイプラインをリポジトリのルートに配置します。
+パイプラインと投稿スクリプトをリポジトリのルートに配置します。
 
 ```bash
 curl -o .gitlab-ci.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/gitlab_ci/.gitlab-ci.yml
+curl -o post_review.py \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/gitlab_ci/post_review.py
 ```
 
 すでに `.gitlab-ci.yml` があり、それを保持したい場合は、レシピを別のパスに配置して `include:`
@@ -300,6 +350,8 @@ curl -o .gitlab-ci.yml \
 include:
   - local: 'ci/ocr-review.gitlab-ci.yml'
 ```
+
+`post_review.py` はリポジトリのルートに置きます。別の場所に置く場合はパイプライン内のパスを更新してください。
 
 ### 必須の CI/CD 変数
 
@@ -312,8 +364,9 @@ include:
 | `OCR_LLM_MODEL` | いいえ | いいえ | モデル名。デフォルトはありません——明示的に設定する必要があります。 |
 | `GITLAB_API_TOKEN` | いいえ | はい | `api` scope を持つ project / personal / group access token。オプションです——欠落時は組み込みの `CI_JOB_TOKEN` にフォールバックします（fork MR など）。信頼性のためには専用の `GITLAB_API_TOKEN` を推奨します。 |
 
-> GitLab は 8 文字未満の変数を拒否するため、パイプライン内で `llm.use_anthropic` は
-> `false` にハードコードされています。Anthropic Claude モデルを使うには、スクリプトを直接編集してください。
+> GitLab の 8 文字以上という要件はマスクされた変数に適用されます。`OCR_GATE` などの
+> ポリシー値はマスクなしの変数で設定します。この例の `llm.use_anthropic` は
+> `false` です。Anthropic Claude モデルを使う場合は、その設定行を編集してください。
 
 > パイプライン起動時には
 > `ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'`
@@ -321,6 +374,20 @@ include:
 
 > **手軽な bot 命名のヒント。** Project Access Token と Group Access Token では、
 > token の**名前**が MR ディスカッションの横に表示されます。token を `OpenCodeReview Bot` と命名すれば、追加設定なしでレビューディスカッションにブランド名を付けられます——[サービスアカウント名義で投稿する](#post-under-a-service-account-identity)に記載のより永続的なサービスアカウント設定が不要なときに便利です。
+
+### ゲートの有効化
+
+```yaml
+variables:
+  OCR_GATE: 'true'
+  OCR_FAIL_ON_SEVERITY: high
+```
+
+この値はマスクなしの変数として設定します。`OCR_GATE` の既定値は `false` で、
+`true` / `false` の大文字小文字を区別しません。重要度は `critical`、`high`、`medium`、
+`low` を指定でき、前後の空白と大文字小文字は無視します。空の場合は重要度を検査しません。
+無効な値はインストールやモデル呼び出しの前にエラーになります。ゲートが無効な場合、
+`OCR_FAIL_ON_SEVERITY` は既存の投稿スクリプトによる判定を維持します。
 
 ### カスタマイズ
 
@@ -358,14 +425,20 @@ script:
 
 #### OCR のバージョン固定
 
+インストールする npm バージョンを `OCR_VERSION` で指定します。ゲートを有効にする場合は、`ocr gate` を含むバージョンが必要です。
+
 ```yaml
-script:
-  - npm install -g @alibaba-group/open-code-review@1.0.0
+variables:
+  OCR_VERSION: '<version>'
 ```
 
 #### プッシュのたびの再レビューを避ける
 
-`only: [merge_requests]` は **MR の更新のたびに**トリガーするため、長期にわたる MR では大量の LLM token を消費します。GitLab にはネイティブの「作成時のみ」イベントがないため、推奨されるパターンは、レビューを実行する前に既存の OCR note を検出し、あればスキップすることです。`ocr review` の呼び出しを Python wrapper に置き換えます。
+`only: [merge_requests]` は MR が更新されるたびに実行されます。`OCR_GATE=false` で
+コストを抑える場合は、既存の OCR note を検出してレビューを省略できます。
+`OCR_GATE=true` では、MR が更新されるたびに現在の変更範囲全体を新たにレビューします。
+次の例では、ゲートが無効な場合だけ既存 note によるスキップを適用します。
+この省略を使うと、その後の変更は次のレビューを実行するまで未レビューのままになります。
 
 ```python
 import json, os, sys, urllib.request
@@ -383,7 +456,10 @@ req = urllib.request.Request(url, headers={"PRIVATE-TOKEN": API_TOKEN})
 with urllib.request.urlopen(req) as resp:
     notes = json.loads(resp.read().decode())
 
-if any("OpenCodeReview" in n.get("body", "") for n in notes):
+if (
+    os.environ.get("OCR_GATE", "false").lower() == "false"
+    and any("OpenCodeReview" in n.get("body", "") for n in notes)
+):
     print("OCR already reviewed this MR. Skipping to save tokens.")
     sys.exit(0)
 
@@ -420,13 +496,18 @@ if any("OpenCodeReview" in n.get("body", "") for n in notes):
 | `Failed to parse OCR output` | `OCR_LLM_URL` または `OCR_LLM_AUTH_TOKEN` が誤っています。*Settings → CI/CD → Variables* で値を再確認してください。 |
 | インラインコメントが誤った行に付く | GitLab のインラインディスカッションは正確な SHA の一致を要求します。貼り付けスクリプトは `versions` メタデータを取得して正しい `base_sha` / `start_sha` / `head_sha` を得ます。それでも発見をアンカーできない場合は、通常の MR note にフォールバックします。 |
 
-パイプラインは生のレビュー JSON を `/tmp/ocr-result.json` に、stderr を
-`/tmp/ocr-stderr.log` に書き込みます。debug 手順でそれらを cat して、OCR が何を返したか確認できます。
+パイプラインは `when: always` でプロジェクト相対のアーティファクトを保存します。
+`.ocr/ocr-result.json`、`.ocr/ocr-stderr.log`、`.ocr/ocr-gate.json`、
+`.ocr/ocr-gate-stderr.log` が対象です。ゲートが無効、またはその段階に到達しなかった場合、
+ゲートのファイルは空です。投稿統計は `.ocr/ocr-stats.env` の dotenv レポートで確認できます。
+デバッグ手順でこれらのファイルを確認してください。
 
 ```yaml
 script:
-  - cat /tmp/ocr-result.json
-  - cat /tmp/ocr-stderr.log
+  - cat .ocr/ocr-result.json
+  - cat .ocr/ocr-stderr.log
+  - cat .ocr/ocr-gate.json
+  - cat .ocr/ocr-gate-stderr.log
 ```
 
 ## 関連項目

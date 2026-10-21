@@ -54,6 +54,31 @@ for free via `GITHUB_TOKEN`; GitLab recommends an explicit
 fallback for fork MRs (it can post discussions via `/discussions`) —
 a dedicated token is recommended for reliability.
 
+## Optional CI gate
+
+Both integrations can run `ocr gate` after publishing the review. The gate is
+**off by default**. Select a CLI build containing `ocr gate` through the GitHub
+`ocr_version` input or GitLab `OCR_VERSION` variable. With the gate enabled, each
+integration checks command availability before calling the model.
+
+| Decision | Meaning | Exit code |
+|---|---|---|
+| `pass` | The selected files have complete review evidence and all enabled checks pass. | `0` |
+| `fail` | A finding meets or exceeds the configured severity threshold. | `1` |
+| `inconclusive` | Coverage, revision identity, comment delivery, or other required evidence is insufficient. | `1` |
+
+Before review, the integration resolves the merge base and head to immutable
+commit IDs and passes those same IDs to the review and gate. The gate evaluates
+the original findings, including entries routed to the summary or deduplicated
+during publication. Budget stops, waived items, zero selected files, missing
+evidence, recorded `code_comment` failures, and unsupported manifest versions
+prevent a pass.
+
+The job requires successful review execution, successful publication, and a
+`pass` decision. Publication and gate evaluation are attempted before the final
+job status is set. Inline submission failures still fail the job after a summary
+fallback; the final summary must also be confirmed published.
+
 ## GitHub Actions
 
 The upstream workflow lives at
@@ -120,6 +145,8 @@ step:
 | `max_tokens_budget` | `''` | Total token cap (input + output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Checked before every LLM round: a subtask already over the cap gets one final round to submit findings, no further subtasks are dispatched, over-budget and skipped files are reported as `failed(budget)`, partial results are still published, and the review exits 0. |
 | `llm_reasoning_effort` | `''` | Reasoning depth for models with a steerable `reasoning_effort` request field (e.g. GLM-5.x, OpenAI reasoning models): `minimal`, `low`, `medium`, `high`, `max` (case-insensitive). Merged into the request body through `llm_extra_body`, so it works with every published CLI version; an explicit `reasoning_effort` key in `llm_extra_body` wins over this input. Empty (default) sends nothing. OpenAI-compatible protocols only — the Anthropic API rejects unknown body fields, so the action fails fast on that protocol; steer Anthropic thinking through an explicit `llm_extra_body` key instead. |
 | `stream_progress` | `'false'` | `'true'` streams live `[ocr]` progress lines to the workflow log (human audience on stderr) instead of staying silent until the run finishes. Display-only: stderr is still captured to a file for artifacts and comment posting. |
+| `gate` | `'false'` | Enable the shared CI gate. Accepts `true` or `false`, case-insensitively. |
+| `fail_on_severity` | `''` | With `gate: 'true'`, block findings at or above `critical`, `high`, `medium`, or `low`. Empty disables severity checks; values ignore case and surrounding whitespace. |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -137,6 +164,26 @@ step:
 See [`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)
 for the full input list — posting modes (`sticky_summary`, `incremental`),
 severity/category routing, and cross-push checkpoints included.
+
+### Enable the gate
+
+Add these inputs under `with:` in your existing action step:
+
+```yaml
+gate: 'true'
+fail_on_severity: high
+```
+
+Gate mode reviews the full `merge-base..head` range on every run and disables
+checkpoint reads and writes, including when `checkpoint_range` is enabled. This
+can increase token use on long-running PRs. Comment routing and incremental
+posting remain available.
+
+The `gate_exit_code` output reports the gate command's exit code; it is empty when
+disabled or not reached. With `upload_artifacts: 'true'` (default), download
+`ocr-result.json`, `ocr-stderr.log`, and, when the gate runs, `ocr-gate.json` and
+`ocr-gate-stderr.log` from the run's **Artifacts** section. Each action invocation
+uses a fresh temporary directory.
 
 ### Customization
 
@@ -325,14 +372,11 @@ produce a report.
 |---|---|
 | `Cannot find merge-base` | The checkout step used a shallow clone, but range-mode review needs full history. The upstream workflow sets `fetch-depth: 0` on `actions/checkout` — preserve that setting if you edit the file. |
 | `Failed to parse OCR output` | `OCR_LLM_URL` or `OCR_LLM_AUTH_TOKEN` is missing or wrong. Re-check the values under *Settings → Secrets and variables → Actions*. |
-| Review comments land on the wrong lines | Usually means the diff shifted between the moment the review started and when comments were posted. The posting script falls back to a plain issue comment in that case — no action needed. |
+| Review comments land on the wrong lines | The PR head or diff may have changed during review. Findings that cannot be posted inline are included in the summary comment. With `gate: 'true'`, remaining inline submission failures still fail the job. Check the reviewed head and diff positions, then rerun. |
 
-> **Note.** The `OCR_DEBUG` env var is **not currently implemented**
-> in OCR — setting `OCR_DEBUG: "1"` has no effect. It's documented
-> here in case it is wired up later. For verbose output today, inspect
-> the raw review JSON and stderr that the workflow writes to
-> `/tmp/ocr-result.json` and `/tmp/ocr-stderr.log` (see troubleshooting
-> below), or run `ocr review` locally.
+Inspect `ocr-result.json` and `ocr-stderr.log` in the run's uploaded artifacts or
+the "Run OpenCodeReview" step log. Gate diagnostics are in `ocr-gate.json` and
+`ocr-gate-stderr.log`.
 
 ## GitLab CI
 
@@ -345,7 +389,7 @@ The upstream pipeline lives at
   updates, reopen).
 - Runs in a `node:20` image, installs OCR, configures it via
   `ocr config set`, then runs the core command in MR diff mode.
-- Parses the JSON envelope with an inlined Python script and posts
+- Parses the JSON envelope with `post_review.py` and posts
   each finding as a GitLab Discussion (inline on the diff), using
   the MR's `versions` endpoint to compute correct `base_sha` /
   `start_sha` / `head_sha` for accurate positioning. Falls back to
@@ -354,11 +398,13 @@ The upstream pipeline lives at
 
 ### Install
 
-Drop the pipeline into your repo root:
+Copy the pipeline and its publishing script into your repo root:
 
 ```bash
 curl -o .gitlab-ci.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/gitlab_ci/.gitlab-ci.yml
+curl -o post_review.py \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/gitlab_ci/post_review.py
 ```
 
 If you already have a `.gitlab-ci.yml` and want to keep it, vendor
@@ -368,6 +414,8 @@ the recipe to a different path and pull it in with `include:`:
 include:
   - local: 'ci/ocr-review.gitlab-ci.yml'
 ```
+
+Keep `post_review.py` at the repository root, or update its path in the pipeline.
 
 ### Required CI/CD variables
 
@@ -380,9 +428,11 @@ Set under **Settings → CI/CD → Variables**:
 | `OCR_LLM_MODEL` | No | No | Model name. No default — must be set explicitly. |
 | `GITLAB_API_TOKEN` | No | Yes | Project / personal / group access token with `api` scope. Optional — the built-in `CI_JOB_TOKEN` is used as a fallback when this is absent (e.g. for fork MRs). A dedicated `GITLAB_API_TOKEN` is recommended for reliability. |
 
-> GitLab rejects variables shorter than 8 characters, so
-> `llm.use_anthropic` is hardcoded to `false` in the pipeline. To use
-> Anthropic Claude models, edit the script directly.
+> GitLab's eight-character minimum applies to
+> [masked variables](https://docs.gitlab.com/ci/variables/#mask-a-cicd-variable).
+> Use ordinary visible variables for non-secret policy values such as `OCR_GATE`.
+> The pipeline sets `llm.use_anthropic` to `false`; edit that line to use
+> Anthropic Claude models.
 
 > The pipeline also runs
 > `ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'`
@@ -396,6 +446,22 @@ Set under **Settings → CI/CD → Variables**:
 > to brand the reviewer without setting up anything else — handy
 > when you don't need the more durable service-account setup
 > documented under [Post under a service account identity](#post-under-a-service-account-identity).
+
+### Enable the gate
+
+Add these ordinary, unmasked variables to the job or CI/CD settings:
+
+```yaml
+variables:
+  OCR_GATE: 'true'
+  OCR_FAIL_ON_SEVERITY: high
+```
+
+`OCR_GATE` defaults to `false` and accepts `true` or `false` case-insensitively.
+With the gate enabled, `OCR_FAIL_ON_SEVERITY` accepts `critical`, `high`, `medium`,
+or `low`, ignoring case and surrounding whitespace; empty disables severity
+checks. With the gate disabled, this variable retains the publisher's existing
+severity policy. Gate mode requires a fresh full review for the current MR range.
 
 ### Customization
 
@@ -435,18 +501,21 @@ See [Review Rules](../../review-rules/) for the rule schema.
 
 #### Pin the OCR version
 
+Set `OCR_VERSION` to the npm version you want to install. Gate mode requires a
+version containing `ocr gate`.
+
 ```yaml
-script:
-  - npm install -g @alibaba-group/open-code-review@1.0.0
+variables:
+  OCR_VERSION: '<version>'
 ```
 
 #### Avoid re-reviewing on every push
 
-`only: [merge_requests]` triggers on **every** MR update, which can
-burn a lot of LLM tokens on long-running MRs. GitLab has no native
-"only on creation" event, so the recommended pattern is to detect
-existing OCR notes before running the review and bail out if any are
-found. Replace the `ocr review` invocation with a Python wrapper:
+With `OCR_GATE=true`, keep a fresh full review on every MR update so the gate
+can evaluate the current range. With `OCR_GATE=false`, you can save tokens by
+skipping review when earlier OCR notes exist. This leaves later changes
+unreviewed until you request another review. A wrapper around `ocr review` can
+apply that gate-off policy:
 
 ```python
 import json, os, sys, urllib.request
@@ -464,7 +533,10 @@ req = urllib.request.Request(url, headers={"PRIVATE-TOKEN": API_TOKEN})
 with urllib.request.urlopen(req) as resp:
     notes = json.loads(resp.read().decode())
 
-if any("OpenCodeReview" in n.get("body", "") for n in notes):
+if (
+    os.environ.get("OCR_GATE", "false").lower() == "false"
+    and any("OpenCodeReview" in n.get("body", "") for n in notes)
+):
     print("OCR already reviewed this MR. Skipping to save tokens.")
     sys.exit(0)
 
@@ -518,14 +590,18 @@ of the user who originally created the token.
 | `Failed to parse OCR output` | `OCR_LLM_URL` or `OCR_LLM_AUTH_TOKEN` is wrong. Re-check the values under *Settings → CI/CD → Variables*. |
 | Inline comments land on the wrong lines | GitLab requires exact SHA matching for inline discussions; the posting script fetches `versions` metadata to get the right `base_sha` / `start_sha` / `head_sha`. If a finding still can't be anchored, it falls back to a plain MR note. |
 
-The pipeline writes raw review JSON to `/tmp/ocr-result.json` and
-stderr to `/tmp/ocr-stderr.log`. Cat them in a debug step to inspect
-what OCR returned:
+The pipeline retains project-relative artifacts with `when: always`:
+`.ocr/ocr-result.json`, `.ocr/ocr-stderr.log`, `.ocr/ocr-gate.json`, and
+`.ocr/ocr-gate-stderr.log`. Gate files are empty when disabled or not reached.
+Publication statistics are available through the `.ocr/ocr-stats.env` dotenv
+report. Inspect these files in a debug step:
 
 ```yaml
 script:
-  - cat /tmp/ocr-result.json
-  - cat /tmp/ocr-stderr.log
+  - cat .ocr/ocr-result.json
+  - cat .ocr/ocr-stderr.log
+  - cat .ocr/ocr-gate.json
+  - cat .ocr/ocr-gate-stderr.log
 ```
 
 ## See Also

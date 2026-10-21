@@ -49,7 +49,7 @@ Go to your project's **Settings → CI/CD → Variables** and add:
 | `OCR_BACKGROUND` | No | No | Business/requirement context, passed via `ocr review --background` (e.g. the MR title). |
 | `OCR_RULE` | No | No | Path to a custom rules JSON file, passed via `ocr review --rule`. |
 
-> **Note:** GitLab CI/CD does not support variables with values shorter than 8 characters, so `use_anthropic` cannot be set as a CI variable. The pipeline sets it to `false` by default. If you need to use Anthropic Claude models, you'll need to modify the `.gitlab-ci.yml` script directly.
+> **Note:** The example pins `use_anthropic` to `false`; edit that configuration line to use Anthropic. GitLab's eight-character minimum applies to [masked variables](https://docs.gitlab.com/ci/variables/#mask-a-cicd-variable), not ordinary visible variables such as the `OCR_GATE` policy switch.
 >
 > The pipeline also configures `llm.extra_body` to disable thinking mode for compatibility with various LLM providers.
 
@@ -132,7 +132,8 @@ The posting script implements the same publication behaviors as the GitHub Actio
 | `OCR_INCREMENTAL_OVERLAP_THRESHOLD` | `0.6` | IoU (0–1) above which two multi-line comments are considered the same. Single-line comments match only on the exact same line; a single-line and multi-line comment never match. |
 | `OCR_ROUTE_SEVERITY_BELOW` | _(empty)_ | Route findings whose severity is at-or-below this level to the summary note instead of posting them inline (e.g. `low` keeps only critical/high/medium inline). Unknown severities never match (fail-open). |
 | `OCR_ROUTE_CATEGORIES` | _(empty)_ | Comma-separated categories to route to the summary (e.g. `style,documentation`). Routed findings never enter the inline write path, so they cannot be double-posted on retry. |
-| `OCR_FAIL_ON_SEVERITY` | _(empty)_ | Fail the CI job (non-zero exit) when any comment's severity is at-or-above this level (e.g. `critical`). The summary note is still posted before the job fails, so visibility is preserved. |
+| `OCR_GATE` | `false` | Enable the shared `ocr gate` command and require complete review evidence and successful publication. Requires a CLI with gate support. |
+| `OCR_FAIL_ON_SEVERITY` | _(empty)_ | Fail when a finding meets or exceeds this level. With `OCR_GATE=true`, the CLI owns this policy and accepts `critical`, `high`, `medium`, or `low`; unknown/missing finding severity is inconclusive. With the gate disabled, the existing publisher-only severity behavior is preserved. |
 
 Additional behaviors ported from the GitHub Action (always on, no variable):
 
@@ -143,12 +144,32 @@ Additional behaviors ported from the GitHub Action (always on, no variable):
 - **Idempotent retry**: each inline discussion carries an invisible HTML-comment id tag (`<!-- ocr-<pipeline>-<job>-<hex> -->`). When a `POST /discussions` fails with a 5xx/408/network error (the request may still have landed), the script queries existing discussions for the id before retrying; if found it is treated as success (no duplicate), and if the read API is unavailable it skips the retry rather than risk a duplicate.
 - **400 line-resolution fallback**: when a discussion `POST` returns 400 indicating a position problem, the script fetches the MR diff (`GET /merge_requests/:iid/diffs`), classifies the comment as valid/invalid/unknown, and drops provably-out-of-diff findings to the summary rather than blindly retrying. Unknown cases keep the existing fallback behavior.
 
+### Opt into the shared CI gate
+
+```yaml
+variables:
+  OCR_GATE: 'true'
+  OCR_FAIL_ON_SEVERITY: high
+```
+
+These are non-secret policy values; configure them as ordinary, unmasked variables. `OCR_GATE` accepts `true` or `false` case-insensitively and defaults to `false`. An empty severity threshold leaves finding severity unchecked. Enabled thresholds ignore case and surrounding whitespace; invalid values stop the job before installation or model calls.
+
+Pin `OCR_VERSION` to a version containing `ocr gate`. When enabled, the pipeline checks that the command exists before running the model and reports an actionable error on older CLIs. A pipeline update alone does not upgrade a pinned CLI.
+
+The pipeline resolves the immutable head and merge base before review, uses those exact IDs for both review and gate, and evaluates the original result after attempting publication. The shared CLI checks selected-file coverage, recorded comment-tool failures, optional severity, and revision identity. Partial coverage including budget stops, waived or zero selected items, missing evidence, and unknown manifest versions cannot pass. Routed or deduplicated findings remain in the gate input.
+
+In this mode the publisher runs with `--require-publication` and its legacy severity check disabled. It attempts to publish usable findings and returns non-zero for invalid input, failed inline submissions, or an unconfirmed final summary. An old summary URL or the MR landing page is not proof that this run's summary was published. Even a successful fallback summary does not clear a failed inline submission. Without `OCR_GATE=true`, the publisher retains its existing best-effort behavior and severity setting; standalone users can opt into publication enforcement with the same flag.
+
+The final job status combines review, publication, and gate outcomes. A gate pass cannot erase an earlier failure; publication and gate evaluation are attempted before the final non-zero exit, and GitLab retains the artifacts with `when: always`. Outputs are cleared before validation/install so reused runners cannot upload an earlier pass after setup fails.
+
+This compares the reviewed snapshot, not the live MR head after the model finishes. It also does not attest excluded files. Artifact and workflow trust, and merge-time freshness enforcement, remain the caller's responsibility.
+
 ### CI outputs and artifacts
 
 The pipeline exposes the following to downstream jobs:
 
-- **dotenv report** (`.ocr/ocr-stats.env`): `OCR_COMMENTS_TOTAL`, `OCR_COMMENTS_INLINE`, `OCR_COMMENTS_SUMMARY`, `OCR_COMMENTS_ROUTED`, `OCR_COMMENTS_SKIPPED`, `OCR_COMMENTS_FAILED`, and `OCR_SUMMARY_URL`. Consume them in later stages via the `dotenv` artifact.
-- **Artifacts** (`when: always`, 1 week retention): `.ocr/ocr-result.json` (raw review JSON) and `.ocr/ocr-stderr.log` (OCR stderr), so you can inspect a failed review even when the job fails. Paths are project-relative (under `.ocr/`) because GitLab Runner refuses to upload artifacts outside the build directory.
+- **dotenv report** (`.ocr/ocr-stats.env`): `OCR_COMMENTS_TOTAL`, `OCR_COMMENTS_INLINE`, `OCR_COMMENTS_SUMMARY`, `OCR_COMMENTS_ROUTED`, `OCR_COMMENTS_SKIPPED`, `OCR_COMMENTS_FAILED`, `OCR_SUMMARY_URL`, and `OCR_SUMMARY_PUBLISHED`. The last value is `true` only when this run's final summary was confirmed written; a URL alone may point to stale content or the MR page. Consume them in later stages via the `dotenv` artifact.
+- **Artifacts** (`when: always`, 1 week retention): `.ocr/ocr-result.json` (raw review JSON), `.ocr/ocr-stderr.log` (review stderr), `.ocr/ocr-gate.json` (shared gate decision), and `.ocr/ocr-gate-stderr.log` (gate diagnostics). The gate files are empty when disabled or not reached. Paths are project-relative (under `.ocr/`) because GitLab Runner refuses to upload artifacts outside the build directory.
 
 ### Limit concurrency
 
@@ -320,6 +341,8 @@ script:
 
 ## Testing
 
+`pipeline_test.py` executes the actual YAML shell blocks with offline CLI, Git, and publisher doubles. It checks opt-in defaults, unsupported CLIs, frozen revision forwarding, stale artifacts, publication-before-enforcement ordering, and independent review/publication/gate failures. The same test command below runs both suites. For local Windows testing, set `OCR_TEST_BASH` to the Git Bash executable; Linux CI uses `/bin/bash`.
+
 The posting logic is unit-tested with no network access and no wall-clock sleep cost. Tests use only the standard-library `unittest` and cover: comment formatting (badge, suggestion, fallback), the publication policy (severity/category routing), deterministic sort, warning rendering, safe-fence code blocks, the full `publish()` flow (partition → sticky summary → fallback), incremental overlap (IoU, single-vs-multi, bot detection), the GitLab transport (retry/backoff/jitter/`Retry-After`/rate-limit/auth/network errors), idempotent `post_discussion` reconciliation, the 400 line-resolution fallback classification, wait-until-reset, and the dotenv stats / severity-gating helpers.
 
 ```bash
@@ -330,5 +353,3 @@ python3 post_review_test.py
 # From the repo root
 python3 -m unittest discover -s examples/gitlab_ci -p '*_test.py'
 ```
-
-
