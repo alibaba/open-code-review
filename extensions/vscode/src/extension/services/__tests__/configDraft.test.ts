@@ -5,6 +5,17 @@ import { applyConfigEntries } from '../configDraft';
 import { buildCustomCreateSaveEntries } from '@shared/configUtils';
 
 describe('applyConfigEntries', () => {
+  it.each(['dashscope-codingplan', 'dashscope-codingplan-intl'])('stores %s in built-in providers', (provider) => {
+    const draft = applyConfigEntries({}, [
+      { key: 'provider', value: provider },
+      { key: 'model', value: 'qwen3.7-plus' },
+      { key: `providers.${provider}.api_key`, value: 'sk-sp-test' },
+    ]);
+    expect(draft.provider).toBe(provider);
+    expect(draft.providers?.[provider]).toEqual({ model: 'qwen3.7-plus', api_key: 'sk-sp-test' });
+    expect(draft.custom_providers).toBeUndefined();
+  });
+
   it.each(['mimo-v2.6-flash', 'foo.api_key', 'openai.extra_body'])('creates %s before applying form fields', (name) => {
     const entries = buildCustomCreateSaveEntries({
       name, protocol: 'openai', url: 'https://example.invalid/v1', model: 'some-model',
