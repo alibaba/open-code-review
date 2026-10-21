@@ -9,6 +9,11 @@ go.sum
 scripts/hooks/
 scripts/publish/
 .claude/
+.claude-plugin/
+.agents/
+.opencodereview/
+.trae/
+.zhanlu/
 .git/
 .idea/
 .github/
