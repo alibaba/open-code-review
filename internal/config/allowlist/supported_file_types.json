@@ -79,6 +79,7 @@
   ".hrl",
   ".ets",
   ".json5",
+  ".jsonc",
   ".dart",
   ".tf",
   ".tofu",
