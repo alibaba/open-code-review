@@ -7,13 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/estimate"
 	"github.com/alibaba/open-code-review/internal/model"
 )
-
-// These tests mirror internal/scan/estimate_test.go deliberately: the agent
-// estimate helpers are re-declared copies that must stay in sync with scan's
-// (see internal/agent/estimate.go). The humanTokens table in particular is
-// duplicated verbatim so a divergence between the two copies is caught here.
 
 // TestHumanTokens mirrors scan's TestHumanTokens so the diff- and scan-path
 // formatters stay byte-identical. If this table and scan's ever disagree, one
@@ -41,20 +37,20 @@ func TestHumanTokens(t *testing.T) {
 // before dispatch). Also asserts a normal diff projects a sane positive value
 // bounded below by the fixed per-file overhead.
 func TestEstimateDiffFileTokens_ZeroForSkipped(t *testing.T) {
-	if got := estimateDiffFileTokens(model.Diff{IsDeleted: true, Diff: "+x"}); got != 0 {
+	if got := estimateDiffFileTokens(model.Diff{IsDeleted: true, Diff: "+x"}, estimate.Parameters{}); got != 0 {
 		t.Errorf("deleted diff projected %d tokens, want 0", got)
 	}
-	if got := estimateDiffFileTokens(model.Diff{NewPath: "a.go", Diff: ""}); got != 0 {
+	if got := estimateDiffFileTokens(model.Diff{NewPath: "a.go", Diff: ""}, estimate.Parameters{}); got != 0 {
 		t.Errorf("empty diff projected %d tokens, want 0", got)
 	}
-	got := estimateDiffFileTokens(model.Diff{NewPath: "a.go", Diff: "+package main\nfunc f() {}\n"})
+	got := estimateDiffFileTokens(model.Diff{NewPath: "a.go", Diff: "+package main\nfunc f() {}\n"}, estimate.Parameters{})
 	if got <= 0 {
 		t.Errorf("normal diff projected %d tokens, want > 0", got)
 	}
 	// The look-ahead must be at least the fixed per-file overhead
 	// (promptOverhead*(1+rounds) + plan output + main output) so even a tiny
 	// diff carries meaningful cost in the projection.
-	const minExpected = int64(promptOverheadTokens*(1+avgMainRoundsPerFile) + 400 + avgOutputTokensPerRound*avgMainRoundsPerFile)
+	const minExpected = int64(2000*8 + 400 + 700*7)
 	if got < minExpected {
 		t.Errorf("projected %d, want >= %d (fixed overhead floor)", got, minExpected)
 	}
@@ -70,11 +66,11 @@ func TestEstimateDiffCost(t *testing.T) {
 		{NewPath: "c.go", IsDeleted: true, Diff: "+c\n"}, // skipped
 		{NewPath: "d.go", Diff: ""},                      // skipped
 	}
-	est := estimateDiffCost(diffs)
+	est := estimateDiffCost(diffs, estimate.Parameters{})
 	if est.Files != 2 {
 		t.Errorf("Files = %d, want 2 (deleted + empty skipped)", est.Files)
 	}
-	perFile := estimateDiffFileTokens(diffs[0])
+	perFile := estimateDiffFileTokens(diffs[0], estimate.Parameters{})
 	if est.TotalTokens != perFile*2 {
 		t.Errorf("TotalTokens = %d, want 2*%d = %d", est.TotalTokens, perFile, perFile*2)
 	}
@@ -94,9 +90,32 @@ func TestEstimateDiffCost(t *testing.T) {
 // TestEstimateDiffCost_ScalesWithContent verifies that a larger diff projects
 // strictly more tokens than a small one (the estimate isn't a flat constant).
 func TestEstimateDiffCost_ScalesWithContent(t *testing.T) {
-	small := estimateDiffFileTokens(model.Diff{NewPath: "a.go", Diff: "+x\n"})
-	large := estimateDiffFileTokens(model.Diff{NewPath: "a.go", Diff: strings.Repeat("line of code\n", 200)})
+	small := estimateDiffFileTokens(model.Diff{NewPath: "a.go", Diff: "+x\n"}, estimate.Parameters{})
+	large := estimateDiffFileTokens(model.Diff{NewPath: "a.go", Diff: strings.Repeat("line of code\n", 200)}, estimate.Parameters{})
 	if large <= small {
 		t.Errorf("expected large diff to project more tokens than small: large=%d small=%d", large, small)
+	}
+}
+
+func TestEstimateDiffCost_CustomParameters(t *testing.T) {
+	diffs := []model.Diff{
+		{NewPath: "a.go", Diff: "+a\n"},
+		{NewPath: "b.go", Diff: "+longer diff\n"},
+		{NewPath: "deleted.go", IsDeleted: true, Diff: "-deleted\n"},
+		{NewPath: "empty.go"},
+	}
+	params := estimate.Parameters{PromptOverheadTokens: 8000, OutputTokensPerRound: 3000}
+	custom := estimateDiffCost(diffs, params)
+	baseline := estimateDiffCost(diffs, estimate.Parameters{})
+	if custom.InputTokens-baseline.InputTokens != 2*8*(8000-2000) ||
+		custom.OutputTokens-baseline.OutputTokens != 2*7*(3000-700) {
+		t.Fatalf("custom estimate = %+v, baseline = %+v", custom, baseline)
+	}
+	var total int64
+	for _, d := range diffs {
+		total += estimateDiffFileTokens(d, params)
+	}
+	if custom.Files != 2 || custom.TotalTokens != total || total != custom.InputTokens+custom.OutputTokens {
+		t.Fatalf("aggregate %+v disagrees with per-file total %d", custom, total)
 	}
 }
