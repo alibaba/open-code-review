@@ -16,6 +16,60 @@ import (
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
+func TestNearAIProviderNameCasePreservesVerification(t *testing.T) {
+	t.Setenv("OCR_LLM_TIMEOUT", "")
+	t.Setenv("OCR_LLM_EXTRA_HEADERS", "")
+	for _, provider := range []string{"nearai", "NEARAI", "NearAI"} {
+		t.Run(provider, func(t *testing.T) {
+			for _, policy := range []struct {
+				name     string
+				explicit bool
+				want     llm.NearAISettings
+			}{
+				{name: "default", want: llm.NearAISettings{E2EE: true, VerificationLevel: "model-tee"}},
+				{name: "gateway", explicit: true, want: llm.NearAISettings{E2EE: false, VerificationLevel: "gateway"}},
+			} {
+				t.Run(policy.name, func(t *testing.T) {
+					cfg := &Config{}
+					settings := [][2]string{
+						{"provider", provider},
+						{"model", "canonical/model"},
+						{"providers." + provider + ".api_key", "test"},
+					}
+					if policy.explicit {
+						settings = append(settings,
+							[2]string{"providers." + provider + ".e2ee", "false"},
+							[2]string{"providers." + provider + ".verification_level", "gateway"},
+						)
+					}
+					for _, setting := range settings {
+						if err := setConfigValue(cfg, setting[0], setting[1]); err != nil {
+							t.Fatalf("set %s: %v", setting[0], err)
+						}
+					}
+					path := filepath.Join(t.TempDir(), "config.json")
+					if err := saveConfig(path, cfg); err != nil {
+						t.Fatal(err)
+					}
+					ep, err := llm.ResolveEndpointWithOptions(path, llm.ResolveOptions{Provider: provider})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if ep.NearAI == nil || *ep.NearAI != policy.want {
+						t.Fatalf("resolved policy: %+v, want %+v", ep.NearAI, policy.want)
+					}
+					client := llm.NewLLMClient(ep, nil, nil)
+					defer llm.CloseClient(client)
+					report := llm.ClientVerificationReport(client)
+					if report == nil || report.NearAISettings != policy.want {
+						t.Fatalf("client %T verification policy: %+v, want %+v", client, report, policy.want)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestNearAISettingsPersistAcrossProviderChanges(t *testing.T) {
 	cfg := &Config{}
 	for _, setting := range [][2]string{{"provider", "nearai"}, {"providers.nearai.e2ee", "false"}, {"providers.nearai.verification_level", "gateway"}, {"model", "canonical/model"}, {"provider", "openai"}, {"model", "gpt-test"}} {

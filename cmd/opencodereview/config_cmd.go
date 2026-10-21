@@ -808,7 +808,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 func applyProviderField(providerName string, entry *ProviderEntry, field, key, value string) error {
 	switch field {
 	case "e2ee", "verification_level":
-		if providerName != "nearai" {
+		if preset, ok := llm.LookupProvider(providerName); !ok || preset.Name != "nearai" {
 			return fmt.Errorf("%s applies only to the nearai provider", field)
 		}
 		if field == "e2ee" {
