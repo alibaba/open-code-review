@@ -304,6 +304,8 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.R`                            | `r.md`                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                         |
 | `**/*.c`                            | `c.md`                                                                           |
+| `**/*.{cu,cuh}`                     | `cuda_hip.md` — CUDA 커널 및 헤더.                                                    |
+| `**/*.hip`                          | `cuda_hip.md` — HIP(AMD ROCm) 커널.                                                |
 | `**/*.{py,pyi,ipynb}`               | `python.md` — Python 소스.                                                       |
 | `**/*.{php,phtml}`                  | `php.md` — PHP 소스와 PHP 템플릿.                                                |
 | `**/*.proto`                        | `protobuf.md` — Protocol Buffers 통신 호환성.                                    |

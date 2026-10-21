@@ -322,6 +322,8 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.R`                            | `r.md`                                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                         |
 | `**/*.c`                            | `c.md`                                                                                           |
+| `**/*.{cu,cuh}`                     | `cuda_hip.md` — ядра и заголовки CUDA.                                                           |
+| `**/*.hip`                          | `cuda_hip.md` — ядра HIP (AMD ROCm).                                                             |
 | `**/*.{py,pyi,ipynb}`               | `python.md` — исходный код Python.                                                               |
 | `**/*.{php,phtml}`                  | `php.md` — исходный код PHP и шаблоны PHP.                                                       |
 | `**/*.proto`                        | `protobuf.md` — совместимость Protocol Buffers на уровне wire.                                   |

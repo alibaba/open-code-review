@@ -259,6 +259,8 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.R`                            | `r.md`                                                                                          |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                        |
 | `**/*.c`                            | `c.md`                                                                                          |
+| `**/*.{cu,cuh}`                     | `cuda_hip.md`：CUDA カーネルとヘッダー。                                                                   |
+| `**/*.hip`                          | `cuda_hip.md`：HIP（AMD ROCm）カーネル。                                                                |
 | `**/*.{py,pyi,ipynb}`               | `python.md`: Python ソースコード。                                                              |
 | `**/*.{php,phtml}`                  | `php.md`: PHP ソースと PHP テンプレート。                                                       |
 | `**/*.proto`                        | `protobuf.md`: Protocol Buffers のワイヤ互換性。                                                |
