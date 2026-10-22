@@ -19,7 +19,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 5
     container:
-      image: node:24.18.0
+      image: node:24.22.1
       options: --cpus=1 --memory=1g
     steps:
       - name: Check out trusted policy script
