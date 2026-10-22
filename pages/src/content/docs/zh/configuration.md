@@ -53,6 +53,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
 | `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
+| `nearai` | openai + SDK 验证传输 | `https://cloud-api.near.ai/v1` | `NEARAI_API_KEY` |
 | `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
 | `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
 | `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
@@ -72,6 +73,13 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 如果指定的模型既不在内置列表中，也不在 `providers.<name>.models` 中，OCR 会向
 stderr 输出警告；发送请求时由 provider 验证模型。自定义 provider 仍遵循原有的
 `--model` 校验规则。
+
+## NEAR AI 可验证推理
+
+`nearai` 提供商通过 NEAR AI inference SDK 发起请求，默认开启端到端加密（E2EE）
+和模型 TEE 验证。OCR 会先验证每次推理响应，再使用响应内容或执行其中的工具调用。
+配置方法、验证级别、报告与限制见 [NEAR AI 指南](https://github.com/alibaba/open-code-review/blob/main/docs/nearai.md)。
+将通用 OpenAI 提供商的地址设为 NEAR AI URL 不会启用此集成。
 
 ## ChatGPT 登录预览版
 

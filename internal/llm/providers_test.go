@@ -32,6 +32,25 @@ func TestLookupProvider_KnownProviders(t *testing.T) {
 	}
 }
 
+func TestLookupProvider_NearAIDetails(t *testing.T) {
+	p, ok := LookupProvider("nearai")
+	if !ok {
+		t.Fatal("nearai preset not found")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://cloud-api.near.ai/v1" {
+		t.Errorf("BaseURL = %q, want https://cloud-api.near.ai/v1", p.BaseURL)
+	}
+	if p.EnvVar != "NEARAI_API_KEY" {
+		t.Errorf("EnvVar = %q, want NEARAI_API_KEY", p.EnvVar)
+	}
+	if len(p.Models) != 1 || p.Models[0] != "z-ai/glm-5.3-flash" {
+		t.Errorf("Models = %v, want [z-ai/glm-5.3-flash]", p.Models)
+	}
+}
+
 func TestLookupProvider_ChatGPTDetails(t *testing.T) {
 	if _, ok := LookupProvider("codex"); ok {
 		t.Fatal("undocumented Codex preset must not ship")
@@ -89,7 +108,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "chatgpt", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "chatgpt", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "nearai", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}

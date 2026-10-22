@@ -59,6 +59,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
 | `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
+| `nearai` | openai + проверка транспорта через SDK | `https://cloud-api.near.ai/v1` | `NEARAI_API_KEY` |
 | `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
 | `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
 | `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
@@ -79,6 +80,14 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 `providers.<name>.models`, OCR выводит предупреждение в stderr; провайдер
 проверит модель при отправке запроса. Для пользовательских провайдеров действуют
 прежние правила проверки `--model`.
+
+## Инференс NEAR AI с проверкой
+
+Провайдер `nearai` использует NEAR AI inference SDK. Сквозное шифрование (E2EE)
+и проверка TEE модели включены по умолчанию. OCR проверяет каждый ответ до
+использования его содержимого или выполнения вызовов инструментов из него.
+Настройка, уровни проверки, отчёты и ограничения описаны в [руководстве NEAR AI](https://github.com/alibaba/open-code-review/blob/main/docs/nearai.md).
+Указание URL NEAR AI для обычного провайдера OpenAI не включает эту интеграцию.
 
 ## Предварительная версия входа через ChatGPT
 

@@ -54,6 +54,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
 | `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
+| `nearai` | openai + SDK による通信の検証 | `https://cloud-api.near.ai/v1` | `NEARAI_API_KEY` |
 | `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
 | `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
 | `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
@@ -73,6 +74,14 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 の制限には使われません。組み込み一覧にも `providers.<name>.models` にもないモデルを
 指定すると、OCR は stderr に警告を出します。モデルはリクエスト送信時に provider が
 検証します。カスタム provider には従来の `--model` 検証ルールが適用されます。
+
+## NEAR AI の検証付き推論
+
+`nearai` プロバイダーは NEAR AI inference SDK を使用し、エンドツーエンド暗号化（E2EE）
+とモデルの TEE 検証を既定で有効にします。OCR は各推論応答を検証してから、
+その内容を利用したり、含まれるツール呼び出しを実行したりします。
+設定方法、検証レベル、レポート、制限については [NEAR AI ガイド](https://github.com/alibaba/open-code-review/blob/main/docs/nearai.md)を参照してください。
+汎用 OpenAI プロバイダーの接続先を NEAR AI URL に変更するだけでは、この統合は有効になりません。
 
 ## ChatGPT サインインのプレビュー
 

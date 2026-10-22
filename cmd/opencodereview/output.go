@@ -330,8 +330,9 @@ func newJSONToolCalls(toolCalls map[string]int64, failures []llmloop.ToolFailure
 }
 
 type jsonLLMIdentity struct {
-	Provider string `json:"provider,omitempty"`
-	Model    string `json:"model"`
+	Verification *llm.VerificationReport `json:"verification,omitempty"`
+	Provider     string                  `json:"provider,omitempty"`
+	Model        string                  `json:"model"`
 }
 
 type jsonOutput struct {
@@ -730,6 +731,7 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 	// Text mode has no structured envelope, so the report follows the usage
 	// line on the same stream.
 	outputRetryReportText(os.Stderr, retryReport)
+	outputVerificationText(os.Stderr, llmIdentity)
 }
 
 // outputPreview renders a preview in the requested output format. sarif is
