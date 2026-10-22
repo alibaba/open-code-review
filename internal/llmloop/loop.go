@@ -459,12 +459,20 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 
 		if len(calls) == 0 {
 			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", taskKey)
-			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
+			// Failed rounds must not accumulate: a history of repeated
+			// [prose, retry hint] pairs reads as a valid output pattern and
+			// small local models complete it instead of correcting (observed:
+			// a hundred identical failed rounds on one file). Strip earlier
+			// failed rounds — rounds that produced tool calls are kept — and
+			// re-anchor with an explicit native tool-call instruction, so one
+			// slip costs one round.
+			messages = stripFailedToolRounds(messages)
 			native := resp.Native()
 			reasoning := resp.ReasoningContent()
 			if content != "" || native.Payload != nil || reasoning != "" {
-				messages = append(messages[:len(messages)-1], llm.NewToolCallMessage(content, nil, native, reasoning), messages[len(messages)-1])
+				messages = append(messages, llm.NewToolCallMessage(content, nil, native, reasoning))
 			}
+			messages = append(messages, llm.NewTextMessage("user", toolRetryReanchor))
 			continue
 		}
 
