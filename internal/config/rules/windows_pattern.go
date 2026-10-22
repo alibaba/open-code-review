@@ -8,6 +8,8 @@ import (
 	"os"
 	"runtime"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 // globEscapable lists the characters a backslash is allowed to escape in a
@@ -20,7 +22,13 @@ import (
 // likely to be a Windows path than a pattern for a file literally named
 // "src\gen", and a pattern for a literal backslash in a filename is written
 // `\\` anyway.
-const globEscapable = `*?[]{}\!,\`
+//
+// `/` is not a metacharacter but belongs here all the same: doublestar honors
+// `\/` as an escape for a literal slash, so `src\/gen` matches `src/gen`. The
+// repair this heuristic would derive from reading that backslash as a
+// separator, `src//gen`, matches nothing, so treating it as a separator turns
+// a working pattern into a false positive with a wrong fix.
+const globEscapable = `*?[]{}\!,\/`
 
 // scanBackslashes walks pattern once and reports, for each backslash, whether
 // it is doing the job of a path separator. A trailing backslash is inert and
@@ -130,6 +138,27 @@ func unambiguousRewrite(pattern, rewritten string) bool {
 	return true
 }
 
+// suggestedRewrite returns the slash form worth offering as advice, and
+// reports whether there is one.
+//
+// Three things have to hold. The rewrite must differ from the input, or there
+// is nothing to advise. It must be unambiguous, or it would silently pick one
+// reading of a backslash that could be a separator or an escape. And it must
+// be a valid pattern: `src\gen\` keeps its trailing backslash — the scan reads
+// it as inert, not as a separator — and the result `src/gen\` is a syntax
+// error in doublestar, so printing it as "write it as ..." would hand the user
+// a second broken pattern.
+func suggestedRewrite(pattern string) (string, bool) {
+	rewritten := suggestedSlashForm(pattern)
+	if rewritten == pattern || !unambiguousRewrite(pattern, rewritten) {
+		return "", false
+	}
+	if !doublestar.ValidatePattern(rewritten) {
+		return "", false
+	}
+	return rewritten, true
+}
+
 // WindowsPatternWarnings describes every include/exclude pattern in f that
 // looks like a Windows path, in a form ready to print. It returns nil unless
 // running on Windows, where the ambiguity exists at all, and for a nil filter.
@@ -138,11 +167,15 @@ func unambiguousRewrite(pattern, rewritten string) bool {
 // output decision and lets the caller emit it once, after all layers are
 // merged — which is what stops a project-rule pattern from being reported a
 // second time when CLI --exclude patterns are appended to the same filter.
+// Within a group the same text can still appear twice, because the filter
+// keeps both copies: rule.json may name a pattern that --exclude names too.
+// The filter is left as it is and only the report is deduplicated, since the
+// duplicate is a filter-shape detail the user cannot act on.
 //
-// A rewrite is offered only when the separator conversion is unambiguous. Where
-// a backslash could be either a separator or an escape the warning names the
-// pattern and stops, because any automatic rewrite would pick a reading on the
-// user's behalf.
+// A rewrite is offered only when the separator conversion is unambiguous and
+// the result is a valid pattern. Where a backslash could be either a separator
+// or an escape the warning names the pattern and stops, because any automatic
+// rewrite would pick a reading on the user's behalf.
 func WindowsPatternWarnings(f *FileFilter) []string {
 	if f == nil || runtime.GOOS != "windows" {
 		return nil
@@ -155,19 +188,20 @@ func WindowsPatternWarnings(f *FileFilter) []string {
 		{"include", f.Include},
 		{"exclude", f.Exclude},
 	} {
+		reported := make(map[string]struct{}, len(group.patterns))
 		for _, pattern := range group.patterns {
-			if !looksLikeWindowsPath(pattern) {
+			if _, duplicate := reported[pattern]; duplicate {
 				continue
 			}
-			rewritten := suggestedSlashForm(pattern)
-			if rewritten == pattern {
+			reported[pattern] = struct{}{}
+			if !looksLikeWindowsPath(pattern) {
 				continue
 			}
 			warning := fmt.Sprintf(
 				"[ocr] WARNING: %s pattern %q looks like a Windows path and will never match; "+
 					"patterns are matched against slash-separated paths",
 				group.label, pattern)
-			if unambiguousRewrite(pattern, rewritten) {
+			if rewritten, ok := suggestedRewrite(pattern); ok {
 				warning += fmt.Sprintf(", so write it as %q", rewritten)
 			}
 			warnings = append(warnings, warning)

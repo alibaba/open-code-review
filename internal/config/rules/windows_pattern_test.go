@@ -37,6 +37,10 @@ func TestLooksLikeWindowsPath(t *testing.T) {
 		{"escaped comma", `src\{a\,b}`, false},
 		{"escaped backslash", `src\\gen`, false},
 		{"escaped backslash alone", `\\`, false},
+		// doublestar honors `\/` as an escape for a literal slash, so this
+		// pattern works. Reading the backslash as a separator would produce
+		// `src//gen`, which matches nothing.
+		{"escaped slash", `src\/gen`, false},
 
 		// No backslash at all.
 		{"plain glob", `*.go`, false},
@@ -80,6 +84,7 @@ func TestLooksLikeWindowsPath_MarksPatternsThatCannotMatch(t *testing.T) {
 	working := [][2]string{
 		{`gen\*`, "gen*"},
 		{`src/gen/*`, "src/gen/file.go"},
+		{`src\/gen`, "src/gen"},
 	}
 	for _, pair := range working {
 		pattern, path := pair[0], pair[1]
