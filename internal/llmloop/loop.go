@@ -724,7 +724,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		telemetry.PrintToolCallStarted(t.Name(), args)
 		_, toolSpan := telemetry.StartToolSpan(ctx, t.Name())
 
-		comments, repair, errMsg := tool.ParseCommentsWithPath(args, taskKey)
+		comments, repair, dropped, errMsg := tool.ParseCommentsWithPathDetailed(args, taskKey)
 		if repair != nil {
 			// The model sees a plain success, so this warning is the only record
 			// that its `comments` violated the array schema — without it the
@@ -745,6 +745,17 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 				rec, call.Function.Arguments, dur)
 			telemetry.PrintToolCallError(t.Name(), toolErr)
 			return r.toolFailureResult(taskKey, toolName, errMsg)
+		}
+
+		if dropped > 0 {
+			// The batch filed its usable entries, so the model sees a plain
+			// success — this warning is the only record that some of its
+			// findings were discarded. A batch with no usable entry takes the
+			// failure path above instead, where the error already names the
+			// required fields.
+			r.RecordWarning("comment_entries_dropped", taskKey, fmt.Sprintf(
+				"%d of %d 'comments' entries were dropped: each entry needs a non-empty 'content' and a 'path' (or the reviewed file's path)",
+				dropped, len(comments)+dropped))
 		}
 
 		// Batched comments share the turn's thinking.

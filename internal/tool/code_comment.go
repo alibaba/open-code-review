@@ -84,6 +84,16 @@ func (p *CodeCommentProvider) Execute(_ context.Context, args map[string]any) (s
 // schema violation, not a change to the findings: a repair is accepted only when
 // no recovered value looks cut short.
 func ParseCommentsWithPath(args map[string]any, defaultPath string) (comments []model.LlmComment, repair *CommentRepair, errMsg string) {
+	comments, repair, _, errMsg = ParseCommentsWithPathDetailed(args, defaultPath)
+	return comments, repair, errMsg
+}
+
+// ParseCommentsWithPathDetailed is ParseCommentsWithPath plus dropped: the
+// number of raw `comments` entries that were skipped because they were not
+// objects or lacked a non-empty 'content' and resolvable path. Callers with a
+// warning channel use it so a partially usable batch can report what it
+// discarded instead of filing the survivors under a plain success.
+func ParseCommentsWithPathDetailed(args map[string]any, defaultPath string) (comments []model.LlmComment, repair *CommentRepair, dropped int, errMsg string) {
 	return parseCommentsInner(args, defaultPath)
 }
 
@@ -94,13 +104,12 @@ func ParseCommentsWithPath(args map[string]any, defaultPath string) (comments []
 // today. A future caller that starts carrying real traffic should switch to
 // ParseCommentsWithPath rather than inherit silent repairs.
 func ParseComments(args map[string]any) ([]model.LlmComment, string) {
-	comments, _, errMsg := parseCommentsInner(args, "")
+	comments, _, _, errMsg := parseCommentsInner(args, "")
 	return comments, errMsg
 }
 
-func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmComment, *CommentRepair, string) {
+func parseCommentsInner(args map[string]any, defaultPath string) (comments []model.LlmComment, repair *CommentRepair, dropped int, errMsg string) {
 	var rawComments []any
-	var repair *CommentRepair
 	if arr, ok := args["comments"].([]any); ok && len(arr) > 0 {
 		rawComments = arr
 	} else if s, ok := args["comments"].(string); ok && s != "" {
@@ -113,7 +122,7 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 				// phrasing is what leads the model to regenerate the batch,
 				// while naming the schema violation instead makes it resend the
 				// same broken string.
-				return nil, nil, fmt.Sprintf("Error: failed to parse 'comments' JSON string: %v", err)
+				return nil, nil, 0, fmt.Sprintf("Error: failed to parse 'comments' JSON string: %v", err)
 			}
 			rawComments = entries
 			repair = rep
@@ -121,13 +130,15 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 	}
 	if len(rawComments) == 0 {
 		raw, _ := json.Marshal(args)
-		return nil, nil, fmt.Sprintf("Error: 'comments' array is required. Got args: %s", string(raw))
+		return nil, nil, 0, fmt.Sprintf("Error: 'comments' array is required. Got args: %s", string(raw))
 	}
 
-	var comments []model.LlmComment
+	comments = nil
+	dropped = 0
 	for _, raw := range rawComments {
 		obj, ok := raw.(map[string]any)
 		if !ok {
+			dropped++
 			continue
 		}
 
@@ -159,12 +170,13 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 		}
 
 		if cm.Path == "" || cm.Content == "" {
+			dropped++
 			continue
 		}
 
 		comments = append(comments, cm)
 	}
-	return comments, repair, ""
+	return comments, repair, dropped, ""
 }
 
 func normalizeCommentPath(p string) string {
