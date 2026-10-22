@@ -16,39 +16,54 @@ import (
 
 var errUnverifiedPlan = errors.New("NEAR AI response verification failed")
 
-type unverifiedPlanClient struct {
+type failedPlanClient struct {
 	fakeBudgetClient
-	failed atomic.Bool
+	planErr             error
+	verificationFailure bool
+	failed              atomic.Bool
 }
 
-func (c *unverifiedPlanClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+func (c *failedPlanClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	if strings.HasPrefix(req.Messages[0].ExtractText(), "PLAN") {
 		c.failed.Store(true)
-		return nil, errUnverifiedPlan
+		return nil, c.planErr
 	}
 	return c.fakeBudgetClient.CompletionsWithCtx(ctx, req)
 }
-func (c *unverifiedPlanClient) VerificationError() error {
-	if c.failed.Load() {
-		return errUnverifiedPlan
+func (c *failedPlanClient) VerificationError() error {
+	if c.failed.Load() && c.verificationFailure {
+		return c.planErr
 	}
 	return nil
 }
-func (c *unverifiedPlanClient) VerificationReport() *llm.VerificationReport {
-	return &llm.VerificationReport{Status: "failed", Failed: 1}
-}
 
-func TestNearAIVerificationFailureInOptionalPlanFailsScan(t *testing.T) {
-	repo := initTestRepo(t)
-	writeFile(t, repo, "main.go", []byte("package main\n"))
-	gitCommit(t, repo, "fixture")
-	tpl := budgetTestTemplate()
-	tpl.PlanTask = &template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "PLAN {{file_content}}"}}}
-	client := &unverifiedPlanClient{}
-	a := NewAgent(Args{RepoDir: repo, Template: tpl, LLMClient: client, Model: "test", MaxConcurrency: 1, SkipDedup: true, SkipSummary: true,
-		MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}}})
-	_, err := a.Run(context.Background())
-	if !client.failed.Load() || !errors.Is(err, errUnverifiedPlan) {
-		t.Fatalf("scan hid optional verification failure: %v", err)
+func TestNearAIOptionalPlanFailure(t *testing.T) {
+	for _, verificationFailure := range []bool{false, true} {
+		status := "request_failed"
+		planErr := errors.New("NEAR AI inference failed (http.503)")
+		if verificationFailure {
+			status, planErr = "failed", errUnverifiedPlan
+		}
+		t.Run(status, func(t *testing.T) {
+			repo := initTestRepo(t)
+			writeFile(t, repo, "main.go", []byte("package main\n"))
+			gitCommit(t, repo, "fixture")
+			tpl := budgetTestTemplate()
+			tpl.PlanTask = &template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "PLAN {{file_content}}"}}}
+			client := &failedPlanClient{planErr: planErr, verificationFailure: verificationFailure}
+			a := NewAgent(Args{RepoDir: repo, Template: tpl, LLMClient: client, Model: "test", MaxConcurrency: 1, SkipDedup: true, SkipSummary: true,
+				MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}}})
+			_, err := a.Run(context.Background())
+			if !client.failed.Load() {
+				t.Fatal("optional plan did not run")
+			}
+			if verificationFailure {
+				if !errors.Is(err, errUnverifiedPlan) {
+					t.Fatalf("scan hid optional verification failure: %v", err)
+				}
+			} else if err != nil || atomic.LoadInt64(&client.calls) == 0 {
+				t.Fatalf("plan HTTP error prevented main scan: err=%v calls=%d", err, atomic.LoadInt64(&client.calls))
+			}
+		})
 	}
 }

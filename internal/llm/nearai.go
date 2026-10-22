@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -77,11 +79,12 @@ type VerificationRecord struct {
 }
 
 type VerificationReport struct {
-	Status    string `json:"status"`
-	Verified  int    `json:"verified"`
-	Failed    int    `json:"failed"`
-	Cancelled int    `json:"cancelled"`
-	Pending   int    `json:"pending"`
+	Status        string `json:"status"`
+	Verified      int    `json:"verified"`
+	Failed        int    `json:"failed"`
+	RequestFailed int    `json:"request_failed"`
+	Cancelled     int    `json:"cancelled"`
+	Pending       int    `json:"pending"`
 	NearAISettings
 	Records []VerificationRecord `json:"records"`
 }
@@ -186,6 +189,33 @@ func nearAIError(err error, stage string) error {
 	return &nearAIFailure{code: code, stage: stage}
 }
 
+func nearAIVerificationFailure(err error, stage string) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var sdkError *nearai.Error
+	if errors.As(err, &sdkError) {
+		switch sdkError.Code {
+		case "api.http_status", "api.transport_failed", "api.completion_signature_unavailable":
+			return false
+		case "api.invalid_json", "api.invalid_response":
+			return stage != "inference"
+		}
+		// The SDK can refresh attestation or decrypt a response inside the
+		// inference transport, so the stage alone cannot identify these failures.
+		return true
+	}
+	var failure *nearAIFailure
+	if errors.As(err, &failure) {
+		return failure.code != "request.panicked"
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.ErrClosedPipe) {
+		return false
+	}
+	return stage != "inference"
+}
+
 func (c *nearAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
 	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
@@ -209,12 +239,16 @@ func (c *nearAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			err = &nearAIFailure{code: "request.panicked", stage: record.Stage}
 		}
 		if err != nil {
+			verificationFailed := nearAIVerificationFailure(err, record.Stage)
 			if class, phase, ok := classifyBoundaryError(err); ok {
 				reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
 			}
 			err = nearAIError(err, record.Stage)
 			resp = nil
-			record.Status = "failed"
+			record.Status = "request_failed"
+			if verificationFailed {
+				record.Status = "failed"
+			}
 			record.Code = "request.failed"
 			var failure *nearAIFailure
 			if errors.As(err, &failure) {
@@ -318,6 +352,8 @@ func (c *nearAIClient) VerificationReport() *VerificationReport {
 			r.Verified++
 		case "failed":
 			r.Failed++
+		case "request_failed":
+			r.RequestFailed++
 		case "cancelled":
 			r.Cancelled++
 		default:
@@ -329,6 +365,8 @@ func (c *nearAIClient) VerificationReport() *VerificationReport {
 		r.Status = "failed"
 	case r.Pending > 0:
 		r.Status = "pending"
+	case r.RequestFailed > 0:
+		r.Status = "request_failed"
 	case r.Verified > 0:
 		r.Status = "verified"
 	case r.Cancelled > 0:

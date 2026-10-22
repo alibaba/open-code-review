@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -123,47 +124,48 @@ func TestNearAIResumeRequiresFreshVerifiedRun(t *testing.T) {
 }
 
 func TestNearAIVerificationInRunOutputs(t *testing.T) {
-	for _, failed := range []bool{false, true} {
-		state, status := session.StateComplete, "verified"
-		if failed {
-			state, status = session.StateFailed, "failed"
-		}
-		report := &llm.VerificationReport{Status: status, NearAISettings: llm.NearAISettings{E2EE: true, VerificationLevel: "model-tee"}}
-		if failed {
-			report.Failed = 1
-		} else {
-			report.Verified = 2
-		}
-		identity := &jsonLLMIdentity{Provider: "nearai", Model: "canonical/model", Verification: report}
-		provider := &mockResultProvider{filesReviewed: 1, manifest: mockManifest(state)}
-		for _, format := range []string{"json", "text"} {
-			var out bytes.Buffer
-			if err := emitRunResult(context.Background(), provider, nil, time.Now(), format, "human", &quietHandle{}, identity, &out, nil); err != nil {
-				t.Fatal(err)
+	for _, report := range []*llm.VerificationReport{
+		{Status: "verified", Verified: 2},
+		{Status: "failed", Failed: 1},
+		{Status: "request_failed", RequestFailed: 1, Verified: 1},
+	} {
+		t.Run(report.Status, func(t *testing.T) {
+			state := session.StateComplete
+			if report.Failed > 0 {
+				state = session.StateFailed
 			}
-			if format == "json" {
-				var result struct {
-					Status string           `json:"status"`
-					LLM    *jsonLLMIdentity `json:"llm"`
-				}
-				if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+			report.NearAISettings = llm.NearAISettings{E2EE: true, VerificationLevel: "model-tee"}
+			identity := &jsonLLMIdentity{Provider: "nearai", Model: "canonical/model", Verification: report}
+			provider := &mockResultProvider{filesReviewed: 1, manifest: mockManifest(state)}
+			for _, format := range []string{"json", "text"} {
+				var out bytes.Buffer
+				if err := emitRunResult(context.Background(), provider, nil, time.Now(), format, "human", &quietHandle{}, identity, &out, nil); err != nil {
 					t.Fatal(err)
 				}
-				if result.LLM == nil || result.LLM.Verification == nil || result.LLM.Verification.Status != status {
-					t.Fatalf("missing verification: %s", out.String())
+				if format == "json" {
+					var result struct {
+						Status string           `json:"status"`
+						LLM    *jsonLLMIdentity `json:"llm"`
+					}
+					if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+						t.Fatal(err)
+					}
+					if result.LLM == nil || result.LLM.Verification == nil || result.LLM.Verification.Status != report.Status || result.LLM.Verification.RequestFailed != report.RequestFailed {
+						t.Fatalf("missing verification: %s", out.String())
+					}
+					if (result.Status == "failed") != (report.Failed > 0) {
+						t.Fatalf("run reported %q for %+v", result.Status, report)
+					}
+				} else if !strings.Contains(out.String(), "NEAR AI verification: "+report.Status) || !strings.Contains(out.String(), "E2EE=true, policy=model-tee") || !strings.Contains(out.String(), fmt.Sprintf("%d request failed", report.RequestFailed)) {
+					t.Fatalf("text: %s", out.String())
 				}
-				if failed && result.Status != "failed" {
-					t.Fatalf("failed run reported %q", result.Status)
-				}
-			} else if !strings.Contains(out.String(), "NEAR AI verification: "+status) || !strings.Contains(out.String(), "E2EE=true, policy=model-tee") {
-				t.Fatalf("text: %s", out.String())
 			}
-		}
-		var hint bytes.Buffer
-		outputSessionRetryHint(&hint, "test-session", identity)
-		if strings.Contains(hint.String(), "--resume") || !strings.Contains(hint.String(), "new run") {
-			t.Fatalf("unsafe resume hint: %s", hint.String())
-		}
+			var hint bytes.Buffer
+			outputSessionRetryHint(&hint, "test-session", identity)
+			if strings.Contains(hint.String(), "--resume") || !strings.Contains(hint.String(), "new run") {
+				t.Fatalf("unsafe resume hint: %s", hint.String())
+			}
+		})
 	}
 	var unchanged bytes.Buffer
 	outputVerificationText(&unchanged, nil)

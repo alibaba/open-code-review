@@ -80,11 +80,12 @@ on already-consumed text.
 OCR disables both OpenAI SDK inference retries and its truncated-response replay
 for this provider. A transient signature-fetch failure gets at most two retries
 (250 ms and 500 ms delays) for the same completion ID. These retries do not send
-another inference request. Authentication, transport, attestation, signature and
-policy failures return an error without releasing the response. The first failure
-is retained for the run, and subsequent calls are blocked. Calls already in
-flight still have to pass their own verification. Cancellation releases no
-response and is recorded separately.
+another inference request. Failed requests return an error without releasing the
+response. HTTP errors, transport failures and request timeouts allow later
+independent calls, preserving OCR's fallback for optional tasks such as planning.
+Attestation, signature, encryption and policy failures are retained for the run
+and block subsequent calls. Calls already in flight still have to pass their own
+verification. Cancellation is recorded separately.
 
 Verification failures in optional planning, filtering or background tasks also
 make the final review/scan fail. A successful HTTP status or a completed sibling
@@ -102,6 +103,7 @@ JSON review output includes `llm.verification`, for example:
   "status": "verified",
   "verified": 2,
   "failed": 0,
+  "request_failed": 0,
   "cancelled": 0,
   "pending": 0,
   "e2ee": true,
@@ -114,6 +116,10 @@ The real `records` array identifies each logical call by model, completion ID
 when available, stage, status, signature kind, signer and check time. Review
 requests also include file/task/request identity where available. Failed calls
 include a stable error code, without copying arbitrary provider error bodies.
+`failed` counts verification failures; `request_failed` counts request errors,
+including unavailable signature retrieval. The report status is `request_failed`
+when requests failed but no verification failure occurred, even if other calls
+were verified. The review/scan result follows the task's usual failure handling.
 Session JSONL stores verification alongside accepted `llm_response` records and
 in `session_end`. Failed scans emit their diagnostic JSON on stderr, following
 OCR's failure-output convention. SARIF carries the review failure state; use JSON

@@ -40,6 +40,7 @@ type nearAIGateway struct {
 	key                         ed25519.PrivateKey
 	tee, e2ee, tamper, truncate bool
 	chatStatus                  int
+	failFirstChat               bool
 	signatureKind               string
 	signatureDelay              int32
 	signatureEntered            chan struct{}
@@ -98,8 +99,10 @@ func (g *nearAIGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(result)
 	case r.URL.Path == "/v1/chat/completions":
-		id := fmt.Sprintf("chat-%d", g.chats.Add(1))
-		if g.chatStatus != 0 {
+		chat := g.chats.Add(1)
+		id := fmt.Sprintf("chat-%d", chat)
+		fail := !g.failFirstChat || chat == 1
+		if g.chatStatus != 0 && fail {
 			w.WriteHeader(g.chatStatus)
 			_, _ = io.WriteString(w, `{"error":{"message":"sensitive provider body"}}`)
 			return
@@ -176,7 +179,7 @@ func (g *nearAIGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
 		g.receipts[id] = map[string]any{"signature_kind": kind, "text": text, "signature": hex.EncodeToString(signature), "signing_algo": "ed25519", "signing_address": hex.EncodeToString(g.key.Public().(ed25519.PublicKey))}
 		g.mu.Unlock()
-		if g.truncate {
+		if g.truncate && fail {
 			w.Header().Set("Content-Length", fmt.Sprint(len(reply)+100))
 			reply = reply[:len(reply)/2]
 		}
@@ -269,7 +272,7 @@ func nearAIDecrypt(encrypted string, key ed25519.PrivateKey) (string, error) {
 	return string(plain), err
 }
 
-func nearAITestClient(t *testing.T, gateway *nearAIGateway, settings NearAISettings, stream bool) *nearAIClient {
+func nearAITestClient(t *testing.T, gateway http.Handler, settings NearAISettings, stream bool) *nearAIClient {
 	t.Helper()
 	server := httptest.NewServer(gateway)
 	t.Cleanup(server.Close)
@@ -359,24 +362,20 @@ func TestNearAIRealSDKCompletions(t *testing.T) {
 
 func TestNearAIFailsClosed(t *testing.T) {
 	for _, scenario := range []struct {
-		name                                string
-		e2ee, tee, tamper, truncate, stream bool
-		chatStatus                          int
-		signatureKind                       string
-		chats                               int32
+		name                      string
+		e2ee, tee, tamper, stream bool
+		signatureKind             string
+		chats                     int32
 	}{
 		{name: "unsupported_e2ee", e2ee: true},
 		{name: "unsupported_model_tee"},
 		{name: "tampered_json", tee: true, tamper: true, chats: 1},
 		{name: "tampered_sse", tee: true, tamper: true, stream: true, chats: 1},
-		{name: "truncated_json_no_replay", tee: true, truncate: true, chats: 1},
-		{name: "truncated_sse_no_replay", tee: true, truncate: true, stream: true, chats: 1},
-		{name: "http_503_no_replay", tee: true, chatStatus: 503, chats: 1},
 		{name: "valid_gateway_signature_cannot_satisfy_model_tee", tee: true, signatureKind: "gateway", chats: 1},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			g := newNearAIGateway(t)
-			g.tee, g.e2ee, g.tamper, g.truncate, g.chatStatus = scenario.tee, scenario.e2ee, scenario.tamper, scenario.truncate, scenario.chatStatus
+			g.tee, g.e2ee, g.tamper = scenario.tee, scenario.e2ee, scenario.tamper
 			g.signatureKind = scenario.signatureKind
 			c := nearAITestClient(t, g, NearAISettings{scenario.e2ee, "model-tee"}, scenario.stream)
 			resp, err := c.CompletionsWithCtx(metaCtx(testMeta()), nearAIRequest())
@@ -409,6 +408,142 @@ func TestNearAIFailsClosed(t *testing.T) {
 	}
 }
 
+func TestNearAIRequestFailuresDoNotBlockIndependentRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		status           int
+		truncate, stream bool
+	}{
+		{name: "http_503_json", status: http.StatusServiceUnavailable},
+		{name: "http_503_sse", status: http.StatusServiceUnavailable, stream: true},
+		{name: "http_429", status: http.StatusTooManyRequests},
+		{name: "truncated_json", truncate: true},
+		{name: "truncated_sse", truncate: true, stream: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newNearAIGateway(t)
+			g.chatStatus, g.truncate, g.failFirstChat = tc.status, tc.truncate, true
+			c := nearAITestClient(t, g, NearAISettings{false, "model-tee"}, tc.stream)
+			if resp, err := c.CompletionsWithCtx(metaCtx(testMeta()), nearAIRequest()); err == nil || resp != nil {
+				t.Fatalf("failed request returned a response: %+v %v", resp, err)
+			}
+			if g.chats.Load() != 1 {
+				t.Fatalf("failed inference was replayed: %d", g.chats.Load())
+			}
+			if err := c.VerificationError(); err != nil {
+				t.Fatalf("request failure invalidated verification: %v", err)
+			}
+			if req := freezeOne(t, c.cfg.retryCollector); req.Outcome != OutcomeFailed {
+				t.Fatalf("request failure lost from retry report: %+v", req)
+			}
+			req := nearAIRequest()
+			req.Messages = []Message{NewTextMessage("user", "independent main review")}
+			resp, err := c.CompletionsWithCtx(context.Background(), req)
+			if err != nil || resp == nil || resp.Verification.Status != "verified" || g.chats.Load() != 2 {
+				t.Fatalf("independent request was blocked: %+v %v (chats=%d)", resp, err, g.chats.Load())
+			}
+			r := c.VerificationReport()
+			if r.Status != "request_failed" || r.Failed != 0 || r.RequestFailed != 1 || r.Verified != 1 || r.Records[0].Status != "request_failed" {
+				t.Fatalf("request and verification failures were conflated: %+v", r)
+			}
+		})
+	}
+}
+
+func TestNearAITransportFailureClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		failure                error
+		deadline, verification bool
+	}{
+		{name: "network", failure: io.ErrClosedPipe},
+		{name: "request_timeout", deadline: true},
+		{name: "transport_binding", failure: &nearai.Error{Code: "binding.spki_fingerprint_mismatch"}, verification: true},
+		{name: "decryption", failure: &nearai.Error{Code: "e2ee.decryption_failed"}, verification: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newNearAIGateway(t)
+			c := nearAITestClient(t, g, NearAISettings{false, "model-tee"}, false)
+			transport := c.inner.cfg.httpClient.Transport
+			var attempts atomic.Int32
+			c.inner.cfg.httpClient.Transport = resolverRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if attempts.Add(1) == 1 {
+					if tc.deadline {
+						<-req.Context().Done()
+						return nil, req.Context().Err()
+					}
+					return nil, tc.failure
+				}
+				return transport.RoundTrip(req)
+			})
+			ctx := context.Background()
+			if tc.deadline {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 100*time.Millisecond)
+				defer cancel()
+			}
+			if resp, err := c.CompletionsWithCtx(ctx, nearAIRequest()); err == nil || resp != nil {
+				t.Fatalf("failed transport returned a response: %+v %v", resp, err)
+			}
+			if attempts.Load() != 1 || (c.VerificationError() != nil) != tc.verification {
+				t.Fatalf("attempts=%d verification=%v", attempts.Load(), c.VerificationError())
+			}
+			resp, err := c.CompletionsWithCtx(context.Background(), nearAIRequest())
+			if tc.verification {
+				if err == nil || resp != nil || attempts.Load() != 1 || c.VerificationReport().Failed != 2 {
+					t.Fatalf("verification failure allowed another request: %+v %v", resp, err)
+				}
+			} else if err != nil || resp == nil || resp.Verification.Status != "verified" || attempts.Load() != 2 || c.VerificationReport().RequestFailed != 1 {
+				t.Fatalf("independent request did not recover: %+v %v", resp, err)
+			}
+		})
+	}
+}
+
+func TestNearAIEvidenceFetchFailureAllowsIndependentRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, stage string
+		status            int
+		chats             int32
+	}{
+		{name: "preflight_http_503", path: "/v1/attestation/report", stage: "preflight", status: http.StatusServiceUnavailable},
+		{name: "preflight_interrupted_body", path: "/v1/attestation/report", stage: "preflight"},
+		{name: "signature_interrupted_body", path: "/v1/signature/", stage: "response verification", chats: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newNearAIGateway(t)
+			var fetches atomic.Int32
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasPrefix(r.URL.Path, tc.path) && fetches.Add(1) == 1 {
+					if tc.status != 0 {
+						w.WriteHeader(tc.status)
+					} else {
+						w.Header().Set("Content-Length", "100")
+						_, _ = io.WriteString(w, "{}")
+					}
+					return
+				}
+				g.ServeHTTP(w, r)
+			})
+			c := nearAITestClient(t, handler, NearAISettings{false, "model-tee"}, false)
+			if resp, err := c.CompletionsWithCtx(context.Background(), nearAIRequest()); err == nil || resp != nil {
+				t.Fatalf("failed evidence fetch returned a response: %+v %v", resp, err)
+			}
+			if c.VerificationError() != nil || g.chats.Load() != tc.chats {
+				t.Fatalf("fetch failure poisoned verification or replayed inference: %v chats=%d", c.VerificationError(), g.chats.Load())
+			}
+			r := c.VerificationReport()
+			if r.RequestFailed != 1 || r.Failed != 0 || r.Records[0].Stage != tc.stage {
+				t.Fatalf("fetch failure report: %+v", r)
+			}
+			resp, err := c.CompletionsWithCtx(context.Background(), nearAIRequest())
+			if err != nil || resp == nil || resp.Verification.Status != "verified" || g.chats.Load() != tc.chats+1 {
+				t.Fatalf("independent request did not recover: %+v %v chats=%d", resp, err, g.chats.Load())
+			}
+		})
+	}
+}
+
 func TestNearAIGatewayPolicyAndSignatureRetry(t *testing.T) {
 	for _, delay := range []int32{0, 1, 3} {
 		t.Run(fmt.Sprint(delay), func(t *testing.T) {
@@ -426,6 +561,14 @@ func TestNearAIGatewayPolicyAndSignatureRetry(t *testing.T) {
 			}
 			if g.chats.Load() != 1 || g.signatures.Load() != min(delay+1, 3) {
 				t.Fatalf("chats=%d signatures=%d", g.chats.Load(), g.signatures.Load())
+			}
+			if delay == 3 {
+				if c.VerificationError() != nil || c.VerificationReport().RequestFailed != 1 {
+					t.Fatal("signature service unavailability invalidated verification")
+				}
+				if resp, err := c.CompletionsWithCtx(context.Background(), nearAIRequest()); err != nil || resp == nil || resp.Verification.Status != "verified" || g.chats.Load() != 2 {
+					t.Fatalf("independent request after signature retrieval failure: %+v %v", resp, err)
+				}
 			}
 		})
 	}
@@ -582,7 +725,7 @@ func TestNearAITimeoutIncludesVerification(t *testing.T) {
 			if resp != nil || !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrRequestTimeout) == callerDeadline {
 				t.Fatalf("timeout classification: %+v %v", resp, err)
 			}
-			if g.chats.Load() != 1 || g.signatures.Load() != 1 || c.VerificationReport().Failed != 1 {
+			if g.chats.Load() != 1 || g.signatures.Load() != 1 || c.VerificationReport().RequestFailed != 1 || c.VerificationError() != nil {
 				t.Fatal("deadline allowed a replay or lost failure")
 			}
 		})

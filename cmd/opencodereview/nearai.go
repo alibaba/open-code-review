@@ -22,8 +22,8 @@ func outputVerificationText(out io.Writer, identity *jsonLLMIdentity) {
 		return
 	}
 	r := identity.Verification
-	fmt.Fprintf(out, "\nNEAR AI verification: %s (%d verified, %d failed, %d cancelled; E2EE=%t, policy=%s)\n",
-		r.Status, r.Verified, r.Failed, r.Cancelled, r.E2EE, r.VerificationLevel)
+	fmt.Fprintf(out, "\nNEAR AI verification: %s (%d verified, %d verification failed, %d request failed, %d cancelled; E2EE=%t, policy=%s)\n",
+		r.Status, r.Verified, r.Failed, r.RequestFailed, r.Cancelled, r.E2EE, r.VerificationLevel)
 }
 
 func outputSessionRetryHint(out io.Writer, id string, identity *jsonLLMIdentity) {
