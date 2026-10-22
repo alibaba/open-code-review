@@ -115,6 +115,7 @@ The exclusion reasons map to gates in the
 | `unsupported_ext` | Add the extension to your `include` list to bypass the allowlist gate. |
 | `default_path` | Add the file to `include` — that overrides built-in test-file exclude patterns. |
 | `provider_directory` | Nothing to do — provider directories such as `vendor/` and `node_modules/` are never reviewable, even when included. |
+| `gitignore` | Your repository's `.gitignore` matches the file, and an `include` rule cannot override it. Remove or narrow the pattern if the file should be reviewed. Tracked files are matched too, so a file that was committed before the rule was added is still excluded. |
 | `deleted` | Nothing to do — there's no new content to review. |
 | `too_large` | The diff alone exceeds 80% of `max_tokens`. Raise `--max-tokens` (or the saved `max_tokens`), or split the change into smaller commits. |
 
