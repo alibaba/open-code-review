@@ -12,6 +12,10 @@ jest.mock('child_process', () => ({
   spawn: jest.fn(),
 }));
 
+jest.mock('../windowsCommand', () => ({
+  resolveWindowsCommand: (command: string, args: string[]) => ({ executable: command, args }),
+}));
+
 const mockedSpawn = jest.mocked(spawn);
 const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
 

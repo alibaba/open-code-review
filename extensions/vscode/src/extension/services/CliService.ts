@@ -7,6 +7,7 @@ import { spawn } from 'child_process';
 import { CliResult, CliRunOptions, EnvCheckResult, LogLine } from '@shared/types';
 import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from './cliParse';
 import { getShellEnv, resolveBin } from './shellEnv';
+import { resolveWindowsCommand } from './windowsCommand';
 
 export class CliService {
   private current: ReturnType<typeof spawn> | null = null;
@@ -112,12 +113,17 @@ export class CliService {
     envExtra?: Record<string, string>,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const proc = spawn(resolveBin(this.cliPath), args, {
+      const env = envExtra ? { ...getShellEnv(), ...envExtra } : getShellEnv();
+      const resolved = process.platform === 'win32'
+        ? resolveWindowsCommand(this.cliPath, args, env)
+        : { executable: resolveBin(this.cliPath), args };
+      const proc = spawn(resolved.executable, resolved.args, {
         cwd,
-        env: envExtra ? { ...getShellEnv(), ...envExtra } : getShellEnv(),
+        env,
         // A dedicated POSIX process group lets cancellation escalate without
         // leaving the native CLI or any of its subprocesses behind.
         detached: process.platform !== 'win32',
+        windowsHide: true,
       });
       this.current = proc;
       let stdout = '';
