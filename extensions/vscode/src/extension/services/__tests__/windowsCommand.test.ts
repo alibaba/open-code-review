@@ -158,6 +158,6 @@ describe('parseWindowsCmdShim', () => {
       ].join('\n'),
       shim,
       {},
-    )).toEqual({ jsEntry, nodeHint: 'C:\\Tools\\\\node.exe' });
+    )).toEqual({ jsEntry, nodeHint: 'C:\\Tools\\node.exe' });
   });
 });

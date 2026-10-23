@@ -79,7 +79,7 @@ function createVariableResolver(
 ): VariableResolver {
   const resolveValue = (rawValue: string, stack: Set<string>): string => {
     let value = stripQuotes(rawValue);
-    value = value.replace(/%~dp0/gi, `${shimDirectory}${win32.sep}`);
+    value = value.replace(/%~dp0/gi, shimDirectory);
     value = value.replace(/%([^%:]+)%/g, (match, name: string) => {
       const resolved = resolve(name, stack);
       return resolved ?? getEnvironmentValue(env, name) ?? match;
@@ -162,7 +162,7 @@ export function parseWindowsCmdShim(
     let nodeHint: string | undefined;
     for (const rawToken of tokenizeCommandLine(invocationLine)) {
       if (/^%[*1-9]$/.test(rawToken)) continue;
-      let token = rawToken.replace(/%~dp0/gi, `${shimDirectory}${win32.sep}`);
+      let token = rawToken.replace(/%~dp0/gi, shimDirectory);
       token = token.replace(
         /%([^%:]+)%/g,
         (match, name: string) => variables.resolve(name) ?? match,
