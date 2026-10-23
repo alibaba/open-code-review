@@ -309,26 +309,46 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 		return true
 	}
 
-	excluded := false
+	// Git resolves ignore rules separately for a path and each of its parent
+	// directories. Keeping those results separate matters for patterns such as
+	// `*` + `!*/`: the negation re-includes directories for traversal, but does
+	// not re-include files matched by `*`.
+	parts := strings.Split(filepath.ToSlash(relPath), "/")
+	directoryExcluded := make([]bool, len(parts)-1)
+	fileExcluded := false
 	for _, pat := range gitignorePatterns {
 		body, negated := strings.CutPrefix(pat, "!")
 		if body == "" {
 			continue
 		}
 
-		// Directory-only patterns (trailing "/") apply to directories, never to
-		// files. Git uses a negated one such as `!*/` to keep descending into
-		// subdirectories, not to re-admit the files inside them — honouring it
-		// here would readmit everything below the root.
-		if negated && strings.HasSuffix(body, "/") {
-			continue
+		directoryOnly := strings.HasSuffix(body, "/")
+		if directoryOnly {
+			body = strings.TrimSuffix(body, "/")
+		} else if matchGitignoreBody(relPath, body) {
+			fileExcluded = !negated
 		}
 
-		if matchGitignoreBody(relPath, body) {
-			excluded = !negated
+		for i := range directoryExcluded {
+			directoryPath := strings.Join(parts[:i+1], "/")
+			var matched bool
+			if directoryOnly {
+				matched = matchGitignoreDirectoryEntry(directoryPath, body)
+			} else {
+				matched = matchGitignoreBody(directoryPath, body)
+			}
+			if matched {
+				directoryExcluded[i] = !negated
+			}
 		}
 	}
-	return excluded
+
+	for _, excluded := range directoryExcluded {
+		if excluded {
+			return true
+		}
+	}
+	return fileExcluded
 }
 
 // isProviderDirExcluded reports whether relPath matches the provider's
@@ -402,17 +422,23 @@ func matchGitignoreBody(relPath, body string) bool {
 }
 
 func matchGitignoreDirectory(relPath, pattern string) bool {
-	pattern, anchored := strings.CutPrefix(pattern, "/")
-	if pattern == "" {
-		return false
-	}
-
 	lastSlash := strings.LastIndex(relPath, "/")
 	if lastSlash < 0 {
 		return false
 	}
+	return matchGitignoreDirectoryPath(relPath[:lastSlash], pattern)
+}
 
-	components := strings.Split(relPath[:lastSlash], "/")
+// matchGitignoreDirectoryPath reports whether pattern matches any component
+// in the given directory path. pattern may begin with "/" to anchor it at the
+// repository root.
+func matchGitignoreDirectoryPath(directoryPath, pattern string) bool {
+	pattern, anchored := strings.CutPrefix(pattern, "/")
+	if pattern == "" || directoryPath == "" {
+		return false
+	}
+
+	components := strings.Split(directoryPath, "/")
 	// Slash-containing patterns are relative to the .gitignore location;
 	// slashless patterns match a directory name at any depth.
 	matchFullPath := anchored || strings.Contains(pattern, "/")
@@ -427,6 +453,26 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 		}
 	}
 	return false
+}
+
+// matchGitignoreDirectoryEntry reports whether pattern matches this directory
+// itself. Unlike matchGitignoreDirectoryPath, it does not match ancestor
+// components because each directory has a separate exclusion state.
+func matchGitignoreDirectoryEntry(directoryPath, pattern string) bool {
+	pattern, anchored := strings.CutPrefix(pattern, "/")
+	if pattern == "" || directoryPath == "" {
+		return false
+	}
+
+	// An unanchored pattern without slashes matches a directory name at any
+	// depth. Anchored or slash-containing patterns must match its full path.
+	if !anchored && !strings.Contains(pattern, "/") {
+		if lastSlash := strings.LastIndex(directoryPath, "/"); lastSlash >= 0 {
+			directoryPath = directoryPath[lastSlash+1:]
+		}
+	}
+	matched, err := doublestar.Match(pattern, directoryPath)
+	return err == nil && matched
 }
 
 // partitionDiffs keeps diffs filtered by built-in directory rules available
