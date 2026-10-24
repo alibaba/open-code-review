@@ -10,6 +10,7 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
+
 const { resolveNativeBinary } = require("../scripts/platform");
 const { version: packageVersion } = require("../package.json");
 const { shouldShowUpdateHint } = require("../scripts/version");
