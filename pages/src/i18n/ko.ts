@@ -11,6 +11,7 @@ export const ko: TranslationKeys = {
   'navbar.docs': '문서',
   'navbar.blog': '블로그',
   'navbar.getStarted': '시작하기',
+  'navbar.themeToggle': '라이트와 다크 테마 전환',
 
   // Hero
   'hero.title': 'AI 코드 리뷰\n수백만 건의 실제 작업으로 검증되었습니다',

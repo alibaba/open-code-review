@@ -7,6 +7,69 @@ Copyright 2026 alibaba/open-code-review Contributors
 @tailwind components;
 @tailwind utilities;
 
+/*
+Theme tokens. Dark is the default; the light palette activates when the theme
+toggle sets data-theme="light" on <html> (see src/theme/ThemeProvider.tsx and
+the pre-paint bootstrap script in index.html). The inline critical CSS in
+index.html duplicates the page-level values — keep them in sync (guarded by
+src/index.html.test.ts).
+*/
+:root {
+  --bg-page: #000000;
+  --surface-raised: #141414;
+  --surface-overlay: #1a1a1a;
+  --text-strong: #ffffff;
+  --text-body: rgba(255, 255, 255, 0.85);
+  --text-soft: rgba(255, 255, 255, 0.7);
+  --text-muted: rgba(255, 255, 255, 0.6);
+  --text-faint: rgba(255, 255, 255, 0.5);
+  --text-ghost: rgba(255, 255, 255, 0.4);
+  --text-faintest: rgba(255, 255, 255, 0.3);
+  --line: rgba(255, 255, 255, 0.16);
+  --line-strong: rgba(255, 255, 255, 0.3);
+  --line-nav: rgba(61, 61, 61, 0.6);
+  --fill-hover: rgba(255, 255, 255, 0.08);
+  --fill-subtle: rgba(255, 255, 255, 0.04);
+  --accent: #2BDE5E;
+  --accent-strong: #31FF75;
+  --accent-soft: rgba(43, 222, 94, 0.12);
+  --btn-primary-bg: #ffffff;
+  --btn-primary-text: rgba(0, 0, 0, 0.77);
+  --btn-primary-border: #EBEBEB;
+  --hero-glow-1: #0d750d;
+  --hero-glow-2: #042e04;
+  --glow: rgba(255, 255, 255, 0.15);
+  --glow-strong: rgba(255, 255, 255, 0.25);
+}
+
+:root[data-theme='light'] {
+  --bg-page: #ffffff;
+  --surface-raised: #f6f7f9;
+  --surface-overlay: #ffffff;
+  --text-strong: #0a0f1e;
+  --text-body: rgba(10, 15, 30, 0.87);
+  --text-soft: rgba(10, 15, 30, 0.72);
+  --text-muted: rgba(10, 15, 30, 0.6);
+  --text-faint: rgba(10, 15, 30, 0.48);
+  --text-ghost: rgba(10, 15, 30, 0.38);
+  --text-faintest: rgba(10, 15, 30, 0.28);
+  --line: rgba(10, 15, 30, 0.14);
+  --line-strong: rgba(10, 15, 30, 0.26);
+  --line-nav: rgba(10, 15, 30, 0.12);
+  --fill-hover: rgba(10, 15, 30, 0.06);
+  --fill-subtle: rgba(10, 15, 30, 0.03);
+  --accent: #16a34a;
+  --accent-strong: #15803d;
+  --accent-soft: rgba(22, 163, 74, 0.12);
+  --btn-primary-bg: #0a0f1e;
+  --btn-primary-text: #ffffff;
+  --btn-primary-border: #0a0f1e;
+  --hero-glow-1: #dcfce7;
+  --hero-glow-2: #f0fdf4;
+  --glow: rgba(10, 15, 30, 0.08);
+  --glow-strong: rgba(10, 15, 30, 0.14);
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -18,8 +81,8 @@ html {
 body {
   padding: 0;
   margin: 0;
-  background-color: #000000;
-  color: #ffffff;
+  background-color: var(--bg-page);
+  color: var(--text-strong);
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto, sans-serif;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
@@ -51,21 +114,21 @@ a {
 }
 
 ::-webkit-scrollbar-track {
-  background: #000;
+  background: var(--bg-page);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.15);
+  background: var(--line);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255,255,255,0.3);
+  background: var(--line-strong);
 }
 
 .command-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  scrollbar-color: var(--line) transparent;
 }
 
 .command-scroll::-webkit-scrollbar {
@@ -77,12 +140,12 @@ a {
 }
 
 .command-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--line);
   border-radius: 2px;
 }
 
 .command-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--line-strong);
 }
 
 /* Terminal cursor blink */
@@ -104,7 +167,7 @@ a {
 
 .usecase-card {
   position: relative;
-  border: 1px solid rgba(255,255,255,0.17);
+  border: 1px solid var(--line);
   border-radius: 8px;
   background: transparent;
   transition: border-color 0.4s ease;
@@ -119,7 +182,7 @@ a {
   background: conic-gradient(
     from var(--sweep-angle),
     transparent 0%,
-    #31FF75 8%,
+    var(--accent-strong) 8%,
     #33DDF7 16%,
     rgba(55,252,170,0.79) 24%,
     transparent 40%
@@ -140,7 +203,7 @@ a {
   position: absolute;
   inset: 0;
   border-radius: 8px;
-  background: linear-gradient(180deg, rgba(0,0,0,0.14) 0%, #141313 100%);
+  background: linear-gradient(180deg, var(--fill-subtle) 0%, var(--surface-raised) 100%);
   opacity: 0;
   transition: opacity 0.4s ease;
   pointer-events: none;

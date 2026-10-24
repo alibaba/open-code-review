@@ -11,6 +11,7 @@ export const zh: TranslationKeys = {
   'navbar.docs': '文档',
   'navbar.blog': '博客',
   'navbar.getStarted': '开始使用',
+  'navbar.themeToggle': '切换浅色与深色主题',
 
   // Hero
   'hero.title': 'AI 代码审查\n百万真实任务验证',
