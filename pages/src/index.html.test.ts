@@ -96,9 +96,14 @@ describe('index.html critical CSS', () => {
       // The theme must be known before the critical CSS paints, or a stored
       // light theme flashes dark for a frame. The bootstrap script has to run
       // ahead of the <style> block and only ever sets a valid theme value.
+      // The script body is sliced with indexOf rather than a script-tag regex
+      // (a regex here trips CodeQL's HTML-sanitization checks).
       name: 'sets the stored theme before first paint',
       assert: () => {
-        const script = headBeforeNoscript.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? '';
+        const open = headBeforeNoscript.indexOf('<script>');
+        const close = headBeforeNoscript.indexOf('</script>');
+        expect(open).toBeGreaterThanOrEqual(0);
+        const script = open >= 0 && close > open ? headBeforeNoscript.slice(open, close) : '';
         expect(script).toContain("localStorage.getItem('ocr-theme')");
         expect(script).toContain('document.documentElement.dataset.theme');
         expect(markup.indexOf('<script>')).toBeLessThan(markup.indexOf('<style>'));
