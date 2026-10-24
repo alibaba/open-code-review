@@ -35,7 +35,7 @@ const Footer: React.FC = () => {
     <footer
       style={{
         width: '100%',
-        borderTop: '1px solid rgba(255,255,255,0.12)',
+        borderTop: '1px solid var(--line)',
         padding: isMobile ? '32px 16px' : '64px 32px',
         display: 'flex',
         justifyContent: 'center',
@@ -55,9 +55,9 @@ const Footer: React.FC = () => {
       >
         <a href="https://github.com/alibaba/open-code-review" target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}>
           <img src={githubIcon} alt="" style={{ width: 18, height: 18 }} />
-          <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>{t('footer.brand')}</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>{t('footer.brand')}</span>
         </a>
-        <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>
+        <span style={{ color: 'var(--text-ghost)', fontSize: 13 }}>
           {t('footer.copyright')}
         </span>
 
@@ -70,10 +70,10 @@ const Footer: React.FC = () => {
               alignItems: 'center',
               gap: 6,
               background: 'none',
-              border: '1px solid rgba(255,255,255,0.17)',
+              border: '1px solid var(--line)',
               borderRadius: 6,
               padding: '6px 14px',
-              color: 'rgba(255,255,255,0.6)',
+              color: 'var(--text-muted)',
               fontSize: 13,
               cursor: 'pointer',
             }}
@@ -81,7 +81,7 @@ const Footer: React.FC = () => {
             <img src={langIcon} alt="" style={{ width: 14, height: 14 }} />
             {currentLabel}
             <svg width="10" height="6" viewBox="0 0 10 6" fill="none" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
-              <path d="M1 1L5 5L9 1" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M1 1L5 5L9 1" stroke="var(--text-faint)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
           {open && (
@@ -92,8 +92,8 @@ const Footer: React.FC = () => {
                 left: 0,
                 right: 0,
                 marginBottom: 6,
-                background: '#1a1a1a',
-                border: '1px solid rgba(255,255,255,0.15)',
+                background: 'var(--surface-overlay)',
+                border: '1px solid var(--line)',
                 borderRadius: 8,
                 padding: 4,
                 zIndex: 10,
@@ -107,10 +107,10 @@ const Footer: React.FC = () => {
                     display: 'block',
                     width: '100%',
                     padding: '8px 12px',
-                    background: opt.value === language ? 'rgba(255,255,255,0.08)' : 'transparent',
+                    background: opt.value === language ? 'var(--fill-hover)' : 'transparent',
                     border: 'none',
                     borderRadius: 6,
-                    color: opt.value === language ? '#fff' : 'rgba(255,255,255,0.6)',
+                    color: opt.value === language ? 'var(--text-strong)' : 'var(--text-muted)',
                     fontSize: 13,
                     textAlign: 'left',
                     cursor: 'pointer',

@@ -136,7 +136,7 @@ const HighlightsSection: React.FC = () => {
           >
             <span
               style={{
-                color: '#FFFFFF',
+                color: 'var(--text-strong)',
                 fontSize: 40,
                 fontWeight: 600,
                 lineHeight: '48px',
@@ -154,7 +154,7 @@ const HighlightsSection: React.FC = () => {
             >
               <p
                 style={{
-                  color: 'rgba(255,255,255,0.8)',
+                  color: 'var(--text-body)',
                   fontSize: 12,
                   fontWeight: 500,
                   letterSpacing: '0.5px',
@@ -171,7 +171,7 @@ const HighlightsSection: React.FC = () => {
               </p>
               <p
                 style={{
-                  color: 'rgba(255,255,255,0.4)',
+                  color: 'var(--text-ghost)',
                   fontSize: 12,
                   textAlign: 'center',
                   lineHeight: '16px',

@@ -11,6 +11,7 @@ export const ja: TranslationKeys = {
   'navbar.docs': 'ドキュメント',
   'navbar.blog': 'ブログ',
   'navbar.getStarted': '始める',
+  'navbar.themeToggle': 'ライトとダークテーマを切り替える',
 
   // Hero
   'hero.title': 'AIコードレビュー\n数百万の実タスクで検証済み',
