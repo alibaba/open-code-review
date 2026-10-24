@@ -1071,12 +1071,31 @@ func setCustomProviderField(cfg *Config, name, field, key, value string) error {
 	return nil
 }
 
+// validateMCPServerName mirrors validateProviderName: a server name may
+// contain dots, but each dot-separated segment must be non-empty so a
+// mistyped key like mcp_servers..command cannot create a bogus entry.
+func validateMCPServerName(name string) error {
+	for _, segment := range strings.Split(name, ".") {
+		if strings.TrimSpace(segment) == "" {
+			return fmt.Errorf("invalid MCP server name %q: dot-separated segments must not be empty or whitespace", name)
+		}
+	}
+	return nil
+}
+
 func setMCPServerValue(cfg *Config, key, value string) error {
-	parts := strings.SplitN(key, ".", 3)
-	if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
+	// The last dot separates the field from the server name so a name may
+	// itself contain dots, matching how setProviderValue addresses dotted
+	// provider names and how runConfigUnset already resolves dotted server
+	// names with SplitN(key, ".", 2).
+	dot := strings.LastIndex(key, ".")
+	if dot <= len("mcp_servers.") || dot == len(key)-1 {
 		return fmt.Errorf("invalid MCP server key %q: expected mcp_servers.<name>.<field>", key)
 	}
-	name, field := parts[1], parts[2]
+	name, field := key[len("mcp_servers."):dot], key[dot+1:]
+	if err := validateMCPServerName(name); err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
 
 	if cfg.MCPServers == nil {
 		cfg.MCPServers = make(map[string]MCPServerConfig)
