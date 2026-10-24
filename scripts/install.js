@@ -171,7 +171,9 @@ async function main() {
 
   const pkg = loadPackageJson();
   if (pkg.version === "0.0.0") {
-    console.log("Skipping binary download for unreleased version 0.0.0");
+    info("Version 0.0.0 is a development checkout.");
+    info("No prebuilt binary will be downloaded.");
+    info("Run `make build` to compile the native binary before using the CLI.");
     return;
   }
 
