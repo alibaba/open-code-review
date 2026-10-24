@@ -1922,13 +1922,17 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for group %q\n", totalRemoved, groupKey)
 }
 
-// buildGroupFilterCommentsJSON serializes comments with path info for group-level filtering.
+// buildGroupFilterCommentsJSON serializes comments with path and line info for
+// group-level filtering. The line range is what lets the model recognize two
+// comments as targeting the same location (near-duplicates), not just the same file.
 func buildGroupFilterCommentsJSON(comments []model.LlmComment) string {
 	type filterComment struct {
 		ID           string `json:"id"`
 		Path         string `json:"path"`
 		Content      string `json:"content"`
 		ExistingCode string `json:"existing_code,omitempty"`
+		StartLine    int    `json:"start_line"`
+		EndLine      int    `json:"end_line"`
 	}
 	items := make([]filterComment, len(comments))
 	for i, cm := range comments {
@@ -1937,6 +1941,8 @@ func buildGroupFilterCommentsJSON(comments []model.LlmComment) string {
 			Path:         cm.Path,
 			Content:      cm.Content,
 			ExistingCode: cm.ExistingCode,
+			StartLine:    cm.StartLine,
+			EndLine:      cm.EndLine,
 		}
 	}
 	data, _ := json.Marshal(items)
