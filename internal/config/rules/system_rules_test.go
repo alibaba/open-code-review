@@ -68,6 +68,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 	}{
 		{"src/main/java/com/example/foo.java", "Logic Error Detection"},
 		{"foo.java", "Logic Error Detection"},
+		{"src/main/scala/com/example/Service.scala", "Nullability and Option Safety"},
+		{"foo.scala", "Nullability and Option Safety"},
 		{"src/main/resources/templates/email.ftl", "Template Injection"},
 		{"foo.ftl", "Template Injection"},
 		{"foo.ftlh", "Template Injection"},
