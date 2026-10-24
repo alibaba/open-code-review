@@ -254,13 +254,17 @@ func TestExecuteReviewFilter_NoComments(t *testing.T) {
 }
 
 type filterRequestCaptureClient struct {
-	request llm.ChatRequest
-	calls   int
+	request  llm.ChatRequest
+	calls    int
+	response *llm.ChatResponse // optional; nil answers with an approval
 }
 
 func (c *filterRequestCaptureClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	c.request = req
 	c.calls++
+	if c.response != nil {
+		return c.response, nil
+	}
 	content := "I approve all comments."
 	return &llm.ChatResponse{
 		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
@@ -356,6 +360,83 @@ func TestExecuteReviewFilter_RemovesComments(t *testing.T) {
 	for _, c := range comments {
 		if c.Content == "remove this" {
 			t.Error("filtered comment should have been removed")
+		}
+	}
+}
+
+// TestExecuteReviewFilter_NearDuplicate pins the input contract and the removal
+// path for near-duplicate comments (#709): the filter prompt must expose each
+// comment's line range so the model can see that two comments target the same
+// location, and a reported redundant copy is dropped while its twin survives.
+func TestExecuteReviewFilter_NearDuplicate(t *testing.T) {
+	tmpDir := t.TempDir()
+	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+
+	client := &filterRequestCaptureClient{
+		response: &llm.ChatResponse{
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{
+					ToolCalls: []llm.ToolCall{{
+						ID:   "call_1",
+						Type: "function",
+						Function: llm.FunctionCall{
+							Name:      "report_incorrect_comments",
+							Arguments: `{"comment_ids":["c-1"]}`,
+						},
+					}},
+				},
+			}},
+			Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+		},
+	}
+
+	collector := tool.NewCommentCollector()
+	collector.Add(model.LlmComment{Path: "a.go", Content: "config.asdf may be missing; guard with isfield before use", StartLine: 20, EndLine: 20})
+	collector.Add(model.LlmComment{Path: "a.go", Content: "accesses config.asdf before confirming the field exists; add an isfield guard", StartLine: 20, EndLine: 21})
+	collector.Add(model.LlmComment{Path: "a.go", Content: "unrelated finding elsewhere", StartLine: 55, EndLine: 60})
+
+	a := New(Args{
+		LLMClient:        client,
+		Model:            "test",
+		Session:          sess,
+		CommentCollector: collector,
+		Template: template.Template{
+			ReviewFilterTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}} path={{path}} diff={{diff}}"}},
+			},
+			MaxTokens:           10000,
+			MaxToolRequestTimes: 5,
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+		},
+	})
+
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}}, nil)
+
+	if client.calls != 1 {
+		t.Fatalf("LLM calls = %d, want 1", client.calls)
+	}
+
+	// The rendered prompt must carry the line ranges: without them the model
+	// cannot tell same-location comments from same-file comments.
+	var prompt strings.Builder
+	for _, m := range client.request.Messages {
+		if text, ok := m.Content.(string); ok {
+			prompt.WriteString(text)
+		}
+	}
+	for _, want := range []string{`"start_line":20`, `"end_line":21`, `"start_line":55`} {
+		if !strings.Contains(prompt.String(), want) {
+			t.Errorf("filter prompt missing %s; comments JSON sent to the model:\n%s", want, prompt.String())
+		}
+	}
+
+	comments := collector.CommentsForPath("a.go")
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments after near-duplicate removal, got %d", len(comments))
+	}
+	for _, c := range comments {
+		if c.Content == "accesses config.asdf before confirming the field exists; add an isfield guard" {
+			t.Error("the redundant near-duplicate copy should have been removed")
 		}
 	}
 }

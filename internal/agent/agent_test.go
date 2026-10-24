@@ -126,6 +126,15 @@ func TestBuildGroupFilterCommentsJSON(t *testing.T) {
 			},
 			wantIDs: []string{"c-0", "c-1", "c-2"},
 		},
+		{
+			name: "line ranges are serialized so same-location comments are distinguishable",
+			comments: []model.LlmComment{
+				{Path: "a.go", Content: "nil deref", StartLine: 20, EndLine: 20},
+				{Path: "a.go", Content: "possible nil dereference", StartLine: 20, EndLine: 21},
+				{Path: "a.go", Content: "unrelated", StartLine: 55, EndLine: 60},
+			},
+			wantIDs: []string{"c-0", "c-1", "c-2"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -137,6 +146,8 @@ func TestBuildGroupFilterCommentsJSON(t *testing.T) {
 				Path         string `json:"path"`
 				Content      string `json:"content"`
 				ExistingCode string `json:"existing_code,omitempty"`
+				StartLine    int    `json:"start_line"`
+				EndLine      int    `json:"end_line"`
 			}
 			if err := json.Unmarshal([]byte(got), &items); err != nil {
 				t.Fatalf("invalid JSON: %v\nraw: %s", err, got)
@@ -158,6 +169,12 @@ func TestBuildGroupFilterCommentsJSON(t *testing.T) {
 				}
 				if item.ExistingCode != tt.comments[i].ExistingCode {
 					t.Errorf("items[%d].ExistingCode = %q, want %q", i, item.ExistingCode, tt.comments[i].ExistingCode)
+				}
+				if item.StartLine != tt.comments[i].StartLine {
+					t.Errorf("items[%d].StartLine = %d, want %d", i, item.StartLine, tt.comments[i].StartLine)
+				}
+				if item.EndLine != tt.comments[i].EndLine {
+					t.Errorf("items[%d].EndLine = %d, want %d", i, item.EndLine, tt.comments[i].EndLine)
 				}
 			}
 		})
