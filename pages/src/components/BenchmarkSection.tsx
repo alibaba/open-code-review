@@ -103,19 +103,19 @@ const BenchmarkSection: React.FC = () => {
       <div style={{ width: '100%', maxWidth: 1200, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: isMobile ? 32 : 48 }}>
         {/* Header */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          <span style={{ color: '#2BDE5E', fontSize: 16, fontWeight: 500, letterSpacing: '0.48px' }}>
+          <span style={{ color: 'var(--accent)', fontSize: 16, fontWeight: 500, letterSpacing: '0.48px' }}>
             {t('benchmark.sectionLabel')}
           </span>
-          <h2 style={{ color: '#FFFFFF', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
+          <h2 style={{ color: 'var(--text-strong)', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
             {t('benchmark.title')}
           </h2>
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, textAlign: 'center', lineHeight: '24px', margin: 0, maxWidth: 646 }}>
+          <p style={{ color: 'var(--text-faint)', fontSize: 16, textAlign: 'center', lineHeight: '24px', margin: 0, maxWidth: 646 }}>
             {t('benchmark.subtitle')}
           </p>
         </div>
 
         {/* Table */}
-        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 8, overflow: isMobile ? 'auto' : 'hidden' }}>
+        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', border: '1px solid var(--line)', borderRadius: 8, overflow: isMobile ? 'auto' : 'hidden' }}>
           {/* Table Header */}
           <div style={{
             width: 1200,
@@ -123,7 +123,7 @@ const BenchmarkSection: React.FC = () => {
             display: 'flex',
             alignItems: 'flex-start',
             borderStyle: 'solid',
-            borderColor: 'rgba(255,255,255,0.16)',
+            borderColor: 'var(--line)',
             borderTopWidth: 0,
             borderBottomWidth: 1,
             borderRightWidth: 0,
@@ -149,7 +149,7 @@ const BenchmarkSection: React.FC = () => {
                   }}
                 >
                   <span style={{
-                    color: isActive ? '#2BDE5E' : 'rgba(255,255,255,0.5)',
+                    color: isActive ? 'var(--accent)' : 'var(--text-faint)',
                     fontSize: 12,
                     fontWeight: 500,
                     letterSpacing: '0.5px',
@@ -189,7 +189,7 @@ const BenchmarkSection: React.FC = () => {
                   alignItems: 'center',
                   background: bgOpacity > 0 ? `rgba(43,222,94,${bgOpacity})` : 'transparent',
                   borderStyle: 'solid',
-                  borderColor: 'rgba(255,255,255,0.16)',
+                  borderColor: 'var(--line)',
                   borderTopWidth: 0,
                   borderBottomWidth: idx === sortedRows.length - 1 ? 0 : 1,
                   borderRightWidth: 0,
@@ -199,57 +199,57 @@ const BenchmarkSection: React.FC = () => {
               >
                 {/* Rank */}
                 <div style={{ width: 120, padding: '10px 20px' }}>
-                  <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: idx < 3 ? 18 : 14, fontFamily: 'Menlo, monospace' }}>
+                  <span style={{ color: 'var(--text-body)', fontSize: idx < 3 ? 18 : 14, fontFamily: 'Menlo, monospace' }}>
                     {rankDisplay}
                   </span>
                 </div>
                 {/* Model */}
                 <div style={{ width: 200, padding: '10px 12px', display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ color: '#FFFFFF', fontSize: 14, fontWeight: 500 }}>{row.model}</span>
-                  <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>{row.provider}</span>
+                  <span style={{ color: 'var(--text-strong)', fontSize: 14, fontWeight: 500 }}>{row.model}</span>
+                  <span style={{ color: 'var(--text-ghost)', fontSize: 12 }}>{row.provider}</span>
                 </div>
                 {/* Source */}
                 <div style={{ width: 200, padding: '10px 12px', display: 'flex', flexDirection: 'column' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     {row.sourceIcon && <img src={row.sourceIcon} alt="" style={{ width: 20, height: 20 }} />}
-                    <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>{row.source}</span>
+                    <span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{row.source}</span>
                   </div>
-                  <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, marginLeft: 24 }}>{row.version}</span>
+                  <span style={{ color: 'var(--text-ghost)', fontSize: 11, marginLeft: 24 }}>{row.version}</span>
                 </div>
                 {/* F1 */}
                 <div style={{ flex: 1, padding: '10px 12px' }}>
-                  <span style={{ color: sortField === 'f1' ? '#2BDE5E' : '#FFFFFF', fontSize: 14, fontWeight: sortField === 'f1' ? 600 : 400 }}>
+                  <span style={{ color: sortField === 'f1' ? 'var(--accent)' : 'var(--text-strong)', fontSize: 14, fontWeight: sortField === 'f1' ? 600 : 400 }}>
                     {row.f1}
                   </span>
                 </div>
                 {/* Precision */}
                 <div style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column' }}>
                   <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <span style={{ color: sortField === 'precision' ? '#2BDE5E' : '#FFFFFF', fontSize: 14, fontWeight: sortField === 'precision' ? 600 : 400 }}>
+                    <span style={{ color: sortField === 'precision' ? 'var(--accent)' : 'var(--text-strong)', fontSize: 14, fontWeight: sortField === 'precision' ? 600 : 400 }}>
                       {row.precision}
                     </span>
                     {row.precisionMedal !== undefined && <img src={TROPHY_ICONS[row.precisionMedal]} alt="" style={{ width: 16, height: 16, marginLeft: 4 }} />}
                   </div>
-                  <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>{row.precisionDetail}</span>
+                  <span style={{ color: 'var(--text-ghost)', fontSize: 11 }}>{row.precisionDetail}</span>
                 </div>
                 {/* Recall */}
                 <div style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column' }}>
                   <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <span style={{ color: sortField === 'recall' ? '#2BDE5E' : '#FFFFFF', fontSize: 14, fontWeight: sortField === 'recall' ? 600 : 400 }}>
+                    <span style={{ color: sortField === 'recall' ? 'var(--accent)' : 'var(--text-strong)', fontSize: 14, fontWeight: sortField === 'recall' ? 600 : 400 }}>
                       {row.recall}
                     </span>
                     {row.recallMedal !== undefined && <img src={TROPHY_ICONS[row.recallMedal]} alt="" style={{ width: 16, height: 16, marginLeft: 4 }} />}
                   </div>
-                  <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>{row.recallDetail}</span>
+                  <span style={{ color: 'var(--text-ghost)', fontSize: 11 }}>{row.recallDetail}</span>
                 </div>
                 {/* Avg Time */}
                 <div style={{ flex: 1, padding: '10px 12px' }}>
-                  <span style={{ color: '#FFFFFF', fontSize: 14 }}>{row.avgTime}</span>
+                  <span style={{ color: 'var(--text-strong)', fontSize: 14 }}>{row.avgTime}</span>
                 </div>
                 {/* Avg Token */}
                 <div style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ color: '#FFFFFF', fontSize: 14 }}>{row.avgToken}</span>
-                  <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>{row.tokenDetail}</span>
+                  <span style={{ color: 'var(--text-strong)', fontSize: 14 }}>{row.avgToken}</span>
+                  <span style={{ color: 'var(--text-ghost)', fontSize: 11 }}>{row.tokenDetail}</span>
                 </div>
               </div>
             );

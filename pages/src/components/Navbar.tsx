@@ -4,6 +4,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n';
+import { useTheme } from '../theme/ThemeProvider';
 import { useResponsive } from '../hooks/useResponsive';
 import socialIcon from '../assets/icons/icon-github.svg';
 import brandIcon from '../assets/images/brandicon.svg';
@@ -45,6 +46,7 @@ const navTabs = [
 
 const Navbar: React.FC = () => {
   const { language, setLanguage, t } = useTranslation();
+  const { theme, toggleTheme } = useTheme();
   const { isMobile } = useResponsive();
   const location = useLocation();
   const navigate = useNavigate();
@@ -69,7 +71,7 @@ const Navbar: React.FC = () => {
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        borderBottom: '1px solid rgba(61,61,61,0.6)',
+        borderBottom: '1px solid var(--line-nav)',
         backdropFilter: 'blur(10px)',
         WebkitBackdropFilter: 'blur(10px)',
         position: 'fixed',
@@ -120,7 +122,7 @@ const Navbar: React.FC = () => {
                 >
                   <span
                     style={{
-                      color: '#FFFFFF',
+                      color: 'var(--text-strong)',
                       fontSize: 14,
                       lineHeight: '20px',
                       opacity: isActive ? 1 : 0.6,
@@ -137,6 +139,32 @@ const Navbar: React.FC = () => {
 
         {/* Right section */}
         <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 16 }}>
+          {/* Theme toggle — sun in dark mode (switch to light), moon in light mode */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={t('navbar.themeToggle')}
+            title={t('navbar.themeToggle')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'none',
+              border: '1px solid var(--line-strong)',
+              borderRadius: 4,
+              cursor: 'pointer',
+              opacity: 0.6,
+              padding: 0,
+              width: 18,
+              height: 18,
+              boxSizing: 'border-box' as const,
+              color: 'var(--text-strong)',
+              fontSize: 10,
+              lineHeight: '16px',
+            }}
+          >
+            <i className={theme === 'dark' ? 'fa-solid fa-sun' : 'fa-solid fa-moon'} aria-hidden="true" />
+          </button>
           {/* Language Switcher */}
           <div ref={langRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
             <button
@@ -146,7 +174,7 @@ const Navbar: React.FC = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 background: 'none',
-                border: '1px solid #FFFFFF',
+                border: '1px solid var(--text-strong)',
                 borderRadius: 4,
                 cursor: 'pointer',
                 opacity: 0.6,
@@ -159,7 +187,7 @@ const Navbar: React.FC = () => {
               <span style={{
                 fontSize: 10,
                 fontWeight: 600,
-                color: '#FFFFFF',
+                color: 'var(--text-strong)',
                 lineHeight: '18px',
                 textAlign: 'center' as const,
                 width: '100%',
@@ -175,8 +203,8 @@ const Navbar: React.FC = () => {
                   top: '100%',
                   right: 0,
                   marginTop: 8,
-                  background: '#1a1a1a',
-                  border: '1px solid rgba(255,255,255,0.15)',
+                  background: 'var(--surface-overlay)',
+                  border: '1px solid var(--line)',
                   borderRadius: 8,
                   padding: 4,
                   zIndex: 200,
@@ -191,10 +219,10 @@ const Navbar: React.FC = () => {
                       display: 'block',
                       width: '100%',
                       padding: '8px 12px',
-                      background: opt.value === language ? 'rgba(255,255,255,0.08)' : 'transparent',
+                      background: opt.value === language ? 'var(--fill-hover)' : 'transparent',
                       border: 'none',
                       borderRadius: 6,
-                      color: opt.value === language ? '#fff' : 'rgba(255,255,255,0.6)',
+                      color: opt.value === language ? 'var(--text-strong)' : 'var(--text-muted)',
                       fontSize: 13,
                       textAlign: 'left' as const,
                       cursor: 'pointer',
@@ -223,10 +251,10 @@ const Navbar: React.FC = () => {
               alignItems: 'center',
               gap: 6,
               padding: '4px 12px',
-              background: '#ffffff',
-              border: '1px solid #EBEBEB',
+              background: 'var(--btn-primary-bg)',
+              border: '1px solid var(--btn-primary-border)',
               borderRadius: 6,
-              color: 'rgba(0,0,0,0.77)',
+              color: 'var(--btn-primary-text)',
               fontSize: isMobile ? 12 : 14,
               fontWeight: 500,
               cursor: 'pointer',
