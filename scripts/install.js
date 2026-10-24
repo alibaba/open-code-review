@@ -1,3 +1,9 @@
+
+const pkg = require('../package.json');
+if (pkg.version === '0.0.0') {
+  console.log('Skipping binary download for unreleased version 0.0.0');
+  process.exit(0);
+}
 #!/usr/bin/env node
 
 // SPDX-License-Identifier: Apache-2.0
