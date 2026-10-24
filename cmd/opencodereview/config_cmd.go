@@ -15,6 +15,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -132,9 +133,16 @@ func runConfigSet(key, value string) error {
 // secret and must be masked. Matching on the normalized suffix covers both
 // snake_case and Go field spellings of api_key/auth_token at any path depth,
 // while the *_cmd variants stay unmasked: a command line is not a secret.
+// The object-store credentials (storage.s3.secret_access_key and
+// storage.s3.session_token) are secrets of the same kind and are masked too.
 func shouldMaskConfigValue(key string) bool {
 	normalizedKey := strings.ToLower(strings.ReplaceAll(key, "_", ""))
-	return strings.HasSuffix(normalizedKey, "apikey") || strings.HasSuffix(normalizedKey, "authtoken")
+	for _, suffix := range []string{"apikey", "authtoken", "secretaccesskey", "sessiontoken"} {
+		if strings.HasSuffix(normalizedKey, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func runConfigUnset(key string) error {
@@ -152,10 +160,13 @@ func runConfigUnset(key string) error {
 	if key == "effort" {
 		return unsetEffort(configPath)
 	}
+	if key == "storage" {
+		return unsetStorage(configPath)
+	}
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, mcp_servers.<name>, and storage")
 	}
 
 	switch parts[0] {
@@ -164,8 +175,23 @@ func runConfigUnset(key string) error {
 	case "mcp_servers":
 		return unsetMCPServer(configPath, parts[1])
 	default:
-		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, mcp_servers.<name>, and storage")
 	}
+}
+
+// unsetStorage removes the storage section, returning the install to the local
+// cache as the only store.
+func unsetStorage(configPath string) error {
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	cfg.Storage = nil
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+	fmt.Println("Removed the storage section; sessions are local to this machine again.")
+	return nil
 }
 
 func unsetMaxTokens(configPath string) error {
@@ -357,6 +383,7 @@ type Config struct {
 	Language        string                     `json:"language,omitempty"`
 	Telemetry       *TelemetryConfig           `json:"telemetry,omitempty"`
 	MCPServers      map[string]MCPServerConfig `json:"mcp_servers,omitempty"`
+	Storage         *storage.FileConfig        `json:"storage,omitempty"`
 
 	unknownJSONFields map[string]json.RawMessage
 }
@@ -609,6 +636,10 @@ var supportedConfigKeys = []string{
 	"providers.<name>.<field>",
 	"custom_providers.<name>.<field>",
 	"mcp_servers.<name>.<field>",
+	"storage.type",
+	"storage.prefix",
+	"storage.path",
+	"storage.s3.<field>",
 	"llm.url",
 	"llm.auth_token",
 	"llm.auth_token_cmd",
@@ -637,6 +668,11 @@ func setConfigValue(cfg *Config, key, value string) error {
 	}
 	if strings.HasPrefix(key, "mcp_servers.") {
 		return setMCPServerValue(cfg, key, value)
+	}
+	// The s3 block answers to both the documented "storage.s3.<field>" and the
+	// Go-field "storage.S3.<field>" spelling; setStorageS3Value unwraps either.
+	if strings.HasPrefix(strings.ToLower(key), "storage.s3.") {
+		return setStorageS3Value(cfg, key, value)
 	}
 
 	switch key {
@@ -782,6 +818,19 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.ensureTelemetry()
 		cfg.Telemetry.ContentLog = b
+	case "storage.type", "storage.Type":
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		switch normalized {
+		case storage.TypeLocal, storage.TypeS3, storage.TypeFilesystem:
+		default:
+			return fmt.Errorf("invalid storage.type %q: use %s, %s or %s",
+				value, storage.TypeLocal, storage.TypeS3, storage.TypeFilesystem)
+		}
+		cfg.ensureStorage().Type = normalized
+	case "storage.prefix", "storage.Prefix":
+		cfg.ensureStorage().Prefix = value
+	case "storage.path", "storage.Path":
+		cfg.ensureStorage().Path = value
 	case "llm.extra_body", "llm.ExtraBody":
 		var m map[string]any
 		if err := json.Unmarshal([]byte(value), &m); err != nil {
@@ -1038,6 +1087,50 @@ func isAuxiliaryProviderField(field string) bool {
 	default:
 		return false
 	}
+}
+
+// ensureStorage returns the storage section, creating it on first write.
+func (c *Config) ensureStorage() *storage.FileConfig {
+	if c.Storage == nil {
+		c.Storage = &storage.FileConfig{}
+	}
+	return c.Storage
+}
+
+// setStorageS3Value writes one field of the storage.s3 block.
+func setStorageS3Value(cfg *Config, key, value string) error {
+	// setConfigValue routes both spellings here, so strip the prefix without
+	// assuming its case.
+	field := key
+	if lower := strings.ToLower(field); strings.HasPrefix(lower, "storage.s3.") {
+		field = field[len("storage.s3."):]
+	}
+	section := cfg.ensureStorage()
+	trimmed := strings.TrimSpace(value)
+
+	switch strings.ToLower(strings.ReplaceAll(field, "_", "")) {
+	case "endpoint":
+		section.S3.Endpoint = trimmed
+	case "bucket":
+		section.S3.Bucket = trimmed
+	case "region":
+		section.S3.Region = trimmed
+	case "accesskeyid":
+		section.S3.AccessKeyID = trimmed
+	case "secretaccesskey":
+		section.S3.SecretAccessKey = trimmed
+	case "sessiontoken":
+		section.S3.SessionToken = trimmed
+	case "pathstyle":
+		parsed, err := strconv.ParseBool(trimmed)
+		if err != nil {
+			return fmt.Errorf("invalid boolean for %s: %w", key, err)
+		}
+		section.S3.PathStyle = &parsed
+	default:
+		return fmt.Errorf("unknown storage field %q: supported fields are endpoint, bucket, region, access_key_id, secret_access_key, session_token, path_style", field)
+	}
+	return nil
 }
 
 func validateProviderName(name string) error {
