@@ -5,11 +5,6 @@
 
 "use strict";
 
-const pkg = require("../package.json");
-if (pkg.version === "0.0.0") {
-  console.log("Skipping binary download for unreleased version 0.0.0");
-  process.exit(0);
-}
 
 
 const fs = require("fs");
@@ -175,6 +170,11 @@ async function main() {
   info(`Detected platform: ${os}/${arch}`);
 
   const pkg = loadPackageJson();
+  if (pkg.version === "0.0.0") {
+    console.log("Skipping binary download for unreleased version 0.0.0");
+    return;
+  }
+
   const version = resolveVersion(pkg);
   const config = pkg.ocrConfig;
 
