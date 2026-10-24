@@ -33,7 +33,7 @@ const NotFoundPage: React.FC = () => {
             width: '100%',
             maxWidth: 480,
             textAlign: 'center',
-            color: '#ffffff',
+            color: 'var(--text-strong)',
           }}
         >
           <h1
@@ -51,7 +51,7 @@ const NotFoundPage: React.FC = () => {
               margin: '0 0 32px',
               fontSize: 16,
               lineHeight: 1.6,
-              color: 'rgba(255,255,255,0.65)',
+              color: 'var(--text-soft)',
             }}
           >
             {t('notFound.description')}
@@ -63,8 +63,8 @@ const NotFoundPage: React.FC = () => {
               border: 0,
               borderRadius: 8,
               padding: '12px 22px',
-              background: '#ffffff',
-              color: '#000000',
+              background: 'var(--btn-primary-bg)',
+              color: 'var(--btn-primary-text)',
               fontSize: 15,
               fontWeight: 600,
               cursor: 'pointer',

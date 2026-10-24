@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../i18n';
 import { extractHeadings } from '../utils/extractHeadings';
 import MarkdownRenderer from './MarkdownRenderer';
+import { ThemeProvider } from '../theme/ThemeProvider';
 
 // The headings are Russian on purpose: explicit heading IDs exist for text that
 // cannot produce a usable ASCII slug on its own. Held in constants rather than
@@ -17,9 +18,11 @@ const CONTENT = `## ${H2} {#what-the-skill-does}\n\n#### ${H4} {#service-account
 describe('MarkdownRenderer heading IDs', () => {
   it('renders an explicit heading ID without displaying its marker', () => {
     render(
-      <LanguageProvider>
-        <MarkdownRenderer content={CONTENT} />
-      </LanguageProvider>,
+      <ThemeProvider>
+        <LanguageProvider>
+          <MarkdownRenderer content={CONTENT} />
+        </LanguageProvider>
+      </ThemeProvider>,
     );
 
     const heading = screen.getByRole('heading', { name: H2 });
@@ -30,9 +33,11 @@ describe('MarkdownRenderer heading IDs', () => {
 
   it('renders unique IDs for repeated headings', () => {
     render(
-      <LanguageProvider>
-        <MarkdownRenderer content={'## Schema\n\n## Schema\n\n### Output\n\n### Output'} />
-      </LanguageProvider>,
+      <ThemeProvider>
+        <LanguageProvider>
+          <MarkdownRenderer content={'## Schema\n\n## Schema\n\n### Output\n\n### Output'} />
+        </LanguageProvider>
+      </ThemeProvider>,
     );
 
     expect(screen.getAllByRole('heading', { name: 'Schema' }).map((heading) => heading.id)).toEqual([
@@ -61,9 +66,11 @@ describe('MarkdownRenderer heading IDs', () => {
       '### Output',
     ].join('\n');
     const { container } = render(
-      <LanguageProvider>
-        <MarkdownRenderer content={content} />
-      </LanguageProvider>,
+      <ThemeProvider>
+        <LanguageProvider>
+          <MarkdownRenderer content={content} />
+        </LanguageProvider>
+      </ThemeProvider>,
     );
 
     const renderedTocHeadingIds = Array.from(container.querySelectorAll('h2, h3')).map((heading) => heading.id);

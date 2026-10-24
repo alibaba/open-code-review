@@ -11,6 +11,7 @@ export const ko: TranslationKeys = {
   'navbar.docs': '문서',
   'navbar.blog': '블로그',
   'navbar.getStarted': '시작하기',
+  'navbar.themeToggle': '라이트와 다크 테마 전환',
 
   'providers.title': '주요 모델 제공업체 기본 지원',
   'providers.description': 'API 키만 설정하면 리뷰를 시작할 수 있습니다. 주요 프로토콜과 호환되는 프라이빗 모델 서비스도 연결할 수 있습니다.',

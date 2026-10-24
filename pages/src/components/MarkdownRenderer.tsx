@@ -6,6 +6,7 @@ import ReactDOM from 'react-dom';
 import { Marked, Renderer } from 'marked';
 import DOMPurify from 'dompurify';
 import { useTranslation } from '../i18n';
+import { useTheme } from '../theme/ThemeProvider';
 import { useCopyToast } from '../hooks/useCopyToast';
 import copyIcon from '../assets/icons/icon-copy.svg';
 import { extractHeadingInfo, generateHeadingId, parseExplicitHeadingId } from '../utils/headingId';
@@ -14,38 +15,66 @@ type Mermaid = typeof import('mermaid')['default'];
 
 let mermaidPromise: Promise<Mermaid> | null = null;
 
+const mermaidThemes: Record<'dark' | 'light', Parameters<Mermaid['initialize']>[0]> = {
+  dark: {
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#1a1a2e',
+      primaryTextColor: 'rgba(255,255,255,0.85)',
+      primaryBorderColor: 'rgba(255,255,255,0.2)',
+      lineColor: 'rgba(255,255,255,0.4)',
+      secondaryColor: '#16213e',
+      tertiaryColor: '#0f3460',
+      background: 'var(--bg-page)',
+      mainBkg: 'rgba(255,255,255,0.04)',
+      nodeBorder: 'rgba(255,255,255,0.16)',
+      clusterBkg: 'rgba(255,255,255,0.02)',
+      titleColor: '#FFFFFF',
+      edgeLabelBackground: '#000000',
+    },
+  },
+  light: {
+    theme: 'default',
+    themeVariables: {
+      primaryColor: '#eef2f7',
+      primaryTextColor: 'rgba(10,15,30,0.85)',
+      primaryBorderColor: 'rgba(10,15,30,0.2)',
+      lineColor: 'rgba(10,15,30,0.4)',
+      secondaryColor: '#f6f7f9',
+      tertiaryColor: '#e2e8f0',
+      background: 'var(--bg-page)',
+      mainBkg: 'rgba(10,15,30,0.04)',
+      nodeBorder: 'rgba(10,15,30,0.16)',
+      clusterBkg: 'rgba(10,15,30,0.02)',
+      titleColor: '#0a0f1e',
+      edgeLabelBackground: '#ffffff',
+    },
+  },
+};
+
+let mermaidTheme: 'dark' | 'light' | null = null;
+
+function configureMermaid(mermaid: Mermaid, theme: 'dark' | 'light') {
+  if (mermaidTheme === theme) return;
+  mermaidTheme = theme;
+  mermaid.initialize({
+    startOnLoad: false,
+    // 'strict' makes mermaid sanitize its own SVG output (DOMPurify internally):
+    // safe label HTML like <b>/<span> is kept, scripts/handlers are stripped.
+    // This is why we can inject the returned SVG directly below without re-sanitizing.
+    securityLevel: 'strict',
+    ...mermaidThemes[theme],
+    flowchart: {
+      htmlLabels: true,
+      curve: 'basis',
+    },
+  });
+}
+
 function loadMermaid(): Promise<Mermaid> {
   if (!mermaidPromise) {
     mermaidPromise = import('mermaid')
-      .then(({ default: mermaid }) => {
-        mermaid.initialize({
-          startOnLoad: false,
-          // 'strict' makes mermaid sanitize its own SVG output (DOMPurify internally):
-          // safe label HTML like <b>/<span> is kept, scripts/handlers are stripped.
-          // This is why we can inject the returned SVG directly below without re-sanitizing.
-          securityLevel: 'strict',
-          theme: 'dark',
-          themeVariables: {
-            primaryColor: '#1a1a2e',
-            primaryTextColor: 'rgba(255,255,255,0.85)',
-            primaryBorderColor: 'rgba(255,255,255,0.2)',
-            lineColor: 'rgba(255,255,255,0.4)',
-            secondaryColor: '#16213e',
-            tertiaryColor: '#0f3460',
-            background: '#000000',
-            mainBkg: 'rgba(255,255,255,0.04)',
-            nodeBorder: 'rgba(255,255,255,0.16)',
-            clusterBkg: 'rgba(255,255,255,0.02)',
-            titleColor: '#FFFFFF',
-            edgeLabelBackground: '#000000',
-          },
-          flowchart: {
-            htmlLabels: true,
-            curve: 'basis',
-          },
-        });
-        return mermaid;
-      })
+      .then(({ default: mermaid }) => mermaid)
       .catch((error) => {
         // Allow a later navigation to retry after a transient chunk-load failure.
         mermaidPromise = null;
@@ -67,6 +96,7 @@ interface MarkdownRendererProps {
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
+  const { theme } = useTheme();
   const { toastVisible, handleCopy } = useCopyToast();
 
   const html = useMemo(() => {
@@ -127,6 +157,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
     const renderMermaidBlocks = async () => {
       try {
         const mermaid = await loadMermaid();
+        configureMermaid(mermaid, theme);
         if (cancelled) return;
 
         for (const block of Array.from(mermaidBlocks)) {
@@ -167,7 +198,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
     void renderMermaidBlocks();
 
     return () => { cancelled = true; };
-  }, [html]);
+    // theme: re-render diagrams with the other palette when it changes
+  }, [html, theme]);
 
   return (
     <>
@@ -184,9 +216,9 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
             top: 88,
             left: '50%',
             transform: 'translateX(-50%)',
-            background: 'rgba(255,255,255,0.1)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            color: 'rgba(255,255,255,0.85)',
+            background: 'var(--fill-hover)',
+            border: '1px solid var(--line)',
+            color: 'var(--text-body)',
             padding: '5px 8px 5px 10px',
             borderRadius: 6,
             fontSize: 12,

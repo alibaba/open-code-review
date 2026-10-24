@@ -40,13 +40,13 @@ const FeaturesSection: React.FC = () => {
       <div style={{ width: '100%', maxWidth: 1200, display: 'flex', flexDirection: 'column', gap: isMobile ? 32 : 48 }}>
         {/* Header */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          <span style={{ color: '#2BDE5E', fontSize: 16, fontWeight: 500, lineHeight: '22px', letterSpacing: '0.48px' }}>
+          <span style={{ color: 'var(--accent)', fontSize: 16, fontWeight: 500, lineHeight: '22px', letterSpacing: '0.48px' }}>
             {t('features.sectionBadge')}
           </span>
-          <h2 style={{ color: '#FFFFFF', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
+          <h2 style={{ color: 'var(--text-strong)', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
             {t('features.title')}
           </h2>
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, textAlign: 'center', lineHeight: '24px', margin: 0, maxWidth: 646 }}>
+          <p style={{ color: 'var(--text-faint)', fontSize: 16, textAlign: 'center', lineHeight: '24px', margin: 0, maxWidth: 646 }}>
             {t('features.subtitle')}
           </p>
         </div>
@@ -56,7 +56,7 @@ const FeaturesSection: React.FC = () => {
           style={{
             display: 'grid',
             gridTemplateColumns: isMobile ? '1fr' : isTablet ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
-            border: '1px solid rgba(255,255,255,0.16)',
+            border: '1px solid var(--line)',
             borderRadius: 8,
           }}
         >
@@ -72,8 +72,8 @@ const FeaturesSection: React.FC = () => {
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 16,
-                borderRight: isLastCol ? 'none' : '1px solid rgba(255,255,255,0.16)',
-                borderBottom: isLastRow ? 'none' : '1px solid rgba(255,255,255,0.16)',
+                borderRight: isLastCol ? 'none' : '1px solid var(--line)',
+                borderBottom: isLastRow ? 'none' : '1px solid var(--line)',
                 minHeight: isMobile ? undefined : 272,
               }}
             >
@@ -85,16 +85,16 @@ const FeaturesSection: React.FC = () => {
                   justifyContent: 'center',
                   alignItems: 'center',
                   borderRadius: 8,
-                  border: '1px solid rgba(255,255,255,0.16)',
+                  border: '1px solid var(--line)',
                 }}
               >
                 <img src={feat.icon} alt="" style={{ width: 24, height: 24 }} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <p style={{ color: '#FFFFFF', fontSize: 16, fontWeight: 500, margin: 0, maxWidth: 352 }}>
+                <p style={{ color: 'var(--text-strong)', fontSize: 16, fontWeight: 500, margin: 0, maxWidth: 352 }}>
                   {feat.title}
                 </p>
-                <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14, lineHeight: '20px', margin: 0, maxWidth: 352 }}>
+                <p style={{ color: 'var(--text-faint)', fontSize: 14, lineHeight: '20px', margin: 0, maxWidth: 352 }}>
                   {feat.desc}
                 </p>
               </div>

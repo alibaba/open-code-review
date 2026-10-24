@@ -30,7 +30,7 @@ const RouteErrorFallback: React.FC<{ reset: () => void }> = ({ reset }) => {
     <div
       style={{
         minHeight: '100vh',
-        background: '#000000',
+        background: 'var(--bg-page)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -42,10 +42,10 @@ const RouteErrorFallback: React.FC<{ reset: () => void }> = ({ reset }) => {
           width: '100%',
           maxWidth: 360,
           padding: 24,
-          background: '#141414',
-          border: '1px solid rgba(255,255,255,0.16)',
+          background: 'var(--surface-raised)',
+          border: '1px solid var(--line)',
           borderRadius: 12,
-          color: '#ffffff',
+          color: 'var(--text-strong)',
           textAlign: 'center',
         }}
       >
@@ -57,8 +57,8 @@ const RouteErrorFallback: React.FC<{ reset: () => void }> = ({ reset }) => {
             border: 0,
             borderRadius: 6,
             padding: '10px 18px',
-            background: '#ffffff',
-            color: '#000000',
+            background: 'var(--btn-primary-bg)',
+            color: 'var(--btn-primary-text)',
             fontSize: 14,
             fontWeight: 600,
             cursor: 'pointer',
@@ -83,7 +83,7 @@ const App: React.FC = () => {
     <>
       <ScrollToTop pathname={displayLocation.pathname} />
       <ErrorBoundary reloadOnChunkError fallback={(_error, reset) => <RouteErrorFallback reset={reset} />}>
-        <Suspense fallback={<div style={{ minHeight: '100vh', background: '#000000' }} />}>
+        <Suspense fallback={<div style={{ minHeight: '100vh', background: 'var(--bg-page)' }} />}>
           <Routes location={displayLocation}>
             <Route path="/" element={<LandingPage><FeaturesPage /></LandingPage>} />
             <Route path="/features" element={<LandingPage><FeaturesRoutePage /></LandingPage>} />

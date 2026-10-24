@@ -5,6 +5,7 @@ import React, { Suspense, useCallback, useState, useEffect, useRef } from 'react
 import ReactDOM from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n';
+import { useTheme } from '../theme/ThemeProvider';
 import { useResponsive } from '../hooks/useResponsive';
 import ErrorBoundary from './ErrorBoundary';
 import npmIcon from '../assets/icons/npm.svg';
@@ -147,6 +148,7 @@ const SECONDARY_CHANNELS = INSTALL_CHANNELS.filter((ch) => !ch.primary);
 
 const HeroSection: React.FC = () => {
   const { t } = useTranslation();
+  const { theme } = useTheme();
   const { isMobile, isTablet, isDesktop } = useResponsive();
   const twoCol = isDesktop;
   const [toastVisible, setToastVisible] = useState(false);
@@ -236,7 +238,7 @@ const HeroSection: React.FC = () => {
         position: 'absolute',
         inset: 0,
         zIndex: 0,
-        background: 'radial-gradient(circle at 50% 20%, #0d750d 0%, #042e04 38%, #000000 78%)',
+        background: 'radial-gradient(circle at 50% 20%, var(--hero-glow-1) 0%, var(--hero-glow-2) 38%, var(--bg-page) 78%)',
       }}
     />
   );
@@ -270,7 +272,7 @@ const HeroSection: React.FC = () => {
                 height: '100%',
                 zIndex: 0,
               }}
-              colors={['#0d750d', '#042e04', '#066020']}
+              colors={theme === 'light' ? ['#86efac', '#bbf7d0', '#4ade80'] : ['#0d750d', '#042e04', '#066020']}
               rotation={90}
               speed={0.23}
               scale={1.2}
@@ -296,7 +298,7 @@ const HeroSection: React.FC = () => {
           bottom: 0,
           width: '100%',
           height: 200,
-          background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, #000000 100%)',
+          background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, var(--bg-page) 100%)',
           zIndex: 1,
         }}
       />
@@ -335,7 +337,7 @@ const HeroSection: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: twoCol ? 'flex-start' : 'center', width: '100%' }}>
             <h1
               style={{
-                color: '#FFFFFF',
+                color: 'var(--text-strong)',
                 fontSize: isMobile ? 28 : isTablet ? 36 : 48,
                 fontWeight: 500,
                 textAlign: twoCol ? 'left' : 'center',
@@ -353,7 +355,7 @@ const HeroSection: React.FC = () => {
             </h1>
             <p
               style={{
-                color: 'rgba(255,255,255,0.6)',
+                color: 'var(--text-muted)',
                 fontSize: isMobile ? 14 : 16,
                 textAlign: twoCol ? 'left' : 'center',
                 lineHeight: '24px',
@@ -380,9 +382,9 @@ const HeroSection: React.FC = () => {
                       alignItems: 'center',
                       gap: 6,
                       padding: '6px 9px',
-                      background: isActive ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      background: isActive ? 'var(--fill-hover)' : 'transparent',
                       border: 'none',
-                      borderBottom: isActive ? '2px solid rgba(255,255,255,0.8)' : '2px solid transparent',
+                      borderBottom: isActive ? '2px solid var(--line-strong)' : '2px solid transparent',
                       cursor: 'pointer',
                       transition: 'all 0.2s',
                     }}
@@ -390,7 +392,7 @@ const HeroSection: React.FC = () => {
                     {ch.icons.map((icon, i) => (
                       <img key={i} src={icon} alt="" style={{ width: 14, height: 14, flexShrink: 0, opacity: isActive ? 1 : 0.5 }} />
                     ))}
-                    <span style={{ fontSize: 13, fontWeight: isActive ? 600 : 500, color: isActive ? '#fff' : 'rgba(255,255,255,0.45)' }}>
+                    <span style={{ fontSize: 13, fontWeight: isActive ? 600 : 500, color: isActive ? 'var(--text-strong)' : 'var(--text-ghost)' }}>
                       {t(ch.labelKey)}
                     </span>
                   </button>
@@ -410,9 +412,9 @@ const HeroSection: React.FC = () => {
                     alignItems: 'center',
                     gap: 6,
                     padding: '6px 9px',
-                    background: activeIsSecondary ? 'rgba(255,255,255,0.1)' : 'transparent',
+                    background: activeIsSecondary ? 'var(--fill-hover)' : 'transparent',
                     border: 'none',
-                    borderBottom: activeIsSecondary ? '2px solid rgba(255,255,255,0.8)' : '2px solid transparent',
+                    borderBottom: activeIsSecondary ? '2px solid var(--line-strong)' : '2px solid transparent',
                     cursor: 'pointer',
                     transition: 'all 0.2s',
                   }}
@@ -420,7 +422,7 @@ const HeroSection: React.FC = () => {
                   {activeIsSecondary && (
                     <img src={activeChannel.icons[0]} alt="" style={{ width: 14, height: 14, flexShrink: 0, opacity: 1 }} />
                   )}
-                  <span style={{ fontSize: 13, fontWeight: activeIsSecondary ? 600 : 500, color: activeIsSecondary ? '#fff' : 'rgba(255,255,255,0.45)' }}>
+                  <span style={{ fontSize: 13, fontWeight: activeIsSecondary ? 600 : 500, color: activeIsSecondary ? 'var(--text-strong)' : 'var(--text-ghost)' }}>
                     {activeIsSecondary ? t(activeChannel.labelKey) : t('hero.installMore')}
                   </span>
                   <img
@@ -440,7 +442,7 @@ const HeroSection: React.FC = () => {
                       marginTop: 8,
                       background: 'rgba(26,26,26,0.92)',
                       backdropFilter: 'blur(12px)',
-                      border: '1px solid rgba(255,255,255,0.15)',
+                      border: '1px solid var(--line)',
                       borderRadius: 8,
                       padding: '8px 4px',
                       zIndex: 200,
@@ -488,7 +490,7 @@ const HeroSection: React.FC = () => {
                         gap: 8,
                         padding: '8px 12px',
                         borderRadius: 6,
-                        color: 'rgba(255,255,255,0.6)',
+                        color: 'var(--text-muted)',
                         fontSize: 13,
                         textDecoration: 'none',
                         whiteSpace: 'nowrap',
@@ -510,7 +512,7 @@ const HeroSection: React.FC = () => {
                 height: 36,
                 padding: '0 14px',
                 background: 'rgba(0,0,0,0.75)',
-                border: '1px solid rgba(255,255,255,0.12)',
+                border: '1px solid rgba(255,255,255,0.18)',
                 borderRadius: 8,
                 width: '100%',
               }}
@@ -522,7 +524,7 @@ const HeroSection: React.FC = () => {
                   minWidth: 0,
                   fontSize: 13,
                   fontFamily: 'Menlo, monospace',
-                  color: 'rgba(255,255,255,0.85)',
+                  color: 'rgba(255,255,255,0.9)',
                   whiteSpace: 'nowrap',
                   overflowX: 'auto',
                   overflowY: 'hidden',
@@ -550,18 +552,18 @@ const HeroSection: React.FC = () => {
                 alignItems: 'center',
                 gap: 6,
                 padding: '0 20px',
-                background: '#ffffff',
+                background: 'var(--btn-primary-bg)',
                 border: 'none',
                 borderRadius: 8,
-                color: '#111',
+                color: 'var(--btn-primary-text)',
                 fontSize: 15,
                 fontWeight: 600,
                 textDecoration: 'none',
-                boxShadow: '0 2px 12px rgba(255,255,255,0.15)',
+                boxShadow: '0 2px 12px var(--glow)',
                 transition: 'transform 0.15s, box-shadow 0.15s',
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(255,255,255,0.25)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 2px 12px rgba(255,255,255,0.15)'; }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 20px var(--glow-strong)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 2px 12px var(--glow)'; }}
             >
               {t('hero.quickStart')}
             </a>
@@ -573,12 +575,12 @@ const HeroSection: React.FC = () => {
                 justifyContent: 'center',
                 alignItems: 'center',
                 padding: '0 20px',
-                background: 'rgba(255,255,255,0.06)',
+                background: 'var(--fill-hover)',
                 borderRadius: 8,
-                color: 'rgba(255,255,255,0.9)',
+                color: 'var(--text-body)',
                 fontSize: 15,
                 fontWeight: 500,
-                border: '1px solid rgba(255,255,255,0.18)',
+                border: '1px solid var(--line)',
                 textDecoration: 'none',
                 transition: 'background 0.15s, border-color 0.15s',
               }}
@@ -599,6 +601,8 @@ const HeroSection: React.FC = () => {
             borderRadius: 8,
             overflow: 'hidden',
             border: '1px solid rgba(255,255,255,0.08)',
+            background: '#0a0f1e',
+            color: '#ffffff',
           }}
         >
           {/* Terminal header */}
@@ -666,9 +670,9 @@ const HeroSection: React.FC = () => {
         top: 88,
         left: '50%',
         transform: 'translateX(-50%)',
-        background: 'rgba(255,255,255,0.1)',
-        border: '1px solid rgba(255,255,255,0.2)',
-        color: 'rgba(255,255,255,0.85)',
+        background: 'var(--fill-hover)',
+        border: '1px solid var(--line)',
+        color: 'var(--text-body)',
         padding: '5px 14px',
         borderRadius: 6,
         fontSize: 12,
