@@ -638,7 +638,7 @@ Model:  <effective model>
 ### `ocr llm providers` {#ocr-llm-providers}
 
 ```text
-ocr llm providers
+ocr llm providers [--json]
 ```
 
 내장 LLM 프로바이더를 세 열짜리 표로 나열합니다:
@@ -653,6 +653,10 @@ Built-in providers:
 
 이어서 `ocr config provider`로 대화형 설정을 하거나 `ocr config set provider <name>`으로
 대화 없이 설정하라는 안내가 따라붙습니다.
+
+| Flag | 기본값 | 설명 |
+|---|---|---|
+| `--json` | `false` | 표 대신 프로바이더 메타데이터와 모델 카탈로그를 JSON 배열로 출력합니다. |
 
 ## `ocr viewer` {#ocr-viewer}
 

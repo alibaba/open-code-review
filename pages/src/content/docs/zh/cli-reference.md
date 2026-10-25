@@ -616,7 +616,7 @@ Model:  <effective model>
 ### `ocr llm providers`
 
 ```text
-ocr llm providers
+ocr llm providers [--json]
 ```
 
 以三列表格列出每个内置 LLM provider：
@@ -631,6 +631,10 @@ Built-in providers:
 
 随后是一条提示，可用 `ocr config provider` 交互式配置，或用
 `ocr config set provider <name>` 非交互式配置。
+
+| Flag | 默认值 | 说明 |
+|---|---|---|
+| `--json` | `false` | 以 JSON 数组输出 provider 元数据和模型目录，而非表格。 |
 
 ## `ocr viewer`
 
