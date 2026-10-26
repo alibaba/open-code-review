@@ -78,7 +78,10 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 		cmdArgs = append(cmdArgs, "-F")
 	}
 
-	cmdArgs = append(cmdArgs, "-n", "--no-color")
+	// -z terminates the pathname and the line number with NUL rather than ':'
+	// and a newline, so a pathname holding either one survives verbatim instead
+	// of being misparsed or quoted. See parseGrepOutput.
+	cmdArgs = append(cmdArgs, "-n", "-z", "--no-color")
 	// git grep limits matches per file. Fetch one extra to distinguish an exact
 	// limit from truncated results, then enforce the global limit below.
 	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount+1))
@@ -180,55 +183,27 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		}
 	}
 
-	lines := strings.Split(strings.TrimRight(outStr, "\n"), "\n")
-
-	type match struct {
-		lineNum int
-		content string
-	}
-	fileMatches := make(map[string][]match)
+	fileMatches := make(map[string][]grepMatch)
 	var fileOrder []string
 	seen := make(map[string]bool)
-
-	hasRef := p.FileReader.Ref != ""
-	splitN := 3
-	offset := 0
-	if hasRef {
-		splitN = 4
-		offset = 1
-	}
 
 	matchCount := 0
 	truncated := false
 	matchedFiles := make(map[string]bool)
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, ":", splitN)
-		if len(parts) < splitN {
-			continue
-		}
-		fname := parts[offset]
-		ln, parseErr := strconv.Atoi(parts[offset+1])
-		if parseErr != nil {
-			// Skip lines whose line-number field is not numeric.
-			continue
-		}
+	for _, rec := range parseGrepOutput(outStr, p.FileReader.Ref) {
 		// Count every file with a text match, including those beyond the render
 		// budget, so the truncation note can report the true matched-file count.
-		matchedFiles[fname] = true
+		matchedFiles[rec.path] = true
 		if matchCount >= gitGrepMaxCount {
 			// Keep scanning to finish counting matched files, but render no more.
 			truncated = true
 			continue
 		}
-		m := match{lineNum: ln, content: parts[offset+2]}
-		if !seen[fname] {
-			seen[fname] = true
-			fileOrder = append(fileOrder, fname)
+		if !seen[rec.path] {
+			seen[rec.path] = true
+			fileOrder = append(fileOrder, rec.path)
 		}
-		fileMatches[fname] = append(fileMatches[fname], m)
+		fileMatches[rec.path] = append(fileMatches[rec.path], rec)
 		matchCount++
 	}
 
@@ -251,6 +226,91 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	return sb.String(), nil
+}
+
+// grepMatch is one match as `git grep -z -n` reports it.
+type grepMatch struct {
+	path    string
+	lineNum int
+	content string
+}
+
+// parseGrepOutput parses `git grep -z -n` output, whose records are
+//
+//	<path>\0<line number>\0<line content>\n
+//
+// with the searched revision and a ':' in front of the path when a revision was
+// given.
+//
+// The separators have to be NUL. git's default format separates the path from
+// the line number with ':', so a pathname that holds a ':' is indistinguishable
+// from the field separator: "src/a:b.go:3:code" splits into "src/a", "b.go" and
+// the rest, the line-number field is no longer numeric, and the match was
+// dropped without a trace. git also quotes a pathname holding '"', a backslash
+// or a newline (and a newline additionally splits one record into two lines), so
+// the path it printed could not be opened by file_read. -z prints the pathname
+// and the line number verbatim instead.
+func parseGrepOutput(outStr, ref string) []grepMatch {
+	var matches []grepMatch
+	rest := outStr
+	for {
+		sep := strings.IndexByte(rest, 0)
+		if sep < 0 {
+			// A trailing "Binary file <path> matches" line has no separators.
+			return matches
+		}
+		path := rest[:sep]
+		rest = rest[sep+1:]
+
+		// -z leaves the "Binary file <path> matches" line git prints for a
+		// binary match unchanged, so it lands in front of the next record's
+		// path. It carries no match to render.
+		for {
+			nl := strings.IndexByte(path, '\n')
+			if nl < 0 || !isBinaryMatchLine(path[:nl]) {
+				break
+			}
+			path = path[nl+1:]
+		}
+
+		sep = strings.IndexByte(rest, 0)
+		if sep < 0 {
+			return matches
+		}
+		lineField := rest[:sep]
+		rest = rest[sep+1:]
+
+		// The content runs to the end of its line, which starts the next
+		// record. Consume it before validating this one, so a record this
+		// parser cannot read never desynchronizes the rest of the output.
+		content := rest
+		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+			content, rest = rest[:nl], rest[nl+1:]
+		} else {
+			rest = ""
+		}
+
+		if ref != "" {
+			trimmed, ok := strings.CutPrefix(path, ref+":")
+			if !ok {
+				continue
+			}
+			path = trimmed
+		}
+		lineNum, parseErr := strconv.Atoi(lineField)
+		if parseErr != nil || path == "" {
+			// Skip records whose line-number field is not numeric.
+			continue
+		}
+		matches = append(matches, grepMatch{path: path, lineNum: lineNum, content: content})
+		if rest == "" {
+			return matches
+		}
+	}
+}
+
+func isBinaryMatchLine(line string) bool {
+	return strings.HasPrefix(line, "Binary file ") && strings.HasSuffix(line, " matches")
 }
 
 func trimGitUsage(stderr string, exitCode int) string {
