@@ -25,7 +25,7 @@ Go を書かなくても貢献できます。
 
 ### 前提条件
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -37,7 +37,7 @@ git clone https://github.com/<your-username>/open-code-review.git
 cd open-code-review
 git remote add upstream https://github.com/alibaba/open-code-review.git
 
-make build       # dist/opencodereview を書き出す
+make build       # dist/opencodereview を書き出す（Windows では dist/opencodereview.exe）
 make test        # LC_ALL=C go test -v -race -count=1 ./...
 ```
 
@@ -46,7 +46,8 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 ### ローカルビルドの実行
 
 ```bash
-./dist/opencodereview review --preview
+./dist/opencodereview review --preview        # macOS / Linux
+.\dist\opencodereview.exe review --preview   # Windows (PowerShell / cmd)
 ```
 
 便宜のため、`dist/opencodereview` を指すシンボリックリンクを `~/bin/ocr-dev` に置いておくと、
@@ -56,7 +57,7 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 
 | Target | 作用 |
 |---|---|
-| `make build` | 現在のプラットフォーム向けにビルド → `dist/opencodereview`。 |
+| `make build` | 現在のプラットフォーム向けにビルド → `dist/opencodereview`（Windows では `dist/opencodereview.exe`）。 |
 | `make build-darwin-amd64` | macOS Intel 向けのクロスコンパイル。 |
 | `make build-darwin-arm64` | macOS Apple Silicon 向けのクロスコンパイル。 |
 | `make build-linux-amd64` | Linux x86_64 向けのクロスコンパイル。 |
@@ -109,43 +110,79 @@ refactor(viewer): extract task-card rendering into helper
 
 **PR タイトル**も同じフォーマットを使うと、生成される changelog に整然と表示されます。
 
+`PR Commit Policy` は、PR タイトルと本文を含むすべてのコミットメッセージを、
+大文字・小文字を区別せずに検査します。`[skip ci]`、`[ci skip]`、`[no ci]`、
+`[skip actions]`、`[actions skip]`、または `skip-checks: true` / `skip-checks:true`
+だけの行を含めないでください。
+
+検査に失敗した場合は、PR タイトルを編集するか、自分の作業ブランチで該当するコミットメッセージを書き換えてください。
+これらの指示を含まないコミットを追加しても、過去のコミットの違反は解消されません。
+PR の説明ではこれらの指示について議論でき、検査の対象にはなりません。
+
 ## プロジェクト構成
 
 ```
 open-code-review/
+├── acp/                       # CLI 向けの独立した ACP（Agent Client Protocol）アダプター
 ├── cmd/opencodereview/        # CLI エントリーポイント——引数解析、ディスパッチ
+├── docs/                      # 各言語の README と貢献ガイド
+├── imgs/                      # README 用の画像とロゴ
 ├── internal/
 │   ├── agent/                 # レビューエージェントのロジック、サブエージェントのディスパッチ
+│   ├── chatgptauth/           # ChatGPT OAuth と認証情報の管理
 │   ├── config/                # テンプレート、ルール、ホワイトリスト、埋め込み JSON
-│   ├── diff/                  # Git diff の解析、3 つのモード
+│   ├── delegate/              # LLM を呼び出さないレビュー仕様の生成
+│   ├── diff/                  # Git diff の解析
 │   ├── gitcmd/                # Git サブプロセスランナー
-│   ├── llm/                   # LLM client（Anthropic と OpenAI）、エンドポイント解決
+│   ├── llm/                   # LLM クライアントとエンドポイント解決
+│   ├── llmloop/               # Review と Scan で共有する LLM ツール呼び出しループ
+│   ├── mcp/                   # MCP クライアントとツールアダプター
 │   ├── model/                 # データ構造（LlmComment、Diff……）
 │   ├── pathutil/              # パスユーティリティ
-│   ├── release/               # Release notes の生成
+│   ├── release/               # リリース成果物の命名整合性チェック
+│   ├── scan/                  # ファイル全体のコードレビュー
 │   ├── session/               # JSONL セッションライター
 │   ├── stdout/                # ミュート可能な stdout writer
 │   ├── suggestdiff/           # 提案 diff のレンダリング
 │   ├── telemetry/             # OpenTelemetry の設定 + ヘルパー
 │   ├── tool/                  # ツールレジストリ + provider の実装
-│   └── viewer/                # 埋め込み HTTP UI
-├── pages/                     # WebUI マーケティングページ（独立した React app）
-├── plugins/                   # Claude Code slash コマンド
-├── extensions/                # エディタ拡張（VS Code）
+│   └── viewer/                # レビューセッションを閲覧する埋め込み HTTP UI
+├── pages/                     # 公式サイトのランディングページとドキュメント（独立した React app）
+├── plugins/                   # コーディングエージェントとの連携（Claude Code、Codex、OpenCode など）
+├── extensions/                # VS Code と IntelliJ IDEA の拡張、共有フロントエンド
 ├── examples/                  # CI レシピ（GitHub Actions、GitLab CI）
-├── skills/                    # Agent SDK skill manifest
-├── scripts/                   # NPM postinstall + クロスプラットフォームビルドスクリプト
+├── skills/                    # レビューと委譲のスキル定義
+├── scripts/                   # インストール、公開、リポジトリチェック用スクリプト
 ├── npm/                       # 各プラットフォーム向け optional dependency パッケージ
 └── bin/                       # NPM wrapper（Node）
 ```
 
 ほとんどの貢献は `internal/agent/`、`internal/tool/`、`internal/llm/` に触れます。
-`cmd/opencodereview/` の CLI レイヤーは意図的に薄く保たれています——引数を解析してから
-agent パッケージへディスパッチします。
+`cmd/opencodereview/` の CLI レイヤーは意図的に薄く保たれています——引数の解析と
+コマンドのディスパッチを担当します。
+
+## AI支援開発
+
+開発を AI に手伝ってもらうこと自体はまったく問題なく、それで貢献が楽になるならむしろ歓迎します。受け入れられないのは、モデルが生成したコードを読まないまま提出し、その冗長さや誤りを一切直さないことです。そうした提出はレビューのやり取りを滞らせ、プルリクエストを前に進めにくくします。
+
+AI を開発に使った場合は、下記のルールに従ってください。
+
+### ルール:
+
+1. **初期のIssueまたはPull Requestで、AI/LLMを使用したこと、および使用したツール/モデルなどを開示しなければなりません。**
+2. AIが書いたすべてのコードを理解し、AIが何をしたのか把握する必要があります。
+3. レビュアーが変更の理由を尋ねた場合は、自分が書いたものであれAIが書いたものであれ、自分で説明できなければなりません。メンテナーからの質問やレビューコメントへの回答の内容は、あなた自身の理解に基づくものでなければなりません。AI/LLMは翻訳や文章の推敲にのみ使用でき、回答そのものを生成させてはいけません。
+4. PR内に `AI生成 -> 修正 -> 修正 -> 修正` のような繰り返しのサイクルが現れてはなりません。これは、AIが生成したコードをレビューせず、問題が発生するたびにAIに修正させて繰り返している可能性を示しています。
+5. メンバーにレビューを依頼する前に、AI/LLMが生成したコード、テキストなどのすべての内容を必ず自分でレビューする必要があります。
+6. 「Assisted-by」「Co-developed-by」または類似のトレーラーを使ってコミットをAI/LLMに帰属させてはなりません。
+7. 冗長なコミットメッセージを書かないでください。重要な情報は、折りたたまれたコミットメッセージではなく、PRの説明に記載してください。
+8. 上記のすべてを行うことを望まない場合、または行うことができない場合は、IssueまたはPull Requestをクローズしてください。
+
+ありがとうございます！
 
 ## ライセンスヘッダー
 
-すべてのソースファイル（`.go`、`.sh`、`.js`、`.mjs`、`.ts`、`.tsx`）にはSPDXライセンスヘッダーが必要です。新しいファイルを作成した後、以下を実行してください：
+すべてのソースファイル（`.go`、`.js`、`.mjs`、`.ts`、`.tsx`、`.kt`、`.kts`、`.sh`、`.py`、`.css`）にはSPDXライセンスヘッダーが必要です。新しいファイルを作成した後、以下を実行してください：
 
 ```bash
 make license-add

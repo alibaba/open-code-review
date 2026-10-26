@@ -10,11 +10,31 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "target": "ES2021",
-    "lib": ["ES2021", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2021",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "jsx": "react-jsx",
     "jsxImportSource": "preact",
-    "types": ["node", "vscode", "jest"]
+    "types": [
+      "node",
+      "vscode",
+      "jest"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": [
+        "../frontend/src/shared/*"
+      ]
+    }
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "out", "reference"]
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "out",
+    "reference"
+  ]
 }

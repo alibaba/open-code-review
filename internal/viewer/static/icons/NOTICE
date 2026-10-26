@@ -1,0 +1,20 @@
+`logo.svg` is the Open Code Review brand mark, part of this project and covered by
+the repository's own license (Apache-2.0). It is not an Ant Design icon.
+
+The remaining UI icons in this directory are from Ant Design Icons, used under the MIT License.
+
+  Ant Design Icons
+  Copyright (c) 2015-present Ant UED, https://xtech.antfin.com/
+  Licensed under the MIT License:
+  https://github.com/ant-design/ant-design-icons/blob/master/LICENSE
+
+Each SVG was normalized for inline embedding: the XML prolog and `class`
+attribute were dropped and `fill="currentColor"` was added so a single asset
+adapts to both light and dark themes. The path data is unchanged from upstream.
+
+  chevron-left.svg  <- left    (outlined)
+  chevron-right.svg <- right   (outlined)
+  chevron-down.svg  <- down    (outlined)
+  search.svg        <- search  (outlined)
+  settings.svg      <- setting (outlined)
+  file.svg          <- file    (outlined)

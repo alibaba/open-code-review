@@ -340,3 +340,13 @@ func parseRecordTime(s string) time.Time {
 	}
 	return time.Time{}
 }
+
+// LoadSummaryAt reads one session summary from an exact file path.
+//
+// LoadSummary derives the path from a repository, which the global id search
+// deliberately does not have: it found the file first and learns the repository
+// from the record inside it. fallbackRepoDir is only used when the file carries
+// no cwd of its own.
+func LoadSummaryAt(path, sessionID, fallbackRepoDir string) (*Summary, error) {
+	return loadSummaryFromFile(path, sessionID, fallbackRepoDir)
+}

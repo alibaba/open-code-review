@@ -18,7 +18,19 @@ SLASH_HEADER='// SPDX-License-Identifier: Apache-2.0
 HASH_HEADER='# SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 alibaba/open-code-review Contributors'
 
-LICENSE_EXTS=(go sh js mjs ts tsx)
+# CSS has no // line comment — that is SCSS — so a block is the only option. The
+# lines inside carry no prefix, matching the {{/* */}} header already in
+# internal/viewer/templates/app-header.html.
+BLOCK_HEADER='/*
+SPDX-License-Identifier: Apache-2.0
+Copyright 2026 alibaba/open-code-review Contributors
+*/'
+
+# Grouped by the comment syntax add_header gives each below: // for Go, the
+# JS/TS family and Kotlin, # for shell and Python, /* */ for CSS. Extensions
+# whose comment cannot simply be prepended stay out — .html would need its
+# DOCTYPE kept on the first line, so it is not covered yet.
+LICENSE_EXTS=(go js mjs ts tsx kt kts sh py css)
 
 IGNORED_PATHS=(
   "vendor/"
@@ -100,8 +112,9 @@ while IFS= read -r file; do
   has_header "$file" && continue
 
   case "$ext" in
-    sh) add_header "$file" "$HASH_HEADER" ;;
-    *)  add_header "$file" "$SLASH_HEADER" ;;
+    sh | py) add_header "$file" "$HASH_HEADER" ;;
+    css) add_header "$file" "$BLOCK_HEADER" ;;
+    *) add_header "$file" "$SLASH_HEADER" ;;
   esac
 
   ADDED=$((ADDED + 1))

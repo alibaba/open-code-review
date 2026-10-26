@@ -8,6 +8,7 @@
 # Requires PowerShell 5.1+ or PowerShell 7+.
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'Continue'
 
 function Err([string]$Message) {
     [Console]::Error.WriteLine("error: $Message")
@@ -128,7 +129,7 @@ try {
 
     Write-Host "downloading $Bin $Version ($os/$arch)..."
     try {
-        Invoke-WebRequest -Uri "$base/$asset" -OutFile $assetPath -UseBasicParsing
+        Invoke-WebRequest -Uri "$base/$asset" -OutFile $assetPath -UseBasicParsing -TimeoutSec 1800
     } catch {
         Err "download failed: $base/$asset"
     }

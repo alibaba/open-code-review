@@ -310,6 +310,45 @@ func TestCodeCommentProvider_Execute(t *testing.T) {
 		}
 	})
 
+	t.Run("all entries dropped returns error message", func(t *testing.T) {
+		collector := NewCommentCollector()
+		p := &CodeCommentProvider{Collector: collector}
+		result, err := p.Execute(context.Background(), map[string]any{
+			"comments": []any{
+				map[string]any{"path": "main.go", "message": "nil dereference"},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != CommentNoneUsableMsg {
+			t.Errorf("result = %q, want %q", result, CommentNoneUsableMsg)
+		}
+		if len(collector.Comments()) != 0 {
+			t.Errorf("collector has %d comments, want 0", len(collector.Comments()))
+		}
+	})
+
+	t.Run("partially dropped batch still succeeds", func(t *testing.T) {
+		collector := NewCommentCollector()
+		p := &CodeCommentProvider{Collector: collector}
+		result, err := p.Execute(context.Background(), map[string]any{
+			"comments": []any{
+				map[string]any{"content": "real finding", "path": "main.go"},
+				map[string]any{"path": "main.go", "message": "dropped: no content"},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != CommentSucceed {
+			t.Errorf("result = %q, want %q", result, CommentSucceed)
+		}
+		if len(collector.Comments()) != 1 {
+			t.Errorf("collector has %d comments, want 1", len(collector.Comments()))
+		}
+	})
+
 	t.Run("nil collector returns error message", func(t *testing.T) {
 		p := &CodeCommentProvider{Collector: nil}
 		result, err := p.Execute(context.Background(), map[string]any{
@@ -341,4 +380,23 @@ func TestCodeCommentProvider_Execute(t *testing.T) {
 			t.Errorf("Tool() = %v, want CodeComment", p.Tool())
 		}
 	})
+}
+
+func TestParseComments_NormalizePath(t *testing.T) {
+	args := map[string]any{
+		"comments": []any{
+			map[string]any{"path": `pkg\util.go`, "content": "fix 1"},
+			map[string]any{"path": `./pkg/util.go`, "content": "fix 2"},
+			map[string]any{"path": `pkg/sub//util.go`, "content": "fix 3"},
+		},
+	}
+	comments, errMsg := ParseComments(args)
+	if errMsg != "" || len(comments) != 3 {
+		t.Fatalf("ParseComments failed: err=%q len=%d", errMsg, len(comments))
+	}
+	for i, want := range []string{"pkg/util.go", "pkg/util.go", "pkg/sub/util.go"} {
+		if comments[i].Path != want {
+			t.Errorf("comment[%d].Path = %q, want %q", i, comments[i].Path, want)
+		}
+	}
 }

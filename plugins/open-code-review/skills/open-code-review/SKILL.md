@@ -12,7 +12,8 @@ license: Apache-2.0
 compatibility: >
   Requires the `ocr` CLI installed (via `npm install -g
   @alibaba-group/open-code-review` or GitHub release binary). Requires a
-  configured LLM (Anthropic or OpenAI-compatible) before first run.
+  configured supported LLM provider before first run (protocols: Anthropic,
+  OpenAI Chat Completions, OpenAI Responses, AWS Bedrock).
 metadata:
   author: alibaba
   homepage: https://github.com/alibaba/open-code-review
@@ -35,6 +36,8 @@ A skill for invoking [open-code-review](https://github.com/alibaba/open-code-rev
 Analyze the review target (commits, branch, or changes) to extract concise business context. Pass this context via `--background` to improve review quality.
 
 ### Step 2: Run Code Review
+
+**Do not pre-check whether `ocr` is installed** — skip probes like `command -v ocr` or `ocr --version`. Assume the CLI is available and run the review directly; that saves a tool call on the common path. Only if the review fails with `command not found` should you install it per Troubleshooting.
 
 Run the OCR command with appropriate flags. **Always pass business context via `--background`** when available:
 
@@ -171,16 +174,40 @@ To preview which rule applies to a file before reviewing:
 ocr rules check src/main/java/com/example/Foo.java
 ```
 
+## Advanced Review Options
+
+Beyond the common flags above, `ocr review` exposes a few groups of controls. Run `ocr review --help` for the complete list.
+
+**Scoping**
+
+- `--exclude '<patterns>'` — comma-separated gitignore-style patterns (for example `--exclude '**/generated/*,**/testdata/*'`), merged with `rule.json` excludes.
+- `--background-file <path>` — read review context from a Markdown file. Takes precedence over `--background`.
+
+**Output**
+
+- `--format text|json|sarif` — `text` (default) for humans; `json` for machine-readable findings; `sarif` for code-scanning integrations such as GitHub Code Scanning.
+
+**Model**
+
+- `--provider <name>` / `--model <name>` — override the configured provider/model for this run only (for example, to recheck a diff with a different model; the user names the model, `ocr llm providers` lists the built-ins).
+
+**Budget**
+
+- `--max-tokens <n>` — per-group prompt ceiling; defaults to the configured value or the template default (`200000`).
+- `--max-tokens-budget <n>` — cap total input + output tokens for the run. Checked before every LLM round: a group already over budget gets one final round to submit findings, no further groups are dispatched, partial results are still published, and skipped files are reported as `failed(budget)`.
+- `--no-filter` — keep all review comments and skip the LLM post-filtering call.
+
 ## Gotchas
 
 - **LLM must be configured first** — `ocr review` will fail loudly if no LLM is reachable. See the Troubleshooting section below if this happens.
 - **Working directory matters** — `ocr review` operates on the Git repo at the current directory. Use `--repo /path/to/repo` to run from elsewhere.
 - **Untracked files are reviewed in workspace mode** — running bare `ocr review` includes staged, unstaged, *and* untracked changes. Stage selectively if you want narrower scope.
-- **Large diffs may hit token limits** — files with very large diffs may be truncated. The default `MAX_TOKENS` is 58888 per request.
-- **Plan phase triggers at 50 lines** — diffs exceeding 50 changed lines run an extra risk-analysis phase before main review. This adds latency but improves quality.
+- **Large diffs may hit token limits** — `MAX_TOKENS` sets the prompt budget (`200000` in the review template; `ocr scan` uses `58888`); conversation context is compressed to stay within this prompt budget. Model output is capped separately by `MAX_COMPLETION_TOKENS` (`16384`). A file whose diff alone exceeds ~80% of `MAX_TOKENS` is skipped before the LLM is called.
+- **Plan phase triggers on either of two thresholds** — a group runs an extra risk-analysis phase before main review when its largest changed file reaches `PLAN_MODE_LINE_THRESHOLD` (default `50`) **or** it holds 2+ files whose combined changed lines reach `PLAN_MODE_GROUP_LINE_THRESHOLD` (default `100`). This adds latency but improves quality.
 - **Don't pass `--audience human`** — it streams progress UI that pollutes output. Always use `--audience agent`.
-- **Comment language follows config** — set `language` config to `English` or `Chinese` (default: Chinese) to control review comment language.
+- **Comment language follows config** — the `language` config controls review comment language, defaults to `English`, and accepts any language name (for example `English` or `中文`).
 - **Avoid output truncation** — Large review runs produce verbose output. Never pipe command output to `tail` or `head` as it drops review comments from earlier sections. Use `--output <path>` and read it in full; on older CLIs, follow the **Output file** guidance above.
+- **Resume an interrupted review** — a failed or interrupted range/commit review can be continued with `ocr review --resume <id>` using the same `--from`/`--to` or `--commit` target (the id is printed as `retry with: --resume <id>` on failure, or find it with `ocr session list`). Workspace resume is not supported.
 
 ## Validation
 

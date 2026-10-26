@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -65,6 +67,21 @@ func isSubtaskErrorType(warningType string) bool {
 	return warningType == "subtask_error" || warningType == "scan_subtask_error"
 }
 
+// hasReviewLimitWarning reports whether a declared review limit — the
+// tool-request round budget or the aggregate token budget — was reached.
+// llmloop records the warning regardless of how the grace round ended, and an
+// item completed there is still a completed, reusable result, so this must not
+// affect status or coverage. It only keeps a zero-finding result from reading
+// as a clean review when a limit truncated it.
+func hasReviewLimitWarning(warnings []agent.AgentWarning) bool {
+	for _, w := range warnings {
+		if w.Type == llmloop.WarningReviewLimitReached {
+			return true
+		}
+	}
+	return false
+}
+
 func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning, manifest *session.RunManifest, out io.Writer) {
 	if manifest != nil {
 		fmt.Fprintln(out, manifestMessage(manifest, len(comments)))
@@ -72,9 +89,12 @@ func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			renderComment(c, out)
 		}
 	} else if len(comments) == 0 {
-		if hasSubtaskErrors(warnings) {
+		switch {
+		case hasSubtaskErrors(warnings):
 			fmt.Fprintln(out, "Some files could not be reviewed due to errors (see warnings below).")
-		} else {
+		case hasReviewLimitWarning(warnings):
+			fmt.Fprintln(out, "A review limit was reached before finishing; some findings may be missing (see warnings below).")
+		default:
 			fmt.Fprintln(out, "No comments generated. Looks good to me.")
 		}
 	} else {
@@ -384,9 +404,12 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		payload.Status = string(manifest.TerminalState)
 		payload.Message = manifestMessage(manifest, len(comments))
 	} else if len(comments) == 0 {
-		if hasSubtaskErrors(warnings) {
+		switch {
+		case hasSubtaskErrors(warnings):
 			payload.Message = "Some files could not be reviewed due to errors."
-		} else {
+		case hasReviewLimitWarning(warnings):
+			payload.Message = "A review limit was reached before finishing; some findings may be missing."
+		default:
 			payload.Message = "No comments generated. Looks good to me."
 		}
 	}
@@ -739,23 +762,13 @@ func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 		return
 	}
 
-	maxPathLen := 0
-	for _, e := range p.Entries {
-		if n := len(sanitizeTerminal(e.Path)); n > maxPathLen {
-			maxPathLen = n
-		}
-	}
-	if maxPathLen < 20 {
-		maxPathLen = 20
-	}
-	pathFmt := fmt.Sprintf("%%-%ds", maxPathLen)
-
 	fmt.Fprintf(out, "\nPreview: %d file(s) changed  |  %s  %s\n", p.TotalFiles,
 		colorf("\033[32m", "+%d", p.TotalInsertions),
 		colorf("\033[31m", "-%d", p.TotalDeletions))
 
 	if p.ReviewableCount > 0 {
 		fmt.Fprintf(out, "\n%s\n", colorf("\033[1m", "Will review (%d):", p.ReviewableCount))
+		pathFmt := previewPathFmt(p.Entries, func(e agent.DiffPreviewEntry) bool { return e.WillReview })
 		for _, e := range p.Entries {
 			if !e.WillReview {
 				continue
@@ -771,7 +784,22 @@ func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 
 	if p.ExcludedCount > 0 {
 		fmt.Fprintf(out, "\n%s\n", colorf("\033[1m", "Excluded from review (%d):", p.ExcludedCount))
+		// Provider-directory files can number in the thousands and no rule can
+		// make them reviewable, so they collapse into one line instead of a row each.
+		perRow := func(e agent.DiffPreviewEntry) bool {
+			return !e.WillReview && e.ExcludeReason != agent.ExcludeProviderDirectory
+		}
+		pathFmt := previewPathFmt(p.Entries, perRow)
+		var providerDirs []string
+		providerCount := 0
 		for _, e := range p.Entries {
+			if e.ExcludeReason == agent.ExcludeProviderDirectory {
+				providerCount++
+				if prefix := diff.ProviderDirPrefix(e.Path); prefix != "" {
+					providerDirs = append(providerDirs, prefix)
+				}
+				continue
+			}
 			if e.WillReview {
 				continue
 			}
@@ -779,9 +807,26 @@ func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 				statusBadge(e.Status), sanitizeTerminal(e.Path),
 				colorf("\033[2m", "(%s)", sanitizeTerminal(string(e.ExcludeReason))))
 		}
+		if providerCount > 0 {
+			slices.Sort(providerDirs)
+			fmt.Fprintf(out, "  %s\n", colorf("\033[2m", "%d file(s) in provider directories (%s) — not reviewable",
+				providerCount, sanitizeTerminal(strings.Join(slices.Compact(providerDirs), ", "))))
+		}
 	}
 
 	fmt.Fprintln(out)
+}
+
+// previewPathFmt pads paths to the widest one among the rows a section prints,
+// so a long path in one section cannot push another section's columns out.
+func previewPathFmt(entries []agent.DiffPreviewEntry, printed func(agent.DiffPreviewEntry) bool) string {
+	width := 20
+	for _, e := range entries {
+		if printed(e) {
+			width = max(width, len(sanitizeTerminal(e.Path)))
+		}
+	}
+	return fmt.Sprintf("%%-%ds", width)
 }
 
 // statusBadge renders the per-file status tag. The letter carries the meaning,

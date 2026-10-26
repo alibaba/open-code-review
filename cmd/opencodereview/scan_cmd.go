@@ -85,7 +85,7 @@ var scanCmd = &cobra.Command{
 		if err := validateScanOptions(&scanOpts); err != nil {
 			return err
 		}
-		return executeScan(scanOpts)
+		return executeScanContext(cmd.Context(), scanOpts)
 	},
 }
 
@@ -108,7 +108,11 @@ func splitPaths(raw string) []string {
 	return out
 }
 
-func executeScan(opts scanOptions) (retErr error) {
+func executeScan(opts scanOptions) error {
+	return executeScanContext(context.Background(), opts)
+}
+
+func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
 	if err != nil {
 		return err
@@ -152,7 +156,13 @@ func executeScan(opts scanOptions) (retErr error) {
 	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
+		maxTokens, err := previewMaxTokens(scanTpl.MaxTokens, opts.maxTokens)
+		if err != nil {
+			return err
+		}
+		scanTpl.MaxTokens = maxTokens
 		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat, out)
+
 	}
 
 	resumeState, err := loadScanResumeState(cc.RepoDir, opts, scanPaths)
@@ -163,6 +173,7 @@ func executeScan(opts scanOptions) (retErr error) {
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
+		Context:  ctx,
 	})
 	if err != nil {
 		return err
@@ -209,6 +220,7 @@ func executeScan(opts scanOptions) (retErr error) {
 		MaxConcurrency:        opts.concurrency,
 		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
+		EndpointSource:        rt.Source,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		MaxFileSizeBytes:      scanTpl.MaxFileSizeBytes,
@@ -225,7 +237,7 @@ func executeScan(opts scanOptions) (retErr error) {
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
 
-	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(context.Background()), "scan.run")
+	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(ctx), "scan.run")
 	defer span.End()
 	var traceID string
 	if telemetry.IsEnabled() {

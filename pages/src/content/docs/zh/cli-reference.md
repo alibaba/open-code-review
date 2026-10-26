@@ -79,6 +79,8 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session show <id>` | `ocr sessions show <id>` | 查看单个会话及其逐文件检查点。 |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | 输出单个会话中记录的评审评论。 |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 对比两个会话的问题：新增、仍存在、已解决、未评审。 |
+| `ocr session export [id]` | — | 将单个会话导出为自包含的 HTML 文件。 |
+| `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | 删除一个已保存的评审会话。 |
 | `ocr viewer` | — | 启动用于历史评审会话的本地 Web UI（`localhost:5483`）。 |
 | `ocr version` | — | 打印版本、commit、平台、构建日期与 GitHub URL。 |
 
@@ -107,7 +109,7 @@ unstaged + untracked 变更。
 | `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
-| `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个文件的 `REVIEW_FILTER_TASK` LLM 后处理调用。 |
+| `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个子任务的 `REVIEW_FILTER_TASK` LLM 后处理调用。子任务评审单个文件或一组相关文件。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
 | `--output <path>` | `-o` | 标准输出 | 将评审结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
@@ -115,12 +117,12 @@ unstaged + untracked 变更。
 | `--background <text>` | `-b` | — | 注入 plan + main prompt 的可选需求 / 业务上下文。 |
 | `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。 |
 | `--exclude <patterns>` | — | — | 逗号分隔的 gitignore 风格排除模式；与 `rule.json` 的 excludes 合并。 |
-| `--concurrency <n>` | — | `8` | 并行评审的最大文件数。 |
-| `--timeout <minutes>` | — | `15` | 每文件截止时间。`0` 关闭超时。按 effort 轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。 |
+| `--concurrency <n>` | — | `8` | 并行评审的最大子任务数。 |
+| `--timeout <minutes>` | — | `15` | 每个子任务的时间预算，包括 LLM 调用、工具执行和重试等待。`0` 关闭任务期限，但不关闭请求超时。单次请求超时独立设置：`OCR_LLM_TIMEOUT` 或 provider 的 `timeout_sec`，单位秒（默认 `300`）。按 effort 评审轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
-| `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。 |
-| `--max-tokens <n>` | — | 配置或模板默认 | 每文件**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。 |
-| `--max-tokens-budget <n>` | — | `0`（无限制） | 限制本次评审的输入 + 输出 token 总量。超出预算后停止分发，并仍会发布部分结果。 |
+| `--max-tools <n>` | — | 模板默认 | 每个子任务的最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。 |
+| `--max-tokens <n>` | — | 配置或模板默认 | 每个子任务的**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。 |
+| `--max-tokens-budget <n>` | — | `0`（无限制） | 限制本次评审的输入 + 输出 token 总量。每次 LLM 轮次前都会检查：已超出预算的子任务会获得最后一轮来提交发现，并记为 `failed(budget)`；不再分发新的子任务，部分结果仍会发布。 |
 | `--effort <level>` | — | 配置或 `medium` | 评审投入档位：`low` = 1 轮 main 循环，`medium` = 2 轮（默认），`high` = 3 轮。轮数越多召回越高、耗时与 token 也越多。可用 `ocr config set effort <level>` 持久化。 |
 | `--provider <name>` | — | — | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。 |
 | `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
@@ -146,6 +148,10 @@ ocr scan --provider openai --model gpt-5.4 --format json
 `OCR_LLM_*` 环境配置、完整的 Claude Code 环境配置、shell rc 文件。`--model` 会覆盖
 最终选中来源中的 model，但不会改变来源顺序。不完整的策略会继续回退，而不会与其他策略
 混合。选中的内置 provider 仍可从其支持的环境变量读取凭据。
+
+对于内置 provider，`--model` 不受 `ocr config model` 的建议模型列表限制。
+如果模型既不在内置列表中，也不在 `providers.<name>.models` 中，OCR 会向 stderr
+输出警告，并交由 provider 验证。自定义 provider 仍遵循原有的 `--model` 校验规则。
 
 ### 模式
 
@@ -297,7 +303,7 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
 
 | 字段 | 说明 |
 |---|---|
-| `status` | `success`、`completed_with_warnings`、`completed_with_errors` 或 `skipped`。 |
+| `status` | 输出包含 `manifest` 字段时，为 manifest 的终态：`complete`、`partial`、`failed`、`skipped`；否则为 `success`、`completed_with_warnings`、`completed_with_errors`。`skipped` 也用于没有可评审文件的情况。 |
 | `llm` | 实际解析的 LLM 标识。规范化后的 `model` 始终存在；`provider` 仅在使用已命名的配置 provider 时存在。 |
 | `message` | 可选。人类可读摘要，如 `"No comments generated. Looks good to me."`。 |
 | `summary` | 可选。运行聚合：`files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` 运行时省略。 |
@@ -347,7 +353,7 @@ ocr s      [flags]   (alias)
 
 | 参数 | 简写 | 默认 | 说明 |
 |---|---|---|---|
-| `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。 |
+| `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。选择器按工作树中的实际路径解析：原拼写优先，因此 `src` 不会同时选中同级的 `SRC/`；在不区分大小写的文件系统（Windows、默认 macOS）上，用其他大小写拼写、但文件系统能解析时，仍会选中对应文件；若选择器指向的路径不存在，则报错而不是得到空扫描。 |
 | `--exclude <patterns>` | - | - | 逗号分隔的 gitignore 风格排除模式（如 `**/generated/*,*.pb.go`）；与 `rule.json` 的 excludes 合并。 |
 | `--output <path>` | `-o` | 标准输出 | 将扫描结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
 | `--preview` | `-p` | `false` | 枚举并过滤文件但跳过 LLM。打印文件列表、可评审/排除数量、总行数及每个文件的排除原因。支持 `--format json`；不支持 `--format sarif`。 |
@@ -431,7 +437,8 @@ ocr session comments --severity critical,high --category bug,security <session-i
 （出现在 before 会话，但 after 会话没有评审该文件，因此不计为已解决）。
 
 匹配依据是文件路径、类别和问题代码片段，而不是行号，所以仅仅是行号发生偏移
-的问题仍然算作 persisting。
+的问题仍然算作 persisting。如果 after 会话的运行清单记录了文件重命名，匹配前
+会先将旧路径映射到新路径。
 
 ```bash
 ocr session compare <before-session-id> <after-session-id>
@@ -446,6 +453,52 @@ ocr session compare --json <before-session-id> <after-session-id>
 |---|---|---|
 | `--repo <path>` | 当前目录 | 要对比会话的仓库。 |
 | `--json` | `false` | 以 JSON 输出对比结果（`new`、`persisting`、`resolved`、`not_reviewed`）。 |
+
+### `ocr session export`
+
+将单个会话渲染为一个自包含的 HTML 文件。查看器的样式表和脚本会被内联，
+因此该文件可以通过 `file://` 打开而无需任何网络访问，CI 也可以将评审
+结果归档为构建产物。
+
+```bash
+ocr session export -o review.html
+ocr session export 20250601-100000-abc123 -o review.html
+```
+
+不指定会话 id 时，导出该仓库最新的会话。之所以这样默认，是因为
+`ocr review` 成功时并不会打印会话 id。不指定 `-o` 时，HTML 输出到标准输出。
+
+导出的页面内嵌了该会话记录的被评审源码片段，因此在发布之前，请像对待
+仓库本身一样谨慎处理该文件。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--repo <path>` | 当前目录 | 要导出会话的仓库。 |
+| `--output <path>`、`-o` | 标准输出 | 将 HTML 写入文件而不是标准输出。 |
+
+### `ocr session rm`
+
+从 `~/.opencodereview/sessions/` 中删除一个已保存的会话。
+
+```bash
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --yes
+ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --repo ~/work/my-project
+```
+
+只要会话 id 就够了，因此在任何目录下都能运行。如果同一个 id 在多个仓库中都存在，
+命令会列出候选项并且不删除任何内容；用 `--repo` 指定其中一个。
+
+命令会打印该会话的仓库、分支、开始时间、文件数和评论数，并请你确认。**非交互式的
+stdin 一律视为「否」**，因此流水线或 CI 任务需要传入 `--yes`（`-y`）来跳过确认。
+
+元数据无法解析的会话仍然可以删除；完全读不了的会话则会报错而不是删除。使用
+`--repo` 时，记录了其他仓库或没有记录仓库的会话会被拒绝：这种情况请只用 id 删除。
+
+| 标志 | 默认值 | 说明 |
+|---|---|---|
+| `--repo <path>` | 所有仓库 | 只在该仓库下查找这个会话。 |
+| `--yes`、`-y` | `false` | 跳过确认提示。 |
 
 ## `ocr rules`
 
@@ -505,9 +558,30 @@ ocr config model                           Interactive model selection
 
 完整的 key 参考、schema 与示例见[配置](../configuration/)。
 
+
+
+## `ocr auth`
+
+`ocr auth login`、`status` 和 `logout` 默认使用 Sign in with ChatGPT。仍支持显式指定 `--provider chatgpt`。
+
+`chatgpt` provider 使用公开的 Sign in with ChatGPT 流程。请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)。
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` 支持 `--provider chatgpt` 和 `--account <client-id>`；`login` 还支持 `--no-browser`、`--new-account` 和 `--enable-plan`。ChatGPT 不支持 `--device`。`--enable-plan` 会针对已保存的注册请求同意，不能与 `--new-account` 同时使用。模型目录按账户显示；即使目录中没有，显式模型也会被接受。此 provider 的 `extra_body` 仅支持 `reasoning`、`text` 和 `prompt_cache_key`。账户管理、权限和限制请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)。
+
 ## `ocr llm`
 
-LLM 工具命令。两个子命令：
+LLM 工具命令。三个子命令：
 
 ```text
 ocr llm <sub-command>
@@ -515,6 +589,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`

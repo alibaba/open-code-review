@@ -77,6 +77,23 @@ func resolveEffort(cfg *Config, cliOverride string) (template.Effort, error) {
 	return template.EffortDefault, nil
 }
 
+// previewMaxTokens resolves the per-file prompt ceiling the way a real run
+// resolves it, but without building an LLM runtime: resolveMaxTokens needs only
+// the app config, which loads independently of endpoint resolution. A preview
+// therefore reports the limit its run would actually apply while keeping its
+// property of requiring no API key.
+func previewMaxTokens(templateDefault, cliOverride int) (int, error) {
+	cfgPath, err := defaultConfigPath()
+	if err != nil {
+		return 0, err
+	}
+	appCfg, err := LoadAppConfig(cfgPath)
+	if err != nil {
+		return 0, fmt.Errorf("load app config: %w", err)
+	}
+	return resolveMaxTokens(templateDefault, appCfg, cliOverride)
+}
+
 // loadCommonContext validates the working directory, loads the embedded
 // template, raises MaxToolRequestTimes when maxTools exceeds the default,
 // resolves the absolute repo path, loads system review rules, and creates
@@ -183,6 +200,7 @@ type llmRuntime struct {
 	Client       llm.LLMClient
 	Model        string
 	Provider     string // resolved provider name (non-secret label; empty for non-provider endpoints)
+	Source       string // resolved configuration source (non-secret label)
 	PlanToolDefs []llm.ToolDef
 	MainToolDefs []llm.ToolDef
 	Collector    *tool.CommentCollector
@@ -257,6 +275,7 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 		Client:         llm.NewLLMClient(ep, retryCollector, rawHolder),
 		Model:          ep.Model,
 		Provider:       ep.Provider,
+		Source:         ep.Source,
 		PlanToolDefs:   planToolDefs,
 		MainToolDefs:   mainToolDefs,
 		Collector:      tool.NewCommentCollector(),
@@ -350,12 +369,16 @@ type quietHandle struct {
 }
 
 // isMachineReadable reports whether the output format writes a structured
-// document to stdout that must not be interleaved with progress text. Both
-// json and sarif move [ocr] progress lines off stdout and suppress the trace
-// summary, which is already carried inside the document.
+// document to stdout that must not be interleaved with progress text. json and
+// sarif move [ocr] progress lines off stdout and suppress the trace summary,
+// which is already carried inside the document. html joins them for the second
+// reason resolveOutputWriter consults this: it must not run the exported page
+// through stripAnsiWriter, which would eat the ESC bytes in trace-quoted
+// source. It is not a value validateOutputFormat accepts, so it reaches this
+// function only from `session export`.
 func isMachineReadable(outputFormat string) bool {
 	switch strings.ToLower(strings.TrimSpace(outputFormat)) {
-	case "json", "sarif":
+	case "json", "sarif", "html":
 		return true
 	default:
 		return false

@@ -1,0 +1,5 @@
+node_modules/
+out/
+.DS_Store
+# This package is npm-managed: keep yarn's lockfile out (use npm ci).
+yarn.lock

@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-There are six supported ways to install the `ocr` CLI.
+There are five supported ways to install the `ocr` CLI.
 
 ## NPM (recommended)
 
@@ -53,20 +53,6 @@ To upgrade later:
 
 ```bash
 brew upgrade open-code-review
-```
-
-## MacPorts (macOS)
-
-```bash
-sudo port install open-code-review
-```
-
-The port installs the `ocr` binary built from source.
-
-To upgrade later:
-
-```bash
-sudo port upgrade open-code-review
 ```
 
 ## Install script (curl | sh)
@@ -177,7 +163,7 @@ without a pre-built binary.
 
 #### Prerequisites
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -186,7 +172,7 @@ without a pre-built binary.
 ```bash
 git clone https://github.com/alibaba/open-code-review.git
 cd open-code-review
-make build              # writes dist/opencodereview
+make build              # writes dist/opencodereview (dist/opencodereview.exe on Windows)
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 

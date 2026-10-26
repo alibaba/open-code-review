@@ -25,7 +25,7 @@ OCR 是 Apache-2.0 许可下的开源项目。欢迎 bug 报告、文档修复�
 
 ### 前置条件
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -37,7 +37,7 @@ git clone https://github.com/<your-username>/open-code-review.git
 cd open-code-review
 git remote add upstream https://github.com/alibaba/open-code-review.git
 
-make build       # writes dist/opencodereview
+make build       # writes dist/opencodereview (dist/opencodereview.exe on Windows)
 make test        # LC_ALL=C go test -v -race -count=1 ./...
 ```
 
@@ -46,7 +46,8 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 ### 运行本地构建
 
 ```bash
-./dist/opencodereview review --preview
+./dist/opencodereview review --preview        # macOS / Linux
+.\dist\opencodereview.exe review --preview   # Windows (PowerShell / cmd)
 ```
 
 为方便起见，在 `~/bin/ocr-dev` 放一个指向 `dist/opencodereview` 的符号链接，即可在
@@ -56,7 +57,7 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 
 | Target | 作用 |
 |---|---|
-| `make build` | 为当前平台构建 → `dist/opencodereview`。 |
+| `make build` | 为当前平台构建 → `dist/opencodereview`（Windows 上是 `dist/opencodereview.exe`）。 |
 | `make build-darwin-amd64` | 交叉编译 macOS Intel。 |
 | `make build-darwin-arm64` | 交叉编译 macOS Apple Silicon。 |
 | `make build-linux-amd64` | 交叉编译 Linux x86_64。 |
@@ -109,42 +110,77 @@ refactor(viewer): extract task-card rendering into helper
 
 **PR 标题**也用相同格式，以便在生成的 changelog 中整洁显示。
 
+`PR Commit Policy` 会检查 PR 标题以及每条提交的完整信息（包括正文），不区分大小写。
+请勿包含 `[skip ci]`、`[ci skip]`、`[no ci]`、`[skip actions]`、`[actions skip]`，
+或单独一行的 `skip-checks: true` / `skip-checks:true`。
+
+检查失败时，请修改 PR 标题，或在你的贡献分支上重写相关提交的信息。
+新增一条不含这些指令的提交，无法消除历史提交中的违规内容。
+PR 描述可以讨论这些指令，不在检查范围内。
+
 ## 项目结构
 
 ```
 open-code-review/
+├── acp/                       # 独立的 CLI ACP（Agent Client Protocol）适配器
 ├── cmd/opencodereview/        # CLI 入口——参数解析、分发
+├── docs/                      # 本地化 README 与贡献指南
+├── imgs/                      # README 图片与标志
 ├── internal/
 │   ├── agent/                 # 评审 agent 逻辑、子 agent 分发
+│   ├── chatgptauth/           # ChatGPT OAuth 与凭据管理
 │   ├── config/                # 模板、规则、白名单、内嵌 JSON
-│   ├── diff/                  # Git diff 解析、三种模式
+│   ├── delegate/              # 无需调用 LLM 的审查规范生成
+│   ├── diff/                  # Git diff 解析
 │   ├── gitcmd/                # Git 子进程运行器
-│   ├── llm/                   # LLM client（Anthropic 与 OpenAI）、端点解析器
+│   ├── llm/                   # LLM 客户端与端点解析
+│   ├── llmloop/               # Review 与 Scan 共用的 LLM 工具调用循环
+│   ├── mcp/                   # MCP 客户端与工具适配器
 │   ├── model/                 # 数据结构（LlmComment、Diff……）
 │   ├── pathutil/              # 路径工具
-│   ├── release/               # Release notes 生成
+│   ├── release/               # 发布产物命名一致性检查
+│   ├── scan/                  # 全文件代码审查
 │   ├── session/               # JSONL 会话写入器
 │   ├── stdout/                # 可静音的 stdout writer
 │   ├── suggestdiff/           # 建议 diff 渲染
 │   ├── telemetry/             # OpenTelemetry 配置 + 辅助
 │   ├── tool/                  # 工具注册表 + provider 实现
-│   └── viewer/                # 内嵌 HTTP UI
-├── pages/                     # WebUI 营销页（独立 React app）
-├── plugins/                   # Claude Code slash 命令
-├── extensions/                # 编辑器扩展（VS Code）
+│   └── viewer/                # 浏览审查会话的内嵌 HTTP UI
+├── pages/                     # 官网 Landing Page 与文档（独立 React app）
+├── plugins/                   # 编码代理集成（Claude Code、Codex、OpenCode 等）
+├── extensions/                # VS Code 与 IntelliJ IDEA 扩展、共享前端
 ├── examples/                  # CI 配方（GitHub Actions、GitLab CI）
-├── skills/                    # Agent SDK skill manifest
-├── scripts/                   # NPM postinstall + 跨平台构建脚本
+├── skills/                    # 审查与委托技能定义
+├── scripts/                   # 安装、发布与仓库检查脚本
 ├── npm/                       # 各平台 optional dependency 包
 └── bin/                       # NPM wrapper（Node）
 ```
 
 多数贡献触及 `internal/agent/`、`internal/tool/` 或 `internal/llm/`。
-`cmd/opencodereview/` 中的 CLI 层有意保持精简——参数解析后分发到 agent 包。
+`cmd/opencodereview/` 中的 CLI 层有意保持精简——负责参数解析与命令分发。
+
+## AI 参与辅助开发
+
+使用 AI 协助开发完全没有问题，如果它能让贡献变得更轻松，我们也很高兴。我们无法接受的是：模型生成的代码未经阅读就直接进入提交，其中的冗余和错误无人清理。这类提交会拖慢评审沟通，也让拉取请求更难推进。
+
+如果 AI 参与了你的开发过程，请遵守下面的规则。
+
+### 规则:
+
+1. **您必须在初始问题或拉取请求中披露您使用了 AI/LLM，以及您使用的工具/模型等。**
+2. 您应当理解 AI 写出的每行代码，了解 AI 做了什么。
+3. 当审查者询问某处改动的原因，您需要作出解释，不论这是您写的还是 AI 写的。您对维护者问题和审查意见的回答，其实质内容必须出自您本人的理解；AI/LLM 仅可用于翻译或语言润色，不得用于替您生成回答。
+4. 您的 PR 中不应该出现 `AI 生成 -> 修复 -> 修复 -> 修复` 多次这样的循环，这可能显示您并没有审查 AI 生成的代码，而是在出现问题后再让 AI 自己修复，循环往复。
+5. 您必须在主动请求任何成员为您审查之前，先自己审查所有由 AI/LLM 生成的代码、文本等内容。
+6. 您不得将提交记录归于 AI/LLM，包括通过“Assisted-by”、“Co-developed-by”或类似的提交尾部。
+7. 请勿编写冗长的提交信息，重要的信息应该放在 PR 简介而不是被折叠的提交信息里。
+8. 如果您感到不愿或无法做到以上所有事项，请关闭您的问题或拉取请求。
+
+谢谢！
 
 ## 许可证头
 
-每个源文件（`.go`、`.sh`、`.js`、`.mjs`、`.ts`、`.tsx`）都必须包含 SPDX 许可证头。创建新文件后请运行：
+每个源文件（`.go`、`.js`、`.mjs`、`.ts`、`.tsx`、`.kt`、`.kts`、`.sh`、`.py`、`.css`）都必须包含 SPDX 许可证头。创建新文件后请运行：
 
 ```bash
 make license-add

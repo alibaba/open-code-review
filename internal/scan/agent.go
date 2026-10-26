@@ -54,6 +54,7 @@ type Args struct {
 	MaxConcurrency        int
 	ConcurrentTaskTimeout int
 	Model                 string
+	EndpointSource        string
 	Background            string
 	GitRunner             *gitcmd.Runner
 	Session               *session.SessionHistory
@@ -105,8 +106,8 @@ type Agent struct {
 	runner           *llmloop.Runner
 	resumeInfo       *session.ResumeInfo
 	scanFingerprints map[string]string
-	projectSummary   string // populated post-run by maybeRunProjectSummary
-	budgetExceeded   bool   // set when the token budget gate stopped dispatch; written only by dispatchBatch's loop
+	projectSummary   string      // populated post-run by maybeRunProjectSummary
+	budgetExceeded   atomic.Bool // set when the aggregate token budget stops dispatch or an in-flight task
 }
 
 // ProjectSummary returns the markdown project-level summary produced after
@@ -128,6 +129,7 @@ func NewAgent(args Args) *Agent {
 			ReviewMode:  session.ReviewModeFullScan,
 			ScanPaths:   args.Paths,
 			ResumedFrom: resumedFromSession(args.Resume),
+			LLMSource:   args.EndpointSource,
 		})
 	}
 	a := &Agent{
@@ -146,7 +148,8 @@ func NewAgent(args Args) *Agent {
 		// DiffLookup returns a synthetic Diff so the code_comment tool's
 		// line-number resolver (resolveFromFileContent) can match against
 		// the full file content of the scanned file.
-		DiffLookup: a.lookupDiff,
+		DiffLookup:      a.lookupDiff,
+		MaxTokensBudget: args.MaxTokensBudget,
 		// NewRequestMeta is deliberately left nil. The retry report describes
 		// ocr review; scan shares this Runner, and a nil factory is what keeps
 		// scan's requests out of the report. See llmloop.Deps.NewRequestMeta.
@@ -232,7 +235,7 @@ func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.Too
 // its partial comments and a nil error, and the value reaches output solely as
 // summary.budget_exceeded. Per-file MaxToolRequestTimes exhaustion does NOT set
 // it — that is an item-level outcome, not a run-level budget stop.
-func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded }
+func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded.Load() }
 
 func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
@@ -329,8 +332,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	a.args.Tools.Freeze()
 
 	totalDiscovered := len(a.items)
-	a.items = a.filterScanItems(a.items)
-	a.items = a.filterLargeScans(a.items)
+	decisions := a.selectScanItems(a.items)
+	a.logSelection(decisions)
+	a.items = selectedScanItems(decisions)
 
 	reviewable := len(a.items)
 	fmt.Fprintf(stdout.Writer(), "[ocr] full-scan: %d file(s) discovered, reviewing %d in %s\n",
@@ -425,52 +429,75 @@ func (a *Agent) injectScanContentMap() {
 	}
 }
 
-// filterScanItems drops items that should not be reviewed under the standard
-// reviewability rules (binary, extension allowlist, user include/exclude,
-// default excluded paths).
-func (a *Agent) filterScanItems(items []model.ScanItem) []model.ScanItem {
-	var kept []model.ScanItem
-	skipped := 0
+type scanSelection struct {
+	item   model.ScanItem
+	reason model.ExcludeReason
+	tokens int
+}
+
+// selectScanItems is the single pre-dispatch selection pass shared by Run and
+// Preview. Keep the size check after the normal reviewability rules so an item
+// has one stable exclusion reason and the two paths cannot drift.
+func (a *Agent) selectScanItems(items []model.ScanItem) []scanSelection {
+	limit := llmloop.PromptTokenLimit(a.args.Template.MaxTokens)
+	decisions := make([]scanSelection, 0, len(items))
 	for _, it := range items {
-		if reason := a.whyExcluded(it); reason != model.ExcludeNone {
-			if it.IsBinary {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", it.Path)
-			} else {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", it.Path)
-			}
-			skipped++
-			continue
+		decision := scanSelection{
+			item:   it,
+			reason: a.whyExcluded(it),
 		}
-		kept = append(kept, it)
+		if decision.reason == model.ExcludeNone && limit > 0 {
+			decision.tokens = llm.CountTokens(it.Content)
+			if decision.tokens > limit {
+				decision.reason = model.ExcludeTooLarge
+			}
+		}
+		decisions = append(decisions, decision)
 	}
-	if skipped > 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Filtered %d file(s) by include/exclude rules\n", skipped)
+	return decisions
+}
+
+func selectedScanItems(decisions []scanSelection) []model.ScanItem {
+	kept := make([]model.ScanItem, 0, len(decisions))
+	for _, decision := range decisions {
+		if decision.reason == model.ExcludeNone {
+			kept = append(kept, decision.item)
+		}
 	}
 	return kept
 }
 
-// filterLargeScans drops items whose content exceeds 80% of MaxTokens.
-func (a *Agent) filterLargeScans(items []model.ScanItem) []model.ScanItem {
-	limit := llmloop.PromptTokenLimit(a.args.Template.MaxTokens)
-	if limit <= 0 {
-		return items
-	}
-	var kept []model.ScanItem
-	skipped := 0
-	for _, it := range items {
-		tokens := llm.CountTokens(it.Content)
-		if tokens > limit {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 80%% of max_tokens(%d))\n",
-				it.Path, tokens, a.args.Template.MaxTokens)
-			skipped++
+func (a *Agent) logSelection(decisions []scanSelection) {
+	staticSkipped := 0
+	for _, decision := range decisions {
+		if decision.reason == model.ExcludeNone || decision.reason == model.ExcludeTooLarge {
 			continue
 		}
-		kept = append(kept, it)
+		if decision.item.IsBinary {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", decision.item.Path)
+		} else if decision.reason == model.ExcludeSecret {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — matches a built-in secret path\n", decision.item.Path)
+		} else {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", decision.item.Path)
+		}
+		staticSkipped++
 	}
-	if skipped > 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 80%% of max_tokens\n", skipped)
+	if staticSkipped > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Filtered %d file(s) by include/exclude rules\n", staticSkipped)
 	}
-	return kept
+
+	largeSkipped := 0
+	for _, decision := range decisions {
+		if decision.reason != model.ExcludeTooLarge {
+			continue
+		}
+		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 80%% of max_tokens(%d))\n",
+			decision.item.Path, decision.tokens, a.args.Template.MaxTokens)
+		largeSkipped++
+	}
+	if largeSkipped > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 80%% of max_tokens\n", largeSkipped)
+	}
 }
 
 // whyExcluded mirrors agent.whyExcluded but for ScanItem inputs.
@@ -479,6 +506,11 @@ func (a *Agent) whyExcluded(it model.ScanItem) model.ExcludeReason {
 		return model.ExcludeBinary
 	}
 	path := it.Path
+	// Ahead of both user rules, matching internal/agent: no include glob can
+	// admit a credential path, and no user exclude can reclassify it. See #1240.
+	if allowedext.IsSecretPath(path) {
+		return model.ExcludeSecret
+	}
 	if a.args.FileFilter != nil && a.args.FileFilter.IsUserExcluded(path) {
 		return model.ExcludeUserRule
 	}
@@ -533,7 +565,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	batches := groupBatches(a.items, strategy, a.args.Template.BatchSize)
 	fmt.Fprintf(stdout.Writer(), "[ocr] scan dispatch: %d batch(es) by %s strategy\n", len(batches), strategy)
 
-	var dispatched int64
+	var dispatched, reused int64
 	for bi, batch := range batches {
 		if err := ctx.Err(); err != nil {
 			return a.args.CommentCollector.Comments(), err
@@ -544,6 +576,11 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 
 		n, budgetHit, checkpoints, err := a.dispatchBatch(ctx, bi, batch)
 		dispatched += n
+		for _, checkpoint := range checkpoints {
+			if checkpoint.reused {
+				reused++
+			}
+		}
 		if err != nil {
 			// ctx cancelled mid-batch: stop scheduling further batches but
 			// still return whatever we've collected so far.
@@ -572,8 +609,8 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	failed := atomic.LoadInt64(&a.subtaskFailed)
-	if failed > 0 && failed == dispatched {
-		return nil, fmt.Errorf("all %d file scan(s) failed — check your LLM configuration and API key", dispatched)
+	if failed > 0 && failed == dispatched && reused == 0 {
+		return a.args.CommentCollector.Comments(), fmt.Errorf("all %d file scan(s) failed — check your LLM configuration and API key", dispatched)
 	}
 	return a.args.CommentCollector.Comments(), nil
 }
@@ -692,7 +729,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 				budgetHit = true
 				// budgetHit is per-batch and dies with this call; the field is
 				// the run-level signal emitRunResult reads after Run returns.
-				a.budgetExceeded = true
+				a.budgetExceeded.Store(true)
 				break
 			}
 		}
@@ -787,7 +824,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 			telemetry.AnyToAttr("file.path", it.Path),
 			telemetry.AnyToAttr("tokens", tokenCount),
 			telemetry.AnyToAttr("max_tokens", maxAllowed))
-		return false, "", nil
+		return false, msg, nil
 	}
 
 	completed, stop, err := a.runner.RunMainTask(ctx, messages, it.Path)
@@ -795,6 +832,15 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 		return false, "", err
 	}
 	if !completed {
+		// Mirror the review path: an in-flight token-budget stop must surface
+		// on the run-level BudgetExceeded() / token_budget_reached warning,
+		// not only on the per-item failure record. Without this, --format json
+		// reports budget_exceeded: false after llmloop's StopTokenBudget fired
+		// and the stderr "budget_exceeded=..." line lies too.
+		if stop == llmloop.StopTokenBudget && a.budgetExceeded.CompareAndSwap(false, true) {
+			a.recordWarning("token_budget_reached", it.Path,
+				fmt.Sprintf("stopped mid-task: used %d tokens exceeds budget %d", a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
+		}
 		// Scan sessions opt out of the run manifest, so this one string is the
 		// whole diagnostic: it feeds both RecordReviewItemFailed and the
 		// scan_subtask_error warning, and under --format json the [ocr] progress

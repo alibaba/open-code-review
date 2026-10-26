@@ -93,17 +93,19 @@ hardware, raise the LLM timeout instead — see
 
 ### My file isn't being reviewed
 
-Run `ocr review --preview` (no LLM cost). The output lists every
-candidate file with the **reason** it was kept or dropped:
+Run `ocr review --preview` (no LLM cost). The output shows the **reason**
+each candidate file was kept or dropped. Files under provider directories
+such as `vendor/` and `node_modules/` collapse into one summary line in the
+terminal; `ocr review --preview --format json` still lists every entry:
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
-The five exclusion reasons map to gates in the
+The exclusion reasons map to gates in the
 [file filter](../review-rules/#how-files-are-filtered):
 
 | Reason | Fix |
@@ -112,7 +114,9 @@ The five exclusion reasons map to gates in the
 | `user_exclude` | Remove the pattern from your `exclude` list. |
 | `unsupported_ext` | Add the extension to your `include` list to bypass the allowlist gate. |
 | `default_path` | Add the file to `include` — that overrides built-in test-file exclude patterns. |
+| `provider_directory` | Nothing to do — provider directories such as `vendor/` and `node_modules/` are never reviewable, even when included. |
 | `deleted` | Nothing to do — there's no new content to review. |
+| `too_large` | The diff alone exceeds 80% of `max_tokens`. Raise `--max-tokens` (or the saved `max_tokens`), or split the change into smaller commits. |
 
 ### My custom rule isn't firing
 
@@ -307,8 +311,8 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-LLM calls don't get their own spans — they're recorded as metrics
-instead. Watch `ocr.llm.tokens_used` (counter, labelled `model` +
+In the main review loop, LLM calls produce `llm.request` spans and are
+also recorded as metrics. Watch `ocr.llm.tokens_used` (counter, labelled `model` +
 `type`), `ocr.llm.requests_total` (counter, labelled `model` +
 `status`), and `ocr.llm.request_duration_seconds` (histogram, labelled
 `model`). The console exporter prints these aggregates inline. For
@@ -396,7 +400,8 @@ need new providers; an issue for Hg support is open
 
 The static binary published in releases is named after the project
 (`opencodereview`); the NPM wrapper installs it as `ocr` for
-ergonomics. If you build from source you get `dist/opencodereview` —
+ergonomics. If you build from source you get `dist/opencodereview`
+(`dist/opencodereview.exe` on Windows) —
 copy it to `ocr` on your `$PATH`.
 
 ### How do I uninstall?

@@ -28,7 +28,7 @@ You don't have to write Go to be useful:
 
 ### Prerequisites
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26.9](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -40,7 +40,7 @@ git clone https://github.com/<your-username>/open-code-review.git
 cd open-code-review
 git remote add upstream https://github.com/alibaba/open-code-review.git
 
-make build       # writes dist/opencodereview
+make build       # writes dist/opencodereview (dist/opencodereview.exe on Windows)
 make test        # LC_ALL=C go test -v -race -count=1 ./...
 ```
 
@@ -50,7 +50,8 @@ make test        # LC_ALL=C go test -v -race -count=1 ./...
 ### Running your local build
 
 ```bash
-./dist/opencodereview review --preview
+./dist/opencodereview review --preview        # macOS / Linux
+.\dist\opencodereview.exe review --preview   # Windows (PowerShell / cmd)
 ```
 
 For convenience, drop a symlink at `~/bin/ocr-dev` pointing at
@@ -60,7 +61,7 @@ For convenience, drop a symlink at `~/bin/ocr-dev` pointing at
 
 | Target | What it does |
 |---|---|
-| `make build` | Build for current platform → `dist/opencodereview`. |
+| `make build` | Build for current platform → `dist/opencodereview` (`dist/opencodereview.exe` on Windows). |
 | `make build-darwin-amd64` | Cross-compile for macOS Intel. |
 | `make build-darwin-arm64` | Cross-compile for macOS Apple Silicon. |
 | `make build-linux-amd64` | Cross-compile for Linux x86_64. |
@@ -114,43 +115,78 @@ refactor(viewer): extract task-card rendering into helper
 The same format is used for **PR titles** so they show up cleanly in the
 generated changelog.
 
+`PR Commit Policy` checks the PR title and every commit's full message, including
+the body, case-insensitively. Do not include `[skip ci]`, `[ci skip]`, `[no ci]`,
+`[skip actions]`, `[actions skip]`, or a `skip-checks: true` / `skip-checks:true` line.
+
+To fix failures, edit the PR title or rewrite affected commit messages on your
+contribution branch. Adding a clean commit does not remove earlier violations.
+PR descriptions may discuss these instructions and are not checked.
+
 ## Project layout
 
 ```
 open-code-review/
+├── acp/                       # Independent ACP (Agent Client Protocol) adapter for the CLI
 ├── cmd/opencodereview/        # CLI entry point — flag parsing, dispatch
+├── docs/                      # Localized README and contributing guides
+├── imgs/                      # README images and logos
 ├── internal/
 │   ├── agent/                 # Review agent logic, sub-agent dispatch
+│   ├── chatgptauth/           # ChatGPT OAuth and credential management
 │   ├── config/                # Template, rules, allowlist, embedded JSON
-│   ├── diff/                  # Git diff parsing, three modes
+│   ├── delegate/              # Review specification generation without LLM calls
+│   ├── diff/                  # Git diff parsing
 │   ├── gitcmd/                # Git subprocess runner
-│   ├── llm/                   # LLM client (Anthropic & OpenAI), endpoint resolver
+│   ├── llm/                   # LLM clients and endpoint resolution
+│   ├── llmloop/               # LLM tool-use loop shared by review and scan
+│   ├── mcp/                   # MCP clients and tool adapters
 │   ├── model/                 # Data structs (LlmComment, Diff, …)
 │   ├── pathutil/              # Path utilities
-│   ├── release/               # Release-notes generation
+│   ├── release/               # Release artifact naming consistency checks
+│   ├── scan/                  # Full-file code review
 │   ├── session/               # JSONL session writer
 │   ├── stdout/                # Quiet-able stdout writer
 │   ├── suggestdiff/           # Suggestion diff rendering
 │   ├── telemetry/             # OpenTelemetry config + helpers
 │   ├── tool/                  # Tool registry + provider impls
-│   └── viewer/                # Embedded HTTP UI
-├── pages/                     # WebUI marketing page (separate React app)
-├── plugins/                   # Claude Code slash command
-├── extensions/                # Editor extensions (VS Code)
+│   └── viewer/                # Embedded HTTP UI for browsing review sessions
+├── pages/                     # Website landing page and docs (separate React app)
+├── plugins/                   # Coding agent integrations (Claude Code, Codex, OpenCode, …)
+├── extensions/                # VS Code and IntelliJ IDEA extensions, shared frontend
 ├── examples/                  # CI recipes (GitHub Actions, GitLab CI)
-├── skills/                    # Agent SDK skill manifest
-├── scripts/                   # NPM postinstall + cross-build scripts
+├── skills/                    # Review and delegation skill definitions
+├── scripts/                   # Install, publish, and repository check scripts
 ├── npm/                       # Per-platform optional dependency packages
 └── bin/                       # NPM wrapper (Node)
 ```
 
 Most contributions touch `internal/agent/`, `internal/tool/`, or
 `internal/llm/`. The CLI surface in `cmd/opencodereview/` is
-intentionally thin — flag parsing then dispatch to the agent package.
+intentionally thin — flag parsing and command dispatch.
+
+## AI-Assisted Development
+
+Using AI to help with your development is perfectly welcome, and we are glad if it makes contributing easier. What we cannot accept is code that a model produced going straight into a commit unread, with none of its redundancy or mistakes cleaned up. Submissions like that slow down the review conversation and make a pull request harder to move forward.
+
+If AI played a part in how you worked, please follow the rules below.
+
+### Rules:
+
+1. **You must disclose in your initial issue or pull request that you used AI/LLM, as well as the tools/models you used.**
+2. You should understand every line of code written by AI and know what the AI did.
+3. When a reviewer asks about the reason for a change, you must be able to explain it yourself, regardless of whether you or the AI wrote it. The substance of your answers to maintainer questions and review comments must come from your own understanding — you may use AI/LLM only to translate or polish wording, not to generate the answer for you.
+4. Your PR should not contain repeated cycles like `AI generated -> fixed -> fixed -> fixed`. This may indicate that you did not review the AI-generated code, but instead let the AI fix issues as they arise, over and over.
+5. You must review all code, text, and other content generated by AI/LLM yourself before proactively requesting a review from any member.
+6. You must not attribute commits to AI/LLM, including through "Assisted-by", "Co-developed-by", or similar trailers.
+7. Do not write overly long commit messages. Important information should go in the PR description rather than in collapsed commit messages.
+8. If you are unwilling or unable to do all of the above, please close your issue or pull request.
+
+Thanks!
 
 ## License headers
 
-Every source file (`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`) must include an SPDX license header. After creating new files, run:
+Every source file (`.go`, `.js`, `.mjs`, `.ts`, `.tsx`, `.kt`, `.kts`, `.sh`, `.py`, `.css`) must include an SPDX license header. After creating new files, run:
 
 ```bash
 make license-add

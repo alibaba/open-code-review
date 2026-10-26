@@ -5,22 +5,22 @@
 import { LineOffsetTracker } from '../lineOffset';
 
 describe('LineOffsetTracker', () => {
-  it('无变更时返回原行号', () => {
+  it('returns the original line number when there are no changes', () => {
     const t = new LineOffsetTracker();
     expect(t.adjusted('a.ts', 10)).toBe(10);
   });
-  it('在某行之前插入若干行，后续行号顺移', () => {
+  it('shifts subsequent line numbers forward after an insertion', () => {
     const t = new LineOffsetTracker();
-    t.record('a.ts', 5, +2); // 第5行起增加2行
+    t.record('a.ts', 5, +2); // Insert two lines starting at line 5.
     expect(t.adjusted('a.ts', 10)).toBe(12);
-    expect(t.adjusted('a.ts', 3)).toBe(3); // 之前的行不受影响
+    expect(t.adjusted('a.ts', 3)).toBe(3); // Earlier lines are unaffected.
   });
-  it('删除行使后续行号回退', () => {
+  it('shifts subsequent line numbers backward after a deletion', () => {
     const t = new LineOffsetTracker();
     t.record('a.ts', 5, -1);
     expect(t.adjusted('a.ts', 10)).toBe(9);
   });
-  it('不同文件互不影响', () => {
+  it('tracks offsets independently for each file', () => {
     const t = new LineOffsetTracker();
     t.record('a.ts', 1, +5);
     expect(t.adjusted('b.ts', 10)).toBe(10);

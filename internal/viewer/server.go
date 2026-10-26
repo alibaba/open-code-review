@@ -10,13 +10,34 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
-//go:embed templates/*.html static/style.css static/session.js static/repos.js
+//go:embed templates/*.html static/style.css static/pager.js static/a11y.js static/session.js static/repos.js static/sessions.js static/icons/*.svg
 var assets embed.FS
+
+// iconNameRE guards the icon() template helper: names are hard-coded in
+// templates, but constraining them to a simple alphabet keeps the embedded
+// file read from ever turning into a path lookup outside static/icons.
+var iconNameRE = regexp.MustCompile(`^[a-z-]+$`)
+
+// inlineIcon returns the embedded SVG for name as trusted markup, or "" when
+// the name is malformed or the asset is missing. The SVGs ship with
+// fill="currentColor", so an inline <svg> inherits the surrounding text color
+// and adapts to light/dark without any script (CSP-safe).
+func inlineIcon(name string) template.HTML {
+	if !iconNameRE.MatchString(name) {
+		return ""
+	}
+	b, err := assets.ReadFile("static/icons/" + name + ".svg")
+	if err != nil {
+		return ""
+	}
+	return template.HTML(b) //nolint:gosec // content is a repo-controlled static asset, not user input
+}
 
 // StartServer binds addr and serves until the listener fails. openMode is one
 // of OpenAuto, OpenAlways or OpenNever; callers should have run
@@ -101,16 +122,26 @@ func newMux(root string) *http.ServeMux {
 	})
 	mux.HandleFunc("GET /r/{repo}", func(w http.ResponseWriter, r *http.Request) {
 		repo := r.PathValue("repo")
-		if strings.Contains(repo, "..") || strings.Contains(repo, "/") {
+		if unsafeSegment(repo) {
 			http.Error(w, "invalid repo path", http.StatusBadRequest)
 			return
 		}
 		handleSessions(w, r, root, repo)
 	})
+	// Registered before the {sessionID} wildcard for readability only: a
+	// literal segment wins over a wildcard whatever the order.
+	mux.HandleFunc("GET /r/{repo}/compare", func(w http.ResponseWriter, r *http.Request) {
+		repo := r.PathValue("repo")
+		if unsafeSegment(repo) {
+			http.Error(w, "invalid repo path", http.StatusBadRequest)
+			return
+		}
+		handleCompare(w, r, root, repo)
+	})
 	mux.HandleFunc("GET /r/{repo}/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
 		repo := r.PathValue("repo")
 		sid := r.PathValue("sessionID")
-		if strings.Contains(repo, "..") || strings.Contains(sid, "..") {
+		if unsafeSegment(repo) || unsafeSegment(sid) {
 			http.Error(w, "invalid path", http.StatusBadRequest)
 			return
 		}
@@ -136,6 +167,14 @@ func displayURL(requestedAddr, listenerAddr string) (string, error) {
 		return "", fmt.Errorf("parse listener addr %q: %w", listenerAddr, err)
 	}
 	return "http://" + DisplayAddr(net.JoinHostPort(splitBindHost(requestedAddr), port)), nil
+}
+
+// unsafeSegment rejects a URL-supplied name that must stay a single directory
+// or file name once it reaches filepath.Join. ServeMux unescapes each path
+// segment, so "%2F" and "%5C" arrive here as real separators; "\" is one on
+// Windows, so it is rejected everywhere "/" is.
+func unsafeSegment(s string) bool {
+	return strings.Contains(s, "..") || strings.ContainsAny(s, `/\`)
 }
 
 var cstZone = func() *time.Location {
@@ -290,7 +329,15 @@ func parseTemplate(name string) (*template.Template, error) {
 		"formatTime":     formatTime,
 		"truncate":       truncateText,
 		"formatNumber":   formatNumber,
+		"icon":           inlineIcon,
+		"dict":           dictKV,
 		"add":            func(a, b int) int { return a + b },
+		"countLabel": func(n int, singular, plural string) string {
+			if n == 1 {
+				return strconv.Itoa(n) + " " + singular
+			}
+			return strconv.Itoa(n) + " " + plural
+		},
 		"cardCount": func(tasks map[TaskType][]*TaskCard) int {
 			n := 0
 			for _, cards := range tasks {
@@ -322,6 +369,8 @@ func parseTemplate(name string) (*template.Template, error) {
 				return fp
 			}
 		},
+		"isGrouping":   func(tt TaskType) bool { return tt == GroupingTask },
+		"groupingView": groupingView,
 		"orderedTasks": func(tasks map[TaskType][]*TaskCard) []struct {
 			Type  TaskType
 			Cards []*TaskCard
@@ -405,11 +454,25 @@ func parseTemplate(name string) (*template.Template, error) {
 		},
 		"numberedCodeLines": numberedCodeLines,
 	}
-	content, err := assets.ReadFile("templates/" + name)
-	if err != nil {
-		return nil, err
+	// Keep page-specific breadcrumb definitions isolated from other pages.
+	return template.New(name).Funcs(funcMap).ParseFS(assets, "templates/"+name, "templates/app-header.html", "templates/pager.html")
+}
+
+// dictKV builds a map from key/value pairs so pages can pass inline
+// arguments to a shared partial: {{template "pager" (dict "prefix" "repos")}}.
+func dictKV(keysAndValues ...any) (map[string]any, error) {
+	if len(keysAndValues)%2 != 0 {
+		return nil, fmt.Errorf("dict expects key and value pairs, got %d values", len(keysAndValues))
 	}
-	return template.New(name).Funcs(funcMap).Parse(string(content))
+	m := make(map[string]any, len(keysAndValues)/2)
+	for i := 0; i < len(keysAndValues); i += 2 {
+		key, ok := keysAndValues[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("dict keys must be strings, got %T", keysAndValues[i])
+		}
+		m[key] = keysAndValues[i+1]
+	}
+	return m, nil
 }
 
 func truncateText(n int, s string) string {

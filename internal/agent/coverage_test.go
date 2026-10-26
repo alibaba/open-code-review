@@ -128,7 +128,8 @@ func TestInjectDiffMap(t *testing.T) {
 	})
 	a.diffs = []model.Diff{
 		{NewPath: "main.go", OldPath: "main.go", Diff: "+new code"},
-		{NewPath: "/dev/null", OldPath: "deleted.go", Diff: "-deleted"},
+		{NewPath: "/dev/null", OldPath: "deleted.go", Diff: "-deleted", IsDeleted: true},
+		{NewPath: "renamed.go", OldPath: "old_name.go", Diff: "+renamed", IsRenamed: true},
 	}
 
 	a.injectDiffMap()
@@ -146,12 +147,19 @@ func TestInjectDiffMap(t *testing.T) {
 	result2, _ := frd.Execute(context.Background(), map[string]any{
 		"path_array": []any{"deleted.go"},
 	})
-	if !strings.Contains(result2, "not found") {
-		t.Errorf("/dev/null path should not be in DiffMap, got: %q", result2)
+	if !strings.Contains(result2, "-deleted") {
+		t.Errorf("DiffMap did not contain deleted.go diff, got: %q", result2)
+	}
+
+	result3, _ := frd.Execute(context.Background(), map[string]any{
+		"path_array": []any{"renamed.go"},
+	})
+	if !strings.Contains(result3, "+renamed") {
+		t.Errorf("DiffMap did not contain renamed.go diff, got: %q", result3)
 	}
 }
 
-func TestFilterDiffs(t *testing.T) {
+func TestSelectFilesDropsFilteredPaths(t *testing.T) {
 	a := New(Args{
 		FileFilter: &rules.FileFilter{
 			Exclude: []string{"vendor/**"},
@@ -164,7 +172,7 @@ func TestFilterDiffs(t *testing.T) {
 		{NewPath: "handler.go"},
 	}
 
-	kept := a.filterDiffs(a.diffs)
+	kept, _ := summarizeSelection(a.selectFiles(a.diffs))
 
 	names := make(map[string]bool)
 	for _, d := range kept {
@@ -949,6 +957,7 @@ func TestClassifyItemError(t *testing.T) {
 	}{
 		{"deadline", context.DeadlineExceeded, session.FailureTimeout},
 		{"deadline_wrapped", fmt.Errorf("review %s: %w", secret, context.DeadlineExceeded), session.FailureTimeout},
+		{"request_timeout", fmt.Errorf("%w: %w", llm.ErrRequestTimeout, context.DeadlineExceeded), session.FailureTimeout},
 		{"cancelled", context.Canceled, session.FailureCancelled},
 		{"cancelled_wrapped", fmt.Errorf("aborted %s: %w", secret, context.Canceled), session.FailureCancelled},
 		{"main_task_empty", errMainTaskEmpty, session.FailureConfiguration},
@@ -962,6 +971,12 @@ func TestClassifyItemError(t *testing.T) {
 			}
 			if reason == "" {
 				t.Error("reason is empty; a static safe reason is required")
+			}
+			if errors.Is(tc.err, llm.ErrRequestTimeout) && !strings.Contains(reason, "OCR_LLM_TIMEOUT") {
+				t.Errorf("request timeout reason = %q", reason)
+			}
+			if errors.Is(tc.err, context.DeadlineExceeded) && !errors.Is(tc.err, llm.ErrRequestTimeout) && !strings.Contains(reason, "--timeout") {
+				t.Errorf("task deadline reason = %q", reason)
 			}
 			if strings.Contains(reason, "sk-LEAKED-SECRET") || strings.Contains(reason, "/home/alice") {
 				t.Errorf("reason leaked raw error text: %q", reason)

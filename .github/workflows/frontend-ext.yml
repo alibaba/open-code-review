@@ -1,0 +1,61 @@
+name: Frontend Extension Shared Webview
+
+# Covers extensions/frontend, the shared webview built into both the VS Code
+# and IDEA extensions: type checking, unit tests, and a production build of
+# each target (OCR_TARGET=vscode / idea). Kept separate from vscode-ext.yml so
+# a frontend-only change gets feedback without paying for the VS Code job.
+# Scoped with paths: so it only runs when the webview source or this workflow
+# itself changes.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'extensions/frontend/**'
+      - '.github/workflows/frontend-ext.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    container:
+      image: node:24.4.1
+    defaults:
+      run:
+        working-directory: extensions/frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+        working-directory: .
+
+      - name: Cache npm packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('extensions/frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build VS Code webview
+        run: OCR_TARGET=vscode npm run build
+
+      - name: Build IDEA webview
+        run: OCR_TARGET=idea npm run build
