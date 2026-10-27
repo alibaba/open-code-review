@@ -189,6 +189,66 @@ func TestValidateResume(t *testing.T) {
 				r.ModelExplicit = true
 			},
 		},
+		{
+			name: "identical task_models is accepted",
+			parent: func(m *RunManifest) {
+				m.Execution.TaskModels = map[string]string{"main_task": "haiku"}
+			},
+			req: func(r *ResumeRequest) {
+				r.TaskModels = map[string]string{"main_task": "haiku"}
+			},
+		},
+		{
+			// The gap task_models admission exists to close: the run-wide model
+			// is byte-identical, so the model comparison passes, but main_task
+			// would run on a different model than the one that produced the
+			// parent's completed checkpoints.
+			name: "task_models change is rejected even with the same model",
+			parent: func(m *RunManifest) {
+				m.Execution.TaskModels = map[string]string{"main_task": "haiku"}
+			},
+			req: func(r *ResumeRequest) {
+				r.TaskModels = map[string]string{"main_task": "sonnet"}
+			},
+			wantErr: "task_models changed",
+		},
+		{
+			// The parent ran every task on the run-wide model; a child that
+			// routes even one task elsewhere mixes models across the chain.
+			name:    "adding a first task_models override is rejected",
+			req:     func(r *ResumeRequest) { r.TaskModels = map[string]string{"plan_task": "haiku"} },
+			wantErr: "task_models changed",
+		},
+		{
+			name: "removing the last task_models override is rejected",
+			parent: func(m *RunManifest) {
+				m.Execution.TaskModels = map[string]string{"plan_task": "haiku"}
+			},
+			wantErr: "task_models changed",
+		},
+		{
+			// The session-file round trip drops an empty map (omitempty) to nil;
+			// both mean "no task overrides" and must not read as a change.
+			name: "empty task_models map equals no task_models",
+			parent: func(m *RunManifest) {
+				m.Execution.TaskModels = map[string]string{}
+			},
+		},
+		{
+			// task_models follows the model's provider semantics: an explicit
+			// provider switch necessarily brings that provider's own model
+			// names with it, overrides included.
+			name: "task_models change rides along with an explicit provider change",
+			parent: func(m *RunManifest) {
+				m.Execution.TaskModels = map[string]string{"main_task": "haiku"}
+			},
+			req: func(r *ResumeRequest) {
+				r.Provider = "openai"
+				r.Model = "gpt-5"
+				r.TaskModels = map[string]string{"main_task": "gpt-5-mini"}
+				r.ProviderExplicit = true
+			},
+		},
 	}
 
 	for _, tc := range tests {

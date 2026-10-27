@@ -3,7 +3,11 @@
 
 package session
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
 
 // RunIdentity is the resolved input identity of a candidate run. Every field
 // mirrors the manifest field a finished run records, so a parent manifest and a
@@ -23,10 +27,15 @@ type RunIdentity struct {
 // on this very command line. A provider or model that changed because a config
 // file, environment variable or shell RC changed is an implicit transition, and
 // an implicit transition is exactly what this check exists to catch.
+//
+// TaskModels carries the config file's task_models overrides resolved for the
+// candidate run. Unlike provider and model it has no flag form, so there is no
+// explicit variant: any change to it is an implicit transition by construction.
 type ResumeRequest struct {
 	Identity         RunIdentity
 	Provider         string
 	Model            string
+	TaskModels       map[string]string
 	ProviderExplicit bool
 	ModelExplicit    bool
 }
@@ -65,7 +74,50 @@ func (s *ResumeState) ValidateResume(req ResumeRequest) error {
 	if !providerChanged && m.Execution.Model != req.Model && !req.ModelExplicit {
 		return fmt.Errorf("resume rejected: model changed from %q to %q without being asked for; %s to resume across models on purpose", m.Execution.Model, req.Model, explicitFlagHint("--model", req.Model))
 	}
+	// task_models is compared on the same terms as the model it overrides, and
+	// only within the same provider for the same reason: an intentional provider
+	// switch brings that provider's own model names with it. There is no
+	// explicit-flag escape hatch because the map only comes from the config
+	// file, so the actionable path is to revert the change or start a new run.
+	if !providerChanged && !sameTaskModels(m.Execution.TaskModels, req.TaskModels) {
+		return fmt.Errorf("resume rejected: task_models changed from %s to %s without being asked for; task_models comes from the config file, so revert the change or %s", renderTaskModels(m.Execution.TaskModels), renderTaskModels(req.TaskModels), resumeHint)
+	}
 	return nil
+}
+
+// sameTaskModels reports whether two task_models maps are behaviorally equal.
+// A nil map and an empty map both mean "every task uses the run-wide model" —
+// the JSON round trip through the session file turns the latter into the former
+// — so they must compare equal rather than trip a len-0 vs len-0 DeepEqual.
+func sameTaskModels(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for task, model := range a {
+		if b[task] != model {
+			return false
+		}
+	}
+	return true
+}
+
+// renderTaskModels renders a task_models map for a rejection message: task ids
+// sorted, "task=model" pairs joined by ", ", and "(none)" for a map that
+// overrides nothing. Deterministic so the same change always reads the same.
+func renderTaskModels(tm map[string]string) string {
+	if len(tm) == 0 {
+		return "(none)"
+	}
+	tasks := make([]string, 0, len(tm))
+	for task := range tm {
+		tasks = append(tasks, task)
+	}
+	sort.Strings(tasks)
+	parts := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		parts = append(parts, task+"="+tm[task])
+	}
+	return strings.Join(parts, ", ")
 }
 
 // validateInputIdentity compares only the input half of the resume contract: the

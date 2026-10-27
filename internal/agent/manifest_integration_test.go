@@ -845,6 +845,7 @@ func TestManifestFlowResumeWithProviderTransition(t *testing.T) {
 	// the frozen manifest reflects the child's actual provider/model.
 	a.args.Provider = "beta"
 	a.args.Model = "model-b"
+	a.args.TaskModels = llm.TaskModels{"main_task": "model-b-mini"}
 	a.initManifest()
 
 	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
@@ -856,6 +857,12 @@ func TestManifestFlowResumeWithProviderTransition(t *testing.T) {
 	// can audit that a transition occurred across the resume chain.
 	if manifest.Execution.Provider != "beta" || manifest.Execution.Model != "model-b" {
 		t.Fatalf("execution = %+v, want provider=beta model=model-b", manifest.Execution)
+	}
+	// task_models rides on execution the same way: a later resume of this run
+	// compares admission against what was persisted here, so an override that
+	// never reached the manifest would be invisible to that check.
+	if got := manifest.Execution.TaskModels; len(got) != 1 || got["main_task"] != "model-b-mini" {
+		t.Fatalf("execution.task_models = %v, want main_task=model-b-mini", got)
 	}
 	// parent_run_id links to the parent, making the transition traceable.
 	if manifest.ParentRunID != "parent-run" {

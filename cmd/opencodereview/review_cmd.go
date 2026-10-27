@@ -392,7 +392,9 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 // provider and model are explicit exactly when their flag was passed on this
 // command line: both default to the empty string and nothing else can set them,
 // so a provider that changed via config file or environment stays implicit —
-// which is the transition this check exists to reject.
+// which is the transition this check exists to reject. task_models rides along
+// on rt for the same comparison: it has no flag form, so any change to it is an
+// implicit transition by construction and always rejects.
 func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState) (*agent.SealedInput, error) {
 	if state == nil {
 		return nil, nil
@@ -415,6 +417,7 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 		Identity:         sealed.Identity,
 		Provider:         rt.Provider,
 		Model:            rt.Model,
+		TaskModels:       rt.TaskModels,
 		ProviderExplicit: opts.provider != "",
 		ModelExplicit:    opts.model != "",
 	}); err != nil {

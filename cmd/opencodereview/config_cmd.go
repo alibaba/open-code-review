@@ -60,8 +60,8 @@ var configSetCmd = &cobra.Command{
 var configUnsetCmd = &cobra.Command{
 	Use:     "unset <key>",
 	Short:   "Remove a configuration value",
-	Long:    "Remove a provider, custom_providers.<name>, or mcp_servers.<name>.",
-	Example: "  ocr config unset provider\n  ocr config unset custom_providers.my-provider\n  ocr config unset mcp_servers.github",
+	Long:    "Remove a provider, max_tokens, effort, custom_providers.<name>, mcp_servers.<name>, or task_models.<task>.",
+	Example: "  ocr config unset provider\n  ocr config unset custom_providers.my-provider\n  ocr config unset mcp_servers.github\n  ocr config unset task_models.plan_task",
 	Args:    exactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runConfigUnset(args[0])
@@ -159,7 +159,7 @@ func runConfigUnset(key string) error {
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, mcp_servers.<name>, and task_models.<task>")
 	}
 
 	switch parts[0] {

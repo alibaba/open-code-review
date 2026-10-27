@@ -259,12 +259,13 @@ type ManifestInput struct {
 // ManifestExecution records how the run was executed. Only non-secret values
 // and hashes are stored here — never tokens, endpoints or raw config.
 type ManifestExecution struct {
-	OCRVersion            string `json:"ocr_version,omitempty"`
-	Provider              string `json:"provider,omitempty"`
-	Model                 string `json:"model,omitempty"`
-	ConfiguredConcurrency int    `json:"configured_concurrency,omitempty"`
-	RuleConfigSHA256      string `json:"rule_config_sha256,omitempty"`
-	RuntimeConfigSHA256   string `json:"runtime_config_sha256,omitempty"`
+	OCRVersion            string            `json:"ocr_version,omitempty"`
+	Provider              string            `json:"provider,omitempty"`
+	Model                 string            `json:"model,omitempty"`
+	TaskModels            map[string]string `json:"task_models,omitempty"`
+	ConfiguredConcurrency int               `json:"configured_concurrency,omitempty"`
+	RuleConfigSHA256      string            `json:"rule_config_sha256,omitempty"`
+	RuntimeConfigSHA256   string            `json:"runtime_config_sha256,omitempty"`
 }
 
 // RunManifest is the immutable, versioned coverage snapshot of a single run.

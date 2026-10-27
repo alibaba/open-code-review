@@ -974,6 +974,7 @@ func (a *Agent) initManifest() {
 		OCRVersion:            llm.AppVersion,
 		Provider:              a.args.Provider,
 		Model:                 a.args.Model,
+		TaskModels:            map[string]string(a.args.TaskModels),
 		ConfiguredConcurrency: a.args.MaxConcurrency,
 		RuleConfigSHA256:      a.ruleConfigSHA256(),
 		RuntimeConfigSHA256:   a.runtimeConfigSHA256(),
@@ -1099,8 +1100,8 @@ func (a *Agent) ruleConfigSHA256() string {
 func (a *Agent) runtimeConfigSHA256() string {
 	// Deliberately run-wide only: task_models routing is a per-request model
 	// swap on the same endpoint, so two runs differing only in task_models
-	// share this hash. The per-task choices remain visible in the session
-	// history's per-task records instead.
+	// share this hash. The per-task choices are persisted as the manifest's
+	// execution.task_models instead, which is what resume admission compares.
 	r := a.args.RuntimeConfig
 	return hashFields(
 		"protocol", r.Protocol,
