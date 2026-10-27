@@ -150,9 +150,21 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
       pre.appendChild(btn);
     });
 
-    // Render mermaid diagrams
-    const mermaidBlocks = containerRef.current.querySelectorAll('code.language-mermaid');
-    if (mermaidBlocks.length === 0) return;
+    // Render mermaid diagrams. Two target shapes: code.language-mermaid on a
+    // first render of this html, and .mermaid-rendered wrappers carrying their
+    // source in data-mermaid-source after a theme change — by then the
+    // original <pre><code> elements no longer exist, and React will not reset
+    // dangerouslySetInnerHTML whose html is unchanged, so without the wrappers
+    // the diagrams could never re-render with the other palette.
+    const mermaidTargets: Array<{ code: string; mount: Element; fresh: boolean }> = [];
+    containerRef.current.querySelectorAll('code.language-mermaid').forEach((block) => {
+      const pre = block.parentElement;
+      if (pre) mermaidTargets.push({ code: block.textContent || '', mount: pre, fresh: true });
+    });
+    containerRef.current.querySelectorAll('.mermaid-rendered[data-mermaid-source]').forEach((wrapper) => {
+      mermaidTargets.push({ code: wrapper.getAttribute('data-mermaid-source') || '', mount: wrapper, fresh: false });
+    });
+    if (mermaidTargets.length === 0) return;
 
     const renderMermaidBlocks = async () => {
       try {
@@ -160,36 +172,39 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
         configureMermaid(mermaid, theme);
         if (cancelled) return;
 
-        for (const block of Array.from(mermaidBlocks)) {
-          const pre = block.parentElement;
-          if (!pre) continue;
-          const code = block.textContent || '';
+        for (const { code, mount, fresh } of mermaidTargets) {
+          if (!mount.isConnected || !code) continue;
           try {
             const id = `mermaid-diagram-${crypto.randomUUID()}`;
             const { svg } = await mermaid.render(id, code);
             if (cancelled) return;
-            // Replace the <pre> with rendered SVG. The SVG is produced by mermaid with
-            // securityLevel:'strict' (configured in loadMermaid), which already sanitizes
-            // its output. Re-running DOMPurify over the whole SVG breaks it (namespaces,
-            // inline <style>, foreignObject labels), so we inject mermaid's trusted output.
+            // Replace the mount (the <pre>, or the previous wrapper on a
+            // re-render) with the rendered SVG. The SVG is produced by mermaid
+            // with securityLevel:'strict' (configured in loadMermaid), which
+            // already sanitizes its output. Re-running DOMPurify over the
+            // whole SVG breaks it (namespaces, inline <style>, foreignObject
+            // labels), so we inject mermaid's trusted output.
             const wrapper = document.createElement('div');
             wrapper.className = 'mermaid-rendered';
+            wrapper.setAttribute('data-mermaid-source', code);
             // codeql[js/xss-through-dom] -- svg is derived from user-controlled mermaid code, but mermaid
             // renders it with securityLevel:'strict' (see loadMermaid), which sanitizes the output via
             // DOMPurify (scripts/handlers stripped). The trust boundary relies on that setting staying 'strict'.
             wrapper.innerHTML = svg;
-            pre.replaceWith(wrapper);
+            mount.replaceWith(wrapper);
           } catch (e) {
             if (cancelled) return;
-            // If rendering fails, show the code block normally
-            (block as HTMLElement).style.display = 'block';
+            // A fresh block that fails falls back to showing the code. A
+            // wrapper that fails to re-render keeps the previous diagram —
+            // the old palette beats a blank spot.
+            if (fresh) (mount.querySelector('code') as HTMLElement | null)?.style.setProperty('display', 'block');
             console.warn('[Mermaid] render failed:', e);
           }
         }
       } catch (e) {
         if (cancelled) return;
-        for (const block of Array.from(mermaidBlocks)) {
-          (block as HTMLElement).style.display = 'block';
+        for (const { mount, fresh } of mermaidTargets) {
+          if (fresh) (mount.querySelector('code') as HTMLElement | null)?.style.setProperty('display', 'block');
         }
         console.warn('[Mermaid] failed to load:', e);
       }

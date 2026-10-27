@@ -146,7 +146,7 @@ const BlogPage: React.FC = () => {
                 fontFamily,
                 transition: 'color 0.2s',
               }}
-              onMouseEnter={e => (e.currentTarget.style.color = '#2BDE5E')}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent)')}
               onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-faint)')}
             >
               {t('blog.backToList')}

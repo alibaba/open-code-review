@@ -39,18 +39,72 @@ const ToggleProbe: React.FC = () => {
   );
 };
 
+/** Stand-in for window.matchMedia that reports the given OS scheme. */
+function installMatchMediaMock(prefersLight: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({
+      matches: prefersLight && query.includes('prefers-color-scheme: light'),
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
 describe('ThemeProvider', () => {
   beforeEach(() => {
     installLocalStorageMock();
+    // Default to an OS dark preference: tests that care about the OS fallback
+    // install their own mock.
+    installMatchMediaMock(false);
     window.localStorage.clear();
     delete document.documentElement.dataset.theme;
   });
 
   afterEach(() => {
     delete document.documentElement.dataset.theme;
+    delete (window as { matchMedia?: unknown }).matchMedia;
   });
 
   it('defaults to dark when nothing is stored', () => {
+    render(
+      <ThemeProvider>
+        <ToggleProbe />
+      </ThemeProvider>
+    );
+    expect(screen.getByRole('button').textContent).toBe('dark');
+  });
+
+  it('follows a light OS preference when nothing is stored', () => {
+    installMatchMediaMock(true);
+    render(
+      <ThemeProvider>
+        <ToggleProbe />
+      </ThemeProvider>
+    );
+    expect(screen.getByRole('button').textContent).toBe('light');
+    expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('stays dark when the OS prefers dark and nothing is stored', () => {
+    installMatchMediaMock(false);
+    render(
+      <ThemeProvider>
+        <ToggleProbe />
+      </ThemeProvider>
+    );
+    expect(screen.getByRole('button').textContent).toBe('dark');
+  });
+
+  it('a stored choice wins over the OS preference', () => {
+    installMatchMediaMock(true);
+    window.localStorage.setItem('ocr-theme', 'dark');
     render(
       <ThemeProvider>
         <ToggleProbe />

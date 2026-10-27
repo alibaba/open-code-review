@@ -110,6 +110,21 @@ describe('index.html critical CSS', () => {
       },
     },
     {
+      // With no stored choice the OS preference must decide before first
+      // paint too, or a first visit by a light-mode user paints dark and
+      // swaps only after React mounts — the same flash the stored-choice
+      // path guards against, one frame later.
+      name: 'consults the OS color scheme when no theme is stored',
+      assert: () => {
+        const open = headBeforeNoscript.indexOf('<script>');
+        const close = headBeforeNoscript.indexOf('</script>');
+        expect(open).toBeGreaterThanOrEqual(0);
+        const script = open >= 0 && close > open ? headBeforeNoscript.slice(open, close) : '';
+        expect(script).toContain('matchMedia');
+        expect(script).toContain('prefers-color-scheme: light');
+      },
+    },
+    {
       // Critical CSS is pointless while the browser is still blocked on two CDN
       // round-trips, so the links must not be render-blocking.
       name: 'loads both CDN stylesheets without blocking first paint',
