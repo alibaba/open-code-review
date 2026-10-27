@@ -118,15 +118,16 @@ unstaged + untracked 变更。
 | `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。 |
 | `--exclude <patterns>` | — | — | 逗号分隔的 gitignore 风格排除模式；与 `rule.json` 的 excludes 合并。 |
 | `--concurrency <n>` | — | `8` | 并行评审的最大子任务数。 |
-| `--timeout <minutes>` | — | `15` | 每个子任务的时间预算，包括 LLM 调用、工具执行和重试等待。`0` 关闭任务期限，但不关闭请求超时。单次请求超时独立设置：`OCR_LLM_TIMEOUT` 或 provider 的 `timeout_sec`，单位秒（默认 `300`）。按 effort 评审轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。 |
+| `--timeout <minutes>` | — | `15` | 分组子任务的单次尝试截止时间。`0` 关闭超时。按 effort 轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。每次尝试都获得完整的超时额度：分组在超时后重试一次，重试仍超时则拆分为单文件尝试——因此 N 个文件的分组最坏情况约消耗 (N + 2) 倍配置的超时（不含评论 worker 的等待）。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
-| `--max-tools <n>` | — | 模板默认 | 每个子任务的最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的正值会精确设置上限。 |
+| `--max-tools <n>` | — | 模板默认 | 每个子任务的最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。 |
 | `--max-tokens <n>` | — | 配置或模板默认 | 每个子任务的**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。 |
 | `--max-tokens-budget <n>` | — | `0`（无限制） | 限制本次评审的输入 + 输出 token 总量。每次 LLM 轮次前都会检查：已超出预算的子任务会获得最后一轮来提交发现，并记为 `failed(budget)`；不再分发新的子任务，部分结果仍会发布。 |
 | `--effort <level>` | — | 配置或 `medium` | 评审投入档位：`low` = 1 轮 main 循环，`medium` = 2 轮（默认），`high` = 3 轮。轮数越多召回越高、耗时与 token 也越多。可用 `ocr config set effort <level>` 持久化。 |
 | `--provider <name>` | — | — | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。 |
 | `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 并发 git 子进程的最大数。 |
+| `--tools <path>` | — | 内嵌 | 自定义 JSON 工具配置文件路径。覆盖内嵌工具定义。 |
 
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
@@ -147,10 +148,6 @@ ocr scan --provider openai --model gpt-5.4 --format json
 `OCR_LLM_*` 环境配置、完整的 Claude Code 环境配置、shell rc 文件。`--model` 会覆盖
 最终选中来源中的 model，但不会改变来源顺序。不完整的策略会继续回退，而不会与其他策略
 混合。选中的内置 provider 仍可从其支持的环境变量读取凭据。
-
-对于内置 provider，`--model` 不受 `ocr config model` 的建议模型列表限制。
-如果模型既不在内置列表中，也不在 `providers.<name>.models` 中，OCR 会向 stderr
-输出警告，并交由 provider 验证。自定义 provider 仍遵循原有的 `--model` 校验规则。
 
 ### 模式
 
@@ -352,7 +349,7 @@ ocr s      [flags]   (alias)
 
 | 参数 | 简写 | 默认 | 说明 |
 |---|---|---|---|
-| `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。选择器按工作树中的实际路径解析：原拼写优先，因此 `src` 不会同时选中同级的 `SRC/`；在不区分大小写的文件系统（Windows、默认 macOS）上，用其他大小写拼写、但文件系统能解析时，仍会选中对应文件；若选择器指向的路径不存在，则报错而不是得到空扫描。 |
+| `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。 |
 | `--exclude <patterns>` | - | - | 逗号分隔的 gitignore 风格排除模式（如 `**/generated/*,*.pb.go`）；与 `rule.json` 的 excludes 合并。 |
 | `--output <path>` | `-o` | 标准输出 | 将扫描结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
 | `--preview` | `-p` | `false` | 枚举并过滤文件但跳过 LLM。打印文件列表、可评审/排除数量、总行数及每个文件的排除原因。支持 `--format json`；不支持 `--format sarif`。 |
@@ -397,26 +394,17 @@ ocr session list --json
 
 ### `ocr session show`
 
-默认根据 ID 在所有已保存的仓库会话中查找。传入 `--repo .` 可保留原先仅在当前目录
-范围内查找会话的行为。
-
-使用默认的全局查找且 ID 唯一时，切换 worktree 或移除原工作目录后仍能查看。
-若多个仓库保存了相同的 ID，命令会列出候选仓库，要求用 `--repo` 指定其中一个。
-`--repo` 目前要求指定的仓库目录仍然存在；如果要选择的会话所属仓库目录已被删除，
-目前就无法通过 `--repo` 选择该会话。
-
 恢复的运行还会打印它所继续的父运行，若这次恢复跨了 provider 或 model，也会打印这次切换。
 
 ```bash
 ocr session show <session-id>
 ocr session show --json <session-id>
-ocr session show --repo . <session-id>
 ocr session show --repo /path/to/repo <session-id>
 ```
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `--repo <path>` | 所有仓库 | 仅在指定的、仍然存在的仓库目录下查找会话。 |
+| `--repo <path>` | 当前目录 | 要查看会话的仓库。 |
 | `--json` | `false` | 以 JSON 输出会话元数据和逐文件条目。 |
 
 ### `ocr session comments`
@@ -566,30 +554,9 @@ ocr config model                           Interactive model selection
 
 完整的 key 参考、schema 与示例见[配置](../configuration/)。
 
-
-
-## `ocr auth`
-
-`ocr auth login`、`status` 和 `logout` 默认使用 Sign in with ChatGPT。仍支持显式指定 `--provider chatgpt`。
-
-`chatgpt` provider 使用公开的 Sign in with ChatGPT 流程。请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)。
-
-```bash
-ocr auth login --provider chatgpt
-ocr auth login --provider chatgpt --no-browser
-ocr auth login --provider chatgpt --enable-plan
-ocr auth login --provider chatgpt --new-account
-ocr auth status --provider chatgpt
-ocr auth select <saved-client-id> --provider chatgpt
-ocr auth logout --provider chatgpt --account <saved-client-id>
-ocr llm models
-```
-
-`ocr auth` 支持 `--provider chatgpt` 和 `--account <client-id>`；`login` 还支持 `--no-browser`、`--new-account` 和 `--enable-plan`。ChatGPT 不支持 `--device`。`--enable-plan` 会针对已保存的注册请求同意，不能与 `--new-account` 同时使用。模型目录按账户显示；即使目录中没有，显式模型也会被接受。此 provider 的 `extra_body` 仅支持 `reasoning`、`text` 和 `prompt_cache_key`。账户管理、权限和限制请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)。
-
 ## `ocr llm`
 
-LLM 工具命令。三个子命令：
+LLM 工具命令。两个子命令：
 
 ```text
 ocr llm <sub-command>
@@ -597,7 +564,6 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
-  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`
