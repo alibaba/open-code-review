@@ -3,6 +3,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import githubIcon from '../assets/icons/icon-github.svg';
+import { ThemedMonochromeIcon } from './ThemedMonochromeIcon';
 import langIcon from '../assets/icons/icon-language.svg';
 import { useTranslation } from '../i18n/context';
 import { useResponsive } from '../hooks/useResponsive';
@@ -54,7 +55,7 @@ const Footer: React.FC = () => {
         }}
       >
         <a href="https://github.com/alibaba/open-code-review" target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}>
-          <img src={githubIcon} alt="" style={{ width: 18, height: 18 }} />
+          <ThemedMonochromeIcon src={githubIcon} alt="" width={18} height={18} />
           <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>{t('footer.brand')}</span>
         </a>
         <span style={{ color: 'var(--text-ghost)', fontSize: 13 }}>

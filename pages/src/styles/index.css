@@ -12,7 +12,7 @@ Theme tokens. Dark is the default; the light palette activates when the theme
 toggle sets data-theme="light" on <html> (see src/theme/ThemeProvider.tsx and
 the pre-paint bootstrap script in index.html). The inline critical CSS in
 index.html duplicates the page-level values — keep them in sync (guarded by
-src/index.html.test.ts).
+pages/src/index.html.test.ts).
 */
 :root {
   --bg-page: #000000;
@@ -33,6 +33,9 @@ src/index.html.test.ts).
   --accent: #2BDE5E;
   --accent-strong: #31FF75;
   --accent-soft: rgba(43, 222, 94, 0.12);
+  /* Sweep-gradient companions to the accent (usecase-card hover border). */
+  --accent-cyan: #33DDF7;
+  --accent-mint: rgba(55, 252, 170, 0.79);
   --btn-primary-bg: #ffffff;
   --btn-primary-text: rgba(0, 0, 0, 0.77);
   --btn-primary-border: #EBEBEB;
@@ -61,6 +64,8 @@ src/index.html.test.ts).
   --accent: #16a34a;
   --accent-strong: #15803d;
   --accent-soft: rgba(22, 163, 74, 0.12);
+  --accent-cyan: #0891b2;
+  --accent-mint: rgba(5, 150, 105, 0.75);
   --btn-primary-bg: #0a0f1e;
   --btn-primary-text: #ffffff;
   --btn-primary-border: #0a0f1e;
@@ -183,8 +188,8 @@ a {
     from var(--sweep-angle),
     transparent 0%,
     var(--accent-strong) 8%,
-    #33DDF7 16%,
-    rgba(55,252,170,0.79) 24%,
+    var(--accent-cyan) 16%,
+    var(--accent-mint) 24%,
     transparent 40%
   );
   -webkit-mask:

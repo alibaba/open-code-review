@@ -7,6 +7,7 @@ import { useTranslation } from '../i18n';
 import { useTheme } from '../theme/ThemeProvider';
 import { useResponsive } from '../hooks/useResponsive';
 import socialIcon from '../assets/icons/icon-github.svg';
+import { ThemedMonochromeIcon } from './ThemedMonochromeIcon';
 import brandIcon from '../assets/images/brandicon.svg';
 
 import type { Language } from '../i18n/types';
@@ -97,7 +98,12 @@ const Navbar: React.FC = () => {
           style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
           onClick={() => navigate('/')}
         >
-          <img src={brandIcon} alt="Open Code Review" style={{ height: isMobile ? 20 : 24 }} />
+          <ThemedMonochromeIcon
+            src={brandIcon}
+            alt="Open Code Review"
+            width={isMobile ? 160 : 192}
+            height={isMobile ? 20 : 24}
+          />
         </div>
 
         {/* Nav Tabs - hidden on mobile */}
@@ -240,7 +246,7 @@ const Navbar: React.FC = () => {
             rel="noopener noreferrer"
             style={{ display: 'flex', alignItems: 'center', opacity: 0.6 }}
           >
-            <img src={socialIcon} alt="Social" style={{ width: 22, height: 22 }} />
+            <ThemedMonochromeIcon src={socialIcon} alt="Social" width={22} height={22} />
           </a>
           <button
             onClick={() => navigate('/quickstart')}

@@ -19,25 +19,37 @@ function getInitialTheme(): Theme {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === 'dark' || stored === 'light') return stored;
   } catch {}
+  // No stored choice: follow the OS preference before falling back to dark,
+  // which is the palette :root ships by default. The bootstrap script in
+  // index.html makes the same decision ahead of first paint.
+  if (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-color-scheme: light)').matches
+  ) {
+    return 'light';
+  }
   return 'dark';
 }
 
-// index.html sets data-theme from localStorage before first paint so the
-// background never flashes the wrong color; this provider keeps the attribute
-// in sync with React state afterwards.
+// index.html sets data-theme from localStorage (and the OS preference) before
+// first paint so the background never flashes the wrong color; this provider
+// keeps the attribute in sync with React state afterwards.
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
 
+  // The storage write lives here rather than inside the updater — React may
+  // invoke an updater more than once (StrictMode, concurrent rendering), and a
+  // side effect there is a purity violation. Writing on mount also pins the
+  // OS-derived first-visit theme, keeping this state, the html attribute and
+  // the bootstrap script in agreement from the first toggle.
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem(STORAGE_KEY, theme); } catch {}
   }, [theme]);
 
   const toggleTheme = useCallback(() => {
-    setTheme((prev) => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      try { localStorage.setItem(STORAGE_KEY, next); } catch {}
-      return next;
-    });
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   }, []);
 
   return (
