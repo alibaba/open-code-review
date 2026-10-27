@@ -1133,6 +1133,10 @@ var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 // once; if the retry also exceeds its deadline and the group bundles more
 // than one file, it splits into single-file groups and gives each file its
 // own fresh attempt, so one stuck file cannot drag its peers down with it.
+// Every attempt — the first try, the retry and each split file — runs under
+// its own full timeout: the timeout is per-attempt, not a budget shared
+// across attempts, so a group of N files can spend roughly (N + 2) timeouts
+// in the worst case, excluding comment-worker waits.
 // Recovery only fires while the collector holds no comments for the group's
 // files: a fresh attempt starts a new conversation and would re-file
 // anything the failed attempt already submitted, so a comment-free group is
@@ -1141,23 +1145,31 @@ var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 // coverage, counters, stderr and telemetry behave identically for the
 // whole-group path and for split parts.
 func (a *Agent) executeGroupResilient(ctx context.Context, g FileGroup, timeout time.Duration, exec func(context.Context, FileGroup) (bool, *subtaskStop, error)) {
-	attempt := func(g FileGroup) (context.Context, bool, *subtaskStop, error) {
+	// attempt hands the deadline's cancel back with its context: finishGroupOutcome
+	// traces telemetry under the attempt's context, so canceling is the caller's
+	// job, done once the outcome is applied or the attempt is superseded by a
+	// retry. Canceling inside attempt would hand every outcome an
+	// already-cancelled context.
+	attempt := func(g FileGroup) (context.Context, context.CancelFunc, bool, *subtaskStop, error) {
 		runCtx := ctx
+		cancel := context.CancelFunc(func() {})
 		if timeout > 0 {
-			var cancel context.CancelFunc
 			runCtx, cancel = context.WithTimeout(ctx, timeout)
-			defer cancel()
 		}
 		completed, stop, err := exec(runCtx, g)
-		return runCtx, completed, stop, err
+		return runCtx, cancel, completed, stop, err
 	}
 
-	runCtx, completed, stop, err := attempt(g)
+	runCtx, cancel, completed, stop, err := attempt(g)
 	if a.canRetryGroupDeadline(ctx, err, g) {
+		// The failed attempt's outcome is discarded, so release its deadline
+		// before the retry spends its own.
+		cancel()
 		a.recordWarning("group_retry", g.Label,
 			fmt.Sprintf("group exceeded its deadline; retrying once (%d files)", len(g.Diffs)))
-		runCtx, completed, stop, err = attempt(g)
+		runCtx, cancel, completed, stop, err = attempt(g)
 		if a.canRetryGroupDeadline(ctx, err, g) && len(g.Diffs) > 1 {
+			cancel()
 			a.recordWarning("group_split", g.Label,
 				fmt.Sprintf("group still exceeded its deadline after retry; splitting %d files into single-file groups", len(g.Diffs)))
 			for _, part := range toSingleFileGroups(g.Diffs) {
@@ -1171,13 +1183,15 @@ func (a *Agent) executeGroupResilient(ctx context.Context, g FileGroup, timeout 
 					}, nil)
 					continue
 				}
-				partCtx, pCompleted, pStop, pErr := attempt(part)
+				partCtx, partCancel, pCompleted, pStop, pErr := attempt(part)
 				a.finishGroupOutcome(partCtx, part, pCompleted, pStop, pErr)
+				partCancel()
 			}
 			return
 		}
 	}
 	a.finishGroupOutcome(runCtx, g, completed, stop, err)
+	cancel()
 }
 
 // canRetryGroupDeadline reports whether err is a deadline failure worth
@@ -1227,6 +1241,12 @@ func (a *Agent) finishGroupOutcome(ctx context.Context, g FileGroup, completed b
 	}
 	if !completed {
 		if stop == nil {
+			// Unreachable from executeGroupSubtask today — it reports a stop
+			// for every incomplete outcome — but a silent return would leave
+			// the group's files undecided for the Finalize sweep with no trace
+			// of why, so make the contract violation loud, not invisible.
+			a.recordWarning("group_incomplete", g.Label,
+				"subtask reported incomplete with no stop reason; leaving files for the finalize sweep")
 			return
 		}
 		// A group that stopped short of task_done may still have produced
