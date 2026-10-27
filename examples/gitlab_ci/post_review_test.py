@@ -1712,10 +1712,6 @@ class MainAuthHeaderTest(unittest.TestCase):
         self.assertEqual(rc, 1)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class NoteSizeLimitTest(unittest.TestCase):
     """#1401: note-size handling — no comment may exceed the server's cap."""
 
@@ -1784,6 +1780,44 @@ class NoteSizeLimitTest(unittest.TestCase):
         self.assertEqual(pr.cap_note_body("short", 990_000), "short")
         self.assertEqual(pr.cap_note_body("short", None), "short")
 
+    def test_small_limit_never_exceeds_the_limit(self):
+        """A limit below the marker must not leak the marker past the cap.
+
+        cap_note_body("x" * 100, 10) used to return the 56-char truncation
+        marker — over the very limit it exists to enforce — and
+        format_comment/format_comment_fallback had the same failure whenever
+        prefix + marker exceeded the limit. The fit invariant comes first; the
+        marker survives only when it fits. Real configs cannot reach this
+        (the parser floors tiny values at NOTE_BODY_LIMIT_MIN), so this pins
+        the safety net for hand-built configs.
+        """
+        for limit in (1, 10, len("\n\n" + pr._TRUNCATION_MARK) - 1):
+            capped = pr.cap_note_body("x" * 100, limit)
+            self.assertLessEqual(len(capped), limit,
+                                 "cap_note_body(%d) returned %d chars" % (limit, len(capped)))
+        c = comment(content="x" * 9000, existing_code="x = 1", suggestion_code="x = 2")
+        for limit in (10, 40):
+            body = pr.format_comment(c, "c-1-2", limit)
+            self.assertLessEqual(len(body), limit,
+                                 "format_comment(%d) returned %d chars" % (limit, len(body)))
+            fallback = pr.format_comment_fallback(c, reason="no line", note_body_limit=limit)
+            self.assertLessEqual(len(fallback), limit,
+                                 "format_comment_fallback(%d) returned %d chars" % (limit, len(fallback)))
+        # With headroom for the prefix (reconcile comment) but not the marker,
+        # the prefix is still kept intact: idempotent re-posting depends on it.
+        body = pr.format_comment(c, "c-1-2", 40)
+        self.assertTrue(body.startswith("<!-- c-1-2 -->\n"))
+        self.assertNotIn(pr._TRUNCATION_MARK, body)
+        # The floor itself: below NOTE_BODY_LIMIT_MIN is a misconfiguration the
+        # parser redirects to the default; the boundary value passes through.
+        self.assertEqual(pr._parse_note_body_limit({"OCR_NOTE_BODY_LIMIT": "199"}),
+                         pr.NOTE_BODY_LIMIT_DEFAULT)
+        self.assertEqual(pr._parse_note_body_limit({"OCR_NOTE_BODY_LIMIT": "10"}),
+                         pr.NOTE_BODY_LIMIT_DEFAULT)
+        self.assertEqual(pr._parse_note_body_limit(
+            {"OCR_NOTE_BODY_LIMIT": str(pr.NOTE_BODY_LIMIT_MIN)}),
+            pr.NOTE_BODY_LIMIT_MIN)
+
     def test_parse_note_body_limit(self):
         self.assertEqual(pr._parse_note_body_limit({}), pr.NOTE_BODY_LIMIT_DEFAULT)
         self.assertEqual(pr._parse_note_body_limit({"OCR_NOTE_BODY_LIMIT": "5000"}), 5000)
@@ -1829,3 +1863,7 @@ class NoteSizePublishPlumbingTest(unittest.TestCase):
         stats = pr.publish(result, DIFF_REFS, rec, cfg, sleep=NOOP_SLEEP)
         for body in rec.note_calls:
             self.assertLessEqual(len(body), 600, "anchor/summary note over the limit")
+
+
+if __name__ == "__main__":
+    unittest.main()

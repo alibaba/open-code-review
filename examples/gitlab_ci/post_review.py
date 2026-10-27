@@ -293,7 +293,12 @@ def format_comment(comment, comment_id=None, note_body_limit=None):
         body += "\n\n" + _SUGGESTION_OMITTED_MARK
         if len(body) <= limit:
             return body
-    budget = max(limit - len(prefix) - len(_TRUNCATION_MARK) - 2, 0)
+    budget = limit - len(prefix) - len(_TRUNCATION_MARK) - 2
+    if budget < 0:
+        # Prefix + marker alone exceed the limit; the size invariant wins over
+        # the marker (and over the finding text, which is all that is left to
+        # cut). The prefix is kept as long as it itself fits.
+        return (prefix + content)[:limit]
     return prefix + content[:budget] + "\n\n" + _TRUNCATION_MARK
 
 
@@ -337,7 +342,11 @@ def format_comment_fallback(comment, reason=None, note_body_limit=None):
         md += "\n\n" + _SUGGESTION_OMITTED_MARK
         if len(md) <= limit:
             return md
-    budget = max(limit - len(prefix) - len(_TRUNCATION_MARK) - 2, 0)
+    budget = limit - len(prefix) - len(_TRUNCATION_MARK) - 2
+    if budget < 0:
+        # Same escape as format_comment: prefix + marker alone exceed the
+        # limit, so keep the size invariant and cut the finding text.
+        return (prefix + content)[:limit]
     return prefix + content[:budget] + "\n\n" + _TRUNCATION_MARK
 
 
@@ -1187,6 +1196,12 @@ def make_dry_run_poster():
 # caps. Values <= 0 fall back to the default (a disable switch would just
 # move the failure to the server).
 NOTE_BODY_LIMIT_DEFAULT = 990000
+# A configured limit below this cannot be honored: the truncation markers are
+# ~56 characters and the formatters must also keep their prefix (reconcile
+# comment, badge, file heading), so a cap this small could only be met by
+# dropping the very parts that make a truncated note still work. Treat it as
+# a misconfiguration and use the default.
+NOTE_BODY_LIMIT_MIN = 200
 _SUGGESTION_OMITTED_MARK = "> \u26a0\ufe0f Suggestion omitted: the note exceeded the note size limit."
 _TRUNCATION_MARK = "> \u26a0\ufe0f Truncated: the note exceeded the note size limit."
 
@@ -1201,8 +1216,12 @@ def cap_note_body(body, limit):
     if limit is None or limit <= 0 or len(body) <= limit:
         return body
     mark = "\n\n" + _TRUNCATION_MARK
-    keep = max(limit - len(mark), 0)
-    return body[:keep] + mark
+    if len(mark) >= limit:
+        # The marker itself does not fit. A limit this small is below any cap
+        # GitLab actually enforces, and returning the marker would break the
+        # one invariant this function exists for, so truncate plainly.
+        return body[:limit]
+    return body[:limit - len(mark)] + mark
 
 
 def _truncate_error(body, limit=300):
@@ -1538,17 +1557,20 @@ ZERO_STATS = {"total": 0, "inline": 0, "summary": 0,
 
 
 def _parse_note_body_limit(env):
-    """OCR_NOTE_BODY_LIMIT as an int; unset, invalid, or <= 0 uses the default.
+    """OCR_NOTE_BODY_LIMIT as an int; unset, invalid, <= 0, or below
+    NOTE_BODY_LIMIT_MIN uses the default.
 
     A disable switch would just move the failure to the server's own cap, so
-    there is deliberately no way to turn the client cap off.
+    there is deliberately no way to turn the client cap off. Limits below the
+    floor cannot carry the truncation markers the capping relies on, so they
+    are a misconfiguration, not a cap.
     """
     raw = env.get("OCR_NOTE_BODY_LIMIT", "")
     try:
         limit = int(raw)
     except ValueError:
         return NOTE_BODY_LIMIT_DEFAULT
-    return limit if limit > 0 else NOTE_BODY_LIMIT_DEFAULT
+    return limit if limit >= NOTE_BODY_LIMIT_MIN else NOTE_BODY_LIMIT_DEFAULT
 
 
 def build_config(env):
@@ -1694,7 +1716,9 @@ def main(argv=None):
             run_tag = config.get("run_tag", "0-0")
             # Cap the raw stderr before fencing: fenced_block closes its own
             # fence, so a head-truncation here keeps the note well-formed.
-            stderr_budget = max((config.get("note_body_limit") or NOTE_BODY_LIMIT_DEFAULT) - 300, 0)
+            # config comes from build_config, so note_body_limit is always a
+            # positive int here.
+            stderr_budget = max(config["note_body_limit"] - 300, 0)
             if len(stderr_content) > stderr_budget:
                 stderr_content = stderr_content[:stderr_budget] + "\n… (truncated)"
             body = cap_note_body(
