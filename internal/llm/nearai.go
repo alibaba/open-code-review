@@ -74,6 +74,7 @@ type VerificationRecord struct {
 	SignatureKind  string    `json:"signature_kind,omitempty"`
 	SigningAddress string    `json:"signing_address,omitempty"`
 	Code           string    `json:"code,omitempty"`
+	StatusCode     int       `json:"status_code,omitempty"`
 	CheckedAt      time.Time `json:"checked_at"`
 	NearAISettings
 }
@@ -108,9 +109,18 @@ type nearAIClient struct {
 	failure  error
 }
 
-type nearAIFailure struct{ code, stage string }
+type nearAIFailure struct {
+	code, stage string
+	statusCode  int
+	cause       error
+}
+
+func (e *nearAIFailure) Unwrap() error { return e.cause }
 
 func (e *nearAIFailure) Error() string {
+	if e.statusCode != 0 {
+		return fmt.Sprintf("NEAR AI %s failed: HTTP %d %s (%s)", e.stage, e.statusCode, http.StatusText(e.statusCode), e.code)
+	}
 	if e.code == "policy.model_attestation_required" || e.code == "e2ee.model_public_key_required" {
 		return "NEAR AI model cannot satisfy the configured policy (" + e.code + "). Choose a model with model attestation and E2EE support, or explicitly set providers.nearai.e2ee=false and providers.nearai.verification_level=gateway for Gateway-only verification"
 	}
@@ -176,17 +186,12 @@ func nearAIError(err error, stage string) error {
 	if errors.As(err, &failure) {
 		return failure
 	}
-	code := "request.failed"
 	var sdkError *nearai.Error
 	if errors.As(err, &sdkError) {
-		code = sdkError.Code
-	} else {
-		var apiError *openai.Error
-		if errors.As(err, &apiError) {
-			code = fmt.Sprintf("http.%d", apiError.StatusCode)
-		}
+		status, _ := sdkError.Details["status"].(int)
+		return &nearAIFailure{code: sdkError.Code, stage: stage, statusCode: status, cause: err}
 	}
-	return &nearAIFailure{code: code, stage: stage}
+	return err
 }
 
 func nearAIVerificationFailure(err error, stage string) bool {
@@ -251,9 +256,15 @@ func (c *nearAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			}
 			record.Code = "request.failed"
 			var failure *nearAIFailure
-			if errors.As(err, &failure) {
+			var apiError *openai.Error
+			switch {
+			case errors.As(err, &failure):
 				record.Code = failure.code
 				record.Stage = failure.stage
+				record.StatusCode = failure.statusCode
+			case errors.As(err, &apiError):
+				record.Code = fmt.Sprintf("http.%d", apiError.StatusCode)
+				record.StatusCode = apiError.StatusCode
 			}
 			if errors.Is(err, context.Canceled) {
 				record.Status, record.Code = "cancelled", "request.cancelled"

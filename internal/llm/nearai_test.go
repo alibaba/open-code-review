@@ -28,6 +28,7 @@ import (
 
 	"filippo.io/edwards25519"
 	nearai "github.com/nearai/inference-sdk/go"
+	"github.com/openai/openai-go/v3"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/hkdf"
 )
@@ -414,6 +415,8 @@ func TestNearAIRequestFailuresDoNotBlockIndependentRequests(t *testing.T) {
 		status           int
 		truncate, stream bool
 	}{
+		{name: "http_401", status: http.StatusUnauthorized},
+		{name: "http_403", status: http.StatusForbidden},
 		{name: "http_503_json", status: http.StatusServiceUnavailable},
 		{name: "http_503_sse", status: http.StatusServiceUnavailable, stream: true},
 		{name: "http_429", status: http.StatusTooManyRequests},
@@ -424,8 +427,15 @@ func TestNearAIRequestFailuresDoNotBlockIndependentRequests(t *testing.T) {
 			g := newNearAIGateway(t)
 			g.chatStatus, g.truncate, g.failFirstChat = tc.status, tc.truncate, true
 			c := nearAITestClient(t, g, NearAISettings{false, "model-tee"}, tc.stream)
-			if resp, err := c.CompletionsWithCtx(metaCtx(testMeta()), nearAIRequest()); err == nil || resp != nil {
+			resp, err := c.CompletionsWithCtx(metaCtx(testMeta()), nearAIRequest())
+			if err == nil || resp != nil {
 				t.Fatalf("failed request returned a response: %+v %v", resp, err)
+			}
+			if tc.status != 0 {
+				var apiError *openai.Error
+				if !errors.As(err, &apiError) || apiError.StatusCode != tc.status || !strings.Contains(err.Error(), "sensitive provider body") {
+					t.Fatalf("OpenAI-compatible error lost its status, message or type: %v", err)
+				}
 			}
 			if g.chats.Load() != 1 {
 				t.Fatalf("failed inference was replayed: %d", g.chats.Load())
@@ -438,13 +448,16 @@ func TestNearAIRequestFailuresDoNotBlockIndependentRequests(t *testing.T) {
 			}
 			req := nearAIRequest()
 			req.Messages = []Message{NewTextMessage("user", "independent main review")}
-			resp, err := c.CompletionsWithCtx(context.Background(), req)
+			resp, err = c.CompletionsWithCtx(context.Background(), req)
 			if err != nil || resp == nil || resp.Verification.Status != "verified" || g.chats.Load() != 2 {
 				t.Fatalf("independent request was blocked: %+v %v (chats=%d)", resp, err, g.chats.Load())
 			}
 			r := c.VerificationReport()
 			if r.Status != "request_failed" || r.Failed != 0 || r.RequestFailed != 1 || r.Verified != 1 || r.Records[0].Status != "request_failed" {
 				t.Fatalf("request and verification failures were conflated: %+v", r)
+			}
+			if r.Records[0].StatusCode != tc.status {
+				t.Fatalf("HTTP status missing from verification diagnostics: %+v", r.Records[0])
 			}
 		})
 	}
@@ -506,6 +519,9 @@ func TestNearAIEvidenceFetchFailureAllowsIndependentRequest(t *testing.T) {
 		status            int
 		chats             int32
 	}{
+		{name: "preflight_http_401", path: "/v1/attestation/report", stage: "preflight", status: http.StatusUnauthorized},
+		{name: "preflight_http_403", path: "/v1/attestation/report", stage: "preflight", status: http.StatusForbidden},
+		{name: "preflight_http_429", path: "/v1/attestation/report", stage: "preflight", status: http.StatusTooManyRequests},
 		{name: "preflight_http_503", path: "/v1/attestation/report", stage: "preflight", status: http.StatusServiceUnavailable},
 		{name: "preflight_interrupted_body", path: "/v1/attestation/report", stage: "preflight"},
 		{name: "signature_interrupted_body", path: "/v1/signature/", stage: "response verification", chats: 1},
@@ -526,21 +542,47 @@ func TestNearAIEvidenceFetchFailureAllowsIndependentRequest(t *testing.T) {
 				g.ServeHTTP(w, r)
 			})
 			c := nearAITestClient(t, handler, NearAISettings{false, "model-tee"}, false)
-			if resp, err := c.CompletionsWithCtx(context.Background(), nearAIRequest()); err == nil || resp != nil {
+			resp, err := c.CompletionsWithCtx(context.Background(), nearAIRequest())
+			if err == nil || resp != nil {
 				t.Fatalf("failed evidence fetch returned a response: %+v %v", resp, err)
+			}
+			if tc.status != 0 {
+				var sdkError *nearai.Error
+				status := fmt.Sprintf("HTTP %d %s", tc.status, http.StatusText(tc.status))
+				if !errors.As(err, &sdkError) || sdkError.Details["status"] != tc.status || !strings.Contains(err.Error(), status) {
+					t.Fatalf("SDK HTTP error lost its status or cause: %v", err)
+				}
 			}
 			if c.VerificationError() != nil || g.chats.Load() != tc.chats {
 				t.Fatalf("fetch failure poisoned verification or replayed inference: %v chats=%d", c.VerificationError(), g.chats.Load())
 			}
 			r := c.VerificationReport()
-			if r.RequestFailed != 1 || r.Failed != 0 || r.Records[0].Stage != tc.stage {
+			if r.RequestFailed != 1 || r.Failed != 0 || r.Records[0].Stage != tc.stage || r.Records[0].StatusCode != tc.status {
 				t.Fatalf("fetch failure report: %+v", r)
 			}
-			resp, err := c.CompletionsWithCtx(context.Background(), nearAIRequest())
+			resp, err = c.CompletionsWithCtx(context.Background(), nearAIRequest())
 			if err != nil || resp == nil || resp.Verification.Status != "verified" || g.chats.Load() != tc.chats+1 {
 				t.Fatalf("independent request did not recover: %+v %v chats=%d", resp, err, g.chats.Load())
 			}
 		})
+	}
+}
+
+func TestNearAIErrorPreservesCausesWithoutCopyingSDKDetails(t *testing.T) {
+	cause := errors.New("sensitive transport details")
+	for _, code := range []string{"api.transport_failed", "signature.invalid"} {
+		sdkError := &nearai.Error{Code: code, Cause: cause, Details: map[string]any{"body": "sensitive provider body"}}
+		err := nearAIError(sdkError, "preflight")
+		var restored *nearai.Error
+		if !errors.As(err, &restored) || restored != sdkError || !errors.Is(err, cause) {
+			t.Fatalf("SDK cause lost: %v", err)
+		}
+		if !strings.Contains(err.Error(), code) || strings.Contains(err.Error(), "sensitive") {
+			t.Fatalf("SDK diagnostic lost its code or exposed arbitrary details: %v", err)
+		}
+	}
+	if got := nearAIError(io.ErrUnexpectedEOF, "inference"); got != io.ErrUnexpectedEOF {
+		t.Fatalf("ordinary inference error replaced: %v", got)
 	}
 }
 

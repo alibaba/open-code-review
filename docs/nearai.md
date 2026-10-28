@@ -115,7 +115,11 @@ JSON review output includes `llm.verification`, for example:
 The real `records` array identifies each logical call by model, completion ID
 when available, stage, status, signature kind, signer and check time. Review
 requests also include file/task/request identity where available. Failed calls
-include a stable error code, without copying arbitrary provider error bodies.
+include a stable error code and the HTTP `status_code` when available, without
+copying arbitrary provider error bodies into the records. Ordinary inference
+errors retain the same error messages and causes as other OpenAI-compatible
+providers. SDK verification errors report their stage and code; HTTP failures
+also identify the status and reason phrase.
 `failed` counts verification failures; `request_failed` counts request errors,
 including unavailable signature retrieval. The report status is `request_failed`
 when requests failed but no verification failure occurred, even if other calls
