@@ -2371,6 +2371,54 @@ async function testSummaryAnchorSkipsHumanCommentQuotingTheMarker() {
     `only the bot's own summary may be rewritten; got ${JSON.stringify(updatedIds)}`
   );
   assert.doesNotMatch(github.updatedComments[0].body, /Review-feedback disposition/, "the human comment's text must survive");
+  assert.deepStrictEqual(github.issueComments, [], "no new summary is created");
+}
+
+async function testMalformedResultUpdatesExistingSummaryWithStderr() {
+  const existing = [{
+    id: 42,
+    body: `${SUMMARY_MARKER}\nold summary`,
+    user: { login: "maintainer", type: "User" },
+  }];
+  const { github } = await run({
+    result: "{not json",
+    stderr: "stderr error log",
+    githubOpts: { existingSummary: existing, authenticatedLogin: "maintainer" },
+  });
+  assert.deepStrictEqual(github.updatedComments.map((c) => c.comment_id), [42]);
+  assert.match(github.updatedComments[0].body, /stderr error log/);
+  assert.deepStrictEqual(github.issueComments, []);
+}
+
+async function testCustomAppSummaryWhenAuthenticatedUserIsUnavailable() {
+  const existing = [
+    { id: 43, body: `${SUMMARY_MARKER}\nold summary`, user: { login: "custom-app[bot]", type: "Bot" }, performed_via_github_app: { slug: "custom-app" } },
+    { id: 44, body: `${SUMMARY_MARKER}\nquoted summary`, user: { login: "other-user", type: "User" } },
+  ];
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: existing },
+  });
+  assert.strictEqual(github.authCalls.length, 1, "the authenticated user lookup fails for an app token");
+  assert.deepStrictEqual(github.updatedComments.map((c) => c.comment_id), [43]);
+  assert.deepStrictEqual(github.issueComments, []);
+}
+
+async function testCustomAppSummaryWithPinnedSlug() {
+  const existing = [{
+    id: 43,
+    body: `${SUMMARY_MARKER}\nold summary`,
+    user: { login: "custom-app[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "custom-app" },
+  }];
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: existing },
+    opts: { appSlug: "custom-app" },
+  });
+  assert.deepStrictEqual(github.updatedComments.map((c) => c.comment_id), [43]);
+  assert.deepStrictEqual(github.issueComments, []);
+  assert.strictEqual(github.authCalls.length, 0, "a pinned app slug needs no user lookup");
 }
 
 // The other half of the contract: tightening the anchor must not stop the bot
@@ -2727,6 +2775,9 @@ async function main() {
   await testResolvePacingUsesSuccessDelay();
   testActionYmlDoesNotPromiseTheIoUThresholdToResolveOutdated();
   await testSummaryAnchorSkipsHumanCommentQuotingTheMarker();
+  await testMalformedResultUpdatesExistingSummaryWithStderr();
+  await testCustomAppSummaryWhenAuthenticatedUserIsUnavailable();
+  await testCustomAppSummaryWithPinnedSlug();
   await testSummaryAnchorStillFindsTheBotsOwnSummary();
   await testSummaryAnchorSkipsAnotherAppsComment();
   await testSummaryAnchorStillFindsOurSummaryWhenAppIsUnknown();
