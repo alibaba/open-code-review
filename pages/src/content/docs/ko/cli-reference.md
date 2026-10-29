@@ -369,7 +369,7 @@ ocr s      [flags]   (alias)
 
 | 플래그 | 단축 | 기본값 | 설명 |
 |---|---|---|---|
-| `--path <list>` | - | 저장소 전체 | 스캔할 저장소 기준 상대 디렉터리나 파일(쉼표 구분). 예: `internal/agent`, `internal/llm/client.go`. |
+| `--path <list>` | - | 저장소 전체 | 스캔할 저장소 기준 상대 디렉터리나 파일(쉼표 구분). 예: `internal/agent`, `internal/llm/client.go`. 선택자는 작업 트리의 실제 경로로 해석됩니다. 입력한 철자의 일치를 우선하므로 `src`가 같은 위치의 `SRC/`까지 선택하지 않으며, 대소문자를 구분하지 않는 파일 시스템(Windows, 기본 macOS)에서는 파일 시스템이 해석할 수 있는 다른 철자로도 해당 파일을 선택합니다. 존재하지 않는 경로를 지정하면 빈 스캔이 아니라 오류가 됩니다. |
 | `--exclude <patterns>` | - | - | 건너뛸 gitignore 형식 패턴(쉼표 구분). 예: `**/generated/*,*.pb.go`. `rule.json`의 excludes와 합쳐집니다. |
 | `--output <path>` | `-o` | stdout | 스캔 결과를 UTF-8 파일로 씁니다(`-`는 stdout). 첫 쓰기 시점에 파일을 만들므로 실패한 실행은 기존 파일을 건드리지 않습니다. text 형식에서는 ANSI 색 코드를 자동으로 제거합니다. |
 | `--preview` | `-p` | `false` | LLM을 호출하지 않고 파일을 나열하고 필터링합니다. 파일 목록, 리뷰 대상과 제외 대상 개수, 전체 라인 수, 파일별 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다. |
@@ -580,9 +580,30 @@ ocr config model                           Interactive model selection
 
 키 전체 목록과 스키마, 예시는 [설정](../configuration/)을 참고하세요.
 
+
+
+## `ocr auth` {#ocr-auth}
+
+`ocr auth login`, `status`, `logout`은 기본적으로 Sign in with ChatGPT를 사용합니다. 명시적인 `--provider chatgpt`도 계속 지원합니다.
+
+`chatgpt` provider는 공개 Sign in with ChatGPT 흐름을 사용합니다. [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth`는 `--provider chatgpt` 및 `--account <client-id>`를 받으며 `login`은 `--no-browser`, `--new-account`, `--enable-plan`도 받습니다. ChatGPT는 `--device`를 지원하지 않습니다. `--enable-plan`은 저장된 등록에 대한 동의를 요청하며 `--new-account`와 함께 사용할 수 없습니다. 모델 목록은 계정별로 다르며 목록에 없어도 명시적 모델을 사용할 수 있습니다. 이 provider의 `extra_body`는 `reasoning`, `text`, `prompt_cache_key`만 지원합니다. 계정 관리, 권한 및 제한은 [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.
+
 ## `ocr llm` {#ocr-llm}
 
-LLM 유틸리티 명령입니다. 하위 명령은 두 가지입니다:
+LLM 유틸리티 명령입니다. 하위 명령은 세 가지입니다:
 
 ```text
 ocr llm <sub-command>
@@ -590,6 +611,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test` {#ocr-llm-test}

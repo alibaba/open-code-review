@@ -14,6 +14,58 @@ import kotlin.test.assertTrue
 
 class ConfigDraftTest {
 
+    @Test
+    fun `explicitly created dotted providers retain all draft fields`() {
+        for (prefix in listOf("providers", "custom_providers")) {
+            for (name in listOf("mimo-v2.6-flash", "foo.api_key", "openai.extra_body")) {
+                val d = draft(
+                    "{}",
+                    "provider" to name,
+                    "$prefix.$name.protocol" to "openai",
+                    "$prefix.$name.url" to "https://example.invalid/v1",
+                    "$prefix.$name.model" to "some-model",
+                    "$prefix.$name.api_key" to "test-key",
+                    "$prefix.$name.models" to "some-model,other-model",
+                    "$prefix.$name.auth_header" to "authorization",
+                )
+                assertEquals(name, d.str("provider"))
+                val expected = parseRawConfig(
+                    """{"protocol":"openai","url":"https://example.invalid/v1","model":"some-model","api_key":"test-key","models":["some-model","other-model"],"auth_header":"authorization"}""",
+                )
+                assertEquals(JsonObject(expected), d.obj("custom_providers", name))
+                assertNull(d.obj("providers"))
+            }
+        }
+    }
+
+    @Test
+    fun `dotted field writes require an existing provider without changing the active provider`() {
+        for (prefix in listOf("providers", "custom_providers")) {
+            for (name in listOf("mimo-v2.6-flash", "foo.api_key", "openai.extra_body")) {
+                val base = parseRawConfig("""{"provider":"openai","model":"saved-model"}""")
+                val entries = listOf(ConfigEntry("$prefix.$name.model", "some-model"))
+                assertEquals(base, applyConfigEntries(base, entries))
+                val existing = parseRawConfig("""{"provider":"openai","custom_providers":{"$name":{}}}""")
+                val d = applyConfigEntries(existing, entries)
+                assertEquals("openai", d.str("provider"))
+                assertEquals("some-model", d.str("custom_providers", name, "model"))
+                assertEquals(JsonObject(emptyMap()), existing.obj("custom_providers", name))
+            }
+        }
+    }
+
+    @Test
+    fun `invalid provider names leave the draft unchanged`() {
+        for (name in listOf(" ", ".a", "a.", "a..b", "a. .b", "anthropic.")) {
+            val base = parseRawConfig("""{"provider":"openai","model":"saved-model","custom_providers":{"$name":{}}}""")
+            assertEquals(base, applyConfigEntries(base, listOf(ConfigEntry("provider", name))))
+            for (prefix in listOf("providers", "custom_providers")) {
+                val entries = listOf(ConfigEntry("$prefix.$name.url", "https://example.invalid/v1"))
+                assertEquals(base, applyConfigEntries(base, entries))
+            }
+        }
+    }
+
     private fun draft(base: String, vararg entries: Pair<String, String>): RawConfig =
         applyConfigEntries(parseRawConfig(base), entries.map { ConfigEntry(it.first, it.second) })
 

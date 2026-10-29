@@ -615,9 +615,7 @@ func (a *Agent) injectDiffMap() {
 	m := make(map[string]string, len(a.diffs))
 	for i := range a.diffs {
 		d := &a.diffs[i]
-		if d.NewPath != "/dev/null" {
-			m[d.NewPath] = d.Diff
-		}
+		m[effectivePath(*d)] = d.Diff
 	}
 	dm := tool.NewDiffMap(m)
 	if p, ok := a.args.Tools.Get(tool.FileReadDiff.Name()); ok {
@@ -1643,7 +1641,7 @@ func formatDiffEntry(d model.Diff) string {
 	case d.IsRenamed:
 		status = "RENAMED"
 	}
-	return fmt.Sprintf("%s   %s (+%d/-%d)", status, d.NewPath, d.Insertions, d.Deletions)
+	return fmt.Sprintf("%s   %s (+%d/-%d)", status, effectivePath(d), d.Insertions, d.Deletions)
 }
 
 // buildChangeFilesExceptGroup returns a formatted list of changed files excluding all group members.
