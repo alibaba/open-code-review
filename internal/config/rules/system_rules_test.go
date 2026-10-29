@@ -184,6 +184,11 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"scripts/deploy.ps1", "PowerShell Review Principles"},
 		{"modules/Build/Build.psm1", "PowerShell Review Principles"},
 		{"modules/Build/Build.psd1", "PowerShell Review Principles"},
+		{"scripts/deploy.sh", "Command Injection and Unquoted Expansions"},
+		{"ci/build.bash", "Interpreter and Strict Mode"},
+		{"tools/release.zsh", "Destructive and Irreversible Operations"},
+		{"scripts/setup.fish", "not POSIX"},
+		{"scripts/Deploy.SH", "Command Injection and Unquoted Expansions"},
 	}
 
 	for _, tt := range tests {
