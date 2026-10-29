@@ -813,6 +813,76 @@ func TestGitGrep_NonASCIIPath(t *testing.T) {
 	}
 }
 
+// grepUnusualPaths are committed pathnames that the default `git grep` output
+// cannot represent verbatim: it separates the path from the line number with
+// ':', so a ':' inside the path is indistinguishable from that separator, and
+// it quotes a path holding '"', a backslash or a newline.
+var grepUnusualPaths = []struct{ name, path string }{
+	{name: "colon", path: "src/we1rd:name.go"},
+	{name: "quote", path: `src/he said "hi".go`},
+}
+
+// setupGrepUnusualPathRepo commits path holding one matching line and returns
+// the repository and its HEAD commit.
+func setupGrepUnusualPathRepo(t *testing.T, path string) (string, string) {
+	t.Helper()
+	dir := setupTestRepo(t)
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	full := filepath.Join(dir, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte("package unusual\n\nfunc Needle() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "--", path)
+	git("commit", "-q", "-m", "add unusual path")
+	return dir, getHeadCommit(t, dir)
+}
+
+func TestGitGrep_UnusualPath(t *testing.T) {
+	for _, fp := range grepUnusualPaths {
+		for _, tc := range []struct {
+			name string
+			mode ReviewMode
+		}{
+			{name: "workspace", mode: ModeWorkspace},
+			{name: "commit", mode: ModeCommit},
+		} {
+			t.Run(fp.name+"/"+tc.name, func(t *testing.T) {
+				dir, commit := setupGrepUnusualPathRepo(t, fp.path)
+				ref := ""
+				if tc.mode == ModeCommit {
+					ref = commit
+				}
+				p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: tc.mode, Ref: ref})
+				result, err := p.gitGrep(context.Background(), "Needle", true, false, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if want := "File: " + fp.path + "\n"; !strings.Contains(result, want) {
+					t.Errorf("expected %q in result, got: %s", want, result)
+				}
+				if want := "3|func Needle() {}"; !strings.Contains(result, want) {
+					t.Errorf("expected %q in result, got: %s", want, result)
+				}
+			})
+		}
+	}
+}
+
+func TestBuildGrepArgs_NullSeparatedFields(t *testing.T) {
+	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
+	assertContains(t, p.buildGrepArgs("foo", false, false, false, nil), "-z")
+}
+
 func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
 	args := p.buildGrepArgs("foo", false, false, true, nil)
