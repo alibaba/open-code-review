@@ -466,7 +466,7 @@ func TestIsExcludedPath(t *testing.T) {
 		{"shadow-cljs cache", ".shadow-cljs/builds/app/release/bundle-info.edn", true},
 		{"clojure non-test", "src/myapp/core.clj", false},
 		{"clojure test in filename prefix", "src/myapp/test_helpers.clj", false},
-		{"hand-written js beside the compiled output", "resources/public/js/vendor/analytics.js", false},
+		{"hand-written js beside the compiled output", "resources/public/js/app/analytics.js", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},
