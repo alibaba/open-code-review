@@ -172,7 +172,7 @@ func looksLikeObjC(firstLine string) bool {
 }
 
 func firstNonBlankLine(content string) string {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			return trimmed
 		}
