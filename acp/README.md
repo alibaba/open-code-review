@@ -88,9 +88,8 @@ notice and skips it — it never reports a pass for a check it did not run.
 
 A present-but-useless `staticcheck` is also a failure, not a pass: if it
 reports `matched no packages` it analyzed nothing, which usually happens when
-the binary is newer than the active Go toolchain. `staticcheck` 0.8.x needs a
-Go >= 1.26 toolchain while this module declares `go 1.23`, so CI pins a
-`golang:1.26.9` container for exactly that reason.
+the binary is newer than the active Go toolchain. Use a compatible
+`staticcheck` release; CI runs it in the pinned `golang:1.26.10` container.
 
 ### CI
 
@@ -101,7 +100,7 @@ module.
 `.github/workflows/acp-ci.yml` covers it instead — a dedicated workflow
 for the nested module, the same idea as `pages-ci.yml` for `pages/`.
 Linux CI runs the license, English-only, formatting, line-ending, `go.mod`
-tidy, vet, staticcheck, coverage and govulncheck gates in a `golang:1.26.9`
+tidy, vet, staticcheck, coverage and govulncheck gates in a `golang:1.26.10`
 container, builds the adapter and runs the pinned official Python SDK smoke
 test with mock OCR. The workflow has only the `test` job; there are no
 cross-platform build jobs.
@@ -482,7 +481,7 @@ line numbers, summary, manifest classifications) rather than just counts.
 
 ## Dependencies
 
-- Go 1.23+ to build this module
+- Go 1.26.10+ to build this module
 - OCR CLI 
 - ACP Go SDK v0.13.5
 

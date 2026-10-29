@@ -9,7 +9,7 @@ sidebar:
 ## Prerequisites {#prerequisites}
 
 - Install the [OCR CLI](../../installation/), configure the [review model](../../configuration/), and check the connection with `ocr llm test`.
-- Prepare a source checkout containing `acp/`, Git, and Go 1.23+ to build the adapter. Building the OCR CLI from source requires Go 1.25.5+.
+- Prepare a source checkout containing `acp/`, Git, and Go 1.26.10+ to build the adapter. Building the OCR CLI from source requires Go 1.26.10+.
 - Use a client that supports ACP v1 stdio and custom agent launch commands.
 
 The adapter and OCR CLI are built separately. The instructions below use a local build.
