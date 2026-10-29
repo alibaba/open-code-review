@@ -12,11 +12,20 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
 	gitGrepMaxCount = 100
 	gitGrepTimeout  = 10 * time.Second
+
+	// Matched-line content is passed through to the model verbatim. Minified
+	// build artifacts (committed dist bundles) contain megabyte-long single
+	// lines, so the 100-match cap — which counts lines, not bytes — cannot
+	// protect the context window on such repos. Cap each matched line and the
+	// total rendered output; both caps are far above normal source lines.
+	gitGrepMaxLineBytes   = 2048
+	gitGrepMaxOutputBytes = 256 * 1024
 )
 
 // CodeSearchProvider performs text search across the repository using git grep.
@@ -223,7 +232,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			truncated = true
 			continue
 		}
-		m := match{lineNum: ln, content: parts[offset+2]}
+		m := match{lineNum: ln, content: truncateMatchLine(parts[offset+2])}
 		if !seen[fname] {
 			seen[fname] = true
 			fileOrder = append(fileOrder, fname)
@@ -238,6 +247,12 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	for _, path := range fileOrder {
+		if sb.Len() >= gitGrepMaxOutputBytes {
+			// Defense in depth: the per-line cap alone bounds the rendered
+			// size, but stop early if pathological path lengths add up.
+			sb.WriteString(fmt.Sprintf("Note: output truncated at %d bytes before all matches could be shown. Narrow file_patterns to a more specific path.\n", gitGrepMaxOutputBytes))
+			break
+		}
 		matches := fileMatches[path]
 		sb.WriteString(fmt.Sprintf("File: %s\nMatch lines: %d\n", path, len(matches)))
 		for _, m := range matches {
@@ -251,6 +266,20 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	return sb.String(), nil
+}
+
+// truncateMatchLine caps a single matched line at gitGrepMaxLineBytes and
+// marks the cut so the model knows content was omitted. The byte cut is
+// backed off to the last valid UTF-8 boundary.
+func truncateMatchLine(s string) string {
+	if len(s) <= gitGrepMaxLineBytes {
+		return s
+	}
+	cut := s[:gitGrepMaxLineBytes]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return fmt.Sprintf("%s …[line truncated, %d more bytes omitted]", cut, len(s)-len(cut))
 }
 
 func trimGitUsage(stderr string, exitCode int) string {
