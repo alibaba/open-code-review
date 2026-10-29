@@ -41,10 +41,18 @@ func TestFileReadDiffNamesMissingPathAndAvailablePaths(t *testing.T) {
 	if !strings.Contains(got, "diff not found") {
 		t.Errorf("the original reason must survive: %q", got)
 	}
+	// Recovering is the point of the change: the non-empty case must point the
+	// model at the paths that do have diffs and, for a file outside the change
+	// set, at file_read.
+	if !strings.Contains(got, "file_read for a file outside the reviewed set") {
+		t.Errorf("message should tell the model how to reach a file outside the change set: %q", got)
+	}
 }
 
 // Several paths in one call: the message must not pretend every path was
-// missing, or the model stops looking for the one that was.
+// missing, or the model stops looking for the one that was. The error line
+// names only the paths that failed — a served path must never be reported as
+// missing — and its diff is returned in full.
 func TestFileReadDiffReportsPartialHits(t *testing.T) {
 	p := NewFileReadDiff(NewDiffMap(map[string]string{
 		"a.go": "@@ -1 +1 @@\n-old\n+new",
@@ -59,8 +67,33 @@ func TestFileReadDiffReportsPartialHits(t *testing.T) {
 	if !strings.Contains(got, "==== FILE: a.go ====") {
 		t.Fatalf("the available diff must still be returned: %q", got)
 	}
-	if !strings.Contains(got, "b.go") {
-		t.Errorf("the missing path should be named: %q", got)
+	if !strings.Contains(got, "-old\n+new") {
+		t.Fatalf("the available diff must be returned in full, not just its header: %q", got)
+	}
+	if !strings.Contains(got, "Error: diff not found for: b.go\n") {
+		t.Errorf("the error line should name exactly the missing paths, not the served ones: %q", got)
+	}
+}
+
+// Every requested path has a diff: no part of the missing-path message may
+// appear at all.
+func TestFileReadDiffAllPathsFoundHasNoError(t *testing.T) {
+	p := NewFileReadDiff(NewDiffMap(map[string]string{
+		"a.go": "@@ -1 +1 @@\n-old\n+new",
+		"b.go": "@@ -1 +1 @@\n-old\n+new",
+	}))
+
+	got, err := p.Execute(context.Background(), map[string]any{
+		"path_array": []any{"a.go", "b.go"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "diff not found") {
+		t.Errorf("a fully served request must not carry the missing-path message: %q", got)
+	}
+	if strings.Contains(got, "Error:") {
+		t.Errorf("a fully served request must carry no error line: %q", got)
 	}
 }
 
@@ -115,6 +148,9 @@ func TestFileReadDiffEmptySnapshotClaimsNoMode(t *testing.T) {
 	}
 	if !strings.Contains(got, "a.go") {
 		t.Errorf("message should name the path it could not serve: %q", got)
+	}
+	if !strings.Contains(got, "file_read") {
+		t.Errorf("with nothing to point at, file_read is the only recovery the message can offer: %q", got)
 	}
 	for _, unwanted := range []string{"scan", "reviewed set"} {
 		if strings.Contains(got, unwanted) {
