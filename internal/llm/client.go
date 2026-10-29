@@ -720,8 +720,8 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 	}
 
 	sdkResp, err := c.sdk.Chat.Completions.New(ctx, params, opts...)
-	if errors.Is(err, io.ErrUnexpectedEOF) {
-		// The truncated response was observed as HTTP 200, so it is corrected here
+	if isResponseBodyNetworkError(err) {
+		// The truncated or severed response was observed as HTTP 200, so it is corrected here
 		// rather than in the defer: this SDK call ends now, and a second one is
 		// about to append its own attempts under the same logical request.
 		//
@@ -738,13 +738,13 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			sdkResp = retryResp
 			err = nil
 		} else {
-			if errors.Is(retryErr, io.ErrUnexpectedEOF) {
+			if isResponseBodyNetworkError(retryErr) {
 				reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassNetwork, FailurePhaseResponseDecode)
 			}
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, ctxErr
 			}
-			if !errors.Is(retryErr, io.ErrUnexpectedEOF) {
+			if !isResponseBodyNetworkError(retryErr) {
 				err = retryErr
 			}
 		}

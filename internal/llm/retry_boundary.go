@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
+	"net/url"
 
 	"github.com/openai/openai-go/v3/packages/ssestream"
 )
@@ -31,6 +33,39 @@ type streamIntegrityError struct{ reason string }
 
 func (e *streamIntegrityError) Error() string { return "OpenAI streaming response " + e.reason }
 
+// isResponseBodyNetworkError reports whether err is a network failure that
+// struck while the response body was being read, i.e. after the provider had
+// already sent its 200 headers.
+//
+// This matters because openai-go's retry loop wraps the round trip, not the
+// body read: requestconfig breaks out of the loop once it has a response, then
+// calls io.ReadAll afterwards. A connection that dies mid-body is therefore
+// never re-sent by the SDK, while the same failure before the headers is, since
+// shouldRetry returns true whenever there is no response.
+//
+// The two are told apart structurally, never by message text, which is the rule
+// classifyBoundaryError documents: net/http wraps every round-trip failure in
+// *url.Error, whereas the body read error is wrapped only by fmt.Errorf. An
+// error carrying a *url.Error has already been through the SDK's retries and
+// must not be re-sent again here.
+//
+// io.ErrUnexpectedEOF keeps the unconditional match it was given when the
+// truncated-body recovery was added, so that path behaves exactly as before.
+func isResponseBodyNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return false
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr)
+}
+
 // classifyBoundaryError classifies an error that only surfaced after the SDK
 // retry loop finished, and reports whether it recognized it at all.
 //
@@ -50,7 +85,10 @@ func classifyBoundaryError(err error) (ErrorClass, FailurePhase, bool) {
 		return ErrorClassCancelled, FailurePhaseContext, true
 	case errors.Is(err, context.DeadlineExceeded):
 		return ErrorClassTimeout, FailurePhaseContext, true
-	case errors.Is(err, io.ErrUnexpectedEOF):
+	case isResponseBodyNetworkError(err):
+		// Without this the attempt keeps the HTTP 200 it was observed as, so a
+		// request that died reading its body is reported as a successful
+		// attempt inside a failed request.
 		return ErrorClassNetwork, FailurePhaseResponseDecode, true
 	}
 
