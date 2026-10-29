@@ -286,7 +286,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/package.json`                   | `package_json.md` — NPM 의존성 / 스크립트.                                       |
 | `**/Cargo.toml`                     | `cargo_toml.md` — Rust 매니페스트.                                               |
 | `**/composer.json`                  | `composer_json.md` — Composer 의존성, 오토로딩, 스크립트, 플러그인, 패키지 설정. |
-| `**/*.{json,json5}`                 | `json.md` — 일반 JSON(`.json5`도 포함).                                          |
+| `**/*.{json,json5,jsonc}`           | `json.md` — 일반 JSON(`.json5`와 `.jsonc`도 포함).                               |
 | `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md` — GitHub Actions 워크플로 YAML.                            |
 | `.github/**/*.{yaml,yml}`           | `github_config.md` — 그 밖의 `.github` 설정 YAML.                                |
 | `**/*.{yaml,yml}`                   | `yaml.md`                                                                        |
