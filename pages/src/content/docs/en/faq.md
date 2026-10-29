@@ -224,9 +224,10 @@ is usually one of:
   session JSONL — if the same tool result repeats, that's why.
 - The group is genuinely large or context-heavy and 100 rounds isn't
   enough. Raise the cap with `--max-tools <n>` (e.g., `--max-tools
-  150`). The flag only ever *raises* the limit — a value below the
-  template default of `100` is ignored, values 1–49 are clamped up to
-  `50`, and `0` keeps the template default.
+  150`). For `ocr review` the flag is a cap in both directions: above
+  the template default of `100` it raises the limit, below it lowers it,
+  so it doubles as a cost guard. Values 1–49 are clamped up to `50`, and
+  `0` keeps the template default. `ocr scan`'s flag still only raises.
 - The model does not support native tool calling at all (common with
   local models) — see
   ["No tool calls parsed" (local models / Ollama)](#no-tool-calls-parsed-local-models-ollama).
