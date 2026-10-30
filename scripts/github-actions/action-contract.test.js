@@ -127,7 +127,20 @@ function parseSteps(text) {
       }
     }
 
-    steps.push({ name: current.name, run, env, index: current.index });
+    let script;
+    const scriptMarker = rawLines.findIndex((line) => /^        script:\s*\|\s*$/.test(line));
+    if (scriptMarker >= 0) {
+      const body = [];
+      for (let index = scriptMarker + 1; index < rawLines.length; index += 1) {
+        const line = rawLines[index];
+        if (line.trim() === "") body.push("");
+        else if (/^          /.test(line)) body.push(line.slice(10));
+        else break;
+      }
+      script = body.join("\n");
+    }
+
+    steps.push({ name: current.name, run, script, env, index: current.index });
     current = undefined;
   }
 
@@ -2055,6 +2068,24 @@ function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
   );
 }
 
+function testPostReviewCommentsWiresAppSlug() {
+  const post = stepNamed("Post review comments");
+  assert.ok(post, "action.yml must retain the Post review comments step");
+  assert.strictEqual(
+    post.env.OCR_CHECKPOINT_APP_SLUG,
+    "${{ inputs.github_token == github.token && 'github-actions' || '' }}",
+    "the posting step must expose OCR_CHECKPOINT_APP_SLUG"
+  );
+  assert.ok(post.script, "the posting step must define a github-script body");
+  const call = post.script.match(/runPostReviewComments\(\{[\s\S]*?\n\}\);/);
+  assert.ok(call, "the posting script must call runPostReviewComments");
+  assert.match(
+    call[0],
+    /^\s*appSlug:\s*process\.env\.OCR_CHECKPOINT_APP_SLUG\s*\|\|\s*(['"])\1\s*,?\s*$/m,
+    "the posting call must forward the app slug"
+  );
+}
+
 const TESTS = [
   ["review_task_timeout names and describes the CLI task deadline", testReviewTaskTimeoutInputNameAndScope],
   ["llm_timeout defaults to the CLI's 5-minute timeout", testLlmTimeoutInputDefault],
@@ -2106,6 +2137,7 @@ const TESTS = [
   ["the resolved PR number reaches the fork-safe head fetch", testResolvedPrNumberReachesTheHeadFetch],
   ["both github-script steps read the resolved PR number", testPrNumberWiredIntoBothGithubScriptSteps],
   ["GitHub Actions README documents PR number resolution", testExampleReadmeDocumentsPrNumberResolution],
+  ["Post review comments wires the app slug", testPostReviewCommentsWiresAppSlug],
 ];
 
 function main() {

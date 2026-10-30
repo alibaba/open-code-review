@@ -121,6 +121,14 @@ async function runPostReviewComments({
   // resolve, anything else (including the default) is a hard no-op that issues
   // zero GraphQL calls.
   resolveOutdated = "",
+  // The GitHub App slug that owns this action's summary comment, when known
+  // (the default GITHUB_TOKEN is always "github-actions"). Pins the summary
+  // anchor's identity check so a different bot quoting the marker cannot be
+  // rewritten in place. Empty when the caller supplied its own token: an
+  // installation token cannot ask GitHub which app it is, so that case keeps
+  // the wider "any bot" check rather than pinning to a slug that would reject
+  // our own summary too.
+  appSlug = "",
 }) {
   const log = (msg) => {
     if (core && typeof core.info === "function") core.info(msg);
@@ -129,6 +137,23 @@ async function runPostReviewComments({
   const out = (name, value) => {
     if (core && typeof core.setOutput === "function") core.setOutput(name, value);
   };
+
+  // One identity lookup shared by every caller that may need it: the summary
+  // author gate (which needs it for a PAT), incremental dedupe, and the resolve
+  // gate. Memoized on the PROMISE, so a run that needs it twice issues a single
+  // request — those paths used to call it separately, and under a token that
+  // 403s that meant one failed request and one warning line each — while a run
+  // that needs it zero times still issues none.
+  //
+  // The resolve caller looks dead, because botLogin is null under every Actions
+  // token, and it is not. Under a PAT, getAuthenticated() succeeds and returns
+  // the human's login, and shouldResolveThread's `!rootIsBot && rootLogin !==
+  // botLogin` branch is the only thing separating "our own comment, posted via
+  // PAT" from "a human quoting our marker". Drop this call and the feature
+  // silently resolves nothing on every PAT run. The summary gate below leans on
+  // the same lookup for the same reason: a PAT-posted summary is a User-typed
+  // comment, and that login is the only identity GitHub offers for it.
+  const authenticatedLogin = makeSelfLoginResolver(github, log);
 
   const owner = context.repo.owner;
   const repo = context.repo.repo;
@@ -275,7 +300,18 @@ async function runPostReviewComments({
         `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview** encountered an error:\n${fencedBlock(stderr)}`,
         null
       );
-      const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log });
+      const posted = await postSummary({
+        github,
+        owner,
+        repo,
+        prNumber,
+        body,
+        sticky: stickySummary,
+        preserveMarker,
+        appSlug,
+        resolveSelfLogin: authenticatedLogin,
+        log,
+      });
       stats.summaryUrl = posted.url;
     }
     setStatsOutputs(out, stats);
@@ -298,7 +334,18 @@ async function runPostReviewComments({
     const message = result.message || "No comments generated. Looks good to me.";
     // A clean run is still a complete run: this path advances the checkpoint.
     const body = appendCheckpoint(`${SUMMARY_MARKER}\n✅ **OpenCodeReview**: ${message}${rangeNote}`, result.manifest);
-    const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log });
+    const posted = await postSummary({
+      github,
+      owner,
+      repo,
+      prNumber,
+      body,
+      sticky: stickySummary,
+      preserveMarker,
+      appSlug,
+      resolveSelfLogin: authenticatedLogin,
+      log,
+    });
     stats.summaryUrl = posted.url;
     setStatsOutputs(out, stats);
     return;
@@ -372,24 +419,6 @@ async function runPostReviewComments({
     reviewComments.push({ comment, reviewComment, id });
   }
 
-  // One lookup shared by both callers below (incremental dedupe and the resolve
-  // gate). Memoized on the PROMISE, so a run that needs it twice issues a single
-  // request — both paths used to call it, and under a token that 403s that meant
-  // two failed requests and two warning lines — while a run that needs it zero
-  // times still issues none.
-  //
-  // The resolve caller looks dead, because botLogin is null under every Actions
-  // token, and it is not. Under a PAT, getAuthenticated() succeeds and returns
-  // the human's login, and shouldResolveThread's `!rootIsBot && rootLogin !==
-  // botLogin` branch is the only thing separating "our own comment, posted via
-  // PAT" from "a human quoting our marker". Drop this call and the feature
-  // silently resolves nothing on every PAT run.
-  let authenticatedLoginPromise = null;
-  const authenticatedLogin = () => {
-    if (!authenticatedLoginPromise) authenticatedLoginPromise = getAuthenticatedLogin(github, log);
-    return authenticatedLoginPromise;
-  };
-
   // Incremental filtering (non-destructive): drop current inline comments
   // whose (path, line range) overlaps an existing bot review comment, so we
   // only append comments on lines not yet covered. History is never deleted.
@@ -437,6 +466,8 @@ async function runPostReviewComments({
     prNumber,
     sticky: stickySummary,
     tag: SUMMARY_TAG,
+    appSlug,
+    resolveSelfLogin: authenticatedLogin,
     body: wrapSummary(
       buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings)
     ),
@@ -540,6 +571,8 @@ async function runPostReviewComments({
     anchor,
     sticky: stickySummary,
     tag: SUMMARY_TAG,
+    appSlug,
+    resolveSelfLogin: authenticatedLogin,
     body: wrapSummary(appendCheckpoint(summaryBody, result.manifest)),
     preserveMarker,
     log,
@@ -1059,10 +1092,29 @@ function setStatsOutputs(out, stats, batchCounters, batchSize) {
 
 // ---- Summary posting (sticky vs new) ----
 
-async function postSummary({ github, owner, repo, prNumber, body, sticky, preserveMarker = false, log }) {
+async function postSummary({
+  github,
+  owner,
+  repo,
+  prNumber,
+  body,
+  sticky,
+  preserveMarker = false,
+  appSlug = "",
+  resolveSelfLogin = null,
+  log,
+}) {
   const fullBody = body;
   if (sticky) {
-    const existing = await findExistingSummaryComment({ github, owner, repo, prNumber, log });
+    const existing = await findExistingSummaryComment({
+      github,
+      owner,
+      repo,
+      prNumber,
+      appSlug,
+      resolveSelfLogin,
+      log,
+    });
     if (existing) {
       const { data: updated } = await github.rest.issues.updateComment({
         owner,
@@ -1082,7 +1134,7 @@ async function postSummary({ github, owner, repo, prNumber, body, sticky, preser
   return { id: created.id, url: created.html_url, updated: false };
 }
 
-async function findExistingSummaryComment({ github, owner, repo, prNumber, log }) {
+async function findExistingSummaryComment({ github, owner, repo, prNumber, appSlug = "", resolveSelfLogin = null, log }) {
   const comments = await readAllPages("listIssueComments", (page, per_page) =>
     github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page, page }), log
   );
@@ -1090,6 +1142,20 @@ async function findExistingSummaryComment({ github, owner, repo, prNumber, log }
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body;
     if (typeof body === "string" && body.includes(SUMMARY_MARKER)) {
+      // The marker is plain Markdown, so anyone can quote it verbatim — a human
+      // dispositioning a review, another tool citing one, or a DIFFERENT bot
+      // echoing one. postSummary rewrites whatever this returns IN PLACE, so
+      // accepting a substring match on someone else's comment destroys it
+      // silently, with no error and no way to tell an overwrite from a comment
+      // that never existed. isSummaryAuthorOurs is the same gate the checkpoint
+      // reader applies to this comment; appSlug pins it to the app that owns the
+      // OCR summary when that identity is known (the default GITHUB_TOKEN is
+      // always the "github-actions" app), so a bot-typed writer from another app
+      // cannot be selected. An empty slug keeps the wider "any bot" check for a
+      // caller-supplied token, plus the PAT case: a user-to-server token posts
+      // as a User, so the run has to name its own account to recognize its
+      // summary at all.
+      if (!(await isSummaryAuthorOurs(comments[i], { appSlug, resolveSelfLogin }))) continue;
       return comments[i];
     }
   }
@@ -1108,13 +1174,35 @@ async function findExistingSummaryComment({ github, owner, repo, prNumber, log }
 // Sticky matches the persistent cross-run marker (SUMMARY_MARKER); non-sticky
 // matches this run's tag (SUMMARY_TAG) so each run gets its own comment while
 // retries within a run reuse it. Throws on read failure so callers can degrade.
-async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log }) {
+//
+// The marker match alone is NOT enough to claim a comment: the body is plain
+// Markdown, so any human (or another tool) can quote a prior review's marker
+// verbatim. Both callers below treat the match as "this comment is ours" and
+// rewrite it in place, so a substring hit on somebody else's comment silently
+// destroys it — and the comment most worth quoting is exactly the durable
+// evidence a downstream gate reads. The author gate therefore always applies.
+//
+// The checkpoint reader no longer comes through here: it needs to tell "a
+// comment quoting the marker exists but is not ours" (author_unverified) from
+// "there is no summary yet" (no_summary_comment), so it scans the list itself.
+async function findSummaryIssueComment({
+  github,
+  owner,
+  repo,
+  prNumber,
+  sticky,
+  tag,
+  appSlug = "",
+  resolveSelfLogin = null,
+  log,
+}) {
   const comments = await readAllPages("listIssueComments", (page, per_page) =>
     github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page, page }), log
   );
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body || "";
     if (sticky ? body.includes(SUMMARY_MARKER) : body.includes(tag)) {
+      if (!(await isSummaryAuthorOurs(comments[i], { appSlug, resolveSelfLogin }))) continue;
       return comments[i];
     }
   }
@@ -1125,10 +1213,31 @@ async function findSummaryIssueComment({ github, owner, repo, prNumber, sticky, 
 // its timeline position is pinned above the not-yet-posted review. Returns
 // { id, url } for the existing/created comment, or null when the existence
 // check fails (read API unavailable) — callers then defer to finalizeSummary.
-async function ensureSummaryAnchor({ github, owner, repo, prNumber, body, sticky, tag, log }) {
+async function ensureSummaryAnchor({
+  github,
+  owner,
+  repo,
+  prNumber,
+  body,
+  sticky,
+  tag,
+  appSlug = "",
+  resolveSelfLogin = null,
+  log,
+}) {
   let existing = null;
   try {
-    existing = await findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log });
+    existing = await findSummaryIssueComment({
+      github,
+      owner,
+      repo,
+      prNumber,
+      sticky,
+      tag,
+      appSlug,
+      resolveSelfLogin,
+      log,
+    });
   } catch (e) {
     log(`[summary] cannot check for existing summary before review (${e.message}); skipping anchor.`);
     return null;
@@ -1151,7 +1260,20 @@ async function ensureSummaryAnchor({ github, owner, repo, prNumber, body, sticky
 // known, update it directly (no extra read). Otherwise upsert: find then update
 // or create. Returns { id, url }, or null when the read API is unavailable and
 // the summary cannot be safely written without risking a duplicate.
-async function finalizeSummary({ github, owner, repo, prNumber, anchor, body, sticky, tag, preserveMarker = false, log }) {
+async function finalizeSummary({
+  github,
+  owner,
+  repo,
+  prNumber,
+  anchor,
+  body,
+  sticky,
+  tag,
+  preserveMarker = false,
+  appSlug = "",
+  resolveSelfLogin = null,
+  log,
+}) {
   const keep = (newBody, oldBody) => (preserveMarker ? preserveCheckpointMarker(newBody, oldBody) : newBody);
   if (anchor && anchor.id != null) {
     const { data: updated } = await github.rest.issues.updateComment({
@@ -1164,7 +1286,17 @@ async function finalizeSummary({ github, owner, repo, prNumber, anchor, body, st
   }
   let existing = null;
   try {
-    existing = await findSummaryIssueComment({ github, owner, repo, prNumber, sticky, tag, log });
+    existing = await findSummaryIssueComment({
+      github,
+      owner,
+      repo,
+      prNumber,
+      sticky,
+      tag,
+      appSlug,
+      resolveSelfLogin,
+      log,
+    });
   } catch (e) {
     log(`[summary] cannot check for existing summary at finalize (${e.message}); skipping to avoid duplicate.`);
     return null;
@@ -2988,19 +3120,61 @@ function checkpointAuthorSlug(comment) {
 // author_unverified until that comment is deleted and reposted. That is
 // fail-closed — a wider review, never a wrong one — and the log line below
 // names the slug that was expected so it is diagnosable.
-function isCheckpointAuthorOurs(comment, appSlug = "") {
+//
+// selfLogin is the exception a user-to-server token needs, and it is narrow on
+// purpose. A PAT posts as a User, so nothing on the comment attests a bot, and
+// refusing every User writer makes the run treat its own summary as a plant:
+// the anchor is never found, so every run posts a duplicate summary and the
+// checkpoint never advances. GitHub does attest that case, just on the token
+// instead of the comment — GET /user succeeds for a PAT and fails for both
+// Actions tokens — so the two logins are compared, case-insensitively as
+// GitHub compares them. The marker must also LEAD the body: our summary opens
+// with it, while an account discussing a review quotes it mid-body, and the
+// destructive callers rewrite whatever passes this gate.
+function isCheckpointAuthorOurs(comment, appSlug = "", selfLogin = "") {
   const user = (comment && comment.user) || null;
   if (!user) return false;
-  // performed_via_github_app is set for a user-to-server token too, i.e. on a
-  // comment a HUMAN wrote through some App (a CLI, a browser integration). The
-  // App slug there attests the client, not the author, so a User-typed account
-  // is never ours no matter what app it posted through — otherwise a fork
-  // contributor could plant a marker just by commenting through any App.
-  if (user.type === "User") return false;
+  if (user.type === "User") {
+    // performed_via_github_app is set for a user-to-server token too, i.e. on a
+    // comment a HUMAN wrote through some App (a CLI, a browser integration). The
+    // App slug there attests the client, not the author, so a User-typed account
+    // is not ours unless selfLogin names it — otherwise a fork contributor could
+    // plant a marker just by commenting through any App. A pinned appSlug means
+    // this run holds an App token, whose comments are never User-typed, so the
+    // PAT branch cannot apply.
+    if (appSlug || !selfLogin) return false;
+    if (typeof user.login !== "string" || user.login.toLowerCase() !== selfLogin.toLowerCase()) return false;
+    return typeof comment.body === "string" && comment.body.trimStart().startsWith(SUMMARY_MARKER);
+  }
   const slug = checkpointAuthorSlug(comment);
   if (slug === "" && user.type !== "Bot") return false;
   if (appSlug) return slug === appSlug;
   return true;
+}
+
+// Memoized GET /user, for callers that want the login only if they turn out to
+// need it. The lookup is deliberately lazy: it 403s under both Actions tokens,
+// so a run whose summary is bot-attributed — every run with the default token —
+// must not pay a failed request and a warning line for an identity the gate
+// never consults. Callers that already hold the promise pass it in instead.
+function makeSelfLoginResolver(github, log) {
+  let promise = null;
+  return () => {
+    if (!promise) promise = getAuthenticatedLogin(github, log);
+    return promise;
+  };
+}
+
+// The author gate plus the one identity a PAT run can have. Bot-attributed
+// comments are decided entirely by isCheckpointAuthorOurs; only a User-typed
+// writer with no pinned app is worth a GET /user, which is why the lookup is
+// resolved here and not before the scan.
+async function isSummaryAuthorOurs(comment, { appSlug = "", resolveSelfLogin = null } = {}) {
+  if (isCheckpointAuthorOurs(comment, appSlug)) return true;
+  const user = (comment && comment.user) || null;
+  if (appSlug || !resolveSelfLogin || !user || user.type !== "User") return false;
+  const selfLogin = await resolveSelfLogin();
+  return selfLogin ? isCheckpointAuthorOurs(comment, appSlug, selfLogin) : false;
 }
 
 // Read the checkpoint payload out of this PR's sticky summary comment, with the
@@ -3008,49 +3182,63 @@ function isCheckpointAuthorOurs(comment, appSlug = "") {
 //   reason "ok"              -> payload is the marker's decoded payload and raw
 //                               is the marker string, byte for byte as read
 //   "no_summary_comment"     -> no sticky summary exists yet
-//   "author_unverified"      -> GitHub does not attribute the summary to a bot
-//                               writer (or not to `appSlug`, when one is given)
+//   "author_unverified"      -> marker-bearing comments exist, none written by us
+//                               (by `appSlug` when one is given, by `selfLogin`
+//                               under a PAT)
 //   "corrupt_checkpoint"     -> no readable marker in the body
 //   "resolver_error"         -> the comment could not be listed at all
 //
 // appSlug optionally tightens the author check to one specific app (see
-// isCheckpointAuthorOurs); empty means "any writer GitHub attributes to a bot".
-async function readCheckpointComment({ github, owner, repo, prNumber, appSlug = "", log }) {
-  let comment;
+// isCheckpointAuthorOurs); empty means "any writer GitHub attributes to a bot",
+// plus the run's own account when a user-to-server token makes one knowable.
+async function readCheckpointComment({ github, owner, repo, prNumber, appSlug = "", resolveSelfLogin = null, log }) {
+  let comments;
   try {
-    comment = await findSummaryIssueComment({
-      github,
-      owner,
-      repo,
-      prNumber,
-      sticky: true,
-      tag: "",
-      log,
-    });
+    comments = await readAllPages("listIssueComments", (page, per_page) =>
+      github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page, page }), log
+    );
   } catch (e) {
     log(`[checkpoint] cannot list issue comments (${e.message}); reviewing the full range.`);
     return { reason: "resolver_error", payload: null, raw: "" };
   }
-  if (!comment) return { reason: "no_summary_comment", payload: null, raw: "" };
 
-  if (!isCheckpointAuthorOurs(comment, appSlug)) {
+  // Scan from the newest marker-bearing comment for one that passes the author
+  // gate, rather than gating on whichever one happens to be newest. A single
+  // quote of our summary is enough to put a comment we do not own on top, and
+  // anchoring there made the checkpoint author_unverified for good — the gate
+  // reported a permanent failure for a condition that had already recovered,
+  // since our own valid summary is still right below the quote. The list is
+  // fetched once: this is the same read the "is there any summary at all"
+  // answer comes from, so the distinction costs no extra call.
+  let sawMarker = false;
+  // The action's checkpoint step calls this without a resolver, so build the
+  // lazy one here; postSummary's callers already hold a shared promise.
+  const selfLogin = resolveSelfLogin || makeSelfLoginResolver(github, log);
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const body = comments[i].body || "";
+    if (!body.includes(SUMMARY_MARKER)) continue;
+    sawMarker = true;
+    if (!(await isSummaryAuthorOurs(comments[i], { appSlug, resolveSelfLogin: selfLogin }))) continue;
+
+    const payload = parseCheckpointMarker(body);
+    if (!payload) return { reason: "corrupt_checkpoint", payload: null, raw: "" };
+    // parseCheckpointMarker just proved the body holds exactly one marker, so the
+    // exec cannot miss and the fallback is unreachable today. It stays so that a
+    // future edit to that guard degrades into an empty carry — a wider next range
+    // — instead of a TypeError on a null match.
+    const raw = (CHECKPOINT_MARKER_RE.exec(body) || [""])[0];
+    return { reason: "ok", payload, raw };
+  }
+
+  if (sawMarker) {
     log(
       appSlug
-        ? `[checkpoint] summary comment was not written by the "${appSlug}" app; reviewing the full range.`
-        : "[checkpoint] summary comment was not written by a verifiable bot identity; reviewing the full range."
+        ? `[checkpoint] no summary comment was written by the "${appSlug}" app; reviewing the full range.`
+        : "[checkpoint] no summary comment was written by a verifiable bot identity; reviewing the full range."
     );
     return { reason: "author_unverified", payload: null, raw: "" };
   }
-
-  const body = comment.body || "";
-  const payload = parseCheckpointMarker(body);
-  if (!payload) return { reason: "corrupt_checkpoint", payload: null, raw: "" };
-  // parseCheckpointMarker just proved the body holds exactly one marker, so the
-  // exec cannot miss and the fallback is unreachable today. It stays so that a
-  // future edit to that guard degrades into an empty carry — a wider next range
-  // — instead of a TypeError on a null match.
-  const raw = (CHECKPOINT_MARKER_RE.exec(body) || [""])[0];
-  return { reason: "ok", payload, raw };
+  return { reason: "no_summary_comment", payload: null, raw: "" };
 }
 
 // The ordered gate. Returns exactly eight keys:
@@ -3237,6 +3425,8 @@ module.exports = {
   readCheckpointComment,
   resolveCheckpointRange,
   isCheckpointAuthorOurs,
+  isSummaryAuthorOurs,
+  makeSelfLoginResolver,
   preserveCheckpointMarker,
   CHECKPOINT_VERSION,
   listBotReviewThreads,
