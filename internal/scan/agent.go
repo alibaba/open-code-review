@@ -328,7 +328,6 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	scanSpan.End()
 
 	a.items = items
-	a.injectScanContentMap()
 	a.args.Tools.Freeze()
 
 	totalDiscovered := len(a.items)
@@ -408,25 +407,6 @@ func (a *Agent) lookupDiff(path string) *model.Diff {
 		}
 	}
 	return nil
-}
-
-// injectScanContentMap fills the file_read_diff tool's DiffMap with full
-// file content keyed by path, so if the model calls it the tool returns
-// the whole file rather than failing.
-func (a *Agent) injectScanContentMap() {
-	m := make(map[string]string, len(a.items))
-	for i := range a.items {
-		it := &a.items[i]
-		if it.Path != "" {
-			m[it.Path] = it.Content
-		}
-	}
-	dm := tool.NewDiffMap(m)
-	if p, ok := a.args.Tools.Get(tool.FileReadDiff.Name()); ok {
-		if frd, ok := p.(*tool.FileReadDiffProvider); ok {
-			frd.SetDiffMap(dm)
-		}
-	}
 }
 
 type scanSelection struct {

@@ -61,7 +61,7 @@ func runManualReview(t *testing.T, srv *fakeLLM) manualResult {
 
 	mode := tool.ParseReviewMode("HEAD~1", "HEAD", "")
 	fileReader := &tool.FileReader{RepoDir: cc.RepoDir, Mode: mode, Ref: "HEAD", Runner: cc.GitRunner}
-	tools := buildToolRegistry(rt.Collector, fileReader)
+	tools := buildReviewToolRegistry(rt.Collector, fileReader)
 
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,

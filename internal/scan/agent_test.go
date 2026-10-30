@@ -312,33 +312,6 @@ func selectScanItemsForTest(t *testing.T, a *Agent, items []model.ScanItem) []mo
 	return selectedScanItems(a.selectScanItems(items))
 }
 
-func TestInjectScanContentMap(t *testing.T) {
-	tpl := makeTemplateWithFullScan()
-	a := newAgentForTest(t, tpl)
-	a.args.Tools.Register(tool.NewFileReadDiff(tool.DiffMap{}))
-
-	a.items = []model.ScanItem{
-		{Path: "x.go", Content: "package x"},
-		{Path: "y.go", Content: "package y"},
-	}
-	a.injectScanContentMap()
-
-	p, ok := a.args.Tools.Get(tool.FileReadDiff.Name())
-	if !ok {
-		t.Fatal("file_read_diff not registered")
-	}
-	frd := p.(*tool.FileReadDiffProvider)
-	res, err := frd.Execute(t.Context(), map[string]any{
-		"path_array": []any{"x.go", "y.go", "missing.go"},
-	})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if !strings.Contains(res, "package x") || !strings.Contains(res, "package y") {
-		t.Errorf("missing scan content:\n%s", res)
-	}
-}
-
 func TestNewAgent_SetsSessionMode(t *testing.T) {
 	a := NewAgent(Args{Template: makeTemplateWithFullScan()})
 	if a.session.ReviewMode != session.ReviewModeFullScan {

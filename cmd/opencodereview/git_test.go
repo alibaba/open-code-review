@@ -4,11 +4,14 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/tool"
 )
 
 func initTestGitRepo(t *testing.T) string {
@@ -179,9 +182,28 @@ func TestValidateReviewRefs_EmptySkipped(t *testing.T) {
 	}
 }
 
-func TestBuildToolRegistry(t *testing.T) {
-	reg := buildToolRegistry(nil, nil)
-	if reg == nil {
-		t.Fatal("expected non-nil registry")
+func TestBuildReviewToolRegistry(t *testing.T) {
+	reg := buildReviewToolRegistry(nil, nil)
+	for _, name := range []string{"file_read", "file_find", "code_search", "code_comment"} {
+		if _, ok := reg.Get(name); !ok {
+			t.Errorf("review tools must include %s", name)
+		}
+	}
+	p, ok := reg.Get(tool.FileReadDiff.Name())
+	if !ok {
+		t.Fatal("review tools must include file_read_diff")
+	}
+	frd, ok := p.(*tool.FileReadDiffProvider)
+	if !ok {
+		t.Fatalf("unexpected diff provider type: %T", p)
+	}
+	const diff = "@@ -1 +1 @@\n-old\n+new\n"
+	frd.SetDiffMap(tool.NewDiffMap(map[string]string{"main.go": diff}))
+	got, err := p.Execute(context.Background(), map[string]any{"path_array": []any{"main.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, diff) {
+		t.Fatalf("review diff = %q, want %q", got, diff)
 	}
 }

@@ -205,7 +205,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Ref:     fileReadRef(mode, opts, sealedInput),
 		Runner:  cc.GitRunner,
 	}
-	tools := buildToolRegistry(rt.Collector, fileReader)
+	tools := buildReviewToolRegistry(rt.Collector, fileReader)
 
 	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
 	defer closeReviewMCPClients(mcpClients)
@@ -610,7 +610,7 @@ var closeReviewMCPClients = func(clients []*mcp.Client) {
 	}
 }
 
-func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *tool.Registry {
+func buildReviewToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *tool.Registry {
 	reg := tool.NewRegistry()
 	reg.Register(tool.NewFileRead(fr))
 	reg.Register(tool.NewFileFind(fr))
