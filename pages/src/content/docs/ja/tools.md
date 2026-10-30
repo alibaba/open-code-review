@@ -197,8 +197,11 @@ hunk ヘッダー `@@ -x,y +m,n @@` から範囲を計算すべきです——�
 + query := "SELECT id"
 ```
 
-あるパスが変更セットに含まれていない場合、そのエントリは静かに省略されます。要求されたパスが**いずれも**変更セットに含まれていない場合、ツールは
-`Error: diff not found for the requested paths` を返します。空の `path_array` は
+変更セットに含まれていないパスは静かに捨てられるわけではありません。
+`Error: diff not found for: <path>` の中で名前が挙げられ、見つかったパスの diff は
+そのエラーより先に返されます。他のファイルの diff がある実行では、メッセージはそれらを
+列挙し（`Diffs exist for: ...`）、スペルミスのパスを修正できるようにします。diff が
+まったくない実行では、代わりに `file_read` を使うよう案内します。空の `path_array` は
 `Error: no files found` を返します。
 
 ## `file_find`
