@@ -369,11 +369,11 @@ func buildFileFilter(layers ...*ProjectRule) *FileFilter {
 }
 
 func loadGlobalRule() (*ProjectRule, error) {
-	home, err := os.UserHomeDir()
+	home, err := pathutil.OCRHome()
 	if err != nil {
 		return nil, nil
 	}
-	path := filepath.Join(home, ".opencodereview", "rule.json")
+	path := filepath.Join(home, "rule.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
