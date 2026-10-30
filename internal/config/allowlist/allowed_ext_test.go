@@ -225,6 +225,14 @@ func TestAllowlistKeepsEveryTestedExtension(t *testing.T) {
 	}
 }
 
+func TestIsAllowedExtStarlark(t *testing.T) {
+	for _, ext := range []string{".star", ".bzl", ".STAR", ".BZL"} {
+		if !IsAllowedExt(ext) {
+			t.Errorf("IsAllowedExt(%q) = false, want true for Starlark", ext)
+		}
+	}
+}
+
 func TestIsExcludedPath(t *testing.T) {
 	tests := []struct {
 		name string
