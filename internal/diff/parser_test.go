@@ -90,6 +90,35 @@ index 1234567..89abcde 100644
 	}
 }
 
+// TestParseDiffText_PathEndingInSpaceBDir guards against the header being split
+// inside a pathname: a directory whose name ends in " b" produces an unquoted
+// "diff --git a/x b/y.go b/x b/y.go" line, and a lazy old-path capture stops at
+// the first " b/" instead of the real separator.
+func TestParseDiffText_PathEndingInSpaceBDir(t *testing.T) {
+	diffText := "diff --git a/x b/y.go b/x b/y.go\n" +
+		"index 789ca71..aa33d82 100644\n" +
+		"--- a/x b/y.go\n" +
+		"+++ b/x b/y.go\n" +
+		"@@ -1 +1,2 @@\n" +
+		" package y\n" +
+		"+var Changed = true\n"
+
+	diffs, err := ParseDiffText(context.Background(), diffText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d", len(diffs))
+	}
+	d := diffs[0]
+	if d.OldPath != "x b/y.go" {
+		t.Errorf("OldPath = %q, want %q", d.OldPath, "x b/y.go")
+	}
+	if d.NewPath != "x b/y.go" {
+		t.Errorf("NewPath = %q, want %q", d.NewPath, "x b/y.go")
+	}
+}
+
 // TestParseDiffText_PureRename covers a 100% similarity rename, which carries
 // no hunks and no ---/+++ lines at all.
 func TestParseDiffText_PureRename(t *testing.T) {

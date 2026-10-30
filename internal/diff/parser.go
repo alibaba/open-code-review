@@ -120,6 +120,17 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 		case strings.HasPrefix(line, "rename to "):
 			current.NewPath = unquoteRenamePath(strings.TrimPrefix(line, "rename to "))
 			current.IsRenamed = true
+		// The "--- a/" and "+++ b/" lines are unambiguous even when the
+		// "diff --git" header is not: git does not quote a space, so a path
+		// whose directory ends in " b" splits the header at the wrong " b/"
+		// (see TestParseDiffText_PathEndingInSpaceBDir). The path on these
+		// lines is everything after the fixed prefix, so they are authoritative
+		// for the unquoted case; quoted paths render as `--- "a/...` and are
+		// left to the header parser.
+		case !inHunk && strings.HasPrefix(line, "--- a/"):
+			current.OldPath = strings.TrimPrefix(line, "--- a/")
+		case !inHunk && strings.HasPrefix(line, "+++ b/"):
+			current.NewPath = strings.TrimPrefix(line, "+++ b/")
 		// git emits "--- /dev/null" / "+++ /dev/null" without a/ b/ prefixes.
 		// Guarded by inHunk: inside a hunk the same strings can be content
 		// (e.g. an added line "++ /dev/null").
