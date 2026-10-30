@@ -26,9 +26,9 @@
             <td class="col-mode">{{if $s.ReviewMode}}{{$s.ReviewMode}}{{else}}-{{end}}</td>
             <td class="col-model">{{$s.Model}}</td>
             <td class="col-files">{{$s.FileCount}}</td>
-            <td>{{if $s.Aborted}}aborted{{else if $s.Legacy}}legacy{{else}}{{$s.TerminalState}}{{end}}</td>
+            <td>{{template "session-status" $s}}</td>
             <td class="col-comments">{{if $s.CommentCount}}{{$s.CommentCount}}{{else}}-{{end}}</td>
-            <td class="col-duration">{{formatDuration $s.DurationSec}}</td>
+            <td class="col-duration">{{if $s.Running}}<span data-live-duration data-started="{{$s.Timestamp.Unix}}" data-ended="{{$s.EndTime.Unix}}">{{formatDuration $s.DurationSec}}</span>{{else}}{{formatDuration $s.DurationSec}}{{end}}</td>
             <td class="col-started">{{formatTime $s.Timestamp}}</td>
             {{/* Rows are newest-first, so the next-older session is index+1.
                  The oldest row has no older neighbour to compare against. */}}
@@ -42,6 +42,7 @@
 <script src="/static/pager.js"></script>
 <script src="/static/a11y.js"></script>
 <script src="/static/sessions.js"></script>
+<script src="/static/live.js"></script>
 {{else}}
 <p>No sessions found for this repository.</p>
 {{end}}
@@ -50,3 +51,8 @@
 </html>
 
 {{define "breadcrumbs"}}<span class="sep">/</span><span class="current">{{.RepoName}}</span>{{end}}
+
+{{/* Status cell for the sessions table. Invoked with a SessionSummary as dot.
+     Running is checked first: an in-flight run has written no session_end, so
+     Aborted is also true for it and would otherwise win. */}}
+{{define "session-status"}}{{if .Running}}<span class="session-status status-running" data-live-status>running</span>{{else if .Aborted}}<span class="session-status status-aborted">aborted</span>{{else if .Legacy}}<span class="session-status status-legacy">legacy</span>{{else}}<span class="session-status status-{{.TerminalState}}">{{.TerminalState}}</span>{{end}}{{end}}
