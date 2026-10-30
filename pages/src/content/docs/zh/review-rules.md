@@ -274,7 +274,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/package.json`                   | `package_json.md`——NPM 依赖 / 脚本。                                  |
 | `**/Cargo.toml`                     | `cargo_toml.md`——Rust manifest。                                      |
 | `**/composer.json`                  | `composer_json.md`——Composer 依赖、自动加载、脚本、插件和包配置。     |
-| `**/*.{json,json5}`                 | `json.md`——通用 JSON（也匹配 `.json5`）。                             |
+| `**/*.{json,json5,jsonc}`           | `json.md`——通用 JSON（也匹配 `.json5` 和 `.jsonc`）。                  |
 | `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md`——GitHub Actions 工作流 YAML。                   |
 | `.github/**/*.{yaml,yml}`           | `github_config.md`——其他 `.github` 配置 YAML。                        |
 | `**/*.{yaml,yml}`                   | `yaml.md`                                                             |
