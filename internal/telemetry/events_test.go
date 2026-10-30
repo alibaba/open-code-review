@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
+	"github.com/alibaba/open-code-review/internal/progress"
 	"github.com/alibaba/open-code-review/internal/stdout"
 )
 
@@ -224,7 +225,7 @@ func TestPrintToolCallFinished(t *testing.T) {
 
 func TestPrintToolCallError(t *testing.T) {
 	out := captureStderr(t, func() {
-		PrintToolCallError("file_read", fmt.Errorf("permission denied"))
+		PrintToolCallError("task-1", "file_read", fmt.Errorf("permission denied"))
 	})
 	if !strings.Contains(out, "✘ file_read") {
 		t.Errorf("expected tool name with X mark, got %q", out)
@@ -275,5 +276,34 @@ func TestSummarizeArgs(t *testing.T) {
 				t.Errorf("summarizeArgs(%v) = %q, want %q", tc.args, got, tc.want)
 			}
 		})
+	}
+}
+
+// The tool error is published, not written straight to stderr, so the
+// dashboard can show it as a tool error rather than as a generic warning.
+// Stderr keeps it on the same stream it has always used.
+func TestPrintToolCallErrorPublishesAToolError(t *testing.T) {
+	var got []progress.Event
+	restore := progress.SetSinkForTest(func(ev progress.Event) {
+		got = append(got, ev)
+	})
+	defer restore()
+
+	PrintToolCallError("task-1", "file_read", fmt.Errorf("permission denied"))
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(got))
+	}
+	if got[0].Kind != progress.KindToolError {
+		t.Errorf("kind = %v, want KindToolError", got[0].Kind)
+	}
+	if got[0].Group != "task-1" {
+		t.Errorf("group = %q, want the task the tool ran under", got[0].Group)
+	}
+	if !got[0].Stderr {
+		t.Error("the tool error must stay on stderr")
+	}
+	if !strings.Contains(got[0].Text, "✘ file_read") {
+		t.Errorf("text = %q, want the tool name with an X mark", got[0].Text)
 	}
 }

@@ -5,14 +5,13 @@ package diff
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
-	"github.com/alibaba/open-code-review/internal/stdout"
+	"github.com/alibaba/open-code-review/internal/progress"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 )
 
@@ -70,7 +69,7 @@ func ReLocateComment(
 	if err != nil {
 		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 		llmSpan.End()
-		fmt.Fprintf(stdout.Writer(), "[ocr] Re-location LLM call failed for %s: %v\n", cm.Path, err)
+		progress.Noticef("Re-location LLM call failed for %s: %v\n", cm.Path, err)
 		return false, nil
 	}
 	var totalTokens int64

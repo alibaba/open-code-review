@@ -14,8 +14,8 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/progress"
 	"github.com/alibaba/open-code-review/internal/session"
-	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 )
 
@@ -99,7 +99,7 @@ func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, m
 
 	groups, usage, err := callGroupingLLM(ctx, diffs, client, modelName, tpl.GroupingTask, tpl.CompletionTokenLimit(), sessOpts)
 	if err != nil {
-		fmt.Fprintf(stdout.Writer(), "[ocr] LLM grouping failed (%v), falling back to per-file dispatch\n", err)
+		progress.Noticef("LLM grouping failed (%v), falling back to per-file dispatch\n", err)
 		return groupDiffsResult{groups: toSingleFileGroups(diffs), usage: usage}
 	}
 
@@ -145,7 +145,7 @@ func groupWithoutLLM(ctx context.Context, diffs []model.Diff, strategy template.
 	default:
 		shape = fmt.Sprintf("reviewing as %d groups", len(groups))
 	}
-	fmt.Fprintf(stdout.Writer(), "[ocr] Skipping LLM grouping for %d file(s), %d changed line(s) — %s\n",
+	progress.Noticef("Skipping LLM grouping for %d file(s), %d changed line(s) — %s\n",
 		len(diffs), totalChanged, shape)
 	emitGroupingSkipped(ctx, strategy, len(diffs), totalChanged, tpl)
 

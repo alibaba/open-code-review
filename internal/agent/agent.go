@@ -30,11 +30,10 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/progress"
 	"github.com/alibaba/open-code-review/internal/session"
-	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
-
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -327,7 +326,14 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	kept, counts := summarizeSelection(decisions)
 	totalChanged := len(a.diffs)
 	reviewCount := counts.Selected
-	fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) changed, reviewing %d in %s\n", totalChanged, reviewCount, a.args.RepoDir)
+	progress.Noticef("%d file(s) changed, reviewing %d in %s\n", totalChanged, reviewCount, a.args.RepoDir)
+	// The estimate is over the selected set, not the changed one: a file that
+	// selection dropped is never reviewed and never costs anything. It is
+	// computed here rather than at the budget check so the dashboard can show
+	// it for the whole run, and reused there so the projection is only ever
+	// made once.
+	est := estimateDiffCost(kept)
+	publishPlanned(reviewCount, est)
 
 	a.logExclusions(decisions)
 	a.diffs = kept
@@ -357,9 +363,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		// consumers are unaffected; it stayed silent when the size gate emptied the
 		// set, which is the reading review.skipped adds.
 		if counts.TooLarge > 0 {
-			fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) exceeded the token size limit; nothing left to review. Skipping review.\n", counts.TooLarge)
+			progress.Noticef("%d file(s) exceeded the token size limit; nothing left to review. Skipping review.\n", counts.TooLarge)
 		} else {
-			fmt.Fprintln(stdout.Writer(), "[ocr] No supported files changed. Skipping review.")
+			progress.Notice("No supported files changed. Skipping review.\n")
 			telemetry.Event(ctx, "no.files.changed")
 		}
 		// No item was ever selected: finalize yields a skipped manifest (no
@@ -395,11 +401,10 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// projected cost against their cap). Keeps the prior text-mode output
 	// unchanged for the common unlimited path.
 	if a.args.MaxTokensBudget > 0 {
-		est := estimateDiffCost(a.diffs)
-		fmt.Fprintf(stdout.Writer(), "[ocr] estimated cost: %s\n", est)
-		fmt.Fprintf(stdout.Writer(), "[ocr] token budget: %s (dispatch stops once exceeded)\n", humanTokens(a.args.MaxTokensBudget))
+		progress.Noticef("estimated cost: %s\n", est)
+		progress.Noticef("token budget: %s (dispatch stops once exceeded)\n", humanTokens(a.args.MaxTokensBudget))
 		if est.TotalTokens > a.args.MaxTokensBudget {
-			fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: estimate (%s) exceeds token budget (%s); review will stop partway\n",
+			progress.Warningf("estimate (%s) exceeds token budget (%s); review will stop partway\n",
 				humanTokens(est.TotalTokens), humanTokens(a.args.MaxTokensBudget))
 		}
 	}
@@ -695,8 +700,9 @@ dispatchLoop:
 			projected := used + groupEst
 			if projected > a.args.MaxTokensBudget {
 				firstPath := group.Diffs[0].NewPath
-				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + group est %s = projected %s > budget %s) — skipping group %q and remaining\n",
+				progress.Noticef("token budget reached (used %s + group est %s = projected %s > budget %s) — skipping group %q and remaining\n",
 					humanTokens(used), humanTokens(groupEst), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), group.Label)
+				publishBudgetReached()
 				a.recordWarning("token_budget_reached", firstPath,
 					fmt.Sprintf("stopped dispatch: used %d tokens + group estimate %d = projected %d exceeds budget %d", used, groupEst, projected, a.args.MaxTokensBudget))
 				a.budgetExceeded.Store(true)
@@ -728,6 +734,8 @@ dispatchLoop:
 		dispatched += int64(len(group.Diffs))
 		wg.Add(1)
 
+		publishGroupStart(group)
+
 		go func(g FileGroup) {
 			defer wg.Done()
 			defer func() { <-sem }() // release
@@ -742,7 +750,8 @@ dispatchLoop:
 						a.markFailed(d, session.FailurePanic, "subtask panicked during review")
 						a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, fmt.Sprintf("panic: %v", r))
 					}
-					fmt.Fprintf(stdout.Writer(), "[ocr] Subtask panic for group %q: %v\n%s\n", g.Label, r, debug.Stack())
+					progress.Noticef("Subtask panic for group %q: %v\n%s\n", g.Label, r, debug.Stack())
+					publishGroupFailed(fileGroupKey(g.Diffs), len(g.Diffs), fmt.Sprintf("panic: %v", r))
 					telemetry.ErrorEvent(ctx, "subtask.panic", fmt.Errorf("panic: %v", r),
 						telemetry.AnyToAttr("group.label", g.Label))
 					a.recordWarning("subtask_error", g.Label, fmt.Sprintf("panic: %v", r))
@@ -767,14 +776,38 @@ dispatchLoop:
 					a.markFailed(d, class, reason)
 					a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, err.Error())
 				}
-				fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for group %q: %v\n", g.Label, err)
+				progress.Noticef("Subtask error for group %q: %v\n", g.Label, err)
+				publishGroupFailed(fileGroupKey(g.Diffs), len(g.Diffs), err.Error())
 				telemetry.ErrorEvent(groupCtx, "subtask.error", err,
 					telemetry.AnyToAttr("group.label", g.Label))
 				a.recordWarning("subtask_error", g.Label, err.Error())
 				return
 			}
 			if !completed {
-				if stop != nil {
+				// A group that stopped short still owes the dashboard a terminal
+				// state. Without one its row keeps spinning and its files never
+				// advance the bar, so a finished run reports less than 100%
+				// covered and leaves a non-zero in-flight count.
+				//
+				// The split is by what each file produced: a file that has
+				// comments is done, the rest failed.
+				var doneCount, failedCount int
+				var findings int
+				for _, d := range g.Diffs {
+					comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
+					if len(comments) > 0 {
+						doneCount++
+						findings += len(comments)
+					} else {
+						failedCount++
+					}
+					if stop == nil {
+						// No stop reason to record against: the session sweeps
+						// these files at finalize, and the dashboard still needs
+						// the terminal state, which is what the counts above are
+						// for.
+						continue
+					}
 					// A group that stopped short of task_done may still have produced
 					// usable output for some of its files before the round/token
 					// budget ran out. Classify per file rather than per group so a
@@ -782,42 +815,59 @@ dispatchLoop:
 					// Failed — otherwise a single stuck file drags its whole group
 					// (and, when nothing else was dispatched, the whole run) down to
 					// terminal_state=failed even though real coverage exists.
-					var failedCount int64
-					for _, d := range g.Diffs {
-						fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 {
-							a.markCompleted(d)
-							a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
-							continue
-						}
-						a.markFailed(d, stop.class, stop.reason)
-						if stop.checkpoint != "" {
-							a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, stop.checkpoint)
-						}
-						failedCount++
+					fingerprint := reviewItemFingerprint(a.reviewMode(), d)
+					if len(comments) > 0 {
+						a.markCompleted(d)
+						a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+						continue
 					}
+					a.markFailed(d, stop.class, stop.reason)
+					if stop.checkpoint != "" {
+						a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, stop.checkpoint)
+					}
+				}
+				if stop != nil {
 					// subtaskFailed must count only the files actually marked failed
 					// above, not the whole group — a group can mix Completed and
 					// Failed files, and reportAsError itself is a group-level signal
 					// (any file with comments suppresses it) that must not be assumed
 					// to imply failedCount == len(g.Diffs).
 					if stop.reportAsError && failedCount > 0 {
-						atomic.AddInt64(&a.subtaskFailed, failedCount)
+						atomic.AddInt64(&a.subtaskFailed, int64(failedCount))
 						stopErr := errors.New(stop.checkpoint)
-						fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for group %q: %v\n", g.Label, stopErr)
+						progress.Noticef("Subtask error for group %q: %v\n", g.Label, stopErr)
+						publishGroupFailed(fileGroupKey(g.Diffs), len(g.Diffs), stopErr.Error())
 						telemetry.ErrorEvent(groupCtx, "subtask.error", stopErr,
 							telemetry.AnyToAttr("group.label", g.Label))
 						a.recordWarning("subtask_error", g.Label, stopErr.Error())
+						return
 					}
+				}
+				// The group is one row, so its files are accounted for in two
+				// events: the ones that produced comments are done, the rest
+				// failed. Both are needed for the bar to reach the group's full
+				// file count.
+				if doneCount > 0 {
+					publishGroupDoneFiles(fileGroupKey(g.Diffs), doneCount, findings)
+				}
+				if failedCount > 0 {
+					reason := "group stopped before completing"
+					if stop != nil {
+						reason = stop.reason
+					}
+					publishGroupFailed(fileGroupKey(g.Diffs), failedCount, reason)
 				}
 				return
 			}
+			findings := 0
 			for _, d := range g.Diffs {
 				fingerprint := reviewItemFingerprint(a.reviewMode(), d)
 				comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
+				findings += len(comments)
 				a.markCompleted(d)
 				a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
 			}
+			a.publishGroupDone(g, findings)
 		}(group)
 	}
 
@@ -880,6 +930,7 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 	mode := a.reviewMode()
 	toDispatch := make([]model.Diff, 0, len(diffs))
 	var reused int64
+	var reusedFindings int64
 	for _, d := range diffs {
 		if d.IsDeleted {
 			toDispatch = append(toDispatch, d)
@@ -896,6 +947,7 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 		}
 		for _, cm := range item.Comments {
 			a.args.CommentCollector.Add(cm)
+			reusedFindings++
 		}
 		a.session.RecordReviewItemReused(effectivePath(d), d.OldPath, d.NewPath, fingerprint, resume.SessionID, item.Comments)
 		a.markReused(d)
@@ -903,6 +955,14 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 	}
 
 	rerun := countDispatchable(toDispatch)
+	// The dashboard's denominator is every selected file, so the reused ones
+	// have to count as covered or the bar stalls short of full on a resumed
+	// run that had almost nothing left to do.
+	progress.Publish(progress.Event{
+		Kind:     progress.KindReused,
+		Files:    int(reused),
+		Findings: int(reusedFindings),
+	})
 	a.resumeInfo = &ResumeInfo{
 		ResumedFrom:   resume.SessionID,
 		ReusedFiles:   reused,
@@ -910,7 +970,7 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 		PreviousModel: resume.Model,
 		CurrentModel:  a.args.Model,
 	}
-	fmt.Fprintf(stdout.Writer(), "[ocr] Resume %s: reusing %d file(s), reviewing %d file(s)\n", resume.SessionID, reused, rerun)
+	progress.Noticef("Resume %s: reusing %d file(s), reviewing %d file(s)\n", resume.SessionID, reused, rerun)
 	return toDispatch
 }
 
@@ -1332,7 +1392,7 @@ func (a *Agent) checkPromptBudget(ctx context.Context, messages []llm.Message, g
 		return nil
 	}
 	msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d) [round %d]", tokenCount, 80, maxAllowed, round)
-	fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: %s for group %q\n", msg, groupKey)
+	progress.Warningf("%s for group %q\n", msg, groupKey)
 	a.recordWarning("token_threshold_exceeded", groupKey, msg)
 	telemetry.Event(ctx, "token.threshold.exceeded",
 		telemetry.AnyToAttr("group.label", groupKey),
@@ -1412,13 +1472,13 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		var err error
 		planResult, err = a.executeGroupPlanPhase(ctx, g, concatenatedDiffs, changeFilesExcludingGroup, rule)
 		if err != nil {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Plan phase failed for group %q: %v (continuing without plan)\n", groupKey, err)
+			progress.Noticef("Plan phase failed for group %q: %v (continuing without plan)\n", groupKey, err)
 			telemetry.Eventf(ctx, "plan.failed", err.Error(),
 				telemetry.AnyToAttr("group.label", groupKey))
 			planResult = ""
 		}
 	default:
-		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping plan phase for group %q (%d file(s), max %d lines, total %d lines)\n",
+		progress.Noticef("Skipping plan phase for group %q (%d file(s), max %d lines, total %d lines)\n",
 			groupKey, len(g.Diffs), maxFileChanged, totalChanged)
 		telemetry.Event(ctx, "plan.skipped",
 			telemetry.AnyToAttr("group.label", groupKey),
@@ -1453,8 +1513,10 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 			return false, nil, ctx.Err()
 		}
 
+		publishRoundStart(groupKey, round)
+
 		if round > 1 && a.args.MaxTokensBudget > 0 && (a.budgetExceeded.Load() || a.runner.TotalTokensUsed() > a.args.MaxTokensBudget) {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Aggregate budget exceeded, skipping round %d for group %q\n", round, groupKey)
+			progress.Noticef("Aggregate budget exceeded, skipping round %d for group %q\n", round, groupKey)
 			// A group can finish a round over budget with no other gate noticing,
 			// so record it here too or the run would report the budget as intact.
 			if a.budgetExceeded.CompareAndSwap(false, true) {
@@ -1499,7 +1561,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 				return false, nil, err
 			}
 			a.recordWarning("review_round_failed", groupKey, fmt.Sprintf("round %d: %v", round, err))
-			fmt.Fprintf(stdout.Writer(), "[ocr] Round %d failed for group %q: %v (keeping earlier findings)\n", round, groupKey, err)
+			progress.Noticef("Round %d failed for group %q: %v (keeping earlier findings)\n", round, groupKey, err)
 			break
 		}
 
@@ -1542,12 +1604,12 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		completed = true
 
 		if len(newlyConfirmed) == 0 {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Round %d/%d added no new findings for group %q; stopping early\n", round, maxRounds, groupKey)
+			progress.Noticef("Round %d/%d added no new findings for group %q; stopping early\n", round, maxRounds, groupKey)
 			break
 		}
 
 		if len(confirmed) >= confirmedCap {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Group %q reached %d confirmed findings; skipping further rounds\n", groupKey, len(confirmed))
+			progress.Noticef("Group %q reached %d confirmed findings; skipping further rounds\n", groupKey, len(confirmed))
 			break
 		}
 	}
@@ -1787,7 +1849,7 @@ func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concaten
 	llmSpan.End()
 	rec.SetResponse(resp, duration)
 	a.runner.RecordUsage(resp.Usage)
-	fmt.Fprintf(stdout.Writer(), "[ocr] Plan completed for group %q\n", gk)
+	progress.Noticef("Plan completed for group %q\n", gk)
 	return resp.Content(), nil
 }
 
@@ -1808,7 +1870,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 
 	if a.args.SkipFilter {
 		telemetry.SetAttr(span, "skipped", true)
-		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for group %q (--no-filter)\n", groupKey)
+		progress.Noticef("Review filter skipped for group %q (--no-filter)\n", groupKey)
 		return
 	}
 
@@ -1872,7 +1934,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 		llmSpan.End()
 		rec.SetError(err, duration)
-		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter failed for group %q: %v\n", groupKey, err)
+		progress.Noticef("Review filter failed for group %q: %v\n", groupKey, err)
 		span.SetStatus(codes.Error, err.Error())
 		span.RecordError(err)
 		return
@@ -1919,7 +1981,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		attribute.String("group.label", groupKey),
 		attribute.Int("total_comments", len(candidates)),
 		attribute.Int("removed", totalRemoved))
-	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for group %q\n", totalRemoved, groupKey)
+	progress.Noticef("Review filter removed %d comment(s) for group %q\n", totalRemoved, groupKey)
 }
 
 // buildGroupFilterCommentsJSON serializes comments with path info for group-level filtering.
@@ -1959,7 +2021,7 @@ func parseFilterToolCalls(calls []llm.ToolCall, total int) map[int]struct{} {
 				CommentIDs []string `json:"comment_ids"`
 			}
 			if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Review filter: failed to parse tool call arguments: %v\n", err)
+				progress.Noticef("Review filter: failed to parse tool call arguments: %v\n", err)
 				continue
 			}
 			if indices == nil {
@@ -1986,7 +2048,7 @@ func parseFilterResponse(raw string, total int) map[int]struct{} {
 		if len(preview) > 200 {
 			preview = preview[:200] + "..."
 		}
-		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter: failed to parse LLM response: %v, raw: %s\n", err, preview)
+		progress.Noticef("Review filter: failed to parse LLM response: %v, raw: %s\n", err, preview)
 		return nil
 	}
 	indices := make(map[int]struct{})
@@ -2010,18 +2072,21 @@ func (a *Agent) logExclusions(decisions []fileDecision) {
 		// cannot silently inherit the path/extension wording.
 		switch dec.Reason {
 		case ExcludeBinary:
-			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", effectivePath(dec.Diff))
+			progress.Skipped(effectivePath(dec.Diff), "binary file",
+				fmt.Sprintf("Skipping %s — binary file\n", effectivePath(dec.Diff)))
 		case ExcludeSecret:
-			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — matches a built-in secret path\n", effectivePath(dec.Diff))
+			progress.Skipped(effectivePath(dec.Diff), "matches a built-in secret path",
+				fmt.Sprintf("Skipping %s — matches a built-in secret path\n", effectivePath(dec.Diff)))
 		case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath:
-			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", effectivePath(dec.Diff))
+			progress.Skipped(effectivePath(dec.Diff), "filtered by path/extension rules",
+				fmt.Sprintf("Skipping %s — filtered by path/extension rules\n", effectivePath(dec.Diff)))
 		default:
 			continue
 		}
 		staticSkipped++
 	}
 	if staticSkipped > 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Filtered %d file(s) by include/exclude rules\n", staticSkipped)
+		progress.Noticef("Filtered %d file(s) by include/exclude rules\n", staticSkipped)
 	}
 
 	tooLarge := 0
@@ -2029,12 +2094,13 @@ func (a *Agent) logExclusions(decisions []fileDecision) {
 		if dec.Reason != ExcludeTooLarge {
 			continue
 		}
-		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 80%% of max_tokens(%d))\n",
-			dec.Diff.NewPath, dec.DiffTokens, a.args.Template.MaxTokens)
+		progress.Skipped(dec.Diff.NewPath, "exceeds 80% of max_tokens",
+			fmt.Sprintf("Skipping %s (~%d tokens exceeds 80%% of max_tokens(%d))\n",
+				dec.Diff.NewPath, dec.DiffTokens, a.args.Template.MaxTokens))
 		tooLarge++
 	}
 	if tooLarge > 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 80%% of max_tokens\n", tooLarge)
+		progress.Noticef("Pre-filtered %d file(s) exceeding 80%% of max_tokens\n", tooLarge)
 	}
 }
 
@@ -2197,7 +2263,7 @@ func BuildToolDefs(entries []toolsconfig.ToolConfigEntry, planOnly bool) []llm.T
 		}
 		var fn llm.FunctionDef
 		if err := json.Unmarshal(defRaw, &fn); err != nil {
-			fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: failed to parse tool definition %q: %v\n", e.Name, err)
+			progress.Warningf("failed to parse tool definition %q: %v\n", e.Name, err)
 			continue
 		}
 		fn.RawDefinition = defRaw

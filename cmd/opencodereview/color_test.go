@@ -4,9 +4,11 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/colorprofile"
 	"github.com/spf13/cobra"
 )
 
@@ -160,5 +162,22 @@ func TestAddColorFlags(t *testing.T) {
 	}
 	if def := cmd.PersistentFlags().Lookup("color").DefValue; def != colorModeAuto {
 		t.Errorf("--color default = %q, want %q", def, colorModeAuto)
+	}
+}
+
+func TestProgressColorProfileFollowsTheColorFlag(t *testing.T) {
+	// The dashboard renders with the profile the flag asks for, and with the
+	// terminal's own when the flag says nothing.
+	setColorFlags(t, colorModeNever)
+	if got := progressColorProfile(); got != colorprofile.Ascii {
+		t.Errorf("--color=never profile = %v, want Ascii", got)
+	}
+	setColorFlags(t, colorModeAlways)
+	if got := progressColorProfile(); got != colorprofile.TrueColor {
+		t.Errorf("--color=always profile = %v, want TrueColor", got)
+	}
+	setColorFlags(t, colorModeAuto)
+	if got, want := progressColorProfile(), colorprofile.Detect(os.Stdout, os.Environ()); got != want {
+		t.Errorf("--color=auto profile = %v, want the detected %v", got, want)
 	}
 }
