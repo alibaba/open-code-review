@@ -4,12 +4,30 @@ sidebar:
   order: 5
 ---
 
-The config file lives at `~/.opencodereview/config.json`. You have three ways
+By default, the config file lives at `~/.opencodereview/config.json`. You have three ways
 to edit it:
 
 - **Interactive TUI** — `ocr config provider` / `ocr config model`, with guided menus.
 - **Command line** — `ocr config set <key> <value>`, ideal for scripts and CI.
 - **Manual edit (not recommended)** — the JSON file directly (it gets reformatted on the next `ocr config set` write).
+
+## Storage directory
+
+Set `OCR_HOME` to store configuration, sessions, raw captures, global rules,
+and authentication data in another directory. An unset or empty value uses
+`~/.opencodereview`. Existing files are not moved automatically.
+
+```bash
+export OCR_HOME=/data/ocr
+ocr config path --json   # {"path":"/data/ocr/config.json"}
+ocr review
+ocr viewer --open=never
+```
+
+Relative paths are resolved against the CLI's working directory. Use an absolute
+path when sharing storage between processes or containers. The IDE extensions
+query `ocr config path --json` and pin its absolute parent directory for subsequent
+CLI calls. Project-local `.opencodereview/rule.json` stays in the project directory.
 
 ## Configuring a model
 

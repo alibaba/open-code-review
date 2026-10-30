@@ -3,7 +3,8 @@
 
 import { t, resolveLocale } from '@shared/i18n';
 import * as vscode from 'vscode';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
+import { dirname, isAbsolute, join } from 'path';
 import { CliResult, CliRunOptions, EnvCheckResult, LogLine } from '@shared/types';
 import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from './cliParse';
 import { getShellEnv, resolveBin } from './shellEnv';
@@ -11,9 +12,30 @@ import { getShellEnv, resolveBin } from './shellEnv';
 export class CliService {
   private current: ReturnType<typeof spawn> | null = null;
   private envCache: { env: EnvCheckResult; at: number } | null = null;
+  private resolvedConfigPath: string | undefined;
   private static readonly ENV_CACHE_TTL_MS = 5 * 60 * 1000;
 
   constructor(private cliPath: string = 'ocr') {}
+
+  configPath(): string {
+    if (this.resolvedConfigPath) return this.resolvedConfigPath;
+    const result = spawnSync(resolveBin(this.cliPath), ['config', 'path', '--json'], {
+      cwd: process.cwd(),
+      env: getShellEnv(),
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(extractCliError(result.stderr || '') || 'Failed to resolve the OCR config path');
+    }
+    const { path } = JSON.parse(result.stdout);
+    if (typeof path !== 'string' || !isAbsolute(path)) {
+      throw new Error('The CLI returned an invalid config path');
+    }
+    this.resolvedConfigPath = path;
+    return path;
+  }
 
   invalidateEnvironmentCache(): void {
     this.envCache = null;
@@ -114,7 +136,11 @@ export class CliService {
     return new Promise((resolve, reject) => {
       const proc = spawn(resolveBin(this.cliPath), args, {
         cwd,
-        env: envExtra ? { ...getShellEnv(), ...envExtra } : getShellEnv(),
+        env: {
+          ...getShellEnv(),
+          ...(this.resolvedConfigPath ? { OCR_HOME: dirname(this.resolvedConfigPath) } : {}),
+          ...envExtra,
+        },
         // A dedicated POSIX process group lets cancellation escalate without
         // leaving the native CLI or any of its subprocesses behind.
         detached: process.platform !== 'win32',
@@ -149,6 +175,7 @@ export class CliService {
     const envExtra: Record<string, string> = {};
     if (options?.home) {
       envExtra.HOME = options.home;
+      envExtra.OCR_HOME = join(options.home, '.opencodereview');
       if (process.platform === 'win32') envExtra.USERPROFILE = options.home;
     }
     const env = Object.keys(envExtra).length > 0 ? envExtra : undefined;

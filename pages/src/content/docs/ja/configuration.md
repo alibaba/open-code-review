@@ -4,11 +4,27 @@ sidebar:
   order: 5
 ---
 
-設定ファイルは `~/.opencodereview/config.json` にあります。編集方法は 3 つあります。
+設定ファイルはデフォルトで `~/.opencodereview/config.json` にあります。編集方法は 3 つあります。
 
 - **インタラクティブ TUI** —— `ocr config provider` / `ocr config model`。ガイド付きメニューが表示されます。
 - **コマンドライン** —— `ocr config set <key> <value>`。スクリプトや CI に適しています。
 - **手動編集（非推奨）** —— この JSON ファイルを直接編集（次回の `ocr config set` 書き込み時に再フォーマットされます）。
+
+## 保存先ディレクトリ
+
+`OCR_HOME` を設定すると、設定、セッション、生の LLM 記録、グローバルルール、認証データを別のディレクトリに保存できます。
+未設定または空の場合は `~/.opencodereview` を使います。既存ファイルは自動移行されません。
+
+```bash
+export OCR_HOME=/data/ocr
+ocr config path --json   # {"path":"/data/ocr/config.json"}
+ocr review
+ocr viewer --open=never
+```
+
+相対パスは CLI の作業ディレクトリを基準に解決されます。プロセスやコンテナ間で保存先を共有する場合は絶対パスを指定してください。
+IDE 拡張機能は `ocr config path --json` を実行し、返されたパスの絶対親ディレクトリを後続の CLI 呼び出しの保存先として固定します。
+プロジェクト内の `.opencodereview/rule.json` の場所は変わりません。
 
 ## モデルを設定する
 

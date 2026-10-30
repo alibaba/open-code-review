@@ -4,11 +4,27 @@ sidebar:
   order: 5
 ---
 
-配置文件在 `~/.opencodereview/config.json`，你有三种方式编辑它：
+配置文件默认位于 `~/.opencodereview/config.json`，你有三种方式编辑它：
 
 - **交互式 TUI** —— `ocr config provider` / `ocr config model`，带引导菜单。
 - **命令行** —— `ocr config set <key> <value>`，适合脚本与 CI。
 - **手动编辑（不推荐）** —— 该 JSON 文件（下次 `ocr config set` 写入时会重新格式化）。
+
+## 存储目录
+
+设置 `OCR_HOME`，可将配置、会话、原始 LLM 记录、全局规则和认证数据存储到其他目录。
+未设置或值为空时，使用 `~/.opencodereview`。已有文件不会自动迁移。
+
+```bash
+export OCR_HOME=/data/ocr
+ocr config path --json   # {"path":"/data/ocr/config.json"}
+ocr review
+ocr viewer --open=never
+```
+
+相对路径以 CLI 的工作目录为基准解析。跨进程或容器共享存储时，请使用绝对路径。
+IDE 插件会查询 `ocr config path --json`，并将返回路径的绝对父目录固定为后续 CLI 调用的存储目录。
+项目内的 `.opencodereview/rule.json` 仍位于项目目录。
 
 ## 配置模型
 
