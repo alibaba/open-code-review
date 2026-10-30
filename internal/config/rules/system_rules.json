@@ -18,6 +18,7 @@
     "**/*.{hbs,mustache}": "handlebars_mustache.md",
     "**/*.{jinja2,j2}": "jinja.md",
     "**/*.pug": "pug.md",
+    "**/*.{ejs,liquid,njk}": "ejs_liquid_njk.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
     "**/*.{ts,js,tsx,jsx,mjs,cjs}": "ts_js_tsx_jsx.md",
