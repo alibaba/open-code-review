@@ -173,6 +173,7 @@ type Args struct {
 // Model and concurrency are not duplicated here; the hash folds them in from
 // Args.Model and Args.MaxConcurrency.
 type RuntimeConfig struct {
+	Verification string        // Non-secret verification policy identity.
 	Protocol     string        // LLM wire protocol (canonical name, e.g. "anthropic")
 	EndpointHost string        // endpoint host[:port] only, credential- and path-free
 	Language     string        // configured review output language
@@ -423,6 +424,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// and be discarded wholesale. Cheap in the normal case — every job has
 	// already been cancelled by now.
 	a.runner.WaitBackground()
+	if verificationErr := llm.ClientVerificationError(a.args.LLMClient); verificationErr != nil {
+		err = errors.Join(err, verificationErr)
+	}
 	// Freeze coverage into the immutable manifest before session_end embeds it,
 	// so the CLI and the persisted session serialize the identical object. A
 	// persistence failure is a delivery error in its own right: when the review
@@ -1083,7 +1087,7 @@ func (a *Agent) ruleConfigSHA256() string {
 // interchangeable when auditing why one stopped short.
 func (a *Agent) runtimeConfigSHA256() string {
 	r := a.args.RuntimeConfig
-	return hashFields(
+	fields := []string{
 		"protocol", r.Protocol,
 		"model", a.args.Model,
 		"host", r.EndpointHost,
@@ -1091,7 +1095,11 @@ func (a *Agent) runtimeConfigSHA256() string {
 		"timeout", r.Timeout.String(),
 		"concurrency", strconv.Itoa(a.args.MaxConcurrency),
 		"max_tokens_budget", strconv.FormatInt(a.args.MaxTokensBudget, 10),
-	)
+	}
+	if r.Verification != "" {
+		fields = append(fields, "verification", r.Verification)
+	}
+	return hashFields(fields...)
 }
 
 // hashFields folds a sequence of string fields into one SHA-256 digest, writing an
@@ -1271,9 +1279,13 @@ func (a *Agent) registerCoverage(diffs []model.Diff) error {
 // cannot report a manifest-enabled review as successful without a valid snapshot.
 // Elapsed is measured from the session start so both outlets report the same duration.
 func (a *Agent) finalizeManifest() error {
+	a.session.SetVerificationReport(llm.ClientVerificationReport(a.args.LLMClient))
 	b := a.session.Manifest()
 	if b == nil {
 		return nil
+	}
+	if err := llm.ClientVerificationError(a.args.LLMClient); err != nil {
+		_ = b.SetRunFailure(session.RunFailureVerification, "LLM verification failed; see verification records")
 	}
 	// Freeze the input/repository identity from this run's captured resolution and
 	// current selected set before the manifest closes. Done here (not in New) so

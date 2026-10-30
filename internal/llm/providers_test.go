@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -29,6 +30,33 @@ func TestLookupProvider_KnownProviders(t *testing.T) {
 		if len(p.Models) == 0 && name != "chatgpt" {
 			t.Errorf("LookupProvider(%q).Models is empty", name)
 		}
+	}
+}
+
+func TestLookupProvider_NearAIDetails(t *testing.T) {
+	p, ok := LookupProvider("nearai")
+	if !ok {
+		t.Fatal("nearai preset not found")
+	}
+	if p.DisplayName != "NEAR AI (private)" {
+		t.Errorf("DisplayName = %q, want NEAR AI (private)", p.DisplayName)
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://cloud-api.near.ai/v1" {
+		t.Errorf("BaseURL = %q, want https://cloud-api.near.ai/v1", p.BaseURL)
+	}
+	if p.EnvVar != "NEARAI_API_KEY" {
+		t.Errorf("EnvVar = %q, want NEARAI_API_KEY", p.EnvVar)
+	}
+	wantModels := []string{
+		"z-ai/glm-5.3-flash",
+		"deepseek-ai/DeepSeek-V4.1-Flash-1017",
+		"deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated",
+	}
+	if !slices.Equal(p.Models, wantModels) {
+		t.Errorf("Models = %v, want %v", p.Models, wantModels)
 	}
 }
 
@@ -89,7 +117,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "chatgpt", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "chatgpt", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "nearai", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
