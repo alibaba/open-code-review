@@ -8,7 +8,8 @@
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const os = require("os");
+const os = require("os");  
+
 
 const { resolveNativeBinary } = require("../scripts/platform");
 const { version: packageVersion } = require("../package.json");
