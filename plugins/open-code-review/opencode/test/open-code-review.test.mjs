@@ -2,7 +2,7 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import assert from "node:assert/strict"
-import { access, chmod, copyFile, link, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { access, chmod, copyFile, link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
 import test from "node:test"
@@ -55,6 +55,32 @@ async function withFakeOcr(source, callback) {
       await writeFile(executable, `#!/usr/bin/env node\n${source}\n`)
       await chmod(executable, 0o755)
     }
+
+    const previousPath = process.env.PATH
+    process.env.PATH = `${directory}${delimiter}${previousPath ?? ""}`
+    try {
+      return await callback(directory)
+    } finally {
+      process.env.PATH = previousPath
+    }
+  })
+}
+
+// Mirrors a global npm install on Windows: only `ocr.cmd` is on PATH and the
+// package launcher lives next to it. The .cmd stub fails on purpose so a test
+// that still routes through the shim cannot pass.
+async function withNpmShimOcr(source, callback) {
+  return await withTemporaryDirectory(async (directory) => {
+    const launcherDirectory = join(
+      directory,
+      "node_modules",
+      "@alibaba-group",
+      "open-code-review",
+      "bin",
+    )
+    await mkdir(launcherDirectory, { recursive: true })
+    await writeFile(join(directory, "ocr.cmd"), "@echo off\r\nexit /b 1\r\n")
+    await writeFile(join(launcherDirectory, "ocr.js"), `${source}\n`)
 
     const previousPath = process.env.PATH
     process.env.PATH = `${directory}${delimiter}${previousPath ?? ""}`
@@ -276,6 +302,39 @@ test("ocr_review passes suspicious-looking refs as one argv value without a shel
     },
   )
 })
+
+test(
+  "ocr_review starts the npm launcher on Windows so refs reach OCR unchanged",
+  { skip: process.platform !== "win32" },
+  async () => {
+    await withNpmShimOcr(
+      "console.log(JSON.stringify({status:'success', argv:process.argv.slice(2)}))",
+      async (worktree) => {
+        const { hooks } = await loadPlugin(worktree)
+        const output = await hooks.tool.ocr_review.execute(
+          {
+            commit: "HEAD^",
+            exclude: "100%PATH%",
+          },
+          toolContext(worktree),
+        )
+        assert.deepEqual(JSON.parse(output).argv, [
+          "review",
+          "--audience",
+          "agent",
+          "--format",
+          "json",
+          "--repo",
+          worktree,
+          "--commit",
+          "HEAD^",
+          "--exclude",
+          "100%PATH%",
+        ])
+      },
+    )
+  },
+)
 
 test("ocr_review rejects incompatible review targets before starting OCR", async () => {
   await withTemporaryDirectory(async (worktree) => {
