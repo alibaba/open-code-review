@@ -2,9 +2,10 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import { spawn } from "node:child_process"
+import { existsSync } from "node:fs"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { delimiter, join } from "node:path"
 import { type Plugin, tool } from "@opencode-ai/plugin"
 import type { Plugin as PluginV2 } from "@opencode/plugin"
 
@@ -165,8 +166,43 @@ function appendChunk(
   return nextBytes
 }
 
+const defaultOcrInvocation: OcrInvocation = { command: "ocr", prefixArgs: [] }
+const npmOcrLauncherPath = ["node_modules", "@alibaba-group", "open-code-review", "bin", "ocr.js"]
+
+/**
+ * A global npm install on Windows only provides `ocr.cmd`, which cannot be
+ * started without a shell: Node fails with ENOENT, and Bun routes the arguments
+ * through cmd.exe, which rewrites refs such as `HEAD^`. When the shim resolves
+ * to the package launcher, start that with the current runtime instead.
+ */
+function resolveWindowsOcrInvocation(): OcrInvocation | undefined {
+  const directories = new Set<string>()
+  for (const directory of (process.env.PATH ?? "").split(delimiter)) {
+    if (directory) directories.add(directory)
+  }
+  if (process.env.APPDATA) {
+    directories.add(join(process.env.APPDATA, "npm"))
+  }
+
+  for (const directory of directories) {
+    if (existsSync(join(directory, "ocr.exe"))) {
+      return defaultOcrInvocation
+    }
+    const launcher = join(directory, ...npmOcrLauncherPath)
+    if (existsSync(join(directory, "ocr.cmd")) && existsSync(launcher)) {
+      return { command: process.execPath, prefixArgs: [launcher] }
+    }
+  }
+  return undefined
+}
+
+function resolveInvocation(): OcrInvocation {
+  if (process.platform !== "win32") return defaultOcrInvocation
+  return resolveWindowsOcrInvocation() ?? defaultOcrInvocation
+}
+
 async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
-  const invocation = options.invocation ?? { command: "ocr", prefixArgs: [] }
+  const invocation = options.invocation ?? resolveInvocation()
   const timeoutMs = options.timeoutMs === undefined ? 15 * 60 * 1000 : options.timeoutMs
   const maxOutputBytes = options.maxOutputBytes ?? 10 * 1024 * 1024
 
