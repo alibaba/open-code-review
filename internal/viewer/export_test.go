@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -73,6 +74,49 @@ func TestExportSession_SelfContained(t *testing.T) {
 		if strings.Contains(body, bad) {
 			t.Errorf("export contains %q", bad)
 		}
+	}
+}
+
+// The exported page inlines the scripts in one order and the served page
+// loads them in the template's order. If the two drift apart, the same page
+// runs the same scripts in a different sequence depending on how it was
+// served, so the export has to follow the template.
+func TestExportSession_ScriptOrderMatchesTheTemplate(t *testing.T) {
+	root := sessionFixture(t, fixtureStart, fixtureRequest, fixtureResponse, fixtureEnd)
+
+	var buf bytes.Buffer
+	if err := ExportSession(&buf, root, "repo", "sess1"); err != nil {
+		t.Fatalf("ExportSession: %v", err)
+	}
+	body := buf.String()
+
+	tmpl, err := os.ReadFile(filepath.Join("templates", "session.html"))
+	if err != nil {
+		t.Fatalf("read template: %v", err)
+	}
+	var order []string
+	for _, m := range regexp.MustCompile(`src="/static/([a-z0-9]+\.js)"`).FindAllStringSubmatch(string(tmpl), -1) {
+		order = append(order, m[1])
+	}
+	if len(order) == 0 {
+		t.Fatal("the template loads no scripts; the test cannot compare anything")
+	}
+
+	prev := -1
+	for _, name := range order {
+		src, err := assets.ReadFile("static/" + name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		at := strings.Index(body, string(src))
+		if at < 0 {
+			t.Errorf("export is missing %s", name)
+			continue
+		}
+		if at < prev {
+			t.Errorf("export inlines %s after a later script; the template loads it at %d", name, at)
+		}
+		prev = at
 	}
 }
 
@@ -178,6 +222,7 @@ func TestEmbeddedAssetsHaveNoTerminators(t *testing.T) {
 		{"static/a11y.js", "</script"},
 		{"static/pager.js", "</script"},
 		{"static/session.js", "</script"},
+		{"static/agent.js", "</script"},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
 			b, err := assets.ReadFile(tt.path)

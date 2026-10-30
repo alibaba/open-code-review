@@ -1,0 +1,394 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
+// Per-finding handoff into a coding agent.
+//
+// Every vendor's deep link is prefilled but never submitted - Claude Code even
+// shows a "Prompt from an external link" warning - so the user always confirms
+// before anything runs. The menu is built around that: it hands over context,
+// it does not start work.
+//
+// The parameter name for the prompt is NOT consistent across vendors (q /
+// prompt / text), and each truncates at a different length, so the whole
+// mapping lives here rather than being spread across the markup.
+
+(() => {
+    "use strict";
+
+    // Documented limits. Claude Code's CLI caps q at 5000 chars and Cursor caps
+    // text at 10000 URL-encoded; truncating to the smaller bound everywhere
+    // keeps one rule instead of four.
+    //
+    // The bound is on the encoded form, because that is what the vendors
+    // measure: encoding inflates a prompt several times over for non-ASCII
+    // text, so a prompt that fits a raw character budget can still overflow
+    // the limit once it is a query parameter.
+    const MAX_ENCODED = 5000;
+
+    // Appended to a truncated prompt, and the fence close that may precede it.
+    // Both are reserved from the budget so the text that is finally produced
+    // still fits.
+    const TRUNCATION_TAIL = "\n\n[truncated]";
+    const FENCE_TAIL = "\n```";
+
+    // The encoded length of a prompt's value, which is what the vendors
+    // measure. The parameter name differs per target but the value's encoding
+    // does not, so a one-character name is used to keep the overhead at the
+    // two characters of "name=".
+    function encodedLength(text) {
+        return new URLSearchParams({ v: text }).toString().length - 2;
+    }
+
+    // Builds the prompt body shared by every target. Kept as plain text with a
+    // fenced diff for the code, because these are terminal/chat agents and
+    // markdown survives the trip better than structured data would.
+    function buildPrompt(ctx) {
+        const lines = [];
+        lines.push("Fix this code review finding.");
+        lines.push("");
+        if (ctx.severity) lines.push(`Severity: ${ctx.severity}`);
+        if (ctx.category) lines.push(`Category: ${ctx.category}`);
+        lines.push(`File: ${ctx.file}${lineRange(ctx)}`);
+        // The copy-to-clipboard path and two of the deep-link targets carry no
+        // workspace at all, so the repository is named in the prompt itself
+        // rather than left to the receiving agent's working directory.
+        const repo = repoPath(ctx);
+        if (repo) lines.push(`Repository: ${repo}`);
+        if (ctx.branch) lines.push(`Branch: ${ctx.branch}`);
+        lines.push("");
+        lines.push("Finding:");
+        lines.push(ctx.content || "(no description)");
+        if (ctx.existing) {
+            lines.push("");
+            lines.push("Current code:");
+            lines.push("```");
+            lines.push(ctx.existing);
+            lines.push("```");
+        }
+        if (ctx.suggestion) {
+            lines.push("");
+            lines.push("Suggested change (from the reviewer, adapt as needed):");
+            lines.push("```");
+            lines.push(ctx.suggestion);
+            lines.push("```");
+        }
+        lines.push("");
+        lines.push(repo
+            ? "Make the change in the repository above. Keep it minimal and match the surrounding style."
+            : "Make the change. Keep it minimal and match the surrounding style.");
+        return clampPrompt(lines.join("\n"));
+    }
+
+    // Cuts an over-long prompt to the encoded budget without producing
+    // malformed text.
+    //
+    // A plain slice does damage in two ways that matter to the agent receiving
+    // it: it can land inside a fenced code block and leave the fence unclosed,
+    // so the rest of the prompt renders as code; and it can land between the
+    // halves of a surrogate pair, so the last character is invalid UTF-16 and
+    // decodes to a replacement character.
+    //
+    // So the cut is walked back to a line boundary, never between a high and low
+    // surrogate, and an unbalanced fence is closed.
+    function clampPrompt(text) {
+        const budget = MAX_ENCODED - encodedLength(FENCE_TAIL) - encodedLength(TRUNCATION_TAIL);
+        let cut = text.length;
+        if (encodedLength(text) > budget) {
+            // The encoded length grows with the raw text, so bisecting finds
+            // the longest prefix that fits.
+            let lo = 0;
+            let hi = text.length;
+            while (lo < hi) {
+                const mid = (lo + hi + 1) >> 1;
+                if (encodedLength(text.slice(0, mid)) <= budget) lo = mid;
+                else hi = mid - 1;
+            }
+            cut = lo;
+        }
+        if (cut >= text.length) return text;
+
+        // Never split a surrogate pair: a high surrogate at the cut point means
+        // its partner was cut off.
+        if (cut > 0 && isHighSurrogate(text.charCodeAt(cut - 1))) cut--;
+        // Prefer a line boundary so the prompt stays readable and a fence is
+        // never cut in half. The boundary has to be near the cut: walking back
+        // to a newline far above it would drop most of the prompt, which is
+        // worse than landing mid-line.
+        const lastNewline = text.lastIndexOf("\n", cut);
+        if (lastNewline > cut * 0.5) cut = lastNewline;
+
+        let out = text.slice(0, cut).trimEnd();
+        // An odd number of fences means the cut landed inside a block.
+        if ((out.match(/```/g) || []).length % 2 !== 0) out += FENCE_TAIL;
+        out += TRUNCATION_TAIL;
+        return out;
+    }
+
+    function isHighSurrogate(code) {
+        return code >= 0xd800 && code <= 0xdbff;
+    }
+
+    function lineRange(ctx) {
+        if (!ctx.start) return "";
+        if (ctx.end && ctx.end !== ctx.start) return `:${ctx.start}-${ctx.end}`;
+        return `:${ctx.start}`;
+    }
+
+    // Absolute path for agents that take a workspace. A relative or empty CWD
+    // would silently open the agent in the wrong directory, so it is dropped
+    // rather than passed through.
+    function repoPath(ctx) {
+        const repo = (ctx.repo || "").trim();
+        if (!repo) return "";
+        return repo.startsWith("/") || /^[A-Za-z]:[\\/]/.test(repo) ? repo : "";
+    }
+
+    // A file URI for a workspace directory. The URL parser does the work the
+    // string concatenation cannot: a Windows path has its backslashes turned
+    // into slashes and gains the leading slash a URI needs, and a "#" or "?"
+    // in the path is escaped instead of starting a fragment or a query.
+    function fileURI(dir) {
+        const url = new URL("file:///" + dir.replace(/\\/g, "/"));
+        return url.href;
+    }
+
+    // Each entry returns a URL. Grouped by vendor and ordered app -> CLI ->
+    // extension, which is the order a user reaches for: the app is already
+    // running, the CLI is the fallback, the editor extension is last.
+    //
+    // Only combinations with a documented, prefilled-prompt scheme are listed.
+    // Notably there is no CLI scheme for any of them - `claude`, `codex app`
+    // and `cursor agent` take a prompt as a positional argument with no URI
+    // equivalent - so "Copy prompt for agent" is the CLI path, and the menu
+    // says so rather than offering a link that silently does nothing.
+    //
+    // Sources: Claude Code deep-links doc (claude-cli://open?q=, cwd=) and
+    // VS Code doc (vscode://anthropic.claude-code/open?prompt=); Cursor
+    // deeplink reference (cursor://anysphere.cursor-deeplink/prompt?text=);
+    // Codex commands doc (codex://new?prompt=, path=); VS Code command-line
+    // doc (vscode://agents/new?prompt=, workspace=).
+    const TARGETS = {
+        // Claude Code, native app / CLI handler. Registered by the Claude Code
+        // app; opens the terminal session with the prompt prefilled.
+        "claude-app": (prompt, ctx) => {
+            const p = new URLSearchParams({ q: prompt });
+            const dir = repoPath(ctx);
+            if (dir) p.set("cwd", dir);
+            return "claude-cli://open?" + p.toString();
+        },
+        // Claude Code VS Code extension, which registers its own URI handler.
+        "claude-vscode": (prompt) =>
+            "vscode://anthropic.claude-code/open?" + new URLSearchParams({ prompt }).toString(),
+        // Codex native app. codex://new needs at least one of prompt/path, and
+        // path is what puts the chat in the right workspace.
+        codex: (prompt, ctx) => {
+            const p = new URLSearchParams({ prompt });
+            const dir = repoPath(ctx);
+            if (dir) p.set("path", dir);
+            return "codex://new?" + p.toString();
+        },
+        cursor: (prompt) =>
+            "cursor://anysphere.cursor-deeplink/prompt?" + new URLSearchParams({ text: prompt }).toString(),
+        // VS Code's own agent draft, for the editor rather than one vendor.
+        "vscode-agents": (prompt, ctx) => {
+            const p = new URLSearchParams({ prompt });
+            const dir = repoPath(ctx);
+            // workspace takes a folder URI, not a bare path.
+            if (dir) p.set("workspace", fileURI(dir));
+            return "vscode://agents/new?" + p.toString();
+        },
+    };
+
+    // The finding's text is read from the rendered card rather than shipped
+    // again in a data attribute. The panel already holds the code, and a
+    // second copy of it roughly doubled the size of a session page.
+    function readContext(el) {
+        const d = el.dataset;
+        const card = el.closest("[data-comment-card]");
+        return {
+            file: d.file || "",
+            start: parseInt(d.start, 10) || 0,
+            end: parseInt(d.end, 10) || 0,
+            category: d.category || "",
+            severity: d.severity || "",
+            content: textOf(card, ".comment-content"),
+            existing: codeOf(card, ".code-existing"),
+            suggestion: codeOf(card, ".code-suggestion"),
+            branch: d.branch || "",
+            repo: d.repo || "",
+        };
+    }
+
+    function textOf(card, selector) {
+        if (!card) return "";
+        const el = card.querySelector(selector);
+        return el ? el.textContent : "";
+    }
+
+    // The code panel renders one span per line when it shows line numbers, so
+    // the line text has to be joined back together; the numbers themselves are
+    // not part of the code.
+    function codeOf(card, selector) {
+        if (!card) return "";
+        const panel = card.querySelector(selector);
+        if (!panel) return "";
+        const lines = panel.querySelectorAll(".line-text");
+        if (lines.length) {
+            return Array.from(lines, (el) => el.textContent).join("\n");
+        }
+        const pre = panel.querySelector("pre code");
+        return pre ? pre.textContent : "";
+    }
+
+    async function copyText(text) {
+        // execCommand is the fallback for browsers and insecure origins where
+        // the async clipboard API is unavailable - the viewer is routinely
+        // reached over plain http on a LAN address.
+        if (navigator.clipboard && window.isSecureContext) {
+            try {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } catch {
+                /* fall through to the legacy path */
+            }
+        }
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try {
+            ok = document.execCommand("copy");
+        } catch {
+            ok = false;
+        }
+        document.body.removeChild(ta);
+        return ok;
+    }
+
+    function initActions(root) {
+        const menu = root.querySelector(".agent-menu");
+        const toggle = root.querySelector("[data-agent-menu-toggle]");
+        if (!menu || !toggle) return;
+
+        const links = Array.from(menu.querySelectorAll("[data-agent-open]"));
+
+        // Build each anchor's real href as the menu opens.
+        //
+        // The href has to be in place before the click is dispatched, and the
+        // browser has to be the one performing the navigation. Both matter: an
+        // anchor whose href is assigned from inside its own click handler needs
+        // either a re-dispatched click or a manual location change, and both of
+        // those run outside the transient user activation that every current
+        // browser requires before it will hand an external protocol
+        // (claude-cli:, codex:, cursor:) to the desktop. The result is a click
+        // that does nothing at all, with no error to show for it.
+        //
+        // So the URL is built here, while the menu is being opened by a real
+        // click, and the click handler below only closes the menu - the browser
+        // follows the href itself, carrying the user's gesture with it.
+        const buildLinks = () => {
+            const ctx = readContext(root);
+            const prompt = buildPrompt(ctx);
+            links.forEach((item) => {
+                const build = TARGETS[item.dataset.agentOpen];
+                if (build) item.href = build(prompt, ctx);
+            });
+        };
+
+        const close = () => closeMenu(root);
+        const open = () => {
+            buildLinks();
+            menu.hidden = false;
+            toggle.setAttribute("aria-expanded", "true");
+        };
+
+        // No stopPropagation: the page-level dismiss handler has to see this
+        // click, or opening a second menu would leave the first one open.
+        // It skips clicks that land inside this root, so it does not close
+        // the menu being toggled.
+        toggle.addEventListener("click", () => {
+            menu.hidden ? open() : close();
+        });
+
+        // No preventDefault here: the default action IS the handoff. Keyboard
+        // activation lands on the anchor as a real click too, so it needs
+        // nothing extra.
+        links.forEach((item) => {
+            item.addEventListener("click", close);
+        });
+
+        const copyBtn = root.querySelector("[data-agent-copy]");
+        const copied = root.querySelector("[data-agent-copied]");
+        if (copyBtn) {
+            copyBtn.addEventListener("click", async (e) => {
+                e.preventDefault();
+                const ok = await copyText(buildPrompt(readContext(root)));
+                if (copied) {
+                    // The live region stays in the accessibility tree, so only
+                    // its text changes: a region that is hidden while its
+                    // content changes is not reliably announced.
+                    copied.textContent = ok ? "Copied" : "Copy failed";
+                    setTimeout(() => {
+                        copied.textContent = "";
+                    }, 2000);
+                }
+                close();
+            });
+        }
+
+        // A click anywhere else, or Escape, dismisses the menu. The click is
+        // handled by one delegated listener installed once for the whole page
+        // (see bindDismiss below): a session with hundreds of findings would
+        // otherwise register hundreds of document-level listeners, all of which
+        // run on every click anywhere in the viewer. The keydown stays scoped
+        // to this finding, because it only fires while focus is inside it.
+        root.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") {
+                close();
+                toggle.focus();
+            }
+        });
+    }
+
+    // One document-level listener for every menu on the page, installed on
+    // first use and reused thereafter.
+    let dismissBound = false;
+
+    function bindDismiss() {
+        if (dismissBound) return;
+        dismissBound = true;
+        document.addEventListener("click", (e) => {
+            // Any click outside an open menu closes it. Only menus that are
+            // actually open are touched, so a click on the page cannot walk
+            // hundreds of closed cards.
+            document.querySelectorAll('[data-agent-actions] .agent-menu:not([hidden])').forEach((menu) => {
+                const root = menu.closest("[data-agent-actions]");
+                if (root && !root.contains(e.target)) closeMenu(root);
+            });
+        });
+    }
+
+    // closeMenu is the one implementation of the dismissal, used by the
+    // per-finding handlers and by the page-level dismiss handler alike.
+    function closeMenu(root) {
+        const menu = root.querySelector(".agent-menu");
+        const toggle = root.querySelector("[data-agent-menu-toggle]");
+        if (menu) menu.hidden = true;
+        if (toggle) toggle.setAttribute("aria-expanded", "false");
+    }
+
+    function initAll() {
+        bindDismiss();
+        document.querySelectorAll("[data-agent-actions]").forEach(initActions);
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initAll);
+    } else {
+        initAll();
+    }
+})();

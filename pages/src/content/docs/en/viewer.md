@@ -188,6 +188,12 @@ only one. Changing a severity or category filter returns to page 1;
 marking a finding, toggling **Hide marked**, or clearing marks keeps
 the current page where it still exists.
 
+**Collapse all** next to the findings count folds every file group down
+to its one-line summary, which turns a 275-finding page into a scannable
+index of files and their counts. The button toggles to **Expand all**.
+Groups hidden by the current filters are left alone, so what you see
+open always matches what you can see.
+
 ### Marking findings as you fix them
 
 Each card carries three buttons — **Fixed** / **Ignored** /
@@ -213,6 +219,38 @@ read-only:
   for the site starts it over.
 - Re-running a review of the same change produces a new session, which
   starts unmarked.
+
+### Handing a finding to a coding agent
+
+**Fix with agent** opens a menu that carries one finding — its file,
+line range, severity, category, description, both versions of the code,
+and the repository path — into whichever agent you use, prefilled and
+ready to send:
+
+| Target | Opens |
+|---|---|
+| **App** — Claude Code, Codex, Cursor | The agent's own desktop app. |
+| **Editor extension** — Claude Code (VS Code), VS Code agent | The extension in whichever VS Code window is focused. |
+
+**Copy prompt for agent** puts the same text on your clipboard instead,
+for pasting into a terminal — `claude "…"`, `codex "…"`, `cursor agent "…"`.
+There is no deep-link scheme for any vendor's CLI, which is why the CLI
+is reached by copy rather than by a link.
+
+Two things worth knowing:
+
+- **Nothing is submitted for you.** Every one of these prefills a
+  composer and stops; you read the prompt and send it. Claude Code
+  additionally labels the prompt as coming from an external link.
+- **Registration can be missing on a fresh machine.** Claude Code's
+  `claude-cli://` handler is only registered once you send your first
+  interactive prompt, so on a brand-new install the link can silently
+  do nothing — the copy action always works.
+
+The prompt is truncated to fit the smallest documented vendor limit, which
+each one measures on the URL-encoded value it receives. Encoding inflates
+non-ASCII text several times over, so a long or non-English finding is cut
+shorter than an equivalent one in ASCII.
 
 ## Use cases
 
