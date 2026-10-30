@@ -229,6 +229,32 @@ func TestResolveLineNumbers_FallbackToFileContent_AllBlankExistingCode(t *testin
 	}
 }
 
+// A quote that spans a blank line has to match inside the hunk: deleted code
+// is not in the new file, so the file-content fallback cannot find it.
+func TestResolveLineNumbers_HunkMatchAcrossBlankLine(t *testing.T) {
+	diff := `diff --git a/pkg/example/old.go b/pkg/example/old.go
+--- a/pkg/example/old.go
++++ b/pkg/example/old.go
+@@ -20,6 +20,2 @@ package example
+ func keep() {}
+-func legacy() {
+-}
+-
+-func legacyHelper() {}
+ func tail() {}
+`
+	diffs := []model.Diff{{NewPath: "pkg/example/old.go", Diff: diff}}
+	comments := []model.LlmComment{{
+		Path:         "pkg/example/old.go",
+		ExistingCode: "}\n\nfunc legacyHelper() {}",
+	}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	if result[0].StartLine != 22 || result[0].EndLine != 24 {
+		t.Errorf("got lines %d-%d, want 22-24", result[0].StartLine, result[0].EndLine)
+	}
+}
+
 func TestResolveLineNumbers_NoMatchKeepsZero(t *testing.T) {
 	diffs := []model.Diff{
 		{NewPath: "test.go", Diff: testDiff},
