@@ -7,6 +7,12 @@ with `ocr review`, `ocr scan` and `ocr llm test`, including streamed responses a
 tool calls. Select the `nearai` provider explicitly; setting a generic OpenAI
 provider's URL to NEAR AI does not enable verification.
 
+The provider picker labels this integration **NEAR AI (private)** for its default
+E2EE and model-TEE policy. Disabling E2EE removes application-level encryption of
+supported fields to the model; gateway-only verification does not attest the
+external model's execution. The picker label does not change with these settings,
+so check the verification policy and E2EE status in each run's report.
+
 ## Setup
 
 Provide a NEAR AI API key in `NEARAI_API_KEY`, or configure

@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -37,6 +38,9 @@ func TestLookupProvider_NearAIDetails(t *testing.T) {
 	if !ok {
 		t.Fatal("nearai preset not found")
 	}
+	if p.DisplayName != "NEAR AI (private)" {
+		t.Errorf("DisplayName = %q, want NEAR AI (private)", p.DisplayName)
+	}
 	if p.Protocol != ProtocolOpenAIChatCompletions {
 		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
 	}
@@ -46,8 +50,13 @@ func TestLookupProvider_NearAIDetails(t *testing.T) {
 	if p.EnvVar != "NEARAI_API_KEY" {
 		t.Errorf("EnvVar = %q, want NEARAI_API_KEY", p.EnvVar)
 	}
-	if len(p.Models) != 1 || p.Models[0] != "z-ai/glm-5.3-flash" {
-		t.Errorf("Models = %v, want [z-ai/glm-5.3-flash]", p.Models)
+	wantModels := []string{
+		"z-ai/glm-5.3-flash",
+		"deepseek-ai/DeepSeek-V4.1-Flash-1017",
+		"deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated",
+	}
+	if !slices.Equal(p.Models, wantModels) {
+		t.Errorf("Models = %v, want %v", p.Models, wantModels)
 	}
 }
 

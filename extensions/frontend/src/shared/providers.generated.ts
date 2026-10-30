@@ -282,12 +282,14 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
   },
   {
     "name": "nearai",
-    "displayName": "NEAR AI (verified)",
+    "displayName": "NEAR AI (private)",
     "protocol": "openai",
     "baseUrl": "https://cloud-api.near.ai/v1",
     "envVar": "NEARAI_API_KEY",
     "models": [
-      "z-ai/glm-5.3-flash"
+      "z-ai/glm-5.3-flash",
+      "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated"
     ]
   },
   {

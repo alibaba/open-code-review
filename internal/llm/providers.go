@@ -45,11 +45,15 @@ type Provider struct {
 var registry = []Provider{
 	{
 		Name:        "nearai",
-		DisplayName: "NEAR AI (verified)",
+		DisplayName: "NEAR AI (private)",
 		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://cloud-api.near.ai/v1",
 		EnvVar:      "NEARAI_API_KEY",
-		Models:      []string{"z-ai/glm-5.3-flash"},
+		Models: []string{
+			"z-ai/glm-5.3-flash",
+			"deepseek-ai/DeepSeek-V4.1-Flash-1017",
+			"deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated",
+		},
 	},
 	{
 		Name:        "anthropic",
