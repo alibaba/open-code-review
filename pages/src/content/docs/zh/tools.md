@@ -268,7 +268,7 @@ src/main/java/com/example/internal/UserServiceImpl.java
 | `search_text` | 是 | — | 字面量字符串或 PCRE 模式（见 `use_perl_regexp`）。 |
 | `file_patterns` | 否 | 全仓 | pathspec 条目数组。用 `:(exclude)pat` 做排除。 |
 | `case_sensitive` | 否 | `false` | — |
-| `use_perl_regexp` | 否 | `false` | 为 `true` 时，`search_text` 作为正则处理。 |
+| `use_perl_regexp` | 否 | `false` | 为 `true` 时，`search_text` 作为正则处理。否则按字面匹配，`a\|b` 搜索的就是这段文本；这样的字面搜索无结果时，工具会改用 `\|` 分隔的各部分重试，并在结果中注明。 |
 
 ### 输出
 
