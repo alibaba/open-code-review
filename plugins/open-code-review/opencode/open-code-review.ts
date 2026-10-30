@@ -196,9 +196,20 @@ function resolveWindowsOcrInvocation(): OcrInvocation | undefined {
   return undefined
 }
 
+let cachedInvocation: { key: string; invocation: OcrInvocation } | undefined
+
 function resolveInvocation(): OcrInvocation {
-  if (process.platform !== "win32") return defaultOcrInvocation
-  return resolveWindowsOcrInvocation() ?? defaultOcrInvocation
+  // Keyed on the search path so a long-lived process picks up a reinstall, and
+  // so tests that swap PATH between cases still resolve their own layout.
+  const key = `${process.env.PATH ?? ""}\0${process.env.APPDATA ?? ""}`
+  if (cachedInvocation?.key === key) {
+    return cachedInvocation.invocation
+  }
+  const invocation = process.platform === "win32"
+    ? resolveWindowsOcrInvocation() ?? defaultOcrInvocation
+    : defaultOcrInvocation
+  cachedInvocation = { key, invocation }
+  return invocation
 }
 
 async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
