@@ -390,7 +390,9 @@ rm -rf ~/.opencodereview                                # all state
 
 OCR은 `~/.opencodereview` 바깥에 아무것도 쓰지 않습니다(NPM으로 내려받는
 바이너리는 예외). 그러니 이 디렉터리를 지우면 기록과 설정, 사용자별 규칙이 모두
-사라집니다.
+사라집니다. `ocr review --fetch`는 저장소에도 씁니다. `git fetch`와
+마찬가지로 가져온 Git 객체를 쓰고 선택한 원격 추적 브랜치(와 그 reflog)를 갱신하지만,
+로컬 브랜치와 작업 트리는 건드리지 않습니다.
 
 ## 함께 보기 {#see-also}
 

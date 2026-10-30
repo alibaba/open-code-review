@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
@@ -93,6 +95,38 @@ func TestSealedInputPinsRunToAdmittedCommits(t *testing.T) {
 			t.Fatal("fixture proves nothing: the moved ref must change an unsealed identity")
 		}
 	})
+}
+
+// TestResolveIdentityKeepsPresetSeal pins what --fetch relies on under --resume:
+// endpoints the caller already froze are admitted as they are, instead of being
+// resolved again from refs that may have moved since.
+func TestResolveIdentityKeepsPresetSeal(t *testing.T) {
+	dir := sealRepo(t)
+	frozen := &diff.InputResolution{ResolvedBase: gitRevParse(t, dir, "main"), ResolvedHead: gitRevParse(t, dir, "feature")}
+	commitIn(t, dir, "late.go", "package main\n\nfunc late() {}\n", "move the ref")
+
+	sealed, err := ResolveIdentity(context.Background(), Args{
+		RepoDir:     dir,
+		From:        "main",
+		To:          "feature",
+		Template:    template.Template{MaxTokens: 4000},
+		SealedInput: frozen,
+	})
+	if err != nil {
+		t.Fatalf("ResolveIdentity: %v", err)
+	}
+	if sealed.Resolution.ResolvedHead != frozen.ResolvedHead || sealed.Resolution.ResolvedBase != frozen.ResolvedBase {
+		t.Errorf("a preset seal must be admitted unchanged:\n preset = %+v\n got    = %+v", *frozen, sealed.Resolution)
+	}
+}
+
+func gitRevParse(t *testing.T, dir, ref string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--verify", ref).Output()
+	if err != nil {
+		t.Fatalf("git rev-parse %s: %v", ref, err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // runPathIdentity replays what the run itself selects — the same diff load
