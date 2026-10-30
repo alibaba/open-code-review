@@ -124,6 +124,9 @@ For other installation methods (install script, GitHub Release binary, from sour
 
 You must configure an LLM before reviewing code, unless you use [Delegation Mode](https://open-codereview.ai/docs/delegate).
 
+- Needs `llm.auth_token`: `ocr review`, the `/open-code-review:review` command and the `open-code-review` skill. OCR calls the LLM itself and does not reuse a Claude Code Team/Pro login.
+- No OCR key needed: the `/open-code-review:delegate-review` command and the `open-code-review-delegate` skill. The host agent reviews with its own login. See the [Claude Code install steps](plugins/open-code-review/README.md#claude-code).
+
 ```bash
 ocr config provider          # Select a built-in provider or add a custom one
 ocr config model             # Pick a model for the active provider
