@@ -285,6 +285,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 
 	resultErr := reviewResultError(runErr, manifest)
+	if resultErr == nil && ag.HadUnreviewedInput() {
+		// A non-empty changeset that selected zero files is not "review passed":
+		// a CI gate reads exit 0 as a clean review, and the summary already shows
+		// "Review skipped". Surface it as a process error so callers can tell the
+		// difference between "nothing to do" and "everything was filtered out".
+		resultErr = fmt.Errorf("no files were selected for review: every changed file was filtered out (see 'Excluded from review')")
+	}
 	if resultErr != nil {
 		span.SetStatus(codes.Error, resultErr.Error())
 		span.RecordError(resultErr)

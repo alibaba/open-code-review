@@ -17,6 +17,9 @@ func TestAgentGettersNilSafe(t *testing.T) {
 	if got := a.RunManifest(); got != nil {
 		t.Errorf("RunManifest() on session-less agent = %v, want nil", got)
 	}
+	if got := a.HadUnreviewedInput(); got {
+		t.Errorf("HadUnreviewedInput() on fresh agent = true, want false")
+	}
 
 	var nilAgent *Agent
 	if got := nilAgent.SessionID(); got != "" {
@@ -24,5 +27,8 @@ func TestAgentGettersNilSafe(t *testing.T) {
 	}
 	if got := nilAgent.RunManifest(); got != nil {
 		t.Errorf("nil-receiver RunManifest() = %v, want nil", got)
+	}
+	if got := nilAgent.HadUnreviewedInput(); got {
+		t.Errorf("nil-receiver HadUnreviewedInput() = true, want false")
 	}
 }

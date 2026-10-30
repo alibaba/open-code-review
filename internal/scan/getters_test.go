@@ -23,10 +23,16 @@ func TestScanGettersOnEmptyAgent(t *testing.T) {
 	if a.BudgetExceeded() {
 		t.Errorf("BudgetExceeded() = true, want false")
 	}
+	if a.HadUnreviewedInput() {
+		t.Errorf("HadUnreviewedInput() = true, want false")
+	}
 
 	// Nil receiver must not panic for SessionID (guarded).
 	var nilAgent *Agent
 	if got := nilAgent.SessionID(); got != "" {
 		t.Errorf("nil-receiver SessionID() = %q, want empty", got)
+	}
+	if nilAgent.HadUnreviewedInput() {
+		t.Errorf("nil-receiver HadUnreviewedInput() = true, want false")
 	}
 }

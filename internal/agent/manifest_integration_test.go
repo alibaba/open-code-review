@@ -458,6 +458,57 @@ func TestManifestFlowBudgetAndSkipped(t *testing.T) {
 		if manifest == nil || manifest.TerminalState != session.StateSkipped || len(manifest.Coverage.Selected) != 0 {
 			t.Fatalf("manifest = %+v", manifest)
 		}
+		if !a.HadUnreviewedInput() {
+			t.Fatalf("HadUnreviewedInput() = false for an all-oversized changeset, want true")
+		}
+	})
+
+	t.Run("unsupported extension only marks unreviewed input", func(t *testing.T) {
+		dir := initPreviewRepo(t)
+		// Only an unsupported-extension file changes: the changeset is non-empty
+		// but zero files are selected, which is exactly the #1779 silent-skip case.
+		if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("# notes\n"), 0o644); err != nil {
+			t.Fatalf("write notes.md: %v", err)
+		}
+		a := New(Args{
+			RepoDir:   dir,
+			LLMClient: manifestFlowClient{},
+			Model:     "fake",
+			Template:  template.Template{MaxTokens: 1000},
+		})
+		comments, err := a.Run(context.Background())
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if len(comments) != 0 {
+			t.Fatalf("comments = %d, want 0", len(comments))
+		}
+		if m := a.RunManifest(); m == nil || m.TerminalState != session.StateSkipped {
+			t.Fatalf("manifest = %+v", m)
+		}
+		if !a.HadUnreviewedInput() {
+			t.Fatalf("HadUnreviewedInput() = false for an unsupported-extension-only changeset, want true")
+		}
+	})
+
+	t.Run("empty diff is not unreviewed input", func(t *testing.T) {
+		dir := initPreviewRepo(t)
+		a := New(Args{
+			RepoDir:   dir,
+			LLMClient: manifestFlowClient{},
+			Model:     "fake",
+			Template:  template.Template{MaxTokens: 1000},
+		})
+		comments, err := a.Run(context.Background())
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if len(comments) != 0 {
+			t.Fatalf("comments = %d, want 0", len(comments))
+		}
+		if a.HadUnreviewedInput() {
+			t.Fatalf("HadUnreviewedInput() = true for a clean working tree, want false")
+		}
 	})
 }
 
