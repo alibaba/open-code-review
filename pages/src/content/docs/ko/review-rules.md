@@ -318,6 +318,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.elm`                          | `elm.md` — Elm 소스.                                                             |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리.                                 |
 | `**/*.thrift`                       | `thrift.md` — Apache Thrift IDL 통신 호환성.                                     |
+| `**/*.{bzl,bazel,star}`             | `starlark.md` — Starlark 및 Bazel 빌드, 매크로, 규칙 설계.                        |
 | `**/*.capnp`                        | `capnp.md` — Cap'n Proto 스키마 통신 호환성.                                     |
 | `**/*.{glsl,hlsl,wgsl,metal}`        | `shader.md` — GLSL, HLSL, WGSL 및 Metal 셰이더.                                   |
 | `**/*.{v,sv,vh}`                    | `verilog.md` — Verilog 및 SystemVerilog RTL.                                     |
