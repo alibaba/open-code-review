@@ -622,9 +622,7 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	if cfg.rawHolder != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
-	if cfg.retryCollector != nil {
-		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
-	}
+	opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 
 	return &OpenAIClient{
 		cfg: cfg,
@@ -650,6 +648,7 @@ type ChatRequest struct {
 // path including the streaming branch, the EOF recovery and a panic. Results are
 // named so the defer can read the error actually returned.
 func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	ctx = withHTTPAttemptCounter(ctx)
 	defer func() {
 		// A panic still has to finalize, or the entry stays unfinalized and Freeze
 		// drops the whole run's report. The panic value itself is re-raised
@@ -1211,9 +1210,7 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	if cfg.rawHolder != nil {
 		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
-	if cfg.retryCollector != nil {
-		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
-	}
+	opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 
 	return &AnthropicClient{
 		cfg: cfg,
@@ -1270,9 +1267,7 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	if cfg.rawHolder != nil {
 		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
-	if cfg.retryCollector != nil {
-		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
-	}
+	opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 
 	// Load the AWS config here rather than calling bedrock.WithLoadDefaultConfig,
 	// which panics on failure.
@@ -1460,6 +1455,7 @@ func anthropicThinkingBudgetTokens(v any) (int64, bool) {
 // named. A parameter-building failure returns before any HTTP attempt, so
 // Finalize finds no entry and the request stays out of the report entirely.
 func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	ctx = withHTTPAttemptCounter(ctx)
 	defer func() {
 		if r := recover(); r != nil {
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
