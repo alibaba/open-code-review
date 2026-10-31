@@ -238,6 +238,23 @@ func TestFileGroupKey_Multiple(t *testing.T) {
 	}
 }
 
+func TestFileGroupKey_DeletedFileUsesRealPath(t *testing.T) {
+	key := fileGroupKey([]model.Diff{{NewPath: "/dev/null", OldPath: "deleted.go", IsDeleted: true}})
+	if key != "deleted.go" {
+		t.Errorf("got %q, want %q; the /dev/null sentinel must not be a group key", key, "deleted.go")
+	}
+}
+
+func TestToSingleFileGroups_DeletedFileLabel(t *testing.T) {
+	groups := toSingleFileGroups([]model.Diff{{NewPath: "/dev/null", OldPath: "deleted.go", IsDeleted: true}})
+	if len(groups) != 1 {
+		t.Fatalf("got %d groups, want 1", len(groups))
+	}
+	if groups[0].Label != "deleted.go" {
+		t.Errorf("got label %q, want %q", groups[0].Label, "deleted.go")
+	}
+}
+
 func TestGroupDiffs_SingleFile(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "a.go"}}
 	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0, nil)
@@ -637,6 +654,17 @@ func TestResolveGroupSystemRule(t *testing.T) {
 		a.resolveGroupSystemRule(in)
 		if in[0].NewPath != "z.go" || in[1].NewPath != "a.go" {
 			t.Errorf("input slice was reordered: %q, %q", in[0].NewPath, in[1].NewPath)
+		}
+	})
+
+	// A deletion carries the /dev/null sentinel in NewPath; the rule must be
+	// resolved from the real path so the file is reviewed under its language
+	// checklist, not whatever the sentinel's empty extension resolves to.
+	t.Run("deleted file resolves by its real path", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		got := a.resolveGroupSystemRule([]model.Diff{{NewPath: "/dev/null", OldPath: "a.go", IsDeleted: true}})
+		if got != goRule {
+			t.Errorf("got %q, want %q", got, goRule)
 		}
 	})
 
