@@ -70,6 +70,10 @@ type SessionHistory struct {
 	// still produce a manifest for CLI output, but Finalize must report that the
 	// persisted-session outlet was never available.
 	persistInitErr error
+	// interruptedBy is the reason session_end reports for a run that ended
+	// before it could finish (see RecordInterrupted), or empty for a run that
+	// reached its own terminal state. Set before Finalize; guarded by mu.
+	interruptedBy string
 	// finalizeOnce ensures session_end is written exactly once even if several
 	// run paths (error, skip, normal) — possibly concurrently — reach Finalize.
 	finalizeOnce sync.Once
@@ -316,6 +320,36 @@ func (sh *SessionHistory) RecordReviewItemFailed(filePath, oldPath, newPath, fin
 	}
 }
 
+// InterruptReasonCancelled is the session_end.interrupted_by value for a run that
+// ended because its context was cancelled: Ctrl-C, SIGTERM, or the caller's own
+// deadline. It is a plain string because it is part of the persisted session
+// format, not a Go-only enum.
+const InterruptReasonCancelled = "cancelled"
+
+// RecordInterrupted marks the session as one that ended before its run could
+// reach a terminal state, and records why. Finalize writes that reason into
+// session_end as interrupted_by.
+//
+// Without the label, a cancelled run persists as a session_end that looks like
+// every other truncated run's, and `ocr session list` can only report the
+// catch-all "aborted" — which readers take to mean the process was killed, the
+// one explanation the run itself has already ruled out by writing a session_end
+// at all. The reason changes neither coverage nor exit status; it replaces a
+// guess with the fact the run already knew.
+//
+// Call it before Finalize. It is a no-op on a session that has already been
+// finalized, so a late call cannot rewrite a delivered session_end.
+func (sh *SessionHistory) RecordInterrupted(reason string) {
+	if sh == nil || reason == "" {
+		return
+	}
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	if sh.EndTime.IsZero() {
+		sh.interruptedBy = reason
+	}
+}
+
 // Finalize marks the session as complete, sets the end time, and persists the
 // final summary record. When a frozen manifest was stored via SetFinalManifest
 // it is embedded into session_end as run_manifest, which is the last physical
@@ -332,6 +366,7 @@ func (sh *SessionHistory) Finalize() error {
 		p := sh.persist
 		persistInitErr := sh.persistInitErr
 		manifest := sh.finalManifest
+		interruptedBy := sh.interruptedBy
 		duration := sh.EndTime.Sub(sh.StartTime)
 		filesReviewed := make([]string, 0, len(sh.FileSessions))
 		if manifest != nil && manifest.SchemaVersion == ManifestSchemaVersion {
@@ -358,7 +393,7 @@ func (sh *SessionHistory) Finalize() error {
 		// result is cached in finalizeErr. sync.Once guarantees every other
 		// caller blocks until this completes, then reads the same finalizeErr.
 		if p != nil {
-			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest)
+			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest, interruptedBy)
 		}
 	})
 	return sh.finalizeErr

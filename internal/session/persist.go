@@ -374,7 +374,7 @@ func (jw *jsonlWriter) WriteResumeLineage(l *ResumeLineage) string {
 // is appended. The record is flushed before the file is closed. Any marshal,
 // flush or close error is returned so the caller can surface it as a delivery
 // error rather than silently losing the manifest.
-func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, manifest *RunManifest) error {
+func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, manifest *RunManifest, interruptedBy string) error {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -391,6 +391,12 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 	}
 	if manifest != nil {
 		rec["run_manifest"] = manifest
+	}
+	// Omitted rather than written empty: every reader already treats a
+	// session_end without this key as a run that finished on its own, so the
+	// record stays byte-identical for the overwhelmingly common case.
+	if interruptedBy != "" {
+		rec["interrupted_by"] = interruptedBy
 	}
 	jw.lastUUID = uuid
 

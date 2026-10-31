@@ -41,6 +41,11 @@ type Summary struct {
 	Aborted        bool          `json:"aborted"`
 	Legacy         bool          `json:"legacy"`
 	RunManifest    *RunManifest  `json:"run_manifest,omitempty"`
+	// InterruptedBy names why a run ended before reaching a terminal state (see
+	// session_end.interrupted_by). Empty for a run that finished on its own,
+	// including one that failed normally: a failure is a terminal state, an
+	// interruption is not.
+	InterruptedBy string `json:"interrupted_by,omitempty"`
 
 	// ResumeLineage is present only for a run that resumed another, and records
 	// which run it continued and across which provider and model.
@@ -84,6 +89,7 @@ type summaryRecord struct {
 	DurationSeconds float64         `json:"duration_seconds"`
 	LLMFailures     int64           `json:"llm_failures"`
 	RunManifest     *RunManifest    `json:"run_manifest"`
+	InterruptedBy   string          `json:"interrupted_by"`
 	SchemaVersion   string          `json:"schema_version"`
 	RunID           string          `json:"run_id"`
 	ParentRunID     string          `json:"parent_run_id"`
@@ -290,6 +296,7 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 			s.Duration = s.EndTime.Sub(s.StartTime)
 		}
 		s.LLMFailures = rec.LLMFailures
+		s.InterruptedBy = rec.InterruptedBy
 	}
 }
 
