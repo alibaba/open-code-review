@@ -337,6 +337,7 @@ matching order:
 | `**/*.elm`                          | `elm.md` - Elm source.                                                                                |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — Jsonnet configuration templates and libraries.                                         |
 | `**/*.thrift`                       | `thrift.md` — Apache Thrift IDL wire compatibility.                                                   |
+| `**/*.{bzl,bazel,star}`             | `starlark.md` — Starlark and Bazel build, macro, and rule design.                                      |
 | `**/*.capnp`                        | `capnp.md` — Cap'n Proto schema wire compatibility.                                                   |
 | `**/*.{glsl,hlsl,wgsl,metal}`       | `shader.md` — GLSL, HLSL, WGSL, and Metal shaders.                                                     |
 | `**/*.{v,sv,vh}`                    | `verilog.md` — Verilog and SystemVerilog RTL.                                                         |

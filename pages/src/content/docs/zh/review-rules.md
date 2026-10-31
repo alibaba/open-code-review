@@ -306,6 +306,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.elm`                          | `elm.md` - Elm 源代码。                                               |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md`——Jsonnet 配置模板与库。                                  |
 | `**/*.thrift`                       | `thrift.md`——Apache Thrift IDL 线协议兼容性。                         |
+| `**/*.{bzl,bazel,star}`             | `starlark.md`——Starlark 和 Bazel 构建、宏与规则设计。                  |
 | `**/*.capnp`                        | `capnp.md`——Cap'n Proto schema 线协议兼容性。                         |
 | `**/*.{glsl,hlsl,wgsl,metal}`       | `shader.md` - GLSL、HLSL、WGSL、Metal 着色器。                               |
 | `**/*.{v,sv,vh}`                    | `verilog.md`——Verilog 与 SystemVerilog RTL。                          |
