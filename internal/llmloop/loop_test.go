@@ -400,6 +400,148 @@ func TestRunMainTask_EmptyToolResultsStopWithEmptyRounds(t *testing.T) {
 	}
 }
 
+// A response that carries prose but no tool call leaves the round with nothing
+// usable, exactly like a tool that returns an empty result, so both have to
+// count against the same consecutive-empty-round cap. Otherwise a model that
+// never calls a tool (a provider ignoring the tool definitions, a wrong model)
+// spends the whole tool-request budget one growing-conversation request at a
+// time instead of tripping the cap on the third round.
+func TestRunMainTask_NoToolCallsStopWithEmptyRounds(t *testing.T) {
+	client := &textOnlyClient{content: "I reviewed the change and found nothing to report."}
+	deps := newTestDeps(client)
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if completed {
+		t.Fatal("RunMainTask completed without task_done")
+	}
+	if stop != StopEmptyRounds {
+		t.Fatalf("stop = %v, want StopEmptyRounds", stop)
+	}
+	if client.calls != 3 {
+		t.Fatalf("LLM calls = %d, want 3 (the empty-round cap, not the %d-round budget)",
+			client.calls, deps.Template.MaxToolRequestTimes)
+	}
+}
+
+// textOnlyClient answers every request with prose and no tool calls, and keeps
+// the requests so a test can inspect the round each one belongs to.
+type textOnlyClient struct {
+	content  string
+	calls    int
+	requests []llm.ChatRequest
+}
+
+func (c *textOnlyClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.calls++
+	c.requests = append(c.requests, req)
+	content := c.content
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
+		Model:   "fake",
+		Usage:   &llm.UsageInfo{PromptTokens: 5, CompletionTokens: 5},
+	}, nil
+}
+
+// The empty-round cap is a retry budget, not a request budget: a run that trips
+// it bails at round 3 with most of its tool-request rounds unused. Bouncing
+// straight out of the loop therefore threw away the one round that could still
+// be useful to a model that is merely bad at tool calling, so the same FINAL
+// round the budget stops get has to run here too.
+func TestRunMainTask_NoToolCallsStillGetsTheGraceRound(t *testing.T) {
+	client := &textOnlyClient{content: "I reviewed the change and found nothing to report."}
+	deps := newTestDeps(client)
+	// Production sets these; without them graceRoundToolDefs is empty and
+	// runGraceRound returns before making a call, which is what hid the gap.
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if completed {
+		t.Fatal("RunMainTask completed without task_done")
+	}
+	if stop != StopEmptyRounds {
+		t.Fatalf("stop = %v, want StopEmptyRounds", stop)
+	}
+	// Three rounds to trip the cap, plus the grace round.
+	if client.calls != 4 {
+		t.Fatalf("LLM calls = %d, want 4 (3 empty rounds + 1 grace)", client.calls)
+	}
+
+	grace := client.requests[len(client.requests)-1]
+	if len(grace.Tools) != 2 {
+		t.Fatalf("grace round tools = %d, want 2 (code_comment, task_done)", len(grace.Tools))
+	}
+	for _, def := range grace.Tools {
+		if name := def.Function.Name; name != "code_comment" && name != "task_done" {
+			t.Errorf("grace round offered %q, want only code_comment and task_done", name)
+		}
+	}
+	prompt, _ := grace.Messages[len(grace.Messages)-1].Content.(string)
+	if !strings.Contains(prompt, "FINAL round") {
+		t.Errorf("grace round prompt = %q, want the FINAL-round instruction", prompt)
+	}
+
+	// The early stop has to stay visible: an empty-round exit shares the
+	// warning the budget stops record, because a grace round that completes the
+	// task would otherwise be the only trace of it.
+	if limit := graceLimitWarnings(runner); len(limit) != 1 ||
+		limit[0].File != "main.go" || !strings.Contains(limit[0].Message, "did not complete the task") ||
+		!strings.Contains(limit[0].Message, "without a usable tool result") {
+		t.Fatalf("limit warnings = %+v, want one incomplete verdict naming the empty-round stop", limit)
+	}
+}
+
+// The grace round is a regular main-task round, so a task_done it carries is
+// the model declaring the subtask finished — the empty-round stop must not
+// discard it, or a resume re-runs a file the model already completed.
+func TestRunMainTask_EmptyRoundsGraceRoundTaskDoneCompletes(t *testing.T) {
+	prose := "I reviewed the change and found nothing to report."
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &prose}}}, Model: "fake"},
+		{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &prose}}}, Model: "fake"},
+		{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &prose}}}, Model: "fake"},
+		taskDoneResponseWithArguments(`{"state":"DONE"}`),
+	}}
+	deps := newTestDeps(client)
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if !completed {
+		t.Fatal("task_done DONE in the grace round must complete RunMainTask")
+	}
+	if stop != StopEmptyRounds {
+		t.Fatalf("stop = %v, want StopEmptyRounds", stop)
+	}
+	if client.calls != 4 {
+		t.Fatalf("LLM calls = %d, want 4 (3 empty rounds + 1 grace)", client.calls)
+	}
+	if limit := graceLimitWarnings(runner); len(limit) != 1 ||
+		!strings.Contains(limit[0].Message, "the grace round completed the task") {
+		t.Fatalf("limit warnings = %+v, want one completed verdict", limit)
+	}
+}
+
 func TestRunMainTask_UncompressibleContextStopsWithCompression(t *testing.T) {
 	emptySummary := ""
 	client := &fakeClient{responses: []*llm.ChatResponse{

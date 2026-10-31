@@ -362,11 +362,12 @@ func (s MainLoopStop) Reason() string {
 // called or limits are reached. Token usage and warnings are aggregated on the
 // Runner across every call. The returned bool is true only when the model
 // explicitly calls task_done with a successful state, including one issued in
-// the grace round that follows an exhausted budget. That grace round also
-// records a WarningReviewLimitReached warning, so a spent limit stays visible
-// even when the completion it produced is the only other trace of it. The
-// MainLoopStop return classifies a non-completed, non-error stop at its trigger
-// point so the caller never has to infer the cause from text or context state.
+// the grace round that follows a stop which ended the loop early — an exhausted
+// budget or the empty-round cap. That grace round also records a
+// WarningReviewLimitReached warning, so an early stop stays visible even when
+// the completion it produced is the only other trace of it. The MainLoopStop
+// return classifies a non-completed, non-error stop at its trigger point so the
+// caller never has to infer the cause from text or context state.
 //
 // taskKey identifies the subtask this conversation belongs to, and is not
 // necessarily a file path: scan passes one file's path, while review passes the
@@ -386,6 +387,10 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		llm.SessionTaskKey(r.deps.Session.SessionID, string(session.MainTask), taskKey))
 
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
+	// Both kinds of round that produced nothing usable share this cap: one whose
+	// tool results carried no data, and one that called no tool at all. Neither
+	// lets the model make progress, and the second still spends a full request
+	// of the round budget while the conversation it re-sends keeps growing.
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
 	sessionID := uuid.NewString()
@@ -458,6 +463,12 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		calls := resp.ToolCalls()
 
 		if len(calls) == 0 {
+			consecutiveEmptyRounds++
+			if consecutiveEmptyRounds >= maxConsecutiveEmptyRounds {
+				fmt.Fprintf(stdout.Writer(), "[ocr] Too many empty retries for %s, stopping.\n", taskKey)
+				stop = StopEmptyRounds
+				break
+			}
 			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", taskKey)
 			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
 			native := resp.Native()
@@ -530,6 +541,12 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 	// task, so a task_done it carries counts as completion. The caller records
 	// the subtask as incomplete otherwise, and a resume re-runs a file the
 	// model already declared done.
+	//
+	// A model that stopped calling tools gets the same round. The cap that ends
+	// that run is a retry budget, not a request budget, so the conversation was
+	// cut at the third empty round while the remaining tool-request rounds went
+	// unused; the FINAL round is where a model that is merely bad at tool
+	// calling can still submit what it found.
 	completed := false
 	switch stop {
 	case StopMaxRounds:
@@ -539,11 +556,17 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		fmt.Fprintf(stdout.Writer(), "[ocr] Token budget exceeded (used %d > budget %d) for %s.\n",
 			r.TotalTokensUsed(), r.deps.MaxTokensBudget, taskKey)
 		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
+	case StopEmptyRounds:
+		fmt.Fprintf(stdout.Writer(), "[ocr] No usable tool results for %s; running the final round.\n", taskKey)
+		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
 	}
-	// Both budget stops above ran the grace round, and completion is the only
-	// other trace it leaves: without this warning a caller would see a
-	// completed task and never learn that its budget ran out mid-review.
-	if stop == StopMaxRounds || stop == StopTokenBudget {
+	// Every stop above ran the grace round, and completion is the only other
+	// trace it leaves: without this warning a caller would see a completed task
+	// and never learn that the loop stopped early. The empty-round stop is
+	// included for that reason — it is not a declared budget, so
+	// classifyMainLoopStop keeps it out of the budget failure class, but a
+	// review it cut short still has to stay visible.
+	if stop == StopMaxRounds || stop == StopTokenBudget || stop == StopEmptyRounds {
 		r.recordGraceRoundLimit(taskKey, stop, completed)
 	}
 	return completed, stop, nil
@@ -632,19 +655,20 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	return completed && !failed
 }
 
-// WarningReviewLimitReached is the warning type RunMainTask records when a
-// declared budget — the tool-request rounds (StopMaxRounds) or the aggregate
-// token budget (StopTokenBudget) — spends the main loop's last round and sends
-// the task into its grace round. Callers publish warnings in their JSON and
-// terminal output, and the warning keeps a spent limit visible even when the
-// grace round completes the task: by design the completion alone would look
-// like an untruncated review.
+// WarningReviewLimitReached is the warning type RunMainTask records when a stop
+// ends the main loop early and hands the task to its grace round: a declared
+// budget — the tool-request rounds (StopMaxRounds) or the aggregate token budget
+// (StopTokenBudget) — or the empty-round cap (StopEmptyRounds), which spends
+// retries rather than a configured budget. Callers publish warnings in their
+// JSON and terminal output, and the warning keeps an early stop visible even
+// when the grace round completes the task: by design the completion alone would
+// look like an untruncated review.
 const WarningReviewLimitReached = "review_limit_reached"
 
-// recordGraceRoundLimit records which declared budget reached its grace round,
-// and the round's verdict on the task. The verdict is part of the message
-// because completion and its absence send a reader — or a JSON consumer — to
-// opposite conclusions about the same limit.
+// recordGraceRoundLimit records which stop reached its grace round, and the
+// round's verdict on the task. The verdict is part of the message because
+// completion and its absence send a reader — or a JSON consumer — to opposite
+// conclusions about the same stop.
 func (r *Runner) recordGraceRoundLimit(taskKey string, stop MainLoopStop, completed bool) {
 	outcome := "the grace round did not complete the task"
 	if completed {
