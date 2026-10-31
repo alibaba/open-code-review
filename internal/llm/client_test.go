@@ -2394,3 +2394,31 @@ func TestMessage_EstimatedTokens(t *testing.T) {
 		}
 	})
 }
+
+// TruncatedAtOutputCap is the shared predicate every caller that must notice a
+// clipped reply uses, so its edges are pinned directly rather than through
+// three separate pipelines: a finished reply, a reply with no choice at all,
+// and a nil response must all read as "complete", or the warning becomes noise
+// on every ordinary run.
+func TestChatResponseTruncatedAtOutputCap(t *testing.T) {
+	text := "body"
+	cases := []struct {
+		name string
+		resp *ChatResponse
+		want bool
+	}{
+		{"nil response", nil, false},
+		{"no choices", &ChatResponse{}, false},
+		{"cut at the cap", &ChatResponse{Choices: []Choice{{Message: ResponseMessage{Content: &text}, FinishReason: "length"}}}, true},
+		{"finished normally", &ChatResponse{Choices: []Choice{{Message: ResponseMessage{Content: &text}, FinishReason: "stop"}}}, false},
+		{"tool call", &ChatResponse{Choices: []Choice{{Message: ResponseMessage{Content: &text}, FinishReason: "tool_calls"}}}, false},
+		{"reason not reported", &ChatResponse{Choices: []Choice{{Message: ResponseMessage{Content: &text}}}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.resp.TruncatedAtOutputCap(); got != tc.want {
+				t.Fatalf("TruncatedAtOutputCap() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
