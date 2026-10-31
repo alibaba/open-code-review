@@ -63,35 +63,44 @@ type Provider struct {
 	mergeBase string // cached common ancestor for range mode
 }
 
-// DiffSet separates the diffs a review may process from files excluded by the
-// provider's built-in directory rules. The latter remain unavailable to a
-// review, but callers such as Preview can account for them.
+// DiffSet separates the diffs a review may process from files the provider
+// resolved away before any review rule ran — its built-in directory rules and
+// the repository's .gitignore. The latter remain unavailable to a review, but
+// callers such as Preview can account for them.
 //
 // excludedAt[i] is Excluded[i]'s index in the changeset order of Included and
 // Excluded combined, so ForEachInOrder can walk the two slices as Git listed
-// them rather than every provider exclusion first.
+// them rather than every provider exclusion first. excludedReason[i] is why
+// Excluded[i] is there, which the two kinds of exclusion need to be told apart
+// in a report.
 type DiffSet struct {
-	Included   []model.Diff
-	Excluded   []model.Diff
-	excludedAt []int
+	Included       []model.Diff
+	Excluded       []model.Diff
+	excludedAt     []int
+	excludedReason []model.ExcludeReason
 }
 
 // ForEachInOrder visits Included and Excluded in the original changeset order.
-// providerExcluded is true for built-in directory exclusions. Files dropped by
-// .gitignore are not visited.
-func (s DiffSet) ForEachInOrder(visit func(d model.Diff, providerExcluded bool)) {
+// providerReason is ExcludeNone for a diff the review may process, and
+// otherwise says which provider-level rule removed it.
+//
+// A gitignored file used to be visited by nothing at all: partitionDiffs
+// appended it to neither slice, so it was absent from the preview's counts and
+// from its file list, and a repository whose .gitignore covered everything
+// changed reported zero files with no reason given.
+func (s DiffSet) ForEachInOrder(visit func(d model.Diff, providerReason model.ExcludeReason)) {
 	next := 0
 	for i, d := range s.Excluded {
 		// excludedAt[i] is the mixed-stream index, so the number of included
 		// files that precede this exclusion is excludedAt[i]-i.
 		upTo := s.excludedAt[i] - i
 		for ; next < upTo; next++ {
-			visit(s.Included[next], false)
+			visit(s.Included[next], model.ExcludeNone)
 		}
-		visit(d, true)
+		visit(d, s.excludedReason[i])
 	}
 	for ; next < len(s.Included); next++ {
-		visit(s.Included[next], false)
+		visit(s.Included[next], model.ExcludeNone)
 	}
 }
 
@@ -429,23 +438,37 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 	return false
 }
 
-// partitionDiffs keeps diffs filtered by built-in directory rules available
-// for reporting while preserving the review input as the Included slice.
+// partitionDiffs keeps the diffs a review may not process available for
+// reporting while preserving the review input as the Included slice.
+//
+// Both kinds of provider-level exclusion go to Excluded. A .gitignore match
+// used to go nowhere: it was neither reviewed nor reported, so a repository
+// whose .gitignore happened to cover the whole changeset previewed as
+// total_files 0, reviewable 0, excluded 0 — indistinguishable from a commit
+// that changed nothing, which is the one reading that makes an empty review
+// look like a complete one.
 func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 	patterns := p.loadGitignorePatterns()
 	result := DiffSet{
 		Included: make([]model.Diff, 0, len(diffs)),
 		Excluded: make([]model.Diff, 0),
 	}
+	exclude := func(d model.Diff, reason model.ExcludeReason) {
+		result.excludedAt = append(result.excludedAt, len(result.Included)+len(result.Excluded))
+		result.excludedReason = append(result.excludedReason, reason)
+		result.Excluded = append(result.Excluded, d)
+	}
 	for _, d := range diffs {
 		path := d.NewPath
 		if path == "/dev/null" {
 			path = d.OldPath
 		}
-		if isProviderDirExcluded(path) {
-			result.excludedAt = append(result.excludedAt, len(result.Included)+len(result.Excluded))
-			result.Excluded = append(result.Excluded, d)
-		} else if !p.isPathExcluded(path, patterns) {
+		switch {
+		case isProviderDirExcluded(path):
+			exclude(d, model.ExcludeProviderDirectory)
+		case p.isPathExcluded(path, patterns):
+			exclude(d, model.ExcludeGitignore)
+		default:
 			result.Included = append(result.Included, d)
 		}
 	}

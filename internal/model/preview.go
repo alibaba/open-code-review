@@ -20,9 +20,16 @@ const (
 	// exclusion (for example vendor/ or node_modules/). Unlike default_path,
 	// an include rule cannot make the file reviewable.
 	ExcludeProviderDirectory ExcludeReason = "provider_directory"
-	ExcludeDeleted           ExcludeReason = "deleted"
-	ExcludeBinary            ExcludeReason = "binary"
-	ExcludeTooLarge          ExcludeReason = "too_large"
+	// ExcludeGitignore is a repository .gitignore match. Like
+	// provider_directory it is resolved before any review rule, so an include
+	// rule cannot make the file reviewable. It exists so such a file is still
+	// counted and named: without it a gitignored path was appended to neither
+	// the reviewable nor the excluded list, and a preview reported zero files
+	// with nothing to say where they had gone.
+	ExcludeGitignore ExcludeReason = "gitignore"
+	ExcludeDeleted   ExcludeReason = "deleted"
+	ExcludeBinary    ExcludeReason = "binary"
+	ExcludeTooLarge  ExcludeReason = "too_large"
 )
 
 // PreviewEntry is one file's preview record (mode-agnostic).

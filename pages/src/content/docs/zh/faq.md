@@ -104,6 +104,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `unsupported_ext` | 把扩展名加入你的 `include` 列表以绕过白名单门。 |
 | `default_path` | 把文件加入 `include`——那会覆盖内置测试文件排除模式。 |
 | `provider_directory` | 无需操作——`vendor/`、`node_modules/` 等 provider 目录永远不可评审，即使被 `include` 匹配也是如此。 |
+| `gitignore` | 仓库的 `.gitignore` 匹配到了该文件，且 `include` 无法覆盖它。如果需要评审，请删除或收窄该模式。已跟踪的文件同样会被匹配，因此在添加该规则之前就已提交的文件仍会被排除。 |
 | `deleted` | 无需处理——没有新内容可评审。 |
 | `too_large` | 仅 diff 本身就超过 `max_tokens` 的 80%。调高 `--max-tokens`（或已保存的 `max_tokens`），或把改动拆成更小的 commit。 |
 
