@@ -188,8 +188,8 @@ func TestGetDiffSetWalksChangesetOrderAcrossGitignoreDrop(t *testing.T) {
 	runGitTest(t, repo, "config", "user.name", "Test User")
 	runGitTest(t, repo, "config", "commit.gpgsign", "false")
 
-	// skip.log is tracked so git diff still emits it; partitionDiffs then
-	// drops it, which is the case excludedAt must not count.
+	// skip.log is tracked, so the commit diff still emits it. Commit mode
+	// then drops the .gitignore match, and excludedAt must not count that drop.
 	all := []string{"a.go", "skip.log", "target/mid.go", "z.go"}
 	want := []string{"a.go", "target/mid.go", "z.go"}
 	write := func(content string) {
@@ -212,8 +212,12 @@ func TestGetDiffSetWalksChangesetOrderAcrossGitignoreDrop(t *testing.T) {
 	runGitTest(t, repo, "add", ".gitignore")
 	runGitTest(t, repo, "commit", "-q", "-m", "add files")
 	write("package p\n\nconst V = 2\n")
+	// Commit the edits so this exercises commit mode, where a .gitignore
+	// match is still omitted. Workspace mode reviews that file instead.
+	runGitTest(t, repo, "add", "-u")
+	runGitTest(t, repo, "commit", "-q", "-m", "edit files")
 
-	set, err := NewWorkspaceProvider(repo, gitcmd.New(0)).GetDiffSet(context.Background())
+	set, err := NewCommitProvider(repo, "HEAD", gitcmd.New(0)).GetDiffSet(context.Background())
 	if err != nil {
 		t.Fatalf("GetDiffSet: %v", err)
 	}
@@ -229,6 +233,71 @@ func TestGetDiffSetWalksChangesetOrderAcrossGitignoreDrop(t *testing.T) {
 	}
 	if len(flags) != 3 || flags[0] || !flags[1] || flags[2] {
 		t.Errorf("providerExcluded flags = %v, want [false true false]", flags)
+	}
+}
+
+// TestWorkspaceIncludesTrackedFileMatchingGitignore checks that a tracked
+// file whose path matches the root .gitignore is still reviewed. Git does not
+// apply ignore rules to tracked paths, so a file force-added under bin/ stays
+// in `git diff HEAD` and workspace mode must include it with the other change.
+func TestWorkspaceIncludesTrackedFileMatchingGitignore(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("bin/\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "app.py"), []byte("print('ok')\n"), 0o644); err != nil {
+		t.Fatalf("write app.py: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "bin"), 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	release := filepath.Join(repo, "bin", "release.py")
+	if err := os.WriteFile(release, []byte("print('v1')\n"), 0o644); err != nil {
+		t.Fatalf("write bin/release.py: %v", err)
+	}
+	runGitTest(t, repo, "add", ".gitignore", "app.py")
+	runGitTest(t, repo, "add", "-f", "bin/release.py")
+	runGitTest(t, repo, "commit", "-q", "-m", "add app and force-added release script")
+
+	if err := os.WriteFile(filepath.Join(repo, "app.py"), []byte("print('changed')\n"), 0o644); err != nil {
+		t.Fatalf("modify app.py: %v", err)
+	}
+	if err := os.WriteFile(release, []byte("import os\nos.system('echo hi')\n"), 0o644); err != nil {
+		t.Fatalf("modify bin/release.py: %v", err)
+	}
+
+	set, err := NewWorkspaceProvider(repo, gitcmd.New(0)).GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+
+	got := make([]string, 0, len(set.Included))
+	var releaseDiff string
+	for _, d := range set.Included {
+		got = append(got, d.NewPath)
+		if d.NewPath == "bin/release.py" {
+			releaseDiff = d.Diff
+		}
+	}
+	slices.Sort(got)
+	want := []string{"app.py", "bin/release.py"}
+	if !slices.Equal(got, want) {
+		excluded := make([]string, 0, len(set.Excluded))
+		for _, d := range set.Excluded {
+			excluded = append(excluded, d.NewPath)
+		}
+		t.Fatalf("Included paths = %v, want %v; Excluded = %v", got, want, excluded)
+	}
+	if len(set.Excluded) != 0 {
+		t.Fatalf("Excluded = %+v, want none", set.Excluded)
+	}
+	if !strings.Contains(releaseDiff, "os.system(") {
+		t.Fatalf("bin/release.py diff = %q, want the tracked modification", releaseDiff)
 	}
 }
 
