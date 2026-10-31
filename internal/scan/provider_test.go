@@ -38,30 +38,25 @@ func TestCountLines(t *testing.T) {
 	}
 }
 
-func TestFilterByPaths(t *testing.T) {
-	all := []string{
-		"cmd/main.go",
-		"internal/agent/agent.go",
-		"internal/agent/fullscan.go",
-		"internal/scan/provider.go",
-		"README.md",
-	}
+func TestPathMatches(t *testing.T) {
 	tests := []struct {
 		name  string
-		paths []string
-		want  []string
+		f     string
+		want  string
+		match bool
 	}{
-		{"exact file", []string{"README.md"}, []string{"README.md"}},
-		{"dir prefix", []string{"internal/agent"}, []string{"internal/agent/agent.go", "internal/agent/fullscan.go"}},
-		{"multi", []string{"cmd/main.go", "internal/scan"}, []string{"cmd/main.go", "internal/scan/provider.go"}},
-		{"prefix not at boundary", []string{"internal/age"}, nil},
-		{"no match", []string{"does/not/exist"}, nil},
+		{name: "exact file", f: "README.md", want: "README.md", match: true},
+		{name: "directory itself", f: "internal/agent", want: "internal/agent", match: true},
+		{name: "file under directory", f: "internal/agent/agent.go", want: "internal/agent", match: true},
+		{name: "prefix not at boundary", f: "internal/agent/agent.go", want: "internal/age"},
+		{name: "partial file name", f: "internal/scan/provider.go", want: "internal/scan/provider"},
+		{name: "other path", f: "README.md", want: "docs"},
+		{name: "case variant is a different path", f: "SRC/Keep.go", want: "src"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := filterByPaths(all, tt.paths)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("filterByPaths() = %v, want %v", got, tt.want)
+			if got := pathMatches(tt.f, tt.want); got != tt.match {
+				t.Errorf("pathMatches(%q, %q) = %v, want %v", tt.f, tt.want, got, tt.match)
 			}
 		})
 	}

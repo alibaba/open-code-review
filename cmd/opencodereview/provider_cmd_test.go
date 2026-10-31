@@ -289,6 +289,21 @@ func TestApplyCustomProviderConfig_MissingProvider(t *testing.T) {
 	}
 }
 
+func TestApplyCustomProviderConfigInvalidName(t *testing.T) {
+	for _, name := range []string{" ", ".gateway", "gateway.", "gateway..v2"} {
+		t.Run(name, func(t *testing.T) {
+			cfg := &Config{Provider: "openai", Model: "saved-model"}
+			err := applyCustomProviderConfig(filepath.Join(t.TempDir(), "config.json"), cfg, providerTUIResult{provider: name, model: "some-model"})
+			if err == nil {
+				t.Fatal("expected invalid provider name error")
+			}
+			if cfg.Provider != "openai" || cfg.Model != "saved-model" || cfg.CustomProviders != nil {
+				t.Fatalf("configuration changed after rejected write: %#v", cfg)
+			}
+		})
+	}
+}
+
 func TestApplyCustomProviderConfig_MissingModel(t *testing.T) {
 	err := applyCustomProviderConfig("", &Config{}, providerTUIResult{provider: "p", model: ""})
 	if err == nil {

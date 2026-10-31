@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -375,4 +376,49 @@ func TestNewClient_Integration(t *testing.T) {
 			t.Errorf("Close: %v", err)
 		}
 	})
+}
+
+// tools/list is paginated, so a server that pages its catalog returns one page
+// plus a nextCursor per call. Reading a single page must not truncate the
+// catalog: listAllTools has to follow the cursor to the last page.
+func TestListAllTools_FollowsPagination(t *testing.T) {
+	ctx := context.Background()
+
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	serverSession, err := newPagedTestMCPServer(3).Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("connect server: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "open-code-review", Version: "v0.0.1"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("connect client: %v", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	// Pin the fixture: the server must actually paginate, otherwise this test
+	// would pass against a client that reads only the first page.
+	firstPage, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(firstPage.Tools) != 1 || firstPage.NextCursor == "" {
+		t.Fatalf("fixture does not paginate: %d tool(s) on the first page, nextCursor %q",
+			len(firstPage.Tools), firstPage.NextCursor)
+	}
+
+	tools, err := listAllTools(ctx, session)
+	if err != nil {
+		t.Fatalf("listAllTools: %v", err)
+	}
+	var names []string
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+	}
+	want := []string{"paged_tool_1", "paged_tool_2", "paged_tool_3"}
+	if !slices.Equal(names, want) {
+		t.Errorf("listAllTools names = %v, want %v", names, want)
+	}
 }

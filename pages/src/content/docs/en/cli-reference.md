@@ -123,7 +123,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Takes precedence over `--background` when both are set. |
 | `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json` |
 | `--concurrency <n>` | — | `8` | Maximum number of subtasks reviewed in parallel. |
-| `--timeout <minutes>` | — | `15` | Per-subtask deadline. `0` disables the timeout. Scaled linearly by the number of effort review rounds (e.g. 15/30/45 min for low/medium/high). |
+| `--timeout <minutes>` | — | `15` | Per-subtask budget, including LLM calls, tools, and retry waits. `0` disables the task deadline, not request timeouts. Independent request timeout: `OCR_LLM_TIMEOUT` or provider `timeout_sec`, in seconds (default `300`). Scaled linearly by the number of effort review rounds (e.g. 15/30/45 min for low/medium/high). |
 | `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per subtask. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. The flag only ever *raises* the cap — a value below the template default is ignored. |
@@ -157,6 +157,11 @@ shell rc files. `--model` overrides the model within whichever source wins; it
 does not change that source order. Incomplete strategies fall through without
 being mixed. A selected built-in provider's credentials may still come from its
 supported environment variable.
+
+For built-in providers, `--model` accepts IDs outside the suggested models in
+`ocr config model`. If the ID is absent from both the built-in list and
+`providers.<name>.models`, OCR warns on stderr and leaves validation to the
+provider. Custom providers retain their existing `--model` validation rules.
 
 ### Modes
 
@@ -371,7 +376,7 @@ With no `--path`, the whole repository is scanned.
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--path <list>` | - | whole repo | Comma-separated repo-relative directories or files to scan (e.g., `internal/agent`, `internal/llm/client.go`). |
+| `--path <list>` | - | whole repo | Comma-separated repo-relative directories or files to scan (e.g., `internal/agent`, `internal/llm/client.go`). Selectors resolve against the working tree: the spelled path wins over a case-variant sibling, a differently-cased spelling that the filesystem resolves (Windows, default macOS) still selects the tracked files, and a selector that names no existing path is an error rather than an empty scan. |
 | `--exclude <patterns>` | - | - | Comma-separated gitignore-style patterns to skip (e.g., `**/generated/*,*.pb.go`); merged with `rule.json` excludes. |
 | `--output <path>` | `-o` | stdout | Write scan results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
 | `--preview` | `-p` | `false` | Enumerate and filter files without calling the LLM. Prints the file list, reviewable/excluded counts, total lines, and per-file exclusion reasons. Honors `--format json`; `--format sarif` is not supported. |
@@ -591,9 +596,30 @@ ocr config model                           Interactive model selection
 See [Configuration](../configuration/) for the full key reference,
 schemas, and examples.
 
+
+
+## `ocr auth`
+
+Sign in with ChatGPT is the default for `ocr auth login`, `status` and `logout`. Explicit `--provider chatgpt` remains supported.
+
+Use the documented Sign in with ChatGPT flow with the `chatgpt` provider. See the [ChatGPT preview guide](../chatgpt-preview/).
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` accepts `--provider chatgpt` and `--account <client-id>`; `login` also accepts `--no-browser`, `--new-account` and `--enable-plan`. ChatGPT does not support `--device`. `--enable-plan` requests consent for a saved registration and cannot be combined with `--new-account`. The model list is account-specific; an explicit model is accepted even if the list omits it. This provider accepts `extra_body` only for `reasoning`, `text` and `prompt_cache_key`. See the [ChatGPT preview guide](../chatgpt-preview/) for account handling, permissions and restrictions.
+
 ## `ocr llm`
 
-LLM utility commands. Two subcommands:
+LLM utility commands. Three subcommands:
 
 ```text
 ocr llm <sub-command>
@@ -601,6 +627,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`

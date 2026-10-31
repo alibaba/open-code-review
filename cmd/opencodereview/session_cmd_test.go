@@ -236,6 +236,34 @@ func TestRunSessionComments_JSON(t *testing.T) {
 	}
 }
 
+func TestRunSessionShow_JSONNoItemsIsArray(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	// A run that ends before any file is reviewed records no items.
+	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
+		ReviewMode: session.ReviewModeCommit,
+		DiffCommit: "abc123",
+	})
+	sh.Finalize()
+
+	got := captureStdout(t, func() {
+		if err := runSessionShowCompat([]string{"--repo", repoDir, "--json", sh.SessionID}); err != nil {
+			t.Fatalf("runSessionShow: %v", err)
+		}
+	})
+
+	// json.Unmarshal accepts null into a slice, so only the raw text pins the wire shape.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(got), &raw); err != nil {
+		t.Fatalf("unmarshal: %v (out=%q)", err, got)
+	}
+	if string(raw["items"]) != "[]" {
+		t.Errorf("items = %s, want []", raw["items"])
+	}
+}
+
 func TestRunSessionComments_JSONEmptyIsArray(t *testing.T) {
 	tmpHome := t.TempDir()
 	setTestHome(t, tmpHome)
