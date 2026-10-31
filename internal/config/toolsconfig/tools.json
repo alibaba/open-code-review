@@ -168,7 +168,7 @@
     "main_task": true,
     "definition": {
       "name": "file_read_diff",
-      "description": "The tool is used to view the changes made to other files in the list of modifications. Call this tool when you discover suspected code issues but need to check changes in other files to confirm whether the problem actually exists. This tool will respond in git diff format.\n\nOutput example:\n==== FILE: path/to/file1.txt ====\n--- a/path/to/file1.txt\n+++ b/path/to/file1.txt\n@@ -10,1 +10,1 @@\n- old content\n+ new content\n\n==== FILE: path/to/file2.txt ====\n@@ -5,1 +5,2 @@\n  - old content\n  + new content1\n  + new content2",
+      "description": "The tool is used to view the changes made to other files in the list of modifications. Call this tool when you discover suspected code issues but need to check changes in other files to confirm whether the problem actually exists. This tool will respond in git diff format.\n\nOutput is bounded per call: at most max_lines lines (default 500, hard ceiling 5000). When the output is capped the response starts with IS_TRUNCATED: true and NEXT_OFFSET: <n>; pass that value back as offset to read the next page. A page that opens in the middle of a file repeats that file's ==== FILE: ... ==== header line.\n\nOutput example:\nIS_TRUNCATED: false\n==== FILE: path/to/file1.txt ====\n--- a/path/to/file1.txt\n+++ b/path/to/file1.txt\n@@ -10,1 +10,1 @@\n- old content\n+ new content\n\n==== FILE: path/to/file2.txt ====\n@@ -5,1 +5,2 @@\n  - old content\n  + new content1\n  + new content2",
       "parameters": {
         "type": "object",
         "properties": {
@@ -178,6 +178,14 @@
               "type": "string"
             },
             "description": "List of file paths to view diff content."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Number of leading output lines to skip, used to page through a truncated result. Defaults to 0. Pass the NEXT_OFFSET value returned by the previous call."
+          },
+          "max_lines": {
+            "type": "integer",
+            "description": "Maximum number of output lines to return in this call. Defaults to 500 and is capped at 5000."
           }
         },
         "required": [

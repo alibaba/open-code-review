@@ -204,7 +204,9 @@ LINE_RANGE: 10-80
 {
   "name": "file_read_diff",
   "input": {
-    "path_array": ["src/api/handler.go", "src/db/queries.go"]
+    "path_array": ["src/api/handler.go", "src/db/queries.go"],
+    "max_lines": 500,
+    "offset": 0
   }
 }
 ```
@@ -212,6 +214,7 @@ LINE_RANGE: 10-80
 ### Вывод
 
 ```
+IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -225,6 +228,12 @@ LINE_RANGE: 10-80
 - query := "SELECT *"
 + query := "SELECT id"
 ```
+
+Вывод ограничен на каждый вызов: не более `max_lines` строк (по умолчанию 500,
+жёсткий предел 5000). Если вывод обрезан, ответ начинается с `IS_TRUNCATED: true`
+и `NEXT_OFFSET: <n>`; передайте это значение обратно в `offset`, чтобы прочитать
+следующую страницу. Если страница начинается в середине файла, строка заголовка
+`==== FILE: ... ====` этого файла повторяется.
 
 Если путь отсутствует в наборе изменений, соответствующая запись незаметно
 пропускается. Если **ни одного** из запрошенных путей нет в наборе изменений,

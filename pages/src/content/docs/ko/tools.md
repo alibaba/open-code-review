@@ -187,7 +187,9 @@ hunk 머리글 `@@ -x,y +m,n @@`에서 범위를 계산해야 합니다. 보통 
 {
   "name": "file_read_diff",
   "input": {
-    "path_array": ["src/api/handler.go", "src/db/queries.go"]
+    "path_array": ["src/api/handler.go", "src/db/queries.go"],
+    "max_lines": 500,
+    "offset": 0
   }
 }
 ```
@@ -195,6 +197,7 @@ hunk 머리글 `@@ -x,y +m,n @@`에서 범위를 계산해야 합니다. 보통 
 ### 출력 {#output}
 
 ```
+IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -208,6 +211,11 @@ hunk 머리글 `@@ -x,y +m,n @@`에서 범위를 계산해야 합니다. 보통 
 - query := "SELECT *"
 + query := "SELECT id"
 ```
+
+호출 한 번당 출력에 상한이 있습니다: 최대 `max_lines` 줄(기본 500, 하드 상한 5000).
+출력이 잘리면 응답이 `IS_TRUNCATED: true`와 `NEXT_OFFSET: <n>`으로 시작하며, 해당 값을
+`offset`으로 다시 넘기면 다음 페이지를 읽습니다. 페이지가 파일 중간에서 시작하면 그 파일의
+`==== FILE: ... ====` 헤더 줄이 반복됩니다.
 
 변경 집합에 없는 경로는 조용히 빠집니다. 요청한 경로가 **하나도** 변경 집합에 없으면
 `Error: diff not found for the requested paths`를 반환하고, `path_array`가 비어
