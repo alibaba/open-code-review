@@ -155,6 +155,108 @@ func TestRun_PromptOverflowRecordsFailure(t *testing.T) {
 	}
 }
 
+// TestRun_OversizedPlanPromptFailsFile verifies the plan-phase token gate is
+// an explicit per-file error, not a silent plan-less fallback: an oversized
+// PLAN prompt is rejected locally before any provider request, the file is
+// marked failed with a message pointing at --max-tokens / --no-plan, and the
+// MAIN_TASK gate still rejects files whose main prompt alone overflows.
+func TestRun_OversizedPlanPromptFailsFile(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		planWords        int
+		mainWords        int
+		wantCalls        int64
+		wantPlanOverflow bool
+	}{
+		{name: "plan overflows, main fits: file fails with zero provider requests", planWords: 100, mainWords: 5, wantCalls: 0, wantPlanOverflow: true},
+		{name: "plan and main overflow: plan gate rejects first", planWords: 100, mainWords: 100, wantCalls: 0, wantPlanOverflow: true},
+		{name: "plan fits, main overflows: main gate still rejects after plan ran", planWords: 5, mainWords: 100, wantCalls: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := initTestRepo(t)
+			writeFile(t, repo, "overflow.go", []byte("package main\n"))
+			gitCommit(t, repo, "init")
+			tpl := budgetTestTemplate()
+			tpl.MaxTokens = 100
+			tpl.PlanTask = &template.LlmConversation{
+				Messages: []template.ChatMessage{
+					{Role: "system", Content: strings.Repeat("plan ", tc.planWords)},
+					{Role: "user", Content: "plan {{file_content}}"},
+				},
+			}
+			tpl.MainTask.Messages = []template.ChatMessage{
+				{Role: "system", Content: strings.Repeat("review ", tc.mainWords)},
+				{Role: "user", Content: "review {{file_content}}"},
+			}
+			client := &fakeBudgetClient{}
+			a := NewAgent(Args{
+				RepoDir:        repo,
+				Template:       tpl,
+				LLMClient:      client,
+				MaxConcurrency: 1,
+				SkipDedup:      true,
+				SkipSummary:    true,
+				Session:        session.New(repo, "main", "test", session.SessionOptions{ReviewMode: session.ReviewModeFullScan}),
+			})
+			_, err := a.Run(context.Background())
+			if err == nil || !strings.Contains(err.Error(), "all 1 file scan(s) failed") {
+				t.Fatalf("expected all-files-failed error, got %v", err)
+			}
+			if calls := atomic.LoadInt64(&client.calls); calls != tc.wantCalls {
+				t.Fatalf("MAIN_TASK/PLAN calls = %d, want %d (a doomed plan request must not be sent)", calls, tc.wantCalls)
+			}
+			var foundWarning bool
+			for _, warning := range a.Warnings() {
+				if warning.Type != "scan_subtask_error" || warning.File != "overflow.go" {
+					continue
+				}
+				if tc.wantPlanOverflow {
+					if strings.Contains(warning.Message, "plan prompt tokens") && strings.Contains(warning.Message, "--no-plan") {
+						foundWarning = true
+					}
+				} else if strings.Contains(warning.Message, "prompt tokens") && !strings.Contains(warning.Message, "plan prompt tokens") {
+					foundWarning = true
+				}
+			}
+			if !foundWarning {
+				t.Fatalf("missing prompt-overflow failure warning: %+v", a.Warnings())
+			}
+			path, err := session.SessionFilePath(repo, a.SessionID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var foundFailure bool
+			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				var record struct {
+					Type     string `json:"type"`
+					FilePath string `json:"filePath"`
+					Error    string `json:"error"`
+				}
+				if err := json.Unmarshal([]byte(line), &record); err != nil {
+					t.Fatal(err)
+				}
+				if record.Type != "review_item_failed" || record.FilePath != "overflow.go" {
+					continue
+				}
+				if tc.wantPlanOverflow {
+					if strings.Contains(record.Error, "plan prompt tokens") && strings.Contains(record.Error, "--no-plan") {
+						foundFailure = true
+					}
+				} else if strings.Contains(record.Error, "prompt tokens") && !strings.Contains(record.Error, "plan prompt tokens") {
+					foundFailure = true
+				}
+			}
+			if !foundFailure {
+				t.Fatal("session omitted the plan-overflow failure record")
+			}
+		})
+	}
+}
+
 // TestRun_TokenBudgetStopSurfacesAsBudgetExceeded pins the gap the dispatch
 // look-ahead cannot close: a single scan item admitted while usage is still
 // low can outgrow the budget on its own, and only an in-conversation check

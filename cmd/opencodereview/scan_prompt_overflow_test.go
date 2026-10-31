@@ -33,8 +33,14 @@ func TestExecuteScanPromptOverflowCannotReportClean(t *testing.T) {
 	}
 	for _, format := range []string{"text", "json"} {
 		t.Run(format, func(t *testing.T) {
+			// Plan is deliberately left enabled: the default template's PLAN_TASK
+			// renders the same file content, so the plan gate must reject the
+			// file locally too. Dropping --no-plan pins that the zero-request
+			// guarantee holds end to end under the default config — if either
+			// gate (plan or MAIN) ever sends the doomed request, the fake
+			// server's counter catches it.
 			opts, err := parseScanFlags([]string{
-				"--repo", repo, "--max-tokens", "100", "--no-plan", "--no-dedup",
+				"--repo", repo, "--max-tokens", "100", "--no-dedup",
 				"--no-summary", "--format", format, "--audience", "agent",
 			})
 			if err != nil {

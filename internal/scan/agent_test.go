@@ -172,7 +172,7 @@ func TestMaybeRunPlan_SkipPathsDoNotCallLLM(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	// no PlanTask attached → must return sentinel without crashing
 	a := newAgentForTest(t, tpl)
-	guidance := a.maybeRunPlan(t.Context(), model.ScanItem{Path: "x.go", Content: "package x"}, "rule")
+	guidance, _ := a.maybeRunPlan(t.Context(), model.ScanItem{Path: "x.go", Content: "package x"}, "rule")
 	if !strings.Contains(guidance, "no pre-scan plan") {
 		t.Errorf("expected fallback sentinel, got %q", guidance)
 	}
@@ -190,7 +190,7 @@ func TestMaybeRunPlan_SkipPathsDoNotCallLLM(t *testing.T) {
 		}),
 		SkipPlan: true,
 	})
-	guidance2 := a2.maybeRunPlan(t.Context(), model.ScanItem{Path: "x.go", Content: "package x"}, "rule")
+	guidance2, _ := a2.maybeRunPlan(t.Context(), model.ScanItem{Path: "x.go", Content: "package x"}, "rule")
 	if !strings.Contains(guidance2, "no pre-scan plan") {
 		t.Errorf("SkipPlan should suppress plan, got %q", guidance2)
 	}

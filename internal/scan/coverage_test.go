@@ -347,7 +347,7 @@ func TestMaybeRunPlan_Success(t *testing.T) {
 	a.currentDate = "2026-06-26 10:00"
 
 	it := model.ScanItem{Path: "handler.go", Content: "package h\nfunc Handle() {}\n"}
-	guidance := a.maybeRunPlan(context.Background(), it, "rule-text")
+	guidance, _ := a.maybeRunPlan(context.Background(), it, "rule-text")
 
 	if !strings.Contains(guidance, "nil check") {
 		t.Errorf("guidance missing checkpoint, got: %q", guidance)
