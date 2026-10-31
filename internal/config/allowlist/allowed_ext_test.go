@@ -132,6 +132,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".sol", true},
 		{".SOL", true},
 		{".vy", true},
+		{".move", true},
+		{".MOVE", true},
 		{".VY", true},
 		{".rego", true},
 		{".REGO", true},
@@ -440,6 +442,20 @@ func TestIsExcludedPath(t *testing.T) {
 		{"solidity deploy script", "script/Deploy.s.sol", false},
 		{"vyper non-test", "src/token.vy", false},
 		{"vyper test in filename only", "src/test_helpers.vy", false},
+
+		// Move integration tests live in tests/; production sources live in sources/.
+		// Unit tests are inline #[test] functions inside sources/ and stay reviewable.
+		{"move integration test at root", "tests/coin.move", true},
+		{"move integration test nested", "packages/app/tests/coin.move", true},
+		{"move production source at root", "sources/coin.move", false},
+		{"move production source nested", "packages/app/sources/coin.move", false},
+		// Generated Move artifacts under build/ (sui move build / aptos move build).
+		{"move generated build artifact", "build/coin.move", true},
+		{"move generated build artifact nested", "build/packages/app/sources/coin.move", true},
+		// Move has no *_test.move file-name convention; a source file that merely
+		// contains "test" in its name is still hand-written production code.
+		{"move test suffix not excluded", "sources/coin_test.move", false},
+		{"move tests suffix not excluded", "sources/coin_tests.move", false},
 
 		// Shader languages have no conventional default test-file exclusion.
 		{"glsl shader", "shaders/fragment.glsl", false},

@@ -55,6 +55,7 @@
     "**/*.mm": "objc.md",
     "**/*.sol": "solidity.md",
     "**/*.vy": "vyper.md",
+    "**/*.move": "move.md",
     "**/*.rego": "rego.md",
     "**/*.{glsl,hlsl,wgsl,metal}": "shader.md",
     "**/*.{ps1,psm1,psd1}": "powershell.md"

@@ -313,6 +313,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.m`                            | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
 | `**/*.mm`                           | `objc.md`——Objective-C++ 源代码。                                     |
 | `**/*.sol`                          | `solidity.md`——Solidity 智能合约。                                    |
+| `**/*.move` | `move.md`——Move 智能合约。 |
 | `**/*.vy`                           | `vyper.md`——Vyper 智能合约。                                          |
 | `**/*.rego`                         | `rego.md`——Rego 策略（OPA）。                                         |
 | `**/*.{ps1,psm1,psd1}` | `powershell.md`——PowerShell 脚本、模块和数据/清单文件。 |

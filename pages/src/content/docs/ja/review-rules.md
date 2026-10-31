@@ -280,6 +280,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.m`                            | `matlab.md`（または[コンテンツスニッフィング](#content-sniffing-for-m-files)により `objc.md`）  |
 | `**/*.mm`                           | `objc.md`: Objective-C++ ソースコード。                                                         |
 | `**/*.sol`                          | `solidity.md`: Solidity スマートコントラクト。                                                  |
+| `**/*.move` | `move.md`: Move スマートコントラクト。 |
 | `**/*.vy`                           | `vyper.md`: Vyper スマートコントラクト。                                                        |
 | `**/*.rego`                         | `rego.md`: Rego ポリシー（OPA）。                                                               |
 | `**/*.{ps1,psm1,psd1}` | `powershell.md`: PowerShell スクリプト、モジュール、データ／マニフェストファイル。 |

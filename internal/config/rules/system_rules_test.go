@@ -179,6 +179,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
 		{"contracts/token.vy", "Language Restrictions"},
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
+		{"sources/coin.move", "Asset and Balance Handling"},
+		{"contracts/escrow.move", "Global Storage and Borrow Safety"},
 		{"policies/authz.rego", "Default Posture"},
 		{"policies/authz.REGO", "Default Posture"},
 		{"scripts/deploy.ps1", "PowerShell Review Principles"},

@@ -344,6 +344,7 @@ matching order:
 | `**/*.m`                            | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files))                      |
 | `**/*.mm`                           | `objc.md` — Objective-C++ source.                                                                     |
 | `**/*.sol`                          | `solidity.md` — Solidity smart contracts.                                                             |
+| `**/*.move` | `move.md` — Move smart contracts. |
 | `**/*.vy`                           | `vyper.md` — Vyper smart contracts.                                                                   |
 | `**/*.rego`                         | `rego.md` — Rego policy (OPA).                                                                        |
 | `**/*.{ps1,psm1,psd1}` | `powershell.md` — PowerShell scripts, modules, and data/manifest files. |

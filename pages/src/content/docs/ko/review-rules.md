@@ -325,6 +325,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.m`                            | `matlab.md`(또는 [내용 탐지](#content-sniffing-for-m-files)로 `objc.md`)         |
 | `**/*.mm`                           | `objc.md` — Objective-C++ 소스.                                                  |
 | `**/*.sol`                          | `solidity.md` — Solidity 스마트 컨트랙트.                                        |
+| `**/*.move` | `move.md` — Move 스마트 컨트랙트. |
 | `**/*.vy`                           | `vyper.md` — Vyper 스마트 컨트랙트.                                              |
 | `**/*.rego`                         | `rego.md` — Rego 정책 (OPA).                                                     |
 | `**/*.{ps1,psm1,psd1}` | `powershell.md` — PowerShell 스크립트, 모듈 및 데이터/매니페스트 파일. |

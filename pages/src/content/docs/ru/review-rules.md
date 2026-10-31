@@ -343,6 +343,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.m`                            | `matlab.md` (или `objc.md` через [определение содержимого](#content-sniffing-for-m-files))       |
 | `**/*.mm`                           | `objc.md` — исходный код Objective-C++.                                                          |
 | `**/*.sol`                          | `solidity.md` — смарт-контракты Solidity.                                                        |
+| `**/*.move` | `move.md` — смарт-контракты Move. |
 | `**/*.vy`                           | `vyper.md` — смарт-контракты Vyper.                                                              |
 | `**/*.rego`                         | `rego.md` — политики Rego (OPA).                                                                 |
 | `**/*.{ps1,psm1,psd1}` | `powershell.md` — скрипты, модули и файлы данных/манифестов PowerShell. |
