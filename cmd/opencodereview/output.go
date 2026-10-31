@@ -500,6 +500,17 @@ func outputRetryReportText(w io.Writer, rep *llm.RetryReport) {
 	}
 	fmt.Fprintln(w)
 
+	// The wait is summed here rather than left to the JSON report because it is
+	// the number that explains a run that felt slow while no attempt looked slow:
+	// the group deadline is charged for every attempt plus their backoff.
+	if rep.TotalElapsedMS != nil {
+		fmt.Fprintf(w, "LLM wait across listed requests: %s", formatElapsedMS(*rep.TotalElapsedMS))
+		if rep.AttemptTimeoutMS > 0 {
+			fmt.Fprintf(w, " (per-attempt budget %s)", formatElapsedMS(rep.AttemptTimeoutMS))
+		}
+		fmt.Fprintln(w)
+	}
+
 	for _, g := range groups {
 		header := fmt.Sprintf("%s (%d %s", g.title,
 			len(g.requests), plural(len(g.requests), "request"))
@@ -514,6 +525,20 @@ func outputRetryReportText(w io.Writer, rep *llm.RetryReport) {
 	}
 
 	fmt.Fprintf(w, "\nPer-attempt detail: --format json (retry_report).\n")
+}
+
+// formatElapsedMS renders a duration the way an operator reads a wait: one
+// decimal, in whichever unit keeps the number short.
+func formatElapsedMS(ms int64) string {
+	d := time.Duration(ms) * time.Millisecond
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	case d < time.Hour:
+		return fmt.Sprintf("%.1fm", d.Minutes())
+	default:
+		return fmt.Sprintf("%.1fh", d.Hours())
+	}
 }
 
 // groupRetryRequests buckets by review stage, then sorts for stable output.
