@@ -4,8 +4,10 @@
 package viewer
 
 import (
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestTruncateText(t *testing.T) {
@@ -20,8 +22,9 @@ func TestTruncateText(t *testing.T) {
 		{"truncated with ellipsis", 3, "hello", "hel…"},
 		{"empty string", 5, "", ""},
 		{"n=0 always truncates non-empty", 0, "hi", "…"},
-		{"unicode shorter than n bytes", 20, "你好世界", "你好世界"},     // allow-non-english: fixture exercises rune-boundary truncation
-		{"unicode truncated at byte boundary", 6, "你好世界", "你好…"}, // allow-non-english: fixture exercises rune-boundary truncation
+		{"unicode shorter than n runes", 20, "你好世界", "你好世界"},           // allow-non-english: fixture exercises rune-boundary truncation
+		{"unicode truncated at rune boundary", 2, "你好世界", "你好…"},       // allow-non-english: fixture exercises rune-boundary truncation
+		{"multibyte cut never splits a rune", 5, "你好世界你好世界", "你好世界你…"}, // allow-non-english: byte slice at n=5 would split 好 mid-rune
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -30,6 +33,31 @@ func TestTruncateText(t *testing.T) {
 				t.Errorf("truncateText(%d, %q) = %q, want %q", tt.n, tt.s, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestTruncateTextAlwaysValidUTF8 guards the viewer's truncate template
+// function against splitting multibyte runes (issue #1853): a byte-level cut
+// inside a CJK/Cyrillic/emoji path used to emit invalid UTF-8 that browsers
+// rendered as U+FFFD.
+func TestTruncateTextAlwaysValidUTF8(t *testing.T) {
+	inputs := []string{
+		"你好世界",
+		"src/组件/用户资料/资料管理器.java", // allow-non-english: multibyte file path from issue #1853
+		"привет/мир/файл.go",
+		"🚀🚀🚀🚀🚀",
+		"mixed/ascii/混批/path.go",
+	}
+	for _, s := range inputs {
+		for n := 0; n <= 12; n++ {
+			got := truncateText(n, s)
+			if !utf8.ValidString(got) {
+				t.Errorf("truncateText(%d, %q) = %q is not valid UTF-8", n, s, got)
+			}
+			if !strings.HasSuffix(got, "…") && got != s {
+				t.Errorf("truncateText(%d, %q) = %q: untruncated result should equal input", n, s, got)
+			}
+		}
 	}
 }
 
