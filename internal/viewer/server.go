@@ -10,10 +10,13 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 //go:embed templates/*.html static/style.css static/pager.js static/a11y.js static/session.js static/repos.js static/sessions.js static/icons/*.svg
@@ -48,6 +51,19 @@ func StartServer(addr, openMode string) error {
 		return fmt.Errorf("resolve sessions root: %w", err)
 	}
 
+	// Bind before hydrating or printing anything: once Listen returns the port is
+	// ours, so early connections queue in the accept backlog instead of being
+	// refused while the download below runs, and a port that is taken fails here
+	// rather than after a minute of work.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+	// srv.Serve takes ownership and closes ln itself; this covers the
+	// early-return path below and any future one. Close is idempotent enough
+	// here — the second call just reports ErrClosed, which nothing reads.
+	defer ln.Close()
+
 	mux := newMux(root)
 
 	// Wrap the mux with a Host-header allowlist. Without this, any web page
@@ -64,21 +80,20 @@ func StartServer(addr, openMode string) error {
 		Handler: handler,
 	}
 
-	// Bind before printing or opening anything: once Listen returns, early
-	// connections queue in the accept backlog instead of being refused, so the
-	// browser cannot outrun the server.
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", addr, err)
-	}
-	// srv.Serve takes ownership and closes ln itself; this covers the
-	// early-return path below and any future one. Close is idempotent enough
-	// here — the second call just reports ErrClosed, which nothing reads.
-	defer ln.Close()
-
 	url, err := displayURL(addr, ln.Addr().String())
 	if err != nil {
 		return err
+	}
+
+	// Download sessions recorded on other machines before the first page is
+	// served, so the viewer shows the whole configured store and not just this
+	// machine's cache. A failed download is reported and the viewer still serves
+	// what is local. Nothing is served until Serve starts below, so this cannot
+	// race a request; it is announced first because the call waits up to the
+	// mirror timeout and an unexplained minute of silence reads as a hang.
+	fmt.Fprintf(os.Stderr, "[ocr viewer] downloading sessions from the configured store…\n")
+	if err := session.RefreshFromStore(); err != nil {
+		fmt.Fprintf(os.Stderr, "[ocr viewer] warning: download sessions from the configured store: %v (showing the local cache only)\n", err)
 	}
 
 	serveErr := make(chan error, 1)

@@ -109,6 +109,11 @@ func LoadReviewResumeState(repoDir, sessionID string) (*ResumeState, error) {
 }
 
 func loadResumeState(repoDir, sessionID string, skipUnparseable bool) (*ResumeState, error) {
+	// A session that was recorded on another machine reaches this machine through
+	// the store, so pull it into the cache before opening it by path.
+	if err := hydrateSessionsForRead(repoDir); err != nil {
+		warnStorage("download session %s: %v", sessionID, err)
+	}
 	path, err := SessionFilePath(repoDir, sessionID)
 	if err != nil {
 		return nil, err
