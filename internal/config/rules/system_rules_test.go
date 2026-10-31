@@ -181,6 +181,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
 		{"policies/authz.rego", "Default Posture"},
 		{"policies/authz.REGO", "Default Posture"},
+		{"kernels/softmax.cu", "CUDA and HIP Kernel Review Principles"},
+		{"src/attention.cuh", "CUDA and HIP Kernel Review Principles"},
+		{"kernels/hip_softmax.hip", "CUDA and HIP Kernel Review Principles"},
 		{"scripts/deploy.ps1", "PowerShell Review Principles"},
 		{"modules/Build/Build.psm1", "PowerShell Review Principles"},
 		{"modules/Build/Build.psd1", "PowerShell Review Principles"},
@@ -1087,6 +1090,49 @@ func TestResolveDetail_SystemComposerPatternPrecedesJSON(t *testing.T) {
 			} {
 				if !strings.Contains(detail.Rule, required) {
 					t.Errorf("expected Composer rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemCUDAHIPPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	// CUDA and HIP share one rule doc, mapped by two patterns, the way
+	// ocaml.md serves both {ml,mli} and {re,rei}. The reported Pattern must
+	// stay the one that actually matched.
+	tests := []struct {
+		path        string
+		wantPattern string
+	}{
+		{"kernels/softmax.cu", "**/*.{cu,cuh}"},
+		{"src/kernels/attention.cuh", "**/*.{cu,cuh}"},
+		{"KERNELS/SOFTMAX.CU", "**/*.{cu,cuh}"},
+		{"kernels/hip_softmax.hip", "**/*.hip"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			detail := dr.ResolveDetail(tt.path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != tt.wantPattern {
+				t.Errorf("expected pattern %q, got %q", tt.wantPattern, detail.Pattern)
+			}
+			for _, required := range []string{
+				"CUDA and HIP Kernel Review Principles",
+				"__syncthreads",
+				"cudaGetLastError",
+				"__syncwarp",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected CUDA/HIP rule to contain %q", required)
 				}
 			}
 		})

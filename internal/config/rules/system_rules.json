@@ -26,6 +26,8 @@
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,cxx,hpp,hxx}": "cpp.md",
     "**/*.c": "c.md",
+    "**/*.{cu,cuh}": "cuda_hip.md",
+    "**/*.hip": "cuda_hip.md",
     "**/*.{py,pyi,ipynb}": "python.md",
     "**/*.{php,phtml}": "php.md",
     "**/*.proto": "protobuf.md",
