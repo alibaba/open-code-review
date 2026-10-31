@@ -41,6 +41,17 @@ function bodyColors(css: string): { bg?: string; fg?: string } {
   };
 }
 
+/** --bg-page / --text-strong out of a theme block of index.css (":root" or
+ *  ":root[data-theme='light']"). The body rule itself uses var(), so the sync
+ *  check compares the values the variables resolve to. */
+function themeTokens(css: string, block: RegExp): { bg?: string; fg?: string } {
+  const body = css.match(block)?.[1] ?? '';
+  return {
+    bg: body.match(/--bg-page:\s*(#[0-9a-fA-F]{3,8})/)?.[1]?.toLowerCase(),
+    fg: body.match(/--text-strong:\s*(#[0-9a-fA-F]{3,8})/)?.[1]?.toLowerCase(),
+  };
+}
+
 describe('index.html critical CSS', () => {
   const cases: { name: string; assert: () => void }[] = [
     {
@@ -57,12 +68,60 @@ describe('index.html critical CSS', () => {
       // The colours are duplicated from index.css by necessity — index.css is not
       // available at first paint. Asserting they still match is the only thing
       // stopping a later edit to index.css from reintroducing a visible shift.
+      // The body rule in index.css uses var(--bg-page)/var(--text-strong), so the
+      // sync is against the values those tokens resolve to in each theme.
       name: 'keeps the inline colours in sync with index.css',
       assert: () => {
-        const css = bodyColors(indexCss);
-        expect(css.bg).toBeDefined();
-        expect(css.fg).toBeDefined();
-        expect(bodyColors(inlineStyle)).toEqual(css);
+        const dark = themeTokens(indexCss, /:root\s*{([^}]*)}/);
+        expect(dark.bg).toBeDefined();
+        expect(dark.fg).toBeDefined();
+        expect(bodyColors(inlineStyle)).toEqual(dark);
+      },
+    },
+    {
+      name: 'paints the stored light theme on html and body',
+      assert: () => {
+        const light = inlineStyle.match(
+          /html\[data-theme='light'\],\s*html\[data-theme='light'\]\s*body\s*{([^}]*)}/
+        )?.[1] ?? '';
+        expect(light).not.toBe('');
+        const cssLight = themeTokens(indexCss, /:root\[data-theme='light'\]\s*{([^}]*)}/);
+        expect(cssLight.bg).toBeDefined();
+        expect(cssLight.fg).toBeDefined();
+        expect(light.match(/background-color:\s*(#[0-9a-fA-F]{3,8})/)?.[1]?.toLowerCase()).toBe(cssLight.bg);
+        expect(light.match(/(?<!-)\bcolor:\s*(#[0-9a-fA-F]{3,8})/)?.[1]?.toLowerCase()).toBe(cssLight.fg);
+      },
+    },
+    {
+      // The theme must be known before the critical CSS paints, or a stored
+      // light theme flashes dark for a frame. The bootstrap script has to run
+      // ahead of the <style> block and only ever sets a valid theme value.
+      // The script body is sliced with indexOf rather than a script-tag regex
+      // (a regex here trips CodeQL's HTML-sanitization checks).
+      name: 'sets the stored theme before first paint',
+      assert: () => {
+        const open = headBeforeNoscript.indexOf('<script>');
+        const close = headBeforeNoscript.indexOf('</script>');
+        expect(open).toBeGreaterThanOrEqual(0);
+        const script = open >= 0 && close > open ? headBeforeNoscript.slice(open, close) : '';
+        expect(script).toContain("localStorage.getItem('ocr-theme')");
+        expect(script).toContain('document.documentElement.dataset.theme');
+        expect(markup.indexOf('<script>')).toBeLessThan(markup.indexOf('<style>'));
+      },
+    },
+    {
+      // With no stored choice the OS preference must decide before first
+      // paint too, or a first visit by a light-mode user paints dark and
+      // swaps only after React mounts — the same flash the stored-choice
+      // path guards against, one frame later.
+      name: 'consults the OS color scheme when no theme is stored',
+      assert: () => {
+        const open = headBeforeNoscript.indexOf('<script>');
+        const close = headBeforeNoscript.indexOf('</script>');
+        expect(open).toBeGreaterThanOrEqual(0);
+        const script = open >= 0 && close > open ? headBeforeNoscript.slice(open, close) : '';
+        expect(script).toContain('matchMedia');
+        expect(script).toContain('prefers-color-scheme: light');
       },
     },
     {

@@ -10,16 +10,18 @@ Copyright 2026 alibaba/open-code-review Contributors
   flex-direction: column;
   gap: 12px;
   padding: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--fill-subtle);
   cursor: pointer;
   transition: background 0.2s, border-color 0.2s;
 }
 
 .blog-card:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--fill-hover);
+  /* The resting border is var(--line); the stronger hover border restores the
+     border-brightens feedback the pre-variable values had. */
+  border-color: var(--line-strong);
 }
 
 .blog-card-header {
@@ -32,21 +34,21 @@ Copyright 2026 alibaba/open-code-review Contributors
 .blog-card-title {
   font-size: 18px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-strong);
   line-height: 26px;
   margin: 0;
 }
 
 .blog-card-date {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-ghost);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .blog-card-summary {
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-muted);
   line-height: 22px;
   margin: 0;
   display: -webkit-box;
@@ -70,7 +72,7 @@ Copyright 2026 alibaba/open-code-review Contributors
 
 .blog-card-author {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-ghost);
   flex-shrink: 0;
 }
 
@@ -82,22 +84,22 @@ Copyright 2026 alibaba/open-code-review Contributors
   border-radius: 12px;
   font-size: 12px;
   line-height: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--line);
   background: transparent;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-faint);
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .blog-tag:hover {
-  border-color: rgba(43, 222, 94, 0.4);
-  color: rgba(43, 222, 94, 0.8);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .blog-tag--active {
-  border-color: rgba(43, 222, 94, 0.6);
-  background: rgba(43, 222, 94, 0.1);
-  color: #2BDE5E;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* Blog detail metadata */
@@ -108,14 +110,14 @@ Copyright 2026 alibaba/open-code-review Contributors
   gap: 12px;
   margin-bottom: 32px;
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-faint);
 }
 
 .blog-detail-meta-separator {
   width: 3px;
   height: 3px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--line-strong);
 }
 
 .blog-detail-tags {
@@ -131,6 +133,6 @@ Copyright 2026 alibaba/open-code-review Contributors
   border-radius: 10px;
   font-size: 12px;
   line-height: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--line);
+  color: var(--text-faint);
 }

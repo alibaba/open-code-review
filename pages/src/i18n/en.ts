@@ -9,6 +9,7 @@ export const en = {
   'navbar.docs': 'Docs',
   'navbar.blog': 'Blog',
   'navbar.getStarted': 'Get Started',
+  'navbar.themeToggle': 'Toggle light and dark theme',
 
   // Hero
   'hero.title': 'AI Code Review\nValidated on Millions of Real-World Tasks',
