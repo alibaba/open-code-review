@@ -4,13 +4,15 @@
 > language (a dialect of Python) used primarily by Bazel. It is **not** Python:
 > the syntax is a strict subset, but the semantics differ, and many Python
 > features are intentionally absent. Unless noted, this guide assumes Bazel's
-> Starlark dialect.
+> Starlark dialect. Check the repository's Bazel version (for example in
+> `.bazelversion`) before reporting version-dependent language or API issues.
 
 ## Obvious Typos or Spelling Errors
 
 - Spelling errors in variable, function, provider, rule, attribute, and target
-  names **at their declaration sites**; do not report spelling errors at call
-  sites.
+  names **at their declaration sites**. At call sites, ignore harmless naming
+  preferences when the referenced symbol or attribute is valid; report
+  unresolved symbols, invalid labels, and incorrect attribute names.
 - Spelling errors in `fail()` or `print()` messages, comments, and docstrings
   that affect readability.
 - Typos in `load()` symbol names and label strings (these can cause load or
@@ -101,9 +103,13 @@ def add(name, names=None):
 - Dictionary literals cannot contain duplicate keys.
 - Dictionary iteration order is deterministic.
 - There is no implicit string concatenation; use `+`.
-- In Bazel, `int` is limited to 32-bit signed values and overflow is an error.
+- Modern Bazel Starlark integers have arbitrary precision and exact integer
+  arithmetic. Check bounds required by a particular API separately; do not
+  assume a language-wide signed 32-bit limit.
 - Use `struct()` instead of `class`; use `provider()` for rule outputs.
-- Define named functions with `def`; Bazel's dialect has no `lambda`.
+- Bazel 5.0 and later support lambda expressions and nested `def` statements
+  in `.bzl` files. Check the repository's supported versions and file context
+  before reporting these constructs; `BUILD` files restrict function definitions.
 - There is no `import`; use `load()`, placed at the top of the file.
 - There is no `global` or `nonlocal`.
 
@@ -171,13 +177,20 @@ files = depset(
 - Minimize exported symbols per `.bzl` file; mark file-private top-level
   symbols with a leading `_`.
 - Remove unused loads, variables, and parameters.
-- Prefer rules over macros; macros expand before graph analysis and hide the
-  real build graph.
+- Use macros for simple reuse of target declarations, preferring symbolic
+  macros where the supported Bazel versions allow them. Use custom rules when
+  analysis-time logic, actions, or provider propagation is needed; report a
+  mismatch with those needs rather than the use of a macro alone.
 - Flag macro-generated helper targets that are not prefixed with the main
   target's `name` (for example `name_bar` or `_name_bar`).
-- Flag helper targets that lack `visibility = ["//visibility:private"]` or a
-  `manual` tag; without `manual`, wildcard patterns such as `:all` and `:...`
-  expand them.
+- Check the effective visibility of helper targets. Targets in symbolic macros
+  default to private visibility; targets in `BUILD` files or legacy macros use
+  the package's `default_visibility`, falling back to private. Flag unintended
+  exposure rather than the absence of an explicit visibility attribute.
+- Require a `manual` tag only when a target must be excluded from wildcard
+  expansion (such as `:all` or `//...`) for `build`, `test`, or `coverage`.
+  The tag does not prevent explicit builds or builds as a dependency, and does
+  not filter `query` wildcards. Base findings on the intended target behavior.
 - Keep `BUILD` files simple and explicit (DAMP over DRY); avoid top-level list
   comprehensions and shared `deps` variables.
 
@@ -221,6 +234,8 @@ files = depset(
 - Code that already avoids Python-isms correctly, such as using `==` instead of
   `is`, or `fail()` instead of `try`/`except`.
 - Formatting that `buildifier` is responsible for.
-- Spelling errors at call sites rather than declaration sites.
+- Harmless spelling or naming preferences at call sites that resolve correctly.
+  Unresolved symbols, invalid labels, and incorrect attribute names remain
+  correctness issues.
 - The absence of features Starlark intentionally omits (`class`, `while`,
   `import`, recursion, and so on).

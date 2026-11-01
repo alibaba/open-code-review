@@ -213,7 +213,7 @@ func shouldSkipFile(path string) bool {
 	if !hasExt {
 		// Allow well-known extensionless files
 		switch base {
-		case "Makefile", "Dockerfile", "LICENSE", "Vagrantfile", "Containerfile":
+		case "Makefile", "Dockerfile", "LICENSE", "Vagrantfile", "Containerfile", "BUILD", "WORKSPACE":
 			return false
 		}
 		return true // skip other extensionless files
