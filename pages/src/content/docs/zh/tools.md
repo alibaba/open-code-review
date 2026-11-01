@@ -224,7 +224,7 @@ hunk 头 `@@ -x,y +m,n @@` 计算范围——通常 `m-50` 到 `m+n+50`。
 候选集在工作区模式下来自 `git ls-files --cached --others --exclude-standard`，
 在区间 / commit 模式下来自 `git ls-tree -r --name-only <ref>`。无扩展名的文件
 被跳过，但 `Makefile`、`Dockerfile`、`LICENSE`、`Vagrantfile`、
-`Containerfile` 例外。
+`Containerfile`、`BUILD`、`WORKSPACE` 例外。
 
 ### 输出
 
