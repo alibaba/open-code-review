@@ -205,7 +205,7 @@ files = depset(
 - Rule names are nouns describing the produced artifact; common suffixes
   include `_library`, `_binary`, `_test`, and `_import`.
 - Common attributes follow standard names and types: `srcs` is a `label_list`
-  (typically source files), `deps` is a `label_list` (typically *not* files),
+  (typically source files), `deps` is a `label_list` (typically _not_ files),
   `data` is a `label_list` (runtime/test data), and `runtime_deps` is a
   `label_list` for dependencies not needed at compile time.
 - A macro's `name` parameter is first, and generated targets are prefixed with
@@ -219,7 +219,7 @@ files = depset(
 - Document rules, aspects, providers, and attributes using the `doc` argument.
 - Rules pass data through well-defined providers; flag provider fields that
   are undeclared or undocumented.
-- Use comments to explain *why*, not what the code does.
+- Use comments to explain _why_, not what the code does.
 
 ## Formatting
 
