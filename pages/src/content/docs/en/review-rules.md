@@ -319,6 +319,7 @@ matching order:
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                                    |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                                           |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — F# implementation, signature, and script files.                                         |
+| `**/*.cs`                           | `csharp.md` — C# source files.                                                                        |
 | `**/*.rs`                           | `rust.md`                                                                                             |
 | `**/*.R`                            | `r.md`                                                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                              |

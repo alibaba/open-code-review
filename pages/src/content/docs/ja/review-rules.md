@@ -255,6 +255,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                              |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                                     |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md`: F# の実装、シグネチャ、スクリプトファイル。                                        |
+| `**/*.cs`                           | `csharp.md`: C# のソースファイル。                                                      |
 | `**/*.rs`                           | `rust.md`                                                                                       |
 | `**/*.R`                            | `r.md`                                                                                          |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                        |
