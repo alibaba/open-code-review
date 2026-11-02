@@ -283,6 +283,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。          |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。               |
 | `**/*.{jinja2,j2}`                  | `jinja.md`——Jinja 模板                                              |
+| `**/*.pug`                          | `pug.md`——Pug 模板（转义与输出上下文）。                              |
 | `**/*.ets`                          | `arkts.md`——ArkTS / HarmonyOS。                                       |
 | `**/*.astro`                        | `astro.md`——Astro 组件与 islands。                                    |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                    |
@@ -302,11 +303,18 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.jl`                           | `julia.md`——Julia 源代码。                                            |
 | `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md`——Terraform / HCL。                                     |
 | `**/*.bicep`                        | `bicep.md`——Bicep（Azure）模板。                                      |
+| `**/*.nix`                          | `nix.md`——Nix 表达式与 derivation。                                   |
+| `**/*.{hs,lhs}`                     | `haskell.md`——Haskell 源文件与 literate Haskell。                     |
+| `**/*.{nim,nims,nimble}`            | `nim.md`——Nim 源文件、脚本与包文件。                                  |
+| `**/*.swift`                        | `swift.md`——Swift 源文件。                                            |
 | `**/*.nu`                           | `nushell.md`——Nushell 脚本。                                          |
 | `**/*.elm`                          | `elm.md` - Elm 源代码。                                               |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md`——Jsonnet 配置模板与库。                                  |
+| `**/*.zig`                          | `zig.md`——Zig 源文件。                                                |
 | `**/*.thrift`                       | `thrift.md`——Apache Thrift IDL 线协议兼容性。                         |
 | `**/*.capnp`                        | `capnp.md`——Cap'n Proto schema 线协议兼容性。                         |
+| `**/*.{ml,mli}`                     | `ocaml.md`——OCaml 实现与接口文件。                                    |
+| `**/*.{re,rei}`                     | `ocaml.md`——ReasonML，与 OCaml 使用同一套规则。                       |
 | `**/*.{glsl,hlsl,wgsl,metal}`       | `shader.md` - GLSL、HLSL、WGSL、Metal 着色器。                               |
 | `**/*.{v,sv,vh}`                    | `verilog.md`——Verilog 与 SystemVerilog RTL。                          |
 | `**/*.{vhd,vhdl}`                   | `vhdl.md`——VHDL RTL。                                                 |

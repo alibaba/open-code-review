@@ -250,6 +250,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md`: FreeMarker テンプレート（SSTI / XSS / null 処理）。                            |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md`: Handlebars / Mustache テンプレート。                                  |
 | `**/*.{jinja2,j2}`                  | `jinja.md`: Jinja テンプレート                                                                 |
+| `**/*.pug`                          | `pug.md`: Pug テンプレート（エスケープと出力コンテキスト）。                                    |
 | `**/*.ets`                          | `arkts.md`: ArkTS / HarmonyOS。                                                                 |
 | `**/*.astro`                        | `astro.md`: Astro コンポーネントと islands。                                                    |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                              |
@@ -269,11 +270,18 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.jl`                           | `julia.md`: Julia ソースコード。                                                                |
 | `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md`: Terraform / HCL。                                                               |
 | `**/*.bicep`                        | `bicep.md`: Bicep（Azure）テンプレート。                                                        |
+| `**/*.nix`                          | `nix.md`: Nix 式と derivation。                                                                 |
+| `**/*.{hs,lhs}`                     | `haskell.md`: Haskell のソースと literate Haskell。                                             |
+| `**/*.{nim,nims,nimble}`            | `nim.md`: Nim のソース、スクリプト、パッケージファイル。                                        |
+| `**/*.swift`                        | `swift.md`: Swift のソースファイル。                                                            |
 | `**/*.nu`                           | `nushell.md`: Nushell スクリプト。                                                              |
 | `**/*.elm`                          | `elm.md` - Elm ソースコード。                                                                   |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。                                          |
+| `**/*.zig`                          | `zig.md`: Zig のソースファイル。                                                                |
 | `**/*.thrift`                       | `thrift.md`: Apache Thrift IDL のワイヤ互換性。                                                 |
 | `**/*.capnp`                        | `capnp.md`: Cap'n Proto スキーマのワイヤ互換性。                                                |
+| `**/*.{ml,mli}`                     | `ocaml.md`: OCaml の実装ファイルとインターフェースファイル。                                    |
+| `**/*.{re,rei}`                     | `ocaml.md`: ReasonML。OCaml と同じルール。                                                      |
 | `**/*.{glsl,hlsl,wgsl,metal}`       | `shader.md` - GLSL、HLSL、WGSL、Metal シェーダー。                                                       |
 | `**/*.{v,sv,vh}`                    | `verilog.md`: Verilog および SystemVerilog の RTL。                                             |
 | `**/*.{vhd,vhdl}`                   | `vhdl.md`: VHDL の RTL。                                                                        |

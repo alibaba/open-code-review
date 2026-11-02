@@ -313,6 +313,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — шаблоны FreeMarker (SSTI / XSS / обработка null).                              |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — шаблоны Handlebars и Mustache.                                        |
 | `**/*.{jinja2,j2}`                  | `jinja.md` — шаблоны Jinja                                                                       |
+| `**/*.pug`                          | `pug.md` — шаблоны Pug (экранирование и контексты вывода).                                       |
 | `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                                  |
 | `**/*.astro`                        | `astro.md` — компоненты и islands Astro.                                                         |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                               |
@@ -332,11 +333,18 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.jl`                           | `julia.md` — исходный код Julia.                                                                 |
 | `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md` — Terraform / HCL.                                                                |
 | `**/*.bicep`                        | `bicep.md` — шаблоны Bicep (Azure).                                                              |
+| `**/*.nix`                          | `nix.md` — выражения Nix и деривации.                                                            |
+| `**/*.{hs,lhs}`                     | `haskell.md` — исходные файлы Haskell и literate Haskell.                                        |
+| `**/*.{nim,nims,nimble}`            | `nim.md` — исходные файлы, скрипты и пакеты Nim.                                                 |
+| `**/*.swift`                        | `swift.md` — исходные файлы Swift.                                                               |
 | `**/*.nu`                           | `nushell.md` — скрипты Nushell.                                                                  |
 | `**/*.elm`                          | `elm.md` - исходный код Elm.                                                                     |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet.                                        |
+| `**/*.zig`                          | `zig.md` — исходные файлы Zig.                                                                   |
 | `**/*.thrift`                       | `thrift.md` — совместимость Apache Thrift IDL на уровне wire.                                    |
 | `**/*.capnp`                        | `capnp.md` — совместимость схем Cap'n Proto на уровне wire.                                      |
+| `**/*.{ml,mli}`                     | `ocaml.md` — файлы реализации и интерфейсов OCaml.                                               |
+| `**/*.{re,rei}`                     | `ocaml.md` — ReasonML, те же правила, что и для OCaml.                                           |
 | `**/*.{glsl,hlsl,wgsl,metal}`       | `shader.md` - шейдеры GLSL, HLSL, WGSL и Metal.                                                  |
 | `**/*.{v,sv,vh}`                    | `verilog.md` — RTL на Verilog и SystemVerilog.                                                   |
 | `**/*.{vhd,vhdl}`                   | `vhdl.md` — RTL на VHDL.                                                                         |

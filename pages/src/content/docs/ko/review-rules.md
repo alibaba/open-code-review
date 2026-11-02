@@ -295,6 +295,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — FreeMarker 템플릿(SSTI / XSS / null 처리).                     |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — Handlebars 및 Mustache 템플릿.                        |
 | `**/*.{jinja2,j2}`                  | `jinja.md` — Jinja 템플릿.                                                      |
+| `**/*.pug`                          | `pug.md` — Pug 템플릿(이스케이프 및 출력 컨텍스트).                              |
 | `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                  |
 | `**/*.astro`                        | `astro.md` — Astro 컴포넌트와 아일랜드.                                          |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                               |
@@ -314,11 +315,18 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.jl`                           | `julia.md` — Julia 소스.                                                         |
 | `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md` — Terraform / HCL.                                                |
 | `**/*.bicep`                        | `bicep.md` — Bicep(Azure) 템플릿.                                                |
+| `**/*.nix`                          | `nix.md` — Nix 표현식 및 derivation.                                             |
+| `**/*.{hs,lhs}`                     | `haskell.md` — Haskell 소스 및 literate Haskell.                                 |
+| `**/*.{nim,nims,nimble}`            | `nim.md` — Nim 소스, 스크립트, 패키지 파일.                                      |
+| `**/*.swift`                        | `swift.md` — Swift 소스 파일.                                                    |
 | `**/*.nu`                           | `nushell.md` — Nushell 스크립트.                                                 |
 | `**/*.elm`                          | `elm.md` — Elm 소스.                                                             |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리.                                 |
+| `**/*.zig`                          | `zig.md` — Zig 소스 파일.                                                        |
 | `**/*.thrift`                       | `thrift.md` — Apache Thrift IDL 통신 호환성.                                     |
 | `**/*.capnp`                        | `capnp.md` — Cap'n Proto 스키마 통신 호환성.                                     |
+| `**/*.{ml,mli}`                     | `ocaml.md` — OCaml 구현 및 시그니처 파일.                                        |
+| `**/*.{re,rei}`                     | `ocaml.md` — ReasonML, OCaml과 동일한 규칙.                                      |
 | `**/*.{glsl,hlsl,wgsl,metal}`        | `shader.md` — GLSL, HLSL, WGSL 및 Metal 셰이더.                                   |
 | `**/*.{v,sv,vh}`                    | `verilog.md` — Verilog 및 SystemVerilog RTL.                                     |
 | `**/*.{vhd,vhdl}`                   | `vhdl.md` — VHDL RTL.                                                            |

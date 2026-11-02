@@ -314,6 +314,7 @@ matching order:
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling).                                  |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — Handlebars and Mustache templates.                                         |
 | `**/*.{jinja2,j2}`                  | `jinja.md` — Jinja templates                                                                          |
+| `**/*.pug`                          | `pug.md` — Pug templates (escaping and output contexts).                                              |
 | `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                                       |
 | `**/*.astro`                        | `astro.md` — Astro components and islands.                                                            |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                                    |
@@ -333,11 +334,18 @@ matching order:
 | `**/*.jl`                           | `julia.md` — Julia source.                                                                            |
 | `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md` — Terraform / HCL.                                                                     |
 | `**/*.bicep`                        | `bicep.md` — Bicep (Azure) templates.                                                                 |
+| `**/*.nix`                          | `nix.md` — Nix expressions and derivations.                                                           |
+| `**/*.{hs,lhs}`                     | `haskell.md` — Haskell source and literate Haskell.                                                   |
+| `**/*.{nim,nims,nimble}`            | `nim.md` — Nim source, scripts, and package files.                                                    |
+| `**/*.swift`                        | `swift.md` — Swift source.                                                                            |
 | `**/*.nu`                           | `nushell.md` — Nushell scripts.                                                                       |
 | `**/*.elm`                          | `elm.md` - Elm source.                                                                                |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — Jsonnet configuration templates and libraries.                                         |
+| `**/*.zig`                          | `zig.md` — Zig source.                                                                                |
 | `**/*.thrift`                       | `thrift.md` — Apache Thrift IDL wire compatibility.                                                   |
 | `**/*.capnp`                        | `capnp.md` — Cap'n Proto schema wire compatibility.                                                   |
+| `**/*.{ml,mli}`                     | `ocaml.md` — OCaml implementation and interface files.                                                |
+| `**/*.{re,rei}`                     | `ocaml.md` — ReasonML, the same rules as OCaml.                                                       |
 | `**/*.{glsl,hlsl,wgsl,metal}`       | `shader.md` — GLSL, HLSL, WGSL, and Metal shaders.                                                     |
 | `**/*.{v,sv,vh}`                    | `verilog.md` — Verilog and SystemVerilog RTL.                                                         |
 | `**/*.{vhd,vhdl}`                   | `vhdl.md` — VHDL RTL.                                                                                 |
