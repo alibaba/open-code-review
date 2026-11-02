@@ -432,10 +432,8 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 // partitionDiffs keeps diffs filtered by built-in directory rules available
 // for reporting while preserving the review input as the Included slice.
 //
-// Workspace mode does not apply .gitignore. Git never ignores a tracked path,
-// and untrackedFilesList already drops ignored untracked paths, so filtering
-// `git diff HEAD` again would hide a force-added file. Commit and range mode
-// still apply it, leaving a match out of both slices.
+// In workspace mode, ignored untracked files are already filtered out.
+// Applying .gitignore here would incorrectly drop tracked changes.
 func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 	var patterns []string
 	honorGitignore := p.mode != ModeWorkspace
