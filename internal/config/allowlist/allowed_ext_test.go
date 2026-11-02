@@ -89,6 +89,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".NIMS", true},
 		{".nimble", true},
 		{".NIMBLE", true},
+		{".nu", true},
+		{".NU", true},
 		{".ipynb", true},
 		{".IPYNB", true},
 		{".elm", true},
@@ -133,6 +135,20 @@ func TestIsAllowedExt(t *testing.T) {
 		{".VY", true},
 		{".rego", true},
 		{".REGO", true},
+		{".glsl", true},
+		{".GLSL", true},
+		{".hlsl", true},
+		{".HLSL", true},
+		{".wgsl", true},
+		{".WGSL", true},
+		{".metal", true},
+		{".METAL", true},
+		{".ps1", true},
+		{".PS1", true},
+		{".psm1", true},
+		{".PSM1", true},
+		{".psd1", true},
+		{".PSD1", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -283,6 +299,14 @@ func TestIsExcludedPath(t *testing.T) {
 		// Prisma schemas have no conventional default test-file exclusion.
 		{"prisma schema", "prisma/schema.prisma", false},
 
+		{"powershell script", "scripts/Deploy.ps1", false},
+		{"powershell module", "modules/Deploy/Deploy.psm1", false},
+		{"powershell manifest", "modules/Deploy/Deploy.psd1", false},
+		{"pester root", "Deploy.Tests.ps1", false},
+		{"pester nested", "tests/unit/Deploy.Tests.ps1", false},
+		{"pester uppercase", "tests/unit/DEPLOY.TESTS.PS1", false},
+		{"powershell fixture", "tests/fixtures/Deploy.ps1", true},
+
 		// Handlebars/Mustache have no extension-specific test-path convention;
 		// generic fixture directories remain excluded.
 		{"handlebars fixture", "test/fixtures/card.hbs", true},
@@ -346,6 +370,14 @@ func TestIsExcludedPath(t *testing.T) {
 		{"nim non-test", "src/parser.nim", false},
 		{"nim tests in filename", "src/tests_helper.nim", false},
 
+		// Nushell test files
+		{"nushell tests directory", "tests/parser.nu", true},
+		{"nushell nested tests directory", "packages/core/tests/unit/parser.nu", true},
+		{"nushell test directory", "test/parser.nu", true},
+		{"nushell test prefix", "src/test_parser.nu", true},
+		{"nushell test hyphen prefix", "src/test-parser.nu", true},
+		{"nushell test suffix", "src/parser_test.nu", true},
+		{"nushell non-test", "src/parser.nu", false},
 		// Elm test files
 		{"elm test directory", "tests/ParserTest.elm", true},
 		{"elm nested test directory", "packages/core/tests/unit/ParserTest.elm", true},
@@ -408,6 +440,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"solidity deploy script", "script/Deploy.s.sol", false},
 		{"vyper non-test", "src/token.vy", false},
 		{"vyper test in filename only", "src/test_helpers.vy", false},
+
+		// Shader languages have no conventional default test-file exclusion.
+		{"glsl shader", "shaders/fragment.glsl", false},
+		{"hlsl shader", "shaders/lighting.hlsl", false},
+		{"wgsl shader", "shaders/compute.wgsl", false},
+		{"metal shader", "shaders/blur.metal", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

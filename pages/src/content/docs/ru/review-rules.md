@@ -217,6 +217,11 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/test/**/*.lhs`
 - `**/*Spec.lhs`
 - `**/tests/**/*.nim`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 - `**/tests/**/*.R`
 - `**/__snapshots__/**`
 - `**/*.snap`
@@ -325,12 +330,14 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{graphql,gql}`                | `graphql.md` — схема и операции GraphQL.                                                         |
 | `**/*.prisma`                       | `prisma.md` — схема Prisma.                                                                      |
 | `**/*.jl`                           | `julia.md` — исходный код Julia.                                                                 |
-| `**/*.{tf,hcl,tfvars}`              | `terraform.md` — Terraform / HCL.                                                                |
+| `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md` — Terraform / HCL.                                                                |
 | `**/*.bicep`                        | `bicep.md` — шаблоны Bicep (Azure).                                                              |
+| `**/*.nu`                           | `nushell.md` — скрипты Nushell.                                                                  |
 | `**/*.elm`                          | `elm.md` - исходный код Elm.                                                                     |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet.                                        |
 | `**/*.thrift`                       | `thrift.md` — совместимость Apache Thrift IDL на уровне wire.                                    |
 | `**/*.capnp`                        | `capnp.md` — совместимость схем Cap'n Proto на уровне wire.                                      |
+| `**/*.{glsl,hlsl,wgsl,metal}`       | `shader.md` - шейдеры GLSL, HLSL, WGSL и Metal.                                                  |
 | `**/*.{v,sv,vh}`                    | `verilog.md` — RTL на Verilog и SystemVerilog.                                                   |
 | `**/*.{vhd,vhdl}`                   | `vhdl.md` — RTL на VHDL.                                                                         |
 | `**/*.m`                            | `matlab.md` (или `objc.md` через [определение содержимого](#content-sniffing-for-m-files))       |
@@ -338,6 +345,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.sol`                          | `solidity.md` — смарт-контракты Solidity.                                                        |
 | `**/*.vy`                           | `vyper.md` — смарт-контракты Vyper.                                                              |
 | `**/*.rego`                         | `rego.md` — политики Rego (OPA).                                                                 |
+| `**/*.{ps1,psm1,psd1}` | `powershell.md` — скрипты, модули и файлы данных/манифестов PowerShell. |
 | _(fallback)_                        | `default.md`                                                                                     |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

@@ -363,7 +363,7 @@ ocr s      [flags]   (alias)
 
 | Флаг | Краткая форма | По умолчанию | Описание |
 |---|---|---|---|
-| `--path <list>` | - | весь репозиторий | Относительные каталоги или файлы репозитория для сканирования (через запятую, например `internal/agent`, `internal/llm/client.go`). |
+| `--path <list>` | - | весь репозиторий | Относительные каталоги или файлы репозитория для сканирования (через запятую, например `internal/agent`, `internal/llm/client.go`). Селекторы разрешаются по рабочему дереву: точное написание имеет приоритет, поэтому `src` не выберет соседний каталог `SRC/`; в регистронезависимых файловых системах (Windows, macOS по умолчанию) другое написание, которое файловая система может разрешить, всё равно выберет соответствующие файлы; селектор, не указывающий ни на один существующий путь, приводит к ошибке, а не к пустому сканированию. |
 | `--exclude <patterns>` | - | - | Шаблоны исключения в стиле gitignore (через запятую, например `**/generated/*,*.pb.go`); объединяются с excludes из `rule.json`. |
 | `--output <path>` | `-o` | stdout | Запись результатов сканирования в файл UTF-8 (`-` означает stdout). Файл создаётся лениво при первой записи, поэтому неудачные запуски не затрагивают существующие файлы. В текстовом формате цветовые коды ANSI удаляются автоматически. |
 | `--preview` | `-p` | `false` | Перечисляет и фильтрует файлы без вызова LLM. Выводит список файлов, количество проверяемых/исключённых, общее число строк и причины исключения для каждого файла. Учитывает `--format json`; `--format sarif` не поддерживается. |
@@ -587,9 +587,30 @@ ocr config model                           Interactive model selection
 Полный справочник по ключам, схемы и примеры приведены в разделе
 [Конфигурация](../configuration/).
 
+
+
+## `ocr auth`
+
+`ocr auth login`, `status` и `logout` по умолчанию используют Sign in with ChatGPT. Явный параметр `--provider chatgpt` также поддерживается.
+
+Провайдер `chatgpt` использует документированный процесс Sign in with ChatGPT. См. [руководство по предварительной версии ChatGPT](../chatgpt-preview/).
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` принимает `--provider chatgpt` и `--account <client-id>`, а `login` также принимает `--no-browser`, `--new-account` и `--enable-plan`. Для ChatGPT параметр `--device` не поддерживается. `--enable-plan` запрашивает согласие для сохраненной регистрации и несовместим с `--new-account`. Список моделей зависит от аккаунта; явно заданная модель допустима, даже если ее нет в списке. Этот провайдер принимает в `extra_body` только `reasoning`, `text` и `prompt_cache_key`. Управление аккаунтами, права и ограничения описаны в [руководстве по предварительной версии ChatGPT](../chatgpt-preview/).
+
 ## `ocr llm`
 
-Служебные команды LLM. Доступны две подкоманды:
+Служебные команды LLM. Доступны три подкоманды:
 
 ```text
 ocr llm <sub-command>
@@ -597,6 +618,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`

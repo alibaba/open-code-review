@@ -35,12 +35,13 @@
     "**/*.prisma": "prisma.md",
     "**/*.jl": "julia.md",
     "**/*.R": "r.md",
-    "**/*.{tf,hcl,tfvars}": "terraform.md",
+    "**/*.{tf,tofu,hcl,tfvars}": "terraform.md",
     "**/*.bicep": "bicep.md",
     "**/*.nix": "nix.md",
     "**/*.{hs,lhs}": "haskell.md",
     "**/*.{nim,nims,nimble}": "nim.md",
     "**/*.swift": "swift.md",
+    "**/*.nu": "nushell.md",
     "**/*.elm": "elm.md",
     "**/*.{jsonnet,libsonnet}": "jsonnet.md",
     "**/*.zig": "zig.md",
@@ -54,6 +55,8 @@
     "**/*.mm": "objc.md",
     "**/*.sol": "solidity.md",
     "**/*.vy": "vyper.md",
-    "**/*.rego": "rego.md"
+    "**/*.rego": "rego.md",
+    "**/*.{glsl,hlsl,wgsl,metal}": "shader.md",
+    "**/*.{ps1,psm1,psd1}": "powershell.md"
   }
 }

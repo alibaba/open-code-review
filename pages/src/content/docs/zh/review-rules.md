@@ -192,6 +192,11 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/test/**/*.lhs`
 - `**/*Spec.lhs`
 - `**/tests/**/*.nim`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 - `**/tests/**/*.R`
 - `**/__snapshots__/**`
 - `**/*.snap`
@@ -282,7 +287,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.astro`                        | `astro.md`——Astro 组件与 islands。                                    |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                    |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                           |
-| `**/*.{fs,fsi,fsx}`                 | `fsharp.md`——F# 实现、签名和脚本文件。                                           |
+| `**/*.{fs,fsi,fsx}`                 | `fsharp.md`——F# 实现、签名和脚本文件。                                |
 | `**/*.rs`                           | `rust.md`                                                             |
 | `**/*.R`                            | `r.md`                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                              |
@@ -295,12 +300,14 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{graphql,gql}`                | `graphql.md`——GraphQL schema 与操作。                                 |
 | `**/*.prisma`                       | `prisma.md`——Prisma schema。                                          |
 | `**/*.jl`                           | `julia.md`——Julia 源代码。                                            |
-| `**/*.{tf,hcl,tfvars}`              | `terraform.md`——Terraform / HCL。                                     |
+| `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md`——Terraform / HCL。                                     |
 | `**/*.bicep`                        | `bicep.md`——Bicep（Azure）模板。                                      |
+| `**/*.nu`                           | `nushell.md`——Nushell 脚本。                                          |
 | `**/*.elm`                          | `elm.md` - Elm 源代码。                                               |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md`——Jsonnet 配置模板与库。                                  |
 | `**/*.thrift`                       | `thrift.md`——Apache Thrift IDL 线协议兼容性。                         |
 | `**/*.capnp`                        | `capnp.md`——Cap'n Proto schema 线协议兼容性。                         |
+| `**/*.{glsl,hlsl,wgsl,metal}`       | `shader.md` - GLSL、HLSL、WGSL、Metal 着色器。                               |
 | `**/*.{v,sv,vh}`                    | `verilog.md`——Verilog 与 SystemVerilog RTL。                          |
 | `**/*.{vhd,vhdl}`                   | `vhdl.md`——VHDL RTL。                                                 |
 | `**/*.m`                            | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
@@ -308,6 +315,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.sol`                          | `solidity.md`——Solidity 智能合约。                                    |
 | `**/*.vy`                           | `vyper.md`——Vyper 智能合约。                                          |
 | `**/*.rego`                         | `rego.md`——Rego 策略（OPA）。                                         |
+| `**/*.{ps1,psm1,psd1}` | `powershell.md`——PowerShell 脚本、模块和数据/清单文件。 |
 | _(fallback)_                        | `default.md`                                                          |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。

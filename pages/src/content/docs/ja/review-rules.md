@@ -165,6 +165,11 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/test/**/*.lhs`
 - `**/*Spec.lhs`
 - `**/tests/**/*.nim`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 - `**/tests/**/*.R`
 - `**/__snapshots__/**`
 - `**/*.snap`
@@ -249,7 +254,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.astro`                        | `astro.md`: Astro コンポーネントと islands。                                                    |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                              |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                                     |
-| `**/*.{fs,fsi,fsx}`                 | `fsharp.md`: F# の実装、シグネチャ、スクリプトファイル。                                                            |
+| `**/*.{fs,fsi,fsx}`                 | `fsharp.md`: F# の実装、シグネチャ、スクリプトファイル。                                        |
 | `**/*.rs`                           | `rust.md`                                                                                       |
 | `**/*.R`                            | `r.md`                                                                                          |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                        |
@@ -262,12 +267,14 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{graphql,gql}`                | `graphql.md`: GraphQL スキーマと操作。                                                          |
 | `**/*.prisma`                       | `prisma.md`: Prisma スキーマ。                                                                  |
 | `**/*.jl`                           | `julia.md`: Julia ソースコード。                                                                |
-| `**/*.{tf,hcl,tfvars}`              | `terraform.md`: Terraform / HCL。                                                               |
+| `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md`: Terraform / HCL。                                                               |
 | `**/*.bicep`                        | `bicep.md`: Bicep（Azure）テンプレート。                                                        |
+| `**/*.nu`                           | `nushell.md`: Nushell スクリプト。                                                              |
 | `**/*.elm`                          | `elm.md` - Elm ソースコード。                                                                   |
 | `**/*.{jsonnet,libsonnet}`          | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。                                          |
 | `**/*.thrift`                       | `thrift.md`: Apache Thrift IDL のワイヤ互換性。                                                 |
 | `**/*.capnp`                        | `capnp.md`: Cap'n Proto スキーマのワイヤ互換性。                                                |
+| `**/*.{glsl,hlsl,wgsl,metal}`       | `shader.md` - GLSL、HLSL、WGSL、Metal シェーダー。                                                       |
 | `**/*.{v,sv,vh}`                    | `verilog.md`: Verilog および SystemVerilog の RTL。                                             |
 | `**/*.{vhd,vhdl}`                   | `vhdl.md`: VHDL の RTL。                                                                        |
 | `**/*.m`                            | `matlab.md`（または[コンテンツスニッフィング](#content-sniffing-for-m-files)により `objc.md`）  |
@@ -275,6 +282,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.sol`                          | `solidity.md`: Solidity スマートコントラクト。                                                  |
 | `**/*.vy`                           | `vyper.md`: Vyper スマートコントラクト。                                                        |
 | `**/*.rego`                         | `rego.md`: Rego ポリシー（OPA）。                                                               |
+| `**/*.{ps1,psm1,psd1}` | `powershell.md`: PowerShell スクリプト、モジュール、データ／マニフェストファイル。 |
 | _(fallback)_                        | `default.md`                                                                                    |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。
