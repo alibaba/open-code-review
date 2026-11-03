@@ -99,6 +99,7 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"server/bootstrap.cjs", "TypeScript"},
 		{"app.kt", "Null Safety"},
 		{"scripts/setup.kts", "Null Safety"},
+		{"src/main/scala/com/example/Service.scala", "Scala Review Principles"},
 		{"src/domain/Order.fs", "Discriminated Unions and Pattern Matching"},
 		{"src/domain/Order.fsi", "Discriminated Unions and Pattern Matching"},
 		{"scripts/migrate.fsx", "Discriminated Unions and Pattern Matching"},
