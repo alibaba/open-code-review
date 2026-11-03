@@ -55,10 +55,9 @@ func splitDiffLines(text string) []string {
 // does not quote a space, so the delimiter diffHeaderRe takes -- the first one --
 // is not always the separator. "diff --git a/x b/y.go b/x b/y.go" was read as a
 // rename from "x" to "y.go b/x b/y.go", and the file was then reviewed under a
-// path that does not exist. A header that is not a rename names the same path on
-// both sides, so the split whose sides agree is the one git wrote; a rename has
-// no such split and keeps its "rename from"/"rename to" lines as the
-// authoritative paths.
+// path that does not exist. A same-path header is unambiguous when its two
+// operands agree. Renames and copies can also admit an equal split, so their
+// extended headers remain authoritative over these provisional paths.
 func parseDiffHeaderLine(line string) (oldPath string, newPath string, ok bool) {
 	if rest, isHeader := strings.CutPrefix(line, "diff --git "); isHeader {
 		if sameOld, sameNew, ok := splitSamePathHeader(rest); ok {
@@ -155,6 +154,10 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 		case strings.HasPrefix(line, "rename to "):
 			current.NewPath = unquoteRenamePath(strings.TrimPrefix(line, "rename to "))
 			current.IsRenamed = true
+		case !inHunk && strings.HasPrefix(line, "copy from "):
+			current.OldPath = unquoteRenamePath(strings.TrimPrefix(line, "copy from "))
+		case !inHunk && strings.HasPrefix(line, "copy to "):
+			current.NewPath = unquoteRenamePath(strings.TrimPrefix(line, "copy to "))
 		// git emits "--- /dev/null" / "+++ /dev/null" without a/ b/ prefixes.
 		// Guarded by inHunk: inside a hunk the same strings can be content
 		// (e.g. an added line "++ /dev/null").
