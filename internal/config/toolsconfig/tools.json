@@ -109,7 +109,7 @@
         "properties": {
           "search_text": {
             "type": "string",
-            "description": "The text string or regular expression pattern to search for."
+            "description": "The text string or regular expression pattern to search for. Without use_perl_regexp it is matched literally, so characters such as | . * ( match themselves: to find any of several strings, set use_perl_regexp: true and write 'a|b'."
           },
           "file_patterns": {
             "type": "array",
