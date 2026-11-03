@@ -52,25 +52,55 @@ export interface CommentAnchorDeps {
   toGitUri: (path: string, ref: string) => Promise<vscode.Uri>;
 }
 
+/** Trim a line, and nothing else: on the content side a leading '+' or '-' is code, not a diff marker. */
 export function normalizeLine(s: string): string {
-  let line = s.trim();
-  if (line.startsWith('+') || line.startsWith('-')) line = line.slice(1).trim();
-  return line;
+  return s.trim();
 }
 
-export function splitAndNormalize(code: string): string[] {
-  const result: string[] = [];
-  for (const raw of code.split('\n')) {
-    const n = normalizeLine(raw);
-    if (n) result.push(n);
-  }
-  return result;
+/** Trim each line and drop the blank ones, so a snippet's blank lines never become match targets of their own. */
+function normalizeLines(lines: string[]): string[] {
+  return lines.map(normalizeLine).filter((line) => line !== '');
+}
+
+/**
+ * Remove one leading diff marker from each line: the reading for a snippet quoted
+ * out of diff output ("+  - name: app" becomes "- name: app").
+ *
+ * Exactly one marker per line, and only from the first character, so a deleted
+ * YAML list item keeps its own dash ("-- name: app" becomes "- name: app"). A line
+ * that is nothing but a marker loses the marker, is left blank, and is dropped.
+ */
+function stripDiffMarkers(lines: string[]): string[] {
+  return normalizeLines(
+    lines.map((line) => (line.startsWith('+') || line.startsWith('-') ? line.slice(1) : line)),
+  );
+}
+
+/**
+ * The readings an existingCode snippet may be matched against, in priority order.
+ *
+ * Verbatim first: the model copied the code out of the file, where a leading '-' is
+ * code, a YAML list item being the everyday case. Diff-quoted second: the model
+ * copied it out of the diff instead, where that first character is a marker. A
+ * snippet carrying no marker reads the same both ways, so the two collapse into
+ * one form: callers would otherwise scan the file twice for an answer the first
+ * scan already settled.
+ */
+export function snippetForms(existingCode: string): string[][] {
+  const lines = existingCode.split('\n');
+  const verbatim = normalizeLines(lines);
+  if (verbatim.length === 0) return [];
+  const stripped = stripDiffMarkers(lines);
+  const identical =
+    stripped.length === verbatim.length && stripped.every((line, i) => line === verbatim[i]);
+  if (stripped.length > 0 && !identical) return [verbatim, stripped];
+  return [verbatim];
 }
 
 /** Find existingCode in the file content using a sliding-window match and return 1-based line numbers. */
 export function findLinesByExistingCode(content: string, existingCode: string): { start: number; end: number } | null {
-  const targetLines = splitAndNormalize(existingCode);
-  if (targetLines.length === 0) return null;
+  const forms = snippetForms(existingCode);
+  if (forms.length === 0) return null;
 
   const fileLines = content.split('\n');
   const normalized: string[] = [];
@@ -81,18 +111,20 @@ export function findLinesByExistingCode(content: string, existingCode: string): 
     normalized.push(n);
     lineNums.push(i + 1);
   }
-  if (normalized.length < targetLines.length) return null;
 
-  for (let i = 0; i <= normalized.length - targetLines.length; i++) {
-    let matched = true;
-    for (let j = 0; j < targetLines.length; j++) {
-      if (normalized[i + j] !== targetLines[j]) {
-        matched = false;
-        break;
+  for (const targetLines of forms) {
+    if (normalized.length < targetLines.length) continue;
+    for (let i = 0; i <= normalized.length - targetLines.length; i++) {
+      let matched = true;
+      for (let j = 0; j < targetLines.length; j++) {
+        if (normalized[i + j] !== targetLines[j]) {
+          matched = false;
+          break;
+        }
       }
-    }
-    if (matched) {
-      return { start: lineNums[i], end: lineNums[i + targetLines.length - 1] };
+      if (matched) {
+        return { start: lineNums[i], end: lineNums[i + targetLines.length - 1] };
+      }
     }
   }
   return null;

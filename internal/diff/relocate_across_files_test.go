@@ -61,6 +61,33 @@ func TestRelocateAcrossFiles_RefilesToImplementation(t *testing.T) {
 	}
 }
 
+// TestRelocateAcrossFiles_YAMLListItem covers the same YAML collision on the
+// cross-file path: the item must not be confused with the mapping line above it
+// in the file the comment is moved to.
+func TestRelocateAcrossFiles_YAMLListItem(t *testing.T) {
+	// The comment is filed against a.go, where the snippet does not appear.
+	from := model.Diff{
+		NewPath: "a.go", OldPath: "a.go",
+		Diff: "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,1 @@\n-package a\n+package a2\n",
+	}
+	to := model.Diff{
+		NewPath: "deploy.yaml", OldPath: "deploy.yaml",
+		Diff: "diff --git a/deploy.yaml b/deploy.yaml\n--- a/deploy.yaml\n+++ b/deploy.yaml\n" +
+			"@@ -1,2 +1,4 @@\n defaults:\n   name: app\n+items:\n+  - name: app\n",
+	}
+	cm := &model.LlmComment{Path: "a.go", ExistingCode: "- name: app"}
+
+	got, ok := RelocateAcrossFiles(cm, []model.Diff{from, to})
+	if !ok {
+		t.Fatal("expected a unique hit in deploy.yaml")
+	}
+	// The item is new-file line 4; the mapping line is line 2.
+	if got != "deploy.yaml" || cm.Path != "deploy.yaml" || cm.StartLine != 4 || cm.EndLine != 4 {
+		t.Errorf("path = %q, cm.Path = %q, lines = %d..%d; want deploy.yaml 4..4",
+			got, cm.Path, cm.StartLine, cm.EndLine)
+	}
+}
+
 func TestRelocateAcrossFiles_DeclinesWhenAmbiguous(t *testing.T) {
 	// The same excerpt in two files: re-filing onto either one would just swap
 	// one wrong location for another, so the comment must be left alone.
