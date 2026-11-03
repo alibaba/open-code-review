@@ -305,6 +305,9 @@ func runSessionShow(sessionID string) error {
 	}
 
 	if sessionShowJSON {
+		if items == nil {
+			items = []session.ItemDetail{}
+		}
 		payload := struct {
 			Summary *session.Summary     `json:"summary"`
 			Items   []session.ItemDetail `json:"items"`
