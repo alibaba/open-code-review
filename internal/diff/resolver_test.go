@@ -292,8 +292,8 @@ func TestNormalizeLine(t *testing.T) {
 		want  string
 	}{
 		{"  hello  ", "hello"},
-		{"+added line", "added line"},
-		{"-deleted line", "deleted line"},
+		{"+added line", "+added line"},
+		{"-deleted line", "-deleted line"},
 		{"\tindented\t", "indented"},
 		{"", ""},
 	}
@@ -303,6 +303,17 @@ func TestNormalizeLine(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("normalizeLine(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestSplitAndNormalizeDiffSnippet_StripsOneMarker(t *testing.T) {
+	lines := splitAndNormalizeDiffSnippet("++added\n--removed")
+
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(lines))
+	}
+	if lines[0] != "+added" || lines[1] != "-removed" {
+		t.Errorf("got %v", lines)
 	}
 }
 
@@ -873,8 +884,107 @@ func TestResolveLineNumbers_DiffMarkerInExistingCode(t *testing.T) {
 
 	result := ResolveLineNumbers(comments, diffs)
 	cm := result[0]
-	// normalizeLine strips leading '+', so "+y := 2" → "y := 2" matches
 	if cm.StartLine != 2 || cm.EndLine != 2 {
 		t.Errorf("diff marker in existing_code: expected 2..2, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveLineNumbers_SnippetMissingItemDashDeclines(t *testing.T) {
+	raw := `diff --git a/deploy.yaml b/deploy.yaml
+--- a/deploy.yaml
++++ b/deploy.yaml
+@@ -1,2 +1,3 @@
+ items:
++  - name: app
+`
+	diffs := []model.Diff{{NewPath: "deploy.yaml", Diff: raw}}
+	comments := []model.LlmComment{
+		{Path: "deploy.yaml", ExistingCode: "name: app"},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 0 || cm.EndLine != 0 {
+		t.Errorf("snippet missing the item's dash: expected 0..0, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveFromFileContent_YAMLListItem(t *testing.T) {
+	diffs := []model.Diff{{
+		NewPath: "deploy.yaml",
+		Diff: `diff --git a/deploy.yaml b/deploy.yaml
+--- a/deploy.yaml
++++ b/deploy.yaml
+@@ -1,1 +1,2 @@
+ # deploy
++#
+`,
+		NewFileContent: `# deploy
+#
+defaults:
+  name: app
+items:
+  - name: app
+`,
+	}}
+	comments := []model.LlmComment{{Path: "deploy.yaml", ExistingCode: "- name: app"}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 6 || cm.EndLine != 6 {
+		t.Errorf("file-content fallback: expected 6..6, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveLineNumbers_LiteralFileMatchPrecedesDiffStyleHunkMatch(t *testing.T) {
+	diffs := []model.Diff{{
+		NewPath: "deploy.yaml",
+		Diff: `diff --git a/deploy.yaml b/deploy.yaml
+--- a/deploy.yaml
++++ b/deploy.yaml
+@@ -1,2 +1,3 @@
+ defaults:
++  name: app
+ items:
+`,
+		NewFileContent: `defaults:
+  name: app
+items:
+  - name: app
+`,
+	}}
+	comments := []model.LlmComment{{Path: "deploy.yaml", ExistingCode: "- name: app"}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 4 || cm.EndLine != 4 {
+		t.Errorf("literal file match: expected 4..4, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveFromFileContent_DiffStyleSnippet(t *testing.T) {
+	diffs := []model.Diff{{
+		NewPath: "deploy.yaml",
+		Diff: `diff --git a/deploy.yaml b/deploy.yaml
+--- a/deploy.yaml
++++ b/deploy.yaml
+@@ -1,1 +1,2 @@
+ # deploy
++#
+`,
+		NewFileContent: `# deploy
+#
+defaults:
+  name: app
+items:
+  - name: app
+`,
+	}}
+	comments := []model.LlmComment{{Path: "deploy.yaml", ExistingCode: "+  - name: app"}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 6 || cm.EndLine != 6 {
+		t.Errorf("file-content fallback, diff-style snippet: expected 6..6, got %d..%d", cm.StartLine, cm.EndLine)
 	}
 }

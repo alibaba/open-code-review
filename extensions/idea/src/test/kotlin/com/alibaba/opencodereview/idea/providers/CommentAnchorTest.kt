@@ -15,9 +15,14 @@ class CommentAnchorTest {
         .joinToString("\n")
 
     @Test
-    fun `normalizeLine removes diff markers`() {
-        assertEquals("added", normalizeLine("+added"))
-        assertEquals("removed", normalizeLine("-removed"))
+    fun `normalizeLine preserves leading signs`() {
+        assertEquals("+added", normalizeLine("+added"))
+        assertEquals("-removed", normalizeLine("-removed"))
+    }
+
+    @Test
+    fun `splitAndNormalizeDiffSnippet removes one diff marker`() {
+        assertEquals(listOf("+added", "-removed"), splitAndNormalizeDiffSnippet("++added\n--removed"))
     }
 
     @Test
@@ -61,6 +66,23 @@ class CommentAnchorTest {
         val crlfContent = content.replace("\n", "\r\n")
         val found = findLinesByExistingCode(crlfContent, "console.log(i);")
         assertEquals(LineSpan(3, 3), found)
+    }
+
+    @Test
+    fun `snippet missing the YAML item dash does not match`() {
+        assertNull(findLinesByExistingCode("items:\n  - name: app", "name: app"))
+    }
+
+    @Test
+    fun `literal YAML list item wins over an earlier mapping`() {
+        val yaml = "defaults:\n  name: app\nitems:\n  - name: app"
+        assertEquals(LineSpan(4, 4), findLinesByExistingCode(yaml, "- name: app"))
+    }
+
+    @Test
+    fun `diff-style snippet matches after literal matching fails`() {
+        val yaml = "defaults:\n  name: app\nitems:\n  - name: app"
+        assertEquals(LineSpan(4, 4), findLinesByExistingCode(yaml, "+  - name: app"))
     }
 
     @Test
