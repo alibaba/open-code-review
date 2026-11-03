@@ -61,6 +61,28 @@ type compressionJob struct {
 type compressionState struct {
 	mu         sync.Mutex
 	pendingJob *compressionJob
+	// Only the conversation goroutine accesses tokens; background jobs return
+	// rebuilt messages without touching the counter.
+	tokens conversationTokens
+}
+
+// conversationTokens assumes the counted prefix is immutable. Replacing
+// messages during compression must reset it, even if the length is unchanged.
+type conversationTokens struct {
+	counted int
+	total   int
+}
+
+func (c *conversationTokens) count(messages []llm.Message) int {
+	for _, m := range messages[c.counted:] {
+		c.total += messageTokens(m)
+	}
+	c.counted = len(messages)
+	return c.total
+}
+
+func (c *conversationTokens) reset() {
+	*c = conversationTokens{}
 }
 
 // messageTokens counts visible text plus the Native replay payload and
@@ -365,6 +387,7 @@ func (r *Runner) tryApplyPendingCompression(st *compressionState, messages *[]ll
 				rebuilt = append(rebuilt, (*messages)[job.snapshotLen:]...)
 			}
 			*messages = rebuilt
+			st.tokens.reset()
 			applied = true
 		}
 		if st.pendingJob == job {

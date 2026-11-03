@@ -274,7 +274,11 @@ func TestTryApplyPendingCompression_Applied(t *testing.T) {
 		msg("assistant", "resp"),
 		msg("tool", "appended after snapshot"),
 	}
+	st.tokens.count(msgs)
 	applied := r.tryApplyPendingCompression(st, &msgs)
+	if got, want := st.tokens.count(msgs), CountMessagesTokens(msgs); got != want {
+		t.Fatalf("cached tokens = %d, want %d", got, want)
+	}
 	if !applied {
 		t.Fatal("expected applied=true")
 	}
@@ -306,6 +310,7 @@ func TestTryApplyPendingCompression_NilRebuilt(t *testing.T) {
 	st := &compressionState{pendingJob: job}
 
 	msgs := []llm.Message{msg("user", "hi")}
+	st.tokens.count(msgs)
 	applied := r.tryApplyPendingCompression(st, &msgs)
 	if applied {
 		t.Error("expected false when rebuilt is nil (compression failed)")
@@ -670,6 +675,9 @@ func TestAddNextMessage_NoStartThenCancelSameCall(t *testing.T) {
 	st := &compressionState{}
 	ok := r.addNextMessage(context.Background(), strings.Repeat("word ", 200), calls, llm.NativeTurn{}, "", results, &msgs, "f.go", st)
 
+	if got, want := st.tokens.count(msgs), CountMessagesTokens(msgs); got != want {
+		t.Fatalf("cached tokens after sync compression = %d, want %d", got, want)
+	}
 	if !ok {
 		t.Error("expected true: sync compression should bring the count under the warning threshold")
 	}
