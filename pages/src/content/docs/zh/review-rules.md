@@ -284,6 +284,8 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。               |
 | `**/*.{jinja2,j2}`                  | `jinja.md`——Jinja 模板                                              |
 | `**/*.{ejs,liquid,njk}`             | `ejs_liquid_njk.md`——EJS、Liquid 与 Nunjucks 模板（SSTI / XSS / 转义）。 |
+| `**/*.{haml,slim}`                  | `haml_slim.md`——HAML 与 Slim 模板（SSTI / XSS / 转义 / 缩进语义）。   |
+| `**/*.erb`                          | `erb.md`——ERB 模板（SSTI / XSS / 转义 / 空白与输出结构）。            |
 | `**/*.ets`                          | `arkts.md`——ArkTS / HarmonyOS。                                       |
 | `**/*.astro`                        | `astro.md`——Astro 组件与 islands。                                    |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                    |
