@@ -160,7 +160,7 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 	}
 
 	for i := range hunks {
-		newSide := extractSideLines(&hunks[i], true)
+		newSide := nonBlankLines(extractSideLines(&hunks[i], true))
 		if start, end, ok := matchConsecutive(newSide, targetLines); ok {
 			cm.StartLine = start
 			cm.EndLine = end
@@ -169,7 +169,7 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 	}
 
 	for i := range hunks {
-		oldSide := extractSideLines(&hunks[i], false)
+		oldSide := nonBlankLines(extractSideLines(&hunks[i], false))
 		if start, end, ok := matchConsecutive(oldSide, targetLines); ok {
 			cm.StartLine = start
 			cm.EndLine = end
@@ -178,6 +178,20 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 	}
 
 	return false
+}
+
+// nonBlankLines drops blank lines from one side of a hunk. splitAndNormalize
+// drops them from the quoted code, so keeping them here meant a quote that
+// spans a blank line never matched its hunk; resolveFromFileContent skips
+// blanks the same way.
+func nonBlankLines(lines []indexedLine) []indexedLine {
+	result := lines[:0:0]
+	for _, l := range lines {
+		if l.content != "" {
+			result = append(result, l)
+		}
+	}
+	return result
 }
 
 // extractSideLines extracts one side of the diff from a hunk.
