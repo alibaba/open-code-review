@@ -204,8 +204,10 @@ IS_TRUNCATED: false
 再次调用即可读取后续页。某一页从文件中间开始时，会重复该文件的
 `==== FILE: ... ====` 头行。
 
-若某路径不在变更集中，该条目被静默省略。若请求的路径**都不**在变更集中，工具
-返回 `Error: diff not found for the requested paths`；空的 `path_array` 返回
+不在变更集中的路径不会被静默丢弃：它会在 `Error: diff not found for: <path>`
+中被点名，而已找到路径的 diff 仍会先于该错误返回。当本次运行对其他文件有 diff 时，
+消息会列出它们（`Diffs exist for: ...`），以便纠正拼写错误的路径；当本次运行完全
+没有 diff 时，消息会指引改用 `file_read`。空的 `path_array` 返回
 `Error: no files found`。
 
 ## `file_find`

@@ -233,10 +233,13 @@ ceiling 5000). When the output is capped the response starts with
 `offset` to read the next page. A page that opens in the middle of a
 file repeats that file's `==== FILE: ... ====` header line.
 
-If a path isn't in the change set, that entry is silently omitted. If
-**none** of the requested paths are in the change set the tool returns
-`Error: diff not found for the requested paths`; an empty `path_array`
-returns `Error: no files found`.
+A path that isn't in the change set is not silently dropped: it is
+named in `Error: diff not found for: <path>`, and diffs for the paths
+that *were* found are still returned ahead of it. When the run has
+diffs for other files the message lists them (`Diffs exist for: ...`)
+so a mis-spelled path can be corrected; when the run has no diffs at
+all it points to `file_read` instead. An empty `path_array` returns
+`Error: no files found`.
 
 ## `file_find`
 

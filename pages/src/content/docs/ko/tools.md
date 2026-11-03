@@ -217,9 +217,11 @@ IS_TRUNCATED: false
 `offset`으로 다시 넘기면 다음 페이지를 읽습니다. 페이지가 파일 중간에서 시작하면 그 파일의
 `==== FILE: ... ====` 헤더 줄이 반복됩니다.
 
-변경 집합에 없는 경로는 조용히 빠집니다. 요청한 경로가 **하나도** 변경 집합에 없으면
-`Error: diff not found for the requested paths`를 반환하고, `path_array`가 비어
-있으면 `Error: no files found`를 반환합니다.
+변경 집합에 없는 경로는 조용히 버려지지 않습니다. `Error: diff not found for: <path>`에
+해당 경로가 명시되고, 찾은 경로의 diff는 오류보다 먼저 반환됩니다. 다른 파일의 diff가
+있는 실행에서는 메시지가 그 목록을 보여주어(`Diffs exist for: ...`) 잘못 쓴 경로를
+고칠 수 있게 하고, diff가 전혀 없는 실행에서는 `file_read`를 대신 쓰도록 안내합니다.
+비어 있는 `path_array`는 `Error: no files found`를 반환합니다.
 
 ## `file_find` {#filefind}
 
