@@ -113,7 +113,8 @@ export class CommentProvider {
   }
 
   private threadContextValue(c: ReviewComment, ctx: ReviewContext): string {
-    if (ctx.mode !== ReviewMode.Workspace) return 'pendingNoSuggestion';
+    // Keep old-side comments non-actionable if a caller bypasses anchor resolution.
+    if (ctx.mode !== ReviewMode.Workspace || c.side === 'LEFT') return 'pendingNoSuggestion';
     return this.hasSuggestion(c) ? 'pending' : 'pendingNoSuggestion';
   }
 
@@ -145,6 +146,10 @@ export class CommentProvider {
     }
     const c = this.comments[index];
     if (!c) return;
+    if (c.side === 'LEFT') {
+      vscode.window.showWarningMessage(t(this.locale, 'ext.comment.applyOldSide'));
+      return;
+    }
     const root = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
     if (!root) return;
     const uri = vscode.Uri.file(`${root}/${c.path}`);

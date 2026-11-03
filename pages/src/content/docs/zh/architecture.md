@@ -229,7 +229,7 @@ func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath
 后处理上：
 
 1. **行解析**（worker 内）——`existing_code` 用滑动窗口算法与 diff 匹配以计算
-   精确的 `start_line` / `end_line`。匹配失败则两者默认为 `0`——`0` 行范围是
+   精确的 `start_line` / `end_line` 和 `side`（变更后文件为 `RIGHT`，删除代码的变更前文件为 `LEFT`）。匹配失败则两者默认为 `0` 且省略 `side`——`0` 行范围是
    “未锚定”评论的隐式信号，用户需手动定位（没有存储标志；下游消费者检查
    `start_line == 0`）。
 2. **重新定位任务** *（可选回退）*——当行解析在较复杂的 diff 上失败时，OCR 运行

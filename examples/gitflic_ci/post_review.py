@@ -17,9 +17,10 @@ onto the merge request as discussions:
 GitFlic's Discussions API needs an *old-side* line even for a comment on the new
 side of the diff: an inline (code) discussion requires all four of
 newLine/oldLine/newPath/oldPath, otherwise GitFlic silently records a plain
-comment. `ocr review` only reports new-side positions, so this script computes
-the old-side line itself by parsing the same merge-base diff the review ran on
-(`git diff merge-base(from, to)..to`).
+comment. For RIGHT-side comments, this script computes the old-side line itself
+by parsing the same merge-base diff the review ran on (`git diff
+merge-base(from, to)..to`). GitFlic has no side selector, so LEFT-side comments
+are kept in the fallback summary instead of being attached to the wrong file.
 
 Standard library only (json, urllib, subprocess) so it runs on the stock
 node:20 / python image used by the pipeline.
@@ -167,7 +168,7 @@ def parse_diff(diff_text):
 
 
 # --------------------------------------------------------------------------- #
-# Line mapping (new file side -> old file side)
+# Line mapping (RIGHT/new file side -> old file side)
 # --------------------------------------------------------------------------- #
 
 
@@ -235,7 +236,8 @@ def format_comment_fallback(c):
     start_line = c.get("start_line", 0)
     end_line = c.get("end_line", 0)
     if start_line and end_line:
-        md += " (L%d-L%d)" % (start_line, end_line)
+        side_label = " (old file)" if str(c.get("side", "")).upper() == "LEFT" else ""
+        md += " (L%d-L%d%s)" % (start_line, end_line, side_label)
     md += "\n\n" + c.get("content", "")
     suggestion = c.get("suggestion_code", "")
     existing = c.get("existing_code", "")
@@ -269,6 +271,13 @@ def publish(result, diffs_by_path, post):
     for c in comments:
         path = c.get("path", "")
         end_line = c.get("end_line", 0) or 0
+        # GitFlic's discussion API has no side selector. Posting a LEFT-side
+        # coordinate as newLine would silently annotate the wrong revision, so
+        # keep it in the summary fallback until the API can represent it.
+        if str(c.get("side", "")).upper() == "LEFT":
+            log("left-side comment for %s cannot be positioned by GitFlic; folding into summary" % path)
+            failed.append(c)
+            continue
         fd = diffs_by_path.get(path)
         if fd is None:
             log("no diff for %s; folding comment into the summary note" % path)

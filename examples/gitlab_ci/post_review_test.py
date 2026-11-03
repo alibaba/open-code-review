@@ -269,6 +269,12 @@ class FormatCommentTest(unittest.TestCase):
         self.assertTrue(body.startswith("<!-- ocr-1-2-deadbeef -->\n"))
         self.assertIn("hi", body)
 
+    def test_left_side_suggestion_is_plain_fenced_text(self):
+        body = pr.format_comment(comment(side="left", existing_code="old", suggestion_code="new"))
+        self.assertIn("Suggested change (old-side comment)", body)
+        self.assertIn("```\nnew\n```", body)
+        self.assertNotIn("suggestion:-0+0", body)
+
     def test_with_badge(self):
         body = pr.format_comment(comment(content="hi", category="bug", severity="high"))
         self.assertIn("[bug · high]\n", body)
@@ -778,6 +784,21 @@ class IncrementalPureTest(unittest.TestCase):
         self.assertEqual(pr.position_span({"new_line": 7}),
                          {"start": 7, "end": 7, "multiline": False})
 
+    def test_position_span_left_side(self):
+        self.assertEqual(pr.position_span({"old_line": 7}),
+                         {"start": 7, "end": 7, "multiline": False})
+
+    def test_position_span_left_side_with_null_new_line(self):
+        self.assertEqual(pr.position_span({"old_line": 7, "new_line": None}),
+                         {"start": 7, "end": 7, "multiline": False})
+
+    def test_position_span_left_side_range(self):
+        pos = {"line_range": {
+            "start": {"old_line": 3, "new_line": None, "type": "old"},
+            "end": {"old_line": 6, "new_line": None, "type": "old"},
+        }}
+        self.assertEqual(pr.position_span(pos), {"start": 3, "end": 6, "multiline": True})
+
     def test_position_span_line_range(self):
         pos = {"line_range": {"start": {"new_line": 3}, "end": {"new_line": 6}}}
         self.assertEqual(pr.position_span(pos), {"start": 3, "end": 6, "multiline": True})
@@ -827,6 +848,40 @@ class IncrementalPublishTest(unittest.TestCase):
         stats = pr.publish({"comments": [comment()]}, DIFF_REFS, rec, self.config(), sleep=NOOP_SLEEP)
         self.assertEqual(stats["skipped"], 0)
         self.assertEqual(stats["inline"], 1)  # posted anyway
+
+    def test_left_side_history_dedupes_old_line(self):
+        discussions = [{"notes": [{"body": "<!-- ocr-1-1-aabb -->",
+                                    "position": {"old_path": "main.py", "new_path": "main.py",
+                                                 "old_line": 10, "new_line": None}}]}]
+        rec = Recorder(discussions=discussions)
+        cfg = self.config()
+        stats = pr.publish({"comments": [comment(side="LEFT")]}, DIFF_REFS, rec, cfg, sleep=NOOP_SLEEP)
+        self.assertEqual(stats["skipped"], 1)
+
+    def test_left_side_history_dedupes_renamed_path_by_new_name(self):
+        discussions = [{"notes": [{"body": "<!-- ocr-1-1-aabb -->",
+                                    "position": {"old_path": "old.py", "new_path": "main.py",
+                                                 "old_line": 10, "new_line": None}}]}]
+        rec = Recorder(discussions=discussions)
+        cfg = self.config()
+        stats = pr.publish({"comments": [comment(side="LEFT")]}, DIFF_REFS, rec, cfg, sleep=NOOP_SLEEP)
+        self.assertEqual(stats["skipped"], 1)
+
+    def test_left_side_posts_old_line(self):
+        stats, rec = run_publish({"comments": [comment(side="LEFT")]})
+        self.assertEqual(stats["inline"], 1)
+        self.assertEqual(rec.disc_calls[0]["position"].get("old_line"), 10)
+        self.assertNotIn("new_line", rec.disc_calls[0]["position"])
+
+    def test_left_side_multiline_posts_old_line_range(self):
+        stats, rec = run_publish({"comments": [comment(side="LEFT", start_line=8, end_line=10)]})
+        self.assertEqual(stats["inline"], 1)
+        position = rec.disc_calls[0]["position"]
+        self.assertEqual(position["old_line"], 10)
+        self.assertEqual(position["line_range"], {
+            "start": {"old_line": 8, "type": "old"},
+            "end": {"old_line": 10, "type": "old"},
+        })
 
 
 # --------------------------------------------------------------------------- #
@@ -1250,6 +1305,12 @@ class LineResolutionTest(unittest.TestCase):
         self.assertTrue(complete)
         self.assertEqual(ranges, [{"start": 5, "end": 7}])
 
+    def test_parse_hunks_left_side(self):
+        patch = "@@ -1,3 +5,3 @@\n ctx\n-old\n+new\n ctx2\n"
+        ranges, complete = pr.parse_diff_hunk_inventory(patch, side="LEFT")
+        self.assertTrue(complete)
+        self.assertEqual(ranges, [{"start": 1, "end": 3}])
+
     def test_parse_hunks_truncated_is_incomplete(self):
         patch = "@@ -1,3 +5,5 @@\n ctx\n"  # declares 5 lines, shows 1
         ranges, complete = pr.parse_diff_hunk_inventory(patch)
@@ -1272,21 +1333,27 @@ class LineResolutionTest(unittest.TestCase):
         diff = {"known": {"main.py"}, "files": {"main.py": [{"start": 5, "end": 15}]}, "complete": True}
         self.assertEqual(pr.classify_comment_against_diff(comment(start_line=10, end_line=10), diff), "valid")
 
+    def test_classify_left_against_old_ranges(self):
+        diff = {"known": {"main.py"}, "files": {"main.py": [{"start": 50, "end": 60}]},
+                "files_old": {"main.py": [{"start": 1, "end": 5}]}, "complete": True}
+        self.assertEqual(pr.classify_comment_against_diff(
+            comment(start_line=3, end_line=3, side="LEFT"), diff), "valid")
+
 
 class LinePositionTest(unittest.TestCase):
-    def test_build_new_line_positions_maps_added_and_context(self):
+    def test_build_line_positions_maps_added_and_context(self):
         # @@ -1,3 +5,4 @@: new lines 5 (ctx), 6 (added), 7 (ctx); '-' advances
         # only the old counter and creates no new-file position.
         patch = "@@ -1,3 +5,4 @@\n ctx\n-gone\n+added\n ctx2\n"
-        positions = pr.build_new_line_positions(patch)
+        positions = pr.build_line_positions(patch)
         self.assertEqual(positions[5], {"type": "context", "old_line": 1})
         self.assertEqual(positions[6], {"type": "new", "old_line": None})
         # ctx2 is the old line after the removed one (old counter 2 -> 3).
         self.assertEqual(positions[7], {"type": "context", "old_line": 3})
 
-    def test_build_new_line_positions_empty(self):
-        self.assertEqual(pr.build_new_line_positions(""), {})
-        self.assertEqual(pr.build_new_line_positions(None), {})
+    def test_build_line_positions_empty(self):
+        self.assertEqual(pr.build_line_positions(""), {})
+        self.assertEqual(pr.build_line_positions(None), {})
 
     def test_resolve_boundary_added_line(self):
         positions = {6: {"type": "new", "old_line": None}}

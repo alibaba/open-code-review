@@ -68,6 +68,11 @@ class BuildReviewInputTest(unittest.TestCase):
     def test_single_line_comment(self):
         self.assert_line(comment(start_line=6, end_line=6), 6)
 
+    def test_left_side_uses_parent(self):
+        entry = entry_of(build([comment(side="LEFT")]))
+        self.assertEqual(entry["line"], 6)
+        self.assertEqual(entry["side"], "PARENT")
+
     def test_multi_line_range(self):
         self.assert_line(comment(start_line=3, end_line=6), 6)
 

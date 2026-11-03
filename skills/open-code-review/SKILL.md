@@ -93,6 +93,7 @@ Each comment in OCR's output contains:
 - `path`: File path
 - `content`: Review comment text
 - `start_line` / `end_line`: Line range (both 0 means positioning failed)
+- `side`: `RIGHT` for the post-change file, `LEFT` for deleted-code locations; omitted when unresolved
 - `category`: Issue category (bug, security, performance, maintainability, test, style, documentation, other)
 - `severity`: Issue severity (critical, high, medium, low)
 - `suggestion_code`: Optional fix suggestion

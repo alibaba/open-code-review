@@ -50,7 +50,7 @@ Create a token in **User Settings → Access Tokens** (or a dedicated service ac
 
 ## Notes & Limitations
 
-- **Inline positioning** — GitFlic requires all four of `newLine`/`oldLine`/`newPath`/`oldPath` for a code comment; if any is missing it silently creates a general comment. `post_review.py` computes the old-side position from the same merge-base diff the review ran on (`git diff merge-base(from, to)..to`), and anchors added lines to the closest preceding old line.
+- **Inline positioning** — GitFlic requires all four of `newLine`/`oldLine`/`newPath`/`oldPath` for a code comment; if any is missing it silently creates a general comment. `post_review.py` computes the old-side position from the same merge-base diff the review ran on (`git diff merge-base(from, to)..to`), and anchors added lines to the closest preceding old line. GitFlic has no side selector for LEFT/base coordinates, so those comments are placed in the fallback summary instead of being attached to a potentially incorrect new-side line.
 - **Rate limit** — the GitFlic cloud API allows 500 requests/hour per token. One review posts `comments + 2` requests at most, which fits comfortably.
 - **Self-hosted GitFlic** — set `GITFLIC_API_URL` to your instance's REST API base URL.
 - **Re-reviews** — every push to the MR triggers a new pipeline and a new review. To skip already-reviewed MRs, check existing discussions for the `OpenCodeReview` marker before running the review step.
