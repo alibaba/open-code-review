@@ -352,7 +352,7 @@ ocr s      [flags]   (alias)
 
 | 引数 | 短縮形 | デフォルト | 説明 |
 |---|---|---|---|
-| `--path <list>` | - | リポジトリ全体 | スキャン対象のリポジトリ相対ディレクトリまたはファイル（カンマ区切り、例: `internal/agent`、`internal/llm/client.go`）。 |
+| `--path <list>` | - | リポジトリ全体 | スキャン対象のリポジトリ相対ディレクトリまたはファイル（カンマ区切り、例: `internal/agent`、`internal/llm/client.go`）。セレクターは作業ツリー上の実際のパスとして解決されます。綴りどおりの一致を優先するため `src` が兄弟ディレクトリ `SRC/` を選ぶことはなく、大文字小文字を区別しないファイルシステム（Windows、既定の macOS）では、ファイルシステムが解決できる別の綴りでも対応するファイルを選びます。存在しないパスを指定した場合は、空のスキャンではなくエラーになります。 |
 | `--exclude <patterns>` | - | - | 除外する gitignore 形式のパターン（カンマ区切り、例: `**/generated/*,*.pb.go`）。`rule.json` の excludes とマージされます。 |
 | `--output <path>` | `-o` | 標準出力 | スキャン結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
 | `--preview` | `-p` | `false` | LLM を呼び出さずにファイルを列挙・フィルタリングします。ファイルリスト、レビュー対象/除外数、総行数、ファイルごとの除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません。 |
@@ -558,9 +558,30 @@ ocr config model                           Interactive model selection
 
 key の完全なリファレンス、schema、例は[設定](../configuration/)を参照してください。
 
+
+
+## `ocr auth`
+
+`ocr auth login`、`status`、`logout` は既定で Sign in with ChatGPT を使用します。明示的な `--provider chatgpt` も引き続き使用できます。
+
+`chatgpt` provider では公開された Sign in with ChatGPT フローを使用します。[ChatGPT プレビューガイド](../chatgpt-preview/)を参照してください。
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` は `--provider chatgpt` と `--account <client-id>` を受け付けます。`login` はさらに `--no-browser`、`--new-account`、`--enable-plan` を受け付けます。ChatGPT では `--device` をサポートしません。`--enable-plan` は保存済み登録の同意を要求し、`--new-account` とは併用できません。モデル一覧はアカウントごとに異なります。一覧にないモデルも明示すれば使用できます。この provider の `extra_body` は `reasoning`、`text`、`prompt_cache_key` のみ対応します。アカウント管理、権限、制限は[ChatGPT プレビューガイド](../chatgpt-preview/)を参照してください。
+
 ## `ocr llm`
 
-LLM ユーティリティコマンドです。2 つのサブコマンドがあります:
+LLM ユーティリティコマンドです。3 つのサブコマンドがあります:
 
 ```text
 ocr llm <sub-command>
@@ -568,6 +589,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`

@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { ConfigEntry, ConfigPanelFocus, ProviderTab, buildCustomCreateSaveEntries, buildCustomUpdateSaveEntries, buildOfficialSaveEntries, describeActiveProvider, detectInitialTab, isConfigReady, listCustomProviderNames } from '../../shared/configUtils';
+import { ConfigEntry, ConfigPanelFocus, ProviderTab, buildCustomCreateSaveEntries, buildCustomUpdateSaveEntries, buildOfficialSaveEntries, describeActiveProvider, detectInitialTab, isConfigReady, isValidProviderName, listCustomProviderNames } from '../../shared/configUtils';
 import { mergeModelLists, PROVIDER_PRESETS, usesAmbientAuth } from '../../shared/providers';
 import { EnvCheckResult, LogLine, OcrConfig } from '../../shared/types';
 import { CliStatus, ConnTest } from '../configStore';
@@ -450,8 +450,8 @@ function CustomForm({
   const [apiKeyTouched, setApiKeyTouched] = useState(false);
   const [authHeader, setAuthHeader] = useState(entry?.authHeader ?? '');
 
-  const canSaveCreate = name.trim() !== '' && url.trim() !== '' && model.trim() !== '' && apiKey.trim() !== '';
-  const canSaveEdit = !isCreate && name.trim() !== '' && url.trim() !== '' && model.trim() !== ''
+  const canSaveCreate = isValidProviderName(name) && url.trim() !== '' && model.trim() !== '' && apiKey.trim() !== '';
+  const canSaveEdit = !isCreate && isValidProviderName(name) && url.trim() !== '' && model.trim() !== ''
     && Boolean(entry?.apiKey || apiKey.trim());
   const canSave = isCreate ? canSaveCreate : canSaveEdit;
 
