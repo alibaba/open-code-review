@@ -304,7 +304,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/package.json`                   | `package_json.md` — зависимости / скрипты NPM.                                                   |
 | `**/Cargo.toml`                     | `cargo_toml.md` — манифест Rust.                                                                 |
 | `**/composer.json`                  | `composer_json.md` — зависимости Composer, автозагрузка, скрипты, плагины и конфигурация пакета. |
-| `**/*.{json,json5}`                 | `json.md` — обычный JSON (также совпадает `.json5`).                                             |
+| `**/*.{json,json5,jsonc}`           | `json.md` — обычный JSON (также совпадает `.json5` и `.jsonc`).                                  |
 | `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md` — YAML workflow GitHub Actions.                                            |
 | `.github/**/*.{yaml,yml}`           | `github_config.md` — прочий конфигурационный YAML `.github`.                                     |
 | `**/*.{yaml,yml}`                   | `yaml.md`                                                                                        |

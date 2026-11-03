@@ -8,7 +8,7 @@
     "**/package.json": "package_json.md",
     "**/Cargo.toml": "cargo_toml.md",
     "**/composer.json": "composer_json.md",
-    "**/*.{json,json5}": "json.md",
+    "**/*.{json,json5,jsonc}": "json.md",
     ".github/workflows/**/*.{yaml,yml}": "github_workflows.md",
     ".github/**/*.{yaml,yml}": "github_config.md",
     "**/*.{yaml,yml}": "yaml.md",

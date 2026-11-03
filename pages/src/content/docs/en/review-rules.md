@@ -305,7 +305,7 @@ matching order:
 | `**/package.json`                   | `package_json.md` — NPM dependencies / scripts.                                                       |
 | `**/Cargo.toml`                     | `cargo_toml.md` — Rust manifest.                                                                      |
 | `**/composer.json`                  | `composer_json.md` — Composer dependencies, autoloading, scripts, plugins, and package configuration. |
-| `**/*.{json,json5}`                 | `json.md` — generic JSON (also matches `.json5`).                                                     |
+| `**/*.{json,json5,jsonc}`           | `json.md` — generic JSON (also matches `.json5` and `.jsonc`).                                      |
 | `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md` — GitHub Actions workflow YAML.                                                 |
 | `.github/**/*.{yaml,yml}`           | `github_config.md` — other `.github` config YAML.                                                     |
 | `**/*.{yaml,yml}`                   | `yaml.md`                                                                                             |
