@@ -87,12 +87,15 @@ func TestPreviewEntry_ExcludeReasonOmitEmpty(t *testing.T) {
 
 func TestExcludeReasonConstants(t *testing.T) {
 	constants := map[ExcludeReason]string{
-		ExcludeNone:        "",
-		ExcludeUserRule:    "user_exclude",
-		ExcludeExtension:   "unsupported_ext",
-		ExcludeDefaultPath: "default_path",
-		ExcludeDeleted:     "deleted",
-		ExcludeBinary:      "binary",
+		ExcludeNone:              "",
+		ExcludeUserRule:          "user_exclude",
+		ExcludeExtension:         "unsupported_ext",
+		ExcludeDefaultPath:       "default_path",
+		ExcludeSecret:            "secret_exclude",
+		ExcludeProviderDirectory: "provider_directory",
+		ExcludeDeleted:           "deleted",
+		ExcludeBinary:            "binary",
+		ExcludeTooLarge:          "too_large",
 	}
 	for k, v := range constants {
 		if string(k) != v {

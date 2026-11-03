@@ -8,7 +8,7 @@ import DOMPurify from 'dompurify';
 import { useTranslation } from '../i18n';
 import { useCopyToast } from '../hooks/useCopyToast';
 import copyIcon from '../assets/icons/icon-copy.svg';
-import { generateHeadingId, parseExplicitHeadingId } from '../utils/headingId';
+import { extractHeadingInfo, generateHeadingId, parseExplicitHeadingId } from '../utils/headingId';
 
 type Mermaid = typeof import('mermaid')['default'];
 
@@ -72,6 +72,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
   const html = useMemo(() => {
     // Custom renderer to generate heading IDs matching the TOC extraction logic
     const renderer = new Renderer();
+    const headingIds = extractHeadingInfo(content).map(({ id }) => id);
+    let headingIndex = 0;
     renderer.image = function ({ href, title, text }: { href: string; title?: string | null; text: string }) {
       const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
@@ -79,7 +81,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
     };
     renderer.heading = function ({ text, depth }: { text: string; depth: number }) {
       const { text: headingText, id: explicitId } = parseExplicitHeadingId(text);
-      const id = explicitId ?? generateHeadingId(headingText);
+      const id = headingIds[headingIndex++] ?? (explicitId ?? generateHeadingId(headingText));
       // Escape id attribute value to prevent XSS
       const safeId = id.replace(/"/g, '&quot;');
       return `<h${depth} id="${safeId}">${headingText}</h${depth}>\n`;

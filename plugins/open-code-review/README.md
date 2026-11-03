@@ -1,8 +1,8 @@
 # Coding agent plugins
 
 Open Code Review ships platform-specific integrations for Claude Code, Codex,
-Cursor, and QCA Forward. Choose your platform below instead of adapting installation
-instructions written for a different agent.
+Cursor, Kimi Code, and QCA Forward. Choose your platform below instead of
+adapting installation instructions written for a different agent.
 
 All integrations require Git 2.41 or later. Install the `ocr` CLI first:
 
@@ -69,6 +69,31 @@ portable OCR review skills from the bundled `skills/` directory.
 
 See the [Cursor plugin documentation](https://cursor.com/docs/plugins) for
 plugin loading and management details.
+
+## Kimi Code
+
+This repository is itself a Kimi Code plugin. The manifest lives at the
+repository root ([`.kimi-plugin/plugin.json`](../../.kimi-plugin/plugin.json))
+because Kimi Code treats the repository root as the plugin root when installing
+from GitHub; its `skills` and `commands` paths point down into this directory.
+
+Run this inside Kimi Code:
+
+```text
+/plugins install https://github.com/alibaba/open-code-review
+```
+
+Then run `/reload` (or start a new session) to activate the plugin. It
+provides the `/open-code-review:review` and `/open-code-review:delegate-review`
+slash commands plus the portable OCR review skills, backed by the local `ocr`
+CLI.
+
+Plugins are installed per-user and apply to every project. Manage the
+installation with `/plugins list`, `/plugins info open-code-review`,
+`/plugins disable open-code-review`, and `/plugins remove open-code-review`.
+See the
+[Kimi Code plugin documentation](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/plugins.html)
+for details.
 
 ## QCA Forward
 

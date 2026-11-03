@@ -21,7 +21,7 @@ function renderHero() {
 // The panel is found through the id that `aria-controls` already points at, so
 // the test leans on the accessibility wiring instead of a test-only hook.
 const panel = () => document.getElementById('install-more-panel');
-const trigger = () => screen.getByRole('button', { name: /More|MacPorts/i });
+const trigger = () => screen.getByRole('button', { name: /More|Windows/i });
 
 describe('HeroSection install channels', () => {
   it('starts on the first channel with the panel closed', () => {
@@ -37,9 +37,9 @@ describe('HeroSection install channels', () => {
     await user.click(trigger());
     expect(panel()).not.toBeNull();
 
-    await user.click(screen.getByRole('button', { name: /MacPorts/i }));
+    await user.click(screen.getByRole('button', { name: /Windows/i }));
 
-    expect(screen.getByText('sudo port install open-code-review')).toBeTruthy();
+    expect(screen.getByText('irm https://open-codereview.ai/install.ps1 | iex')).toBeTruthy();
     expect(panel()).toBeNull();
   });
 
@@ -87,9 +87,9 @@ describe('HeroSection install channels', () => {
     expect(screen.getByRole('button', { name: /^More$/i })).toBeTruthy();
 
     await user.click(trigger());
-    await user.click(screen.getByRole('button', { name: /MacPorts/i }));
+    await user.click(screen.getByRole('button', { name: /Windows/i }));
 
-    const collapsed = screen.getByRole('button', { name: /MacPorts/i });
+    const collapsed = screen.getByRole('button', { name: /Windows/i });
     expect(collapsed.getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByRole('button', { name: /^More$/i })).toBeNull();
   });

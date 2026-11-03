@@ -276,8 +276,8 @@ func TestParseScanFlags_IntFlags(t *testing.T) {
 	if opts.concurrency != 16 {
 		t.Errorf("concurrency = %d", opts.concurrency)
 	}
-	if opts.perFileTimeout != 20 {
-		t.Errorf("perFileTimeout = %d", opts.perFileTimeout)
+	if opts.concurrentTaskTimeout != 20 {
+		t.Errorf("concurrentTaskTimeout = %d", opts.concurrentTaskTimeout)
 	}
 	if opts.maxTools != 50 {
 		t.Errorf("maxTools = %d", opts.maxTools)

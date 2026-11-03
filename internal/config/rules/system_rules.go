@@ -115,8 +115,7 @@ func LoadDefault() (*SystemRule, error) {
 }
 
 // loadObjCRule reads the embedded Objective-C rule doc used by the ".m"
-// content sniff. It is not referenced from system_rules.json's path_rule_map,
-// so it is loaded explicitly rather than through the PathRules loop.
+// content sniff.
 func loadObjCRule() (string, error) {
 	content, err := rulesFS.ReadFile("rule_docs/objc.md")
 	if err != nil {

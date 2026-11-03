@@ -1,0 +1,300 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
+package llm
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	oteltrace "go.opentelemetry.io/otel/trace"
+)
+
+// rawLoggingEnv is the opt-in switch for raw LLM capture. Only the exact
+// value "1" enables it (mirrors telemetry's OCR_ENABLE_TELEMETRY), so an unset
+// or misspelled variable keeps the default: no middleware mounted, no files
+// created, no behavior change.
+const rawLoggingEnv = "OCR_RAW_LOGGING"
+
+func RawLoggingEnabled() bool {
+	return os.Getenv(rawLoggingEnv) == "1"
+}
+
+// RawRecord is one JSONL line: everything captured about a single HTTP
+// attempt against an LLM endpoint. One logical request may expand into several
+// attempts inside the SDK retry loop, and each attempt gets its own record.
+//
+// "Raw" is capture-point, not wire-level: on Bedrock the records show the
+// pre-signing request and SSE-normalized response (SigV4 blocks moving in).
+type RawRecord struct {
+	// SessionID identifies the review/scan session this attempt belongs to. It
+	// is stamped by the writer, which is bound per session; the middleware
+	// leaves it empty.
+	SessionID string `json:"session_id"`
+
+	// RequestID identifies this attempt, not the logical request above it.
+	RequestID string `json:"request_id"`
+
+	// Timestamp is when the HTTP attempt started, RFC 3339 UTC. The end of
+	// the attempt is Timestamp + DurationMs; the two fields share one base.
+	Timestamp string `json:"timestamp"`
+
+	// FilePath, TaskType and RequestNo mirror session.TaskRecord identity and
+	// come from the RequestMeta attached to the request context. Scan requests
+	// carry no meta, so these stay empty / zero — an honest omission rather
+	// than a fabricated identity; `ocr llm test` captures nothing at all.
+	FilePath  string `json:"file_path,omitempty"`
+	TaskType  string `json:"task_type,omitempty"`
+	RequestNo int    `json:"request_no,omitempty"`
+
+	// TraceID is the OTel trace ID of the span context the request carries
+	// (the review.run tree). It joins raw records to the OTLP span tree when
+	// telemetry is on; omitted otherwise, so the two channels stay independent.
+	TraceID string `json:"trace_id,omitempty"`
+
+	// Model is the meta's model, falling back to the request body's "model"
+	// field when no meta is attached.
+	Model string `json:"model,omitempty"`
+
+	// DurationMs covers the whole attempt: next() plus the full response-body
+	// capture, so for streaming it spans the entire stream, not just the
+	// connection.
+	DurationMs int64 `json:"duration_ms"`
+
+	// StatusCode is the HTTP status of this attempt; 0 when next() failed
+	// before any response arrived (transport error).
+	StatusCode int `json:"status_code,omitempty"`
+
+	// RequestHeaders are the request headers, with credential-bearing ones
+	// redacted by sensitiveHeader.
+	RequestHeaders map[string]string `json:"request_headers"`
+
+	// ResponseHeaders are the response headers, redacted the same way —
+	// Set-Cookie is a credential too. Omitted when next() failed. The
+	// server-side request ID lives here, not in the body.
+	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
+
+	// RequestBody is the raw request body after extra_body merging and
+	// session-key expansion — the shape the SDK logic sent, which on Bedrock
+	// precedes the provider adaptation (see RawRecord). Valid JSON whenever
+	// non-empty; an empty body leaves it null. Mutually exclusive with
+	// RequestBodyText.
+	RequestBody json.RawMessage `json:"request_body"`
+
+	// RequestBodyText holds a non-JSON request body verbatim. Unreachable while
+	// the SDK marshals every body; a future mangling middleware would land
+	// here instead of dropping the whole record.
+	RequestBodyText string `json:"request_body_text,omitempty"`
+
+	// ResponseBody holds the raw response body when it is valid JSON
+	// (every non-streaming completion response). Mutually exclusive with
+	// ResponseBodyText.
+	ResponseBody json.RawMessage `json:"response_body,omitempty"`
+
+	// ResponseBodyText holds a non-JSON response body verbatim. This is the SSE
+	// stream text (extra_body.stream=true) — stuffing it into ResponseBody
+	// would emit a malformed JSONL line.
+	ResponseBodyText string `json:"response_body_text,omitempty"`
+
+	// Error carries the transport-level error when next() failed; the record
+	// then has no response. HTTP-level errors are not transport errors: the
+	// SDK retries them internally, and the body lands in ResponseBody as-is.
+	Error string `json:"error,omitempty"`
+}
+
+// RawWriter receives raw records. Implemented by session.RawFileWriter;
+// kept as an interface so the llm package never learns where captures go.
+type RawWriter interface {
+	Write(rec RawRecord)
+	Close() error
+}
+
+// RawHolder is a thread-safe late-binding slot for a RawWriter. The LLM
+// client is constructed in loadLLMRuntime, before any session exists, while
+// the writer needs the session's ID and repo dir — so the holder is created
+// with the client and the writer is set once the session is known.
+type RawHolder struct {
+	mu sync.RWMutex
+	w  RawWriter
+}
+
+func NewRawHolder() *RawHolder { return &RawHolder{} }
+
+func (h *RawHolder) Set(w RawWriter) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.w = w
+}
+
+func (h *RawHolder) get() RawWriter {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.w
+}
+
+// sensitiveHeaderKeywords names the substrings that mark a request header as
+// credential-bearing: provider secrets (authorization, x-api-key,
+// x-amz-security-token, x-session-token, …) and session cookies are named
+// after what they carry. Missing one leaks a secret into raw logs, while a
+// false positive only hides a header, so this errs toward redacting.
+var sensitiveHeaderKeywords = []string{"auth", "token", "key", "secret", "credential", "cookie"}
+
+func sensitiveHeader(name string) bool {
+	lower := strings.ToLower(name)
+	for _, kw := range sensitiveHeaderKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// captureHeaders flattens an http.Header for the record: credential-bearing
+// headers are redacted by name, repeated values are joined in the RFC 9110
+// list form.
+func captureHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for k, vs := range h {
+		if len(vs) == 0 {
+			continue
+		}
+		if sensitiveHeader(k) {
+			out[k] = "[REDACTED]"
+		} else {
+			out[k] = strings.Join(vs, ", ")
+		}
+	}
+	return out
+}
+
+// newRawMiddleware builds the SDK middleware that captures raw
+// request/response bodies into the writer held by holder. It sits inside the
+// SDK retry loop, so it records one line per real HTTP attempt.
+//
+// The bodies are read fully and then restored for the SDK to consume. For a
+// streaming response this means the middleware buffers the whole SSE stream
+// before the client sees it — acceptable for an opt-in raw capture.
+//
+// Raw capture must never fail a review: every capture step tolerates errors
+// and the record write happens last, fire-and-forget.
+func newRawMiddleware(holder *RawHolder) retryObserver {
+	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+		tw := holder.get()
+		if tw == nil {
+			return next(req)
+		}
+
+		meta, _ := RequestMetaFromContext(req.Context())
+
+		reqHeaders := captureHeaders(req.Header)
+
+		var reqBody []byte
+		var reqReadErr error
+		if req.Body != nil {
+			reqBody, reqReadErr = io.ReadAll(req.Body)
+			if reqReadErr != nil {
+				// Replay the failure to the SDK exactly as it would surface
+				// without capture; a clean truncated body would turn the
+				// client-side fault into a server-side 400.
+				req.Body = io.NopCloser(io.MultiReader(bytes.NewReader(reqBody), errReader{reqReadErr}))
+			} else {
+				req.Body = io.NopCloser(bytes.NewReader(reqBody))
+			}
+		}
+
+		model := meta.Model
+		if model == "" && len(reqBody) > 0 {
+			var partial struct {
+				Model string `json:"model"`
+			}
+			if json.Unmarshal(reqBody, &partial) == nil {
+				model = partial.Model
+			}
+		}
+
+		startedAt := time.Now()
+		resp, err := next(req)
+
+		rec := RawRecord{
+			RequestID:      uuid.NewString(),
+			Timestamp:      startedAt.UTC().Format(time.RFC3339),
+			FilePath:       meta.FilePath,
+			TaskType:       meta.TaskType,
+			RequestNo:      meta.RequestNo,
+			Model:          model,
+			RequestHeaders: reqHeaders,
+		}
+		// A zero-length RawMessage fails to marshal and would drop the whole
+		// record, so an empty body stays null; malformed bytes would fail the
+		// same way, so they fall back to RequestBodyText.
+		if len(reqBody) > 0 && reqReadErr == nil {
+			if json.Valid(reqBody) {
+				rec.RequestBody = json.RawMessage(reqBody)
+			} else {
+				rec.RequestBodyText = string(reqBody)
+			}
+		}
+		if reqReadErr != nil {
+			rec.Error = reqReadErr.Error()
+		}
+		if sc := oteltrace.SpanContextFromContext(req.Context()); sc.HasTraceID() {
+			rec.TraceID = sc.TraceID().String()
+		}
+
+		if err != nil {
+			rec.DurationMs = time.Since(startedAt).Milliseconds()
+			if reqReadErr != nil {
+				// Keep both: the request-body read failure is the root cause,
+				// next's error the downstream symptom.
+				rec.Error = reqReadErr.Error() + "; next: " + err.Error()
+			} else {
+				rec.Error = err.Error()
+			}
+			tw.Write(rec)
+			return resp, err
+		}
+
+		rec.StatusCode = resp.StatusCode
+		if len(resp.Header) > 0 {
+			rec.ResponseHeaders = captureHeaders(resp.Header)
+		}
+
+		if resp.Body != nil {
+			respBody, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				// Hand the SDK the same read failure it would see without capture.
+				rec.DurationMs = time.Since(startedAt).Milliseconds()
+				rec.Error = readErr.Error()
+				if len(respBody) > 0 {
+					rec.ResponseBodyText = string(respBody)
+				}
+				tw.Write(rec)
+				resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(respBody), errReader{readErr}))
+				return resp, nil
+			}
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			if json.Valid(respBody) {
+				rec.ResponseBody = json.RawMessage(respBody)
+			} else {
+				rec.ResponseBodyText = string(respBody)
+			}
+		}
+
+		rec.DurationMs = time.Since(startedAt).Milliseconds()
+		tw.Write(rec)
+		return resp, nil
+	}
+}
+
+// errReader replays a captured read error once the buffered bytes are drained.
+type errReader struct{ err error }
+
+func (r errReader) Read([]byte) (int, error) { return 0, r.err }

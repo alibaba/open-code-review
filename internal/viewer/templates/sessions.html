@@ -8,31 +8,45 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a><span class="sep">/</span><span class="current">{{.RepoName}}</span></nav>
-<main>
-<h2>Sessions: {{.RepoName}}</h2>
+{{template "app-header" .}}
+<main class="sessions-page">
+<div class="page-heading">
+    <a class="back-link" href="/" aria-label="Back to repositories">{{icon "chevron-left"}}</a>
+    <h2>Sessions: {{.RepoName}}</h2>
+</div>
 {{if .Sessions}}
-<table class="table">
-    <thead><tr><th>Session ID</th><th>Branch</th><th>Mode</th><th>Model</th><th>Files</th><th>Status</th><th>Comments</th><th>Duration</th><th>Started At</th></tr></thead>
+<div class="table-scroll" role="region" aria-label="Sessions table">
+<table id="sessions-table" class="table">
+    <thead><tr><th scope="col">Session ID</th><th scope="col">Branch</th><th scope="col">Mode</th><th scope="col">Model</th><th scope="col">Files</th><th scope="col">Status</th><th scope="col">Comments</th><th scope="col">Duration</th><th scope="col">Started At</th><th scope="col" class="col-action">Action</th></tr></thead>
     <tbody>
-    {{range .Sessions}}
+    {{range $i, $s := .Sessions}}
         <tr>
-            <td><a href="/r/{{$.EncodedRepo}}/{{.SessionID}}">{{.SessionID | printf "%.8s"}}…</a></td>
-            <td>{{.GitBranch}}</td>
-            <td>{{if .ReviewMode}}{{.ReviewMode}}{{else}}-{{end}}</td>
-            <td><code>{{.Model}}</code></td>
-            <td>{{.FileCount}}</td>
-            <td>{{if .Aborted}}aborted{{else if .Legacy}}legacy{{else}}{{.TerminalState}}{{end}}</td>
-            <td>{{if .CommentCount}}{{.CommentCount}}{{else}}-{{end}}</td>
-            <td>{{formatDuration .DurationSec}}</td>
-            <td>{{formatTime .Timestamp}}</td>
+            <td class="col-session"><a class="session-id" href="/r/{{$.EncodedRepo}}/{{$s.SessionID}}" title="{{$s.SessionID}}">{{truncate 8 $s.SessionID}}</a></td>
+            <td class="col-branch">{{$s.GitBranch}}</td>
+            <td class="col-mode">{{if $s.ReviewMode}}{{$s.ReviewMode}}{{else}}-{{end}}</td>
+            <td class="col-model">{{$s.Model}}</td>
+            <td class="col-files">{{$s.FileCount}}</td>
+            <td>{{if $s.Aborted}}aborted{{else if $s.Legacy}}legacy{{else}}{{$s.TerminalState}}{{end}}</td>
+            <td class="col-comments">{{if $s.CommentCount}}{{$s.CommentCount}}{{else}}-{{end}}</td>
+            <td class="col-duration">{{formatDuration $s.DurationSec}}</td>
+            <td class="col-started">{{formatTime $s.Timestamp}}</td>
+            {{/* Rows are newest-first, so the next-older session is index+1.
+                 The oldest row has no older neighbour to compare against. */}}
+            <td class="col-action">{{if lt (add $i 1) (len $.Sessions)}}{{$prev := index $.Sessions (add $i 1)}}<a href="/r/{{$.EncodedRepo}}/compare?before={{$prev.SessionID}}&amp;after={{$s.SessionID}}">Compare</a>{{else}}-{{end}}</td>
         </tr>
     {{end}}
     </tbody>
 </table>
+</div>
+{{template "pager" (dict "prefix" "sessions" "label" "Session pages")}}
+<script src="/static/pager.js"></script>
+<script src="/static/a11y.js"></script>
+<script src="/static/sessions.js"></script>
 {{else}}
 <p>No sessions found for this repository.</p>
 {{end}}
 </main>
 </body>
 </html>
+
+{{define "breadcrumbs"}}<span class="sep">/</span><span class="current">{{.RepoName}}</span>{{end}}

@@ -64,8 +64,8 @@ func TestParseGroupingResponse_Valid(t *testing.T) {
 		{NewPath: "docs/README.md"},
 	}
 	content := `[
-		{"label": "auth handler", "files": ["internal/auth/handler.go", "internal/auth/handler_test.go"]},
-		{"label": "docs", "files": ["docs/README.md"]}
+		{"label": "auth handler", "files": [0, 1]},
+		{"label": "docs", "files": [2]}
 	]`
 	groups, err := parseGroupingResponse(content, diffs)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestParseGroupingResponse_MarkdownFenced(t *testing.T) {
 		{NewPath: "a.go"},
 		{NewPath: "b.go"},
 	}
-	content := "```json\n" + `[{"label":"all","files":["a.go","b.go"]}]` + "\n```"
+	content := "```json\n" + `[{"label":"all","files":[0,1]}]` + "\n```"
 	groups, err := parseGroupingResponse(content, diffs)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestParseGroupingResponse_DuplicateFile(t *testing.T) {
 	diffs := []model.Diff{
 		{NewPath: "a.go"},
 	}
-	content := `[{"label":"g1","files":["a.go"]},{"label":"g2","files":["a.go"]}]`
+	content := `[{"label":"g1","files":[0]},{"label":"g2","files":[0]}]`
 	groups, err := parseGroupingResponse(content, diffs)
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +120,7 @@ func TestParseGroupingResponse_MissingFile(t *testing.T) {
 		{NewPath: "a.go"},
 		{NewPath: "b.go"},
 	}
-	content := `[{"label":"g1","files":["a.go"]}]`
+	content := `[{"label":"g1","files":[0]}]`
 	groups, err := parseGroupingResponse(content, diffs)
 	if err != nil {
 		t.Fatal(err)
@@ -138,12 +138,12 @@ func TestParseGroupingResponse_UnknownFile(t *testing.T) {
 	diffs := []model.Diff{
 		{NewPath: "a.go"},
 	}
-	content := `[{"label":"g1","files":["a.go","unknown.go"]}]`
+	content := `[{"label":"g1","files":[0,99]}]`
 	groups, err := parseGroupingResponse(content, diffs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// unknown.go is skipped; a.go still forms the group
+	// index 99 is out of range and skipped; a.go still forms the group
 	if len(groups) != 1 {
 		t.Fatalf("got %d groups, want 1", len(groups))
 	}
@@ -157,6 +157,18 @@ func TestParseGroupingResponse_InvalidJSON(t *testing.T) {
 	_, err := parseGroupingResponse("not json", diffs)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestParseGroupingResponse_Truncated(t *testing.T) {
+	// A response cut off by the completion limit is no longer partially salvaged:
+	// json.Unmarshal fails, parseGroupingResponse returns an error, and the caller
+	// falls back to per-file dispatch — the same behavior the path-based version
+	// had. Indices make this case far rarer (smaller output), but not special.
+	diffs := []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}}
+	content := `[{"label":"g1","files":[0,1]},{"label":"g2","fil`
+	if _, err := parseGroupingResponse(content, diffs); err == nil {
+		t.Fatal("expected an error for a truncated response")
 	}
 }
 
@@ -259,7 +271,7 @@ func TestGroupDiffs_LLMError_Fallback(t *testing.T) {
 func TestGroupDiffs_LLMSuccess(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}, {NewPath: "c.go"}}
 	client := &fakeGroupingClient{
-		response: `[{"label":"ab","files":["a.go","b.go"]},{"label":"c","files":["c.go"]}]`,
+		response: `[{"label":"ab","files":[0,1]},{"label":"c","files":[2]}]`,
 	}
 	tpl := template.Template{
 		GroupingTask: &template.LlmConversation{
@@ -403,7 +415,7 @@ func TestGroupDiffs_AtFileThresholdCallsLLM(t *testing.T) {
 		{NewPath: "d.go", Insertions: 1},
 	}
 	client := &fakeGroupingClient{
-		response: `[{"label":"ab","files":["a.go","b.go"]},{"label":"cd","files":["c.go","d.go"]}]`,
+		response: `[{"label":"ab","files":[0,1]},{"label":"cd","files":[2,3]}]`,
 	}
 	result := groupDiffs(context.Background(), diffs, client, "fake", groupingSkipTemplate(4, 200), 0, nil)
 	if !client.called {
@@ -523,7 +535,7 @@ func TestCallGroupingLLM_UsesTemplateMaxTokens(t *testing.T) {
 		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 	}
 
-	client := &fakeGroupingClient{response: `[{"label":"a","files":["a.go"]}]`}
+	client := &fakeGroupingClient{response: `[{"label":"a","files":[0]}]`}
 	if _, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 32000, nil); err != nil {
 		t.Fatalf("callGroupingLLM: %v", err)
 	}
@@ -531,7 +543,7 @@ func TestCallGroupingLLM_UsesTemplateMaxTokens(t *testing.T) {
 		t.Errorf("MaxTokens = %d, want 32000 (the template's own limit)", client.gotReq.MaxTokens)
 	}
 
-	client = &fakeGroupingClient{response: `[{"label":"a","files":["a.go"]}]`}
+	client = &fakeGroupingClient{response: `[{"label":"a","files":[0]}]`}
 	if _, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 0, nil); err != nil {
 		t.Fatalf("callGroupingLLM: %v", err)
 	}
@@ -548,12 +560,14 @@ func TestBuildFileMetadataTable(t *testing.T) {
 		{NewPath: "d.go", OldPath: "d.go", Insertions: 3, Deletions: 4},
 	}
 	// The grouping file list shares formatDiffEntry with the other-changed-files
-	// block, so both prompts enumerate files the same way. Pin the exact shape,
-	// including the per-entry trailing newline the grouping template relies on.
-	want := "ADDED   a.go (+10/-0)\n" +
-		"DELETED   b.go (+0/-5)\n" +
-		"RENAMED   c.go (+2/-1)\n" +
-		"MODIFIED   d.go (+3/-4)\n"
+	// block, so both prompts enumerate files the same way. buildFileList adds a
+	// zero-based index prefix on top, which the model groups by. Pin the exact
+	// shape, including the per-entry trailing newline the grouping template
+	// relies on.
+	want := "[0] ADDED   a.go (+10/-0)\n" +
+		"[1] DELETED   b.go (+0/-5)\n" +
+		"[2] RENAMED   c.go (+2/-1)\n" +
+		"[3] MODIFIED   d.go (+3/-4)\n"
 	if got := buildFileList(diffs); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

@@ -21,6 +21,143 @@ func writeJSONL(t *testing.T, path string, lines ...string) {
 	}
 }
 
+func TestBuildGroupingIndex(t *testing.T) {
+	// The list mirrors buildFileList([%d] ) + formatDiffEntry (STATUS   path (+N/-M))
+	// across every status, plus a path with a space to prove the "(+N/-M)" anchor.
+	content := "Group the following changed files:\n\n" +
+		"[0] ADDED   internal/auth/handler.go (+10/-0)\n" +
+		"[1] MODIFIED   internal/auth/handler_test.go (+5/-2)\n" +
+		"[2] RENAMED   cmd/app/main.go (+2/-1)\n" +
+		"[3] DELETED   docs/old notes.md (+0/-7)\n\n" +
+		"Respond with a JSON array"
+	msgs := []any{
+		map[string]any{"role": "system", "content": "You are a file grouping assistant."},
+		map[string]any{"role": "user", "content": content},
+	}
+	index := buildGroupingIndex(msgs)
+	want := map[int]string{
+		0: "internal/auth/handler.go",
+		1: "internal/auth/handler_test.go",
+		2: "cmd/app/main.go",
+		3: "docs/old notes.md",
+	}
+	if len(index) != len(want) {
+		t.Fatalf("got %d entries, want %d: %v", len(index), len(want), index)
+	}
+	for k, v := range want {
+		if index[k] != v {
+			t.Errorf("index[%d] = %q, want %q", k, index[k], v)
+		}
+	}
+
+	if buildGroupingIndex(nil) != nil {
+		t.Error("nil messages should yield nil index")
+	}
+	if buildGroupingIndex([]any{map[string]any{"role": "user", "content": "no file list here"}}) != nil {
+		t.Error("content without a file list should yield nil index")
+	}
+}
+
+func TestBuildGroupingIndex_IgnoresSystemMessage(t *testing.T) {
+	// Only the user message's list may seed the map. A worked example living in
+	// the system prompt (which users can reword onto its own line) must not
+	// pollute the index — otherwise an out-of-range index would render as a bogus
+	// path instead of "#idx".
+	msgs := []any{
+		map[string]any{"role": "system", "content": "e.g.\n[0] MODIFIED   bogus/from-prompt.go (+1/-1)\n"},
+		map[string]any{"role": "user", "content": "[0] MODIFIED   real/file.go (+2/-1)\n"},
+	}
+	index := buildGroupingIndex(msgs)
+	if index[0] != "real/file.go" {
+		t.Errorf("index[0] = %q, want the user message's path (system example must be ignored)", index[0])
+	}
+}
+
+func TestParseGroupingGroups(t *testing.T) {
+	t.Run("plain index JSON", func(t *testing.T) {
+		groups, ok := parseGroupingGroups(`[{"label":"auth","files":[0,1]},{"label":"docs","files":[2]}]`)
+		if !ok {
+			t.Fatal("expected ok")
+		}
+		if len(groups) != 2 || groups[0].Label != "auth" || len(groups[0].Files) != 2 || groups[0].Files[1] != 1 {
+			t.Errorf("unexpected parse: %+v", groups)
+		}
+	})
+	t.Run("markdown fenced", func(t *testing.T) {
+		groups, ok := parseGroupingGroups("```json\n" + `[{"label":"all","files":[0,1]}]` + "\n```")
+		if !ok || len(groups) != 1 || len(groups[0].Files) != 2 {
+			t.Errorf("fenced parse failed: ok=%v groups=%+v", ok, groups)
+		}
+	})
+	t.Run("legacy path-string response is not index-shaped", func(t *testing.T) {
+		// Sessions recorded before the index switch had "files" as path strings.
+		if _, ok := parseGroupingGroups(`[{"label":"auth","files":["a.go","b.go"]}]`); ok {
+			t.Error("path-string files should report ok=false so the viewer falls back to raw text")
+		}
+	})
+	t.Run("garbage", func(t *testing.T) {
+		if _, ok := parseGroupingGroups("not json at all"); ok {
+			t.Error("non-JSON should report ok=false")
+		}
+	})
+	t.Run("truncated response is not index-shaped", func(t *testing.T) {
+		// One-shot Unmarshal of a cut-off array fails, so the viewer falls back to
+		// the raw text — the same call the backend recorded.
+		if _, ok := parseGroupingGroups(`[{"label":"g1","files":[0,1]},{"label":"g2","fil`); ok {
+			t.Error("a truncated response should report ok=false")
+		}
+	})
+}
+
+func TestGroupingView(t *testing.T) {
+	req := []any{map[string]any{"role": "user", "content": "" +
+		"[0] MODIFIED   a.go (+1/-1)\n" +
+		"[1] MODIFIED   b.go (+2/-0)\n"}}
+
+	t.Run("resolves indices to paths, flags out-of-range", func(t *testing.T) {
+		card := &TaskCard{
+			RequestMessages: req,
+			ResponseContent: `[{"label":"g","files":[0,1,9]}]`,
+		}
+		views := groupingView(card)
+		if len(views) != 1 || len(views[0].Files) != 3 {
+			t.Fatalf("unexpected views: %+v", views)
+		}
+		if !views[0].Files[0].Resolved || views[0].Files[0].Path != "a.go" {
+			t.Errorf("file 0 = %+v, want resolved a.go", views[0].Files[0])
+		}
+		if views[0].Files[2].Resolved {
+			t.Errorf("index 9 should be unresolved, got %+v", views[0].Files[2])
+		}
+	})
+	t.Run("nil when request list missing", func(t *testing.T) {
+		card := &TaskCard{ResponseContent: `[{"label":"g","files":[0]}]`}
+		if groupingView(card) != nil {
+			t.Error("missing request list should yield nil (fall back to raw)")
+		}
+	})
+	t.Run("nil when response not index-shaped", func(t *testing.T) {
+		card := &TaskCard{RequestMessages: req, ResponseContent: `[{"label":"g","files":["a.go"]}]`}
+		if groupingView(card) != nil {
+			t.Error("legacy path response should yield nil (fall back to raw)")
+		}
+	})
+	t.Run("nil card", func(t *testing.T) {
+		if groupingView(nil) != nil {
+			t.Error("nil card should yield nil")
+		}
+	})
+	t.Run("nil when no referenced index resolves (format drift)", func(t *testing.T) {
+		// Request list parses (index != nil) but every index the response cites is
+		// out of range: the list shape drifted from what the response indexes into,
+		// so a wall of "#idx" would mislead — fall back to raw instead.
+		card := &TaskCard{RequestMessages: req, ResponseContent: `[{"label":"g","files":[8,9]}]`}
+		if groupingView(card) != nil {
+			t.Error("all-unresolved indices should yield nil (fall back to raw)")
+		}
+	})
+}
+
 func TestDiscoverRepos_Empty(t *testing.T) {
 	root := t.TempDir()
 	repos, err := DiscoverRepos(root)

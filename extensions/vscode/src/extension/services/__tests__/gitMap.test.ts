@@ -18,19 +18,19 @@ import {
 } from '../gitMap';
 
 describe('mapStatusCode', () => {
-  it('VSCode git Status 枚举映射到 FileChange.status', () => {
-    // VSCode Status: INDEX_ADDED=1, MODIFIED=5, DELETED=6, UNTRACKED=7 (示例值)
+  it('maps Git status codes to FileChange.status', () => {
+    // VSCode Status: INDEX_ADDED=1, MODIFIED=5, DELETED=6, UNTRACKED=7 (example values)
     expect(mapStatusCode('A')).toBe('added');
     expect(mapStatusCode('M')).toBe('modified');
     expect(mapStatusCode('D')).toBe('deleted');
     expect(mapStatusCode('R')).toBe('renamed');
-    expect(mapStatusCode('?')).toBe('added'); // untracked 视为 added
-    expect(mapStatusCode('X')).toBe('modified'); // 未知兜底
+    expect(mapStatusCode('?')).toBe('added'); // Treat untracked files as added.
+    expect(mapStatusCode('X')).toBe('modified'); // Fall back for unknown codes.
   });
 });
 
 describe('parsePorcelain', () => {
-  it('解析各种状态', () => {
+  it('parses different file statuses', () => {
     const out = [
       'M  src/a.ts',
       ' M src/b.ts',
@@ -47,26 +47,26 @@ describe('parsePorcelain', () => {
     ]);
   });
 
-  it('重命名取新路径', () => {
+  it('uses the new path for renames', () => {
     expect(parsePorcelain('R  old/x.ts -> new/x.ts')).toEqual([
       { path: 'new/x.ts', status: 'renamed' },
     ]);
   });
 
-  it('去重同一路径（同时暂存+工作区变更）', () => {
+  it('deduplicates paths with both staged and working tree changes', () => {
     expect(parsePorcelain('MM src/a.ts')).toEqual([
       { path: 'src/a.ts', status: 'modified' },
     ]);
   });
 
-  it('空输出返回空数组', () => {
+  it('returns an empty array for empty output', () => {
     expect(parsePorcelain('')).toEqual([]);
     expect(parsePorcelain('\n  \n')).toEqual([]);
   });
 });
 
 describe('parseNameStatus', () => {
-  it('解析 git diff/show --name-status 输出', () => {
+  it('parses git diff/show --name-status output', () => {
     const out = [
       'M\tsrc/a.ts',
       'A\tsrc/b.ts',
@@ -79,26 +79,26 @@ describe('parseNameStatus', () => {
     ]);
   });
 
-  it('重命名行 R<score> old new 取新路径', () => {
+  it('uses the new path from an R<score> old new rename line', () => {
     expect(parseNameStatus('R100\told/x.ts\tnew/x.ts')).toEqual([
       { path: 'new/x.ts', status: 'renamed' },
     ]);
   });
 
-  it('去重同一路径', () => {
+  it('deduplicates identical paths', () => {
     expect(parseNameStatus('M\tsrc/a.ts\nM\tsrc/a.ts')).toEqual([
       { path: 'src/a.ts', status: 'modified' },
     ]);
   });
 
-  it('空输出返回空数组', () => {
+  it('returns an empty array for empty output', () => {
     expect(parseNameStatus('')).toEqual([]);
     expect(parseNameStatus('\n \n')).toEqual([]);
   });
 });
 
 describe('buildWorkspaceFiles', () => {
-  it('合并 diff HEAD 与未跟踪文件', () => {
+  it('merges diff HEAD output with untracked files', () => {
     const files = buildWorkspaceFiles(
       'M\tsrc/a.ts\nA\tsrc/b.ts',
       '',
@@ -111,25 +111,25 @@ describe('buildWorkspaceFiles', () => {
     ]);
   });
 
-  it('diff HEAD 为空时回退 staged', () => {
+  it('falls back to staged changes when diff HEAD is empty', () => {
     const files = buildWorkspaceFiles('', 'M\tsrc/staged.ts', '');
     expect(files).toEqual([{ path: 'src/staged.ts', status: 'modified' }]);
   });
 
-  it('按路径去重，已跟踪优先于未跟踪', () => {
+  it('deduplicates paths and prefers tracked changes over untracked files', () => {
     const files = buildWorkspaceFiles('M\tsrc/a.ts', '', 'src/a.ts');
     expect(files).toEqual([{ path: 'src/a.ts', status: 'modified' }]);
   });
 });
 
 describe('parseUntrackedList', () => {
-  it('解析未跟踪路径并忽略空行', () => {
+  it('parses untracked paths and ignores blank lines', () => {
     expect(parseUntrackedList('src/a.ts\n\n src/b.ts \n')).toEqual(['src/a.ts', 'src/b.ts']);
   });
 });
 
 describe('mergeWorkspaceFiles', () => {
-  it('合并并去重', () => {
+  it('merges and deduplicates paths', () => {
     expect(mergeWorkspaceFiles(
       [{ path: 'a.ts', status: 'modified' }],
       ['b.ts', 'a.ts'],
@@ -141,34 +141,34 @@ describe('mergeWorkspaceFiles', () => {
 });
 
 describe('unquoteGitPath', () => {
-  it('解码 Git quotepath 八进制转义的中文路径', () => {
+  it('decodes Chinese paths with Git quotepath octal escapes', () => {
     const quoted = '"\\344\\273\\243\\347\\240\\201\\344\\277\\256\\346\\224\\271\\346\\234\\200\\345\\260\\217\\345\\271\\262\\351\\242\\204\\350\\247\\204\\345\\210\\231.md"';
-    expect(unquoteGitPath(quoted)).toBe('代码修改最小干预规则.md');
+    expect(unquoteGitPath(quoted)).toBe('代码修改最小干预规则.md'); // allow-non-english: fixture verifies UTF-8 Git path decoding
   });
 
-  it('普通路径原样返回', () => {
+  it('returns ordinary paths unchanged', () => {
     expect(unquoteGitPath('src/a.ts')).toBe('src/a.ts');
   });
 });
 
 describe('parseNameStatus', () => {
-  it('解析 quotepath 转义路径', () => {
+  it('parses quotepath-escaped paths', () => {
     expect(parseNameStatus('A\t"\\344\\273\\243\\347\\240\\201.md"')).toEqual([
-      { path: '代码.md', status: 'added' },
+      { path: '代码.md', status: 'added' }, // allow-non-english: fixture verifies UTF-8 Git path decoding
     ]);
   });
 });
 
 describe('branchRefCandidates', () => {
-  it('本地分支名补充 origin/ 前缀', () => {
+  it('adds an origin/ candidate for local branch names', () => {
     expect(branchRefCandidates('dev')).toEqual(['dev', 'origin/dev']);
   });
 
-  it('master 回退到 main 候选', () => {
+  it('adds main fallback candidates for master', () => {
     expect(branchRefCandidates('master')).toEqual(['master', 'origin/master', 'main', 'origin/main']);
   });
 
-  it('已是远程引用时不重复拼接', () => {
+  it('does not add another prefix to remote references', () => {
     expect(branchRefCandidates('origin/main')).toEqual(['origin/main']);
   });
 });
@@ -176,35 +176,35 @@ describe('branchRefCandidates', () => {
 describe('pickRepoRoot', () => {
   const ws = '/Users/lost/tre/copilot-union/code-chat';
 
-  it('精确匹配 workspace 根优先(嵌套子仓库不漂移)', () => {
-    // 子仓库 chat-ui 排在前面也应选中父 code-chat
+  it('prefers an exact workspace root match over a nested child repository', () => {
+    // Select the parent code-chat repository even when the child chat-ui appears first.
     const roots = ['/Users/lost/tre/copilot-union/code-chat/chat-ui', ws];
     expect(pickRepoRoot(roots, ws)).toBe(ws);
   });
 
-  it('无精确匹配时选 workspace 的祖先仓库', () => {
+  it('selects an ancestor repository when there is no exact workspace match', () => {
     const parent = '/Users/lost/tre/copilot-union';
     const roots = ['/Users/lost/tre/copilot-union/code-chat/chat-ui', parent];
     expect(pickRepoRoot(roots, ws)).toBe(parent);
   });
 
-  it('多个祖先时选最深(最长路径)的祖先', () => {
+  it('selects the deepest ancestor when multiple ancestors match', () => {
     const grand = '/Users/lost/tre';
     const parent = '/Users/lost/tre/copilot-union';
     const roots = [grand, parent];
     expect(pickRepoRoot(roots, ws)).toBe(parent);
   });
 
-  it('都不匹配时退回第一个', () => {
+  it('falls back to the first candidate when none match', () => {
     const roots = ['/some/other/repo', '/another/repo'];
     expect(pickRepoRoot(roots, ws)).toBe('/some/other/repo');
   });
 
-  it('空候选返回 null', () => {
+  it('returns null when there are no candidates', () => {
     expect(pickRepoRoot([], ws)).toBeNull();
   });
 
-  it('无 workspace 路径时退回第一个', () => {
+  it('falls back to the first candidate when the workspace path is missing', () => {
     const roots = ['/a/repo', '/b/repo'];
     expect(pickRepoRoot(roots, undefined)).toBe('/a/repo');
   });
@@ -231,7 +231,7 @@ describe('getCommitFiles: git show revision placement', () => {
     promisify(execFile)('git', ['-c', 'core.quotepath=false', ...args], { cwd: repoRoot })
       .then((r) => r.stdout.trim());
 
-  it('revision 必须在 -- 之前，否则会被当成 pathspec 导致空列表', async () => {
+  it('requires the revision before -- to avoid treating it as a pathspec and returning an empty list', async () => {
     const good = await execGit(['show', '--name-status', '--format=', 'HEAD']);
     const bad = await execGit(['show', '--name-status', '--format=', '--', 'HEAD']);
     expect(good.length).toBeGreaterThan(0);

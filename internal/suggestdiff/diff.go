@@ -51,7 +51,13 @@ func ComputeLineDiff(oldLines, newLines []string) []DiffLine {
 	back := make([]DiffLine, 0, max(m, n)*2)
 	for i > 0 || j > 0 {
 		if i > 0 && j > 0 && strings.EqualFold(strings.TrimSpace(oldLines[i-1]), strings.TrimSpace(newLines[j-1])) {
-			back = append(back, DiffLine{Type: DiffContext, Content: oldLines[i-1]})
+			if oldLines[i-1] == newLines[j-1] {
+				back = append(back, DiffLine{Type: DiffContext, Content: oldLines[i-1]})
+			} else {
+				// Fuzzy equality is only for alignment; preserve raw changes in the rendered diff.
+				back = append(back, DiffLine{Type: DiffAdded, Content: newLines[j-1]})
+				back = append(back, DiffLine{Type: DiffDeleted, Content: oldLines[i-1]})
+			}
 			i--
 			j--
 		} else if j > 0 && (i == 0 || lcs[i][j-1] >= lcs[i-1][j]) {

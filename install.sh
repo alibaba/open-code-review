@@ -58,7 +58,8 @@ main() {
   trap 'rm -rf "$tmp"' INT TERM EXIT
 
   printf 'downloading %s %s (%s/%s)...\n' "$BIN" "$VERSION" "$os" "$arch"
-  curl -fsSL -o "$tmp/$asset" "$base/$asset" || err "download failed: $base/$asset"
+  curl -fL --progress-bar --connect-timeout 5 --speed-limit 1024 --speed-time 30 -o "$tmp/$asset" "$base/$asset" ||
+    err "download failed: $base/$asset"
 
   curl -fsSL --connect-timeout 5 --max-time 15 -o "$tmp/sha256sum.txt" "$base/sha256sum.txt" ||
     err "sha256sum.txt download failed"

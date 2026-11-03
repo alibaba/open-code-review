@@ -19,6 +19,20 @@ type TestTask struct {
 type LlmConversation struct {
 	Timeout  int           `json:"timeout"`
 	Messages []ChatMessage `json:"messages"`
+	// Tool is offered to the model so the test exercises a tool-call round
+	// trip. A single request cannot detect providers that reject the turn
+	// after a tool call, which is how #1357 passed the test but failed every
+	// review.
+	Tool *ToolSpec `json:"tool,omitempty"`
+}
+
+// ToolSpec is the throwaway tool offered during the connectivity test, together
+// with the canned result sent back as the second turn.
+type ToolSpec struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+	Result      string         `json:"result"`
 }
 
 // ChatMessage represents a single message in a conversation.
