@@ -215,6 +215,7 @@ The task and request timeouts are independent:
 |-------|---------|-------------|
 | `effort` | `''` | Review effort preset passed to `ocr review --effort`: `low`, `medium`, or `high` (case-insensitive). Higher effort runs more review rounds. Empty keeps the CLI default (the configured value, or medium). |
 | `max_tokens_budget` | `''` | Total token cap (input+output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Checked before every LLM round: a group already over the cap gets one final round to submit findings, no further groups are dispatched, over-budget and skipped files are reported as failed(budget), partial results are still published, and the review exits 0. |
+| `max_tools` | `''` | Maximum tool-call rounds per review subtask, passed to `ocr review --max-tools`. Empty or `'0'` keeps the template default (100); the CLI raises values from 1 through 49 to its minimum of 50. Lower values bound review time on slow or local models at the cost of less exploration per file. Values below the template default take effect from OCR v1.13.5; earlier releases ignore them. |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -311,7 +312,7 @@ The action posts a summary issue comment plus inline review comments. Two inputs
 | `corrupt_checkpoint` | the summary carries no readable checkpoint marker (absent, malformed, or two of them) |
 | `schema_invalid` | the marker is for another PR, another marker version, or records a run that did not complete |
 | `base_changed` | the base ref or the merge-base moved, so the diff basis is no longer the one the checkpoint was taken against |
-| `config_changed` | the model, language, `llm_protocol` (or an inherited `OCR_LLM_PROTOCOL`), `llm_extra_body`, `llm_reasoning_effort`, `llm_extra_headers`, `llm_auth_header`, `llm_timeout`, `effort`, `max_tokens_budget`, `background`, routing inputs, the resolved OCR version, or the contents of `rule` / `.opencodereview/rule.json` changed — or `ocr version` printed nothing, so the version could not be established at all |
+| `config_changed` | the model, language, `llm_protocol` (or an inherited `OCR_LLM_PROTOCOL`), `llm_extra_body`, `llm_reasoning_effort`, `llm_extra_headers`, `llm_auth_header`, `llm_timeout`, `effort`, `max_tokens_budget`, `max_tools`, `background`, routing inputs, the resolved OCR version, or the contents of `rule` / `.opencodereview/rule.json` changed — or `ocr version` printed nothing, so the version could not be established at all |
 | `not_ancestor` | the checkpoint commit is in this clone but is not on the new head's history (the branch was reset to an earlier commit) |
 | `unknown_object` | the checkpoint commit is not in this clone, so ancestry could not be checked — where a force-push usually lands, since the replaced commit is no longer fetched |
 | `rule_unreadable` | a rule file was given but could not be read, so no stored fingerprint can be trusted to mean "same rules" |

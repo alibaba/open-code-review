@@ -790,7 +790,7 @@ function testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps() {
   }
 }
 
-function testValidateInputsRejectsInvalidEffortAndBudget() {
+function testValidateInputsRejectsInvalidEffortBudgetAndMaxTools() {
   const validation = validationStep();
   assert.ok(validation, "action.yml must retain input validation");
   const cases = [
@@ -799,6 +799,9 @@ function testValidateInputsRejectsInvalidEffortAndBudget() {
     [{ max_tokens_budget: "-5" }, /max_tokens_budget must be/],
     [{ max_tokens_budget: "10.5" }, /max_tokens_budget must be/],
     [{ max_tokens_budget: "abc" }, /max_tokens_budget must be/],
+    [{ max_tools: "-5" }, /max_tools must be/],
+    [{ max_tools: "60.5" }, /max_tools must be/],
+    [{ max_tools: "abc" }, /max_tools must be/],
   ];
   for (const [overrides, pattern] of cases) {
     const fixture = makeFixture();
@@ -820,7 +823,7 @@ function testValidateInputsRejectsInvalidEffortAndBudget() {
   }
 }
 
-function testEffortAndBudgetNormalizeAndForwardAcrossSteps() {
+function testEffortBudgetAndMaxToolsNormalizeAndForwardAcrossSteps() {
   const validation = validationStep();
   const run = stepNamed("Run OpenCodeReview");
   assert.ok(validation, "action.yml must retain input validation");
@@ -830,6 +833,7 @@ function testEffortAndBudgetNormalizeAndForwardAcrossSteps() {
     const values = inputValues({
       effort: "HIGH",
       max_tokens_budget: "010000",
+      max_tools: "060",
       llm_url: "https://llm.example.invalid/v1",
       llm_auth_token: "unused-token",
       llm_model: "contract-model",
@@ -844,6 +848,7 @@ function testEffortAndBudgetNormalizeAndForwardAcrossSteps() {
       "10000",
       "validation must export normalized decimal max_tokens_budget"
     );
+    assert.strictEqual(exported.MAX_TOOLS, "60", "validation must export normalized decimal max_tools");
     const result = runStep(
       run,
       values,
@@ -854,6 +859,7 @@ function testEffortAndBudgetNormalizeAndForwardAcrossSteps() {
         REVIEW_TASK_TIMEOUT: exported.REVIEW_TASK_TIMEOUT,
         EFFORT: exported.EFFORT,
         MAX_TOKENS_BUDGET: exported.MAX_TOKENS_BUDGET,
+        MAX_TOOLS: exported.MAX_TOOLS,
       },
       { replaceResultPaths: true }
     );
@@ -866,26 +872,30 @@ function testEffortAndBudgetNormalizeAndForwardAcrossSteps() {
     const budgetIndex = reviewCall.args.indexOf("--max-tokens-budget");
     assert.ok(budgetIndex >= 0, "Run OpenCodeReview must forward --max-tokens-budget");
     assert.strictEqual(reviewCall.args[budgetIndex + 1], "10000");
+    const maxToolsIndex = reviewCall.args.indexOf("--max-tools");
+    assert.ok(maxToolsIndex >= 0, "Run OpenCodeReview must forward --max-tools");
+    assert.strictEqual(reviewCall.args[maxToolsIndex + 1], "60");
   } finally {
     removeFixture(fixture);
   }
 }
 
-function testZeroMaxTokensBudgetNormalizesToUnlimited() {
+function testZeroMaxTokensBudgetAndMaxToolsNormalizeToDefaults() {
   const validation = validationStep();
   assert.ok(validation, "action.yml must retain input validation");
   const fixture = makeFixture();
   try {
-    const result = runStep(validation, inputValues({ max_tokens_budget: "0" }), fixture);
+    const result = runStep(validation, inputValues({ max_tokens_budget: "0", max_tools: "00" }), fixture);
     assert.strictEqual(result.status, 0, `validation failed; ${resultDescription(result)}`);
     const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
     assert.strictEqual(exported.MAX_TOKENS_BUDGET, "", "max_tokens_budget=0 must normalize to unlimited (empty)");
+    assert.strictEqual(exported.MAX_TOOLS, "", "max_tools=0 must normalize to the template default (empty)");
   } finally {
     removeFixture(fixture);
   }
 }
 
-function testEmptyEffortAndBudgetOmitTheFlags() {
+function testEmptyEffortBudgetAndMaxToolsOmitTheFlags() {
   const run = stepNamed("Run OpenCodeReview");
   assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
   const fixture = makeFixture();
@@ -906,6 +916,7 @@ function testEmptyEffortAndBudgetOmitTheFlags() {
         REVIEW_TASK_TIMEOUT: "15",
         EFFORT: "",
         MAX_TOKENS_BUDGET: "",
+        MAX_TOOLS: "",
       },
       { replaceResultPaths: true }
     );
@@ -917,6 +928,7 @@ function testEmptyEffortAndBudgetOmitTheFlags() {
       !reviewCall.args.includes("--max-tokens-budget"),
       "empty max_tokens_budget must omit --max-tokens-budget so the CLI default applies"
     );
+    assert.ok(!reviewCall.args.includes("--max-tools"), "empty max_tools must omit --max-tools so the template default applies");
   } finally {
     removeFixture(fixture);
   }
@@ -1872,6 +1884,7 @@ function testRequiredStepTopologyAndEnvironmentContracts() {
       "REVIEW_TASK_TIMEOUT",
       "EFFORT_INPUT",
       "MAX_TOKENS_BUDGET_INPUT",
+      "MAX_TOOLS_INPUT",
       "LLM_REASONING_EFFORT_INPUT",
       "STREAM_PROGRESS_INPUT",
     ],
@@ -2065,10 +2078,10 @@ const TESTS = [
   ["default llm_timeout exports independently from review_task_timeout", testDefaultLlmTimeoutExportedSeparatelyFromReviewTimeout],
   ["empty llm_timeout normalizes before review invocation", testEmptyLlmTimeoutNormalizesBeforeReviewInvocation],
   ["review_task_timeout with a leading zero normalizes across steps", testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps],
-  ["effort and max_tokens_budget reject malformed values", testValidateInputsRejectsInvalidEffortAndBudget],
-  ["effort and max_tokens_budget normalize and forward across steps", testEffortAndBudgetNormalizeAndForwardAcrossSteps],
-  ["max_tokens_budget=0 normalizes to unlimited", testZeroMaxTokensBudgetNormalizesToUnlimited],
-  ["empty effort and max_tokens_budget omit the CLI flags", testEmptyEffortAndBudgetOmitTheFlags],
+  ["effort, max_tokens_budget and max_tools reject malformed values", testValidateInputsRejectsInvalidEffortBudgetAndMaxTools],
+  ["effort, max_tokens_budget and max_tools normalize and forward across steps", testEffortBudgetAndMaxToolsNormalizeAndForwardAcrossSteps],
+  ["max_tokens_budget=0 and max_tools=0 normalize to the CLI defaults", testZeroMaxTokensBudgetAndMaxToolsNormalizeToDefaults],
+  ["empty effort, max_tokens_budget and max_tools omit the CLI flags", testEmptyEffortBudgetAndMaxToolsOmitTheFlags],
   ["llm_reasoning_effort rejects values outside the OpenAI/GLM vocabulary", testValidateInputsRejectsInvalidReasoningEffort],
   ["stream_progress defaults to false and describes [ocr] progress", testStreamProgressInputDefaultsToFalse],
   ["stream_progress validation accepts true/false case-insensitively", testValidateInputsValidatesStreamProgress],
