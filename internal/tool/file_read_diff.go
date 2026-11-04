@@ -10,6 +10,17 @@ import (
 	"strings"
 )
 
+const (
+	// fileReadDiffMaxLines is the default per-call line budget for file_read_diff.
+	fileReadDiffMaxLines = 500
+	// fileReadDiffMaxLinesCap is the hard ceiling for a caller-requested max_lines.
+	fileReadDiffMaxLinesCap = 5000
+	// fileReadDiffMaxBytes is the per-call byte budget. It is a backstop for
+	// pathologically long lines, such as minified sources, that a line budget
+	// alone cannot bound.
+	fileReadDiffMaxBytes = 1 << 20
+)
+
 // diffNotFoundMaxListed bounds how many available paths the not-found message
 // names before it summarizes the rest. The list exists to let a model correct a
 // wrong path, so it has to stay short enough to read in one glance.
@@ -63,42 +74,152 @@ func (p *FileReadDiffProvider) SetDiffMap(dm DiffMap) {
 
 func (p *FileReadDiffProvider) Tool() Tool { return FileReadDiff }
 
+// diffBlock records where one file's slice starts in the assembled output.
+type diffBlock struct {
+	header    string
+	startLine int
+}
+
+// Execute returns the diff for the requested paths, bounded per call.
+//
+// The response carries at most maxLines lines (default fileReadDiffMaxLines,
+// hard ceiling fileReadDiffMaxLinesCap) and fileReadDiffMaxBytes bytes. A
+// bounded response reports IS_TRUNCATED and the NEXT_OFFSET the caller passes
+// back as offset to keep paging; consecutive pages reassemble byte for byte
+// into the unbounded output. A page that opens in the middle of a file repeats
+// that file's header line so the page stays self-describing. A single diff line
+// larger than the whole byte budget cannot be returned at all and is reported
+// as an error instead of being silently dropped.
+//
+// A requested path that has no diff does not shorten the page: the paths that
+// were served are returned as usual and the missing ones are named after them,
+// so the caller learns which path to correct instead of losing the diffs it
+// did get.
 func (p *FileReadDiffProvider) Execute(_ context.Context, args map[string]any) (string, error) {
 	pathArray, _ := args["path_array"].([]any)
 	if len(pathArray) == 0 {
 		return "Error: no files found", nil
 	}
 
-	var sb strings.Builder
-	var missing []string
+	offset, err := parseToolInt(args, "offset", 0)
+	if err != nil {
+		return "", err
+	}
+	maxLines, err := parseToolInt(args, "max_lines", fileReadDiffMaxLines)
+	if err != nil {
+		return "", err
+	}
+	if offset < 0 {
+		return "", fmt.Errorf("offset must be >= 0, got %d", offset)
+	}
+	if maxLines <= 0 {
+		return "", fmt.Errorf("max_lines must be > 0, got %d", maxLines)
+	}
+	if maxLines > fileReadDiffMaxLinesCap {
+		maxLines = fileReadDiffMaxLinesCap
+	}
+
+	full, blocks, missing := p.assemble(pathArray)
+	if full == "" {
+		if len(missing) > 0 {
+			return p.notFoundMessage(missing), nil
+		}
+		return "Error: no files found", nil
+	}
+	// Every block ends with a newline, so the trailing empty element a split
+	// would produce is not a line: the real line count is the newline count.
+	total := strings.Count(full, "\n")
+
+	var (
+		sb       strings.Builder
+		lineIdx  int
+		emitted  int
+		size     int
+		blockIdx int
+	)
+	for pos := 0; pos < len(full); {
+		nl := strings.IndexByte(full[pos:], '\n')
+		line := full[pos : pos+nl]
+
+		if lineIdx >= offset {
+			// Stop at the requested page boundary before the next line is
+			// validated: a line beyond the page belongs to a later request,
+			// and failing on it here would discard the collected prefix.
+			if emitted >= maxLines {
+				break
+			}
+			// The next requested line cannot be emitted at all, so the
+			// oversized-line error is only surfaced for content the caller
+			// actually asked for.
+			if len(line)+1 > fileReadDiffMaxBytes {
+				return "", fmt.Errorf("the diff line at offset %d is %d bytes, over the %d-byte per-call limit; request fewer paths or read that file with file_read", lineIdx, len(line), fileReadDiffMaxBytes)
+			}
+			if size+len(line)+1 > fileReadDiffMaxBytes {
+				break
+			}
+			for blockIdx+1 < len(blocks) && lineIdx >= blocks[blockIdx+1].startLine {
+				blockIdx++
+			}
+			if emitted == 0 && lineIdx > blocks[blockIdx].startLine {
+				sb.WriteString(blocks[blockIdx].header)
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(line)
+			sb.WriteByte('\n')
+			emitted++
+			size += len(line) + 1
+		}
+		lineIdx++
+		pos += nl + 1
+	}
+
+	if emitted == 0 {
+		return "", fmt.Errorf("offset %d is past the end of the diff output (%d lines total)", offset, total)
+	}
+
+	truncated := offset+emitted < total
+	var meta strings.Builder
+	meta.WriteString(fmt.Sprintf("IS_TRUNCATED: %t\n", truncated))
+	if truncated {
+		meta.WriteString(fmt.Sprintf("NEXT_OFFSET: %d\n", offset+emitted))
+	}
+	out := meta.String() + sb.String()
+	if len(missing) > 0 {
+		// The missing-path notice follows the diffs it qualifies, so a partial
+		// hit reads as the diff first and the reason it is short second.
+		out += "\n" + p.notFoundMessage(missing)
+	}
+	return out, nil
+}
+
+// assemble concatenates the requested paths into the unbounded output and
+// records the line index each file's block starts at. The paths without a diff
+// are returned separately: they are not part of the output, but the caller
+// still has to be told which ones were dropped.
+func (p *FileReadDiffProvider) assemble(pathArray []any) (string, []diffBlock, []string) {
+	var (
+		sb      strings.Builder
+		blocks  []diffBlock
+		line    int
+		missing []string
+	)
 	for _, item := range pathArray {
 		path, ok := item.(string)
 		if !ok {
 			continue
 		}
-		if d, exists := p.diffMap.Get(path); exists {
-			sb.WriteString("==== FILE: ")
-			sb.WriteString(path)
-			sb.WriteString(" ====\n")
-			sb.WriteString(d)
-			sb.WriteString("\n")
+		diff, exists := p.diffMap.Get(path)
+		if !exists {
+			missing = append(missing, path)
 			continue
 		}
-		missing = append(missing, path)
+		header := "==== FILE: " + path + " ===="
+		text := header + "\n" + diff + "\n"
+		blocks = append(blocks, diffBlock{header: header, startLine: line})
+		sb.WriteString(text)
+		line += strings.Count(text, "\n")
 	}
-
-	if len(missing) > 0 {
-		if sb.Len() > 0 {
-			sb.WriteString("\n")
-		}
-		sb.WriteString(p.notFoundMessage(missing))
-	}
-
-	result := sb.String()
-	if result == "" {
-		return "Error: diff not found for the requested paths", nil
-	}
-	return result, nil
+	return sb.String(), blocks, missing
 }
 
 // notFoundMessage names the paths that had no diff and, when the snapshot
@@ -134,4 +255,21 @@ func (p *FileReadDiffProvider) notFoundMessage(missing []string) string {
 	}
 	sb.WriteString("\nUse one of those paths, or file_read for a file outside the reviewed set.\n")
 	return sb.String()
+}
+
+// parseToolInt reads an integer tool argument, falling back to def when the
+// key is absent. JSON decoding yields float64; direct Go callers may pass int.
+func parseToolInt(args map[string]any, key string, def int) (int, error) {
+	raw, ok := args[key]
+	if !ok || raw == nil {
+		return def, nil
+	}
+	switch v := raw.(type) {
+	case float64:
+		return int(v), nil
+	case int:
+		return v, nil
+	default:
+		return 0, fmt.Errorf("%s must be an integer, got %T", key, raw)
+	}
 }

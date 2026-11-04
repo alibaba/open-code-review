@@ -175,7 +175,9 @@ hunk ヘッダー `@@ -x,y +m,n @@` から範囲を計算すべきです——�
 {
   "name": "file_read_diff",
   "input": {
-    "path_array": ["src/api/handler.go", "src/db/queries.go"]
+    "path_array": ["src/api/handler.go", "src/db/queries.go"],
+    "max_lines": 500,
+    "offset": 0
   }
 }
 ```
@@ -183,6 +185,7 @@ hunk ヘッダー `@@ -x,y +m,n @@` から範囲を計算すべきです——�
 ### 出力
 
 ```
+IS_TRUNCATED: false
 ==== FILE: src/api/handler.go ====
 --- a/src/api/handler.go
 +++ b/src/api/handler.go
@@ -196,6 +199,11 @@ hunk ヘッダー `@@ -x,y +m,n @@` から範囲を計算すべきです——�
 - query := "SELECT *"
 + query := "SELECT id"
 ```
+
+1 回の呼び出しあたりの出力には上限があります: 最大 `max_lines` 行（デフォルト 500、
+ハード上限 5000）。出力が切り詰められた場合、レスポンスは `IS_TRUNCATED: true` と
+`NEXT_OFFSET: <n>` で始まります。その値を `offset` として渡すと次のページを読み取れます。
+ページがファイルの途中から始まる場合、そのファイルの `==== FILE: ... ====` ヘッダー行が繰り返されます。
 
 変更セットに含まれていないパスは静かに捨てられるわけではありません。
 `Error: diff not found for: <path>` の中で名前が挙げられ、見つかったパスの diff は
