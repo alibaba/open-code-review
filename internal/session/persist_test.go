@@ -130,6 +130,37 @@ func readJSONLRecords(t *testing.T, path string) []map[string]any {
 	return records
 }
 
+func TestSessionRecordsIncludeLLMSource(t *testing.T) {
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{
+		ReviewMode: ReviewModeWorkspace,
+		LLMSource:  "Claude Code environment",
+	})
+	fs := sh.GetOrCreateFileSession("foo.go")
+	fs.AppendTaskRecord(MainTask, nil).SetError(fmt.Errorf("boom"), time.Second)
+	if err := sh.Finalize(); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	found := map[string]bool{}
+	for _, record := range records {
+		typeName, _ := record["type"].(string)
+		if typeName != "session_start" && typeName != "llm_error" {
+			continue
+		}
+		found[typeName] = true
+		if got := record["llmSource"]; got != "Claude Code environment" {
+			t.Errorf("%s llmSource = %v, want Claude Code environment", typeName, got)
+		}
+	}
+	for _, typeName := range []string{"session_start", "llm_error"} {
+		if !found[typeName] {
+			t.Errorf("missing %s record", typeName)
+		}
+	}
+}
+
 func sessionJSONLPath(t *testing.T, repoDir, sessionID string) string {
 	t.Helper()
 	home, err := os.UserHomeDir()

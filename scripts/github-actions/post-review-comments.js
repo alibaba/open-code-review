@@ -155,6 +155,7 @@ async function runPostReviewComments({
     summaryUrl: "",
     checkpointAfter: "",
   };
+  let outsideDiffCount = 0;
 
   // Parsed here, before anything can exit early, even though it is only acted
   // on after the posting loop. Unknown values fall to "off", which is the right
@@ -175,9 +176,10 @@ async function runPostReviewComments({
   // ---- Checkpoint write path (#476) ----
   //
   // The checkpoint may only move forward past a run that published everything
-  // it found: terminal_state "complete" AND nothing failed to post AND a real
-  // 40-hex resolved head. Anything else re-emits the marker this run started
-  // with (carry-forward), so an unrelated failure never silently resets the PR
+  // it found: terminal_state "complete", no blocking posting failures, and a
+  // real 40-hex resolved head. Proven out-of-diff findings are published in the
+  // summary and do not block advancement. Other failures re-emit the marker
+  // this run started with, so an unrelated failure never silently resets the PR
   // to full reviews, and never silently skips a range that was not reviewed.
   //
   // The fourth condition — the summary was actually published — is enforced in
@@ -195,7 +197,7 @@ async function runPostReviewComments({
     stats.checkpointAfter = "";
     if (!checkpointEnabled || !stickySummary) return null;
     if (!manifest || manifest.terminal_state !== "complete") return null;
-    if (stats.failed !== 0) return null;
+    if (stats.failed !== outsideDiffCount) return null;
     // No fingerprint means the resolve step fell over before it computed one
     // (its catch path publishes an empty one). A marker without a fingerprint
     // can never validate, so writing one here would only overwrite a usable
@@ -480,6 +482,7 @@ async function runPostReviewComments({
       });
       successCount += r.succeeded;
       failedCount += r.failed;
+      outsideDiffCount += r.failedComments.filter((fc) => fc.outsideDiff === true).length;
       for (const fc of r.failedComments) failedComments.push(fc);
       batchCounters.attempted++;
       if (r.reconciled) batchCounters.reconciled++;
@@ -699,10 +702,10 @@ async function publishBatch({
     //     through to the per-comment loop, which has its own retry discipline.
     //     Re-sending a batch into a spam-throttled endpoint would deepen the
     //     incident rather than fix it.
-    //   * classifyCommentAgainstDiff() is TRI-state. A comment is only dropped
-    //     when the diff inventory is complete AND proves the line is outside
-    //     it. "unknown" (incomplete file list, file present but patch omitted
-    //     for a binary/oversized diff, LEFT-side comment, no line info) keeps
+    //   * classifyCommentAgainstDiff() distinguishes malformed locations from
+    //     locations proven outside the diff. Only the latter can advance a
+    //     checkpoint. "unknown" (incomplete file list, omitted patch data,
+    //     LEFT-side comment, no line info) keeps
     //     the pre-existing per-comment behavior instead of silently voiding a
     //     comment that might well post.
     if (batchStatus === 422 && toRetry.length > 0 && isLineResolutionFailure(e)) {
@@ -722,9 +725,10 @@ async function publishBatch({
         log(`[422-fallback] Failed to fetch PR diff hunks (${hunkErr.message}); proceeding without diff hunk filter.`);
       }
 
-      // valid   -> provably inside the diff, safe to re-batch
-      // unknown -> cannot prove either way, fall through to the per-comment loop
-      // invalid -> provably outside the diff, route to the summary
+      // valid        -> provably inside the diff, safe to re-batch
+      // unknown      -> cannot prove either way, try the per-comment loop
+      // outside_diff -> route to the summary without blocking the checkpoint
+      // malformed    -> route to the summary and keep the checkpoint blocked
       const validItems = [];
       const unknownItems = [];
       for (const item of toRetry) {
@@ -735,11 +739,16 @@ async function publishBatch({
           unknownItems.push(item);
         } else {
           failed++;
+          const outsideDiff = verdict === "outside_diff";
+          const reason = outsideDiff ? "outside PR diff hunks" : "malformed comment location";
           failedComments.push({
             comment: item.comment,
-            error: `${describeCommentLocation(item.reviewComment)} could not be resolved (outside PR diff hunks)`,
+            error: `${describeCommentLocation(item.reviewComment)} could not be resolved (${reason})`,
+            // Only proven placement limitations qualify; malformed metadata
+            // remains blocking even though its finding is also in the summary.
+            outsideDiff,
           });
-          log(`[422-fallback] Comment for ${item.reviewComment.path} (${describeCommentLocation(item.reviewComment)}) is outside PR diff hunks; routing to summary failure.`);
+          log(`[422-fallback] Comment for ${item.reviewComment.path} (${describeCommentLocation(item.reviewComment)}) could not be resolved (${reason}); routing to summary failure.`);
         }
       }
       if (unknownItems.length > 0) {
@@ -2674,26 +2683,18 @@ function parseDiffHunkRanges(patch) {
   return parseDiffHunkInventory(patch).ranges;
 }
 
-// TRI-STATE classification: "valid" | "invalid" | "unknown".
+// Classification: "valid" | "outside_diff" | "malformed" | "unknown".
 //
-// "invalid" is a claim we must be able to PROVE, because it permanently routes
-// a finding to the summary without ever attempting to post it. Missing or
-// partial diff metadata is "unknown", not "invalid" — it means we could not
-// check, and the caller keeps the pre-existing per-comment behavior.
+// "outside_diff" requires valid location metadata and proof from the diff;
+// it routes the finding to the summary without blocking checkpoint advancement.
+// "malformed" also routes to the summary but remains a blocking failure.
+// Missing or partial diff metadata is "unknown": keep the per-comment behavior.
 function classifyCommentAgainstDiff(item, diff) {
   // No inventory at all, or one we know is truncated: we cannot prove anything.
   if (!diff || !diff.complete) return "unknown";
 
   const { reviewComment } = item;
   const path = reviewComment.path;
-
-  // File is not among the PR's changed files at all — provably outside the diff.
-  if (!diff.known.has(path)) return "invalid";
-
-  // File IS in the PR but GitHub omitted its `patch` (binary, or a diff over
-  // the size limit). We know nothing about its lines.
-  const ranges = diff.files.get(path);
-  if (!ranges) return "unknown";
 
   // We only model RIGHT-side (new file) lines. The producer builds RIGHT-side
   // comments today; if that ever changes, decline to judge rather than drop.
@@ -2703,12 +2704,25 @@ function classifyCommentAgainstDiff(item, diff) {
   if (endLine == null) return "unknown";
   const startLine = reviewComment.start_line != null ? reviewComment.start_line : endLine;
 
-  // A reversed span is malformed and GitHub will reject it.
-  if (startLine > endLine) return "invalid";
+  // Malformed metadata is not proof of an out-of-diff location, even if the
+  // path is absent or its patch is unavailable. Check it before those cases.
+  if (
+    typeof path !== "string" || path.length === 0 ||
+    !Number.isInteger(startLine) || !Number.isInteger(endLine) ||
+    startLine < 1 || endLine < 1 || startLine > endLine
+  ) return "malformed";
+
+  // File is not among the PR's changed files at all — provably outside the diff.
+  if (!diff.known.has(path)) return "outside_diff";
+
+  // File IS in the PR but GitHub omitted its `patch` (binary, or a diff over
+  // the size limit). We know nothing about its lines.
+  const ranges = diff.files.get(path);
+  if (!ranges) return "unknown";
 
   // Both endpoints must fall inside ONE hunk.
   const withinOneHunk = ranges.some((r) => startLine >= r.start && endLine <= r.end);
-  return withinOneHunk ? "valid" : "invalid";
+  return withinOneHunk ? "valid" : "outside_diff";
 }
 
 // Human-readable location for the failure summary. A multi-line comment reports
@@ -2731,8 +2745,8 @@ function describeCommentLocation(reviewComment) {
 //   known    Set<path>                     — every path in the PR's file list
 //   complete boolean                       — the file list was fully enumerated
 //
-// `complete` is the guard that makes "invalid" provable: a truncated walk means
-// an absent path proves nothing. Pagination goes through readWithPacing so this
+// `complete` makes "outside_diff" provable: with a truncated walk, an absent
+// path proves nothing. Pagination goes through readWithPacing so this
 // read honors the same retry/pacing/quota discipline as every other read in
 // this file. GitHub caps listFiles at 3000 files, hence MAX_PAGES = 30.
 //
@@ -2786,8 +2800,8 @@ async function getPrDiffHunks({ github, owner, repo, prNumber, commitSha, log, c
   // necessarily has changed files, so an empty listFiles response is an anomaly
   // (diff not yet materialized server-side, or a malformed/empty response body)
   // rather than evidence that every commented path sits outside the diff.
-  // Trusting it would classify EVERY comment "invalid" and discard the whole
-  // batch without a single posting attempt — the exact outcome the tri-state
+  // Trusting it would classify EVERY comment "outside_diff" and discard the
+  // batch without a single posting attempt — the exact outcome the "unknown"
   // classification exists to prevent. Note this is the mirror of the truncation
   // case above: too many files and zero files are both "cannot judge".
   if (known.size === 0) {

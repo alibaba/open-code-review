@@ -2441,6 +2441,8 @@ async function main() {
   await testCheckpointResolveShape();
   // Cross-push checkpoints (#476) — write path
   await testCheckpointAdvanceGateTable();
+  await testCheckpointAdvancesAcrossOutOfDiffBatches();
+  await testCheckpointMalformedRangesRemainBlocking();
   await testCheckpointAdvanceRequiresFullSha();
   await testManifestHeadPinsEveryReviewPost();
   await testLegacyPullRequestEventUsesSnapshotHead();
@@ -2565,21 +2567,28 @@ function testClassifyCommentAgainstDiff() {
   // Single line inside a hunk.
   assert.strictEqual(at({ path: "foo.js", line: 11 }), "valid");
   // Single line outside every hunk.
-  assert.strictEqual(at({ path: "foo.js", line: 30 }), "invalid");
+  assert.strictEqual(at({ path: "foo.js", line: 30 }), "outside_diff");
   // File not in the PR at all.
-  assert.strictEqual(at({ path: "bar.js", line: 10 }), "invalid");
+  assert.strictEqual(at({ path: "bar.js", line: 10 }), "outside_diff");
 
   // Multi-line span wholly inside ONE hunk.
   assert.strictEqual(at({ path: "foo.js", start_line: 10, line: 12 }), "valid");
   // Span straddling two hunks: both endpoints exist, but not in the same hunk.
   // A flat line-set would wrongly call this valid and 422 all over again.
-  assert.strictEqual(at({ path: "foo.js", start_line: 11, line: 51 }), "invalid");
+  assert.strictEqual(at({ path: "foo.js", start_line: 11, line: 51 }), "outside_diff");
   // Reversed span.
-  assert.strictEqual(at({ path: "foo.js", start_line: 52, line: 11 }), "invalid");
+  for (const path of ["foo.js", "bar.js", "binary.png"]) {
+    assert.strictEqual(at({ path, start_line: 52, line: 11 }), "malformed");
+  }
+  for (const line of [0, -1, 1.5, "11", NaN, Infinity]) {
+    assert.strictEqual(at({ path: "foo.js", line }), "malformed");
+    assert.strictEqual(at({ path: "foo.js", start_line: line, line: 11 }), "malformed");
+  }
+  assert.strictEqual(at({ path: "", line: 11 }), "malformed");
   // Span partially overhanging the end of a hunk.
-  assert.strictEqual(at({ path: "foo.js", start_line: 11, line: 13 }), "invalid");
+  assert.strictEqual(at({ path: "foo.js", start_line: 11, line: 13 }), "outside_diff");
 
-  // ---- "unknown" must never be reported as "invalid" ----
+  // ---- "unknown" must never be reported as "outside_diff" ----
   // File is in the PR but GitHub omitted its patch (binary / oversized diff).
   assert.strictEqual(at({ path: "binary.png", line: 3 }), "unknown");
   // No line information to check.
@@ -3870,33 +3879,35 @@ function lastSummaryBody(gh) {
 }
 
 // K2/C4: the advance is gated on publication completeness. Only a run that is
-// terminal-complete, failed nothing, and published a summary may move the
-// checkpoint forward.
+// terminal-complete, has no blocking publication failures, and published a
+// summary may move the checkpoint forward.
 async function testCheckpointAdvanceGateTable() {
   const terminals = ["complete", "partial", "failed", "skipped", null];
-  const failures = [0, 1];
+  const failures = ["none", "outside_diff", "api", "unknown_diff"];
   const published = [true, false];
   let advancing = 0;
   for (const terminal of terminals) {
     for (const failed of failures) {
       for (const isPublished of published) {
-        // failed=1 is produced the way production produces it: a finding whose
-        // line is provably outside the diff, so the 422 fallback can neither
-        // repost nor reconcile it.
+        // Only a proven out-of-diff location is non-blocking. API failures and
+        // unresolvable locations with unavailable diff data must still block.
         const result = {
           comments: [
-            failed === 1
+            failed !== "none"
               ? { path: "src/a.js", content: "c1", start_line: 90, end_line: 90 }
               : { path: "src/a.js", content: "c1", start_line: 1, end_line: 1 },
           ],
           manifest: terminal === null ? undefined : ckManifest({ terminal_state: terminal }),
         };
         const gh = makeGithub(
-          failed === 1
+          failed !== "none"
             ? {
                 headSha: terminal === null ? context.payload.pull_request.head.sha : CK_RESOLVED,
                 files: [{ filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" }],
-                batchErrorSpec: [{ message: "Line could not be resolved", status: 422 }],
+                listFilesThrow: failed === "unknown_diff",
+                batchErrorSpec: [{ message: "Line could not be resolved", status: failed === "api" ? 403 : 422 }],
+                individualError: "Line could not be resolved (outside PR diff hunks)",
+                individualErrorStatus: 422,
               }
             : { headSha: terminal === null ? context.payload.pull_request.head.sha : CK_RESOLVED }
         );
@@ -3922,9 +3933,9 @@ async function testCheckpointAdvanceGateTable() {
         const label = `terminal=${terminal} failed=${failed} published=${isPublished}`;
         // Pin the fixture itself: the "failed" axis must really have failed a
         // finding, otherwise the row proves nothing.
-        assert.strictEqual(outputs.comments_failed, String(failed), `${label}: fixture failure count`);
+        assert.strictEqual(outputs.comments_failed, failed === "none" ? "0" : "1", `${label}: fixture failure count`);
         assert.strictEqual(outputs.summary_comment_url === "", !isPublished, `${label}: fixture publication`);
-        const expectAdvance = terminal === "complete" && failed === 0 && isPublished;
+        const expectAdvance = terminal === "complete" && (failed === "none" || failed === "outside_diff") && isPublished;
         assert.strictEqual(advanced, expectAdvance, `${label}: marker written=${advanced}`);
         if (expectAdvance) {
           advancing++;
@@ -3943,7 +3954,102 @@ async function testCheckpointAdvanceGateTable() {
       }
     }
   }
-  assert.strictEqual(advancing, 1, "exactly one of the 20 cells may advance");
+  assert.strictEqual(advancing, 2, "only complete, published runs without blocking failures may advance");
+}
+
+// Malformed spans are never checkpoint-safe, even on absent paths or alongside
+// genuinely out-of-diff findings. Preserve the previous checkpoint if present.
+async function testCheckpointMalformedRangesRemainBlocking() {
+  for (const carry of ["", CARRY]) {
+    for (const path of ["src/a.js", "src/missing.js", "assets/logo.png"]) {
+      for (const mixed of [false, true]) {
+        const comments = [{ path, content: "Malformed finding", start_line: 2, end_line: 1 }];
+        if (mixed) {
+          comments.push({ path: "src/a.js", content: "Outside finding", start_line: 90, end_line: 90 });
+        }
+        const gh = makeGithub({
+          headSha: CK_RESOLVED,
+          files: [
+            { filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" },
+            { filename: "assets/logo.png" },
+          ],
+          batchErrorSpec: [{ message: "Line could not be resolved", status: 422 }],
+        });
+        const outputs = {};
+        await runPostReviewComments({
+          github: gh,
+          context,
+          core: { info() {}, setOutput: (k, v) => { outputs[k] = v; } },
+          fs: mockFs(JSON.stringify({ comments, manifest: ckManifest() }), ""),
+          ...ckRunOptions({ checkpointCarry: carry }),
+        });
+        const body = lastSummaryBody(gh);
+        assert.strictEqual(outputs.checkpoint_after, "", `${path}: malformed ranges must block advancement`);
+        assert.deepStrictEqual(parseCheckpointMarker(body), carry ? parseCheckpointMarker(carry) : null);
+        assert.strictEqual(outputs.comments_failed, String(comments.length));
+        assert.strictEqual(outputs.comments_inline, "0");
+        assert.strictEqual(gh.createReviewCalls.length, 1, "malformed ranges must not be retried");
+        assert.ok(body.includes("Malformed finding"));
+        assert.ok(body.includes("Lines 2-1 could not be resolved (malformed comment location)"));
+        assert.ok(!body.includes("Lines 2-1 could not be resolved (outside PR diff hunks)"));
+        if (mixed) assert.ok(body.includes("Line 90 could not be resolved (outside PR diff hunks)"));
+      }
+    }
+  }
+}
+
+// #1521: out-of-diff findings must not prevent either the first checkpoint or
+// later advances, even across multiple batches. A real failure still blocks.
+async function testCheckpointAdvancesAcrossOutOfDiffBatches() {
+  for (const carry of ["", CARRY]) {
+    for (const apiFailure of [false, true]) {
+      const gh = makeGithub({
+        headSha: CK_RESOLVED,
+        files: [{ filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" }],
+        batchErrorSpec: [
+          { message: "Line could not be resolved", status: 422 },
+          { message: "Line could not be resolved", status: 422 },
+          apiFailure ? { message: "Forbidden", status: 403 } : null,
+        ],
+        individualError: "Forbidden",
+        individualErrorStatus: 403,
+      });
+      const outputs = {};
+      const comments = [
+        { path: "src/a.js", content: "First outside finding", start_line: 90, end_line: 90 },
+        { path: "src/a.js", content: "Second outside finding", start_line: 91, end_line: 91 },
+        { path: "src/b.js", content: "Other finding", start_line: 1, end_line: 1 },
+      ];
+      await runPostReviewComments({
+        github: gh,
+        context,
+        core: { info() {}, setOutput: (k, v) => { outputs[k] = v; } },
+        fs: mockFs(JSON.stringify({ comments, manifest: ckManifest() }), ""),
+        reviewCommentBatchSize: 1,
+        ...ckRunOptions({ checkpointCarry: carry }),
+      });
+      const body = lastSummaryBody(gh);
+      assert.ok(body.includes("First outside finding"));
+      assert.ok(body.includes("Second outside finding"));
+      assert.ok(body.includes("outside PR diff hunks"));
+      assert.strictEqual(outputs.comments_failed, apiFailure ? "3" : "2");
+      assert.strictEqual(outputs.comments_inline, apiFailure ? "0" : "1");
+      assert.strictEqual(outputs.checkpoint_after, apiFailure ? "" : CK_RESOLVED);
+      const marker = parseCheckpointMarker(body);
+      if (apiFailure) {
+        assert.deepStrictEqual(marker, carry ? parseCheckpointMarker(carry) : null);
+      } else {
+        assert.strictEqual(marker.head, CK_RESOLVED);
+        const range = await resolveCheckpointRange(ckArgs({
+          github: ckGithub({ comments: [ckComment({ body })] }),
+          isAncestor: async (from, to) => from === CK_RESOLVED && to === CK_NEW ? 0 : 1,
+        }));
+        assert.strictEqual(range.mode, "checkpoint");
+        assert.strictEqual(range.from, CK_RESOLVED);
+        assert.strictEqual(range.to, CK_NEW);
+      }
+    }
+  }
 }
 
 // A manifest whose resolved_head is not a full sha cannot identify a range, so

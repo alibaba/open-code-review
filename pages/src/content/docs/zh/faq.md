@@ -187,9 +187,8 @@ OCR 跳过该文件并继续——JSON 模式下你也会在 `warnings` 中看�
 - 模型不擅长遵循“完成后调 `task_done`”指令。换更强模型（如 Claude Opus）。
 - 某工具持续报错而模型持续重试。看会话 JSONL——若同一工具结果重复，即是原因。
 - 文件确实大或上下文重，100 轮不够。用 `--max-tools <n>` 调高
-  （如 `--max-tools 150`）。`--max-tools` 只能**上调**：小于模板默认值
-  （`100`）的值不生效，1–49 还会先被上调到 `50`；`0`（默认）直接用模板默认
-  `100`。
+  （如 `--max-tools 150`）。解析后的正值会精确设置上限；1–49 会先被上调到
+  `50`，`0`（默认）直接使用模板默认值 `100`。
 - 模型完全不支持原生工具调用（本地模型常见）——见
   ["No tool calls parsed"（本地模型 / Ollama）](#no-tool-calls-parsed-本地模型-ollama)。
 
@@ -325,7 +324,7 @@ issue 已在[此](https://github.com/alibaba/open-code-review/issues)开放。
 
 ### 为什么二进制叫 `opencodereview` 而 CLI 是 `ocr`？
 
-release 中发布的静态二进制以项目命名（`opencodereview`）；NPM wrapper 为了便于使用而安装为 `ocr`。从源码构建得到 `dist/opencodereview`——复制为 `$PATH` 上的
+release 中发布的静态二进制以项目命名（`opencodereview`）；NPM wrapper 为了便于使用而安装为 `ocr`。从源码构建得到 `dist/opencodereview`（Windows 上是 `dist/opencodereview.exe`）——复制为 `$PATH` 上的
 `ocr`。
 
 ### 如何卸载？

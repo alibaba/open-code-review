@@ -59,6 +59,68 @@ Three independent fields:
   order**. The first `path` whose glob matches the file determines the
   prompt OCR sends to the model for that file.
 
+Each `rules` entry also accepts an optional third field:
+
+- `merge_system_rule` — optional, defaults to `false`. When `false`
+  (the default), a matching entry **replaces** the built-in system rule
+  for that file. When `true`, the matched system rule is kept and the
+  user rule is **combined** with it.
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+With that entry in place, `ocr rules check src/main/java/com/example/UserService.java`
+reports both halves:
+
+```
+$ ocr rules check src/main/java/com/example/UserService.java
+Source: Project (.opencodereview/rule.json)
+Pattern: **/*
+Rule:
+────────────────────────────────────────
+## System-Specific Rules (Mandatory)
+
+…contents of java.md…
+
+---
+
+## User-Specific Rules (Mandatory)
+
+Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.
+────────────────────────────────────────
+```
+
+Two things are worth knowing about how the merge is assembled:
+
+- The **system half is resolved per file**, not once for the run. The
+  entry above is a catch-all, yet a `.java` file gets `java.md`, a `.py`
+  file gets `python.md`, an unrecognized extension uses `default.md`.
+  One entry therefore adds your rule on top of the right language rules
+  everywhere, without repeating it per extension.
+- Either half may be empty. If the system layer resolves to nothing for
+  a file, you get your rule alone; if your rule text is empty, you get
+  the system rule alone. In neither case is the other half replaced by a
+  placeholder.
+
+The field is read from all three user layers — `--rule`, the project's
+`.opencodereview/rule.json`, and `~/.opencodereview/rule.json`. Layer
+priority is unchanged: the first matching entry still wins, and a
+matching layer still shadows the layers below it.
+
+The limitation to keep in mind: merging reaches the **system** layer
+only. If two of your own entries match the same file, the first one
+still wins outright — `merge_system_rule` does not combine them with
+each other.
+
 ### Glob features
 
 OCR uses [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)
@@ -157,6 +219,11 @@ snapshots, and generated code:
 - `**/test/**/*.lhs`
 - `**/*Spec.lhs`
 - `**/tests/**/*.nim`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 - `**/tests/**/*.R`
 - `**/__snapshots__/**`
 - `**/*.snap`
@@ -229,54 +296,64 @@ text the agent should follow:
 Selected embedded `system_rules.json` patterns are shown below in relative
 matching order:
 
-| Pattern                             | Rule doc                                                                                              |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `**/*.properties`                   | `properties.md` — i18n / configuration files.                                                         |
-| `**/*{mapper,dao}*.xml`             | `mapper_dao_xml.md` — MyBatis-style mapper SQL.                                                       |
-| `**/pom.xml`                        | `pom_xml.md` — Maven dependencies.                                                                    |
-| `**/build.gradle`                   | `build_gradle.md` — Gradle dependencies.                                                              |
-| `**/package.json`                   | `package_json.md` — NPM dependencies / scripts.                                                       |
-| `**/Cargo.toml`                     | `cargo_toml.md` — Rust manifest.                                                                      |
-| `**/composer.json`                  | `composer_json.md` — Composer dependencies, autoloading, scripts, plugins, and package configuration. |
-| `**/*.{json,json5}`                 | `json.md` — generic JSON (also matches `.json5`).                                                     |
-| `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md` — GitHub Actions workflow YAML.                                                 |
-| `.github/**/*.{yaml,yml}`           | `github_config.md` — other `.github` config YAML.                                                     |
-| `**/*.{yaml,yml}`                   | `yaml.md`                                                                                             |
-| `**/*.java`                         | `java.md`                                                                                             |
-| `**/*.go`                           | `go.md` — Go source.                                                                                  |
-| `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling).                                  |
-| `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — Handlebars and Mustache templates.                                         |
-| `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                                       |
-| `**/*.astro`                        | `astro.md` — Astro components and islands.                                                            |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                                    |
-| `**/*.{kt,kts}`                     | `kotlin.md`                                                                                           |
-| `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — F# implementation, signature, and script files.                                         |
-| `**/*.rs`                           | `rust.md`                                                                                             |
-| `**/*.R`                            | `r.md`                                                                                                |
-| `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                              |
-| `**/*.c`                            | `c.md`                                                                                                |
-| `**/*.{py,pyi,ipynb}`               | `python.md` — Python source.                                                                          |
-| `**/*.{php,phtml}`                  | `php.md` — PHP source and PHP templates.                                                              |
-| `**/*.proto`                        | `protobuf.md` — Protocol Buffers wire compatibility.                                                  |
-| `**/*.po`                           | `po.md` — gettext translation source catalogs.                                                        |
-| `**/*.pot`                          | `pot.md` — gettext template files.                                                                    |
-| `**/*.{graphql,gql}`                | `graphql.md` — GraphQL schema and operations.                                                         |
-| `**/*.prisma`                       | `prisma.md` — Prisma schema.                                                                          |
-| `**/*.jl`                           | `julia.md` — Julia source.                                                                            |
-| `**/*.{tf,hcl,tfvars}`              | `terraform.md` — Terraform / HCL.                                                                     |
-| `**/*.bicep`                        | `bicep.md` — Bicep (Azure) templates.                                                                 |
-| `**/*.elm`                          | `elm.md` - Elm source.                                                                                |
-| `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — Jsonnet configuration templates and libraries.                                         |
-| `**/*.thrift`                       | `thrift.md` — Apache Thrift IDL wire compatibility.                                                   |
-| `**/*.capnp`                        | `capnp.md` — Cap'n Proto schema wire compatibility.                                                   |
-| `**/*.{v,sv,vh}`                    | `verilog.md` — Verilog and SystemVerilog RTL.                                                         |
-| `**/*.{vhd,vhdl}`                   | `vhdl.md` — VHDL RTL.                                                                                 |
-| `**/*.m`                            | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files))                      |
-| `**/*.mm`                           | `objc.md` — Objective-C++ source.                                                                     |
-| `**/*.sol`                          | `solidity.md` — Solidity smart contracts.                                                             |
-| `**/*.vy`                           | `vyper.md` — Vyper smart contracts.                                                                   |
-| `**/*.rego`                         | `rego.md` — Rego policy (OPA).                                                                        |
-| _(fallback)_                        | `default.md`                                                                                          |
+| Pattern                                         | Rule doc                                                                                              |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `**/*.properties`                               | `properties.md` — i18n / configuration files.                                                         |
+| `**/*{mapper,dao}*.xml`                         | `mapper_dao_xml.md` — MyBatis-style mapper SQL.                                                       |
+| `**/pom.xml`                                    | `pom_xml.md` — Maven dependencies.                                                                    |
+| `**/build.gradle`                               | `build_gradle.md` — Gradle dependencies.                                                              |
+| `**/package.json`                               | `package_json.md` — NPM dependencies / scripts.                                                       |
+| `**/Cargo.toml`                                 | `cargo_toml.md` — Rust manifest.                                                                      |
+| `**/composer.json`                              | `composer_json.md` — Composer dependencies, autoloading, scripts, plugins, and package configuration. |
+| `**/*.{json,json5,jsonc}`                       | `json.md` — generic JSON (also matches `.json5` and `.jsonc`). |
+| `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md` — GitHub Actions workflow YAML.                                                 |
+| `.github/**/*.{yaml,yml}`                       | `github_config.md` — other `.github` config YAML.                                                     |
+| `**/*.{yaml,yml}`                               | `yaml.md`                                                                                             |
+| `**/*.java`                                     | `java.md`                                                                                             |
+| `**/*.go`                                       | `go.md` — Go source.                                                                                  |
+| `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling).                                  |
+| `**/*.{hbs,mustache}`                           | `handlebars_mustache.md` — Handlebars and Mustache templates.                                         |
+| `**/*.{jinja2,j2}`                              | `jinja.md` — Jinja templates                                                                          |
+| `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md` — EJS, Liquid and Nunjucks templates (SSTI / XSS / escaping). |
+| `**/*.{haml,slim}`                              | `haml_slim.md` — HAML and Slim templates (SSTI / XSS / escaping / indentation semantics). |
+| `**/*.erb`                                      | `erb.md` — ERB templates (SSTI / XSS / escaping / whitespace and output structure). |
+| `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                                       |
+| `**/*.astro`                                    | `astro.md` — Astro components and islands.                                                            |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                                    |
+| `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                           |
+| `**/*.scala`                                    | `scala.md` |
+| `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# implementation, signature, and script files.                                         |
+| `**/*.cs`                                       | `csharp.md` — C# source files. |
+| `**/*.rs`                                       | `rust.md`                                                                                             |
+| `**/*.R`                                        | `r.md`                                                                                                |
+| `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                              |
+| `**/*.c`                                        | `c.md`                                                                                                |
+| `**/*.{py,pyi,ipynb}`                           | `python.md` — Python source.                                                                          |
+| `**/*.{php,phtml}`                              | `php.md` — PHP source and PHP templates.                                                              |
+| `**/*.proto`                                    | `protobuf.md` — Protocol Buffers wire compatibility.                                                  |
+| `**/*.po`                                       | `po.md` — gettext translation source catalogs.                                                        |
+| `**/*.pot`                                      | `pot.md` — gettext template files.                                                                    |
+| `**/*.{graphql,gql}`                            | `graphql.md` — GraphQL schema and operations.                                                         |
+| `**/*.prisma`                                   | `prisma.md` — Prisma schema.                                                                          |
+| `**/*.jl`                                       | `julia.md` — Julia source.                                                                            |
+| `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                     |
+| `**/*.bicep`                                    | `bicep.md` — Bicep (Azure) templates.                                                                 |
+| `**/*.nu`                                       | `nushell.md` — Nushell scripts.                                                                       |
+| `**/*.elm`                                      | `elm.md` - Elm source.                                                                                |
+| `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md` — Jsonnet configuration templates and libraries.                                         |
+| `**/*.thrift`                                   | `thrift.md` — Apache Thrift IDL wire compatibility.                                                   |
+| `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md` — Starlark and Bazel build, macro, and rule design.                                     |
+| `**/*.capnp`                                    | `capnp.md` — Cap'n Proto schema wire compatibility.                                                   |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL, and Metal shaders.                                                    |
+| `**/*.{v,sv,vh}`                                | `verilog.md` — Verilog and SystemVerilog RTL.                                                         |
+| `**/*.{vhd,vhdl}`                               | `vhdl.md` — VHDL RTL.                                                                                 |
+| `**/*.m`                                        | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files))                      |
+| `**/*.mm`                                       | `objc.md` — Objective-C++ source.                                                                     |
+| `**/*.sol`                                      | `solidity.md` — Solidity smart contracts.                                                             |
+| `**/*.vy`                                       | `vyper.md` — Vyper smart contracts.                                                                   |
+| `**/*.rego`                                     | `rego.md` — Rego policy (OPA).                                                                        |
+| `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell scripts, modules, and data/manifest files.                               |
+| _(fallback)_                                    | `default.md`                                                                                          |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
 plan and main task prompts.
@@ -379,6 +456,35 @@ inherits them:
   ]
 }
 ```
+
+### Global security rules on top of the built-in language rules
+
+A catch-all user rule **replaces** the built-in per-language rules by
+default, so adding one entry for `**/*` would quietly drop `java.md`,
+`python.md` and the rest everywhere. Set `merge_system_rule` to keep
+both:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+Save it at `~/.opencodereview/rule.json` to apply it to every repo, or
+in `<repo>/.opencodereview/rule.json` to apply it to one. Because the
+system half is resolved per file, each language still gets its own
+built-in rules alongside yours — no need to enumerate extensions.
+
+The global file is the **lowest** of the three user layers. If `--rule`
+or the project's `.opencodereview/rule.json` has an entry that matches
+the same file, that entry wins and the global one is never reached, so
+put the catch-all rule in only one place.
 
 ## See Also
 

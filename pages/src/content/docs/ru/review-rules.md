@@ -61,6 +61,69 @@ OCR разрешает правила через **четырёхуровнев�
   Первый `path`, чей glob совпадает с файлом, определяет промпт, который OCR
   отправляет модели для этого файла.
 
+Каждая запись в `rules` принимает ещё одно необязательное поле:
+
+- `merge_system_rule` — необязательно, по умолчанию `false`. При `false`
+  (по умолчанию) совпавшая запись **заменяет** встроенное системное правило
+  для этого файла. При `true` совпавшее системное правило сохраняется, а
+  пользовательское правило **объединяется** с ним.
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+С этой записью `ocr rules check src/main/java/com/example/UserService.java`
+сообщает обе половины:
+
+```
+$ ocr rules check src/main/java/com/example/UserService.java
+Source: Project (.opencodereview/rule.json)
+Pattern: **/*
+Rule:
+────────────────────────────────────────
+## System-Specific Rules (Mandatory)
+
+…contents of java.md…
+
+---
+
+## User-Specific Rules (Mandatory)
+
+Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.
+────────────────────────────────────────
+```
+
+О том, как собирается это объединение, стоит знать две вещи:
+
+- **Системная половина разрешается для каждого файла**, а не один раз за
+  запуск. Запись выше — catch-all, однако файл `.java` получает `java.md`,
+  файл `.py` получает `python.md`, а расширение, которое OCR не узнаёт,
+  откатывается к `default.md`. Таким образом одна запись добавляет ваше
+  правило поверх правильных языковых правил везде, без необходимости
+  перечислять расширения.
+- Любая из половин может быть пустой. Если для файла системный слой
+  разрешается в пустоту, вы получаете только своё правило; если текст
+  вашего правила пуст, вы получаете только системное правило. Ни в одном
+  из случаев вторая половина не заменяется пустотой.
+
+Поле читается из всех трёх пользовательских слоёв — `--rule`, проектного
+`.opencodereview/rule.json` и `~/.opencodereview/rule.json`. Приоритет
+слоёв не меняется: первая совпавшая запись по-прежнему выигрывает, а
+совпавший слой по-прежнему затеняет слои ниже.
+
+Ограничение, о котором стоит помнить: объединение достигает **только
+системного** слоя. Если два ваших собственных правила совпадают с одним
+файлом, первое по-прежнему выигрывает целиком — `merge_system_rule` не
+объединяет их друг с другом.
+
 ### Возможности glob
 
 OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)
@@ -154,6 +217,11 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/test/**/*.lhs`
 - `**/*Spec.lhs`
 - `**/tests/**/*.nim`
+- `**/tests/**/*.nu`
+- `**/test/**/*.nu`
+- `**/*_test.nu`
+- `**/test_*.nu`
+- `**/test-*.nu`
 - `**/tests/**/*.R`
 - `**/__snapshots__/**`
 - `**/*.snap`
@@ -227,54 +295,64 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 Выбранные шаблоны встроенного `system_rules.json` показаны ниже в относительном
 порядке сопоставления:
 
-| Шаблон                              | Документ правила                                                                                 |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `**/*.properties`                   | `properties.md` — i18n / файлы конфигурации.                                                     |
-| `**/*{mapper,dao}*.xml`             | `mapper_dao_xml.md` — MyBatis-стиль mapper SQL.                                                  |
-| `**/pom.xml`                        | `pom_xml.md` — зависимости Maven.                                                                |
-| `**/build.gradle`                   | `build_gradle.md` — зависимости Gradle.                                                          |
-| `**/package.json`                   | `package_json.md` — зависимости / скрипты NPM.                                                   |
-| `**/Cargo.toml`                     | `cargo_toml.md` — манифест Rust.                                                                 |
-| `**/composer.json`                  | `composer_json.md` — зависимости Composer, автозагрузка, скрипты, плагины и конфигурация пакета. |
-| `**/*.{json,json5}`                 | `json.md` — обычный JSON (также совпадает `.json5`).                                             |
-| `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md` — YAML workflow GitHub Actions.                                            |
-| `.github/**/*.{yaml,yml}`           | `github_config.md` — прочий конфигурационный YAML `.github`.                                     |
-| `**/*.{yaml,yml}`                   | `yaml.md`                                                                                        |
-| `**/*.java`                         | `java.md`                                                                                        |
-| `**/*.go`                           | `go.md` — исходный код Go.                                                                       |
-| `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — шаблоны FreeMarker (SSTI / XSS / обработка null).                              |
-| `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — шаблоны Handlebars и Mustache.                                        |
-| `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                                  |
-| `**/*.astro`                        | `astro.md` — компоненты и islands Astro.                                                         |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                               |
-| `**/*.{kt,kts}`                     | `kotlin.md`                                                                                      |
-| `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — файлы реализации, сигнатур и скриптов F#.                                          |
-| `**/*.rs`                           | `rust.md`                                                                                        |
-| `**/*.R`                            | `r.md`                                                                                           |
-| `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                         |
-| `**/*.c`                            | `c.md`                                                                                           |
-| `**/*.{py,pyi,ipynb}`               | `python.md` — исходный код Python.                                                               |
-| `**/*.{php,phtml}`                  | `php.md` — исходный код PHP и шаблоны PHP.                                                       |
-| `**/*.proto`                        | `protobuf.md` — совместимость Protocol Buffers на уровне wire.                                   |
-| `**/*.po`                           | `po.md` — исходные каталоги переводов gettext.                                                   |
-| `**/*.pot`                          | `pot.md` — файлы шаблонов gettext.                                                               |
-| `**/*.{graphql,gql}`                | `graphql.md` — схема и операции GraphQL.                                                         |
-| `**/*.prisma`                       | `prisma.md` — схема Prisma.                                                                      |
-| `**/*.jl`                           | `julia.md` — исходный код Julia.                                                                 |
-| `**/*.{tf,hcl,tfvars}`              | `terraform.md` — Terraform / HCL.                                                                |
-| `**/*.bicep`                        | `bicep.md` — шаблоны Bicep (Azure).                                                              |
-| `**/*.elm`                          | `elm.md` - исходный код Elm.                                                                     |
-| `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet.                                        |
-| `**/*.thrift`                       | `thrift.md` — совместимость Apache Thrift IDL на уровне wire.                                    |
-| `**/*.capnp`                        | `capnp.md` — совместимость схем Cap'n Proto на уровне wire.                                      |
-| `**/*.{v,sv,vh}`                    | `verilog.md` — RTL на Verilog и SystemVerilog.                                                   |
-| `**/*.{vhd,vhdl}`                   | `vhdl.md` — RTL на VHDL.                                                                         |
-| `**/*.m`                            | `matlab.md` (или `objc.md` через [определение содержимого](#content-sniffing-for-m-files))       |
-| `**/*.mm`                           | `objc.md` — исходный код Objective-C++.                                                          |
-| `**/*.sol`                          | `solidity.md` — смарт-контракты Solidity.                                                        |
-| `**/*.vy`                           | `vyper.md` — смарт-контракты Vyper.                                                              |
-| `**/*.rego`                         | `rego.md` — политики Rego (OPA).                                                                 |
-| _(fallback)_                        | `default.md`                                                                                     |
+| Шаблон                                          | Документ правила                                                                                 |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `**/*.properties`                               | `properties.md` — i18n / файлы конфигурации.                                                     |
+| `**/*{mapper,dao}*.xml`                         | `mapper_dao_xml.md` — MyBatis-стиль mapper SQL.                                                  |
+| `**/pom.xml`                                    | `pom_xml.md` — зависимости Maven.                                                                |
+| `**/build.gradle`                               | `build_gradle.md` — зависимости Gradle.                                                          |
+| `**/package.json`                               | `package_json.md` — зависимости / скрипты NPM.                                                   |
+| `**/Cargo.toml`                                 | `cargo_toml.md` — манифест Rust.                                                                 |
+| `**/composer.json`                              | `composer_json.md` — зависимости Composer, автозагрузка, скрипты, плагины и конфигурация пакета. |
+| `**/*.{json,json5,jsonc}`                       | `json.md` — обычный JSON (также совпадает `.json5` и `.jsonc`). |
+| `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md` — YAML workflow GitHub Actions.                                            |
+| `.github/**/*.{yaml,yml}`                       | `github_config.md` — прочий конфигурационный YAML `.github`.                                     |
+| `**/*.{yaml,yml}`                               | `yaml.md`                                                                                        |
+| `**/*.java`                                     | `java.md`                                                                                        |
+| `**/*.go`                                       | `go.md` — исходный код Go.                                                                       |
+| `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md` — шаблоны FreeMarker (SSTI / XSS / обработка null).                              |
+| `**/*.{hbs,mustache}`                           | `handlebars_mustache.md` — шаблоны Handlebars и Mustache.                                        |
+| `**/*.{jinja2,j2}`                              | `jinja.md` — шаблоны Jinja                                                                       |
+| `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md` — шаблоны EJS, Liquid и Nunjucks (SSTI / XSS / экранирование). |
+| `**/*.{haml,slim}`                              | `haml_slim.md` — шаблоны HAML и Slim (SSTI / XSS / экранирование / семантика отступов). |
+| `**/*.erb`                                      | `erb.md` — шаблоны ERB (SSTI / XSS / экранирование / пробелы и структура вывода). |
+| `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                                  |
+| `**/*.astro`                                    | `astro.md` — компоненты и islands Astro.                                                         |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                               |
+| `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                      |
+| `**/*.scala`                                    | `scala.md` |
+| `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — файлы реализации, сигнатур и скриптов F#.                                          |
+| `**/*.cs`                                       | `csharp.md` — исходные файлы C#. |
+| `**/*.rs`                                       | `rust.md`                                                                                        |
+| `**/*.R`                                        | `r.md`                                                                                           |
+| `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                         |
+| `**/*.c`                                        | `c.md`                                                                                           |
+| `**/*.{py,pyi,ipynb}`                           | `python.md` — исходный код Python.                                                               |
+| `**/*.{php,phtml}`                              | `php.md` — исходный код PHP и шаблоны PHP.                                                       |
+| `**/*.proto`                                    | `protobuf.md` — совместимость Protocol Buffers на уровне wire.                                   |
+| `**/*.po`                                       | `po.md` — исходные каталоги переводов gettext.                                                   |
+| `**/*.pot`                                      | `pot.md` — файлы шаблонов gettext.                                                               |
+| `**/*.{graphql,gql}`                            | `graphql.md` — схема и операции GraphQL.                                                         |
+| `**/*.prisma`                                   | `prisma.md` — схема Prisma.                                                                      |
+| `**/*.jl`                                       | `julia.md` — исходный код Julia.                                                                 |
+| `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                |
+| `**/*.bicep`                                    | `bicep.md` — шаблоны Bicep (Azure).                                                              |
+| `**/*.nu`                                       | `nushell.md` — скрипты Nushell.                                                                  |
+| `**/*.elm`                                      | `elm.md` - исходный код Elm.                                                                     |
+| `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet.                                        |
+| `**/*.thrift`                                   | `thrift.md` — совместимость Apache Thrift IDL на уровне wire.                                    |
+| `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md` — проектирование сборок, макросов и правил Starlark и Bazel.                       |
+| `**/*.capnp`                                    | `capnp.md` — совместимость схем Cap'n Proto на уровне wire.                                      |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - шейдеры GLSL, HLSL, WGSL и Metal.                                                  |
+| `**/*.{v,sv,vh}`                                | `verilog.md` — RTL на Verilog и SystemVerilog.                                                   |
+| `**/*.{vhd,vhdl}`                               | `vhdl.md` — RTL на VHDL.                                                                         |
+| `**/*.m`                                        | `matlab.md` (или `objc.md` через [определение содержимого](#content-sniffing-for-m-files))       |
+| `**/*.mm`                                       | `objc.md` — исходный код Objective-C++.                                                          |
+| `**/*.sol`                                      | `solidity.md` — смарт-контракты Solidity.                                                        |
+| `**/*.vy`                                       | `vyper.md` — смарт-контракты Vyper.                                                              |
+| `**/*.rego`                                     | `rego.md` — политики Rego (OPA).                                                                 |
+| `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — скрипты, модули и файлы данных/манифестов PowerShell.                          |
+| _(fallback)_                                    | `default.md`                                                                                     |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`
 в промптах plan и main task.
@@ -378,6 +456,36 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
   ]
 }
 ```
+
+### Глобальные правила безопасности поверх встроенных языковых правил
+
+Широкое пользовательское правило по умолчанию **заменяет** встроенные
+правила для языка, поэтому одна запись для `**/*` незаметно уберёт
+`java.md`, `python.md` и остальные повсюду. Установите
+`merge_system_rule`, чтобы сохранить и то, и другое:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+Сохраните в `~/.opencodereview/rule.json`, чтобы применить ко всем
+репозиториям, или в `<repo>/.opencodereview/rule.json` — к одному.
+Поскольку системная половина разрешается для каждого файла, каждый язык
+по-прежнему получает свои встроенные правила вдобавок к вашим —
+перечислять расширения не нужно.
+
+Глобальный файл — **самый нижний** из трёх пользовательских слоёв. Если в
+`--rule` или в проектном `.opencodereview/rule.json` есть запись, которая
+совпадает с тем же файлом, она побеждает, а глобальная запись не читается
+вовсе — поэтому размещайте обобщённую запись только в одном месте.
 
 ## Смотрите также
 
