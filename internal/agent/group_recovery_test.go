@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alibaba/open-code-review/internal/llmloop"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -26,7 +26,7 @@ func recoveryTestAgent(t *testing.T) *Agent {
 	return &Agent{
 		args:    Args{CommentCollector: tool.NewCommentCollector()},
 		session: sess,
-		runner:  llmloop.NewRunner(llmloop.Deps{Session: sess, CommentCollector: tool.NewCommentCollector()}),
+		runner:  reviewtask.NewRunner(reviewtask.Deps{Session: sess}),
 	}
 }
 
