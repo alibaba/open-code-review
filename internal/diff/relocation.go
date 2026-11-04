@@ -61,6 +61,7 @@ func ReLocateComment(
 
 	startTime := time.Now()
 	_, llmSpan := telemetry.StartLLMSpan(ctx, modelName)
+	telemetry.RecordLLMInput(llmSpan, "", modelName, messages)
 	resp, err := client.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     modelName,
 		Messages:  messages,
@@ -78,6 +79,7 @@ func ReLocateComment(
 		totalTokens = resp.Usage.TotalTokens
 	}
 	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	telemetry.RecordLLMOutput(llmSpan, resp.VisibleContent(), nil, resp.ReasoningContent(), resp.Usage)
 	llmSpan.End()
 
 	code := extractCodeBlock(resp.Content())

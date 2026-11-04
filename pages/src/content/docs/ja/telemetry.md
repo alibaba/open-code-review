@@ -147,9 +147,17 @@ OCR は OTel meter を通じて数値 metric を記録します——カウン�
 
 ## コンテンツログ
 
-テレメトリは LLM トラフィックの**形状**（カウント、所要時間、ステータス）をエクスポートしますが、実際の prompt や
-レスポンスは**決して**エクスポートしません。OCR は LLM のメッセージ内容を span や event に付加しようとはしません——プロセスを離れるデータは上記に
+デフォルトでは、テレメトリは LLM トラフィックの**形状**（カウント、所要時間、ステータス）をエクスポートしますが、実際の prompt や
+レスポンスは**決して**エクスポートしません——プロセスを離れるデータは上記に
 記載された metric / event schema に限られ、それ以外は一切ありません。
+
+`OCR_TRACE_CONTENT=1` を設定すると、span レベルのコンテンツキャプチャにオプトインします。
+prompt、補完、推論内容、ツール呼び出しの引数と結果、および使用状況の詳細が
+`langfuse.observation.*` / `gen_ai.*` 属性として `llm.request` と `tool.execute.*`
+span に付加され、**設定済みの collector にエクスポートされます**。キャプチャされる
+内容にはソースコード、diff、その他レビューコンテキストに存在するもの——機密情報を含む可能性のあるもの——
+が含まれ得るため、セルフホストの Langfuse など信頼できる collector でのみ有効にし、
+生成されるトレースは機密データとして扱ってください。
 
 `content_logging` の config key（および `OCR_CONTENT_LOGGING=1` の環境上書き）は設定レイヤーに接続されていますが、
 現時点では prompt 内容を発出するいかなるコードパスも**制御しません**。このフラグは予約済みとみなしてください。
@@ -270,7 +278,7 @@ OCR は**すべて**をエクスポートします。サンプリングの設定
 | 何もエクスポートされない | `OCR_ENABLE_TELEMETRY` / `telemetry.enabled` が未設定。デフォルトは**無効**。 |
 | OTLP がローカルでは動くが本番で失敗する | OCR は現在 OTLP/gRPC のみを実装している——`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`（または `http/json`）は受理されるが接続されておらず、切り替えても効果はない。endpoint と、collector が gRPC をリッスンしているかを確認すること。 |
 | span は表示されるが metric がない | 一部の collector はデフォルトで traces pipeline のみを有効にする。設定に `metrics` pipeline を追加すること。 |
-| span に prompt がない | OCR は prompt の内容をテレメトリに付加することは決してない——[コンテンツログ](#content-logging)を参照。代わりに[セッションビューア](../viewer/)を使ってトランスクリプトを検査すること。 |
+| span に prompt がない | prompt の内容は `OCR_TRACE_CONTENT=1` でオプトインする必要がある——[コンテンツログ](#content-logging)を参照。代わりに[セッションビューア](../viewer/)を使ってトランスクリプトを検査すること。 |
 
 ## 関連項目
 
