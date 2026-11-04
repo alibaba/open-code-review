@@ -37,7 +37,6 @@ var providerDirIgnoreDirs = []string{
 	".cachefile/",
 	"_packages/",
 	"rpm/",
-	"pkgs/",
 }
 
 // Mode defines how the diff is retrieved.
@@ -432,8 +431,15 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 
 // partitionDiffs keeps diffs filtered by built-in directory rules available
 // for reporting while preserving the review input as the Included slice.
+//
+// In workspace mode, ignored untracked files are already filtered out.
+// Applying .gitignore here would incorrectly drop tracked changes.
 func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
-	patterns := p.loadGitignorePatterns()
+	var patterns []string
+	honorGitignore := p.mode != ModeWorkspace
+	if honorGitignore {
+		patterns = p.loadGitignorePatterns()
+	}
 	result := DiffSet{
 		Included: make([]model.Diff, 0, len(diffs)),
 		Excluded: make([]model.Diff, 0),
@@ -446,7 +452,7 @@ func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 		if isProviderDirExcluded(path) {
 			result.excludedAt = append(result.excludedAt, len(result.Included)+len(result.Excluded))
 			result.Excluded = append(result.Excluded, d)
-		} else if !p.isPathExcluded(path, patterns) {
+		} else if !honorGitignore || !p.isPathExcluded(path, patterns) {
 			result.Included = append(result.Included, d)
 		}
 	}
@@ -703,7 +709,13 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 }
 
 func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
-	out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")
+	// -z, and no trimming of the records it produces. Without it git quotes
+	// any pathname holding a tab, a newline, a quote or a backslash, so the
+	// name arrives escaped and matches nothing on disk; a newline in a name
+	// also splits one file into two entries. Trimming then removes leading and
+	// trailing spaces, which are filename bytes. Each of those drops an
+	// untracked file out of the review with no error.
+	out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "ls-files", "-z", "--others", "--exclude-standard")
 	if err != nil {
 		return nil, gitFailure("git ls-files", stderr, err)
 	}
@@ -712,13 +724,12 @@ func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
 	}
 	patterns := p.loadGitignorePatterns()
 	var files []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	for _, name := range strings.Split(strings.TrimRight(out, "\x00"), "\x00") {
+		if name == "" {
 			continue
 		}
-		if !p.isPathExcluded(line, patterns) {
-			files = append(files, line)
+		if !p.isPathExcluded(name, patterns) {
+			files = append(files, name)
 		}
 	}
 	return files, nil

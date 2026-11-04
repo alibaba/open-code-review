@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -295,6 +296,9 @@ func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
 		AWSRegion:    "us-west-2",
 		AWSProfile:   "example-profile",
 		MaxInFlight:  4,
+		unknownJSONFields: map[string]json.RawMessage{
+			"future_provider": json.RawMessage(`{"value":"preserve-me"}`),
+		},
 	}
 
 	rv := reflect.ValueOf(orig)
@@ -1946,6 +1950,11 @@ func TestApiKeyStepCanConfirm(t *testing.T) {
 			name:   "official env var set",
 			env:    "sk-from-env",
 			cfg:    &Config{Provider: "deepseek", Providers: map[string]ProviderEntry{"deepseek": {}}},
+			wantOK: true,
+		},
+		{
+			name:   "official external auth",
+			cfg:    &Config{Provider: "chatgpt", Providers: map[string]ProviderEntry{"chatgpt": {}}},
 			wantOK: true,
 		},
 		{

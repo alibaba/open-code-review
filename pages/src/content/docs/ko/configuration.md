@@ -36,14 +36,16 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 ### 내장 프로바이더 {#built-in-providers}
 
-다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 선택한 뒤 API 키만 채우면 됩니다. `providers.<name>.api_key`가 비어 있으면 OCR은 해당 환경 변수로 대체합니다.
+다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 대부분은 API 키가 필요하며, `providers.<name>.api_key`가 비어 있으면 OCR은 해당 환경 변수로 대체합니다. `chatgpt`는 대신 `ocr auth login`이 만든 ChatGPT 자격 증명을 사용합니다.
 
 | 이름 | 프로토콜 | Base URL | API 키 환경 변수 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region`에서 결정 | — (AWS 자격 증명 체인) |
+| `chatgpt` | openai-responses | `https://api.openai.com/v1` | 해당 없음 (Sign in with ChatGPT) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
@@ -64,9 +66,33 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
+내장 프로바이더의 모델 목록은 `ocr config model`에서 선택할 때 제안하는 목록이며
+`--model`을 제한하지 않습니다. 지정한 모델이 내장 목록과
+`providers.<name>.models` 모두에 없으면 OCR은 stderr에 경고를 출력합니다.
+모델의 유효성은 요청을 보낼 때 프로바이더가 확인합니다. 사용자 정의 프로바이더에는
+기존 `--model` 검증 규칙이 적용됩니다.
+
+## ChatGPT 로그인 미리보기
+
+이 미리보기는 공개 Responses API용 내장 `chatgpt` provider를 추가합니다. API 키 환경 변수는 없습니다. 로그인, 동의 및 사용 제한은 [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.
+
+`ocr config set`으로 provider와 선택적 요청 필드를 설정합니다. `ocr llm models`에서 모델을 선택하거나 모델 slug를 직접 지정할 수 있습니다.
+
+```bash
+ocr auth login --provider chatgpt
+ocr config set provider chatgpt
+ocr config set providers.chatgpt.model <model-slug>
+ocr config set providers.chatgpt.extra_body '{"reasoning":{"effort":"low"}}'
+ocr llm test
+```
+
+계정별 목록에 없는 모델도 명시하면 전송됩니다. `extra_body`는 `reasoning`, `text`, `prompt_cache_key`만 받으며 엔드포인트, 프로토콜, 자격 증명 재정의는 거부됩니다.
+
 ### 내장 프로바이더의 Base URL 재정의 {#overriding-a-built-in-provider-s-base-url}
 
 모든 내장 프로바이더에는 미리 설정된 Base URL이 있습니다(위 표 참고). 내장 프로바이더를 다른 엔드포인트로 보내려면 `providers.<name>.url`을 설정합니다(예: 자체 호스팅 LiteLLM 게이트웨이는 미리 설정된 기본값 `http://localhost:4000/v1`에 있는 경우가 드뭅니다):
+
+`chatgpt` 미리보기는 예외입니다. 공개 엔드포인트는 고정되어 있으며 URL 재정의를 거부합니다.
 
 ```bash
 ocr config set provider                   litellm
@@ -79,7 +105,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock {#aws-bedrock}
 
-`bedrock`은 `anthropic`과 같은 Messages API를 사용하지만, 요청에 API 키를 싣는 대신 표준 AWS 자격 증명 체인으로 SigV4 서명을 하며 호스트는 리전이 결정합니다. 설정할 `api_key`가 없고, 서명을 대신할 키도 받지 않습니다:
+`bedrock`은 기본 `anthropic-bedrock` 프로토콜에서 `anthropic`과 같은 Messages API를 사용하지만, 요청에 API 키를 싣는 대신 표준 AWS 자격 증명 체인으로 SigV4 서명을 하며 호스트는 리전이 결정합니다. 설정할 `api_key`가 없고, 서명을 대신할 키도 받지 않습니다:
 
 ```bash
 ocr config set provider                      bedrock
@@ -87,6 +113,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+OpenAI 호환 게이트웨이에 연결하려고 `providers.bedrock.protocol`을 `openai`로 설정했다면, `providers.bedrock.url`에 게이트웨이 URL을 설정하고 `providers.bedrock.api_key` 또는 `providers.bedrock.api_key_cmd`로 게이트웨이의 API 키를 제공하세요. `ocr config provider`에서 모델을 변경해도 저장된 API 키는 유지됩니다.
 
 | 필드 | 의미 |
 |---|---|
@@ -97,7 +125,7 @@ ocr config set providers.bedrock.aws_profile example-profile
 
 모델 식별자는 계정 **과** 리전 단위로 정해지므로 OCR이 제공하는 목록은 닫힌 집합이 아니라 출발점입니다. 목록에 없더라도 계정에서 유효한 추론 프로필 ID나 애플리케이션 추론 프로필 ARN이면 그대로 받습니다. 계정에서 무엇을 쓸 수 있는지는 `aws bedrock list-inference-profiles --region <region>`으로 확인하세요. 최신 계열에서는 `-v1:0` 같은 버전 접미사가 유효하지 않습니다.
 
-bedrock에는 설정된 URL이 없고 호스트를 리전이 결정하므로, `ocr llm test`는 URL 대신 리전과 프로필을 표시합니다:
+기본 `anthropic-bedrock` 프로토콜에서는 리전이 호스트를 결정하므로, `ocr llm test`는 URL 대신 리전과 프로필을 표시합니다:
 
 ```
 Source: provider:bedrock
@@ -110,6 +138,8 @@ Model:  claude-sonnet-5
 Bedrock은 `llm.protocol`이나 `OCR_LLM_PROTOCOL`로는 사용할 수 **없습니다**. 이 블록은 URL 하나와 토큰 하나를 기술하는 구조라 리전이나 프로필을 담을 자리가 없고, bedrock은 이 블록이 담는 두 값 중 어느 것도 쓰지 않습니다. 그래서 이 조합은 받아들인 뒤 무시하는 대신 거부합니다.
 
 ### 커스텀 프로바이더 {#custom-providers}
+
+`mimo-v2.6-flash`, `foo.api_key`처럼 점이 포함된 이름을 사용할 수 있습니다. 새로운 이름에 점이 있다면 필드를 설정하기 전에 `ocr config set provider <name>`으로 생성하고 선택하세요. 이 명령은 현재 프로바이더를 변경합니다. 기존 항목은 선택하지 않고도 `providers.<name>.<field>` 또는 `custom_providers.<name>.<field>`로 수정할 수 있습니다. 이름의 처음이나 끝에 점이 있거나, 점이 연속되거나, 구분된 부분이 비어 있거나 공백으로만 구성된 이름은 허용되지 않습니다. 점이 없는 이름은 필드 설정 시 계속 자동으로 생성됩니다.
 
 위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock` 중 하나):
 
@@ -157,6 +187,16 @@ Ollama는 API 키를 무시하지만 커스텀 프로바이더에는 비어 있�
 
 ### 타임아웃 {#timeouts}
 
+태스크 타임아웃과 개별 요청 타임아웃은 서로 독립적입니다:
+
+- `ocr review --timeout`과 `ocr scan --timeout`은 동시 실행 태스크의 시간 예산을
+  **분** 단위로 설정합니다(기본값 **15**, `0`이면 태스크 기한을 비활성화).
+  이 예산에는 태스크의 모든 LLM 호출, 도구 실행, 재시도 대기가 포함됩니다.
+  review에서는 effort의 리뷰 라운드 수만큼 예산을 늘립니다.
+- 개별 HTTP 요청 타임아웃은 **초** 단위입니다(기본값 **300**).
+  `--timeout`을 늘려도 요청 타임아웃은 바뀌지 않으며, 태스크 기한을 비활성화해도
+  요청 타임아웃은 비활성화되지 않습니다. 태스크의 남은 예산이 더 짧으면 그 예산이 우선합니다.
+
 LLM 요청마다 HTTP 타임아웃이 있으며 기본값은 **300초**입니다. 느린 로컬 모델(또는 큰 파일)에는 더 필요할 수 있습니다. 범위가 좁은 것부터 세 가지 설정이 있습니다:
 
 - `providers.<name>.timeout_sec` / `custom_providers.<name>.timeout_sec` — 프로바이더별, 초 단위.
@@ -172,6 +212,23 @@ LLM 요청마다 HTTP 타임아웃이 있으며 기본값은 **300초**입니다
   }
 }
 ```
+
+예를 들어 `OCR_LLM_TIMEOUT=900 ocr review --timeout 30`은 태스크 예산 내에서
+개별 요청을 최대 15분까지 허용합니다. 이 환경 변수나 `timeout_sec`를 설정하지 않으면
+`--timeout 30`을 지정해도 요청은 5분 후에 타임아웃됩니다.
+
+개별 요청 기한이 만료되면 요청을 자동으로 다시 보내지 않고 호출을 종료합니다.
+응답 본문이나 스트림을 읽는 도중 타임아웃된 경우도 마찬가지입니다. 지속적으로 느린
+요청은 같은 제한 시간으로 재시도하기보다 요청 타임아웃을 늘려야 합니다.
+기존 SDK 재시도 정책은 바뀌지 않습니다. 재시도 가능한 연결 및 HTTP 오류는 백오프와
+프로바이더의 `Retry-After` 지시에 따라 최대 5회 재시도합니다. SDK의 각 시도 기한은
+재시도 대기 시간에도 적용됩니다. 취소되거나 태스크 기한이 만료되면 요청과 재시도 대기가
+모두 중단됩니다.
+
+진단 메시지는 `LLM request timeout`(`OCR_LLM_TIMEOUT` 또는 프로바이더의 `timeout_sec` 확인)과
+`caller deadline exceeded`를 구분합니다. 후자는 호출한 작업의 컨텍스트 기한이 만료되었다는
+뜻입니다. review/scan 태스크 기한이 만료된 경우에는 `--timeout`을 확인하세요.
+백그라운드 메모리 압축이나 `ocr llm test` 같은 다른 작업에는 각각 독립적인 기한이 있습니다.
 
 ### 명령으로 API 키 가져오기 {#api-key-from-a-command}
 

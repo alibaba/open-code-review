@@ -63,10 +63,10 @@ type compressionState struct {
 	pendingJob *compressionJob
 }
 
-// messageTokens counts visible text plus the Native replay payload that
-// ExtractText() does not see.
+// messageTokens counts visible text plus the Native replay payload and
+// tool calls that ExtractText() does not see.
 func messageTokens(m llm.Message) int {
-	return llm.CountTokens(m.ExtractText()) + m.Native.EstimatedTokens()
+	return llm.CountTokens(m.ExtractText()) + m.EstimatedTokens()
 }
 
 // CountMessagesTokens returns the rough token count of msgs by summing the

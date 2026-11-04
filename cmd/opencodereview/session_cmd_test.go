@@ -236,6 +236,34 @@ func TestRunSessionComments_JSON(t *testing.T) {
 	}
 }
 
+func TestRunSessionShow_JSONNoItemsIsArray(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	// A run that ends before any file is reviewed records no items.
+	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
+		ReviewMode: session.ReviewModeCommit,
+		DiffCommit: "abc123",
+	})
+	sh.Finalize()
+
+	got := captureStdout(t, func() {
+		if err := runSessionShowCompat([]string{"--repo", repoDir, "--json", sh.SessionID}); err != nil {
+			t.Fatalf("runSessionShow: %v", err)
+		}
+	})
+
+	// json.Unmarshal accepts null into a slice, so only the raw text pins the wire shape.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(got), &raw); err != nil {
+		t.Fatalf("unmarshal: %v (out=%q)", err, got)
+	}
+	if string(raw["items"]) != "[]" {
+		t.Errorf("items = %s, want []", raw["items"])
+	}
+}
+
 func TestRunSessionComments_JSONEmptyIsArray(t *testing.T) {
 	tmpHome := t.TempDir()
 	setTestHome(t, tmpHome)
@@ -498,6 +526,49 @@ func TestRunSessionCompare_JSONShape(t *testing.T) {
 	}
 	if len(decoded.NotReviewed) != 0 {
 		t.Fatalf("not_reviewed = %+v", decoded.NotReviewed)
+	}
+}
+
+func TestRunSessionCompare_RenamedFileFindingPersists(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	opts := session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "abc123"}
+
+	before := newCompareSession(t, repoDir, opts, []model.LlmComment{
+		{Path: "old/name.go", StartLine: 7, EndLine: 7, Category: "bug", ExistingCode: "x := 1", Content: "still here"},
+	})
+	before.Finalize()
+	after := newCompareSession(t, repoDir, opts, []model.LlmComment{
+		{Path: "new/name.go", StartLine: 19, EndLine: 19, Category: "bug", ExistingCode: "x := 1", Content: "still here"},
+	})
+	after.SetFinalManifest(&session.RunManifest{
+		SchemaVersion: session.ManifestSchemaVersion,
+		RunID:         after.SessionID,
+		Operation:     session.OperationReview,
+		TerminalState: session.StateComplete,
+		Coverage: session.Coverage{
+			Selected:  []session.CoverageItem{{ItemID: "renamed", Path: "new/name.go", OldPath: "old/name.go"}},
+			Completed: []session.CoverageItem{{ItemID: "renamed", Path: "new/name.go", OldPath: "old/name.go"}},
+		},
+	})
+	after.Finalize()
+
+	useCompareRepo(t, repoDir, true)
+	out := captureStdout(t, func() {
+		if err := runSessionCompare(before.SessionID, after.SessionID); err != nil {
+			t.Fatalf("runSessionCompare: %v", err)
+		}
+	})
+
+	var decoded session.CompareResult
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("unmarshal: %v (out=%q)", err, out)
+	}
+	if len(decoded.New) != 0 || len(decoded.Resolved) != 0 || len(decoded.NotReviewed) != 0 {
+		t.Fatalf("unexpected buckets: %+v", decoded)
+	}
+	if len(decoded.Persisting) != 1 || decoded.Persisting[0].Path != "new/name.go" || decoded.Persisting[0].StartLine != 19 {
+		t.Fatalf("persisting = %+v, want the after copy at new/name.go:19", decoded.Persisting)
 	}
 }
 

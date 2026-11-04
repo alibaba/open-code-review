@@ -12,6 +12,11 @@ export const ko: TranslationKeys = {
   'navbar.blog': '블로그',
   'navbar.getStarted': '시작하기',
 
+  'providers.title': '주요 모델 제공업체 기본 지원',
+  'providers.description': 'API 키만 설정하면 리뷰를 시작할 수 있습니다. 주요 프로토콜과 호환되는 프라이빗 모델 서비스도 연결할 수 있습니다.',
+  'providers.listLabel': '지원하는 모델 브랜드',
+  'providers.explore': '지원하는 제공업체 보기',
+
   // Hero
   'hero.title': 'AI 코드 리뷰\n수백만 건의 실제 작업으로 검증되었습니다',
   'hero.description': 'Open Code Review는 Alibaba에서 실전 검증된 코드 리뷰 Agent를 그대로 워크플로에 옮겨 놓습니다. 원하는 LLM을 연결하고, 데이터는 외부로 나가지 않으며, 개발자가 실제로 반영하는 리뷰 코멘트를 받습니다.',
@@ -297,8 +302,10 @@ export const ko: TranslationKeys = {
   'docs.sidebar.claudeCode': 'Command (Claude Code)',
   'docs.sidebar.delegate': '위임 모드',
   'docs.sidebar.cicd': 'CI/CD',
+  'docs.sidebar.acp': 'ACP',
   'docs.sidebar.contributing': '기여하기',
   'docs.sidebar.faq': 'FAQ',
+  'docs.sidebar.chatgptPreview': 'ChatGPT 로그인 미리보기',
   'docs.search.placeholder': '검색...',
   'docs.search.noResults': '검색 결과가 없습니다',
   'docs.search.hint.select': '선택',
