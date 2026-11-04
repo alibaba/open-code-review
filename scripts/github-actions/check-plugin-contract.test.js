@@ -39,6 +39,7 @@ const {
   resolveDeclaredPath,
   checkPluginDeclarations,
   pluginEntries,
+  repoAbsPath,
   listEntries,
   readFileOrNull,
   runLinksCheck,
@@ -673,6 +674,40 @@ function testReadFileOrNullSizeCapIsOptional() {
   });
 }
 
+function testRepoAbsPathRefusesEscapes() {
+  const root = path.resolve(path.join(os.tmpdir(), "ocr-confine-root"));
+  assert.strictEqual(repoAbsPath(root, "docs/x.md"), path.join(root, "docs/x.md"));
+  assert.strictEqual(repoAbsPath(root, "./docs/x.md"), path.join(root, "docs/x.md"));
+  // The root itself is in the root.
+  assert.strictEqual(repoAbsPath(root, ""), root);
+  // `..` is what path.join normalises away, so it is the escape that has to be
+  // refused rather than followed.
+  assert.strictEqual(repoAbsPath(root, "../sibling.md"), null);
+  assert.strictEqual(repoAbsPath(root, "docs/../../sibling.md"), null);
+  assert.strictEqual(repoAbsPath(root, ".."), null);
+  // A leading slash joins INSIDE the root, which is path.join's behaviour and
+  // not the path.resolve reset that a naive confinement would introduce.
+  assert.strictEqual(repoAbsPath(root, "/docs/x.md"), path.join(root, "docs/x.md"));
+}
+
+function testOutOfRepoLinkPathsAreNotProbed() {
+  withTempDir((tmp) => {
+    const repo = path.join(tmp, "repo");
+    fs.mkdirSync(repo);
+    fs.writeFileSync(path.join(tmp, "sibling.md"), "not part of the repo\n");
+    fs.writeFileSync(path.join(repo, "doc.md"), `link: ${BLOB}../sibling.md`);
+
+    const { code, lines } = withCapturedStdout(() =>
+      runLinksCheck({ repoRoot: repo, minLinks: 1, minFiles: 1 })
+    );
+    assert.strictEqual(code, 1, lines.join("\n"));
+    assert.ok(
+      lines.some((l) => l.includes("`../sibling.md`") && /does not exist/.test(l)),
+      lines.join("\n")
+    );
+  });
+}
+
 function withCapturedStdout(fn) {
   const orig = console.log;
   const lines = [];
@@ -839,6 +874,8 @@ function main_() {
   testWalkFollowsSymlinksWithoutLooping();
   testUnscannedDocsAreReportedNotSkippedSilently();
   testReadFileOrNullSizeCapIsOptional();
+  testRepoAbsPathRefusesEscapes();
+  testOutOfRepoLinkPathsAreNotProbed();
   testDeclarationTargetsAreCoveredByTheTreesWeValidate();
   testCorpusFloorFailsClosed();
   testLinksRunnerOnFixture();
