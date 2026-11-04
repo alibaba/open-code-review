@@ -718,10 +718,12 @@ func TestFinalizeRequestWithPanicSentinel(t *testing.T) {
 func TestBoundaryHelpersAreInertWithoutCollectorOrMeta(t *testing.T) {
 	m := testMeta()
 	reviseAttempt(metaCtx(m), nil, ErrorClassNetwork, FailurePhaseResponseDecode)
+	extendLastAttempt(metaCtx(m), nil, time.Now())
 	finalizeRequest(metaCtx(m), nil, errors.New("boom"))
 
 	c := NewRetryCollector()
 	reviseAttempt(context.Background(), c, ErrorClassNetwork, FailurePhaseResponseDecode)
+	extendLastAttempt(context.Background(), c, time.Now())
 	finalizeRequest(context.Background(), c, errors.New("boom"))
 
 	c.mu.Lock()

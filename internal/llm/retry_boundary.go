@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"time"
 
 	"github.com/openai/openai-go/v3/packages/ssestream"
 )
@@ -101,6 +102,16 @@ func classifyStreamError(err error) (ErrorClass, FailurePhase) {
 // later correction does nothing, which is what lets the inline stream and
 // Responses corrections coexist with the generic one in the boundary defer.
 func reviseAttempt(ctx context.Context, collector *RetryCollector, class ErrorClass, phase FailurePhase) {
+	reviseAttemptAt(ctx, collector, class, phase, time.Time{})
+}
+
+// reviseAttemptAt is reviseAttempt for a failure whose end the boundary knows —
+// a stream that ended, rather than an attempt whose headers just arrived.
+//
+// The end matters because the observer only ever sees response headers. Without
+// it a streamed request would look like it took milliseconds, and the report's
+// wall clock would silently exclude exactly the requests that wait longest.
+func reviseAttemptAt(ctx context.Context, collector *RetryCollector, class ErrorClass, phase FailurePhase, endedAt time.Time) {
 	if collector == nil {
 		return
 	}
@@ -108,7 +119,25 @@ func reviseAttempt(ctx context.Context, collector *RetryCollector, class ErrorCl
 	if !ok {
 		return
 	}
-	collector.ReviseLastAttempt(meta, class, phase)
+	collector.ReviseLastAttemptAt(meta, class, phase, endedAt)
+}
+
+// extendLastAttempt records that the request kept running until endedAt after
+// its last response header arrived.
+//
+// It exists for the success path of a stream: nothing is wrong with the attempt,
+// so there is no correction to make and ReviseLastAttempt would rightly do
+// nothing, yet the request did hold the clock for the whole stream. Only the
+// end moves; the attempt's classification never does.
+func extendLastAttempt(ctx context.Context, collector *RetryCollector, endedAt time.Time) {
+	if collector == nil {
+		return
+	}
+	meta, ok := RequestMetaFromContext(ctx)
+	if !ok {
+		return
+	}
+	collector.extendLastAttempt(meta, endedAt)
 }
 
 // finalizeRequest is the shared body of the client-boundary defer: correct the

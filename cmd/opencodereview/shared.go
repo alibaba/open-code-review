@@ -228,7 +228,12 @@ type llmRuntime struct {
 // the only way to exercise the Freeze construction-error branch from the
 // outside: every production path finalizes every logical request on every exit,
 // so a well-behaved run can never produce one.
-var newRetryCollector = llm.NewRetryCollector
+//
+// It takes the per-attempt timeout so the report can put each request's total
+// wall clock next to the budget it was meant to fit inside: one attempt can be
+// cancelled at OCR_LLM_TIMEOUT, but the run waits for every attempt plus their
+// backoff, and that sum is what a group deadline actually spends.
+var newRetryCollector = llm.NewRetryCollectorWithAttemptTimeout
 
 // loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
 // from the user's default config path (applying the configured language to
@@ -264,7 +269,7 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 		return nil, fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
 
-	retryCollector := newRetryCollector()
+	retryCollector := newRetryCollector(ep.Timeout)
 
 	var rawHolder *llm.RawHolder
 	if llm.RawLoggingEnabled() {

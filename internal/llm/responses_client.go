@@ -239,16 +239,20 @@ func (e *responseStreamEventError) Error() string {
 
 func (c *OpenAIResponsesClient) responsesStreaming(ctx context.Context, params responses.ResponseNewParams, opts ...openaiopt.RequestOption) (*responses.Response, error) {
 	resp, err := c.responsesStreamingInner(ctx, params, opts...)
+	// See the Chat Completions wrapper: the stream's end is when the request
+	// really ended, and only this frame knows it.
+	endedAt := time.Now()
 	if err == nil {
+		extendLastAttempt(ctx, c.cfg.retryCollector, endedAt)
 		return resp, nil
 	}
 
 	var statusErr *responseStatusError
 	if errors.As(err, &statusErr) {
-		reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassProvider, FailurePhaseResponseStatus)
+		reviseAttemptAt(ctx, c.cfg.retryCollector, ErrorClassProvider, FailurePhaseResponseStatus, endedAt)
 	} else {
 		class, phase := classifyStreamError(err)
-		reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
+		reviseAttemptAt(ctx, c.cfg.retryCollector, class, phase, endedAt)
 	}
 	return nil, err
 }
