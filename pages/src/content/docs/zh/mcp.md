@@ -5,7 +5,7 @@ sidebar:
 ---
 
 OCR 可以作为 **Model Context Protocol（MCP）客户端**。你把它指向一个或多个外部
-MCP server，这些 server 暴露的工具就会提供给审查 agent —— 与 `file_read`、
+MCP server，这些 server 暴露的工具就会提供给审查和扫描 agent —— 与 `file_read`、
 `code_search` 等[内置工具](../tools/)并列。
 
 ## 何时使用
@@ -57,11 +57,11 @@ ocr config set mcp_servers.search.url https://mcp.example.com/mcp
 ocr config set mcp_servers.search.tools '["search", "fetch"]'
 ```
 
-这些命令会把连接保存到你的用户配置中。下一次审查时，OCR 会连接该 server，并把
-`search` 与 `fetch` 与内置工具一并提供给 agent。工具白名单会把 server 可能提供的
-其他工具挡在审查之外。其他已配置的 server 和你的审查设置保持不变。
+这些命令会把连接保存到你的用户配置中。下一次运行 `ocr review` 或 `ocr scan` 时，OCR
+会连接该 server，把 `search` 和 `fetch` 连同内置工具提供给 agent。工具白名单会把 server 可能提供的
+其他工具挡在本次运行之外。其他已配置的 server 和你的审查设置保持不变。
 
-配置完成后，agent 在审查过程中调用这些工具不会逐次征求同意。工具参数 —— 搜索
+配置完成后，agent 在审查和扫描过程中调用这些工具不会逐次征求同意。工具参数 —— 搜索
 查询、请求的 URL，以及 agent 附带的任何上下文 —— 都会离开你的机器，抵达该端点的
 运营方。由于这是用户级配置，它对所有仓库生效：只在允许对外请求的场景启用它，且不要
 在请求中包含密钥、私有代码或内网 URL。接入第三方服务前，请先了解其隐私政策与服务
@@ -91,6 +91,22 @@ MCP server 配置在用户配置文件（`~/.opencodereview/config.json`）的 `
 对于需要认证的远程 server，请按该 server 的说明配置 `headers`。当传给
 `ocr config set` 的 JSON 中含有环境变量引用时，请用单引号包裹，以免 shell 在 OCR
 保存配置之前就把它们展开。允许匿名访问的 server 完全不需要 `headers`。
+
+## 扫描时使用 MCP 工具
+
+全文件扫描使用同一份用户级 MCP 配置。例如，添加上述 `docs` server 后，可以运行：
+
+```bash
+ocr scan --path path/to/file.go
+```
+
+OCR 会在创建扫描 agent 前连接已配置的 server。审查每个文件时，agent 可以调用允许的
+MCP 工具获取上下文，工具结果会返回给该文件的主任务。扫描的预规划阶段无法使用工具。
+全文件扫描没有 diff，因此即使启用了 MCP，也不会提供 `file_read_diff`。
+
+`ocr scan --preview` 只列出待扫描文件，不会启动或连接 MCP server。正常扫描时，
+如果某个 server 连接失败，OCR 会记录警告，并继续使用内置工具和其他可用的 MCP
+server。扫描正常结束或出错退出时，已连接的客户端都会关闭。
 
 ## 过滤工具
 
@@ -139,10 +155,10 @@ MCP 工具名与内置工具共享同一个命名空间。如果某个 server �
 - `allowed tool "y" not found in server's tool list` —— `tools` 中的名字与 server 提供
   的任何工具都不匹配；检查拼写。
 
-启动或连接失败的 server 会被跳过；审查会在没有它的工具的情况下继续。
+启动或连接失败的 server 会被跳过；审查或扫描会在没有它的工具的情况下继续。
 
 ## 另见
 
 - [工具](../tools/) —— MCP 工具与之并列的六个内置工具。
 - [配置](../configuration/) —— 完整的配置文件与每个键。
-- [CLI 参考](../cli-reference/) —— `ocr config` 与 review 参数。
+- [CLI 参考](../cli-reference/) —— `ocr config`、`ocr review` 和 `ocr scan` 参数。
