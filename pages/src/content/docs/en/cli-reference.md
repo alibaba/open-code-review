@@ -420,6 +420,26 @@ ocr session list --json
 | `--json` | `false` | Emit session summaries as JSON. |
 | `--limit <n>` | `20` | Cap the number of listed sessions. Use `0` for unlimited. |
 
+The STATUS column distinguishes unfinished-but-alive runs from dead and
+finalized ones:
+
+- `running` — unfinished, and the writer is still proving liveness: heartbeat
+  records (or, for session files written by older versions, record appends)
+  reached disk within the freshness window — about 3 minutes for files with
+  heartbeats, about 10 minutes for legacy files. This is freshness evidence,
+  not a lease: a writer killed seconds ago keeps showing `running` until the
+  window lapses.
+- `aborted` — unfinished and no heartbeat or append inside the window: the run
+  most likely died without writing its `session_end` record.
+- `complete` / `partial` / `failed` / `skipped` / `legacy` — finalized runs; a
+  `session_end` record is on disk.
+
+With `--json`, `aborted` keeps its file-based meaning — `true` until a
+`session_end` record exists — so a live run reports `"running": true` and
+`"aborted": true` at the same time. The two flags are not mutually exclusive:
+when both are set, `running` takes precedence, exactly as the STATUS column
+does.
+
 ### `ocr session show`
 
 A resumed run also prints the run it continued, and the provider/model

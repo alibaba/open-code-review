@@ -20,6 +20,14 @@ import (
 
 var sessionSubDir = "sessions"
 
+// heartbeatInterval is how often a live writer emits a heartbeat record into
+// its session file. Heartbeats are flushed eagerly, so they keep the file's
+// modification time fresh even while the run sits inside a long provider
+// request or retry wait that produces no other records; readers use that
+// freshness as liveness evidence (see markRunning in list.go). A writer
+// killed mid-run stops refreshing it. It is a variable so tests can shrink it.
+var heartbeatInterval = 60 * time.Second
+
 // jsonlWriter streams session records to a JSONL file under
 // $HOME/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl.
 // It is safe for concurrent use by multiple goroutines.
@@ -39,6 +47,13 @@ type jsonlWriter struct {
 	file        *os.File
 	writer      *bufio.Writer
 	lastUUID    string // tracks chain of records via parentUuid
+
+	// Heartbeat liveness loop: hbStop asks the loop to exit, hbDone is closed
+	// by the loop once it has exited, so stopHeartbeat can wait out the last
+	// in-flight write before the file is closed.
+	hbStop     chan struct{}
+	hbDone     chan struct{}
+	hbStopOnce sync.Once
 }
 
 // newJSONLWriter creates and opens a new JSONL writer for the given session.
@@ -134,7 +149,11 @@ func (jw *jsonlWriter) writeRecordLocked(rec map[string]any) {
 	jw.writer.WriteByte('\n')
 }
 
-// WriteSessionStart writes the initial session_start record.
+// WriteSessionStart writes the initial session_start record, then starts the
+// heartbeat loop so the file's first heartbeat lands right after session_start:
+// with the periodic loop alone, a writer killed during its first interval
+// would leave no heartbeat record at all, and readers could not tell its file
+// from one written by a pre-heartbeat version (see startHeartbeat).
 func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	uuid := generateUUID()
 	rec := map[string]any{
@@ -170,9 +189,11 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	}
 
 	jw.mu.Lock()
-	defer jw.mu.Unlock()
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
+	// Unlock before starting the heartbeat: its writes take jw.mu too.
+	jw.mu.Unlock()
+	jw.startHeartbeat()
 	return uuid
 }
 
@@ -377,6 +398,11 @@ func (jw *jsonlWriter) WriteResumeLineage(l *ResumeLineage) string {
 func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, manifest *RunManifest) error {
 	uuid := generateUUID()
 
+	// Stop the heartbeat before taking the lock: the loop writes under jw.mu,
+	// and waiting for it while holding the lock would deadlock. After
+	// stopHeartbeat returns, no heartbeat write can be in flight.
+	jw.stopHeartbeat()
+
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
 	rec := map[string]any{
@@ -426,6 +452,7 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 }
 
 func (jw *jsonlWriter) flushAndClose() {
+	jw.stopHeartbeat()
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
 	if jw.writer != nil {
@@ -434,4 +461,82 @@ func (jw *jsonlWriter) flushAndClose() {
 	if jw.file != nil {
 		jw.file.Close()
 	}
+}
+
+// startHeartbeat appends one synchronous initial heartbeat, then launches the
+// periodic liveness loop. The initial beat is what marks a file as written by
+// a heartbeat-capable version from its first moments: the periodic loop alone
+// stays silent for one interval after startup, so a writer killed during that
+// first interval would leave no heartbeat record at all and readers would
+// hold its file to the wider legacy activity window instead of the heartbeat
+// liveness window (see markRunning in list.go). Called once, after the
+// session_start record is on disk.
+func (jw *jsonlWriter) startHeartbeat() {
+	if jw.hbDone != nil {
+		return // already started
+	}
+	if heartbeatInterval > 0 {
+		jw.writeHeartbeat()
+	}
+	jw.hbStop = make(chan struct{})
+	jw.hbDone = make(chan struct{})
+	go func() {
+		defer close(jw.hbDone)
+		if heartbeatInterval <= 0 {
+			// Degenerate interval (tests): the loop idles until stopped, and
+			// with no initial beat either the file stays heartbeat-free — how
+			// tests simulate a pre-heartbeat (legacy) writer.
+			<-jw.hbStop
+			return
+		}
+		ticker := time.NewTicker(heartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				jw.writeHeartbeat()
+			case <-jw.hbStop:
+				return
+			}
+		}
+	}()
+}
+
+// stopHeartbeat stops the liveness loop and waits for any in-flight heartbeat
+// write to finish, so no write races with the file being closed. It must not
+// be called while holding jw.mu — the loop takes that lock to write, and
+// waiting for the loop while holding it would deadlock. Idempotent, so every
+// close path can call it unconditionally.
+func (jw *jsonlWriter) stopHeartbeat() {
+	if jw.hbDone == nil {
+		return
+	}
+	jw.hbStopOnce.Do(func() { close(jw.hbStop) })
+	<-jw.hbDone
+}
+
+// writeHeartbeat appends one heartbeat record and flushes it. The flush is
+// the point: the record exists to reach disk and refresh the file's
+// modification time even when the run itself produces no records (a long
+// provider request or retry wait). Every existing reader ignores record
+// types it does not know, so heartbeat lines are invisible to older tooling.
+func (jw *jsonlWriter) writeHeartbeat() {
+	jw.mu.Lock()
+	defer jw.mu.Unlock()
+	if jw.writer == nil {
+		return
+	}
+	uuid := generateUUID()
+	rec := map[string]any{
+		"uuid":       uuid,
+		"parentUuid": jw.lastUUID,
+		"type":       "heartbeat",
+		"sessionId":  jw.sessionID,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+	}
+	jw.writeRecordLocked(rec)
+	if jw.writer != nil {
+		jw.writer.Flush()
+	}
+	jw.lastUUID = uuid
 }

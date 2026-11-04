@@ -4,7 +4,10 @@
 package session
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +70,318 @@ func TestListSessions_SortsAndAggregates(t *testing.T) {
 	if got[0].CompletedFiles != 2 {
 		t.Errorf("newest CompletedFiles = %d, want 2", got[0].CompletedFiles)
 	}
+}
+
+func TestListSessions_MarksFreshUnfinishedSessionRunning(t *testing.T) {
+	// A pre-heartbeat (legacy) run still in progress: records appended, no
+	// session_end, no heartbeat records, file just written. Expect
+	// Running=true via the legacy activity window while Aborted keeps its
+	// file-based true, so resume logic and existing JSON consumers are
+	// unaffected.
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	// Zero interval suppresses even the initial beat, leaving a file exactly
+	// like a pre-heartbeat version writes.
+	defer swapHeartbeatInterval(t, 0)()
+	writeTestSession(t, repoDir, "feature-a", "commit-x", nil, 1, 0, false)
+
+	got, err := ListSessions(repoDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(got))
+	}
+	if !got[0].Running {
+		t.Errorf("unfinished session with a fresh file: Running = false, want true")
+	}
+	if !got[0].Aborted {
+		t.Errorf("Aborted must stay true until session_end reaches disk")
+	}
+}
+
+func TestListSessions_StaleUnfinishedSessionNotRunning(t *testing.T) {
+	// A legacy-file run whose process is gone: no session_end, no heartbeat
+	// records (so the activity window applies), and nothing appended for
+	// longer than legacyActivityWindow. Expect Running=false, Aborted=true —
+	// a real interruption, not an active session.
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	// Zero interval keeps the file heartbeat-free so the legacy window is
+	// the one under test.
+	defer swapHeartbeatInterval(t, 0)()
+	id := writeTestSession(t, repoDir, "feature-a", "commit-x", nil, 1, 0, false)
+
+	path, err := SessionFilePath(repoDir, id)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	stale := time.Now().Add(-2 * legacyActivityWindow)
+	if err := os.Chtimes(path, stale, stale); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	got, err := ListSessions(repoDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(got))
+	}
+	if got[0].Running {
+		t.Errorf("stale unfinished session: Running = true, want false")
+	}
+	if !got[0].Aborted {
+		t.Errorf("stale unfinished session: Aborted = false, want true")
+	}
+}
+
+func TestListSessions_QuietLiveHeartbeatWriterStaysRunning(t *testing.T) {
+	// A live writer producing nothing but heartbeats — the quiet-request
+	// case: the run sits inside one long provider call or retry wait, so no
+	// review_item or request-boundary record is appended, yet heartbeat
+	// records keep reaching disk. The writer stays alive (its heartbeat
+	// goroutine still running) across the ListSessions call, pinning the
+	// integration contract: a live-but-quiet session reports Running, which
+	// no append-activity window of any fixed size could guarantee.
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	defer swapHeartbeatInterval(t, 20*time.Millisecond)()
+
+	sh := New(repoDir, "main", "test-model", SessionOptions{
+		ReviewMode: ReviewModeRange,
+		DiffFrom:   "feature-a",
+		DiffTo:     "commit-x",
+	})
+	if sh.persist == nil {
+		t.Fatal("session writer was not created")
+	}
+	// Terminate the writer when the test ends, on every exit path: the
+	// heartbeat goroutine must not outlive the test.
+	defer sh.persist.flushAndClose()
+
+	time.Sleep(120 * time.Millisecond) // quiet interval: beats land, nothing else
+
+	path, err := SessionFilePath(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	heartbeats := countRecordTypes(t, path)["heartbeat"]
+	if heartbeats < 2 {
+		t.Fatalf("expected >= 2 heartbeat records in a quiet live session, got %d", heartbeats)
+	}
+
+	// The heartbeat goroutine is still running while the list is read.
+	got, err := ListSessions(repoDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(got))
+	}
+	if !got[0].Running {
+		t.Errorf("quiet but live heartbeat writer: Running = false, want true")
+	}
+	if !got[0].Aborted {
+		t.Errorf("no session_end on disk: Aborted = false, want true")
+	}
+}
+
+func TestListSessions_TerminatedHeartbeatWriterNotRunningAfterWindow(t *testing.T) {
+	// A writer that died without session_end. Immediately after the kill the
+	// session still reports Running — the documented residual of a
+	// freshness-based signal, bounded by livenessWindow. Once the file goes
+	// stale past livenessWindow, Running must flip off even though heartbeat
+	// records are present in the file: a heartbeat selects the stricter
+	// window, it does not pin the session as running forever.
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	defer swapHeartbeatInterval(t, 20*time.Millisecond)()
+	id := writeKilledHeartbeatSession(t, repoDir)
+
+	path, err := SessionFilePath(repoDir, id)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	if got := countRecordTypes(t, path)["heartbeat"]; got < 1 {
+		t.Fatalf("expected heartbeat records in the file, got %d", got)
+	}
+
+	// Fresh kill: still inside livenessWindow — the bounded false-positive.
+	fresh, err := LoadSummary(repoDir, id)
+	if err != nil {
+		t.Fatalf("LoadSummary: %v", err)
+	}
+	if !fresh.Running || !fresh.Aborted {
+		t.Fatalf("freshly killed writer: running=%v aborted=%v, want true/true", fresh.Running, fresh.Aborted)
+	}
+
+	// Past livenessWindow: heartbeat records exist, but staleness wins.
+	stale := time.Now().Add(-2 * livenessWindow)
+	if err := os.Chtimes(path, stale, stale); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	got, err := ListSessions(repoDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(got))
+	}
+	if got[0].Running {
+		t.Errorf("terminated writer past livenessWindow: Running = true, want false")
+	}
+	if !got[0].Aborted {
+		t.Errorf("no session_end on disk: Aborted = false, want true")
+	}
+}
+
+func TestListSessions_KilledBeforeFirstPeriodicBeatUsesLivenessWindow(t *testing.T) {
+	// Review regression: a current-version writer dies before its first
+	// PERIODIC heartbeat tick, so the only heartbeat in the file is the
+	// synchronous initial beat written at session start. That beat must still
+	// select the heartbeat liveness window, not the legacy activity window:
+	// once aged past livenessWindow — while staying younger than
+	// legacyActivityWindow — the session must stop reporting Running.
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	// A minute between periodic beats: no periodic tick fires during the
+	// test, so any heartbeat in the file is the initial synchronous one.
+	defer swapHeartbeatInterval(t, time.Minute)()
+
+	id := writeKilledHeartbeatSession(t, repoDir)
+
+	path, err := SessionFilePath(repoDir, id)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	if got := countRecordTypes(t, path)["heartbeat"]; got != 1 {
+		t.Fatalf("heartbeat records = %d, want exactly the 1 initial beat written before the first periodic tick", got)
+	}
+
+	// Fresh kill: still inside livenessWindow, the session reports Running.
+	fresh, err := LoadSummary(repoDir, id)
+	if err != nil {
+		t.Fatalf("LoadSummary: %v", err)
+	}
+	if !fresh.Running || !fresh.Aborted {
+		t.Fatalf("freshly killed writer: running=%v aborted=%v, want true/true", fresh.Running, fresh.Aborted)
+	}
+
+	// Aged past livenessWindow but well inside legacyActivityWindow: had the
+	// initial beat been missing, the legacy window would keep it Running.
+	stale := time.Now().Add(-2 * livenessWindow)
+	if err := os.Chtimes(path, stale, stale); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	got, err := ListSessions(repoDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(got))
+	}
+	if got[0].Running {
+		t.Errorf("killed before the first periodic beat, aged past livenessWindow: Running = true, want false")
+	}
+	if !got[0].Aborted {
+		t.Errorf("no session_end on disk: Aborted = false, want true")
+	}
+}
+
+func TestListSessions_FinalizedFreshFileNeverRunning(t *testing.T) {
+	// A finalized session: session_end is on disk, so the file is fresh but
+	// the run is over. Running must stay false no matter how fresh the file
+	// is — running is only meaningful for unfinished sessions.
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	writeTestSession(t, repoDir, "feature-a", "commit-x", nil, 1, 0, true)
+
+	got, err := ListSessions(repoDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(got))
+	}
+	if got[0].Running {
+		t.Errorf("finalized session: Running = true, want false")
+	}
+	if got[0].Aborted {
+		t.Errorf("finalized session: Aborted = true, want false")
+	}
+}
+
+// writeKilledHeartbeatSession starts a real writer under the test-swapped
+// heartbeat interval, lets heartbeat records reach disk with no other progress
+// records, then terminates it without session_end — the on-disk state a
+// killed writer leaves behind. Returns the session id.
+func writeKilledHeartbeatSession(t *testing.T, repoDir string) string {
+	t.Helper()
+	sh := New(repoDir, "main", "test-model", SessionOptions{
+		ReviewMode: ReviewModeRange,
+		DiffFrom:   "feature-a",
+		DiffTo:     "commit-x",
+	})
+	time.Sleep(120 * time.Millisecond)
+	if sh.persist == nil {
+		t.Fatal("session writer was not created")
+	}
+	sh.persist.stopHeartbeat()
+	sh.persist.mu.Lock()
+	sh.persist.writer.Flush()
+	sh.persist.file.Close()
+	sh.persist.writer = nil
+	sh.persist.file = nil
+	sh.persist.mu.Unlock()
+	return sh.SessionID
+}
+
+// swapHeartbeatInterval shrinks the heartbeat interval for tests that need
+// real heartbeats to reach disk quickly, and returns a function restoring the
+// production value. The session package's writer tests run sequentially, so
+// the package-level variable is safe to swap.
+func swapHeartbeatInterval(t *testing.T, d time.Duration) func() {
+	t.Helper()
+	old := heartbeatInterval
+	heartbeatInterval = d
+	return func() { heartbeatInterval = old }
+}
+
+// countRecordTypes reads a session JSONL file and tallies records by their
+// type field, tolerating malformed lines the same way production readers do.
+func countRecordTypes(t *testing.T, path string) map[string]int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	counts := make(map[string]int)
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		counts[rec.Type]++
+	}
+	return counts
 }
 
 func TestLoadDetail_ReturnsItems(t *testing.T) {
@@ -259,6 +574,9 @@ func writeTestSession(t *testing.T, repoDir, from, to string, comments []model.L
 	} else {
 		// Simulate an aborted run: flush the writer without emitting session_end.
 		if sh.persist != nil {
+			// Stop the heartbeat loop first: the manual close below bypasses
+			// WriteSessionEnd/flushAndClose, which are the normal stop points.
+			sh.persist.stopHeartbeat()
 			sh.persist.mu.Lock()
 			if sh.persist.writer != nil {
 				sh.persist.writer.Flush()
