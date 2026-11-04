@@ -459,9 +459,14 @@ ocr session diagnose <session-id> --json
 | `--repo <path>` | current dir | Repository whose saved session should be inspected. |
 | `--task <key>` | all tasks | Select an exact key from the overview and list its events. |
 | `--request <id>` | all requests | Follow explicit request links; counts and event lists are limited to the selected request. |
-| `--comment <id>` | none | Open a comment's captured origin and code evidence; cannot be combined with `--event`. |
-| `--event <line>` | none | Open the original JSONL record at a positive physical line number. |
-| `--json` | `false` | Emit structured diagnostics, including the selected original event if any. |
+| `--comment <id>` | none | Open a comment's captured origin and code evidence as JSON, even without `--json`; cannot be combined with `--event`. |
+| `--event <line>` | none | Open the original JSONL record at a positive physical line number as JSON, even without `--json`. |
+| `--json` | `false` | Emit the full diagnostic report as JSON, including the selected original event if any. |
+
+The overview, task and request views use text by default. The `--comment` and
+`--event` detail views always output JSON. Without `--json`, `--event` outputs only
+the original record, while `--comment` outputs the full diagnostic report with
+the selected comment. Add `--json` to output the full diagnostic report for any view.
 
 Observations identify recorded LLM errors, tool calls with `ok=false`, failed
 file checkpoints and missing or unreadable execution records. Existing `ok`

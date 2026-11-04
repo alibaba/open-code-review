@@ -22,6 +22,9 @@ func newSessionDiagnoseCmd() *cobra.Command {
 		Long: "Inspect saved execution evidence by task and phase, then open a source record by its JSONL line number.\n" +
 			"Use --request to follow explicit request links in new records; older records remain inspectable by task and event.\n" +
 			"Use --comment to inspect a comment's original claim, location changes and captured code evidence.\n" +
+			"The --comment and --event detail views always output JSON, even without --json.\n" +
+			"Without --json, --event outputs only the original record; --comment outputs the full diagnostic report.\n" +
+			"Use --json to output the full diagnostic report for any view.\n" +
 			"Observations describe recorded failures and missing records; they do not judge whether review findings are correct.\n" +
 			"A task key may name a group of files. Existing tool ok values are preserved as recorded.",
 		Example: "  ocr session diagnose <session-id>\n" +
@@ -54,9 +57,9 @@ func newSessionDiagnoseCmd() *cobra.Command {
 	cmd.Flags().StringVar(&repo, "repo", "", "root directory of the repository (default: current dir)")
 	cmd.Flags().StringVar(&task, "task", "", "drill into an exact task key from the overview")
 	cmd.Flags().StringVar(&requestID, "request", "", "drill into an explicitly linked request ID from the task events")
-	cmd.Flags().StringVar(&commentID, "comment", "", "open a comment's captured origin and code evidence (may include source code)")
-	cmd.Flags().IntVar(&eventLine, "event", 0, "open the original record at this positive JSONL line number")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "emit structured execution diagnostics")
+	cmd.Flags().StringVar(&commentID, "comment", "", "open a comment's captured origin and code evidence as JSON (may include source code; does not require --json)")
+	cmd.Flags().IntVar(&eventLine, "event", 0, "open the original record at this positive JSONL line number as JSON (does not require --json)")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit the full diagnostic report as JSON (detail views already use JSON)")
 	return cmd
 }
 
