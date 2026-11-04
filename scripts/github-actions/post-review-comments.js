@@ -286,7 +286,8 @@ async function runPostReviewComments({
   const warnings = result.warnings || [];
   stats.total = comments.length;
 
-  // No comments: post a "looks good" summary.
+  // No comments: post a summary. Warnings, when present, are part of it:
+  // a check mark would hide them, and the fallback must not call that clean.
   //
   // Outdated-thread resolution deliberately does NOT run here (nor at the
   // parse-failure exit above). "The model reported nothing this run" is not
@@ -295,9 +296,18 @@ async function runPostReviewComments({
   // of them would otherwise close every open thread on the PR in one sweep.
   // Resolution requires a run that actually produced findings.
   if (comments.length === 0) {
-    const message = result.message || "No comments generated. Looks good to me.";
+    const warningBlock = formatWarnings(warnings);
+    const message = result.message
+      || (warningBlock
+        ? "No comments generated. See warnings below."
+        : "No comments generated. Looks good to me.");
+    const icon = warningBlock ? "⚠️" : "✅";
     // A clean run is still a complete run: this path advances the checkpoint.
-    const body = appendCheckpoint(`${SUMMARY_MARKER}\n✅ **OpenCodeReview**: ${message}${rangeNote}`, result.manifest);
+    // Warnings are not an input to that decision.
+    const body = appendCheckpoint(
+      `${SUMMARY_MARKER}\n${icon} **OpenCodeReview**: ${message}${warningBlock}${rangeNote}`,
+      result.manifest
+    );
     const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, preserveMarker, log });
     stats.summaryUrl = posted.url;
     setStatsOutputs(out, stats);

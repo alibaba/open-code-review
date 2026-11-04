@@ -626,6 +626,164 @@ async function testNoCommentsStickyUpdate() {
   assert.match(github.updatedComments[0].body, /All clear\./);
 }
 
+// A zero-finding run still has to show result.warnings. This branch used to
+// post result.message under a check mark and return, so the warning list the
+// findings path renders with formatWarnings never reached the summary. With
+// no warnings the summary, including the check mark, stays byte-identical.
+async function testZeroFindingSummaryRendersWarnings() {
+  const limitWarning = {
+    file: "a.go",
+    type: "review_limit_reached",
+    message: "reached the aggregate token budget before finishing; the grace round completed the task",
+  };
+  const completedMessage = "Review complete: 0 finding(s) across 1 selected item(s).";
+  const completedWarnings = [limitWarning];
+  const completedBody = `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: ${completedMessage}${formatWarnings(completedWarnings)}`;
+  const completed = {
+    comments: [],
+    message: completedMessage,
+    warnings: completedWarnings,
+    manifest: { terminal_state: "complete", input: { resolved_head: "ab".repeat(20) } },
+  };
+
+  const postedBody = (github) => {
+    if (github.updatedComments.length > 0) return github.updatedComments[github.updatedComments.length - 1].body;
+    return github.issueComments.length > 0 ? github.issueComments[github.issueComments.length - 1].body : null;
+  };
+
+  // New summary on a cold start.
+  {
+    const { github } = await run({ result: completed, opts: { stickySummary: true } });
+    assert.strictEqual(github.issueComments.length, 1, "a cold start creates the summary");
+    assert.strictEqual(github.updatedComments.length, 0, "a cold start does not update a comment");
+    assert.strictEqual(github.issueComments[0].body, completedBody, "new summary renders review_limit_reached");
+    assert.strictEqual(github.issueComments[0].body.includes("✅"), false);
+    assert.strictEqual(
+      github.issueComments[0].body.includes("`a.go` (`review_limit_reached`): reached the aggregate token budget before finishing; the grace round completed the task"),
+      true
+    );
+  }
+
+  // Sticky update of an existing summary.
+  {
+    const existing = [{ id: 7, body: `${SUMMARY_MARKER}\nold good`, user: { login: "github-actions[bot]" } }];
+    const { github } = await run({
+      result: completed,
+      githubOpts: { existingSummary: existing },
+      opts: { stickySummary: true },
+    });
+    assert.strictEqual(github.issueComments.length, 0, "sticky update does not create a second summary");
+    assert.strictEqual(github.updatedComments.length, 1, "sticky update rewrites the existing summary");
+    assert.strictEqual(github.updatedComments[0].body, completedBody, "sticky summary keeps the warnings");
+  }
+
+  // Non-sticky runs also create a fresh summary, and it carries the same warnings.
+  {
+    const { github } = await run({ result: completed, opts: { stickySummary: false } });
+    assert.strictEqual(github.issueComments.length, 1);
+    assert.strictEqual(github.updatedComments.length, 0);
+    assert.strictEqual(github.issueComments[0].body, completedBody);
+  }
+
+  // Missing message: neutral fallback, for both a plain string and a structured
+  // warning that is not review_limit_reached. Neither path may say the review
+  // looks good, and neither warning shape is special-cased.
+  const mixed = [
+    "skipped unscanned generated file",
+    { file: "internal/llm/resolver.go", type: "subtask_error", message: "context deadline exceeded" },
+  ];
+  {
+    const { github } = await run({ result: { comments: [], warnings: mixed } });
+    const body = postedBody(github);
+    assert.strictEqual(
+      body,
+      `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: No comments generated. See warnings below.${formatWarnings(mixed)}`
+    );
+    assert.strictEqual(body.includes("Looks good to me"), false);
+  }
+
+  // A supplied message is kept for a string warning too.
+  {
+    const warnings = ["review_limit_reached"];
+    const { github } = await run({ result: { comments: [], message: "Custom qualifier.", warnings } });
+    assert.strictEqual(
+      postedBody(github),
+      `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: Custom qualifier.${formatWarnings(warnings)}`
+    );
+  }
+
+  // A narrowed range note stays after the warning list, matching the
+  // with-comments summary (formatWarnings, then rangeNote).
+  {
+    const { github } = await run({
+      result: { comments: [], message: completedMessage, warnings: completedWarnings },
+      opts: ckRunOptions({ rangeMode: "checkpoint", rangeFrom: CK_OLD, rangeTo: CK_NEW }),
+    });
+    const rangeNote = `\n\n_Reviewed \`${CK_OLD.slice(0, 7)}..${CK_NEW.slice(0, 7)}\` only; earlier commits in this PR were reviewed in a previous run._`;
+    const warningBlock = formatWarnings(completedWarnings);
+    const body = postedBody(github);
+    assert.strictEqual(
+      body,
+      `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: ${completedMessage}${warningBlock}${rangeNote}`
+    );
+    assert.ok(body.indexOf(warningBlock) < body.indexOf(rangeNote), "warnings appear before the range note");
+  }
+
+  // No warnings: byte-identical to the historical clean summary.
+  for (const warnings of [undefined, []]) {
+    const result = { comments: [] };
+    if (warnings) result.warnings = warnings;
+    const { github } = await run({ result });
+    assert.strictEqual(
+      postedBody(github),
+      `${SUMMARY_MARKER}\n✅ **OpenCodeReview**: No comments generated. Looks good to me.`,
+      `warnings=${JSON.stringify(warnings)} must keep the clean summary`
+    );
+  }
+  {
+    const { github } = await run({ result: { comments: [], message: "All clear." } });
+    assert.strictEqual(
+      postedBody(github),
+      `${SUMMARY_MARKER}\n✅ **OpenCodeReview**: All clear.`
+    );
+  }
+}
+
+// Warnings are presentation. They must not change which runs may advance the
+// checkpoint: a complete zero-finding result still advances, and partial or
+// failed results stay ineligible.
+async function testZeroFindingWarningsDoNotBlockCheckpoint() {
+  const warnings = [{
+    file: "a.go",
+    type: "review_limit_reached",
+    message: "reached the aggregate token budget before finishing; the grace round completed the task",
+  }];
+  const message = "Review complete: 0 finding(s) across 1 selected item(s).";
+  const summary = `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: ${message}${formatWarnings(warnings)}`;
+
+  for (const terminal of ["complete", "partial", "failed"]) {
+    const { github, outputs } = await run({
+      result: {
+        comments: [],
+        message,
+        warnings,
+        manifest: ckManifest({ terminal_state: terminal }),
+      },
+      opts: ckRunOptions({ checkpointCarry: CARRY }),
+    });
+    const body = lastSummaryBody(github);
+    if (terminal === "complete") {
+      assert.strictEqual(outputs.checkpoint_after, CK_RESOLVED, "warnings do not block a complete run");
+      assert.strictEqual(parseCheckpointMarker(body).head, CK_RESOLVED);
+      assert.strictEqual(body.includes(CARRY), false, "advancing replaces the carried marker");
+      assert.strictEqual(body.startsWith(`${summary}\n\n`), true, "the advanced summary still renders the warnings");
+    } else {
+      assert.strictEqual(outputs.checkpoint_after, "", `${terminal} stays ineligible`);
+      assert.strictEqual(body, `${summary}\n\n${CARRY}`, `${terminal} keeps the previous checkpoint and the warnings`);
+    }
+  }
+}
+
 async function testIncrementalSkipsOverlapping() {
   const history = [{ path: "src/a.js", line: 10, start_line: 10, side: "RIGHT", user: { login: "github-actions[bot]" } }];
   const result = {
@@ -2338,6 +2496,8 @@ async function main() {
   await testNonStickyCreatesNewCommentOnFallback();
   await testNonStickyFallbackAllSuccessStillPostsSummary();
   await testNoCommentsStickyUpdate();
+  await testZeroFindingSummaryRendersWarnings();
+  await testZeroFindingWarningsDoNotBlockCheckpoint();
   await testIncrementalSkipsOverlapping();
   await testIncrementalSkipsSameRunOverlapping();
   await testIncrementalSkipsSameRunIoUOverlapping();
