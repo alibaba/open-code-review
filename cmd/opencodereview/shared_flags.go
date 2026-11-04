@@ -32,9 +32,9 @@ func addBackgroundFlags(cmd *cobra.Command, background, backgroundFile *string) 
 }
 
 func addOutputFlags(cmd *cobra.Command, format, audience *string) {
-	cmd.Flags().StringVarP(format, "format", "f", "text", "output format: text, json, or sarif")
-	cmd.Flags().StringVar(audience, "audience", "human", "output audience: human (show progress; on stderr for json/sarif) or agent (summary only)")
-	cmd.RegisterFlagCompletionFunc("format", completeEnum("text", "json", "sarif"))
+	cmd.Flags().StringVarP(format, "format", "f", "text", "output format: text, json, sarif, or codequality (GitLab Code Quality report)")
+	cmd.Flags().StringVar(audience, "audience", "human", "output audience: human (show progress; on stderr for json/sarif/codequality) or agent (summary only)")
+	cmd.RegisterFlagCompletionFunc("format", completeEnum("text", "json", "sarif", "codequality"))
 	cmd.RegisterFlagCompletionFunc("audience", completeEnum("human", "agent"))
 }
 
@@ -116,10 +116,10 @@ func validateAudience(audience string) error {
 func validateOutputFormat(format string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(format))
 	switch normalized {
-	case "text", "json", "sarif":
+	case "text", "json", "sarif", "codequality":
 		return normalized, nil
 	default:
-		return "", fmt.Errorf("invalid --format value %q: must be 'text', 'json', or 'sarif'", format)
+		return "", fmt.Errorf("invalid --format value %q: must be 'text', 'json', 'sarif', or 'codequality'", format)
 	}
 }
 

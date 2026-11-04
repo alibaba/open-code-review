@@ -378,7 +378,7 @@ type quietHandle struct {
 // function only from `session export`.
 func isMachineReadable(outputFormat string) bool {
 	switch strings.ToLower(strings.TrimSpace(outputFormat)) {
-	case "json", "sarif", "html":
+	case "json", "sarif", "codequality", "html":
 		return true
 	default:
 		return false
@@ -848,6 +848,9 @@ func emitRunResult(
 		if outputFormat == "json" {
 			return outputJSONNoFiles(traceID, llmIdentity, out)
 		}
+		if outputFormat == "codequality" {
+			return outputCodeQuality(nil, out)
+		}
 		return outputSARIF(nil, Version, ag.Warnings(), manifest, out)
 	}
 
@@ -887,6 +890,9 @@ func emitRunResult(
 	}
 	if outputFormat == "sarif" {
 		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
+	}
+	if outputFormat == "codequality" {
+		return outputCodeQuality(comments, out)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
 	// Between the comments/warnings block and the project summary: the report is

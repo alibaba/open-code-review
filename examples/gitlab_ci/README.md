@@ -13,6 +13,11 @@ MR Created/Updated → GitLab Pipeline Triggered → OCR Reviews Diff → Discus
 3. Runs `ocr review --from origin/<target> --to <commit_sha> --format json --audience agent` to analyze the diff (uses commit SHA to support fork MRs)
 4. Parses the JSON output and posts inline discussions on the MR using GitLab's Discussions API
 
+> **No token, no script:** if showing findings in the merge request is
+> enough, use [`ocr-codequality.gitlab-ci.yml`](ocr-codequality.gitlab-ci.yml)
+> instead. It publishes a GitLab Code Quality report (`--format codequality`)
+> that GitLab renders natively, without posting through the API.
+
 ## Setup
 
 ### 1. Copy the pipeline and script files
