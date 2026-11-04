@@ -305,7 +305,7 @@ matching order:
 | `**/package.json`                               | `package_json.md` — NPM dependencies / scripts.                                                       |
 | `**/Cargo.toml`                                 | `cargo_toml.md` — Rust manifest.                                                                      |
 | `**/composer.json`                              | `composer_json.md` — Composer dependencies, autoloading, scripts, plugins, and package configuration. |
-| `**/*.{json,json5}`                             | `json.md` — generic JSON (also matches `.json5`).                                                     |
+| `**/*.{json,json5,jsonc}`                       | `json.md` — generic JSON (also matches `.json5` and `.jsonc`). |
 | `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md` — GitHub Actions workflow YAML.                                                 |
 | `.github/**/*.{yaml,yml}`                       | `github_config.md` — other `.github` config YAML.                                                     |
 | `**/*.{yaml,yml}`                               | `yaml.md`                                                                                             |
@@ -314,11 +314,16 @@ matching order:
 | `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling).                                  |
 | `**/*.{hbs,mustache}`                           | `handlebars_mustache.md` — Handlebars and Mustache templates.                                         |
 | `**/*.{jinja2,j2}`                              | `jinja.md` — Jinja templates                                                                          |
+| `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md` — EJS, Liquid and Nunjucks templates (SSTI / XSS / escaping). |
+| `**/*.{haml,slim}`                              | `haml_slim.md` — HAML and Slim templates (SSTI / XSS / escaping / indentation semantics). |
+| `**/*.erb`                                      | `erb.md` — ERB templates (SSTI / XSS / escaping / whitespace and output structure). |
 | `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                                       |
 | `**/*.astro`                                    | `astro.md` — Astro components and islands.                                                            |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                                    |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                           |
+| `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# implementation, signature, and script files.                                         |
+| `**/*.cs`                                       | `csharp.md` — C# source files. |
 | `**/*.rs`                                       | `rust.md`                                                                                             |
 | `**/*.R`                                        | `r.md`                                                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                              |

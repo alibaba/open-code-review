@@ -274,7 +274,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/package.json`                               | `package_json.md`——NPM 依赖 / 脚本。                                  |
 | `**/Cargo.toml`                                 | `cargo_toml.md`——Rust manifest。                                      |
 | `**/composer.json`                              | `composer_json.md`——Composer 依赖、自动加载、脚本、插件和包配置。     |
-| `**/*.{json,json5}`                             | `json.md`——通用 JSON（也匹配 `.json5`）。                             |
+| `**/*.{json,json5,jsonc}`                       | `json.md`——通用 JSON（也匹配 `.json5` 和 `.jsonc`）。 |
 | `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md`——GitHub Actions 工作流 YAML。                   |
 | `.github/**/*.{yaml,yml}`                       | `github_config.md`——其他 `.github` 配置 YAML。                        |
 | `**/*.{yaml,yml}`                               | `yaml.md`                                                             |
@@ -283,11 +283,16 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。          |
 | `**/*.{hbs,mustache}`                           | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。               |
 | `**/*.{jinja2,j2}`                              | `jinja.md`——Jinja 模板                                                |
+| `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md`——EJS、Liquid 与 Nunjucks 模板（SSTI / XSS / 转义）。 |
+| `**/*.{haml,slim}`                              | `haml_slim.md`——HAML 与 Slim 模板（SSTI / XSS / 转义 / 缩进语义）。 |
+| `**/*.erb`                                      | `erb.md`——ERB 模板（SSTI / XSS / 转义 / 空白与输出结构）。 |
 | `**/*.ets`                                      | `arkts.md`——ArkTS / HarmonyOS。                                       |
 | `**/*.astro`                                    | `astro.md`——Astro 组件与 islands。                                    |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                    |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                           |
+| `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md`——F# 实现、签名和脚本文件。                                |
+| `**/*.cs`                                       | `csharp.md`——C# 源文件。 |
 | `**/*.rs`                                       | `rust.md`                                                             |
 | `**/*.R`                                        | `r.md`                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                              |
