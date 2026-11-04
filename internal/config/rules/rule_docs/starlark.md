@@ -97,8 +97,9 @@ def add(name, names=None):
 
 **Key checks:**
 
-- Ordered comparisons (`<`, `<=`, `>`, `>=`) are defined only within a single
-  value type; `==` and `!=` may compare across types.
+- Ordered comparisons (`<`, `<=`, `>`, `>=`) generally require operands of the
+  same type, but mixed `int`/`float` comparisons are also supported.
+  `==` and `!=` may compare across types.
 - Strings are not iterable; use `s.elems()` to iterate over characters.
 - Dictionary literals cannot contain duplicate keys.
 - Dictionary iteration order is deterministic.
