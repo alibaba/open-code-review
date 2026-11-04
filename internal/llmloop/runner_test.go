@@ -137,8 +137,8 @@ func TestRecordToolCall(t *testing.T) {
 
 func TestToolFailures_AreOrderedAndSnapshotIsolated(t *testing.T) {
 	r := NewRunner(Deps{})
-	r.recordToolFailure(2, "tool_b", "b.go", "second", nil, `{}`, 0)
-	r.recordToolFailure(1, "tool_a", "a.go", "first", nil, `{}`, 0)
+	r.recordToolFailure(2, llm.ToolCall{Function: llm.FunctionCall{Name: "tool_b", Arguments: `{}`}}, "b.go", "second", nil, 0)
+	r.recordToolFailure(1, llm.ToolCall{Function: llm.FunctionCall{Name: "tool_a", Arguments: `{}`}}, "a.go", "first", nil, 0)
 
 	failures := r.ToolFailures()
 	if len(failures) != 2 || failures[0].ToolCallNumber != 1 || failures[1].ToolCallNumber != 2 {

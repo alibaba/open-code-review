@@ -232,13 +232,13 @@ func (r *Runner) recordToolCall(name string) int64 {
 	return r.toolCallSequence
 }
 
-func (r *Runner) recordToolFailure(number int64, name, taskKey, errMsg string,
-	rec *session.TaskRecord, rawArguments string, duration time.Duration) {
+func (r *Runner) recordToolFailure(number int64, call llm.ToolCall, taskKey, errMsg string,
+	rec *session.TaskRecord, duration time.Duration) {
 	detail := ToolFailureDetail{
 		ToolCallNumber: number,
-		ToolName:       name,
+		ToolName:       call.Function.Name,
 		FilePath:       taskKey,
-		Arguments:      rawArguments,
+		Arguments:      call.Function.Arguments,
 		Error:          errMsg,
 	}
 
@@ -247,7 +247,7 @@ func (r *Runner) recordToolFailure(number int64, name, taskKey, errMsg string,
 	r.toolCallsMu.Unlock()
 
 	if rec != nil {
-		rec.AddToolFailure(name, rawArguments, errMsg, duration)
+		rec.AddToolCallResult(call, errMsg, false, duration)
 	}
 }
 
@@ -713,8 +713,8 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		errMsg := fmt.Sprintf("Error parsing tool arguments for %s: %v", toolName, err)
 		telemetry.PrintToolCallStarted(toolName, nil)
 		telemetry.PrintToolCallError(toolName, fmt.Errorf("%s", errMsg))
-		r.recordToolFailure(toolCallNumber, toolName, taskKey, errMsg,
-			rec, call.Function.Arguments, time.Since(callStarted))
+		r.recordToolFailure(toolCallNumber, call, taskKey, errMsg,
+			rec, time.Since(callStarted))
 		return r.toolFailureResult(taskKey, toolName, errMsg)
 	}
 
@@ -741,8 +741,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 			telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), toolErr)
 			toolSpan.End()
 			telemetry.RecordToolCall(ctx, t.Name(), dur, false)
-			r.recordToolFailure(toolCallNumber, toolName, taskKey, errMsg,
-				rec, call.Function.Arguments, dur)
+			r.recordToolFailure(toolCallNumber, call, taskKey, errMsg, rec, dur)
 			telemetry.PrintToolCallError(t.Name(), toolErr)
 			return r.toolFailureResult(taskKey, toolName, errMsg)
 		}
@@ -759,6 +758,8 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		resolveAndCollect := func(rctx context.Context) {
 			for i := range comments {
 				cm := &comments[i]
+				original := *cm
+				var relocationRecord *session.TaskRecord
 				var d *model.Diff
 				if r.deps.DiffLookup != nil {
 					d = r.deps.DiffLookup(cm.Path)
@@ -789,6 +790,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 						if len(msgs) > 0 {
 							fs := r.deps.Session.GetOrCreateFileSession(cm.Path)
 							rlRec := fs.AppendTaskRecord(session.ReLocationTask, msgs)
+							relocationRecord = rlRec
 							// FilePath is cm.Path so it cannot drift from the file
 							// session opened above — that join is what the report
 							// needs. Reading it from the comment rather than from
@@ -814,13 +816,28 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 						}
 					}
 				}
+				if rec != nil {
+					evidenceDiff := d
+					if evidenceDiff == nil || (evidenceDiff.NewPath != cm.Path && evidenceDiff.OldPath != cm.Path) {
+						if r.deps.AllDiffs != nil {
+							all := r.deps.AllDiffs()
+							for j := range all {
+								if all[j].NewPath == cm.Path || all[j].OldPath == cm.Path {
+									evidenceDiff = &all[j]
+									break
+								}
+							}
+						}
+					}
+					rec.RecordCommentEvidence(call, i, original, cm, diff.CaptureCommentEvidence(*cm, evidenceDiff), relocationRecord)
+				}
 				r.deps.CommentCollector.Add(*cm)
 			}
 		}
 
 		if r.deps.CommentWorkerPool != nil {
 			if rec != nil {
-				rec.AddToolResult(t.Name(), call.Function.Arguments, "(async)")
+				rec.AddToolCallResult(call, "(async)", true, 0)
 			}
 			pool := r.deps.CommentWorkerPool
 			asyncCtx := context.WithoutCancel(ctx)
@@ -847,7 +864,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		telemetry.RecordToolCall(ctx, t.Name(), dur, true)
 		telemetry.PrintToolCallFinished(t.Name(), dur)
 		if rec != nil {
-			rec.AddToolResult(t.Name(), call.Function.Arguments, tool.CommentSucceed)
+			rec.AddToolCallResult(call, tool.CommentSucceed, true, 0)
 		}
 		r.resetToolFailureStreak(taskKey, t.Name())
 		return tool.Of(tool.CommentSucceed)
@@ -864,14 +881,13 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 	telemetry.RecordToolCall(ctx, toolName, dur, ok)
 
 	if err != nil {
-		r.recordToolFailure(toolCallNumber, toolName, taskKey, err.Error(),
-			rec, call.Function.Arguments, dur)
+		r.recordToolFailure(toolCallNumber, call, taskKey, err.Error(), rec, dur)
 		telemetry.PrintToolCallError(toolName, err)
 		return r.toolFailureResult(taskKey, toolName, fmt.Sprintf("Error executing tool %s: %v", toolName, err))
 	}
 	telemetry.PrintToolCallFinished(toolName, dur)
 	if rec != nil {
-		rec.AddToolResult(toolName, call.Function.Arguments, result)
+		rec.AddToolCallResult(call, result, true, 0)
 	}
 	r.resetToolFailureStreak(taskKey, toolName)
 	return tool.Of(result)

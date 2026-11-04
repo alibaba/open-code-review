@@ -79,6 +79,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr llm providers` | — | List all built-in LLM providers. |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions. |
 | `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints. |
+| `ocr session diagnose <id>` | — | Drill into recorded execution by task, phase and event. |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | Print the review comments recorded in one session. |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | Compare two sessions' findings: new, persisting, resolved, not reviewed. |
 | `ocr session export [id]` | — | Export one session as a self-contained HTML file. |
@@ -435,6 +436,90 @@ ocr session show --repo /path/to/repo <session-id>
 |---|---|---|
 | `--repo <path>` | current dir | Repository whose session should be inspected. |
 | `--json` | `false` | Emit session metadata and per-file items as JSON. |
+
+### `ocr session diagnose`
+
+Inspect the execution evidence saved in a session without making another model
+request. The overview groups LLM requests, responses and tool calls by their
+recorded task key and phase. A task key can identify a group of files.
+This complements the Viewer and HTML export with terminal diagnostics and
+structured output for scripts.
+
+```bash
+ocr session diagnose <session-id>
+ocr session diagnose <session-id> --task 'src/service.go'
+ocr session diagnose <session-id> --request <request-id>
+ocr session diagnose <session-id> --comment <evidence-id>
+ocr session diagnose <session-id> --event 12
+ocr session diagnose <session-id> --json
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--repo <path>` | current dir | Repository whose saved session should be inspected. |
+| `--task <key>` | all tasks | Select an exact key from the overview and list its events. |
+| `--request <id>` | all requests | Follow explicit request links; counts and event lists are limited to the selected request. |
+| `--comment <id>` | none | Open a comment's captured origin and code evidence; cannot be combined with `--event`. |
+| `--event <line>` | none | Open the original JSONL record at a positive physical line number. |
+| `--json` | `false` | Emit structured diagnostics, including the selected original event if any. |
+
+Observations identify recorded LLM errors, tool calls with `ok=false`, failed
+file checkpoints and missing or unreadable execution records. Existing `ok`
+values are preserved; error-looking text is not reclassified. A failure during
+an intermediate phase can be followed by recovery, so the run outcome remains
+the one recorded in its known-version manifest. Unknown or legacy outcomes
+remain unknown.
+
+A missing `session_end` can mean the review is still running. New records carry
+`request_id` (the request event's UUID), and tool results additionally carry
+`response_id` and the model's `tool_call_id` when available. Task event lists show
+these IDs; use `--request` to inspect one request and `--event` for its raw evidence.
+Session metadata and manifest coverage remain session-wide when filtering.
+
+Explicit links can reveal a request with no outcome even if another request has
+duplicate outcomes and the aggregate counts balance. Conflicting task, phase or
+request-number metadata, unresolved references and ambiguous IDs are reported as
+evidence inconsistencies. Inconsistent request scopes are excluded from the
+selected request's counts and event list. These observations do not redefine
+execution success. Async comment dispatch retains its existing recorded status.
+
+Older records without request links remain available through `--task` and
+`--event`; `--request` does not reconstruct their relationships. Legacy request/outcome
+counts indicate missing evidence without guessing which request owns a response.
+Record order and `parentUuid` do not establish causality between concurrent
+tasks. Physical line numbers also work for older records without UUIDs.
+
+Newly collected comments carry an `evidence_id` referencing a `comment_evidence`
+event. The overview lists these IDs without comment bodies or code excerpts.
+`--comment` emits structured diagnostics with the originating request, response,
+tool call and parsed batch index, the original comment before location, the
+resolved comment and code from the reviewed in-memory snapshot. It never reads
+the current working tree. Optional LLM re-location has its own request reference;
+capturing this evidence adds no model calls. A task/group key can differ from the
+comment's final file path; task/request filters refer to the origin.
+
+Code status is `matched`, `unmatched`, `snippet_missing` or `unavailable`. A match
+only describes text at the recorded coordinates. Each span identifies its old/new
+side and whether matching was exact or whitespace-normalized; whitespace matching
+does not establish semantic equivalence. Both sides are retained when available.
+SHA-256 hashes identify the raw diff, full new-file snapshot when present, and
+each complete span. Span text uses LF line endings and omits the final newline.
+Excerpts are capped at 16 KiB per span, with truncation marked; matching and span
+hashes still use the full span.
+
+Checkpoint references are historical, including superseded records; they do not
+mean a comment is currently accepted or published. Changes made by later stages
+(such as deduplication) are reported without overwriting the captured comment.
+Reused comments can reference evidence in another session and are marked
+`external`; the source checkpoint session is shown without automatically following
+session chains. Missing or conflicting references are reported, and ambiguous
+comment selections must be inspected through individual events. Older comments
+without evidence IDs remain inspectable through `--event`.
+
+Diagnosis does not verify findings or certify that every code block was reviewed.
+Original events and comment evidence can contain source code, review prose and
+model prompts; details are only included when explicitly selected with `--event`
+or `--comment`.
 
 ### `ocr session comments`
 

@@ -256,6 +256,7 @@ func TestExecuteToolCall_CodeCommentAsyncPool(t *testing.T) {
 
 	rec := &session.TaskRecord{}
 	cp := r.executeToolCall(context.Background(), "async.go", llm.ToolCall{
+		ID: "call-async-comment",
 		Function: llm.FunctionCall{
 			Name:      tool.CodeComment.Name(),
 			Arguments: `{"comments":[{"content":"issue","existing_code":"foo","path":"async.go"}]}`,
@@ -265,7 +266,7 @@ func TestExecuteToolCall_CodeCommentAsyncPool(t *testing.T) {
 	if cp.Data != tool.CommentSucceed {
 		t.Fatalf("cp.Data = %q, want CommentSucceed", cp.Data)
 	}
-	if len(rec.ToolResults) != 1 || rec.ToolResults[0].Result != "(async)" {
+	if len(rec.ToolResults) != 1 || rec.ToolResults[0].Result != "(async)" || rec.ToolResults[0].ToolCallID != "call-async-comment" {
 		t.Errorf("recorded results = %+v, want one (async) entry", rec.ToolResults)
 	}
 
@@ -304,6 +305,7 @@ func TestExecuteToolCall_CodeCommentDiffResolved(t *testing.T) {
 
 	rec := &session.TaskRecord{}
 	cp := r.executeToolCall(context.Background(), "resolved.go", llm.ToolCall{
+		ID: "call-sync-comment",
 		Function: llm.FunctionCall{
 			Name:      tool.CodeComment.Name(),
 			Arguments: `{"comments":[{"content":"issue","existing_code":"foo bar","path":"resolved.go"}]}`,
@@ -313,7 +315,7 @@ func TestExecuteToolCall_CodeCommentDiffResolved(t *testing.T) {
 	if cp.Data != tool.CommentSucceed {
 		t.Fatalf("cp.Data = %q, want CommentSucceed", cp.Data)
 	}
-	if len(rec.ToolResults) != 1 || rec.ToolResults[0].Result != tool.CommentSucceed {
+	if len(rec.ToolResults) != 1 || rec.ToolResults[0].Result != tool.CommentSucceed || rec.ToolResults[0].ToolCallID != "call-sync-comment" {
 		t.Errorf("recorded results = %+v, want one success entry", rec.ToolResults)
 	}
 

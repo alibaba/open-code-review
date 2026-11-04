@@ -77,6 +77,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr llm providers` | — | 列出所有内置 LLM provider。 |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | 列出已保存的评审会话。 |
 | `ocr session show <id>` | `ocr sessions show <id>` | 查看单个会话及其逐文件检查点。 |
+| `ocr session diagnose <id>` | — | 按任务、阶段和事件下钻查看已记录的执行证据。 |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | 输出单个会话中记录的评审评论。 |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 对比两个会话的问题：新增、仍存在、已解决、未评审。 |
 | `ocr session export [id]` | — | 将单个会话导出为自包含的 HTML 文件。 |
@@ -410,6 +411,69 @@ ocr session show --repo /path/to/repo <session-id>
 |---|---|---|
 | `--repo <path>` | 当前目录 | 要查看会话的仓库。 |
 | `--json` | `false` | 以 JSON 输出会话元数据和逐文件条目。 |
+
+### `ocr session diagnose`
+
+读取已保存的会话执行证据，无需再次调用模型。概览按记录中的任务标识和阶段，
+汇总 LLM 请求、响应及工具调用。任务标识可能代表一组文件。
+它在已有 Viewer 和 HTML 导出之外，提供终端诊断及供脚本使用的结构化输出。
+
+```bash
+ocr session diagnose <session-id>
+ocr session diagnose <session-id> --task 'src/service.go'
+ocr session diagnose <session-id> --request <request-id>
+ocr session diagnose <session-id> --comment <evidence-id>
+ocr session diagnose <session-id> --event 12
+ocr session diagnose <session-id> --json
+```
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--repo <path>` | 当前目录 | 待查看会话所属的仓库。 |
+| `--task <key>` | 全部任务 | 选择概览中的完整任务标识并列出事件。 |
+| `--request <id>` | 全部请求 | 沿显式关联查看一次请求，任务计数和事件列表仅包含所选请求。 |
+| `--comment <id>` | 无 | 打开评论来源和代码证据，不能与 `--event` 同时使用。 |
+| `--event <line>` | 无 | 按正整数物理行号查看原始 JSONL 记录。 |
+| `--json` | `false` | 输出结构化诊断，选择事件时附上其原始记录。 |
+
+诊断列出已记录的 LLM 错误、`ok=false` 的工具调用、失败的文件检查点，
+以及缺失或无法解析的执行记录。它保留已有 `ok` 含义，不根据文本是否像错误而重新分类。
+中间阶段失败后仍可能恢复，整次评审的结果沿用已知版本 manifest 中的状态；
+旧会话或未知版本的结果保持未知。
+
+缺少 `session_end` 也可能表示评审仍在进行。新记录包含 `request_id`（请求事件的 UUID），
+工具结果还包含 `response_id` 和模型提供的 `tool_call_id`（若有）。任务事件列表展示这些 ID，
+可用 `--request` 查看一次请求，再用 `--event` 打开原始证据。
+筛选请求时，会话元数据和 manifest 覆盖信息仍属于整次会话。
+
+即使某次请求的重复结果与另一次请求的缺失结果在总数上抵消，显式关联也能分别定位。
+诊断提示任务、阶段或请求序号冲突、无法解析的引用及歧义 ID；请求范围不一致的记录
+不计入所选请求的计数与事件列表。这些提示不改变执行成功的定义，异步评论派发也保留原有记录含义。
+
+缺少关联字段的旧记录仍可通过 `--task` 和 `--event` 查看，`--request` 不重建其关系。
+旧记录的请求和结果数量差只提示证据缺失，不猜测某条响应属于哪次请求。
+记录顺序和 `parentUuid` 不代表并发任务间的因果关系。
+物理行号同样适用于没有 UUID 的旧记录。
+
+新收集的评论带有 `evidence_id`，引用一条 `comment_evidence` 事件。
+概览展示这些 ID，不输出评论正文或代码片段。`--comment` 输出结构化诊断，包含来源请求、响应、
+工具调用及解析后批次下标、定位前的原始评论、定位后的评论，以及内存中被审查快照的代码。
+它不读取当前工作区文件；可选的 LLM 重新定位通过独立请求 ID 关联，证据记录本身不增加模型调用。
+任务或分组标识可以不同于评论最终文件路径，任务和请求筛选仍指向来源。
+
+代码状态为 `matched`、`unmatched`、`snippet_missing` 或 `unavailable`，匹配只描述记录坐标处的文本。
+每个片段注明旧侧或新侧、精确匹配或空白归一化匹配；空白匹配不代表语义等价。
+两侧均有可用证据时同时保留。SHA-256 分别标识原始 diff、可用的完整新文件快照和完整片段。
+片段统一使用 LF 换行且不包含末尾换行符，每段展示文本最多 16 KiB，并标明截断；
+匹配与片段哈希仍使用完整片段。
+
+检查点引用是历史记录，包含已被覆盖的记录，不代表评论当前被接受或已发布。
+后续去重等阶段改写评论时会提示差异，不覆盖原始捕获内容。复用的评论可能引用其他会话的证据，
+标为 `external` 并展示来源检查点会话，不自动沿会话链追踪。缺失或冲突的引用会被提示，
+歧义评论须通过原始事件逐条检查。没有证据 ID 的旧评论仍可通过 `--event` 查看。
+
+诊断不验证评论是否正确，也不保证每个代码块都经过审查。
+原始事件和评论证据可能包含源码、评论正文及模型提示词，仅在显式使用 `--event` 或 `--comment` 时输出详情。
 
 ### `ocr session comments`
 

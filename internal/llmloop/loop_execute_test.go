@@ -55,6 +55,7 @@ func TestExecuteToolCall_DynamicExecuteError(t *testing.T) {
 
 	rec := &session.TaskRecord{}
 	cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
+		ID:       "call-failure",
 		Function: llm.FunctionCall{Name: "dyn_fail", Arguments: `{"query":"needle"}`},
 	}, rec, "")
 
@@ -75,7 +76,7 @@ func TestExecuteToolCall_DynamicExecuteError(t *testing.T) {
 	if failure.Error != "boom" {
 		t.Errorf("failure details = %+v", failure)
 	}
-	if len(rec.ToolResults) != 1 || rec.ToolResults[0].OK || rec.ToolResults[0].Result != "boom" {
+	if len(rec.ToolResults) != 1 || rec.ToolResults[0].OK || rec.ToolResults[0].Result != "boom" || rec.ToolResults[0].ToolCallID != "call-failure" {
 		t.Errorf("session tool failure = %+v", rec.ToolResults)
 	}
 }
@@ -91,6 +92,7 @@ func TestExecuteToolCall_DynamicSuccessRecordsResult(t *testing.T) {
 
 	rec := &session.TaskRecord{}
 	cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
+		ID:       "call-success",
 		Function: llm.FunctionCall{Name: "dyn_ok", Arguments: `{"k":"v"}`},
 	}, rec, "")
 
@@ -100,7 +102,7 @@ func TestExecuteToolCall_DynamicSuccessRecordsResult(t *testing.T) {
 	if len(rec.ToolResults) != 1 {
 		t.Fatalf("expected 1 recorded tool result, got %d", len(rec.ToolResults))
 	}
-	if rec.ToolResults[0].ToolName != "dyn_ok" || rec.ToolResults[0].Result != "ok" {
+	if rec.ToolResults[0].ToolName != "dyn_ok" || rec.ToolResults[0].Result != "ok" || rec.ToolResults[0].ToolCallID != "call-success" {
 		t.Errorf("recorded result = %+v, want dyn_ok/ok", rec.ToolResults[0])
 	}
 	if !rec.ToolResults[0].OK {
