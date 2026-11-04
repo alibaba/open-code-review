@@ -5235,14 +5235,14 @@ function testActionEmitsMachineReadableRangeOutputs() {
     assert.strictEqual(resolve.includes(`core.setOutput('${name}'`), true, `the resolve step emits ${name}`);
     assert.strictEqual(outputsBlock.includes(`\n  ${name}:`), true, `action.yml declares the ${name} output`);
     assert.strictEqual(
-      outputsBlock.includes(`steps.range.outputs.${name} }}`),
+      outputsBlock.includes(`steps.range.outputs.${name} || steps.saved_post.outputs.${name} }}`),
       true,
       `${name} is mapped to the resolve step`
     );
     assert.strictEqual(ACTION_README.includes(`\`${name}\``), true, `the README documents ${name}`);
   }
   // checkpoint_after comes from the posting step, where it is recorded.
-  assert.strictEqual(outputsBlock.includes("steps.post.outputs.checkpoint_after }}"), true);
+  assert.strictEqual(outputsBlock.includes("steps.post.outputs.checkpoint_after || steps.saved_post.outputs.checkpoint_after }}"), true);
   assert.strictEqual(ACTION_README.includes("`checkpoint_after`"), true);
 }
 
@@ -5251,7 +5251,7 @@ function testActionEmitsMachineReadableRangeOutputs() {
 function testActionPinsGithubScriptSha() {
   assert.strictEqual(/actions\/github-script@v/.test(ACTION_YML), false, "no floating github-script tag may remain");
   const uses = [...ACTION_YML.matchAll(/uses: actions\/github-script@([0-9a-f]{40})/g)].map((m) => m[1]);
-  assert.strictEqual(uses.length, 2, "both github-script steps are pinned");
+  assert.strictEqual(uses.length, 4, "all github-script steps are pinned");
   assert.strictEqual(new Set(uses).size, 1, "…to the same sha");
 }
 
