@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -115,15 +116,7 @@ func TestReadLines_CommitMode_LegitimatePathSpellings(t *testing.T) {
 	dir := setupSpellingRepo(t)
 	commit := getHeadCommit(t, dir)
 
-	for _, path := range []string{
-		"docs/云配置项.md", // allow-non-english: fixture exercises a non-ASCII path
-		"we ird/space file.go",
-		"we:ird/colon.txt",
-		"br[ack]et.txt",
-		"-weird.txt",
-		"empty.txt",
-		"pkg/sub/impl.go",
-	} {
+	for _, path := range spellingFixturePaths() {
 		t.Run(path, func(t *testing.T) {
 			fr := &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit}
 			if _, _, err := fr.ReadLines(context.Background(), path, 1, 100); err != nil {
@@ -131,6 +124,25 @@ func TestReadLines_CommitMode_LegitimatePathSpellings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// spellingFixturePaths lists one file per path spelling that must keep
+// working. The colon spelling cannot exist on Windows, where ':' is not a
+// valid file-name character, so it is excluded there.
+func spellingFixturePaths() []string {
+	paths := []string{
+		"docs/云配置项.md", // allow-non-english: fixture exercises a non-ASCII path
+		"we ird/space file.go",
+		"we:ird/colon.txt",
+		"br[ack]et.txt",
+		"-weird.txt",
+		"empty.txt",
+		"pkg/sub/impl.go",
+	}
+	if runtime.GOOS == "windows" {
+		paths = slices.DeleteFunc(paths, func(p string) bool { return strings.Contains(p, ":") })
+	}
+	return paths
 }
 
 // setupSpellingRepo builds a repository holding one file per path spelling
@@ -149,15 +161,7 @@ func setupSpellingRepo(t *testing.T) string {
 	run("git", "init")
 	run("git", "config", "user.email", "test@test.com")
 	run("git", "config", "user.name", "Test")
-	for _, rel := range []string{
-		"docs/云配置项.md", // allow-non-english: fixture exercises a non-ASCII path
-		"we ird/space file.go",
-		"we:ird/colon.txt",
-		"br[ack]et.txt",
-		"-weird.txt",
-		"empty.txt",
-		"pkg/sub/impl.go",
-	} {
+	for _, rel := range spellingFixturePaths() {
 		full := filepath.Join(dir, rel)
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			t.Fatal(err)
