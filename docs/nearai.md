@@ -101,6 +101,24 @@ phase for failures discovered after the response arrives.
 
 ## Results and local storage
 
+Use `--audience human` to follow requests while a review is running:
+
+```sh
+ocr review --provider nearai --format json --audience human
+```
+
+Each logical request prints its start and finish, including status and elapsed
+time. Review requests include their file, task and request number so concurrent
+calls can be distinguished. NEAR AI also prints the start and finish of
+`preflight`, `inference` and `response_verification`, making the current stage
+visible before the request returns. These lines contain identifiers, status and
+timing rather than prompts, responses or raw error bodies.
+
+With JSON output, progress goes to stderr and stdout remains a single result
+document. `--audience agent` suppresses progress. A started stage without a matching
+finish identifies the operation still in progress or interrupted when the log
+ended; it does not by itself establish a deadlock.
+
 Text output includes the verification status, counts, E2EE setting and policy.
 JSON review output includes `llm.verification`, for example:
 

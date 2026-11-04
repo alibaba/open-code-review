@@ -222,6 +222,7 @@ func nearAIVerificationFailure(err error, stage string) bool {
 }
 
 func (c *nearAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	progress := startRequestProgress(ctx, req.Model, c.cfg.Model)
 	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
 	defer cancel()
@@ -287,8 +288,10 @@ func (c *nearAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		}
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 		if panicked != nil {
+			progress.finish(errRequestPanicked)
 			panic(panicked)
 		}
+		progress.finish(err)
 	}()
 	if err = ctx.Err(); err != nil {
 		return nil, err
@@ -299,6 +302,7 @@ func (c *nearAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 	if c.initErr != nil {
 		return nil, c.initErr
 	}
+	progress.stage("preflight")
 	evidence, err := c.sdk.Verify(ctx, model)
 	if err != nil {
 		return nil, err
@@ -307,12 +311,14 @@ func (c *nearAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		return nil, &nearAIFailure{code: "policy.model_attestation_required", stage: "preflight"}
 	}
 	record.Stage = "inference"
+	progress.stage("inference")
 	resp, err = c.inner.CompletionsWithCtx(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	record.CompletionID = resp.ID
 	record.Stage = "response verification"
+	progress.stage("response_verification")
 	verified, err := c.verifyResponse(ctx, resp.ID)
 	if err != nil {
 		return nil, err

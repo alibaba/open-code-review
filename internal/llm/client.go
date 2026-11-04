@@ -673,6 +673,10 @@ type ChatRequest struct {
 // path including the streaming branch, the EOF recovery and a panic. Results are
 // named so the defer can read the error actually returned.
 func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	var progress *requestProgress
+	if !c.cfg.deferFinalize {
+		progress = startRequestProgress(ctx, req.Model, c.cfg.Model)
+	}
 	defer func() {
 		if c.cfg.deferFinalize {
 			return
@@ -681,10 +685,12 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		// drops the whole run's report. The panic value itself is re-raised
 		// unchanged so agent.go's per-file recovery behaves exactly as before.
 		if r := recover(); r != nil {
+			progress.finish(errRequestPanicked)
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
 			panic(r)
 		}
 		err = describeTimeout(ctx, err)
+		progress.finish(err)
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
 
@@ -1486,12 +1492,15 @@ func anthropicThinkingBudgetTokens(v any) (int64, bool) {
 // named. A parameter-building failure returns before any HTTP attempt, so
 // Finalize finds no entry and the request stays out of the report entirely.
 func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	progress := startRequestProgress(ctx, req.Model, c.cfg.Model)
 	defer func() {
 		if r := recover(); r != nil {
+			progress.finish(errRequestPanicked)
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
 			panic(r)
 		}
 		err = describeTimeout(ctx, err)
+		progress.finish(err)
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
 

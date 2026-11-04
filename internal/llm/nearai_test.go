@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"filippo.io/edwards25519"
+	"github.com/alibaba/open-code-review/internal/stdout"
 	nearai "github.com/nearai/inference-sdk/go"
 	"github.com/openai/openai-go/v3"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -619,12 +620,14 @@ func TestNearAIGatewayPolicyAndSignatureRetry(t *testing.T) {
 func TestNearAIWaitsForVerificationAndCancellation(t *testing.T) {
 	for _, cancelRequest := range []bool{false, true} {
 		t.Run(fmt.Sprint(cancelRequest), func(t *testing.T) {
+			var output progressBuffer
+			defer stdout.Swap(&output)()
 			g := newNearAIGateway(t)
 			g.signatureEntered = make(chan struct{}, 1)
 			g.signatureRelease = make(chan struct{})
 			c := nearAITestClient(t, g, NearAISettings{false, "model-tee"}, true)
 			defer close(g.signatureRelease)
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(metaCtx(testMeta()))
 			defer cancel()
 			done := make(chan struct{})
 			var resp *ChatResponse
@@ -643,6 +646,16 @@ func TestNearAIWaitsForVerificationAndCancellation(t *testing.T) {
 			if c.VerificationReport().Status != "pending" {
 				t.Fatal("in-flight response reported verified")
 			}
+			progress := output.String()
+			if strings.Count(progress, "[ocr] LLM request started ") != 1 || strings.Contains(progress, "[ocr] LLM request finished ") {
+				t.Fatalf("logical request progress ended early or was duplicated: %s", progress)
+			}
+			if got := nearAIProgressStages(progress, "started"); got != "preflight,inference,response_verification" {
+				t.Fatalf("live stages = %q", got)
+			}
+			if got := nearAIProgressStages(progress, "finished"); got != "preflight,inference" {
+				t.Fatalf("unfinished verification stage was marked complete: %q", got)
+			}
 			if cancelRequest {
 				cancel()
 			} else {
@@ -660,7 +673,118 @@ func TestNearAIWaitsForVerificationAndCancellation(t *testing.T) {
 			} else if err != nil || resp == nil {
 				t.Fatalf("verified: %+v %v", resp, err)
 			}
+			progress = output.String()
+			status := "ok"
+			if cancelRequest {
+				status = "cancelled"
+			}
+			if strings.Count(progress, "[ocr] LLM request finished ") != 1 || !strings.Contains(progress, "status="+status+" elapsed=") {
+				t.Fatalf("request completion progress: %s", progress)
+			}
+			if got := nearAIProgressStages(progress, "finished"); got != "preflight,inference,response_verification" {
+				t.Fatalf("finished stages = %q", got)
+			}
+			for _, private := range []string{"private review", "verified answer", "verified reasoning", "Bearer test"} {
+				if strings.Contains(progress, private) {
+					t.Fatalf("progress copied private content %q", private)
+				}
+			}
 		})
+	}
+}
+
+func nearAIProgressStages(output, event string) string {
+	var stages []string
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.HasPrefix(line, "[ocr] LLM stage "+event+" ") {
+			continue
+		}
+		_, suffix, ok := strings.Cut(line, `stage="`)
+		if ok {
+			stage, _, _ := strings.Cut(suffix, `"`)
+			stages = append(stages, stage)
+		}
+	}
+	return strings.Join(stages, ",")
+}
+
+func TestNearAIProgressRetainsFailureStageWithoutPrivateErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name, stages string
+		chats        int32
+	}{
+		{name: "preflight", stages: "preflight"},
+		{name: "inference", stages: "preflight,inference", chats: 1},
+		{name: "verification", stages: "preflight,inference,response_verification", chats: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newNearAIGateway(t)
+			if tc.name == "inference" {
+				g.chatStatus = http.StatusServiceUnavailable
+			}
+			g.tamper = tc.name == "verification"
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.name == "preflight" && r.URL.Path == "/v1/attestation/report" {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					_, _ = io.WriteString(w, "sensitive provider body")
+					return
+				}
+				g.ServeHTTP(w, r)
+			})
+			c := nearAITestClient(t, handler, NearAISettings{false, "model-tee"}, false)
+			var response *ChatResponse
+			var requestErr error
+			progress := captureRequestProgress(t, func() {
+				response, requestErr = c.CompletionsWithCtx(metaCtx(testMeta()), nearAIRequest())
+			})
+			if response != nil || requestErr == nil || g.chats.Load() != tc.chats {
+				t.Fatalf("failure semantics changed: response=%+v err=%v chats=%d", response, requestErr, g.chats.Load())
+			}
+			if tc.name == "inference" && !strings.Contains(requestErr.Error(), "sensitive provider body") {
+				t.Fatalf("caller lost its original provider error: %v", requestErr)
+			}
+			for _, event := range []string{"started", "finished"} {
+				if got := nearAIProgressStages(progress, event); got != tc.stages {
+					t.Fatalf("%s stages = %q, want %q", event, got, tc.stages)
+				}
+				if strings.Count(progress, "[ocr] LLM request "+event+" ") != 1 {
+					t.Fatalf("duplicated or missing logical request %s: %s", event, progress)
+				}
+			}
+			if !strings.Contains(progress, "status=failed elapsed=") {
+				t.Fatalf("failure status missing: %s", progress)
+			}
+			for _, private := range []string{"sensitive provider body", "private review", "verified answer", "Bearer test"} {
+				if strings.Contains(progress, private) {
+					t.Fatalf("progress copied private content %q", private)
+				}
+			}
+		})
+	}
+}
+
+type nearAIPanicTransport struct{ nearAITransport }
+
+func (nearAIPanicTransport) Verify(context.Context, string) (nearai.AttestationVerificationResult, error) {
+	panic("sensitive panic details")
+}
+
+func TestNearAIProgressPreservesPanic(t *testing.T) {
+	c := nearAITestClient(t, newNearAIGateway(t), NearAISettings{false, "model-tee"}, false)
+	c.sdk = nearAIPanicTransport{c.sdk}
+	var panicked any
+	progress := captureRequestProgress(t, func() {
+		defer func() { panicked = recover() }()
+		_, _ = c.CompletionsWithCtx(metaCtx(testMeta()), nearAIRequest())
+	})
+	if panicked != "sensitive panic details" {
+		t.Fatalf("panic changed: %v", panicked)
+	}
+	if strings.Contains(progress, "sensitive panic details") || !strings.Contains(progress, "status=panicked elapsed=") {
+		t.Fatalf("panic progress exposed its value or missed its status: %s", progress)
+	}
+	if c.VerificationReport().Records[0].Code != "request.panicked" {
+		t.Fatal("panic verification record changed")
 	}
 }
 
