@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/pathutil"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -335,11 +337,21 @@ func sanitizeEndpointHost(rawURL string) string {
 
 // applyCLIExcludes appends user-supplied --exclude patterns (already split
 // into a []string) onto cc.FileFilter.Exclude. Creates the FileFilter if
-// none was returned by rule.json layers. Idempotent on empty input.
+// none was returned by rule.json layers. Idempotent on empty input. On
+// Windows, patterns whose backslash separators doublestar would read as
+// escapes are warned about (#1463); matching behavior is unchanged.
 func applyCLIExcludes(cc *commonContext, patterns []string) {
+	applyCLIExcludesFor(os.Stderr, runtime.GOOS, cc, patterns)
+}
+
+// applyCLIExcludesFor is applyCLIExcludes with the warning destination and
+// GOOS injectable so tests can assert the Windows separator warnings from
+// #1463 on any platform.
+func applyCLIExcludesFor(w io.Writer, goos string, cc *commonContext, patterns []string) {
 	if len(patterns) == 0 {
 		return
 	}
+	pathutil.WarnPatternBackslashes(w, goos, "--exclude", patterns)
 	if cc.FileFilter == nil {
 		cc.FileFilter = &rules.FileFilter{}
 	}
