@@ -71,6 +71,9 @@ func TestScanFileRead_MissingPathKeepsItemStatus(t *testing.T) {
 	})
 	a.items = items
 	a.currentDate = "2026-06-26"
+	// Finalize closes the session's JSONL file; without it Windows cannot
+	// remove the TempDir during cleanup (open files cannot be unlinked).
+	t.Cleanup(func() { _ = a.Session().Finalize() })
 
 	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
 		t.Fatalf("dispatchSubtasks: %v", err)
