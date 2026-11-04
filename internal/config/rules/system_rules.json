@@ -51,6 +51,8 @@
     "**/*.{jsonnet,libsonnet}": "jsonnet.md",
     "**/*.zig": "zig.md",
     "**/*.thrift": "thrift.md",
+    "**/*.{bzl,bazel,star}": "starlark.md",
+    "**/{BUILD,WORKSPACE}": "starlark.md",
     "**/*.capnp": "capnp.md",
     "**/*.{ml,mli}": "ocaml.md",
     "**/*.{re,rei}": "ocaml.md",
