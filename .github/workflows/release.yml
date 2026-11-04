@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     container:
-      image: node:24
+      image: node:24.22.1
     permissions:
       contents: read
       id-token: write
@@ -99,7 +99,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 15
     container:
-      image: golang:1.26.9
+      image: golang:1.26.10
       options: --cpus=2
     strategy:
       matrix:
@@ -253,7 +253,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
-      image: node:24
+      image: node:24.22.1
     permissions:
       contents: read
       id-token: write

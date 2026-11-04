@@ -304,7 +304,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/package.json`                   | `package_json.md` — зависимости / скрипты NPM.                                                   |
 | `**/Cargo.toml`                     | `cargo_toml.md` — манифест Rust.                                                                 |
 | `**/composer.json`                  | `composer_json.md` — зависимости Composer, автозагрузка, скрипты, плагины и конфигурация пакета. |
-| `**/*.{json,json5}`                 | `json.md` — обычный JSON (также совпадает `.json5`).                                             |
+| `**/*.{json,json5,jsonc}`           | `json.md` — обычный JSON (также совпадает `.json5` и `.jsonc`).                                  |
 | `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md` — YAML workflow GitHub Actions.                                            |
 | `.github/**/*.{yaml,yml}`           | `github_config.md` — прочий конфигурационный YAML `.github`.                                     |
 | `**/*.{yaml,yml}`                   | `yaml.md`                                                                                        |
@@ -313,10 +313,14 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — шаблоны FreeMarker (SSTI / XSS / обработка null).                              |
 | `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — шаблоны Handlebars и Mustache.                                        |
 | `**/*.{jinja2,j2}`                  | `jinja.md` — шаблоны Jinja                                                                       |
+| `**/*.{ejs,liquid,njk}`             | `ejs_liquid_njk.md` — шаблоны EJS, Liquid и Nunjucks (SSTI / XSS / экранирование).               |
+| `**/*.{haml,slim}`                  | `haml_slim.md` — шаблоны HAML и Slim (SSTI / XSS / экранирование / семантика отступов).          |
+| `**/*.erb`                          | `erb.md` — шаблоны ERB (SSTI / XSS / экранирование / пробелы и структура вывода).                |
 | `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                                  |
 | `**/*.astro`                        | `astro.md` — компоненты и islands Astro.                                                         |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                               |
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                                      |
+| `**/*.scala`                        | `scala.md`                                                                                       |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — файлы реализации, сигнатур и скриптов F#.                                          |
 | `**/*.cs`                           | `csharp.md` — исходные файлы C#.                                                                |
 | `**/*.rs`                           | `rust.md`                                                                                        |
