@@ -48,7 +48,7 @@ func TestParsePrice(t *testing.T) {
 		"input=3":                  "both input and output",
 		"output=3":                 "both input and output",
 		"input=3,output=x":         "not a number",
-		"input=3,output=-1":        "non-negative",
+		"input=3,output=-1":        "non-negative number, got -1",
 		"input=3,output=NaN":       "non-negative",
 		"input=3,output=1,foo=1":   "unknown price key",
 		"input=3;output=1":         "not a number",

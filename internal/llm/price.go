@@ -71,7 +71,7 @@ func PriceFromMap(m map[string]float64) (Price, error) {
 			return Price{}, fmt.Errorf("unknown price key %q (want input, cache_read, cache_write, output)", k)
 		}
 		if v := m[k]; v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
-			return Price{}, fmt.Errorf("price %s must be a non-negative number", k)
+			return Price{}, fmt.Errorf("price %s must be a non-negative number, got %v", k, m[k])
 		}
 	}
 	input, hasInput := m["input"]
