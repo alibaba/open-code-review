@@ -118,11 +118,9 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// This client is non-streaming: it calls Responses.New, which expects a
-		// single JSON body. If a provider config sets extra_body.stream=true
-		// (valid for the Chat Completions client, which switches to a streaming
-		// path), forwarding it here makes the API answer with SSE and every
-		// call fails to decode. Drop the key rather than forward it.
+		// Responses.New expects a single JSON body, not SSE. Drop true and
+		// non-boolean stream values to preserve that contract, but forward
+		// explicit false so gateways that default to streaming return JSON.
 		if k == "stream" {
 			stream, isBool := v.(bool)
 			if !isBool || stream {

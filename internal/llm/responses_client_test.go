@@ -610,55 +610,71 @@ func TestOpenAIResponsesClient_EndToEnd(t *testing.T) {
 	}
 }
 
-// TestOpenAIResponsesClient_ExtraBodyStreamDropped verifies that an
-// extra_body.stream=true (valid for the Chat Completions client) is NOT
-// forwarded to the Responses API. Forwarding it makes the API answer with SSE
-// while Responses.New expects a JSON body, breaking every call. Other
-// extra_body keys must still be forwarded.
+// True and non-boolean stream values must not request SSE while Responses.New
+// expects JSON. Other extra_body keys must still be forwarded.
 func TestOpenAIResponsesClient_ExtraBodyStreamDropped(t *testing.T) {
-	var gotBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(raw, &gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"resp_stream",
-			"object":"response",
-			"model":"gpt-5.4",
-			"status":"completed",
-			"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
-			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
-		}`))
-	}))
-	defer server.Close()
-
-	client := NewOpenAIResponsesClient(ClientConfig{
-		URL:    server.URL + "/v1",
-		APIKey: "test-key",
-		Model:  "gpt-5.4",
-		ExtraBody: map[string]any{
-			"stream":               true,
-			"keep_me":              "yes",
-			"temperature_override": 0.1,
-		},
-	})
-
-	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
-		Messages: []Message{{Role: "user", Content: "hi"}},
-	})
-	if err != nil {
-		t.Fatalf("CompletionsWithCtx: %v", err)
+	testCases := []struct {
+		name  string
+		value any
+	}{
+		{name: "boolean true", value: true},
+		{name: "string true", value: "true"},
+		{name: "string false", value: "false"},
+		{name: "null", value: nil},
+		{name: "number", value: 1},
+		{name: "object", value: map[string]any{}},
+		{name: "array", value: []any{}},
 	}
 
-	if _, present := gotBody["stream"]; present {
-		t.Errorf("request body should NOT contain a stream field, got %v", gotBody["stream"])
-	}
-	if gotBody["keep_me"] != "yes" {
-		t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
-	}
-	if resp.Content() != "ok" {
-		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(test *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					test.Errorf("decode request body: %v", err)
+					http.Error(writer, "invalid request body", http.StatusBadRequest)
+					return
+				}
+				if value, present := body["stream"]; present {
+					test.Errorf("request body should NOT contain a stream field, got %v", value)
+				}
+				if body["keep_me"] != "yes" {
+					test.Errorf("other extra_body keys must still be forwarded; keep_me = %v", body["keep_me"])
+				}
+
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{
+					"id":"resp_stream",
+					"object":"response",
+					"model":"gpt-5.4",
+					"status":"completed",
+					"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
+					"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+				}`))
+			}))
+			defer server.Close()
+
+			client := NewOpenAIResponsesClient(ClientConfig{
+				URL:    server.URL + "/v1",
+				APIKey: "test-key",
+				Model:  "gpt-5.4",
+				ExtraBody: map[string]any{
+					"stream":               testCase.value,
+					"keep_me":              "yes",
+					"temperature_override": 0.1,
+				},
+			})
+
+			resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages: []Message{{Role: "user", Content: "hi"}},
+			})
+			if err != nil {
+				test.Fatalf("CompletionsWithCtx: %v", err)
+			}
+			if resp.Content() != "ok" {
+				test.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+			}
+		})
 	}
 }
 
