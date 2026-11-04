@@ -101,6 +101,7 @@ type SessionSummary struct {
 	LLMFailures    int
 	CommentCount   int
 	Aborted        bool
+	Running        bool
 	Legacy         bool
 	TerminalState  string
 	SelectedCount  int
@@ -213,6 +214,7 @@ func peekSession(path string) (SessionSummary, error) {
 			}
 		}
 	}
+	applyRunning(&summary, path)
 	return summary, readErr
 }
 
@@ -767,7 +769,20 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs.Summary.SessionID = sessionID
 	vs.Summary.CommentCount = len(vs.Comments)
+	applyRunning(&vs.Summary, path)
 	return vs, readErr
+}
+
+// applyRunning marks an unfinished session running when its writer still holds
+// the sidecar lock. A session_end record has already cleared Aborted.
+func applyRunning(summary *SessionSummary, path string) {
+	if summary == nil || !summary.Aborted {
+		return
+	}
+	if session.SessionLockHeld(path) {
+		summary.Aborted = false
+		summary.Running = true
+	}
 }
 
 // commentMarkID returns a stable identity for one comment within an immutable

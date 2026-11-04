@@ -39,6 +39,7 @@ type Summary struct {
 	TotalComments  int           `json:"total_comments"`
 	LLMFailures    int64         `json:"llm_failures"`
 	Aborted        bool          `json:"aborted"`
+	Running        bool          `json:"running"`
 	Legacy         bool          `json:"legacy"`
 	RunManifest    *RunManifest  `json:"run_manifest,omitempty"`
 
@@ -172,6 +173,7 @@ func LoadDetail(repoDir, sessionID string) (*Summary, []ItemDetail, error) {
 	if summary.SessionID == "" {
 		summary.SessionID = sessionID
 	}
+	applyLiveness(summary)
 	return summary, items, nil
 }
 
@@ -190,7 +192,21 @@ func loadSummaryFromFile(path, sessionID, repoDir string) (*Summary, error) {
 	if summary.SessionID == "" {
 		summary.SessionID = sessionID
 	}
+	applyLiveness(summary)
 	return summary, nil
+}
+
+// applyLiveness marks an unfinished session running when its writer still
+// holds the sidecar lock. session_end has already cleared Aborted, so a
+// finished run is left alone.
+func applyLiveness(s *Summary) {
+	if s == nil || !s.Aborted || s.FilePath == "" {
+		return
+	}
+	if SessionLockHeld(s.FilePath) {
+		s.Aborted = false
+		s.Running = true
+	}
 }
 
 func walkSessionFile(path string, apply func(summaryRecord)) error {

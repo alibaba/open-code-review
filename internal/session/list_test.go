@@ -5,6 +5,7 @@ package session
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -266,10 +267,79 @@ func writeTestSession(t *testing.T, repoDir, from, to string, comments []model.L
 			if sh.persist.file != nil {
 				_ = sh.persist.file.Close()
 			}
+			if sh.persist.lockFile != nil {
+				_ = sh.persist.lockFile.Close()
+				sh.persist.lockFile = nil
+			}
 			sh.persist.writer = nil
 			sh.persist.file = nil
 			sh.persist.mu.Unlock()
 		}
 	}
 	return sh.SessionID
+}
+
+func TestSessionLivenessRunningAbortedCompleted(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	t.Run("running", func(t *testing.T) {
+		sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeCommit})
+		got, err := ListSessions(repoDir)
+		if err != nil {
+			t.Fatalf("ListSessions: %v", err)
+		}
+		var live *Summary
+		for i := range got {
+			if got[i].SessionID == sh.SessionID {
+				live = &got[i]
+				break
+			}
+		}
+		if live == nil {
+			t.Fatal("live session missing from list")
+		}
+		if live.Aborted || !live.Running {
+			t.Fatalf("live session flags = aborted:%v running:%v", live.Aborted, live.Running)
+		}
+		if live.Model != "test-model" {
+			t.Fatalf("live session model = %q, want metadata flushed while the run is open", live.Model)
+		}
+		detail, _, err := LoadDetail(repoDir, sh.SessionID)
+		if err != nil {
+			t.Fatalf("LoadDetail: %v", err)
+		}
+		if detail.Aborted || !detail.Running {
+			t.Fatalf("live detail flags = aborted:%v running:%v", detail.Aborted, detail.Running)
+		}
+		// The writer must stay reachable until the reads above finish: the
+		// process holding the session lock is this test.
+		runtime.KeepAlive(sh)
+	})
+
+	t.Run("aborted", func(t *testing.T) {
+		id := writeTestSession(t, repoDir, "a", "b", nil, 0, 0, false)
+		summary, err := LoadSummary(repoDir, id)
+		if err != nil {
+			t.Fatalf("LoadSummary: %v", err)
+		}
+		if !summary.Aborted || summary.Running {
+			t.Fatalf("interrupted session flags = aborted:%v running:%v", summary.Aborted, summary.Running)
+		}
+	})
+
+	t.Run("completed", func(t *testing.T) {
+		sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeCommit})
+		if err := sh.Finalize(); err != nil {
+			t.Fatalf("Finalize: %v", err)
+		}
+		summary, err := LoadSummary(repoDir, sh.SessionID)
+		if err != nil {
+			t.Fatalf("LoadSummary: %v", err)
+		}
+		if summary.Aborted || summary.Running {
+			t.Fatalf("completed session flags = aborted:%v running:%v", summary.Aborted, summary.Running)
+		}
+	})
 }

@@ -264,7 +264,7 @@
 
 {{/* Terminal-state rendering for the meta bar: classed by outcome, unclassed
      for unrecognized states. Invoked with .Session.Summary as dot. */}}
-{{define "meta-status"}}{{if .Aborted}}<span class="meta-status status-aborted">aborted</span>{{else if .Legacy}}<span class="meta-status status-legacy">legacy</span>{{else if eq .TerminalState "complete"}}<span class="meta-status status-complete">complete</span>{{else if eq .TerminalState "partial"}}<span class="meta-status status-partial">partial</span>{{else if eq .TerminalState "failed"}}<span class="meta-status status-failed">failed</span>{{else if eq .TerminalState "skipped"}}<span class="meta-status status-legacy">skipped</span>{{else}}<span class="meta-status">{{.TerminalState}}</span>{{end}}{{end}}
+{{define "meta-status"}}{{if .Running}}<span class="meta-status status-running">running</span>{{else if .Aborted}}<span class="meta-status status-aborted">aborted</span>{{else if .Legacy}}<span class="meta-status status-legacy">legacy</span>{{else if eq .TerminalState "complete"}}<span class="meta-status status-complete">complete</span>{{else if eq .TerminalState "partial"}}<span class="meta-status status-partial">partial</span>{{else if eq .TerminalState "failed"}}<span class="meta-status status-failed">failed</span>{{else if eq .TerminalState "skipped"}}<span class="meta-status status-legacy">skipped</span>{{else}}<span class="meta-status">{{.TerminalState}}</span>{{end}}{{end}}
 
 {{define "task-cards"}}
 <details class="file-accordion" data-pagination-item>
