@@ -149,6 +149,12 @@ func TestIsAllowedExt(t *testing.T) {
 		{".VY", true},
 		{".rego", true},
 		{".REGO", true},
+		{".cu", true},
+		{".CU", true},
+		{".cuh", true},
+		{".CUH", true},
+		{".hip", true},
+		{".HIP", true},
 		{".glsl", true},
 		{".GLSL", true},
 		{".hlsl", true},
@@ -225,7 +231,7 @@ func TestAllowlistKeepsEveryTestedExtension(t *testing.T) {
 		".haml", ".slim", ".erb",
 		".js", ".jsx", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".cs",
 		".rb", ".sh", ".bash", ".zsh", ".sql", ".css", ".scss", ".html", ".xml", ".yaml",
-		".yml", ".json", ".toml", ".lua", ".swift",
+		".yml", ".json", ".toml", ".lua", ".swift", ".cu", ".cuh", ".hip",
 	}
 	for _, ext := range tested {
 		if !allowed[ext] {
@@ -485,6 +491,16 @@ func TestIsExcludedPath(t *testing.T) {
 		{"vyper non-test", "src/token.vy", false},
 		{"vyper test in filename only", "src/test_helpers.vy", false},
 
+		// CUDA/HIP kernels have no conventional default test-file exclusion:
+		// PyTorch, CUTLASS and ROCm put kernels under both tests/ and test/,
+		// and many projects keep production kernels there too, so an
+		// extension-scoped pattern would drop real source. Generic fixture
+		// directories remain excluded.
+		{"cuda kernel in a tests directory", "tests/kernels/softmax.cu", false},
+		{"cuda header in a test directory", "kernels/test/attention.cuh", false},
+		{"hip kernel in a tests directory", "tests/kernels/hip_softmax.hip", false},
+		{"cuda kernel in testdata", "kernels/testdata/ref.cu", true},
+		{"cuda kernel under vendor", "third_party/cutlass/vendor/softmax.cu", true},
 		// Shader languages have no conventional default test-file exclusion.
 		{"glsl shader", "shaders/fragment.glsl", false},
 		{"hlsl shader", "shaders/lighting.hlsl", false},
