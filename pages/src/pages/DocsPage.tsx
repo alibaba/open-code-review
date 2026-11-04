@@ -74,6 +74,7 @@ const sidebarTree: SidebarGroup[] = [
     groupLabelKey: 'docs.sidebar.userGuide',
     items: [
       { id: 'sb-cli', labelKey: 'docs.sidebar.cliReference', slug: 'cli-reference' },
+      { id: 'sb-chatgpt-preview', labelKey: 'docs.sidebar.chatgptPreview', slug: 'chatgpt-preview' },
       { id: 'sb-rules', labelKey: 'docs.sidebar.reviewRules', slug: 'review-rules' },
       { id: 'sb-arch', labelKey: 'docs.sidebar.architecture', slug: 'architecture' },
       { id: 'sb-tools', labelKey: 'docs.sidebar.tools', slug: 'tools' },
@@ -88,6 +89,7 @@ const sidebarTree: SidebarGroup[] = [
           { id: 'sb-claude-code', labelKey: 'docs.sidebar.claudeCode', slug: 'claude-code' },
           { id: 'sb-delegate', labelKey: 'docs.sidebar.delegate', slug: 'delegate' },
           { id: 'sb-cicd', labelKey: 'docs.sidebar.cicd', slug: 'cicd' },
+          { id: 'sb-acp', labelKey: 'docs.sidebar.acp', slug: 'acp' },
         ],
       },
       { id: 'sb-contributing', labelKey: 'docs.sidebar.contributing', slug: 'contributing' },

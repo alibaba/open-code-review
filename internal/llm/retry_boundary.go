@@ -79,9 +79,10 @@ func classifyBoundaryError(err error) (ErrorClass, FailurePhase, bool) {
 // transport.
 func classifyStreamError(err error) (ErrorClass, FailurePhase) {
 	var integrityErr *streamIntegrityError
+	var responseEventErr *responseStreamEventError
 	var streamErr *ssestream.StreamError
 	switch {
-	case errors.As(err, &integrityErr), errors.As(err, &streamErr):
+	case errors.As(err, &integrityErr), errors.As(err, &responseEventErr), errors.As(err, &streamErr):
 		return ErrorClassProvider, FailurePhaseStream
 	case errors.Is(err, context.Canceled):
 		return ErrorClassCancelled, FailurePhaseContext

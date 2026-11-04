@@ -40,6 +40,28 @@ func TestHasSubtaskErrors(t *testing.T) {
 	}
 }
 
+func TestHasReviewLimitWarning(t *testing.T) {
+	tests := []struct {
+		name     string
+		warnings []agent.AgentWarning
+		want     bool
+	}{
+		{"nil warnings", nil, false},
+		{"empty", []agent.AgentWarning{}, false},
+		{"unrelated warning", []agent.AgentWarning{{Type: "token_budget_reached"}}, false},
+		{"subtask error only", []agent.AgentWarning{{Type: "subtask_error"}}, false},
+		{"limit reached", []agent.AgentWarning{{Type: llmloop.WarningReviewLimitReached}}, true},
+		{"mixed", []agent.AgentWarning{{Type: "other"}, {Type: llmloop.WarningReviewLimitReached}}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasReviewLimitWarning(tc.warnings); got != tc.want {
+				t.Errorf("hasReviewLimitWarning() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestWrapByRunes(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -372,6 +394,37 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	}
 }
 
+func TestOutputJSONWithWarnings_NoCommentsWithReviewLimitReached(t *testing.T) {
+	warnings := []agent.AgentWarning{{
+		Type:    llmloop.WarningReviewLimitReached,
+		File:    "a.go",
+		Message: "reached the aggregate token budget before finishing; the grace round completed the task",
+	}}
+	got := captureStdout(t, func() {
+		err := outputJSONWithWarnings(nil, warnings, 1, 40_000, 0, 40_000, 0, 0,
+			time.Second, "", nil, nil, "trace-1", nil, "sess-1", nil, false, nil, os.Stdout, nil, nil)
+		if err != nil {
+			t.Fatalf("outputJSONWithWarnings: %v", err)
+		}
+	})
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if strings.Contains(out.Message, "Looks good") {
+		t.Errorf("message = %q, a reached limit must not read as clean", out.Message)
+	}
+	if !strings.Contains(out.Message, "A review limit was reached") {
+		t.Errorf("message = %q, want the limit qualifier", out.Message)
+	}
+	if out.Status != "completed_with_warnings" {
+		t.Errorf("status = %q, want completed_with_warnings", out.Status)
+	}
+	if len(out.Warnings) != 1 || out.Warnings[0].Type != llmloop.WarningReviewLimitReached {
+		t.Errorf("warnings = %+v, want the structured limit warning", out.Warnings)
+	}
+}
+
 func TestOutputJSONNoFiles(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
@@ -522,6 +575,31 @@ func TestOutputTextWithWarnings_NoCommentsWithSubtaskError(t *testing.T) {
 	})
 	if !strings.Contains(got, "could not be reviewed") {
 		t.Errorf("expected subtask error message, got %q", got)
+	}
+}
+
+// A limit the grace round completed still truncates the review, so the
+// zero-finding output must not read as an unqualified approval.
+func TestOutputTextWithWarnings_NoCommentsWithReviewLimitReached(t *testing.T) {
+	warnings := []agent.AgentWarning{{
+		Type:    llmloop.WarningReviewLimitReached,
+		File:    "a.go",
+		Message: "reached the maximum tool-request rounds without finishing; the grace round completed the task",
+	}}
+	var got string
+	stderr := captureStderr(t, func() {
+		got = captureStdout(t, func() {
+			outputTextWithWarnings(nil, warnings, nil, os.Stdout)
+		})
+	})
+	if strings.Contains(got, "Looks good") {
+		t.Errorf("a reached limit must not read as clean, got %q", got)
+	}
+	if !strings.Contains(got, "A review limit was reached") {
+		t.Errorf("expected the limit message, got %q", got)
+	}
+	if !strings.Contains(stderr, "["+llmloop.WarningReviewLimitReached+"]") {
+		t.Errorf("expected the structured warning on stderr, got %q", stderr)
 	}
 }
 
