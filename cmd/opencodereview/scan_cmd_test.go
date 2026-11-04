@@ -4,6 +4,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -290,5 +292,39 @@ func TestParseScanFlags_IntFlags(t *testing.T) {
 	}
 	if opts.maxTokensBudget != 100000 {
 		t.Errorf("maxTokensBudget = %d", opts.maxTokensBudget)
+	}
+}
+
+func TestLoadScanTemplate(t *testing.T) {
+	defaults, err := loadScanTemplate("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.PlanTask == nil {
+		t.Fatal("default planner changed")
+	}
+	path := filepath.Join(t.TempDir(), "bounded.json")
+	raw := `{"MAIN_TASK":{"messages":[{"role":"system","content":"Bounded review."},{"role":"user","content":"{{file_content}}"}]},"PLAN_TASK":null,"NO_PLAN_GUIDANCE":"Bounded scope."}`
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	custom, err := loadScanTemplate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if custom.PlanTask != nil || custom.MainTask.Messages[0].Content != "Bounded review." {
+		t.Fatal("file override not loaded")
+	}
+	if custom.MaxTokens != defaults.MaxTokens || custom.MaxToolRequestTimes != defaults.MaxToolRequestTimes {
+		t.Fatal("budget changed")
+	}
+	if _, err := loadScanTemplate(path + "missing"); err == nil {
+		t.Fatal("missing file silently fell back")
+	}
+	if err := os.WriteFile(path, []byte(`{"MAIN_TASK":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadScanTemplate(path); err == nil {
+		t.Fatal("invalid file silently fell back")
 	}
 }
