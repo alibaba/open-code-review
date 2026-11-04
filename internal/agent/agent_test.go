@@ -17,6 +17,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
@@ -905,7 +906,9 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 		{NewPath: "main.go", OldPath: "main.go", Insertions: 4, Deletions: 2},
 		{NewPath: "moved_new.go", OldPath: "moved_old.go", IsRenamed: true},
 		{NewPath: "helper.go", OldPath: "helper.go", IsNew: true, Insertions: 12},
-		{NewPath: "removed.go", OldPath: "removed.go", IsDeleted: true, Deletions: 30},
+		// A deletion as ParseDiffText produces it: NewPath is the sentinel and
+		// the name is in OldPath.
+		{NewPath: "/dev/null", OldPath: "removed.go", IsDeleted: true, Deletions: 30},
 		{NewPath: "renamed.go", OldPath: "old_name.go", IsRenamed: true, Insertions: 5, Deletions: 5},
 		{NewPath: "bin.dat", OldPath: "bin.dat", IsBinary: true},
 	}
@@ -952,6 +955,9 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 	}
 	if strings.Contains(got, "bin.dat") {
 		t.Error("binary files should be skipped")
+	}
+	if strings.Contains(got, "/dev/null") {
+		t.Errorf("a deletion must be listed under its own path, not the /dev/null sentinel; got:\n%s", got)
 	}
 
 	// The separator is emitted before each entry, so a skipped final diff cannot
@@ -1157,9 +1163,22 @@ func TestDispatchSubtasks_MainTaskWithoutTaskDoneIsNotReusableCheckpoint(t *test
 	if client.calls != 1 {
 		t.Fatalf("LLM calls = %d, want 1", client.calls)
 	}
-	warnings := a.Warnings()
-	if len(warnings) != 1 || warnings[0].Type != "subtask_error" || warnings[0].File != diff.NewPath {
-		t.Fatalf("warnings = %+v, want one subtask_error for %s", warnings, diff.NewPath)
+	// The runner also records the spent round budget, with its incomplete
+	// verdict; the subtask_error is the failure diagnostic this test is about.
+	var limitWarnings, subtaskErrors []AgentWarning
+	for _, w := range a.Warnings() {
+		switch w.Type {
+		case llmloop.WarningReviewLimitReached:
+			limitWarnings = append(limitWarnings, w)
+		case "subtask_error":
+			subtaskErrors = append(subtaskErrors, w)
+		}
+	}
+	if len(limitWarnings) != 1 || !strings.Contains(limitWarnings[0].Message, "did not complete the task") {
+		t.Fatalf("limit warnings = %+v, want one incomplete verdict", limitWarnings)
+	}
+	if len(subtaskErrors) != 1 || subtaskErrors[0].File != diff.NewPath {
+		t.Fatalf("subtask errors = %+v, want one for %s", subtaskErrors, diff.NewPath)
 	}
 	sess.Finalize()
 
@@ -1220,9 +1239,14 @@ func TestDispatchSubtasks_IncompleteMainTaskMarksPartialFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("one completed file should keep the review partial, got %v", err)
 	}
-	warnings := a.Warnings()
-	if len(warnings) != 1 || warnings[0].Type != "subtask_error" || warnings[0].File != "incomplete.go" {
-		t.Fatalf("warnings = %+v, want one subtask_error for incomplete.go", warnings)
+	var subtaskErrors []AgentWarning
+	for _, w := range a.Warnings() {
+		if w.Type == "subtask_error" {
+			subtaskErrors = append(subtaskErrors, w)
+		}
+	}
+	if len(subtaskErrors) != 1 || subtaskErrors[0].File != "incomplete.go" {
+		t.Fatalf("subtask errors = %+v, want one for incomplete.go", subtaskErrors)
 	}
 }
 
