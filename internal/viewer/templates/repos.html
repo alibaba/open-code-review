@@ -23,7 +23,7 @@
     {{end}}
 </div>
 {{if .Repos}}
-<div class="table-scroll">
+<div class="table-scroll" role="region" aria-label="Repositories table">
 <table id="repositories-table" class="table">
     <thead><tr><th scope="col" class="col-repository">Repository</th><th scope="col" class="col-sessions">Sessions</th><th scope="col" class="col-modified">Last Modified</th><th scope="col" class="col-action">Action</th></tr></thead>
     <tbody>
@@ -40,6 +40,7 @@
 </div>
 {{template "pager" (dict "prefix" "repos" "label" "Repository pages")}}
 <script src="/static/pager.js"></script>
+<script src="/static/a11y.js"></script>
 <script src="/static/repos.js"></script>
 {{else}}
 <p>No session data found. Run a code review first.</p>

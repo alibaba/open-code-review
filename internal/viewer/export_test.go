@@ -32,7 +32,7 @@ const (
 )
 
 // TestExportSession_SelfContained is the whole point of the feature: the page
-// must render offline, so both /static/ assets have to arrive inlined and
+// must render offline, so all /static/ assets have to arrive inlined and
 // correctly typed. A plain string in <style>/<script> is what html/template
 // rejects - it renders the literal ZgotmplZ for CSS and a JSON-escaped string
 // literal (\u003c, never a bare <) for JS - so asserting on real asset content
@@ -49,6 +49,8 @@ func TestExportSession_SelfContained(t *testing.T) {
 
 	for _, want := range []string{
 		"--font: -apple-system",                 // style.css:5, inlined verbatim
+		"ocrArrowScroll",                        // a11y.js, inlined before pager.js
+		"window.ocrPager",                       // pager.js, inlined before session.js
 		`'<code class="inline-code">$1</code>'`, // session.js:17, inlined verbatim
 		`<span class="crumb">proj</span>`,       // the repo breadcrumb, de-linked
 		// the shared nav-brand partial, logo included, de-linked
@@ -168,11 +170,13 @@ func TestExportSession_Errors(t *testing.T) {
 // TestEmbeddedAssetsHaveNoTerminators is the static half of the inlining
 // contract. template.CSS and template.JS pass their contents through
 // unescaped, so an asset containing "</style" or "</script" would break out of
-// the tag it was inlined into. Both are compile-time embedded, so checking
-// them here is cheaper and stricter than a runtime guard.
+// the tag it was inlined into. The assets are compile-time embedded, so
+// checking them here is cheaper and stricter than a runtime guard.
 func TestEmbeddedAssetsHaveNoTerminators(t *testing.T) {
 	for _, tt := range []struct{ path, terminator string }{
 		{"static/style.css", "</style"},
+		{"static/a11y.js", "</script"},
+		{"static/pager.js", "</script"},
 		{"static/session.js", "</script"},
 	} {
 		t.Run(tt.path, func(t *testing.T) {

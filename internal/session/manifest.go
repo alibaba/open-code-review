@@ -263,6 +263,7 @@ type ManifestExecution struct {
 	Provider              string `json:"provider,omitempty"`
 	Model                 string `json:"model,omitempty"`
 	ConfiguredConcurrency int    `json:"configured_concurrency,omitempty"`
+	MaxToolRequestTimes   int    `json:"max_tool_request_times,omitempty"`
 	RuleConfigSHA256      string `json:"rule_config_sha256,omitempty"`
 	RuntimeConfigSHA256   string `json:"runtime_config_sha256,omitempty"`
 }

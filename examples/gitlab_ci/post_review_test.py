@@ -20,6 +20,7 @@ Test seams:
      canned ``HTTPError`` sequences.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -58,6 +59,13 @@ DIFF_REFS = {
     "start_sha": "def456",
     "head_sha": "ghi789",
 }
+
+
+def diff_inventory(path, lines):
+    """Build a diff inventory for ``path`` from ``{new_line: (type, old_line)}``."""
+    positions = {n: {"type": t, "old_line": o} for n, (t, o) in lines.items()}
+    return {"files": {path: []}, "known": {path},
+            "positions": {path: positions}, "complete": True}
 
 DEFAULT_CONFIG = {
     "success_delay": 2.0,
@@ -234,6 +242,24 @@ class FormatCommentTest(unittest.TestCase):
         self.assertIn("```suggestion:-0+0\nx = 2\n```", body)
         self.assertIn("**Suggestion:**", body)
 
+    def test_with_multiline_suggestion(self):
+        body = pr.format_comment(comment(content="fix this", existing_code="x = 1\ny = 2", suggestion_code="x = 2\ny = 3", start_line=5, end_line=6))
+        self.assertIn("fix this", body)
+        self.assertIn("```suggestion:-1+0\nx = 2\ny = 3\n```", body)
+        self.assertIn("**Suggestion:**", body)
+
+    def test_with_multiline_suggestion_no_start_line(self):
+        body = pr.format_comment(comment(content="fix this", existing_code="x = 1\ny = 2", suggestion_code="x = 2\ny = 3", start_line=None, end_line=5))
+        self.assertIn("fix this", body)
+        self.assertIn("```suggestion:-0+0\nx = 2\ny = 3\n```", body)
+        self.assertIn("**Suggestion:**", body)
+
+    def test_with_multiline_suggestion_no_end_line(self):
+        body = pr.format_comment(comment(content="fix this", existing_code="x = 1\ny = 2", suggestion_code="x = 2\ny = 3", start_line=5, end_line=None))
+        self.assertIn("fix this", body)
+        self.assertIn("```suggestion:-0+0\nx = 2\ny = 3\n```", body)
+        self.assertIn("**Suggestion:**", body)
+
     def test_suggestion_without_existing(self):
         body = pr.format_comment(comment(content="fix this", suggestion_code="x = 2"))
         self.assertNotIn("```suggestion", body)
@@ -385,7 +411,13 @@ class SafeFenceTest(unittest.TestCase):
 
 class PublishTest(unittest.TestCase):
     def test_inline_success_and_summary(self):
-        stats, rec = run_publish({"comments": [comment()]})
+        # A multiline span whose boundaries are added lines: line_range is
+        # resolved from the diff and both boundaries use the pure-addition code.
+        diffs = diff_inventory("main.py", {n: ("new", None) for n in range(5, 11)})
+        stats, rec = run_publish(
+            {"comments": [comment(start_line=5, end_line=10)]},
+            poster=Recorder(diffs=diffs),
+        )
         self.assertEqual(stats["inline"], 1)
         self.assertEqual(stats["failed"], 0)
         self.assertEqual(len(rec.disc_calls), 1)
@@ -394,9 +426,44 @@ class PublishTest(unittest.TestCase):
         inline = rec.disc_calls[0]
         self.assertEqual(inline["position"]["new_path"], "main.py")
         self.assertEqual(inline["position"]["new_line"], 10)
+        line_range = inline["position"]["line_range"]
+        expected_path_sha1 = hashlib.sha1(b"main.py").hexdigest()
+        self.assertEqual(line_range["start"]["line_code"], f"{expected_path_sha1}_0_5")
+        self.assertEqual(line_range["start"]["new_line"], 5)
+        self.assertEqual(line_range["start"]["type"], "new")
+        self.assertEqual(line_range["end"]["line_code"], f"{expected_path_sha1}_0_10")
+        self.assertEqual(line_range["end"]["new_line"], 10)
+
         self.assertIn("possible issue", inline["body"])
         self.assertIn("**1** issue(s)", rec.final_summary_body)
         self.assertIn("Successfully posted inline: 1 comment(s)", rec.final_summary_body)
+
+    def test_inline_multiline_context_boundary(self):
+        # The start boundary is an unchanged context line, so its line_code must
+        # carry the real old-file line number (not the pure-addition 0).
+        diffs = diff_inventory("main.py", {5: ("context", 4), 6: ("new", None)})
+        stats, rec = run_publish(
+            {"comments": [comment(start_line=5, end_line=6)]},
+            poster=Recorder(diffs=diffs),
+        )
+        self.assertEqual(stats["inline"], 1)
+        line_range = rec.disc_calls[0]["position"]["line_range"]
+        expected_path_sha1 = hashlib.sha1(b"main.py").hexdigest()
+        self.assertEqual(line_range["start"]["line_code"], f"{expected_path_sha1}_4_5")
+        self.assertEqual(line_range["start"]["type"], None)
+        self.assertEqual(line_range["start"]["old_line"], 4)
+        self.assertEqual(line_range["end"]["line_code"], f"{expected_path_sha1}_0_6")
+        self.assertEqual(line_range["end"]["type"], "new")
+
+    def test_inline_multiline_unresolvable_omits_line_range(self):
+        # With no diff positions for the file, we must not emit a bogus code;
+        # the comment still posts, anchored on the single end_line.
+        stats, rec = run_publish({"comments": [comment(start_line=5, end_line=10)]})
+        self.assertEqual(stats["inline"], 1)
+        self.assertEqual(stats["failed"], 0)
+        inline = rec.disc_calls[0]
+        self.assertEqual(inline["position"]["new_line"], 10)
+        self.assertNotIn("line_range", inline["position"])
 
     def test_fallback_when_diff_refs_none(self):
         stats, rec = run_publish({"comments": [comment()]}, diff_refs=None)
@@ -1204,6 +1271,45 @@ class LineResolutionTest(unittest.TestCase):
     def test_classify_valid(self):
         diff = {"known": {"main.py"}, "files": {"main.py": [{"start": 5, "end": 15}]}, "complete": True}
         self.assertEqual(pr.classify_comment_against_diff(comment(start_line=10, end_line=10), diff), "valid")
+
+
+class LinePositionTest(unittest.TestCase):
+    def test_build_new_line_positions_maps_added_and_context(self):
+        # @@ -1,3 +5,4 @@: new lines 5 (ctx), 6 (added), 7 (ctx); '-' advances
+        # only the old counter and creates no new-file position.
+        patch = "@@ -1,3 +5,4 @@\n ctx\n-gone\n+added\n ctx2\n"
+        positions = pr.build_new_line_positions(patch)
+        self.assertEqual(positions[5], {"type": "context", "old_line": 1})
+        self.assertEqual(positions[6], {"type": "new", "old_line": None})
+        # ctx2 is the old line after the removed one (old counter 2 -> 3).
+        self.assertEqual(positions[7], {"type": "context", "old_line": 3})
+
+    def test_build_new_line_positions_empty(self):
+        self.assertEqual(pr.build_new_line_positions(""), {})
+        self.assertEqual(pr.build_new_line_positions(None), {})
+
+    def test_resolve_boundary_added_line(self):
+        positions = {6: {"type": "new", "old_line": None}}
+        b = pr.resolve_line_range_boundary("sha", 6, positions)
+        self.assertEqual(b, {"line_code": "sha_0_6", "type": "new",
+                             "old_line": None, "new_line": 6})
+
+    def test_resolve_boundary_context_line(self):
+        positions = {5: {"type": "context", "old_line": 4}}
+        b = pr.resolve_line_range_boundary("sha", 5, positions)
+        self.assertEqual(b, {"line_code": "sha_4_5", "type": None,
+                             "old_line": 4, "new_line": 5})
+
+    def test_resolve_boundary_unknown_line(self):
+        self.assertIsNone(pr.resolve_line_range_boundary("sha", 99, {}))
+
+    def test_build_line_range_unresolvable_when_no_positions(self):
+        diff = {"positions": {}}
+        self.assertIsNone(pr.build_line_range(diff, "main.py", {"start": 5, "end": 10}))
+
+    def test_build_line_range_none_when_boundary_missing(self):
+        diff = diff_inventory("main.py", {5: ("new", None)})  # 10 absent
+        self.assertIsNone(pr.build_line_range(diff, "main.py", {"start": 5, "end": 10}))
 
 
 class FallbackPublishTest(unittest.TestCase):
