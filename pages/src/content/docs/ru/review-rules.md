@@ -322,6 +322,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                                      |
 | `**/*.scala`                        | `scala.md`                                                                                       |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — файлы реализации, сигнатур и скриптов F#.                                          |
+| `**/*.cs`                           | `csharp.md` — исходные файлы C#.                                                                |
 | `**/*.rs`                           | `rust.md`                                                                                        |
 | `**/*.R`                            | `r.md`                                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                         |

@@ -304,6 +304,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                      |
 | `**/*.scala`                        | `scala.md`                                                                       |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — F# 구현, 시그니처, 스크립트 파일.                                  |
+| `**/*.cs`                           | `csharp.md` — C# 소스 파일.                                                     |
 | `**/*.rs`                           | `rust.md`                                                                        |
 | `**/*.R`                            | `r.md`                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                         |

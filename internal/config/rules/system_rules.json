@@ -27,6 +27,7 @@
     "**/*.{kt,kts}": "kotlin.md",
     "**/*.scala": "scala.md",
     "**/*.{fs,fsi,fsx}": "fsharp.md",
+    "**/*.cs": "csharp.md",
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,cxx,hpp,hxx}": "cpp.md",
     "**/*.c": "c.md",

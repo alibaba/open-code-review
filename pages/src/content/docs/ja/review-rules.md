@@ -259,6 +259,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{kt,kts}`                     | `kotlin.md`                                                                                     |
 | `**/*.scala`                        | `scala.md`                                                                                      |
 | `**/*.{fs,fsi,fsx}`                 | `fsharp.md`: F# の実装、シグネチャ、スクリプトファイル。                                        |
+| `**/*.cs`                           | `csharp.md`: C# のソースファイル。                                                      |
 | `**/*.rs`                           | `rust.md`                                                                                       |
 | `**/*.R`                            | `r.md`                                                                                          |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                        |
