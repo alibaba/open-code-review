@@ -77,6 +77,11 @@ type Args struct {
 	// batches are dispatched. 0 = unlimited. Set via --max-tokens-budget
 	// or ScanTemplate.MaxTokensBudget.
 	MaxTokensBudget int64
+	// MaxCostBudget, when > 0, caps the aggregate spend in USD at Price,
+	// checked where MaxTokensBudget is. Set via --max-cost-budget or the
+	// max_cost_budget config key.
+	MaxCostBudget float64
+	Price         *llm.Price
 }
 
 // planEnabled / dedupEnabled / summaryEnabled report whether each optional
@@ -108,6 +113,8 @@ type Agent struct {
 	scanFingerprints map[string]string
 	projectSummary   string      // populated post-run by maybeRunProjectSummary
 	budgetExceeded   atomic.Bool // set when the aggregate token budget stops dispatch or an in-flight task
+	// costBudgetExceeded is set with budgetExceeded when the stop was the cost budget.
+	costBudgetExceeded atomic.Bool
 }
 
 // ProjectSummary returns the markdown project-level summary produced after
@@ -150,6 +157,8 @@ func NewAgent(args Args) *Agent {
 		// the full file content of the scanned file.
 		DiffLookup:      a.lookupDiff,
 		MaxTokensBudget: args.MaxTokensBudget,
+		MaxCostBudget:   args.MaxCostBudget,
+		Price:           args.Price,
 		// NewRequestMeta is deliberately left nil. The retry report describes
 		// ocr review; scan shares this Runner, and a nil factory is what keeps
 		// scan's requests out of the report. See llmloop.Deps.NewRequestMeta.
@@ -236,6 +245,22 @@ func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.Too
 // summary.budget_exceeded. Per-file MaxToolRequestTimes exhaustion does NOT set
 // it — that is an item-level outcome, not a run-level budget stop.
 func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded.Load() }
+
+// CostBudgetExceeded reports whether the stop BudgetExceeded reports was the
+// cost budget.
+func (a *Agent) CostBudgetExceeded() bool { return a.costBudgetExceeded.Load() }
+
+// TotalCost returns the run's spend in USD at Args.Price, and false when no
+// price is known.
+func (a *Agent) TotalCost() (float64, bool) { return a.runner.TotalCost() }
+
+// markCostBudget records a cost budget stop; only the first one warns.
+func (a *Agent) markCostBudget(file, message string) {
+	a.budgetExceeded.Store(true)
+	if a.costBudgetExceeded.CompareAndSwap(false, true) {
+		a.recordWarning("cost_budget_reached", file, message)
+	}
+}
 
 func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
@@ -361,6 +386,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 			fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: estimate (%s) exceeds budget (%s); scan will stop partway\n",
 				humanTokens(est.TotalTokens), humanTokens(a.args.MaxTokensBudget))
 		}
+	}
+	if a.args.MaxCostBudget > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] cost budget: $%.2f (dispatch stops once exceeded)\n", a.args.MaxCostBudget)
 	}
 
 	a.currentDate = time.Now().Format("2006-01-02 15:04")
@@ -740,6 +768,17 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 			wg.Wait()
 			return dispatched, budgetHit, checkpoints, ctx.Err()
 		}
+		// After the slot is acquired: waiting for it is waiting for a file to
+		// finish and record its spend.
+		if a.runner.CostBudgetExceeded() {
+			<-sem
+			spent, _ := a.runner.TotalCost()
+			fmt.Fprintf(stdout.Writer(), "[ocr] cost budget reached (spent $%.4f > budget $%.2f), skipping %s and remaining files\n",
+				spent, a.args.MaxCostBudget, it.Path)
+			a.markCostBudget(it.Path, fmt.Sprintf("stopped in batch #%d: spent $%.4f exceeds cost budget $%.2f", batchIdx, spent, a.args.MaxCostBudget))
+			budgetHit = true
+			break
+		}
 
 		dispatched++
 		wg.Add(1)
@@ -840,6 +879,10 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 		if stop == llmloop.StopTokenBudget && a.budgetExceeded.CompareAndSwap(false, true) {
 			a.recordWarning("token_budget_reached", it.Path,
 				fmt.Sprintf("stopped mid-task: used %d tokens exceeds budget %d", a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
+		}
+		if stop == llmloop.StopCostBudget {
+			spent, _ := a.runner.TotalCost()
+			a.markCostBudget(it.Path, fmt.Sprintf("stopped mid-task: spent $%.4f exceeds cost budget $%.2f", spent, a.args.MaxCostBudget))
 		}
 		// Scan sessions opt out of the run manifest, so this one string is the
 		// whole diagnostic: it feeds both RecordReviewItemFailed and the

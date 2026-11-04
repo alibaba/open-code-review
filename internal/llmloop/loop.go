@@ -72,6 +72,13 @@ type Deps struct {
 	// unlimited, which is also what scan and every existing caller get by
 	// default.
 	MaxTokensBudget int64
+
+	// MaxCostBudget, when > 0, is the run's aggregate spend cap in USD at
+	// Price, checked wherever MaxTokensBudget is. Token counts alone do not
+	// track spend: cache reads and writes are billed far below and above the
+	// input price. Callers must set Price whenever MaxCostBudget is set.
+	MaxCostBudget float64
+	Price         *llm.Price
 }
 
 // requestCtx returns ctx carrying the identity of one logical LLM request, or
@@ -172,6 +179,15 @@ func (r *Runner) TotalCacheReadTokens() int64 { return atomic.LoadInt64(&r.total
 
 // TotalCacheWriteTokens returns the accumulated cache write tokens.
 func (r *Runner) TotalCacheWriteTokens() int64 { return atomic.LoadInt64(&r.totalCacheWriteTokens) }
+
+// TotalCost returns the USD spent so far at Deps.Price, and false when no
+// price is known.
+func (r *Runner) TotalCost() (float64, bool) {
+	if r.deps.Price == nil {
+		return 0, false
+	}
+	return r.deps.Price.Cost(r.TotalInputTokens(), r.TotalOutputTokens(), r.TotalCacheReadTokens(), r.TotalCacheWriteTokens()), true
+}
 
 // TotalTokensUsed returns input + output.
 func (r *Runner) TotalTokensUsed() int64 {
@@ -303,6 +319,10 @@ const (
 	// was already exceeded when the next round was about to start. This is a
 	// declared budget limit, like StopMaxRounds.
 	StopTokenBudget
+	// StopCostBudget: the run's aggregate cost budget (Deps.MaxCostBudget)
+	// was already exceeded when the next round was about to start. This is a
+	// declared budget limit, like StopTokenBudget.
+	StopCostBudget
 )
 
 // String names the stop for diagnostics — telemetry attributes, log lines and
@@ -320,6 +340,8 @@ func (s MainLoopStop) String() string {
 		return "compression"
 	case StopTokenBudget:
 		return "token_budget"
+	case StopCostBudget:
+		return "cost_budget"
 	default:
 		return fmt.Sprintf("MainLoopStop(%d)", int(s))
 	}
@@ -351,6 +373,8 @@ func (s MainLoopStop) Reason() string {
 		return "stopped because context compression exceeded its threshold"
 	case StopTokenBudget:
 		return "reached the aggregate token budget before finishing"
+	case StopCostBudget:
+		return "reached the aggregate cost budget before finishing"
 	default:
 		return fmt.Sprintf("main task stopped for an unrecognized reason (stop=%d)", int(s))
 	}
@@ -412,6 +436,10 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		// long group is exactly the spender a between-subtasks gate never sees.
 		if r.tokenBudgetExceeded() {
 			stop = StopTokenBudget
+			break
+		}
+		if r.CostBudgetExceeded() {
+			stop = StopCostBudget
 			break
 		}
 
@@ -539,11 +567,16 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		fmt.Fprintf(stdout.Writer(), "[ocr] Token budget exceeded (used %d > budget %d) for %s.\n",
 			r.TotalTokensUsed(), r.deps.MaxTokensBudget, taskKey)
 		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
+	case StopCostBudget:
+		spent, _ := r.TotalCost()
+		fmt.Fprintf(stdout.Writer(), "[ocr] Cost budget exceeded (spent $%.4f > budget $%.2f) for %s.\n",
+			spent, r.deps.MaxCostBudget, taskKey)
+		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
 	}
-	// Both budget stops above ran the grace round, and completion is the only
+	// Every budget stop above ran the grace round, and completion is the only
 	// other trace it leaves: without this warning a caller would see a
 	// completed task and never learn that its budget ran out mid-review.
-	if stop == StopMaxRounds || stop == StopTokenBudget {
+	if stop == StopMaxRounds || stop == StopTokenBudget || stop == StopCostBudget {
 		r.recordGraceRoundLimit(taskKey, stop, completed)
 	}
 	return completed, stop, nil
@@ -554,6 +587,13 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 func (r *Runner) tokenBudgetExceeded() bool {
 	budget := r.deps.MaxTokensBudget
 	return budget > 0 && r.TotalTokensUsed() > budget
+}
+
+// CostBudgetExceeded reports whether the run's spend is past
+// Deps.MaxCostBudget. A zero budget or an unknown price never trips.
+func (r *Runner) CostBudgetExceeded() bool {
+	spent, ok := r.TotalCost()
+	return ok && r.deps.MaxCostBudget > 0 && spent > r.deps.MaxCostBudget
 }
 
 // runGraceRound performs one final LLM call after the tool-request budget is
@@ -633,9 +673,9 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 }
 
 // WarningReviewLimitReached is the warning type RunMainTask records when a
-// declared budget — the tool-request rounds (StopMaxRounds) or the aggregate
-// token budget (StopTokenBudget) — spends the main loop's last round and sends
-// the task into its grace round. Callers publish warnings in their JSON and
+// declared budget (the tool-request rounds, StopMaxRounds, or the aggregate
+// token or cost budget, StopTokenBudget or StopCostBudget) spends the main
+// loop's last round and sends the task into its grace round. Callers publish warnings in their JSON and
 // terminal output, and the warning keeps a spent limit visible even when the
 // grace round completes the task: by design the completion alone would look
 // like an untruncated review.

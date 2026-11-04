@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"slices"
 	"sort"
@@ -295,6 +296,32 @@ type jsonSummary struct {
 	CacheWriteTokens int64  `json:"cache_write_tokens,omitempty"`
 	Elapsed          string `json:"elapsed"`
 	BudgetExceeded   bool   `json:"budget_exceeded,omitempty"`
+	// CostUSD is set only when the model's price is known (--price-per-m or
+	// the provider's price table). A cost budget stop sets both
+	// CostBudgetExceeded and BudgetExceeded.
+	CostUSD            *float64 `json:"cost_usd,omitempty"`
+	CostBudgetExceeded bool     `json:"cost_budget_exceeded,omitempty"`
+}
+
+// costReporter is implemented by the agents that measure spend at a price.
+type costReporter interface {
+	TotalCost() (float64, bool)
+	CostBudgetExceeded() bool
+}
+
+// runCost returns the run's spend in USD, rounded to a millionth of a dollar
+// (nil when no price is known), and whether the cost budget stopped the run.
+func runCost(ag ResultProvider) (*float64, bool) {
+	p, ok := ag.(costReporter)
+	if !ok {
+		return nil, false
+	}
+	var cost *float64
+	if usd, known := p.TotalCost(); known {
+		usd = math.Round(usd*1e6) / 1e6
+		cost = &usd
+	}
+	return cost, p.CostBudgetExceeded()
 }
 
 type jsonToolCalls struct {
@@ -373,7 +400,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, toolFailures []llmloop.ToolFailureDetail,
 	traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
-	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
+	manifest *session.RunManifest, budgetExceeded bool, costUSD *float64, costBudgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
 	retryReport *llm.RetryReport, groups []agent.FileGroupInfo) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	payload := jsonOutput{
@@ -382,15 +409,17 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		TraceID:  traceID,
 		Comments: comments,
 		Summary: &jsonSummary{
-			FilesReviewed:    filesReviewed,
-			Comments:         int64(len(comments)),
-			TotalTokens:      totalTokens,
-			InputTokens:      inputTokens,
-			OutputTokens:     outputTokens,
-			CacheReadTokens:  cacheReadTokens,
-			CacheWriteTokens: cacheWriteTokens,
-			Elapsed:          duration.Round(time.Second).String(),
-			BudgetExceeded:   budgetExceeded,
+			FilesReviewed:      filesReviewed,
+			Comments:           int64(len(comments)),
+			TotalTokens:        totalTokens,
+			InputTokens:        inputTokens,
+			OutputTokens:       outputTokens,
+			CacheReadTokens:    cacheReadTokens,
+			CacheWriteTokens:   cacheWriteTokens,
+			Elapsed:            duration.Round(time.Second).String(),
+			BudgetExceeded:     budgetExceeded,
+			CostUSD:            costUSD,
+			CostBudgetExceeded: costBudgetExceeded,
 		},
 		Groups:         groups,
 		ProjectSummary: projectSummary,
@@ -692,19 +721,22 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 	toolCallSummary := newJSONToolCalls(ag.ToolCalls(), ag.ToolFailures())
 	toolTotal := toolCallSummary.Total
 	budgetExceeded := ag.BudgetExceeded()
+	costUSD, costBudgetExceeded := runCost(ag)
 	if outputFormat == "json" {
 		out := jsonOutput{
 			Status: "failed",
 			LLM:    llmIdentity,
 			Summary: &jsonSummary{
-				FilesReviewed:    ag.FilesReviewed(),
-				TotalTokens:      ag.TotalTokensUsed(),
-				InputTokens:      ag.TotalInputTokens(),
-				OutputTokens:     ag.TotalOutputTokens(),
-				CacheReadTokens:  ag.TotalCacheReadTokens(),
-				CacheWriteTokens: ag.TotalCacheWriteTokens(),
-				Elapsed:          duration.Round(time.Second).String(),
-				BudgetExceeded:   budgetExceeded,
+				FilesReviewed:      ag.FilesReviewed(),
+				TotalTokens:        ag.TotalTokensUsed(),
+				InputTokens:        ag.TotalInputTokens(),
+				OutputTokens:       ag.TotalOutputTokens(),
+				CacheReadTokens:    ag.TotalCacheReadTokens(),
+				CacheWriteTokens:   ag.TotalCacheWriteTokens(),
+				Elapsed:            duration.Round(time.Second).String(),
+				BudgetExceeded:     budgetExceeded,
+				CostUSD:            costUSD,
+				CostBudgetExceeded: costBudgetExceeded,
 			},
 			ToolCalls:   toolCallSummary,
 			SessionID:   ag.SessionID(),

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -142,6 +143,7 @@ func TestRuntimeConfigSHA256(t *testing.T) {
 		// The aggregate budget changes what coverage a run can even attempt, so two
 		// otherwise-identical runs with different caps must not share an identity.
 		{"max_tokens_budget", func(x *Args) { x.MaxTokensBudget = 100_000 }},
+		{"max_cost_budget", func(x *Args) { x.MaxCostBudget, x.Price = 2, &llm.Price{Input: 3, Output: 15} }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
