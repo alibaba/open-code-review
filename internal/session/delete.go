@@ -59,7 +59,7 @@ func CheckSessionRepo(repoDir, sessionID string) error {
 			ErrSessionUnverifiable, sessionID,
 		)
 	}
-	if !sameRepoPath(recorded, repoDir) {
+	if !SameRepoPath(recorded, repoDir) {
 		return fmt.Errorf("%w: %s was recorded for %s", ErrSessionOtherRepo, sessionID, recorded)
 	}
 	return nil
@@ -109,8 +109,17 @@ func recordedRepoDir(path string) (string, bool) {
 	return cwd, true
 }
 
-// sameRepoPath reports whether two repository paths name the same directory.
-func sameRepoPath(a, b string) bool {
+// SameRepoPath reports whether two repository paths name the same directory.
+//
+// A session records whichever spelling the caller used: `C:\repo` arrives from a
+// resolved Windows path, `C:/repo` from a `--repo` flag or Git's forward-slash
+// form, and a trailing separator is its own spelling again. An exact string
+// compare therefore splits one repository across two names, which is what made
+// `session compare` refuse two sessions of the repository it was run in. Clean
+// settles separators and dot segments; `os.SameFile` covers the rest — symlinks,
+// bind mounts, and the case-insensitive filesystems where `A-B` and `a-b` are
+// one directory.
+func SameRepoPath(a, b string) bool {
 	ca, cb := filepath.Clean(a), filepath.Clean(b)
 	if ca == cb {
 		return true
