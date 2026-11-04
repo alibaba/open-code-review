@@ -121,6 +121,7 @@
   ".vhdl",
   ".sol",
   ".vy",
+  ".move",
   ".rego",
   ".glsl",
   ".hlsl",

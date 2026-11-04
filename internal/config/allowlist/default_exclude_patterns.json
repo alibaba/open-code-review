@@ -60,7 +60,8 @@
   "**/tests/**/*.sol",
   "**/test/**/*.vy",
   "**/tests/**/*.vy",
-
+  "**/tests/**/*.move",
+  "**/build/**/*.move",
   "**/node_modules/**",
   "**/bower_components/**",
   "**/.pnpm-store/**",
@@ -80,13 +81,10 @@
   "**/.angular/**",
   "**/.parcel-cache/**",
   "**/.docusaurus/**",
-
   "**/vendor/**",
   "**/.bundle/**",
-
   "**/target/**",
   "**/.gradle/**",
-
   "**/__pycache__/**",
   "**/.venv/**",
   "**/venv/**",
@@ -96,11 +94,9 @@
   "**/.mypy_cache/**",
   "**/.pytest_cache/**",
   "**/.ruff_cache/**",
-
   "**/Pods/**",
   "**/Carthage/**",
   "**/.build/**",
-
   "**/obj/**",
   "**/.dart_tool/**",
   "**/.terraform/**",
