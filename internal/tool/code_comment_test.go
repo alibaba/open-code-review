@@ -400,3 +400,60 @@ func TestParseComments_NormalizePath(t *testing.T) {
 		}
 	}
 }
+
+// A batch that keeps at least one usable entry parses without error, so the
+// dropped count is the only way a caller with a warning channel can see what
+// the batch discarded.
+func TestParseCommentsWithPathDetailed_ReportsDroppedEntries(t *testing.T) {
+	args := map[string]any{
+		"comments": []any{
+			map[string]any{"content": "real finding", "path": "main.go"},
+			map[string]any{"path": "main.go", "message": "dropped: no content"},
+			map[string]any{"content": "dropped: no path"},
+			"not an object",
+		},
+	}
+	comments, repair, dropped, errMsg := ParseCommentsWithPathDetailed(args, "")
+	if errMsg != "" {
+		t.Fatalf("errMsg = %q, want empty", errMsg)
+	}
+	if repair != nil {
+		t.Errorf("repair = %+v, want nil", repair)
+	}
+	if len(comments) != 1 || comments[0].Content != "real finding" {
+		t.Fatalf("comments = %+v, want the single usable entry", comments)
+	}
+	if dropped != 3 {
+		t.Errorf("dropped = %d, want 3", dropped)
+	}
+}
+
+// Nothing was discarded, so the count must stay zero — the warning built on it
+// only fires for real partial losses.
+func TestParseCommentsWithPathDetailed_NoDropsKeepsZero(t *testing.T) {
+	args := map[string]any{
+		"comments": []any{
+			map[string]any{"content": "a", "path": "a.go"},
+			map[string]any{"content": "b"}, // path falls back to defaultPath
+		},
+	}
+	comments, _, dropped, errMsg := ParseCommentsWithPathDetailed(args, "fallback.go")
+	if errMsg != "" || len(comments) != 2 || dropped != 0 {
+		t.Fatalf("comments=%+v dropped=%d errMsg=%q, want 2 comments, 0 dropped, no error", comments, dropped, errMsg)
+	}
+}
+
+// Every entry unusable: dropped accounts for the whole batch, and the caller
+// turns it into the none-usable failure, not a partial-drop warning.
+func TestParseCommentsWithPathDetailed_AllDropped(t *testing.T) {
+	args := map[string]any{
+		"comments": []any{
+			map[string]any{"path": "main.go", "message": "no content"},
+			map[string]any{"content": "no path"},
+		},
+	}
+	comments, _, dropped, errMsg := ParseCommentsWithPathDetailed(args, "")
+	if errMsg != "" || len(comments) != 0 || dropped != 2 {
+		t.Fatalf("comments=%+v dropped=%d errMsg=%q, want 0 comments, 2 dropped, no error", comments, dropped, errMsg)
+	}
+}
