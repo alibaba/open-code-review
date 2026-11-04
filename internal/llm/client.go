@@ -872,7 +872,7 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 		}
 
 		builder := reasoningByChoice[accumulator.Choices[i].Index]
-		if builder != nil && builder.Len() > 0 {
+		if builder != nil {
 			reasoningContent := builder.String()
 			resp.Choices[i].Message.ReasoningContent = reasoningContent
 			resp.Choices[i].Message.Native = NativeTurn{Family: "openai-chat-completions", Payload: ReasoningPayload(reasoningContent)}
@@ -884,6 +884,16 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 
 // buildOpenAIParams converts the shared ChatRequest into OpenAI SDK parameters.
 func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.ChatCompletionNewParams {
+	// Thinking gateways require the replay field on every assistant turn, even
+	// when a tool-only response omitted it. Infer this only from native history,
+	// not model names, so ordinary non-thinking conversations stay unchanged.
+	replayReasoning := false
+	for _, msg := range req.Messages {
+		if _, ok := msg.Native.Payload.(ReasoningPayload); ok {
+			replayReasoning = true
+			break
+		}
+	}
 	var messages []openai.ChatCompletionMessageParamUnion
 
 	for _, msg := range req.Messages {
@@ -916,7 +926,7 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{OfFunction: fn})
 			}
 			// reasoning_content: gateway extension not modeled by the SDK (#805).
-			if reasoning, ok := msg.Native.Payload.(ReasoningPayload); ok && reasoning != "" {
+			if reasoning, ok := msg.Native.Payload.(ReasoningPayload); ok || replayReasoning {
 				asst.SetExtraFields(map[string]any{"reasoning_content": string(reasoning)})
 			}
 			messages = append(messages, openai.ChatCompletionMessageParamUnion{OfAssistant: &asst})
@@ -1099,14 +1109,15 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 
 		var reasoningContent string
 		// Presence (ok) is the only signal; Valid() is always false for extra fields.
-		if extra, ok := ch.Message.JSON.ExtraFields["reasoning_content"]; ok {
+		extra, hasReasoning := ch.Message.JSON.ExtraFields["reasoning_content"]
+		if hasReasoning {
 			if err := json.Unmarshal([]byte(extra.Raw()), &reasoningContent); err != nil {
 				reasoningContent = extra.Raw()
 			}
 		}
 
 		var native NativeTurn
-		if reasoningContent != "" {
+		if hasReasoning {
 			native = NativeTurn{Family: "openai-chat-completions", Payload: ReasoningPayload(reasoningContent)}
 		}
 
