@@ -3,6 +3,40 @@
 
 // Small accessibility helpers shared by the viewer pages.
 (() => {
+    const themeKey = "ocr-viewer-theme";
+    const applyTheme = (theme) => {
+        const nextTheme = theme === "light" ? "light" : "dark";
+        document.body.dataset.theme = nextTheme;
+        const button = document.querySelector("[data-theme-toggle]");
+        if (button) {
+            button.setAttribute("aria-pressed", String(nextTheme === "light"));
+            button.textContent = nextTheme === "light" ? "☀" : "☾";
+            button.title = nextTheme === "light" ? "Switch to dark mode" : "Switch to light mode";
+        }
+        try {
+            localStorage.setItem(themeKey, nextTheme);
+        } catch {
+            // Storage may be unavailable; the page still keeps the in-memory mode.
+        }
+    };
+
+    const storedTheme = (() => {
+        try {
+            return localStorage.getItem(themeKey);
+        } catch {
+            return null;
+        }
+    })();
+    applyTheme(storedTheme === "light" ? "light" : "dark");
+
+    const button = document.querySelector("[data-theme-toggle]");
+    if (button) {
+        button.addEventListener("click", () => {
+            const nextTheme = document.body.dataset.theme === "light" ? "dark" : "light";
+            applyTheme(nextTheme);
+        });
+    }
+
     // The scrollable table wrappers are focusable regions, but not every
     // browser scrolls a focused container with the arrow keys; route the
     // keys through scrollBy so keyboard users can reach overflowing columns
