@@ -4,6 +4,9 @@
 package allowedext
 
 import (
+	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +34,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".ETS", true},
 		{".json5", true},
 		{".JSON5", true},
+		{".jsonc", true},
+		{".JSONC", true},
 		{".kt", true},
 		{".KT", true},
 		{".kts", true},
@@ -57,6 +62,18 @@ func TestIsAllowedExt(t *testing.T) {
 		{".J2", true},
 		{".pug", true},
 		{".PUG", true},
+		{".ejs", true},
+		{".EJS", true},
+		{".liquid", true},
+		{".LIQUID", true},
+		{".njk", true},
+		{".NJK", true},
+		{".haml", true},
+		{".HAML", true},
+		{".slim", true},
+		{".SLIM", true},
+		{".erb", true},
+		{".ERB", true},
 		{".graphql", true},
 		{".GRAPHQL", true},
 		{".gql", true},
@@ -86,6 +103,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".NIMS", true},
 		{".nimble", true},
 		{".NIMBLE", true},
+		{".nu", true},
+		{".NU", true},
 		{".ipynb", true},
 		{".IPYNB", true},
 		{".elm", true},
@@ -104,6 +123,12 @@ func TestIsAllowedExt(t *testing.T) {
 		{".ZIG", true},
 		{".thrift", true},
 		{".THRIFT", true},
+		{".bzl", true},
+		{".BZL", true},
+		{".bazel", true},
+		{".BAZEL", true},
+		{".star", true},
+		{".STAR", true},
 		{".capnp", true},
 		{".CAPNP", true},
 		{".ml", true},
@@ -130,6 +155,20 @@ func TestIsAllowedExt(t *testing.T) {
 		{".VY", true},
 		{".rego", true},
 		{".REGO", true},
+		{".glsl", true},
+		{".GLSL", true},
+		{".hlsl", true},
+		{".HLSL", true},
+		{".wgsl", true},
+		{".WGSL", true},
+		{".metal", true},
+		{".METAL", true},
+		{".ps1", true},
+		{".PS1", true},
+		{".psm1", true},
+		{".PSM1", true},
+		{".psd1", true},
+		{".PSD1", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -142,6 +181,69 @@ func TestIsAllowedExt(t *testing.T) {
 				t.Errorf("IsAllowedExt(%q) = %v, want %v", tt.ext, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestAllowlistKeepsEveryTestedExtension ties the explicit table in
+// TestIsAllowedExt to supported_file_types.json. The table above can only test
+// what it lists, so on its own it keeps passing when an entry disappears from the
+// file: the case simply stops being exercised, and the suite gets greener while
+// the allowlist gets smaller. Dropping a listed extension from the file is the
+// shape an accidental deletion takes, so that direction is asserted here.
+//
+// The reverse direction, an allowlisted extension with no case in the table, is
+// deliberately not a failure: the table is far smaller than the allowlist, and
+// requiring a case for every entry would mean touching this test for every
+// language PR. What is guaranteed here is that nothing the table covers can be
+// removed unnoticed.
+func TestAllowlistKeepsEveryTestedExtension(t *testing.T) {
+	raw, err := os.ReadFile("supported_file_types.json")
+	if err != nil {
+		t.Fatalf("read supported_file_types.json: %v", err)
+	}
+	var exts []string
+	if err := json.Unmarshal(raw, &exts); err != nil {
+		t.Fatalf("parse supported_file_types.json: %v", err)
+	}
+	if len(exts) == 0 {
+		t.Fatal("supported_file_types.json has no extensions")
+	}
+
+	allowed := make(map[string]bool, len(exts))
+	for _, ext := range exts {
+		if ext != strings.ToLower(ext) {
+			t.Errorf("allowlist entry %q is not lower case; matching lowercases the input, so a mixed-case entry can never be hit", ext)
+		}
+		if !strings.HasPrefix(ext, ".") {
+			t.Errorf("allowlist entry %q does not start with a dot", ext)
+		}
+		if allowed[ext] {
+			t.Errorf("allowlist entry %q is listed more than once", ext)
+		}
+		allowed[ext] = true
+	}
+
+	tested := []string{
+		".go", ".java", ".ts", ".tsx", ".astro", ".py", ".pyi", ".php", ".phtml",
+		".rs", ".r", ".ets", ".json5", ".jsonc", ".kt", ".kts", ".fs", ".fsi", ".fsx",
+		".ftl", ".ftlh", ".ftlx", ".hbs", ".mustache", ".jinja2", ".j2", ".pug", ".graphql",
+		".ejs", ".liquid", ".njk",
+		".haml", ".slim", ".erb",
+		".js", ".jsx", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".cs",
+		".rb", ".sh", ".bash", ".zsh", ".sql", ".css", ".scss", ".html", ".xml", ".yaml",
+		".yml", ".json", ".toml", ".lua", ".swift",
+	}
+	for _, ext := range tested {
+		if !allowed[ext] {
+			t.Errorf("supported_file_types.json no longer lists %q, but TestIsAllowedExt expects it to be allowed", ext)
+			continue
+		}
+		if !IsAllowedExt(ext) {
+			t.Errorf("IsAllowedExt(%q) = false for an extension listed in supported_file_types.json", ext)
+		}
+		if upper := strings.ToUpper(ext); !IsAllowedExt(upper) {
+			t.Errorf("IsAllowedExt(%q) = false: matching must be case-insensitive", upper)
+		}
 	}
 }
 
@@ -219,6 +321,14 @@ func TestIsExcludedPath(t *testing.T) {
 		// Prisma schemas have no conventional default test-file exclusion.
 		{"prisma schema", "prisma/schema.prisma", false},
 
+		{"powershell script", "scripts/Deploy.ps1", false},
+		{"powershell module", "modules/Deploy/Deploy.psm1", false},
+		{"powershell manifest", "modules/Deploy/Deploy.psd1", false},
+		{"pester root", "Deploy.Tests.ps1", false},
+		{"pester nested", "tests/unit/Deploy.Tests.ps1", false},
+		{"pester uppercase", "tests/unit/DEPLOY.TESTS.PS1", false},
+		{"powershell fixture", "tests/fixtures/Deploy.ps1", true},
+
 		// Handlebars/Mustache have no extension-specific test-path convention;
 		// generic fixture directories remain excluded.
 		{"handlebars fixture", "test/fixtures/card.hbs", true},
@@ -231,6 +341,34 @@ func TestIsExcludedPath(t *testing.T) {
 		{"pug fixture", "test/fixtures/page.pug", true},
 		{"pug template in tests directory", "tests/templates/page.pug", false},
 		{"pug template in test directory", "test/templates/page.pug", false},
+
+		// EJS/Liquid/Nunjucks use the shared fixture and dependency exclusions.
+		{"ejs fixture", "test/fixtures/card.ejs", true},
+		{"ejs vendored template", "vendor/templates/card.ejs", true},
+		{"ejs template in tests directory", "tests/templates/card.ejs", false},
+		{"ejs application template", "app/views/card.html.ejs", false},
+		{"liquid fixture", "test/fixtures/card.liquid", true},
+		{"liquid vendored template", "vendor/templates/card.liquid", true},
+		{"liquid template in tests directory", "tests/templates/card.liquid", false},
+		{"liquid application template", "app/views/card.html.liquid", false},
+		{"njk fixture", "test/fixtures/card.njk", true},
+		{"njk vendored template", "vendor/templates/card.njk", true},
+		{"njk template in tests directory", "tests/templates/card.njk", false},
+		{"njk application template", "app/views/card.html.njk", false},
+
+		// HAML/Slim/ERB use the shared fixture and dependency exclusions.
+		{"haml fixture", "test/fixtures/card.haml", true},
+		{"haml vendored template", "vendor/templates/card.haml", true},
+		{"haml template in tests directory", "tests/templates/card.haml", false},
+		{"haml application template", "app/views/card.html.haml", false},
+		{"slim fixture", "test/fixtures/card.slim", true},
+		{"slim vendored template", "vendor/templates/card.slim", true},
+		{"slim template in tests directory", "tests/templates/card.slim", false},
+		{"slim application template", "app/views/card.html.slim", false},
+		{"erb fixture", "test/fixtures/card.erb", true},
+		{"erb vendored template", "vendor/templates/card.erb", true},
+		{"erb template in tests directory", "tests/templates/card.erb", false},
+		{"erb application template", "app/views/card.html.erb", false},
 
 		// HarmonyOS oh_modules and test files
 		{"oh_modules root", "oh_modules/some_lib/index.ets", true},
@@ -282,6 +420,14 @@ func TestIsExcludedPath(t *testing.T) {
 		{"nim non-test", "src/parser.nim", false},
 		{"nim tests in filename", "src/tests_helper.nim", false},
 
+		// Nushell test files
+		{"nushell tests directory", "tests/parser.nu", true},
+		{"nushell nested tests directory", "packages/core/tests/unit/parser.nu", true},
+		{"nushell test directory", "test/parser.nu", true},
+		{"nushell test prefix", "src/test_parser.nu", true},
+		{"nushell test hyphen prefix", "src/test-parser.nu", true},
+		{"nushell test suffix", "src/parser_test.nu", true},
+		{"nushell non-test", "src/parser.nu", false},
 		// Elm test files
 		{"elm test directory", "tests/ParserTest.elm", true},
 		{"elm nested test directory", "packages/core/tests/unit/ParserTest.elm", true},
@@ -344,6 +490,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"solidity deploy script", "script/Deploy.s.sol", false},
 		{"vyper non-test", "src/token.vy", false},
 		{"vyper test in filename only", "src/test_helpers.vy", false},
+
+		// Shader languages have no conventional default test-file exclusion.
+		{"glsl shader", "shaders/fragment.glsl", false},
+		{"hlsl shader", "shaders/lighting.hlsl", false},
+		{"wgsl shader", "shaders/compute.wgsl", false},
+		{"metal shader", "shaders/blur.metal", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},
