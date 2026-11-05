@@ -1,6 +1,10 @@
 {
   "default_rule": "default.md",
   "path_rule_map": {
+    "**/*.{py,go,java,ts,js,tsx,jsx}": "architecture_consistency.md",
+    "**/*llm*.{py,ts,js,go,java}": "llm_security.md",
+    "**/*agent*.{py,ts,js,go,java}": "llm_security.md",
+    "**/*prompt*.{py,ts,js,go,java}": "llm_security.md",
     "**/*.properties": "properties.md",
     "**/*{mapper,dao}*.xml": "mapper_dao_xml.md",
     "**/pom.xml": "pom_xml.md",
