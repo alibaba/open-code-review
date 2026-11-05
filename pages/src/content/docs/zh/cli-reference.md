@@ -422,7 +422,6 @@ ocr session show --repo /path/to/repo <session-id>
 ocr session diagnose <session-id>
 ocr session diagnose <session-id> --task 'src/service.go'
 ocr session diagnose <session-id> --request <request-id>
-ocr session diagnose <session-id> --comment <evidence-id>
 ocr session diagnose <session-id> --event 12
 ocr session diagnose <session-id> --json
 ```
@@ -432,13 +431,11 @@ ocr session diagnose <session-id> --json
 | `--repo <path>` | 当前目录 | 待查看会话所属的仓库。 |
 | `--task <key>` | 全部任务 | 选择概览中的完整任务标识并列出事件。 |
 | `--request <id>` | 全部请求 | 沿显式关联查看一次请求，任务计数和事件列表仅包含所选请求。 |
-| `--comment <id>` | 无 | 以 JSON 打开评论来源和代码证据，无需指定 `--json`；不能与 `--event` 同时使用。 |
 | `--event <line>` | 无 | 按正整数物理行号以 JSON 查看原始 JSONL 记录，无需指定 `--json`。 |
 | `--json` | `false` | 以 JSON 输出完整诊断报告，选择事件时附上其原始记录。 |
 
-概览、任务和请求视图默认使用文本输出。`--comment` 和 `--event` 详情视图始终输出 JSON。
-未指定 `--json` 时，`--event` 只输出原始记录，`--comment` 输出包含所选评论的完整诊断报告。
-添加 `--json` 后，所有视图均以 JSON 输出完整诊断报告。
+概览、任务和请求视图默认使用文本输出。`--event` 详情视图始终输出 JSON。
+未指定 `--json` 时，它只输出原始记录；添加 `--json` 后输出完整诊断报告。
 
 诊断列出已记录的 LLM 错误、`ok=false` 的工具调用、失败的文件检查点，
 以及缺失或无法解析的执行记录。它保留已有 `ok` 含义，不根据文本是否像错误而重新分类。
@@ -459,25 +456,8 @@ ocr session diagnose <session-id> --json
 记录顺序和 `parentUuid` 不代表并发任务间的因果关系。
 物理行号同样适用于没有 UUID 的旧记录。
 
-新收集的评论带有 `evidence_id`，引用一条 `comment_evidence` 事件。
-概览展示这些 ID，不输出评论正文或代码片段。`--comment` 输出结构化诊断，包含来源请求、响应、
-工具调用及解析后批次下标、定位前的原始评论、定位后的评论，以及内存中被审查快照的代码。
-它不读取当前工作区文件；可选的 LLM 重新定位通过独立请求 ID 关联，证据记录本身不增加模型调用。
-任务或分组标识可以不同于评论最终文件路径，任务和请求筛选仍指向来源。
-
-代码状态为 `matched`、`unmatched`、`snippet_missing` 或 `unavailable`，匹配只描述记录坐标处的文本。
-每个片段注明旧侧或新侧、精确匹配或空白归一化匹配；空白匹配不代表语义等价。
-两侧均有可用证据时同时保留。SHA-256 分别标识原始 diff、可用的完整新文件快照和完整片段。
-片段统一使用 LF 换行且不包含末尾换行符，每段展示文本最多 16 KiB，并标明截断；
-匹配与片段哈希仍使用完整片段。
-
-检查点引用是历史记录，包含已被覆盖的记录，不代表评论当前被接受或已发布。
-后续去重等阶段改写评论时会提示差异，不覆盖原始捕获内容。复用的评论可能引用其他会话的证据，
-标为 `external` 并展示来源检查点会话，不自动沿会话链追踪。缺失或冲突的引用会被提示，
-歧义评论须通过原始事件逐条检查。没有证据 ID 的旧评论仍可通过 `--event` 查看。
-
 诊断不验证评论是否正确，也不保证每个代码块都经过审查。
-原始事件和评论证据可能包含源码、评论正文及模型提示词，仅在显式使用 `--event` 或 `--comment` 时输出详情。
+原始事件可能包含源代码、评审文字和模型提示词；仅显式使用 `--event` 时输出原始记录内容。
 
 ### `ocr session comments`
 

@@ -286,7 +286,7 @@ func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, cont
 }
 
 // WriteLLMError writes an llm_error entry recording a failed LLM request.
-func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, requestNo int, errorMsg string, duration time.Duration, link recordLink) string {
+func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, errorMsg string, duration time.Duration, link recordLink) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -299,7 +299,6 @@ func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, request
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
 		"filePath":    filePath,
 		"taskType":    string(taskType),
-		"request_no":  requestNo,
 		"error":       errorMsg,
 		"duration_ms": duration.Milliseconds(),
 	}

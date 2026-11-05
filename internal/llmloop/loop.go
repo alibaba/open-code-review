@@ -758,8 +758,6 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		resolveAndCollect := func(rctx context.Context) {
 			for i := range comments {
 				cm := &comments[i]
-				original := *cm
-				var relocationRecord *session.TaskRecord
 				var d *model.Diff
 				if r.deps.DiffLookup != nil {
 					d = r.deps.DiffLookup(cm.Path)
@@ -790,7 +788,6 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 						if len(msgs) > 0 {
 							fs := r.deps.Session.GetOrCreateFileSession(cm.Path)
 							rlRec := fs.AppendTaskRecord(session.ReLocationTask, msgs)
-							relocationRecord = rlRec
 							// FilePath is cm.Path so it cannot drift from the file
 							// session opened above — that join is what the report
 							// needs. Reading it from the comment rather than from
@@ -815,21 +812,6 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 							}
 						}
 					}
-				}
-				if rec != nil {
-					evidenceDiff := d
-					if evidenceDiff == nil || (evidenceDiff.NewPath != cm.Path && evidenceDiff.OldPath != cm.Path) {
-						if r.deps.AllDiffs != nil {
-							all := r.deps.AllDiffs()
-							for j := range all {
-								if all[j].NewPath == cm.Path || all[j].OldPath == cm.Path {
-									evidenceDiff = &all[j]
-									break
-								}
-							}
-						}
-					}
-					rec.RecordCommentEvidence(call, i, original, cm, diff.CaptureCommentEvidence(*cm, evidenceDiff), relocationRecord)
 				}
 				r.deps.CommentCollector.Add(*cm)
 			}

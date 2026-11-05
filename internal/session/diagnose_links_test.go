@@ -66,6 +66,19 @@ func TestDiagnoseLinksWriterOutOfOrder(t *testing.T) {
 	if err != nil || len(all.Observations) != 1 || all.Observations[0].RequestID != compression.requestID {
 		t.Fatalf("compression failure lost its own request identity: %+v, %v", all, err)
 	}
+	failed, err := Diagnose(repo, sh.SessionID, DiagnoseOptions{RequestID: compression.requestID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedPhase := failed.Tasks[0].Phases[0]
+	if failedPhase.LLMErrors != 1 || len(failedPhase.Events) != 2 {
+		t.Fatalf("failed request lost its recorded outcome: %+v", failedPhase)
+	}
+	for _, event := range failedPhase.Events {
+		if event.RequestNo != compression.RequestNo || event.RequestID != compression.requestID || event.TaskType != string(MemoryCompressionTask) {
+			t.Fatalf("error persistence lost the request scope: %+v", event)
+		}
+	}
 }
 
 const diagnosticLinkedRecords = `{"type":"session_start","sessionId":"diagnostic-run"}
