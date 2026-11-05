@@ -542,6 +542,19 @@ func extFromPath(path string) string {
 	return strings.ToLower(basename[dot:])
 }
 
+type scanProgress struct {
+	mu        sync.Mutex
+	processed int
+	total     int
+}
+
+func (p *scanProgress) fileProcessed() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.processed++
+	fmt.Fprintf(stdout.Writer(), "[ocr] scan progress: %d/%d files processed\n", p.processed, p.total)
+}
+
 // dispatchSubtasks groups items into batches per the configured strategy,
 // then processes batches sequentially while running files within each
 // batch concurrently up to MaxConcurrency. Sequential batches enable
@@ -564,6 +577,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	strategy := a.resolveBatchStrategy()
 	batches := groupBatches(a.items, strategy, a.args.Template.BatchSize)
 	fmt.Fprintf(stdout.Writer(), "[ocr] scan dispatch: %d batch(es) by %s strategy\n", len(batches), strategy)
+	progress := &scanProgress{total: len(a.items)}
 
 	var dispatched, reused int64
 	for bi, batch := range batches {
@@ -574,7 +588,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		// batch and feed them into the per-batch dedup hook.
 		batchStart := a.args.CommentCollector.Snapshot()
 
-		n, budgetHit, checkpoints, err := a.dispatchBatch(ctx, bi, batch)
+		n, budgetHit, checkpoints, err := a.dispatchBatch(ctx, bi, batch, progress)
 		dispatched += n
 		for _, checkpoint := range checkpoints {
 			if checkpoint.reused {
@@ -683,7 +697,7 @@ func (a *Agent) resolveBatchStrategy() BatchStrategy {
 // budget, the file (and all remaining files in the batch) are skipped.
 // This keeps overrun bounded by roughly one in-flight file per worker,
 // instead of a whole batch as the coarse batch-level gate did.
-func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.ScanItem) (int64, bool, []batchCheckpoint, error) {
+func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.ScanItem, progress *scanProgress) (int64, bool, []batchCheckpoint, error) {
 	concurrency := a.args.MaxConcurrency
 	if concurrency <= 0 {
 		concurrency = 8
@@ -713,6 +727,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 				originalComments: item.Comments,
 			})
 			checkpointsMu.Unlock()
+			progress.fileProcessed()
 			continue
 		}
 
@@ -741,11 +756,18 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 			return dispatched, budgetHit, checkpoints, ctx.Err()
 		}
 
+		if err := ctx.Err(); err != nil {
+			<-sem
+			wg.Wait()
+			return dispatched, budgetHit, checkpoints, err
+		}
+
 		dispatched++
 		wg.Add(1)
 		go func(it model.ScanItem, fingerprint string) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer progress.fileProcessed()
 
 			var fileCtx context.Context
 			var cancel context.CancelFunc
