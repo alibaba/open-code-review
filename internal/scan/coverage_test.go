@@ -1329,6 +1329,18 @@ func TestDispatchSubtasks_PersistsDedupedCommentsForResume(t *testing.T) {
 	if err := first.Session().Finalize(); err != nil {
 		t.Fatalf("finalize first session: %v", err)
 	}
+	diagnostics, err := session.Diagnose(repoDir, first.SessionID(), session.DiagnoseOptions{CommentID: comments[0].EvidenceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := diagnostics.Comment
+	if canonical == nil || len(canonical.Decisions) != 1 || canonical.Decisions[0].Outcome != "rewritten" || len(canonical.MergedFrom) != 1 || canonical.CheckpointState != "present" {
+		t.Fatalf("dedup lost its decision or checkpoint provenance: %+v", canonical)
+	}
+	mergedInput, err := session.Diagnose(repoDir, first.SessionID(), session.DiagnoseOptions{CommentID: canonical.MergedFrom[0]})
+	if err != nil || mergedInput.Comment.Decisions[0].OutputEvidenceID != canonical.ID || mergedInput.Comment.Decisions[0].Outcome != "merged" {
+		t.Fatalf("dedup input cannot reach canonical output: %+v, %v", mergedInput, err)
+	}
 
 	state, err := session.LoadResumeState(repoDir, first.SessionID())
 	if err != nil {
@@ -1375,6 +1387,10 @@ func TestDispatchSubtasks_PersistsDedupedCommentsForResume(t *testing.T) {
 	}
 	if err := resumed.Session().Finalize(); err != nil {
 		t.Fatalf("finalize resumed session: %v", err)
+	}
+	resumedEvidence, err := session.Diagnose(repoDir, resumed.SessionID(), session.DiagnoseOptions{CommentID: canonical.ID})
+	if err != nil || resumedEvidence.Comment.EvidenceStatus != "external" || resumedEvidence.Comment.Checkpoints[0].SourceSessionID != first.SessionID() {
+		t.Fatalf("resume cannot reach the source checkpoint session: %+v, %v", resumedEvidence, err)
 	}
 
 	chainedState, err := session.LoadResumeState(repoDir, resumed.SessionID())

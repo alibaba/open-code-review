@@ -15,6 +15,7 @@ import (
 type DiagnoseOptions struct {
 	TaskKey   string
 	RequestID string
+	CommentID string
 	EventLine int
 }
 
@@ -25,6 +26,8 @@ type DiagnosticReport struct {
 	Tasks         []DiagnosticTask        `json:"tasks"`
 	RequestID     string                  `json:"request_id,omitempty"`
 	Event         *DiagnosticEvent        `json:"event,omitempty"`
+	Comments      []DiagnosticComment     `json:"comments,omitempty"`
+	Comment       *DiagnosticComment      `json:"comment,omitempty"`
 }
 
 type DiagnosticObservation struct {
@@ -32,6 +35,7 @@ type DiagnosticObservation struct {
 	TaskKey   string `json:"task_key,omitempty"`
 	TaskType  string `json:"task_type,omitempty"`
 	RequestID string `json:"request_id,omitempty"`
+	CommentID string `json:"comment_id,omitempty"`
 	Line      int    `json:"line,omitempty"`
 	Message   string `json:"message"`
 }
@@ -64,6 +68,7 @@ type DiagnosticEvent struct {
 	RequestID  string          `json:"request_id,omitempty"`
 	ResponseID string          `json:"response_id,omitempty"`
 	ToolCallID string          `json:"tool_call_id,omitempty"`
+	CommentID  string          `json:"comment_id,omitempty"`
 	ToolName   string          `json:"tool_name,omitempty"`
 	RecordedOK *bool           `json:"recorded_ok,omitempty"`
 	Error      string          `json:"error,omitempty"`
@@ -72,6 +77,8 @@ type DiagnosticEvent struct {
 
 type diagnosticRecord struct {
 	summaryRecord
+	commentEvidenceRecord
+	commentDecisionRecord
 	ID         string               `json:"uuid"`
 	TaskType   string               `json:"taskType"`
 	RequestNo  int                  `json:"request_no"`
@@ -86,6 +93,9 @@ type diagnosticRecord struct {
 // Diagnose reads recorded execution facts without assessing finding correctness.
 // Physical line numbers remain usable for old sessions without event UUIDs.
 func Diagnose(repoDir, sessionID string, opts DiagnoseOptions) (*DiagnosticReport, error) {
+	if opts.CommentID != "" && opts.EventLine > 0 {
+		return nil, fmt.Errorf("select either a comment or an event")
+	}
 	if opts.EventLine < 0 {
 		return nil, fmt.Errorf("event line must be positive")
 	}
@@ -109,6 +119,7 @@ func Diagnose(repoDir, sessionID string, opts DiagnoseOptions) (*DiagnosticRepor
 	}
 	tasks := make(map[string]int)
 	links := newDiagnosticLinks()
+	comments := newDiagnosticComments()
 	reader := bufio.NewReader(f)
 	for lineNo := 1; ; lineNo++ {
 		line, readErr := reader.ReadBytes('\n')
@@ -135,6 +146,7 @@ func Diagnose(repoDir, sessionID string, opts DiagnoseOptions) (*DiagnosticRepor
 				applyRecordToSummary(report.Summary, rec.summaryRecord)
 				report.addDiagnosticRecord(rec, lineNo, opts, tasks)
 				links.add(rec, lineNo)
+				comments.add(rec, lineNo)
 				if opts.EventLine == lineNo {
 					event := diagnosticEvent(rec, lineNo)
 					event.Record = append(json.RawMessage(nil), bytes.TrimSpace(line)...)
@@ -145,6 +157,9 @@ func Diagnose(repoDir, sessionID string, opts DiagnoseOptions) (*DiagnosticRepor
 		if readErr == io.EOF {
 			break
 		}
+	}
+	if err := comments.finish(report, opts, links); err != nil {
+		return nil, err
 	}
 	report.Observations = append(report.Observations, links.observations()...)
 	if report.Summary.Aborted {
@@ -188,6 +203,9 @@ func Diagnose(repoDir, sessionID string, opts DiagnoseOptions) (*DiagnosticRepor
 	}
 	filtered := make([]DiagnosticObservation, 0, len(report.Observations))
 	for _, obs := range report.Observations {
+		if opts.CommentID != "" && obs.CommentID != "" && obs.CommentID != opts.CommentID {
+			continue
+		}
 		if opts.TaskKey != "" && obs.TaskKey != "" && obs.TaskKey != opts.TaskKey && (opts.RequestID == "" || obs.RequestID != opts.RequestID) {
 			continue
 		}
@@ -212,10 +230,15 @@ func Diagnose(repoDir, sessionID string, opts DiagnoseOptions) (*DiagnosticRepor
 }
 
 func diagnosticEvent(rec diagnosticRecord, line int) DiagnosticEvent {
+	commentID := rec.EvidenceID
+	if rec.Type == "comment_evidence" {
+		commentID = rec.ID
+	}
 	return DiagnosticEvent{
 		Line: line, ID: rec.ID, Type: rec.Type, TaskKey: rec.FilePath,
 		TaskType: rec.TaskType, RequestNo: rec.RequestNo, ToolName: rec.ToolName,
 		RequestID: rec.RequestID, ResponseID: rec.ResponseID, ToolCallID: rec.ToolCallID,
+		CommentID:  commentID,
 		RecordedOK: rec.OK, Error: rec.Error,
 	}
 }
@@ -244,7 +267,7 @@ func (r *DiagnosticReport) addDiagnosticRecord(rec diagnosticRecord, line int, o
 
 func (r *DiagnosticReport) addDiagnosticEvent(event DiagnosticEvent, opts DiagnoseOptions, tasks map[string]int) {
 	switch event.Type {
-	case "llm_request", "llm_response", "llm_error", "tool_call":
+	case "llm_request", "llm_response", "llm_error", "tool_call", "comment_evidence", "comment_decision":
 	default:
 		return
 	}
