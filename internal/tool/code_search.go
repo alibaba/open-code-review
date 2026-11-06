@@ -163,6 +163,12 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		if errors.Is(err, context.Canceled) {
 			return "", err
 		}
+		if isPerlRegexpCompileError(err, errStr) {
+			// An invalid -P pattern is a user/model error, not a tool failure:
+			// surface it as a message the caller can inspect and correct instead
+			// of aborting the tool session.
+			return fmt.Sprintf("Error: invalid regular expression: %s", strings.TrimSpace(errStr)), nil
+		}
 		if outStr == "" {
 			var exitErr *exec.ExitError
 			exitCode := -1
@@ -270,4 +276,18 @@ func isNotGitRepoError(err error, stderr string) bool {
 		return true
 	}
 	return false
+}
+
+func isPerlRegexpCompileError(err error, stderr string) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 128 {
+		return false
+	}
+	// Detect the stable structure of a failed -P pattern compile rather than
+	// enumerating PCRE diagnostics. Newer git reports "fatal: -e option,
+	// '<pattern>': ..."; older builds "fatal: pcre2_compile failed: ...". Both
+	// identify the pattern argument itself as the failure, not a repository or
+	// I/O error.
+	return strings.Contains(stderr, "pcre2_compile failed") ||
+		strings.Contains(stderr, "-e option")
 }
