@@ -274,3 +274,43 @@ func TestIsCommitMode(t *testing.T) {
 		t.Error("expected IsCommitMode() = false for ModeWorkspace")
 	}
 }
+
+// TestIsPathExcluded_NegatedDirectoryReincludes pins the `/*/` + `!/src/` shape:
+// a negated directory pattern re-admits the directory it names and everything
+// below it, while the directories it does not name stay excluded. Ground truth
+// comes from git itself (a .gitignore holding those two lines, then
+// `git check-ignore -q <path>`):
+//
+//	src/main.go  -> tracked
+//	docs/r.md    -> ignored
+//	src          -> tracked
+//
+// The same fixture also covers the asymmetry that made a single flat verdict
+// wrong: `!*/` re-admits every directory but must not re-admit the files that
+// `*` already matched.
+func TestIsPathExcluded_NegatedDirectoryReincludes(t *testing.T) {
+	tests := []struct {
+		name     string
+		relPath  string
+		patterns []string
+		want     bool
+	}{
+		{"re-admitted directory", "src/main.go", []string{"/*/", "!/src/"}, false},
+		{"directory not named by the negation", "docs/r.md", []string{"/*/", "!/src/"}, true},
+		{"no negation", "src/main.go", []string{"/*/"}, true},
+		{"later exclusion wins", "src/main.go", []string{"/*/", "!/src/", "/src/"}, true},
+		{"nested directory excluded again", "src/internal/a.go", []string{"/*/", "!/src/", "/src/internal/"}, true},
+		{"sibling file stays re-admitted", "src/main.go", []string{"/*/", "!/src/", "/src/internal/"}, false},
+		{"dir-only negation does not re-admit files", "src/main.go", []string{"*", "!*/"}, true},
+		{"file under re-admitted dir still excluded by file pattern", "src/main.go", []string{"/*/", "!/src/", "*.go"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsPathExcluded(".", tt.relPath, tt.patterns)
+			if got != tt.want {
+				t.Errorf("IsPathExcluded(%q, %v) = %v, want %v",
+					tt.relPath, tt.patterns, got, tt.want)
+			}
+		})
+	}
+}

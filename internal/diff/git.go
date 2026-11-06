@@ -304,31 +304,99 @@ func (p *Provider) loadGitignorePatterns() []string {
 // re-include with `!` lines — github/gitignore ships one per language) is only
 // correct under last-match-wins. Treating negations as unmatchable made every
 // file in such a repository look excluded, so a review silently covered nothing.
+//
+// Directory patterns are resolved in two layers, like git: a path is excluded
+// when one of its ancestor directories is excluded, or when the path itself is.
+// Git stops descending into an excluded directory, so a later negated directory
+// pattern (`!/src/`) re-admits that directory *and* everything below it, while a
+// negated pattern that only re-admits directories (`!*/`) still leaves files
+// matched by `*` excluded. Collapsing both layers into one verdict either drops
+// every file under a re-admitted directory or readmits everything below the root.
 func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bool {
 	if isProviderDirExcluded(relPath) {
 		return true
 	}
+	if isBelowExcludedDirectory(relPath, gitignorePatterns) {
+		return true
+	}
+	return isFileExcludedByPatterns(relPath, gitignorePatterns)
+}
 
+// isBelowExcludedDirectory reports whether any ancestor directory of relPath is
+// excluded by the pattern list. Ancestors are walked from the root down, and the
+// first excluded one decides, mirroring git's refusal to descend past it.
+func isBelowExcludedDirectory(relPath string, gitignorePatterns []string) bool {
+	components := strings.Split(relPath, "/")
+	for i := 1; i < len(components); i++ {
+		if isDirectoryExcludedByPatterns(strings.Join(components[:i], "/"), gitignorePatterns) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDirectoryExcludedByPatterns resolves one directory against the whole pattern
+// list with last-match-wins. Both directory-only patterns (`build/`) and plain
+// ones (`build`) apply to directories, which is what makes `*` + `!*/` behave
+// like git: every directory is re-admitted, every file stays matched by `*`.
+func isDirectoryExcludedByPatterns(dir string, gitignorePatterns []string) bool {
 	excluded := false
 	for _, pat := range gitignorePatterns {
 		body, negated := strings.CutPrefix(pat, "!")
+		body = strings.TrimSuffix(body, "/")
 		if body == "" {
 			continue
 		}
+		if matchGitignoreDir(dir, body) {
+			excluded = !negated
+		}
+	}
+	return excluded
+}
 
-		// Directory-only patterns (trailing "/") apply to directories, never to
-		// files. Git uses a negated one such as `!*/` to keep descending into
-		// subdirectories, not to re-admit the files inside them — honouring it
-		// here would readmit everything below the root.
-		if negated && strings.HasSuffix(body, "/") {
+// isFileExcludedByPatterns resolves the path itself, ignoring directory-only
+// patterns: a pattern such as `build/` never matches a file, and a negated one
+// (`!*/`) re-admits directories without re-admitting the files inside them.
+func isFileExcludedByPatterns(relPath string, gitignorePatterns []string) bool {
+	excluded := false
+	for _, pat := range gitignorePatterns {
+		body, negated := strings.CutPrefix(pat, "!")
+		if body == "" || strings.HasSuffix(body, "/") {
 			continue
 		}
-
 		if matchGitignoreBody(relPath, body) {
 			excluded = !negated
 		}
 	}
 	return excluded
+}
+
+// matchGitignoreDir reports whether a single pattern body matches the directory
+// path dir, which is always relative to the repository root and never has a
+// trailing slash. Slashless patterns match a directory name at any depth;
+// patterns with a slash are relative to the root; "**" uses globstar semantics.
+func matchGitignoreDir(dir, body string) bool {
+	body, anchored := strings.CutPrefix(body, "/")
+	if body == "" {
+		return false
+	}
+
+	if strings.Contains(body, "**") {
+		matched, err := doublestar.Match(body, dir)
+		return err == nil && matched
+	}
+
+	if !strings.Contains(body, "/") {
+		target := filepath.Base(dir)
+		if anchored {
+			target = dir
+		}
+		matched, _ := filepath.Match(body, target)
+		return matched
+	}
+
+	matched, _ := filepath.Match(body, dir)
+	return matched
 }
 
 // isProviderDirExcluded reports whether relPath matches the provider's
