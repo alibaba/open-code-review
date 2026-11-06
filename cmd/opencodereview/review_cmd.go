@@ -134,11 +134,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}()
 
 	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, opts.maxTools, opts.maxGitProcs, true)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true)
 	if err != nil {
 		return err
 	}
-	applyMaxToolsCap(cc.Template, opts.maxTools)
+	cc.Template.MaxToolRequestTimes = resolveMaxTools(cc.Template.MaxToolRequestTimes, opts.maxTools)
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security (#112): reject ref-option injection before any git invocation.
@@ -323,6 +323,16 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return errors.Join(resultErr, emitErr)
 	}
 	return emitErr
+}
+
+// resolveMaxTools applies --max-tools as a cap rather than a floor: an
+// explicit value wins over the template default in both directions. Shared
+// by review and scan, which each own a template but take the same flag.
+func resolveMaxTools(templateDefault, cliValue int) int {
+	if cliValue > 0 {
+		return cliValue
+	}
+	return templateDefault
 }
 
 func reviewResultError(runErr error, manifest *session.RunManifest) error {

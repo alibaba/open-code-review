@@ -94,19 +94,9 @@ func previewMaxTokens(templateDefault, cliOverride int) (int, error) {
 	return resolveMaxTokens(templateDefault, appCfg, cliOverride)
 }
 
-// applyMaxToolsCap makes review's --max-tools a cap rather than a floor.
-//
-// loadCommonContext only raises MaxToolRequestTimes, which is what scan's flag
-// documents. Review's flag is a maximum, so a value under the template default
-// has to lower it as well, or it is accepted and then ignored (#935).
-func applyMaxToolsCap(tpl *template.Template, maxTools int) {
-	if maxTools > 0 {
-		tpl.MaxToolRequestTimes = maxTools
-	}
-}
-
 // loadCommonContext validates the working directory, loads the embedded
-// template, raises MaxToolRequestTimes when maxTools exceeds the default,
+// template, raises MaxToolRequestTimes when maxTools exceeds the default
+// (callers apply the cap afterwards, via resolveMaxTools),
 // resolves the absolute repo path, loads system review rules, and creates
 // the global git subprocess limiter. Both review and scan callers go
 // through this so the startup sequence stays consistent.

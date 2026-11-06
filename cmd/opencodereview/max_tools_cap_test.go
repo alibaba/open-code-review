@@ -4,63 +4,60 @@
 package main
 
 import (
-	"os/exec"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/config/template"
 )
 
-// Review's --max-tools is a cap. Before #935 a value under the template default
-// was accepted, clamped to the minimum, and then ignored, so a cost guard looked
-// active while the run still used the full budget.
-func TestMaxToolsCapLowersTheBudget(t *testing.T) {
-	dir := t.TempDir()
-	if err := exec.Command("git", "-C", dir, "init").Run(); err != nil {
-		t.Skip("git not available")
-	}
-
-	cc, err := loadCommonContext(dir, "", "", 60, 0, false)
+// --max-tools is a cap, not a floor (#935). review got this via resolveMaxTools;
+// scan kept an "only raise" override, so a value below the scan template's
+// default was accepted on the command line and then ignored. A cost guard that
+// reports nothing and does nothing is worse than one that refuses the flag.
+//
+// This goes through loadScanTemplate rather than calling resolveMaxTools
+// directly: the helper was already correct, and what broke was scan not using
+// it. A test of the helper alone would pass with the old override back in place.
+func TestScanTemplateAppliesMaxToolsAsACap(t *testing.T) {
+	def, err := template.LoadScanDefault()
 	if err != nil {
-		t.Fatalf("loadCommonContext: %v", err)
+		t.Fatalf("LoadScanDefault: %v", err)
 	}
-	applyMaxToolsCap(cc.Template, 60)
-
-	if cc.Template.MaxToolRequestTimes != 60 {
-		t.Errorf("MaxToolRequestTimes = %d, want 60 — --max-tools was ignored",
-			cc.Template.MaxToolRequestTimes)
-	}
-}
-
-func TestMaxToolsCapStillRaises(t *testing.T) {
-	dir := t.TempDir()
-	if err := exec.Command("git", "-C", dir, "init").Run(); err != nil {
-		t.Skip("git not available")
+	if def.MaxToolRequestTimes <= 1 {
+		t.Fatalf("scan template default is %d, too small to test a lower cap against",
+			def.MaxToolRequestTimes)
 	}
 
-	cc, err := loadCommonContext(dir, "", "", 500, 0, false)
-	if err != nil {
-		t.Fatalf("loadCommonContext: %v", err)
-	}
-	applyMaxToolsCap(cc.Template, 500)
+	t.Run("lowers the budget", func(t *testing.T) {
+		want := def.MaxToolRequestTimes - 1
+		tpl, err := loadScanTemplate(want, "")
+		if err != nil {
+			t.Fatalf("loadScanTemplate: %v", err)
+		}
+		if tpl.MaxToolRequestTimes != want {
+			t.Errorf("MaxToolRequestTimes = %d, want %d — --max-tools was ignored",
+				tpl.MaxToolRequestTimes, want)
+		}
+	})
 
-	if cc.Template.MaxToolRequestTimes != 500 {
-		t.Errorf("MaxToolRequestTimes = %d, want 500", cc.Template.MaxToolRequestTimes)
-	}
-}
+	t.Run("still raises it", func(t *testing.T) {
+		want := def.MaxToolRequestTimes + 100
+		tpl, err := loadScanTemplate(want, "")
+		if err != nil {
+			t.Fatalf("loadScanTemplate: %v", err)
+		}
+		if tpl.MaxToolRequestTimes != want {
+			t.Errorf("MaxToolRequestTimes = %d, want %d", tpl.MaxToolRequestTimes, want)
+		}
+	})
 
-func TestMaxToolsZeroKeepsTemplateDefault(t *testing.T) {
-	dir := t.TempDir()
-	if err := exec.Command("git", "-C", dir, "init").Run(); err != nil {
-		t.Skip("git not available")
-	}
-
-	cc, err := loadCommonContext(dir, "", "", 0, 0, false)
-	if err != nil {
-		t.Fatalf("loadCommonContext: %v", err)
-	}
-	before := cc.Template.MaxToolRequestTimes
-	applyMaxToolsCap(cc.Template, 0)
-
-	if cc.Template.MaxToolRequestTimes != before {
-		t.Errorf("MaxToolRequestTimes = %d, want the template default %d",
-			cc.Template.MaxToolRequestTimes, before)
-	}
+	t.Run("unset keeps the template default", func(t *testing.T) {
+		tpl, err := loadScanTemplate(0, "")
+		if err != nil {
+			t.Fatalf("loadScanTemplate: %v", err)
+		}
+		if tpl.MaxToolRequestTimes != def.MaxToolRequestTimes {
+			t.Errorf("MaxToolRequestTimes = %d, want the template default %d",
+				tpl.MaxToolRequestTimes, def.MaxToolRequestTimes)
+		}
+	})
 }
