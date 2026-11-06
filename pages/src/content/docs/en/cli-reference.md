@@ -656,7 +656,7 @@ which.
 ### `ocr llm providers`
 
 ```text
-ocr llm providers
+ocr llm providers [--json]
 ```
 
 Lists every built-in LLM provider in a three-column table:
@@ -671,6 +671,10 @@ Built-in providers:
 
 Followed by a hint to configure one interactively with `ocr config
 provider` or non-interactively with `ocr config set provider <name>`.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--json` | `false` | Emit provider metadata and model catalogs as a JSON array instead of the table. |
 
 ## `ocr viewer`
 

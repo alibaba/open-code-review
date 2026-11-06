@@ -613,7 +613,7 @@ Model:  <effective model>
 ### `ocr llm providers`
 
 ```text
-ocr llm providers
+ocr llm providers [--json]
 ```
 
 各組み込み LLM プロバイダーを 3 列のテーブルで一覧表示します:
@@ -627,6 +627,10 @@ Built-in providers:
 ```
 
 続いて、`ocr config provider` で対話的に設定するか、`ocr config set provider <name>` で非対話的に設定できる旨のヒントが表示されます。
+
+| Flag | デフォルト | 説明 |
+|---|---|---|
+| `--json` | `false` | テーブルではなく、プロバイダーのメタデータとモデルカタログを JSON 配列として出力します。 |
 
 ## `ocr viewer`
 
