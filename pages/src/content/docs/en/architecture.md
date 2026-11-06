@@ -297,7 +297,9 @@ main tool-use loop never blocks on post-processing:
 3. **Review filter** — after the main loop finishes (and the worker pool
    drains), the `REVIEW_FILTER_TASK` LLM call inspects the collected
    comments against the diff and removes ones that are provably
-   incorrect. Errors here are logged and ignored.
+   incorrect, plus near-duplicates — comments restating the same finding
+   at the same location as another surviving comment. Errors here are
+   logged and ignored.
 4. **Second line-resolution pass** — once `Agent.Run` returns, the
    top-level command re-runs `diff.ResolveLineNumbers` over the full
    comment set (see `cmd/opencodereview/review_cmd.go`) to catch
@@ -337,7 +339,7 @@ grouping — see `enforceGroupTokenBudget` above.
 | `PLAN_TASK` | Planning phase — produces a checklist. |
 | `MAIN_TASK` | Main review loop — emits `code_comment` calls. |
 | `MEMORY_COMPRESSION_TASK` | Summarises the compress zone. |
-| `REVIEW_FILTER_TASK` | Post-loop pass that removes provably-incorrect comments. |
+| `REVIEW_FILTER_TASK` | Post-loop pass that removes provably-incorrect and near-duplicate comments. |
 | `RE_LOCATION_TASK` | Re-anchors a comment whose `existing_code` couldn't be matched. |
 
 Each prompt is a list of `{role, prompt_file}` references that point to
