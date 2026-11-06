@@ -389,3 +389,68 @@ func TestPreviewEmptyEntriesNotNil(t *testing.T) {
 		t.Error("Entries is nil; JSON output would emit \"files\":null")
 	}
 }
+
+// TestPreviewReportsGitignoredTrackedFile covers issue #1804: a tracked file
+// that the repository's .gitignore matches is excluded from review, and it has
+// to say so. It used to leave both of partitionDiffs' slices, so a repository
+// whose .gitignore covered the whole changeset previewed as total_files 0,
+// reviewable 0, excluded 0 — the same output a commit that changed nothing
+// produces, which is what let an empty review read as a complete one.
+//
+// The .gitignore here is written AFTER the file is committed, because git
+// applies ignore rules only to untracked paths: the file stays tracked, git
+// diff still emits it, and OCR is the only layer that drops it.
+//
+// Commit mode, not workspace mode, because that is where #1804 was reported
+// ("delegate preview returns zero files for changed Java commit and range").
+// The distinction matters: #1837 argues workspace mode should not apply
+// .gitignore at all, since git never ignores a tracked path and
+// untrackedFilesList already drops ignored untracked ones. That is about which
+// files workspace mode reviews; this test is about a file that is excluded
+// being reported rather than silently dropped, which commit mode states
+// without colliding with it.
+func TestPreviewReportsGitignoredTrackedFile(t *testing.T) {
+	dir := initPreviewRepo(t)
+
+	path := filepath.Join(dir, "generated.go")
+	if err := os.WriteFile(path, []byte("package main\n\nconst Gen = 1\n"), 0o644); err != nil {
+		t.Fatalf("write generated file: %v", err)
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("add", "generated.go")
+	run("commit", "-m", "add tracked generated file")
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("generated.go\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	run("add", ".gitignore")
+	run("commit", "-m", "ignore it after the fact")
+	if err := os.WriteFile(path, []byte("package main\n\nconst Gen = 2\n"), 0o644); err != nil {
+		t.Fatalf("modify generated file: %v", err)
+	}
+	run("add", "-u")
+	run("commit", "-m", "edit the tracked generated file")
+
+	preview, err := Preview(context.Background(), Args{RepoDir: dir, Commit: "HEAD"})
+	if err != nil {
+		t.Fatalf("Preview error: %v", err)
+	}
+	if preview.TotalFiles != 1 {
+		t.Fatalf("total_files = %d, want 1; the file git reports as changed must be accounted for; entries = %+v", preview.TotalFiles, preview.Entries)
+	}
+	if preview.ExcludedCount != 1 || preview.ReviewableCount != 0 {
+		t.Fatalf("counts = excluded:%d reviewable:%d, want excluded:1 reviewable:0", preview.ExcludedCount, preview.ReviewableCount)
+	}
+	if len(preview.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(preview.Entries))
+	}
+	entry := preview.Entries[0]
+	if entry.Path != "generated.go" || entry.WillReview || entry.ExcludeReason != ExcludeGitignore {
+		t.Errorf("entry = %+v, want generated.go excluded as gitignore", entry)
+	}
+}
