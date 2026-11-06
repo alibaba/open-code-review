@@ -1068,6 +1068,8 @@ func TestMainLoopStopStringAndReason(t *testing.T) {
 		{StopMaxRounds, "max_rounds"},
 		{StopEmptyRounds, "empty_rounds"},
 		{StopCompression, "compression"},
+		{StopTokenBudget, "token_budget"},
+		{StopCostBudget, "cost_budget"},
 	} {
 		t.Run(tc.wantName, func(t *testing.T) {
 			name := tc.stop.String()
@@ -1096,12 +1098,12 @@ func TestMainLoopStopStringAndReason(t *testing.T) {
 // stop its own String() and Reason() case instead of letting it fall through to
 // a message that says nothing.
 func TestMainLoopStopUnknownValue(t *testing.T) {
-	unknown := StopTokenBudget + 1
+	unknown := StopCostBudget + 1
 
-	if got, want := unknown.String(), "MainLoopStop(5)"; got != want {
+	if got, want := unknown.String(), "MainLoopStop(6)"; got != want {
 		t.Errorf("String() = %q, want %q; a new constant needs its own case in String() and Reason()", got, want)
 	}
-	if got, want := unknown.Reason(), "main task stopped for an unrecognized reason (stop=5)"; got != want {
+	if got, want := unknown.Reason(), "main task stopped for an unrecognized reason (stop=6)"; got != want {
 		t.Errorf("Reason() = %q, want %q; a new constant needs its own case in String() and Reason()", got, want)
 	}
 	if unknown.Reason() == StopNone.Reason() {
@@ -1291,4 +1293,56 @@ func TestRunMainTask_ZeroTokenBudgetNeverStops(t *testing.T) {
 func withUsage(resp *llm.ChatResponse, prompt int64) *llm.ChatResponse {
 	resp.Usage = &llm.UsageInfo{PromptTokens: prompt, CompletionTokens: 0, TotalTokens: prompt}
 	return resp
+}
+
+// The cost budget is checked at the same point as the token budget: before the
+// round that would spend past it, followed by one grace round.
+func TestRunMainTask_CostBudgetStopsBeforeNextRound(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		withUsage(fileReadToolCallResponse("call_1", `{"path":"main.go"}`), 600),
+		withUsage(fileReadToolCallResponse("call_2", `{"path":"main.go"}`), 600),
+		withUsage(fileReadToolCallResponse("call_3", `{"path":"main.go"}`), 600),
+		withUsage(fileReadToolCallResponse("call_4", `{"path":"main.go"}`), 600),
+	}}
+	deps := newTestDeps(client)
+	// $1000 per million input tokens: 600 tokens cost $0.60, so a $1.00 budget
+	// admits two rounds ($0.00 and $0.60 spent) and refuses the third ($1.20).
+	deps.MaxCostBudget = 1
+	deps.Price = &llm.Price{Input: 1000, Output: 1000}
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "file_read", Description: "read"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+	}
+	runner := NewRunner(deps)
+
+	completed, stop, err := runner.RunMainTask(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "main.go")
+	if err != nil {
+		t.Fatalf("RunMainTask: %v", err)
+	}
+	if completed || stop != StopCostBudget {
+		t.Fatalf("completed=%v stop=%v, want false and StopCostBudget", completed, stop)
+	}
+	if got := len(client.requests); got != 3 {
+		t.Fatalf("LLM requests = %d, want 3 (2 rounds + grace)", got)
+	}
+	if limit := graceLimitWarnings(runner); len(limit) != 1 || !strings.Contains(limit[0].Message, "cost budget") {
+		t.Fatalf("limit warnings = %+v, want one cost-budget verdict", limit)
+	}
+	if cost, ok := runner.TotalCost(); !ok || cost < 1.799 || cost > 1.801 {
+		t.Fatalf("TotalCost = %v, %v; want 1.80, true", cost, ok)
+	}
+}
+
+// Without a price the cost budget can never trip, and no cost is reported.
+func TestRunnerTotalCostUnknownPrice(t *testing.T) {
+	deps := newTestDeps(&fakeClient{})
+	deps.MaxCostBudget = 1
+	runner := NewRunner(deps)
+	runner.RecordUsage(&llm.UsageInfo{PromptTokens: 1 << 40})
+	if _, ok := runner.TotalCost(); ok {
+		t.Fatal("TotalCost reported a cost without a price")
+	}
+	if runner.CostBudgetExceeded() {
+		t.Fatal("cost budget tripped without a price")
+	}
 }

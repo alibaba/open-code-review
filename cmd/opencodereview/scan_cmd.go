@@ -45,6 +45,8 @@ type scanOptions struct {
 	batch                 string
 	maxTokens             int
 	maxTokensBudget       int
+	maxCostBudget         float64
+	pricePerM             string
 	provider              string
 	model                 string
 	resume                string
@@ -183,6 +185,10 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 		return err
 	}
 	scanTpl.MaxTokens = maxTokens
+	costBudget, price, err := resolveCostBudget(rt.AppCfg, opts.maxCostBudget, opts.pricePerM, rt)
+	if err != nil {
+		return err
+	}
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,
@@ -225,6 +231,8 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 		GitRunner:             cc.GitRunner,
 		MaxFileSizeBytes:      scanTpl.MaxFileSizeBytes,
 		MaxTokensBudget:       budget,
+		MaxCostBudget:         costBudget,
+		Price:                 price,
 		SkipPlan:              opts.noPlan,
 		SkipDedup:             opts.noDedup,
 		SkipSummary:           opts.noSummary,

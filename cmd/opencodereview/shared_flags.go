@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 
@@ -58,6 +59,11 @@ func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, max
 	cmd.Flags().IntVar(maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(maxTokens, "max-tokens", 0, "per-group prompt token ceiling (0 = configured or template default)")
 	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; checked before every LLM round, so a group already over budget gets one final round to submit findings and is reported as failed(budget), and no further groups are dispatched. Partial results are published and review exits 0; it exits non-zero only if every selected item failed (0 = unlimited)")
+}
+
+func addCostBudgetFlags(cmd *cobra.Command, maxCostBudget *float64, pricePerM *string) {
+	cmd.Flags().Float64Var(maxCostBudget, "max-cost-budget", 0, "cap the run's LLM spend in USD, measured at the model's price (see --price-per-m); checked where --max-tokens-budget is, with the same final round and partial results (0 = max_cost_budget from config, else unlimited)")
+	cmd.Flags().StringVar(pricePerM, "price-per-m", "", "model price in USD per million tokens, as input=3,cache_read=0.3,cache_write=3.75,output=15 (default: providers.<name>.prices.<model> in config); a missing cache price defaults to input")
 }
 
 func addModelFlag(cmd *cobra.Command, target *string) {
@@ -155,6 +161,9 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if opts.maxTokensBudget < 0 {
 		return fmt.Errorf("--max-tokens-budget must be a non-negative integer (0 means unlimited)")
 	}
+	if err := validateCostBudget(opts.maxCostBudget); err != nil {
+		return err
+	}
 	if opts.effort != "" {
 		if _, err := template.ParseEffort(opts.effort); err != nil {
 			return fmt.Errorf("--effort: %w", err)
@@ -187,6 +196,13 @@ func validateScanOptions(opts *scanOptions) error {
 	if opts.maxTokensBudget < 0 {
 		return fmt.Errorf("--max-tokens-budget must be a non-negative integer (0 means unlimited)")
 	}
+	return validateCostBudget(opts.maxCostBudget)
+}
+
+func validateCostBudget(v float64) error {
+	if v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+		return fmt.Errorf("--max-cost-budget must be a non-negative number (0 means unlimited)")
+	}
 	return nil
 }
 
@@ -212,6 +228,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
 	addOutputPathFlag(cmd, &opts.outputPath)
 	addConcurrencyFlags(cmd, &opts.concurrency, &opts.concurrentTaskTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokens, &opts.maxTokensBudget)
+	addCostBudgetFlags(cmd, &opts.maxCostBudget, &opts.pricePerM)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	addProviderFlag(cmd, &opts.provider)
 	addModelFlag(cmd, &opts.model)
@@ -236,6 +253,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(&opts.maxTokens, "max-tokens", 0, "per-file prompt token ceiling (0 = configured or template default)")
 	cmd.Flags().IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage; checked before every LLM round and at dispatch (0 = unlimited)")
+	addCostBudgetFlags(cmd, &opts.maxCostBudget, &opts.pricePerM)
 	cmd.Flags().StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the scan")
 	cmd.Flags().BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be scanned without running the LLM")
 	cmd.Flags().BoolVar(&opts.noPlan, "no-plan", false, "skip the per-file PLAN_TASK pre-pass")

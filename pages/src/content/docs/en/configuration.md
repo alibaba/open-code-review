@@ -372,6 +372,43 @@ model's **output** cap (`MAX_COMPLETION_TOKENS`, `16384` in both templates)
 and of `--max-tokens-budget`, which caps total token use for a whole run.
 Restore the embedded default with `ocr config unset max_tokens`.
 
+### Cost budget
+
+`--max-tokens-budget` counts tokens, but providers bill each kind of token at
+its own rate: a cache read can cost a tenth of the input price and a cache
+write more than the input price. `max_cost_budget` caps the spend of a whole
+run in USD instead. It needs the model's price per million tokens, from the
+provider's `prices` table:
+
+```json
+{
+  "providers": {
+    "anthropic": {
+      "model": "claude-sonnet-4-5",
+      "prices": {
+        "claude-sonnet-4-5": {"input": 3, "cache_read": 0.3, "cache_write": 3.75, "output": 15}
+      }
+    }
+  }
+}
+```
+
+`input` and `output` are required; a missing `cache_read` or `cache_write`
+defaults to the `input` price, so set `cache_write` for a provider that bills
+cache writes above the input price. Save a default cap with
+`ocr config set max_cost_budget 2`, or set it per run:
+
+```bash
+ocr review --max-cost-budget 2
+ocr review --max-cost-budget 2 --price-per-m input=3,cache_read=0.3,cache_write=3.75,output=15
+```
+
+`--price-per-m` overrides the table, and a cap without a known price is an
+error. The cap is checked before every LLM round and before each new subtask
+starts, so the spend can pass it by at most one round per subtask in flight plus
+each one's final round. With a price known, `--format json` reports
+`summary.cost_usd` even without a cap.
+
 ### Review effort
 
 `effort` sets how many review rounds each subtask gets: `low` = 1,
