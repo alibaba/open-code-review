@@ -650,10 +650,18 @@ func TestSarifInvocation_ExecutionSuccessful(t *testing.T) {
 		t.Error("executionSuccessful should be true for StateSkipped (not a failure)")
 	}
 
-	// Partial manifest → successful (budget truncation is publishable)
+	// Operationally partial manifest → not successful, though still publishable.
 	inv = sarifInvocationFromRun(nil, mockManifest(session.StatePartial), 0)
+	if inv.ExecutionSuccessful {
+		t.Error("executionSuccessful should be false for a partial timeout")
+	}
+
+	// A controlled budget-only partial keeps the historical successful status.
+	budgetPartial := mockManifest(session.StatePartial)
+	budgetPartial.Coverage.Failed[0].Classification = session.FailureBudget
+	inv = sarifInvocationFromRun(nil, budgetPartial, 0)
 	if !inv.ExecutionSuccessful {
-		t.Error("executionSuccessful should be true for StatePartial (publishable outcome)")
+		t.Error("executionSuccessful should be true for a budget-only partial")
 	}
 
 	// Failed manifest → not successful
