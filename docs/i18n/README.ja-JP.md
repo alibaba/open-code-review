@@ -124,6 +124,9 @@ npm install -g @alibaba-group/open-code-review
 
 コードレビューの前にLLMの設定が必要です。[デリゲートモード](https://open-codereview.ai/docs/delegate)を使用する場合は不要です。
 
+- `llm.auth_token` が必要: `ocr review`、`/open-code-review:review` コマンド、`open-code-review` スキル。OCR が自ら LLM を呼び出すため、Claude Code Team/Pro のログインは再利用されません。
+- OCR のキーは不要: `/open-code-review:delegate-review` コマンドと `open-code-review-delegate` スキル。ホストエージェントが自身のログインでレビューを実行します。[Claude Code のインストール手順](../../plugins/open-code-review/README.md#claude-code)を参照してください。
+
 ```bash
 ocr config provider          # ビルトインプロバイダーを選択またはカスタムプロバイダーを追加
 ocr config model             # アクティブなプロバイダーのモデルを選択
