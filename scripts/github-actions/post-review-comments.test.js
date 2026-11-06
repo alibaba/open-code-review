@@ -5033,6 +5033,10 @@ async function testActionScriptFingerprintCoversRepoLocalRules() {
   assert.notStrictEqual(shifted, shiftedBack, "no input value may shift a fingerprint field boundary");
   const otherVersion = await fingerprint({ OCR_VERSION_ACTUAL: "1.2.4" });
   assert.notStrictEqual(otherVersion, edited, "a changed OCR version must invalidate the checkpoint");
+  const withMaxTools = await fingerprint({ OCR_FP_MAX_TOOLS: "60" });
+  assert.notStrictEqual(withMaxTools, edited, "a changed max_tools must invalidate the checkpoint");
+  const unsetMaxTools = await fingerprint({ OCR_FP_MAX_TOOLS: "" });
+  assert.strictEqual(unsetMaxTools, edited, "an unset max_tools must keep checkpoints taken before the input existed");
 }
 
 // GET /user is 403 ("Resource not accessible by integration") for the
