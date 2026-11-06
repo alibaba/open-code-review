@@ -25,7 +25,7 @@ flowchart TD
 ```
 
 Оркестрация реализована в пакете
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/).
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/).
 Основные файлы:
 
 - `agent.go` — диспетчеризация и оркестрация по группам;
@@ -35,7 +35,7 @@ flowchart TD
 - `util.go` — вспомогательные функции.
 
 Цикл вызова инструментов и сжатие памяти находятся рядом, в пакете
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/).
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/).
 
 Основные точки входа:
 

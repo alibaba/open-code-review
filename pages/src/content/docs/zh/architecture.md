@@ -23,11 +23,11 @@ flowchart TD
 ```
 
 编排逻辑位于
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 包，主要文件有：`agent.go`（分发与按组编排）、`grouping.go`（语义文件分组）、
 `selection.go`（文件过滤）、`preview.go`（`--preview` 报告）和 `util.go`（辅助）；
 工具调用循环与记忆压缩位于相邻的
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)。
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/)。
 两个入口点值得关注：`Agent.Run`（流水线顶部）和 `Agent.dispatchSubtasks`
 （per-group 扇出）。
 
@@ -201,12 +201,21 @@ compress 区被渲染为 XML，用 `MEMORY_COMPRESSION_TASK` prompt 交给模型
 
 压缩后：`messages = frozen[2] + compressed_user_msg + active`。
 
+若模型返回的摘要因超出 completion token 限制而被截断（`finish_reason` 为 `"length"` 或 `"max_tokens"`），或者返回的摘要为空，OCR 将拒绝采纳该不完整摘要并完整保留原有上下文消息，避免会话历史丢失。
+
 ```go
 // compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
+func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey string) ([]llm.Message, error) {
+    part := partitionMessages(msgs, r.deps.Template.MaxTokens, 0)
     contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
     // … call MEMORY_COMPRESSION_TASK …
+    if resp.IsTruncated() {
+        return msgs, fmt.Errorf("memory compression truncated: finish_reason is %q", resp.FinishReason())
+    }
+    rawSummary := stripMarkdownFences(resp.Content())
+    if rawSummary == "" {
+        return msgs, nil
+    }
     rebuilt[1] = llm.NewTextMessage(role, currentText+
         "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
     for i := part.compressEnd; i < len(msgs); i++ {

@@ -25,12 +25,12 @@ flowchart TD
 ```
 
 The orchestration lives in the
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 package, whose main files are `agent.go` (dispatch & per-group
 orchestration), `grouping.go` (semantic file grouping), `selection.go`
 (the file filter), `preview.go` (the `--preview` report), and `util.go`
 (helpers); the tool-use loop and memory compression live alongside it in
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/).
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/).
 Two entry points matter: `Agent.Run` (top of pipeline) and
 `Agent.dispatchSubtasks` (per-group fan-out).
 
@@ -254,12 +254,21 @@ the original user message inside `<previous_review_summary>` tags.
 
 After compression: `messages = frozen[2] + compressed_user_msg + active`.
 
+If the model response is truncated (such as when hitting `max_tokens` / `length` limit), or if the summary is empty, OCR declines to apply the summary and preserves the original conversation history intact to avoid context loss.
+
 ```go
 // compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
+func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey string) ([]llm.Message, error) {
+    part := partitionMessages(msgs, r.deps.Template.MaxTokens, 0)
     contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
     // … call MEMORY_COMPRESSION_TASK …
+    if resp.IsTruncated() {
+        return msgs, fmt.Errorf("memory compression truncated: finish_reason is %q", resp.FinishReason())
+    }
+    rawSummary := stripMarkdownFences(resp.Content())
+    if rawSummary == "" {
+        return msgs, nil
+    }
     rebuilt[1] = llm.NewTextMessage(role, currentText+
         "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
     for i := part.compressEnd; i < len(msgs); i++ {
