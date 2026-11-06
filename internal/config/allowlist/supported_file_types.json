@@ -6,6 +6,8 @@
   ".groovy",
   ".py",
   ".pyi",
+  ".star",
+  ".bzl",
   ".js",
   ".jsx",
   ".ts",
