@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -363,6 +364,81 @@ func TestFileFind_NonASCIIPath(t *testing.T) {
 			wantBase := filepath.Base(nonASCIIPath)
 			if !strings.Contains(got, wantBase) {
 				t.Errorf("expected to find %q, but got: %q", wantBase, got)
+			}
+		})
+	}
+}
+
+// TestFileFind_QuotedPathnamesReturnVerbatim covers issue #1866. Git C-quotes
+// pathnames holding control bytes, so a newline-delimited listing returned the
+// escaped spelling instead of the real relative path, and file_read could not
+// open it. The NUL-delimited listing must return the pathname byte-for-byte.
+func TestFileFind_QuotedPathnamesReturnVerbatim(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("control characters are not legal in windows filenames")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-b", "main")
+	git("config", "commit.gpgsign", "false")
+	git("config", "user.email", "test@example.com")
+	git("config", "user.name", "test")
+
+	fixtures := []struct {
+		name  string
+		query string
+	}{
+		{name: "tab\tname.go", query: "tab"},
+		{name: "line\nbreak.go", query: "line"},
+	}
+	for _, f := range fixtures {
+		if err := os.WriteFile(filepath.Join(dir, f.name), []byte("package q\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git("add", "--", f.name)
+	}
+	git("commit", "-m", "init")
+
+	for _, tc := range []struct {
+		name string
+		mode ReviewMode
+		ref  string
+	}{
+		{name: "workspace", mode: ModeWorkspace},
+		{name: "commit", mode: ModeCommit, ref: "HEAD"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewFileFind(&FileReader{RepoDir: dir, Mode: tc.mode, Ref: tc.ref})
+			for _, f := range fixtures {
+				got, err := p.Execute(context.Background(), map[string]any{"query_name": f.query})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got != f.name {
+					t.Fatalf("Execute(%q) = %q, want %q", f.query, got, f.name)
+				}
+				content, readErr := p.FileReader.Read(context.Background(), got)
+				if readErr != nil {
+					t.Fatalf("file_read %q: %v", got, readErr)
+				}
+				if !strings.Contains(content, "package q") {
+					t.Errorf("content = %q, want package q", content)
+				}
 			}
 		})
 	}

@@ -105,13 +105,15 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 	var output []byte
 	var err error
 
-	// core.quotepath=false reports non-ASCII paths literally instead of as
-	// quoted octal escapes, which file_find cannot match and file_read cannot open.
+	// -z reports pathnames verbatim, separated by NUL, instead of C-quoting
+	// bytes such as tab and newline. A quoted spelling neither matches the
+	// query nor opens in file_read, and core.quotepath=false does not cover
+	// those bytes.
 	var args []string
 	if ref := p.FileReader.Ref; ref != "" {
-		args = []string{"-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "--end-of-options", ref}
+		args = []string{"ls-tree", "-r", "--name-only", "-z", "--end-of-options", ref}
 	} else {
-		args = []string{"-c", "core.quotepath=false", "ls-files", "--cached", "--others", "--exclude-standard"}
+		args = []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}
 	}
 
 	if p.FileReader.Runner != nil {
@@ -137,10 +139,10 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 	}
 
 	var files []string
-	lines := bytes.Split(bytes.TrimRight(output, "\n"), []byte{'\n'})
-	for _, line := range lines {
-		if len(line) > 0 {
-			s := string(line)
+	records := bytes.Split(output, []byte{0})
+	for _, record := range records {
+		if len(record) > 0 {
+			s := string(record)
 			// Skip binary-like files that lack meaningful extensions patterns
 			// and filter out paths in common generated/artifact directories.
 			if shouldSkipFile(s) {
