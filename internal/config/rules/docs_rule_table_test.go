@@ -16,9 +16,18 @@ import (
 // the same rule table, so a new language has to be added to all five.
 var docLocales = []string{"en", "ja", "ko", "ru", "zh"}
 
-// docTableRow matches one row of the rule table and captures the glob in its
-// first column: "| `**/*.go` | `go.md` — Go source. |".
-var docTableRow = regexp.MustCompile("(?m)^\\|\\s*`([^`]+)`\\s*\\|")
+// docTableRow matches one row of the rule table and captures its whole first
+// column: "| `**/*.go` | `go.md` — Go source. |". docTableGlob then pulls the
+// globs out of it.
+//
+// The column holds more than one glob where several patterns share a rule doc,
+// so capturing only the first backticked span would let the rest go quietly
+// undocumented -- which is the drift this test exists to catch, not a shape it
+// should tolerate.
+var (
+	docTableRow  = regexp.MustCompile("(?m)^\\|([^|\\n]*`[^|\\n]*)\\|")
+	docTableGlob = regexp.MustCompile("`([^`]+)`")
+)
 
 // TestRuleTableDocumentsEveryPattern keeps pages/.../review-rules.md honest
 // about path_rule_map.
@@ -29,6 +38,10 @@ var docTableRow = regexp.MustCompile("(?m)^\\|\\s*`([^`]+)`\\s*\\|")
 // the shape that works. Nothing enforced it, so eight languages -- pug, nix,
 // haskell, nim, swift, zig, ocaml and reason -- had reached the resolver
 // without ever reaching the docs.
+//
+// It compares sets, not order: the table is meant to read in matching order,
+// but a row in the wrong place still documents its pattern, and failing a
+// build over that would be noise.
 //
 // Failing here is cheap to fix and the message says exactly which rows to add.
 func TestRuleTableDocumentsEveryPattern(t *testing.T) {
@@ -103,8 +116,10 @@ func patternsFromDoc(t *testing.T, locale string) map[string]bool {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	documented := map[string]bool{}
-	for _, match := range docTableRow.FindAllStringSubmatch(string(data), -1) {
-		documented[match[1]] = true
+	for _, row := range docTableRow.FindAllStringSubmatch(string(data), -1) {
+		for _, glob := range docTableGlob.FindAllStringSubmatch(row[1], -1) {
+			documented[glob[1]] = true
+		}
 	}
 	if len(documented) == 0 {
 		t.Fatalf("no table rows found in %s, so this test would pass vacuously", path)

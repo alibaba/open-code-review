@@ -14,21 +14,21 @@ input/output. The full machine-readable definitions live in
 Each tool declares whether it's exposed during the **plan phase**, the
 **main task**, or both:
 
-| Tool | Plan | Main | Purpose |
-|---|---|---|---|
-| `task_done` | ✗ | ✓ | Signal "I'm finished" — terminates the loop. |
-| `code_comment` | ✗ | ✓ | Emit a review comment with line range + suggestion. |
-| `file_read` | ✗ | ✓ | Read a slice of a file from the post-change snapshot. |
-| `file_read_diff` | ✓ | ✓ | Read another file's diff to confirm a cross-file concern. |
-| `file_find` | ✓ | ✓ | Locate files by filename keyword. |
-| `code_search` | ✓ | ✓ | Grep across the repo (literal or regex). |
+| Tool             | Plan | Main | Purpose                                                   |
+| ---------------- | ---- | ---- | --------------------------------------------------------- |
+| `task_done`      | ✗    | ✓    | Signal "I'm finished" — terminates the loop.              |
+| `code_comment`   | ✗    | ✓    | Emit a review comment with line range + suggestion.       |
+| `file_read`      | ✗    | ✓    | Read a slice of a file from the post-change snapshot.     |
+| `file_read_diff` | ✓    | ✓    | Read another file's diff to confirm a cross-file concern. |
+| `file_find`      | ✓    | ✓    | Locate files by filename keyword.                         |
+| `code_search`    | ✓    | ✓    | Grep across the repo (literal or regex).                  |
 
 `task_done` and `code_comment` are intentionally **not** available
 during the plan phase: planning is read-only.
 
 > **Context tools are read-only context, not comment targets.** The
 > `main_task` prompt explicitly forbids commenting on findings in
-> *other* files. `file_read`, `file_read_diff`, `file_find`, and
+> _other_ files. `file_read`, `file_read_diff`, `file_find`, and
 > `code_search` exist so the model can understand the current file's
 > diff better — any issue spotted while gathering that context is
 > ignored by design. Cross-file concerns surface as comments only when
@@ -49,9 +49,9 @@ Terminate the main loop.
 }
 ```
 
-| Field | Required | Meaning |
-|---|---|---|
-| `state` | yes | `DONE` (default) or `FAILED`. `FAILED` is for "I literally cannot use the available tools to do this" — almost never the right choice. |
+| Field   | Required | Meaning                                                                                                                                |
+| ------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `state` | yes      | `DONE` (default) or `FAILED`. `FAILED` is for "I literally cannot use the available tools to do this" — almost never the right choice. |
 
 When the agent sees `task_done`, it stops calling the LLM and starts
 processing accumulated `code_comment` calls. `task_done` returns
@@ -155,11 +155,11 @@ Read a range of lines from a file in its **post-change** form.
 }
 ```
 
-| Field | Required | Default | Notes |
-|---|---|---|---|
-| `file_path` | yes | — | Path relative to the repo root. |
-| `start_line` | no | `1` | 1-indexed. |
-| `end_line` | no | end of file | Inclusive. |
+| Field        | Required | Default     | Notes                           |
+| ------------ | -------- | ----------- | ------------------------------- |
+| `file_path`  | yes      | —           | Path relative to the repo root. |
+| `start_line` | no       | `1`         | 1-indexed.                      |
+| `end_line`   | no       | end of file | Inclusive.                      |
 
 ### Output
 
@@ -181,8 +181,8 @@ separator so the model can quote line numbers precisely in subsequent
 ### Limits
 
 - **500 lines max per call.** Larger ranges are truncated, `IS_TRUNCATED:
-  true` is set, and a trailing `Note: Results truncated to 500 lines.
-  Please narrow your line range.` is appended.
+true` is set, and a trailing `Note: Results truncated to 500 lines.
+Please narrow your line range.` is appended.
 - Reads only the **modified version** of the file. To see the old
   version, use `file_read_diff`.
 
@@ -193,7 +193,7 @@ from the diff hunk header `@@ -x,y +m,n @@` — typically `m-50` to
 
 ## `file_read_diff`
 
-Read the diff for one or more *other* files in the same change set —
+Read the diff for one or more _other_ files in the same change set —
 useful when a comment hinges on whether a related file was updated.
 
 ### Schema
@@ -248,15 +248,16 @@ Find files in the repo by repository-relative path or filename keyword (substrin
 }
 ```
 
-| Field | Required | Default | Notes |
-|---|---|---|---|
-| `query_name` | yes | — | Substring matched against each file's **repository-relative path** (accepting both `/` and `\` path separators). |
-| `case_sensitive` | no | `false` | Set to `true` for exact-case matching. |
+| Field            | Required | Default | Notes                                                                                                            |
+| ---------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `query_name`     | yes      | —       | Substring matched against each file's **repository-relative path** (accepting both `/` and `\` path separators). |
+| `case_sensitive` | no       | `false` | Set to `true` for exact-case matching.                                                                           |
 
 The candidate set comes from `git ls-files --cached --others
 --exclude-standard` in workspace mode, or `git ls-tree -r --name-only
 <ref>` in range / commit mode. Extensionless files are skipped except
-for `Makefile`, `Dockerfile`, `LICENSE`, `Vagrantfile`, `Containerfile`.
+for `Makefile`, `Dockerfile`, `LICENSE`, `Vagrantfile`, `Containerfile`,
+`BUILD`, and `WORKSPACE`.
 
 ### Output
 
@@ -295,12 +296,12 @@ understands `pathspec` syntax and respects `.gitignore`.
 }
 ```
 
-| Field | Required | Default | Notes |
-|---|---|---|---|
-| `search_text` | yes | — | Literal string or PCRE pattern (see `use_perl_regexp`). |
-| `file_patterns` | no | whole repo | Array of pathspec entries. Use `:(exclude)pat` to subtract. |
-| `case_sensitive` | no | `false` | — |
-| `use_perl_regexp` | no | `false` | When `true`, `search_text` is treated as a regex. |
+| Field             | Required | Default    | Notes                                                       |
+| ----------------- | -------- | ---------- | ----------------------------------------------------------- |
+| `search_text`     | yes      | —          | Literal string or PCRE pattern (see `use_perl_regexp`).     |
+| `file_patterns`   | no       | whole repo | Array of pathspec entries. Use `:(exclude)pat` to subtract. |
+| `case_sensitive`  | no       | `false`    | —                                                           |
+| `use_perl_regexp` | no       | `false`    | When `true`, `search_text` is treated as a regex.           |
 
 ### Output
 
@@ -323,12 +324,12 @@ When there are no matches, the tool returns the literal string
 
 ### Pathspec cookbook
 
-| Goal | `file_patterns` |
-|---|---|
-| Single file | `["src/main.go"]` |
-| All Go files | `["*.go"]` |
-| All Go except tests | `["*.go", ":(exclude)*_test.go"]` |
-| Only one directory | `["src/api/"]` |
+| Goal                      | `file_patterns`                                                    |
+| ------------------------- | ------------------------------------------------------------------ |
+| Single file               | `["src/main.go"]`                                                  |
+| All Go files              | `["*.go"]`                                                         |
+| All Go except tests       | `["*.go", ":(exclude)*_test.go"]`                                  |
+| Only one directory        | `["src/api/"]`                                                     |
 | Multiple types, no vendor | `["*.go", "*.ts", ":(exclude)vendor/", ":(exclude)node_modules/"]` |
 
 ### Limits
@@ -336,9 +337,9 @@ When there are no matches, the tool returns the literal string
 - Caps matches at **100 per file** via `git grep --max-count 100`, so
   total output across many files can exceed 100. When the per-file cap
   is hit the output is prefixed with `Note: The results have been
-  truncated. Only showing first 100 results.`.
+truncated. Only showing first 100 results.`.
 - Empty / whitespace-only `search_text` returns `Error: search_text is
-  blank` instead of expanding to every line.
+blank` instead of expanding to every line.
 - Searches the **current working tree** in workspace mode, or the
   resolved target ref in range / commit mode (the `FileReader.Ref` is
   passed as a positional argument to `git grep`).
@@ -383,7 +384,7 @@ change the `description` to nudge the model. This is the easiest way to
 inject project-specific guidance — e.g., "When using `file_read`,
 always read at least 30 lines around the change."
 
-> Adding **new** tool *names* requires Go-side wiring; see
+> Adding **new** tool _names_ requires Go-side wiring; see
 > `internal/tool/definitions.go` and the providers under
 > `internal/tool/`. The JSON file alone can't add new behaviour.
 
