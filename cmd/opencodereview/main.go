@@ -20,7 +20,7 @@ func main() {
 
 func run() int {
 	ctx := context.Background()
-	if telemetry.Init(ctx) {
+	if shouldInitializeTelemetry(os.Args[1:]) && telemetry.Init(ctx) {
 		defer telemetry.ShutdownWithTimeout(ctx, 5*time.Second)
 	}
 
@@ -29,4 +29,11 @@ func run() int {
 		return 1
 	}
 	return 0
+}
+
+// The interactive shell has no review work of its own. Its review subprocess
+// initializes telemetry, keeping console exporters off the active TUI screen.
+func shouldInitializeTelemetry(args []string) bool {
+	cmd, _, err := rootCmd.Find(args)
+	return err != nil || cmd.Name() != "tui"
 }
