@@ -142,11 +142,13 @@ type Args struct {
 	Resume *session.ResumeState
 
 	// SealedInput pins this run to commit endpoints a pre-flight resolve already
-	// froze, instead of resolving From/To/Commit again. Set only on the resume
-	// path, where admission compared an identity derived from those endpoints:
+	// froze, instead of resolving From/To/Commit again. The resume path sets it
+	// because admission compared an identity derived from those endpoints:
 	// re-resolving a raw ref here could read a commit the admitted identity never
 	// covered, and the mismatch would surface only after the child session and
-	// manifest existed. Nil means resolve normally, which is every non-resume run.
+	// manifest existed. review --fetch sets it so the run reviews the base it
+	// fetched even if the remote-tracking ref moves again. Nil means resolve
+	// normally.
 	SealedInput *diff.InputResolution
 
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
