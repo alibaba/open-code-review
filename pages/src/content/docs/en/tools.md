@@ -178,6 +178,18 @@ Each content line is prefixed with its 1-indexed line number and a `|`
 separator so the model can quote line numbers precisely in subsequent
 `code_comment` calls.
 
+If a `.ts` or `.tsx` path is missing in a commit or range review, OCR can
+suggest its counterpart with the same directory and filename stem after
+verifying that it exists in the same target commit. The failed call remains
+an error: OCR does not silently substitute the suggested path. The model must
+issue another `file_read` to obtain its content.
+
+The final JSON output records a later successful candidate read under the
+original failure's `recovery` field, including its call number and actual
+line range. Unrelated successful reads do not count as recovery evidence.
+See [file-read recovery evidence](../cli-reference/#file-read-recovery-evidence)
+for the output contract and its limits.
+
 ### Limits
 
 - **500 lines max per call.** Larger ranges are truncated, `IS_TRUNCATED:
