@@ -25,6 +25,10 @@ func Shutdown(ctx context.Context) error {
 	}
 
 	shutdownFuncs = nil
+	// Re-arm Init: the lifecycle is symmetric, so a process (or test) that
+	// shuts telemetry down can initialize it again instead of getting a
+	// no-op from the `initialized` guard.
+	initialized = false
 
 	if len(errs) > 0 {
 		return fmt.Errorf("telemetry shutdown: %v", errs)

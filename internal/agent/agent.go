@@ -288,8 +288,14 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
 	// Step 1: Parse diffs
-	ctx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
-	if err := a.loadDiffs(ctx); err != nil {
+	// The parse span's context is deliberately scoped to the parse block: after
+	// diffSpan.End() the pipeline keeps using the incoming ctx. Rebinding ctx to
+	// the span's context here would parent every later span and event (group
+	// subtasks, main loop, plan, review filter) to the already-ended diff.parse
+	// span, attributing review work to parsing and placing children outside the
+	// parent operation's lifetime (#1710).
+	parseCtx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
+	if err := a.loadDiffs(parseCtx); err != nil {
 		diffSpan.End()
 		// The builder already exists (agent.New created session + manifest), but
 		// no item was selected yet. Record the run-level input failure at this
