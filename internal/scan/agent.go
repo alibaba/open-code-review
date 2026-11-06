@@ -791,10 +791,12 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 //     {{plan_guidance}}.
 //
 // Plan phase is skipped (and {{plan_guidance}} is filled with a "no plan"
-// sentinel) when Template.PlanTask is nil, args.SkipPlan is true, the file
-// is small enough that planning overhead outweighs gain, or the plan call
-// itself fails. Plan failure never blocks the main review — it falls back
-// to v1 (plan-less) behavior.
+// sentinel) when Template.PlanTask is nil, args.SkipPlan is true, or the
+// plan call itself fails — a plan-provider failure falls back to v1
+// (plan-less) behavior and never blocks the main review. A plan prompt that
+// exceeds the local token gate is different: planning was explicitly
+// requested, so the file fails with an error instead of silently dropping
+// the phase, and the message suggests --max-tokens / --no-plan.
 func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, string, error) {
 	ctx, span := telemetry.StartSpan(ctx, "scan.subtask."+it.Path)
 	defer span.End()
@@ -809,7 +811,16 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 		rule = a.args.SystemRule.Resolve(it.Path)
 	}
 
-	planGuidance := a.maybeRunPlan(ctx, it, rule)
+	planGuidance, planErr := a.maybeRunPlan(ctx, it, rule)
+	if planErr != nil {
+		// An oversized PLAN prompt is an explicit per-file failure, not a
+		// silent plan-less fallback: the user did not pass --no-plan, so
+		// dropping the planning phase is not a decision made on their behalf.
+		// The error names both ways forward (raise --max-tokens or rerun with
+		// --no-plan); MAIN keeps its own token check for the files that get
+		// here with a fitting plan prompt.
+		return false, planErr.Error(), nil
+	}
 
 	messages := a.renderMessages(it, rule, planGuidance)
 
@@ -853,17 +864,25 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 	return true, "", nil
 }
 
+// errPlanPromptTooLarge marks the local rejection of an oversized PLAN
+// prompt. It fires before any provider request is sent; executeSubtask turns
+// it into an explicit per-file failure so the user decides between raising
+// --max-tokens and rerunning with --no-plan.
+var errPlanPromptTooLarge = errors.New("plan prompt exceeds the token limit")
+
 // maybeRunPlan invokes PLAN_TASK on the file and returns a human-readable
 // guidance string suitable for {{plan_guidance}} substitution. Returns "(no
 // pre-scan plan; review the entire file as usual)" when planning is
 // disabled or fails — that sentinel is intentionally non-empty so the
 // surrounding "### Pre-scan Focus Areas" header in MAIN_TASK has content
-// instead of dangling.
-func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string) string {
+// instead of dangling. A non-nil error means the plan prompt itself exceeds
+// the prompt token limit; the caller must fail the file with it instead of
+// reviewing plan-less.
+func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string) (string, error) {
 	const noPlan = "(no pre-scan plan; review the entire file as usual)"
 
 	if !a.planEnabled() {
-		return noPlan
+		return noPlan, nil
 	}
 	pt := a.args.Template.PlanTask
 
@@ -876,6 +895,23 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
 		content = strings.ReplaceAll(content, "{{file_content}}", it.Content)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
+	}
+
+	// Same local pre-flight gate as MAIN_TASK below: a plan prompt that
+	// already exceeds the limit cannot succeed at the provider, and sending
+	// it burns one doomed request. Unlike a plan-provider failure this is
+	// not absorbed as a plan-less fallback — the user did not pass
+	// --no-plan, so the file fails with an explicit error instead.
+	planTokens := llmloop.CountMessagesTokens(messages)
+	if planTokens > llmloop.PromptTokenLimit(a.args.Template.MaxTokens) {
+		msg := fmt.Sprintf("plan prompt tokens (%d) exceed %d%% of max_tokens(%d); increase --max-tokens or rerun with --no-plan to review without planning", planTokens, 80, a.args.Template.MaxTokens)
+		fmt.Fprintf(stdout.Writer(), "[ocr] ERROR: %s for %s\n", msg, it.Path)
+		telemetry.Event(ctx, "token.threshold.exceeded",
+			telemetry.AnyToAttr("file.path", it.Path),
+			telemetry.AnyToAttr("tokens", planTokens),
+			telemetry.AnyToAttr("max_tokens", a.args.Template.MaxTokens),
+			telemetry.AnyToAttr("phase", "plan"))
+		return "", fmt.Errorf("%w: %s", errPlanPromptTooLarge, msg)
 	}
 
 	fs := a.session.GetOrCreateFileSession(it.Path)
@@ -892,16 +928,16 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))
 		fmt.Fprintf(stdout.Writer(), "[ocr] scan plan failed for %s: %v (falling back to plan-less)\n", it.Path, err)
-		return noPlan
+		return noPlan, nil
 	}
 	rec.SetResponse(resp, time.Since(startTime))
 	a.runner.RecordUsage(resp.Usage)
 
 	guidance := formatPlanGuidance(resp.Content())
 	if guidance == "" {
-		return noPlan
+		return noPlan, nil
 	}
-	return guidance
+	return guidance, nil
 }
 
 // maybeRunProjectSummary runs the post-batch PROJECT_SUMMARY_TASK over the
