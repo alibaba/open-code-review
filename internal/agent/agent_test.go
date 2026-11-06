@@ -1004,6 +1004,24 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 	})
 }
 
+func TestBuildConcatenatedDiffs_DeletedFileUsesRealPath(t *testing.T) {
+	// A deletion's NewPath is the /dev/null sentinel and its real name is in
+	// OldPath. The prompt must frame the file under its real path, otherwise the
+	// model receives two different names for the same file (the change list
+	// shows "removed.go" while the diff body says "/dev/null").
+	diffs := []model.Diff{
+		{OldPath: "removed.go", NewPath: "/dev/null", IsDeleted: true, Diff: "-package removed\n"},
+	}
+	got := buildConcatenatedDiffs(diffs)
+
+	if !strings.Contains(got, `<file path="removed.go">`) {
+		t.Errorf("deleted file must be framed under its real path, got:\n%s", got)
+	}
+	if strings.Contains(got, "/dev/null") {
+		t.Errorf("the /dev/null sentinel must not leak into the prompt, got:\n%s", got)
+	}
+}
+
 func TestDispatchSubtasks_WithFakeLLM(t *testing.T) {
 	client := &fakeAgentClient{responses: []*llm.ChatResponse{
 		codeCommentResponse("main.go"),
