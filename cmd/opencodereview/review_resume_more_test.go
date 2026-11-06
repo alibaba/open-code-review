@@ -15,6 +15,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
@@ -136,8 +137,9 @@ func resumeTestContext(repoDir string) *commonContext {
 }
 
 // writeVerifiableParent persists a review session whose manifest records identity
-// with the given provider and model, as a completed parent run would.
-func writeVerifiableParent(t *testing.T, repoDir string, id session.RunIdentity, provider, model string) string {
+// with the given provider, model and task_models overrides, as a completed
+// parent run would.
+func writeVerifiableParent(t *testing.T, repoDir string, id session.RunIdentity, provider, model string, taskModels map[string]string) string {
 	t.Helper()
 	sh := session.New(repoDir, "feature", model, session.SessionOptions{
 		ReviewMode: session.ReviewModeRange,
@@ -150,6 +152,7 @@ func writeVerifiableParent(t *testing.T, repoDir string, id session.RunIdentity,
 	b.SetInput(session.ManifestInput{Mode: id.Mode, SourceArtifactSHA256: id.SourceArtifactSHA256})
 	b.SetExecution(session.ManifestExecution{
 		Provider: provider, Model: model, RuleConfigSHA256: id.RuleConfigSHA256,
+		TaskModels: taskModels,
 	})
 	if err := b.RegisterSelected(session.CoverageItem{ItemID: "item-1", Path: "main.go"}); err != nil {
 		t.Fatalf("register selected: %v", err)
@@ -215,7 +218,7 @@ func TestValidateResumeIdentity(t *testing.T) {
 		t.Fatalf("ResolveIdentity: %v", err)
 	}
 
-	parentID := writeVerifiableParent(t, repoDir, sealed.Identity, "anthropic", "claude")
+	parentID := writeVerifiableParent(t, repoDir, sealed.Identity, "anthropic", "claude", nil)
 	state, err := loadReviewResumeState(repoDir, reviewOptions{resume: parentID, from: opts.from, to: opts.to})
 	if err != nil {
 		t.Fatalf("loadReviewResumeState: %v", err)
@@ -278,6 +281,43 @@ func TestValidateResumeIdentity(t *testing.T) {
 		rt := &llmRuntime{Provider: "openai", Model: "gpt-5"}
 		if _, err := validateResumeIdentity(context.Background(), cc, explicit, rt, state); err != nil {
 			t.Errorf("want accepted with --provider, got: %v", err)
+		}
+	})
+
+	// The admission gap task_models comparison exists to close: the run-wide
+	// model is identical, so the model check passes, but the main_task
+	// checkpoints this resume would reuse were produced under a different
+	// per-task model. Runs against its own parent so the shared parent (which
+	// recorded no task_models) stays usable for the input-change case below.
+	t.Run("task_models change with the same model is rejected", func(t *testing.T) {
+		before := countSessionFiles(t, repoDir)
+
+		parentID := writeVerifiableParent(t, repoDir, sealed.Identity, "anthropic", "claude",
+			map[string]string{"main_task": "claude-haiku"})
+		taskModelState, err := loadReviewResumeState(repoDir, reviewOptions{resume: parentID, from: opts.from, to: opts.to})
+		if err != nil {
+			t.Fatalf("loadReviewResumeState: %v", err)
+		}
+
+		// Same provider, same run-wide model, a different main_task override —
+		// and no flag exists that could have asked for the change.
+		rt := &llmRuntime{Provider: "anthropic", Model: "claude", TaskModels: llm.TaskModels{"main_task": "claude-sonnet"}}
+		_, err = validateResumeIdentity(context.Background(), cc, opts, rt, taskModelState)
+		if err == nil {
+			t.Fatal("want rejection for an unasked-for task_models change")
+		}
+		if !strings.Contains(err.Error(), "task_models changed") {
+			t.Errorf("error must name task_models as the cause, got: %v", err)
+		}
+		if after := countSessionFiles(t, repoDir); after != before+1 {
+			t.Errorf("rejection created %d session file(s) beyond the parent; it must persist nothing", after-before-1)
+		}
+
+		// The identical map is the accepted baseline: only the override drift
+		// rejects, not the presence of task_models itself.
+		rtSame := &llmRuntime{Provider: "anthropic", Model: "claude", TaskModels: llm.TaskModels{"main_task": "claude-haiku"}}
+		if _, err := validateResumeIdentity(context.Background(), cc, opts, rtSame, taskModelState); err != nil {
+			t.Errorf("want accepted with identical task_models, got: %v", err)
 		}
 	})
 

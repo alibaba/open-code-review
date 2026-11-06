@@ -220,6 +220,7 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 		MaxConcurrency:        opts.concurrency,
 		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
+		TaskModels:            rt.TaskModels,
 		EndpointSource:        rt.Source,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
