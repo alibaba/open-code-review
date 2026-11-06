@@ -35,7 +35,7 @@ func (l *diagnosticLinks) add(rec diagnosticRecord, line int) {
 		return
 	}
 	switch rec.Type {
-	case "llm_request", "llm_response", "llm_error", "tool_call", "comment_evidence", "comment_decision":
+	case "llm_request", "llm_response", "llm_error", "tool_call", "comment_location":
 	default:
 		return
 	}
@@ -98,7 +98,7 @@ func (l *diagnosticLinks) observations() []DiagnosticObservation {
 		switch event.Type {
 		case "llm_response", "llm_error":
 			outcomes[event.RequestID]++
-		case "tool_call", "comment_evidence", "comment_decision":
+		case "tool_call", "comment_location":
 			if obs := l.checkToolResponse(linked); obs != nil {
 				out = append(out, *obs)
 			}

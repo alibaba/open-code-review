@@ -5,9 +5,6 @@ package llmloop
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -57,60 +54,12 @@ func TestRunMainTaskPersistsRequestLinks(t *testing.T) {
 	}
 }
 
-func TestRunMainTaskCommentEvidenceDuplicateAnchor(t *testing.T) {
-	setTestHome(t, t.TempDir())
-	const snapshot = "if timeout {\n  ev.ErrorClass = ArgosRuntimeStatusTimeout\n}\nif analyze {\n  ev.ErrorClass = ArgosRuntimeStatusTimeout\n}\n"
-	response := codeCommentResponse("", "")
-	response.Choices[0].Message.ToolCalls[0].Function.Arguments = `{"comments":[{"path":"a.go","content":"Analyze marks a non-timeout error as timeout","existing_code":"ev.ErrorClass = ArgosRuntimeStatusTimeout"}]}`
-	client := &scriptedLLMClient{responses: []*llm.ChatResponse{response, taskDoneResponse()}}
-	runner, collector := newThinkingTestRunner(t, client)
-	d := model.Diff{NewPath: "a.go", NewFileContent: snapshot}
-	runner.deps.DiffLookup = func(string) *model.Diff { return &d }
-	ok, _, err := runner.RunMainTask(context.Background(), []llm.Message{msg("user", snapshot)}, "a.go")
-	if err != nil || !ok {
-		t.Fatalf("run = %v, %v", ok, err)
-	}
-	comments := collector.Comments()
-	if len(comments) != 1 {
-		t.Fatal("missing review comment")
-	}
-	sh := runner.deps.Session
-	sh.RecordReviewItemDone("a.go", "a.go", "a.go", "fp", comments)
-	if err := sh.Finalize(); err != nil {
-		t.Fatal(err)
-	}
-	report, err := session.Diagnose(sh.RepoDir, sh.SessionID, session.DiagnoseOptions{CommentID: comments[0].EvidenceID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cm := report.Comment
-	// This fixture preserves the resolver's existing first-match behavior.
-	// Text matching is not a verdict that the model's intended branch is correct.
-	if cm.OriginalComment.StartLine != 0 || cm.Comment.StartLine != 2 || !strings.Contains(cm.OriginalComment.Content, "Analyze") || cm.Code.Status != "matched" || cm.RequestID == "" || cm.ToolCallID != "call_comment" {
-		t.Fatalf("cannot distinguish original claim from actual location: %+v", cm)
-	}
-	request, err := session.Diagnose(sh.RepoDir, sh.SessionID, session.DiagnoseOptions{RequestID: cm.RequestID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, event := range request.Tasks[0].Phases[0].Events {
-		if event.Type == "llm_request" {
-			raw, err := session.Diagnose(sh.RepoDir, sh.SessionID, session.DiagnoseOptions{EventLine: event.Line})
-			if err != nil || !strings.Contains(string(raw.Event.Record), "if analyze") {
-				t.Fatal("original reviewed context cannot be reached from the comment")
-			}
-			return
-		}
-	}
-	t.Fatal("comment has no inspectable source request")
-}
-
-func TestRunMainTaskCommentEvidence(t *testing.T) {
-	for _, mode := range []string{"sync", "async", "cross-file", "llm-relocation"} {
+func TestRunMainTaskCommentLocation(t *testing.T) {
+	for _, mode := range []string{"sync", "async", "cross-file", "relocation", "unlocated"} {
 		t.Run(mode, func(t *testing.T) {
 			setTestHome(t, t.TempDir())
 			response := codeCommentResponse("", "")
-			response.Choices[0].Message.ToolCalls[0].Function.Arguments = `{"comments":[{"path":"a.go","content":"check x","existing_code":"x","start_line":99,"end_line":99}]}`
+			response.Choices[0].Message.ToolCalls[0].Function.Arguments = `{"comments":[{"path":"a.go","content":"private finding","existing_code":"x"}]}`
 			client := &scriptedLLMClient{responses: []*llm.ChatResponse{response, taskDoneResponse()}}
 			runner, collector := newThinkingTestRunner(t, client)
 			d := model.Diff{NewPath: "a.go", NewFileContent: "header\n\tx\n"}
@@ -128,56 +77,63 @@ func TestRunMainTaskCommentEvidence(t *testing.T) {
 				d.NewPath = "b.go"
 				runner.deps.AllDiffs = func() []model.Diff { return []model.Diff{d} }
 			}
-			if mode == "llm-relocation" {
-				response.Choices[0].Message.ToolCalls[0].Function.Arguments = `{"comments":[{"path":"a.go","content":"check x","existing_code":"invented()"}]}`
-				reply := "```go\nx\n```"
+			if mode == "unlocated" {
+				d.NewFileContent = "unrelated()\n"
+			}
+			if mode == "relocation" {
+				d.NewFileContent = "header\n\tactual()\n"
+				reply := "```go\nactual()\n```"
 				client.responses = []*llm.ChatResponse{response, {Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &reply}}}}, taskDoneResponse()}
 				runner.deps.Template.ReLocationTask = &template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "relocate {existing_code} in {diff}"}}}
 			}
 			ok, _, err := runner.RunMainTask(context.Background(), []llm.Message{msg("user", "review")}, "group-a")
 			if err != nil || !ok {
-				t.Fatalf("RunMainTask = %v, %v", ok, err)
+				t.Fatalf("run = %v, %v", ok, err)
 			}
 			if runner.deps.CommentWorkerPool != nil {
 				runner.deps.CommentWorkerPool.AwaitKey("group-a")
 			}
-			comments := collector.Comments()
-			if len(comments) != 1 || comments[0].EvidenceID == "" || comments[0].Path != d.NewPath || comments[0].StartLine != 2 {
-				t.Fatalf("collected comment lost evidence or resolution: %+v", comments)
-			}
 			sh := runner.deps.Session
-			sh.RecordReviewItemDone(d.NewPath, d.NewPath, d.NewPath, "fingerprint", comments)
 			if err := sh.Finalize(); err != nil {
 				t.Fatal(err)
 			}
-			// Later source changes must not change the persisted reviewed snapshot.
-			if err := os.WriteFile(filepath.Join(sh.RepoDir, d.NewPath), []byte("changed\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			d.NewFileContent = "changed in memory\n"
-			report, err := session.Diagnose(sh.RepoDir, sh.SessionID, session.DiagnoseOptions{CommentID: comments[0].EvidenceID})
+			report, err := session.Diagnose(sh.RepoDir, sh.SessionID, session.DiagnoseOptions{TaskKey: "group-a"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			cm := report.Comment
-			if len(report.Observations) != 0 || cm.TaskKey != "group-a" || cm.RequestID == "" || cm.ResponseID == "" || cm.ToolCallID != "call_comment" || cm.CommentIndex != 0 || cm.EvidenceStatus != "matched" || len(cm.Checkpoints) != 1 {
-				t.Fatalf("bad runtime provenance: %+v, %+v", cm, report.Observations)
+			if len(report.Observations) != 0 {
+				t.Fatalf("normal processing acquired failure semantics: %+v", report.Observations)
 			}
-			if cm.OriginalComment.Path != "a.go" || cm.Code.Spans[0].Excerpt != "\tx" || cm.Code.SnapshotSHA256 == "" {
-				t.Fatalf("original or reviewed snapshot changed: %+v", cm)
-			}
-			if mode == "llm-relocation" {
-				if cm.OriginalComment.ExistingCode != "invented()" || cm.Comment.ExistingCode != "x" || cm.RelocationRequestID == "" {
-					t.Fatalf("re-location erased original evidence: %+v", cm)
-				}
-				relocation, err := session.Diagnose(sh.RepoDir, sh.SessionID, session.DiagnoseOptions{RequestID: cm.RelocationRequestID})
-				if err != nil || relocation.Tasks[0].Phases[0].Type != string(session.ReLocationTask) {
-					t.Fatalf("re-location target invalid: %+v, %v", relocation, err)
+			var locations []session.DiagnosticEvent
+			for _, phase := range report.Tasks[0].Phases {
+				for _, event := range phase.Events {
+					if event.Type == "comment_location" {
+						locations = append(locations, event)
+					}
 				}
 			}
-			loaded, err := session.LoadComments(sh.RepoDir, sh.SessionID)
-			if err != nil || len(loaded) != 1 || loaded[0].EvidenceID != cm.ID {
-				t.Fatalf("checkpoint replay lost evidence ID: %+v, %v", loaded, err)
+			comments := collector.Comments()
+			if len(locations) != 1 || len(comments) != 1 {
+				t.Fatalf("locations=%d comments=%d", len(locations), len(comments))
+			}
+			location := locations[0]
+			cm := comments[0]
+			if location.Location.Path != cm.Path || location.Location.StartLine != cm.StartLine || location.Location.EndLine != cm.EndLine || location.ToolCallID != "call_comment" || location.RequestID == "" || location.ResponseID == "" {
+				t.Fatalf("stage did not describe the processing result: %+v", location)
+			}
+			if mode == "unlocated" {
+				if cm.StartLine != 0 {
+					t.Fatal("unlocated comment acquired coordinates")
+				}
+			} else if cm.StartLine != 2 {
+				t.Fatal("record was written before location processing returned")
+			}
+			wantCalls := 2
+			if mode == "relocation" {
+				wantCalls = 3
+			}
+			if client.calls != wantCalls {
+				t.Fatalf("recording added model calls: %d", client.calls)
 			}
 		})
 	}

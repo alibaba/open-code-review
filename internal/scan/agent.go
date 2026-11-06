@@ -1031,7 +1031,7 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) map
 	rec.SetResponse(resp, time.Since(startTime))
 	a.runner.RecordUsage(resp.Usage)
 
-	deduped, dedupCheckpoints, decisions, ok := applyDedupGroupsWithDecisions(resp.Content(), batchComments)
+	deduped, dedupCheckpoints, ok := applyDedupGroupsWithCheckpoints(resp.Content(), batchComments)
 	if !ok {
 		fmt.Fprintf(stdout.Writer(), "[ocr] scan dedup batch #%d: malformed groups, keeping originals\n", batchIdx)
 		return nil
@@ -1041,9 +1041,6 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) map
 		return nil
 	}
 	a.args.CommentCollector.ReplaceSince(batchStart, deduped)
-	for index, output := range decisions {
-		rec.RecordCommentDecision("scan_dedup", index, batchComments[index], &output)
-	}
 	fmt.Fprintf(stdout.Writer(), "[ocr] scan dedup batch #%d: %d → %d comments\n", batchIdx, len(batchComments), len(deduped))
 	return dedupCheckpoints
 }
@@ -1085,18 +1082,10 @@ func applyDedupGroupsWithCheckpoints(
 	rawJSON string,
 	originals []model.LlmComment,
 ) ([]model.LlmComment, map[string][]model.LlmComment, bool) {
-	comments, checkpoints, _, ok := applyDedupGroupsWithDecisions(rawJSON, originals)
-	return comments, checkpoints, ok
-}
-
-func applyDedupGroupsWithDecisions(
-	rawJSON string,
-	originals []model.LlmComment,
-) ([]model.LlmComment, map[string][]model.LlmComment, []model.LlmComment, bool) {
 	stripped := llmloop.StripMarkdownFences(rawJSON)
 	stripped = strings.TrimSpace(stripped)
 	if stripped == "" {
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 	var parsed struct {
 		Groups []struct {
@@ -1105,7 +1094,7 @@ func applyDedupGroupsWithDecisions(
 		} `json:"groups"`
 	}
 	if err := json.Unmarshal([]byte(stripped), &parsed); err != nil {
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 
 	idToIdx := make(map[string]int, len(originals))
@@ -1116,24 +1105,23 @@ func applyDedupGroupsWithDecisions(
 	seen := make(map[string]bool, len(originals))
 	var out []model.LlmComment
 	checkpoints := make(map[string][]model.LlmComment)
-	decisions := make([]model.LlmComment, len(originals))
 	for _, g := range parsed.Groups {
 		if len(g.Members) == 0 {
-			return nil, nil, nil, false
+			return nil, nil, false
 		}
 		canonicalIdx, ok := idToIdx[g.Members[0]]
 		if !ok {
-			return nil, nil, nil, false
+			return nil, nil, false
 		}
 		memberPaths := make(map[string]bool)
 		memberIndices := make([]int, 0, len(g.Members))
 		for _, id := range g.Members {
 			idx, exists := idToIdx[id]
 			if !exists {
-				return nil, nil, nil, false // unknown id
+				return nil, nil, false // unknown id
 			}
 			if seen[id] {
-				return nil, nil, nil, false // duplicate assignment
+				return nil, nil, false // duplicate assignment
 			}
 			seen[id] = true
 			memberPaths[originals[idx].Path] = true
@@ -1144,9 +1132,6 @@ func applyDedupGroupsWithDecisions(
 			canonical.Content = g.MergedContent
 		}
 		out = append(out, canonical)
-		for _, idx := range memberIndices {
-			decisions[idx] = canonical
-		}
 		if len(memberPaths) == 1 {
 			checkpoints[canonical.Path] = append(checkpoints[canonical.Path], canonical)
 			continue
@@ -1158,9 +1143,9 @@ func applyDedupGroupsWithDecisions(
 	}
 
 	if len(seen) != len(originals) {
-		return nil, nil, nil, false // some id missing
+		return nil, nil, false // some id missing
 	}
-	return out, checkpoints, decisions, true
+	return out, checkpoints, true
 }
 
 // formatPlanGuidance parses the PLAN_TASK JSON output into a markdown

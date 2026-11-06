@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -71,42 +70,43 @@ func TestSessionDiagnoseCommand(t *testing.T) {
 	}
 }
 
-func TestSessionDiagnoseCommentEvidence(t *testing.T) {
+func TestSessionDiagnoseCommentLocation(t *testing.T) {
 	setTestHome(t, t.TempDir())
-	repo := t.TempDir()
-	sh := session.New(repo, "main", "test-model", session.SessionOptions{})
-	rec := sh.GetOrCreateFileSession("group-a").AppendTaskRecord(session.MainTask, nil)
+	sh := session.New(t.TempDir(), "main", "test", session.SessionOptions{})
 	call := llm.ToolCall{ID: "call-a", Function: llm.FunctionCall{Name: "code_comment"}}
+	rec := sh.GetOrCreateFileSession("group-a").AppendTaskRecord(session.MainTask, nil)
 	rec.SetResponse(&llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{ToolCalls: []llm.ToolCall{call}}}}}, 0)
-	cm := model.LlmComment{Path: "a.go", Content: "private finding", ExistingCode: "privateCall()", StartLine: 1, EndLine: 1}
-	rec.RecordCommentEvidence(call, 0, cm, &cm, diff.CaptureCommentEvidence(cm, &model.Diff{NewPath: "a.go", NewFileContent: "privateCall()\n"}), nil)
-	sh.RecordReviewItemDone("a.go", "a.go", "a.go", "fp", []model.LlmComment{cm})
+	rec.RecordCommentLocation(call, 0, model.LlmComment{Path: "a.go", StartLine: 210, EndLine: 211, Content: "private finding", ExistingCode: "privateCode()"})
 	if err := sh.Finalize(); err != nil {
 		t.Fatal(err)
 	}
-	for _, flags := range [][]string{nil, {"--comment", cm.EvidenceID}, {"--comment", cm.EvidenceID, "--json"}, {"--comment", cm.EvidenceID, "--event", "3"}, {"--comment", "absent"}} {
+	report, err := session.Diagnose(sh.RepoDir, sh.SessionID, session.DiagnoseOptions{TaskKey: "group-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := report.Tasks[0].Phases[0].Events
+	requestID := events[0].RequestID
+	for _, tc := range []struct {
+		flags    []string
+		expected string
+	}{
+		{nil, "comment_locations=1"},
+		{[]string{"--request", requestID}, `comment_index=0 path="a.go" range=210:211`},
+		{[]string{"--request", requestID, "--json"}, `"comment_location"`},
+		{[]string{"--event", "4"}, `"type": "comment_location"`},
+	} {
 		cmd := newSessionDiagnoseCmd()
-		cmd.SilenceUsage, cmd.SilenceErrors = true, true
 		var out bytes.Buffer
 		cmd.SetOut(&out)
-		cmd.SetArgs(append([]string{"--repo", repo, sh.SessionID}, flags...))
-		err := cmd.Execute()
-		invalid := len(flags) > 3 || (len(flags) == 2 && flags[1] == "absent")
-		if (err != nil) != invalid {
-			t.Fatalf("flags %v: %v", flags, err)
+		cmd.SetArgs(append([]string{sh.SessionID, "--repo", sh.RepoDir}, tc.flags...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
 		}
-		if invalid {
-			continue
+		if !strings.Contains(out.String(), tc.expected) || strings.Contains(out.String(), "private finding") || strings.Contains(out.String(), "privateCode()") {
+			t.Fatalf("incorrect stage output: %s", out.String())
 		}
-		if len(flags) == 0 {
-			if !strings.Contains(out.String(), cm.EvidenceID) || strings.Contains(out.String(), "privateCall()") || strings.Contains(out.String(), "private finding") {
-				t.Fatalf("overview should expose IDs without private evidence: %s", out.String())
-			}
-			continue
-		}
-		var report session.DiagnosticReport
-		if err := json.Unmarshal(out.Bytes(), &report); err != nil || report.Comment == nil || report.Comment.Code.Spans[0].Excerpt != "privateCall()" || len(report.Observations) != 0 {
-			t.Fatalf("invalid comment drill-down: %s, %v", out.String(), err)
+		if cmd.Flags().Lookup("comment") != nil {
+			t.Fatal("full comment evidence selector remained in the reduced command")
 		}
 	}
 }

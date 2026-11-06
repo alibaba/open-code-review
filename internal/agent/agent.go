@@ -1893,9 +1893,6 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 	}
 	telemetry.SetAttr(span, "comments.filtered", len(indices))
 	if len(indices) == 0 {
-		for i, cm := range candidateComments {
-			rec.RecordCommentDecision("review_filter", i, cm, &cm)
-		}
 		telemetry.Event(ctx, "review_filter.completed",
 			attribute.String("group.label", groupKey),
 			attribute.Int("total_comments", len(candidates)),
@@ -1918,13 +1915,6 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 	for path, idxSet := range perPath {
 		a.args.CommentCollector.RemoveByPathAndIndices(path, idxSet)
 		totalRemoved += len(idxSet)
-	}
-	for i, cm := range candidateComments {
-		if _, removed := indices[i]; removed {
-			rec.RecordCommentDecision("review_filter", i, cm, nil)
-		} else {
-			rec.RecordCommentDecision("review_filter", i, cm, &cm)
-		}
 	}
 	telemetry.Event(ctx, "review_filter.completed",
 		attribute.String("group.label", groupKey),

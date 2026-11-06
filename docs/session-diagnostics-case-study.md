@@ -5,9 +5,10 @@ contribution. It demonstrates the terminal investigation path, not a production
 defect or a measured reduction in human debugging time.
 
 This case evaluates explicit request/response/tool links and read-only session,
-task, request and original-event inspection. The PR also includes
-[comment evidence](comment-evidence.md), which was not exercised by these runs.
-These results do not establish the need for that larger persistence model.
+task, request and original-event inspection. The PR additionally retains a small
+post-location stage record, motivated by the separate
+[interrupted-comment investigation](session-diagnostics-interrupted-comments.md).
+Full comment-provenance persistence is outside the merge scope.
 
 ## The investigation
 
@@ -115,4 +116,4 @@ observation per case/condition; shared-host scheduling, agent behavior, order an
 individual differences prevent a causal performance claim. No human participants
 or human investigation times were measured. These observations do not establish
 either a general speedup or a general slowdown, nor do they justify the
-comment-evidence persistence model now included in the PR.
+broader comment-evidence persistence model, which is excluded from the PR.

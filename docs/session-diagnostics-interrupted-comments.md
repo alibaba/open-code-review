@@ -61,31 +61,26 @@ it is not a second execution with an unmodified producer or a timing experiment.
 The comparison is limited to the saved JSONL and Viewer export; it does not claim
 that separately retained telemetry traces could never supply a completion signal.
 
-## What the new records establish
+## What the captured records establish
+
+This historical run used the larger experimental producer. Its records retain
+the old `comment_evidence` type; they were not rewritten into the reduced format.
+The current CLI can open them as original records by physical line:
 
 ```sh
-ocr session diagnose 9e3d5483-89ed-4a73-a1ae-fe8498e279db
-```
-
-Relevant output, with unrelated fields omitted:
-
-```text
-Recorded outcome: unknown
-Session end recorded: false
-Comment references (2; checkpoint references include historical records):
-  id="63641a77-926b-45a7-ae4a-a9ef00cf10ad" line=32 path="internal/session/diagnose_comments.go" range=210:211 code_reference="matched" checkpoint_refs=0 checkpoint_state="unrecorded"
-  id="4e46b998-00fc-404e-b4b1-2d1a65faa110" line=39 path="internal/session/diagnose_comments.go" range=222:224 code_reference="matched" checkpoint_refs=0 checkpoint_state="unrecorded"
-```
-
-Open one captured candidate and then its dispatch/origin:
-
-```sh
-ocr session diagnose 9e3d5483-89ed-4a73-a1ae-fe8498e279db \
-  --comment 63641a77-926b-45a7-ae4a-a9ef00cf10ad
+ocr session diagnose 9e3d5483-89ed-4a73-a1ae-fe8498e279db --event 32
+ocr session diagnose 9e3d5483-89ed-4a73-a1ae-fe8498e279db --event 39
 ocr session diagnose 9e3d5483-89ed-4a73-a1ae-fe8498e279db \
   --request 01143741-2148-4eed-89e8-4f84a1c6f6ff --json
 ocr session diagnose 9e3d5483-89ed-4a73-a1ae-fe8498e279db --event 31
 ```
+
+Their captured positions are:
+
+| Original line | Path | Original range | Captured range |
+| --- | --- | --- | --- |
+| 32 | `internal/session/diagnose_comments.go` | 0:0 | 210:211 |
+| 39 | `internal/session/diagnose_comments.go` | 0:0 | 222:224 |
 
 The first candidate is linked to response
 `83783e2d-4167-41ff-82e1-af805fc43850` and tool call
@@ -93,22 +88,47 @@ The first candidate is linked to response
 and its captured coordinates are `210:211`. The second candidate changes from
 `0:0` to `222:224`. The stored span hashes match the captured excerpts.
 
-`RecordCommentEvidence` is called after location processing and immediately
-before `CommentCollector.Add` in `resolveAndCollect`. The saved records therefore
-establish that both workers reached this capture boundary after resolving their
+The [archived producer](https://github.com/biheto/open-code-review/blob/60c0893ea9610bcaefaf15ed5ec4951c57400f73/internal/llmloop/loop.go#L832)
+wrote these records after location processing and
+immediately before `CommentCollector.Add` in `resolveAndCollect`. The saved records
+establish that both jobs reached this capture boundary after resolving their
 locations. They do not establish that `Add` returned, that a file checkpoint was
 written, that either candidate is a valid bug, or why the process ended. One
 candidate's own prose even says that no defect was confirmed; neither should be
 treated as an accepted finding.
 
 The concrete gain is a more definite processing-stage conclusion without
-assuming that an async dispatch result means worker completion. The CLI also
-indexes the two candidate records despite the absence of checkpoint comments.
+assuming that an async dispatch result means worker completion.
 No human investigation time or percentage speedup was measured.
 The additional fact narrows uncertainty about worker progress; it does not
 explain the interruption or demonstrate a large reduction in overall debugging
 effort. The question and endpoints were examined retrospectively, not in a
 blinded productivity experiment.
+
+## Reduced implementation
+
+The merge scope now uses one `comment_location` event at the same boundary. It
+stores only `comment_index`, `comment_path`, `start_line`, `end_line`, and the
+existing event/task/request/response/tool metadata. There is no global comment ID,
+comment-body copy, code snapshot/hash or checkpoint/lifecycle model. Filtering,
+deduplication, resume and `model.LlmComment` are unchanged.
+
+For new recordings, the overview includes `comment_locations` counts; `--task`
+and `--request` list stage events and their locations, and `--event` opens the
+original record. The original response supplies the candidate body through the
+tool-call ID and parsed batch index. A zero range records returned-but-unlocated
+processing, not failure or acceptance. The removed experimental `--comment`
+selector is not part of the reduced CLI; no compatibility decoder for that larger
+experimental schema is retained.
+The index counts the comments accepted by the tool parser, not rejected entries
+in the raw JSON array. Buffered session writes retain their existing behavior;
+missing stage records do not prove processing never happened.
+
+The writer and diagnostic integration are tested with synchronous and
+asynchronous processing, cross-file resolution, LLM relocation and unlocated
+comments. Those scripted tests establish correctness, separately from the actual
+historical case above. No new real run or measured speedup is claimed by changing
+the record format.
 
 ## Which persistence is supported by this case
 
@@ -136,9 +156,10 @@ post-resolution event still answers the stage question without retaining both
 comment copies, code excerpts/hashes or the broader lifecycle model.
 
 This case supports persistent async-stage evidence plus origin/location links.
-It does **not** establish that the entire comment-persistence model is worth its
-compatibility, lifecycle and maintenance obligations. Separate real cases are
-still needed for those additional mechanisms. The existing request-failure
+The larger comment-persistence model has been removed from this PR because this
+case does **not** establish that its compatibility, lifecycle and maintenance
+obligations are justified. Separate real cases are still needed for those
+additional mechanisms. The existing request-failure
 [case study](session-diagnostics-case-study.md) likewise does not justify them.
 
 As a completed-session counterexample, the actual earlier self-review
