@@ -240,6 +240,7 @@ func (jw *jsonlWriter) WriteLLMRequest(filePath string, taskType TaskType, reque
 		"filePath":   filePath,
 		"taskType":   string(taskType),
 		"request_no": requestNo,
+		"request_id": uuid,
 		"messages":   messages,
 	}
 	jw.writeRecordLocked(rec)
@@ -248,7 +249,7 @@ func (jw *jsonlWriter) WriteLLMRequest(filePath string, taskType TaskType, reque
 }
 
 // WriteLLMResponse writes a response entry with model, content, reasoning, tool calls, and usage.
-func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content, reasoningContent string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration, nativePayload any) string {
+func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content, reasoningContent string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration, nativePayload any, link recordLink) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -278,13 +279,14 @@ func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, cont
 	if nativePayload != nil {
 		rec["native_payload"] = nativePayload
 	}
+	link.apply(rec)
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
 	return uuid
 }
 
 // WriteLLMError writes an llm_error entry recording a failed LLM request.
-func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, requestNo int, errorMsg string, duration time.Duration) string {
+func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, errorMsg string, duration time.Duration, link recordLink) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -297,20 +299,20 @@ func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, request
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
 		"filePath":    filePath,
 		"taskType":    string(taskType),
-		"request_no":  requestNo,
 		"error":       errorMsg,
 		"duration_ms": duration.Milliseconds(),
 	}
 	if jw.llmSource != "" {
 		rec["llmSource"] = jw.llmSource
 	}
+	link.apply(rec)
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
 	return uuid
 }
 
 // WriteToolCall writes a tool call result entry.
-func (jw *jsonlWriter) WriteToolCall(filePath string, taskType TaskType, toolName, arguments, result string, ok bool, duration time.Duration) string {
+func (jw *jsonlWriter) WriteToolCall(filePath string, taskType TaskType, toolName, arguments, result string, ok bool, duration time.Duration, link recordLink) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -329,9 +331,32 @@ func (jw *jsonlWriter) WriteToolCall(filePath string, taskType TaskType, toolNam
 		"ok":          ok,
 		"duration_ms": duration.Milliseconds(),
 	}
+	link.apply(rec)
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
 	return uuid
+}
+
+type recordLink struct {
+	RequestID  string
+	RequestNo  int
+	ResponseID string
+	ToolCallID string
+}
+
+func (l recordLink) apply(rec map[string]any) {
+	if l.RequestID != "" {
+		rec["request_id"] = l.RequestID
+	}
+	if l.RequestNo > 0 {
+		rec["request_no"] = l.RequestNo
+	}
+	if l.ResponseID != "" {
+		rec["response_id"] = l.ResponseID
+	}
+	if l.ToolCallID != "" {
+		rec["tool_call_id"] = l.ToolCallID
+	}
 }
 
 // WriteResumeLineage writes the one resume_lineage record of a resumed run.

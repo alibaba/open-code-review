@@ -1,0 +1,203 @@
+{
+  "description": "Selected fields from an actual local OCR self-review, not synthetic model responses. Source physical lines are preserved as metadata; these projections are not a replayable complete session.",
+  "source_sha256": "da8be5a27a40c4de509cebf85c2ac993e73a9821f81e082fa23b23729647fbd7",
+  "source_bytes": 1060598,
+  "source_records": 61,
+  "session_id": "9e3d5483-89ed-4a73-a1ae-fe8498e279db",
+  "session_end_present": false,
+  "checkpoint_comment_refs": 0,
+  "events": [
+    {
+      "source_line": 30,
+      "record_fields": {
+        "filePath": "cmd/opencodereview/session_diagnose.go,internal/session/comment_decision.go,internal/session/comment_evidence.go,internal/session/diagnose.go,internal/session/diagnose_comments.go,internal/session/diagnose_links.go",
+        "request_id": "01143741-2148-4eed-89e8-4f84a1c6f6ff",
+        "request_no": 3,
+        "sessionId": "9e3d5483-89ed-4a73-a1ae-fe8498e279db",
+        "taskType": "main_task",
+        "timestamp": "2026-11-06T13:35:14Z",
+        "tool_calls": [
+          {
+            "arguments": "{\"comments\":[{\"path\":\"internal/session/diagnose_comments.go\",\"existing_code\":\"\\t\\tfor i, claim := range node.claims {\\n\\t\\t\\tref := item.Checkpoints[i]\",\"category\":\"bug\",\"severity\":\"high\",\"content\":\"`node.claims` receives only comments with non-empty `EvidenceID`, but `item.Checkpoints` can have fewer entries when unmarshaled comments include entries without IDs. With one identified comment after an unidentified one, the first refs happen to align in count, but a mixed list can still cause indexing past refs only if claims/ref insertion diverge; currently both append in the same branch, so these slices remain equal. However detail output indexes them too, also paired. No defect confirmed.\"}]}",
+            "id": "call_d01f0f4759014bb3bb7c55754aba60cd",
+            "name": "code_comment"
+          }
+        ],
+        "type": "llm_response",
+        "uuid": "83783e2d-4167-41ff-82e1-af805fc43850"
+      }
+    },
+    {
+      "source_line": 31,
+      "record_fields": {
+        "filePath": "cmd/opencodereview/session_diagnose.go,internal/session/comment_decision.go,internal/session/comment_evidence.go,internal/session/diagnose.go,internal/session/diagnose_comments.go,internal/session/diagnose_links.go",
+        "ok": true,
+        "request_id": "01143741-2148-4eed-89e8-4f84a1c6f6ff",
+        "request_no": 3,
+        "response_id": "83783e2d-4167-41ff-82e1-af805fc43850",
+        "result": "(async)",
+        "sessionId": "9e3d5483-89ed-4a73-a1ae-fe8498e279db",
+        "taskType": "main_task",
+        "timestamp": "2026-11-06T13:35:14Z",
+        "tool_call_id": "call_d01f0f4759014bb3bb7c55754aba60cd",
+        "tool_name": "code_comment",
+        "type": "tool_call",
+        "uuid": "89bb0710-2cc0-4d4f-af9b-1de6db7e8382"
+      }
+    },
+    {
+      "source_line": 32,
+      "record_fields": {
+        "code_evidence": {
+          "status": "matched",
+          "path": "internal/session/diagnose_comments.go",
+          "diff_sha256": "71c77ae78fd4dded068be671404f1924af6bb64aeaedfdb2fd86e3340c8afe3c",
+          "snapshot_sha256": "75ae0e94ea0a4368aceb94ff755350b5a4d73a506d6c33d56190fda4c84e52b8",
+          "spans": [
+            {
+              "side": "new",
+              "source": "new_file_content",
+              "start_line": 210,
+              "end_line": 211,
+              "sha256": "4ca29ff956d5104ae8e4d9292eb49e13e2177852e942c98578de2f8278699413",
+              "match": "exact",
+              "excerpt": "\t\tfor i, claim := range node.claims {\n\t\t\tref := item.Checkpoints[i]"
+            }
+          ]
+        },
+        "comment": {
+          "evidence_id": "63641a77-926b-45a7-ae4a-a9ef00cf10ad",
+          "path": "internal/session/diagnose_comments.go",
+          "content": "`node.claims` receives only comments with non-empty `EvidenceID`, but `item.Checkpoints` can have fewer entries when unmarshaled comments include entries without IDs. With one identified comment after an unidentified one, the first refs happen to align in count, but a mixed list can still cause indexing past refs only if claims/ref insertion diverge; currently both append in the same branch, so these slices remain equal. However detail output indexes them too, also paired. No defect confirmed.",
+          "existing_code": "\t\tfor i, claim := range node.claims {\n\t\t\tref := item.Checkpoints[i]",
+          "start_line": 210,
+          "end_line": 211,
+          "category": "bug",
+          "severity": "high"
+        },
+        "comment_index": 0,
+        "evidence_version": "ocr.comment-evidence/v1",
+        "filePath": "cmd/opencodereview/session_diagnose.go,internal/session/comment_decision.go,internal/session/comment_evidence.go,internal/session/diagnose.go,internal/session/diagnose_comments.go,internal/session/diagnose_links.go",
+        "original_comment": {
+          "path": "internal/session/diagnose_comments.go",
+          "content": "`node.claims` receives only comments with non-empty `EvidenceID`, but `item.Checkpoints` can have fewer entries when unmarshaled comments include entries without IDs. With one identified comment after an unidentified one, the first refs happen to align in count, but a mixed list can still cause indexing past refs only if claims/ref insertion diverge; currently both append in the same branch, so these slices remain equal. However detail output indexes them too, also paired. No defect confirmed.",
+          "existing_code": "\t\tfor i, claim := range node.claims {\n\t\t\tref := item.Checkpoints[i]",
+          "start_line": 0,
+          "end_line": 0,
+          "category": "bug",
+          "severity": "high"
+        },
+        "request_id": "01143741-2148-4eed-89e8-4f84a1c6f6ff",
+        "request_no": 3,
+        "response_id": "83783e2d-4167-41ff-82e1-af805fc43850",
+        "sessionId": "9e3d5483-89ed-4a73-a1ae-fe8498e279db",
+        "taskType": "main_task",
+        "timestamp": "2026-11-06T13:35:14Z",
+        "tool_call_id": "call_d01f0f4759014bb3bb7c55754aba60cd",
+        "tool_name": "code_comment",
+        "type": "comment_evidence",
+        "uuid": "63641a77-926b-45a7-ae4a-a9ef00cf10ad"
+      }
+    },
+    {
+      "source_line": 37,
+      "record_fields": {
+        "filePath": "cmd/opencodereview/session_diagnose.go,internal/session/comment_decision.go,internal/session/comment_evidence.go,internal/session/diagnose.go,internal/session/diagnose_comments.go,internal/session/diagnose_links.go",
+        "request_id": "915a6e9e-d8df-40eb-88da-53ca5960a7ce",
+        "request_no": 4,
+        "sessionId": "9e3d5483-89ed-4a73-a1ae-fe8498e279db",
+        "taskType": "main_task",
+        "timestamp": "2026-11-06T13:35:24Z",
+        "tool_calls": [
+          {
+            "arguments": "{\"comments\":[{\"path\":\"internal/session/diagnose_comments.go\",\"existing_code\":\"\\t\\t\\t} else if claim != node.comment {\\n\\t\\t\\t\\tobserve(\\\"comment_snapshot_changed\\\", \\\"The checkpoint comment differs from its captured evidence; inspect both records before reusing the code span.\\\", ref.Line)\\n\\t\\t\\t}\",\"category\":\"bug\",\"severity\":\"medium\",\"content\":\"When multiple checkpoints reuse the same evidence ID with conflicting comment bodies, this branch only emits an observation and leaves `ambiguous` false. `--comment` therefore still returns the captured code span and aggregates all checkpoint claims as if the evidence were usable. Mark conflicting checkpoint claims ambiguous (and reject the detail view), while retaining ordinary checkpoint snapshots that match the captured comment.\"}]}",
+            "id": "call_aef037d3ffcc4f0e9405fa851a5824ca",
+            "name": "code_comment"
+          }
+        ],
+        "type": "llm_response",
+        "uuid": "c45b0c60-f145-48d1-8e2c-c7da551d0a57"
+      }
+    },
+    {
+      "source_line": 38,
+      "record_fields": {
+        "filePath": "cmd/opencodereview/session_diagnose.go,internal/session/comment_decision.go,internal/session/comment_evidence.go,internal/session/diagnose.go,internal/session/diagnose_comments.go,internal/session/diagnose_links.go",
+        "ok": true,
+        "request_id": "915a6e9e-d8df-40eb-88da-53ca5960a7ce",
+        "request_no": 4,
+        "response_id": "c45b0c60-f145-48d1-8e2c-c7da551d0a57",
+        "result": "(async)",
+        "sessionId": "9e3d5483-89ed-4a73-a1ae-fe8498e279db",
+        "taskType": "main_task",
+        "timestamp": "2026-11-06T13:35:24Z",
+        "tool_call_id": "call_aef037d3ffcc4f0e9405fa851a5824ca",
+        "tool_name": "code_comment",
+        "type": "tool_call",
+        "uuid": "89a2c3df-8429-446b-ba26-188a778ffac2"
+      }
+    },
+    {
+      "source_line": 39,
+      "record_fields": {
+        "code_evidence": {
+          "status": "matched",
+          "path": "internal/session/diagnose_comments.go",
+          "diff_sha256": "71c77ae78fd4dded068be671404f1924af6bb64aeaedfdb2fd86e3340c8afe3c",
+          "snapshot_sha256": "75ae0e94ea0a4368aceb94ff755350b5a4d73a506d6c33d56190fda4c84e52b8",
+          "spans": [
+            {
+              "side": "new",
+              "source": "new_file_content",
+              "start_line": 222,
+              "end_line": 224,
+              "sha256": "de0696b008e8ee0dcf30fd0d42cd674915de933376368a79abc626f2a6e1d5cf",
+              "match": "exact",
+              "excerpt": "\t\t\t} else if claim != node.comment {\n\t\t\t\tobserve(\"comment_snapshot_changed\", \"The checkpoint comment differs from its captured evidence; inspect both records before reusing the code span.\", ref.Line)\n\t\t\t}"
+            }
+          ]
+        },
+        "comment": {
+          "evidence_id": "4e46b998-00fc-404e-b4b1-2d1a65faa110",
+          "path": "internal/session/diagnose_comments.go",
+          "content": "When multiple checkpoints reuse the same evidence ID with conflicting comment bodies, this branch only emits an observation and leaves `ambiguous` false. `--comment` therefore still returns the captured code span and aggregates all checkpoint claims as if the evidence were usable. Mark conflicting checkpoint claims ambiguous (and reject the detail view), while retaining ordinary checkpoint snapshots that match the captured comment.",
+          "existing_code": "\t\t\t} else if claim != node.comment {\n\t\t\t\tobserve(\"comment_snapshot_changed\", \"The checkpoint comment differs from its captured evidence; inspect both records before reusing the code span.\", ref.Line)\n\t\t\t}",
+          "start_line": 222,
+          "end_line": 224,
+          "category": "bug",
+          "severity": "medium"
+        },
+        "comment_index": 0,
+        "evidence_version": "ocr.comment-evidence/v1",
+        "filePath": "cmd/opencodereview/session_diagnose.go,internal/session/comment_decision.go,internal/session/comment_evidence.go,internal/session/diagnose.go,internal/session/diagnose_comments.go,internal/session/diagnose_links.go",
+        "original_comment": {
+          "path": "internal/session/diagnose_comments.go",
+          "content": "When multiple checkpoints reuse the same evidence ID with conflicting comment bodies, this branch only emits an observation and leaves `ambiguous` false. `--comment` therefore still returns the captured code span and aggregates all checkpoint claims as if the evidence were usable. Mark conflicting checkpoint claims ambiguous (and reject the detail view), while retaining ordinary checkpoint snapshots that match the captured comment.",
+          "existing_code": "\t\t\t} else if claim != node.comment {\n\t\t\t\tobserve(\"comment_snapshot_changed\", \"The checkpoint comment differs from its captured evidence; inspect both records before reusing the code span.\", ref.Line)\n\t\t\t}",
+          "start_line": 0,
+          "end_line": 0,
+          "category": "bug",
+          "severity": "medium"
+        },
+        "request_id": "915a6e9e-d8df-40eb-88da-53ca5960a7ce",
+        "request_no": 4,
+        "response_id": "c45b0c60-f145-48d1-8e2c-c7da551d0a57",
+        "sessionId": "9e3d5483-89ed-4a73-a1ae-fe8498e279db",
+        "taskType": "main_task",
+        "timestamp": "2026-11-06T13:35:24Z",
+        "tool_call_id": "call_aef037d3ffcc4f0e9405fa851a5824ca",
+        "tool_name": "code_comment",
+        "type": "comment_evidence",
+        "uuid": "4e46b998-00fc-404e-b4b1-2d1a65faa110"
+      }
+    }
+  ],
+  "existing_request_source": {
+    "source_request_line": 19,
+    "source_request_id": "01143741-2148-4eed-89e8-4f84a1c6f6ff",
+    "path": "internal/session/diagnose_comments.go",
+    "method": "Complete added-file diff block extracted from existing llm_request.messages; file bytes reconstructed from its added lines.",
+    "diff_fragment": "diff --git a/internal/session/diagnose_comments.go b/internal/session/diagnose_comments.go\nnew file mode 100644\n--- /dev/null\n+++ b/internal/session/diagnose_comments.go\n@@ -0,0 +1,254 @@\n+// SPDX-License-Identifier: Apache-2.0\n+// Copyright 2026 alibaba/open-code-review Contributors\n+\n+package session\n+\n+import (\n+\t\"encoding/json\"\n+\t\"fmt\"\n+\n+\t\"github.com/alibaba/open-code-review/internal/model\"\n+)\n+\n+type DiagnosticComment struct {\n+\tID                  string                      `json:\"id\"`\n+\tLine                int                         `json:\"line,omitempty\"`\n+\tTaskKey             string                      `json:\"task_key,omitempty\"`\n+\tRequestID           string                      `json:\"request_id,omitempty\"`\n+\tResponseID          string                      `json:\"response_id,omitempty\"`\n+\tToolCallID          string                      `json:\"tool_call_id,omitempty\"`\n+\tCommentIndex        int                         `json:\"comment_index\"`\n+\tPath                string                      `json:\"path\"`\n+\tStartLine           int                         `json:\"start_line\"`\n+\tEndLine             int                         `json:\"end_line\"`\n+\tEvidenceStatus      string                      `json:\"evidence_status\"`\n+\tRelocationRequestID string                      `json:\"relocation_request_id,omitempty\"`\n+\tCheckpoints         []DiagnosticCommentRef      `json:\"checkpoints\"`\n+\tCheckpointState     string                      `json:\"checkpoint_state\"`\n+\tDecisions           []DiagnosticCommentDecision `json:\"decisions,omitempty\"`\n+\tMergedFrom          []string                    `json:\"merged_from,omitempty\"`\n+\tOriginalComment     *model.LlmComment           `json:\"original_comment,omitempty\"`\n+\tComment             *model.LlmComment           `json:\"comment,omitempty\"`\n+\tCode                *model.CommentCodeEvidence  `json:\"code_evidence,omitempty\"`\n+}\n+\n+type DiagnosticCommentRef struct {\n+\tLine            int               `json:\"line\"`\n+\tIndex           int               `json:\"index\"`\n+\tType            string            `json:\"type\"`\n+\tSourceSessionID string            `json:\"source_session_id,omitempty\"`\n+\tActive          bool              `json:\"active\"`\n+\tComment         *model.LlmComment `json:\"comment,omitempty\"`\n+}\n+\n+type DiagnosticCommentDecision struct {\n+\tLine             int               `json:\"line\"`\n+\tStage            string            `json:\"stage\"`\n+\tOutcome          string            `json:\"outcome\"`\n+\tInputIndex       int               `json:\"input_index\"`\n+\tTaskKey          string            `json:\"task_key\"`\n+\tRequestID        string            `json:\"request_id,omitempty\"`\n+\tResponseID       string            `json:\"response_id,omitempty\"`\n+\tOutputEvidenceID string            `json:\"output_evidence_id,omitempty\"`\n+\tOutput           *model.LlmComment `json:\"output_comment,omitempty\"`\n+}\n+\n+type diagnosticCommentNode struct {\n+\tsummary   DiagnosticComment\n+\trecord    *commentEvidenceRecord\n+\tevents    int\n+\tcomment   model.LlmComment\n+\tclaims    []model.LlmComment\n+\tdecisions []commentDecisionRecord\n+}\n+\n+type diagnosticComments struct {\n+\torder           []*diagnosticCommentNode\n+\tbyID            map[string]*diagnosticCommentNode\n+\tcheckpointLines map[string]int\n+\tactiveLines     map[int]bool\n+}\n+\n+func newDiagnosticComments() *diagnosticComments {\n+\treturn &diagnosticComments{byID: make(map[string]*diagnosticCommentNode), checkpointLines: make(map[string]int), activeLines: make(map[int]bool)}\n+}\n+\n+func (c *diagnosticComments) node(id string) *diagnosticCommentNode {\n+\tif node := c.byID[id]; node != nil {\n+\t\treturn node\n+\t}\n+\tnode := &diagnosticCommentNode{summary: DiagnosticComment{ID: id, EvidenceStatus: \"unrecorded\", Checkpoints: []DiagnosticCommentRef{}}}\n+\tc.byID[id] = node\n+\tc.order = append(c.order, node)\n+\treturn node\n+}\n+\n+func (c *diagnosticComments) add(rec diagnosticRecord, line int) {\n+\tif rec.Type == \"comment_decision\" && rec.EvidenceID != \"\" {\n+\t\tnode := c.node(rec.EvidenceID)\n+\t\tdecision := DiagnosticCommentDecision{\n+\t\t\tLine: line, Stage: rec.Stage, Outcome: rec.Outcome, InputIndex: rec.InputIndex,\n+\t\t\tTaskKey: rec.FilePath, RequestID: rec.RequestID, ResponseID: rec.ResponseID,\n+\t\t}\n+\t\tif rec.Output != nil {\n+\t\t\tdecision.OutputEvidenceID = rec.Output.EvidenceID\n+\t\t\tif rec.Outcome == \"merged\" && rec.commentDecisionRecord.validShape() && (rec.DecisionVersion == \"\" || rec.DecisionVersion == \"ocr.comment-decision/v1\") {\n+\t\t\t\ttarget := c.node(rec.Output.EvidenceID)\n+\t\t\t\ttarget.summary.MergedFrom = append(target.summary.MergedFrom, rec.EvidenceID)\n+\t\t\t}\n+\t\t}\n+\t\tnode.summary.Decisions = append(node.summary.Decisions, decision)\n+\t\tnode.decisions = append(node.decisions, rec.commentDecisionRecord)\n+\t\treturn\n+\t}\n+\tif rec.Type == \"comment_evidence\" {\n+\t\tnode := c.node(rec.ID)\n+\t\tnode.events++\n+\t\tif node.events == 1 {\n+\t\t\trecord := rec.commentEvidenceRecord\n+\t\t\tnode.record = &record\n+\t\t\tnode.comment = record.Comment\n+\t\t\tnode.summary.Line, node.summary.TaskKey = line, rec.FilePath\n+\t\t\tnode.summary.RequestID, node.summary.ResponseID, node.summary.ToolCallID = rec.RequestID, rec.ResponseID, rec.ToolCallID\n+\t\t\tnode.summary.CommentIndex, node.summary.RelocationRequestID = record.CommentIndex, record.RelocationRequestID\n+\t\t\tif record.Code.Status != \"\" {\n+\t\t\t\tnode.summary.EvidenceStatus = record.Code.Status\n+\t\t\t}\n+\t\t}\n+\t\treturn\n+\t}\n+\tif rec.Type != \"review_item_done\" && rec.Type != \"review_item_reused\" && rec.Type != \"review_item_failed\" {\n+\t\treturn\n+\t}\n+\tif rec.Type == \"review_item_failed\" {\n+\t\tdelete(c.activeLines, c.checkpointLines[rec.Fingerprint])\n+\t\treturn\n+\t}\n+\tvar comments []model.LlmComment\n+\tif json.Unmarshal(rec.Comments, &comments) != nil {\n+\t\tif len(rec.Comments) > 0 {\n+\t\t\treturn\n+\t\t}\n+\t}\n+\tif rec.Fingerprint != \"\" {\n+\t\tdelete(c.activeLines, c.checkpointLines[rec.Fingerprint])\n+\t\tc.checkpointLines[rec.Fingerprint] = line\n+\t}\n+\tc.activeLines[line] = true\n+\tfor i, cm := range comments {\n+\t\tif cm.EvidenceID == \"\" {\n+\t\t\tcontinue\n+\t\t}\n+\t\tif cm.Path == \"\" {\n+\t\t\tcm.Path = rec.FilePath\n+\t\t\tif cm.Path == \"\" {\n+\t\t\t\tcm.Path = rec.NewPath\n+\t\t\t}\n+\t\t}\n+\t\tnode := c.node(cm.EvidenceID)\n+\t\tif node.record == nil {\n+\t\t\tnode.comment = cm\n+\t\t}\n+\t\tnode.claims = append(node.claims, cm)\n+\t\tnode.summary.Checkpoints = append(node.summary.Checkpoints, DiagnosticCommentRef{\n+\t\t\tLine: line, Index: i, Type: rec.Type, SourceSessionID: rec.SourceSessionID,\n+\t\t})\n+\t}\n+}\n+\n+func (c *diagnosticComments) finish(report *DiagnosticReport, opts DiagnoseOptions, links *diagnosticLinks) error {\n+\tfor _, node := range c.order {\n+\t\titem := node.summary\n+\t\titem.Checkpoints = append([]DiagnosticCommentRef(nil), node.summary.Checkpoints...)\n+\t\titem.Decisions = append([]DiagnosticCommentDecision(nil), node.summary.Decisions...)\n+\t\titem.CheckpointState = \"unrecorded\"\n+\t\tif len(item.Checkpoints) > 0 {\n+\t\t\titem.CheckpointState = \"absent\"\n+\t\t\tfor i := range item.Checkpoints {\n+\t\t\t\titem.Checkpoints[i].Active = c.activeLines[item.Checkpoints[i].Line]\n+\t\t\t\tif item.Checkpoints[i].Active {\n+\t\t\t\t\titem.CheckpointState = \"present\"\n+\t\t\t\t}\n+\t\t\t}\n+\t\t}\n+\t\titem.Path, item.StartLine, item.EndLine = node.comment.Path, node.comment.StartLine, node.comment.EndLine\n+\t\tobserve := func(code, message string, line int) {\n+\t\t\treport.Observations = append(report.Observations, DiagnosticObservation{\n+\t\t\t\tCode: code, TaskKey: item.TaskKey, RequestID: item.RequestID, CommentID: item.ID, Line: line, Message: message,\n+\t\t\t})\n+\t\t}\n+\t\tif node.events > 1 {\n+\t\t\tobserve(\"comment_evidence_duplicate\", \"Multiple evidence events have this ID; the comment origin is ambiguous.\", item.Line)\n+\t\t}\n+\t\tif node.record != nil && (item.ID == \"\" || node.comment.EvidenceID != item.ID) {\n+\t\t\tobserve(\"comment_identity_mismatch\", \"The captured comment does not reference its evidence event's UUID.\", item.Line)\n+\t\t}\n+\t\tif item.RelocationRequestID != \"\" {\n+\t\t\trequest, err := links.selectRequest(item.RelocationRequestID)\n+\t\t\tif err != nil || request.TaskKey != item.Path || request.TaskType != string(ReLocationTask) {\n+\t\t\t\tobserve(\"comment_relocation_link_mismatch\", \"The re-location request does not resolve to a unique request for this comment's path and re-location phase.\", item.Line)\n+\t\t\t}\n+\t\t}\n+\t\tambiguous := false\n+\t\tif node.record != nil && node.record.EvidenceVersion != \"\" && node.record.EvidenceVersion != \"ocr.comment-evidence/v1\" {\n+\t\t\tambiguous = true\n+\t\t\tobserve(\"comment_evidence_version_unknown\", \"The evidence format version is unsupported; inspect the raw event instead.\", item.Line)\n+\t\t}\n+\t\tif node.record == nil && len(node.claims) == 0 {\n+\t\t\tobserve(\"comment_evidence_missing\", \"A processing decision references a comment whose origin and checkpoint are absent from this session.\", 0)\n+\t\t}\n+\t\tfor i, decision := range node.decisions {\n+\t\t\tif decision.DecisionVersion != \"\" && decision.DecisionVersion != \"ocr.comment-decision/v1\" {\n+\t\t\t\tambiguous = true\n+\t\t\t\tobserve(\"comment_decision_version_unknown\", \"The decision format version is unsupported; inspect the raw event instead.\", item.Decisions[i].Line)\n+\t\t\t}\n+\t\t\tif !decision.validShape() {\n+\t\t\t\tambiguous = true\n+\t\t\t\tobserve(\"comment_decision_invalid\", \"The recorded decision has an inconsistent outcome or comment identity; inspect the source event.\", item.Decisions[i].Line)\n+\t\t\t}\n+\t\t}\n+\t\tfor i, claim := range node.claims {\n+\t\t\tref := item.Checkpoints[i]\n+\t\t\tif node.record == nil {\n+\t\t\t\tif claim != node.comment {\n+\t\t\t\t\tambiguous = true\n+\t\t\t\t\tobserve(\"comment_checkpoint_ambiguous\", \"Checkpoints reference the same evidence ID with different comment bodies; inspect individual records.\", ref.Line)\n+\t\t\t\t}\n+\t\t\t\tif ref.Type == \"review_item_reused\" && ref.SourceSessionID != \"\" {\n+\t\t\t\t\titem.EvidenceStatus = \"external\"\n+\t\t\t\t} else {\n+\t\t\t\t\tobserve(\"comment_evidence_missing\", \"The checkpoint references evidence that is not recorded in this session.\", ref.Line)\n+\t\t\t\t}\n+\t\t\t} else if claim != node.comment {\n+\t\t\t\tobserve(\"comment_snapshot_changed\", \"The checkpoint comment differs from its captured evidence; inspect both records before reusing the code span.\", ref.Line)\n+\t\t\t}\n+\t\t}\n+\t\tmatches := (opts.TaskKey == \"\" || opts.TaskKey == item.TaskKey) && (opts.RequestID == \"\" || opts.RequestID == item.RequestID)\n+\t\tif matches {\n+\t\t\treport.Comments = append(report.Comments, item)\n+\t\t}\n+\t\tif opts.CommentID == item.ID && opts.CommentID != \"\" {\n+\t\t\tif !matches {\n+\t\t\t\treturn fmt.Errorf(\"comment %q does not have the selected task and request origin\", item.ID)\n+\t\t\t}\n+\t\t\tif ambiguous || node.events > 1 || (node.record != nil && node.comment.EvidenceID != item.ID) {\n+\t\t\t\treturn fmt.Errorf(\"comment %q has ambiguous or inconsistent evidence; inspect individual events\", item.ID)\n+\t\t\t}\n+\t\t\titem.Comment = &node.comment\n+\t\t\tfor i := range item.Checkpoints {\n+\t\t\t\titem.Checkpoints[i].Comment = &node.claims[i]\n+\t\t\t}\n+\t\t\tfor i := range item.Decisions {\n+\t\t\t\titem.Decisions[i].Output = node.decisions[i].Output\n+\t\t\t}\n+\t\t\tif node.record != nil {\n+\t\t\t\titem.OriginalComment, item.Code = &node.record.OriginalComment, &node.record.Code\n+\t\t\t}\n+\t\t\treport.Comment = &item\n+\t\t}\n+\t}\n+\tif opts.CommentID != \"\" && report.Comment == nil {\n+\t\treturn fmt.Errorf(\"comment evidence %q not found; use --event for older comments without evidence IDs\", opts.CommentID)\n+\t}\n+\treturn nil\n+}\n",
+    "reconstructed_snapshot_sha256": "75ae0e94ea0a4368aceb94ff755350b5a4d73a506d6c33d56190fda4c84e52b8"
+  }
+}

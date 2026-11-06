@@ -79,6 +79,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr llm providers` | — | List all built-in LLM providers. |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions. |
 | `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints. |
+| `ocr session diagnose <id>` | — | Drill into recorded execution by task, phase and event. |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | Print the review comments recorded in one session. |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | Compare two sessions' findings: new, persisting, resolved, not reviewed. |
 | `ocr session export [id]` | — | Export one session as a self-contained HTML file. |
@@ -435,6 +436,76 @@ ocr session show --repo /path/to/repo <session-id>
 |---|---|---|
 | `--repo <path>` | current dir | Repository whose session should be inspected. |
 | `--json` | `false` | Emit session metadata and per-file items as JSON. |
+
+### `ocr session diagnose`
+
+Inspect the execution evidence saved in a session without making another model
+request. The overview groups LLM requests, responses and tool calls by their
+recorded task key and phase. A task key can identify a group of files.
+This complements the Viewer and HTML export with terminal diagnostics and
+structured output for scripts.
+
+```bash
+ocr session diagnose <session-id>
+ocr session diagnose <session-id> --task 'src/service.go'
+ocr session diagnose <session-id> --request <request-id>
+ocr session diagnose <session-id> --event 12
+ocr session diagnose <session-id> --json
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--repo <path>` | current dir | Repository whose saved session should be inspected. |
+| `--task <key>` | all tasks | Select an exact key from the overview and list its events. |
+| `--request <id>` | all requests | Follow explicit request links; counts and event lists are limited to the selected request. |
+| `--event <line>` | none | Open the original JSONL record at a positive physical line number as JSON, even without `--json`. |
+| `--json` | `false` | Emit the full diagnostic report as JSON, including the selected original event if any. |
+
+The overview, task and request views use text by default. The `--event` detail
+view always outputs JSON. Without `--json`, it outputs only the original record.
+Add `--json` to output the full diagnostic report for any view.
+
+Observations identify recorded LLM errors, tool calls with `ok=false`, failed
+file checkpoints and missing or unreadable execution records. Existing `ok`
+values are preserved; error-looking text is not reclassified. A failure during
+an intermediate phase can be followed by recovery, so the run outcome remains
+the one recorded in its known-version manifest. Unknown or legacy outcomes
+remain unknown.
+
+A missing `session_end` can mean the review is still running. New records carry
+`request_id` (the request event's UUID), and tool results additionally carry
+`response_id` and the model's `tool_call_id` when available. Task event lists show
+these IDs; use `--request` to inspect one request and `--event` for its raw evidence.
+Session metadata and manifest coverage remain session-wide when filtering.
+
+Explicit links can reveal a request with no outcome even if another request has
+duplicate outcomes and the aggregate counts balance. Conflicting task, phase or
+request-number metadata, unresolved references and ambiguous IDs are reported as
+evidence inconsistencies. Inconsistent request scopes are excluded from the
+selected request's counts and event list. These observations do not redefine
+execution success. Async comment dispatch retains its existing recorded status.
+
+Older records without request links remain available through `--task` and
+`--event`; `--request` does not reconstruct their relationships. Legacy request/outcome
+counts indicate missing evidence without guessing which request owns a response.
+Record order and `parentUuid` do not establish causality between concurrent
+tasks. Physical line numbers also work for older records without UUIDs.
+
+New `comment_location` records mark return from comment location processing,
+immediately before collection. They retain only the parsed batch index, final
+path/range and the existing request/response/tool references. Overview phase
+counts include `comment_locations`; `--task` and `--request` list their positions,
+and `--event` opens the original record. A `0:0` range remains unlocated. The
+record does not prove collector insertion, checkpoint persistence, publication
+or finding correctness. It stores no comment body, code snapshot or hash, adds
+no model calls and does not assign an ID to the review comment.
+The index counts parsed comments; rejected entries in the original tool arguments
+are not counted. As with other session records, an abrupt stop can lose buffered
+writes, so an absent stage record does not prove the worker never ran.
+
+Diagnosis does not verify findings or certify that every code block was reviewed.
+Original events can contain source code, review prose and model prompts;
+raw record contents are only included when explicitly selected with `--event`.
 
 ### `ocr session comments`
 

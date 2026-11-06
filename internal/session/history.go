@@ -98,6 +98,8 @@ type TaskRecord struct {
 	Duration        time.Duration
 	Error           string
 	fileSession     *FileSession // back-reference for JSONL persistence
+	requestID       string
+	responseID      string
 }
 
 // TokenUsage holds token usage for a single LLM request/response cycle.
@@ -122,11 +124,12 @@ type ResponseRecord struct {
 
 // ToolResultRecord records the result of a tool call executed after the LLM response.
 type ToolResultRecord struct {
-	ToolName  string
-	Arguments string
-	Result    string
-	OK        bool
-	Duration  time.Duration
+	ToolCallID string
+	ToolName   string
+	Arguments  string
+	Result     string
+	OK         bool
+	Duration   time.Duration
 }
 
 // SessionOptions holds optional metadata for a new session.
@@ -380,7 +383,7 @@ func (fs *FileSession) AppendTaskRecord(taskType TaskType, messages []llm.Messag
 	fs.TaskRecords[taskType] = append(fs.TaskRecords[taskType], rec)
 
 	if p := fs.session.persist; p != nil {
-		p.WriteLLMRequest(fs.FilePath, taskType, rec.RequestNo, copyMessagesForJSON(messages))
+		rec.requestID = p.WriteLLMRequest(fs.FilePath, taskType, rec.RequestNo, copyMessagesForJSON(messages))
 	}
 
 	return rec
@@ -529,7 +532,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 				}
 				toolCallsJSON = append(toolCallsJSON, entry)
 			}
-			p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration, nativeTurnForJSON(tr.Response.Native))
+			tr.responseID = p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration, nativeTurnForJSON(tr.Response.Native), tr.requestLink())
 		}
 	}
 }
@@ -542,7 +545,7 @@ func (tr *TaskRecord) SetError(err error, duration time.Duration) {
 
 	if fs := tr.fileSession; fs != nil {
 		if p := fs.session.persist; p != nil {
-			p.WriteLLMError(fs.FilePath, tr.Type, tr.RequestNo, err.Error(), duration)
+			p.WriteLLMError(fs.FilePath, tr.Type, err.Error(), duration, tr.requestLink())
 		}
 		atomic.AddInt64(&fs.session.llmFailures, 1)
 	}
@@ -556,26 +559,37 @@ func (sh *SessionHistory) LLMFailures() int64 {
 // AddToolResult appends a tool call result to this task record and writes a
 // tool_call record to the JSONL stream.
 func (tr *TaskRecord) AddToolResult(toolName, arguments, result string) {
-	tr.addToolResult(toolName, arguments, result, true, 0)
+	tr.addToolResult(toolName, arguments, result, "", true, 0)
 }
 
 // AddToolFailure appends and persists a failed tool call result.
 func (tr *TaskRecord) AddToolFailure(toolName, arguments, result string, duration time.Duration) {
-	tr.addToolResult(toolName, arguments, result, false, duration)
+	tr.addToolResult(toolName, arguments, result, "", false, duration)
 }
 
-func (tr *TaskRecord) addToolResult(toolName, arguments, result string, ok bool, duration time.Duration) {
+func (tr *TaskRecord) AddToolCallResult(call llm.ToolCall, result string, ok bool, duration time.Duration) {
+	tr.addToolResult(call.Function.Name, call.Function.Arguments, result, call.ID, ok, duration)
+}
+
+func (tr *TaskRecord) requestLink() recordLink {
+	return recordLink{RequestID: tr.requestID, RequestNo: tr.RequestNo}
+}
+
+func (tr *TaskRecord) addToolResult(toolName, arguments, result, toolCallID string, ok bool, duration time.Duration) {
 	tr.ToolResults = append(tr.ToolResults, ToolResultRecord{
-		ToolName:  toolName,
-		Arguments: arguments,
-		Result:    result,
-		OK:        ok,
-		Duration:  duration,
+		ToolCallID: toolCallID,
+		ToolName:   toolName,
+		Arguments:  arguments,
+		Result:     result,
+		OK:         ok,
+		Duration:   duration,
 	})
 
 	if fs := tr.fileSession; fs != nil {
 		if p := fs.session.persist; p != nil {
-			p.WriteToolCall(fs.FilePath, tr.Type, toolName, arguments, result, ok, duration)
+			link := tr.requestLink()
+			link.ResponseID, link.ToolCallID = tr.responseID, toolCallID
+			p.WriteToolCall(fs.FilePath, tr.Type, toolName, arguments, result, ok, duration, link)
 		}
 	}
 }
