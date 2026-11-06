@@ -447,8 +447,17 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 // total_files 0, reviewable 0, excluded 0 — indistinguishable from a commit
 // that changed nothing, which is the one reading that makes an empty review
 // look like a complete one.
+//
+// Whether .gitignore applies at all is still honorGitignore's decision: in
+// workspace mode ignored untracked files are filtered out before this, and
+// matching here would drop tracked changes. This only changes where a path
+// goes once that decision has said it is ignored.
 func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
-	patterns := p.loadGitignorePatterns()
+	var patterns []string
+	honorGitignore := p.mode != ModeWorkspace
+	if honorGitignore {
+		patterns = p.loadGitignorePatterns()
+	}
 	result := DiffSet{
 		Included: make([]model.Diff, 0, len(diffs)),
 		Excluded: make([]model.Diff, 0),
@@ -466,7 +475,7 @@ func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 		switch {
 		case isProviderDirExcluded(path):
 			exclude(d, model.ExcludeProviderDirectory)
-		case p.isPathExcluded(path, patterns):
+		case honorGitignore && p.isPathExcluded(path, patterns):
 			exclude(d, model.ExcludeGitignore)
 		default:
 			result.Included = append(result.Included, d)
