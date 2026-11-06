@@ -5,6 +5,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,6 +85,90 @@ func TestRunSessionList_EmptyRepo(t *testing.T) {
 	})
 	if !strings.Contains(got, "No sessions found") {
 		t.Errorf("expected empty message, got %q", got)
+	}
+}
+
+func TestRunSessionList_BranchFilter(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	dir, err := session.SessionsDir(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for i, branch := range []string{"feat/topic", "feat/topic", "main", "feat/topic-extra", "Feat/topic", ""} {
+		id := fmt.Sprintf("session-%d", i)
+		record, err := json.Marshal(map[string]any{
+			"type": "session_start", "sessionId": id, "cwd": repoDir,
+			"gitBranch": branch, "timestamp": time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), append(record, '\n'), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, tt := range []struct {
+		name   string
+		branch string
+		limit  string
+		want   []string
+	}{
+		{"exact match", "feat/topic", "0", []string{"session-1", "session-0"}},
+		{"filter before limit", "feat/topic", "1", []string{"session-1"}},
+		{"case sensitive", "Feat/topic", "0", []string{"session-4"}},
+		{"no match", "missing", "0", nil},
+		{"no filter", "", "0", []string{"session-5", "session-4", "session-3", "session-2", "session-1", "session-0"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, asJSON := range []bool{false, true} {
+				args := []string{"--repo", repoDir, "--branch", tt.branch, "--limit", tt.limit}
+				if asJSON {
+					args = append(args, "--json")
+				}
+				got := captureStdout(t, func() {
+					if err := runSessionListCompat(args); err != nil {
+						t.Fatal(err)
+					}
+				})
+				if asJSON {
+					var summaries []session.Summary
+					if err := json.Unmarshal([]byte(got), &summaries); err != nil {
+						t.Fatal(err)
+					}
+					if len(summaries) != len(tt.want) {
+						t.Fatalf("got %d sessions, want %d: %s", len(summaries), len(tt.want), got)
+					}
+					for i, id := range tt.want {
+						if summaries[i].SessionID != id {
+							t.Errorf("session %d = %s, want %s", i, summaries[i].SessionID, id)
+						}
+					}
+					if len(tt.want) == 0 && strings.TrimSpace(got) != "[]" {
+						t.Errorf("empty filtered output = %q, want []", got)
+					}
+				} else if len(tt.want) == 0 {
+					if !strings.Contains(got, `on branch "missing"`) {
+						t.Errorf("missing branch context: %s", got)
+					}
+				} else {
+					var ids []string
+					for _, line := range strings.Split(got, "\n") {
+						fields := strings.Fields(line)
+						if len(fields) > 0 && strings.HasPrefix(fields[0], "session-") {
+							ids = append(ids, fields[0])
+						}
+					}
+					if strings.Join(ids, ",") != strings.Join(tt.want, ",") {
+						t.Errorf("session IDs = %v, want %v", ids, tt.want)
+					}
+				}
+			}
+		})
 	}
 }
 

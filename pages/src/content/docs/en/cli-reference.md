@@ -411,6 +411,7 @@ Sub-commands:
 ```bash
 ocr session list
 ocr session list --limit 50
+ocr session list --branch feat/my-feature
 ocr session list --json
 ```
 
@@ -418,7 +419,12 @@ ocr session list --json
 |---|---|---|
 | `--repo <path>` | current dir | Repository whose sessions should be listed. |
 | `--json` | `false` | Emit session summaries as JSON. |
-| `--limit <n>` | `20` | Cap the number of listed sessions. Use `0` for unlimited. |
+| `--limit <n>` | `20` | Cap the number of listed sessions after filtering. Use `0` for unlimited. |
+| `--branch <name>` | all branches | Only list sessions whose recorded branch exactly matches the name (case-sensitive). |
+
+The branch filter uses saved metadata, so it also works with `--repo` for an archived
+checkout. It does not check whether the branch still exists or whether a session can
+be resumed. Sessions with no recorded branch are excluded when filtering.
 
 ### `ocr session show`
 

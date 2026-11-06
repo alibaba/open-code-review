@@ -387,6 +387,7 @@ Sub-commands:
 ```bash
 ocr session list
 ocr session list --limit 50
+ocr session list --branch feat/my-feature
 ocr session list --json
 ```
 
@@ -395,6 +396,11 @@ ocr session list --json
 | `--repo <path>` | 当前目录 | 要列出会话的仓库。 |
 | `--json` | `false` | 以 JSON 输出会话摘要。 |
 | `--limit <n>` | `20` | 限制列出的会话数量。使用 `0` 表示不限制。 |
+| `--branch <name>` | 所有分支 | 只列出记录的分支名与指定名称完全匹配的会话（区分大小写）。 |
+
+分支筛选在 `--limit` 之前应用，使用会话中保存的元数据，因此也支持通过
+`--repo` 查看已归档的检出目录。它不会检查分支是否仍存在或会话是否可以恢复。
+筛选时，不包含未记录分支的会话。
 
 ### `ocr session show`
 
