@@ -4,9 +4,10 @@ This case examines a local OCR self-review performed while preparing this
 contribution. It demonstrates the terminal investigation path, not a production
 defect or a measured reduction in human debugging time.
 
-The feature is limited to explicit request/response/tool links and read-only
-session, task, request and original-event inspection. Comment identities, captured
-source snapshots and comment-provenance persistence are outside this change.
+This case evaluates explicit request/response/tool links and read-only session,
+task, request and original-event inspection. The PR also includes
+[comment evidence](comment-evidence.md), which was not exercised by these runs.
+These results do not establish the need for that larger persistence model.
 
 ## The investigation
 
@@ -113,5 +114,5 @@ also parsed raw logs to independently verify their answers. There is only one
 observation per case/condition; shared-host scheduling, agent behavior, order and
 individual differences prevent a causal performance claim. No human participants
 or human investigation times were measured. These observations do not establish
-either a general speedup or a general slowdown, nor do they justify the deferred
-comment-evidence persistence model.
+either a general speedup or a general slowdown, nor do they justify the
+comment-evidence persistence model now included in the PR.
