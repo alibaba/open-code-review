@@ -21,6 +21,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/estimate"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
@@ -63,6 +64,15 @@ func resolveMaxTokens(templateDefault int, cfg *Config, cliOverride int) (int, e
 		return 0, fmt.Errorf("invalid max_tokens in app config: must be a positive integer")
 	}
 	return cfg.MaxTokens, nil
+}
+
+func resolveEstimation(cfg *Config) estimate.Parameters {
+	var parameters estimate.Parameters
+	if cfg != nil {
+		parameters.PromptOverheadTokens = int64(cfg.EstimationOverheadTokens)
+		parameters.OutputTokensPerRound = int64(cfg.EstimationOutputTokensPerRound)
+	}
+	return parameters.WithDefaults()
 }
 
 // resolveEffort applies the standard precedence for the review effort preset:
