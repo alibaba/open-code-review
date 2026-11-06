@@ -6,6 +6,7 @@ package tool
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -105,7 +106,16 @@ func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
 	resolvedPath, err := filepath.EvalSymlinks(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fullPath, nil
+			// The path is not there. Resolve its parent first: a path that
+			// leaves the repository through a symlinked directory must still
+			// be refused as out-of-repository, and today the missing file
+			// hides that escape behind a bare "does not exist". The pattern
+			// is the one internal/diff/workspace_file.go already uses.
+			parent, parentErr := filepath.EvalSymlinks(filepath.Dir(fullPath))
+			if parentErr == nil && !pathutil.WithinBase(repoRoot, parent) {
+				return "", fmt.Errorf("file path %q is outside repository", path)
+			}
+			return "", pathNotFoundInWorkspace(path, err)
 		}
 		return "", fmt.Errorf("resolve file %q: %w", path, err)
 	}
@@ -115,9 +125,78 @@ func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
 	return resolvedPath, nil
 }
 
+// runGit runs a git command in the repository and returns its stdout.
+func (fr *FileReader) runGit(ctx context.Context, args ...string) ([]byte, error) {
+	if fr.Runner != nil {
+		return fr.Runner.Output(ctx, fr.RepoDir, args...)
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = fr.RepoDir
+	return cmd.Output()
+}
+
+// pathExistsAtRef reports whether path is present in the tree at the
+// reader's ref.
+//
+// It returns (true, nil) when the path is present, (false, nil) when it is
+// absent, and (false, err) when the answer could not be established — the ref
+// does not resolve, git failed, or the context ended. A caller must treat the
+// third case as unknown and fall back to the ordinary read rather than
+// rejecting the path.
+func (fr *FileReader) pathExistsAtRef(ctx context.Context, path string) (bool, error) {
+	// `rev-parse --verify --quiet` prints the object id and exits 0 when the
+	// path exists, and exits 1 with no output when it does not. It is the
+	// same command shape internal/diff/git.go uses to resolve a ref.
+	_, err := fr.runGit(ctx, "rev-parse", "--verify", "--quiet", "--end-of-options", fr.Ref+":"+path)
+	if err == nil {
+		return true, nil
+	}
+	// Exit 1 means "not there" or "the ref does not resolve": rev-parse
+	// reports both the same way. Ask the ref itself before concluding that
+	// the path is absent.
+	if !isExitCode(err, 1) {
+		return false, err
+	}
+	if _, refErr := fr.runGit(ctx, "rev-parse", "--verify", "--quiet", "--end-of-options", fr.Ref+"^{commit}"); refErr != nil {
+		return false, refErr
+	}
+	return false, nil
+}
+
+// isExitCode reports whether err is a git invocation that exited with the
+// given status.
+func isExitCode(err error, code int) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == code
+}
+
+// rejectAbsentPath returns the structural rejection when path is known to be
+// absent at the reader's ref. When the answer cannot be established it
+// returns nil, so that the ordinary read proceeds and its own error surfaces
+// as it does today.
+func (fr *FileReader) rejectAbsentPath(ctx context.Context, path string) error {
+	if fr.Ref == "" {
+		// There is nothing to resolve the path against, so there is nothing
+		// to decide: let the ordinary read report what it finds.
+		return nil
+	}
+	exists, err := fr.pathExistsAtRef(ctx, path)
+	if err != nil {
+		return nil
+	}
+	if exists {
+		return nil
+	}
+	return pathNotFoundAtRef(path, fr.Ref)
+}
+
 func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (string, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
+
+	if err := fr.rejectAbsentPath(ctx, path); err != nil {
+		return "", err
+	}
 
 	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
 	if fr.Runner != nil {
@@ -205,6 +284,10 @@ func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([
 }
 
 func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
+	if err := fr.rejectAbsentPath(ctx, path); err != nil {
+		return nil, 0, err
+	}
+
 	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
 
 	var collected []string

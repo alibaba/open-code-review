@@ -6,6 +6,7 @@ package llmloop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -867,6 +868,16 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		r.recordToolFailure(toolCallNumber, toolName, taskKey, err.Error(),
 			rec, call.Function.Arguments, dur)
 		telemetry.PrintToolCallError(toolName, err)
+		if errors.Is(err, tool.ErrPathNotFound) {
+			// A path that is not present at the read target will not appear
+			// by reading it again, so it is not a failure the model can fix
+			// by adjusting its arguments. Reporting it through the ladder
+			// would spend the retry budget on it and, from the third
+			// attempt on, replace its reason with the ladder's generic
+			// wording. The failure is still recorded above, so the run
+			// report shows it as a failed tool call.
+			return tool.Of(err.Error())
+		}
 		return r.toolFailureResult(taskKey, toolName, fmt.Sprintf("Error executing tool %s: %v", toolName, err))
 	}
 	telemetry.PrintToolCallFinished(toolName, dur)

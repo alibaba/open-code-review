@@ -5,6 +5,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -48,7 +49,13 @@ func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (st
 
 	lines, totalLines, err := p.FileReader.ReadLines(ctx, filePath, int(startLine), maxLines)
 	if err != nil {
-		return "", fmt.Errorf("file %q not found: %w", filePath, err)
+		if errors.Is(err, ErrPathNotFound) {
+			// The rejection already names the path, says where it was
+			// looked for, and says that reading it again will not help.
+			// Wrapping it again would bury that.
+			return "", err
+		}
+		return "", fmt.Errorf("read file %q: %w", filePath, err)
 	}
 
 	if totalLines > 0 && int(startLine)-1 >= totalLines {
