@@ -794,6 +794,10 @@ type ResultProvider interface {
 	// failed(budget) without recording a run_failure, so it reads as partial
 	// whenever anything was covered.
 	BudgetExceeded() bool
+	// HadUnreviewedInput reports whether the run's input was non-empty (files
+	// changed for review, or discovered for scan) yet zero files were selected,
+	// i.e. a silent skip caused by filtering rather than a genuinely empty input.
+	HadUnreviewedInput() bool
 	// RunManifest returns the frozen v1 coverage result for review runs. Scan
 	// remains legacy and returns nil.
 	RunManifest() *session.RunManifest

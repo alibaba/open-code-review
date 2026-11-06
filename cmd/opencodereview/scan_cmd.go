@@ -258,7 +258,13 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, nil)
+	emitErr := emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, nil)
+	if emitErr == nil && ag.HadUnreviewedInput() {
+		// Same exit contract as review: a non-empty input that selected zero files
+		// must not read as a clean scan in a CI gate.
+		emitErr = fmt.Errorf("no files were selected for scan: every discovered file was filtered out")
+	}
+	return emitErr
 }
 
 func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (*session.ResumeState, error) {

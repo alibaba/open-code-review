@@ -193,6 +193,11 @@ type Agent struct {
 	runner          *llmloop.Runner
 	resumeInfo      *ResumeInfo
 	budgetExceeded  atomic.Bool // set when a token/tool-call budget gate stopped dispatch
+	// hadUnreviewedInput records that the run's input was non-empty (files
+	// changed) but every file was filtered out, so nothing was selected for
+	// review. It lets the exit-status decision distinguish a genuine no-op from
+	// a silent skip that a CI gate would otherwise read as "review passed".
+	hadUnreviewedInput atomic.Bool
 
 	fileGroups []FileGroup // semantic grouping result, stored for JSON output
 
@@ -339,6 +344,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// can coexist with statically filtered files — and the reasons are ordered
 	// most-actionable first.
 	if counts.Selected == 0 {
+		if totalChanged > 0 {
+			a.hadUnreviewedInput.Store(true)
+		}
 		skipReason := "no_supported_files"
 		switch {
 		case counts.TooLarge > 0:
@@ -544,6 +552,16 @@ func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.Too
 // when the cap left nothing covered. Per-file token/tool-round exhaustion
 // does NOT set this flag — it is an item-level failed(budget) outcome instead.
 func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded.Load() }
+
+// HadUnreviewedInput reports whether the run saw a non-empty input but selected
+// zero files for review (every changed file was filtered out). It is true only
+// for a silent skip of a non-empty changeset, never for a genuinely empty diff.
+func (a *Agent) HadUnreviewedInput() bool {
+	if a == nil {
+		return false
+	}
+	return a.hadUnreviewedInput.Load()
+}
 
 // recordWarning adds a non-fatal warning to the agent's warning list.
 func (a *Agent) recordWarning(warningType, file, message string) {

@@ -108,6 +108,10 @@ type Agent struct {
 	scanFingerprints map[string]string
 	projectSummary   string      // populated post-run by maybeRunProjectSummary
 	budgetExceeded   atomic.Bool // set when the aggregate token budget stops dispatch or an in-flight task
+	// hadUnreviewedInput records that files were discovered but every one was
+	// filtered out, so nothing was selected. Mirrors agent.Agent's signal for the
+	// exit-status decision.
+	hadUnreviewedInput bool
 }
 
 // ProjectSummary returns the markdown project-level summary produced after
@@ -200,6 +204,16 @@ func (a *Agent) ResumeInfo() *session.ResumeInfo {
 
 // FilesReviewed returns the number of items included in this scan.
 func (a *Agent) FilesReviewed() int64 { return int64(len(a.items)) }
+
+// HadUnreviewedInput reports whether files were discovered but zero were
+// selected (every one filtered out). It is true only for a silent skip of a
+// non-empty input, never for a genuinely empty path set.
+func (a *Agent) HadUnreviewedInput() bool {
+	if a == nil {
+		return false
+	}
+	return a.hadUnreviewedInput
+}
 
 // Diffs returns the scanned items adapted to model.Diff form so callers
 // (e.g. cmd/opencodereview's outputJSON / ResolveLineNumbers) can treat
@@ -341,6 +355,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		totalDiscovered, reviewable, a.args.RepoDir)
 
 	if reviewable == 0 {
+		if totalDiscovered > 0 {
+			a.hadUnreviewedInput = true
+		}
 		fmt.Fprintln(stdout.Writer(), "[ocr] No reviewable files. Skipping scan.")
 		telemetry.Event(ctx, "scan.no.files")
 		// A clean skip still has to reach disk: if session_end never persisted,
