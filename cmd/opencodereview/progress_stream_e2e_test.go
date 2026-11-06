@@ -45,6 +45,11 @@ func TestReviewE2E_JSONHumanStreamsProgressToStderr(t *testing.T) {
 	if !strings.Contains(errOut, "[ocr]") {
 		t.Errorf("--audience human must stream [ocr] progress to stderr, got:\n%s", errOut)
 	}
+	for _, event := range []string{"[ocr] LLM request started", "[ocr] LLM request finished"} {
+		if !strings.Contains(errOut, event) {
+			t.Errorf("human audience must show %q on stderr, got:\n%s", event, errOut)
+		}
+	}
 
 	// stdout must remain exactly one JSON document. Unmarshal is the real
 	// assertion a consumer like jq cares about; a single leaked progress line
@@ -71,6 +76,9 @@ func TestReviewE2E_JSONAgentStaysSilent(t *testing.T) {
 
 	if strings.Contains(errOut, "[ocr]   ▶") {
 		t.Errorf("audience=agent must not emit tool progress, got:\n%s", errOut)
+	}
+	if strings.Contains(errOut, "[ocr] LLM request ") || strings.Contains(errOut, "[ocr] LLM stage ") {
+		t.Errorf("audience=agent must not emit request or verification progress, got:\n%s", errOut)
 	}
 
 	var doc map[string]any

@@ -51,6 +51,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
 | `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
+| `nearai` | openai + SDK 전송 검증 | `https://cloud-api.near.ai/v1` | `NEARAI_API_KEY` |
 | `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
 | `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
 | `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
@@ -71,6 +72,14 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 `providers.<name>.models` 모두에 없으면 OCR은 stderr에 경고를 출력합니다.
 모델의 유효성은 요청을 보낼 때 프로바이더가 확인합니다. 사용자 정의 프로바이더에는
 기존 `--model` 검증 규칙이 적용됩니다.
+
+## NEAR AI 추론 검증
+
+`nearai` 프로바이더는 NEAR AI inference SDK를 사용하며, 종단 간 암호화(E2EE)와
+모델 TEE 검증을 기본으로 활성화합니다. OCR은 각 추론 응답을 검증한 뒤에만
+응답 내용을 사용하거나 응답에 포함된 도구 호출을 실행합니다.
+설정 방법, 검증 수준, 보고서와 제한 사항은 [NEAR AI 안내](https://github.com/alibaba/open-code-review/blob/main/docs/nearai.md)를 참조하세요.
+일반 OpenAI 프로바이더의 주소를 NEAR AI URL로 설정하는 것만으로는 이 통합이 활성화되지 않습니다.
 
 ## ChatGPT 로그인 미리보기
 

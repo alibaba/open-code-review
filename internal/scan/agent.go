@@ -384,6 +384,10 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// their LLM request can still be in flight here; joining them ensures no
 	// background goroutine is left leaking or writing to a finalized session.
 	a.runner.WaitBackground()
+	a.session.SetVerificationReport(llm.ClientVerificationReport(a.args.LLMClient))
+	if verificationErr := llm.ClientVerificationError(a.args.LLMClient); verificationErr != nil {
+		err = errors.Join(err, verificationErr)
+	}
 
 	// A persistence failure is a delivery error in its own right: when the scan
 	// also failed, both facts are reported (errors.Join) rather than letting the

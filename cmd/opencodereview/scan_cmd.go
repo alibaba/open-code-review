@@ -178,6 +178,10 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	if err != nil {
 		return err
 	}
+	defer llm.CloseClient(rt.Client)
+	if err := validateVerifiedResume(rt.Client, opts.resume); err != nil {
+		return err
+	}
 	maxTokens, err := resolveMaxTokens(scanTpl.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
@@ -249,12 +253,14 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	startTime := time.Now()
 
 	comments, err := ag.Run(ctx)
+	llmIdentity.Verification = llm.ClientVerificationReport(rt.Client)
 	if err != nil {
+		if llmIdentity.Verification != nil {
+			emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, nil)
+		}
 		span.SetStatus(codes.Error, err.Error())
 		span.RecordError(err)
-		if id := ag.SessionID(); id != "" {
-			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
-		}
+		outputSessionRetryHint(os.Stderr, ag.SessionID(), llmIdentity)
 		return fmt.Errorf("scan failed: %w", err)
 	}
 

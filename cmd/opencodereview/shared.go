@@ -283,6 +283,7 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 		RawHolder:      rawHolder,
 		AppCfg:         appCfg,
 		RuntimeConfig: agent.RuntimeConfig{
+			Verification: nearAIPolicyIdentity(ep.NearAI),
 			Protocol:     ep.Protocol,
 			EndpointHost: sanitizeEndpointHost(ep.URL),
 			Language:     lang,
@@ -893,6 +894,7 @@ func emitRunResult(
 	// run-level diagnostics about how the comments were obtained, so it reads
 	// after them but must not separate the summary from the end of output.
 	outputRetryReportText(out, retryReport)
+	outputVerificationText(out, llmIdentity)
 	if summary := ag.ProjectSummary(); summary != "" {
 		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", sanitizeTerminal(summary))
 	}

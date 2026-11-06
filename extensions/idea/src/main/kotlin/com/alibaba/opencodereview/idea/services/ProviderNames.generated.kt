@@ -25,6 +25,7 @@ internal fun generatedPresetProviderNames(): Set<String> = setOf(
     "minimax",
     "minimax-cn",
     "mistral",
+    "nearai",
     "novita",
     "ollama-cloud",
     "openai",

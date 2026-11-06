@@ -169,6 +169,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err != nil {
 		return err
 	}
+	defer llm.CloseClient(rt.Client)
+	if err := validateVerifiedResume(rt.Client, opts.resume); err != nil {
+		return err
+	}
 	maxTokens, err := resolveMaxTokens(cc.Template.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
@@ -268,6 +272,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	startTime := time.Now()
 
 	comments, runErr := ag.Run(runCtx)
+	llmIdentity.Verification = llm.ClientVerificationReport(rt.Client)
 	manifest := ag.RunManifest()
 
 	// Freeze the retry report at the same boundary as the manifest: ag.Run has
@@ -317,9 +322,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 			failureReport = nil
 		}
 		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
-		if id := ag.SessionID(); id != "" {
-			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
-		}
+		outputSessionRetryHint(os.Stderr, ag.SessionID(), llmIdentity)
 		return errors.Join(resultErr, emitErr)
 	}
 	return emitErr

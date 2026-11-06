@@ -39,6 +39,7 @@ const (
 // SessionHistory is the top-level container for an entire CR run.
 // It is safe for concurrent use by multiple goroutines.
 type SessionHistory struct {
+	verification *llm.VerificationReport
 	mu           sync.Mutex
 	SessionID    string
 	RepoDir      string
@@ -112,6 +113,7 @@ type TokenUsage struct {
 
 // ResponseRecord holds the parsed LLM response.
 type ResponseRecord struct {
+	Verification     *llm.VerificationRecord
 	Content          string
 	ToolCalls        []llm.ToolCall
 	Model            string
@@ -332,6 +334,7 @@ func (sh *SessionHistory) Finalize() error {
 		p := sh.persist
 		persistInitErr := sh.persistInitErr
 		manifest := sh.finalManifest
+		verification := sh.verification
 		duration := sh.EndTime.Sub(sh.StartTime)
 		filesReviewed := make([]string, 0, len(sh.FileSessions))
 		if manifest != nil && manifest.SchemaVersion == ManifestSchemaVersion {
@@ -358,7 +361,7 @@ func (sh *SessionHistory) Finalize() error {
 		// result is cached in finalizeErr. sync.Once guarantees every other
 		// caller blocks until this completes, then reads the same finalizeErr.
 		if p != nil {
-			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest)
+			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest, verification)
 		}
 	})
 	return sh.finalizeErr
@@ -506,6 +509,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 	}
 
 	tr.Response = &ResponseRecord{
+		Verification:     resp.Verification,
 		Content:          content,
 		ToolCalls:        choice.Message.ToolCalls,
 		Model:            resp.Model,
@@ -529,7 +533,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 				}
 				toolCallsJSON = append(toolCallsJSON, entry)
 			}
-			p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration, nativeTurnForJSON(tr.Response.Native))
+			p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration, nativeTurnForJSON(tr.Response.Native), resp.Verification)
 		}
 	}
 }

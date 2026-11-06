@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -41,13 +42,20 @@ func TestExecuteScanPromptOverflowCannotReportClean(t *testing.T) {
 				t.Fatal(err)
 			}
 			var scanErr error
-			output := captureStdout(t, func() { scanErr = executeScan(opts) })
+			var stderr string
+			output := captureStdout(t, func() {
+				stderr = captureStderr(t, func() { scanErr = executeScan(opts) })
+			})
 			t.Logf("scan error: %v; output: %s", scanErr, output)
 			if scanErr == nil || !strings.Contains(scanErr.Error(), "all 1 file scan(s) failed") {
 				t.Errorf("scan error = %v, want complete scan failure", scanErr)
 			}
 			if strings.Contains(output, "Looks good to me") {
 				t.Errorf("unreviewed file was reported as clean: %s", output)
+			}
+			hint := regexp.MustCompile(`\[ocr\] Session: (\S+) \(retry with: --resume (\S+)\)`).FindStringSubmatch(stderr)
+			if len(hint) != 3 || hint[1] != hint[2] {
+				t.Errorf("scan failure lost the session resume hint: %s", stderr)
 			}
 		})
 	}

@@ -56,6 +56,10 @@ func classifyBoundaryError(err error) (ErrorClass, FailurePhase, bool) {
 
 	var syntaxErr *json.SyntaxError
 	var typeErr *json.UnmarshalTypeError
+	var verificationErr *nearAIFailure
+	if errors.As(err, &verificationErr) && verificationErr.stage == "response verification" {
+		return ErrorClassProvider, FailurePhaseVerification, true
+	}
 	if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) {
 		return ErrorClassUnknown, FailurePhaseResponseDecode, true
 	}
