@@ -324,6 +324,13 @@ type ProviderEntry struct {
 	AWSProfile string `json:"aws_profile,omitempty"`
 	AWSRegion  string `json:"aws_region,omitempty"`
 
+	// MaxInFlight is the per-provider admission limit for review runs: the
+	// maximum number of simultaneous in-flight LLM attempts (transport in
+	// progress or response body still open) across every review request path.
+	// Zero or negative (the default) disables the gate. It must exist here as
+	// well as in the resolver's own view of the file — see the AWS comment
+	// above for the silent-drop failure this struct guards against.
+	MaxInFlight int `json:"max_in_flight,omitempty"`
 	// unknownJSONFields keeps JSON keys with no matching struct field alive across
 	// a load/save cycle. Unexported: any struct-literal rebuild must copy it
 	// (see cloneProviderEntry) or the fields are dropped again
@@ -798,7 +805,8 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, max_in_flight, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+
 	}
 	return nil
 }
@@ -886,8 +894,18 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 		} else {
 			entry.AWSProfile = normalized
 		}
+	case "max_in_flight":
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return fmt.Errorf("invalid max_in_flight for %s: %w", key, err)
+		}
+		if n < 0 {
+			return fmt.Errorf("invalid max_in_flight for %s: must be >= 0 (0 disables admission limiting)", key)
+		}
+		entry.MaxInFlight = n
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, max_in_flight, aws_region, aws_profile", field)
+
 	}
 	return nil
 }
