@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
@@ -820,4 +821,55 @@ func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	assertContains(t, args, "--no-index")
 	assertContains(t, args, "--exclude-standard")
 	assertNotContains(t, args, "--untracked")
+}
+
+func TestGitGrepTimeout_FromEnv(t *testing.T) {
+	t.Setenv(gitGrepTimeoutEnv, "45")
+	if got := NewCodeSearch(&FileReader{RepoDir: "/tmp"}).grepTimeout(); got != 45*time.Second {
+		t.Errorf("grepTimeout() = %s, want 45s", got)
+	}
+}
+
+func TestGitGrepTimeout_InvalidEnvFallsBackToDefault(t *testing.T) {
+	for _, raw := range []string{"abc", "0", "-5", "1.5"} {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv(gitGrepTimeoutEnv, raw)
+			if got := NewCodeSearch(&FileReader{RepoDir: "/tmp"}).grepTimeout(); got != defaultGitGrepTimeout {
+				t.Errorf("grepTimeout() = %s, want default %s", got, defaultGitGrepTimeout)
+			}
+		})
+	}
+}
+
+func TestGitGrepTimeout_DefaultWhenUnset(t *testing.T) {
+	t.Setenv(gitGrepTimeoutEnv, "")
+	if got := NewCodeSearch(&FileReader{RepoDir: "/tmp"}).grepTimeout(); got != defaultGitGrepTimeout {
+		t.Errorf("grepTimeout() = %s, want default %s", got, defaultGitGrepTimeout)
+	}
+}
+
+func TestGitGrepTimeout_ZeroProviderFieldUsesDefault(t *testing.T) {
+	p := &CodeSearchProvider{FileReader: &FileReader{RepoDir: "/tmp"}}
+	if got := p.grepTimeout(); got != defaultGitGrepTimeout {
+		t.Errorf("grepTimeout() = %s, want default %s", got, defaultGitGrepTimeout)
+	}
+}
+
+// A configured timeout shorter than the git run surfaces as a DeadlineExceeded
+// error that names the effective timeout and the knob to raise it.
+func TestGitGrep_TimeoutMessageNamesTimeout(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace, Runner: gitcmd.New(1)})
+	p.Timeout = time.Nanosecond
+
+	_, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	if err == nil {
+		t.Fatal("expected a timeout error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context.DeadlineExceeded, got: %v", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "timed out after 1ns") || !strings.Contains(msg, gitGrepTimeoutEnv) {
+		t.Errorf("error should name the timeout and %s, got: %s", gitGrepTimeoutEnv, msg)
+	}
 }
