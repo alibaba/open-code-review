@@ -4,9 +4,16 @@
 package llm
 
 import (
+	"context"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // retryObserver is the middleware signature both SDKs use. option.Middleware in
@@ -29,23 +36,50 @@ type retryObserver = func(*http.Request, func(*http.Request) (*http.Response, er
 // the SDK and put response content somewhere it must never go.
 func newRetryObserver(collector *RetryCollector) retryObserver {
 	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
-		// Identity comes from the context the business layer attached before
-		// calling the SDK. The per-attempt context the SDK builds is derived from
-		// it, so the value is still visible here. Requests without identity —
-		// scan and llm test — go straight through: the collector would drop them
-		// anyway, and skipping the timestamps keeps those paths untouched.
-		meta, ok := RequestMetaFromContext(req.Context())
-		if collector == nil || !ok {
-			return next(req)
+		meta, hasMeta := RequestMetaFromContext(req.Context())
+		var number int64 = 1
+		if counter, ok := req.Context().Value(httpAttemptCounterKey{}).(*atomic.Int64); ok {
+			number = counter.Add(1)
 		}
-
 		startedAt := time.Now()
-		res, err := next(req)
-		endedAt := time.Now()
-
-		collector.RecordAttempt(meta, observeAttempt(res, err, endedAt), startedAt, endedAt)
+		ctx, span := otel.Tracer("open-code-review/llm").Start(req.Context(), "llm.http_attempt",
+			trace.WithSpanKind(trace.SpanKindClient),
+			trace.WithTimestamp(startedAt),
+			trace.WithAttributes(attribute.Int64("llm.attempt", number)))
+		var endedAt time.Time
+		defer func() {
+			if endedAt.IsZero() {
+				endedAt = time.Now()
+			}
+			span.End(trace.WithTimestamp(endedAt))
+		}()
+		res, err := next(req.WithContext(ctx))
+		endedAt = time.Now()
+		attempt := observeAttempt(res, err, endedAt)
+		if collector != nil && hasMeta {
+			collector.RecordAttempt(meta, attempt, startedAt, endedAt)
+		}
+		span.SetAttributes(attribute.Float64("llm.duration_ms", float64(endedAt.Sub(startedAt))/float64(time.Millisecond)))
+		if res != nil {
+			span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
+		}
+		if attempt.ErrorClass != "" {
+			// Classification avoids exporting provider bodies, URLs or credentials
+			// carried by transport errors.
+			span.SetAttributes(attribute.String("error.type", string(attempt.ErrorClass)),
+				attribute.String("llm.failure_phase", string(attempt.FailurePhase)))
+			span.SetStatus(codes.Error, string(attempt.ErrorClass))
+		}
 		return res, err
 	}
+}
+
+type httpAttemptCounterKey struct{}
+
+// The SDK retries and the Chat Completions EOF recovery share one counter,
+// while simultaneous calls through the same client remain independent.
+func withHTTPAttemptCounter(ctx context.Context) context.Context {
+	return context.WithValue(ctx, httpAttemptCounterKey{}, &atomic.Int64{})
 }
 
 // observeAttempt turns one transport result into an AttemptRecord.
