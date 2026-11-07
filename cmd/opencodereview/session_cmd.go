@@ -128,7 +128,9 @@ var sessionRmCmd = &cobra.Command{
 	Use:     "rm [flags] <session-id>",
 	Aliases: []string{"delete", "remove"},
 	Short:   "Delete one saved review session",
-	Long: "Delete a persisted review session from ~/.opencodereview/sessions/.\n\n" +
+	Long: "Delete a persisted review session from ~/.opencodereview/sessions/, along with\n" +
+		"its record in the configured object store when one is set, so a session deleted\n" +
+		"here does not come back on the next listing.\n\n" +
 		"The id is enough on its own, so this works from anywhere; --repo only narrows\n" +
 		"the search. An id saved for more than one repository is listed, not guessed at.\n\n" +
 		"The file cannot be recovered, so this confirms first unless --yes is given.",

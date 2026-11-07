@@ -7,6 +7,7 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -359,9 +360,40 @@ func (sh *SessionHistory) Finalize() error {
 		// caller blocks until this completes, then reads the same finalizeErr.
 		if p != nil {
 			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest)
+			// session_end is the last record, and WriteSessionEnd has closed the
+			// file, so the mirror now receives the complete session. A failed
+			// upload does not fail the run: the local cache still holds the
+			// session, and the warning names what did not reach the store.
+			if sh.finalizeErr == nil {
+				sh.mirrorSession()
+			} else {
+				// The local file may be truncated mid-record, and the store is
+				// the copy the other machines read from. Uploading a half
+				// written session spreads the damage instead of containing it.
+				warnStorage("session %s: not uploaded, the local session file was not finalised: %v", sh.SessionID, sh.finalizeErr)
+			}
 		}
 	})
 	return sh.finalizeErr
+}
+
+// mirrorSession uploads the finished session file to the configured store, if
+// any. It runs after the file is closed so that the object and the local file
+// hold the same records.
+func (sh *SessionHistory) mirrorSession() {
+	if StorageBackend() == nil {
+		return
+	}
+	path, err := SessionFilePath(sh.RepoDir, sh.SessionID)
+	if err != nil {
+		warnStorage("resolve session file for upload: %v", err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), mirrorTimeout)
+	defer cancel()
+	if err := uploadSessionFile(ctx, sh.RepoDir, sh.SessionID, path); err != nil {
+		warnStorage("upload session %s: %v (the session remains in the local cache)", sh.SessionID, err)
+	}
 }
 
 // AppendTaskRecord adds a new task record to the file session for the given

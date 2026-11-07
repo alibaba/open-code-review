@@ -106,7 +106,14 @@ func SessionsDir(repoDir string) (string, error) {
 // ListSessions enumerates all persisted sessions for the given repository
 // directory, sorted by StartTime descending (most recent first). Missing
 // directories return an empty slice with no error.
+//
+// When an object store is configured, sessions recorded elsewhere are downloaded
+// into the local cache first, so a listing shows runs from every machine that
+// wrote to the same store.
 func ListSessions(repoDir string) ([]Summary, error) {
+	if err := hydrateSessionsForRead(repoDir); err != nil {
+		warnStorage("download sessions for %s: %v (listing the local cache only)", repoDir, err)
+	}
 	dir, err := SessionsDir(repoDir)
 	if err != nil {
 		return nil, err

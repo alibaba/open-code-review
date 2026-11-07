@@ -4,6 +4,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -132,9 +133,14 @@ type Location struct {
 }
 
 // FindSessionsByID returns every session file matching an id, in any repository.
+// A configured store is consulted first, so a session recorded elsewhere can be
+// found by id alone.
 func FindSessionsByID(sessionID string) ([]Location, error) {
 	if err := ValidateSessionID(sessionID); err != nil {
 		return nil, err
+	}
+	if err := hydrateAllForRead(); err != nil {
+		warnStorage("download sessions: %v (searching the local cache only)", err)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -203,6 +209,14 @@ func DeleteSessionAt(loc Location) error {
 		}
 		return fmt.Errorf("delete session %q: %w", loc.SessionID, err)
 	}
+	// Remove the mirrored copy too, or the next hydration downloads the session
+	// the user just deleted. A failure here is reported: the session still exists
+	// in the store, and leaving the caller to assume it is gone would be wrong.
+	ctx, cancel := context.WithTimeout(context.Background(), mirrorTimeout)
+	defer cancel()
+	if err := deleteSessionObject(ctx, loc.EncodedDir, loc.SessionID); err != nil {
+		return fmt.Errorf("delete session %q from the configured store: %w", loc.SessionID, err)
+	}
 	return nil
 }
 
@@ -230,6 +244,9 @@ func resolveLocationPath(loc Location) (string, error) {
 
 // ListAllSessionIDs returns every saved session id.
 func ListAllSessionIDs() ([]Location, error) {
+	if err := hydrateAllForRead(); err != nil {
+		warnStorage("download sessions: %v (listing the local cache only)", err)
+	}
 	root, err := sessionsRoot()
 	if err != nil {
 		return nil, err

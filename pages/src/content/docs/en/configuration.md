@@ -458,6 +458,80 @@ ocr config set language 中文
 ocr config set language English
 ```
 
+## Storing review results in object storage
+
+By default every session record lives under `~/.opencodereview/sessions/` on
+the machine that produced it. On a laptop that is exactly right; in Kubernetes
+or any CI runner that is recycled, the pod is replaced and the review history
+goes with it.
+
+A `storage` section in `~/.opencodereview/config.json` mirrors session records
+to an S3-compatible bucket, so a restarted pod — or a teammate's machine — can
+still list, read and resume them:
+
+```json
+{
+  "storage": {
+    "type": "s3",
+    "prefix": "prod",
+    "s3": {
+      "endpoint": "https://s3.mycompany.internal",
+      "bucket": "ocr-review-results",
+      "region": "us-west-2"
+    }
+  }
+}
+```
+
+Credentials are read from `OCR_S3_ACCESS_KEY_ID` and
+`OCR_S3_SECRET_ACCESS_KEY` when the section does not carry them, so a container
+image can hold the bucket and the region while the secret stays in the
+environment. The same keys can be written to the file instead with the commands
+below.
+
+```bash
+# The same section, written for you:
+ocr config set storage.type s3
+ocr config set storage.s3.endpoint https://s3.mycompany.internal
+ocr config set storage.s3.bucket ocr-review-results
+ocr config set storage.s3.region us-west-2
+ocr config set storage.s3.access_key_id "$OCR_S3_ACCESS_KEY"
+ocr config set storage.s3.secret_access_key "$OCR_S3_SECRET_KEY"
+```
+
+`ocr config unset storage` returns the install to local-only, and
+`ocr config set storage.type local` keeps the section but turns mirroring off.
+
+Every field can also come from the environment, which is what carries
+credentials in CI:
+
+| Variable | Meaning |
+| -------- | ------- |
+| `OCR_STORAGE_TYPE` | `local`, `s3` or `filesystem` |
+| `OCR_STORAGE_PREFIX` | key prefix, e.g. `prod` |
+| `OCR_STORAGE_PATH` | root directory, for `filesystem` |
+| `OCR_S3_ENDPOINT` | service URL; AWS's endpoint for the region when unset |
+| `OCR_S3_BUCKET`, `OCR_S3_REGION` | bucket and signing region |
+| `OCR_S3_ACCESS_KEY_ID`, `OCR_S3_SECRET_ACCESS_KEY` | credentials |
+| `OCR_S3_SESSION_TOKEN` | token for temporary credentials |
+| `OCR_S3_PATH_STYLE` | `true` (default) addresses `endpoint/bucket/key` |
+
+What the mirror does, and what it does not:
+
+- A run uploads its session to `<prefix>/sessions/<encoded-repo>/<session-id>.jsonl`
+  when it finishes, and when it is interrupted, so a stopped container still
+  leaves a record.
+- `ocr session list`, `ocr session show`, `--resume`, `ocr session rm` and
+  `ocr viewer` download the objects they need into the local cache first, and
+  `ocr session rm` also deletes the stored object.
+- The local directory stays authoritative: an unconfigured install, or one whose
+  `storage` section cannot be opened, behaves exactly as before and says so on
+  stderr. Nothing else about a run changes.
+- Only session records are mirrored. `--output` reports and the raw LLM traces
+  (`raw/`) stay local; upload them as CI artifacts, or copy them yourself.
+- `type: "filesystem"` mirrors to a shared directory (an NFS mount, say) instead
+  of an object store, with `path` as its root.
+
 ## See Also
 
 - [QuickStart](../quickstart/) — minimal setup and first review.
