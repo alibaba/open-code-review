@@ -107,6 +107,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | 理由 | 修正方法 |
 |---|---|
 | `binary` | 対処不要——バイナリファイルにはレビュー可能なテキストがありません。 |
+| `secret_exclude` | 対応は不要です。`.env`、`id_rsa`、`.netrc` などの認証情報パスは、`include` に一致してもレビュー対象にはなりません。 |
 | `user_exclude` | あなたの `exclude` リストからそのパターンを削除してください。 |
 | `unsupported_ext` | ホワイトリストゲートを回避するため、拡張子を `include` リストに追加してください。 |
 | `default_path` | ファイルを `include` に追加してください——組み込みのテストファイル除外パターンを上書きします。 |
