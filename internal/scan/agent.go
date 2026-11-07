@@ -303,6 +303,16 @@ func resumedFromSession(resume *session.ResumeState) string {
 	return resume.SessionID
 }
 
+// recordInterruptionIfCancelled records why this scan is stopping when its
+// context is already cancelled. Like the review pipeline, every path that
+// finalizes the session calls it first, so a cancelled scan persists a reason
+// instead of reading as one whose process was killed.
+func (a *Agent) recordInterruptionIfCancelled(ctx context.Context) {
+	if ctx.Err() != nil {
+		a.session.RecordInterrupted(session.InterruptReasonCancelled)
+	}
+}
+
 // Run executes the full-scan pipeline: enumerate → filter → token-filter →
 // dispatch one subtask per file → collect comments.
 func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
@@ -346,6 +356,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		// A clean skip still has to reach disk: if session_end never persisted,
 		// the skip cannot be claimed. Scan has no manifest builder, but the
 		// session_end delivery contract still applies.
+		a.recordInterruptionIfCancelled(ctx)
 		if ferr := a.session.Finalize(); ferr != nil {
 			return []model.LlmComment{}, fmt.Errorf("finalize session: %w", ferr)
 		}
@@ -388,6 +399,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// A persistence failure is a delivery error in its own right: when the scan
 	// also failed, both facts are reported (errors.Join) rather than letting the
 	// dispatch error hide the fact that session_end never reached disk.
+	a.recordInterruptionIfCancelled(ctx)
 	if ferr := a.session.Finalize(); ferr != nil {
 		finalizeErr := fmt.Errorf("finalize session: %w", ferr)
 		if err != nil {
