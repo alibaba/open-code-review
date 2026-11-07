@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/progress"
 )
 
 // rawSubDir is the subdirectory of ~/.opencodereview that holds the raw LLM
@@ -100,7 +101,7 @@ func (w *RawFileWriter) Write(rec llm.RawRecord) {
 // silent so a degraded sink cannot spam every subsequent record.
 func (w *RawFileWriter) warn(err error) {
 	w.warnOnce.Do(func() {
-		fmt.Fprintf(os.Stderr, "[ocr] WARNING: raw logging failed, captures may be dropped: %v\n", err)
+		fmt.Fprintf(progress.ErrWriter(), "[ocr] WARNING: raw logging failed, captures may be dropped: %v\n", err)
 	})
 }
 

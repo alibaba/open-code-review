@@ -118,6 +118,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
 | `--output <path>` | `-o` | stdout | Write review results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
+| `--tui` | — | `false` | Show the live terminal dashboard instead of plain `[ocr]` progress lines. The dashboard only starts on an interactive terminal with `--format text` and `--audience human`, so this is only needed to turn it on. |
 | `--audience <who>` | — | `human` | `human` streams progress lines (to stderr when `--format` is `json`/`sarif`, so stdout stays a single parseable document); `agent` suppresses progress entirely and prints only the final summary / JSON. |
 | `--background <text>` | `-b` | — | Optional requirement / business context injected into the plan + main prompts. |
 | `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Takes precedence over `--background` when both are set. |
@@ -266,6 +267,96 @@ Concurrent map access without a lock — wrap with sync.RWMutex.
 …
 [ocr] Summary: 9 file(s) reviewed, 14 comment(s), ~21344 token(s) used (input: ~18012, output: ~3332), 1m12s elapsed
 ```
+
+#### Live dashboard
+
+On an interactive terminal, `ocr review` and `ocr scan` replace the wall of
+`[ocr]` lines with a full-screen dashboard that repaints in place: a header
+with the model and elapsed time, a progress bar over the frozen file count, a
+status row of findings / in-flight / failed / skipped counters, a plan line
+with the run's estimated cost, one row per unit of concurrent work showing
+which round it is on and what tool it is calling right now, and a scrolling
+activity log with timestamps.
+
+```
+ocr review  …ev/open-code-review   anthropic/claude-opus-4-6 [▲3.8M ▼412k]  9m00s
+reviewing ▕████████████░░░░░░░░▏ 292/487  ▇ reused ▇ done ▇ failed
+143 findings · 1 in flight · 240 reused · 12 failed · 272 skipped · session 3ee6cd77-…
+plan est 3.0M in + 527k out ≈ 3.5M total
+work (4)                                       13 finished (c)
+  ⣾ internal/agent/agent.go       round 2 · file_read "internal/agen… · ▲93.2k ▼8.1k
+  ⣾ internal/scan/agent.go        round 1 · code_search "budget" · ▲41k
+finished (13)
+  ✓ pages/src/content/docs/en/cli-ref.md   2 findings · 4.1s · ▲196k ▼18k
+  ✗ internal/llm/resolver.go               context deadline exceeded · 18k
+activity (214)                                              following
+  01:10:02  ▶ file_read "internal/agent/agent.go"
+  01:10:04  ✔ file_read (12ms)
+  01:10:05  ✘ code_search failed: context deadline exceeded
+q detach  ·  tab pane  ·  ↑↓ work  ·  c finished  ·  l hide log  ·  p pause log  ·  ctrl+c cancel
+```
+
+The plan line carries the run's estimated cost — what the run is expected to
+spend, as against the header's figure for what it has spent so far. It is
+published with the file count, before the first file is dispatched, and it
+stays on screen for the whole run; the log says the same thing once, and a
+line that scrolls away is not a plan. A scan that groups its work says so
+beside the estimate, as `3 batches · by language`, and each row names the
+batch it belongs to. The estimate is a floor: agent tool use multiplies the
+prompt, so the run usually costs more than the projection.
+
+Token counts appear in two places: beside the model name as the run's
+cumulative total, and per row as what that group has spent. The arrows mean
+the same thing in both — `▲` is input and `▼` is output — so a row's numbers
+can be read against the run's without a second guess. They are abbreviated the
+way `btop` abbreviates its own counters — `3.8k`, `123k`, `1.1M`. The per-group
+numbers are attributed per task key, so a row carries only the tokens it
+actually spent, not a share of the run total.
+
+Rows wrap rather than being cut. A work row that does not fit continues on the
+next line, indented under its own column, and so does a log entry under the
+text — a truncated note says nothing, and the note is the part of the row that
+says what is happening. The name column gives ground to the note when the
+paths are long, so the note always has room.
+
+The progress bar is segmented rather than a single fill, and the legend names
+each segment: **reused** (files carried over from a resumed session's
+checkpoints, which this run inherited rather than reviewed), **done**, and
+**failed**. On a resumed run the distinction matters — the bar opens partly
+full before this run has done any work at all, and the reused segment says how
+much of that was inherited.
+
+Files reused by `--resume` also contribute their findings to the running total,
+because the run collects them and reports them in its final output.
+
+The session id appears at the end of the status row as soon as the session's
+first write persists, so a run can be cross-checked against `ocr session list` or
+a dashboard while it is still going. It is trimmed from the left on a narrow
+terminal, keeping the tail, which is the identifying end.
+
+| Key | Action |
+| --- | --- |
+| `q` / `esc` | Detach the dashboard. The review keeps running; progress reverts to plain `[ocr]` lines and the report is written as usual. |
+| `tab` / `shift+tab` | Switch which pane the arrow keys drive, between the work list and the activity log. The focused pane is highlighted, and the help line names it. |
+| `↑` / `k`, `↓` / `j` | Scroll the focused pane. `u` snaps back to the newest entry and starts following again. |
+| `c` | Expand or collapse the finished rows. They are folded away by default, because a long scan finishes hundreds of files and the running ones are what you are watching; the work heading shows `N finished (c)` while they are hidden. |
+| `l` | Expand or collapse the activity log. Folded away, the work list takes the height the two of them shared and the log keeps a line saying how many entries it holds and how to bring it back. |
+| `ctrl+c` | Cancel the run. The dashboard hands the request back to the pipeline, so it goes through the same graceful shutdown as an interrupt: the report is flushed, the retry report frozen, the manifest persisted, and MCP clients closed. The view stays up until that finishes. |
+
+The dashboard starts only when all of these hold, so pipes, CI, and scripted
+use are unaffected and never see an alternate screen:
+
+- stdin and stdout are terminals (and `TERM` is not `dumb`)
+- `--format text`
+- `--audience human`
+
+A terminal smaller than 40x13 is told to enlarge itself rather than shown a
+frame that would not fit.
+
+`--tui` turns it on explicitly. The dashboard starts without its own signal
+handler, so an interrupt that arrives outside it still goes to the run's
+signal handling; `ctrl+c` pressed *inside* the dashboard is handed back to the
+same graceful-shutdown path.
 
 #### Text (agent, `--audience agent`)
 

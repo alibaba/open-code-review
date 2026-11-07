@@ -14,6 +14,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/progress"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -231,4 +232,42 @@ func captureToolTerminal(t *testing.T, fn func()) (string, string) {
 		t.Fatal(err)
 	}
 	return progress.String(), string(errBytes)
+}
+
+// A tool call has a lifecycle, and a live dashboard needs both ends of it: the
+// start names the tool the row is running, and the end says it has stopped.
+// Without the end the row keeps naming a tool that has already finished.
+func TestExecuteToolCall_PublishesTheToolLifecycle(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Register(&argsCapturingProvider{tool: tool.Dynamic("dyn_ok")})
+	reg.Freeze()
+	r := NewRunner(Deps{Tools: reg, CommentCollector: tool.NewCommentCollector()})
+
+	var events []progress.Event
+	restore := progress.SetSinkForTest(func(ev progress.Event) {
+		events = append(events, ev)
+	})
+	defer restore()
+
+	_, _ = captureToolTerminal(t, func() {
+		r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
+			Function: llm.FunctionCall{Name: "dyn_ok", Arguments: `null`},
+		}, nil, "")
+	})
+
+	var started, done bool
+	for _, ev := range events {
+		switch ev.Kind {
+		case progress.KindToolStart:
+			started = ev.Group == "file.go" && ev.Detail == "dyn_ok"
+		case progress.KindToolDone:
+			done = ev.Group == "file.go"
+		}
+	}
+	if !started {
+		t.Error("the tool start must be published with the task and the tool name")
+	}
+	if !done {
+		t.Error("the tool end must be published, or the row keeps naming a finished tool")
+	}
 }

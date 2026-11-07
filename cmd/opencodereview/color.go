@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
@@ -71,6 +72,42 @@ func resolveColor() bool {
 
 // colorOn reports whether ANSI color should be emitted.
 func colorOn() bool { return colorEnabled }
+
+// interactiveTerminal reports whether the process is attached to a terminal a
+// full-screen program can take over.
+//
+// Both ends are checked. A program that reads keys needs stdin to be a
+// terminal, and one that draws needs stdout to be a terminal; a run with its
+// input piped in would otherwise take the screen and then never hear the user.
+//
+// TERM=dumb means the terminal cannot do what a full-screen program needs —
+// colours and cursor movement — so it counts as not interactive even when the
+// file descriptors are a tty.
+func interactiveTerminal() bool {
+	if strings.EqualFold(os.Getenv("TERM"), "dumb") {
+		return false
+	}
+	return term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd())
+}
+
+// progressColorProfile resolves the colour profile the live dashboard renders
+// with.
+//
+// It follows the precedence of --color: never means no colour at all, always
+// means the widest profile, and the default asks the terminal what it
+// supports. Detecting rather than assuming truecolor matters on a terminal
+// that only speaks 256 colours: the dashboard's palette would otherwise emit
+// sequences the terminal cannot show.
+func progressColorProfile() colorprofile.Profile {
+	switch colorMode {
+	case colorModeNever:
+		return colorprofile.Ascii
+	case colorModeAlways:
+		return colorprofile.TrueColor
+	default:
+		return colorprofile.Detect(os.Stdout, os.Environ())
+	}
+}
 
 // colorize wraps s in seq and a reset, or returns s untouched when color is off.
 // Every escape sequence in the text output path is gated through here or through
