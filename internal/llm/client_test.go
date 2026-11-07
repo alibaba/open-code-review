@@ -2457,3 +2457,78 @@ func TestMessage_EstimatedTokens(t *testing.T) {
 		}
 	})
 }
+
+func TestOpenAIChatCompletions_FoldsToolCallsFromExtraChoices(t *testing.T) {
+	body := `{
+		"id":"chatcmpl_split",
+		"object":"chat.completion",
+		"model":"claude-opus-5.5",
+		"choices":[
+			{"index":0,"message":{"role":"assistant","content":"Reviewing the diff."},"finish_reason":"stop"},
+			{"index":1,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_comment","type":"function","function":{"name":"code_comment","arguments":"{\"line\":3}"}}]},"finish_reason":"tool_calls"},
+			{"index":2,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_done","type":"function","function":{"name":"task_done","arguments":"{}"}}]},"finish_reason":"tool_calls"}
+		]
+	}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := io.WriteString(w, body); err != nil {
+			t.Errorf("write body: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{URL: server.URL + "/v1", APIKey: "test-key", Model: "claude-opus-5.5"})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	var names []string
+	for _, tc := range resp.ToolCalls() {
+		names = append(names, tc.Function.Name)
+	}
+	if want := []string{"code_comment", "task_done"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("tool calls = %v, want %v", names, want)
+	}
+	if got := resp.Content(); got != "Reviewing the diff." {
+		t.Fatalf("content = %q, want the text from the first choice", got)
+	}
+	if len(resp.Choices) != 1 {
+		t.Fatalf("choices = %d, want the extra choices folded into the first", len(resp.Choices))
+	}
+}
+
+func TestOpenAIChatCompletions_FoldsStreamedToolCallsFromExtraChoices(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeOpenAISSE(t, w,
+			`{"id":"c1","object":"chat.completion.chunk","created":1,"model":"claude-opus-5.5","choices":[{"index":0,"delta":{"role":"assistant","content":"Reviewing the diff."},"finish_reason":null}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","created":1,"model":"claude-opus-5.5","choices":[{"index":1,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_comment","type":"function","function":{"name":"code_comment","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","created":1,"model":"claude-opus-5.5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","created":1,"model":"claude-opus-5.5","choices":[{"index":1,"delta":{},"finish_reason":"tool_calls"}]}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:       server.URL + "/v1",
+		APIKey:    "test-key",
+		Model:     "claude-opus-5.5",
+		ExtraBody: map[string]any{"stream": true},
+	})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	calls := resp.ToolCalls()
+	if len(calls) != 1 || calls[0].Function.Name != "code_comment" {
+		t.Fatalf("tool calls = %+v, want the one code_comment call from the second choice", calls)
+	}
+	if got := resp.Content(); got != "Reviewing the diff." {
+		t.Fatalf("content = %q, want the text from the first choice", got)
+	}
+}
