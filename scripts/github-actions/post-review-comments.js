@@ -98,6 +98,12 @@ async function runPostReviewComments({
   // (fail-open for the policy itself, upholding I1).
   routeSeverityBelow = "",
   routeCategories = "",
+  // Severity at-or-below which a finding is not published anywhere, neither
+  // inline nor in the summary. Same vocabulary as routeSeverityBelow; an empty
+  // or unknown value excludes nothing, and a finding with an empty or unknown
+  // severity is never excluded. Excluded findings still veto thread resolution
+  // on their lines: the finding is live, only unpublished.
+  excludeSeverityAtOrBelow = "",
   // Cross-push checkpoints (#476). Off by default: with checkpointEnabled
   // false and an empty carry, every emitted body is byte-identical to today's.
   // checkpointCarry is the raw marker string the resolve step read from the
@@ -121,6 +127,12 @@ async function runPostReviewComments({
   // resolve, anything else (including the default) is a hard no-op that issues
   // zero GraphQL calls.
   resolveOutdated = "",
+  // Path of a verified-fix verdict file, and the head it must have been judged
+  // against. Only a "fixed" verdict whose quoted evidence matches the head blob
+  // resolves a thread; see resolveVerifiedThreads.
+  verifiedFixesPath = "",
+  headSha = "",
+  readHeadFile = null,
   // The GitHub App slug that owns this action's summary comment, when known
   // (the default GITHUB_TOKEN is always "github-actions"). Pins the summary
   // anchor's identity check so a different bot quoting the marker cannot be
@@ -175,6 +187,7 @@ async function runPostReviewComments({
     skipped: 0,
     failed: 0,
     routed: 0,
+    excluded: 0,
     resolved: 0,
     resolvedPreview: 0,
     summaryUrl: "",
@@ -197,6 +210,38 @@ async function runPostReviewComments({
     if (core && typeof core.warning === "function") core.warning(msg);
     else log(msg);
   }
+
+  // With verification on, "fixed" is decided per thread by the verifier, so the
+  // outdated-only resolver must not close a thread the verifier left open. A
+  // missing or unreadable verdict file then resolves nothing.
+  const verifyMode = Boolean(verifiedFixesPath) && resolveMode !== "off";
+  const verifiedFixes = verifyMode ? readVerifiedFixes(fs, verifiedFixesPath, log) : null;
+  const resolveVerified = async (currentSpans) => {
+    if (!verifiedFixes) return;
+    try {
+      const r = await resolveVerifiedThreads({
+        github,
+        owner,
+        repo,
+        prNumber,
+        core,
+        log,
+        botLogin: await authenticatedLogin(),
+        currentSpans,
+        verdicts: verifiedFixes,
+        headSha,
+        readHeadFile,
+        budget: MAX_RESOLVE_PER_RUN - stats.resolved,
+        dryRun: resolveMode !== "resolve",
+      });
+      stats.resolved += r.resolved;
+      if (resolveMode === "report") stats.resolvedPreview += r.candidates;
+    } catch (e) {
+      const msg = `[resolve-verified] cleanup failed unexpectedly (${e.message}); the review itself is unaffected.`;
+      if (core && typeof core.warning === "function") core.warning(msg);
+      else log(msg);
+    }
+  };
 
   // ---- Checkpoint write path (#476) ----
   //
@@ -347,6 +392,7 @@ async function runPostReviewComments({
       log,
     });
     stats.summaryUrl = posted.url;
+    await resolveVerified([]);
     setStatsOutputs(out, stats);
     return;
   }
@@ -385,10 +431,15 @@ async function runPostReviewComments({
   // never enter reviewComments -> never enter toSend/toRetry -> never reach a
   // createReview call (I4: no double-post surface on retry).
   const policy = buildPolicy({ severityThreshold: routeSeverityBelow, categories: routeCategories });
+  const exclusion = buildPolicy({ severityThreshold: excludeSeverityAtOrBelow });
   const reviewComments = [];
   const commentsWithoutLine = [];
   const commentsRouted = [];
   for (const comment of comments) {
+    if (routeComment(comment, exclusion).routed) {
+      stats.excluded++;
+      continue;
+    }
     const hasValidLine = comment.start_line >= 1 || comment.end_line >= 1;
     if (!hasValidLine) {
       commentsWithoutLine.push({ comment, body: formatComment(comment), reason: NO_LINE_REASON });
@@ -469,7 +520,7 @@ async function runPostReviewComments({
     appSlug,
     resolveSelfLogin: authenticatedLogin,
     body: wrapSummary(
-      buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings)
+      buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings, stats.excluded)
     ),
     log,
   });
@@ -543,6 +594,7 @@ async function runPostReviewComments({
     summary: commentsWithoutLine.length,
     skipped: stats.skipped,
     routed: commentsRouted.length,
+    excluded: stats.excluded,
     failed: failedCount,
     warnings,
   });
@@ -589,12 +641,12 @@ async function runPostReviewComments({
   // lines, which is why currentSpans is built from the raw parsed findings
   // rather than from `toSend`: a finding we chose not to repeat is still a
   // finding that is live.
-  if (resolveMode !== "off") {
-    const currentSpans = comments.map((c) => ({
-      path: c.path,
-      start_line: c.start_line,
-      line: c.end_line,
-    }));
+  const currentSpans = comments.map((c) => ({
+    path: c.path,
+    start_line: c.start_line,
+    line: c.end_line,
+  }));
+  if (resolveMode !== "off" && !verifyMode) {
     // Cleanup must never cost the run its outputs. resolveOutdatedThreads
     // catches its own expected failures, but an unexpected throw here (a mock,
     // an Octokit shape change, a network layer rejecting outside the mutation
@@ -624,6 +676,7 @@ async function runPostReviewComments({
       else log(msg);
     }
   }
+  await resolveVerified(currentSpans);
 
   setStatsOutputs(out, stats, batchCounters, batchSize);
 }
@@ -1054,6 +1107,7 @@ function setStatsOutputs(out, stats, batchCounters, batchSize) {
   out("comments_inline", String(stats.inline));
   out("comments_skipped", String(stats.skipped));
   out("comments_routed", String(stats.routed));
+  out("comments_excluded", String(stats.excluded || 0));
   out("comments_failed", String(stats.failed));
   // Emitted on every exit (always "0" when resolve_outdated is off or in
   // 'true' mode respectively) so a consumer workflow can read them
@@ -1473,9 +1527,10 @@ const OCR_COMMENT_ID_RE = new RegExp(OCR_COMMENT_ID_SOURCE);
 // all keep the thread open.
 
 const REVIEW_THREADS_QUERY = `
-query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+query($owner: String!, $repo: String!, $number: Int!, $cursor: String, $withBodies: Boolean = false) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
+      headRefOid
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
@@ -1485,7 +1540,9 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
           isResolved
           originalLine
           originalStartLine
-          comments(first: 100) { totalCount nodes { author { login __typename } } }
+          line
+          startLine
+          comments(first: 100) { totalCount nodes { body @include(if: $withBodies) author { login __typename } } }
           # Aliased second selection so only the ROOT comment's body crosses the
           # wire: ownership is proved by the marker OCR stamps on the comment it
           # created, and replies cannot carry that proof. Fetching every body
@@ -1529,7 +1586,7 @@ const MAX_RESOLVE_PER_RUN = 50;
 // List every review thread on the PR, paginated. Read-only and fail-open:
 // any GraphQL error degrades to "no threads", which makes the whole feature a
 // no-op rather than failing the run over a cleanup step.
-async function listBotReviewThreads({ github, owner, repo, prNumber, log, warn }) {
+async function listBotReviewThreads({ github, owner, repo, prNumber, log, warn, withBodies = false, meta = null }) {
   const all = [];
   let cursor = null;
   const MAX_PAGES = 10; // 1000 threads; far past any realistic PR.
@@ -1541,7 +1598,11 @@ async function listBotReviewThreads({ github, owner, repo, prNumber, log, warn }
         repo,
         number: prNumber,
         cursor,
+        withBodies,
       });
+      if (meta && res && res.repository && res.repository.pullRequest) {
+        meta.headRefOid = res.repository.pullRequest.headRefOid || "";
+      }
       const threads =
         res && res.repository && res.repository.pullRequest
           ? res.repository.pullRequest.reviewThreads
@@ -1654,17 +1715,8 @@ function shouldResolveThread(
   // rest on an ordering guarantee. `|| nodes[0]` covers a response that omitted
   // the author field; when both are present and disagree, the loop below still
   // rejects the thread, because nodes[0] must also match the root login.
-  const root = rootComment(thread);
-  const rootAuthor = (root && root.author) || (nodes[0] && nodes[0].author);
-  const rootLogin = graphqlAuthorLogin(rootAuthor);
-  // Fail closed on an unreadable root author, and on a human-typed root author
-  // that is not the login we authenticated as: a User carrying our marker is a
-  // quote of our comment, not our comment. A bot-typed (or `[bot]`-suffixed)
-  // root author is trusted because only an app can post as one.
-  const rootIsBot =
-    (rootAuthor && rootAuthor.__typename === "Bot") || /\[bot\]$/i.test(rootLogin);
+  const rootLogin = ownRootLogin(thread, botLogin);
   if (!rootLogin) return "human_reply";
-  if (!rootIsBot && rootLogin !== botLogin) return "human_reply";
   for (const c of nodes) {
     if (graphqlAuthorLogin(c && c.author) !== rootLogin) return "human_reply";
   }
@@ -1689,6 +1741,286 @@ function shouldResolveThread(
   if (!lineSpan(span)) return "unverified_no_line";
   if (spansIntersect(span, currentSpans)) return "overlap";
   return "resolve";
+}
+
+// Fail closed on an unreadable root author, and on a human-typed root author
+// that is not the login we authenticated as: a User carrying our marker is a
+// quote of our comment, not our comment. A bot-typed (or `[bot]`-suffixed)
+// root author is trusted because only an app can post as one.
+function ownRootLogin(thread, botLogin) {
+  const nodes = (thread.comments && thread.comments.nodes) || [];
+  const root = rootComment(thread);
+  const rootAuthor = (root && root.author) || (nodes[0] && nodes[0].author);
+  const rootLogin = graphqlAuthorLogin(rootAuthor);
+  const rootIsBot = (rootAuthor && rootAuthor.__typename === "Bot") || /\[bot\]$/i.test(rootLogin);
+  if (!rootLogin || (!rootIsBot && rootLogin !== botLogin)) return "";
+  return rootLogin;
+}
+
+// ---- Verified-fix resolution ----
+//
+// `ocr verify-threads` judges each OCR thread this function hands it, and the
+// executor below resolves a thread only on its explicit "fixed" verdict. The
+// verdict is bound to the head it was judged at and to a digest of every
+// comment in the thread as the verifier saw it, so a reply added or edited
+// after verification, or a push after verification, keeps the thread open.
+// Being outdated, absent from this run's findings, or a human reply saying
+// "fixed" is never proof.
+
+const VERIFY_MAX_THREADS = MAX_RESOLVE_PER_RUN;
+
+const THREAD_FIELDS = `
+  id
+  path
+  isOutdated
+  isResolved
+  originalLine
+  originalStartLine
+  line
+  startLine
+  comments(first: 100) { totalCount nodes { body author { login __typename } } }
+  root: comments(first: 1) { nodes { body author { login __typename } } }`;
+
+const THREAD_NODE_QUERY = `
+query($id: ID!) {
+  node(id: $id) { ... on PullRequestReviewThread {${THREAD_FIELDS}
+  } }
+}`;
+
+const PR_HEAD_QUERY = `
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) { pullRequest(number: $number) { headRefOid } }
+}`;
+
+// Every comment's author and body, in order. Any change to the conversation
+// after verification changes it.
+function threadDigest(thread) {
+  const nodes = (thread.comments && thread.comments.nodes) || [];
+  const parts = nodes.map((c) => [graphqlAuthorLogin(c && c.author), c && c.body]);
+  return crypto.createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+}
+
+// Ownership and visibility gates shared by the verifier input and the
+// executor, so a thread the verifier never saw cannot be resolved and a
+// thread the executor would refuse is never sent for verification.
+function verifiableThreadReason(thread, botLogin) {
+  if (!thread) return "missing_thread";
+  if (thread.isResolved === true) return "already_resolved";
+  const nodes = (thread.comments && thread.comments.nodes) || [];
+  const total = thread.comments && thread.comments.totalCount;
+  if (nodes.length === 0 || (typeof total === "number" && total > nodes.length)) {
+    return "unverified_partial_view";
+  }
+  if (nodes.some((c) => !c || typeof c.body !== "string")) return "unverified_partial_view";
+  if (!threadIsOurs(thread) || !ownRootLogin(thread, botLogin)) return "not_ours";
+  return "verifiable";
+}
+
+async function fetchPrHead(github, owner, repo, prNumber) {
+  const res = await github.graphql(PR_HEAD_QUERY, { owner, repo, number: prNumber });
+  return (res && res.repository && res.repository.pullRequest && res.repository.pullRequest.headRefOid) || "";
+}
+
+// Writes the verify-threads input for every OCR thread that could be resolved
+// at headSha. Returns the number of threads written; 0 writes nothing.
+async function buildVerificationInput({ github, owner, repo, prNumber, botLogin, headSha, log, warn, fs, outPath }) {
+  if (!/^[0-9a-f]{40}$/.test(headSha || "")) {
+    log(`[verify-fixes] head ${JSON.stringify(headSha)} is not a commit sha; verifying nothing.`);
+    return 0;
+  }
+  const meta = {};
+  const threads = await listBotReviewThreads({ github, owner, repo, prNumber, log, warn, withBodies: true, meta });
+  if (meta.headRefOid !== headSha) {
+    log(`[verify-fixes] PR head is ${meta.headRefOid || "unknown"}, not ${headSha}; verifying nothing.`);
+    return 0;
+  }
+  const out = [];
+  for (const t of threads) {
+    if (out.length >= VERIFY_MAX_THREADS) break;
+    if (verifiableThreadReason(t, botLogin) !== "verifiable") continue;
+    const [root, ...replies] = t.comments.nodes;
+    const outdated = t.line == null;
+    out.push({
+      id: t.id,
+      path: t.path,
+      outdated,
+      start_line: (!outdated && t.startLine) || undefined,
+      line: (!outdated && t.line) || undefined,
+      original_start_line: (outdated && t.originalStartLine) || undefined,
+      original_line: (outdated && t.originalLine) || undefined,
+      finding: root.body,
+      replies: replies.map((c) => ({ author: graphqlAuthorLogin(c.author), body: c.body })),
+      digest: threadDigest(t),
+    });
+  }
+  if (out.length > 0) fs.writeFileSync(outPath, JSON.stringify({ head_sha: headSha, threads: out }));
+  log(`[verify-fixes] threads=${threads.length} sent_for_verification=${out.length}`);
+  return out.length;
+}
+
+function readVerifiedFixes(fs, file, log) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!parsed || typeof parsed.head_sha !== "string" || !Array.isArray(parsed.verdicts)) {
+      throw new Error("expected { head_sha: string, verdicts: [] }");
+    }
+    return parsed;
+  } catch (e) {
+    log(`[resolve-verified] no usable verdicts at ${file} (${e.message}); resolving nothing.`);
+    return null;
+  }
+}
+
+function evidenceMatchesHead(evidence, readHeadFile) {
+  if (!evidence || typeof evidence.quote !== "string" || !evidence.quote.trim()) return false;
+  const file = normalizeComparePath(evidence.path);
+  if (!file || file.split("/").includes("..")) return false;
+  const span = lineSpan({ start_line: evidence.start_line, line: evidence.end_line });
+  if (!span || typeof readHeadFile !== "function") return false;
+  let text;
+  try {
+    text = readHeadFile(file);
+  } catch (_) {
+    return false;
+  }
+  if (typeof text !== "string") return false;
+  const lines = text.split("\n").slice(span.start - 1, span.end);
+  if (lines.length !== span.end - span.start + 1) return false;
+  const norm = (str) =>
+    str
+      .split("\n")
+      .map((l) => l.replace(/[ \t\r]+$/, ""))
+      .join("\n")
+      .replace(/\n+$/, "");
+  return norm(lines.join("\n")) === norm(evidence.quote);
+}
+
+// Pure predicate. Returns "resolve" or the reason the thread stays open.
+function shouldResolveVerified(
+  thread,
+  verdict,
+  { botLogin, currentSpans = [], unlocatablePaths = new Set(), readHeadFile } = {}
+) {
+  const gate = verifiableThreadReason(thread, botLogin);
+  if (gate !== "verifiable") return gate;
+  if (!verdict || typeof verdict.decision !== "string") return "no_verdict";
+  if (verdict.decision !== "fixed") return verdict.decision;
+  if (verdict.digest !== threadDigest(thread)) return "thread_changed";
+  if (unlocatablePaths.has(normalizeComparePath(thread.path))) return "unlocatable_path";
+  const spans = [
+    { path: thread.path, start_line: thread.originalStartLine, line: thread.originalLine },
+    { path: thread.path, start_line: thread.startLine, line: thread.line },
+  ];
+  if (spans.some((span) => spansIntersect(span, currentSpans))) return "overlap";
+  if (!evidenceMatchesHead(verdict.evidence, readHeadFile)) return "unproven";
+  return "resolve";
+}
+
+async function resolveVerifiedThreads({
+  github,
+  owner,
+  repo,
+  prNumber,
+  core,
+  log,
+  botLogin,
+  currentSpans = [],
+  verdicts,
+  headSha,
+  readHeadFile,
+  budget = MAX_RESOLVE_PER_RUN,
+  dryRun = false,
+}) {
+  const warn = (msg) => {
+    if (core && typeof core.warning === "function") core.warning(msg);
+    else log(msg);
+  };
+  const empty = { candidates: 0, attempted: 0, resolved: 0, failed: 0, reasons: {} };
+  if (!/^[0-9a-f]{40}$/.test(headSha || "") || verdicts.head_sha !== headSha) {
+    log(`[resolve-verified] verdicts were judged against ${verdicts.head_sha}, not run head ${headSha}; resolving nothing.`);
+    return empty;
+  }
+  if (currentSpans.some((s) => !s || !s.path)) {
+    log("[resolve-verified] this run produced a path-less finding; resolving nothing.");
+    return empty;
+  }
+  const unlocatablePaths = new Set(
+    currentSpans.filter((s) => !lineSpan(s)).map((s) => normalizeComparePath(s.path))
+  );
+  const meta = {};
+  const threads = await listBotReviewThreads({ github, owner, repo, prNumber, log, warn, withBodies: true, meta });
+  if (meta.headRefOid !== headSha) {
+    log(`[resolve-verified] PR head is ${meta.headRefOid || "unknown"}, not verified head ${headSha}; resolving nothing.`);
+    return empty;
+  }
+  const byId = new Map(threads.map((t) => [t.id, t]));
+  const guard = { botLogin, currentSpans, unlocatablePaths, readHeadFile };
+  const reasons = {};
+  const candidates = [];
+  const verdictById = new Map();
+  for (const verdict of verdicts.verdicts) {
+    const id = verdict && verdict.thread_id;
+    if (typeof id !== "string" || verdictById.has(id)) continue;
+    verdictById.set(id, verdict);
+    const reason = shouldResolveVerified(byId.get(id), verdict, guard);
+    reasons[reason] = (reasons[reason] || 0) + 1;
+    if (reason === "resolve") candidates.push(id);
+    log(`[resolve-verified] ${id} -> ${reason}`);
+  }
+  const attempted = candidates.slice(0, Math.max(0, budget));
+  let resolved = 0;
+  let failed = 0;
+  if (!dryRun) {
+    const delay = parseNonNegInt(process.env.OCR_SUCCESS_DELAY, 2000);
+    for (let i = 0; i < attempted.length; i++) {
+      // The batch is paced, so a push can land between two mutations; every
+      // verdict is about the verified head only.
+      let liveHead;
+      try {
+        liveHead = await fetchPrHead(github, owner, repo, prNumber);
+      } catch (e) {
+        warn(`[resolve-verified] cannot re-read the PR head (${e.message}); stopping.`);
+        break;
+      }
+      if (liveHead !== headSha) {
+        log(`[resolve-verified] PR head moved to ${liveHead || "unknown"}; stopping after ${resolved} resolution(s).`);
+        break;
+      }
+      // The listing above can be seconds old by now; a reply posted since then
+      // must still keep this thread open.
+      let live;
+      try {
+        const res = await github.graphql(THREAD_NODE_QUERY, { id: attempted[i] });
+        live = res && res.node;
+      } catch (e) {
+        warn(`[resolve-verified] cannot re-read thread ${attempted[i]} (${e.message}); leaving it open.`);
+        continue;
+      }
+      const recheck = shouldResolveVerified(live, verdictById.get(attempted[i]), guard);
+      if (recheck !== "resolve") {
+        log(`[resolve-verified] ${attempted[i]} -> ${recheck} on re-read; leaving it open.`);
+        continue;
+      }
+      try {
+        await github.graphql(RESOLVE_THREAD_MUTATION, { threadId: attempted[i] });
+        resolved++;
+      } catch (e) {
+        const kind = classifyResolveError(e);
+        if (kind !== "other") {
+          warn(`[resolve-verified] ${kind} while resolving threads (${e.message}); resolved ${resolved} of ${attempted.length}.`);
+          break;
+        }
+        failed++;
+        warn(`[resolve-verified] failed to resolve thread ${attempted[i]}: ${e.message}`);
+      }
+      if (delay > 0 && i < attempted.length - 1) await sleep(delay);
+    }
+  }
+  log(
+    `[resolve-verified] mode=${dryRun ? "report" : "resolve"} verdicts=${verdictById.size} candidates=${candidates.length} ` +
+      `attempted=${attempted.length} resolved=${resolved} failed=${failed}`
+  );
+  return { candidates: candidates.length, attempted: attempted.length, resolved, failed, reasons };
 }
 
 // Resolve-veto overlap: ANY shared line between a thread's original span and a
@@ -2419,7 +2751,7 @@ function formatCommentMarkdown(comment, error) {
 //   skipped — comments suppressed by incremental overlap filtering
 //   failed  — comments that had line info but could not be posted (also
 //             rendered in the body below, each tagged with its failure reason)
-function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed, warnings }) {
+function buildSummaryBody({ total, inline, summary, skipped, routed = 0, excluded = 0, failed, warnings }) {
   let body = `🔍 **OpenCodeReview** found **${total}** issue(s) in this PR.`;
   if (total > 0) {
     body += `\n- ✅ Successfully posted inline: ${inline} comment(s)`;
@@ -2431,6 +2763,9 @@ function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed,
     }
     if (skipped > 0) {
       body += `\n- ⏭️ Skipped (overlap with history): ${skipped} comment(s)`;
+    }
+    if (excluded > 0) {
+      body += `\n- 🚫 Excluded by severity policy: ${excluded} comment(s)`;
     }
     if (failed > 0) {
       body += `\n- ❌ Failed to post inline: ${failed} comment(s)`;
@@ -2450,12 +2785,15 @@ function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed,
 // finalize. Routed findings are known before the review (the policy decision is
 // made in the partition loop) so they are rendered here too, keeping the
 // pre-review anchor accurate.
-function buildPreReviewSummaryBody(totalCount, summaryComments, routedComments, warnings) {
+function buildPreReviewSummaryBody(totalCount, summaryComments, routedComments, warnings, excluded = 0) {
   let body = `🔍 **OpenCodeReview** found **${totalCount}** issue(s) in this PR.`;
   if (totalCount > 0) {
     body += `\n- ⏳ _Posting review comments…_`;
     if (routedComments && routedComments.length > 0) {
       body += `\n- 📋 Routed to summary by policy: ${routedComments.length} comment(s)`;
+    }
+    if (excluded > 0) {
+      body += `\n- 🚫 Excluded by severity policy: ${excluded} comment(s)`;
     }
   }
   if (warnings.length > 0) {
@@ -3432,6 +3770,11 @@ module.exports = {
   listBotReviewThreads,
   shouldResolveThread,
   resolveOutdatedThreads,
+  shouldResolveVerified,
+  resolveVerifiedThreads,
+  evidenceMatchesHead,
+  buildVerificationInput,
+  threadDigest,
   classifyResolveError,
   MAX_RESOLVE_PER_RUN,
 };

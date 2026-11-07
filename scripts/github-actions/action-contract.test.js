@@ -560,7 +560,7 @@ require("fs").appendFileSync(process.env.OCR_GIT_CALLS, JSON.stringify(process.a
 }
 
 function testPrNumberWiredIntoBothGithubScriptSteps() {
-  for (const name of ["Resolve review range", "Post review comments"]) {
+  for (const name of ["Resolve review range", "Collect prior findings", "Post review comments"]) {
     const step = stepNamed(name);
     assert.ok(step, `action.yml must retain the ${name} step`);
     assert.strictEqual(
@@ -576,8 +576,8 @@ function testPrNumberWiredIntoBothGithubScriptSteps() {
   );
   assert.strictEqual(
     (ACTION_TEXT.match(/prNumber: Number\(process\.env\.OCR_PR_NUMBER\)/g) || []).length,
-    2,
-    "both github-script steps must pass the resolved number"
+    3,
+    "every github-script step must pass the resolved number"
   );
 }
 

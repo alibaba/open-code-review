@@ -49,11 +49,12 @@ const context = {
   payload: { pull_request: { head: { sha: DEFAULT_HEAD_SHA } } },
 };
 
-function mockFs(resultText, stderrText) {
+function mockFs(resultText, stderrText, files = {}) {
   return {
     readFileSync(file) {
       if (file === "/tmp/ocr-result.json") return resultText;
       if (file === "/tmp/ocr-stderr.log") return stderrText;
+      if (Object.prototype.hasOwnProperty.call(files, file)) return files[file];
       throw new Error(`unexpected read: ${file}`);
     },
   };
@@ -178,12 +179,18 @@ function makeGithub(opts = {}) {
       return { resolveReviewThread: { thread: { id: vars.threadId, isResolved: true } } };
     }
     if (opts.threadsThrow) throw new Error(opts.threadsError || "graphql unavailable");
+    if (/node\(id:/.test(query)) {
+      if (typeof opts.nodeThread === "function") return { node: opts.nodeThread(vars.id) };
+      const all = (opts.threadPages || [opts.threads || []]).flat();
+      return { node: all.find((t) => t.id === vars.id) || null };
+    }
     const pages = opts.threadPages || [opts.threads || []];
     const pageIdx = vars.cursor ? Number(vars.cursor) : 0;
     const hasNextPage = pageIdx + 1 < pages.length;
     return {
       repository: {
         pullRequest: {
+          headRefOid: typeof opts.headRefOid === "function" ? opts.headRefOid() : opts.headRefOid,
           reviewThreads: {
             pageInfo: { hasNextPage, endCursor: String(pageIdx + 1) },
             nodes: pages[pageIdx] || [],
@@ -416,9 +423,9 @@ function mockCore() {
   };
 }
 
-async function run({ result, stderr = "", opts = {}, githubOpts = {} }) {
+async function run({ result, stderr = "", opts = {}, githubOpts = {}, files = {} }) {
   const resultText = typeof result === "string" ? result : JSON.stringify(result);
-  const fs = mockFs(resultText, stderr);
+  const fs = mockFs(resultText, stderr, files);
   const github = makeGithub(githubOpts);
   const core = mockCore();
   const options = Object.assign({ stickySummary: true, incremental: false }, opts);
@@ -2774,6 +2781,14 @@ async function main() {
   await testResolveCleanupNeverBreaksOutputs();
   await testResolvePacingUsesSuccessDelay();
   testActionYmlDoesNotPromiseTheIoUThresholdToResolveOutdated();
+  await testExcludeSeverityDropsInlineAndSummaryPlacements();
+  testShouldResolveVerifiedTable();
+  await testResolveVerifiedVetoesALineLessFindingOnThePath();
+  await testResolveVerifiedRefusesAChangedHead();
+  await testResolveVerifiedReReadsEachThreadBeforeItsMutation();
+  await testVerifyModeNeverRunsTheOutdatedResolver();
+  await testBuildVerificationInputSendsOnlyVerifiableThreads();
+  await testResolveVerifiedWiredIntoRunsWithAndWithoutFindings();
   await testSummaryAnchorSkipsHumanCommentQuotingTheMarker();
   await testMalformedResultUpdatesExistingSummaryWithStderr();
   await testCustomAppSummaryWhenAuthenticatedUserIsUnavailable();
@@ -5583,7 +5598,7 @@ function testActionEmitsMachineReadableRangeOutputs() {
 function testActionPinsGithubScriptSha() {
   assert.strictEqual(/actions\/github-script@v/.test(ACTION_YML), false, "no floating github-script tag may remain");
   const uses = [...ACTION_YML.matchAll(/uses: actions\/github-script@([0-9a-f]{40})/g)].map((m) => m[1]);
-  assert.strictEqual(uses.length, 2, "both github-script steps are pinned");
+  assert.strictEqual(uses.length, 3, "every github-script step is pinned");
   assert.strictEqual(new Set(uses).size, 1, "…to the same sha");
 }
 
@@ -5961,6 +5976,10 @@ const {
   listBotReviewThreads,
   shouldResolveThread,
   resolveOutdatedThreads,
+  shouldResolveVerified,
+  resolveVerifiedThreads,
+  buildVerificationInput,
+  threadDigest,
   MAX_RESOLVE_PER_RUN,
 } = require(path.join(__dirname, "post-review-comments.js"));
 
@@ -6932,6 +6951,256 @@ function testActionYmlDoesNotPromiseTheIoUThresholdToResolveOutdated() {
   const desc = yml.split("\n  resolve_outdated:\n")[1].split("\n    required:")[0];
   assert.strictEqual(/is decided by incremental_overlap_threshold/.test(desc), false, desc);
   assert.strictEqual(/shares ANY line/.test(desc), true, desc);
+}
+
+// ---- Severity exclusion and verified-fix resolution ----
+
+async function testExcludeSeverityDropsInlineAndSummaryPlacements() {
+  const result = {
+    comments: [
+      { path: "src/crit.js", content: "crit finding", severity: "critical", start_line: 1, end_line: 1 },
+      { path: "src/med.js", content: "medium finding", severity: "medium", start_line: 3, end_line: 3 },
+      { path: "src/low.js", content: "low inline finding", severity: "low", start_line: 2, end_line: 2 },
+      { path: "docs/x.md", content: "low no-line finding", severity: "low", start_line: 0, end_line: 0 },
+      { path: "src/unk.js", content: "unknown severity finding", severity: "", start_line: 4, end_line: 4 },
+    ],
+  };
+  const { github, outputs } = await run({
+    result,
+    opts: { excludeSeverityAtOrBelow: "low", routeSeverityBelow: "medium" },
+  });
+  const sent = github.createReviewCalls.flatMap((c) => c.comments || []).map((c) => c.path).sort();
+  assert.deepStrictEqual(sent, ["src/crit.js", "src/unk.js"], "low is not inline; medium is routed; unknown stays inline");
+  const body = github.updatedComments[0].body;
+  assert.doesNotMatch(body, /low inline finding|low no-line finding/, "excluded findings never reach the summary");
+  assert.match(body, /medium finding/, "a routed finding above the exclusion still reaches the summary");
+  assert.match(body, /Excluded by severity policy: 2 comment\(s\)/);
+  assert.strictEqual(outputs.comments_excluded, "2");
+  assert.strictEqual(outputs.comments_routed, "1");
+  assert.strictEqual(outputs.comments_total, "5");
+
+  const off = await run({ result, opts: { excludeSeverityAtOrBelow: "bogus" } });
+  assert.strictEqual(off.outputs.comments_excluded, "0", "an unknown threshold excludes nothing");
+}
+
+const HEAD = "a".repeat(40);
+const HEAD_FILE = "line1\nif (n > MAX) throw new Error('cap');\nline3\n";
+const readHead = (file) => (file === "src/a.js" ? HEAD_FILE : null);
+
+// A current (not outdated) OCR thread on src/a.js:2, the unchanged-line case,
+// with every comment body visible as the verifier listing fetches them.
+function liveThread(over = {}) {
+  return botThread(
+    Object.assign(
+      {
+        isOutdated: false,
+        line: 2,
+        startLine: null,
+        originalLine: 2,
+        comments: { totalCount: 1, nodes: [{ body: OURS, author: { login: BOT } }] },
+      },
+      over
+    )
+  );
+}
+
+function withReply(body) {
+  return liveThread({
+    comments: {
+      totalCount: 2,
+      nodes: [
+        { body: OURS, author: { login: BOT } },
+        { body, author: { login: "dev", __typename: "User" } },
+      ],
+    },
+  });
+}
+
+// A verdict as `ocr verify-threads` writes it for `thread`: the digest is the
+// one the publisher computed when it handed the thread over.
+function fixedVerdict(thread = liveThread(), over = {}) {
+  return Object.assign(
+    {
+      thread_id: thread.id,
+      decision: "fixed",
+      digest: threadDigest(thread),
+      evidence: { path: "src/a.js", start_line: 2, end_line: 2, quote: "if (n > MAX) throw new Error('cap');" },
+    },
+    over
+  );
+}
+
+function testShouldResolveVerifiedTable() {
+  const opts = { botLogin: null, currentSpans: [], readHeadFile: readHead };
+  const claimed = withReply("Fixed in the latest push.");
+  const disputed = withReply("This still fails for negative inputs. Please do not close this.");
+  const cases = [
+    { name: "fixed on an unchanged, non-outdated line with matching evidence", thread: liveThread(), verdict: fixedVerdict(), want: "resolve" },
+    { name: "unfixed", thread: liveThread(), verdict: fixedVerdict(liveThread(), { decision: "unfixed" }), want: "unfixed" },
+    { name: "uncertain", thread: liveThread(), verdict: fixedVerdict(liveThread(), { decision: "uncertain" }), want: "uncertain" },
+    { name: "verifier read the human dispute", thread: disputed, verdict: fixedVerdict(disputed, { decision: "disputed" }), want: "disputed" },
+    { name: "no verdict for the thread", thread: liveThread(), verdict: undefined, want: "no_verdict" },
+    { name: "human says fixed: the verifier's fixed verdict decides", thread: claimed, verdict: fixedVerdict(claimed), want: "resolve" },
+    { name: "human claims fixed but the verifier says unfixed", thread: claimed, verdict: fixedVerdict(claimed, { decision: "unfixed" }), want: "unfixed" },
+    { name: "a reply added after verification", thread: disputed, verdict: fixedVerdict(liveThread()), want: "thread_changed" },
+    { name: "a reply edited after verification", thread: withReply("Won’t fix."), verdict: fixedVerdict(claimed), want: "thread_changed" },
+    { name: "reply body not fetched", thread: liveThread({ comments: { totalCount: 2, nodes: [{ body: OURS, author: { login: BOT } }, { author: { login: "dev" } }] } }), verdict: fixedVerdict(), want: "unverified_partial_view" },
+    { name: "foreign thread under the same bot identity", thread: liveThread({ root: { nodes: [{ body: "Dependency update available." }] } }), verdict: fixedVerdict(), want: "not_ours" },
+    { name: "partial comment view", thread: liveThread({ comments: { totalCount: 101, nodes: [{ body: OURS, author: { login: BOT } }] } }), verdict: fixedVerdict(), want: "unverified_partial_view" },
+    { name: "quote does not match the head blob", thread: liveThread(), verdict: fixedVerdict(liveThread(), { evidence: { path: "src/a.js", start_line: 2, end_line: 2, quote: "if (n > LIMIT) throw" } }), want: "unproven" },
+    { name: "evidence without a quote", thread: liveThread(), verdict: fixedVerdict(liveThread(), { evidence: { path: "src/a.js", start_line: 2, end_line: 2 } }), want: "unproven" },
+    { name: "evidence path escapes the repository", thread: liveThread(), verdict: fixedVerdict(liveThread(), { evidence: { path: "../a.js", start_line: 2, end_line: 2, quote: "x" } }), want: "unproven" },
+    { name: "already resolved", thread: liveThread({ isResolved: true }), verdict: fixedVerdict(), want: "already_resolved" },
+    { name: "thread not on the PR", thread: undefined, verdict: fixedVerdict(), want: "missing_thread" },
+  ];
+  for (const c of cases) {
+    assert.strictEqual(shouldResolveVerified(c.thread, c.verdict, opts), c.want, c.name);
+  }
+  const overlap = { ...opts, currentSpans: [{ path: "src/a.js", start_line: 2, line: 2 }] };
+  assert.strictEqual(shouldResolveVerified(liveThread(), fixedVerdict(), overlap), "overlap", "a live finding on the thread's lines vetoes");
+  const unlocatable = { ...opts, unlocatablePaths: new Set(["src/a.js"]) };
+  assert.strictEqual(shouldResolveVerified(liveThread(), fixedVerdict(), unlocatable), "unlocatable_path");
+}
+
+async function testResolveVerifiedVetoesALineLessFindingOnThePath() {
+  const gh = makeGithub({ threads: [liveThread()], headRefOid: HEAD });
+  const r = await resolveVerifiedThreads(
+    resolveArgs(gh, mockCore(), {
+      verdicts: { head_sha: HEAD, verdicts: [fixedVerdict()] },
+      headSha: HEAD,
+      readHeadFile: readHead,
+      currentSpans: [{ path: "src/a.js", start_line: 0, line: 0 }],
+    })
+  );
+  assert.deepStrictEqual(r.reasons, { unlocatable_path: 1 });
+  assert.strictEqual(gh.resolveMutationCalls().length, 0);
+}
+
+async function testResolveVerifiedRefusesAChangedHead() {
+  const verdicts = { head_sha: HEAD, verdicts: [fixedVerdict()] };
+  const moved = makeGithub({ threads: [liveThread()], headRefOid: "b".repeat(40) });
+  const r1 = await resolveVerifiedThreads(resolveArgs(moved, mockCore(), { verdicts, headSha: HEAD, readHeadFile: readHead }));
+  assert.strictEqual(r1.resolved, 0);
+  assert.strictEqual(moved.resolveMutationCalls().length, 0, "PR head moved after verification: no mutation");
+
+  const stale = makeGithub({ threads: [liveThread()], headRefOid: HEAD });
+  const r2 = await resolveVerifiedThreads(
+    resolveArgs(stale, mockCore(), { verdicts: { ...verdicts, head_sha: "c".repeat(40) }, headSha: HEAD, readHeadFile: readHead })
+  );
+  assert.strictEqual(r2.resolved, 0);
+  assert.strictEqual(stale.graphqlCalls.length, 0, "verdicts for another head: no API call at all");
+
+  // A push lands while the paced batch runs: the head is re-read before every
+  // mutation and the batch stops at the first mismatch.
+  const second = liveThread({ id: "T2" });
+  let reads = 0;
+  const pushed = makeGithub({
+    threads: [liveThread(), second],
+    headRefOid: () => (reads++ < 2 ? HEAD : "d".repeat(40)),
+  });
+  const r3 = await resolveVerifiedThreads(
+    resolveArgs(pushed, mockCore(), {
+      verdicts: { head_sha: HEAD, verdicts: [fixedVerdict(), fixedVerdict(second)] },
+      headSha: HEAD,
+      readHeadFile: readHead,
+    })
+  );
+  assert.strictEqual(r3.candidates, 2);
+  assert.strictEqual(pushed.resolveMutationCalls().length, 1, "no mutation after the head moved");
+
+  const ok = makeGithub({ threads: [liveThread(), second], headRefOid: HEAD });
+  await resolveVerifiedThreads(
+    resolveArgs(ok, mockCore(), {
+      verdicts: { head_sha: HEAD, verdicts: [fixedVerdict(), fixedVerdict(second)] },
+      headSha: HEAD,
+      readHeadFile: readHead,
+      budget: 1,
+    })
+  );
+  assert.strictEqual(ok.resolveMutationCalls().length, 1, "the shared per-run cap bounds verified resolution");
+}
+
+async function testResolveVerifiedReReadsEachThreadBeforeItsMutation() {
+  const objection = withReply("This still fails for negative inputs. Please do not close this.");
+  const gh = makeGithub({
+    threads: [liveThread()],
+    headRefOid: HEAD,
+    nodeThread: (id) => (id === "T1" ? objection : null),
+  });
+  const r = await resolveVerifiedThreads(
+    resolveArgs(gh, mockCore(), { verdicts: { head_sha: HEAD, verdicts: [fixedVerdict()] }, headSha: HEAD, readHeadFile: readHead })
+  );
+  assert.strictEqual(r.candidates, 1, "the batch listing saw no objection");
+  assert.strictEqual(gh.resolveMutationCalls().length, 0, "a reply posted after the listing vetoes the mutation");
+}
+
+async function testVerifyModeNeverRunsTheOutdatedResolver() {
+  const stale = botThread({ id: "STALE", originalLine: 99, comments: { totalCount: 1, nodes: [{ body: OURS, author: { login: BOT } }] } });
+  const githubOpts = { threads: [stale], headRefOid: HEAD };
+  const base = { resolveOutdated: "true", headSha: HEAD, readHeadFile: readHead, verifiedFixesPath: "/tmp/verdicts.json" };
+  for (const decision of ["unfixed", "uncertain", "disputed"]) {
+    const files = { "/tmp/verdicts.json": JSON.stringify({ head_sha: HEAD, verdicts: [fixedVerdict(stale, { decision })] }) };
+    for (const result of [TWO_FINDINGS, { comments: [] }]) {
+      const r = await run({ result, opts: base, githubOpts, files });
+      assert.strictEqual(r.github.resolveMutationCalls().length, 0, `outdated + ${decision} stays open`);
+    }
+  }
+  for (const result of [TWO_FINDINGS, { comments: [] }]) {
+    const missing = await run({ result, opts: { ...base, verifiedFixesPath: "/tmp/absent.json" }, githubOpts });
+    assert.strictEqual(missing.github.resolveMutationCalls().length, 0, "a missing verdict file resolves nothing");
+  }
+  const without = await run({ result: TWO_FINDINGS, opts: { resolveOutdated: "true" }, githubOpts });
+  assert.strictEqual(without.github.resolveMutationCalls().length, 1, "without verify mode the outdated resolver still runs");
+}
+
+async function testBuildVerificationInputSendsOnlyVerifiableThreads() {
+  const written = {};
+  const fsMock = { writeFileSync: (file, text) => { written[file] = JSON.parse(text); } };
+  const claimed = withReply("Fixed in the latest push.");
+  const gh = makeGithub({
+    headRefOid: HEAD,
+    threads: [
+      claimed,
+      liveThread({ id: "FOREIGN", root: { nodes: [{ body: "Dependency update available." }] } }),
+      liveThread({ id: "DONE", isResolved: true }),
+      liveThread({ id: "PARTIAL", comments: { totalCount: 101, nodes: [{ body: OURS, author: { login: BOT } }] } }),
+    ],
+  });
+  const core = mockCore();
+  const args = { github: gh, owner: "owner", repo: "repo", prNumber: 123, botLogin: null, headSha: HEAD, log: (m) => core.info(m), warn: (m) => core.warning(m), fs: fsMock, outPath: "/tmp/in.json" };
+  assert.strictEqual(await buildVerificationInput(args), 1);
+  const input = written["/tmp/in.json"];
+  assert.strictEqual(input.head_sha, HEAD);
+  assert.deepStrictEqual(input.threads.map((t) => t.id), ["T1"]);
+  assert.deepStrictEqual(input.threads[0].replies, [{ author: "dev", body: "Fixed in the latest push." }]);
+  assert.strictEqual(input.threads[0].digest, threadDigest(claimed));
+  assert.strictEqual(input.threads[0].line, 2);
+  assert.strictEqual(input.threads[0].outdated, false);
+
+  const old = liveThread({ id: "OLD", isOutdated: true, line: null, originalLine: 7 });
+  const outdatedGh = makeGithub({ headRefOid: HEAD, threads: [old] });
+  await buildVerificationInput({ ...args, github: outdatedGh, outPath: "/tmp/old.json" });
+  const sent = written["/tmp/old.json"].threads[0];
+  assert.deepStrictEqual([sent.outdated, sent.line, sent.original_line], [true, undefined, 7], "outdated coordinates are labelled as original");
+
+  const moved = makeGithub({ headRefOid: "b".repeat(40), threads: [liveThread()] });
+  assert.strictEqual(await buildVerificationInput({ ...args, github: moved, outPath: "/tmp/moved.json" }), 0);
+  assert.strictEqual(written["/tmp/moved.json"], undefined, "a head other than the reviewed one sends nothing");
+}
+
+async function testResolveVerifiedWiredIntoRunsWithAndWithoutFindings() {
+  const files = { "/tmp/verdicts.json": JSON.stringify({ head_sha: HEAD, verdicts: [fixedVerdict()] }) };
+  const opts = { resolveOutdated: "true", verifiedFixesPath: "/tmp/verdicts.json", headSha: HEAD, readHeadFile: readHead };
+  const githubOpts = { threads: [liveThread()], headRefOid: HEAD };
+  const withFindings = await run({ result: TWO_FINDINGS, opts, githubOpts, files });
+  assert.strictEqual(withFindings.outputs.comments_resolved, "1");
+  const clean = await run({ result: { comments: [] }, opts, githubOpts, files });
+  assert.strictEqual(clean.outputs.comments_resolved, "1", "a verified fix needs no finding from this run");
+  const report = await run({ result: TWO_FINDINGS, opts: { ...opts, resolveOutdated: "report" }, githubOpts, files });
+  assert.strictEqual(report.github.resolveMutationCalls().length, 0);
+  assert.strictEqual(report.outputs.comments_resolved_preview, "1");
+  const off = await run({ result: TWO_FINDINGS, opts: { ...opts, resolveOutdated: "false" }, githubOpts, files });
+  assert.strictEqual(off.github.graphqlCalls.length, 0, "resolve_outdated false keeps verified resolution off");
 }
 
 main().catch((err) => {

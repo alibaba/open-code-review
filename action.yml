@@ -188,6 +188,39 @@ inputs:
       keep their normal placement.
     required: false
     default: ''
+  exclude_severity_at_or_below:
+    description: >-
+      Optional severity threshold. Findings at-or-below it are not published
+      at all, neither inline nor in the summary. One of: critical, high,
+      medium, low. For example, 'low' drops low-severity findings, while
+      'medium' drops medium AND low. An empty or unknown value excludes
+      nothing. Findings with an empty or unknown severity are never excluded.
+      An excluded finding still keeps resolve_outdated from resolving a thread
+      on its lines. The count is the comments_excluded output.
+    required: false
+    default: ''
+  verify_fixes:
+    description: >-
+      true = after the review, check each of this action's earlier unresolved
+      inline threads against the reviewed head with `ocr verify-threads` (the
+      same model, provider settings and review_task_timeout as the review), and
+      resolve the ones it proves fixed. Read only when resolve_outdated is
+      'report' (log the verdicts, change nothing) or 'true' (resolve). A thread
+      is resolved only when the verifier decided 'fixed' and cited head-commit
+      lines that match the head verbatim, the PR head is still the reviewed
+      head when each thread is resolved, no comment in the thread was added or
+      edited after verification, no person disputed or deferred the finding,
+      and no finding from this run covers the thread's lines. Unfixed,
+      disputed and uncertain threads stay open. Outdated state and missing
+      findings are never used as proof. With verify_fixes on, the
+      outdated-only cleanup of resolve_outdated does not run, so an outdated
+      thread closes only on a 'fixed' verdict. At most 50 threads are verified
+      per run, and the 50-thread resolve cap includes these threads. Costs one
+      model conversation per verified thread, bounded by review_task_timeout
+      and by what the review left of max_tokens_budget; verification is
+      skipped when nothing is left.
+    required: false
+    default: 'false'
   route_categories:
     description: >-
       Optional comma-separated list of categories routed from inline comments
@@ -258,6 +291,11 @@ outputs:
       route_severity_below / route_categories policy. Mutually exclusive with
       comments_inline, comments_skipped, and comments_failed.
     value: ${{ steps.post.outputs.comments_routed }}
+  comments_excluded:
+    description: >-
+      Number of findings exclude_severity_at_or_below kept off the PR. They
+      are not included in any other comments_* count except comments_total.
+    value: ${{ steps.post.outputs.comments_excluded }}
   comments_failed:
     description: Number of inline comments that failed to post.
     value: ${{ steps.post.outputs.comments_failed }}
@@ -765,6 +803,7 @@ runs:
         OCR_FP_RULE: ${{ inputs.rule }}
         OCR_FP_ROUTE_SEVERITY_BELOW: ${{ inputs.route_severity_below }}
         OCR_FP_ROUTE_CATEGORIES: ${{ inputs.route_categories }}
+        OCR_FP_EXCLUDE_SEVERITY: ${{ inputs.exclude_severity_at_or_below }}
         OCR_FP_BACKGROUND: ${{ inputs.background }}
         OCR_RULE_PATH: ${{ inputs.rule }}
         # `github.token` is always the "github-actions" app, so when the caller
@@ -901,6 +940,9 @@ runs:
                 versionActual,
                 ruleDigest,
                 localRuleDigest,
+                // Appended only when set, so checkpoints taken before the
+                // input existed stay valid.
+                ...(process.env.OCR_FP_EXCLUDE_SEVERITY ? [process.env.OCR_FP_EXCLUDE_SEVERITY] : []),
               ].map((v) => v || '')))
               .digest('hex')
               .slice(0, 16);
@@ -1019,6 +1061,83 @@ runs:
         echo "=== OCR stderr ==="
         cat /tmp/ocr-stderr.log
 
+    - name: Collect prior findings
+      if: ${{ env.OCR_EXIT_CODE == '0' && inputs.verify_fixes == 'true' && env.RESOLVE_OUTDATED != 'false' }}
+      id: collect
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        OCR_PR_NUMBER: ${{ env.PR_NUMBER }}
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          const REL = 'scripts/github-actions/post-review-comments.js';
+          const roots = [process.env.GITHUB_ACTION_PATH, process.env.GITHUB_WORKSPACE].filter(Boolean);
+          const helper = roots.map(r => path.resolve(r, REL)).find(p => fs.existsSync(p));
+          if (!helper) throw new Error(`Could not locate ${REL}; searched roots: ${roots.join(', ')}`);
+          const { buildVerificationInput, makeSelfLoginResolver } = require(helper);
+          const log = (m) => core.info(m);
+          // A result left by an earlier use of this action in the same job is
+          // about other threads or another head.
+          fs.rmSync('/tmp/ocr-verify-result.json', { force: true });
+          try {
+            const count = await buildVerificationInput({
+              github,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              prNumber: Number(process.env.OCR_PR_NUMBER),
+              botLogin: await makeSelfLoginResolver(github, log)(),
+              headSha: process.env.HEAD_SHA || '',
+              log,
+              warn: (m) => core.warning(m),
+              fs,
+              outPath: '/tmp/ocr-verify-input.json',
+            });
+            core.setOutput('count', String(count));
+          } catch (e) {
+            core.warning(`verify_fixes: could not collect prior findings (${e.message}); verifying nothing.`);
+            core.setOutput('count', '0');
+          }
+
+    - name: Verify prior findings
+      if: ${{ steps.collect.outputs.count != '' && steps.collect.outputs.count != '0' }}
+      env:
+        OCR_NO_UPDATE: "1"
+        OCR_LLM_URL: ${{ inputs.llm_url }}
+        OCR_LLM_TOKEN: ${{ inputs.llm_auth_token }}
+        OCR_LLM_MODEL: ${{ inputs.llm_model }}
+        OCR_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
+        OCR_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
+        OCR_LLM_EXTRA_HEADERS: ${{ inputs.llm_extra_headers }}
+        OCR_LLM_TIMEOUT: ${{ inputs.llm_timeout }}
+      shell: bash
+      run: |
+        export OCR_LLM_TIMEOUT="${OCR_LLM_TIMEOUT:-300}"
+        # review_task_timeout bounds one task, and verification runs as one.
+        ARGS=(verify-threads --input /tmp/ocr-verify-input.json --output /tmp/ocr-verify-result.json --timeout "$REVIEW_TASK_TIMEOUT")
+        # max_tokens_budget is one total for the job: verification gets only
+        # what the review left of it.
+        if [ -n "${MAX_TOKENS_BUDGET:-}" ]; then
+          USED="$(node -e 'try { const r = JSON.parse(require("fs").readFileSync("/tmp/ocr-result.json", "utf8")); const n = Number(r.summary && r.summary.total_tokens); if (Number.isInteger(n) && n >= 0) process.stdout.write(String(n)); } catch (_) {}')"
+          if [ -z "$USED" ]; then
+            echo "::warning::verify_fixes: the review result reports no token usage; skipping verification to stay within max_tokens_budget."
+            exit 0
+          fi
+          REMAINING=$((MAX_TOKENS_BUDGET - USED))
+          if (( REMAINING <= 0 )); then
+            echo "verify_fixes: the review used the whole max_tokens_budget; skipping verification."
+            exit 0
+          fi
+          ARGS+=(--max-tokens-budget "$REMAINING")
+        fi
+        # A failed verification resolves nothing; it must not fail the review.
+        if ! ocr "${ARGS[@]}" 2>/tmp/ocr-verify-stderr.log; then
+          rm -f /tmp/ocr-verify-result.json
+          echo "::warning::ocr verify-threads failed; no thread is resolved as fixed this run. See /tmp/ocr-verify-stderr.log."
+        fi
+        cat /tmp/ocr-verify-stderr.log >&2 || true
+
     - name: Upload review artifacts
       if: ${{ always() && inputs.upload_artifacts == 'true' }}
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -1045,6 +1164,7 @@ runs:
         OCR_REVIEW_COMMENT_BATCH_SIZE: ${{ inputs.review_comment_batch_size }}
         OCR_ROUTE_SEVERITY_BELOW: ${{ inputs.route_severity_below }}
         OCR_ROUTE_CATEGORIES: ${{ inputs.route_categories }}
+        OCR_EXCLUDE_SEVERITY_AT_OR_BELOW: ${{ inputs.exclude_severity_at_or_below }}
         # Outputs of the Resolve review range step; all empty when that step was
         # skipped (checkpointing off), which is what turns the checkpoint write
         # path back into today's behavior.
@@ -1109,6 +1229,19 @@ runs:
             rangeFrom: process.env.OCR_RANGE_FROM || '',
             rangeTo: process.env.OCR_RANGE_TO || '',
             resolveOutdated: process.env.OCR_RESOLVE_OUTDATED,
+            excludeSeverityAtOrBelow: process.env.OCR_EXCLUDE_SEVERITY_AT_OR_BELOW,
+            verifiedFixesPath: ${{ inputs.verify_fixes == 'true' }} ? '/tmp/ocr-verify-result.json' : '',
+            headSha: process.env.HEAD_SHA || '',
+            // Reads the reviewed head's blob from git objects, never the base
+            // working tree this job has checked out.
+            readHeadFile: (file) => {
+              const r = require('child_process').spawnSync('git', ['show', `${process.env.HEAD_SHA}:${file}`], {
+                cwd: process.env.GITHUB_WORKSPACE,
+                encoding: 'utf8',
+                maxBuffer: 64 * 1024 * 1024,
+              });
+              return r.status === 0 ? r.stdout : null;
+            },
             // Pins the summary anchor's author check to the app that owns the
             // OCR summary (see OCR_CHECKPOINT_APP_SLUG above).
             appSlug: process.env.OCR_CHECKPOINT_APP_SLUG || '',
