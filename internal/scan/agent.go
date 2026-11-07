@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
 	"github.com/alibaba/open-code-review/internal/config/rules"
@@ -972,7 +973,13 @@ func buildSummaryCommentsList(comments []model.LlmComment) string {
 		sb.WriteString("`: ")
 		oneLine := strings.ReplaceAll(c.Content, "\n", " ")
 		if len(oneLine) > maxLine {
-			oneLine = oneLine[:maxLine] + "..."
+			// Back up to a rune start so a multi-byte character (CJK review
+			// comments are common) is not split into invalid UTF-8.
+			cut := maxLine
+			for cut > 0 && !utf8.RuneStart(oneLine[cut]) {
+				cut--
+			}
+			oneLine = oneLine[:cut] + "..."
 		}
 		sb.WriteString(oneLine)
 		sb.WriteString("\n")
