@@ -24,6 +24,20 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     ]
   },
   {
+    "name": "anthropic-oauth",
+    "displayName": "Anthropic Claude (Subscription OAuth)",
+    "protocol": "anthropic-oauth",
+    "baseUrl": "",
+    "envVar": "",
+    "ambientAuth": true,
+    "models": [
+      "sonnet",
+      "opus",
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ]
+  },
+  {
     "name": "baidu-qianfan",
     "displayName": "Baidu Qianfan API",
     "protocol": "openai",

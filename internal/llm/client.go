@@ -503,6 +503,8 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		AWSRegion:             ep.AWSRegion,
 	}
 	switch ep.Protocol {
+	case ProtocolAnthropicOAuth:
+		return NewClaudeOAuthClient(cfg)
 	case ProtocolAnthropic:
 		return NewAnthropicClient(cfg)
 	case ProtocolAnthropicBedrock:
