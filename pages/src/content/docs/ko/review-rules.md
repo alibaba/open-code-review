@@ -295,6 +295,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md` — FreeMarker 템플릿(SSTI / XSS / null 처리).                     |
 | `**/*.{hbs,mustache}`                           | `handlebars_mustache.md` — Handlebars 및 Mustache 템플릿.                        |
 | `**/*.{jinja2,j2}`                              | `jinja.md` — Jinja 템플릿.                                                       |
+| `**/*.pug`                                      | `pug.md` — Pug 템플릿(이스케이프 및 출력 컨텍스트).                                             |
 | `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md` — EJS, Liquid, Nunjucks 템플릿(SSTI / XSS / 이스케이프). |
 | `**/*.{haml,slim}`                              | `haml_slim.md` — HAML 및 Slim 템플릿(SSTI / XSS / 이스케이프 / 들여쓰기 의미론). |
 | `**/*.erb`                                      | `erb.md` — ERB 템플릿(SSTI / XSS / 이스케이프 / 공백 및 출력 구조). |
@@ -306,7 +307,6 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# 구현, 시그니처, 스크립트 파일.                                  |
 | `**/*.cs`                                       | `csharp.md` — C# 소스 파일. |
 | `**/*.rs`                                       | `rust.md`                                                                        |
-| `**/*.R`                                        | `r.md`                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                         |
 | `**/*.c`                                        | `c.md`                                                                           |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — Python 소스.                                                       |
@@ -317,15 +317,23 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{graphql,gql}`                            | `graphql.md` — GraphQL 스키마와 오퍼레이션.                                      |
 | `**/*.prisma`                                   | `prisma.md` — Prisma 스키마.                                                     |
 | `**/*.jl`                                       | `julia.md` — Julia 소스.                                                         |
+| `**/*.R`                                        | `r.md`                                                                           |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                |
 | `**/*.bicep`                                    | `bicep.md` — Bicep(Azure) 템플릿.                                                |
+| `**/*.nix`                                      | `nix.md` — Nix 표현식 및 derivation.                                                 |
+| `**/*.{hs,lhs}`                                 | `haskell.md` — Haskell 소스 및 literate Haskell.                                    |
+| `**/*.{nim,nims,nimble}`                        | `nim.md` — Nim 소스, 스크립트, 패키지 파일.                                                 |
+| `**/*.swift`                                    | `swift.md` — Swift 소스 파일.                                                        |
 | `**/*.nu`                                       | `nushell.md` — Nushell 스크립트.                                                 |
 | `**/*.elm`                                      | `elm.md` — Elm 소스.                                                             |
 | `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리.                                 |
+| `**/*.zig`                                      | `zig.md` — Zig 소스 파일.                                                            |
 | `**/*.thrift`                                   | `thrift.md` — Apache Thrift IDL 통신 호환성.                                     |
-| `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md` — Starlark 및 Bazel 빌드, 매크로, 규칙 설계.                       |
+| `**/*.{bzl,bazel,star}`                         | `starlark.md` — Starlark 및 Bazel 빌드, 매크로, 규칙 설계.                                 |
+| `**/{BUILD,WORKSPACE}`                          | `starlark.md` — Starlark 및 Bazel 빌드, 매크로, 규칙 설계.                                 |
 | `**/*.capnp`                                    | `capnp.md` — Cap'n Proto 스키마 통신 호환성.                                     |
-| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL 및 Metal 셰이더.                                  |
+| `**/*.{ml,mli}`                                 | `ocaml.md` — OCaml 구현 및 시그니처 파일.                                                 |
+| `**/*.{re,rei}`                                 | `ocaml.md` — ReasonML, OCaml과 동일한 규칙.                                            |
 | `**/*.{v,sv,vh}`                                | `verilog.md` — Verilog 및 SystemVerilog RTL.                                     |
 | `**/*.{vhd,vhdl}`                               | `vhdl.md` — VHDL RTL.                                                            |
 | `**/*.m`                                        | `matlab.md`(또는 [내용 탐지](#content-sniffing-for-m-files)로 `objc.md`)         |
@@ -333,6 +341,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.sol`                                      | `solidity.md` — Solidity 스마트 컨트랙트.                                        |
 | `**/*.vy`                                       | `vyper.md` — Vyper 스마트 컨트랙트.                                              |
 | `**/*.rego`                                     | `rego.md` — Rego 정책 (OPA).                                                     |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL 및 Metal 셰이더.                                  |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell 스크립트, 모듈 및 데이터/매니페스트 파일.           |
 | _(대체값)_                                      | `default.md`                                                                     |
 

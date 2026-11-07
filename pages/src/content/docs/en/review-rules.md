@@ -314,6 +314,7 @@ matching order:
 | `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling).                                  |
 | `**/*.{hbs,mustache}`                           | `handlebars_mustache.md` — Handlebars and Mustache templates.                                         |
 | `**/*.{jinja2,j2}`                              | `jinja.md` — Jinja templates                                                                          |
+| `**/*.pug`                                      | `pug.md` — Pug templates (escaping and output contexts).                                              |
 | `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md` — EJS, Liquid and Nunjucks templates (SSTI / XSS / escaping). |
 | `**/*.{haml,slim}`                              | `haml_slim.md` — HAML and Slim templates (SSTI / XSS / escaping / indentation semantics). |
 | `**/*.erb`                                      | `erb.md` — ERB templates (SSTI / XSS / escaping / whitespace and output structure). |
@@ -325,7 +326,6 @@ matching order:
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# implementation, signature, and script files.                                         |
 | `**/*.cs`                                       | `csharp.md` — C# source files. |
 | `**/*.rs`                                       | `rust.md`                                                                                             |
-| `**/*.R`                                        | `r.md`                                                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                              |
 | `**/*.c`                                        | `c.md`                                                                                                |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — Python source.                                                                          |
@@ -336,15 +336,23 @@ matching order:
 | `**/*.{graphql,gql}`                            | `graphql.md` — GraphQL schema and operations.                                                         |
 | `**/*.prisma`                                   | `prisma.md` — Prisma schema.                                                                          |
 | `**/*.jl`                                       | `julia.md` — Julia source.                                                                            |
+| `**/*.R`                                        | `r.md`                                                                                                |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                     |
 | `**/*.bicep`                                    | `bicep.md` — Bicep (Azure) templates.                                                                 |
+| `**/*.nix`                                      | `nix.md` — Nix expressions and derivations.                                                           |
+| `**/*.{hs,lhs}`                                 | `haskell.md` — Haskell source and literate Haskell.                                                   |
+| `**/*.{nim,nims,nimble}`                        | `nim.md` — Nim source, scripts, and package files.                                                    |
+| `**/*.swift`                                    | `swift.md` — Swift source.                                                                            |
 | `**/*.nu`                                       | `nushell.md` — Nushell scripts.                                                                       |
 | `**/*.elm`                                      | `elm.md` - Elm source.                                                                                |
 | `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md` — Jsonnet configuration templates and libraries.                                         |
+| `**/*.zig`                                      | `zig.md` — Zig source.                                                                                |
 | `**/*.thrift`                                   | `thrift.md` — Apache Thrift IDL wire compatibility.                                                   |
-| `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md` — Starlark and Bazel build, macro, and rule design.                                     |
+| `**/*.{bzl,bazel,star}`                         | `starlark.md` — Starlark and Bazel build, macro, and rule design.                                     |
+| `**/{BUILD,WORKSPACE}`                          | `starlark.md` — Starlark and Bazel build, macro, and rule design.                                     |
 | `**/*.capnp`                                    | `capnp.md` — Cap'n Proto schema wire compatibility.                                                   |
-| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL, and Metal shaders.                                                    |
+| `**/*.{ml,mli}`                                 | `ocaml.md` — OCaml implementation and interface files.                                                |
+| `**/*.{re,rei}`                                 | `ocaml.md` — ReasonML, the same rules as OCaml.                                                       |
 | `**/*.{v,sv,vh}`                                | `verilog.md` — Verilog and SystemVerilog RTL.                                                         |
 | `**/*.{vhd,vhdl}`                               | `vhdl.md` — VHDL RTL.                                                                                 |
 | `**/*.m`                                        | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files))                      |
@@ -352,6 +360,7 @@ matching order:
 | `**/*.sol`                                      | `solidity.md` — Solidity smart contracts.                                                             |
 | `**/*.vy`                                       | `vyper.md` — Vyper smart contracts.                                                                   |
 | `**/*.rego`                                     | `rego.md` — Rego policy (OPA).                                                                        |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL, and Metal shaders.                                                    |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell scripts, modules, and data/manifest files.                               |
 | _(fallback)_                                    | `default.md`                                                                                          |
 

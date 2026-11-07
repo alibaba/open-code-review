@@ -283,6 +283,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。          |
 | `**/*.{hbs,mustache}`                           | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。               |
 | `**/*.{jinja2,j2}`                              | `jinja.md`——Jinja 模板                                                |
+| `**/*.pug`                                      | `pug.md`——Pug 模板（转义与输出上下文）。                                       |
 | `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md`——EJS、Liquid 与 Nunjucks 模板（SSTI / XSS / 转义）。 |
 | `**/*.{haml,slim}`                              | `haml_slim.md`——HAML 与 Slim 模板（SSTI / XSS / 转义 / 缩进语义）。 |
 | `**/*.erb`                                      | `erb.md`——ERB 模板（SSTI / XSS / 转义 / 空白与输出结构）。 |
@@ -294,7 +295,6 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md`——F# 实现、签名和脚本文件。                                |
 | `**/*.cs`                                       | `csharp.md`——C# 源文件。 |
 | `**/*.rs`                                       | `rust.md`                                                             |
-| `**/*.R`                                        | `r.md`                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                              |
 | `**/*.c`                                        | `c.md`                                                                |
 | `**/*.{py,pyi,ipynb}`                           | `python.md`——Python 源代码。                                          |
@@ -305,15 +305,23 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{graphql,gql}`                            | `graphql.md`——GraphQL schema 与操作。                                 |
 | `**/*.prisma`                                   | `prisma.md`——Prisma schema。                                          |
 | `**/*.jl`                                       | `julia.md`——Julia 源代码。                                            |
+| `**/*.R`                                        | `r.md`                                                                |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md`——Terraform / HCL。                                     |
 | `**/*.bicep`                                    | `bicep.md`——Bicep（Azure）模板。                                      |
+| `**/*.nix`                                      | `nix.md`——Nix 表达式与 derivation。                                    |
+| `**/*.{hs,lhs}`                                 | `haskell.md`——Haskell 源文件与 literate Haskell。                      |
+| `**/*.{nim,nims,nimble}`                        | `nim.md`——Nim 源文件、脚本与包文件。                                         |
+| `**/*.swift`                                    | `swift.md`——Swift 源文件。                                            |
 | `**/*.nu`                                       | `nushell.md`——Nushell 脚本。                                          |
 | `**/*.elm`                                      | `elm.md` - Elm 源代码。                                               |
 | `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md`——Jsonnet 配置模板与库。                                  |
+| `**/*.zig`                                      | `zig.md`——Zig 源文件。                                                |
 | `**/*.thrift`                                   | `thrift.md`——Apache Thrift IDL 线协议兼容性。                         |
-| `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md`——Starlark 和 Bazel 构建、宏与规则设计。                 |
+| `**/*.{bzl,bazel,star}`                         | `starlark.md`——Starlark 和 Bazel 构建、宏与规则设计。                        |
+| `**/{BUILD,WORKSPACE}`                          | `starlark.md`——Starlark 和 Bazel 构建、宏与规则设计。                        |
 | `**/*.capnp`                                    | `capnp.md`——Cap'n Proto schema 线协议兼容性。                         |
-| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - GLSL、HLSL、WGSL、Metal 着色器。                        |
+| `**/*.{ml,mli}`                                 | `ocaml.md`——OCaml 实现与接口文件。                                        |
+| `**/*.{re,rei}`                                 | `ocaml.md`——ReasonML，与 OCaml 使用同一套规则。                             |
 | `**/*.{v,sv,vh}`                                | `verilog.md`——Verilog 与 SystemVerilog RTL。                          |
 | `**/*.{vhd,vhdl}`                               | `vhdl.md`——VHDL RTL。                                                 |
 | `**/*.m`                                        | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
@@ -321,6 +329,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.sol`                                      | `solidity.md`——Solidity 智能合约。                                    |
 | `**/*.vy`                                       | `vyper.md`——Vyper 智能合约。                                          |
 | `**/*.rego`                                     | `rego.md`——Rego 策略（OPA）。                                         |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - GLSL、HLSL、WGSL、Metal 着色器。                        |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md`——PowerShell 脚本、模块和数据/清单文件。               |
 | _(fallback)_                                    | `default.md`                                                          |
 
