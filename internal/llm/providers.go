@@ -437,6 +437,20 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:        "runcrate",
+		DisplayName: "Runcrate API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.runcrate.ai/v1",
+		EnvVar:      "RUNCRATE_API_KEY",
+		Models: []string{
+			"deepseek-ai/DeepSeek-V4-Flash",
+			"deepseek-ai/DeepSeek-V4-Pro",
+			"zai-org/GLM-5.3",
+			"moonshotai/Kimi-K2.6",
+			"Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",
+		},
+	},
+	{
 		Name:        "xai",
 		DisplayName: "xAI Grok API",
 		Protocol:    ProtocolOpenAIChatCompletions,

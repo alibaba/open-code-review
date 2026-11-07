@@ -68,6 +68,7 @@ provider instead uses the ChatGPT credentials created by `ocr auth login`.
 | `siliconflow`  | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
+| `runcrate` | openai | `https://api.runcrate.ai/v1` | `RUNCRATE_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
 Built-in providers' model lists are suggestions for `ocr config model`, not
