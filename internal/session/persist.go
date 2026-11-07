@@ -39,6 +39,10 @@ type jsonlWriter struct {
 	file        *os.File
 	writer      *bufio.Writer
 	lastUUID    string // tracks chain of records via parentUuid
+	// active keeps this run's liveness sidecar locked, so a reader can tell a
+	// run in progress from one that died before writing session_end. Released by
+	// closeFile, which every exit path goes through.
+	active *activeLock
 }
 
 // newJSONLWriter creates and opens a new JSONL writer for the given session.
@@ -121,6 +125,16 @@ func (jw *jsonlWriter) open() error {
 
 	jw.file = f
 	jw.writer = bufio.NewWriter(f)
+
+	// Claim the liveness sidecar. A failure here is logged and tolerated: the
+	// run is worth more than its "running" badge, and the viewer falls back to
+	// reading the run as finished.
+	lock, err := holdActiveLock(filename)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ocr session] WARNING: liveness lock unavailable, viewer may not show this run as active: %v\n", err)
+		return nil
+	}
+	jw.active = lock
 	return nil
 }
 
@@ -401,9 +415,7 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 		if jw.writer != nil {
 			jw.writer.Flush()
 		}
-		if jw.file != nil {
-			jw.file.Close()
-		}
+		jw.closeFile()
 		return fmt.Errorf("marshal session_end: %w", err)
 	}
 
@@ -418,11 +430,27 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 		}
 	}
 	if jw.file != nil {
-		if err := jw.file.Close(); err != nil && writeErr == nil {
+		if err := jw.closeFile(); err != nil && writeErr == nil {
 			writeErr = fmt.Errorf("close session file: %w", err)
 		}
 	}
 	return writeErr
+}
+
+// closeFile closes the session file and releases the liveness lock. The lock is
+// released after the file so a reader that sees the lock drop is already
+// looking at a fully written session_end.
+func (jw *jsonlWriter) closeFile() error {
+	var err error
+	if jw.file != nil {
+		err = jw.file.Close()
+		jw.file = nil
+	}
+	if jw.active != nil {
+		jw.active.Close()
+		jw.active = nil
+	}
+	return err
 }
 
 func (jw *jsonlWriter) flushAndClose() {
@@ -431,7 +459,5 @@ func (jw *jsonlWriter) flushAndClose() {
 	if jw.writer != nil {
 		jw.writer.Flush()
 	}
-	if jw.file != nil {
-		jw.file.Close()
-	}
+	jw.closeFile()
 }

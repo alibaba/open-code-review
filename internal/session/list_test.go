@@ -257,19 +257,12 @@ func writeTestSession(t *testing.T, repoDir, from, to string, comments []model.L
 	if finalize {
 		sh.Finalize()
 	} else {
-		// Simulate an aborted run: flush the writer without emitting session_end.
-		if sh.persist != nil {
-			sh.persist.mu.Lock()
-			if sh.persist.writer != nil {
-				sh.persist.writer.Flush()
-			}
-			if sh.persist.file != nil {
-				_ = sh.persist.file.Close()
-			}
-			sh.persist.writer = nil
-			sh.persist.file = nil
-			sh.persist.mu.Unlock()
-		}
+		// Simulate an abandoned run: Close releases the writer and the liveness
+		// lock without writing session_end, which is what an abandoned run
+		// leaves behind. The lock has to go too - an open handle cannot be
+		// deleted on Windows, so holding it would fail this test's temp dir
+		// cleanup rather than the test itself.
+		_ = sh.Close()
 	}
 	return sh.SessionID
 }

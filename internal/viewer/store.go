@@ -39,6 +39,12 @@ type RepoInfo struct {
 	EncodedPath  string // encoded directory name on disk
 	SessionCount int
 	LastModified time.Time
+
+	// ActiveSessionID names a run in progress in this repository, empty when
+	// none is. At most one run per repository is ever live: two concurrent
+	// reviews of one working tree would race on the same files, and the newest
+	// is the one a reader means by "the current run".
+	ActiveSessionID string
 }
 
 // DiscoverRepos walks the sessions root and returns one entry per subdirectory.
@@ -63,14 +69,52 @@ func DiscoverRepos(root string) ([]RepoInfo, error) {
 		if err != nil {
 			continue
 		}
+		// A session can only be live if its liveness sidecar exists, and the
+		// sidecars are already in this directory listing. Filtering on that
+		// first keeps the cost at one open per *candidate* rather than one per
+		// archived session, which is what makes this safe for a repository with
+		// thousands of them.
+		// Sized for the locks, not for the directory: most of a repository's
+		// sessions are archived, and reserving room for all of them would
+		// allocate a map far larger than the one or two entries it holds.
+		hasSidecar := make(map[string]bool)
 		for _, se := range subEntries {
-			if strings.HasSuffix(se.Name(), ".jsonl") {
-				info.SessionCount++
-				if fi, err := se.Info(); err == nil {
-					if fi.ModTime().After(info.LastModified) {
-						info.LastModified = fi.ModTime()
-					}
+			if strings.HasSuffix(se.Name(), ".lock") {
+				hasSidecar[strings.TrimSuffix(se.Name(), ".lock")+".jsonl"] = true
+			}
+		}
+
+		// Newest session first, so the lock probe stops at the first live run.
+		// os.ReadDir orders by filename and a session id is a UUID, so the
+		// ordering has to be established from mtime before probing.
+		type candidate struct {
+			name    string
+			modTime time.Time
+		}
+		var candidates []candidate
+		for _, se := range subEntries {
+			if !strings.HasSuffix(se.Name(), ".jsonl") {
+				continue
+			}
+			info.SessionCount++
+			var mod time.Time
+			if fi, err := se.Info(); err == nil {
+				mod = fi.ModTime()
+				if mod.After(info.LastModified) {
+					info.LastModified = mod
 				}
+			}
+			if hasSidecar[se.Name()] {
+				candidates = append(candidates, candidate{name: se.Name(), modTime: mod})
+			}
+		}
+		sort.Slice(candidates, func(i, j int) bool {
+			return candidates[i].modTime.After(candidates[j].modTime)
+		})
+		for _, c := range candidates {
+			if session.SessionIsActive(filepath.Join(repoDir, c.name)) {
+				info.ActiveSessionID = strings.TrimSuffix(c.name, ".jsonl")
+				break
 			}
 		}
 		if info.SessionCount > 0 {
@@ -109,6 +153,16 @@ type SessionSummary struct {
 	FailedCount    int
 	WaivedCount    int
 	RunManifest    *session.RunManifest
+
+	// Running reports that a live process still holds this session's liveness
+	// lock. Aborted is true for a run in progress too - it only means no
+	// session_end has been written - so this is what the status column must
+	// consult first.
+	Running bool
+
+	// EndTime is the session_end timestamp. It is zero while Running, and is
+	// what the browser subtracts from the clock to tick a live duration.
+	EndTime time.Time
 }
 
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
@@ -157,7 +211,7 @@ func peekSession(path string) (SessionSummary, error) {
 	}
 	defer f.Close()
 
-	summary := SessionSummary{Aborted: true}
+	summary := SessionSummary{Aborted: true, Running: true}
 	var lastLine []byte
 	readErr := readJSONLLines(f, func(line []byte) {
 		lastLine = append([]byte(nil), line...)
@@ -212,6 +266,12 @@ func peekSession(path string) (SessionSummary, error) {
 				applySessionEnd(&summary, rec)
 			}
 		}
+	}
+	// Defaulted true and cleared by applySessionEnd, mirroring Aborted: a file
+	// whose last record is not session_end is provisionally live, and the lock
+	// is what confirms it.
+	if summary.Running {
+		summary.Running = session.SessionIsActive(path)
 	}
 	return summary, readErr
 }
@@ -502,6 +562,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs := &ViewSession{Files: make([]*FileGroup, 0)}
 	vs.Summary.Aborted = true
+	vs.Summary.Running = true
 	fileIndex := make(map[string]*FileGroup)
 	markOccurrences := make(map[string]int)
 
@@ -767,6 +828,12 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs.Summary.SessionID = sessionID
 	vs.Summary.CommentCount = len(vs.Comments)
+	// Mirrors peekSession: this path builds its own summary rather than reusing
+	// it, so the liveness probe has to be applied here too or the detail page
+	// would show a live run as aborted while the list showed it as running.
+	if vs.Summary.Running {
+		vs.Summary.Running = session.SessionIsActive(path)
+	}
 	return vs, readErr
 }
 
@@ -790,6 +857,13 @@ func commentMarkID(recordUUID string, commentIndex int, rc *ReviewComment, occur
 
 func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 	summary.Aborted = false
+	// A run that reached session_end is over by definition, whatever the lock
+	// says: the record is the authoritative end, and the lock is only a fallback
+	// for runs that never got to write one.
+	summary.Running = false
+	if ts, ok := rec["timestamp"].(string); ok {
+		summary.EndTime, _ = time.Parse(time.RFC3339, ts)
+	}
 	if dur, ok := rec["duration_seconds"].(float64); ok {
 		summary.DurationSec = dur
 	}

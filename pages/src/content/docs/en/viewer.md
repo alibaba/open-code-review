@@ -84,17 +84,29 @@ on-disk directories). You don't usually type this — you click through.
 ### `/` — Repository list
 
 For each repo with at least one session you see the repo path, the
-total session count, the most recent activity timestamp, and a `Check`
-link to its sessions. The search box filters the list by repo path, and
+total session count, its current status, the most recent activity
+timestamp, and a `Check` link to its sessions. A repository with a
+review running right now shows a pulsing **running** badge linking
+straight to that session; everything else shows a dash. The page polls
+while a run is in flight and reloads itself when one starts, so leaving
+it open is enough. The search box filters the list by repo path, and
 ten repositories fit on a page; the pager at the bottom right moves
 between pages.
 
 ### `/r/{repo}` — Session list for one repo
 
 For each session: ID (a UUID), branch name (when OCR was able to
-detect it), review mode, model, file count, duration, and a started-at
-timestamp, and a `Check` link to the next-older session. Ten sessions
-fit on a page; the pager at the bottom right moves between pages.
+detect it), review mode, model, file count, status, comment count,
+duration, and a started-at timestamp, and a `Compare` link to the
+next-older session. Ten sessions fit on a page; the pager at the bottom
+right moves between pages.
+
+A session that is still running shows a **running** status and a
+duration that ticks up in the browser; the page reloads itself the
+moment the run finishes, so the final figures always come from the
+server rather than from a guess made in the browser. A session with no
+`session_end` record and no live process behind it is **aborted** —
+that is a genuine crash or a killed run, not a review in progress.
 
 ### `/r/{repo}/{sessionID}` — Session detail
 
@@ -251,8 +263,18 @@ The viewer reads from:
 ```
 ~/.opencodereview/sessions/
 └── <path-encoded-repo-path>/
-    └── <session-id>.jsonl
+    ├── <session-id>.jsonl
+    └── <session-id>.lock
 ```
+
+The `.lock` sidecar is an empty file the running process holds an
+exclusive OS lock on for the life of the review. That lock — not the
+absence of a `session_end` record — is what tells the viewer a run is
+still going, because a killed run looks exactly like a run that has
+not finished yet if you only look at the records. The kernel releases
+the lock when the process dies, however it dies, so a crashed review
+shows as `aborted` without any cleanup step. The file itself stays on
+disk afterwards and holds nothing.
 
 Each line in the JSONL file is one event:
 
