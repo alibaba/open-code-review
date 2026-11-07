@@ -13,7 +13,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ children }) => {
     <div
       style={{
         width: '100%',
-        background: '#000000',
+        background: 'var(--bg-page)',
         overflowX: 'hidden',
       }}
     >

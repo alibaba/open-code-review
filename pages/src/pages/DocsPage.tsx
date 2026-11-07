@@ -101,7 +101,7 @@ const sidebarTree: SidebarGroup[] = [
 /* ─── Chevron icon for expandable items ─── */
 const ChevronIcon: React.FC<{ expanded: boolean }> = ({ expanded }) => (
   <svg width="16" height="16" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0, transition: 'transform 0.2s', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-    <path d="M7.5 5L12.5 10L7.5 15" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M7.5 5L12.5 10L7.5 15" stroke="var(--text-ghost)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
@@ -283,7 +283,7 @@ const DocsPage: React.FC = () => {
   );
 
   return (
-    <div style={{ minHeight: '100vh', background: '#000000', paddingTop: 72, fontFamily }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-page)', paddingTop: 72, fontFamily }}>
       <Navbar />
       {/* Main layout: left sidebar + content + right TOC */}
       <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'flex-start', maxWidth: 1440, margin: '0 auto', minHeight: 'calc(100vh - 72px)' }}>
@@ -320,7 +320,7 @@ const DocsPage: React.FC = () => {
                   gap: 8,
                   padding: '8px 12px 12px 12px',
                 }}>
-                  <span style={{ flexShrink: 0, fontSize: 14, fontWeight: 600, color: '#ffffff', fontFamily, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  <span style={{ flexShrink: 0, fontSize: 14, fontWeight: 600, color: 'var(--text-strong)', fontFamily, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
                     {t(group.groupLabelKey)}
                   </span>
                 </div>
@@ -348,7 +348,7 @@ const DocsPage: React.FC = () => {
                           padding: '10px 12px',
                           cursor: 'pointer',
                           transition: 'background 0.15s',
-                          background: isActive ? 'rgba(43, 222, 94, 0.12)' : 'transparent',
+                          background: isActive ? 'var(--accent-soft)' : 'transparent',
                         }}
                       >
                         <div style={{ display: 'flex', flex: 1, alignItems: 'center', gap: 8 }}>
@@ -357,7 +357,7 @@ const DocsPage: React.FC = () => {
                             fontSize: 14,
                             fontFamily,
                             fontWeight: isActive ? 500 : 400,
-                            color: isActive ? '#2BDE5E' : 'rgba(255,255,255,0.7)',
+                            color: isActive ? 'var(--accent)' : 'var(--text-soft)',
                             lineHeight: '22px',
                             transition: 'color 0.2s',
                           }}>
@@ -391,7 +391,7 @@ const DocsPage: React.FC = () => {
                               borderRadius: 6,
                               padding: '10px 12px 10px 28px',
                               cursor: 'pointer',
-                              background: childActive ? 'rgba(43, 222, 94, 0.12)' : 'transparent',
+                              background: childActive ? 'var(--accent-soft)' : 'transparent',
                             }}
                           >
                             <div style={{ display: 'flex', flex: 1, alignItems: 'center', gap: 8 }}>
@@ -400,7 +400,7 @@ const DocsPage: React.FC = () => {
                                 fontSize: 14,
                                 fontFamily,
                                 fontWeight: childActive ? 500 : 400,
-                                color: childActive ? '#2BDE5E' : 'rgba(255,255,255,0.7)',
+                                color: childActive ? 'var(--accent)' : 'var(--text-soft)',
                                 lineHeight: '22px',
                                 transition: 'color 0.2s',
                               }}>
@@ -421,7 +421,7 @@ const DocsPage: React.FC = () => {
         {/* ─── Main content area ─── */}
         <div ref={contentRef} onClick={handleContentClick} style={{ display: 'flex', flex: 1, flexDirection: 'column', minWidth: 0, padding: isMobile ? '32px 20px 80px' : '40px 48px 80px' }}>
           {/* Doc title */}
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#FFFFFF', margin: '0 0 32px 0', lineHeight: '36px', fontFamily }}>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-strong)', margin: '0 0 32px 0', lineHeight: '36px', fontFamily }}>
             {docTitle}
           </h1>
           {/* Rendered markdown content */}
@@ -448,8 +448,8 @@ const DocsPage: React.FC = () => {
                   transition: 'opacity 0.2s',
                 }}
               >
-                <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>‹</span>
-                <span style={{ fontSize: 14, fontFamily, color: 'rgba(255,255,255,0.7)', fontWeight: 400 }}>
+                <span style={{ fontSize: 14, color: 'var(--text-faint)' }}>‹</span>
+                <span style={{ fontSize: 14, fontFamily, color: 'var(--text-soft)', fontWeight: 400 }}>
                   {t(prevDoc.labelKey)}
                 </span>
               </button>
@@ -468,10 +468,10 @@ const DocsPage: React.FC = () => {
                   transition: 'opacity 0.2s',
                 }}
               >
-                <span style={{ fontSize: 14, fontFamily, color: 'rgba(255,255,255,0.7)', fontWeight: 400 }}>
+                <span style={{ fontSize: 14, fontFamily, color: 'var(--text-soft)', fontWeight: 400 }}>
                   {t(nextDoc.labelKey)}
                 </span>
-                <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>›</span>
+                <span style={{ fontSize: 14, color: 'var(--text-faint)' }}>›</span>
               </button>
             ) : <span />}
           </div>
@@ -493,7 +493,7 @@ const DocsPage: React.FC = () => {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
               <img src={docContentsIcon} alt="" style={{ width: 20, height: 20 }} />
-              <span style={{ fontSize: 14, fontWeight: 500, color: 'rgba(255,255,255,0.5)', letterSpacing: '0.05em', position: 'relative', top: 1 }}>
+              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-faint)', letterSpacing: '0.05em', position: 'relative', top: 1 }}>
                 {t('docs.toc')}
               </span>
             </div>
@@ -515,7 +515,7 @@ const DocsPage: React.FC = () => {
                       fontSize: 14,
                       fontFamily: 'PingFang SC, -apple-system, sans-serif',
                       fontWeight: isActive ? 500 : 400,
-                      color: isActive ? '#2BDE5E' : isHovered ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)',
+                      color: isActive ? 'var(--accent)' : isHovered ? 'var(--text-body)' : 'var(--text-faint)',
                       lineHeight: '22px',
                       padding: 0,
                       paddingLeft: h.level === 3 ? 16 : 0,
@@ -554,8 +554,8 @@ const DocsPage: React.FC = () => {
             style={{
               width: 560,
               maxWidth: '90vw',
-              background: '#141414',
-              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'var(--surface-raised)',
+              border: '1px solid var(--line)',
               borderRadius: 12,
               overflow: 'hidden',
               boxShadow: '0 24px 48px rgba(0,0,0,0.4)',
@@ -578,7 +578,7 @@ const DocsPage: React.FC = () => {
                   background: 'transparent',
                   border: 'none',
                   outline: 'none',
-                  color: '#ffffff',
+                  color: 'var(--text-strong)',
                   fontSize: 14,
                   fontFamily,
                 }}
@@ -587,7 +587,7 @@ const DocsPage: React.FC = () => {
             {/* Results */}
             <div style={{ maxHeight: 400, overflowY: 'auto', padding: searchQuery ? '8px 0' : '0' }}>
               {searchQuery && searchResults.length === 0 && (
-                <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
+                <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-ghost)', fontSize: 14 }}>
                   {t('docs.search.noResults')}
                 </div>
               )}
@@ -599,7 +599,7 @@ const DocsPage: React.FC = () => {
                     display: 'block',
                     width: '100%',
                     padding: '10px 16px',
-                    background: idx === searchSelectedIdx ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                    background: idx === searchSelectedIdx ? 'var(--fill-hover)' : 'transparent',
                     border: 'none',
                     cursor: 'pointer',
                     textAlign: 'left',
@@ -608,10 +608,10 @@ const DocsPage: React.FC = () => {
                   }}
                   onMouseEnter={() => setSearchSelectedIdx(idx)}
                 >
-                  <div style={{ color: '#ffffff', fontSize: 14, fontWeight: 500, fontFamily, marginBottom: 4 }}>
+                  <div style={{ color: 'var(--text-strong)', fontSize: 14, fontWeight: 500, fontFamily, marginBottom: 4 }}>
                     {result.title}
                   </div>
-                  <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, fontFamily, lineHeight: '18px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ color: 'var(--text-ghost)', fontSize: 12, fontFamily, lineHeight: '18px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {result.snippet}
                   </div>
                 </button>
@@ -624,24 +624,24 @@ const DocsPage: React.FC = () => {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 padding: '8px 16px',
-                borderTop: '1px solid rgba(255,255,255,0.08)',
+                borderTop: '1px solid var(--line)',
                 fontSize: 12,
-                color: 'rgba(255,255,255,0.35)',
+                color: 'var(--text-ghost)',
                 fontFamily,
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <kbd style={{ background: 'rgba(255,255,255,0.85)', borderRadius: 3, padding: '0px 3px', fontSize: 9, color: '#000000' }}>↑</kbd>
-                    <kbd style={{ background: 'rgba(255,255,255,0.85)', borderRadius: 3, padding: '0px 3px', fontSize: 9, color: '#000000' }}>↓</kbd>
+                    <kbd style={{ background: 'var(--fill-hover)', border: '1px solid var(--line)', borderRadius: 3, padding: '0px 3px', fontSize: 9, color: 'var(--text-strong)' }}>↑</kbd>
+                    <kbd style={{ background: 'var(--fill-hover)', border: '1px solid var(--line)', borderRadius: 3, padding: '0px 3px', fontSize: 9, color: 'var(--text-strong)' }}>↓</kbd>
                     {t('docs.search.hint.select')}
                   </span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <kbd style={{ background: 'rgba(255,255,255,0.85)', borderRadius: 3, padding: '0px 3px', fontSize: 9, color: '#000000' }}>↵</kbd>
+                    <kbd style={{ background: 'var(--fill-hover)', border: '1px solid var(--line)', borderRadius: 3, padding: '0px 3px', fontSize: 9, color: 'var(--text-strong)' }}>↵</kbd>
                     {t('docs.search.hint.open')}
                   </span>
                 </div>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <kbd style={{ background: 'rgba(255,255,255,0.85)', borderRadius: 3, padding: '0px 3px', fontSize: 9, color: '#000000' }}>esc</kbd>
+                  <kbd style={{ background: 'var(--fill-hover)', border: '1px solid var(--line)', borderRadius: 3, padding: '0px 3px', fontSize: 9, color: 'var(--text-strong)' }}>esc</kbd>
                   {t('docs.search.hint.close')}
                 </span>
               </div>

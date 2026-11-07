@@ -11,6 +11,7 @@ export const zh: TranslationKeys = {
   'navbar.docs': '文档',
   'navbar.blog': '博客',
   'navbar.getStarted': '开始使用',
+  'navbar.themeToggle': '切换浅色与深色主题',
 
   'providers.title': '内置主流模型服务商',
   'providers.description': '配置 API Key 即可开始审查，也可接入兼容主流协议的私有模型服务。',
