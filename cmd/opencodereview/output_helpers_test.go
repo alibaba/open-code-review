@@ -15,6 +15,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func TestHasSubtaskErrors(t *testing.T) {
@@ -881,4 +882,22 @@ func decodeSinglePreviewJSON(t *testing.T, s string) model.Preview {
 		t.Errorf("expected EOF after the first JSON value, got err=%v\nstdout was:\n%q", err, s)
 	}
 	return got
+}
+
+func TestOutputJSONWithWarnings_NilCommentsEncodeAsEmptyArray(t *testing.T) {
+	// A failed run publishes its manifest with nil comments. json.Unmarshal
+	// accepts null into a slice, so only the raw text pins the wire shape.
+	manifest := &session.RunManifest{TerminalState: session.StateFailed}
+	var buf bytes.Buffer
+	err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, time.Second, "", nil, nil, "", nil, "", manifest, false, nil, &buf, nil, nil)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := string(raw["comments"]); got != "[]" {
+		t.Errorf("comments = %s, want []", got)
+	}
 }

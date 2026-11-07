@@ -356,6 +356,9 @@ type jsonOutput struct {
 }
 
 func outputJSON(comments []model.LlmComment) error {
+	if comments == nil {
+		comments = []model.LlmComment{}
+	}
 	out := jsonOutput{
 		Status:    "success",
 		ToolCalls: newJSONToolCalls(nil, nil),
@@ -376,6 +379,12 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
 	retryReport *llm.RetryReport, groups []agent.FileGroupInfo) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
+	// A run that failed before collecting anything (for example every file
+	// review failed) hands over nil comments while still publishing its
+	// manifest. Encode that as [] like outputJSONNoFiles and SARIF do, not null.
+	if comments == nil {
+		comments = []model.LlmComment{}
+	}
 	payload := jsonOutput{
 		Status:   "success",
 		LLM:      llmIdentity,
