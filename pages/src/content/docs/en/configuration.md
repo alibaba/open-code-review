@@ -277,6 +277,21 @@ calling operation's context has expired. For a review/scan task deadline,
 check `--timeout`; other operations, such as background memory compression
 and `ocr llm test`, have their own deadlines.
 
+### Git tool timeout
+
+The `code_search` tool shells out to `git grep`, bounded by a 10-second
+deadline. A wide search in a multi-GB working tree — or several concurrent
+searches competing for a small CPU quota — can exceed that and come back as
+`git grep timed out`, which costs the agent a tool round. Set
+`OCR_GIT_GREP_TIMEOUT` (integer seconds) to raise the deadline:
+
+```bash
+OCR_GIT_GREP_TIMEOUT=60 ocr review --from main --to HEAD
+```
+
+Unset keeps the 10-second default. An invalid value also keeps the default but
+warns on stderr, so a typo does not silently look like it took effect.
+
 ### API key from a command
 
 Instead of storing a key in the config file, `api_key_cmd` fetches it at
