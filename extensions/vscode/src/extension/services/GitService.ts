@@ -10,6 +10,12 @@ import { buildWorkspaceFiles, branchRefCandidates, parseNameStatus, pickRepoRoot
 
 const WORKSPACE_REFRESH_DEBOUNCE_MS = 300;
 
+/**
+ * Git's empty tree. It is a fixed hash that every repository can resolve, which
+ * makes it the base a root commit is diffed against.
+ */
+const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
 export class GitService {
   private api: any | null = null;
   private cache: GitState = { branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] };
@@ -226,6 +232,24 @@ export class GitService {
     }
   }
 
+  /**
+   * The ref to diff a commit against: its first parent, or the empty tree when
+   * it has none.
+   *
+   * `<sha>^` does not resolve for a repository's initial commit, so building it
+   * unconditionally leaves the left side of the diff — and the `git diff` range
+   * used as a fallback — pointing at a revision that does not exist. The empty
+   * tree is present in every repository and makes a root commit read as what it
+   * is: every file added.
+   */
+  private async commitBaseRef(root: string, commit: string): Promise<string> {
+    try {
+      const out = await runGit(root, ['rev-parse', '--verify', '--quiet', `${commit}^`]);
+      if (out.trim()) return `${commit}^`;
+    } catch { /* no parent: fall through to the empty tree */ }
+    return EMPTY_TREE_SHA;
+  }
+
   private async resolveGitRef(root: string, ref: string): Promise<string | null> {
     for (const candidate of branchRefCandidates(ref)) {
       try {
@@ -294,7 +318,7 @@ export class GitService {
     }
 
     if (opts.mode === ReviewMode.Commit && opts.commit) {
-      const parent = `${opts.commit}^`;
+      const parent = await this.commitBaseRef(root, opts.commit);
       const label = `${opts.commit}^ ↔ ${opts.commit}`;
       const leftRef = opts.status === 'added' ? null : parent;
       const rightRef = opts.status === 'deleted' ? null : opts.commit;
@@ -345,15 +369,24 @@ export class GitService {
     status: FileChange['status'],
     side: 'left' | 'right',
   ): Promise<vscode.Uri> {
-    if (side === 'left' && (status === 'added' || !ref)) return this.emptySideUri();
-    if (side === 'right' && (status === 'deleted' || !ref)) return this.emptySideUri();
-    if (!ref || !(await this.pathExistsAtRef(root, ref, relPath))) return this.emptySideUri();
+    if (side === 'left' && (status === 'added' || !ref)) return this.emptySideUri(api, root, relPath);
+    if (side === 'right' && (status === 'deleted' || !ref)) return this.emptySideUri(api, root, relPath);
+    if (!ref || !(await this.pathExistsAtRef(root, ref, relPath))) return this.emptySideUri(api, root, relPath);
     return api.toGitUri(vscode.Uri.file(`${root}/${relPath}`), ref);
   }
 
-  /** Provide an empty side (equivalent to /dev/null) for diffs of added or deleted files. */
-  private emptySideUri(): vscode.Uri {
-    return vscode.Uri.file(process.platform === 'win32' ? '\\\\.\\NUL' : '/dev/null');
+  /**
+   * Provide an empty side for diffs of added or deleted files.
+   *
+   * This used to point at the platform's null device, but VS Code opens both
+   * sides of a diff through its file system provider, and on Windows reading
+   * `\\.\NUL` fails with "Unavailable (FileSystemError)" — the editor then
+   * reports that it could not be opened. A `git:` URI with an empty ref is what
+   * workspace mode above already uses for the same purpose, and it renders as
+   * an empty document on every platform.
+   */
+  private emptySideUri(api: any, root: string, relPath: string): vscode.Uri {
+    return api.toGitUri(vscode.Uri.file(`${root}/${relPath}`), '');
   }
 
   private async presentDiff(
@@ -463,7 +496,7 @@ export class GitService {
     if (!api || !root) return null;
 
     if (ctx.mode === ReviewMode.Commit && ctx.commit) {
-      const parent = `${ctx.commit}^`;
+      const parent = await this.commitBaseRef(root, ctx.commit);
       const label = `${ctx.commit}^ ↔ ${ctx.commit}`;
       const leftRef = status === 'added' ? null : parent;
       const rightRef = status === 'deleted' ? null : ctx.commit;
