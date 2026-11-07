@@ -105,6 +105,32 @@ document.querySelectorAll('.response-text').forEach(function(el) {
         }
     }
 
+    // Collapses or expands every per-file comment group at once. A session with
+    // hundreds of findings renders one open group per file, which buries the
+    // page; collapsing gives a scannable index of files and their counts.
+    function initCollapseAll() {
+        const button = document.querySelector('[data-collapse-all]');
+        if (!button) return;
+
+        // The label is the state: it names the action the button performs, so
+        // it carries the collapsed state on its own. A toggle attribute would
+        // contradict it, since the two would announce the opposite states.
+        let collapsing = false;
+
+        button.addEventListener('click', function() {
+            collapsing = !collapsing;
+
+            groups.forEach(function(group) {
+                // Every group, including one the filters have hidden: a hidden
+                // group that reappears still open would leave the page in a
+                // state the button's label does not describe.
+                group.open = !collapsing;
+            });
+
+            button.textContent = collapsing ? 'Expand all' : 'Collapse all';
+        });
+    }
+
     function renderCommentState(state) {
         const visibleCards = new Set(state.visible);
         const matchingCards = new Set(state.filtered);
@@ -313,6 +339,8 @@ document.querySelectorAll('.response-text').forEach(function(el) {
             applyMarkState(card, marks[card.dataset.markId]);
         }
     });
+
+    initCollapseAll();
 
     commentsPager = window.ocrPager({
         rows: cards,
