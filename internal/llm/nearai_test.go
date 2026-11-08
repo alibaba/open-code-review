@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -40,6 +41,7 @@ import (
 type nearAIGateway struct {
 	t                           *testing.T
 	key                         ed25519.PrivateKey
+	modelInstances              int
 	tee, e2ee, tamper, truncate bool
 	chatStatus                  int
 	failFirstChat               bool
@@ -58,11 +60,15 @@ func newNearAIGateway(t *testing.T) *nearAIGateway {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &nearAIGateway{t: t, key: key, tee: true, receipts: make(map[string]map[string]any)}
+	return &nearAIGateway{t: t, key: key, tee: true, modelInstances: 1, receipts: make(map[string]map[string]any)}
 }
 
 func (g *nearAIGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Authorization") != "Bearer test" {
+	wantAuth := "Bearer test"
+	if r.URL.Path == "/v1/attestation/report" && !r.URL.Query().Has("model") {
+		wantAuth = ""
+	}
+	if r.Header.Get("Authorization") != wantAuth {
 		g.t.Error("incorrect authorization")
 		w.WriteHeader(401)
 		return
@@ -97,7 +103,12 @@ func (g *nearAIGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		result := map[string]any{"gateway_attestation": attestation}
 		if r.URL.Query().Get("model") != "" {
-			result = map[string]any{"model_attestations": []any{attestation}}
+			reports := make([]map[string]any, g.modelInstances)
+			for i := range reports {
+				reports[i] = maps.Clone(attestation)
+				reports[i]["instance_id"] = fmt.Sprintf("replica-%d", i)
+			}
+			result = map[string]any{"model_attestations": reports}
 		}
 		_ = json.NewEncoder(w).Encode(result)
 	case r.URL.Path == "/v1/chat/completions":
@@ -129,7 +140,7 @@ func (g *nearAIGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		transform := func(s string) string { return s }
 		if g.e2ee {
-			if r.Header.Get("X-Signing-Algo") != "ed25519" || r.Header.Get("X-Model-Pub-Key") == "" {
+			if r.Header.Get("X-Encryption-Version") != "3" || r.Header.Get("X-Signing-Algo") != "ed25519" || r.Header.Get("X-Model-Pub-Key") == "" {
 				g.t.Error("missing E2EE headers")
 			}
 			for _, plain := range []string{"private review", "task_done", "private tool result", "verified answer", "verified reasoning"} {
@@ -137,7 +148,7 @@ func (g *nearAIGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					g.t.Errorf("plaintext field escaped E2EE: %s", plain)
 				}
 			}
-			plain, err := nearAIDecrypt(input.Messages[0].Content, g.key)
+			plain, err := nearAIDecryptContent(input.Messages[0].Content, r.Header.Get("X-Client-Pub-Key"), g.key)
 			if err != nil || plain != "private review" {
 				g.t.Errorf("decrypt request: %q %v", plain, err)
 			}
@@ -161,7 +172,7 @@ func (g *nearAIGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply, _ := json.Marshal(map[string]any{"id": id, "model": input.Model, "choices": []any{choice}, "usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}})
 		if input.Stream {
 			w.Header().Set("Content-Type", "text/event-stream")
-			reply = []byte("data: " + string(reply) + "\r\n\r\ndata: [DONE]\r\n\r\n")
+			reply = []byte("data: " + string(reply) + "\r\n\r\ndata: [DONE]\r\n\r\n: signed trailer\r\n\r\n")
 		}
 		requestHash, responseHash := sha256.Sum256(body), sha256.Sum256(reply)
 		text := fmt.Sprintf("%x:%x", requestHash, responseHash)
@@ -176,7 +187,11 @@ func (g *nearAIGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		signature := ed25519.Sign(g.key, []byte(text))
 		if g.tamper {
-			signature[0] ^= 1
+			if input.Stream {
+				reply = append(reply, ": unsigned trailer\r\n\r\n"...)
+			} else {
+				signature[0] ^= 1
+			}
 		}
 		g.mu.Lock()
 		g.receipts[id] = map[string]any{"signature_kind": kind, "text": text, "signature": hex.EncodeToString(signature), "signing_algo": "ed25519", "signing_address": hex.EncodeToString(g.key.Public().(ed25519.PublicKey))}
@@ -253,7 +268,7 @@ func nearAIEncrypt(plain, public string) (string, error) {
 	return hex.EncodeToString(append(result, aead.Seal(nil, nonce, []byte(plain), nil)...)), nil
 }
 
-func nearAIDecrypt(encrypted string, key ed25519.PrivateKey) (string, error) {
+func nearAIDecryptContent(encrypted, replyKey string, key ed25519.PrivateKey) (string, error) {
 	data, err := hex.DecodeString(encrypted)
 	if err != nil || len(data) < 72 {
 		return "", fmt.Errorf("invalid ciphertext")
@@ -270,7 +285,14 @@ func nearAIDecrypt(encrypted string, key ed25519.PrivateKey) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	plain, err := aead.Open(nil, data[32:56], data[56:], nil)
+	replyPublic, err := hex.DecodeString(replyKey)
+	if err != nil {
+		return "", err
+	}
+	// The v3 Ed25519 suite binds the reply key and request field as associated data.
+	aad := append([]byte("nearai-e2ee-request-v3\x02"), replyPublic...)
+	aad = append(aad, "\x00messages[].content"...)
+	plain, err := aead.Open(nil, data[32:56], data[56:], aad)
 	return string(plain), err
 }
 
@@ -328,6 +350,7 @@ func TestNearAIRealSDKCompletions(t *testing.T) {
 			t.Run(fmt.Sprintf("stream=%t/e2ee=%t", stream, e2ee), func(t *testing.T) {
 				gateway := newNearAIGateway(t)
 				gateway.e2ee = e2ee
+				gateway.modelInstances = 2
 				client := nearAITestClient(t, gateway, NearAISettings{e2ee, "model-tee"}, stream)
 				response, err := client.CompletionsWithCtx(metaCtx(testMeta()), nearAIRequest())
 				if err != nil {
@@ -342,6 +365,9 @@ func TestNearAIRealSDKCompletions(t *testing.T) {
 				}
 				if response.Verification == nil || response.Verification.Status != "verified" || response.Verification.SignatureKind != "provider_tee" {
 					t.Fatalf("verification: %+v", response.Verification)
+				}
+				if response.Verification.ModelAttestationCount != 2 || response.Verification.SigningAddress != hex.EncodeToString(gateway.key.Public().(ed25519.PublicKey)) {
+					t.Fatalf("shared-signer receipt: %+v", response.Verification)
 				}
 				if response.Usage == nil || response.Usage.TotalTokens != 15 {
 					t.Fatalf("usage: %+v", response.Usage)
@@ -372,7 +398,7 @@ func TestNearAIFailsClosed(t *testing.T) {
 		{name: "unsupported_e2ee", e2ee: true},
 		{name: "unsupported_model_tee"},
 		{name: "tampered_json", tee: true, tamper: true, chats: 1},
-		{name: "tampered_sse", tee: true, tamper: true, stream: true, chats: 1},
+		{name: "tampered_sse_after_done", tee: true, tamper: true, stream: true, chats: 1},
 		{name: "valid_gateway_signature_cannot_satisfy_model_tee", tee: true, signatureKind: "gateway", chats: 1},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -598,6 +624,9 @@ func TestNearAIGatewayPolicyAndSignatureRetry(t *testing.T) {
 			if delay < 3 {
 				if err != nil || resp.Verification.SignatureKind != "gateway" {
 					t.Fatalf("gateway response: %+v %v", resp, err)
+				}
+				if resp.Verification.ModelAttestationCount != 0 || resp.Verification.SigningAddress != hex.EncodeToString(g.key.Public().(ed25519.PublicKey)) {
+					t.Fatalf("gateway receipt: %+v", resp.Verification)
 				}
 			} else if err == nil || resp != nil {
 				t.Fatal("unavailable signature accepted")

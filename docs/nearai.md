@@ -137,7 +137,10 @@ JSON review output includes `llm.verification`, for example:
 ```
 
 The real `records` array identifies each logical call by model, completion ID
-when available, stage, status, signature kind, signer and check time. Review
+when available, stage, status, signature kind, signer and check time. For a
+`provider_tee` receipt, `model_attestation_count` is the number of verified
+model reports that match its signer. Replicas can share a signing key, so the
+receipt does not identify which replica served the request. Review
 requests also include file/task/request identity where available. Failed calls
 include a stable error code and the HTTP `status_code` when available, without
 copying arbitrary provider error bodies into the records. Ordinary inference

@@ -64,18 +64,19 @@ func validateNearAIEndpoint(endpoint, protocol string, body map[string]any, retr
 // VerificationRecord contains diagnostics, not a portable cryptographic proof.
 // Request and response bodies and credentials must never be added here.
 type VerificationRecord struct {
-	FilePath       string    `json:"file_path,omitempty"`
-	TaskType       string    `json:"task_type,omitempty"`
-	RequestNo      int       `json:"request_no,omitempty"`
-	CompletionID   string    `json:"completion_id,omitempty"`
-	Model          string    `json:"model"`
-	Status         string    `json:"status"`
-	Stage          string    `json:"stage"`
-	SignatureKind  string    `json:"signature_kind,omitempty"`
-	SigningAddress string    `json:"signing_address,omitempty"`
-	Code           string    `json:"code,omitempty"`
-	StatusCode     int       `json:"status_code,omitempty"`
-	CheckedAt      time.Time `json:"checked_at"`
+	FilePath              string    `json:"file_path,omitempty"`
+	TaskType              string    `json:"task_type,omitempty"`
+	RequestNo             int       `json:"request_no,omitempty"`
+	CompletionID          string    `json:"completion_id,omitempty"`
+	Model                 string    `json:"model"`
+	Status                string    `json:"status"`
+	Stage                 string    `json:"stage"`
+	SignatureKind         string    `json:"signature_kind,omitempty"`
+	SigningAddress        string    `json:"signing_address,omitempty"`
+	ModelAttestationCount int       `json:"model_attestation_count,omitempty"`
+	Code                  string    `json:"code,omitempty"`
+	StatusCode            int       `json:"status_code,omitempty"`
+	CheckedAt             time.Time `json:"checked_at"`
 	NearAISettings
 }
 
@@ -324,9 +325,8 @@ func (c *nearAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		return nil, err
 	}
 	record.SignatureKind = verified.SignatureKind
-	if verified.Attestation != nil {
-		record.SigningAddress = verified.Attestation.Signer.SigningAddress
-	}
+	record.SigningAddress = verified.Signature.Signer.SigningAddress
+	record.ModelAttestationCount = len(verified.Attestations)
 	if c.settings.VerificationLevel == "model-tee" && verified.SignatureKind != "provider_tee" {
 		return nil, &nearAIFailure{code: "policy.model_tee_required", stage: record.Stage}
 	}
