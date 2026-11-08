@@ -20,8 +20,9 @@ const (
 	// fileReadMaxLineBytes caps one rendered line, cutting at a UTF-8 rune
 	// boundary with an explicit omission marker.
 	fileReadMaxLineBytes = 2048
-	// fileReadMaxResultBytes caps the total bytes of rendered lines in one
-	// result, applied after the per-line cap.
+	// fileReadMaxResultBytes caps the total bytes a rendered result may hold,
+	// counted over the fully formatted lines (line-number prefix, content and
+	// trailing newline) after the per-line cap.
 	fileReadMaxResultBytes = 256 * 1024
 )
 
@@ -86,13 +87,17 @@ func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (st
 		if cut {
 			lineTruncated = true
 		}
-		if renderedBytes > 0 && renderedBytes+len(text) > fileReadMaxResultBytes {
+		// Budget the fully formatted line: the line-number prefix and the
+		// trailing newline are body bytes too, so counting only len(text)
+		// would let the rendered body drift past the cap.
+		entry := fmt.Sprintf("%d|%s\n", int(startLine)+i, text)
+		if renderedBytes > 0 && renderedBytes+len(entry) > fileReadMaxResultBytes {
 			outputTruncated = true
 			break
 		}
-		renderedBytes += len(text)
+		renderedBytes += len(entry)
 		shown = i + 1
-		fmt.Fprintf(&body, "%d|%s\n", int(startLine)+i, text)
+		body.WriteString(entry)
 	}
 	truncated = truncated || lineTruncated || outputTruncated
 
