@@ -134,10 +134,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}()
 
 	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, opts.maxTools, opts.maxGitProcs, true)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true)
 	if err != nil {
 		return err
 	}
+	cc.Template.MaxToolRequestTimes = resolveReviewMaxTools(cc.Template.MaxToolRequestTimes, opts.maxTools)
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security (#112): reject ref-option injection before any git invocation.
@@ -163,6 +164,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
+		Context:  ctx,
 	})
 	if err != nil {
 		return err
@@ -232,6 +234,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
 		Provider:              rt.Provider,
+		EndpointSource:        rt.Source,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
@@ -320,6 +323,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return errors.Join(resultErr, emitErr)
 	}
 	return emitErr
+}
+
+func resolveReviewMaxTools(templateDefault, cliValue int) int {
+	if cliValue > 0 {
+		return cliValue
+	}
+	return templateDefault
 }
 
 func reviewResultError(runErr error, manifest *session.RunManifest) error {

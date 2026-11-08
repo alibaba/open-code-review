@@ -12,6 +12,11 @@ export const ru: TranslationKeys = {
   'navbar.blog': 'Блог',
   'navbar.getStarted': 'Начать работу',
 
+  'providers.title': 'Встроенная поддержка ведущих провайдеров моделей',
+  'providers.description': 'Укажите API-ключ, чтобы начать ревью, или подключите приватный сервис моделей, совместимый с основными протоколами.',
+  'providers.listLabel': 'Поддерживаемые бренды моделей',
+  'providers.explore': 'Поддерживаемые провайдеры',
+
   // Hero
   'hero.title': 'Код-ревью с ИИ,\nпроверенное на миллионах реальных задач',
   'hero.description': 'Open Code Review разработали в Alibaba и проверили на реальных проектах компании. Он встраивается в привычный процесс разработки и работает с выбранной вами LLM. Вы сами решаете, куда передаются данные. Замечания агента разработчики действительно учитывают.',
@@ -295,8 +300,10 @@ export const ru: TranslationKeys = {
   'docs.sidebar.claudeCode': 'Command (Claude Code)',
   'docs.sidebar.delegate': 'Режим делегирования',
   'docs.sidebar.cicd': 'CI/CD',
+  'docs.sidebar.acp': 'ACP',
   'docs.sidebar.contributing': 'Участие в разработке',
   'docs.sidebar.faq': 'FAQ',
+  'docs.sidebar.chatgptPreview': 'Вход через ChatGPT (предварительная версия)',
   'docs.search.placeholder': 'Поиск...',
   'docs.search.noResults': 'Ничего не найдено',
   'docs.search.hint.select': 'Выбрать',

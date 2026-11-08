@@ -224,9 +224,8 @@ is usually one of:
   session JSONL — if the same tool result repeats, that's why.
 - The group is genuinely large or context-heavy and 100 rounds isn't
   enough. Raise the cap with `--max-tools <n>` (e.g., `--max-tools
-  150`). The flag only ever *raises* the limit — a value below the
-  template default of `100` is ignored, values 1–49 are clamped up to
-  `50`, and `0` keeps the template default.
+  150`). A resolved positive value sets the limit exactly; values 1–49
+  are clamped up to `50`, and `0` keeps the template default of `100`.
 - The model does not support native tool calling at all (common with
   local models) — see
   ["No tool calls parsed" (local models / Ollama)](#no-tool-calls-parsed-local-models-ollama).
@@ -400,7 +399,8 @@ need new providers; an issue for Hg support is open
 
 The static binary published in releases is named after the project
 (`opencodereview`); the NPM wrapper installs it as `ocr` for
-ergonomics. If you build from source you get `dist/opencodereview` —
+ergonomics. If you build from source you get `dist/opencodereview`
+(`dist/opencodereview.exe` on Windows) —
 copy it to `ocr` on your `$PATH`.
 
 ### How do I uninstall?
