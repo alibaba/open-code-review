@@ -105,7 +105,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock {#aws-bedrock}
 
-`bedrock`은 `anthropic`과 같은 Messages API를 사용하지만, 요청에 API 키를 싣는 대신 표준 AWS 자격 증명 체인으로 SigV4 서명을 하며 호스트는 리전이 결정합니다. 설정할 `api_key`가 없고, 서명을 대신할 키도 받지 않습니다:
+`bedrock`은 기본 `anthropic-bedrock` 프로토콜에서 `anthropic`과 같은 Messages API를 사용하지만, 요청에 API 키를 싣는 대신 표준 AWS 자격 증명 체인으로 SigV4 서명을 하며 호스트는 리전이 결정합니다. 설정할 `api_key`가 없고, 서명을 대신할 키도 받지 않습니다:
 
 ```bash
 ocr config set provider                      bedrock
@@ -113,6 +113,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+OpenAI 호환 게이트웨이에 연결하려고 `providers.bedrock.protocol`을 `openai`로 설정했다면, `providers.bedrock.url`에 게이트웨이 URL을 설정하고 `providers.bedrock.api_key` 또는 `providers.bedrock.api_key_cmd`로 게이트웨이의 API 키를 제공하세요. `ocr config provider`에서 모델을 변경해도 저장된 API 키는 유지됩니다.
 
 | 필드 | 의미 |
 |---|---|
@@ -123,7 +125,7 @@ ocr config set providers.bedrock.aws_profile example-profile
 
 모델 식별자는 계정 **과** 리전 단위로 정해지므로 OCR이 제공하는 목록은 닫힌 집합이 아니라 출발점입니다. 목록에 없더라도 계정에서 유효한 추론 프로필 ID나 애플리케이션 추론 프로필 ARN이면 그대로 받습니다. 계정에서 무엇을 쓸 수 있는지는 `aws bedrock list-inference-profiles --region <region>`으로 확인하세요. 최신 계열에서는 `-v1:0` 같은 버전 접미사가 유효하지 않습니다.
 
-bedrock에는 설정된 URL이 없고 호스트를 리전이 결정하므로, `ocr llm test`는 URL 대신 리전과 프로필을 표시합니다:
+기본 `anthropic-bedrock` 프로토콜에서는 리전이 호스트를 결정하므로, `ocr llm test`는 URL 대신 리전과 프로필을 표시합니다:
 
 ```
 Source: provider:bedrock
@@ -136,6 +138,8 @@ Model:  claude-sonnet-5
 Bedrock은 `llm.protocol`이나 `OCR_LLM_PROTOCOL`로는 사용할 수 **없습니다**. 이 블록은 URL 하나와 토큰 하나를 기술하는 구조라 리전이나 프로필을 담을 자리가 없고, bedrock은 이 블록이 담는 두 값 중 어느 것도 쓰지 않습니다. 그래서 이 조합은 받아들인 뒤 무시하는 대신 거부합니다.
 
 ### 커스텀 프로바이더 {#custom-providers}
+
+`mimo-v2.6-flash`, `foo.api_key`처럼 점이 포함된 이름을 사용할 수 있습니다. 새로운 이름에 점이 있다면 필드를 설정하기 전에 `ocr config set provider <name>`으로 생성하고 선택하세요. 이 명령은 현재 프로바이더를 변경합니다. 기존 항목은 선택하지 않고도 `providers.<name>.<field>` 또는 `custom_providers.<name>.<field>`로 수정할 수 있습니다. 이름의 처음이나 끝에 점이 있거나, 점이 연속되거나, 구분된 부분이 비어 있거나 공백으로만 구성된 이름은 허용되지 않습니다. 점이 없는 이름은 필드 설정 시 계속 자동으로 생성됩니다.
 
 위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock` 중 하나):
 

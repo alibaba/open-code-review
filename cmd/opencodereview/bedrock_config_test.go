@@ -286,18 +286,18 @@ func TestCheckAPIKeyRequirement(t *testing.T) {
 		t.Fatal("chatgpt preset not registered")
 	}
 
-	if err := checkAPIKeyRequirement("bedrock", "", "", bedrock, true); err != nil {
+	if err := checkAPIKeyRequirement("bedrock", "", "", bedrock, true, ProviderEntry{}); err != nil {
 		t.Errorf("ambient provider with no api_key = %v, want nil", err)
 	}
-	if err := checkAPIKeyRequirement("chatgpt", "", "", chatgpt, true); err != nil {
+	if err := checkAPIKeyRequirement("chatgpt", "", "", chatgpt, true, ProviderEntry{}); err != nil {
 		t.Errorf("external-auth provider with no api_key = %v, want nil", err)
 	}
 
 	t.Setenv(anthropic.EnvVar, "")
-	if err := checkAPIKeyRequirement("anthropic", "", "", anthropic, true); err == nil {
+	if err := checkAPIKeyRequirement("anthropic", "", "", anthropic, true, ProviderEntry{}); err == nil {
 		t.Error("key-based provider with no api_key and no env var = nil, want an error")
 	}
-	if err := checkAPIKeyRequirement("anthropic", "", "op read op://vault/key", anthropic, true); err != nil {
+	if err := checkAPIKeyRequirement("anthropic", "", "op read op://vault/key", anthropic, true, ProviderEntry{}); err != nil {
 		t.Errorf("key-based provider with api_key_cmd = %v, want nil", err)
 	}
 }

@@ -60,7 +60,17 @@ On Unix, credential files use owner-only `0600` permissions and the store direct
 
 Store mutations and refresh rotation share an operating-system file lock, but browser authorization runs outside it so other accounts remain usable. Completion reloads the store and checks the retained registration's revision. Logout, refresh or another completed login on that registration invalidates the pending result. Unrelated account updates are preserved. Access tokens are refreshed before expiry with rotating refresh tokens.
 
-Logout attempts to revoke the renewable session, clears access, refresh and ID tokens, and retains the account registration and host ID. Later sign-in omits `id_token_hint` after logout. If remote revocation cannot be confirmed, the CLI reports that local tokens were cleared and directs you to disconnect the app in ChatGPT settings.
+If a refresh returns new tokens but verification is interrupted by cancellation or a temporary failure to fetch public keys for ID-token verification, OCR keeps the received tokens. Run the original command again. The next request resumes verification, even after restarting the CLI.
+
+If the refreshed ID token fails signature or identity validation, OCR stops retrying and asks you to sign in again. Run the command shown in the error, using the saved client ID:
+
+```bash
+ocr auth login --provider chatgpt --account <saved-client-id>
+```
+
+A successful sign-in replaces the rejected credentials.
+
+Logout attempts to revoke the renewable session using the newest refresh token, including a replacement awaiting ID-token verification. It clears access, refresh and ID tokens, and retains the account registration and host ID. Later sign-in omits `id_token_hint` after logout. If remote revocation cannot be confirmed, the CLI reports that local tokens were cleared and directs you to disconnect the app in ChatGPT settings.
 
 ## Transport and usage
 

@@ -6,6 +6,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -650,52 +651,56 @@ func TestOpenAIResponsesClient_StatuslessResponseSucceeds(t *testing.T) {
 	}
 }
 
-// TestOpenAIResponsesClient_ExtraBodyStreamDropped verifies that an
-// extra_body.stream=true (valid for the Chat Completions client) is NOT
-// forwarded to the Responses API. Forwarding it makes the API answer with SSE
-// while Responses.New expects a JSON body, breaking every call. Non-boolean
-// values fall in the same bucket: a clean bool is what the streaming branch
-// expects, and a malformed value that reaches the wire trips the server or
-// breaks the non-streaming decoder. An explicit boolean false is the one
-// shape worth forwarding on the wire (see issue #1527 and the matching
-// TestOpenAIResponsesClient_ExtraBodyStreamFalseForwarded test below). Other
-// extra_body keys must still be forwarded.
+// True and non-boolean stream values must not request SSE while Responses.New
+// expects JSON. Other extra_body keys must still be forwarded.
 func TestOpenAIResponsesClient_ExtraBodyStreamDropped(t *testing.T) {
-	tests := []struct {
+	testCases := []struct {
 		name  string
 		value any
 	}{
 		{name: "boolean true", value: true},
 		{name: "string true", value: "true"},
+		{name: "string false", value: "false"},
 		{name: "null", value: nil},
+		{name: "number", value: 1},
+		{name: "object", value: map[string]any{}},
+		{name: "array", value: []any{}},
 	}
 
-	var gotBody map[string]any
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(test *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					test.Errorf("decode request body: %v", err)
+					http.Error(writer, "invalid request body", http.StatusBadRequest)
+					return
+				}
+				if value, present := body["stream"]; present {
+					test.Errorf("request body should NOT contain a stream field, got %v", value)
+				}
+				if body["keep_me"] != "yes" {
+					test.Errorf("other extra_body keys must still be forwarded; keep_me = %v", body["keep_me"])
+				}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(raw, &gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"resp_stream",
-			"object":"response",
-			"model":"gpt-5.4",
-			"status":"completed",
-			"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
-			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
-		}`))
-	}))
-	defer server.Close()
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{
+					"id":"resp_stream",
+					"object":"response",
+					"model":"gpt-5.4",
+					"status":"completed",
+					"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
+					"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+				}`))
+			}))
+			defer server.Close()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotBody = nil
 			client := NewOpenAIResponsesClient(ClientConfig{
 				URL:    server.URL + "/v1",
 				APIKey: "test-key",
 				Model:  "gpt-5.4",
 				ExtraBody: map[string]any{
-					"stream":               tt.value,
+					"stream":               testCase.value,
 					"keep_me":              "yes",
 					"temperature_override": 0.1,
 				},
@@ -705,28 +710,15 @@ func TestOpenAIResponsesClient_ExtraBodyStreamDropped(t *testing.T) {
 				Messages: []Message{{Role: "user", Content: "hi"}},
 			})
 			if err != nil {
-				t.Fatalf("CompletionsWithCtx: %v", err)
-			}
-
-			if _, present := gotBody["stream"]; present {
-				t.Errorf("request body should NOT contain a stream field, got %v", gotBody["stream"])
-			}
-			if gotBody["keep_me"] != "yes" {
-				t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
+				test.Fatalf("CompletionsWithCtx: %v", err)
 			}
 			if resp.Content() != "ok" {
-				t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+				test.Errorf("Content() = %q, want %q", resp.Content(), "ok")
 			}
 		})
 	}
 }
 
-// TestOpenAIResponsesClient_ExtraBodyStreamFalseForwarded verifies that an
-// explicit extra_body.stream=false is forwarded on the wire for a
-// non-streaming Responses API request (issue #1527). Some Responses-compatible
-// gateways default to text/event-stream when the stream field is absent; the
-// only way to force a non-streaming JSON response is to write "stream": false
-// explicitly. Other extra_body keys continue to flow through.
 func TestOpenAIResponsesClient_ExtraBodyStreamFalseForwarded(t *testing.T) {
 	var gotBody map[string]any
 
@@ -735,7 +727,7 @@ func TestOpenAIResponsesClient_ExtraBodyStreamFalseForwarded(t *testing.T) {
 		_ = json.Unmarshal(raw, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"id":"resp_no_stream",
+			"id":"resp_stream_false",
 			"object":"response",
 			"model":"gpt-5.4",
 			"status":"completed",
@@ -750,85 +742,18 @@ func TestOpenAIResponsesClient_ExtraBodyStreamFalseForwarded(t *testing.T) {
 		APIKey: "test-key",
 		Model:  "gpt-5.4",
 		ExtraBody: map[string]any{
-			"stream":      false,
-			"keep_me":     "yes",
-			"vendor_flag": "keep-me",
+			"stream": false,
 		},
 	})
 
-	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
 		Messages: []Message{{Role: "user", Content: "hi"}},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("CompletionsWithCtx: %v", err)
 	}
 
-	stream, present := gotBody["stream"]
-	if !present {
-		t.Fatalf("request body must contain stream field; got %#v", gotBody)
-	}
-	if stream != false {
-		t.Errorf("stream field = %#v, want false", stream)
-	}
-	if gotBody["keep_me"] != "yes" {
-		t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
-	}
-	if gotBody["vendor_flag"] != "keep-me" {
-		t.Errorf("vendor_flag must be forwarded; got %v", gotBody["vendor_flag"])
-	}
-	if resp.Content() != "ok" {
-		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
-	}
-}
-
-// TestOpenAIResponsesClient_ExtraBodyStreamDroppedOnStreamingPath verifies
-// that extra_body.stream never reaches the wire when the client uses the
-// streaming path (RequiresStreaming): the SDK's NewStreaming call owns the
-// stream field there, and a forwarded "stream": false would contradict it
-// and make the server answer with a plain JSON body that the SSE reader
-// cannot consume. Other extra_body keys are still forwarded.
-func TestOpenAIResponsesClient_ExtraBodyStreamDroppedOnStreamingPath(t *testing.T) {
-	var gotBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(raw, &gotBody)
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"resp_sse\",\"object\":\"response\",\"model\":\"gpt-5.4\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
-	}))
-	defer server.Close()
-
-	client := NewOpenAIResponsesClient(ClientConfig{
-		URL:               server.URL + "/v1",
-		APIKey:            "test-key",
-		Model:             "gpt-5.4",
-		RequiresStreaming: true,
-		ExtraBody: map[string]any{
-			"stream":      false,
-			"keep_me":     "yes",
-			"vendor_flag": "keep-me",
-		},
-	})
-
-	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
-		Messages: []Message{{Role: "user", Content: "hi"}},
-	})
-	if err != nil {
-		t.Fatalf("CompletionsWithCtx: %v", err)
-	}
-
-	if gotBody["stream"] != true {
-		t.Errorf("stream field = %#v, want the SDK's true; extra_body.stream must not override it", gotBody["stream"])
-	}
-	if gotBody["keep_me"] != "yes" {
-		t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
-	}
-	if gotBody["vendor_flag"] != "keep-me" {
-		t.Errorf("vendor_flag must be forwarded; got %v", gotBody["vendor_flag"])
-	}
-	if resp.Content() != "" {
-		t.Errorf("Content() = %q, want empty", resp.Content())
+	if got, present := gotBody["stream"]; !present || got != false {
+		t.Errorf("stream = %v (present %v), want false", got, present)
 	}
 }
 
@@ -978,6 +903,30 @@ func TestAccumulateResponseStreamRejectsTerminalBeyondLimit(t *testing.T) {
 	}
 }
 
+func TestChatGPTStreamFailureDetails(t *testing.T) {
+	for _, tc := range []struct {
+		name, eventType, details, want string
+	}{
+		{"failed_missing", "failed", "", "response.failed: rate limited; Manage usage: "},
+		{"failed_null", "failed", `,"incomplete_details":null`, "response.failed: rate limited; Manage usage: "},
+		{"incomplete_null", "incomplete", `,"incomplete_details":null`, "response.incomplete: rate limited; Manage usage: "},
+		{"incomplete_reason", "incomplete", `,"incomplete_details":{"reason":"max_output_tokens"}`, `response.incomplete: rate limited {"reason":"max_output_tokens"}; Manage usage: `},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := responseStreamEvents(t, `{"type":"response.`+tc.eventType+`","response":{"id":"resp_failed","status":"`+tc.eventType+`","error":{"code":"rate_limit_exceeded","message":"rate limited","param":"model"}`+tc.details+`}}`)
+			accumulator := responseStreamAccumulator{requireCompleted: true}
+			err := accumulator.add(events[0])
+			var streamErr *responseStreamEventError
+			if !errors.As(err, &streamErr) || streamErr.code != "rate_limit_exceeded" || streamErr.param != "model" {
+				t.Fatal("structured error details were lost", err)
+			}
+			if streamErr.message != tc.want+"https://chatgpt.com/settings/usage" {
+				t.Fatalf("unexpected error message: %s", streamErr.message)
+			}
+		})
+	}
+}
+
 func TestOpenAIResponsesClient_StreamingIncompleteContract(t *testing.T) {
 	for _, status := range []string{"incomplete", "failed"} {
 		t.Run(status, func(t *testing.T) {
@@ -1012,6 +961,42 @@ func TestOpenAIResponsesClient_StreamingIncompleteContract(t *testing.T) {
 				t.Fatal("ordinary incomplete stream lost the length finish reason or partial output", err)
 			}
 		})
+	}
+}
+
+func TestOpenAIResponsesClient_RequiredStreamingOverridesStreamFalse(test *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			test.Errorf("decode request body: %v", err)
+			http.Error(writer, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if body["stream"] != true {
+			test.Errorf("stream = %v, want true", body["stream"])
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(writer, `data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_required_stream","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}}`+"\n\n")
+		_, _ = io.WriteString(writer, `data: {"type":"response.completed","response":{"id":"resp_required_stream","object":"response","model":"fixture-model","status":"completed","output":[]}}`+"\n\n")
+		_, _ = io.WriteString(writer, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL:               server.URL + "/v1",
+		APIKey:            "fixture-key",
+		Model:             "fixture-model",
+		RequiresStreaming: true,
+		ExtraBody:         map[string]any{"stream": false},
+	})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		test.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if resp.Content() != "ok" {
+		test.Errorf("Content() = %q, want %q", resp.Content(), "ok")
 	}
 }
 

@@ -1,6 +1,6 @@
 module github.com/alibaba/open-code-review
 
-go 1.26.9
+go 1.26.10
 
 require (
 	charm.land/bubbles/v2 v2.1.1
@@ -89,6 +89,6 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect
-	google.golang.org/grpc v1.83.1 // indirect
+	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )

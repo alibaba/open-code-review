@@ -163,22 +163,13 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// "stream" is handled case-by-case. The non-streaming Responses.New
-		// call expects a single JSON body, so an explicit stream=true (valid
-		// on the Chat Completions client, which switches to a streaming
-		// path) or a non-boolean value would make the API answer with SSE
-		// and the JSON decoder would fail (issue #647): drop them. An
-		// explicit stream=false is safe to forward there and is the
-		// documented merge semantics of extra_body (issue #1527): some
-		// Responses-compatible gateways default to SSE when the stream
-		// field is absent, and the only way to force a JSON body on the
-		// wire is to write "stream": false explicitly. The streaming path
-		// (RequiresStreaming) puts stream=true on the wire itself, so any
-		// extra_body.stream value is dropped there to avoid contradicting
-		// the SDK's own field.
+		// Streaming is selected by the resolved provider, not extra_body.stream.
+		// Drop true and non-boolean values so ordinary Responses.New receives
+		// JSON, but forward explicit false for gateways that default to SSE.
+		// When streaming is required, NewStreaming overrides it with true.
 		if k == "stream" {
-			b, isBool := v.(bool)
-			if !isBool || b || c.cfg.RequiresStreaming {
+			stream, isBool := v.(bool)
+			if !isBool || stream {
 				continue
 			}
 		}
@@ -323,7 +314,12 @@ func (a *responseStreamAccumulator) add(event responses.ResponseStreamEventUnion
 			if err := json.Unmarshal([]byte(event.Response.RawJSON()), &envelope); err != nil {
 				return err
 			}
-			return &responseStreamEventError{code: string(event.Response.Error.Code), param: envelope.Error.Param, message: fmt.Sprintf("%s: %s %s; Manage usage: %s", event.Type, event.Response.Error.Message, envelope.Incomplete, chatgptauth.UsageURL)}
+			message := fmt.Sprintf("%s: %s", event.Type, event.Response.Error.Message)
+			if len(envelope.Incomplete) > 0 && string(envelope.Incomplete) != "null" {
+				message += " " + string(envelope.Incomplete)
+			}
+			message += "; Manage usage: " + chatgptauth.UsageURL
+			return &responseStreamEventError{code: string(event.Response.Error.Code), param: envelope.Error.Param, message: message}
 		}
 		a.terminalType = event.Type
 		response := event.Response

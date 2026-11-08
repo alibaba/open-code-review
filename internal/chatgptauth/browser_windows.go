@@ -11,5 +11,8 @@ import (
 )
 
 func openBrowserURL(ctx context.Context, target string) error {
-	return exec.CommandContext(ctx, "rundll32", "url.dll,FileProtocolHandler", target).Run()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return exec.Command("rundll32", "url.dll,FileProtocolHandler", target).Run()
 }

@@ -114,7 +114,7 @@ preset default — so you only need to set it when your endpoint differs.
 
 ### AWS Bedrock
 
-`bedrock` speaks the same Messages API as `anthropic`, but requests are
+With its default `anthropic-bedrock` protocol, `bedrock` uses the same Messages API as `anthropic`, but requests are
 SigV4-signed from the standard AWS credential chain instead of carrying an API
 key, and the region decides the host. There is no `api_key` to set, and none is
 accepted as a substitute for a signature:
@@ -125,6 +125,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+If you set `providers.bedrock.protocol` to `openai` for an OpenAI-compatible gateway, configure the gateway URL in `providers.bedrock.url` and supply its API key through `providers.bedrock.api_key` or `providers.bedrock.api_key_cmd`. Selecting another model in `ocr config provider` preserves the saved API key.
 
 | Field | Meaning |
 |---|---|
@@ -143,8 +145,8 @@ when absent from it. Run `aws bedrock list-inference-profiles --region <region>`
 to see what an account offers; a version suffix such as `-v1:0` is invalid for
 the newer families.
 
-`ocr llm test` reports the region and profile in place of a URL, because bedrock
-has no configured URL — the region decides the host:
+With the default `anthropic-bedrock` protocol, `ocr llm test` reports the region
+and profile in place of a URL. The region determines the host:
 
 ```
 Source: provider:bedrock
@@ -160,6 +162,14 @@ and bedrock uses neither value it does carry, so the combination is rejected
 rather than accepted and ignored.
 
 ### Custom providers
+
+Names such as `mimo-v2.6-flash` and `foo.api_key` are supported. Before
+setting fields on a new name containing dots, create and select it with
+`ocr config set provider <name>`; this changes the active provider. Existing
+dotted entries can be edited without selecting them, through either
+`providers.<name>.<field>` or `custom_providers.<name>.<field>`. Names must
+not start or end with a dot, contain consecutive dots, or have empty or
+whitespace-only segments. Dot-free names still support implicit creation.
 
 Any provider name not in the table above is treated as custom and must
 supply at least `url` and `protocol` (`protocol` is `anthropic`,

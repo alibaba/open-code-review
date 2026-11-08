@@ -90,6 +90,7 @@ func TestLoopbackLogin(t *testing.T) {
 					callback.Set("state", "wrong")
 				case "denied":
 					callback.Set("error", "access_denied")
+					callback.Del("code")
 				case "wrong-identity":
 					f.claims["sub"] = "different"
 				}
@@ -101,6 +102,9 @@ func TestLoopbackLogin(t *testing.T) {
 				r, err = client.Do(req)
 				if err == nil {
 					r.Body.Close()
+				}
+				if scenario == "bad-state" || scenario == "missing-id" || scenario == "changed-id" {
+					cancel()
 				}
 				return nil
 			}
@@ -439,6 +443,8 @@ func TestCallbackMalformedQueryDoesNotExchangeCode(t *testing.T) {
 		t.Run(suffix, func(t *testing.T) {
 			f := fixture(t)
 			s := testStore(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 			old := openBrowser
 			defer func() { openBrowser = old }()
 			openBrowser = func(_ context.Context, local string) error {
@@ -456,12 +462,11 @@ func TestCallbackMalformedQueryDoesNotExchangeCode(t *testing.T) {
 				if r.StatusCode != 400 || strings.Contains(string(body), "sensitive-fixture-code") || strings.Contains(string(body), q.Get("state")) {
 					t.Error("malformed callback response exposed authorization parameters or did not fail")
 				}
+				cancel()
 				return err
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
 			got, err := f.client.Login(ctx, s, "", false, false, false, io.Discard)
-			if got != nil || err == nil || err.Error() != "invalid OAuth callback query" || f.calls.Load() != 0 {
+			if got != nil || !errors.Is(err, context.Canceled) || f.calls.Load() != 0 {
 				t.Fatal("malformed callback reached code exchange", err)
 			}
 			d, err := s.Snapshot()

@@ -679,25 +679,15 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// The "stream" key needs case-by-case handling:
-		//
-		//   - bool true  -> drop. The streaming decision below uses a
-		//     dedicated boolean check, and when streaming is enabled the
-		//     SDK's NewStreaming method sets stream=true on the wire itself.
-		//   - bool false -> forward. Some gateways (vLLM, certain
-		//     OpenAI-compatible frontends) default to text/event-stream when
-		//     the stream field is absent. Forcing a non-streaming JSON body
-		//     needs an explicit "stream": false on the wire (issue #1527).
-		//   - any other type (string "true", null, map, ...) -> drop. The
-		//     forwarding branch below expects a clean boolean, and a malformed
-		//     value that reached the wire would either be ignored by the
-		//     server or break the non-streaming JSON decoder (issue #647).
-		//
-		// "stream_options" is owned by the streaming branch below: providers
+		// Only boolean true enables the streaming branch below; NewStreaming
+		// sets stream=true itself. Drop non-boolean values so they cannot
+		// request SSE while the non-streaming SDK expects JSON. Forward
+		// explicit false so gateways that default to streaming return JSON.
+		// stream_options belongs to the streaming branch because providers
 		// reject it unless stream is true.
 		if k == "stream" {
-			b, isBool := v.(bool)
-			if !isBool || b {
+			stream, isBool := v.(bool)
+			if !isBool || stream {
 				continue
 			}
 		} else if k == "stream_options" {
@@ -1506,18 +1496,12 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		opts = append(opts, option.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// "stream" is handled case-by-case. This client calls Messages.New,
-		// which is non-streaming, so an explicit stream=true would make the
-		// API answer with SSE and the JSON decoder would fail (issue #647):
-		// drop truthy and non-boolean values. An explicit stream=false is
-		// safe to forward and is the documented merge semantics of
-		// extra_body (issue #1527): some Anthropic-compatible gateways
-		// default to SSE when the stream field is absent, and the only way
-		// to force a JSON body on the wire is to write "stream": false
-		// explicitly.
+		// Messages.New expects a single JSON body, not SSE. Drop true and
+		// non-boolean stream values to preserve that contract, but forward
+		// explicit false so gateways that default to streaming return JSON.
 		if k == "stream" {
-			b, isBool := v.(bool)
-			if !isBool || b {
+			stream, isBool := v.(bool)
+			if !isBool || stream {
 				continue
 			}
 		}

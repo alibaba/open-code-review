@@ -10,7 +10,7 @@ import (
 )
 
 func TestLookupProvider_KnownProviders(t *testing.T) {
-	names := []string{"anthropic", "openai", "openrouter", "dashscope", "edenai"}
+	names := []string{"anthropic", "openai", "openrouter", "dashscope", "edenai", "chatgpt"}
 	for _, name := range names {
 		p, ok := LookupProvider(name)
 		if !ok {
@@ -26,9 +26,22 @@ func TestLookupProvider_KnownProviders(t *testing.T) {
 		if p.BaseURL == "" {
 			t.Errorf("LookupProvider(%q).BaseURL is empty", name)
 		}
-		if len(p.Models) == 0 {
+		if len(p.Models) == 0 && name != "chatgpt" {
 			t.Errorf("LookupProvider(%q).Models is empty", name)
 		}
+	}
+}
+
+func TestLookupProvider_ChatGPTDetails(t *testing.T) {
+	if _, ok := LookupProvider("codex"); ok {
+		t.Fatal("undocumented Codex preset must not ship")
+	}
+	p, ok := LookupProvider("chatgpt")
+	if !ok {
+		t.Fatal("chatgpt preset not found")
+	}
+	if p.Protocol != ProtocolOpenAIResponses || p.BaseURL != "https://api.openai.com/v1" || p.EnvVar != "" || !p.ExternalAuth || !p.RequiresStreaming || !p.RejectsSamplingParams || len(p.Models) != 0 {
+		t.Fatalf("unexpected chatgpt preset: %+v", p)
 	}
 }
 

@@ -193,13 +193,16 @@ type tokenResponse struct {
 }
 
 func (t tokenResponse) apply(a *Auth, refresh bool) error {
+	return t.applyAt(a, refresh, time.Now())
+}
+
+func (t tokenResponse) applyAt(a *Auth, refresh bool, now time.Time) error {
 	if t.Access == "" || t.Refresh == "" || !strings.EqualFold(t.Type, "Bearer") || t.Expires <= 0 || t.Expires > 86400 {
 		return errors.New("ChatGPT token response is missing credentials, Bearer type or valid expiry")
 	}
 	if !refresh && (t.ID == "" || t.Scope == nil) {
 		return errors.New("ChatGPT sign-in response is missing ID token or granted scopes")
 	}
-	now := time.Now()
 	earliest := time.Time{}
 	if len(t.Earliest) > 0 && string(t.Earliest) != "null" {
 		var seconds int64
@@ -396,13 +399,18 @@ func (c *Client) loginAttempt(ctx context.Context, host string, registration, ol
 			return
 		}
 		q, parseErr := url.ParseQuery(r.URL.RawQuery)
+		w.Header().Set("Cache-Control", "no-store")
+		if parseErr != nil || len(q["state"]) != 1 || q.Get("state") != a.state || len(q["code"]) > 1 || len(q["client_id"]) > 1 || len(q["error"]) > 1 || (len(q["error"]) > 0 && len(q["code"]) > 0) {
+			http.Error(w, "invalid OAuth callback state or query", http.StatusBadRequest)
+			return
+		}
 		code, id, callbackErr := a.callback(q, registration)
-		if parseErr != nil {
-			callbackErr = errors.New("invalid OAuth callback query")
+		if callbackErr != nil && q.Get("error") == "" {
+			http.Error(w, "invalid OAuth callback parameters", http.StatusBadRequest)
+			return
 		}
 		consumed := false
 		once.Do(func() { consumed = true; done <- result{code: code, id: id, err: callbackErr} })
-		w.Header().Set("Cache-Control", "no-store")
 		if !consumed {
 			http.Error(w, "callback already consumed", 410)
 		} else if callbackErr != nil {
@@ -419,31 +427,42 @@ func (c *Client) loginAttempt(ctx context.Context, host string, registration, ol
 	if _, err := fmt.Fprintln(out, "Continue with ChatGPT. Eligible requests use your ChatGPT plan."); err != nil {
 		return nil, err
 	}
+	var browserResult <-chan error
 	if noBrowser {
 		if _, err := fmt.Fprintln(out, "Open this local URL in your browser:", localURL); err != nil {
 			return nil, err
 		}
-	} else if err := openBrowser(ctx, localURL); err != nil {
-		return nil, errors.New("could not open browser; retry with --no-browser")
+	} else {
+		opened := make(chan error, 1)
+		opener := openBrowser
+		go func() { opened <- opener(ctx, localURL) }()
+		browserResult = opened
 	}
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case err := <-serveErr:
-		return nil, fmt.Errorf("ChatGPT callback server stopped: %w", err)
-	case r := <-done:
-		if r.err != nil {
-			return nil, r.err
+	for {
+		select {
+		case err := <-browserResult:
+			browserResult = nil
+			if err != nil {
+				return nil, errors.New("could not open browser; retry with --no-browser")
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case err := <-serveErr:
+			return nil, fmt.Errorf("ChatGPT callback server stopped: %w", err)
+		case r := <-done:
+			if r.err != nil {
+				return nil, r.err
+			}
+			*issued = r.id
+			auth, err := c.exchange(ctx, a, r.code, r.id, old)
+			if err != nil {
+				return nil, err
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return auth, nil
 		}
-		*issued = r.id
-		auth, err := c.exchange(ctx, a, r.code, r.id, old)
-		if err != nil {
-			return nil, err
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		return auth, nil
 	}
 }
 
@@ -458,7 +477,25 @@ func terminalRefresh(err error) bool {
 	}
 	return false
 }
+
+var errAccessNeedsRefresh = errors.New("ChatGPT access token needs refresh after verification; retry the request")
+
+func (a *Auth) refreshDue(now time.Time) bool {
+	if !now.Before(a.ExpiresAt) {
+		return true
+	}
+	return !a.ExpiresAt.After(now.Add(5*time.Minute)) && !now.Before(a.EarliestRefreshAt)
+}
+
 func (c *Client) Credentials(ctx context.Context, s Store, account string) (*Auth, error) {
+	auth, err := c.credentials(ctx, s, account)
+	if errors.Is(err, errAccessNeedsRefresh) {
+		return c.credentials(ctx, s, account)
+	}
+	return auth, err
+}
+
+func (c *Client) credentials(ctx context.Context, s Store, account string) (*Auth, error) {
 	var result *Auth
 	err := s.withLock(ctx, func() error {
 		d, err := s.load()
@@ -469,6 +506,12 @@ func (c *Client) Credentials(ctx context.Context, s Store, account string) (*Aut
 		if err != nil {
 			return err
 		}
+		signInRequired := func(reason string) error {
+			return fmt.Errorf("%s; run ocr auth login --provider chatgpt --account %s", reason, auth.ClientID)
+		}
+		if auth.PendingRefresh != nil && auth.PendingRefresh.IdentityError != "" {
+			return signInRequired(auth.PendingRefresh.IdentityError)
+		}
 		if auth.AccessToken == "" {
 			return errors.New("ChatGPT account is signed out; run ocr auth login --provider chatgpt")
 		}
@@ -476,7 +519,8 @@ func (c *Client) Credentials(ctx context.Context, s Store, account string) (*Aut
 			return fmt.Errorf("ChatGPT plan usage is disabled; run ocr auth login --provider chatgpt --enable-plan --account %s or select an API-key provider", auth.ClientID)
 		}
 		now := time.Now()
-		if auth.ExpiresAt.After(now.Add(5*time.Minute)) || (!auth.EarliestRefreshAt.IsZero() && now.Before(auth.EarliestRefreshAt) && now.Before(auth.ExpiresAt)) {
+		recoveringPending := auth.PendingRefresh != nil
+		if !recoveringPending && !auth.refreshDue(now) {
 			copy := *auth
 			result = &copy
 			return nil
@@ -485,34 +529,60 @@ func (c *Client) Credentials(ctx context.Context, s Store, account string) (*Aut
 			return errors.New("ChatGPT refresh token is missing; sign in again")
 		}
 		var t tokenResponse
-		err = c.post(ctx, c.base+"/api/accounts/oauth/token", url.Values{"grant_type": {"refresh_token"}, "client_id": {auth.ClientID}, "refresh_token": {auth.RefreshToken}, "resource": {Resource}}, &t)
-		if err != nil {
-			if terminalRefresh(err) {
-				auth.clear()
-				if saveErr := s.save(d); saveErr != nil {
-					return saveErr
-				}
-			}
-			return err
-		}
-		rotated := *auth
-		if t.ID != "" {
-			identity, err := c.verify(ctx, t.ID, auth.ClientID, "")
+		if auth.PendingRefresh != nil {
+			t = auth.PendingRefresh.Response
+			now = auth.PendingRefresh.ReceivedAt
+		} else {
+			err = c.post(ctx, c.base+"/api/accounts/oauth/token", url.Values{"grant_type": {"refresh_token"}, "client_id": {auth.ClientID}, "refresh_token": {auth.RefreshToken}, "resource": {Resource}}, &t)
 			if err != nil {
+				if terminalRefresh(err) {
+					auth.clear()
+					if saveErr := s.save(d); saveErr != nil {
+						return saveErr
+					}
+				}
 				return err
 			}
-			if identity.Subject != auth.Subject || identity.Issuer != auth.Issuer {
-				return errors.New("refresh changed ChatGPT identity")
+			now = time.Now()
+		}
+		rotated := *auth
+		if err := t.applyAt(&rotated, true, now); err != nil {
+			return err
+		}
+		if t.ID != "" {
+			// The issuer may already have consumed the old token. Keep the replacement
+			// recoverable, but never expose it for inference before identity verification.
+			if auth.PendingRefresh == nil {
+				auth.PendingRefresh = &pendingRefresh{Response: t, ReceivedAt: now}
+				auth.Revision++
+				if err := s.save(d); err != nil {
+					return err
+				}
 			}
-			if identity.Nonce != "" && identity.Nonce != auth.Nonce {
-				return errors.New("refresh changed the original ID-token nonce")
+			identity, err := c.verifyAt(ctx, t.ID, auth.ClientID, "", now)
+			if err == nil && (identity.Subject != auth.Subject || identity.Issuer != auth.Issuer) {
+				err = invalidIDTokenError("refresh changed ChatGPT identity")
+			}
+			if err == nil && identity.Nonce != "" && identity.Nonce != auth.Nonce {
+				err = invalidIDTokenError("refresh changed the original ID-token nonce")
+			}
+			if err != nil {
+				var invalid invalidIDTokenError
+				if errors.As(err, &invalid) {
+					// Retain the latest refresh token for logout, but stop retrying a rejected identity.
+					auth.PendingRefresh.IdentityError = invalid.Error()
+					auth.Revision++
+					if saveErr := s.save(d); saveErr != nil {
+						return saveErr
+					}
+					return signInRequired(invalid.Error())
+				}
+				return err
 			}
 			rotated.Email = identity.Email
 		}
-		if err := t.apply(&rotated, true); err != nil {
-			return err
-		}
-		rotated.Revision++
+		rotated.PendingRefresh = nil
+		rotated.Revision = auth.Revision + 1
 		*auth = rotated
 		if err := s.save(d); err != nil {
 			return err
@@ -523,6 +593,10 @@ func (c *Client) Credentials(ctx context.Context, s Store, account string) (*Aut
 		}
 		if !rotated.PlanEnabled() {
 			return fmt.Errorf("refreshed ChatGPT grant does not permit plan usage; run ocr auth login --provider chatgpt --enable-plan --account %s", auth.ClientID)
+		}
+		now = time.Now()
+		if !rotated.ExpiresAt.After(now) || (recoveringPending && rotated.refreshDue(now)) {
+			return errAccessNeedsRefresh
 		}
 		result = &rotated
 		return nil
@@ -574,7 +648,11 @@ func (c *Client) Logout(ctx context.Context, s Store, account string) error {
 		}
 		var revokeErr error
 		if a.RefreshToken != "" {
-			revokeErr = c.revokeSession(ctx, a)
+			session := *a
+			if a.PendingRefresh != nil {
+				session.RefreshToken = a.PendingRefresh.Response.Refresh
+			}
+			revokeErr = c.revokeSession(ctx, &session)
 		}
 		a.clear()
 		if err := s.save(d); err != nil {

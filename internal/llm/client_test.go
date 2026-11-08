@@ -985,23 +985,22 @@ func TestOpenAIClient_StreamOptionsConfigOverrides(t *testing.T) {
 
 // TestOpenAIClient_NonStreamingRequestDropsStreamField verifies that the
 // "stream" key in extra_body is NOT forwarded to the non-streaming Chat
-// Completions request when its value is truthy or non-boolean. Forwarding
-// stream=true makes the API answer with text/event-stream (SSE) while
-// Chat.Completions.New expects a JSON body, breaking every call (see issue
-// #647). Non-boolean shapes ("true" as a string, null, maps, ...) fall in the
-// same bucket: a clean bool is what the dedicated streaming branch expects,
-// and a malformed value that reaches the wire either trips the server or
-// breaks the non-streaming decoder. An explicit boolean false is forwarded:
-// see TestOpenAIClient_NonStreamingRequestForwardsStreamFalse.
+// Completions request. Forwarding it makes the API answer with
+// text/event-stream (SSE) while Chat.Completions.New expects a JSON body,
+// breaking every call (see issue #647). Only extra_body.stream=true as a
+// boolean triggers the streaming path. A false boolean must be forwarded so
+// gateways that stream by default can be explicitly told to return JSON;
+// other non-boolean values must still be dropped. Other extra_body keys are
+// still forwarded.
 func TestOpenAIClient_NonStreamingRequestDropsStreamField(t *testing.T) {
 	tests := []struct {
-		name  string
-		value any
+		name       string
+		value      any
+		wantStream bool
 	}{
 		{name: "missing"},
+		{name: "boolean false", value: false, wantStream: true},
 		{name: "string true", value: "true"},
-		{name: "null", value: nil},
-		{name: "object", value: map[string]any{"enabled": true}},
 	}
 
 	for _, tt := range tests {
@@ -1014,8 +1013,13 @@ func TestOpenAIClient_NonStreamingRequestDropsStreamField(t *testing.T) {
 					return
 				}
 
-				if _, exists := body["stream"]; exists {
-					t.Errorf("stream field should NOT be present in non-streaming request body, got %v", body["stream"])
+				stream, present := body["stream"]
+				if tt.wantStream {
+					if !present || stream != false {
+						t.Errorf("stream = %v (present %v), want false", stream, present)
+					}
+				} else if present {
+					t.Errorf("stream field should NOT be present in non-streaming request body, got %v", stream)
 				}
 
 				w.Header().Set("Content-Type", "application/json")
@@ -1049,60 +1053,6 @@ func TestOpenAIClient_NonStreamingRequestDropsStreamField(t *testing.T) {
 				t.Errorf("content = %q, want %q", got, "json")
 			}
 		})
-	}
-}
-
-// TestOpenAIClient_NonStreamingRequestForwardsStreamFalse verifies that an
-// explicit extra_body.stream=false is forwarded on the wire for a non-streaming
-// Chat Completions request (issue #1527). Some OpenAI-compatible gateways
-// (notably vLLM frontends and certain local LLM proxies) default to
-// text/event-stream when the stream field is absent; the only way to force a
-// non-streaming JSON response is to write "stream": false explicitly. Other
-// extra_body keys continue to flow through.
-func TestOpenAIClient_NonStreamingRequestForwardsStreamFalse(t *testing.T) {
-	var gotBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(raw, &gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{
-			"id":"chatcmpl-no-stream",
-			"object":"chat.completion",
-			"model":"gpt-5.4",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
-		}`)
-	}))
-	defer server.Close()
-
-	client := NewOpenAIClient(ClientConfig{
-		URL:    server.URL + "/v1",
-		APIKey: "test-key",
-		Model:  "gpt-5.4",
-		ExtraBody: map[string]any{
-			"stream":      false,
-			"vendor_flag": "keep-me",
-		},
-	})
-
-	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
-		Messages: []Message{{Role: "user", Content: "ping"}},
-	})
-	if err != nil {
-		t.Fatalf("CompletionsWithCtx: %v", err)
-	}
-	if resp.Content() != "ok" {
-		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
-	}
-	stream, present := gotBody["stream"]
-	if !present {
-		t.Fatalf("request body must contain stream field; got %#v", gotBody)
-	}
-	if stream != false {
-		t.Errorf("stream field = %#v, want false", stream)
-	}
-	if gotBody["vendor_flag"] != "keep-me" {
-		t.Errorf("other extra_body keys must still be forwarded; vendor_flag = %v", gotBody["vendor_flag"])
 	}
 }
 
@@ -1470,52 +1420,57 @@ func TestAnthropicClient_NoExtraHeadersWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestAnthropicClient_ExtraBodyStreamDropped verifies that an
-// extra_body.stream=true or non-boolean shape is NOT forwarded to the Messages
-// API. Forwarding stream=true makes the API answer with text/event-stream
-// (SSE) while Messages.New expects a JSON body, breaking every call (see
-// issue #647); non-boolean shapes fall in the same bucket since the
-// non-streaming Messages path only honors a clean boolean. An explicit
-// boolean false is the one shape worth forwarding on the wire (see issue
-// #1527 and the matching TestAnthropicClient_ExtraBodyStreamFalseForwarded
-// test below). Other extra_body keys must still be forwarded.
+// True and non-boolean stream values must not request SSE while Messages.New
+// expects JSON. Other extra_body keys must still be forwarded.
 func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
-	tests := []struct {
+	testCases := []struct {
 		name  string
 		value any
 	}{
 		{name: "boolean true", value: true},
 		{name: "string true", value: "true"},
+		{name: "string false", value: "false"},
 		{name: "null", value: nil},
+		{name: "number", value: 1},
+		{name: "object", value: map[string]any{}},
+		{name: "array", value: []any{}},
 	}
 
-	var gotBody map[string]any
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(test *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					test.Errorf("decode request body: %v", err)
+					http.Error(writer, "invalid request body", http.StatusBadRequest)
+					return
+				}
+				if value, present := body["stream"]; present {
+					test.Errorf("request body should NOT contain a stream field, got %v", value)
+				}
+				if body["keep_me"] != "yes" {
+					test.Errorf("other extra_body keys must still be forwarded; keep_me = %v", body["keep_me"])
+				}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(raw, &gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"msg_stream_test",
-			"type":"message",
-			"role":"assistant",
-			"model":"claude-test",
-			"content":[{"type":"text","text":"ok"}],
-			"stop_reason":"end_turn",
-			"usage":{"input_tokens":1,"output_tokens":1}
-		}`))
-	}))
-	defer server.Close()
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{
+					"id":"msg_stream_test",
+					"type":"message",
+					"role":"assistant",
+					"model":"claude-test",
+					"content":[{"type":"text","text":"ok"}],
+					"stop_reason":"end_turn",
+					"usage":{"input_tokens":1,"output_tokens":1}
+				}`))
+			}))
+			defer server.Close()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotBody = nil
 			client := NewAnthropicClient(ClientConfig{
 				URL:    server.URL + "/v1/messages",
 				APIKey: "test-key",
 				Model:  "claude-test",
 				ExtraBody: map[string]any{
-					"stream":               tt.value,
+					"stream":               testCase.value,
 					"keep_me":              "yes",
 					"temperature_override": 0.1,
 				},
@@ -1526,28 +1481,15 @@ func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
 				MaxTokens: 64,
 			})
 			if err != nil {
-				t.Fatalf("CompletionsWithCtx: %v", err)
-			}
-
-			if _, present := gotBody["stream"]; present {
-				t.Errorf("request body should NOT contain a stream field, got %v", gotBody["stream"])
-			}
-			if gotBody["keep_me"] != "yes" {
-				t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
+				test.Fatalf("CompletionsWithCtx: %v", err)
 			}
 			if resp.Content() != "ok" {
-				t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+				test.Errorf("Content() = %q, want %q", resp.Content(), "ok")
 			}
 		})
 	}
 }
 
-// TestAnthropicClient_ExtraBodyStreamFalseForwarded verifies that an explicit
-// extra_body.stream=false is forwarded on the wire for a non-streaming
-// Messages API request (issue #1527). Some Anthropic-compatible gateways
-// default to text/event-stream when the stream field is absent; the only way
-// to force a non-streaming JSON response is to write "stream": false
-// explicitly. Other extra_body keys continue to flow through.
 func TestAnthropicClient_ExtraBodyStreamFalseForwarded(t *testing.T) {
 	var gotBody map[string]any
 
@@ -1556,7 +1498,7 @@ func TestAnthropicClient_ExtraBodyStreamFalseForwarded(t *testing.T) {
 		_ = json.Unmarshal(raw, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"id":"msg_no_stream_test",
+			"id":"msg_stream_false_test",
 			"type":"message",
 			"role":"assistant",
 			"model":"claude-test",
@@ -1572,32 +1514,19 @@ func TestAnthropicClient_ExtraBodyStreamFalseForwarded(t *testing.T) {
 		APIKey: "test-key",
 		Model:  "claude-test",
 		ExtraBody: map[string]any{
-			"stream":               false,
-			"keep_me":              "yes",
-			"temperature_override": 0.1,
+			"stream": false,
 		},
 	})
 
-	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
 		Messages:  []Message{{Role: "user", Content: "hi"}},
 		MaxTokens: 64,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("CompletionsWithCtx: %v", err)
 	}
 
-	stream, present := gotBody["stream"]
-	if !present {
-		t.Fatalf("request body must contain stream field; got %#v", gotBody)
-	}
-	if stream != false {
-		t.Errorf("stream field = %#v, want false", stream)
-	}
-	if gotBody["keep_me"] != "yes" {
-		t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
-	}
-	if resp.Content() != "ok" {
-		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+	if got, present := gotBody["stream"]; !present || got != false {
+		t.Errorf("stream = %v (present %v), want false", got, present)
 	}
 }
 
