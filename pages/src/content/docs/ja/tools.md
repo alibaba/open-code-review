@@ -159,6 +159,10 @@ LINE_RANGE: 10-80
 
 - **1 回の呼び出しで最大 500 行。** より大きな範囲は切り詰められ、`IS_TRUNCATED: true` が設定され、
   `Note: Results truncated to 500 lines. Please narrow your line range.` が追記されます。
+- **結果にはバイト上限があります。** 2,048 バイトを超える行は UTF-8 の文字境界で切り詰められ、
+  `[line truncated, N more bytes omitted]` と印が付きます。本文が 256 KiB に達すると描画も停止し、
+  `Note: Output truncated at 262144 bytes. …` が追記されます。いずれも `IS_TRUNCATED: true`
+  が設定されるため、ミニファイされた単一行ファイルが数 MB を会話に流し込むことはありません。
 - ファイルの**変更後バージョン**のみを読み取ります。旧バージョンを見るには `file_read_diff` を使用します。
 
 モデルが周辺のコンテキストを必要とする場合（diff 内でしか見えない関数についてコメントする際など）、diff の

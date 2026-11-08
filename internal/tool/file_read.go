@@ -7,9 +7,23 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 const fileReadMaxLines = 500
+
+// Byte bounds for the rendered tool result. A line-count cap alone cannot
+// bound the result: committed minified or generated files (bundles, lockfiles,
+// JSON exports) pack megabytes into one line, and 500 capped lines still add
+// up.
+const (
+	// fileReadMaxLineBytes caps one rendered line, cutting at a UTF-8 rune
+	// boundary with an explicit omission marker.
+	fileReadMaxLineBytes = 2048
+	// fileReadMaxResultBytes caps the total bytes of rendered lines in one
+	// result, applied after the per-line cap.
+	fileReadMaxResultBytes = 256 * 1024
+)
 
 // FileReadProvider reads file content at a given path and optional line range.
 type FileReadProvider struct {
@@ -62,17 +76,56 @@ func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (st
 	fullRange := effectiveEnd - (int(startLine) - 1)
 	truncated := fullRange > fileReadMaxLines
 
-	displayEnd := int(startLine) - 1 + len(lines)
+	// Render the lines under the byte bounds before assembling the header, so
+	// LINE_RANGE and IS_TRUNCATED always describe the lines actually shown.
+	var body strings.Builder
+	shown, renderedBytes := 0, 0
+	lineTruncated, outputTruncated := false, false
+	for i, line := range lines {
+		text, cut := capFileReadLine(line)
+		if cut {
+			lineTruncated = true
+		}
+		if renderedBytes > 0 && renderedBytes+len(text) > fileReadMaxResultBytes {
+			outputTruncated = true
+			break
+		}
+		renderedBytes += len(text)
+		shown = i + 1
+		fmt.Fprintf(&body, "%d|%s\n", int(startLine)+i, text)
+	}
+	truncated = truncated || lineTruncated || outputTruncated
+
+	displayEnd := int(startLine) - 1 + shown
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("File: %s (Total lines: %d)\n", filePath, totalLines))
 	sb.WriteString(fmt.Sprintf("IS_TRUNCATED: %t\n", truncated))
 	sb.WriteString(fmt.Sprintf("LINE_RANGE: %d-%d\n", int(startLine), displayEnd))
-	for i, line := range lines {
-		sb.WriteString(fmt.Sprintf("%d|%s\n", int(startLine)+i, line))
+	sb.WriteString(body.String())
+	if lineTruncated {
+		sb.WriteString(fmt.Sprintf("\nNote: Lines longer than %d bytes were cut mid-line and the omitted bytes are not part of this result. Reason about the visible part only.\n", fileReadMaxLineBytes))
 	}
-	if truncated {
+	if outputTruncated {
+		sb.WriteString(fmt.Sprintf("\nNote: Output truncated at %d bytes. Re-read the remaining lines with a narrower start_line/end_line range.\n", fileReadMaxResultBytes))
+	}
+	if fullRange > fileReadMaxLines {
 		sb.WriteString(fmt.Sprintf("\nNote: Results truncated to %d lines. Please narrow your line range.\n", fileReadMaxLines))
 	}
 	return sb.String(), nil
+}
+
+// capFileReadLine caps one rendered line at fileReadMaxLineBytes. The cut
+// backs off to a UTF-8 rune boundary so a multibyte character is never split
+// mid-sequence, and the marker reports the omitted byte count so the model
+// knows the line was not shown in full.
+func capFileReadLine(s string) (string, bool) {
+	if len(s) <= fileReadMaxLineBytes {
+		return s, false
+	}
+	cut := fileReadMaxLineBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return fmt.Sprintf("%s …[line truncated, %d more bytes omitted]", s[:cut], len(s)-cut), true
 }

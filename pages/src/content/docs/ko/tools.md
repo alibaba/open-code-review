@@ -170,6 +170,10 @@ LINE_RANGE: 10-80
 - **호출당 최대 500줄입니다.** 더 큰 범위는 잘리고 `IS_TRUNCATED: true`가 설정되며,
   끝에 `Note: Results truncated to 500 lines. Please narrow your line range.`가
   붙습니다.
+- **결과에는 바이트 상한이 있습니다.** 2,048바이트를 넘는 줄은 UTF-8 문자 경계에서 잘려
+  `[line truncated, N more bytes omitted]` 표시가 붙고, 본문이 256 KiB에 도달하면 렌더링이
+  멈추며 `Note: Output truncated at 262144 bytes. …`가 추가됩니다. 두 경우 모두
+  `IS_TRUNCATED: true`가 설정되므로 한 줄로 압축된 파일이 수 MB를 대화에 밀어 넣지 않습니다.
 - 파일의 **변경된 쪽만** 읽습니다. 이전 버전을 보려면 `file_read_diff`를 쓰세요.
 
 모델이 주변 맥락이 필요할 때(diff에서만 보이는 함수에 코멘트를 달아야 할 때)는 diff의

@@ -158,6 +158,10 @@ LINE_RANGE: 10-80
 
 - **每次调用最多 500 行。** 更大范围会被截断，置 `IS_TRUNCATED: true`，并追加
   `Note: Results truncated to 500 lines. Please narrow your line range.`。
+- **结果有字节上限。** 超过 2,048 字节的行会在 UTF-8 字符边界处截断，并标记
+  `[line truncated, N more bytes omitted]`；正文达到 256 KiB 后停止渲染，追加
+  `Note: Output truncated at 262144 bytes. …`。两种情况都会置 `IS_TRUNCATED: true`，
+  因此压缩成单行的文件不会把数 MB 内容带进对话。
 - 只读取文件的**修改后版本**。要看旧版本，用 `file_read_diff`。
 
 当模型需要周围上下文（对某个只能在 diff 中看到的函数发表评论时），应从 diff
