@@ -5,10 +5,13 @@ package agent
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -58,6 +61,8 @@ func initTraceParentRepo(t *testing.T) string {
 func setupRecordingTelemetry(t *testing.T) *tracetest.SpanRecorder {
 	t.Helper()
 	t.Setenv("OCR_ENABLE_TELEMETRY", "1")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "")
 	telemetry.Init(context.Background())
 	recorder := tracetest.NewSpanRecorder()
 	prevTP := otel.GetTracerProvider()
@@ -77,6 +82,29 @@ func setupRecordingTelemetry(t *testing.T) *tracetest.SpanRecorder {
 		otel.SetTextMapPropagator(prevProp)
 	})
 	return recorder
+}
+
+func TestRecordingTelemetryIgnoresOTLPEnvironment(t *testing.T) {
+	var requests atomic.Int64
+	collector := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requests.Add(1)
+		response.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(collector.Close)
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.URL)
+	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+
+	t.Run("record", func(t *testing.T) {
+		setupRecordingTelemetry(t)
+		if !telemetry.IsEnabled() {
+			t.Fatal("expected telemetry to be enabled")
+		}
+		telemetry.RecordFilesReviewed(context.Background(), 1)
+	})
+
+	if count := requests.Load(); count != 0 {
+		t.Fatalf("expected no OTLP requests, got %d", count)
+	}
 }
 
 // TestRunPipelineSpansDoNotParentToDiffParse guards the trace hierarchy fix for
