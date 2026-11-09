@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
+import { useState } from 'preact/hooks';
+import { LogLine } from '../../shared/types';
+import { LogViewer } from '../components/LogViewer';
 import { useT } from '../I18nProvider';
 
-interface Props { onRetry: () => void; error?: string; }
-export function FailedView({ onRetry, error }: Props) {
+interface Props { onRetry: () => void; error?: string; logs?: LogLine[]; }
+export function FailedView({ onRetry, error, logs = [] }: Props) {
+  const [showLogs, setShowLogs] = useState(false);
   const t = useT();
   return (
     <div class="action-failed" style="display:block">
@@ -13,6 +17,16 @@ export function FailedView({ onRetry, error }: Props) {
         {error && <div class="fc-detail">{error}</div>}
         <button class="retry-pill" onClick={onRetry}>{t('view.failed.retry')}</button>
       </div>
+
+      {logs.length > 0 && (
+        <div class="logs-disclosure">
+          <button class="logs-toggle" onClick={() => setShowLogs(!showLogs)}>
+            <span class={`logs-toggle-arrow${showLogs ? ' open' : ''}`}></span>
+            {t('view.failed.processLog')}
+          </button>
+          {showLogs && <LogViewer logs={logs} />}
+        </div>
+      )}
     </div>
   );
 }

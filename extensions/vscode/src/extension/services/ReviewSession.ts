@@ -5,7 +5,8 @@ import { CliResult, CliRunOptions, LogLine, ReviewState } from '@shared/types';
 import { CliService } from './CliService';
 
 // `ocr review` reports the manifest terminal state (complete | partial | failed | skipped);
-// completed_with_errors is the manifest-less status. None of these is a clean pass.
+// completed_with_errors is the manifest-less status. The statuses below mean some or all
+// items were not reviewed, so they are never a clean pass.
 const INCOMPLETE_STATUSES: ReadonlySet<string> = new Set(['completed_with_errors', 'partial', 'failed']);
 
 export function resultToState(result: CliResult): ReviewState {
