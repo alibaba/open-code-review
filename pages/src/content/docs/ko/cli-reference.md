@@ -415,18 +415,28 @@ ocr session list --json
 
 ### `ocr session show` {#ocr-session-show}
 
+기본적으로 저장된 모든 저장소의 세션에서 ID를 검색합니다. `--repo .`을 지정하면
+기존처럼 현재 디렉터리 범위로 검색을 제한할 수 있습니다.
+
+기본 전역 검색에서는 ID가 유일하면 worktree를 전환하거나 원래 체크아웃을 삭제한 후에도
+세션을 확인할 수 있습니다. 여러 저장소에 같은 ID가 저장되어 있으면 후보 저장소를 나열하며,
+`--repo`로 하나를 선택해야 합니다. 현재 `--repo`에는 실제로 존재하는 저장소 디렉터리를
+지정해야 하므로, ID가 중복되고 확인하려는 세션의 원래 체크아웃이 삭제된 경우에는
+해당 세션을 선택할 수 없습니다.
+
 이어서 한 실행이라면 어떤 실행을 이어받았는지, 그 과정에서 프로바이더나 모델이 바뀌었다면
 무엇에서 무엇으로 바뀌었는지도 함께 출력합니다.
 
 ```bash
 ocr session show <session-id>
 ocr session show --json <session-id>
+ocr session show --repo . <session-id>
 ocr session show --repo /path/to/repo <session-id>
 ```
 
 | 플래그 | 기본값 | 설명 |
 |---|---|---|
-| `--repo <path>` | 현재 디렉터리 | 살펴볼 세션이 속한 저장소. |
+| `--repo <path>` | 모든 저장소 | 세션 검색 범위를 지정한 저장소 디렉터리로 제한합니다. 해당 디렉터리는 실제로 존재해야 합니다. |
 | `--json` | `false` | 세션 메타데이터와 파일별 항목을 JSON으로 출력합니다. |
 
 ### `ocr session comments` {#ocr-session-comments}

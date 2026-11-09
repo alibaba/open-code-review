@@ -422,18 +422,28 @@ ocr session list --json
 
 ### `ocr session show`
 
+Finds the session by id across saved repositories by default. Pass `--repo .`
+to retain the previous current-directory-scoped lookup.
+
+With the default global lookup, a unique id remains inspectable after switching
+worktrees or removing the original checkout. If the id exists under multiple
+repositories, the command lists them and requires `--repo` to select one.
+`--repo` currently requires an existing repository directory, so it cannot select
+an ambiguous session whose original checkout has been removed.
+
 A resumed run also prints the run it continued, and the provider/model
 transition when the resume crossed one.
 
 ```bash
 ocr session show <session-id>
 ocr session show --json <session-id>
+ocr session show --repo . <session-id>
 ocr session show --repo /path/to/repo <session-id>
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `--repo <path>` | current dir | Repository whose session should be inspected. |
+| `--repo <path>` | all repositories | Restrict the session lookup to this existing repository directory. |
 | `--json` | `false` | Emit session metadata and per-file items as JSON. |
 
 ### `ocr session comments`
