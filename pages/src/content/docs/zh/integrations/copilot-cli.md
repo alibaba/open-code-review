@@ -11,11 +11,28 @@ sidebar:
 
 ## 仓库里有什么
 
-没有任何 Copilot 专有的内容。工作流位于与 agent 无关的 skill 中：
+工作流位于与 agent 无关的 skill 中：
 [`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md)。
-Copilot CLI 会从标准位置读取 skill，因此安装步骤就是直接复制该目录。
+一个 Copilot CLI 插件清单
+[`plugins/open-code-review/plugin.json`](https://github.com/alibaba/open-code-review/blob/main/plugins/open-code-review/plugin.json)
+（Agent Plugins 1.0）将随附的 skill 打包，供 `copilot plugin install` 使用。
+Copilot CLI 仍会从标准位置读取 skill，因此手动复制该 skill 目录同样可行。
 
 ## 安装
+
+安装插件（推荐）：
+
+```bash
+copilot plugin install alibaba/open-code-review:plugins/open-code-review
+```
+
+这会安装 `open-code-review` 和 `open-code-review-delegate` 两个 skill。用
+`copilot plugin uninstall open-code-review` 卸载。
+
+Copilot CLI 已弃用直接安装插件的方式，转而推荐通过 marketplace 安装；将来
+marketplace 条目可能让 `plugin@open-code-review` 成为推荐写法。
+
+### 手动替代方案：复制 skill
 
 把 skill 复制到 Copilot CLI 能发现的目录中。**项目级**（提交到仓库，让团队共享）：
 

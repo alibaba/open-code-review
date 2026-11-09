@@ -10,12 +10,26 @@ OCR を、他のコーディングエージェントと同じポータブルな 
 
 ## リポジトリに含まれるもの
 
-Copilot 固有のものは何もありません。ワークフローは agent に依存しない
-skill
+ワークフローは agent に依存しない skill
 [`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md)
-にあります。Copilot CLI は標準的な場所から skill を読み込むため、インストール手順はそのディレクトリをそのままコピーするだけです。
+にあります。Copilot CLI のプラグインマニフェスト
+[`plugins/open-code-review/plugin.json`](https://github.com/alibaba/open-code-review/blob/main/plugins/open-code-review/plugin.json)
+（Agent Plugins 1.0）が、同梱の skill を `copilot plugin install` 用にまとめます。
+Copilot CLI は標準的な場所からも skill を読み込むため、skill ディレクトリをコピーする方法も引き続き使えます。
 
 ## インストール
+
+プラグインをインストールします（推奨）：
+
+```bash
+copilot plugin install alibaba/open-code-review:plugins/open-code-review
+```
+
+`open-code-review` と `open-code-review-delegate` の skill がインストールされます。削除するには `copilot plugin uninstall open-code-review` を実行します。
+
+Copilot CLI は直接のプラグインインストールを非推奨とし、marketplace 経由のインストールを推奨しています。将来 marketplace のエントリにより `plugin@open-code-review` が推奨形式になる可能性があります。
+
+### 手動の代替：skill をコピーする
 
 skill を Copilot CLI が検出するディレクトリにコピーします。**プロジェクトレベル**
 （リポジトリにコミットし、チームで共有）：

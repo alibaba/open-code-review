@@ -14,13 +14,30 @@ behavior.
 
 ## What ships in the repo
 
-Nothing Copilot-specific. The workflow lives in the agent-agnostic
-skill at
-[`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md);
-Copilot CLI reads skills from standard locations, so the install step
-is a plain copy of that directory.
+The workflow lives in the agent-agnostic skill at
+[`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md).
+A Copilot CLI plugin manifest at
+[`plugins/open-code-review/plugin.json`](https://github.com/alibaba/open-code-review/blob/main/plugins/open-code-review/plugin.json)
+(Agent Plugins 1.0) packages the bundled skills for `copilot plugin install`.
+Copilot CLI still reads skills from standard locations, so copying the skill
+directory also works.
 
 ## Install
+
+Install the plugin (recommended):
+
+```bash
+copilot plugin install alibaba/open-code-review:plugins/open-code-review
+```
+
+This installs the `open-code-review` and `open-code-review-delegate` skills.
+Remove it with `copilot plugin uninstall open-code-review`.
+
+Direct plugin installs are deprecated by Copilot CLI in favor of marketplace
+installs; a marketplace entry may make `plugin@open-code-review` the recommended
+form later.
+
+### Manual alternative: copy the skill
 
 Copy the skill into a directory Copilot CLI discovers. **Project-level**
 (commit it so the team shares it):

@@ -14,13 +14,30 @@ sidebar:
 
 ## Что поставляется в репозитории
 
-Ничего специфичного для Copilot. Рабочий процесс находится в не зависящем от
-агента навыке по пути
-[`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md);
-Copilot CLI читает навыки из стандартных расположений, поэтому установка — это
-обычное копирование этого каталога.
+Рабочий процесс находится в не зависящем от агента навыке по пути
+[`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md).
+Манифест плагина Copilot CLI
+[`plugins/open-code-review/plugin.json`](https://github.com/alibaba/open-code-review/blob/main/plugins/open-code-review/plugin.json)
+(Agent Plugins 1.0) упаковывает встроенные навыки для `copilot plugin install`.
+Copilot CLI по-прежнему читает навыки из стандартных расположений, поэтому
+копирование каталога навыка тоже работает.
 
 ## Установка
+
+Установите плагин (рекомендуется):
+
+```bash
+copilot plugin install alibaba/open-code-review:plugins/open-code-review
+```
+
+Устанавливаются навыки `open-code-review` и `open-code-review-delegate`.
+Удалить плагин можно командой `copilot plugin uninstall open-code-review`.
+
+Прямая установка плагинов признана Copilot CLI устаревшей в пользу установки
+через marketplace; запись в marketplace может позже сделать
+`plugin@open-code-review` рекомендуемой формой.
+
+### Ручной вариант: скопируйте навык
 
 Скопируйте навык в каталог, который обнаруживает Copilot CLI. **На уровне
 проекта** (закоммитьте его, чтобы навык был доступен всей команде):

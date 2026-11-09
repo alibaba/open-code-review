@@ -12,12 +12,30 @@ sidebar:
 
 ## 저장소에 포함된 것 {#what-ships-in-the-repo}
 
-Copilot 전용 파일은 없습니다. 워크플로는 Agent에 종속되지 않는 스킬인
+워크플로는 Agent에 종속되지 않는 스킬인
 [`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md)에
-들어 있습니다. Copilot CLI는 표준 위치에서 스킬을 읽으므로, 설치 단계는 해당
-디렉터리를 그대로 복사하는 것뿐입니다.
+들어 있습니다. Copilot CLI 플러그인 매니페스트
+[`plugins/open-code-review/plugin.json`](https://github.com/alibaba/open-code-review/blob/main/plugins/open-code-review/plugin.json)
+(Agent Plugins 1.0)가 번들 스킬을 `copilot plugin install`용으로 묶습니다.
+Copilot CLI는 표준 위치에서도 스킬을 읽으므로 스킬 디렉터리를 복사하는 방법도
+계속 사용할 수 있습니다.
 
 ## 설치 {#install}
+
+플러그인을 설치하세요(권장).
+
+```bash
+copilot plugin install alibaba/open-code-review:plugins/open-code-review
+```
+
+`open-code-review`와 `open-code-review-delegate` 스킬이 설치됩니다. 제거하려면
+`copilot plugin uninstall open-code-review`를 실행하세요.
+
+Copilot CLI는 직접 플러그인 설치를 더 이상 권장하지 않고 마켓플레이스 설치를
+권장합니다. 나중에 마켓플레이스 항목이 추가되면 `plugin@open-code-review`가 권장
+형식이 될 수 있습니다.
+
+### 수동 대안: 스킬 복사 {#manual-alternative-copy-the-skill}
 
 Copilot CLI가 인식하는 디렉터리에 스킬을 복사하세요. **프로젝트 수준**(저장소에 함께
 커밋해 팀이 공유):

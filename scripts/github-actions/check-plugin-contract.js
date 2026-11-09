@@ -204,6 +204,23 @@ const PLUGIN_DECLARATIONS = [
   },
 ];
 
+// Agent Plugins 1.0 manifests (GitHub Copilot CLI). The schema fixes `skills/`
+// as an immediate child of the plugin root and offers no field to override it,
+// so there is no declared path to resolve: the layout itself is the contract.
+// `target` pins the tree the fixed path must land on and is already validated
+// by SKILL_ROOTS, so the manifest and the tree cannot drift apart.
+const AGENT_PLUGIN_MANIFESTS = [
+  {
+    file: "plugins/open-code-review/plugin.json",
+    host: "GitHub Copilot CLI",
+    // Fixed by the schema, not declared in the manifest: resolve it from the
+    // manifest directory, where Agent Plugins 1.0 places `skills/`.
+    base: "manifest-dir",
+    skillsDir: "skills",
+    target: "plugins/open-code-review/skills",
+  },
+];
+
 // Skill trees. Each direct subdirectory must hold a SKILL.md whose frontmatter
 // `name` equals the directory name — `npx skills add --skill <name>` and every
 // skill loader address a skill by that name.
@@ -547,6 +564,67 @@ function checkPluginDeclarations(specs, readJson) {
   return { errors, warnings };
 }
 
+// Agent Plugins 1.0 fixes the layout, so this certifies what a declared-path
+// check cannot: the manifest exists and parses, and every immediate
+// subdirectory of the fixed `skills/` tree holds a non-empty SKILL.md. The
+// schema bundles a directory as a skill by that file alone, so any subdirectory
+// without one installs silently and exposes nothing.
+function checkAgentPluginManifests(specs, readJson, listDirs, readFile) {
+  const errors = [];
+  for (const spec of specs) {
+    if (readJson(spec.file) === null) {
+      errors.push({
+        file: spec.file,
+        message:
+          `${spec.host} plugin manifest ${spec.file} is missing or is not ` +
+          `valid JSON. ${spec.host} would not install the plugin.`,
+      });
+      continue;
+    }
+    const skillsRoot = resolveDeclaredPath(spec.file, spec.base, spec.skillsDir);
+    if (skillsRoot !== spec.target) {
+      errors.push({
+        file: spec.file,
+        message:
+          `${spec.file} fixes its skills directory at \`${spec.skillsDir}\` ` +
+          `(relative to the ${spec.base}), which resolves to \`${skillsRoot}\`, ` +
+          `but the skills tree is at \`${spec.target}\`.`,
+      });
+      continue;
+    }
+    const dirs = listDirs(skillsRoot);
+    if (dirs === null) {
+      errors.push({
+        file: skillsRoot,
+        message: `Skill tree \`${skillsRoot}\` is missing.`,
+      });
+      continue;
+    }
+    if (dirs.length === 0) {
+      errors.push({
+        file: skillsRoot,
+        message:
+          `Skill tree \`${skillsRoot}\` contains no skill directory. Agent ` +
+          `Plugins 1.0 installs nothing from an empty skills/ tree.`,
+      });
+      continue;
+    }
+    for (const dir of dirs) {
+      const file = `${skillsRoot}/${dir}/SKILL.md`;
+      const content = readFile(file);
+      if (content === null || content.trim() === "") {
+        errors.push({
+          file,
+          message:
+            `\`${skillsRoot}/${dir}/\` has no non-empty SKILL.md. Agent Plugins ` +
+            `1.0 requires every immediate subdirectory of skills/ to hold one.`,
+        });
+      }
+    }
+  }
+  return { errors };
+}
+
 // ---------------------------------------------------------------------------
 // GitHub Actions annotation + IO helpers
 // ---------------------------------------------------------------------------
@@ -836,6 +914,16 @@ function runManifestsCheck({ repoRoot = process.cwd() } = {}) {
   warnings.push(...declared.warnings);
   checked += PLUGIN_DECLARATIONS.length;
 
+  // Agent Plugins 1.0 manifests -> the fixed skills/ layout they imply.
+  const agent = checkAgentPluginManifests(
+    AGENT_PLUGIN_MANIFESTS,
+    (file) => readJsonOrNull(repoRoot, file),
+    (rel) => listEntries(repoRoot, rel, "dir"),
+    (rel) => readFileOrNull(path.join(repoRoot, rel), { maxBytes: Infinity })
+  );
+  errors.push(...agent.errors);
+  checked += AGENT_PLUGIN_MANIFESTS.length;
+
   // Skill trees: non-empty, and every SKILL.md well-formed.
   for (const root of SKILL_ROOTS) {
     const dirs = listEntries(repoRoot, root, "dir");
@@ -945,6 +1033,7 @@ module.exports = {
   LINK_ALLOW_MARKER,
   MARKETPLACES,
   PLUGIN_DECLARATIONS,
+  AGENT_PLUGIN_MANIFESTS,
   SKILL_ROOTS,
   COMMAND_DIRS,
   MIN_EXPECTED_LINKS,
@@ -966,6 +1055,7 @@ module.exports = {
   validateCommandFrontmatter,
   resolveDeclaredPath,
   checkPluginDeclarations,
+  checkAgentPluginManifests,
   pluginEntries,
   listEntries,
   readFileOrNull,

@@ -22,6 +22,7 @@ const {
   MARKETPLACES,
   MIN_EXPECTED_LINKS,
   PLUGIN_DECLARATIONS,
+  AGENT_PLUGIN_MANIFESTS,
   SKILL_ROOTS,
   COMMAND_DIRS,
   escapeAnnotationData,
@@ -38,6 +39,7 @@ const {
   validateCommandFrontmatter,
   resolveDeclaredPath,
   checkPluginDeclarations,
+  checkAgentPluginManifests,
   pluginEntries,
   listEntries,
   readFileOrNull,
@@ -516,6 +518,93 @@ function testCheckPluginDeclarationsCatchesDrift() {
   assert.ok(/missing or is not valid JSON/.test(missing.errors[0].message));
 }
 
+// --- Agent Plugins 1.0 fixed layout ----------------------------------------
+
+const AGENT_SPEC = {
+  file: "p/plugin.json",
+  host: "GitHub Copilot CLI",
+  base: "manifest-dir",
+  skillsDir: "skills",
+  target: "p/skills",
+};
+
+function runAgentCheck({ json = {}, dirs = {}, files = {} } = {}) {
+  return checkAgentPluginManifests(
+    [AGENT_SPEC],
+    (file) => (Object.prototype.hasOwnProperty.call(json, file) ? json[file] : null),
+    (rel) => (Object.prototype.hasOwnProperty.call(dirs, rel) ? dirs[rel] : null),
+    (rel) => (Object.prototype.hasOwnProperty.call(files, rel) ? files[rel] : null)
+  );
+}
+
+function testAgentPluginManifestHappyPath() {
+  const { errors } = runAgentCheck({
+    json: { "p/plugin.json": { name: "open-code-review" } },
+    dirs: { "p/skills": ["open-code-review", "open-code-review-delegate"] },
+    files: {
+      "p/skills/open-code-review/SKILL.md": "---\nname: open-code-review\n---\n",
+      "p/skills/open-code-review-delegate/SKILL.md":
+        "---\nname: open-code-review-delegate\n---\n",
+    },
+  });
+  assert.deepStrictEqual(errors, []);
+}
+
+function testAgentPluginManifestRequiresASkillPerSubdirectory() {
+  // Agent Plugins 1.0 exposes an immediate skills/ subdirectory as a skill only
+  // when it holds SKILL.md, so one without it is dropped at install time.
+  const { errors } = runAgentCheck({
+    json: { "p/plugin.json": {} },
+    dirs: { "p/skills": ["a", "b"] },
+    files: { "p/skills/a/SKILL.md": "---\nname: a\n---\n" },
+  });
+  assert.strictEqual(errors.length, 1);
+  assert.strictEqual(errors[0].file, "p/skills/b/SKILL.md");
+  assert.ok(/has no non-empty SKILL\.md/.test(errors[0].message));
+}
+
+function testAgentPluginManifestRejectsEmptySkillFile() {
+  const { errors } = runAgentCheck({
+    json: { "p/plugin.json": {} },
+    dirs: { "p/skills": ["a"] },
+    files: { "p/skills/a/SKILL.md": "  \n" },
+  });
+  assert.strictEqual(errors.length, 1);
+  assert.strictEqual(errors[0].file, "p/skills/a/SKILL.md");
+  assert.ok(/has no non-empty SKILL\.md/.test(errors[0].message));
+}
+
+function testAgentPluginManifestRejectsMalformedManifest() {
+  // Missing and unparseable both surface as null from the reader.
+  const { errors } = runAgentCheck({ dirs: { "p/skills": ["a"] } });
+  assert.strictEqual(errors.length, 1);
+  assert.strictEqual(errors[0].file, "p/plugin.json");
+  assert.ok(/missing or is not valid JSON/.test(errors[0].message));
+}
+
+function testAgentPluginManifestRejectsLayoutDrift() {
+  // The schema fixes skills/ beside the manifest; a manifest that moved must
+  // not certify a tree it no longer sits next to.
+  const { errors } = checkAgentPluginManifests(
+    [{ ...AGENT_SPEC, base: "plugin-root" }],
+    () => ({}),
+    () => [],
+    () => null
+  );
+  assert.strictEqual(errors.length, 1);
+  assert.ok(/resolves to `skills`/.test(errors[0].message));
+}
+
+function testRealAgentPluginManifestPinsTheFixedLayout() {
+  const spec = AGENT_PLUGIN_MANIFESTS.find((m) => m.host === "GitHub Copilot CLI");
+  assert.ok(spec, "expected a Copilot CLI manifest");
+  assert.strictEqual(spec.base, "manifest-dir");
+  assert.strictEqual(
+    resolveDeclaredPath(spec.file, spec.base, spec.skillsDir),
+    spec.target
+  );
+}
+
 // --- malformed marketplace manifests ---------------------------------------
 
 function testPluginEntriesToleratesMalformedShapes() {
@@ -545,7 +634,7 @@ function testDeclarationTargetsAreCoveredByTheTreesWeValidate() {
   // script validates the contents of; otherwise a manifest could point at a
   // directory nobody checks for well-formed skills.
   const validated = new Set([...SKILL_ROOTS, ...COMMAND_DIRS]);
-  for (const spec of PLUGIN_DECLARATIONS) {
+  for (const spec of [...PLUGIN_DECLARATIONS, ...AGENT_PLUGIN_MANIFESTS]) {
     assert.ok(
       validated.has(spec.target),
       `${spec.file} targets ${spec.target}, which is not in SKILL_ROOTS or COMMAND_DIRS`
@@ -833,6 +922,12 @@ function main_() {
   testRealCursorEntryCarriesTheUnverifiedFlag();
   testRealKimiEntriesResolveFromTheRepoRoot();
   testCheckPluginDeclarationsCatchesDrift();
+  testAgentPluginManifestHappyPath();
+  testAgentPluginManifestRequiresASkillPerSubdirectory();
+  testAgentPluginManifestRejectsEmptySkillFile();
+  testAgentPluginManifestRejectsMalformedManifest();
+  testAgentPluginManifestRejectsLayoutDrift();
+  testRealAgentPluginManifestPinsTheFixedLayout();
   testPluginEntriesToleratesMalformedShapes();
   testMarketplaceReadersDoNotThrowOnMalformedInput();
   testListEntriesResolvesSymlinks();
