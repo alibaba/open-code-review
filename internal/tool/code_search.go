@@ -12,11 +12,16 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
 	gitGrepMaxCount = 100
-	gitGrepTimeout  = 10 * time.Second
+	// One line of a minified or data file can be megabytes long, so the match
+	// count alone does not bound how much a search puts into the model context.
+	gitGrepMaxLineBytes   = 2048
+	gitGrepMaxResultBytes = 64 * 1024
+	gitGrepTimeout        = 10 * time.Second
 )
 
 // CodeSearchProvider performs text search across the repository using git grep.
@@ -232,25 +237,66 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		matchCount++
 	}
 
+	const fileEnd = "\n"
+	var body strings.Builder
+	full := false
+	cutLines := 0
+	add := func(s string) bool {
+		if body.Len()+len(s)+len(fileEnd) > gitGrepMaxResultBytes {
+			full = true
+			return false
+		}
+		body.WriteString(s)
+		return true
+	}
+render:
+	for _, path := range fileOrder {
+		matches := fileMatches[path]
+		if !add(fmt.Sprintf("File: %s\nMatch lines: %d\n", path, len(matches))) {
+			break
+		}
+		for _, m := range matches {
+			content, cut := m.content, len(m.content) > gitGrepMaxLineBytes
+			if cut {
+				content = cutLine(content)
+			}
+			if !add(fmt.Sprintf("%d|%s\n", m.lineNum, content)) {
+				break render
+			}
+			if cut {
+				cutLines++
+			}
+		}
+		body.WriteString(fileEnd)
+	}
+
 	var sb strings.Builder
 	if truncated {
 		sb.WriteString(fmt.Sprintf("Note: Showing the first %d matches across %d matching files. Some files are partially shown or omitted entirely. Narrow file_patterns to see the rest.\n", gitGrepMaxCount, len(matchedFiles)))
 	}
-
-	for _, path := range fileOrder {
-		matches := fileMatches[path]
-		sb.WriteString(fmt.Sprintf("File: %s\nMatch lines: %d\n", path, len(matches)))
-		for _, m := range matches {
-			sb.WriteString(fmt.Sprintf("%d|%s\n", m.lineNum, m.content))
-		}
-		sb.WriteString("\n")
+	if cutLines > 0 {
+		sb.WriteString(fmt.Sprintf("Note: Results truncated: %d match lines are cut to %d bytes. Narrow search_text or file_patterns to skip long lines, such as those in data or minified files.\n", cutLines, gitGrepMaxLineBytes))
 	}
+	if full {
+		sb.WriteString(fmt.Sprintf("Note: Results truncated to %d bytes. Some matches are not shown. Narrow search_text or file_patterns to see the rest.\n", gitGrepMaxResultBytes))
+	}
+	sb.WriteString(body.String())
 
 	if err != nil && errStr != "" {
 		sb.WriteString(fmt.Sprintf("Warning: %s\n", strings.TrimSpace(errStr)))
 	}
 
 	return sb.String(), nil
+}
+
+// cutLine keeps the first gitGrepMaxLineBytes bytes of s without splitting a
+// UTF-8 character; a character is at most utf8.UTFMax bytes long.
+func cutLine(s string) string {
+	n := gitGrepMaxLineBytes
+	for i := 0; i < utf8.UTFMax-1 && !utf8.RuneStart(s[n]); i++ {
+		n--
+	}
+	return fmt.Sprintf("%s [cut: line is %d bytes]", s[:n], len(s))
 }
 
 func trimGitUsage(stderr string, exitCode int) string {
