@@ -5,7 +5,7 @@ sidebar:
 ---
 
 OCR은 **Model Context Protocol(MCP) 클라이언트**로 동작할 수 있습니다. 외부
-MCP 서버를 하나 이상 지정해 두면 그 서버가 제공하는 도구를 리뷰 Agent가 쓸 수
+MCP 서버를 하나 이상 지정해 두면 그 서버가 제공하는 도구를 리뷰와 스캔 Agent가 쓸 수
 있게 됩니다. `file_read`나 `code_search` 같은 [내장 도구](../tools/)와 나란히
 놓입니다.
 
@@ -61,12 +61,13 @@ ocr config set mcp_servers.search.url https://mcp.example.com/mcp
 ocr config set mcp_servers.search.tools '["search", "fetch"]'
 ```
 
-이 명령들은 연결을 사용자 설정에 저장합니다. 다음 리뷰에서 OCR이 서버에 접속해
-`search`와 `fetch`를 내장 도구와 나란히 Agent에게 넘깁니다. 도구 허용 목록이
-서버가 제공할 수 있는 나머지 도구를 리뷰 바깥에 남겨 둡니다. 이미 설정한 다른
+이 명령들은 연결을 사용자 설정에 저장합니다. 다음 `ocr review` 또는 `ocr scan`에서
+OCR이 서버에 접속해 `search`와 `fetch`를 내장 도구와 나란히 Agent에게 넘깁니다.
+도구 허용 목록이 서버가 제공할 수 있는 나머지 도구를 실행에서 제외합니다.
+이미 설정한 다른
 서버와 리뷰 설정은 그대로입니다.
 
-설정을 마치면 Agent는 리뷰 중에 매번 묻지 않고 이 도구들을 부릅니다. 도구
+설정을 마치면 Agent는 리뷰나 스캔 중에 매번 묻지 않고 이 도구들을 부릅니다. 도구
 인자 — 검색어, 요청한 URL, Agent가 함께 실어 보내는 맥락 — 는 내 컴퓨터를 떠나
 그 엔드포인트를 운영하는 쪽에 닿습니다. 사용자 설정이므로 저장소를 가로질러
 적용됩니다. 외부 요청이 허용된 곳에서만 켜고, 요청에 비밀 값이나 비공개 코드,
@@ -99,6 +100,25 @@ MCP 서버는 사용자 설정 파일(`~/.opencodereview/config.json`)의 `mcp_s
 `ocr config set`에 넘기는 JSON에 환경 변수 참조가 들어 있으면, OCR이 설정을
 저장하기 전에 셸이 먼저 펼쳐 버리지 않도록 작은따옴표로 감싸세요. 익명 접근을
 허용하는 서버라면 `headers`는 아예 필요 없습니다.
+
+## 스캔에서 MCP 도구 사용하기 {#using-mcp-tools-during-a-scan}
+
+전체 파일 스캔에도 같은 사용자 수준 MCP 설정이 적용됩니다. 위의 `docs` 서버를
+추가했다면 다음 명령으로 파일을 스캔할 수 있습니다.
+
+```bash
+ocr scan --path path/to/file.go
+```
+
+OCR은 스캔 Agent를 만들기 전에 설정된 서버에 연결합니다. 각 파일을 검토할 때
+Agent는 허용된 MCP 도구로 맥락을 가져올 수 있고, 그 응답은 해당 파일의 주 작업에
+전달됩니다. 스캔의 사전 계획 단계에서는 도구를 사용할 수 없습니다. 전체 파일
+스캔에는 diff가 없으므로 MCP를 켜도 `file_read_diff`는 제공되지 않습니다.
+
+`ocr scan --preview`는 스캔할 파일만 나열하며 MCP 서버를 시작하거나 연결하지
+않습니다. 일반 스캔에서 서버 연결에 실패하면 OCR은 경고를 남기고 내장 도구와
+연결에 성공한 다른 MCP 서버로 계속 진행합니다. 스캔이 성공하거나 오류로 끝나면
+연결된 클라이언트를 닫습니다.
 
 ## 도구 걸러 내기 {#filtering-tools}
 
@@ -152,11 +172,11 @@ stdout의 `--format json` 출력을 더럽히지 않습니다.
 - `allowed tool "y" not found in server's tool list` — `tools`에 적은 이름이
   서버가 제공하는 것과 맞지 않습니다. 철자를 확인하세요.
 
-띄우거나 연결하는 데 실패한 서버는 건너뜁니다. 리뷰는 그 서버의 도구 없이
+띄우거나 연결하는 데 실패한 서버는 건너뜁니다. 리뷰나 스캔은 그 서버의 도구 없이
 이어집니다.
 
 ## 함께 보기 {#see-also}
 
 - [도구](../tools/) — MCP 도구가 나란히 놓이는 내장 도구 여섯 가지.
 - [설정](../configuration/) — 설정 파일 전체와 모든 키.
-- [CLI 레퍼런스](../cli-reference/) — `ocr config`와 리뷰 플래그.
+- [CLI 레퍼런스](../cli-reference/) — `ocr config`, `ocr review`, `ocr scan` 플래그.
