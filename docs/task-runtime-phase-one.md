@@ -46,11 +46,17 @@ not replaced by newly worded generic prompts.
 ## Verification and evaluation gate
 
 `internal/reviewtask/testdata/equivalence` captures fixed-response execution from
-the pre-extraction implementation at `34517e30`. The fixtures compare complete
+the pre-extraction implementation at `34517e30`. The 20 fixtures compare complete
 model requests, tool definitions/order, tool results, comments, warnings,
 completion/stop states, usage, and session/request associations. Random
 conversation/session identifiers and durations are normalized; affinity is
 checked against the task identity before normalization.
+
+The `repaired` cases recover a serialized comment batch with unescaped quotes,
+preserve both findings and their quoted prose, and emit `comment_args_repaired`
+without tool failures. Explicit assertions guard these outcomes even when
+regenerating the fixtures. The `invalid_comment_shape` cases separately preserve
+outer-argument trailing-text recovery followed by rejection of a non-array batch.
 
 Existing relocation, worker-isolation, compression, retry-identity, manifest,
 scan, CLI, and resume tests continue to protect their respective boundaries.

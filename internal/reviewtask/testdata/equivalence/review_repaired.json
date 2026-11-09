@@ -4,18 +4,27 @@
     "session-main_task-e92eec1034e5ee82",
     "session-main_task-e92eec1034e5ee82"
   ],
-  "comments": [],
-  "completed": true,
-  "error": "",
-  "failures": [
+  "comments": [
     {
-      "tool_call_number": 2,
-      "tool_name": "code_comment",
-      "file_path": "sample.go",
-      "arguments": "{\"comments\":{\"path\":\"sample.go\",\"content\":\"issue\",\"existing_code\":\"package main\"}} trailing text",
-      "error": "Error: 'comments' array is required. Got args: {\"comments\":{\"content\":\"issue\",\"existing_code\":\"package main\",\"path\":\"sample.go\"}}"
+      "path": "sample.go",
+      "content": "the name suggests \"a trusted proxy exists\" here",
+      "existing_code": "package main",
+      "start_line": 1,
+      "end_line": 1,
+      "thinking": "reasoning"
+    },
+    {
+      "path": "sample.go",
+      "content": "this uses \"untrusted data\" directly",
+      "existing_code": "func main() {}",
+      "start_line": 2,
+      "end_line": 2,
+      "thinking": "reasoning"
     }
   ],
+  "completed": true,
+  "error": "",
+  "failures": null,
   "metadata": [
     {
       "Provider": "openai",
@@ -129,7 +138,7 @@
               "type": "function",
               "function": {
                 "name": "code_comment",
-                "arguments": "{\"comments\":{\"path\":\"sample.go\",\"content\":\"issue\",\"existing_code\":\"package main\"}} trailing text"
+                "arguments": "{\"comments\":\"[{\\\"path\\\":\\\"sample.go\\\",\\\"content\\\":\\\"the name suggests \\\"a trusted proxy exists\\\" here\\\",\\\"existing_code\\\":\\\"package main\\\"},{\\\"path\\\":\\\"sample.go\\\",\\\"content\\\":\\\"this uses \\\"untrusted data\\\" directly\\\",\\\"existing_code\\\":\\\"func main() {}\\\"}]\"}"
               }
             }
           ],
@@ -147,9 +156,9 @@
         "ToolResults": [
           {
             "ToolName": "code_comment",
-            "Arguments": "{\"comments\":{\"path\":\"sample.go\",\"content\":\"issue\",\"existing_code\":\"package main\"}} trailing text",
-            "Result": "Error: 'comments' array is required. Got args: {\"comments\":{\"content\":\"issue\",\"existing_code\":\"package main\",\"path\":\"sample.go\"}}",
-            "OK": false,
+            "Arguments": "{\"comments\":\"[{\\\"path\\\":\\\"sample.go\\\",\\\"content\\\":\\\"the name suggests \\\"a trusted proxy exists\\\" here\\\",\\\"existing_code\\\":\\\"package main\\\"},{\\\"path\\\":\\\"sample.go\\\",\\\"content\\\":\\\"this uses \\\"untrusted data\\\" directly\\\",\\\"existing_code\\\":\\\"func main() {}\\\"}]\"}",
+            "Result": "Successfully commented.",
+            "OK": true,
             "Duration": 0
           }
         ],
@@ -196,14 +205,14 @@
                 "type": "function",
                 "function": {
                   "name": "code_comment",
-                  "arguments": "{\"comments\":{\"path\":\"sample.go\",\"content\":\"issue\",\"existing_code\":\"package main\"}} trailing text"
+                  "arguments": "{\"comments\":\"[{\\\"path\\\":\\\"sample.go\\\",\\\"content\\\":\\\"the name suggests \\\"a trusted proxy exists\\\" here\\\",\\\"existing_code\\\":\\\"package main\\\"},{\\\"path\\\":\\\"sample.go\\\",\\\"content\\\":\\\"this uses \\\"untrusted data\\\" directly\\\",\\\"existing_code\\\":\\\"func main() {}\\\"}]\"}"
                 }
               }
             ]
           },
           {
             "role": "tool",
-            "content": "Error: 'comments' array is required. Got args: {\"comments\":{\"content\":\"issue\",\"existing_code\":\"package main\",\"path\":\"sample.go\"}}",
+            "content": "Successfully commented.",
             "tool_call_id": "call_comment"
           }
         ],
@@ -727,14 +736,14 @@
               "type": "function",
               "function": {
                 "name": "code_comment",
-                "arguments": "{\"comments\":{\"path\":\"sample.go\",\"content\":\"issue\",\"existing_code\":\"package main\"}} trailing text"
+                "arguments": "{\"comments\":\"[{\\\"path\\\":\\\"sample.go\\\",\\\"content\\\":\\\"the name suggests \\\"a trusted proxy exists\\\" here\\\",\\\"existing_code\\\":\\\"package main\\\"},{\\\"path\\\":\\\"sample.go\\\",\\\"content\\\":\\\"this uses \\\"untrusted data\\\" directly\\\",\\\"existing_code\\\":\\\"func main() {}\\\"}]\"}"
               }
             }
           ]
         },
         {
           "role": "tool",
-          "content": "Error: 'comments' array is required. Got args: {\"comments\":{\"content\":\"issue\",\"existing_code\":\"package main\",\"path\":\"sample.go\"}}",
+          "content": "Successfully commented.",
           "tool_call_id": "call_comment"
         }
       ],
@@ -954,5 +963,11 @@
     0,
     0
   ],
-  "warnings": []
+  "warnings": [
+    {
+      "file": "sample.go",
+      "message": "comments arrived as a serialized string instead of an array; repaired 4 unescaped character(s)",
+      "type": "comment_args_repaired"
+    }
+  ]
 }

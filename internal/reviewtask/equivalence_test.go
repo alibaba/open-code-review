@@ -47,7 +47,7 @@ func TestReviewExecutionEquivalence(t *testing.T) {
 		}
 	}
 	for _, mode := range []string{"review", "scan"} {
-		for _, scenario := range []string{"normal", "failed", "invalid", "repaired", "async", "round_budget", "token_budget", "compression", "relocation"} {
+		for _, scenario := range []string{"normal", "failed", "invalid", "invalid_comment_shape", "repaired", "async", "round_budget", "token_budget", "compression", "relocation"} {
 			t.Run(mode+"/"+scenario, func(t *testing.T) {
 				comment := codeCommentResponse("reasoning", "visible")
 				comment.Choices[0].Message.ToolCalls[0].Function.Arguments = `{"comments":[{"path":"sample.go","content":"issue","existing_code":"package main"},{"path":"sample.go","content":"second issue","existing_code":"func main() {}"}]}`
@@ -70,8 +70,15 @@ func TestReviewExecutionEquivalence(t *testing.T) {
 					client.responses[2] = taskDoneResponseWithArguments(`{"state":"FAILED"}`)
 				case "invalid":
 					client.responses = append([]*llm.ChatResponse{taskDoneResponseWithArguments(`{"state":1}`)}, client.responses...)
-				case "repaired":
+				case "invalid_comment_shape":
 					comment.Choices[0].Message.ToolCalls[0].Function.Arguments = `{"comments":{"path":"sample.go","content":"issue","existing_code":"package main"}} trailing text`
+				case "repaired":
+					serialized := `[{"path":"sample.go","content":"the name suggests "a trusted proxy exists" here","existing_code":"package main"},{"path":"sample.go","content":"this uses "untrusted data" directly","existing_code":"func main() {}"}]`
+					arguments, err := json.Marshal(map[string]any{"comments": serialized})
+					if err != nil {
+						t.Fatal(err)
+					}
+					comment.Choices[0].Message.ToolCalls[0].Function.Arguments = string(arguments)
 				case "async":
 					deps.CommentWorkerPool = NewCommentWorkerPool(1)
 				case "round_budget":
@@ -107,6 +114,21 @@ func TestReviewExecutionEquivalence(t *testing.T) {
 				}, "sample.go")
 				comments := runner.CollectPendingComments()
 				runner.WaitBackground()
+				if scenario == "repaired" {
+					if runErr != nil || !completed || stop != StopNone {
+						t.Fatalf("repaired execution = %v, %v, %v", completed, stop, runErr)
+					}
+					if len(comments) != 2 || comments[0].Content != `the name suggests "a trusted proxy exists" here` || comments[1].Content != `this uses "untrusted data" directly` {
+						t.Fatalf("repaired comments lost entries or quoted content: %+v", comments)
+					}
+					warnings := runner.Warnings()
+					if len(warnings) != 1 || warnings[0].Type != "comment_args_repaired" || warnings[0].File != "sample.go" {
+						t.Fatalf("repaired execution warnings = %+v", warnings)
+					}
+					if failures := runner.ToolFailures(); len(failures) != 0 {
+						t.Fatalf("repaired execution recorded tool failures: %+v", failures)
+					}
+				}
 				conversationID := client.requests[0].SessionID
 				for index := range client.requests {
 					taskType := session.MainTask
