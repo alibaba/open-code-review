@@ -196,6 +196,128 @@ func TestMaybeRunPlan_SkipPathsDoNotCallLLM(t *testing.T) {
 	}
 }
 
+// planCountingClient counts the LLM calls that reach it so the line-threshold
+// gate can be asserted on call count, which is the observable the gate is
+// actually about — not on log text.
+type planCountingClient struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *planCountingClient) CompletionsWithCtx(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	content := `{"summary":"small helper","checkpoints":[{"focus":"nil deref","lines":"3","why":"no guard"}]}`
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
+		Usage:   &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+	}, nil
+}
+
+func (c *planCountingClient) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+func TestMaybeRunPlan_LineThresholdGate(t *testing.T) {
+	newAgent := func(t *testing.T, threshold int, client llm.LLMClient) *Agent {
+		t.Helper()
+		tpl := makeTemplateWithFullScan()
+		tpl.PlanTask = &template.LlmConversation{
+			Messages: []template.ChatMessage{{Role: "user", Content: "plan {{file_content}}"}},
+		}
+		tpl.PlanModeLineThreshold = threshold
+		return NewAgent(Args{
+			Template:         tpl,
+			LLMClient:        client,
+			Model:            "test-model",
+			CommentCollector: tool.NewCommentCollector(),
+			Tools:            tool.NewRegistry(),
+			Session: session.New(t.TempDir(), "main", "test-model", session.SessionOptions{
+				ReviewMode: session.ReviewModeFullScan,
+			}),
+		})
+	}
+
+	// A non-empty file smaller than the threshold must not pay for a plan
+	// call at all.
+	t.Run("below threshold skips the plan call", func(t *testing.T) {
+		client := &planCountingClient{}
+		a := newAgent(t, 200, client)
+		got := a.maybeRunPlan(t.Context(), model.ScanItem{
+			Path: "small.go", Content: "package x\n", LineCount: 40,
+		}, "")
+		if !strings.Contains(got, "no pre-scan plan") {
+			t.Errorf("expected plan-less sentinel, got %q", got)
+		}
+		if n := client.count(); n != 0 {
+			t.Errorf("plan LLM calls = %d, want 0 (40 lines < threshold 200)", n)
+		}
+	})
+
+	// The gate is >=, so a file exactly at the threshold still plans.
+	t.Run("at threshold plans", func(t *testing.T) {
+		client := &planCountingClient{}
+		a := newAgent(t, 200, client)
+		got := a.maybeRunPlan(t.Context(), model.ScanItem{
+			Path: "edge.go", Content: "package x\n", LineCount: 200,
+		}, "")
+		if strings.Contains(got, "no pre-scan plan") {
+			t.Errorf("200 lines should meet a 200-line threshold, got sentinel")
+		}
+		if n := client.count(); n != 1 {
+			t.Errorf("plan LLM calls = %d, want 1", n)
+		}
+	})
+
+	t.Run("above threshold plans", func(t *testing.T) {
+		client := &planCountingClient{}
+		a := newAgent(t, 200, client)
+		got := a.maybeRunPlan(t.Context(), model.ScanItem{
+			Path: "big.go", Content: "package x\n", LineCount: 900,
+		}, "")
+		if !strings.Contains(got, "nil deref") {
+			t.Errorf("expected rendered plan guidance, got %q", got)
+		}
+		if n := client.count(); n != 1 {
+			t.Errorf("plan LLM calls = %d, want 1", n)
+		}
+	})
+
+	// An unset threshold means "always plan", matching Template.PlanRequired.
+	t.Run("zero threshold disables the gate", func(t *testing.T) {
+		client := &planCountingClient{}
+		a := newAgent(t, 0, client)
+		got := a.maybeRunPlan(t.Context(), model.ScanItem{
+			Path: "tiny.go", Content: "package x\n", LineCount: 1,
+		}, "")
+		if strings.Contains(got, "no pre-scan plan") {
+			t.Errorf("threshold 0 should plan every file, got sentinel")
+		}
+		if n := client.count(); n != 1 {
+			t.Errorf("plan LLM calls = %d, want 1", n)
+		}
+	})
+
+	// LineCount is populated by the provider; an item built by hand without
+	// it must not be mistaken for an empty file and silently lose its plan.
+	t.Run("unknown line count plans rather than skipping", func(t *testing.T) {
+		client := &planCountingClient{}
+		a := newAgent(t, 200, client)
+		got := a.maybeRunPlan(t.Context(), model.ScanItem{
+			Path: "handmade.go", Content: "package x\n",
+		}, "")
+		if strings.Contains(got, "no pre-scan plan") {
+			t.Errorf("unknown size should fall back to planning, got sentinel")
+		}
+		if n := client.count(); n != 1 {
+			t.Errorf("plan LLM calls = %d, want 1", n)
+		}
+	})
+}
+
 func TestRenderMessages(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	a := newAgentForTest(t, tpl)

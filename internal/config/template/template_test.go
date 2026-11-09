@@ -476,3 +476,66 @@ func TestPlanRequired(t *testing.T) {
 		})
 	}
 }
+
+func TestScanPlanRequired(t *testing.T) {
+	tests := []struct {
+		name      string
+		tpl       ScanTemplate
+		lineCount int
+		want      bool
+	}{
+		{
+			name:      "file above threshold plans",
+			tpl:       ScanTemplate{PlanModeLineThreshold: 200},
+			lineCount: 201,
+			want:      true,
+		},
+		{
+			name:      "file at threshold plans",
+			tpl:       ScanTemplate{PlanModeLineThreshold: 200},
+			lineCount: 200,
+			want:      true,
+		},
+		{
+			name:      "file below threshold skips",
+			tpl:       ScanTemplate{PlanModeLineThreshold: 200},
+			lineCount: 199,
+			want:      false,
+		},
+		{
+			name:      "zero threshold means always plan",
+			tpl:       ScanTemplate{PlanModeLineThreshold: 0},
+			lineCount: 1,
+			want:      true,
+		},
+		{
+			name:      "negative threshold means always plan",
+			tpl:       ScanTemplate{PlanModeLineThreshold: -1},
+			lineCount: 1,
+			want:      true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.tpl.PlanRequired(tt.lineCount); got != tt.want {
+				t.Errorf("PlanRequired(%d) = %v, want %v", tt.lineCount, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadScanDefault_PlanModeLineThreshold(t *testing.T) {
+	tpl, err := LoadScanDefault()
+	if err != nil {
+		t.Fatalf("LoadScanDefault: %v", err)
+	}
+	if tpl.PlanModeLineThreshold != 200 {
+		t.Errorf("PlanModeLineThreshold = %d, want 200", tpl.PlanModeLineThreshold)
+	}
+	if !tpl.PlanRequired(200) {
+		t.Error("default template should plan a 200-line file")
+	}
+	if tpl.PlanRequired(199) {
+		t.Error("default template should skip a 199-line file")
+	}
+}

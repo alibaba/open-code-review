@@ -86,6 +86,26 @@ func (a *Agent) planEnabled() bool {
 	return !a.args.SkipPlan && a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0
 }
 
+// planRequired reports whether the PLAN_TASK pre-pass should run for this
+// specific file: planning must be enabled globally AND the file must be big
+// enough to justify the extra call. Binary placeholders and empty files are
+// dropped before dispatch, so neither is a meaningful "small file" signal.
+// A non-positive LineCount on a non-empty file means the item was built
+// without the provider's line count, so the size is unknown and we plan
+// rather than silently skip.
+func (a *Agent) planRequired(it model.ScanItem) bool {
+	if !a.planEnabled() {
+		return false
+	}
+	if it.IsBinary || it.Content == "" {
+		return false
+	}
+	if it.LineCount <= 0 {
+		return true
+	}
+	return a.args.Template.PlanRequired(it.LineCount)
+}
+
 func (a *Agent) dedupEnabled() bool {
 	return !a.args.SkipDedup && a.args.Template.DedupTask != nil && len(a.args.Template.DedupTask.Messages) > 0
 }
@@ -721,7 +741,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 		// don't even queue work that would blow the budget.
 		if a.args.MaxTokensBudget > 0 {
 			used := a.runner.TotalTokensUsed()
-			projected := used + estimateFileTokens(it, a.planEnabled())
+			projected := used + estimateFileTokens(it, a.planRequired(it))
 			if projected > a.args.MaxTokensBudget {
 				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + next-file est ≈ %s > budget %s) — skipping %s and remaining files\n",
 					humanTokens(used), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), it.Path)
@@ -857,13 +877,26 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 // maybeRunPlan invokes PLAN_TASK on the file and returns a human-readable
 // guidance string suitable for {{plan_guidance}} substitution. Returns "(no
 // pre-scan plan; review the entire file as usual)" when planning is
-// disabled or fails — that sentinel is intentionally non-empty so the
-// surrounding "### Pre-scan Focus Areas" header in MAIN_TASK has content
-// instead of dangling.
+// disabled, the file is below PLAN_MODE_LINE_THRESHOLD, or the plan call
+// fails — that sentinel is intentionally non-empty so the surrounding
+// "### Pre-scan Focus Areas" header in MAIN_TASK has content instead of
+// dangling.
 func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string) string {
 	const noPlan = "(no pre-scan plan; review the entire file as usual)"
 
 	if !a.planEnabled() {
+		return noPlan
+	}
+	if !a.planRequired(it) {
+		// Mirror the review path's skip observability: the per-file decision
+		// is otherwise invisible under --format json, where the plan-less
+		// fallback and a plan that produced nothing look identical.
+		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping plan phase for %s (%d line(s), threshold %d)\n",
+			it.Path, it.LineCount, a.args.Template.PlanModeLineThreshold)
+		telemetry.Event(ctx, "plan.skipped",
+			telemetry.AnyToAttr("file.path", it.Path),
+			telemetry.AnyToAttr("lines", it.LineCount),
+			telemetry.AnyToAttr("threshold", a.args.Template.PlanModeLineThreshold))
 		return noPlan
 	}
 	pt := a.args.Template.PlanTask

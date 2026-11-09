@@ -48,6 +48,12 @@ type ScanTemplate struct {
 	DedupTask             *LlmConversation `json:"DEDUP_TASK,omitempty"`
 	DedupMinComments      int              `json:"DEDUP_MIN_COMMENTS,omitempty"`
 	ProjectSummaryTask    *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
+	// PlanModeLineThreshold gates the PLAN_TASK pre-pass on the file's total
+	// line count. Scan has no diff to measure churn from, so whole-file size
+	// is the only available proxy for "planning costs more than it saves".
+	// At or below 0 the gate is disabled and every file is planned, matching
+	// Template.PlanRequired's reading of an unset threshold.
+	PlanModeLineThreshold int `json:"PLAN_MODE_LINE_THRESHOLD,omitempty"`
 }
 
 // ReviewRounds returns the effective per-group round count, never below 1.
@@ -149,6 +155,23 @@ func (t ScanTemplate) CompletionTokenLimit() int {
 		return t.MaxCompletionTokens
 	}
 	return t.MaxTokens
+}
+
+// PlanRequired reports whether a file is large enough to warrant the
+// PLAN_TASK pre-pass. Template.PlanRequired gates on diff churn, but scan
+// reviews whole files and has no diff, so the file's total line count is the
+// only available proxy: below the threshold the plan call's fixed overhead
+// (a full file re-send plus prompt scaffolding) buys no better focus areas
+// than reading the file directly.
+//
+// A non-positive threshold means "always plan", mirroring
+// Template.PlanRequired, so a template that omits the field keeps the
+// pre-gate behaviour.
+func (t ScanTemplate) PlanRequired(lineCount int) bool {
+	if t.PlanModeLineThreshold <= 0 {
+		return true
+	}
+	return lineCount >= t.PlanModeLineThreshold
 }
 
 //go:embed task_template.json prompts/*
