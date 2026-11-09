@@ -352,7 +352,7 @@ func TestRunCompression_EmptyTemplate(t *testing.T) {
 		msg("user", "prompt"),
 		msg("assistant", "resp"),
 	}
-	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	got, err := r.runCompression(context.Background(), msgs, "test.go", &compressionState{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestRunCompression_ShortMessages(t *testing.T) {
 	r := newTestRunner(&fakeLLMClient{}, tpl)
 
 	msgs := []llm.Message{msg("system", "sys"), msg("user", "prompt")}
-	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	got, err := r.runCompression(context.Background(), msgs, "test.go", &compressionState{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -409,7 +409,7 @@ func TestRunCompression_Success(t *testing.T) {
 		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
 	}
 
-	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	got, err := r.runCompression(context.Background(), msgs, "test.go", &compressionState{})
 	if err != nil {
 		t.Fatalf("runCompression: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestRunCompression_LLMError(t *testing.T) {
 		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
 	}
 
-	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	got, err := r.runCompression(context.Background(), msgs, "test.go", &compressionState{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -482,7 +482,7 @@ func TestRunCompression_EmptySummary(t *testing.T) {
 		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
 	}
 
-	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	got, err := r.runCompression(context.Background(), msgs, "test.go", &compressionState{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
