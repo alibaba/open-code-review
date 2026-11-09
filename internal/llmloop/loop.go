@@ -731,6 +731,10 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 			// repair would absorb an unbounded number of them unobserved.
 			r.RecordWarning("comment_args_repaired", taskKey, repair.Message())
 		}
+		// Report failure so the model can retry instead of assuming its findings were saved.
+		if errMsg == "" && len(comments) == 0 {
+			errMsg = tool.CommentNoneUsableMsg
+		}
 		if errMsg != "" {
 			dur := time.Since(startTime)
 			toolErr := fmt.Errorf("%s", errMsg)

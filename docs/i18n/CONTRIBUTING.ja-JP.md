@@ -22,7 +22,7 @@ OpenCodeReviewへのコントリビューションに興味を持っていただ
 
 ### 前提条件
 
-- [Go 1.26.9+](https://go.dev/dl/)
+- [Go 1.26.10+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -89,6 +89,15 @@ feat(agent): add support for custom tool definitions
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
+
+`PR Commit Policy` は、PR タイトルと本文を含むすべてのコミットメッセージを、
+大文字・小文字を区別せずに検査します。`[skip ci]`、`[ci skip]`、`[no ci]`、
+`[skip actions]`、`[actions skip]`、または `skip-checks: true` / `skip-checks:true`
+だけの行を含めないでください。
+
+検査に失敗した場合は、PR タイトルを編集するか、自分の作業ブランチで該当するコミットメッセージを書き換えてください。
+これらの指示を含まないコミットを追加しても、過去のコミットの違反は解消されません。
+PR の説明ではこれらの指示について議論でき、検査の対象にはなりません。
 
 ### ライセンスヘッダー
 

@@ -287,9 +287,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// so affinity keys stay per-conversation, the granularity provider prompt caches actually reuse prefixes at.
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
-	// Step 1: Parse diffs
-	ctx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
-	if err := a.loadDiffs(ctx); err != nil {
+	// Keep later review work under the incoming parent, not the short-lived parse span.
+	parseCtx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
+	if err := a.loadDiffs(parseCtx); err != nil {
 		diffSpan.End()
 		// The builder already exists (agent.New created session + manifest), but
 		// no item was selected yet. Record the run-level input failure at this
@@ -960,6 +960,7 @@ func (a *Agent) initManifest() {
 		Provider:              a.args.Provider,
 		Model:                 a.args.Model,
 		ConfiguredConcurrency: a.args.MaxConcurrency,
+		MaxToolRequestTimes:   a.args.Template.MaxToolRequestTimes,
 		RuleConfigSHA256:      a.ruleConfigSHA256(),
 		RuntimeConfigSHA256:   a.runtimeConfigSHA256(),
 	})

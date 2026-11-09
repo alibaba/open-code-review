@@ -82,6 +82,18 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"templates/email.J2", "Jinja Escaping Boundaries"},
 		{"templates/account.pug", "Pug Escaping and Output Contexts"},
 		{"templates/account.PUG", "Pug Escaping and Output Contexts"},
+		{"index.ejs", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"app/views/users/show.html.EJS", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"index.liquid", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"app/views/users/show.html.LIQUID", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"index.njk", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"app/views/users/show.html.NJK", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"index.haml", "HAML and Slim Escaping and Output Contexts"},
+		{"app/views/users/show.html.HAML", "HAML and Slim Escaping and Output Contexts"},
+		{"index.slim", "HAML and Slim Escaping and Output Contexts"},
+		{"app/views/users/show.html.SLIM", "HAML and Slim Escaping and Output Contexts"},
+		{"index.erb", "ERB Escaping and Output Contexts"},
+		{"app/views/users/show.html.ERB", "ERB Escaping and Output Contexts"},
 		{"src/main/resources/mapper/usermapper.xml", "SQL Logic Error Detection"},
 		{"src/main/resources/dao/userdao.xml", "SQL Logic Error Detection"},
 		{"pom.xml", "snapshot"},
@@ -99,9 +111,12 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"server/bootstrap.cjs", "TypeScript"},
 		{"app.kt", "Null Safety"},
 		{"scripts/setup.kts", "Null Safety"},
+		{"src/main/scala/com/example/Service.scala", "Scala Review Principles"},
 		{"src/domain/Order.fs", "Discriminated Unions and Pattern Matching"},
 		{"src/domain/Order.fsi", "Discriminated Unions and Pattern Matching"},
 		{"scripts/migrate.fsx", "Discriminated Unions and Pattern Matching"},
+		{"src/Api/Controllers/UserController.cs", "Nullability and Reference Types"},
+		{"tests/Domain/OrderTests.cs", "Nullability and Reference Types"},
 		{"src/main/handler.cpp", "Smart Pointer"},
 		{"src/main/handler.cxx", "Smart Pointer"},
 		{"include/handler.hxx", "Smart Pointer"},
@@ -110,6 +125,7 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"components/Button.ets", "State Decorator"},
 		{"entry/src/main/module.json5", "json-key"},
 		{"entry/oh-package.json5", "json-key"},
+		{"config/profile.jsonc", "json-key"},
 		{"src/lib.rs", "Ownership and Lifetime Correctness"},
 		{"crates/service/src/main.rs", "Unsafe Code Boundaries"},
 		{"crates/service/Cargo.toml", "Cargo Manifest Hygiene"},
@@ -144,6 +160,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"Sources/App/ContentView.swift", "Swift Review Principles"},
 		{"MyApp/Models/UserStore.swift", "Swift Review Principles"},
 		{"ChattyFit/ChattyFit/Views/WorkoutSessionView.swift", "SwiftUI State and Lifecycle"},
+		{"scripts/setup.nu", "Nushell Script Review Checklist"},
+		{"modules/user/init.nu", "Nushell Script Review Checklist"},
 		{"src/Main.elm", "Elm Architecture"},
 		{"app/Page/Home.elm", "Elm Architecture"},
 		{"lib/config.libsonnet", "Late Binding"},
@@ -155,8 +173,21 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"build.zig", "Illegal Behavior"},
 		{"idl/service.thrift", "Field IDs and Wire Compatibility"},
 		{"if/common.thrift", "Field IDs and Wire Compatibility"},
+		{"rules/library.bzl", "Starlark Code Review Guide"},
+		{"config.star", "Starlark Code Review Guide"},
+		{"MODULE.bazel", "Starlark Code Review Guide"},
+		{"BUILD", "Starlark Code Review Guide"},
+		{"src/library/BUILD", "Starlark Code Review Guide"},
+		{"WORKSPACE", "Starlark Code Review Guide"},
+		{"legacy/WORKSPACE", "Starlark Code Review Guide"},
+		{"src/library/BUILD.bazel", "Starlark Code Review Guide"},
+		{"legacy/WORKSPACE.bazel", "Starlark Code Review Guide"},
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
+		{"shaders/fragment.glsl", "Texture and Buffer Access Safety"},
+		{"Shaders/Lighting.hlsl", "Texture and Buffer Access Safety"},
+		{"shaders/compute.wgsl", "Texture and Buffer Access Safety"},
+		{"Shaders/Blur.metal", "Texture and Buffer Access Safety"},
 		{"src/parser.ml", "Pattern Matching"},
 		{"lib/parser.mli", "Pattern Matching"},
 		{"src/Component.re", "Pattern Matching"},
@@ -175,6 +206,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
 		{"policies/authz.rego", "Default Posture"},
 		{"policies/authz.REGO", "Default Posture"},
+		{"scripts/deploy.ps1", "PowerShell Review Principles"},
+		{"modules/Build/Build.psm1", "PowerShell Review Principles"},
+		{"modules/Build/Build.psd1", "PowerShell Review Principles"},
 	}
 
 	for _, tt := range tests {
@@ -907,6 +941,32 @@ func TestResolveDetail_SystemPatternMatch(t *testing.T) {
 	}
 	if !strings.Contains(detail.Rule, "Logic Error Detection") {
 		t.Errorf("expected java rule, got %q", truncate(detail.Rule, 80))
+	}
+}
+
+func TestResolveDetail_SystemPowerShellPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, name := range []string{"Deploy.ps1", "Build.psm1", "Build.psd1", "Deploy.Tests.ps1"} {
+		for _, path := range []string{name, "scripts/" + name, "tests/unit/" + strings.ToUpper(name)} {
+			t.Run(path, func(t *testing.T) {
+				if !allowedext.IsAllowedExt(filepath.Ext(path)) || allowedext.IsExcludedPath(path) {
+					t.Fatalf("PowerShell file %q must remain reviewable", path)
+				}
+				detail := dr.ResolveDetail(path)
+				if detail.Source != "system" || detail.Pattern != "**/*.{ps1,psm1,psd1}" {
+					t.Errorf("unexpected rule source/pattern: %q / %q", detail.Source, detail.Pattern)
+				}
+				if !strings.Contains(detail.Rule, "PowerShell Review Principles") {
+					t.Errorf("expected PowerShell rule, got %q", truncate(detail.Rule, 80))
+				}
+			})
+		}
 	}
 }
 

@@ -22,7 +22,7 @@
 
 ### Требования
 
-- [Go 1.26.9+](https://go.dev/dl/)
+- [Go 1.26.10+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -89,6 +89,16 @@ feat(agent): add support for custom tool definitions
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
+
+`PR Commit Policy` проверяет заголовок PR и полное сообщение каждого коммита,
+включая тело, без учёта регистра. Не добавляйте `[skip ci]`, `[ci skip]`, `[no ci]`,
+`[skip actions]`, `[actions skip]` или отдельную строку
+`skip-checks: true` / `skip-checks:true`.
+
+Если проверка не пройдена, измените заголовок PR или перепишите сообщения
+соответствующих коммитов в своей рабочей ветке. Новый коммит без этих инструкций
+не устраняет нарушения в предыдущих коммитах. Описание PR может содержать
+обсуждение этих инструкций и не проверяется.
 
 ### Заголовки лицензии
 
