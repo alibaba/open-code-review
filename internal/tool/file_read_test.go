@@ -255,7 +255,6 @@ func TestReadLines_Disk_MissingFilePreservesReadError(t *testing.T) {
 	}
 }
 
-func TestReadLines_Disk_RejectsSymlinkOutsideRepo(t *testing.Cmd) // wait, see line 258
 func TestReadLines_Disk_RejectsSymlinkOutsideRepo(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink privileges vary on Windows")
