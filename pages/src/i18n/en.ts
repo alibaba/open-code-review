@@ -299,6 +299,7 @@ export const en = {
   'docs.sidebar.delegate': 'Delegation Mode',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': 'Contributing',
   'docs.sidebar.faq': 'FAQ',
   'docs.sidebar.chatgptPreview': 'Sign in with ChatGPT preview',

@@ -303,6 +303,7 @@ export const zh: TranslationKeys = {
   'docs.sidebar.delegate': '委托模式',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': '贡献',
   'docs.sidebar.faq': 'FAQ',
   'docs.sidebar.chatgptPreview': 'ChatGPT 登录预览版',
