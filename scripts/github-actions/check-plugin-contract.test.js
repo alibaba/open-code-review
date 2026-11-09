@@ -39,6 +39,7 @@ const {
   validateCommandFrontmatter,
   resolveDeclaredPath,
   checkPluginDeclarations,
+  validateAgentPluginManifest,
   checkAgentPluginManifests,
   pluginEntries,
   listEntries,
@@ -528,6 +529,12 @@ const AGENT_SPEC = {
   target: "p/skills",
 };
 
+const AGENT_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+
+// A manifest that satisfies the identity fields, so a test exercises the layout
+// contract rather than failing on `name`/`$schema` first.
+const AGENT_MANIFEST = { $schema: AGENT_SCHEMA, name: "open-code-review" };
+
 function runAgentCheck({ json = {}, dirs = {}, files = {} } = {}) {
   return checkAgentPluginManifests(
     [AGENT_SPEC],
@@ -539,7 +546,7 @@ function runAgentCheck({ json = {}, dirs = {}, files = {} } = {}) {
 
 function testAgentPluginManifestHappyPath() {
   const { errors } = runAgentCheck({
-    json: { "p/plugin.json": { name: "open-code-review" } },
+    json: { "p/plugin.json": AGENT_MANIFEST },
     dirs: { "p/skills": ["open-code-review", "open-code-review-delegate"] },
     files: {
       "p/skills/open-code-review/SKILL.md": "---\nname: open-code-review\n---\n",
@@ -550,11 +557,57 @@ function testAgentPluginManifestHappyPath() {
   assert.deepStrictEqual(errors, []);
 }
 
+function testAgentPluginManifestRejectsEmptyObject() {
+  // Parseable JSON is not a manifest: `{}` names no plugin and declares no
+  // schema, so accepting it would certify an empty file.
+  const { errors } = runAgentCheck({ json: { "p/plugin.json": {} } });
+  assert.deepStrictEqual(
+    errors.map((e) => e.file).sort(),
+    ["p/plugin.json", "p/plugin.json"]
+  );
+  assert.ok(errors.some((e) => /non-empty string `name`/.test(e.message)));
+  assert.ok(errors.some((e) => /`\$schema` pointing at agent-plugins\.org/.test(e.message)));
+}
+
+function testAgentPluginManifestRequiresAName() {
+  const { errors } = runAgentCheck({
+    json: { "p/plugin.json": { $schema: AGENT_SCHEMA } },
+  });
+  assert.strictEqual(errors.length, 1);
+  assert.strictEqual(errors[0].file, "p/plugin.json");
+  assert.ok(/non-empty string `name`/.test(errors[0].message));
+
+  // An empty string is as nameless as an absent field.
+  const empty = runAgentCheck({
+    json: { "p/plugin.json": { $schema: AGENT_SCHEMA, name: "" } },
+  });
+  assert.strictEqual(empty.errors.length, 1);
+  assert.ok(/non-empty string `name`/.test(empty.errors[0].message));
+}
+
+function testAgentPluginManifestRequiresTheAgentPluginsSchema() {
+  // Missing and foreign `$schema` both fail: otherwise any object with a name
+  // could pose as an Agent Plugins 1.0 manifest.
+  for (const manifest of [
+    { name: "open-code-review" },
+    { name: "open-code-review", $schema: "https://example.com/plugin.schema.json" },
+    { name: "open-code-review", $schema: 1 },
+  ]) {
+    const { errors } = runAgentCheck({ json: { "p/plugin.json": manifest } });
+    assert.strictEqual(errors.length, 1, JSON.stringify(manifest));
+    assert.strictEqual(errors[0].file, "p/plugin.json");
+    assert.ok(
+      /`\$schema` pointing at agent-plugins\.org/.test(errors[0].message),
+      errors[0].message
+    );
+  }
+}
+
 function testAgentPluginManifestRequiresASkillPerSubdirectory() {
   // Agent Plugins 1.0 exposes an immediate skills/ subdirectory as a skill only
   // when it holds SKILL.md, so one without it is dropped at install time.
   const { errors } = runAgentCheck({
-    json: { "p/plugin.json": {} },
+    json: { "p/plugin.json": AGENT_MANIFEST },
     dirs: { "p/skills": ["a", "b"] },
     files: { "p/skills/a/SKILL.md": "---\nname: a\n---\n" },
   });
@@ -565,7 +618,7 @@ function testAgentPluginManifestRequiresASkillPerSubdirectory() {
 
 function testAgentPluginManifestRejectsEmptySkillFile() {
   const { errors } = runAgentCheck({
-    json: { "p/plugin.json": {} },
+    json: { "p/plugin.json": AGENT_MANIFEST },
     dirs: { "p/skills": ["a"] },
     files: { "p/skills/a/SKILL.md": "  \n" },
   });
@@ -587,7 +640,7 @@ function testAgentPluginManifestRejectsLayoutDrift() {
   // not certify a tree it no longer sits next to.
   const { errors } = checkAgentPluginManifests(
     [{ ...AGENT_SPEC, base: "plugin-root" }],
-    () => ({}),
+    () => ({ ...AGENT_MANIFEST }),
     () => [],
     () => null
   );
@@ -603,6 +656,14 @@ function testRealAgentPluginManifestPinsTheFixedLayout() {
     resolveDeclaredPath(spec.file, spec.base, spec.skillsDir),
     spec.target
   );
+}
+
+function testRealAgentPluginManifestDeclaresNameAndSchema() {
+  // The registry test above only covers the layout assumption; this reads the
+  // shipped manifest so a dropped `name` or `$schema` fails here as well.
+  const spec = AGENT_PLUGIN_MANIFESTS.find((m) => m.host === "GitHub Copilot CLI");
+  const raw = fs.readFileSync(path.join(__dirname, "..", "..", spec.file), "utf8");
+  assert.deepStrictEqual(validateAgentPluginManifest(spec.file, JSON.parse(raw)), []);
 }
 
 // --- malformed marketplace manifests ---------------------------------------
@@ -923,11 +984,15 @@ function main_() {
   testRealKimiEntriesResolveFromTheRepoRoot();
   testCheckPluginDeclarationsCatchesDrift();
   testAgentPluginManifestHappyPath();
+  testAgentPluginManifestRejectsEmptyObject();
+  testAgentPluginManifestRequiresAName();
+  testAgentPluginManifestRequiresTheAgentPluginsSchema();
   testAgentPluginManifestRequiresASkillPerSubdirectory();
   testAgentPluginManifestRejectsEmptySkillFile();
   testAgentPluginManifestRejectsMalformedManifest();
   testAgentPluginManifestRejectsLayoutDrift();
   testRealAgentPluginManifestPinsTheFixedLayout();
+  testRealAgentPluginManifestDeclaresNameAndSchema();
   testPluginEntriesToleratesMalformedShapes();
   testMarketplaceReadersDoNotThrowOnMalformedInput();
   testListEntriesResolvesSymlinks();

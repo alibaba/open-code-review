@@ -29,8 +29,9 @@ copilot plugin install alibaba/open-code-review:plugins/open-code-review
 这会安装 `open-code-review` 和 `open-code-review-delegate` 两个 skill。用
 `copilot plugin uninstall open-code-review` 卸载。
 
-Copilot CLI 已弃用直接安装插件的方式，转而推荐通过 marketplace 安装；将来
-marketplace 条目可能让 `plugin@open-code-review` 成为推荐写法。
+Copilot CLI 的安装程序目前会警告：直接安装插件（repo/path/URL）已被弃用，建议
+改用 marketplace 安装；将来 marketplace 条目可能让 `plugin@open-code-review`
+成为推荐写法。
 
 ### 手动替代方案：复制 skill
 
@@ -52,8 +53,9 @@ curl -o ~/.copilot/skills/open-code-review/SKILL.md \
 
 Copilot CLI 还会发现项目中的 `.agents/skills/` 和 `.claude/skills/`；同名时项目级
 skill 优先于个人级。在会话内用 `/skills list` 查看已加载的 skill（在会话外用
-`copilot skill list`）。修改 skill 后，需执行 `/skills reload` 或开启新会话才会
-生效。
+`copilot skill list`）。手动复制的 skill 在 `/skills reload` 或开启新会话后生效；
+已安装的插件则通过重新安装（再次执行 `copilot plugin install`）或
+`copilot plugin update` 来更新。
 
 ## 使用
 
@@ -92,19 +94,20 @@ Fix all `critical` and `high` findings first.
 ## 无头运行
 
 ```bash
-copilot -p "Review the current branch with /open-code-review and fix critical/high findings" \
-  --allow-tool='shell(ocr:*)' \
-  --output-format json \
-  --trust-folder
+copilot -p "Review the current branch with /open-code-review and report the findings." \
+  --allow-tool='shell(ocr:*)'
 ```
 
-- `--allow-tool='shell(ocr:*)'` 预先批准 `ocr` 命令；没有它，每次运行都会暂停等待
-  交互式批准。
-- `--trust-folder` 允许非交互式会话加载项目级 skill。
-- 启用 Copilot 沙箱后，`ocr` 需要访问你的 LLM 端点的网络权限，以及读取
-  `~/.opencodereview/` 的权限。
-- `--output-format json` 包装的是 Copilot 自身的会话记录；评审结果是 `ocr` 输出的
-  JSON（`ocr review --format json --audience agent`）。
+- `--allow-tool='shell(ocr:*)'` 仅预先批准 `ocr` 的 shell 命令——并不授权编辑文件。
+  在非交互式（`-p`）会话中，需要审批的操作会被拒绝而非暂停等待；交互式会话则会
+  暂停等待审批。若要让 Copilot 应用修复，请以交互方式运行（或有意识地扩展允许
+  列表以包含编辑工具）。
+- 在不受信任的文件夹中，非交互式会话可能会跳过项目级 skill（`.github/skills/`）；
+  Copilot CLI v1.0.107+ 提供 `--trust-folder`，可为单次会话信任该文件夹。
+- 启用 Copilot 沙箱后，`ocr` 需要访问你的 LLM 端点的网络权限，以及
+  `~/.opencodereview/` 的读写权限（它会在此保存会话状态）。
+- `--output-format json` 输出的是 Copilot 的 JSONL 会话事件；评审结果本身是 `ocr`
+  的 JSON，需显式运行 `ocr review --format json --audience agent` 获得。
 
 若需要确定性的 CI 门禁，请跳过 agent，直接调用 `ocr`——参见 [CI/CD](../cicd/)。
 

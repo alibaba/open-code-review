@@ -564,21 +564,55 @@ function checkPluginDeclarations(specs, readJson) {
   return { errors, warnings };
 }
 
+// Any parseable JSON object is not an Agent Plugins 1.0 manifest. `name` is how
+// the schema identifies the plugin and `$schema` is what makes the file declare
+// itself as that format at all, so a manifest lacking either describes nothing
+// installable however valid its JSON is.
+function validateAgentPluginManifest(file, json) {
+  const errors = [];
+  if (typeof json.name !== "string" || json.name === "") {
+    errors.push({
+      file,
+      message:
+        `${file} does not declare a non-empty string \`name\`. Agent Plugins 1.0 ` +
+        `identifies the plugin by that field, so this manifest describes nothing ` +
+        `installable.`,
+    });
+  }
+  if (typeof json.$schema !== "string" || !json.$schema.includes("agent-plugins.org")) {
+    errors.push({
+      file,
+      message:
+        `${file} does not declare a \`$schema\` pointing at agent-plugins.org ` +
+        `(expected \`https://agent-plugins.org/schemas/1.0.0/plugin.schema.json\`). ` +
+        `Without it the file does not identify itself as an Agent Plugins 1.0 ` +
+        `manifest.`,
+    });
+  }
+  return errors;
+}
+
 // Agent Plugins 1.0 fixes the layout, so this certifies what a declared-path
-// check cannot: the manifest exists and parses, and every immediate
-// subdirectory of the fixed `skills/` tree holds a non-empty SKILL.md. The
-// schema bundles a directory as a skill by that file alone, so any subdirectory
-// without one installs silently and exposes nothing.
+// check cannot: the manifest exists, parses, names the plugin and its schema,
+// and every immediate subdirectory of the fixed `skills/` tree holds a
+// non-empty SKILL.md. The schema bundles a directory as a skill by that file
+// alone, so any subdirectory without one installs silently and exposes nothing.
 function checkAgentPluginManifests(specs, readJson, listDirs, readFile) {
   const errors = [];
   for (const spec of specs) {
-    if (readJson(spec.file) === null) {
+    const manifest = readJson(spec.file);
+    if (manifest === null) {
       errors.push({
         file: spec.file,
         message:
           `${spec.host} plugin manifest ${spec.file} is missing or is not ` +
           `valid JSON. ${spec.host} would not install the plugin.`,
       });
+      continue;
+    }
+    const identity = validateAgentPluginManifest(spec.file, manifest);
+    if (identity.length > 0) {
+      errors.push(...identity);
       continue;
     }
     const skillsRoot = resolveDeclaredPath(spec.file, spec.base, spec.skillsDir);
@@ -1055,6 +1089,7 @@ module.exports = {
   validateCommandFrontmatter,
   resolveDeclaredPath,
   checkPluginDeclarations,
+  validateAgentPluginManifest,
   checkAgentPluginManifests,
   pluginEntries,
   listEntries,

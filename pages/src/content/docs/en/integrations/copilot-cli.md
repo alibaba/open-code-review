@@ -33,9 +33,9 @@ copilot plugin install alibaba/open-code-review:plugins/open-code-review
 This installs the `open-code-review` and `open-code-review-delegate` skills.
 Remove it with `copilot plugin uninstall open-code-review`.
 
-Direct plugin installs are deprecated by Copilot CLI in favor of marketplace
-installs; a marketplace entry may make `plugin@open-code-review` the recommended
-form later.
+Copilot CLI's installer currently warns that direct plugin installs
+(repo/path/URL) are deprecated in favor of marketplace installs; a marketplace
+entry may make `plugin@open-code-review` the recommended form later.
 
 ### Manual alternative: copy the skill
 
@@ -59,8 +59,9 @@ curl -o ~/.copilot/skills/open-code-review/SKILL.md \
 Copilot CLI also discovers `.agents/skills/` and `.claude/skills/` in
 the project; project skills win over personal ones with the same name.
 Check what is loaded with `/skills list` inside a session (or
-`copilot skill list` outside one). Skill edits take effect after
-`/skills reload` or a new session.
+`copilot skill list` outside one). Manually copied skills take effect
+after `/skills reload` or a new session; installed plugins are updated by
+reinstalling (`copilot plugin install` again) or `copilot plugin update`.
 
 ## Use
 
@@ -102,19 +103,24 @@ does not impose one.
 ## Headless runs
 
 ```bash
-copilot -p "Review the current branch with /open-code-review and fix critical/high findings" \
-  --allow-tool='shell(ocr:*)' \
-  --output-format json \
-  --trust-folder
+copilot -p "Review the current branch with /open-code-review and report the findings." \
+  --allow-tool='shell(ocr:*)'
 ```
 
-- `--allow-tool='shell(ocr:*)'` pre-approves `ocr` commands; without it
-  every run pauses for interactive approval.
-- `--trust-folder` lets non-interactive sessions load project skills.
+- `--allow-tool='shell(ocr:*)'` pre-approves `ocr` shell commands only — it
+  does not authorize file edits. In non-interactive (`-p`) sessions, actions
+  that would need approval are denied rather than paused; interactive
+  sessions pause for approval instead. To have Copilot apply fixes, run
+  interactively (or deliberately extend the allowlist to editing tools).
+- Project-level skills (`.github/skills/`) may be skipped in non-interactive
+  sessions in untrusted folders; Copilot CLI v1.0.107+ offers
+  `--trust-folder` to trust the folder for a single session.
 - With the Copilot sandbox enabled, `ocr` needs network access to your
-  LLM endpoint and read access to `~/.opencodereview/`.
-- `--output-format json` wraps Copilot's own transcript; the review
-  result is `ocr`'s JSON (`ocr review --format json --audience agent`).
+  LLM endpoint and both read and write access to `~/.opencodereview/`
+  (it stores session state).
+- `--output-format json` emits Copilot's JSONL session events; the review
+  result itself is `ocr`'s JSON, obtained by explicitly running
+  `ocr review --format json --audience agent`.
 
 For deterministic CI gates, skip the agent and invoke `ocr` directly —
 see [CI/CD](../cicd/).

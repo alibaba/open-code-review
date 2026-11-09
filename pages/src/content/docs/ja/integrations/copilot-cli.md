@@ -27,7 +27,7 @@ copilot plugin install alibaba/open-code-review:plugins/open-code-review
 
 `open-code-review` と `open-code-review-delegate` の skill がインストールされます。削除するには `copilot plugin uninstall open-code-review` を実行します。
 
-Copilot CLI は直接のプラグインインストールを非推奨とし、marketplace 経由のインストールを推奨しています。将来 marketplace のエントリにより `plugin@open-code-review` が推奨形式になる可能性があります。
+Copilot CLI のインストーラーは現在、直接のプラグインインストール（repo/path/URL）が非推奨であり、marketplace 経由のインストールが推奨される、と警告しています。将来 marketplace のエントリにより `plugin@open-code-review` が推奨形式になる可能性があります。
 
 ### 手動の代替：skill をコピーする
 
@@ -49,8 +49,7 @@ curl -o ~/.copilot/skills/open-code-review/SKILL.md \
 ```
 
 Copilot CLI はプロジェクト内の `.agents/skills/` と `.claude/skills/` も検出します。同じ名前のプロジェクト skill は個人用のものより優先されます。セッション内で `/skills list` を実行して（セッション外では
-`copilot skill list`）、何がロードされているかを確認してください。skill の編集は
-`/skills reload` または新しいセッションの後に反映されます。
+`copilot skill list`）、何がロードされているかを確認してください。手動でコピーした skill は `/skills reload` または新しいセッションの後に反映されます。インストールしたプラグインは、再インストール（`copilot plugin install` をもう一度実行）または `copilot plugin update` で更新します。
 
 ## 使い方
 
@@ -84,16 +83,14 @@ Fix all `critical` and `high` findings first.
 ## ヘッドレス実行
 
 ```bash
-copilot -p "Review the current branch with /open-code-review and fix critical/high findings" \
-  --allow-tool='shell(ocr:*)' \
-  --output-format json \
-  --trust-folder
+copilot -p "Review the current branch with /open-code-review and report the findings." \
+  --allow-tool='shell(ocr:*)'
 ```
 
-- `--allow-tool='shell(ocr:*)'` は `ocr` コマンドを事前承認します。これがないと、実行のたびに対話的な承認のために一時停止します。
-- `--trust-folder` は非対話セッションがプロジェクト skill をロードできるようにします。
-- Copilot のサンドボックスが有効な場合、`ocr` は LLM エンドポイントへのネットワークアクセスと `~/.opencodereview/` への読み取りアクセスを必要とします。
-- `--output-format json` は Copilot 自身のトランスクリプトをラップします。レビュー結果は `ocr` の JSON（`ocr review --format json --audience agent`）です。
+- `--allow-tool='shell(ocr:*)'` が事前承認するのは `ocr` のシェルコマンドのみです——ファイル編集を許可するものではありません。非対話（`-p`）セッションでは、承認が必要な操作は一時停止ではなく拒否されます。対話セッションでは代わりに承認のために一時停止します。Copilot に修正を適用させるには、対話的に実行してください（または許可リストを意図的に編集ツールまで広げてください）。
+- 信頼されていないフォルダでは、非対話セッションでプロジェクトレベルの skill（`.github/skills/`）がスキップされることがあります。Copilot CLI v1.0.107 以降には、単一セッションでそのフォルダを信頼する `--trust-folder` があります。
+- Copilot のサンドボックスが有効な場合、`ocr` は LLM エンドポイントへのネットワークアクセスと、`~/.opencodereview/` への読み取りおよび書き込みアクセスを必要とします（セッション状態を保存するため）。
+- `--output-format json` が出力するのは Copilot の JSONL セッションイベントです。レビュー結果そのものは `ocr` の JSON で、`ocr review --format json --audience agent` を明示的に実行して取得します。
 
 決定的な CI ゲートが必要な場合は、agent を介さずに `ocr` を直接呼び出してください——
 [CI/CD](../cicd/)を参照してください。

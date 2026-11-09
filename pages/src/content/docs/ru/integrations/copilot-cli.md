@@ -33,9 +33,9 @@ copilot plugin install alibaba/open-code-review:plugins/open-code-review
 Устанавливаются навыки `open-code-review` и `open-code-review-delegate`.
 Удалить плагин можно командой `copilot plugin uninstall open-code-review`.
 
-Прямая установка плагинов признана Copilot CLI устаревшей в пользу установки
-через marketplace; запись в marketplace может позже сделать
-`plugin@open-code-review` рекомендуемой формой.
+Установщик Copilot CLI сейчас предупреждает, что прямая установка плагинов
+(repo/path/URL) устарела в пользу установки через marketplace; запись в marketplace
+может позже сделать `plugin@open-code-review` рекомендуемой формой.
 
 ### Ручной вариант: скопируйте навык
 
@@ -59,8 +59,9 @@ curl -o ~/.copilot/skills/open-code-review/SKILL.md \
 Copilot CLI также обнаруживает `.agents/skills/` и `.claude/skills/` в проекте;
 навыки проекта имеют приоритет над личными навыками с тем же именем. Проверьте,
 что загружено, командой `/skills list` внутри сеанса (или `copilot skill list`
-вне его). Изменения навыка вступают в силу после `/skills reload` или в новом
-сеансе.
+вне его). Скопированные вручную навыки вступают в силу после `/skills reload` или
+в новом сеансе; установленные плагины обновляются переустановкой (повторный
+`copilot plugin install`) или командой `copilot plugin update`.
 
 ## Использование
 
@@ -101,19 +102,25 @@ Fix all `critical` and `high` findings first.
 ## Неинтерактивный запуск
 
 ```bash
-copilot -p "Review the current branch with /open-code-review and fix critical/high findings" \
-  --allow-tool='shell(ocr:*)' \
-  --output-format json \
-  --trust-folder
+copilot -p "Review the current branch with /open-code-review and report the findings." \
+  --allow-tool='shell(ocr:*)'
 ```
 
-- `--allow-tool='shell(ocr:*)'` заранее одобряет команды `ocr`; без него каждый
-  запуск останавливается для интерактивного подтверждения.
-- `--trust-folder` позволяет неинтерактивным сеансам загружать навыки проекта.
+- `--allow-tool='shell(ocr:*)'` заранее одобряет только shell-команды `ocr` — он не
+  разрешает редактирование файлов. В неинтерактивных сеансах (`-p`) действия,
+  требующие подтверждения, отклоняются, а не приостанавливаются; интерактивные
+  сеансы вместо этого ждут подтверждения. Чтобы Copilot применял исправления,
+  запускайте в интерактивном режиме (или намеренно расширьте список разрешённых
+  инструментов на инструменты редактирования).
+- В недоверенных папках неинтерактивные сеансы могут пропускать навыки уровня
+  проекта (`.github/skills/`); Copilot CLI v1.0.107+ предлагает `--trust-folder`,
+  чтобы доверять папке в рамках одного сеанса.
 - При включённой песочнице Copilot `ocr` нужен сетевой доступ к вашему
-  эндпоинту LLM и доступ на чтение к `~/.opencodereview/`.
-- `--output-format json` оборачивает собственный журнал Copilot; результат
-  ревью — это JSON от `ocr` (`ocr review --format json --audience agent`).
+  эндпоинту LLM, а также доступ на чтение и запись к `~/.opencodereview/`
+  (там хранится состояние сеанса).
+- `--output-format json` выводит события сеанса Copilot в формате JSONL; сам
+  результат ревью — это JSON от `ocr`, получаемый явным запуском
+  `ocr review --format json --audience agent`.
 
 Для детерминированных проверок в CI пропустите агента и вызывайте `ocr`
 напрямую — см. [CI/CD](../cicd/).
