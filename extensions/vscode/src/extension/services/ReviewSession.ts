@@ -4,9 +4,13 @@
 import { CliResult, CliRunOptions, LogLine, ReviewState } from '@shared/types';
 import { CliService } from './CliService';
 
+// `ocr review` reports the manifest terminal state (complete | partial | failed | skipped);
+// completed_with_errors is the manifest-less status. None of these is a clean pass.
+const INCOMPLETE_STATUSES: ReadonlySet<string> = new Set(['completed_with_errors', 'partial', 'failed']);
+
 export function resultToState(result: CliResult): ReviewState {
   if (result.comments.length > 0) return 'done';
-  if (result.status === 'completed_with_errors') return 'failed';
+  if (INCOMPLETE_STATUSES.has(result.status)) return 'failed';
   return 'empty';
 }
 
@@ -30,7 +34,11 @@ export class ReviewSession {
         cb.onState('cancelled');
         return;
       }
-      cb.onState(resultToState(result));
+      const state = resultToState(result);
+      const error = state === 'failed'
+        ? result.message || `Review did not complete successfully (${result.status})`
+        : undefined;
+      cb.onState(state, error);
       cb.onDone(result);
     } catch (e) {
       if (this.cancelled) {
