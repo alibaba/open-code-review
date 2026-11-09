@@ -12,6 +12,11 @@ export const ja: TranslationKeys = {
   'navbar.blog': 'ブログ',
   'navbar.getStarted': '始める',
 
+  'providers.title': '主要モデルプロバイダーに標準対応',
+  'providers.description': 'API キーを設定するだけでレビューを開始。主要プロトコルに対応したプライベートモデルサービスにも接続できます。',
+  'providers.listLabel': '対応モデルのブランド',
+  'providers.explore': '対応プロバイダーを見る',
+
   // Hero
   'hero.title': 'AIコードレビュー\n数百万の実タスクで検証済み',
   'hero.description': 'Open Code Review は、アリババの実戦検証済みコードレビュー Agent をワークフローに統合します。任意の LLM に接続し、データを完全にプライベートに保ち、開発者が実際に採用するレビューコメントを取得できます。',

@@ -317,9 +317,10 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// provider prompt caches actually reuse prefixes at.
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
-	ctx, scanSpan := telemetry.StartSpan(ctx, "scan.enumerate")
+	// Keep later scan work under the incoming parent, not the short-lived enumeration span.
+	enumerateCtx, scanSpan := telemetry.StartSpan(ctx, "scan.enumerate")
 	provider := NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner, a.args.MaxFileSizeBytes)
-	items, err := provider.Enumerate(ctx)
+	items, err := provider.Enumerate(enumerateCtx)
 	if err != nil {
 		scanSpan.End()
 		return nil, fmt.Errorf("enumerate files: %w", err)
