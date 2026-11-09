@@ -5,6 +5,7 @@ package telemetry
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -12,9 +13,12 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// Metric handles — initialized once on first use.
+// Metric handles — initialized once on first use. Record* functions are called
+// from concurrent review goroutines, so initialization is serialized by
+// metricsMu; the unlock in ensureMetrics publishes the handles to every caller.
 var (
-	initMetricsOnce    bool
+	metricsMu          sync.Mutex
+	initMetricsOnce    bool // guarded by metricsMu; tests reset it to re-initialize
 	mReviewDuration    metric.Int64Histogram
 	mFilesReviewed     metric.Int64Counter
 	mCommentsGenerated metric.Int64Counter
@@ -30,6 +34,8 @@ func getMeter() metric.Meter {
 }
 
 func ensureMetrics() {
+	metricsMu.Lock()
+	defer metricsMu.Unlock()
 	if initMetricsOnce {
 		return
 	}
