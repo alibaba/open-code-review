@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -140,6 +141,93 @@ func TestEmitRunResult_JSONIncludesToolFailureArguments(t *testing.T) {
 	}
 	if got := out.ToolCalls.FailureDetails[0].Arguments; got != `{"search_text":"needle"}` {
 		t.Errorf("failure arguments = %q, want raw tool arguments", got)
+	}
+}
+
+func TestJSONOutput_FileReadRecoveryEvidence(t *testing.T) {
+	for _, recovery := range []struct {
+		name string
+		json string
+	}{
+		{"candidate read", `{"status":"candidate_read","target_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","candidate_path":"src/use-toggle.tsx","successful_read":{"tool_call_number":2,"arguments":"{\"file_path\":\"src/use-toggle.tsx\",\"start_line\":10}","file_path":"src/use-toggle.tsx","start_line":10,"end_line":509,"total_lines":700,"is_truncated":true}}`},
+		{"candidate not read", `{"status":"not_observed","target_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","candidate_path":"src/use-toggle.tsx"}`},
+		{"no candidate", `{"status":"not_observed"}`},
+		{"legacy", ""},
+	} {
+		for _, failureOutput := range []bool{false, true} {
+			name := recovery.name + "/complete"
+			if failureOutput {
+				name = recovery.name + "/failed"
+			}
+			t.Run(name, func(t *testing.T) {
+				failureJSON := `{"tool_call_number":1,"tool_name":"file_read","file_path":"review-group","arguments":"{\"file_path\":\"src/use-toggle.ts\"}","error":"file not found"`
+				if recovery.json != "" {
+					failureJSON += `,"recovery":` + recovery.json
+				}
+				failureJSON += `}`
+				var failure llmloop.ToolFailureDetail
+				if err := json.Unmarshal([]byte(failureJSON), &failure); err != nil {
+					t.Fatal(err)
+				}
+				ag := &mockResultProvider{
+					filesReviewed: 2,
+					toolCalls:     map[string]int64{"file_read": 2, "code_search": 1},
+					toolFailures: []llmloop.ToolFailureDetail{failure, {
+						ToolCallNumber: 3,
+						ToolName:       "code_search",
+						Arguments:      `{"search_text":"needle"}`,
+						Error:          "search failed",
+					}},
+					manifest: mockManifest(session.StateComplete),
+				}
+				var got string
+				wantStatus := "complete"
+				if failureOutput {
+					wantStatus = "failed"
+					got = captureStderr(t, func() {
+						emitFailureUsage(ag, time.Second, "json", nil, nil)
+					})
+				} else {
+					var buf bytes.Buffer
+					if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "agent", nil, nil, &buf, nil); err != nil {
+						t.Fatal(err)
+					}
+					got = buf.String()
+				}
+				var out struct {
+					Status    string `json:"status"`
+					ToolCalls struct {
+						Total          int64            `json:"total"`
+						Failure        int64            `json:"failure"`
+						FailureByTool  map[string]int64 `json:"failure_by_tool"`
+						FailureDetails []map[string]any `json:"failure_details"`
+					} `json:"tool_calls"`
+				}
+				if err := json.Unmarshal([]byte(got), &out); err != nil {
+					t.Fatalf("decode output: %v\n%s", err, got)
+				}
+				if out.Status != wantStatus {
+					t.Errorf("status = %q, want %q", out.Status, wantStatus)
+				}
+				calls := out.ToolCalls
+				if calls.Total != 3 || calls.Failure != 2 || calls.FailureByTool["file_read"] != 1 || calls.FailureByTool["code_search"] != 1 {
+					t.Errorf("historical tool counts changed: %+v", calls)
+				}
+				if len(calls.FailureDetails) != 2 {
+					t.Fatalf("failure details = %+v, want two", calls.FailureDetails)
+				}
+				var wantFailure map[string]any
+				if err := json.Unmarshal([]byte(failureJSON), &wantFailure); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(calls.FailureDetails[0], wantFailure) {
+					t.Errorf("failure detail = %#v, want %#v", calls.FailureDetails[0], wantFailure)
+				}
+				if _, ok := calls.FailureDetails[1]["recovery"]; ok {
+					t.Errorf("non-file_read failure gained recovery evidence: %+v", calls.FailureDetails[1])
+				}
+			})
+		}
 	}
 }
 
