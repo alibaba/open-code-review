@@ -287,13 +287,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// so affinity keys stay per-conversation, the granularity provider prompt caches actually reuse prefixes at.
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
-	// Step 1: Parse diffs
-	// The parse span's context is deliberately scoped to the parse block: after
-	// diffSpan.End() the pipeline keeps using the incoming ctx. Rebinding ctx to
-	// the span's context here would parent every later span and event (group
-	// subtasks, main loop, plan, review filter) to the already-ended diff.parse
-	// span, attributing review work to parsing and placing children outside the
-	// parent operation's lifetime (#1710).
+	// Keep later review work under the incoming parent, not the short-lived parse span.
 	parseCtx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
 	if err := a.loadDiffs(parseCtx); err != nil {
 		diffSpan.End()
