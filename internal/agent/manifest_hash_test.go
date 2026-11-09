@@ -142,6 +142,8 @@ func TestRuntimeConfigSHA256(t *testing.T) {
 		// The aggregate budget changes what coverage a run can even attempt, so two
 		// otherwise-identical runs with different caps must not share an identity.
 		{"max_tokens_budget", func(x *Args) { x.MaxTokensBudget = 100_000 }},
+		{"estimation_overhead_tokens", func(x *Args) { x.Estimation.PromptOverheadTokens = 8000 }},
+		{"estimation_output_tokens_per_round", func(x *Args) { x.Estimation.OutputTokensPerRound = 3000 }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -151,5 +153,10 @@ func TestRuntimeConfigSHA256(t *testing.T) {
 				t.Errorf("changing %s did not change runtime_config_sha256", tc.name)
 			}
 		})
+	}
+	explicitDefaults := baseArgs
+	explicitDefaults.Estimation = explicitDefaults.Estimation.WithDefaults()
+	if New(explicitDefaults).runtimeConfigSHA256() != a.runtimeConfigSHA256() {
+		t.Error("explicit defaults must have the same runtime identity as omitted estimates")
 	}
 }

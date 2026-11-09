@@ -229,6 +229,7 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 		SkipDedup:             opts.noDedup,
 		SkipSummary:           opts.noSummary,
 		Resume:                resumeState,
+		Estimation:            resolveEstimation(rt.AppCfg),
 	})
 
 	closeRaw := bindRawWriter(rt.RawHolder, cc.RepoDir, ag.Session())

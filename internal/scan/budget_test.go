@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/estimate"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -69,6 +70,40 @@ func makeScanItems(n int) []model.ScanItem {
 		}
 	}
 	return items
+}
+
+func TestBudgetGate_CustomEstimation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		params estimate.Parameters
+		calls  int64
+	}{
+		{"defaults", estimate.Parameters{}, 1},
+		{"overhead override", estimate.Parameters{PromptOverheadTokens: 8000}, 0},
+		{"output override", estimate.Parameters{OutputTokensPerRound: 3000}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeBudgetClient{perCallTokens: 10}
+			a := NewAgent(Args{
+				Template: budgetTestTemplate(), LLMClient: fake, MaxConcurrency: 1,
+				MaxTokensBudget: 30_000, Estimation: tc.params,
+				Session:  session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: session.ReviewModeFullScan}),
+				SkipPlan: true, SkipDedup: true, SkipSummary: true,
+			})
+			t.Cleanup(func() { _ = a.Session().Finalize() })
+			a.items = makeScanItems(1)
+			a.args.Tools.Freeze()
+			if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if calls := atomic.LoadInt64(&fake.calls); calls != tc.calls {
+				t.Fatalf("LLM calls = %d, want %d", calls, tc.calls)
+			}
+			if a.BudgetExceeded() != (tc.calls == 0) {
+				t.Fatalf("BudgetExceeded = %v, expected stopped=%v", a.BudgetExceeded(), tc.calls == 0)
+			}
+		})
+	}
 }
 
 // TestBudgetGate_StopsBeforeExceeding verifies the per-file gate stops
