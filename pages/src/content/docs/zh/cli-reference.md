@@ -398,6 +398,9 @@ ocr session list --json
 
 ### `ocr session show`
 
+根据 ID 在所有已保存的仓库会话中查找，切换 worktree 或移除原工作目录后也能查看。
+若多个仓库保存了相同的 ID，命令会列出候选仓库，要求用 `--repo` 指定其中一个。
+
 恢复的运行还会打印它所继续的父运行，若这次恢复跨了 provider 或 model，也会打印这次切换。
 
 ```bash
@@ -408,7 +411,7 @@ ocr session show --repo /path/to/repo <session-id>
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `--repo <path>` | 当前目录 | 要查看会话的仓库。 |
+| `--repo <path>` | 所有仓库 | 仅在指定仓库下查找会话。 |
 | `--json` | `false` | 以 JSON 输出会话元数据和逐文件条目。 |
 
 ### `ocr session comments`

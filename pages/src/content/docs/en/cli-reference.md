@@ -422,6 +422,10 @@ ocr session list --json
 
 ### `ocr session show`
 
+Finds the session by id across saved repositories, so it also works after
+switching worktrees or removing the original checkout. If the id exists under
+multiple repositories, the command lists them and requires `--repo` to select one.
+
 A resumed run also prints the run it continued, and the provider/model
 transition when the resume crossed one.
 
@@ -433,7 +437,7 @@ ocr session show --repo /path/to/repo <session-id>
 
 | Flag | Default | Description |
 |---|---|---|
-| `--repo <path>` | current dir | Repository whose session should be inspected. |
+| `--repo <path>` | all repositories | Restrict the session lookup to this repository. |
 | `--json` | `false` | Emit session metadata and per-file items as JSON. |
 
 ### `ocr session comments`
