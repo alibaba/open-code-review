@@ -689,6 +689,79 @@ func TestExecuteToolCall_CodeCommentWithNoUsableEntryIsReported(t *testing.T) {
 	}
 }
 
+// The model gets a plain success when at least one entry survives, so this
+// warning is the only record that the rest of its findings were discarded.
+func TestExecuteToolCall_CodeCommentPartialDropWarns(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	r := NewRunner(Deps{Tools: reg, CommentCollector: collector})
+
+	argsJSON, err := json.Marshal(map[string]any{
+		"comments": []any{
+			map[string]any{"content": "real finding", "path": "main.go"},
+			map[string]any{"path": "main.go", "message": "dropped: no content"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cp := r.executeToolCall(context.Background(), "main.go", llm.ToolCall{
+		Function: llm.FunctionCall{Name: "code_comment", Arguments: string(argsJSON)},
+	}, nil, "")
+	if cp.Data != tool.CommentSucceed {
+		t.Fatalf("result = %+v, want the usable entry to file normally", cp)
+	}
+	if got := collector.Comments(); len(got) != 1 || got[0].Content != "real finding" {
+		t.Fatalf("collected %+v, want only the usable entry", got)
+	}
+
+	warnings := r.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %+v, want exactly one", warnings)
+	}
+	if warnings[0].Type != "comment_entries_dropped" || warnings[0].File != "main.go" {
+		t.Errorf("warning = %+v, want comment_entries_dropped on main.go", warnings[0])
+	}
+	if !strings.Contains(warnings[0].Message, "1 of 2") {
+		t.Errorf("warning message = %q, want the dropped/total count", warnings[0].Message)
+	}
+}
+
+// A batch with no usable entry takes the none-usable failure instead — the
+// error already names the required fields, so no partial-drop warning on top.
+func TestExecuteToolCall_CodeCommentAllDroppedFailsWithoutPartialWarning(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	r := NewRunner(Deps{Tools: reg, CommentCollector: collector})
+
+	argsJSON, err := json.Marshal(map[string]any{
+		"comments": []any{
+			map[string]any{"path": "main.go", "message": "no content"},
+			map[string]any{"content": "", "path": "main.go"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cp := r.executeToolCall(context.Background(), "main.go", llm.ToolCall{
+		Function: llm.FunctionCall{Name: "code_comment", Arguments: string(argsJSON)},
+	}, nil, "")
+	if cp.Data != tool.CommentNoneUsableMsg {
+		t.Fatalf("result = %q, want %q", cp.Data, tool.CommentNoneUsableMsg)
+	}
+	if w := r.Warnings(); len(w) != 0 {
+		t.Errorf("warnings = %+v, want none — the failure covers the whole batch", w)
+	}
+}
+
 func graceRoundCommentResponse() *llm.ChatResponse {
 	content := ""
 	return &llm.ChatResponse{
