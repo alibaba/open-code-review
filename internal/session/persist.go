@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -248,7 +249,7 @@ func (jw *jsonlWriter) WriteLLMRequest(filePath string, taskType TaskType, reque
 }
 
 // WriteLLMResponse writes a response entry with model, content, reasoning, tool calls, and usage.
-func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content, reasoningContent string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration, nativePayload any) string {
+func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content, reasoningContent string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration, nativePayload any, verification ...*llm.VerificationRecord) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -277,6 +278,9 @@ func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, cont
 	}
 	if nativePayload != nil {
 		rec["native_payload"] = nativePayload
+	}
+	if len(verification) > 0 && verification[0] != nil {
+		rec["verification"] = verification[0]
 	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
@@ -374,7 +378,7 @@ func (jw *jsonlWriter) WriteResumeLineage(l *ResumeLineage) string {
 // is appended. The record is flushed before the file is closed. Any marshal,
 // flush or close error is returned so the caller can surface it as a delivery
 // error rather than silently losing the manifest.
-func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, manifest *RunManifest) error {
+func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, manifest *RunManifest, verification ...*llm.VerificationReport) error {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -391,6 +395,9 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 	}
 	if manifest != nil {
 		rec["run_manifest"] = manifest
+	}
+	if len(verification) > 0 && verification[0] != nil {
+		rec["verification"] = verification[0]
 	}
 	jw.lastUUID = uuid
 

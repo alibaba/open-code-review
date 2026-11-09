@@ -19,6 +19,7 @@ import (
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
 type ResolvedEndpoint struct {
+	NearAI       *NearAISettings
 	URL          string
 	Token        string
 	Model        string
@@ -346,17 +347,19 @@ type llmFileConfig struct {
 
 // providerEntryConfig represents a single provider entry in config.json.
 type providerEntryConfig struct {
-	APIKey       string            `json:"api_key,omitempty"`
-	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
-	URL          string            `json:"url,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Models       []string          `json:"models,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	E2EE              *bool             `json:"e2ee,omitempty"`
+	VerificationLevel string            `json:"verification_level,omitempty"`
+	APIKey            string            `json:"api_key,omitempty"`
+	APIKeyCmd         string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
+	URL               string            `json:"url,omitempty"`
+	Protocol          string            `json:"protocol,omitempty"`
+	Model             string            `json:"model,omitempty"`
+	Models            []string          `json:"models,omitempty"`
+	AuthHeader        string            `json:"auth_header,omitempty"`
+	TimeoutSec        int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
+	ExtraBody         map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders      map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes        []int             `json:"retry_codes,omitempty"`
 
 	// AWSProfile and AWSRegion apply to ambient-auth providers that sign with
 	// SigV4 (currently bedrock). Both are optional: without them the standard
@@ -596,6 +599,19 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 	if protocol == ProtocolAnthropic {
 		url = ensureMessagesSuffix(url)
 	}
+	var nearAISettings *NearAISettings
+	if isPreset && preset.Name == "nearai" {
+		settings, err := ResolveNearAISettings(entry.E2EE, entry.VerificationLevel)
+		if err != nil {
+			return ResolvedEndpoint{}, false, err
+		}
+		if err := validateNearAIEndpoint(url, protocol, extraBody, entry.RetryCodes); err != nil {
+			return ResolvedEndpoint{}, false, err
+		}
+		nearAISettings = &settings
+	} else if entry.E2EE != nil || entry.VerificationLevel != "" {
+		return ResolvedEndpoint{}, false, fmt.Errorf("e2ee and verification_level apply only to the nearai provider")
+	}
 
 	// Single api_key_cmd resolution site for both preset and custom providers,
 	// as late as possible: everything above can fail without running the
@@ -616,6 +632,7 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 		Token:        apiKey,
 		Model:        model,
 		Provider:     cfg.Provider,
+		NearAI:       nearAISettings,
 		Protocol:     protocol,
 		AuthHeader:   authHeader,
 		Source:       "provider:" + cfg.Provider,

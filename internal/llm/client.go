@@ -324,11 +324,12 @@ type ResponseMessage struct {
 
 // ChatResponse is the parsed result of a completion request.
 type ChatResponse struct {
-	ID       string          `json:"-"`
-	Model    string          `json:"-"`
-	Choices  []Choice        `json:"-"`
-	Usage    *UsageInfo      `json:"-"` // Token usage extracted from API response
-	RawUsage json.RawMessage `json:"-"`
+	Verification *VerificationRecord `json:"-"`
+	ID           string              `json:"-"`
+	Model        string              `json:"-"`
+	Choices      []Choice            `json:"-"`
+	Usage        *UsageInfo          `json:"-"` // Token usage extracted from API response
+	RawUsage     json.RawMessage     `json:"-"`
 }
 
 // Content extracts the text content from the first choice, falling back to reasoning content.
@@ -398,6 +399,9 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
+	httpClient            *http.Client
+	disableRetries        bool
+	deferFinalize         bool
 	URL                   string            // Full API endpoint URL
 	APIKey                string            // Bearer token / API key
 	Model                 string            // Default model override
@@ -502,6 +506,17 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		AWSProfile:            ep.AWSProfile,
 		AWSRegion:             ep.AWSRegion,
 	}
+	if preset, ok := LookupProvider(ep.Provider); ok && preset.Name == "nearai" {
+		settings := defaultNearAISettings()
+		if ep.NearAI != nil {
+			settings = *ep.NearAI
+		}
+		client := newNearAIClient(cfg, settings)
+		if ep.Protocol != "" && ep.Protocol != ProtocolOpenAIChatCompletions {
+			client.initErr = &nearAIFailure{code: "configuration.invalid", stage: "configuration"}
+		}
+		return client
+	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
 		return NewAnthropicClient(cfg)
@@ -604,14 +619,22 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	}
 
 	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/chat/completions")
+	httpClient := cfg.httpClient
+	if httpClient == nil {
+		httpClient = httpClientWithHeaderTimeout(cfg.Timeout)
+	}
+	retries := 5
+	if cfg.disableRetries {
+		retries = 0
+	}
 
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(cfg.APIKey),
 		openaiopt.WithBaseURL(sdkBaseURL),
-		openaiopt.WithMaxRetries(5),
+		openaiopt.WithMaxRetries(retries),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
-		openaiopt.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
+		openaiopt.WithHTTPClient(httpClient),
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
@@ -650,15 +673,24 @@ type ChatRequest struct {
 // path including the streaming branch, the EOF recovery and a panic. Results are
 // named so the defer can read the error actually returned.
 func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	var progress *requestProgress
+	if !c.cfg.deferFinalize {
+		progress = startRequestProgress(ctx, req.Model, c.cfg.Model)
+	}
 	defer func() {
+		if c.cfg.deferFinalize {
+			return
+		}
 		// A panic still has to finalize, or the entry stays unfinalized and Freeze
 		// drops the whole run's report. The panic value itself is re-raised
 		// unchanged so agent.go's per-file recovery behaves exactly as before.
 		if r := recover(); r != nil {
+			progress.finish(errRequestPanicked)
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
 			panic(r)
 		}
 		err = describeTimeout(ctx, err)
+		progress.finish(err)
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
 
@@ -723,7 +755,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 	}
 
 	sdkResp, err := c.sdk.Chat.Completions.New(ctx, params, opts...)
-	if errors.Is(err, io.ErrUnexpectedEOF) {
+	if !c.cfg.disableRetries && errors.Is(err, io.ErrUnexpectedEOF) {
 		// The truncated response was observed as HTTP 200, so it is corrected here
 		// rather than in the defer: this SDK call ends now, and a second one is
 		// about to append its own attempts under the same logical request.
@@ -1463,12 +1495,15 @@ func anthropicThinkingBudgetTokens(v any) (int64, bool) {
 // named. A parameter-building failure returns before any HTTP attempt, so
 // Finalize finds no entry and the request stays out of the report entirely.
 func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	progress := startRequestProgress(ctx, req.Model, c.cfg.Model)
 	defer func() {
 		if r := recover(); r != nil {
+			progress.finish(errRequestPanicked)
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
 			panic(r)
 		}
 		err = describeTimeout(ctx, err)
+		progress.finish(err)
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
 

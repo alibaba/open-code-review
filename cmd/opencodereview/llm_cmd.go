@@ -85,13 +85,17 @@ func runLLMTestWithConfigPath(configPath string) error {
 	if task.Timeout > 0 {
 		timeout = time.Duration(task.Timeout) * time.Second
 	}
-	if ep.ChatGPTPlan {
+	if ep.ChatGPTPlan || ep.NearAI != nil {
 		timeout = llmTestTimeout(task.Timeout, ep.Timeout)
+		if ep.NearAI != nil && ep.Timeout == 0 {
+			timeout = max(timeout, 3*time.Minute)
+		}
 	}
 
 	// No retry collector: llm test is a connectivity probe, not a review, and the
 	// retry report only describes ocr review.
 	llmClient := llm.NewLLMClient(ep, nil, nil)
+	defer llm.CloseClient(llmClient)
 
 	messages := make([]llm.Message, 0, len(task.Messages))
 	for _, m := range task.Messages {
@@ -162,6 +166,7 @@ func runLLMTestWithConfigPath(configPath string) error {
 	}
 	fmt.Printf("%s\n", content)
 	fmt.Println("✓ Connection test successful")
+	outputVerificationText(os.Stdout, &jsonLLMIdentity{Verification: llm.ClientVerificationReport(llmClient)})
 	if note := toolRoundTripNote(len(tools) > 0, toolCalled); note != "" {
 		fmt.Println(note)
 	}

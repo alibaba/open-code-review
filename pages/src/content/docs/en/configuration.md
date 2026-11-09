@@ -55,6 +55,7 @@ provider instead uses the ChatGPT credentials created by `ocr auth login`.
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
 | `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
+| `nearai` | openai + verified SDK transport | `https://cloud-api.near.ai/v1` | `NEARAI_API_KEY` |
 | `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
 | `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
 | `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
@@ -75,6 +76,14 @@ restrictions on `--model`. An override absent from both the built-in list and
 `providers.<name>.models` produces a warning on stderr; the provider validates
 the model when the request is sent. Custom providers retain their existing
 `--model` validation rules.
+
+## NEAR AI verified inference
+
+The `nearai` provider uses the NEAR AI inference SDK with E2EE and model TEE
+verification enabled by default. OCR verifies each completion before using its
+content or executing its tool calls. See the [NEAR AI guide](https://github.com/alibaba/open-code-review/blob/main/docs/nearai.md) for setup,
+verification levels, reporting and limitations. Pointing a generic OpenAI
+provider at the NEAR AI URL does not enable this integration.
 
 ## Sign in with ChatGPT preview
 
