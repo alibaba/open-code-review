@@ -21,7 +21,8 @@ func NewFileRead(fr *FileReader) *FileReadProvider { return &FileReadProvider{Fi
 func (p *FileReadProvider) Tool() Tool { return FileRead }
 
 func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (string, error) {
-	filePath, _ := args["file_path"].(string)
+	rawPath, _ := args["file_path"].(string)
+	filePath := normalizePath(rawPath)
 	if filePath == "" {
 		return "Error: file_path is required", nil
 	}

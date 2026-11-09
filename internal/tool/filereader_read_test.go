@@ -274,3 +274,58 @@ func TestFileReader_Read_CommitMode_MonorepoSubdirPath(t *testing.T) {
 		t.Errorf("workspace-mode Read = %q, want %q", gotDisk, content)
 	}
 }
+
+func TestFileReader_Read_WindowsPath_Workspace(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "pkg", "util")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "package util\n"
+	if err := os.WriteFile(filepath.Join(subDir, "helper.go"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+
+	windowsPath := `pkg\util\helper.go`
+	got, err := fr.Read(context.Background(), windowsPath)
+	if err != nil {
+		t.Fatalf("Read(%q) error: %v", windowsPath, err)
+	}
+	if got != content {
+		t.Errorf("Read = %q, want %q", got, content)
+	}
+
+	lines, total, err := fr.ReadLines(context.Background(), windowsPath, 1, 10)
+	if err != nil {
+		t.Fatalf("ReadLines(%q) error: %v", windowsPath, err)
+	}
+	if total != 2 || len(lines) == 0 || lines[0] != "package util" {
+		t.Errorf("ReadLines = %v, total = %d", lines, total)
+	}
+}
+
+func TestFileReader_Read_WindowsPath_CommitMode(t *testing.T) {
+	dir := setupTestRepo(t)
+	commit := getHeadCommit(t, dir)
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit}
+
+	windowsPath := `pkg\util.go`
+	got, err := fr.Read(context.Background(), windowsPath)
+	if err != nil {
+		t.Fatalf("Read(%q) error: %v", windowsPath, err)
+	}
+	if !strings.Contains(got, "package pkg") {
+		t.Errorf("Read(%q) = %q, want containing 'package pkg'", windowsPath, got)
+	}
+
+	lines, total, err := fr.ReadLines(context.Background(), windowsPath, 1, 10)
+	if err != nil {
+		t.Fatalf("ReadLines(%q) error: %v", windowsPath, err)
+	}
+	if total == 0 || len(lines) == 0 {
+		t.Errorf("ReadLines(%q) returned empty result", windowsPath)
+	}
+}

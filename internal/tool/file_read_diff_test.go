@@ -107,3 +107,50 @@ func TestFileReadDiffProvider_Tool(t *testing.T) {
 		t.Errorf("Tool() = %v, want FileReadDiff", p.Tool())
 	}
 }
+
+func TestDiffMap_Get_Normalized(t *testing.T) {
+	dm := NewDiffMap(map[string]string{
+		"pkg/util.go": "diff content",
+	})
+
+	for _, query := range []string{
+		"pkg/util.go",
+		`pkg\util.go`,
+		"./pkg/util.go",
+		`.\pkg\util.go`,
+		"/pkg/util.go",
+	} {
+		v, ok := dm.Get(query)
+		if !ok || v != "diff content" {
+			t.Errorf("Get(%q) = (%q, %v), want ('diff content', true)", query, v, ok)
+		}
+	}
+
+	// Also test NewDiffMap key with backslashes
+	dm2 := NewDiffMap(map[string]string{
+		`dir\file.go`: "diff content 2",
+	})
+	if v, ok := dm2.Get("dir/file.go"); !ok || v != "diff content 2" {
+		t.Errorf("Get(dir/file.go) on backslash-keyed map = (%q, %v)", v, ok)
+	}
+}
+
+func TestFileReadDiffProvider_Execute_WindowsPaths(t *testing.T) {
+	dm := NewDiffMap(map[string]string{
+		"pkg/util.go": "@@ -1 +1 @@\n-old\n+new",
+	})
+	p := NewFileReadDiff(dm)
+
+	got, err := p.Execute(context.Background(), map[string]any{
+		"path_array": []any{`pkg\util.go`, `./pkg/util.go`},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "==== FILE: pkg/util.go ====") {
+		t.Errorf("expected normalized file header in output, got: %s", got)
+	}
+	if strings.Contains(got, "Error: diff not found") {
+		t.Errorf("did not expect missing error, got: %s", got)
+	}
+}

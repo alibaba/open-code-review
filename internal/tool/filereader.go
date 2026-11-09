@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -91,13 +92,32 @@ func (fr *FileReader) readFromDisk(path string) (string, error) {
 	return string(content), nil
 }
 
+// normalizePath standardizes relative file paths across platforms by converting
+// Windows backslashes to forward slashes, cleaning redundant segments, and stripping
+// leading slashes or "./".
+func normalizePath(p string) string {
+	if p == "" {
+		return ""
+	}
+	p = strings.ReplaceAll(p, "\\", "/")
+	p = path.Clean(p)
+	if p == "." {
+		return ""
+	}
+	return strings.TrimPrefix(p, "/")
+}
+
 func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
+	norm := normalizePath(path)
+	if norm == "" {
+		return "", fmt.Errorf("file path %q is empty or invalid", path)
+	}
 	repoRoot, err := pathutil.CanonicalPath(fr.RepoDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve repository path %q: %w", fr.RepoDir, err)
 	}
 
-	fullPath := filepath.Join(repoRoot, path)
+	fullPath := filepath.Join(repoRoot, filepath.FromSlash(norm))
 	if !pathutil.WithinBase(repoRoot, fullPath) {
 		return "", fmt.Errorf("file path %q is outside repository", path)
 	}
@@ -116,14 +136,18 @@ func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
 }
 
 func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (string, error) {
+	norm := normalizePath(path)
+	if norm == "" {
+		return "", fmt.Errorf("file path %q is empty or invalid", path)
+	}
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
 
-	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
+	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + norm}
 	if fr.Runner != nil {
 		output, err := fr.Runner.Output(ctx, fr.RepoDir, args...)
 		if err != nil {
-			return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+			return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, norm, err)
 		}
 		return string(output), nil
 	}
@@ -132,7 +156,7 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 	cmd.Dir = fr.RepoDir
 	output, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+		return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, norm, err)
 	}
 	return string(output), nil
 }
@@ -205,7 +229,11 @@ func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([
 }
 
 func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
-	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
+	norm := normalizePath(path)
+	if norm == "" {
+		return nil, 0, fmt.Errorf("file path %q is empty or invalid", path)
+	}
+	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + norm}
 
 	var collected []string
 	var totalLines int
@@ -217,7 +245,7 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 			return scanErr
 		}, args...)
 		if err != nil {
-			return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+			return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, norm, err)
 		}
 		return collected, totalLines, nil
 	}
@@ -226,10 +254,10 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 	cmd.Dir = fr.RepoDir
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, norm, err)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, norm, err)
 	}
 
 	collected, totalLines, scanErr := scanLines(stdoutPipe, startLine, maxLines)
@@ -239,10 +267,10 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 	waitErr := cmd.Wait()
 
 	if scanErr != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, scanErr)
+		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, norm, scanErr)
 	}
 	if waitErr != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, waitErr)
+		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, norm, waitErr)
 	}
 	return collected, totalLines, nil
 }

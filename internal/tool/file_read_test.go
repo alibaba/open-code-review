@@ -255,6 +255,7 @@ func TestReadLines_Disk_MissingFilePreservesReadError(t *testing.T) {
 	}
 }
 
+func TestReadLines_Disk_RejectsSymlinkOutsideRepo(t *testing.Cmd) // wait, see line 258
 func TestReadLines_Disk_RejectsSymlinkOutsideRepo(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink privileges vary on Windows")
@@ -468,5 +469,44 @@ func TestExecute_WithEndLine(t *testing.T) {
 	}
 	if strings.Contains(result, "5|e") {
 		t.Error("line 5 should not appear")
+	}
+}
+
+func TestExecute_WindowsBackslashAndRelativePath(t *testing.T) {
+	dir := setupTestRepo(t)
+	commit := getHeadCommit(t, dir)
+
+	// Test Workspace mode
+	frWorkspace := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	pWorkspace := NewFileRead(frWorkspace)
+
+	got, err := pWorkspace.Execute(context.Background(), map[string]any{
+		"file_path": `pkg\util.go`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "File: pkg/util.go") {
+		t.Errorf("expected header File: pkg/util.go, got: %s", got)
+	}
+	if !strings.Contains(got, "package pkg") {
+		t.Errorf("expected content, got: %s", got)
+	}
+
+	// Test Commit mode with .\pkg\util.go
+	frCommit := &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit}
+	pCommit := NewFileRead(frCommit)
+
+	gotCommit, err := pCommit.Execute(context.Background(), map[string]any{
+		"file_path": `.\pkg\util.go`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(gotCommit, "File: pkg/util.go") {
+		t.Errorf("expected header File: pkg/util.go, got: %s", gotCommit)
+	}
+	if !strings.Contains(gotCommit, "package pkg") {
+		t.Errorf("expected content, got: %s", gotCommit)
 	}
 }

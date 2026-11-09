@@ -25,14 +25,14 @@ type DiffMap struct {
 func NewDiffMap(m map[string]string) DiffMap {
 	cp := make(map[string]string, len(m))
 	for k, v := range m {
-		cp[k] = v
+		cp[normalizePath(k)] = v
 	}
 	return DiffMap{m: cp}
 }
 
 // Get returns the diff text for path.
 func (d DiffMap) Get(path string) (string, bool) {
-	v, ok := d.m[path]
+	v, ok := d.m[normalizePath(path)]
 	return v, ok
 }
 
@@ -72,19 +72,22 @@ func (p *FileReadDiffProvider) Execute(_ context.Context, args map[string]any) (
 	var sb strings.Builder
 	var missing []string
 	for _, item := range pathArray {
-		path, ok := item.(string)
+		rawPath, ok := item.(string)
 		if !ok {
 			continue
 		}
-		if d, exists := p.diffMap.Get(path); exists {
-			sb.WriteString("==== FILE: ")
-			sb.WriteString(path)
-			sb.WriteString(" ====\n")
-			sb.WriteString(d)
-			sb.WriteString("\n")
-			continue
+		path := normalizePath(rawPath)
+		if path != "" {
+			if d, exists := p.diffMap.Get(path); exists {
+				sb.WriteString("==== FILE: ")
+				sb.WriteString(path)
+				sb.WriteString(" ====\n")
+				sb.WriteString(d)
+				sb.WriteString("\n")
+				continue
+			}
 		}
-		missing = append(missing, path)
+		missing = append(missing, rawPath)
 	}
 
 	if len(missing) > 0 {
