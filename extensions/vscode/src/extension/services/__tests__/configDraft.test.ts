@@ -2,8 +2,48 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import { applyConfigEntries } from '../configDraft';
+import { buildCustomCreateSaveEntries } from '@shared/configUtils';
 
 describe('applyConfigEntries', () => {
+  it.each(['mimo-v2.6-flash', 'foo.api_key', 'openai.extra_body'])('creates %s before applying form fields', (name) => {
+    const entries = buildCustomCreateSaveEntries({
+      name, protocol: 'openai', url: 'https://example.invalid/v1', model: 'some-model',
+      models: 'some-model,other-model', apiKey: 'test-key', authHeader: 'authorization',
+    });
+    expect(entries[0]).toEqual({ key: 'provider', value: name });
+    const base = { provider: 'openai', model: 'saved-model' };
+    const draft = applyConfigEntries(base, entries);
+    expect(draft.provider).toBe(name);
+    expect(draft.custom_providers).toEqual({
+      [name]: {
+        protocol: 'openai', url: 'https://example.invalid/v1', model: 'some-model',
+        models: ['some-model', 'other-model'], api_key: 'test-key', auth_header: 'authorization',
+      },
+    });
+    expect(base).toEqual({ provider: 'openai', model: 'saved-model' });
+  });
+
+  it.each(['providers', 'custom_providers'])('requires existing dotted names for %s', (prefix) => {
+    const base = { provider: 'openai', model: 'saved-model' };
+    for (const name of ['mimo-v2.6-flash', 'foo.api_key', 'openai.extra_body']) {
+      const entry = { key: `${prefix}.${name}.model`, value: 'some-model' };
+      expect(applyConfigEntries(base, [entry])).toEqual(base);
+      const existing = { ...base, custom_providers: { [name]: {} } };
+      const draft = applyConfigEntries(existing, [entry]);
+      expect(draft.provider).toBe('openai');
+      expect(draft.custom_providers).toEqual({ [name]: { model: 'some-model' } });
+      expect(existing.custom_providers[name]).toEqual({});
+    }
+  });
+
+  it.each([' ', '.a', 'a.', 'a..b', 'a. .b', 'anthropic.'])('rejects invalid name %s', (name) => {
+    const base = { provider: 'openai', model: 'saved-model', custom_providers: { [name]: {} } };
+    expect(applyConfigEntries(base, [{ key: 'provider', value: name }])).toEqual(base);
+    for (const prefix of ['providers', 'custom_providers']) {
+      expect(applyConfigEntries(base, [{ key: `${prefix}.${name}.url`, value: 'https://example.invalid/v1' }])).toEqual(base);
+    }
+  });
+
   it('merges built-in provider entries', () => {
     const draft = applyConfigEntries({}, [
       { key: 'provider', value: 'anthropic' },

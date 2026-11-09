@@ -9,6 +9,7 @@ import type { Language } from '../../i18n/types';
 import enQuickstart from './en/quickstart.md';
 import enInstallation from './en/installation.md';
 import enConfiguration from './en/configuration.md';
+import enChatGPTPreview from './en/chatgpt-preview.md';
 import enCliReference from './en/cli-reference.md';
 import enReviewRules from './en/review-rules.md';
 import enArchitecture from './en/architecture.md';
@@ -28,6 +29,7 @@ import enFaq from './en/faq.md';
 import zhQuickstart from './zh/quickstart.md';
 import zhInstallation from './zh/installation.md';
 import zhConfiguration from './zh/configuration.md';
+import zhChatGPTPreview from './zh/chatgpt-preview.md';
 import zhCliReference from './zh/cli-reference.md';
 import zhReviewRules from './zh/review-rules.md';
 import zhArchitecture from './zh/architecture.md';
@@ -47,6 +49,7 @@ import zhFaq from './zh/faq.md';
 import jaQuickstart from './ja/quickstart.md';
 import jaInstallation from './ja/installation.md';
 import jaConfiguration from './ja/configuration.md';
+import jaChatGPTPreview from './ja/chatgpt-preview.md';
 import jaCliReference from './ja/cli-reference.md';
 import jaReviewRules from './ja/review-rules.md';
 import jaArchitecture from './ja/architecture.md';
@@ -66,6 +69,7 @@ import jaFaq from './ja/faq.md';
 import koQuickstart from './ko/quickstart.md';
 import koInstallation from './ko/installation.md';
 import koConfiguration from './ko/configuration.md';
+import koChatGPTPreview from './ko/chatgpt-preview.md';
 import koCliReference from './ko/cli-reference.md';
 import koReviewRules from './ko/review-rules.md';
 import koArchitecture from './ko/architecture.md';
@@ -85,6 +89,7 @@ import koFaq from './ko/faq.md';
 import ruQuickstart from './ru/quickstart.md';
 import ruInstallation from './ru/installation.md';
 import ruConfiguration from './ru/configuration.md';
+import ruChatGPTPreview from './ru/chatgpt-preview.md';
 import ruCliReference from './ru/cli-reference.md';
 import ruReviewRules from './ru/review-rules.md';
 import ruArchitecture from './ru/architecture.md';
@@ -117,7 +122,8 @@ export type DocSlug =
   | 'delegate'
   | 'acp'
   | 'contributing'
-  | 'faq';
+  | 'faq'
+  | 'chatgpt-preview';
 
 type LocalizedDocs = Partial<Record<DocSlug, string>>;
 
@@ -125,6 +131,7 @@ const enDocs: Record<DocSlug, string> = {
   'quickstart': enQuickstart,
   'installation': enInstallation,
   'configuration': enConfiguration,
+  'chatgpt-preview': enChatGPTPreview,
   'cli-reference': enCliReference,
   'review-rules': enReviewRules,
   'architecture': enArchitecture,
@@ -145,6 +152,7 @@ const zhDocs: Record<DocSlug, string> = {
   'quickstart': zhQuickstart,
   'installation': zhInstallation,
   'configuration': zhConfiguration,
+  'chatgpt-preview': zhChatGPTPreview,
   'cli-reference': zhCliReference,
   'review-rules': zhReviewRules,
   'architecture': zhArchitecture,
@@ -165,6 +173,7 @@ const jaDocs: Record<DocSlug, string> = {
   'quickstart': jaQuickstart,
   'installation': jaInstallation,
   'configuration': jaConfiguration,
+  'chatgpt-preview': jaChatGPTPreview,
   'cli-reference': jaCliReference,
   'review-rules': jaReviewRules,
   'architecture': jaArchitecture,
@@ -185,6 +194,7 @@ const koDocs: Record<DocSlug, string> = {
   'quickstart': koQuickstart,
   'installation': koInstallation,
   'configuration': koConfiguration,
+  'chatgpt-preview': koChatGPTPreview,
   'cli-reference': koCliReference,
   'review-rules': koReviewRules,
   'architecture': koArchitecture,
@@ -205,6 +215,7 @@ const ruDocs: LocalizedDocs = {
   'quickstart': ruQuickstart,
   'installation': ruInstallation,
   'configuration': ruConfiguration,
+  'chatgpt-preview': ruChatGPTPreview,
   'cli-reference': ruCliReference,
   'review-rules': ruReviewRules,
   'architecture': ruArchitecture,
