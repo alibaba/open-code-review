@@ -4,6 +4,7 @@
 package viewer
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -142,6 +143,47 @@ func TestAgentScript_BuildsTheWorkspaceURIWithTheURLParser(t *testing.T) {
 	}
 	if !strings.Contains(js, "split(\"/\").map(encodeURIComponent).join(\"/\")") {
 		t.Error("agent.js does not encode filesystem path components before URL parsing")
+	}
+}
+
+func TestAgentScript_FileURI_RoundTripsReservedPathCharacters(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is unavailable for the file URI round-trip test")
+	}
+	src, err := assets.ReadFile("static/agent.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(src)
+	start := strings.Index(js, "function fileURI(dir) {")
+	if start < 0 {
+		t.Fatal("fileURI helper not found")
+	}
+	end := strings.Index(js[start:], "\n    }")
+	if end < 0 {
+		t.Fatal("fileURI helper end not found")
+	}
+	helper := js[start : start+end+len("\n    }")]
+	script := `const { fileURLToPath } = require("node:url");
+` + helper + `
+const cases = [
+    ["/my/pr#oj/proj", "file:///my/pr%23oj/proj", "/my/pr#oj/proj", false],
+    ["/my/pr?oj/proj", "file:///my/pr%3Foj/proj", "/my/pr?oj/proj", false],
+    ["/my/pr%oj/proj", "file:///my/pr%25oj/proj", "/my/pr%oj/proj", false],
+    ["C:\\code\\pr#oj", "file:///C:/code/pr%23oj", "C:/code/pr#oj", true],
+    ["C:\\code\\pr?oj", "file:///C:/code/pr%3Foj", "C:/code/pr?oj", true],
+    ["C:\\code\\pr%oj", "file:///C:/code/pr%25oj", "C:/code/pr%oj", true],
+];
+for (const [input, wantURI, wantPath, windows] of cases) {
+    const uri = fileURI(input);
+    if (uri !== wantURI) throw new Error(input + ": URI " + uri + ", want " + wantURI);
+    const path = fileURLToPath(uri, { windows }).replace(/\\/g, "/");
+    if (path !== wantPath) throw new Error(input + ": round trip " + path + ", want " + wantPath);
+}
+`
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("file URI cases failed: %v\n%s", err, output)
 	}
 }
 
