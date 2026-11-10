@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from 'react';
 
 interface SearchResult<S extends string> {
@@ -10,19 +10,68 @@ interface SearchResult<S extends string> {
   snippet: string;
 }
 
+type SearchRunner<S extends string> = (
+  query: string,
+  language: string,
+) => SearchResult<S>[] | Promise<SearchResult<S>[]>;
+
+interface SearchState<S extends string> {
+  requestKey: string;
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  results: SearchResult<S>[];
+  error: Error | null;
+}
+
 export function useCommandSearch<S extends string>(
-  runSearch: (query: string, language: string) => SearchResult<S>[],
+  runSearch: SearchRunner<S>,
   language: string,
 ) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchSelectedIdx, setSearchSelectedIdx] = useState(0);
+  const [searchAttempt, setSearchAttempt] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const requestKey = `${language}:${searchQuery}:${searchAttempt}`;
+  const [searchState, setSearchState] = useState<SearchState<S>>({
+    requestKey: '',
+    status: 'idle',
+    results: [],
+    error: null,
+  });
 
-  const searchResults = useMemo(
-    () => runSearch(searchQuery, language),
-    [runSearch, searchQuery, language],
-  );
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchState({ requestKey, status: 'idle', results: [], error: null });
+      return;
+    }
+
+    let active = true;
+    setSearchState({ requestKey, status: 'loading', results: [], error: null });
+    try {
+      Promise.resolve(runSearch(searchQuery, language)).then(
+        results => {
+          if (active) setSearchState({ requestKey, status: 'ready', results, error: null });
+        },
+        reason => {
+          if (!active) return;
+          const error = reason instanceof Error ? reason : new Error(String(reason));
+          setSearchState({ requestKey, status: 'error', results: [], error });
+        },
+      );
+    } catch (reason) {
+      const error = reason instanceof Error ? reason : new Error(String(reason));
+      setSearchState({ requestKey, status: 'error', results: [], error });
+    }
+    return () => {
+      active = false;
+    };
+  }, [language, requestKey, runSearch, searchQuery]);
+
+  const currentSearchState = searchState.requestKey === requestKey
+    ? searchState
+    : { requestKey, status: searchQuery.trim() ? 'loading' as const : 'idle' as const, results: [], error: null };
+  const searchResults = currentSearchState.results;
+  const retrySearch = useCallback(() => setSearchAttempt(value => value + 1), []);
 
   /* Reset selection when results change */
   useEffect(() => {
@@ -65,6 +114,9 @@ export function useCommandSearch<S extends string>(
     setSearchSelectedIdx,
     searchInputRef,
     searchResults,
+    searchStatus: currentSearchState.status,
+    searchError: currentSearchState.error,
+    retrySearch,
   };
 }
 

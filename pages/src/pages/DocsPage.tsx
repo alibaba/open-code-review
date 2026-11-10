@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import Navbar from '../components/Navbar';
@@ -10,7 +10,8 @@ import MarkdownRenderer from '../components/MarkdownRenderer';
 import { SearchTrigger } from '../components/SearchTrigger';
 import { useResponsive } from '../hooks/useResponsive';
 import { useCommandSearch, useSearchKeyboardNav } from '../hooks/useCommandSearch';
-import { getDocContent, getDocTitle, DocSlug, searchDocs } from '../content/docs';
+import { useDocPage } from '../hooks/useDocPage';
+import { type DocSlug, searchDocs } from '../content/docs';
 import { extractHeadings } from '../utils/extractHeadings';
 import docContentsIcon from '../assets/icons/doc-contents.svg';
 import searchIcon from '../assets/icons/icon-search.svg';
@@ -148,8 +149,6 @@ const DocsPage: React.FC = () => {
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({ 'sb-integrations': true });
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [hoveredHeadingId, setHoveredHeadingId] = useState<string>('');
-  /* Cancels an in-flight click-triggered scroll when a newer one starts */
-  const cancelPendingScroll = useRef<(() => void) | null>(null);
   const { t, language } = useTranslation();
   const { isMobile } = useResponsive();
   const {
@@ -158,14 +157,16 @@ const DocsPage: React.FC = () => {
     searchSelectedIdx, setSearchSelectedIdx,
     searchInputRef,
     searchResults,
+    searchStatus,
+    retrySearch,
   } = useCommandSearch(searchDocs, language);
   const contentRef = React.useRef<HTMLDivElement>(null);
 
   const fontFamily = 'PingFang SC, -apple-system, BlinkMacSystemFont, sans-serif';
 
-  /* Get markdown content for current doc */
-  const docContent = useMemo(() => getDocContent(activeSlug, language), [activeSlug, language]);
-  const docTitle = useMemo(() => getDocTitle(activeSlug, language), [activeSlug, language]);
+  const docPage = useDocPage(activeSlug, language);
+  const docContent = docPage.data?.content ?? '';
+  const docTitle = docPage.data?.title ?? '';
   const headings = useMemo(() => extractHeadings(docContent), [docContent]);
 
   /* Scroll direct links after their markdown heading has rendered */
@@ -206,8 +207,8 @@ const DocsPage: React.FC = () => {
     setExpandedItems(prev => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
-  const navigateToDoc = useCallback((slug: DocSlug) => {
-    navigate(`/docs/${slug}`);
+  const navigateToDoc = useCallback((slug: DocSlug, fragment?: string) => {
+    navigate(`/docs/${slug}${fragment ? `#${fragment}` : ''}`);
     // Scroll page to top
     window.scrollTo(0, 0);
   }, [navigate]);
@@ -241,14 +242,9 @@ const DocsPage: React.FC = () => {
     // Verify it's a valid doc slug
     if (validSlugs.has(slug)) {
       e.preventDefault();
-      navigateToDoc(slug);
-      // Handle anchor scroll after navigation with reliable retry
       const anchor2raw = href.split('#')[1];
-      const anchor2 = anchor2raw ? decodeFragment(anchor2raw) : undefined;
-      if (anchor2) {
-        cancelPendingScroll.current?.();
-        cancelPendingScroll.current = scrollToFragmentWhenReady(anchor2);
-      }
+      // Keep the fragment in the URL so scrolling reruns when lazy content is ready.
+      navigateToDoc(slug, anchor2raw);
     }
   }, [navigateToDoc]);
 
@@ -420,61 +416,87 @@ const DocsPage: React.FC = () => {
 
         {/* ─── Main content area ─── */}
         <div ref={contentRef} onClick={handleContentClick} style={{ display: 'flex', flex: 1, flexDirection: 'column', minWidth: 0, padding: isMobile ? '32px 20px 80px' : '40px 48px 80px' }}>
-          {/* Doc title */}
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#FFFFFF', margin: '0 0 32px 0', lineHeight: '36px', fontFamily }}>
-            {docTitle}
-          </h1>
-          {/* Rendered markdown content */}
-          <MarkdownRenderer content={docContent} />
+          {docPage.status === 'loading' && (
+            <div role="status" style={{ minHeight: 240, color: 'rgba(255,255,255,0.5)', fontSize: 14 }}>
+              {t('docs.loading')}
+            </div>
+          )}
+          {docPage.status === 'error' && (
+            <div role="alert" style={{ minHeight: 240, color: 'rgba(255,255,255,0.7)', fontSize: 14 }}>
+              <p style={{ margin: '0 0 16px' }}>{t('error.pageLoadFailed')}</p>
+              <button
+                onClick={docPage.retry}
+                style={{
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  borderRadius: 6,
+                  background: 'transparent',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  padding: '8px 14px',
+                  fontFamily,
+                }}
+              >
+                {t('error.reload')}
+              </button>
+            </div>
+          )}
+          {docPage.status === 'ready' && docPage.data && (
+            <>
+              <h1 style={{ fontSize: 28, fontWeight: 700, color: '#FFFFFF', margin: '0 0 32px 0', lineHeight: '36px', fontFamily }}>
+                {docTitle}
+              </h1>
+              <MarkdownRenderer content={docContent} />
 
-          {/* ─── Prev / Next pagination ─── */}
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginTop: 56,
-          }}>
-            {prevDoc ? (
-              <button
-                onClick={() => navigateToDoc(prevDoc.slug)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: 0,
-                  transition: 'opacity 0.2s',
-                }}
-              >
-                <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>‹</span>
-                <span style={{ fontSize: 14, fontFamily, color: 'rgba(255,255,255,0.7)', fontWeight: 400 }}>
-                  {t(prevDoc.labelKey)}
-                </span>
-              </button>
-            ) : <span />}
-            {nextDoc ? (
-              <button
-                onClick={() => navigateToDoc(nextDoc.slug)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: 0,
-                  transition: 'opacity 0.2s',
-                }}
-              >
-                <span style={{ fontSize: 14, fontFamily, color: 'rgba(255,255,255,0.7)', fontWeight: 400 }}>
-                  {t(nextDoc.labelKey)}
-                </span>
-                <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>›</span>
-              </button>
-            ) : <span />}
-          </div>
+              {/* ─── Prev / Next pagination ─── */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginTop: 56,
+              }}>
+                {prevDoc ? (
+                  <button
+                    onClick={() => navigateToDoc(prevDoc.slug)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: 0,
+                      transition: 'opacity 0.2s',
+                    }}
+                  >
+                    <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>‹</span>
+                    <span style={{ fontSize: 14, fontFamily, color: 'rgba(255,255,255,0.7)', fontWeight: 400 }}>
+                      {t(prevDoc.labelKey)}
+                    </span>
+                  </button>
+                ) : <span />}
+                {nextDoc ? (
+                  <button
+                    onClick={() => navigateToDoc(nextDoc.slug)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: 0,
+                      transition: 'opacity 0.2s',
+                    }}
+                  >
+                    <span style={{ fontSize: 14, fontFamily, color: 'rgba(255,255,255,0.7)', fontWeight: 400 }}>
+                      {t(nextDoc.labelKey)}
+                    </span>
+                    <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>›</span>
+                  </button>
+                ) : <span />}
+              </div>
+            </>
+          )}
         </div>
 
         {/* ─── Right sidebar: page TOC ─── */}
@@ -586,7 +608,31 @@ const DocsPage: React.FC = () => {
             </div>
             {/* Results */}
             <div style={{ maxHeight: 400, overflowY: 'auto', padding: searchQuery ? '8px 0' : '0' }}>
-              {searchQuery && searchResults.length === 0 && (
+              {searchQuery.trim() && searchStatus === 'loading' && (
+                <div role="status" style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
+                  {t('docs.loading')}
+                </div>
+              )}
+              {searchQuery.trim() && searchStatus === 'error' && (
+                <div role="alert" style={{ padding: '20px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 14 }}>
+                  <div style={{ marginBottom: 12 }}>{t('error.pageLoadFailed')}</div>
+                  <button
+                    onClick={retrySearch}
+                    style={{
+                      border: '1px solid rgba(255,255,255,0.25)',
+                      borderRadius: 6,
+                      background: 'transparent',
+                      color: '#ffffff',
+                      cursor: 'pointer',
+                      padding: '6px 12px',
+                      fontFamily,
+                    }}
+                  >
+                    {t('error.reload')}
+                  </button>
+                </div>
+              )}
+              {searchQuery.trim() && searchStatus === 'ready' && searchResults.length === 0 && (
                 <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
                   {t('docs.search.noResults')}
                 </div>
@@ -618,7 +664,7 @@ const DocsPage: React.FC = () => {
               ))}
             </div>
             {/* Footer hints */}
-            {searchResults.length > 0 && (
+            {searchStatus === 'ready' && searchResults.length > 0 && (
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
