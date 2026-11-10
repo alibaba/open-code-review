@@ -230,13 +230,13 @@ type llmRuntime struct {
 // so a well-behaved run can never produce one.
 var newRetryCollector = llm.NewRetryCollector
 
-// loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
+// loadLLMRuntime loads the embedded tool defs, reads the app config
 // from the user's default config path (applying the configured language to
 // tpl — defaulting when the config file is absent), resolves the LLM
 // endpoint (honoring resolveOpts), and
 // returns the runtime bundle. tpl is mutated in place.
-func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts llm.ResolveOptions) (*llmRuntime, error) {
-	toolEntries, err := toolsconfig.Load(toolConfigPath)
+func loadLLMRuntime(tpl *template.Template, resolveOpts llm.ResolveOptions) (*llmRuntime, error) {
+	toolEntries, err := toolsconfig.LoadDefault()
 	if err != nil {
 		return nil, fmt.Errorf("load tools: %w", err)
 	}

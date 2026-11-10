@@ -106,7 +106,7 @@ git checkout -b feat/anthropic-streaming
 Examples:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(readme): clarify endpoint resolution priority
 refactor(viewer): extract task-card rendering into helper
@@ -207,6 +207,10 @@ make build      # smoke test the binary builds
 CI runs the same set on every push; nothing surprising.
 
 ## Adding new tools
+
+This section covers source-level changes to the built-in agent, not runtime
+configuration. Validate core tool changes with tests and benchmarks. For
+external business context, use [MCP servers](../mcp/) instead.
 
 A tool has two parts:
 

@@ -31,7 +31,7 @@ func (client *equivalenceClient) CompletionsWithCtx(ctx context.Context, request
 }
 
 func TestReviewExecutionEquivalence(t *testing.T) {
-	entries, err := toolsconfig.Load("")
+	entries, err := toolsconfig.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}

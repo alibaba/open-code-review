@@ -251,8 +251,6 @@ export const ru: TranslationKeys = {
   'docs.scanFlag14Default': 'Встроенное',
   'docs.scanFlag15Desc': 'Макс. параллельных git-подпроцессов',
   'docs.scanFlag16Desc': 'Путь к пользовательскому JSON с правилами ревью',
-  'docs.scanFlag17Desc': 'Путь к пользовательскому JSON-файлу настроек инструментов',
-  'docs.scanFlag17Default': 'Встроенный',
   'docs.scanFlag18Desc': 'Корень репозитория или каталога для скана',
   'docs.scanFlag18Default': 'Текущая директория',
   'docs.scanNote': 'Примечание: <code>--max-tools</code> только повышает бюджет вызовов инструментов на файл в шаблоне scan. Параметр не действует, если указанное значение меньше значения шаблона по умолчанию.',

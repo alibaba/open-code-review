@@ -25,7 +25,6 @@ import (
 )
 
 type scanOptions struct {
-	toolConfigPath        string
 	rulePath              string
 	repoDir               string
 	paths                 string
@@ -170,7 +169,7 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 		return err
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
+	rt, err := loadLLMRuntime(cc.Template, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
 		Context:  ctx,

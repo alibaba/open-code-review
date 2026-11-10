@@ -107,7 +107,7 @@ git checkout -b feat/anthropic-streaming
 Примеры:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(readme): clarify endpoint resolution priority
 refactor(viewer): extract task-card rendering into helper
@@ -211,6 +211,10 @@ CI запускает тот же набор при каждой отправк�
 проверок нет.
 
 ## Добавление новых инструментов
+
+Этот раздел описывает изменение исходников встроенного агента, а не настройку
+во время выполнения. Проверяйте изменения основных инструментов тестами и
+бенчмарками. Для внешнего бизнес-контекста используйте [MCP-серверы](../mcp/).
 
 Инструмент состоит из двух частей:
 

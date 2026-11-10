@@ -249,8 +249,6 @@ export const en = {
   'docs.scanFlag14Default': 'Built-in',
   'docs.scanFlag15Desc': 'Max concurrent git subprocesses',
   'docs.scanFlag16Desc': 'Path to custom JSON review rules',
-  'docs.scanFlag17Desc': 'Path to custom JSON tools config',
-  'docs.scanFlag17Default': 'Built-in',
   'docs.scanFlag18Desc': 'Repository or directory root to scan',
   'docs.scanFlag18Default': 'Current dir',
   'docs.scanNote': 'Note: <code>--max-tools</code> only raises the scan template\'s per-file tool-call budget — it has no effect when set lower than the template default.',

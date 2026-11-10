@@ -11,7 +11,51 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/spf13/cobra"
 )
+
+func TestCommandsRejectToolsOverride(t *testing.T) {
+	for _, command := range []string{"review", "scan"} {
+		for _, args := range [][]string{
+			{"--tools", "custom-tools.json"},
+			{"--tools=custom-tools.json"},
+			{"--tools="},
+			{"--preview", "--tools", "custom-tools.json"},
+			{"--preview", "--tools=custom-tools.json"},
+		} {
+			t.Run(command+"/"+strings.Join(args, " "), func(t *testing.T) {
+				var err error
+				if command == "review" {
+					_, err = parseReviewFlags(args)
+				} else {
+					_, err = parseScanFlags(args)
+				}
+				if err == nil || !strings.Contains(err.Error(), "unknown flag: --tools") {
+					t.Fatalf("got %v, want unknown tools flag", err)
+				}
+			})
+		}
+	}
+}
+
+func TestCommandsToolFlags(t *testing.T) {
+	for _, command := range []string{"review", "scan"} {
+		t.Run(command, func(t *testing.T) {
+			cmd := &cobra.Command{Use: command}
+			if command == "review" {
+				registerReviewFlags(cmd, &reviewOptions{})
+			} else {
+				registerScanFlags(cmd, &scanOptions{})
+			}
+			if cmd.Flags().Lookup("tools") != nil || strings.Contains(cmd.Flags().FlagUsages(), "--tools") {
+				t.Fatal("removed tools override is still advertised")
+			}
+			if cmd.Flags().Lookup("max-tools") == nil {
+				t.Fatal("tool round budget flag must remain available")
+			}
+		})
+	}
+}
 
 func TestResolveReviewMaxTools(t *testing.T) {
 	tests := []struct {
