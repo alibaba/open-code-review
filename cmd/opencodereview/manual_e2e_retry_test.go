@@ -51,7 +51,7 @@ func runManualReview(t *testing.T, srv *fakeLLM) manualResult {
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
-	rt, err := loadLLMRuntime(cc.Template, "", llm.ResolveOptions{})
+	rt, err := loadLLMRuntime(cc.Template, llm.ResolveOptions{})
 	if err != nil {
 		t.Fatalf("loadLLMRuntime: %v", err)
 	}

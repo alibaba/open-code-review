@@ -27,8 +27,9 @@ document.querySelectorAll('.response-text').forEach(function(el) {
         .replace(/\n{2,}/g, '<br><br>')
         .replace(/\n/g, '<br>');
     codeBlocks.forEach(function(code, i) {
-        html = html.replace('%%CODEBLOCK_' + i + '%%',
-            '<pre class="code-block"><code>' + code + '</code></pre>');
+        html = html.replace('%%CODEBLOCK_' + i + '%%', function() {
+            return '<pre class="code-block"><code>' + code + '</code></pre>';
+        });
     });
     el.innerHTML = html;
 });

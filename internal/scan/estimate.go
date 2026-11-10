@@ -34,22 +34,21 @@ type Estimate struct {
 }
 
 // estimateCost projects token usage for reviewing the given items under the
-// supplied scan template. planEnabled / dedupEnabled / summaryEnabled
-// reflect the effective runtime toggles (template field present AND not
-// disabled by a --no-* flag).
+// supplied scan template. planEnabled reports whether PLAN_TASK runs for each
+// item; dedupEnabled / summaryEnabled reflect the effective runtime toggles.
 // estimateFileTokens projects the input+output token cost of reviewing a
 // single file (PLAN_TASK + MAIN_TASK rounds). Excludes the run-level dedup/
 // summary phases. Returns 0 for files that are skipped before dispatch
 // (binary / empty). Used both by the aggregate estimate and by the
 // per-file budget look-ahead in dispatch.
-func estimateFileTokens(it model.ScanItem, planEnabled bool) int64 {
+func estimateFileTokens(it model.ScanItem, planEnabled func(model.ScanItem) bool) int64 {
 	if it.IsBinary || it.Content == "" {
 		return 0
 	}
 	fileTokens := int64(llm.CountTokens(it.Content))
 
 	var total int64
-	if planEnabled {
+	if planEnabled(it) {
 		total += fileTokens + promptOverheadTokens // PLAN input
 		total += 400                               // PLAN output (small JSON)
 	}
@@ -59,7 +58,7 @@ func estimateFileTokens(it model.ScanItem, planEnabled bool) int64 {
 	return total
 }
 
-func estimateCost(items []model.ScanItem, planEnabled, dedupEnabled, summaryEnabled bool) Estimate {
+func estimateCost(items []model.ScanItem, planEnabled func(model.ScanItem) bool, dedupEnabled, summaryEnabled bool) Estimate {
 	var est Estimate
 	var allCommentsApprox int64
 
@@ -74,7 +73,7 @@ func estimateCost(items []model.ScanItem, planEnabled, dedupEnabled, summaryEnab
 		// Recompute the input/output split inline to keep the headline
 		// numbers meaningful.
 		fileTokens := int64(llm.CountTokens(it.Content))
-		if planEnabled {
+		if planEnabled(*it) {
 			est.InputTokens += fileTokens + promptOverheadTokens
 			est.OutputTokens += 400
 		}

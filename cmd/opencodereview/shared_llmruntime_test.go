@@ -6,6 +6,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -33,7 +34,7 @@ func TestLoadLLMRuntime_Success(t *testing.T) {
 	t.Setenv("OCR_LLM_MODEL", "test-model")
 
 	tpl := loadTestTemplate(t)
-	rt, err := loadLLMRuntime(tpl, "", llm.ResolveOptions{})
+	rt, err := loadLLMRuntime(tpl, llm.ResolveOptions{})
 	if err != nil {
 		t.Fatalf("loadLLMRuntime error: %v", err)
 	}
@@ -49,21 +50,24 @@ func TestLoadLLMRuntime_Success(t *testing.T) {
 	if rt.Collector == nil {
 		t.Error("expected non-nil collector")
 	}
-	if len(rt.MainToolDefs) == 0 {
-		t.Error("expected main tool defs")
+	for _, phase := range []struct {
+		name string
+		defs []llm.ToolDef
+		want []string
+	}{
+		{"plan", rt.PlanToolDefs, []string{"code_search", "file_read_diff", "file_find"}},
+		{"main", rt.MainToolDefs, []string{"task_done", "code_comment", "code_search", "file_read", "file_read_diff", "file_find"}},
+	} {
+		var names []string
+		for _, definition := range phase.defs {
+			names = append(names, definition.Function.Name)
+		}
+		if !reflect.DeepEqual(names, phase.want) {
+			t.Errorf("%s tools = %v, want %v", phase.name, names, phase.want)
+		}
 	}
 	if rt.RuntimeConfig.EndpointHost != "api.example.test" {
 		t.Errorf("endpoint host = %q, want api.example.test", rt.RuntimeConfig.EndpointHost)
-	}
-}
-
-// TestLoadLLMRuntime_BadToolConfig covers the toolsconfig.Load failure branch.
-func TestLoadLLMRuntime_BadToolConfig(t *testing.T) {
-	setTestHome(t, t.TempDir())
-	tpl := loadTestTemplate(t)
-	_, err := loadLLMRuntime(tpl, filepath.Join(t.TempDir(), "no-such-tools.json"), llm.ResolveOptions{})
-	if err == nil || !strings.Contains(err.Error(), "load tools") {
-		t.Fatalf("err = %v, want load-tools failure", err)
 	}
 }
 
@@ -80,7 +84,7 @@ func TestLoadLLMRuntime_UnresolvableEndpoint(t *testing.T) {
 	t.Setenv("ANTHROPIC_MODEL", "")
 
 	tpl := loadTestTemplate(t)
-	_, err := loadLLMRuntime(tpl, "", llm.ResolveOptions{})
+	_, err := loadLLMRuntime(tpl, llm.ResolveOptions{})
 	if err == nil || !strings.Contains(err.Error(), "resolve LLM endpoint") {
 		t.Fatalf("err = %v, want resolve-endpoint failure", err)
 	}
@@ -100,7 +104,7 @@ func TestLoadLLMRuntime_BadAppConfig(t *testing.T) {
 	}
 
 	tpl := loadTestTemplate(t)
-	_, err := loadLLMRuntime(tpl, "", llm.ResolveOptions{})
+	_, err := loadLLMRuntime(tpl, llm.ResolveOptions{})
 	if err == nil || !strings.Contains(err.Error(), "load app config") {
 		t.Fatalf("err = %v, want load-app-config failure", err)
 	}

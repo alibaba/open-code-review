@@ -22,7 +22,7 @@
 
 ### 前置条件
 
-- [Go 1.26.9+](https://go.dev/dl/)
+- [Go 1.26.10+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -85,7 +85,7 @@ git checkout -b feat/your-feature-name
 示例：
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
@@ -233,7 +233,7 @@ make build
 使用与 commit message 相同的 Conventional Commits 格式：
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 ```
 
 ### 审查流程

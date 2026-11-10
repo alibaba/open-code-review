@@ -15,6 +15,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -726,6 +727,103 @@ func TestRun_FullPipeline(t *testing.T) {
 	}
 }
 
+func TestRun_PlanThreshold(t *testing.T) {
+	zeroThreshold, negativeThreshold := 0, -1
+	for _, testCase := range []struct {
+		name              string
+		lineCount         int
+		noTrailingNewline bool
+		skipPlan          bool
+		threshold         *int
+		wantPlanCalls     int
+	}{
+		{name: "below threshold", lineCount: 199},
+		{name: "at threshold", lineCount: 200, wantPlanCalls: 1},
+		{name: "above threshold", lineCount: 201, wantPlanCalls: 1},
+		{name: "below threshold without final newline", lineCount: 199, noTrailingNewline: true},
+		{name: "at threshold without final newline", lineCount: 200, noTrailingNewline: true, wantPlanCalls: 1},
+		{name: "global override", lineCount: 201, skipPlan: true},
+		{name: "zero threshold", lineCount: 1, threshold: &zeroThreshold, wantPlanCalls: 1},
+		{name: "negative threshold", lineCount: 1, threshold: &negativeThreshold, wantPlanCalls: 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := initTestRepo(t)
+			content := "package fixture\n" + strings.Repeat("var _ = 1\n", testCase.lineCount-1)
+			if testCase.noTrailingNewline {
+				content = strings.TrimSuffix(content, "\n")
+			}
+			writeFile(t, repo, "fixture.go", []byte(content))
+			gitCommit(t, repo, "add scan fixture")
+
+			scanTemplate, err := template.LoadScanDefault()
+			if err != nil {
+				t.Fatalf("LoadScanDefault: %v", err)
+			}
+			if testCase.threshold != nil {
+				scanTemplate.PlanModeLineThreshold = *testCase.threshold
+			}
+			planJSON := `{"summary":"inspect fixture declarations","checkpoints":[]}`
+			client := &fakeScanClient{}
+			if testCase.wantPlanCalls > 0 {
+				client.responses = append(client.responses, &llm.ChatResponse{
+					Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &planJSON}}},
+				})
+			}
+			client.responses = append(client.responses, &llm.ChatResponse{
+				Choices: []llm.Choice{{Message: llm.ResponseMessage{
+					ToolCalls: []llm.ToolCall{{
+						ID: "done", Type: "function",
+						Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"},
+					}},
+				}}},
+			})
+			agent := NewAgent(Args{
+				RepoDir:        repo,
+				Template:       *scanTemplate,
+				LLMClient:      client,
+				MaxConcurrency: 1,
+				SkipPlan:       testCase.skipPlan,
+				SkipDedup:      true,
+				SkipSummary:    true,
+			})
+			if _, err := agent.Run(t.Context()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if agent.FilesReviewed() != 1 {
+				t.Errorf("FilesReviewed = %d, want 1", agent.FilesReviewed())
+			}
+			if client.calls != testCase.wantPlanCalls+1 {
+				t.Errorf("LLM calls = %d, want %d", client.calls, testCase.wantPlanCalls+1)
+			}
+			fileSession := agent.Session().FileSessions["fixture.go"]
+			if fileSession == nil {
+				t.Fatal("fixture.go must have a file session")
+			}
+			if got := len(fileSession.TaskRecords[session.PlanTask]); got != testCase.wantPlanCalls {
+				t.Errorf("PLAN_TASK calls = %d, want %d", got, testCase.wantPlanCalls)
+			}
+			mainRecords := fileSession.TaskRecords[session.MainTask]
+			if len(mainRecords) != 1 {
+				t.Fatalf("MAIN_TASK calls = %d, want 1", len(mainRecords))
+			}
+			var mainPrompt strings.Builder
+			for _, message := range mainRecords[0].RequestMessages {
+				mainPrompt.WriteString(message.ExtractText())
+			}
+			if !strings.Contains(mainPrompt.String(), content) {
+				t.Error("MAIN_TASK must receive the complete file content")
+			}
+			wantGuidance := "(no pre-scan plan; review the entire file as usual)"
+			if testCase.wantPlanCalls > 0 {
+				wantGuidance = "**Summary**: inspect fixture declarations"
+			}
+			if !strings.Contains(mainPrompt.String(), wantGuidance) {
+				t.Errorf("MAIN_TASK prompt must include %q", wantGuidance)
+			}
+		})
+	}
+}
+
 func TestDispatchSubtasks_ResumeSkipsCompletedFiles(t *testing.T) {
 	doneContent := ""
 	client := &fakeScanClient{
@@ -944,7 +1042,7 @@ func TestDispatchSubtasks_GraceRoundTaskDoneCheckpointed(t *testing.T) {
 		if w.Type == "scan_subtask_error" {
 			t.Fatalf("a file completed in the grace round must not warn as failed: %+v", w)
 		}
-		if w.Type == llmloop.WarningReviewLimitReached {
+		if w.Type == reviewtask.WarningReviewLimitReached {
 			limitWarnings = append(limitWarnings, w)
 		}
 	}
@@ -1058,7 +1156,7 @@ func TestDispatchSubtasks_GraceRoundLimitVisibleWithZeroFindings(t *testing.T) {
 				if w.Type == "scan_subtask_error" {
 					t.Fatalf("a file completed in the grace round must not warn as failed: %+v", w)
 				}
-				if w.Type == llmloop.WarningReviewLimitReached {
+				if w.Type == reviewtask.WarningReviewLimitReached {
 					limitWarnings = append(limitWarnings, w)
 				}
 			}

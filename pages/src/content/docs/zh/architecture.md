@@ -23,11 +23,11 @@ flowchart TD
 ```
 
 编排逻辑位于
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 包，主要文件有：`agent.go`（分发与按组编排）、`grouping.go`（语义文件分组）、
 `selection.go`（文件过滤）、`preview.go`（`--preview` 报告）和 `util.go`（辅助）；
 工具调用循环与记忆压缩位于相邻的
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)。
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/)。
 两个入口点值得关注：`Agent.Run`（流水线顶部）和 `Agent.dispatchSubtasks`
 （per-group 扇出）。
 
@@ -298,8 +298,8 @@ if countMessagesTokens(messages) > tokenLimit {
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go)。
 模板本身不是 CLI 覆盖——要修改 prompt，你需要编辑
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)
-并重新构建。`--tools` 参数是*工具注册表*覆盖（它替换 `internal/config/toolsconfig`
-消费的 JSON），不是模板覆盖——见[工具](../tools/#customizing-tools)。
+并重新构建。内置工具定义同样内嵌，不支持运行时覆盖。项目指引使用评审规则和背景，
+外部业务上下文使用 MCP——见[工具](../tools/#customizing-tools)。
 
 > **占位符语法注意。** 以上所有占位符都使用双花括号
 > `{{…}}` 语法，*除了* `RE_LOCATION_TASK`，它替换单花括号

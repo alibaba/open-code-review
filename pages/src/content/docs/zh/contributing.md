@@ -25,7 +25,7 @@ OCR 是 Apache-2.0 许可下的开源项目。欢迎 bug 报告、文档修复�
 
 ### 前置条件
 
-- [Go ≥ 1.26.9](https://go.dev/dl/)
+- [Go ≥ 1.26.10](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -102,7 +102,7 @@ git checkout -b feat/anthropic-streaming
 示例：
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(readme): clarify endpoint resolution priority
 refactor(viewer): extract task-card rendering into helper
@@ -201,6 +201,9 @@ make build      # smoke test the binary builds
 CI 在每次推送时运行同一套，不会有意外。
 
 ## 添加新工具
+
+本节介绍内置 Agent 的源码级变更，而非运行时配置。核心工具变更需要测试和
+benchmark 验证。外部业务上下文请使用 [MCP 服务器](../mcp/)。
 
 一个工具有两部分：
 
