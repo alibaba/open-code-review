@@ -35,16 +35,13 @@ func TestReviewExecutionEquivalence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var definitions []llm.ToolDef
-	for _, entry := range entries {
-		if raw, enabled := entry.ToolDefsByPhase(false); enabled {
-			var function llm.FunctionDef
-			if err := json.Unmarshal(raw, &function); err != nil {
-				t.Fatal(err)
-			}
-			function.RawDefinition = raw
-			definitions = append(definitions, llm.ToolDef{Type: "function", Function: function})
-		}
+	defaults, err := template.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitions, err := toolsconfig.Resolve(entries, defaults.MainTask.Tools)
+	if err != nil {
+		t.Fatal(err)
 	}
 	for _, mode := range []string{"review", "scan"} {
 		for _, scenario := range []string{"normal", "failed", "invalid", "invalid_comment_shape", "repaired", "async", "round_budget", "token_budget", "compression", "relocation"} {

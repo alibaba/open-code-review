@@ -1,5 +1,6 @@
 {
   "MAIN_TASK": {
+    "tools": ["task_done", "code_comment", "code_search", "file_read", "file_find"],
     "messages": [
       {
         "role": "system",

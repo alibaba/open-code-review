@@ -11,14 +11,26 @@ input/output. The full machine-readable definitions live in
 
 ## Tool availability per phase
 
-Each tool declares whether it's exposed during the **plan phase**, the
-**main task**, or both:
+Task templates select tools by name from the shared definitions. In
+`task_template.json`, `MAIN_TASK.tools` is the ordered list sent as callable
+tools, while `PLAN_TASK.tool_references` is rendered into the planning prompt
+as reference text only. Planning remains a single request without callable
+tools. Neither field changes a tool's definition.
+
+`scan_template.json` independently selects its main-task tools, omitting
+`file_read_diff` because a full-file scan has no diff. An omitted or empty
+list selects no tools; it never enables the entire catalog. Repeated names
+in either list are included only once, in order of first occurrence in the
+array. Unknown references, duplicate catalog entries, and invalid definitions
+fail during task setup.
+
+The default diff-review selections are:
 
 | Tool             | Plan | Main | Purpose                                                   |
 | ---------------- | ---- | ---- | --------------------------------------------------------- |
 | `task_done`      | ✗    | ✓    | Signal "I'm finished" — terminates the loop.              |
 | `code_comment`   | ✗    | ✓    | Emit a review comment with line range + suggestion.       |
-| `file_read`      | ✗    | ✓    | Read a slice of a file from the post-change snapshot.     |
+| `file_read`      | ✓    | ✓    | Read a slice of a file from the post-change snapshot.     |
 | `file_read_diff` | ✓    | ✓    | Read another file's diff to confirm a cross-file concern. |
 | `file_find`      | ✓    | ✓    | Locate files by filename keyword.                         |
 | `code_search`    | ✓    | ✓    | Grep across the repo (literal or regex).                  |

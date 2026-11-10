@@ -12,6 +12,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -636,6 +637,50 @@ func TestExecuteGroupPlanPhase(t *testing.T) {
 	// retry report and the resume checkpoint join on the same string.
 	if recs := sess.GetOrCreateFileSession("helper.go,main.go").TaskRecords[session.PlanTask]; len(recs) != 1 {
 		t.Errorf("group file session holds %d plan records, want 1", len(recs))
+	}
+}
+
+func TestPlanToolReferencesRemainReferenceOnly(test *testing.T) {
+	tpl, err := template.LoadDefault()
+	if err != nil {
+		test.Fatal(err)
+	}
+	entries, err := toolsconfig.LoadDefault()
+	if err != nil {
+		test.Fatal(err)
+	}
+	references, err := toolsconfig.Resolve(entries, tpl.PlanTask.ToolReferences)
+	if err != nil {
+		test.Fatal(err)
+	}
+	client := &filterRequestCaptureClient{}
+	reviewer := New(Args{
+		Template:     *tpl,
+		PlanToolDefs: references,
+		LLMClient:    client,
+		Model:        "test-model",
+		Session:      session.New(test.TempDir(), "main", "test-model", session.SessionOptions{}),
+	})
+	group := FileGroup{Label: "sample", Diffs: []model.Diff{{NewPath: "sample.go", Diff: "+package sample"}}}
+	if _, err := reviewer.executeGroupPlanPhase(context.Background(), group, "+package sample", "", ""); err != nil {
+		test.Fatal(err)
+	}
+	if client.calls != 1 || len(client.request.Tools) != 0 {
+		test.Fatalf("plan must remain a single request without callable tools: %+v", client.request)
+	}
+	content := client.request.Messages[0].ExtractText()
+	if !strings.Contains(content, formatToolDefs(references)) || strings.Contains(content, "{{plan_tools}}") {
+		test.Fatal("plan tool references were not rendered into the system prompt")
+	}
+	for _, name := range []string{"code_search", "file_read", "file_read_diff", "file_find"} {
+		if !strings.Contains(content, "- **"+name+"**:") {
+			test.Errorf("missing plan reference %s", name)
+		}
+	}
+	for _, name := range []string{"task_done", "code_comment"} {
+		if strings.Contains(content, "- **"+name+"**:") {
+			test.Errorf("unexpected plan reference %s", name)
+		}
 	}
 }
 
