@@ -135,6 +135,30 @@ describe('GitService commit base ref', () => {
 
     expect(base).toBe(`${merge}^`);
   });
+
+  // The title is the only place the base is visible to the person reading the
+  // diff, so it must not claim a revision that does not resolve.
+  it('does not title a root commit diff with a parent it does not have', async () => {
+    const root = await commit('first.ts', 'root commit');
+    const service = new GitService() as any;
+    const base = await service.commitBaseRef(repoRoot, root);
+
+    const label = service.commitDiffLabel(base, root);
+
+    expect(label).not.toContain(`${root}^`);
+    expect(label).toContain(root);
+    // Nor the empty tree SHA, which is accurate and unreadable.
+    expect(label).not.toContain(EMPTY_TREE);
+  });
+
+  it('titles a commit that has a parent with that parent', async () => {
+    await commit('first.ts', 'root commit');
+    const second = await commit('second.ts', 'second commit');
+    const service = new GitService() as any;
+    const base = await service.commitBaseRef(repoRoot, second);
+
+    expect(service.commitDiffLabel(base, second)).toBe(`${second}^ ↔ ${second}`);
+  });
 });
 
 describe('GitService empty diff side', () => {

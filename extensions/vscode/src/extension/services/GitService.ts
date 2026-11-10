@@ -264,6 +264,20 @@ export class GitService {
     return emptyTreeRef(root, this.emptyTreeCache);
   }
 
+  /**
+   * The diff title for one commit, naming the base it is actually diffed
+   * against.
+   *
+   * `commitBaseRef` falls back to the empty tree for a root commit, so a title
+   * built as `<sha>^ ↔ <sha>` names a revision that does not resolve and is
+   * not what is on screen. Putting the empty tree SHA there would be accurate
+   * and unreadable, so the root case says what it is in words.
+   */
+  private commitDiffLabel(parent: string, commit: string): string {
+    if (parent === `${commit}^`) return `${commit}^ ↔ ${commit}`;
+    return `${t(resolveLocale(vscode.env.language), 'ext.git.rootCommit')} ↔ ${commit}`;
+  }
+
   private async resolveGitRef(root: string, ref: string): Promise<string | null> {
     for (const candidate of branchRefCandidates(ref)) {
       try {
@@ -336,7 +350,7 @@ export class GitService {
 
     if (opts.mode === ReviewMode.Commit && opts.commit) {
       const parent = await this.commitBaseRef(root, opts.commit);
-      const label = `${opts.commit}^ ↔ ${opts.commit}`;
+      const label = this.commitDiffLabel(parent, opts.commit);
       const leftRef = opts.status === 'added' ? null : parent;
       const rightRef = opts.status === 'deleted' ? null : opts.commit;
       await this.presentRefDiff(api, root, opts.path, opts.status, leftRef, rightRef, `${opts.path} (${label})`, {
@@ -510,7 +524,7 @@ export class GitService {
 
     if (ctx.mode === ReviewMode.Commit && ctx.commit) {
       const parent = await this.commitBaseRef(root, ctx.commit);
-      const label = `${ctx.commit}^ ↔ ${ctx.commit}`;
+      const label = this.commitDiffLabel(parent, ctx.commit);
       const leftRef = status === 'added' ? null : parent;
       const rightRef = status === 'deleted' ? null : ctx.commit;
       const mountRef = status === 'deleted' ? parent : ctx.commit;
