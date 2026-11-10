@@ -564,29 +564,90 @@ function checkPluginDeclarations(specs, readJson) {
   return { errors, warnings };
 }
 
+// The schema identifier an Agent Plugins 1.0 manifest MUST declare (spec §5.2).
+// The whole string is compared, not a substring: the spec fixes one exact URL,
+// so `.../9.9.9/...` or a lookalike host identifies a different format rather
+// than being a lenient match for this one.
+const AGENT_PLUGIN_SCHEMA =
+  "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+
+// `name` grammar from spec §5.5: 1-64 characters from `[a-z0-9.-]`, starting
+// and ending alphanumeric, without `--` or `..`. A host addresses the plugin by
+// this name, so a value outside the grammar resolves inconsistently across
+// loaders (including ones that lowercase it).
+const AGENT_PLUGIN_NAME_MAX = 64;
+
+// The first violated name rule as a message fragment (the caller prefixes the
+// file), or null. One violation is reported, not every one: `Open-Code-Review`
+// breaks the character set, the leading-alphanumeric rule and the lowercase
+// rule simultaneously, and three lines of the same complaint help nobody.
+function agentPluginNameProblem(name) {
+  if (typeof name !== "string" || name === "") {
+    return (
+      "does not declare a non-empty string `name`. Agent Plugins 1.0 identifies " +
+      "the plugin by that field, so this manifest describes nothing installable."
+    );
+  }
+  // Count code points, not UTF-16 units: a non-BMP name is already illegal
+  // under the character rule below, but reporting it as twice its real length
+  // would send the reader after the wrong constraint.
+  const length = Array.from(name).length;
+  if (length > AGENT_PLUGIN_NAME_MAX) {
+    return (
+      `declares a ${length}-character \`name\`, but Agent Plugins 1.0 limits ` +
+      `it to ${AGENT_PLUGIN_NAME_MAX} characters.`
+    );
+  }
+  if (/[^a-z0-9.-]/.test(name)) {
+    return (
+      `declares \`name: "${name}"\`, which uses characters outside the Agent ` +
+      `Plugins 1.0 grammar (lowercase a-z, digits, \`-\` and \`.\` only).`
+    );
+  }
+  if (!/^[a-z0-9]/.test(name) || !/[a-z0-9]$/.test(name)) {
+    return (
+      `declares \`name: "${name}"\`, which must start and end with a lowercase ` +
+      `letter or digit.`
+    );
+  }
+  if (name.includes("--") || name.includes("..")) {
+    return (
+      `declares \`name: "${name}"\`, which contains consecutive \`--\` or \`..\`; ` +
+      `Agent Plugins 1.0 forbids both.`
+    );
+  }
+  return null;
+}
+
 // Any parseable JSON object is not an Agent Plugins 1.0 manifest. `name` is how
-// the schema identifies the plugin and `$schema` is what makes the file declare
-// itself as that format at all, so a manifest lacking either describes nothing
-// installable however valid its JSON is.
+// the schema identifies the plugin (and §5.5 constrains its grammar) and
+// `$schema` is what makes the file declare itself as that format at all, so a
+// manifest failing either describes nothing installable however valid its JSON
+// is. `version` is deliberately NOT checked: §5.5 says clients MUST NOT reject a
+// manifest over a non-SemVer version, and the same holds for the informational
+// `homepage`/`repository`/`author`/`license` fields.
 function validateAgentPluginManifest(file, json) {
   const errors = [];
-  if (typeof json.name !== "string" || json.name === "") {
-    errors.push({
-      file,
-      message:
-        `${file} does not declare a non-empty string \`name\`. Agent Plugins 1.0 ` +
-        `identifies the plugin by that field, so this manifest describes nothing ` +
-        `installable.`,
-    });
+  const nameProblem = agentPluginNameProblem(json.name);
+  if (nameProblem) {
+    errors.push({ file, message: `${file} ${nameProblem}` });
   }
-  if (typeof json.$schema !== "string" || !json.$schema.includes("agent-plugins.org")) {
+  if (typeof json.$schema !== "string" || json.$schema === "") {
     errors.push({
       file,
       message:
-        `${file} does not declare a \`$schema\` pointing at agent-plugins.org ` +
-        `(expected \`https://agent-plugins.org/schemas/1.0.0/plugin.schema.json\`). ` +
-        `Without it the file does not identify itself as an Agent Plugins 1.0 ` +
-        `manifest.`,
+        `${file} does not declare a string \`$schema\`. Agent Plugins 1.0 ` +
+        `requires exactly \`${AGENT_PLUGIN_SCHEMA}\`; without it the file does ` +
+        `not identify itself as a 1.0 manifest.`,
+    });
+  } else if (json.$schema !== AGENT_PLUGIN_SCHEMA) {
+    errors.push({
+      file,
+      message:
+        `${file} declares \`$schema: "${json.$schema}"\`, but Agent Plugins 1.0 ` +
+        `fixes the identifier to exactly \`${AGENT_PLUGIN_SCHEMA}\`. A different ` +
+        `version or URL declares a different format, so this check cannot ` +
+        `certify the file as a 1.0 manifest.`,
     });
   }
   return errors;
@@ -1089,6 +1150,9 @@ module.exports = {
   validateCommandFrontmatter,
   resolveDeclaredPath,
   checkPluginDeclarations,
+  AGENT_PLUGIN_SCHEMA,
+  AGENT_PLUGIN_NAME_MAX,
+  agentPluginNameProblem,
   validateAgentPluginManifest,
   checkAgentPluginManifests,
   pluginEntries,
