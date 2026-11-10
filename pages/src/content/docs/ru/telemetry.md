@@ -15,8 +15,9 @@ OCR включает полноценную встроенную поддерж�
 По умолчанию телеметрия **отключена**. После включения OCR экспортирует:
 
 - **Спаны** — три спана уровня конвейера (`review.run`, `diff.parse`,
-  `subtask.execute.group.<group-key>`) и по одному кратковременному спану
-  `event.*` для каждого события в точке принятия решения.
+  `subtask.execute.group.<group-key>`), спаны `llm.request` и
+  `tool.execute.<tool-name>` для запросов LLM и выполнений инструментов, а также
+  кратковременный спан `event.*` для каждого события в точке принятия решения.
 - **Метрики** — агрегированные счётчики и гистограммы длительности ревью,
   проверенных файлов, созданных комментариев, запросов / токенов / задержки LLM,
   а также вызовов / задержки инструментов.
@@ -108,7 +109,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:3000/api/public/otel
 
 ### Спаны
 
-Полное дерево спанов одного ревью:
+Пример спанов одного ревью:
 
 ```
 review.run
@@ -120,6 +121,8 @@ review.run
 │   ├── event.plan.failed                  (when plan phase errored)
 │   ├── event.token.threshold.exceeded     (when prompt > 80% of max_tokens)
 │   ├── main.loop                          (one span per review round)
+│   │   ├── llm.request
+│   │   └── tool.execute.<tool-name>
 │   └── event.subtask.error                (when the subtask errored)
 ├── subtask.execute.group.<group-key2>
 └── …
@@ -130,10 +133,11 @@ review.run
 группы — это пути файлов группы, отсортированные и соединённые запятыми (для
 группы из одного файла это просто этот путь).
 
-Циклы запросов к LLM и выполнения инструментов **не** создают отдельных
-спанов: они отображаются только в метриках (см. ниже). События в точках
-принятия решений создаются как кратковременные спаны `event.<name>`,
-присоединённые к текущему контексту.
+В основном цикле ревью запросы к LLM и выполнения инструментов записываются
+соответственно как спаны `llm.request` и `tool.execute.<tool-name>`. Их
+агрегированные счётчики и задержка также записываются как метрики (см. ниже).
+События в точках принятия решений создаются как
+кратковременные спаны `event.<name>`, присоединённые к текущему контексту.
 
 Каждый спан содержит полезные атрибуты:
 
@@ -143,6 +147,8 @@ review.run
 | `diff.parse` | `files.changed`, `lines.inserted`, `lines.deleted` |
 | `subtask.execute.group.<group-key>` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file` |
 | `main.loop` | `group.label`, `round` |
+| `llm.request` | `llm.model`, `llm.duration_ms`, `llm.total_tokens`, `llm.status` |
+| `tool.execute.<tool-name>` | `tool.name`, `tool.duration_ms`, `tool.status` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |
 | `event.review.skipped` | `reason` (`too_large` / `deleted` / `no_supported_files`), `file.count`, `too_large.count` |
 | `event.grouping.skipped` | `strategy`, `file.count`, `lines.changed`, `threshold.files`, `threshold.lines` |
@@ -309,12 +315,10 @@ OCR экспортирует **всё**. Настройка сэмплирова
 - 1 спан `review.run` + 1 спан `diff.parse` + 1 спан
   `subtask.execute.group.<group-key>` на каждую проверенную группу (плюс его
   дочерние `plan.execute` / `main.loop` / `review_filter.execute`) +
-  1 кратковременный спан `event.*` на каждое событие в точке принятия решения.
-- PR из 10 файлов создаёт в общей сложности примерно 15–25 спанов — меньше,
-  когда группировка объединяет файлы, и больше, когда предустановка effort
-  выполняет дополнительные раунды ревью. Циклы запросов LLM и вызовы
-  инструментов увеличивают счётчики метрик, но не создают дополнительные
-  спаны.
+  1 кратковременный спан `event.*` на каждое событие в точке принятия решения,
+  а также спаны `llm.request` и `tool.execute.<tool-name>`.
+- Общее число спанов зависит не только от числа файлов, но и от количества групп,
+  раундов ревью, запросов LLM и выполнений инструментов.
 
 Экспорт выполняется **пакетно и асинхронно**, поэтому телеметрия не блокирует
 цикл ревью. Если коллектор недоступен, OCR записывает предупреждение и

@@ -178,6 +178,30 @@ const PLUGIN_DECLARATIONS = [
     kind: "skills",
     host: "Cursor",
   },
+  {
+    file: ".kimi-plugin/plugin.json",
+    field: "skills",
+    // Kimi Code installs a GitHub repository with the repo root as the plugin
+    // root and only looks for the manifest at <root>/kimi.plugin.json or
+    // <root>/.kimi-plugin/plugin.json — it cannot address a subdirectory of a
+    // repo. The manifest therefore lives at the repo root and its
+    // plugin-root-relative paths point down into the shared plugin tree.
+    base: "plugin-root",
+    target: "plugins/open-code-review/skills",
+    kind: "skills",
+    host: "Kimi Code",
+  },
+  {
+    file: ".kimi-plugin/plugin.json",
+    field: "commands",
+    // Same resolution base as the skills entry; commands live under the
+    // kimi-code/ subtree so the Kimi plugin never references the
+    // claude-code/ tree.
+    base: "plugin-root",
+    target: "plugins/open-code-review/kimi-code/commands",
+    kind: "commands",
+    host: "Kimi Code",
+  },
 ];
 
 // Skill trees. Each direct subdirectory must hold a SKILL.md whose frontmatter
@@ -187,7 +211,10 @@ const SKILL_ROOTS = ["skills", "plugins/open-code-review/skills"];
 
 // Command prompt directories. Each `.md` needs a `description` for the host to
 // render it in the slash-command list.
-const COMMAND_DIRS = ["plugins/open-code-review/claude-code/commands"];
+const COMMAND_DIRS = [
+  "plugins/open-code-review/claude-code/commands",
+  "plugins/open-code-review/kimi-code/commands",
+];
 
 // ---------------------------------------------------------------------------
 // Check 1: in-repo path links

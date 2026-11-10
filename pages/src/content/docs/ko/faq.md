@@ -93,13 +93,15 @@ curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/js
 ### 제 파일이 리뷰되지 않습니다 {#my-file-isn-t-being-reviewed}
 
 `ocr review --preview`를 돌려 보세요(LLM 비용이 들지 않습니다). 후보 파일마다
-남긴 **이유** 또는 버린 **이유**가 함께 나옵니다.
+남긴 **이유** 또는 버린 **이유**가 함께 나옵니다. `vendor/`, `node_modules/` 같은
+provider 디렉터리의 파일은 터미널에서는 한 줄로 묶입니다. `ocr review --preview --format json`은
+여전히 모든 항목을 나열합니다.
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: provider_directory)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
 제외 사유는
@@ -215,9 +217,9 @@ OCR이 코멘트를 diff의 정확한 줄에 붙이지 못했다는 뜻입니다
 - 어떤 도구가 계속 오류를 내고 모델이 계속 재시도합니다. 세션 JSONL을 보세요.
   같은 도구 결과가 반복된다면 그것이 원인입니다.
 - 그룹이 정말로 크거나 맥락이 많아 100라운드로는 모자랍니다.
-  `--max-tools <n>`으로 상한을 올리세요(예: `--max-tools 150`). 이 플래그는
-  상한을 *올리기만* 합니다. 템플릿 기본값 `100`보다 낮은 값은 무시되고,
-  1~49는 `50`으로 올려 맞추며, `0`은 템플릿 기본값을 그대로 씁니다.
+  `--max-tools <n>`으로 상한을 올리세요(예: `--max-tools 150`). 검증된 양수 값은
+  상한으로 정확히 적용됩니다. 1~49는 `50`으로 올려 맞추며, `0`은 템플릿 기본값
+  `100`을 그대로 씁니다.
 - 모델이 네이티브 도구 호출을 아예 지원하지 않습니다(로컬 모델에서 흔합니다).
   ["No tool calls parsed"(로컬 모델 / Ollama)](#no-tool-calls-parsed-local-models-ollama)를
   참고하세요.
@@ -292,7 +294,8 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-LLM 호출에는 별도 스팬이 생기지 않고 메트릭으로 기록됩니다.
+메인 리뷰 루프에서는 LLM 호출이 `llm.request` 스팬으로 기록되며 메트릭도 함께
+기록됩니다.
 `ocr.llm.tokens_used`(카운터, 레이블 `model` + `type`),
 `ocr.llm.requests_total`(카운터, 레이블 `model` + `status`),
 `ocr.llm.request_duration_seconds`(히스토그램, 레이블 `model`)를 보세요. console
@@ -375,7 +378,7 @@ JSONL과 규칙 파일은 로컬에만 있습니다.
 
 릴리스에 올라가는 정적 바이너리는 프로젝트 이름을 따 `opencodereview`이고, NPM
 래퍼는 쓰기 편하도록 `ocr`이라는 이름으로 설치합니다. 소스에서 빌드하면
-`dist/opencodereview`가 나옵니다. `$PATH`에 `ocr`로 복사해 두세요.
+`dist/opencodereview`(Windows에서는 `dist/opencodereview.exe`)가 나옵니다. `$PATH`에 `ocr`로 복사해 두세요.
 
 ### 어떻게 제거하나요? {#how-do-i-uninstall}
 

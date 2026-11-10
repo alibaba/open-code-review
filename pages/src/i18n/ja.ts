@@ -12,6 +12,11 @@ export const ja: TranslationKeys = {
   'navbar.blog': 'ブログ',
   'navbar.getStarted': '始める',
 
+  'providers.title': '主要モデルプロバイダーに標準対応',
+  'providers.description': 'API キーを設定するだけでレビューを開始。主要プロトコルに対応したプライベートモデルサービスにも接続できます。',
+  'providers.listLabel': '対応モデルのブランド',
+  'providers.explore': '対応プロバイダーを見る',
+
   // Hero
   'hero.title': 'AIコードレビュー\n数百万の実タスクで検証済み',
   'hero.description': 'Open Code Review は、アリババの実戦検証済みコードレビュー Agent をワークフローに統合します。任意の LLM に接続し、データを完全にプライベートに保ち、開発者が実際に採用するレビューコメントを取得できます。',
@@ -22,7 +27,6 @@ export const ja: TranslationKeys = {
   'hero.copyFailed': 'コピー失敗',
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
-  'hero.installMacPorts': 'MacPorts',
   'hero.installMacOS': 'MacOS',
   'hero.installLinux': 'Linux',
   'hero.installWindows': 'Windows',
@@ -298,8 +302,10 @@ export const ja: TranslationKeys = {
   'docs.sidebar.claudeCode': 'Command（Claude Code）',
   'docs.sidebar.delegate': 'デリゲーションモード',
   'docs.sidebar.cicd': 'CI/CD',
+  'docs.sidebar.acp': 'ACP',
   'docs.sidebar.contributing': 'コントリビュート',
   'docs.sidebar.faq': 'FAQ',
+  'docs.sidebar.chatgptPreview': 'ChatGPT サインインのプレビュー',
   'docs.search.placeholder': '検索...',
   'docs.search.noResults': '結果が見つかりません',
   'docs.search.hint.select': '選択',

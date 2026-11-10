@@ -38,7 +38,7 @@ var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? 
 // ParseHunks parses raw unified diff text for a single file into a slice of Hunks.
 // Lines before the first @@ header (file-level headers like "diff --git", "---", "+++") are ignored.
 func ParseHunks(rawDiffText string) []Hunk {
-	lines := strings.Split(rawDiffText, "\n")
+	lines := splitDiffLines(rawDiffText)
 	var hunks []Hunk
 	var current *Hunk
 

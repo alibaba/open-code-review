@@ -10,6 +10,11 @@ export const en = {
   'navbar.blog': 'Blog',
   'navbar.getStarted': 'Get Started',
 
+  'providers.title': 'Built-in support for leading model providers',
+  'providers.description': 'Add your API key to start reviewing, or connect a private model service compatible with standard protocols.',
+  'providers.listLabel': 'Supported model brands',
+  'providers.explore': 'Explore supported providers',
+
   // Hero
   'hero.title': 'AI Code Review\nValidated on Millions of Real-World Tasks',
   'hero.description': 'Open Code Review brings Alibaba\'s battle-tested code review Agent into your workflow. Connect any LLM, keep data fully private, and get review comments developers actually adopt.',
@@ -20,7 +25,6 @@ export const en = {
   'hero.copyFailed': 'Copy failed',
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
-  'hero.installMacPorts': 'MacPorts',
   'hero.installMacOS': 'MacOS',
   'hero.installLinux': 'Linux',
   'hero.installWindows': 'Windows',
@@ -294,8 +298,10 @@ export const en = {
   'docs.sidebar.claudeCode': 'Command (Claude Code)',
   'docs.sidebar.delegate': 'Delegation Mode',
   'docs.sidebar.cicd': 'CI/CD',
+  'docs.sidebar.acp': 'ACP',
   'docs.sidebar.contributing': 'Contributing',
   'docs.sidebar.faq': 'FAQ',
+  'docs.sidebar.chatgptPreview': 'Sign in with ChatGPT preview',
   'docs.search.placeholder': 'Search...',
   'docs.search.noResults': 'No results found',
   'docs.search.hint.select': 'Select',

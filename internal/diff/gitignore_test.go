@@ -25,10 +25,36 @@ func TestExcludedDirs(t *testing.T) {
 		t.Error("ExcludedDirs should include .git/")
 	}
 
+	for _, d := range dirs {
+		if d == "pkgs/" {
+			t.Error("ExcludedDirs must not include pkgs/")
+		}
+	}
+
 	dirs2 := ExcludedDirs()
 	dirs[0] = "MUTATED"
 	if dirs2[0] == "MUTATED" {
 		t.Error("ExcludedDirs should return a copy, not the original slice")
+	}
+}
+
+func TestProviderDirPrefix(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"vendor/pkg/keep.go", "vendor/"},
+		{"vendor", "vendor/"},
+		{"target/.pnpm/pkg/index.js", "target/"},
+		{"src/vendor/keep.go", ""},
+		{"main.go", ""},
+		{"pkgs/foo/default.nix", ""},
+		{"pkgs", ""},
+	}
+	for _, tc := range tests {
+		if got := ProviderDirPrefix(tc.path); got != tc.want {
+			t.Errorf("ProviderDirPrefix(%q) = %q, want %q", tc.path, got, tc.want)
+		}
 	}
 }
 

@@ -2,7 +2,7 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import * as vscode from 'vscode';
-import { SIDEBAR_VIEW_ID } from '../shared/constants';
+import { SIDEBAR_VIEW_ID } from '@shared/constants';
 import { CliService } from './services/CliService';
 import { ConfigService } from './services/ConfigService';
 import { GitService } from './services/GitService';

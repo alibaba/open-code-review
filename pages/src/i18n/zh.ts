@@ -12,6 +12,11 @@ export const zh: TranslationKeys = {
   'navbar.blog': '博客',
   'navbar.getStarted': '开始使用',
 
+  'providers.title': '内置主流模型服务商',
+  'providers.description': '配置 API Key 即可开始审查，也可接入兼容主流协议的私有模型服务。',
+  'providers.listLabel': '支持的模型品牌',
+  'providers.explore': '查看支持的模型服务商',
+
   // Hero
   'hero.title': 'AI 代码审查\n百万真实任务验证',
   'hero.description': 'Open Code Review 将阿里巴巴经过实战检验的代码审查 Agent 引入您的工作流程。连接任意 LLM，数据完全私有，获得开发者真正采纳的审查意见。',
@@ -22,7 +27,6 @@ export const zh: TranslationKeys = {
   'hero.copyFailed': '复制失败',
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
-  'hero.installMacPorts': 'MacPorts',
   'hero.installMacOS': 'MacOS',
   'hero.installLinux': 'Linux',
   'hero.installWindows': 'Windows',
@@ -298,8 +302,10 @@ export const zh: TranslationKeys = {
   'docs.sidebar.claudeCode': 'Command（Claude Code）',
   'docs.sidebar.delegate': '委托模式',
   'docs.sidebar.cicd': 'CI/CD',
+  'docs.sidebar.acp': 'ACP',
   'docs.sidebar.contributing': '贡献',
   'docs.sidebar.faq': 'FAQ',
+  'docs.sidebar.chatgptPreview': 'ChatGPT 登录预览版',
   'docs.search.placeholder': '搜索...',
   'docs.search.noResults': '未找到结果',
   'docs.search.hint.select': '选择',

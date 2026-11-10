@@ -14,8 +14,9 @@ OCR은 **OpenTelemetry**를 일급으로 지원합니다. 리뷰를 한 번 돌�
 텔레메트리는 **기본적으로 꺼져 있습니다**. 켜면 OCR이 다음을 내보냅니다.
 
 - **스팬** — 파이프라인 수준의 스팬 세 가지(`review.run`, `diff.parse`,
-  `subtask.execute.group.<group-key>`). 여기에 결정 지점 이벤트마다 짧게
-  생겼다 사라지는 `event.*` 스팬이 하나씩 더 붙습니다.
+  `subtask.execute.group.<group-key>`), LLM 요청과 도구 실행을 나타내는
+  `llm.request` 및 `tool.execute.<tool-name>` 스팬, 그리고 결정 지점 이벤트마다
+  짧게 생겼다 사라지는 `event.*` 스팬입니다.
 - **메트릭** — 리뷰 소요 시간, 리뷰한 파일 수, 생성한 코멘트 수, LLM 요청·토큰·
   지연 시간, 도구 호출·지연 시간의 집계 카운트와 히스토그램.
 - **이벤트** — `plan.skipped`, `token.threshold.exceeded`, `review.started`처럼
@@ -103,7 +104,7 @@ gRPC에는 URL 경로가 없으므로 이 이야기는 HTTP 프로토콜에만 �
 
 ### 스팬 {#spans}
 
-리뷰 한 번의 전체 스팬 트리입니다.
+리뷰에서 나오는 스팬의 예입니다.
 
 ```
 review.run
@@ -115,6 +116,8 @@ review.run
 │   ├── event.plan.failed                  (when plan phase errored)
 │   ├── event.token.threshold.exceeded     (when prompt > 80% of max_tokens)
 │   ├── main.loop                          (one span per review round)
+│   │   ├── llm.request
+│   │   └── tool.execute.<tool-name>
 │   └── event.subtask.error                (when the subtask errored)
 ├── subtask.execute.group.<group-key2>
 └── …
@@ -124,9 +127,10 @@ review.run
 나옵니다. 파일은 리뷰 전에 의미 단위로 묶이기 때문입니다. 그룹 키는 그룹의 파일
 경로를 정렬해 쉼표로 이은 것입니다(파일이 하나뿐인 그룹이면 경로 하나).
 
-LLM 왕복과 도구 실행은 별도 스팬으로 **나오지 않습니다**. 아래의 메트릭에만
-잡힙니다. 결정 지점 이벤트는 현재 컨텍스트에 붙은 짧은 `event.<name>` 스팬으로
-발생합니다.
+메인 리뷰 루프에서는 LLM 요청과 도구 실행을 각각 `llm.request` 및
+`tool.execute.<tool-name>` 스팬으로 기록합니다. 집계된 횟수와 지연 시간도
+메트릭으로 기록됩니다(아래 참고).
+결정 지점 이벤트는 현재 컨텍스트에 붙은 짧은 `event.<name>` 스팬으로 발생합니다.
 
 스팬마다 쓸모 있는 속성이 실려 있습니다.
 
@@ -136,6 +140,8 @@ LLM 왕복과 도구 실행은 별도 스팬으로 **나오지 않습니다**. �
 | `diff.parse` | `files.changed`, `lines.inserted`, `lines.deleted` |
 | `subtask.execute.group.<group-key>` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file` |
 | `main.loop` | `group.label`, `round` |
+| `llm.request` | `llm.model`, `llm.duration_ms`, `llm.total_tokens`, `llm.status` |
+| `tool.execute.<tool-name>` | `tool.name`, `tool.duration_ms`, `tool.status` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |
 | `event.review.skipped` | `reason`(`too_large` / `deleted` / `no_supported_files`), `file.count`, `too_large.count` |
 | `event.grouping.skipped` | `strategy`, `file.count`, `lines.changed`, `threshold.files`, `threshold.lines` |
@@ -295,10 +301,9 @@ OCR은 **전부** 내보냅니다. 샘플링 설정은 없으며 OTel 샘플링�
 - `review.run` 스팬 1개 + `diff.parse` 스팬 1개 + 리뷰한 그룹마다
   `subtask.execute.group.<group-key>` 스팬 1개(그 아래 `plan.execute` /
   `main.loop` / `review_filter.execute` 자식 스팬 포함) + 결정 지점 이벤트마다
-  짧은 `event.*` 스팬 1개.
-- 파일 10개짜리 PR이면 대략 15~25개 스팬입니다. 그룹화가 파일을 잘 묶으면 더
-  적고, effort 프리셋이 리뷰 라운드를 더 돌리면 더 많습니다. LLM 왕복과 도구
-  호출은 메트릭 카운터만 올릴 뿐 스팬을 더 만들지는 않습니다.
+  짧은 `event.*` 스팬 1개 + `llm.request` 및 `tool.execute.<tool-name>` 스팬.
+- 전체 스팬 수는 파일 수 하나로 정해지지 않고 리뷰 그룹 수, 리뷰 라운드 수,
+  LLM 요청 수, 도구 실행 수에 따라 달라집니다.
 
 내보내기는 **묶음으로 비동기** 처리되므로 텔레메트리가 리뷰 루프를 막지
 않습니다. 컬렉터에 닿지 못하면 OCR은 경고를 남기고 계속 갑니다. 리뷰는 평소대로

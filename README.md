@@ -12,7 +12,7 @@
 </p>
 <p align="center">
   <a href="https://trendshift.io/repositories/41087" target="_blank">
-    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
   </a>
   <a href="https://trendshift.io/repositories/41087" target="_blank">
     <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/monthly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
@@ -22,7 +22,7 @@
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
-  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://img.shields.io/badge/Ask-DeepWiki-blue?style=flat-square" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
@@ -32,6 +32,7 @@
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
   English | <a href="docs/i18n/README.zh-CN.md">简体中文</a> | <a href="docs/i18n/README.ja-JP.md">日本語</a> | <a href="docs/i18n/README.ko-KR.md">한국어</a> | <a href="docs/i18n/README.ru-RU.md">Русский</a>
@@ -123,6 +124,9 @@ For other installation methods (install script, GitHub Release binary, from sour
 
 You must configure an LLM before reviewing code, unless you use [Delegation Mode](https://open-codereview.ai/docs/delegate).
 
+- **OCR calls the model:** `ocr review`, the `/open-code-review:review` command, and the `open-code-review` skill use OCR's own provider configuration, not your Claude Code Team/Pro subscription login. Authentication requirements depend on the provider; see [Configuration](https://open-codereview.ai/docs/configuration).
+- **The host agent calls the model:** the `/open-code-review:delegate-review` command and the `open-code-review-delegate` skill use the host agent's configured model and authentication. No separate LLM configuration or credentials are needed in OCR. See the [Claude Code install steps](plugins/open-code-review/README.md#claude-code).
+
 ```bash
 ocr config provider          # Select a built-in provider or add a custom one
 ocr config model             # Pick a model for the active provider
@@ -180,6 +184,7 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
   - [Claude Code](plugins/open-code-review/README.md#claude-code) — install a plugin with review slash commands
   - [Codex](plugins/open-code-review/README.md#codex) — install a plugin with callable review skills
   - [Cursor](plugins/open-code-review/README.md#cursor) — install a plugin with portable review skills
+  - [Kimi Code](plugins/open-code-review/README.md#kimi-code) — install a plugin with review slash commands and skills
   - [OpenCode](plugins/open-code-review/opencode/README.md) — install native review tools and slash commands
   - [QCA Forward](plugins/open-code-review/qca/README.md) — run delegation mode with the QCA host model and a ready-to-publish template
   - [Skill-compatible agents](https://open-codereview.ai/docs/agent-skill) — install the portable agent skill

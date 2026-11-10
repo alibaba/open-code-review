@@ -153,14 +153,20 @@ func LoadDetail(repoDir, sessionID string) (*Summary, []ItemDetail, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	return LoadDetailAt(path, sessionID, repoDir)
+}
+
+// LoadDetailAt reads a session found by its saved path, even when its original
+// checkout no longer exists or its metadata does not record a repository.
+func LoadDetailAt(path, sessionID, fallbackRepoDir string) (*Summary, []ItemDetail, error) {
 	summary := &Summary{
 		SessionID: sessionID,
 		FilePath:  path,
-		RepoDir:   repoDir,
+		RepoDir:   fallbackRepoDir,
 		Aborted:   true,
 	}
 	var items []ItemDetail
-	err = walkSessionFile(path, func(rec summaryRecord) {
+	err := walkSessionFile(path, func(rec summaryRecord) {
 		applyRecordToSummary(summary, rec)
 		if item, ok := recordToItem(rec); ok {
 			items = append(items, item)
@@ -339,4 +345,14 @@ func parseRecordTime(s string) time.Time {
 		return t
 	}
 	return time.Time{}
+}
+
+// LoadSummaryAt reads one session summary from an exact file path.
+//
+// LoadSummary derives the path from a repository, which the global id search
+// deliberately does not have: it found the file first and learns the repository
+// from the record inside it. fallbackRepoDir is only used when the file carries
+// no cwd of its own.
+func LoadSummaryAt(path, sessionID, fallbackRepoDir string) (*Summary, error) {
+	return loadSummaryFromFile(path, sessionID, fallbackRepoDir)
 }

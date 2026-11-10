@@ -12,7 +12,7 @@
 </p>
 <p align="center">
   <a href="https://trendshift.io/repositories/41087" target="_blank">
-    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
   </a>
   <a href="https://trendshift.io/repositories/41087" target="_blank">
     <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/monthly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
@@ -22,7 +22,7 @@
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
-  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://img.shields.io/badge/Ask-DeepWiki-blue?style=flat-square" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
@@ -32,6 +32,7 @@
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
   <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | Русский
@@ -123,6 +124,9 @@ npm install -g @alibaba-group/open-code-review
 
 Перед запуском ревью необходимо настроить LLM, если только вы не используете [режим делегирования](https://open-codereview.ai/docs/delegate).
 
+- **Модель вызывает OCR:** `ocr review`, команда `/open-code-review:review` и навык `open-code-review` используют настройки провайдера в OCR, а не авторизацию по подписке Claude Code Team/Pro. Требования к аутентификации зависят от провайдера; см. [руководство по настройке](https://open-codereview.ai/docs/configuration).
+- **Модель вызывает хост-агент:** команда `/open-code-review:delegate-review` и навык `open-code-review-delegate` используют модель и способ аутентификации, настроенные в хост-агенте. Отдельная настройка LLM или учётных данных в OCR не требуется. См. [инструкции по установке для Claude Code](../../plugins/open-code-review/README.md#claude-code).
+
 ```bash
 ocr config provider          # Выбрать встроенного провайдера или добавить пользовательский
 ocr config model             # Выбрать модель для активного провайдера
@@ -180,6 +184,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — установка плагина со slash-командами для ревью
   - [Codex](../../plugins/open-code-review/README.md#codex) — установка плагина с вызываемыми навыками ревью
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — установка плагина с переносимыми навыками ревью
+  - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — установка плагина со slash-командами и навыками ревью
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — установка нативных инструментов ревью и slash-команд
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — запуск режима делегирования с хост-моделью QCA и готовым к публикации шаблоном
   - [Агенты с поддержкой Skill](https://open-codereview.ai/docs/agent-skill) — установка переносимого навыка агента

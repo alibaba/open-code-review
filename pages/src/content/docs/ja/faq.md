@@ -90,14 +90,16 @@ LLM タイムアウトを引き上げてください——[タイムアウト](.
 
 ### ファイルがレビューされない
 
-`ocr review --preview` を実行してください（LLM コストなし）。出力には各候補ファイルと、それが
-保持されたか破棄されたかの**理由**が一覧されます。
+`ocr review --preview` を実行してください（LLM コストなし）。出力には、各候補ファイルが
+保持されたか破棄されたかの**理由**が示されます。`vendor/` や `node_modules/` などの
+provider ディレクトリ配下のファイルは端末では 1 行に集約されます。`ocr review --preview --format json`
+では引き続き全エントリが列挙されます。
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: provider_directory)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
 これらの除外理由は、[ファイルフィルタリング](../review-rules/#how-files-are-filtered)のゲートに対応します。
@@ -203,9 +205,8 @@ JSON モードでは `warnings` にも表示されます。
 - あるツールがエラーを出し続け、モデルがリトライし続けている。セッション JSONL を確認してください——
   同じツール結果が繰り返されていれば、それが原因です。
 - ファイルが本当に大きい、あるいはコンテキストが重く、100 回では足りない。`--max-tools <n>` で
-  引き上げてください（例: `--max-tools 150`）。`--max-tools` は**引き上げ専用**です。
-  テンプレートのデフォルト（`100`）より小さい値は効果がなく、1〜49 はさらに `50` に
-  引き上げられます。`0`（デフォルト）はテンプレートのデフォルト `100` を使います。
+  引き上げてください（例: `--max-tools 150`）。解決後の正の値が上限としてそのまま適用されます。
+  1〜49 は `50` に引き上げられ、`0`（デフォルト）はテンプレートのデフォルト `100` を使います。
 - モデルがネイティブなツール呼び出しを全くサポートしていない（ローカルモデルでよくある）——
   ["No tool calls parsed"（ローカルモデル / Ollama）](#no-tool-calls-parsed-ollama)を
   参照してください。
@@ -278,7 +279,7 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-LLM 呼び出しには独自の span がありません——metric として記録されます。`ocr.llm.tokens_used`
+メインレビュー ループの LLM 呼び出しは `llm.request` span を生成し、metric としても記録されます。`ocr.llm.tokens_used`
 （counter、`model` + `type` でラベル付け）、`ocr.llm.requests_total`（counter、`model`
 + `status` でラベル付け）、`ocr.llm.request_duration_seconds`（histogram、`model` でラベル付け）に
 注目してください。console exporter はこれらの集計をインラインで出力します。ダッシュボードが必要な場合は、
@@ -353,7 +354,7 @@ provider が必要です。Hg サポートの issue は[こちら](https://githu
 ### なぜバイナリは `opencodereview` なのに CLI は `ocr` なのか？
 
 release で配布される静的バイナリはプロジェクト名（`opencodereview`）を持ちます。NPM wrapper は
-使いやすさのため `ocr` としてインストールされます。ソースからビルドすると `dist/opencodereview` が
+使いやすさのため `ocr` としてインストールされます。ソースからビルドすると `dist/opencodereview`（Windows では `dist/opencodereview.exe`）が
 得られます——`$PATH` 上の `ocr` としてコピーしてください。
 
 ### アンインストールするには？

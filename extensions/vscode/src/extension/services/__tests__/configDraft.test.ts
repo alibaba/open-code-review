@@ -2,9 +2,49 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import { applyConfigEntries } from '../configDraft';
+import { buildCustomCreateSaveEntries } from '@shared/configUtils';
 
 describe('applyConfigEntries', () => {
-  it('合并官方 provider 条目', () => {
+  it.each(['mimo-v2.6-flash', 'foo.api_key', 'openai.extra_body'])('creates %s before applying form fields', (name) => {
+    const entries = buildCustomCreateSaveEntries({
+      name, protocol: 'openai', url: 'https://example.invalid/v1', model: 'some-model',
+      models: 'some-model,other-model', apiKey: 'test-key', authHeader: 'authorization',
+    });
+    expect(entries[0]).toEqual({ key: 'provider', value: name });
+    const base = { provider: 'openai', model: 'saved-model' };
+    const draft = applyConfigEntries(base, entries);
+    expect(draft.provider).toBe(name);
+    expect(draft.custom_providers).toEqual({
+      [name]: {
+        protocol: 'openai', url: 'https://example.invalid/v1', model: 'some-model',
+        models: ['some-model', 'other-model'], api_key: 'test-key', auth_header: 'authorization',
+      },
+    });
+    expect(base).toEqual({ provider: 'openai', model: 'saved-model' });
+  });
+
+  it.each(['providers', 'custom_providers'])('requires existing dotted names for %s', (prefix) => {
+    const base = { provider: 'openai', model: 'saved-model' };
+    for (const name of ['mimo-v2.6-flash', 'foo.api_key', 'openai.extra_body']) {
+      const entry = { key: `${prefix}.${name}.model`, value: 'some-model' };
+      expect(applyConfigEntries(base, [entry])).toEqual(base);
+      const existing = { ...base, custom_providers: { [name]: {} } };
+      const draft = applyConfigEntries(existing, [entry]);
+      expect(draft.provider).toBe('openai');
+      expect(draft.custom_providers).toEqual({ [name]: { model: 'some-model' } });
+      expect(existing.custom_providers[name]).toEqual({});
+    }
+  });
+
+  it.each([' ', '.a', 'a.', 'a..b', 'a. .b', 'anthropic.'])('rejects invalid name %s', (name) => {
+    const base = { provider: 'openai', model: 'saved-model', custom_providers: { [name]: {} } };
+    expect(applyConfigEntries(base, [{ key: 'provider', value: name }])).toEqual(base);
+    for (const prefix of ['providers', 'custom_providers']) {
+      expect(applyConfigEntries(base, [{ key: `${prefix}.${name}.url`, value: 'https://example.invalid/v1' }])).toEqual(base);
+    }
+  });
+
+  it('merges built-in provider entries', () => {
     const draft = applyConfigEntries({}, [
       { key: 'provider', value: 'anthropic' },
       { key: 'providers.anthropic.model', value: 'claude-opus-4-8' },
@@ -17,7 +57,7 @@ describe('applyConfigEntries', () => {
     });
   });
 
-  it('合并自定义 provider 条目', () => {
+  it('merges custom provider entries', () => {
     const draft = applyConfigEntries({}, [
       { key: 'custom_providers.my-llm.protocol', value: 'openai' },
       { key: 'custom_providers.my-llm.url', value: 'https://api.example.com/v1' },
@@ -34,7 +74,7 @@ describe('applyConfigEntries', () => {
     });
   });
 
-  it('合并 manual llm 条目并清空 provider', () => {
+  it('merges manual llm entries and clears the provider', () => {
     const draft = applyConfigEntries({ provider: 'anthropic' }, [
       { key: 'provider', value: '' },
       { key: 'model', value: '' },

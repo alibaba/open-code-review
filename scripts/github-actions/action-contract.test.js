@@ -127,7 +127,20 @@ function parseSteps(text) {
       }
     }
 
-    steps.push({ name: current.name, run, env, index: current.index });
+    let script;
+    const scriptMarker = rawLines.findIndex((line) => /^        script:\s*\|\s*$/.test(line));
+    if (scriptMarker >= 0) {
+      const body = [];
+      for (let index = scriptMarker + 1; index < rawLines.length; index += 1) {
+        const line = rawLines[index];
+        if (line.trim() === "") body.push("");
+        else if (/^          /.test(line)) body.push(line.slice(10));
+        else break;
+      }
+      script = body.join("\n");
+    }
+
+    steps.push({ name: current.name, run, script, env, index: current.index });
     current = undefined;
   }
 
@@ -222,7 +235,7 @@ function makeFixture() {
 const fs = require("fs");
 const args = process.argv.slice(2);
 const env = {};
-for (const name of ["OCR_LLM_TIMEOUT", "OCR_LLM_EXTRA_HEADERS", "REVIEW_TASK_TIMEOUT", "OCR_TIMEOUT"]) {
+for (const name of ["OCR_LLM_TIMEOUT", "OCR_LLM_EXTRA_HEADERS", "REVIEW_TASK_TIMEOUT", "OCR_TIMEOUT", "OCR_NO_UPDATE"]) {
   if (process.env[name] !== undefined) env[name] = process.env[name];
 }
 const record = { args, env };
@@ -359,6 +372,226 @@ function assertValidation(value, expectedValid) {
   } finally {
     removeFixture(fixture);
   }
+}
+
+function prRefsStep() {
+  const step = stepNamed("Resolve PR refs");
+  assert.ok(step, "action.yml must retain the Resolve PR refs step");
+  return step;
+}
+
+// The step reads its candidate PR numbers from `github.*` expressions, which the
+// harness deliberately refuses to resolve. So the sources are supplied here the
+// way the runner would have rendered them for a given event, and the precedence
+// between them — the part that is actually under test — runs as written.
+function runPrRefs(sources) {
+  const fixture = makeFixture();
+  try {
+    const env = Object.assign(
+      {
+        INPUT_BASE_REF: "",
+        INPUT_HEAD_SHA: "",
+        INPUT_PR_NUMBER: "",
+        EVENT_BASE_REF: "main",
+        EVENT_HEAD_SHA: "a".repeat(40),
+        EVENT_PR_NUMBER: "",
+        WORKFLOW_RUN_PR_NUMBER: "",
+        GITHUB_EVENT_NAME: "workflow_run",
+      },
+      sources
+    );
+    const result = runShell(renderedRun(prRefsStep(), inputValues()), env, fixture);
+    return { result, exported: readEnvAssignments(path.join(fixture.dir, "github-env")) };
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testPrNumberInputIsOptionalAndDocumented() {
+  assert.ok(INPUTS.pr_number, "action.yml must define the pr_number input");
+  assert.strictEqual(
+    INPUTS.pr_number.default,
+    "",
+    "pr_number must default to empty so every current trigger keeps today's resolution"
+  );
+  const inputBlock = ACTION_TEXT.match(
+    /^  pr_number:\s*$([\s\S]*?)(?=^  [A-Za-z0-9_]+:\s*$|^outputs:|^runs:)/m
+  );
+  assert.ok(inputBlock, "action.yml must expose pr_number metadata");
+  assert.match(inputBlock[1], /required:\s*false/, "pr_number must stay optional");
+  assert.match(
+    inputBlock[1],
+    /workflow_run/,
+    "pr_number must document the trigger it exists for"
+  );
+}
+
+function testPrNumberResolutionOrder() {
+  const cases = [
+    [
+      "the explicit input outranks every payload field",
+      { INPUT_PR_NUMBER: "4242", EVENT_PR_NUMBER: "7", WORKFLOW_RUN_PR_NUMBER: "9" },
+      "4242",
+    ],
+    [
+      "pull_request / issue_comment payloads are used when no input is given",
+      { EVENT_PR_NUMBER: "7", WORKFLOW_RUN_PR_NUMBER: "9" },
+      "7",
+    ],
+    [
+      "workflow_run.pull_requests[0] is the last resort",
+      { WORKFLOW_RUN_PR_NUMBER: "9" },
+      "9",
+    ],
+  ];
+  for (const [label, sources, expected] of cases) {
+    const { result, exported } = runPrRefs(sources);
+    assert.strictEqual(result.status, 0, `${label}; ${resultDescription(result)}`);
+    assert.strictEqual(exported.PR_NUMBER, expected, label);
+    assert.strictEqual(exported.BASE_REF, "main", `${label}; the ref resolution is unchanged`);
+    assert.strictEqual(exported.HEAD_SHA, "a".repeat(40), `${label}; the head resolution is unchanged`);
+  }
+}
+
+function testPrNumberFailsBeforeAnyReviewWork() {
+  const { result, exported } = runPrRefs({});
+  assert.notStrictEqual(
+    result.status,
+    0,
+    `an unresolvable PR number must stop the run; ${resultDescription(result)}`
+  );
+  const output = `${result.stdout}${result.stderr}`;
+  assert.match(output, /::error::/, "the failure must be annotated for the run summary");
+  assert.match(output, /pr_number/, "…and must name the input that fixes it");
+  assert.match(output, /workflow_run\.pull_requests\[0\]\.number/, "…and where that payload keeps it");
+  assert.strictEqual(exported.PR_NUMBER, undefined, "nothing is exported when no number is known");
+
+  // The point of failing here is that it costs nothing: no install, no LLM
+  // quota, no half-finished review whose findings have nowhere to go.
+  const refs = prRefsStep();
+  for (const later of ["Install OpenCodeReview", "Run OpenCodeReview", "Post review comments"]) {
+    const step = stepNamed(later);
+    assert.ok(step, `action.yml must retain the ${later} step`);
+    assert.ok(refs.index < step.index, `PR number resolution must precede ${later}`);
+  }
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({ ocr_version: "contract-test" });
+    const install = installStep();
+    const script = `${renderedRun(refs, values)}\n${renderedRun(install, values)}`;
+    const env = Object.assign(
+      {
+        INPUT_BASE_REF: "",
+        INPUT_HEAD_SHA: "",
+        INPUT_PR_NUMBER: "",
+        EVENT_BASE_REF: "main",
+        EVENT_HEAD_SHA: "a".repeat(40),
+        EVENT_PR_NUMBER: "",
+        WORKFLOW_RUN_PR_NUMBER: "",
+        GITHUB_EVENT_NAME: "workflow_run",
+      },
+      renderedEnv(install, values)
+    );
+    const combined = runShell(script, env, fixture);
+    assert.notStrictEqual(combined.status, 0, `the run must stop; ${resultDescription(combined)}`);
+    assert.deepStrictEqual(
+      readJsonLines(fixture.npmCallsPath),
+      [],
+      "NPM must not run after PR-number resolution fails"
+    );
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testPrNumberRejectsValuesThatAreNotAPrNumber() {
+  for (const value of ["#123", "123abc", "0", "-1", "12.0", " ", "pull/123"]) {
+    const { result, exported } = runPrRefs({ INPUT_PR_NUMBER: value });
+    assert.notStrictEqual(
+      result.status,
+      0,
+      `pr_number=${JSON.stringify(value)} must be rejected; ${resultDescription(result)}`
+    );
+    assert.strictEqual(exported.PR_NUMBER, undefined, "a rejected value is never exported");
+  }
+  for (const value of ["1", "4242"]) {
+    const { result, exported } = runPrRefs({ INPUT_PR_NUMBER: value });
+    assert.strictEqual(
+      result.status,
+      0,
+      `pr_number=${JSON.stringify(value)} must be accepted; ${resultDescription(result)}`
+    );
+    assert.strictEqual(exported.PR_NUMBER, value);
+  }
+}
+
+function testResolvedPrNumberReachesTheHeadFetch() {
+  const step = stepNamed("Fetch PR head (fork-safe)");
+  assert.ok(step, "action.yml must retain the fork-safe head fetch");
+  assert.strictEqual(
+    step.env.PR_NUM,
+    "${{ env.PR_NUMBER }}",
+    "the fetch must use the resolved number rather than re-reading the payload"
+  );
+  const fixture = makeFixture();
+  try {
+    const gitCalls = path.join(fixture.dir, "git-calls.jsonl");
+    fs.writeFileSync(
+      path.join(fixture.bin, "git"),
+      `#!/usr/bin/env node
+require("fs").appendFileSync(process.env.OCR_GIT_CALLS, JSON.stringify(process.argv.slice(2)) + "\\n");
+`,
+      { mode: 0o755 }
+    );
+    const result = runShell(
+      renderedRun(step, inputValues()),
+      { PR_NUM: "4242", OCR_GIT_CALLS: gitCalls },
+      fixture
+    );
+    assert.strictEqual(result.status, 0, resultDescription(result));
+    assert.deepStrictEqual(
+      readJsonLines(gitCalls),
+      [["fetch", "origin", "pull/4242/head"]],
+      "the head fetch must name the resolved PR"
+    );
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testPrNumberWiredIntoBothGithubScriptSteps() {
+  for (const name of ["Resolve review range", "Post review comments"]) {
+    const step = stepNamed(name);
+    assert.ok(step, `action.yml must retain the ${name} step`);
+    assert.strictEqual(
+      step.env.OCR_PR_NUMBER,
+      "${{ env.PR_NUMBER }}",
+      `${name} must read the resolved PR number`
+    );
+  }
+  assert.doesNotMatch(
+    ACTION_TEXT,
+    /prNumber:\s*context\.issue\.number/,
+    "no step may fall back to context.issue.number, which resolves nothing on workflow_run"
+  );
+  assert.strictEqual(
+    (ACTION_TEXT.match(/prNumber: Number\(process\.env\.OCR_PR_NUMBER\)/g) || []).length,
+    2,
+    "both github-script steps must pass the resolved number"
+  );
+}
+
+function testExampleReadmeDocumentsPrNumberResolution() {
+  assert.match(
+    EXAMPLE_README_TEXT,
+    /\| `pr_number` input \|/,
+    "GitHub Actions README must document pr_number as the first resolution source"
+  );
+  assert.match(
+    EXAMPLE_README_TEXT,
+    /pr_number: \$\{\{ github\.event\.workflow_run\.pull_requests\[0\]\.number \}\}/,
+    "GitHub Actions README must show the workflow_run wiring it exists for"
+  );
 }
 
 function testReviewTaskTimeoutInputNameAndScope() {
@@ -790,6 +1023,50 @@ function testValidateInputsValidatesStreamProgress() {
   }
 }
 
+function testValidateInputsValidatesResolveOutdated() {
+  const validation = validationStep();
+  assert.ok(validation, "action.yml must retain input validation");
+  for (const value of ["yes", "1", "on", "resolve"]) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validation, inputValues({ resolve_outdated: value }), fixture);
+      assert.notStrictEqual(
+        result.status,
+        0,
+        `resolve_outdated=${JSON.stringify(value)} should be rejected; ${resultDescription(result)}`
+      );
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        /resolve_outdated must be one of/,
+        `rejection for resolve_outdated=${JSON.stringify(value)} must name the input; ${resultDescription(result)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+  const acceptance = [
+    ["TRUE", "true"],
+    ["Report", "report"],
+    ["", "false"],
+    ["false", "false"],
+  ];
+  for (const [value, expected] of acceptance) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validation, inputValues({ resolve_outdated: value }), fixture);
+      assert.strictEqual(result.status, 0, `resolve_outdated=${JSON.stringify(value)} should be accepted; ${resultDescription(result)}`);
+      const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
+      assert.strictEqual(
+        exported.RESOLVE_OUTDATED,
+        expected,
+        `validation must export ${JSON.stringify(expected)} for resolve_outdated=${JSON.stringify(value)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
 function testRunKeepsAgentAudienceAndLogFileByDefault() {
   const run = stepNamed("Run OpenCodeReview");
   assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
@@ -1121,6 +1398,112 @@ function testConfigureProtocolTracksUseAnthropic() {
     } finally {
       removeFixture(fixture);
     }
+  }
+}
+
+function testConfigureHonoursExplicitProtocol() {
+  const configure = stepNamed("Configure OCR");
+  assert.ok(configure, "action.yml must retain the Configure OCR step");
+  const base = {
+    llm_url: "https://llm.example.invalid/v1",
+    llm_model: "contract-model",
+    llm_auth_token: "protocol-token-sentinel",
+  };
+  // The explicit protocol wins, and use_anthropic follows it — the boolean
+  // alone is what forced every Responses API user onto chat/completions.
+  const cases = [
+    { input: "openai-responses", useAnthropic: "false", expectAnthropic: "false", expectProtocol: "openai-responses" },
+    { input: "openai-responses", useAnthropic: "true", expectAnthropic: "false", expectProtocol: "openai-responses" },
+    { input: "Anthropic", useAnthropic: "false", expectAnthropic: "true", expectProtocol: "anthropic" },
+    { input: "openai", useAnthropic: "true", expectAnthropic: "false", expectProtocol: "openai" },
+  ];
+  for (const testCase of cases) {
+    const fixture = makeFixture();
+    try {
+      const values = inputValues(Object.assign({}, base, {
+        llm_use_anthropic: testCase.useAnthropic,
+        llm_protocol: testCase.input,
+      }));
+      const result = runStep(configure, values, fixture);
+      assert.strictEqual(
+        result.status,
+        0,
+        `Configure OCR failed for llm_protocol=${testCase.input}; ${resultDescription(result)}`
+      );
+      const configured = configValues(configOperations(fixture));
+      assert.strictEqual(configured["llm.protocol"], testCase.expectProtocol);
+      assert.strictEqual(configured["llm.use_anthropic"], testCase.expectAnthropic);
+      assert.strictEqual(
+        readEnvAssignments(path.join(fixture.dir, "github-env")).OCR_LLM_PROTOCOL_EXPLICIT,
+        testCase.expectProtocol,
+        "the normalized explicit protocol must be exported for the checkpoint fingerprint"
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+
+  // OCR_LLM_PROTOCOL from the job environment is honoured when the input is
+  // empty: it is the variable the CLI itself reads, and the one the report
+  // set without effect.
+  const inherited = makeFixture();
+  try {
+    const values = inputValues(Object.assign({}, base, { llm_use_anthropic: "false" }));
+    const result = runStep(configure, values, inherited, { OCR_LLM_PROTOCOL: "openai-responses" });
+    assert.strictEqual(result.status, 0, `Configure OCR failed with inherited OCR_LLM_PROTOCOL; ${resultDescription(result)}`);
+    const configured = configValues(configOperations(inherited));
+    assert.strictEqual(configured["llm.protocol"], "openai-responses");
+    assert.strictEqual(configured["llm.use_anthropic"], "false");
+    assert.strictEqual(
+      readEnvAssignments(path.join(inherited.dir, "github-env")).OCR_LLM_PROTOCOL_EXPLICIT,
+      "openai-responses",
+      "a protocol switched through the environment alone must reach the checkpoint fingerprint"
+    );
+  } finally {
+    removeFixture(inherited);
+  }
+
+  // With neither source set the export is empty, so the fingerprint stays
+  // exactly what it was before the input existed.
+  const neither = makeFixture();
+  try {
+    const values = inputValues(Object.assign({}, base, { llm_use_anthropic: "false" }));
+    const result = runStep(configure, values, neither);
+    assert.strictEqual(result.status, 0, `Configure OCR failed without a protocol source; ${resultDescription(result)}`);
+    assert.strictEqual(readEnvAssignments(path.join(neither.dir, "github-env")).OCR_LLM_PROTOCOL_EXPLICIT, "");
+  } finally {
+    removeFixture(neither);
+  }
+
+  // The resolve step fingerprints that export, not the raw input.
+  const resolve = STEPS.find((step) => step.name === "Resolve review range");
+  assert.ok(resolve, "action.yml must retain the Resolve review range step");
+  assert.strictEqual(
+    resolve.env.OCR_FP_LLM_PROTOCOL,
+    "${{ env.OCR_LLM_PROTOCOL_EXPLICIT }}",
+    "the checkpoint fingerprint must read the protocol Configure OCR resolved"
+  );
+
+  // The input outranks the inherited variable.
+  const both = makeFixture();
+  try {
+    const values = inputValues(Object.assign({}, base, { llm_use_anthropic: "false", llm_protocol: "anthropic" }));
+    const result = runStep(configure, values, both, { OCR_LLM_PROTOCOL: "openai-responses" });
+    assert.strictEqual(result.status, 0, `Configure OCR failed with both protocol sources; ${resultDescription(result)}`);
+    assert.strictEqual(configValues(configOperations(both))["llm.protocol"], "anthropic");
+  } finally {
+    removeFixture(both);
+  }
+
+  // An unknown protocol fails the step rather than silently configuring one.
+  const unknown = makeFixture();
+  try {
+    const values = inputValues(Object.assign({}, base, { llm_use_anthropic: "false", llm_protocol: "grpc" }));
+    const result = runStep(configure, values, unknown);
+    assert.notStrictEqual(result.status, 0, "an unknown llm_protocol must fail the Configure OCR step");
+    assert.match(`${result.stdout}${result.stderr}`, /llm_protocol must be/, "the failure must name the accepted protocols");
+  } finally {
+    removeFixture(unknown);
   }
 }
 
@@ -1537,6 +1920,104 @@ function testRequiredStepTopologyAndEnvironmentContracts() {
   }
 }
 
+// Returns the composite steps whose shell block invokes the `ocr` CLI.
+// Full-line shell comments are dropped first: they mention `ocr` in prose
+// (the Validate inputs step documents an `ocr review` flag), and a comment
+// is not an invocation. `ocr` must also sit in a command position — start of
+// line or after a shell separator — so quoted strings such as the
+// "ocr review exited with code ..." echo never count. The sweep stays
+// fail-closed: a future step that invokes `ocr` without disabling the
+// self-updater breaks this contract without any step-name list to maintain.
+function ocrInvokingSteps() {
+  return STEPS.filter((step) => {
+    if (typeof step.run !== "string") return false;
+    const code = step.run
+      .split(/\r?\n/)
+      .filter((line) => !/^\s*#/.test(line))
+      .join("\n");
+    return /(?:^|[\s;&|(`])ocr\s+\S/.test(code);
+  });
+}
+
+function testActionOcrInvocationsDisableSelfUpdate() {
+  const invokers = ocrInvokingSteps();
+  const names = invokers.map((step) => step.name);
+  for (const expected of ["Install OpenCodeReview", "Configure OCR", "Run OpenCodeReview"]) {
+    assert.ok(
+      names.includes(expected),
+      `${expected} must be detected as an ocr-invoking step; detection must keep up with action.yml`
+    );
+  }
+  const values = inputValues({
+    llm_url: "https://llm.example.invalid/v1",
+    llm_auth_token: "unused-token",
+    llm_model: "contract-model",
+    llm_use_anthropic: "false",
+  });
+  for (const step of invokers) {
+    assert.strictEqual(
+      renderedEnv(step, values).OCR_NO_UPDATE,
+      "1",
+      `step ${step.name} invokes ocr and must disable CLI self-update (env OCR_NO_UPDATE: "1")`
+    );
+  }
+
+  // The same contract observed through the executed shell blocks: the first
+  // `ocr version` in the Install step is what spawns the detached updater,
+  // so every recorded invocation — version, config, review — must observe
+  // OCR_NO_UPDATE=1, not just the later steps.
+  const fixture = makeFixture();
+  try {
+    const install = runStep(
+      installStep(),
+      inputValues({ ocr_version: "1.9.10" }),
+      fixture,
+      { OCR_FAKE_VERSION_OUTPUT: "open-code-review 1.9.10 linux/amd64" }
+    );
+    assert.strictEqual(
+      install.status,
+      0,
+      `Install OpenCodeReview shell block failed; ${resultDescription(install)}`
+    );
+    const configure = runStep(stepNamed("Configure OCR"), values, fixture, {
+      OCR_LLM_TOKEN: values.llm_auth_token,
+    });
+    assert.strictEqual(
+      configure.status,
+      0,
+      `Configure OCR shell block failed; ${resultDescription(configure)}`
+    );
+    const run = runStep(
+      stepNamed("Run OpenCodeReview"),
+      values,
+      fixture,
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15" },
+      { replaceResultPaths: true }
+    );
+    assert.strictEqual(
+      run.status,
+      0,
+      `Run OpenCodeReview shell block failed; ${resultDescription(run)}`
+    );
+    const calls = readJsonLines(fixture.callsPath);
+    for (const subcommand of ["version", "config", "review"]) {
+      assert.ok(
+        calls.some((call) => call.args[0] === subcommand),
+        `the executed steps must exercise \`ocr ${subcommand}\``
+      );
+    }
+    for (const call of calls) {
+      assert.strictEqual(
+        call.env.OCR_NO_UPDATE,
+        "1",
+        `every action-owned ocr invocation must observe OCR_NO_UPDATE=1; \`ocr ${call.args.join(" ")}\` saw ${JSON.stringify(call.env.OCR_NO_UPDATE)}`
+      );
+    }
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
 function testContractsRunInDedicatedWorkflow() {
   assert.match(
     CONTRACT_WORKFLOW_TEXT,
@@ -1587,6 +2068,24 @@ function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
   );
 }
 
+function testPostReviewCommentsWiresAppSlug() {
+  const post = stepNamed("Post review comments");
+  assert.ok(post, "action.yml must retain the Post review comments step");
+  assert.strictEqual(
+    post.env.OCR_CHECKPOINT_APP_SLUG,
+    "${{ inputs.github_token == github.token && 'github-actions' || '' }}",
+    "the posting step must expose OCR_CHECKPOINT_APP_SLUG"
+  );
+  assert.ok(post.script, "the posting step must define a github-script body");
+  const call = post.script.match(/runPostReviewComments\(\{[\s\S]*?\n\}\);/);
+  assert.ok(call, "the posting script must call runPostReviewComments");
+  assert.match(
+    call[0],
+    /^\s*appSlug:\s*process\.env\.OCR_CHECKPOINT_APP_SLUG\s*\|\|\s*(['"])\1\s*,?\s*$/m,
+    "the posting call must forward the app slug"
+  );
+}
+
 const TESTS = [
   ["review_task_timeout names and describes the CLI task deadline", testReviewTaskTimeoutInputNameAndScope],
   ["llm_timeout defaults to the CLI's 5-minute timeout", testLlmTimeoutInputDefault],
@@ -1604,6 +2103,7 @@ const TESTS = [
   ["llm_reasoning_effort rejects values outside the OpenAI/GLM vocabulary", testValidateInputsRejectsInvalidReasoningEffort],
   ["stream_progress defaults to false and describes [ocr] progress", testStreamProgressInputDefaultsToFalse],
   ["stream_progress validation accepts true/false case-insensitively", testValidateInputsValidatesStreamProgress],
+  ["resolve_outdated validation fails fast on an unknown value", testValidateInputsValidatesResolveOutdated],
   ["Run OpenCodeReview keeps --audience agent and the log file by default", testRunKeepsAgentAudienceAndLogFileByDefault],
   ["Run OpenCodeReview streams live progress when opted in", testRunStreamsProgressWhenOptedIn],
   ["llm_extra_body defaults to disabling thinking", testLlmExtraBodyDefaultDisablesThinking],
@@ -1615,6 +2115,7 @@ const TESTS = [
   ["Configure OCR never persists the token", testConfigureNeverPersistsToken],
   ["Configure OCR neutralizes stale provider and static token", testConfigureNeutralizesStaleProviderAndStaticToken],
   ["Configure OCR sets a protocol consistent with use_anthropic", testConfigureProtocolTracksUseAnthropic],
+  ["Configure OCR honours an explicit llm_protocol", testConfigureHonoursExplicitProtocol],
   ["Configure OCR preserves legacy use_anthropic resolution", testConfigurePreservesLegacyUseAnthropicResolution],
   ["Configure OCR clears stale persisted extra headers", testConfigureClearsStaleExtraHeadersBeforeTokenCommand],
   ["Configure OCR clears stale persisted retry codes", testConfigureClearsStaleRetryCodesBeforeEndpointConfig],
@@ -1626,8 +2127,17 @@ const TESTS = [
   ["Install OpenCodeReview rejects stream_progress below v1.9.8", testInstallRejectsStreamProgressBelowV198],
   ["contract harness fails closed on unsupported YAML shapes", testContractHarnessFailsClosedOnUnsupportedYamlShapes],
   ["required action steps and env contracts are present", testRequiredStepTopologyAndEnvironmentContracts],
+  ["every action-owned ocr invocation disables CLI self-update", testActionOcrInvocationsDisableSelfUpdate],
   ["GitHub Actions contracts run in a dedicated workflow", testContractsRunInDedicatedWorkflow],
   ["GitHub Actions README documents timeout and version contracts", testExampleReadmeDocumentsTimeoutAndVersionContracts],
+  ["pr_number is an optional, documented input", testPrNumberInputIsOptionalAndDocumented],
+  ["the PR number resolves input, then payload, then workflow_run", testPrNumberResolutionOrder],
+  ["an unresolvable PR number fails before any review work", testPrNumberFailsBeforeAnyReviewWork],
+  ["pr_number rejects values that are not a PR number", testPrNumberRejectsValuesThatAreNotAPrNumber],
+  ["the resolved PR number reaches the fork-safe head fetch", testResolvedPrNumberReachesTheHeadFetch],
+  ["both github-script steps read the resolved PR number", testPrNumberWiredIntoBothGithubScriptSteps],
+  ["GitHub Actions README documents PR number resolution", testExampleReadmeDocumentsPrNumberResolution],
+  ["Post review comments wires the app slug", testPostReviewCommentsWiresAppSlug],
 ];
 
 function main() {

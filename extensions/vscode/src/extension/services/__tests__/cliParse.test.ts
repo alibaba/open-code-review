@@ -2,37 +2,37 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from '../cliParse';
-import { ReviewMode } from '../../../shared/types';
+import { ReviewMode } from '@shared/types';
 
 describe('buildReviewArgs', () => {
-  it('workspace 模式加 --format json', () => {
+  it('adds --format json in workspace mode', () => {
     expect(buildReviewArgs({ mode: ReviewMode.Workspace }))
       .toEqual(['review', '--format', 'json']);
   });
 
-  it('branch 模式加 --from/--to', () => {
+  it('adds --from and --to in branch mode', () => {
     expect(buildReviewArgs({ mode: ReviewMode.Branch, from: 'main', to: 'dev' }))
       .toEqual(['review', '--from', 'main', '--to', 'dev', '--format', 'json']);
   });
 
-  it('commit 模式加 --commit', () => {
+  it('adds --commit in commit mode', () => {
     expect(buildReviewArgs({ mode: ReviewMode.Commit, commit: 'abc123' }))
       .toEqual(['review', '--commit', 'abc123', '--format', 'json']);
   });
 
-  it('customPrompt 追加 --background', () => {
-    expect(buildReviewArgs({ mode: ReviewMode.Workspace, customPrompt: '关注安全' }))
-      .toEqual(['review', '--format', 'json', '--background', '关注安全']);
+  it('appends --background for customPrompt', () => {
+    expect(buildReviewArgs({ mode: ReviewMode.Workspace, customPrompt: '关注安全' })) // allow-non-english: fixture verifies Unicode prompt forwarding
+      .toEqual(['review', '--format', 'json', '--background', '关注安全']); // allow-non-english: fixture verifies Unicode prompt forwarding
   });
 
-  it('concurrency 追加 --concurrency', () => {
+  it('appends --concurrency for concurrency', () => {
     expect(buildReviewArgs({ mode: ReviewMode.Workspace, concurrency: 4 }))
       .toEqual(['review', '--format', 'json', '--concurrency', '4']);
   });
 });
 
 describe('parseCliResult', () => {
-  it('解析 success + comments + summary，字段转 camelCase', () => {
+  it('parses success, comments, and summary with camelCase fields', () => {
     const raw = JSON.stringify({
       status: 'success',
       comments: [{
@@ -53,14 +53,14 @@ describe('parseCliResult', () => {
     expect(r.summary?.filesReviewed).toBe(2);
   });
 
-  it('skipped 状态无 comments', () => {
+  it('returns no comments for skipped status', () => {
     const raw = JSON.stringify({ status: 'skipped', message: 'No supported files changed.', comments: [] });
     const r = parseCliResult(raw);
     expect(r.status).toBe('skipped');
     expect(r.comments).toEqual([]);
   });
 
-  it('忽略 JSON 前的非 JSON 噪声行', () => {
+  it('ignores non-JSON noise before the JSON result', () => {
     const raw = '[ocr] some log\n{"status":"success","comments":[]}';
     const r = parseCliResult(raw);
     expect(r.status).toBe('success');
@@ -68,33 +68,33 @@ describe('parseCliResult', () => {
 });
 
 describe('extractCliError', () => {
-  it('优先提取 Error: 行并去掉前缀', () => {
+  it('prefers an Error: line and removes its prefix', () => {
     const stderr = '[ocr] starting\nError: llm request failed: 401 unauthorized\n';
     expect(extractCliError(stderr)).toBe('llm request failed: 401 unauthorized');
   });
-  it('多个 Error 行取最后一个', () => {
+  it('uses the last Error line when there are multiple errors', () => {
     const stderr = 'Error: first\nError: last';
     expect(extractCliError(stderr)).toBe('last');
   });
-  it('无 Error 行时取最后一行非空内容', () => {
+  it('uses the last non-empty line when there is no Error line', () => {
     expect(extractCliError('foo\nbar\n\n')).toBe('bar');
   });
-  it('空 stderr → 空字符串', () => {
+  it('returns an empty string for empty stderr', () => {
     expect(extractCliError('')).toBe('');
   });
 });
 
 describe('parseLogLine', () => {
-  it('普通 [ocr] 行 → info', () => {
+  it('classifies a regular [ocr] line as info', () => {
     expect(parseLogLine('[ocr] Reviewing src/a.ts')).toEqual({ text: '[ocr] Reviewing src/a.ts', level: 'info' });
   });
-  it('含 Retrying 的行 → warn', () => {
+  it('classifies a line containing Retrying as warn', () => {
     expect(parseLogLine('[llm] Retrying in 1.46s (attempt 1/3)').level).toBe('warn');
   });
-  it('含 WARNING 的行 → warn', () => {
+  it('classifies a line containing WARNING as warn', () => {
     expect(parseLogLine('[ocr] WARNING [x] f: m').level).toBe('warn');
   });
-  it('空行 → null', () => {
+  it('returns null for a blank line', () => {
     expect(parseLogLine('   ')).toBeNull();
   });
 });

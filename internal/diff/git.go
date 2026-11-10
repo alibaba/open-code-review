@@ -6,6 +6,7 @@ package diff
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -36,7 +37,6 @@ var providerDirIgnoreDirs = []string{
 	".cachefile/",
 	"_packages/",
 	"rpm/",
-	"pkgs/",
 }
 
 // Mode defines how the diff is retrieved.
@@ -66,9 +66,33 @@ type Provider struct {
 // DiffSet separates the diffs a review may process from files excluded by the
 // provider's built-in directory rules. The latter remain unavailable to a
 // review, but callers such as Preview can account for them.
+//
+// excludedAt[i] is Excluded[i]'s index in the changeset order of Included and
+// Excluded combined, so ForEachInOrder can walk the two slices as Git listed
+// them rather than every provider exclusion first.
 type DiffSet struct {
-	Included []model.Diff
-	Excluded []model.Diff
+	Included   []model.Diff
+	Excluded   []model.Diff
+	excludedAt []int
+}
+
+// ForEachInOrder visits Included and Excluded in the original changeset order.
+// providerExcluded is true for built-in directory exclusions. Files dropped by
+// .gitignore are not visited.
+func (s DiffSet) ForEachInOrder(visit func(d model.Diff, providerExcluded bool)) {
+	next := 0
+	for i, d := range s.Excluded {
+		// excludedAt[i] is the mixed-stream index, so the number of included
+		// files that precede this exclusion is excludedAt[i]-i.
+		upTo := s.excludedAt[i] - i
+		for ; next < upTo; next++ {
+			visit(s.Included[next], false)
+		}
+		visit(d, true)
+	}
+	for ; next < len(s.Included); next++ {
+		visit(s.Included[next], false)
+	}
 }
 
 // NewProvider creates a Provider for range mode: from..to (via merge-base).
@@ -311,13 +335,7 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 // unconditional directory blocklist. A .gitignore negation cannot re-admit
 // one of these paths.
 func isProviderDirExcluded(relPath string) bool {
-	for _, prefix := range providerDirIgnoreDirs {
-		dirPart := strings.TrimSuffix(prefix, "/")
-		if relPath == dirPart || strings.HasPrefix(relPath, prefix) {
-			return true
-		}
-	}
-	return false
+	return ProviderDirPrefix(relPath) != ""
 }
 
 // matchGitignorePattern checks if relPath matches a single .gitignore pattern.
@@ -413,8 +431,15 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 
 // partitionDiffs keeps diffs filtered by built-in directory rules available
 // for reporting while preserving the review input as the Included slice.
+//
+// In workspace mode, ignored untracked files are already filtered out.
+// Applying .gitignore here would incorrectly drop tracked changes.
 func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
-	patterns := p.loadGitignorePatterns()
+	var patterns []string
+	honorGitignore := p.mode != ModeWorkspace
+	if honorGitignore {
+		patterns = p.loadGitignorePatterns()
+	}
 	result := DiffSet{
 		Included: make([]model.Diff, 0, len(diffs)),
 		Excluded: make([]model.Diff, 0),
@@ -425,8 +450,9 @@ func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 			path = d.OldPath
 		}
 		if isProviderDirExcluded(path) {
+			result.excludedAt = append(result.excludedAt, len(result.Included)+len(result.Excluded))
 			result.Excluded = append(result.Excluded, d)
-		} else if !p.isPathExcluded(path, patterns) {
+		} else if !honorGitignore || !p.isPathExcluded(path, patterns) {
 			result.Included = append(result.Included, d)
 		}
 	}
@@ -614,6 +640,24 @@ func (p *Provider) workspaceTrackedDiff(ctx context.Context) (string, string, er
 	return p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--staged", "--")
 }
 
+// binarySniffWindow is the number of leading bytes inspected when deciding
+// whether an untracked file is binary. Matches git's own heuristic and the
+// scan provider's sniff window.
+const binarySniffWindow = 8000
+
+// looksBinary reports whether content contains a NUL byte within the sniff
+// window — the same marker git uses to report a file as binary.
+func looksBinary(content []byte) bool {
+	if len(content) > binarySniffWindow {
+		content = content[:binarySniffWindow]
+	}
+	return bytes.IndexByte(content, 0) >= 0
+}
+
+func untrackedBinaryDiff(path string) string {
+	return fmt.Sprintf("diff --git a/%s b/%s\nnew file mode 100644\nBinary files /dev/null and b/%s differ\n", path, path, path)
+}
+
 func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 	files, err := p.untrackedFilesList(ctx)
 	if err != nil {
@@ -622,8 +666,20 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 
 	var results []string
 	for _, f := range files {
-		content, rerr := readWorkspaceFileForDiff(p.repoDir, f)
+		content, rerr := readWorkspaceFileForDiffWithLimit(p.repoDir, f, maxUntrackedFileSize)
+		if errors.Is(rerr, errWorkspaceFileTooLarge) {
+			results = append(results, untrackedBinaryDiff(f))
+			continue
+		}
 		if rerr != nil {
+			continue
+		}
+
+		if looksBinary(content) {
+			// Emit git's own binary marker so the parser flags the file and
+			// the selection layer excludes it, matching the tracked path where
+			// `git diff` itself reports "Binary files ... differ".
+			results = append(results, untrackedBinaryDiff(f))
 			continue
 		}
 
@@ -653,7 +709,13 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 }
 
 func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
-	out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")
+	// -z, and no trimming of the records it produces. Without it git quotes
+	// any pathname holding a tab, a newline, a quote or a backslash, so the
+	// name arrives escaped and matches nothing on disk; a newline in a name
+	// also splits one file into two entries. Trimming then removes leading and
+	// trailing spaces, which are filename bytes. Each of those drops an
+	// untracked file out of the review with no error.
+	out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "ls-files", "-z", "--others", "--exclude-standard")
 	if err != nil {
 		return nil, gitFailure("git ls-files", stderr, err)
 	}
@@ -662,13 +724,12 @@ func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
 	}
 	patterns := p.loadGitignorePatterns()
 	var files []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	for _, name := range strings.Split(strings.TrimRight(out, "\x00"), "\x00") {
+		if name == "" {
 			continue
 		}
-		if !p.isPathExcluded(line, patterns) {
-			files = append(files, line)
+		if !p.isPathExcluded(name, patterns) {
+			files = append(files, name)
 		}
 	}
 	return files, nil

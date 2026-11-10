@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { FileChange } from '../../shared/types';
+import { FileChange } from '@shared/types';
 import path from 'path';
 
 export function mapStatusCode(code: string): FileChange['status'] {
@@ -16,9 +16,9 @@ export function mapStatusCode(code: string): FileChange['status'] {
 }
 
 /**
- * 解析 `git status --porcelain` 输出。
- * 每行格式：XY<space>path，X=暂存区状态，Y=工作区状态，'??'=未跟踪。
- * 重命名行格式：`R  old -> new`，取 new。
+ * Parse `git status --porcelain` output.
+ * Each line is XY<space>path: X is the index status, Y is the working tree status, and '??' means untracked.
+ * Rename lines have the form `R  old -> new`; use the new path.
  */
 export function parsePorcelain(output: string): FileChange[] {
   const files: FileChange[] = [];
@@ -36,7 +36,7 @@ export function parsePorcelain(output: string): FileChange[] {
       const arrow = path.indexOf(' -> ');
       if (arrow >= 0) path = path.slice(arrow + 4);
     } else {
-      // 取暂存区状态优先，否则工作区状态
+      // Prefer the index status, otherwise use the working tree status.
       const c = x !== ' ' && x !== '?' ? x : y;
       code = c;
     }
@@ -48,12 +48,12 @@ export function parsePorcelain(output: string): FileChange[] {
   return files;
 }
 
-/** 解析 `git ls-files --others --exclude-standard` 输出的未跟踪路径列表。 */
+/** Parse untracked paths from `git ls-files --others --exclude-standard` output. */
 export function parseUntrackedList(output: string): string[] {
   return output.split('\n').map((line) => unquoteGitPath(line.trim())).filter(Boolean);
 }
 
-/** 合并已跟踪变更与未跟踪文件，按路径去重。 */
+/** Merge tracked changes with untracked files, deduplicating by path. */
 export function mergeWorkspaceFiles(tracked: FileChange[], untrackedPaths: string[]): FileChange[] {
   const files: FileChange[] = [];
   const seen = new Set<string>();
@@ -71,8 +71,8 @@ export function mergeWorkspaceFiles(tracked: FileChange[], untrackedPaths: strin
 }
 
 /**
- * 从 git diff / ls-files 输出构建工作区文件列表。
- * 与 OCR CLI workspace 模式一致：先 diff HEAD，空则回退 staged，再合并未跟踪文件。
+ * Build the workspace file list from git diff and ls-files output.
+ * Match OCR CLI workspace mode: use diff HEAD, fall back to staged changes if empty, then merge untracked files.
  */
 export function buildWorkspaceFiles(diffHeadOut: string, diffCachedOut: string, untrackedOut: string): FileChange[] {
   let tracked = parseNameStatus(diffHeadOut);
@@ -83,9 +83,9 @@ export function buildWorkspaceFiles(diffHeadOut: string, diffCachedOut: string, 
 }
 
 /**
- * 从候选仓库根路径中选出与 workspace 匹配的那个。
- * VSCode git 扩展异步扫描嵌套仓库,repositories 顺序不稳定,直接取 [0] 会漂移到子仓库。
- * 优先级:精确等于 workspace 根 > workspace 的最深祖先 > 第一个。
+ * Choose the candidate repository root that matches the workspace.
+ * The VS Code Git extension scans nested repositories asynchronously, so choosing [0] may select a child repository.
+ * Priority: exact workspace root match > deepest workspace ancestor > first candidate.
  */
 export function pickRepoRoot(roots: string[], workspacePath?: string): string | null {
   if (roots.length === 0) return null;
@@ -110,7 +110,7 @@ export function pickRepoRoot(roots: string[], workspacePath?: string): string | 
   return roots[0];
 }
 
-/** 生成用于 rev-parse 验证的分支引用候选列表。 */
+/** Build candidate branch references for rev-parse validation. */
 export function branchRefCandidates(ref: string): string[] {
   const candidates = [ref];
   if (!ref.includes('/')) {
@@ -125,7 +125,7 @@ export function branchRefCandidates(ref: string): string[] {
 }
 
 /**
- * 解码 Git quotepath 转义路径（core.quotepath=true 时中文等会显示为 "\344\273..."）。
+ * Decode Git quotepath escapes (with core.quotepath=true, non-ASCII paths use octal escapes such as "\344\273...").
  */
 export function unquoteGitPath(path: string): string {
   if (!path.startsWith('"') || !path.endsWith('"')) return path;
@@ -155,8 +155,8 @@ export function unquoteGitPath(path: string): string {
 }
 
 /**
- * 解析 `git diff --name-status` / `git show --name-status` 输出。
- * 每行制表符分隔：status<TAB>path,重命名为 R<score><TAB>old<TAB>new(取 new)。
+ * Parse `git diff --name-status` or `git show --name-status` output.
+ * Lines are tab-separated: status<TAB>path, or R<score><TAB>old<TAB>new for renames (use new).
  */
 export function parseNameStatus(output: string): FileChange[] {
   const files: FileChange[] = [];
