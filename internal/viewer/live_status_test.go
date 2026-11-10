@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -322,6 +323,91 @@ func TestLiveScript_PollsSessionPagesWhenIdleAndTracksRunningIDs(t *testing.T) {
 	if !strings.Contains(js, `el.closest("tr")?.querySelector("a.session-id")`) {
 		t.Error("session list polling does not associate running status with its session ID")
 	}
+}
+
+func TestLiveScript_IdentitySnapshotsDetectConcurrentRunChanges(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is unavailable for the live session identity test")
+	}
+	src, err := assets.ReadFile("static/live.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(src)
+	activeRepoKeys := extractLiveJSFunction(t, js, "activeRepoKeys")
+	runningSessionKeys := extractLiveJSFunction(t, js, "runningSessionKeys")
+	script := `let repos = [];
+let sessions = [];
+const document = { querySelectorAll: (selector) => selector === "[data-repo-active]" ? repos : sessions };
+const window = { location: { pathname: "/r/repo/session" } };
+` + activeRepoKeys + `
+` + runningSessionKeys + `
+function repo(href) { return { getAttribute: () => href }; }
+function session(href) {
+    return { closest: () => ({ querySelector: () => ({ getAttribute: () => href }) }) };
+}
+function changed(before, after, label) {
+    if (before === after) throw new Error(label + " did not change identity snapshot");
+}
+repos = [repo("/r/a/run-1")];
+let before = activeRepoKeys();
+repos = [repo("/r/a/run-1"), repo("/r/b/run-2")];
+let after = activeRepoKeys();
+changed(before, after, "starting a second repository run");
+repos = [repo("/r/b/run-2")];
+before = activeRepoKeys();
+repos = [repo("/r/b/run-2")];
+after = activeRepoKeys();
+if (before !== after) throw new Error("unchanged active repository set changed");
+repos = [repo("/r/a/run-1"), repo("/r/b/run-2")];
+before = activeRepoKeys();
+repos = [repo("/r/b/run-2")];
+after = activeRepoKeys();
+changed(before, after, "ending one repository run while another remains active");
+
+sessions = [session("/r/repo/run-1")];
+before = runningSessionKeys();
+sessions = [session("/r/repo/run-1"), session("/r/repo/run-2")];
+after = runningSessionKeys();
+changed(before, after, "starting a second session run");
+sessions = [session("/r/repo/run-2")];
+before = runningSessionKeys();
+sessions = [session("/r/repo/run-2")];
+after = runningSessionKeys();
+if (before !== after) throw new Error("unchanged running session set changed");
+sessions = [session("/r/repo/run-1"), session("/r/repo/run-2")];
+before = runningSessionKeys();
+sessions = [session("/r/repo/run-2")];
+after = runningSessionKeys();
+changed(before, after, "ending one session while another remains active");
+`
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("live identity cases failed: %v\n%s", err, output)
+	}
+}
+
+func extractLiveJSFunction(t *testing.T, js, name string) string {
+	t.Helper()
+	start := strings.Index(js, "function "+name+"(")
+	if start < 0 {
+		t.Fatalf("%s helper not found", name)
+	}
+	open := strings.Index(js[start:], "{") + start
+	depth := 0
+	for i := open; i < len(js); i++ {
+		switch js[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return js[start : i+1]
+			}
+		}
+	}
+	t.Fatalf("%s helper is not closed", name)
+	return ""
 }
 
 func TestReposPage_NoActiveSessionWhenFinished(t *testing.T) {
