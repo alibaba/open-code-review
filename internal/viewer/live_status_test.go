@@ -288,15 +288,39 @@ func TestLiveScript_WatchesForRunsStarting(t *testing.T) {
 	if strings.Contains(js, "if (!marker) return;") {
 		t.Error("watchRepoActivity returns early without a marker, so it can never detect a run starting")
 	}
-	// The comparison has to be against a captured initial state, not against
-	// the marker element, which is truthy on every code path that reaches it.
-	if !strings.Contains(js, "wasActive") {
-		t.Error("watchRepoActivity does not track the previous state, so only one direction is detected")
+	// Compare the stable active-session URLs. A boolean misses one repo ending
+	// while another starts because both snapshots still contain an active run.
+	for _, want := range []string{
+		"function activeRepoKeys(html)",
+		`.map((el) => el.getAttribute("href"))`,
+		"function runningSessionKeys(html)",
+		"current !== previous",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("live.js does not compare active session identities: missing %q", want)
+		}
 	}
 	// A tab opened in the background reports document.hidden at setup time;
 	// returning there would mean polling never begins.
 	if strings.Contains(js, "if (document.hidden) return;\n\n        setInterval") {
 		t.Error("watchRepoActivity checks document.hidden at setup, so a background tab never starts polling")
+	}
+}
+
+func TestLiveScript_PollsSessionPagesWhenIdleAndTracksRunningIDs(t *testing.T) {
+	src, err := assets.ReadFile("static/live.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(src)
+	if !strings.Contains(js, `document.querySelector(".sessions-page")`) {
+		t.Error("idle session lists do not poll for newly started runs")
+	}
+	if !strings.Contains(js, `previous === "[]" && !isSessionsPage`) {
+		t.Error("finished session details should avoid polling while idle session lists keep watching")
+	}
+	if !strings.Contains(js, `el.closest("tr")?.querySelector("a.session-id")`) {
+		t.Error("session list polling does not associate running status with its session ID")
 	}
 }
 

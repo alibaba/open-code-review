@@ -43,15 +43,9 @@
     // findings, token totals and a terminal state, and re-rendering those
     // correctly is what the server already does.
     function watchForCompletion() {
-        const live = document.querySelectorAll("[data-live-status]");
-        if (!live.length) return;
-
-        // Only sessions that are actually running are worth polling for. A
-        // finished page polls not at all.
-        const running = Array.from(live).some((el) =>
-            el.classList.contains("status-running")
-        );
-        if (!running) return;
+        const isSessionsPage = !!document.querySelector(".sessions-page");
+        let previous = runningSessionKeys();
+        if (previous === "[]" && !isSessionsPage) return;
 
         setInterval(async () => {
             // Pause while the tab is hidden: a background review page that
@@ -65,45 +59,47 @@
                 });
                 if (!res.ok) return;
                 const html = await res.text();
-                if (!stillRunning(html)) window.location.reload();
+                const current = runningSessionKeys(html);
+                if (current !== previous) {
+                    previous = current;
+                    window.location.reload();
+                }
             } catch {
                 /* a transient network error just means we try again next tick */
             }
         }, POLL_MS);
     }
 
-    // Compares the server's current view against what this page was rendered
-    // with. A "running" badge that is gone means the run ended.
-    function stillRunning(html) {
-        const doc = new DOMParser().parseFromString(html, "text/html");
-        const statuses = doc.querySelectorAll("[data-live-status]");
-        for (const el of statuses) {
-            if (el.classList.contains("status-running")) return true;
-        }
-        return false;
+    // A set of running session URLs catches one run ending while another
+    // starts, which a page-wide running boolean cannot distinguish.
+    function runningSessionKeys(html) {
+        const root = html === undefined
+            ? document
+            : new DOMParser().parseFromString(html, "text/html");
+        return JSON.stringify(Array.from(root.querySelectorAll("[data-live-status].status-running"))
+            .map((el) => {
+                const link = el.closest("tr")?.querySelector("a.session-id");
+                return link ? link.getAttribute("href") : window.location.pathname;
+            })
+            .sort());
     }
 
     function init() {
         tick();
         watchRepoActivity();
+        watchForCompletion();
         if (!document.querySelector("[data-live-duration]")) return;
         setInterval(tick, 1000);
-        watchForCompletion();
     }
 
-    // The repositories page has no session rows to tick, so it polls for a
-    // change in whether any repository is running at all - in either direction.
+    // The repositories page polls the active session URL for each repository.
     //
-    // Both directions matter, and the idle one matters most: opening the viewer
-    // and only then starting a review is the ordinary workflow, so a page that
-    // only noticed runs *ending* would never show the badge for the run the
-    // user just launched. The state is therefore captured once up front and
-    // compared against the server on every poll, rather than gated on a marker
-    // that only exists in the active case.
+    // Capture active session URLs once and compare them on each poll, so a new
+    // run or a change between concurrently active runs is visible.
     function watchRepoActivity() {
         if (!document.querySelector(".repos-page")) return;
 
-        let wasActive = hasActiveRepo();
+        let previous = activeRepoKeys();
 
         setInterval(async () => {
             // Checked per tick, not once at setup: a page opened in a background
@@ -117,9 +113,9 @@
                     cache: "no-store",
                 });
                 if (!res.ok) return;
-                const isActive = hasActiveRepo(await res.text());
-                if (isActive !== wasActive) {
-                    wasActive = isActive;
+                const current = activeRepoKeys(await res.text());
+                if (current !== previous) {
+                    previous = current;
                     window.location.reload();
                 }
             } catch {
@@ -128,10 +124,13 @@
         }, POLL_MS);
     }
 
-    function hasActiveRepo(html) {
-        if (html === undefined) return !!document.querySelector("[data-repo-active]");
-        const doc = new DOMParser().parseFromString(html, "text/html");
-        return !!doc.querySelector("[data-repo-active]");
+    function activeRepoKeys(html) {
+        const root = html === undefined
+            ? document
+            : new DOMParser().parseFromString(html, "text/html");
+        return JSON.stringify(Array.from(root.querySelectorAll("[data-repo-active]"))
+            .map((el) => el.getAttribute("href"))
+            .sort());
     }
 
     if (document.readyState === "loading") {
