@@ -275,8 +275,10 @@ func parseToolArgs(raw string) (map[string]any, error) {
 
 // lineHintInFile reports whether the model-supplied range is a real anchor.
 // A missing end line means a single-line comment. A range past the end of
-// NewFileContent is not anchorable. When the file body is unavailable the
-// positive range is kept, because nothing is available to disprove it.
+// NewFileContent is not anchorable. An empty body has no lines: a scanned
+// empty file, a deleted diff, a binary diff, and a failed read all stay
+// unanchored. Only a nil diff, where nothing was loaded to disprove the
+// line, keeps a positive range.
 func lineHintInFile(d *model.Diff, start, end int) (int, int, bool) {
 	if start <= 0 {
 		return 0, 0, false
@@ -287,7 +289,7 @@ func lineHintInFile(d *model.Diff, start, end int) (int, int, bool) {
 	if end < start {
 		return 0, 0, false
 	}
-	if d == nil || d.NewFileContent == "" {
+	if d == nil {
 		return start, end, true
 	}
 	n := contentLineCount(d.NewFileContent)

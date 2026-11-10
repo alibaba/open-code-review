@@ -82,10 +82,37 @@ func TestScanCodeComment_OmitsLineWhenNothingIsAnchorable(t *testing.T) {
 	}
 }
 
+func TestScanCodeComment_DropsModelLineWhenFileBodyIsEmpty(t *testing.T) {
+	comments := runScanCommentsWith(t, "", 0, `{"comments":[{"path":"calc.go","content":"nope","existing_code":"not in the file","start_line":99,"end_line":99}]}`, "")
+	if len(comments) != 1 {
+		t.Fatalf("comments = %+v, want 1", comments)
+	}
+	if comments[0].StartLine != 0 || comments[0].EndLine != 0 {
+		t.Fatalf("finding line = %d-%d, want 0-0 when the scanned file is empty", comments[0].StartLine, comments[0].EndLine)
+	}
+}
+
+func TestScanCodeComment_RelocationBeatsModelLine(t *testing.T) {
+	// "a - b" is not a whole line, so the file match misses and the model
+	// line would be 4. The re-location fence is line 1 and must win.
+	comments := runScanCommentsWith(t, calcGo, 5, `{"comments":[{"path":"calc.go","content":"bug","existing_code":"a - b","start_line":4,"end_line":4}]}`, "```go\npackage calc\n```")
+	if len(comments) != 1 {
+		t.Fatalf("comments = %+v, want 1", comments)
+	}
+	if comments[0].StartLine != 1 || comments[0].EndLine != 1 {
+		t.Fatalf("finding line = %d-%d, want 1-1 from the re-located snippet", comments[0].StartLine, comments[0].EndLine)
+	}
+}
+
 func runScanComments(t *testing.T, arguments string) []model.LlmComment {
 	t.Helper()
+	return runScanCommentsWith(t, calcGo, 5, arguments, "")
+}
+
+func runScanCommentsWith(t *testing.T, content string, lineCount int, arguments, plainReply string) []model.LlmComment {
+	t.Helper()
 	repo := t.TempDir()
-	item := model.ScanItem{Path: "calc.go", Content: calcGo, LineCount: 5}
+	item := model.ScanItem{Path: "calc.go", Content: content, LineCount: lineCount}
 	tpl := makeTemplateWithFullScan()
 	// Default scan templates include re-location. An empty synthetic diff
 	// must not be what decides whether an anchorable comment keeps a line.
@@ -105,6 +132,7 @@ func runScanComments(t *testing.T, arguments string) []model.LlmComment {
 			scanCommentResponse(arguments),
 			scanTaskDoneResponse(),
 		},
+		plainReply: plainReply,
 	}
 	agent := NewAgent(Args{
 		RepoDir:          repo,
@@ -132,17 +160,21 @@ func runScanComments(t *testing.T, arguments string) []model.LlmComment {
 	return comments
 }
 
-// scriptedScanClient returns tool-loop responses in order. Auxiliary calls
-// (re-location has no tools) get a reply with no code block, so a failed
-// text match cannot invent a line number.
+// scriptedScanClient returns tool-loop responses in order. A tool-less call
+// is re-location. plainReply, when set, is that reply; otherwise the call
+// gets text with no code block, so a failed text match cannot invent a line.
 type scriptedScanClient struct {
 	toolResponses []*llm.ChatResponse
 	toolIdx       int
+	plainReply    string
 }
 
 func (c *scriptedScanClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	if len(req.Tools) == 0 {
-		text := "unable to locate"
+		text := c.plainReply
+		if text == "" {
+			text = "unable to locate"
+		}
 		return &llm.ChatResponse{
 			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &text}}},
 			Usage:   &llm.UsageInfo{PromptTokens: 1, CompletionTokens: 1},

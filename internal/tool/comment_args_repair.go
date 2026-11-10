@@ -23,10 +23,10 @@ import (
 // which is the safe direction.
 var contentFieldPattern = regexp.MustCompile(`"content"\s*:`)
 
-// knownCommentFields holds every field the code_comment schema defines, plus
-// thinking, which parseCommentsInner also copies through. Anything else in a
-// repaired batch means the scan re-read prose as structure — see
-// repairedCommentsAcceptable.
+// knownCommentFields holds every field parseCommentsInner copies through:
+// the code_comment schema fields, thinking, and the optional start_line /
+// end_line pair. Anything else in a repaired batch means the scan re-read
+// prose as structure — see repairedCommentsAcceptable.
 var knownCommentFields = map[string]struct{}{
 	"content":         {},
 	"existing_code":   {},
