@@ -335,7 +335,7 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 			if directoryOnly {
 				matched = matchGitignoreDirectoryEntry(directoryPath, body)
 			} else {
-				matched = matchGitignoreBody(directoryPath, body)
+				matched = matchGitignoreAncestorBody(directoryPath, body)
 			}
 			if matched {
 				directoryExcluded[i] = !negated
@@ -389,8 +389,7 @@ func matchGitignoreBody(relPath, body string) bool {
 	// "**" is not expressible with filepath.Match, so patterns containing it go
 	// through doublestar, which implements gitignore's globstar semantics.
 	if strings.Contains(body, "**") {
-		matched, err := doublestar.Match(body, relPath)
-		return err == nil && matched
+		return matchGitignoreGlobstar(body, relPath)
 	}
 
 	// Patterns without / match basename — unless anchored, where the pattern
@@ -414,11 +413,68 @@ func matchGitignoreBody(relPath, body string) bool {
 	// The leading "/" makes the suffix start on a path component: without it
 	// "src/main.go" also matches "othersrc/main.go", because the tail of
 	// "othersrc" completes the pattern.
+	//
+	// This fallback serves file paths only. Ancestor directories are resolved
+	// by matchGitignoreAncestorBody, which skips it: git anchors a
+	// slash-containing pattern to the .gitignore's location, so the root rule
+	// `docs/generated` never reaches src/docs/generated.
 	if !anchored && strings.HasSuffix(relPath, "/"+body) {
 		return true
 	}
 
 	return false
+}
+
+// matchGitignoreGlobstar matches a "**" pattern against a path through
+// doublestar, with one git rule doublestar does not implement: a trailing
+// /** matches everything *inside* the prefix directory, never the prefix
+// itself. Git leaves `src` unignored under `src/**` (only its contents are
+// ignored), which is what lets a negation like `!src/*.go` re-admit
+// src/a.go — and src/a.go stays visible under `src/**/` for the same
+// reason. doublestar accepts the empty suffix, so the trailing case is
+// matched as prefix-plus-at-least-one-component.
+func matchGitignoreGlobstar(pattern, path string) bool {
+	if !strings.HasSuffix(pattern, "/**") {
+		matched, err := doublestar.Match(pattern, path)
+		return err == nil && matched
+	}
+	deepened := strings.TrimSuffix(pattern, "/**") + "/**/*"
+	matched, err := doublestar.Match(deepened, path)
+	return err == nil && matched
+}
+
+// matchGitignoreAncestorBody reports whether a pattern body excludes an
+// ancestor directory by the directory's own full path. It mirrors
+// matchGitignoreBody except that the path-suffix fallback is file-only:
+// git resolves an ancestor directory against its full path, so reusing the
+// fallback here would let the root rule `docs/generated` exclude the
+// unrelated src/docs/generated subtree.
+func matchGitignoreAncestorBody(directoryPath, body string) bool {
+	// A leading "/" anchors the pattern to the repository root.
+	anchored := false
+	if trimmed, ok := strings.CutPrefix(body, "/"); ok {
+		body, anchored = trimmed, true
+	}
+
+	if strings.Contains(body, "**") {
+		return matchGitignoreGlobstar(body, directoryPath)
+	}
+
+	// Slashless patterns match a directory name at any depth — unless
+	// anchored, where the pattern addresses that name at the root only.
+	if !strings.Contains(body, "/") {
+		target := filepath.Base(directoryPath)
+		if anchored {
+			target = directoryPath
+		}
+		matched, _ := filepath.Match(body, target)
+		return matched
+	}
+
+	// Slash-containing patterns are relative to the .gitignore location and
+	// match the directory's full path only — no suffix fallback.
+	matched, _ := filepath.Match(body, directoryPath)
+	return matched
 }
 
 func matchGitignoreDirectory(relPath, pattern string) bool {
@@ -471,8 +527,10 @@ func matchGitignoreDirectoryEntry(directoryPath, pattern string) bool {
 			directoryPath = directoryPath[lastSlash+1:]
 		}
 	}
-	matched, err := doublestar.Match(pattern, directoryPath)
-	return err == nil && matched
+	// The trailing-/** rule of matchGitignoreGlobstar applies here too: a
+	// directory-only pattern like `src/**/` matches directories strictly
+	// inside src, never src itself, so src/a.go is not ignored either.
+	return matchGitignoreGlobstar(pattern, directoryPath)
 }
 
 // partitionDiffs keeps diffs filtered by built-in directory rules available
