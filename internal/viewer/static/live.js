@@ -129,7 +129,7 @@
             ? document
             : new DOMParser().parseFromString(html, "text/html");
         return JSON.stringify(Array.from(root.querySelectorAll("[data-repo-active]"))
-            .map((el) => el.getAttribute("href"))
+            .map((el) => el.getAttribute("href") || "")
             .sort());
     }
 

@@ -293,7 +293,7 @@ func TestLiveScript_WatchesForRunsStarting(t *testing.T) {
 	// while another starts because both snapshots still contain an active run.
 	for _, want := range []string{
 		"function activeRepoKeys(html)",
-		`.map((el) => el.getAttribute("href"))`,
+		`.map((el) => el.getAttribute("href") || "")`,
 		"function runningSessionKeys(html)",
 		"current !== previous",
 	} {
