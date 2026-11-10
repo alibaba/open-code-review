@@ -69,7 +69,7 @@ async function withFakeOcr(source, callback) {
 // Mirrors a global npm install on Windows: only `ocr.cmd` is on PATH and the
 // package launcher lives next to it. The .cmd stub fails on purpose so a test
 // that still routes through the shim cannot pass.
-async function withNpmShimOcr(source, callback) {
+async function withNpmShimOcr(source, callback, { isolatePath = false, node = false } = {}) {
   return await withTemporaryDirectory(async (directory) => {
     const launcherDirectory = join(
       directory,
@@ -81,15 +81,51 @@ async function withNpmShimOcr(source, callback) {
     await mkdir(launcherDirectory, { recursive: true })
     await writeFile(join(directory, "ocr.cmd"), "@echo off\r\nexit /b 1\r\n")
     await writeFile(join(launcherDirectory, "ocr.js"), `${source}\n`)
+    if (node) {
+      const executable = join(directory, "node.exe")
+      try {
+        await link(process.execPath, executable)
+      } catch {
+        await copyFile(process.execPath, executable)
+      }
+    }
 
     const previousPath = process.env.PATH
-    process.env.PATH = `${directory}${delimiter}${previousPath ?? ""}`
+    const previousAppData = process.env.APPDATA
+    // Keep resolution inside the fixture: a real %APPDATA%\npm may hold another
+    // global install that would win before the case under test.
+    process.env.APPDATA = directory
+    process.env.PATH = isolatePath ? directory : `${directory}${delimiter}${previousPath ?? ""}`
     try {
       return await callback(directory)
     } finally {
       process.env.PATH = previousPath
+      if (previousAppData === undefined) {
+        delete process.env.APPDATA
+      } else {
+        process.env.APPDATA = previousAppData
+      }
     }
   })
+}
+
+// A Bun-compiled OpenCode host reports process.versions.bun (and the Node
+// compatibility version). The test runner is Node, so mark the runtime for the
+// duration of a case to exercise the packaged-host branches.
+async function withBunHost(callback) {
+  const versions = process.versions
+  const hadBun = Object.prototype.hasOwnProperty.call(versions, "bun")
+  const previousBun = versions.bun
+  versions.bun = "1.3.0"
+  try {
+    return await callback()
+  } finally {
+    if (hadBun) {
+      versions.bun = previousBun
+    } else {
+      delete versions.bun
+    }
+  }
 }
 
 function toolContext(worktree, signal = new AbortController().signal) {
@@ -303,35 +339,74 @@ test("ocr_review passes suspicious-looking refs as one argv value without a shel
   )
 })
 
+function reviewArgv(worktree) {
+  return [
+    "review",
+    "--audience",
+    "agent",
+    "--format",
+    "json",
+    "--repo",
+    worktree,
+    "--commit",
+    "HEAD^",
+    "--exclude",
+    "100%PATH%",
+  ]
+}
+
 test(
   "ocr_review starts the npm launcher on Windows so refs reach OCR unchanged",
   { skip: process.platform !== "win32" },
   async () => {
-    await withNpmShimOcr(
-      "console.log(JSON.stringify({status:'success', argv:process.argv.slice(2)}))",
-      async (worktree) => {
-        const { hooks } = await loadPlugin(worktree)
-        const output = await hooks.tool.ocr_review.execute(
-          {
-            commit: "HEAD^",
-            exclude: "100%PATH%",
-          },
-          toolContext(worktree),
-        )
-        assert.deepEqual(JSON.parse(output).argv, [
-          "review",
-          "--audience",
-          "agent",
-          "--format",
-          "json",
-          "--repo",
-          worktree,
-          "--commit",
-          "HEAD^",
-          "--exclude",
-          "100%PATH%",
-        ])
-      },
+    await withBunHost(() =>
+      withNpmShimOcr(
+        "console.log(JSON.stringify({status:'success', argv:process.argv.slice(2), bun:process.env.BUN_BE_BUN ?? null}))",
+        async (worktree) => {
+          const { hooks } = await loadPlugin(worktree)
+          const output = await hooks.tool.ocr_review.execute(
+            {
+              commit: "HEAD^",
+              exclude: "100%PATH%",
+            },
+            toolContext(worktree),
+          )
+          const parsed = JSON.parse(output)
+          assert.deepEqual(parsed.argv, reviewArgv(worktree))
+          // A real node.exe on PATH is the interpreter, not the packaged host.
+          assert.equal(parsed.bun, null)
+        },
+        { isolatePath: true, node: true },
+      ),
+    )
+  },
+)
+
+test(
+  "ocr_review uses the Bun host's CLI mode when no node is on PATH",
+  { skip: process.platform !== "win32" },
+  async () => {
+    assert.equal(process.env.BUN_BE_BUN, undefined)
+    await withBunHost(() =>
+      withNpmShimOcr(
+        "console.log(JSON.stringify({status:'success', argv:process.argv.slice(2), bun:process.env.BUN_BE_BUN ?? null}))",
+        async (worktree) => {
+          const { hooks } = await loadPlugin(worktree)
+          const output = await hooks.tool.ocr_review.execute(
+            {
+              commit: "HEAD^",
+              exclude: "100%PATH%",
+            },
+            toolContext(worktree),
+          )
+          const parsed = JSON.parse(output)
+          assert.deepEqual(parsed.argv, reviewArgv(worktree))
+          // A packaged host is not a JS interpreter: the launcher only runs
+          // because the child is started in Bun's documented CLI mode.
+          assert.equal(parsed.bun, "1")
+        },
+        { isolatePath: true },
+      ),
     )
   },
 )

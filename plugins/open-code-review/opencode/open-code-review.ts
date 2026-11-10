@@ -33,6 +33,8 @@ interface ReviewInput {
 interface OcrInvocation {
   command: string
   prefixArgs: string[]
+  /** Child-only environment overrides, e.g. a packaged host's CLI mode. */
+  env?: NodeJS.ProcessEnv
 }
 
 interface RunOptions {
@@ -169,13 +171,13 @@ function appendChunk(
 const defaultOcrInvocation: OcrInvocation = { command: "ocr", prefixArgs: [] }
 const npmOcrLauncherPath = ["node_modules", "@alibaba-group", "open-code-review", "bin", "ocr.js"]
 
-/**
- * A global npm install on Windows only provides `ocr.cmd`, which cannot be
- * started without a shell: Node fails with ENOENT, and Bun routes the arguments
- * through cmd.exe, which rewrites refs such as `HEAD^`. When the shim resolves
- * to the package launcher, start that with the current runtime instead.
- */
-function resolveWindowsOcrInvocation(): OcrInvocation | undefined {
+function isBunHost(): boolean {
+  // Bun also reports the Node compatibility version and a Bun-compiled host
+  // keeps this marker; no other runtime defines it.
+  return Boolean((process.versions as Record<string, string | undefined>).bun)
+}
+
+function searchDirectories(): Set<string> {
   const directories = new Set<string>()
   for (const directory of (process.env.PATH ?? "").split(delimiter)) {
     if (directory) directories.add(directory)
@@ -183,15 +185,50 @@ function resolveWindowsOcrInvocation(): OcrInvocation | undefined {
   if (process.env.APPDATA) {
     directories.add(join(process.env.APPDATA, "npm"))
   }
+  return directories
+}
+
+function findNodeExecutable(directories: Set<string>): string | undefined {
+  for (const directory of directories) {
+    const executable = join(directory, "node.exe")
+    if (existsSync(executable)) return executable
+  }
+  return undefined
+}
+
+/**
+ * A global npm install on Windows only provides `ocr.cmd`, which cannot be
+ * started without a shell: Node fails with ENOENT, and Bun routes the arguments
+ * through cmd.exe, which rewrites refs such as `HEAD^`.
+ *
+ * The npm shim runs `node <launcher>`, so prefer a real Node from PATH. A
+ * packaged OpenCode host is not a JavaScript interpreter: `process.execPath` is
+ * the application, and spawning it with the launcher path re-runs its bundled
+ * entry point. Without Node on PATH, Bun's documented CLI mode (`BUN_BE_BUN`)
+ * makes the detected Bun host run the launcher with the remaining arguments.
+ */
+function resolveWindowsOcrInvocation(): OcrInvocation | undefined {
+  const directories = searchDirectories()
 
   for (const directory of directories) {
     if (existsSync(join(directory, "ocr.exe"))) {
       return defaultOcrInvocation
     }
     const launcher = join(directory, ...npmOcrLauncherPath)
-    if (existsSync(join(directory, "ocr.cmd")) && existsSync(launcher)) {
+    if (!existsSync(join(directory, "ocr.cmd")) || !existsSync(launcher)) {
+      continue
+    }
+    const node = findNodeExecutable(directories)
+    if (node) {
+      return { command: node, prefixArgs: [launcher] }
+    }
+    if (isBunHost()) {
+      return { command: process.execPath, prefixArgs: [launcher], env: { BUN_BE_BUN: "1" } }
+    }
+    if ((process.versions as Record<string, string | undefined>).node) {
       return { command: process.execPath, prefixArgs: [launcher] }
     }
+    return undefined
   }
   return undefined
 }
@@ -223,7 +260,7 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
       [...invocation.prefixArgs, ...args],
       {
         cwd: options.cwd,
-        env: process.env,
+        env: invocation.env ? { ...process.env, ...invocation.env } : process.env,
         shell: false,
         detached: process.platform !== "win32",
       },
