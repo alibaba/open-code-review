@@ -208,6 +208,81 @@ func buildMessageXML(msgs []llm.Message) string {
 	return sb.String()
 }
 
+// truncateToByteBudget shortens text so that its byte length stays within
+// maxBytes. It is used to keep a single oversized message (typically a large
+// tool result) from blowing past the compression request's own input bound.
+// Byte length is used rather than a token estimate because token counting is
+// extremely expensive on multi-hundred-KB single-line results and the
+// compression input bound only needs a cheap, deterministic ceiling. The
+// returned string always carries an explicit "... (truncated)" suffix so the
+// summarizer can see that source content was elided rather than silently
+// pretending it reviewed the full history.
+func truncateToByteBudget(text string, maxBytes int) string {
+	const suffix = "... (truncated)"
+
+	if maxBytes <= 0 {
+		return suffix
+	}
+	if len(text) <= maxBytes {
+		return text
+	}
+	keep := maxBytes - len(suffix)
+	if keep <= 0 {
+		return suffix
+	}
+	return text[:keep] + suffix
+}
+
+// boundCompressZoneInput returns a copy of the compress-zone messages whose
+// combined serialized input is guaranteed to fit within inputBudgetBytes. It
+// truncates the largest messages first so that small messages keep their full
+// content and only oversized results are elided. This prevents the compression
+// request itself from exceeding the provider's context limit when a tool
+// result carries an unbounded line (see #1876).
+func boundCompressZoneInput(msgs []llm.Message, inputBudgetBytes int) []llm.Message {
+	if inputBudgetBytes <= 0 {
+		return msgs
+	}
+
+	total := 0
+	for _, m := range msgs {
+		total += len(m.ExtractText())
+	}
+	if total <= inputBudgetBytes {
+		return msgs
+	}
+
+	out := copyMessages(msgs)
+	// Repeatedly shrink the largest remaining message until the zone fits the
+	// budget. Each message is truncated at most once, so this is O(n^2) in the
+	// message count but n is a handful of compress-zone messages.
+	for {
+		largestIdx := -1
+		largestLen := 0
+		total = 0
+		for i, m := range out {
+			n := len(m.ExtractText())
+			total += n
+			if n > largestLen {
+				largestLen = n
+				largestIdx = i
+			}
+		}
+		if total <= inputBudgetBytes || largestIdx < 0 || largestLen == 0 {
+			break
+		}
+		// Give the largest message the remaining budget after the other
+		// messages take their full share.
+		budgetForLargest := inputBudgetBytes - (total - largestLen)
+		text := truncateToByteBudget(out[largestIdx].ExtractText(), budgetForLargest)
+		if text == out[largestIdx].ExtractText() {
+			break // no further reduction possible
+		}
+		out[largestIdx] = llm.NewTextMessage(out[largestIdx].Role, text)
+	}
+	return out
+}
+
 // copyMessages creates a shallow copy of a message slice.
 func copyMessages(msgs []llm.Message) []llm.Message {
 	out := make([]llm.Message, len(msgs))
@@ -229,7 +304,17 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 		return msgs, nil
 	}
 
-	contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
+	// Bound the compression request's own input. The compress zone holds the
+	// history that already overflowed the active-zone budget, so a single
+	// unbounded tool result can otherwise make the "compression" request
+	// larger than the provider's context limit (see #1876). Reuse the
+	// conversation's own context ceiling as the input bound: the serialized
+	// history being summarized can never legitimately exceed it. The bound is
+	// expressed in bytes (MaxContextTokens × ~4 chars/token) to stay a cheap
+	// O(1) check that does not tokenize multi-hundred-KB single-line results.
+	inputBudgetBytes := r.task.MaxContextTokens * 4
+	compressZone := boundCompressZoneInput(msgs[part.frozenEnd:part.compressEnd], inputBudgetBytes)
+	contextXML := buildMessageXML(compressZone)
 
 	compressionMsgs := make([]llm.Message, 0, len(r.task.Compression.Messages))
 	for _, m := range r.task.Compression.Messages {

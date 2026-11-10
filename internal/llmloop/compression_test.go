@@ -316,3 +316,76 @@ func TestPromptTokenLimitMatchesReplacedExpression(t *testing.T) {
 		}
 	}
 }
+
+func TestTruncateToByteBudget(t *testing.T) {
+	t.Run("under budget unchanged", func(t *testing.T) {
+		text := "short text"
+		if got := truncateToByteBudget(text, 1000); got != text {
+			t.Errorf("truncateToByteBudget = %q, want unchanged %q", got, text)
+		}
+	})
+	t.Run("over budget truncates with suffix", func(t *testing.T) {
+		text := strings.Repeat("word ", 500) // 2500 bytes
+		got := truncateToByteBudget(text, 100)
+		if len(got) > 100 {
+			t.Errorf("truncated text = %d bytes, want <= 100", len(got))
+		}
+		if !strings.HasSuffix(got, "... (truncated)") {
+			t.Errorf("truncated text should end with suffix, got %q", got[len(got)-20:])
+		}
+	})
+	t.Run("zero budget returns suffix only", func(t *testing.T) {
+		got := truncateToByteBudget("anything", 0)
+		if got != "... (truncated)" {
+			t.Errorf("truncateToByteBudget with 0 budget = %q, want suffix only", got)
+		}
+	})
+}
+
+// TestBoundCompressZoneInput_OversizedToolResult guards #1876: a single
+// unbounded tool result must not let the compression request exceed its own
+// input bound. The oversized message is elided (with an explicit truncation
+// suffix) while smaller messages keep their full content.
+func TestBoundCompressZoneInput_OversizedToolResult(t *testing.T) {
+	huge := strings.Repeat("x", 170*1024) // 170 KB single-line result
+	msgs := []llm.Message{
+		msg("assistant", "read the file"),
+		llm.NewToolResultMessage("call_1", huge),
+		msg("assistant", "done"),
+	}
+	const inputBudgetBytes = 4096
+	got := boundCompressZoneInput(msgs, inputBudgetBytes)
+
+	total := 0
+	for _, m := range got {
+		total += len(m.ExtractText())
+	}
+	if total > inputBudgetBytes {
+		t.Fatalf("bounded input = %d bytes, want <= %d", total, inputBudgetBytes)
+	}
+	// The small messages must survive intact.
+	if got[0].ExtractText() != "read the file" {
+		t.Errorf("assistant message was altered: %q", got[0].ExtractText())
+	}
+	if got[2].ExtractText() != "done" {
+		t.Errorf("final assistant message was altered: %q", got[2].ExtractText())
+	}
+	// The oversized result must be visibly truncated, not silently kept.
+	if !strings.Contains(got[1].ExtractText(), "... (truncated)") {
+		t.Errorf("oversized result should carry truncation marker, got %q", got[1].ExtractText()[:40])
+	}
+}
+
+func TestBoundCompressZoneInput_UnderBudgetUnchanged(t *testing.T) {
+	msgs := []llm.Message{
+		msg("assistant", "short reply"),
+		msg("tool", "ok"),
+	}
+	got := boundCompressZoneInput(msgs, 100000)
+	if len(got) != len(msgs) {
+		t.Fatalf("len = %d, want %d", len(got), len(msgs))
+	}
+	if got[0].ExtractText() != "short reply" {
+		t.Errorf("message altered under budget: %q", got[0].ExtractText())
+	}
+}
