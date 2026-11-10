@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -224,11 +223,11 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 // intact. Returns rebuilt as [frozen] + [compressed_summary appended to
 // the user prompt] + [active].
 func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey string, st *compressionState) ([]llm.Message, error) {
-	if len(r.deps.Template.MemoryCompressionTask.Messages) == 0 || len(msgs) <= 2 {
+	if len(r.task.Compression.Messages) == 0 || len(msgs) <= 2 {
 		return msgs[:min(len(msgs), 2)], nil
 	}
 
-	part := partitionMessages(msgs, r.deps.Template.MaxTokens, 0)
+	part := partitionMessages(msgs, r.task.MaxContextTokens, 0)
 	if part.compressEnd <= part.frozenEnd {
 		return msgs, nil
 	}
@@ -246,8 +245,8 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 		return msgs, previousErr
 	}
 
-	compressionMsgs := make([]llm.Message, 0, len(r.deps.Template.MemoryCompressionTask.Messages))
-	for _, m := range r.deps.Template.MemoryCompressionTask.Messages {
+	compressionMsgs := make([]llm.Message, 0, len(r.task.Compression.Messages))
+	for _, m := range r.task.Compression.Messages {
 		content := strings.ReplaceAll(m.Content, "{{context}}", contextXML)
 		compressionMsgs = append(compressionMsgs, llm.NewTextMessage(m.Role, content))
 	}
@@ -265,11 +264,11 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 		llm.SessionTaskKey(r.deps.Session.SessionID, string(session.MemoryCompressionTask), taskKey))
 
 	startTime := time.Now()
-	reqCtx := r.requestCtx(ctx, taskKey, session.MemoryCompressionTask, rec.RequestNo)
+	reqCtx := r.RequestContext(ctx, taskKey, session.MemoryCompressionTask, rec.RequestNo)
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  compressionMsgs,
-		MaxTokens: r.deps.Template.CompletionTokenLimit(),
+		MaxTokens: r.task.MaxCompletionTokens,
 	})
 	duration := time.Since(startTime)
 
@@ -291,12 +290,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 		return msgs, err
 	}
 	rec.SetResponse(resp, duration)
-	if resp.Usage != nil {
-		atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
-		atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
-		atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
-	}
+	r.RecordUsage(resp.Usage)
 
 	rawSummary := stripMarkdownFences(resp.Content())
 	if rawSummary == "" {
@@ -310,7 +304,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 
 	userMsg := rebuilt[1]
 	currentText := userMsg.ExtractText()
-	rebuilt[1] = llm.NewTextMessage(userMsg.Role, currentText+"\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
+	rebuilt[1] = llm.NewTextMessage(userMsg.Role, currentText+strings.ReplaceAll(r.task.Compression.SummaryTemplate, "{{summary}}", rawSummary))
 
 	for i := part.compressEnd; i < len(msgs); i++ {
 		rebuilt = append(rebuilt, msgs[i])

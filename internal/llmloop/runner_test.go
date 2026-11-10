@@ -11,11 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
-	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
-	"github.com/alibaba/open-code-review/internal/tool"
 )
 
 type fakeLLMClient struct {
@@ -81,23 +78,19 @@ func (c *concurrentFakeClient) CompletionsWithCtx(_ context.Context, req llm.Cha
 	}, nil
 }
 
-func newTestRunner(client llm.LLMClient, tpl template.Template) *Runner {
-	sess := session.New(t_tempDir, "main", "test-model", session.SessionOptions{ReviewMode: "diff"})
-	collector := tool.NewCommentCollector()
+func newTestRunner(client llm.LLMClient, task Task) *Runner {
+	task.Compression.SummaryTemplate = "\n\n<summary>\n{{summary}}\n</summary>"
 	return NewRunner(Deps{
-		LLMClient:        client,
-		Model:            "test-model",
-		Template:         tpl,
-		CommentCollector: collector,
-		Session:          sess,
-	})
+		LLMClient: client, Model: "test-model",
+		Session: session.New(t_tempDir, "main", "test-model", session.SessionOptions{}),
+	}, task)
 }
 
 var t_tempDir string
 
 func TestRecordWarning(t *testing.T) {
 	t_tempDir = t.TempDir()
-	r := newTestRunner(&fakeLLMClient{}, template.Template{})
+	r := newTestRunner(&fakeLLMClient{}, Task{})
 	r.RecordWarning("error", "main.go", "something went wrong")
 	r.RecordWarning("warn", "lib.go", "not great")
 
@@ -115,14 +108,14 @@ func TestRecordWarning(t *testing.T) {
 
 func TestRecordToolCall(t *testing.T) {
 	t_tempDir = t.TempDir()
-	r := newTestRunner(&fakeLLMClient{}, template.Template{})
-	if got := r.recordToolCall("file_read"); got != 1 {
+	r := newTestRunner(&fakeLLMClient{}, Task{})
+	if got := r.RecordToolCall("file_read"); got != 1 {
 		t.Errorf("first tool call number = %d, want 1", got)
 	}
-	if got := r.recordToolCall("file_read"); got != 2 {
+	if got := r.RecordToolCall("file_read"); got != 2 {
 		t.Errorf("second tool call number = %d, want 2", got)
 	}
-	if got := r.recordToolCall("code_comment"); got != 3 {
+	if got := r.RecordToolCall("code_comment"); got != 3 {
 		t.Errorf("third tool call number = %d, want 3", got)
 	}
 
@@ -136,9 +129,9 @@ func TestRecordToolCall(t *testing.T) {
 }
 
 func TestToolFailures_AreOrderedAndSnapshotIsolated(t *testing.T) {
-	r := NewRunner(Deps{})
-	r.recordToolFailure(2, "tool_b", "b.go", "second", nil, `{}`, 0)
-	r.recordToolFailure(1, "tool_a", "a.go", "first", nil, `{}`, 0)
+	r := NewRunner(Deps{}, Task{})
+	r.RecordToolFailure(2, "tool_b", "b.go", "second", nil, `{}`, 0)
+	r.RecordToolFailure(1, "tool_a", "a.go", "first", nil, `{}`, 0)
 
 	failures := r.ToolFailures()
 	if len(failures) != 2 || failures[0].ToolCallNumber != 1 || failures[1].ToolCallNumber != 2 {
@@ -155,7 +148,7 @@ func TestToolFailures_AreOrderedAndSnapshotIsolated(t *testing.T) {
 
 func TestRecordUsage(t *testing.T) {
 	t_tempDir = t.TempDir()
-	r := newTestRunner(&fakeLLMClient{}, template.Template{})
+	r := newTestRunner(&fakeLLMClient{}, Task{})
 
 	r.RecordUsage(nil)
 	if r.TotalInputTokens() != 0 {
@@ -185,33 +178,15 @@ func TestRecordUsage(t *testing.T) {
 	}
 }
 
-func TestCollectPendingComments_NilPool(t *testing.T) {
-	t_tempDir = t.TempDir()
-	collector := tool.NewCommentCollector()
-	collector.Add(model.LlmComment{Path: "a.go", Content: "fix"})
-
-	r := NewRunner(Deps{
-		CommentCollector:  collector,
-		CommentWorkerPool: nil,
-	})
-	comments := r.CollectPendingComments()
-	if len(comments) != 1 {
-		t.Fatalf("expected 1 comment, got %d", len(comments))
-	}
-	if comments[0].Path != "a.go" {
-		t.Errorf("comment.Path = %q", comments[0].Path)
-	}
-}
-
 func TestCancelPendingCompression_NilJob(t *testing.T) {
 	t_tempDir = t.TempDir()
-	r := newTestRunner(&fakeLLMClient{}, template.Template{})
+	r := newTestRunner(&fakeLLMClient{}, Task{})
 	r.cancelPendingCompression(&compressionState{})
 }
 
 func TestCancelPendingCompression_WithJob(t *testing.T) {
 	t_tempDir = t.TempDir()
-	r := newTestRunner(&fakeLLMClient{}, template.Template{})
+	r := newTestRunner(&fakeLLMClient{}, Task{})
 
 	cancelled := false
 	job := &compressionJob{
@@ -231,7 +206,7 @@ func TestCancelPendingCompression_WithJob(t *testing.T) {
 
 func TestTryApplyPendingCompression_NilJob(t *testing.T) {
 	t_tempDir = t.TempDir()
-	r := newTestRunner(&fakeLLMClient{}, template.Template{})
+	r := newTestRunner(&fakeLLMClient{}, Task{})
 	msgs := []llm.Message{msg("user", "hi")}
 	if r.tryApplyPendingCompression(&compressionState{}, &msgs) {
 		t.Error("expected false for nil job")
@@ -240,7 +215,7 @@ func TestTryApplyPendingCompression_NilJob(t *testing.T) {
 
 func TestTryApplyPendingCompression_NotDone(t *testing.T) {
 	t_tempDir = t.TempDir()
-	r := newTestRunner(&fakeLLMClient{}, template.Template{})
+	r := newTestRunner(&fakeLLMClient{}, Task{})
 
 	job := &compressionJob{
 		done:   make(chan struct{}),
@@ -256,7 +231,7 @@ func TestTryApplyPendingCompression_NotDone(t *testing.T) {
 
 func TestTryApplyPendingCompression_Applied(t *testing.T) {
 	t_tempDir = t.TempDir()
-	r := newTestRunner(&fakeLLMClient{}, template.Template{})
+	r := newTestRunner(&fakeLLMClient{}, Task{})
 
 	rebuilt := []llm.Message{msg("system", "sys"), msg("user", "compressed")}
 	job := &compressionJob{
@@ -294,7 +269,7 @@ func TestTryApplyPendingCompression_Applied(t *testing.T) {
 
 func TestTryApplyPendingCompression_NilRebuilt(t *testing.T) {
 	t_tempDir = t.TempDir()
-	r := newTestRunner(&fakeLLMClient{}, template.Template{})
+	r := newTestRunner(&fakeLLMClient{}, Task{})
 
 	job := &compressionJob{
 		done:        make(chan struct{}),
@@ -343,8 +318,8 @@ func TestPartitionMessages_CompressionNeeded(t *testing.T) {
 
 func TestRunCompression_EmptyTemplate(t *testing.T) {
 	t_tempDir = t.TempDir()
-	r := newTestRunner(&fakeLLMClient{}, template.Template{
-		MaxTokens: 1000,
+	r := newTestRunner(&fakeLLMClient{}, Task{
+		MaxContextTokens: 1000,
 	})
 
 	msgs := []llm.Message{
@@ -363,11 +338,11 @@ func TestRunCompression_EmptyTemplate(t *testing.T) {
 
 func TestRunCompression_ShortMessages(t *testing.T) {
 	t_tempDir = t.TempDir()
-	tpl := template.Template{
-		MemoryCompressionTask: template.LlmConversation{
-			Messages: []template.ChatMessage{{Role: "user", Content: "{{context}}"}},
+	tpl := Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxTokens: 1000,
+		MaxContextTokens: 1000,
 	}
 	r := newTestRunner(&fakeLLMClient{}, tpl)
 
@@ -392,11 +367,11 @@ func TestRunCompression_Success(t *testing.T) {
 			Usage: &llm.UsageInfo{PromptTokens: 100, CompletionTokens: 20},
 		},
 	}
-	tpl := template.Template{
-		MemoryCompressionTask: template.LlmConversation{
-			Messages: []template.ChatMessage{{Role: "user", Content: "Summarize: {{context}}"}},
+	tpl := Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: "Summarize: {{context}}"}},
 		},
-		MaxTokens: 50,
+		MaxContextTokens: 50,
 	}
 	r := newTestRunner(client, tpl)
 
@@ -416,7 +391,7 @@ func TestRunCompression_Success(t *testing.T) {
 	if len(got) < 2 {
 		t.Fatalf("expected at least 2 messages, got %d", len(got))
 	}
-	if !strings.Contains(got[1].ExtractText(), "previous_review_summary") {
+	if !strings.Contains(got[1].ExtractText(), "summary") {
 		t.Errorf("expected summary in rebuilt messages, got: %s", got[1].ExtractText())
 	}
 	if r.TotalInputTokens() != 100 {
@@ -429,11 +404,11 @@ func TestRunCompression_LLMError(t *testing.T) {
 	client := &fakeLLMClient{
 		err: context.DeadlineExceeded,
 	}
-	tpl := template.Template{
-		MemoryCompressionTask: template.LlmConversation{
-			Messages: []template.ChatMessage{{Role: "user", Content: "{{context}}"}},
+	tpl := Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxTokens: 50,
+		MaxContextTokens: 50,
 	}
 	r := newTestRunner(client, tpl)
 
@@ -465,11 +440,11 @@ func TestRunCompression_EmptySummary(t *testing.T) {
 			}},
 		},
 	}
-	tpl := template.Template{
-		MemoryCompressionTask: template.LlmConversation{
-			Messages: []template.ChatMessage{{Role: "user", Content: "{{context}}"}},
+	tpl := Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxTokens: 50,
+		MaxContextTokens: 50,
 	}
 	r := newTestRunner(client, tpl)
 
@@ -502,11 +477,11 @@ func TestTriggerAsyncCompression(t *testing.T) {
 			Usage: &llm.UsageInfo{PromptTokens: 50, CompletionTokens: 10},
 		},
 	}
-	tpl := template.Template{
-		MemoryCompressionTask: template.LlmConversation{
-			Messages: []template.ChatMessage{{Role: "user", Content: "{{context}}"}},
+	tpl := Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxTokens: 50,
+		MaxContextTokens: 50,
 	}
 	r := newTestRunner(client, tpl)
 
@@ -546,11 +521,11 @@ func TestCompression_CrossFileIsolation(t *testing.T) {
 			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summary}}},
 		},
 	}
-	tpl := template.Template{
-		MemoryCompressionTask: template.LlmConversation{
-			Messages: []template.ChatMessage{{Role: "user", Content: "{{context}}"}},
+	tpl := Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxTokens: 50,
+		MaxContextTokens: 50,
 	}
 	r := newTestRunner(gated, tpl)
 
@@ -616,7 +591,7 @@ func TestCompression_CrossFileIsolation(t *testing.T) {
 		if !r.tryApplyPendingCompression(stA, &msgsA) {
 			t.Fatal("file A should apply its own completed compression")
 		}
-		if !strings.Contains(msgsA[1].ExtractText(), "<previous_review_summary>") {
+		if !strings.Contains(msgsA[1].ExtractText(), "<summary>") {
 			t.Errorf("file A's rebuilt prompt should embed the summary, got: %s", msgsA[1].ExtractText())
 		}
 		if last := msgsA[len(msgsA)-1].ExtractText(); last != "post-snapshot" {
@@ -638,11 +613,11 @@ func TestAddNextMessage_NoStartThenCancelSameCall(t *testing.T) {
 		},
 	}
 	close(gated.release)
-	tpl := template.Template{
-		MemoryCompressionTask: template.LlmConversation{
-			Messages: []template.ChatMessage{{Role: "user", Content: "{{context}}"}},
+	tpl := Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxTokens: 1000, // soft 600, warn 800
+		MaxContextTokens: 1000, // soft 600, warn 800
 	}
 	r := newTestRunner(gated, tpl)
 
@@ -661,7 +636,7 @@ func TestAddNextMessage_NoStartThenCancelSameCall(t *testing.T) {
 		Type:     "function",
 		Function: llm.FunctionCall{Name: "file_read", Arguments: `{"path":"f.go"}`},
 	}}
-	results := []tool.ToolCallResult{{
+	results := []ToolCallResult{{
 		ToolCallID: "c1",
 		Name:       "file_read",
 		Result:     strings.Repeat("data ", 100),
@@ -685,35 +660,26 @@ func TestAddNextMessage_NoStartThenCancelSameCall(t *testing.T) {
 	if len(gated.started) != 1 {
 		t.Errorf("compression LLM calls = %d, want exactly 1 (the sync one)", len(gated.started))
 	}
-	if !strings.Contains(msgs[1].ExtractText(), "<previous_review_summary>") {
+	if !strings.Contains(msgs[1].ExtractText(), "<summary>") {
 		t.Errorf("sync compression should have rebuilt the prompt, got: %s", msgs[1].ExtractText())
 	}
 }
 
 func TestRunMainTask_ConcurrentFilesCompression_Race(t *testing.T) {
 	t_tempDir = t.TempDir()
-	tpl := template.Template{
-		MemoryCompressionTask: template.LlmConversation{
-			Messages: []template.ChatMessage{{Role: "user", Content: "{{context}}"}},
+	tpl := Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxTokens:           1000,
-		MaxToolRequestTimes: 5,
+		MaxContextTokens: 1000,
+		MaxRounds:        5,
 	}
-	reg := tool.NewRegistry()
-	reg.Register(&fakeFileReadProvider{result: "package main\n"})
 	client := &concurrentFakeClient{}
-	r := NewRunner(Deps{
-		LLMClient:        client,
-		Model:            "test-model",
-		Template:         tpl,
-		Tools:            reg,
-		CommentCollector: tool.NewCommentCollector(),
-		// MainToolDefs must be non-empty: the fake client classifies a
-		// request with no tools as a compression request, mirroring how
-		// RunMainTask and runCompression build their ChatRequests.
-		MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "file_read"}}},
-		Session:      session.New(t_tempDir, "main", "test-model", session.SessionOptions{ReviewMode: "diff"}),
-	})
+	tpl.ToolDefs = []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "file_read"}}}
+	tpl.ExecuteTool = func(context.Context, string, llm.ToolCall, *session.TaskRecord, string) ToolOutcome {
+		return ToolOutcome{Content: "package main\n"}
+	}
+	r := newTestRunner(client, tpl)
 
 	// Four files reviewed concurrently over one shared Runner, like the
 	// agent/scan fan-out. Each conversation crosses the soft and warning
@@ -725,7 +691,7 @@ func TestRunMainTask_ConcurrentFilesCompression_Race(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			msgs := []llm.Message{msg("system", "sys"), msg("user", "review this file")}
-			_, _, err := r.RunMainTask(context.Background(), msgs, fmt.Sprintf("f%d.go", i))
+			_, err := r.Run(context.Background(), msgs, fmt.Sprintf("f%d.go", i))
 			errs[i] = err
 		}(i)
 	}

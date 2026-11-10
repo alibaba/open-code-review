@@ -253,8 +253,6 @@ export const ja: TranslationKeys = {
   'docs.scanFlag14Default': '内蔵',
   'docs.scanFlag15Desc': '最大並行 git サブプロセス数',
   'docs.scanFlag16Desc': 'カスタム JSON レビュールールのパス',
-  'docs.scanFlag17Desc': 'カスタム JSON ツール設定のパス',
-  'docs.scanFlag17Default': '内蔵',
   'docs.scanFlag18Desc': 'スキャンするリポジトリまたはディレクトリのルート',
   'docs.scanFlag18Default': '現在のディレクトリ',
   'docs.scanNote': '注：<code>--max-tools</code> はスキャンテンプレートのファイル単位ツール呼び出し予算を引き上げる場合にのみ効果があります —— テンプレートのデフォルトより低い値を設定しても効果はありません。',

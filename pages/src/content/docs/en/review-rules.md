@@ -293,7 +293,7 @@ text the agent should follow:
 3. Try `~/.opencodereview/rule.json` in declaration order.
 4. Fall back to the embedded system rule layer.
 
-Selected embedded `system_rules.json` patterns are shown below in relative
+Every pattern in the embedded `system_rules.json` is listed below in relative
 matching order:
 
 | Pattern                                         | Rule doc                                                                                              |
@@ -314,6 +314,7 @@ matching order:
 | `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling).                                  |
 | `**/*.{hbs,mustache}`                           | `handlebars_mustache.md` — Handlebars and Mustache templates.                                         |
 | `**/*.{jinja2,j2}`                              | `jinja.md` — Jinja templates                                                                          |
+| `**/*.pug`                          | `pug.md` — Pug templates.                                                                             |
 | `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md` — EJS, Liquid and Nunjucks templates (SSTI / XSS / escaping). |
 | `**/*.{haml,slim}`                              | `haml_slim.md` — HAML and Slim templates (SSTI / XSS / escaping / indentation semantics). |
 | `**/*.erb`                                      | `erb.md` — ERB templates (SSTI / XSS / escaping / whitespace and output structure). |
@@ -338,12 +339,19 @@ matching order:
 | `**/*.jl`                                       | `julia.md` — Julia source.                                                                            |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                     |
 | `**/*.bicep`                                    | `bicep.md` — Bicep (Azure) templates.                                                                 |
+| `**/*.nix`                          | `nix.md` — Nix expressions and flakes.                                                                |
+| `**/*.{hs,lhs}`                     | `haskell.md` — Haskell source.                                                                        |
+| `**/*.{nim,nims,nimble}`            | `nim.md` — Nim source and package manifests.                                                          |
+| `**/*.swift`                        | `swift.md` — Swift source.                                                                            |
 | `**/*.nu`                                       | `nushell.md` — Nushell scripts.                                                                       |
 | `**/*.elm`                                      | `elm.md` - Elm source.                                                                                |
 | `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md` — Jsonnet configuration templates and libraries.                                         |
+| `**/*.zig`                          | `zig.md` — Zig source.                                                                                |
 | `**/*.thrift`                                   | `thrift.md` — Apache Thrift IDL wire compatibility.                                                   |
 | `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md` — Starlark and Bazel build, macro, and rule design.                                     |
 | `**/*.capnp`                                    | `capnp.md` — Cap'n Proto schema wire compatibility.                                                   |
+| `**/*.{ml,mli}`                     | `ocaml.md` — OCaml source.                                                                            |
+| `**/*.{re,rei}`                     | `ocaml.md` — ReasonML source.                                                                         |
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL, and Metal shaders.                                                    |
 | `**/*.{v,sv,vh}`                                | `verilog.md` — Verilog and SystemVerilog RTL.                                                         |
 | `**/*.{vhd,vhdl}`                               | `vhdl.md` — VHDL RTL.                                                                                 |
@@ -353,6 +361,7 @@ matching order:
 | `**/*.vy`                                       | `vyper.md` — Vyper smart contracts.                                                                   |
 | `**/*.rego`                                     | `rego.md` — Rego policy (OPA).                                                                        |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell scripts, modules, and data/manifest files.                               |
+| `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — Clojure / ClojureScript source and EDN data. |
 | _(fallback)_                                    | `default.md`                                                                                          |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

@@ -235,7 +235,7 @@ silently falls back to a default for unknown values rather than erroring.
 
 Everything else is rejected, including the integration flags the adapter owns
 (`--format`, `--audience`, `--color`, `--output`, `--repo`, `--rule`,
-`--tools`, `--resume`), the runtime overrides (`--model`, `--provider`),
+`--resume`), the runtime overrides (`--model`, `--provider`),
 `--preview`, and any bare word that is not a flag.
 
 ### Result types

@@ -25,7 +25,7 @@ flowchart TD
 ```
 
 Оркестрация реализована в пакете
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/).
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/).
 Основные файлы:
 
 - `agent.go` — диспетчеризация и оркестрация по группам;
@@ -35,7 +35,7 @@ flowchart TD
 - `util.go` — вспомогательные функции.
 
 Цикл вызова инструментов и сжатие памяти находятся рядом, в пакете
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/).
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/).
 
 Основные точки входа:
 
@@ -363,9 +363,10 @@ if countMessagesTokens(messages) > tokenLimit {
 Сам шаблон нельзя переопределить через CLI: чтобы изменить промпты,
 отредактируйте
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)
-и заново соберите проект. Флаг `--tools` переопределяет *реестр инструментов*
-(заменяет JSON, используемый `internal/config/toolsconfig`), а не шаблон. См.
-раздел [Инструменты](../tools/#customizing-tools).
+и заново соберите проект. Встроенные определения инструментов также нельзя
+переопределить во время выполнения. Для рекомендаций по проекту используйте
+правила ревью и фоновый контекст, а для внешнего бизнес-контекста — MCP.
+См. раздел [Инструменты](../tools/#customizing-tools).
 
 > **Особенность синтаксиса плейсхолдеров.** Все перечисленные выше плейсхолдеры
 > используют двойные фигурные скобки `{{…}}`, **кроме** `RE_LOCATION_TASK`,

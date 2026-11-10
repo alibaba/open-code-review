@@ -34,9 +34,10 @@ during the plan phase: planning is read-only.
 > ignored by design. Cross-file concerns surface as comments only when
 > they're observable from the **current file's diff**.
 
-To override the tool registry, pass `--tools <path>` to a JSON file with
-the same shape as the embedded one. This lets you disable a tool, edit
-a description, or add a new tool backed by an existing provider.
+Built-in tool definitions ship with OCR and cannot be overridden at runtime.
+Use [review rules](../review-rules/) for project guidance and [MCP](../mcp/)
+for external business context. See [migration guidance](#customizing-tools)
+if you previously supplied a custom tools file.
 
 ## `task_done`
 
@@ -359,34 +360,32 @@ like `"Error: file not found: src/missing.go"`. The model then decides
 whether to retry, ask for a different file, or call `task_done`.
 
 If a tool name isn't in the registry, OCR returns the constant
-`tool.NotAvailableMsg` rather than crashing. This makes runtime tool
-disabling (via `--tools`) safe.
+`tool.NotAvailableMsg` rather than crashing, so an unknown tool call is
+reported back to the model as an unavailable tool.
 
-## Customizing tools
+## Tool customization limits and migration {#customizing-tools}
 
-Two paths to extend:
+OCR uses a dedicated review agent whose core workflow and built-in tools are
+validated together through tests and benchmarks, rather than a user-defined
+tool registry.
 
-### 1. Disable a tool
+**Migration:** `--tools` has been removed from both `ocr review` and `ocr scan`.
+Old invocations now fail with `unknown flag: --tools`; remove the flag and its
+file argument from scripts, CI jobs, and shell aliases.
 
-Copy `tools.json`, drop the entry you don't want, then run:
+- For project-specific review guidance, use [review rules](../review-rules/)
+  or `--background` (`review` also supports `--background-file`).
+- For requirements, knowledge bases, or other external business context,
+  configure [MCP servers](../mcp/). MCP is currently connected only in `review`,
+  not `scan`, and cannot replace tools with built-in names.
+- Disabling built-in tools or changing their descriptions, schemas, or phase
+  availability has no runtime replacement. Core changes require source edits,
+  a rebuild, and appropriate tests and benchmark validation.
 
-```bash
-ocr review --tools ./my-tools.json
-```
-
-For example, if you want a "comment-only" reviewer that never reads
-extra context, keep only `code_comment` and `task_done`.
-
-### 2. Re-describe a tool
-
-Keep the `name` (the providers are looked up by name internally) but
-change the `description` to nudge the model. This is the easiest way to
-inject project-specific guidance — e.g., "When using `file_read`,
-always read at least 30 lines around the change."
-
-> Adding **new** tool _names_ requires Go-side wiring; see
-> `internal/tool/definitions.go` and the providers under
-> `internal/tool/`. The JSON file alone can't add new behaviour.
+`--max-tools` still controls the tool-round budget. The MCP setting
+`mcp_servers.<name>.tools` still filters external tools; it is unrelated to
+the removed flag. Existing session files remain readable, but start a new
+review rather than resuming a session that used custom tool definitions.
 
 ## See Also
 
