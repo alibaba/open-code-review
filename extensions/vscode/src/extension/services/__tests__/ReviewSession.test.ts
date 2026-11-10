@@ -23,16 +23,30 @@ describe('resultToState', () => {
 
   // `ocr review` reports its manifest terminal state: complete | partial | failed | skipped.
   it('returns failed for partial without comments', () => {
-    expect(resultToState({ status: 'partial' as any, comments: [], warnings: [] })).toBe('failed');
+    expect(resultToState({ status: 'partial', comments: [], warnings: [] })).toBe('failed');
   });
   it('returns failed for failed without comments', () => {
-    expect(resultToState({ status: 'failed' as any, comments: [], warnings: [] })).toBe('failed');
+    expect(resultToState({ status: 'failed', comments: [], warnings: [] })).toBe('failed');
   });
   it('returns done for partial with comments', () => {
-    expect(resultToState({ status: 'partial' as any, comments: [{} as any], warnings: [] })).toBe('done');
+    expect(resultToState({ status: 'partial', comments: [{} as any], warnings: [] })).toBe('done');
   });
   it('returns empty for complete without comments', () => {
-    expect(resultToState({ status: 'complete' as any, comments: [], warnings: [] })).toBe('empty');
+    expect(resultToState({ status: 'complete', comments: [], warnings: [] })).toBe('empty');
+  });
+  it('returns empty for completed_with_warnings without comments', () => {
+    expect(resultToState({ status: 'completed_with_warnings', comments: [], warnings: [] })).toBe('empty');
+  });
+
+  // Like the IntelliJ plugin: only a recognized, non-failing status may report an empty review.
+  it('returns failed for an unrecognized status without comments', () => {
+    expect(resultToState({ status: 'aborted' as any, comments: [], warnings: [] })).toBe('failed');
+  });
+  it('returns failed when the status is missing', () => {
+    expect(resultToState({ status: undefined as any, comments: [], warnings: [] })).toBe('failed');
+  });
+  it('returns failed for an unrecognized status even with comments', () => {
+    expect(resultToState({ status: 'aborted' as any, comments: [{} as any], warnings: [] })).toBe('failed');
   });
 });
 
@@ -47,5 +61,16 @@ describe('ReviewSession.run', () => {
     const session = new ReviewSession(cli as any, '/repo');
     await session.run({} as any, { onState, onLog: jest.fn(), onDone: jest.fn() });
     expect(onState).toHaveBeenLastCalledWith('failed', message);
+  });
+
+  it('reports a result without a status as failed', async () => {
+    const cli = {
+      review: jest.fn().mockResolvedValue({ comments: [], warnings: [] }),
+      cancel: jest.fn(),
+    };
+    const onState = jest.fn();
+    const session = new ReviewSession(cli as any, '/repo');
+    await session.run({} as any, { onState, onLog: jest.fn(), onDone: jest.fn() });
+    expect(onState).toHaveBeenLastCalledWith('failed', 'Review did not complete successfully (status: missing)');
   });
 });

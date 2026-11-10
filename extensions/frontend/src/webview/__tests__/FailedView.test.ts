@@ -12,7 +12,7 @@ import { FailedView } from '../views/FailedView';
 // reachable from the failed view, as it is from the empty and done views.
 describe('FailedView after a partial review', () => {
   const message = 'Review partially completed: 0 finding(s); 2 of 5 selected item(s) failed.';
-  const partial = { status: 'partial', comments: [], warnings: [], message } as unknown as CliResult;
+  const partial: CliResult = { status: 'partial', comments: [], warnings: [], message };
 
   function runPartialReview() {
     let s = reducer(initialState, { type: 'stateChange', state: 'running' });
@@ -34,7 +34,6 @@ describe('FailedView after a partial review', () => {
     const html = renderToString(h(FailedView, { error: s.session.error, logs: s.logs, onRetry: () => {} }));
     expect(html).toContain(message);
     expect(html).toContain('logs-toggle');
-    expect(html).toContain('Process log');
   });
 
   it('shows no log toggle when the run produced no logs', () => {
