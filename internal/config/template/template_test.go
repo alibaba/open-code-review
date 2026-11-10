@@ -24,6 +24,19 @@ func TestLoadScanDefault_BudgetParsed(t *testing.T) {
 	}
 }
 
+func TestLoadScanDefault_PlanThreshold(t *testing.T) {
+	tpl, err := LoadScanDefault()
+	if err != nil {
+		t.Fatalf("LoadScanDefault: %v", err)
+	}
+	if tpl.PlanModeLineThreshold != 200 {
+		t.Errorf("PlanModeLineThreshold = %d, want 200", tpl.PlanModeLineThreshold)
+	}
+	if tpl.PlanTask == nil || len(tpl.PlanTask.Messages) == 0 {
+		t.Fatal("default scan template must define PLAN_TASK messages")
+	}
+}
+
 func TestApplyLanguage_ScanTemplate(t *testing.T) {
 	tpl, err := LoadScanDefault()
 	if err != nil {

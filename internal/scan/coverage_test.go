@@ -15,6 +15,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -726,6 +727,103 @@ func TestRun_FullPipeline(t *testing.T) {
 	}
 }
 
+func TestRun_PlanThreshold(t *testing.T) {
+	zeroThreshold, negativeThreshold := 0, -1
+	for _, testCase := range []struct {
+		name              string
+		lineCount         int
+		noTrailingNewline bool
+		skipPlan          bool
+		threshold         *int
+		wantPlanCalls     int
+	}{
+		{name: "below threshold", lineCount: 199},
+		{name: "at threshold", lineCount: 200, wantPlanCalls: 1},
+		{name: "above threshold", lineCount: 201, wantPlanCalls: 1},
+		{name: "below threshold without final newline", lineCount: 199, noTrailingNewline: true},
+		{name: "at threshold without final newline", lineCount: 200, noTrailingNewline: true, wantPlanCalls: 1},
+		{name: "global override", lineCount: 201, skipPlan: true},
+		{name: "zero threshold", lineCount: 1, threshold: &zeroThreshold, wantPlanCalls: 1},
+		{name: "negative threshold", lineCount: 1, threshold: &negativeThreshold, wantPlanCalls: 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := initTestRepo(t)
+			content := "package fixture\n" + strings.Repeat("var _ = 1\n", testCase.lineCount-1)
+			if testCase.noTrailingNewline {
+				content = strings.TrimSuffix(content, "\n")
+			}
+			writeFile(t, repo, "fixture.go", []byte(content))
+			gitCommit(t, repo, "add scan fixture")
+
+			scanTemplate, err := template.LoadScanDefault()
+			if err != nil {
+				t.Fatalf("LoadScanDefault: %v", err)
+			}
+			if testCase.threshold != nil {
+				scanTemplate.PlanModeLineThreshold = *testCase.threshold
+			}
+			planJSON := `{"summary":"inspect fixture declarations","checkpoints":[]}`
+			client := &fakeScanClient{}
+			if testCase.wantPlanCalls > 0 {
+				client.responses = append(client.responses, &llm.ChatResponse{
+					Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &planJSON}}},
+				})
+			}
+			client.responses = append(client.responses, &llm.ChatResponse{
+				Choices: []llm.Choice{{Message: llm.ResponseMessage{
+					ToolCalls: []llm.ToolCall{{
+						ID: "done", Type: "function",
+						Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"},
+					}},
+				}}},
+			})
+			agent := NewAgent(Args{
+				RepoDir:        repo,
+				Template:       *scanTemplate,
+				LLMClient:      client,
+				MaxConcurrency: 1,
+				SkipPlan:       testCase.skipPlan,
+				SkipDedup:      true,
+				SkipSummary:    true,
+			})
+			if _, err := agent.Run(t.Context()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if agent.FilesReviewed() != 1 {
+				t.Errorf("FilesReviewed = %d, want 1", agent.FilesReviewed())
+			}
+			if client.calls != testCase.wantPlanCalls+1 {
+				t.Errorf("LLM calls = %d, want %d", client.calls, testCase.wantPlanCalls+1)
+			}
+			fileSession := agent.Session().FileSessions["fixture.go"]
+			if fileSession == nil {
+				t.Fatal("fixture.go must have a file session")
+			}
+			if got := len(fileSession.TaskRecords[session.PlanTask]); got != testCase.wantPlanCalls {
+				t.Errorf("PLAN_TASK calls = %d, want %d", got, testCase.wantPlanCalls)
+			}
+			mainRecords := fileSession.TaskRecords[session.MainTask]
+			if len(mainRecords) != 1 {
+				t.Fatalf("MAIN_TASK calls = %d, want 1", len(mainRecords))
+			}
+			var mainPrompt strings.Builder
+			for _, message := range mainRecords[0].RequestMessages {
+				mainPrompt.WriteString(message.ExtractText())
+			}
+			if !strings.Contains(mainPrompt.String(), content) {
+				t.Error("MAIN_TASK must receive the complete file content")
+			}
+			wantGuidance := "(no pre-scan plan; review the entire file as usual)"
+			if testCase.wantPlanCalls > 0 {
+				wantGuidance = "**Summary**: inspect fixture declarations"
+			}
+			if !strings.Contains(mainPrompt.String(), wantGuidance) {
+				t.Errorf("MAIN_TASK prompt must include %q", wantGuidance)
+			}
+		})
+	}
+}
+
 func TestDispatchSubtasks_ResumeSkipsCompletedFiles(t *testing.T) {
 	doneContent := ""
 	client := &fakeScanClient{
@@ -863,17 +961,310 @@ func TestDispatchSubtasks_WithoutTaskDoneIsAllFailed(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "all 1 file scan(s) failed") {
 		t.Fatalf("expected all-failed error, got %v", err)
 	}
-	warnings := a.Warnings()
-	if len(warnings) != 1 || warnings[0].Type != "scan_subtask_error" ||
-		!strings.Contains(warnings[0].Message, "main_task did not complete") {
-		t.Fatalf("warnings = %+v, want one incomplete scan subtask error", warnings)
+	// The runner also records the spent round budget, with its incomplete
+	// verdict; the scan_subtask_error is the failure diagnostic asserted here.
+	var subtaskErrors []llmloop.AgentWarning
+	for _, w := range a.Warnings() {
+		if w.Type == "scan_subtask_error" {
+			subtaskErrors = append(subtaskErrors, w)
+		}
+	}
+	if len(subtaskErrors) != 1 || !strings.Contains(subtaskErrors[0].Message, "main_task did not complete") {
+		t.Fatalf("subtask errors = %+v, want one incomplete scan subtask error", subtaskErrors)
 	}
 	// Scan opts out of the run manifest and --format json discards the progress
 	// lines, so this warning is the whole diagnostic: it must name the trigger
 	// (here the exhausted MaxToolRequestTimes budget), not just report that the
 	// task did not finish.
-	if want := llmloop.StopMaxRounds.Reason(); !strings.Contains(warnings[0].Message, want) {
-		t.Errorf("warning %q does not name the stop trigger %q", warnings[0].Message, want)
+	if want := llmloop.StopMaxRounds.Reason(); !strings.Contains(subtaskErrors[0].Message, want) {
+		t.Errorf("warning %q does not name the stop trigger %q", subtaskErrors[0].Message, want)
+	}
+}
+
+// A file whose tool budget runs out mid-review but which the model then marks
+// done in the grace round must be checkpointed as completed. Treating it as
+// failed both misreports the scan and makes the next resume re-run a file that
+// was already finished.
+func TestDispatchSubtasks_GraceRoundTaskDoneCheckpointed(t *testing.T) {
+	testHome := t.TempDir()
+	t.Setenv("HOME", testHome)
+	t.Setenv("USERPROFILE", testHome)
+	repoDir := t.TempDir()
+	items := []model.ScanItem{{Path: "a.go", Content: "package a\nfunc f() {}\n", LineCount: 2}}
+
+	tpl := makeTemplateWithFullScan()
+	tpl.MaxTokens = 100000
+	tpl.MaxToolRequestTimes = 1
+
+	collector := tool.NewCommentCollector()
+	registry := tool.NewRegistry()
+	registry.Register(&tool.CodeCommentProvider{Collector: collector})
+	registry.Freeze()
+
+	// Round 1 spends the only tool-request round on a finding; the grace round
+	// then declares the file done.
+	client := &fakeScanClient{responses: []*llm.ChatResponse{
+		scanCodeCommentResponse("found something"),
+		scanTaskDoneResponse(),
+	}}
+
+	a := NewAgent(Args{
+		Template:  tpl,
+		LLMClient: client,
+		Model:     "test",
+		Tools:     registry,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
+		CommentCollector: collector,
+		MaxConcurrency:   1,
+		SkipPlan:         true,
+		SkipDedup:        true,
+		SkipSummary:      true,
+		RepoDir:          repoDir,
+		Session: session.New(repoDir, "main", "test", session.SessionOptions{
+			ReviewMode: session.ReviewModeFullScan,
+		}),
+	})
+	a.items = items
+	a.currentDate = "2026-06-26"
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if len(comments) != 1 || comments[0].Content != "found something" {
+		t.Fatalf("comments = %+v, want the round 1 finding", comments)
+	}
+	var limitWarnings []llmloop.AgentWarning
+	for _, w := range a.Warnings() {
+		if w.Type == "scan_subtask_error" {
+			t.Fatalf("a file completed in the grace round must not warn as failed: %+v", w)
+		}
+		if w.Type == reviewtask.WarningReviewLimitReached {
+			limitWarnings = append(limitWarnings, w)
+		}
+	}
+	if len(limitWarnings) != 1 || limitWarnings[0].File != items[0].Path ||
+		!strings.Contains(limitWarnings[0].Message, "the grace round completed the task") {
+		t.Fatalf("limit warnings = %+v, want one completed verdict on %s", limitWarnings, items[0].Path)
+	}
+	if err := a.Session().Finalize(); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+	state, err := session.LoadResumeState(repoDir, a.SessionID())
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if _, ok := state.Item(scanItemFingerprint(items[0])); !ok {
+		t.Fatal("a grace-round completion must persist a checkpoint that resume can reuse")
+	}
+}
+
+// The same completion, but with zero findings and nothing after the file, is
+// the case where the limit would otherwise vanish entirely: no scan_subtask_error
+// fires (the file finished) and no later work can warn again. Both declared
+// limits must leave exactly one visible warning while the file stays completed
+// and reusable for resume.
+func TestDispatchSubtasks_GraceRoundLimitVisibleWithZeroFindings(t *testing.T) {
+	const tokenBudget = 30_000
+	cases := []struct {
+		name            string
+		maxToolRequests int
+		tokenBudget     int64
+		roundOneUsage   int64
+	}{
+		{name: "max_tool_requests", maxToolRequests: 1},
+		{name: "token_budget", maxToolRequests: 5, tokenBudget: tokenBudget, roundOneUsage: tokenBudget + 10_000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			testHome := t.TempDir()
+			t.Setenv("HOME", testHome)
+			t.Setenv("USERPROFILE", testHome)
+			repoDir := t.TempDir()
+			items := []model.ScanItem{{Path: "a.go", Content: "package a\nfunc f() {}\n", LineCount: 2}}
+
+			tpl := makeTemplateWithFullScan()
+			tpl.MaxTokens = 100000
+			tpl.MaxToolRequestTimes = tc.maxToolRequests
+
+			collector := tool.NewCommentCollector()
+			registry := tool.NewRegistry()
+			registry.Register(&tool.CodeCommentProvider{Collector: collector})
+			registry.Register(tool.NewFileReadDiff(tool.DiffMap{}))
+			registry.Freeze()
+
+			// Round 1 spends the limit on a read and reports no finding; the
+			// grace round then declares the file done.
+			client := &fakeScanClient{responses: []*llm.ChatResponse{
+				{
+					Choices: []llm.Choice{{
+						Message: llm.ResponseMessage{ToolCalls: []llm.ToolCall{{
+							ID: "read", Type: "function",
+							Function: llm.FunctionCall{Name: "file_read_diff", Arguments: `{"path_array":["a.go"]}`},
+						}}},
+					}},
+					Usage: &llm.UsageInfo{PromptTokens: tc.roundOneUsage},
+				},
+				scanTaskDoneResponse(),
+			}}
+
+			a := NewAgent(Args{
+				Template:  tpl,
+				LLMClient: client,
+				Model:     "test",
+				Tools:     registry,
+				MainToolDefs: []llm.ToolDef{
+					{Type: "function", Function: llm.FunctionDef{Name: "file_read_diff"}},
+					{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+					{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+				},
+				CommentCollector: collector,
+				MaxTokensBudget:  tc.tokenBudget,
+				MaxConcurrency:   1,
+				SkipPlan:         true,
+				SkipDedup:        true,
+				SkipSummary:      true,
+				RepoDir:          repoDir,
+				Session: session.New(repoDir, "main", "test", session.SessionOptions{
+					ReviewMode: session.ReviewModeFullScan,
+				}),
+			})
+			a.items = items
+			a.currentDate = "2026-06-26"
+			a.injectScanContentMap()
+
+			comments, err := a.dispatchSubtasks(context.Background())
+			if err != nil {
+				t.Fatalf("dispatchSubtasks: %v", err)
+			}
+			if len(comments) != 0 {
+				t.Fatalf("comments = %+v, want none", comments)
+			}
+			if client.calls != 2 {
+				t.Fatalf("LLM calls = %d, want 2 (1 round + 1 grace)", client.calls)
+			}
+			// The file completed, so the run-level budget flag stays false —
+			// the warning must not redefine budget_exceeded.
+			if a.BudgetExceeded() {
+				t.Fatal("a limit the grace round completed must not set BudgetExceeded")
+			}
+			var limitWarnings []llmloop.AgentWarning
+			for _, w := range a.Warnings() {
+				if w.Type == "scan_subtask_error" {
+					t.Fatalf("a file completed in the grace round must not warn as failed: %+v", w)
+				}
+				if w.Type == reviewtask.WarningReviewLimitReached {
+					limitWarnings = append(limitWarnings, w)
+				}
+			}
+			if len(limitWarnings) != 1 || limitWarnings[0].File != items[0].Path ||
+				!strings.Contains(limitWarnings[0].Message, "the grace round completed the task") {
+				t.Fatalf("limit warnings = %+v, want one completed verdict on %s", limitWarnings, items[0].Path)
+			}
+			if err := a.Session().Finalize(); err != nil {
+				t.Fatalf("finalize session: %v", err)
+			}
+			state, err := session.LoadResumeState(repoDir, a.SessionID())
+			if err != nil {
+				t.Fatalf("LoadResumeState: %v", err)
+			}
+			if _, ok := state.Item(scanItemFingerprint(items[0])); !ok {
+				t.Fatal("the completed checkpoint must stay reusable for resume")
+			}
+		})
+	}
+}
+
+func TestDispatchSubtasks_GraceRoundMixedTaskDoneNotCheckpointed(t *testing.T) {
+	limits := []struct {
+		name            string
+		maxToolRequests int
+		tokenBudget     int64
+	}{
+		{name: "max_tool_requests", maxToolRequests: 1},
+		{name: "token_budget", maxToolRequests: 5, tokenBudget: 30_000},
+	}
+	for _, limit := range limits {
+		for _, states := range [][]string{{"DONE", "FAILED"}, {"FAILED", "DONE"}} {
+			t.Run(limit.name+"/"+strings.Join(states, "_then_"), func(t *testing.T) {
+				testHome := t.TempDir()
+				t.Setenv("HOME", testHome)
+				t.Setenv("USERPROFILE", testHome)
+				repoDir := t.TempDir()
+				item := model.ScanItem{Path: "a.go", Content: "package a\nfunc f() {}\n", LineCount: 2}
+				tpl := makeTemplateWithFullScan()
+				tpl.MaxTokens = 100000
+				tpl.MaxToolRequestTimes = limit.maxToolRequests
+
+				collector := tool.NewCommentCollector()
+				registry := tool.NewRegistry()
+				registry.Register(&tool.CodeCommentProvider{Collector: collector})
+				registry.Register(tool.NewFileReadDiff(tool.DiffMap{}))
+				registry.Freeze()
+
+				var calls []llm.ToolCall
+				for _, state := range states {
+					calls = append(calls, llm.ToolCall{
+						ID: state, Type: "function",
+						Function: llm.FunctionCall{Name: "task_done", Arguments: `{"state":"` + state + `"}`},
+					})
+				}
+				client := &fakeScanClient{responses: []*llm.ChatResponse{
+					{
+						Choices: []llm.Choice{{Message: llm.ResponseMessage{ToolCalls: []llm.ToolCall{{
+							ID: "read", Type: "function",
+							Function: llm.FunctionCall{Name: "file_read_diff", Arguments: `{"path_array":["a.go"]}`},
+						}}}}},
+						Usage: &llm.UsageInfo{PromptTokens: 40_000},
+					},
+					{Choices: []llm.Choice{{Message: llm.ResponseMessage{ToolCalls: calls}}}},
+				}}
+				agent := NewAgent(Args{
+					Template:  tpl,
+					LLMClient: client,
+					Model:     "test",
+					Tools:     registry,
+					MainToolDefs: []llm.ToolDef{
+						{Type: "function", Function: llm.FunctionDef{Name: "file_read_diff"}},
+						{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+						{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+					},
+					CommentCollector: collector,
+					MaxTokensBudget:  limit.tokenBudget,
+					MaxConcurrency:   1,
+					SkipPlan:         true,
+					SkipDedup:        true,
+					SkipSummary:      true,
+					RepoDir:          repoDir,
+					Session: session.New(repoDir, "main", "test", session.SessionOptions{
+						ReviewMode: session.ReviewModeFullScan,
+					}),
+				})
+				agent.items = []model.ScanItem{item}
+				agent.currentDate = "2026-06-26"
+				agent.injectScanContentMap()
+
+				if _, err := agent.dispatchSubtasks(context.Background()); err == nil || !strings.Contains(err.Error(), "all 1 file scan(s) failed") {
+					t.Errorf("dispatchSubtasks error = %v, want the single file to fail", err)
+				}
+				if client.calls != 2 {
+					t.Errorf("LLM calls = %d, want 2 (1 main + 1 grace)", client.calls)
+				}
+				if err := agent.Session().Finalize(); err != nil {
+					t.Fatalf("finalize session: %v", err)
+				}
+				resumeState, err := session.LoadResumeState(repoDir, agent.SessionID())
+				if err != nil {
+					t.Fatalf("LoadResumeState: %v", err)
+				}
+				if _, ok := resumeState.Item(scanItemFingerprint(item)); ok {
+					t.Error("a failed grace round must not leave a reusable completion checkpoint")
+				}
+			})
+		}
 	}
 }
 

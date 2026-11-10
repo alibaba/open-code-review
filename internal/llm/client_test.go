@@ -988,16 +988,18 @@ func TestOpenAIClient_StreamOptionsConfigOverrides(t *testing.T) {
 // Completions request. Forwarding it makes the API answer with
 // text/event-stream (SSE) while Chat.Completions.New expects a JSON body,
 // breaking every call (see issue #647). Only extra_body.stream=true as a
-// boolean triggers the streaming path; other types (string "true", bool
-// false) must be dropped from the wire body entirely so the server returns
-// JSON. Other extra_body keys are still forwarded.
+// boolean triggers the streaming path. A false boolean must be forwarded so
+// gateways that stream by default can be explicitly told to return JSON;
+// other non-boolean values must still be dropped. Other extra_body keys are
+// still forwarded.
 func TestOpenAIClient_NonStreamingRequestDropsStreamField(t *testing.T) {
 	tests := []struct {
-		name  string
-		value any
+		name       string
+		value      any
+		wantStream bool
 	}{
 		{name: "missing"},
-		{name: "boolean false", value: false},
+		{name: "boolean false", value: false, wantStream: true},
 		{name: "string true", value: "true"},
 	}
 
@@ -1011,8 +1013,13 @@ func TestOpenAIClient_NonStreamingRequestDropsStreamField(t *testing.T) {
 					return
 				}
 
-				if _, exists := body["stream"]; exists {
-					t.Errorf("stream field should NOT be present in non-streaming request body, got %v", body["stream"])
+				stream, present := body["stream"]
+				if tt.wantStream {
+					if !present || stream != false {
+						t.Errorf("stream = %v (present %v), want false", stream, present)
+					}
+				} else if present {
+					t.Errorf("stream field should NOT be present in non-streaming request body, got %v", stream)
 				}
 
 				w.Header().Set("Content-Type", "application/json")
@@ -1413,12 +1420,77 @@ func TestAnthropicClient_NoExtraHeadersWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestAnthropicClient_ExtraBodyStreamDropped verifies that an
-// extra_body.stream=true is NOT forwarded to the Messages API. Forwarding it
-// makes the API answer with text/event-stream (SSE) while Messages.New expects
-// a JSON body, breaking every call (see issue #647). Other extra_body keys
-// must still be forwarded.
+// True and non-boolean stream values must not request SSE while Messages.New
+// expects JSON. Other extra_body keys must still be forwarded.
 func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
+	testCases := []struct {
+		name  string
+		value any
+	}{
+		{name: "boolean true", value: true},
+		{name: "string true", value: "true"},
+		{name: "string false", value: "false"},
+		{name: "null", value: nil},
+		{name: "number", value: 1},
+		{name: "object", value: map[string]any{}},
+		{name: "array", value: []any{}},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(test *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					test.Errorf("decode request body: %v", err)
+					http.Error(writer, "invalid request body", http.StatusBadRequest)
+					return
+				}
+				if value, present := body["stream"]; present {
+					test.Errorf("request body should NOT contain a stream field, got %v", value)
+				}
+				if body["keep_me"] != "yes" {
+					test.Errorf("other extra_body keys must still be forwarded; keep_me = %v", body["keep_me"])
+				}
+
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{
+					"id":"msg_stream_test",
+					"type":"message",
+					"role":"assistant",
+					"model":"claude-test",
+					"content":[{"type":"text","text":"ok"}],
+					"stop_reason":"end_turn",
+					"usage":{"input_tokens":1,"output_tokens":1}
+				}`))
+			}))
+			defer server.Close()
+
+			client := NewAnthropicClient(ClientConfig{
+				URL:    server.URL + "/v1/messages",
+				APIKey: "test-key",
+				Model:  "claude-test",
+				ExtraBody: map[string]any{
+					"stream":               testCase.value,
+					"keep_me":              "yes",
+					"temperature_override": 0.1,
+				},
+			})
+
+			resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages:  []Message{{Role: "user", Content: "hi"}},
+				MaxTokens: 64,
+			})
+			if err != nil {
+				test.Fatalf("CompletionsWithCtx: %v", err)
+			}
+			if resp.Content() != "ok" {
+				test.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+			}
+		})
+	}
+}
+
+func TestAnthropicClient_ExtraBodyStreamFalseForwarded(t *testing.T) {
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1426,7 +1498,7 @@ func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
 		_ = json.Unmarshal(raw, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"id":"msg_stream_test",
+			"id":"msg_stream_false_test",
 			"type":"message",
 			"role":"assistant",
 			"model":"claude-test",
@@ -1442,28 +1514,19 @@ func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
 		APIKey: "test-key",
 		Model:  "claude-test",
 		ExtraBody: map[string]any{
-			"stream":               true,
-			"keep_me":              "yes",
-			"temperature_override": 0.1,
+			"stream": false,
 		},
 	})
 
-	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
 		Messages:  []Message{{Role: "user", Content: "hi"}},
 		MaxTokens: 64,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("CompletionsWithCtx: %v", err)
 	}
 
-	if _, present := gotBody["stream"]; present {
-		t.Errorf("request body should NOT contain a stream field, got %v", gotBody["stream"])
-	}
-	if gotBody["keep_me"] != "yes" {
-		t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
-	}
-	if resp.Content() != "ok" {
-		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+	if got, present := gotBody["stream"]; !present || got != false {
+		t.Errorf("stream = %v (present %v), want false", got, present)
 	}
 }
 

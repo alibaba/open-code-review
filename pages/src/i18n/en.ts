@@ -10,6 +10,11 @@ export const en = {
   'navbar.blog': 'Blog',
   'navbar.getStarted': 'Get Started',
 
+  'providers.title': 'Built-in support for leading model providers',
+  'providers.description': 'Add your API key to start reviewing, or connect a private model service compatible with standard protocols.',
+  'providers.listLabel': 'Supported model brands',
+  'providers.explore': 'Explore supported providers',
+
   // Hero
   'hero.title': 'AI Code Review\nValidated on Millions of Real-World Tasks',
   'hero.description': 'Open Code Review brings Alibaba\'s battle-tested code review Agent into your workflow. Connect any LLM, keep data fully private, and get review comments developers actually adopt.',

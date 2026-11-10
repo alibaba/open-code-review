@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 )
@@ -151,4 +153,108 @@ func TestRun_PromptOverflowRecordsFailure(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRun_TokenBudgetStopSurfacesAsBudgetExceeded pins the gap the dispatch
+// look-ahead cannot close: a single scan item admitted while usage is still
+// low can outgrow the budget on its own, and only an in-conversation check
+// (llmloop.RunMainTask's per-round check) can stop it. The resulting
+// StopTokenBudget must surface on the agent's BudgetExceeded() flag and
+// emit a token_budget_reached warning so --format json and the stderr
+// usage line agree with the run-level state.
+//
+// Without this propagation, --format json reports budget_exceeded: false
+// after a token-budget stop fired and the stderr "budget_exceeded=..."
+// line lies too, masking the partial stop from CI consumers.
+//
+// The fake client returns no tool calls, so the main loop retries rather
+// than completing. Its first response consumes 26K tokens, exceeding the
+// 25K budget; the next round's pre-flight check trips StopTokenBudget.
+// The dispatch look-ahead admits the file because its estimated total
+// cost is about 19K tokens, below the 25K budget.
+func TestRun_TokenBudgetStopSurfacesAsBudgetExceeded(t *testing.T) {
+	perCall := int64(26_000)
+	budget := int64(25_000) // > per-file estimate (~19K) so the look-ahead admits the file
+	client := &emptyRetryClient{perCallTokens: perCall}
+
+	repo := initTestRepo(t)
+	writeFile(t, repo, "single.go", []byte("package main\n"))
+	gitCommit(t, repo, "init")
+
+	tpl := budgetTestTemplate()
+	tpl.MaxTokens = 100_000
+	tpl.MaxToolRequestTimes = 3
+	tpl.MainTask = template.LlmConversation{
+		Messages: []template.ChatMessage{
+			{Role: "user", Content: "review {{file_content}}"},
+		},
+	}
+
+	a := NewAgent(Args{
+		RepoDir:         repo,
+		Template:        tpl,
+		LLMClient:       client,
+		MaxConcurrency:  1,
+		SkipPlan:        true,
+		SkipDedup:       true,
+		SkipSummary:     true,
+		MaxTokensBudget: budget,
+		Session: session.New(repo, "main", "test", session.SessionOptions{
+			ReviewMode: session.ReviewModeFullScan,
+		}),
+	})
+	_, err := a.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "all 1 file scan(s) failed") {
+		t.Fatalf("expected all-files-failed error, got %v", err)
+	}
+	if !a.BudgetExceeded() {
+		t.Error("BudgetExceeded() = false, want true after an in-flight token-budget stop")
+	}
+	var budgetWarnings int
+	for _, w := range a.Warnings() {
+		if w.Type == "token_budget_reached" {
+			budgetWarnings++
+		}
+	}
+	if budgetWarnings == 0 {
+		t.Errorf("expected a token_budget_reached warning; got %+v", a.Warnings())
+	}
+	// The per-item scan_subtask_error warning also names the same stop
+	// trigger via stop.Reason(); llmloop's per-round check tripped
+	// StopTokenBudget, so that string is the diagnostic that survives
+	// --format json's discarded [ocr] progress lines.
+	var sawStopReason bool
+	for _, w := range a.Warnings() {
+		if w.Type == "scan_subtask_error" && strings.Contains(w.Message, llmloop.StopTokenBudget.Reason()) {
+			sawStopReason = true
+		}
+	}
+	if !sawStopReason {
+		t.Errorf("scan_subtask_error warning does not name %q: %+v", llmloop.StopTokenBudget.Reason(), a.Warnings())
+	}
+}
+
+// emptyRetryClient answers every request with an empty assistant content and
+// no tool calls, so llmloop.RunMainTask takes the no-tool-calls retry branch
+// instead of completing on task_done. Used to drive the per-round
+// token-budget stop on a scan path that otherwise completes in one round.
+type emptyRetryClient struct {
+	perCallTokens int64
+	calls         int64 // atomic
+}
+
+func (f *emptyRetryClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	atomic.AddInt64(&f.calls, 1)
+	empty := ""
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{Role: "assistant", Content: &empty},
+		}},
+		Model: "fake",
+		Usage: &llm.UsageInfo{
+			PromptTokens:     f.perCallTokens,
+			CompletionTokens: 0,
+			TotalTokens:      f.perCallTokens,
+		},
+	}, nil
 }
