@@ -275,7 +275,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 3. `~/.opencodereview/rule.json`을 선언 순서대로 확인합니다.
 4. 내장 시스템 규칙 계층으로 넘어갑니다.
 
-내장 `system_rules.json`에서 고른 패턴을 상대적인 대조 순서대로 아래에 정리했습니다.
+내장 `system_rules.json`의 모든 패턴을 상대적인 대조 순서대로 아래에 정리했습니다.
 
 | 패턴                                            | 규칙 문서                                                                        |
 | ----------------------------------------------- | -------------------------------------------------------------------------------- |
@@ -295,6 +295,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md` — FreeMarker 템플릿(SSTI / XSS / null 처리).                     |
 | `**/*.{hbs,mustache}`                           | `handlebars_mustache.md` — Handlebars 및 Mustache 템플릿.                        |
 | `**/*.{jinja2,j2}`                              | `jinja.md` — Jinja 템플릿.                                                       |
+| `**/*.pug`                          | `pug.md` — Pug 템플릿.                                                              |
 | `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md` — EJS, Liquid, Nunjucks 템플릿(SSTI / XSS / 이스케이프). |
 | `**/*.{haml,slim}`                              | `haml_slim.md` — HAML 및 Slim 템플릿(SSTI / XSS / 이스케이프 / 들여쓰기 의미론). |
 | `**/*.erb`                                      | `erb.md` — ERB 템플릿(SSTI / XSS / 이스케이프 / 공백 및 출력 구조). |
@@ -319,12 +320,19 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.jl`                                       | `julia.md` — Julia 소스.                                                         |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                |
 | `**/*.bicep`                                    | `bicep.md` — Bicep(Azure) 템플릿.                                                |
+| `**/*.nix`                          | `nix.md` — Nix 식과 flake.                                                         |
+| `**/*.{hs,lhs}`                     | `haskell.md` — Haskell 소스.                                                       |
+| `**/*.{nim,nims,nimble}`            | `nim.md` — Nim 소스와 패키지 매니페스트.                                                    |
+| `**/*.swift`                        | `swift.md` — Swift 소스.                                                           |
 | `**/*.nu`                                       | `nushell.md` — Nushell 스크립트.                                                 |
 | `**/*.elm`                                      | `elm.md` — Elm 소스.                                                             |
 | `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리.                                 |
+| `**/*.zig`                          | `zig.md` — Zig 소스.                                                               |
 | `**/*.thrift`                                   | `thrift.md` — Apache Thrift IDL 통신 호환성.                                     |
 | `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md` — Starlark 및 Bazel 빌드, 매크로, 규칙 설계.                       |
 | `**/*.capnp`                                    | `capnp.md` — Cap'n Proto 스키마 통신 호환성.                                     |
+| `**/*.{ml,mli}`                     | `ocaml.md` — OCaml 소스.                                                           |
+| `**/*.{re,rei}`                     | `ocaml.md` — ReasonML 소스.                                                        |
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL 및 Metal 셰이더.                                  |
 | `**/*.{v,sv,vh}`                                | `verilog.md` — Verilog 및 SystemVerilog RTL.                                     |
 | `**/*.{vhd,vhdl}`                               | `vhdl.md` — VHDL RTL.                                                            |
