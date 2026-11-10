@@ -17,8 +17,8 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
-	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -1168,7 +1168,7 @@ func TestDispatchSubtasks_MainTaskWithoutTaskDoneIsNotReusableCheckpoint(t *test
 	var limitWarnings, subtaskErrors []AgentWarning
 	for _, w := range a.Warnings() {
 		switch w.Type {
-		case llmloop.WarningReviewLimitReached:
+		case reviewtask.WarningReviewLimitReached:
 			limitWarnings = append(limitWarnings, w)
 		case "subtask_error":
 			subtaskErrors = append(subtaskErrors, w)

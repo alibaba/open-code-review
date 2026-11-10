@@ -172,8 +172,8 @@ OCR 跳过该文件并继续——JSON 模式下你也会在 `warnings` 中看�
 先运行 `ocr review --preview`。plan 阶段在下面任一条件成立时运行：组内某个文件的
 `lines.changed` 达到 `PLAN_MODE_LINE_THRESHOLD`（默认 **50**），或该组含 2 个以上
 文件且合计变更行数达到 `PLAN_MODE_GROUP_LINE_THRESHOLD`（默认 **100**）。这是有意
-为之——大 diff 能从 plan 中受益。要为单次评审跳过它，用更小 diff 运行，或临时编辑内嵌模板
-（高级；需覆盖 `--tools`）。
+为之——大 diff 能从 plan 中受益。更小的 diff 可能低于这两个阈值。
+评审规划由内嵌模板控制，而不是工具覆盖参数；修改这一核心行为需要修改源码并重新构建。
 
 ### "Max tool requests reached"
 
@@ -187,9 +187,8 @@ OCR 跳过该文件并继续——JSON 模式下你也会在 `warnings` 中看�
 - 模型不擅长遵循“完成后调 `task_done`”指令。换更强模型（如 Claude Opus）。
 - 某工具持续报错而模型持续重试。看会话 JSONL——若同一工具结果重复，即是原因。
 - 文件确实大或上下文重，100 轮不够。用 `--max-tools <n>` 调高
-  （如 `--max-tools 150`）。`--max-tools` 只能**上调**：小于模板默认值
-  （`100`）的值不生效，1–49 还会先被上调到 `50`；`0`（默认）直接用模板默认
-  `100`。
+  （如 `--max-tools 150`）。解析后的正值会精确设置上限；1–49 会先被上调到
+  `50`，`0`（默认）直接使用模板默认值 `100`。
 - 模型完全不支持原生工具调用（本地模型常见）——见
   ["No tool calls parsed"（本地模型 / Ollama）](#no-tool-calls-parsed-本地模型-ollama)。
 

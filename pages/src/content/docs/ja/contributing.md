@@ -102,7 +102,7 @@ git checkout -b feat/anthropic-streaming
 例:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(readme): clarify endpoint resolution priority
 refactor(viewer): extract task-card rendering into helper
@@ -203,6 +203,10 @@ make build      # バイナリがビルドできることのスモークテス�
 CI は push のたびに同じ一式を実行するため、予期せぬ結果になることはありません。
 
 ## 新しいツールの追加
+
+この節は実行時の設定ではなく、組み込み Agent のソース変更を扱います。
+コアツールの変更にはテストとベンチマークによる検証が必要です。
+外部の業務コンテキストには [MCP サーバー](../mcp/)を使用してください。
 
 ツールは 2 つの部分から成ります。
 
