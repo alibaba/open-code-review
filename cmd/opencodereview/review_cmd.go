@@ -27,7 +27,6 @@ import (
 )
 
 type reviewOptions struct {
-	toolConfigPath        string
 	rulePath              string
 	repoDir               string
 	from                  string
@@ -161,7 +160,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return err
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
+	rt, err := loadLLMRuntime(cc.Template, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
 		Context:  ctx,

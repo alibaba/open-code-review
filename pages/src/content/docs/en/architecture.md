@@ -366,9 +366,9 @@ The placeholder substitution lives in
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go).
 The template itself isn't a CLI override — to change prompts you edit
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)
-and rebuild. The `--tools` flag is a *tool-registry* override (it
-swaps the JSON consumed by `internal/config/toolsconfig`), not a
-template override — see [Tools](../tools/#customizing-tools).
+and rebuild. Built-in tool definitions are also embedded and cannot be
+overridden at runtime. Use review rules and background for project guidance,
+or MCP for external business context — see [Tools](../tools/#customizing-tools).
 
 > **Placeholder syntax caveat.** All the placeholders above use
 > double-brace `{{…}}` syntax *except* `RE_LOCATION_TASK`, which

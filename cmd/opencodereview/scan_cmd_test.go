@@ -223,7 +223,6 @@ func TestParseScanFlags_PreviewWithResume(t *testing.T) {
 
 func TestParseScanFlags_AllStringFlags(t *testing.T) {
 	opts, err := parseScanFlags([]string{
-		"--tools", "/tmp/tools.json",
 		"--rule", "/tmp/rule.json",
 		"--repo", "/tmp/repo",
 		"--exclude", "*.md,*.txt",
@@ -234,9 +233,6 @@ func TestParseScanFlags_AllStringFlags(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if opts.toolConfigPath != "/tmp/tools.json" {
-		t.Errorf("toolConfigPath = %q", opts.toolConfigPath)
 	}
 	if opts.rulePath != "/tmp/rule.json" {
 		t.Errorf("rulePath = %q", opts.rulePath)

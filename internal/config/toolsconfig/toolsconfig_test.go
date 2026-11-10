@@ -5,74 +5,84 @@ package toolsconfig
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestLoad_Default(t *testing.T) {
-	tools, err := Load("")
+func TestLoadDefault(t *testing.T) {
+	tools, err := LoadDefault()
 	if err != nil {
 		t.Fatalf("Load default tools: %v", err)
 	}
-	if len(tools) == 0 {
-		t.Fatal("expected at least one tool from embedded config")
+	expected := []struct {
+		name string
+		plan bool
+	}{
+		{"task_done", false},
+		{"code_comment", false},
+		{"code_search", true},
+		{"file_read", false},
+		{"file_read_diff", true},
+		{"file_find", true},
 	}
-	// Verify first tool has required fields
-	first := tools[0]
-	if first.Name == "" {
-		t.Error("expected non-empty tool name")
+	if len(tools) != len(expected) {
+		t.Fatalf("got %d tools, want %d", len(tools), len(expected))
 	}
-	if first.Definition == nil {
-		t.Error("expected non-nil definition")
+	for index, want := range expected {
+		entry := tools[index]
+		if entry.Name != want.name || entry.PlanTask != want.plan || !entry.MainTask {
+			t.Errorf("tool %d: got %s (plan=%v, main=%v), want %s (plan=%v, main=true)", index, entry.Name, entry.PlanTask, entry.MainTask, want.name, want.plan)
+		}
+		var definition struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Parameters  struct {
+				Type       string                     `json:"type"`
+				Properties map[string]json.RawMessage `json:"properties"`
+				Required   []string                   `json:"required"`
+			} `json:"parameters"`
+		}
+		if err := json.Unmarshal(entry.Definition, &definition); err != nil {
+			t.Fatalf("parse %s: %v", entry.Name, err)
+		}
+		if definition.Name != entry.Name || definition.Description == "" {
+			t.Errorf("%s: invalid name or missing description", entry.Name)
+		}
+		if definition.Parameters.Type != "object" || len(definition.Parameters.Properties) == 0 {
+			t.Errorf("%s: expected object schema with properties", entry.Name)
+		}
+		for _, required := range definition.Parameters.Required {
+			if _, exists := definition.Parameters.Properties[required]; !exists {
+				t.Errorf("%s: required field %q missing from properties", entry.Name, required)
+			}
+		}
 	}
 }
 
-func TestLoad_CustomFile(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "tools.json")
-	data := `[
-		{"name": "test_tool", "plan_task": true, "main_task": false, "definition": {"name": "test_tool"}}
-	]`
-	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
-		t.Fatalf("write tools.json: %v", err)
+func TestLoadDefaultInvalidJSON(t *testing.T) {
+	original := defaultToolsJSON
+	t.Cleanup(func() { defaultToolsJSON = original })
+	defaultToolsJSON = []byte("not json")
+	_, err := LoadDefault()
+	if err == nil || !strings.Contains(err.Error(), "unmarshal embedded tools") {
+		t.Fatalf("got %v, want embedded tools parse error", err)
 	}
+}
 
-	tools, err := Load(path)
+func TestLoadDefaultIndependentCopies(t *testing.T) {
+	first, err := LoadDefault()
 	if err != nil {
-		t.Fatalf("Load custom file: %v", err)
+		t.Fatal(err)
 	}
-	if len(tools) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(tools))
+	original := string(first[0].Definition)
+	first[0].Name = "changed"
+	first[0].Definition[0] = '!'
+	second, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if tools[0].Name != "test_tool" {
-		t.Errorf("expected name=test_tool, got %s", tools[0].Name)
-	}
-	if !tools[0].PlanTask {
-		t.Error("expected PlanTask=true")
-	}
-	if tools[0].MainTask {
-		t.Error("expected MainTask=false")
-	}
-}
-
-func TestLoad_FileNotFound(t *testing.T) {
-	_, err := Load("/nonexistent/tools.json")
-	if err == nil {
-		t.Error("expected error for nonexistent file")
-	}
-}
-
-func TestLoad_InvalidJSON(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "tools.json")
-	if err := os.WriteFile(path, []byte("not json"), 0644); err != nil {
-		t.Fatalf("write tools.json: %v", err)
-	}
-
-	_, err := Load(path)
-	if err == nil {
-		t.Error("expected error for invalid JSON")
+	if second[0].Name != "task_done" || string(second[0].Definition) != original {
+		t.Fatal("mutating a loaded definition changed the embedded defaults")
 	}
 }
 

@@ -203,9 +203,9 @@ threshold is crossed:
 
 So a small file can still get a plan pass if it was grouped with other
 changes that add up. That's by design — large or wide diffs benefit
-from a planning pass. To skip it for a single review, run with a
-smaller diff, or temporarily edit the embedded template (advanced;
-you'll need to override `--tools`).
+from a planning pass. A smaller diff may fall below both thresholds.
+Review planning is controlled by the embedded template, not a tool override;
+changing that core behavior requires a source change and rebuild.
 
 ### "Max tool requests reached"
 

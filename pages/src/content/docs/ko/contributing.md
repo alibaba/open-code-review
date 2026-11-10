@@ -209,6 +209,10 @@ CI도 푸시할 때마다 같은 것을 돌립니다. 놀랄 일은 없습니다
 
 ## 새 도구 추가하기 {#adding-new-tools}
 
+이 절은 실행 시점의 설정이 아닌 내장 Agent의 소스 변경을 다룹니다.
+핵심 도구 변경은 테스트와 벤치마크로 검증하세요.
+외부 업무 맥락에는 [MCP 서버](../mcp/)를 사용하세요.
+
 도구는 두 부분으로 이뤄집니다.
 
 1. [`internal/config/toolsconfig/tools.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/toolsconfig/tools.json)의

@@ -298,8 +298,8 @@ if countMessagesTokens(messages) > tokenLimit {
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go)。
 模板本身不是 CLI 覆盖——要修改 prompt，你需要编辑
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)
-并重新构建。`--tools` 参数是*工具注册表*覆盖（它替换 `internal/config/toolsconfig`
-消费的 JSON），不是模板覆盖——见[工具](../tools/#customizing-tools)。
+并重新构建。内置工具定义同样内嵌，不支持运行时覆盖。项目指引使用评审规则和背景，
+外部业务上下文使用 MCP——见[工具](../tools/#customizing-tools)。
 
 > **占位符语法注意。** 以上所有占位符都使用双花括号
 > `{{…}}` 语法，*除了* `RE_LOCATION_TASK`，它替换单花括号

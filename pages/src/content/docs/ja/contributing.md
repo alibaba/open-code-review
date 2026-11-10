@@ -204,6 +204,10 @@ CI は push のたびに同じ一式を実行するため、予期せぬ結果�
 
 ## 新しいツールの追加
 
+この節は実行時の設定ではなく、組み込み Agent のソース変更を扱います。
+コアツールの変更にはテストとベンチマークによる検証が必要です。
+外部の業務コンテキストには [MCP サーバー](../mcp/)を使用してください。
+
 ツールは 2 つの部分から成ります。
 
 1. [`internal/config/toolsconfig/tools.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/toolsconfig/tools.json)

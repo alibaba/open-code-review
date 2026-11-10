@@ -208,6 +208,10 @@ CI runs the same set on every push; nothing surprising.
 
 ## Adding new tools
 
+This section covers source-level changes to the built-in agent, not runtime
+configuration. Validate core tool changes with tests and benchmarks. For
+external business context, use [MCP servers](../mcp/) instead.
+
 A tool has two parts:
 
 1. **JSON definition** in

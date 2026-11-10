@@ -202,6 +202,9 @@ CI 在每次推送时运行同一套，不会有意外。
 
 ## 添加新工具
 
+本节介绍内置 Agent 的源码级变更，而非运行时配置。核心工具变更需要测试和
+benchmark 验证。外部业务上下文请使用 [MCP 服务器](../mcp/)。
+
 一个工具有两部分：
 
 1. [`internal/config/toolsconfig/tools.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/toolsconfig/tools.json)
