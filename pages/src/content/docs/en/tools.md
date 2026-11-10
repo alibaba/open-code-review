@@ -363,7 +363,7 @@ If a tool name isn't in the registry, OCR returns the constant
 `tool.NotAvailableMsg` rather than crashing, so an unknown tool call is
 reported back to the model as an unavailable tool.
 
-## Customizing tools
+## Tool customization limits and migration {#customizing-tools}
 
 OCR uses a dedicated review agent whose core workflow and built-in tools are
 validated together through tests and benchmarks, rather than a user-defined

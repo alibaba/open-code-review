@@ -325,7 +325,7 @@ Match lines: 1
 若工具名不在注册表中，OCR 返回常量 `tool.NotAvailableMsg` 而不是崩溃，
 将未知工具调用作为工具不可用的结果反馈给模型。
 
-## 自定义工具 {#customizing-tools}
+## 工具定制限制与迁移 {#customizing-tools}
 
 OCR 使用专用审查 Agent，核心工作流与内置工具通过测试和 benchmark 一同验证，
 而不是由用户自行定义工具注册表。
