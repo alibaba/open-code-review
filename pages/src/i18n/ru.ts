@@ -304,6 +304,7 @@ export const ru: TranslationKeys = {
   'docs.sidebar.contributing': 'Участие в разработке',
   'docs.sidebar.faq': 'FAQ',
   'docs.sidebar.chatgptPreview': 'Вход через ChatGPT (предварительная версия)',
+  'docs.loading': 'Загрузка документации…',
   'docs.search.placeholder': 'Поиск...',
   'docs.search.noResults': 'Ничего не найдено',
   'docs.search.hint.select': 'Выбрать',
