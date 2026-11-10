@@ -35,6 +35,8 @@ var knownCommentFields = map[string]struct{}{
 	"severity":        {},
 	"path":            {},
 	"thinking":        {},
+	"start_line":      {},
+	"end_line":        {},
 }
 
 // escapeControl returns the JSON escape for a control character. JSON forbids

@@ -13,6 +13,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"strings"
 	"time"
 )
 
@@ -114,6 +115,15 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 				if r.deps.DiffLookup != nil {
 					d = r.deps.DiffLookup(cm.Path)
 				}
+				// The model may have named a line. ResolveComment treats any
+				// positive line as already resolved, which would skip the file
+				// match. Hold the hint aside so a verbatim existing_code still
+				// wins, then put the hint back only if every resolver misses
+				// and the line actually falls inside the file. Scan's synthetic
+				// diff has no unified diff text, so this hint is the only
+				// anchor left when the snippet is not a whole-line match.
+				hintStart, hintEnd := cm.StartLine, cm.EndLine
+				cm.StartLine, cm.EndLine = 0, 0
 				// Resolution order: the comment's own file, then a cross-file
 				// search, then the LLM. The cross-file search precedes the LLM
 				// because it needs the Agent's original ExistingCode, which the
@@ -150,7 +160,10 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 							rlCtx := llm.ContextWithSessionKey(rctx,
 								llm.SessionTaskKey(r.deps.Session.SessionID, string(session.ReLocationTask), cm.Path))
 							reqCtx := r.RequestContext(rlCtx, cm.Path, session.ReLocationTask, rlRec.RequestNo)
-							_, resp := diff.ReLocateComment(reqCtx, cm, d, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
+							relocated, resp := diff.ReLocateComment(reqCtx, cm, d, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
+							if relocated {
+								located = true
+							}
 							if resp != nil {
 								rlRec.SetResponse(resp, time.Since(rlStart))
 								r.RecordUsage(resp.Usage)
@@ -158,6 +171,11 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 								rlRec.SetError(fmt.Errorf("re-location LLM call failed"), time.Since(rlStart))
 							}
 						}
+					}
+				}
+				if !located {
+					if start, end, ok := lineHintInFile(d, hintStart, hintEnd); ok {
+						cm.StartLine, cm.EndLine = start, end
 					}
 				}
 				r.deps.CommentCollector.Add(*cm)
@@ -253,4 +271,39 @@ func parseToolArgs(raw string) (map[string]any, error) {
 		args = make(map[string]any)
 	}
 	return args, nil
+}
+
+// lineHintInFile reports whether the model-supplied range is a real anchor.
+// A missing end line means a single-line comment. A range past the end of
+// NewFileContent is not anchorable. When the file body is unavailable the
+// positive range is kept, because nothing is available to disprove it.
+func lineHintInFile(d *model.Diff, start, end int) (int, int, bool) {
+	if start <= 0 {
+		return 0, 0, false
+	}
+	if end <= 0 {
+		end = start
+	}
+	if end < start {
+		return 0, 0, false
+	}
+	if d == nil || d.NewFileContent == "" {
+		return start, end, true
+	}
+	n := contentLineCount(d.NewFileContent)
+	if start > n || end > n {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+func contentLineCount(content string) int {
+	if content == "" {
+		return 0
+	}
+	n := strings.Count(content, "\n")
+	if !strings.HasSuffix(content, "\n") {
+		n++
+	}
+	return n
 }

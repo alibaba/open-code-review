@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path"
 	"strings"
 
@@ -157,6 +158,20 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 		if cm.Path == "" {
 			cm.Path = normalizeCommentPath(defaultPath)
 		}
+		// start_line / end_line are not in the advertised schema. Models still
+		// send them. Copy the pair through; the review loop may replace it
+		// when existing_code matches the file, and drops it when it does not
+		// name a real line. Leaving the pair at zero here is what made every
+		// scan finding look unanchored once text matching failed.
+		if start, ok := commentLineArg(obj["start_line"]); ok {
+			cm.StartLine = start
+		}
+		if end, ok := commentLineArg(obj["end_line"]); ok {
+			cm.EndLine = end
+		}
+		if cm.StartLine > 0 && cm.EndLine <= 0 {
+			cm.EndLine = cm.StartLine
+		}
 
 		if cm.Path == "" || cm.Content == "" {
 			continue
@@ -165,6 +180,37 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 		comments = append(comments, cm)
 	}
 	return comments, repair, ""
+}
+
+// commentLineArg reads a 1-based line number from a tool-argument value.
+// JSON objects decode numbers as float64. A non-integer or a value below 1
+// is not a line, so the caller leaves the field unset.
+func commentLineArg(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		if n < 1 || n != math.Trunc(n) || n > float64(math.MaxInt) {
+			return 0, false
+		}
+		return int(n), true
+	case int:
+		if n < 1 {
+			return 0, false
+		}
+		return n, true
+	case int64:
+		if n < 1 || n > math.MaxInt {
+			return 0, false
+		}
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil || i < 1 || i > math.MaxInt {
+			return 0, false
+		}
+		return int(i), true
+	default:
+		return 0, false
+	}
 }
 
 func normalizeCommentPath(p string) string {
