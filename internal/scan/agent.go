@@ -21,6 +21,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -50,7 +51,7 @@ type Args struct {
 	Tools                 *tool.Registry
 	MainToolDefs          []llm.ToolDef
 	CommentCollector      *tool.CommentCollector
-	CommentWorkerPool     *llmloop.CommentWorkerPool
+	CommentWorkerPool     *reviewtask.CommentWorkerPool
 	MaxConcurrency        int
 	ConcurrentTaskTimeout int
 	Model                 string
@@ -95,7 +96,7 @@ func (a *Agent) summaryEnabled() bool {
 }
 
 // Agent orchestrates full-file code review. It delegates the per-file LLM
-// tool-use loop to llmloop.Runner and owns only scan-specific concerns
+// tool-use loop to reviewtask.Runner and owns only scan-specific concerns
 // (file enumeration, FULL_SCAN_TASK rendering, per-file filtering).
 type Agent struct {
 	args             Args
@@ -103,7 +104,7 @@ type Agent struct {
 	currentDate      string
 	session          *session.SessionHistory
 	subtaskFailed    int64 // atomic
-	runner           *llmloop.Runner
+	runner           *reviewtask.Runner
 	resumeInfo       *session.ResumeInfo
 	scanFingerprints map[string]string
 	projectSummary   string      // populated post-run by maybeRunProjectSummary
@@ -136,7 +137,7 @@ func NewAgent(args Args) *Agent {
 		args:    args,
 		session: args.Session,
 	}
-	a.runner = llmloop.NewRunner(llmloop.Deps{
+	a.runner = reviewtask.NewRunner(reviewtask.Deps{
 		LLMClient:         args.LLMClient,
 		Model:             args.Model,
 		Template:          toLoopTemplate(args.Template),
@@ -158,7 +159,7 @@ func NewAgent(args Args) *Agent {
 }
 
 // toLoopTemplate maps the scan-specific ScanTemplate onto the subset of
-// fields llmloop.Runner reads from template.Template. llmloop only needs
+// fields reviewtask.Runner reads from template.Template. The adapter only needs
 // MaxTokens / MaxToolRequestTimes / MemoryCompressionTask / ReLocationTask,
 // so we leave the diff-only fields (MainTask / PlanTask / ReviewFilterTask)
 // at their zero values.
@@ -400,7 +401,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	return comments, err
 }
 
-// lookupDiff returns the synthetic Diff for a path, used by llmloop.Runner
+// lookupDiff returns the synthetic Diff for a path, used by reviewtask.Runner
 // to resolve code_comment line numbers against the scanned file content.
 func (a *Agent) lookupDiff(path string) *model.Diff {
 	for i := range a.items {

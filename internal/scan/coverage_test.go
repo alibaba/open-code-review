@@ -15,6 +15,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -944,7 +945,7 @@ func TestDispatchSubtasks_GraceRoundTaskDoneCheckpointed(t *testing.T) {
 		if w.Type == "scan_subtask_error" {
 			t.Fatalf("a file completed in the grace round must not warn as failed: %+v", w)
 		}
-		if w.Type == llmloop.WarningReviewLimitReached {
+		if w.Type == reviewtask.WarningReviewLimitReached {
 			limitWarnings = append(limitWarnings, w)
 		}
 	}
@@ -1058,7 +1059,7 @@ func TestDispatchSubtasks_GraceRoundLimitVisibleWithZeroFindings(t *testing.T) {
 				if w.Type == "scan_subtask_error" {
 					t.Fatalf("a file completed in the grace round must not warn as failed: %+v", w)
 				}
-				if w.Type == llmloop.WarningReviewLimitReached {
+				if w.Type == reviewtask.WarningReviewLimitReached {
 					limitWarnings = append(limitWarnings, w)
 				}
 			}
