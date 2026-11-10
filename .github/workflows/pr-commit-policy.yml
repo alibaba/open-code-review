@@ -19,7 +19,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 5
     container:
-      image: node:24.18.0
+      image: node:24.22.1
       options: --cpus=1 --memory=1g
     steps:
       - name: Check out trusted policy script
@@ -27,8 +27,6 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          sparse-checkout: scripts/github-actions/check-pr-commit-policy.js
-          sparse-checkout-cone-mode: false
 
       - name: Check PR title and commit messages
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0

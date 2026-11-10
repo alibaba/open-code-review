@@ -6,6 +6,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -22,6 +23,7 @@ const (
 	runAsHangingServerEnv  = "_OCR_MCP_TEST_HANG_SERVER"
 	runAsExit3ServerEnv    = "_OCR_MCP_TEST_EXIT3_SERVER"
 	runAsSlowExitServerEnv = "_OCR_MCP_TEST_SLOW_EXIT_SERVER"
+	runAsPagedServerEnv    = "_OCR_MCP_TEST_PAGED_SERVER"
 )
 
 func TestMain(m *testing.M) {
@@ -42,6 +44,8 @@ func TestMain(m *testing.M) {
 		runExit3MCPServer()
 	case os.Getenv(runAsSlowExitServerEnv) != "":
 		runSlowExitMCPServer()
+	case os.Getenv(runAsPagedServerEnv) != "":
+		runPagedTestMCPServer()
 	default:
 		os.Exit(m.Run())
 	}
@@ -79,6 +83,31 @@ func newTestMCPServer() *mcp.Server {
 	return server
 }
 
+// newPagedTestMCPServer returns a server that publishes toolCount tools one
+// page at a time, so a client reading a single page sees only the first one.
+func newPagedTestMCPServer(toolCount int) *mcp.Server {
+	server := mcp.NewServer(
+		&mcp.Implementation{Name: "paged-server", Version: "v0.0.1"},
+		&mcp.ServerOptions{PageSize: 1},
+	)
+	for i := 1; i <= toolCount; i++ {
+		name := fmt.Sprintf("paged_tool_%d", i)
+		server.AddTool(
+			&mcp.Tool{
+				Name:        name,
+				Description: "Paged tool " + name,
+				InputSchema: map[string]any{"type": "object"},
+			},
+			func(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{&mcp.TextContent{Text: name}},
+				}, nil
+			},
+		)
+	}
+	return server
+}
+
 func runTestMCPServer() {
 	if err := newTestMCPServer().Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Fatal(err)
@@ -86,6 +115,13 @@ func runTestMCPServer() {
 	// Exit explicitly with code 0 as soon as stdin EOF ends the server loop,
 	// rather than unwinding through the test runtime, whose teardown adds a
 	// slow and variable tail under the race detector.
+	os.Exit(0)
+}
+
+func runPagedTestMCPServer() {
+	if err := newPagedTestMCPServer(3).Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+		log.Fatal(err)
+	}
 	os.Exit(0)
 }
 
@@ -167,6 +203,35 @@ func TestNewClient_Stdio(t *testing.T) {
 
 	if err := c.Close(); err != nil {
 		t.Errorf("Close: %v", err)
+	}
+}
+
+func TestNewClient_Stdio_PaginatedTools(t *testing.T) {
+	requireExec(t)
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := NewClient(context.Background(), "paged-srv", exe, nil, []string{runAsPagedServerEnv + "=1"}, "", "v0.0.1")
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	var names []string
+	for _, tool := range c.Tools() {
+		names = append(names, tool.Name)
+	}
+	want := []string{"paged_tool_1", "paged_tool_2", "paged_tool_3"}
+	if len(names) != len(want) {
+		t.Fatalf("Tools() = %v, want all %d paginated tools %v", names, len(want), want)
+	}
+	for i, name := range want {
+		if names[i] != name {
+			t.Errorf("Tools()[%d] = %q, want %q", i, names[i], name)
+		}
 	}
 }
 
