@@ -170,14 +170,15 @@ async function main() {
   info(`Detected platform: ${os}/${arch}`);
 
   const pkg = loadPackageJson();
-  if (pkg.version === "0.0.0") {
+  const version = resolveVersion(pkg);
+
+  if (version === "0.0.0") {
     info("Version 0.0.0 is a development checkout.");
     info("No prebuilt binary will be downloaded.");
     info("Run `make build` to compile the native binary before using the CLI.");
     return;
   }
 
-  const version = resolveVersion(pkg);
   const config = pkg.ocrConfig;
 
   if (!fs.existsSync(binDir)) {
