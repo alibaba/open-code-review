@@ -23,11 +23,11 @@ flowchart TD
 ```
 
 编排逻辑位于
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 包，主要文件有：`agent.go`（分发与按组编排）、`grouping.go`（语义文件分组）、
 `selection.go`（文件过滤）、`preview.go`（`--preview` 报告）和 `util.go`（辅助）；
 工具调用循环与记忆压缩位于相邻的
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)。
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/)。
 两个入口点值得关注：`Agent.Run`（流水线顶部）和 `Agent.dispatchSubtasks`
 （per-group 扇出）。
 

@@ -25,12 +25,12 @@ flowchart TD
 ```
 
 The orchestration lives in the
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 package, whose main files are `agent.go` (dispatch & per-group
 orchestration), `grouping.go` (semantic file grouping), `selection.go`
 (the file filter), `preview.go` (the `--preview` report), and `util.go`
 (helpers); the tool-use loop and memory compression live alongside it in
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/).
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/).
 Two entry points matter: `Agent.Run` (top of pipeline) and
 `Agent.dispatchSubtasks` (per-group fan-out).
 

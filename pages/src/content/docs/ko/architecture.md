@@ -24,11 +24,11 @@ flowchart TD
 ```
 
 전체 흐름을 지휘하는 코드는
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 패키지에 있습니다. 주요 파일은 `agent.go`(디스패치와 그룹별 오케스트레이션),
 `grouping.go`(의미 기반 파일 그룹화), `selection.go`(파일 필터),
 `preview.go`(`--preview` 보고서), `util.go`(헬퍼)입니다. 도구 호출 루프와 메모리 압축은 그 옆의
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)에
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/)에
 있습니다. 진입점은 두 개가 중요합니다. `Agent.Run`(파이프라인 최상단)과
 `Agent.dispatchSubtasks`(그룹별 팬아웃)입니다.
 
