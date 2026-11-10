@@ -196,6 +196,38 @@ func TestManifestFlowCompleteAndPartial(t *testing.T) {
 	})
 }
 
+// Two paths that differ only in separator normalize to one item_id. When
+// selection excludes one and selects the other, the excluded record must give
+// way: the run keeps its full denominator and still ends complete. An unrelated
+// exclusion is kept.
+func TestManifestFlowExcludedItemIDCollisionKeepsSelected(t *testing.T) {
+	a := newManifestFlowAgent(t, nil, nil)
+	decisions := a.selectFiles([]model.Diff{
+		{OldPath: `src\a.go`, NewPath: `src\a.go`, IsBinary: true},
+		{OldPath: "src/a.go", NewPath: "src/a.go", Diff: "+ok", Insertions: 1},
+		{OldPath: "good.go", NewPath: "good.go", Diff: "+ok", Insertions: 1},
+		{OldPath: "blob.go", NewPath: "blob.go", IsBinary: true},
+	})
+	if err := a.registerExclusions(decisions); err != nil {
+		t.Fatalf("registerExclusions: %v", err)
+	}
+	a.diffs, _ = summarizeSelection(decisions)
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	manifest := finishManifestFlow(t, a)
+	if manifest.TerminalState != session.StateComplete || manifest.RunFailure != nil {
+		t.Fatalf("terminal = %q, run_failure = %+v", manifest.TerminalState, manifest.RunFailure)
+	}
+	if len(manifest.Coverage.Selected) != 2 || len(manifest.Coverage.Completed) != 2 {
+		t.Fatalf("coverage = %+v", manifest.Coverage)
+	}
+	ex := manifest.Coverage.Excluded
+	if len(ex) != 1 || ex[0].Path != "blob.go" || ex[0].ExcludeReason != model.ExcludeBinary {
+		t.Fatalf("excluded = %+v, want only blob.go: the colliding record is dropped", ex)
+	}
+}
+
 func TestManifestFlowCancellationPersistsResumableSession(t *testing.T) {
 	done := model.Diff{OldPath: "done.go", NewPath: "done.go", Diff: "+done", Insertions: 1}
 	blocked := model.Diff{OldPath: "blocked.go", NewPath: "blocked.go", Diff: "+blocked", Insertions: 1}
@@ -460,6 +492,10 @@ func TestManifestFlowBudgetAndSkipped(t *testing.T) {
 		manifest := a.RunManifest()
 		if manifest == nil || manifest.TerminalState != session.StateSkipped || len(manifest.Coverage.Selected) != 0 {
 			t.Fatalf("manifest = %+v", manifest)
+		}
+		excluded := manifest.Coverage.Excluded
+		if len(excluded) != 1 || excluded[0].Path != "large.go" || excluded[0].ExcludeReason != model.ExcludeTooLarge {
+			t.Fatalf("excluded = %+v, want large.go as too_large", excluded)
 		}
 	})
 }

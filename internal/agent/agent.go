@@ -331,6 +331,12 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) changed, reviewing %d in %s\n", totalChanged, reviewCount, a.args.RepoDir)
 
 	a.logExclusions(decisions)
+	// Recorded here rather than next to registerCoverage so a run that selects
+	// nothing, and so never reaches dispatch, still reports why. A failure only
+	// loses the record: the denominator is untouched, so the run is not failed.
+	if err := a.registerExclusions(decisions); err != nil {
+		a.recordWarning("manifest_error", "", err.Error())
+	}
 	a.diffs = kept
 
 	// One run-level skip signal, keyed on the selected set rather than on what
@@ -1264,6 +1270,36 @@ func (a *Agent) registerCoverage(diffs []model.Diff) error {
 		}
 	}
 	return b.SealSelected()
+}
+
+// registerExclusions records every file the selection left out, deletions
+// included, in the manifest's excluded set with the reason selection gave.
+// Nil-safe (no-op without a builder). It keeps going past a rejected item and
+// returns the joined errors, so one bad entry does not drop the rest.
+func (a *Agent) registerExclusions(decisions []fileDecision) error {
+	b := a.session.Manifest()
+	if b == nil {
+		return nil
+	}
+	var errs []error
+	for _, dec := range decisions {
+		if dec.selected() {
+			continue
+		}
+		oldPath, newPath := manifestPaths(dec.Diff)
+		item := session.ExcludedItem{
+			ItemID:        a.manifestItemID(dec.Diff),
+			Path:          effectivePath(dec.Diff),
+			ExcludeReason: dec.Reason,
+		}
+		if oldPath != "" && newPath != "" && oldPath != newPath {
+			item.OldPath = oldPath
+		}
+		if err := b.RegisterExcluded(item); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // finalizeManifest freezes the run's coverage builder and stores the immutable
