@@ -140,6 +140,9 @@ func TestAgentScript_BuildsTheWorkspaceURIWithTheURLParser(t *testing.T) {
 	if !strings.Contains(js, "new URL(") {
 		t.Error("agent.js does not build the workspace URI with the URL parser")
 	}
+	if !strings.Contains(js, "split(\"/\").map(encodeURIComponent).join(\"/\")") {
+		t.Error("agent.js does not encode filesystem path components before URL parsing")
+	}
 }
 
 // Two copies of the dismissal can drift apart, and they already had: one

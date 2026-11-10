@@ -143,12 +143,16 @@
         return repo.startsWith("/") || /^[A-Za-z]:[\\/]/.test(repo) ? repo : "";
     }
 
-    // A file URI for a workspace directory. The URL parser does the work the
-    // string concatenation cannot: a Windows path has its backslashes turned
-    // into slashes and gains the leading slash a URI needs, and a "#" or "?"
-    // in the path is escaped instead of starting a fragment or a query.
+    // A file URI for a workspace directory. Encode each path component before
+    // URL parsing so filename delimiters and literal percent signs stay data.
     function fileURI(dir) {
-        const url = new URL("file:///" + dir.replace(/\\/g, "/"));
+        let path = dir.replace(/\\/g, "/");
+        if (/^[A-Za-z]:\//.test(path)) {
+            path = "/" + path[0] + ":/" + path.slice(3).split("/").map(encodeURIComponent).join("/");
+        } else {
+            path = "/" + path.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/");
+        }
+        const url = new URL("file://" + path);
         return url.href;
     }
 

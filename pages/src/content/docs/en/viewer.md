@@ -191,8 +191,8 @@ the current page where it still exists.
 **Collapse all** next to the findings count folds every file group down
 to its one-line summary, which turns a 275-finding page into a scannable
 index of files and their counts. The button toggles to **Expand all**.
-Groups hidden by the current filters are left alone, so what you see
-open always matches what you can see.
+Every file group is collapsed, including groups currently hidden by filters.
+When you expand all, those groups are expanded too.
 
 ### Marking findings as you fix them
 
