@@ -9,6 +9,7 @@ import { GitService } from './services/GitService';
 import { CommentProvider } from './providers/CommentProvider';
 import { SidebarProvider } from './providers/SidebarProvider';
 import { ConfigPanelProvider } from './providers/ConfigPanelProvider';
+import { EMPTY_SIDE_SCHEME, EmptySideProvider } from './providers/EmptySideProvider';
 import { registerCommands } from './commands';
 
 let disposables: vscode.Disposable[] = [];
@@ -31,8 +32,14 @@ export function activate(context: vscode.ExtensionContext): void {
     { webviewOptions: { retainContextWhenHidden: true } },
   );
   const cmdReg = registerCommands(comments, () => configPanel.open());
+  // The blank side of an added/deleted file's diff. Registered here because a
+  // TextDocumentContentProvider has to exist before the first diff is opened.
+  const emptyReg = vscode.workspace.registerTextDocumentContentProvider(
+    EMPTY_SIDE_SCHEME,
+    new EmptySideProvider(),
+  );
 
-  disposables.push(viewReg, cmdReg, comments, output, configPanel);
+  disposables.push(viewReg, cmdReg, emptyReg, comments, output, configPanel);
   context.subscriptions.push(...disposables);
 }
 

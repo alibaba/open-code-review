@@ -9,6 +9,7 @@ import { promisify } from 'util';
 import * as vscode from 'vscode';
 import { ReviewMode } from '@shared/types';
 import { GitService } from '../GitService';
+import { EMPTY_SIDE_SCHEME, EmptySideProvider, emptySideUri } from '../../providers/EmptySideProvider';
 
 const execFileAsync = promisify(execFile);
 
@@ -137,38 +138,38 @@ describe('GitService commit base ref', () => {
 });
 
 describe('GitService empty diff side', () => {
-  // VS Code opens both sides of a diff through its file system provider. The
-  // null device is not readable through it on Windows -- the reported symptom
-  // in #1816 is a failed read of `\\.\NUL` -- so the empty side has to be a
-  // git URI with an empty ref, the way workspace mode already builds it.
-  const fakeApi = () => {
-    const calls: Array<{ fsPath: string; ref: string }> = [];
-    return {
-      calls,
-      api: { toGitUri: (uri: any, ref: string) => { calls.push({ fsPath: uri.fsPath, ref }); return { scheme: 'git', fsPath: uri.fsPath, ref }; } },
-    };
-  };
-
-  it('represents an added file\'s left side as an empty git ref, not a device path', async () => {
-    const { api, calls } = fakeApi();
-
+  // #1816: the platform null device is not readable through VS Code's file
+  // system provider, so `\\.\NUL` made the diff fail to open on Windows.
+  //
+  // The repair is not a git URI with an empty ref either. An empty treeish is
+  // not a sentinel for "nothing" -- VS Code's getObjectDetails sends `!treeish`
+  // to lsfiles, so it addresses the index. The two tests below pin the git-level
+  // consequences that makes, which are why this uses its own scheme instead.
+  it('resolves an added file\'s left side to an empty document', async () => {
     const uri: any = await (new GitService() as any)
-      .resolveDiffSide(api, '/repo', 'added.ts', 'HEAD', 'added', 'left');
+      .resolveDiffSide({}, '/repo', 'added.ts', 'HEAD', 'added', 'left');
 
-    expect(uri.scheme).toBe('git');
-    expect(uri.ref).toBe('');
-    expect(calls).toEqual([{ fsPath: '/repo/added.ts', ref: '' }]);
-    expect(String(uri.fsPath)).not.toMatch(/NUL|dev\/null/);
+    // Pinned to the literal, not EMPTY_SIDE_SCHEME: an assertion against the
+    // same constant the code uses moves with it and cannot fail.
+    expect(uri.scheme).toBe('ocr-empty');
+    expect(EMPTY_SIDE_SCHEME).toBe('ocr-empty');
+    // 'git' is the spelling that looks right and resolves to the index.
+    expect(uri.scheme).not.toBe('git');
+    expect(new EmptySideProvider().provideTextDocumentContent()).toBe('');
+    expect(String(uri.path)).not.toMatch(/NUL|dev\/null/);
   });
 
-  it('represents a deleted file\'s right side as an empty git ref', async () => {
-    const { api } = fakeApi();
-
+  it('resolves a deleted file\'s right side to an empty document', async () => {
     const uri: any = await (new GitService() as any)
-      .resolveDiffSide(api, '/repo', 'gone.ts', 'HEAD', 'deleted', 'right');
+      .resolveDiffSide({}, '/repo', 'gone.ts', 'HEAD', 'deleted', 'right');
 
-    expect(uri.scheme).toBe('git');
-    expect(uri.ref).toBe('');
+    expect(uri.scheme).toBe('ocr-empty');
+    expect(uri.scheme).not.toBe('git');
+    expect(new EmptySideProvider().provideTextDocumentContent()).toBe('');
+  });
+
+  it('names the file in the URI so the diff title still reads sensibly', () => {
+    expect(emptySideUri('src/added.ts').path).toBe('/src/added.ts');
   });
 
   it('still builds a real git side when the file exists at the ref', async () => {
@@ -182,13 +183,71 @@ describe('GitService empty diff side', () => {
       await run(['add', 'kept.ts']);
       await run(['commit', '-q', '-m', 'kept']);
 
-      const { api } = fakeApi();
+      const calls: Array<{ fsPath: string; ref: string }> = [];
+      const api = { toGitUri: (uri: any, ref: string) => { calls.push({ fsPath: uri.fsPath, ref }); return { scheme: 'git', fsPath: uri.fsPath, ref }; } };
       const uri: any = await (new GitService() as any)
         .resolveDiffSide(api, repoRoot, 'kept.ts', 'HEAD', 'modified', 'left');
 
       expect(uri.ref).toBe('HEAD');
+      expect(calls).toEqual([{ fsPath: `${repoRoot}/kept.ts`, ref: 'HEAD' }]);
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
     }
+  });
+});
+
+// The reason the empty side cannot be `toGitUri(uri, '')`. VS Code resolves an
+// empty treeish against the index, and these are what the index actually holds
+// at the two moments the diff is opened. Asserting the git boundary directly
+// rather than mocking it is the whole point: a mocked toGitUri would report
+// success for either spelling.
+describe('an empty git ref addresses the index, not nothing', () => {
+  let repoRoot = '';
+  const run = (args: string[]) => execFileAsync('git', args, { cwd: repoRoot });
+
+  beforeEach(async () => {
+    repoRoot = await mkdtemp(path.join(tmpdir(), 'ocr-vscode-empty-ref-'));
+    await run(['init', '-q']);
+    await run(['config', 'user.email', 'test@example.com']);
+    await run(['config', 'user.name', 'Test User']);
+  });
+  afterEach(async () => { await rm(repoRoot, { recursive: true, force: true }); });
+
+  it('holds the added file right after a root commit, so an empty ref would hide the addition', async () => {
+    await writeFile(path.join(repoRoot, 'first.ts'), 'export const x = 1;\n');
+    await run(['add', 'first.ts']);
+    await run(['commit', '-q', '-m', 'root commit']);
+
+    const fromIndex = (await run(['show', ':first.ts'])).stdout;
+    const fromCommit = (await run(['show', 'HEAD:first.ts'])).stdout;
+
+    expect(fromIndex).toBe(fromCommit);
+    expect(fromIndex.trim()).not.toBe('');
+  });
+
+  it('has no entry after a committed deletion, so an empty ref would fail to open', async () => {
+    await writeFile(path.join(repoRoot, 'gone.ts'), 'export const x = 1;\n');
+    await run(['add', 'gone.ts']);
+    await run(['commit', '-q', '-m', 'add']);
+    await run(['rm', '-q', 'gone.ts']);
+    await run(['commit', '-q', '-m', 'delete']);
+
+    await expect(run(['show', ':gone.ts'])).rejects.toThrow();
+  });
+
+  it('bases a root commit on a real, empty tree object in this repository', async () => {
+    await writeFile(path.join(repoRoot, 'first.ts'), 'export const x = 1;\n');
+    await run(['add', 'first.ts']);
+    await run(['commit', '-q', '-m', 'root commit']);
+
+    const base = await (new GitService() as any).commitBaseRef(repoRoot, 'HEAD');
+
+    // Asserted as properties rather than against the SHA-1 constant
+    // `4b825dc...`: a repository created with --object-format=sha256 has a
+    // different empty tree, and hardcoding either one is the bug this avoids.
+    expect((await run(['cat-file', '-t', base])).stdout.trim()).toBe('tree');
+    expect((await run(['ls-tree', base])).stdout).toBe('');
+    expect((await run(['rev-parse', '--verify', base])).stdout.trim()).toBe(base);
+    expect((await run(['diff', '--name-status', `${base}..HEAD`])).stdout).toContain('A\tfirst.ts');
   });
 });

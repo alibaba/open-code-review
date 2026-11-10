@@ -8,16 +8,30 @@ import { execFile } from 'child_process';
 import { GitState, FileChange, ReviewMode, ReviewContext } from '@shared/types';
 import { buildWorkspaceFiles, branchRefCandidates, parseNameStatus, pickRepoRoot } from './gitMap';
 
+import { emptySideUri } from '../providers/EmptySideProvider';
+
 const WORKSPACE_REFRESH_DEBOUNCE_MS = 300;
 
 /**
- * Git's empty tree. It is a fixed hash that every repository can resolve, which
- * makes it the base a root commit is diffed against.
+ * Git's empty tree, the base a root commit is diffed against.
+ *
+ * Computed rather than hardcoded: `4b825dc...` is the SHA-1 value, and a
+ * repository created with `--object-format=sha256` has a different one, where
+ * a literal would simply fail to resolve. `--stdin` with no input rather than
+ * `/dev/null`, which is not a path on Windows -- and an unreadable Windows
+ * path is the bug this is here to fix.
  */
-const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+async function emptyTreeRef(root: string, cache: Map<string, string>): Promise<string> {
+  const hit = cache.get(root);
+  if (hit) return hit;
+  const sha = (await runGit(root, ['hash-object', '-t', 'tree', '--stdin'], '')).trim();
+  cache.set(root, sha);
+  return sha;
+}
 
 export class GitService {
   private api: any | null = null;
+  private readonly emptyTreeCache = new Map<string, string>();
   private cache: GitState = { branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] };
   private reviewFileStatus = new Map<string, FileChange['status']>();
 
@@ -247,7 +261,7 @@ export class GitService {
       const out = await runGit(root, ['rev-parse', '--verify', '--quiet', `${commit}^`]);
       if (out.trim()) return `${commit}^`;
     } catch { /* no parent: fall through to the empty tree */ }
-    return EMPTY_TREE_SHA;
+    return emptyTreeRef(root, this.emptyTreeCache);
   }
 
   private async resolveGitRef(root: string, ref: string): Promise<string | null> {
@@ -309,9 +323,12 @@ export class GitService {
     }
 
     if (opts.mode === ReviewMode.Workspace) {
-      const emptyRef = '';
-      const left = api.toGitUri(fileUri, opts.status === 'added' ? emptyRef : 'HEAD');
-      const right = opts.status === 'deleted' ? api.toGitUri(fileUri, emptyRef) : fileUri;
+      // The empty ref this used to pass has the same meaning here as anywhere
+      // else -- the index, not nothing -- so a staged new file showed its
+      // staged contents as the "before", and an untracked one failed to open
+      // rather than rendering blank. Same provider as every other empty side.
+      const left = opts.status === 'added' ? this.emptySideUri(opts.path) : api.toGitUri(fileUri, 'HEAD');
+      const right = opts.status === 'deleted' ? this.emptySideUri(opts.path) : fileUri;
       const label = t(resolveLocale(vscode.env.language), 'ext.git.workspaceVsHead');
       await this.presentDiff(left, right, `${opts.path} (${label})`);
       return;
@@ -369,24 +386,20 @@ export class GitService {
     status: FileChange['status'],
     side: 'left' | 'right',
   ): Promise<vscode.Uri> {
-    if (side === 'left' && (status === 'added' || !ref)) return this.emptySideUri(api, root, relPath);
-    if (side === 'right' && (status === 'deleted' || !ref)) return this.emptySideUri(api, root, relPath);
-    if (!ref || !(await this.pathExistsAtRef(root, ref, relPath))) return this.emptySideUri(api, root, relPath);
+    if (side === 'left' && (status === 'added' || !ref)) return this.emptySideUri(relPath);
+    if (side === 'right' && (status === 'deleted' || !ref)) return this.emptySideUri(relPath);
+    if (!ref || !(await this.pathExistsAtRef(root, ref, relPath))) return this.emptySideUri(relPath);
     return api.toGitUri(vscode.Uri.file(`${root}/${relPath}`), ref);
   }
 
   /**
    * Provide an empty side for diffs of added or deleted files.
    *
-   * This used to point at the platform's null device, but VS Code opens both
-   * sides of a diff through its file system provider, and on Windows reading
-   * `\\.\NUL` fails with "Unavailable (FileSystemError)" — the editor then
-   * reports that it could not be opened. A `git:` URI with an empty ref is what
-   * workspace mode above already uses for the same purpose, and it renders as
-   * an empty document on every platform.
+   * See EmptySideProvider for why this is neither the null device nor a git
+   * URI with an empty ref.
    */
-  private emptySideUri(api: any, root: string, relPath: string): vscode.Uri {
-    return api.toGitUri(vscode.Uri.file(`${root}/${relPath}`), '');
+  private emptySideUri(relPath: string): vscode.Uri {
+    return emptySideUri(relPath);
   }
 
   private async presentDiff(
@@ -533,12 +546,13 @@ export class GitService {
   }
 }
 
-function runGit(cwd: string, args: string[]): Promise<string> {
+function runGit(cwd: string, args: string[], stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('git', ['-c', 'core.quotepath=false', ...args], { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+    const child = execFile('git', ['-c', 'core.quotepath=false', ...args], { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
       if (err) reject(err);
       else resolve(stdout);
     });
+    if (stdin !== undefined) child.stdin?.end(stdin);
   });
 }
 
