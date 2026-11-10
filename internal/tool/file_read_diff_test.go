@@ -5,6 +5,8 @@ package tool
 
 import (
 	"context"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -126,12 +128,65 @@ func TestDiffMap_Get_Normalized(t *testing.T) {
 		}
 	}
 
-	// Also test NewDiffMap key with backslashes
+	// Preserve literal backslash keys verbatim without collapsing to forward slashes.
 	dm2 := NewDiffMap(map[string]string{
 		`dir\file.go`: "diff content 2",
 	})
-	if v, ok := dm2.Get("dir/file.go"); !ok || v != "diff content 2" {
-		t.Errorf("Get(dir/file.go) on backslash-keyed map = (%q, %v)", v, ok)
+	if got := dm2.Paths(); !reflect.DeepEqual(got, []string{`dir\file.go`}) {
+		t.Errorf("Paths() = %v, want [%q]", got, `dir\file.go`)
+	}
+	if v, ok := dm2.Get(`dir\file.go`); !ok || v != "diff content 2" {
+		t.Errorf("Get(dir\\file.go) = (%q, %v), want ('diff content 2', true)", v, ok)
+	}
+	if v, ok := dm2.Get(`./dir\file.go`); !ok || v != "diff content 2" {
+		t.Errorf("Get(./dir\\file.go) = (%q, %v), want ('diff content 2', true)", v, ok)
+	}
+	if runtime.GOOS != "windows" {
+		if v, ok := dm2.Get("dir/file.go"); ok {
+			t.Errorf("Get(dir/file.go) on POSIX backslash-only map = (%q, %v), want ('', false)", v, ok)
+		}
+	} else {
+		if v, ok := dm2.Get("dir/file.go"); !ok || v != "diff content 2" {
+			t.Errorf("Get(dir/file.go) on Windows = (%q, %v), want ('diff content 2', true)", v, ok)
+		}
+	}
+}
+
+func TestDiffMap_POSIXDualPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX literal backslashes cannot coexist with directory separators on Windows")
+	}
+
+	dm := NewDiffMap(map[string]string{
+		"pkg/util.go": "diff slash",
+		`pkg\util.go`: "diff backslash",
+	})
+
+	wantPaths := []string{"pkg/util.go", `pkg\util.go`}
+	if got := dm.Paths(); !reflect.DeepEqual(got, wantPaths) {
+		t.Fatalf("Paths() = %q, want %q", got, wantPaths)
+	}
+
+	cases := []struct {
+		query  string
+		want   string
+		wantOK bool
+	}{
+		{query: "pkg/util.go", want: "diff slash", wantOK: true},
+		{query: "./pkg/util.go", want: "diff slash", wantOK: true},
+		{query: "/pkg/util.go", want: "diff slash", wantOK: true},
+		{query: `pkg\util.go`, want: "diff backslash", wantOK: true},
+		{query: `./pkg\util.go`, want: "diff backslash", wantOK: true},
+		{query: `/pkg\util.go`, want: "diff backslash", wantOK: true},
+		{query: `.\pkg\util.go`, want: "", wantOK: false},
+		{query: `pkg\.\util.go`, want: "", wantOK: false},
+	}
+
+	for _, tc := range cases {
+		got, ok := dm.Get(tc.query)
+		if ok != tc.wantOK || got != tc.want {
+			t.Errorf("Get(%q) = (%q, %v), want (%q, %v)", tc.query, got, ok, tc.want, tc.wantOK)
+		}
 	}
 }
 
@@ -152,5 +207,62 @@ func TestFileReadDiffProvider_Execute_WindowsPaths(t *testing.T) {
 	}
 	if strings.Contains(got, "Error: diff not found") {
 		t.Errorf("did not expect missing error, got: %s", got)
+	}
+}
+
+func TestFileReadDiffProvider_Execute_POSIXDualPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX literal backslashes cannot coexist with directory separators on Windows")
+	}
+
+	dm := NewDiffMap(map[string]string{
+		"pkg/util.go": "@@ -1 +1 @@\n-slash-old\n+slash-new",
+		`pkg\util.go`: "@@ -1 +1 @@\n-backslash-old\n+backslash-new",
+	})
+	p := NewFileReadDiff(dm)
+
+	// Exact queries select their distinct canonical diffs without substitution.
+	got, err := p.Execute(context.Background(), map[string]any{
+		"path_array": []any{"pkg/util.go", `pkg\util.go`},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "==== FILE: pkg/util.go ====\n@@ -1 +1 @@\n-slash-old\n+slash-new") {
+		t.Errorf("missing slash diff in output: %s", got)
+	}
+	if !strings.Contains(got, "==== FILE: pkg\\util.go ====\n@@ -1 +1 @@\n-backslash-old\n+backslash-new") {
+		t.Errorf("missing literal-backslash diff in output: %s", got)
+	}
+
+	// Ambiguous Windows-style alias fails explicitly without serving either file.
+	amb, err := p.Execute(context.Background(), map[string]any{
+		"path_array": []any{`.\pkg\util.go`},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(amb, "ambiguous diff path") || !strings.Contains(amb, "pkg/util.go") || !strings.Contains(amb, `pkg\util.go`) {
+		t.Errorf("expected explicit ambiguity error listing candidates, got: %s", amb)
+	}
+	if strings.Contains(amb, "slash-new") || strings.Contains(amb, "backslash-new") {
+		t.Errorf("ambiguous lookup must not serve diff content: %s", amb)
+	}
+
+	// Partial batch with exact hit + ambiguous alias + missing path handles each cleanly.
+	mixed, err := p.Execute(context.Background(), map[string]any{
+		"path_array": []any{`./pkg\util.go`, `.\pkg\util.go`, "missing.go"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(mixed, "==== FILE: pkg\\util.go ====\n@@ -1 +1 @@\n-backslash-old\n+backslash-new") {
+		t.Errorf("expected unambiguous ./pkg\\util.go diff in mixed batch, got: %s", mixed)
+	}
+	if !strings.Contains(mixed, "Error: diff not found for: missing.go") {
+		t.Errorf("expected missing path error in mixed batch, got: %s", mixed)
+	}
+	if !strings.Contains(mixed, "Error: ambiguous diff path") {
+		t.Errorf("expected ambiguity error in mixed batch, got: %s", mixed)
 	}
 }

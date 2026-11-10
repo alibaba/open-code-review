@@ -5,6 +5,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -22,8 +23,7 @@ func (p *FileReadProvider) Tool() Tool { return FileRead }
 
 func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (string, error) {
 	rawPath, _ := args["file_path"].(string)
-	filePath := normalizePath(rawPath)
-	if filePath == "" {
+	if cleanNativeRepoPath(rawPath) == "" {
 		return "Error: file_path is required", nil
 	}
 
@@ -47,13 +47,17 @@ func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (st
 		}
 	}
 
-	lines, totalLines, err := p.FileReader.ReadLines(ctx, filePath, int(startLine), maxLines)
+	resolvedPath, lines, totalLines, err := p.FileReader.readLinesResolved(ctx, rawPath, int(startLine), maxLines)
 	if err != nil {
-		return "", fmt.Errorf("file %q not found: %w", filePath, err)
+		var ambErr *ambiguousPathError
+		if errors.As(err, &ambErr) {
+			return "", err
+		}
+		return "", fmt.Errorf("file %q not found: %w", rawPath, err)
 	}
 
 	if totalLines > 0 && int(startLine)-1 >= totalLines {
-		return "", fmt.Errorf("file %q has only %d lines, requested range %d-%d", filePath, totalLines, int(startLine), int(endLine))
+		return "", fmt.Errorf("file %q has only %d lines, requested range %d-%d", resolvedPath, totalLines, int(startLine), int(endLine))
 	}
 
 	effectiveEnd := totalLines
@@ -66,7 +70,7 @@ func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (st
 	displayEnd := int(startLine) - 1 + len(lines)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("File: %s (Total lines: %d)\n", filePath, totalLines))
+	sb.WriteString(fmt.Sprintf("File: %s (Total lines: %d)\n", resolvedPath, totalLines))
 	sb.WriteString(fmt.Sprintf("IS_TRUNCATED: %t\n", truncated))
 	sb.WriteString(fmt.Sprintf("LINE_RANGE: %d-%d\n", int(startLine), displayEnd))
 	for i, line := range lines {
