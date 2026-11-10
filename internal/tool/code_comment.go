@@ -47,6 +47,9 @@ var validCodeCommentSeverities = map[string]struct{}{
 	codeCommentSeverityLow:      {},
 }
 
+// CommentNoneUsableMsg reports a parsed batch with no usable comments.
+const CommentNoneUsableMsg = "Error: none of the 'comments' entries could be filed; each entry needs a non-empty 'content' and a 'path' (or the reviewed file's path). Re-send the finding with those fields."
+
 // CodeCommentProvider submits review comments to the per-Agent CommentCollector.
 type CodeCommentProvider struct {
 	Collector *CommentCollector
@@ -62,6 +65,9 @@ func (p *CodeCommentProvider) Execute(_ context.Context, args map[string]any) (s
 	comments, errMsg := ParseComments(args)
 	if errMsg != "" {
 		return errMsg, nil
+	}
+	if len(comments) == 0 {
+		return CommentNoneUsableMsg, nil
 	}
 
 	for i := range comments {

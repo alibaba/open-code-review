@@ -5,6 +5,7 @@ package rules
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,12 +26,73 @@ var reviewRulesLocales = []string{"en", "zh", "ja", "ko", "ru"}
 //
 // The rule-doc capture is greedy on purpose, ending at the last "|" of the line,
 // so that a row carrying a column-alignment padding is still captured whole.
-var reviewRulesTableRow = regexp.MustCompile("^\\|\\s*`([^`]+)`\\s*\\|(.*)\\|\\s*$")
+var reviewRulesTableRow = regexp.MustCompile("^\\|\\s*(`[^`]+`(?:\\s*,\\s*`[^`]+`)*)\\s*\\|(.*)\\|\\s*$")
+var reviewRulesTablePattern = regexp.MustCompile("`([^`]+)`")
 
 // ruleDocNameRE finds the rule-document filenames a row references. A row may
 // name more than one (the ".m" row names matlab.md and points at objc.md for
 // the content sniff), so membership, not equality, is what the caller checks.
 var ruleDocNameRE = regexp.MustCompile("`([A-Za-z0-9_]+\\.md)`")
+
+func reviewRulesListedPatterns(body string) map[string]string {
+	listed := make(map[string]string)
+	for _, line := range strings.Split(body, "\n") {
+		row := reviewRulesTableRow.FindStringSubmatch(line)
+		if row == nil {
+			continue
+		}
+		for _, pattern := range reviewRulesTablePattern.FindAllStringSubmatch(row[1], -1) {
+			listed[pattern[1]] = row[2]
+		}
+	}
+	return listed
+}
+
+func TestReviewRulesListedPatterns(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want map[string]string
+	}{
+		{
+			name: "single pattern",
+			body: "| `**/*.pug` | `pug.md` |",
+			want: map[string]string{"**/*.pug": " `pug.md` "},
+		},
+		{
+			name: "grouped brace patterns",
+			body: "| `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md` |",
+			want: map[string]string{
+				"**/*.{bzl,bazel,star}": " `starlark.md` ",
+				"**/{BUILD,WORKSPACE}":  " `starlark.md` ",
+			},
+		},
+		{
+			name: "multiple rows and rule references",
+			body: "| `**/*.m` | `matlab.md` (or `objc.md`) |\n| `**/*.mm` | `objc.md` |",
+			want: map[string]string{
+				"**/*.m":  " `matlab.md` (or `objc.md`) ",
+				"**/*.mm": " `objc.md` ",
+			},
+		},
+		{
+			name: "ignore headings and fallback",
+			body: "| Pattern | Rule doc |\n| --- | --- |\n| _(fallback)_ | `default.md` |",
+			want: map[string]string{},
+		},
+		{
+			name: "empty page",
+			want: map[string]string{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := reviewRulesListedPatterns(test.body); !maps.Equal(got, test.want) {
+				t.Fatalf("listed patterns = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
 
 // embeddedPathRuleMap returns the embedded system_rules.json path_rule_map as a
 // glob → rule-doc map. A plain map decode is enough: the check below compares
@@ -64,9 +126,8 @@ func embeddedPathRuleMap(t *testing.T) map[string]string {
 // document named on the row is the one the map points at (a translated row is
 // just as able to name the wrong document as to go missing).
 //
-// Relative row order is not asserted: the page presents the rows in matching
-// order, but the patterns are disjoint, so a reordered row cannot change which
-// rule a file resolves to.
+// Relative row order is not asserted: this test checks table membership rather
+// than matching precedence.
 func TestReviewRulesGuideListsEverySystemRulePattern(t *testing.T) {
 	mappings := embeddedPathRuleMap(t)
 	for _, locale := range reviewRulesLocales {
@@ -76,14 +137,7 @@ func TestReviewRulesGuideListsEverySystemRulePattern(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read %s: %v", page, err)
 			}
-			listed := make(map[string]string)
-			for _, line := range strings.Split(string(body), "\n") {
-				m := reviewRulesTableRow.FindStringSubmatch(line)
-				if m == nil {
-					continue
-				}
-				listed[m[1]] = m[2]
-			}
+			listed := reviewRulesListedPatterns(string(body))
 			if len(listed) == 0 {
 				t.Fatalf("%s lists no pattern rows", page)
 			}

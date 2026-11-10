@@ -1,0 +1,875 @@
+{
+  "affinity": [
+    "session-main_task-e92eec1034e5ee82",
+    "session-main_task-e92eec1034e5ee82",
+    "session-main_task-e92eec1034e5ee82"
+  ],
+  "comments": [
+    {
+      "path": "sample.go",
+      "content": "issue",
+      "existing_code": "package main",
+      "start_line": 1,
+      "end_line": 1,
+      "thinking": "reasoning"
+    },
+    {
+      "path": "sample.go",
+      "content": "second issue",
+      "existing_code": "func main() {}",
+      "start_line": 2,
+      "end_line": 2,
+      "thinking": "reasoning"
+    }
+  ],
+  "completed": true,
+  "error": "",
+  "failures": null,
+  "metadata": [
+    {
+      "Provider": "",
+      "Model": "",
+      "FilePath": "",
+      "TaskType": "",
+      "RequestNo": 0
+    },
+    {
+      "Provider": "",
+      "Model": "",
+      "FilePath": "",
+      "TaskType": "",
+      "RequestNo": 0
+    },
+    {
+      "Provider": "",
+      "Model": "",
+      "FilePath": "",
+      "TaskType": "",
+      "RequestNo": 0
+    }
+  ],
+  "records": {
+    "main_task": [
+      {
+        "Type": "main_task",
+        "RequestNo": 1,
+        "RequestMessages": [
+          {
+            "role": "system",
+            "content": "Review the supplied code."
+          },
+          {
+            "role": "user",
+            "content": "Review sample.go."
+          }
+        ],
+        "Response": {
+          "Content": "",
+          "ToolCalls": [
+            {
+              "id": "read",
+              "type": "function",
+              "function": {
+                "name": "file_read",
+                "arguments": "{\"path\":\"sample.go\"}"
+              }
+            }
+          ],
+          "Model": "fake",
+          "Usage": {
+            "prompt_tokens": 20,
+            "completion_tokens": 10
+          },
+          "ReasoningContent": "",
+          "Native": {
+            "Family": "",
+            "Payload": null
+          }
+        },
+        "ToolResults": [
+          {
+            "ToolName": "file_read",
+            "Arguments": "{\"path\":\"sample.go\"}",
+            "Result": "package main\n",
+            "OK": true,
+            "Duration": 0
+          }
+        ],
+        "Duration": 0,
+        "Error": ""
+      },
+      {
+        "Type": "main_task",
+        "RequestNo": 2,
+        "RequestMessages": [
+          {
+            "role": "system",
+            "content": "Review the supplied code."
+          },
+          {
+            "role": "user",
+            "content": "Review sample.go."
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "read",
+                "type": "function",
+                "function": {
+                  "name": "file_read",
+                  "arguments": "{\"path\":\"sample.go\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "package main\n",
+            "tool_call_id": "read"
+          }
+        ],
+        "Response": {
+          "Content": "visible",
+          "ToolCalls": [
+            {
+              "id": "call_comment",
+              "type": "function",
+              "function": {
+                "name": "code_comment",
+                "arguments": "{\"comments\":[{\"path\":\"sample.go\",\"content\":\"issue\",\"existing_code\":\"package main\"},{\"path\":\"sample.go\",\"content\":\"second issue\",\"existing_code\":\"func main() {}\"}]}"
+              }
+            }
+          ],
+          "Model": "",
+          "Usage": {
+            "prompt_tokens": 20,
+            "completion_tokens": 1
+          },
+          "ReasoningContent": "reasoning",
+          "Native": {
+            "Family": "",
+            "Payload": null
+          }
+        },
+        "ToolResults": [
+          {
+            "ToolName": "code_comment",
+            "Arguments": "{\"comments\":[{\"path\":\"sample.go\",\"content\":\"issue\",\"existing_code\":\"package main\"},{\"path\":\"sample.go\",\"content\":\"second issue\",\"existing_code\":\"func main() {}\"}]}",
+            "Result": "Successfully commented.",
+            "OK": true,
+            "Duration": 0
+          }
+        ],
+        "Duration": 0,
+        "Error": ""
+      },
+      {
+        "Type": "main_task",
+        "RequestNo": 3,
+        "RequestMessages": [
+          {
+            "role": "system",
+            "content": "Review the supplied code."
+          },
+          {
+            "role": "user",
+            "content": "Review sample.go."
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "read",
+                "type": "function",
+                "function": {
+                  "name": "file_read",
+                  "arguments": "{\"path\":\"sample.go\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "package main\n",
+            "tool_call_id": "read"
+          },
+          {
+            "role": "assistant",
+            "content": "visible",
+            "tool_calls": [
+              {
+                "id": "call_comment",
+                "type": "function",
+                "function": {
+                  "name": "code_comment",
+                  "arguments": "{\"comments\":[{\"path\":\"sample.go\",\"content\":\"issue\",\"existing_code\":\"package main\"},{\"path\":\"sample.go\",\"content\":\"second issue\",\"existing_code\":\"func main() {}\"}]}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "Successfully commented.",
+            "tool_call_id": "call_comment"
+          },
+          {
+            "role": "user",
+            "content": "Your review budget is exhausted. This is your FINAL round. You may ONLY:\n- Call code_comment to submit any findings you have identified but not yet reported.\n- Call task_done if you have nothing more to report.\nNo other tools are available. Do not attempt further analysis."
+          }
+        ],
+        "Response": {
+          "Content": "",
+          "ToolCalls": [
+            {
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "task_done",
+                "arguments": "{}"
+              }
+            }
+          ],
+          "Model": "fake",
+          "Usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5
+          },
+          "ReasoningContent": "",
+          "Native": {
+            "Family": "",
+            "Payload": null
+          }
+        },
+        "ToolResults": null,
+        "Duration": 0,
+        "Error": ""
+      }
+    ]
+  },
+  "requests": [
+    {
+      "model": "fake",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Review the supplied code."
+        },
+        {
+          "role": "user",
+          "content": "Review sample.go."
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "task_done",
+            "description": "Call this tool to terminate task execution when you have completed the user's task, such as when no obvious code issues are found during code review.",
+            "parameters": {
+              "properties": {
+                "state": {
+                  "description": "Defaults to DONE. Return FAILED if the task cannot be completed using available tools.",
+                  "enum": [
+                    "DONE",
+                    "FAILED"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "code_comment",
+            "description": "When you discover that a code change could introduce code issue, please use this tool to report the issue. The tool will pinpoint your feedback to the precise code line (or block) in the current file by inserting a code comment.\n\n**Core Mechanism:**\nThis tool uses a dynamic sliding window algorithm to match corresponding consecutive lines in diff text based on your provided 'existing_code' parameter. Therefore, you must ensure the provided 'existing_code' actually exists in the diff text with exactly matching format. It should contain one or several consecutive lines of code most relevant to your comment.",
+            "parameters": {
+              "properties": {
+                "comments": {
+                  "description": "A list of comments. Each item should contain 'content' and 'existing_code'.",
+                  "items": {
+                    "properties": {
+                      "category": {
+                        "description": "The category the issue belongs to.",
+                        "enum": [
+                          "bug",
+                          "security",
+                          "performance",
+                          "maintainability",
+                          "test",
+                          "style",
+                          "documentation",
+                          "other"
+                        ],
+                        "type": "string"
+                      },
+                      "content": {
+                        "description": "Comment content, typically a brief description of code issues and corresponding suggestions.",
+                        "type": "string"
+                      },
+                      "existing_code": {
+                        "description": "Code snippet used to locate comment position. Only return newly added code lines, should not include deleted code or unchanged code lines. Maintain consistent style with diff code for IDE recognition and mounting in current file.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "The relative file path this comment applies to.",
+                        "type": "string"
+                      },
+                      "severity": {
+                        "description": "The severity of the issue.",
+                        "enum": [
+                          "critical",
+                          "high",
+                          "medium",
+                          "low"
+                        ],
+                        "type": "string"
+                      },
+                      "suggestion_code": {
+                        "description": "Corresponding suggested code snippet, maintaining consistent code style.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "content",
+                      "existing_code",
+                      "category",
+                      "severity",
+                      "path"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "comments"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "code_search",
+            "description": "Use this tool to search for specific text within files. Supports searching in specific files, directories, or across the entire codebase with flexible file pattern filtering. Can use either exact string matching or regular expressions.\n\n**Example output:**\nSearch results for 'toolRequest' (case-insensitive):\nFile: path/to/example.java\n433|      String name = toolRequest.get().getName();\n438|      logToolRequest(newPath, tool, toolRequest.get());\n\n**Regular expression examples (requires use_perl_regexp: true):**\n- Find classes that extend BaseModel: 'class.*extends.*BaseModel'\n- Find function: 'functionName(.*)'\n- Find the function call sites: '\\.functionName(.*)'\n- Match any of multiple strings: 'error|exception|fail'\n\n**File patterns examples:**\n- Single file: ['src/main.go']\n- Multiple files: ['src/main.go', 'lib/utils.js']\n- All Go files: ['*.go']\n- Exclude test files: [':(exclude)*_test.go']\n- Only in src directory: ['src/']\n- Multiple patterns: ['*.go', ':(exclude)vendor/']\n\n**Limitations:**\n- If more than 100 matches are found, only the first 100 results will be returned.\n- Empty search terms will return no results.\n- This tool searches in the current version of files.",
+            "parameters": {
+              "properties": {
+                "case_sensitive": {
+                  "description": "Whether the search should be case-sensitive. Defaults to false (case-insensitive).",
+                  "type": "boolean"
+                },
+                "file_patterns": {
+                  "description": "Array of patterns to include/exclude files in the search. Supports Git pathspec syntax for including and excluding files. If omitted, searches the entire codebase.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "search_text": {
+                  "description": "The text string or regular expression pattern to search for.",
+                  "type": "string"
+                },
+                "use_perl_regexp": {
+                  "description": "If true, treats search_text as a Perl-compatible regular expression pattern instead of literal text. Defaults to false.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "search_text"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "file_read",
+            "description": "Use this tool to read file content when you need to get context for git diff. You can specify start_line and end_line to view specific parts of the file.\n\n**Line Range Strategy:**\n- Git diff hunk header provides guidance on how to get more relevant context.\n- Git diff hunk header \"@@-x,y +m,n@@\" indicates that the old file has y lines starting from line x, and the new file has n lines starting from line m.\n- For example, when you need to read 50 lines above and below the current changed code block in the new file, set start_line = m - 50, end_line = m + n + 50.\n\n**Example output:**\nFile: path/to/example.go (Total lines: 50)\nIS_TRUNCATED: false\nLINE_RANGE: 10-12\n// The following is the original content of the file\nfunc main() {\n  fmt.Println(\"Hello, World!\")\n}\n\n**Limitations:**\n- If the specified range exceeds 500 lines, only 500 lines will be returned with a truncation notice.\n- This tool can only read file content from the modified version (after changes) in git diff.",
+            "parameters": {
+              "properties": {
+                "end_line": {
+                  "description": "The end line number to view. Defaults to end line of file.",
+                  "type": "integer"
+                },
+                "file_path": {
+                  "description": "The relative path of the file to open.",
+                  "type": "string"
+                },
+                "start_line": {
+                  "description": "The start line number to view. Defaults to 1.",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "file_path"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "file_read_diff",
+            "description": "The tool is used to view the changes made to other files in the list of modifications. Call this tool when you discover suspected code issues but need to check changes in other files to confirm whether the problem actually exists. This tool will respond in git diff format.\n\nOutput example:\n==== FILE: path/to/file1.txt ====\n--- a/path/to/file1.txt\n+++ b/path/to/file1.txt\n@@ -10,1 +10,1 @@\n- old content\n+ new content\n\n==== FILE: path/to/file2.txt ====\n@@ -5,1 +5,2 @@\n  - old content\n  + new content1\n  + new content2",
+            "parameters": {
+              "properties": {
+                "path_array": {
+                  "description": "List of file paths to view diff content.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "path_array"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "file_find",
+            "description": "Search for matching files in the current project based on filename keywords. When the query contains a path separator ('/' or '\\'), also matches against the full repository-relative path, enabling directory-scoped queries. Use this tool when you cannot find the files you need to view in the current change file list.\n\nThis tool searches for filenames containing specified keywords in the project directory and returns a list of matching file paths. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\nsrc/main/java/UserService.java\nsrc/test/java/UserServiceTest.java\n\nInput:\nquery_name: pkg/util\nOutput:\npkg/util.go\npkg/util_test.go",
+            "parameters": {
+              "properties": {
+                "case_sensitive": {
+                  "description": "Whether to perform case-sensitive search. Defaults to false.",
+                  "type": "boolean"
+                },
+                "query_name": {
+                  "description": "Filename keyword to search for, supports partial matching. If the query contains '/' or '\\', falls back to matching against the full repository-relative path (e.g. 'pkg/util' or 'internal/diff/').",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "query_name"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ],
+      "max_tokens": 321
+    },
+    {
+      "model": "fake",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Review the supplied code."
+        },
+        {
+          "role": "user",
+          "content": "Review sample.go."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "read",
+              "type": "function",
+              "function": {
+                "name": "file_read",
+                "arguments": "{\"path\":\"sample.go\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "package main\n",
+          "tool_call_id": "read"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "task_done",
+            "description": "Call this tool to terminate task execution when you have completed the user's task, such as when no obvious code issues are found during code review.",
+            "parameters": {
+              "properties": {
+                "state": {
+                  "description": "Defaults to DONE. Return FAILED if the task cannot be completed using available tools.",
+                  "enum": [
+                    "DONE",
+                    "FAILED"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "code_comment",
+            "description": "When you discover that a code change could introduce code issue, please use this tool to report the issue. The tool will pinpoint your feedback to the precise code line (or block) in the current file by inserting a code comment.\n\n**Core Mechanism:**\nThis tool uses a dynamic sliding window algorithm to match corresponding consecutive lines in diff text based on your provided 'existing_code' parameter. Therefore, you must ensure the provided 'existing_code' actually exists in the diff text with exactly matching format. It should contain one or several consecutive lines of code most relevant to your comment.",
+            "parameters": {
+              "properties": {
+                "comments": {
+                  "description": "A list of comments. Each item should contain 'content' and 'existing_code'.",
+                  "items": {
+                    "properties": {
+                      "category": {
+                        "description": "The category the issue belongs to.",
+                        "enum": [
+                          "bug",
+                          "security",
+                          "performance",
+                          "maintainability",
+                          "test",
+                          "style",
+                          "documentation",
+                          "other"
+                        ],
+                        "type": "string"
+                      },
+                      "content": {
+                        "description": "Comment content, typically a brief description of code issues and corresponding suggestions.",
+                        "type": "string"
+                      },
+                      "existing_code": {
+                        "description": "Code snippet used to locate comment position. Only return newly added code lines, should not include deleted code or unchanged code lines. Maintain consistent style with diff code for IDE recognition and mounting in current file.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "The relative file path this comment applies to.",
+                        "type": "string"
+                      },
+                      "severity": {
+                        "description": "The severity of the issue.",
+                        "enum": [
+                          "critical",
+                          "high",
+                          "medium",
+                          "low"
+                        ],
+                        "type": "string"
+                      },
+                      "suggestion_code": {
+                        "description": "Corresponding suggested code snippet, maintaining consistent code style.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "content",
+                      "existing_code",
+                      "category",
+                      "severity",
+                      "path"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "comments"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "code_search",
+            "description": "Use this tool to search for specific text within files. Supports searching in specific files, directories, or across the entire codebase with flexible file pattern filtering. Can use either exact string matching or regular expressions.\n\n**Example output:**\nSearch results for 'toolRequest' (case-insensitive):\nFile: path/to/example.java\n433|      String name = toolRequest.get().getName();\n438|      logToolRequest(newPath, tool, toolRequest.get());\n\n**Regular expression examples (requires use_perl_regexp: true):**\n- Find classes that extend BaseModel: 'class.*extends.*BaseModel'\n- Find function: 'functionName(.*)'\n- Find the function call sites: '\\.functionName(.*)'\n- Match any of multiple strings: 'error|exception|fail'\n\n**File patterns examples:**\n- Single file: ['src/main.go']\n- Multiple files: ['src/main.go', 'lib/utils.js']\n- All Go files: ['*.go']\n- Exclude test files: [':(exclude)*_test.go']\n- Only in src directory: ['src/']\n- Multiple patterns: ['*.go', ':(exclude)vendor/']\n\n**Limitations:**\n- If more than 100 matches are found, only the first 100 results will be returned.\n- Empty search terms will return no results.\n- This tool searches in the current version of files.",
+            "parameters": {
+              "properties": {
+                "case_sensitive": {
+                  "description": "Whether the search should be case-sensitive. Defaults to false (case-insensitive).",
+                  "type": "boolean"
+                },
+                "file_patterns": {
+                  "description": "Array of patterns to include/exclude files in the search. Supports Git pathspec syntax for including and excluding files. If omitted, searches the entire codebase.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "search_text": {
+                  "description": "The text string or regular expression pattern to search for.",
+                  "type": "string"
+                },
+                "use_perl_regexp": {
+                  "description": "If true, treats search_text as a Perl-compatible regular expression pattern instead of literal text. Defaults to false.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "search_text"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "file_read",
+            "description": "Use this tool to read file content when you need to get context for git diff. You can specify start_line and end_line to view specific parts of the file.\n\n**Line Range Strategy:**\n- Git diff hunk header provides guidance on how to get more relevant context.\n- Git diff hunk header \"@@-x,y +m,n@@\" indicates that the old file has y lines starting from line x, and the new file has n lines starting from line m.\n- For example, when you need to read 50 lines above and below the current changed code block in the new file, set start_line = m - 50, end_line = m + n + 50.\n\n**Example output:**\nFile: path/to/example.go (Total lines: 50)\nIS_TRUNCATED: false\nLINE_RANGE: 10-12\n// The following is the original content of the file\nfunc main() {\n  fmt.Println(\"Hello, World!\")\n}\n\n**Limitations:**\n- If the specified range exceeds 500 lines, only 500 lines will be returned with a truncation notice.\n- This tool can only read file content from the modified version (after changes) in git diff.",
+            "parameters": {
+              "properties": {
+                "end_line": {
+                  "description": "The end line number to view. Defaults to end line of file.",
+                  "type": "integer"
+                },
+                "file_path": {
+                  "description": "The relative path of the file to open.",
+                  "type": "string"
+                },
+                "start_line": {
+                  "description": "The start line number to view. Defaults to 1.",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "file_path"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "file_read_diff",
+            "description": "The tool is used to view the changes made to other files in the list of modifications. Call this tool when you discover suspected code issues but need to check changes in other files to confirm whether the problem actually exists. This tool will respond in git diff format.\n\nOutput example:\n==== FILE: path/to/file1.txt ====\n--- a/path/to/file1.txt\n+++ b/path/to/file1.txt\n@@ -10,1 +10,1 @@\n- old content\n+ new content\n\n==== FILE: path/to/file2.txt ====\n@@ -5,1 +5,2 @@\n  - old content\n  + new content1\n  + new content2",
+            "parameters": {
+              "properties": {
+                "path_array": {
+                  "description": "List of file paths to view diff content.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "path_array"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "file_find",
+            "description": "Search for matching files in the current project based on filename keywords. When the query contains a path separator ('/' or '\\'), also matches against the full repository-relative path, enabling directory-scoped queries. Use this tool when you cannot find the files you need to view in the current change file list.\n\nThis tool searches for filenames containing specified keywords in the project directory and returns a list of matching file paths. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\nsrc/main/java/UserService.java\nsrc/test/java/UserServiceTest.java\n\nInput:\nquery_name: pkg/util\nOutput:\npkg/util.go\npkg/util_test.go",
+            "parameters": {
+              "properties": {
+                "case_sensitive": {
+                  "description": "Whether to perform case-sensitive search. Defaults to false.",
+                  "type": "boolean"
+                },
+                "query_name": {
+                  "description": "Filename keyword to search for, supports partial matching. If the query contains '/' or '\\', falls back to matching against the full repository-relative path (e.g. 'pkg/util' or 'internal/diff/').",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "query_name"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ],
+      "max_tokens": 321
+    },
+    {
+      "model": "fake",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Review the supplied code."
+        },
+        {
+          "role": "user",
+          "content": "Review sample.go."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "read",
+              "type": "function",
+              "function": {
+                "name": "file_read",
+                "arguments": "{\"path\":\"sample.go\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "package main\n",
+          "tool_call_id": "read"
+        },
+        {
+          "role": "assistant",
+          "content": "visible",
+          "tool_calls": [
+            {
+              "id": "call_comment",
+              "type": "function",
+              "function": {
+                "name": "code_comment",
+                "arguments": "{\"comments\":[{\"path\":\"sample.go\",\"content\":\"issue\",\"existing_code\":\"package main\"},{\"path\":\"sample.go\",\"content\":\"second issue\",\"existing_code\":\"func main() {}\"}]}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "Successfully commented.",
+          "tool_call_id": "call_comment"
+        },
+        {
+          "role": "user",
+          "content": "Your review budget is exhausted. This is your FINAL round. You may ONLY:\n- Call code_comment to submit any findings you have identified but not yet reported.\n- Call task_done if you have nothing more to report.\nNo other tools are available. Do not attempt further analysis."
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "task_done",
+            "description": "Call this tool to terminate task execution when you have completed the user's task, such as when no obvious code issues are found during code review.",
+            "parameters": {
+              "properties": {
+                "state": {
+                  "description": "Defaults to DONE. Return FAILED if the task cannot be completed using available tools.",
+                  "enum": [
+                    "DONE",
+                    "FAILED"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "code_comment",
+            "description": "When you discover that a code change could introduce code issue, please use this tool to report the issue. The tool will pinpoint your feedback to the precise code line (or block) in the current file by inserting a code comment.\n\n**Core Mechanism:**\nThis tool uses a dynamic sliding window algorithm to match corresponding consecutive lines in diff text based on your provided 'existing_code' parameter. Therefore, you must ensure the provided 'existing_code' actually exists in the diff text with exactly matching format. It should contain one or several consecutive lines of code most relevant to your comment.",
+            "parameters": {
+              "properties": {
+                "comments": {
+                  "description": "A list of comments. Each item should contain 'content' and 'existing_code'.",
+                  "items": {
+                    "properties": {
+                      "category": {
+                        "description": "The category the issue belongs to.",
+                        "enum": [
+                          "bug",
+                          "security",
+                          "performance",
+                          "maintainability",
+                          "test",
+                          "style",
+                          "documentation",
+                          "other"
+                        ],
+                        "type": "string"
+                      },
+                      "content": {
+                        "description": "Comment content, typically a brief description of code issues and corresponding suggestions.",
+                        "type": "string"
+                      },
+                      "existing_code": {
+                        "description": "Code snippet used to locate comment position. Only return newly added code lines, should not include deleted code or unchanged code lines. Maintain consistent style with diff code for IDE recognition and mounting in current file.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "The relative file path this comment applies to.",
+                        "type": "string"
+                      },
+                      "severity": {
+                        "description": "The severity of the issue.",
+                        "enum": [
+                          "critical",
+                          "high",
+                          "medium",
+                          "low"
+                        ],
+                        "type": "string"
+                      },
+                      "suggestion_code": {
+                        "description": "Corresponding suggested code snippet, maintaining consistent code style.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "content",
+                      "existing_code",
+                      "category",
+                      "severity",
+                      "path"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "comments"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ],
+      "max_tokens": 321
+    }
+  ],
+  "stop": 1,
+  "tool_calls": {
+    "code_comment": 1,
+    "file_read": 1
+  },
+  "usage": [
+    30,
+    15,
+    0,
+    0
+  ],
+  "warnings": [
+    {
+      "file": "sample.go",
+      "message": "reached the maximum tool-request rounds without finishing; the grace round completed the task",
+      "type": "review_limit_reached"
+    }
+  ]
+}

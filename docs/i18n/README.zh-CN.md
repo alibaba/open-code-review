@@ -124,6 +124,9 @@ npm install -g @alibaba-group/open-code-review
 
 在审查代码之前，必须先配置 LLM。除非你使用[委托模式](https://open-codereview.ai/docs/delegate)。
 
+- **由 OCR 调用模型：** `ocr review`、`/open-code-review:review` 命令和 `open-code-review` skill 使用 OCR 自身的供应商配置，而非你的 Claude Code Team/Pro 订阅登录。认证要求取决于供应商；参见[配置说明](https://open-codereview.ai/docs/configuration)。
+- **由宿主 agent 调用模型：** `/open-code-review:delegate-review` 命令和 `open-code-review-delegate` skill 使用宿主 agent 配置的模型和认证方式，无需在 OCR 中单独配置 LLM 或凭证。参见 [Claude Code 安装步骤](../../plugins/open-code-review/README.md#claude-code)。
+
 ```bash
 ocr config provider          # 选择内置供应商或添加自定义供应商
 ocr config model             # 为当前供应商选择模型
