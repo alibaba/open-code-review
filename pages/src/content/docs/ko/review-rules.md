@@ -275,60 +275,75 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 3. `~/.opencodereview/rule.json`을 선언 순서대로 확인합니다.
 4. 내장 시스템 규칙 계층으로 넘어갑니다.
 
-내장 `system_rules.json`에서 고른 패턴을 상대적인 대조 순서대로 아래에 정리했습니다.
+내장 `system_rules.json`의 모든 패턴을 상대적인 대조 순서대로 아래에 정리했습니다.
 
-| 패턴                                | 규칙 문서                                                                        |
-| ----------------------------------- | -------------------------------------------------------------------------------- |
-| `**/*.properties`                   | `properties.md` — i18n / 설정 파일.                                              |
-| `**/*{mapper,dao}*.xml`             | `mapper_dao_xml.md` — MyBatis 형식의 매퍼 SQL.                                   |
-| `**/pom.xml`                        | `pom_xml.md` — Maven 의존성.                                                     |
-| `**/build.gradle`                   | `build_gradle.md` — Gradle 의존성.                                               |
-| `**/package.json`                   | `package_json.md` — NPM 의존성 / 스크립트.                                       |
-| `**/Cargo.toml`                     | `cargo_toml.md` — Rust 매니페스트.                                               |
-| `**/composer.json`                  | `composer_json.md` — Composer 의존성, 오토로딩, 스크립트, 플러그인, 패키지 설정. |
-| `**/*.{json,json5}`                 | `json.md` — 일반 JSON(`.json5`도 포함).                                          |
-| `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md` — GitHub Actions 워크플로 YAML.                            |
-| `.github/**/*.{yaml,yml}`           | `github_config.md` — 그 밖의 `.github` 설정 YAML.                                |
-| `**/*.{yaml,yml}`                   | `yaml.md`                                                                        |
-| `**/*.java`                         | `java.md`                                                                        |
-| `**/*.go`                           | `go.md` — Go 소스.                                                               |
-| `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — FreeMarker 템플릿(SSTI / XSS / null 처리).                     |
-| `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — Handlebars 및 Mustache 템플릿.                        |
-| `**/*.{jinja2,j2}`                  | `jinja.md` — Jinja 템플릿.                                                      |
-| `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                  |
-| `**/*.astro`                        | `astro.md` — Astro 컴포넌트와 아일랜드.                                          |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                               |
-| `**/*.{kt,kts}`                     | `kotlin.md`                                                                      |
-| `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — F# 구현, 시그니처, 스크립트 파일.                                  |
-| `**/*.rs`                           | `rust.md`                                                                        |
-| `**/*.R`                            | `r.md`                                                                           |
-| `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                         |
-| `**/*.c`                            | `c.md`                                                                           |
-| `**/*.{py,pyi,ipynb}`               | `python.md` — Python 소스.                                                       |
-| `**/*.{php,phtml}`                  | `php.md` — PHP 소스와 PHP 템플릿.                                                |
-| `**/*.proto`                        | `protobuf.md` — Protocol Buffers 통신 호환성.                                    |
-| `**/*.po`                           | `po.md` — gettext 번역 원본 카탈로그.                                            |
-| `**/*.pot`                          | `pot.md` — gettext 템플릿 파일.                                                  |
-| `**/*.{graphql,gql}`                | `graphql.md` — GraphQL 스키마와 오퍼레이션.                                      |
-| `**/*.prisma`                       | `prisma.md` — Prisma 스키마.                                                     |
-| `**/*.jl`                           | `julia.md` — Julia 소스.                                                         |
-| `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md` — Terraform / HCL.                                                |
-| `**/*.bicep`                        | `bicep.md` — Bicep(Azure) 템플릿.                                                |
-| `**/*.nu`                           | `nushell.md` — Nushell 스크립트.                                                 |
-| `**/*.elm`                          | `elm.md` — Elm 소스.                                                             |
-| `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리.                                 |
-| `**/*.thrift`                       | `thrift.md` — Apache Thrift IDL 통신 호환성.                                     |
-| `**/*.capnp`                        | `capnp.md` — Cap'n Proto 스키마 통신 호환성.                                     |
-| `**/*.{glsl,hlsl,wgsl,metal}`        | `shader.md` — GLSL, HLSL, WGSL 및 Metal 셰이더.                                   |
-| `**/*.{v,sv,vh}`                    | `verilog.md` — Verilog 및 SystemVerilog RTL.                                     |
-| `**/*.{vhd,vhdl}`                   | `vhdl.md` — VHDL RTL.                                                            |
-| `**/*.m`                            | `matlab.md`(또는 [내용 탐지](#content-sniffing-for-m-files)로 `objc.md`)         |
-| `**/*.mm`                           | `objc.md` — Objective-C++ 소스.                                                  |
-| `**/*.sol`                          | `solidity.md` — Solidity 스마트 컨트랙트.                                        |
-| `**/*.vy`                           | `vyper.md` — Vyper 스마트 컨트랙트.                                              |
-| `**/*.rego`                         | `rego.md` — Rego 정책 (OPA).                                                     |
-| `**/*.{ps1,psm1,psd1}` | `powershell.md` — PowerShell 스크립트, 모듈 및 데이터/매니페스트 파일. |
-| _(대체값)_                          | `default.md`                                                                     |
+| 패턴                                            | 규칙 문서                                                                        |
+| ----------------------------------------------- | -------------------------------------------------------------------------------- |
+| `**/*.properties`                               | `properties.md` — i18n / 설정 파일.                                              |
+| `**/*{mapper,dao}*.xml`                         | `mapper_dao_xml.md` — MyBatis 형식의 매퍼 SQL.                                   |
+| `**/pom.xml`                                    | `pom_xml.md` — Maven 의존성.                                                     |
+| `**/build.gradle`                               | `build_gradle.md` — Gradle 의존성.                                               |
+| `**/package.json`                               | `package_json.md` — NPM 의존성 / 스크립트.                                       |
+| `**/Cargo.toml`                                 | `cargo_toml.md` — Rust 매니페스트.                                               |
+| `**/composer.json`                              | `composer_json.md` — Composer 의존성, 오토로딩, 스크립트, 플러그인, 패키지 설정. |
+| `**/*.{json,json5,jsonc}`                       | `json.md` — 일반 JSON(`.json5`와 `.jsonc`도 포함). |
+| `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md` — GitHub Actions 워크플로 YAML.                            |
+| `.github/**/*.{yaml,yml}`                       | `github_config.md` — 그 밖의 `.github` 설정 YAML.                                |
+| `**/*.{yaml,yml}`                               | `yaml.md`                                                                        |
+| `**/*.java`                                     | `java.md`                                                                        |
+| `**/*.go`                                       | `go.md` — Go 소스.                                                               |
+| `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md` — FreeMarker 템플릿(SSTI / XSS / null 처리).                     |
+| `**/*.{hbs,mustache}`                           | `handlebars_mustache.md` — Handlebars 및 Mustache 템플릿.                        |
+| `**/*.{jinja2,j2}`                              | `jinja.md` — Jinja 템플릿.                                                       |
+| `**/*.pug`                          | `pug.md` — Pug 템플릿.                                                              |
+| `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md` — EJS, Liquid, Nunjucks 템플릿(SSTI / XSS / 이스케이프). |
+| `**/*.{haml,slim}`                              | `haml_slim.md` — HAML 및 Slim 템플릿(SSTI / XSS / 이스케이프 / 들여쓰기 의미론). |
+| `**/*.erb`                                      | `erb.md` — ERB 템플릿(SSTI / XSS / 이스케이프 / 공백 및 출력 구조). |
+| `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                  |
+| `**/*.astro`                                    | `astro.md` — Astro 컴포넌트와 아일랜드.                                          |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                               |
+| `**/*.{kt,kts}`                                 | `kotlin.md`                                                                      |
+| `**/*.scala`                                    | `scala.md` |
+| `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# 구현, 시그니처, 스크립트 파일.                                  |
+| `**/*.cs`                                       | `csharp.md` — C# 소스 파일. |
+| `**/*.rs`                                       | `rust.md`                                                                        |
+| `**/*.R`                                        | `r.md`                                                                           |
+| `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                         |
+| `**/*.c`                                        | `c.md`                                                                           |
+| `**/*.{py,pyi,ipynb}`                           | `python.md` — Python 소스.                                                       |
+| `**/*.{php,phtml}`                              | `php.md` — PHP 소스와 PHP 템플릿.                                                |
+| `**/*.proto`                                    | `protobuf.md` — Protocol Buffers 통신 호환성.                                    |
+| `**/*.po`                                       | `po.md` — gettext 번역 원본 카탈로그.                                            |
+| `**/*.pot`                                      | `pot.md` — gettext 템플릿 파일.                                                  |
+| `**/*.{graphql,gql}`                            | `graphql.md` — GraphQL 스키마와 오퍼레이션.                                      |
+| `**/*.prisma`                                   | `prisma.md` — Prisma 스키마.                                                     |
+| `**/*.jl`                                       | `julia.md` — Julia 소스.                                                         |
+| `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                |
+| `**/*.bicep`                                    | `bicep.md` — Bicep(Azure) 템플릿.                                                |
+| `**/*.nix`                          | `nix.md` — Nix 식과 flake.                                                         |
+| `**/*.{hs,lhs}`                     | `haskell.md` — Haskell 소스.                                                       |
+| `**/*.{nim,nims,nimble}`            | `nim.md` — Nim 소스와 패키지 매니페스트.                                                    |
+| `**/*.swift`                        | `swift.md` — Swift 소스.                                                           |
+| `**/*.nu`                                       | `nushell.md` — Nushell 스크립트.                                                 |
+| `**/*.elm`                                      | `elm.md` — Elm 소스.                                                             |
+| `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리.                                 |
+| `**/*.zig`                          | `zig.md` — Zig 소스.                                                               |
+| `**/*.thrift`                                   | `thrift.md` — Apache Thrift IDL 통신 호환성.                                     |
+| `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md` — Starlark 및 Bazel 빌드, 매크로, 규칙 설계.                       |
+| `**/*.capnp`                                    | `capnp.md` — Cap'n Proto 스키마 통신 호환성.                                     |
+| `**/*.{ml,mli}`                     | `ocaml.md` — OCaml 소스.                                                           |
+| `**/*.{re,rei}`                     | `ocaml.md` — ReasonML 소스.                                                        |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL 및 Metal 셰이더.                                  |
+| `**/*.{v,sv,vh}`                                | `verilog.md` — Verilog 및 SystemVerilog RTL.                                     |
+| `**/*.{vhd,vhdl}`                               | `vhdl.md` — VHDL RTL.                                                            |
+| `**/*.m`                                        | `matlab.md`(또는 [내용 탐지](#content-sniffing-for-m-files)로 `objc.md`)         |
+| `**/*.mm`                                       | `objc.md` — Objective-C++ 소스.                                                  |
+| `**/*.sol`                                      | `solidity.md` — Solidity 스마트 컨트랙트.                                        |
+| `**/*.vy`                                       | `vyper.md` — Vyper 스마트 컨트랙트.                                              |
+| `**/*.rego`                                     | `rego.md` — Rego 정책 (OPA).                                                     |
+| `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell 스크립트, 모듈 및 데이터/매니페스트 파일.           |
+| `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — Clojure / ClojureScript 소스 코드 및 EDN 데이터. |
+| _(대체값)_                                      | `default.md`                                                                     |
 
 해석된 규칙 본문은 plan과 main 작업 프롬프트에서 `{{system_rule}}` 자리에 들어갑니다.
 

@@ -12,14 +12,14 @@ schema 与示例输入/输出。完整的机器可读定义位于
 
 每个工具声明它在 **plan 阶段**、**main task** 还是两者中都可用：
 
-| 工具 | Plan | Main | 用途 |
-|---|---|---|---|
-| `task_done` | ✗ | ✓ | 表示“我完成了”——终止循环。 |
-| `code_comment` | ✗ | ✓ | 发出一条带行范围 + 建议的评审评论。 |
-| `file_read` | ✗ | ✓ | 读取变更后快照中某文件的一段。 |
-| `file_read_diff` | ✓ | ✓ | 读取另一文件的 diff 以确认跨文件关切。 |
-| `file_find` | ✓ | ✓ | 按文件名关键字定位文件。 |
-| `code_search` | ✓ | ✓ | 全仓 grep（字面量或正则）。 |
+| 工具             | Plan | Main | 用途                                   |
+| ---------------- | ---- | ---- | -------------------------------------- |
+| `task_done`      | ✗    | ✓    | 表示“我完成了”——终止循环。             |
+| `code_comment`   | ✗    | ✓    | 发出一条带行范围 + 建议的评审评论。    |
+| `file_read`      | ✗    | ✓    | 读取变更后快照中某文件的一段。         |
+| `file_read_diff` | ✓    | ✓    | 读取另一文件的 diff 以确认跨文件关切。 |
+| `file_find`      | ✓    | ✓    | 按文件名关键字定位文件。               |
+| `code_search`    | ✓    | ✓    | 全仓 grep（字面量或正则）。            |
 
 `task_done` 和 `code_comment` 在 plan 阶段有意**不可用**：plan 是只读的。
 
@@ -29,8 +29,9 @@ schema 与示例输入/输出。完整的机器可读定义位于
 > 发现的任何问题按设计都会被忽略。跨文件关切只有在**当前文件 diff**中可观测
 > 时，才会作为评论出现。
 
-要覆盖工具注册表，传入一个与内嵌定义同形的 JSON 文件路径 `--tools <path>`。
-借此可以禁用工具、编辑描述，或基于已有 provider 添加新工具。
+内置工具定义随 OCR 发布，不支持运行时覆盖。项目指引使用[评审规则](../review-rules/)，
+外部业务上下文使用 [MCP](../mcp/)。曾使用自定义工具文件的用户请参阅
+[迁移说明](#customizing-tools)。
 
 ## `task_done`
 
@@ -43,9 +44,9 @@ schema 与示例输入/输出。完整的机器可读定义位于
 }
 ```
 
-| 字段 | 必需 | 含义 |
-|---|---|---|
-| `state` | 是 | `DONE`（默认）或 `FAILED`。`FAILED` 表示“我确实无法用可用工具完成此事”——几乎从不是正确的选择。 |
+| 字段    | 必需 | 含义                                                                                           |
+| ------- | ---- | ---------------------------------------------------------------------------------------------- |
+| `state` | 是   | `DONE`（默认）或 `FAILED`。`FAILED` 表示“我确实无法用可用工具完成此事”——几乎从不是正确的选择。 |
 
 agent 看到 `task_done` 后，停止调用 LLM 并开始处理已累积的 `code_comment`
 调用。`task_done` 立即返回（在结果记入会话日志之前），因此 `state` 值会被接受
@@ -132,11 +133,11 @@ OCR 用一个**动态滑动窗口**在 diff 中查找 `existing_code` 文本。�
 }
 ```
 
-| 字段 | 必需 | 默认 | 说明 |
-|---|---|---|---|
-| `file_path` | 是 | — | 相对仓库根的路径。 |
-| `start_line` | 否 | `1` | 从 1 开始索引。 |
-| `end_line` | 否 | 文件末尾 | 含端点。 |
+| 字段         | 必需 | 默认     | 说明               |
+| ------------ | ---- | -------- | ------------------ |
+| `file_path`  | 是   | —        | 相对仓库根的路径。 |
+| `start_line` | 否   | `1`      | 从 1 开始索引。    |
+| `end_line`   | 否   | 文件末尾 | 含端点。           |
 
 ### 输出
 
@@ -196,8 +197,10 @@ hunk 头 `@@ -x,y +m,n @@` 计算范围——通常 `m-50` 到 `m+n+50`。
 + query := "SELECT id"
 ```
 
-若某路径不在变更集中，该条目被静默省略。若请求的路径**都不**在变更集中，工具
-返回 `Error: diff not found for the requested paths`；空的 `path_array` 返回
+不在变更集中的路径不会被静默丢弃：它会在 `Error: diff not found for: <path>`
+中被点名，而已找到路径的 diff 仍会先于该错误返回。当本次运行对其他文件有 diff 时，
+消息会列出它们（`Diffs exist for: ...`），以便纠正拼写错误的路径；当本次运行完全
+没有 diff 时，消息会指引改用 `file_read`。空的 `path_array` 返回
 `Error: no files found`。
 
 ## `file_find`
@@ -216,15 +219,15 @@ hunk 头 `@@ -x,y +m,n @@` 计算范围——通常 `m-50` 到 `m+n+50`。
 }
 ```
 
-| 字段 | 必需 | 默认 | 说明 |
-|---|---|---|---|
-| `query_name` | 是 | — | 与每个文件的**仓库相对路径**做子串匹配（同时支持 `/` 和 `\` 路径分隔符）。 |
-| `case_sensitive` | 否 | `false` | 设为 `true` 做精确大小写匹配。 |
+| 字段             | 必需 | 默认    | 说明                                                                       |
+| ---------------- | ---- | ------- | -------------------------------------------------------------------------- |
+| `query_name`     | 是   | —       | 与每个文件的**仓库相对路径**做子串匹配（同时支持 `/` 和 `\` 路径分隔符）。 |
+| `case_sensitive` | 否   | `false` | 设为 `true` 做精确大小写匹配。                                             |
 
 候选集在工作区模式下来自 `git ls-files --cached --others --exclude-standard`，
 在区间 / commit 模式下来自 `git ls-tree -r --name-only <ref>`。无扩展名的文件
 被跳过，但 `Makefile`、`Dockerfile`、`LICENSE`、`Vagrantfile`、
-`Containerfile` 例外。
+`Containerfile`、`BUILD`、`WORKSPACE` 例外。
 
 ### 输出
 
@@ -263,12 +266,12 @@ src/main/java/com/example/internal/UserServiceImpl.java
 }
 ```
 
-| 字段 | 必需 | 默认 | 说明 |
-|---|---|---|---|
-| `search_text` | 是 | — | 字面量字符串或 PCRE 模式（见 `use_perl_regexp`）。 |
-| `file_patterns` | 否 | 全仓 | pathspec 条目数组。用 `:(exclude)pat` 做排除。 |
-| `case_sensitive` | 否 | `false` | — |
-| `use_perl_regexp` | 否 | `false` | 为 `true` 时，`search_text` 作为正则处理。 |
+| 字段              | 必需 | 默认    | 说明                                               |
+| ----------------- | ---- | ------- | -------------------------------------------------- |
+| `search_text`     | 是   | —       | 字面量字符串或 PCRE 模式（见 `use_perl_regexp`）。 |
+| `file_patterns`   | 否   | 全仓    | pathspec 条目数组。用 `:(exclude)pat` 做排除。     |
+| `case_sensitive`  | 否   | `false` | —                                                  |
+| `use_perl_regexp` | 否   | `false` | 为 `true` 时，`search_text` 作为正则处理。         |
 
 ### 输出
 
@@ -290,12 +293,12 @@ Match lines: 1
 
 ### pathspec 速查
 
-| 目标 | `file_patterns` |
-|---|---|
-| 单个文件 | `["src/main.go"]` |
-| 所有 Go 文件 | `["*.go"]` |
-| 除测试外所有 Go | `["*.go", ":(exclude)*_test.go"]` |
-| 仅一个目录 | `["src/api/"]` |
+| 目标                  | `file_patterns`                                                    |
+| --------------------- | ------------------------------------------------------------------ |
+| 单个文件              | `["src/main.go"]`                                                  |
+| 所有 Go 文件          | `["*.go"]`                                                         |
+| 除测试外所有 Go       | `["*.go", ":(exclude)*_test.go"]`                                  |
+| 仅一个目录            | `["src/api/"]`                                                     |
 | 多种类型，排除 vendor | `["*.go", "*.ts", ":(exclude)vendor/", ":(exclude)node_modules/"]` |
 
 ### 限制
@@ -319,32 +322,27 @@ Match lines: 1
 文本形如 `"Error: file not found: src/missing.go"`。模型再决定是重试、换文件，
 还是调 `task_done`。
 
-若工具名不在注册表中，OCR 返回常量 `tool.NotAvailableMsg` 而不是崩溃。这使得
-（通过 `--tools`）运行时禁用工具是安全的。
+若工具名不在注册表中，OCR 返回常量 `tool.NotAvailableMsg` 而不是崩溃，
+将未知工具调用作为工具不可用的结果反馈给模型。
 
-## 自定义工具
+## 工具定制限制与迁移 {#customizing-tools}
 
-两种扩展方式：
+OCR 使用专用审查 Agent，核心工作流与内置工具通过测试和 benchmark 一同验证，
+而不是由用户自行定义工具注册表。
 
-### 1. 禁用工具
+**迁移说明：** `ocr review` 和 `ocr scan` 均已移除 `--tools`。
+旧调用会报 `unknown flag: --tools`；请从脚本、CI 任务和 shell 别名中删除该参数及其文件路径。
 
-复制 `tools.json`，删掉不想要的条目，然后运行：
+- 项目专属审查指引使用[评审规则](../review-rules/)或 `--background`
+  （`review` 还支持 `--background-file`）。
+- 需求、知识库等外部业务上下文使用 [MCP 服务器](../mcp/)。目前只有 `review`
+  接入 MCP，`scan` 尚未接入；MCP 不能替换同名内置工具。
+- 禁用内置工具、修改其描述、schema 或阶段可见性没有运行时替代方案。
+  核心变更需要修改源码、重新构建，并进行相应测试和 benchmark 验证。
 
-```bash
-ocr review --tools ./my-tools.json
-```
-
-例如，想要一个从不读额外上下文的“仅评论”评审器，只保留 `code_comment` 和
-`task_done`。
-
-### 2. 重新描述工具
-
-保留 `name`（provider 内部按 name 查找）但更改 `description` 以引导模型。这是
-注入项目专属指引最简单的方式——如“使用 `file_read` 时，始终读取变更附近至少
-30 行。”
-
-> 添加**新**工具*名*需要在 Go 侧接入；见 `internal/tool/definitions.go` 及
-> `internal/tool/` 下的 provider。仅靠 JSON 文件无法添加新行为。
+`--max-tools` 仍控制工具调用轮次预算。MCP 配置项 `mcp_servers.<name>.tools`
+仍用于筛选外部工具，与移除的参数无关。历史会话文件仍可读取，但对曾使用自定义工具定义的
+会话，建议重新开始审查，而不是恢复旧会话。
 
 ## 另见
 

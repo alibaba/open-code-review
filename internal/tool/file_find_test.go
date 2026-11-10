@@ -118,6 +118,10 @@ func setupFileFindRepo(t *testing.T) string {
 	write("Makefile", "all:\n")
 	write("Dockerfile", "FROM scratch\n")
 	write("LICENSE", "MIT\n")
+	write("BUILD", "filegroup(name = \"root\")\n")
+	write("pkg/BUILD", "filegroup(name = \"pkg\")\n")
+	write("WORKSPACE", "workspace(name = \"root\")\n")
+	write("legacy/WORKSPACE", "workspace(name = \"legacy\")\n")
 	write("data_binary", "binary\n")
 
 	run("git", "add", ".")
@@ -156,6 +160,39 @@ func TestFileFind_GitRepo_CommitMode(t *testing.T) {
 	}
 	if !strings.Contains(got, "main.go") {
 		t.Errorf("expected main.go in commit mode, got: %s", got)
+	}
+}
+
+func TestFileFind_GitRepo_StarlarkBuildFiles(t *testing.T) {
+	dir := setupFileFindRepo(t)
+	for _, tc := range []struct {
+		name string
+		mode ReviewMode
+		ref  string
+	}{
+		{name: "workspace", mode: ModeWorkspace},
+		{name: "commit", mode: ModeCommit, ref: "HEAD"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewFileFind(&FileReader{RepoDir: dir, Mode: tc.mode, Ref: tc.ref})
+			for _, query := range []struct {
+				name string
+				want string
+			}{
+				{name: "BUILD", want: "BUILD\npkg/BUILD"},
+				{name: "WORKSPACE", want: "WORKSPACE\nlegacy/WORKSPACE"},
+			} {
+				t.Run(query.name, func(t *testing.T) {
+					got, err := p.Execute(context.Background(), map[string]any{"query_name": query.name})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got != query.want {
+						t.Errorf("Execute(%q) = %q, want %q", query.name, got, query.want)
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -287,6 +324,10 @@ func TestShouldSkipFile(t *testing.T) {
 		{"LICENSE", false},
 		{"Vagrantfile", false},
 		{"Containerfile", false},
+		{"BUILD", false},
+		{"pkg/BUILD", false},
+		{"WORKSPACE", false},
+		{"legacy/WORKSPACE", false},
 		{"some_binary", true},
 		{"dir/unknown_file", true},
 	}

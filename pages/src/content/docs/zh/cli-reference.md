@@ -120,14 +120,13 @@ unstaged + untracked 变更。
 | `--concurrency <n>` | — | `8` | 并行评审的最大子任务数。 |
 | `--timeout <minutes>` | — | `15` | 每个子任务的时间预算，包括 LLM 调用、工具执行和重试等待。`0` 关闭任务期限，但不关闭请求超时。单次请求超时独立设置：`OCR_LLM_TIMEOUT` 或 provider 的 `timeout_sec`，单位秒（默认 `300`）。按 effort 评审轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
-| `--max-tools <n>` | — | 模板默认 | 每个子任务的最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。 |
+| `--max-tools <n>` | — | 模板默认 | 每个子任务的最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的正值会精确设置上限。 |
 | `--max-tokens <n>` | — | 配置或模板默认 | 每个子任务的**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。 |
 | `--max-tokens-budget <n>` | — | `0`（无限制） | 限制本次评审的输入 + 输出 token 总量。每次 LLM 轮次前都会检查：已超出预算的子任务会获得最后一轮来提交发现，并记为 `failed(budget)`；不再分发新的子任务，部分结果仍会发布。 |
 | `--effort <level>` | — | 配置或 `medium` | 评审投入档位：`low` = 1 轮 main 循环，`medium` = 2 轮（默认），`high` = 3 轮。轮数越多召回越高、耗时与 token 也越多。可用 `ocr config set effort <level>` 持久化。 |
 | `--provider <name>` | — | — | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。 |
 | `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 并发 git 子进程的最大数。 |
-| `--tools <path>` | — | 内嵌 | 自定义 JSON 工具配置文件路径。覆盖内嵌工具定义。 |
 
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
@@ -398,17 +397,26 @@ ocr session list --json
 
 ### `ocr session show`
 
+默认根据 ID 在所有已保存的仓库会话中查找。传入 `--repo .` 可保留原先仅在当前目录
+范围内查找会话的行为。
+
+使用默认的全局查找且 ID 唯一时，切换 worktree 或移除原工作目录后仍能查看。
+若多个仓库保存了相同的 ID，命令会列出候选仓库，要求用 `--repo` 指定其中一个。
+`--repo` 目前要求指定的仓库目录仍然存在；如果要选择的会话所属仓库目录已被删除，
+目前就无法通过 `--repo` 选择该会话。
+
 恢复的运行还会打印它所继续的父运行，若这次恢复跨了 provider 或 model，也会打印这次切换。
 
 ```bash
 ocr session show <session-id>
 ocr session show --json <session-id>
+ocr session show --repo . <session-id>
 ocr session show --repo /path/to/repo <session-id>
 ```
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `--repo <path>` | 当前目录 | 要查看会话的仓库。 |
+| `--repo <path>` | 所有仓库 | 仅在指定的、仍然存在的仓库目录下查找会话。 |
 | `--json` | `false` | 以 JSON 输出会话元数据和逐文件条目。 |
 
 ### `ocr session comments`

@@ -22,7 +22,7 @@
 
 ### Требования
 
-- [Go 1.26.9+](https://go.dev/dl/)
+- [Go 1.26.10+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -85,7 +85,7 @@ git checkout -b feat/your-feature-name
 Примеры:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
@@ -241,7 +241,7 @@ make build
 Используйте тот же формат Conventional Commits, что и для сообщений коммитов:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 ```
 
 ### Процесс ревью

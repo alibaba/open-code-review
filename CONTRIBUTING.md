@@ -22,7 +22,7 @@ There are many ways to contribute beyond writing code:
 
 ### Prerequisites
 
-- [Go 1.26.9+](https://go.dev/dl/)
+- [Go 1.26.10+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -95,7 +95,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/) format:
 Examples:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
@@ -249,7 +249,7 @@ When reporting a bug, include:
 Use the same Conventional Commits format as commit messages:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 ```
 
 ### Review Process

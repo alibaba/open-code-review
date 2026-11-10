@@ -293,61 +293,76 @@ text the agent should follow:
 3. Try `~/.opencodereview/rule.json` in declaration order.
 4. Fall back to the embedded system rule layer.
 
-Selected embedded `system_rules.json` patterns are shown below in relative
+Every pattern in the embedded `system_rules.json` is listed below in relative
 matching order:
 
-| Pattern                             | Rule doc                                                                                              |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `**/*.properties`                   | `properties.md` — i18n / configuration files.                                                         |
-| `**/*{mapper,dao}*.xml`             | `mapper_dao_xml.md` — MyBatis-style mapper SQL.                                                       |
-| `**/pom.xml`                        | `pom_xml.md` — Maven dependencies.                                                                    |
-| `**/build.gradle`                   | `build_gradle.md` — Gradle dependencies.                                                              |
-| `**/package.json`                   | `package_json.md` — NPM dependencies / scripts.                                                       |
-| `**/Cargo.toml`                     | `cargo_toml.md` — Rust manifest.                                                                      |
-| `**/composer.json`                  | `composer_json.md` — Composer dependencies, autoloading, scripts, plugins, and package configuration. |
-| `**/*.{json,json5}`                 | `json.md` — generic JSON (also matches `.json5`).                                                     |
-| `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md` — GitHub Actions workflow YAML.                                                 |
-| `.github/**/*.{yaml,yml}`           | `github_config.md` — other `.github` config YAML.                                                     |
-| `**/*.{yaml,yml}`                   | `yaml.md`                                                                                             |
-| `**/*.java`                         | `java.md`                                                                                             |
-| `**/*.go`                           | `go.md` — Go source.                                                                                  |
-| `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling).                                  |
-| `**/*.{hbs,mustache}`               | `handlebars_mustache.md` — Handlebars and Mustache templates.                                         |
-| `**/*.{jinja2,j2}`                  | `jinja.md` — Jinja templates                                                                          |
-| `**/*.ets`                          | `arkts.md` — ArkTS / HarmonyOS.                                                                       |
-| `**/*.astro`                        | `astro.md` — Astro components and islands.                                                            |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                                                    |
-| `**/*.{kt,kts}`                     | `kotlin.md`                                                                                           |
-| `**/*.{fs,fsi,fsx}`                 | `fsharp.md` — F# implementation, signature, and script files.                                         |
-| `**/*.rs`                           | `rust.md`                                                                                             |
-| `**/*.R`                            | `r.md`                                                                                                |
-| `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                                                              |
-| `**/*.c`                            | `c.md`                                                                                                |
-| `**/*.{py,pyi,ipynb}`               | `python.md` — Python source.                                                                          |
-| `**/*.{php,phtml}`                  | `php.md` — PHP source and PHP templates.                                                              |
-| `**/*.proto`                        | `protobuf.md` — Protocol Buffers wire compatibility.                                                  |
-| `**/*.po`                           | `po.md` — gettext translation source catalogs.                                                        |
-| `**/*.pot`                          | `pot.md` — gettext template files.                                                                    |
-| `**/*.{graphql,gql}`                | `graphql.md` — GraphQL schema and operations.                                                         |
-| `**/*.prisma`                       | `prisma.md` — Prisma schema.                                                                          |
-| `**/*.jl`                           | `julia.md` — Julia source.                                                                            |
-| `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md` — Terraform / HCL.                                                                     |
-| `**/*.bicep`                        | `bicep.md` — Bicep (Azure) templates.                                                                 |
-| `**/*.nu`                           | `nushell.md` — Nushell scripts.                                                                       |
-| `**/*.elm`                          | `elm.md` - Elm source.                                                                                |
-| `**/*.{jsonnet,libsonnet}`          | `jsonnet.md` — Jsonnet configuration templates and libraries.                                         |
-| `**/*.thrift`                       | `thrift.md` — Apache Thrift IDL wire compatibility.                                                   |
-| `**/*.capnp`                        | `capnp.md` — Cap'n Proto schema wire compatibility.                                                   |
-| `**/*.{glsl,hlsl,wgsl,metal}`       | `shader.md` — GLSL, HLSL, WGSL, and Metal shaders.                                                     |
-| `**/*.{v,sv,vh}`                    | `verilog.md` — Verilog and SystemVerilog RTL.                                                         |
-| `**/*.{vhd,vhdl}`                   | `vhdl.md` — VHDL RTL.                                                                                 |
-| `**/*.m`                            | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files))                      |
-| `**/*.mm`                           | `objc.md` — Objective-C++ source.                                                                     |
-| `**/*.sol`                          | `solidity.md` — Solidity smart contracts.                                                             |
-| `**/*.vy`                           | `vyper.md` — Vyper smart contracts.                                                                   |
-| `**/*.rego`                         | `rego.md` — Rego policy (OPA).                                                                        |
-| `**/*.{ps1,psm1,psd1}` | `powershell.md` — PowerShell scripts, modules, and data/manifest files. |
-| _(fallback)_                        | `default.md`                                                                                          |
+| Pattern                                         | Rule doc                                                                                              |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `**/*.properties`                               | `properties.md` — i18n / configuration files.                                                         |
+| `**/*{mapper,dao}*.xml`                         | `mapper_dao_xml.md` — MyBatis-style mapper SQL.                                                       |
+| `**/pom.xml`                                    | `pom_xml.md` — Maven dependencies.                                                                    |
+| `**/build.gradle`                               | `build_gradle.md` — Gradle dependencies.                                                              |
+| `**/package.json`                               | `package_json.md` — NPM dependencies / scripts.                                                       |
+| `**/Cargo.toml`                                 | `cargo_toml.md` — Rust manifest.                                                                      |
+| `**/composer.json`                              | `composer_json.md` — Composer dependencies, autoloading, scripts, plugins, and package configuration. |
+| `**/*.{json,json5,jsonc}`                       | `json.md` — generic JSON (also matches `.json5` and `.jsonc`). |
+| `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md` — GitHub Actions workflow YAML.                                                 |
+| `.github/**/*.{yaml,yml}`                       | `github_config.md` — other `.github` config YAML.                                                     |
+| `**/*.{yaml,yml}`                               | `yaml.md`                                                                                             |
+| `**/*.java`                                     | `java.md`                                                                                             |
+| `**/*.go`                                       | `go.md` — Go source.                                                                                  |
+| `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling).                                  |
+| `**/*.{hbs,mustache}`                           | `handlebars_mustache.md` — Handlebars and Mustache templates.                                         |
+| `**/*.{jinja2,j2}`                              | `jinja.md` — Jinja templates                                                                          |
+| `**/*.pug`                          | `pug.md` — Pug templates.                                                                             |
+| `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md` — EJS, Liquid and Nunjucks templates (SSTI / XSS / escaping). |
+| `**/*.{haml,slim}`                              | `haml_slim.md` — HAML and Slim templates (SSTI / XSS / escaping / indentation semantics). |
+| `**/*.erb`                                      | `erb.md` — ERB templates (SSTI / XSS / escaping / whitespace and output structure). |
+| `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                                       |
+| `**/*.astro`                                    | `astro.md` — Astro components and islands.                                                            |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                                    |
+| `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                           |
+| `**/*.scala`                                    | `scala.md` |
+| `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# implementation, signature, and script files.                                         |
+| `**/*.cs`                                       | `csharp.md` — C# source files. |
+| `**/*.rs`                                       | `rust.md`                                                                                             |
+| `**/*.R`                                        | `r.md`                                                                                                |
+| `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                              |
+| `**/*.c`                                        | `c.md`                                                                                                |
+| `**/*.{py,pyi,ipynb}`                           | `python.md` — Python source.                                                                          |
+| `**/*.{php,phtml}`                              | `php.md` — PHP source and PHP templates.                                                              |
+| `**/*.proto`                                    | `protobuf.md` — Protocol Buffers wire compatibility.                                                  |
+| `**/*.po`                                       | `po.md` — gettext translation source catalogs.                                                        |
+| `**/*.pot`                                      | `pot.md` — gettext template files.                                                                    |
+| `**/*.{graphql,gql}`                            | `graphql.md` — GraphQL schema and operations.                                                         |
+| `**/*.prisma`                                   | `prisma.md` — Prisma schema.                                                                          |
+| `**/*.jl`                                       | `julia.md` — Julia source.                                                                            |
+| `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                     |
+| `**/*.bicep`                                    | `bicep.md` — Bicep (Azure) templates.                                                                 |
+| `**/*.nix`                          | `nix.md` — Nix expressions and flakes.                                                                |
+| `**/*.{hs,lhs}`                     | `haskell.md` — Haskell source.                                                                        |
+| `**/*.{nim,nims,nimble}`            | `nim.md` — Nim source and package manifests.                                                          |
+| `**/*.swift`                        | `swift.md` — Swift source.                                                                            |
+| `**/*.nu`                                       | `nushell.md` — Nushell scripts.                                                                       |
+| `**/*.elm`                                      | `elm.md` - Elm source.                                                                                |
+| `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md` — Jsonnet configuration templates and libraries.                                         |
+| `**/*.zig`                          | `zig.md` — Zig source.                                                                                |
+| `**/*.thrift`                                   | `thrift.md` — Apache Thrift IDL wire compatibility.                                                   |
+| `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md` — Starlark and Bazel build, macro, and rule design.                                     |
+| `**/*.capnp`                                    | `capnp.md` — Cap'n Proto schema wire compatibility.                                                   |
+| `**/*.{ml,mli}`                     | `ocaml.md` — OCaml source.                                                                            |
+| `**/*.{re,rei}`                     | `ocaml.md` — ReasonML source.                                                                         |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL, and Metal shaders.                                                    |
+| `**/*.{v,sv,vh}`                                | `verilog.md` — Verilog and SystemVerilog RTL.                                                         |
+| `**/*.{vhd,vhdl}`                               | `vhdl.md` — VHDL RTL.                                                                                 |
+| `**/*.m`                                        | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files))                      |
+| `**/*.mm`                                       | `objc.md` — Objective-C++ source.                                                                     |
+| `**/*.sol`                                      | `solidity.md` — Solidity smart contracts.                                                             |
+| `**/*.vy`                                       | `vyper.md` — Vyper smart contracts.                                                                   |
+| `**/*.rego`                                     | `rego.md` — Rego policy (OPA).                                                                        |
+| `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell scripts, modules, and data/manifest files.                               |
+| `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — Clojure / ClojureScript source and EDN data. |
+| _(fallback)_                                    | `default.md`                                                                                          |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
 plan and main task prompts.

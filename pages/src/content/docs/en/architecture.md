@@ -25,12 +25,12 @@ flowchart TD
 ```
 
 The orchestration lives in the
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 package, whose main files are `agent.go` (dispatch & per-group
 orchestration), `grouping.go` (semantic file grouping), `selection.go`
 (the file filter), `preview.go` (the `--preview` report), and `util.go`
 (helpers); the tool-use loop and memory compression live alongside it in
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/).
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/).
 Two entry points matter: `Agent.Run` (top of pipeline) and
 `Agent.dispatchSubtasks` (per-group fan-out).
 
@@ -366,9 +366,9 @@ The placeholder substitution lives in
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go).
 The template itself isn't a CLI override — to change prompts you edit
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)
-and rebuild. The `--tools` flag is a *tool-registry* override (it
-swaps the JSON consumed by `internal/config/toolsconfig`), not a
-template override — see [Tools](../tools/#customizing-tools).
+and rebuild. Built-in tool definitions are also embedded and cannot be
+overridden at runtime. Use review rules and background for project guidance,
+or MCP for external business context — see [Tools](../tools/#customizing-tools).
 
 > **Placeholder syntax caveat.** All the placeholders above use
 > double-brace `{{…}}` syntax *except* `RE_LOCATION_TASK`, which

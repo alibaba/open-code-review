@@ -24,11 +24,11 @@ flowchart TD
 ```
 
 전체 흐름을 지휘하는 코드는
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 패키지에 있습니다. 주요 파일은 `agent.go`(디스패치와 그룹별 오케스트레이션),
 `grouping.go`(의미 기반 파일 그룹화), `selection.go`(파일 필터),
 `preview.go`(`--preview` 보고서), `util.go`(헬퍼)입니다. 도구 호출 루프와 메모리 압축은 그 옆의
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)에
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/)에
 있습니다. 진입점은 두 개가 중요합니다. `Agent.Run`(파이프라인 최상단)과
 `Agent.dispatchSubtasks`(그룹별 팬아웃)입니다.
 
@@ -352,9 +352,9 @@ OCR은 이 검사로 괴물 같은 diff(자동 생성된 lock 파일, 수천 줄
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go)에
 있습니다. 템플릿 자체는 CLI로 덮어쓸 수 없습니다. 프롬프트를 바꾸려면
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)을
-고치고 다시 빌드해야 합니다. `--tools` 플래그는 *도구 레지스트리*를 덮어쓰는
-것이지(`internal/config/toolsconfig`가 읽는 JSON을 갈아 끼웁니다) 템플릿을
-덮어쓰는 게 아닙니다. [도구](../tools/#customizing-tools)를 참고하세요.
+고치고 다시 빌드해야 합니다. 내장 도구 정의도 실행 시점에 덮어쓸 수 없습니다.
+프로젝트 지침에는 리뷰 규칙과 배경 정보를, 외부 업무 맥락에는 MCP를 사용하세요.
+[도구](../tools/#customizing-tools)를 참고하세요.
 
 > **플레이스홀더 문법 주의.** 위의 플레이스홀더는 모두 중괄호 두 개
 > `{{…}}` 문법을 쓰지만 `RE_LOCATION_TASK`만 예외입니다. 여기서는 중괄호

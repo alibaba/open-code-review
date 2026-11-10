@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-// Package toolsconfig loads tool definitions from JSON config files.
+// Package toolsconfig loads the embedded tool definitions.
 package toolsconfig
 
 import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os"
 )
 
 // ToolConfigEntry holds a single tool definition loaded from tools.json.
@@ -22,22 +21,11 @@ type ToolConfigEntry struct {
 //go:embed tools.json
 var defaultToolsJSON []byte
 
-// Load parses the tools config file. When path is empty, falls back to
-// the embedded default tools configuration.
-func Load(path string) ([]ToolConfigEntry, error) {
-	var data []byte
-	var err error
-	if path == "" {
-		data = defaultToolsJSON
-	} else {
-		data, err = os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("read tools file %s: %w", path, err)
-		}
-	}
+// LoadDefault parses the embedded tool definitions shipped with this build.
+func LoadDefault() ([]ToolConfigEntry, error) {
 	var tools []ToolConfigEntry
-	if err := json.Unmarshal(data, &tools); err != nil {
-		return nil, fmt.Errorf("unmarshal tools file: %w", err)
+	if err := json.Unmarshal(defaultToolsJSON, &tools); err != nil {
+		return nil, fmt.Errorf("unmarshal embedded tools: %w", err)
 	}
 	return tools, nil
 }

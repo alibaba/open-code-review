@@ -25,6 +25,9 @@ func Shutdown(ctx context.Context) error {
 	}
 
 	shutdownFuncs = nil
+	// Reinitialization must rebuild both providers and their metric instruments.
+	initialized = false
+	initMetricsOnce = false
 
 	if len(errs) > 0 {
 		return fmt.Errorf("telemetry shutdown: %v", errs)

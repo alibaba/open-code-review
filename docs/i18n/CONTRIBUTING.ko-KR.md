@@ -22,7 +22,7 @@ OpenCodeReview에 기여해 주셔서 감사합니다. 오타 수정, bug report
 
 ### 전제 조건
 
-- [Go 1.26.9+](https://go.dev/dl/)
+- [Go 1.26.10+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -85,7 +85,7 @@ git checkout -b feat/your-feature-name
 예시:
 
 ```text
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
@@ -238,7 +238,7 @@ Bug를 보고할 때는 다음 정보를 포함해 주세요.
 commit message와 같은 Conventional Commits 형식을 사용합니다.
 
 ```text
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 ```
 
 ### Review process
