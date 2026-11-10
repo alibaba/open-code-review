@@ -649,18 +649,19 @@ function testAgentPluginManifestNameBoundariesAreAccepted() {
 }
 
 function testAgentPluginManifestDoesNotRejectNonSemverVersionOrMetadata() {
-  // Spec §5.5: clients MUST NOT reject a manifest over a non-SemVer `version`,
-  // nor over the format of the informational fields. Validating them here would
-  // fail manifests the specification declares valid.
+  // Spec §5.4: clients MUST NOT reject a manifest over a non-SemVer `version`
+  // nor over unrecognized URL/email/SPDX string contents in the informational
+  // fields. Those strings are unconventional, not invalid, so rejecting them
+  // here would fail manifests the specification declares valid.
   const manifest = {
     $schema: AGENT_SCHEMA,
     name: "open-code-review",
     version: "not-semver",
     description: "",
-    homepage: 42,
-    repository: { not: "a string" },
-    author: [],
-    license: null,
+    homepage: "not a URL",
+    repository: "also not a URL",
+    author: { name: "someone", email: "not-an-email", url: "still not a URL" },
+    license: "NOT-AN-SPDX-ID",
   };
   assert.deepStrictEqual(validateAgentPluginManifest("p/plugin.json", manifest), []);
 }

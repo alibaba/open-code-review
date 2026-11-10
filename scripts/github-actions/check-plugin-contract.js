@@ -623,9 +623,9 @@ function agentPluginNameProblem(name) {
 // the schema identifies the plugin (and §5.5 constrains its grammar) and
 // `$schema` is what makes the file declare itself as that format at all, so a
 // manifest failing either describes nothing installable however valid its JSON
-// is. `version` is deliberately NOT checked: §5.5 says clients MUST NOT reject a
-// manifest over a non-SemVer version, and the same holds for the informational
-// `homepage`/`repository`/`author`/`license` fields.
+// is. `version` and the informational `homepage`/`repository`/`author`/`license`
+// fields are deliberately NOT inspected: §5.4 forbids rejecting a manifest over
+// a non-SemVer version or unrecognized URL/email/SPDX string contents.
 function validateAgentPluginManifest(file, json) {
   const errors = [];
   const nameProblem = agentPluginNameProblem(json.name);
