@@ -16,10 +16,11 @@ func lockExclusive(f *os.File) error {
 	return windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &windows.Overlapped{})
 }
 
-// tryLock reports whether this process acquired the lock. A held lock returns
-// false without an error.
+// tryLock is a shared, nonblocking liveness probe. It reports whether this
+// process acquired that shared lock. An exclusive lock already held on the
+// file returns false without an error. Shared probes do not block each other.
 func tryLock(f *os.File) (bool, error) {
-	err := windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &windows.Overlapped{})
+	err := windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &windows.Overlapped{})
 	if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
 		return false, nil
 	}

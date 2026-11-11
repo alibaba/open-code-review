@@ -4,8 +4,10 @@
 package session
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -340,6 +342,78 @@ func TestSessionLivenessRunningAbortedCompleted(t *testing.T) {
 		}
 		if summary.Aborted || summary.Running {
 			t.Fatalf("completed session flags = aborted:%v running:%v", summary.Aborted, summary.Running)
+		}
+	})
+}
+
+// TestOverlappingReadersDoNotMarkInactiveSessionRunning checks that one
+// reader holding the liveness probe does not make other readers report an
+// inactive session as running. The session is unfinished and its leftover
+// sidecar is unlocked, so no exclusive writer exists. An exclusive writer
+// still makes SessionLockHeld report true.
+func TestOverlappingReadersDoNotMarkInactiveSessionRunning(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	id := writeTestSession(t, repoDir, "a", "b", nil, 0, 0, false)
+	summary, err := LoadSummary(repoDir, id)
+	if err != nil {
+		t.Fatalf("LoadSummary: %v", err)
+	}
+	if summary.FilePath == "" {
+		t.Fatal("session file path is empty")
+	}
+	if !summary.Aborted || summary.Running {
+		t.Fatalf("inactive session flags = aborted:%v running:%v", summary.Aborted, summary.Running)
+	}
+
+	t.Run("overlapping readers", func(t *testing.T) {
+		probe, err := os.OpenFile(sessionLockPath(summary.FilePath), os.O_RDWR, 0)
+		if err != nil {
+			t.Fatalf("open lock: %v", err)
+		}
+		t.Cleanup(func() { probe.Close() })
+
+		acquired, err := tryLock(probe)
+		if err != nil {
+			t.Fatalf("tryLock: %v", err)
+		}
+		if !acquired {
+			t.Fatal("probe did not acquire the unlocked leftover sidecar")
+		}
+		t.Cleanup(func() { unlock(probe) })
+
+		const readers = 8
+		held := make([]bool, readers)
+		var wg sync.WaitGroup
+		wg.Add(readers)
+		for i := 0; i < readers; i++ {
+			go func(i int) {
+				defer wg.Done()
+				held[i] = SessionLockHeld(summary.FilePath)
+			}(i)
+		}
+		wg.Wait()
+		for i, running := range held {
+			if running {
+				t.Errorf("reader %d: SessionLockHeld = true, want false for an inactive session", i)
+			}
+		}
+	})
+
+	t.Run("exclusive writer", func(t *testing.T) {
+		writer, err := os.OpenFile(sessionLockPath(summary.FilePath), os.O_RDWR, 0)
+		if err != nil {
+			t.Fatalf("open lock: %v", err)
+		}
+		t.Cleanup(func() { writer.Close() })
+		if err := lockExclusive(writer); err != nil {
+			t.Fatalf("lockExclusive: %v", err)
+		}
+		t.Cleanup(func() { unlock(writer) })
+		if !SessionLockHeld(summary.FilePath) {
+			t.Fatal("SessionLockHeld = false, want true while an exclusive writer holds the sidecar")
 		}
 	})
 }
