@@ -27,7 +27,6 @@ import (
 )
 
 type reviewOptions struct {
-	toolConfigPath        string
 	rulePath              string
 	repoDir               string
 	from                  string
@@ -134,10 +133,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}()
 
 	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, opts.maxTools, opts.maxGitProcs, true)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true)
 	if err != nil {
 		return err
 	}
+	cc.Template.MaxToolRequestTimes = resolveReviewMaxTools(cc.Template.MaxToolRequestTimes, opts.maxTools)
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security (#112): reject ref-option injection before any git invocation.
@@ -160,7 +160,18 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return err
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
+	mainToolDefs, err := loadToolDefs(cc.Template.MainTask.Tools)
+	if err != nil {
+		return fmt.Errorf("MAIN_TASK.tools: %w", err)
+	}
+	var planToolDefs []llm.ToolDef
+	if plan := cc.Template.PlanTask; plan != nil {
+		planToolDefs, err = loadToolDefs(plan.ToolReferences)
+		if err != nil {
+			return fmt.Errorf("PLAN_TASK.tool_references: %w", err)
+		}
+	}
+	rt, err := loadLLMRuntime(cc.Template, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
 		Context:  ctx,
@@ -211,8 +222,8 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	defer closeReviewMCPClients(mcpClients)
 
 	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
-	rt.PlanToolDefs = append(rt.PlanToolDefs, mcpToolDefs...)
-	rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
+	planToolDefs = append(planToolDefs, mcpToolDefs...)
+	mainToolDefs = append(mainToolDefs, mcpToolDefs...)
 
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
@@ -225,8 +236,8 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		FileFilter:            cc.FileFilter,
 		LLMClient:             rt.Client,
 		Tools:                 tools,
-		PlanToolDefs:          rt.PlanToolDefs,
-		MainToolDefs:          rt.MainToolDefs,
+		PlanToolDefs:          planToolDefs,
+		MainToolDefs:          mainToolDefs,
 		CommentCollector:      rt.Collector,
 		CommentWorkerPool:     agent.NewCommentWorkerPool(opts.concurrency),
 		MaxConcurrency:        opts.concurrency,
@@ -322,6 +333,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return errors.Join(resultErr, emitErr)
 	}
 	return emitErr
+}
+
+func resolveReviewMaxTools(templateDefault, cliValue int) int {
+	if cliValue > 0 {
+		return cliValue
+	}
+	return templateDefault
 }
 
 func reviewResultError(runErr error, manifest *session.RunManifest) error {

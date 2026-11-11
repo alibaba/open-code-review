@@ -4,6 +4,7 @@
 import React from 'react';
 import HeroSection from '../components/HeroSection';
 import HighlightsSection from '../components/HighlightsSection';
+import ProvidersSection from '../components/ProvidersSection';
 import UseCasesSection from '../components/UseCasesSection';
 import FeaturesSection from '../components/FeaturesSection';
 import BenchmarkSection from '../components/BenchmarkSection';
@@ -19,6 +20,9 @@ const FeaturesPage: React.FC = () => {
       </FadeInSection>
       <FadeInSection delay={100}>
         <HighlightsSection />
+      </FadeInSection>
+      <FadeInSection delay={100}>
+        <ProvidersSection />
       </FadeInSection>
       <FadeInSection delay={100}>
         <UseCasesSection />

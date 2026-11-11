@@ -73,6 +73,17 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 stderr 输出警告；发送请求时由 provider 验证模型。自定义 provider 仍遵循原有的
 `--model` 校验规则。
 
+`minimax` 和 `minimax-cn` 的新模型选择优先推荐 `MiniMax-M3.1-Flash`，其次为
+`MiniMax-M3`。OCR 仍接受已保存的模型及显式指定的旧版或自定义模型 ID。
+网关使用各自的模型 ID；MiniMax 直连模型 ID 并不代表网关已支持该模型。
+
+默认请求不设置 `thinking` 和 `reasoning_effort`，由
+[MiniMax API 默认值](https://platform.minimax.io/docs/api-reference/text-openai-api)决定。
+Flash 必须使用自适应思考，默认 effort 为 `max`。在 `extra_body` 中可显式设置
+`thinking: {"type":"adaptive"}`，并将 `reasoning_effort` 设为 `low`、`medium`、
+`high`、`xhigh` 或 `max`。M3 还支持 `thinking: {"type":"disabled"}`。
+已有 `extra_body` 配置会保留，因此切换到 Flash 前应移除禁用思考的设置。
+
 ## ChatGPT 登录预览版
 
 此预览版新增通过公开 Responses API 使用的内置 `chatgpt` provider，没有 API key 环境变量。 请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)了解登录、同意和使用限制。
