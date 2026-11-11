@@ -10,10 +10,12 @@ import (
 	"os/signal"
 )
 
-func waitForInterrupt() {
-	ch := make(chan os.Signal, 1)
+func waitForInterrupt(ready func()) {
+	signals := make(chan os.Signal, 1)
 	// CTRL_BREAK is mapped to os.Interrupt. syscall.SIGBREAK is not defined
 	// in the standard syscall package on Windows.
-	signal.Notify(ch, os.Interrupt)
-	<-ch
+	signal.Notify(signals, os.Interrupt)
+	defer signal.Stop(signals)
+	ready()
+	<-signals
 }
