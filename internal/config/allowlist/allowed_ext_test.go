@@ -475,7 +475,10 @@ func TestIsExcludedPath(t *testing.T) {
 		// sources/ rather than tests/, e.g. aptos-core's
 		// move-examples/hello_blockchain/sources/hello_blockchain_test.move.
 		{"move _test suffix", "sources/hello_blockchain_test.move", true},
+		{"move tests dir at root", "tests/coin.move", true},
+		{"move tests dir in nested package", "packages/app/tests/coin.move", true},
 		{"move non-test", "sources/pool.move", false},
+		{"move non-test in nested package", "packages/app/sources/coin.move", false},
 		{"move tests in filename", "sources/tests_helper.move", false},
 		{"move build pattern does not catch ts", "frontend/build/index.ts", false},
 		{"move build pattern does not catch java", "build/classes/com/example/Foo.java", false},
