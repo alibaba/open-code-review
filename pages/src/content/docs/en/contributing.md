@@ -223,6 +223,19 @@ A tool has two parts:
 Both have to be present for a new tool name to work. See [Tools](../tools/)
 for the existing six and treat them as templates.
 
+Select the tool in each applicable template's `MAIN_TASK.tools` array. Review
+and scan own separate lists; keep their order stable because it affects the
+model request. To describe a tool during review planning without enabling
+calls, add it to `PLAN_TASK.tool_references` instead. Tool definitions must
+not contain task membership flags, and a definition's name must match its
+catalog entry name.
+
+These lists select definitions for model requests, not an execution sandbox.
+MCP discovery and review-specific completion/filter protocols remain owned by
+their existing task adapters. Other helper tasks do not consume these catalog
+bindings; unsupported `tools` or `tool_references` fields are rejected rather
+than silently ignored.
+
 ## Adding new rule patterns
 
 Edit `internal/config/rules/system_rules.json` to map a new glob to a

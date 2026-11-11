@@ -7,41 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/alibaba/open-code-review/internal/llm"
 )
-
-func TestExcludeToolDef(t *testing.T) {
-	defs := []llm.ToolDef{
-		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
-		{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
-		{Type: "function", Function: llm.FunctionDef{Name: "file_read_diff"}},
-		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
-	}
-	got := excludeToolDef(defs, "file_read_diff")
-	if len(got) != 3 {
-		t.Fatalf("expected 3 defs, got %d", len(got))
-	}
-	for _, d := range got {
-		if d.Function.Name == "file_read_diff" {
-			t.Errorf("file_read_diff should have been removed")
-		}
-	}
-	// Input slice must not be mutated.
-	if len(defs) != 4 {
-		t.Errorf("input slice was mutated: len=%d, want 4", len(defs))
-	}
-}
-
-func TestExcludeToolDef_AbsentName(t *testing.T) {
-	defs := []llm.ToolDef{
-		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
-	}
-	got := excludeToolDef(defs, "does_not_exist")
-	if !reflect.DeepEqual(got, defs) {
-		t.Errorf("removing absent name should return identical content")
-	}
-}
 
 func TestSplitPaths(t *testing.T) {
 	tests := []struct {
