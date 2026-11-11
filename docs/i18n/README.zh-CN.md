@@ -182,6 +182,7 @@ ocr delegate rule src/main.go src/handler.go
 - [MCP 服务器](https://open-codereview.ai/docs/mcp) —— 用外部工具扩展评审 agent
 - 编程 Agent 集成 —— 选择你使用的平台
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) —— 安装包含评审斜杠命令的插件
+  - [Qwen Code](../../plugins/open-code-review/README.md#qwen-code) —— 安装市场插件，使用评审和委托模式命令
   - [Codex](../../plugins/open-code-review/README.md#codex) —— 安装包含可调用评审 Skill 的插件
   - [Cursor](../../plugins/open-code-review/README.md#cursor) —— 安装包含可移植评审 Skill 的插件
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) —— 安装包含评审斜杠命令与 Skill 的插件

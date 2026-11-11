@@ -182,6 +182,7 @@ ocr delegate rule src/main.go src/handler.go
 - [MCP サーバー](https://open-codereview.ai/docs/mcp) — 外部ツールでレビューエージェントを拡張
 - コーディングエージェント連携 — 使用するプラットフォームを選択
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — レビュー用スラッシュコマンドを含むプラグインをインストール
+  - [Qwen Code](../../plugins/open-code-review/README.md#qwen-code) — マーケットプレイスのプラグインでレビューと委譲モードのコマンドを利用
   - [Codex](../../plugins/open-code-review/README.md#codex) — 呼び出し可能なレビュースキルを含むプラグインをインストール
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — 移植可能なレビュースキルを含むプラグインをインストール
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — レビュー用スラッシュコマンドとスキルを含むプラグインをインストール

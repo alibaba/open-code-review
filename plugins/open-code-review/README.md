@@ -1,7 +1,7 @@
 # Coding agent plugins
 
-Open Code Review ships platform-specific integrations for Claude Code, Codex,
-Cursor, Kimi Code, and QCA Forward. Choose your platform below instead of
+Open Code Review ships platform-specific integrations for Claude Code, Qwen Code,
+Codex, Cursor, Kimi Code, and QCA Forward. Choose your platform below instead of
 adapting installation instructions written for a different agent.
 
 All integrations require Git 2.41 or later. Install the `ocr` CLI first:
@@ -32,6 +32,53 @@ This installs the `/open-code-review:review` and
 `/open-code-review:delegate-review` slash commands. See the
 [Claude Code guide](https://open-codereview.ai/docs/claude-code) for manual
 installation, usage, and behavior.
+
+## Qwen Code
+
+Install the existing Claude Code plugin through Qwen Code's marketplace
+compatibility support:
+
+```bash
+qwen extensions install alibaba/open-code-review:open-code-review
+qwen extensions list
+```
+
+Qwen Code converts the plugin during installation. Start a new Qwen Code session
+after installing from the CLI. With Qwen Code's bundled `/review` enabled, the OCR
+commands are:
+
+```text
+/open-code-review.review
+/open-code-review.review --from main --to feature
+/delegate-review
+/delegate-review --commit abc123
+```
+
+Qwen Code keeps its bundled `/review` and prefixes the conflicting OCR command
+with `open-code-review.`. `/delegate-review` keeps its name unless another command
+already uses it; in that case, use `/open-code-review.delegate-review`. If the
+bundled review skill is disabled, OCR can use `/review` instead. Check `/help` in
+your session for the loaded command names.
+
+`/open-code-review.review` runs `ocr review` with OCR's configured LLM.
+`/delegate-review` runs `ocr delegate preview` and `ocr delegate rule`, then Qwen
+Code performs the review with its own model and authentication. Delegation mode
+requires the OCR CLI but no separate OCR LLM configuration. Both commands can
+automatically apply fixes for findings they accept.
+
+To browse the plugin in the Discover tab of `/extensions`, add this repository
+as a marketplace source:
+
+```bash
+qwen extensions sources add alibaba/open-code-review
+```
+
+Local plugin installation, command loading, conflict resolution, and prompt
+argument expansion were verified with Qwen Code 0.27.2 on Windows. Compatibility
+with the separate [Qwen Code 1.0 Preview](https://github.com/QwenLM/qwen-code/releases/tag/v1.0.0-preview)
+release has not been verified. See the
+[Qwen Code extension documentation](https://qwenlm.github.io/qwen-code-docs/en/users/extension/introduction/)
+for extension management.
 
 ## Copilot CLI
 

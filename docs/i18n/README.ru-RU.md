@@ -182,6 +182,7 @@ ocr delegate rule src/main.go src/handler.go
 - [MCP-сервер](https://open-codereview.ai/docs/mcp) — расширение агента ревью внешними инструментами
 - Интеграции с кодинг-агентами — выберите используемую платформу
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — установка плагина со slash-командами для ревью
+  - [Qwen Code](../../plugins/open-code-review/README.md#qwen-code) — установка плагина из маркетплейса с командами ревью и делегирования
   - [Codex](../../plugins/open-code-review/README.md#codex) — установка плагина с вызываемыми навыками ревью
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — установка плагина с переносимыми навыками ревью
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — установка плагина со slash-командами и навыками ревью

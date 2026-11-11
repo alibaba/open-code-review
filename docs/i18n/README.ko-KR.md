@@ -182,6 +182,7 @@ ocr delegate rule src/main.go src/handler.go
 - [MCP 서버](https://open-codereview.ai/docs/mcp) — 외부 도구로 리뷰 에이전트 확장
 - 코딩 에이전트 연동 — 사용하는 플랫폼 선택
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — 리뷰 슬래시 명령이 포함된 플러그인 설치
+  - [Qwen Code](../../plugins/open-code-review/README.md#qwen-code) — 마켓플레이스 플러그인을 설치하여 리뷰 및 위임 모드 명령 사용
   - [Codex](../../plugins/open-code-review/README.md#codex) — 호출 가능한 리뷰 스킬이 포함된 플러그인 설치
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — 이식 가능한 리뷰 스킬이 포함된 플러그인 설치
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — 리뷰 슬래시 명령과 스킬이 포함된 플러그인 설치

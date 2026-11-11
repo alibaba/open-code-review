@@ -182,6 +182,7 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
 - [MCP Server](https://open-codereview.ai/docs/mcp) — extend the review agent with external tools
 - Coding Agent Integrations — choose the platform you use
   - [Claude Code](plugins/open-code-review/README.md#claude-code) — install a plugin with review slash commands
+  - [Qwen Code](plugins/open-code-review/README.md#qwen-code) — install the marketplace plugin with review and delegation commands
   - [Codex](plugins/open-code-review/README.md#codex) — install a plugin with callable review skills
   - [Cursor](plugins/open-code-review/README.md#cursor) — install a plugin with portable review skills
   - [Kimi Code](plugins/open-code-review/README.md#kimi-code) — install a plugin with review slash commands and skills
