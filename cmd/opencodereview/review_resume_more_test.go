@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,7 +47,7 @@ func TestLoadReviewResumeState_WithSession(t *testing.T) {
 		repoDir := t.TempDir()
 		id := writeRangeResumeSession(t, repoDir, "a.go", "b.go")
 
-		state, err := loadReviewResumeState(repoDir, reviewOptions{resume: id, from: "main", to: "feature"})
+		state, err := loadReviewResumeState(repoDir, &reviewOptions{resume: id, from: "main", to: "feature"})
 		if err != nil {
 			t.Fatalf("loadReviewResumeState: %v", err)
 		}
@@ -61,7 +62,7 @@ func TestLoadReviewResumeState_WithSession(t *testing.T) {
 		id := writeRangeResumeSession(t, repoDir, "a.go")
 
 		// Session was range-mode; request commit-mode resume.
-		_, err := loadReviewResumeState(repoDir, reviewOptions{resume: id, commit: "HEAD"})
+		_, err := loadReviewResumeState(repoDir, &reviewOptions{resume: id, commit: "HEAD"})
 		if err == nil {
 			t.Fatal("expected error for mode mismatch")
 		}
@@ -75,12 +76,103 @@ func TestLoadReviewResumeState_WithSession(t *testing.T) {
 		repoDir := t.TempDir()
 		id := writeRangeResumeSession(t, repoDir) // no items recorded
 
-		state, err := loadReviewResumeState(repoDir, reviewOptions{resume: id, from: "main", to: "feature"})
+		state, err := loadReviewResumeState(repoDir, &reviewOptions{resume: id, from: "main", to: "feature"})
 		if err != nil {
 			t.Fatalf("loadReviewResumeState: %v", err)
 		}
 		if state == nil || state.CompletedCount() != 0 {
 			t.Fatalf("got %v, want an admitted state with 0 completed items", state)
+		}
+	})
+}
+
+func writeWorkspaceResumeSession(t *testing.T, repoDir, branch string, files ...string) string {
+	t.Helper()
+	sh := session.New(repoDir, branch, "fake", session.SessionOptions{
+		ReviewMode: session.ReviewModeWorkspace,
+	})
+	for _, f := range files {
+		sh.RecordReviewItemDone(f, "", f, "fp-"+f, nil)
+	}
+	if err := sh.Finalize(); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+	return sh.SessionID
+}
+
+func TestLoadReviewResumeState_InferenceAndConflicts(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	rangeID := writeRangeResumeSession(t, repoDir, "a.go")
+	wsID := writeWorkspaceResumeSession(t, repoDir, "main", "w.go")
+
+	t.Run("auto-infers range parameters when not provided", func(t *testing.T) {
+		opts := reviewOptions{resume: rangeID}
+		state, err := loadReviewResumeState(repoDir, &opts)
+		if err != nil {
+			t.Fatalf("loadReviewResumeState: %v", err)
+		}
+		if state == nil {
+			t.Fatal("expected non-nil state")
+		}
+		if opts.from != "main" || opts.to != "feature" {
+			t.Errorf("got from=%q to=%q, want main/feature", opts.from, opts.to)
+		}
+	})
+
+	t.Run("auto-infers workspace mode when not provided", func(t *testing.T) {
+		opts := reviewOptions{resume: wsID}
+		state, err := loadReviewResumeState(repoDir, &opts)
+		if err != nil {
+			t.Fatalf("loadReviewResumeState: %v", err)
+		}
+		if state == nil || state.ReviewMode != session.ReviewModeWorkspace {
+			t.Fatalf("got %v, want workspace state", state)
+		}
+		if opts.from != "" || opts.to != "" || opts.commit != "" {
+			t.Errorf("workspace resume should not populate range/commit flags, got %+v", opts)
+		}
+	})
+
+	t.Run("preserves explicit runtime parameter overrides", func(t *testing.T) {
+		opts := reviewOptions{
+			resume:          wsID,
+			model:           "custom-model",
+			provider:        "custom-provider",
+			concurrency:     4,
+			effort:          "high",
+			maxTokensBudget: 50000,
+		}
+		_, err := loadReviewResumeState(repoDir, &opts)
+		if err != nil {
+			t.Fatalf("loadReviewResumeState: %v", err)
+		}
+		if opts.model != "custom-model" || opts.provider != "custom-provider" || opts.concurrency != 4 || opts.effort != "high" || opts.maxTokensBudget != 50000 {
+			t.Errorf("runtime parameters were mutated: %+v", opts)
+		}
+	})
+
+	t.Run("rejects --commit on workspace session", func(t *testing.T) {
+		opts := reviewOptions{resume: wsID, commit: "HEAD"}
+		_, err := loadReviewResumeState(repoDir, &opts)
+		if err == nil || !strings.Contains(err.Error(), "parameter conflict") {
+			t.Fatalf("expected parameter conflict error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects --from/--to on workspace session", func(t *testing.T) {
+		opts := reviewOptions{resume: wsID, from: "main", to: "dev"}
+		_, err := loadReviewResumeState(repoDir, &opts)
+		if err == nil || !strings.Contains(err.Error(), "parameter conflict") {
+			t.Fatalf("expected parameter conflict error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects --commit on range session", func(t *testing.T) {
+		opts := reviewOptions{resume: rangeID, commit: "HEAD"}
+		_, err := loadReviewResumeState(repoDir, &opts)
+		if err == nil || !strings.Contains(err.Error(), "parameter conflict") {
+			t.Fatalf("expected parameter conflict error, got: %v", err)
 		}
 	})
 }
@@ -219,7 +311,7 @@ func TestValidateResumeIdentity(t *testing.T) {
 	}
 
 	parentID := writeVerifiableParent(t, repoDir, sealed.Identity, "anthropic", "claude")
-	state, err := loadReviewResumeState(repoDir, reviewOptions{resume: parentID, from: opts.from, to: opts.to})
+	state, err := loadReviewResumeState(repoDir, &reviewOptions{resume: parentID, from: opts.from, to: opts.to})
 	if err != nil {
 		t.Fatalf("loadReviewResumeState: %v", err)
 	}
@@ -341,4 +433,96 @@ func TestFileReadRef(t *testing.T) {
 			}
 		})
 	}
+}
+
+func writeVerifiableWorkspaceParent(t *testing.T, repoDir, branch string, id session.RunIdentity, fps []string, provider, model string) string {
+	t.Helper()
+	sh := session.New(repoDir, branch, model, session.SessionOptions{
+		ReviewMode: session.ReviewModeWorkspace,
+		Operation:  session.OperationReview,
+	})
+	b := sh.Manifest()
+	b.SetRepository(session.ManifestRepository{IdentitySHA256: id.RepositorySHA256})
+	b.SetInput(session.ManifestInput{Mode: id.Mode, SourceArtifactSHA256: id.SourceArtifactSHA256})
+	b.SetExecution(session.ManifestExecution{
+		Provider: provider, Model: model, RuleConfigSHA256: id.RuleConfigSHA256,
+	})
+	for i, fp := range fps {
+		itemID := fmt.Sprintf("item-%d", i)
+		if err := b.RegisterSelected(session.CoverageItem{ItemID: itemID, Fingerprint: fp, Path: "main.go"}); err != nil {
+			t.Fatalf("register selected: %v", err)
+		}
+		if err := b.MarkCompleted(itemID); err != nil {
+			t.Fatalf("mark completed: %v", err)
+		}
+		sh.RecordReviewItemDone("main.go", "", "main.go", fp, nil)
+	}
+	m, err := b.Finalize(time.Second)
+	if err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	sh.SetFinalManifest(&m)
+	if err := sh.Finalize(); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+	return sh.SessionID
+}
+
+func TestValidateResumeIdentity_Workspace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := initResumeRepo(t)
+	cc := resumeTestContext(repoDir)
+	branch := detectGitBranch(repoDir)
+
+	// Make an uncommitted workspace modification to main.go.
+	if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte("package main\n\nfunc main() { println(\"ws\") }\n"), 0o644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+
+	opts := reviewOptions{}
+	sealed, err := agent.ResolveIdentity(context.Background(), agent.Args{
+		RepoDir:    repoDir,
+		ReviewMode: session.ReviewModeWorkspace,
+		Template:   *cc.Template,
+	})
+	if err != nil {
+		t.Fatalf("ResolveIdentity: %v", err)
+	}
+
+	parentID := writeVerifiableWorkspaceParent(t, repoDir, branch, sealed.Identity, sealed.ItemFingerprints, "anthropic", "claude")
+	state, err := loadReviewResumeState(repoDir, &reviewOptions{resume: parentID})
+	if err != nil {
+		t.Fatalf("loadReviewResumeState: %v", err)
+	}
+
+	t.Run("matching branch and workspace diff is accepted", func(t *testing.T) {
+		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
+		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state); err != nil {
+			t.Fatalf("want accepted, got error: %v", err)
+		}
+	})
+
+	t.Run("git branch mismatch is rejected", func(t *testing.T) {
+		gitIn(t, repoDir, "checkout", "-b", "other-branch")
+		defer gitIn(t, repoDir, "checkout", branch)
+
+		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
+		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
+		if err == nil || !strings.Contains(err.Error(), "does not match session branch") {
+			t.Fatalf("want branch mismatch error, got: %v", err)
+		}
+	})
+
+	t.Run("zero matching items is rejected", func(t *testing.T) {
+		// Overwrite main.go with completely different content so fingerprint doesn't match
+		if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte("package main\n\nfunc main() { println(\"entirely different\") }\n"), 0o644); err != nil {
+			t.Fatalf("write main.go: %v", err)
+		}
+
+		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
+		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
+		if err == nil || !strings.Contains(err.Error(), "no completed review items") {
+			t.Fatalf("want zero matching items error, got: %v", err)
+		}
+	})
 }

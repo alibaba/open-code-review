@@ -44,7 +44,8 @@ type fakeLLM struct {
 	// rateLimitOnce lists files whose first attempt returns 429.
 	rateLimitOnce map[string]bool
 	// hardFail lists files whose every attempt returns 402.
-	hardFail map[string]bool
+	hardFail  map[string]bool
+	onAttempt func(file string, n int, r *http.Request)
 }
 
 // newFakeLLM returns a server that succeeds on the first attempt for every
@@ -181,7 +182,12 @@ func (f *fakeLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	n := f.attemptsByFile[file]
 	rateLimit := f.rateLimitOnce[file] && n == 1
 	fail := f.hardFail[file]
+	fn := f.onAttempt
 	f.mu.Unlock()
+
+	if fn != nil {
+		fn(file, n, r)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("request-id", fmt.Sprintf("req_%s_%d", strings.TrimSuffix(file, ".go"), n))

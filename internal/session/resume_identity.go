@@ -31,6 +31,8 @@ type ResumeRequest struct {
 	Model            string
 	ProviderExplicit bool
 	ModelExplicit    bool
+	GitBranch        string
+	ItemFingerprints []string
 }
 
 const resumeHint = "start a new review instead of resuming"
@@ -53,7 +55,10 @@ func (s *ResumeState) ValidateResume(req ResumeRequest) error {
 	if s == nil {
 		return nil
 	}
-	if err := s.validateInputIdentity(req.Identity); err != nil {
+	if req.Identity.Mode == ReviewModeWorkspace && req.GitBranch != s.GitBranch {
+		return fmt.Errorf("resume rejected: current branch %q does not match session branch %q", req.GitBranch, s.GitBranch)
+	}
+	if err := s.validateInputIdentity(req.Identity, req.ItemFingerprints); err != nil {
 		return err
 	}
 	identity := req.Identity
@@ -87,7 +92,7 @@ func (s *ResumeState) ValidateResume(req ResumeRequest) error {
 // This runs once, at admission, and is never repeated during the run: the caller
 // pins the run to the commit endpoints this comparison was made against (see
 // agent.SealedInput), so a second comparison could only ever confirm the first.
-func (s *ResumeState) validateInputIdentity(id RunIdentity) error {
+func (s *ResumeState) validateInputIdentity(id RunIdentity, itemFingerprints []string) error {
 	if s == nil {
 		return nil
 	}
@@ -124,7 +129,7 @@ func (s *ResumeState) validateInputIdentity(id RunIdentity) error {
 	if m.Repository.IdentitySHA256 != id.RepositorySHA256 {
 		return fmt.Errorf("resume rejected: repository identity changed, so this is not the repository the parent run reviewed; %s", resumeHint)
 	}
-	if m.Input.SourceArtifactSHA256 != id.SourceArtifactSHA256 {
+	if id.Mode != ReviewModeWorkspace && m.Input.SourceArtifactSHA256 != id.SourceArtifactSHA256 {
 		return fmt.Errorf("resume rejected: the reviewed input changed since session %q — a ref may now point at a different commit, or the selected file set changed; %s", s.SessionID, resumeHint)
 	}
 	if m.Execution.RuleConfigSHA256 == "" {
@@ -134,6 +139,18 @@ func (s *ResumeState) validateInputIdentity(id RunIdentity) error {
 		// The digest is one aggregate, so it can only be attributed to a layer,
 		// never to a specific rule or pattern.
 		return fmt.Errorf("resume rejected: review rule identity changed — either a rule text layer (custom, project, global or system) or the include/exclude file filter differs from session %q; %s", s.SessionID, resumeHint)
+	}
+	if id.Mode == ReviewModeWorkspace {
+		reusable := manifestReusableFingerprints(m)
+		var reusableCount int
+		for _, fp := range itemFingerprints {
+			if reusable[fp] {
+				reusableCount++
+			}
+		}
+		if reusableCount == 0 {
+			return fmt.Errorf("resume rejected: no completed review items from session %q match current workspace diffs (run 'ocr review' to start a fresh review)", s.SessionID)
+		}
 	}
 	return nil
 }

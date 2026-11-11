@@ -273,21 +273,21 @@ func TestLoadReviewResumeState(t *testing.T) {
 	dir := initTestGitRepo(t)
 
 	t.Run("empty resume returns nil", func(t *testing.T) {
-		state, err := loadReviewResumeState(dir, reviewOptions{})
+		state, err := loadReviewResumeState(dir, &reviewOptions{})
 		if err != nil || state != nil {
 			t.Errorf("got state=%v err=%v, want nil,nil", state, err)
 		}
 	})
 
-	t.Run("workspace resume rejected", func(t *testing.T) {
-		_, err := loadReviewResumeState(dir, reviewOptions{resume: "sess-1"})
+	t.Run("nonexistent resume session rejected", func(t *testing.T) {
+		_, err := loadReviewResumeState(dir, &reviewOptions{resume: "sess-1"})
 		if err == nil {
-			t.Fatal("expected error for workspace-mode resume")
+			t.Fatal("expected error for nonexistent resume")
 		}
 	})
 
 	t.Run("missing session load fails", func(t *testing.T) {
-		_, err := loadReviewResumeState(dir, reviewOptions{resume: "does-not-exist", commit: "HEAD"})
+		_, err := loadReviewResumeState(dir, &reviewOptions{resume: "does-not-exist", commit: "HEAD"})
 		if err == nil {
 			t.Fatal("expected error loading nonexistent resume session")
 		}

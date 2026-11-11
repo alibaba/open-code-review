@@ -121,7 +121,7 @@ func TestComparisonToolsReachModelAndManifest(test *testing.T) {
 	if strings.Contains(string(raw), "code_access_profile") {
 		test.Fatal("manifest persisted a code access profile")
 	}
-	state, err := loadReviewResumeState(repo, reviewOptions{resume: result.SessionID, from: base, to: "HEAD"})
+	state, err := loadReviewResumeState(repo, &reviewOptions{resume: result.SessionID, from: base, to: "HEAD"})
 	if err != nil {
 		test.Fatal(err)
 	}

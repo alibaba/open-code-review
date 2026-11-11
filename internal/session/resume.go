@@ -279,8 +279,8 @@ func (s *ResumeState) ValidateOptions(opts SessionOptions) error {
 	if s == nil {
 		return nil
 	}
-	if opts.ReviewMode == "" || opts.ReviewMode == ReviewModeWorkspace {
-		return fmt.Errorf("resume requires --from/--to or --commit; workspace resume is not supported")
+	if opts.ReviewMode == "" {
+		return fmt.Errorf("resume requires review mode")
 	}
 	if s.ReviewMode == "" {
 		return fmt.Errorf("resume session %q is missing review mode metadata", s.SessionID)
@@ -288,7 +288,7 @@ func (s *ResumeState) ValidateOptions(opts SessionOptions) error {
 	if s.ReviewMode != opts.ReviewMode {
 		return fmt.Errorf("resume session review mode %q does not match current mode %q", s.ReviewMode, opts.ReviewMode)
 	}
-	if opts.ReviewMode != ReviewModeRange && opts.ReviewMode != ReviewModeCommit {
+	if opts.ReviewMode != ReviewModeRange && opts.ReviewMode != ReviewModeCommit && opts.ReviewMode != ReviewModeWorkspace {
 		return fmt.Errorf("resume mode %q is not supported", opts.ReviewMode)
 	}
 	return nil

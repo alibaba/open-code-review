@@ -33,19 +33,25 @@ func TestResumeComparisonEndpoints(test *testing.T) {
 		{name: "missing parent range base", mode: InputModeRange, parentHead: "head", base: "base", head: "head", reject: true},
 		{name: "missing current range base", mode: InputModeRange, parentBase: "base", parentHead: "head", head: "head", reject: true},
 		{name: "both range bases missing", mode: InputModeRange, parentHead: "head", head: "head", reject: true},
-		{name: "workspace without endpoints", mode: InputModeWorkspace},
-		{name: "workspace with changed head", mode: InputModeWorkspace, parentHead: "head", head: "other"},
+		{name: "workspace without comparison head", mode: InputModeWorkspace, parentBase: "base", base: "base"},
+		{name: "workspace with changed head", mode: InputModeWorkspace, parentBase: "base", parentHead: "head", base: "base", head: "other"},
 	} {
 		test.Run(scenario.name, func(test *testing.T) {
 			state := parentState(func(manifest *RunManifest) {
 				manifest.Input.Mode = scenario.mode
 				manifest.Input.ResolvedBase = scenario.parentBase
 				manifest.Input.ResolvedHead = scenario.parentHead
+				if scenario.mode == InputModeWorkspace {
+					manifest.Coverage.Completed = []CoverageItem{{ItemID: "item-1", Fingerprint: "fp-1"}}
+				}
 			})
 			req := request(func(req *ResumeRequest) {
 				req.Identity.Mode = scenario.mode
 				req.Identity.ResolvedBase = scenario.base
 				req.Identity.ResolvedHead = scenario.head
+				if scenario.mode == InputModeWorkspace {
+					req.ItemFingerprints = []string{"fp-1"}
+				}
 			})
 			err := state.ValidateResume(req)
 			if scenario.reject {

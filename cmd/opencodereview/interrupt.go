@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"sync"
@@ -18,6 +19,10 @@ import (
 // synchronous write to a full stderr pipe would block the exit entirely.
 var forceExit = func(sig os.Signal) {
 	os.Exit(1)
+}
+
+var notifySignals = func(c chan<- os.Signal) {
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 }
 
 // interruptContextWithForcedExit returns a child of parent that is canceled
@@ -45,7 +50,7 @@ func interruptContextWithForcedExit(parent context.Context) (context.Context, co
 	// back-to-back signals could drop the second before the watcher consumes
 	// the first — the very failure mode this function exists to eliminate.
 	ch := make(chan os.Signal, 2)
-	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	notifySignals(ch)
 
 	done := make(chan struct{})
 	var once sync.Once
@@ -73,6 +78,7 @@ func interruptContextWithForcedExit(parent context.Context) (context.Context, co
 		select {
 		case <-ch:
 			// First signal: start the graceful shutdown.
+			fmt.Fprintln(os.Stderr, "[ocr] Interrupted. Saving session checkpoint...")
 			cancel()
 			// Second signal: the user wants out now; skip the remaining
 			// cleanup. stop() (graceful shutdown finished first) releases

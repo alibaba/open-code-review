@@ -23,8 +23,9 @@ import (
 // run exists. Without it, a ref that moved after admission would be discovered
 // only mid-run, once a child session and manifest were already on disk.
 type SealedInput struct {
-	Identity   session.RunIdentity
-	Resolution diff.InputResolution
+	Identity         session.RunIdentity
+	Resolution       diff.InputResolution
+	ItemFingerprints []string
 }
 
 // ResolveIdentity computes the identity a review with these args would record,
@@ -61,7 +62,17 @@ func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	if resolution != nil {
 		a.inputResolution = *resolution
 	}
-	return &SealedInput{Identity: a.runIdentity(), Resolution: a.inputResolution}, nil
+	var fingerprints []string
+	for _, d := range a.diffs {
+		if !d.IsDeleted {
+			fingerprints = append(fingerprints, reviewItemFingerprint(a.manifestMode(), d))
+		}
+	}
+	return &SealedInput{
+		Identity:         a.runIdentity(),
+		Resolution:       a.inputResolution,
+		ItemFingerprints: fingerprints,
+	}, nil
 }
 
 // ResolveComparisonInput turns every moving head ref into an immutable commit

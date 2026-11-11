@@ -133,6 +133,17 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		}
 	}()
 
+	repoDir, _, err := resolveWorkingDir(opts.repoDir, true)
+	if err != nil {
+		return err
+	}
+	opts.repoDir = repoDir
+
+	resumeState, err := loadReviewResumeState(opts.repoDir, &opts)
+	if err != nil {
+		return err
+	}
+
 	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
 	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true)
 	if err != nil {
@@ -154,11 +165,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 
 	if opts.preview {
 		return runPreviewContext(ctx, cc, opts, out)
-	}
-
-	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
-	if err != nil {
-		return err
 	}
 
 	mainToolDefs, err := loadToolDefs(cc.Template.MainTask.Tools)
@@ -378,22 +384,48 @@ func reviewResultError(runErr error, manifest *session.RunManifest) error {
 	return nil
 }
 
-func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeState, error) {
+func loadReviewResumeState(repoDir string, opts *reviewOptions) (*session.ResumeState, error) {
 	if opts.resume == "" {
 		return nil, nil
-	}
-	current := session.SessionOptions{
-		ReviewMode: reviewModeFromOptions(opts),
-		DiffFrom:   opts.from,
-		DiffTo:     opts.to,
-		DiffCommit: opts.commit,
-	}
-	if current.ReviewMode == session.ReviewModeWorkspace {
-		return nil, fmt.Errorf("resume requires --from/--to or --commit; workspace resume is not supported")
 	}
 	state, err := session.LoadReviewResumeState(repoDir, opts.resume)
 	if err != nil {
 		return nil, fmt.Errorf("load resume session: %w (run 'ocr session list' to see available sessions)", err)
+	}
+
+	hasTarget := opts.from != "" || opts.to != "" || opts.commit != ""
+	if !hasTarget {
+		switch state.ReviewMode {
+		case session.ReviewModeRange:
+			opts.from = state.DiffFrom
+			opts.to = state.DiffTo
+		case session.ReviewModeCommit:
+			opts.commit = state.DiffCommit
+		case session.ReviewModeWorkspace:
+			// Auto-inferred workspace mode: target flags remain empty.
+		}
+	} else {
+		switch state.ReviewMode {
+		case session.ReviewModeWorkspace:
+			if opts.from != "" || opts.to != "" || opts.commit != "" {
+				return nil, fmt.Errorf("parameter conflict: session %q is workspace mode; cannot specify --from/--to or --commit", opts.resume)
+			}
+		case session.ReviewModeRange:
+			if opts.commit != "" {
+				return nil, fmt.Errorf("parameter conflict: session %q is range mode; cannot specify --commit", opts.resume)
+			}
+		case session.ReviewModeCommit:
+			if opts.from != "" || opts.to != "" {
+				return nil, fmt.Errorf("parameter conflict: session %q is commit mode; cannot specify --from/--to", opts.resume)
+			}
+		}
+	}
+
+	current := session.SessionOptions{
+		ReviewMode: reviewModeFromOptions(*opts),
+		DiffFrom:   opts.from,
+		DiffTo:     opts.to,
+		DiffCommit: opts.commit,
 	}
 	if err := state.ValidateOptions(current); err != nil {
 		return nil, fmt.Errorf("%w (run 'ocr session list' to see available sessions)", err)
@@ -437,12 +469,15 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 	if err != nil {
 		return nil, fmt.Errorf("resolve current input identity: %w", err)
 	}
+	branch := detectGitBranch(cc.RepoDir)
 	if err := state.ValidateResume(session.ResumeRequest{
 		Identity:         sealed.Identity,
 		Provider:         rt.Provider,
 		Model:            rt.Model,
 		ProviderExplicit: opts.provider != "",
 		ModelExplicit:    opts.model != "",
+		GitBranch:        branch,
+		ItemFingerprints: sealed.ItemFingerprints,
 	}); err != nil {
 		return nil, err
 	}

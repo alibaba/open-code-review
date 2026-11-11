@@ -33,21 +33,26 @@ func stubForceExit(t *testing.T) <-chan os.Signal {
 
 func TestInterruptContextFirstSignalCancelsGracefully(t *testing.T) {
 	sigs := stubForceExit(t)
-	ctx, stop := interruptContextWithForcedExit(context.Background())
-	t.Cleanup(stop)
+	errOut := captureStderr(t, func() {
+		ctx, stop := interruptContextWithForcedExit(context.Background())
+		t.Cleanup(stop)
 
-	if err := syscall.Kill(syscall.Getpid(), syscall.SIGINT); err != nil {
-		t.Fatalf("send SIGINT: %v", err)
-	}
-	select {
-	case <-ctx.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("first SIGINT did not cancel the context within 5s")
-	}
-	select {
-	case sig := <-sigs:
-		t.Fatalf("forced exit invoked by the first signal: %v", sig)
-	default:
+		if err := syscall.Kill(syscall.Getpid(), syscall.SIGINT); err != nil {
+			t.Fatalf("send SIGINT: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("first SIGINT did not cancel the context within 5s")
+		}
+		select {
+		case sig := <-sigs:
+			t.Fatalf("forced exit invoked by the first signal: %v", sig)
+		default:
+		}
+	})
+	if !strings.Contains(errOut, "[ocr] Interrupted. Saving session checkpoint...") {
+		t.Fatalf("expected stderr to contain checkpoint message, got:\n%s", errOut)
 	}
 }
 

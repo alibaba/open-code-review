@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
@@ -816,6 +817,158 @@ func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
 	if info == nil || info.ReusedFiles != 1 || info.RerunFiles != 1 || info.PreviousModel != "anthropic-model" || info.CurrentModel != "openai-model" {
 		t.Fatalf("ResumeInfo = %+v", info)
 	}
+}
+
+func TestApplyResumeWorkspace(t *testing.T) {
+	t.Run("full reuse in workspace mode", func(t *testing.T) {
+		diffs := []model.Diff{
+			{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
+			{OldPath: "b.go", NewPath: "b.go", Diff: "+b", Insertions: 1},
+		}
+		fpA := reviewItemFingerprint(session.ReviewModeWorkspace, diffs[0])
+		fpB := reviewItemFingerprint(session.ReviewModeWorkspace, diffs[1])
+
+		resume := &session.ResumeState{
+			SessionID:  "parent-ws-session",
+			Model:      "parent-model",
+			ReviewMode: session.ReviewModeWorkspace,
+			GitBranch:  "main",
+			Items: map[string]session.ResumeItem{
+				fpA: {FilePath: "a.go", NewPath: "a.go", Fingerprint: fpA, Comments: []model.LlmComment{{Path: "a.go", Content: "c-a"}}},
+				fpB: {FilePath: "b.go", NewPath: "b.go", Fingerprint: fpB, Comments: []model.LlmComment{{Path: "b.go", Content: "c-b"}}},
+			},
+			Manifest: &session.RunManifest{
+				RunID: "run-parent-ws",
+				Coverage: session.Coverage{
+					Completed: []session.CoverageItem{
+						{ItemID: "item-a", Fingerprint: fpA},
+						{ItemID: "item-b", Fingerprint: fpB},
+					},
+				},
+				Execution: session.ManifestExecution{Provider: "anthropic", Model: "parent-model"},
+			},
+			Closed: true,
+		}
+
+		collector := tool.NewCommentCollector()
+		sess := session.New(t.TempDir(), "main", "child-model", session.SessionOptions{
+			ReviewMode:  session.ReviewModeWorkspace,
+			ResumedFrom: "parent-ws-session",
+			Operation:   session.OperationReview,
+		})
+		defer sess.Finalize()
+
+		a := New(Args{
+			ReviewMode:       session.ReviewModeWorkspace,
+			Model:            "child-model",
+			Provider:         "openai",
+			CommentCollector: collector,
+			Resume:           resume,
+			Session:          sess,
+		})
+
+		toDispatch := a.applyResume(diffs)
+		if len(toDispatch) != 0 {
+			t.Fatalf("expected 0 files to dispatch for full reuse, got: %d", len(toDispatch))
+		}
+		if len(collector.Comments()) != 2 {
+			t.Fatalf("expected 2 reused comments, got: %d", len(collector.Comments()))
+		}
+		info := a.ResumeInfo()
+		if info == nil || info.ReusedFiles != 2 || info.RerunFiles != 0 {
+			t.Fatalf("unexpected ResumeInfo: %+v", info)
+		}
+	})
+
+	t.Run("partial reuse and partial re-review in workspace mode", func(t *testing.T) {
+		oldDiffB := model.Diff{OldPath: "b.go", NewPath: "b.go", Diff: "+b-old", Insertions: 1}
+		fpA := reviewItemFingerprint(session.ReviewModeWorkspace, model.Diff{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1})
+		fpBOld := reviewItemFingerprint(session.ReviewModeWorkspace, oldDiffB)
+
+		diffs := []model.Diff{
+			{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
+			{OldPath: "b.go", NewPath: "b.go", Diff: "+b-new", Insertions: 1},
+			{OldPath: "c.go", NewPath: "c.go", Diff: "+c", Insertions: 1},
+		}
+
+		resume := &session.ResumeState{
+			SessionID:  "parent-ws-session",
+			Model:      "parent-model",
+			ReviewMode: session.ReviewModeWorkspace,
+			GitBranch:  "main",
+			Items: map[string]session.ResumeItem{
+				fpA:    {FilePath: "a.go", NewPath: "a.go", Fingerprint: fpA, Comments: []model.LlmComment{{Path: "a.go", Content: "c-a"}}},
+				fpBOld: {FilePath: "b.go", NewPath: "b.go", Fingerprint: fpBOld, Comments: []model.LlmComment{{Path: "b.go", Content: "c-b-old"}}},
+			},
+			Manifest: &session.RunManifest{
+				RunID: "run-parent-ws",
+				Coverage: session.Coverage{
+					Completed: []session.CoverageItem{
+						{ItemID: "item-a", Fingerprint: fpA},
+						{ItemID: "item-b", Fingerprint: fpBOld},
+					},
+				},
+				Execution: session.ManifestExecution{Provider: "anthropic", Model: "parent-model"},
+			},
+			Closed: true,
+		}
+
+		collector := tool.NewCommentCollector()
+		sess := session.New(t.TempDir(), "main", "child-model", session.SessionOptions{
+			ReviewMode:  session.ReviewModeWorkspace,
+			ResumedFrom: "parent-ws-session",
+			Operation:   session.OperationReview,
+		})
+		defer sess.Finalize()
+
+		a := New(Args{
+			ReviewMode:       session.ReviewModeWorkspace,
+			Model:            "child-model",
+			Provider:         "openai",
+			CommentCollector: collector,
+			Resume:           resume,
+			Session:          sess,
+		})
+
+		b := sess.Manifest()
+		for _, d := range diffs {
+			_ = b.RegisterSelected(a.coverageItem(d))
+		}
+
+		toDispatch := a.applyResume(diffs)
+		if len(toDispatch) != 2 {
+			t.Fatalf("expected 2 files to dispatch, got: %d", len(toDispatch))
+		}
+		if toDispatch[0].NewPath != "b.go" || toDispatch[1].NewPath != "c.go" {
+			t.Fatalf("unexpected toDispatch: %+v", toDispatch)
+		}
+		if len(collector.Comments()) != 1 || collector.Comments()[0].Content != "c-a" {
+			t.Fatalf("unexpected collector comments: %+v", collector.Comments())
+		}
+		info := a.ResumeInfo()
+		if info == nil || info.ReusedFiles != 1 || info.RerunFiles != 2 {
+			t.Fatalf("unexpected ResumeInfo: %+v", info)
+		}
+
+		a.markCompleted(toDispatch[0])
+		a.markCompleted(toDispatch[1])
+
+		m, err := b.Finalize(time.Second)
+		if err != nil {
+			t.Fatalf("finalize manifest: %v", err)
+		}
+		if len(m.Coverage.Reused) != 1 || m.Coverage.Reused[0].Path != "a.go" {
+			t.Fatalf("expected Coverage.Reused to contain a.go, got: %+v", m.Coverage.Reused)
+		}
+		if len(m.Coverage.Completed) != 2 {
+			t.Fatalf("expected Coverage.Completed to contain 2 items, got: %+v", m.Coverage.Completed)
+		}
+
+		lineage := session.NewResumeLineage(resume, sess.SessionID, a.args.Provider, a.args.Model)
+		if lineage == nil || lineage.ParentRunID != "run-parent-ws" || lineage.SourceProvider != "anthropic" || lineage.TargetProvider != "openai" {
+			t.Fatalf("unexpected lineage: %+v", lineage)
+		}
+	})
 }
 
 // TestAgentGettersNil covers the defensive early returns in the accessor

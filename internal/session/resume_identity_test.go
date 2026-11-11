@@ -224,6 +224,146 @@ func TestValidateResumeNilStateAccepts(t *testing.T) {
 	}
 }
 
+func TestValidateResumeWorkspace(t *testing.T) {
+	wsParentIdentity := RunIdentity{
+		Mode:                 ReviewModeWorkspace,
+		SourceArtifactSHA256: "artifact-parent",
+		RuleConfigSHA256:     "rules-parent",
+		RepositorySHA256:     "repo-parent",
+	}
+
+	wsParentState := func(mutate func(*RunManifest), mutateState func(*ResumeState)) *ResumeState {
+		m := &RunManifest{
+			SchemaVersion: ManifestSchemaVersion,
+			RunID:         "run-parent-ws",
+			Operation:     OperationReview,
+			Repository:    ManifestRepository{IdentitySHA256: wsParentIdentity.RepositorySHA256},
+			Input: ManifestInput{
+				Mode:                 wsParentIdentity.Mode,
+				SourceArtifactSHA256: wsParentIdentity.SourceArtifactSHA256,
+			},
+			Execution: ManifestExecution{
+				Provider:         "anthropic",
+				Model:            "claude",
+				RuleConfigSHA256: wsParentIdentity.RuleConfigSHA256,
+			},
+			Coverage: Coverage{
+				Selected:  []CoverageItem{{ItemID: "item-1", Fingerprint: "fp-1"}},
+				Completed: []CoverageItem{{ItemID: "item-1", Fingerprint: "fp-1"}},
+			},
+		}
+		if mutate != nil {
+			mutate(m)
+		}
+		s := &ResumeState{
+			SessionID:  "parent-session",
+			ReviewMode: ReviewModeWorkspace,
+			GitBranch:  "main",
+			Manifest:   m,
+			Closed:     true,
+		}
+		if mutateState != nil {
+			mutateState(s)
+		}
+		return s
+	}
+
+	wsRequest := func(mutate func(*ResumeRequest)) ResumeRequest {
+		req := ResumeRequest{
+			Identity: RunIdentity{
+				Mode:                 ReviewModeWorkspace,
+				SourceArtifactSHA256: wsParentIdentity.SourceArtifactSHA256,
+				RuleConfigSHA256:     wsParentIdentity.RuleConfigSHA256,
+				RepositorySHA256:     wsParentIdentity.RepositorySHA256,
+			},
+			Provider:         "anthropic",
+			Model:            "claude",
+			GitBranch:        "main",
+			ItemFingerprints: []string{"fp-1"},
+		}
+		if mutate != nil {
+			mutate(&req)
+		}
+		return req
+	}
+
+	t.Run("content change passes in workspace mode", func(t *testing.T) {
+		state := wsParentState(nil, nil)
+		req := wsRequest(func(r *ResumeRequest) {
+			r.Identity.SourceArtifactSHA256 = "artifact-changed"
+		})
+		if err := state.ValidateResume(req); err != nil {
+			t.Fatalf("expected workspace mode to pass with changed SourceArtifactSHA256, got: %v", err)
+		}
+	})
+
+	t.Run("repository change is rejected in workspace mode", func(t *testing.T) {
+		state := wsParentState(nil, nil)
+		req := wsRequest(func(r *ResumeRequest) {
+			r.Identity.RepositorySHA256 = "repo-other"
+		})
+		err := state.ValidateResume(req)
+		if err == nil || !strings.Contains(err.Error(), "repository identity changed") {
+			t.Fatalf("expected repository identity rejection, got: %v", err)
+		}
+	})
+
+	t.Run("rule config change is rejected in workspace mode", func(t *testing.T) {
+		state := wsParentState(nil, nil)
+		req := wsRequest(func(r *ResumeRequest) {
+			r.Identity.RuleConfigSHA256 = "rules-other"
+		})
+		err := state.ValidateResume(req)
+		if err == nil || !strings.Contains(err.Error(), "rule identity changed") {
+			t.Fatalf("expected rule identity rejection, got: %v", err)
+		}
+	})
+
+	t.Run("zero reusable items triggers error in workspace mode", func(t *testing.T) {
+		state := wsParentState(nil, nil)
+		req := wsRequest(func(r *ResumeRequest) {
+			r.ItemFingerprints = []string{"fp-unmatched"}
+		})
+		err := state.ValidateResume(req)
+		want := `resume rejected: no completed review items from session "parent-session" match current workspace diffs (run 'ocr review' to start a fresh review)`
+		if err == nil || err.Error() != want {
+			t.Fatalf("got err = %v, want = %q", err, want)
+		}
+	})
+
+	t.Run("at least one matching reusable item passes", func(t *testing.T) {
+		state := wsParentState(nil, nil)
+		req := wsRequest(func(r *ResumeRequest) {
+			r.ItemFingerprints = []string{"fp-1", "fp-new"}
+		})
+		if err := state.ValidateResume(req); err != nil {
+			t.Fatalf("expected pass when at least one item matches, got: %v", err)
+		}
+	})
+
+	t.Run("git branch mismatch is rejected in workspace mode", func(t *testing.T) {
+		state := wsParentState(nil, nil)
+		req := wsRequest(func(r *ResumeRequest) {
+			r.GitBranch = "feature-x"
+		})
+		err := state.ValidateResume(req)
+		want := `resume rejected: current branch "feature-x" does not match session branch "main"`
+		if err == nil || err.Error() != want {
+			t.Fatalf("got err = %v, want = %q", err, want)
+		}
+	})
+
+	t.Run("git branch match passes in workspace mode", func(t *testing.T) {
+		state := wsParentState(nil, nil)
+		req := wsRequest(func(r *ResumeRequest) {
+			r.GitBranch = "main"
+		})
+		if err := state.ValidateResume(req); err != nil {
+			t.Fatalf("expected pass when branches match, got: %v", err)
+		}
+	})
+}
+
 // An endpoint configured straight from environment variables resolves no
 // provider name, so the rejection must not tell the user to run `--provider `
 // with nothing after it. The same applies to a model that resolved empty.
