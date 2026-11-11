@@ -22,8 +22,11 @@ import (
 func TestComparisonToolsReachModelAndManifest(test *testing.T) {
 	freshOCRHome(test)
 	repo := initTestGitRepo(test)
+	commitFile(test, repo, "helper.go", "package example\nconst Helper = 1\n", "old helper")
 	commitFile(test, repo, "version.go", "package example\nconst Value = \"old-marker\"\n", "old")
 	base := revParse(test, repo, "HEAD")
+	commitFile(test, repo, "helper.go", "package example\nconst Helper = 2\n", "change helper")
+	advancedBase := revParse(test, repo, "HEAD")
 	commitFile(test, repo, "version.go", "package example\nconst Value = \"new-marker\"\n", "new")
 	head := revParse(test, repo, "HEAD")
 	var mutex sync.Mutex
@@ -89,7 +92,7 @@ func TestComparisonToolsReachModelAndManifest(test *testing.T) {
 	test.Setenv("OCR_LLM_PROTOCOL", "openai")
 	test.Setenv("OCR_USE_ANTHROPIC", "false")
 	output := filepath.Join(test.TempDir(), "result.json")
-	opts, err := parseReviewFlags([]string{"--repo", repo, "--from", base, "--to", "HEAD", "--format", "json", "--audience", "agent", "--output", output})
+	opts, err := parseReviewFlags([]string{"--repo", repo, "--from", base, "--to", "HEAD", "--exclude", "helper.go", "--format", "json", "--audience", "agent", "--output", output})
 	if err != nil {
 		test.Fatal(err)
 	}
@@ -119,6 +122,54 @@ func TestComparisonToolsReachModelAndManifest(test *testing.T) {
 	profile, err := state.CodeAccessProfile()
 	if err != nil || profile != session.CodeAccessComparisonSides {
 		test.Fatalf("persisted profile did not survive resume loading: %q %v", profile, err)
+	}
+
+	test.Run("equivalent refs preserve reuse", func(test *testing.T) {
+		resumed := opts
+		resumed.resume = result.SessionID
+		resumed.from = "HEAD~2"
+		resumed.to = head
+		resumed.outputPath = filepath.Join(test.TempDir(), "resumed.json")
+		if err := executeReview(resumed); err != nil {
+			test.Fatal(err)
+		}
+		raw, err := os.ReadFile(resumed.outputPath)
+		if err != nil {
+			test.Fatal(err)
+		}
+		var result jsonOutput
+		if err := json.Unmarshal(raw, &result); err != nil {
+			test.Fatal(err)
+		}
+		if result.Manifest == nil || len(result.Manifest.Coverage.Reused) != 1 || result.Manifest.Input.ResolvedBase != base || result.Manifest.Input.ResolvedHead != head {
+			test.Fatalf("equivalent refs lost the comparison or reuse: %+v", result.Manifest)
+		}
+	})
+
+	commitFile(test, repo, "helper.go", "package example\nconst Helper = 3\n", "advance head")
+	advancedHead := revParse(test, repo, "HEAD")
+	for _, scenario := range []struct {
+		name string
+		from string
+		to   string
+	}{
+		{name: "changed base with identical selected patch", from: advancedBase, to: head},
+		{name: "changed head with identical selected patch", from: base, to: advancedHead},
+	} {
+		test.Run(scenario.name, func(test *testing.T) {
+			resumed := opts
+			resumed.resume = result.SessionID
+			resumed.from = scenario.from
+			resumed.to = scenario.to
+			resumed.outputPath = filepath.Join(test.TempDir(), "rejected.json")
+			before := countSessionFiles(test, repo)
+			if err := executeReview(resumed); err == nil || !strings.Contains(err.Error(), "comparison endpoints changed") {
+				test.Errorf("expected endpoint rejection despite an identical selected patch, got %v", err)
+			}
+			if after := countSessionFiles(test, repo); after != before {
+				test.Errorf("rejected resume created %d session files", after-before)
+			}
+		})
 	}
 }
 

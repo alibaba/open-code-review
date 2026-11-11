@@ -95,10 +95,15 @@ from it during setup.
 
 Review manifests record `execution.code_access_profile` as
 `current-only/v1` or `comparison-sides/v1`. Resuming a review preserves its
-profile. Older sessions without that field resume with current-only tools;
-start a new review to enable comparison sides. Unsupported profiles are
-rejected rather than silently downgraded. Use a version that supports the
-recorded profile when resuming; older binaries do not enforce this new field.
+profile. Comparison-side sessions also require the same resolved old and new
+endpoints, even when the selected patches are unchanged: context elsewhere in
+either tree may have influenced the previous review. Different ref names that
+resolve to the same endpoints remain valid. If either endpoint changes, start
+a new review instead of resuming. Older sessions without that field resume
+with current-only tools; start a new review to enable comparison sides.
+Unsupported profiles are rejected rather than silently downgraded. Use a
+version that supports the recorded profile when resuming; older binaries
+do not enforce this new field.
 
 ## `task_done`
 

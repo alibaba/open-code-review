@@ -111,6 +111,8 @@ func resolveCommitHead(ctx context.Context, args Args, ref string) (string, erro
 func (a *Agent) runIdentity() session.RunIdentity {
 	id := session.RunIdentity{
 		Mode:                 a.manifestMode(),
+		ResolvedBase:         a.inputResolution.ResolvedBase,
+		ResolvedHead:         a.inputResolution.ResolvedHead,
 		SourceArtifactSHA256: a.sourceArtifactSHA256(),
 		RuleConfigSHA256:     a.ruleConfigSHA256(),
 	}
