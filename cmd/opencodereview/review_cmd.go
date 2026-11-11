@@ -210,7 +210,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		sealedInput = &sealed.Resolution
 	}
 
-	codeTools, err := prepareReviewCodeTools(ctx, cc.RepoDir, opts, cc.GitRunner, resumeState, sealedInput)
+	codeTools, err := prepareReviewCodeTools(ctx, cc.RepoDir, opts, cc.GitRunner, sealedInput)
 	if err != nil {
 		return fmt.Errorf("prepare code tools: %w", err)
 	}
@@ -257,7 +257,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
 		SealedInput:           codeTools.resolution,
-		CodeAccessProfile:     codeTools.profile,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,

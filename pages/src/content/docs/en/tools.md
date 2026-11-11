@@ -53,7 +53,7 @@ if you previously supplied a custom tools file.
 
 ## Comparison sides
 
-New commit and range reviews expose an optional `side` parameter on
+Commit and range reviews, including resumed sessions, expose an optional `side` parameter on
 `file_read`, `code_search`, and `file_find`. Omit it, or pass `"new"`, to
 keep the default behavior and output format. Pass `"old"` to read, search,
 or enumerate the previous side of the same comparison:
@@ -95,17 +95,14 @@ definitions and does not declare `side`. During setup, comparison reviews use
 references from that catalog, adding `side` and updating the descriptions
 without modifying the base definitions.
 
-Review manifests record `execution.code_access_profile` as
-`current-only/v1` or `comparison-sides/v1`. Resuming a review preserves its
-profile. Comparison-side sessions also require the same resolved old and new
-endpoints, even when the selected patches are unchanged: context elsewhere in
-either tree may have influenced the previous review. Different ref names that
-resolve to the same endpoints remain valid. If either endpoint changes, start
-a new review instead of resuming. Older sessions without that field resume
-with current-only tools; start a new review to enable comparison sides.
-Unsupported profiles are rejected rather than silently downgraded. Use a
-version that supports the recorded profile when resuming; older binaries
-do not enforce this new field.
+Resuming a commit or range review uses the current built-in tools and requires
+the same resolved old and new endpoints, even when the selected patches are
+unchanged: context elsewhere in either tree may have influenced the previous
+review. Different ref names that resolve to the same endpoints remain valid.
+If either endpoint changes or an older session lacks enough endpoint information
+to verify the comparison, start a new review instead of resuming. Completed
+files are reused; pending files are reviewed with the current tools. Start a
+new review to recheck every file with the current capabilities.
 
 ## `task_done`
 

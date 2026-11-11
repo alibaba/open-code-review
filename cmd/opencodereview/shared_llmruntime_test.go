@@ -115,16 +115,18 @@ func TestComparisonToolsReachModelAndManifest(test *testing.T) {
 	if err := json.Unmarshal(raw, &result); err != nil {
 		test.Fatal(err)
 	}
-	if result.Manifest == nil || result.Manifest.Execution.CodeAccessProfile != session.CodeAccessComparisonSides || result.Manifest.Input.ResolvedBase != base || result.Manifest.Input.ResolvedHead != head {
-		test.Fatalf("manifest lost profile or endpoints: %+v", result.Manifest)
+	if result.Manifest == nil || result.Manifest.Input.ResolvedBase != base || result.Manifest.Input.ResolvedHead != head {
+		test.Fatalf("manifest lost comparison endpoints: %+v", result.Manifest)
+	}
+	if strings.Contains(string(raw), "code_access_profile") {
+		test.Fatal("manifest persisted a code access profile")
 	}
 	state, err := loadReviewResumeState(repo, reviewOptions{resume: result.SessionID, from: base, to: "HEAD"})
 	if err != nil {
 		test.Fatal(err)
 	}
-	profile, err := state.CodeAccessProfile()
-	if err != nil || profile != session.CodeAccessComparisonSides {
-		test.Fatalf("persisted profile did not survive resume loading: %q %v", profile, err)
+	if state.Manifest == nil || state.Manifest.Input.ResolvedBase != base || state.Manifest.Input.ResolvedHead != head {
+		test.Fatalf("persisted endpoints did not survive resume loading: %+v", state.Manifest)
 	}
 
 	test.Run("equivalent refs preserve reuse", func(test *testing.T) {
@@ -146,6 +148,76 @@ func TestComparisonToolsReachModelAndManifest(test *testing.T) {
 		}
 		if result.Manifest == nil || len(result.Manifest.Coverage.Reused) != 1 || result.Manifest.Input.ResolvedBase != base || result.Manifest.Input.ResolvedHead != head {
 			test.Fatalf("equivalent refs lost the comparison or reuse: %+v", result.Manifest)
+		}
+	})
+
+	test.Run("legacy current-only session uses comparison tools", func(test *testing.T) {
+		parent := session.New(repo, "feature", "test-model", session.SessionOptions{
+			ReviewMode: session.ReviewModeRange, DiffFrom: base, DiffTo: head, Operation: session.OperationReview,
+		})
+		builder := parent.Manifest()
+		builder.SetRepository(result.Manifest.Repository)
+		builder.SetInput(result.Manifest.Input)
+		builder.SetExecution(result.Manifest.Execution)
+		for _, item := range result.Manifest.Coverage.Selected {
+			if err := builder.RegisterSelected(item); err != nil {
+				test.Fatal(err)
+			}
+			if err := builder.MarkFailed(item.ItemID, session.FailureProvider, "interrupted request"); err != nil {
+				test.Fatal(err)
+			}
+		}
+		manifest, err := builder.Finalize(0)
+		if err != nil {
+			test.Fatal(err)
+		}
+		parent.SetFinalManifest(&manifest)
+		if err := parent.Finalize(); err != nil {
+			test.Fatal(err)
+		}
+		path, err := session.SessionFilePath(repo, parent.SessionID)
+		if err != nil {
+			test.Fatal(err)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			test.Fatal(err)
+		}
+		legacy := strings.Replace(string(raw), `"execution":{`, `"execution":{"code_access_profile":"current-only/v1",`, 1)
+		if legacy == string(raw) {
+			test.Fatal("legacy session fixture has no execution metadata")
+		}
+		if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+			test.Fatal(err)
+		}
+		mutex.Lock()
+		called = false
+		seen = make(map[string]bool)
+		mutex.Unlock()
+		resumed := opts
+		resumed.resume = parent.SessionID
+		resumed.outputPath = filepath.Join(test.TempDir(), "legacy-resumed.json")
+		if err := executeReview(resumed); err != nil {
+			test.Fatal(err)
+		}
+		mutex.Lock()
+		if len(seen) != 3 {
+			test.Errorf("legacy resume did not execute all old-side tools: %v", seen)
+		}
+		mutex.Unlock()
+		raw, err = os.ReadFile(resumed.outputPath)
+		if err != nil {
+			test.Fatal(err)
+		}
+		var result jsonOutput
+		if err := json.Unmarshal(raw, &result); err != nil {
+			test.Fatal(err)
+		}
+		if result.Manifest == nil || len(result.Manifest.Coverage.Completed) != 1 || len(result.Manifest.Coverage.Reused) != 0 {
+			test.Fatalf("legacy resume did not complete the pending file: %+v", result.Manifest)
+		}
+		if strings.Contains(string(raw), "code_access_profile") {
+			test.Fatal("legacy resume preserved a code access profile")
 		}
 	})
 

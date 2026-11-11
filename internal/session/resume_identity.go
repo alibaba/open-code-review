@@ -56,12 +56,8 @@ func (s *ResumeState) ValidateResume(req ResumeRequest) error {
 	if err := s.validateInputIdentity(req.Identity); err != nil {
 		return err
 	}
-	profile, err := s.CodeAccessProfile()
-	if err != nil {
-		return err
-	}
-	if profile == CodeAccessComparisonSides {
-		identity := req.Identity
+	identity := req.Identity
+	if identity.Mode == InputModeRange || identity.Mode == InputModeCommit {
 		if identity.ResolvedHead == "" || (identity.Mode == InputModeRange && identity.ResolvedBase == "") {
 			return fmt.Errorf("resume rejected: comparison endpoints could not be resolved; %s", resumeHint)
 		}
