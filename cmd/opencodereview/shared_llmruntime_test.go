@@ -21,7 +21,10 @@ import (
 
 func TestComparisonToolsReachModelAndManifest(test *testing.T) {
 	freshOCRHome(test)
-	repo := initTestGitRepo(test)
+	repo, err := resolveRepoDir(initTestGitRepo(test))
+	if err != nil {
+		test.Fatal(err)
+	}
 	commitFile(test, repo, "helper.go", "package example\nconst Helper = 1\n", "old helper")
 	commitFile(test, repo, "version.go", "package example\nconst Value = \"old-marker\"\n", "old")
 	base := revParse(test, repo, "HEAD")
