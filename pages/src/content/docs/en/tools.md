@@ -6,7 +6,7 @@ sidebar:
 
 OCR ships with **six built-in tools** the LLM can call during a review.
 This page documents each tool's purpose, input schema, and example
-input/output. The full machine-readable definitions live in
+input/output. The base machine-readable definitions live in
 [`internal/config/toolsconfig/tools.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/toolsconfig/tools.json).
 
 ## Tool availability per phase
@@ -89,9 +89,11 @@ invalid.
 
 Workspace reviews and scans retain their existing definitions, prompts, and
 default tool output formats. They do not expose `side` and reject it if supplied.
-The shared catalog remains the source of the current-only definitions;
-comparison reviews derive their callable definitions and planning references
-from it during setup.
+The shared `tools.json` catalog remains the source of the current-only
+definitions and does not declare `side`. During setup, comparison reviews use
+`WithComparisonSides` to derive their callable definitions and planning
+references from that catalog, adding `side` and updating the descriptions
+without modifying the base definitions.
 
 Review manifests record `execution.code_access_profile` as
 `current-only/v1` or `comparison-sides/v1`. Resuming a review preserves its
