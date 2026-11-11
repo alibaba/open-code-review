@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -22,6 +23,29 @@ import (
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
+
+func TestComparisonPlanningReferences(test *testing.T) {
+	entries, err := toolsconfig.LoadDefault()
+	if err != nil {
+		test.Fatal(err)
+	}
+	base, err := toolsconfig.Resolve(entries, []string{"code_search", "file_read", "file_read_diff", "file_find"})
+	if err != nil {
+		test.Fatal(err)
+	}
+	before := formatToolDefs(base)
+	derived, err := toolsconfig.WithComparisonSides(base)
+	if err != nil {
+		test.Fatal(err)
+	}
+	text := formatToolDefs(derived)
+	if strings.Count(text, "  - side:") != 3 || strings.Contains(text, "side: The side of the current comparison to access. Defaults to new. Paths and line numbers belong to the selected side. (required)") {
+		test.Fatalf("incorrect planning parameters: %s", text)
+	}
+	if strings.Contains(before, "  - side:") || formatToolDefs(base) != before {
+		test.Fatal("comparison planning contaminated current-only references")
+	}
+}
 
 type fakeAgentClient struct {
 	responses []*llm.ChatResponse

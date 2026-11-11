@@ -54,6 +54,9 @@ func (s *ResumeState) ValidateResume(req ResumeRequest) error {
 	if err := s.validateInputIdentity(req.Identity); err != nil {
 		return err
 	}
+	if _, err := s.CodeAccessProfile(); err != nil {
+		return err
+	}
 
 	m := s.Manifest
 	providerChanged := m.Execution.Provider != req.Provider

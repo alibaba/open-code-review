@@ -16,7 +16,111 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/session"
 )
+
+func TestComparisonToolsReachModelAndManifest(test *testing.T) {
+	freshOCRHome(test)
+	repo := initTestGitRepo(test)
+	commitFile(test, repo, "version.go", "package example\nconst Value = \"old-marker\"\n", "old")
+	base := revParse(test, repo, "HEAD")
+	commitFile(test, repo, "version.go", "package example\nconst Value = \"new-marker\"\n", "new")
+	head := revParse(test, repo, "HEAD")
+	var mutex sync.Mutex
+	called := false
+	seen := make(map[string]bool)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body struct {
+			Tools    []llm.ToolDef `json:"tools"`
+			Messages []struct {
+				Role       string          `json:"role"`
+				Name       string          `json:"name"`
+				ToolCallID string          `json:"tool_call_id"`
+				Content    json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			test.Error(err)
+			http.Error(writer, "bad request", http.StatusBadRequest)
+			return
+		}
+		mutex.Lock()
+		defer mutex.Unlock()
+		for _, message := range body.Messages {
+			if message.Role != "tool" {
+				continue
+			}
+			var content string
+			if err := json.Unmarshal(message.Content, &content); err != nil {
+				test.Error(err)
+				continue
+			}
+			if strings.HasPrefix(content, "SIDE: old\nREVISION: "+base+"\n") {
+				seen[message.ToolCallID] = true
+			} else if strings.HasPrefix(message.ToolCallID, "old-") {
+				test.Errorf("old-side tool result lost its source: %s", content)
+			}
+		}
+		for _, definition := range body.Tools {
+			name := definition.Function.Name
+			if name == "file_read" || name == "file_find" || name == "code_search" {
+				properties := definition.Function.Parameters["properties"].(map[string]any)
+				if _, exists := properties["side"]; !exists {
+					test.Errorf("model did not receive side for %s", name)
+				}
+			}
+		}
+		response := `{"id":"done","object":"chat.completion","model":"test-model","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[{"id":"done","type":"function","function":{"name":"task_done","arguments":"{\"state\":\"DONE\"}"}}]}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`
+		if len(body.Tools) == 0 {
+			response = `{"id":"plan","object":"chat.completion","model":"test-model","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Inspect the changed file."}}]}`
+		} else if !called {
+			called = true
+			response = `{"id":"read","object":"chat.completion","model":"test-model","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[{"id":"old-read","type":"function","function":{"name":"file_read","arguments":"{\"file_path\":\"version.go\",\"side\":\"old\"}"}},{"id":"old-search","type":"function","function":{"name":"code_search","arguments":"{\"search_text\":\"old-marker\",\"side\":\"old\"}"}},{"id":"old-find","type":"function","function":{"name":"file_find","arguments":"{\"query_name\":\"version.go\",\"side\":\"old\"}"}}]}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		if _, err := writer.Write([]byte(response)); err != nil {
+			test.Error(err)
+		}
+	}))
+	defer server.Close()
+	test.Setenv("OCR_LLM_URL", server.URL+"/v1/chat/completions")
+	test.Setenv("OCR_LLM_TOKEN", "test-token")
+	test.Setenv("OCR_LLM_MODEL", "test-model")
+	test.Setenv("OCR_LLM_PROTOCOL", "openai")
+	test.Setenv("OCR_USE_ANTHROPIC", "false")
+	output := filepath.Join(test.TempDir(), "result.json")
+	opts, err := parseReviewFlags([]string{"--repo", repo, "--from", base, "--to", "HEAD", "--format", "json", "--audience", "agent", "--output", output})
+	if err != nil {
+		test.Fatal(err)
+	}
+	if err := executeReview(opts); err != nil {
+		test.Fatal(err)
+	}
+	mutex.Lock()
+	if len(seen) != 3 {
+		test.Errorf("expected all old-side results, got %v", seen)
+	}
+	mutex.Unlock()
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		test.Fatal(err)
+	}
+	var result jsonOutput
+	if err := json.Unmarshal(raw, &result); err != nil {
+		test.Fatal(err)
+	}
+	if result.Manifest == nil || result.Manifest.Execution.CodeAccessProfile != session.CodeAccessComparisonSides || result.Manifest.Input.ResolvedBase != base || result.Manifest.Input.ResolvedHead != head {
+		test.Fatalf("manifest lost profile or endpoints: %+v", result.Manifest)
+	}
+	state, err := loadReviewResumeState(repo, reviewOptions{resume: result.SessionID, from: base, to: "HEAD"})
+	if err != nil {
+		test.Fatal(err)
+	}
+	profile, err := state.CodeAccessProfile()
+	if err != nil || profile != session.CodeAccessComparisonSides {
+		test.Fatalf("persisted profile did not survive resume loading: %q %v", profile, err)
+	}
+}
 
 func TestCommandsUseTaskToolBindings(test *testing.T) {
 	for _, mode := range []string{"review", "scan"} {
@@ -91,6 +195,15 @@ func TestCommandsUseTaskToolBindings(test *testing.T) {
 				}
 				if !reflect.DeepEqual(names, want) {
 					test.Errorf("request tools = %v, want %v", names, want)
+				}
+				base, err := loadToolDefs(want)
+				if err != nil {
+					test.Fatal(err)
+				}
+				baseJSON, _ := json.Marshal(base)
+				requestJSON, _ := json.Marshal(definitions)
+				if string(baseJSON) != string(requestJSON) {
+					test.Error("current-only command changed the model-visible tool definitions")
 				}
 			}
 			if toolRequests == 0 {

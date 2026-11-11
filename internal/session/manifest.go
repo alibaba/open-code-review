@@ -259,6 +259,7 @@ type ManifestInput struct {
 // ManifestExecution records how the run was executed. Only non-secret values
 // and hashes are stored here — never tokens, endpoints or raw config.
 type ManifestExecution struct {
+	CodeAccessProfile     string `json:"code_access_profile,omitempty"`
 	OCRVersion            string `json:"ocr_version,omitempty"`
 	Provider              string `json:"provider,omitempty"`
 	Model                 string `json:"model,omitempty"`
