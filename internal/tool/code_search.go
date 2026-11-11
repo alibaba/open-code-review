@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -16,15 +17,52 @@ import (
 
 const (
 	gitGrepMaxCount = 100
-	gitGrepTimeout  = 10 * time.Second
+
+	// defaultGitGrepTimeout bounds a single `git grep` invocation. It is only a
+	// default: repos with multi-GB working trees (or several concurrent greps on
+	// a small CPU quota) legitimately need longer, so OCR_GIT_GREP_TIMEOUT can
+	// raise it.
+	defaultGitGrepTimeout = 10 * time.Second
+
+	// gitGrepTimeoutEnv overrides defaultGitGrepTimeout, in seconds.
+	gitGrepTimeoutEnv = "OCR_GIT_GREP_TIMEOUT"
 )
 
 // CodeSearchProvider performs text search across the repository using git grep.
 type CodeSearchProvider struct {
 	FileReader *FileReader
+	// Timeout bounds one `git grep`; zero means defaultGitGrepTimeout.
+	Timeout time.Duration
 }
 
-func NewCodeSearch(fr *FileReader) *CodeSearchProvider { return &CodeSearchProvider{FileReader: fr} }
+func NewCodeSearch(fr *FileReader) *CodeSearchProvider {
+	return &CodeSearchProvider{FileReader: fr, Timeout: gitGrepTimeoutFromEnv()}
+}
+
+// gitGrepTimeoutFromEnv reads OCR_GIT_GREP_TIMEOUT (seconds). Unset means the
+// default; an invalid value also falls back to the default, but warns on stderr
+// so a typo does not silently leave the caller believing it took effect.
+func gitGrepTimeoutFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(gitGrepTimeoutEnv))
+	if raw == "" {
+		return defaultGitGrepTimeout
+	}
+	sec, err := strconv.Atoi(raw)
+	if err != nil || sec <= 0 {
+		fmt.Fprintf(os.Stderr, "[ocr] ignoring %s=%q (want a positive integer of seconds); using %s\n", gitGrepTimeoutEnv, raw, defaultGitGrepTimeout)
+		return defaultGitGrepTimeout
+	}
+	return time.Duration(sec) * time.Second
+}
+
+// grepTimeout returns the effective timeout, tolerating a zero value from a
+// provider built without NewCodeSearch.
+func (p *CodeSearchProvider) grepTimeout() time.Duration {
+	if p.Timeout > 0 {
+		return p.Timeout
+	}
+	return defaultGitGrepTimeout
+}
 
 func (p *CodeSearchProvider) Tool() Tool { return CodeSearch }
 
@@ -114,7 +152,8 @@ func hasTraversalPathComponent(pathspec string) bool {
 }
 
 func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []string) (string, string, error) {
-	ctx, cancel := context.WithTimeout(parentCtx, gitGrepTimeout)
+	timeout := p.grepTimeout()
+	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
 
 	if p.FileReader.Runner != nil {
@@ -158,7 +197,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return "", fmt.Errorf("git grep timed out; try narrowing file_patterns to a more specific path: %w", err)
+			return "", fmt.Errorf("git grep timed out after %s; try narrowing file_patterns to a more specific path, or raise %s: %w", p.grepTimeout(), gitGrepTimeoutEnv, err)
 		}
 		if errors.Is(err, context.Canceled) {
 			return "", err

@@ -267,6 +267,20 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
 如果耗尽的是 review/scan 任务期限，应检查 `--timeout`；后台内存压缩、`ocr llm test`
 等其他操作有各自独立的期限。
 
+### Git 工具超时
+
+`code_search` 工具通过 `git grep` 检索，单次执行有 10 秒期限。在几 GB 的工作区里
+做大范围搜索，或多个搜索并发抢很少的 CPU 配额时，容易超过这个期限并返回
+`git grep timed out`，模型因此白费一轮工具调用。可以设置 `OCR_GIT_GREP_TIMEOUT`
+（整数秒）调大这个期限：
+
+```bash
+OCR_GIT_GREP_TIMEOUT=60 ocr review --from main --to HEAD
+```
+
+不设置时保持 10 秒默认值。值非法时同样回退到默认值，但会在 stderr 给出告警，
+避免拼写错误看起来像是生效了。
+
 ### 通过命令获取 API key
 
 除了把 key 直接写进配置文件，还可以用 `api_key_cmd` 在运行时从密钥管理器
