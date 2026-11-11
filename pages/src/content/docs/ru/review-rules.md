@@ -292,7 +292,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 3. Опробовать `~/.opencodereview/rule.json` в порядке объявления.
 4. Откатиться к встроенному системному уровню правил.
 
-Выбранные шаблоны встроенного `system_rules.json` показаны ниже в относительном
+Все шаблоны встроенного `system_rules.json` перечислены ниже в относительном
 порядке сопоставления:
 
 | Шаблон                                          | Документ правила                                                                                 |
@@ -313,6 +313,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md` — шаблоны FreeMarker (SSTI / XSS / обработка null).                              |
 | `**/*.{hbs,mustache}`                           | `handlebars_mustache.md` — шаблоны Handlebars и Mustache.                                        |
 | `**/*.{jinja2,j2}`                              | `jinja.md` — шаблоны Jinja                                                                       |
+| `**/*.pug`                          | `pug.md` — шаблоны Pug.                                                                          |
 | `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md` — шаблоны EJS, Liquid и Nunjucks (SSTI / XSS / экранирование). |
 | `**/*.{haml,slim}`                              | `haml_slim.md` — шаблоны HAML и Slim (SSTI / XSS / экранирование / семантика отступов). |
 | `**/*.erb`                                      | `erb.md` — шаблоны ERB (SSTI / XSS / экранирование / пробелы и структура вывода). |
@@ -337,12 +338,19 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.jl`                                       | `julia.md` — исходный код Julia.                                                                 |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                |
 | `**/*.bicep`                                    | `bicep.md` — шаблоны Bicep (Azure).                                                              |
+| `**/*.nix`                          | `nix.md` — выражения Nix и flake.                                                                |
+| `**/*.{hs,lhs}`                     | `haskell.md` — исходный код Haskell.                                                             |
+| `**/*.{nim,nims,nimble}`            | `nim.md` — исходный код Nim и манифесты пакетов.                                                 |
+| `**/*.swift`                        | `swift.md` — исходный код Swift.                                                                 |
 | `**/*.nu`                                       | `nushell.md` — скрипты Nushell.                                                                  |
 | `**/*.elm`                                      | `elm.md` - исходный код Elm.                                                                     |
 | `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet.                                        |
+| `**/*.zig`                          | `zig.md` — исходный код Zig.                                                                     |
 | `**/*.thrift`                                   | `thrift.md` — совместимость Apache Thrift IDL на уровне wire.                                    |
 | `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md` — проектирование сборок, макросов и правил Starlark и Bazel.                       |
 | `**/*.capnp`                                    | `capnp.md` — совместимость схем Cap'n Proto на уровне wire.                                      |
+| `**/*.{ml,mli}`                     | `ocaml.md` — исходный код OCaml.                                                                 |
+| `**/*.{re,rei}`                     | `ocaml.md` — исходный код ReasonML.                                                              |
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - шейдеры GLSL, HLSL, WGSL и Metal.                                                  |
 | `**/*.{v,sv,vh}`                                | `verilog.md` — RTL на Verilog и SystemVerilog.                                                   |
 | `**/*.{vhd,vhdl}`                               | `vhdl.md` — RTL на VHDL.                                                                         |
@@ -352,6 +360,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.vy`                                       | `vyper.md` — смарт-контракты Vyper.                                                              |
 | `**/*.rego`                                     | `rego.md` — политики Rego (OPA).                                                                 |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — скрипты, модули и файлы данных/манифестов PowerShell.                          |
+| `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — исходный код Clojure / ClojureScript и данные EDN. |
 | _(fallback)_                                    | `default.md`                                                                                     |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

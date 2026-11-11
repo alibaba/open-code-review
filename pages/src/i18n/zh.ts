@@ -12,6 +12,11 @@ export const zh: TranslationKeys = {
   'navbar.blog': '博客',
   'navbar.getStarted': '开始使用',
 
+  'providers.title': '内置主流模型服务商',
+  'providers.description': '配置 API Key 即可开始审查，也可接入兼容主流协议的私有模型服务。',
+  'providers.listLabel': '支持的模型品牌',
+  'providers.explore': '查看支持的模型服务商',
+
   // Hero
   'hero.title': 'AI 代码审查\n百万真实任务验证',
   'hero.description': 'Open Code Review 将阿里巴巴经过实战检验的代码审查 Agent 引入您的工作流程。连接任意 LLM，数据完全私有，获得开发者真正采纳的审查意见。',
@@ -248,8 +253,6 @@ export const zh: TranslationKeys = {
   'docs.scanFlag14Default': '内置',
   'docs.scanFlag15Desc': '最大并发 git 子进程数',
   'docs.scanFlag16Desc': '自定义 JSON 审查规则的路径',
-  'docs.scanFlag17Desc': '自定义 JSON 工具配置的路径',
-  'docs.scanFlag17Default': '内置',
   'docs.scanFlag18Desc': '要扫描的仓库或目录根路径',
   'docs.scanFlag18Default': '当前目录',
   'docs.scanNote': '注意：<code>--max-tools</code> 仅会提高扫描模板中按文件的工具调用预算 —— 当设置值低于模板默认值时不生效。',
@@ -298,6 +301,7 @@ export const zh: TranslationKeys = {
   'docs.sidebar.delegate': '委托模式',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': '贡献',
   'docs.sidebar.faq': 'FAQ',
   'docs.sidebar.chatgptPreview': 'ChatGPT 登录预览版',

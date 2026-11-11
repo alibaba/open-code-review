@@ -24,12 +24,12 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
-	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -43,12 +43,12 @@ import (
 // existing callers (cmd/opencodereview/output.go).
 type AgentWarning = llmloop.AgentWarning
 
-// CommentWorkerPool is re-exported from llmloop for backwards compatibility.
-type CommentWorkerPool = llmloop.CommentWorkerPool
+// CommentWorkerPool is re-exported from reviewtask for backwards compatibility.
+type CommentWorkerPool = reviewtask.CommentWorkerPool
 
-// NewCommentWorkerPool delegates to llmloop.NewCommentWorkerPool.
+// NewCommentWorkerPool delegates to reviewtask.NewCommentWorkerPool.
 func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
-	return llmloop.NewCommentWorkerPool(workerCount)
+	return reviewtask.NewCommentWorkerPool(workerCount)
 }
 
 // Args holds all dependencies and configuration needed to run a review session.
@@ -84,11 +84,8 @@ type Args struct {
 	// Tool registry mapping tool aliases to implementations.
 	Tools *tool.Registry
 
-	// PlanToolDefs holds llm.ToolDef entries enabled in plan_task, built once at startup.
-	// When nil, plan phase sends no tool definitions.
 	PlanToolDefs []llm.ToolDef
 
-	// MainToolDefs holds llm.ToolDef entries enabled in main_task, built once at startup.
 	MainToolDefs []llm.ToolDef
 
 	// CommentWorkerPool — separate goroutine pool for running asynchronous
@@ -197,7 +194,7 @@ type Agent struct {
 	currentDate     string
 	session         *session.SessionHistory
 	subtaskFailed   int64 // count of failed subtasks, accessed atomically
-	runner          *llmloop.Runner
+	runner          *reviewtask.Runner
 	resumeInfo      *ResumeInfo
 	budgetExceeded  atomic.Bool // set when a token/tool-call budget gate stopped dispatch
 	// costBudgetExceeded is set with budgetExceeded when the stop was the cost budget.
@@ -248,7 +245,7 @@ func New(args Args) *Agent {
 	// DiffLookup closure captures a so the runner can resolve per-file
 	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
 	// after New returns).
-	a.runner = llmloop.NewRunner(llmloop.Deps{
+	a.runner = reviewtask.NewRunner(reviewtask.Deps{
 		LLMClient:         args.LLMClient,
 		Model:             args.Model,
 		Template:          args.Template,
@@ -298,9 +295,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// so affinity keys stay per-conversation, the granularity provider prompt caches actually reuse prefixes at.
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
-	// Step 1: Parse diffs
-	ctx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
-	if err := a.loadDiffs(ctx); err != nil {
+	// Keep later review work under the incoming parent, not the short-lived parse span.
+	parseCtx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
+	if err := a.loadDiffs(parseCtx); err != nil {
 		diffSpan.End()
 		// The builder already exists (agent.New created session + manifest), but
 		// no item was selected yet. Record the run-level input failure at this
@@ -2252,27 +2249,4 @@ func (a *Agent) findDiff(path string) *model.Diff {
 		}
 	}
 	return nil
-}
-
-// BuildToolDefs converts toolsconfig.ToolConfigEntry slice into []llm.ToolDef,
-// filtering by phase (planOnly=true for plan_task, false for main_task).
-func BuildToolDefs(entries []toolsconfig.ToolConfigEntry, planOnly bool) []llm.ToolDef {
-	var defs []llm.ToolDef
-	for _, e := range entries {
-		defRaw, ok := e.ToolDefsByPhase(planOnly)
-		if !ok {
-			continue
-		}
-		var fn llm.FunctionDef
-		if err := json.Unmarshal(defRaw, &fn); err != nil {
-			fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: failed to parse tool definition %q: %v\n", e.Name, err)
-			continue
-		}
-		fn.RawDefinition = defRaw
-		defs = append(defs, llm.ToolDef{
-			Type:     "function",
-			Function: fn,
-		})
-	}
-	return defs
 }

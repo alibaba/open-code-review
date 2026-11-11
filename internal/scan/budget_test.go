@@ -5,6 +5,7 @@ package scan
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -119,6 +120,61 @@ func TestBudgetGate_StopsBeforeExceeding(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected a token_budget_reached warning")
+	}
+}
+
+func TestBudgetGate_PlanThreshold(t *testing.T) {
+	for _, testCase := range []struct {
+		name           string
+		lineCount      int
+		includePlan    bool
+		wantBudgetHit  bool
+		wantDispatched int64
+		wantCalls      int64
+	}{
+		{name: "small file fits main-only budget", lineCount: 199, wantDispatched: 1, wantCalls: 1},
+		{name: "boundary file needs plan budget", lineCount: 200, wantBudgetHit: true},
+		{name: "boundary file fits plan and main budget", lineCount: 200, includePlan: true, wantDispatched: 1, wantCalls: 2},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			scanTemplate, err := template.LoadScanDefault()
+			if err != nil {
+				t.Fatalf("LoadScanDefault: %v", err)
+			}
+			item := model.ScanItem{
+				Path:      "fixture.go",
+				Content:   "package fixture\n" + strings.Repeat("var _ = 1\n", testCase.lineCount-1),
+				LineCount: testCase.lineCount,
+			}
+			budget := estimateFileTokens(item, func(model.ScanItem) bool { return testCase.includePlan })
+			client := &fakeBudgetClient{}
+			agent := NewAgent(Args{
+				Template:        *scanTemplate,
+				LLMClient:       client,
+				MaxConcurrency:  1,
+				MaxTokensBudget: budget,
+				Session:         session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: session.ReviewModeFullScan}),
+			})
+			t.Cleanup(func() {
+				if err := agent.Session().Finalize(); err != nil {
+					t.Errorf("Finalize: %v", err)
+				}
+			})
+			agent.args.Tools.Freeze()
+			dispatched, budgetHit, checkpoints, err := agent.dispatchBatch(t.Context(), 0, []model.ScanItem{item})
+			if err != nil {
+				t.Fatalf("dispatchBatch: %v", err)
+			}
+			if dispatched != testCase.wantDispatched || int64(len(checkpoints)) != testCase.wantDispatched {
+				t.Errorf("dispatched=%d, checkpoints=%d, want both %d", dispatched, len(checkpoints), testCase.wantDispatched)
+			}
+			if budgetHit != testCase.wantBudgetHit || agent.BudgetExceeded() != testCase.wantBudgetHit {
+				t.Errorf("budgetHit=%v, BudgetExceeded=%v, want both %v", budgetHit, agent.BudgetExceeded(), testCase.wantBudgetHit)
+			}
+			if calls := atomic.LoadInt64(&client.calls); calls != testCase.wantCalls {
+				t.Errorf("LLM calls = %d, want %d", calls, testCase.wantCalls)
+			}
+		})
 	}
 }
 

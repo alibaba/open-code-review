@@ -10,6 +10,11 @@ export const en = {
   'navbar.blog': 'Blog',
   'navbar.getStarted': 'Get Started',
 
+  'providers.title': 'Built-in support for leading model providers',
+  'providers.description': 'Add your API key to start reviewing, or connect a private model service compatible with standard protocols.',
+  'providers.listLabel': 'Supported model brands',
+  'providers.explore': 'Explore supported providers',
+
   // Hero
   'hero.title': 'AI Code Review\nValidated on Millions of Real-World Tasks',
   'hero.description': 'Open Code Review brings Alibaba\'s battle-tested code review Agent into your workflow. Connect any LLM, keep data fully private, and get review comments developers actually adopt.',
@@ -244,8 +249,6 @@ export const en = {
   'docs.scanFlag14Default': 'Built-in',
   'docs.scanFlag15Desc': 'Max concurrent git subprocesses',
   'docs.scanFlag16Desc': 'Path to custom JSON review rules',
-  'docs.scanFlag17Desc': 'Path to custom JSON tools config',
-  'docs.scanFlag17Default': 'Built-in',
   'docs.scanFlag18Desc': 'Repository or directory root to scan',
   'docs.scanFlag18Default': 'Current dir',
   'docs.scanNote': 'Note: <code>--max-tools</code> only raises the scan template\'s per-file tool-call budget — it has no effect when set lower than the template default.',
@@ -294,6 +297,7 @@ export const en = {
   'docs.sidebar.delegate': 'Delegation Mode',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': 'Contributing',
   'docs.sidebar.faq': 'FAQ',
   'docs.sidebar.chatgptPreview': 'Sign in with ChatGPT preview',

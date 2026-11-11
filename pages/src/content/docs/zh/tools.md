@@ -10,13 +10,22 @@ schema 与示例输入/输出。完整的机器可读定义位于
 
 ## 各阶段工具可用性
 
-每个工具声明它在 **plan 阶段**、**main task** 还是两者中都可用：
+任务模板按名称从共享定义中选择工具。在 `task_template.json` 中，
+`MAIN_TASK.tools` 是发送给模型的有序可调用工具列表，
+`PLAN_TASK.tool_references` 则仅作为参考文本渲染进规划 prompt。
+规划仍然是没有可调用工具的单次请求；这两个字段都不会改变工具定义。
+
+`scan_template.json` 独立选择主任务工具，不包含 `file_read_diff`，因为全文件扫描没有 diff。
+省略或留空的列表不选择任何工具，不会启用整个目录。重复名称按首次出现的顺序去重。
+未知引用、重复的目录条目和无效定义会在任务初始化时导致失败。
+
+默认 diff 评审的选择如下：
 
 | 工具             | Plan | Main | 用途                                   |
 | ---------------- | ---- | ---- | -------------------------------------- |
 | `task_done`      | ✗    | ✓    | 表示“我完成了”——终止循环。             |
 | `code_comment`   | ✗    | ✓    | 发出一条带行范围 + 建议的评审评论。    |
-| `file_read`      | ✗    | ✓    | 读取变更后快照中某文件的一段。         |
+| `file_read`      | ✓    | ✓    | 读取变更后快照中某文件的一段。         |
 | `file_read_diff` | ✓    | ✓    | 读取另一文件的 diff 以确认跨文件关切。 |
 | `file_find`      | ✓    | ✓    | 按文件名关键字定位文件。               |
 | `code_search`    | ✓    | ✓    | 全仓 grep（字面量或正则）。            |
@@ -29,8 +38,9 @@ schema 与示例输入/输出。完整的机器可读定义位于
 > 发现的任何问题按设计都会被忽略。跨文件关切只有在**当前文件 diff**中可观测
 > 时，才会作为评论出现。
 
-要覆盖工具注册表，传入一个与内嵌定义同形的 JSON 文件路径 `--tools <path>`。
-借此可以禁用工具、编辑描述，或基于已有 provider 添加新工具。
+内置工具定义随 OCR 发布，不支持运行时覆盖。项目指引使用[评审规则](../review-rules/)，
+外部业务上下文使用 [MCP](../mcp/)。曾使用自定义工具文件的用户请参阅
+[迁移说明](#customizing-tools)。
 
 ## `task_done`
 
@@ -321,32 +331,27 @@ Match lines: 1
 文本形如 `"Error: file not found: src/missing.go"`。模型再决定是重试、换文件，
 还是调 `task_done`。
 
-若工具名不在注册表中，OCR 返回常量 `tool.NotAvailableMsg` 而不是崩溃。这使得
-（通过 `--tools`）运行时禁用工具是安全的。
+若工具名不在注册表中，OCR 返回常量 `tool.NotAvailableMsg` 而不是崩溃，
+将未知工具调用作为工具不可用的结果反馈给模型。
 
-## 自定义工具
+## 工具定制限制与迁移 {#customizing-tools}
 
-两种扩展方式：
+OCR 使用专用审查 Agent，核心工作流与内置工具通过测试和 benchmark 一同验证，
+而不是由用户自行定义工具注册表。
 
-### 1. 禁用工具
+**迁移说明：** `ocr review` 和 `ocr scan` 均已移除 `--tools`。
+旧调用会报 `unknown flag: --tools`；请从脚本、CI 任务和 shell 别名中删除该参数及其文件路径。
 
-复制 `tools.json`，删掉不想要的条目，然后运行：
+- 项目专属审查指引使用[评审规则](../review-rules/)或 `--background`
+  （`review` 还支持 `--background-file`）。
+- 需求、知识库等外部业务上下文使用 [MCP 服务器](../mcp/)。目前只有 `review`
+  接入 MCP，`scan` 尚未接入；MCP 不能替换同名内置工具。
+- 禁用内置工具、修改其描述、schema 或阶段可见性没有运行时替代方案。
+  核心变更需要修改源码、重新构建，并进行相应测试和 benchmark 验证。
 
-```bash
-ocr review --tools ./my-tools.json
-```
-
-例如，想要一个从不读额外上下文的“仅评论”评审器，只保留 `code_comment` 和
-`task_done`。
-
-### 2. 重新描述工具
-
-保留 `name`（provider 内部按 name 查找）但更改 `description` 以引导模型。这是
-注入项目专属指引最简单的方式——如“使用 `file_read` 时，始终读取变更附近至少
-30 行。”
-
-> 添加**新**工具*名*需要在 Go 侧接入；见 `internal/tool/definitions.go` 及
-> `internal/tool/` 下的 provider。仅靠 JSON 文件无法添加新行为。
+`--max-tools` 仍控制工具调用轮次预算。MCP 配置项 `mcp_servers.<name>.tools`
+仍用于筛选外部工具，与移除的参数无关。历史会话文件仍可读取，但对曾使用自定义工具定义的
+会话，建议重新开始审查，而不是恢复旧会话。
 
 ## 另见
 

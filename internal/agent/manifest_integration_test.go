@@ -545,7 +545,7 @@ func TestManifestFlowGroupBudgetStopIsPartialWhenSomeFilesHaveComments(t *testin
 	reg := tool.NewRegistry()
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
 	// MaxToolRequestTimes and GroupingTask must be set before New(), since
-	// llmloop.Runner snapshots Template by value at construction time — mutating
+	// reviewtask.Runner snapshots Template by value at construction time — mutating
 	// a.args.Template afterward (as other tests in this file do for MaxTokens,
 	// which executeGroupSubtask re-reads from a.args.Template directly) would
 	// not reach the runner's copy that RunMainTask actually consumes.

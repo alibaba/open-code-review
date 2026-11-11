@@ -131,7 +131,6 @@ ocr r      [flags]   (alias)
 | `--provider <name>` | — | — | 이 실행에 쓸 프로바이더를 고릅니다. `providers`와 `custom_providers` 양쪽의 이름을 모두 받습니다. |
 | `--model <name>` | — | — | 이 실행에 한해 해석된 LLM 모델을 덮어씁니다(예: `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | 동시에 띄울 git 서브프로세스의 최대 개수. |
-| `--tools <path>` | — | 내장 | 커스텀 JSON 도구 설정 파일 경로. 내장 도구 정의를 덮어씁니다. |
 
 > 모드 플래그는 함께 쓸 수 없습니다. `--from`/`--to`, `--commit`, 아무것도 주지
 > 않기(워크스페이스 모드) 중 하나만 고르세요. 섞어 쓰면 오류로 중단됩니다.
@@ -415,18 +414,28 @@ ocr session list --json
 
 ### `ocr session show` {#ocr-session-show}
 
+기본적으로 저장된 모든 저장소의 세션에서 ID를 검색합니다. `--repo .`을 지정하면
+기존처럼 현재 디렉터리 범위로 검색을 제한할 수 있습니다.
+
+기본 전역 검색에서는 ID가 유일하면 worktree를 전환하거나 원래 체크아웃을 삭제한 후에도
+세션을 확인할 수 있습니다. 여러 저장소에 같은 ID가 저장되어 있으면 후보 저장소를 나열하며,
+`--repo`로 하나를 선택해야 합니다. 현재 `--repo`에는 실제로 존재하는 저장소 디렉터리를
+지정해야 하므로, ID가 중복되고 확인하려는 세션의 원래 체크아웃이 삭제된 경우에는
+해당 세션을 선택할 수 없습니다.
+
 이어서 한 실행이라면 어떤 실행을 이어받았는지, 그 과정에서 프로바이더나 모델이 바뀌었다면
 무엇에서 무엇으로 바뀌었는지도 함께 출력합니다.
 
 ```bash
 ocr session show <session-id>
 ocr session show --json <session-id>
+ocr session show --repo . <session-id>
 ocr session show --repo /path/to/repo <session-id>
 ```
 
 | 플래그 | 기본값 | 설명 |
 |---|---|---|
-| `--repo <path>` | 현재 디렉터리 | 살펴볼 세션이 속한 저장소. |
+| `--repo <path>` | 모든 저장소 | 세션 검색 범위를 지정한 저장소 디렉터리로 제한합니다. 해당 디렉터리는 실제로 존재해야 합니다. |
 | `--json` | `false` | 세션 메타데이터와 파일별 항목을 JSON으로 출력합니다. |
 
 ### `ocr session comments` {#ocr-session-comments}
