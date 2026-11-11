@@ -51,13 +51,27 @@ var validCodeCommentSeverities = map[string]struct{}{
 // CommentNoneUsableMsg reports a parsed batch with no usable comments.
 const CommentNoneUsableMsg = "Error: none of the 'comments' entries could be filed; each entry needs a non-empty 'content' and a 'path' (or the reviewed file's path). Re-send the finding with those fields."
 
-// CodeCommentProvider submits review comments to the per-Agent CommentCollector.
+// CodeCommentProvider is registered so Tools.Get("code_comment") succeeds and
+// the tool definition can be advertised. It is not a live dispatch path.
+// Review, scan, and the agent all run tools through reviewtask.executeToolCall,
+// which handles tool.CodeComment and returns before Provider.Execute. MCP
+// skips the reserved name, so it cannot call this method either. Only unit
+// tests invoke Execute.
+//
+// Execute parses arguments and adds them to the collector. It does not run
+// ResolveComment, cross-file relocation, or the lineHintInFile bounds check.
+// parseCommentsInner keeps a model start_line/end_line, and
+// diff.ResolveLineNumbers skips existing_code matching when StartLine or
+// EndLine is already greater than zero. A future live caller must apply the
+// same lineHintInFile treatment and must not let a raw model hint skip that
+// match.
 type CodeCommentProvider struct {
 	Collector *CommentCollector
 }
 
 func (p *CodeCommentProvider) Tool() Tool { return CodeComment }
 
+// Execute is not used by production dispatch. See CodeCommentProvider.
 func (p *CodeCommentProvider) Execute(_ context.Context, args map[string]any) (string, error) {
 	if p.Collector == nil {
 		return "Error: comment collector is not configured", nil
