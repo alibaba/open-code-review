@@ -339,3 +339,50 @@ func TestFileReadRef(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareOrdinaryReviewInput(t *testing.T) {
+	for _, commitMode := range []bool{false, true} {
+		name := "range"
+		if commitMode {
+			name = "commit"
+		}
+		t.Run(name, func(t *testing.T) {
+			repoDir := initResumeRepo(t)
+			opts := reviewOptions{from: "HEAD~1", to: "HEAD"}
+			if commitMode {
+				opts = reviewOptions{commit: "HEAD"}
+			}
+			head := revParse(t, repoDir, "HEAD")
+			sealed, err := prepareReviewInput(context.Background(), resumeTestContext(repoDir), opts, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sealed == nil || sealed.ResolvedHead != head {
+				t.Fatalf("ordinary input = %+v, want head %s", sealed, head)
+			}
+			commitFile(t, repoDir, "main.go", "package main\n\nfunc changed() {}\n", "move head")
+			if ref := fileReadRef(tool.ParseReviewMode(opts.from, opts.to, opts.commit), opts, sealed); ref != head {
+				t.Fatalf("reader ref = %s, want original %s", ref, head)
+			}
+			if sealed.ResolvedHead == revParse(t, repoDir, "HEAD") {
+				t.Fatal("fixture did not move HEAD")
+			}
+		})
+	}
+	t.Run("workspace remains unsealed", func(t *testing.T) {
+		sealed, err := prepareReviewInput(context.Background(), resumeTestContext(t.TempDir()), reviewOptions{}, nil, nil)
+		if err != nil || sealed != nil {
+			t.Fatalf("workspace = %+v, %v", sealed, err)
+		}
+	})
+}
+
+func TestPrepareReviewInputRejectsInvalidRefs(t *testing.T) {
+	for _, opts := range []reviewOptions{{commit: "missing"}, {from: "missing", to: "HEAD"}, {from: "HEAD", to: "missing"}} {
+		dir := initResumeRepo(t)
+		sealed, err := prepareReviewInput(context.Background(), resumeTestContext(dir), opts, nil, nil)
+		if err == nil || sealed != nil {
+			t.Fatalf("invalid refs accepted: %+v, %v", sealed, err)
+		}
+	}
+}
