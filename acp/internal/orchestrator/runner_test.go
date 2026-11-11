@@ -83,12 +83,18 @@ func TestRunnerRejectsInvalidAndMultipleJSON(t *testing.T) {
 
 func TestRunnerLocalCancelOverridesExit(t *testing.T) {
 	runner := NewRunner(writeOCRScript(t))
+	cooperativeInterrupt := cooperativeInterruptAvailable(t)
+	cleanupExitCode := 0
+	if !cooperativeInterrupt {
+		cleanupExitCode = 1
+		t.Log("No shared console; expecting forced termination without cleanup")
+	}
 	for _, testCase := range []struct {
 		mode     string
 		exitCode int
 	}{
 		{mode: "block", exitCode: 1},
-		{mode: "cleanup", exitCode: 0},
+		{mode: "cleanup", exitCode: cleanupExitCode},
 	} {
 		t.Run(testCase.mode, func(t *testing.T) {
 			directory := t.TempDir()
@@ -115,7 +121,11 @@ func TestRunnerLocalCancelOverridesExit(t *testing.T) {
 			}
 			if testCase.mode == "cleanup" {
 				contents, err := os.ReadFile(filepath.Join(directory, "cleaned"))
-				if err != nil || string(contents) != "cleaned\n" {
+				if !cooperativeInterrupt {
+					if !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("forced termination ran cleanup: marker = %q, error = %v", contents, err)
+					}
+				} else if err != nil || string(contents) != "cleaned\n" {
 					t.Fatalf("cleanup marker = %q, error = %v", contents, err)
 				}
 			}
