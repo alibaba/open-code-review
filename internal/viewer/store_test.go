@@ -400,6 +400,10 @@ func TestPeekAndLoadSessionLiveness(t *testing.T) {
 
 	t.Run("running", func(t *testing.T) {
 		sh := session.New(repoDir, "main", "test-model", session.SessionOptions{})
+		// Release the live writer when this subtest returns, before the parent
+		// TempDir cleanup. Finalize would write session_end and clear Running.
+		// Windows cannot delete a session file that still has an open handle.
+		t.Cleanup(func() { session.CloseWithoutFinalize(sh) })
 		path := sessionFilePath(t, repoDir, sh.SessionID)
 		s, err := peekSession(path)
 		if err != nil {

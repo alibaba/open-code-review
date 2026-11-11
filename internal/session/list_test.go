@@ -288,6 +288,14 @@ func TestSessionLivenessRunningAbortedCompleted(t *testing.T) {
 
 	t.Run("running", func(t *testing.T) {
 		sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeCommit})
+		// Release the live writer when this subtest returns, before the parent
+		// TempDir cleanup. Finalize would write session_end and clear Running.
+		// Windows cannot delete a session file that still has an open handle.
+		t.Cleanup(func() {
+			if sh.persist != nil {
+				sh.persist.flushAndClose()
+			}
+		})
 		got, err := ListSessions(repoDir)
 		if err != nil {
 			t.Fatalf("ListSessions: %v", err)
