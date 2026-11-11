@@ -301,6 +301,7 @@ export const ko: TranslationKeys = {
   'docs.sidebar.delegate': '위임 모드',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.qwenCode': 'Qwen Code',
   'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': '기여하기',
   'docs.sidebar.faq': 'FAQ',

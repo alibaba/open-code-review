@@ -19,6 +19,7 @@ import enViewer from './en/viewer.md';
 import enTelemetry from './en/telemetry.md';
 import enAgentSkill from './en/integrations/agent-skill.md';
 import enClaudeCode from './en/integrations/claude-code.md';
+import enQwenCode from './en/integrations/qwen-code.md';
 import enCicd from './en/integrations/ci.md';
 import enDelegate from './en/integrations/delegate.md';
 import enAcp from './en/integrations/acp.md';
@@ -40,6 +41,7 @@ import zhViewer from './zh/viewer.md';
 import zhTelemetry from './zh/telemetry.md';
 import zhAgentSkill from './zh/integrations/agent-skill.md';
 import zhClaudeCode from './zh/integrations/claude-code.md';
+import zhQwenCode from './zh/integrations/qwen-code.md';
 import zhCicd from './zh/integrations/ci.md';
 import zhDelegate from './zh/integrations/delegate.md';
 import zhAcp from './zh/integrations/acp.md';
@@ -61,6 +63,7 @@ import jaViewer from './ja/viewer.md';
 import jaTelemetry from './ja/telemetry.md';
 import jaAgentSkill from './ja/integrations/agent-skill.md';
 import jaClaudeCode from './ja/integrations/claude-code.md';
+import jaQwenCode from './ja/integrations/qwen-code.md';
 import jaCicd from './ja/integrations/ci.md';
 import jaDelegate from './ja/integrations/delegate.md';
 import jaAcp from './ja/integrations/acp.md';
@@ -82,6 +85,7 @@ import koViewer from './ko/viewer.md';
 import koTelemetry from './ko/telemetry.md';
 import koAgentSkill from './ko/integrations/agent-skill.md';
 import koClaudeCode from './ko/integrations/claude-code.md';
+import koQwenCode from './ko/integrations/qwen-code.md';
 import koCicd from './ko/integrations/ci.md';
 import koDelegate from './ko/integrations/delegate.md';
 import koAcp from './ko/integrations/acp.md';
@@ -103,6 +107,7 @@ import ruViewer from './ru/viewer.md';
 import ruTelemetry from './ru/telemetry.md';
 import ruAgentSkill from './ru/integrations/agent-skill.md';
 import ruClaudeCode from './ru/integrations/claude-code.md';
+import ruQwenCode from './ru/integrations/qwen-code.md';
 import ruCicd from './ru/integrations/ci.md';
 import ruDelegate from './ru/integrations/delegate.md';
 import ruAcp from './ru/integrations/acp.md';
@@ -123,6 +128,7 @@ export type DocSlug =
   | 'telemetry'
   | 'agent-skill'
   | 'claude-code'
+  | 'qwen-code'
   | 'cicd'
   | 'delegate'
   | 'acp'
@@ -147,6 +153,7 @@ const enDocs: Record<DocSlug, string> = {
   'telemetry': enTelemetry,
   'agent-skill': enAgentSkill,
   'claude-code': enClaudeCode,
+  'qwen-code': enQwenCode,
   'cicd': enCicd,
   'delegate': enDelegate,
   'acp': enAcp,
@@ -169,6 +176,7 @@ const zhDocs: Record<DocSlug, string> = {
   'telemetry': zhTelemetry,
   'agent-skill': zhAgentSkill,
   'claude-code': zhClaudeCode,
+  'qwen-code': zhQwenCode,
   'cicd': zhCicd,
   'delegate': zhDelegate,
   'acp': zhAcp,
@@ -191,6 +199,7 @@ const jaDocs: Record<DocSlug, string> = {
   'telemetry': jaTelemetry,
   'agent-skill': jaAgentSkill,
   'claude-code': jaClaudeCode,
+  'qwen-code': jaQwenCode,
   'cicd': jaCicd,
   'delegate': jaDelegate,
   'acp': jaAcp,
@@ -213,6 +222,7 @@ const koDocs: Record<DocSlug, string> = {
   'telemetry': koTelemetry,
   'agent-skill': koAgentSkill,
   'claude-code': koClaudeCode,
+  'qwen-code': koQwenCode,
   'cicd': koCicd,
   'delegate': koDelegate,
   'acp': koAcp,
@@ -235,6 +245,7 @@ const ruDocs: LocalizedDocs = {
   'telemetry': ruTelemetry,
   'agent-skill': ruAgentSkill,
   'claude-code': ruClaudeCode,
+  'qwen-code': ruQwenCode,
   'cicd': ruCicd,
   'delegate': ruDelegate,
   'acp': ruAcp,

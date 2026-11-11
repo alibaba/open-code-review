@@ -301,6 +301,7 @@ export const zh: TranslationKeys = {
   'docs.sidebar.delegate': '委托模式',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.qwenCode': 'Qwen Code',
   'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': '贡献',
   'docs.sidebar.faq': 'FAQ',
