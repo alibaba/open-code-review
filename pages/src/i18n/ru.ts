@@ -288,6 +288,7 @@ export const ru: TranslationKeys = {
   'docs.sidebar.configuration': 'Конфигурация',
   'docs.sidebar.cliReference': 'Справочник CLI',
   'docs.sidebar.reviewRules': 'Правила ревью',
+  'docs.sidebar.nativePlugins': 'Нативные плагины',
   'docs.sidebar.architecture': 'Архитектура',
   'docs.sidebar.tools': 'Инструменты',
   'docs.sidebar.mcp': 'MCP-серверы',

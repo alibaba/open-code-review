@@ -290,6 +290,7 @@ export const ko: TranslationKeys = {
   'docs.sidebar.configuration': '설정',
   'docs.sidebar.cliReference': 'CLI 레퍼런스',
   'docs.sidebar.reviewRules': '리뷰 규칙',
+  'docs.sidebar.nativePlugins': '네이티브 플러그인',
   'docs.sidebar.architecture': '아키텍처',
   'docs.sidebar.tools': '도구',
   'docs.sidebar.mcp': 'MCP 서버',

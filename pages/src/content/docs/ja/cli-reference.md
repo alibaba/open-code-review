@@ -17,6 +17,7 @@ Usage:
 Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
+  plugin       Manage local rule plugins
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
@@ -38,6 +39,7 @@ Examples:
 
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
+Use "ocr plugin -h" for more information about plugins.
 Use "ocr config" for more information about config.
 Use "ocr llm" for more information about LLM utilities.
 Use "ocr session -h" for more information about session inspection.
@@ -69,6 +71,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr review` | `ocr r` | コードレビューを実行してコメントを出力します。 |
 | `ocr scan` | `ocr s` | Git diff を必要とせず、ファイル全体をスキャンします。 |
 | `ocr rules check <file>` | — | あるファイルパスにどのルールが適用され、その出所はどこかを表示します。 |
+| `ocr plugin` | — | ローカルルールプラグインのインストール、確認、管理。 |
 | `ocr config set <key> <value>` | — | 設定値を `~/.opencodereview/config.json` に永続化します。 |
 | `ocr config unset <key>` | — | 保存済みの設定値をクリアします（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
 | `ocr config provider` | — | 対話的なプロバイダー設定 TUI。 |
@@ -548,6 +551,34 @@ Rule:
 ```
 
 「なぜ自分のカスタムルールが発火しないのか？」を調査するのに使えます。優先順位の完全な説明は[レビュールール](../review-rules/)を参照してください。
+
+## `ocr plugin`
+
+ローカルルールパッケージのユーザー単位のスナップショットを管理します。
+インストール直後は無効で、有効化すると全リポジトリの以降のレビューとスキャンに
+ルールを追加します。
+
+| コマンド | 動作 |
+|---|---|
+| `ocr plugin install <directory> [--enable]` | ローカルパッケージをプラグインストアにコピー。任意で同時に有効化。 |
+| `ocr plugin list` | インストール済みの ID、バージョン、状態、ルールパック数を表示。 |
+| `ocr plugin show <id>` | マニフェストの概要、インストール元、スナップショットのパス、内容の SHA-256 を表示。 |
+| `ocr plugin enable <id>` | インストール済みパッケージを有効化。 |
+| `ocr plugin disable <id>` | パッケージのルールを無効化。 |
+| `ocr plugin remove <id>` | 登録を解除し、実行中のレビュー用のスナップショットは保持。 |
+
+すべてのサブコマンドは `--json` による構造化出力に対応します。
+
+```bash
+ocr plugin install ./examples/ocr-plugins/review-checklist --enable
+ocr plugin show review-checklist --json
+ocr rules check src/main.go
+```
+
+変更した元ディレクトリを再インストールするには、既存の ID を先に削除します。
+登録情報は `~/.opencodereview/plugins/state.json`、スナップショットは
+`plugins/packages/` に保存されます。形式、互換性確認、ルールの順序は
+[ネイティブプラグイン](../native-plugins/)を参照してください。
 
 ## `ocr config`
 

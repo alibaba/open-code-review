@@ -12,6 +12,7 @@ import enConfiguration from './en/configuration.md';
 import enChatGPTPreview from './en/chatgpt-preview.md';
 import enCliReference from './en/cli-reference.md';
 import enReviewRules from './en/review-rules.md';
+import enNativePlugins from './en/native-plugins.md';
 import enArchitecture from './en/architecture.md';
 import enTools from './en/tools.md';
 import enMcp from './en/mcp.md';
@@ -33,6 +34,7 @@ import zhConfiguration from './zh/configuration.md';
 import zhChatGPTPreview from './zh/chatgpt-preview.md';
 import zhCliReference from './zh/cli-reference.md';
 import zhReviewRules from './zh/review-rules.md';
+import zhNativePlugins from './zh/native-plugins.md';
 import zhArchitecture from './zh/architecture.md';
 import zhTools from './zh/tools.md';
 import zhMcp from './zh/mcp.md';
@@ -54,6 +56,7 @@ import jaConfiguration from './ja/configuration.md';
 import jaChatGPTPreview from './ja/chatgpt-preview.md';
 import jaCliReference from './ja/cli-reference.md';
 import jaReviewRules from './ja/review-rules.md';
+import jaNativePlugins from './ja/native-plugins.md';
 import jaArchitecture from './ja/architecture.md';
 import jaTools from './ja/tools.md';
 import jaMcp from './ja/mcp.md';
@@ -75,6 +78,7 @@ import koConfiguration from './ko/configuration.md';
 import koChatGPTPreview from './ko/chatgpt-preview.md';
 import koCliReference from './ko/cli-reference.md';
 import koReviewRules from './ko/review-rules.md';
+import koNativePlugins from './ko/native-plugins.md';
 import koArchitecture from './ko/architecture.md';
 import koTools from './ko/tools.md';
 import koMcp from './ko/mcp.md';
@@ -96,6 +100,7 @@ import ruConfiguration from './ru/configuration.md';
 import ruChatGPTPreview from './ru/chatgpt-preview.md';
 import ruCliReference from './ru/cli-reference.md';
 import ruReviewRules from './ru/review-rules.md';
+import ruNativePlugins from './ru/native-plugins.md';
 import ruArchitecture from './ru/architecture.md';
 import ruTools from './ru/tools.md';
 import ruMcp from './ru/mcp.md';
@@ -116,6 +121,7 @@ export type DocSlug =
   | 'configuration'
   | 'cli-reference'
   | 'review-rules'
+  | 'native-plugins'
   | 'architecture'
   | 'tools'
   | 'mcp'
@@ -140,6 +146,7 @@ const enDocs: Record<DocSlug, string> = {
   'chatgpt-preview': enChatGPTPreview,
   'cli-reference': enCliReference,
   'review-rules': enReviewRules,
+  'native-plugins': enNativePlugins,
   'architecture': enArchitecture,
   'tools': enTools,
   'mcp': enMcp,
@@ -162,6 +169,7 @@ const zhDocs: Record<DocSlug, string> = {
   'chatgpt-preview': zhChatGPTPreview,
   'cli-reference': zhCliReference,
   'review-rules': zhReviewRules,
+  'native-plugins': zhNativePlugins,
   'architecture': zhArchitecture,
   'tools': zhTools,
   'mcp': zhMcp,
@@ -184,6 +192,7 @@ const jaDocs: Record<DocSlug, string> = {
   'chatgpt-preview': jaChatGPTPreview,
   'cli-reference': jaCliReference,
   'review-rules': jaReviewRules,
+  'native-plugins': jaNativePlugins,
   'architecture': jaArchitecture,
   'tools': jaTools,
   'mcp': jaMcp,
@@ -206,6 +215,7 @@ const koDocs: Record<DocSlug, string> = {
   'chatgpt-preview': koChatGPTPreview,
   'cli-reference': koCliReference,
   'review-rules': koReviewRules,
+  'native-plugins': koNativePlugins,
   'architecture': koArchitecture,
   'tools': koTools,
   'mcp': koMcp,
@@ -228,6 +238,7 @@ const ruDocs: LocalizedDocs = {
   'chatgpt-preview': ruChatGPTPreview,
   'cli-reference': ruCliReference,
   'review-rules': ruReviewRules,
+  'native-plugins': ruNativePlugins,
   'architecture': ruArchitecture,
   'tools': ruTools,
   'mcp': ruMcp,

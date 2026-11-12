@@ -27,6 +27,11 @@ just falls through to the global / system layers.
 The system layer is **always** present (it ships in the binary), so there
 is always _some_ rule resolved.
 
+Enabled [native plugins](../native-plugins/) append matching rule text after
+this base resolution. They are applied by plugin ID, then each manifest's
+rule-pack order, with the first matching entry in each pack contributing.
+Plugin packs leave file filtering and the priority chain above unchanged.
+
 ## Rule file format (layers 1–3)
 
 ```json

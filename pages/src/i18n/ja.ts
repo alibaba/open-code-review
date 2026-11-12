@@ -290,6 +290,7 @@ export const ja: TranslationKeys = {
   'docs.sidebar.configuration': '設定',
   'docs.sidebar.cliReference': 'CLI リファレンス',
   'docs.sidebar.reviewRules': 'レビュールール',
+  'docs.sidebar.nativePlugins': 'ネイティブプラグイン',
   'docs.sidebar.architecture': 'アーキテクチャ',
   'docs.sidebar.tools': 'ツール',
   'docs.sidebar.mcp': 'MCP サーバー',

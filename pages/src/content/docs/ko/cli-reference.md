@@ -17,6 +17,7 @@ Usage:
 Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
+  plugin       Manage local rule plugins
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
@@ -38,6 +39,7 @@ Examples:
 
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
+Use "ocr plugin -h" for more information about plugins.
 Use "ocr config" for more information about config.
 Use "ocr llm" for more information about LLM utilities.
 Use "ocr session -h" for more information about session inspection.
@@ -70,6 +72,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr review` | `ocr r` | 코드 리뷰를 실행하고 코멘트를 출력합니다. |
 | `ocr scan` | `ocr s` | Git diff 없이 파일 전체를 스캔합니다. |
 | `ocr rules check <file>` | — | 주어진 파일 경로에 어떤 규칙이 적용되는지, 그 규칙이 어디서 왔는지 보여줍니다. |
+| `ocr plugin` | — | 로컬 규칙 플러그인을 설치, 확인하고 관리합니다. |
 | `ocr config set <key> <value>` | — | 설정값을 `~/.opencodereview/config.json`에 저장합니다. |
 | `ocr config unset custom_providers.<name>` | — | 커스텀 프로바이더를 삭제합니다(활성 상태였다면 `provider`/`model`도 함께 지웁니다). |
 | `ocr config provider` | — | 대화형 프로바이더 설정 TUI입니다. |
@@ -562,6 +565,32 @@ Rule:
 
 "내 커스텀 규칙이 왜 안 걸리지?"를 파헤칠 때 유용합니다. 우선순위 전체는
 [리뷰 규칙](../review-rules/)을 참고하세요.
+
+## `ocr plugin` {#ocr-plugin}
+
+로컬 규칙 패키지의 사용자 단위 스냅샷을 관리합니다. 설치 직후에는 비활성 상태이며,
+활성화하면 모든 저장소에서 이후 실행하는 리뷰와 스캔에 규칙을 추가합니다.
+
+| 명령 | 동작 |
+|---|---|
+| `ocr plugin install <directory> [--enable]` | 로컬 패키지를 플러그인 저장소에 복사하고 선택적으로 활성화합니다. |
+| `ocr plugin list` | 설치된 ID, 버전, 상태, 규칙 팩 수를 표시합니다. |
+| `ocr plugin show <id>` | 매니페스트 요약, 원본, 스냅샷 경로, 내용의 SHA-256을 표시합니다. |
+| `ocr plugin enable <id>` | 설치한 패키지를 활성화합니다. |
+| `ocr plugin disable <id>` | 해당 규칙을 비활성화합니다. |
+| `ocr plugin remove <id>` | 등록을 해제하고 실행 중인 리뷰를 위한 스냅샷은 보관합니다. |
+
+모든 하위 명령은 `--json`으로 구조화된 출력을 제공합니다.
+
+```bash
+ocr plugin install ./examples/ocr-plugins/review-checklist --enable
+ocr plugin show review-checklist --json
+ocr rules check src/main.go
+```
+
+수정한 원본을 다시 설치하려면 기존 ID를 먼저 제거하세요. 등록 정보는
+`~/.opencodereview/plugins/state.json`에, 스냅샷은 `plugins/packages/`에 있습니다.
+매니페스트, 호환성 확인, 규칙 순서는 [네이티브 플러그인](../native-plugins/)을 참고하세요.
 
 ## `ocr config` {#ocr-config}
 
