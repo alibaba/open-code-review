@@ -182,8 +182,8 @@ func TestValidateReviewRefs_EmptySkipped(t *testing.T) {
 	}
 }
 
-func TestBuildReviewToolRegistry(t *testing.T) {
-	reg := buildReviewToolRegistry(nil, nil)
+func TestBuildToolRegistry(t *testing.T) {
+	reg := buildToolRegistry(nil, nil)
 	for _, name := range []string{"file_read", "file_find", "code_search", "code_comment"} {
 		if _, ok := reg.Get(name); !ok {
 			t.Errorf("review tools must include %s", name)

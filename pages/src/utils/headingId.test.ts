@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { extractHeadings } from './extractHeadings';
 import { createHeadingIdResolver, extractHeadingInfo, parseExplicitHeadingId } from './headingId';
@@ -25,6 +28,17 @@ describe('explicit heading IDs', () => {
     expect(extractHeadings(`## ${HEADING} {#what-the-skill-does}`)).toEqual([
       { id: 'what-the-skill-does', text: HEADING, level: 2 },
     ]);
+  });
+
+  it.each(['en', 'zh', 'ja', 'ko', 'ru'])('preserves the tools migration anchor in %s documentation', (language) => {
+    const docsDirectory = join(dirname(fileURLToPath(import.meta.url)), '..', 'content', 'docs');
+    const markdown = readFileSync(join(docsDirectory, language, 'tools.md'), 'utf8');
+    const headings = extractHeadings(markdown).filter(heading => heading.id === 'customizing-tools');
+
+    expect(headings).toHaveLength(1);
+    expect(headings[0].level).toBe(2);
+    expect(headings[0].text).not.toContain('{#');
+    expect(markdown).toContain('](#customizing-tools)');
   });
 
   it('assigns unique IDs to repeated headings', () => {

@@ -17,12 +17,35 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
-	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
+
+func TestComparisonPlanningReferences(test *testing.T) {
+	entries, err := toolsconfig.LoadDefault()
+	if err != nil {
+		test.Fatal(err)
+	}
+	base, err := toolsconfig.Resolve(entries, []string{"code_search", "file_read", "file_read_diff", "file_find"})
+	if err != nil {
+		test.Fatal(err)
+	}
+	before := formatToolDefs(base)
+	derived, err := toolsconfig.WithComparisonSides(base)
+	if err != nil {
+		test.Fatal(err)
+	}
+	text := formatToolDefs(derived)
+	if strings.Count(text, "  - side:") != 3 || strings.Contains(text, "side: The side of the current comparison to access. Defaults to new. Paths and line numbers belong to the selected side. (required)") {
+		test.Fatalf("incorrect planning parameters: %s", text)
+	}
+	if strings.Contains(before, "  - side:") || formatToolDefs(base) != before {
+		test.Fatal("comparison planning contaminated current-only references")
+	}
+}
 
 type fakeAgentClient struct {
 	responses []*llm.ChatResponse
@@ -576,56 +599,6 @@ func TestFormatToolDefs(t *testing.T) {
 	})
 }
 
-func TestBuildToolDefs(t *testing.T) {
-	funcDef := json.RawMessage(`{"name":"test_tool","description":"a tool","parameters":{}}`)
-
-	entries := []toolsconfig.ToolConfigEntry{
-		{Name: "plan_only", PlanTask: true, MainTask: false, Definition: funcDef},
-		{Name: "main_only", PlanTask: false, MainTask: true, Definition: funcDef},
-		{Name: "both", PlanTask: true, MainTask: true, Definition: funcDef},
-		{Name: "neither", PlanTask: false, MainTask: false, Definition: funcDef},
-	}
-
-	t.Run("planOnly=true returns plan_task tools", func(t *testing.T) {
-		defs := BuildToolDefs(entries, true)
-		if len(defs) != 2 {
-			t.Fatalf("expected 2 defs, got %d", len(defs))
-		}
-		names := make(map[string]bool)
-		for _, d := range defs {
-			names[d.Function.Name] = true
-		}
-		if !names["test_tool"] {
-			t.Error("expected test_tool in plan defs")
-		}
-	})
-
-	t.Run("planOnly=false returns main_task tools", func(t *testing.T) {
-		defs := BuildToolDefs(entries, false)
-		if len(defs) != 2 {
-			t.Fatalf("expected 2 defs, got %d", len(defs))
-		}
-	})
-
-	t.Run("invalid definition JSON is skipped", func(t *testing.T) {
-		bad := []toolsconfig.ToolConfigEntry{
-			{Name: "bad", PlanTask: true, MainTask: true, Definition: json.RawMessage(`{invalid}`)},
-			{Name: "good", PlanTask: true, MainTask: true, Definition: funcDef},
-		}
-		defs := BuildToolDefs(bad, true)
-		if len(defs) != 1 {
-			t.Fatalf("expected 1 def (bad skipped), got %d", len(defs))
-		}
-	})
-
-	t.Run("empty entries returns nil", func(t *testing.T) {
-		defs := BuildToolDefs(nil, true)
-		if defs != nil {
-			t.Errorf("expected nil, got %v", defs)
-		}
-	})
-}
-
 // selectionReasons indexes a selection pass by path so the tests can assert on
 // the decision the run and `--preview` now share.
 func selectionReasons(decisions []fileDecision) map[string]ExcludeReason {
@@ -1168,7 +1141,7 @@ func TestDispatchSubtasks_MainTaskWithoutTaskDoneIsNotReusableCheckpoint(t *test
 	var limitWarnings, subtaskErrors []AgentWarning
 	for _, w := range a.Warnings() {
 		switch w.Type {
-		case llmloop.WarningReviewLimitReached:
+		case reviewtask.WarningReviewLimitReached:
 			limitWarnings = append(limitWarnings, w)
 		case "subtask_error":
 			subtaskErrors = append(subtaskErrors, w)

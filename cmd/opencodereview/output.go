@@ -19,6 +19,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/suggestdiff"
 )
@@ -75,7 +76,7 @@ func isSubtaskErrorType(warningType string) bool {
 // as a clean review when a limit truncated it.
 func hasReviewLimitWarning(warnings []agent.AgentWarning) bool {
 	for _, w := range warnings {
-		if w.Type == llmloop.WarningReviewLimitReached {
+		if w.Type == reviewtask.WarningReviewLimitReached {
 			return true
 		}
 	}

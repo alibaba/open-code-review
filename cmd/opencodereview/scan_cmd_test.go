@@ -99,38 +99,6 @@ func TestExecuteScanRejectsFileReadDiff(t *testing.T) {
 	}
 }
 
-func TestExcludeToolDef(t *testing.T) {
-	defs := []llm.ToolDef{
-		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
-		{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
-		{Type: "function", Function: llm.FunctionDef{Name: "file_read_diff"}},
-		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
-	}
-	got := excludeToolDef(defs, "file_read_diff")
-	if len(got) != 3 {
-		t.Fatalf("expected 3 defs, got %d", len(got))
-	}
-	for _, d := range got {
-		if d.Function.Name == "file_read_diff" {
-			t.Errorf("file_read_diff should have been removed")
-		}
-	}
-	// Input slice must not be mutated.
-	if len(defs) != 4 {
-		t.Errorf("input slice was mutated: len=%d, want 4", len(defs))
-	}
-}
-
-func TestExcludeToolDef_AbsentName(t *testing.T) {
-	defs := []llm.ToolDef{
-		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
-	}
-	got := excludeToolDef(defs, "does_not_exist")
-	if !reflect.DeepEqual(got, defs) {
-		t.Errorf("removing absent name should return identical content")
-	}
-}
-
 func TestSplitPaths(t *testing.T) {
 	tests := []struct {
 		name string
@@ -311,7 +279,6 @@ func TestParseScanFlags_PreviewWithResume(t *testing.T) {
 
 func TestParseScanFlags_AllStringFlags(t *testing.T) {
 	opts, err := parseScanFlags([]string{
-		"--tools", "/tmp/tools.json",
 		"--rule", "/tmp/rule.json",
 		"--repo", "/tmp/repo",
 		"--exclude", "*.md,*.txt",
@@ -322,9 +289,6 @@ func TestParseScanFlags_AllStringFlags(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if opts.toolConfigPath != "/tmp/tools.json" {
-		t.Errorf("toolConfigPath = %q", opts.toolConfigPath)
 	}
 	if opts.rulePath != "/tmp/rule.json" {
 		t.Errorf("rulePath = %q", opts.rulePath)

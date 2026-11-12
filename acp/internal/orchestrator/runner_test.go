@@ -83,21 +83,53 @@ func TestRunnerRejectsInvalidAndMultipleJSON(t *testing.T) {
 
 func TestRunnerLocalCancelOverridesExit(t *testing.T) {
 	runner := NewRunner(writeOCRScript(t))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	events, outcomes := runner.Run(ctx, Request{CWD: t.TempDir(), Args: []string{"review", "block"}})
-	for event := range events {
-		if event.Message == "READY" {
-			cancel()
-			break
-		}
+	cooperativeInterrupt := cooperativeInterruptAvailable(t)
+	cleanupExitCode := 0
+	if !cooperativeInterrupt {
+		cleanupExitCode = 1
+		t.Log("No shared console; expecting forced termination without cleanup")
 	}
-	outcome := <-outcomes
-	if outcome.Kind != OutcomeCancelled || !errors.Is(outcome.Err, context.Canceled) {
-		t.Fatalf("outcome = %+v", outcome)
-	}
-	if outcome.ExitCode != 1 {
-		t.Fatalf("exit code = %d, want 1", outcome.ExitCode)
+	for _, testCase := range []struct {
+		mode     string
+		exitCode int
+	}{
+		{mode: "block", exitCode: 1},
+		{mode: "cleanup", exitCode: cleanupExitCode},
+	} {
+		t.Run(testCase.mode, func(t *testing.T) {
+			directory := t.TempDir()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			events, outcomes := runner.Run(ctx, Request{CWD: directory, Args: []string{"review", testCase.mode}})
+			ready := false
+			for event := range events {
+				if event.Message == "READY" {
+					ready = true
+					cancel()
+					break
+				}
+			}
+			outcome := <-outcomes
+			if !ready {
+				t.Fatalf("OCR did not report readiness: %+v", outcome)
+			}
+			if outcome.Kind != OutcomeCancelled || !errors.Is(outcome.Err, context.Canceled) {
+				t.Fatalf("outcome = %+v", outcome)
+			}
+			if outcome.ExitCode != testCase.exitCode {
+				t.Fatalf("exit code = %d, want %d", outcome.ExitCode, testCase.exitCode)
+			}
+			if testCase.mode == "cleanup" {
+				contents, err := os.ReadFile(filepath.Join(directory, "cleaned"))
+				if !cooperativeInterrupt {
+					if !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("forced termination ran cleanup: marker = %q, error = %v", contents, err)
+					}
+				} else if err != nil || string(contents) != "cleaned\n" {
+					t.Fatalf("cleanup marker = %q, error = %v", contents, err)
+				}
+			}
+		})
 	}
 }
 
