@@ -44,7 +44,10 @@ func (p *FileFindProvider) execute(ctx context.Context, args map[string]any) (st
 		return "// The file was not found", nil
 	}
 
-	caseSensitive, _ := args["case_sensitive"].(bool)
+	caseSensitive, err := boolArg(args, "case_sensitive")
+	if err != nil {
+		return "Error: " + err.Error(), nil
+	}
 	files, err := p.listGitFiles(ctx)
 	if err != nil {
 		return "", err
