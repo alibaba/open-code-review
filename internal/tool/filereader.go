@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +70,7 @@ type FileReader struct {
 // - Workspace: reads directly from the filesystem.
 // - Range / Commit: uses `git show <Ref>:<path>` to read at the given ref.
 func (fr *FileReader) Read(ctx context.Context, path string) (string, error) {
+	path = decodePathRecord(path)
 	switch fr.Mode {
 	case ModeWorkspace:
 		return fr.readFromDisk(path)
@@ -77,6 +79,21 @@ func (fr *FileReader) Read(ctx context.Context, path string) (string, error) {
 	default:
 		return fr.readFromDisk(path)
 	}
+}
+
+// decodePathRecord reverses the quoting file_find applies to pathnames holding
+// a line break, so the listed spelling can be fed straight back to file_read.
+// A quoted name without a line break passes through untouched, which keeps a
+// file whose real name carries quotes reachable.
+func decodePathRecord(path string) string {
+	if len(path) < 2 || path[0] != '"' || path[len(path)-1] != '"' {
+		return path
+	}
+	decoded, err := strconv.Unquote(path)
+	if err != nil || !strings.ContainsAny(decoded, "\r\n") {
+		return path
+	}
+	return decoded
 }
 
 func (fr *FileReader) readFromDisk(path string) (string, error) {
@@ -140,6 +157,7 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 // ReadLines returns a window of lines from the file plus the total line count.
 // startLine is 1-based; maxLines is the maximum number of lines to collect.
 func (fr *FileReader) ReadLines(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
+	path = decodePathRecord(path)
 	switch fr.Mode {
 	case ModeWorkspace:
 		return fr.readLinesFromDisk(path, startLine, maxLines)

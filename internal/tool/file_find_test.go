@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -369,11 +370,10 @@ func TestFileFind_NonASCIIPath(t *testing.T) {
 	}
 }
 
-// TestFileFind_QuotedPathnamesReturnVerbatim covers issue #1866. Git C-quotes
-// pathnames holding control bytes, so a newline-delimited listing returned the
-// escaped spelling instead of the real relative path, and file_read could not
-// open it. The NUL-delimited listing must return the pathname byte-for-byte.
-func TestFileFind_QuotedPathnamesReturnVerbatim(t *testing.T) {
+// setupControlCharRepo commits files whose names hold control bytes. Such
+// names are illegal on Windows and need a real git repository to list.
+func setupControlCharRepo(t *testing.T, names ...string) string {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("control characters are not legal in windows filenames")
 	}
@@ -399,6 +399,22 @@ func TestFileFind_QuotedPathnamesReturnVerbatim(t *testing.T) {
 	git("config", "user.email", "test@example.com")
 	git("config", "user.name", "test")
 
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("package q\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git("add", "--", name)
+	}
+	git("commit", "-m", "init")
+	return dir
+}
+
+// TestFileFind_CQuotedPathnamesRoundTrip covers issue #1866. Git C-quotes
+// pathnames holding control bytes, so a newline-delimited listing returned the
+// escaped spelling instead of the real relative path. Both listings now use
+// NUL; the tool quotes a name only when the name itself holds a line break, and
+// file_read accepts that spelling back.
+func TestFileFind_CQuotedPathnamesRoundTrip(t *testing.T) {
 	fixtures := []struct {
 		name  string
 		query string
@@ -406,13 +422,7 @@ func TestFileFind_QuotedPathnamesReturnVerbatim(t *testing.T) {
 		{name: "tab\tname.go", query: "tab"},
 		{name: "line\nbreak.go", query: "line"},
 	}
-	for _, f := range fixtures {
-		if err := os.WriteFile(filepath.Join(dir, f.name), []byte("package q\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		git("add", "--", f.name)
-	}
-	git("commit", "-m", "init")
+	dir := setupControlCharRepo(t, fixtures[0].name, fixtures[1].name)
 
 	for _, tc := range []struct {
 		name string
@@ -429,15 +439,90 @@ func TestFileFind_QuotedPathnamesReturnVerbatim(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got != f.name {
-					t.Fatalf("Execute(%q) = %q, want %q", f.query, got, f.name)
+				want := f.name
+				if strings.ContainsAny(f.name, "\r\n") {
+					want = strconv.Quote(f.name)
 				}
-				content, readErr := p.FileReader.Read(context.Background(), got)
+				if got != want {
+					t.Fatalf("Execute(%q) = %q, want %q", f.query, got, want)
+				}
+				lines, _, readErr := p.FileReader.ReadLines(context.Background(), got, 1, 10)
 				if readErr != nil {
 					t.Fatalf("file_read %q: %v", got, readErr)
 				}
-				if !strings.Contains(content, "package q") {
-					t.Errorf("content = %q, want package q", content)
+				if !strings.Contains(strings.Join(lines, "\n"), "package q") {
+					t.Errorf("content = %q, want package q", lines)
+				}
+			}
+		})
+	}
+}
+
+// TestPathRecordRoundTrip pins the quoting rule itself, which the repository
+// tests above can only exercise where control bytes are legal in filenames.
+func TestPathRecordRoundTrip(t *testing.T) {
+	for _, path := range []string{
+		"main.go",
+		"tab\tname.go",
+		"line\nbreak.go",
+		"carriage\rreturn.go",
+		`quote"name.go`,
+		`"quoted.go"`,
+	} {
+		t.Run(strconv.Quote(path), func(t *testing.T) {
+			record := pathRecord(path)
+			if strings.ContainsAny(record, "\r\n") {
+				t.Fatalf("pathRecord(%q) = %q, want a single record", path, record)
+			}
+			if got := decodePathRecord(record); got != path {
+				t.Errorf("decodePathRecord(%q) = %q, want %q", record, got, path)
+			}
+		})
+	}
+}
+
+// TestFileFind_LineBreakPathIsOneRecord keeps one file and two files
+// distinguishable. A single file named probeA.go<LF>probeB.go printed exactly
+// like two files named probeA.go and probeB.go once the listing was a plain
+// newline-separated list.
+func TestFileFind_LineBreakPathIsOneRecord(t *testing.T) {
+	names := []string{"probeA.go", "probeA.go\nprobeB.go", "probeB.go"}
+	dir := setupControlCharRepo(t, names...)
+
+	for _, tc := range []struct {
+		name string
+		mode ReviewMode
+		ref  string
+	}{
+		{name: "workspace", mode: ModeWorkspace},
+		{name: "commit", mode: ModeCommit, ref: "HEAD"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewFileFind(&FileReader{RepoDir: dir, Mode: tc.mode, Ref: tc.ref})
+			got, err := p.Execute(context.Background(), map[string]any{"query_name": "probe"})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			records := strings.Split(got, "\n")
+			if len(records) != len(names) {
+				t.Fatalf("got %d records (%q), want %d", len(records), got, len(names))
+			}
+			seen := make(map[string]bool, len(records))
+			for _, record := range records {
+				name := record
+				if strings.HasPrefix(record, `"`) {
+					decoded, uerr := strconv.Unquote(record)
+					if uerr != nil {
+						t.Fatalf("record %q is not a valid quoted pathname: %v", record, uerr)
+					}
+					name = decoded
+				}
+				seen[name] = true
+			}
+			for _, want := range names {
+				if !seen[want] {
+					t.Errorf("missing record for %q in %q", want, got)
 				}
 			}
 		})

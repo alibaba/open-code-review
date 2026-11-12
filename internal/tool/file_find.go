@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -93,7 +94,22 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 	if len(matched) == 0 {
 		return "// The file was not found", nil
 	}
-	return strings.Join(matched, "\n"), nil
+	records := make([]string, len(matched))
+	for i, f := range matched {
+		records[i] = pathRecord(f)
+	}
+	return strings.Join(records, "\n"), nil
+}
+
+// pathRecord renders one pathname as a single output line. A pathname may
+// contain a line break, which would otherwise split one file into records that
+// look like separate files, so such a path is quoted. file_read accepts the
+// quoted spelling back.
+func pathRecord(path string) string {
+	if strings.ContainsAny(path, "\r\n") {
+		return strconv.Quote(path)
+	}
+	return path
 }
 
 // listGitFiles returns tracked and untracked files (respecting .gitignore) via git ls-files.
