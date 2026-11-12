@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/session"
 )
@@ -326,10 +327,16 @@ func TestCommandsUseTaskToolBindings(test *testing.T) {
 				if err != nil {
 					test.Fatal(err)
 				}
+				if mode == "review" {
+					base, err = toolsconfig.WithWorkspaceSides(base)
+					if err != nil {
+						test.Fatal(err)
+					}
+				}
 				baseJSON, _ := json.Marshal(base)
 				requestJSON, _ := json.Marshal(definitions)
 				if string(baseJSON) != string(requestJSON) {
-					test.Error("current-only command changed the model-visible tool definitions")
+					test.Error("command used incorrect model-visible tool definitions")
 				}
 			}
 			if toolRequests == 0 {

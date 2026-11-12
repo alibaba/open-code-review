@@ -21,7 +21,7 @@ type reviewCodeTools struct {
 
 func prepareReviewCodeTools(ctx context.Context, repoDir string, opts reviewOptions, runner *gitcmd.Runner, resolution *diff.InputResolution) (*reviewCodeTools, error) {
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
-	if resolution == nil && mode != tool.ModeWorkspace {
+	if resolution == nil {
 		var err error
 		resolution, err = agent.ResolveComparisonInput(ctx, agent.Args{
 			RepoDir: repoDir, From: opts.from, To: opts.to, Commit: opts.commit, GitRunner: runner,
@@ -34,21 +34,29 @@ func prepareReviewCodeTools(ctx context.Context, repoDir string, opts reviewOpti
 		RepoDir: repoDir, Mode: mode, Ref: fileReadRef(mode, opts, resolution), Runner: runner,
 	}
 	setup := &reviewCodeTools{reader: reader, resolution: resolution}
+	if resolution == nil || (resolution.ResolvedBase == "" && !resolution.BaseIsEmpty) || (resolution.ResolvedBase != "" && resolution.BaseIsEmpty) {
+		return nil, fmt.Errorf("code access requires a resolved base or an empty tree")
+	}
+	previous := *reader
+	previous.Mode = tool.ModeCommit
+	previous.Ref = resolution.ResolvedBase
+	if resolution.BaseIsEmpty {
+		previous.Mode = tool.ModeEmpty
+	}
+	var err error
 	if mode != tool.ModeWorkspace {
-		if resolution == nil || resolution.ResolvedHead == "" || (resolution.ResolvedBase == "" && !resolution.BaseIsEmpty) {
+		if resolution.ResolvedHead == "" {
 			return nil, fmt.Errorf("comparison code access requires resolved comparison endpoints")
 		}
-		previous := *reader
-		previous.Mode = tool.ModeCommit
-		previous.Ref = resolution.ResolvedBase
-		if resolution.BaseIsEmpty {
-			previous.Mode = tool.ModeEmpty
-		}
-		var err error
 		setup.access, err = tool.NewComparisonCodeAccess(*reader, previous)
-		if err != nil {
-			return nil, err
+	} else {
+		if resolution.ResolvedHead != "" || resolution.ExactRange != "" {
+			return nil, fmt.Errorf("workspace code access cannot have a resolved head or range")
 		}
+		setup.access, err = tool.NewWorkspaceCodeAccess(*reader, previous)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return setup, nil
 }

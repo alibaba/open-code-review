@@ -67,6 +67,7 @@ func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 // ResolveComparisonInput turns every moving head ref into an immutable commit
 // before loading the diff. Range mode computes its merge-base against frozen
 // endpoints; commit mode verifies the first parent or a genuine empty old tree.
+// Workspace mode freezes HEAD as the base while leaving the working tree live.
 func ResolveComparisonInput(ctx context.Context, args Args) (*diff.InputResolution, error) {
 	switch {
 	case args.Commit != "":
@@ -90,7 +91,11 @@ func ResolveComparisonInput(ctx context.Context, args Args) (*diff.InputResoluti
 		}
 		return &resolved, nil
 	default:
-		return nil, nil
+		resolution, err := diff.NewWorkspaceProvider(args.RepoDir, args.GitRunner).ResolveWorkspaceComparison(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &resolution, nil
 	}
 }
 
