@@ -135,6 +135,7 @@ type InputResolution struct {
 	ResolvedBase string
 	ResolvedHead string
 	ExactRange   string
+	BaseIsEmpty  bool
 }
 
 // ResolveInput freezes this run's commit endpoints by asking git, following the
@@ -431,8 +432,15 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 
 // partitionDiffs keeps diffs filtered by built-in directory rules available
 // for reporting while preserving the review input as the Included slice.
+//
+// In workspace mode, ignored untracked files are already filtered out.
+// Applying .gitignore here would incorrectly drop tracked changes.
 func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
-	patterns := p.loadGitignorePatterns()
+	var patterns []string
+	honorGitignore := p.mode != ModeWorkspace
+	if honorGitignore {
+		patterns = p.loadGitignorePatterns()
+	}
 	result := DiffSet{
 		Included: make([]model.Diff, 0, len(diffs)),
 		Excluded: make([]model.Diff, 0),
@@ -445,7 +453,7 @@ func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 		if isProviderDirExcluded(path) {
 			result.excludedAt = append(result.excludedAt, len(result.Included)+len(result.Excluded))
 			result.Excluded = append(result.Excluded, d)
-		} else if !p.isPathExcluded(path, patterns) {
+		} else if !honorGitignore || !p.isPathExcluded(path, patterns) {
 			result.Included = append(result.Included, d)
 		}
 	}

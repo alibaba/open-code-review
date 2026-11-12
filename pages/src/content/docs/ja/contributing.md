@@ -25,7 +25,7 @@ Go を書かなくても貢献できます。
 
 ### 前提条件
 
-- [Go ≥ 1.26.9](https://go.dev/dl/)
+- [Go ≥ 1.26.10](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -102,7 +102,7 @@ git checkout -b feat/anthropic-streaming
 例:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(readme): clarify endpoint resolution priority
 refactor(viewer): extract task-card rendering into helper
@@ -204,6 +204,10 @@ CI は push のたびに同じ一式を実行するため、予期せぬ結果�
 
 ## 新しいツールの追加
 
+この節は実行時の設定ではなく、組み込み Agent のソース変更を扱います。
+コアツールの変更にはテストとベンチマークによる検証が必要です。
+外部の業務コンテキストには [MCP サーバー](../mcp/)を使用してください。
+
 ツールは 2 つの部分から成ります。
 
 1. [`internal/config/toolsconfig/tools.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/toolsconfig/tools.json)
@@ -212,6 +216,16 @@ CI は push のたびに同じ一式を実行するため、予期せぬ結果�
 
 両方が揃って初めて、新しいツール名が機能します。既存の 6 つは[ツール](../tools/)にあり、
 テンプレートとして使えます。
+
+適用するテンプレートの `MAIN_TASK.tools` 配列にツールを追加します。review と scan は
+別々のリストを持ち、順序はモデルへのリクエストに影響するため安定させてください。
+review の計画で呼び出しを許可せず説明だけを渡す場合は `PLAN_TASK.tool_references` に追加します。
+ツール定義にタスク所属フラグを含めず、定義の名前をカタログ項目の名前と一致させてください。
+
+これらのリストはモデルへのリクエストに含める定義を選択するもので、実行サンドボックスではありません。
+MCP の検出と review 固有の完了・フィルタープロトコルは既存のタスクアダプターが担当します。
+他の補助タスクはこれらのカタログバインディングを使用せず、未対応の `tools` や
+`tool_references` フィールドは無視されるのではなく拒否されます。
 
 ## 新しいルールパターンの追加
 

@@ -14,6 +14,7 @@ const fileReadMaxLines = 500
 // FileReadProvider reads file content at a given path and optional line range.
 type FileReadProvider struct {
 	FileReader *FileReader
+	Access     *CodeAccess
 }
 
 func NewFileRead(fr *FileReader) *FileReadProvider { return &FileReadProvider{FileReader: fr} }
@@ -21,6 +22,14 @@ func NewFileRead(fr *FileReader) *FileReadProvider { return &FileReadProvider{Fi
 func (p *FileReadProvider) Tool() Tool { return FileRead }
 
 func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (string, error) {
+	return p.Access.execute(ctx, args, p.FileReader, func(reader *FileReader) (string, error) {
+		selected := *p
+		selected.FileReader = reader
+		return selected.execute(ctx, args)
+	})
+}
+
+func (p *FileReadProvider) execute(ctx context.Context, args map[string]any) (string, error) {
 	filePath, _ := args["file_path"].(string)
 	if filePath == "" {
 		return "Error: file_path is required", nil

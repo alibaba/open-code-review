@@ -25,7 +25,7 @@ OCR 是 Apache-2.0 许可下的开源项目。欢迎 bug 报告、文档修复�
 
 ### 前置条件
 
-- [Go ≥ 1.26.9](https://go.dev/dl/)
+- [Go ≥ 1.26.10](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -102,7 +102,7 @@ git checkout -b feat/anthropic-streaming
 示例：
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(readme): clarify endpoint resolution priority
 refactor(viewer): extract task-card rendering into helper
@@ -202,6 +202,9 @@ CI 在每次推送时运行同一套，不会有意外。
 
 ## 添加新工具
 
+本节介绍内置 Agent 的源码级变更，而非运行时配置。核心工具变更需要测试和
+benchmark 验证。外部业务上下文请使用 [MCP 服务器](../mcp/)。
+
 一个工具有两部分：
 
 1. [`internal/config/toolsconfig/tools.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/toolsconfig/tools.json)
@@ -209,6 +212,15 @@ CI 在每次推送时运行同一套，不会有意外。
 2. 在 `internal/tool/definitions.go` 注册的 **Go provider**，含实际实现。
 
 两者都存在，新工具名才能工作。现有六个见[工具](../tools/)，可当作模板。
+
+在适用模板的 `MAIN_TASK.tools` 数组中选择工具。review 和 scan 各自维护列表；
+顺序会影响模型请求，应保持稳定。若只需在 review 规划中描述工具而不允许调用，
+将其加入 `PLAN_TASK.tool_references`。工具定义不应包含任务归属标志，
+定义中的名称必须与目录条目名称一致。
+
+这些列表选择模型请求中的定义，不是执行沙箱。MCP 发现和 review 特有的完成、过滤协议
+仍由现有任务适配器负责。其他辅助任务不使用这些目录绑定；不支持的 `tools` 或
+`tool_references` 字段会被拒绝，而不是静默忽略。
 
 ## 添加新规则模式
 

@@ -28,7 +28,7 @@ Go를 쓰지 않아도 도울 수 있습니다.
 
 ### 사전 요구 사항 {#prerequisites}
 
-- [Go 1.26.9 이상](https://go.dev/dl/)
+- [Go 1.26.10 이상](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -106,7 +106,7 @@ git checkout -b feat/anthropic-streaming
 예시:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(readme): clarify endpoint resolution priority
 refactor(viewer): extract task-card rendering into helper
@@ -209,6 +209,10 @@ CI도 푸시할 때마다 같은 것을 돌립니다. 놀랄 일은 없습니다
 
 ## 새 도구 추가하기 {#adding-new-tools}
 
+이 절은 실행 시점의 설정이 아닌 내장 Agent의 소스 변경을 다룹니다.
+핵심 도구 변경은 테스트와 벤치마크로 검증하세요.
+외부 업무 맥락에는 [MCP 서버](../mcp/)를 사용하세요.
+
 도구는 두 부분으로 이뤄집니다.
 
 1. [`internal/config/toolsconfig/tools.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/toolsconfig/tools.json)의
@@ -217,6 +221,15 @@ CI도 푸시할 때마다 같은 것을 돌립니다. 놀랄 일은 없습니다
 
 새 도구 이름이 동작하려면 둘 다 있어야 합니다. 기존 여섯 개는
 [도구](../tools/)에서 볼 수 있으니 본보기로 삼으세요.
+
+해당 템플릿의 `MAIN_TASK.tools` 배열에서 도구를 선택하세요. review와 scan은 별도 목록을
+관리하며 순서가 모델 요청에 영향을 주므로 안정적으로 유지해야 합니다. review 계획에서
+호출을 허용하지 않고 도구 설명만 제공하려면 `PLAN_TASK.tool_references`에 추가하세요.
+도구 정의에는 작업 소속 플래그를 넣지 않으며 정의의 이름은 카탈로그 항목 이름과 일치해야 합니다.
+
+이 목록은 모델 요청에 포함할 정의를 선택하며 실행 샌드박스가 아닙니다. MCP 검색과 review 전용
+완료 및 필터 프로토콜은 기존 작업 어댑터가 담당합니다. 다른 보조 작업은 이 카탈로그 바인딩을
+사용하지 않으며 지원하지 않는 `tools` 또는 `tool_references` 필드는 무시하지 않고 거부합니다.
 
 ## 새 규칙 패턴 추가하기 {#adding-new-rule-patterns}
 

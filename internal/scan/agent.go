@@ -21,6 +21,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -50,7 +51,7 @@ type Args struct {
 	Tools                 *tool.Registry
 	MainToolDefs          []llm.ToolDef
 	CommentCollector      *tool.CommentCollector
-	CommentWorkerPool     *llmloop.CommentWorkerPool
+	CommentWorkerPool     *reviewtask.CommentWorkerPool
 	MaxConcurrency        int
 	ConcurrentTaskTimeout int
 	Model                 string
@@ -86,6 +87,14 @@ func (a *Agent) planEnabled() bool {
 	return !a.args.SkipPlan && a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0
 }
 
+func (a *Agent) planEnabledFor(it model.ScanItem) bool {
+	if !a.planEnabled() || it.IsBinary || it.Content == "" {
+		return false
+	}
+	threshold := a.args.Template.PlanModeLineThreshold
+	return threshold <= 0 || it.LineCount >= threshold
+}
+
 func (a *Agent) dedupEnabled() bool {
 	return !a.args.SkipDedup && a.args.Template.DedupTask != nil && len(a.args.Template.DedupTask.Messages) > 0
 }
@@ -95,7 +104,7 @@ func (a *Agent) summaryEnabled() bool {
 }
 
 // Agent orchestrates full-file code review. It delegates the per-file LLM
-// tool-use loop to llmloop.Runner and owns only scan-specific concerns
+// tool-use loop to reviewtask.Runner and owns only scan-specific concerns
 // (file enumeration, FULL_SCAN_TASK rendering, per-file filtering).
 type Agent struct {
 	args             Args
@@ -103,7 +112,7 @@ type Agent struct {
 	currentDate      string
 	session          *session.SessionHistory
 	subtaskFailed    int64 // atomic
-	runner           *llmloop.Runner
+	runner           *reviewtask.Runner
 	resumeInfo       *session.ResumeInfo
 	scanFingerprints map[string]string
 	projectSummary   string      // populated post-run by maybeRunProjectSummary
@@ -136,7 +145,7 @@ func NewAgent(args Args) *Agent {
 		args:    args,
 		session: args.Session,
 	}
-	a.runner = llmloop.NewRunner(llmloop.Deps{
+	a.runner = reviewtask.NewRunner(reviewtask.Deps{
 		LLMClient:         args.LLMClient,
 		Model:             args.Model,
 		Template:          toLoopTemplate(args.Template),
@@ -158,7 +167,7 @@ func NewAgent(args Args) *Agent {
 }
 
 // toLoopTemplate maps the scan-specific ScanTemplate onto the subset of
-// fields llmloop.Runner reads from template.Template. llmloop only needs
+// fields reviewtask.Runner reads from template.Template. The adapter only needs
 // MaxTokens / MaxToolRequestTimes / MemoryCompressionTask / ReLocationTask,
 // so we leave the diff-only fields (MainTask / PlanTask / ReviewFilterTask)
 // at their zero values.
@@ -317,9 +326,10 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// provider prompt caches actually reuse prefixes at.
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
-	ctx, scanSpan := telemetry.StartSpan(ctx, "scan.enumerate")
+	// Keep later scan work under the incoming parent, not the short-lived enumeration span.
+	enumerateCtx, scanSpan := telemetry.StartSpan(ctx, "scan.enumerate")
 	provider := NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner, a.args.MaxFileSizeBytes)
-	items, err := provider.Enumerate(ctx)
+	items, err := provider.Enumerate(enumerateCtx)
 	if err != nil {
 		scanSpan.End()
 		return nil, fmt.Errorf("enumerate files: %w", err)
@@ -353,7 +363,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	}
 
 	// Pre-run cost projection so users aren't surprised by a large scan.
-	est := estimateCost(a.items, a.planEnabled(), a.dedupEnabled(), a.summaryEnabled())
+	est := estimateCost(a.items, a.planEnabledFor, a.dedupEnabled(), a.summaryEnabled())
 	fmt.Fprintf(stdout.Writer(), "[ocr] estimated cost: %s\n", est)
 	if a.args.MaxTokensBudget > 0 {
 		fmt.Fprintf(stdout.Writer(), "[ocr] token budget: %s (dispatch stops once exceeded)\n", humanTokens(a.args.MaxTokensBudget))
@@ -399,7 +409,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	return comments, err
 }
 
-// lookupDiff returns the synthetic Diff for a path, used by llmloop.Runner
+// lookupDiff returns the synthetic Diff for a path, used by reviewtask.Runner
 // to resolve code_comment line numbers against the scanned file content.
 func (a *Agent) lookupDiff(path string) *model.Diff {
 	for i := range a.items {
@@ -720,7 +730,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 		// don't even queue work that would blow the budget.
 		if a.args.MaxTokensBudget > 0 {
 			used := a.runner.TotalTokensUsed()
-			projected := used + estimateFileTokens(it, a.planEnabled())
+			projected := used + estimateFileTokens(it, a.planEnabledFor)
 			if projected > a.args.MaxTokensBudget {
 				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + next-file est ≈ %s > budget %s) — skipping %s and remaining files\n",
 					humanTokens(used), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), it.Path)
@@ -791,10 +801,10 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 //     {{plan_guidance}}.
 //
 // Plan phase is skipped (and {{plan_guidance}} is filled with a "no plan"
-// sentinel) when Template.PlanTask is nil, args.SkipPlan is true, the file
-// is small enough that planning overhead outweighs gain, or the plan call
-// itself fails. Plan failure never blocks the main review — it falls back
-// to v1 (plan-less) behavior.
+// sentinel) when PLAN_TASK is missing, --no-plan is set, the file is binary
+// or empty, the file is below PLAN_MODE_LINE_THRESHOLD, or the plan call
+// fails. Plan failure never blocks the main review — it falls back to
+// plan-less behavior.
 func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, string, error) {
 	ctx, span := telemetry.StartSpan(ctx, "scan.subtask."+it.Path)
 	defer span.End()
@@ -862,7 +872,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string) string {
 	const noPlan = "(no pre-scan plan; review the entire file as usual)"
 
-	if !a.planEnabled() {
+	if !a.planEnabledFor(it) {
 		return noPlan
 	}
 	pt := a.args.Template.PlanTask

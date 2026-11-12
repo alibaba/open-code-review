@@ -8,7 +8,7 @@
     "**/package.json": "package_json.md",
     "**/Cargo.toml": "cargo_toml.md",
     "**/composer.json": "composer_json.md",
-    "**/*.{json,json5}": "json.md",
+    "**/*.{json,json5,jsonc}": "json.md",
     ".github/workflows/**/*.{yaml,yml}": "github_workflows.md",
     ".github/**/*.{yaml,yml}": "github_config.md",
     "**/*.{yaml,yml}": "yaml.md",
@@ -18,11 +18,16 @@
     "**/*.{hbs,mustache}": "handlebars_mustache.md",
     "**/*.{jinja2,j2}": "jinja.md",
     "**/*.pug": "pug.md",
+    "**/*.{ejs,liquid,njk}": "ejs_liquid_njk.md",
+    "**/*.{haml,slim}": "haml_slim.md",
+    "**/*.erb": "erb.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
     "**/*.{ts,js,tsx,jsx,mjs,cjs}": "ts_js_tsx_jsx.md",
     "**/*.{kt,kts}": "kotlin.md",
+    "**/*.scala": "scala.md",
     "**/*.{fs,fsi,fsx}": "fsharp.md",
+    "**/*.cs": "csharp.md",
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,cxx,hpp,hxx}": "cpp.md",
     "**/*.c": "c.md",
@@ -46,6 +51,8 @@
     "**/*.{jsonnet,libsonnet}": "jsonnet.md",
     "**/*.zig": "zig.md",
     "**/*.thrift": "thrift.md",
+    "**/*.{bzl,bazel,star}": "starlark.md",
+    "**/{BUILD,WORKSPACE}": "starlark.md",
     "**/*.capnp": "capnp.md",
     "**/*.{ml,mli}": "ocaml.md",
     "**/*.{re,rei}": "ocaml.md",
@@ -57,6 +64,7 @@
     "**/*.vy": "vyper.md",
     "**/*.rego": "rego.md",
     "**/*.{glsl,hlsl,wgsl,metal}": "shader.md",
-    "**/*.{ps1,psm1,psd1}": "powershell.md"
+    "**/*.{ps1,psm1,psd1}": "powershell.md",
+    "**/*.{clj,cljs,cljc,edn}": "clojure.md"
   }
 }
