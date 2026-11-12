@@ -542,6 +542,7 @@ func TestExecuteSubtask_Success(t *testing.T) {
 	tpl.MaxTokens = 100000
 
 	a := NewAgent(Args{
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		Template:         tpl,
 		LLMClient:        client,
 		Model:            "test",
@@ -600,6 +601,7 @@ func TestExecuteSubtask_WithPlan(t *testing.T) {
 	}
 
 	a := NewAgent(Args{
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		Template:         tpl,
 		LLMClient:        client,
 		Model:            "test",
@@ -700,6 +702,7 @@ func TestRun_FullPipeline(t *testing.T) {
 	tpl.MaxTokens = 100000
 
 	a := NewAgent(Args{
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		RepoDir:          repo,
 		Template:         tpl,
 		LLMClient:        client,
@@ -780,6 +783,7 @@ func TestRun_PlanThreshold(t *testing.T) {
 				}}},
 			})
 			agent := NewAgent(Args{
+				MainToolDefs:   []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 				RepoDir:        repo,
 				Template:       *scanTemplate,
 				LLMClient:      client,
@@ -1418,11 +1422,14 @@ func TestDispatchSubtasks_PersistsDedupedCommentsForResume(t *testing.T) {
 		},
 	}}
 	first := NewAgent(Args{
-		Template:         tpl,
-		LLMClient:        client,
-		Model:            "test-model",
-		Tools:            registry,
-		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}}},
+		Template:  tpl,
+		LLMClient: client,
+		Model:     "test-model",
+		Tools:     registry,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
 		CommentCollector: collector,
 		MaxConcurrency:   1,
 		SkipPlan:         true,
@@ -1460,11 +1467,14 @@ func TestDispatchSubtasks_PersistsDedupedCommentsForResume(t *testing.T) {
 	resumedRegistry.Freeze()
 	resumedClient := &fakeScanClient{}
 	resumed := NewAgent(Args{
-		Template:         tpl,
-		LLMClient:        resumedClient,
-		Model:            "test-model",
-		Tools:            resumedRegistry,
-		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}}},
+		Template:  tpl,
+		LLMClient: resumedClient,
+		Model:     "test-model",
+		Tools:     resumedRegistry,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
 		CommentCollector: resumedCollector,
 		MaxConcurrency:   1,
 		SkipPlan:         true,
@@ -1614,11 +1624,14 @@ func TestDispatchSubtasks_PreservesMixedDedupCheckpointProvenance(t *testing.T) 
 	registry.Register(&tool.CodeCommentProvider{Collector: collector})
 	registry.Freeze()
 	a := NewAgent(Args{
-		Template:         tpl,
-		LLMClient:        client,
-		Model:            "test-model",
-		Tools:            registry,
-		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}}},
+		Template:  tpl,
+		LLMClient: client,
+		Model:     "test-model",
+		Tools:     registry,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
 		CommentCollector: collector,
 		MaxConcurrency:   1,
 		SkipPlan:         true,
@@ -1677,6 +1690,7 @@ func TestDispatchSubtasks_ResumeRerunsChangedContent(t *testing.T) {
 	}
 	client := &fakeScanClient{responses: []*llm.ChatResponse{scanTaskDoneResponse()}}
 	a := NewAgent(Args{
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		Template:         makeTemplateWithFullScan(),
 		LLMClient:        client,
 		Model:            "new-model",
@@ -1739,6 +1753,7 @@ func TestDispatchSubtasks_ResumeMultiBatchAndChained(t *testing.T) {
 	tpl.BatchSize = 2
 	client := &fakeScanClient{responses: []*llm.ChatResponse{scanTaskDoneResponse(), scanTaskDoneResponse()}}
 	a := NewAgent(Args{
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		Template:         tpl,
 		LLMClient:        client,
 		Model:            "new-model",

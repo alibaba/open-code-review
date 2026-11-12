@@ -255,13 +255,17 @@ func TestExecuteReviewFilter_NoComments(t *testing.T) {
 }
 
 type filterRequestCaptureClient struct {
-	request llm.ChatRequest
-	calls   int
+	response *llm.ChatResponse
+	request  llm.ChatRequest
+	calls    int
 }
 
 func (c *filterRequestCaptureClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	c.request = req
 	c.calls++
+	if c.response != nil {
+		return c.response, nil
+	}
 	content := "I approve all comments."
 	return &llm.ChatResponse{
 		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
@@ -640,6 +644,14 @@ func TestExecuteGroupPlanPhase(t *testing.T) {
 	}
 }
 
+type planReferenceProvider struct{ calls int }
+
+func (p *planReferenceProvider) Tool() tool.Tool { return tool.FileRead }
+func (p *planReferenceProvider) Execute(context.Context, map[string]any) (string, error) {
+	p.calls++
+	return "unexpected read", nil
+}
+
 func TestPlanToolReferencesRemainReferenceOnly(test *testing.T) {
 	tpl, err := template.LoadDefault()
 	if err != nil {
@@ -653,9 +665,16 @@ func TestPlanToolReferencesRemainReferenceOnly(test *testing.T) {
 	if err != nil {
 		test.Fatal(err)
 	}
-	client := &filterRequestCaptureClient{}
+	response := agentTaskDoneResponse()
+	response.Choices[0].Message.ToolCalls[0].Function.Name = "file_read"
+	client := &filterRequestCaptureClient{response: response}
+	provider := &planReferenceProvider{}
+	registry := tool.NewRegistry()
+	registry.Register(provider)
+	tpl.MaxToolRequestTimes = 1
 	reviewer := New(Args{
 		Template:     *tpl,
+		Tools:        registry,
 		PlanToolDefs: references,
 		LLMClient:    client,
 		Model:        "test-model",
@@ -681,6 +700,14 @@ func TestPlanToolReferencesRemainReferenceOnly(test *testing.T) {
 		if strings.Contains(content, "- **"+name+"**:") {
 			test.Errorf("unexpected plan reference %s", name)
 		}
+	}
+
+	if provider.calls != 0 {
+		test.Fatal("plan executed a reference-only tool")
+	}
+	completed, _, err := reviewer.runner.RunMainTask(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "sample.go")
+	if err != nil || completed || provider.calls != 0 {
+		test.Fatalf("tool references granted main execution: completed=%v, calls=%d, err=%v", completed, provider.calls, err)
 	}
 }
 

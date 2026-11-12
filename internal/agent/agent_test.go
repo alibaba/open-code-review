@@ -1189,6 +1189,7 @@ func TestDispatchSubtasks_IncompleteMainTaskMarksPartialFailure(t *testing.T) {
 		},
 	}}
 	a := New(Args{
+		MainToolDefs:   []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		From:           "main",
 		To:             "feature",
 		LLMClient:      client,
@@ -1262,8 +1263,9 @@ func TestAgent_TokenAccumulation(t *testing.T) {
 	}}
 
 	a := New(Args{
-		LLMClient: client,
-		Model:     "fake",
+		MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
+		LLMClient:    client,
+		Model:        "fake",
 		Template: template.Template{
 			MaxTokens:           100000,
 			MaxToolRequestTimes: 10,

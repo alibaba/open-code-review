@@ -107,15 +107,6 @@ func splitPaths(raw string) []string {
 	return out
 }
 
-func buildScanToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *tool.Registry {
-	reg := tool.NewRegistry()
-	reg.Register(tool.NewFileRead(fr))
-	reg.Register(tool.NewFileFind(fr))
-	reg.Register(tool.NewCodeSearch(fr))
-	reg.Register(&tool.CodeCommentProvider{Collector: collector})
-	return reg
-}
-
 func executeScan(opts scanOptions) error {
 	return executeScanContext(context.Background(), opts)
 }
@@ -211,7 +202,7 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 		Mode:    tool.ModeWorkspace,
 		Runner:  cc.GitRunner,
 	}
-	tools := buildScanToolRegistry(rt.Collector, fileReader)
+	tools := buildToolRegistry(rt.Collector, fileReader)
 
 	ag := scan.NewAgent(scan.Args{
 		RepoDir:               cc.RepoDir,

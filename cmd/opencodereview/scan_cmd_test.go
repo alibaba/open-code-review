@@ -18,18 +18,6 @@ import (
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
-func TestBuildScanToolRegistry(t *testing.T) {
-	reg := buildScanToolRegistry(nil, nil)
-	for _, name := range []string{"file_read", "file_find", "code_search", "code_comment"} {
-		if _, ok := reg.Get(name); !ok {
-			t.Errorf("scan tools must include %s", name)
-		}
-	}
-	if _, ok := reg.Get(tool.FileReadDiff.Name()); ok {
-		t.Fatal("scan tools must not include file_read_diff")
-	}
-}
-
 func TestExecuteScanRejectsFileReadDiff(t *testing.T) {
 	freshOCRHome(t)
 	var requests atomic.Int64

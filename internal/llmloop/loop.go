@@ -15,6 +15,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
+	"github.com/alibaba/open-code-review/internal/tool"
 	"github.com/google/uuid"
 )
 
@@ -338,13 +339,14 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		reqCtx := r.RequestContext(ctx, taskKey, session.MainTask, rec.RequestNo)
 
 		_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
-		resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
+		request := llm.ChatRequest{
 			Model:     r.deps.Model,
 			Messages:  messages,
 			Tools:     r.task.ToolDefs,
 			MaxTokens: r.task.MaxCompletionTokens,
 			SessionID: sessionID,
-		})
+		}
+		resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, request)
 		duration := time.Since(startTime)
 		if err != nil {
 			rec.SetError(err, duration)
@@ -389,7 +391,7 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		// Reasoning is turn-level, so all tool calls in this turn share it.
 		thinking := resp.ReasoningContent()
 		for _, call := range calls {
-			cp := r.task.ExecuteTool(ctx, taskKey, call, rec, thinking)
+			cp := r.executeTool(ctx, request.Tools, taskKey, call, rec, thinking)
 			if cp.Action == Fail {
 				return false, StopNone, fmt.Errorf("task failed: %s", cp.Content)
 			} else if cp.Action == Complete {
@@ -455,6 +457,17 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 	return completed, stop, nil
 }
 
+// Check the current request before dispatch so restricted rounds cannot invoke
+// providers or completion actions that were only available in earlier rounds.
+func (r *Runner) executeTool(ctx context.Context, definitions []llm.ToolDef, taskKey string, call llm.ToolCall, rec *session.TaskRecord, thinking string) ToolOutcome {
+	for _, definition := range definitions {
+		if definition.Type == "function" && definition.Function.Name == call.Function.Name {
+			return r.task.ExecuteTool(ctx, taskKey, call, rec, thinking)
+		}
+	}
+	return ToolOutcome{Content: tool.NotAvailableMsg}
+}
+
 // tokenBudgetExceeded reports whether the run's aggregate token usage is past
 // Deps.MaxTokensBudget. A zero budget never trips.
 func (r *Runner) tokenBudgetExceeded() bool {
@@ -481,13 +494,14 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	reqCtx := r.RequestContext(ctx, taskKey, session.MainTask, rec.RequestNo)
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
-	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
+	request := llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  messages,
 		Tools:     graceDefs,
 		MaxTokens: r.task.MaxCompletionTokens,
 		SessionID: sessionID,
-	})
+	}
+	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, request)
 	duration := time.Since(startTime)
 	if err != nil {
 		rec.SetError(err, duration)
@@ -522,7 +536,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	failed := false
 	thinking := resp.ReasoningContent()
 	for _, call := range calls {
-		checkpoint := r.task.ExecuteTool(ctx, taskKey, call, rec, thinking)
+		checkpoint := r.executeTool(ctx, request.Tools, taskKey, call, rec, thinking)
 		completed = completed || checkpoint.Action == Complete
 		failed = failed || checkpoint.Action == Fail
 	}
