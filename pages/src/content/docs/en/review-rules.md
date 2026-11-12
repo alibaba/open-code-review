@@ -49,15 +49,29 @@ is always _some_ rule resolved.
 Three independent fields:
 
 - `include` — optional. Glob patterns that _bypass_ built-in default
-  exclude patterns (test-file exclusions — see below). It is not a
-  whitelist: files not matching any `include` pattern still proceed
-  through the `unsupported_ext` and `default_path` checks and may still
-  be reviewed.
+  exclude patterns (test-file exclusions — see below) **and the
+  extension allowlist**. It is not a whitelist: files not matching any
+  `include` pattern still proceed through the `unsupported_ext` and
+  `default_path` checks and may still be reviewed.
 - `exclude` — optional. Glob patterns for files OCR must _not_ review.
   Highest precedence among user-configured filters.
 - `rules` — array of `{path, rule}` entries, evaluated **in declaration
   order**. The first `path` whose glob matches the file determines the
   prompt OCR sends to the model for that file.
+
+`include` is also how an extension outside the built-in allowlist becomes
+reviewable — for example a Markdown contract that changes together with its
+code:
+
+```json
+{
+  "include": ["**/*.md"]
+}
+```
+
+A file matching the pattern skips the `unsupported_ext` gate; files outside
+it keep the normal checks. A `rules[].path` entry is not an inclusion filter
+— it only selects which rule text applies to a file.
 
 Each `rules` entry also accepts an optional third field:
 
