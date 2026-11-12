@@ -307,7 +307,6 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# 구현, 시그니처, 스크립트 파일.                                  |
 | `**/*.cs`                                       | `csharp.md` — C# 소스 파일. |
 | `**/*.rs`                                       | `rust.md`                                                                        |
-| `**/*.R`                                        | `r.md`                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                         |
 | `**/*.c`                                        | `c.md`                                                                           |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — Python 소스.                                                       |
@@ -318,6 +317,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{graphql,gql}`                            | `graphql.md` — GraphQL 스키마와 오퍼레이션.                                      |
 | `**/*.prisma`                                   | `prisma.md` — Prisma 스키마.                                                     |
 | `**/*.jl`                                       | `julia.md` — Julia 소스.                                                         |
+| `**/*.R`                                        | `r.md`                                                                           |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                |
 | `**/*.bicep`                                    | `bicep.md` — Bicep(Azure) 템플릿.                                                |
 | `**/*.nix`                          | `nix.md` — Nix 식과 flake.                                                         |
@@ -333,7 +333,6 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.capnp`                                    | `capnp.md` — Cap'n Proto 스키마 통신 호환성.                                     |
 | `**/*.{ml,mli}`                     | `ocaml.md` — OCaml 소스.                                                           |
 | `**/*.{re,rei}`                     | `ocaml.md` — ReasonML 소스.                                                        |
-| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL 및 Metal 셰이더.                                  |
 | `**/*.{v,sv,vh}`                                | `verilog.md` — Verilog 및 SystemVerilog RTL.                                     |
 | `**/*.{vhd,vhdl}`                               | `vhdl.md` — VHDL RTL.                                                            |
 | `**/*.m`                                        | `matlab.md`(또는 [내용 탐지](#content-sniffing-for-m-files)로 `objc.md`)         |
@@ -341,6 +340,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.sol`                                      | `solidity.md` — Solidity 스마트 컨트랙트.                                        |
 | `**/*.vy`                                       | `vyper.md` — Vyper 스마트 컨트랙트.                                              |
 | `**/*.rego`                                     | `rego.md` — Rego 정책 (OPA).                                                     |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL 및 Metal 셰이더.                                  |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell 스크립트, 모듈 및 데이터/매니페스트 파일.           |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — Clojure / ClojureScript 소스 코드 및 EDN 데이터. |
 | _(대체값)_                                      | `default.md`                                                                     |

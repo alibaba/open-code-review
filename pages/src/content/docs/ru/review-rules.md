@@ -325,7 +325,6 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — файлы реализации, сигнатур и скриптов F#.                                          |
 | `**/*.cs`                                       | `csharp.md` — исходные файлы C#. |
 | `**/*.rs`                                       | `rust.md`                                                                                        |
-| `**/*.R`                                        | `r.md`                                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                         |
 | `**/*.c`                                        | `c.md`                                                                                           |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — исходный код Python.                                                               |
@@ -336,6 +335,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{graphql,gql}`                            | `graphql.md` — схема и операции GraphQL.                                                         |
 | `**/*.prisma`                                   | `prisma.md` — схема Prisma.                                                                      |
 | `**/*.jl`                                       | `julia.md` — исходный код Julia.                                                                 |
+| `**/*.R`                                        | `r.md`                                                                                           |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                |
 | `**/*.bicep`                                    | `bicep.md` — шаблоны Bicep (Azure).                                                              |
 | `**/*.nix`                          | `nix.md` — выражения Nix и flake.                                                                |
@@ -351,7 +351,6 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.capnp`                                    | `capnp.md` — совместимость схем Cap'n Proto на уровне wire.                                      |
 | `**/*.{ml,mli}`                     | `ocaml.md` — исходный код OCaml.                                                                 |
 | `**/*.{re,rei}`                     | `ocaml.md` — исходный код ReasonML.                                                              |
-| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - шейдеры GLSL, HLSL, WGSL и Metal.                                                  |
 | `**/*.{v,sv,vh}`                                | `verilog.md` — RTL на Verilog и SystemVerilog.                                                   |
 | `**/*.{vhd,vhdl}`                               | `vhdl.md` — RTL на VHDL.                                                                         |
 | `**/*.m`                                        | `matlab.md` (или `objc.md` через [определение содержимого](#content-sniffing-for-m-files))       |
@@ -359,6 +358,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.sol`                                      | `solidity.md` — смарт-контракты Solidity.                                                        |
 | `**/*.vy`                                       | `vyper.md` — смарт-контракты Vyper.                                                              |
 | `**/*.rego`                                     | `rego.md` — политики Rego (OPA).                                                                 |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - шейдеры GLSL, HLSL, WGSL и Metal.                                                  |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — скрипты, модули и файлы данных/манифестов PowerShell.                          |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — исходный код Clojure / ClojureScript и данные EDN. |
 | _(fallback)_                                    | `default.md`                                                                                     |
