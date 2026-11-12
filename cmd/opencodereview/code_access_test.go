@@ -11,6 +11,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 func TestPrepareReviewCodeTools(test *testing.T) {
@@ -21,7 +22,7 @@ func TestPrepareReviewCodeTools(test *testing.T) {
 	head := revParse(test, repo, "HEAD")
 	runner := gitcmd.New(2)
 	for _, opts := range []reviewOptions{{from: previous, to: "HEAD"}, {commit: "HEAD"}} {
-		setup, err := prepareReviewCodeTools(context.Background(), repo, opts, runner, nil)
+		setup, err := prepareReviewCodeTools(context.Background(), repo, opts, runner, nil, nil, nil)
 		if err != nil {
 			test.Fatal(err)
 		}
@@ -42,7 +43,7 @@ func TestPrepareReviewCodeTools(test *testing.T) {
 		}
 	}
 	opts := reviewOptions{commit: "HEAD"}
-	setup, err := prepareReviewCodeTools(context.Background(), repo, opts, runner, nil)
+	setup, err := prepareReviewCodeTools(context.Background(), repo, opts, runner, nil, nil, nil)
 	if err != nil {
 		test.Fatal(err)
 	}
@@ -52,7 +53,7 @@ func TestPrepareReviewCodeTools(test *testing.T) {
 		test.Fatalf("new side moved with HEAD: %q %v", got, err)
 	}
 	for _, resumedOpts := range []reviewOptions{opts, {from: previous, to: "HEAD"}} {
-		resumed, err := prepareReviewCodeTools(context.Background(), repo, resumedOpts, runner, setup.resolution)
+		resumed, err := prepareReviewCodeTools(context.Background(), repo, resumedOpts, runner, setup.resolution, nil, nil)
 		if err != nil {
 			test.Fatal(err)
 		}
@@ -60,14 +61,24 @@ func TestPrepareReviewCodeTools(test *testing.T) {
 			test.Fatalf("resume lost comparison access or snapshot: %+v", resumed)
 		}
 	}
-	workspace, err := prepareReviewCodeTools(context.Background(), repo, reviewOptions{}, runner, nil)
+	workspace, err := prepareReviewCodeTools(context.Background(), repo, reviewOptions{}, runner, nil, nil, nil)
 	if err != nil || workspace.access != nil || workspace.reader.Mode != tool.ModeWorkspace || workspace.reader.Ref != "" {
 		test.Fatalf("workspace changed: %+v %v", workspace, err)
 	}
 	root := revParse(test, repo, "HEAD~4")
-	empty, err := prepareReviewCodeTools(context.Background(), repo, reviewOptions{commit: root}, runner, nil)
+	empty, err := prepareReviewCodeTools(context.Background(), repo, reviewOptions{commit: root}, runner, nil, nil, nil)
 	if err != nil || !empty.resolution.BaseIsEmpty || empty.access == nil {
 		test.Fatalf("root comparison: %+v %v", empty, err)
+	}
+}
+
+func TestPrepareReviewCodeToolsResolvesThroughInjectedRepository(t *testing.T) {
+	t.Setenv("PATH", "")
+	spec := vcs.ReviewSpec{Mode: vcs.MergeBase, Base: "trunk", Head: "feature"}
+	source := &preparedRepository{resolved: vcs.ResolvedReview{Provider: "example", Spec: spec, Base: "r41", Head: "r42", Content: vcs.ContentRef{Revision: "r42"}}}
+	setup, err := prepareReviewCodeTools(context.Background(), t.TempDir(), reviewOptions{from: "trunk", to: "feature"}, nil, nil, source, nil)
+	if err != nil || setup.resolution.ResolvedBase != "r41" || setup.reader.Content.Revision != "r42" || len(source.requests) != 1 {
+		t.Fatalf("injected comparison resolution: %+v, %v", setup, err)
 	}
 }
 
@@ -81,7 +92,7 @@ func TestPrepareReviewCodeToolsErrors(test *testing.T) {
 		{opts: reviewOptions{commit: "HEAD"}, resolution: &diff.InputResolution{}},
 		{opts: reviewOptions{commit: "HEAD"}, resolution: &diff.InputResolution{ResolvedHead: "HEAD"}},
 	} {
-		if _, err := prepareReviewCodeTools(context.Background(), repo, scenario.opts, nil, scenario.resolution); err == nil {
+		if _, err := prepareReviewCodeTools(context.Background(), repo, scenario.opts, nil, scenario.resolution, nil, nil); err == nil {
 			test.Fatalf("accepted invalid setup: %+v", scenario)
 		}
 	}

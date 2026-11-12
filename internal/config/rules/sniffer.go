@@ -5,15 +5,12 @@ package rules
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"io"
 	"strings"
 	"time"
 
-	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 // sniffTimeout bounds a single content peek. A peek is a best-effort hint, so
@@ -44,9 +41,8 @@ type systemLayer interface {
 // peek costs at most one read per ".m" file.
 type sniffer struct {
 	inner    systemLayer
-	repoDir  string
-	ref      string // git ref to read at; "" reads the working tree
-	runner   *gitcmd.Runner
+	files    vcs.FileSource
+	content  vcs.ContentRef
 	objcRule string // rule_docs/objc.md
 }
 
@@ -91,54 +87,29 @@ func (s *sniffer) sniffsAsObjC(path string) bool {
 	return looksLikeObjC(s.peekFirstLine(path))
 }
 
-// peekFirstLine returns the first non-blank line of path, read at s.ref when
-// set (so refs that are not checked out still resolve correctly) and from the
-// working tree otherwise. Any failure yields "", which leaves the path-based
-// match — matlab.md — in place.
+// peekFirstLine reads the first non-blank line at the selected content version.
+// Any failure leaves the path-based match in place.
 func (s *sniffer) peekFirstLine(path string) string {
-	if s.ref != "" {
-		return firstNonBlankLine(s.showAtRef(path))
-	}
-
-	f, err := os.Open(filepath.Join(s.repoDir, path))
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		if line := strings.TrimSpace(scanner.Text()); line != "" {
-			return line
-		}
-	}
-	return ""
-}
-
-// showAtRef reads path's content at s.ref via `git show <ref>:<path>`.
-// Returns "" when the file does not exist at that ref or git fails.
-func (s *sniffer) showAtRef(path string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), sniffTimeout)
 	defer cancel()
-
-	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", s.ref + ":" + path}
-
-	if s.runner != nil {
-		out, err := s.runner.Output(ctx, s.repoDir, args...)
-		if err != nil {
-			return ""
+	var firstLine string
+	err := s.files.ReadFile(ctx, s.content, path, func(r io.Reader) error {
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if line := strings.TrimSpace(scanner.Text()); line != "" {
+				firstLine = line
+				return nil
+			}
 		}
-		return string(out)
-	}
-
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = s.repoDir
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+		return scanner.Err()
+	})
+	if err != nil || ctx.Err() != nil {
 		return ""
 	}
-	return stdout.String()
+	return firstLine
 }
 
 // objcSniffPrefixes are first-line signals for Objective-C. MATLAB comments

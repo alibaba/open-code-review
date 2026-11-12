@@ -12,7 +12,6 @@ import (
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/delegate"
-	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/tool"
 	"github.com/spf13/cobra"
 )
@@ -106,8 +105,16 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 	if err := validateReviewRefs(cc.RepoDir, reviewOpts); err != nil {
 		return nil, err
 	}
+	reviewOpts.rulePath, reviewOpts.excludes = opts.rulePath, opts.excludes
+	if err := prepareRepositoryReview(context.Background(), cc, reviewOpts); err != nil {
+		return nil, err
+	}
 
-	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
+	backgroundCommit := opts.commit
+	if backgroundCommit != "" {
+		backgroundCommit = cc.Review.Head
+	}
+	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, backgroundCommit)
 	if err != nil {
 		return nil, err
 	}
@@ -123,12 +130,14 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 // not the limit that applies to delegated work.
 func (dc *delegateContext) preview(ctx context.Context) (*agent.DiffPreview, error) {
 	return agent.Preview(ctx, agent.Args{
-		RepoDir:    dc.cc.RepoDir,
-		From:       dc.opts.from,
-		To:         dc.opts.to,
-		Commit:     dc.opts.commit,
-		FileFilter: dc.cc.FileFilter,
-		GitRunner:  dc.cc.GitRunner,
+		RepoDir:        dc.cc.RepoDir,
+		From:           dc.opts.from,
+		To:             dc.opts.to,
+		Commit:         dc.opts.commit,
+		FileFilter:     dc.cc.FileFilter,
+		GitRunner:      dc.cc.GitRunner,
+		Repository:     dc.cc.Repository,
+		ResolvedReview: dc.cc.Review,
 	})
 }
 
@@ -137,8 +146,14 @@ func (dc *delegateContext) mergeBase(ctx context.Context) string {
 	if dc.opts.from == "" || dc.opts.to == "" {
 		return ""
 	}
-	provider := diff.NewProvider(dc.cc.RepoDir, dc.opts.from, dc.opts.to, dc.cc.GitRunner)
-	return provider.MergeBase(ctx)
+	if dc.cc.Review != nil {
+		return dc.cc.Review.Base
+	}
+	resolved, err := dc.cc.Repository.ResolveReview(ctx, agent.ReviewSpec(dc.opts.from, dc.opts.to, dc.opts.commit))
+	if err != nil {
+		return ""
+	}
+	return resolved.Base
 }
 
 // reviewMode returns the string mode identifier.

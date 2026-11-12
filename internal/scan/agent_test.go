@@ -6,6 +6,7 @@ package scan
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 func newAgentForTest(t *testing.T, tpl template.ScanTemplate) *Agent {
@@ -139,6 +141,51 @@ func TestPreview_EmptyResultEntriesIsNonNilSlice(t *testing.T) {
 	}
 	if len(got.Entries) != 0 {
 		t.Errorf("expected 0 entries, got %d", len(got.Entries))
+	}
+}
+
+func TestScanAgent_InjectedSourcePreviewAndRun(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repo := t.TempDir()
+	writeFile(t, repo, "main.go", []byte("disk\n"))
+	t.Setenv("PATH", "")
+	reads := 0
+	source := scanFileSource{
+		list: func(context.Context, vcs.ContentRef) ([]string, error) { return []string{"main.go"}, nil },
+		read: func(_ context.Context, ref vcs.ContentRef, _ string, consume func(io.Reader) error) error {
+			if !ref.IsWorkspace() {
+				t.Errorf("scan selected revision %q", ref.Revision)
+			}
+			reads++
+			return consume(strings.NewReader("package main\nfunc main() {}\n"))
+		},
+	}
+	client := &fakeScanClient{responses: []*llm.ChatResponse{{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{ToolCalls: []llm.ToolCall{{
+			ID: "done", Type: "function", Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"},
+		}}}}},
+	}}}
+	args := Args{
+		RepoDir: repo, Files: source, Template: makeTemplateWithFullScan(),
+		LLMClient: client, Model: "test", MaxConcurrency: 1,
+		SkipPlan: true, SkipDedup: true, SkipSummary: true,
+	}
+	preview, err := Preview(t.Context(), args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.ReviewableCount != 1 || preview.TotalInsertions != 2 {
+		t.Errorf("preview = %+v", preview)
+	}
+	a := NewAgent(args)
+	if _, err := a.Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.items) != 1 || a.items[0].Content != "package main\nfunc main() {}\n" {
+		t.Errorf("reviewed source items = %+v", a.items)
+	}
+	if reads != 2 || client.calls != 1 {
+		t.Errorf("source reads = %d, LLM calls = %d", reads, client.calls)
 	}
 }
 

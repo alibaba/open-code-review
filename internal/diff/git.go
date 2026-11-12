@@ -46,6 +46,7 @@ const (
 	ModeWorkspace Mode = iota // current workspace (staged + unstaged + untracked)
 	ModeCommit                // single commit vs its parent
 	ModeRange                 // merge-base(from,to)..to
+	ModeDirect                // exact from..to, without resolving a merge-base
 )
 
 // Provider retrieves and parse git diffs from a repository.
@@ -60,7 +61,8 @@ type Provider struct {
 	// Commit mode parameter
 	commit string // single commit hash/ref
 
-	mergeBase string // cached common ancestor for range mode
+	mergeBase     string  // cached common ancestor for range mode
+	workspaceBase *string // pinned HEAD; an empty value represents an unborn repository
 }
 
 // DiffSet separates the diffs a review may process from files excluded by the
@@ -125,6 +127,19 @@ func NewWorkspaceProvider(repoDir string, runner *gitcmd.Runner) *Provider {
 	}
 }
 
+// NewDirectProvider compares already resolved revisions without changing the base.
+func NewDirectProvider(repoDir, base, head string, runner *gitcmd.Runner) *Provider {
+	return &Provider{repoDir: repoDir, mode: ModeDirect, from: base, to: head, runner: runner}
+}
+
+// NewResolvedWorkspaceProvider keeps the comparison base frozen while reading
+// mutable workspace contents. An empty base selects the unborn repository case.
+func NewResolvedWorkspaceProvider(repoDir, base string, runner *gitcmd.Runner) *Provider {
+	p := NewWorkspaceProvider(repoDir, runner)
+	p.workspaceBase = &base
+	return p
+}
+
 // InputResolution carries this run's frozen, immutable commit endpoints, per the
 // run-manifest input-mode matrix. An empty field means "not applicable or not
 // resolvable" — a root commit and a merge commit have no single comparison base,
@@ -157,8 +172,11 @@ type InputResolution struct {
 // endpoint is reported as an empty field, never a fabricated SHA.
 func (p *Provider) ResolveInput(ctx context.Context) InputResolution {
 	switch p.mode {
-	case ModeRange:
-		base := p.MergeBase(ctx)
+	case ModeRange, ModeDirect:
+		base := p.from
+		if p.mode == ModeRange {
+			base = p.MergeBase(ctx)
+		}
 		head := p.resolveCommit(ctx, p.to)
 		r := InputResolution{ResolvedBase: base, ResolvedHead: head}
 		if base != "" && head != "" {
@@ -219,8 +237,11 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 	var combined strings.Builder
 
 	switch p.mode {
-	case ModeRange:
-		base := p.MergeBase(ctx)
+	case ModeRange, ModeDirect:
+		base := p.from
+		if p.mode == ModeRange {
+			base = p.MergeBase(ctx)
+		}
 		if base == "" {
 			return DiffSet{}, fmt.Errorf("cannot find merge-base between %s and %s", p.from, p.to)
 		}
@@ -266,7 +287,7 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 
 	var ref string
 	switch p.mode {
-	case ModeRange:
+	case ModeRange, ModeDirect:
 		ref = p.to
 	case ModeCommit:
 		ref = p.commit
@@ -626,6 +647,28 @@ func firstLine(out string) string {
 // failure if there was one. Stderr is returned separately so the caller can
 // quote it without risking diff content in the error; see runGitSplit.
 func (p *Provider) workspaceTrackedDiff(ctx context.Context) (string, string, error) {
+	if p.workspaceBase != nil {
+		args := []string{"-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U" + fmt.Sprint(DiffContextLines)}
+		base := *p.workspaceBase
+		if base == "" {
+			// The workspace was unborn at resolution. Compare with an empty tree
+			// even if HEAD appears before this read; --staged would use that new HEAD.
+			out, stderr, err := p.runGitSplit(ctx, "hash-object", "-t", "tree", "--stdin")
+			if err != nil {
+				return "", stderr, err
+			}
+			base = strings.TrimSpace(out)
+		}
+		args = append(args, "--end-of-options", base, "--")
+		out, stderr, err := p.runGitSplit(ctx, args...)
+		if err != nil || out != "" {
+			return out, stderr, err
+		}
+		// Preserve staged-only changes when unstaged edits cancel their net
+		// workspace diff, but compare the index against the same frozen base.
+		args = append(args[:len(args)-3], "--staged", "--end-of-options", base, "--")
+		return p.runGitSplit(ctx, args...)
+	}
 	out, _, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", "HEAD", "--")
 	if err == nil && out != "" {
 		return out, "", nil

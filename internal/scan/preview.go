@@ -26,7 +26,7 @@ func Preview(ctx context.Context, args Args) (*model.Preview, error) {
 // Agent silently observe the preview's enumeration instead of re-running
 // it.) Callers that want to reuse the enumeration should call Run once.
 func (a *Agent) preview(ctx context.Context) (*model.Preview, error) {
-	provider := NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner, a.args.MaxFileSizeBytes)
+	provider := a.fileProvider()
 	items, err := provider.Enumerate(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("enumerate files: %w", err)
