@@ -16,7 +16,237 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/session"
 )
+
+func TestComparisonToolsReachModelAndManifest(test *testing.T) {
+	freshOCRHome(test)
+	repo, err := resolveRepoDir(initTestGitRepo(test))
+	if err != nil {
+		test.Fatal(err)
+	}
+	commitFile(test, repo, "helper.go", "package example\nconst Helper = 1\n", "old helper")
+	commitFile(test, repo, "version.go", "package example\nconst Value = \"old-marker\"\n", "old")
+	base := revParse(test, repo, "HEAD")
+	commitFile(test, repo, "helper.go", "package example\nconst Helper = 2\n", "change helper")
+	advancedBase := revParse(test, repo, "HEAD")
+	commitFile(test, repo, "version.go", "package example\nconst Value = \"new-marker\"\n", "new")
+	head := revParse(test, repo, "HEAD")
+	var mutex sync.Mutex
+	called := false
+	seen := make(map[string]bool)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body struct {
+			Tools    []llm.ToolDef `json:"tools"`
+			Messages []struct {
+				Role       string          `json:"role"`
+				Name       string          `json:"name"`
+				ToolCallID string          `json:"tool_call_id"`
+				Content    json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			test.Error(err)
+			http.Error(writer, "bad request", http.StatusBadRequest)
+			return
+		}
+		mutex.Lock()
+		defer mutex.Unlock()
+		for _, message := range body.Messages {
+			if message.Role != "tool" {
+				continue
+			}
+			var content string
+			if err := json.Unmarshal(message.Content, &content); err != nil {
+				test.Error(err)
+				continue
+			}
+			if strings.HasPrefix(content, "SIDE: old\nREVISION: "+base+"\n") {
+				seen[message.ToolCallID] = true
+			} else if strings.HasPrefix(message.ToolCallID, "old-") {
+				test.Errorf("old-side tool result lost its source: %s", content)
+			}
+		}
+		for _, definition := range body.Tools {
+			name := definition.Function.Name
+			if name == "file_read" || name == "file_find" || name == "code_search" {
+				properties := definition.Function.Parameters["properties"].(map[string]any)
+				if _, exists := properties["side"]; !exists {
+					test.Errorf("model did not receive side for %s", name)
+				}
+			}
+		}
+		response := `{"id":"done","object":"chat.completion","model":"test-model","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[{"id":"done","type":"function","function":{"name":"task_done","arguments":"{\"state\":\"DONE\"}"}}]}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`
+		if len(body.Tools) == 0 {
+			response = `{"id":"plan","object":"chat.completion","model":"test-model","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Inspect the changed file."}}]}`
+		} else if !called {
+			called = true
+			response = `{"id":"read","object":"chat.completion","model":"test-model","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[{"id":"old-read","type":"function","function":{"name":"file_read","arguments":"{\"file_path\":\"version.go\",\"side\":\"old\"}"}},{"id":"old-search","type":"function","function":{"name":"code_search","arguments":"{\"search_text\":\"old-marker\",\"side\":\"old\"}"}},{"id":"old-find","type":"function","function":{"name":"file_find","arguments":"{\"query_name\":\"version.go\",\"side\":\"old\"}"}}]}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		if _, err := writer.Write([]byte(response)); err != nil {
+			test.Error(err)
+		}
+	}))
+	defer server.Close()
+	test.Setenv("OCR_LLM_URL", server.URL+"/v1/chat/completions")
+	test.Setenv("OCR_LLM_TOKEN", "test-token")
+	test.Setenv("OCR_LLM_MODEL", "test-model")
+	test.Setenv("OCR_LLM_PROTOCOL", "openai")
+	test.Setenv("OCR_USE_ANTHROPIC", "false")
+	output := filepath.Join(test.TempDir(), "result.json")
+	opts, err := parseReviewFlags([]string{"--repo", repo, "--from", base, "--to", "HEAD", "--exclude", "helper.go", "--format", "json", "--audience", "agent", "--output", output})
+	if err != nil {
+		test.Fatal(err)
+	}
+	if err := executeReview(opts); err != nil {
+		test.Fatal(err)
+	}
+	mutex.Lock()
+	if len(seen) != 3 {
+		test.Errorf("expected all old-side results, got %v", seen)
+	}
+	mutex.Unlock()
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		test.Fatal(err)
+	}
+	var result jsonOutput
+	if err := json.Unmarshal(raw, &result); err != nil {
+		test.Fatal(err)
+	}
+	if result.Manifest == nil || result.Manifest.Input.ResolvedBase != base || result.Manifest.Input.ResolvedHead != head {
+		test.Fatalf("manifest lost comparison endpoints: %+v", result.Manifest)
+	}
+	if strings.Contains(string(raw), "code_access_profile") {
+		test.Fatal("manifest persisted a code access profile")
+	}
+	state, err := loadReviewResumeState(repo, reviewOptions{resume: result.SessionID, from: base, to: "HEAD"})
+	if err != nil {
+		test.Fatal(err)
+	}
+	if state.Manifest == nil || state.Manifest.Input.ResolvedBase != base || state.Manifest.Input.ResolvedHead != head {
+		test.Fatalf("persisted endpoints did not survive resume loading: %+v", state.Manifest)
+	}
+
+	test.Run("equivalent refs preserve reuse", func(test *testing.T) {
+		resumed := opts
+		resumed.resume = result.SessionID
+		resumed.from = "HEAD~2"
+		resumed.to = head
+		resumed.outputPath = filepath.Join(test.TempDir(), "resumed.json")
+		if err := executeReview(resumed); err != nil {
+			test.Fatal(err)
+		}
+		raw, err := os.ReadFile(resumed.outputPath)
+		if err != nil {
+			test.Fatal(err)
+		}
+		var result jsonOutput
+		if err := json.Unmarshal(raw, &result); err != nil {
+			test.Fatal(err)
+		}
+		if result.Manifest == nil || len(result.Manifest.Coverage.Reused) != 1 || result.Manifest.Input.ResolvedBase != base || result.Manifest.Input.ResolvedHead != head {
+			test.Fatalf("equivalent refs lost the comparison or reuse: %+v", result.Manifest)
+		}
+	})
+
+	test.Run("legacy current-only session uses comparison tools", func(test *testing.T) {
+		parent := session.New(repo, "feature", "test-model", session.SessionOptions{
+			ReviewMode: session.ReviewModeRange, DiffFrom: base, DiffTo: head, Operation: session.OperationReview,
+		})
+		builder := parent.Manifest()
+		builder.SetRepository(result.Manifest.Repository)
+		builder.SetInput(result.Manifest.Input)
+		builder.SetExecution(result.Manifest.Execution)
+		for _, item := range result.Manifest.Coverage.Selected {
+			if err := builder.RegisterSelected(item); err != nil {
+				test.Fatal(err)
+			}
+			if err := builder.MarkFailed(item.ItemID, session.FailureProvider, "interrupted request"); err != nil {
+				test.Fatal(err)
+			}
+		}
+		manifest, err := builder.Finalize(0)
+		if err != nil {
+			test.Fatal(err)
+		}
+		parent.SetFinalManifest(&manifest)
+		if err := parent.Finalize(); err != nil {
+			test.Fatal(err)
+		}
+		path, err := session.SessionFilePath(repo, parent.SessionID)
+		if err != nil {
+			test.Fatal(err)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			test.Fatal(err)
+		}
+		legacy := strings.Replace(string(raw), `"execution":{`, `"execution":{"code_access_profile":"current-only/v1",`, 1)
+		if legacy == string(raw) {
+			test.Fatal("legacy session fixture has no execution metadata")
+		}
+		if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+			test.Fatal(err)
+		}
+		mutex.Lock()
+		called = false
+		seen = make(map[string]bool)
+		mutex.Unlock()
+		resumed := opts
+		resumed.resume = parent.SessionID
+		resumed.outputPath = filepath.Join(test.TempDir(), "legacy-resumed.json")
+		if err := executeReview(resumed); err != nil {
+			test.Fatal(err)
+		}
+		mutex.Lock()
+		if len(seen) != 3 {
+			test.Errorf("legacy resume did not execute all old-side tools: %v", seen)
+		}
+		mutex.Unlock()
+		raw, err = os.ReadFile(resumed.outputPath)
+		if err != nil {
+			test.Fatal(err)
+		}
+		var result jsonOutput
+		if err := json.Unmarshal(raw, &result); err != nil {
+			test.Fatal(err)
+		}
+		if result.Manifest == nil || len(result.Manifest.Coverage.Completed) != 1 || len(result.Manifest.Coverage.Reused) != 0 {
+			test.Fatalf("legacy resume did not complete the pending file: %+v", result.Manifest)
+		}
+		if strings.Contains(string(raw), "code_access_profile") {
+			test.Fatal("legacy resume preserved a code access profile")
+		}
+	})
+
+	commitFile(test, repo, "helper.go", "package example\nconst Helper = 3\n", "advance head")
+	advancedHead := revParse(test, repo, "HEAD")
+	for _, scenario := range []struct {
+		name string
+		from string
+		to   string
+	}{
+		{name: "changed base with identical selected patch", from: advancedBase, to: head},
+		{name: "changed head with identical selected patch", from: base, to: advancedHead},
+	} {
+		test.Run(scenario.name, func(test *testing.T) {
+			resumed := opts
+			resumed.resume = result.SessionID
+			resumed.from = scenario.from
+			resumed.to = scenario.to
+			resumed.outputPath = filepath.Join(test.TempDir(), "rejected.json")
+			before := countSessionFiles(test, repo)
+			if err := executeReview(resumed); err == nil || !strings.Contains(err.Error(), "comparison endpoints changed") {
+				test.Errorf("expected endpoint rejection despite an identical selected patch, got %v", err)
+			}
+			if after := countSessionFiles(test, repo); after != before {
+				test.Errorf("rejected resume created %d session files", after-before)
+			}
+		})
+	}
+}
 
 func TestCommandsUseTaskToolBindings(test *testing.T) {
 	for _, mode := range []string{"review", "scan"} {
@@ -91,6 +321,15 @@ func TestCommandsUseTaskToolBindings(test *testing.T) {
 				}
 				if !reflect.DeepEqual(names, want) {
 					test.Errorf("request tools = %v, want %v", names, want)
+				}
+				base, err := loadToolDefs(want)
+				if err != nil {
+					test.Fatal(err)
+				}
+				baseJSON, _ := json.Marshal(base)
+				requestJSON, _ := json.Marshal(definitions)
+				if string(baseJSON) != string(requestJSON) {
+					test.Error("current-only command changed the model-visible tool definitions")
 				}
 			}
 			if toolRequests == 0 {

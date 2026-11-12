@@ -6,7 +6,7 @@ sidebar:
 
 OCR ships with **six built-in tools** the LLM can call during a review.
 This page documents each tool's purpose, input schema, and example
-input/output. The full machine-readable definitions live in
+input/output. The base machine-readable definitions live in
 [`internal/config/toolsconfig/tools.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/toolsconfig/tools.json).
 
 ## Tool availability per phase
@@ -30,7 +30,7 @@ The default diff-review selections are:
 | ---------------- | ---- | ---- | --------------------------------------------------------- |
 | `task_done`      | ✗    | ✓    | Signal "I'm finished" — terminates the loop.              |
 | `code_comment`   | ✗    | ✓    | Emit a review comment with line range + suggestion.       |
-| `file_read`      | ✓    | ✓    | Read a slice of a file from the post-change snapshot.     |
+| `file_read`      | ✓    | ✓    | Read a slice of a file from the selected comparison side. |
 | `file_read_diff` | ✓    | ✓    | Read another file's diff to confirm a cross-file concern. |
 | `file_find`      | ✓    | ✓    | Locate files by filename keyword.                         |
 | `code_search`    | ✓    | ✓    | Grep across the repo (literal or regex).                  |
@@ -50,6 +50,59 @@ Built-in tool definitions ship with OCR and cannot be overridden at runtime.
 Use [review rules](../review-rules/) for project guidance and [MCP](../mcp/)
 for external business context. See [migration guidance](#customizing-tools)
 if you previously supplied a custom tools file.
+
+## Comparison sides
+
+Commit and range reviews, including resumed sessions, expose an optional `side` parameter on
+`file_read`, `code_search`, and `file_find`. Omit it, or pass `"new"`, to
+keep the default behavior and output format. Pass `"old"` to read, search,
+or enumerate the previous side of the same comparison:
+
+```json
+{"file_path": "src/foo.go", "start_line": 10, "end_line": 80, "side": "old"}
+{"search_text": "OldAPI", "file_patterns": ["src/"], "side": "old"}
+{"query_name": "foo.go", "side": "old"}
+```
+
+| Review input | New side | Old side |
+| --- | --- | --- |
+| `--from BASE --to HEAD` | Frozen head commit | Merge-base of the frozen endpoints, not the target branch tip |
+| `--commit COMMIT` | Frozen commit | First parent, including for merge commits |
+| Root commit | Frozen commit | Empty tree |
+
+The diff and all three tools share these immutable endpoints. Paths and line
+numbers belong to the selected side. For renamed files, use the old path on
+the old side; the tools do not translate names or fall back to another version.
+Deleted files remain accessible on the old side. A root commit's old side
+has no files: reads report a missing file, while searches and enumeration
+return empty results. Unavailable Git objects and Git failures are errors,
+not evidence of an empty tree.
+Commits at a shallow boundary must be deepened before review, even if their
+parent objects are already available locally, so Git's diff and old-side
+tools agree on the comparison base.
+
+Old-side results start with `SIDE: old` and `REVISION: <commit-sha>`, or
+`SOURCE: empty-tree` for an empty tree. Old-side errors also identify their
+source. Existing line and match limits apply to both sides. Only the strings
+`"new"` and `"old"` are accepted; null, empty strings, and arbitrary refs are
+invalid.
+
+Workspace reviews and scans retain their existing definitions, prompts, and
+default tool output formats. They do not expose `side` and reject it if supplied.
+The shared `tools.json` catalog remains the source of the current-only
+definitions and does not declare `side`. During setup, comparison reviews use
+`WithComparisonSides` to derive their callable definitions and planning
+references from that catalog, adding `side` and updating the descriptions
+without modifying the base definitions.
+
+Resuming a commit or range review uses the current built-in tools and requires
+the same resolved old and new endpoints, even when the selected patches are
+unchanged: context elsewhere in either tree may have influenced the previous
+review. Different ref names that resolve to the same endpoints remain valid.
+If either endpoint changes or an older session lacks enough endpoint information
+to verify the comparison, start a new review instead of resuming. Completed
+files are reused; pending files are reviewed with the current tools. Start a
+new review to recheck every file with the current capabilities.
 
 ## `task_done`
 
@@ -153,7 +206,8 @@ find the spot yourself".
 
 ## `file_read`
 
-Read a range of lines from a file in its **post-change** form.
+Read a range of lines from a file in its **post-change** form by default.
+Commit and range reviews also support the optional [comparison side](#comparison-sides).
 
 ### Schema
 
@@ -196,8 +250,9 @@ separator so the model can quote line numbers precisely in subsequent
 - **500 lines max per call.** Larger ranges are truncated, `IS_TRUNCATED:
 true` is set, and a trailing `Note: Results truncated to 500 lines.
 Please narrow your line range.` is appended.
-- Reads only the **modified version** of the file. To see the old
-  version, use `file_read_diff`.
+- Defaults to the **modified version** of the file. In comparison reviews,
+  use `side: "old"` to read the full old file, or `file_read_diff` to inspect
+  the patch.
 
 When the model needs surrounding context (for a comment about a
 function it can only see in the diff), it should compute the range

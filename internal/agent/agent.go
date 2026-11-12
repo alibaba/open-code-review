@@ -139,11 +139,8 @@ type Args struct {
 	Resume *session.ResumeState
 
 	// SealedInput pins this run to commit endpoints a pre-flight resolve already
-	// froze, instead of resolving From/To/Commit again. Set only on the resume
-	// path, where admission compared an identity derived from those endpoints:
-	// re-resolving a raw ref here could read a commit the admitted identity never
-	// covered, and the mismatch would surface only after the child session and
-	// manifest existed. Nil means resolve normally, which is every non-resume run.
+	// froze, instead of resolving From/To/Commit again. Admission and code tools
+	// must use the same immutable endpoints as the diff.
 	SealedInput *diff.InputResolution
 
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
