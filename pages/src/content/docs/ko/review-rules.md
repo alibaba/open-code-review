@@ -277,7 +277,8 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 `include` 규칙으로 되돌릴 수 있는 것은 후자뿐입니다.
 
 위 패턴 중 하나에 걸리는 파일을 **리뷰하고 싶다면** 사용자 `include` 목록에
-넣으세요. `include`가 기본 경로 관문을 덮어씁니다.
+넣으세요. `include`가 기본 경로 관문(확장자가 내장 허용 목록에 없다면
+`unsupported_ext` 관문도)을 덮어씁니다.
 
 ## 파일별 규칙 해석 {#rule-resolution-per-file}
 

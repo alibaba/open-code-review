@@ -264,7 +264,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 `include` 规则重新纳入评审。
 
 要**评审**一个匹配上述任一模式的文件，把它加入用户 `include` 列表——那会
-覆盖 default-path 门。
+覆盖 default-path 门（如果扩展名不在内置允许列表中，也会覆盖 `unsupported_ext` 门）。
 
 ## 每文件的规则解析
 

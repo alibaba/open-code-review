@@ -295,7 +295,9 @@ is reported as `default_path`. Only the second can be brought back by an
 `include` rule.
 
 To **review** a file that matches one of these patterns, add
-it to the user `include` list — that overrides the default-path gate.
+it to the user `include` list — that overrides the default-path gate (and, for
+a file whose extension is not on the built-in allowlist, the `unsupported_ext`
+gate).
 
 ## Rule resolution per file
 

@@ -229,7 +229,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 同じディレクトリは、より早い [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go) の diff 層でもフィルタリングされます。このリストはパスの接頭辞で照合するため、**リポジトリルート**のディレクトリしか捕捉しません。`vendor/pkg/x.go` はファイルごとのフィルタに届かず `provider_directory` として報告され、`api/vendor/pkg/x.go` は届いて `default_path` で除外されます。`include` ルールで戻せるのは後者だけです。
 
-上記いずれかのパターンに一致するファイルを**レビューする**には、それをユーザー `include` リストに追加してください。それが default-path ゲートを上書きします。
+上記いずれかのパターンに一致するファイルを**レビューする**には、それをユーザー `include` リストに追加してください。それが default-path ゲート（拡張子が組み込みの許可リストにない場合は `unsupported_ext` ゲートも）を上書きします。
 
 ## ファイルごとのルール解決
 
