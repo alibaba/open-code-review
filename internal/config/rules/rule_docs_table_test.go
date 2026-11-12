@@ -126,8 +126,8 @@ func embeddedPathRuleMap(t *testing.T) map[string]string {
 // document named on the row is the one the map points at (a translated row is
 // just as able to name the wrong document as to go missing).
 //
-// Relative row order is not asserted: this test checks table membership rather
-// than matching precedence.
+// Relative row order is asserted separately, by
+// TestReviewRulesGuideListsPatternsInMatchingOrder.
 func TestReviewRulesGuideListsEverySystemRulePattern(t *testing.T) {
 	mappings := embeddedPathRuleMap(t)
 	for _, locale := range reviewRulesLocales {
@@ -167,6 +167,83 @@ func TestReviewRulesGuideListsEverySystemRulePattern(t *testing.T) {
 			for glob := range listed {
 				if _, ok := mappings[glob]; !ok {
 					t.Errorf("%s lists %q, which is not in system_rules.json", page, glob)
+				}
+			}
+		})
+	}
+}
+
+// orderedPathRulePatterns returns the embedded path_rule_map's globs in
+// declaration order. The sibling helper decodes into a map because membership
+// is all it needs; order is the whole point here, so this goes through
+// SystemRule, whose PathRules slice preserves the order the resolver matches in.
+func orderedPathRulePatterns(t *testing.T) []string {
+	t.Helper()
+	data, err := rulesFS.ReadFile("system_rules.json")
+	if err != nil {
+		t.Fatalf("read embedded system_rules.json: %v", err)
+	}
+	var rule SystemRule
+	if err := json.Unmarshal(data, &rule); err != nil {
+		t.Fatalf("unmarshal system_rules.json: %v", err)
+	}
+	if len(rule.PathRules) < 2 {
+		t.Fatalf("system_rules.json has %d path rules, too few for an order check", len(rule.PathRules))
+	}
+	patterns := make([]string, 0, len(rule.PathRules))
+	for _, pathRule := range rule.PathRules {
+		patterns = append(patterns, pathRule.Pattern)
+	}
+	return patterns
+}
+
+// TestReviewRulesGuideListsPatternsInMatchingOrder holds the guide to the claim
+// it makes about itself.
+//
+// The table is introduced as listing every pattern "in relative matching
+// order", and that ordering is the only thing in the page that tells a reader
+// which of two overlapping globs wins -- `**/*.m` resolving to matlab.md rather
+// than objc.md is a question of position, not of the row's own text. Membership
+// alone cannot catch a row that drifts: two rows sat out of position in all five
+// locales while the membership check above passed.
+//
+// Only relative order is asserted. The table carries non-glob rows, such as the
+// fallback, and where they sit is presentation.
+func TestReviewRulesGuideListsPatternsInMatchingOrder(t *testing.T) {
+	patterns := orderedPathRulePatterns(t)
+	rank := make(map[string]int, len(patterns))
+	for i, pattern := range patterns {
+		rank[pattern] = i
+	}
+
+	for _, locale := range reviewRulesLocales {
+		t.Run(locale, func(t *testing.T) {
+			page := filepath.Join("..", "..", "..", "pages", "src", "content", "docs", locale, "review-rules.md")
+			body, err := os.ReadFile(page)
+			if err != nil {
+				t.Fatalf("read %s: %v", page, err)
+			}
+
+			var seen []string
+			for _, line := range strings.Split(string(body), "\n") {
+				row := reviewRulesTableRow.FindStringSubmatch(line)
+				if row == nil {
+					continue
+				}
+				for _, match := range reviewRulesTablePattern.FindAllStringSubmatch(row[1], -1) {
+					if _, ok := rank[match[1]]; ok {
+						seen = append(seen, match[1])
+					}
+				}
+			}
+			if len(seen) == 0 {
+				t.Fatalf("%s lists no pattern rows", page)
+			}
+
+			for i := 1; i < len(seen); i++ {
+				if rank[seen[i]] < rank[seen[i-1]] {
+					t.Errorf("%s lists %q (match position %d) after %q (match position %d); the table is introduced as being in relative matching order",
+						page, seen[i], rank[seen[i]], seen[i-1], rank[seen[i-1]])
 				}
 			}
 		})
