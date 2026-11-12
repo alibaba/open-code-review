@@ -11,6 +11,8 @@ import "fmt"
 // before any session exists.
 type RunIdentity struct {
 	Mode                 string // manifest input.mode
+	ResolvedBase         string
+	ResolvedHead         string
 	SourceArtifactSHA256 string // manifest input.source_artifact_sha256
 	RuleConfigSHA256     string // manifest execution.rule_config_sha256
 	RepositorySHA256     string // manifest repository.identity_sha256; empty when the repo has no remote
@@ -53,6 +55,15 @@ func (s *ResumeState) ValidateResume(req ResumeRequest) error {
 	}
 	if err := s.validateInputIdentity(req.Identity); err != nil {
 		return err
+	}
+	identity := req.Identity
+	if identity.Mode == InputModeRange || identity.Mode == InputModeCommit {
+		if identity.ResolvedHead == "" || (identity.Mode == InputModeRange && identity.ResolvedBase == "") {
+			return fmt.Errorf("resume rejected: comparison endpoints could not be resolved; %s", resumeHint)
+		}
+		if s.Manifest.Input.ResolvedBase != identity.ResolvedBase || s.Manifest.Input.ResolvedHead != identity.ResolvedHead {
+			return fmt.Errorf("resume rejected: comparison endpoints changed since session %q; %s", s.SessionID, resumeHint)
+		}
 	}
 
 	m := s.Manifest

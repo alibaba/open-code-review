@@ -22,7 +22,7 @@
 
 ### Требования
 
-- [Go 1.26.9+](https://go.dev/dl/)
+- [Go 1.26.10+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -85,10 +85,20 @@ git checkout -b feat/your-feature-name
 Примеры:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
+
+`PR Commit Policy` проверяет заголовок PR и полное сообщение каждого коммита,
+включая тело, без учёта регистра. Не добавляйте `[skip ci]`, `[ci skip]`, `[no ci]`,
+`[skip actions]`, `[actions skip]` или отдельную строку
+`skip-checks: true` / `skip-checks:true`.
+
+Если проверка не пройдена, измените заголовок PR или перепишите сообщения
+соответствующих коммитов в своей рабочей ветке. Новый коммит без этих инструкций
+не устраняет нарушения в предыдущих коммитах. Описание PR может содержать
+обсуждение этих инструкций и не проверяется.
 
 ### Заголовки лицензии
 
@@ -118,20 +128,38 @@ make build
 ### Структура проекта
 
 ```
+├── acp/                  # ACP-адаптер для CLI
+├── bin/                  # NPM-обёртка
 ├── cmd/opencodereview/   # Точка входа CLI
+├── docs/                 # Локализованные README и CONTRIBUTING
+├── examples/             # Примеры интеграции с CI/CD
+├── extensions/           # Расширения редактора (VS Code и IDEA)
+├── imgs/                 # Изображения логотипа, бенчмарков и обзора
 ├── internal/
 │   ├── agent/            # Логика ревью-агента
+│   ├── chatgptauth/      # OAuth и управление учётными данными ChatGPT
 │   ├── config/           # Управление конфигурацией
+│   ├── delegate/         # Спеки ревью для режима делегирования (без LLM)
 │   ├── diff/             # Разбор git-диффов
-│   ├── llm/              # Клиент LLM API (Anthropic и OpenAI)
+│   ├── gitcmd/           # Ограниченный запуск git-подпроцессов
+│   ├── llm/              # Клиент LLM API (Anthropic, Bedrock и OpenAI)
+│   ├── llmloop/          # Общий цикл вызова инструментов для подзадач
+│   ├── mcp/              # Клиент MCP-сервера и адаптер инструментов
 │   ├── model/            # Модели данных
+│   ├── pathutil/         # Канонические пути и проверка вложенности
+│   ├── release/          # Проверки имён URL артефактов релиза
+│   ├── scan/             # Пофайловое ревью кода (ocr scan)
 │   ├── session/          # Управление сессиями ревью
-│   ├── tool/             # Встроенные инструменты (file_read, code_search и др.)
+│   ├── stdout/           # Подменяемый writer для stdout
+│   ├── suggestdiff/      # Построчные diff для отрисовки предложений
 │   ├── telemetry/        # Интеграция с OpenTelemetry
+│   ├── tool/             # Встроенные инструменты (file_read, code_search и др.)
 │   └── viewer/           # WebUI-просмотрщик сессий
-├── pages/                # Фронтенд WebUI
-├── scripts/              # Скрипты сборки и установки
-└── bin/                  # NPM-обёртка
+├── npm/                  # Опциональные бинарные пакеты по платформам
+├── pages/                # Лендинг
+├── plugins/              # Плагины для coding-агентов
+├── scripts/              # Скрипты установки, публикации и проверок
+└── skills/               # Манифесты agent skill
 ```
 
 ## Разработка с помощью ИИ
@@ -213,7 +241,7 @@ make build
 Используйте тот же формат Conventional Commits, что и для сообщений коммитов:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 ```
 
 ### Процесс ревью

@@ -1,57 +1,70 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-// Package toolsconfig loads tool definitions from JSON config files.
+// Package toolsconfig loads the embedded tool definitions.
 package toolsconfig
 
 import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os"
+	"strings"
+
+	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 // ToolConfigEntry holds a single tool definition loaded from tools.json.
 type ToolConfigEntry struct {
 	Name       string          `json:"name"`
-	PlanTask   bool            `json:"plan_task"`
-	MainTask   bool            `json:"main_task"`
 	Definition json.RawMessage `json:"definition"`
 }
 
 //go:embed tools.json
 var defaultToolsJSON []byte
 
-// Load parses the tools config file. When path is empty, falls back to
-// the embedded default tools configuration.
-func Load(path string) ([]ToolConfigEntry, error) {
-	var data []byte
-	var err error
-	if path == "" {
-		data = defaultToolsJSON
-	} else {
-		data, err = os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("read tools file %s: %w", path, err)
-		}
-	}
+// LoadDefault parses the embedded tool definitions shipped with this build.
+func LoadDefault() ([]ToolConfigEntry, error) {
 	var tools []ToolConfigEntry
-	if err := json.Unmarshal(data, &tools); err != nil {
-		return nil, fmt.Errorf("unmarshal tools file: %w", err)
+	if err := json.Unmarshal(defaultToolsJSON, &tools); err != nil {
+		return nil, fmt.Errorf("unmarshal embedded tools: %w", err)
 	}
 	return tools, nil
 }
 
-// ToolDefsByPhase returns the parsed tool definitions filtered by phase.
-// planOnly=true returns only tools with plan_task:true.
-// planOnly=false returns only tools with main_task:true.
-func (t *ToolConfigEntry) ToolDefsByPhase(planOnly bool) (json.RawMessage, bool) {
-	switch {
-	case planOnly && t.PlanTask:
-		return t.Definition, true
-	case !planOnly && t.MainTask:
-		return t.Definition, true
-	default:
-		return nil, false
+func Resolve(entries []ToolConfigEntry, names []string) ([]llm.ToolDef, error) {
+	catalog := make(map[string]llm.ToolDef, len(entries))
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Name) == "" {
+			return nil, fmt.Errorf("tool name must not be empty")
+		}
+		if _, exists := catalog[entry.Name]; exists {
+			return nil, fmt.Errorf("duplicate tool definition %q", entry.Name)
+		}
+		var function llm.FunctionDef
+		if err := json.Unmarshal(entry.Definition, &function); err != nil {
+			return nil, fmt.Errorf("parse tool %q: %w", entry.Name, err)
+		}
+		if function.Name != entry.Name {
+			return nil, fmt.Errorf("tool %q has mismatched definition name %q", entry.Name, function.Name)
+		}
+		if strings.TrimSpace(function.Description) == "" || function.Parameters["type"] != "object" {
+			return nil, fmt.Errorf("tool %q requires a description and object parameters", entry.Name)
+		}
+		function.RawDefinition = entry.Definition
+		catalog[entry.Name] = llm.ToolDef{Type: "function", Function: function}
 	}
+	var definitions []llm.ToolDef
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if seen[name] {
+			continue
+		}
+		definition, exists := catalog[name]
+		if !exists {
+			return nil, fmt.Errorf("unknown tool reference %q", name)
+		}
+		seen[name] = true
+		definitions = append(definitions, definition)
+	}
+	return definitions, nil
 }
