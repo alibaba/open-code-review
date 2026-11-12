@@ -113,16 +113,22 @@ private fun RawConfig.setProviderEntryField(
     }
 }
 
-private fun RawConfig.setCustomProviderField(name: String, field: String, value: String) =
+private fun isValidProviderName(name: String): Boolean = name.split('.').all { it.isNotBlank() }
+
+private fun RawConfig.setCustomProviderField(name: String, field: String, value: String) {
+    if (!isValidProviderName(name)) return
+    if ('.' in name && (this["custom_providers"] as? JsonObject)?.containsKey(name) != true) return
     setProviderEntryField("custom_providers", name, field, value)
+}
 
 /** `providers.<name>.<field>`: if name is a built-in provider, write to providers; otherwise write to custom_providers. */
 private fun RawConfig.setProviderValue(key: String, value: String) {
-    val parts = key.split('.')
-    if (parts.size != 3) return
-    val name = parts[1]
-    val field = parts[2]
-    if (isPresetProvider(name)) {
+    val prefix = if (key.startsWith("providers.")) "providers." else "custom_providers."
+    val dot = key.lastIndexOf('.')
+    if (dot <= prefix.length || dot == key.length - 1) return
+    val name = key.substring(prefix.length, dot)
+    val field = key.substring(dot + 1)
+    if (prefix == "providers." && isPresetProvider(name)) {
         // Consistent with isPresetProvider / ConfigUtils: preset keys are stored canonically lowercased, so "OpenAI"
         // is not judged preset yet written under a capitalized key that later lookups would miss.
         setProviderEntryField("providers", name.trim().lowercase(Locale.ROOT), field, value)
@@ -145,18 +151,14 @@ private fun RawConfig.setLlmField(field: String, element: JsonElement) {
 }
 
 private fun RawConfig.setConfigValue(key: String, value: String) {
-    if (key.startsWith("providers.")) {
+    if (key.startsWith("providers.") || key.startsWith("custom_providers.")) {
         setProviderValue(key, value)
-        return
-    }
-    if (key.startsWith("custom_providers.")) {
-        val parts = key.split('.')
-        if (parts.size == 3) setCustomProviderField(parts[1], parts[2], value)
         return
     }
 
     when (key) {
         "provider" -> {
+            if (value.isNotEmpty() && !isValidProviderName(value)) return
             // Preset providers are stored canonically lowercased, matching the providers bucket keys; custom providers keep the user's original name.
             val providerName = if (isPresetProvider(value)) value.trim().lowercase(Locale.ROOT) else value
             // Clear the top-level model when the provider changes: the old model usually does not belong to the new provider

@@ -25,12 +25,12 @@ flowchart TD
 ```
 
 The orchestration lives in the
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 package, whose main files are `agent.go` (dispatch & per-group
 orchestration), `grouping.go` (semantic file grouping), `selection.go`
 (the file filter), `preview.go` (the `--preview` report), and `util.go`
 (helpers); the tool-use loop and memory compression live alongside it in
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/).
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/).
 Two entry points matter: `Agent.Run` (top of pipeline) and
 `Agent.dispatchSubtasks` (per-group fan-out).
 
@@ -152,8 +152,8 @@ For small changes the plan adds latency without value, so it's skipped
 silently and the main loop runs straight away. Otherwise OCR
 makes a **single** `PLAN_TASK` LLM call — no `Tools` field is sent, so
 the model cannot call tools during planning. The read-only tool subset
-(`code_search`, `file_read_diff`, `file_find` — the three tools whose
-`plan_task` flag is `true` in `tools.json`) is embedded as plain text
+(`code_search`, `file_read`, `file_read_diff`, `file_find` — selected by
+`PLAN_TASK.tool_references` in `task_template.json`) is embedded as plain text
 via the `{{plan_tools}}` placeholder (rendered by
 `formatToolDefs`) so the model knows what's available later. The model
 returns a checklist that becomes `{{plan_guidance}}`
@@ -162,8 +162,8 @@ in the main prompt.
 ### Phase 2 — Main loop
 
 The main loop assembles the `MAIN_TASK` prompt and runs a tool-use
-conversation with the model. The full tool set adds **`task_done`**,
-**`code_comment`**, and **`file_read`** to the plan-phase tools — see
+conversation with the model. The full tool set adds **`task_done`**
+and **`code_comment`** to the plan-phase tool references — see
 [Tools](../tools/) for the full catalogue.
 
 ```
@@ -366,9 +366,9 @@ The placeholder substitution lives in
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go).
 The template itself isn't a CLI override — to change prompts you edit
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)
-and rebuild. The `--tools` flag is a *tool-registry* override (it
-swaps the JSON consumed by `internal/config/toolsconfig`), not a
-template override — see [Tools](../tools/#customizing-tools).
+and rebuild. Built-in tool definitions are also embedded and cannot be
+overridden at runtime. Use review rules and background for project guidance,
+or MCP for external business context — see [Tools](../tools/#customizing-tools).
 
 > **Placeholder syntax caveat.** All the placeholders above use
 > double-brace `{{…}}` syntax *except* `RE_LOCATION_TASK`, which

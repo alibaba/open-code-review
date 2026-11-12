@@ -119,14 +119,13 @@ ocr r      [flags]   (alias)
 | `--concurrency <n>` | — | `8` | 並行してレビューするサブタスクの最大数。 |
 | `--timeout <minutes>` | — | `15` | LLM 呼び出し、ツール実行、再試行の待機を含むサブタスクごとの制限時間。`0` でタスクの期限を無効化しますが、リクエストのタイムアウトは無効化しません。リクエスト単位のタイムアウトは `OCR_LLM_TIMEOUT` または provider の `timeout_sec` で独立して設定し、秒単位です（デフォルト `300`）。effort のレビューラウンド数に応じて線形にスケールします（例: low/medium/high で 15/30/45 分）。 |
 | `--rule <path>` | — | — | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。 |
-| `--max-tools <n>` | — | テンプレートのデフォルト | サブタスクごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`100`）を使用します。1〜49 は `50` に引き上げられます。解決後の値はテンプレートのデフォルトを**上回る場合にのみ**適用されます（引き上げのみ可能で、引き下げはできません）。 |
+| `--max-tools <n>` | — | テンプレートのデフォルト | サブタスクごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`100`）を使用します。1〜49 は `50` に引き上げられます。解決後の正の値が上限としてそのまま適用されます。 |
 | `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | サブタスクごとの**プロンプト**トークン上限（review のデフォルトは `200000`）。この実行で保存済みの `max_tokens` 設定を上書きします。出力の上限には影響しません。そちらは `MAX_COMPLETION_TOKENS`（`16384`）が個別に制御します。 |
 | `--max-tokens-budget <n>` | — | `0`（無制限） | レビュー全体の入力 + 出力トークン使用量を制限します。LLM の各ラウンドの前に確認されます: すでに予算を超えたサブタスクには発見を提出するための最終ラウンドが 1 回与えられ、`failed(budget)` として報告されます。以降のサブタスクは割り当てられず、部分的な結果は引き続き公開されます。 |
 | `--effort <level>` | — | 設定または `medium` | レビューの労力プリセット: `low` = main ループ 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド。ラウンドが多いほど recall は上がりますが、時間とトークンも増えます。`ocr config set effort <level>` で永続化できます。 |
 | `--provider <name>` | — | — | 今回の実行で設定済み provider を選択します。`providers` と `custom_providers` の両方の名前を使用できます。 |
 | `--model <name>` | — | — | 今回の実行で解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 並行 git サブプロセスの最大数。 |
-| `--tools <path>` | — | 埋め込み | カスタム JSON ツール設定ファイルのパス。埋め込みのツール定義を上書きします。 |
 
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
@@ -352,7 +351,7 @@ ocr s      [flags]   (alias)
 
 | 引数 | 短縮形 | デフォルト | 説明 |
 |---|---|---|---|
-| `--path <list>` | - | リポジトリ全体 | スキャン対象のリポジトリ相対ディレクトリまたはファイル（カンマ区切り、例: `internal/agent`、`internal/llm/client.go`）。 |
+| `--path <list>` | - | リポジトリ全体 | スキャン対象のリポジトリ相対ディレクトリまたはファイル（カンマ区切り、例: `internal/agent`、`internal/llm/client.go`）。セレクターは作業ツリー上の実際のパスとして解決されます。綴りどおりの一致を優先するため `src` が兄弟ディレクトリ `SRC/` を選ぶことはなく、大文字小文字を区別しないファイルシステム（Windows、既定の macOS）では、ファイルシステムが解決できる別の綴りでも対応するファイルを選びます。存在しないパスを指定した場合は、空のスキャンではなくエラーになります。 |
 | `--exclude <patterns>` | - | - | 除外する gitignore 形式のパターン（カンマ区切り、例: `**/generated/*,*.pb.go`）。`rule.json` の excludes とマージされます。 |
 | `--output <path>` | `-o` | 標準出力 | スキャン結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
 | `--preview` | `-p` | `false` | LLM を呼び出さずにファイルを列挙・フィルタリングします。ファイルリスト、レビュー対象/除外数、総行数、ファイルごとの除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません。 |
@@ -398,18 +397,28 @@ ocr session list --json
 
 ### `ocr session show`
 
+デフォルトでは、保存済みのすべてのリポジトリのセッションを ID で検索します。
+`--repo .` を指定すると、従来どおりカレントディレクトリに検索範囲を限定できます。
+
+デフォルトの全体検索では、ID が一意であれば、worktree の切り替えや元のチェックアウトの
+削除後もセッションを確認できます。同じ ID が複数のリポジトリに存在する場合は、
+候補のリポジトリが一覧表示され、`--repo` で 1 つを選択する必要があります。
+現在、`--repo` には既存のリポジトリディレクトリが必要です。そのため、ID が重複し、
+選択したいセッションの元のチェックアウトが削除されている場合、そのセッションを選択できません。
+
 再開した実行では、継続元の実行も表示されます。provider や model をまたいだ
 再開の場合は、その切り替えも表示されます。
 
 ```bash
 ocr session show <session-id>
 ocr session show --json <session-id>
+ocr session show --repo . <session-id>
 ocr session show --repo /path/to/repo <session-id>
 ```
 
 | 引数 | デフォルト | 説明 |
 |---|---|---|
-| `--repo <path>` | カレントディレクトリ | セッションを確認するリポジトリ。 |
+| `--repo <path>` | すべてのリポジトリ | 指定した既存のリポジトリディレクトリにセッションの検索範囲を限定します。 |
 | `--json` | `false` | セッションのメタデータとファイル単位の項目を JSON として出力します。 |
 
 ### `ocr session comments`
@@ -558,9 +567,30 @@ ocr config model                           Interactive model selection
 
 key の完全なリファレンス、schema、例は[設定](../configuration/)を参照してください。
 
+
+
+## `ocr auth`
+
+`ocr auth login`、`status`、`logout` は既定で Sign in with ChatGPT を使用します。明示的な `--provider chatgpt` も引き続き使用できます。
+
+`chatgpt` provider では公開された Sign in with ChatGPT フローを使用します。[ChatGPT プレビューガイド](../chatgpt-preview/)を参照してください。
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` は `--provider chatgpt` と `--account <client-id>` を受け付けます。`login` はさらに `--no-browser`、`--new-account`、`--enable-plan` を受け付けます。ChatGPT では `--device` をサポートしません。`--enable-plan` は保存済み登録の同意を要求し、`--new-account` とは併用できません。モデル一覧はアカウントごとに異なります。一覧にないモデルも明示すれば使用できます。この provider の `extra_body` は `reasoning`、`text`、`prompt_cache_key` のみ対応します。アカウント管理、権限、制限は[ChatGPT プレビューガイド](../chatgpt-preview/)を参照してください。
+
 ## `ocr llm`
 
-LLM ユーティリティコマンドです。2 つのサブコマンドがあります:
+LLM ユーティリティコマンドです。3 つのサブコマンドがあります:
 
 ```text
 ocr llm <sub-command>
@@ -568,6 +598,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`
