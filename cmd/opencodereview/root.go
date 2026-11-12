@@ -64,6 +64,7 @@ func init() {
 	rootCmd.AddCommand(rulesCmd)
 	rootCmd.AddCommand(viewerCmd)
 	rootCmd.AddCommand(completionCmd)
+	rootCmd.AddCommand(newPluginCmd())
 }
 
 func commandNeedsGit(cmd *cobra.Command) bool {
