@@ -5,18 +5,27 @@ sidebar:
 ---
 
 OCR 内置 **六个工具**，供 LLM 在评审过程中调用。本页记录每个工具的用途、输入
-schema 与示例输入/输出。完整的机器可读定义位于
+schema 与示例输入/输出。基础的机器可读定义位于
 [`internal/config/toolsconfig/tools.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/toolsconfig/tools.json)。
 
 ## 各阶段工具可用性
 
-每个工具声明它在 **plan 阶段**、**main task** 还是两者中都可用：
+任务模板按名称从共享定义中选择工具。在 `task_template.json` 中，
+`MAIN_TASK.tools` 是发送给模型的有序可调用工具列表，
+`PLAN_TASK.tool_references` 则仅作为参考文本渲染进规划 prompt。
+规划仍然是没有可调用工具的单次请求；这两个字段都不会改变工具定义。
+
+`scan_template.json` 独立选择主任务工具，不包含 `file_read_diff`，因为全文件扫描没有 diff。
+省略或留空的列表不选择任何工具，不会启用整个目录。重复名称按首次出现的顺序去重。
+未知引用、重复的目录条目和无效定义会在任务初始化时导致失败。
+
+默认 diff 评审的选择如下：
 
 | 工具             | Plan | Main | 用途                                   |
 | ---------------- | ---- | ---- | -------------------------------------- |
 | `task_done`      | ✗    | ✓    | 表示“我完成了”——终止循环。             |
 | `code_comment`   | ✗    | ✓    | 发出一条带行范围 + 建议的评审评论。    |
-| `file_read`      | ✗    | ✓    | 读取变更后快照中某文件的一段。         |
+| `file_read`      | ✓    | ✓    | 读取所选比较侧中某文件的一段。         |
 | `file_read_diff` | ✓    | ✓    | 读取另一文件的 diff 以确认跨文件关切。 |
 | `file_find`      | ✓    | ✓    | 按文件名关键字定位文件。               |
 | `code_search`    | ✓    | ✓    | 全仓 grep（字面量或正则）。            |
@@ -32,6 +41,46 @@ schema 与示例输入/输出。完整的机器可读定义位于
 内置工具定义随 OCR 发布，不支持运行时覆盖。项目指引使用[评审规则](../review-rules/)，
 外部业务上下文使用 [MCP](../mcp/)。曾使用自定义工具文件的用户请参阅
 [迁移说明](#customizing-tools)。
+
+## 比较两侧 {#comparison-sides}
+
+commit 和 range 评审（包括恢复的会话）会为 `file_read`、`code_search` 和 `file_find`
+提供可选参数 `side`。省略该参数或传入 `"new"`，保持默认行为和输出格式；
+传入 `"old"`，即可读取、搜索或枚举同一次比较的旧侧代码：
+
+```json
+{"file_path": "src/foo.go", "start_line": 10, "end_line": 80, "side": "old"}
+{"search_text": "OldAPI", "file_patterns": ["src/"], "side": "old"}
+{"query_name": "foo.go", "side": "old"}
+```
+
+| 评审输入 | 新侧 | 旧侧 |
+| --- | --- | --- |
+| `--from BASE --to HEAD` | 固定的 head 提交 | 固定端点的 merge-base，而非目标分支的最新提交 |
+| `--commit COMMIT` | 固定的提交 | 第一个父提交，合并提交也一样 |
+| 根提交 | 固定的提交 | 空树 |
+
+diff 和这三个工具共享这些不可变端点。路径和行号属于所选的一侧。对于重命名文件，
+旧侧应使用旧路径；工具不会自动转换名称，也不会回退到其他版本。已删除文件仍可
+从旧侧读取。根提交的旧侧没有文件：读取会报告文件不存在，搜索和枚举则返回空结果。
+Git 对象不可用或 Git 操作失败时会报错，不能据此判定为空树。
+对于处于浅克隆边界的提交，必须先补全所需历史再评审，即使父提交对象已存在于本地，
+以确保 Git diff 与旧侧工具使用一致的比较基线。
+
+旧侧结果以 `SIDE: old` 和 `REVISION: <commit-sha>` 开头；空树则使用
+`SOURCE: empty-tree`。旧侧错误也会标明来源。现有的行数和匹配数限制对两侧
+都适用。只接受字符串 `"new"` 和 `"old"`；null、空字符串和任意 Git ref 均无效。
+
+工作区评审和扫描保留现有定义、prompt 和默认工具输出格式，不暴露 `side`，
+传入时会明确拒绝。共享的 `tools.json` 目录仍是 current-only 定义的来源，
+不声明 `side`。比较评审在初始化时通过 `WithComparisonSides` 从该目录派生
+可调用工具定义和规划参考，添加 `side` 并更新描述，不修改基础定义。
+
+恢复 commit 或 range 评审时使用当前内置工具，并要求解析后的新旧端点与原会话
+一致，即使选中的 patch 没变：任一代码树中的其他上下文都可能影响之前的评审。
+不同 ref 名称只要解析到相同端点，仍可恢复。如果任一端点变化，或旧会话缺少
+足够的端点信息来验证比较，应新建评审而不是恢复。已完成文件会复用结果；
+待完成文件使用当前工具评审。若要让所有文件都使用当前能力重新评审，请新建评审。
 
 ## `task_done`
 
@@ -118,7 +167,8 @@ OCR 用一个**动态滑动窗口**在 diff 中查找 `existing_code` 文本。�
 
 ## `file_read`
 
-读取文件**变更后**形式的一段行。
+默认读取文件**变更后**形式的一段行。
+commit 和 range 评审还支持可选的[比较侧](#comparison-sides)。
 
 ### Schema
 
@@ -159,7 +209,8 @@ LINE_RANGE: 10-80
 
 - **每次调用最多 500 行。** 更大范围会被截断，置 `IS_TRUNCATED: true`，并追加
   `Note: Results truncated to 500 lines. Please narrow your line range.`。
-- 只读取文件的**修改后版本**。要看旧版本，用 `file_read_diff`。
+- 默认读取文件的**修改后版本**。在 commit 和 range 评审中，使用 `side: "old"`
+  可读取旧侧完整内容；使用 `file_read_diff` 可查看变更片段。
 
 当模型需要周围上下文（对某个只能在 diff 中看到的函数发表评论时），应从 diff
 hunk 头 `@@ -x,y +m,n @@` 计算范围——通常 `m-50` 到 `m+n+50`。

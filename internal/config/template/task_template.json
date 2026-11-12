@@ -1,11 +1,13 @@
 {
   "MAIN_TASK": {
+    "tools": ["task_done", "code_comment", "code_search", "file_read", "file_read_diff", "file_find"],
     "messages": [
       { "role": "system", "prompt_file": "main_task_system.md" },
       { "role": "user", "prompt_file": "main_task_user.md" }
     ]
   },
   "PLAN_TASK": {
+    "tool_references": ["code_search", "file_read", "file_read_diff", "file_find"],
     "messages": [
       { "role": "system", "prompt_file": "plan_task_system.md" },
       { "role": "user", "prompt_file": "plan_task_user.md" }

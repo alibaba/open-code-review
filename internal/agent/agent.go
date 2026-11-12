@@ -24,7 +24,6 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
-	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -85,11 +84,8 @@ type Args struct {
 	// Tool registry mapping tool aliases to implementations.
 	Tools *tool.Registry
 
-	// PlanToolDefs holds llm.ToolDef entries enabled in plan_task, built once at startup.
-	// When nil, plan phase sends no tool definitions.
 	PlanToolDefs []llm.ToolDef
 
-	// MainToolDefs holds llm.ToolDef entries enabled in main_task, built once at startup.
 	MainToolDefs []llm.ToolDef
 
 	// CommentWorkerPool — separate goroutine pool for running asynchronous
@@ -143,11 +139,8 @@ type Args struct {
 	Resume *session.ResumeState
 
 	// SealedInput pins this run to commit endpoints a pre-flight resolve already
-	// froze, instead of resolving From/To/Commit again. Set only on the resume
-	// path, where admission compared an identity derived from those endpoints:
-	// re-resolving a raw ref here could read a commit the admitted identity never
-	// covered, and the mismatch would surface only after the child session and
-	// manifest existed. Nil means resolve normally, which is every non-resume run.
+	// froze, instead of resolving From/To/Commit again. Admission and code tools
+	// must use the same immutable endpoints as the diff.
 	SealedInput *diff.InputResolution
 
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
@@ -2186,27 +2179,4 @@ func (a *Agent) findDiff(path string) *model.Diff {
 		}
 	}
 	return nil
-}
-
-// BuildToolDefs converts toolsconfig.ToolConfigEntry slice into []llm.ToolDef,
-// filtering by phase (planOnly=true for plan_task, false for main_task).
-func BuildToolDefs(entries []toolsconfig.ToolConfigEntry, planOnly bool) []llm.ToolDef {
-	var defs []llm.ToolDef
-	for _, e := range entries {
-		defRaw, ok := e.ToolDefsByPhase(planOnly)
-		if !ok {
-			continue
-		}
-		var fn llm.FunctionDef
-		if err := json.Unmarshal(defRaw, &fn); err != nil {
-			fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: failed to parse tool definition %q: %v\n", e.Name, err)
-			continue
-		}
-		fn.RawDefinition = defRaw
-		defs = append(defs, llm.ToolDef{
-			Type:     "function",
-			Function: fn,
-		})
-	}
-	return defs
 }

@@ -8,13 +8,14 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"strings"
+
+	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 // ToolConfigEntry holds a single tool definition loaded from tools.json.
 type ToolConfigEntry struct {
 	Name       string          `json:"name"`
-	PlanTask   bool            `json:"plan_task"`
-	MainTask   bool            `json:"main_task"`
 	Definition json.RawMessage `json:"definition"`
 }
 
@@ -30,16 +31,40 @@ func LoadDefault() ([]ToolConfigEntry, error) {
 	return tools, nil
 }
 
-// ToolDefsByPhase returns the parsed tool definitions filtered by phase.
-// planOnly=true returns only tools with plan_task:true.
-// planOnly=false returns only tools with main_task:true.
-func (t *ToolConfigEntry) ToolDefsByPhase(planOnly bool) (json.RawMessage, bool) {
-	switch {
-	case planOnly && t.PlanTask:
-		return t.Definition, true
-	case !planOnly && t.MainTask:
-		return t.Definition, true
-	default:
-		return nil, false
+func Resolve(entries []ToolConfigEntry, names []string) ([]llm.ToolDef, error) {
+	catalog := make(map[string]llm.ToolDef, len(entries))
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Name) == "" {
+			return nil, fmt.Errorf("tool name must not be empty")
+		}
+		if _, exists := catalog[entry.Name]; exists {
+			return nil, fmt.Errorf("duplicate tool definition %q", entry.Name)
+		}
+		var function llm.FunctionDef
+		if err := json.Unmarshal(entry.Definition, &function); err != nil {
+			return nil, fmt.Errorf("parse tool %q: %w", entry.Name, err)
+		}
+		if function.Name != entry.Name {
+			return nil, fmt.Errorf("tool %q has mismatched definition name %q", entry.Name, function.Name)
+		}
+		if strings.TrimSpace(function.Description) == "" || function.Parameters["type"] != "object" {
+			return nil, fmt.Errorf("tool %q requires a description and object parameters", entry.Name)
+		}
+		function.RawDefinition = entry.Definition
+		catalog[entry.Name] = llm.ToolDef{Type: "function", Function: function}
 	}
+	var definitions []llm.ToolDef
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if seen[name] {
+			continue
+		}
+		definition, exists := catalog[name]
+		if !exists {
+			return nil, fmt.Errorf("unknown tool reference %q", name)
+		}
+		seen[name] = true
+		definitions = append(definitions, definition)
+	}
+	return definitions, nil
 }

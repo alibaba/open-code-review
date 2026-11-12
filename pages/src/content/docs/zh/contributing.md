@@ -213,6 +213,15 @@ benchmark 验证。外部业务上下文请使用 [MCP 服务器](../mcp/)。
 
 两者都存在，新工具名才能工作。现有六个见[工具](../tools/)，可当作模板。
 
+在适用模板的 `MAIN_TASK.tools` 数组中选择工具。review 和 scan 各自维护列表；
+顺序会影响模型请求，应保持稳定。若只需在 review 规划中描述工具而不允许调用，
+将其加入 `PLAN_TASK.tool_references`。工具定义不应包含任务归属标志，
+定义中的名称必须与目录条目名称一致。
+
+这些列表选择模型请求中的定义，不是执行沙箱。MCP 发现和 review 特有的完成、过滤协议
+仍由现有任务适配器负责。其他辅助任务不使用这些目录绑定；不支持的 `tools` 或
+`tool_references` 字段会被拒绝，而不是静默忽略。
+
 ## 添加新规则模式
 
 编辑 `internal/config/rules/system_rules.json` 把新 glob 映射到规则文档，并在
