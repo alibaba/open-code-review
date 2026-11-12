@@ -227,6 +227,7 @@ func TestValidateResumeNilStateAccepts(t *testing.T) {
 func TestValidateResumeWorkspace(t *testing.T) {
 	wsParentIdentity := RunIdentity{
 		Mode:                 ReviewModeWorkspace,
+		ResolvedBase:         "base-parent",
 		SourceArtifactSHA256: "artifact-parent",
 		RuleConfigSHA256:     "rules-parent",
 		RepositorySHA256:     "repo-parent",
@@ -240,6 +241,7 @@ func TestValidateResumeWorkspace(t *testing.T) {
 			Repository:    ManifestRepository{IdentitySHA256: wsParentIdentity.RepositorySHA256},
 			Input: ManifestInput{
 				Mode:                 wsParentIdentity.Mode,
+				ResolvedBase:         wsParentIdentity.ResolvedBase,
 				SourceArtifactSHA256: wsParentIdentity.SourceArtifactSHA256,
 			},
 			Execution: ManifestExecution{
@@ -272,13 +274,13 @@ func TestValidateResumeWorkspace(t *testing.T) {
 		req := ResumeRequest{
 			Identity: RunIdentity{
 				Mode:                 ReviewModeWorkspace,
+				ResolvedBase:         wsParentIdentity.ResolvedBase,
 				SourceArtifactSHA256: wsParentIdentity.SourceArtifactSHA256,
 				RuleConfigSHA256:     wsParentIdentity.RuleConfigSHA256,
 				RepositorySHA256:     wsParentIdentity.RepositorySHA256,
 			},
 			Provider:         "anthropic",
 			Model:            "claude",
-			GitBranch:        "main",
 			ItemFingerprints: []string{"fp-1"},
 		}
 		if mutate != nil {
@@ -341,25 +343,76 @@ func TestValidateResumeWorkspace(t *testing.T) {
 		}
 	})
 
-	t.Run("git branch mismatch is rejected in workspace mode", func(t *testing.T) {
-		state := wsParentState(nil, nil)
-		req := wsRequest(func(r *ResumeRequest) {
-			r.GitBranch = "feature-x"
-		})
+	t.Run("empty parent resolved base is rejected as unborn repo", func(t *testing.T) {
+		state := wsParentState(func(m *RunManifest) {
+			m.Input.ResolvedBase = ""
+		}, nil)
+		req := wsRequest(nil)
 		err := state.ValidateResume(req)
-		want := `resume rejected: current branch "feature-x" does not match session branch "main"`
+		want := "resume rejected: repository has no base commit (unborn repository does not support resume; run 'ocr review' to start a fresh review)"
 		if err == nil || err.Error() != want {
 			t.Fatalf("got err = %v, want = %q", err, want)
 		}
 	})
 
-	t.Run("git branch match passes in workspace mode", func(t *testing.T) {
+	t.Run("empty candidate resolved base is rejected as unborn repo", func(t *testing.T) {
 		state := wsParentState(nil, nil)
 		req := wsRequest(func(r *ResumeRequest) {
-			r.GitBranch = "main"
+			r.Identity.ResolvedBase = ""
+		})
+		err := state.ValidateResume(req)
+		want := "resume rejected: repository has no base commit (unborn repository does not support resume; run 'ocr review' to start a fresh review)"
+		if err == nil || err.Error() != want {
+			t.Fatalf("got err = %v, want = %q", err, want)
+		}
+	})
+
+	t.Run("base commit unchanged passes in workspace mode", func(t *testing.T) {
+		state := wsParentState(nil, nil)
+		req := wsRequest(nil)
+		if err := state.ValidateResume(req); err != nil {
+			t.Fatalf("expected pass when base commit is unchanged, got: %v", err)
+		}
+	})
+
+	t.Run("descendant commit passes in workspace mode", func(t *testing.T) {
+		state := wsParentState(nil, nil)
+		req := wsRequest(func(r *ResumeRequest) {
+			r.Identity.ResolvedBase = "base-child-commit"
+			r.IsAncestor = func(base, head string) bool {
+				return base == "base-parent" && head == "base-child-commit"
+			}
 		})
 		if err := state.ValidateResume(req); err != nil {
-			t.Fatalf("expected pass when branches match, got: %v", err)
+			t.Fatalf("expected pass for descendant commit, got: %v", err)
+		}
+	})
+
+	t.Run("non-descendant commit is rejected in workspace mode", func(t *testing.T) {
+		state := wsParentState(nil, nil)
+		req := wsRequest(func(r *ResumeRequest) {
+			r.Identity.ResolvedBase = "base-diverged-commit"
+			r.IsAncestor = func(base, head string) bool {
+				return false
+			}
+		})
+		err := state.ValidateResume(req)
+		want := `resume rejected: current HEAD commit "base-diverged-commit" is not a descendant of session base commit "base-parent"; start a new review instead of resuming`
+		if err == nil || err.Error() != want {
+			t.Fatalf("got err = %v, want = %q", err, want)
+		}
+	})
+
+	t.Run("non-descendant commit without is ancestor is rejected", func(t *testing.T) {
+		state := wsParentState(nil, nil)
+		req := wsRequest(func(r *ResumeRequest) {
+			r.Identity.ResolvedBase = "base-other"
+			r.IsAncestor = nil
+		})
+		err := state.ValidateResume(req)
+		want := `resume rejected: current HEAD commit "base-other" is not a descendant of session base commit "base-parent"; start a new review instead of resuming`
+		if err == nil || err.Error() != want {
+			t.Fatalf("got err = %v, want = %q", err, want)
 		}
 	})
 }

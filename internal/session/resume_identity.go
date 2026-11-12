@@ -11,8 +11,8 @@ import "fmt"
 // before any session exists.
 type RunIdentity struct {
 	Mode                 string // manifest input.mode
-	ResolvedBase         string
-	ResolvedHead         string
+	ResolvedBase         string // manifest input.resolved_base
+	ResolvedHead         string // manifest input.resolved_head
 	SourceArtifactSHA256 string // manifest input.source_artifact_sha256
 	RuleConfigSHA256     string // manifest execution.rule_config_sha256
 	RepositorySHA256     string // manifest repository.identity_sha256; empty when the repo has no remote
@@ -31,7 +31,7 @@ type ResumeRequest struct {
 	Model            string
 	ProviderExplicit bool
 	ModelExplicit    bool
-	GitBranch        string
+	IsAncestor       func(base, head string) bool
 	ItemFingerprints []string
 }
 
@@ -55,8 +55,14 @@ func (s *ResumeState) ValidateResume(req ResumeRequest) error {
 	if s == nil {
 		return nil
 	}
-	if req.Identity.Mode == ReviewModeWorkspace && req.GitBranch != s.GitBranch {
-		return fmt.Errorf("resume rejected: current branch %q does not match session branch %q", req.GitBranch, s.GitBranch)
+	if s.Manifest != nil && req.Identity.Mode == ReviewModeWorkspace {
+		parentBase := s.Manifest.Input.ResolvedBase
+		currentHead := req.Identity.ResolvedBase
+		if parentBase != "" && currentHead != "" && currentHead != parentBase {
+			if req.IsAncestor == nil || !req.IsAncestor(parentBase, currentHead) {
+				return fmt.Errorf("resume rejected: current HEAD commit %q is not a descendant of session base commit %q; start a new review instead of resuming", currentHead, parentBase)
+			}
+		}
 	}
 	if err := s.validateInputIdentity(req.Identity, req.ItemFingerprints); err != nil {
 		return err
@@ -128,6 +134,9 @@ func (s *ResumeState) validateInputIdentity(id RunIdentity, itemFingerprints []s
 	// Both sides empty means a repository with no remote, which is unchanged.
 	if m.Repository.IdentitySHA256 != id.RepositorySHA256 {
 		return fmt.Errorf("resume rejected: repository identity changed, so this is not the repository the parent run reviewed; %s", resumeHint)
+	}
+	if id.Mode == ReviewModeWorkspace && (m.Input.ResolvedBase == "" || id.ResolvedBase == "") {
+		return fmt.Errorf("resume rejected: repository has no base commit (unborn repository does not support resume; run 'ocr review' to start a fresh review)")
 	}
 	if id.Mode != ReviewModeWorkspace && m.Input.SourceArtifactSHA256 != id.SourceArtifactSHA256 {
 		return fmt.Errorf("resume rejected: the reviewed input changed since session %q — a ref may now point at a different commit, or the selected file set changed; %s", s.SessionID, resumeHint)

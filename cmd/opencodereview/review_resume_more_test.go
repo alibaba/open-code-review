@@ -443,7 +443,11 @@ func writeVerifiableWorkspaceParent(t *testing.T, repoDir, branch string, id ses
 	})
 	b := sh.Manifest()
 	b.SetRepository(session.ManifestRepository{IdentitySHA256: id.RepositorySHA256})
-	b.SetInput(session.ManifestInput{Mode: id.Mode, SourceArtifactSHA256: id.SourceArtifactSHA256})
+	b.SetInput(session.ManifestInput{
+		Mode:                 id.Mode,
+		ResolvedBase:         id.ResolvedBase,
+		SourceArtifactSHA256: id.SourceArtifactSHA256,
+	})
 	b.SetExecution(session.ManifestExecution{
 		Provider: provider, Model: model, RuleConfigSHA256: id.RuleConfigSHA256,
 	})
@@ -502,14 +506,42 @@ func TestValidateResumeIdentity_Workspace(t *testing.T) {
 		}
 	})
 
-	t.Run("git branch mismatch is rejected", func(t *testing.T) {
+	t.Run("different branch with same commit is accepted", func(t *testing.T) {
 		gitIn(t, repoDir, "checkout", "-b", "other-branch")
 		defer gitIn(t, repoDir, "checkout", branch)
 
 		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
+		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state); err != nil {
+			t.Fatalf("want accepted on same commit under different branch, got: %v", err)
+		}
+	})
+
+	t.Run("descendant commit is accepted", func(t *testing.T) {
+		if err := os.WriteFile(filepath.Join(repoDir, "extra.go"), []byte("package main\n\nfunc extra() {}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, repoDir, "add", "extra.go")
+		gitIn(t, repoDir, "commit", "-m", "extra commit")
+
+		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
+		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state); err != nil {
+			t.Fatalf("want accepted for descendant commit, got: %v", err)
+		}
+	})
+
+	t.Run("non-descendant commit is rejected", func(t *testing.T) {
+		gitIn(t, repoDir, "checkout", "--orphan", "diverged-branch")
+		if err := os.WriteFile(filepath.Join(repoDir, "div.go"), []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, repoDir, "add", "div.go")
+		gitIn(t, repoDir, "commit", "-m", "diverged commit")
+		defer gitIn(t, repoDir, "checkout", branch)
+
+		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
 		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
-		if err == nil || !strings.Contains(err.Error(), "does not match session branch") {
-			t.Fatalf("want branch mismatch error, got: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "is not a descendant of session base commit") {
+			t.Fatalf("want not-descendant rejection, got: %v", err)
 		}
 	})
 

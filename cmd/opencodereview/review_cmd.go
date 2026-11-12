@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -469,14 +470,21 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 	if err != nil {
 		return nil, fmt.Errorf("resolve current input identity: %w", err)
 	}
-	branch := detectGitBranch(cc.RepoDir)
 	if err := state.ValidateResume(session.ResumeRequest{
 		Identity:         sealed.Identity,
 		Provider:         rt.Provider,
 		Model:            rt.Model,
 		ProviderExplicit: opts.provider != "",
 		ModelExplicit:    opts.model != "",
-		GitBranch:        branch,
+		IsAncestor: func(base, head string) bool {
+			if cc.GitRunner != nil {
+				_, err := cc.GitRunner.Run(ctx, cc.RepoDir, "merge-base", "--is-ancestor", base, head)
+				return err == nil
+			}
+			cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", base, head)
+			cmd.Dir = cc.RepoDir
+			return cmd.Run() == nil
+		},
 		ItemFingerprints: sealed.ItemFingerprints,
 	}); err != nil {
 		return nil, err

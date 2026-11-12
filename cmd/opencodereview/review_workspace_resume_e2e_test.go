@@ -228,20 +228,77 @@ func TestWorkspaceReviewResume_E2E(t *testing.T) {
 		t.Errorf("expected 3 reused files, got %d", latestSummary.ReusedFiles)
 	}
 
-	// Git branch switch must be rejected.
+	// Branch switch at same base commit must succeed and reuse checkpoints.
 	retryTestGit(t, repoDir, "checkout", "-b", "other-branch")
-	var branchErr error
+	srv.mu.Lock()
+	srv.attemptsByFile = map[string]int{}
+	srv.mu.Unlock()
+
+	var branchSwitchErr error
 	captureStderr(t, func() {
 		captureStdout(t, func() {
-			branchErr = executeReviewCLI(context.Background(), []string{"--repo", repoDir, "--resume", latestSummary.SessionID})
+			branchSwitchErr = executeReviewCLI(context.Background(), []string{"--repo", repoDir, "--resume", latestSummary.SessionID})
 		})
 	})
-	if branchErr == nil || !strings.Contains(branchErr.Error(), "does not match session branch") {
-		t.Fatalf("expected branch mismatch error, got: %v", branchErr)
+	if branchSwitchErr != nil {
+		t.Fatalf("expected resume on other branch at same commit to succeed: %v", branchSwitchErr)
 	}
-	retryTestGit(t, repoDir, "checkout", "main")
+	attempts = srv.attemptCounts()
+	for _, f := range []string{"a.go", "b.go", "c.go", "d.go"} {
+		if attempts[f] != 0 {
+			t.Errorf("file %s should be reused (0 attempts) on branch switch, got %d", f, attempts[f])
+		}
+	}
 
-	// Modifying all files triggers the zero-reusable items guard.
+	// Forward commit evolution: commit d.go so HEAD moves forward.
+	// Remaining uncommitted files (a.go, b.go, c.go) must be safely resumed with 0 LLM attempts.
+	retryTestGit(t, repoDir, "add", "d.go")
+	retryTestGit(t, repoDir, "commit", "-m", "commit d.go")
+
+	srv.mu.Lock()
+	srv.attemptsByFile = map[string]int{}
+	srv.mu.Unlock()
+
+	var forwardErr error
+	captureStderr(t, func() {
+		captureStdout(t, func() {
+			forwardErr = executeReviewCLI(context.Background(), []string{"--repo", repoDir, "--resume", latestSummary.SessionID})
+		})
+	})
+	if forwardErr != nil {
+		t.Fatalf("expected resume after forward commit to succeed: %v", forwardErr)
+	}
+	attempts = srv.attemptCounts()
+	for _, f := range []string{"a.go", "b.go", "c.go"} {
+		if attempts[f] != 0 {
+			t.Errorf("%s was unmodified and should have 0 attempts on forward commit resume, got %d", f, attempts[f])
+		}
+	}
+	if attempts["d.go"] != 0 {
+		t.Errorf("committed d.go should not be reviewed in workspace mode, got %d attempts", attempts["d.go"])
+	}
+
+	// Non-descendant commit (e.g. diverged/orphan branch) must be rejected with descendant error.
+	retryTestGit(t, repoDir, "checkout", "--orphan", "diverged-branch")
+	divBody := "package p\n\nfunc div() int { return 42 }\n"
+	if err := os.WriteFile(filepath.Join(repoDir, "div.go"), []byte(divBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	retryTestGit(t, repoDir, "add", "div.go")
+	retryTestGit(t, repoDir, "commit", "-m", "diverged commit")
+
+	var divergedErr error
+	captureStderr(t, func() {
+		captureStdout(t, func() {
+			divergedErr = executeReviewCLI(context.Background(), []string{"--repo", repoDir, "--resume", latestSummary.SessionID})
+		})
+	})
+	if divergedErr == nil || !strings.Contains(divergedErr.Error(), "is not a descendant of session base commit") {
+		t.Fatalf("expected not-descendant rejection, got: %v", divergedErr)
+	}
+
+	// Switch back to branch with uncommitted files and modify all files to trigger zero-reusable items guard.
+	retryTestGit(t, repoDir, "checkout", "other-branch")
 	for marker, name := range markers {
 		body := fmt.Sprintf("package p\n\n// entirely different %s\nfunc %s() int {\n\treturn 12345\n}\n",
 			marker, strings.TrimSuffix(name, ".go"))

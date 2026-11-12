@@ -200,3 +200,35 @@ func TestResolveInputBeforeDiffRejectsInvalidRefs(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveIdentityWorkspaceResolvedBase(t *testing.T) {
+	dir := initIdentityRepo(t)
+	sealed, err := ResolveIdentity(context.Background(), identityArgs(dir, 4000))
+	if err != nil {
+		t.Fatalf("ResolveIdentity: %v", err)
+	}
+	if sealed.Identity.ResolvedBase == "" {
+		t.Fatal("expected ResolvedBase to be populated in workspace mode for repo with commits")
+	}
+	if sealed.Resolution.ResolvedBase != sealed.Identity.ResolvedBase {
+		t.Fatalf("ResolvedBase mismatch: identity=%q, resolution=%q",
+			sealed.Identity.ResolvedBase, sealed.Resolution.ResolvedBase)
+	}
+}
+
+func TestResolveIdentityUnbornRepo(t *testing.T) {
+	repo := t.TempDir()
+	gitIn(t, repo, "init", "-q")
+	if err := os.WriteFile(filepath.Join(repo, "staged.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write staged.go: %v", err)
+	}
+	gitIn(t, repo, "add", "staged.go")
+
+	sealed, err := ResolveIdentity(context.Background(), Args{RepoDir: repo})
+	if err != nil {
+		t.Fatalf("ResolveIdentity: %v", err)
+	}
+	if sealed.Identity.ResolvedBase != "" {
+		t.Fatalf("expected empty ResolvedBase for unborn repo, got %q", sealed.Identity.ResolvedBase)
+	}
+}
