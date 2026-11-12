@@ -8,8 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
+	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
@@ -84,5 +88,72 @@ func TestPrepareReviewCodeToolsErrors(test *testing.T) {
 		if _, err := prepareReviewCodeTools(context.Background(), repo, scenario.opts, nil, scenario.resolution); err == nil {
 			test.Fatalf("accepted invalid setup: %+v", scenario)
 		}
+	}
+}
+
+type reviewToolsClient func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error)
+
+func (c reviewToolsClient) CompletionsWithCtx(ctx context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
+	return c(ctx, request)
+}
+
+func TestReviewLoopPreservesDiffAndComparisonReads(t *testing.T) {
+	repo := initResumeRepo(t)
+	commitFile(t, repo, "version.go", "package example\nconst Value = 1\n", "old")
+	previous := revParse(t, repo, "HEAD")
+	commitFile(t, repo, "version.go", "package example\nconst Value = 2\n", "new")
+	setup, err := prepareReviewCodeTools(context.Background(), repo, reviewOptions{from: previous, to: "HEAD"}, gitcmd.New(2), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	collector := tool.NewCommentCollector()
+	registry := buildToolRegistryWithCodeAccess(collector, setup.reader, setup.access)
+	patch, err := runGitCmd(repo, "diff", previous, "HEAD", "--", "version.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, _ := registry.Get("file_read_diff")
+	provider.(*tool.FileReadDiffProvider).SetDiffMap(tool.NewDiffMap(map[string]string{"version.go": string(patch)}))
+	defs, err := loadToolDefs([]string{"file_read", "file_read_diff", "task_done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defs, err = toolsconfig.WithComparisonSides(defs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := 0
+	client := reviewToolsClient(func(_ context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
+		requests++
+		var calls []llm.ToolCall
+		if requests == 1 {
+			calls = []llm.ToolCall{
+				{ID: "old", Type: "function", Function: llm.FunctionCall{Name: "file_read", Arguments: `{"file_path":"version.go","side":"old"}`}},
+				{ID: "new", Type: "function", Function: llm.FunctionCall{Name: "file_read", Arguments: `{"file_path":"version.go","side":"new"}`}},
+				{ID: "diff", Type: "function", Function: llm.FunctionCall{Name: "file_read_diff", Arguments: `{"path_array":["version.go"]}`}},
+			}
+		} else {
+			results := map[string]string{}
+			for _, message := range request.Messages {
+				if message.Role == "tool" {
+					results[message.ToolCallID] = message.ExtractText()
+				}
+			}
+			for id, want := range map[string]string{"old": "const Value = 1", "new": "const Value = 2", "diff": string(patch)} {
+				if !strings.Contains(results[id], want) {
+					t.Errorf("%s result = %q, want %q", id, results[id], want)
+				}
+			}
+			calls = []llm.ToolCall{{ID: "done", Type: "function", Function: llm.FunctionCall{Name: "task_done", Arguments: `{}`}}}
+		}
+		return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{ToolCalls: calls}}}}, nil
+	})
+	runner := reviewtask.NewRunner(reviewtask.Deps{
+		LLMClient: client, Model: "test", Template: *loadTestTemplate(t), Tools: registry, MainToolDefs: defs,
+		CommentCollector: collector, Session: session.New(t.TempDir(), "main", "test", session.SessionOptions{}),
+	})
+	completed, _, err := runner.RunMainTask(context.Background(), []llm.Message{llm.NewTextMessage("user", "review version.go")}, "version.go")
+	if err != nil || !completed || requests != 2 {
+		t.Fatalf("completed=%v, requests=%d, err=%v", completed, requests, err)
 	}
 }

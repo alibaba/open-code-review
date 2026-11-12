@@ -4,10 +4,88 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/tool"
 )
+
+func TestExecuteScanRejectsFileReadDiff(t *testing.T) {
+	freshOCRHome(t)
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req llm.ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		for _, def := range req.Tools {
+			if def.Function.Name == tool.FileReadDiff.Name() {
+				t.Error("scan exposed file_read_diff to the model")
+			}
+		}
+
+		response := `{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"done","type":"function","function":{"name":"task_done","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`
+		switch requests.Add(1) {
+		case 1:
+			response = `{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"unexpected-diff","type":"function","function":{"name":"file_read_diff","arguments":"{\"path_array\":[\"main.go\"]}"}}]},"finish_reason":"tool_calls"}]}`
+		case 2:
+			rejected := false
+			for _, msg := range req.Messages {
+				if msg.Role == "tool" && msg.ToolCallID == "unexpected-diff" {
+					rejected = true
+					if msg.Content != tool.NotAvailableMsg {
+						t.Errorf("unexpected diff result: %v", msg.Content)
+					}
+				}
+			}
+			if !rejected {
+				t.Error("scan did not return a result for the unexpected diff call")
+			}
+		default:
+			t.Error("unexpected extra LLM request")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(response)); err != nil {
+			t.Errorf("write response: %v", err)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("OCR_LLM_URL", server.URL+"/v1/chat/completions")
+	t.Setenv("OCR_LLM_TOKEN", "test-token")
+	t.Setenv("OCR_LLM_MODEL", "test-model")
+	t.Setenv("OCR_LLM_PROTOCOL", "openai")
+	t.Setenv("OCR_USE_ANTHROPIC", "false")
+
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := parseScanFlags([]string{
+		"--repo", repoDir, "--path", "main.go", "--concurrency", "1",
+		"--no-plan", "--no-dedup", "--no-summary", "--format", "json", "--audience", "agent",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := captureStdout(t, func() {
+		if err := executeScan(opts); err != nil {
+			t.Errorf("executeScan: %v", err)
+		}
+	})
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("LLM requests = %d, want 2; output: %s", got, output)
+	}
+}
 
 func TestSplitPaths(t *testing.T) {
 	tests := []struct {

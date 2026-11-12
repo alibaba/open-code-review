@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
@@ -36,6 +37,7 @@ func TestBudgetExceededFlag(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a := NewAgent(Args{
+				MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 				Template:         budgetTestTemplate(),
 				LLMClient:        &fakeBudgetClient{perCallTokens: 50_000},
 				CommentCollector: tool.NewCommentCollector(),
