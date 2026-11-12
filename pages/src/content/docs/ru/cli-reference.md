@@ -70,6 +70,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 |---|---|---|
 | `ocr review` | `ocr r` | Запускает код-ревью и выводит комментарии. |
 | `ocr rules check <file>` | — | Показывает, какое правило применяется к указанному пути файла и откуда оно получено. |
+| `ocr config show --format json` | — | Показать несекретные параметры модели в JSON без сети. |
 | `ocr config set <key> <value>` | — | Сохраняет значение конфигурации в `~/.opencodereview/config.json`. |
 | `ocr config unset <key>` | — | Сбрасывает сохранённое значение конфигурации (`provider`, `max_tokens`, `effort`, `custom_providers.<name>`, `mcp_servers.<name>`). |
 | `ocr config provider` | — | Интерактивный TUI для настройки провайдера. |
@@ -569,10 +570,10 @@ Rule:
 
 ## `ocr config`
 
-Сохраняет ключи в `~/.opencodereview/config.json` и предоставляет
-интерактивные TUI для настройки. Доступны четыре подкоманды:
+Поддерживает автономный просмотр, сохранение настроек в `~/.opencodereview/config.json` и интерактивную настройку.
 
 ```text
+ocr config show --format json
 ocr config set <key> <value>
 ocr config unset <key>                     Clear a saved config value
 ocr config provider                        Interactive provider setup
@@ -597,6 +598,15 @@ ocr config model                           Interactive model selection
 Полный справочник по ключам, схемы и примеры приведены в разделе
 [Конфигурация](../configuration/).
 
+### `ocr config show`
+
+`ocr config show --format json` выводит несекретные параметры модели без сети. JSON также используется по умолчанию. Порядок выбора совпадает с существующим: файл настроек OCR, переменные OCR, переменные Claude Code, затем разбор export в shell RC. Команда не исполняет RC, не изменяет настройки, не запускает команды получения учетных данных, обновление OAuth, запрос списка моделей или телеметрию.
+
+Для выбранного провайдера должна существовать запись конфигурации. Если запись есть, отсутствие учетных данных или модели не мешает просмотру; отсутствие самой записи считается ошибкой конфигурации. Неполные конечные точки старого блока `llm` или переменных окружения пропускаются в пользу следующих источников.
+
+Поля вывода: `provider`, `model`, `protocol`, `source`, `timeout_sec`, `timeout_source`, `credential_status`. `source` указывает источник настроек конечной точки; `OCR_LLM_TIMEOUT` переопределяет тайм-аут. Нулевой `timeout_sec` означает значение клиента по умолчанию. Если подходящей конфигурации нет, `source` равен `none`.
+
+Состояния учетных данных: `configured`, `command_not_executed`, `ambient_not_resolved`, `oauth_not_resolved`, `not_configured`. Они не подтверждают успешную аутентификацию. Модель ChatGPT остается пустой, если требуется сетевой запрос каталога. URL, заголовки, тела запросов, секреты и команды их получения, настройки MCP не выводятся. Ошибки конфигурации возвращаются без чувствительных значений.
 
 
 ## `ocr auth`

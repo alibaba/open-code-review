@@ -69,6 +69,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr review` | `ocr r` | 运行代码评审并输出评论。 |
 | `ocr scan` | `ocr s` | 无需 Git diff，扫描完整文件。 |
 | `ocr rules check <file>` | — | 显示某文件路径适用哪条规则及其来源。 |
+| `ocr config show --format json` | — | 以 JSON 离线查看非敏感模型配置。 |
 | `ocr config set <key> <value>` | — | 将一个配置值持久化到 `~/.opencodereview/config.json`。 |
 | `ocr config unset <key>` | — | 清除一个已保存的配置值（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
 | `ocr config provider` | — | 交互式 provider 配置 TUI。 |
@@ -542,10 +543,10 @@ Rule:
 
 ## `ocr config`
 
-将 key 持久化到 `~/.opencodereview/config.json`，并提供交互式配置 TUI。四个
-子命令：
+支持离线查询、将设置保存到 `~/.opencodereview/config.json`，以及交互式配置。
 
 ```text
+ocr config show --format json
 ocr config set <key> <value>
 ocr config unset <key>                     Clear a saved config value
 ocr config provider                        Interactive provider setup
@@ -566,6 +567,15 @@ ocr config model                           Interactive model selection
 
 完整的 key 参考、schema 与示例见[配置](../configuration/)。
 
+### `ocr config show`
+
+`ocr config show --format json` 离线输出非敏感模型配置，默认格式也是 JSON。配置选择顺序沿用现有逻辑：OCR 配置文件、OCR 环境变量、Claude Code 环境变量、仅解析 shell RC 中的导出变量。不会执行 RC 文件、修改配置、获取凭据、刷新 OAuth、查询模型列表或启动遥测。
+
+选中的 provider 必须存在对应配置条目；条目存在但未配置凭据或模型时仍可查询，缺少条目则返回配置无效错误。不完整的旧版 `llm` 或环境端点会继续尝试后续来源。
+
+输出字段为 `provider`、`model`、`protocol`、`source`、`timeout_sec`、`timeout_source` 和 `credential_status`。`source` 表示端点配置来源；`OCR_LLM_TIMEOUT` 覆盖超时值，`timeout_sec: 0` 表示客户端默认值。环境变量或旧版端点没有命名 provider 时，该字段为空。没有可选配置时 `source` 为 `none`。
+
+凭据状态包括 `configured`（仅表示令牌存在）、`command_not_executed`、`ambient_not_resolved`、`oauth_not_resolved` 和 `not_configured`，均不表示认证已验证。ChatGPT 未显式配置模型时，`model` 为空，不执行在线模型发现。URL、自定义 header、请求体、凭据值及命令、MCP 配置都不输出。配置无效时仅返回通用错误，防止错误信息带出敏感值。
 
 
 ## `ocr auth`

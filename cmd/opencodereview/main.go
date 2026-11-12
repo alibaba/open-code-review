@@ -20,7 +20,14 @@ func main() {
 
 func run() int {
 	ctx := context.Background()
-	if telemetry.Init(ctx) {
+	// Execute normally registers help later; its target must be resolved before telemetry starts.
+	rootCmd.InitDefaultHelpCmd()
+	cmd, args, findErr := rootCmd.Find(os.Args[1:])
+	if findErr == nil && cmd.Name() == "help" {
+		cmd, _, findErr = rootCmd.Find(args)
+	}
+	offline := findErr == nil && cmd.Annotations["offline"] == "true"
+	if !offline && telemetry.Init(ctx) {
 		defer telemetry.ShutdownWithTimeout(ctx, 5*time.Second)
 	}
 

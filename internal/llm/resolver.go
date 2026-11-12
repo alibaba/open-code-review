@@ -50,6 +50,8 @@ type ResolvedEndpoint struct {
 	// providers. Empty means "let the AWS SDK decide".
 	AWSProfile string
 	AWSRegion  string
+
+	credentialStatus string
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -81,9 +83,10 @@ const (
 
 // ResolveOptions controls per-run endpoint resolution overrides.
 type ResolveOptions struct {
-	Provider string
-	Model    string
-	Context  context.Context
+	Provider    string
+	Model       string
+	Context     context.Context
+	inspectOnly bool
 }
 
 // ResolveEndpoint resolves an endpoint without per-run overrides.
@@ -148,11 +151,14 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 		// An ambient-auth endpoint is complete without a URL or token: the
 		// transport supplies both. Everything else still needs all three.
 		complete := ep.Model != "" && (ep.AmbientAuth || (ep.URL != "" && ep.Token != ""))
-		if ok && complete {
+		if ok && (complete || (opts.inspectOnly && (ep.Provider != "" || ep.credentialStatus == "command_not_executed"))) {
 			return finalizeResolvedEndpoint(strategy.name, ep, env), nil
 		}
 	}
 
+	if opts.inspectOnly {
+		return finalizeResolvedEndpoint("", ResolvedEndpoint{}, env), nil
+	}
 	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
 }
 
@@ -396,14 +402,14 @@ func tryOCRConfig(path string, opts ResolveOptions) (ResolvedEndpoint, bool, err
 		cfg.Provider = opts.Provider
 	}
 	if cfg.Provider != "" {
-		return tryProviderConfig(cfg, opts.Model, opts.Context)
+		return tryProviderConfig(cfg, opts.Model, opts.Context, opts.inspectOnly)
 	}
 
-	return tryLegacyLlmConfig(cfg, opts.Model)
+	return tryLegacyLlmConfig(cfg, opts.Model, opts.inspectOnly)
 }
 
 // tryProviderConfig resolves an endpoint from the provider-based configuration.
-func tryProviderConfig(cfg configFile, modelOverride string, callerContext context.Context) (ResolvedEndpoint, bool, error) {
+func tryProviderConfig(cfg configFile, modelOverride string, callerContext context.Context, inspectOnly bool) (ResolvedEndpoint, bool, error) {
 	preset, isPreset := LookupProvider(cfg.Provider)
 
 	var entry providerEntryConfig
@@ -414,7 +420,7 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 		entry, ok = cfg.CustomProviders[cfg.Provider]
 	}
 	if isPreset && preset.Name == "chatgpt" && ok {
-		return resolveChatGPT(cfg, entry, modelOverride, callerContext)
+		return resolveChatGPTWithInspection(cfg, entry, modelOverride, callerContext, inspectOnly)
 	}
 	if !ok {
 		section := "providers"
@@ -448,7 +454,7 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 	case apiKey != "":
 		// Static api_key always wins. Warn (don't error) if a command is also set,
 		// so a config that keeps api_key_cmd as a deliberate fallback still works.
-		if apiKeyCmd != "" {
+		if apiKeyCmd != "" && !inspectOnly {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: provider %q has both api_key and api_key_cmd set; using the static api_key\n", cfg.Provider)
 		}
 	case apiKeyCmd == "" && isPreset && preset.EnvVar != "":
@@ -518,7 +524,7 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 	// An ambient-auth provider is the exception — it has no key to configure,
 	// since credentials come from the environment's own chain and the request is
 	// signed rather than bearing a token.
-	if apiKey == "" && apiKeyCmd == "" && !ambientAuth {
+	if apiKey == "" && apiKeyCmd == "" && !ambientAuth && !inspectOnly {
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key or api_key_cmd configured and no environment variable fallback found", cfg.Provider)
 	}
 
@@ -556,7 +562,7 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 		model = modelOverride
 	}
 
-	if model == "" {
+	if model == "" && !inspectOnly {
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no model configured; run 'ocr config model' to select one or pass --model", cfg.Provider)
 	}
 
@@ -603,7 +609,7 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 	// signed, so the command's output would be discarded, and running it anyway
 	// means a real 1Password / Touch ID prompt for a value nothing consumes.
 	// For everyone else a failing command is a hard error.
-	if apiKey == "" && apiKeyCmd != "" && !ambientAuth {
+	if apiKey == "" && apiKeyCmd != "" && !ambientAuth && !inspectOnly {
 		resolved, err := resolveKeyCmd(apiKeyCmd, fmt.Sprintf("api_key_cmd for provider %q", cfg.Provider))
 		if err != nil {
 			return ResolvedEndpoint{}, false, err
@@ -611,26 +617,31 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 		apiKey = resolved
 	}
 
+	status := ""
+	if inspectOnly {
+		status = credentialInspectionStatus(apiKey, apiKeyCmd, ambientAuth)
+	}
 	return ResolvedEndpoint{
-		URL:          url,
-		Token:        apiKey,
-		Model:        model,
-		Provider:     cfg.Provider,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "provider:" + cfg.Provider,
-		ExtraBody:    extraBody,
-		ExtraHeaders: extraHeaders,
-		Timeout:      timeout,
-		RetryCodes:   retryCodes,
-		AmbientAuth:  ambientAuth,
-		AWSProfile:   entry.AWSProfile,
-		AWSRegion:    entry.AWSRegion,
+		credentialStatus: status,
+		URL:              url,
+		Token:            apiKey,
+		Model:            model,
+		Provider:         cfg.Provider,
+		Protocol:         protocol,
+		AuthHeader:       authHeader,
+		Source:           "provider:" + cfg.Provider,
+		ExtraBody:        extraBody,
+		ExtraHeaders:     extraHeaders,
+		Timeout:          timeout,
+		RetryCodes:       retryCodes,
+		AmbientAuth:      ambientAuth,
+		AWSProfile:       entry.AWSProfile,
+		AWSRegion:        entry.AWSRegion,
 	}, true, nil
 }
 
 // tryLegacyLlmConfig resolves an endpoint from the legacy llm config block.
-func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, bool, error) {
+func tryLegacyLlmConfig(cfg configFile, modelOverride string, inspectOnly bool) (ResolvedEndpoint, bool, error) {
 	model := cfg.Llm.Model
 	if modelOverride != "" {
 		model = modelOverride
@@ -656,7 +667,7 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 	}
 	// Static auth_token always wins; warn if a command is also set. The command
 	// itself runs only just before returning, after the validation below.
-	if token != "" && tokenCmd != "" {
+	if token != "" && tokenCmd != "" && !inspectOnly {
 		fmt.Fprintln(os.Stderr, "[ocr] WARNING: llm config has both auth_token and auth_token_cmd set; using the static auth_token")
 	}
 
@@ -709,7 +720,7 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 	// an otherwise-complete block whose auth_token_cmd is set (guaranteed by the
 	// incompleteness check above), so a failing command is a hard error and an
 	// incomplete or invalid block never prompts for a credential.
-	if token == "" {
+	if token == "" && !inspectOnly {
 		resolved, err := resolveKeyCmd(tokenCmd, "auth_token_cmd for llm config")
 		if err != nil {
 			return ResolvedEndpoint{}, false, err
@@ -717,17 +728,22 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		token = resolved
 	}
 
+	status := ""
+	if inspectOnly {
+		status = credentialInspectionStatus(token, tokenCmd, false)
+	}
 	return ResolvedEndpoint{
-		URL:          cfg.Llm.URL,
-		Token:        token,
-		Model:        model,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "OCR config file",
-		ExtraBody:    cfg.Llm.ExtraBody,
-		ExtraHeaders: cfg.Llm.ExtraHeaders,
-		Timeout:      timeout,
-		RetryCodes:   retryCodes,
+		credentialStatus: status,
+		URL:              cfg.Llm.URL,
+		Token:            token,
+		Model:            model,
+		Protocol:         protocol,
+		AuthHeader:       authHeader,
+		Source:           "OCR config file",
+		ExtraBody:        cfg.Llm.ExtraBody,
+		ExtraHeaders:     cfg.Llm.ExtraHeaders,
+		Timeout:          timeout,
+		RetryCodes:       retryCodes,
 	}, true, nil
 }
 

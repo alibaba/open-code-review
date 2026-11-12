@@ -71,6 +71,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr review` | `ocr r` | Run a code review and emit comments. |
 | `ocr scan` | `ocr s` | Scan complete files without requiring a Git diff. |
 | `ocr rules check <file>` | — | Show which rule applies to a given file path and where it came from. |
+| `ocr config show --format json` | — | Inspect non-secret LLM metadata offline as JSON. |
 | `ocr config set <key> <value>` | — | Persist a config value to `~/.opencodereview/config.json`. |
 | `ocr config unset custom_providers.<name>` | — | Delete a custom provider (clears active `provider`/`model` if it was active). |
 | `ocr config provider` | — | Interactive provider-setup TUI. |
@@ -577,10 +578,10 @@ Useful for debugging "why isn't my custom rule firing?" — see
 
 ## `ocr config`
 
-Persists keys to `~/.opencodereview/config.json` and offers interactive
-setup TUIs. Four subcommands:
+Inspect non-secret LLM configuration offline, persist settings to `~/.opencodereview/config.json`, or use the interactive setup TUIs.
 
 ```text
+ocr config show --format json
 ocr config set <key> <value>
 ocr config unset <key>                     Clear a saved key
 ocr config provider                        Interactive provider setup
@@ -605,6 +606,19 @@ ocr config model                           Interactive model selection
 See [Configuration](../configuration/) for the full key reference,
 schemas, and examples.
 
+### `ocr config show`
+
+```bash
+ocr config show --format json
+```
+
+JSON is the default and only supported format. The command reuses endpoint selection precedence: OCR config file, OCR environment, Claude Code environment, then parsed shell RC exports. It neither executes shell RC files nor writes configuration. A missing configuration reports `source: "none"`; an existing selected provider entry remains inspectable when credentials or a model have not been configured. Missing provider entries are invalid configuration. Incomplete legacy or environment endpoints fall through to later sources.
+
+The allowlisted output contains `provider`, `model`, `protocol`, `source`, `timeout_sec`, `timeout_source`, and `credential_status`. `source` identifies the endpoint selection strategy; `OCR_LLM_TIMEOUT` overrides the timeout and is named in `timeout_source`. Zero `timeout_sec` means the client default. An empty provider denotes an environment or legacy endpoint without a named provider.
+
+`credential_status` is `configured` for a present token, `command_not_executed` for a deferred credential command, `ambient_not_resolved` for AWS ambient authentication, `oauth_not_resolved` for ChatGPT authentication, or `not_configured`. None of these states verifies authentication. ChatGPT model discovery is skipped, so `model` is empty if it requires a catalog lookup.
+
+No network requests, credential helpers, OAuth refresh or telemetry are started. URLs, custom headers, request bodies, credential values/commands and MCP configuration are omitted rather than serialized. Invalid configuration produces a generic error because resolver diagnostics can contain secrets.
 
 
 ## `ocr auth`
