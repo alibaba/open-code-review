@@ -68,10 +68,6 @@ func addProviderFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "provider", "", "override configured LLM provider for this run")
 }
 
-func addToolsFlag(cmd *cobra.Command, target *string) {
-	cmd.Flags().StringVar(target, "tools", "", "path to JSON tools config file (default: embedded)")
-}
-
 func addPreviewFlag(cmd *cobra.Command, target *bool) {
 	cmd.Flags().BoolVarP(target, "preview", "p", false, "preview which files will be reviewed without running the LLM")
 }
@@ -202,7 +198,6 @@ func validateDelegateOptions(opts *delegateOptions) error {
 
 // registerReviewFlags registers all review command flags on cmd, binding to opts.
 func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
-	addToolsFlag(cmd, &opts.toolConfigPath)
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)
@@ -223,7 +218,6 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 
 // registerScanFlags registers all scan command flags on cmd, binding to opts.
 func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
-	addToolsFlag(cmd, &opts.toolConfigPath)
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
 	cmd.Flags().StringVar(&opts.paths, "path", "", "comma-separated repo-relative directories or files to scan (default: whole repo; nonexistent paths are an error)")

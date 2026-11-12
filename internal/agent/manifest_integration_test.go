@@ -108,6 +108,8 @@ func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *se
 		}},
 	})
 	a.diffs = diffs
+	a.inputResolution.ResolvedBase = "base-parent"
+	a.inputResolution.ResolvedHead = "head-parent"
 	a.currentDate = "2026-07-26 12:00"
 	return a
 }
@@ -241,6 +243,8 @@ func TestManifestFlowCancellationPersistsResumableSession(t *testing.T) {
 	}
 	identity := session.RunIdentity{
 		Mode:                 manifest.Input.Mode,
+		ResolvedBase:         manifest.Input.ResolvedBase,
+		ResolvedHead:         manifest.Input.ResolvedHead,
 		SourceArtifactSHA256: manifest.Input.SourceArtifactSHA256,
 		RuleConfigSHA256:     manifest.Execution.RuleConfigSHA256,
 		RepositorySHA256:     manifest.Repository.IdentitySHA256,
@@ -545,7 +549,7 @@ func TestManifestFlowGroupBudgetStopIsPartialWhenSomeFilesHaveComments(t *testin
 	reg := tool.NewRegistry()
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
 	// MaxToolRequestTimes and GroupingTask must be set before New(), since
-	// llmloop.Runner snapshots Template by value at construction time — mutating
+	// reviewtask.Runner snapshots Template by value at construction time — mutating
 	// a.args.Template afterward (as other tests in this file do for MaxTokens,
 	// which executeGroupSubtask re-reads from a.args.Template directly) would
 	// not reach the runner's copy that RunMainTask actually consumes.
