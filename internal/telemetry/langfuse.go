@@ -33,7 +33,9 @@ func WithSessionID(ctx context.Context, sessionID string) context.Context {
 	return context.WithValue(ctx, sessionIDCtxKey{}, sessionID)
 }
 
-func sessionIDFromContext(ctx context.Context) string {
+// SessionIDFromContext returns the Langfuse session ID placed by
+// WithSessionID, or "" when the context carries none.
+func SessionIDFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(sessionIDCtxKey{}).(string)
 	return v
 }
@@ -61,7 +63,7 @@ func applyTraceAttrs(ctx context.Context, span trace.Span) {
 	}
 	session := cfg.TraceSession
 	if session == "" {
-		session = sessionIDFromContext(ctx)
+		session = SessionIDFromContext(ctx)
 	}
 	if session != "" {
 		SetAttr(span, "langfuse.session.id", session)
