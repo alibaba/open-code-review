@@ -34,6 +34,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -131,6 +132,11 @@ type Args struct {
 	// When nil, subprocesses are spawned without a global limit.
 	GitRunner *gitcmd.Runner
 
+	// Repository supplies version-control semantics; nil selects built-in Git.
+	Repository vcs.ReviewSource
+	// ResolvedReview shares the exact input used by admission and context tools.
+	ResolvedReview *vcs.ResolvedReview
+
 	// Session is an optional session history instance for collecting conversation records.
 	// When nil, a default one is created automatically with git branch auto-detected from repoDir.
 	Session *session.SessionHistory
@@ -194,6 +200,7 @@ type Agent struct {
 	// head/exact_range), and repoRemoteIdentity the credential-free repository
 	// identity. Both are captured from git during loadDiffs (which has a context)
 	// and consumed by finalizeManifest to fill the manifest input/repository.
+	resolvedReview     vcs.ResolvedReview
 	inputResolution    diff.InputResolution
 	repoRemoteIdentity string
 }
@@ -203,6 +210,18 @@ type ResumeInfo = session.ResumeInfo
 
 // New creates a new Agent from the given arguments.
 func New(args Args) *Agent {
+	// Semantic input is authoritative for both session metadata and manifests.
+	// Legacy callers continue to supply From/To/Commit without ResolvedReview.
+	if args.ResolvedReview != nil {
+		spec := args.ResolvedReview.Spec
+		args.From, args.To, args.Commit = "", "", ""
+		switch spec.Mode {
+		case vcs.Commit:
+			args.Commit = spec.Head
+		case vcs.MergeBase, vcs.TwoRevisions:
+			args.From, args.To = spec.Base, spec.Head
+		}
+	}
 	if args.Tools == nil {
 		args.Tools = tool.NewRegistry()
 	}
@@ -210,12 +229,12 @@ func New(args Args) *Agent {
 		args.CommentCollector = tool.NewCommentCollector()
 	}
 	if args.Session == nil {
-		gitBranch := detectGitBranch(context.Background(), args.RepoDir)
+		branch := repositoryBranch(context.Background(), args)
 		mode := args.ReviewMode
 		if mode == "" {
 			mode = reviewModeString(args.From, args.To, args.Commit)
 		}
-		args.Session = session.New(args.RepoDir, gitBranch, args.Model, session.SessionOptions{
+		args.Session = session.New(args.RepoDir, branch, args.Model, session.SessionOptions{
 			ReviewMode:  mode,
 			DiffFrom:    args.From,
 			DiffTo:      args.To,
@@ -290,7 +309,14 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		// trigger point, then finalize and persist so the run still emits a
 		// session_end with a failed manifest instead of looking aborted.
 		if b := a.session.Manifest(); b != nil {
-			_ = b.SetRunFailure(session.RunFailureInput, "failed to resolve review input")
+			class, reason := session.RunFailureInput, "failed to resolve review input"
+			switch {
+			case errors.Is(err, context.DeadlineExceeded):
+				class, reason = session.RunFailureTimeout, "review input deadline exceeded"
+			case errors.Is(err, context.Canceled):
+				class, reason = session.RunFailureCancelled, "review was cancelled"
+			}
+			_ = b.SetRunFailure(class, reason)
 		}
 		manifestErr := a.finalizeManifest()
 		// Keep the load failure as the primary cause, but never drop a persistence
@@ -544,61 +570,17 @@ func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
 }
 
-// newDiffProvider resolves the configured input to a diff provider.
-func (a *Agent) newDiffProvider() *diff.Provider {
-	// A sealed input substitutes the commit SHAs a pre-flight resolve already froze
-	// for the refs the user typed. Both loads then read the same immutable objects,
-	// which is what makes this run's input provably the admitted one: a ref moving
-	// after admission can no longer change what gets reviewed. Neither mode's
-	// semantics shift under the substitution — range keeps its merge-base, because
-	// the sealed base already is that merge-base and merge-base(base, head) is base
-	// whenever base is an ancestor of head; commit mode keeps its first-parent
-	// comparison, which is derived from the commit rather than from its spelling.
-	// Workspace mode seals no head and is left alone.
-	from, to, commit := a.args.From, a.args.To, a.args.Commit
-	if s := a.args.SealedInput; s != nil && s.ResolvedHead != "" {
-		switch {
-		case commit != "":
-			commit = s.ResolvedHead
-		case s.ResolvedBase != "":
-			from, to = s.ResolvedBase, s.ResolvedHead
-		}
-	}
-
-	switch {
-	case commit != "":
-		return diff.NewCommitProvider(a.args.RepoDir, commit, a.args.GitRunner)
-	case from != "" && to != "":
-		return diff.NewProvider(a.args.RepoDir, from, to, a.args.GitRunner)
-	default:
-		return diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
-	}
-}
-
-// loadDiffs populates the diff-related fields used by normal review runs.
+// loadDiffs resolves the input before reading its changes.
 func (a *Agent) loadDiffs(ctx context.Context) error {
-	provider := a.newDiffProvider()
-
-	parsed, err := provider.GetDiff(ctx)
+	set, err := a.loadRepositoryChanges(ctx)
 	if err != nil {
 		return fmt.Errorf("get diffs: %w", err)
 	}
-
-	a.diffs = parsed
-
-	// Freeze this run's real commit endpoints and repository identity while the
-	// git-backed provider and a live context are in hand; finalizeManifest reads
-	// these (never re-resolving) so the manifest records the input as it was at
-	// dispatch time, even on a later skipped or failed path.
-	a.inputResolution = provider.ResolveInput(ctx)
-	a.repoRemoteIdentity = provider.RemoteIdentity(ctx)
-
-	for i := range a.diffs {
-		d := &a.diffs[i]
+	a.diffs = set.Included
+	for _, d := range a.diffs {
 		a.totalInsertions += d.Insertions
 		a.totalDeletions += d.Deletions
 	}
-
 	return nil
 }
 
@@ -922,7 +904,7 @@ func (a *Agent) reviewMode() string {
 	if a.args.ReviewMode != "" {
 		return a.args.ReviewMode
 	}
-	return reviewModeString(a.args.From, a.args.To, a.args.Commit)
+	return a.manifestMode()
 }
 
 func reviewItemFingerprint(mode string, d model.Diff) string {
@@ -960,12 +942,17 @@ func (a *Agent) initManifest() {
 	})
 }
 
-// manifestMode maps the review to the manifest input mode. It derives purely
-// from From/To/Commit so the value is always one of the three valid input modes
-// and stays stable across a resume chain (independent of an explicit ReviewMode
-// label). It is also the mode component of every item_id.
+// manifestMode maps the semantic input to the existing manifest schema. Both
+// direct and merge-base comparisons retain the schema's range mode.
 func (a *Agent) manifestMode() string {
-	return reviewModeString(a.args.From, a.args.To, a.args.Commit)
+	switch a.reviewSpec().Mode {
+	case vcs.Commit:
+		return session.InputModeCommit
+	case vcs.MergeBase, vcs.TwoRevisions:
+		return session.InputModeRange
+	default:
+		return session.InputModeWorkspace
+	}
 }
 
 // manifestInput builds the frozen input identity per the input-mode field
@@ -973,12 +960,13 @@ func (a *Agent) manifestMode() string {
 // head, workspace carries neither.
 func (a *Agent) manifestInput() session.ManifestInput {
 	in := session.ManifestInput{Mode: a.manifestMode()}
+	spec := a.reviewSpec()
 	switch in.Mode {
 	case session.InputModeRange:
-		in.RequestedFrom = a.args.From
-		in.RequestedHead = a.args.To
+		in.RequestedFrom = spec.Base
+		in.RequestedHead = spec.Head
 	case session.InputModeCommit:
-		in.RequestedHead = a.args.Commit
+		in.RequestedHead = spec.Head
 	}
 	return in
 }

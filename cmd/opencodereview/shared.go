@@ -29,6 +29,8 @@ import (
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
+	gitvcs "github.com/alibaba/open-code-review/internal/vcs/git"
 )
 
 // commonContext bundles the state that both `ocr review` and `ocr scan`
@@ -41,6 +43,8 @@ type commonContext struct {
 	Resolver   rules.Resolver
 	FileFilter *rules.FileFilter
 	GitRunner  *gitcmd.Runner
+	Repository vcs.Repository
+	Review     *vcs.ResolvedReview
 	// IsGitRepo reports whether RepoDir is inside a git repository. Always
 	// true when requireGit was set; may be false when scan accepts non-git
 	// directories.
@@ -128,10 +132,11 @@ func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxG
 	// Built before the resolver: the sniffer reads file content at contentRef
 	// through this limiter.
 	gitRunner := gitcmd.New(maxGitProcs)
+	repository := gitvcs.New(repoDir, gitRunner)
 
 	resolver, fileFilter, err := rules.NewResolver(repoDir, rulePath, rules.ResolverOptions{
-		Ref:    contentRef,
-		Runner: gitRunner,
+		Files:   repository,
+		Content: vcs.ContentRef{Revision: contentRef},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("load rules: %w", err)
@@ -143,6 +148,7 @@ func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxG
 		Resolver:   resolver,
 		FileFilter: fileFilter,
 		GitRunner:  gitRunner,
+		Repository: repository,
 		IsGitRepo:  isGit,
 	}, nil
 }

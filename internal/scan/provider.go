@@ -16,13 +16,14 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/vcs"
+	vcsGit "github.com/alibaba/open-code-review/internal/vcs/git"
 )
 
 // binarySniffWindow is the number of leading bytes inspected to decide
@@ -44,7 +45,7 @@ const DefaultMaxFileSizeBytes int64 = 2 << 20 // 2 MiB
 type Provider struct {
 	repoDir          string
 	paths            []string // empty = whole repo
-	runner           *gitcmd.Runner
+	files            vcs.FileSource
 	maxFileSizeBytes int64
 }
 
@@ -53,6 +54,15 @@ type Provider struct {
 // directory); only matching files are returned. maxFileSizeBytes <= 0 falls
 // back to DefaultMaxFileSizeBytes.
 func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileSizeBytes int64) *Provider {
+	return NewProviderWithSource(repoDir, paths, vcsGit.New(repoDir, runner), maxFileSizeBytes)
+}
+
+// NewProviderWithSource enumerates workspace files through source. Local file
+// metadata still determines whether an entry is regular and exceeds the cap.
+func NewProviderWithSource(repoDir string, paths []string, source vcs.FileSource, maxFileSizeBytes int64) *Provider {
+	if source == nil {
+		source = vcsGit.New(repoDir, nil)
+	}
 	cleaned := make([]string, 0, len(paths))
 	rootSelected := false
 	for _, p := range paths {
@@ -90,7 +100,7 @@ func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileS
 	return &Provider{
 		repoDir:          repoDir,
 		paths:            cleaned,
-		runner:           runner,
+		files:            source,
 		maxFileSizeBytes: maxFileSizeBytes,
 	}
 }
@@ -98,7 +108,10 @@ func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileS
 // Enumerate returns one ScanItem per reviewable file. Binaries are emitted
 // with empty Content + IsBinary=true so previews can show them as excluded.
 func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
-	files, err := p.listFiles(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	files, err := p.files.ListFiles(ctx, vcs.ContentRef{})
 	if err != nil {
 		return nil, err
 	}
@@ -140,9 +153,22 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 				rel, info.Size(), p.maxFileSizeBytes)
 			continue
 		}
-		binary, err := isBinaryFile(full)
+		var content []byte
+		var binary bool
+		err = p.files.ReadFile(ctx, vcs.ContentRef{}, rel, func(r io.Reader) error {
+			var readErr error
+			content, binary, readErr = readScanContent(r, p.maxFileSizeBytes)
+			return readErr
+		})
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot sniff %s: %v\n", rel, err)
+			if errors.Is(err, errScanFileTooLarge) {
+				fmt.Fprintf(os.Stderr, "[ocr] WARNING: skipping %s (content exceeds %d-byte scan limit; raise MaxTokens if the real concern is token budget, not memory)\n", rel, p.maxFileSizeBytes)
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read %s: %v\n", rel, err)
 			continue
 		}
 		if binary {
@@ -152,11 +178,6 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 				Path:     rel,
 				IsBinary: true,
 			})
-			continue
-		}
-		content, err := os.ReadFile(full)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read %s: %v\n", rel, err)
 			continue
 		}
 		out = append(out, model.ScanItem{
@@ -169,132 +190,36 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 	return out, nil
 }
 
-// listFiles returns all source files under repoDir. In a git repo it uses
-// `git ls-files` for full .gitignore semantics (nested + global excludes +
-// negation rules). In a non-git directory it falls back to filepath.WalkDir
-// with the simpler in-process gitignore handling (root .gitignore + the
-// internal ExcludedDirs blocklist).
-func (p *Provider) listFiles(ctx context.Context) ([]string, error) {
-	if p.isGitRepo(ctx) {
-		return p.listFilesViaGit(ctx)
+var errScanFileTooLarge = errors.New("file exceeds scan size limit")
+
+// readScanContent stops after the binary sniff for binary placeholders and
+// bounds text reads even if a workspace file grows after its metadata check.
+func readScanContent(r io.Reader, maxBytes int64) ([]byte, bool, error) {
+	limited := &io.LimitedReader{R: r, N: maxBytes}
+	prefix := make([]byte, binarySniffWindow)
+	n, err := io.ReadFull(limited, prefix)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, false, err
 	}
-	return p.listFilesViaWalk(ctx)
-}
-
-// isGitRepo reports whether p.repoDir is inside a git working tree.
-func (p *Provider) isGitRepo(ctx context.Context) bool {
-	cmd := exec.CommandContext(ctx, "git", "-C", p.repoDir, "rev-parse", "--git-dir")
-	return cmd.Run() == nil
-}
-
-func (p *Provider) listFilesViaGit(ctx context.Context) ([]string, error) {
-	tracked, err := p.gitLs(ctx, "-z")
+	prefix = prefix[:n]
+	if bytes.IndexByte(prefix, 0) >= 0 {
+		return nil, true, nil
+	}
+	rest, err := io.ReadAll(limited)
 	if err != nil {
-		return nil, fmt.Errorf("git ls-files (tracked): %w", err)
+		return nil, false, err
 	}
-	untracked, err := p.gitLs(ctx, "-z", "--others", "--exclude-standard")
-	if err != nil {
-		return nil, fmt.Errorf("git ls-files (untracked): %w", err)
-	}
-
-	seen := make(map[string]struct{}, len(tracked)+len(untracked))
-	all := make([]string, 0, len(tracked)+len(untracked))
-	for _, f := range append(tracked, untracked...) {
-		if f == "" {
-			continue
+	if limited.N == 0 {
+		var extra [1]byte
+		n, err := io.ReadFull(r, extra[:])
+		if n != 0 {
+			return nil, false, errScanFileTooLarge
 		}
-		if _, ok := seen[f]; ok {
-			continue
-		}
-		seen[f] = struct{}{}
-		all = append(all, f)
-	}
-	return all, nil
-}
-
-// listFilesViaWalk recursively walks p.repoDir collecting regular files.
-// Honors:
-//   - the internal ExcludedDirs blocklist (.git, node_modules, vendor, ...)
-//   - the root .gitignore (simplified semantics; nested .gitignore is NOT
-//     supported in this mode)
-//
-// Skips entire subtrees via filepath.SkipDir for performance.
-func (p *Provider) listFilesViaWalk(ctx context.Context) ([]string, error) {
-	gitignorePatterns := diff.LoadGitignorePatterns(p.repoDir)
-	var files []string
-
-	err := filepath.WalkDir(p.repoDir, func(path string, d os.DirEntry, err error) error {
-		if cerr := ctx.Err(); cerr != nil {
-			// Abort the walk; filepath.WalkDir propagates this back as the
-			// returned error so the caller sees ctx.Err().
-			return cerr
-		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: walk error at %s: %v\n", path, err)
-			return nil // continue walking; skip this entry
-		}
-		if path == p.repoDir {
-			return nil
-		}
-		rel, relErr := filepath.Rel(p.repoDir, path)
-		if relErr != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-
-		if d.IsDir() {
-			// Skip the whole subtree if the dir itself is excluded.
-			if diff.IsPathExcluded(p.repoDir, rel, gitignorePatterns) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		// Regular files only; skip symlinks / sockets / etc.
-		if !d.Type().IsRegular() {
-			return nil
-		}
-		if diff.IsPathExcluded(p.repoDir, rel, gitignorePatterns) {
-			return nil
-		}
-		files = append(files, rel)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walk %s: %w", p.repoDir, err)
-	}
-	return files, nil
-}
-
-func (p *Provider) gitLs(ctx context.Context, args ...string) ([]string, error) {
-	cmdArgs := append([]string{"-c", "core.quotepath=false", "ls-files"}, args...)
-	// Both branches take stdout only, never stdout+stderr combined: with -z,
-	// git emits NUL-delimited paths on stdout, and a warning written to stderr
-	// would be spliced into the middle of a pathname by the parsing below.
-	var raw []byte
-	var err error
-	if p.runner != nil {
-		raw, err = p.runner.Output(ctx, p.repoDir, cmdArgs...)
-	} else {
-		cmd := exec.CommandContext(ctx, "git", cmdArgs...)
-		cmd.Dir = p.repoDir
-		raw, err = cmd.Output()
-	}
-	if err != nil {
-		return nil, err
-	}
-	// Do not trim the records. Leading and trailing whitespace are valid
-	// filename bytes, and -z exists precisely so that they need no escaping:
-	// trimming " normal.go" to "normal.go" points every later Lstat at a path
-	// that does not exist, and the tracked file drops out of the scan with no
-	// error. Only genuinely empty records are discarded.
-	records := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
-	files := make([]string, 0, len(records))
-	for _, f := range records {
-		if f != "" {
-			files = append(files, f)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, false, err
 		}
 	}
-	return files, nil
+	return append(prefix, rest...), false, nil
 }
 
 // filterByPaths keeps only entries named by a --path selector: the file
@@ -441,20 +366,4 @@ func countLines(content []byte) int {
 		n++
 	}
 	return n
-}
-
-// isBinaryFile reads up to binarySniffWindow bytes from path and reports
-// whether they contain a NUL byte (git's "binary" heuristic).
-func isBinaryFile(path string) (bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	buf := make([]byte, binarySniffWindow)
-	n, err := io.ReadFull(f, buf)
-	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return false, err
-	}
-	return bytes.IndexByte(buf[:n], 0) >= 0, nil
 }
