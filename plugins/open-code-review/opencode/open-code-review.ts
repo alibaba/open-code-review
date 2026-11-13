@@ -29,6 +29,28 @@ interface ReviewInput {
   preview?: boolean
 }
 
+interface DelegatePreviewInput {
+  commit?: string
+  from?: string
+  to?: string
+  background?: string
+  backgroundFile?: string
+  exclude?: string
+  rule?: string
+  maxGitProcesses?: number
+  timeoutSeconds?: number
+}
+
+interface DelegateRuleInput {
+  paths: string[] | string
+  commit?: string
+  from?: string
+  to?: string
+  rule?: string
+  maxGitProcesses?: number
+  timeoutSeconds?: number
+}
+
 interface OcrInvocation {
   command: string
   prefixArgs: string[]
@@ -122,6 +144,71 @@ function buildReviewArgs(input: ReviewInput, repo: string, backgroundFile?: stri
   if (input.preview) {
     args.push("--preview")
   }
+  return args
+}
+
+function buildDelegatePreviewArgs(
+  input: DelegatePreviewInput,
+  repo: string,
+  backgroundFile?: string,
+): string[] {
+  const hasRange = input.from !== undefined || input.to !== undefined
+  if (hasRange && (!input.from || !input.to)) {
+    throw new Error("Both 'from' and 'to' are required for a branch comparison.")
+  }
+  if (input.commit && hasRange) {
+    throw new Error("Use either 'commit' or a 'from'/'to' range, not both.")
+  }
+  if (input.background && input.backgroundFile) {
+    throw new Error("Use either 'background' or 'backgroundFile', not both.")
+  }
+
+  const args = ["delegate", "preview", "--format", "json", "--repo", repo]
+  pushValue(args, "--commit", input.commit)
+  pushValue(args, "--from", input.from)
+  pushValue(args, "--to", input.to)
+  if (backgroundFile !== undefined) {
+    pushValue(args, "--background-file", backgroundFile)
+  } else {
+    pushValue(args, "--background", input.background)
+    pushValue(args, "--background-file", input.backgroundFile)
+  }
+  pushValue(args, "--exclude", input.exclude)
+  pushValue(args, "--rule", input.rule)
+  pushValue(args, "--max-git-procs", input.maxGitProcesses)
+  return args
+}
+
+function parsePaths(paths: unknown): string[] {
+  if (Array.isArray(paths)) {
+    return paths.map((p) => String(p).trim()).filter(Boolean)
+  }
+  if (typeof paths === "string") {
+    return paths.split(/[,\s]+/).map((p) => p.trim()).filter(Boolean)
+  }
+  return []
+}
+
+function buildDelegateRuleArgs(input: DelegateRuleInput, repo: string): string[] {
+  const rawPaths = parsePaths(input.paths)
+  if (rawPaths.length === 0) {
+    throw new Error("At least one file path is required to fetch review rules.")
+  }
+  const hasRange = input.from !== undefined || input.to !== undefined
+  if (hasRange && (!input.from || !input.to)) {
+    throw new Error("Both 'from' and 'to' are required for a branch comparison.")
+  }
+  if (input.commit && hasRange) {
+    throw new Error("Use either 'commit' or a 'from'/'to' range, not both.")
+  }
+
+  const args = ["delegate", "rule", "--format", "json", "--repo", repo]
+  pushValue(args, "--commit", input.commit)
+  pushValue(args, "--from", input.from)
+  pushValue(args, "--to", input.to)
+  pushValue(args, "--rule", input.rule)
+  pushValue(args, "--max-git-procs", input.maxGitProcesses)
+  args.push("--", ...rawPaths)
   return args
 }
 
@@ -324,6 +411,18 @@ function formatReviewResult(result: RunResult, preview: boolean): string {
   }
 }
 
+function formatDelegateResult(result: RunResult): string {
+  if (result.stdout === "") {
+    return "{}"
+  }
+  try {
+    JSON.parse(result.stdout)
+    return result.stdout
+  } catch {
+    throw new OcrExecutionError("OpenCodeReview returned invalid JSON.", result)
+  }
+}
+
 const optionalString = (description: string) =>
   tool.schema.string().optional().describe(description)
 
@@ -355,6 +454,34 @@ const reviewArgs = {
   ),
 }
 
+const delegatePreviewArgs = {
+  commit: optionalString("Review a single commit against its parent."),
+  from: optionalString("Base ref for a branch/range comparison. Must be paired with 'to'."),
+  to: optionalString("Target ref for a branch/range comparison. Must be paired with 'from'."),
+  background: optionalString("Business or requirement context that the implementation should satisfy."),
+  backgroundFile: optionalString(
+    "Path to a Markdown file holding the review background, for context too long to pass inline. " +
+      "A relative path resolves against the repository root; an absolute path is used as given. " +
+      "Cannot be combined with 'background'.",
+  ),
+  exclude: optionalString("Comma-separated gitignore-style exclusion patterns."),
+  rule: optionalString("Path to custom rule.json file."),
+  maxGitProcesses: optionalPositiveInt("Maximum concurrent Git subprocesses."),
+  timeoutSeconds: optionalPositiveInt("Timeout in seconds for preview (default: 60)."),
+}
+
+const delegateRuleArgs = {
+  paths: tool.schema
+    .union([tool.schema.array(tool.schema.string()), tool.schema.string()])
+    .describe("File path(s) to fetch review rules for."),
+  commit: optionalString("Single commit hash if reviewing a specific commit."),
+  from: optionalString("Base ref for a branch/range comparison. Must be paired with 'to'."),
+  to: optionalString("Target ref for a branch/range comparison. Must be paired with 'from'."),
+  rule: optionalString("Path to custom rule.json file."),
+  maxGitProcesses: optionalPositiveInt("Maximum concurrent Git subprocesses."),
+  timeoutSeconds: optionalPositiveInt("Timeout in seconds for rule resolution (default: 60)."),
+}
+
 export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
   try {
     await client.app.log({
@@ -384,6 +511,18 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
         template:
           "Use the ocr_health tool and explain any configuration problem concisely.",
       }
+      config.command["ocr-delegate-review"] ??= {
+        description: "Review code changes in delegation mode using OpenCode's model for reasoning",
+        template:
+          "Perform a code review in delegation mode where OpenCodeReview handles file selection and rules, and you perform the actual code review reasoning. " +
+          "Treat the following text as review intent, target details, and business context: $ARGUMENTS. " +
+          "If no target is specified, review the current workspace changes. " +
+          "First, call ocr_delegate_preview to determine reviewable files. " +
+          "Next, call ocr_delegate_rule to retrieve applicable rules for those files. " +
+          "Then, inspect the diffs and perform the review using your own model capabilities. " +
+          "Finally, summarize findings by severity with exact file and line references, accounting for all previewed files.",
+      }
+      config.command["ocr-delegate"] ??= config.command["ocr-delegate-review"]
     },
     tool: {
       ocr_review: tool({
@@ -459,6 +598,59 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
           return parts.filter(Boolean).join("\n")
         },
       }),
+      ocr_delegate_preview: tool({
+        description:
+          "Step 1 of delegated review: determine reviewable files, review mode, and ref metadata without calling an LLM. " +
+          "Returns structured JSON containing reviewable files, excluded files, and git metadata.",
+        args: delegatePreviewArgs,
+        async execute(args, context) {
+          const input = args as DelegatePreviewInput
+          const { background, ...inputWithoutBackground } = input
+          const normalizedBackground = background?.trim()
+          const normalizedInput: DelegatePreviewInput = normalizedBackground
+            ? { ...inputWithoutBackground, background: normalizedBackground }
+            : inputWithoutBackground
+          const cwd = context.worktree || context.directory || worktree
+          const timeoutMs = (normalizedInput.timeoutSeconds ?? 60) * 1000
+          const options: RunOptions = {
+            cwd,
+            signal: context.abort,
+            timeoutMs,
+          }
+          const runPreview = async (backgroundFile?: string): Promise<string> => {
+            const result = await runOcr(
+              buildDelegatePreviewArgs(normalizedInput, cwd, backgroundFile),
+              options,
+            )
+            return formatDelegateResult(result)
+          }
+          if (normalizedInput.background !== undefined) {
+            return await withTemporaryBackgroundFile(normalizedInput.background, runPreview)
+          }
+          return await runPreview()
+        },
+      }),
+      ocr_delegate_rule: tool({
+        description:
+          "Step 2 of delegated review: retrieve resolved review rules grouped by content for specified file paths without calling an LLM. " +
+          "Returns structured JSON grouping files by their applicable checklist rules.",
+        args: delegateRuleArgs,
+        async execute(args, context) {
+          const input = args as DelegateRuleInput
+          const cwd = context.worktree || context.directory || worktree
+          const timeoutMs = (input.timeoutSeconds ?? 60) * 1000
+          const options: RunOptions = {
+            cwd,
+            signal: context.abort,
+            timeoutMs,
+          }
+          const result = await runOcr(
+            buildDelegateRuleArgs(input, cwd),
+            options,
+          )
+          return formatDelegateResult(result)
+        },
+      }),
     },
   }
 }
@@ -495,6 +687,28 @@ const OCR_REVIEW_COMMAND_SUFFIX =
 const OCR_HEALTH_COMMAND_TEMPLATE =
   "Use the ocr_health tool and explain any configuration problem concisely."
 
+const OCR_DELEGATE_PREVIEW_DESCRIPTION =
+  "Step 1 of delegated review: determine reviewable files, review mode, and ref metadata without calling an LLM. " +
+  "Returns structured JSON containing reviewable files, excluded files, and git metadata."
+
+const OCR_DELEGATE_RULE_DESCRIPTION =
+  "Step 2 of delegated review: retrieve resolved review rules grouped by content for specified file paths without calling an LLM. " +
+  "Returns structured JSON grouping files by their applicable checklist rules."
+
+const OCR_DELEGATE_COMMAND_DESCRIPTION =
+  "Review code changes in delegation mode using OpenCode's model for reasoning"
+
+const OCR_DELEGATE_COMMAND_TEMPLATE =
+  "Perform a code review in delegation mode where OpenCodeReview handles file selection and rules, and you perform the actual code review reasoning. " +
+  "Treat the following text as review intent, target details, and business context:"
+
+const OCR_DELEGATE_COMMAND_SUFFIX =
+  ". If no target is specified, review the current workspace changes. " +
+  "First, call ocr_delegate_preview to determine reviewable files. " +
+  "Next, call ocr_delegate_rule to retrieve applicable rules for those files. " +
+  "Then, inspect the diffs and perform the review using your own model capabilities. " +
+  "Finally, summarize findings by severity with exact file and line references, accounting for all previewed files."
+
 const reviewInputSchema = {
   type: "object",
   properties: {
@@ -514,6 +728,46 @@ const reviewInputSchema = {
     preview: { type: "boolean", description: "List the files that would be reviewed without calling an LLM." },
   },
   required: [],
+  additionalProperties: false,
+}
+
+const delegatePreviewInputSchema = {
+  type: "object",
+  properties: {
+    commit: { type: "string", description: "Review a single commit against its parent." },
+    from: { type: "string", description: "Base ref for a branch/range comparison. Must be paired with 'to'." },
+    to: { type: "string", description: "Target ref for a branch/range comparison. Must be paired with 'from'." },
+    background: { type: "string", description: "Business or requirement context that the implementation should satisfy." },
+    backgroundFile: {
+      type: "string",
+      description:
+        "Path to a Markdown file holding the review background, for context too long to pass inline. Cannot be combined with 'background'.",
+    },
+    exclude: { type: "string", description: "Comma-separated gitignore-style exclusion patterns." },
+    rule: { type: "string", description: "Path to custom rule.json file." },
+    maxGitProcesses: { type: "integer", minimum: 1, description: "Maximum concurrent Git subprocesses." },
+    timeoutSeconds: { type: "integer", minimum: 1, description: "Timeout in seconds for preview (default: 60)." },
+  },
+  required: [],
+  additionalProperties: false,
+}
+
+const delegateRuleInputSchema = {
+  type: "object",
+  properties: {
+    paths: {
+      type: "array",
+      items: { type: "string" },
+      description: "File paths to fetch review rules for.",
+    },
+    commit: { type: "string", description: "Single commit hash if reviewing a specific commit." },
+    from: { type: "string", description: "Base ref for a branch/range comparison. Must be paired with 'to'." },
+    to: { type: "string", description: "Target ref for a branch/range comparison. Must be paired with 'from'." },
+    rule: { type: "string", description: "Path to custom rule.json file." },
+    maxGitProcesses: { type: "integer", minimum: 1, description: "Maximum concurrent Git subprocesses." },
+    timeoutSeconds: { type: "integer", minimum: 1, description: "Timeout in seconds for rule resolution (default: 60)." },
+  },
+  required: ["paths"],
   additionalProperties: false,
 }
 
@@ -570,6 +824,45 @@ async function setupV2(ctx: PluginV2.Context): Promise<void> {
         return { content: parts.filter(Boolean).join("\n") }
       },
     })
+    editor.add({
+      name: "ocr_delegate_preview",
+      description: OCR_DELEGATE_PREVIEW_DESCRIPTION,
+      input: delegatePreviewInputSchema,
+      execute: async (input, toolCtx) => {
+        const preview = input as DelegatePreviewInput
+        const cwd = await resolveSessionCwd(ctx, toolCtx.sessionID)
+        const timeoutMs = (preview.timeoutSeconds ?? 60) * 1000
+        const runPreview = async (backgroundFile?: string): Promise<string> => {
+          const result = await runOcr(buildDelegatePreviewArgs(preview, cwd, backgroundFile), {
+            cwd,
+            timeoutMs,
+          })
+          return formatDelegateResult(result)
+        }
+        const normalizedBackground = preview.background?.trim()
+        if (normalizedBackground !== undefined && normalizedBackground !== "") {
+          const content = await withTemporaryBackgroundFile(normalizedBackground, runPreview)
+          return { content }
+        }
+        const content = await runPreview()
+        return { content }
+      },
+    })
+    editor.add({
+      name: "ocr_delegate_rule",
+      description: OCR_DELEGATE_RULE_DESCRIPTION,
+      input: delegateRuleInputSchema,
+      execute: async (input, toolCtx) => {
+        const rule = input as DelegateRuleInput
+        const cwd = await resolveSessionCwd(ctx, toolCtx.sessionID)
+        const timeoutMs = (rule.timeoutSeconds ?? 60) * 1000
+        const result = await runOcr(buildDelegateRuleArgs(rule, cwd), {
+          cwd,
+          timeoutMs,
+        })
+        return { content: formatDelegateResult(result) }
+      },
+    })
   })
 
   // Like the V1 `??=` guards above, never override commands the user
@@ -602,6 +895,32 @@ async function setupV2(ctx: PluginV2.Context): Promise<void> {
           await ctx.session.prompt({
             sessionID,
             text: OCR_HEALTH_COMMAND_TEMPLATE,
+            delivery,
+          })
+        },
+      })
+    }
+    if (!commandNames.has("ocr-delegate-review")) {
+      editor.add({
+        name: "ocr-delegate-review",
+        description: OCR_DELEGATE_COMMAND_DESCRIPTION,
+        execute: async ({ sessionID, prompt, delivery }) => {
+          await ctx.session.prompt({
+            sessionID,
+            text: `${OCR_DELEGATE_COMMAND_TEMPLATE}${prompt.text ?? ""}${OCR_DELEGATE_COMMAND_SUFFIX}`,
+            delivery,
+          })
+        },
+      })
+    }
+    if (!commandNames.has("ocr-delegate")) {
+      editor.add({
+        name: "ocr-delegate",
+        description: OCR_DELEGATE_COMMAND_DESCRIPTION,
+        execute: async ({ sessionID, prompt, delivery }) => {
+          await ctx.session.prompt({
+            sessionID,
+            text: `${OCR_DELEGATE_COMMAND_TEMPLATE}${prompt.text ?? ""}${OCR_DELEGATE_COMMAND_SUFFIX}`,
             delivery,
           })
         },
