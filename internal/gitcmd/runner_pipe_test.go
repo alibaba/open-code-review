@@ -146,14 +146,16 @@ func TestRunner_SuccessWithLateDescendantOutput(t *testing.T) {
 }
 
 // The Stream contract (consume drains stdout) must keep working, including the
-// stderr text attached to a failing command.
+// stderr text attached to a failing command. `git show` is used instead of
+// `git rev-parse --verify` because its stderr echoes the offending argument on
+// every git version; rev-parse prints a generic message on some platforms.
 func TestRunner_StreamFailureIncludesStderr(t *testing.T) {
 	dir := initRepo(t)
 
 	err := New(1).Stream(context.Background(), dir, func(stdout io.Reader) error {
 		_, _ = io.Copy(io.Discard, stdout)
 		return nil
-	}, "rev-parse", "--verify", "does-not-exist")
+	}, "show", "does-not-exist")
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -166,7 +168,7 @@ func TestRunner_StreamFailureIncludesStderr(t *testing.T) {
 func TestRunner_RunSplitReportsStderr(t *testing.T) {
 	dir := initRepo(t)
 
-	_, stderr, err := New(1).RunSplit(context.Background(), dir, "rev-parse", "--verify", "does-not-exist")
+	_, stderr, err := New(1).RunSplit(context.Background(), dir, "show", "does-not-exist")
 	if err == nil {
 		t.Fatal("expected an error")
 	}
