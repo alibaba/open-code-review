@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-package llmloop
+package reviewtask
 
 import (
 	"context"
@@ -97,10 +97,14 @@ func newTestDeps(client llm.LLMClient) Deps {
 	reg := tool.NewRegistry()
 	reg.Register(&fakeFileReadProvider{result: "package main\n"})
 	return Deps{
-		LLMClient:        client,
-		Model:            "fake",
-		Template:         template.Template{MaxTokens: 100000, MaxToolRequestTimes: 10},
-		Tools:            reg,
+		LLMClient: client,
+		Model:     "fake",
+		Template:  template.Template{MaxTokens: 100000, MaxToolRequestTimes: 10},
+		Tools:     reg,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
 		CommentCollector: tool.NewCommentCollector(),
 		Session:          session.New("/tmp/test-repo", "main", "fake", session.SessionOptions{}),
 	}
@@ -651,6 +655,44 @@ func TestExecuteToolCall_CodeCommentUsesPerItemPath(t *testing.T) {
 	}
 }
 
+func TestExecuteToolCall_CodeCommentWithNoUsableEntryIsReported(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	r := NewRunner(Deps{
+		Tools:            reg,
+		CommentCollector: collector,
+	})
+
+	argsJSON, err := json.Marshal(map[string]any{
+		"comments": []any{
+			map[string]any{"path": "main.go", "message": "nil dereference"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cp := r.executeToolCall(context.Background(), "main.go", llm.ToolCall{
+		Function: llm.FunctionCall{
+			Name:      "code_comment",
+			Arguments: string(argsJSON),
+		},
+	}, nil, "")
+
+	if cp.Data != tool.CommentNoneUsableMsg {
+		t.Fatalf("result = %q, want %q", cp.Data, tool.CommentNoneUsableMsg)
+	}
+	if len(collector.Comments()) != 0 {
+		t.Fatalf("collected %d comments, want 0", len(collector.Comments()))
+	}
+	if failures := r.ToolFailures(); len(failures) != 1 || failures[0].ToolName != "code_comment" {
+		t.Fatalf("ToolFailures() = %+v, want one code_comment failure", failures)
+	}
+}
+
 func graceRoundCommentResponse() *llm.ChatResponse {
 	content := ""
 	return &llm.ChatResponse{
@@ -994,6 +1036,7 @@ func TestRunMainTask_GraceRoundNotTriggeredOnEmptyRoundsStop(t *testing.T) {
 		Tools:            reg,
 		CommentCollector: tool.NewCommentCollector(),
 		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
 			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
 			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
 		},
@@ -1012,62 +1055,6 @@ func TestRunMainTask_GraceRoundNotTriggeredOnEmptyRoundsStop(t *testing.T) {
 	// Should NOT trigger grace round — only 3 LLM calls (empty rounds)
 	if client.calls != 3 {
 		t.Fatalf("LLM calls = %d, want 3 (no grace round on empty-rounds stop)", client.calls)
-	}
-}
-
-// MainLoopStop must be self-describing in both registers: String() for logs and
-// telemetry, Reason() for the manifest reason and scan warning that are the only
-// stop diagnostics surviving a --format json run. Neither may collide across
-// stops, or a reader cannot tell which exit fired from the artifact alone.
-func TestMainLoopStopStringAndReason(t *testing.T) {
-	names := make(map[string]MainLoopStop)
-	reasons := make(map[string]MainLoopStop)
-	for _, tc := range []struct {
-		stop     MainLoopStop
-		wantName string
-	}{
-		{StopNone, "none"},
-		{StopMaxRounds, "max_rounds"},
-		{StopEmptyRounds, "empty_rounds"},
-		{StopCompression, "compression"},
-	} {
-		t.Run(tc.wantName, func(t *testing.T) {
-			name := tc.stop.String()
-			if name != tc.wantName {
-				t.Errorf("String() = %q, want %q", name, tc.wantName)
-			}
-			reason := tc.stop.Reason()
-			if reason == "" {
-				t.Fatal("Reason() is empty; every stop needs a diagnostic sentence")
-			}
-			if prev, dup := names[name]; dup {
-				t.Errorf("String() %q is shared by %v and %v", name, prev, tc.stop)
-			}
-			if prev, dup := reasons[reason]; dup {
-				t.Errorf("Reason() %q is shared by %v and %v; stops must stay distinguishable", reason, prev, tc.stop)
-			}
-			names[name] = tc.stop
-			reasons[reason] = tc.stop
-		})
-	}
-}
-
-// A value outside the enum must name itself in both registers rather than borrow
-// the StopNone catch-all. This also guards the enum's growth: adding a constant
-// after StopCompression makes this test fail, which is the prompt to give the new
-// stop its own String() and Reason() case instead of letting it fall through to
-// a message that says nothing.
-func TestMainLoopStopUnknownValue(t *testing.T) {
-	unknown := StopTokenBudget + 1
-
-	if got, want := unknown.String(), "MainLoopStop(5)"; got != want {
-		t.Errorf("String() = %q, want %q; a new constant needs its own case in String() and Reason()", got, want)
-	}
-	if got, want := unknown.Reason(), "main task stopped for an unrecognized reason (stop=5)"; got != want {
-		t.Errorf("Reason() = %q, want %q; a new constant needs its own case in String() and Reason()", got, want)
-	}
-	if unknown.Reason() == StopNone.Reason() {
-		t.Error("an unrecognized stop reuses the StopNone catch-all; the collapsed message is back")
 	}
 }
 

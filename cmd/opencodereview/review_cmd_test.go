@@ -11,7 +11,74 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/spf13/cobra"
 )
+
+func TestCommandsRejectToolsOverride(t *testing.T) {
+	for _, command := range []string{"review", "scan"} {
+		for _, args := range [][]string{
+			{"--tools", "custom-tools.json"},
+			{"--tools=custom-tools.json"},
+			{"--tools="},
+			{"--preview", "--tools", "custom-tools.json"},
+			{"--preview", "--tools=custom-tools.json"},
+		} {
+			t.Run(command+"/"+strings.Join(args, " "), func(t *testing.T) {
+				var err error
+				if command == "review" {
+					_, err = parseReviewFlags(args)
+				} else {
+					_, err = parseScanFlags(args)
+				}
+				if err == nil || !strings.Contains(err.Error(), "unknown flag: --tools") {
+					t.Fatalf("got %v, want unknown tools flag", err)
+				}
+			})
+		}
+	}
+}
+
+func TestCommandsToolFlags(t *testing.T) {
+	for _, command := range []string{"review", "scan"} {
+		t.Run(command, func(t *testing.T) {
+			cmd := &cobra.Command{Use: command}
+			if command == "review" {
+				registerReviewFlags(cmd, &reviewOptions{})
+			} else {
+				registerScanFlags(cmd, &scanOptions{})
+			}
+			if cmd.Flags().Lookup("tools") != nil || strings.Contains(cmd.Flags().FlagUsages(), "--tools") {
+				t.Fatal("removed tools override is still advertised")
+			}
+			if cmd.Flags().Lookup("max-tools") == nil {
+				t.Fatal("tool round budget flag must remain available")
+			}
+		})
+	}
+}
+
+func TestResolveReviewMaxTools(t *testing.T) {
+	tests := []struct {
+		name            string
+		templateDefault int
+		cliValue        int
+		want            int
+	}{
+		{name: "template default", templateDefault: 100, cliValue: 0, want: 100},
+		{name: "minimum override", templateDefault: 100, cliValue: 50, want: 50},
+		{name: "lower override", templateDefault: 100, cliValue: 75, want: 75},
+		{name: "equal override", templateDefault: 100, cliValue: 100, want: 100},
+		{name: "higher override", templateDefault: 100, cliValue: 125, want: 125},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveReviewMaxTools(tt.templateDefault, tt.cliValue); got != tt.want {
+				t.Errorf("resolveReviewMaxTools() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
 	err := validateReviewRefs(t.TempDir(), reviewOptions{commit: "-O./pwn.sh"})

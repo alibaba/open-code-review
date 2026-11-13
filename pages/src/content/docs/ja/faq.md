@@ -186,9 +186,9 @@ JSON モードでは `warnings` にも表示されます。
 実行されます: グループ内のいずれかのファイルの `lines.changed` が
 `PLAN_MODE_LINE_THRESHOLD`（デフォルト **50**）に達する、またはグループに 2 つ以上の
 ファイルが含まれ、合計変更行数が `PLAN_MODE_GROUP_LINE_THRESHOLD`（デフォルト **100**）に
-達する。これは意図的なものです——大きな diff は plan の恩恵を受けます。単一のレビューでスキップするには、
-より小さな diff で実行するか、埋め込みテンプレートを一時的に編集してください（上級者向け。
-`--tools` の上書きが必要）。
+達する。これは意図的なものです——大きな diff は plan の恩恵を受けます。
+より小さな diff なら両方の閾値を下回る可能性があります。レビューの計画処理は
+ツールの上書きではなく組み込みテンプレートで制御されるため、変更にはソース編集と再ビルドが必要です。
 
 ### "Max tool requests reached"
 
@@ -205,9 +205,8 @@ JSON モードでは `warnings` にも表示されます。
 - あるツールがエラーを出し続け、モデルがリトライし続けている。セッション JSONL を確認してください——
   同じツール結果が繰り返されていれば、それが原因です。
 - ファイルが本当に大きい、あるいはコンテキストが重く、100 回では足りない。`--max-tools <n>` で
-  引き上げてください（例: `--max-tools 150`）。`--max-tools` は**引き上げ専用**です。
-  テンプレートのデフォルト（`100`）より小さい値は効果がなく、1〜49 はさらに `50` に
-  引き上げられます。`0`（デフォルト）はテンプレートのデフォルト `100` を使います。
+  引き上げてください（例: `--max-tools 150`）。解決後の正の値が上限としてそのまま適用されます。
+  1〜49 は `50` に引き上げられ、`0`（デフォルト）はテンプレートのデフォルト `100` を使います。
 - モデルがネイティブなツール呼び出しを全くサポートしていない（ローカルモデルでよくある）——
   ["No tool calls parsed"（ローカルモデル / Ollama）](#no-tool-calls-parsed-ollama)を
   参照してください。
@@ -241,7 +240,8 @@ JSON モードでは `warnings` にも表示されます。
 レビュー対象のファイルがありません。`files_reviewed` はトップレベルのフィールドではなく `summary` の
 下にあり、この経路では `0` になります。トップレベルの `[]` は `comments` のほうです。同じオブジェクトは
 `"status": "skipped"` と `"message": "Review skipped: no items were selected."`、および
-`terminal_state` が `"skipped"` で `coverage` の各配列が空の `manifest` も含みます。
+`terminal_state` が `"skipped"` で `coverage.selected` が空の `manifest` も含みます。
+選択段階で除外されたファイルは `coverage.excluded` に列挙され、それぞれに `exclude_reason` が付きます。
 
 ファイルをレビューして指摘がなかった場合も、**`comments: []` を持つ JSON オブジェクト**が返ります。
 `summary.files_reviewed` は実際にレビューしたファイル数になり、`status` は `"complete"`、
@@ -251,6 +251,16 @@ JSON モードでは `warnings` にも表示されます。
 `manifest.terminal_state` を使ってください。ただし、呼び出し側は後述の manifest-less 経路で
 `summary` と `manifest` の両方が存在しない場合も扱う必要があります。`review --format json` は
 stdout に必ず JSON オブジェクトを 1 つだけ書き出し、裸の配列にはなりません。
+
+`terminal_state: "complete"` は選択された集合のレビューが完了したことを意味し、変更されたすべての
+ファイルがレビューされたことを意味するわけではありません。選択段階で除外されたファイル
+（未対応の拡張子、パスルール、組み込みの機密パス、バイナリ、削除済み、またはファイル単位の
+サイズ上限超過）は、`--preview` と同じ `exclude_reason` とともに
+`manifest.coverage.excluded` に記録され、実行を `partial` にすることはありません。
+この一覧は選択段階に到達したファイルだけを対象とします。diff provider がそれ以前に除外した
+ものは含まれません。具体的には、`vendor/` や `node_modules/` など常にスキップされるディレクトリ
+内の変更、`.gitignore` で無視される未追跡ファイル、および単一コミットやコミット範囲のレビューで
+`.gitignore` に一致するすべての変更です。
 
 manifest-less の no-files 経路はより簡素で、`summary` と `manifest` の両方を省略しますが、
 `"status": "skipped"`、`"message": "No supported files changed."`、`"comments": []` は
