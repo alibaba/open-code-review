@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
@@ -160,6 +161,17 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return err
 	}
 
+	mainToolDefs, err := loadToolDefs(cc.Template.MainTask.Tools)
+	if err != nil {
+		return fmt.Errorf("MAIN_TASK.tools: %w", err)
+	}
+	var planToolDefs []llm.ToolDef
+	if plan := cc.Template.PlanTask; plan != nil {
+		planToolDefs, err = loadToolDefs(plan.ToolReferences)
+		if err != nil {
+			return fmt.Errorf("PLAN_TASK.tool_references: %w", err)
+		}
+	}
 	rt, err := loadLLMRuntime(cc.Template, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
@@ -198,21 +210,28 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		sealedInput = &sealed.Resolution
 	}
 
-	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
-	fileReader := &tool.FileReader{
-		RepoDir: cc.RepoDir,
-		Mode:    mode,
-		Ref:     fileReadRef(mode, opts, sealedInput),
-		Runner:  cc.GitRunner,
+	codeTools, err := prepareReviewCodeTools(ctx, cc.RepoDir, opts, cc.GitRunner, sealedInput)
+	if err != nil {
+		return fmt.Errorf("prepare code tools: %w", err)
 	}
-	tools := buildToolRegistry(rt.Collector, fileReader)
+	if codeTools.access != nil {
+		mainToolDefs, err = toolsconfig.WithComparisonSides(mainToolDefs)
+		if err != nil {
+			return err
+		}
+		planToolDefs, err = toolsconfig.WithComparisonSides(planToolDefs)
+		if err != nil {
+			return err
+		}
+	}
+	tools := buildToolRegistryWithCodeAccess(rt.Collector, codeTools.reader, codeTools.access)
 
 	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
 	defer closeReviewMCPClients(mcpClients)
 
 	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
-	rt.PlanToolDefs = append(rt.PlanToolDefs, mcpToolDefs...)
-	rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
+	planToolDefs = append(planToolDefs, mcpToolDefs...)
+	mainToolDefs = append(mainToolDefs, mcpToolDefs...)
 
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
@@ -225,8 +244,8 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		FileFilter:            cc.FileFilter,
 		LLMClient:             rt.Client,
 		Tools:                 tools,
-		PlanToolDefs:          rt.PlanToolDefs,
-		MainToolDefs:          rt.MainToolDefs,
+		PlanToolDefs:          planToolDefs,
+		MainToolDefs:          mainToolDefs,
 		CommentCollector:      rt.Collector,
 		CommentWorkerPool:     agent.NewCommentWorkerPool(opts.concurrency),
 		MaxConcurrency:        opts.concurrency,
@@ -237,7 +256,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
-		SealedInput:           sealedInput,
+		SealedInput:           codeTools.resolution,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
@@ -618,11 +637,21 @@ var closeReviewMCPClients = func(clients []*mcp.Client) {
 }
 
 func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *tool.Registry {
+	return buildToolRegistryWithCodeAccess(collector, fr, nil)
+}
+
+func buildToolRegistryWithCodeAccess(collector *tool.CommentCollector, fr *tool.FileReader, access *tool.CodeAccess) *tool.Registry {
 	reg := tool.NewRegistry()
-	reg.Register(tool.NewFileRead(fr))
-	reg.Register(tool.NewFileFind(fr))
+	reader := tool.NewFileRead(fr)
+	reader.Access = access
+	finder := tool.NewFileFind(fr)
+	finder.Access = access
+	search := tool.NewCodeSearch(fr)
+	search.Access = access
+	reg.Register(reader)
+	reg.Register(finder)
 	reg.Register(tool.NewFileReadDiff(tool.DiffMap{}))
-	reg.Register(tool.NewCodeSearch(fr))
+	reg.Register(search)
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
 	return reg
 }

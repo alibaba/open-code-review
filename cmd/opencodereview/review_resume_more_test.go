@@ -147,7 +147,10 @@ func writeVerifiableParent(t *testing.T, repoDir string, id session.RunIdentity,
 	})
 	b := sh.Manifest()
 	b.SetRepository(session.ManifestRepository{IdentitySHA256: id.RepositorySHA256})
-	b.SetInput(session.ManifestInput{Mode: id.Mode, SourceArtifactSHA256: id.SourceArtifactSHA256})
+	b.SetInput(session.ManifestInput{
+		Mode: id.Mode, ResolvedBase: id.ResolvedBase, ResolvedHead: id.ResolvedHead,
+		SourceArtifactSHA256: id.SourceArtifactSHA256,
+	})
 	b.SetExecution(session.ManifestExecution{
 		Provider: provider, Model: model, RuleConfigSHA256: id.RuleConfigSHA256,
 	})

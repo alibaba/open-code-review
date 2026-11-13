@@ -146,8 +146,8 @@ if fileCount >= 2 && total >= PlanModeGroupLineThreshold { plan }  // several mo
 작은 변경에서는 plan이 값어치 없이 시간만 잡아먹으므로 조용히 건너뛰고 곧장
 main 루프로 갑니다. 그 외에는 `PLAN_TASK` LLM 호출을 **한 번** 합니다. 이때
 `Tools` 필드를 보내지 않으므로 모델은 계획 중에 도구를 부를 수 없습니다.
-읽기 전용 도구 세 가지(`code_search`, `file_read_diff`, `file_find` —
-`tools.json`에서 `plan_task` 플래그가 `true`인 도구들)는 `{{plan_tools}}`
+읽기 전용 도구 네 가지(`code_search`, `file_read`, `file_read_diff`, `file_find` —
+`task_template.json`의 `PLAN_TASK.tool_references`로 선택)는 `{{plan_tools}}`
 자리에 평문으로 박아 넣어(`formatToolDefs`가 렌더링) 나중에 무엇을 쓸 수
 있는지 모델이 알게 합니다. 모델이 돌려준 체크리스트는 main 프롬프트의
 `{{plan_guidance}}`가 됩니다.
@@ -155,8 +155,8 @@ main 루프로 갑니다. 그 외에는 `PLAN_TASK` LLM 호출을 **한 번** �
 ### 2단계 — main 루프 {#phase-2-main-loop}
 
 main 루프는 `MAIN_TASK` 프롬프트를 조립해 모델과 도구 호출 대화를 진행합니다.
-전체 도구 세트에는 plan 단계 도구에 더해 **`task_done`**, **`code_comment`**,
-**`file_read`**가 들어갑니다. 전체 목록은 [도구](../tools/)를 참고하세요.
+전체 도구 세트에는 plan 단계 도구 참조에 더해 **`task_done`**과 **`code_comment`**가
+들어갑니다. 전체 목록은 [도구](../tools/)를 참고하세요.
 
 ```
 loop up to MAX_TOOL_REQUEST_TIMES (default 100):

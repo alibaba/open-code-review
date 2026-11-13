@@ -301,6 +301,7 @@ export const ja: TranslationKeys = {
   'docs.sidebar.delegate': 'デリゲーションモード',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': 'コントリビュート',
   'docs.sidebar.faq': 'FAQ',
   'docs.sidebar.chatgptPreview': 'ChatGPT サインインのプレビュー',

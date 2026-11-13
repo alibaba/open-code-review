@@ -92,11 +92,11 @@ otherwise                                    { skip plan }
 
 2 つのしきい値は連携して働きます。`PLAN_MODE_LINE_THRESHOLD` はグループ内で最も大きいファイルを見て、`PLAN_MODE_GROUP_LINE_THRESHOLD` はグループ全体の合計変更量を見ます。後者を意図的に大きめの値にしているのは、plan 段階が無条件に実行されてしまうのを避けるためです。
 
-小さな diff に対しては、plan はレイテンシを増やすだけで価値がないため、静かにスキップされ、main ループが直接実行されます。より大きな diff に対しては、OCR は**1 回だけ** `PLAN_TASK` の LLM 呼び出しを行います。`Tools` フィールドを送らないため、plan の間モデルはツールを呼び出せません。読み取り専用ツールのサブセット（`code_search`、`file_read_diff`、`file_find`。`tools.json` で `plan_task` フラグが `true` の 3 つ）が、`{{plan_tools}}` プレースホルダー（`formatToolDefs` でレンダリング）を通じてプレーンテキストとして埋め込まれ、あとで何が使えるかをモデルに知らせます。モデルはチェックリストを返し、それが main prompt 内の `{{plan_guidance}}` になります。
+小さな diff に対しては、plan はレイテンシを増やすだけで価値がないため、静かにスキップされ、main ループが直接実行されます。より大きな diff に対しては、OCR は**1 回だけ** `PLAN_TASK` の LLM 呼び出しを行います。`Tools` フィールドを送らないため、plan の間モデルはツールを呼び出せません。読み取り専用ツールのサブセット（`code_search`、`file_read`、`file_read_diff`、`file_find`。`task_template.json` の `PLAN_TASK.tool_references` で選択）が、`{{plan_tools}}` プレースホルダー（`formatToolDefs` でレンダリング）を通じてプレーンテキストとして埋め込まれ、あとで何が使えるかをモデルに知らせます。モデルはチェックリストを返し、それが main prompt 内の `{{plan_guidance}}` になります。
 
 ### 段階 2: main ループ（複数ラウンド）
 
-main ループは `MAIN_TASK` prompt を組み立て、モデルとツール呼び出しの対話を展開します。完全なツールセットは、plan 段階のツールに **`task_done`**、**`code_comment`**、**`file_read`** を加えたものです。完全な一覧は[ツール](../tools/)を参照してください。
+main ループは `MAIN_TASK` prompt を組み立て、モデルとツール呼び出しの対話を展開します。完全なツールセットは、plan 段階のツール参照に **`task_done`** と **`code_comment`** を加えたものです。完全な一覧は[ツール](../tools/)を参照してください。
 
 main ループ全体は最大 `MAX_REVIEW_ROUNDS` 回繰り返されます（`--effort` で制御: `low` = 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド）。2 ラウンド目以降は plan の結果を取り除き（それが recall の上限になってしまうのを避けるため）、前のラウンドで確定したコメントを「すでに見つかった指摘」のコンテキストとして渡し、モデルに**新しい**問題を探させます。あるラウンドで新しい指摘が出なかった場合、または確定コメント数が上限に達した場合は、早期に停止します。
 
