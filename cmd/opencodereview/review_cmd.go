@@ -388,9 +388,6 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 		DiffTo:     opts.to,
 		DiffCommit: opts.commit,
 	}
-	if current.ReviewMode == session.ReviewModeWorkspace {
-		return nil, fmt.Errorf("resume requires --from/--to or --commit; workspace resume is not supported")
-	}
 	state, err := session.LoadReviewResumeState(repoDir, opts.resume)
 	if err != nil {
 		return nil, fmt.Errorf("load resume session: %w (run 'ocr session list' to see available sessions)", err)

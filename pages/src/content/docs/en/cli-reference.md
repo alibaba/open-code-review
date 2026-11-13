@@ -115,7 +115,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
 | `--no-filter` | — | `false` | Keep all review comments and skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files. |
-| `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
+| `--resume <session-id>` | — | — | Resume from a previous compatible range, commit, or workspace review session. |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
 | `--output <path>` | `-o` | stdout | Write review results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
 | `--audience <who>` | — | `human` | `human` streams progress lines (to stderr when `--format` is `json`/`sarif`, so stdout stays a single parseable document); `agent` suppresses progress entirely and prints only the final summary / JSON. |
@@ -135,8 +135,8 @@ staged + unstaged + untracked changes in the current directory's repo.
 
 > Mode flags are mutually exclusive: pass either `--from`/`--to`, or
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
-> `--resume` supports only range or commit reviews and cannot be combined
-> with `--preview`.
+> `--resume` works with range, commit, and workspace reviews and cannot be
+> combined with `--preview`.
 
 ### Per-run LLM selection
 
@@ -206,8 +206,8 @@ Every `ocr review` run persists a local session log under
 `~/.opencodereview/sessions/`. Successful text output stays focused on review
 results and does not print the session ID; use `ocr session list/show` to find
 saved sessions, or `--format json` to include `session_id` in machine-readable
-output. If a range or commit review is interrupted, list saved sessions and
-resume from one that matches the same review target:
+output. If a review is interrupted, list saved sessions and resume from one that
+matches the same review target:
 
 ```bash
 ocr session list
@@ -215,12 +215,16 @@ ocr session show <session-id>
 ocr session comments <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
+ocr review --resume <session-id>   # workspace (no mode flags)
 ```
 
 Resume is strict by design. Checkpoints are only reused when the resumed run
 would review the same thing the parent did:
 
-- workspace reviews cannot be resumed
+- a workspace review resumes only when the worktree it reviews is unchanged:
+  the base commit and the uncommitted changes must both match. Unlike range or
+  commit reviews there is no commit to pin, so edits made during the resumed
+  run are not guarded
 - the review mode must match: a range session cannot be resumed as a commit one
 - the resolved input must match. Ref *spellings* are not compared — `abc1234`
   and `abc1234def` name the same commit — but if the same refs now resolve to a
@@ -329,7 +333,7 @@ Top-level fields:
 | `summary` | Optional. Run aggregates: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (omitempty), `cache_write_tokens` (omitempty), `elapsed`. Omitted for `skipped` runs. |
 | `comments` | Always present, possibly empty. Per-comment fields are the ones in the example above. |
 | `warnings` | Optional. Present when one or more sub-agents failed; each entry describes the affected file and the error. |
-| `session_id` | Optional. Present on persisted review runs; pass this to `ocr review --resume <session-id>` when retrying compatible range or commit reviews. |
+| `session_id` | Optional. Present on persisted review runs; pass this to `ocr review --resume <session-id>` when retrying compatible reviews. |
 | `resume` | Optional. Present on resumed runs with `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, and `current_model`. |
 
 When no files were eligible for review, JSON mode emits a `skipped`
@@ -393,7 +397,7 @@ See `ocr scan -h` for the full flag list.
 
 Lists and inspects local review session logs saved under
 `~/.opencodereview/sessions/`. Use it to find a session ID, inspect
-per-file checkpoint status, and resume interrupted range or commit reviews.
+per-file checkpoint status, and resume interrupted reviews.
 
 ```text
 ocr session <sub-command>

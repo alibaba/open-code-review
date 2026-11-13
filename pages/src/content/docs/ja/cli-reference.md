@@ -109,7 +109,7 @@ ocr r      [flags]   (alias)
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、サブタスクごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。サブタスクは単一ファイル、または関連ファイルのまとまりをレビューします。 |
-| `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
+| `--resume <session-id>` | — | — | 以前の互換性のある範囲、単一 commit、またはワークスペースレビューセッションから再開します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |
 | `--output <path>` | `-o` | 標準出力 | レビュー結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
 | `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します（`--format` が `json`/`sarif` の場合は stderr に出力し、stdout は解析可能な単一ドキュメントのままになります）。`agent` は進捗行を完全に抑制し、最終サマリー / JSON のみを出力します。 |
@@ -129,7 +129,7 @@ ocr r      [flags]   (alias)
 
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
-> `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
+> `--resume` は範囲、単一 commit、ワークスペースレビューに対応し、`--preview` とは併用できません。
 
 ### 実行単位の LLM 選択
 
@@ -199,12 +199,16 @@ ocr session show <session-id>
 ocr session comments <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
+ocr review --resume <session-id>   # ワークスペース（モード引数なし）
 ```
 
 再開は意図的に厳密です。今回の実行が親と同じ対象をレビューする場合にのみ、
 チェックポイントが再利用されます:
 
-- ワークスペースレビューは再開できません
+- ワークスペースレビューは、レビュー対象のワークツリーが変わっていない場合にのみ
+  再開できます。ベース commit と未コミットの変更の両方が一致する必要があります。
+  範囲や単一 commit レビューと違い固定できる commit がないため、再開実行中の
+  編集は保護されません
 - レビューモードが一致する必要があります: 範囲セッションを単一 commit として
   再開することはできません
 - 解決後の入力が一致する必要があります。ref の*表記*は比較しません
@@ -310,7 +314,7 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
 | `summary` | 任意。実行の集計: `files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` の実行時は省略されます。 |
 | `comments` | 常に存在しますが、空の場合があります。各コメントのフィールドは上記の例のとおりです。 |
 | `warnings` | 任意。1 つ以上のサブエージェントが失敗した場合に存在します。各項目は影響を受けたファイルとエラーを記述します。 |
-| `session_id` | 任意。永続化されたレビュー実行に含まれます。互換性のある範囲または単一 commit レビューを再試行する際に `ocr review --resume <session-id>` へ渡せます。 |
+| `session_id` | 任意。永続化されたレビュー実行に含まれます。互換性のあるレビューを再試行する際に `ocr review --resume <session-id>` へ渡せます。 |
 | `resume` | 任意。再開した実行で存在し、`resumed_from`、`reused_files`、`rerun_files`、`previous_model`、`current_model` を含みます。 |
 
 レビュー対象のファイルがない場合、JSON モードは `skipped` の外殻を発行し、呼び出し側が「変更なし」と「発見なし」を区別できるようにします:
