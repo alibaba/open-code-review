@@ -20,6 +20,10 @@ func TestBoolArg(t *testing.T) {
 		{false, false, false},
 		{"true", true, false},
 		{" False ", false, false},
+		{"1", true, false},
+		{"0", false, false},
+		{"T", true, false},
+		{"f", false, false},
 		{"junk", false, true},
 		{1, false, true},
 	}
