@@ -126,7 +126,6 @@ ocr r      [flags]   (alias)
 | `--provider <name>` | — | — | 今回の実行で設定済み provider を選択します。`providers` と `custom_providers` の両方の名前を使用できます。 |
 | `--model <name>` | — | — | 今回の実行で解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 並行 git サブプロセスの最大数。 |
-| `--tools <path>` | — | 埋め込み | カスタム JSON ツール設定ファイルのパス。埋め込みのツール定義を上書きします。 |
 
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
@@ -398,18 +397,28 @@ ocr session list --json
 
 ### `ocr session show`
 
+デフォルトでは、保存済みのすべてのリポジトリのセッションを ID で検索します。
+`--repo .` を指定すると、従来どおりカレントディレクトリに検索範囲を限定できます。
+
+デフォルトの全体検索では、ID が一意であれば、worktree の切り替えや元のチェックアウトの
+削除後もセッションを確認できます。同じ ID が複数のリポジトリに存在する場合は、
+候補のリポジトリが一覧表示され、`--repo` で 1 つを選択する必要があります。
+現在、`--repo` には既存のリポジトリディレクトリが必要です。そのため、ID が重複し、
+選択したいセッションの元のチェックアウトが削除されている場合、そのセッションを選択できません。
+
 再開した実行では、継続元の実行も表示されます。provider や model をまたいだ
 再開の場合は、その切り替えも表示されます。
 
 ```bash
 ocr session show <session-id>
 ocr session show --json <session-id>
+ocr session show --repo . <session-id>
 ocr session show --repo /path/to/repo <session-id>
 ```
 
 | 引数 | デフォルト | 説明 |
 |---|---|---|
-| `--repo <path>` | カレントディレクトリ | セッションを確認するリポジトリ。 |
+| `--repo <path>` | すべてのリポジトリ | 指定した既存のリポジトリディレクトリにセッションの検索範囲を限定します。 |
 | `--json` | `false` | セッションのメタデータとファイル単位の項目を JSON として出力します。 |
 
 ### `ocr session comments`

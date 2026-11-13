@@ -87,6 +87,24 @@ func TestRunSessionList_EmptyRepo(t *testing.T) {
 	}
 }
 
+func TestRunSessionList_JSONMissingDirPrintsEmptyArray(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	got := captureStdout(t, func() {
+		if err := runSessionListCompat([]string{"--repo", repoDir, "--json"}); err != nil {
+			t.Fatalf("runSessionList: %v", err)
+		}
+	})
+	// json.Unmarshal accepts null into a slice, so the wire text is the only
+	// thing that pins this: a repository with no sessions directory must read
+	// exactly the same as one whose directory is empty.
+	if strings.TrimSpace(got) != "[]" {
+		t.Errorf("expected [] for a repo with no sessions, got %q", got)
+	}
+}
+
 func TestRunSessionShow_Text(t *testing.T) {
 	tmpHome := t.TempDir()
 	setTestHome(t, tmpHome)

@@ -135,6 +135,7 @@ type InputResolution struct {
 	ResolvedBase string
 	ResolvedHead string
 	ExactRange   string
+	BaseIsEmpty  bool
 }
 
 // ResolveInput freezes this run's commit endpoints by asking git, following the

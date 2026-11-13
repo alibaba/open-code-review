@@ -16,6 +16,11 @@ import (
 	"github.com/alibaba/open-code-review/acp/internal/orchestrator/process"
 )
 
+func cooperativeInterruptAvailable(test *testing.T) bool {
+	test.Helper()
+	return true
+}
+
 func TestStopKillsIgnoringMemberAfterLeaderExit(t *testing.T) {
 	// Both processes are children of the test so their exit can be reaped and
 	// verified even on containers whose PID 1 does not reap orphan zombies.

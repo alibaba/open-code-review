@@ -45,7 +45,7 @@ type SealedInput struct {
 func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	defer stdout.Quiet()()
 
-	resolution, err := resolveInputBeforeDiff(ctx, args)
+	resolution, err := ResolveComparisonInput(ctx, args)
 	if err != nil {
 		return nil, err
 	}
@@ -58,20 +58,23 @@ func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 		return nil, fmt.Errorf("load diffs: %w", err)
 	}
 	a.diffs, _ = summarizeSelection(a.selectFiles(a.diffs))
+	if resolution != nil {
+		a.inputResolution = *resolution
+	}
 	return &SealedInput{Identity: a.runIdentity(), Resolution: a.inputResolution}, nil
 }
 
-// resolveInputBeforeDiff turns every moving head ref into an immutable commit
-// before the diff used for admission is loaded. Range mode then computes its
-// merge-base against that frozen head; commit mode needs only the frozen head.
-func resolveInputBeforeDiff(ctx context.Context, args Args) (*diff.InputResolution, error) {
+// ResolveComparisonInput turns every moving head ref into an immutable commit
+// before loading the diff. Range mode computes its merge-base against frozen
+// endpoints; commit mode verifies the first parent or a genuine empty old tree.
+func ResolveComparisonInput(ctx context.Context, args Args) (*diff.InputResolution, error) {
 	switch {
 	case args.Commit != "":
-		head, err := resolveCommitHead(ctx, args, args.Commit)
+		resolution, err := diff.NewCommitProvider(args.RepoDir, args.Commit, args.GitRunner).ResolveCommitComparison(ctx)
 		if err != nil {
 			return nil, err
 		}
-		return &diff.InputResolution{ResolvedHead: head}, nil
+		return &resolution, nil
 	case args.From != "" && args.To != "":
 		from, err := resolveCommitHead(ctx, args, args.From)
 		if err != nil {
@@ -108,6 +111,8 @@ func resolveCommitHead(ctx context.Context, args Args, ref string) (string, erro
 func (a *Agent) runIdentity() session.RunIdentity {
 	id := session.RunIdentity{
 		Mode:                 a.manifestMode(),
+		ResolvedBase:         a.inputResolution.ResolvedBase,
+		ResolvedHead:         a.inputResolution.ResolvedHead,
 		SourceArtifactSHA256: a.sourceArtifactSHA256(),
 		RuleConfigSHA256:     a.ruleConfigSHA256(),
 	}
