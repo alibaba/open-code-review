@@ -52,6 +52,11 @@ func TestNewOpenAIResponsesClient_URLNormalization(t *testing.T) {
 			inputURL: "https://api.example.com/",
 			wantURL:  "https://api.example.com/responses",
 		},
+		{
+			name:     "gateway URL with query keeps suffix before query",
+			inputURL: "https://api.example.com/gateway?tenant=acme",
+			wantURL:  "https://api.example.com/gateway/responses?tenant=acme",
+		},
 	}
 
 	for _, tt := range tests {
@@ -621,6 +626,45 @@ func TestOpenAIResponsesClient_EndToEnd(t *testing.T) {
 
 	if resp.Content() != "pong" {
 		t.Errorf("Content() = %q, want %q", resp.Content(), "pong")
+	}
+}
+
+// TestOpenAIResponsesClient_PreservesURLQuery verifies that query parameters on
+// a configured Responses URL reach the final request instead of being dropped
+// when the SDK resolves the request path against the base URL.
+func TestOpenAIResponsesClient_PreservesURLQuery(t *testing.T) {
+	var gotPath, gotQuery string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_q","object":"response","model":"m","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL:    server.URL + "/gateway?tenant=synthetic",
+		APIKey: "test-key",
+		Model:  "m",
+	})
+
+	if client.cfg.URL != server.URL+"/gateway/responses?tenant=synthetic" {
+		t.Fatalf("cfg.URL = %q, want %q", client.cfg.URL, server.URL+"/gateway/responses?tenant=synthetic")
+	}
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	if gotPath != "/gateway/responses" {
+		t.Errorf("request path = %q, want /gateway/responses", gotPath)
+	}
+	if gotQuery != "tenant=synthetic" {
+		t.Errorf("request query = %q, want tenant=synthetic", gotQuery)
 	}
 }
 
