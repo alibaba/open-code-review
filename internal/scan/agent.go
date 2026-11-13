@@ -78,6 +78,19 @@ type Args struct {
 	// batches are dispatched. 0 = unlimited. Set via --max-tokens-budget
 	// or ScanTemplate.MaxTokensBudget.
 	MaxTokensBudget int64
+
+	// TaskModels carries the config file's task_models overrides resolved for
+	// this run. Nil when unset; ModelForTask falls back to Model. Scan PLAN
+	// keys on plan_task; DEDUP and PROJECT_SUMMARY reuse the
+	// memory_compression_task id, matching how they are recorded in the
+	// session history.
+	TaskModels llm.TaskModels
+}
+
+// ModelForTask returns the model override configured for task, or the run-wide
+// Model when task_models has no entry for it.
+func (a Args) ModelForTask(task session.TaskType) string {
+	return a.TaskModels.ModelFor(string(task), a.Model)
 }
 
 // planEnabled / dedupEnabled / summaryEnabled report whether each optional
@@ -148,6 +161,7 @@ func NewAgent(args Args) *Agent {
 	a.runner = reviewtask.NewRunner(reviewtask.Deps{
 		LLMClient:         args.LLMClient,
 		Model:             args.Model,
+		TaskModels:        args.TaskModels,
 		Template:          toLoopTemplate(args.Template),
 		Tools:             args.Tools,
 		MainToolDefs:      args.MainToolDefs,
@@ -875,7 +889,7 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 	startTime := time.Now()
 
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
-		Model:     a.args.Model,
+		Model:     a.args.ModelForTask(session.PlanTask),
 		Messages:  messages,
 		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
@@ -930,7 +944,7 @@ func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.Llm
 	startTime := time.Now()
 
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
-		Model:     a.args.Model,
+		Model:     a.args.ModelForTask(session.MemoryCompressionTask),
 		Messages:  messages,
 		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
@@ -1009,7 +1023,7 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) map
 	startTime := time.Now()
 
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
-		Model:     a.args.Model,
+		Model:     a.args.ModelForTask(session.MemoryCompressionTask),
 		Messages:  messages,
 		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
