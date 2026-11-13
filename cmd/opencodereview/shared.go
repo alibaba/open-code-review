@@ -379,7 +379,7 @@ func isMachineReadable(outputFormat string) bool {
 //     Every result document (json, sarif, text) is written straight to
 //     os.Stdout and never through stdout.Writer(), so stdout stays a single
 //     parseable document while stderr carries the live progress.
-//   - otherwise: no-op, progress stays on stdout.
+//   - otherwise: progress stays on stdout, styled according to --color.
 func newQuietHandle(outputFormat, audience string) *quietHandle {
 	h := &quietHandle{}
 	switch {
@@ -387,6 +387,14 @@ func newQuietHandle(outputFormat, audience string) *quietHandle {
 		h.fn = stdout.Quiet()
 	case isMachineReadable(outputFormat):
 		h.fn = stdout.Swap(os.Stderr)
+	}
+	restoreRouting := h.fn
+	restoreStyle := stdout.StyleProgress(resolveColorFor(stdout.Writer()), resolveColorFor(os.Stderr))
+	h.fn = func() {
+		restoreStyle()
+		if restoreRouting != nil {
+			restoreRouting()
+		}
 	}
 	return h
 }
@@ -877,7 +885,7 @@ func emitRunResult(
 	// after them but must not separate the summary from the end of output.
 	outputRetryReportText(out, retryReport)
 	if summary := ag.ProjectSummary(); summary != "" {
-		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", sanitizeTerminal(summary))
+		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", markdownForOutput(out, summary))
 	}
 	// Text rendering ignores fmt.Fprintf write errors; surface them here so a
 	// failed --output write (permission, disk full) fails the command non-zero

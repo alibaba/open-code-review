@@ -21,7 +21,21 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/alibaba/open-code-review/internal/stdout"
+	"github.com/charmbracelet/x/ansi"
 )
+
+func TestToolCallErrorStyle(test *testing.T) {
+	output := captureStderr(test, func() {
+		defer stdout.StyleProgress(false, true)()
+		PrintToolCallError("file_read", errors.New("permission denied"))
+	})
+	if ansi.Strip(output) != "[ocr]   ✘ file_read failed: permission denied\n" {
+		test.Fatalf("error text changed: %q", output)
+	}
+	if !strings.Contains(output, "\x1b[31m✘\x1b[0m") || !strings.Contains(output, "\x1b[1;36mfile_read\x1b[0m") {
+		test.Fatalf("missing error/tool style: %q", output)
+	}
+}
 
 func setupEnabledTelemetry(t *testing.T) {
 	t.Helper()
