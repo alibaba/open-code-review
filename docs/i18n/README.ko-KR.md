@@ -152,9 +152,9 @@ ocr review --from main --to feature-branch
 # 단일 commit
 ocr review --commit abc123
 
-# 중단된 range 또는 단일 commit review 재개
+# 중단된 리뷰 재개 (workspace, range, commit 지원; 대상 플래그는 세션에서 자동 추론)
 ocr session list
-ocr review --from main --to feature-branch --resume <session-id>
+ocr review --resume <session-id>
 
 # 전체 파일 스캔 — diff 대신 파일 전체를 리뷰 (git 이력 불필요)
 ocr scan                          # 전체 repository 스캔

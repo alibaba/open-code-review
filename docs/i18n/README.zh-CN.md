@@ -152,9 +152,9 @@ ocr review --from main --to feature-branch
 # 单个提交
 ocr review --commit abc123
 
-# 恢复中断的区间或单 commit 评审
+# 恢复中断的评审（支持工作区、区间或单 commit；省略目标参数时自动从会话推断）
 ocr session list
-ocr review --from main --to feature-branch --resume <session-id>
+ocr review --resume <session-id>
 
 # 全量文件扫描 —— 审查整个文件而非 diff（无需 git 历史）
 ocr scan                          # 扫描整个仓库

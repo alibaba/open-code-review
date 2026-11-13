@@ -152,9 +152,9 @@ ocr review --from main --to feature-branch
 # Single commit
 ocr review --commit abc123
 
-# Resume an interrupted range or commit review
+# Resume an interrupted review (workspace, range, or commit; target flags are inferred)
 ocr session list
-ocr review --from main --to feature-branch --resume <session-id>
+ocr review --resume <session-id>
 
 # Full-file scan — review whole files instead of a diff (no git history needed)
 ocr scan                          # scan the entire repository

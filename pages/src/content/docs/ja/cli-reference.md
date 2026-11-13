@@ -109,7 +109,7 @@ ocr r      [flags]   (alias)
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、サブタスクごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。サブタスクは単一ファイル、または関連ファイルのまとまりをレビューします。 |
-| `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
+| `--resume <session-id>` | — | — | 以前の互換性のあるレビューセッション（ワークスペース・範囲・単一 commit）から再開します。ターゲット引数を省略するとセッションから自動推論します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |
 | `--output <path>` | `-o` | 標準出力 | レビュー結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
 | `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します（`--format` が `json`/`sarif` の場合は stderr に出力し、stdout は解析可能な単一ドキュメントのままになります）。`agent` は進捗行を完全に抑制し、最終サマリー / JSON のみを出力します。 |
@@ -129,7 +129,7 @@ ocr r      [flags]   (alias)
 
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
-> `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
+> `--resume` はワークスペース・範囲・単一 commit レビューに対応し（省略時はターゲット引数を自動推論し、競合する場合は拒否します）、`--preview` とは併用できません。
 
 ### 実行単位の LLM 選択
 
@@ -190,34 +190,42 @@ ocr review -c abc123
 すべての `ocr review` 実行は、`~/.opencodereview/sessions/` 配下にローカル
 セッションログを保存します。正常終了したテキスト出力はレビュー結果に集中し、session ID
 は表示しません。保存済みセッションは `ocr session list/show` で確認でき、
-`--format json` では機械可読出力に `session_id` が含まれます。範囲または単一 commit
-レビューが中断された場合は、保存済みセッションを一覧表示し、同じレビュー対象に一致するセッションから再開します:
+`--format json` では機械可読出力に `session_id` が含まれます。ワークスペース・範囲・
+単一 commit レビューが中断された場合は、保存済みセッションを一覧表示し、互換性のあるセッションから再開します:
 
 ```bash
 ocr session list
 ocr session show <session-id>
 ocr session comments <session-id>
+ocr review --resume <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
 ```
 
-再開は意図的に厳密です。今回の実行が親と同じ対象をレビューする場合にのみ、
-チェックポイントが再利用されます:
+再開では子セッションを作成する前に互換性を検証します:
 
-- ワークスペースレビューは再開できません
-- レビューモードが一致する必要があります: 範囲セッションを単一 commit として
-  再開することはできません
-- 解決後の入力が一致する必要があります。ref の*表記*は比較しません
+- レビューモードが一致する必要があります: 範囲セッションを単一 commit や
+  ワークスペースとして再開することはできません。ターゲット引数（`--from`/`--to`、
+  `--commit`）は省略して保存済みセッションから自動推論でき、セッションのモードと
+  競合する引数を渡すと拒否されます
+- 範囲および単一 commit レビューでは、解決後の入力が一致する必要があります。ref の*表記*は比較しません
   (`abc1234` と `abc1234def` は同じ commit を指します) が、同じ ref が別の
   diff に解決される場合、あるいはルールやフィルタが選択ファイル集合を変えた
   場合は、部分的に再利用するのではなく再開全体を拒否します
+- ワークスペースレビューでは、リポジトリにベース commit が存在すること（commit のない
+  空リポジトリは拒否）、現在の `HEAD` が親セッションの記録したベース commit と一致する
+  かその子孫であること（`git merge-base --is-ancestor`）、リポジトリ識別子とルール/
+  フィルタ設定が一致すること、および現在選択されている未削除ファイルの diff フィンガー
+  プリントのうち少なくとも 1 件が親 manifest の完了済みまたは再利用済み項目に一致する
+  ことが必須です。変更されていないファイルはキャッシュ済み checkpoint を再利用し、
+  編集・新規追加・hunk 行番号がずれたファイルは再レビューされます
 - provider や model の変更は `--provider` / `--model` で明示的に指定する必要が
   あります。設定ファイルや環境変数経由の変更は拒否されます
 - 親の実行が run manifest を持っている必要があります。入力はこれと照合して
-  検証されます。ファイルの dispatch 開始後は、Ctrl-C によってレビューが正常に
-  キャンセルされて manifest が書き出されるため、完了済みの checkpoint は再開時に
-  再利用できます。正常に終了できなかったプロセスと run manifest より古い
-  セッションには manifest がありません
+  検証されます。ファイルの dispatch 開始後は、Ctrl-C によってチェックポイント保存の
+  通知を出してレビューが正常にキャンセルされ manifest が書き出されるため、完了済みの
+  checkpoint は再開時に再利用できます。正常に終了できなかったプロセスと run manifest
+  より古いセッションには manifest がありません
 - 再利用されるのは、親の manifest が結果を確定したファイルだけです。manifest が
   裏付けないチェックポイントや読み取れないチェックポイントは、そのファイルが
   もう一度レビューされるだけで、他のファイルには影響しません
@@ -310,7 +318,7 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
 | `summary` | 任意。実行の集計: `files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` の実行時は省略されます。 |
 | `comments` | 常に存在しますが、空の場合があります。各コメントのフィールドは上記の例のとおりです。 |
 | `warnings` | 任意。1 つ以上のサブエージェントが失敗した場合に存在します。各項目は影響を受けたファイルとエラーを記述します。 |
-| `session_id` | 任意。永続化されたレビュー実行に含まれます。互換性のある範囲または単一 commit レビューを再試行する際に `ocr review --resume <session-id>` へ渡せます。 |
+| `session_id` | 任意。永続化されたレビュー実行に含まれます。互換性のあるワークスペース・範囲・単一 commit レビューを再試行する際に `ocr review --resume <session-id>` へ渡せます。 |
 | `resume` | 任意。再開した実行で存在し、`resumed_from`、`reused_files`、`rerun_files`、`previous_model`、`current_model` を含みます。 |
 
 レビュー対象のファイルがない場合、JSON モードは `skipped` の外殻を発行し、呼び出し側が「変更なし」と「発見なし」を区別できるようにします:
@@ -368,7 +376,7 @@ ocr scan --exclude '**/generated/*,*.pb.go'
 ## `ocr session`
 
 `~/.opencodereview/sessions/` 配下に保存されたローカルレビューセッションログを一覧表示・確認します。
-session ID の確認、ファイル単位のチェックポイント状態の確認、中断した範囲または単一 commit
+session ID の確認、ファイル単位のチェックポイント状態の確認、中断したワークスペース・範囲・単一 commit
 レビューの再開に使用します。
 
 ```text

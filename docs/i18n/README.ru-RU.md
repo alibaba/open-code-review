@@ -152,9 +152,9 @@ ocr review --from main --to feature-branch
 # Один коммит
 ocr review --commit abc123
 
-# Возобновить прерванное ревью диапазона или одного коммита
+# Возобновить прерванное ревью (рабочая область, диапазон или коммит; целевые флаги определяются из сессии)
 ocr session list
-ocr review --from main --to feature-branch --resume <session-id>
+ocr review --resume <session-id>
 
 # Полнофайловое сканирование — ревью целых файлов вместо диффа (история git не нужна)
 ocr scan                          # сканировать весь репозиторий

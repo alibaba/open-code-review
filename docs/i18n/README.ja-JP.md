@@ -152,9 +152,9 @@ ocr review --from main --to feature-branch
 # 単一コミット
 ocr review --commit abc123
 
-# 中断した範囲または単一 commit レビューを再開
+# 中断したレビューを再開（ワークスペース・範囲・単一 commit に対応。ターゲット引数はセッションから自動推論）
 ocr session list
-ocr review --from main --to feature-branch --resume <session-id>
+ocr review --resume <session-id>
 
 # フルファイルスキャン — diffではなくファイル全体をレビュー（git履歴不要）
 ocr scan                          # リポジトリ全体をスキャン
