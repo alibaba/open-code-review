@@ -68,6 +68,20 @@ func (r *Runner) Output(ctx context.Context, repoDir string, args ...string) ([]
 	return cmd.Output()
 }
 
+// OutputWithInput executes a git command with stdin read from input and
+// returns stdout only.
+func (r *Runner) OutputWithInput(ctx context.Context, repoDir string, input io.Reader, args ...string) ([]byte, error) {
+	if err := r.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer r.release()
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoDir
+	cmd.Stdin = input
+	return cmd.Output()
+}
+
 // RunSplit executes a git command and returns stdout and stderr separately.
 func (r *Runner) RunSplit(ctx context.Context, repoDir string, args ...string) (string, string, error) {
 	if err := r.acquire(ctx); err != nil {
