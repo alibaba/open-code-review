@@ -1198,6 +1198,10 @@ test("v2 exposes delegate tools with complete schemas and disallows additional p
 
   const preview = tools.find((definition) => definition.name === "ocr_delegate_preview")
   assert.equal(preview.input.additionalProperties, false)
+  assert.match(
+    preview.input.properties.backgroundFile?.description ?? "",
+    /A relative path resolves against the repository root/,
+  )
   assert.deepEqual(
     Object.keys(preview.input.properties).sort(),
     ["background", "backgroundFile", "commit", "exclude", "from", "maxGitProcesses", "rule", "timeoutSeconds", "to"].sort(),
@@ -1206,7 +1210,10 @@ test("v2 exposes delegate tools with complete schemas and disallows additional p
   const rule = tools.find((definition) => definition.name === "ocr_delegate_rule")
   assert.equal(rule.input.additionalProperties, false)
   assert.deepEqual(rule.input.required, ["paths"])
-  assert.equal(rule.input.properties.paths.type, "array")
+  assert.deepEqual(rule.input.properties.paths.oneOf, [
+    { type: "array", items: { type: "string" } },
+    { type: "string" },
+  ])
   assert.deepEqual(
     Object.keys(rule.input.properties).sort(),
     ["commit", "from", "maxGitProcesses", "paths", "rule", "timeoutSeconds", "to"].sort(),
@@ -1246,23 +1253,37 @@ test("v2 executes ocr_delegate_preview and ocr_delegate_rule resolving cwd from 
         "--",
         "file.go",
       ])
+
+      const ruleStringRes = await ruleTool.execute({ paths: "file1.go, file2.go" }, v2ToolContext())
+      assert.deepEqual(JSON.parse(ruleStringRes.content).argv, [
+        "delegate",
+        "rule",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--",
+        "file1.go",
+        "file2.go",
+      ])
     },
   )
 })
 
-test("v2 ocr-delegate-review and ocr-delegate commands render review intent with sentence break", async () => {
+test("v2 ocr-delegate-review and ocr-delegate commands render review intent with clean sentence boundaries", async () => {
   const module = await import("../dist/open-code-review.js")
   const { ctx, addedCommands, prompts } = stubV2Context({ directory: "/tmp/project" })
   await module.default.setup(ctx)
 
   const delegateReviewCmd = addedCommands.find((definition) => definition.name === "ocr-delegate-review")
   await delegateReviewCmd.execute({ sessionID: "session-test", prompt: { text: "my branch changes" }, delivery: "steer" })
-  assert.match(prompts[0].text, /business context:my branch changes\. If no target is specified/)
+  assert.match(prompts[0].text, /business context: my branch changes\./)
   assert.match(prompts[0].text, /ocr_delegate_preview/)
   assert.match(prompts[0].text, /ocr_delegate_rule/)
 
   const delegateCmd = addedCommands.find((definition) => definition.name === "ocr-delegate")
   await delegateCmd.execute({ sessionID: "session-test", prompt: {}, delivery: "steer" })
-  assert.match(prompts[1].text, /business context:\. If no target is specified/)
-  assert.doesNotMatch(prompts[1].text, /  /)
+  assert.doesNotMatch(prompts[1].text, /:\./)
+  assert.doesNotMatch(prompts[1].text, /business context/)
+  assert.match(prompts[1].text, /reasoning\. If no target is specified/)
 })

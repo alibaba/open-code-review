@@ -698,16 +698,21 @@ const OCR_DELEGATE_RULE_DESCRIPTION =
 const OCR_DELEGATE_COMMAND_DESCRIPTION =
   "Review code changes in delegation mode using OpenCode's model for reasoning"
 
-const OCR_DELEGATE_COMMAND_TEMPLATE =
-  "Perform a code review in delegation mode where OpenCodeReview handles file selection and rules, and you perform the actual code review reasoning. " +
-  "Treat the following text as review intent, target details, and business context:"
-
-const OCR_DELEGATE_COMMAND_SUFFIX =
-  ". If no target is specified, review the current workspace changes. " +
-  "First, call ocr_delegate_preview to determine reviewable files. " +
-  "Next, call ocr_delegate_rule to retrieve applicable rules for those files. " +
-  "Then, inspect the diffs and perform the review using your own model capabilities. " +
-  "Finally, summarize findings by severity with exact file and line references, accounting for all previewed files."
+function buildDelegateCommandPrompt(userText?: string): string {
+  const intent = userText?.trim()
+  const contextClause = intent
+    ? ` Treat the following text as review intent, target details, and business context: ${intent}.`
+    : ""
+  return (
+    "Perform a code review in delegation mode where OpenCodeReview handles file selection and rules, " +
+    `and you perform the actual code review reasoning.${contextClause} ` +
+    "If no target is specified, review the current workspace changes. " +
+    "First, call ocr_delegate_preview to determine reviewable files. " +
+    "Next, call ocr_delegate_rule to retrieve applicable rules for those files. " +
+    "Then, inspect the diffs and perform the review using your own model capabilities. " +
+    "Finally, summarize findings by severity with exact file and line references, accounting for all previewed files."
+  )
+}
 
 const reviewInputSchema = {
   type: "object",
@@ -741,7 +746,9 @@ const delegatePreviewInputSchema = {
     backgroundFile: {
       type: "string",
       description:
-        "Path to a Markdown file holding the review background, for context too long to pass inline. Cannot be combined with 'background'.",
+        "Path to a Markdown file holding the review background, for context too long to pass inline. " +
+        "A relative path resolves against the repository root; an absolute path is used as given. " +
+        "Cannot be combined with 'background'.",
     },
     exclude: { type: "string", description: "Comma-separated gitignore-style exclusion patterns." },
     rule: { type: "string", description: "Path to custom rule.json file." },
@@ -756,9 +763,11 @@ const delegateRuleInputSchema = {
   type: "object",
   properties: {
     paths: {
-      type: "array",
-      items: { type: "string" },
-      description: "File paths to fetch review rules for.",
+      description: "File path(s) to fetch review rules for.",
+      oneOf: [
+        { type: "array", items: { type: "string" } },
+        { type: "string" },
+      ],
     },
     commit: { type: "string", description: "Single commit hash if reviewing a specific commit." },
     from: { type: "string", description: "Base ref for a branch/range comparison. Must be paired with 'to'." },
@@ -830,18 +839,22 @@ async function setupV2(ctx: PluginV2.Context): Promise<void> {
       input: delegatePreviewInputSchema,
       execute: async (input, toolCtx) => {
         const preview = input as DelegatePreviewInput
+        const { background, ...inputWithoutBackground } = preview
+        const normalizedBackground = background?.trim()
+        const normalizedInput: DelegatePreviewInput = normalizedBackground
+          ? { ...inputWithoutBackground, background: normalizedBackground }
+          : inputWithoutBackground
         const cwd = await resolveSessionCwd(ctx, toolCtx.sessionID)
-        const timeoutMs = (preview.timeoutSeconds ?? 60) * 1000
+        const timeoutMs = (normalizedInput.timeoutSeconds ?? 60) * 1000
         const runPreview = async (backgroundFile?: string): Promise<string> => {
-          const result = await runOcr(buildDelegatePreviewArgs(preview, cwd, backgroundFile), {
+          const result = await runOcr(buildDelegatePreviewArgs(normalizedInput, cwd, backgroundFile), {
             cwd,
             timeoutMs,
           })
           return formatDelegateResult(result)
         }
-        const normalizedBackground = preview.background?.trim()
-        if (normalizedBackground !== undefined && normalizedBackground !== "") {
-          const content = await withTemporaryBackgroundFile(normalizedBackground, runPreview)
+        if (normalizedInput.background !== undefined) {
+          const content = await withTemporaryBackgroundFile(normalizedInput.background, runPreview)
           return { content }
         }
         const content = await runPreview()
@@ -907,7 +920,7 @@ async function setupV2(ctx: PluginV2.Context): Promise<void> {
         execute: async ({ sessionID, prompt, delivery }) => {
           await ctx.session.prompt({
             sessionID,
-            text: `${OCR_DELEGATE_COMMAND_TEMPLATE}${prompt.text ?? ""}${OCR_DELEGATE_COMMAND_SUFFIX}`,
+            text: buildDelegateCommandPrompt(prompt.text),
             delivery,
           })
         },
@@ -920,7 +933,7 @@ async function setupV2(ctx: PluginV2.Context): Promise<void> {
         execute: async ({ sessionID, prompt, delivery }) => {
           await ctx.session.prompt({
             sessionID,
-            text: `${OCR_DELEGATE_COMMAND_TEMPLATE}${prompt.text ?? ""}${OCR_DELEGATE_COMMAND_SUFFIX}`,
+            text: buildDelegateCommandPrompt(prompt.text),
             delivery,
           })
         },
