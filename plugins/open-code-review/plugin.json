@@ -1,6 +1,6 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "open-code-review",
+  "name": "open-code-review-codex",
   "version": "1.0.0",
   "description": "AI-powered code review on Git diffs — run ocr review as an agent skill: workspace changes, branch ranges, and single commits with structured, severity-rated findings.",
   "author": {

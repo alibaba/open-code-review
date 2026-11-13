@@ -45,6 +45,7 @@ const {
   validateAgentPluginManifest,
   checkAgentPluginManifests,
   pluginEntries,
+  checkMarketplaceRootName,
   listEntries,
   readFileOrNull,
   runLinksCheck,
@@ -807,6 +808,61 @@ function testMarketplaceReadersDoNotThrowOnMalformedInput() {
   }
 }
 
+// --- marketplace root manifest name ----------------------------------------
+
+function testMarketplaceRootNameMustMatchEntry() {
+  // Codex reads the root Agent Plugins 1.0 manifest of a plugin directory
+  // first and rejects the install when its `name` differs from the
+  // marketplace entry name, even though the host manifest is present.
+  const read = (name) => (file) => (file === "p/plugin.json" ? { name } : null);
+
+  // Agreement: no error.
+  assert.deepStrictEqual(
+    checkMarketplaceRootName(
+      "open-code-review-codex",
+      "p",
+      "plugin.json",
+      read("open-code-review-codex")
+    ),
+    { errors: [] }
+  );
+
+  // The exact shape of the reported failure: the Copilot CLI manifest names
+  // the plugin `open-code-review` while the Codex marketplace entry is
+  // `open-code-review-codex`.
+  const mismatch = checkMarketplaceRootName(
+    "open-code-review-codex",
+    "p",
+    "plugin.json",
+    read("open-code-review")
+  );
+  assert.strictEqual(mismatch.errors.length, 1);
+  assert.strictEqual(mismatch.errors[0].file, "p/plugin.json");
+  assert.ok(/does not match marketplace plugin name/.test(mismatch.errors[0].message));
+
+  // No root manifest in the directory: Codex falls back to the host manifest
+  // alone, so there is nothing to disagree with.
+  assert.deepStrictEqual(
+    checkMarketplaceRootName("open-code-review-codex", "p", "plugin.json", () => null),
+    { errors: [] }
+  );
+
+  // A root manifest with no usable `name` is the identity check's problem,
+  // not this one's.
+  assert.deepStrictEqual(
+    checkMarketplaceRootName("open-code-review-codex", "p", "plugin.json", () => ({})),
+    { errors: [] }
+  );
+}
+
+function testRealCodexMarketplaceDeclaresARootManifest() {
+  // Guards the wiring the runner test below depends on: the Codex entry must
+  // name the root manifest whose `name` Codex compares against the entry.
+  const codex = MARKETPLACES.find((m) => m.host === "Codex");
+  assert.ok(codex, "expected a Codex marketplace");
+  assert.strictEqual(codex.rootManifest, "plugin.json");
+}
+
 // --- configuration sanity --------------------------------------------------
 
 function testDeclarationTargetsAreCoveredByTheTreesWeValidate() {
@@ -1027,6 +1083,96 @@ function testManifestsRunnerReportsMissingManifests() {
   });
 }
 
+function writeMarketplaceFixture(tmp, rootName) {
+  // A tree that satisfies every other manifests-check rule, so only the
+  // root-manifest name can fail it.
+  const write = (rel, content) => {
+    const file = path.join(tmp, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+  };
+  const skill = (name) =>
+    `---\nname: ${name}\ndescription: Fixture skill.\n---\n`;
+  const command = `---\ndescription: Fixture command.\n---\n`;
+  write(
+    ".claude-plugin/marketplace.json",
+    JSON.stringify({
+      name: "open-code-review",
+      plugins: [{ name: "open-code-review", source: "./plugins/open-code-review/claude-code" }],
+    })
+  );
+  write(
+    "plugins/open-code-review/claude-code/.claude-plugin/plugin.json",
+    JSON.stringify({
+      name: "open-code-review",
+      commands: "./commands",
+      description: "Fixture.",
+      version: "1.0.0",
+    })
+  );
+  write("plugins/open-code-review/claude-code/commands/review.md", command);
+  write(
+    ".agents/plugins/marketplace.json",
+    JSON.stringify({
+      name: "open-code-review",
+      plugins: [
+        {
+          name: "open-code-review-codex",
+          source: { source: "local", path: "./plugins/open-code-review" },
+        },
+      ],
+    })
+  );
+  write(
+    "plugins/open-code-review/.codex-plugin/plugin.json",
+    JSON.stringify({ name: "open-code-review-codex", skills: "./skills/" })
+  );
+  write(
+    "plugins/open-code-review/plugin.json",
+    JSON.stringify({ $schema: AGENT_PLUGIN_SCHEMA, name: rootName, version: "1.0.0" })
+  );
+  write(
+    "plugins/open-code-review/.cursor-plugin/plugin.json",
+    JSON.stringify({ name: "open-code-review", skills: "../skills/" })
+  );
+  write(
+    ".kimi-plugin/plugin.json",
+    JSON.stringify({
+      name: "open-code-review",
+      skills: "./plugins/open-code-review/skills/",
+      commands: "./plugins/open-code-review/kimi-code/commands/",
+    })
+  );
+  write("plugins/open-code-review/kimi-code/commands/review.md", command);
+  for (const name of ["open-code-review", "open-code-review-delegate"]) {
+    write(`plugins/open-code-review/skills/${name}/SKILL.md`, skill(name));
+    write(`skills/${name}/SKILL.md`, skill(name));
+  }
+}
+
+function testManifestsRunnerCatchesRootManifestNameMismatch() {
+  // The reported failure: the root manifest names the plugin
+  // `open-code-review` while the Codex marketplace entry is
+  // `open-code-review-codex`. The manifests check must fail on that tree
+  // even though every declared path resolves.
+  withTempDir((tmp) => {
+    writeMarketplaceFixture(tmp, "open-code-review");
+    const { code, lines } = withCapturedStdout(() => runManifestsCheck({ repoRoot: tmp }));
+    assert.strictEqual(code, 1);
+    assert.ok(
+      lines.some((l) => /does not match marketplace plugin name/.test(l)),
+      lines.join("\n")
+    );
+  });
+
+  // The same tree with the names in agreement passes.
+  withTempDir((tmp) => {
+    writeMarketplaceFixture(tmp, "open-code-review-codex");
+    const { code } = withCapturedStdout(() => runManifestsCheck({ repoRoot: tmp }));
+    assert.strictEqual(code, 0);
+  });
+}
+
 function testAnnotationDataIsEscaped() {
   // GitHub truncates an annotation at an unescaped newline, losing exactly the
   // part worth reading. Manifest values and frontmatter scalars are
@@ -1120,6 +1266,8 @@ function main_() {
   testRealAgentPluginManifestDeclaresNameAndSchema();
   testPluginEntriesToleratesMalformedShapes();
   testMarketplaceReadersDoNotThrowOnMalformedInput();
+  testMarketplaceRootNameMustMatchEntry();
+  testRealCodexMarketplaceDeclaresARootManifest();
   testListEntriesResolvesSymlinks();
   testWalkFollowsSymlinksWithoutLooping();
   testUnscannedDocsAreReportedNotSkippedSilently();
@@ -1130,6 +1278,7 @@ function main_() {
   testLinksRunnerPassesAndReportsCounts();
   testLinksRunnerTripsTheFloorOnAnEmptyTree();
   testManifestsRunnerReportsMissingManifests();
+  testManifestsRunnerCatchesRootManifestNameMismatch();
   testAnnotationDataIsEscaped();
   testUnknownModeIsAnError();
   testMainDispatchesEachMode();
