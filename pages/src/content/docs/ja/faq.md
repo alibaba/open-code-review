@@ -240,7 +240,8 @@ JSON モードでは `warnings` にも表示されます。
 レビュー対象のファイルがありません。`files_reviewed` はトップレベルのフィールドではなく `summary` の
 下にあり、この経路では `0` になります。トップレベルの `[]` は `comments` のほうです。同じオブジェクトは
 `"status": "skipped"` と `"message": "Review skipped: no items were selected."`、および
-`terminal_state` が `"skipped"` で `coverage` の各配列が空の `manifest` も含みます。
+`terminal_state` が `"skipped"` で `coverage.selected` が空の `manifest` も含みます。
+選択段階で除外されたファイルは `coverage.excluded` に列挙され、それぞれに `exclude_reason` が付きます。
 
 ファイルをレビューして指摘がなかった場合も、**`comments: []` を持つ JSON オブジェクト**が返ります。
 `summary.files_reviewed` は実際にレビューしたファイル数になり、`status` は `"complete"`、
@@ -250,6 +251,16 @@ JSON モードでは `warnings` にも表示されます。
 `manifest.terminal_state` を使ってください。ただし、呼び出し側は後述の manifest-less 経路で
 `summary` と `manifest` の両方が存在しない場合も扱う必要があります。`review --format json` は
 stdout に必ず JSON オブジェクトを 1 つだけ書き出し、裸の配列にはなりません。
+
+`terminal_state: "complete"` は選択された集合のレビューが完了したことを意味し、変更されたすべての
+ファイルがレビューされたことを意味するわけではありません。選択段階で除外されたファイル
+（未対応の拡張子、パスルール、組み込みの機密パス、バイナリ、削除済み、またはファイル単位の
+サイズ上限超過）は、`--preview` と同じ `exclude_reason` とともに
+`manifest.coverage.excluded` に記録され、実行を `partial` にすることはありません。
+この一覧は選択段階に到達したファイルだけを対象とします。diff provider がそれ以前に除外した
+ものは含まれません。具体的には、`vendor/` や `node_modules/` など常にスキップされるディレクトリ
+内の変更、`.gitignore` で無視される未追跡ファイル、および単一コミットやコミット範囲のレビューで
+`.gitignore` に一致するすべての変更です。
 
 manifest-less の no-files 経路はより簡素で、`summary` と `manifest` の両方を省略しますが、
 `"status": "skipped"`、`"message": "No supported files changed."`、`"comments": []` は

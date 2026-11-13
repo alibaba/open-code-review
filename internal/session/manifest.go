@@ -151,8 +151,8 @@ type RunFailure struct {
 // genuinely did not get reviewed, so they are failed(<class>) and count against
 // coverage, but the run did not fail and its terminal state stays coverage-derived
 // (partial while anything completed, failed only when nothing did). It is
-// deliberately NOT part of RunManifest: schema v1 is frozen, and the fact is
-// already observable through coverage.failed[].classification.
+// deliberately NOT part of RunManifest: the cause is already observable
+// through coverage.failed[].classification.
 type pendingFailureCause struct {
 	Classification FailureClass
 	Reason         string
@@ -548,12 +548,9 @@ func (b *ManifestBuilder) RegisterSelected(item CoverageItem) error {
 	return nil
 }
 
-// RegisterExcluded records a changed file that selection left out of the
-// selected set, together with why. Excluded items never enter the coverage
-// denominator and never receive a Mark*, so they cannot change the terminal
-// state. It rejects a reason that is not a defined exclusion, an item_id that
-// is already selected, and any call after seal or freeze. Re-registering an
-// already-excluded item_id keeps the first registration (idempotent).
+// RegisterExcluded requires a defined exclusion reason and an item_id outside
+// the selected set. It rejects calls after seal or freeze and keeps the first
+// registration for each excluded item_id.
 func (b *ManifestBuilder) RegisterExcluded(item ExcludedItem) error {
 	if b == nil {
 		return errNilBuilder

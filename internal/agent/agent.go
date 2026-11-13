@@ -324,9 +324,8 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) changed, reviewing %d in %s\n", totalChanged, reviewCount, a.args.RepoDir)
 
 	a.logExclusions(decisions)
-	// Recorded here rather than next to registerCoverage so a run that selects
-	// nothing, and so never reaches dispatch, still reports why. A failure only
-	// loses the record: the denominator is untouched, so the run is not failed.
+	// Register before the early return so skipped runs also explain exclusions.
+	// A missing exclusion record must not fail the selected review.
 	if err := a.registerExclusions(decisions); err != nil {
 		a.recordWarning("manifest_error", "", err.Error())
 	}
@@ -1265,10 +1264,7 @@ func (a *Agent) registerCoverage(diffs []model.Diff) error {
 	return b.SealSelected()
 }
 
-// registerExclusions records every file the selection left out, deletions
-// included, in the manifest's excluded set with the reason selection gave.
-// Nil-safe (no-op without a builder). It keeps going past a rejected item and
-// returns the joined errors, so one bad entry does not drop the rest.
+// registerExclusions records selection exclusions, including deletions.
 func (a *Agent) registerExclusions(decisions []fileDecision) error {
 	b := a.session.Manifest()
 	if b == nil {
