@@ -23,21 +23,22 @@ import (
 )
 
 type mockResultProvider struct {
-	diffs            []model.Diff
-	filesReviewed    int64
-	inputTokens      int64
-	outputTokens     int64
-	totalTokens      int64
-	cacheReadTokens  int64
-	cacheWriteTokens int64
-	warnings         []agent.AgentWarning
-	projectSummary   string
-	toolCalls        map[string]int64
-	toolFailures     []llmloop.ToolFailureDetail
-	resumeInfo       *agent.ResumeInfo
-	sessionID        string
-	budgetExceeded   bool
-	manifest         *session.RunManifest
+	diffs              []model.Diff
+	filesReviewed      int64
+	inputTokens        int64
+	outputTokens       int64
+	totalTokens        int64
+	cacheReadTokens    int64
+	cacheWriteTokens   int64
+	warnings           []agent.AgentWarning
+	projectSummary     string
+	toolCalls          map[string]int64
+	toolFailures       []llmloop.ToolFailureDetail
+	resumeInfo         *agent.ResumeInfo
+	sessionID          string
+	budgetExceeded     bool
+	hadUnreviewedInput bool
+	manifest           *session.RunManifest
 }
 
 func (m *mockResultProvider) Diffs() []model.Diff            { return m.diffs }
@@ -56,6 +57,7 @@ func (m *mockResultProvider) ToolFailures() []llmloop.ToolFailureDetail {
 func (m *mockResultProvider) ResumeInfo() *agent.ResumeInfo     { return m.resumeInfo }
 func (m *mockResultProvider) SessionID() string                 { return m.sessionID }
 func (m *mockResultProvider) BudgetExceeded() bool              { return m.budgetExceeded }
+func (m *mockResultProvider) HadUnreviewedInput() bool          { return m.hadUnreviewedInput }
 func (m *mockResultProvider) RunManifest() *session.RunManifest { return m.manifest }
 
 func mockManifest(state session.TerminalState) *session.RunManifest {
