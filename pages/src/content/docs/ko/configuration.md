@@ -72,6 +72,19 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 모델의 유효성은 요청을 보낼 때 프로바이더가 확인합니다. 사용자 정의 프로바이더에는
 기존 `--model` 검증 규칙이 적용됩니다.
 
+`minimax`와 `minimax-cn`의 새 모델 선택에서는 `MiniMax-M3.1-Flash`,
+`MiniMax-M3` 순으로 추천합니다. OCR은 저장된 모델과 명시적으로 지정한 이전 모델 또는
+사용자 정의 모델 ID를 계속 허용합니다. 게이트웨이는 자체 모델 ID를 사용하므로,
+MiniMax 직접 연결용 ID가 게이트웨이에서도 제공된다는 의미는 아닙니다.
+
+기본 요청은 `thinking`과 `reasoning_effort`를 생략하여
+[MiniMax API 기본값](https://platform.minimax.io/docs/api-reference/text-openai-api)을 사용합니다.
+Flash는 adaptive thinking이 필수이며 effort 기본값은 `max`입니다. `extra_body`에서
+`thinking: {"type":"adaptive"}`와 `low`, `medium`, `high`, `xhigh`, `max` 중 하나의
+`reasoning_effort`를 명시할 수 있습니다. M3는 `thinking: {"type":"disabled"}`도
+지원합니다. 저장된 `extra_body`는 유지되므로 Flash로 전환하기 전에 thinking을
+비활성화하는 설정을 제거하세요.
+
 ## ChatGPT 로그인 미리보기
 
 이 미리보기는 공개 Responses API용 내장 `chatgpt` provider를 추가합니다. API 키 환경 변수는 없습니다. 로그인, 동의 및 사용 제한은 [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.

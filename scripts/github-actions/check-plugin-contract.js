@@ -204,6 +204,23 @@ const PLUGIN_DECLARATIONS = [
   },
 ];
 
+// Agent Plugins 1.0 manifests (GitHub Copilot CLI). The schema fixes `skills/`
+// as an immediate child of the plugin root and offers no field to override it,
+// so there is no declared path to resolve: the layout itself is the contract.
+// `target` pins the tree the fixed path must land on and is already validated
+// by SKILL_ROOTS, so the manifest and the tree cannot drift apart.
+const AGENT_PLUGIN_MANIFESTS = [
+  {
+    file: "plugins/open-code-review/plugin.json",
+    host: "GitHub Copilot CLI",
+    // Fixed by the schema, not declared in the manifest: resolve it from the
+    // manifest directory, where Agent Plugins 1.0 places `skills/`.
+    base: "manifest-dir",
+    skillsDir: "skills",
+    target: "plugins/open-code-review/skills",
+  },
+];
+
 // Skill trees. Each direct subdirectory must hold a SKILL.md whose frontmatter
 // `name` equals the directory name — `npx skills add --skill <name>` and every
 // skill loader address a skill by that name.
@@ -547,6 +564,162 @@ function checkPluginDeclarations(specs, readJson) {
   return { errors, warnings };
 }
 
+// The schema identifier an Agent Plugins 1.0 manifest MUST declare (spec §5.2).
+// The whole string is compared, not a substring: the spec fixes one exact URL,
+// so `.../9.9.9/...` or a lookalike host identifies a different format rather
+// than being a lenient match for this one.
+const AGENT_PLUGIN_SCHEMA =
+  "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+
+// `name` grammar from spec §5.5: 1-64 characters from `[a-z0-9.-]`, starting
+// and ending alphanumeric, without `--` or `..`. A host addresses the plugin by
+// this name, so a value outside the grammar resolves inconsistently across
+// loaders (including ones that lowercase it).
+const AGENT_PLUGIN_NAME_MAX = 64;
+
+// The first violated name rule as a message fragment (the caller prefixes the
+// file), or null. One violation is reported, not every one: `Open-Code-Review`
+// breaks the character set, the leading-alphanumeric rule and the lowercase
+// rule simultaneously, and three lines of the same complaint help nobody.
+function agentPluginNameProblem(name) {
+  if (typeof name !== "string" || name === "") {
+    return (
+      "does not declare a non-empty string `name`. Agent Plugins 1.0 identifies " +
+      "the plugin by that field, so this manifest describes nothing installable."
+    );
+  }
+  // Count code points, not UTF-16 units: a non-BMP name is already illegal
+  // under the character rule below, but reporting it as twice its real length
+  // would send the reader after the wrong constraint.
+  const length = Array.from(name).length;
+  if (length > AGENT_PLUGIN_NAME_MAX) {
+    return (
+      `declares a ${length}-character \`name\`, but Agent Plugins 1.0 limits ` +
+      `it to ${AGENT_PLUGIN_NAME_MAX} characters.`
+    );
+  }
+  if (/[^a-z0-9.-]/.test(name)) {
+    return (
+      `declares \`name: "${name}"\`, which uses characters outside the Agent ` +
+      `Plugins 1.0 grammar (lowercase a-z, digits, \`-\` and \`.\` only).`
+    );
+  }
+  if (!/^[a-z0-9]/.test(name) || !/[a-z0-9]$/.test(name)) {
+    return (
+      `declares \`name: "${name}"\`, which must start and end with a lowercase ` +
+      `letter or digit.`
+    );
+  }
+  if (name.includes("--") || name.includes("..")) {
+    return (
+      `declares \`name: "${name}"\`, which contains consecutive \`--\` or \`..\`; ` +
+      `Agent Plugins 1.0 forbids both.`
+    );
+  }
+  return null;
+}
+
+// Any parseable JSON object is not an Agent Plugins 1.0 manifest. `name` is how
+// the schema identifies the plugin (and §5.5 constrains its grammar) and
+// `$schema` is what makes the file declare itself as that format at all, so a
+// manifest failing either describes nothing installable however valid its JSON
+// is. `version` and the informational `homepage`/`repository`/`author`/`license`
+// fields are deliberately NOT inspected: §5.4 forbids rejecting a manifest over
+// a non-SemVer version or unrecognized URL/email/SPDX string contents.
+function validateAgentPluginManifest(file, json) {
+  const errors = [];
+  const nameProblem = agentPluginNameProblem(json.name);
+  if (nameProblem) {
+    errors.push({ file, message: `${file} ${nameProblem}` });
+  }
+  if (typeof json.$schema !== "string" || json.$schema === "") {
+    errors.push({
+      file,
+      message:
+        `${file} does not declare a string \`$schema\`. Agent Plugins 1.0 ` +
+        `requires exactly \`${AGENT_PLUGIN_SCHEMA}\`; without it the file does ` +
+        `not identify itself as a 1.0 manifest.`,
+    });
+  } else if (json.$schema !== AGENT_PLUGIN_SCHEMA) {
+    errors.push({
+      file,
+      message:
+        `${file} declares \`$schema: "${json.$schema}"\`, but Agent Plugins 1.0 ` +
+        `fixes the identifier to exactly \`${AGENT_PLUGIN_SCHEMA}\`. A different ` +
+        `version or URL declares a different format, so this check cannot ` +
+        `certify the file as a 1.0 manifest.`,
+    });
+  }
+  return errors;
+}
+
+// Agent Plugins 1.0 fixes the layout, so this certifies what a declared-path
+// check cannot: the manifest exists, parses, names the plugin and its schema,
+// and every immediate subdirectory of the fixed `skills/` tree holds a
+// non-empty SKILL.md. The schema bundles a directory as a skill by that file
+// alone, so any subdirectory without one installs silently and exposes nothing.
+function checkAgentPluginManifests(specs, readJson, listDirs, readFile) {
+  const errors = [];
+  for (const spec of specs) {
+    const manifest = readJson(spec.file);
+    if (manifest === null) {
+      errors.push({
+        file: spec.file,
+        message:
+          `${spec.host} plugin manifest ${spec.file} is missing or is not ` +
+          `valid JSON. ${spec.host} would not install the plugin.`,
+      });
+      continue;
+    }
+    const identity = validateAgentPluginManifest(spec.file, manifest);
+    if (identity.length > 0) {
+      errors.push(...identity);
+      continue;
+    }
+    const skillsRoot = resolveDeclaredPath(spec.file, spec.base, spec.skillsDir);
+    if (skillsRoot !== spec.target) {
+      errors.push({
+        file: spec.file,
+        message:
+          `${spec.file} fixes its skills directory at \`${spec.skillsDir}\` ` +
+          `(relative to the ${spec.base}), which resolves to \`${skillsRoot}\`, ` +
+          `but the skills tree is at \`${spec.target}\`.`,
+      });
+      continue;
+    }
+    const dirs = listDirs(skillsRoot);
+    if (dirs === null) {
+      errors.push({
+        file: skillsRoot,
+        message: `Skill tree \`${skillsRoot}\` is missing.`,
+      });
+      continue;
+    }
+    if (dirs.length === 0) {
+      errors.push({
+        file: skillsRoot,
+        message:
+          `Skill tree \`${skillsRoot}\` contains no skill directory. Agent ` +
+          `Plugins 1.0 installs nothing from an empty skills/ tree.`,
+      });
+      continue;
+    }
+    for (const dir of dirs) {
+      const file = `${skillsRoot}/${dir}/SKILL.md`;
+      const content = readFile(file);
+      if (content === null || content.trim() === "") {
+        errors.push({
+          file,
+          message:
+            `\`${skillsRoot}/${dir}/\` has no non-empty SKILL.md. Agent Plugins ` +
+            `1.0 requires every immediate subdirectory of skills/ to hold one.`,
+        });
+      }
+    }
+  }
+  return { errors };
+}
+
 // ---------------------------------------------------------------------------
 // GitHub Actions annotation + IO helpers
 // ---------------------------------------------------------------------------
@@ -836,6 +1009,16 @@ function runManifestsCheck({ repoRoot = process.cwd() } = {}) {
   warnings.push(...declared.warnings);
   checked += PLUGIN_DECLARATIONS.length;
 
+  // Agent Plugins 1.0 manifests -> the fixed skills/ layout they imply.
+  const agent = checkAgentPluginManifests(
+    AGENT_PLUGIN_MANIFESTS,
+    (file) => readJsonOrNull(repoRoot, file),
+    (rel) => listEntries(repoRoot, rel, "dir"),
+    (rel) => readFileOrNull(path.join(repoRoot, rel), { maxBytes: Infinity })
+  );
+  errors.push(...agent.errors);
+  checked += AGENT_PLUGIN_MANIFESTS.length;
+
   // Skill trees: non-empty, and every SKILL.md well-formed.
   for (const root of SKILL_ROOTS) {
     const dirs = listEntries(repoRoot, root, "dir");
@@ -945,6 +1128,7 @@ module.exports = {
   LINK_ALLOW_MARKER,
   MARKETPLACES,
   PLUGIN_DECLARATIONS,
+  AGENT_PLUGIN_MANIFESTS,
   SKILL_ROOTS,
   COMMAND_DIRS,
   MIN_EXPECTED_LINKS,
@@ -966,6 +1150,11 @@ module.exports = {
   validateCommandFrontmatter,
   resolveDeclaredPath,
   checkPluginDeclarations,
+  AGENT_PLUGIN_SCHEMA,
+  AGENT_PLUGIN_NAME_MAX,
+  agentPluginNameProblem,
+  validateAgentPluginManifest,
+  checkAgentPluginManifests,
   pluginEntries,
   listEntries,
   readFileOrNull,

@@ -89,7 +89,7 @@ notice and skips it — it never reports a pass for a check it did not run.
 A present-but-useless `staticcheck` is also a failure, not a pass: if it
 reports `matched no packages` it analyzed nothing, which usually happens when
 the binary is newer than the active Go toolchain. Use a compatible
-`staticcheck` release; CI runs it in the pinned `golang:1.26.10` container.
+`staticcheck` release; CI runs it in the pinned `golang:1.26.11` container.
 
 ### CI
 
@@ -100,7 +100,7 @@ module.
 `.github/workflows/acp-ci.yml` covers it instead — a dedicated workflow
 for the nested module, the same idea as `pages-ci.yml` for `pages/`.
 Linux CI runs the license, English-only, formatting, line-ending, `go.mod`
-tidy, vet, staticcheck, coverage and govulncheck gates in a `golang:1.26.10`
+tidy, vet, staticcheck, coverage and govulncheck gates in a `golang:1.26.11`
 container, builds the adapter and runs the pinned official Python SDK smoke
 test with mock OCR. The workflow has only the `test` job; there are no
 cross-platform build jobs.
@@ -235,7 +235,7 @@ silently falls back to a default for unknown values rather than erroring.
 
 Everything else is rejected, including the integration flags the adapter owns
 (`--format`, `--audience`, `--color`, `--output`, `--repo`, `--rule`,
-`--tools`, `--resume`), the runtime overrides (`--model`, `--provider`),
+`--resume`), the runtime overrides (`--model`, `--provider`),
 `--preview`, and any bare word that is not a flag.
 
 ### Result types

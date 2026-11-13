@@ -14,6 +14,8 @@ import (
 // comparison did the rejecting.
 var parentIdentity = RunIdentity{
 	Mode:                 InputModeRange,
+	ResolvedBase:         "base-parent",
+	ResolvedHead:         "head-parent",
 	SourceArtifactSHA256: "artifact-parent",
 	RuleConfigSHA256:     "rules-parent",
 	RepositorySHA256:     "repo-parent",
@@ -30,6 +32,8 @@ func parentState(mutate func(*RunManifest)) *ResumeState {
 		Repository:    ManifestRepository{IdentitySHA256: parentIdentity.RepositorySHA256},
 		Input: ManifestInput{
 			Mode:                 parentIdentity.Mode,
+			ResolvedBase:         parentIdentity.ResolvedBase,
+			ResolvedHead:         parentIdentity.ResolvedHead,
 			SourceArtifactSHA256: parentIdentity.SourceArtifactSHA256,
 		},
 		Execution: ManifestExecution{

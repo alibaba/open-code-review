@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 // ManifestSchemaVersion identifies the versioned, machine-readable coverage
@@ -149,8 +151,8 @@ type RunFailure struct {
 // genuinely did not get reviewed, so they are failed(<class>) and count against
 // coverage, but the run did not fail and its terminal state stays coverage-derived
 // (partial while anything completed, failed only when nothing did). It is
-// deliberately NOT part of RunManifest: schema v1 is frozen, and the fact is
-// already observable through coverage.failed[].classification.
+// deliberately NOT part of RunManifest: the cause is already observable
+// through coverage.failed[].classification.
 type pendingFailureCause struct {
 	Classification FailureClass
 	Reason         string
@@ -225,15 +227,30 @@ func normalizePath(p string) string {
 	return p
 }
 
-// Coverage holds the five disjoint file sets. selected is the denominator and
-// equals the disjoint union of completed, reused, failed and waived. Arrays are
-// sorted by ItemID and are always non-nil so JSON renders "[]" rather than null.
+// ExcludedItem is one changed file the pre-dispatch selection left out of the
+// selected set, with the reason selection gave for it. It carries no
+// fingerprint: an excluded file is never dispatched or checkpointed, and the
+// digest of a diff under a secret path does not belong in a persisted manifest.
+type ExcludedItem struct {
+	ItemID        string              `json:"item_id"`
+	Path          string              `json:"path"`
+	OldPath       string              `json:"old_path,omitempty"`
+	ExcludeReason model.ExcludeReason `json:"exclude_reason"`
+}
+
+// Coverage holds the selected set, its four terminal partitions, and the
+// excluded set. selected is the denominator and equals the disjoint union of
+// completed, reused, failed and waived. excluded is disjoint from selected and
+// outside the denominator: it records the changed files selection never
+// admitted, so it has no effect on the terminal state. Arrays are sorted by
+// ItemID and are always non-nil so JSON renders "[]" rather than null.
 type Coverage struct {
 	Selected  []CoverageItem `json:"selected"`
 	Completed []CoverageItem `json:"completed"`
 	Reused    []CoverageItem `json:"reused"`
 	Failed    []CoverageItem `json:"failed"`
 	Waived    []CoverageItem `json:"waived"`
+	Excluded  []ExcludedItem `json:"excluded"`
 }
 
 // ManifestRepository is the redacted repository identity for a run.
@@ -320,9 +337,10 @@ var (
 // boundaries beyond the mutex:
 //
 //   - sealed: after SealSelected the selected set is closed; RegisterSelected
-//     then returns an error. The pre-dispatch pass registers every planned item
-//     and seals immediately, before resume reuse or concurrent dispatch, so the
-//     coverage denominator can never be widened mid-run.
+//     and RegisterExcluded then return an error. The pre-dispatch pass registers
+//     every planned item and seals immediately, before resume reuse or
+//     concurrent dispatch, so the coverage denominator can never be widened
+//     mid-run.
 //   - frozen: after Finalize the whole builder is immutable; every mutating call
 //     returns an error and Finalize returns the same frozen manifest.
 //
@@ -330,8 +348,9 @@ var (
 // transition (that returns an error); the same outcome applied twice is
 // idempotent.
 type ManifestBuilder struct {
-	mu    sync.Mutex
-	items map[string]*builderItem
+	mu       sync.Mutex
+	items    map[string]*builderItem
+	excluded map[string]ExcludedItem
 
 	runID       string
 	parentRunID string
@@ -493,7 +512,11 @@ func (b *ManifestBuilder) SetPendingFailureCause(class FailureClass, reason stri
 // files excluded before planning (deleted files, path/extension-filtered files)
 // must NOT be registered, because every registered item that never receives a
 // Mark* is swept to failed at Finalize — registering a non-dispatchable file
-// would fabricate a bogus failure and misreport the run as partial.
+// would fabricate a bogus failure and misreport the run as partial. Those files
+// go to RegisterExcluded instead. The selected set has priority: selecting an
+// item_id that was recorded as excluded drops that exclusion rather than
+// failing, so two paths that normalize to one item_id can never cost the run
+// its denominator.
 func (b *ManifestBuilder) RegisterSelected(item CoverageItem) error {
 	if b == nil {
 		return errNilBuilder
@@ -509,6 +532,7 @@ func (b *ManifestBuilder) RegisterSelected(item CoverageItem) error {
 	if b.sealed {
 		return errSealed
 	}
+	delete(b.excluded, item.ItemID)
 	if b.items == nil {
 		b.items = make(map[string]*builderItem)
 	}
@@ -525,11 +549,45 @@ func (b *ManifestBuilder) RegisterSelected(item CoverageItem) error {
 	return nil
 }
 
-// SealSelected closes the selected set. After it returns, RegisterSelected fails
-// and the coverage denominator is fixed; per-item Mark* calls continue to work
-// against the sealed set. It is idempotent and separate from freeze: sealing
-// happens once the pre-dispatch pass has registered every planned item, before
-// resume reuse and concurrent dispatch.
+// RegisterExcluded requires a defined exclusion reason and an item_id outside
+// the selected set. It rejects calls after seal or freeze and keeps the first
+// registration for each excluded item_id.
+func (b *ManifestBuilder) RegisterExcluded(item ExcludedItem) error {
+	if b == nil {
+		return errNilBuilder
+	}
+	if item.ItemID == "" {
+		return errEmptyID
+	}
+	if !item.ExcludeReason.IsExclusion() {
+		return fmt.Errorf("manifest: invalid exclude reason %q for item %s", item.ExcludeReason, item.ItemID)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.frozen {
+		return errFrozen
+	}
+	if b.sealed {
+		return errSealed
+	}
+	if _, selected := b.items[item.ItemID]; selected {
+		return fmt.Errorf("manifest: item %s is already selected, cannot exclude it", item.ItemID)
+	}
+	if b.excluded == nil {
+		b.excluded = make(map[string]ExcludedItem)
+	}
+	if _, exists := b.excluded[item.ItemID]; exists {
+		return nil // first registration wins; idempotent
+	}
+	b.excluded[item.ItemID] = item
+	return nil
+}
+
+// SealSelected closes the selected set. After it returns, RegisterSelected and
+// RegisterExcluded fail and the coverage denominator is fixed; per-item Mark*
+// calls continue to work against the sealed set. It is idempotent and separate
+// from freeze: sealing happens once the pre-dispatch pass has registered every
+// planned item, before resume reuse and concurrent dispatch.
 func (b *ManifestBuilder) SealSelected() error {
 	if b == nil {
 		return errNilBuilder
@@ -729,7 +787,7 @@ func (b *ManifestBuilder) Frozen() bool {
 // Finalize performs the hard-validated close of the run and returns the
 // immutable manifest. In order it: sweeps any item still selected into failed
 // (colored by the run_failure class, else the pending failure cause, else
-// unknown — see the sweep comment for the precedence); builds the five
+// unknown — see the sweep comment for the precedence); builds the
 // coverage sets; validates the contract invariants (non-empty run_id/operation,
 // a valid input.mode, the set partition, a valid class on every failed item, a
 // non-empty reason on every waived item, and a valid run_failure class if set);
@@ -835,6 +893,7 @@ func emptyManifest() RunManifest {
 			Reused:    []CoverageItem{},
 			Failed:    []CoverageItem{},
 			Waived:    []CoverageItem{},
+			Excluded:  []ExcludedItem{},
 		},
 	}
 }
@@ -886,6 +945,7 @@ func (m RunManifest) cloned() RunManifest {
 	m.Coverage.Reused = cloneItems(m.Coverage.Reused)
 	m.Coverage.Failed = cloneItems(m.Coverage.Failed)
 	m.Coverage.Waived = cloneItems(m.Coverage.Waived)
+	m.Coverage.Excluded = append([]ExcludedItem{}, m.Coverage.Excluded...)
 	if m.RunFailure != nil {
 		rf := *m.RunFailure
 		m.RunFailure = &rf
@@ -899,8 +959,8 @@ func cloneItems(src []CoverageItem) []CoverageItem {
 	return out
 }
 
-// buildCoverageLocked assembles the five sorted, non-nil coverage sets from the
-// current item map. Caller must hold b.mu.
+// buildCoverageLocked assembles the sorted, non-nil coverage sets from the
+// current item and exclusion maps. Caller must hold b.mu.
 func (b *ManifestBuilder) buildCoverageLocked() Coverage {
 	cov := Coverage{
 		Selected:  []CoverageItem{},
@@ -908,7 +968,14 @@ func (b *ManifestBuilder) buildCoverageLocked() Coverage {
 		Reused:    []CoverageItem{},
 		Failed:    []CoverageItem{},
 		Waived:    []CoverageItem{},
+		Excluded:  make([]ExcludedItem, 0, len(b.excluded)),
 	}
+	for _, item := range b.excluded {
+		cov.Excluded = append(cov.Excluded, item)
+	}
+	sort.SliceStable(cov.Excluded, func(i, j int) bool {
+		return cov.Excluded[i].ItemID < cov.Excluded[j].ItemID
+	})
 	for _, bi := range b.items {
 		sel := CoverageItem{
 			ItemID:      bi.item.ItemID,

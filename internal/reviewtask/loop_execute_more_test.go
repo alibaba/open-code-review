@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-package llmloop
+package reviewtask
 
 import (
 	"context"
@@ -49,8 +49,11 @@ func newThinkingTestRunner(t *testing.T, client llm.LLMClient) (*Runner, *tool.C
 		Template:         template.Template{MaxToolRequestTimes: 5, MaxTokens: 1000000},
 		Tools:            reg,
 		CommentCollector: collector,
-		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: tool.CodeComment.Name()}}},
-		Session:          session.New(t.TempDir(), "main", "test-model", session.SessionOptions{ReviewMode: "diff"}),
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: tool.CodeComment.Name()}},
+			{Type: "function", Function: llm.FunctionDef{Name: tool.TaskDone.Name()}},
+		},
+		Session: session.New(t.TempDir(), "main", "test-model", session.SessionOptions{ReviewMode: "diff"}),
 	})
 	return r, collector
 }
