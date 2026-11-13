@@ -71,7 +71,7 @@ func newManifestFlowAgent(t *testing.T, diffs []model.Diff, resume *session.Resu
 	return newManifestFlowAgentWithClient(t, diffs, resume, manifestFlowClient{})
 }
 
-func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *session.ResumeState, client llm.LLMClient) *Agent {
+func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *session.ResumeState, client llm.LLMClient, extraTools ...llm.ToolDef) *Agent {
 	t.Helper()
 	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
@@ -99,13 +99,13 @@ func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *se
 				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diffs}}"}},
 			},
 		},
-		MainToolDefs: []llm.ToolDef{{
+		MainToolDefs: append([]llm.ToolDef{{
 			Type: "function",
 			Function: llm.FunctionDef{
 				Name:        "task_done",
 				Description: "finish the review",
 			},
-		}},
+		}}, extraTools...),
 	})
 	a.diffs = diffs
 	a.inputResolution.ResolvedBase = "base-parent"

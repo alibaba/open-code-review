@@ -45,6 +45,7 @@ type Summary struct {
 	// ResumeLineage is present only for a run that resumed another, and records
 	// which run it continued and across which provider and model.
 	ResumeLineage *ResumeLineage `json:"resume_lineage,omitempty"`
+	checkpoints   map[string]ItemDetail
 }
 
 // ItemDetail describes one file-level record within a session, used by `ocr session show`.
@@ -170,9 +171,17 @@ func LoadDetailAt(path, sessionID, fallbackRepoDir string) (*Summary, []ItemDeta
 		Aborted:   true,
 	}
 	var items []ItemDetail
+	itemIndex := make(map[string]int)
 	err := walkSessionFile(path, func(rec summaryRecord) {
 		applyRecordToSummary(summary, rec)
 		if item, ok := recordToItem(rec); ok {
+			if item.Fingerprint != "" {
+				if index, exists := itemIndex[item.Fingerprint]; exists {
+					items[index] = item
+					return
+				}
+				itemIndex[item.Fingerprint] = len(items)
+			}
 			items = append(items, item)
 		}
 	})
@@ -264,14 +273,18 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 			TargetProvider: rec.TargetProvider,
 			TargetModel:    rec.TargetModel,
 		}
-	case "review_item_done":
-		s.CompletedFiles++
-		s.TotalComments += countCommentsRaw(rec.Comments)
-	case "review_item_reused":
-		s.ReusedFiles++
-		s.TotalComments += countCommentsRaw(rec.Comments)
-	case "review_item_failed":
-		s.FailedFiles++
+	case "review_item_done", "review_item_reused", "review_item_failed":
+		item, _ := recordToItem(rec)
+		if item.Fingerprint != "" {
+			if s.checkpoints == nil {
+				s.checkpoints = make(map[string]ItemDetail)
+			}
+			if previous, ok := s.checkpoints[item.Fingerprint]; ok {
+				applyItemCounts(s, previous, -1)
+			}
+			s.checkpoints[item.Fingerprint] = item
+		}
+		applyItemCounts(s, item, 1)
 	case "session_end":
 		s.Aborted = false
 		if rec.RunManifest != nil && rec.RunManifest.SchemaVersion == ManifestSchemaVersion {
@@ -300,6 +313,19 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 			s.Duration = s.EndTime.Sub(s.StartTime)
 		}
 		s.LLMFailures = rec.LLMFailures
+	}
+}
+
+func applyItemCounts(s *Summary, item ItemDetail, delta int) {
+	switch item.Type {
+	case "done":
+		s.CompletedFiles += delta
+		s.TotalComments += delta * item.Comments
+	case "reused":
+		s.ReusedFiles += delta
+		s.TotalComments += delta * item.Comments
+	case "failed":
+		s.FailedFiles += delta
 	}
 }
 
