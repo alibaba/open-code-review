@@ -55,16 +55,7 @@ func (s *ResumeState) ValidateResume(req ResumeRequest) error {
 	if s == nil {
 		return nil
 	}
-	if s.Manifest != nil && req.Identity.Mode == ReviewModeWorkspace {
-		parentBase := s.Manifest.Input.ResolvedBase
-		currentHead := req.Identity.ResolvedBase
-		if parentBase != "" && currentHead != "" && currentHead != parentBase {
-			if req.IsAncestor == nil || !req.IsAncestor(parentBase, currentHead) {
-				return fmt.Errorf("resume rejected: current HEAD commit %q is not a descendant of session base commit %q; start a new review instead of resuming", currentHead, parentBase)
-			}
-		}
-	}
-	if err := s.validateInputIdentity(req.Identity, req.ItemFingerprints); err != nil {
+	if err := s.validateInputIdentity(req.Identity, req.IsAncestor, req.ItemFingerprints); err != nil {
 		return err
 	}
 	identity := req.Identity
@@ -98,7 +89,7 @@ func (s *ResumeState) ValidateResume(req ResumeRequest) error {
 // This runs once, at admission, and is never repeated during the run: the caller
 // pins the run to the commit endpoints this comparison was made against (see
 // agent.SealedInput), so a second comparison could only ever confirm the first.
-func (s *ResumeState) validateInputIdentity(id RunIdentity, itemFingerprints []string) error {
+func (s *ResumeState) validateInputIdentity(id RunIdentity, isAncestor func(base, head string) bool, itemFingerprints []string) error {
 	if s == nil {
 		return nil
 	}
@@ -135,10 +126,11 @@ func (s *ResumeState) validateInputIdentity(id RunIdentity, itemFingerprints []s
 	if m.Repository.IdentitySHA256 != id.RepositorySHA256 {
 		return fmt.Errorf("resume rejected: repository identity changed, so this is not the repository the parent run reviewed; %s", resumeHint)
 	}
-	if id.Mode == ReviewModeWorkspace && (m.Input.ResolvedBase == "" || id.ResolvedBase == "") {
-		return fmt.Errorf("resume rejected: repository has no base commit (unborn repository does not support resume; run 'ocr review' to start a fresh review)")
-	}
-	if id.Mode != ReviewModeWorkspace && m.Input.SourceArtifactSHA256 != id.SourceArtifactSHA256 {
+	if id.Mode == ReviewModeWorkspace {
+		if err := validateWorkspaceBase(m.Input.ResolvedBase, id.ResolvedBase, isAncestor); err != nil {
+			return err
+		}
+	} else if m.Input.SourceArtifactSHA256 != id.SourceArtifactSHA256 {
 		return fmt.Errorf("resume rejected: the reviewed input changed since session %q — a ref may now point at a different commit, or the selected file set changed; %s", s.SessionID, resumeHint)
 	}
 	if m.Execution.RuleConfigSHA256 == "" {
@@ -149,19 +141,30 @@ func (s *ResumeState) validateInputIdentity(id RunIdentity, itemFingerprints []s
 		// never to a specific rule or pattern.
 		return fmt.Errorf("resume rejected: review rule identity changed — either a rule text layer (custom, project, global or system) or the include/exclude file filter differs from session %q; %s", s.SessionID, resumeHint)
 	}
-	if id.Mode == ReviewModeWorkspace {
-		reusable := manifestReusableFingerprints(m)
-		var reusableCount int
-		for _, fp := range itemFingerprints {
-			if reusable[fp] {
-				reusableCount++
-			}
-		}
-		if reusableCount == 0 {
-			return fmt.Errorf("resume rejected: no completed review items from session %q match current workspace diffs (run 'ocr review' to start a fresh review)", s.SessionID)
-		}
+	if id.Mode == ReviewModeWorkspace && !hasReusableItem(m, itemFingerprints) {
+		return fmt.Errorf("resume rejected: no completed review items from session %q match current workspace diffs (run 'ocr review' to start a fresh review)", s.SessionID)
 	}
 	return nil
+}
+
+func validateWorkspaceBase(parentBase, currentHead string, isAncestor func(base, head string) bool) error {
+	if parentBase == "" || currentHead == "" {
+		return fmt.Errorf("resume rejected: repository has no base commit (unborn repository does not support resume; run 'ocr review' to start a fresh review)")
+	}
+	if currentHead != parentBase && (isAncestor == nil || !isAncestor(parentBase, currentHead)) {
+		return fmt.Errorf("resume rejected: current HEAD commit %q is not a descendant of session base commit %q; %s", currentHead, parentBase, resumeHint)
+	}
+	return nil
+}
+
+func hasReusableItem(m *RunManifest, itemFingerprints []string) bool {
+	reusable := manifestReusableFingerprints(m)
+	for _, fp := range itemFingerprints {
+		if reusable[fp] {
+			return true
+		}
+	}
+	return false
 }
 
 // explicitFlagHint renders the actionable half of a transition rejection. value

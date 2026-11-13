@@ -225,196 +225,157 @@ func TestValidateResumeNilStateAccepts(t *testing.T) {
 }
 
 func TestValidateResumeWorkspace(t *testing.T) {
-	wsParentIdentity := RunIdentity{
-		Mode:                 ReviewModeWorkspace,
-		ResolvedBase:         "base-parent",
-		SourceArtifactSHA256: "artifact-parent",
-		RuleConfigSHA256:     "rules-parent",
-		RepositorySHA256:     "repo-parent",
-	}
-
-	wsParentState := func(mutate func(*RunManifest), mutateState func(*ResumeState)) *ResumeState {
-		m := &RunManifest{
-			SchemaVersion: ManifestSchemaVersion,
-			RunID:         "run-parent-ws",
-			Operation:     OperationReview,
-			Repository:    ManifestRepository{IdentitySHA256: wsParentIdentity.RepositorySHA256},
-			Input: ManifestInput{
-				Mode:                 wsParentIdentity.Mode,
-				ResolvedBase:         wsParentIdentity.ResolvedBase,
-				SourceArtifactSHA256: wsParentIdentity.SourceArtifactSHA256,
-			},
-			Execution: ManifestExecution{
-				Provider:         "anthropic",
-				Model:            "claude",
-				RuleConfigSHA256: wsParentIdentity.RuleConfigSHA256,
-			},
-			Coverage: Coverage{
-				Selected:  []CoverageItem{{ItemID: "item-1", Fingerprint: "fp-1"}},
-				Completed: []CoverageItem{{ItemID: "item-1", Fingerprint: "fp-1"}},
-			},
-		}
-		if mutate != nil {
-			mutate(m)
-		}
-		s := &ResumeState{
-			SessionID:  "parent-session",
-			ReviewMode: ReviewModeWorkspace,
-			GitBranch:  "main",
-			Manifest:   m,
-			Closed:     true,
-		}
-		if mutateState != nil {
-			mutateState(s)
-		}
-		return s
-	}
-
-	wsRequest := func(mutate func(*ResumeRequest)) ResumeRequest {
-		req := ResumeRequest{
-			Identity: RunIdentity{
-				Mode:                 ReviewModeWorkspace,
-				ResolvedBase:         wsParentIdentity.ResolvedBase,
-				SourceArtifactSHA256: wsParentIdentity.SourceArtifactSHA256,
-				RuleConfigSHA256:     wsParentIdentity.RuleConfigSHA256,
-				RepositorySHA256:     wsParentIdentity.RepositorySHA256,
-			},
-			Provider:         "anthropic",
-			Model:            "claude",
-			ItemFingerprints: []string{"fp-1"},
-		}
-		if mutate != nil {
-			mutate(&req)
-		}
-		return req
-	}
-
-	t.Run("content change passes in workspace mode", func(t *testing.T) {
-		state := wsParentState(nil, nil)
-		req := wsRequest(func(r *ResumeRequest) {
-			r.Identity.SourceArtifactSHA256 = "artifact-changed"
-		})
-		if err := state.ValidateResume(req); err != nil {
-			t.Fatalf("expected workspace mode to pass with changed SourceArtifactSHA256, got: %v", err)
-		}
-	})
-
-	t.Run("repository change is rejected in workspace mode", func(t *testing.T) {
-		state := wsParentState(nil, nil)
-		req := wsRequest(func(r *ResumeRequest) {
-			r.Identity.RepositorySHA256 = "repo-other"
-		})
-		err := state.ValidateResume(req)
-		if err == nil || !strings.Contains(err.Error(), "repository identity changed") {
-			t.Fatalf("expected repository identity rejection, got: %v", err)
-		}
-	})
-
-	t.Run("rule config change is rejected in workspace mode", func(t *testing.T) {
-		state := wsParentState(nil, nil)
-		req := wsRequest(func(r *ResumeRequest) {
-			r.Identity.RuleConfigSHA256 = "rules-other"
-		})
-		err := state.ValidateResume(req)
-		if err == nil || !strings.Contains(err.Error(), "rule identity changed") {
-			t.Fatalf("expected rule identity rejection, got: %v", err)
-		}
-	})
-
-	t.Run("zero reusable items triggers error in workspace mode", func(t *testing.T) {
-		state := wsParentState(nil, nil)
-		req := wsRequest(func(r *ResumeRequest) {
-			r.ItemFingerprints = []string{"fp-unmatched"}
-		})
-		err := state.ValidateResume(req)
-		want := `resume rejected: no completed review items from session "parent-session" match current workspace diffs (run 'ocr review' to start a fresh review)`
-		if err == nil || err.Error() != want {
-			t.Fatalf("got err = %v, want = %q", err, want)
-		}
-	})
-
-	t.Run("at least one matching reusable item passes", func(t *testing.T) {
-		state := wsParentState(nil, nil)
-		req := wsRequest(func(r *ResumeRequest) {
-			r.ItemFingerprints = []string{"fp-1", "fp-new"}
-		})
-		if err := state.ValidateResume(req); err != nil {
-			t.Fatalf("expected pass when at least one item matches, got: %v", err)
-		}
-	})
-
-	t.Run("empty parent resolved base is rejected as unborn repo", func(t *testing.T) {
-		state := wsParentState(func(m *RunManifest) {
-			m.Input.ResolvedBase = ""
-		}, nil)
-		req := wsRequest(nil)
-		err := state.ValidateResume(req)
-		want := "resume rejected: repository has no base commit (unborn repository does not support resume; run 'ocr review' to start a fresh review)"
-		if err == nil || err.Error() != want {
-			t.Fatalf("got err = %v, want = %q", err, want)
-		}
-	})
-
-	t.Run("empty candidate resolved base is rejected as unborn repo", func(t *testing.T) {
-		state := wsParentState(nil, nil)
-		req := wsRequest(func(r *ResumeRequest) {
-			r.Identity.ResolvedBase = ""
-		})
-		err := state.ValidateResume(req)
-		want := "resume rejected: repository has no base commit (unborn repository does not support resume; run 'ocr review' to start a fresh review)"
-		if err == nil || err.Error() != want {
-			t.Fatalf("got err = %v, want = %q", err, want)
-		}
-	})
-
-	t.Run("base commit unchanged passes in workspace mode", func(t *testing.T) {
-		state := wsParentState(nil, nil)
-		req := wsRequest(nil)
-		if err := state.ValidateResume(req); err != nil {
-			t.Fatalf("expected pass when base commit is unchanged, got: %v", err)
-		}
-	})
-
-	t.Run("descendant commit passes in workspace mode", func(t *testing.T) {
-		state := wsParentState(nil, nil)
-		req := wsRequest(func(r *ResumeRequest) {
-			r.Identity.ResolvedBase = "base-child-commit"
-			r.IsAncestor = func(base, head string) bool {
-				return base == "base-parent" && head == "base-child-commit"
+	wsParent := func(mutate func(*RunManifest)) *ResumeState {
+		return parentState(func(m *RunManifest) {
+			m.Input.Mode = ReviewModeWorkspace
+			m.Input.ResolvedBase = "base-parent"
+			m.Coverage.Selected = []CoverageItem{{ItemID: "item-1", Fingerprint: "fp-1"}}
+			m.Coverage.Completed = []CoverageItem{{ItemID: "item-1", Fingerprint: "fp-1"}}
+			if mutate != nil {
+				mutate(m)
 			}
 		})
-		if err := state.ValidateResume(req); err != nil {
-			t.Fatalf("expected pass for descendant commit, got: %v", err)
-		}
-	})
-
-	t.Run("non-descendant commit is rejected in workspace mode", func(t *testing.T) {
-		state := wsParentState(nil, nil)
-		req := wsRequest(func(r *ResumeRequest) {
-			r.Identity.ResolvedBase = "base-diverged-commit"
-			r.IsAncestor = func(base, head string) bool {
-				return false
+	}
+	wsReq := func(mutate func(*ResumeRequest)) ResumeRequest {
+		return request(func(r *ResumeRequest) {
+			r.Identity.Mode = ReviewModeWorkspace
+			r.Identity.ResolvedBase = "base-parent"
+			r.ItemFingerprints = []string{"fp-1"}
+			if mutate != nil {
+				mutate(r)
 			}
 		})
-		err := state.ValidateResume(req)
-		want := `resume rejected: current HEAD commit "base-diverged-commit" is not a descendant of session base commit "base-parent"; start a new review instead of resuming`
-		if err == nil || err.Error() != want {
-			t.Fatalf("got err = %v, want = %q", err, want)
-		}
-	})
+	}
 
-	t.Run("non-descendant commit without is ancestor is rejected", func(t *testing.T) {
-		state := wsParentState(nil, nil)
-		req := wsRequest(func(r *ResumeRequest) {
-			r.Identity.ResolvedBase = "base-other"
-			r.IsAncestor = nil
+	const (
+		unbornErr    = "resume rejected: repository has no base commit (unborn repository does not support resume; run 'ocr review' to start a fresh review)"
+		zeroItemsErr = `resume rejected: no completed review items from session "parent-session" match current workspace diffs (run 'ocr review' to start a fresh review)`
+	)
+
+	tests := []struct {
+		name      string
+		parent    func(*RunManifest)
+		req       func(*ResumeRequest)
+		wantErr   string
+		exactErr  bool
+		spyAncest bool
+	}{
+		{
+			name: "content change passes in workspace mode",
+			req:  func(r *ResumeRequest) { r.Identity.SourceArtifactSHA256 = "artifact-changed" },
+		},
+		{
+			name:    "repository change is rejected in workspace mode",
+			req:     func(r *ResumeRequest) { r.Identity.RepositorySHA256 = "repo-other" },
+			wantErr: "repository identity changed",
+		},
+		{
+			name:    "rule config change is rejected in workspace mode",
+			req:     func(r *ResumeRequest) { r.Identity.RuleConfigSHA256 = "rules-other" },
+			wantErr: "rule identity changed",
+		},
+		{
+			name:     "zero reusable items triggers error in workspace mode",
+			req:      func(r *ResumeRequest) { r.ItemFingerprints = []string{"fp-unmatched"} },
+			wantErr:  zeroItemsErr,
+			exactErr: true,
+		},
+		{
+			name: "at least one matching reusable item passes",
+			req:  func(r *ResumeRequest) { r.ItemFingerprints = []string{"fp-1", "fp-new"} },
+		},
+		{
+			name:     "empty parent resolved base is rejected as unborn repo",
+			parent:   func(m *RunManifest) { m.Input.ResolvedBase = "" },
+			wantErr:  unbornErr,
+			exactErr: true,
+		},
+		{
+			name:     "empty candidate resolved base is rejected as unborn repo",
+			req:      func(r *ResumeRequest) { r.Identity.ResolvedBase = "" },
+			wantErr:  unbornErr,
+			exactErr: true,
+		},
+		{
+			name: "base commit unchanged passes in workspace mode",
+		},
+		{
+			name: "descendant commit passes in workspace mode",
+			req: func(r *ResumeRequest) {
+				r.Identity.ResolvedBase = "base-child-commit"
+				r.IsAncestor = func(base, head string) bool {
+					return base == "base-parent" && head == "base-child-commit"
+				}
+			},
+		},
+		{
+			name: "non-descendant commit is rejected in workspace mode",
+			req: func(r *ResumeRequest) {
+				r.Identity.ResolvedBase = "base-diverged-commit"
+				r.IsAncestor = func(base, head string) bool { return false }
+			},
+			wantErr:  `resume rejected: current HEAD commit "base-diverged-commit" is not a descendant of session base commit "base-parent"; start a new review instead of resuming`,
+			exactErr: true,
+		},
+		{
+			name: "non-descendant commit without is ancestor is rejected",
+			req: func(r *ResumeRequest) {
+				r.Identity.ResolvedBase = "base-other"
+				r.IsAncestor = nil
+			},
+			wantErr:  `resume rejected: current HEAD commit "base-other" is not a descendant of session base commit "base-parent"; start a new review instead of resuming`,
+			exactErr: true,
+		},
+		{
+			name: "repository mismatch takes precedence over topology check",
+			req: func(r *ResumeRequest) {
+				r.Identity.RepositorySHA256 = "repo-other"
+				r.Identity.ResolvedBase = "base-other"
+			},
+			wantErr:   "repository identity changed",
+			spyAncest: true,
+		},
+		{
+			name:      "input mode mismatch takes precedence over topology check",
+			parent:    func(m *RunManifest) { m.Input.Mode = InputModeRange },
+			req:       func(r *ResumeRequest) { r.Identity.ResolvedBase = "base-other" },
+			wantErr:   "input mode changed",
+			spyAncest: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			state := wsParent(tc.parent)
+			called := false
+			req := wsReq(func(r *ResumeRequest) {
+				if tc.req != nil {
+					tc.req(r)
+				}
+				if tc.spyAncest {
+					r.IsAncestor = func(base, head string) bool {
+						called = true
+						return false
+					}
+				}
+			})
+
+			err := state.ValidateResume(req)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("want accepted, got error: %v", err)
+			case tc.wantErr != "" && err == nil:
+				t.Fatalf("want error matching %q, got nil", tc.wantErr)
+			case tc.wantErr != "" && tc.exactErr && err.Error() != tc.wantErr:
+				t.Fatalf("got err = %v, want = %q", err, tc.wantErr)
+			case tc.wantErr != "" && !tc.exactErr && !strings.Contains(err.Error(), tc.wantErr):
+				t.Fatalf("error %q does not mention %q", err, tc.wantErr)
+			}
+			if tc.spyAncest && called {
+				t.Fatal("IsAncestor must not run when higher-priority check fails")
+			}
 		})
-		err := state.ValidateResume(req)
-		want := `resume rejected: current HEAD commit "base-other" is not a descendant of session base commit "base-parent"; start a new review instead of resuming`
-		if err == nil || err.Error() != want {
-			t.Fatalf("got err = %v, want = %q", err, want)
-		}
-	})
+	}
 }
 
 // An endpoint configured straight from environment variables resolves no

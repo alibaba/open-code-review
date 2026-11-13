@@ -820,43 +820,43 @@ func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
 }
 
 func TestApplyResumeWorkspace(t *testing.T) {
-	t.Run("full reuse in workspace mode", func(t *testing.T) {
-		diffs := []model.Diff{
-			{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
-			{OldPath: "b.go", NewPath: "b.go", Diff: "+b", Insertions: 1},
+	setupWorkspaceResume := func(t *testing.T, parentDiffs []model.Diff, commentSuffix string) (*Agent, *session.ResumeState, *session.SessionHistory, *tool.CommentCollector) {
+		t.Helper()
+		items := make(map[string]session.ResumeItem, len(parentDiffs))
+		completed := make([]session.CoverageItem, 0, len(parentDiffs))
+		for _, d := range parentDiffs {
+			fp := reviewItemFingerprint(session.ReviewModeWorkspace, d)
+			items[fp] = session.ResumeItem{
+				FilePath:    d.NewPath,
+				NewPath:     d.NewPath,
+				Fingerprint: fp,
+				Comments:    []model.LlmComment{{Path: d.NewPath, Content: "c-" + strings.TrimSuffix(d.NewPath, ".go") + commentSuffix}},
+			}
+			completed = append(completed, session.CoverageItem{
+				ItemID:      "item-" + strings.TrimSuffix(d.NewPath, ".go"),
+				Fingerprint: fp,
+			})
 		}
-		fpA := reviewItemFingerprint(session.ReviewModeWorkspace, diffs[0])
-		fpB := reviewItemFingerprint(session.ReviewModeWorkspace, diffs[1])
-
 		resume := &session.ResumeState{
 			SessionID:  "parent-ws-session",
 			Model:      "parent-model",
 			ReviewMode: session.ReviewModeWorkspace,
 			GitBranch:  "main",
-			Items: map[string]session.ResumeItem{
-				fpA: {FilePath: "a.go", NewPath: "a.go", Fingerprint: fpA, Comments: []model.LlmComment{{Path: "a.go", Content: "c-a"}}},
-				fpB: {FilePath: "b.go", NewPath: "b.go", Fingerprint: fpB, Comments: []model.LlmComment{{Path: "b.go", Content: "c-b"}}},
-			},
+			Items:      items,
 			Manifest: &session.RunManifest{
-				RunID: "run-parent-ws",
-				Coverage: session.Coverage{
-					Completed: []session.CoverageItem{
-						{ItemID: "item-a", Fingerprint: fpA},
-						{ItemID: "item-b", Fingerprint: fpB},
-					},
-				},
+				RunID:     "run-parent-ws",
+				Coverage:  session.Coverage{Completed: completed},
 				Execution: session.ManifestExecution{Provider: "anthropic", Model: "parent-model"},
 			},
 			Closed: true,
 		}
-
 		collector := tool.NewCommentCollector()
 		sess := session.New(t.TempDir(), "main", "child-model", session.SessionOptions{
 			ReviewMode:  session.ReviewModeWorkspace,
 			ResumedFrom: "parent-ws-session",
 			Operation:   session.OperationReview,
 		})
-		defer sess.Finalize()
+		t.Cleanup(func() { _ = sess.Finalize() })
 
 		a := New(Args{
 			ReviewMode:       session.ReviewModeWorkspace,
@@ -866,6 +866,15 @@ func TestApplyResumeWorkspace(t *testing.T) {
 			Resume:           resume,
 			Session:          sess,
 		})
+		return a, resume, sess, collector
+	}
+
+	t.Run("full reuse in workspace mode", func(t *testing.T) {
+		diffs := []model.Diff{
+			{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
+			{OldPath: "b.go", NewPath: "b.go", Diff: "+b", Insertions: 1},
+		}
+		a, _, _, collector := setupWorkspaceResume(t, diffs, "")
 
 		toDispatch := a.applyResume(diffs)
 		if len(toDispatch) != 0 {
@@ -881,54 +890,16 @@ func TestApplyResumeWorkspace(t *testing.T) {
 	})
 
 	t.Run("partial reuse and partial re-review in workspace mode", func(t *testing.T) {
-		oldDiffB := model.Diff{OldPath: "b.go", NewPath: "b.go", Diff: "+b-old", Insertions: 1}
-		fpA := reviewItemFingerprint(session.ReviewModeWorkspace, model.Diff{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1})
-		fpBOld := reviewItemFingerprint(session.ReviewModeWorkspace, oldDiffB)
-
+		parentDiffs := []model.Diff{
+			{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
+			{OldPath: "b.go", NewPath: "b.go", Diff: "+b-old", Insertions: 1},
+		}
 		diffs := []model.Diff{
 			{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
 			{OldPath: "b.go", NewPath: "b.go", Diff: "+b-new", Insertions: 1},
 			{OldPath: "c.go", NewPath: "c.go", Diff: "+c", Insertions: 1},
 		}
-
-		resume := &session.ResumeState{
-			SessionID:  "parent-ws-session",
-			Model:      "parent-model",
-			ReviewMode: session.ReviewModeWorkspace,
-			GitBranch:  "main",
-			Items: map[string]session.ResumeItem{
-				fpA:    {FilePath: "a.go", NewPath: "a.go", Fingerprint: fpA, Comments: []model.LlmComment{{Path: "a.go", Content: "c-a"}}},
-				fpBOld: {FilePath: "b.go", NewPath: "b.go", Fingerprint: fpBOld, Comments: []model.LlmComment{{Path: "b.go", Content: "c-b-old"}}},
-			},
-			Manifest: &session.RunManifest{
-				RunID: "run-parent-ws",
-				Coverage: session.Coverage{
-					Completed: []session.CoverageItem{
-						{ItemID: "item-a", Fingerprint: fpA},
-						{ItemID: "item-b", Fingerprint: fpBOld},
-					},
-				},
-				Execution: session.ManifestExecution{Provider: "anthropic", Model: "parent-model"},
-			},
-			Closed: true,
-		}
-
-		collector := tool.NewCommentCollector()
-		sess := session.New(t.TempDir(), "main", "child-model", session.SessionOptions{
-			ReviewMode:  session.ReviewModeWorkspace,
-			ResumedFrom: "parent-ws-session",
-			Operation:   session.OperationReview,
-		})
-		defer sess.Finalize()
-
-		a := New(Args{
-			ReviewMode:       session.ReviewModeWorkspace,
-			Model:            "child-model",
-			Provider:         "openai",
-			CommentCollector: collector,
-			Resume:           resume,
-			Session:          sess,
-		})
+		a, resume, sess, collector := setupWorkspaceResume(t, parentDiffs, "")
 
 		b := sess.Manifest()
 		for _, d := range diffs {
@@ -936,10 +907,7 @@ func TestApplyResumeWorkspace(t *testing.T) {
 		}
 
 		toDispatch := a.applyResume(diffs)
-		if len(toDispatch) != 2 {
-			t.Fatalf("expected 2 files to dispatch, got: %d", len(toDispatch))
-		}
-		if toDispatch[0].NewPath != "b.go" || toDispatch[1].NewPath != "c.go" {
+		if len(toDispatch) != 2 || toDispatch[0].NewPath != "b.go" || toDispatch[1].NewPath != "c.go" {
 			t.Fatalf("unexpected toDispatch: %+v", toDispatch)
 		}
 		if len(collector.Comments()) != 1 || collector.Comments()[0].Content != "c-a" {

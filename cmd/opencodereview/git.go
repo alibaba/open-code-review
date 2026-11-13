@@ -34,11 +34,3 @@ func getCommitMessage(repoDir, commit string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
-
-func detectGitBranch(repoDir string) string {
-	out, err := runGitCmdStdout(repoDir, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil || len(out) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}

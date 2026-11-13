@@ -20,15 +20,9 @@ import (
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
-// writeRangeResumeSession persists a range-mode session with the given completed
-// file checkpoints and returns its ID. HOME must already point at a temp dir.
-func writeRangeResumeSession(t *testing.T, repoDir string, files ...string) string {
+func writeResumeSessionWithOpts(t *testing.T, repoDir, branch string, opts session.SessionOptions, files ...string) string {
 	t.Helper()
-	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
-		ReviewMode: session.ReviewModeRange,
-		DiffFrom:   "main",
-		DiffTo:     "feature",
-	})
+	sh := session.New(repoDir, branch, "fake", opts)
 	for _, f := range files {
 		sh.RecordReviewItemDone(f, "", f, "fp-"+f, nil)
 	}
@@ -36,6 +30,17 @@ func writeRangeResumeSession(t *testing.T, repoDir string, files ...string) stri
 		t.Fatalf("finalize session: %v", err)
 	}
 	return sh.SessionID
+}
+
+// writeRangeResumeSession persists a range-mode session with the given completed
+// file checkpoints and returns its ID. HOME must already point at a temp dir.
+func writeRangeResumeSession(t *testing.T, repoDir string, files ...string) string {
+	t.Helper()
+	return writeResumeSessionWithOpts(t, repoDir, "feature", session.SessionOptions{
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+	}, files...)
 }
 
 // TestLoadReviewResumeState_WithSession drives the fixture-backed branches of
@@ -86,53 +91,45 @@ func TestLoadReviewResumeState_WithSession(t *testing.T) {
 	})
 }
 
-func writeWorkspaceResumeSession(t *testing.T, repoDir, branch string, files ...string) string {
-	t.Helper()
-	sh := session.New(repoDir, branch, "fake", session.SessionOptions{
-		ReviewMode: session.ReviewModeWorkspace,
-	})
-	for _, f := range files {
-		sh.RecordReviewItemDone(f, "", f, "fp-"+f, nil)
-	}
-	if err := sh.Finalize(); err != nil {
-		t.Fatalf("finalize session: %v", err)
-	}
-	return sh.SessionID
-}
-
 func TestLoadReviewResumeState_InferenceAndConflicts(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	rangeID := writeRangeResumeSession(t, repoDir, "a.go")
-	wsID := writeWorkspaceResumeSession(t, repoDir, "main", "w.go")
+	commitID := writeResumeSessionWithOpts(t, repoDir, "main", session.SessionOptions{
+		ReviewMode: session.ReviewModeCommit,
+		DiffCommit: "abc1234",
+	}, "c.go")
+	wsID := writeResumeSessionWithOpts(t, repoDir, "main", session.SessionOptions{
+		ReviewMode: session.ReviewModeWorkspace,
+	}, "w.go")
 
-	t.Run("auto-infers range parameters when not provided", func(t *testing.T) {
-		opts := reviewOptions{resume: rangeID}
-		state, err := loadReviewResumeState(repoDir, &opts)
-		if err != nil {
-			t.Fatalf("loadReviewResumeState: %v", err)
-		}
-		if state == nil {
-			t.Fatal("expected non-nil state")
-		}
-		if opts.from != "main" || opts.to != "feature" {
-			t.Errorf("got from=%q to=%q, want main/feature", opts.from, opts.to)
-		}
-	})
-
-	t.Run("auto-infers workspace mode when not provided", func(t *testing.T) {
-		opts := reviewOptions{resume: wsID}
-		state, err := loadReviewResumeState(repoDir, &opts)
-		if err != nil {
-			t.Fatalf("loadReviewResumeState: %v", err)
-		}
-		if state == nil || state.ReviewMode != session.ReviewModeWorkspace {
-			t.Fatalf("got %v, want workspace state", state)
-		}
-		if opts.from != "" || opts.to != "" || opts.commit != "" {
-			t.Errorf("workspace resume should not populate range/commit flags, got %+v", opts)
-		}
-	})
+	inferCases := []struct {
+		name       string
+		opts       reviewOptions
+		wantMode   string
+		wantFrom   string
+		wantTo     string
+		wantCommit string
+	}{
+		{name: "auto-infers range parameters when not provided", opts: reviewOptions{resume: rangeID}, wantMode: session.ReviewModeRange, wantFrom: "main", wantTo: "feature"},
+		{name: "auto-infers commit parameters when not provided", opts: reviewOptions{resume: commitID}, wantMode: session.ReviewModeCommit, wantCommit: "abc1234"},
+		{name: "auto-infers workspace mode when not provided", opts: reviewOptions{resume: wsID}, wantMode: session.ReviewModeWorkspace},
+	}
+	for _, tc := range inferCases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := tc.opts
+			state, err := loadReviewResumeState(repoDir, &opts)
+			if err != nil {
+				t.Fatalf("loadReviewResumeState: %v", err)
+			}
+			if state == nil || state.ReviewMode != tc.wantMode {
+				t.Fatalf("got %v, want mode %q", state, tc.wantMode)
+			}
+			if opts.from != tc.wantFrom || opts.to != tc.wantTo || opts.commit != tc.wantCommit {
+				t.Errorf("got from=%q to=%q commit=%q, want %q/%q/%q", opts.from, opts.to, opts.commit, tc.wantFrom, tc.wantTo, tc.wantCommit)
+			}
+		})
+	}
 
 	t.Run("preserves explicit runtime parameter overrides", func(t *testing.T) {
 		opts := reviewOptions{
@@ -143,8 +140,7 @@ func TestLoadReviewResumeState_InferenceAndConflicts(t *testing.T) {
 			effort:          "high",
 			maxTokensBudget: 50000,
 		}
-		_, err := loadReviewResumeState(repoDir, &opts)
-		if err != nil {
+		if _, err := loadReviewResumeState(repoDir, &opts); err != nil {
 			t.Fatalf("loadReviewResumeState: %v", err)
 		}
 		if opts.model != "custom-model" || opts.provider != "custom-provider" || opts.concurrency != 4 || opts.effort != "high" || opts.maxTokensBudget != 50000 {
@@ -152,29 +148,23 @@ func TestLoadReviewResumeState_InferenceAndConflicts(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects --commit on workspace session", func(t *testing.T) {
-		opts := reviewOptions{resume: wsID, commit: "HEAD"}
-		_, err := loadReviewResumeState(repoDir, &opts)
-		if err == nil || !strings.Contains(err.Error(), "parameter conflict") {
-			t.Fatalf("expected parameter conflict error, got: %v", err)
-		}
-	})
-
-	t.Run("rejects --from/--to on workspace session", func(t *testing.T) {
-		opts := reviewOptions{resume: wsID, from: "main", to: "dev"}
-		_, err := loadReviewResumeState(repoDir, &opts)
-		if err == nil || !strings.Contains(err.Error(), "parameter conflict") {
-			t.Fatalf("expected parameter conflict error, got: %v", err)
-		}
-	})
-
-	t.Run("rejects --commit on range session", func(t *testing.T) {
-		opts := reviewOptions{resume: rangeID, commit: "HEAD"}
-		_, err := loadReviewResumeState(repoDir, &opts)
-		if err == nil || !strings.Contains(err.Error(), "parameter conflict") {
-			t.Fatalf("expected parameter conflict error, got: %v", err)
-		}
-	})
+	conflictCases := []struct {
+		name string
+		opts reviewOptions
+	}{
+		{name: "rejects --commit on workspace session", opts: reviewOptions{resume: wsID, commit: "HEAD"}},
+		{name: "rejects --from/--to on workspace session", opts: reviewOptions{resume: wsID, from: "main", to: "dev"}},
+		{name: "rejects --commit on range session", opts: reviewOptions{resume: rangeID, commit: "HEAD"}},
+		{name: "rejects --from/--to on commit session", opts: reviewOptions{resume: commitID, from: "main", to: "feature"}},
+	}
+	for _, tc := range conflictCases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := tc.opts
+			if _, err := loadReviewResumeState(repoDir, &opts); err == nil || !strings.Contains(err.Error(), "parameter conflict") {
+				t.Fatalf("expected parameter conflict error, got: %v", err)
+			}
+		})
+	}
 }
 
 // gitIn runs git in dir with a fixed identity so commits are reproducible.
@@ -231,12 +221,17 @@ func resumeTestContext(repoDir string) *commonContext {
 // with the given provider and model, as a completed parent run would.
 func writeVerifiableParent(t *testing.T, repoDir string, id session.RunIdentity, provider, model string) string {
 	t.Helper()
-	sh := session.New(repoDir, "feature", model, session.SessionOptions{
+	return writeVerifiableParentWithOpts(t, repoDir, "feature", session.SessionOptions{
 		ReviewMode: session.ReviewModeRange,
 		DiffFrom:   "HEAD~1",
 		DiffTo:     "HEAD",
 		Operation:  session.OperationReview,
-	})
+	}, id, nil, provider, model)
+}
+
+func writeVerifiableParentWithOpts(t *testing.T, repoDir, branch string, sessOpts session.SessionOptions, id session.RunIdentity, fps []string, provider, model string) string {
+	t.Helper()
+	sh := session.New(repoDir, branch, model, sessOpts)
 	b := sh.Manifest()
 	b.SetRepository(session.ManifestRepository{IdentitySHA256: id.RepositorySHA256})
 	b.SetInput(session.ManifestInput{
@@ -246,11 +241,22 @@ func writeVerifiableParent(t *testing.T, repoDir string, id session.RunIdentity,
 	b.SetExecution(session.ManifestExecution{
 		Provider: provider, Model: model, RuleConfigSHA256: id.RuleConfigSHA256,
 	})
-	if err := b.RegisterSelected(session.CoverageItem{ItemID: "item-1", Path: "main.go"}); err != nil {
-		t.Fatalf("register selected: %v", err)
+	items := fps
+	recordDone := len(fps) > 0
+	if !recordDone {
+		items = []string{""}
 	}
-	if err := b.MarkCompleted("item-1"); err != nil {
-		t.Fatalf("mark completed: %v", err)
+	for i, fp := range items {
+		itemID := fmt.Sprintf("item-%d", i)
+		if err := b.RegisterSelected(session.CoverageItem{ItemID: itemID, Fingerprint: fp, Path: "main.go"}); err != nil {
+			t.Fatalf("register selected: %v", err)
+		}
+		if err := b.MarkCompleted(itemID); err != nil {
+			t.Fatalf("mark completed: %v", err)
+		}
+		if recordDone {
+			sh.RecordReviewItemDone("main.go", "", "main.go", fp, nil)
+		}
 	}
 	m, err := b.Finalize(time.Second)
 	if err != nil {
@@ -435,50 +441,15 @@ func TestFileReadRef(t *testing.T) {
 	}
 }
 
-func writeVerifiableWorkspaceParent(t *testing.T, repoDir, branch string, id session.RunIdentity, fps []string, provider, model string) string {
-	t.Helper()
-	sh := session.New(repoDir, branch, model, session.SessionOptions{
-		ReviewMode: session.ReviewModeWorkspace,
-		Operation:  session.OperationReview,
-	})
-	b := sh.Manifest()
-	b.SetRepository(session.ManifestRepository{IdentitySHA256: id.RepositorySHA256})
-	b.SetInput(session.ManifestInput{
-		Mode:                 id.Mode,
-		ResolvedBase:         id.ResolvedBase,
-		SourceArtifactSHA256: id.SourceArtifactSHA256,
-	})
-	b.SetExecution(session.ManifestExecution{
-		Provider: provider, Model: model, RuleConfigSHA256: id.RuleConfigSHA256,
-	})
-	for i, fp := range fps {
-		itemID := fmt.Sprintf("item-%d", i)
-		if err := b.RegisterSelected(session.CoverageItem{ItemID: itemID, Fingerprint: fp, Path: "main.go"}); err != nil {
-			t.Fatalf("register selected: %v", err)
-		}
-		if err := b.MarkCompleted(itemID); err != nil {
-			t.Fatalf("mark completed: %v", err)
-		}
-		sh.RecordReviewItemDone("main.go", "", "main.go", fp, nil)
-	}
-	m, err := b.Finalize(time.Second)
-	if err != nil {
-		t.Fatalf("finalize manifest: %v", err)
-	}
-	sh.SetFinalManifest(&m)
-	if err := sh.Finalize(); err != nil {
-		t.Fatalf("finalize session: %v", err)
-	}
-	return sh.SessionID
-}
-
 func TestValidateResumeIdentity_Workspace(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	repoDir := initResumeRepo(t)
+	gitIn(t, repoDir, "branch", "-M", "main")
+	// Add a third commit without touching main.go so HEAD~1 rollback keeps the
+	// uncommitted modification to main.go intact.
+	commitFile(t, repoDir, "step.go", "package main\n\nfunc step() {}\n", "add step")
 	cc := resumeTestContext(repoDir)
-	branch := detectGitBranch(repoDir)
 
-	// Make an uncommitted workspace modification to main.go.
 	if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte("package main\n\nfunc main() { println(\"ws\") }\n"), 0o644); err != nil {
 		t.Fatalf("write main.go: %v", err)
 	}
@@ -493,68 +464,86 @@ func TestValidateResumeIdentity_Workspace(t *testing.T) {
 		t.Fatalf("ResolveIdentity: %v", err)
 	}
 
-	parentID := writeVerifiableWorkspaceParent(t, repoDir, branch, sealed.Identity, sealed.ItemFingerprints, "anthropic", "claude")
+	parentID := writeVerifiableParentWithOpts(t, repoDir, "main", session.SessionOptions{
+		ReviewMode: session.ReviewModeWorkspace,
+		Operation:  session.OperationReview,
+	}, sealed.Identity, sealed.ItemFingerprints, "anthropic", "claude")
 	state, err := loadReviewResumeState(repoDir, &reviewOptions{resume: parentID})
 	if err != nil {
 		t.Fatalf("loadReviewResumeState: %v", err)
 	}
 
-	t.Run("matching branch and workspace diff is accepted", func(t *testing.T) {
-		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state); err != nil {
-			t.Fatalf("want accepted, got error: %v", err)
+	commitSingleFile := func(t *testing.T, name, content, msg string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repoDir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
 		}
-	})
+		gitIn(t, repoDir, "add", name)
+		gitIn(t, repoDir, "commit", "-m", msg)
+	}
 
-	t.Run("different branch with same commit is accepted", func(t *testing.T) {
-		gitIn(t, repoDir, "checkout", "-b", "other-branch")
-		defer gitIn(t, repoDir, "checkout", branch)
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T)
+		wantErr string
+	}{
+		{
+			name: "matching branch and workspace diff is accepted",
+		},
+		{
+			name: "different branch with same commit is accepted",
+			setup: func(t *testing.T) {
+				gitIn(t, repoDir, "checkout", "-b", "other-branch")
+				t.Cleanup(func() { gitIn(t, repoDir, "checkout", "main") })
+			},
+		},
+		{
+			name: "descendant commit is accepted",
+			setup: func(t *testing.T) {
+				commitSingleFile(t, "extra.go", "package main\n\nfunc extra() {}\n", "extra commit")
+			},
+		},
+		{
+			name: "historical rollback commit is rejected",
+			setup: func(t *testing.T) {
+				gitIn(t, repoDir, "checkout", "main~2")
+				t.Cleanup(func() { gitIn(t, repoDir, "checkout", "main") })
+			},
+			wantErr: "is not a descendant of session base commit",
+		},
+		{
+			name: "non-descendant commit is rejected",
+			setup: func(t *testing.T) {
+				gitIn(t, repoDir, "checkout", "--orphan", "diverged-branch")
+				t.Cleanup(func() { gitIn(t, repoDir, "checkout", "main") })
+				commitSingleFile(t, "div.go", "package main\n", "diverged commit")
+			},
+			wantErr: "is not a descendant of session base commit",
+		},
+		{
+			name: "zero matching items is rejected",
+			setup: func(t *testing.T) {
+				if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte("package main\n\nfunc main() { println(\"entirely different\") }\n"), 0o644); err != nil {
+					t.Fatalf("write main.go: %v", err)
+				}
+			},
+			wantErr: "no completed review items",
+		},
+	}
 
-		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state); err != nil {
-			t.Fatalf("want accepted on same commit under different branch, got: %v", err)
-		}
-	})
-
-	t.Run("descendant commit is accepted", func(t *testing.T) {
-		if err := os.WriteFile(filepath.Join(repoDir, "extra.go"), []byte("package main\n\nfunc extra() {}\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		gitIn(t, repoDir, "add", "extra.go")
-		gitIn(t, repoDir, "commit", "-m", "extra commit")
-
-		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state); err != nil {
-			t.Fatalf("want accepted for descendant commit, got: %v", err)
-		}
-	})
-
-	t.Run("non-descendant commit is rejected", func(t *testing.T) {
-		gitIn(t, repoDir, "checkout", "--orphan", "diverged-branch")
-		if err := os.WriteFile(filepath.Join(repoDir, "div.go"), []byte("package main\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		gitIn(t, repoDir, "add", "div.go")
-		gitIn(t, repoDir, "commit", "-m", "diverged commit")
-		defer gitIn(t, repoDir, "checkout", branch)
-
-		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
-		if err == nil || !strings.Contains(err.Error(), "is not a descendant of session base commit") {
-			t.Fatalf("want not-descendant rejection, got: %v", err)
-		}
-	})
-
-	t.Run("zero matching items is rejected", func(t *testing.T) {
-		// Overwrite main.go with completely different content so fingerprint doesn't match
-		if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte("package main\n\nfunc main() { println(\"entirely different\") }\n"), 0o644); err != nil {
-			t.Fatalf("write main.go: %v", err)
-		}
-
-		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
-		if err == nil || !strings.Contains(err.Error(), "no completed review items") {
-			t.Fatalf("want zero matching items error, got: %v", err)
-		}
-	})
+	rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.setup != nil {
+				tc.setup(t)
+			}
+			_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("want accepted, got error: %v", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("want error containing %q, got: %v", tc.wantErr, err)
+			}
+		})
+	}
 }

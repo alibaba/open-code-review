@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -408,9 +407,7 @@ func loadReviewResumeState(repoDir string, opts *reviewOptions) (*session.Resume
 	} else {
 		switch state.ReviewMode {
 		case session.ReviewModeWorkspace:
-			if opts.from != "" || opts.to != "" || opts.commit != "" {
-				return nil, fmt.Errorf("parameter conflict: session %q is workspace mode; cannot specify --from/--to or --commit", opts.resume)
-			}
+			return nil, fmt.Errorf("parameter conflict: session %q is workspace mode; cannot specify --from/--to or --commit", opts.resume)
 		case session.ReviewModeRange:
 			if opts.commit != "" {
 				return nil, fmt.Errorf("parameter conflict: session %q is range mode; cannot specify --commit", opts.resume)
@@ -481,9 +478,8 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 				_, err := cc.GitRunner.Run(ctx, cc.RepoDir, "merge-base", "--is-ancestor", base, head)
 				return err == nil
 			}
-			cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", base, head)
-			cmd.Dir = cc.RepoDir
-			return cmd.Run() == nil
+			_, err := runGitCmd(cc.RepoDir, "merge-base", "--is-ancestor", base, head)
+			return err == nil
 		},
 		ItemFingerprints: sealed.ItemFingerprints,
 	}); err != nil {
