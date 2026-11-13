@@ -22,7 +22,7 @@
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
-  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://img.shields.io/badge/Ask-DeepWiki-blue?style=flat-square" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
@@ -123,6 +123,9 @@ npm install -g @alibaba-group/open-code-review
 **1. LLMの設定**
 
 コードレビューの前にLLMの設定が必要です。[デリゲートモード](https://open-codereview.ai/docs/delegate)を使用する場合は不要です。
+
+- **OCR がモデルを呼び出す場合:** `ocr review`、`/open-code-review:review` コマンド、`open-code-review` スキルは、Claude Code Team/Pro サブスクリプションのログインではなく、OCR 側のプロバイダー設定を使用します。認証要件はプロバイダーによって異なります。[設定](https://open-codereview.ai/docs/configuration)を参照してください。
+- **ホストエージェントがモデルを呼び出す場合:** `/open-code-review:delegate-review` コマンドと `open-code-review-delegate` スキルは、ホストエージェントに設定されたモデルと認証方式を使用します。OCR 側で LLM や認証情報を別途設定する必要はありません。[Claude Code のインストール手順](../../plugins/open-code-review/README.md#claude-code)を参照してください。
 
 ```bash
 ocr config provider          # ビルトインプロバイダーを選択またはカスタムプロバイダーを追加

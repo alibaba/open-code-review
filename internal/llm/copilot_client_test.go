@@ -98,6 +98,33 @@ func TestCopilotResponseRejectsUnavailableTool(t *testing.T) {
 	}
 }
 
+func TestCopilotSearchSchemaPreservesCaller(t *testing.T) {
+	defs := []ToolDef{{Type: "function", Function: FunctionDef{Name: "code_search", Description: "Can use either exact string matching or regular expressions.", Parameters: map[string]any{
+		"type": "object", "properties": map[string]any{"search_text": map[string]any{"type": "string"}, "use_perl_regexp": map[string]any{"type": "boolean", "description": "Defaults to false."}}, "required": []string{"search_text"},
+	}}}}
+	before, err := json.Marshal(defs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools, _, err := copilotTools(defs, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	required := tools[0].Parameters["required"].([]any)
+	if len(required) != 2 || required[0] != "search_text" || required[1] != "use_perl_regexp" {
+		t.Fatalf("search mode was not made explicit: %v", required)
+	}
+	after, err := json.Marshal(defs)
+	if err != nil || string(before) != string(after) {
+		t.Fatalf("Copilot changed the caller's schema: before=%s after=%s error=%v", before, after, err)
+	}
+	defs[0].Function.Parameters = tools[0].Parameters
+	again, _, err := copilotTools(defs, "")
+	if err != nil || len(again[0].Parameters["required"].([]any)) != 2 {
+		t.Fatalf("repeated schema adaptation changed the required fields: %#v, %v", again, err)
+	}
+}
+
 func TestCopilotResponseAccumulatesModelUsage(t *testing.T) {
 	inputA, inputB := int64(10), int64(20)
 	outputA, outputB := int64(2), int64(3)
@@ -231,6 +258,128 @@ func TestCopilotResponseUsesFallbackUsage(t *testing.T) {
 	}
 	if calls := response.ToolCalls(); len(calls) != 1 || calls[0].Function.Arguments != `{"path":"file.go"}` || response.Choices[0].FinishReason != "tool_calls" {
 		t.Fatalf("tool response = %#v", response)
+	}
+}
+
+func TestCopilotClientSignedInTokenLimit(t *testing.T) {
+	if os.Getenv("OCR_COPILOT_LIVE_TEST") != "1" {
+		t.Skip("set OCR_COPILOT_LIVE_TEST=1 to use signed-in Copilot allowance")
+	}
+	client := NewCopilotClient(ClientConfig{Model: "auto", Timeout: time.Minute})
+	defer client.CloseSession("output-limit-test")
+	response, err := client.CompletionsWithCtx(t.Context(), ChatRequest{
+		SessionID: "output-limit-test", MaxTokens: 128,
+		Messages: []Message{NewTextMessage("user", "Write a detailed essay of at least 2000 words about binary search trees. Begin writing immediately.")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Usage == nil || response.Usage.CompletionTokens > 128 || response.Choices[0].FinishReason != "length" {
+		t.Fatalf("output limit was not applied: %#v", response)
+	}
+	if _, kept := client.sessions.Load("output-limit-test"); kept {
+		t.Fatal("truncated response kept its SDK session")
+	}
+	t.Logf("output_tokens=%d finish=%s", response.Usage.CompletionTokens, response.Choices[0].FinishReason)
+}
+
+func TestCopilotClientSignedInCancellation(t *testing.T) {
+	if os.Getenv("OCR_COPILOT_LIVE_TEST") != "1" {
+		t.Skip("set OCR_COPILOT_LIVE_TEST=1 to use signed-in Copilot allowance")
+	}
+	client := NewCopilotClient(ClientConfig{Model: "auto", Timeout: time.Minute})
+	defer client.CloseSession("live-cancellation")
+	tools := []ToolDef{{Type: "function", Function: FunctionDef{Name: "file_read", Description: "Read the review fixture", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}}}}
+	messages := []Message{NewTextMessage("system", "Use only supplied tools. First call file_read and wait for its result. After reading, write a detailed essay of at least 2000 words."), NewTextMessage("user", "Read the fixture, then explain it in detail.")}
+	first, err := client.CompletionsWithCtx(t.Context(), ChatRequest{SessionID: "live-cancellation", Messages: messages, Tools: tools, MaxTokens: 4096})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := first.ToolCalls()
+	if len(calls) != 1 || calls[0].Function.Name != "file_read" {
+		t.Fatalf("unexpected tools: %#v", calls)
+	}
+	value, ok := client.sessions.Load("live-cancellation")
+	if !ok {
+		t.Fatal("native session was not retained")
+	}
+	conversation := value.(*copilotConversation)
+	messages = append(messages, NewToolCallMessage(first.VisibleContent(), calls, first.Native(), first.ReasoningContent()), NewToolResultMessage(calls[0].ID, "A binary search tree contains ordered nodes. Expand on its algorithms."))
+	if _, valid := conversation.continuation(ChatRequest{Messages: messages, MaxTokens: 4096}, "auto", copilotBaseSystem(messages), conversation.toolsKey); !valid {
+		t.Fatalf("native continuation was rejected: history=%+v current=%+v pending=%v model=%s system=%q", conversation.history, copilotHistorySnapshot(messages), conversation.pending, conversation.model, conversation.system)
+	}
+	toolBytes, _ := json.Marshal(struct {
+		Defs   []ToolDef
+		Choice string
+	}{tools, ""})
+	if string(toolBytes) != conversation.toolsKey {
+		t.Fatalf("tools changed: old=%s new=%s", conversation.toolsKey, toolBytes)
+	}
+	finished := make(chan error, 1)
+	go func() {
+		_, err := client.CompletionsWithCtx(t.Context(), ChatRequest{SessionID: "live-cancellation", Messages: messages, Tools: tools, MaxTokens: 4096})
+		finished <- err
+	}()
+	var upstream context.Context
+	deadline := time.NewTimer(time.Minute)
+	defer deadline.Stop()
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+waitForInference:
+	for {
+		select {
+		case <-tick.C:
+			conversation.transport.mu.Lock()
+			active := conversation.transport.ctx
+			responded := conversation.transport.responded
+			conversation.transport.mu.Unlock()
+			if responded && active != nil && active.Err() == nil {
+				upstream = active
+				break waitForInference
+			}
+		case err := <-finished:
+			t.Fatalf("continuation ended before an inference request: %v", err)
+		case <-deadline.C:
+			t.Fatal("signed-in continuation did not issue an inference request")
+		}
+	}
+	client.CloseSession("live-cancellation")
+	select {
+	case err := <-finished:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled inference = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("cancelled signed-in request did not return")
+	}
+	select {
+	case <-upstream.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream HTTP context was not cancelled")
+	}
+	if t.Context().Err() != nil {
+		t.Fatal("session cleanup cancelled its caller")
+	}
+}
+
+func TestCopilotClientLocalHTTPError(t *testing.T) {
+	cliPath := os.Getenv("OCR_COPILOT_CLI_TEST_PATH")
+	if cliPath == "" {
+		t.Skip("set OCR_COPILOT_CLI_TEST_PATH to run the local Copilot CLI integration test")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"error":{"type":"permission_error","message":"policy denied this request"}}`)
+	}))
+	defer server.Close()
+	client := &CopilotClient{model: "gpt-4.1", timeout: 30 * time.Second, cliPath: cliPath, provider: &copilot.ProviderConfig{Type: "openai", BaseURL: server.URL + "/v1", APIKey: "local-only", WireAPI: "completions"}}
+	response, err := client.CompletionsWithCtx(t.Context(), ChatRequest{SessionID: "http-error", Messages: []Message{NewTextMessage("user", "Hello")}})
+	if err == nil || response != nil || !strings.Contains(err.Error(), "HTTP 403") {
+		t.Fatalf("service error was not preserved: response=%#v error=%v", response, err)
+	}
+	if _, kept := client.sessions.Load("http-error"); kept {
+		t.Fatal("service failure kept its SDK session")
 	}
 }
 
@@ -406,9 +555,10 @@ func TestCopilotClientNativeToolContinuation(t *testing.T) {
 	if len(calls) != 1 || calls[0].Function.Name != "file_read" {
 		t.Fatalf("first tool calls = %#v", calls)
 	}
+	toolResult := "file contents\n" + strings.Repeat("padding\n", 8000) + "OCR_RESULT_END_MARKER"
 	continued := append(append([]Message(nil), start...),
 		NewToolCallMessage("", calls, NativeTurn{}, ""),
-		NewToolResultMessage(calls[0].ID, "file contents"))
+		NewToolResultMessage(calls[0].ID, toolResult))
 	second, err := client.CompletionsWithCtx(ctx, ChatRequest{Messages: continued, Tools: tools, MaxTokens: 128, SessionID: "native-test"})
 	if err != nil {
 		t.Fatal(err)
@@ -431,7 +581,7 @@ func TestCopilotClientNativeToolContinuation(t *testing.T) {
 	var sawToolResult bool
 	for _, raw := range wireMessages {
 		message, ok := raw.(map[string]any)
-		if ok && message["role"] == "tool" && strings.Contains(fmt.Sprint(message["content"]), "file contents") {
+		if ok && message["role"] == "tool" && strings.Contains(fmt.Sprint(message["content"]), "file contents") && strings.Contains(fmt.Sprint(message["content"]), "OCR_RESULT_END_MARKER") {
 			sawToolResult = true
 		}
 	}
@@ -448,11 +598,11 @@ func TestCopilotConversationFallsBackAfterCompression(t *testing.T) {
 		system:    "Review this patch.",
 		toolsKey:  "tools",
 		maxTokens: 128,
-		history:   copilotHistorySnapshot(start),
 		pending:   map[string]string{"call-1": "request-1"},
 	}
 	call := ToolCall{ID: "call-1", Type: "function", Function: FunctionCall{Name: "file_read", Arguments: `{"path":"file.go"}`}}
 	continued := append(append([]Message(nil), start...), NewToolCallMessage("", []ToolCall{call}, NativeTurn{}, ""), NewToolResultMessage("call-1", "file contents"))
+	conversation.history = copilotHistorySnapshot(continued[:3])
 	results, ok := conversation.continuation(ChatRequest{Messages: continued, MaxTokens: 128}, "gpt-4.1", "Review this patch.", "tools")
 	if !ok || results["call-1"] != "file contents" {
 		t.Fatalf("native continuation = (%#v, %v)", results, ok)

@@ -28,7 +28,7 @@ You don't have to write Go to be useful:
 
 ### Prerequisites
 
-- [Go ≥ 1.25](https://go.dev/dl/)
+- [Go ≥ 1.26.10](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -106,7 +106,7 @@ git checkout -b feat/anthropic-streaming
 Examples:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(readme): clarify endpoint resolution priority
 refactor(viewer): extract task-card rendering into helper
@@ -115,39 +115,55 @@ refactor(viewer): extract task-card rendering into helper
 The same format is used for **PR titles** so they show up cleanly in the
 generated changelog.
 
+`PR Commit Policy` checks the PR title and every commit's full message, including
+the body, case-insensitively. Do not include `[skip ci]`, `[ci skip]`, `[no ci]`,
+`[skip actions]`, `[actions skip]`, or a `skip-checks: true` / `skip-checks:true` line.
+
+To fix failures, edit the PR title or rewrite affected commit messages on your
+contribution branch. Adding a clean commit does not remove earlier violations.
+PR descriptions may discuss these instructions and are not checked.
+
 ## Project layout
 
 ```
 open-code-review/
+├── acp/                       # Independent ACP (Agent Client Protocol) adapter for the CLI
 ├── cmd/opencodereview/        # CLI entry point — flag parsing, dispatch
+├── docs/                      # Localized README and contributing guides
+├── imgs/                      # README images and logos
 ├── internal/
 │   ├── agent/                 # Review agent logic, sub-agent dispatch
+│   ├── chatgptauth/           # ChatGPT OAuth and credential management
 │   ├── config/                # Template, rules, allowlist, embedded JSON
-│   ├── diff/                  # Git diff parsing, three modes
+│   ├── delegate/              # Review specification generation without LLM calls
+│   ├── diff/                  # Git diff parsing
 │   ├── gitcmd/                # Git subprocess runner
-│   ├── llm/                   # LLM client (Anthropic & OpenAI), endpoint resolver
+│   ├── llm/                   # LLM clients and endpoint resolution
+│   ├── llmloop/               # LLM tool-use loop shared by review and scan
+│   ├── mcp/                   # MCP clients and tool adapters
 │   ├── model/                 # Data structs (LlmComment, Diff, …)
 │   ├── pathutil/              # Path utilities
-│   ├── release/               # Release-notes generation
+│   ├── release/               # Release artifact naming consistency checks
+│   ├── scan/                  # Full-file code review
 │   ├── session/               # JSONL session writer
 │   ├── stdout/                # Quiet-able stdout writer
 │   ├── suggestdiff/           # Suggestion diff rendering
 │   ├── telemetry/             # OpenTelemetry config + helpers
 │   ├── tool/                  # Tool registry + provider impls
-│   └── viewer/                # Embedded HTTP UI
-├── pages/                     # WebUI marketing page (separate React app)
-├── plugins/                   # Claude Code slash command
-├── extensions/                # Editor extensions (VS Code)
+│   └── viewer/                # Embedded HTTP UI for browsing review sessions
+├── pages/                     # Website landing page and docs (separate React app)
+├── plugins/                   # Coding agent integrations (Claude Code, Codex, OpenCode, …)
+├── extensions/                # VS Code and IntelliJ IDEA extensions, shared frontend
 ├── examples/                  # CI recipes (GitHub Actions, GitLab CI)
-├── skills/                    # Agent SDK skill manifest
-├── scripts/                   # NPM postinstall + cross-build scripts
+├── skills/                    # Review and delegation skill definitions
+├── scripts/                   # Install, publish, and repository check scripts
 ├── npm/                       # Per-platform optional dependency packages
 └── bin/                       # NPM wrapper (Node)
 ```
 
 Most contributions touch `internal/agent/`, `internal/tool/`, or
 `internal/llm/`. The CLI surface in `cmd/opencodereview/` is
-intentionally thin — flag parsing then dispatch to the agent package.
+intentionally thin — flag parsing and command dispatch.
 
 ## AI-Assisted Development
 
@@ -192,6 +208,10 @@ CI runs the same set on every push; nothing surprising.
 
 ## Adding new tools
 
+This section covers source-level changes to the built-in agent, not runtime
+configuration. Validate core tool changes with tests and benchmarks. For
+external business context, use [MCP servers](../mcp/) instead.
+
 A tool has two parts:
 
 1. **JSON definition** in
@@ -202,6 +222,19 @@ A tool has two parts:
 
 Both have to be present for a new tool name to work. See [Tools](../tools/)
 for the existing six and treat them as templates.
+
+Select the tool in each applicable template's `MAIN_TASK.tools` array. Review
+and scan own separate lists; keep their order stable because it affects the
+model request. To describe a tool during review planning without enabling
+calls, add it to `PLAN_TASK.tool_references` instead. Tool definitions must
+not contain task membership flags, and a definition's name must match its
+catalog entry name.
+
+These lists select definitions for model requests, not an execution sandbox.
+MCP discovery and review-specific completion/filter protocols remain owned by
+their existing task adapters. Other helper tasks do not consume these catalog
+bindings; unsupported `tools` or `tool_references` fields are rejected rather
+than silently ignored.
 
 ## Adding new rule patterns
 

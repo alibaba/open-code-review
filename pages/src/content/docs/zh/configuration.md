@@ -36,14 +36,16 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 ### 内置 provider
 
-下列 provider 随 OCR 发布，已预置 Base URL 与协议，选中后只需填 API key。
-若 `providers.<name>.api_key` 未设置，会自动回退到对应的环境变量。
+下列 provider 随 OCR 发布，并已预置 Base URL 与协议。多数 provider 需要 API key；
+若 `providers.<name>.api_key` 未设置，会自动回退到对应的环境变量。`chatgpt`
+改用 `ocr auth login` 创建的 ChatGPT 凭证。
 Copilot 和 Bedrock 使用各自的认证链，无需配置 API key。
 
 | 名称 | 协议 | Base URL | API key 环境变量 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
+| `chatgpt` | openai-responses | `https://api.openai.com/v1` | 不适用（Sign in with ChatGPT） |
 | `copilot` | copilot | 由 Copilot CLI 管理 | —（Copilot 登录态） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
@@ -68,11 +70,45 @@ Copilot 和 Bedrock 使用各自的认证链，无需配置 API key。
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
+内置 provider 的模型列表只为 `ocr config model` 提供选择建议，不限制 `--model`。
+如果指定的模型既不在内置列表中，也不在 `providers.<name>.models` 中，OCR 会向
+stderr 输出警告；发送请求时由 provider 验证模型。自定义 provider 仍遵循原有的
+`--model` 校验规则。
+
+`minimax` 和 `minimax-cn` 的新模型选择优先推荐 `MiniMax-M3.1-Flash`，其次为
+`MiniMax-M3`。OCR 仍接受已保存的模型及显式指定的旧版或自定义模型 ID。
+网关使用各自的模型 ID；MiniMax 直连模型 ID 并不代表网关已支持该模型。
+
+默认请求不设置 `thinking` 和 `reasoning_effort`，由
+[MiniMax API 默认值](https://platform.minimax.io/docs/api-reference/text-openai-api)决定。
+Flash 必须使用自适应思考，默认 effort 为 `max`。在 `extra_body` 中可显式设置
+`thinking: {"type":"adaptive"}`，并将 `reasoning_effort` 设为 `low`、`medium`、
+`high`、`xhigh` 或 `max`。M3 还支持 `thinking: {"type":"disabled"}`。
+已有 `extra_body` 配置会保留，因此切换到 Flash 前应移除禁用思考的设置。
+
+## ChatGPT 登录预览版
+
+此预览版新增通过公开 Responses API 使用的内置 `chatgpt` provider，没有 API key 环境变量。 请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)了解登录、同意和使用限制。
+
+使用 `ocr config set` 配置 provider 和可选请求字段。可从 `ocr llm models` 选择模型，也可显式设置模型 slug：
+
+```bash
+ocr auth login --provider chatgpt
+ocr config set provider chatgpt
+ocr config set providers.chatgpt.model <model-slug>
+ocr config set providers.chatgpt.extra_body '{"reasoning":{"effort":"low"}}'
+ocr llm test
+```
+
+即使账户模型目录没有列出，显式模型仍会传递。`extra_body` 仅接受 `reasoning`、`text` 和 `prompt_cache_key`；端点、协议和凭证覆盖会被拒绝。
+
 ### 覆盖内置 provider 的 Base URL
 
 每个内置 provider 都有一个预设 Base URL（见上表）。要将内置 provider
 指向不同的端点——例如自建的 LiteLLM 网关，其地址很少是预设默认值
 `http://localhost:4000/v1`——设置 `providers.<name>.url`：
+
+`chatgpt` 预览版例外：其公开端点固定，不接受 URL 覆盖。
 
 ```bash
 ocr config set provider                   litellm
@@ -95,15 +131,18 @@ ocr review --provider copilot --model auto
 
 OCR 从 `PATH` 查找 `copilot`，也可通过 `COPILOT_CLI_PATH` 指定路径。
 只有 OCR 的审查工具会提供给模型，工具仍由 OCR 执行。普通工具轮次沿用同一个
-SDK 会话；OCR 压缩历史或收窄最终轮次的工具时，会以 JSON 历史重建会话。
-工具轮次、超时、上下文和总 token 预算仍由 OCR 控制，但目前尚未验证 SDK 能严格
-执行单次输出 token 上限。SDK 未报告用量时，OCR 使用估算值。调用会消耗账号的
-Copilot 额度，建议先进行小范围审查。此 provider 仅接受模型和可选超时设置，
+SDK 会话；OCR 压缩历史或收窄最终轮次的工具时，会以 JSON 历史和已完成的读取记录
+重建会话。SDK 的自动压缩和大输出临时文件替换已关闭，完整工具结果与压缩流程均由
+OCR 管理。工具轮次、超时、上下文和总 token 预算仍由 OCR 控制。OCR 通过 SDK 的
+请求回调为 HTTP 和 WebSocket 推理设置任务的单次输出 token 上限；截断响应返回
+`length`，CLI 不能在同一次 OCR 请求内自行继续调用模型。取消操作会取消当前传输
+并释放会话。SDK 未报告的用量字段使用估算值；这些 token 数用于 OCR 预算，账号
+额度和费用仍按 Copilot 的规则计算。此 provider 仅接受模型和可选超时设置，
 不支持 URL、API key、自定义请求头、请求体或协议覆盖。
 
 ### AWS Bedrock
 
-`bedrock` 使用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
+`bedrock` 默认使用 `anthropic-bedrock` 协议，调用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
 用标准 AWS 凭证链做 SigV4 签名，主机由区域决定。没有 `api_key` 需要设置，也不
 接受用它替代签名：
 
@@ -113,6 +152,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+如果将 `providers.bedrock.protocol` 设为 `openai` 来连接 OpenAI 兼容网关，请在 `providers.bedrock.url` 中配置网关地址，并通过 `providers.bedrock.api_key` 或 `providers.bedrock.api_key_cmd` 提供网关的 API key。在 `ocr config provider` 中切换模型会保留已保存的 API key。
 
 | 字段 | 含义 |
 |---|---|
@@ -128,7 +169,7 @@ ocr config set providers.bedrock.aws_profile example-profile
 会被接受。运行 `aws bedrock list-inference-profiles --region <region>` 可以查看
 账号提供了哪些；注意新系列不接受 `-v1:0` 这类版本后缀。
 
-bedrock 没有配置的 URL——主机由区域决定——所以 `ocr llm test` 显示区域和 profile
+使用默认的 `anthropic-bedrock` 协议时，主机由区域决定，`ocr llm test` 显示区域和 profile
 而不是 URL：
 
 ```
@@ -144,6 +185,12 @@ URL 加一个 token，没有地方放区域或 profile，而 bedrock 这两个�
 会被明确拒绝，而不是接受后悄悄忽略。
 
 ### 自定义 provider
+
+支持 `mimo-v2.6-flash` 和 `foo.api_key` 这样的名称。为新的含点名称设置字段前，
+请先运行 `ocr config set provider <name>` 创建并选中它；这会更改当前 provider。
+已有的含点条目无需选中即可通过 `providers.<name>.<field>` 或
+`custom_providers.<name>.<field>` 编辑。名称不能以点开头或结尾、包含连续的点，
+也不能包含空白或仅由空白字符组成的分段。不含点的名称仍支持隐式创建。
 
 任何不在上表中的 provider 名都视为自定义，至少要提供 `url` 和 `protocol`
 （`protocol` 取 `anthropic`、`openai`、`openai-responses` 或
@@ -199,6 +246,15 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
 
 ### 超时
 
+任务超时和单次请求超时相互独立：
+
+- `ocr review --timeout` 和 `ocr scan --timeout` 以**分钟**为单位设置并发任务的
+  时间预算（默认 **15**；`0` 关闭任务期限）。预算包括任务中的所有 LLM 调用、
+  工具执行和重试等待。review 会按 effort 的评审轮数放大预算。
+- 单次 HTTP 请求超时以**秒**为单位（默认 **300**）。调大 `--timeout` 不会改变
+  请求超时，关闭任务期限也不会关闭请求超时。如果任务的剩余预算更短，则以
+  剩余任务预算为限。
+
 每个 LLM 请求都有 HTTP 超时，默认 **300 秒**。慢的本地模型（或大文件）可能
 需要更长的时间。三个配置项，作用域递增：
 
@@ -217,6 +273,21 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
   }
 }
 ```
+
+例如，`OCR_LLM_TIMEOUT=900 ocr review --timeout 30` 允许单次请求在任务预算内
+最多运行 15 分钟。如果没有设置该环境变量或 `timeout_sec`，即使使用
+`--timeout 30`，请求仍会在 5 分钟后超时。
+
+单次请求期限耗尽后会结束调用，不会自动重放请求，包括在读取响应体或流式响应时
+超时的情况。对于持续较慢的请求，应调大请求超时，而不是用相同的时限重试。
+现有 SDK 重试策略保持不变：可重试的连接和 HTTP 错误最多重试 5 次，采用退避
+等待并遵守服务端的 `Retry-After` 提示。SDK 的单次尝试期限也会约束重试等待。
+取消任务或任务期限耗尽时，请求和重试等待都会停止。
+
+诊断信息会区分 `LLM request timeout`（检查 `OCR_LLM_TIMEOUT` 或 provider 的
+`timeout_sec`）和 `caller deadline exceeded`，后者表示调用方操作的上下文期限已耗尽。
+如果耗尽的是 review/scan 任务期限，应检查 `--timeout`；后台内存压缩、`ocr llm test`
+等其他操作有各自独立的期限。
 
 ### 通过命令获取 API key
 

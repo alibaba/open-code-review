@@ -37,14 +37,17 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 ### Built-in providers
 
-The following providers ship with OCR. Most have a preset Base URL and
-protocol; their API key can come from the config or the listed environment
-variable. Copilot and Bedrock use their own authentication chains instead.
+The following providers ship with OCR, with the Base URL and protocol
+preset. Most require an API key. If `providers.<name>.api_key` is unset,
+OCR falls back to the corresponding environment variable. The `chatgpt`
+provider instead uses the ChatGPT credentials created by `ocr auth login`.
+Copilot and Bedrock use their own authentication chains instead.
 
 | Name | Protocol | Base URL | API key env var |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
+| `chatgpt` | openai-responses | `https://api.openai.com/v1` | not applicable (Sign in with ChatGPT) |
 | `copilot` | copilot | managed by Copilot CLI | — (Copilot authentication) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
@@ -69,12 +72,50 @@ variable. Copilot and Bedrock use their own authentication chains instead.
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
+Built-in providers' model lists are suggestions for `ocr config model`, not
+restrictions on `--model`. An override absent from both the built-in list and
+`providers.<name>.models` produces a warning on stderr; the provider validates
+the model when the request is sent. Custom providers retain their existing
+`--model` validation rules.
+
+For `minimax` and `minimax-cn`, new model selections suggest
+`MiniMax-M3.1-Flash` first, followed by `MiniMax-M3`. Existing saved models and
+explicit legacy or custom model IDs remain accepted by OCR. Gateway presets keep their
+own model IDs; a direct MiniMax model ID does not imply gateway availability.
+
+The default MiniMax request omits `thinking` and `reasoning_effort`, allowing
+[MiniMax's API defaults](https://platform.minimax.io/docs/api-reference/text-openai-api)
+to apply. Flash requires adaptive thinking and defaults to `max` effort; explicit
+`extra_body` settings can use `thinking: {"type":"adaptive"}` with
+`reasoning_effort` set to `low`, `medium`, `high`, `xhigh`, or `max`. M3 also
+supports `thinking: {"type":"disabled"}`. Saved `extra_body` settings are
+preserved, so remove any `thinking: {"type":"disabled"}` override when switching
+to Flash.
+
+## Sign in with ChatGPT preview
+
+This preview adds the `chatgpt` built-in provider for the public Responses API. It has no API-key environment variable. See the [ChatGPT preview guide](../chatgpt-preview/) for sign-in, consent and usage restrictions.
+
+Configure the provider and optional supported request fields with `ocr config set`. Choose a model from `ocr llm models` or set an explicit model slug:
+
+```bash
+ocr auth login --provider chatgpt
+ocr config set provider chatgpt
+ocr config set providers.chatgpt.model <model-slug>
+ocr config set providers.chatgpt.extra_body '{"reasoning":{"effort":"low"}}'
+ocr llm test
+```
+
+The provider accepts explicit model values even if the account-specific catalog omits them. It accepts `extra_body` fields `reasoning`, `text` and `prompt_cache_key`; it rejects endpoint, protocol and credential overrides.
+
 ### Overriding a built-in provider's Base URL
 
 Every built-in provider has a preset Base URL (shown in the table above).
 To point a built-in provider at a different endpoint — for example a
 self-hosted LiteLLM gateway that is rarely at the preset default
 `http://localhost:4000/v1` — set `providers.<name>.url`:
+
+The `chatgpt` preview is an exception: its public endpoint is fixed and URL overrides are rejected.
 
 ```bash
 ocr config set provider                   litellm
@@ -121,12 +162,15 @@ OCR returning each tool result to Copilot before the next model call. OCR still
 applies its tool-round, timeout, context, and aggregate token limits. When OCR
 compresses the transcript or narrows the tools for its final round, it starts
 a new session with OCR's recorded conversation. That fallback serializes the
-history as JSON rather than native SDK messages. The SDK does not provide a
-verified hard equivalent of OCR's per-request output-token cap on the
-signed-in Copilot path; OCR estimates usage when the SDK does not report it.
-Each model call consumes the account's Copilot allowance. Test with a small
-review before relying on this provider for large reviews or strict token
-budgets.
+history as JSON, together with OCR's record of completed tool reads. SDK automatic
+compaction and large-output file substitution are disabled so OCR supplies full
+tool results and owns compression. OCR forwards
+the task's per-request output-token limit through the SDK's request handler for
+HTTP and WebSocket inference. A truncated response returns `length`; the CLI
+cannot continue with another model response inside that OCR request. Cancellation
+also cancels the active transport and releases the session. SDK token usage is
+used when available; missing fields are estimated. These token counts track OCR
+budgets. Account allowance and charges remain governed by Copilot.
 
 The provider accepts a model and optional timeout only. OCR rejects
 `providers.copilot.url`, API keys, custom headers, request bodies, retry codes,
@@ -135,7 +179,7 @@ valid custom-provider or `llm.protocol` value.
 
 ### AWS Bedrock
 
-`bedrock` speaks the same Messages API as `anthropic`, but requests are
+With its default `anthropic-bedrock` protocol, `bedrock` uses the same Messages API as `anthropic`, but requests are
 SigV4-signed from the standard AWS credential chain instead of carrying an API
 key, and the region decides the host. There is no `api_key` to set, and none is
 accepted as a substitute for a signature:
@@ -146,6 +190,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+If you set `providers.bedrock.protocol` to `openai` for an OpenAI-compatible gateway, configure the gateway URL in `providers.bedrock.url` and supply its API key through `providers.bedrock.api_key` or `providers.bedrock.api_key_cmd`. Selecting another model in `ocr config provider` preserves the saved API key.
 
 | Field | Meaning |
 |---|---|
@@ -164,8 +210,8 @@ when absent from it. Run `aws bedrock list-inference-profiles --region <region>`
 to see what an account offers; a version suffix such as `-v1:0` is invalid for
 the newer families.
 
-`ocr llm test` reports the region and profile in place of a URL, because bedrock
-has no configured URL — the region decides the host:
+With the default `anthropic-bedrock` protocol, `ocr llm test` reports the region
+and profile in place of a URL. The region determines the host:
 
 ```
 Source: provider:bedrock
@@ -181,6 +227,14 @@ and bedrock uses neither value it does carry, so the combination is rejected
 rather than accepted and ignored.
 
 ### Custom providers
+
+Names such as `mimo-v2.6-flash` and `foo.api_key` are supported. Before
+setting fields on a new name containing dots, create and select it with
+`ocr config set provider <name>`; this changes the active provider. Existing
+dotted entries can be edited without selecting them, through either
+`providers.<name>.<field>` or `custom_providers.<name>.<field>`. Names must
+not start or end with a dot, contain consecutive dots, or have empty or
+whitespace-only segments. Dot-free names still support implicit creation.
 
 Any provider name not in the table above is treated as custom and must
 supply at least `url` and `protocol` (`protocol` is `anthropic`,
@@ -239,6 +293,16 @@ in the FAQ before picking one.
 
 ### Timeouts
 
+Task and request timeouts are independent:
+
+- `ocr review --timeout` and `ocr scan --timeout` set the concurrent-task
+  budget in **minutes** (default **15**; `0` disables the task deadline).
+  This budget includes all LLM calls, tool work, and retry waits for the task.
+  Review scales it by the number of effort rounds.
+- The per-request HTTP timeout is in **seconds** (default **300**).
+  Raising `--timeout` does not change it; disabling the task deadline does
+  not disable request timeouts. A shorter remaining task budget always wins.
+
 Each LLM request has an HTTP timeout, defaulting to **300 seconds**.
 Slow local models (or large files) can need more. Three knobs, in
 increasing scope:
@@ -258,6 +322,25 @@ Both `timeout_sec` keys can be set with `ocr config set`:
   }
 }
 ```
+
+For example, `OCR_LLM_TIMEOUT=900 ocr review --timeout 30` allows an
+individual request up to 15 minutes within the task budget. Without the
+environment variable or a configured `timeout_sec`, requests still time
+out after 5 minutes even with `--timeout 30`.
+
+An expired per-request deadline ends the call without automatically replaying
+it, including when reading a response body or stream. For consistently slow
+requests, increase the request timeout rather than retrying with the same
+limit. The existing SDK retry policy is unchanged: retryable connection and
+HTTP failures use up to 5 retries with backoff and provider `Retry-After`
+hints. The SDK's per-attempt deadline also bounds its retry wait. Cancellation
+or an exhausted task deadline stops both requests and retry waits.
+
+Diagnostics distinguish `LLM request timeout` (check `OCR_LLM_TIMEOUT` or
+provider `timeout_sec`) from `caller deadline exceeded`, which means the
+calling operation's context has expired. For a review/scan task deadline,
+check `--timeout`; other operations, such as background memory compression
+and `ocr llm test`, have their own deadlines.
 
 ### API key from a command
 

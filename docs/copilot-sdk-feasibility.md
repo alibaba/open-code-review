@@ -2,10 +2,68 @@
 
 This note records the architecture check and experimental implementation for
 [discussion #1271](https://github.com/alibaba/open-code-review/discussions/1271).
-It records one completed, signed-in Copilot-backed review of a one-line fixture;
-that result does not establish reliability for larger reviews.
+The current verification is recorded below, followed by the original September
+experiments and their diagnosis.
 
-## Checked state
+## Verified integration (2026-11-13)
+
+The integration uses Go SDK `v1.0.14`; the current Windows verification used
+Copilot CLI `1.0.108` and Go `1.26.10`. The branch is synchronized with main
+through `0e9060da`. Authentication remains in the official SDK/CLI chain.
+
+| Check | Executed result |
+| --- | --- |
+| Six-file CLI review | All six selected files completed, with six correct findings and no failed or waived items. The fixed fixture covers addition, empty-slice handling, copying, authorization, discounts, and FIFO order. It completed in 2m25s using 27,095 OCR-reported tokens. |
+| Native/replay/compression/grace comparison | All four signed-in cases completed and returned findings for the same six files. The compression case invokes OCR's actual `runCompression`; the grace case exposes only `task_done` after the read. See `internal/llmloop/copilot_live_test.go`. |
+| Merged connectivity probe | Signed-in `ocr llm test` verified its tool-call round trip. Both requests now use one session ID, with cleanup on exit. |
+| Output-token cap | A signed-in request limited to 128 output tokens reported 128 and returned `length`. HTTP and WebSocket tests verify the protocol fields, preservation of smaller upstream limits, and unchanged WebSocket control frames. A successful inference cannot start another model response inside the same OCR request. |
+| Large tool results | A 62.5 KB native tool result was replaced by a 500-character preview and an SDK temporary-file reference before the repair. The same test now preserves the final `OCR_RESULT_END_MARKER` on the second model request. SDK large-output substitution and automatic compaction are disabled; OCR owns the complete results and its compression policy. |
+| Tool execution and cancellation | Local CLI tests cover the custom-tool allowlist, a built-in name collision, restricted final tools, parallel calls, context cancellation, and `CloseSession`. Signed-in cancellation interrupts an active continuation and releases its session. |
+| Service errors | A local HTTP 403 passed through the real SDK/CLI and returned its authentication error, with no successful response or retained session. The SDK sanitizes the response body; OCR preserves its error message. |
+| Project checks | `make check`, `make test` with race detection and the local CLI integration tests, generated-provider verification, and `make coverage` passed. Windows coverage was 90.6%. Frontend type checking and all 47 provider tests passed. |
+| Platform builds | `make build-all` passed for Linux, macOS, and Windows on amd64 and arm64. |
+
+The first complete-patch OCR attempt used a 300,000-token budget and a
+five-minute task timeout. It completed the two CLI files and stopped the other
+nine files at the budget boundary, reporting 348,487 tokens including its grace
+round. Its trace also showed regex alternations sent as literal searches.
+The Copilot declaration for `code_search` asks the model to choose
+`use_perl_regexp` explicitly, retaining both literal and regex matching while
+preserving the shared tool schema and other providers. A local control for the observed query found
+zero literal matches and three regex matches.
+
+The follow-up excluded the two completed CLI files, included the search-schema
+change, and used a 500,000-token budget and a ten-minute task timeout. All ten
+selected items completed in eight minutes with no findings or failed items;
+the restricted grace round completed the task after the aggregate budget
+triggered. Reported usage was 540,865 tokens. Together, these runs account for
+the eleven production files in this patch and the intermediate shared-schema
+change. The explicit search-mode declaration is localized to the Copilot adapter
+in the final patch; the existing review/scan behavior fixtures remain unchanged.
+The final SDK settings disabling compaction and file substitution and the
+schema localization were reviewed with the pinned SDK, large-result regression,
+schema immutability test, and existing behavior fixtures separately.
+
+The SDK request handler sets `max_output_tokens` for Responses requests,
+`max_tokens` for Anthropic Messages, and `max_completion_tokens` for Chat
+Completions. Truncated tool arguments are discarded, while available text and
+usage are returned with `length`. HTTP request cancellation follows the OCR
+request context. Native history snapshots include the returned assistant turn;
+changed history or additional instructions cause replay instead of being ignored.
+When OCR compresses its frozen prompt, the replacement session also receives
+the names of tool reads already executed, preserving progress omitted by a summary.
+
+SDK usage fields are authoritative when supplied. Missing fields use OCR's
+token estimates; these counts govern OCR's between-request budget checks and
+final grace round. Copilot account allowances and charges follow Copilot's
+accounting. The optional signed-in tests are enabled with
+`OCR_COPILOT_LIVE_TEST=1`; local mock tests use `OCR_COPILOT_CLI_TEST_PATH` and
+consume no signed-in model allowance. Host-agent token usage is unavailable.
+
+<details>
+<summary>September 2026 feasibility investigation</summary>
+
+## Initial checked state (September 2026)
 
 - OCR base: `bccbc15f785269400735d5255540c231e6c02b6d` (`origin/main` at the
   start of this check). The isolated worktree had no pre-existing patch.
@@ -66,7 +124,7 @@ name-collision test verifies that an OCR tool can replace a CLI built-in tool
 without the CLI executing the built-in. These checks do not validate review
 quality or the real Copilot service.
 
-## Current decision
+## Initial decision (September 2026)
 
 Do not expose a `copilot` model provider by wrapping `session.SendAndWait`.
 It would report the final output of Copilot's agent loop where OCR expects one
@@ -163,3 +221,5 @@ This diagnosis used the existing session JSONL and local repository code only.
 It made zero additional authenticated Copilot requests. The first two review
 attempts had 0 tool calls; later attempts had 5, 11, and 87, respectively.
 Host-agent token usage is unavailable.
+
+</details>

@@ -24,12 +24,12 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
-	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -43,12 +43,12 @@ import (
 // existing callers (cmd/opencodereview/output.go).
 type AgentWarning = llmloop.AgentWarning
 
-// CommentWorkerPool is re-exported from llmloop for backwards compatibility.
-type CommentWorkerPool = llmloop.CommentWorkerPool
+// CommentWorkerPool is re-exported from reviewtask for backwards compatibility.
+type CommentWorkerPool = reviewtask.CommentWorkerPool
 
-// NewCommentWorkerPool delegates to llmloop.NewCommentWorkerPool.
+// NewCommentWorkerPool delegates to reviewtask.NewCommentWorkerPool.
 func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
-	return llmloop.NewCommentWorkerPool(workerCount)
+	return reviewtask.NewCommentWorkerPool(workerCount)
 }
 
 // Args holds all dependencies and configuration needed to run a review session.
@@ -84,11 +84,8 @@ type Args struct {
 	// Tool registry mapping tool aliases to implementations.
 	Tools *tool.Registry
 
-	// PlanToolDefs holds llm.ToolDef entries enabled in plan_task, built once at startup.
-	// When nil, plan phase sends no tool definitions.
 	PlanToolDefs []llm.ToolDef
 
-	// MainToolDefs holds llm.ToolDef entries enabled in main_task, built once at startup.
 	MainToolDefs []llm.ToolDef
 
 	// CommentWorkerPool — separate goroutine pool for running asynchronous
@@ -142,11 +139,8 @@ type Args struct {
 	Resume *session.ResumeState
 
 	// SealedInput pins this run to commit endpoints a pre-flight resolve already
-	// froze, instead of resolving From/To/Commit again. Set only on the resume
-	// path, where admission compared an identity derived from those endpoints:
-	// re-resolving a raw ref here could read a commit the admitted identity never
-	// covered, and the mismatch would surface only after the child session and
-	// manifest existed. Nil means resolve normally, which is every non-resume run.
+	// froze, instead of resolving From/To/Commit again. Admission and code tools
+	// must use the same immutable endpoints as the diff.
 	SealedInput *diff.InputResolution
 
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
@@ -190,7 +184,7 @@ type Agent struct {
 	currentDate     string
 	session         *session.SessionHistory
 	subtaskFailed   int64 // count of failed subtasks, accessed atomically
-	runner          *llmloop.Runner
+	runner          *reviewtask.Runner
 	resumeInfo      *ResumeInfo
 	budgetExceeded  atomic.Bool // set when a token/tool-call budget gate stopped dispatch
 
@@ -239,7 +233,7 @@ func New(args Args) *Agent {
 	// DiffLookup closure captures a so the runner can resolve per-file
 	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
 	// after New returns).
-	a.runner = llmloop.NewRunner(llmloop.Deps{
+	a.runner = reviewtask.NewRunner(reviewtask.Deps{
 		LLMClient:         args.LLMClient,
 		Model:             args.Model,
 		Template:          args.Template,
@@ -287,9 +281,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// so affinity keys stay per-conversation, the granularity provider prompt caches actually reuse prefixes at.
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
-	// Step 1: Parse diffs
-	ctx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
-	if err := a.loadDiffs(ctx); err != nil {
+	// Keep later review work under the incoming parent, not the short-lived parse span.
+	parseCtx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
+	if err := a.loadDiffs(parseCtx); err != nil {
 		diffSpan.End()
 		// The builder already exists (agent.New created session + manifest), but
 		// no item was selected yet. Record the run-level input failure at this
@@ -330,6 +324,11 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) changed, reviewing %d in %s\n", totalChanged, reviewCount, a.args.RepoDir)
 
 	a.logExclusions(decisions)
+	// Register before the early return so skipped runs also explain exclusions.
+	// A missing exclusion record must not fail the selected review.
+	if err := a.registerExclusions(decisions); err != nil {
+		a.recordWarning("manifest_error", "", err.Error())
+	}
 	a.diffs = kept
 
 	// One run-level skip signal, keyed on the selected set rather than on what
@@ -615,9 +614,7 @@ func (a *Agent) injectDiffMap() {
 	m := make(map[string]string, len(a.diffs))
 	for i := range a.diffs {
 		d := &a.diffs[i]
-		if d.NewPath != "/dev/null" {
-			m[d.NewPath] = d.Diff
-		}
+		m[effectivePath(*d)] = d.Diff
 	}
 	dm := tool.NewDiffMap(m)
 	if p, ok := a.args.Tools.Get(tool.FileReadDiff.Name()); ok {
@@ -962,6 +959,7 @@ func (a *Agent) initManifest() {
 		Provider:              a.args.Provider,
 		Model:                 a.args.Model,
 		ConfiguredConcurrency: a.args.MaxConcurrency,
+		MaxToolRequestTimes:   a.args.Template.MaxToolRequestTimes,
 		RuleConfigSHA256:      a.ruleConfigSHA256(),
 		RuntimeConfigSHA256:   a.runtimeConfigSHA256(),
 	})
@@ -1193,12 +1191,14 @@ var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 // safe, generic reason. It never returns the raw error text (which may embed a
 // provider payload, credentials or absolute paths); the full error is persisted
 // separately in the session checkpoint. Context deadline/cancel are recognized
-// via errors.Is (the per-group subtask timeout is the only deadline in play), and the
+// via errors.Is, and the
 // empty-template precondition is a configuration failure.
 func classifyItemError(err error) (session.FailureClass, string) {
 	switch {
+	case errors.Is(err, llm.ErrRequestTimeout):
+		return session.FailureTimeout, "LLM request timed out; configure OCR_LLM_TIMEOUT or provider timeout_sec"
 	case errors.Is(err, context.DeadlineExceeded):
-		return session.FailureTimeout, "file review exceeded its time limit"
+		return session.FailureTimeout, "file review exhausted its task deadline (--timeout)"
 	case errors.Is(err, context.Canceled):
 		return session.FailureCancelled, "file review was cancelled"
 	case errors.Is(err, errMainTaskEmpty):
@@ -1262,6 +1262,33 @@ func (a *Agent) registerCoverage(diffs []model.Diff) error {
 		}
 	}
 	return b.SealSelected()
+}
+
+// registerExclusions records selection exclusions, including deletions.
+func (a *Agent) registerExclusions(decisions []fileDecision) error {
+	b := a.session.Manifest()
+	if b == nil {
+		return nil
+	}
+	var errs []error
+	for _, dec := range decisions {
+		if dec.selected() {
+			continue
+		}
+		oldPath, newPath := manifestPaths(dec.Diff)
+		item := session.ExcludedItem{
+			ItemID:        a.manifestItemID(dec.Diff),
+			Path:          effectivePath(dec.Diff),
+			ExcludeReason: dec.Reason,
+		}
+		if oldPath != "" && newPath != "" && oldPath != newPath {
+			item.OldPath = oldPath
+		}
+		if err := b.RegisterExcluded(item); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // finalizeManifest freezes the run's coverage builder and stores the immutable
@@ -1641,7 +1668,7 @@ func formatDiffEntry(d model.Diff) string {
 	case d.IsRenamed:
 		status = "RENAMED"
 	}
-	return fmt.Sprintf("%s   %s (+%d/-%d)", status, d.NewPath, d.Insertions, d.Deletions)
+	return fmt.Sprintf("%s   %s (+%d/-%d)", status, effectivePath(d), d.Insertions, d.Deletions)
 }
 
 // buildChangeFilesExceptGroup returns a formatted list of changed files excluding all group members.
@@ -2184,27 +2211,4 @@ func (a *Agent) findDiff(path string) *model.Diff {
 		}
 	}
 	return nil
-}
-
-// BuildToolDefs converts toolsconfig.ToolConfigEntry slice into []llm.ToolDef,
-// filtering by phase (planOnly=true for plan_task, false for main_task).
-func BuildToolDefs(entries []toolsconfig.ToolConfigEntry, planOnly bool) []llm.ToolDef {
-	var defs []llm.ToolDef
-	for _, e := range entries {
-		defRaw, ok := e.ToolDefsByPhase(planOnly)
-		if !ok {
-			continue
-		}
-		var fn llm.FunctionDef
-		if err := json.Unmarshal(defRaw, &fn); err != nil {
-			fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: failed to parse tool definition %q: %v\n", e.Name, err)
-			continue
-		}
-		fn.RawDefinition = defRaw
-		defs = append(defs, llm.ToolDef{
-			Type:     "function",
-			Function: fn,
-		})
-	}
-	return defs
 }

@@ -6,6 +6,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -67,6 +68,42 @@ func TestCopilotConversationWaitForIdleWithoutTools(t *testing.T) {
 	message, _, pending, err := conversation.wait(ctx)
 	if err != nil || message == nil || message.Content != "Review complete." || len(pending) != 0 {
 		t.Fatalf("plain response = (%#v, %#v, %v)", message, pending, err)
+	}
+}
+
+func TestCopilotTruncatedResponse(t *testing.T) {
+	for _, haveMessage := range []bool{false, true} {
+		t.Run(fmt.Sprint(haveMessage), func(t *testing.T) {
+			conversation := &copilotConversation{events: make(chan copilot.SessionEvent, 2)}
+			conversation.partial.WriteString("Partial answer")
+			if haveMessage {
+				conversation.events <- copilot.SessionEvent{Data: &copilot.AssistantMessageData{Content: "Partial answer", ToolRequests: []copilot.AssistantMessageToolRequest{{ToolCallID: "incomplete", Name: "file_read"}}}}
+			}
+			finish, output := "length", int64(128)
+			conversation.events <- copilot.SessionEvent{Data: &copilot.AssistantUsageData{FinishReason: &finish, OutputTokens: &output}}
+			message, usage, pending, err := conversation.wait(t.Context())
+			if err != nil || message.Content != "Partial answer" || len(message.ToolRequests) != 0 || len(pending) != 0 {
+				t.Fatalf("truncated message=%#v, pending=%v, error=%v", message, pending, err)
+			}
+			response, err := copilotResponse(message, usage, "system", "prompt", nil, nil, "auto")
+			if err != nil || response.Choices[0].FinishReason != "length" || response.Usage.CompletionTokens != 128 {
+				t.Fatalf("truncated response=%#v, error=%v", response, err)
+			}
+		})
+	}
+}
+
+func TestCopilotCompressedResumeNote(t *testing.T) {
+	conversation := &copilotConversation{history: copilotHistorySnapshot([]Message{NewTextMessage("system", "Review"), NewTextMessage("user", "Inspect patch"), NewToolCallMessage("", []ToolCall{{ID: "read-1", Function: FunctionCall{Name: "file_read"}}}, NativeTurn{}, "")}), pending: map[string]string{"read-1": "request-1"}}
+	messages := []Message{NewTextMessage("system", "Review"), NewTextMessage("user", "Inspect patch\nMemory: the patch contains a reversed condition.")}
+	if note := conversation.compressedResumeNote(ChatRequest{Messages: messages}); !strings.Contains(note, "file_read") {
+		t.Fatalf("completed tool missing: %q", note)
+	}
+	for _, prompt := range []string{"Inspect patch", "Review another patch"} {
+		messages[1] = NewTextMessage("user", prompt)
+		if note := conversation.compressedResumeNote(ChatRequest{Messages: messages}); note != "" {
+			t.Fatalf("fresh prompt inherited execution state: %q", note)
+		}
 	}
 }
 
@@ -147,7 +184,7 @@ func TestCopilotConversationContinuationRequiresAllToolResults(t *testing.T) {
 	newConversation := func() *copilotConversation {
 		return &copilotConversation{
 			session: &copilot.Session{}, model: "auto", system: "Review the patch.", toolsKey: "tools", maxTokens: 128,
-			history: copilotHistorySnapshot(start), pending: map[string]string{"read-1": "request-1", "read-2": "request-2"},
+			history: copilotHistorySnapshot(continued[:len(start)+1]), pending: map[string]string{"read-1": "request-1", "read-2": "request-2"},
 		}
 	}
 	req := ChatRequest{Messages: continued, MaxTokens: 128}
@@ -160,6 +197,16 @@ func TestCopilotConversationContinuationRequiresAllToolResults(t *testing.T) {
 		change func(*copilotConversation, *ChatRequest)
 	}{
 		{name: "missing result", change: func(_ *copilotConversation, req *ChatRequest) { req.Messages = continued[:len(continued)-1] }},
+		{name: "new instruction", change: func(_ *copilotConversation, req *ChatRequest) {
+			req.Messages = append(append([]Message(nil), continued...), NewTextMessage("user", "Check another condition."))
+		}},
+		{name: "duplicate result", change: func(_ *copilotConversation, req *ChatRequest) {
+			req.Messages = append(append([]Message(nil), continued...), NewToolResultMessage("read-1", "changed"))
+		}},
+		{name: "changed assistant", change: func(_ *copilotConversation, req *ChatRequest) {
+			req.Messages = append([]Message(nil), continued...)
+			req.Messages[len(start)].Content = "Revised assistant turn."
+		}},
 		{name: "unknown result", change: func(_ *copilotConversation, req *ChatRequest) {
 			req.Messages = append(append([]Message(nil), continued...), NewToolResultMessage("unknown", "unexpected"))
 		}},
@@ -355,6 +402,7 @@ func TestCopilotHistorySnapshotDetectsMutation(t *testing.T) {
 func TestCopilotHistoryIgnoresUnusedProviderState(t *testing.T) {
 	prefix := []Message{NewTextMessage("user", "Inspect file.go"),
 		NewToolCallMessage("", []ToolCall{{ID: "prior-1", Function: FunctionCall{Name: "file_read"}}}, NativeTurn{}, ""),
+		NewToolCallMessage("", []ToolCall{{ID: "read-1", Function: FunctionCall{Name: "file_read"}}}, NativeTurn{}, ""),
 	}
 	conversation := &copilotConversation{
 		session: &copilot.Session{}, model: "auto", system: "system", toolsKey: "tools",
@@ -363,8 +411,7 @@ func TestCopilotHistoryIgnoresUnusedProviderState(t *testing.T) {
 	prefix[0].Native = NativeTurn{Family: "other-provider", Payload: make(chan struct{})}
 	prefix[0].ReasoningContent = "Display-only state."
 	prefix[1].ToolCalls[0].ExtraContent = []byte(`{"signature":"unused"}`)
-	messages := append(prefix, NewToolCallMessage("", []ToolCall{{ID: "read-1", Function: FunctionCall{Name: "file_read"}}}, NativeTurn{}, ""),
-		NewToolResultMessage("read-1", "file contents"))
+	messages := append(prefix, NewToolResultMessage("read-1", "file contents"))
 	results, ok := conversation.continuation(ChatRequest{Messages: messages}, "auto", "system", "tools")
 	if !ok || results["read-1"] != "file contents" {
 		t.Fatalf("unused provider state interrupted continuation: (%#v, %t)", results, ok)

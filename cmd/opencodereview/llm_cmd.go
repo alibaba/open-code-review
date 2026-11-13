@@ -12,6 +12,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/testconnection"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -85,10 +86,17 @@ func runLLMTestWithConfigPath(configPath string) error {
 	if task.Timeout > 0 {
 		timeout = time.Duration(task.Timeout) * time.Second
 	}
+	if ep.ChatGPTPlan {
+		timeout = llmTestTimeout(task.Timeout, ep.Timeout)
+	}
 
 	// No retry collector: llm test is a connectivity probe, not a review, and the
 	// retry report only describes ocr review.
 	llmClient := llm.NewLLMClient(ep, nil, nil)
+	sessionID := uuid.NewString()
+	if closer, ok := llmClient.(interface{ CloseSession(string) }); ok {
+		defer closer.CloseSession(sessionID)
+	}
 
 	messages := make([]llm.Message, 0, len(task.Messages))
 	for _, m := range task.Messages {
@@ -109,6 +117,7 @@ func runLLMTestWithConfigPath(configPath string) error {
 			Messages:  msgs,
 			Tools:     tools,
 			MaxTokens: 2048,
+			SessionID: sessionID,
 		})
 	}
 
@@ -165,6 +174,17 @@ func runLLMTestWithConfigPath(configPath string) error {
 		fmt.Println(note)
 	}
 	return nil
+}
+
+func llmTestTimeout(taskSeconds int, endpointTimeout time.Duration) time.Duration {
+	timeout := 30 * time.Second
+	if taskTimeout := time.Duration(taskSeconds) * time.Second; taskTimeout > timeout {
+		timeout = taskTimeout
+	}
+	if endpointTimeout > timeout {
+		timeout = endpointTimeout
+	}
+	return timeout
 }
 
 // testToolDefs offers the configured self-test tool, or none when the task

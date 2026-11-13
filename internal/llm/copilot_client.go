@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -159,10 +160,39 @@ func copilotTools(defs []ToolDef, choice string) ([]copilot.Tool, []string, erro
 			return nil, nil, fmt.Errorf("invalid or duplicate Copilot tool name %q", name)
 		}
 		seen[name] = true
+		parameters := def.Function.Parameters
+		description := def.Function.Description
+		if name == "code_search" {
+			properties, _ := parameters["properties"].(map[string]any)
+			mode, _ := properties["use_perl_regexp"].(map[string]any)
+			if mode["type"] == "boolean" {
+				encoded, err := json.Marshal(parameters)
+				if err != nil {
+					return nil, nil, fmt.Errorf("encode Copilot search schema: %w", err)
+				}
+				decoder := json.NewDecoder(bytes.NewReader(encoded))
+				decoder.UseNumber()
+				var copied map[string]any
+				if err := decoder.Decode(&copied); err != nil {
+					return nil, nil, fmt.Errorf("copy Copilot search schema: %w", err)
+				}
+				parameters = copied
+				required, ok := parameters["required"].([]any)
+				if !ok && parameters["required"] != nil {
+					return nil, nil, errors.New("Copilot search schema requires an array of required fields")
+				}
+				if !slices.Contains(required, any("use_perl_regexp")) {
+					parameters["required"] = append(required, "use_perl_regexp")
+				}
+				properties = parameters["properties"].(map[string]any)
+				properties["use_perl_regexp"].(map[string]any)["description"] = "Choose true for Perl-compatible regular expressions, including alternation with |. Choose false for literal text, including literal regex symbols."
+				description = strings.Replace(description, "Can use either exact string matching or regular expressions.", "Set use_perl_regexp explicitly: true for regex patterns such as 'name1|name2', false for literal text.", 1)
+			}
+		}
 		tools = append(tools, copilot.Tool{
 			Name:                 name,
-			Description:          def.Function.Description,
-			Parameters:           def.Function.Parameters,
+			Description:          description,
+			Parameters:           parameters,
 			SkipPermission:       true,
 			OverridesBuiltInTool: true,
 			IsTerminal:           false,
@@ -225,6 +255,11 @@ func copilotResponse(message *copilot.AssistantMessageData, sdkUsages []*copilot
 	finishReason := "stop"
 	if len(toolCalls) > 0 {
 		finishReason = "tool_calls"
+	}
+	for _, event := range sdkUsages {
+		if event.FinishReason != nil && *event.FinishReason == "length" {
+			finishReason = "length"
+		}
 	}
 	return &ChatResponse{Model: model, Choices: []Choice{{Message: ResponseMessage{Role: "assistant", Content: &content, ToolCalls: toolCalls}, FinishReason: finishReason}}, Usage: usage}, nil
 }

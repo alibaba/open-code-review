@@ -22,7 +22,7 @@
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
-  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://img.shields.io/badge/Ask-DeepWiki-blue?style=flat-square" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
@@ -123,6 +123,9 @@ For other installation methods (install script, GitHub Release binary, from sour
 **1. Configure LLM**
 
 You must configure an LLM before reviewing code, unless you use [Delegation Mode](https://open-codereview.ai/docs/delegate).
+
+- **OCR calls the model:** `ocr review`, the `/open-code-review:review` command, and the `open-code-review` skill use OCR's own provider configuration, not your Claude Code Team/Pro subscription login. Authentication requirements depend on the provider; see [Configuration](https://open-codereview.ai/docs/configuration).
+- **The host agent calls the model:** the `/open-code-review:delegate-review` command and the `open-code-review-delegate` skill use the host agent's configured model and authentication. No separate LLM configuration or credentials are needed in OCR. See the [Claude Code install steps](plugins/open-code-review/README.md#claude-code).
 
 ```bash
 ocr config provider          # Select a built-in provider or add a custom one

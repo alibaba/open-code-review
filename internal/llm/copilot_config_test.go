@@ -17,7 +17,7 @@ func TestCopilotPresetResolution(t *testing.T) {
 			"copilot": {Model: "gpt-4.1"},
 		},
 	}
-	ep, ok, err := tryProviderConfig(cfg, "account-specific-model")
+	ep, ok, err := tryProviderConfig(cfg, "account-specific-model", t.Context())
 	if err != nil || !ok {
 		t.Fatalf("resolve Copilot preset = (%#v, %t, %v)", ep, ok, err)
 	}
@@ -65,7 +65,7 @@ func TestCopilotPresetRejectsUnusedEndpointFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := tryProviderConfig(configFile{Provider: "copilot", Providers: map[string]providerEntryConfig{"copilot": tc.entry}}, "")
+			_, _, err := tryProviderConfig(configFile{Provider: "copilot", Providers: map[string]providerEntryConfig{"copilot": tc.entry}}, "", t.Context())
 			if err == nil {
 				t.Fatal("unused endpoint field was accepted")
 			}
@@ -76,7 +76,7 @@ func TestCopilotPresetRejectsUnusedEndpointFields(t *testing.T) {
 func TestCopilotProtocolIsPresetOnly(t *testing.T) {
 	_, _, err := tryProviderConfig(configFile{Provider: "other", CustomProviders: map[string]providerEntryConfig{
 		"other": {Protocol: ProtocolCopilot, Model: "gpt-4.1"},
-	}}, "")
+	}}, "", t.Context())
 	if err == nil || !strings.Contains(err.Error(), "copilot") {
 		t.Fatalf("custom Copilot protocol error = %v", err)
 	}

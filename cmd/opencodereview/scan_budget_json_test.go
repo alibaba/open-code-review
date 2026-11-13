@@ -74,7 +74,8 @@ func TestScanBudgetJSON(t *testing.T) {
 			}
 
 			ag := scan.NewAgent(scan.Args{
-				RepoDir: repoDir,
+				MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
+				RepoDir:      repoDir,
 				Template: template.ScanTemplate{
 					MaxTokens:           100000,
 					MaxToolRequestTimes: 5,

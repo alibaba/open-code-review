@@ -22,7 +22,7 @@
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
-  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://img.shields.io/badge/Ask-DeepWiki-blue?style=flat-square" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
@@ -123,6 +123,9 @@ npm install -g @alibaba-group/open-code-review
 **1. 配置 LLM**
 
 在审查代码之前，必须先配置 LLM。除非你使用[委托模式](https://open-codereview.ai/docs/delegate)。
+
+- **由 OCR 调用模型：** `ocr review`、`/open-code-review:review` 命令和 `open-code-review` skill 使用 OCR 自身的供应商配置，而非你的 Claude Code Team/Pro 订阅登录。认证要求取决于供应商；参见[配置说明](https://open-codereview.ai/docs/configuration)。
+- **由宿主 agent 调用模型：** `/open-code-review:delegate-review` 命令和 `open-code-review-delegate` skill 使用宿主 agent 配置的模型和认证方式，无需在 OCR 中单独配置 LLM 或凭证。参见 [Claude Code 安装步骤](../../plugins/open-code-review/README.md#claude-code)。
 
 ```bash
 ocr config provider          # 选择内置供应商或添加自定义供应商

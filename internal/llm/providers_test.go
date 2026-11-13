@@ -10,7 +10,7 @@ import (
 )
 
 func TestLookupProvider_KnownProviders(t *testing.T) {
-	names := []string{"anthropic", "openai", "openrouter", "dashscope", "edenai"}
+	names := []string{"anthropic", "openai", "openrouter", "dashscope", "edenai", "chatgpt"}
 	for _, name := range names {
 		p, ok := LookupProvider(name)
 		if !ok {
@@ -26,7 +26,7 @@ func TestLookupProvider_KnownProviders(t *testing.T) {
 		if p.BaseURL == "" {
 			t.Errorf("LookupProvider(%q).BaseURL is empty", name)
 		}
-		if len(p.Models) == 0 {
+		if len(p.Models) == 0 && name != "chatgpt" {
 			t.Errorf("LookupProvider(%q).Models is empty", name)
 		}
 	}
@@ -42,6 +42,19 @@ func TestLookupProvider_CopilotDetails(t *testing.T) {
 	}
 	if len(p.Models) != 1 || p.Models[0] != "auto" {
 		t.Errorf("Copilot models = %v, want [auto]", p.Models)
+	}
+}
+
+func TestLookupProvider_ChatGPTDetails(t *testing.T) {
+	if _, ok := LookupProvider("codex"); ok {
+		t.Fatal("undocumented Codex preset must not ship")
+	}
+	p, ok := LookupProvider("chatgpt")
+	if !ok {
+		t.Fatal("chatgpt preset not found")
+	}
+	if p.Protocol != ProtocolOpenAIResponses || p.BaseURL != "https://api.openai.com/v1" || p.EnvVar != "" || !p.ExternalAuth || !p.RequiresStreaming || !p.RejectsSamplingParams || len(p.Models) != 0 {
+		t.Fatalf("unexpected chatgpt preset: %+v", p)
 	}
 }
 
@@ -67,6 +80,9 @@ func TestLookupProvider_MiniMaxDetails(t *testing.T) {
 			if !ok {
 				t.Fatalf("LookupProvider(%q) returned false, want true", tt.name)
 			}
+			if len(provider.Models) != 2 || provider.Models[0] != "MiniMax-M3.1-Flash" || provider.Models[1] != "MiniMax-M3" {
+				t.Errorf("LookupProvider(%q).Models = %v, want [MiniMax-M3.1-Flash MiniMax-M3]", tt.name, provider.Models)
+			}
 			if provider.BaseURL != tt.wantURL {
 				t.Errorf("LookupProvider(%q).BaseURL = %q, want %q", tt.name, provider.BaseURL, tt.wantURL)
 			}
@@ -74,6 +90,25 @@ func TestLookupProvider_MiniMaxDetails(t *testing.T) {
 				t.Errorf("LookupProvider(%q).EnvVar = %q, want %q", tt.name, provider.EnvVar, tt.wantEnvVar)
 			}
 		})
+	}
+}
+
+func TestMiniMaxSuggestedModels(t *testing.T) {
+	for _, provider := range ListProviders() {
+		for _, model := range provider.Models {
+			if !strings.HasPrefix(strings.ToLower(model), "minimax-") {
+				continue
+			}
+			if model != "MiniMax-M3.1-Flash" && model != "MiniMax-M3" && model != "minimax-m3" {
+				t.Errorf("provider %q suggests legacy MiniMax model %q", provider.Name, model)
+			}
+		}
+	}
+	for _, name := range []string{"tencent-tokenhub", "ollama-cloud"} {
+		provider, _ := LookupProvider(name)
+		if !ModelListContains(provider.Models, "minimax-m3") {
+			t.Errorf("provider %q lost its existing M3 route", name)
+		}
 	}
 }
 
@@ -89,7 +124,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "copilot", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "chatgpt", "copilot", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -303,8 +338,7 @@ func TestLookupProvider_OllamaCloudDetails(t *testing.T) {
 	if p.AuthHeader != "" {
 		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
 	}
-	// Models list mirrors the live /v1/models endpoint (as of Jul 2026).
-	// Every entry was runtime-verified to support tool calling via /v1/chat/completions.
+	// Suggested models are a subset of the live /v1/models catalog.
 	expectedModels := []string{
 		"deepseek-v4-flash",
 		"deepseek-v4-pro",
@@ -316,8 +350,6 @@ func TestLookupProvider_OllamaCloudDetails(t *testing.T) {
 		"kimi-k2.5",
 		"kimi-k2.6",
 		"kimi-k2.7-code",
-		"minimax-m2.5",
-		"minimax-m2.7",
 		"minimax-m3",
 		"mistral-large-3:675b",
 		"nemotron-3-nano:30b",
