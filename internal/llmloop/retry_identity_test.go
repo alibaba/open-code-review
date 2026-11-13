@@ -98,7 +98,7 @@ func newCompressionRunner(t *testing.T, client llm.LLMClient, factory func(strin
 			Messages:        []MessageTemplate{{Role: "user", Content: "Summarize: {{context}}"}},
 			SummaryTemplate: "\n\n<summary>\n{{summary}}\n</summary>",
 		},
-		MaxContextTokens: 50,
+		MaxContextTokens: 1000,
 	})
 
 	msgs := []llm.Message{

@@ -4,8 +4,10 @@
 package llmloop
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/llm"
 )
@@ -325,67 +327,124 @@ func TestTruncateToByteBudget(t *testing.T) {
 		}
 	})
 	t.Run("over budget truncates with suffix", func(t *testing.T) {
-		text := strings.Repeat("word ", 500) // 2500 bytes
-		got := truncateToByteBudget(text, 100)
+		got := truncateToByteBudget(strings.Repeat("word ", 500), 100)
 		if len(got) > 100 {
 			t.Errorf("truncated text = %d bytes, want <= 100", len(got))
 		}
-		if !strings.HasSuffix(got, "... (truncated)") {
-			t.Errorf("truncated text should end with suffix, got %q", got[len(got)-20:])
+		if !strings.HasSuffix(got, truncationSuffix) {
+			t.Errorf("truncated text should end with suffix, got %q", got)
 		}
 	})
-	t.Run("zero budget returns suffix only", func(t *testing.T) {
-		got := truncateToByteBudget("anything", 0)
-		if got != "... (truncated)" {
+	t.Run("budget below suffix returns suffix only", func(t *testing.T) {
+		if got := truncateToByteBudget("anything longer", 0); got != truncationSuffix {
 			t.Errorf("truncateToByteBudget with 0 budget = %q, want suffix only", got)
 		}
 	})
+	t.Run("does not split a multi-byte rune", func(t *testing.T) {
+		text := strings.Repeat("\u00e9", 100) // 2 bytes per rune
+		for budget := len(truncationSuffix) + 1; budget < 60; budget++ {
+			got := truncateToByteBudget(text, budget)
+			if !utf8.ValidString(got) {
+				t.Fatalf("budget %d produced invalid UTF-8: %q", budget, got)
+			}
+			if len(got) > budget {
+				t.Fatalf("budget %d produced %d bytes", budget, len(got))
+			}
+		}
+	})
 }
 
-// TestBoundCompressZoneInput_OversizedToolResult guards #1876: a single
-// unbounded tool result must not let the compression request exceed its own
-// input bound. The oversized message is elided (with an explicit truncation
-// suffix) while smaller messages keep their full content.
-func TestBoundCompressZoneInput_OversizedToolResult(t *testing.T) {
-	huge := strings.Repeat("x", 170*1024) // 170 KB single-line result
+var plainTemplate = []MessageTemplate{{Role: "user", Content: "Summarize the history below.\n{{context}}"}}
+
+func renderedFor(msgs []llm.Message) int {
+	return renderedSize(plainTemplate, buildMessageXML(msgs))
+}
+
+func TestFitCompressionInput_UnderBudgetUnchanged(t *testing.T) {
+	msgs := []llm.Message{msg("assistant", "short reply"), msg("tool", "ok")}
+	got, err := fitCompressionInput(msgs, plainTemplate, 100000)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got[0].ExtractText() != "short reply" || got[1].ExtractText() != "ok" {
+		t.Errorf("messages altered under budget: %+v", got)
+	}
+}
+
+// A single unbounded one-line tool result must not push the compression
+// request past its budget, and only that result should be elided.
+func TestFitCompressionInput_OversizedToolResult(t *testing.T) {
 	msgs := []llm.Message{
 		msg("assistant", "read the file"),
-		llm.NewToolResultMessage("call_1", huge),
+		llm.NewToolResultMessage("call_1", strings.Repeat("x", 170*1024)),
 		msg("assistant", "done"),
 	}
-	const inputBudgetBytes = 4096
-	got := boundCompressZoneInput(msgs, inputBudgetBytes)
-
-	total := 0
-	for _, m := range got {
-		total += len(m.ExtractText())
+	const budget = 4096
+	got, err := fitCompressionInput(msgs, plainTemplate, budget)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if total > inputBudgetBytes {
-		t.Fatalf("bounded input = %d bytes, want <= %d", total, inputBudgetBytes)
+	if size := renderedFor(got); size > budget {
+		t.Fatalf("rendered request = %d bytes, want <= %d", size, budget)
 	}
-	// The small messages must survive intact.
-	if got[0].ExtractText() != "read the file" {
-		t.Errorf("assistant message was altered: %q", got[0].ExtractText())
+	if got[0].ExtractText() != "read the file" || got[2].ExtractText() != "done" {
+		t.Errorf("small messages were altered: %q, %q", got[0].ExtractText(), got[2].ExtractText())
 	}
-	if got[2].ExtractText() != "done" {
-		t.Errorf("final assistant message was altered: %q", got[2].ExtractText())
+	if !strings.HasSuffix(got[1].ExtractText(), truncationSuffix) {
+		t.Errorf("oversized result should carry the truncation marker")
 	}
-	// The oversized result must be visibly truncated, not silently kept.
-	if !strings.Contains(got[1].ExtractText(), "... (truncated)") {
-		t.Errorf("oversized result should carry truncation marker, got %q", got[1].ExtractText()[:40])
+	if got[1].ToolCallID != "call_1" {
+		t.Errorf("ToolCallID = %q, want call_1 preserved", got[1].ToolCallID)
+	}
+	if msgs[1].ExtractText() == got[1].ExtractText() {
+		t.Error("input slice was mutated instead of copied")
 	}
 }
 
-func TestBoundCompressZoneInput_UnderBudgetUnchanged(t *testing.T) {
+// Reasoning is rendered into the request but invisible to ExtractText, so it
+// must count toward the budget and be trimmed like content.
+func TestFitCompressionInput_OversizedReasoning(t *testing.T) {
+	calls := []llm.ToolCall{{ID: "call_1", Function: llm.FunctionCall{Name: "file_read"}}}
 	msgs := []llm.Message{
-		msg("assistant", "short reply"),
-		msg("tool", "ok"),
+		llm.NewToolCallMessage("ok", calls, llm.NativeTurn{}, strings.Repeat("r", 170*1024)),
 	}
-	got := boundCompressZoneInput(msgs, 100000)
-	if len(got) != len(msgs) {
-		t.Fatalf("len = %d, want %d", len(got), len(msgs))
+	const budget = 4096
+	got, err := fitCompressionInput(msgs, plainTemplate, budget)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if got[0].ExtractText() != "short reply" {
-		t.Errorf("message altered under budget: %q", got[0].ExtractText())
+	if size := renderedFor(got); size > budget {
+		t.Fatalf("rendered request = %d bytes, want <= %d", size, budget)
+	}
+	if got[0].ExtractText() != "ok" {
+		t.Errorf("content = %q, want ok", got[0].ExtractText())
+	}
+	if !strings.HasSuffix(got[0].ReasoningContent, truncationSuffix) {
+		t.Error("reasoning should carry the truncation marker")
+	}
+	if len(got[0].ToolCalls) != 1 {
+		t.Errorf("ToolCalls dropped: %+v", got[0].ToolCalls)
+	}
+}
+
+// Visible text exactly at the budget still overflows once markup and the
+// template text are added.
+func TestFitCompressionInput_CountsMarkupAndTemplate(t *testing.T) {
+	const budget = 4096
+	msgs := []llm.Message{llm.NewToolResultMessage("call_1", strings.Repeat("y", budget))}
+	got, err := fitCompressionInput(msgs, plainTemplate, budget)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if size := renderedFor(got); size > budget {
+		t.Fatalf("rendered request = %d bytes, want <= %d", size, budget)
+	}
+}
+
+func TestFitCompressionInput_MarkupAloneTooLarge(t *testing.T) {
+	msgs := []llm.Message{msg("assistant", "a"), msg("tool", "b"), msg("assistant", "c")}
+	_, err := fitCompressionInput(msgs, plainTemplate, 64)
+	if !errors.Is(err, errCompressionInputTooLarge) {
+		t.Fatalf("err = %v, want errCompressionInputTooLarge", err)
 	}
 }
