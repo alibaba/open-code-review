@@ -256,7 +256,8 @@ stderr로 나갑니다(경고, 오류). `--audience agent`가 보장하는 깨�
 리뷰할 대상 파일이 없었다는 뜻입니다. `files_reviewed`는 최상위 필드가 아니라 `summary` 아래에
 있으며, 이 경로에서는 `0`입니다. 최상위 `[]`은 `comments` 쪽입니다. 같은 객체에는
 `"status": "skipped"`와 `"message": "Review skipped: no items were selected."`, 그리고
-`terminal_state`가 `"skipped"`이고 `coverage`의 각 배열이 비어 있는 `manifest`도 함께 실립니다.
+`terminal_state`가 `"skipped"`이고 `coverage.selected`가 비어 있는 `manifest`도 함께 실립니다.
+선택 단계에서 제외된 파일은 `coverage.excluded`에 나열되며, 각 항목에는 `exclude_reason`이 있습니다.
 
 파일을 리뷰했는데 지적이 없는 경우에도 **`comments: []`을 담은 JSON 객체**가 반환됩니다.
 `summary.files_reviewed`는 실제로 리뷰한 파일 수가 되고, `status`는 `"complete"`, `message`는
@@ -265,6 +266,15 @@ stderr로 나갑니다(경고, 오류). `--audience agent`가 보장하는 깨�
 review 출력에서는 `summary.files_reviewed`나 `manifest.terminal_state`를 사용하세요. 다만 호출자는
 아래의 manifest-less 경로에서 `summary`와 `manifest`가 둘 다 없을 수 있다는 점도 처리해야 합니다.
 `review --format json`은 stdout에 항상 JSON 객체 하나만 기록하며, 맨 배열을 내보내는 일은 없습니다.
+
+`terminal_state: "complete"`는 선택된 파일 집합의 리뷰가 완료되었다는 뜻이지, 변경된 모든 파일을
+리뷰했다는 뜻은 아닙니다. 선택 단계에서 제외된 파일(지원하지 않는 확장자, 경로 규칙, 내장된 민감 정보
+경로, 바이너리, 삭제된 파일 또는 파일별 크기 제한 초과)은 `--preview`와 같은 `exclude_reason`과
+함께 `manifest.coverage.excluded`에 기록되며, 이로 인해 실행 상태가 `partial`이 되지는 않습니다.
+이 목록은 선택 단계까지 도달한 파일만 포함합니다. diff provider가 그보다 먼저 제외한 파일은
+포함하지 않습니다. 여기에는 `vendor/`나 `node_modules/`처럼 항상 건너뛰는 디렉터리의 변경,
+`.gitignore`가 무시하는 추적되지 않은 파일, 그리고 단일 커밋이나 커밋 범위를 리뷰할 때
+`.gitignore`에 일치하는 모든 변경이 해당합니다.
 
 manifest-less no-files 경로는 더 간소해서 `summary`와 `manifest`를 모두 생략하지만
 `"status": "skipped"`, `"message": "No supported files changed."`, `"comments": []`는

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 func sel(id string) CoverageItem {
@@ -532,12 +534,12 @@ func TestCoverageSortedAndNonNilJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// reused/failed/waived are empty and must render as [].
+	// reused/failed/waived/excluded are empty and must render as [].
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"selected", "completed", "reused", "failed", "waived"} {
+	for _, k := range []string{"selected", "completed", "reused", "failed", "waived", "excluded"} {
 		if string(raw[k]) == "null" || raw[k] == nil {
 			t.Fatalf("%s serialized as null, want []", k)
 		}
@@ -563,7 +565,7 @@ func TestFinalizeNilReceiver(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"selected", "completed", "reused", "failed", "waived"} {
+	for _, k := range []string{"selected", "completed", "reused", "failed", "waived", "excluded"} {
 		if string(raw[k]) == "null" || raw[k] == nil {
 			t.Fatalf("%s serialized as null on nil finalize", k)
 		}
@@ -862,5 +864,157 @@ func TestConcurrentTransitions(t *testing.T) {
 	total := len(m.Coverage.Completed) + len(m.Coverage.Reused) + len(m.Coverage.Failed) + len(m.Coverage.Waived)
 	if len(m.Coverage.Selected) != n || total != n {
 		t.Fatalf("selected=%d total=%d, want %d each", len(m.Coverage.Selected), total, n)
+	}
+}
+
+func exc(id string, reason model.ExcludeReason) ExcludedItem {
+	return ExcludedItem{ItemID: id, Path: id + ".go", ExcludeReason: reason}
+}
+
+// Excluded files are recorded with their reason but stay outside the
+// denominator: complete means complete over the selected set.
+func TestExcludedDoesNotChangeTerminalState(t *testing.T) {
+	b := newBuilderWith("a")
+	if err := b.RegisterExcluded(exc("z", model.ExcludeTooLarge)); err != nil {
+		t.Fatalf("RegisterExcluded z: %v", err)
+	}
+	if err := b.RegisterExcluded(exc("y", model.ExcludeUserRule)); err != nil {
+		t.Fatalf("RegisterExcluded y: %v", err)
+	}
+	if err := b.MarkCompleted("a"); err != nil {
+		t.Fatalf("MarkCompleted: %v", err)
+	}
+	m := mustFinalize(t, b)
+	if m.TerminalState != StateComplete {
+		t.Fatalf("terminal = %q, want complete", m.TerminalState)
+	}
+	if len(m.Coverage.Selected) != 1 || len(m.Coverage.Completed) != 1 {
+		t.Fatalf("coverage = %+v", m.Coverage)
+	}
+	want := []ExcludedItem{exc("y", model.ExcludeUserRule), exc("z", model.ExcludeTooLarge)}
+	if len(m.Coverage.Excluded) != len(want) {
+		t.Fatalf("excluded = %+v, want %+v", m.Coverage.Excluded, want)
+	}
+	for i := range want {
+		if m.Coverage.Excluded[i] != want[i] {
+			t.Fatalf("excluded[%d] = %+v, want %+v", i, m.Coverage.Excluded[i], want[i])
+		}
+	}
+}
+
+// A run that selected nothing is still skipped, and says what it left out.
+func TestExcludedOnlyIsSkipped(t *testing.T) {
+	b := newBuilderWith()
+	if err := b.RegisterExcluded(exc("a", model.ExcludeBinary)); err != nil {
+		t.Fatalf("RegisterExcluded: %v", err)
+	}
+	m := mustFinalize(t, b)
+	if m.TerminalState != StateSkipped {
+		t.Fatalf("terminal = %q, want skipped", m.TerminalState)
+	}
+	if len(m.Coverage.Selected) != 0 || len(m.Coverage.Excluded) != 1 {
+		t.Fatalf("coverage = %+v", m.Coverage)
+	}
+}
+
+func TestRegisterExcludedValidation(t *testing.T) {
+	b := newBuilderWith()
+	if err := b.RegisterExcluded(ExcludedItem{ExcludeReason: model.ExcludeBinary}); err == nil {
+		t.Fatal("empty item_id should error")
+	}
+	if err := b.RegisterExcluded(exc("a", model.ExcludeNone)); err == nil {
+		t.Fatal("empty exclude reason should error")
+	}
+	if err := b.RegisterExcluded(exc("a", model.ExcludeReason("made_up"))); err == nil {
+		t.Fatal("unknown exclude reason should error")
+	}
+	if err := b.RegisterExcluded(exc("a", model.ExcludeBinary)); err != nil {
+		t.Fatalf("RegisterExcluded: %v", err)
+	}
+	if err := b.RegisterExcluded(exc("a", model.ExcludeDeleted)); err != nil {
+		t.Fatalf("duplicate register should be idempotent, got: %v", err)
+	}
+	m := mustFinalize(t, b)
+	if len(m.Coverage.Excluded) != 1 || m.Coverage.Excluded[0].ExcludeReason != model.ExcludeBinary {
+		t.Fatalf("excluded = %+v, want the first registration only", m.Coverage.Excluded)
+	}
+}
+
+// An item_id is never in both sets, and the selected set wins either way:
+// excluding a selected item is rejected, selecting an excluded one replaces it.
+func TestSelectedWinsOverExcluded(t *testing.T) {
+	b := newBuilderWith("a")
+	if err := b.RegisterExcluded(exc("a", model.ExcludeBinary)); err == nil {
+		t.Fatal("excluding a selected item should error")
+	}
+	if err := b.RegisterExcluded(exc("b", model.ExcludeBinary)); err != nil {
+		t.Fatalf("RegisterExcluded b: %v", err)
+	}
+	if err := b.RegisterExcluded(exc("c", model.ExcludeBinary)); err != nil {
+		t.Fatalf("RegisterExcluded c: %v", err)
+	}
+	if err := b.RegisterSelected(sel("b")); err != nil {
+		t.Fatalf("selecting an excluded item must not fail the denominator: %v", err)
+	}
+	b.MarkCompleted("a")
+	b.MarkCompleted("b")
+	m := mustFinalize(t, b)
+	if m.TerminalState != StateComplete || len(m.Coverage.Selected) != 2 {
+		t.Fatalf("terminal = %q, selected = %+v", m.TerminalState, m.Coverage.Selected)
+	}
+	if len(m.Coverage.Excluded) != 1 || m.Coverage.Excluded[0].ItemID != "c" {
+		t.Fatalf("excluded = %+v, want only c", m.Coverage.Excluded)
+	}
+}
+
+func TestRegisterExcludedAfterSealErrors(t *testing.T) {
+	b := newBuilderWith("a")
+	if err := b.SealSelected(); err != nil {
+		t.Fatalf("SealSelected: %v", err)
+	}
+	if err := b.RegisterExcluded(exc("b", model.ExcludeBinary)); err == nil {
+		t.Fatal("RegisterExcluded after seal should error")
+	}
+}
+
+func TestExcludedJSONShape(t *testing.T) {
+	b := newBuilderWith()
+	item := ExcludedItem{ItemID: "a", Path: "new.png", OldPath: "old.png", ExcludeReason: model.ExcludeBinary}
+	if err := b.RegisterExcluded(item); err != nil {
+		t.Fatalf("RegisterExcluded: %v", err)
+	}
+	m := mustFinalize(t, b)
+	data, err := json.Marshal(m.Coverage.Excluded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"item_id":"a","path":"new.png","old_path":"old.png","exclude_reason":"binary"}]`
+	if string(data) != want {
+		t.Fatalf("excluded JSON = %s, want %s", data, want)
+	}
+}
+
+func TestFinalizeReturnsOwnedExcludedSlice(t *testing.T) {
+	b := newBuilderWith()
+	if err := b.RegisterExcluded(exc("a", model.ExcludeBinary)); err != nil {
+		t.Fatalf("RegisterExcluded: %v", err)
+	}
+	m1 := mustFinalize(t, b)
+	m2 := mustFinalize(t, b)
+	m1.Coverage.Excluded[0].Path = "MUTATED"
+	if m2.Coverage.Excluded[0].Path == "MUTATED" {
+		t.Fatal("returned manifests share the excluded backing array")
+	}
+}
+
+// A manifest persisted before the excluded set existed decodes without one;
+// the copy handed to consumers must still render it as [] rather than null.
+func TestClonedLegacyManifestHasNonNilExcluded(t *testing.T) {
+	var legacy RunManifest
+	if err := json.Unmarshal([]byte(`{"coverage":{"selected":[],"completed":[],"reused":[],"failed":[],"waived":[]}}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if got := legacy.cloned().Coverage.Excluded; got == nil {
+		t.Fatal("excluded is nil after cloning a legacy manifest")
 	}
 }
