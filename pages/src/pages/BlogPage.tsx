@@ -127,7 +127,7 @@ const BlogPage: React.FC = () => {
   /* ─── Detail View ─── */
   if (isDetailView && docMeta) {
     return (
-      <div style={{ minHeight: '100vh', background: '#000000', paddingTop: 72, fontFamily, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ minHeight: '100vh', background: 'var(--bg-page)', paddingTop: 72, fontFamily, display: 'flex', flexDirection: 'column' }}>
         <Navbar />
         <div style={{ display: 'flex', justifyContent: 'center', maxWidth: 1440, margin: '0 auto', flex: 1, width: '100%' }}>
           {/* Main content */}
@@ -142,18 +142,18 @@ const BlogPage: React.FC = () => {
                 padding: 0,
                 marginBottom: 24,
                 fontSize: 14,
-                color: 'rgba(255,255,255,0.5)',
+                color: 'var(--text-faint)',
                 fontFamily,
                 transition: 'color 0.2s',
               }}
-              onMouseEnter={e => (e.currentTarget.style.color = '#2BDE5E')}
-              onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.5)')}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-faint)')}
             >
               {t('blog.backToList')}
             </button>
 
             {/* Title */}
-            <h1 style={{ fontSize: 28, fontWeight: 700, color: '#FFFFFF', margin: '0 0 16px 0', lineHeight: '36px', fontFamily }}>
+            <h1 style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-strong)', margin: '0 0 16px 0', lineHeight: '36px', fontFamily }}>
               {docMeta.title}
             </h1>
 
@@ -188,8 +188,8 @@ const BlogPage: React.FC = () => {
                   onClick={() => navigateToPost(prevPost.slug)}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: 0 }}
                 >
-                  <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>‹</span>
-                  <span style={{ fontSize: 14, fontFamily, color: 'rgba(255,255,255,0.7)', fontWeight: 400 }}>
+                  <span style={{ fontSize: 14, color: 'var(--text-faint)' }}>‹</span>
+                  <span style={{ fontSize: 14, fontFamily, color: 'var(--text-soft)', fontWeight: 400 }}>
                     {prevPost.title}
                   </span>
                 </button>
@@ -199,10 +199,10 @@ const BlogPage: React.FC = () => {
                   onClick={() => navigateToPost(nextPost.slug)}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: 0 }}
                 >
-                  <span style={{ fontSize: 14, fontFamily, color: 'rgba(255,255,255,0.7)', fontWeight: 400 }}>
+                  <span style={{ fontSize: 14, fontFamily, color: 'var(--text-soft)', fontWeight: 400 }}>
                     {nextPost.title}
                   </span>
-                  <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>›</span>
+                  <span style={{ fontSize: 14, color: 'var(--text-faint)' }}>›</span>
                 </button>
               ) : <span />}
             </div>
@@ -224,7 +224,7 @@ const BlogPage: React.FC = () => {
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                 <img src={docContentsIcon} alt="" style={{ width: 20, height: 20 }} />
-                <span style={{ fontSize: 14, fontWeight: 500, color: 'rgba(255,255,255,0.5)', letterSpacing: '0.05em', position: 'relative', top: 1 }}>
+                <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-faint)', letterSpacing: '0.05em', position: 'relative', top: 1 }}>
                   {t('blog.toc')}
                 </span>
               </div>
@@ -246,7 +246,7 @@ const BlogPage: React.FC = () => {
                         fontSize: 14,
                         fontFamily,
                         fontWeight: isActive ? 500 : 400,
-                        color: isActive ? '#2BDE5E' : isHovered ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)',
+                        color: isActive ? 'var(--accent)' : isHovered ? 'var(--text-body)' : 'var(--text-faint)',
                         lineHeight: '22px',
                         padding: 0,
                         paddingLeft: h.level === 3 ? 16 : 0,
@@ -268,12 +268,12 @@ const BlogPage: React.FC = () => {
 
   /* ─── List View ─── */
   return (
-    <div style={{ minHeight: '100vh', background: '#000000', paddingTop: 72, fontFamily, display: 'flex', flexDirection: 'column' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-page)', paddingTop: 72, fontFamily, display: 'flex', flexDirection: 'column' }}>
       <Navbar />
       <div style={{ maxWidth: 820, margin: '0 auto', padding: isMobile ? '32px 20px 80px' : '48px 48px 80px', flex: 1, width: '100%' }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#FFFFFF', margin: 0, fontFamily }}>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-strong)', margin: 0, fontFamily }}>
             {t('blog.title')}
           </h1>
           {/* Search button */}
@@ -310,7 +310,7 @@ const BlogPage: React.FC = () => {
         {/* Post list */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {filteredMetas.length === 0 && (
-            <div style={{ padding: '48px 0', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
+            <div style={{ padding: '48px 0', textAlign: 'center', color: 'var(--text-ghost)', fontSize: 14 }}>
               {activeTag ? t('blog.noPostsForTag') : t('blog.noPosts')}
             </div>
           )}
@@ -363,8 +363,8 @@ const BlogPage: React.FC = () => {
             style={{
               width: 560,
               maxWidth: '90vw',
-              background: '#141414',
-              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'var(--surface-raised)',
+              border: '1px solid var(--line)',
               borderRadius: 12,
               overflow: 'hidden',
               boxShadow: '0 24px 48px rgba(0,0,0,0.4)',
@@ -386,7 +386,7 @@ const BlogPage: React.FC = () => {
                   background: 'transparent',
                   border: 'none',
                   outline: 'none',
-                  color: '#ffffff',
+                  color: 'var(--text-strong)',
                   fontSize: 14,
                   fontFamily,
                 }}
@@ -394,7 +394,7 @@ const BlogPage: React.FC = () => {
             </div>
             <div style={{ maxHeight: 400, overflowY: 'auto', padding: searchQuery ? '8px 0' : '0' }}>
               {searchQuery && searchResults.length === 0 && (
-                <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
+                <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-ghost)', fontSize: 14 }}>
                   {t('blog.search.noResults')}
                 </div>
               )}
@@ -406,7 +406,7 @@ const BlogPage: React.FC = () => {
                     display: 'block',
                     width: '100%',
                     padding: '10px 16px',
-                    background: idx === searchSelectedIdx ? 'rgba(255,255,255,0.08)' : 'transparent',
+                    background: idx === searchSelectedIdx ? 'var(--fill-hover)' : 'transparent',
                     border: 'none',
                     cursor: 'pointer',
                     textAlign: 'left',
@@ -415,10 +415,10 @@ const BlogPage: React.FC = () => {
                   }}
                   onMouseEnter={() => setSearchSelectedIdx(idx)}
                 >
-                  <div style={{ color: '#ffffff', fontSize: 14, fontWeight: 500, fontFamily, marginBottom: 4 }}>
+                  <div style={{ color: 'var(--text-strong)', fontSize: 14, fontWeight: 500, fontFamily, marginBottom: 4 }}>
                     {result.title}
                   </div>
-                  <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, fontFamily, lineHeight: '18px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ color: 'var(--text-ghost)', fontSize: 12, fontFamily, lineHeight: '18px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {result.snippet}
                   </div>
                 </button>

@@ -55,7 +55,7 @@ const UseCasesSection: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
           <span
             style={{
-              color: '#2BDE5E',
+              color: 'var(--accent)',
               fontSize: 16,
               fontWeight: 500,
               lineHeight: '22px',
@@ -66,7 +66,7 @@ const UseCasesSection: React.FC = () => {
           </span>
           <h2
             style={{
-              color: '#FFFFFF',
+              color: 'var(--text-strong)',
               fontSize: titleStyle.fontSize,
               fontWeight: 500,
               textAlign: 'center',
@@ -123,7 +123,7 @@ const UseCasesSection: React.FC = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', zIndex: 2 }}>
                   <p
                     style={{
-                      color: '#FFFFFF',
+                      color: 'var(--text-strong)',
                       fontSize: 18,
                       fontWeight: 500,
                       margin: 0,
@@ -133,7 +133,7 @@ const UseCasesSection: React.FC = () => {
                   </p>
                   <p
                     style={{
-                      color: 'rgba(255,255,255,0.5)',
+                      color: 'var(--text-faint)',
                       fontSize: 14,
                       lineHeight: '20px',
                       margin: 0,
