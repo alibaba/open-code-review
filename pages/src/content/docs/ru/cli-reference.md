@@ -657,7 +657,7 @@ Model:  <effective model>
 ### `ocr llm providers`
 
 ```text
-ocr llm providers
+ocr llm providers [--json]
 ```
 
 Выводит всех встроенных LLM-провайдеров в таблице из трёх столбцов:
@@ -673,6 +673,10 @@ Built-in providers:
 Затем выводится подсказка: настроить провайдера интерактивно можно командой
 `ocr config provider`, а неинтерактивно — командой
 `ocr config set provider <name>`.
+
+| Flag | По умолчанию | Описание |
+|---|---|---|
+| `--json` | `false` | Выводить метаданные провайдеров и каталоги моделей в виде JSON-массива вместо таблицы. |
 
 ## `ocr viewer`
 
