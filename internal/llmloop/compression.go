@@ -5,6 +5,7 @@ package llmloop
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"sync"
@@ -52,14 +53,16 @@ type compressionJob struct {
 	snapshotLen int // message count when the snapshot was taken
 }
 
-// compressionState is the async-compression bookkeeping for a single
+// compressionState is the compression bookkeeping for a single
 // conversation (one RunMainTask call). The Runner is shared by concurrent
 // per-subtask goroutines, so this state must not live on the Runner: a shared
 // slot lets one subtask apply, cancel, or replace another subtask's
 // compression job (#384).
 type compressionState struct {
-	mu         sync.Mutex
-	pendingJob *compressionJob
+	mu          sync.Mutex
+	pendingJob  *compressionJob
+	failedInput [sha256.Size]byte
+	failedErr   error
 }
 
 // messageTokens counts visible text plus the Native replay payload and
@@ -219,7 +222,7 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 // messages, summarizing the compress zone while preserving the active zone
 // intact. Returns rebuilt as [frozen] + [compressed_summary appended to
 // the user prompt] + [active].
-func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey string) ([]llm.Message, error) {
+func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey string, st *compressionState) ([]llm.Message, error) {
 	if len(r.task.Compression.Messages) == 0 || len(msgs) <= 2 {
 		return msgs[:min(len(msgs), 2)], nil
 	}
@@ -230,6 +233,17 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 	}
 
 	contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
+	// A new active round can leave the compressible prefix unchanged. Key the
+	// rejection on that prefix, not on the growing conversation's length. The
+	// template, model and completion limit are fixed for this conversation.
+	inputHash := sha256.Sum256([]byte(contextXML))
+	st.mu.Lock()
+	previousErr := st.failedErr
+	previousInput := st.failedInput
+	st.mu.Unlock()
+	if previousErr != nil && previousInput == inputHash {
+		return msgs, previousErr
+	}
 
 	compressionMsgs := make([]llm.Message, 0, len(r.task.Compression.Messages))
 	for _, m := range r.task.Compression.Messages {
@@ -260,10 +274,20 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 
 	if err != nil {
 		rec.SetError(err, duration)
+		err = fmt.Errorf("memory compression: %w", err)
+		if llm.IsNonRetryableInputError(err) {
+			st.mu.Lock()
+			// Cancellation supersedes a background job before its replacement
+			// starts; a late response from that job must not replace the cache.
+			if ctx.Err() == nil {
+				st.failedInput, st.failedErr = inputHash, err
+			}
+			st.mu.Unlock()
+		}
 		// Return msgs unchanged: truncating to frozenEnd would discard all
 		// conversation context, which is worse than staying over the token
 		// limit temporarily.
-		return msgs, fmt.Errorf("memory compression: %w", err)
+		return msgs, err
 	}
 	rec.SetResponse(resp, duration)
 	r.RecordUsage(resp.Usage)
@@ -311,7 +335,7 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 	go func() {
 		defer r.bg.Done()
 		defer cancel()
-		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, taskKey)
+		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, taskKey, st)
 
 		st.mu.Lock()
 		defer st.mu.Unlock()
