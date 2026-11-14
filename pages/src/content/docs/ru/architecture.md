@@ -16,7 +16,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (selection.go) — drop binaries, secret paths,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -62,7 +62,7 @@ flowchart TD
 Неотслеживаемые файлы читаются с диска и считаются целиком добавленными, чтобы
 их можно было проверить до коммита.
 
-## Пятиступенчатый фильтр файлов
+## Шестиступенчатый фильтр файлов
 
 После загрузки diff каждый файл проходит через функцию
 [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
@@ -70,6 +70,7 @@ flowchart TD
 
 ```
 binary          — файл является бинарным
+secret_exclude  — путь совпадает со встроенным шаблоном секретов (.env, id_rsa, …)
 user_exclude    — совпадение с шаблоном из списка `exclude`
 unsupported_ext — расширение отсутствует в supported_file_types.json
 default_path    — совпадение со встроенным шаблоном исключения тестовых файлов
@@ -85,12 +86,15 @@ default_path    — совпадение со встроенным шаблон�
 Проверки выполняются в таком порядке:
 
 1. `binary` — бинарные файлы отбрасываются первыми.
-2. `user_exclude` — значение `exclude` вашего проекта всегда имеет приоритет.
-3. `user_include` — если у фильтра есть шаблоны включения **и** файл совпадает
+2. `secret_exclude` — один из путей совпадает со встроенной защитой
+   **секретных путей** (`.env`, `id_rsa`, `.netrc`, …). Как и
+   `provider_directory`, вернуть файл правилом `include` нельзя.
+3. `user_exclude` — значение `exclude` вашего проекта всегда имеет приоритет.
+4. `user_include` — если у фильтра есть шаблоны включения **и** файл совпадает
    с одним из них, он сразу сохраняется (возвращается пустое значение), минуя
    расположенные ниже проверки `unsupported_ext` и `default_path`.
-4. `unsupported_ext` фильтрует по списку допустимых расширений.
-5. `default_path` — последняя проверка: она сопоставляет встроенные шаблоны
+5. `unsupported_ext` фильтрует по списку допустимых расширений.
+6. `default_path` — последняя проверка: она сопоставляет встроенные шаблоны
    исключения **тестовых файлов** (`**/*_test.go`,
    `**/*.test.{js,jsx,ts,tsx}`, `**/__tests__/**`, `**/*_test.py`,
    `**/*_spec.rb`, `**/*.test.ets`, …). Каждый шаблон начинается с `**/`.
