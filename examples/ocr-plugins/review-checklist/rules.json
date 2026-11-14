@@ -1,0 +1,8 @@
+{
+  "rules": [
+    {
+      "path": "**/*.{go,js,mjs,ts,tsx,py}",
+      "rule": "checklist.md"
+    }
+  ]
+}

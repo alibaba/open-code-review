@@ -18,6 +18,7 @@ Usage:
 Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
+  plugin       Manage local rule plugins
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
@@ -39,6 +40,7 @@ Examples:
 
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
+Use "ocr plugin -h" for more information about plugins.
 Use "ocr config" for more information about config.
 Use "ocr llm" for more information about LLM utilities.
 Use "ocr session -h" for more information about session inspection.
@@ -70,6 +72,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 |---|---|---|
 | `ocr review` | `ocr r` | Запускает код-ревью и выводит комментарии. |
 | `ocr rules check <file>` | — | Показывает, какое правило применяется к указанному пути файла и откуда оно получено. |
+| `ocr plugin` | — | Установка, проверка и управление локальными плагинами правил. |
 | `ocr config set <key> <value>` | — | Сохраняет значение конфигурации в `~/.opencodereview/config.json`. |
 | `ocr config unset <key>` | — | Сбрасывает сохранённое значение конфигурации (`provider`, `max_tokens`, `effort`, `custom_providers.<name>`, `mcp_servers.<name>`). |
 | `ocr config provider` | — | Интерактивный TUI для настройки провайдера. |
@@ -566,6 +569,34 @@ Rule:
 Команда помогает разобраться, «почему моё пользовательское правило не
 срабатывает». Полная схема приоритетов описана в разделе
 [Правила ревью](../review-rules/).
+
+## `ocr plugin`
+
+Управляет пользовательскими снимками локальных пакетов правил. По умолчанию
+плагин устанавливается выключенным; после включения добавляет правила в
+последующие ревью и сканирования во всех репозиториях.
+
+| Команда | Действие |
+|---|---|
+| `ocr plugin install <directory> [--enable]` | Копирует локальный пакет в хранилище; при необходимости включает. |
+| `ocr plugin list` | Выводит ID, версии, состояния и число пакетов правил. |
+| `ocr plugin show <id>` | Показывает сводку манифеста, источник, путь снимка и SHA-256 содержимого. |
+| `ocr plugin enable <id>` | Включает установленный пакет. |
+| `ocr plugin disable <id>` | Выключает его правила. |
+| `ocr plugin remove <id>` | Снимает регистрацию, сохраняя снимки для запущенных ревью. |
+
+Все подкоманды принимают `--json` для структурированного вывода.
+
+```bash
+ocr plugin install ./examples/ocr-plugins/review-checklist --enable
+ocr plugin show review-checklist --json
+ocr rules check src/main.go
+```
+
+Перед повторной установкой изменённого источника удалите существующий ID.
+Реестр: `~/.opencodereview/plugins/state.json`; снимки: `plugins/packages/`.
+Формат манифеста, проверка совместимости и порядок правил описаны в разделе
+[Нативные плагины](../native-plugins/).
 
 ## `ocr config`
 

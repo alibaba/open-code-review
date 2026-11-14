@@ -17,6 +17,7 @@ Usage:
 Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
+  plugin       Manage local rule plugins
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
@@ -38,6 +39,7 @@ Examples:
 
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
+Use "ocr plugin -h" for more information about plugins.
 Use "ocr config" for more information about config.
 Use "ocr llm" for more information about LLM utilities.
 Use "ocr session -h" for more information about session inspection.
@@ -69,6 +71,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr review` | `ocr r` | 运行代码评审并输出评论。 |
 | `ocr scan` | `ocr s` | 无需 Git diff，扫描完整文件。 |
 | `ocr rules check <file>` | — | 显示某文件路径适用哪条规则及其来源。 |
+| `ocr plugin` | — | 安装、检查和管理本地规则插件。 |
 | `ocr config set <key> <value>` | — | 将一个配置值持久化到 `~/.opencodereview/config.json`。 |
 | `ocr config unset <key>` | — | 清除一个已保存的配置值（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
 | `ocr config provider` | — | 交互式 provider 配置 TUI。 |
@@ -539,6 +542,32 @@ Rule:
 
 可用于排查“为什么我的自定义规则没触发？”——完整的优先级说明见
 [评审规则](../review-rules/)。
+
+## `ocr plugin`
+
+管理本地规则包的用户级快照。安装后默认禁用；启用后会为所有仓库中后续的评审和
+扫描添加规则。
+
+| 命令 | 作用 |
+|---|---|
+| `ocr plugin install <directory> [--enable]` | 将本地包复制到插件存储，可在安装时启用。 |
+| `ocr plugin list` | 列出已安装插件的 ID、版本、状态和规则包数量。 |
+| `ocr plugin show <id>` | 查看清单摘要、源目录、快照路径及内容 SHA-256。 |
+| `ocr plugin enable <id>` | 启用已安装的包。 |
+| `ocr plugin disable <id>` | 禁用该包的规则。 |
+| `ocr plugin remove <id>` | 注销插件，保留快照供正在运行的评审使用。 |
+
+所有子命令均支持 `--json` 结构化输出。
+
+```bash
+ocr plugin install ./examples/ocr-plugins/review-checklist --enable
+ocr plugin show review-checklist --json
+ocr rules check src/main.go
+```
+
+重新安装修改后的源目录前，需先移除现有 ID。注册表为
+`~/.opencodereview/plugins/state.json`，快照位于 `plugins/packages/`。
+清单格式、兼容性检查及规则顺序见[原生插件](../native-plugins/)。
 
 ## `ocr config`
 

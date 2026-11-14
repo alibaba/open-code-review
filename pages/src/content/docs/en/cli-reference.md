@@ -18,6 +18,7 @@ Usage:
 Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
+  plugin       Manage local rule plugins
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
@@ -39,6 +40,7 @@ Examples:
 
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
+Use "ocr plugin -h" for more information about plugins.
 Use "ocr config" for more information about config.
 Use "ocr llm" for more information about LLM utilities.
 Use "ocr session -h" for more information about session inspection.
@@ -71,6 +73,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr review` | `ocr r` | Run a code review and emit comments. |
 | `ocr scan` | `ocr s` | Scan complete files without requiring a Git diff. |
 | `ocr rules check <file>` | — | Show which rule applies to a given file path and where it came from. |
+| `ocr plugin` | — | Install, inspect and manage local rule plugins. |
 | `ocr config set <key> <value>` | — | Persist a config value to `~/.opencodereview/config.json`. |
 | `ocr config unset custom_providers.<name>` | — | Delete a custom provider (clears active `provider`/`model` if it was active). |
 | `ocr config provider` | — | Interactive provider-setup TUI. |
@@ -574,6 +577,33 @@ Rule:
 
 Useful for debugging "why isn't my custom rule firing?" — see
 [Review Rules](../review-rules/) for the full priority story.
+
+## `ocr plugin`
+
+Manage user-wide snapshots of local rule packages. Installation defaults to disabled;
+enabled packages add rules to subsequent reviews and scans across repositories.
+
+| Command | Effect |
+|---|---|
+| `ocr plugin install <directory> [--enable]` | Copy a local package into the plugin store; optionally enable it. |
+| `ocr plugin list` | List installed IDs, versions, states and rule-pack counts. |
+| `ocr plugin show <id>` | Inspect the manifest summary, source, snapshot path and content SHA-256. |
+| `ocr plugin enable <id>` | Enable the installed package. |
+| `ocr plugin disable <id>` | Disable its rules. |
+| `ocr plugin remove <id>` | Unregister it; retain snapshots for running reviews. |
+
+All subcommands accept `--json` for structured output.
+
+```bash
+ocr plugin install ./examples/ocr-plugins/review-checklist --enable
+ocr plugin show review-checklist --json
+ocr rules check src/main.go
+```
+
+Remove an existing ID before reinstalling modified source. The registry is
+`~/.opencodereview/plugins/state.json`; snapshots are under `plugins/packages/`.
+See [Native Plugins](../native-plugins/) for the manifest, compatibility checks
+and rule ordering.
 
 ## `ocr config`
 
