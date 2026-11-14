@@ -678,6 +678,23 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	sem := make(chan struct{}, concurrency)
 	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute * time.Duration(a.args.Template.ReviewRounds())
 
+	// Checkpoints written as each group finishes, refreshed once every group
+	// is done: a later group can still file a finding against an earlier
+	// group's file (cross-file relocation), which the early checkpoint missed.
+	type doneCheckpoint struct {
+		diff        model.Diff
+		fingerprint string
+		comments    []model.LlmComment
+	}
+	var doneMu sync.Mutex
+	var doneCheckpoints []doneCheckpoint
+	recordDone := func(d model.Diff, fingerprint string, comments []model.LlmComment) {
+		a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+		doneMu.Lock()
+		doneCheckpoints = append(doneCheckpoints, doneCheckpoint{d, fingerprint, comments})
+		doneMu.Unlock()
+	}
+
 	var dispatched int64
 dispatchLoop:
 	for gi := range groups {
@@ -789,7 +806,7 @@ dispatchLoop:
 						fingerprint := reviewItemFingerprint(a.reviewMode(), d)
 						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 {
 							a.markCompleted(d)
-							a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+							recordDone(d, fingerprint, comments)
 							continue
 						}
 						a.markFailed(d, stop.class, stop.reason)
@@ -818,7 +835,7 @@ dispatchLoop:
 				fingerprint := reviewItemFingerprint(a.reviewMode(), d)
 				comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
 				a.markCompleted(d)
-				a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+				recordDone(d, fingerprint, comments)
 			}
 		}(group)
 	}
@@ -827,6 +844,13 @@ dispatchLoop:
 	// All subtasks finished — collect comments from the global collector once.
 	if a.args.CommentWorkerPool != nil {
 		a.args.CommentWorkerPool.Await()
+	}
+	// Resume restores the last done checkpoint per fingerprint, so rewrite any
+	// whose file gained or lost findings after its group finished.
+	for _, cp := range doneCheckpoints {
+		if final := a.args.CommentCollector.CommentsForPath(cp.diff.NewPath); !slices.Equal(final, cp.comments) {
+			a.session.RecordReviewItemDone(cp.diff.NewPath, cp.diff.OldPath, cp.diff.NewPath, cp.fingerprint, final)
+		}
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		a.recordContextFailure(ctxErr)
