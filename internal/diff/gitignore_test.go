@@ -138,6 +138,164 @@ func TestIsPathExcluded_DirectoryPatterns(t *testing.T) {
 	}
 }
 
+func TestIsPathExcluded_NegatedDirectoryPatterns(t *testing.T) {
+	tests := []struct {
+		name     string
+		relPath  string
+		patterns []string
+		want     bool
+	}{
+		{
+			name:     "root directory re-included",
+			relPath:  "src/a.go",
+			patterns: []string{"/*/", "!/src/"},
+			want:     false,
+		},
+		{
+			name:     "re-including parent does not re-include ignored child",
+			relPath:  "src/build/out.go",
+			patterns: []string{"build/", "/*/", "!/src/"},
+			want:     true,
+		},
+		{
+			name:     "nested ignored directory stays excluded",
+			relPath:  "ui/node_modules/x.js",
+			patterns: []string{"node_modules/", "/*/", "!/ui/"},
+			want:     true,
+		},
+		{
+			name:     "slashless parent negation does not re-include child",
+			relPath:  "src/vendor/lib.go",
+			patterns: []string{"vendor/", "!src/"},
+			want:     true,
+		},
+		{
+			name:     "file-style ignored directory stays excluded",
+			relPath:  "tools/build/x.go",
+			patterns: []string{"build", "!tools/"},
+			want:     true,
+		},
+		{
+			name:     "relative directory re-included",
+			relPath:  "src/a.go",
+			patterns: []string{"src/", "!src/"},
+			want:     false,
+		},
+		{
+			name:     "negated directory does not re-include files",
+			relPath:  "src/a.go",
+			patterns: []string{"*", "!*/"},
+			want:     true,
+		},
+		{
+			name:     "file negation cannot bypass an excluded parent",
+			relPath:  "src/a.go",
+			patterns: []string{"src/", "!src/a.go"},
+			want:     true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsPathExcluded(".", tt.relPath, tt.patterns)
+			if got != tt.want {
+				t.Errorf("IsPathExcluded(%q, %v) = %v, want %v", tt.relPath, tt.patterns, got, tt.want)
+			}
+		})
+	}
+}
+
+// Expectations below follow git's own verdicts, verified with
+// `git check-ignore --no-index` (PR #1794 review ground truth): a trailing
+// /** ignores the prefix directory's contents but not the directory itself,
+// and a slash-containing pattern stays relative to the .gitignore location
+// even without a leading "/".
+func TestIsPathExcluded_GlobstarAncestorRules(t *testing.T) {
+	tests := []struct {
+		name     string
+		relPath  string
+		patterns []string
+		want     bool
+	}{
+		{
+			name:     "trailing globstar ignores the contents",
+			relPath:  "src/a.go",
+			patterns: []string{"src/**"},
+			want:     true,
+		},
+		{
+			name: "trailing globstar does not exclude the directory itself, " +
+				"so a file negation can re-include",
+			relPath:  "src/a.go",
+			patterns: []string{"src/**", "!src/*.go"},
+			want:     false,
+		},
+		{
+			name: "file negation only reaches the globstar prefix's direct " +
+				"children",
+			relPath:  "src/sub/b.go",
+			patterns: []string{"src/**", "!src/*.go"},
+			want:     true,
+		},
+		{
+			name:     "mid-pattern globstar with trailing globstar stays excluded",
+			relPath:  "a/b/x.go",
+			patterns: []string{"a/**/b/**"},
+			want:     true,
+		},
+		{
+			name: "trailing globstar after a mid-pattern globstar does not " +
+				"exclude the inner directory itself",
+			relPath:  "a/b/x.go",
+			patterns: []string{"a/**/b/**", "!a/b/*.go"},
+			want:     false,
+		},
+		{
+			name:     "directory-only trailing globstar does not exclude the prefix",
+			relPath:  "src/a.go",
+			patterns: []string{"src/**/"},
+			want:     false,
+		},
+		{
+			name:     "directory-only trailing globstar ignores deeper directories",
+			relPath:  "src/sub/x.go",
+			patterns: []string{"src/**/"},
+			want:     true,
+		},
+		{
+			name:     "root-relative rule does not exclude an unrelated subtree",
+			relPath:  "src/docs/generated/a.go",
+			patterns: []string{"docs/generated"},
+			want:     false,
+		},
+		{
+			name:     "root-relative rule control at the repository root",
+			relPath:  "docs/generated/a.go",
+			patterns: []string{"docs/generated"},
+			want:     true,
+		},
+		{
+			name:     "anchored root-relative rule behaves the same",
+			relPath:  "src/docs/generated/a.go",
+			patterns: []string{"/docs/generated"},
+			want:     false,
+		},
+		{
+			name:     "anchored root-relative rule control",
+			relPath:  "docs/generated/a.go",
+			patterns: []string{"/docs/generated"},
+			want:     true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsPathExcluded(".", tt.relPath, tt.patterns)
+			if got != tt.want {
+				t.Errorf("IsPathExcluded(%q, %v) = %v, want %v", tt.relPath, tt.patterns, got, tt.want)
+			}
+		})
+	}
+}
+
 // allowListGitignore is the "ignore everything, then re-include" idiom from
 // github/gitignore's Go.AllowList.gitignore. Repositories using it are the
 // reason negation patterns cannot be discarded: the leading `*` matches every

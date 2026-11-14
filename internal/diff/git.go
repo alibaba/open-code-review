@@ -304,26 +304,46 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 		return true
 	}
 
-	excluded := false
+	// Git resolves ignore rules separately for a path and each of its parent
+	// directories. Keeping those results separate matters for patterns such as
+	// `*` + `!*/`: the negation re-includes directories for traversal, but does
+	// not re-include files matched by `*`.
+	parts := strings.Split(filepath.ToSlash(relPath), "/")
+	directoryExcluded := make([]bool, len(parts)-1)
+	fileExcluded := false
 	for _, pat := range gitignorePatterns {
 		body, negated := strings.CutPrefix(pat, "!")
 		if body == "" {
 			continue
 		}
 
-		// Directory-only patterns (trailing "/") apply to directories, never to
-		// files. Git uses a negated one such as `!*/` to keep descending into
-		// subdirectories, not to re-admit the files inside them — honouring it
-		// here would readmit everything below the root.
-		if negated && strings.HasSuffix(body, "/") {
-			continue
+		directoryOnly := strings.HasSuffix(body, "/")
+		if directoryOnly {
+			body = strings.TrimSuffix(body, "/")
+		} else if matchGitignoreBody(relPath, body) {
+			fileExcluded = !negated
 		}
 
-		if matchGitignoreBody(relPath, body) {
-			excluded = !negated
+		for i := range directoryExcluded {
+			directoryPath := strings.Join(parts[:i+1], "/")
+			var matched bool
+			if directoryOnly {
+				matched = matchGitignoreDirectoryEntry(directoryPath, body)
+			} else {
+				matched = matchGitignoreAncestorBody(directoryPath, body)
+			}
+			if matched {
+				directoryExcluded[i] = !negated
+			}
 		}
 	}
-	return excluded
+
+	for _, excluded := range directoryExcluded {
+		if excluded {
+			return true
+		}
+	}
+	return fileExcluded
 }
 
 // isProviderDirExcluded reports whether relPath matches the provider's
@@ -364,8 +384,7 @@ func matchGitignoreBody(relPath, body string) bool {
 	// "**" is not expressible with filepath.Match, so patterns containing it go
 	// through doublestar, which implements gitignore's globstar semantics.
 	if strings.Contains(body, "**") {
-		matched, err := doublestar.Match(body, relPath)
-		return err == nil && matched
+		return matchGitignoreGlobstar(body, relPath)
 	}
 
 	// Patterns without / match basename — unless anchored, where the pattern
@@ -389,6 +408,11 @@ func matchGitignoreBody(relPath, body string) bool {
 	// The leading "/" makes the suffix start on a path component: without it
 	// "src/main.go" also matches "othersrc/main.go", because the tail of
 	// "othersrc" completes the pattern.
+	//
+	// This fallback serves file paths only. Ancestor directories are resolved
+	// by matchGitignoreAncestorBody, which skips it: git anchors a
+	// slash-containing pattern to the .gitignore's location, so the root rule
+	// `docs/generated` never reaches src/docs/generated.
 	if !anchored && strings.HasSuffix(relPath, "/"+body) {
 		return true
 	}
@@ -396,18 +420,76 @@ func matchGitignoreBody(relPath, body string) bool {
 	return false
 }
 
-func matchGitignoreDirectory(relPath, pattern string) bool {
-	pattern, anchored := strings.CutPrefix(pattern, "/")
-	if pattern == "" {
-		return false
+// matchGitignoreGlobstar matches a "**" pattern against a path through
+// doublestar, with one git rule doublestar does not implement: a trailing
+// /** matches everything *inside* the prefix directory, never the prefix
+// itself. Git leaves `src` unignored under `src/**` (only its contents are
+// ignored), which is what lets a negation like `!src/*.go` re-admit
+// src/a.go — and src/a.go stays visible under `src/**/` for the same
+// reason. doublestar accepts the empty suffix, so the trailing case is
+// matched as prefix-plus-at-least-one-component.
+func matchGitignoreGlobstar(pattern, path string) bool {
+	if !strings.HasSuffix(pattern, "/**") {
+		matched, err := doublestar.Match(pattern, path)
+		return err == nil && matched
+	}
+	deepened := strings.TrimSuffix(pattern, "/**") + "/**/*"
+	matched, err := doublestar.Match(deepened, path)
+	return err == nil && matched
+}
+
+// matchGitignoreAncestorBody reports whether a pattern body excludes an
+// ancestor directory by the directory's own full path. It mirrors
+// matchGitignoreBody except that the path-suffix fallback is file-only:
+// git resolves an ancestor directory against its full path, so reusing the
+// fallback here would let the root rule `docs/generated` exclude the
+// unrelated src/docs/generated subtree.
+func matchGitignoreAncestorBody(directoryPath, body string) bool {
+	// A leading "/" anchors the pattern to the repository root.
+	anchored := false
+	if trimmed, ok := strings.CutPrefix(body, "/"); ok {
+		body, anchored = trimmed, true
 	}
 
+	if strings.Contains(body, "**") {
+		return matchGitignoreGlobstar(body, directoryPath)
+	}
+
+	// Slashless patterns match a directory name at any depth — unless
+	// anchored, where the pattern addresses that name at the root only.
+	if !strings.Contains(body, "/") {
+		target := filepath.Base(directoryPath)
+		if anchored {
+			target = directoryPath
+		}
+		matched, _ := filepath.Match(body, target)
+		return matched
+	}
+
+	// Slash-containing patterns are relative to the .gitignore location and
+	// match the directory's full path only — no suffix fallback.
+	matched, _ := filepath.Match(body, directoryPath)
+	return matched
+}
+
+func matchGitignoreDirectory(relPath, pattern string) bool {
 	lastSlash := strings.LastIndex(relPath, "/")
 	if lastSlash < 0 {
 		return false
 	}
+	return matchGitignoreDirectoryPath(relPath[:lastSlash], pattern)
+}
 
-	components := strings.Split(relPath[:lastSlash], "/")
+// matchGitignoreDirectoryPath reports whether pattern matches any component
+// in the given directory path. pattern may begin with "/" to anchor it at the
+// repository root.
+func matchGitignoreDirectoryPath(directoryPath, pattern string) bool {
+	pattern, anchored := strings.CutPrefix(pattern, "/")
+	if pattern == "" || directoryPath == "" {
+		return false
+	}
+
+	components := strings.Split(directoryPath, "/")
 	// Slash-containing patterns are relative to the .gitignore location;
 	// slashless patterns match a directory name at any depth.
 	matchFullPath := anchored || strings.Contains(pattern, "/")
@@ -422,6 +504,28 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 		}
 	}
 	return false
+}
+
+// matchGitignoreDirectoryEntry reports whether pattern matches this directory
+// itself. Unlike matchGitignoreDirectoryPath, it does not match ancestor
+// components because each directory has a separate exclusion state.
+func matchGitignoreDirectoryEntry(directoryPath, pattern string) bool {
+	pattern, anchored := strings.CutPrefix(pattern, "/")
+	if pattern == "" || directoryPath == "" {
+		return false
+	}
+
+	// An unanchored pattern without slashes matches a directory name at any
+	// depth. Anchored or slash-containing patterns must match its full path.
+	if !anchored && !strings.Contains(pattern, "/") {
+		if lastSlash := strings.LastIndex(directoryPath, "/"); lastSlash >= 0 {
+			directoryPath = directoryPath[lastSlash+1:]
+		}
+	}
+	// The trailing-/** rule of matchGitignoreGlobstar applies here too: a
+	// directory-only pattern like `src/**/` matches directories strictly
+	// inside src, never src itself, so src/a.go is not ignored either.
+	return matchGitignoreGlobstar(pattern, directoryPath)
 }
 
 // partitionDiffs keeps diffs filtered by built-in directory rules available
