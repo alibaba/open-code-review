@@ -470,3 +470,56 @@ func TestExecute_WithEndLine(t *testing.T) {
 		t.Error("line 5 should not appear")
 	}
 }
+
+func TestFileRead_StringTypedLineArgsAreCoerced(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "range.txt", "a\nb\nc\nd\ne\nf\ng\nh\n")
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	result, err := p.Execute(context.Background(), map[string]any{
+		"file_path":  "range.txt",
+		"start_line": "3",
+		"end_line":   "5",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "LINE_RANGE: 3-5") {
+		t.Errorf("string-typed line args ignored, got: %s", result)
+	}
+	if !strings.Contains(result, "3|c") || !strings.Contains(result, "5|e") {
+		t.Errorf("expected lines 3-5, got: %s", result)
+	}
+}
+
+func TestFileRead_NonNumericLineArgIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "plain.txt", "a\nb\nc\n")
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	_, err := p.Execute(context.Background(), map[string]any{
+		"file_path":  "plain.txt",
+		"start_line": "abc",
+	})
+	if err == nil {
+		t.Fatal("expected an error for a non-numeric start_line")
+	}
+	if !strings.Contains(err.Error(), `start_line must be a number, got "abc"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	_, err = p.Execute(context.Background(), map[string]any{
+		"file_path": "plain.txt",
+		"end_line":  true,
+	})
+	if err == nil {
+		t.Fatal("expected an error for a bool end_line")
+	}
+	if !strings.Contains(err.Error(), "end_line must be a number, got bool") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
