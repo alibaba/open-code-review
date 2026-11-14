@@ -1,0 +1,43 @@
+# OpenCodeReview - GitLab Code Quality report (no API token, no posting script)
+#
+# Findings appear in the merge request's Code Quality widget (all GitLab
+# tiers) and, on GitLab Ultimate, as annotations in the "Changes" tab.
+# Nothing is posted through the API, so fork MRs work without extra tokens.
+# Pair it with .gitlab-ci.yml (inline discussions) or use it on its own.
+#
+# Required CI/CD Variables (Settings -> CI/CD -> Variables):
+#   OCR_LLM_URL        - LLM API endpoint (OpenAI-compatible)
+#   OCR_LLM_AUTH_TOKEN - Authentication token for the LLM API (mark as "Masked")
+#   OCR_LLM_MODEL      - Model name
+# Optional:
+#   OCR_VERSION        - npm version spec (default: latest)
+
+ocr-code-quality:
+  stage: test
+  image: node:20
+  interruptible: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    GIT_DEPTH: 0  # merge-base diff needs full history
+  script:
+    - npm install -g "@alibaba-group/open-code-review@${OCR_VERSION:-latest}"
+    - |
+      : "${OCR_LLM_URL:?set OCR_LLM_URL in Settings -> CI/CD -> Variables}"
+      : "${OCR_LLM_AUTH_TOKEN:?set OCR_LLM_AUTH_TOKEN in Settings -> CI/CD -> Variables}"
+      : "${OCR_LLM_MODEL:?set OCR_LLM_MODEL in Settings -> CI/CD -> Variables}"
+      ocr config set llm.url "$OCR_LLM_URL"
+      ocr config set llm.auth_token "$OCR_LLM_AUTH_TOKEN"
+      ocr config set llm.model "$OCR_LLM_MODEL"
+      ocr config set llm.use_anthropic false
+    - |
+      ocr review \
+        --from "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" \
+        --to "${CI_COMMIT_SHA}" \
+        --format codequality \
+        --audience agent \
+        --output gl-code-quality-report.json
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality-report.json
