@@ -215,11 +215,15 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return fmt.Errorf("prepare code tools: %w", err)
 	}
 	if codeTools.access != nil {
-		mainToolDefs, err = toolsconfig.WithComparisonSides(mainToolDefs)
+		withSides := toolsconfig.WithComparisonSides
+		if codeTools.reader.Mode == tool.ModeWorkspace {
+			withSides = toolsconfig.WithWorkspaceSides
+		}
+		mainToolDefs, err = withSides(mainToolDefs)
 		if err != nil {
 			return err
 		}
-		planToolDefs, err = toolsconfig.WithComparisonSides(planToolDefs)
+		planToolDefs, err = withSides(planToolDefs)
 		if err != nil {
 			return err
 		}

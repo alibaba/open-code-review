@@ -6,6 +6,8 @@ package session
 import (
 	"errors"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 // TestManifestBuilderNilReceiver covers the `if b == nil` guard on every
@@ -26,6 +28,7 @@ func TestManifestBuilderNilReceiver(t *testing.T) {
 		"SetRunFailure":          b.SetRunFailure(RunFailureBudget, "r"),
 		"SetPendingFailureCause": b.SetPendingFailureCause(FailureBudget, "r"),
 		"RegisterSelected":       b.RegisterSelected(CoverageItem{ItemID: "a"}),
+		"RegisterExcluded":       b.RegisterExcluded(ExcludedItem{ItemID: "x", ExcludeReason: model.ExcludeBinary}),
 		"SealSelected":           b.SealSelected(),
 		"MarkCompleted":          b.MarkCompleted("a"),
 		"MarkReused":             b.MarkReused("a"),
@@ -76,6 +79,7 @@ func TestManifestBuilderFrozenNoOp(t *testing.T) {
 		"SetRunFailure":          b.SetRunFailure(RunFailureBudget, "r"),
 		"SetPendingFailureCause": b.SetPendingFailureCause(FailureBudget, "r"),
 		"RegisterSelected":       b.RegisterSelected(CoverageItem{ItemID: "z"}),
+		"RegisterExcluded":       b.RegisterExcluded(ExcludedItem{ItemID: "y", ExcludeReason: model.ExcludeBinary}),
 		"SealSelected":           b.SealSelected(),
 		"MarkCompleted":          b.MarkCompleted("a"),
 	}

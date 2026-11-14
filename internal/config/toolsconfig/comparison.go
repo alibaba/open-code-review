@@ -13,13 +13,21 @@ import (
 )
 
 func WithComparisonSides(definitions []llm.ToolDef) ([]llm.ToolDef, error) {
+	return withCodeAccessSides(definitions, false)
+}
+
+func WithWorkspaceSides(definitions []llm.ToolDef) ([]llm.ToolDef, error) {
+	return withCodeAccessSides(definitions, true)
+}
+
+func withCodeAccessSides(definitions []llm.ToolDef, workspace bool) ([]llm.ToolDef, error) {
 	result := append([]llm.ToolDef(nil), definitions...)
 	for index, definition := range result {
 		name := definition.Function.Name
 		if name != "file_read" && name != "file_find" && name != "code_search" {
 			continue
 		}
-		updated, err := comparisonDefinition(definition.Function)
+		updated, err := comparisonDefinition(definition.Function, workspace)
 		if err != nil {
 			return nil, fmt.Errorf("add comparison sides to %s: %w", name, err)
 		}
@@ -28,7 +36,7 @@ func WithComparisonSides(definitions []llm.ToolDef) ([]llm.ToolDef, error) {
 	return result, nil
 }
 
-func comparisonDefinition(function llm.FunctionDef) (llm.FunctionDef, error) {
+func comparisonDefinition(function llm.FunctionDef, workspace bool) (llm.FunctionDef, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(function.RawDefinition, &fields); err != nil {
 		return llm.FunctionDef{}, err
@@ -61,7 +69,11 @@ func comparisonDefinition(function llm.FunctionDef) (llm.FunctionDef, error) {
 	description = strings.ReplaceAll(description,
 		"This tool searches in the current version of files.",
 		"This tool searches in the selected side of the current comparison.")
-	description += "\n\nOmit side or use side=new for the reviewed new version. Use side=old for the frozen comparison base, not the current target branch tip. For renamed files, use the path on the selected side; paths are not automatically translated. An empty old tree contains no files."
+	if workspace {
+		description += "\n\nOmit side or use side=new for the live working tree, not the index. The working tree is not snapshotted and may change during review. Use side=old for HEAD frozen when this review started, not HEAD's parent. Before the first commit, the old side is an empty tree. For renamed files, use the path on the selected side; paths are not automatically translated. An empty old tree contains no files."
+	} else {
+		description += "\n\nOmit side or use side=new for the reviewed new version. Use side=old for the frozen comparison base, not the current target branch tip. For renamed files, use the path on the selected side; paths are not automatically translated. An empty old tree contains no files."
+	}
 	fields["description"], _ = json.Marshal(description)
 	raw, err := json.Marshal(fields)
 	if err != nil {

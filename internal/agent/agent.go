@@ -139,8 +139,8 @@ type Args struct {
 	Resume *session.ResumeState
 
 	// SealedInput pins this run to commit endpoints a pre-flight resolve already
-	// froze, instead of resolving From/To/Commit again. Admission and code tools
-	// must use the same immutable endpoints as the diff.
+	// froze, instead of resolving From/To/Commit or workspace HEAD again. Admission
+	// and code tools must use the same immutable endpoints as the diff.
 	SealedInput *diff.InputResolution
 
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
@@ -324,6 +324,11 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) changed, reviewing %d in %s\n", totalChanged, reviewCount, a.args.RepoDir)
 
 	a.logExclusions(decisions)
+	// Register before the early return so skipped runs also explain exclusions.
+	// A missing exclusion record must not fail the selected review.
+	if err := a.registerExclusions(decisions); err != nil {
+		a.recordWarning("manifest_error", "", err.Error())
+	}
 	a.diffs = kept
 
 	// One run-level skip signal, keyed on the selected set rather than on what
@@ -554,7 +559,7 @@ func (a *Agent) newDiffProvider() *diff.Provider {
 	// the sealed base already is that merge-base and merge-base(base, head) is base
 	// whenever base is an ancestor of head; commit mode keeps its first-parent
 	// comparison, which is derived from the commit rather than from its spelling.
-	// Workspace mode seals no head and is left alone.
+	// Workspace mode seals only its base and keeps reading the live working tree.
 	from, to, commit := a.args.From, a.args.To, a.args.Commit
 	if s := a.args.SealedInput; s != nil && s.ResolvedHead != "" {
 		switch {
@@ -571,6 +576,9 @@ func (a *Agent) newDiffProvider() *diff.Provider {
 	case from != "" && to != "":
 		return diff.NewProvider(a.args.RepoDir, from, to, a.args.GitRunner)
 	default:
+		if a.args.SealedInput != nil {
+			return diff.NewWorkspaceProviderWithBase(a.args.RepoDir, *a.args.SealedInput, a.args.GitRunner)
+		}
 		return diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
 	}
 }
@@ -1257,6 +1265,33 @@ func (a *Agent) registerCoverage(diffs []model.Diff) error {
 		}
 	}
 	return b.SealSelected()
+}
+
+// registerExclusions records selection exclusions, including deletions.
+func (a *Agent) registerExclusions(decisions []fileDecision) error {
+	b := a.session.Manifest()
+	if b == nil {
+		return nil
+	}
+	var errs []error
+	for _, dec := range decisions {
+		if dec.selected() {
+			continue
+		}
+		oldPath, newPath := manifestPaths(dec.Diff)
+		item := session.ExcludedItem{
+			ItemID:        a.manifestItemID(dec.Diff),
+			Path:          effectivePath(dec.Diff),
+			ExcludeReason: dec.Reason,
+		}
+		if oldPath != "" && newPath != "" && oldPath != newPath {
+			item.OldPath = oldPath
+		}
+		if err := b.RegisterExcluded(item); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // finalizeManifest freezes the run's coverage builder and stores the immutable
