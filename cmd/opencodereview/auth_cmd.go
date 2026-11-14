@@ -3,16 +3,23 @@
 
 package main
 
-import "github.com/spf13/cobra"
+import (
+	"fmt"
+
+	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/spf13/cobra"
+)
 
 var (
 	authLoginDevice    bool
 	authLoginNoBrowser bool
 )
 
+var runOfficialAuth = llm.RunOAuthAuth
+
 var authCmd = &cobra.Command{
 	Use:   "auth",
-	Short: "Manage Sign in with ChatGPT authentication",
+	Short: "Manage Sign in with ChatGPT and Claude subscription authentication",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -21,9 +28,12 @@ var authCmd = &cobra.Command{
 
 var authLoginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "Sign in with ChatGPT",
+	Short: "Sign in with ChatGPT or through the Claude Code CLI",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if official, err := runOfficialProviderAuth(cmd, "login"); official {
+			return err
+		}
 		if err := validateAuthProvider(); err != nil {
 			return err
 		}
@@ -33,9 +43,12 @@ var authLoginCmd = &cobra.Command{
 
 var authStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show saved ChatGPT registrations and authentication status",
+	Short: "Show saved ChatGPT registrations or Claude Code login status",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if official, err := runOfficialProviderAuth(cmd, "status"); official {
+			return err
+		}
 		if err := validateAuthProvider(); err != nil {
 			return err
 		}
@@ -45,14 +58,33 @@ var authStatusCmd = &cobra.Command{
 
 var authLogoutCmd = &cobra.Command{
 	Use:   "logout",
-	Short: "Revoke the ChatGPT session and clear local tokens",
+	Short: "Revoke the ChatGPT session or log out of Claude Code",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if official, err := runOfficialProviderAuth(cmd, "logout"); official {
+			return err
+		}
 		if err := validateAuthProvider(); err != nil {
 			return err
 		}
 		return runChatGPTLogout(cmd.Context(), cmd.OutOrStdout())
 	},
+}
+
+// runOfficialProviderAuth hands anthropic-oauth to the Claude Code CLI, which
+// owns that credential store. The ChatGPT login and registration flags have
+// no meaning there, so they are rejected rather than ignored.
+func runOfficialProviderAuth(cmd *cobra.Command, action string) (bool, error) {
+	preset, ok := llm.LookupProvider(authProvider)
+	if !ok || !llm.IsOAuthProtocol(preset.Protocol) {
+		return false, nil
+	}
+	for _, name := range []string{"account", "new-account", "enable-plan", "no-browser", "device"} {
+		if flag := cmd.Flags().Lookup(name); flag != nil && flag.Changed {
+			return true, fmt.Errorf("--%s is not supported for --provider %s", name, authProvider)
+		}
+	}
+	return true, runOfficialAuth(cmd.Context(), authProvider, action, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 }
 
 func init() {

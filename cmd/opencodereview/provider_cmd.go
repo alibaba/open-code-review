@@ -315,6 +315,9 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 
 	fmt.Printf("\nProvider set to: %s\n", result.provider)
 	fmt.Printf("Model: %s\n", model)
+	if llm.IsOAuthProtocol(preset.Protocol) {
+		fmt.Printf("Sign in with 'ocr auth login --provider %s' if you have not already signed in.\n", result.provider)
+	}
 
 	fmt.Println("\nTesting connection...")
 	if err := runLLMTestPath(configPath); err != nil {

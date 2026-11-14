@@ -26,10 +26,13 @@ var logoutChatGPT = func(ctx context.Context, store chatgptauth.Store, account s
 }
 
 func validateAuthProvider() error {
-	if authProvider != "chatgpt" {
-		return fmt.Errorf("unknown auth provider %q; expected chatgpt", authProvider)
+	if authProvider == "chatgpt" {
+		return nil
 	}
-	return nil
+	if preset, ok := llm.LookupProvider(authProvider); ok && llm.IsOAuthProtocol(preset.Protocol) {
+		return fmt.Errorf("auth provider %q is managed by its official CLI and has no saved ChatGPT registrations", authProvider)
+	}
+	return fmt.Errorf("unknown auth provider %q; expected chatgpt or anthropic-oauth", authProvider)
 }
 func runChatGPTLogin(ctx context.Context, out io.Writer) error {
 	if authLoginDevice {
@@ -104,7 +107,7 @@ func runChatGPTLogout(ctx context.Context, out io.Writer) error {
 	return err
 }
 func init() {
-	authCmd.PersistentFlags().StringVar(&authProvider, "provider", "chatgpt", "authentication provider: chatgpt")
+	authCmd.PersistentFlags().StringVar(&authProvider, "provider", "chatgpt", "authentication provider: chatgpt or anthropic-oauth")
 	authCmd.PersistentFlags().StringVar(&authAccount, "account", "", "ChatGPT registration client ID (default: active account)")
 	authLoginCmd.Flags().BoolVar(&authEnablePlan, "enable-plan", false, "request consent for plan usage on a retained ChatGPT registration")
 	authLoginCmd.Flags().BoolVar(&authNewAccount, "new-account", false, "register a separate ChatGPT account or workspace")
