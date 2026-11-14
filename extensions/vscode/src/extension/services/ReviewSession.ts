@@ -4,9 +4,20 @@
 import { CliResult, CliRunOptions, LogLine, ReviewState } from '@shared/types';
 import { CliService } from './CliService';
 
+type CliStatus = CliResult['status'];
+
+// Mirrors the IntelliJ plugin's resultToState: only a recognized, non-failing terminal result
+// can report an empty review. A missing or unknown status is treated as a failure.
+const SUPPORTED_STATUSES: ReadonlySet<CliStatus> = new Set<CliStatus>([
+  'success', 'complete', 'completed_with_warnings', 'completed_with_errors', 'partial', 'failed', 'skipped',
+]);
+// Some or all items were not reviewed, so these are never a clean pass.
+const INCOMPLETE_STATUSES: ReadonlySet<CliStatus> = new Set<CliStatus>(['completed_with_errors', 'partial', 'failed']);
+
 export function resultToState(result: CliResult): ReviewState {
+  if (!SUPPORTED_STATUSES.has(result.status)) return 'failed';
   if (result.comments.length > 0) return 'done';
-  if (result.status === 'completed_with_errors') return 'failed';
+  if (INCOMPLETE_STATUSES.has(result.status)) return 'failed';
   return 'empty';
 }
 
@@ -30,7 +41,11 @@ export class ReviewSession {
         cb.onState('cancelled');
         return;
       }
-      cb.onState(resultToState(result));
+      const state = resultToState(result);
+      const error = state === 'failed'
+        ? result.message || `Review did not complete successfully (status: ${result.status || 'missing'})`
+        : undefined;
+      cb.onState(state, error);
       cb.onDone(result);
     } catch (e) {
       if (this.cancelled) {
