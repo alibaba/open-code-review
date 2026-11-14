@@ -470,3 +470,20 @@ ocr config set language English
 
 - [クイックスタート](../quickstart/)——最小限のセットアップと初回のレビュー。
 - [CLI リファレンス](../cli-reference/)——review コマンドが受け入れる各引数。
+
+## バージョン管理
+
+既定は Git です。ローカルの Lore リポジトリをレビューするには、Lore CLI をインストールして PATH に追加し、ユーザー設定で Lore を選択します。
+
+```sh
+ocr config set vcs_provider lore
+```
+
+Lore リポジトリで作業ツリーの変更をプレビューしたり、番号または署名でローカルのリビジョンをレビューしたりできます。コミットの比較対象は最初の親リビジョンです。
+
+```sh
+ocr review --preview
+ocr review --commit 42
+```
+
+Git に戻すには `ocr config unset vcs_provider` を実行します。Lore は作業ツリーのスキャンと変更前後のファイル読み取りに対応しています。共通祖先を基準とする比較（`--from/--to`）と `code_search` ツールには現在対応していません。

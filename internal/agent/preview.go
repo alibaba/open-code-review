@@ -7,8 +7,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 // ExcludeReason / DiffPreview / DiffPreviewEntry are now type aliases of
@@ -111,11 +111,10 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 // loadPreviewDiffs loads the normal review input plus provider-level directory
 // exclusions. Only Preview needs the excluded payload, so normal review runs do
 // not retain potentially large unified diffs or file contents for them.
-func (a *Agent) loadPreviewDiffs(ctx context.Context) (diff.DiffSet, error) {
-	provider := a.newDiffProvider()
-	set, err := provider.GetDiffSet(ctx)
+func (a *Agent) loadPreviewDiffs(ctx context.Context) (vcs.Changes, error) {
+	set, err := a.loadRepositoryChanges(ctx)
 	if err != nil {
-		return diff.DiffSet{}, err
+		return vcs.Changes{}, err
 	}
 	a.diffs = set.Included
 	for i := range a.diffs {

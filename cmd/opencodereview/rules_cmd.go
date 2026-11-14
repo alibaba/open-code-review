@@ -43,12 +43,12 @@ func init() {
 }
 
 func runRulesCheck(filePath string) error {
-	resolvedRepo, err := resolveRepoDir(rulesCheckRepoDir)
+	resolvedRepo, source, _, err := openConfiguredRepository(rulesCheckRepoDir, true, nil)
 	if err != nil {
 		return err
 	}
 
-	resolver, _, err := rules.NewResolver(resolvedRepo, rulesCheckRulePath, rules.ResolverOptions{})
+	resolver, _, err := rules.NewResolver(resolvedRepo, rulesCheckRulePath, rules.ResolverOptions{Files: source})
 	if err != nil {
 		return fmt.Errorf("load rules: %w", err)
 	}
