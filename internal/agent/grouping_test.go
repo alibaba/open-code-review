@@ -669,6 +669,18 @@ func TestResolveGroupSystemRule(t *testing.T) {
 		}
 	})
 
+	// Regression test: a deleted file's diff carries the /dev/null sentinel in
+	// NewPath and its real name in OldPath. resolveGroupSystemRule must resolve
+	// the rule by the real path, otherwise a deleted .go file is reviewed under
+	// the empty-extension default checklist instead of the Go rule.
+	t.Run("deleted file resolves its real-path rule", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		deleted := model.Diff{OldPath: "removed.go", NewPath: "/dev/null", IsDeleted: true}
+		if got := a.resolveGroupSystemRule([]model.Diff{deleted}); got != goRule {
+			t.Errorf("got %q, want %q for a deleted .go file", got, goRule)
+		}
+	})
+
 	// Regression test: resolveGroupSystemRule must pass the path through
 	// verbatim, not lowercased. The sniffer-wrapped resolver does its own
 	// internal lowercasing for glob matching, but also does real file I/O
