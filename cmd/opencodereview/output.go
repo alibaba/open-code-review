@@ -22,6 +22,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/suggestdiff"
+	"github.com/alibaba/open-code-review/internal/workflow"
 )
 
 func outputText(comments []model.LlmComment) {
@@ -336,6 +337,10 @@ type jsonLLMIdentity struct {
 }
 
 type jsonOutput struct {
+	SchemaVersion  string                `json:"schema_version,omitempty"`
+	ReviewStatus   string                `json:"review_status,omitempty"`
+	Analysis       *string               `json:"analysis,omitempty"`
+	AnalysisMeta   *workflow.Report      `json:"analysis_meta,omitempty"`
 	Status         string                `json:"status"`
 	LLM            *jsonLLMIdentity      `json:"llm,omitempty"`
 	TraceID        string                `json:"trace_id,omitempty"`
@@ -375,7 +380,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, toolFailures []llmloop.ToolFailureDetail,
 	traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
-	retryReport *llm.RetryReport, groups []agent.FileGroupInfo) error {
+	retryReport *llm.RetryReport, groups []agent.FileGroupInfo, analysis ...*analysisOutput) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	payload := jsonOutput{
 		Status:   "success",
@@ -430,6 +435,15 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	// and the budget reason stays observable through three deterministic outlets:
 	// summary.budget_exceeded, the token_budget_reached warning, and
 	// coverage.failed[].classification == "budget".
+	if len(analysis) > 0 && analysis[0] != nil {
+		combined := analysis[0]
+		payload.SchemaVersion = "ocr.review-with-analysis/v2"
+		payload.Analysis = &combined.Report.Markdown
+		payload.AnalysisMeta = combined.Report
+		payload.ReviewStatus = combined.ReviewStatus
+		payload.Status = combined.status()
+		payload.Message = fmt.Sprintf("Review: %s. Analysis execution: %s. Model-declared completeness: %s (not a quality guarantee).", combined.ReviewStatus, combined.Report.Status, combined.Report.DeclaredCompletion)
+	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)

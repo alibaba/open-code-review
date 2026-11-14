@@ -1,0 +1,24 @@
+{
+  "version": "ocr.behavior-prompts/v3",
+  "MAIN_TASK": {
+    "tools": ["file_read", "code_search", "file_find", "file_read_diff", "context_read", "submit_analysis"],
+    "messages": [
+      {"role": "system", "prompt_file": "behavior_system.md"},
+      {"role": "system", "prompt_file": "behavior_investigation.md"},
+      {"role": "user", "prompt_file": "behavior_task.md"}
+    ]
+  },
+  "MEMORY_COMPRESSION_TASK": {
+    "messages": [
+      {"role": "system", "prompt_file": "behavior_compression_system.md"},
+      {"role": "user", "prompt_file": "behavior_compression_user.md"}
+    ]
+  },
+  "FINAL_ROUND": {
+    "tools": ["submit_analysis"],
+    "messages": [{"role": "user", "prompt_file": "behavior_final_round.md"}]
+  },
+  "MAX_TOKENS": 200000,
+  "MAX_COMPLETION_TOKENS": 16384,
+  "MAX_TOOL_REQUEST_TIMES": 100
+}

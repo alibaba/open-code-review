@@ -197,6 +197,7 @@ func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 // adjusted template (mutated in place via ApplyLanguage), the LLM client,
 // the resolved model name, and a fresh comment collector.
 type llmRuntime struct {
+	Endpoint  llm.ResolvedEndpoint
 	Client    llm.LLMClient
 	Model     string
 	Provider  string // resolved provider name (non-secret label; empty for non-provider endpoints)
@@ -263,6 +264,7 @@ func loadLLMRuntime(tpl *template.Template, resolveOpts llm.ResolveOptions) (*ll
 	}
 
 	return &llmRuntime{
+		Endpoint:       ep,
 		Client:         llm.NewLLMClient(ep, retryCollector, rawHolder),
 		Model:          ep.Model,
 		Provider:       ep.Provider,
@@ -830,12 +832,13 @@ func emitRunResult(
 
 	traceID := telemetry.TraceIDFromContext(ctx)
 	manifest := ag.RunManifest()
+	analysis := analysisOutputOf(ag)
 
 	// JSON and SARIF are machine-readable formats written to stdout; they
 	// share the same suppression of trace summaries and early stdout restore.
 	machineReadable := isMachineReadable(outputFormat)
 
-	if machineReadable && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
+	if machineReadable && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 && analysis == nil {
 		if outputFormat == "json" {
 			return outputJSONNoFiles(traceID, llmIdentity, out)
 		}
@@ -874,12 +877,15 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, analysis)
 	}
 	if outputFormat == "sarif" {
 		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
+	if analysis != nil {
+		outputAnalysisText(out, analysis)
+	}
 	// Between the comments/warnings block and the project summary: the report is
 	// run-level diagnostics about how the comments were obtained, so it reads
 	// after them but must not separate the summary from the end of output.

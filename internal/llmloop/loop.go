@@ -5,6 +5,7 @@ package llmloop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -353,6 +354,9 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 			telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 			llmSpan.End()
 			telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
+			if errors.Is(err, llm.ErrTokenBudget) {
+				return false, StopTokenBudget, nil
+			}
 			return false, StopNone, fmt.Errorf("LLM completion error: %w", err)
 		}
 		rec.SetResponse(resp, duration)
@@ -448,11 +452,16 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 	switch stop {
 	case StopMaxRounds:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", taskKey)
-		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
 	case StopTokenBudget:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Token budget exceeded (used %d > budget %d) for %s.\n",
 			r.TotalTokensUsed(), r.deps.MaxTokensBudget, taskKey)
-		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
+	}
+	if stop == StopMaxRounds || stop == StopTokenBudget {
+		var graceStop MainLoopStop
+		completed, graceStop = r.runGraceRound(ctx, messages, taskKey, sessionID)
+		if graceStop != StopNone {
+			stop = graceStop
+		}
 	}
 	return completed, stop, nil
 }
@@ -475,17 +484,17 @@ func (r *Runner) tokenBudgetExceeded() bool {
 	return budget > 0 && r.TotalTokensUsed() > budget
 }
 
-func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID string) bool {
+func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID string) (bool, MainLoopStop) {
 	graceDefs := r.task.Grace.Tools
 	if len(graceDefs) == 0 {
-		return false
+		return false, StopNone
 	}
 
 	messages = append(messages, r.task.Grace.Messages...)
 
 	if ctx.Err() != nil {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round skipped for %s: context cancelled\n", taskKey)
-		return false
+		return false, StopNone
 	}
 
 	fs := r.deps.Session.GetOrCreateFileSession(taskKey)
@@ -509,7 +518,10 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 		llmSpan.End()
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", taskKey, err)
-		return false
+		if errors.Is(err, llm.ErrTokenBudget) {
+			return false, StopTokenBudget
+		}
+		return false, StopNone
 	}
 
 	rec.SetResponse(resp, duration)
@@ -527,7 +539,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
-		return false
+		return false, StopNone
 	}
 
 	// Any explicit failure keeps the round incomplete, even if another tool
@@ -540,7 +552,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 		completed = completed || checkpoint.Action == Complete
 		failed = failed || checkpoint.Action == Fail
 	}
-	return completed && !failed
+	return completed && !failed, StopNone
 }
 
 // addNextMessage extends the conversation with the assistant message and

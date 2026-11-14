@@ -1209,6 +1209,8 @@ var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 // empty-template precondition is a configuration failure.
 func classifyItemError(err error) (session.FailureClass, string) {
 	switch {
+	case errors.Is(err, llm.ErrTokenBudget):
+		return session.FailureBudget, "aggregate LLM token budget exhausted"
 	case errors.Is(err, llm.ErrRequestTimeout):
 		return session.FailureTimeout, "LLM request timed out; configure OCR_LLM_TIMEOUT or provider timeout_sec"
 	case errors.Is(err, context.DeadlineExceeded):
@@ -1567,8 +1569,15 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 				// it the same way the dispatch gate does, so BudgetExceeded() and the
 				// warning list agree with the item's failed(budget) classification.
 				if a.budgetExceeded.CompareAndSwap(false, true) {
+					message := fmt.Sprintf("stopped group %q mid-review: aggregate LLM token budget exhausted", groupKey)
+					if a.args.MaxTokensBudget > 0 {
+						message = fmt.Sprintf("stopped group %q mid-review: used %d tokens exceeds budget %d", groupKey, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget)
+					}
 					a.recordWarning("token_budget_reached", g.Diffs[0].NewPath,
-						fmt.Sprintf("stopped group %q mid-review: used %d tokens exceeds budget %d", groupKey, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
+						message)
+				}
+				if completed {
+					break
 				}
 			}
 			class, reason := classifyMainLoopStop(mainStop)
