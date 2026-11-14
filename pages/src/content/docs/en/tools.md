@@ -99,7 +99,10 @@ resumes reuse completed checkpoints only while HEAD and the review input stay
 unchanged: the selected diff, including the deletion or restoration of tracked
 files, must match the parent run exactly. Completed files are reused and
 unfinished files are retried; incremental reuse after edits and protection
-against edits made while the review runs are out of scope.
+against edits made while the review runs are out of scope. The comparison is on
+the normalized selected diff, so adding or removing an untracked file's final
+newline, or an LF/CRLF-only line-ending change, still resumes; a substantive
+edit does not.
 
 Old-side results start with `SIDE: old` and `REVISION: <commit-sha>`, or
 `SOURCE: empty-tree` for an empty tree. Old-side errors also identify their

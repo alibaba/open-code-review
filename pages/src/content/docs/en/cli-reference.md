@@ -224,7 +224,11 @@ would review the same thing the parent did:
 - a workspace review resumes only when the worktree it reviews is unchanged:
   the base commit and the uncommitted changes must both match. Unlike range or
   commit reviews there is no commit to pin, so edits made during the resumed
-  run are not guarded
+  run are not guarded. Identity is computed from the selected, parsed diff, not
+  from a byte-for-byte snapshot of the worktree: adding or removing an untracked
+  file's final newline, or an LF/CRLF-only line-ending change, normalizes to the
+  same diff and still resumes; a substantive content edit changes the diff and
+  is rejected
 - the review mode must match: a range session cannot be resumed as a commit one
 - the resolved input must match. Ref *spellings* are not compared — `abc1234`
   and `abc1234def` name the same commit — but if the same refs now resolve to a

@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,10 +17,15 @@ import (
 // End-to-end coverage of workspace --resume. A workspace review has no fixed
 // endpoints to seal its input, so a resume may only reuse checkpoints while the
 // HEAD commit and the review input (the selected diff, including tracked-file
-// deletions) are byte-for-byte what the parent reviewed. These tests drive the
-// real CLI against real Git repositories and a controlled fake LLM, so the
-// identity the CLI computes and the identity the agent persists are both
-// derived from actual Git changes rather than hand-built digests.
+// deletions) are unchanged. Input identity is computed from the selected,
+// parsed/normalized diff, not from a byte-for-byte snapshot of the worktree:
+// equivalent inputs such as an untracked file that only gained or lost its
+// final newline, or whose line endings changed between LF and CRLF, normalize
+// to the same diff and may resume and reuse completed work. A substantive
+// content edit changes the diff and is rejected. These tests drive the real CLI
+// against real Git repositories and a controlled fake LLM, so the identity the
+// CLI computes and the identity the agent persists are both derived from
+// actual Git changes rather than hand-built digests.
 
 // workspaceResumeFileLines pushes the change set past the grouping bundle
 // threshold (200 changed lines), forcing per-file dispatch. That is what makes
@@ -55,10 +61,26 @@ func writeWorkspaceResumeFile(t *testing.T, dir, name, body string) {
 	}
 }
 
+// workspaceUntrackedFile is an extra untracked file added to the fixture before
+// the parent review. marker must occur only in this file's diff so the fake LLM
+// can attribute its requests, exactly like the package-level markers.
+type workspaceUntrackedFile struct {
+	name   string
+	marker string
+	body   string
+}
+
 // newWorkspaceResumeFixture builds the repo, runs one workspace review in which
 // c.go fails permanently and the other two files complete, then clears the
 // failure so the returned fixture can be resumed successfully.
 func newWorkspaceResumeFixture(t *testing.T, deleteTracked bool) *workspaceResumeFixture {
+	t.Helper()
+	return newWorkspaceResumeFixtureWithUntracked(t, deleteTracked, nil)
+}
+
+// newWorkspaceResumeFixtureWithUntracked is newWorkspaceResumeFixture plus
+// untracked files that join the parent review input.
+func newWorkspaceResumeFixtureWithUntracked(t *testing.T, deleteTracked bool, untracked []workspaceUntrackedFile) *workspaceResumeFixture {
 	t.Helper()
 	raw := t.TempDir()
 	dir, err := filepath.EvalSymlinks(raw)
@@ -82,7 +104,14 @@ func newWorkspaceResumeFixture(t *testing.T, deleteTracked bool) *workspaceResum
 		}
 	}
 
+	for _, extra := range untracked {
+		writeWorkspaceResumeFile(t, dir, extra.name, extra.body)
+	}
+
 	srv := newFakeLLM()
+	for _, extra := range untracked {
+		srv.markers[extra.marker] = extra.name
+	}
 	srv.hardFail["c.go"] = true
 	startFakeLLM(t, srv)
 
@@ -160,7 +189,9 @@ func assertWorkspaceResumeRejected(t *testing.T, f *workspaceResumeFixture, want
 	if len(after) != len(before) {
 		t.Fatalf("rejected resume persisted a child session: %d -> %d sessions", len(before), len(after))
 	}
-	if got := f.srv.attemptCounts(); len(got) != len(beforeAttempts) {
+	// Compare complete per-file attempt counts, not just the number of file
+	// keys: a second request for an already-seen file must fail this check.
+	if got := f.srv.attemptCounts(); !maps.Equal(got, beforeAttempts) {
 		t.Fatalf("rejected resume issued an LLM request: attempts %v -> %v", beforeAttempts, got)
 	}
 }
@@ -261,5 +292,90 @@ func TestWorkspaceResumeE2E_RejectsInputChanges(t *testing.T) {
 			t.Errorf("child coverage = reused %d, completed %d, failed %d; want 2/1/0",
 				child.ReusedFiles, child.CompletedFiles, child.FailedFiles)
 		}
+	})
+}
+
+// TestWorkspaceResumeE2E_NormalizedInputBoundary pins the documented contract:
+// workspace resume identity is the selected, parsed/normalized diff, not a
+// byte-for-byte snapshot of the worktree. Untracked files are synthesized into
+// a patch from their content (untrackedFileDiffs), and the parser strips a
+// trailing CR from every diff line, so adding or removing a final newline, or
+// switching between LF and CRLF, normalizes to the same diff and may reuse
+// completed work. A substantive edit still rejects.
+func TestWorkspaceResumeE2E_NormalizedInputBoundary(t *testing.T) {
+	body := workspaceResumeBody("u.go", "MARKER_EPSILON", "untracked")
+	withoutFinalLF := strings.TrimSuffix(body, "\n")
+	withFinalLF := body
+	crlf := strings.ReplaceAll(body, "\n", "\r\n")
+
+	// assertResumesAndReuses resumes the parent after mutate and asserts that
+	// the normalized-equivalent input is accepted: a.go, d.go and the untracked
+	// file u.go are reused, and only the failed c.go is retried.
+	assertResumesAndReuses := func(t *testing.T, parentBody string, mutate func(t *testing.T, dir string)) {
+		t.Helper()
+		f := newWorkspaceResumeFixtureWithUntracked(t, false, []workspaceUntrackedFile{{
+			name: "u.go", marker: "MARKER_EPSILON", body: parentBody,
+		}})
+		mutate(t, f.dir)
+		before := f.srv.attemptCounts()
+
+		out, errOut, err := runWorkspaceResumeReview(t, f.dir, f.parentID)
+		if err != nil {
+			t.Fatalf("normalized-equivalent resume must succeed: %v\nstdout: %s\nstderr: %s", err, out, errOut)
+		}
+		sessions, listErr := session.ListSessions(f.dir)
+		if listErr != nil {
+			t.Fatalf("list sessions: %v", listErr)
+		}
+		if len(sessions) != 2 {
+			t.Fatalf("got %d sessions, want parent + child", len(sessions))
+		}
+		child := workspaceResumeChild(t, sessions, f.parentID)
+		if child.FailedFiles != 0 || child.ReusedFiles != 3 || child.CompletedFiles != 1 {
+			t.Errorf("child coverage = reused %d, completed %d, failed %d; want 3/1/0",
+				child.ReusedFiles, child.CompletedFiles, child.FailedFiles)
+		}
+
+		after := f.srv.attemptCounts()
+		for _, name := range []string{"a.go", "d.go", "u.go"} {
+			if after[name] != before[name] {
+				t.Errorf("completed file %s was re-requested: before %v, after %v", name, before, after)
+			}
+		}
+		if after["c.go"] <= before["c.go"] {
+			t.Errorf("failed c.go was not retried: before %v, after %v", before, after)
+		}
+	}
+
+	t.Run("untracked file gains its final newline", func(t *testing.T) {
+		assertResumesAndReuses(t, withoutFinalLF, func(t *testing.T, dir string) {
+			writeWorkspaceResumeFile(t, dir, "u.go", withFinalLF)
+		})
+	})
+
+	t.Run("untracked file loses its final newline", func(t *testing.T) {
+		assertResumesAndReuses(t, withFinalLF, func(t *testing.T, dir string) {
+			writeWorkspaceResumeFile(t, dir, "u.go", withoutFinalLF)
+		})
+	})
+
+	t.Run("untracked file converts LF to CRLF", func(t *testing.T) {
+		assertResumesAndReuses(t, withFinalLF, func(t *testing.T, dir string) {
+			writeWorkspaceResumeFile(t, dir, "u.go", crlf)
+		})
+	})
+
+	t.Run("untracked file converts CRLF to LF", func(t *testing.T) {
+		assertResumesAndReuses(t, crlf, func(t *testing.T, dir string) {
+			writeWorkspaceResumeFile(t, dir, "u.go", withFinalLF)
+		})
+	})
+
+	t.Run("substantive edit of untracked file still rejects", func(t *testing.T) {
+		f := newWorkspaceResumeFixtureWithUntracked(t, false, []workspaceUntrackedFile{{
+			name: "u.go", marker: "MARKER_EPSILON", body: withFinalLF,
+		}})
+		writeWorkspaceResumeFile(t, f.dir, "u.go", workspaceResumeBody("u.go", "MARKER_EPSILON", "edited-after-parent"))
+		assertWorkspaceResumeRejected(t, f, "workspace changed")
 	})
 }
