@@ -553,7 +553,7 @@ func formatDuration(seconds float64) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%.1fs", seconds)
 	}
-	minutes := int(d.Minutes())
-	sec := int(d.Seconds()) - minutes*60
+	minutes := d / time.Minute
+	sec := int((d % time.Minute).Seconds())
 	return fmt.Sprintf("%dm%ds", minutes, sec)
 }
