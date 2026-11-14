@@ -2,7 +2,10 @@
 
 `internal/vcs` defines the repository operations used by review, preview, scan,
 rule sniffing, and code tools. `internal/vcs/git` implements them with Git and
-the existing diff parser. The CLI selects this Git adapter by default.
+the existing diff parser. The CLI selects Git by default. Set `vcs_provider` to
+`lore` to use `internal/vcs/lore` for local workspaces and revisions. The Lore
+adapter reads the CLI event stream, including file changes and repository state.
+See the [configuration guide](../pages/src/content/docs/en/configuration.md#version-control).
 
 `ReviewSpec` distinguishes workspace changes, one commit, a merge-base
 comparison, and a direct comparison. `ResolveReview` freezes historical

@@ -56,7 +56,7 @@ Output review spec for host-agent delegation (no LLM required).`,
 var delegatePreviewCmd = &cobra.Command{
 	Use:   "preview [flags]",
 	Short: "Preview reviewable files with mode/ref metadata",
-	Long:  "Outputs reviewable file list with mode/ref metadata for the host agent to construct git commands.",
+	Long:  "Outputs reviewable file list with mode/ref metadata for the host agent.",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateDelegateOptions(&delegatePreviewOpts); err != nil {
@@ -102,7 +102,7 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 
 	// Security: reject ref-option injection.
 	reviewOpts := reviewOptions{from: opts.from, to: opts.to, commit: opts.commit}
-	if err := validateReviewRefs(cc.RepoDir, reviewOpts); err != nil {
+	if err := cc.validateRefs(reviewOpts); err != nil {
 		return nil, err
 	}
 	reviewOpts.rulePath, reviewOpts.excludes = opts.rulePath, opts.excludes
@@ -113,6 +113,9 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 	backgroundCommit := opts.commit
 	if backgroundCommit != "" {
 		backgroundCommit = cc.Review.Head
+	}
+	if !cc.IsGitRepo {
+		backgroundCommit = ""
 	}
 	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, backgroundCommit)
 	if err != nil {

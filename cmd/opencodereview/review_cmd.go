@@ -142,7 +142,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security (#112): reject ref-option injection before any git invocation.
-	if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
+	if err := cc.validateRefs(opts); err != nil {
 		return err
 	}
 	if err := prepareRepositoryReview(ctx, cc, opts); err != nil {
@@ -158,6 +158,9 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	backgroundCommit := opts.commit
 	if backgroundCommit != "" && cc.Review != nil {
 		backgroundCommit = cc.Review.Head
+	}
+	if !cc.IsGitRepo {
+		backgroundCommit = ""
 	}
 	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, backgroundCommit)
 	if err != nil {

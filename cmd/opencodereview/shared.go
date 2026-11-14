@@ -30,7 +30,6 @@ import (
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
 	"github.com/alibaba/open-code-review/internal/vcs"
-	gitvcs "github.com/alibaba/open-code-review/internal/vcs/git"
 )
 
 // commonContext bundles the state that both `ocr review` and `ocr scan`
@@ -45,9 +44,7 @@ type commonContext struct {
 	GitRunner  *gitcmd.Runner
 	Repository vcs.Repository
 	Review     *vcs.ResolvedReview
-	// IsGitRepo reports whether RepoDir is inside a git repository. Always
-	// true when requireGit was set; may be false when scan accepts non-git
-	// directories.
+	// IsGitRepo enables Git-specific validation and commit-message lookup.
 	IsGitRepo bool
 }
 
@@ -104,15 +101,9 @@ func previewMaxTokens(templateDefault, cliOverride int) (int, error) {
 // the global git subprocess limiter. Both review and scan callers go
 // through this so the startup sequence stays consistent.
 //
-// requireGit=true fails fast when the directory is not a git repo (review
-// path: diff concept requires git). requireGit=false allows non-git
-// directories (scan path: provider falls back to filepath.Walk).
-//
-// contentRef is the git ref whose file content the rule resolver should
-// inspect when disambiguating ambiguous extensions — derive it via
-// tool.ParseReviewMode(from, to, commit).RefValue(to, commit). Pass "" to
-// read the working tree, which is what scan wants.
-func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxGitProcs int, requireGit bool) (*commonContext, error) {
+// Reviews are rooted at the repository top level. Scans preserve the selected
+// directory. The default Git provider also supports scanning plain directories.
+func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxGitProcs int, requireRepo bool) (*commonContext, error) {
 	tpl, err := template.LoadDefault()
 	if err != nil {
 		return nil, fmt.Errorf("load default template: %w", err)
@@ -124,15 +115,11 @@ func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxG
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	repoDir, isGit, err := resolveWorkingDir(repoDirInput, requireGit)
+	gitRunner := gitcmd.New(maxGitProcs)
+	repoDir, repository, isGit, err := openConfiguredRepository(repoDirInput, requireRepo, gitRunner)
 	if err != nil {
 		return nil, err
 	}
-
-	// Built before the resolver: the sniffer reads file content at contentRef
-	// through this limiter.
-	gitRunner := gitcmd.New(maxGitProcs)
-	repository := gitvcs.New(repoDir, gitRunner)
 
 	resolver, fileFilter, err := rules.NewResolver(repoDir, rulePath, rules.ResolverOptions{
 		Files:   repository,
