@@ -821,3 +821,28 @@ func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	assertContains(t, args, "--exclude-standard")
 	assertNotContains(t, args, "--untracked")
 }
+
+func TestCodeSearchProvider_Execute_StringTypedBooleans(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	run := func(args map[string]any) string {
+		t.Helper()
+		got, err := p.Execute(context.Background(), args)
+		if err != nil {
+			t.Fatalf("Execute(%v): %v", args, err)
+		}
+		return got
+	}
+
+	if got := run(map[string]any{"search_text": "HELLO", "case_sensitive": "true"}); strings.Contains(got, "hello.go") {
+		t.Errorf(`case_sensitive "true" must not match HELLO against Hello, got: %s`, got)
+	}
+	if got := run(map[string]any{"search_text": "Hello", "case_sensitive": "true"}); !strings.Contains(got, "hello.go") {
+		t.Errorf(`case_sensitive "true" must still match exact Hello, got: %s`, got)
+	}
+
+	if got := run(map[string]any{"search_text": "Hel+o", "use_perl_regexp": "true"}); !strings.Contains(got, "hello.go") {
+		t.Errorf(`use_perl_regexp "true" must treat the pattern as a regexp, got: %s`, got)
+	}
+}
