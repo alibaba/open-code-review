@@ -280,6 +280,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// Each task conversation (plan, per-group main loop, compression, ...) refines it with llm.SessionTaskKey where it starts,
 	// so affinity keys stay per-conversation, the granularity provider prompt caches actually reuse prefixes at.
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
+	ctx = telemetry.WithSessionID(ctx, a.SessionID())
 
 	// Keep later review work under the incoming parent, not the short-lived parse span.
 	parseCtx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
@@ -1795,6 +1796,7 @@ func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concaten
 	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(gk, session.PlanTask, rec.RequestNo))
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
+	telemetry.RecordLLMInput(llmSpan, a.session.SessionID, a.args.Model, messages)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
@@ -1814,6 +1816,7 @@ func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concaten
 		totalTokens = resp.Usage.TotalTokens
 	}
 	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	telemetry.RecordLLMOutput(llmSpan, resp.VisibleContent(), nil, resp.ReasoningContent(), resp.Usage)
 	llmSpan.End()
 	rec.SetResponse(resp, duration)
 	a.runner.RecordUsage(resp.Usage)
@@ -1891,6 +1894,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(groupKey, session.ReviewFilterTask, rec.RequestNo))
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
+	telemetry.RecordLLMInput(llmSpan, a.session.SessionID, a.args.Model, messages)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
@@ -1912,6 +1916,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		totalTokens = resp.Usage.TotalTokens
 	}
 	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	telemetry.RecordLLMOutput(llmSpan, resp.VisibleContent(), resp.ToolCalls(), resp.ReasoningContent(), resp.Usage)
 	llmSpan.End()
 	rec.SetResponse(resp, duration)
 	a.runner.RecordUsage(resp.Usage)
