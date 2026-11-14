@@ -145,8 +145,21 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
 		return err
 	}
+	if err := prepareRepositoryReview(ctx, cc, opts); err != nil {
+		// A fresh workspace run cancelled during preflight follows the normal
+		// failed-run reporting path so callers receive its saved JSON result.
+		// Preview and resume admission must remain free of session writes.
+		if opts.commit != "" || opts.from != "" || opts.to != "" || opts.preview || opts.resume != "" ||
+			(!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)) {
+			return err
+		}
+	}
 
-	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
+	backgroundCommit := opts.commit
+	if backgroundCommit != "" && cc.Review != nil {
+		backgroundCommit = cc.Review.Head
+	}
+	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, backgroundCommit)
 	if err != nil {
 		return err
 	}
@@ -205,12 +218,14 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Model:    rt.Model,
 	}
 
+	resolvedReview := cc.Review
 	var sealedInput *diff.InputResolution
 	if sealed != nil {
 		sealedInput = &sealed.Resolution
+		resolvedReview = &sealed.Review
 	}
 
-	codeTools, err := prepareReviewCodeTools(ctx, cc.RepoDir, opts, cc.GitRunner, sealedInput)
+	codeTools, err := prepareReviewCodeTools(ctx, cc.RepoDir, opts, cc.GitRunner, sealedInput, cc.Repository, resolvedReview)
 	if err != nil {
 		return fmt.Errorf("prepare code tools: %w", err)
 	}
@@ -259,6 +274,8 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		EndpointSource:        rt.Source,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
+		Repository:            cc.Repository,
+		ResolvedReview:        resolvedReview,
 		Resume:                resumeState,
 		SealedInput:           codeTools.resolution,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
@@ -428,15 +445,17 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 		return nil, nil
 	}
 	sealed, err := agent.ResolveIdentity(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		ReviewMode: reviewModeFromOptions(opts),
-		Template:   *cc.Template,
-		SystemRule: cc.Resolver,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:        cc.RepoDir,
+		From:           opts.from,
+		To:             opts.to,
+		Commit:         opts.commit,
+		ReviewMode:     reviewModeFromOptions(opts),
+		Template:       *cc.Template,
+		SystemRule:     cc.Resolver,
+		FileFilter:     cc.FileFilter,
+		GitRunner:      cc.GitRunner,
+		Repository:     cc.Repository,
+		ResolvedReview: cc.Review,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("resolve current input identity: %w", err)
@@ -543,13 +562,15 @@ func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOption
 	tpl.MaxTokens = maxTokens
 
 	preview, err := agent.Preview(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		Template:   tpl,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:        cc.RepoDir,
+		From:           opts.from,
+		To:             opts.to,
+		Commit:         opts.commit,
+		Template:       tpl,
+		FileFilter:     cc.FileFilter,
+		GitRunner:      cc.GitRunner,
+		Repository:     cc.Repository,
+		ResolvedReview: cc.Review,
 	})
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)

@@ -6,6 +6,7 @@ package scan
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +14,116 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
+
+type scanFileSource struct {
+	list func(context.Context, vcs.ContentRef) ([]string, error)
+	read func(context.Context, vcs.ContentRef, string, func(io.Reader) error) error
+}
+
+func (s scanFileSource) ListFiles(ctx context.Context, ref vcs.ContentRef) ([]string, error) {
+	return s.list(ctx, ref)
+}
+
+func (s scanFileSource) ReadFile(ctx context.Context, ref vcs.ContentRef, path string, consume func(io.Reader) error) error {
+	return s.read(ctx, ref, path, consume)
+}
+
+func TestProvider_EnumerateWithSource(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("PATH", "") // The injected source must not require Git.
+	for _, path := range []string{"pkg/main.go", "pkg/image.bin", "pkg/growing.go", "other.go"} {
+		writeFile(t, repo, path, []byte("disk\n"))
+	}
+	writeFile(t, repo, "pkg/large.go", []byte(strings.Repeat("x", 64)))
+	if err := os.Mkdir(filepath.Join(repo, "pkg", "directory.go"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var reads []string
+	source := scanFileSource{
+		list: func(_ context.Context, ref vcs.ContentRef) ([]string, error) {
+			if !ref.IsWorkspace() {
+				t.Errorf("scan listed revision %q", ref.Revision)
+			}
+			return []string{"pkg/main.go", "pkg/image.bin", "pkg/growing.go", "pkg/large.go", "pkg/directory.go", "other.go"}, nil
+		},
+		read: func(_ context.Context, ref vcs.ContentRef, path string, consume func(io.Reader) error) error {
+			if !ref.IsWorkspace() {
+				t.Errorf("scan read revision %q", ref.Revision)
+			}
+			reads = append(reads, path)
+			contents := map[string]string{
+				"pkg/main.go":    "package source\n\n",
+				"pkg/image.bin":  "a\x00b",
+				"pkg/growing.go": strings.Repeat("x", 64),
+			}
+			return consume(strings.NewReader(contents[path]))
+		},
+	}
+	items, err := NewProviderWithSource(repo, []string{"./pkg/"}, source, 32).Enumerate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := itemPaths(items); !reflect.DeepEqual(got, []string{"pkg/image.bin", "pkg/main.go"}) {
+		t.Fatalf("paths = %v", got)
+	}
+	if items[0].Content != "package source\n\n" || items[0].LineCount != 2 {
+		t.Errorf("source content = %+v", items[0])
+	}
+	if !items[1].IsBinary || items[1].Content != "" {
+		t.Errorf("binary placeholder = %+v", items[1])
+	}
+	if !reflect.DeepEqual(reads, []string{"pkg/main.go", "pkg/image.bin", "pkg/growing.go"}) {
+		t.Errorf("reads = %v", reads)
+	}
+}
+
+func TestProvider_SourceErrors(t *testing.T) {
+	repo := t.TempDir()
+	writeFile(t, repo, "main.go", []byte("disk\n"))
+	failure := errors.New("source failed")
+	source := scanFileSource{
+		list: func(context.Context, vcs.ContentRef) ([]string, error) { return nil, failure },
+	}
+	if _, err := NewProviderWithSource(repo, nil, source, 0).Enumerate(t.Context()); !errors.Is(err, failure) {
+		t.Fatalf("listing error = %v", err)
+	}
+	source.list = func(context.Context, vcs.ContentRef) ([]string, error) { return []string{"main.go"}, nil }
+	source.read = func(context.Context, vcs.ContentRef, string, func(io.Reader) error) error { return failure }
+	if items, err := NewProviderWithSource(repo, nil, source, 0).Enumerate(t.Context()); err != nil || len(items) != 0 {
+		t.Fatalf("failed read = %v, %v", items, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	source.read = func(context.Context, vcs.ContentRef, string, func(io.Reader) error) error {
+		cancel()
+		return context.Canceled
+	}
+	if _, err := NewProviderWithSource(repo, nil, source, 0).Enumerate(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled read = %v", err)
+	}
+}
+
+func TestReadScanContent_BoundsReads(t *testing.T) {
+	text := strings.NewReader(strings.Repeat("x", 100))
+	if _, _, err := readScanContent(text, 32); !errors.Is(err, errScanFileTooLarge) {
+		t.Fatalf("oversize error = %v", err)
+	}
+	if text.Len() != 67 {
+		t.Errorf("read %d bytes, want cap + 1", 100-text.Len())
+	}
+	binary := strings.NewReader("\x00" + strings.Repeat("x", 2*binarySniffWindow))
+	if content, isBinary, err := readScanContent(binary, DefaultMaxFileSizeBytes); err != nil || !isBinary || len(content) != 0 {
+		t.Fatalf("binary read = %q, %v, %v", content, isBinary, err)
+	}
+	if binary.Len() != binarySniffWindow+1 {
+		t.Errorf("binary sniff read %d bytes", 2*binarySniffWindow+1-binary.Len())
+	}
+	if content, isBinary, err := readScanContent(strings.NewReader("exact"), 5); err != nil || isBinary || string(content) != "exact" {
+		t.Fatalf("exact cap = %q, %v, %v", content, isBinary, err)
+	}
+}
 
 func TestCountLines(t *testing.T) {
 	tests := []struct {

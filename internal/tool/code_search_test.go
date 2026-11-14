@@ -10,96 +10,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
 
-func TestBuildGrepArgs_WorkspaceMode(t *testing.T) {
-	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("myFunc", false, false, false, nil)
-
-	assertContainsInOrder(t, args, "-e", "myFunc", "--")
-	assertContains(t, args, "-i")
-	assertContains(t, args, "--untracked")
-	if idx := slices.Index(args, "--"); idx >= 0 {
-		for i := 0; i < idx; i++ {
-			if args[i] == "myFunc" && (i == 0 || args[i-1] != "-e") {
-				t.Error("myFunc should only appear as argument to -e, not as positional")
-			}
-		}
-	}
-}
-
-func TestBuildGrepArgs_CommitMode(t *testing.T) {
-	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "abc1234"})
-	args := p.buildGrepArgs("myFunc", false, false, false, []string{"pkg/"})
-
-	assertContainsInOrder(t, args, "-e", "myFunc", "abc1234", "--", "pkg/")
-	assertNotContains(t, args, "--untracked")
-	assertNotContains(t, args, "--end-of-options")
-}
-
-func TestBuildGrepArgs_RejectsOptionLikeRef(t *testing.T) {
-	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "-O./pwn.sh"})
-	args := p.buildGrepArgs("myFunc", false, false, false, nil)
-	if args != nil {
-		t.Fatalf("expected buildGrepArgs to return nil for option-like ref, got %v", args)
-	}
-}
-
 func TestGitGrep_RejectsOptionLikeRef(t *testing.T) {
-	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "-O./pwn.sh"})
-	result, err := p.gitGrep(context.Background(), "myFunc", false, false, nil)
-	if err != nil {
-		t.Fatal(err)
+	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "-O./pwn.sh", Mode: ModeCommit})
+	result, err := p.search(context.Background(), "myFunc", false, false, nil)
+	if err == nil || result != "" {
+		t.Fatalf("option-like revision should fail: %q, %v", result, err)
 	}
-	if result != "Error: ref must not start with '-'" {
-		t.Fatalf("unexpected result: %s", result)
-	}
-}
-
-func TestBuildGrepArgs_PatternStartingWithDash(t *testing.T) {
-	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("-myOption", false, false, false, nil)
-
-	idx := slices.Index(args, "-e")
-	if idx < 0 || idx+1 >= len(args) || args[idx+1] != "-myOption" {
-		t.Errorf("expected -e to immediately precede -myOption, got %v", args)
-	}
-}
-
-func TestBuildGrepArgs_CaseSensitive(t *testing.T) {
-	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("foo", true, false, false, nil)
-
-	assertNotContains(t, args, "-i")
-}
-
-func TestBuildGrepArgs_CaseInsensitive(t *testing.T) {
-	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("foo", false, false, false, nil)
-
-	assertContains(t, args, "-i")
-}
-
-func TestBuildGrepArgs_PerlRegexp(t *testing.T) {
-	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("foo", false, true, false, nil)
-
-	assertContains(t, args, "-P")
-	assertNotContains(t, args, "-F")
-}
-
-func TestBuildGrepArgs_FixedString(t *testing.T) {
-	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("foo", false, false, false, nil)
-
-	assertContains(t, args, "-F")
-	assertNotContains(t, args, "-E")
-	assertNotContains(t, args, "-P")
 }
 
 func setupTestRepo(t *testing.T) string {
@@ -144,7 +66,7 @@ func getHeadCommit(t *testing.T, dir string) string {
 func TestGitGrep_WorkspaceMode_Found(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
-	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	result, err := p.search(context.Background(), "Hello", false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +78,7 @@ func TestGitGrep_WorkspaceMode_Found(t *testing.T) {
 func TestGitGrep_WorkspaceMode_NoMatch(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
-	result, err := p.gitGrep(context.Background(), "nonexistentXYZ", false, false, nil)
+	result, err := p.search(context.Background(), "nonexistentXYZ", false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +168,7 @@ func TestGitGrep_CommitMode_Found(t *testing.T) {
 	dir := setupTestRepo(t)
 	commit := getHeadCommit(t, dir)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: commit, Mode: ModeCommit})
-	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	result, err := p.search(context.Background(), "Hello", false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +184,7 @@ func TestGitGrep_CommitMode_NoMatch(t *testing.T) {
 	dir := setupTestRepo(t)
 	commit := getHeadCommit(t, dir)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: commit, Mode: ModeCommit})
-	result, err := p.gitGrep(context.Background(), "nonexistentXYZ", false, false, nil)
+	result, err := p.search(context.Background(), "nonexistentXYZ", false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +198,7 @@ func TestGitGrep_CommitMode_WithPathspec(t *testing.T) {
 	commit := getHeadCommit(t, dir)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: commit, Mode: ModeCommit})
 
-	result, err := p.gitGrep(context.Background(), "Util", false, false, []string{"pkg/"})
+	result, err := p.search(context.Background(), "Util", false, false, []string{"pkg/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +206,7 @@ func TestGitGrep_CommitMode_WithPathspec(t *testing.T) {
 		t.Errorf("expected util.go in result, got: %s", result)
 	}
 
-	result2, err2 := p.gitGrep(context.Background(), "Hello", false, false, []string{"pkg/"})
+	result2, err2 := p.search(context.Background(), "Hello", false, false, []string{"pkg/"})
 	if err2 != nil {
 		t.Fatal(err2)
 	}
@@ -302,12 +224,9 @@ func TestGitGrep_OptionLikeRefDoesNotLaunchPager(t *testing.T) {
 	}
 
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "-O./pwn.sh", Mode: ModeCommit})
-	result, err := p.gitGrep(context.Background(), "Hello", false, false, []string{"hello.go"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(result, "Error:") {
-		t.Fatalf("expected git error for invalid ref, got: %s", result)
+	result, err := p.search(context.Background(), "Hello", false, false, []string{"hello.go"})
+	if err == nil || result != "" {
+		t.Fatalf("expected invalid revision error, got: %q, %v", result, err)
 	}
 	if _, err := os.Stat(proofPath); err == nil {
 		t.Fatal("option-like ref launched pager and created proof file")
@@ -321,7 +240,7 @@ func TestGitGrep_CommitMode_WithBadPathspec(t *testing.T) {
 	commit := getHeadCommit(t, dir)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: commit, Mode: ModeCommit})
 
-	result, err := p.gitGrep(context.Background(), "Hello", false, false, []string{"nonexistent/"})
+	result, err := p.search(context.Background(), "Hello", false, false, []string{"nonexistent/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +252,7 @@ func TestGitGrep_CommitMode_WithBadPathspec(t *testing.T) {
 func TestGitGrep_LiteralWithRegexMetaChars(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
-	result, err := p.gitGrep(context.Background(), "Hello()", false, false, nil)
+	result, err := p.search(context.Background(), "Hello()", false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +265,7 @@ func TestGitGrep_CommitMode_LiteralWithRegexMetaChars(t *testing.T) {
 	dir := setupTestRepo(t)
 	commit := getHeadCommit(t, dir)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: commit, Mode: ModeCommit})
-	result, err := p.gitGrep(context.Background(), "Hello()", false, false, nil)
+	result, err := p.search(context.Background(), "Hello()", false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +277,7 @@ func TestGitGrep_CommitMode_LiteralWithRegexMetaChars(t *testing.T) {
 func TestGitGrep_InvalidRef_ReturnsError(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "nonexistent_ref_abc123", Mode: ModeCommit})
-	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	result, err := p.search(context.Background(), "Hello", false, false, nil)
 	if err == nil {
 		t.Fatal("expected invalid ref to return an error")
 	}
@@ -373,7 +292,7 @@ func TestGitGrep_InvalidRef_ReturnsError(t *testing.T) {
 func TestGitGrep_PerlRegexp_InvalidPattern_ReturnsError(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
-	result, err := p.gitGrep(context.Background(), "(unclosed", false, true, nil)
+	result, err := p.search(context.Background(), "(unclosed", false, true, nil)
 	if err == nil {
 		t.Fatal("expected invalid perl regexp to return an error")
 	}
@@ -382,84 +301,6 @@ func TestGitGrep_PerlRegexp_InvalidPattern_ReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "git grep failed") {
 		t.Errorf("expected git grep failure, got: %v", err)
-	}
-}
-
-func TestTrimGitUsage(t *testing.T) {
-	tests := []struct {
-		name   string
-		stderr string
-		want   string
-	}{
-		{
-			name:   "English",
-			stderr: "error: unknown option `max-count'\nusage: git grep [<options>]\n\n    --cached",
-			want:   "error: unknown option `max-count'",
-		},
-		{
-			name:   "Chinese",
-			stderr: "\u9519\u8bef\uff1a\u672a\u77e5\u9009\u9879 `max-count'\n\u7528\u6cd5\uff1agit grep [<\u9009\u9879>]\n\n    --cached",
-			want:   "\u9519\u8bef\uff1a\u672a\u77e5\u9009\u9879 `max-count'",
-		},
-		{
-			name:   "French",
-			stderr: "erreur : option inconnue `max-count'\nutilisation : git grep [<options>]\n\n    --cached",
-			want:   "erreur : option inconnue `max-count'",
-		},
-		{
-			name:   "Japanese",
-			stderr: "\u30a8\u30e9\u30fc: \u4e0d\u660e\u306a\u30aa\u30d7\u30b7\u30e7\u30f3 `max-count'\n\u4f7f\u7528\u6cd5: git grep [<\u30aa\u30d7\u30b7\u30e7\u30f3>]\n\n    --cached",
-			want:   "\u30a8\u30e9\u30fc: \u4e0d\u660e\u306a\u30aa\u30d7\u30b7\u30e7\u30f3 `max-count'",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := trimGitUsage(tt.stderr, 129); got != tt.want {
-				t.Errorf("trimGitUsage() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestTrimGitUsage_PreservesDiagnosticWithoutUsage(t *testing.T) {
-	stderr := "fatal: ambiguous argument 'missing': unknown revision\nhint: verify the revision name"
-	got := trimGitUsage(stderr, 128)
-	if got != stderr {
-		t.Errorf("trimGitUsage() = %q, want %q", got, stderr)
-	}
-}
-
-func TestTrimGitUsage_WhitespaceOnly(t *testing.T) {
-	if got := trimGitUsage(" \n\t", 129); got != "" {
-		t.Errorf("trimGitUsage() = %q, want empty string", got)
-	}
-}
-
-func assertContains(t *testing.T, args []string, val string) {
-	t.Helper()
-	if !slices.Contains(args, val) {
-		t.Errorf("expected args to contain %q, got %v", val, args)
-	}
-}
-
-func assertNotContains(t *testing.T, args []string, val string) {
-	t.Helper()
-	if slices.Contains(args, val) {
-		t.Errorf("expected args NOT to contain %q, got %v", val, args)
-	}
-}
-
-func assertContainsInOrder(t *testing.T, args []string, vals ...string) {
-	t.Helper()
-	idx := 0
-	for _, a := range args {
-		if idx < len(vals) && a == vals[idx] {
-			idx++
-		}
-	}
-	if idx != len(vals) {
-		t.Errorf("expected args to contain %v in order, got %v (matched up to index %d)", vals, args, idx)
 	}
 }
 
@@ -474,7 +315,7 @@ func TestGitGrep_WorkspaceMode_UntrackedFile(t *testing.T) {
 	}
 
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
-	result, err := p.gitGrep(context.Background(), "UntrackedFunc", false, false, nil)
+	result, err := p.search(context.Background(), "UntrackedFunc", false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +346,7 @@ func TestGitGrep_NonGitDirectoryFallback(t *testing.T) {
 
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
 
-	out, err := p.gitGrep(context.Background(), "Handler", false, false, nil)
+	out, err := p.search(context.Background(), "Handler", false, false, nil)
 	if err != nil {
 		t.Fatalf("gitGrep should not error in a non-git dir, got: %v", err)
 	}
@@ -526,7 +367,7 @@ func TestGitGrep_NonGitDirectoryNoMatch(t *testing.T) {
 	}
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
 
-	out, err := p.gitGrep(context.Background(), "nonexistentXYZ", false, false, nil)
+	out, err := p.search(context.Background(), "nonexistentXYZ", false, false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -702,7 +543,7 @@ func TestGitGrep_WithRunner(t *testing.T) {
 	runner := gitcmd.New(4)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace, Runner: runner})
 
-	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	result, err := p.search(context.Background(), "Hello", false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,7 +557,7 @@ func TestGitGrep_WithRunner_NoMatch(t *testing.T) {
 	runner := gitcmd.New(4)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace, Runner: runner})
 
-	result, err := p.gitGrep(context.Background(), "nonexistentXYZ", false, false, nil)
+	result, err := p.search(context.Background(), "nonexistentXYZ", false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -731,7 +572,7 @@ func TestGitGrep_WithRunner_CommitMode(t *testing.T) {
 	runner := gitcmd.New(4)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: commit, Mode: ModeCommit, Runner: runner})
 
-	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	result, err := p.search(context.Background(), "Hello", false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -747,7 +588,7 @@ func TestGitGrep_Timeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := p.gitGrep(ctx, "Hello", false, false, nil)
+	result, err := p.search(ctx, "Hello", false, false, nil)
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("expected context.Canceled, got: %v", err)
@@ -802,7 +643,7 @@ func TestGitGrep_NonASCIIPath(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: tc.mode, Ref: tc.ref})
-			result, err := p.gitGrep(context.Background(), "Needle", true, false, nil)
+			result, err := p.search(context.Background(), "Needle", true, false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -811,13 +652,4 @@ func TestGitGrep_NonASCIIPath(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestBuildGrepArgs_NoIndex(t *testing.T) {
-	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("foo", false, false, true, nil)
-
-	assertContains(t, args, "--no-index")
-	assertContains(t, args, "--exclude-standard")
-	assertNotContains(t, args, "--untracked")
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 type reviewCodeTools struct {
@@ -19,12 +20,13 @@ type reviewCodeTools struct {
 	resolution *diff.InputResolution
 }
 
-func prepareReviewCodeTools(ctx context.Context, repoDir string, opts reviewOptions, runner *gitcmd.Runner, resolution *diff.InputResolution) (*reviewCodeTools, error) {
+func prepareReviewCodeTools(ctx context.Context, repoDir string, opts reviewOptions, runner *gitcmd.Runner, resolution *diff.InputResolution, source vcs.Repository, review *vcs.ResolvedReview) (*reviewCodeTools, error) {
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
 	if resolution == nil {
 		var err error
 		resolution, err = agent.ResolveComparisonInput(ctx, agent.Args{
 			RepoDir: repoDir, From: opts.from, To: opts.to, Commit: opts.commit, GitRunner: runner,
+			Repository: source, ResolvedReview: review,
 		})
 		if err != nil {
 			return nil, err
@@ -33,6 +35,13 @@ func prepareReviewCodeTools(ctx context.Context, repoDir string, opts reviewOpti
 	reader := &tool.FileReader{
 		RepoDir: repoDir, Mode: mode, Ref: fileReadRef(mode, opts, resolution), Runner: runner,
 	}
+	if source != nil {
+		reader.Source = source
+		reader.Content = vcs.ContentRef{Revision: reader.Ref}
+		if review != nil {
+			reader.Content = review.Content
+		}
+	}
 	setup := &reviewCodeTools{reader: reader, resolution: resolution}
 	if resolution == nil || (resolution.ResolvedBase == "" && !resolution.BaseIsEmpty) || (resolution.ResolvedBase != "" && resolution.BaseIsEmpty) {
 		return nil, fmt.Errorf("code access requires a resolved base or an empty tree")
@@ -40,6 +49,7 @@ func prepareReviewCodeTools(ctx context.Context, repoDir string, opts reviewOpti
 	previous := *reader
 	previous.Mode = tool.ModeCommit
 	previous.Ref = resolution.ResolvedBase
+	previous.Content = vcs.ContentRef{Revision: previous.Ref}
 	if resolution.BaseIsEmpty {
 		previous.Mode = tool.ModeEmpty
 	}
