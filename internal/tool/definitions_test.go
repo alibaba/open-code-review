@@ -19,6 +19,8 @@ func TestOfName(t *testing.T) {
 		{"file_read_diff", FileReadDiff},
 		{"code_search", CodeSearch},
 		{"task_done", TaskDone},
+		{"context_read", ContextRead},
+		{"submit_analysis", SubmitAnalysis},
 		{"nonexistent", Unknown},
 		{"", Unknown},
 	}
@@ -90,7 +92,7 @@ func TestRegistry_GetAfterFreeze(t *testing.T) {
 }
 
 func TestIsReserved(t *testing.T) {
-	reserved := []string{"unknown", "task_done", "code_comment", "file_read", "file_find", "file_read_diff", "code_search"}
+	reserved := []string{"unknown", "task_done", "code_comment", "file_read", "file_find", "file_read_diff", "code_search", "context_read", "submit_analysis"}
 	for _, name := range reserved {
 		if !IsReserved(name) {
 			t.Errorf("IsReserved(%q) = false, want true", name)
