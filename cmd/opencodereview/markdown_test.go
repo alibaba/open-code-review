@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,6 +89,34 @@ func TestRenderMarkdownWrapAndRetention(test *testing.T) {
 	for _, word := range []string{"Trigger", "Impact", "enabled", "Retain", "every", "important", "compatibility", "boundary", "condition", "[[obs-000002]]"} {
 		if !strings.Contains(plain, word) {
 			test.Errorf("table lost %q: %s", word, plain)
+		}
+	}
+}
+
+func TestRenderMarkdownTableLinkRetention(test *testing.T) {
+	longURL := "https://example.invalid/repository/blob/0123456789abcdef0123456789abcdef01234567/internal/scan/agent.go#L900"
+	shortURL := "https://example.invalid"
+	longLabel := strings.Repeat("Evidence for the compatibility change ", 4)
+	for _, fixture := range []struct {
+		name, cell, url string
+	}{
+		{"long URL", "[Evidence](" + longURL + ")", longURL},
+		{"long label", "[" + longLabel + "](" + shortURL + ")", shortURL},
+		{"image", "![Diagram](" + longURL + ")", longURL},
+		{"autolink", longURL, longURL},
+	} {
+		for _, width := range []int{24, 38, 80, 0} {
+			test.Run(fmt.Sprintf("%s/width_%d", fixture.name, width), func(test *testing.T) {
+				markdown := "| Reference |\n| --- |\n| " + fixture.cell + " |\n"
+				rendered := renderMarkdown(markdown, width)
+				plain := strings.Join(strings.Fields(ansi.Strip(rendered)), "")
+				if !strings.Contains(plain, fixture.url) {
+					test.Errorf("table lost URL %q: %q", fixture.url, rendered)
+				}
+				if strings.Contains(rendered, "\x1b]") || sanitizeRenderedMarkdown(rendered) != rendered {
+					test.Errorf("unsafe terminal output: %q", rendered)
+				}
+			})
 		}
 	}
 }

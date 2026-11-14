@@ -59,7 +59,12 @@ func renderMarkdown(markdown string, width int) string {
 		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 	)
 	markdownRenderer := renderer.NewRenderer(renderer.WithNodeRenderers(util.Prioritized(
-		glamouransi.NewRenderer(glamouransi.Options{Styles: style, WordWrap: width, TableWrap: &wrapTables}), 1000,
+		glamouransi.NewRenderer(glamouransi.Options{
+			Styles:           style,
+			WordWrap:         width,
+			TableWrap:        &wrapTables,
+			InlineTableLinks: true,
+		}), 1000,
 	)))
 	source := []byte(markdown)
 	document := markdownParser.Parser().Parse(text.NewReader(source))
