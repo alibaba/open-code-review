@@ -108,6 +108,7 @@ curl -o .github/workflows/ocr-review.yml \
 |---|---|---|
 | `effort` | `''` | `ocr review --effort`로 전달되는 리뷰 강도 프리셋: `low`, `medium`, `high`(대소문자 무시). 비워 두면 CLI 기본값(설정된 값, 없으면 medium)을 따릅니다. OCR v1.10.0 이상이 필요하며, 더 낮은 버전에서는 액션이 명확한 오류와 함께 일찍 실패합니다. |
 | `max_tokens_budget` | `''` | `ocr review --max-tokens-budget`으로 전달되는 총 토큰(입력 + 출력) 상한. 비어 있거나 `'0'`이면 무제한입니다. LLM 라운드마다 먼저 확인하며, 이미 상한을 넘긴 하위 작업은 발견 사항을 제출할 마지막 라운드를 한 번 받고, 이후 하위 작업은 디스패치되지 않으며, 예산을 넘기거나 건너뛴 파일은 `failed(budget)`로 보고되고, 부분 결과는 그대로 게시되며, 리뷰는 0으로 종료합니다. |
+| `max_tools` | `''` | 리뷰 하위 작업마다 허용되는 도구 호출 라운드 상한으로, `ocr review --max-tools`로 전달됩니다. 비어 있거나 `'0'`이면 템플릿 기본값(100)을 유지하며, 1~49 값은 CLI가 최솟값 50으로 올립니다. 값을 낮추면 파일별 탐색이 줄어드는 대신 느린 모델이나 로컬 모델에서 리뷰 시간을 제한할 수 있습니다. 템플릿 기본값보다 낮은 값은 OCR v1.13.5부터 적용되며, 이전 릴리스에서는 무시됩니다. |
 | `llm_reasoning_effort` | `''` | `reasoning_effort` 요청 필드를 조절할 수 있는 모델(예: GLM-5.x, OpenAI reasoning 모델)의 추론 깊이: `minimal`, `low`, `medium`, `high`, `max`(대소문자 무시). `llm_extra_body`를 통해 요청 본문에 병합되므로 이미 배포된 모든 CLI 버전에서 동작합니다. `llm_extra_body` 안의 명시적 `reasoning_effort` 키가 이 입력보다 우선합니다. 비어 있으면(기본값) 아무것도 보내지 않습니다. OpenAI 호환 프로토콜 전용입니다 — Anthropic API는 알 수 없는 본문 필드를 거부하므로 해당 프로토콜에서는 액션이 즉시 실패합니다. Anthropic의 thinking 제어는 `llm_extra_body`의 명시적 키를 사용하세요. |
 | `stream_progress` | `'false'` | `'true'`로 설정하면 실행이 끝날 때까지 조용히 기다리는 대신 `[ocr]` 진행 라인을 워크플로 로그에 실시간으로 흘려보냅니다(stderr의 human audience). 표시 전용 토글이며 stderr는 여전히 파일에 캡처되어 아티팩트와 코멘트 게시에 사용됩니다. |
 
