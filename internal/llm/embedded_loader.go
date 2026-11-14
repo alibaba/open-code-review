@@ -66,7 +66,7 @@ func loadFromEmbed(filename string) (map[string]int, error) {
 // Each line: <base64-token> <rank>
 func parseBpeData(data []byte) (map[string]int, error) {
 	bpeRanks := make(map[string]int)
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

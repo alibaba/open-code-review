@@ -387,7 +387,7 @@ func TestSessionEndIncludesFailures(t *testing.T) {
 	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
 
 	fs := sh.GetOrCreateFileSession("bar.go")
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		rec := &TaskRecord{Type: MainTask, RequestNo: i + 1, fileSession: fs}
 		rec.SetError(fmt.Errorf("error %d", i), time.Second)
 	}

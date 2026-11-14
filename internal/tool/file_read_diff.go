@@ -6,6 +6,7 @@ package tool
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 )
@@ -24,9 +25,7 @@ type DiffMap struct {
 // NewDiffMap creates a frozen, read-only DiffMap from a plain map.
 func NewDiffMap(m map[string]string) DiffMap {
 	cp := make(map[string]string, len(m))
-	for k, v := range m {
-		cp[k] = v
-	}
+	maps.Copy(cp, m)
 	return DiffMap{m: cp}
 }
 

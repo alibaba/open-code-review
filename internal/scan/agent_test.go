@@ -161,7 +161,7 @@ func TestBuildSummaryCommentsList_TruncatesAndOneLines(t *testing.T) {
 	if !strings.Contains(got, "...") {
 		t.Errorf("expected truncation marker on long content, got:\n%s", got)
 	}
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if len(line) > 320 { // 280 content + small path/prefix overhead
 			t.Errorf("line not capped: len=%d %q", len(line), line)
 		}

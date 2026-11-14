@@ -101,9 +101,8 @@ func stripMarkdownFences(s string) string {
 		}
 	}
 	s = strings.TrimSpace(s)
-	if strings.HasSuffix(s, "```") {
-		s = strings.TrimSuffix(s, "```")
-		s = strings.TrimSpace(s)
+	if before, ok := strings.CutSuffix(s, "```"); ok {
+		s = strings.TrimSpace(before)
 	}
 	return s
 }
