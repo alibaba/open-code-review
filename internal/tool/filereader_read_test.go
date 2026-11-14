@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -272,5 +273,205 @@ func TestFileReader_Read_CommitMode_MonorepoSubdirPath(t *testing.T) {
 	}
 	if gotDisk != content {
 		t.Errorf("workspace-mode Read = %q, want %q", gotDisk, content)
+	}
+}
+
+func TestFileReader_Read_WindowsPath_Workspace(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "pkg", "util")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "package util\n"
+	if err := os.WriteFile(filepath.Join(subDir, "helper.go"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+
+	windowsPath := `pkg\util\helper.go`
+	got, err := fr.Read(context.Background(), windowsPath)
+	if err != nil {
+		t.Fatalf("Read(%q) error: %v", windowsPath, err)
+	}
+	if got != content {
+		t.Errorf("Read = %q, want %q", got, content)
+	}
+
+	lines, total, err := fr.ReadLines(context.Background(), windowsPath, 1, 10)
+	if err != nil {
+		t.Fatalf("ReadLines(%q) error: %v", windowsPath, err)
+	}
+	if total != 2 || len(lines) == 0 || lines[0] != "package util" {
+		t.Errorf("ReadLines = %v, total = %d", lines, total)
+	}
+}
+
+func TestFileReader_Read_WindowsPath_CommitMode(t *testing.T) {
+	dir := setupTestRepo(t)
+	commit := getHeadCommit(t, dir)
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit}
+
+	windowsPath := `pkg\util.go`
+	got, err := fr.Read(context.Background(), windowsPath)
+	if err != nil {
+		t.Fatalf("Read(%q) error: %v", windowsPath, err)
+	}
+	if !strings.Contains(got, "package pkg") {
+		t.Errorf("Read(%q) = %q, want containing 'package pkg'", windowsPath, got)
+	}
+
+	lines, total, err := fr.ReadLines(context.Background(), windowsPath, 1, 10)
+	if err != nil {
+		t.Fatalf("ReadLines(%q) error: %v", windowsPath, err)
+	}
+	if total == 0 || len(lines) == 0 {
+		t.Errorf("ReadLines(%q) returned empty result", windowsPath)
+	}
+}
+
+func setupDualBackslashRepo(t *testing.T) (string, string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX literal backslashes cannot coexist with directory separators on Windows")
+	}
+
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init")
+	git("config", "user.email", "t@t.co")
+	git("config", "user.name", "t")
+
+	if err := os.WriteFile(filepath.Join(dir, `pkg\util.go`), []byte("package backslashfile\n\nfunc LiteralBackslash() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pkg", "util.go"), []byte("package slashpkg\n\nfunc SlashPath() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "--", ".")
+	git("commit", "-m", "add dual backslash and slash files")
+	return dir, getHeadCommit(t, dir)
+}
+
+func TestFileReader_POSIXDualBackslashAndSlashFiles(t *testing.T) {
+	dir, commit := setupDualBackslashRepo(t)
+	runner := gitcmd.New(2)
+
+	readers := []struct {
+		name string
+		fr   *FileReader
+	}{
+		{name: "workspace", fr: &FileReader{RepoDir: dir, Mode: ModeWorkspace}},
+		{name: "commit", fr: &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit}},
+		{name: "commit_with_runner", fr: &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit, Runner: runner}},
+	}
+
+	for _, r := range readers {
+		t.Run(r.name, func(t *testing.T) {
+			for _, q := range []string{`pkg\util.go`, `./pkg\util.go`} {
+				got, err := r.fr.Read(context.Background(), q)
+				if err != nil {
+					t.Fatalf("Read(%q) error: %v", q, err)
+				}
+				if !strings.Contains(got, "package backslashfile") {
+					t.Errorf("Read(%q) = %q, want backslashfile content", q, got)
+				}
+
+				lines, _, err := r.fr.ReadLines(context.Background(), q, 1, 10)
+				if err != nil {
+					t.Fatalf("ReadLines(%q) error: %v", q, err)
+				}
+				if len(lines) == 0 || lines[0] != "package backslashfile" {
+					t.Errorf("ReadLines(%q) = %v, want first line 'package backslashfile'", q, lines)
+				}
+			}
+
+			for _, q := range []string{"pkg/util.go", "./pkg/util.go"} {
+				got, err := r.fr.Read(context.Background(), q)
+				if err != nil {
+					t.Fatalf("Read(%q) error: %v", q, err)
+				}
+				if !strings.Contains(got, "package slashpkg") {
+					t.Errorf("Read(%q) = %q, want slashpkg content", q, got)
+				}
+
+				lines, _, err := r.fr.ReadLines(context.Background(), q, 1, 10)
+				if err != nil {
+					t.Fatalf("ReadLines(%q) error: %v", q, err)
+				}
+				if len(lines) == 0 || lines[0] != "package slashpkg" {
+					t.Errorf("ReadLines(%q) = %v, want first line 'package slashpkg'", q, lines)
+				}
+			}
+
+			for _, ambQuery := range []string{`.\pkg\util.go`, `pkg\.\util.go`} {
+				got, err := r.fr.Read(context.Background(), ambQuery)
+				if err == nil {
+					t.Fatalf("Read(%q) succeeded with %q, want ambiguity error", ambQuery, got)
+				}
+				if !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "pkg/util.go") || !strings.Contains(err.Error(), `pkg\util.go`) {
+					t.Errorf("Read(%q) error = %v, want ambiguity error naming both candidates", ambQuery, err)
+				}
+
+				lines, _, err := r.fr.ReadLines(context.Background(), ambQuery, 1, 10)
+				if err == nil {
+					t.Fatalf("ReadLines(%q) succeeded with %v, want ambiguity error", ambQuery, lines)
+				}
+				if !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "pkg/util.go") || !strings.Contains(err.Error(), `pkg\util.go`) {
+					t.Errorf("ReadLines(%q) error = %v, want ambiguity error naming both candidates", ambQuery, err)
+				}
+			}
+		})
+	}
+}
+
+func TestFileReader_POSIXLiteralBackslashOnlyNotSubstituted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX literal backslashes cannot exist on Windows")
+	}
+
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init")
+	git("config", "user.email", "t@t.co")
+	git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, `pkg\util.go`), []byte("package backslashonly\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "--", `pkg\util.go`)
+	git("commit", "-m", "literal backslash file only")
+	commit := getHeadCommit(t, dir)
+
+	for _, fr := range []*FileReader{
+		{RepoDir: dir, Mode: ModeWorkspace},
+		{RepoDir: dir, Mode: ModeCommit, Ref: commit},
+	} {
+		if got, err := fr.Read(context.Background(), `pkg\util.go`); err != nil || !strings.Contains(got, "package backslashonly") {
+			t.Errorf("Read(pkg\\util.go) = (%q, %v), want backslashonly", got, err)
+		}
+		if got, err := fr.Read(context.Background(), "pkg/util.go"); err == nil {
+			t.Errorf("Read(pkg/util.go) = %q, want error instead of substituting literal backslash file", got)
+		}
+		if lines, _, err := fr.ReadLines(context.Background(), "pkg/util.go", 1, 10); err == nil {
+			t.Errorf("ReadLines(pkg/util.go) = %v, want error instead of substituting literal backslash file", lines)
+		}
 	}
 }

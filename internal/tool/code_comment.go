@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path"
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -168,15 +167,7 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 }
 
 func normalizeCommentPath(p string) string {
-	if p == "" {
-		return ""
-	}
-	p = strings.ReplaceAll(p, "\\", "/")
-	p = path.Clean(p)
-	if p == "." {
-		return ""
-	}
-	return strings.TrimPrefix(p, "/")
+	return normalizePath(p)
 }
 
 func normalizeCodeCommentCategory(category string) string {
