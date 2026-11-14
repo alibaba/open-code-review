@@ -99,6 +99,71 @@ func TestOutputRetryReportText_EmptyRequestsHasNoDanglingSummary(t *testing.T) {
 	}
 }
 
+// The wait is the number that explains a run that felt slow while no attempt
+// looked slow, so it belongs in the terminal summary and not only in the JSON.
+func TestOutputRetryReportText_ShowsTotalWait(t *testing.T) {
+	elapsed := int64(24 * 60 * 1000)
+	rep := retryReportFixture()
+	rep.TotalElapsedMS = &elapsed
+	rep.AttemptTimeoutMS = 300000
+
+	var buf bytes.Buffer
+	outputRetryReportText(&buf, rep)
+	got := buf.String()
+	for _, want := range []string{
+		"LLM wait across listed requests: 24.0m (per-attempt budget 5.0m)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+
+	// Without a budget there is no reference point, so the suffix is dropped
+	// rather than printing a meaningless zero.
+	rep.AttemptTimeoutMS = 0
+	buf.Reset()
+	outputRetryReportText(&buf, rep)
+	got = buf.String()
+	if !strings.Contains(got, "LLM wait across listed requests: 24.0m\n") {
+		t.Errorf("missing the unbudgeted wait line in:\n%s", got)
+	}
+	if strings.Contains(got, "per-attempt budget") {
+		t.Errorf("printed a budget that was never set in:\n%s", got)
+	}
+
+	// A report with no measured wait at all prints no line.
+	rep.TotalElapsedMS = nil
+	buf.Reset()
+	outputRetryReportText(&buf, rep)
+	if strings.Contains(buf.String(), "LLM wait") {
+		t.Errorf("printed a wait line for an unmeasured report:\n%s", buf.String())
+	}
+}
+
+// One decimal in whichever unit keeps the number short: a wait has to be
+// readable at a glance, and "1500.0s" is not.
+func TestFormatElapsedMS(t *testing.T) {
+	cases := map[int64]string{
+		0:          "0.0s",
+		1:          "0.0s",
+		250:        "0.2s",
+		59_900:     "59.9s",
+		60_000:     "1.0m",
+		300_000:    "5.0m",
+		1_439_000:  "24.0m",
+		3_600_000:  "1.0h",
+		90_000_000: "25.0h",
+		// Beyond an hour the unit never changes again, so a very long total
+		// simply grows the hour count rather than switching to days.
+		1_000_000_000_000: "277777.8h",
+	}
+	for ms, want := range cases {
+		if got := formatElapsedMS(ms); got != want {
+			t.Errorf("formatElapsedMS(%d) = %q, want %q", ms, got, want)
+		}
+	}
+}
+
 // Counted nouns are singular at one and plural above it.
 func TestOutputRetryReportText_PluralAgreement(t *testing.T) {
 	var buf bytes.Buffer

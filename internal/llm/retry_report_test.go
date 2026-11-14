@@ -9,6 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"sort"
 	"strings"
@@ -901,5 +904,272 @@ func TestRetryCollectorConcurrentUse(t *testing.T) {
 	}
 	if !sort.StringsAreSorted(ids) {
 		t.Fatal("report ordering is not stable")
+	}
+}
+
+// The wall clock a request holds is the only number that shows the gap between
+// the per-attempt budget and the run's deadline: four attempts that each time
+// out at 300s are 20 minutes of waiting, and no single DurationToHeadersMS says
+// so. The total has to count the backoff between them too, since the run waits
+// through that as well.
+func TestFreezeReportsTotalElapsedAcrossAttemptsAndBackoff(t *testing.T) {
+	c := NewRetryCollectorWithAttemptTimeout(300 * time.Second)
+	m := testMeta()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	c.RecordAttempt(m, errAttempt(ErrorClassNetwork, FailurePhaseTransport, 0), base, base.Add(10*time.Second))
+	c.RecordAttempt(m, okAttempt(), base.Add(30*time.Second), base.Add(45*time.Second))
+	c.Finalize(m, nil, false)
+
+	rep, err := c.Freeze("run-1")
+	if err != nil {
+		t.Fatalf("Freeze: %v", err)
+	}
+	if len(rep.Requests) != 1 {
+		t.Fatalf("got %d requests, want 1", len(rep.Requests))
+	}
+	// First attempt start to last attempt end: 45s, of which the attempts
+	// themselves account for 25s and the backoff for the other 20s.
+	if got := rep.Requests[0].TotalElapsedMS; got == nil || *got != 45000 {
+		t.Errorf("request total_elapsed_ms = %s, want 45000", formatMillisPtr(got))
+	}
+	if rep.TotalElapsedMS == nil || *rep.TotalElapsedMS != 45000 {
+		t.Errorf("run total_elapsed_ms = %s, want 45000", formatMillisPtr(rep.TotalElapsedMS))
+	}
+	if rep.AttemptTimeoutMS != 300000 {
+		t.Errorf("attempt_timeout_ms = %d, want 300000", rep.AttemptTimeoutMS)
+	}
+}
+
+// A collector built without a budget is the timing-only form: the elapsed total
+// is still measured, and no reference point is invented for it.
+func TestFreezeOmitsAttemptTimeoutWhenUnset(t *testing.T) {
+	c := NewRetryCollector()
+	m := testMeta()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	c.RecordAttempt(m, errAttempt(ErrorClassNetwork, FailurePhaseTransport, 0), base, base.Add(2*time.Second))
+	c.Finalize(m, errors.New("boom"), false)
+
+	rep, err := c.Freeze("run-1")
+	if err != nil {
+		t.Fatalf("Freeze: %v", err)
+	}
+	if rep.AttemptTimeoutMS != 0 {
+		t.Errorf("attempt_timeout_ms = %d, want 0", rep.AttemptTimeoutMS)
+	}
+	if rep.TotalElapsedMS == nil || *rep.TotalElapsedMS != 2000 {
+		t.Errorf("run total_elapsed_ms = %s, want 2000", formatMillisPtr(rep.TotalElapsedMS))
+	}
+}
+
+// The end of a stream is not visible to the observer, which only sees response
+// headers. Both the failure correction and the success extension have to move
+// the clock forward, or every streamed request reports the milliseconds it took
+// to open the stream.
+func TestExtendAndReviseMoveTheRequestEnd(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	t.Run("success extension", func(t *testing.T) {
+		c := NewRetryCollector()
+		m := testMeta()
+		c.RecordAttempt(m, okAttempt(), base, base.Add(50*time.Millisecond))
+		c.extendLastAttempt(m, base.Add(3*time.Second))
+		c.Finalize(m, nil, false)
+
+		rep, err := c.Freeze("run-1")
+		if err != nil {
+			t.Fatalf("Freeze: %v", err)
+		}
+		// The attempt stays clean, so nothing is worth listing; the elapsed
+		// total is only published alongside a listed request, which is why this
+		// case asserts on the entry's own clock instead.
+		if rep != nil {
+			t.Fatalf("got a report for a run with nothing to report: %+v", rep)
+		}
+		if got := c.entries[m].elapsed(); got != 3*time.Second {
+			t.Errorf("entry elapsed = %s, want 3s", got)
+		}
+	})
+
+	t.Run("failure correction", func(t *testing.T) {
+		c := NewRetryCollector()
+		m := testMeta()
+		c.RecordAttempt(m, okAttempt(), base, base.Add(50*time.Millisecond))
+		c.ReviseLastAttemptAt(m, ErrorClassProvider, FailurePhaseStream, base.Add(4*time.Second))
+		c.Finalize(m, errors.New("stream broke"), false)
+
+		rep, err := c.Freeze("run-1")
+		if err != nil {
+			t.Fatalf("Freeze: %v", err)
+		}
+		if len(rep.Requests) != 1 {
+			t.Fatalf("got %d listed requests, want 1", len(rep.Requests))
+		}
+		if got := rep.Requests[0].TotalElapsedMS; got == nil || *got != 4000 {
+			t.Errorf("request total_elapsed_ms = %s, want 4000", formatMillisPtr(got))
+		}
+		if got := rep.Requests[0].Attempts[0]; got.ErrorClass != ErrorClassProvider || got.FailurePhase != FailurePhaseStream {
+			t.Errorf("attempt classified as %s/%s, want provider/stream", got.ErrorClass, got.FailurePhase)
+		}
+	})
+
+	t.Run("a correction never shortens the clock", func(t *testing.T) {
+		c := NewRetryCollector()
+		m := testMeta()
+		c.RecordAttempt(m, okAttempt(), base, base.Add(5*time.Second))
+		c.extendLastAttempt(m, base.Add(time.Second))
+		c.Finalize(m, nil, false)
+
+		if got := c.entries[m].elapsed(); got != 5*time.Second {
+			t.Errorf("entry elapsed = %s, want 5s (unchanged)", got)
+		}
+	})
+}
+
+// extendLastAttempt is the success-path clock advance, so its no-op conditions
+// are the ways a late or spurious call could corrupt a report. Each one is
+// checked here rather than left to the happy path that already covers it.
+func TestExtendLastAttemptNoOps(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	t.Run("zero time", func(t *testing.T) {
+		c := NewRetryCollector()
+		m := testMeta()
+		c.RecordAttempt(m, okAttempt(), base, base.Add(time.Second))
+		c.extendLastAttempt(m, time.Time{})
+		if got := c.entries[m].elapsed(); got != time.Second {
+			t.Errorf("elapsed = %s, want 1s (unchanged)", got)
+		}
+	})
+
+	t.Run("unknown request", func(t *testing.T) {
+		c := NewRetryCollector()
+		// No attempt was ever recorded, so there is no clock to extend.
+		c.extendLastAttempt(testMeta(), base.Add(time.Minute))
+		if len(c.entries) != 0 {
+			t.Errorf("entries = %d, want 0: extending must not invent a request", len(c.entries))
+		}
+	})
+
+	t.Run("finalized request", func(t *testing.T) {
+		c := NewRetryCollector()
+		m := testMeta()
+		c.RecordAttempt(m, okAttempt(), base, base.Add(time.Second))
+		c.Finalize(m, nil, false)
+		// A stream that closes after the request was already decided cannot
+		// retroactively lengthen a report that has been settled.
+		c.extendLastAttempt(m, base.Add(time.Hour))
+		if got := c.entries[m].elapsed(); got != time.Second {
+			t.Errorf("elapsed = %s, want 1s after finalize", got)
+		}
+	})
+}
+
+// A streamed request is the case the observer cannot measure on its own: it sees
+// the 200 that opens the stream and nothing after it. Through the real client,// the request's wall clock must therefore still cover the whole stream — the
+// number only earns its place in the report if it measures the wait the run
+// actually served.
+func TestStreamedRequestElapsedCoversTheStream(t *testing.T) {
+	const streamDelay = 250 * time.Millisecond
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "no flushing", http.StatusInternalServerError)
+			return
+		}
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl-slow\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-stream\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n")
+		flusher.Flush()
+		time.Sleep(streamDelay)
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	collector := NewRetryCollector()
+	client := NewOpenAIClient(ClientConfig{
+		URL:            server.URL + "/chat/completions",
+		APIKey:         "test-key",
+		Model:          "gpt-stream",
+		ExtraBody:      map[string]any{"stream": true},
+		retryCollector: collector,
+	})
+	m := testMeta()
+	ctx := WithRequestMeta(context.Background(), m)
+	if _, err := client.CompletionsWithCtx(ctx, ChatRequest{Messages: []Message{{Role: "user", Content: "ping"}}}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	got := collector.entries[m].elapsed()
+	if got < streamDelay {
+		t.Errorf("request elapsed = %s, want at least the %s the stream took", got, streamDelay)
+	}
+	// The attempt itself still measures only the response headers, so the two
+	// numbers stay distinguishable rather than both being the stream length.
+	if d := collector.entries[m].attempts[0].DurationToHeadersMS; int64(streamDelay/time.Millisecond) <= d {
+		t.Errorf("attempt duration_to_headers_ms = %d, want well below the stream length", d)
+	}
+}
+
+// A run total has to stay believable next to the per-attempt budget. Overflow is
+// the one arithmetic failure that would silently turn a very long wait into a
+// short one, so it saturates rather than wrapping.
+func TestAddMillisSaturatesInsteadOfWrapping(t *testing.T) {
+	total := addMillis(nil, 5)
+	if total == nil || *total != 5 {
+		t.Fatalf("addMillis(nil, 5) = %s, want 5", formatMillisPtr(total))
+	}
+
+	total = addMillis(total, math.MaxInt64-1)
+	if *total != math.MaxInt64 {
+		t.Errorf("total = %d, want saturation at MaxInt64", *total)
+	}
+	// Already saturated, and adding more must not wrap into a negative.
+	total = addMillis(total, 1000)
+	if *total != math.MaxInt64 {
+		t.Errorf("total = %d, want to stay saturated at MaxInt64", *total)
+	}
+}
+
+// formatMillisPtr renders an optional millisecond total for failure messages,
+// distinguishing "absent" from "zero".
+func formatMillisPtr(ms *int64) string {
+	if ms == nil {
+		return "<absent>"
+	}
+	return fmt.Sprintf("%d", *ms)
+}
+
+// The elapsed totals are part of the JSON contract, so their wire names and
+// their presence rule are pinned here: a sub-millisecond wait is still a
+// measurement and must serialize as 0 rather than vanish.
+func TestTotalElapsedSerializesAsZeroNotOmitted(t *testing.T) {
+	c := NewRetryCollectorWithAttemptTimeout(300 * time.Second)
+	m := testMeta()
+	// Same instant on both ends: a real attempt that took under a millisecond.
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	c.RecordAttempt(m, errAttempt(ErrorClassNetwork, FailurePhaseTransport, 0), at, at)
+	c.Finalize(m, errors.New("boom"), false)
+
+	rep, err := c.Freeze("run-1")
+	if err != nil || rep == nil {
+		t.Fatalf("Freeze = (%+v, %v)", rep, err)
+	}
+	blob, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	body := string(blob)
+	for _, want := range []string{
+		`"total_elapsed_ms":0`,
+		`"attempt_timeout_ms":300000`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("report JSON is missing %s: %s", want, body)
+		}
+	}
+	// Every listed request carries its own total under the same name.
+	if !strings.Contains(body, `"requests":[{"logical_request_id"`) {
+		t.Fatalf("unexpected request shape: %s", body)
 	}
 }
