@@ -192,7 +192,10 @@ func handleCompare(w http.ResponseWriter, r *http.Request, root, repo string) {
 	// repositories is meaningless, so it is an error here exactly as it is in
 	// the CLI (cmd/opencodereview/session_cmd.go, runSessionCompare) - unlike a
 	// differing review mode, which only warns.
-	if bv.Summary.CWD != av.Summary.CWD {
+	// Same helper as the CLI, for the same reason: the recorded spellings may
+	// differ (`C:\repo` and `C:/repo` are one directory) even though the pair is
+	// comparable.
+	if !session.SameRepoPath(bv.Summary.CWD, av.Summary.CWD) {
 		http.Error(w, "sessions belong to different repositories", http.StatusBadRequest)
 		return
 	}
