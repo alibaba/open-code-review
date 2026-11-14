@@ -71,6 +71,7 @@ func renderMarkdown(markdown string, width int) string {
 	source := []byte(markdown)
 	document := markdownParser.Parser().Parse(text.NewReader(source))
 	escapeCodeSpanEntities(document, source)
+	source = escapeCodeBlockBackslashes(document, source)
 	source = sanitizeMarkdownText(document, source)
 	var rendered bytes.Buffer
 	if err := markdownRenderer.Render(&rendered, source, document); err != nil {
@@ -159,6 +160,27 @@ func escapeCodeSpanEntities(document ast.Node, source []byte) {
 		}
 		return ast.WalkSkipChildren, nil
 	})
+}
+
+func escapeCodeBlockBackslashes(document ast.Node, source []byte) []byte {
+	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering || (node.Kind() != ast.KindCodeBlock && node.Kind() != ast.KindFencedCodeBlock) {
+			return ast.WalkContinue, nil
+		}
+		lines := node.Lines()
+		for index := 0; index < lines.Len(); index++ {
+			segment := lines.At(index)
+			literal := segment.Value(source)
+			if !bytes.ContainsRune(literal, '\\') {
+				continue
+			}
+			start := len(source)
+			source = append(source, bytes.ReplaceAll(literal, []byte("\\"), []byte("\\\\"))...)
+			lines.Set(index, text.NewSegment(start, len(source)))
+		}
+		return ast.WalkSkipChildren, nil
+	})
+	return source
 }
 
 func sanitizeRenderedMarkdown(rendered string) string {

@@ -67,6 +67,53 @@ func TestRenderMarkdownCodeSpanEntities(test *testing.T) {
 	}
 }
 
+func TestRenderMarkdownCodeBlockBackslashes(test *testing.T) {
+	for _, fixture := range []struct {
+		name, literal string
+	}{
+		{"regex", `^example\.com$`},
+		{"UNC path", `\\server\share`},
+		{"Go string", `pattern := "^example\\.com$"`},
+		{"Markdown escapes", `\*literal\* \[group\] \{value\} \_name\_`},
+		{"consecutive backslashes", `one \ two \\ three \\\ four \\\\ end`},
+		{"entities", `&lt;tag&gt; &#27;[8m \.`},
+		{"trailing backslash", `continued\`},
+		{"ordinary text", "return true"},
+	} {
+		for _, block := range []struct {
+			name, markdown string
+		}{
+			{"fenced", "```text\n" + fixture.literal + "\n```\n"},
+			{"indented", "    " + fixture.literal + "\n"},
+		} {
+			test.Run(fixture.name+"/"+block.name, func(test *testing.T) {
+				rendered := renderMarkdown(block.markdown, 120)
+				if got := strings.TrimSpace(ansi.Strip(rendered)); got != fixture.literal {
+					test.Fatalf("code block changed: got %q, want %q", got, fixture.literal)
+				}
+				if sanitizeRenderedMarkdown(rendered) != rendered {
+					test.Fatalf("unsafe terminal output: %q", rendered)
+				}
+			})
+		}
+	}
+}
+
+func TestRenderMarkdownCodeBlockBackslashesMixedContent(test *testing.T) {
+	markdown := "Before \\*literal\\*.\n\n```text\n^example\\.com$\n\\\\server\\share\n```\n\nAnd `inline\\.code`.\n\n    ^other\\.com$\n\nAfter \\*literal\\*.\n"
+	plain := ansi.Strip(renderMarkdown(markdown, 120))
+	var lines []string
+	for _, line := range strings.Split(plain, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	want := "Before *literal*.\n^example\\.com$\n\\\\server\\share\nAnd inline\\.code.\n^other\\.com$\nAfter *literal*."
+	if got := strings.Join(lines, "\n"); got != want {
+		test.Fatalf("mixed Markdown changed: got %q, want %q", got, want)
+	}
+}
+
 func TestRenderMarkdownWrapAndRetention(test *testing.T) {
 	for _, width := range []int{24, 80, 0} {
 		markdown := strings.Repeat("Before \u884c\u4e3a\u53d8\u66f4 after compatibility e\u0301 \U0001f600. ", 160)
