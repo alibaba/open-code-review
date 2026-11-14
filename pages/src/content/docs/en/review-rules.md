@@ -121,6 +121,33 @@ only. If two of your own entries match the same file, the first one
 still wins outright — `merge_system_rule` does not combine them with
 each other.
 
+### Composing rule text from multiple files or parts
+
+`rule` also accepts an array of strings. Each element is interpreted exactly
+like a string `rule`: inline text is used as-is, while a value that looks like a
+`.md`, `.txt`, or `.markdown` path is resolved relative to the rule file's
+directory (same 512 KB per-file limit) and replaced by its content. Parts are
+joined with a blank line in declaration order, and the composed text is the
+rule for that entry — first-match and `merge_system_rule` semantics do not
+change.
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*.sql",
+      "rule": ["sql-baseline.md", "Also flag destructive DDL."]
+    }
+  ]
+}
+```
+
+A missing or unreadable file part prints a warning and is skipped; the other
+parts are still used. If no part contributes text, the entry is ignored.
+Composed text is capped at 1 MiB and truncated with a warning beyond that. A
+single string that contains several path-looking tokens is still treated as
+inline text, with a warning suggesting the array form.
+
 ### Glob features
 
 OCR uses [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)

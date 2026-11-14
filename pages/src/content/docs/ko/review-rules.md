@@ -114,6 +114,32 @@ Security review: flag hardcoded secrets, unvalidated redirects, and missing auth
 일치하면 앞선 항목이 여전히 완전히 이깁니다. `merge_system_rule`는 그것들을 서로
 합치지 않습니다.
 
+### 여러 파일이나 조각에서 규칙 텍스트 구성하기
+
+`rule`은 문자열 배열도 받습니다. 각 요소는 문자열 형식의 `rule`과 정확히 같
+은 방식으로 해석됩니다. 인라인 텍스트는 그대로 사용되고, `.md`, `.txt`,
+`.markdown` 경로처럼 보이는 값은 규칙 파일이 있는 디렉터리를 기준으로 해석되
+며(파일당 512 KB 제한 동일) 해당 내용으로 대체됩니다. 각 부분은 선언 순서대로
+빈 줄로 연결되고, 구성된 텍스트가 해당 항목의 규칙이 됩니다. first-match와
+`merge_system_rule` 의미는 바뀌지 않습니다.
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*.sql",
+      "rule": ["sql-baseline.md", "Also flag destructive DDL."]
+    }
+  ]
+}
+```
+
+파일이 없거나 읽을 수 없는 부분은 경고를 출력하고 건너뛰며 나머지 부분은 그대
+로 사용됩니다. 어떤 부분도 텍스트를 만들지 않으면 해당 항목은 무시됩니다. 구
+성된 텍스트는 1 MiB로 제한되며 초과분은 경고와 함께 잘립니다. 하나의 문자열에
+경로처럼 보이는 토큰이 여러 개 있으면 기존과 같이 인라인으로 처리되고 배열 형
+식을 권하는 경고가 출력됩니다.
+
 ### glob 기능 {#glob-features}
 
 OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)로
