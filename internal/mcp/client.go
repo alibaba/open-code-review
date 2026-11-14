@@ -82,6 +82,9 @@ func NewClient(ctx context.Context, name, command string, args, env []string, di
 // Header values may contain $ENV_VAR references which are expanded at runtime.
 // Returns an error if any header value expands to an empty string.
 func NewRemoteClient(ctx context.Context, name, url string, headers map[string]string, version string) (*Client, error) {
+	if err := ValidateRemoteURL(url); err != nil {
+		return nil, fmt.Errorf("MCP server %q: %w", name, err)
+	}
 	var expanded map[string]string
 	if len(headers) > 0 {
 		expanded = make(map[string]string, len(headers))
@@ -93,6 +96,7 @@ func NewRemoteClient(ctx context.Context, name, url string, headers map[string]s
 		}
 	}
 	httpClient := &http.Client{
+		CheckRedirect: remoteRedirect,
 		Transport: &headerTransport{
 			base:       http.DefaultTransport,
 			headers:    expanded,
