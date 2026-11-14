@@ -5,11 +5,13 @@
 package diff
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,7 +118,6 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 			// Flush previous diff
 			if current != nil {
 				current.Diff = strings.TrimSuffix(buf.String(), "\n")
-				finalizeDiff(ctx, current, repoDir, ref, runner)
 				diffs = append(diffs, *current)
 				buf.Reset()
 			}
@@ -177,11 +178,99 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	// Flush last diff
 	if current != nil {
 		current.Diff = strings.TrimSuffix(buf.String(), "\n")
-		finalizeDiff(ctx, current, repoDir, ref, runner)
 		diffs = append(diffs, *current)
 	}
 
+	finalizeDiffs(ctx, diffs, repoDir, ref, runner)
 	return diffs, nil
+}
+
+// finalizeDiffs runs finalizeDiff over diffs. When ref is set, the new-file
+// contents are first read through one `git cat-file --batch` process instead
+// of a `git show` per file, since starting git costs tens of milliseconds per
+// file on Windows. A file the batch does not return still goes through
+// finalizeDiff, so its content or warning is unchanged.
+func finalizeDiffs(ctx context.Context, diffs []model.Diff, repoDir string, ref string, runner *gitcmd.Runner) {
+	var contents map[string]string
+	if ref != "" {
+		var paths []string
+		for _, d := range diffs {
+			if needsNewFileContent(d) {
+				paths = append(paths, d.NewPath)
+			}
+		}
+		contents = readBlobsAtRef(ctx, repoDir, ref, paths, runner)
+	}
+	for i := range diffs {
+		if content, ok := contents[diffs[i].NewPath]; ok && needsNewFileContent(diffs[i]) {
+			diffs[i].NewFileContent = content
+			continue
+		}
+		finalizeDiff(ctx, &diffs[i], repoDir, ref, runner)
+	}
+}
+
+func needsNewFileContent(d model.Diff) bool {
+	return !d.IsDeleted && d.NewPath != "/dev/null" && !d.IsBinary
+}
+
+// readBlobsAtRef returns the content at ref of each path that resolves to a
+// blob. Paths it cannot return are left out of the map: missing paths,
+// non-blob entries such as submodules, and paths containing a newline, which
+// the line-based batch input cannot carry.
+func readBlobsAtRef(ctx context.Context, repoDir string, ref string, paths []string, runner *gitcmd.Runner) map[string]string {
+	var input strings.Builder
+	var batched []string
+	for _, path := range paths {
+		if strings.Contains(path, "\n") {
+			continue
+		}
+		input.WriteString(ref + ":" + path + "\n")
+		batched = append(batched, path)
+	}
+	if len(batched) == 0 {
+		return nil
+	}
+
+	args := []string{"cat-file", "--batch"}
+	var output []byte
+	if runner != nil {
+		output, _ = runner.OutputWithInput(ctx, repoDir, strings.NewReader(input.String()), args...)
+	} else {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = repoDir
+		cmd.Stdin = strings.NewReader(input.String())
+		output, _ = cmd.Output()
+	}
+
+	// Each answer is "<oid> <type> <size>\n<content>\n", or one line such as
+	// "<name> missing". If git failed or stopped early, the paths without an
+	// answer are left to finalizeDiff.
+	contents := make(map[string]string, len(batched))
+	rest := output
+	for _, path := range batched {
+		header, after, ok := bytes.Cut(rest, []byte("\n"))
+		if !ok {
+			break
+		}
+		rest = after
+		if bytes.HasSuffix(header, []byte(" missing")) || bytes.HasSuffix(header, []byte(" ambiguous")) {
+			continue
+		}
+		fields := strings.Fields(string(header))
+		if len(fields) != 3 {
+			break
+		}
+		size, err := strconv.Atoi(fields[2])
+		if err != nil || size < 0 || size >= len(rest) {
+			break
+		}
+		if fields[1] == "blob" {
+			contents[path] = string(rest[:size])
+		}
+		rest = rest[size+1:]
+	}
+	return contents
 }
 
 // finalizeDiff reads the new file content. When ref is non-empty it uses
