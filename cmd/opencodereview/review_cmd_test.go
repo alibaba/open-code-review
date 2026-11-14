@@ -73,8 +73,8 @@ func TestResolveReviewMaxTools(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveReviewMaxTools(tt.templateDefault, tt.cliValue); got != tt.want {
-				t.Errorf("resolveReviewMaxTools() = %d, want %d", got, tt.want)
+			if got := resolveMaxTools(tt.templateDefault, tt.cliValue); got != tt.want {
+				t.Errorf("resolveMaxTools() = %d, want %d", got, tt.want)
 			}
 		})
 	}

@@ -95,7 +95,8 @@ func previewMaxTokens(templateDefault, cliOverride int) (int, error) {
 }
 
 // loadCommonContext validates the working directory, loads the embedded
-// template, raises MaxToolRequestTimes when maxTools exceeds the default,
+// template, raises MaxToolRequestTimes when maxTools exceeds the default
+// (callers apply the cap afterwards, via resolveMaxTools),
 // resolves the absolute repo path, loads system review rules, and creates
 // the global git subprocess limiter. Both review and scan callers go
 // through this so the startup sequence stays consistent.

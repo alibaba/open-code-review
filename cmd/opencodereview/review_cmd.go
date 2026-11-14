@@ -138,7 +138,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err != nil {
 		return err
 	}
-	cc.Template.MaxToolRequestTimes = resolveReviewMaxTools(cc.Template.MaxToolRequestTimes, opts.maxTools)
+	cc.Template.MaxToolRequestTimes = resolveMaxTools(cc.Template.MaxToolRequestTimes, opts.maxTools)
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security (#112): reject ref-option injection before any git invocation.
@@ -347,7 +347,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	return emitErr
 }
 
-func resolveReviewMaxTools(templateDefault, cliValue int) int {
+// resolveMaxTools applies --max-tools as a cap rather than a floor: an
+// explicit value wins over the template default in both directions. Shared
+// by review and scan, which each own a template but take the same flag.
+func resolveMaxTools(templateDefault, cliValue int) int {
 	if cliValue > 0 {
 		return cliValue
 	}
