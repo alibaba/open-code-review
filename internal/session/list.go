@@ -42,6 +42,11 @@ type Summary struct {
 	Legacy         bool          `json:"legacy"`
 	RunManifest    *RunManifest  `json:"run_manifest,omitempty"`
 
+	// Running reports that a live process still holds this session's liveness
+	// lock. It is what separates a run in progress from Aborted: both lack a
+	// session_end record, and only the lock tells them apart.
+	Running bool `json:"running,omitempty"`
+
 	// ResumeLineage is present only for a run that resumed another, and records
 	// which run it continued and across which provider and model.
 	ResumeLineage *ResumeLineage `json:"resume_lineage,omitempty"`
@@ -182,6 +187,12 @@ func LoadDetailAt(path, sessionID, fallbackRepoDir string) (*Summary, []ItemDeta
 	if summary.SessionID == "" {
 		summary.SessionID = sessionID
 	}
+	// Only a session without a session_end record can still be running, and
+	// the probe costs an open and a lock attempt. A repository with thousands
+	// of finished sessions would pay that for every one of them.
+	if summary.Aborted {
+		summary.Running = SessionIsActive(path)
+	}
 	return summary, items, nil
 }
 
@@ -199,6 +210,11 @@ func loadSummaryFromFile(path, sessionID, repoDir string) (*Summary, error) {
 	}
 	if summary.SessionID == "" {
 		summary.SessionID = sessionID
+	}
+	// As above: a session that has ended cannot be running, and this one is
+	// called once per session in a listing.
+	if summary.Aborted {
+		summary.Running = SessionIsActive(path)
 	}
 	return summary, nil
 }

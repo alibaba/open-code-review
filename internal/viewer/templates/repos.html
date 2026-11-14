@@ -25,12 +25,13 @@
 {{if .Repos}}
 <div class="table-scroll" role="region" aria-label="Repositories table">
 <table id="repositories-table" class="table">
-    <thead><tr><th scope="col" class="col-repository">Repository</th><th scope="col" class="col-sessions">Sessions</th><th scope="col" class="col-modified">Last Modified</th><th scope="col" class="col-action">Action</th></tr></thead>
+    <thead><tr><th scope="col" class="col-repository">Repository</th><th scope="col" class="col-sessions">Sessions</th><th scope="col" class="col-status">Status</th><th scope="col" class="col-modified">Last Modified</th><th scope="col" class="col-action">Action</th></tr></thead>
     <tbody>
     {{range .Repos}}
         <tr>
             <td class="col-repository" data-repository-name><a href="/r/{{.EncodedPath}}">{{.EncodedPath}}</a></td>
             <td class="col-sessions">{{.SessionCount}}</td>
+            <td class="col-status">{{if .ActiveSessionID}}<a class="repo-active" href="/r/{{.EncodedPath}}/{{.ActiveSessionID}}" data-repo-active><span class="status-dot" aria-hidden="true"></span>running</a>{{else}}<span class="repo-idle">&mdash;</span>{{end}}</td>
             <td class="col-modified">{{formatTime .LastModified}}</td>
             <td class="col-action"><a class="repo-check" href="/r/{{.EncodedPath}}">Check</a></td>
         </tr>
@@ -42,6 +43,7 @@
 <script src="/static/pager.js"></script>
 <script src="/static/a11y.js"></script>
 <script src="/static/repos.js"></script>
+<script src="/static/live.js"></script>
 {{else}}
 <p>No session data found. Run a code review first.</p>
 {{end}}
