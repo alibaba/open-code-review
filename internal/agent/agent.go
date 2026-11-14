@@ -148,6 +148,13 @@ type Args struct {
 	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
 	MaxTokensBudget int64
 
+	// MaxCostBudget caps the aggregate spend in USD at Price, checked where
+	// MaxTokensBudget is except for the per-group look-ahead: dispatch stops
+	// once the spend is past it. 0 = unlimited. Price may be set without a
+	// budget, to report the cost only.
+	MaxCostBudget float64
+	Price         *llm.Price
+
 	// SkipFilter disables the REVIEW_FILTER_TASK even when the template
 	// defines one. Set via the --no-filter CLI flag.
 	SkipFilter bool
@@ -187,6 +194,8 @@ type Agent struct {
 	runner          *reviewtask.Runner
 	resumeInfo      *ResumeInfo
 	budgetExceeded  atomic.Bool // set when a token/tool-call budget gate stopped dispatch
+	// costBudgetExceeded is set with budgetExceeded when the stop was the cost budget.
+	costBudgetExceeded atomic.Bool
 
 	fileGroups []FileGroup // semantic grouping result, stored for JSON output
 
@@ -248,6 +257,8 @@ func New(args Args) *Agent {
 		// stay out of the retry report. See newRequestMeta.
 		NewRequestMeta:  a.newRequestMeta,
 		MaxTokensBudget: args.MaxTokensBudget,
+		MaxCostBudget:   args.MaxCostBudget,
+		Price:           args.Price,
 	})
 	return a
 }
@@ -402,6 +413,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 				humanTokens(est.TotalTokens), humanTokens(a.args.MaxTokensBudget))
 		}
 	}
+	if a.args.MaxCostBudget > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] cost budget: $%.2f (dispatch stops once exceeded)\n", a.args.MaxCostBudget)
+	}
 
 	// Record which run this one continued, before any item is dispatched, so the
 	// lineage is on disk even if the review then fails outright. It is written
@@ -543,6 +557,23 @@ func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.Too
 // when the cap left nothing covered. Per-file token/tool-round exhaustion
 // does NOT set this flag — it is an item-level failed(budget) outcome instead.
 func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded.Load() }
+
+// CostBudgetExceeded reports whether the stop BudgetExceeded reports was the
+// cost budget. A cost stop sets both, so a reader that only knows
+// BudgetExceeded still sees the run as cut.
+func (a *Agent) CostBudgetExceeded() bool { return a.costBudgetExceeded.Load() }
+
+// TotalCost returns the run's spend in USD at Args.Price, and false when no
+// price is known.
+func (a *Agent) TotalCost() (float64, bool) { return a.runner.TotalCost() }
+
+// markCostBudget records a cost budget stop; only the first one warns.
+func (a *Agent) markCostBudget(file, message string) {
+	a.budgetExceeded.Store(true)
+	if a.costBudgetExceeded.CompareAndSwap(false, true) {
+		a.recordWarning("cost_budget_reached", file, message)
+	}
+}
 
 // recordWarning adds a non-fatal warning to the agent's warning list.
 func (a *Agent) recordWarning(warningType, file, message string) {
@@ -726,6 +757,23 @@ dispatchLoop:
 		if ctx.Err() != nil {
 			<-sem // release the slot acquired concurrently with cancellation
 			break dispatchLoop
+		}
+		// Checked after the slot is acquired, unlike the token look-ahead: the
+		// wait for a slot is the wait for a group to finish and record its
+		// spend, so no group starts on a stale total.
+		if a.runner.CostBudgetExceeded() {
+			<-sem
+			spent, _ := a.runner.TotalCost()
+			fmt.Fprintf(stdout.Writer(), "[ocr] cost budget reached (spent $%.4f > budget $%.2f), skipping group %q and remaining\n",
+				spent, a.args.MaxCostBudget, group.Label)
+			a.markCostBudget(group.Diffs[0].NewPath,
+				fmt.Sprintf("stopped dispatch: spent $%.4f exceeds cost budget $%.2f", spent, a.args.MaxCostBudget))
+			if b := a.session.Manifest(); b != nil {
+				if err := b.SetPendingFailureCause(session.FailureBudget, "aggregate cost budget reached before dispatch completed"); err != nil {
+					a.recordWarning("manifest_error", "", err.Error())
+				}
+			}
+			break
 		}
 		dispatched += int64(len(group.Diffs))
 		wg.Add(1)
@@ -1097,7 +1145,7 @@ func (a *Agent) ruleConfigSHA256() string {
 // interchangeable when auditing why one stopped short.
 func (a *Agent) runtimeConfigSHA256() string {
 	r := a.args.RuntimeConfig
-	return hashFields(
+	fields := []string{
 		"protocol", r.Protocol,
 		"model", a.args.Model,
 		"host", r.EndpointHost,
@@ -1105,7 +1153,14 @@ func (a *Agent) runtimeConfigSHA256() string {
 		"timeout", r.Timeout.String(),
 		"concurrency", strconv.Itoa(a.args.MaxConcurrency),
 		"max_tokens_budget", strconv.FormatInt(a.args.MaxTokensBudget, 10),
-	)
+	}
+	// Only when set, so runs without a cost budget keep the identity they had.
+	if a.args.MaxCostBudget > 0 && a.args.Price != nil {
+		fields = append(fields,
+			"max_cost_budget", strconv.FormatFloat(a.args.MaxCostBudget, 'f', -1, 64),
+			"price", a.args.Price.String())
+	}
+	return hashFields(fields...)
 }
 
 // hashFields folds a sequence of string fields into one SHA-256 digest, writing an
@@ -1236,7 +1291,7 @@ func classifyItemError(err error) (session.FailureClass, string) {
 // json runs the progress lines that would say why an item stopped are discarded,
 // so that string is the only stop diagnostic that leaves a CI runner.
 func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, string) {
-	if stop == llmloop.StopMaxRounds || stop == llmloop.StopTokenBudget {
+	if stop == llmloop.StopMaxRounds || stop == llmloop.StopTokenBudget || stop == llmloop.StopCostBudget {
 		return session.FailureBudget, stop.Reason()
 	}
 	return session.FailureUnknown, stop.Reason()
@@ -1494,6 +1549,13 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 			return false, nil, ctx.Err()
 		}
 
+		if round > 1 && (a.costBudgetExceeded.Load() || a.runner.CostBudgetExceeded()) {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Aggregate cost budget exceeded, skipping round %d for group %q\n", round, groupKey)
+			spent, _ := a.runner.TotalCost()
+			a.markCostBudget(g.Diffs[0].NewPath,
+				fmt.Sprintf("skipped round %d of group %q: spent $%.4f exceeds cost budget $%.2f", round, groupKey, spent, a.args.MaxCostBudget))
+			break
+		}
 		if round > 1 && a.args.MaxTokensBudget > 0 && (a.budgetExceeded.Load() || a.runner.TotalTokensUsed() > a.args.MaxTokensBudget) {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Aggregate budget exceeded, skipping round %d for group %q\n", round, groupKey)
 			// A group can finish a round over budget with no other gate noticing,
@@ -1570,6 +1632,11 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 					a.recordWarning("token_budget_reached", g.Diffs[0].NewPath,
 						fmt.Sprintf("stopped group %q mid-review: used %d tokens exceeds budget %d", groupKey, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
 				}
+			}
+			if mainStop == llmloop.StopCostBudget {
+				spent, _ := a.runner.TotalCost()
+				a.markCostBudget(g.Diffs[0].NewPath,
+					fmt.Sprintf("stopped group %q mid-review: spent $%.4f exceeds cost budget $%.2f", groupKey, spent, a.args.MaxCostBudget))
 			}
 			class, reason := classifyMainLoopStop(mainStop)
 			lastStop = &subtaskStop{

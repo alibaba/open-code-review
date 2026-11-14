@@ -206,3 +206,46 @@ func TestBudgetGate_Unlimited(t *testing.T) {
 		t.Errorf("unlimited budget should run all 5 files, ran %d", calls)
 	}
 }
+
+// TestCostBudgetGate_StopsDispatch checks the cost gate once a slot is free:
+// with $0.05 a file, a $0.12 budget admits three files.
+func TestCostBudgetGate_StopsDispatch(t *testing.T) {
+	fake := &fakeBudgetClient{perCallTokens: 50_000}
+	a := NewAgent(Args{
+		Template:         budgetTestTemplate(),
+		LLMClient:        fake,
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   1,
+		MaxCostBudget:    0.12,
+		Price:            &llm.Price{Input: 1, Output: 1},
+		Session:          session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: session.ReviewModeFullScan}),
+		SkipPlan:         true,
+		SkipDedup:        true,
+		SkipSummary:      true,
+	})
+	a.items = makeScanItems(10)
+	a.args.Tools.Freeze()
+
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if calls := atomic.LoadInt64(&fake.calls); calls != 3 {
+		t.Fatalf("LLM calls = %d, want 3", calls)
+	}
+	if !a.BudgetExceeded() || !a.CostBudgetExceeded() {
+		t.Fatalf("BudgetExceeded=%v CostBudgetExceeded=%v, want both true", a.BudgetExceeded(), a.CostBudgetExceeded())
+	}
+	if cost, ok := a.TotalCost(); !ok || cost < 0.149 || cost > 0.151 {
+		t.Fatalf("TotalCost = %v, %v; want 0.15, true", cost, ok)
+	}
+	var warned int
+	for _, w := range a.Warnings() {
+		if w.Type == "cost_budget_reached" {
+			warned++
+		}
+	}
+	if warned != 1 {
+		t.Errorf("cost_budget_reached warnings = %d, want 1", warned)
+	}
+}

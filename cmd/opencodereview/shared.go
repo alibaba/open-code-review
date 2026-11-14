@@ -65,6 +65,32 @@ func resolveMaxTokens(templateDefault int, cfg *Config, cliOverride int) (int, e
 	return cfg.MaxTokens, nil
 }
 
+// resolveCostBudget applies the precedence for the cost budget (CLI flag >
+// saved app config > unlimited) and for the price it is measured at
+// (--price-per-m > the provider's price table). A budget without a price is an
+// error, because it could never trip.
+func resolveCostBudget(cfg *Config, cliBudget float64, cliPrice string, rt *llmRuntime) (float64, *llm.Price, error) {
+	budget := cliBudget
+	if budget == 0 && cfg != nil {
+		budget = cfg.MaxCostBudget
+		if err := validateCostBudget(budget); err != nil {
+			return 0, nil, fmt.Errorf("invalid max_cost_budget in app config: must be a non-negative number")
+		}
+	}
+	price := rt.Price
+	if cliPrice != "" {
+		p, err := llm.ParsePrice(cliPrice)
+		if err != nil {
+			return 0, nil, fmt.Errorf("--price-per-m: %w", err)
+		}
+		price = &p
+	}
+	if budget > 0 && price == nil {
+		return 0, nil, fmt.Errorf("a cost budget needs the price of model %q: pass --price-per-m or set providers.<name>.prices[%q] in the config file", rt.Model, rt.Model)
+	}
+	return budget, price, nil
+}
+
 // resolveEffort applies the standard precedence for the review effort preset:
 // CLI flag > saved app config > EffortDefault.
 func resolveEffort(cfg *Config, cliOverride string) (template.Effort, error) {
@@ -199,8 +225,9 @@ func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 type llmRuntime struct {
 	Client    llm.LLMClient
 	Model     string
-	Provider  string // resolved provider name (non-secret label; empty for non-provider endpoints)
-	Source    string // resolved configuration source (non-secret label)
+	Price     *llm.Price // the resolved model's configured price; nil when none
+	Provider  string     // resolved provider name (non-secret label; empty for non-provider endpoints)
+	Source    string     // resolved configuration source (non-secret label)
 	Collector *tool.CommentCollector
 	// RetryCollector observes every LLM HTTP attempt this run makes. It is
 	// created here rather than on the session or the agent because the client is
@@ -265,6 +292,7 @@ func loadLLMRuntime(tpl *template.Template, resolveOpts llm.ResolveOptions) (*ll
 	return &llmRuntime{
 		Client:         llm.NewLLMClient(ep, retryCollector, rawHolder),
 		Model:          ep.Model,
+		Price:          ep.Price,
 		Provider:       ep.Provider,
 		Source:         ep.Source,
 		Collector:      tool.NewCommentCollector(),
@@ -871,10 +899,11 @@ func emitRunResult(
 		if p, ok := ag.(interface{ FileGroups() []agent.FileGroupInfo }); ok {
 			groups = p.FileGroups()
 		}
+		costUSD, costBudgetExceeded := runCost(ag)
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), costUSD, costBudgetExceeded, llmIdentity, out, retryReport, groups)
 	}
 	if outputFormat == "sarif" {
 		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
