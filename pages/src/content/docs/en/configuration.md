@@ -41,12 +41,14 @@ The following providers ship with OCR, with the Base URL and protocol
 preset. Most require an API key. If `providers.<name>.api_key` is unset,
 OCR falls back to the corresponding environment variable. The `chatgpt`
 provider instead uses the ChatGPT credentials created by `ocr auth login`.
+Copilot and Bedrock use their own authentication chains instead.
 
 | Name | Protocol | Base URL | API key env var |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
 | `chatgpt` | openai-responses | `https://api.openai.com/v1` | not applicable (Sign in with ChatGPT) |
+| `copilot` | copilot | managed by Copilot CLI | — (Copilot authentication) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -122,9 +124,58 @@ ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
 ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 ```
 
-The configured `url` takes precedence over the preset Base URL. When
+The configured `url` takes precedence over the preset Base URL for HTTP
+providers. Copilot and Bedrock do not accept a URL override. When
 `providers.<name>.url` is unset (or cleared), OCR falls back to the
 preset default — so you only need to set it when your endpoint differs.
+
+### GitHub Copilot SDK (experimental)
+
+Install the [Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli),
+then run `copilot login` and complete the GitHub browser sign-in. For one
+review, select the built-in provider without changing your saved configuration:
+
+```bash
+ocr review --provider copilot --model auto
+```
+
+To make Copilot the saved default instead:
+
+```bash
+ocr config set provider copilot
+ocr config set model auto
+ocr llm test
+```
+
+The Go SDK uses the Copilot CLI and its authentication chain; OCR does not
+store a Copilot API key or expose a Copilot-compatible HTTP endpoint. OCR finds
+the `copilot` executable in `PATH`, or uses `COPILOT_CLI_PATH` when set. The model
+list in the picker is only a starting point. A model available to one Copilot
+account may be unavailable to another, so `--model` accepts account-specific
+identifiers. Copilot Free supports `auto` model selection and has a limited
+allowance. The `ocr llm test` command and reviews use that allowance; no paid
+plan is required.
+
+OCR exposes only its review tools and executes every requested tool through its
+existing dispatcher. Ordinary tool rounds continue in one SDK session, with
+OCR returning each tool result to Copilot before the next model call. OCR still
+applies its tool-round, timeout, context, and aggregate token limits. When OCR
+compresses the transcript or narrows the tools for its final round, it starts
+a new session with OCR's recorded conversation. That fallback serializes the
+history as JSON, together with OCR's record of completed tool reads. SDK automatic
+compaction and large-output file substitution are disabled so OCR supplies full
+tool results and owns compression. OCR forwards
+the task's per-request output-token limit through the SDK's request handler for
+HTTP and WebSocket inference. A truncated response returns `length`; the CLI
+cannot continue with another model response inside that OCR request. Cancellation
+also cancels the active transport and releases the session. SDK token usage is
+used when available; missing fields are estimated. These token counts track OCR
+budgets. Account allowance and charges remain governed by Copilot.
+
+The provider accepts a model and optional timeout only. OCR rejects
+`providers.copilot.url`, API keys, custom headers, request bodies, retry codes,
+and protocol overrides instead of silently ignoring them. `copilot` is not a
+valid custom-provider or `llm.protocol` value.
 
 ### AWS Bedrock
 

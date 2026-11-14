@@ -39,12 +39,14 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 下列 provider 随 OCR 发布，并已预置 Base URL 与协议。多数 provider 需要 API key；
 若 `providers.<name>.api_key` 未设置，会自动回退到对应的环境变量。`chatgpt`
 改用 `ocr auth login` 创建的 ChatGPT 凭证。
+Copilot 和 Bedrock 使用各自的认证链，无需配置 API key。
 
 | 名称 | 协议 | Base URL | API key 环境变量 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
 | `chatgpt` | openai-responses | `https://api.openai.com/v1` | 不适用（Sign in with ChatGPT） |
+| `copilot` | copilot | 由 Copilot CLI 管理 | —（Copilot 登录态） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -115,8 +117,28 @@ ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
 ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 ```
 
-配置的 `url` 优先于预设 Base URL。当 `providers.<name>.url` 未设置（或
+Copilot 和 Bedrock 不接受 URL 覆盖。其他 provider 配置的 `url` 优先于预设 Base URL。当 `providers.<name>.url` 未设置（或
 被清除）时，OCR 回退到预设默认值——因此只需在端点不同时才设置。
+
+### GitHub Copilot SDK（实验性）
+
+安装 [Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli)，
+运行 `copilot login` 并完成浏览器登录。单次审查可使用以下命令，无需修改已保存配置：
+
+```bash
+ocr review --provider copilot --model auto
+```
+
+OCR 从 `PATH` 查找 `copilot`，也可通过 `COPILOT_CLI_PATH` 指定路径。
+只有 OCR 的审查工具会提供给模型，工具仍由 OCR 执行。普通工具轮次沿用同一个
+SDK 会话；OCR 压缩历史或收窄最终轮次的工具时，会以 JSON 历史和已完成的读取记录
+重建会话。SDK 的自动压缩和大输出临时文件替换已关闭，完整工具结果与压缩流程均由
+OCR 管理。工具轮次、超时、上下文和总 token 预算仍由 OCR 控制。OCR 通过 SDK 的
+请求回调为 HTTP 和 WebSocket 推理设置任务的单次输出 token 上限；截断响应返回
+`length`，CLI 不能在同一次 OCR 请求内自行继续调用模型。取消操作会取消当前传输
+并释放会话。SDK 未报告的用量字段使用估算值；这些 token 数用于 OCR 预算，账号
+额度和费用仍按 Copilot 的规则计算。此 provider 仅接受模型和可选超时设置，
+不支持 URL、API key、自定义请求头、请求体或协议覆盖。
 
 ### AWS Bedrock
 

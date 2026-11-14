@@ -9,7 +9,7 @@ export { PROVIDER_PRESETS };
 export interface OcrProviderPreset {
   name: string;
   displayName: string;
-  protocol: 'anthropic' | 'openai' | 'openai-responses' | 'anthropic-bedrock';
+  protocol: 'anthropic' | 'openai' | 'openai-responses' | 'anthropic-bedrock' | 'copilot';
   baseUrl: string;
   authHeader?: string;
   envVar: string;

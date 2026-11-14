@@ -4,6 +4,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,24 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/testconnection"
 	"github.com/alibaba/open-code-review/internal/llm"
 )
+
+func TestLLMTestCopilotSignedIn(t *testing.T) {
+	if os.Getenv("OCR_COPILOT_LIVE_TEST") != "1" {
+		t.Skip("set OCR_COPILOT_LIVE_TEST=1 to use signed-in Copilot allowance")
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"provider":"copilot","language":"English","providers":{"copilot":{"model":"auto"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var probeErr error
+	output := captureStdout(t, func() { probeErr = runLLMTestWithConfigPath(path) })
+	if probeErr != nil {
+		t.Fatal(probeErr)
+	}
+	if !strings.Contains(output, "Transport: Copilot CLI") || !strings.Contains(output, "Tool-call round trip verified") {
+		t.Fatalf("signed-in Copilot probe did not verify the tool round trip: %s", output)
+	}
+}
 
 func TestLLMTestTimeout(t *testing.T) {
 	tests := []struct {

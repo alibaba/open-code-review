@@ -12,6 +12,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/testconnection"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -92,6 +93,10 @@ func runLLMTestWithConfigPath(configPath string) error {
 	// No retry collector: llm test is a connectivity probe, not a review, and the
 	// retry report only describes ocr review.
 	llmClient := llm.NewLLMClient(ep, nil, nil)
+	sessionID := uuid.NewString()
+	if closer, ok := llmClient.(interface{ CloseSession(string) }); ok {
+		defer closer.CloseSession(sessionID)
+	}
 
 	messages := make([]llm.Message, 0, len(task.Messages))
 	for _, m := range task.Messages {
@@ -112,6 +117,7 @@ func runLLMTestWithConfigPath(configPath string) error {
 			Messages:  msgs,
 			Tools:     tools,
 			MaxTokens: 2048,
+			SessionID: sessionID,
 		})
 	}
 
@@ -151,6 +157,8 @@ func runLLMTestWithConfigPath(configPath string) error {
 		} else {
 			fmt.Printf("Profile: (from the ambient AWS chain)\n")
 		}
+	} else if ep.Protocol == llm.ProtocolCopilot {
+		fmt.Println("Transport: Copilot CLI")
 	} else {
 		fmt.Printf("URL:    %s\n", ep.URL)
 	}
@@ -265,7 +273,11 @@ func runLLMProviders() {
 	fmt.Fprintf(w, "  NAME\tPROTOCOL\tBASE URL\n")
 	fmt.Fprintf(w, "  ----\t--------\t--------\n")
 	for _, p := range providers {
-		fmt.Fprintf(w, "  %s\t%s\t%s\n", p.Name, p.Protocol, p.BaseURL)
+		baseURL := p.BaseURL
+		if p.Protocol == llm.ProtocolCopilot {
+			baseURL = "Copilot CLI"
+		}
+		fmt.Fprintf(w, "  %s\t%s\t%s\n", p.Name, p.Protocol, baseURL)
 	}
 	if err := w.Flush(); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to flush output: %v\n", err)

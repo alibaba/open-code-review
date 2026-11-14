@@ -69,6 +69,17 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     "models": []
   },
   {
+    "name": "copilot",
+    "displayName": "GitHub Copilot SDK (experimental)",
+    "protocol": "copilot",
+    "baseUrl": "",
+    "envVar": "",
+    "ambientAuth": true,
+    "models": [
+      "auto"
+    ]
+  },
+  {
     "name": "dashscope",
     "displayName": "Alibaba DashScope API",
     "protocol": "openai",
