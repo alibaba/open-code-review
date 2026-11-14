@@ -35,6 +35,37 @@ func TestRenderMarkdown(test *testing.T) {
 	}
 }
 
+func TestRenderMarkdownCodeSpanEntities(test *testing.T) {
+	for _, fixture := range []struct {
+		name, markdown, want string
+	}{
+		{"named", "Keep `&lt;script&gt;` escaped.", "Keep &lt;script&gt; escaped."},
+		{"numeric", "Keep `&#60;&#x3e;&#38;` literal.", "Keep &#60;&#x3e;&#38; literal."},
+		{"nested", "Keep `&amp;lt;` literal.", "Keep &amp;lt; literal."},
+		{"plain ampersand", "Use `first && second`.", "Use first && second."},
+		{"backticks", "Keep `` `&lt;tag&gt;` `` literal.", "Keep `&lt;tag&gt;` literal."},
+		{"multiline", "Keep `&lt;\nscript&gt;` escaped.", "Keep &lt; script&gt; escaped."},
+		{"emphasis", "**Keep `&lt;script&gt;` escaped.**", "Keep &lt;script&gt; escaped."},
+		{"link", "[`&lt;tag&gt;`](https://example.invalid)", "&lt;tag&gt; https://example.invalid"},
+		{"table", "| Example |\n| --- |\n| `&lt;tag&gt;` |\n", "&lt;tag&gt;"},
+		{"encoded CSI", "Keep `&#27;[2J` literal.", "Keep &#27;[2J literal."},
+		{"encoded OSC", "Keep `&#27;]52;c;c2VjcmV0&#7;` literal.", "Keep &#27;]52;c;c2VjcmV0&#7; literal."},
+		{"prose", "Decode &lt;tag&gt; but keep `&lt;tag&gt;` literal.", "Decode <tag> but keep &lt;tag&gt; literal."},
+		{"fenced code", "```html\n&lt;tag&gt;\n```\n", "&lt;tag&gt;"},
+	} {
+		test.Run(fixture.name, func(test *testing.T) {
+			rendered := renderMarkdown(fixture.markdown, 100)
+			plain := strings.Join(strings.Fields(ansi.Strip(rendered)), " ")
+			if !strings.Contains(plain, fixture.want) {
+				test.Fatalf("literal code changed: got %q, want %q", plain, fixture.want)
+			}
+			if sanitized := sanitizeRenderedMarkdown(rendered); sanitized != rendered {
+				test.Fatalf("unsafe terminal output: %q", rendered)
+			}
+		})
+	}
+}
+
 func TestRenderMarkdownWrapAndRetention(test *testing.T) {
 	for _, width := range []int{24, 80, 0} {
 		markdown := strings.Repeat("Before \u884c\u4e3a\u53d8\u66f4 after compatibility e\u0301 \U0001f600. ", 160)

@@ -4,15 +4,22 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"strings"
 
-	"charm.land/glamour/v2"
 	glamouransi "charm.land/glamour/v2/ansi"
 	"charm.land/glamour/v2/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer"
+	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 func markdownForOutput(writer io.Writer, markdown string) string {
@@ -46,19 +53,38 @@ func renderMarkdown(markdown string, width int) string {
 	codeColor := "6"
 	style.Code.StylePrimitive = glamouransi.StylePrimitive{Color: &codeColor}
 	style.Link.Underline = &emphasis
-	renderer, err := glamour.NewTermRenderer(
-		glamour.WithStyles(style),
-		glamour.WithWordWrap(width),
-		glamour.WithTableWrap(true),
+	wrapTables := true
+	markdownParser := goldmark.New(
+		goldmark.WithExtensions(extension.GFM, extension.DefinitionList),
+		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 	)
-	if err != nil {
+	markdownRenderer := renderer.NewRenderer(renderer.WithNodeRenderers(util.Prioritized(
+		glamouransi.NewRenderer(glamouransi.Options{Styles: style, WordWrap: width, TableWrap: &wrapTables}), 1000,
+	)))
+	source := []byte(markdown)
+	document := markdownParser.Parser().Parse(text.NewReader(source))
+	escapeCodeSpanEntities(document, source)
+	var rendered bytes.Buffer
+	if err := markdownRenderer.Render(&rendered, source, document); err != nil {
 		return markdown
 	}
-	rendered, err := renderer.Render(markdown)
-	if err != nil {
-		return markdown
-	}
-	return strings.TrimRight(sanitizeRenderedMarkdown(rendered), "\n")
+	return strings.TrimRight(sanitizeRenderedMarkdown(rendered.String()), "\n")
+}
+
+func escapeCodeSpanEntities(document ast.Node, source []byte) {
+	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering || node.Kind() != ast.KindCodeSpan {
+			return ast.WalkContinue, nil
+		}
+		for child := node.FirstChild(); child != nil; {
+			next := child.NextSibling()
+			literal := child.(*ast.Text).Value(source)
+			escaped := bytes.ReplaceAll(literal, []byte("&"), []byte("&amp;"))
+			node.ReplaceChild(node, child, ast.NewString(escaped))
+			child = next
+		}
+		return ast.WalkSkipChildren, nil
+	})
 }
 
 func sanitizeRenderedMarkdown(rendered string) string {
