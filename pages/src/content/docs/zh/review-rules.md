@@ -331,6 +331,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - GLSL、HLSL、WGSL、Metal 着色器。                        |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md`——PowerShell 脚本、模块和数据/清单文件。               |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md`——Clojure / ClojureScript 源代码和 EDN 数据。 |
+| `**/*.sql`                                      | `sql.md`——SQL 迁移与查询。 |
 | _(fallback)_                                    | `default.md`                                                          |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。

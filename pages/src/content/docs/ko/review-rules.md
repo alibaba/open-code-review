@@ -343,6 +343,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL 및 Metal 셰이더.                                  |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell 스크립트, 모듈 및 데이터/매니페스트 파일.           |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — Clojure / ClojureScript 소스 코드 및 EDN 데이터. |
+| `**/*.sql`                                      | `sql.md` — SQL 마이그레이션 및 쿼리. |
 | _(대체값)_                                      | `default.md`                                                                     |
 
 해석된 규칙 본문은 plan과 main 작업 프롬프트에서 `{{system_rule}}` 자리에 들어갑니다.
