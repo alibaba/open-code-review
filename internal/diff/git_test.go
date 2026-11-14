@@ -476,12 +476,7 @@ func TestWorkspaceDiffSurvivesExternalDiffTool(t *testing.T) {
 	}
 }
 
-// TestWorkspaceDiffNoCommitsUsesStagedFallback pins the second runGit call in
-// workspaceTrackedDiff: in a repository with no commits there is no HEAD, so
-// `git diff HEAD` fails, and the staged diff is the only way to review the
-// workspace. Removing the `--staged` fallback (as an over-eager "simplification"
-// might) makes this return zero diffs.
-func TestWorkspaceDiffNoCommitsUsesStagedFallback(t *testing.T) {
+func TestWorkspaceDiffNoCommitsIncludesStagedFiles(t *testing.T) {
 	repo := t.TempDir()
 	runGitTest(t, repo, "init", "-q")
 
@@ -501,8 +496,7 @@ func TestWorkspaceDiffNoCommitsUsesStagedFallback(t *testing.T) {
 		t.Fatalf("GetDiff returned error: %v", err)
 	}
 	if len(diffs) == 0 {
-		t.Fatalf("expected staged changes to be surfaced in a repo with no commits " +
-			"(the --staged fallback in workspaceTrackedDiff), got 0 diffs")
+		t.Fatal("expected workspace changes in a repo with no commits, got 0 diffs")
 	}
 }
 

@@ -139,8 +139,8 @@ type Args struct {
 	Resume *session.ResumeState
 
 	// SealedInput pins this run to commit endpoints a pre-flight resolve already
-	// froze, instead of resolving From/To/Commit again. Admission and code tools
-	// must use the same immutable endpoints as the diff.
+	// froze, instead of resolving From/To/Commit or workspace HEAD again. Admission
+	// and code tools must use the same immutable endpoints as the diff.
 	SealedInput *diff.InputResolution
 
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
@@ -559,7 +559,7 @@ func (a *Agent) newDiffProvider() *diff.Provider {
 	// the sealed base already is that merge-base and merge-base(base, head) is base
 	// whenever base is an ancestor of head; commit mode keeps its first-parent
 	// comparison, which is derived from the commit rather than from its spelling.
-	// Workspace mode seals no head and is left alone.
+	// Workspace mode seals only its base and keeps reading the live working tree.
 	from, to, commit := a.args.From, a.args.To, a.args.Commit
 	if s := a.args.SealedInput; s != nil && s.ResolvedHead != "" {
 		switch {
@@ -576,6 +576,9 @@ func (a *Agent) newDiffProvider() *diff.Provider {
 	case from != "" && to != "":
 		return diff.NewProvider(a.args.RepoDir, from, to, a.args.GitRunner)
 	default:
+		if a.args.SealedInput != nil {
+			return diff.NewWorkspaceProviderWithBase(a.args.RepoDir, *a.args.SealedInput, a.args.GitRunner)
+		}
 		return diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
 	}
 }
