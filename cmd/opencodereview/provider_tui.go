@@ -1303,17 +1303,18 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 // original's slice or map fields.
 func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 	out := ProviderEntry{
-		APIKey:     v.APIKey,
-		APIKeyCmd:  v.APIKeyCmd,
-		URL:        v.URL,
-		Protocol:   v.Protocol,
-		Model:      v.Model,
-		Models:     append([]string(nil), v.Models...),
-		AuthHeader: v.AuthHeader,
-		TimeoutSec: v.TimeoutSec,
-		RetryCodes: append([]int(nil), v.RetryCodes...),
-		AWSProfile: v.AWSProfile,
-		AWSRegion:  v.AWSRegion,
+		APIKey:      v.APIKey,
+		APIKeyCmd:   v.APIKeyCmd,
+		URL:         v.URL,
+		Protocol:    v.Protocol,
+		Model:       v.Model,
+		Models:      append([]string(nil), v.Models...),
+		AuthHeader:  v.AuthHeader,
+		TimeoutSec:  v.TimeoutSec,
+		RetryCodes:  append([]int(nil), v.RetryCodes...),
+		AWSProfile:  v.AWSProfile,
+		AWSRegion:   v.AWSRegion,
+		MaxInFlight: v.MaxInFlight,
 	}
 	out.unknownJSONFields = cloneUnknownJSONFields(v.unknownJSONFields)
 	if v.ExtraBody != nil {
