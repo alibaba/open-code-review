@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -102,7 +103,22 @@ func (p *FileFindProvider) execute(ctx context.Context, args map[string]any) (st
 	if len(matched) == 0 {
 		return "// The file was not found", nil
 	}
-	return strings.Join(matched, "\n"), nil
+	records := make([]string, len(matched))
+	for i, f := range matched {
+		records[i] = pathRecord(f)
+	}
+	return strings.Join(records, "\n"), nil
+}
+
+// pathRecord renders one pathname as a single output line. A pathname may
+// contain a line break, which would otherwise split one file into records that
+// look like separate files, so such a path is quoted. file_read accepts the
+// quoted spelling back.
+func pathRecord(path string) string {
+	if strings.ContainsAny(path, "\r\n") {
+		return strconv.Quote(path)
+	}
+	return path
 }
 
 // listGitFiles returns tracked and untracked files (respecting .gitignore) via git ls-files.
@@ -117,13 +133,15 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 	var output []byte
 	var err error
 
-	// core.quotepath=false reports non-ASCII paths literally instead of as
-	// quoted octal escapes, which file_find cannot match and file_read cannot open.
+	// -z reports pathnames verbatim, separated by NUL, instead of C-quoting
+	// bytes such as tab and newline. A quoted spelling neither matches the
+	// query nor opens in file_read, and core.quotepath=false does not cover
+	// those bytes.
 	var args []string
 	if ref := p.FileReader.Ref; ref != "" {
-		args = []string{"-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "--end-of-options", ref}
+		args = []string{"ls-tree", "-r", "--name-only", "-z", "--end-of-options", ref}
 	} else {
-		args = []string{"-c", "core.quotepath=false", "ls-files", "--cached", "--others", "--exclude-standard"}
+		args = []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}
 	}
 
 	if p.FileReader.Runner != nil {
@@ -149,10 +167,10 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 	}
 
 	var files []string
-	lines := bytes.Split(bytes.TrimRight(output, "\n"), []byte{'\n'})
-	for _, line := range lines {
-		if len(line) > 0 {
-			s := string(line)
+	records := bytes.Split(output, []byte{0})
+	for _, record := range records {
+		if len(record) > 0 {
+			s := string(record)
 			// Skip binary-like files that lack meaningful extensions patterns
 			// and filter out paths in common generated/artifact directories.
 			if shouldSkipFile(s) {
