@@ -65,6 +65,7 @@
     "**/*.rego": "rego.md",
     "**/*.{glsl,hlsl,wgsl,metal}": "shader.md",
     "**/*.{ps1,psm1,psd1}": "powershell.md",
-    "**/*.{clj,cljs,cljc,edn}": "clojure.md"
+    "**/*.{clj,cljs,cljc,edn}": "clojure.md",
+    "**/*.sql": "sql.md"
   }
 }

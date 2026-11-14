@@ -362,6 +362,7 @@ matching order:
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL, and Metal shaders.                                                    |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell scripts, modules, and data/manifest files.                               |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — Clojure / ClojureScript source and EDN data. |
+| `**/*.sql`                                      | `sql.md` — SQL migrations and queries. |
 | _(fallback)_                                    | `default.md`                                                                                          |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

@@ -213,6 +213,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/myapp/views.cljs", "Laziness, Sequences, and Resource Scope"},
 		{"src/myapp/shared.cljc", "Laziness, Sequences, and Resource Scope"},
 		{"deps.edn", "EDN Data, Configuration, and Untrusted Input"},
+		{"db/migrate/20260101_add_users.sql", "Destructive and Irreversible Migrations"},
+		{"sql/reports/monthly.sql", "Destructive and Irreversible Migrations"},
 	}
 
 	for _, tt := range tests {
@@ -971,6 +973,44 @@ func TestResolveDetail_SystemPowerShellPatternMatch(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestResolveDetail_SystemSQLPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{
+		"db/migrate/20260101_add_users.sql",
+		"sql/reports/monthly.sql",
+		"SQL/REPORTS/MONTHLY.SQL",
+	} {
+		t.Run(path, func(t *testing.T) {
+			if !allowedext.IsAllowedExt(filepath.Ext(path)) || allowedext.IsExcludedPath(path) {
+				t.Fatalf("SQL file %q must remain reviewable", path)
+			}
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.sql" {
+				t.Errorf("expected pattern '**/*.sql', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Destructive and Irreversible Migrations",
+				"Locking and Online-Migration Hazards",
+				"NULL Semantics",
+				"sqlfluff",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected SQL rule to contain %q", required)
+				}
+			}
+		})
 	}
 }
 

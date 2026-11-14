@@ -361,6 +361,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - шейдеры GLSL, HLSL, WGSL и Metal.                                                  |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — скрипты, модули и файлы данных/манифестов PowerShell.                          |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — исходный код Clojure / ClojureScript и данные EDN. |
+| `**/*.sql`                                      | `sql.md` — SQL-миграции и запросы. |
 | _(fallback)_                                    | `default.md`                                                                                     |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`
