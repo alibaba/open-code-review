@@ -329,6 +329,7 @@ matching order:
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                              |
 | `**/*.c`                                        | `c.md`                                                                                                |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — Python source.                                                                          |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md` — Ruby source, Rake tasks, gemspecs, Gemfile, and Rakefile. |
 | `**/*.{php,phtml}`                              | `php.md` — PHP source and PHP templates.                                                              |
 | `**/*.proto`                                    | `protobuf.md` — Protocol Buffers wire compatibility.                                                  |
 | `**/*.po`                                       | `po.md` — gettext translation source catalogs.                                                        |
