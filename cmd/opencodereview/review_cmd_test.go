@@ -173,13 +173,13 @@ func TestParseReviewFlagsRejectsToWithoutFrom(t *testing.T) {
 	}
 }
 
-func TestParseReviewFlagsRejectsFromWithoutTo(t *testing.T) {
-	_, err := parseReviewFlags([]string{"--from", "main"})
-	if err == nil {
-		t.Fatal("expected --from without --to to fail")
+func TestParseReviewFlagsFromWithoutToDefaultsToHead(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--from", "main"})
+	if err != nil {
+		t.Fatalf("--from without --to must be accepted: %v", err)
 	}
-	if !strings.Contains(err.Error(), "--to is required when --from is specified") {
-		t.Fatalf("unexpected error: %v", err)
+	if opts.from != "main" || opts.to != "HEAD" {
+		t.Fatalf("from = %q, to = %q, want from=main to=HEAD", opts.from, opts.to)
 	}
 }
 

@@ -150,10 +150,39 @@ func TestParseReviewFlags_ConflictingModes(t *testing.T) {
 	}
 }
 
-func TestParseReviewFlags_FromWithoutTo(t *testing.T) {
-	_, err := parseReviewFlags([]string{"--from", "main"})
-	if err == nil {
-		t.Fatal("expected error for --from without --to")
+func TestParseReviewFlags_FromDefaultsToHead(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--from", "main"})
+	if err != nil {
+		t.Fatalf("--from without --to must be accepted: %v", err)
+	}
+	if opts.from != "main" || opts.to != "HEAD" {
+		t.Fatalf("from = %q, to = %q, want from=main to=HEAD", opts.from, opts.to)
+	}
+}
+
+func TestParseReviewFlags_PlainReviewKeepsWorkspaceMode(t *testing.T) {
+	opts, err := parseReviewFlags([]string{})
+	if err != nil {
+		t.Fatalf("plain review must parse: %v", err)
+	}
+	if opts.from != "" || opts.to != "" {
+		t.Fatalf("plain review must not default refs: from=%q to=%q", opts.from, opts.to)
+	}
+}
+
+func TestParseReviewFlags_FromWithCommitStillConflicts(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--from", "main", "--commit", "abc123"})
+	if err == nil || !strings.Contains(err.Error(), "only one review mode allowed") {
+		t.Fatalf("--from with --commit must stay a mode conflict, got %v", err)
+	}
+}
+
+// The --from shorthand is a review-only convenience. Delegate keeps requiring an
+// explicit --to so its machine-readable output stays unambiguous.
+func TestDelegateStillRequiresToWithFrom(t *testing.T) {
+	err := validateDelegateOptions(&delegateOptions{from: "main", format: "json"})
+	if err == nil || !strings.Contains(err.Error(), "--to is required when --from is specified") {
+		t.Fatalf("delegate must keep requiring --to, got %v", err)
 	}
 }
 

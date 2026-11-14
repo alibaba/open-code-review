@@ -22,7 +22,7 @@ func addRuleFlag(cmd *cobra.Command, target *string) {
 
 func addDiffFlags(cmd *cobra.Command, from, to, commit *string) {
 	cmd.Flags().StringVar(from, "from", "", "source ref to start diff from (e.g., 'main')")
-	cmd.Flags().StringVar(to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
+	cmd.Flags().StringVar(to, "to", "", "target ref to end diff at (e.g., 'feature-branch'; defaults to HEAD when --from is given)")
 	cmd.Flags().StringVarP(commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
 }
 
@@ -120,6 +120,14 @@ func validateOutputFormat(format string) (string, error) {
 }
 
 func validateReviewOptions(opts *reviewOptions) error {
+	// Review-only shorthand: --from without an explicit target compares the
+	// merge-base with HEAD, exactly like --to HEAD. Normalize before validation
+	// so the downstream range path is identical. This is deliberately scoped to
+	// review options: `ocr delegate` keeps requiring --to explicitly, and plain
+	// `ocr review` keeps its empty target (workspace mode).
+	if opts.from != "" && opts.to == "" && opts.commit == "" {
+		opts.to = "HEAD"
+	}
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}

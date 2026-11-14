@@ -67,6 +67,9 @@ var reviewCmd = &cobra.Command{
   # Review a branch against its base (merge-base mode)
   ocr review --from master --to dev-ref
 
+  # Review the current branch against main (--to defaults to HEAD)
+  ocr review --from main
+
   # Review a specific commit
   ocr review --commit abc123
   ocr review -c abc123
