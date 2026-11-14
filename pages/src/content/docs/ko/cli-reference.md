@@ -110,7 +110,7 @@ ocr r      [flags]   (alias)
 |---|---|---|---|
 | `--repo <path>` | — | 현재 디렉터리 | Git 저장소 루트. |
 | `--from <ref>` | — | — | diff를 시작할 원본 ref(예: `main`). |
-| `--to <ref>` | — | — | diff가 끝나는 대상 ref(예: `feature-branch`). 지정하면 OCR이 `merge-base(from, to)..to`를 계산합니다. |
+| `--to <ref>` | — | — | diff가 끝나는 대상 ref(예: `feature-branch`). 지정하면 OCR이 `merge-base(from, to)..to`를 계산합니다. `--from`만 지정하고 `--to`를 생략하면 `HEAD`가 기본값이 됩니다(커밋된 변경만 리뷰, `git diff <from>...HEAD`와 동일). |
 | `--commit <sha>` | `-c` | — | 리뷰할 단일 커밋(부모 커밋과의 diff). |
 | `--preview` | `-p` | `false` | 필터 파이프라인만 돌리고 LLM은 호출하지 않습니다. 파일 목록과 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다(미리 보기에는 내보낼 완료된 지적이 없습니다). |
 | `--no-filter` | — | `false` | 리뷰 코멘트를 모두 남기고 서브태스크 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. 서브태스크는 파일 하나 또는 관련된 파일 묶음을 리뷰합니다. |
