@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func writeTestFile(t *testing.T, dir, name, content string) {
@@ -468,5 +469,150 @@ func TestExecute_WithEndLine(t *testing.T) {
 	}
 	if strings.Contains(result, "5|e") {
 		t.Error("line 5 should not appear")
+	}
+}
+
+// A minified or generated file can pack its whole content into one line, which
+// the 500-line cap counts as a single line. The tool result must still bound
+// that line's bytes and say so, instead of dropping megabytes into the
+// conversation with IS_TRUNCATED: false.
+func TestExecute_SingleOversizeLineIsCapped(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "receipt.json", `{"data":"`+strings.Repeat("a", 170_000)+`"}`)
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	result, err := p.Execute(context.Background(), map[string]any{
+		"file_path": "receipt.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(result, "IS_TRUNCATED: true") {
+		t.Error("expected IS_TRUNCATED: true for a byte-capped single line")
+	}
+	if !strings.Contains(result, "[line truncated,") {
+		t.Error("expected an explicit line-truncation marker")
+	}
+	if !strings.Contains(result, "LINE_RANGE: 1-1") {
+		t.Errorf("expected the single line to still be reported, got header: %s", result)
+	}
+	if len(result) > fileReadMaxLineBytes+4096 {
+		t.Errorf("result body = %d bytes, want it bounded near the %d byte per-line cap", len(result), fileReadMaxLineBytes)
+	}
+}
+
+// The per-line cap alone is not enough: 500 capped lines can still render
+// far more bytes than one request should carry, so the total rendered body
+// needs its own budget with a truthful range and note.
+func TestExecute_TotalResultBytesCapped(t *testing.T) {
+	dir := t.TempDir()
+
+	var sb strings.Builder
+	for i := 1; i <= 400; i++ {
+		sb.WriteString(strings.Repeat("b", 2048))
+		sb.WriteByte('\n')
+	}
+	writeTestFile(t, dir, "bundle.txt", sb.String())
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	result, err := p.Execute(context.Background(), map[string]any{
+		"file_path": "bundle.txt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(result, "IS_TRUNCATED: true") {
+		t.Error("expected IS_TRUNCATED: true when the total byte budget stops rendering")
+	}
+	if !strings.Contains(result, "Output truncated at") {
+		t.Error("expected a total-size truncation note")
+	}
+	if strings.Contains(result, "LINE_RANGE: 1-400") {
+		t.Error("LINE_RANGE must not claim lines whose bytes were omitted")
+	}
+	if len(result) > fileReadMaxResultBytes+4096 {
+		t.Errorf("result body = %d bytes, want it bounded near the %d byte budget", len(result), fileReadMaxResultBytes)
+	}
+}
+
+// The budget must be counted over the fully formatted lines: the line-number
+// prefix and the trailing newline are body bytes too. Counting only the line
+// content lets the rendered body drift past the cap by the accumulated
+// per-line overhead (~2 KiB here), so this test measures the rendered body
+// exactly. With 499 rendered lines of 525 bytes the content-only accounting
+// reaches 264,362 body bytes against the 262,144-byte budget.
+func TestExecute_ResultBudgetCountsFormattedLine(t *testing.T) {
+	dir := t.TempDir()
+
+	var sb strings.Builder
+	for i := 1; i <= 600; i++ {
+		sb.WriteString(strings.Repeat("b", 525))
+		sb.WriteByte('\n')
+	}
+	writeTestFile(t, dir, "bundle.txt", sb.String())
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	result, err := p.Execute(context.Background(), map[string]any{
+		"file_path": "bundle.txt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(result, "IS_TRUNCATED: true") {
+		t.Error("expected IS_TRUNCATED: true when the total byte budget stops rendering")
+	}
+	if !strings.Contains(result, "Output truncated at") {
+		t.Error("expected a total-size truncation note")
+	}
+	if strings.Contains(result, "LINE_RANGE: 1-600") {
+		t.Error("LINE_RANGE must not claim lines whose bytes were omitted")
+	}
+
+	// Strip the three header lines and the trailing notes, leaving exactly
+	// the rendered "N|text\n" lines, whose total must not exceed the budget.
+	body := result
+	if i := strings.Index(body, "\nNote:"); i >= 0 {
+		body = body[:i]
+	}
+	for k := 0; k < 3; k++ {
+		body = body[strings.IndexByte(body, '\n')+1:]
+	}
+	if len(body) > fileReadMaxResultBytes {
+		t.Errorf("rendered body = %d bytes, exceeds the %d byte budget: the line-number prefix and newline bytes are not being counted", len(body), fileReadMaxResultBytes)
+	}
+}
+
+// The mid-line cut must land on a UTF-8 rune boundary so the rendered line
+// stays valid UTF-8 instead of ending in a split multibyte sequence.
+func TestExecute_LineCapIsUtf8Safe(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "cjk.txt", strings.Repeat("中", 2000)+"\n") // allow-non-english: fixture exercises the UTF-8 rune-boundary cut
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	result, err := p.Execute(context.Background(), map[string]any{
+		"file_path": "cjk.txt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	marker := strings.Index(result, " …[line truncated,")
+	if marker < 0 {
+		t.Fatal("expected a line-truncation marker")
+	}
+	visible := result[strings.Index(result, "1|")+2 : marker]
+	if !utf8.ValidString(visible) {
+		t.Error("cut line is not valid UTF-8: a multibyte rune was split")
 	}
 }

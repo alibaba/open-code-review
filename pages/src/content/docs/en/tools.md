@@ -279,6 +279,12 @@ separator so the model can quote line numbers precisely in subsequent
 - **500 lines max per call.** Larger ranges are truncated, `IS_TRUNCATED:
 true` is set, and a trailing `Note: Results truncated to 500 lines.
 Please narrow your line range.` is appended.
+- **Byte bounds on the result.** A line longer than 2,048 bytes is cut at a
+  UTF-8 rune boundary and marked with `[line truncated, N more bytes
+  omitted]`; rendering also stops once the body reaches 256 KiB, with a
+  `Note: Output truncated at 262144 bytes. …` line. Both set
+  `IS_TRUNCATED: true`, so minified single-line files cannot push megabytes
+  into the conversation.
 - Defaults to the **modified version** of the file. In comparison reviews,
   use `side: "old"` to read the full old file, or `file_read_diff` to inspect
   the patch.

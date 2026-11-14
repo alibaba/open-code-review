@@ -241,6 +241,10 @@ LINE_RANGE: 10-80
 - **호출당 최대 500줄입니다.** 더 큰 범위는 잘리고 `IS_TRUNCATED: true`가 설정되며,
   끝에 `Note: Results truncated to 500 lines. Please narrow your line range.`가
   붙습니다.
+- **결과에는 바이트 상한이 있습니다.** 2,048바이트를 넘는 줄은 UTF-8 문자 경계에서 잘려
+  `[line truncated, N more bytes omitted]` 표시가 붙고, 본문이 256 KiB에 도달하면 렌더링이
+  멈추며 `Note: Output truncated at 262144 bytes. …`가 추가됩니다. 두 경우 모두
+  `IS_TRUNCATED: true`가 설정되므로 한 줄로 압축된 파일이 수 MB를 대화에 밀어 넣지 않습니다.
 - 기본적으로 파일의 **변경된 쪽**을 읽습니다. commit 및 range 리뷰에서 `side: "old"`를
   사용하면 이전 쪽의 전체 내용을 읽을 수 있습니다. 변경 부분을 보려면 `file_read_diff`를 쓰세요.
 
