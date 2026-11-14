@@ -41,9 +41,17 @@ func TestPromptContentResources(t *testing.T) {
 			t.Fatalf("accepted %s", bad)
 		}
 	}
-	for _, blocks := range [][]acp.ContentBlock{{{}}, {acp.TextBlock(strings.Repeat("a", 65537))}, make([]acp.ContentBlock, 129)} {
-		if _, _, err := promptContent(dir, blocks); err == nil {
-			t.Fatal("accepted unsupported or oversized input")
+	for _, tc := range []struct {
+		blocks []acp.ContentBlock
+		want   string
+	}{
+		{[]acp.ContentBlock{{}}, "unsupported content"},
+		{[]acp.ContentBlock{acp.TextBlock(strings.Repeat("a", maxPromptBytes+1))}, "64 KiB"},
+		{make([]acp.ContentBlock, maxPromptBlocks+1), "maximum 128"},
+		{[]acp.ContentBlock{acp.ResourceLinkBlock("x", "file:///"+strings.Repeat("a", maxResourceURIBytes))}, "maximum 8192 bytes"},
+	} {
+		if _, _, err := promptContent(dir, tc.blocks); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("error = %v, want it to contain %q", err, tc.want)
 		}
 	}
 	outside := filepath.Join(t.TempDir(), "outside.go")

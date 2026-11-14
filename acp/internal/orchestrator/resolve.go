@@ -19,6 +19,8 @@ import (
 	"github.com/alibaba/open-code-review/acp/internal/orchestrator/process"
 )
 
+const maxVersionOutputBytes = 1024
+
 // ResolveOptions controls OCR binary discovery. Explicit and Environment are
 // passed by the adapter; Environment defaults to OCR_BINARY when empty.
 type ResolveOptions struct {
@@ -153,7 +155,7 @@ func probeVersion(binary string, timeout time.Duration) (string, error) {
 	defer stdin.Close()
 	cmd.Stdin = stdin
 	var output limitedBuffer
-	output.limit = 1024
+	output.limit = maxVersionOutputBytes
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	if err := process.Start(cmd); err != nil {
@@ -165,7 +167,7 @@ func probeVersion(binary string, timeout time.Duration) (string, error) {
 	// WaitDelay closes the local pipe readers before Wait returns.
 	err = errors.Join(err, process.Kill(cmd))
 	if output.exceeded {
-		return "", fmt.Errorf("version output exceeded 1024 bytes")
+		return "", fmt.Errorf("version output exceeded %d bytes", maxVersionOutputBytes)
 	}
 	if ctx.Err() != nil {
 		return "", ctx.Err()
