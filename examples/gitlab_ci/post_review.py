@@ -360,7 +360,7 @@ def build_summary_body(total, inline, summary, skipped, routed, failed, warnings
     if total > 0:
         body += "\n- ✅ Successfully posted inline: %d comment(s)" % inline
         if summary > 0:
-            body += "\n- 📝 In summary (no line info): %d comment(s)" % summary
+            body += "\n- 📝 Kept in summary: %d comment(s)" % summary
         if routed > 0:
             body += "\n- 📋 Routed to summary by policy: %d comment(s)" % routed
         if skipped > 0:
@@ -607,8 +607,8 @@ def build_line_range(diff, path, span):
     """Resolve a multiline ``span`` into a GitLab ``line_range`` from ``diff``.
 
     Returns ``None`` when the inventory lacks per-line positions for ``path`` or
-    either boundary cannot be resolved, letting the caller fall back to a
-    single-line position instead of posting a code GitLab cannot anchor.
+    either boundary cannot be resolved, so the caller can keep the finding in
+    the summary instead of posting a code GitLab cannot anchor.
     """
     positions = ((diff or {}).get("positions") or {}).get(path)
     if not positions:
@@ -619,6 +619,17 @@ def build_line_range(diff, path, span):
     if start is None or end is None:
         return None
     return {"start": start, "end": end}
+
+
+def clip_span_to_diff(span, ranges):
+    """Choose the largest intersection with one hunk, preferring the later tie."""
+    intersections = []
+    for hunk in ranges:
+        start = max(span["start"], hunk["start"])
+        end = min(span["end"], hunk["end"])
+        if start <= end:
+            intersections.append({"start": start, "end": end, "multiline": start != end})
+    return max(intersections, key=lambda s: (s["end"] - s["start"], s["end"]), default=None)
 
 
 def classify_comment_against_diff(comment, diff):
@@ -1277,9 +1288,9 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
                                              tag=summary_tag_for(config.get("run_tag", "0-0")))
         return stats
 
-    # Partition: inline / no-line / routed.
+    # Partition: inline / summary-only / routed.
     inline_items = []
-    no_line = []
+    summary_comments = []
     routed = []
     for comment in comments:
         path = comment.get("path", "")
@@ -1287,10 +1298,10 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         end_line = comment.get("end_line", 0)
         # Inline posting needs a valid end_line (it becomes the GitLab position's
         # new_line). A start_line-only comment cannot be positioned and must land
-        # in the summary (no_line), not be misclassified as a posting failure.
+        # in the summary, not be misclassified as a posting failure.
         has_line = bool(end_line and end_line >= 1)
         if not has_line or not path:
-            no_line.append({"comment": comment, "reason": NO_LINE_REASON})
+            summary_comments.append({"comment": comment, "reason": NO_LINE_REASON})
             continue
         route = route_comment(comment, policy)
         if route["routed"]:
@@ -1300,11 +1311,58 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         inline_items.append({"comment": comment, "body": format_comment(comment, cid),
                              "id": cid})
 
-    stats["summary"] = len(no_line)
     stats["routed"] = len(routed)
 
     # Deterministic order so reruns reproduce the same post sequence.
     inline_items = sort_to_send(inline_items)
+
+    diff_cache = {"diff": None, "fetched": False}
+    positioned_items = []
+    for it in inline_items:
+        comment = it["comment"]
+        span = comment_span(comment)
+        if not diff_refs or span is None or not span["multiline"]:
+            positioned_items.append(it)
+            continue
+        path = comment["path"]
+        diff = get_diff_inventory(poster, diff_cache)
+        ranges = ((diff or {}).get("files") or {}).get(path)
+        reason = None
+        if not diff or not diff.get("complete"):
+            reason = "diff hunk coverage unavailable"
+        elif path not in (diff.get("known") or set()):
+            reason = "out of diff (file is not in the MR diff)"
+        elif not ranges:
+            reason = "diff hunk coverage unavailable"
+        else:
+            clipped = clip_span_to_diff(span, ranges)
+            if clipped is None:
+                reason = "out of diff (range does not intersect a diff hunk)"
+            elif clipped != span and comment.get("existing_code") and comment.get("suggestion_code"):
+                # A replacement for the original span cannot be applied to a clipped one.
+                reason = "suggested change extends beyond one diff hunk"
+            else:
+                entry = (diff.get("positions") or {}).get(path, {}).get(clipped["end"])
+                line_range = build_line_range(diff, path, clipped) if clipped["multiline"] else None
+                if entry is None or (clipped["multiline"] and line_range is None):
+                    reason = "diff line positions unavailable"
+                else:
+                    it["span"] = clipped
+                    it["position"] = {"new_line": clipped["end"]}
+                    if entry["type"] == "context":
+                        it["position"]["old_line"] = entry["old_line"]
+                    if line_range is not None:
+                        it["position"]["line_range"] = line_range
+                    if clipped != span:
+                        it["body"] += ("\n\nOriginal finding range: L%d-L%d. "
+                                       "Inline range clipped to L%d-L%d."
+                                       % (span["start"], span["end"], clipped["start"], clipped["end"]))
+        if reason:
+            summary_comments.append({"comment": comment, "reason": reason})
+        else:
+            positioned_items.append(it)
+    inline_items = positioned_items
+    stats["summary"] = len(summary_comments)
 
     # Incremental filtering: drop comments overlapping prior bot discussions.
     if incremental and inline_items:
@@ -1312,7 +1370,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         if history is not None:
             kept = []
             for it in inline_items:
-                span = comment_span(it["comment"])
+                span = it.get("span") or comment_span(it["comment"])
                 if span and overlaps_history(it["comment"], span, history, overlap_threshold):
                     stats["skipped"] += 1
                     continue
@@ -1330,20 +1388,19 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     run_tag = config.get("run_tag", "0-0")
     anchor_id = None
     anchor_body = wrap_summary_body(
-        build_pre_review_summary_body(stats["total"], no_line, routed, warnings),
+        build_pre_review_summary_body(stats["total"], summary_comments, routed, warnings),
         run_tag,
     )
     anchor_id = ensure_summary_anchor(poster, anchor_body, sticky,
                                       tag=summary_tag_for(run_tag))
 
     # Post inline discussions.
-    diff_cache = {"diff": None, "fetched": False}
     failed_comments = []
     for it in inline_items:
         comment = it["comment"]
         path = comment.get("path", "")
         end_line = comment.get("end_line", 0)
-        span = comment_span(comment)
+        span = it.get("span") or comment_span(comment)
         if not path or not end_line:
             failed_comments.append({"comment": comment, "reason": NO_LINE_REASON})
             continue
@@ -1362,16 +1419,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
                 "head_sha": diff_refs["head_sha"],
             },
         }
-        if span is not None and span["multiline"]:
-            # Resolve the range from the real MR diff: a boundary's line_code
-            # needs the true old-file line unless the line is a pure addition.
-            # If the diff is unavailable or a boundary cannot be resolved, we
-            # omit line_range and let GitLab anchor the single end_line rather
-            # than reject a bogus code.
-            diff = get_diff_inventory(poster, diff_cache)
-            line_range = build_line_range(diff, path, span)
-            if line_range is not None:
-                discussion["position"]["line_range"] = line_range
+        discussion["position"].update(it.get("position") or {})
         resp = poster.post_discussion(discussion, comment_id=it["id"])
         if resp.get("success"):
             stats["inline"] += 1
@@ -1387,7 +1435,8 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
             status = resp.get("http_status")
             if status == 400 and is_line_resolution_failure(resp.get("error_body") or ""):
                 diff = get_diff_inventory(poster, diff_cache)
-                classification = classify_comment_against_diff(comment, diff)
+                location = dict(comment, start_line=span["start"], end_line=span["end"]) if span else comment
+                classification = classify_comment_against_diff(location, diff)
                 if classification == "invalid":
                     reason = "out of diff (line could not be resolved)"
                 else:
@@ -1404,7 +1453,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         stats["total"], stats["inline"], stats["summary"],
         stats["skipped"], stats["routed"], stats["failed"], warnings,
     )
-    summary_body += format_summary_comments(no_line)
+    summary_body += format_summary_comments(summary_comments)
     summary_body += format_summary_comments(routed)
     summary_body += format_summary_comments(failed_comments)
     if not inline_items and stats["skipped"] > 0:
@@ -1443,7 +1492,7 @@ def load_incremental_history(poster):
 
 
 def get_diff_inventory(poster, cache):
-    """Cached diff inventory for the 400 line-resolution fallback."""
+    """Cached diff inventory for inline positions and line-resolution failures."""
     if cache.get("fetched"):
         return cache.get("diff")
     cache["fetched"] = True
