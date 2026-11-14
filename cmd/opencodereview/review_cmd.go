@@ -336,7 +336,16 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		}
 		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
-			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+			if reviewModeFromOptions(opts) == session.ReviewModeWorkspace {
+				// Workspace reviews cannot be resumed: loadReviewResumeState rejects
+				// workspace mode, so recommending --resume would send the user down a
+				// recovery path that always fails. Keep the session ID for diagnostics
+				// but point the user back to the original command instead.
+				fmt.Fprintf(os.Stderr, "[ocr] Session: %s\n", id)
+				fmt.Fprintln(os.Stderr, "[ocr] Workspace reviews cannot be resumed; rerun the original review command to start a fresh review.")
+			} else {
+				fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+			}
 		}
 		return errors.Join(resultErr, emitErr)
 	}
