@@ -45,15 +45,24 @@ type fakeLLM struct {
 	rateLimitOnce map[string]bool
 	// hardFail lists files whose every attempt returns 402.
 	hardFail map[string]bool
+	// markers maps a per-file token to the file carrying it. It starts as a
+	// copy of the package-level markers and may be extended by a test that
+	// reviews files outside that set (the workspace-resume e2e suite does).
+	markers map[string]string
 }
 
 // newFakeLLM returns a server that succeeds on the first attempt for every
 // file. rateLimitOnce and hardFail are set by the caller before use.
 func newFakeLLM() *fakeLLM {
+	fileMarkers := make(map[string]string, len(markers))
+	for marker, name := range markers {
+		fileMarkers[marker] = name
+	}
 	return &fakeLLM{
 		attemptsByFile: map[string]int{},
 		rateLimitOnce:  map[string]bool{},
 		hardFail:       map[string]bool{},
+		markers:        fileMarkers,
 	}
 }
 
@@ -131,7 +140,7 @@ type groupingReply struct {
 }
 
 func (f *fakeLLM) fileOf(body []byte) string {
-	for marker, name := range markers {
+	for marker, name := range f.markers {
 		if bytes.Contains(body, []byte(marker)) {
 			return name
 		}
@@ -156,8 +165,8 @@ func (f *fakeLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.groupingCalls++
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		groups := make([]groupingReply, 0, len(markers))
-		for _, name := range markers {
+		groups := make([]groupingReply, 0, len(f.markers))
+		for _, name := range f.markers {
 			groups = append(groups, groupingReply{Label: name, Files: []string{name}})
 		}
 		// The grouping answer is JSON that has to survive being carried inside a

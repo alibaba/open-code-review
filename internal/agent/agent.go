@@ -1013,13 +1013,23 @@ func (a *Agent) applyInputIdentity(b *session.ManifestBuilder) {
 }
 
 // sourceArtifactSHA256 is the deterministic content identity of this run's
-// selected input: for every non-deleted diff (the same set registerCoverage
-// seals), it pairs the content-independent item_id with the raw diff fingerprint,
-// sorts by item_id, and folds each field into SHA-256 with an unambiguous 8-byte
-// big-endian length prefix so no two distinct field sequences can collide. The
-// empty selected set yields the canonical empty-input digest. It uses the raw
-// fingerprint (not item_id) so a content change to the same logical file changes
-// the artifact — exactly what a resume needs to detect a moved ref's new input.
+// selected input: for every diff it pairs the content-independent item_id with
+// the raw diff fingerprint, sorts by item_id, and folds each field into SHA-256
+// with an unambiguous 8-byte big-endian length prefix so no two distinct field
+// sequences can collide. The empty selected set yields the canonical empty-input
+// digest. It uses the raw fingerprint (not item_id) so a content change to the
+// same logical file changes the artifact — exactly what a resume needs to detect
+// a moved ref's new input.
+//
+// Range and commit reviews skip deleted diffs because their comparison endpoints
+// already seal the old side: a deletion cannot appear between two fixed commits
+// without one of the endpoints changing. Workspace reviews have no such seal, so
+// they include deleted diffs in the identity: deleting an otherwise-unchanged
+// tracked file changes the review context (an imported symbol can disappear) even
+// though the deleted file itself is not dispatched as a review item. Including it
+// here makes workspace admission and the persisted identity agree on that input
+// change, so a resumed session fails closed instead of silently reviewing a
+// different workspace.
 //
 // Items are deduplicated by item_id (first wins) so the hash denominator matches
 // the sealed selected set — RegisterSelected ignores a duplicate item_id, so two
@@ -1030,8 +1040,9 @@ func (a *Agent) sourceArtifactSHA256() string {
 	type pair struct{ id, fingerprint string }
 	pairs := make([]pair, 0, len(a.diffs))
 	seen := make(map[string]struct{}, len(a.diffs))
+	workspace := a.reviewMode() == session.ReviewModeWorkspace
 	for _, d := range a.diffs {
-		if d.IsDeleted {
+		if d.IsDeleted && !workspace {
 			continue
 		}
 		id := a.manifestItemID(d)
