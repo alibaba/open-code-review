@@ -5,7 +5,10 @@ package session
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -276,10 +279,159 @@ func writeTestSession(t *testing.T, repoDir, from, to string, comments []model.L
 			if sh.persist.file != nil {
 				_ = sh.persist.file.Close()
 			}
+			if sh.persist.lockFile != nil {
+				_ = sh.persist.lockFile.Close()
+				sh.persist.lockFile = nil
+			}
 			sh.persist.writer = nil
 			sh.persist.file = nil
 			sh.persist.mu.Unlock()
 		}
 	}
 	return sh.SessionID
+}
+
+func TestSessionLivenessRunningAbortedCompleted(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	t.Run("running", func(t *testing.T) {
+		sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeCommit})
+		// Release the live writer when this subtest returns, before the parent
+		// TempDir cleanup. Finalize would write session_end and clear Running.
+		// Windows cannot delete a session file that still has an open handle.
+		t.Cleanup(func() {
+			if sh.persist != nil {
+				sh.persist.flushAndClose()
+			}
+		})
+		got, err := ListSessions(repoDir)
+		if err != nil {
+			t.Fatalf("ListSessions: %v", err)
+		}
+		var live *Summary
+		for i := range got {
+			if got[i].SessionID == sh.SessionID {
+				live = &got[i]
+				break
+			}
+		}
+		if live == nil {
+			t.Fatal("live session missing from list")
+		}
+		if live.Aborted || !live.Running {
+			t.Fatalf("live session flags = aborted:%v running:%v", live.Aborted, live.Running)
+		}
+		if live.Model != "test-model" {
+			t.Fatalf("live session model = %q, want metadata flushed while the run is open", live.Model)
+		}
+		detail, _, err := LoadDetail(repoDir, sh.SessionID)
+		if err != nil {
+			t.Fatalf("LoadDetail: %v", err)
+		}
+		if detail.Aborted || !detail.Running {
+			t.Fatalf("live detail flags = aborted:%v running:%v", detail.Aborted, detail.Running)
+		}
+		// The writer must stay reachable until the reads above finish: the
+		// process holding the session lock is this test.
+		runtime.KeepAlive(sh)
+	})
+
+	t.Run("aborted", func(t *testing.T) {
+		id := writeTestSession(t, repoDir, "a", "b", nil, 0, 0, false)
+		summary, err := LoadSummary(repoDir, id)
+		if err != nil {
+			t.Fatalf("LoadSummary: %v", err)
+		}
+		if !summary.Aborted || summary.Running {
+			t.Fatalf("interrupted session flags = aborted:%v running:%v", summary.Aborted, summary.Running)
+		}
+	})
+
+	t.Run("completed", func(t *testing.T) {
+		sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeCommit})
+		if err := sh.Finalize(); err != nil {
+			t.Fatalf("Finalize: %v", err)
+		}
+		summary, err := LoadSummary(repoDir, sh.SessionID)
+		if err != nil {
+			t.Fatalf("LoadSummary: %v", err)
+		}
+		if summary.Aborted || summary.Running {
+			t.Fatalf("completed session flags = aborted:%v running:%v", summary.Aborted, summary.Running)
+		}
+	})
+}
+
+// TestOverlappingReadersDoNotMarkInactiveSessionRunning checks that one
+// reader holding the liveness probe does not make other readers report an
+// inactive session as running. The session is unfinished and its leftover
+// sidecar is unlocked, so no exclusive writer exists. An exclusive writer
+// still makes SessionLockHeld report true.
+func TestOverlappingReadersDoNotMarkInactiveSessionRunning(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	id := writeTestSession(t, repoDir, "a", "b", nil, 0, 0, false)
+	summary, err := LoadSummary(repoDir, id)
+	if err != nil {
+		t.Fatalf("LoadSummary: %v", err)
+	}
+	if summary.FilePath == "" {
+		t.Fatal("session file path is empty")
+	}
+	if !summary.Aborted || summary.Running {
+		t.Fatalf("inactive session flags = aborted:%v running:%v", summary.Aborted, summary.Running)
+	}
+
+	t.Run("overlapping readers", func(t *testing.T) {
+		probe, err := os.OpenFile(sessionLockPath(summary.FilePath), os.O_RDWR, 0)
+		if err != nil {
+			t.Fatalf("open lock: %v", err)
+		}
+		t.Cleanup(func() { probe.Close() })
+
+		acquired, err := tryLock(probe)
+		if err != nil {
+			t.Fatalf("tryLock: %v", err)
+		}
+		if !acquired {
+			t.Fatal("probe did not acquire the unlocked leftover sidecar")
+		}
+		t.Cleanup(func() { unlock(probe) })
+
+		const readers = 8
+		held := make([]bool, readers)
+		var wg sync.WaitGroup
+		wg.Add(readers)
+		for i := 0; i < readers; i++ {
+			go func(i int) {
+				defer wg.Done()
+				held[i] = SessionLockHeld(summary.FilePath)
+			}(i)
+		}
+		wg.Wait()
+		for i, running := range held {
+			if running {
+				t.Errorf("reader %d: SessionLockHeld = true, want false for an inactive session", i)
+			}
+		}
+	})
+
+	t.Run("exclusive writer", func(t *testing.T) {
+		writer, err := os.OpenFile(sessionLockPath(summary.FilePath), os.O_RDWR, 0)
+		if err != nil {
+			t.Fatalf("open lock: %v", err)
+		}
+		t.Cleanup(func() { writer.Close() })
+		if err := lockExclusive(writer); err != nil {
+			t.Fatalf("lockExclusive: %v", err)
+		}
+		t.Cleanup(func() { unlock(writer) })
+		if !SessionLockHeld(summary.FilePath) {
+			t.Fatal("SessionLockHeld = false, want true while an exclusive writer holds the sidecar")
+		}
+	})
 }

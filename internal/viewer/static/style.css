@@ -1906,7 +1906,8 @@ nav.breadcrumb a:focus-visible {
     font-weight: 600;
 }
 
-.session-page .meta .status-complete {
+.session-page .meta .status-complete,
+.session-page .meta .status-running {
     color: var(--link);
 }
 

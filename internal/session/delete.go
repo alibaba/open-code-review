@@ -90,6 +90,7 @@ func DeleteSession(repoDir, sessionID string) error {
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("delete session %q: %w", sessionID, err)
 	}
+	removeSessionLock(path)
 	return nil
 }
 
@@ -203,7 +204,15 @@ func DeleteSessionAt(loc Location) error {
 		}
 		return fmt.Errorf("delete session %q: %w", loc.SessionID, err)
 	}
+	removeSessionLock(path)
 	return nil
+}
+
+// removeSessionLock drops the sidecar beside a removed session file. The
+// JSONL removal is the operation that matters: a lock still held by a live
+// process can fail to unlink on Windows, and that must not fail the delete.
+func removeSessionLock(jsonlPath string) {
+	_ = os.Remove(sessionLockPath(jsonlPath))
 }
 
 // resolveLocationPath rebuilds a Location's path from its parts and checks the two agree.
