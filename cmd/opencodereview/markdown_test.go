@@ -140,6 +140,72 @@ func TestRenderMarkdownTerminalSafety(test *testing.T) {
 	}
 }
 
+func TestRenderMarkdownRejectsEntityEncodedStyles(test *testing.T) {
+	for _, fixture := range []struct {
+		name, markdown string
+	}{
+		{"decimal", "&#27;[8mCRITICAL FINDING&#27;[0m"},
+		{"hexadecimal", "&#x1b;[8mCRITICAL FINDING&#x1B;[0m"},
+		{"without semicolon", "&#27[8mCRITICAL FINDING&#27[0m"},
+		{"encoded parameters", "&#27;&#91;&#56;mCRITICAL FINDING&#27;[0m"},
+		{"without reset", "&#27;[8mCRITICAL FINDING"},
+		{"color", "&#27;[31mCRITICAL FINDING&#27;[0m"},
+		{"bold", "**&#27;[8mCRITICAL FINDING&#27;[0m**"},
+		{"strikethrough", "~~&#27;[8mCRITICAL FINDING&#27;[0m~~"},
+		{"split strikethrough", "~~&#2**7;[8mCRITICAL FINDING**&#27;[0m~~"},
+		{"link", "[&#27;[8mCRITICAL FINDING&#27;[0m](https://example.invalid)"},
+		{"table", "| Finding |\n| --- |\n| &#27;[8mCRITICAL FINDING&#27;[0m |"},
+		{"HTML block", "<div>&#27;[8mCRITICAL FINDING&#27;[0m</div>"},
+		{"HTML closure", "<div>\n&#27;[8mCRITICAL FINDING&#27;[0m\n</div>"},
+	} {
+		test.Run(fixture.name, func(test *testing.T) {
+			rendered := renderMarkdown(fixture.markdown, 100)
+			for _, injected := range []string{"\x1b[8m", "\x1b[31m", "\x1b[0m"} {
+				if strings.Contains(rendered, injected) {
+					test.Errorf("input-owned style survived: %q", rendered)
+				}
+			}
+			if !strings.Contains(ansi.Strip(rendered), "CRITICAL FINDING") {
+				test.Fatalf("finding text lost: %q", rendered)
+			}
+		})
+	}
+}
+
+func TestRenderMarkdownEntityStyleLiteralRetention(test *testing.T) {
+	for _, fixture := range []struct {
+		name, markdown, want string
+	}{
+		{"inline code", "`&#27;[8mCRITICAL&#27;[0m`", "&#27;[8mCRITICAL&#27;[0m"},
+		{"fenced code", "```text\n&#27;[8mCRITICAL&#27;[0m\n```", "&#27;[8mCRITICAL&#27;[0m"},
+		{"indented code", "    &#27;[8mCRITICAL&#27;[0m", "&#27;[8mCRITICAL&#27;[0m"},
+		{"escaped entity", "&amp;#27;[8mCRITICAL", "&#27;[8mCRITICAL"},
+		{"adjacent entity", "&#27;[8mCRITICAL &lt;tag&gt; &amp;#27;[8m&#27;[0m", "CRITICAL <tag> &#27;[8m"},
+		{"HTML entity", "<div>&#27;[8mCRITICAL &lt;tag&gt; &amp;#27;[8m&#27;[0m</div>", "CRITICAL <tag> &#27;[8m"},
+	} {
+		test.Run(fixture.name, func(test *testing.T) {
+			rendered := renderMarkdown(fixture.markdown, 100)
+			if strings.Contains(rendered, "\x1b[8m") || !strings.Contains(ansi.Strip(rendered), fixture.want) {
+				test.Fatalf("unsafe or changed literal: %q; want %q", rendered, fixture.want)
+			}
+		})
+	}
+}
+
+func TestRenderMarkdownRetainsStylesAfterSanitizingEntities(test *testing.T) {
+	markdown := "**Visible** &#27;[8mCRITICAL FINDING&#27;[0m with *emphasis* and `&lt;code&gt;`."
+	rendered := renderMarkdown(markdown, 100)
+	for _, style := range []string{"\x1b[1m", "\x1b[3m", "\x1b[36m"} {
+		if !strings.Contains(rendered, style) {
+			test.Errorf("renderer style lost: %q", rendered)
+		}
+	}
+	want := "Visible CRITICAL FINDING with emphasis and &lt;code&gt;."
+	if strings.Contains(rendered, "\x1b[8m") || strings.TrimSpace(ansi.Strip(rendered)) != want {
+		test.Fatalf("unsafe or changed content: %q; want %q", rendered, want)
+	}
+}
+
 func TestRenderMarkdownDelimiterBoundaries(test *testing.T) {
 	for _, fixture := range []struct {
 		markdown string
@@ -175,7 +241,7 @@ func TestRenderedMarkdownRejectsPrivateCSI(test *testing.T) {
 }
 
 func TestMarkdownOutputDestinations(test *testing.T) {
-	markdown := "## Project Summary\n\n**Default changes** to `true`.\n"
+	markdown := "## Project Summary\n\n**Default changes** to `true`.\n\n&#27;[8mImportant finding&#27;[0m\n"
 	result := &mockResultProvider{filesReviewed: 1, projectSummary: markdown}
 	defer stdout.Quiet()()
 	for _, styled := range []bool{false, true} {
@@ -188,6 +254,9 @@ func TestMarkdownOutputDestinations(test *testing.T) {
 		if styled {
 			if strings.Contains(stdout, "**Default changes**") || !strings.Contains(stdout, "\x1b[1m") {
 				test.Fatalf("stdout was not rendered: %q", stdout)
+			}
+			if strings.Contains(stdout, "\x1b[8m") || !strings.Contains(stdout, "Important finding") {
+				test.Fatalf("unsafe or lost summary: %q", stdout)
 			}
 		} else if !strings.Contains(stdout, markdown) || strings.Contains(stdout, "\x1b") {
 			test.Fatalf("plain stdout was changed: %q", stdout)
