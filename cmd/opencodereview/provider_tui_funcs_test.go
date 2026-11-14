@@ -281,20 +281,22 @@ func TestCloneProviderEntry_NilExtraBody(t *testing.T) {
 // omission. It catches a dropped field, not an aliased one -- DeepEqual
 // compares values, not identity; the sibling tests above cover aliasing.
 func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
+	promptCaching := true
 	orig := ProviderEntry{
-		APIKey:       "key",
-		APIKeyCmd:    "op read op://dev/x/api-key",
-		URL:          "http://localhost",
-		Protocol:     "openai",
-		Model:        "gpt-4",
-		Models:       []string{"gpt-4"},
-		AuthHeader:   "Authorization",
-		TimeoutSec:   45,
-		RetryCodes:   []int{403},
-		ExtraBody:    map[string]any{"temperature": 0.7},
-		ExtraHeaders: map[string]string{"X-Trace": "on"},
-		AWSRegion:    "us-west-2",
-		AWSProfile:   "example-profile",
+		APIKey:        "key",
+		APIKeyCmd:     "op read op://dev/x/api-key",
+		URL:           "http://localhost",
+		Protocol:      "openai",
+		Model:         "gpt-4",
+		Models:        []string{"gpt-4"},
+		AuthHeader:    "Authorization",
+		TimeoutSec:    45,
+		RetryCodes:    []int{403},
+		PromptCaching: &promptCaching,
+		ExtraBody:     map[string]any{"temperature": 0.7},
+		ExtraHeaders:  map[string]string{"X-Trace": "on"},
+		AWSRegion:     "us-west-2",
+		AWSProfile:    "example-profile",
 		unknownJSONFields: map[string]json.RawMessage{
 			"future_provider": json.RawMessage(`{"value":"preserve-me"}`),
 		},
