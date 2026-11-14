@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
@@ -270,6 +271,7 @@ func TestRunPreviewCreatesNoSession(t *testing.T) {
 }
 
 func TestLoadReviewResumeState(t *testing.T) {
+	setTestHome(t, t.TempDir())
 	dir := initTestGitRepo(t)
 
 	t.Run("empty resume returns nil", func(t *testing.T) {
@@ -279,10 +281,14 @@ func TestLoadReviewResumeState(t *testing.T) {
 		}
 	})
 
-	t.Run("workspace resume rejected", func(t *testing.T) {
-		_, err := loadReviewResumeState(dir, reviewOptions{resume: "sess-1"})
-		if err == nil {
-			t.Fatal("expected error for workspace-mode resume")
+	t.Run("workspace resume loads session", func(t *testing.T) {
+		id := writeWorkspaceResumeSession(t, dir, "main.go")
+		state, err := loadReviewResumeState(dir, reviewOptions{resume: id})
+		if err != nil {
+			t.Fatalf("workspace resume must load, got: %v", err)
+		}
+		if state == nil || state.ReviewMode != session.ReviewModeWorkspace {
+			t.Fatalf("state = %+v, want a workspace session", state)
 		}
 	})
 

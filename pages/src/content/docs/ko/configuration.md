@@ -72,6 +72,19 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 모델의 유효성은 요청을 보낼 때 프로바이더가 확인합니다. 사용자 정의 프로바이더에는
 기존 `--model` 검증 규칙이 적용됩니다.
 
+`minimax`와 `minimax-cn`의 새 모델 선택에서는 `MiniMax-M3.1-Flash`,
+`MiniMax-M3` 순으로 추천합니다. OCR은 저장된 모델과 명시적으로 지정한 이전 모델 또는
+사용자 정의 모델 ID를 계속 허용합니다. 게이트웨이는 자체 모델 ID를 사용하므로,
+MiniMax 직접 연결용 ID가 게이트웨이에서도 제공된다는 의미는 아닙니다.
+
+기본 요청은 `thinking`과 `reasoning_effort`를 생략하여
+[MiniMax API 기본값](https://platform.minimax.io/docs/api-reference/text-openai-api)을 사용합니다.
+Flash는 adaptive thinking이 필수이며 effort 기본값은 `max`입니다. `extra_body`에서
+`thinking: {"type":"adaptive"}`와 `low`, `medium`, `high`, `xhigh`, `max` 중 하나의
+`reasoning_effort`를 명시할 수 있습니다. M3는 `thinking: {"type":"disabled"}`도
+지원합니다. 저장된 `extra_body`는 유지되므로 Flash로 전환하기 전에 thinking을
+비활성화하는 설정을 제거하세요.
+
 ## ChatGPT 로그인 미리보기
 
 이 미리보기는 공개 Responses API용 내장 `chatgpt` provider를 추가합니다. API 키 환경 변수는 없습니다. 로그인, 동의 및 사용 제한은 [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.
@@ -138,6 +151,8 @@ Model:  claude-sonnet-5
 Bedrock은 `llm.protocol`이나 `OCR_LLM_PROTOCOL`로는 사용할 수 **없습니다**. 이 블록은 URL 하나와 토큰 하나를 기술하는 구조라 리전이나 프로필을 담을 자리가 없고, bedrock은 이 블록이 담는 두 값 중 어느 것도 쓰지 않습니다. 그래서 이 조합은 받아들인 뒤 무시하는 대신 거부합니다.
 
 ### 커스텀 프로바이더 {#custom-providers}
+
+`mimo-v2.6-flash`, `foo.api_key`처럼 점이 포함된 이름을 사용할 수 있습니다. 새로운 이름에 점이 있다면 필드를 설정하기 전에 `ocr config set provider <name>`으로 생성하고 선택하세요. 이 명령은 현재 프로바이더를 변경합니다. 기존 항목은 선택하지 않고도 `providers.<name>.<field>` 또는 `custom_providers.<name>.<field>`로 수정할 수 있습니다. 이름의 처음이나 끝에 점이 있거나, 점이 연속되거나, 구분된 부분이 비어 있거나 공백으로만 구성된 이름은 허용되지 않습니다. 점이 없는 이름은 필드 설정 시 계속 자동으로 생성됩니다.
 
 위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock` 중 하나):
 

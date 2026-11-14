@@ -11,6 +11,8 @@ import "fmt"
 // before any session exists.
 type RunIdentity struct {
 	Mode                 string // manifest input.mode
+	ResolvedBase         string
+	ResolvedHead         string
 	SourceArtifactSHA256 string // manifest input.source_artifact_sha256
 	RuleConfigSHA256     string // manifest execution.rule_config_sha256
 	RepositorySHA256     string // manifest repository.identity_sha256; empty when the repo has no remote
@@ -54,6 +56,22 @@ func (s *ResumeState) ValidateResume(req ResumeRequest) error {
 	if err := s.validateInputIdentity(req.Identity); err != nil {
 		return err
 	}
+	identity := req.Identity
+	if identity.Mode == InputModeRange || identity.Mode == InputModeCommit {
+		if identity.ResolvedHead == "" || (identity.Mode == InputModeRange && identity.ResolvedBase == "") {
+			return fmt.Errorf("resume rejected: comparison endpoints could not be resolved; %s", resumeHint)
+		}
+		if s.Manifest.Input.ResolvedBase != identity.ResolvedBase || s.Manifest.Input.ResolvedHead != identity.ResolvedHead {
+			return fmt.Errorf("resume rejected: comparison endpoints changed since session %q; %s", s.SessionID, resumeHint)
+		}
+	}
+	if identity.Mode == InputModeWorkspace && s.Manifest.Input.ResolvedBase != identity.ResolvedBase {
+		// A workspace run reviews the working tree at a base commit. The base is
+		// not an endpoint the caller passed and cannot be pinned the way range or
+		// commit endpoints are, but comparing it still catches the common accident
+		// of resuming after the worktree base moved.
+		return fmt.Errorf("resume rejected: workspace base commit changed from %q to %q since session %q; workspace resume requires the same worktree base; %s", s.Manifest.Input.ResolvedBase, identity.ResolvedBase, s.SessionID, resumeHint)
+	}
 
 	m := s.Manifest
 	providerChanged := m.Execution.Provider != req.Provider
@@ -76,6 +94,8 @@ func (s *ResumeState) ValidateResume(req ResumeRequest) error {
 // This runs once, at admission, and is never repeated during the run: the caller
 // pins the run to the commit endpoints this comparison was made against (see
 // agent.SealedInput), so a second comparison could only ever confirm the first.
+// Workspace input has no commit to pin, so this admission check is the only
+// guarantee; later worktree edits during the run are outside the contract.
 func (s *ResumeState) validateInputIdentity(id RunIdentity) error {
 	if s == nil {
 		return nil
@@ -114,6 +134,9 @@ func (s *ResumeState) validateInputIdentity(id RunIdentity) error {
 		return fmt.Errorf("resume rejected: repository identity changed, so this is not the repository the parent run reviewed; %s", resumeHint)
 	}
 	if m.Input.SourceArtifactSHA256 != id.SourceArtifactSHA256 {
+		if id.Mode == InputModeWorkspace {
+			return fmt.Errorf("resume rejected: the workspace changed since session %q — resume requires the same uncommitted changes; %s", s.SessionID, resumeHint)
+		}
 		return fmt.Errorf("resume rejected: the reviewed input changed since session %q — a ref may now point at a different commit, or the selected file set changed; %s", s.SessionID, resumeHint)
 	}
 	if m.Execution.RuleConfigSHA256 == "" {

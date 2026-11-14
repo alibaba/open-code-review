@@ -87,6 +87,24 @@ func TestRunSessionList_EmptyRepo(t *testing.T) {
 	}
 }
 
+func TestRunSessionList_JSONMissingDirPrintsEmptyArray(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	got := captureStdout(t, func() {
+		if err := runSessionListCompat([]string{"--repo", repoDir, "--json"}); err != nil {
+			t.Fatalf("runSessionList: %v", err)
+		}
+	})
+	// json.Unmarshal accepts null into a slice, so the wire text is the only
+	// thing that pins this: a repository with no sessions directory must read
+	// exactly the same as one whose directory is empty.
+	if strings.TrimSpace(got) != "[]" {
+		t.Errorf("expected [] for a repo with no sessions, got %q", got)
+	}
+}
+
 func TestRunSessionShow_Text(t *testing.T) {
 	tmpHome := t.TempDir()
 	setTestHome(t, tmpHome)
@@ -233,6 +251,34 @@ func TestRunSessionComments_JSON(t *testing.T) {
 	}
 	if len(decoded) != 1 || decoded[0].Content != "note" || decoded[0].Severity != "medium" {
 		t.Fatalf("decoded = %+v", decoded)
+	}
+}
+
+func TestRunSessionShow_JSONNoItemsIsArray(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	// A run that ends before any file is reviewed records no items.
+	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
+		ReviewMode: session.ReviewModeCommit,
+		DiffCommit: "abc123",
+	})
+	sh.Finalize()
+
+	got := captureStdout(t, func() {
+		if err := runSessionShowCompat([]string{"--repo", repoDir, "--json", sh.SessionID}); err != nil {
+			t.Fatalf("runSessionShow: %v", err)
+		}
+	})
+
+	// json.Unmarshal accepts null into a slice, so only the raw text pins the wire shape.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(got), &raw); err != nil {
+		t.Fatalf("unmarshal: %v (out=%q)", err, got)
+	}
+	if string(raw["items"]) != "[]" {
+		t.Errorf("items = %s, want []", raw["items"])
 	}
 }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { ConfigEntry } from '@shared/configUtils';
+import { ConfigEntry, isValidProviderName } from '@shared/configUtils';
 import { isPresetProvider } from '@shared/providers';
 
 type RawProviderEntry = Record<string, unknown>;
@@ -57,6 +57,8 @@ function applyProviderField(entry: RawProviderEntry, field: string, value: strin
 }
 
 function setCustomProviderField(cfg: RawConfig, name: string, field: string, value: string): void {
+  if (!isValidProviderName(name)) return;
+  if (name.includes('.') && !Object.prototype.hasOwnProperty.call(cfg.custom_providers ?? {}, name)) return;
   if (!cfg.custom_providers) cfg.custom_providers = {};
   const entry = { ...(cfg.custom_providers[name] ?? {}) };
   applyProviderField(entry, field, value);
@@ -64,11 +66,12 @@ function setCustomProviderField(cfg: RawConfig, name: string, field: string, val
 }
 
 function setProviderValue(cfg: RawConfig, key: string, value: string): void {
-  const parts = key.split('.');
-  if (parts.length !== 3) return;
-  const name = parts[1];
-  const field = parts[2];
-  if (isPresetProvider(name)) {
+  const prefix = key.startsWith('providers.') ? 'providers.' : 'custom_providers.';
+  const dot = key.lastIndexOf('.');
+  if (dot <= prefix.length || dot === key.length - 1) return;
+  const name = key.slice(prefix.length, dot);
+  const field = key.slice(dot + 1);
+  if (prefix === 'providers.' && isPresetProvider(name)) {
     if (!cfg.providers) cfg.providers = {};
     const entry = { ...(cfg.providers[name] ?? {}) };
     applyProviderField(entry, field, value);
@@ -79,18 +82,14 @@ function setProviderValue(cfg: RawConfig, key: string, value: string): void {
 }
 
 function setConfigValue(cfg: RawConfig, key: string, value: string): void {
-  if (key.startsWith('providers.')) {
+  if (key.startsWith('providers.') || key.startsWith('custom_providers.')) {
     setProviderValue(cfg, key, value);
-    return;
-  }
-  if (key.startsWith('custom_providers.')) {
-    const parts = key.split('.');
-    if (parts.length === 3) setCustomProviderField(cfg, parts[1], parts[2], value);
     return;
   }
 
   switch (key) {
     case 'provider':
+      if (value && !isValidProviderName(value)) return;
       if (cfg.provider !== value) cfg.model = '';
       cfg.provider = value;
       if (isPresetProvider(value)) {

@@ -147,7 +147,61 @@ func writeVerifiableParent(t *testing.T, repoDir string, id session.RunIdentity,
 	})
 	b := sh.Manifest()
 	b.SetRepository(session.ManifestRepository{IdentitySHA256: id.RepositorySHA256})
-	b.SetInput(session.ManifestInput{Mode: id.Mode, SourceArtifactSHA256: id.SourceArtifactSHA256})
+	b.SetInput(session.ManifestInput{
+		Mode: id.Mode, ResolvedBase: id.ResolvedBase, ResolvedHead: id.ResolvedHead,
+		SourceArtifactSHA256: id.SourceArtifactSHA256,
+	})
+	b.SetExecution(session.ManifestExecution{
+		Provider: provider, Model: model, RuleConfigSHA256: id.RuleConfigSHA256,
+	})
+	if err := b.RegisterSelected(session.CoverageItem{ItemID: "item-1", Path: "main.go"}); err != nil {
+		t.Fatalf("register selected: %v", err)
+	}
+	if err := b.MarkCompleted("item-1"); err != nil {
+		t.Fatalf("mark completed: %v", err)
+	}
+	m, err := b.Finalize(time.Second)
+	if err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	sh.SetFinalManifest(&m)
+	if err := sh.Finalize(); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+	return sh.SessionID
+}
+
+// writeWorkspaceResumeSession persists a workspace-mode review session with the
+// given completed file checkpoints and returns its ID. HOME must already point at
+// a temp dir.
+func writeWorkspaceResumeSession(t *testing.T, repoDir string, files ...string) string {
+	t.Helper()
+	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
+		ReviewMode: session.ReviewModeWorkspace,
+	})
+	for _, f := range files {
+		sh.RecordReviewItemDone(f, "", f, "fp-"+f, nil)
+	}
+	if err := sh.Finalize(); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+	return sh.SessionID
+}
+
+// writeVerifiableWorkspaceParent persists a workspace-mode review session whose
+// manifest records the given identity, as a completed parent run would.
+func writeVerifiableWorkspaceParent(t *testing.T, repoDir string, id session.RunIdentity, provider, model string) string {
+	t.Helper()
+	sh := session.New(repoDir, "feature", model, session.SessionOptions{
+		ReviewMode: session.ReviewModeWorkspace,
+		Operation:  session.OperationReview,
+	})
+	b := sh.Manifest()
+	b.SetRepository(session.ManifestRepository{IdentitySHA256: id.RepositorySHA256})
+	b.SetInput(session.ManifestInput{
+		Mode: id.Mode, ResolvedBase: id.ResolvedBase, ResolvedHead: id.ResolvedHead,
+		SourceArtifactSHA256: id.SourceArtifactSHA256,
+	})
 	b.SetExecution(session.ManifestExecution{
 		Provider: provider, Model: model, RuleConfigSHA256: id.RuleConfigSHA256,
 	})
@@ -300,6 +354,68 @@ func TestValidateResumeIdentity(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "reviewed input changed") {
 			t.Errorf("error must name the input as the cause, got: %v", err)
+		}
+		if after := countSessionFiles(t, repoDir); after != before {
+			t.Errorf("rejection created %d session file(s); it must persist nothing", after-before)
+		}
+	})
+}
+
+// TestValidateResumeIdentityWorkspace pins the workspace half of resume admission:
+// the worktree is the input, so it must be unchanged, and there is no commit
+// endpoint to pin, which is why the base commit is compared instead.
+func TestValidateResumeIdentityWorkspace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := initResumeRepo(t)
+	// An uncommitted edit is what a workspace run reviews; HEAD alone has no diff
+	// to offer.
+	wip := "package main\n\nfunc main() { println(\"wip\") }\n"
+	if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte(wip), 0o644); err != nil {
+		t.Fatalf("write workspace change: %v", err)
+	}
+	cc := resumeTestContext(repoDir)
+	opts := reviewOptions{}
+
+	sealed, err := agent.ResolveIdentity(context.Background(), agent.Args{
+		RepoDir:    repoDir,
+		ReviewMode: session.ReviewModeWorkspace,
+		Template:   *cc.Template,
+	})
+	if err != nil {
+		t.Fatalf("ResolveIdentity: %v", err)
+	}
+	if sealed.Identity.Mode != session.InputModeWorkspace {
+		t.Fatalf("identity mode = %q, want workspace", sealed.Identity.Mode)
+	}
+
+	parentID := writeVerifiableWorkspaceParent(t, repoDir, sealed.Identity, "anthropic", "claude")
+	state, err := loadReviewResumeState(repoDir, reviewOptions{resume: parentID})
+	if err != nil {
+		t.Fatalf("loadReviewResumeState: %v", err)
+	}
+	if state.ReviewMode != session.ReviewModeWorkspace {
+		t.Fatalf("state mode = %q, want workspace", state.ReviewMode)
+	}
+
+	t.Run("unchanged worktree is accepted", func(t *testing.T) {
+		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
+		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state); err != nil {
+			t.Errorf("want accepted, got: %v", err)
+		}
+	})
+
+	t.Run("changed worktree is rejected and persists nothing", func(t *testing.T) {
+		before := countSessionFiles(t, repoDir)
+		if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte(wip+"// more\n"), 0o644); err != nil {
+			t.Fatalf("write workspace change: %v", err)
+		}
+		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
+		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
+		if err == nil {
+			t.Fatal("want rejection after the worktree changed")
+		}
+		if !strings.Contains(err.Error(), "workspace changed") {
+			t.Errorf("error must name the workspace as the cause, got: %v", err)
 		}
 		if after := countSessionFiles(t, repoDir); after != before {
 			t.Errorf("rejection created %d session file(s); it must persist nothing", after-before)
