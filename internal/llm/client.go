@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -586,6 +587,9 @@ func encodingForModel(modelName string) string {
 type OpenAIClient struct {
 	cfg ClientConfig
 	sdk openai.Client
+	// query holds query parameters parsed from a configured URL that carried
+	// them (e.g. a gateway route like ...?tenant=acme); re-applied per request.
+	query url.Values
 }
 
 // NewOpenAIClient creates a new OpenAI-compatible LLM client.
@@ -598,12 +602,19 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	if cfg.SessionKey == "" {
 		cfg.SessionKey = NewSessionKey()
 	}
-	baseURL := strings.TrimRight(cfg.URL, "/")
-	if !strings.HasSuffix(baseURL, "/chat/completions") {
-		cfg.URL = baseURL + "/chat/completions"
+	var query url.Values
+	sdkBaseURL := ""
+	if baseURL, q, fullURL := normalizeEndpointURL(cfg.URL, "/chat/completions"); q != nil {
+		cfg.URL = fullURL
+		query = q
+		sdkBaseURL = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/chat/completions")
+	} else {
+		baseURL := strings.TrimRight(cfg.URL, "/")
+		if !strings.HasSuffix(baseURL, "/chat/completions") {
+			cfg.URL = baseURL + "/chat/completions"
+		}
+		sdkBaseURL = strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/chat/completions")
 	}
-
-	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/chat/completions")
 
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(cfg.APIKey),
@@ -627,8 +638,9 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	}
 
 	return &OpenAIClient{
-		cfg: cfg,
-		sdk: openai.NewClient(opts...),
+		cfg:   cfg,
+		sdk:   openai.NewClient(opts...),
+		query: query,
 	}
 }
 
@@ -675,6 +687,11 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 	}
 
 	var opts []openaiopt.RequestOption
+	for k, vs := range c.query {
+		for _, v := range vs {
+			opts = append(opts, openaiopt.WithQueryAdd(k, v))
+		}
+	}
 	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
@@ -1154,6 +1171,10 @@ type AnthropicClient struct {
 	bedrock    bool
 	awsRegion  string
 	awsProfile string
+
+	// query holds query parameters parsed from a configured URL that carried
+	// them (e.g. a gateway route like ...?tenant=acme); re-applied per request.
+	query url.Values
 }
 
 // NewAnthropicClient creates a new Anthropic Messages API client.
@@ -1168,14 +1189,21 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	if cfg.SessionKey == "" {
 		cfg.SessionKey = NewSessionKey()
 	}
-	if !strings.HasSuffix(cfg.URL, "/v1/messages") && !strings.HasSuffix(cfg.URL, "/v1/messages/") {
-		baseURL := strings.TrimRight(cfg.URL, "/")
-		if !strings.HasSuffix(baseURL, "/v1/messages") {
-			cfg.URL = baseURL + "/v1/messages"
+	var query url.Values
+	sdkBaseURL := ""
+	if baseURL, q, fullURL := normalizeEndpointURL(cfg.URL, "/v1/messages"); q != nil {
+		cfg.URL = fullURL
+		query = q
+		sdkBaseURL = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1/messages")
+	} else {
+		if !strings.HasSuffix(cfg.URL, "/v1/messages") && !strings.HasSuffix(cfg.URL, "/v1/messages/") {
+			baseURL := strings.TrimRight(cfg.URL, "/")
+			if !strings.HasSuffix(baseURL, "/v1/messages") {
+				cfg.URL = baseURL + "/v1/messages"
+			}
 		}
+		sdkBaseURL = strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/v1/messages")
 	}
-
-	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/v1/messages")
 	authHeader, _ := NormalizeAuthHeader(cfg.AuthHeader)
 	if authHeader == "" {
 		authHeader = "authorization"
@@ -1219,8 +1247,9 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	}
 
 	return &AnthropicClient{
-		cfg: cfg,
-		sdk: anthropic.NewClient(opts...),
+		cfg:   cfg,
+		sdk:   anthropic.NewClient(opts...),
+		query: query,
 	}
 }
 
@@ -1492,6 +1521,11 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 	}
 
 	var opts []option.RequestOption
+	for k, vs := range c.query {
+		for _, v := range vs {
+			opts = append(opts, option.WithQueryAdd(k, v))
+		}
+	}
 	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
 		opts = append(opts, option.WithHeader(k, v))
 	}

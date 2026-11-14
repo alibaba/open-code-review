@@ -52,6 +52,11 @@ func TestNewOpenAIClient_URLNormalization(t *testing.T) {
 			inputURL: "https://api.example.com",
 			wantURL:  "https://api.example.com/chat/completions",
 		},
+		{
+			name:     "gateway URL with query keeps suffix before query",
+			inputURL: "https://api.example.com/gateway?tenant=acme",
+			wantURL:  "https://api.example.com/gateway/chat/completions?tenant=acme",
+		},
 	}
 
 	for _, tt := range tests {
@@ -94,6 +99,11 @@ func TestNewAnthropicClient_URLNormalization(t *testing.T) {
 			name:     "custom proxy base URL",
 			inputURL: "https://proxy.example.com/anthropic",
 			wantURL:  "https://proxy.example.com/anthropic/v1/messages",
+		},
+		{
+			name:     "gateway URL with query keeps suffix before query",
+			inputURL: "https://proxy.example.com/gateway?tenant=acme",
+			wantURL:  "https://proxy.example.com/gateway/v1/messages?tenant=acme",
 		},
 	}
 
