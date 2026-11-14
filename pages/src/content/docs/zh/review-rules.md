@@ -107,6 +107,30 @@ Security review: flag hardcoded secrets, unvalidated redirects, and missing auth
 需要牢记的限制：合并只触及**系统**层。如果你自己的两条条目匹配同一个文件，
 靠前的那条仍然完全胜出——`merge_system_rule` 不会把它们彼此合并。
 
+### 组合多个文件或片段的规则文本
+
+`rule` 也可以接受字符串数组。每个元素的解释方式与字符串形式的 `rule` 相同：
+行内文本原样使用；看起来像 `.md`、`.txt` 或 `.markdown` 路径的值会相对于规则
+文件所在目录解析（同样有每文件 512 KB 上限），并替换为文件内容。各片段按声明
+顺序用一个空行连接，组合后的文本就是该条目的规则——first-match 与
+`merge_system_rule` 的语义保持不变。
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*.sql",
+      "rule": ["sql-baseline.md", "Also flag destructive DDL."]
+    }
+  ]
+}
+```
+
+文件缺失或无法读取时会打印警告并跳过该片段，其余片段仍会使用；如果所有片段
+都没有产生文本，该条目会被忽略。组合后的文本上限为 1 MiB，超出部分会被截断
+并打印警告。如果单个字符串里包含多个看起来像路径的 token，它仍按行内文本处理，
+并会打印警告建议改用数组形式。
+
 ### glob 能力
 
 OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)

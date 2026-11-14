@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/bmatcuk/doublestar/v4"
 
@@ -207,6 +208,52 @@ type ProjectRuleEntry struct {
 	Path            string `json:"path"`
 	Rule            string `json:"rule"`
 	MergeSystemRule bool   `json:"merge_system_rule,omitempty"`
+
+	// ruleParts holds the raw parts of an array-form `rule` until
+	// resolveRuleEntries replaces Rule with the composed text. It is nil for
+	// the string form.
+	ruleParts []string
+}
+
+// UnmarshalJSON accepts `rule` either as a single string (inline text or a rule
+// file reference) or as an array of strings whose parts are resolved and
+// composed in declaration order. Both forms are validated before any file I/O.
+func (e *ProjectRuleEntry) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Path            string          `json:"path"`
+		Rule            json.RawMessage `json:"rule"`
+		MergeSystemRule bool            `json:"merge_system_rule"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	e.Path = raw.Path
+	e.MergeSystemRule = raw.MergeSystemRule
+	e.Rule = ""
+	e.ruleParts = nil
+	if len(raw.Rule) == 0 || string(raw.Rule) == "null" {
+		return nil
+	}
+	switch raw.Rule[0] {
+	case '"':
+		var rule string
+		if err := json.Unmarshal(raw.Rule, &rule); err != nil {
+			return fmt.Errorf("rule must be a string or an array of strings: %w", err)
+		}
+		e.Rule = rule
+	case '[':
+		var parts []string
+		if err := json.Unmarshal(raw.Rule, &parts); err != nil {
+			return fmt.Errorf("rule must be a string or an array of strings: %w", err)
+		}
+		e.ruleParts = parts
+		// Provisional composition for callers that inspect Rule before
+		// resolveRuleEntries runs; inline-only arrays keep this text.
+		e.Rule = strings.Join(parts, "\n\n")
+	default:
+		return fmt.Errorf("rule must be a string or an array of strings")
+	}
+	return nil
 }
 
 // ProjectRule holds rules loaded from <repoDir>/.opencodereview/rule.json.
@@ -569,13 +616,26 @@ func looksLikeFilePath(s string) bool {
 	return allowedRuleExts[strings.ToLower(filepath.Ext(s))]
 }
 
+// maxComposedRuleBytes bounds the composed rule text for one entry. Each file
+// part is already capped at 512 KB; the total cap protects prompts from many
+// large parts.
+const maxComposedRuleBytes = 1 << 20
+
 // resolveRuleEntries reads file references in each rule entry and replaces them with
-// the file content. confineRoot is the canonical repo root for the untrusted project
-// layer (empty for trusted layers, meaning no confinement).
+// the file content. Array-form entries are resolved part by part and composed in
+// declaration order with a blank line between parts. confineRoot is the canonical
+// repo root for the untrusted project layer (empty for trusted layers, meaning no
+// confinement).
 func resolveRuleEntries(entries []ProjectRuleEntry, repoDir string, confineRoot string) {
 	for i := range entries {
 		e := &entries[i]
+		if len(e.ruleParts) > 0 {
+			e.Rule = resolveRuleParts(e.ruleParts, repoDir, confineRoot)
+			e.ruleParts = nil
+			continue
+		}
 		if strings.TrimSpace(e.Rule) == "" || !looksLikeFilePath(e.Rule) {
+			warnAmbiguousRulePathList(e.Rule)
 			continue
 		}
 		if content := tryReadRuleFile(e.Rule, repoDir, confineRoot); content != nil {
@@ -584,6 +644,56 @@ func resolveRuleEntries(entries []ProjectRuleEntry, repoDir string, confineRoot 
 			e.Rule = ""
 		}
 	}
+}
+
+// resolveRuleParts resolves each array part like a string `rule`: inline text is
+// kept as-is, a path-looking part is replaced by its file content, and a part
+// that cannot be read is skipped (tryReadRuleFile already warned). Parts are
+// joined with a blank line; an all-empty result ignores the entry.
+func resolveRuleParts(parts []string, repoDir string, confineRoot string) string {
+	resolved := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if looksLikeFilePath(part) {
+			if content := tryReadRuleFile(part, repoDir, confineRoot); content != nil {
+				resolved = append(resolved, *content)
+			}
+			continue
+		}
+		resolved = append(resolved, part)
+	}
+	composed := strings.Join(resolved, "\n\n")
+	if len(composed) > maxComposedRuleBytes {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: composed rule text is %d bytes, exceeding the %d-byte limit; truncating\n", len(composed), maxComposedRuleBytes)
+		composed = truncateUTF8(composed, maxComposedRuleBytes)
+	}
+	return composed
+}
+
+// truncateUTF8 cuts s to at most max bytes without splitting a UTF-8 rune.
+func truncateUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
+	}
+	return s[:max]
+}
+
+// warnAmbiguousRulePathList warns when a string-form rule contains several
+// path-looking tokens where the array form was likely intended. Such text is
+// treated as inline (spaces make it fail looksLikeFilePath), matching history.
+func warnAmbiguousRulePathList(rule string) {
+	fields := strings.Fields(rule)
+	if len(fields) < 2 {
+		return
+	}
+	for _, field := range fields {
+		if !looksLikeFilePath(field) {
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "[ocr] WARNING: rule %q looks like several rule file paths; configure them as an array instead\n", rule)
 }
 
 // tryReadRuleFile reads a rule file reference. Absolute paths are used directly;
