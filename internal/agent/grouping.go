@@ -309,7 +309,7 @@ func parseGroupingResponse(content string, diffs []model.Diff) ([]FileGroup, err
 	// Files not covered by any group get their own single-file group
 	for i, d := range diffs {
 		if !seen[i] {
-			groups = append(groups, FileGroup{Label: d.NewPath, Diffs: []model.Diff{d}})
+			groups = append(groups, FileGroup{Label: effectivePath(d), Diffs: []model.Diff{d}})
 		}
 	}
 
@@ -357,7 +357,7 @@ func enforceGroupTokenBudget(groups []FileGroup, tokenLimit int) []FileGroup {
 		} else {
 			for _, d := range g.Diffs {
 				result = append(result, FileGroup{
-					Label: g.Label + " (split: " + d.NewPath + ")",
+					Label: g.Label + " (split: " + effectivePath(d) + ")",
 					Diffs: []model.Diff{d},
 				})
 			}
@@ -369,11 +369,11 @@ func enforceGroupTokenBudget(groups []FileGroup, tokenLimit int) []FileGroup {
 // fileGroupKey returns a deterministic key for a file group: sorted paths joined by comma.
 func fileGroupKey(diffs []model.Diff) string {
 	if len(diffs) == 1 {
-		return diffs[0].NewPath
+		return effectivePath(diffs[0])
 	}
 	paths := make([]string, len(diffs))
 	for i, d := range diffs {
-		paths[i] = d.NewPath
+		paths[i] = effectivePath(d)
 	}
 	sort.Strings(paths)
 	return strings.Join(paths, ",")
@@ -383,7 +383,7 @@ func toSingleFileGroups(diffs []model.Diff) []FileGroup {
 	groups := make([]FileGroup, 0, len(diffs))
 	for _, d := range diffs {
 		groups = append(groups, FileGroup{
-			Label: d.NewPath,
+			Label: effectivePath(d),
 			Diffs: []model.Diff{d},
 		})
 	}
