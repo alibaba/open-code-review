@@ -19,9 +19,11 @@ import (
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/workflow"
 	"github.com/spf13/cobra"
 
 	"go.opentelemetry.io/otel/codes"
@@ -51,6 +53,7 @@ type reviewOptions struct {
 	effort                string
 	noFilter              bool
 	preview               bool
+	analysis              bool
 }
 
 var reviewOpts reviewOptions
@@ -70,6 +73,10 @@ var reviewCmd = &cobra.Command{
   # Review a specific commit
   ocr review --commit abc123
   ocr review -c abc123
+
+  # Review with peer Behavior/Impact and maintainer decision reports
+  ocr review --analysis
+  ocr review --from master --to dev-ref --analysis --format json
 
   # Resume a previous range review
   ocr review --from master --to dev-ref --resume <session-id>
@@ -112,6 +119,16 @@ func init() {
 }
 
 func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error) {
+	if opts.analysis {
+		if err := validateAnalysisOptions(opts); err != nil {
+			return err
+		}
+		var err error
+		opts, err = pinAnalysisOptions(ctx, opts)
+		if err != nil {
+			return err
+		}
+	}
 	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
 	if err != nil {
 		return err
@@ -180,6 +197,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err != nil {
 		return err
 	}
+	var sharedBudget *workflow.Budget
+	if opts.analysis {
+		sharedBudget = workflow.NewBudget(int64(opts.maxTokensBudget), opts.concurrency)
+		rt.Client = sharedBudget.Wrap(rt.Client)
+	}
 	maxTokens, err := resolveMaxTokens(cc.Template.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
@@ -237,6 +259,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	planToolDefs = append(planToolDefs, mcpToolDefs...)
 	mainToolDefs = append(mainToolDefs, mcpToolDefs...)
 
+	reviewBudget := int64(opts.maxTokensBudget)
+	if opts.analysis {
+		reviewBudget = 0
+	}
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
 		From:                  opts.from,
@@ -261,7 +287,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
 		SealedInput:           codeTools.resolution,
-		MaxTokensBudget:       int64(opts.maxTokensBudget),
+		MaxTokensBudget:       reviewBudget,
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
@@ -289,7 +315,22 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 	startTime := time.Now()
 
-	comments, runErr := ag.Run(runCtx)
+	var resultProvider ResultProvider = ag
+	var comments []model.LlmComment
+	var runErr error
+	var analysisErr error
+	if opts.analysis {
+		execution := newAnalysisExecution(cc, opts, rt, sharedBudget, ag.Session().SessionID, codeTools.resolution)
+		outcome := workflow.Run(runCtx, ag.Run, execution.run)
+		comments, runErr = outcome.Comments, outcome.ReviewError
+		report := execution.report(outcome.Analysis, outcome.AnalysisError)
+		resultProvider = &combinedResult{Agent: ag, report: report, budget: sharedBudget, reviewErr: runErr}
+		if report.Status != "completed" {
+			analysisErr = fmt.Errorf("analysis execution %s; see the analysis report and metadata for details", report.Status)
+		}
+	} else {
+		comments, runErr = ag.Run(runCtx)
+	}
 	manifest := ag.RunManifest()
 
 	// Freeze the retry report at the same boundary as the manifest: ag.Run has
@@ -307,7 +348,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		fmt.Fprintf(os.Stderr, "[ocr] warning: freeze retry report: %v (retry report suppressed)\n", freezeErr)
 	}
 
-	resultErr := reviewResultError(runErr, manifest)
+	resultErr := errors.Join(reviewResultError(runErr, manifest), analysisErr)
 	if resultErr != nil {
 		span.SetStatus(codes.Error, resultErr.Error())
 		span.RecordError(resultErr)
@@ -317,9 +358,9 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	// session delivery failed. Emit it first, then return the independent process
 	// error so JSON consumers retain the complete coverage diagnosis.
 	var emitErr error
-	emitted := manifest != nil || runErr == nil
+	emitted := manifest != nil || runErr == nil || opts.analysis
 	if emitted {
-		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, retryReport)
+		emitErr = emitRunResult(runCtx, resultProvider, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		} else {
@@ -338,9 +379,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		if emitted {
 			failureReport = nil
 		}
-		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
+		emitFailureUsage(resultProvider, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
-			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+			if opts.analysis {
+				fmt.Fprintf(os.Stderr, "[ocr] Review session: %s (--analysis requires a fresh run)\n", id)
+			} else {
+				fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+			}
 		}
 		return errors.Join(resultErr, emitErr)
 	}

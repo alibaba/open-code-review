@@ -134,6 +134,9 @@ func validateReviewOptions(opts *reviewOptions) error {
 		return err
 	}
 	opts.outputFormat = normalizedFormat
+	if err := validateAnalysisOptions(*opts); err != nil {
+		return err
+	}
 	const minMaxTools = 50
 	if opts.maxTools < 0 {
 		return fmt.Errorf("--max-tools must be a non-negative integer (0 means use template default)")
@@ -213,6 +216,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	cmd.Flags().StringVar(&opts.effort, "effort", "", "review effort preset: low | medium | high (\"\" = configured or default medium)")
 	cmd.RegisterFlagCompletionFunc("effort", completeEnum(template.EffortNames()...))
 	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
+	cmd.Flags().BoolVar(&opts.analysis, "analysis", false, "include Behavior, Impact, and maintainer decisions (workspace/range/commit; text/json)")
 	addPreviewFlag(cmd, &opts.preview)
 }
 
