@@ -298,6 +298,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                              |
 | `**/*.c`                                        | `c.md`                                                                |
 | `**/*.{py,pyi,ipynb}`                           | `python.md`——Python 源代码。                                          |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md`——Ruby 源文件、Rake 任务、gemspec、Gemfile 和 Rakefile。 |
 | `**/*.{php,phtml}`                              | `php.md`——PHP 源代码和 PHP 模板。                                     |
 | `**/*.proto`                                    | `protobuf.md`——Protocol Buffers 线协议兼容性。                        |
 | `**/*.po`                                       | `po.md`——gettext 翻译源目录。                                         |

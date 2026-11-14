@@ -310,6 +310,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                         |
 | `**/*.c`                                        | `c.md`                                                                           |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — Python 소스.                                                       |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md` — Ruby 소스, Rake 작업, gemspec, Gemfile, Rakefile. |
 | `**/*.{php,phtml}`                              | `php.md` — PHP 소스와 PHP 템플릿.                                                |
 | `**/*.proto`                                    | `protobuf.md` — Protocol Buffers 통신 호환성.                                    |
 | `**/*.po`                                       | `po.md` — gettext 번역 원본 카탈로그.                                            |
