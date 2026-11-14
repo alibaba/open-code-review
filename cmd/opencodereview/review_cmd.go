@@ -215,11 +215,15 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return fmt.Errorf("prepare code tools: %w", err)
 	}
 	if codeTools.access != nil {
-		mainToolDefs, err = toolsconfig.WithComparisonSides(mainToolDefs)
+		withSides := toolsconfig.WithComparisonSides
+		if codeTools.reader.Mode == tool.ModeWorkspace {
+			withSides = toolsconfig.WithWorkspaceSides
+		}
+		mainToolDefs, err = withSides(mainToolDefs)
 		if err != nil {
 			return err
 		}
-		planToolDefs, err = toolsconfig.WithComparisonSides(planToolDefs)
+		planToolDefs, err = withSides(planToolDefs)
 		if err != nil {
 			return err
 		}
@@ -387,9 +391,6 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 		DiffFrom:   opts.from,
 		DiffTo:     opts.to,
 		DiffCommit: opts.commit,
-	}
-	if current.ReviewMode == session.ReviewModeWorkspace {
-		return nil, fmt.Errorf("resume requires --from/--to or --commit; workspace resume is not supported")
 	}
 	state, err := session.LoadReviewResumeState(repoDir, opts.resume)
 	if err != nil {

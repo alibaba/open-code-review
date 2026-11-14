@@ -114,7 +114,7 @@ ocr r      [flags]   (alias)
 | `--commit <sha>` | `-c` | — | 리뷰할 단일 커밋(부모 커밋과의 diff). |
 | `--preview` | `-p` | `false` | 필터 파이프라인만 돌리고 LLM은 호출하지 않습니다. 파일 목록과 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다(미리 보기에는 내보낼 완료된 지적이 없습니다). |
 | `--no-filter` | — | `false` | 리뷰 코멘트를 모두 남기고 서브태스크 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. 서브태스크는 파일 하나 또는 관련된 파일 묶음을 리뷰합니다. |
-| `--resume <session-id>` | — | — | 호환되는 이전 range 또는 commit 리뷰 세션에서 이어서 실행합니다. |
+| `--resume <session-id>` | — | — | 호환되는 이전 range, commit 또는 워크스페이스 리뷰 세션에서 이어서 실행합니다. |
 | `--format <fmt>` | `-f` | `text` | `text`(사람이 읽는 형식), `json`(기계가 읽는 코멘트 배열), `sarif`(GitHub Code Scanning용 SARIF 2.1.0 리포트). |
 | `--output <path>` | `-o` | stdout | 리뷰 결과를 UTF-8 파일로 씁니다(`-`는 stdout). 첫 쓰기 시점에 파일을 만들므로 실패한 실행은 기존 파일을 건드리지 않습니다. text 형식에서는 ANSI 색 코드를 자동으로 제거합니다. |
 | `--audience <who>` | — | `human` | `human`은 진행 상황을 흘려보냅니다(`--format`이 `json`/`sarif`이면 stderr로 보내 stdout이 파싱 가능한 문서 하나로 유지됩니다). `agent`는 진행 상황을 아예 끄고 최종 요약이나 JSON만 출력합니다. |
@@ -134,7 +134,7 @@ ocr r      [flags]   (alias)
 
 > 모드 플래그는 함께 쓸 수 없습니다. `--from`/`--to`, `--commit`, 아무것도 주지
 > 않기(워크스페이스 모드) 중 하나만 고르세요. 섞어 쓰면 오류로 중단됩니다.
-> `--resume`은 range와 commit 리뷰만 지원하며 `--preview`와 함께 쓸 수 없습니다.
+> `--resume`은 range, commit, 워크스페이스 리뷰를 지원하며 `--preview`와 함께 쓸 수 없습니다.
 
 ### 실행 단위 LLM 선택 {#per-run-llm-selection}
 
@@ -199,7 +199,7 @@ ocr review -c abc123
 `ocr review`는 실행할 때마다 세션 로그를 `~/.opencodereview/sessions/` 아래에
 남깁니다. 텍스트 출력이 정상적으로 끝나면 리뷰 결과에만 집중하도록 세션 ID를 찍지
 않습니다. 저장된 세션을 찾으려면 `ocr session list/show`를 쓰거나, `--format json`으로
-기계가 읽는 출력에 `session_id`를 포함시키세요. range나 commit 리뷰가 중간에 끊겼다면
+기계가 읽는 출력에 `session_id`를 포함시키세요. 리뷰가 중간에 끊겼다면
 저장된 세션을 나열한 뒤 같은 리뷰 대상을 가진 세션에서 이어서 실행합니다:
 
 ```bash
@@ -208,12 +208,18 @@ ocr session show <session-id>
 ocr session comments <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
+ocr review --resume <session-id>   # 워크스페이스(모드 플래그 없음)
 ```
 
 이어서 하기는 의도적으로 엄격합니다. 이어받은 실행이 원래 실행과 똑같은 대상을 리뷰할
 때만 체크포인트를 재사용합니다.
 
-- 워크스페이스 리뷰는 이어서 할 수 없습니다.
+- 워크스페이스 리뷰는 리뷰 대상 워크트리가 그대로일 때만 이어서 할 수 있습니다.
+  기준 commit과 커밋되지 않은 변경이 모두 같아야 합니다. range나 commit 리뷰와 달리
+  고정할 commit이 없으므로, 이어서 실행하는 동안의 편집은 보호되지 않습니다.
+  동일성은 선택·파싱된 diff로 판단하며 워크트리의 바이트 단위 스냅샷이 아닙니다.
+  추적되지 않은 파일의 마지막 개행 추가·제거나 LF/CRLF 줄바꿈 변경만으로는 같은
+  diff로 정규화되어 이어서 할 수 있고, 실질적인 내용 수정은 diff가 달라져 거부됩니다.
 - 리뷰 모드가 같아야 합니다. range 세션을 commit 리뷰로 이어받을 수 없습니다.
 - 해석된 입력이 같아야 합니다. ref를 *어떻게 적었는지*는 따지지 않습니다. `abc1234`와
   `abc1234def`는 같은 커밋을 가리킵니다. 다만 같은 ref가 지금은 다른 diff로
@@ -323,7 +329,7 @@ ocr review --format json | jq .summary   # stdout은 JSON 문서 하나입니다
 | `summary` | 선택. 실행 집계입니다: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens`(omitempty), `cache_write_tokens`(omitempty), `elapsed`. `skipped` 실행에서는 나오지 않습니다. |
 | `comments` | 항상 있으며 비어 있을 수 있습니다. 코멘트별 필드는 위 예시와 같습니다. |
 | `warnings` | 선택. 서브 Agent가 하나 이상 실패했을 때 나오며, 각 항목이 해당 파일과 오류를 설명합니다. |
-| `session_id` | 선택. 세션을 남긴 실행에 나옵니다. 호환되는 range나 commit 리뷰를 다시 시도할 때 `ocr review --resume <session-id>`에 넘기세요. |
+| `session_id` | 선택. 세션을 남긴 실행에 나옵니다. 호환되는 리뷰를 다시 시도할 때 `ocr review --resume <session-id>`에 넘기세요. |
 | `resume` | 선택. 이어서 한 실행에 나오며 `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, `current_model`을 담습니다. |
 
 리뷰 대상 파일이 하나도 없으면 JSON 모드는 대신 `skipped` 응답을 내보냅니다. 호출한

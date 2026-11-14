@@ -91,7 +91,54 @@ func TestComparisonDefinitionErrors(test *testing.T) {
 		}
 	}
 	definition := llm.FunctionDef{Name: "file_read", RawDefinition: json.RawMessage(`{"name":"file_read","parameters":{"properties":{}}}`)}
-	if _, err := comparisonDefinition(definition); err != nil {
+	if _, err := comparisonDefinition(definition, false); err != nil {
 		test.Fatalf("empty properties: %v", err)
+	}
+}
+
+func TestWorkspaceToolDefinitions(test *testing.T) {
+	entries, err := LoadDefault()
+	if err != nil {
+		test.Fatal(err)
+	}
+	base, err := Resolve(entries, []string{"file_read", "file_find", "code_search", "file_read_diff", "task_done"})
+	if err != nil {
+		test.Fatal(err)
+	}
+	before, _ := json.Marshal(base)
+	comparison, err := WithComparisonSides(base)
+	if err != nil {
+		test.Fatal(err)
+	}
+	workspace, err := WithWorkspaceSides(base)
+	if err != nil {
+		test.Fatal(err)
+	}
+	for index, definition := range workspace {
+		if index >= 3 {
+			if !reflect.DeepEqual(definition, base[index]) {
+				test.Fatal("unrelated tool changed")
+			}
+			continue
+		}
+		if !strings.Contains(definition.Function.Description, "live working tree") || !strings.Contains(definition.Function.Description, "HEAD frozen") || !strings.Contains(definition.Function.Description, "not snapshotted") {
+			test.Fatalf("workspace contract missing: %s", definition.Function.Description)
+		}
+		if !reflect.DeepEqual(definition.Function.Parameters, comparison[index].Function.Parameters) {
+			test.Fatal("workspace side parameter differs from comparison side")
+		}
+		var raw llm.FunctionDef
+		if err := json.Unmarshal(definition.Function.RawDefinition, &raw); err != nil || !reflect.DeepEqual(raw.Parameters, definition.Function.Parameters) || raw.Description != definition.Function.Description {
+			test.Fatalf("raw workspace definition disagrees: %v", err)
+		}
+		definition.Function.Parameters["properties"].(map[string]any)["side"] = "mutated"
+	}
+	after, _ := json.Marshal(base)
+	if !bytes.Equal(before, after) {
+		test.Fatal("workspace definitions mutated the base catalog")
+	}
+	again, err := WithComparisonSides(base)
+	if err != nil || !reflect.DeepEqual(again, comparison) {
+		test.Fatal("workspace definitions mutated later comparison definitions")
 	}
 }

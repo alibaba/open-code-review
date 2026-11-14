@@ -53,7 +53,7 @@ if you previously supplied a custom tools file.
 
 ## Comparison sides
 
-Commit and range reviews, including resumed sessions, expose an optional `side` parameter on
+Workspace, commit, and range reviews expose an optional `side` parameter on
 `file_read`, `code_search`, and `file_find`. Omit it, or pass `"new"`, to
 keep the default behavior and output format. Pass `"old"` to read, search,
 or enumerate the previous side of the same comparison:
@@ -69,8 +69,10 @@ or enumerate the previous side of the same comparison:
 | `--from BASE --to HEAD` | Frozen head commit | Merge-base of the frozen endpoints, not the target branch tip |
 | `--commit COMMIT` | Frozen commit | First parent, including for merge commits |
 | Root commit | Frozen commit | Empty tree |
+| Workspace review | Live working tree | HEAD frozen at initialization, not its parent |
+| Workspace before the first commit | Live working tree | Empty tree |
 
-The diff and all three tools share these immutable endpoints. Paths and line
+Commit and range reviews share these immutable endpoints between the diff and all three tools. Paths and line
 numbers belong to the selected side. For renamed files, use the old path on
 the old side; the tools do not translate names or fall back to another version.
 Deleted files remain accessible on the old side. A root commit's old side
@@ -81,19 +83,43 @@ Commits at a shallow boundary must be deepened before review, even if their
 parent objects are already available locally, so Git's diff and old-side
 tools agree on the comparison base.
 
+Workspace reviews freeze only the old side. Their diff and old-side tools use the
+same initial HEAD, even if HEAD moves later. The new side keeps reading the live
+working tree, including untracked files under the existing selection rules; it is
+not an index snapshot or an immutable workspace snapshot. Avoid editing files
+during review when consistent new-side context is required. Workspace review
+does not need HEAD's parent, so a shallow clone with a readable HEAD is supported.
+
+Preview and review use the same workspace comparison logic. Staged changes followed
+by unstaged edits are compared using the working-tree content. An empty diff does
+not fall back to staged changes, and an unborn repository compares the empty tree
+with the working tree rather than reviewing an older staged version. This corrects
+the previous staged fallback behavior. Other Git failures remain errors. Workspace
+resumes reuse completed checkpoints only while HEAD and the review input stay
+unchanged: the selected diff, including the deletion or restoration of tracked
+files, must match the parent run exactly. Completed files are reused and
+unfinished files are retried; incremental reuse after edits and protection
+against edits made while the review runs are out of scope. The comparison is on
+the normalized selected diff, so adding or removing an untracked file's final
+newline, or an LF/CRLF-only line-ending change, still resumes; a substantive
+edit does not.
+
 Old-side results start with `SIDE: old` and `REVISION: <commit-sha>`, or
 `SOURCE: empty-tree` for an empty tree. Old-side errors also identify their
 source. Existing line and match limits apply to both sides. Only the strings
 `"new"` and `"old"` are accepted; null, empty strings, and arbitrary refs are
 invalid.
 
-Workspace reviews and scans retain their existing definitions, prompts, and
-default tool output formats. They do not expose `side` and reject it if supplied.
+Scans retain their existing definitions, prompts, and default tool output formats.
+They do not expose `side` and reject it if supplied. Workspace reviews retain
+default tool output formats and add the optional side parameter.
 The shared `tools.json` catalog remains the source of the current-only
 definitions and does not declare `side`. During setup, comparison reviews use
 `WithComparisonSides` to derive their callable definitions and planning
 references from that catalog, adding `side` and updating the descriptions
-without modifying the base definitions.
+without modifying the base definitions. Workspace reviews use `WithWorkspaceSides`
+to describe their frozen old side and live new side in callable definitions and
+planning references.
 
 Resuming a commit or range review uses the current built-in tools and requires
 the same resolved old and new endpoints, even when the selected patches are
@@ -102,7 +128,10 @@ review. Different ref names that resolve to the same endpoints remain valid.
 If either endpoint changes or an older session lacks enough endpoint information
 to verify the comparison, start a new review instead of resuming. Completed
 files are reused; pending files are reviewed with the current tools. Start a
-new review to recheck every file with the current capabilities.
+new review to recheck every file with the current capabilities. Workspace
+reviews follow the same checkpoint reuse rule, but their identity is HEAD plus
+the review input rather than a commit pair: any input change, including
+deleting or restoring a tracked file, requires a new review.
 
 ## `task_done`
 
@@ -207,7 +236,7 @@ find the spot yourself".
 ## `file_read`
 
 Read a range of lines from a file in its **post-change** form by default.
-Commit and range reviews also support the optional [comparison side](#comparison-sides).
+Workspace, commit, and range reviews also support the optional [comparison side](#comparison-sides).
 
 ### Schema
 

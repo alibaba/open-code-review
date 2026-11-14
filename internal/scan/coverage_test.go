@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -540,6 +542,7 @@ func TestExecuteSubtask_Success(t *testing.T) {
 	tpl.MaxTokens = 100000
 
 	a := NewAgent(Args{
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		Template:         tpl,
 		LLMClient:        client,
 		Model:            "test",
@@ -598,6 +601,7 @@ func TestExecuteSubtask_WithPlan(t *testing.T) {
 	}
 
 	a := NewAgent(Args{
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		Template:         tpl,
 		LLMClient:        client,
 		Model:            "test",
@@ -698,6 +702,7 @@ func TestRun_FullPipeline(t *testing.T) {
 	tpl.MaxTokens = 100000
 
 	a := NewAgent(Args{
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		RepoDir:          repo,
 		Template:         tpl,
 		LLMClient:        client,
@@ -778,6 +783,7 @@ func TestRun_PlanThreshold(t *testing.T) {
 				}}},
 			})
 			agent := NewAgent(Args{
+				MainToolDefs:   []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 				RepoDir:        repo,
 				Template:       *scanTemplate,
 				LLMClient:      client,
@@ -1085,6 +1091,9 @@ func TestDispatchSubtasks_GraceRoundLimitVisibleWithZeroFindings(t *testing.T) {
 			t.Setenv("USERPROFILE", testHome)
 			repoDir := t.TempDir()
 			items := []model.ScanItem{{Path: "a.go", Content: "package a\nfunc f() {}\n", LineCount: 2}}
+			if err := os.WriteFile(filepath.Join(repoDir, items[0].Path), []byte(items[0].Content), 0o600); err != nil {
+				t.Fatal(err)
+			}
 
 			tpl := makeTemplateWithFullScan()
 			tpl.MaxTokens = 100000
@@ -1093,7 +1102,7 @@ func TestDispatchSubtasks_GraceRoundLimitVisibleWithZeroFindings(t *testing.T) {
 			collector := tool.NewCommentCollector()
 			registry := tool.NewRegistry()
 			registry.Register(&tool.CodeCommentProvider{Collector: collector})
-			registry.Register(tool.NewFileReadDiff(tool.DiffMap{}))
+			registry.Register(tool.NewFileRead(&tool.FileReader{RepoDir: repoDir, Mode: tool.ModeWorkspace}))
 			registry.Freeze()
 
 			// Round 1 spends the limit on a read and reports no finding; the
@@ -1103,7 +1112,7 @@ func TestDispatchSubtasks_GraceRoundLimitVisibleWithZeroFindings(t *testing.T) {
 					Choices: []llm.Choice{{
 						Message: llm.ResponseMessage{ToolCalls: []llm.ToolCall{{
 							ID: "read", Type: "function",
-							Function: llm.FunctionCall{Name: "file_read_diff", Arguments: `{"path_array":["a.go"]}`},
+							Function: llm.FunctionCall{Name: "file_read", Arguments: `{"file_path":"a.go"}`},
 						}}},
 					}},
 					Usage: &llm.UsageInfo{PromptTokens: tc.roundOneUsage},
@@ -1117,7 +1126,7 @@ func TestDispatchSubtasks_GraceRoundLimitVisibleWithZeroFindings(t *testing.T) {
 				Model:     "test",
 				Tools:     registry,
 				MainToolDefs: []llm.ToolDef{
-					{Type: "function", Function: llm.FunctionDef{Name: "file_read_diff"}},
+					{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
 					{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
 					{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
 				},
@@ -1134,7 +1143,6 @@ func TestDispatchSubtasks_GraceRoundLimitVisibleWithZeroFindings(t *testing.T) {
 			})
 			a.items = items
 			a.currentDate = "2026-06-26"
-			a.injectScanContentMap()
 
 			comments, err := a.dispatchSubtasks(context.Background())
 			if err != nil {
@@ -1145,6 +1153,12 @@ func TestDispatchSubtasks_GraceRoundLimitVisibleWithZeroFindings(t *testing.T) {
 			}
 			if client.calls != 2 {
 				t.Fatalf("LLM calls = %d, want 2 (1 round + 1 grace)", client.calls)
+			}
+			if calls := a.ToolCalls()[tool.FileRead.Name()]; calls != 1 {
+				t.Fatalf("file_read calls = %d, want 1", calls)
+			}
+			if failures := a.ToolFailures(); len(failures) != 0 {
+				t.Fatalf("unexpected tool failures: %+v", failures)
 			}
 			// The file completed, so the run-level budget flag stays false —
 			// the warning must not redefine budget_exceeded.
@@ -1195,6 +1209,9 @@ func TestDispatchSubtasks_GraceRoundMixedTaskDoneNotCheckpointed(t *testing.T) {
 				t.Setenv("USERPROFILE", testHome)
 				repoDir := t.TempDir()
 				item := model.ScanItem{Path: "a.go", Content: "package a\nfunc f() {}\n", LineCount: 2}
+				if err := os.WriteFile(filepath.Join(repoDir, item.Path), []byte(item.Content), 0o600); err != nil {
+					t.Fatal(err)
+				}
 				tpl := makeTemplateWithFullScan()
 				tpl.MaxTokens = 100000
 				tpl.MaxToolRequestTimes = limit.maxToolRequests
@@ -1202,7 +1219,7 @@ func TestDispatchSubtasks_GraceRoundMixedTaskDoneNotCheckpointed(t *testing.T) {
 				collector := tool.NewCommentCollector()
 				registry := tool.NewRegistry()
 				registry.Register(&tool.CodeCommentProvider{Collector: collector})
-				registry.Register(tool.NewFileReadDiff(tool.DiffMap{}))
+				registry.Register(tool.NewFileRead(&tool.FileReader{RepoDir: repoDir, Mode: tool.ModeWorkspace}))
 				registry.Freeze()
 
 				var calls []llm.ToolCall
@@ -1216,7 +1233,7 @@ func TestDispatchSubtasks_GraceRoundMixedTaskDoneNotCheckpointed(t *testing.T) {
 					{
 						Choices: []llm.Choice{{Message: llm.ResponseMessage{ToolCalls: []llm.ToolCall{{
 							ID: "read", Type: "function",
-							Function: llm.FunctionCall{Name: "file_read_diff", Arguments: `{"path_array":["a.go"]}`},
+							Function: llm.FunctionCall{Name: "file_read", Arguments: `{"file_path":"a.go"}`},
 						}}}}},
 						Usage: &llm.UsageInfo{PromptTokens: 40_000},
 					},
@@ -1228,7 +1245,7 @@ func TestDispatchSubtasks_GraceRoundMixedTaskDoneNotCheckpointed(t *testing.T) {
 					Model:     "test",
 					Tools:     registry,
 					MainToolDefs: []llm.ToolDef{
-						{Type: "function", Function: llm.FunctionDef{Name: "file_read_diff"}},
+						{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
 						{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
 						{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
 					},
@@ -1245,13 +1262,18 @@ func TestDispatchSubtasks_GraceRoundMixedTaskDoneNotCheckpointed(t *testing.T) {
 				})
 				agent.items = []model.ScanItem{item}
 				agent.currentDate = "2026-06-26"
-				agent.injectScanContentMap()
 
 				if _, err := agent.dispatchSubtasks(context.Background()); err == nil || !strings.Contains(err.Error(), "all 1 file scan(s) failed") {
 					t.Errorf("dispatchSubtasks error = %v, want the single file to fail", err)
 				}
 				if client.calls != 2 {
 					t.Errorf("LLM calls = %d, want 2 (1 main + 1 grace)", client.calls)
+				}
+				if calls := agent.ToolCalls()[tool.FileRead.Name()]; calls != 1 {
+					t.Fatalf("file_read calls = %d, want 1", calls)
+				}
+				if failures := agent.ToolFailures(); len(failures) != 0 {
+					t.Fatalf("unexpected tool failures: %+v", failures)
 				}
 				if err := agent.Session().Finalize(); err != nil {
 					t.Fatalf("finalize session: %v", err)
@@ -1400,11 +1422,14 @@ func TestDispatchSubtasks_PersistsDedupedCommentsForResume(t *testing.T) {
 		},
 	}}
 	first := NewAgent(Args{
-		Template:         tpl,
-		LLMClient:        client,
-		Model:            "test-model",
-		Tools:            registry,
-		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}}},
+		Template:  tpl,
+		LLMClient: client,
+		Model:     "test-model",
+		Tools:     registry,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
 		CommentCollector: collector,
 		MaxConcurrency:   1,
 		SkipPlan:         true,
@@ -1442,11 +1467,14 @@ func TestDispatchSubtasks_PersistsDedupedCommentsForResume(t *testing.T) {
 	resumedRegistry.Freeze()
 	resumedClient := &fakeScanClient{}
 	resumed := NewAgent(Args{
-		Template:         tpl,
-		LLMClient:        resumedClient,
-		Model:            "test-model",
-		Tools:            resumedRegistry,
-		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}}},
+		Template:  tpl,
+		LLMClient: resumedClient,
+		Model:     "test-model",
+		Tools:     resumedRegistry,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
 		CommentCollector: resumedCollector,
 		MaxConcurrency:   1,
 		SkipPlan:         true,
@@ -1596,11 +1624,14 @@ func TestDispatchSubtasks_PreservesMixedDedupCheckpointProvenance(t *testing.T) 
 	registry.Register(&tool.CodeCommentProvider{Collector: collector})
 	registry.Freeze()
 	a := NewAgent(Args{
-		Template:         tpl,
-		LLMClient:        client,
-		Model:            "test-model",
-		Tools:            registry,
-		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}}},
+		Template:  tpl,
+		LLMClient: client,
+		Model:     "test-model",
+		Tools:     registry,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
 		CommentCollector: collector,
 		MaxConcurrency:   1,
 		SkipPlan:         true,
@@ -1659,6 +1690,7 @@ func TestDispatchSubtasks_ResumeRerunsChangedContent(t *testing.T) {
 	}
 	client := &fakeScanClient{responses: []*llm.ChatResponse{scanTaskDoneResponse()}}
 	a := NewAgent(Args{
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		Template:         makeTemplateWithFullScan(),
 		LLMClient:        client,
 		Model:            "new-model",
@@ -1721,6 +1753,7 @@ func TestDispatchSubtasks_ResumeMultiBatchAndChained(t *testing.T) {
 	tpl.BatchSize = 2
 	client := &fakeScanClient{responses: []*llm.ChatResponse{scanTaskDoneResponse(), scanTaskDoneResponse()}}
 	a := NewAgent(Args{
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		Template:         tpl,
 		LLMClient:        client,
 		Model:            "new-model",

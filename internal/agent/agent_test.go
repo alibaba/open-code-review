@@ -818,6 +818,55 @@ func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
 	}
 }
 
+func TestApplyResumeWorkspaceReusesCompletedItems(t *testing.T) {
+	diffs := []model.Diff{
+		{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
+		{OldPath: "b.go", NewPath: "b.go", Diff: "+b", Insertions: 1},
+	}
+	fp := reviewItemFingerprint(session.ReviewModeWorkspace, diffs[0])
+	resume := &session.ResumeState{
+		SessionID:  "old-workspace-session",
+		Model:      "openai-model",
+		ReviewMode: session.ReviewModeWorkspace,
+		Items: map[string]session.ResumeItem{
+			fp: {
+				FilePath:    "a.go",
+				OldPath:     "a.go",
+				NewPath:     "a.go",
+				Fingerprint: fp,
+				Comments: []model.LlmComment{{
+					Path:    "a.go",
+					Content: "cached workspace comment",
+				}},
+			},
+		},
+		Manifest: &session.RunManifest{
+			Coverage: session.Coverage{Completed: []session.CoverageItem{{ItemID: fp, Fingerprint: fp}}},
+		},
+	}
+	collector := tool.NewCommentCollector()
+	sess := session.New(t.TempDir(), "feature", "openai-model", session.SessionOptions{
+		ReviewMode:  session.ReviewModeWorkspace,
+		ResumedFrom: "old-workspace-session",
+	})
+	defer sess.Finalize()
+	a := New(Args{
+		ReviewMode:       session.ReviewModeWorkspace,
+		Model:            "openai-model",
+		CommentCollector: collector,
+		Resume:           resume,
+		Session:          sess,
+	})
+
+	toDispatch := a.applyResume(diffs)
+	if len(toDispatch) != 1 || toDispatch[0].NewPath != "b.go" {
+		t.Fatalf("toDispatch = %+v, want only b.go", toDispatch)
+	}
+	if comments := collector.Comments(); len(comments) != 1 || comments[0].Content != "cached workspace comment" {
+		t.Fatalf("comments = %+v", comments)
+	}
+}
+
 // TestAgentGettersNil covers the defensive early returns in the accessor
 // methods when the agent (or its session) was never fully constructed, so
 // callers never advertise a resume target that does not exist.
@@ -1189,6 +1238,7 @@ func TestDispatchSubtasks_IncompleteMainTaskMarksPartialFailure(t *testing.T) {
 		},
 	}}
 	a := New(Args{
+		MainToolDefs:   []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		From:           "main",
 		To:             "feature",
 		LLMClient:      client,
@@ -1262,8 +1312,9 @@ func TestAgent_TokenAccumulation(t *testing.T) {
 	}}
 
 	a := New(Args{
-		LLMClient: client,
-		Model:     "fake",
+		MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
+		LLMClient:    client,
+		Model:        "fake",
 		Template: template.Template{
 			MaxTokens:           100000,
 			MaxToolRequestTimes: 10,

@@ -265,7 +265,8 @@ field — it sits under `summary`, where it reads `0` on this path, while
 `comments` is the top-level `[]`. The same object carries
 `"status": "skipped"`, `"message": "Review skipped: no items were
 selected."`, and a `manifest` whose `terminal_state` is `"skipped"` with
-every `coverage` array empty.
+an empty `coverage.selected`. The files the selection step left out are
+listed in `coverage.excluded`, each with its `exclude_reason`.
 
 A review that examined files and found nothing also returns **a JSON
 object with `comments: []`**: `summary.files_reviewed` counts the files
@@ -278,6 +279,18 @@ manifest-backed review output, use `summary.files_reviewed` or
 `summary` and `manifest` being absent on the manifest-less path described
 below. `review --format json` always writes exactly one JSON object to
 stdout, never a bare array.
+
+`terminal_state: "complete"` means complete over the selected set, not
+that every changed file was reviewed. A file the selection step left out
+(unsupported extension, path rules, built-in secret paths, binary,
+deleted, or over the per-file size limit) is recorded in
+`manifest.coverage.excluded` with the same `exclude_reason` that
+`--preview` reports, and never turns a run `partial`. The list covers
+only files that reached selection. What the diff provider drops earlier
+is not in it: changes under directories it always skips, such as
+`vendor/` or `node_modules/`, untracked files that `.gitignore` ignores,
+and, when reviewing a commit or a range, any change matching
+`.gitignore`.
 
 The manifest-less no-files path is leaner: it omits both `summary` and
 `manifest`, while still reporting `"status": "skipped"`, `"message": "No
