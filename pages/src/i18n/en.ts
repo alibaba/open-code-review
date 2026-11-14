@@ -297,6 +297,7 @@ export const en = {
   'docs.sidebar.delegate': 'Delegation Mode',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.qwenCode': 'Qwen Code',
   'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': 'Contributing',
   'docs.sidebar.faq': 'FAQ',

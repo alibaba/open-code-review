@@ -299,6 +299,7 @@ export const ru: TranslationKeys = {
   'docs.sidebar.delegate': 'Режим делегирования',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.qwenCode': 'Qwen Code',
   'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': 'Участие в разработке',
   'docs.sidebar.faq': 'FAQ',
