@@ -55,7 +55,8 @@ func TestExportSession_SelfContained(t *testing.T) {
 		`<span class="crumb">proj</span>`,       // the repo breadcrumb, de-linked
 		// the shared nav-brand partial, logo included, de-linked
 		`<span class="nav-brand"><span class="brand-icon" aria-hidden="true"><svg`,
-		"sess1", // the session itself rendered
+		"window.ocrArrowScroll", // a11y.js, which export.go prepends ahead of session.js
+		"sess1",                 // the session itself rendered
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("export missing %q", want)
