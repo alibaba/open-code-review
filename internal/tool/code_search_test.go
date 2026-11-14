@@ -371,17 +371,20 @@ func TestGitGrep_InvalidRef_ReturnsError(t *testing.T) {
 }
 
 func TestGitGrep_PerlRegexp_InvalidPattern_ReturnsError(t *testing.T) {
-	dir := setupTestRepo(t)
-	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
-	result, err := p.gitGrep(context.Background(), "(unclosed", false, true, nil)
-	if err == nil {
-		t.Fatal("expected invalid perl regexp to return an error")
-	}
-	if result != "" {
-		t.Errorf("expected empty result for invalid perl regexp, got: %s", result)
-	}
-	if !strings.Contains(err.Error(), "git grep failed") {
-		t.Errorf("expected git grep failure, got: %v", err)
+	// Exercise several distinct PCRE failures to prove the detection keys off
+	// the stable "bad -P pattern" structure rather than one diagnostic string.
+	for _, pattern := range []string{"(unclosed", "a[", "*a", `\x`} {
+		t.Run(pattern, func(t *testing.T) {
+			dir := setupTestRepo(t)
+			p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+			result, err := p.gitGrep(context.Background(), pattern, false, true, nil)
+			if err != nil {
+				t.Fatalf("invalid perl regexp %q must return a model-facing message, not a fatal error: %v", pattern, err)
+			}
+			if !strings.Contains(result, "invalid regular expression") {
+				t.Errorf("expected an invalid-regular-expression message, got: %s", result)
+			}
+		})
 	}
 }
 
