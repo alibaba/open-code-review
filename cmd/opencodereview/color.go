@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -34,7 +35,7 @@ var (
 // `ocr --color=never review` and `ocr review --color=never` are equivalent.
 func addColorFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(&colorMode, "color", colorModeAuto,
-		"when to emit ANSI color: auto (only when stdout is a terminal), always, or never")
+		"when to emit ANSI color: auto (only on terminal streams), always, or never")
 	cmd.RegisterFlagCompletionFunc("color", completeEnum(colorModeAuto, colorModeAlways, colorModeNever))
 }
 
@@ -57,6 +58,10 @@ func validateColorMode(mode string) error {
 //  3. TERM=dumb              → off
 //  4. stdout is a terminal  → on, otherwise off
 func resolveColor() bool {
+	return resolveColorFor(os.Stdout)
+}
+
+func resolveColorFor(writer io.Writer) bool {
 	if colorMode == colorModeNever {
 		return false
 	}
@@ -66,7 +71,8 @@ func resolveColor() bool {
 	if strings.EqualFold(os.Getenv("TERM"), "dumb") {
 		return false
 	}
-	return term.IsTerminal(os.Stdout.Fd())
+	file, ok := writer.(*os.File)
+	return ok && term.IsTerminal(file.Fd())
 }
 
 // colorOn reports whether ANSI color should be emitted.

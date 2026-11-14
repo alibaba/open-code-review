@@ -78,3 +78,19 @@ func TestReviewE2E_JSONAgentStaysSilent(t *testing.T) {
 		t.Fatalf("stdout must be parseable JSON, got error %v for:\n%s", err, out)
 	}
 }
+
+func TestReviewE2E_JSONForcedColorOnlyStylesProgress(test *testing.T) {
+	setColorFlags(test, colorModeAlways)
+	repoDir := retryTestRepo(test)
+	startFakeLLM(test, newFakeLLM())
+	output, progress, err := runReviewWithAudience(test, repoDir, "json", "human")
+	if err != nil {
+		test.Fatalf("review: %v\n%s", err, progress)
+	}
+	if !strings.Contains(progress, "\x1b[2m[ocr]\x1b[0m") {
+		test.Fatalf("progress prefix not styled: %q", progress)
+	}
+	if !json.Valid([]byte(output)) || strings.Contains(output, "\x1b") || strings.Contains(output, "[ocr]") {
+		test.Fatalf("JSON was styled or mixed with progress: %q", output)
+	}
+}

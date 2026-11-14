@@ -14,7 +14,7 @@ var (
 	mu sync.RWMutex
 )
 
-// Writer returns the current stdout writer (real stdout or discard).
+// Writer returns the current progress writer, possibly styled, redirected or discarded.
 func Writer() io.Writer {
 	mu.RLock()
 	defer mu.RUnlock()
