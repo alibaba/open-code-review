@@ -13,6 +13,9 @@ import com.alibaba.opencodereview.idea.model.LogLine
 import com.alibaba.opencodereview.idea.model.currentIdeLocale
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.util.concurrency.AppExecutorUtil
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -27,6 +30,20 @@ class CliException(message: String) : RuntimeException(message)
  * GUI-launched IDEA. All methods here are blocking; callers must run them on a background thread.
  */
 class CliService(private val cliPath: String = "ocr") {
+
+    @Volatile
+    private var resolvedConfigPath: File? = null
+
+    @Synchronized
+    fun configPath(cwd: File): File {
+        resolvedConfigPath?.let { return it }
+        val result = runRaw(listOf("config", "path", "--json"), cwd, {})
+        val path = Json.parseToJsonElement(result).jsonObject["path"]?.jsonPrimitive?.content
+            ?.let(::File)
+        require(path != null && path.isAbsolute) { "The CLI returned an invalid config path" }
+        resolvedConfigPath = path
+        return path
+    }
 
     private companion object {
         const val ENV_CACHE_TTL_MS = 5 * 60 * 1000L
@@ -172,9 +189,13 @@ class CliService(private val cliPath: String = "ocr") {
         cancellation: CliCancellation? = null,
     ): String {
         cancellation?.checkCancelled()
+        val env = buildMap {
+            resolvedConfigPath?.let { put("OCR_HOME", it.parent) }
+            putAll(envExtra)
+        }
         val process = ProcessBuilder(listOf(ShellEnv.resolveBin(cliPath)) + args)
             .directory(cwd)
-            .withShellEnv(*envExtra.toList().toTypedArray())
+            .withShellEnv(*env.toList().toTypedArray())
             .start()
         val stderr = StringBuilder()
         var stderrThread: Thread? = null
@@ -227,6 +248,7 @@ class CliService(private val cliPath: String = "ocr") {
             home?.let {
                 put("HOME", it.absolutePath)
                 put("USERPROFILE", it.absolutePath)
+                put("OCR_HOME", File(it, ".opencodereview").absolutePath)
             }
         }
         val cwd = File(System.getProperty("user.dir"))

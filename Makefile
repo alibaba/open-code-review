@@ -42,12 +42,12 @@ build:
 PACKAGES := $(shell $(GO) list ./... | grep -v /extensions/)
 
 test:
-	LC_ALL=C $(GO) test -v -race -count=1 $(PACKAGES)
+	LC_ALL=C OCR_HOME= $(GO) test -v -race -count=1 $(PACKAGES)
 
 COVERAGE_THRESHOLD := 90
 
 coverage:
-	LC_ALL=C $(GO) test -count=1 -coverprofile=coverage.out $(PACKAGES)
+	LC_ALL=C OCR_HOME= $(GO) test -count=1 -coverprofile=coverage.out $(PACKAGES)
 	$(GO) tool cover -func=coverage.out | grep total:
 	@COVERAGE=$$($(GO) tool cover -func=coverage.out | grep total: | awk '{print $$3}' | sed 's/%//'); \
 	if awk "BEGIN {exit !($$COVERAGE < $(COVERAGE_THRESHOLD))}"; then \
