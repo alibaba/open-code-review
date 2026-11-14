@@ -29,7 +29,7 @@ copilot plugin install alibaba/open-code-review:plugins/open-code-review
 ```
 
 `open-code-review`와 `open-code-review-delegate` 스킬이 설치됩니다. 제거하려면
-`copilot plugin uninstall open-code-review`를 실행하세요.
+`copilot plugin uninstall open-code-review-codex`를 실행하세요.
 
 Copilot CLI의 설치 프로그램은 현재 직접 플러그인 설치(repo/path/URL)가 더 이상
 권장되지 않고 마켓플레이스 설치가 권장된다고 경고합니다. 나중에 마켓플레이스 항목이

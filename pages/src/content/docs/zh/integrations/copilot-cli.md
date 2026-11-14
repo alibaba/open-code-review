@@ -27,7 +27,7 @@ copilot plugin install alibaba/open-code-review:plugins/open-code-review
 ```
 
 这会安装 `open-code-review` 和 `open-code-review-delegate` 两个 skill。用
-`copilot plugin uninstall open-code-review` 卸载。
+`copilot plugin uninstall open-code-review-codex` 卸载。
 
 Copilot CLI 的安装程序目前会警告：直接安装插件（repo/path/URL）已被弃用，建议
 改用 marketplace 安装；将来 marketplace 条目可能让 `plugin@open-code-review`
