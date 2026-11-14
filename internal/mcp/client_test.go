@@ -191,6 +191,35 @@ func TestContentToText_Empty(t *testing.T) {
 	}
 }
 
+func TestContentToText_EmbeddedTextResource(t *testing.T) {
+	contents := []mcp.Content{
+		&mcp.TextContent{Text: "downloaded main.go"},
+		&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{
+			URI:      "repo://owner/name/contents/main.go",
+			MIMEType: "text/plain",
+			Text:     "package main",
+		}},
+	}
+	got := contentToText(contents)
+	want := "downloaded main.go\npackage main"
+	if got != want {
+		t.Errorf("contentToText() = %q, want %q", got, want)
+	}
+}
+
+func TestContentToText_EmbeddedBlobResourceIsUnsupported(t *testing.T) {
+	contents := []mcp.Content{
+		&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{
+			URI:  "repo://owner/name/contents/logo.png",
+			Blob: []byte("data"),
+		}},
+	}
+	got := contentToText(contents)
+	if !strings.Contains(got, "unsupported content type") {
+		t.Errorf("contentToText() = %q, want unsupported placeholder for a binary resource", got)
+	}
+}
+
 func TestContentToText_UnsupportedType(t *testing.T) {
 	contents := []mcp.Content{
 		&mcp.ImageContent{MIMEType: "image/png", Data: []byte("data")},
