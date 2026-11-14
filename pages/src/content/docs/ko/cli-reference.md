@@ -70,6 +70,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr review` | `ocr r` | 코드 리뷰를 실행하고 코멘트를 출력합니다. |
 | `ocr scan` | `ocr s` | Git diff 없이 파일 전체를 스캔합니다. |
 | `ocr rules check <file>` | — | 주어진 파일 경로에 어떤 규칙이 적용되는지, 그 규칙이 어디서 왔는지 보여줍니다. |
+| `ocr config show --format json` | — | 민감한 값을 제외한 모델 설정을 오프라인 JSON으로 조회합니다. |
 | `ocr config set <key> <value>` | — | 설정값을 `~/.opencodereview/config.json`에 저장합니다. |
 | `ocr config unset custom_providers.<name>` | — | 커스텀 프로바이더를 삭제합니다(활성 상태였다면 `provider`/`model`도 함께 지웁니다). |
 | `ocr config provider` | — | 대화형 프로바이더 설정 TUI입니다. |
@@ -565,10 +566,10 @@ Rule:
 
 ## `ocr config` {#ocr-config}
 
-키를 `~/.opencodereview/config.json`에 저장하고 대화형 설정 TUI를 제공합니다. 하위
-명령은 네 가지입니다:
+오프라인 설정 조회, `~/.opencodereview/config.json` 저장, 대화형 설정을 지원합니다.
 
 ```text
+ocr config show --format json
 ocr config set <key> <value>
 ocr config unset <key>                     Clear a saved key
 ocr config provider                        Interactive provider setup
@@ -589,6 +590,15 @@ ocr config model                           Interactive model selection
 
 키 전체 목록과 스키마, 예시는 [설정](../configuration/)을 참고하세요.
 
+### `ocr config show`
+
+`ocr config show --format json`은 민감한 값을 제외한 모델 설정을 오프라인으로 출력합니다. 기본 형식도 JSON입니다. 기존 선택 순서인 OCR 설정 파일, OCR 환경 변수, Claude Code 환경 변수, shell RC의 export 구문을 따릅니다. RC 실행, 설정 쓰기, 자격 증명 명령 실행, OAuth 갱신, 모델 목록 조회 및 원격 측정을 시작하지 않습니다.
+
+선택한 프로바이더의 설정 항목이 있어야 합니다. 항목이 있으면 자격 증명이나 모델이 없어도 조회할 수 있지만, 항목 자체가 없으면 설정 오류를 반환합니다. 불완전한 기존 `llm` 또는 환경 변수 엔드포인트는 다음 설정 출처로 넘어갑니다.
+
+출력 필드는 `provider`, `model`, `protocol`, `source`, `timeout_sec`, `timeout_source`, `credential_status`입니다. `source`는 엔드포인트 설정 출처이며 `OCR_LLM_TIMEOUT`은 제한 시간을 재정의합니다. `timeout_sec: 0`은 클라이언트 기본값입니다. 선택할 설정이 없으면 `source`는 `none`입니다.
+
+자격 증명 상태는 `configured`, `command_not_executed`, `ambient_not_resolved`, `oauth_not_resolved`, `not_configured`이며 인증 성공을 보장하지 않습니다. 온라인 조회가 필요한 ChatGPT 모델은 빈 문자열로 표시합니다. URL, 사용자 지정 헤더, 요청 본문, 자격 증명 값과 명령, MCP 설정은 출력하지 않습니다. 잘못된 설정에는 민감한 값이 없는 일반 오류를 반환합니다.
 
 
 ## `ocr auth` {#ocr-auth}

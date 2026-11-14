@@ -69,6 +69,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr review` | `ocr r` | コードレビューを実行してコメントを出力します。 |
 | `ocr scan` | `ocr s` | Git diff を必要とせず、ファイル全体をスキャンします。 |
 | `ocr rules check <file>` | — | あるファイルパスにどのルールが適用され、その出所はどこかを表示します。 |
+| `ocr config show --format json` | — | 機密情報を除くモデル設定をオフラインで JSON 表示。 |
 | `ocr config set <key> <value>` | — | 設定値を `~/.opencodereview/config.json` に永続化します。 |
 | `ocr config unset <key>` | — | 保存済みの設定値をクリアします（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
 | `ocr config provider` | — | 対話的なプロバイダー設定 TUI。 |
@@ -551,9 +552,10 @@ Rule:
 
 ## `ocr config`
 
-key を `~/.opencodereview/config.json` に永続化し、対話的な設定 TUI を提供します。4 つのサブコマンドがあります:
+オフラインでの設定確認、`~/.opencodereview/config.json` への保存、対話式設定に対応しています。
 
 ```text
+ocr config show --format json
 ocr config set <key> <value>
 ocr config unset <key>                     Clear a saved config value
 ocr config provider                        Interactive provider setup
@@ -567,6 +569,15 @@ ocr config model                           Interactive model selection
 
 key の完全なリファレンス、schema、例は[設定](../configuration/)を参照してください。
 
+### `ocr config show`
+
+`ocr config show --format json` は機密情報を除くモデル設定をオフラインで表示します。既定の形式も JSON です。選択順序は OCR 設定ファイル、OCR 環境変数、Claude Code 環境変数、shell RC の export の順です。RC の実行、設定の書き込み、認証情報の取得、OAuth 更新、モデル一覧の取得、テレメトリの開始は行いません。
+
+選択したプロバイダーの設定エントリーが必要です。エントリーがあれば認証情報やモデルが未設定でも確認できますが、エントリーがなければ設定エラーになります。不完全な旧形式の `llm` や環境変数のエンドポイントは、後続の設定元にフォールバックします。
+
+出力は `provider`、`model`、`protocol`、`source`、`timeout_sec`、`timeout_source`、`credential_status` です。`source` はエンドポイントの設定元を示し、`OCR_LLM_TIMEOUT` がタイムアウトを上書きします。`timeout_sec: 0` はクライアントの既定値です。選択できる設定がなければ `source` は `none` です。
+
+認証情報の状態は `configured`、`command_not_executed`、`ambient_not_resolved`、`oauth_not_resolved`、`not_configured` で、認証の成功を保証しません。オンライン検索が必要な ChatGPT の `model` は空になります。URL、ヘッダー、リクエスト本文、認証情報と取得コマンド、MCP 設定は出力しません。無効な設定のエラーは機密値を含まない一般的なメッセージです。
 
 
 ## `ocr auth`
