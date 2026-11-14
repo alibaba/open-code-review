@@ -377,6 +377,7 @@ With no `--path`, the whole repository is scanned.
 |---|---|---|---|
 | `--path <list>` | - | whole repo | Comma-separated repo-relative directories or files to scan (e.g., `internal/agent`, `internal/llm/client.go`). Selectors resolve against the working tree: the spelled path wins over a case-variant sibling, a differently-cased spelling that the filesystem resolves (Windows, default macOS) still selects the tracked files, and a selector that names no existing path is an error rather than an empty scan. |
 | `--exclude <patterns>` | - | - | Comma-separated gitignore-style patterns to skip (e.g., `**/generated/*,*.pb.go`); merged with `rule.json` excludes. |
+| `--resume <session-id>` | - | - | Resume a previous scan with the same path scope, reusing completed files whose paths, contents, and effective review rules still match. |
 | `--output <path>` | `-o` | stdout | Write scan results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
 | `--preview` | `-p` | `false` | Enumerate and filter files without calling the LLM. Prints the file list, reviewable/excluded counts, total lines, and per-file exclusion reasons. Honors `--format json`; `--format sarif` is not supported. |
 
@@ -388,6 +389,22 @@ ocr scan --exclude '**/generated/*,*.pb.go'
 ```
 
 See `ocr scan -h` for the full flag list.
+
+### Resuming a scan
+
+```bash
+ocr scan --path internal/agent --resume <session-id>
+```
+
+Changing a rule reruns the affected files, even when their contents are unchanged.
+Other completed files remain reusable. Moving or reformatting a rule file, or
+editing a rule that matches no scanned file, does not invalidate checkpoints
+when the effective rules stay the same.
+
+Files with older checkpoints lacking rule-aware fingerprints are reviewed again; the
+original session is not modified. The new session's checkpoints can then be
+reused normally. This check does not cover other prompt settings such as
+`--background`; start a fresh scan when changing those settings.
 
 ## `ocr session`
 

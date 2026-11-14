@@ -55,7 +55,7 @@ func TestRun_PromptOverflowRecordsFailure(t *testing.T) {
 			var resume *session.ResumeState
 			if tc.reuseSmall {
 				item := model.ScanItem{Path: "small.go", Content: "package main\n", LineCount: 1}
-				fingerprint := scanItemFingerprint(item)
+				fingerprint := scanItemFingerprint(item, "")
 				var comments []model.LlmComment
 				if tc.withFinding {
 					comments = []model.LlmComment{{Path: item.Path, Content: "saved finding", StartLine: 1, EndLine: 1}}

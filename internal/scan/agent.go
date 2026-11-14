@@ -6,6 +6,7 @@ package scan
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,16 +108,21 @@ func (a *Agent) summaryEnabled() bool {
 // tool-use loop to reviewtask.Runner and owns only scan-specific concerns
 // (file enumeration, FULL_SCAN_TASK rendering, per-file filtering).
 type Agent struct {
-	args             Args
-	items            []model.ScanItem
-	currentDate      string
-	session          *session.SessionHistory
-	subtaskFailed    int64 // atomic
-	runner           *reviewtask.Runner
-	resumeInfo       *session.ResumeInfo
-	scanFingerprints map[string]string
-	projectSummary   string      // populated post-run by maybeRunProjectSummary
-	budgetExceeded   atomic.Bool // set when the aggregate token budget stops dispatch or an in-flight task
+	args           Args
+	items          []model.ScanItem
+	currentDate    string
+	session        *session.SessionHistory
+	subtaskFailed  int64 // atomic
+	runner         *reviewtask.Runner
+	resumeInfo     *session.ResumeInfo
+	scanInputs     map[string]scanInput
+	projectSummary string      // populated post-run by maybeRunProjectSummary
+	budgetExceeded atomic.Bool // set when the aggregate token budget stops dispatch or an in-flight task
+}
+
+type scanInput struct {
+	fingerprint string
+	rule        string
 }
 
 // ProjectSummary returns the markdown project-level summary produced after
@@ -250,23 +256,39 @@ func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
 }
 
-func (a *Agent) initScanFingerprints(items []model.ScanItem) {
+func (a *Agent) initScanInputs(items []model.ScanItem) {
 	if len(items) == 0 {
 		return
 	}
-	a.scanFingerprints = make(map[string]string, len(items))
+	a.scanInputs = make(map[string]scanInput, len(items))
 	for _, it := range items {
-		a.scanFingerprints[it.Path] = scanItemFingerprint(it)
+		rule := a.scanRule(it.Path)
+		a.scanInputs[it.Path] = scanInput{fingerprint: scanItemFingerprint(it, rule), rule: rule}
 	}
 }
 
 func (a *Agent) scanItemFingerprint(it model.ScanItem) string {
-	if a != nil && a.scanFingerprints != nil {
-		if fingerprint := a.scanFingerprints[it.Path]; fingerprint != "" {
-			return fingerprint
+	if a != nil {
+		if input, ok := a.scanInputs[it.Path]; ok {
+			return input.fingerprint
 		}
 	}
-	return scanItemFingerprint(it)
+	return scanItemFingerprint(it, a.scanRule(it.Path))
+}
+
+func (a *Agent) scanRule(path string) string {
+	if a == nil {
+		return ""
+	}
+	// The prompt must use the rule fingerprinted before checkpoint lookup,
+	// including an empty rule, rather than resolving it again during dispatch.
+	if input, ok := a.scanInputs[path]; ok {
+		return input.rule
+	}
+	if a.args.SystemRule != nil {
+		return a.args.SystemRule.Resolve(path)
+	}
+	return ""
 }
 
 func (a *Agent) initResumeInfo(items []model.ScanItem) {
@@ -300,9 +322,17 @@ func (a *Agent) resumeItem(fingerprint string) (session.ResumeItem, bool) {
 	return a.args.Resume.Item(fingerprint)
 }
 
-func scanItemFingerprint(it model.ScanItem) string {
-	sum := sha256.Sum256([]byte(session.ReviewModeFullScan + "\x00" + it.Path + "\x00" + it.Content))
-	return fmt.Sprintf("%x", sum)
+func scanItemFingerprint(it model.ScanItem, rule string) string {
+	// Domain separation prevents reuse of checkpoints with no rule identity;
+	// length prefixes keep embedded NUL bytes from shifting field boundaries.
+	h := sha256.New()
+	var length [8]byte
+	for _, field := range []string{session.ReviewModeFullScan, "rules-v1", it.Path, it.Content, rule} {
+		binary.BigEndian.PutUint64(length[:], uint64(len(field)))
+		_, _ = h.Write(length[:])
+		_, _ = h.Write([]byte(field))
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func resumedFromSession(resume *session.ResumeState) string {
@@ -548,7 +578,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	atomic.StoreInt64(&a.subtaskFailed, 0)
-	a.initScanFingerprints(a.items)
+	a.initScanInputs(a.items)
 	a.initResumeInfo(a.items)
 
 	strategy := a.resolveBatchStrategy()
@@ -794,10 +824,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 		return false, "", ctx.Err()
 	}
 
-	rule := ""
-	if a.args.SystemRule != nil {
-		rule = a.args.SystemRule.Resolve(it.Path)
-	}
+	rule := a.scanRule(it.Path)
 
 	planGuidance := a.maybeRunPlan(ctx, it, rule)
 
