@@ -95,7 +95,11 @@ by unstaged edits are compared using the working-tree content. An empty diff doe
 not fall back to staged changes, and an unborn repository compares the empty tree
 with the working tree rather than reviewing an older staged version. This corrects
 the previous staged fallback behavior. Other Git failures remain errors. Workspace
-resume is still unsupported.
+resumes reuse completed checkpoints only while HEAD and the review input stay
+unchanged: the selected diff, including the deletion or restoration of tracked
+files, must match the parent run exactly. Completed files are reused and
+unfinished files are retried; incremental reuse after edits and protection
+against edits made while the review runs are out of scope.
 
 Old-side results start with `SIDE: old` and `REVISION: <commit-sha>`, or
 `SOURCE: empty-tree` for an empty tree. Old-side errors also identify their
@@ -121,7 +125,10 @@ review. Different ref names that resolve to the same endpoints remain valid.
 If either endpoint changes or an older session lacks enough endpoint information
 to verify the comparison, start a new review instead of resuming. Completed
 files are reused; pending files are reviewed with the current tools. Start a
-new review to recheck every file with the current capabilities.
+new review to recheck every file with the current capabilities. Workspace
+reviews follow the same checkpoint reuse rule, but their identity is HEAD plus
+the review input rather than a commit pair: any input change, including
+deleting or restoring a tracked file, requires a new review.
 
 ## `task_done`
 
