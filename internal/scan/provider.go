@@ -16,7 +16,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -183,8 +182,8 @@ func (p *Provider) listFiles(ctx context.Context) ([]string, error) {
 
 // isGitRepo reports whether p.repoDir is inside a git working tree.
 func (p *Provider) isGitRepo(ctx context.Context) bool {
-	cmd := exec.CommandContext(ctx, "git", "-C", p.repoDir, "rev-parse", "--git-dir")
-	return cmd.Run() == nil
+	_, err := p.runner.Run(ctx, p.repoDir, "rev-parse", "--git-dir")
+	return err == nil
 }
 
 func (p *Provider) listFilesViaGit(ctx context.Context) ([]string, error) {
@@ -267,18 +266,10 @@ func (p *Provider) listFilesViaWalk(ctx context.Context) ([]string, error) {
 
 func (p *Provider) gitLs(ctx context.Context, args ...string) ([]string, error) {
 	cmdArgs := append([]string{"-c", "core.quotepath=false", "ls-files"}, args...)
-	// Both branches take stdout only, never stdout+stderr combined: with -z,
+	// Output captures stdout only, never stdout+stderr combined: with -z,
 	// git emits NUL-delimited paths on stdout, and a warning written to stderr
 	// would be spliced into the middle of a pathname by the parsing below.
-	var raw []byte
-	var err error
-	if p.runner != nil {
-		raw, err = p.runner.Output(ctx, p.repoDir, cmdArgs...)
-	} else {
-		cmd := exec.CommandContext(ctx, "git", cmdArgs...)
-		cmd.Dir = p.repoDir
-		raw, err = cmd.Output()
-	}
+	raw, err := p.runner.Output(ctx, p.repoDir, cmdArgs...)
 	if err != nil {
 		return nil, err
 	}

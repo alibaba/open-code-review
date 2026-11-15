@@ -35,8 +35,7 @@ func TestProvider_Enumerate_PreservesWhitespaceInTrackedPaths(t *testing.T) {
 	writeFile(t, repo, "plain.go", []byte("package r\n"))
 	gitCommit(t, repo, "init")
 
-	// nil runner and injected runner are separate code paths in gitLs, and
-	// every real `ocr scan` takes the injected one.
+	// Exercise both nil (direct) and pooled runners.
 	for _, runner := range []*gitcmd.Runner{nil, gitcmd.New(2)} {
 		got, err := NewProvider(repo, nil, runner, 0).Enumerate(context.Background())
 		if err != nil {

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -123,17 +122,7 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 	defer cancel()
 
 	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
-	if fr.Runner != nil {
-		output, err := fr.Runner.Output(ctx, fr.RepoDir, args...)
-		if err != nil {
-			return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
-		}
-		return string(output), nil
-	}
-
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = fr.RepoDir
-	output, err := cmd.Output()
+	output, err := fr.Runner.Output(ctx, fr.RepoDir, args...)
 	if err != nil {
 		return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
 	}
@@ -215,39 +204,13 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 	var collected []string
 	var totalLines int
 
-	if fr.Runner != nil {
-		err := fr.Runner.Stream(ctx, fr.RepoDir, func(stdout io.Reader) error {
-			var scanErr error
-			collected, totalLines, scanErr = scanLines(stdout, startLine, maxLines)
-			return scanErr
-		}, args...)
-		if err != nil {
-			return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
-		}
-		return collected, totalLines, nil
-	}
-
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = fr.RepoDir
-	stdoutPipe, err := cmd.StdoutPipe()
+	err := fr.Runner.Stream(ctx, fr.RepoDir, func(stdout io.Reader) error {
+		var scanErr error
+		collected, totalLines, scanErr = scanLines(stdout, startLine, maxLines)
+		return scanErr
+	}, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
-	}
-
-	collected, totalLines, scanErr := scanLines(stdoutPipe, startLine, maxLines)
-	if scanErr != nil {
-		cmd.Process.Kill()
-	}
-	waitErr := cmd.Wait()
-
-	if scanErr != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, scanErr)
-	}
-	if waitErr != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, waitErr)
 	}
 	return collected, totalLines, nil
 }

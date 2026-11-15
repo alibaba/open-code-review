@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -731,13 +730,7 @@ func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
 }
 
 func (p *Provider) runGit(ctx context.Context, args ...string) (string, error) {
-	if p.runner != nil {
-		return p.runner.Run(ctx, p.repoDir, args...)
-	}
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = p.repoDir
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+	return p.runner.Run(ctx, p.repoDir, args...)
 }
 
 // runGitSplit runs git with stdout and stderr kept apart, for the callers that
@@ -753,31 +746,8 @@ func (p *Provider) runGit(ctx context.Context, args ...string) (string, error) {
 //
 // Stderr carries the diagnosis by construction, since die() writes there, so
 // quoting it alone loses nothing a reader wants and cannot carry diff.
-//
-// Mirrors runGitGrep in internal/tool/code_search.go, cancellation guard
-// included: a killed process reports the signal rather than the reason, and
-// the reason is what the caller needs.
 func (p *Provider) runGitSplit(ctx context.Context, args ...string) (string, string, error) {
-	if p.runner != nil {
-		stdout, stderr, err := p.runner.RunSplit(ctx, p.repoDir, args...)
-		if ctx.Err() != nil && err != nil {
-			return "", "", ctx.Err()
-		}
-		return stdout, stderr, err
-	}
-
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = p.repoDir
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if ctx.Err() != nil && err != nil && cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == -1 {
-		return "", "", ctx.Err()
-	}
-	return stdout.String(), stderr.String(), err
+	return p.runner.RunSplit(ctx, p.repoDir, args...)
 }
 
 // gitDiagLimit bounds how much of git's stderr is quoted back in an error.

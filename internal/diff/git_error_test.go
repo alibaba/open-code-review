@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -155,17 +156,75 @@ func TestUntrackedFilesListPropagatesGitFailure(t *testing.T) {
 	}
 }
 
-// shimGit puts a fake `git` at the front of PATH for the duration of the test.
-func shimGit(t *testing.T, body string) {
+// On Windows, cmdBody must use only cmd.exe builtins so TerminateProcess leaves
+// no grandchild holding stdout or stderr pipes open.
+func shimGit(t *testing.T, shBody, cmdBody string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("PATH shim relies on a shebang script")
-	}
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\n"+body), 0o755); err != nil {
-		t.Fatalf("write git shim: %v", err)
+	if runtime.GOOS == "windows" {
+		normalized := strings.ReplaceAll(cmdBody, "\r\n", "\n")
+		normalized = strings.ReplaceAll(normalized, "\n", "\r\n")
+		content := "@echo off\r\n" + normalized
+		if !strings.HasSuffix(content, "\r\n") {
+			content += "\r\n"
+		}
+		if err := os.WriteFile(filepath.Join(dir, "git.cmd"), []byte(content), 0o644); err != nil {
+			t.Fatalf("write git.cmd shim: %v", err)
+		}
+		pathExt := os.Getenv("PATHEXT")
+		hasCmd := false
+		for _, ext := range strings.Split(pathExt, string(os.PathListSeparator)) {
+			if strings.EqualFold(strings.TrimSpace(ext), ".cmd") {
+				hasCmd = true
+				break
+			}
+		}
+		if !hasCmd {
+			if pathExt == "" {
+				t.Setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+			} else {
+				t.Setenv("PATHEXT", pathExt+string(os.PathListSeparator)+".CMD")
+			}
+		}
+	} else {
+		if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\n"+shBody), 0o755); err != nil {
+			t.Fatalf("write git shim: %v", err)
+		}
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	path := os.Getenv("PATH")
+	if path == "" {
+		t.Setenv("PATH", dir)
+	} else {
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+path)
+	}
+}
+
+func waitForMarkerAndCancel(t *testing.T, markerPath string, cancel context.CancelFunc) {
+	t.Helper()
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(2 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if _, err := os.Stat(markerPath); err == nil {
+				cancel()
+				return
+			}
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		close(stop)
+		wg.Wait()
+	})
 }
 
 // TestGetDiff_FailureQuotesStderrNotStdout pins the split that keeps repository
@@ -180,7 +239,10 @@ func TestGetDiff_FailureQuotesStderrNotStdout(t *testing.T) {
 	const secret = "API_KEY=sk-not-a-real-key-do-not-log"
 
 	// Writes plausible diff to stdout, a diagnosis to stderr, and fails.
-	shimGit(t, "echo '+"+secret+"'\necho 'fatal: shim refused' >&2\nexit 128\n")
+	shimGit(t,
+		"echo '+"+secret+"'\necho 'fatal: shim refused' >&2\nexit 128\n",
+		"echo +"+secret+"\r\necho fatal: shim refused>&2\r\nexit /b 128\r\n",
+	)
 
 	repo := t.TempDir()
 	_, err := NewCommitProvider(repo, "HEAD", nil).GetDiff(context.Background())
@@ -205,7 +267,10 @@ func TestGetDiff_CancelledMidWriteReportsCancellation(t *testing.T) {
 
 	// Streams diff to stdout and never exits, so cancellation always lands
 	// inside the write window rather than depending on timing.
-	shimGit(t, "while :; do echo '+"+secret+"'; done\n")
+	shimGit(t,
+		"while :; do echo '+"+secret+"'; done\n",
+		":loop\r\necho +"+secret+"\r\ngoto loop\r\n",
+	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -226,6 +291,35 @@ func TestGetDiff_CancelledMidWriteReportsCancellation(t *testing.T) {
 	// leaving "signal: killed" — the mechanism instead of the reason.
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("error %q does not unwrap to the cancellation", got)
+	}
+}
+
+func TestGetDiff_CanceledMidExecution(t *testing.T) {
+	const secret = "API_KEY=sk-not-a-real-key-do-not-log"
+
+	markerPath := filepath.Join(t.TempDir(), "ready")
+	t.Setenv("OCR_TEST_MARKER", markerPath)
+	shimGit(t,
+		"printf '+%s\\n' '"+secret+"'\nprintf 'secret-stderr-%s\\n' '"+secret+"' >&2\nprintf 'ready\\n' > \"$OCR_TEST_MARKER\"\nwhile :; do :; done\n",
+		"echo +"+secret+"\r\necho secret-stderr-"+secret+">&2\r\necho ready>\"%OCR_TEST_MARKER%\"\r\n:loop\r\ngoto loop\r\n",
+	)
+
+	baseCtx, baseCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer baseCancel()
+	ctx, cancel := context.WithCancel(baseCtx)
+	defer cancel()
+	waitForMarkerAndCancel(t, markerPath, cancel)
+
+	repo := t.TempDir()
+	_, err := NewCommitProvider(repo, "HEAD", nil).GetDiff(ctx)
+	if err == nil {
+		t.Fatal("expected GetDiff to fail on cancellation")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want errors.Is(err, context.Canceled)", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("cancelled command leaked output into the error:\n%s", err)
 	}
 }
 

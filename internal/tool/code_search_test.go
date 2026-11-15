@@ -10,9 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
@@ -748,14 +751,11 @@ func TestGitGrep_Timeout(t *testing.T) {
 	cancel()
 
 	result, err := p.gitGrep(ctx, "Hello", false, false, nil)
-	if err != nil {
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("expected context.Canceled, got: %v", err)
-		}
-		return
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got result=%q, err=%v", result, err)
 	}
-	if !strings.Contains(result, "timed out") && !strings.Contains(result, "No matches found") {
-		t.Errorf("expected timeout or no matches message, got: %s", result)
+	if result != "" {
+		t.Errorf("expected empty result on cancellation, got: %q", result)
 	}
 }
 
@@ -820,4 +820,201 @@ func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	assertContains(t, args, "--no-index")
 	assertContains(t, args, "--exclude-standard")
 	assertNotContains(t, args, "--untracked")
+}
+
+// On Windows, cmdBody must use only cmd.exe builtins so TerminateProcess leaves
+// no grandchild holding stdout or stderr pipes open.
+func shimGit(t *testing.T, shBody, cmdBody string) {
+	t.Helper()
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		normalized := strings.ReplaceAll(cmdBody, "\r\n", "\n")
+		normalized = strings.ReplaceAll(normalized, "\n", "\r\n")
+		content := "@echo off\r\n" + normalized
+		if !strings.HasSuffix(content, "\r\n") {
+			content += "\r\n"
+		}
+		if err := os.WriteFile(filepath.Join(dir, "git.cmd"), []byte(content), 0o644); err != nil {
+			t.Fatalf("write git.cmd shim: %v", err)
+		}
+		pathExt := os.Getenv("PATHEXT")
+		hasCmd := false
+		for _, ext := range strings.Split(pathExt, string(os.PathListSeparator)) {
+			if strings.EqualFold(strings.TrimSpace(ext), ".cmd") {
+				hasCmd = true
+				break
+			}
+		}
+		if !hasCmd {
+			if pathExt == "" {
+				t.Setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+			} else {
+				t.Setenv("PATHEXT", pathExt+string(os.PathListSeparator)+".CMD")
+			}
+		}
+	} else {
+		if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\n"+shBody), 0o755); err != nil {
+			t.Fatalf("write git shim: %v", err)
+		}
+	}
+
+	path := os.Getenv("PATH")
+	if path == "" {
+		t.Setenv("PATH", dir)
+	} else {
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+path)
+	}
+}
+
+func waitForMarkerAndCancel(t *testing.T, markerPath string, cancel context.CancelFunc) {
+	t.Helper()
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(2 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if _, err := os.Stat(markerPath); err == nil {
+				cancel()
+				return
+			}
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		close(stop)
+		wg.Wait()
+	})
+}
+
+func TestCodeSearchProvider_Execute_CancelledMidExecution(t *testing.T) {
+	runners := []struct {
+		name   string
+		runner *gitcmd.Runner
+	}{
+		{name: "nil_runner", runner: nil},
+		{name: "with_runner", runner: gitcmd.New(1)},
+	}
+
+	cases := []struct {
+		name    string
+		wantErr error
+		timeout time.Duration
+	}{
+		{name: "canceled", wantErr: context.Canceled},
+		{name: "deadline_exceeded", wantErr: context.DeadlineExceeded, timeout: 100 * time.Millisecond},
+	}
+
+	for _, rc := range runners {
+		t.Run(rc.name, func(t *testing.T) {
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					repoDir := t.TempDir()
+					var ctx context.Context
+					if errors.Is(tc.wantErr, context.Canceled) {
+						markerPath := filepath.Join(t.TempDir(), "ready")
+						t.Setenv("OCR_TEST_MARKER", markerPath)
+						shimGit(t,
+							"printf 'ready\\n' > \"$OCR_TEST_MARKER\"\nwhile :; do :; done\n",
+							"echo ready>\"%OCR_TEST_MARKER%\"\r\n:loop\r\ngoto loop\r\n",
+						)
+						baseCtx, baseCancel := context.WithTimeout(context.Background(), 10*time.Second)
+						defer baseCancel()
+						var cancel context.CancelFunc
+						ctx, cancel = context.WithCancel(baseCtx)
+						defer cancel()
+						waitForMarkerAndCancel(t, markerPath, cancel)
+					} else {
+						shimGit(t,
+							"while :; do :; done\n",
+							":loop\r\ngoto loop\r\n",
+						)
+						var cancel context.CancelFunc
+						ctx, cancel = context.WithTimeout(context.Background(), tc.timeout)
+						defer cancel()
+					}
+
+					p := NewCodeSearch(&FileReader{
+						RepoDir: repoDir,
+						Mode:    ModeWorkspace,
+						Runner:  rc.runner,
+					})
+					got, err := p.Execute(ctx, map[string]any{"search_text": "Hello"})
+					if !errors.Is(err, tc.wantErr) {
+						t.Errorf("err = %v, want errors.Is(err, %v) (result=%q)", err, tc.wantErr, got)
+					}
+					if errors.Is(tc.wantErr, context.DeadlineExceeded) && (err == nil || !strings.Contains(err.Error(), "timed out")) {
+						t.Errorf("err = %v, want timeout diagnostic", err)
+					}
+					if got != "" {
+						t.Errorf("Execute() = %q, want empty on cancellation/timeout", got)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestCodeSearchProvider_Execute_ExitStatus(t *testing.T) {
+	runners := []struct {
+		name   string
+		runner *gitcmd.Runner
+	}{
+		{name: "nil_runner", runner: nil},
+		{name: "with_runner", runner: gitcmd.New(1)},
+	}
+
+	for _, rc := range runners {
+		t.Run(rc.name, func(t *testing.T) {
+			t.Run("no_matches_exit_1", func(t *testing.T) {
+				shimGit(t,
+					"exit 1\n",
+					"exit /b 1\r\n",
+				)
+				p := NewCodeSearch(&FileReader{
+					RepoDir: t.TempDir(),
+					Mode:    ModeWorkspace,
+					Runner:  rc.runner,
+				})
+				got, err := p.Execute(context.Background(), map[string]any{"search_text": "Hello"})
+				if err != nil {
+					t.Fatalf("unexpected error for exit 1: %v", err)
+				}
+				if got != "No matches found" {
+					t.Errorf("Execute() = %q, want %q", got, "No matches found")
+				}
+			})
+
+			t.Run("grep_error_exit_2", func(t *testing.T) {
+				shimGit(t,
+					"printf 'fatal: bad pattern\\n' >&2\nexit 2\n",
+					"echo fatal: bad pattern>&2\r\nexit /b 2\r\n",
+				)
+				p := NewCodeSearch(&FileReader{
+					RepoDir: t.TempDir(),
+					Mode:    ModeWorkspace,
+					Runner:  rc.runner,
+				})
+				got, err := p.Execute(context.Background(), map[string]any{"search_text": "Hello"})
+				if err == nil {
+					t.Fatal("expected error for exit 2, got nil")
+				}
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					t.Errorf("exit 2 error should not look like cancellation: %v", err)
+				}
+				if !strings.Contains(err.Error(), "git grep failed") || !strings.Contains(err.Error(), "fatal: bad pattern") {
+					t.Errorf("err = %v, want git grep failure with stderr", err)
+				}
+				if got != "" {
+					t.Errorf("Execute() = %q, want empty on error", got)
+				}
+			})
+		})
+	}
 }

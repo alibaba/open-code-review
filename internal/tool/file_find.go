@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"io/fs"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -114,9 +113,6 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 	ctx, cancel := context.WithTimeout(parentCtx, fileFindTimeout)
 	defer cancel()
 
-	var output []byte
-	var err error
-
 	// core.quotepath=false reports non-ASCII paths literally instead of as
 	// quoted octal escapes, which file_find cannot match and file_read cannot open.
 	var args []string
@@ -126,13 +122,7 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 		args = []string{"-c", "core.quotepath=false", "ls-files", "--cached", "--others", "--exclude-standard"}
 	}
 
-	if p.FileReader.Runner != nil {
-		output, err = p.FileReader.Runner.Output(ctx, p.FileReader.RepoDir, args...)
-	} else {
-		cmd := exec.CommandContext(ctx, "git", args...)
-		cmd.Dir = p.FileReader.RepoDir
-		output, err = cmd.Output()
-	}
+	output, err := p.FileReader.Runner.Output(ctx, p.FileReader.RepoDir, args...)
 
 	if err != nil {
 		if ctx.Err() != nil {

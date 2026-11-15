@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -196,15 +195,7 @@ func finalizeDiff(ctx context.Context, d *model.Diff, repoDir string, ref string
 	}
 	if ref != "" {
 		args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", ref + ":" + d.NewPath}
-		var output []byte
-		var err error
-		if runner != nil {
-			output, err = runner.Output(ctx, repoDir, args...)
-		} else {
-			cmd := exec.CommandContext(ctx, "git", args...)
-			cmd.Dir = repoDir
-			output, err = cmd.Output()
-		}
+		output, err := runner.Output(ctx, repoDir, args...)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read file %s at ref %s: %v\n",
 				d.NewPath, ref, err)

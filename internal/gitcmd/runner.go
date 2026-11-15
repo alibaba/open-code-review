@@ -16,6 +16,7 @@ const defaultMaxConcurrent = 16
 // Runner limits the number of concurrent git subprocesses via an internal
 // semaphore. All git command invocations should go through a shared Runner
 // instance so that the total system-wide subprocess count stays bounded.
+// A nil *Runner runs without concurrency limits; a zero-value &Runner{} is invalid.
 type Runner struct {
 	sem chan struct{}
 }
@@ -30,8 +31,14 @@ func New(maxConcurrent int) *Runner {
 }
 
 func (r *Runner) acquire(ctx context.Context) error {
+	if r == nil {
+		return ctx.Err()
+	}
 	if r.sem == nil {
 		return fmt.Errorf("gitcmd.Runner not initialized; use gitcmd.New()")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	select {
 	case r.sem <- struct{}{}:
@@ -41,7 +48,21 @@ func (r *Runner) acquire(ctx context.Context) error {
 	}
 }
 
-func (r *Runner) release() { <-r.sem }
+func (r *Runner) release() {
+	if r == nil {
+		return
+	}
+	<-r.sem
+}
+
+// cancelledErr normalizes command errors under a cancelled context to ctx.Err()
+// because TerminateProcess on Windows exits with status 1 instead of a signal.
+func cancelledErr(ctx context.Context, err error) error {
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return nil
+}
 
 // Run executes a git command and returns the combined stdout+stderr output.
 func (r *Runner) Run(ctx context.Context, repoDir string, args ...string) (string, error) {
@@ -53,6 +74,9 @@ func (r *Runner) Run(ctx context.Context, repoDir string, args ...string) (strin
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoDir
 	out, err := cmd.CombinedOutput()
+	if cErr := cancelledErr(ctx, err); cErr != nil {
+		return "", cErr
+	}
 	return string(out), err
 }
 
@@ -65,7 +89,11 @@ func (r *Runner) Output(ctx context.Context, repoDir string, args ...string) ([]
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoDir
-	return cmd.Output()
+	out, err := cmd.Output()
+	if cErr := cancelledErr(ctx, err); cErr != nil {
+		return nil, cErr
+	}
+	return out, err
 }
 
 // RunSplit executes a git command and returns stdout and stderr separately.
@@ -83,6 +111,9 @@ func (r *Runner) RunSplit(ctx context.Context, repoDir string, args ...string) (
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	if cErr := cancelledErr(ctx, err); cErr != nil {
+		return "", "", cErr
+	}
 	return stdout.String(), stderr.String(), err
 }
 
@@ -99,6 +130,14 @@ func (r *Runner) Stream(ctx context.Context, repoDir string, consume func(stdout
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoDir
 
+	err := streamCommand(cmd, consume)
+	if cErr := cancelledErr(ctx, err); cErr != nil {
+		return cErr
+	}
+	return err
+}
+
+func streamCommand(cmd *exec.Cmd, consume func(stdout io.Reader) error) error {
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 

@@ -5,10 +5,8 @@ package rules
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -122,23 +120,11 @@ func (s *sniffer) showAtRef(path string) string {
 	defer cancel()
 
 	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", s.ref + ":" + path}
-
-	if s.runner != nil {
-		out, err := s.runner.Output(ctx, s.repoDir, args...)
-		if err != nil {
-			return ""
-		}
-		return string(out)
-	}
-
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = s.repoDir
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	out, err := s.runner.Output(ctx, s.repoDir, args...)
+	if err != nil {
 		return ""
 	}
-	return stdout.String()
+	return string(out)
 }
 
 // objcSniffPrefixes are first-line signals for Objective-C. MATLAB comments

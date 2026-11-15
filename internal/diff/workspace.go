@@ -35,19 +35,27 @@ func (provider *Provider) ResolveWorkspaceComparison(ctx context.Context) (Input
 		provider.workspaceBase = &base
 		return base, nil
 	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return InputResolution{}, ctxErr
+	}
 	branch, _, branchErr := provider.runGitSplit(ctx, "symbolic-ref", "--quiet", "HEAD")
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return InputResolution{}, ctxErr
+	}
 	branch = strings.TrimSpace(branch)
 	if branchErr == nil && strings.HasPrefix(branch, "refs/heads/") {
 		_, refStderr, refErr := provider.runGitSplit(ctx, "show-ref", "--verify", "--quiet", "--", branch)
+		// Check ctx.Err() before reading exit code 1 as an unborn branch;
+		// TerminateProcess on Windows also exits child processes with code 1.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return InputResolution{}, ctxErr
+		}
 		var exitErr *exec.ExitError
 		if errors.As(refErr, &exitErr) && exitErr.ExitCode() == 1 && refStderr == "" {
 			base := InputResolution{BaseIsEmpty: true}
 			provider.workspaceBase = &base
 			return base, nil
 		}
-	}
-	if ctx.Err() != nil {
-		return InputResolution{}, ctx.Err()
 	}
 	return InputResolution{}, gitFailure("resolve workspace HEAD", stderr, err)
 }

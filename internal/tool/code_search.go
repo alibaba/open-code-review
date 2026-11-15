@@ -4,7 +4,6 @@
 package tool
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -126,26 +125,7 @@ func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []str
 	ctx, cancel := context.WithTimeout(parentCtx, gitGrepTimeout)
 	defer cancel()
 
-	if p.FileReader.Runner != nil {
-		stdout, stderr, err := p.FileReader.Runner.RunSplit(ctx, p.FileReader.RepoDir, cmdArgs...)
-		if ctx.Err() != nil && err != nil {
-			return "", "", ctx.Err()
-		}
-		return stdout, stderr, err
-	}
-
-	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
-	cmd.Dir = p.FileReader.RepoDir
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if ctx.Err() != nil && err != nil && cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == -1 {
-		return "", "", ctx.Err()
-	}
-	return stdout.String(), stderr.String(), err
+	return p.FileReader.Runner.RunSplit(ctx, p.FileReader.RepoDir, cmdArgs...)
 }
 
 func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, caseSensitive bool, usePerlRegexp bool, pathspec []string) (string, error) {
