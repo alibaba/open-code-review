@@ -12,6 +12,10 @@ const (
 	ExcludeUserRule    ExcludeReason = "user_exclude"
 	ExcludeExtension   ExcludeReason = "unsupported_ext"
 	ExcludeDefaultPath ExcludeReason = "default_path"
+	// ExcludeGenerated is a file whose header marks it as generator output
+	// (for example "Code generated ... DO NOT EDIT."). Like default_path, an
+	// include rule can make the file reviewable again.
+	ExcludeGenerated ExcludeReason = "generated"
 	// ExcludeSecret is a built-in credential path (for example .env or
 	// id_rsa). Like provider_directory and unlike default_path, an include
 	// rule cannot make the file reviewable.
@@ -29,7 +33,7 @@ const (
 // ExcludeNone is not: it marks a file that was selected.
 func (r ExcludeReason) IsExclusion() bool {
 	switch r {
-	case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath, ExcludeSecret,
+	case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath, ExcludeGenerated, ExcludeSecret,
 		ExcludeProviderDirectory, ExcludeDeleted, ExcludeBinary, ExcludeTooLarge:
 		return true
 	default:

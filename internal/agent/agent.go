@@ -2091,6 +2091,8 @@ func (a *Agent) logExclusions(decisions []fileDecision) {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — matches a built-in secret path\n", effectivePath(dec.Diff))
 		case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath:
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", effectivePath(dec.Diff))
+		case ExcludeGenerated:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — header marks it as generated code\n", effectivePath(dec.Diff))
 		default:
 			continue
 		}

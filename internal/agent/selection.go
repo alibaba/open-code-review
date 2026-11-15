@@ -63,10 +63,11 @@ func (a *Agent) selectFiles(diffs []model.Diff) []fileDecision {
 }
 
 // whyExcluded applies the static gates — binary, the built-in secret paths,
-// user exclude/include, then the extension allowlist and default-path patterns
-// — and returns the specific reason a file is excluded, or ExcludeNone when it
-// survives all of them. It answers only what the path and the diff header say;
-// the size gate lives in selectFiles because it needs the resolved token limit.
+// user exclude/include, the extension allowlist, default-path patterns, then
+// the generated-code header — and returns the specific reason a file is
+// excluded, or ExcludeNone when it survives all of them. It answers only what
+// the path, the diff header and the already-loaded new file content say; the
+// size gate lives in selectFiles because it needs the resolved token limit.
 func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 	if d.IsBinary {
 		return ExcludeBinary
@@ -96,6 +97,10 @@ func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 
 	if allowedext.IsExcludedPath(path) {
 		return ExcludeDefaultPath
+	}
+
+	if allowedext.IsGeneratedContent(d.NewFileContent) {
+		return ExcludeGenerated
 	}
 
 	return ExcludeNone
