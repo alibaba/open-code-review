@@ -1241,3 +1241,191 @@ func withUsage(resp *llm.ChatResponse, prompt int64) *llm.ChatResponse {
 	resp.Usage = &llm.UsageInfo{PromptTokens: prompt, CompletionTokens: 0, TotalTokens: prompt}
 	return resp
 }
+
+func TestRunMainTask_ProseWithTaskDone(t *testing.T) {
+	strPtr := func(s string) *string { return &s }
+	codeCommentArgs := `{"comments":[{"path":"main.go","line_number":1,"severity":"bug","title":"Bug","content":"race condition","existing_code":"x"}]}`
+	toolDefs := []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+	}
+	commentResp := func(callID, args string) *llm.ChatResponse {
+		content := ""
+		return &llm.ChatResponse{
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{
+					Content: &content,
+					ToolCalls: []llm.ToolCall{{
+						ID:   callID,
+						Type: "function",
+						Function: llm.FunctionCall{
+							Name:      "code_comment",
+							Arguments: args,
+						},
+					}},
+				},
+			}},
+			Model: "fake",
+			Usage: &llm.UsageInfo{PromptTokens: 20, CompletionTokens: 10},
+		}
+	}
+	newCommentDeps := func(client llm.LLMClient) Deps {
+		deps := newTestDeps(client)
+		deps.Tools.Register(&tool.CodeCommentProvider{Collector: deps.CommentCollector})
+		deps.Session = session.New(t.TempDir(), "main", "fake", session.SessionOptions{})
+		deps.MainToolDefs = toolDefs
+		return deps
+	}
+
+	t.Run("nudges once and saves findings when model calls code_comment next", func(t *testing.T) {
+		prose := "# Review\n\n## Critical - race condition in cache map"
+		proseDone := taskDoneResponseWithArguments(`{"state":"DONE"}`)
+		proseDone.Choices[0].Message.Content = &prose
+
+		client := &fakeClient{responses: []*llm.ChatResponse{
+			proseDone,
+			commentResp("call_cc", codeCommentArgs),
+			taskDoneResponse(),
+		}}
+		deps := newCommentDeps(client)
+		runner := NewRunner(deps)
+
+		completed, stop, err := runner.RunMainTask(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "main.go")
+		if err != nil || !completed || stop != StopNone {
+			t.Fatalf("RunMainTask = (%v, %v, %v), want (true, StopNone, nil)", completed, stop, err)
+		}
+		if len(client.requests) != 3 {
+			t.Fatalf("LLM calls = %d, want 3 (initial + code_comment + task_done)", len(client.requests))
+		}
+		if got := len(deps.CommentCollector.Comments()); got != 1 {
+			t.Fatalf("comments = %d, want 1", got)
+		}
+		if ws := runner.Warnings(); len(ws) != 0 {
+			t.Fatalf("warnings = %+v, want none when findings were filed", ws)
+		}
+	})
+
+	t.Run("no warning when model confirms no issues cleanly after nudge", func(t *testing.T) {
+		prose := "No issues found."
+		proseDone := taskDoneResponseWithArguments(`{"state":"DONE"}`)
+		proseDone.Choices[0].Message.Content = &prose
+
+		client := &fakeClient{responses: []*llm.ChatResponse{
+			proseDone,
+			taskDoneResponse(),
+		}}
+		deps := newCommentDeps(client)
+		runner := NewRunner(deps)
+
+		completed, stop, err := runner.RunMainTask(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "main.go")
+		if err != nil || !completed || stop != StopNone {
+			t.Fatalf("RunMainTask = (%v, %v, %v)", completed, stop, err)
+		}
+		if len(client.requests) != 2 {
+			t.Fatalf("LLM calls = %d, want 2", len(client.requests))
+		}
+		if got := len(deps.CommentCollector.Comments()); got != 0 {
+			t.Fatalf("comments = %d, want 0", got)
+		}
+		if ws := runner.Warnings(); len(ws) != 0 {
+			t.Fatalf("warnings = %+v, want none", ws)
+		}
+	})
+
+	t.Run("bounded to one nudge and records warning when model repeats prose without filing", func(t *testing.T) {
+		prose := "## Bug - dropped finding"
+		first := taskDoneResponseWithArguments(`{"state":"DONE"}`)
+		first.Choices[0].Message.Content = strPtr(prose)
+		second := taskDoneResponseWithArguments(`{"state":"DONE"}`)
+		second.Choices[0].Message.Content = strPtr(prose)
+
+		client := &fakeClient{responses: []*llm.ChatResponse{first, second}}
+		deps := newCommentDeps(client)
+		runner := NewRunner(deps)
+
+		completed, stop, err := runner.RunMainTask(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "main.go")
+		if err != nil || !completed || stop != StopNone {
+			t.Fatalf("RunMainTask = (%v, %v, %v)", completed, stop, err)
+		}
+		if len(client.requests) != 2 {
+			t.Fatalf("LLM calls = %d, want 2", len(client.requests))
+		}
+		ws := runner.Warnings()
+		if len(ws) != 1 || ws[0].Type != "task_done_with_unfiled_text" || ws[0].File != "main.go" {
+			t.Fatalf("warnings = %+v, want 1 task_done_with_unfiled_text warning for main.go", ws)
+		}
+	})
+
+	t.Run("does not nudge when code_comment already succeeded in same task", func(t *testing.T) {
+		summary := "Submitted finding above."
+		done := taskDoneResponseWithArguments(`{"state":"DONE"}`)
+		done.Choices[0].Message.Content = &summary
+
+		client := &fakeClient{responses: []*llm.ChatResponse{
+			commentResp("call_cc", codeCommentArgs),
+			done,
+		}}
+		deps := newCommentDeps(client)
+		runner := NewRunner(deps)
+
+		completed, stop, err := runner.RunMainTask(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "main.go")
+		if err != nil || !completed || stop != StopNone {
+			t.Fatalf("RunMainTask = (%v, %v, %v)", completed, stop, err)
+		}
+		if len(client.requests) != 2 {
+			t.Fatalf("LLM calls = %d, want 2 (no extra nudge)", len(client.requests))
+		}
+		if ws := runner.Warnings(); len(ws) != 0 {
+			t.Fatalf("warnings = %+v, want none", ws)
+		}
+	})
+
+	t.Run("does not nudge when task_done has only whitespace content", func(t *testing.T) {
+		done := taskDoneResponseWithArguments(`{"state":"DONE"}`)
+		done.Choices[0].Message.Content = strPtr(" \n\t ")
+
+		client := &fakeClient{responses: []*llm.ChatResponse{done}}
+		deps := newCommentDeps(client)
+		runner := NewRunner(deps)
+
+		completed, stop, err := runner.RunMainTask(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "main.go")
+		if err != nil || !completed || stop != StopNone {
+			t.Fatalf("RunMainTask = (%v, %v, %v)", completed, stop, err)
+		}
+		if len(client.requests) != 1 {
+			t.Fatalf("LLM calls = %d, want 1", len(client.requests))
+		}
+		if ws := runner.Warnings(); len(ws) != 0 {
+			t.Fatalf("warnings = %+v, want none", ws)
+		}
+	})
+
+	t.Run("records warning if grace round ends with unfiled visible text", func(t *testing.T) {
+		prose := "## Bug - only reported in text"
+		graceDone := taskDoneResponseWithArguments(`{"state":"DONE"}`)
+		graceDone.Choices[0].Message.Content = &prose
+
+		client := &fakeClient{responses: []*llm.ChatResponse{
+			fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+			graceDone,
+		}}
+		deps := newCommentDeps(client)
+		deps.Template.MaxToolRequestTimes = 1
+		deps.MainToolDefs = append([]llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "file_read"}}}, toolDefs...)
+		runner := NewRunner(deps)
+
+		completed, stop, err := runner.RunMainTask(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "main.go")
+		if err != nil || !completed || stop != StopMaxRounds {
+			t.Fatalf("RunMainTask = (%v, %v, %v)", completed, stop, err)
+		}
+		found := false
+		for _, w := range runner.Warnings() {
+			if w.Type == "task_done_with_unfiled_text" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected task_done_with_unfiled_text warning from grace round, got %+v", runner.Warnings())
+		}
+	})
+}

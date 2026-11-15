@@ -348,3 +348,73 @@ func TestTaskMainCannotUseGraceOnlyTool(t *testing.T) {
 		t.Fatalf("Run=%+v, err=%v, executions=%d, requests=%d", result, err, executions, requests)
 	}
 }
+
+func TestTaskUnfiledCompletionNudgeAndWarning(t *testing.T) {
+	t.Run("prompts once with UnfiledCompletionMessage and clears after RecordedSubmission", func(t *testing.T) {
+		task := testTask()
+		task.UnfiledCompletionMessage = "Submit findings first, then complete."
+		task.UnfiledCompletionWarning = "unfiled_completion"
+		task.ExecuteTool = func(_ context.Context, _ string, call llm.ToolCall, _ *session.TaskRecord, _ string) ToolOutcome {
+			switch call.Function.Name {
+			case "read_test_data":
+				return ToolOutcome{Content: "filed", RecordedSubmission: true}
+			case "submit_test_result":
+				return ToolOutcome{Content: "done", Action: Complete}
+			}
+			return ToolOutcome{}
+		}
+
+		requests := 0
+		sawNudge := false
+		client := taskClient(func(_ context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
+			requests++
+			switch requests {
+			case 1:
+				prose := "Found a bug in line 4"
+				r := testTaskResponse("submit_test_result", `{}`)
+				r.Choices[0].Message.Content = &prose
+				return r, nil
+			case 2:
+				if request.Messages[len(request.Messages)-1].ExtractText() == task.UnfiledCompletionMessage {
+					sawNudge = true
+				}
+				return testTaskResponse("read_test_data", `{}`), nil
+			default:
+				return testTaskResponse("submit_test_result", `{}`), nil
+			}
+		})
+
+		runner := NewRunner(Deps{LLMClient: client, Session: session.New(t.TempDir(), "main", "fake", session.SessionOptions{})}, task)
+		result, err := runner.Run(context.Background(), taskMessages(), "data")
+		if err != nil || !result.Completed || result.StopReason != StopNone {
+			t.Fatalf("Run = %+v, %v", result, err)
+		}
+		if !sawNudge || requests != 3 {
+			t.Fatalf("sawNudge=%v requests=%d, want true and 3", sawNudge, requests)
+		}
+		if ws := runner.Warnings(); len(ws) != 0 {
+			t.Fatalf("warnings = %+v, want none", ws)
+		}
+	})
+
+	t.Run("disabled when UnfiledCompletionMessage and UnfiledCompletionWarning are empty", func(t *testing.T) {
+		task := testTask()
+		requests := 0
+		client := taskClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
+			requests++
+			prose := "42"
+			r := testTaskResponse("submit_test_result", `{"value":42}`)
+			r.Choices[0].Message.Content = &prose
+			return r, nil
+		})
+
+		runner := NewRunner(Deps{LLMClient: client, Session: session.New(t.TempDir(), "main", "fake", session.SessionOptions{})}, task)
+		result, err := runner.Run(context.Background(), taskMessages(), "data")
+		if err != nil || !result.Completed || requests != 1 {
+			t.Fatalf("Run = %+v, %v; requests = %d", result, err, requests)
+		}
+		if ws := runner.Warnings(); len(ws) != 0 {
+			t.Fatalf("warnings = %+v, want none", ws)
+		}
+	})
+}
