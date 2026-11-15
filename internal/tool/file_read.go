@@ -6,6 +6,7 @@ package tool
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -24,6 +25,9 @@ func numericToolArg(args map[string]any, name string) (float64, bool, error) {
 	}
 	switch v := value.(type) {
 	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, false, fmt.Errorf("%s must be a finite number, got %v", name, v)
+		}
 		return v, true, nil
 	case string:
 		trimmed := strings.TrimSpace(v)
@@ -31,8 +35,8 @@ func numericToolArg(args map[string]any, name string) (float64, bool, error) {
 			return 0, false, nil
 		}
 		parsed, parseErr := strconv.ParseFloat(trimmed, 64)
-		if parseErr != nil {
-			return 0, false, fmt.Errorf("%s must be a number, got %q", name, v)
+		if parseErr != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+			return 0, false, fmt.Errorf("%s must be a finite number, got %q", name, v)
 		}
 		return parsed, true, nil
 	default:

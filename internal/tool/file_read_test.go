@@ -508,7 +508,7 @@ func TestFileRead_NonNumericLineArgIsAnError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for a non-numeric start_line")
 	}
-	if !strings.Contains(err.Error(), `start_line must be a number, got "abc"`) {
+	if !strings.Contains(err.Error(), `start_line must be a finite number, got "abc"`) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
@@ -520,6 +520,36 @@ func TestFileRead_NonNumericLineArgIsAnError(t *testing.T) {
 		t.Fatal("expected an error for a bool end_line")
 	}
 	if !strings.Contains(err.Error(), "end_line must be a number, got bool") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestFileRead_NonFiniteLineArgIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "plain.txt", "a\nb\nc\n")
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	_, err := p.Execute(context.Background(), map[string]any{
+		"file_path": "plain.txt",
+		"end_line":  "NaN",
+	})
+	if err == nil {
+		t.Fatal("expected an error for a NaN end_line")
+	}
+	if !strings.Contains(err.Error(), `end_line must be a finite number, got "NaN"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	_, err = p.Execute(context.Background(), map[string]any{
+		"file_path":  "plain.txt",
+		"start_line": "Inf",
+	})
+	if err == nil {
+		t.Fatal("expected an error for an Inf start_line")
+	}
+	if !strings.Contains(err.Error(), `start_line must be a finite number, got "Inf"`) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
