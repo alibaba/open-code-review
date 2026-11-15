@@ -5,6 +5,7 @@ package agent
 
 import (
 	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -99,14 +100,29 @@ func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 		return ExcludeDefaultPath
 	}
 
-	// A new file has no earlier version to vouch for its marker; an existing
-	// one must have carried it already, or a change could hide any file from
-	// review by prepending a marker.
-	if allowedext.IsGeneratedContent(d.NewFileContent) && (d.IsNew || !allowedext.AddsGeneratedMarker(d.Diff)) {
+	if isGenerated(d) {
 		return ExcludeGenerated
 	}
 
 	return ExcludeNone
+}
+
+// isGenerated reports whether a changed file opens with a generated-code
+// header both before and after the change. The header is content the change
+// author controls, so it only counts when the earlier version vouches for it:
+// that version is rebuilt from the diff, which keeps a change from hiding a
+// hand-written file by prepending a marker or by moving its code below an
+// existing one. A new or renamed file is always reviewed: it has no earlier
+// version at this path to vouch for it, and a Go file's init() runs without
+// any reviewed file calling it. So is a file whose diff does not fit its new
+// content.
+func isGenerated(d model.Diff) bool {
+	path := effectivePath(d)
+	if d.IsNew || d.IsRenamed || !allowedext.IsGeneratedFile(path, d.NewFileContent) {
+		return false
+	}
+	old, ok := diff.OldContent(d.NewFileContent, d.Diff)
+	return ok && allowedext.IsGeneratedFile(path, old)
 }
 
 // selectionCounts is the run-level rollup of one selection pass.

@@ -520,7 +520,7 @@ func (a *Agent) whyExcluded(it model.ScanItem) model.ExcludeReason {
 	if allowedext.IsExcludedPath(path) {
 		return model.ExcludeDefaultPath
 	}
-	if allowedext.IsGeneratedContent(it.Content) {
+	if allowedext.IsGeneratedFile(path, it.Content) {
 		return model.ExcludeGenerated
 	}
 	return model.ExcludeNone
