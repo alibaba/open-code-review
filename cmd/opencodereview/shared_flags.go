@@ -119,15 +119,15 @@ func validateOutputFormat(format string) (string, error) {
 	}
 }
 
-func validateReviewOptions(opts *reviewOptions) error {
-	// Review-only shorthand: --from without an explicit target compares the
-	// merge-base with HEAD, exactly like --to HEAD. Normalize before validation
-	// so the downstream range path is identical. This is deliberately scoped to
-	// review options: `ocr delegate` keeps requiring --to explicitly, and plain
-	// `ocr review` keeps its empty target (workspace mode).
-	if opts.from != "" && opts.to == "" && opts.commit == "" {
-		opts.to = "HEAD"
+func normalizeDiffTarget(from, to, commit string) string {
+	if from != "" && to == "" && commit == "" {
+		return "HEAD"
 	}
+	return to
+}
+
+func validateReviewOptions(opts *reviewOptions) error {
+	opts.to = normalizeDiffTarget(opts.from, opts.to, opts.commit)
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
@@ -195,6 +195,7 @@ func validateScanOptions(opts *scanOptions) error {
 }
 
 func validateDelegateOptions(opts *delegateOptions) error {
+	opts.to = normalizeDiffTarget(opts.from, opts.to, opts.commit)
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}

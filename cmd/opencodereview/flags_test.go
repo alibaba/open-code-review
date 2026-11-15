@@ -177,12 +177,43 @@ func TestParseReviewFlags_FromWithCommitStillConflicts(t *testing.T) {
 	}
 }
 
-// The --from shorthand is a review-only convenience. Delegate keeps requiring an
-// explicit --to so its machine-readable output stays unambiguous.
-func TestDelegateStillRequiresToWithFrom(t *testing.T) {
-	err := validateDelegateOptions(&delegateOptions{from: "main", format: "json"})
-	if err == nil || !strings.Contains(err.Error(), "--to is required when --from is specified") {
-		t.Fatalf("delegate must keep requiring --to, got %v", err)
+func TestDelegateDiffModes(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantTo  string
+		wantErr string
+	}{
+		{name: "workspace"},
+		{name: "default target", args: []string{"--from", "main"}, wantTo: "HEAD"},
+		{name: "explicit target", args: []string{"--from", "main", "--to", "feature"}, wantTo: "feature"},
+		{name: "commit", args: []string{"--commit", "abc123"}},
+		{name: "missing base", args: []string{"--to", "HEAD"}, wantErr: "--from is required when --to is specified"},
+		{name: "conflicting shorthand", args: []string{"--from", "main", "--commit", "abc123"}, wantErr: "only one review mode allowed"},
+		{name: "conflicting range", args: []string{"--from", "main", "--to", "HEAD", "--commit", "abc123"}, wantErr: "only one review mode allowed"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var opts delegateOptions
+			cmd := &cobra.Command{Use: "delegate"}
+			registerDelegateFlags(cmd, &opts)
+			if err := cmd.ParseFlags(test.args); err != nil {
+				t.Fatal(err)
+			}
+			err := validateDelegateOptions(&opts)
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("error = %v, want %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if opts.to != test.wantTo {
+				t.Fatalf("to = %q, want %q", opts.to, test.wantTo)
+			}
+		})
 	}
 }
 
