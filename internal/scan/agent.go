@@ -467,6 +467,8 @@ func (a *Agent) logSelection(decisions []scanSelection) {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", decision.item.Path)
 		} else if decision.reason == model.ExcludeSecret {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — matches a built-in secret path\n", decision.item.Path)
+		} else if decision.reason == model.ExcludeGenerated {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — header marks it as generated code\n", decision.item.Path)
 		} else {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", decision.item.Path)
 		}
@@ -516,6 +518,9 @@ func (a *Agent) whyExcluded(it model.ScanItem) model.ExcludeReason {
 	}
 	if allowedext.IsExcludedPath(path) {
 		return model.ExcludeDefaultPath
+	}
+	if allowedext.IsGeneratedContent(it.Content) {
+		return model.ExcludeGenerated
 	}
 	return model.ExcludeNone
 }
