@@ -222,6 +222,20 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
 工具调用——选型前请先看 FAQ 中的
 ["No tool calls parsed"（本地模型 / Ollama）](../faq/#no-tool-calls-parsed-本地模型-ollama)。
 
+第三方 OpenAI 兼容网关也用同一套写法。例如
+[DemonRoute](https://demonroute.com) 可作为自定义 provider，指向其 `/v1`
+端点：
+
+```bash
+ocr config set provider                                 demonroute
+ocr config set custom_providers.demonroute.url          https://api.demonroute.com/v1
+ocr config set custom_providers.demonroute.protocol     openai
+ocr config set custom_providers.demonroute.model        <model-id>
+ocr config set custom_providers.demonroute.api_key      "$DEMONROUTE_API_KEY"
+```
+
+将 `<model-id>` 换成该网关目录中的模型，然后运行 `ocr llm test` 验证连通性。
+
 ### 超时
 
 任务超时和单次请求超时相互独立：

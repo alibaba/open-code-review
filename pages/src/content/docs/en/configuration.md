@@ -240,6 +240,21 @@ calling — see
 ["No tool calls parsed" (local models / Ollama)](../faq/#no-tool-calls-parsed-local-models-ollama)
 in the FAQ before picking one.
 
+Third-party OpenAI-compatible gateways use the same pattern. For example,
+[DemonRoute](https://demonroute.com) works as a custom provider at its
+`/v1` endpoint:
+
+```bash
+ocr config set provider                                 demonroute
+ocr config set custom_providers.demonroute.url          https://api.demonroute.com/v1
+ocr config set custom_providers.demonroute.protocol     openai
+ocr config set custom_providers.demonroute.model        <model-id>
+ocr config set custom_providers.demonroute.api_key      "$DEMONROUTE_API_KEY"
+```
+
+Replace `<model-id>` with a model from the gateway's catalog, then run
+`ocr llm test` to verify connectivity.
+
 ### Timeouts
 
 Task and request timeouts are independent:
