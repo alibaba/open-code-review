@@ -21,6 +21,10 @@ import (
 )
 
 const Issuer = "https://auth.openai.com"
+
+// Tolerance for claims compared against the local clock; Windows machines with
+// RTC drift commonly miss tighter windows.
+const idTokenClockSkew = 5
 const Resource = "https://api.openai.com/v1"
 const DynamicClient = "dynamic_agent_client"
 const Scope = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"

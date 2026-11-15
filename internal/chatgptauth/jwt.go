@@ -151,8 +151,25 @@ func (c *Client) verifyAt(ctx context.Context, token, clientID, nonce string, re
 		// connection. Verify its lifetime at receipt, not after a network outage.
 		now = receivedAt.Unix()
 	}
-	if claims.Issuer != Issuer || claims.Subject == "" || !found || claims.Expires <= now || claims.Issued <= 0 || claims.Issued > now+5 || claims.NotBefore > now+5 || (claims.AuthorizedParty != "" && claims.AuthorizedParty != clientID) || (len(audiences) > 1 && claims.AuthorizedParty != clientID) {
-		return claims, invalidIDTokenError("ID-token issuer, audience, subject or lifetime did not match")
+	switch {
+	case claims.Issuer != Issuer:
+		return claims, invalidIDTokenError("ID-token issuer did not match")
+	case claims.Subject == "":
+		return claims, invalidIDTokenError("ID-token subject is empty")
+	case !found:
+		return claims, invalidIDTokenError("ID-token audience did not contain the issued client ID")
+	case claims.Expires <= now:
+		return claims, invalidIDTokenError("ID-token has expired")
+	case claims.Issued <= 0:
+		return claims, invalidIDTokenError("ID-token issued-at is missing")
+	case claims.Issued > now+idTokenClockSkew:
+		return claims, invalidIDTokenError("ID-token issued-at is in the future (is the local clock off?)")
+	case claims.NotBefore > now+idTokenClockSkew:
+		return claims, invalidIDTokenError("ID-token not-before is in the future (is the local clock off?)")
+	case claims.AuthorizedParty != "" && claims.AuthorizedParty != clientID:
+		return claims, invalidIDTokenError("ID-token authorized party did not match")
+	case len(audiences) > 1 && claims.AuthorizedParty != clientID:
+		return claims, invalidIDTokenError("ID-token has multiple audiences but no matching authorized party")
 	}
 	if nonce != "" && claims.Nonce != nonce {
 		return claims, invalidIDTokenError("ID-token nonce did not match")
