@@ -99,7 +99,10 @@ func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 		return ExcludeDefaultPath
 	}
 
-	if allowedext.IsGeneratedContent(d.NewFileContent) {
+	// A new file has no earlier version to vouch for its marker; an existing
+	// one must have carried it already, or a change could hide any file from
+	// review by prepending a marker.
+	if allowedext.IsGeneratedContent(d.NewFileContent) && (d.IsNew || !allowedext.AddsGeneratedMarker(d.Diff)) {
 		return ExcludeGenerated
 	}
 
