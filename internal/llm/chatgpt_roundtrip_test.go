@@ -156,3 +156,191 @@ func TestChatGPTCapabilityStatus(t *testing.T) {
 		t.Fatal("ordinary Responses incomplete behavior changed")
 	}
 }
+
+func TestChatGPTPromptCacheAffinityHeaders(t *testing.T) {
+	newRoutedClient := func(t *testing.T, cfg ClientConfig, handler http.HandlerFunc) *OpenAIResponsesClient {
+		t.Helper()
+		server := httptest.NewServer(handler)
+		t.Cleanup(server.Close)
+		target, _ := url.Parse(server.URL)
+		c := NewOpenAIResponsesClient(cfg)
+		c.chatGPTToken = func(context.Context) (string, error) { return "access-fixture", nil }
+		c.sdk = openai.NewClient(option.WithBaseURL(cfg.URL), option.WithMaxRetries(0), option.WithHTTPClient(&http.Client{Transport: resolverRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			r := req.Clone(req.Context())
+			u := *req.URL
+			u.Scheme = target.Scheme
+			u.Host = target.Host
+			r.URL = &u
+			return http.DefaultTransport.RoundTrip(r)
+		})}))
+		return c
+	}
+
+	okSSE := func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"status\":\"completed\",\"model\":\"gpt-6-luna\",\"output\":[{\"type\":\"message\",\"id\":\"m\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\",\"annotations\":[]}]}],\"usage\":{\"input_tokens\":5,\"output_tokens\":1,\"total_tokens\":6}}}\n\n")
+	}
+
+	t.Run("context session key populates routing headers across rounds", func(t *testing.T) {
+		var seen [][]string
+		var gotBody map[string]any
+		c := newRoutedClient(t, ClientConfig{
+			URL:               chatgptauth.Resource,
+			ChatGPTPlan:       true,
+			RequiresStreaming: true,
+			SessionKey:        "fallback-client-key",
+		}, func(w http.ResponseWriter, r *http.Request) {
+			seen = append(seen, []string{r.Header.Get("session_id"), r.Header.Get("session-id")})
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			okSSE(w)
+		})
+
+		ctx := ContextWithSessionKey(context.Background(), "task-affinity-key")
+		for range 2 {
+			if _, err := c.CompletionsWithCtx(ctx, ChatRequest{
+				Model:     "gpt-6-luna",
+				Messages:  []Message{NewTextMessage("user", "ping")},
+				SessionID: "subtask-uuid-1",
+			}); err != nil {
+				t.Fatalf("CompletionsWithCtx: %v", err)
+			}
+		}
+		if len(seen) != 2 {
+			t.Fatalf("requests = %d, want 2", len(seen))
+		}
+		for i, pair := range seen {
+			if pair[0] != "task-affinity-key" || pair[1] != "task-affinity-key" {
+				t.Errorf("turn %d headers = %q, want [task-affinity-key task-affinity-key]", i+1, pair)
+			}
+		}
+		if got := gotBody["prompt_cache_key"]; got != "subtask-uuid-1" {
+			t.Errorf("prompt_cache_key = %v, want %q", got, "subtask-uuid-1")
+		}
+	})
+
+	t.Run("context key populates prompt_cache_key when request SessionID is empty", func(t *testing.T) {
+		var gotBody map[string]any
+		c := newRoutedClient(t, ClientConfig{
+			URL:               chatgptauth.Resource,
+			ChatGPTPlan:       true,
+			RequiresStreaming: true,
+		}, func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			okSSE(w)
+		})
+
+		ctx := ContextWithSessionKey(context.Background(), "plan-affinity-key")
+		if _, err := c.CompletionsWithCtx(ctx, ChatRequest{
+			Model:    "gpt-6-luna",
+			Messages: []Message{NewTextMessage("user", "ping")},
+		}); err != nil {
+			t.Fatalf("CompletionsWithCtx: %v", err)
+		}
+		if got := gotBody["prompt_cache_key"]; got != "plan-affinity-key" {
+			t.Errorf("prompt_cache_key = %v, want %q", got, "plan-affinity-key")
+		}
+	})
+
+	t.Run("request SessionID is used when context carries no key", func(t *testing.T) {
+		var gotUnderscore, gotHyphen string
+		c := newRoutedClient(t, ClientConfig{
+			URL:               chatgptauth.Resource,
+			ChatGPTPlan:       true,
+			RequiresStreaming: true,
+			SessionKey:        "fallback-client-key",
+		}, func(w http.ResponseWriter, r *http.Request) {
+			gotUnderscore = r.Header.Get("session_id")
+			gotHyphen = r.Header.Get("session-id")
+			okSSE(w)
+		})
+
+		if _, err := c.CompletionsWithCtx(context.Background(), ChatRequest{
+			Model:     "gpt-6-luna",
+			Messages:  []Message{NewTextMessage("user", "ping")},
+			SessionID: "conv-only-id",
+		}); err != nil {
+			t.Fatalf("CompletionsWithCtx: %v", err)
+		}
+		if gotUnderscore != "conv-only-id" || gotHyphen != "conv-only-id" {
+			t.Errorf("headers = (%q, %q), want (%q, %q)", gotUnderscore, gotHyphen, "conv-only-id", "conv-only-id")
+		}
+	})
+
+	t.Run("client SessionKey serves as fallback when both context and request keys are empty", func(t *testing.T) {
+		var gotUnderscore, gotHyphen string
+		c := newRoutedClient(t, ClientConfig{
+			URL:               chatgptauth.Resource,
+			ChatGPTPlan:       true,
+			RequiresStreaming: true,
+			SessionKey:        "fallback-client-key",
+		}, func(w http.ResponseWriter, r *http.Request) {
+			gotUnderscore = r.Header.Get("session_id")
+			gotHyphen = r.Header.Get("session-id")
+			okSSE(w)
+		})
+
+		if _, err := c.CompletionsWithCtx(context.Background(), ChatRequest{
+			Model:    "gpt-6-luna",
+			Messages: []Message{NewTextMessage("user", "ping")},
+		}); err != nil {
+			t.Fatalf("CompletionsWithCtx: %v", err)
+		}
+		if gotUnderscore != "fallback-client-key" || gotHyphen != "fallback-client-key" {
+			t.Errorf("headers = (%q, %q), want fallback-client-key", gotUnderscore, gotHyphen)
+		}
+	})
+
+	t.Run("explicit ExtraHeaders override default affinity headers", func(t *testing.T) {
+		var gotUnderscore, gotHyphen string
+		c := newRoutedClient(t, ClientConfig{
+			URL:               chatgptauth.Resource,
+			ChatGPTPlan:       true,
+			RequiresStreaming: true,
+			ExtraHeaders: map[string]string{
+				"session_id": "{ocr_session_key}-custom",
+				"session-id": "explicit-hyphen",
+			},
+		}, func(w http.ResponseWriter, r *http.Request) {
+			gotUnderscore = r.Header.Get("session_id")
+			gotHyphen = r.Header.Get("session-id")
+			okSSE(w)
+		})
+
+		ctx := ContextWithSessionKey(context.Background(), "ctx-key")
+		if _, err := c.CompletionsWithCtx(ctx, ChatRequest{
+			Model:    "gpt-6-luna",
+			Messages: []Message{NewTextMessage("user", "ping")},
+		}); err != nil {
+			t.Fatalf("CompletionsWithCtx: %v", err)
+		}
+		if gotUnderscore != "ctx-key-custom" || gotHyphen != "explicit-hyphen" {
+			t.Errorf("headers = (%q, %q), want (ctx-key-custom, explicit-hyphen)", gotUnderscore, gotHyphen)
+		}
+	})
+
+	t.Run("non-ChatGPTPlan requests do not add session affinity headers automatically", func(t *testing.T) {
+		var hasUnderscore, hasHyphen bool
+		c := newRoutedClient(t, ClientConfig{
+			URL:        "https://api.openai.com/v1",
+			APIKey:     "sk-test",
+			SessionKey: "fallback-client-key",
+		}, func(w http.ResponseWriter, r *http.Request) {
+			_, hasUnderscore = r.Header[http.CanonicalHeaderKey("session_id")]
+			_, hasHyphen = r.Header[http.CanonicalHeaderKey("session-id")]
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","model":"gpt-5.4","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`))
+		})
+
+		ctx := ContextWithSessionKey(context.Background(), "task-key")
+		if _, err := c.CompletionsWithCtx(ctx, ChatRequest{
+			Model:     "gpt-5.4",
+			Messages:  []Message{NewTextMessage("user", "ping")},
+			SessionID: "req-id",
+		}); err != nil {
+			t.Fatalf("CompletionsWithCtx: %v", err)
+		}
+		if hasUnderscore || hasHyphen {
+			t.Errorf("unexpected automatic headers on standard OpenAI client: session_id=%v session-id=%v", hasUnderscore, hasHyphen)
+		}
+	})
+}
