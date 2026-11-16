@@ -22,7 +22,7 @@ func addRuleFlag(cmd *cobra.Command, target *string) {
 
 func addDiffFlags(cmd *cobra.Command, from, to, commit *string) {
 	cmd.Flags().StringVar(from, "from", "", "source ref to start diff from (e.g., 'main')")
-	cmd.Flags().StringVar(to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
+	cmd.Flags().StringVar(to, "to", "", "target ref to end diff at (e.g., 'feature-branch'; defaults to HEAD when --from is given)")
 	cmd.Flags().StringVarP(commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
 }
 
@@ -66,10 +66,6 @@ func addModelFlag(cmd *cobra.Command, target *string) {
 
 func addProviderFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "provider", "", "override configured LLM provider for this run")
-}
-
-func addToolsFlag(cmd *cobra.Command, target *string) {
-	cmd.Flags().StringVar(target, "tools", "", "path to JSON tools config file (default: embedded)")
 }
 
 func addPreviewFlag(cmd *cobra.Command, target *bool) {
@@ -123,7 +119,15 @@ func validateOutputFormat(format string) (string, error) {
 	}
 }
 
+func normalizeDiffTarget(from, to, commit string) string {
+	if from != "" && to == "" && commit == "" {
+		return "HEAD"
+	}
+	return to
+}
+
 func validateReviewOptions(opts *reviewOptions) error {
+	opts.to = normalizeDiffTarget(opts.from, opts.to, opts.commit)
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
@@ -191,6 +195,7 @@ func validateScanOptions(opts *scanOptions) error {
 }
 
 func validateDelegateOptions(opts *delegateOptions) error {
+	opts.to = normalizeDiffTarget(opts.from, opts.to, opts.commit)
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
@@ -202,7 +207,6 @@ func validateDelegateOptions(opts *delegateOptions) error {
 
 // registerReviewFlags registers all review command flags on cmd, binding to opts.
 func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
-	addToolsFlag(cmd, &opts.toolConfigPath)
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)
@@ -223,10 +227,9 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 
 // registerScanFlags registers all scan command flags on cmd, binding to opts.
 func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
-	addToolsFlag(cmd, &opts.toolConfigPath)
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
-	cmd.Flags().StringVar(&opts.paths, "path", "", "comma-separated repo-relative directories or files to scan (default: whole repo)")
+	cmd.Flags().StringVar(&opts.paths, "path", "", "comma-separated repo-relative directories or files to scan (default: whole repo; nonexistent paths are an error)")
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
 	addOutputPathFlag(cmd, &opts.outputPath)

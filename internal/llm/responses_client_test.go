@@ -651,12 +651,75 @@ func TestOpenAIResponsesClient_StatuslessResponseSucceeds(t *testing.T) {
 	}
 }
 
-// TestOpenAIResponsesClient_ExtraBodyStreamDropped verifies that an
-// extra_body.stream=true (valid for the Chat Completions client) is NOT
-// forwarded to the Responses API. Forwarding it makes the API answer with SSE
-// while Responses.New expects a JSON body, breaking every call. Other
-// extra_body keys must still be forwarded.
+// True and non-boolean stream values must not request SSE while Responses.New
+// expects JSON. Other extra_body keys must still be forwarded.
 func TestOpenAIResponsesClient_ExtraBodyStreamDropped(t *testing.T) {
+	testCases := []struct {
+		name  string
+		value any
+	}{
+		{name: "boolean true", value: true},
+		{name: "string true", value: "true"},
+		{name: "string false", value: "false"},
+		{name: "null", value: nil},
+		{name: "number", value: 1},
+		{name: "object", value: map[string]any{}},
+		{name: "array", value: []any{}},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(test *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					test.Errorf("decode request body: %v", err)
+					http.Error(writer, "invalid request body", http.StatusBadRequest)
+					return
+				}
+				if value, present := body["stream"]; present {
+					test.Errorf("request body should NOT contain a stream field, got %v", value)
+				}
+				if body["keep_me"] != "yes" {
+					test.Errorf("other extra_body keys must still be forwarded; keep_me = %v", body["keep_me"])
+				}
+
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{
+					"id":"resp_stream",
+					"object":"response",
+					"model":"gpt-5.4",
+					"status":"completed",
+					"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
+					"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+				}`))
+			}))
+			defer server.Close()
+
+			client := NewOpenAIResponsesClient(ClientConfig{
+				URL:    server.URL + "/v1",
+				APIKey: "test-key",
+				Model:  "gpt-5.4",
+				ExtraBody: map[string]any{
+					"stream":               testCase.value,
+					"keep_me":              "yes",
+					"temperature_override": 0.1,
+				},
+			})
+
+			resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages: []Message{{Role: "user", Content: "hi"}},
+			})
+			if err != nil {
+				test.Fatalf("CompletionsWithCtx: %v", err)
+			}
+			if resp.Content() != "ok" {
+				test.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+			}
+		})
+	}
+}
+
+func TestOpenAIResponsesClient_ExtraBodyStreamFalseForwarded(t *testing.T) {
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -664,7 +727,7 @@ func TestOpenAIResponsesClient_ExtraBodyStreamDropped(t *testing.T) {
 		_ = json.Unmarshal(raw, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"id":"resp_stream",
+			"id":"resp_stream_false",
 			"object":"response",
 			"model":"gpt-5.4",
 			"status":"completed",
@@ -679,27 +742,18 @@ func TestOpenAIResponsesClient_ExtraBodyStreamDropped(t *testing.T) {
 		APIKey: "test-key",
 		Model:  "gpt-5.4",
 		ExtraBody: map[string]any{
-			"stream":               true,
-			"keep_me":              "yes",
-			"temperature_override": 0.1,
+			"stream": false,
 		},
 	})
 
-	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
 		Messages: []Message{{Role: "user", Content: "hi"}},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("CompletionsWithCtx: %v", err)
 	}
 
-	if _, present := gotBody["stream"]; present {
-		t.Errorf("request body should NOT contain a stream field, got %v", gotBody["stream"])
-	}
-	if gotBody["keep_me"] != "yes" {
-		t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
-	}
-	if resp.Content() != "ok" {
-		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+	if got, present := gotBody["stream"]; !present || got != false {
+		t.Errorf("stream = %v (present %v), want false", got, present)
 	}
 }
 
@@ -907,6 +961,42 @@ func TestOpenAIResponsesClient_StreamingIncompleteContract(t *testing.T) {
 				t.Fatal("ordinary incomplete stream lost the length finish reason or partial output", err)
 			}
 		})
+	}
+}
+
+func TestOpenAIResponsesClient_RequiredStreamingOverridesStreamFalse(test *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			test.Errorf("decode request body: %v", err)
+			http.Error(writer, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if body["stream"] != true {
+			test.Errorf("stream = %v, want true", body["stream"])
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(writer, `data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_required_stream","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}}`+"\n\n")
+		_, _ = io.WriteString(writer, `data: {"type":"response.completed","response":{"id":"resp_required_stream","object":"response","model":"fixture-model","status":"completed","output":[]}}`+"\n\n")
+		_, _ = io.WriteString(writer, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL:               server.URL + "/v1",
+		APIKey:            "fixture-key",
+		Model:             "fixture-model",
+		RequiresStreaming: true,
+		ExtraBody:         map[string]any{"stream": false},
+	})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		test.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if resp.Content() != "ok" {
+		test.Errorf("Content() = %q, want %q", resp.Content(), "ok")
 	}
 }
 

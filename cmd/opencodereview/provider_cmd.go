@@ -158,6 +158,9 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	if result.provider == "" {
 		return fmt.Errorf("provider name is required")
 	}
+	if err := validateProviderName(result.provider); err != nil {
+		return err
+	}
 	model := result.resolvedModel()
 	if model == "" {
 		return fmt.Errorf("model is required")

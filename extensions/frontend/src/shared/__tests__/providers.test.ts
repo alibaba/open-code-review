@@ -3,10 +3,18 @@
 
 import { PROVIDER_PRESETS as generatedPresets } from '../providers.generated';
 import { isPresetProvider, lookupPreset, mergeModelLists, PROVIDER_PRESETS, usesAmbientAuth } from '../providers';
-import { buildOfficialSaveEntries, detectInitialTab, isConfigReady } from '../configUtils';
+import { buildOfficialSaveEntries, detectInitialTab, isConfigReady, isValidProviderName } from '../configUtils';
 import { OcrConfig } from '../types';
 
 describe('generated provider presets', () => {
+  it.each(['my-gateway', 'mimo-v2.6-flash', 'foo.api_key'])('accepts provider name %s', (name) => {
+    expect(isValidProviderName(name)).toBe(true);
+  });
+
+  it.each(['', ' ', '.a', 'a.', 'a..b', 'a. .b'])('rejects provider name %s', (name) => {
+    expect(isValidProviderName(name)).toBe(false);
+  });
+
   it('keeps providers sorted by name with the existing initial provider', () => {
     const names = PROVIDER_PRESETS.map((preset) => preset.name);
     expect(names).toEqual([...names].sort());

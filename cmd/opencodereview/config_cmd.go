@@ -641,6 +641,11 @@ func setConfigValue(cfg *Config, key, value string) error {
 
 	switch key {
 	case "provider":
+		if value != "" {
+			if err := validateProviderName(value); err != nil {
+				return err
+			}
+		}
 		if cfg.Provider != value {
 			cfg.Model = ""
 		}
@@ -995,33 +1000,35 @@ func ensureModelInList(models []string, model string) []string {
 }
 
 func setProviderValue(cfg *Config, key, value string) error {
-	parts := strings.SplitN(key, ".", 3)
-	if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
+	dot := strings.LastIndex(key, ".")
+	if dot <= len("providers.") || dot == len(key)-1 {
 		return fmt.Errorf("invalid provider key %q: expected providers.<name>.<field>", key)
 	}
-	if _, isPreset := llm.LookupProvider(parts[1]); !isPreset {
-		return setCustomProviderField(cfg, parts[1], parts[2], key, value)
+	name, field := key[len("providers."):dot], key[dot+1:]
+	if _, isPreset := llm.LookupProvider(name); !isPreset {
+		return setCustomProviderField(cfg, name, field, key, value)
+	}
+	entry := cfg.Providers[name]
+	if err := applyProviderField(name, &entry, field, key, value); err != nil {
+		return err
 	}
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]ProviderEntry)
 	}
-	entry := cfg.Providers[parts[1]]
-	if err := applyProviderField(parts[1], &entry, parts[2], key, value); err != nil {
-		return err
-	}
-	cfg.Providers[parts[1]] = entry
+	cfg.Providers[name] = entry
 	return nil
 }
 
 func setCustomProviderValue(cfg *Config, key, value string) error {
-	parts := strings.SplitN(key, ".", 3)
-	if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
+	dot := strings.LastIndex(key, ".")
+	if dot <= len("custom_providers.") || dot == len(key)-1 {
 		return fmt.Errorf("invalid custom provider key %q: expected custom_providers.<name>.<field>", key)
 	}
-	if preset, isPreset := llm.LookupProvider(parts[1]); isPreset {
-		return fmt.Errorf("custom provider name %q conflicts with a preset provider; use providers.%s.%s to configure the preset or choose a different custom provider name", parts[1], preset.Name, parts[2])
+	name, field := key[len("custom_providers."):dot], key[dot+1:]
+	if preset, isPreset := llm.LookupProvider(name); isPreset {
+		return fmt.Errorf("custom provider name %q conflicts with a preset provider; use providers.%s.%s to configure the preset or choose a different custom provider name", name, preset.Name, field)
 	}
-	return setCustomProviderField(cfg, parts[1], parts[2], key, value)
+	return setCustomProviderField(cfg, name, field, key, value)
 }
 
 func isAuxiliaryProviderField(field string) bool {
@@ -1033,17 +1040,32 @@ func isAuxiliaryProviderField(field string) bool {
 	}
 }
 
+func validateProviderName(name string) error {
+	for _, segment := range strings.Split(name, ".") {
+		if strings.TrimSpace(segment) == "" {
+			return fmt.Errorf("invalid provider name %q: dot-separated segments must not be empty or whitespace", name)
+		}
+	}
+	return nil
+}
+
 func setCustomProviderField(cfg *Config, name, field, key, value string) error {
+	if err := validateProviderName(name); err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	if _, exists := cfg.CustomProviders[name]; strings.Contains(name, ".") && !exists {
+		return fmt.Errorf("provider %q is not configured for key %q; create or select it first:\n  ocr config set provider %s", name, key, name)
+	}
 	if _, exists := cfg.CustomProviders[name]; isAuxiliaryProviderField(field) && !exists {
 		providerKey := strings.TrimSuffix(key, "."+field)
 		return fmt.Errorf("provider %q is not configured; set a core field first (protocol is required for every custom provider):\n  ocr config set %s.protocol <protocol>", name, providerKey)
 	}
-	if cfg.CustomProviders == nil {
-		cfg.CustomProviders = make(map[string]ProviderEntry)
-	}
 	entry := cfg.CustomProviders[name]
 	if err := applyProviderField(name, &entry, field, key, value); err != nil {
 		return err
+	}
+	if cfg.CustomProviders == nil {
+		cfg.CustomProviders = make(map[string]ProviderEntry)
 	}
 	cfg.CustomProviders[name] = entry
 	return nil
