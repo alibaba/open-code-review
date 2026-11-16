@@ -419,6 +419,8 @@ Sub-commands:
 ocr session list
 ocr session list --limit 50
 ocr session list --json
+ocr session list --branch feat/my-feature --limit 5
+ocr sessions ls --repo /path/to/repo --branch main --json
 ```
 
 | Flag | Default | Description |
@@ -426,6 +428,17 @@ ocr session list --json
 | `--repo <path>` | current dir | Repository whose sessions should be listed. |
 | `--json` | `false` | Emit session summaries as JSON. |
 | `--limit <n>` | `20` | Cap the number of listed sessions. Use `0` for unlimited. |
+| `--branch <name>` | empty | Only list sessions whose saved branch name matches exactly, including case. |
+
+Branch filtering runs before `--limit` and preserves newest-first ordering.
+Omitting `--branch` or passing an empty value keeps the unfiltered behavior.
+When filtering, sessions without a recorded branch are excluded; no matches
+produce a branch-specific message in text mode or `[]` in JSON mode.
+
+The filter uses saved session metadata, so a deleted branch remains searchable
+without checking out that branch. The repository directory selected by `--repo`
+must still exist, but it need not remain a Git checkout. Filtering does not change
+the checks required to resume a session.
 
 ### `ocr session show`
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -84,6 +85,142 @@ func TestRunSessionList_EmptyRepo(t *testing.T) {
 	})
 	if !strings.Contains(got, "No sessions found") {
 		t.Errorf("expected empty message, got %q", got)
+	}
+}
+
+func TestRunSessionList_BranchFilterBeforeLimit(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	directory, err := session.SessionsDir(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixtures := []struct {
+		id        string
+		branch    string
+		timestamp string
+	}{
+		{"feature-old", "feature", "2025-06-01T10:00:00Z"},
+		{"feature-new", "feature", "2025-06-01T11:00:00Z"},
+		{"missing-branch", "", "2025-06-01T12:00:00Z"},
+		{"different-case", "Feature", "2025-06-01T13:00:00Z"},
+		{"main-session", "main", "2025-06-01T14:00:00Z"},
+	}
+	for _, fixture := range fixtures {
+		record := map[string]string{
+			"type":      "session_start",
+			"sessionId": fixture.id,
+			"timestamp": fixture.timestamp,
+			"cwd":       repoDir,
+		}
+		if fixture.branch != "" {
+			record["gitBranch"] = fixture.branch
+		}
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, fixture.id+".jsonl"), append(data, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	unfiltered, err := session.ListSessions(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unfiltered) != len(fixtures) || unfiltered[0].SessionID != "main-session" {
+		t.Fatalf("expected the newest session to be non-matching, got %+v", unfiltered)
+	}
+	allIDs := []string{"main-session", "different-case", "missing-branch", "feature-new", "feature-old"}
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"filter before limit", []string{"--branch", "feature", "--limit", "1"}, []string{"feature-new"}},
+		{"matching order", []string{"--branch", "feature"}, []string{"feature-new", "feature-old"}},
+		{"unlimited", []string{"--branch", "feature", "--limit", "0"}, []string{"feature-new", "feature-old"}},
+		{"case sensitive", []string{"--branch", "Feature"}, []string{"different-case"}},
+		{"exact match", []string{"--branch", "feat"}, []string{}},
+		{"no match", []string{"--branch", "missing"}, []string{}},
+		{"omitted branch", nil, allIDs},
+		{"empty branch", []string{"--branch", ""}, allIDs},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string{"--repo", repoDir, "--json"}, test.args...)
+			got := captureStdout(t, func() {
+				if err := runSessionListCompat(args); err != nil {
+					t.Fatalf("runSessionList: %v", err)
+				}
+			})
+			var decoded []session.Summary
+			if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+				t.Fatalf("unmarshal: %v (out=%q)", err, got)
+			}
+			if decoded == nil {
+				t.Fatalf("expected a JSON array, got %q", got)
+			}
+			var ids []string
+			for _, summary := range decoded {
+				ids = append(ids, summary.SessionID)
+			}
+			if !slices.Equal(ids, test.want) {
+				t.Fatalf("session IDs = %v, want %v", ids, test.want)
+			}
+		})
+	}
+
+	t.Run("table", func(t *testing.T) {
+		got := captureStdout(t, func() {
+			if err := runSessionListCompat([]string{"--repo", repoDir, "--branch", "feature", "--limit", "1"}); err != nil {
+				t.Fatalf("runSessionList: %v", err)
+			}
+		})
+		if !strings.Contains(got, "SESSION ID") || !strings.Contains(got, "feature-new") {
+			t.Fatalf("expected a table containing the newest matching session, got %q", got)
+		}
+		for _, excluded := range []string{"feature-old", "main-session", "different-case", "missing-branch"} {
+			if strings.Contains(got, excluded) {
+				t.Errorf("table contains excluded session %q: %s", excluded, got)
+			}
+		}
+	})
+}
+
+func TestRunSessionList_BranchFilterEmptyMessage(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	got := captureStdout(t, func() {
+		if err := runSessionListCompat([]string{"--repo", repoDir, "--branch", "missing"}); err != nil {
+			t.Fatalf("runSessionList: %v", err)
+		}
+	})
+	if !strings.Contains(got, "on branch missing") {
+		t.Errorf("expected branch in empty message, got %q", got)
+	}
+}
+
+func TestRunSessionList_BranchFilterJSONMissingSessionsDir(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	got := captureStdout(t, func() {
+		if err := runSessionListCompat([]string{"--repo", repoDir, "--branch", "main", "--json"}); err != nil {
+			t.Fatalf("runSessionList: %v", err)
+		}
+	})
+	if strings.TrimSpace(got) != "[]" {
+		t.Fatalf("expected a non-nil empty JSON array, got %q", got)
 	}
 }
 
