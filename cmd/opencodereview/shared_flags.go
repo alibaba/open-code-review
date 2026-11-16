@@ -22,7 +22,7 @@ func addRuleFlag(cmd *cobra.Command, target *string) {
 
 func addDiffFlags(cmd *cobra.Command, from, to, commit *string) {
 	cmd.Flags().StringVar(from, "from", "", "source ref to start diff from (e.g., 'main')")
-	cmd.Flags().StringVar(to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
+	cmd.Flags().StringVar(to, "to", "", "target ref to end diff at (e.g., 'feature-branch'; defaults to HEAD when --from is given)")
 	cmd.Flags().StringVarP(commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
 }
 
@@ -119,7 +119,15 @@ func validateOutputFormat(format string) (string, error) {
 	}
 }
 
+func normalizeDiffTarget(from, to, commit string) string {
+	if from != "" && to == "" && commit == "" {
+		return "HEAD"
+	}
+	return to
+}
+
 func validateReviewOptions(opts *reviewOptions) error {
+	opts.to = normalizeDiffTarget(opts.from, opts.to, opts.commit)
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
@@ -187,6 +195,7 @@ func validateScanOptions(opts *scanOptions) error {
 }
 
 func validateDelegateOptions(opts *delegateOptions) error {
+	opts.to = normalizeDiffTarget(opts.from, opts.to, opts.commit)
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}

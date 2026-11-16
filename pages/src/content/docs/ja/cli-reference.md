@@ -105,7 +105,7 @@ ocr r      [flags]   (alias)
 |---|---|---|---|
 | `--repo <path>` | — | カレントディレクトリ | Git リポジトリのルート。 |
 | `--from <ref>` | — | — | diff の開始 ref（例: `main`）。 |
-| `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
+| `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。`--from` のみ指定して `--to` を省略した場合は `HEAD` が既定値になります（コミット済みの変更のみをレビュー、`git diff <from>...HEAD` 相当）。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、サブタスクごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。サブタスクは単一ファイル、または関連ファイルのまとまりをレビューします。 |

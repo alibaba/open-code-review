@@ -106,7 +106,7 @@ unstaged + untracked 变更。
 |---|---|---|---|
 | `--repo <path>` | — | 当前目录 | Git 仓库根。 |
 | `--from <ref>` | — | — | diff 起始 ref（如 `main`）。 |
-| `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
+| `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。只传 `--from` 而省略 `--to` 时默认取 `HEAD`（仅评审已提交改动，等价于 `git diff <from>...HEAD`）。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个子任务的 `REVIEW_FILTER_TASK` LLM 后处理调用。子任务评审单个文件或一组相关文件。 |
