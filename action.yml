@@ -111,6 +111,16 @@ inputs:
       the review exits 0.
     required: false
     default: ''
+  max_tools:
+    description: >-
+      Maximum tool-call rounds per review subtask, passed to `ocr review
+      --max-tools`. Base-10 integer; empty or 0 keeps the template default
+      (100). The CLI raises values from 1 through 49 to its minimum of 50.
+      Lower values bound review time on slow or local models at the cost of
+      less exploration per file. Values below the template default take
+      effect from OpenCodeReview v1.13.5; earlier releases ignore them.
+    required: false
+    default: ''
   stream_progress:
     description: >-
       Stream live [ocr] review progress to the workflow log (human audience
@@ -439,6 +449,7 @@ runs:
         REVIEW_TASK_TIMEOUT: ${{ inputs.review_task_timeout }}
         EFFORT_INPUT: ${{ inputs.effort }}
         MAX_TOKENS_BUDGET_INPUT: ${{ inputs.max_tokens_budget }}
+        MAX_TOOLS_INPUT: ${{ inputs.max_tools }}
         LLM_REASONING_EFFORT_INPUT: ${{ inputs.llm_reasoning_effort }}
         STREAM_PROGRESS_INPUT: ${{ inputs.stream_progress }}
         RESOLVE_OUTDATED_INPUT: ${{ inputs.resolve_outdated }}
@@ -492,6 +503,24 @@ runs:
           fi
         fi
         echo "MAX_TOKENS_BUDGET=$NORMALIZED_MAX_TOKENS_BUDGET" >> "$GITHUB_ENV"
+
+        # Empty or 0 keeps the template default, so both normalize to empty
+        # and the Run step omits the flag. The 50-round floor is left to the
+        # CLI, which warns when it raises a lower value.
+        NORMALIZED_MAX_TOOLS="$MAX_TOOLS_INPUT"
+        if [[ -n "$NORMALIZED_MAX_TOOLS" ]]; then
+          if [[ ! "$NORMALIZED_MAX_TOOLS" =~ ^[0-9]+$ ]]; then
+            echo "::error::max_tools must be a base-10 integer >= 0 (empty or 0 = template default)"
+            exit 1
+          fi
+          while [[ "$NORMALIZED_MAX_TOOLS" == 0* && "$NORMALIZED_MAX_TOOLS" != "0" ]]; do
+            NORMALIZED_MAX_TOOLS="${NORMALIZED_MAX_TOOLS#0}"
+          done
+          if [[ "$NORMALIZED_MAX_TOOLS" == "0" ]]; then
+            NORMALIZED_MAX_TOOLS=""
+          fi
+        fi
+        echo "MAX_TOOLS=$NORMALIZED_MAX_TOOLS" >> "$GITHUB_ENV"
 
         # Empty leaves the request body untouched; otherwise the union of the
         # OpenAI and GLM vocabularies, normalized to lowercase for the
@@ -571,8 +600,8 @@ runs:
 
         # --effort was introduced in v1.10.0; reject an explicit effort input
         # on older releases instead of letting the CLI fail on an unknown flag.
-        # max_tokens_budget predates the v1.9.6 floor and llm_reasoning_effort
-        # rides extra_body, so neither needs a gate.
+        # The max_tokens_budget and max_tools flags predate the v1.9.6 floor and
+        # llm_reasoning_effort rides extra_body, so none of them needs a gate.
         if [ -n "${EFFORT:-}" ] &&
           (( OCR_VERSION_MAJOR < 1 || (OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR < 10) )); then
           echo "::error::The effort input requires OpenCodeReview v1.10.0 or newer"
@@ -754,6 +783,9 @@ runs:
         # normalized into the environment, not the raw inputs.
         OCR_FP_EFFORT: ${{ env.EFFORT }}
         OCR_FP_MAX_TOKENS_BUDGET: ${{ env.MAX_TOKENS_BUDGET }}
+        # The round cap bounds how far each subtask explores, so it changes
+        # what a review would say as well.
+        OCR_FP_MAX_TOOLS: ${{ env.MAX_TOOLS }}
         # Extra headers can point the same `llm_model` string at a different
         # backend model or a different provider entirely, so they change what a
         # review would say and must invalidate the checkpoint. Their VALUES can
@@ -901,6 +933,9 @@ runs:
                 versionActual,
                 ruleDigest,
                 localRuleDigest,
+                // Appended only when set, so checkpoints taken before the
+                // input existed stay valid.
+                ...(process.env.OCR_FP_MAX_TOOLS ? [`max_tools=${process.env.OCR_FP_MAX_TOOLS}`] : []),
               ].map((v) => v || '')))
               .digest('hex')
               .slice(0, 16);
@@ -998,6 +1033,7 @@ runs:
         [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")
         [ -n "${EFFORT:-}" ] && ARGS+=(--effort "$EFFORT")
         [ -n "${MAX_TOKENS_BUDGET:-}" ] && ARGS+=(--max-tokens-budget "$MAX_TOKENS_BUDGET")
+        [ -n "${MAX_TOOLS:-}" ] && ARGS+=(--max-tools "$MAX_TOOLS")
         set +e
         if [ "${STREAM_PROGRESS:-false}" = "true" ]; then
           OCR_STDERR_FIFO="$(mktemp -u)"
