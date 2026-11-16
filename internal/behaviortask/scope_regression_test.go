@@ -6,6 +6,7 @@ package behaviortask
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -67,12 +68,16 @@ func TestFileFindPreservesWhitespacePaths(test *testing.T) {
 	for _, filePath := range []string{" leading.go", "trailing.go "} {
 		test.Run(filePath, func(test *testing.T) {
 			input := fixture(test)
-			if err := os.WriteFile(filepath.Join(input.RepoDir, filePath), []byte("source content\n"), 0600); err != nil {
-				test.Fatal(err)
+			blob := git(test, input.RepoDir, "rev-parse", "HEAD:main.go")
+			entries := git(test, input.RepoDir, "ls-tree", "HEAD")
+			command := exec.Command("git", "mktree")
+			command.Dir = input.RepoDir
+			command.Stdin = strings.NewReader(entries + fmt.Sprintf("\n100644 blob %s\t%s\n", blob, filePath))
+			tree, err := command.CombinedOutput()
+			if err != nil {
+				test.Fatalf("tree fixture: %s: %v", tree, err)
 			}
-			git(test, input.RepoDir, "add", ".")
-			git(test, input.RepoDir, "commit", "-qm", "Add whitespace path")
-			input.Resolution.ResolvedHead = git(test, input.RepoDir, "rev-parse", "HEAD")
+			input.Resolution.ResolvedHead = git(test, input.RepoDir, "commit-tree", strings.TrimSpace(string(tree)), "-p", input.Resolution.ResolvedHead, "-m", "Add whitespace path")
 			code, err := prepareCodeTools(test.Context(), input)
 			if err != nil {
 				test.Fatal(err)

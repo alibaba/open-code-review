@@ -26,17 +26,19 @@ import (
 
 func TestAnalysisFlags(test *testing.T) {
 	for _, fixture := range []struct {
-		args  []string
-		valid bool
+		args   []string
+		valid  bool
+		wantTo string
 	}{
-		{[]string{}, true},
-		{[]string{"--analysis"}, true},
-		{[]string{"--analysis", "--from", "main"}, false},
-		{[]string{"--analysis", "--commit", "HEAD"}, true},
-		{[]string{"--analysis", "--from", "main", "--to", "topic", "--format", "json"}, true},
-		{[]string{"--analysis", "--commit", "HEAD", "--preview"}, false},
-		{[]string{"--analysis", "--commit", "HEAD", "--resume", "session"}, false},
-		{[]string{"--analysis", "--commit", "HEAD", "--format", "sarif"}, false},
+		{[]string{}, true, ""},
+		{[]string{"--analysis"}, true, ""},
+		{[]string{"--analysis", "--from", "main"}, true, "HEAD"},
+		{[]string{"--analysis", "--to", "HEAD"}, false, ""},
+		{[]string{"--analysis", "--commit", "HEAD"}, true, ""},
+		{[]string{"--analysis", "--from", "main", "--to", "topic", "--format", "json"}, true, "topic"},
+		{[]string{"--analysis", "--commit", "HEAD", "--preview"}, false, ""},
+		{[]string{"--analysis", "--commit", "HEAD", "--resume", "session"}, false, ""},
+		{[]string{"--analysis", "--commit", "HEAD", "--format", "sarif"}, false, ""},
 	} {
 		opts, err := parseReviewFlags(fixture.args)
 		if err == nil {
@@ -44,6 +46,9 @@ func TestAnalysisFlags(test *testing.T) {
 		}
 		if (err == nil) != fixture.valid {
 			test.Fatalf("args %v: %v", fixture.args, err)
+		}
+		if err == nil && opts.to != fixture.wantTo {
+			test.Fatalf("args %v: target = %q, want %q", fixture.args, opts.to, fixture.wantTo)
 		}
 	}
 }
@@ -61,8 +66,19 @@ func TestAnalysisPinning(test *testing.T) {
 		test.Fatalf("commit: %+v %v", pinned, err)
 	}
 	pinned, err = pinAnalysisOptions(test.Context(), reviewOptions{repoDir: repo})
-	if err != nil || pinned.repoDir != repo || pinned.from != "" || pinned.to != "" || pinned.commit != "" {
+	if err != nil || pinned.from != "" || pinned.to != "" || pinned.commit != "" {
 		test.Fatalf("workspace must keep its mode: %+v %v", pinned, err)
+	}
+	repoInfo, err := os.Stat(repo)
+	if err != nil {
+		test.Fatal(err)
+	}
+	pinnedInfo, err := os.Stat(pinned.repoDir)
+	if err != nil {
+		test.Fatal(err)
+	}
+	if !os.SameFile(repoInfo, pinnedInfo) {
+		test.Fatalf("workspace repository changed: got %q, want %q", pinned.repoDir, repo)
 	}
 	for _, invalid := range []reviewOptions{{repoDir: repo, from: "HEAD", commit: "HEAD"}, {repoDir: test.TempDir(), commit: "HEAD"}, {repoDir: repo, commit: "--help"}, {repoDir: repo, commit: "missing"}} {
 		if _, err := pinAnalysisOptions(test.Context(), invalid); err == nil {
