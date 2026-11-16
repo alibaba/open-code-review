@@ -8,6 +8,8 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -42,6 +44,7 @@ type ScanTemplate struct {
 	MaxCompletionTokens   int              `json:"MAX_COMPLETION_TOKENS,omitempty"`
 	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	MaxFileSizeBytes      int64            `json:"MAX_FILE_SIZE_BYTES,omitempty"`
+	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD,omitempty"`
 	MaxTokensBudget       int64            `json:"MAX_TOKENS_BUDGET,omitempty"`
 	BatchStrategy         string           `json:"BATCH_STRATEGY,omitempty"`
 	BatchSize             int              `json:"BATCH_SIZE,omitempty"`
@@ -163,7 +166,9 @@ type manifestMessage struct {
 }
 
 type manifestConversation struct {
-	Messages []manifestMessage `json:"messages"`
+	Messages       []manifestMessage `json:"messages"`
+	Tools          []string          `json:"tools,omitempty"`
+	ToolReferences []string          `json:"tool_references,omitempty"`
 }
 
 type templateManifest struct {
@@ -184,7 +189,7 @@ type templateManifest struct {
 }
 
 func resolveConversation(m manifestConversation) (LlmConversation, error) {
-	var conv LlmConversation
+	conv := LlmConversation{Tools: m.Tools, ToolReferences: m.ToolReferences}
 	conv.Messages = make([]ChatMessage, len(m.Messages))
 	for i, mm := range m.Messages {
 		data, err := templateFS.ReadFile("prompts/" + mm.PromptFile)
@@ -320,7 +325,14 @@ func (t *Template) Validate() error {
 	if len(t.MainTask.Messages) == 0 {
 		return fmt.Errorf("main_task.messages must not be empty")
 	}
-	return nil
+	return validateToolBindings(map[string]*LlmConversation{
+		"MAIN_TASK":               &t.MainTask,
+		"PLAN_TASK":               t.PlanTask,
+		"MEMORY_COMPRESSION_TASK": &t.MemoryCompressionTask,
+		"RE_LOCATION_TASK":        t.ReLocationTask,
+		"REVIEW_FILTER_TASK":      t.ReviewFilterTask,
+		"GROUPING_TASK":           t.GroupingTask,
+	}, "PLAN_TASK")
 }
 
 // Validate checks that a ScanTemplate has the minimum fields populated.
@@ -334,12 +346,40 @@ func (t *ScanTemplate) Validate() error {
 	if len(t.MainTask.Messages) == 0 {
 		return fmt.Errorf("scan: main_task.messages must not be empty")
 	}
+	if err := validateToolBindings(map[string]*LlmConversation{
+		"MAIN_TASK":               &t.MainTask,
+		"PLAN_TASK":               t.PlanTask,
+		"MEMORY_COMPRESSION_TASK": &t.MemoryCompressionTask,
+		"RE_LOCATION_TASK":        t.ReLocationTask,
+		"DEDUP_TASK":              t.DedupTask,
+		"PROJECT_SUMMARY_TASK":    t.ProjectSummaryTask,
+	}, ""); err != nil {
+		return fmt.Errorf("scan: %w", err)
+	}
+	return nil
+}
+
+func validateToolBindings(conversations map[string]*LlmConversation, referenceTask string) error {
+	for _, name := range slices.Sorted(maps.Keys(conversations)) {
+		conversation := conversations[name]
+		if conversation == nil {
+			continue
+		}
+		if name != "MAIN_TASK" && len(conversation.Tools) > 0 {
+			return fmt.Errorf("%s.tools is not supported by this task", name)
+		}
+		if name != referenceTask && len(conversation.ToolReferences) > 0 {
+			return fmt.Errorf("%s.tool_references is not supported by this task", name)
+		}
+	}
 	return nil
 }
 
 // LlmConversation is a preset prompt with settings.
 type LlmConversation struct {
-	Messages []ChatMessage `json:"messages"`
+	Messages       []ChatMessage `json:"messages"`
+	Tools          []string      `json:"tools,omitempty"`
+	ToolReferences []string      `json:"tool_references,omitempty"`
 }
 
 // ChatMessage represents a single message in a conversation.

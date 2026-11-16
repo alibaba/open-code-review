@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "open-code-review",
+  "version": "1.0.0",
+  "description": "AI-powered code review on Git diffs — run ocr review as an agent skill: workspace changes, branch ranges, and single commits with structured, severity-rated findings.",
+  "author": {
+    "name": "Alibaba"
+  },
+  "homepage": "https://github.com/alibaba/open-code-review",
+  "repository": "https://github.com/alibaba/open-code-review",
+  "license": "Apache-2.0",
+  "keywords": [
+    "code-review",
+    "ocr",
+    "open-code-review",
+    "ai-review",
+    "git-diff",
+    "copilot-cli"
+  ]
+}

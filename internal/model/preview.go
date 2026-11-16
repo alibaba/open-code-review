@@ -25,6 +25,18 @@ const (
 	ExcludeTooLarge          ExcludeReason = "too_large"
 )
 
+// IsExclusion reports whether r is one of the defined exclusion reasons.
+// ExcludeNone is not: it marks a file that was selected.
+func (r ExcludeReason) IsExclusion() bool {
+	switch r {
+	case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath, ExcludeSecret,
+		ExcludeProviderDirectory, ExcludeDeleted, ExcludeBinary, ExcludeTooLarge:
+		return true
+	default:
+		return false
+	}
+}
+
 // PreviewEntry is one file's preview record (mode-agnostic).
 type PreviewEntry struct {
 	Path          string        `json:"path"`

@@ -13,6 +13,7 @@
     "@types/jest": "^30.0.0",
     "css-loader": "^7.1.4",
     "jest": "^30.4.2",
+    "preact-render-to-string": "^6.8.1",
     "style-loader": "^4.0.0",
     "ts-jest": "^29.4.12",
     "ts-loader": "^9.5.0",

@@ -13,11 +13,17 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 )
 
+const (
+	maxPromptBlocks     = 128
+	maxPromptBytes      = 64 << 10
+	maxResourceURIBytes = 8192
+)
+
 // Resources select local scan targets; they are never fetched or interpreted
 // as instructions, and never silently narrow a repository-wide review.
 func promptContent(cwd string, blocks []acp.ContentBlock) (string, []string, error) {
-	if len(blocks) > 128 {
-		return "", nil, fmt.Errorf("too many prompt blocks (maximum 128)")
+	if len(blocks) > maxPromptBlocks {
+		return "", nil, fmt.Errorf("too many prompt blocks (maximum %d)", maxPromptBlocks)
 	}
 	var texts, paths []string
 	size := 0
@@ -29,8 +35,8 @@ func promptContent(cwd string, blocks []acp.ContentBlock) (string, []string, err
 		case block.ResourceLink != nil:
 			uri := block.ResourceLink.Uri
 			size += len(uri)
-			if len(uri) > 8192 {
-				return "", nil, fmt.Errorf("resource URI is too long")
+			if len(uri) > maxResourceURIBytes {
+				return "", nil, fmt.Errorf("resource URI is too long (maximum %d bytes)", maxResourceURIBytes)
 			}
 			u, err := url.Parse(uri)
 			if err != nil || u.Scheme != "file" || (u.Host != "" && u.Host != "localhost") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -66,8 +72,8 @@ func promptContent(cwd string, blocks []acp.ContentBlock) (string, []string, err
 		default:
 			return "", nil, fmt.Errorf("unsupported content: send text or a local file resource link")
 		}
-		if size > 64*1024 {
-			return "", nil, fmt.Errorf("prompt exceeds 64 KiB")
+		if size > maxPromptBytes {
+			return "", nil, fmt.Errorf("prompt exceeds %d KiB", maxPromptBytes>>10)
 		}
 	}
 	return strings.Join(texts, "\n"), paths, nil

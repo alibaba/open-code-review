@@ -32,8 +32,10 @@ A skill for performing AI code review where OCR provides deterministic engineeri
 ### Step 1: Preview — Determine What to Review
 
 ```bash
-ocr delegate preview --format json [--from <ref> --to <ref>] [--commit <hash>] [--exclude <patterns>]
+ocr delegate preview --format json [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <patterns>]
 ```
+
+With `--from` and no `--to`, both delegate subcommands default to `HEAD`. Range review compares the merge-base to the target commit and excludes staged, unstaged, and untracked changes. Omit range/commit flags for workspace mode; range and commit flags are mutually exclusive.
 
 This outputs:
 - **mode** (workspace / range / commit)
@@ -47,15 +49,18 @@ This outputs:
 |----------|---------|
 | Workspace changes | `ocr delegate preview` |
 | Branch comparison | `ocr delegate preview --from main --to feature` |
+| Current branch against main | `ocr delegate preview --from main` |
 | Single commit | `ocr delegate preview -c abc123` |
 
 ### Step 2: Get Rules for Files
 
 ```bash
-ocr delegate rule --format json <path1> <path2> ...
+ocr delegate rule --format json [--from <ref> [--to <ref>]] [--commit <hash>] <path1> <path2> ...
 ```
 
 Pass the reviewable file paths from Step 1. Output is grouped by rule content — files sharing the same rule appear under one group, avoiding repetition.
+
+Pass the same range or commit flags as in Step 1 so rules are resolved against the same target. For example, pair `ocr delegate preview --from main` with `ocr delegate rule --from main --format json <path...>`.
 
 ### Step 3: Get Diffs
 
@@ -154,7 +159,7 @@ If the user requested "review and fix":
 | Flag | Description |
 |------|-------------|
 | `--from <ref>` | Source ref for range mode |
-| `--to <ref>` | Target ref for range mode |
+| `--to <ref>` | Target ref for range mode; defaults to `HEAD` when `--from` is supplied in either subcommand |
 | `-c, --commit <hash>` | Single commit mode |
 | `--repo <path>` | Repository root (default: cwd) |
 | `--rule <path>` | Custom rule.json path |

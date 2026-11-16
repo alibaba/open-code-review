@@ -172,8 +172,8 @@ OCR 跳过该文件并继续——JSON 模式下你也会在 `warnings` 中看�
 先运行 `ocr review --preview`。plan 阶段在下面任一条件成立时运行：组内某个文件的
 `lines.changed` 达到 `PLAN_MODE_LINE_THRESHOLD`（默认 **50**），或该组含 2 个以上
 文件且合计变更行数达到 `PLAN_MODE_GROUP_LINE_THRESHOLD`（默认 **100**）。这是有意
-为之——大 diff 能从 plan 中受益。要为单次评审跳过它，用更小 diff 运行，或临时编辑内嵌模板
-（高级；需覆盖 `--tools`）。
+为之——大 diff 能从 plan 中受益。更小的 diff 可能低于这两个阈值。
+评审规划由内嵌模板控制，而不是工具覆盖参数；修改这一核心行为需要修改源码并重新构建。
 
 ### "Max tool requests reached"
 
@@ -220,7 +220,8 @@ agent` 保证的干净 stdout 是*对解析器友好的*——要屏蔽一切，
 没有合格文件可评审。`files_reviewed` 不是顶层字段——它在 `summary` 下面，此路径下读作
 `0`；`comments` 才是顶层的 `[]`。同一个对象还带 `"status": "skipped"`、
 `"message": "Review skipped: no items were selected."`，以及一个 `terminal_state`
-为 `"skipped"`、`coverage` 各数组全空的 `manifest`。
+为 `"skipped"`、`coverage.selected` 为空的 `manifest`。筛选阶段排除的文件会列在
+`coverage.excluded` 中，每项都有对应的 `exclude_reason`。
 
 评审过文件但无发现的正常评审同样返回**带 `comments: []` 的 JSON 对象**：
 `summary.files_reviewed` 是实际评审的文件数，`status` 为 `"complete"`，`message` 读作
@@ -229,6 +230,14 @@ agent` 保证的干净 stdout 是*对解析器友好的*——要屏蔽一切，
 应使用 `summary.files_reviewed` 或 `manifest.terminal_state`。调用方同时必须允许下述
 manifest-less 路径里 `summary` 和 `manifest` 都不存在。`review --format json` 永远向
 stdout 写出恰好一个 JSON 对象，绝不会是裸数组。
+
+`terminal_state: "complete"` 表示已完成选中集合的评审，并不意味着每个变更文件都经过了
+评审。筛选阶段排除的文件（扩展名不受支持、路径规则、内置敏感路径、二进制文件、已删除
+文件，或超过单文件大小限制）会记录在 `manifest.coverage.excluded` 中，其
+`exclude_reason` 与 `--preview` 报告的一致，且不会使运行变成 `partial`。该列表仅覆盖
+进入筛选阶段的文件，不包含 diff provider 更早丢弃的文件：始终跳过的目录（如 `vendor/`
+或 `node_modules/`）下的变更、被 `.gitignore` 忽略的未跟踪文件，以及评审单个 commit
+或 commit 范围时任何匹配 `.gitignore` 的变更。
 
 manifest-less 的 no-files 路径更精简：它同时省略 `summary` 和 `manifest`，但仍会报告
 `"status": "skipped"`、`"message": "No supported files changed."` 以及
