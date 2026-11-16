@@ -378,3 +378,42 @@ func TestMux_HasNoWriteRoutes(t *testing.T) {
 		})
 	}
 }
+
+// TestStaticAssetRefs_OnReposAndSessionsPages holds the two listing pages to the
+// same a11y script reference the session detail page already asserts. Both
+// repos.html and sessions.html hand their scrollable table regions to
+// window.ocrArrowScroll, so dropping the tag kills arrow-key scrolling with
+// nothing failing: the page still renders, only the keyboard path is dead.
+func TestStaticAssetRefs_OnReposAndSessionsPages(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, filepath.Join(repoDir, "s1.jsonl"),
+		`{"type":"session_start","timestamp":"2025-06-01T10:00:00Z","cwd":"/my/proj","model":"claude"}`,
+		`{"type":"session_end","duration_seconds":30,"files_reviewed":["main.go"]}`)
+
+	tests := []struct {
+		name string
+		call func(w http.ResponseWriter, r *http.Request)
+	}{
+		{"repos", func(w http.ResponseWriter, r *http.Request) { handleRepos(w, r, root) }},
+		{"sessions", func(w http.ResponseWriter, r *http.Request) { handleSessions(w, r, root, "repo") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			rr := httptest.NewRecorder()
+			tt.call(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rr.Code)
+			}
+			if !strings.Contains(rr.Body.String(), `src="/static/a11y.js"`) {
+				t.Errorf("%s page is missing src=\"/static/a11y.js\": "+
+					"the scrollable table regions lose arrow-key scrolling", tt.name)
+			}
+		})
+	}
+}
