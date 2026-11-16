@@ -476,3 +476,20 @@ ocr config set language English
 
 - [QuickStart](../quickstart/) — minimal setup and first review.
 - [CLI Reference](../cli-reference/) — every flag the review command accepts.
+
+## Version control
+
+Git is the default. To review a local Lore repository, install the Lore CLI on your PATH and select it in your user configuration.
+
+```sh
+ocr config set vcs_provider lore
+```
+
+From a Lore checkout, preview working changes or review a locally available revision by number or signature. A commit review compares the revision with its first parent.
+
+```sh
+ocr review --preview
+ocr review --commit 42
+```
+
+Use `ocr config unset vcs_provider` to return to Git. Lore supports workspace scans and old/new file reads. Merge-base ranges (`--from/--to`) and the `code_search` tool are currently unavailable with Lore.

@@ -74,7 +74,7 @@ func TestProvider_Enumerate_SniffError(t *testing.T) {
 	writeFile(t, repo, "ok.go", []byte("package ok\n"))
 	writeFile(t, repo, "locked.go", []byte("package locked\n"))
 	gitCommit(t, repo, "init")
-	// Make locked.go unreadable so isBinaryFile's os.Open fails.
+	// Make locked.go unreadable so the workspace reader's os.Open fails.
 	if err := os.Chmod(filepath.Join(repo, "locked.go"), 0o000); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
@@ -91,47 +91,6 @@ func TestProvider_Enumerate_SniffError(t *testing.T) {
 	if !contains(paths, "ok.go") {
 		t.Errorf("ok.go should be present, got %v", paths)
 	}
-}
-
-// TestIsBinaryFile covers detection plus the open-error branch.
-func TestIsBinaryFile(t *testing.T) {
-	dir := t.TempDir()
-	text := filepath.Join(dir, "text.txt")
-	if err := os.WriteFile(text, []byte("hello world\n"), 0o644); err != nil {
-		t.Fatalf("write text: %v", err)
-	}
-	bin := filepath.Join(dir, "bin.dat")
-	if err := os.WriteFile(bin, []byte{'a', 0x00, 'b'}, 0o644); err != nil {
-		t.Fatalf("write bin: %v", err)
-	}
-	empty := filepath.Join(dir, "empty.txt")
-	if err := os.WriteFile(empty, nil, 0o644); err != nil {
-		t.Fatalf("write empty: %v", err)
-	}
-
-	t.Run("text is not binary", func(t *testing.T) {
-		b, err := isBinaryFile(text)
-		if err != nil || b {
-			t.Errorf("isBinaryFile(text) = %v, %v; want false, nil", b, err)
-		}
-	})
-	t.Run("NUL byte is binary", func(t *testing.T) {
-		b, err := isBinaryFile(bin)
-		if err != nil || !b {
-			t.Errorf("isBinaryFile(bin) = %v, %v; want true, nil", b, err)
-		}
-	})
-	t.Run("empty is not binary", func(t *testing.T) {
-		b, err := isBinaryFile(empty)
-		if err != nil || b {
-			t.Errorf("isBinaryFile(empty) = %v, %v; want false, nil", b, err)
-		}
-	})
-	t.Run("missing file errors", func(t *testing.T) {
-		if _, err := isBinaryFile(filepath.Join(dir, "nope")); err == nil {
-			t.Error("expected error for missing file")
-		}
-	})
 }
 
 func itemPaths(items []model.ScanItem) []string {

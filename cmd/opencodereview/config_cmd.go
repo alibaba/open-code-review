@@ -146,6 +146,14 @@ func runConfigUnset(key string) error {
 	if key == "provider" {
 		return unsetActiveProvider(configPath)
 	}
+	if key == "vcs_provider" {
+		cfg, err := loadOrCreateConfig(configPath)
+		if err != nil {
+			return err
+		}
+		cfg.VCSProvider = ""
+		return saveConfig(configPath, cfg)
+	}
 	if key == "max_tokens" {
 		return unsetMaxTokens(configPath)
 	}
@@ -155,7 +163,7 @@ func runConfigUnset(key string) error {
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, vcs_provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
 	}
 
 	switch parts[0] {
@@ -164,7 +172,7 @@ func runConfigUnset(key string) error {
 	case "mcp_servers":
 		return unsetMCPServer(configPath, parts[1])
 	default:
-		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, vcs_provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
 	}
 }
 
@@ -347,6 +355,7 @@ type MCPServerConfig struct {
 
 // Config represents the user-level configuration file (~/.opencodereview/config.json).
 type Config struct {
+	VCSProvider     string                     `json:"vcs_provider,omitempty"`
 	Provider        string                     `json:"provider,omitempty"`
 	Model           string                     `json:"model,omitempty"`
 	MaxTokens       int                        `json:"max_tokens,omitempty"`
@@ -602,6 +611,7 @@ func LoadAppConfig(path string) (*Config, error) {
 // keys accepted by setConfigValue. The unknown-key error message is generated
 // from this list so the two cannot drift apart when a new key is added.
 var supportedConfigKeys = []string{
+	"vcs_provider",
 	"provider",
 	"model",
 	"max_tokens",
@@ -640,6 +650,11 @@ func setConfigValue(cfg *Config, key, value string) error {
 	}
 
 	switch key {
+	case "vcs_provider":
+		if err := validateVCSProvider(value); err != nil {
+			return err
+		}
+		cfg.VCSProvider = value
 	case "provider":
 		if value != "" {
 			if err := validateProviderName(value); err != nil {

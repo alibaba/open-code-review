@@ -207,7 +207,7 @@ func TestReadLines_Disk_AllowsParentSegmentWithinRepo(t *testing.T) {
 	}
 }
 
-func TestReadLines_Disk_AbsolutePathStaysUnderRepo(t *testing.T) {
+func TestReadLines_Disk_RejectsAbsolutePath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("absolute path syntax varies on Windows")
 	}
@@ -219,12 +219,8 @@ func TestReadLines_Disk_AbsolutePathStaysUnderRepo(t *testing.T) {
 	writeTestFile(t, dir, filepath.Join("etc", "passwd"), "repo-passwd\n")
 
 	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
-	lines, _, err := fr.ReadLines(context.Background(), "/etc/passwd", 1, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(lines) == 0 || lines[0] != "repo-passwd" {
-		t.Fatalf("ReadLines(/etc/passwd) = %q, want repo-passwd", lines)
+	if _, _, err := fr.ReadLines(context.Background(), "/etc/passwd", 1, 10); err == nil || !strings.Contains(err.Error(), "outside repository") {
+		t.Fatalf("absolute file paths must be rejected: %v", err)
 	}
 }
 

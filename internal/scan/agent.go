@@ -26,6 +26,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 // changeFilesScanLiteral substitutes for the {{change_files}} placeholder.
@@ -58,7 +59,10 @@ type Args struct {
 	EndpointSource        string
 	Background            string
 	GitRunner             *gitcmd.Runner
-	Session               *session.SessionHistory
+	// Files must describe the workspace at RepoDir; metadata and path selectors
+	// are resolved locally. Nil selects the Git workspace adapter.
+	Files   vcs.FileSource
+	Session *session.SessionHistory
 	// Resume is an optional read-only checkpoint index from a previous scan
 	// session.
 	Resume *session.ResumeState
@@ -312,6 +316,13 @@ func resumedFromSession(resume *session.ResumeState) string {
 	return resume.SessionID
 }
 
+func (a *Agent) fileProvider() *Provider {
+	if a.args.Files == nil {
+		return NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner, a.args.MaxFileSizeBytes)
+	}
+	return NewProviderWithSource(a.args.RepoDir, a.args.Paths, a.args.Files, a.args.MaxFileSizeBytes)
+}
+
 // Run executes the full-scan pipeline: enumerate → filter → token-filter →
 // dispatch one subtask per file → collect comments.
 func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
@@ -326,9 +337,8 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// provider prompt caches actually reuse prefixes at.
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
-	// Keep later scan work under the incoming parent, not the short-lived enumeration span.
 	enumerateCtx, scanSpan := telemetry.StartSpan(ctx, "scan.enumerate")
-	provider := NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner, a.args.MaxFileSizeBytes)
+	provider := a.fileProvider()
 	items, err := provider.Enumerate(enumerateCtx)
 	if err != nil {
 		scanSpan.End()

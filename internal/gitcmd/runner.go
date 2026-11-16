@@ -113,6 +113,9 @@ func (r *Runner) Stream(ctx context.Context, repoDir string, consume func(stdout
 
 	consumeErr := consume(stdoutPipe)
 	if consumeErr != nil {
+		// Close the pipe before waiting, including when a Git launcher leaves a
+		// child writing stdout after the launcher is killed.
+		stdoutPipe.Close()
 		cmd.Process.Kill()
 	}
 	waitErr := cmd.Wait()

@@ -82,6 +82,13 @@ func TestSealedInputPinsRunToAdmittedCommits(t *testing.T) {
 	t.Run("the sealed run still reviews the admitted input", func(t *testing.T) {
 		pinned := args
 		pinned.SealedInput = &sealed.Resolution
+		a := &Agent{args: pinned}
+		if err := a.loadDiffs(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if input := a.manifestInput(); input.RequestedFrom != "main" || input.RequestedHead != "feature" {
+			t.Fatalf("legacy seal replaced requested refs: %+v", input)
+		}
 		if got := runPathIdentity(t, pinned); got != sealed.Identity {
 			t.Errorf("a sealed run must review exactly the admitted input:\n admitted = %+v\n ran      = %+v",
 				sealed.Identity, got)

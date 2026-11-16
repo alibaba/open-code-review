@@ -4,14 +4,96 @@
 package rules
 
 import (
+	"context"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
+
+type ruleFileSource struct {
+	read func(context.Context, vcs.ContentRef, string, func(io.Reader) error) error
+}
+
+func (s ruleFileSource) ReadFile(ctx context.Context, ref vcs.ContentRef, path string, consume func(io.Reader) error) error {
+	return s.read(ctx, ref, path, consume)
+}
+
+func (s ruleFileSource) ListFiles(context.Context, vcs.ContentRef) ([]string, error) {
+	return nil, errors.New("rule sniff must not list files")
+}
+
+func TestSniffer_InjectedSource(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	dir := t.TempDir()
+	writeFile(t, dir, "source.m", matlabSource)
+	t.Setenv("PATH", "") // Resolve must use the injected source without Git.
+	for _, content := range []vcs.ContentRef{{Revision: "frozen-revision"}, {}} {
+		t.Run(content.Revision, func(t *testing.T) {
+			calls := 0
+			source := ruleFileSource{read: func(ctx context.Context, ref vcs.ContentRef, path string, consume func(io.Reader) error) error {
+				calls++
+				if ref != content || path != "source.m" {
+					t.Errorf("read = %+v, %q", ref, path)
+				}
+				deadline, ok := ctx.Deadline()
+				if !ok || time.Until(deadline) > sniffTimeout {
+					t.Error("sniff context must have a bounded deadline")
+				}
+				body := strings.NewReader("\n  \n" + objcSource + strings.Repeat("x", 100000))
+				if err := consume(body); err != nil {
+					return err
+				}
+				if body.Len() == 0 {
+					t.Error("sniff consumed the entire source instead of stopping at its first line")
+				}
+				return nil
+			}}
+			r, _, err := NewResolver(dir, "", ResolverOptions{Files: source, Content: content, Ref: "stale-ref"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := r.Resolve("source.m"); got != objcRuleText(t) {
+				t.Errorf("injected source rule = %q", truncate(got, 80))
+			}
+			r.Resolve("main.go")
+			if calls != 1 {
+				t.Errorf("source reads = %d, want one .m read", calls)
+			}
+		})
+	}
+}
+
+func TestSniffer_SourceFailureKeepsPathRule(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	dir := t.TempDir()
+	writeFile(t, dir, "source.m", objcSource)
+	for _, failure := range []error{errors.New("revision not available"), context.DeadlineExceeded} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			source := ruleFileSource{read: func(_ context.Context, _ vcs.ContentRef, _ string, consume func(io.Reader) error) error {
+				// A provider may discover an error after the callback returned.
+				if err := consume(strings.NewReader(objcSource)); err != nil {
+					return err
+				}
+				return failure
+			}}
+			r, _, err := NewResolver(dir, "", ResolverOptions{Files: source, Content: vcs.ContentRef{Revision: "missing"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := r.Resolve("source.m"); !strings.Contains(got, "MATLAB") {
+				t.Errorf("source failure should preserve MATLAB path rule, got %q", truncate(got, 80))
+			}
+		})
+	}
+}
 
 func writeFile(t *testing.T, dir, rel, content string) {
 	t.Helper()

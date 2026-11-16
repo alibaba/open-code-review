@@ -8,30 +8,23 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
-	"github.com/alibaba/open-code-review/internal/pathutil"
+	"github.com/alibaba/open-code-review/internal/vcs"
+	vcsgit "github.com/alibaba/open-code-review/internal/vcs/git"
 )
 
-// ReviewMode represents the active review mode.
+// ReviewMode represents the legacy review mode used by callers without Source.
 type ReviewMode int
 
 const (
-	// ModeWorkspace reads files from the current working tree.
 	ModeWorkspace ReviewMode = iota
-	// ModeRange reads files as they exist at a specific git ref (--to value).
 	ModeRange
-	// ModeCommit reads files as they exist at a specific commit hash.
 	ModeCommit
 	ModeEmpty
 )
 
-// ParseReviewMode returns the correct ReviewMode based on provided flag values.
 func ParseReviewMode(from, to, commit string) ReviewMode {
 	if commit != "" {
 		return ModeCommit
@@ -42,8 +35,6 @@ func ParseReviewMode(from, to, commit string) ReviewMode {
 	return ModeWorkspace
 }
 
-// RefValue returns the git ref that should be used for reading file contents
-// in range or commit mode. Returns ("", false) for workspace mode.
 func (m ReviewMode) RefValue(toRef, commit string) (string, bool) {
 	switch m {
 	case ModeRange:
@@ -55,106 +46,75 @@ func (m ReviewMode) RefValue(toRef, commit string) (string, bool) {
 	}
 }
 
-// FileReader resolves file contents according to the active review mode.
+// FileReader resolves content through the selected repository provider. Content
+// is the resolved version; legacy fields remain for callers without Source.
 type FileReader struct {
+	Source  vcs.FileSource
+	Content vcs.ContentRef
 	RepoDir string
 	Mode    ReviewMode
-	// Ref is the git ref to use for ModeRange (--to) or ModeCommit (--commit).
-	// Empty for ModeWorkspace.
-	Ref    string
-	Runner *gitcmd.Runner
+	Ref     string
+	Runner  *gitcmd.Runner
 }
 
-// Read returns the full content of a file path (relative to RepoDir),
-// resolved according to the active review mode.
-// - Workspace: reads directly from the filesystem.
-// - Range / Commit: uses `git show <Ref>:<path>` to read at the given ref.
-func (fr *FileReader) Read(ctx context.Context, path string) (string, error) {
-	switch fr.Mode {
-	case ModeEmpty:
-		return "", fmt.Errorf("file %q does not exist in the empty tree", path)
-	case ModeWorkspace:
-		return fr.readFromDisk(path)
-	case ModeRange, ModeCommit:
-		return fr.readFromGitShow(ctx, path)
-	default:
-		return fr.readFromDisk(path)
+func (fr *FileReader) fileSource() (vcs.FileSource, vcs.ContentRef, error) {
+	if fr.Source != nil {
+		if (fr.Mode == ModeRange || fr.Mode == ModeCommit) && fr.Content.IsWorkspace() {
+			return nil, fr.Content, fmt.Errorf("historical file read requires a revision")
+		}
+		return fr.Source, fr.Content, nil
 	}
+	content := fr.Content
+	if content.IsWorkspace() && (fr.Mode == ModeRange || fr.Mode == ModeCommit) {
+		if fr.Ref == "" {
+			return nil, content, fmt.Errorf("historical file read requires a revision")
+		}
+		content.Revision = fr.Ref
+	}
+	return vcsgit.New(fr.RepoDir, fr.Runner), content, nil
 }
 
-func (fr *FileReader) readFromDisk(path string) (string, error) {
-	fullPath, err := fr.resolveWorkspacePath(path)
+// Read returns the full content of a repository-relative file.
+func (fr *FileReader) Read(ctx context.Context, path string) (string, error) {
+	if fr.Mode == ModeEmpty {
+		return "", fmt.Errorf("file %q does not exist in the empty tree", path)
+	}
+	source, content, err := fr.fileSource()
 	if err != nil {
 		return "", err
 	}
-	content, err := os.ReadFile(fullPath)
+	var data []byte
+	err = source.ReadFile(ctx, content, path, func(reader io.Reader) error {
+		var readErr error
+		data, readErr = io.ReadAll(reader)
+		return readErr
+	})
 	if err != nil {
-		return "", fmt.Errorf("read file %q: %w", path, err)
+		return "", err
 	}
-	return string(content), nil
+	return string(data), nil
 }
 
-func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
-	repoRoot, err := pathutil.CanonicalPath(fr.RepoDir)
-	if err != nil {
-		return "", fmt.Errorf("resolve repository path %q: %w", fr.RepoDir, err)
-	}
-
-	fullPath := filepath.Join(repoRoot, path)
-	if !pathutil.WithinBase(repoRoot, fullPath) {
-		return "", fmt.Errorf("file path %q is outside repository", path)
-	}
-
-	resolvedPath, err := filepath.EvalSymlinks(fullPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fullPath, nil
-		}
-		return "", fmt.Errorf("resolve file %q: %w", path, err)
-	}
-	if !pathutil.WithinBase(repoRoot, resolvedPath) {
-		return "", fmt.Errorf("file path %q is outside repository", path)
-	}
-	return resolvedPath, nil
-}
-
-func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (string, error) {
-	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
-	defer cancel()
-
-	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
-	if fr.Runner != nil {
-		output, err := fr.Runner.Output(ctx, fr.RepoDir, args...)
-		if err != nil {
-			return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
-		}
-		return string(output), nil
-	}
-
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = fr.RepoDir
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
-	}
-	return string(output), nil
-}
-
-// ReadLines returns a window of lines from the file plus the total line count.
-// startLine is 1-based; maxLines is the maximum number of lines to collect.
+// ReadLines collects a window of lines while counting the complete file.
 func (fr *FileReader) ReadLines(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
-	switch fr.Mode {
-	case ModeEmpty:
+	if fr.Mode == ModeEmpty {
 		return nil, 0, fmt.Errorf("file %q does not exist in the empty tree", path)
-	case ModeWorkspace:
-		return fr.readLinesFromDisk(path, startLine, maxLines)
-	case ModeRange, ModeCommit:
-		innerCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		return fr.readLinesFromGitShow(innerCtx, path, startLine, maxLines)
-	default:
-		return fr.readLinesFromDisk(path, startLine, maxLines)
 	}
+	source, content, err := fr.fileSource()
+	if err != nil {
+		return nil, 0, err
+	}
+	var lines []string
+	var total int
+	err = source.ReadFile(ctx, content, path, func(reader io.Reader) error {
+		var readErr error
+		lines, total, readErr = scanLines(reader, startLine, maxLines)
+		return readErr
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return lines, total, nil
 }
 
 // scanLines reads from r line by line, collecting at most maxLines lines
@@ -193,61 +153,4 @@ func scanLines(r io.Reader, startLine, maxLines int) ([]string, int, error) {
 	}
 
 	return collected, lineNum, nil
-}
-
-func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([]string, int, error) {
-	fullPath, err := fr.resolveWorkspacePath(path)
-	if err != nil {
-		return nil, 0, err
-	}
-	f, err := os.Open(fullPath)
-	if err != nil {
-		return nil, 0, fmt.Errorf("read file %q: %w", path, err)
-	}
-	defer f.Close()
-
-	return scanLines(f, startLine, maxLines)
-}
-
-func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
-	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
-
-	var collected []string
-	var totalLines int
-
-	if fr.Runner != nil {
-		err := fr.Runner.Stream(ctx, fr.RepoDir, func(stdout io.Reader) error {
-			var scanErr error
-			collected, totalLines, scanErr = scanLines(stdout, startLine, maxLines)
-			return scanErr
-		}, args...)
-		if err != nil {
-			return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
-		}
-		return collected, totalLines, nil
-	}
-
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = fr.RepoDir
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
-	}
-
-	collected, totalLines, scanErr := scanLines(stdoutPipe, startLine, maxLines)
-	if scanErr != nil {
-		cmd.Process.Kill()
-	}
-	waitErr := cmd.Wait()
-
-	if scanErr != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, scanErr)
-	}
-	if waitErr != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, waitErr)
-	}
-	return collected, totalLines, nil
 }

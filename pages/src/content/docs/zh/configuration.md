@@ -426,3 +426,20 @@ ocr config set language English
 
 - [快速开始](../quickstart/)——最小化设置与首次评审。
 - [CLI 参考](../cli-reference/)——review 命令接受的每个参数。
+
+## 版本控制
+
+默认使用 Git。如需审阅本地 Lore 仓库，请安装 Lore CLI，将其加入 PATH，然后在用户配置中选择 Lore。
+
+```sh
+ocr config set vcs_provider lore
+```
+
+在 Lore 仓库内可以预览工作区改动，也可以用修订号或签名审阅本地已有的修订。单次提交的对比基准是第一个父修订。
+
+```sh
+ocr review --preview
+ocr review --commit 42
+```
+
+执行 `ocr config unset vcs_provider` 可切回 Git。Lore 支持工作区扫描和变更前后的文件读取。目前暂不支持基于共同祖先的 `--from/--to` 比较和 `code_search` 工具。

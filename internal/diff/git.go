@@ -46,6 +46,7 @@ const (
 	ModeWorkspace Mode = iota // current workspace (staged + unstaged + untracked)
 	ModeCommit                // single commit vs its parent
 	ModeRange                 // merge-base(from,to)..to
+	ModeDirect                // exact from..to, without resolving a merge-base
 )
 
 // Provider retrieves and parse git diffs from a repository.
@@ -126,6 +127,11 @@ func NewWorkspaceProvider(repoDir string, runner *gitcmd.Runner) *Provider {
 	}
 }
 
+// NewDirectProvider compares already resolved revisions without changing the base.
+func NewDirectProvider(repoDir, base, head string, runner *gitcmd.Runner) *Provider {
+	return &Provider{repoDir: repoDir, mode: ModeDirect, from: base, to: head, runner: runner}
+}
+
 // InputResolution carries this run's frozen, immutable commit endpoints, per the
 // run-manifest input-mode matrix. An empty field means "not applicable or not
 // resolvable" — a root commit and an unborn workspace have an empty old tree,
@@ -158,8 +164,11 @@ type InputResolution struct {
 // endpoint is reported as an empty field, never a fabricated SHA.
 func (p *Provider) ResolveInput(ctx context.Context) InputResolution {
 	switch p.mode {
-	case ModeRange:
-		base := p.MergeBase(ctx)
+	case ModeRange, ModeDirect:
+		base := p.from
+		if p.mode == ModeRange {
+			base = p.MergeBase(ctx)
+		}
 		head := p.resolveCommit(ctx, p.to)
 		r := InputResolution{ResolvedBase: base, ResolvedHead: head}
 		if base != "" && head != "" {
@@ -219,8 +228,11 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 	var combined strings.Builder
 
 	switch p.mode {
-	case ModeRange:
-		base := p.MergeBase(ctx)
+	case ModeRange, ModeDirect:
+		base := p.from
+		if p.mode == ModeRange {
+			base = p.MergeBase(ctx)
+		}
 		if base == "" {
 			return DiffSet{}, fmt.Errorf("cannot find merge-base between %s and %s", p.from, p.to)
 		}
@@ -260,7 +272,7 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 
 	var ref string
 	switch p.mode {
-	case ModeRange:
+	case ModeRange, ModeDirect:
 		ref = p.to
 	case ModeCommit:
 		ref = p.commit
