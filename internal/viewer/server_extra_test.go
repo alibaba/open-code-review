@@ -4,15 +4,21 @@
 package viewer
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"html"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseTemplate_ReposHTML(t *testing.T) {
@@ -1027,6 +1033,444 @@ func TestSessionJS_UsesDefaultCommentPaging(t *testing.T) {
 			strings.Contains(string(script)[idx:], "commentsPager.reset()") {
 			t.Error("session.js should not re-render comments immediately after constructing the pager")
 		}
+	}
+}
+
+// jsGetSubstitution implements ECMAScript GetSubstitution for
+// String.prototype.replace when replaceValue is a string: $$, $&, $`, $' and
+// $1..$9 capture references.
+func jsGetSubstitution(matched, str string, pos int, captures []string, rep string) string {
+	var b strings.Builder
+	b.Grow(len(rep))
+	for i := 0; i < len(rep); i++ {
+		if rep[i] != '$' || i+1 >= len(rep) {
+			b.WriteByte(rep[i])
+			continue
+		}
+		i++
+		switch rep[i] {
+		case '$':
+			b.WriteByte('$')
+		case '&':
+			b.WriteString(matched)
+		case '`':
+			b.WriteString(str[:pos])
+		case '\'':
+			b.WriteString(str[pos+len(matched):])
+		default:
+			if rep[i] >= '1' && rep[i] <= '9' {
+				idx := int(rep[i] - '1')
+				if idx < len(captures) {
+					b.WriteString(captures[idx])
+					continue
+				}
+			}
+			b.WriteByte('$')
+			b.WriteByte(rep[i])
+		}
+	}
+	return b.String()
+}
+
+func jsRegexReplaceAll(s string, re *regexp.Regexp, rep string) string {
+	matches := re.FindAllStringSubmatchIndex(s, -1)
+	if len(matches) == 0 {
+		return s
+	}
+	var b strings.Builder
+	last := 0
+	for _, m := range matches {
+		b.WriteString(s[last:m[0]])
+		var captures []string
+		for j := 2; j < len(m); j += 2 {
+			if m[j] >= 0 {
+				captures = append(captures, s[m[j]:m[j+1]])
+			} else {
+				captures = append(captures, "")
+			}
+		}
+		b.WriteString(jsGetSubstitution(s[m[0]:m[1]], s, m[0], captures, rep))
+		last = m[1]
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// evalSessionResponseTextJS parses the .response-text formatting block from
+// session.js and executes its exact regex/string replacement pipeline in Go so
+// Linux CI (which runs in a Go-only container without Node.js) still exercises
+// the behavioral regression suite instead of skipping it.
+func evalSessionResponseTextJS(t *testing.T, script string, inputs []string) []string {
+	t.Helper()
+
+	blockRE := regexp.MustCompile(`(?s)document\.querySelectorAll\('\.response-text'\)\.forEach\(function\(el\) \{(.*?)\n\}\);`)
+	blockMatch := blockRE.FindStringSubmatch(script)
+	if blockMatch == nil {
+		t.Fatal("session.js is missing the .response-text formatter block")
+	}
+	block := blockMatch[1]
+
+	escBlockRE := regexp.MustCompile(`(?s)const esc = function\(s\) \{(.*?)\};`)
+	escMatch := escBlockRE.FindStringSubmatch(block)
+	if escMatch == nil {
+		t.Fatal("session.js is missing the esc() helper")
+	}
+	replacePairRE := regexp.MustCompile(`\.replace\(/((?:\\/|[^/])+)/([gm]*),\s*'([^']*)'\)`)
+	compileJSRegex := func(pattern, flags string) *regexp.Regexp {
+		t.Helper()
+		if strings.Contains(flags, "m") {
+			pattern = "(?m)" + pattern
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			t.Fatalf("compile JS regex /%s/%s: %v", pattern, flags, err)
+		}
+		return re
+	}
+
+	type regexStep struct {
+		re  *regexp.Regexp
+		rep string
+	}
+	var escSteps []regexStep
+	for _, m := range replacePairRE.FindAllStringSubmatch(escMatch[1], -1) {
+		escSteps = append(escSteps, regexStep{re: compileJSRegex(m[1], m[2]), rep: m[3]})
+	}
+	if len(escSteps) != 5 {
+		t.Fatalf("esc() replacement step count = %d, want 5", len(escSteps))
+	}
+
+	mdRegionStart := strings.Index(block, "return '%%CODEBLOCK_' + (codeBlocks.length - 1) + '%%';")
+	mdRegionEnd := strings.Index(block, "codeBlocks.forEach")
+	if mdRegionStart == -1 || mdRegionEnd == -1 || mdRegionEnd <= mdRegionStart {
+		t.Fatal("session.js is missing the markdown or codeBlocks restoration region")
+	}
+	var mdSteps []regexStep
+	for _, m := range replacePairRE.FindAllStringSubmatch(block[mdRegionStart:mdRegionEnd], -1) {
+		mdSteps = append(mdSteps, regexStep{re: compileJSRegex(m[1], m[2]), rep: m[3]})
+	}
+	if len(mdSteps) != 8 {
+		t.Fatalf("markdown replacement step count = %d, want 8", len(mdSteps))
+	}
+
+	restoreRE := regexp.MustCompile(`(?s)codeBlocks\.forEach\(function\(code,\s*i\)\s*\{\s*html\s*=\s*html\.replace\('%%CODEBLOCK_'\s*\+\s*i\s*\+\s*'%%',(.*?)\);\s*\}\);`)
+	restoreMatch := restoreRE.FindStringSubmatch(block[mdRegionEnd:])
+	if restoreMatch == nil {
+		t.Fatal("session.js is missing the codeBlocks.forEach html.replace call")
+	}
+	replacerArg := strings.Join(strings.Fields(restoreMatch[1]), " ")
+	var useFunctionReplacer bool
+	switch replacerArg {
+	case `function() { return '<pre class="code-block"><code>' + code + '</code></pre>'; }`:
+		useFunctionReplacer = true
+	case `'<pre class="code-block"><code>' + code + '</code></pre>'`:
+		useFunctionReplacer = false
+	default:
+		t.Fatalf("unexpected code-block replacer argument in session.js: %s", replacerArg)
+	}
+
+	fenceRE := regexp.MustCompile("```(\\w*)\\n([\\s\\S]*?)```")
+	trimNewlineRE := regexp.MustCompile(`^\n|\n$`)
+
+	out := make([]string, len(inputs))
+	for idx, text := range inputs {
+		htmlStr := text
+		for _, step := range escSteps {
+			htmlStr = jsRegexReplaceAll(htmlStr, step.re, step.rep)
+		}
+		var codeBlocks []string
+		fences := fenceRE.FindAllStringSubmatchIndex(htmlStr, -1)
+		if len(fences) > 0 {
+			var b strings.Builder
+			last := 0
+			for _, m := range fences {
+				b.WriteString(htmlStr[last:m[0]])
+				code := trimNewlineRE.ReplaceAllString(htmlStr[m[4]:m[5]], "")
+				codeBlocks = append(codeBlocks, code)
+				b.WriteString("%%CODEBLOCK_" + strconv.Itoa(len(codeBlocks)-1) + "%%")
+				last = m[1]
+			}
+			b.WriteString(htmlStr[last:])
+			htmlStr = b.String()
+		}
+		for _, step := range mdSteps {
+			htmlStr = jsRegexReplaceAll(htmlStr, step.re, step.rep)
+		}
+		for i, code := range codeBlocks {
+			placeholder := "%%CODEBLOCK_" + strconv.Itoa(i) + "%%"
+			pos := strings.Index(htmlStr, placeholder)
+			if pos == -1 {
+				continue
+			}
+			wrapped := `<pre class="code-block"><code>` + code + `</code></pre>`
+			replacement := wrapped
+			if !useFunctionReplacer {
+				replacement = jsGetSubstitution(placeholder, htmlStr, pos, nil, wrapped)
+			}
+			htmlStr = htmlStr[:pos] + replacement + htmlStr[pos+len(placeholder):]
+		}
+		out[idx] = htmlStr
+	}
+	return out
+}
+
+// String.prototype.replace interprets $&, $$, $` and $' in replacement strings.
+// Because esc() runs before fenced code extraction, a literal "$" before a
+// quote, angle bracket or ampersand turns into "$&quot;", "$&#39;", "$&lt;",
+// "$&gt;" or "$&amp;", which a replacement string expands into the internal
+// %%CODEBLOCK_i%% placeholder. Restoring code blocks through a replacement
+// function bypasses GetSubstitution in both the live viewer and HTML export.
+func TestSessionJS_PreservesCodeBlockDollarSigns(t *testing.T) {
+	script, err := assets.ReadFile("static/session.js")
+	if err != nil {
+		t.Fatalf("read static/session.js: %v", err)
+	}
+	const wantCallback = "html = html.replace('%%CODEBLOCK_' + i + '%%', function() {\n" +
+		"            return '<pre class=\"code-block\"><code>' + code + '</code></pre>';\n" +
+		"        });"
+	if !strings.Contains(string(script), wantCallback) {
+		t.Fatalf("session.js must restore code blocks with a replacement callback:\n%s", wantCallback)
+	}
+
+	// Render a session exercising all three .response-text template regions
+	// (Reasoning, Raw LLM response on a grouping task, and ResponseContent)
+	// and verify both the served template and the self-contained export.
+	mustJSON := func(v any) string {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	const (
+		reasoningFence = "```js\nconst currency = \"$\";\n```"
+		groupingFence  = "```json\n[{\"label\":\"dollar-$\",\"files\":[0]}]\n```"
+		responseFence  = "```sh\necho $$\n```"
+	)
+	root := sessionFixture(t,
+		fixtureStart,
+		mustJSON(map[string]any{
+			"type": "llm_request", "filePath": "__grouping__", "taskType": "grouping_task", "request_no": 1,
+			"messages": []any{map[string]any{"role": "user", "content": "[0] MODIFIED   main.go (+1/-1)\n"}},
+		}),
+		mustJSON(map[string]any{
+			"type": "llm_response", "filePath": "__grouping__", "taskType": "grouping_task",
+			"content": groupingFence,
+		}),
+		mustJSON(map[string]any{
+			"type": "llm_request", "filePath": "main.go", "taskType": "main_task", "request_no": 2,
+			"messages": []any{map[string]any{"role": "user", "content": "review"}},
+		}),
+		mustJSON(map[string]any{
+			"type": "llm_response", "filePath": "main.go", "taskType": "main_task",
+			"reasoning_content": reasoningFence,
+			"content":           responseFence,
+		}),
+		fixtureEnd,
+	)
+
+	var exported bytes.Buffer
+	if err := ExportSession(&exported, root, "repo", "sess1"); err != nil {
+		t.Fatalf("ExportSession: %v", err)
+	}
+	if !strings.Contains(exported.String(), wantCallback) {
+		t.Fatal("exported session HTML is missing the code-block replacement callback")
+	}
+
+	responseTextRE := regexp.MustCompile(`(?s)<div class="response-text">(.*?)</div>`)
+	matches := responseTextRE.FindAllStringSubmatch(exported.String(), -1)
+	if len(matches) != 3 {
+		t.Fatalf("rendered .response-text count = %d, want 3", len(matches))
+	}
+	templateTexts := make([]string, len(matches))
+	for i, m := range matches {
+		templateTexts[i] = html.UnescapeString(m[1])
+	}
+	wantTemplateTexts := []string{groupingFence, reasoningFence, responseFence}
+	for i, want := range wantTemplateTexts {
+		if templateTexts[i] != want {
+			t.Fatalf("template .response-text[%d] textContent = %q, want %q", i, templateTexts[i], want)
+		}
+	}
+
+	type testCase struct {
+		name     string
+		input    string
+		wantHTML string
+		wantCode []string
+	}
+	cases := []testCase{
+		{
+			name:     "double-quoted dollar sign",
+			input:    "```js\nconst currency = \"$\";\n```",
+			wantHTML: `<pre class="code-block"><code>const currency = &quot;$&quot;;</code></pre>`,
+			wantCode: []string{`const currency = "$";`},
+		},
+		{
+			name:     "single-quoted regex end anchor",
+			input:    "```py\npattern = 'end$'\n```",
+			wantHTML: `<pre class="code-block"><code>pattern = &#39;end$&#39;</code></pre>`,
+			wantCode: []string{`pattern = 'end$'`},
+		},
+		{
+			name:     "shell double dollar",
+			input:    "```sh\necho $$\n```",
+			wantHTML: `<pre class="code-block"><code>echo $$</code></pre>`,
+			wantCode: []string{`echo $$`},
+		},
+		{
+			name:     "replacement token dollar ampersand",
+			input:    "```js\ns.replace(/a/g, \"$&\")\n```",
+			wantHTML: `<pre class="code-block"><code>s.replace(/a/g, &quot;$&amp;&quot;)</code></pre>`,
+			wantCode: []string{`s.replace(/a/g, "$&")`},
+		},
+		{
+			name:     "dollar backtick with surrounding prose",
+			input:    "Intro text\n```js\nconst x = $` + 1;\n```\nOutro text",
+			wantHTML: "Intro text<br><pre class=\"code-block\"><code>const x = $` + 1;</code></pre><br>Outro text",
+			wantCode: []string{"const x = $` + 1;"},
+		},
+		{
+			name:     "multiple fenced code blocks in one response",
+			input:    "```js\nconst a = \"$\";\n```\nMiddle\n```sh\necho $$\n```",
+			wantHTML: `<pre class="code-block"><code>const a = &quot;$&quot;;</code></pre><br>Middle<br><pre class="code-block"><code>echo $$</code></pre>`,
+			wantCode: []string{`const a = "$";`, `echo $$`},
+		},
+		{
+			name:     "ordinary dollar variables and amounts",
+			input:    "```sh\necho $HOME $1 $100\n```",
+			wantHTML: `<pre class="code-block"><code>echo $HOME $1 $100</code></pre>`,
+			wantCode: []string{`echo $HOME $1 $100`},
+		},
+		{
+			name:     "HTML tags inside fenced code block",
+			input:    "```html\n<div data-price=\"$100\"><span>$x</span></div>\n```",
+			wantHTML: `<pre class="code-block"><code>&lt;div data-price=&quot;$100&quot;&gt;&lt;span&gt;$x&lt;/span&gt;&lt;/div&gt;</code></pre>`,
+			wantCode: []string{`<div data-price="$100"><span>$x</span></div>`},
+		},
+		{
+			name:     "ordinary markdown formatting",
+			input:    "# Heading\n\nParagraph with **bold** and `inline`.\n\n- item 1",
+			wantHTML: `<div class="md-h1">Heading</div><br><br>Paragraph with <strong>bold</strong> and <code class="inline-code">inline</code>.<br><br><div class="md-li">&bull; item 1</div>`,
+			wantCode: nil,
+		},
+		{
+			name:     "template grouping raw LLM response",
+			input:    templateTexts[0],
+			wantHTML: `<pre class="code-block"><code>[{&quot;label&quot;:&quot;dollar-$&quot;,&quot;files&quot;:[0]}]</code></pre>`,
+			wantCode: []string{`[{"label":"dollar-$","files":[0]}]`},
+		},
+		{
+			name:     "template reasoning response",
+			input:    templateTexts[1],
+			wantHTML: `<pre class="code-block"><code>const currency = &quot;$&quot;;</code></pre>`,
+			wantCode: []string{`const currency = "$";`},
+		},
+		{
+			name:     "template main response content",
+			input:    templateTexts[2],
+			wantHTML: `<pre class="code-block"><code>echo $$</code></pre>`,
+			wantCode: []string{`echo $$`},
+		},
+	}
+
+	inputs := make([]string, len(cases))
+	for i, tc := range cases {
+		inputs[i] = tc.input
+	}
+
+	// Verify that the evaluator reproduces the original corruption when given
+	// the pre-fix string-replacement form, then evaluate the actual embedded
+	// static/session.js unconditionally on every platform.
+	legacyScript := strings.Replace(
+		string(script),
+		wantCallback,
+		"html = html.replace('%%CODEBLOCK_' + i + '%%',\n            '<pre class=\"code-block\"><code>' + code + '</code></pre>');",
+		1,
+	)
+	legacyHTML := evalSessionResponseTextJS(t, legacyScript, inputs[:6])
+	for i, got := range legacyHTML {
+		if got == cases[i].wantHTML {
+			t.Fatalf("legacy string replacement unexpectedly preserved case %q: %s", cases[i].name, got)
+		}
+	}
+
+	gotHTML := evalSessionResponseTextJS(t, string(script), inputs)
+
+	if node, err := exec.LookPath("node"); err == nil {
+		payload, err := json.Marshal(struct {
+			Script string   `json:"script"`
+			Inputs []string `json:"inputs"`
+		}{
+			Script: string(script),
+			Inputs: inputs,
+		})
+		if err != nil {
+			t.Fatalf("marshal node payload: %v", err)
+		}
+
+		const runner = `
+const fs = require("fs");
+const vm = require("vm");
+const { script, inputs } = JSON.parse(fs.readFileSync(0, "utf8"));
+const elements = inputs.map((text) => ({ textContent: text, innerHTML: "" }));
+const sandbox = {
+  ocrArrowScroll: () => {},
+  window: { location: { pathname: "/r/repo/sess1" }, ocrPager: () => ({ reset() {}, refresh() {} }) },
+  localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+  console,
+  document: {
+    querySelector: () => null,
+    getElementById: () => null,
+    querySelectorAll: (sel) => (sel === ".response-text" ? elements : []),
+  },
+};
+vm.runInNewContext(script, sandbox);
+process.stdout.write(JSON.stringify(elements.map((el) => el.innerHTML)));
+`
+		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, node, "-e", runner)
+		cmd.Stdin = bytes.NewReader(payload)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("execute session.js in node: %v\n%s", err, out)
+		}
+
+		var nodeHTML []string
+		if err := json.Unmarshal(out, &nodeHTML); err != nil {
+			t.Fatalf("unmarshal node output %q: %v", out, err)
+		}
+		if len(nodeHTML) != len(gotHTML) {
+			t.Fatalf("node result count = %d, want %d", len(nodeHTML), len(gotHTML))
+		}
+		for i := range gotHTML {
+			if nodeHTML[i] != gotHTML[i] {
+				t.Fatalf("case %q: node output %q != evaluated output %q", cases[i].name, nodeHTML[i], gotHTML[i])
+			}
+		}
+	}
+
+	codeBlockRE := regexp.MustCompile(`(?s)<pre class="code-block"><code>(.*?)</code></pre>`)
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := gotHTML[i]
+			if got != tc.wantHTML {
+				t.Errorf("innerHTML = %q, want %q", got, tc.wantHTML)
+			}
+			if strings.Contains(got, "%%CODEBLOCK_") {
+				t.Errorf("innerHTML leaked placeholder: %q", got)
+			}
+			codeMatches := codeBlockRE.FindAllStringSubmatch(got, -1)
+			if len(codeMatches) != len(tc.wantCode) {
+				t.Fatalf("code block count = %d, want %d in %q", len(codeMatches), len(tc.wantCode), got)
+			}
+			for j, m := range codeMatches {
+				if text := html.UnescapeString(m[1]); text != tc.wantCode[j] {
+					t.Errorf("code block[%d] text = %q, want %q", j, text, tc.wantCode[j])
+				}
+			}
+		})
 	}
 }
 

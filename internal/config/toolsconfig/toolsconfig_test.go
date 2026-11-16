@@ -5,104 +5,208 @@ package toolsconfig
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
-func TestLoad_Default(t *testing.T) {
-	tools, err := Load("")
+func TestLoadDefault(t *testing.T) {
+	tools, err := LoadDefault()
 	if err != nil {
 		t.Fatalf("Load default tools: %v", err)
 	}
-	if len(tools) == 0 {
-		t.Fatal("expected at least one tool from embedded config")
+	expected := []string{"task_done", "code_comment", "code_search", "file_read", "file_read_diff", "file_find"}
+	if len(tools) != len(expected) {
+		t.Fatalf("got %d tools, want %d", len(tools), len(expected))
 	}
-	// Verify first tool has required fields
-	first := tools[0]
-	if first.Name == "" {
-		t.Error("expected non-empty tool name")
-	}
-	if first.Definition == nil {
-		t.Error("expected non-nil definition")
+	for index, want := range expected {
+		entry := tools[index]
+		if entry.Name != want {
+			t.Errorf("tool %d: got %s, want %s", index, entry.Name, want)
+		}
+		var definition struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Parameters  struct {
+				Type       string                     `json:"type"`
+				Properties map[string]json.RawMessage `json:"properties"`
+				Required   []string                   `json:"required"`
+			} `json:"parameters"`
+		}
+		if err := json.Unmarshal(entry.Definition, &definition); err != nil {
+			t.Fatalf("parse %s: %v", entry.Name, err)
+		}
+		if definition.Name != entry.Name || definition.Description == "" {
+			t.Errorf("%s: invalid name or missing description", entry.Name)
+		}
+		if definition.Parameters.Type != "object" || len(definition.Parameters.Properties) == 0 {
+			t.Errorf("%s: expected object schema with properties", entry.Name)
+		}
+		for _, required := range definition.Parameters.Required {
+			if _, exists := definition.Parameters.Properties[required]; !exists {
+				t.Errorf("%s: required field %q missing from properties", entry.Name, required)
+			}
+		}
 	}
 }
 
-func TestLoad_CustomFile(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "tools.json")
-	data := `[
-		{"name": "test_tool", "plan_task": true, "main_task": false, "definition": {"name": "test_tool"}}
-	]`
-	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
-		t.Fatalf("write tools.json: %v", err)
-	}
-
-	tools, err := Load(path)
+func TestDefaultToolNamesAreUnique(test *testing.T) {
+	entries, err := LoadDefault()
 	if err != nil {
-		t.Fatalf("Load custom file: %v", err)
+		test.Fatal(err)
 	}
-	if len(tools) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(tools))
-	}
-	if tools[0].Name != "test_tool" {
-		t.Errorf("expected name=test_tool, got %s", tools[0].Name)
-	}
-	if !tools[0].PlanTask {
-		t.Error("expected PlanTask=true")
-	}
-	if tools[0].MainTask {
-		t.Error("expected MainTask=false")
-	}
-}
-
-func TestLoad_FileNotFound(t *testing.T) {
-	_, err := Load("/nonexistent/tools.json")
-	if err == nil {
-		t.Error("expected error for nonexistent file")
+	seen := make(map[string]int, len(entries))
+	for index, entry := range entries {
+		if strings.TrimSpace(entry.Name) == "" {
+			test.Errorf("tools.json entry %d has an empty name", index)
+		}
+		if previous, exists := seen[entry.Name]; exists {
+			test.Errorf("tools.json entries %d and %d share the name %q", previous, index, entry.Name)
+		} else {
+			seen[entry.Name] = index
+		}
 	}
 }
 
-func TestLoad_InvalidJSON(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "tools.json")
-	if err := os.WriteFile(path, []byte("not json"), 0644); err != nil {
-		t.Fatalf("write tools.json: %v", err)
+func TestDefaultToolNamesMatchDefinitions(test *testing.T) {
+	entries, err := LoadDefault()
+	if err != nil {
+		test.Fatal(err)
 	}
-
-	_, err := Load(path)
-	if err == nil {
-		t.Error("expected error for invalid JSON")
+	for index, entry := range entries {
+		var definition struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(entry.Definition, &definition); err != nil {
+			test.Errorf("tools.json entry %d (%q): invalid definition: %v", index, entry.Name, err)
+			continue
+		}
+		if definition.Name != entry.Name {
+			test.Errorf("tools.json entry %d: name %q does not match definition.name %q", index, entry.Name, definition.Name)
+		}
 	}
 }
 
-func TestToolDefsByPhase(t *testing.T) {
-	def := json.RawMessage(`{"name": "test"}`)
-	tests := []struct {
-		name     string
-		entry    ToolConfigEntry
-		planOnly bool
-		wantOk   bool
+func TestLoadDefaultInvalidJSON(t *testing.T) {
+	original := defaultToolsJSON
+	t.Cleanup(func() { defaultToolsJSON = original })
+	defaultToolsJSON = []byte("not json")
+	_, err := LoadDefault()
+	if err == nil || !strings.Contains(err.Error(), "unmarshal embedded tools") {
+		t.Fatalf("got %v, want embedded tools parse error", err)
+	}
+}
+
+func TestLoadDefaultIndependentCopies(t *testing.T) {
+	first, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := string(first[0].Definition)
+	first[0].Name = "changed"
+	first[0].Definition[0] = '!'
+	second, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second[0].Name != "task_done" || string(second[0].Definition) != original {
+		t.Fatal("mutating a loaded definition changed the embedded defaults")
+	}
+}
+
+func TestResolveOrderedDefinitions(test *testing.T) {
+	entries, err := LoadDefault()
+	if err != nil {
+		test.Fatal(err)
+	}
+	names := []string{"file_find", "task_done", "file_read"}
+	definitions, err := Resolve(entries, names)
+	if err != nil {
+		test.Fatal(err)
+	}
+	var actual []string
+	for _, definition := range definitions {
+		actual = append(actual, definition.Function.Name)
+		if definition.Type != "function" {
+			test.Errorf("unexpected tool type %q", definition.Type)
+		}
+		for _, entry := range entries {
+			if entry.Name == definition.Function.Name && string(entry.Definition) != string(definition.Function.RawDefinition) {
+				test.Errorf("raw definition changed for %s", entry.Name)
+			}
+		}
+	}
+	if !reflect.DeepEqual(actual, names) {
+		test.Errorf("resolved names = %v, want %v", actual, names)
+	}
+	for _, empty := range [][]string{nil, {}} {
+		definitions, err := Resolve(entries, empty)
+		if err != nil || definitions != nil {
+			test.Errorf("empty selection = %v, %v; want nil, nil", definitions, err)
+		}
+	}
+}
+
+func TestResolveDeduplicatesReferencesInFirstOccurrenceOrder(test *testing.T) {
+	entries, err := LoadDefault()
+	if err != nil {
+		test.Fatal(err)
+	}
+	cases := []struct {
+		name  string
+		names []string
+		want  []string
 	}{
-		{"plan_task and planOnly=true", ToolConfigEntry{PlanTask: true, MainTask: false, Definition: def}, true, true},
-		{"plan_task and planOnly=false", ToolConfigEntry{PlanTask: true, MainTask: false, Definition: def}, false, false},
-		{"main_task and planOnly=false", ToolConfigEntry{PlanTask: false, MainTask: true, Definition: def}, false, true},
-		{"main_task and planOnly=true", ToolConfigEntry{PlanTask: false, MainTask: true, Definition: def}, true, false},
-		{"both and planOnly=true", ToolConfigEntry{PlanTask: true, MainTask: true, Definition: def}, true, true},
-		{"both and planOnly=false", ToolConfigEntry{PlanTask: true, MainTask: true, Definition: def}, false, true},
-		{"neither", ToolConfigEntry{PlanTask: false, MainTask: false, Definition: def}, true, false},
+		{"adjacent", []string{"file_read", "file_read"}, []string{"file_read"}},
+		{"separated", []string{"file_find", "task_done", "file_find", "file_read", "task_done"}, []string{"file_find", "task_done", "file_read"}},
+		{"all repeated", []string{"code_search", "code_search", "code_search"}, []string{"code_search"}},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, ok := tc.entry.ToolDefsByPhase(tc.planOnly)
-			if ok != tc.wantOk {
-				t.Errorf("ToolDefsByPhase(planOnly=%v) ok=%v, want %v", tc.planOnly, ok, tc.wantOk)
+	for _, scenario := range cases {
+		test.Run(scenario.name, func(test *testing.T) {
+			original := append([]string(nil), scenario.names...)
+			definitions, err := Resolve(entries, scenario.names)
+			if err != nil {
+				test.Fatal(err)
 			}
-			if tc.wantOk && got == nil {
-				t.Error("expected non-nil definition when ok=true")
+			var names []string
+			for _, definition := range definitions {
+				names = append(names, definition.Function.Name)
 			}
-			if !tc.wantOk && got != nil {
-				t.Error("expected nil definition when ok=false")
+			if !reflect.DeepEqual(names, scenario.want) {
+				test.Errorf("resolved names = %v, want %v", names, scenario.want)
+			}
+			if !reflect.DeepEqual(scenario.names, original) {
+				test.Errorf("input selection changed: got %v, want %v", scenario.names, original)
+			}
+		})
+	}
+}
+
+func TestResolveInvalidConfiguration(test *testing.T) {
+	valid := ToolConfigEntry{Name: "read", Definition: json.RawMessage(`{"name":"read","description":"Read a file","parameters":{"type":"object"}}`)}
+	cases := []struct {
+		name    string
+		entries []ToolConfigEntry
+		names   []string
+		want    string
+	}{
+		{"unknown", []ToolConfigEntry{valid}, []string{"missing"}, `unknown tool reference "missing"`},
+		{"empty reference", []ToolConfigEntry{valid}, []string{""}, `unknown tool reference ""`},
+		{"unknown after duplicates", []ToolConfigEntry{valid}, []string{"read", "read", "missing"}, `unknown tool reference "missing"`},
+		{"duplicate definition", []ToolConfigEntry{valid, valid}, nil, `duplicate tool definition "read"`},
+		{"empty name", []ToolConfigEntry{{Name: "  "}}, nil, "tool name must not be empty"},
+		{"malformed definition", []ToolConfigEntry{{Name: "read", Definition: json.RawMessage(`{invalid}`)}}, nil, `parse tool "read"`},
+		{"mismatched name", []ToolConfigEntry{{Name: "other", Definition: valid.Definition}}, nil, "mismatched definition name"},
+		{"null definition", []ToolConfigEntry{{Name: "read", Definition: json.RawMessage(`null`)}}, nil, "mismatched definition name"},
+		{"missing description", []ToolConfigEntry{{Name: "read", Definition: json.RawMessage(`{"name":"read","parameters":{"type":"object"}}`)}}, nil, "requires a description and object parameters"},
+		{"missing parameters", []ToolConfigEntry{{Name: "read", Definition: json.RawMessage(`{"name":"read","description":"Read"}`)}}, nil, "requires a description and object parameters"},
+		{"invalid parameter type", []ToolConfigEntry{{Name: "read", Definition: json.RawMessage(`{"name":"read","description":"Read","parameters":{"type":"array"}}`)}}, nil, "requires a description and object parameters"},
+	}
+	for _, scenario := range cases {
+		test.Run(scenario.name, func(test *testing.T) {
+			definitions, err := Resolve(scenario.entries, scenario.names)
+			if definitions != nil || err == nil || !strings.Contains(err.Error(), scenario.want) {
+				test.Fatalf("Resolve = %v, %v; want no definitions and %q", definitions, err, scenario.want)
 			}
 		})
 	}

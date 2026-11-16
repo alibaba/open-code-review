@@ -8,6 +8,13 @@ OCR 可以作为 **Model Context Protocol（MCP）客户端**。你把它指向�
 MCP server，这些 server 暴露的工具就会提供给审查 agent —— 与 `file_read`、
 `code_search` 等[内置工具](../tools/)并列。
 
+MCP 为专用 Agent 扩展外部业务上下文，不能覆盖内置工具的名称或定义。
+目前只有 `ocr review` 接入 MCP，`ocr scan` 尚未接入。Benchmark 结果适用于
+受测 Agent 配置，不代表任意 MCP 服务器组合都经过验证。
+
+建议优先使用只读上下文工具，并设置最小化的 `tools` 白名单。OCR 不强制 MCP 工具
+只读；启用前请检查服务器的权限与数据访问范围。
+
 ## 何时使用
 
 当审查器需要 diff 之外的上下文时，就该引入 MCP server：

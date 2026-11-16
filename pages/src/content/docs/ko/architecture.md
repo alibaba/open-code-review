@@ -24,11 +24,11 @@ flowchart TD
 ```
 
 전체 흐름을 지휘하는 코드는
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 패키지에 있습니다. 주요 파일은 `agent.go`(디스패치와 그룹별 오케스트레이션),
 `grouping.go`(의미 기반 파일 그룹화), `selection.go`(파일 필터),
 `preview.go`(`--preview` 보고서), `util.go`(헬퍼)입니다. 도구 호출 루프와 메모리 압축은 그 옆의
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)에
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/)에
 있습니다. 진입점은 두 개가 중요합니다. `Agent.Run`(파이프라인 최상단)과
 `Agent.dispatchSubtasks`(그룹별 팬아웃)입니다.
 
@@ -146,8 +146,8 @@ if fileCount >= 2 && total >= PlanModeGroupLineThreshold { plan }  // several mo
 작은 변경에서는 plan이 값어치 없이 시간만 잡아먹으므로 조용히 건너뛰고 곧장
 main 루프로 갑니다. 그 외에는 `PLAN_TASK` LLM 호출을 **한 번** 합니다. 이때
 `Tools` 필드를 보내지 않으므로 모델은 계획 중에 도구를 부를 수 없습니다.
-읽기 전용 도구 세 가지(`code_search`, `file_read_diff`, `file_find` —
-`tools.json`에서 `plan_task` 플래그가 `true`인 도구들)는 `{{plan_tools}}`
+읽기 전용 도구 네 가지(`code_search`, `file_read`, `file_read_diff`, `file_find` —
+`task_template.json`의 `PLAN_TASK.tool_references`로 선택)는 `{{plan_tools}}`
 자리에 평문으로 박아 넣어(`formatToolDefs`가 렌더링) 나중에 무엇을 쓸 수
 있는지 모델이 알게 합니다. 모델이 돌려준 체크리스트는 main 프롬프트의
 `{{plan_guidance}}`가 됩니다.
@@ -155,8 +155,8 @@ main 루프로 갑니다. 그 외에는 `PLAN_TASK` LLM 호출을 **한 번** �
 ### 2단계 — main 루프 {#phase-2-main-loop}
 
 main 루프는 `MAIN_TASK` 프롬프트를 조립해 모델과 도구 호출 대화를 진행합니다.
-전체 도구 세트에는 plan 단계 도구에 더해 **`task_done`**, **`code_comment`**,
-**`file_read`**가 들어갑니다. 전체 목록은 [도구](../tools/)를 참고하세요.
+전체 도구 세트에는 plan 단계 도구 참조에 더해 **`task_done`**과 **`code_comment`**가
+들어갑니다. 전체 목록은 [도구](../tools/)를 참고하세요.
 
 ```
 loop up to MAX_TOOL_REQUEST_TIMES (default 100):
@@ -352,9 +352,9 @@ OCR은 이 검사로 괴물 같은 diff(자동 생성된 lock 파일, 수천 줄
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go)에
 있습니다. 템플릿 자체는 CLI로 덮어쓸 수 없습니다. 프롬프트를 바꾸려면
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)을
-고치고 다시 빌드해야 합니다. `--tools` 플래그는 *도구 레지스트리*를 덮어쓰는
-것이지(`internal/config/toolsconfig`가 읽는 JSON을 갈아 끼웁니다) 템플릿을
-덮어쓰는 게 아닙니다. [도구](../tools/#customizing-tools)를 참고하세요.
+고치고 다시 빌드해야 합니다. 내장 도구 정의도 실행 시점에 덮어쓸 수 없습니다.
+프로젝트 지침에는 리뷰 규칙과 배경 정보를, 외부 업무 맥락에는 MCP를 사용하세요.
+[도구](../tools/#customizing-tools)를 참고하세요.
 
 > **플레이스홀더 문법 주의.** 위의 플레이스홀더는 모두 중괄호 두 개
 > `{{…}}` 문법을 쓰지만 `RE_LOCATION_TASK`만 예외입니다. 여기서는 중괄호

@@ -1,5 +1,6 @@
 {
   "MAIN_TASK": {
+    "tools": ["task_done", "code_comment", "code_search", "file_read", "file_find"],
     "messages": [
       {
         "role": "system",
@@ -83,5 +84,6 @@
   "MAX_FILE_SIZE_BYTES": 2097152,
   "BATCH_STRATEGY": "by-language",
   "BATCH_SIZE": 50,
+  "PLAN_MODE_LINE_THRESHOLD": 200,
   "DEDUP_MIN_COMMENTS": 4
 }
