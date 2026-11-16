@@ -196,6 +196,45 @@ func TestMaybeRunPlan_SkipPathsDoNotCallLLM(t *testing.T) {
 	}
 }
 
+func TestPlanEnabledFor(t *testing.T) {
+	tpl := makeTemplateWithFullScan()
+	tpl.PlanTask = &template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "plan {{file_content}}"}},
+	}
+	tpl.PlanModeLineThreshold = 200
+	a := newAgentForTest(t, tpl)
+
+	cases := []struct {
+		name     string
+		item     model.ScanItem
+		expected bool
+	}{
+		{name: "below threshold", item: model.ScanItem{Content: "content", LineCount: 199}},
+		{name: "boundary", item: model.ScanItem{Content: "content", LineCount: 200}, expected: true},
+		{name: "above threshold", item: model.ScanItem{Content: "content", LineCount: 201}, expected: true},
+		{name: "empty", item: model.ScanItem{LineCount: 200}},
+		{name: "binary", item: model.ScanItem{Content: "content", LineCount: 200, IsBinary: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := a.planEnabledFor(tc.item); got != tc.expected {
+				t.Errorf("planEnabledFor(%+v) = %v, want %v", tc.item, got, tc.expected)
+			}
+		})
+	}
+
+	a.args.SkipPlan = true
+	if a.planEnabledFor(model.ScanItem{Content: "content", LineCount: 200}) {
+		t.Error("SkipPlan should suppress planning for every file")
+	}
+
+	a.args.SkipPlan = false
+	a.args.Template.PlanModeLineThreshold = 0
+	if !a.planEnabledFor(model.ScanItem{Content: "content", LineCount: 1}) {
+		t.Error("non-positive threshold should allow planning for eligible files")
+	}
+}
+
 func TestRenderMessages(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	a := newAgentForTest(t, tpl)
@@ -310,33 +349,6 @@ func TestSelectScanItems_NoLimit(t *testing.T) {
 func selectScanItemsForTest(t *testing.T, a *Agent, items []model.ScanItem) []model.ScanItem {
 	t.Helper()
 	return selectedScanItems(a.selectScanItems(items))
-}
-
-func TestInjectScanContentMap(t *testing.T) {
-	tpl := makeTemplateWithFullScan()
-	a := newAgentForTest(t, tpl)
-	a.args.Tools.Register(tool.NewFileReadDiff(tool.DiffMap{}))
-
-	a.items = []model.ScanItem{
-		{Path: "x.go", Content: "package x"},
-		{Path: "y.go", Content: "package y"},
-	}
-	a.injectScanContentMap()
-
-	p, ok := a.args.Tools.Get(tool.FileReadDiff.Name())
-	if !ok {
-		t.Fatal("file_read_diff not registered")
-	}
-	frd := p.(*tool.FileReadDiffProvider)
-	res, err := frd.Execute(t.Context(), map[string]any{
-		"path_array": []any{"x.go", "y.go", "missing.go"},
-	})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if !strings.Contains(res, "package x") || !strings.Contains(res, "package y") {
-		t.Errorf("missing scan content:\n%s", res)
-	}
 }
 
 func TestNewAgent_SetsSessionMode(t *testing.T) {

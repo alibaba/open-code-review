@@ -22,7 +22,7 @@
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
-  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://img.shields.io/badge/Ask-DeepWiki-blue?style=flat-square" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
@@ -123,6 +123,9 @@ npm install -g @alibaba-group/open-code-review
 **1. Настройте LLM**
 
 Перед запуском ревью необходимо настроить LLM, если только вы не используете [режим делегирования](https://open-codereview.ai/docs/delegate).
+
+- **Модель вызывает OCR:** `ocr review`, команда `/open-code-review:review` и навык `open-code-review` используют настройки провайдера в OCR, а не авторизацию по подписке Claude Code Team/Pro. Требования к аутентификации зависят от провайдера; см. [руководство по настройке](https://open-codereview.ai/docs/configuration).
+- **Модель вызывает хост-агент:** команда `/open-code-review:delegate-review` и навык `open-code-review-delegate` используют модель и способ аутентификации, настроенные в хост-агенте. Отдельная настройка LLM или учётных данных в OCR не требуется. См. [инструкции по установке для Claude Code](../../plugins/open-code-review/README.md#claude-code).
 
 ```bash
 ocr config provider          # Выбрать встроенного провайдера или добавить пользовательский

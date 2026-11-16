@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,6 +54,7 @@ type Provider struct {
 // back to DefaultMaxFileSizeBytes.
 func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileSizeBytes int64) *Provider {
 	cleaned := make([]string, 0, len(paths))
+	rootSelected := false
 	for _, p := range paths {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -60,9 +62,27 @@ func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileS
 		}
 		// Normalize: strip leading "./" and trailing "/" so prefix matching
 		// against `git ls-files` output (which never has leading "./") works.
-		p = strings.TrimPrefix(p, "./")
+		// ToSlash runs first: on Windows `.\dir` only becomes `./dir` here, and
+		// trimming the prefix before the conversion leaves it in place to match
+		// nothing.
+		p = filepath.ToSlash(p)
+		for strings.HasPrefix(p, "./") {
+			p = strings.TrimPrefix(p, "./")
+		}
 		p = strings.TrimSuffix(p, "/")
-		cleaned = append(cleaned, filepath.ToSlash(p))
+		// "." and "./" name the repository root, which is what an omitted --path
+		// already means. Kept as a selector they match nothing, because
+		// `git ls-files` prints `main.go` and never `./main.go`.
+		if p == "" || p == "." {
+			rootSelected = true
+			continue
+		}
+		cleaned = append(cleaned, p)
+	}
+	// A root selector widens the scan to the whole repository, so any narrower
+	// selector alongside it is already covered.
+	if rootSelected {
+		cleaned = nil
 	}
 	if maxFileSizeBytes <= 0 {
 		maxFileSizeBytes = DefaultMaxFileSizeBytes
@@ -84,7 +104,10 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 	}
 
 	if len(p.paths) > 0 {
-		files = filterByPaths(files, p.paths)
+		files, err = p.filterByPaths(files)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	gitignorePatterns := diff.LoadGitignorePatterns(p.repoDir)
@@ -274,19 +297,137 @@ func (p *Provider) gitLs(ctx context.Context, args ...string) ([]string, error) 
 	return files, nil
 }
 
-// filterByPaths keeps only entries whose path equals a user-supplied path
-// (for exact files) or lies under it (for directories).
-func filterByPaths(all []string, paths []string) []string {
-	var out []string
-	for _, f := range all {
-		for _, want := range paths {
-			if f == want || strings.HasPrefix(f, want+"/") {
-				out = append(out, f)
-				break
+// filterByPaths keeps only entries named by a --path selector: the file
+// itself, or everything under it for a directory.
+//
+// The selector's own spelling is tried first, so on a case-sensitive
+// filesystem `--path src` names `src/` alone even when a sibling `SRC/`
+// exists. A selector that names nothing in its own spelling is then resolved
+// against the working tree, which decides what the spelling names: symlinks
+// are followed and, on a case-insensitive filesystem, the answer carries the
+// on-disk case, so `--path SRC` names the tracked `src/` on Windows and
+// macOS. Only the resolved path is matched, and it is matched exactly, so a
+// selector can never widen to a case-variant sibling that the filesystem did
+// not name -- an empty `src/docs/` selects nothing even while `src/DOCS/`
+// holds tracked files.
+//
+// A selector that resolves but matches no enumerated entry (an ignored path,
+// say) stays a clean, empty selection. One the working tree does not resolve
+// is an error -- `--path` names a path, not a search pattern, so a mistyped or
+// wrongly-cased selector must not pass for a clean scan of zero files.
+func (p *Provider) filterByPaths(all []string) ([]string, error) {
+	keep := make([]bool, len(all))
+	for _, want := range p.paths {
+		exact := false
+		for i, f := range all {
+			if pathMatches(f, want) {
+				keep[i] = true
+				exact = true
+			}
+		}
+		if exact {
+			continue
+		}
+		resolved, err := p.resolveSelector(want)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("--path %q does not exist in the working tree", want)
+			}
+			return nil, fmt.Errorf("--path %q: %w", want, err)
+		}
+		for i, f := range all {
+			if pathMatches(f, resolved) {
+				keep[i] = true
 			}
 		}
 	}
-	return out
+	var out []string
+	for i, f := range all {
+		if keep[i] {
+			out = append(out, f)
+		}
+	}
+	return out, nil
+}
+
+// resolveSelector returns the repo-relative path the working tree holds at
+// the selector's spelling, or an error wrapping fs.ErrNotExist when nothing
+// is there. The filesystem decides what resolves: symlinks are followed, and
+// a case-insensitive filesystem answers with the on-disk spelling, so `SRC`
+// names `src/` on Windows and macOS while a case-sensitive filesystem keeps
+// the two apart. The result feeds exact matching, never folding, so a
+// resolved selector cannot also drag in a case-variant sibling.
+func (p *Provider) resolveSelector(want string) (string, error) {
+	root, err := filepath.EvalSymlinks(p.repoDir)
+	if err != nil {
+		return "", err
+	}
+	real, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(want)))
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(root, real)
+	if err != nil {
+		return "", err
+	}
+	rel = filepath.ToSlash(rel)
+	// A selector can leave the repository through `..` or an absolute path;
+	// nothing tracked can match, and the clean skip stays.
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return rel, nil
+	}
+	// EvalSymlinks normalises case on Windows but not on macOS, where the
+	// on-disk spelling of every component still has to come from the
+	// directory listing.
+	resolved := ""
+	for _, part := range strings.Split(rel, "/") {
+		name, err := onDiskName(filepath.Join(root, filepath.FromSlash(resolved)), part)
+		if err != nil {
+			return "", err
+		}
+		if resolved == "" {
+			resolved = name
+			continue
+		}
+		resolved += "/" + name
+	}
+	return resolved, nil
+}
+
+// onDiskName returns the name of the directory entry under dir that the
+// filesystem resolves as name, preferring an entry spelled exactly. The
+// listing is consulted because on macOS EvalSymlinks keeps the caller's case
+// even where the filesystem matched a differently-cased entry.
+func onDiskName(dir, name string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if e.Name() == name {
+			return name, nil
+		}
+	}
+	info, err := os.Lstat(filepath.Join(dir, name))
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		ei, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if os.SameFile(ei, info) {
+			return e.Name(), nil
+		}
+	}
+	return "", fmt.Errorf("%s: no directory entry resolves %q", dir, name)
+}
+
+// pathMatches reports whether f is want itself or lies under it as a
+// directory, so `src` also matches `src/loader.go` but never `srcx.go`.
+func pathMatches(f, want string) bool {
+	return f == want || strings.HasPrefix(f, want+"/")
 }
 
 // countLines returns the number of lines in content. A file without a

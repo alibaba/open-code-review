@@ -139,7 +139,7 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 func countMessagesTokens(msgs []llm.Message) int {
 	var total int
 	for _, m := range msgs {
-		total += llm.CountTokens(m.ExtractText())
+		total += llm.CountTokens(m.ExtractText()) + m.EstimatedTokens()
 	}
 	return total
 }

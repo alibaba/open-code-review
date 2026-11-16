@@ -18,6 +18,10 @@ export interface ConfigEntry {
   value: string;
 }
 
+export function isValidProviderName(name: string): boolean {
+  return name.split('.').every((segment) => segment.trim() !== '');
+}
+
 export function detectInitialTab(config: OcrConfig | null): ProviderTab {
   if (!config) return 'official';
   if (config.provider) {
@@ -120,15 +124,15 @@ export function buildCustomCreateSaveEntries(params: {
   authHeader: string;
 }): ConfigEntry[] {
   const entries: ConfigEntry[] = [
+    { key: 'provider', value: params.name.trim() },
     { key: `custom_providers.${params.name}.protocol`, value: params.protocol },
     { key: `custom_providers.${params.name}.url`, value: params.url.trim() },
     { key: `custom_providers.${params.name}.model`, value: params.model.trim() },
     { key: `custom_providers.${params.name}.api_key`, value: params.apiKey.trim() },
-    { key: 'provider', value: params.name.trim() },
   ];
   const models = params.models.trim();
   if (models) {
-    entries.splice(3, 0, { key: `custom_providers.${params.name}.models`, value: models });
+    entries.splice(4, 0, { key: `custom_providers.${params.name}.models`, value: models });
   }
   if (params.authHeader.trim()) {
     entries.push({ key: `custom_providers.${params.name}.auth_header`, value: params.authHeader.trim() });

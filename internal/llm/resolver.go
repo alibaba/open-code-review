@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -31,8 +32,12 @@ type ResolvedEndpoint struct {
 	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
 	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
 	// knob; users can still override via OCR_LLM_TIMEOUT.
-	Timeout    time.Duration
-	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
+	Timeout               time.Duration
+	RetryCodes            []int // additional HTTP status codes that trigger exponential-backoff retry
+	RequiresStreaming     bool
+	RejectsSamplingParams bool
+	ChatGPTPlan           bool
+	ChatGPTAccount        string
 
 	// AmbientAuth marks an endpoint that carries no token and needs no base
 	// URL, because the transport supplies both — AWS SigV4 signing derives the
@@ -78,6 +83,7 @@ const (
 type ResolveOptions struct {
 	Provider string
 	Model    string
+	Context  context.Context
 }
 
 // ResolveEndpoint resolves an endpoint without per-run overrides.
@@ -181,7 +187,9 @@ func finalizeResolvedEndpoint(source string, ep ResolvedEndpoint, env envOverrid
 	if ep.Source == "" {
 		ep.Source = source
 	}
-	ep.Model = stripModelSuffix(ep.Model)
+	if !ep.ChatGPTPlan {
+		ep.Model = stripModelSuffix(ep.Model)
+	}
 	if env.hasTimeout {
 		ep.Timeout = env.timeout
 	}
@@ -388,14 +396,14 @@ func tryOCRConfig(path string, opts ResolveOptions) (ResolvedEndpoint, bool, err
 		cfg.Provider = opts.Provider
 	}
 	if cfg.Provider != "" {
-		return tryProviderConfig(cfg, opts.Model)
+		return tryProviderConfig(cfg, opts.Model, opts.Context)
 	}
 
 	return tryLegacyLlmConfig(cfg, opts.Model)
 }
 
 // tryProviderConfig resolves an endpoint from the provider-based configuration.
-func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, bool, error) {
+func tryProviderConfig(cfg configFile, modelOverride string, callerContext context.Context) (ResolvedEndpoint, bool, error) {
 	preset, isPreset := LookupProvider(cfg.Provider)
 
 	var entry providerEntryConfig
@@ -404,6 +412,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		entry, ok = cfg.Providers[cfg.Provider]
 	} else {
 		entry, ok = cfg.CustomProviders[cfg.Provider]
+	}
+	if isPreset && preset.Name == "chatgpt" && ok {
+		return resolveChatGPT(cfg, entry, modelOverride, callerContext)
 	}
 	if !ok {
 		section := "providers"
@@ -525,24 +536,21 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	}
 	availableModels = append(availableModels, entry.Models...)
 
-	// A preset's Models list doubles as an allowlist for --model. For an
-	// ambient-auth provider it cannot: Bedrock identifiers are scoped to an
-	// account and a region, and an application inference profile ARN — a
-	// supported value, and the one to use when spend has to be attributed — can
-	// never appear in a list compiled upstream. The list stays a picker for
-	// `ocr config model`; it does not gate an override.
-	gateOverrideOnModelList := !ambientAuth
-
-	// Apply model override with validation.
+	// Preset lists can lag provider catalogs, so they guide interactive selection
+	// without preventing a per-run override. A custom provider's configured list
+	// remains a constraint except with ambient, account-scoped authentication.
 	if modelOverride != "" {
-		if gateOverrideOnModelList && len(availableModels) > 0 {
-			if !ModelListContains(availableModels, modelOverride) {
+		if len(availableModels) > 0 && !ModelListContains(availableModels, modelOverride) {
+			if !isPreset && !ambientAuth {
 				return ResolvedEndpoint{}, false, fmt.Errorf(
 					"model %q is not available for provider %q; available models: %s",
 					modelOverride,
 					cfg.Provider,
 					strings.Join(availableModels, ", "),
 				)
+			}
+			if isPreset {
+				fmt.Fprintf(os.Stderr, "[ocr] WARNING: model %q is not in the suggested models for provider %q; the provider will validate it\n", modelOverride, cfg.Provider)
 			}
 		}
 		model = modelOverride
