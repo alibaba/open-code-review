@@ -6,6 +6,7 @@ package com.alibaba.opencodereview.idea.services
 import com.alibaba.opencodereview.idea.model.CliResult
 import com.alibaba.opencodereview.idea.model.CliRunOptions
 import com.alibaba.opencodereview.idea.model.EnvCheckResult
+import com.alibaba.opencodereview.idea.model.ConfigPathStatus
 import com.alibaba.opencodereview.idea.model.EnvToolStatus
 import com.alibaba.opencodereview.idea.model.HostStrings
 import com.alibaba.opencodereview.idea.model.LogLevel
@@ -26,7 +27,7 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicReference
 
 /** Thrown when the CLI exits non-zero. The message has already been refined by [extractCliError] and is safe to show to users. */
-class CliException(message: String) : RuntimeException(message)
+open class CliException(message: String) : RuntimeException(message)
 
 /**
  * Every subprocess goes through [ShellEnv]: the environment comes from the login shell, and command names are
@@ -102,7 +103,7 @@ class CliService(private val cliPath: String = "ocr", private val configPathTime
         return env
     }
 
-    fun isAvailable(): Boolean = checkEnvironment().ocr.ok
+    fun isAvailable(): Boolean = checkEnvironment().let { it.ocr.ok && it.configPath?.ok == true }
 
     /** Probes node -> npm -> ocr in order with short-circuiting: once one is unavailable the rest fail immediately, avoiding pointless waits. */
     fun checkEnvironment(force: Boolean = false): EnvCheckResult {
@@ -110,7 +111,11 @@ class CliService(private val cliPath: String = "ocr", private val configPathTime
         val node = probeCommand("node")
         val npm = if (node.ok) probeCommand("npm") else EnvToolStatus()
         val ocr = if (node.ok && npm.ok) probeCommand(cliPath) else EnvToolStatus()
-        val env = EnvCheckResult(node, npm, ocr)
+        val pathStatus = if (ocr.ok) runCatching {
+            configPath(File(System.getProperty("user.dir")))
+            ConfigPathStatus(ok = true)
+        }.getOrElse(::configPathFailure) else null
+        val env = EnvCheckResult(node, npm, ocr, pathStatus)
         envCache = env to System.currentTimeMillis()
         return env
     }

@@ -33,7 +33,7 @@ class ConfigService(
 
     /** Reads the file and converts it to the plugin's internal camelCase config; returns null when the file is missing or invalid. */
     fun read(): OcrConfig? {
-        val path = runCatching { configPath() }.getOrNull() ?: return null
+        val path = configPath()
         if (!path.isFile) return null
         return runCatching { parseConfig(path.readText()) }.getOrElse {
             thisLogger().warn("[ocr] Failed to parse config, treating as no config: ${path.absolutePath}", it)

@@ -120,7 +120,9 @@ class ConfigPanelRouter(
                 post(ConfigPanelHostToWebview.InstallDone(ok))
                 // A successful install clears the environment cache, so this re-probes even without
                 // force.
-                post(ConfigPanelHostToWebview.EnvironmentResult(cli.checkEnvironment()))
+                val env = cli.checkEnvironment()
+                post(ConfigPanelHostToWebview.EnvironmentResult(env))
+                if (ok && env.configPath?.ok == true) notifyConfig(config.read())
             }
 
             is WebviewToHost.Malformed -> post(ConfigPanelHostToWebview.PanelError(msg.reason))
@@ -138,15 +140,16 @@ class ConfigPanelRouter(
      */
     private fun sendInit() {
         val focus = takePendingFocus()
-        val current = config.read()
+        val result = runCatching { config.read() }
+        val current = result.getOrNull()
         post(
             ConfigPanelHostToWebview.Init(
                 config = current,
-                focus = focus,
-                env = cli.getCachedEnvironment(),
+                focus = if (result.isFailure) null else focus,
+                env = if (result.isFailure) null else cli.getCachedEnvironment(),
                 // Jumping straight to step 2, or an already complete config, means the environment
                 // check walkthrough is not needed.
-                skipEnvCheck = focus.step() == 2 || isConfigReady(current),
+                skipEnvCheck = result.isSuccess && (focus.step() == 2 || isConfigReady(current)),
                 locale = locale(),
             ),
         )

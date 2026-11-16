@@ -9,6 +9,7 @@ import { CliResult, CliRunOptions, EnvCheckResult, LogLine } from '@shared/types
 import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from './cliParse';
 import { getShellEnv, getShellEnvAsync, resolveBin } from './shellEnv';
 import { captureProcess } from './captureProcess';
+import { CliUpgradeRequiredError, configPathFailure } from './configPathError';
 
 export class CliService {
   private current: ReturnType<typeof spawn> | null = null;
@@ -36,6 +37,7 @@ export class CliService {
     const result = await captureProcess(windows ? `"${bin}"` : bin, ['config', 'path', '--json'],
       process.cwd(), env, deadline - Date.now(), windows);
     if (result.code !== 0) {
+      if (/unknown (command|flag)|flag provided but not defined/i.test(result.stderr)) throw new CliUpgradeRequiredError();
       throw new Error(extractCliError(result.stderr || '') || 'Failed to resolve the OCR config path');
     }
     const { path } = JSON.parse(result.stdout);
@@ -61,7 +63,7 @@ export class CliService {
 
   async isAvailable(): Promise<boolean> {
     const env = await this.checkEnvironment();
-    return env.ocr.ok;
+    return env.ocr.ok && env.configPath?.ok === true;
   }
 
   private probeCommand(bin: string): Promise<{ ok: boolean; version?: string }> {
@@ -94,8 +96,10 @@ export class CliService {
       ? await this.probeCommand(this.cliPath)
       : { ok: false };
     const env = { node, npm, ocr };
-    this.envCache = { env, at: Date.now() };
-    return env;
+    const configPath = ocr.ok ? await this.configPath().then(() => ({ ok: true }), configPathFailure) : undefined;
+    const checked = { ...env, configPath };
+    this.envCache = { env: checked, at: Date.now() };
+    return checked;
   }
 
   /** Install the ocr CLI globally, stream npm logs, and report success based on the exit code. */

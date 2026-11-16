@@ -6,6 +6,16 @@ package com.alibaba.opencodereview.idea.services
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
+import com.alibaba.opencodereview.idea.model.ConfigPathStatus
+
+class CliUpgradeRequiredException : CliException(
+    "This OCR CLI does not support config path --json. Upgrade it with: npm install -g @alibaba-group/open-code-review",
+)
+
+fun configPathFailure(error: Throwable): ConfigPathStatus = ConfigPathStatus(
+    message = error.message ?: error.javaClass.simpleName,
+    upgradeRequired = error is CliUpgradeRequiredException,
+)
 
 internal fun captureConfigPathQuery(
     command: List<String>, cwd: File, env: Map<String, String>, timeoutMs: Long,
@@ -35,7 +45,11 @@ internal fun captureConfigPathQuery(
             return data.toString(Charsets.UTF_8)
         }
         if (process.exitValue() != 0) {
-            throw CliException(extractCliError(read(stderr)).ifBlank { "Failed to resolve the OCR config path" })
+            val message = extractCliError(read(stderr)).ifBlank { "Failed to resolve the OCR config path" }
+            if (Regex("unknown (command|flag)|flag provided but not defined", RegexOption.IGNORE_CASE).containsMatchIn(message)) {
+                throw CliUpgradeRequiredException()
+            }
+            throw CliException(message)
         }
         return read(stdout)
     } finally {

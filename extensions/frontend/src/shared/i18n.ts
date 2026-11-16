@@ -15,6 +15,9 @@ export type SupportedLocale = 'en' | 'zh-cn' | 'ja-jp' | 'ko-kr' | 'ru-ru';
 
 const messages: Record<SupportedLocale, Record<string, string>> = {
   en: {
+    'view.env.upgradeCli': 'Upgrade CLI',
+    'view.env.pathFailed': 'Unable to resolve the OCR configuration path.',
+    'view.env.resolveConfig': 'Open configuration',
     // ── IdleView ──
     'view.idle.configFirst': 'Configure model first',
     'view.idle.reviewing': 'Reviewing…',

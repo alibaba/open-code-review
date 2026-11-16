@@ -179,6 +179,14 @@ data class EnvCheckResult(
     val node: EnvToolStatus = EnvToolStatus(),
     val npm: EnvToolStatus = EnvToolStatus(),
     val ocr: EnvToolStatus = EnvToolStatus(),
+    val configPath: ConfigPathStatus? = null,
+)
+
+@Serializable
+data class ConfigPathStatus(
+    val ok: Boolean = false,
+    val message: String? = null,
+    val upgradeRequired: Boolean = false,
 )
 
 @Serializable

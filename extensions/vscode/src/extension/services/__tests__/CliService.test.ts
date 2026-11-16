@@ -6,9 +6,9 @@ process.env.OCR_SKIP_SHELL_RESOLVE = '1';
 import { CliService } from '../CliService';
 
 describe('CliService.isAvailable', () => {
-  it('returns true for the available node command', async () => {
+  it('rejects an installed executable without the OCR config path capability', async () => {
     const svc = new CliService('node');
-    expect(await svc.isAvailable()).toBe(true);
+    expect(await svc.isAvailable()).toBe(false);
   });
   it('returns false for a missing command', async () => {
     const svc = new CliService('definitely-not-a-real-binary-xyz');

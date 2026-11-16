@@ -6,6 +6,7 @@ package com.alibaba.opencodereview.idea.messages
 import com.alibaba.opencodereview.idea.model.CliResult
 import com.alibaba.opencodereview.idea.model.CommentSyncState
 import com.alibaba.opencodereview.idea.model.EnvCheckResult
+import com.alibaba.opencodereview.idea.model.ConfigPathStatus
 import com.alibaba.opencodereview.idea.model.FileChange
 import com.alibaba.opencodereview.idea.model.GitState
 import com.alibaba.opencodereview.idea.model.LogLine
@@ -51,6 +52,7 @@ sealed class HostToWebview {
         val config: OcrConfig?,
         val gitState: GitState,
         val locale: SupportedLocale,
+        val configPathStatus: ConfigPathStatus? = null,
     ) : HostToWebview()
 
     @Serializable
@@ -75,7 +77,7 @@ sealed class HostToWebview {
 
     @Serializable
     @SerialName("config")
-    data class Config(val config: OcrConfig?) : HostToWebview()
+    data class Config(val config: OcrConfig?, val configPathStatus: ConfigPathStatus? = null) : HostToWebview()
 
     @Serializable
     @SerialName("commentSync")

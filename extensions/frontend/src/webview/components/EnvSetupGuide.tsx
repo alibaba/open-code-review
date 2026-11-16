@@ -65,6 +65,18 @@ export function EnvSetupGuide({
     );
   }
 
+  if (envCheck?.configPath?.ok === false) {
+    const status = envCheck.configPath;
+    return <div class="wizard-body">
+      <p role="alert">{status.message || t('view.env.pathFailed')}</p>
+      {status.upgradeRequired && <code>{OCR_INSTALL_CMD}</code>}
+      <div class="form-actions">
+        {status.upgradeRequired && <button type="button" class="btn-primary" onClick={onInstall}>{t('view.env.upgradeCli')}</button>}
+        <button type="button" class="btn-default" onClick={onCheckEnv}>{t('view.env.redetect')}</button>
+      </div>
+    </div>;
+  }
+
   if (cliStatus === 'installed' && envCheck) {
     return (
       <div class="wizard-body">

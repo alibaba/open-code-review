@@ -18,6 +18,7 @@ import com.alibaba.opencodereview.idea.model.toReviewContext
 import com.alibaba.opencodereview.idea.providers.CommentService
 import com.alibaba.opencodereview.idea.services.CliService
 import com.alibaba.opencodereview.idea.services.ConfigService
+import com.alibaba.opencodereview.idea.services.configPathFailure
 import com.alibaba.opencodereview.idea.services.GitService
 import com.alibaba.opencodereview.idea.services.ReviewSession
 import com.alibaba.opencodereview.idea.services.SessionCallbacks
@@ -87,7 +88,10 @@ class SidebarRouter(
                 }
             }
 
-            WebviewToHost.GetConfig -> background { post(HostToWebview.Config(config.read())) }
+            WebviewToHost.GetConfig -> background {
+                val result = runCatching { config.read() }
+                post(HostToWebview.Config(result.getOrNull(), result.exceptionOrNull()?.let(::configPathFailure)))
+            }
 
             // In diff mode jumpTo reads file contents from a git ref, a blocking process call; it
             // must not run on the JCEF message callback thread, where the block would queue the
@@ -130,7 +134,9 @@ class SidebarRouter(
      * or files to choose from.
      */
     private fun sendInit() {
-        post(HostToWebview.Init(config.read(), git.getState(ReviewMode.WORKSPACE), locale()))
+        val result = runCatching { config.read() }
+        post(HostToWebview.Init(result.getOrNull(), git.getState(ReviewMode.WORKSPACE), locale(),
+            result.exceptionOrNull()?.let(::configPathFailure)))
     }
 
     private fun sendModeFiles(msg: WebviewToHost.GetModeFiles) {

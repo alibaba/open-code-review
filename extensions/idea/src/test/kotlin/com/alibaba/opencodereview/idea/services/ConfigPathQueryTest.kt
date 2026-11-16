@@ -11,8 +11,38 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertNull
 
 class ConfigPathQueryTest {
+    @Test
+    fun `old CLI is distinct from missing config and upgrade failures never change saved data`() {
+        if (File.separatorChar == '\\') return
+        val root = Files.createTempDirectory("ocr-old-cli-").toFile()
+        try {
+            val saved = File(root, "config.json").apply { writeText("""{"model":"saved-model"}""") }
+            val fixture = File(root, "ocr").apply {
+                writeText("""
+                    #!/bin/sh
+                    if [ "${'$'}1" = '--version' ]; then echo v1.0.0; exit 0; fi
+                    echo 'Error: unknown command path for ocr config' >&2
+                    exit 1
+                """.trimIndent() + "\n")
+                check(setExecutable(true))
+            }
+            val cli = CliService(fixture.path)
+            val env = cli.checkEnvironment()
+            assertTrue(env.ocr.ok)
+            assertTrue(env.configPath?.upgradeRequired == true)
+            assertTrue(env.configPath?.message.orEmpty().contains("npm install -g"))
+            val config = ConfigService(cli, root)
+            assertFailsWith<CliUpgradeRequiredException> { config.read() }
+            assertFailsWith<CliUpgradeRequiredException> { config.set("model", "wrong-model") }
+            assertEquals("""{"model":"saved-model"}""", saved.readText())
+            fixture.writeText("#!/bin/sh\nprintf '%s' '{\"path\":\"${File(root, "missing.json").path}\"}'\n")
+            assertNull(ConfigService(CliService(fixture.path), root).read())
+        } finally { root.deleteRecursively() }
+    }
+
     @Test
     fun `hung query kills its launcher and child`() = withFixture { root, command ->
         val error = assertFailsWith<CliException> {
@@ -27,7 +57,8 @@ class ConfigPathQueryTest {
 
     @Test
     fun `failed and oversized queries do not poison later successful queries`() = withFixture { root, command ->
-        assertFailsWith<CliException> { captureConfigPathQuery(command + "fail", root, System.getenv(), 3000) }
+        val failed = assertFailsWith<CliException> { captureConfigPathQuery(command + "fail", root, System.getenv(), 3000) }
+        assertFalse(configPathFailure(failed).upgradeRequired)
         assertFailsWith<CliException> { captureConfigPathQuery(command + "large", root, System.getenv(), 3000) }
         assertEquals("result", captureConfigPathQuery(command + "ok", root, System.getenv(), 3000))
     }

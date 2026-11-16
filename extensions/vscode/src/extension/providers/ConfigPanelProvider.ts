@@ -81,14 +81,15 @@ export class ConfigPanelProvider implements vscode.Disposable {
       case 'readyConfigPanel': {
         const focus = this.pendingFocus;
         this.pendingFocus = undefined;
-        const config = await this.config.read();
-        const cached = this.cli.getCachedEnvironment();
-        const skipEnvCheck = focus?.step === 2 || isConfigReady(config);
+        let failed = false;
+        const config = await this.config.read().catch(() => { failed = true; return null; });
+        const cached = failed ? null : this.cli.getCachedEnvironment();
+        const skipEnvCheck = !failed && (focus?.step === 2 || isConfigReady(config));
         const locale = resolveLocale(vscode.env.language);
         this.post({
           type: 'configPanelInit',
           config,
-          focus: focus ?? null,
+          focus: failed ? { step: 1 } : focus ?? null,
           env: cached,
           skipEnvCheck,
           locale,
@@ -141,6 +142,7 @@ export class ConfigPanelProvider implements vscode.Disposable {
         this.post({ type: 'installDone', ok });
         const env = await this.cli.checkEnvironment();
         this.post({ type: 'environmentResult', env });
+        if (ok && env.configPath?.ok) this.notifyConfig(await this.config.read());
         break;
       }
       default:

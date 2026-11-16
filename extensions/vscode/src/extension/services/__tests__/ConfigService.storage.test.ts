@@ -120,13 +120,13 @@ describe('configuration storage', () => {
     await cli.runRaw(['review'], cwd, () => {});
   });
 
-  it('allows setup UI to load when lookup fails, without writing a fallback config', async () => {
+  it('reports lookup failures separately from missing configuration', async () => {
     jest.mocked(spawn).mockImplementation(() => {
       const proc = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() });
       queueMicrotask(() => { proc.stderr.end('Error: unavailable'); proc.emit('close', 1); });
       return proc as ReturnType<typeof spawn>;
     });
-    expect(await config.read()).toBeNull();
+    await expect(config.read()).rejects.toThrow('unavailable');
     await expect(config.set('model', 'wrong-model')).rejects.toThrow('unavailable');
     expect(readFileSync(configPath, 'utf8')).toContain('saved-model');
   });

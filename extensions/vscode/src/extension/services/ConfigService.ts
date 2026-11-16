@@ -18,8 +18,8 @@ export class ConfigService {
   }
 
   async read(): Promise<OcrConfig | null> {
+    const p = await this.configPath();
     try {
-      const p = await this.configPath();
       if (!existsSync(p)) return null;
       return parseConfig(readFileSync(p, 'utf8'));
     } catch {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { CliResult, CommentStatus, FileChange, GitState, LogLine, OcrConfig, ReviewMode, ReviewState } from '../shared/types';
+import { CliResult, CommentStatus, ConfigPathStatus, FileChange, GitState, LogLine, OcrConfig, ReviewMode, ReviewState } from '../shared/types';
 import { SupportedLocale } from '../shared/i18n';
 import { HostToWebview } from '../shared/messages';
 
@@ -10,6 +10,7 @@ export type AppView = 'idle' | 'running' | 'done' | 'empty' | 'cancelled' | 'fai
 export interface AppState {
   view: AppView;
   config: OcrConfig | null;
+  configPathStatus: ConfigPathStatus | null;
   gitState: GitState;
   modeFiles: FileChange[];
   filesLoading: boolean;
@@ -24,6 +25,7 @@ export interface AppState {
 export const initialState: AppState = {
   view: 'idle',
   config: null,
+  configPathStatus: null,
   gitState: { branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] },
   modeFiles: [],
   filesLoading: true,
@@ -54,6 +56,7 @@ export function reducer(state: AppState, msg: HostToWebview | LocalAction): AppS
       return {
         ...state,
         config: msg.config,
+        configPathStatus: msg.configPathStatus ?? null,
         gitState: msg.gitState,
         view: 'idle',
         filesLoading: false,
@@ -64,7 +67,7 @@ export function reducer(state: AppState, msg: HostToWebview | LocalAction): AppS
     case 'modeFiles':
       return { ...state, modeFiles: msg.files, filesLoading: false };
     case 'config':
-      return { ...state, config: msg.config };
+      return { ...state, config: msg.config, configPathStatus: msg.configPathStatus ?? null };
     case 'stateChange': {
       const starting = msg.state === 'running';
       return {

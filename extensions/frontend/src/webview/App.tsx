@@ -13,6 +13,7 @@ import { DoneView } from './views/DoneView';
 import { EmptyView } from './views/EmptyView';
 import { CancelledView } from './views/CancelledView';
 import { FailedView } from './views/FailedView';
+import { ConfigPathNotice } from './components/ConfigPathNotice';
 import './styles/global.css';
 
 export function App() {
@@ -45,6 +46,7 @@ export function App() {
     <I18nContext.Provider value={resolveLocale(state.locale)}>
       <div class="ocr-root">
         <div class="action-region">
+          <ConfigPathNotice status={state.configPathStatus} onOpen={() => bridge.post({ type: 'openConfigPanel', focus: { step: 1 } })} />
           <IdleView gitState={state.gitState} modeFiles={state.modeFiles} filesLoading={state.filesLoading}
             configured={configured} onModeChange={onModeChange} onRequestModeFiles={requestModeFiles}
             onOpenFile={openFile} onStart={start} onOpenConfig={() => bridge.post({ type: 'openConfigPanel' })}
