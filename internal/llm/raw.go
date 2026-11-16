@@ -5,6 +5,7 @@ package llm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -27,7 +28,7 @@ func RawLoggingEnabled() bool {
 	return os.Getenv(rawLoggingEnv) == "1"
 }
 
-// RawRecord is one JSONL line: everything captured about a single HTTP
+// RawRecord is one JSONL line for a Copilot WebSocket frame or a single HTTP
 // attempt against an LLM endpoint. One logical request may expand into several
 // attempts inside the SDK retry loop, and each attempt gets its own record.
 //
@@ -41,6 +42,11 @@ type RawRecord struct {
 
 	// RequestID identifies this attempt, not the logical request above it.
 	RequestID string `json:"request_id"`
+
+	// WebSocket frames on the same connection share a RequestID. Binary payloads
+	// are base64 in the corresponding body_text field.
+	WebSocketDirection string `json:"websocket_direction,omitempty"`
+	WebSocketBinary    bool   `json:"websocket_binary,omitempty"`
 
 	// Timestamp is when the HTTP attempt started, RFC 3339 UTC. The end of
 	// the attempt is Timestamp + DurationMs; the two fields share one base.
@@ -174,6 +180,33 @@ func captureHeaders(h http.Header) map[string]string {
 	return out
 }
 
+func newRawRecord(ctx context.Context, id string, startedAt time.Time, headers map[string]string, body []byte) RawRecord {
+	meta, _ := RequestMetaFromContext(ctx)
+	model := meta.Model
+	if model == "" && len(body) > 0 {
+		var partial struct {
+			Model string `json:"model"`
+		}
+		if json.Unmarshal(body, &partial) == nil {
+			model = partial.Model
+		}
+	}
+
+	rec := RawRecord{
+		RequestID:      id,
+		Timestamp:      startedAt.UTC().Format(time.RFC3339),
+		FilePath:       meta.FilePath,
+		TaskType:       meta.TaskType,
+		RequestNo:      meta.RequestNo,
+		Model:          model,
+		RequestHeaders: headers,
+	}
+	if sc := oteltrace.SpanContextFromContext(ctx); sc.HasTraceID() {
+		rec.TraceID = sc.TraceID().String()
+	}
+	return rec
+}
+
 // newRawMiddleware builds the SDK middleware that captures raw
 // request/response bodies into the writer held by holder. It sits inside the
 // SDK retry loop, so it records one line per real HTTP attempt.
@@ -186,112 +219,92 @@ func captureHeaders(h http.Header) map[string]string {
 // and the record write happens last, fire-and-forget.
 func newRawMiddleware(holder *RawHolder) retryObserver {
 	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
-		tw := holder.get()
-		if tw == nil {
-			return next(req)
-		}
+		return holder.captureHTTP(req.Context(), req, next)
+	}
+}
 
-		meta, _ := RequestMetaFromContext(req.Context())
+func (holder *RawHolder) captureHTTP(metaContext context.Context, req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+	tw := holder.get()
+	if tw == nil {
+		return next(req)
+	}
 
-		reqHeaders := captureHeaders(req.Header)
+	reqHeaders := captureHeaders(req.Header)
 
-		var reqBody []byte
-		var reqReadErr error
-		if req.Body != nil {
-			reqBody, reqReadErr = io.ReadAll(req.Body)
-			if reqReadErr != nil {
-				// Replay the failure to the SDK exactly as it would surface
-				// without capture; a clean truncated body would turn the
-				// client-side fault into a server-side 400.
-				req.Body = io.NopCloser(io.MultiReader(bytes.NewReader(reqBody), errReader{reqReadErr}))
-			} else {
-				req.Body = io.NopCloser(bytes.NewReader(reqBody))
-			}
-		}
-
-		model := meta.Model
-		if model == "" && len(reqBody) > 0 {
-			var partial struct {
-				Model string `json:"model"`
-			}
-			if json.Unmarshal(reqBody, &partial) == nil {
-				model = partial.Model
-			}
-		}
-
-		startedAt := time.Now()
-		resp, err := next(req)
-
-		rec := RawRecord{
-			RequestID:      uuid.NewString(),
-			Timestamp:      startedAt.UTC().Format(time.RFC3339),
-			FilePath:       meta.FilePath,
-			TaskType:       meta.TaskType,
-			RequestNo:      meta.RequestNo,
-			Model:          model,
-			RequestHeaders: reqHeaders,
-		}
-		// A zero-length RawMessage fails to marshal and would drop the whole
-		// record, so an empty body stays null; malformed bytes would fail the
-		// same way, so they fall back to RequestBodyText.
-		if len(reqBody) > 0 && reqReadErr == nil {
-			if json.Valid(reqBody) {
-				rec.RequestBody = json.RawMessage(reqBody)
-			} else {
-				rec.RequestBodyText = string(reqBody)
-			}
-		}
+	var reqBody []byte
+	var reqReadErr error
+	if req.Body != nil {
+		reqBody, reqReadErr = io.ReadAll(req.Body)
 		if reqReadErr != nil {
-			rec.Error = reqReadErr.Error()
+			// Replay the failure to the SDK exactly as it would surface
+			// without capture; a clean truncated body would turn the
+			// client-side fault into a server-side 400.
+			req.Body = io.NopCloser(io.MultiReader(bytes.NewReader(reqBody), errReader{reqReadErr}))
+		} else {
+			req.Body = io.NopCloser(bytes.NewReader(reqBody))
 		}
-		if sc := oteltrace.SpanContextFromContext(req.Context()); sc.HasTraceID() {
-			rec.TraceID = sc.TraceID().String()
-		}
+	}
 
-		if err != nil {
+	startedAt := time.Now()
+	resp, err := next(req)
+	rec := newRawRecord(metaContext, uuid.NewString(), startedAt, reqHeaders, reqBody)
+	// A zero-length RawMessage fails to marshal and would drop the whole
+	// record, so an empty body stays null; malformed bytes would fail the
+	// same way, so they fall back to RequestBodyText.
+	if len(reqBody) > 0 && reqReadErr == nil {
+		if json.Valid(reqBody) {
+			rec.RequestBody = json.RawMessage(reqBody)
+		} else {
+			rec.RequestBodyText = string(reqBody)
+		}
+	}
+	if reqReadErr != nil {
+		rec.Error = reqReadErr.Error()
+	}
+
+	if err != nil {
+		rec.DurationMs = time.Since(startedAt).Milliseconds()
+		if reqReadErr != nil {
+			// Keep both: the request-body read failure is the root cause,
+			// next's error the downstream symptom.
+			rec.Error = reqReadErr.Error() + "; next: " + err.Error()
+		} else {
+			rec.Error = err.Error()
+		}
+		tw.Write(rec)
+		return resp, err
+	}
+
+	rec.StatusCode = resp.StatusCode
+	if len(resp.Header) > 0 {
+		rec.ResponseHeaders = captureHeaders(resp.Header)
+	}
+
+	if resp.Body != nil {
+		respBody, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			// Hand the SDK the same read failure it would see without capture.
 			rec.DurationMs = time.Since(startedAt).Milliseconds()
-			if reqReadErr != nil {
-				// Keep both: the request-body read failure is the root cause,
-				// next's error the downstream symptom.
-				rec.Error = reqReadErr.Error() + "; next: " + err.Error()
-			} else {
-				rec.Error = err.Error()
-			}
-			tw.Write(rec)
-			return resp, err
-		}
-
-		rec.StatusCode = resp.StatusCode
-		if len(resp.Header) > 0 {
-			rec.ResponseHeaders = captureHeaders(resp.Header)
-		}
-
-		if resp.Body != nil {
-			respBody, readErr := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if readErr != nil {
-				// Hand the SDK the same read failure it would see without capture.
-				rec.DurationMs = time.Since(startedAt).Milliseconds()
-				rec.Error = readErr.Error()
-				if len(respBody) > 0 {
-					rec.ResponseBodyText = string(respBody)
-				}
-				tw.Write(rec)
-				resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(respBody), errReader{readErr}))
-				return resp, nil
-			}
-			resp.Body = io.NopCloser(bytes.NewReader(respBody))
-			if json.Valid(respBody) {
-				rec.ResponseBody = json.RawMessage(respBody)
-			} else {
+			rec.Error = readErr.Error()
+			if len(respBody) > 0 {
 				rec.ResponseBodyText = string(respBody)
 			}
+			tw.Write(rec)
+			resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(respBody), errReader{readErr}))
+			return resp, nil
 		}
-
-		rec.DurationMs = time.Since(startedAt).Milliseconds()
-		tw.Write(rec)
-		return resp, nil
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		if json.Valid(respBody) {
+			rec.ResponseBody = json.RawMessage(respBody)
+		} else {
+			rec.ResponseBodyText = string(respBody)
+		}
 	}
+
+	rec.DurationMs = time.Since(startedAt).Milliseconds()
+	tw.Write(rec)
+	return resp, nil
 }
 
 // errReader replays a captured read error once the buffered bytes are drained.

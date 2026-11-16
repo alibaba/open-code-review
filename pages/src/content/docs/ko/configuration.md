@@ -42,6 +42,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region`에서 결정 | — (AWS 자격 증명 체인) |
+| `copilot` | copilot | Copilot CLI에서 관리 | Copilot 로그인 |
 | `chatgpt` | openai-responses | `https://api.openai.com/v1` | 해당 없음 (Sign in with ChatGPT) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
@@ -115,6 +116,23 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 ```
 
 설정한 `url`이 미리 설정된 Base URL보다 우선합니다. `providers.<name>.url`이 비어 있으면(또는 지우면) OCR은 기본값으로 돌아가므로, 엔드포인트가 다를 때만 설정하면 됩니다.
+
+### GitHub Copilot SDK (실험적) {#github-copilot-sdk-experimental}
+
+Copilot CLI에서 `copilot login`으로 로그인한 뒤 `ocr review --provider copilot`을
+실행합니다. 모델은 `--model`, `providers.copilot.model`, 저장된 공급자가 Copilot인 경우
+최상위 `model` 순서로 선택합니다. 지정한 값이 없으면 `auto`를 사용합니다.
+
+기존에 `custom_providers.copilot`을 설정했다면 `~/.opencodereview/config.json`에서
+항목 전체의 이름을 `custom_providers.copilot-legacy`처럼 사용하지 않는 이름으로 바꾸세요.
+기존 URL, 프로토콜, 인증 정보를 계속 사용하려면 `provider`와 스크립트의 `--provider`에도
+새 이름을 지정하세요. CLI 로그인에는 `copilot`을 선택합니다. `providers.copilot`을
+명시하면 내장 공급자를 사용합니다.
+
+리뷰나 스캔에서 `OCR_RAW_LOGGING=1`을 설정하면 Copilot 모델 호출이
+`~/.opencodereview/raw/`에 기록됩니다. HTTP는 최종 요청과 응답을, WebSocket은 각
+프레임의 방향과 공통 연결 ID를 기록합니다. 바이너리 데이터는 base64로 저장합니다.
+HTTP 인증 헤더는 가려지지만 본문에는 소스 코드와 도구 실행 결과가 포함될 수 있습니다.
 
 ### AWS Bedrock {#aws-bedrock}
 

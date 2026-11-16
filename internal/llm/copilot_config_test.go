@@ -45,6 +45,48 @@ func TestCopilotExplicitProviderNeedsNoConfigEntry(t *testing.T) {
 	}
 }
 
+func TestCopilotModelPriority(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, override, want string
+	}{
+		{"saved model without provider entry", `{"provider":"copilot","model":"saved"}`, "", "saved"},
+		{"provider model wins", `{"provider":"copilot","model":"saved","providers":{"copilot":{"model":"specific"}}}`, "", "specific"},
+		{"flag wins", `{"provider":"copilot","model":"saved","providers":{"copilot":{"model":"specific"}}}`, "flag", "flag"},
+		{"timeout only", `{"provider":"copilot","providers":{"copilot":{"timeout_sec":30}}}`, "", "auto"},
+		{"ignore previous provider model", `{"provider":"deepseek","model":"deepseek-chat"}`, "", "auto"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ep, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: "copilot", Model: tc.override})
+			if err != nil || ep.Model != tc.want {
+				t.Fatalf("resolved model = %q, error = %v; want %q", ep.Model, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestCopilotLegacyCustomProviderMigration(t *testing.T) {
+	legacy := providerEntryConfig{URL: "https://example.test", Protocol: ProtocolAnthropic, Model: "custom", APIKey: "test"}
+	cfg := configFile{Provider: "copilot", CustomProviders: map[string]providerEntryConfig{"copilot": legacy}}
+	if _, _, err := tryProviderConfig(cfg, "", t.Context()); err == nil || !strings.Contains(err.Error(), "rename the custom entry") {
+		t.Fatalf("missing migration guidance: %v", err)
+	}
+	cfg.CustomProviders = map[string]providerEntryConfig{"copilot-legacy": legacy}
+	cfg.Provider = "copilot-legacy"
+	ep, ok, err := tryProviderConfig(cfg, "", t.Context())
+	if err != nil || !ok || ep.Protocol != legacy.Protocol || ep.URL != legacy.URL+"/v1/messages" || ep.Model != legacy.Model || ep.Token != legacy.APIKey {
+		t.Fatalf("renamed custom provider = %+v, %v", ep, err)
+	}
+	cfg.Provider = "copilot"
+	ep, ok, err = tryProviderConfig(cfg, "", t.Context())
+	if err != nil || !ok || ep.Protocol != ProtocolCopilot || !ep.AmbientAuth {
+		t.Fatalf("built-in provider after migration = %+v, %v", ep, err)
+	}
+}
+
 func TestOtherExplicitProviderStillRequiresConfigEntry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.json")
 	if _, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: "deepseek"}); err == nil {

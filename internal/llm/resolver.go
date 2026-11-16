@@ -432,11 +432,11 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 	if isPreset && preset.Name == "chatgpt" && ok {
 		return resolveChatGPT(cfg, entry, modelOverride, callerContext)
 	}
-	if !ok {
-		if isPreset && cfg.Provider == "copilot" {
-			entry = providerEntryConfig{Model: "auto"}
-			ok = true
+	if !ok && isPreset && cfg.Provider == "copilot" {
+		if _, legacy := cfg.CustomProviders["copilot"]; legacy {
+			return ResolvedEndpoint{}, false, fmt.Errorf("custom_providers.copilot conflicts with the built-in copilot provider: rename the custom entry and select its new name, or remove it to use Copilot CLI login")
 		}
+		ok = true // Copilot CLI login needs no saved provider entry.
 	}
 	if !ok {
 		section := "providers"
@@ -592,6 +592,9 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 		model = modelOverride
 	}
 
+	if model == "" && protocol == ProtocolCopilot {
+		model = "auto"
+	}
 	if model == "" {
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no model configured; run 'ocr config model' to select one or pass --model", cfg.Provider)
 	}

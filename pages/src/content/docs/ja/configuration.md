@@ -149,6 +149,20 @@ SDK が報告しない使用量は推定します。これらのトークン数�
 モデルと任意のタイムアウトのみを設定でき、URL、API key、独自ヘッダー、
 リクエスト本文、プロトコルの上書きには対応しません。Copilot と Bedrock は URL の上書きにも対応しません。
 
+モデルは `--model`、`providers.copilot.model`、保存済みのプロバイダーが Copilot
+の場合のトップレベルの `model` の順で選択されます。どれも未設定なら `auto` を使用します。
+
+従来の `custom_providers.copilot` を使っている場合は、`~/.opencodereview/config.json`
+でエントリ全体の名前を `custom_providers.copilot-legacy` などの未使用名に変更してください。
+従来の URL・プロトコル・認証情報を引き続き使うには、`provider` とスクリプト内の
+`--provider` に新しい名前を指定します。CLI ログインを使う場合は `copilot` を選びます。
+`providers.copilot` を明示すると組み込みプロバイダーが選択されます。
+
+レビューまたはスキャンで `OCR_RAW_LOGGING=1` を指定すると、Copilot のモデル呼び出しが
+`~/.opencodereview/raw/` に記録されます。HTTP では最終的なリクエストとレスポンスを、
+WebSocket では各フレームの方向と共通の接続 ID を記録します。バイナリは base64 です。
+HTTP の認証ヘッダーはマスクされますが、本文にはソースコードやツールの結果が含まれることがあります。
+
 ### AWS Bedrock
 
 `bedrock` は既定の `anthropic-bedrock` プロトコルで `anthropic` と同じ Messages API を使いますが、API key を持たせる

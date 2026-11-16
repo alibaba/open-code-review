@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -307,5 +308,161 @@ func TestCopilotWebSocketLimitAndControlFrames(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal("WebSocket frame not forwarded")
 		}
+	}
+}
+
+func TestCopilotRawHTTP(t *testing.T) {
+	const stream = "data: first\n\ndata: second\n\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Set-Cookie", "private-cookie")
+		if r.URL.Path == "/messages" {
+			w.WriteHeader(http.StatusForbidden)
+		}
+		fmt.Fprint(w, stream)
+	}))
+	defer server.Close()
+	raw := NewRawHolder()
+	client := NewCopilotClient(ClientConfig{rawHolder: raw})
+	transport := &copilotTransport{raw: client.raw}
+	w := &recordingRawWriter{}
+	raw.Set(w)
+	transport.begin(WithRequestMeta(t.Context(), RequestMeta{Model: "chosen", TaskType: "review", FilePath: "a.go", RequestNo: 5}), 25)
+	for _, path := range []string{"/auth", "/messages"} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+path, strings.NewReader(`{"input":[]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer private-token")
+		resp, err := transport.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil || string(data) != stream {
+			t.Fatalf("forwarded body = %q, error = %v", data, err)
+		}
+	}
+	rec := w.one(t)
+	if rec.RequestHeaders["Authorization"] != "[REDACTED]" || rec.ResponseHeaders["Set-Cookie"] != "[REDACTED]" ||
+		rec.RequestNo != 5 || rec.Model != "chosen" || rec.StatusCode != http.StatusForbidden ||
+		rec.ResponseBodyText != stream || !bytes.Contains(rec.RequestBody, []byte(`"max_tokens":25`)) {
+		t.Fatalf("unexpected capture: %+v", rec)
+	}
+}
+
+type copilotRawTestWriter struct {
+	frames chan copilot.CopilotWebSocketMessage
+}
+
+func (w copilotRawTestWriter) SendText(data []byte) error {
+	w.frames <- copilot.CopilotWebSocketMessage{Data: data}
+	return nil
+}
+
+func (w copilotRawTestWriter) SendBinary(data []byte) error {
+	w.frames <- copilot.CopilotWebSocketMessage{Binary: true, Data: data}
+	return nil
+}
+
+func TestCopilotRawWebSocket(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	const reply = `{"type":"response.output_text.delta","delta":"hello"}`
+	binary := []byte{0xff, 0, 0x80}
+	nextRound := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.CloseNow()
+		_, request, err := conn.Read(ctx)
+		if err != nil || !bytes.Contains(request, []byte(`"max_output_tokens":25`)) {
+			t.Errorf("forwarded request = %s, error = %v", request, err)
+			return
+		}
+		if err := conn.Write(ctx, websocket.MessageText, []byte(reply)); err != nil {
+			t.Error(err)
+		}
+		select {
+		case <-nextRound:
+		case <-ctx.Done():
+			return
+		}
+		if err := conn.Write(ctx, websocket.MessageBinary, binary); err != nil {
+			t.Error(err)
+		}
+		if _, _, err := conn.Read(ctx); err != nil {
+			t.Error(err)
+			return
+		}
+		if err := conn.Write(ctx, websocket.MessageText, []byte(reply)); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	raw := NewRawHolder()
+	transport := &copilotTransport{raw: raw}
+	transport.begin(WithRequestMeta(ctx, RequestMeta{Model: "chosen", TaskType: "review", FilePath: "a.go", RequestNo: 2}), 25)
+	endpoint := &copilot.CopilotRequestContext{URL: "ws" + strings.TrimPrefix(server.URL, "http") + "/responses", RequestID: "socket"}
+	handler, err := transport.openWebSocket(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := &recordingRawWriter{}
+	raw.Set(log) // Session capture can bind after the transport was created.
+	writer := copilotRawTestWriter{make(chan copilot.CopilotWebSocketMessage, 2)}
+	if err := handler.Open(ctx, writer); err != nil {
+		t.Fatal(err)
+	}
+	defer handler.Close()
+	if err := handler.SendRequestMessage(ctx, copilot.NewTextMessage(`{"type":"response.create","input":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2 {
+		select {
+		case msg := <-writer.frames:
+			if i == 0 && (msg.Binary || string(msg.Data) != reply) || i == 1 && (!msg.Binary || !bytes.Equal(msg.Data, binary)) {
+				t.Fatalf("forwarded frame %d = %+v", i, msg)
+			}
+			if i == 0 {
+				// The old binary frame arrives after OCR starts its next round, but
+				// before the CLI sends the new inference on the reused connection.
+				transport.begin(WithRequestMeta(ctx, RequestMeta{Model: "chosen", TaskType: "review", FilePath: "a.go", RequestNo: 3}), 25)
+				close(nextRound)
+			}
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for forwarded response")
+		}
+	}
+	if err := handler.SendRequestMessage(ctx, copilot.NewTextMessage(`{"type":"response.create","input":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-writer.frames:
+	case <-ctx.Done():
+		t.Fatal("missing second response")
+	}
+	log.mu.Lock()
+	defer log.mu.Unlock()
+	records := log.records
+	if len(records) != 5 {
+		t.Fatalf("got %d records, want 5", len(records))
+	}
+	for i, rec := range records {
+		wantRound := 2
+		if i >= 3 {
+			wantRound = 3
+		}
+		if rec.RequestID != "socket" || rec.RequestNo != wantRound || rec.Model != "chosen" {
+			t.Fatalf("lost request identity: %+v", rec)
+		}
+	}
+	if records[0].WebSocketDirection != "request" || !bytes.Contains(records[0].RequestBody, []byte(`"max_output_tokens":25`)) ||
+		records[1].WebSocketDirection != "response" || string(records[1].ResponseBody) != reply ||
+		records[2].WebSocketDirection != "response" || !records[2].WebSocketBinary || records[2].ResponseBodyText != "/wCA" {
+		t.Fatalf("unexpected frame records: %+v", records)
 	}
 }

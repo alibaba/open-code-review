@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -255,21 +254,15 @@ func (conversation *copilotConversation) start(ctx context.Context, owner *Copil
 		return fmt.Errorf("create Copilot session directory: %w", err)
 	}
 	conversation.stateDir = stateDir
-	conversation.transport = &copilotTransport{}
+	conversation.transport = &copilotTransport{raw: owner.raw}
 	conversation.transport.begin(ctx, maxTokens)
 	transport := conversation.transport
 	conversation.client = copilot.NewClient(&copilot.ClientOptions{
 		Mode: copilot.ModeEmpty, BaseDirectory: stateDir,
 		Connection: copilot.StdioConnection{Path: cliPath},
 		RequestHandler: &copilot.CopilotRequestHandler{
-			Transport: transport,
-			OpenWebSocket: func(ctx *copilot.CopilotRequestContext) (copilot.CopilotWebSocketHandler, error) {
-				endpoint, err := url.Parse(ctx.URL)
-				if err != nil {
-					return nil, err
-				}
-				return &copilotWebSocket{CopilotWebSocketForwarder: copilot.NewCopilotWebSocketForwarder(ctx.URL, ctx.Headers), transport: transport, path: endpoint.Path}, nil
-			},
+			Transport:     transport,
+			OpenWebSocket: transport.openWebSocket,
 		},
 	})
 	if err := conversation.client.Start(ctx); err != nil {

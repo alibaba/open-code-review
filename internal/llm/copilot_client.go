@@ -25,6 +25,7 @@ var copilotToolName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 type CopilotClient struct {
 	model    string
 	timeout  time.Duration
+	raw      *RawHolder
 	cliPath  string
 	provider *copilot.ProviderConfig // BYOK override for local tests; nil preserves CLI login.
 	sessions sync.Map                // OCR session ID -> *copilotConversation
@@ -35,7 +36,7 @@ func NewCopilotClient(cfg ClientConfig) *CopilotClient {
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
-	return &CopilotClient{model: cfg.Model, timeout: timeout}
+	return &CopilotClient{model: cfg.Model, timeout: timeout, raw: cfg.rawHolder}
 }
 
 func copilotRuntimePath(override string) (string, error) {

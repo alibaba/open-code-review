@@ -6,13 +6,16 @@ package llm
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	copilot "github.com/github/copilot-sdk/go"
 )
@@ -25,6 +28,7 @@ type copilotTransport struct {
 	limit        int
 	responded    bool
 	responseDone chan struct{}
+	raw          *RawHolder
 	base         http.RoundTripper
 }
 
@@ -35,16 +39,22 @@ func (t *copilotTransport) begin(ctx context.Context, limit int) {
 	t.responseDone = nil
 }
 
-func (t *copilotTransport) prepare(data []byte, path string) ([]byte, context.Context, bool, error) {
-	key := ""
+func copilotOutputLimitKey(path string) string {
 	switch {
 	case strings.HasSuffix(path, "/responses"):
-		key = "max_output_tokens"
+		return "max_output_tokens"
 	case strings.HasSuffix(path, "/messages"):
-		key = "max_tokens"
+		return "max_tokens"
 	case strings.HasSuffix(path, "/chat/completions"):
-		key = "max_completion_tokens"
+		return "max_completion_tokens"
 	default:
+		return ""
+	}
+}
+
+func (t *copilotTransport) prepare(data []byte, path string) ([]byte, context.Context, bool, error) {
+	key := copilotOutputLimitKey(path)
+	if key == "" {
 		return data, nil, false, nil
 	}
 	t.mu.Lock()
@@ -156,7 +166,12 @@ func (t *copilotTransport) RoundTrip(request *http.Request) (*http.Response, err
 		stop = context.AfterFunc(round, done)
 		request = request.WithContext(ctx)
 	}
-	response, err := base.RoundTrip(request)
+	var response *http.Response
+	if inference && t.raw != nil {
+		response, err = t.raw.captureHTTP(round, request, base.RoundTrip)
+	} else {
+		response, err = base.RoundTrip(request)
+	}
 	if err != nil {
 		if cancel != nil {
 			stop()
@@ -200,6 +215,57 @@ type copilotWebSocket struct {
 	*copilot.CopilotWebSocketForwarder
 	transport *copilotTransport
 	path      string
+	rawMu     sync.Mutex
+	rawRound  context.Context // Last inference sent on this socket, even if another OCR round has begun.
+}
+
+func (t *copilotTransport) openWebSocket(ctx *copilot.CopilotRequestContext) (copilot.CopilotWebSocketHandler, error) {
+	endpoint, err := url.Parse(ctx.URL)
+	if err != nil {
+		return nil, err
+	}
+	forwarder := copilot.NewCopilotWebSocketForwarder(ctx.URL, ctx.Headers)
+	socket := &copilotWebSocket{CopilotWebSocketForwarder: forwarder, transport: t, path: endpoint.Path}
+	if t.raw != nil && copilotOutputLimitKey(endpoint.Path) != "" {
+		socket.rawRound = context.Background()
+		forwarder.OnSendRequestMessage = socket.rawFrameObserver(ctx.RequestID, "request")
+		forwarder.OnSendResponseMessage = socket.rawFrameObserver(ctx.RequestID, "response")
+	}
+	return socket, nil
+}
+
+// Observe frames at the forwarding boundary after any output-limit rewrite.
+// Emit each frame immediately, including on long-lived or interrupted streams.
+func (w *copilotWebSocket) rawFrameObserver(id, direction string) func(copilot.CopilotWebSocketMessage) *copilot.CopilotWebSocketMessage {
+	return func(msg copilot.CopilotWebSocketMessage) *copilot.CopilotWebSocketMessage {
+		writer := w.transport.raw.get()
+		if writer == nil {
+			return &msg
+		}
+		w.rawMu.Lock()
+		round := w.rawRound
+		w.rawMu.Unlock()
+		var body json.RawMessage
+		var text string
+		switch {
+		case msg.Binary:
+			text = base64.StdEncoding.EncodeToString(msg.Data)
+		case json.Valid(msg.Data):
+			body = msg.Data
+		default:
+			text = string(msg.Data)
+		}
+		rec := newRawRecord(round, id, time.Now(), nil, body)
+		rec.WebSocketDirection = direction
+		rec.WebSocketBinary = msg.Binary
+		if direction == "request" {
+			rec.RequestBody, rec.RequestBodyText = body, text
+		} else {
+			rec.ResponseBody, rec.ResponseBodyText = body, text
+		}
+		writer.Write(rec)
+		return &msg
+	}
 }
 
 func (w *copilotWebSocket) SendRequestMessage(ctx context.Context, message copilot.CopilotWebSocketMessage) error {
@@ -219,6 +285,11 @@ func (w *copilotWebSocket) SendRequestMessage(ctx context.Context, message copil
 		}
 	}
 	message.Data = data
+	if inference && w.transport.raw != nil {
+		w.rawMu.Lock()
+		w.rawRound = round
+		w.rawMu.Unlock()
+	}
 	if err := w.CopilotWebSocketForwarder.SendRequestMessage(ctx, message); err != nil {
 		return err
 	}

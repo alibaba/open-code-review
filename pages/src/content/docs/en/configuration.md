@@ -177,6 +177,23 @@ The provider accepts a model and optional timeout only. OCR rejects
 and protocol overrides instead of silently ignoring them. `copilot` is not a
 valid custom-provider or `llm.protocol` value.
 
+Model selection uses the first configured value in this order: `--model`,
+`providers.copilot.model`, then the top-level `model` when Copilot is the saved
+provider. With none set, OCR uses `auto`.
+
+If your configuration already has `custom_providers.copilot`, rename that entire
+entry in `~/.opencodereview/config.json` to an unused name such as
+`custom_providers.copilot-legacy`. To keep using its URL, protocol and credentials,
+set `provider` to `copilot-legacy` and update any `--provider copilot` arguments
+in your scripts. To use CLI login, select `copilot`. An explicit `providers.copilot`
+entry selects the built-in provider.
+
+Set `OCR_RAW_LOGGING=1` for a review or scan to record Copilot inference under
+`~/.opencodereview/raw/`. HTTP records contain the final request and response;
+WebSocket frames are written as they pass, with their direction and a shared
+connection ID. Binary frame payloads use base64. HTTP credential headers are
+redacted. Bodies can contain source code and tool results.
+
 ### AWS Bedrock
 
 With its default `anthropic-bedrock` protocol, `bedrock` uses the same Messages API as `anthropic`, but requests are

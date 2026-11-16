@@ -140,6 +140,19 @@ OCR 管理。工具轮次、超时、上下文和总 token 预算仍由 OCR 控�
 额度和费用仍按 Copilot 的规则计算。此 provider 仅接受模型和可选超时设置，
 不支持 URL、API key、自定义请求头、请求体或协议覆盖。
 
+模型按以下顺序选择：`--model`、`providers.copilot.model`、顶层的 `model`
+（仅当已保存的提供商是 Copilot 时）。全部未设置时使用 `auto`。
+
+如果原来配置了 `custom_providers.copilot`，请在 `~/.opencodereview/config.json`
+中把整个条目改为未使用的名称，例如 `custom_providers.copilot-legacy`。要继续使用原有的
+URL、协议和凭据，请将 `provider` 设为 `copilot-legacy`，并更新脚本中的
+`--provider copilot`。要使用 CLI 登录，请选择 `copilot`。显式设置
+`providers.copilot` 会选择内置提供商。
+
+审查或扫描时设置 `OCR_RAW_LOGGING=1`，即可在 `~/.opencodereview/raw/`
+中记录 Copilot 模型调用。HTTP 日志记录最终请求和响应。WebSocket 日志逐帧记录方向，
+同一连接共用一个 ID，二进制内容使用 base64。HTTP 凭据头会脱敏，正文可能包含源码和工具结果。
+
 ### AWS Bedrock
 
 `bedrock` 默认使用 `anthropic-bedrock` 协议，调用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
