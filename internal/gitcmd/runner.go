@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -110,9 +111,15 @@ func (p *outputPipe) closeAll() {
 // startGrace returns a stop func. Once ctx is done it waits cancelGracePeriod
 // and then calls closeReads, which unblocks any copy still waiting on a pipe
 // held by an orphaned descendant. On the success path it does nothing.
+//
+// stop joins the watcher goroutine before returning: the callback touches the
+// same pipe handles the caller's deferred closeAll tears down, and without the
+// join that teardown can race with a callback that already selected timer.C.
 func startGrace(ctx context.Context, closeReads func()) (stop func()) {
 	stopped := make(chan struct{})
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		select {
 		case <-ctx.Done():
 		case <-stopped:
@@ -127,13 +134,70 @@ func startGrace(ctx context.Context, closeReads func()) (stop func()) {
 		}
 	}()
 	var once sync.Once
-	return func() { once.Do(func() { close(stopped) }) }
+	return func() {
+		once.Do(func() { close(stopped) })
+		<-done
+	}
+}
+
+// Limits mirror the retention policy of exec.Cmd.Output, which keeps at most a
+// 32 KiB prefix and a 32 KiB suffix of a command's stderr (prefixSuffixSaver).
+// Diagnostics are only ever read from the beginning and the end, so retaining
+// the whole stream just makes memory grow with the noisiest tool output.
+const (
+	boundedStderrPrefixLimit = 32 << 10
+	boundedStderrSuffixLimit = 32 << 10
+)
+
+// stderrCollector drains a stderr pipe; Bytes reports what was retained.
+type stderrCollector interface {
+	io.Writer
+	Bytes() []byte
+}
+
+// boundedStderr retains the first and last boundedStderr*Limit bytes of a
+// stream while still draining all of it, so the child never blocks on a full
+// pipe and a successful command's memory stays bounded.
+type boundedStderr struct {
+	prefix []byte
+	suffix []byte
+	total  int
+}
+
+func (b *boundedStderr) Write(p []byte) (int, error) {
+	n := len(p)
+	b.total += n
+	if room := boundedStderrPrefixLimit - len(b.prefix); room > 0 {
+		take := n
+		if take > room {
+			take = room
+		}
+		b.prefix = append(b.prefix, p[:take]...)
+		p = p[take:]
+	}
+	if len(p) > 0 {
+		b.suffix = append(b.suffix, p...)
+		if len(b.suffix) > boundedStderrSuffixLimit {
+			b.suffix = b.suffix[len(b.suffix)-boundedStderrSuffixLimit:]
+		}
+	}
+	return n, nil
+}
+
+func (b *boundedStderr) Bytes() []byte {
+	out := make([]byte, 0, len(b.prefix)+len(b.suffix)+48)
+	out = append(out, b.prefix...)
+	if skipped := b.total - len(b.prefix) - len(b.suffix); skipped > 0 {
+		out = append(out, []byte("\n...("+strconv.Itoa(skipped)+" bytes skipped)...\n")...)
+	}
+	out = append(out, b.suffix...)
+	return out
 }
 
 // capture runs a git command and returns its stdout and stderr. With combined
 // set, stderr is folded into the same pipe so relative write order is preserved,
 // matching exec.Cmd.CombinedOutput.
-func (r *Runner) capture(ctx context.Context, repoDir string, combined bool, args ...string) ([]byte, []byte, error) {
+func (r *Runner) capture(ctx context.Context, repoDir string, combined bool, stderrSink stderrCollector, args ...string) ([]byte, []byte, error) {
 	outPipe, err := newOutputPipe()
 	if err != nil {
 		return nil, nil, err
@@ -174,8 +238,8 @@ func (r *Runner) capture(ctx context.Context, repoDir string, combined bool, arg
 	}
 
 	var (
-		stdoutBuf, stderrBuf bytes.Buffer
-		wg                   sync.WaitGroup
+		stdoutBuf bytes.Buffer
+		wg        sync.WaitGroup
 	)
 	wg.Add(1)
 	go func() {
@@ -186,7 +250,7 @@ func (r *Runner) capture(ctx context.Context, repoDir string, combined bool, arg
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = io.Copy(&stderrBuf, errPipe.r)
+			_, _ = io.Copy(stderrSink, errPipe.r)
 		}()
 	}
 
@@ -198,16 +262,20 @@ func (r *Runner) capture(ctx context.Context, repoDir string, combined bool, arg
 	wg.Wait()
 	stopGrace()
 
+	var stderrBytes []byte
+	if stderrSink != nil {
+		stderrBytes = stderrSink.Bytes()
+	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return stdoutBuf.Bytes(), stderrBuf.Bytes(), ctxErr
+		return stdoutBuf.Bytes(), stderrBytes, ctxErr
 	}
 	if waitErr != nil {
 		// Mirror exec.Cmd.Output: callers read stderr off the ExitError.
 		if exitErr, ok := waitErr.(*exec.ExitError); ok && !combined {
-			exitErr.Stderr = stderrBuf.Bytes()
+			exitErr.Stderr = stderrBytes
 		}
 	}
-	return stdoutBuf.Bytes(), stderrBuf.Bytes(), waitErr
+	return stdoutBuf.Bytes(), stderrBytes, waitErr
 }
 
 // Run executes a git command and returns the combined stdout+stderr output.
@@ -217,7 +285,7 @@ func (r *Runner) Run(ctx context.Context, repoDir string, args ...string) (strin
 	}
 	defer r.release()
 
-	out, _, err := r.capture(ctx, repoDir, true, args...)
+	out, _, err := r.capture(ctx, repoDir, true, nil, args...)
 	return string(out), err
 }
 
@@ -228,7 +296,9 @@ func (r *Runner) Output(ctx context.Context, repoDir string, args ...string) ([]
 	}
 	defer r.release()
 
-	out, _, err := r.capture(ctx, repoDir, false, args...)
+	// Keep Output's stderr retention bounded like exec.Cmd.Output; a caller
+	// that wants the full diagnostic stream uses RunSplit.
+	out, _, err := r.capture(ctx, repoDir, false, &boundedStderr{}, args...)
 	return out, err
 }
 
@@ -239,8 +309,9 @@ func (r *Runner) RunSplit(ctx context.Context, repoDir string, args ...string) (
 	}
 	defer r.release()
 
-	out, errOut, err := r.capture(ctx, repoDir, false, args...)
-	return string(out), string(errOut), err
+	var stderrBuf bytes.Buffer
+	out, _, err := r.capture(ctx, repoDir, false, &stderrBuf, args...)
+	return string(out), stderrBuf.String(), err
 }
 
 // Stream acquires the semaphore, starts a git command, and passes its stdout as

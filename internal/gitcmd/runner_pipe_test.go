@@ -6,6 +6,7 @@
 package gitcmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -174,5 +175,104 @@ func TestRunner_RunSplitReportsStderr(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "does-not-exist") {
 		t.Errorf("stderr = %q, want it to mention the bad revision", stderr)
+	}
+}
+
+// boundedStderr must keep the head and tail of a stream while draining all of
+// it: Output's retention stays bounded like exec.Cmd.Output even when a command
+// produces a very large diagnostic stream.
+func TestBoundedStderrKeepsPrefixAndSuffix(t *testing.T) {
+	var b boundedStderr
+	const total = 1 << 20
+	chunk := make([]byte, 1024)
+	for i := range chunk {
+		chunk[i] = byte(0x41 + (i % 26))
+	}
+	for written := 0; written < total; written += len(chunk) {
+		if _, err := b.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := b.Bytes()
+	if len(got) >= total {
+		t.Fatalf("retained %d bytes, want far less than the %d written", len(got), total)
+	}
+	if len(b.prefix) != boundedStderrPrefixLimit || len(b.suffix) != boundedStderrSuffixLimit {
+		t.Fatalf("prefix=%d suffix=%d, want %d/%d", len(b.prefix), len(b.suffix), boundedStderrPrefixLimit, boundedStderrSuffixLimit)
+	}
+	if b.total != total {
+		t.Fatalf("total = %d, want %d", b.total, total)
+	}
+	if !bytes.HasPrefix(got, b.prefix) {
+		t.Fatal("retained bytes do not start with the prefix")
+	}
+	if !bytes.HasSuffix(got, b.suffix) {
+		t.Fatal("retained bytes do not end with the suffix")
+	}
+	if !strings.Contains(string(got), "bytes skipped") {
+		t.Fatal("missing truncation marker")
+	}
+	// Kept bytes plus the skipped count must add back up to the total.
+	if skipped := total - len(b.prefix) - len(b.suffix); skipped <= 0 {
+		t.Fatalf("skipped = %d, want > 0", skipped)
+	}
+}
+
+// A failing command with a huge stderr stream must surface bounded stderr on
+// the ExitError, matching the old exec.Cmd.Output retention policy.
+func TestRunner_OutputFailedCommandBoundsStderr(t *testing.T) {
+	skipIfNoSh(t)
+	dir := initRepo(t)
+	aliasGit(t, dir, "noisy", "!sh -c 'head -c 1048576 /dev/zero >&2; exit 1'")
+
+	_, err := New(1).Output(context.Background(), dir, "noisy")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("error is %T, want *exec.ExitError", err)
+	}
+	if len(exitErr.Stderr) >= 1<<20 {
+		t.Fatalf("ExitError.Stderr retained %d bytes, want it bounded", len(exitErr.Stderr))
+	}
+	if !strings.Contains(string(exitErr.Stderr), "bytes skipped") {
+		t.Fatalf("ExitError.Stderr lost the truncation marker: %q", exitErr.Stderr[:min(120, len(exitErr.Stderr))])
+	}
+}
+
+// RunSplit keeps the full stderr stream: callers there want the whole
+// diagnostic, not just the head and tail.
+func TestRunner_RunSplitKeepsFullStderr(t *testing.T) {
+	skipIfNoSh(t)
+	dir := initRepo(t)
+	aliasGit(t, dir, "noisy", "!sh -c 'head -c 1048576 /dev/zero >&2; exit 1'")
+
+	_, stderr, err := New(1).RunSplit(context.Background(), dir, "noisy")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if len(stderr) != 1<<20 {
+		t.Fatalf("RunSplit stderr = %d bytes, want the full %d", len(stderr), 1<<20)
+	}
+}
+
+// Cancellation with separate stdout/stderr orphans, repeated: the grace
+// callback and the deferred pipe teardown must not race. Run under -race.
+func TestRunner_CancelledWithSeparatePipesRepeated(t *testing.T) {
+	skipIfNoSh(t)
+	dir := initRepo(t)
+	aliasGit(t, dir, "leak", "!sh -c 'sleep 1 2>/dev/null & printf ready; printf oops >&2'")
+
+	orig := cancelGracePeriod
+	cancelGracePeriod = 50 * time.Millisecond
+	t.Cleanup(func() { cancelGracePeriod = orig })
+
+	for i := 0; i < 20; i++ {
+		r := New(1)
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		_, _, _ = r.RunSplit(ctx, dir, "leak")
+		cancel()
 	}
 }
