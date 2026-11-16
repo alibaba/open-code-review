@@ -59,11 +59,11 @@ export function App() {
           {state.view !== 'idle' && (
             <div class="result-region">
               {state.view === 'running' && <RunningView logs={state.logs} onCancel={() => bridge.post({ type: 'cancelReview' })} />}
-              {state.view === 'failed' && <FailedView error={state.session.error} partial={partialFailure}
+              {state.view === 'failed' && <FailedView error={state.session.error} partial={partialFailure} logs={state.logs}
                 onRetry={() => start({ mode: ReviewMode.Workspace })} />}
               {(state.view === 'done' || partialFailure) && result && (
                 <DoneView result={result} commentStatus={state.commentStatus}
-                  commentJumpable={state.commentJumpable} logs={state.logs}
+                  commentJumpable={state.commentJumpable} logs={partialFailure ? [] : state.logs}
                   onOpen={(i) => bridge.post({ type: 'jumpToComment', index: i })}
                   onAction={(i, action) => bridge.post({ type: 'commentAction', index: i, action })} />
               )}

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -165,6 +166,22 @@ func TestBuildSummaryCommentsList_TruncatesAndOneLines(t *testing.T) {
 		if len(line) > 320 { // 280 content + small path/prefix overhead
 			t.Errorf("line not capped: len=%d %q", len(line), line)
 		}
+	}
+}
+
+func TestBuildSummaryCommentsList_TruncatesOnRuneBoundary(t *testing.T) {
+	// U+7A7A is three bytes in UTF-8, so 280 bytes ends one byte into the
+	// 94th rune.
+	const wide = "\u7a7a"
+	cs := []model.LlmComment{{Path: "a.go", Content: strings.Repeat(wide, 200)}}
+	got := buildSummaryCommentsList(cs)
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("summary list is not valid UTF-8: %q", got)
+	}
+	want := "- `a.go`: " + strings.Repeat(wide, 93) + "...\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
