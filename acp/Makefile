@@ -47,7 +47,7 @@ check: license-check english-check
 	printf '%s\n' "$$out"; \
 	if printf '%s' "$$out" | grep -q 'matched no packages'; then \
 		echo "staticcheck: analyzed no packages; refusing to report a pass."; \
-		echo "staticcheck 0.8.x requires a Go >= 1.26 toolchain, but this module declares go 1.23."; \
+		echo "Use a staticcheck release compatible with the active Go toolchain."; \
 		exit 1; \
 	fi; \
 	exit $$status

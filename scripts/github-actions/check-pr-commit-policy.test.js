@@ -442,7 +442,7 @@ test("workflow preserves trust boundaries and runs the exported policy", async (
   assert.match(workflow, /types: \[opened, synchronize, reopened, edited, ready_for_review\]/);
   assert.match(workflow, /permissions:\n  contents: read\n  pull-requests: read\n/);
   assert.match(workflow, /name: PR Commit Policy\n    runs-on: \[self-hosted, Linux, X64\]\n    timeout-minutes: 5/);
-  assert.match(workflow, /container:\n      image: node:24\.18\.0\n      options: --cpus=1 --memory=1g\n/);
+  assert.match(workflow, /container:\n      image: node:24\.22\.1\n      options: --cpus=1 --memory=1g\n/);
   assert.match(workflow, /ref: \$\{\{ github.sha \}\}/);
   assert.match(workflow, /persist-credentials: false/);
   assert.doesNotMatch(workflow, /^\s+sparse-checkout(?:-cone-mode)?:/m);

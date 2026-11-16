@@ -10,8 +10,8 @@ sidebar:
 ## 准备工作 {#prerequisites}
 - 安装 [OCR CLI](../../installation/)，配置好[审查模型](../../configuration/)，
 并用 `ocr llm test` 检查连接。
-- 准备包含 `acp/` 目录的源码、Git 和 Go 1.23+，用于构建适配器。
-如果还要从源码构建主项目的 OCR CLI，则需要 Go 1.25.5+。
+- 准备包含 `acp/` 目录的源码、Git 和 Go 1.26.10+，用于构建适配器。
+如果还要从源码构建主项目的 OCR CLI，则需要 Go 1.26.10+。
 - 使用支持 ACP v1 stdio 和自定义 Agent 启动命令的客户端。
 
 适配器与 OCR CLI 分别构建。下面使用本地构建方式。

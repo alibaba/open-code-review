@@ -679,15 +679,18 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// Skip the "stream" key here. The streaming decision below uses a
-		// dedicated boolean check, and when streaming is enabled the SDK's
-		// NewStreaming method sets stream=true on the wire itself. When
-		// streaming is NOT enabled, leaving the key in the body would make
-		// the API answer with text/event-stream and the non-streaming path
-		// fails to decode (see issue #647). "stream_options" is owned by the
-		// streaming branch below for the same reason: providers reject it
-		// unless stream is true.
-		if k == "stream" || k == "stream_options" {
+		// Only boolean true enables the streaming branch below; NewStreaming
+		// sets stream=true itself. Drop non-boolean values so they cannot
+		// request SSE while the non-streaming SDK expects JSON. Forward
+		// explicit false so gateways that default to streaming return JSON.
+		// stream_options belongs to the streaming branch because providers
+		// reject it unless stream is true.
+		if k == "stream" {
+			stream, isBool := v.(bool)
+			if !isBool || stream {
+				continue
+			}
+		} else if k == "stream_options" {
 			continue
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
@@ -1493,12 +1496,14 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		opts = append(opts, option.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// This client is non-streaming: it calls Messages.New, which expects a
-		// single JSON body. If a provider config sets extra_body.stream=true,
-		// forwarding it here makes the API answer with SSE and every call fails
-		// to decode. Drop the key rather than forward it.
+		// Messages.New expects a single JSON body, not SSE. Drop true and
+		// non-boolean stream values to preserve that contract, but forward
+		// explicit false so gateways that default to streaming return JSON.
 		if k == "stream" {
-			continue
+			stream, isBool := v.(bool)
+			if !isBool || stream {
+				continue
+			}
 		}
 		// Drop thinking when it conflicts with this request's constraints:
 		// forced tool_choice or budget_tokens >= max_tokens.

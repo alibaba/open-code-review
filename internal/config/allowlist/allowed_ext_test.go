@@ -34,6 +34,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".ETS", true},
 		{".json5", true},
 		{".JSON5", true},
+		{".jsonc", true},
+		{".JSONC", true},
 		{".kt", true},
 		{".KT", true},
 		{".kts", true},
@@ -60,6 +62,18 @@ func TestIsAllowedExt(t *testing.T) {
 		{".J2", true},
 		{".pug", true},
 		{".PUG", true},
+		{".ejs", true},
+		{".EJS", true},
+		{".liquid", true},
+		{".LIQUID", true},
+		{".njk", true},
+		{".NJK", true},
+		{".haml", true},
+		{".HAML", true},
+		{".slim", true},
+		{".SLIM", true},
+		{".erb", true},
+		{".ERB", true},
 		{".graphql", true},
 		{".GRAPHQL", true},
 		{".gql", true},
@@ -109,6 +123,12 @@ func TestIsAllowedExt(t *testing.T) {
 		{".ZIG", true},
 		{".thrift", true},
 		{".THRIFT", true},
+		{".bzl", true},
+		{".BZL", true},
+		{".bazel", true},
+		{".BAZEL", true},
+		{".star", true},
+		{".STAR", true},
 		{".capnp", true},
 		{".CAPNP", true},
 		{".ml", true},
@@ -149,6 +169,16 @@ func TestIsAllowedExt(t *testing.T) {
 		{".PSM1", true},
 		{".psd1", true},
 		{".PSD1", true},
+		{".clj", true},
+		{".CLJ", true},
+		{".cljs", true},
+		{".CLJS", true},
+		{".cljc", true},
+		{".CLJC", true},
+		{".edn", true},
+		{".EDN", true},
+		{".move", true},
+		{".MOVE", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -205,8 +235,10 @@ func TestAllowlistKeepsEveryTestedExtension(t *testing.T) {
 
 	tested := []string{
 		".go", ".java", ".ts", ".tsx", ".astro", ".py", ".pyi", ".php", ".phtml",
-		".rs", ".r", ".ets", ".json5", ".kt", ".kts", ".fs", ".fsi", ".fsx",
+		".rs", ".r", ".ets", ".json5", ".jsonc", ".kt", ".kts", ".fs", ".fsi", ".fsx",
 		".ftl", ".ftlh", ".ftlx", ".hbs", ".mustache", ".jinja2", ".j2", ".pug", ".graphql",
+		".ejs", ".liquid", ".njk",
+		".haml", ".slim", ".erb",
 		".js", ".jsx", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".cs",
 		".rb", ".sh", ".bash", ".zsh", ".sql", ".css", ".scss", ".html", ".xml", ".yaml",
 		".yml", ".json", ".toml", ".lua", ".swift",
@@ -320,6 +352,34 @@ func TestIsExcludedPath(t *testing.T) {
 		{"pug template in tests directory", "tests/templates/page.pug", false},
 		{"pug template in test directory", "test/templates/page.pug", false},
 
+		// EJS/Liquid/Nunjucks use the shared fixture and dependency exclusions.
+		{"ejs fixture", "test/fixtures/card.ejs", true},
+		{"ejs vendored template", "vendor/templates/card.ejs", true},
+		{"ejs template in tests directory", "tests/templates/card.ejs", false},
+		{"ejs application template", "app/views/card.html.ejs", false},
+		{"liquid fixture", "test/fixtures/card.liquid", true},
+		{"liquid vendored template", "vendor/templates/card.liquid", true},
+		{"liquid template in tests directory", "tests/templates/card.liquid", false},
+		{"liquid application template", "app/views/card.html.liquid", false},
+		{"njk fixture", "test/fixtures/card.njk", true},
+		{"njk vendored template", "vendor/templates/card.njk", true},
+		{"njk template in tests directory", "tests/templates/card.njk", false},
+		{"njk application template", "app/views/card.html.njk", false},
+
+		// HAML/Slim/ERB use the shared fixture and dependency exclusions.
+		{"haml fixture", "test/fixtures/card.haml", true},
+		{"haml vendored template", "vendor/templates/card.haml", true},
+		{"haml template in tests directory", "tests/templates/card.haml", false},
+		{"haml application template", "app/views/card.html.haml", false},
+		{"slim fixture", "test/fixtures/card.slim", true},
+		{"slim vendored template", "vendor/templates/card.slim", true},
+		{"slim template in tests directory", "tests/templates/card.slim", false},
+		{"slim application template", "app/views/card.html.slim", false},
+		{"erb fixture", "test/fixtures/card.erb", true},
+		{"erb vendored template", "vendor/templates/card.erb", true},
+		{"erb template in tests directory", "tests/templates/card.erb", false},
+		{"erb application template", "app/views/card.html.erb", false},
+
 		// HarmonyOS oh_modules and test files
 		{"oh_modules root", "oh_modules/some_lib/index.ets", true},
 		{"oh_modules nested", "entry/oh_modules/lib/index.ets", true},
@@ -402,6 +462,28 @@ func TestIsExcludedPath(t *testing.T) {
 		{"capnp schema is reviewed", "schema/addressbook.capnp", false},
 		{"capnp in filename only", "src/capnp_helpers.go", false},
 
+		// Move build output and test files. The build/ pattern is deliberately
+		// scoped by extension: IsExcludedPath applies every pattern to every
+		// path with no language dispatch, so a bare "**/build/**" would also
+		// drop Java, Gradle, TypeScript and CMake output.
+		{"move build dir", "build/mypkg/sources/pool.move", true},
+		{"move build vendored dependency", "build/MyPkg/sources/dependencies/Sui/tx_context.move", true},
+		{"move tests dir", "tests/pool_tests.move", true},
+		{"move tests dir under sources", "sources/trading/tests/market/clearinghouse_test.move", true},
+		{"move _tests suffix", "sources/pool_tests.move", true},
+		// Singular _test.move is as common as the plural and often lives in
+		// sources/ rather than tests/, e.g. aptos-core's
+		// move-examples/hello_blockchain/sources/hello_blockchain_test.move.
+		{"move _test suffix", "sources/hello_blockchain_test.move", true},
+		{"move tests dir at root", "tests/coin.move", true},
+		{"move tests dir in nested package", "packages/app/tests/coin.move", true},
+		{"move non-test", "sources/pool.move", false},
+		{"move non-test in nested package", "packages/app/sources/coin.move", false},
+		{"move tests in filename", "sources/tests_helper.move", false},
+		{"move build pattern does not catch ts", "frontend/build/index.ts", false},
+		{"move build pattern does not catch java", "build/classes/com/example/Foo.java", false},
+		{"move build pattern does not catch go", "build/main.go", false},
+
 		// Jsonnet vendored dependencies (written by `jb install`, wiped by `rm -rf vendor`).
 		// This used to be extension-scoped to keep vendored Go and PHP sources reviewable.
 		// #1494 reversed that on purpose: vendor/ is a dependency directory whatever the
@@ -446,6 +528,19 @@ func TestIsExcludedPath(t *testing.T) {
 		{"hlsl shader", "shaders/lighting.hlsl", false},
 		{"wgsl shader", "shaders/compute.wgsl", false},
 		{"metal shader", "shaders/blur.metal", false},
+		// Clojure test files, compiler output and tool-owned cache directories
+		{"clojure test directory", "test/myapp/core_test.clj", true},
+		{"cljs nested test directory", "modules/ui/test/myapp/view_test.cljs", true},
+		{"cljc test suffix", "src/myapp/util_test.cljc", true},
+		{"cljs compiled bundle", "resources/public/js/compiled/app.js", true},
+		{"cljs compiled stdlib copy", "resources/public/js/compiled/out/cljs/core.cljs", true},
+		{"cljs analysis cache", "resources/public/js/compiled/out/cljs/core.cljs.cache.edn", true},
+		{"cljs compiled under a subproject", "example/resources/public/js/compiled/example.js", true},
+		{"clojure cpcache", ".cpcache/launchpad.edn", true},
+		{"shadow-cljs cache", ".shadow-cljs/builds/app/release/bundle-info.edn", true},
+		{"clojure non-test", "src/myapp/core.clj", false},
+		{"clojure test in filename prefix", "src/myapp/test_helpers.clj", false},
+		{"hand-written js beside the compiled output", "resources/public/js/app/analytics.js", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},
