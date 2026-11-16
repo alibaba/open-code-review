@@ -422,7 +422,13 @@ func (c *Client) loginAttempt(ctx context.Context, host string, registration, ol
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
-	defer server.Close()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			server.Close()
+		}
+	}()
 	localURL := "http://" + listener.Addr().String() + "/auth/start/" + a.state
 	if _, err := fmt.Fprintln(out, "Continue with ChatGPT. Eligible requests use your ChatGPT plan."); err != nil {
 		return nil, err
