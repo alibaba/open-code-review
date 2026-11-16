@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /** Thrown when the CLI exits non-zero. The message has already been refined by [extractCliError] and is safe to show to users. */
-class CliException(message: String) : RuntimeException(message)
+class CliException(message: String, val exitCode: Int, val stdout: String) : RuntimeException(message)
 
 /**
  * Every subprocess goes through [ShellEnv]: the environment comes from the login shell, and command names are
@@ -197,7 +197,7 @@ class CliService(private val cliPath: String = "ocr") {
             stderrThread.join(2_000)
             if (exit != 0) {
                 val text = synchronized(stderr) { stderr.toString() }
-                throw CliException(extractCliError(text).ifBlank { "CLI exited with code $exit" })
+                throw CliException(extractCliError(text).ifBlank { "CLI exited with code $exit" }, exit, stdout)
             }
             return stdout
         } finally {
@@ -216,7 +216,21 @@ class CliService(private val cliPath: String = "ocr") {
         cwd: File,
         onLog: (LogLine) -> Unit,
         cancellation: CliCancellation,
-    ): CliResult = parseCliResult(runRaw(buildReviewArgs(opts), cwd, onLog, cancellation = cancellation))
+    ): CliResult {
+        val stdout = try {
+            runRaw(buildReviewArgs(opts), cwd, onLog, cancellation = cancellation)
+        } catch (error: CliException) {
+            if (error.exitCode != 1) throw error
+            val result = try {
+                parseCliResult(error.stdout)
+            } catch (_: IllegalArgumentException) {
+                throw error
+            }
+            if (result.status != "partial") throw error
+            return result.copy(executionError = error.message)
+        }
+        return parseCliResult(stdout)
+    }
 
     /**
      * Runs `ocr llm test`. When [home] / [configPath] are passed, it runs in an isolated environment so that

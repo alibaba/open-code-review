@@ -5,6 +5,7 @@ import { CliResult, CliRunOptions, LogLine, ReviewState } from '@shared/types';
 import { CliService } from './CliService';
 
 export function resultToState(result: CliResult): ReviewState {
+  if (result.executionError) return 'failed';
   if (result.comments.length > 0) return 'done';
   if (result.status === 'completed_with_errors') return 'failed';
   return 'empty';
@@ -30,7 +31,7 @@ export class ReviewSession {
         cb.onState('cancelled');
         return;
       }
-      cb.onState(resultToState(result));
+      cb.onState(resultToState(result), result.executionError);
       cb.onDone(result);
     } catch (e) {
       if (this.cancelled) {

@@ -38,7 +38,8 @@ export interface AgentWarning {
 }
 
 export interface CliResult {
-  status: 'success' | 'completed_with_errors' | 'completed_with_warnings' | 'skipped';
+  status: 'success' | 'complete' | 'partial' | 'failed' | 'completed_with_errors' | 'completed_with_warnings' | 'skipped';
+  executionError?: string;
   comments: ReviewComment[];
   warnings: AgentWarning[];
   summary?: ReviewSummary;
