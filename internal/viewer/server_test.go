@@ -42,11 +42,11 @@ func TestTruncateText(t *testing.T) {
 // rendered as U+FFFD.
 func TestTruncateTextAlwaysValidUTF8(t *testing.T) {
 	inputs := []string{
-		"你好世界",
+		"你好世界", // allow-non-english: UTF-8 truncation regression fixture
 		"src/组件/用户资料/资料管理器.java", // allow-non-english: multibyte file path from issue #1853
-		"привет/мир/файл.go",
+		"привет/мир/файл.go",     // allow-non-english: UTF-8 truncation regression fixture
 		"🚀🚀🚀🚀🚀",
-		"mixed/ascii/混批/path.go",
+		"mixed/ascii/混批/path.go", // allow-non-english: UTF-8 truncation regression fixture
 	}
 	for _, s := range inputs {
 		for n := 0; n <= 12; n++ {
