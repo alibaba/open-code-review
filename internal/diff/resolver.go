@@ -4,6 +4,7 @@
 package diff
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -146,8 +147,11 @@ type indexedLine struct {
 
 // resolveFromHunk tries to find startLine/endLine by matching ExistingCode
 // against hunk lines. It tries the new-side first (context + added lines →
-// new-file line numbers), then falls back to old-side (context + deleted →
-// old-file line numbers).
+// new-file line numbers), then the new-side again without blank lines, which
+// splitAndNormalize has already dropped from the target, then falls back to
+// old-side (context + deleted → old-file line numbers). existing_code is
+// meant to quote added lines, and an old-side match reports old-file line
+// numbers, so old-side comes last and is not retried without blank lines.
 func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 	hunks := ParseHunks(d.Diff)
 	if len(hunks) == 0 {
@@ -161,6 +165,15 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 
 	for i := range hunks {
 		newSide := extractSideLines(&hunks[i], true)
+		if start, end, ok := matchConsecutive(newSide, targetLines); ok {
+			cm.StartLine = start
+			cm.EndLine = end
+			return true
+		}
+	}
+
+	for i := range hunks {
+		newSide := slices.DeleteFunc(extractSideLines(&hunks[i], true), func(l indexedLine) bool { return l.content == "" })
 		if start, end, ok := matchConsecutive(newSide, targetLines); ok {
 			cm.StartLine = start
 			cm.EndLine = end

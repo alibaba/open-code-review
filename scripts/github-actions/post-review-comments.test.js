@@ -16,7 +16,7 @@
 
 const assert = require("assert");
 const path = require("path");
-const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, preserveCheckpointMarker, tailForComment, MAX_COMMENT_STDERR_CHARS } = require(path.join(__dirname, "post-review-comments.js"));
+const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, isSummaryAuthorOurs, preserveCheckpointMarker, tailForComment, MAX_COMMENT_STDERR_CHARS } = require(path.join(__dirname, "post-review-comments.js"));
 
 // REVIEW_TAG as the production code builds it for this test's hardcoded run
 // identity (context.runId=undefined -> 0, runAttempt=undefined -> 1). Used as
@@ -218,6 +218,10 @@ function makeGithub(opts = {}) {
         // would let identity logic pass tests it cannot pass in production.
         getAuthenticated: async () => {
           authCalls.push(Date.now());
+          // Opt-in PAT fixture: with a user-to-server token this endpoint
+          // answers, and that login is the only identity the summary gate has
+          // for the User-typed comment such a run posts.
+          if (opts.authenticatedLogin) return { data: { login: opts.authenticatedLogin } };
           throw Object.assign(new Error("Resource not accessible by integration"), { status: 403 });
         },
       },
@@ -624,6 +628,199 @@ async function testNoCommentsStickyUpdate() {
   assert.strictEqual(github.updatedComments.length, 1);
   assert.strictEqual(github.issueComments.length, 0);
   assert.match(github.updatedComments[0].body, /All clear\./);
+}
+
+// A zero-finding run still has to show result.warnings. This branch used to
+// post result.message under a check mark and return, so the warning list the
+// findings path renders with formatWarnings never reached the summary. With
+// no warnings the summary, including the check mark, stays byte-identical.
+async function testZeroFindingSummaryRendersWarnings() {
+  const limitWarning = {
+    file: "a.go",
+    type: "review_limit_reached",
+    message: "reached the aggregate token budget before finishing; the grace round completed the task",
+  };
+  const completedMessage = "Review complete: 0 finding(s) across 1 selected item(s).";
+  const completedWarnings = [limitWarning];
+  const completedBody = `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: ${completedMessage}${formatWarnings(completedWarnings)}`;
+  const completed = {
+    comments: [],
+    message: completedMessage,
+    warnings: completedWarnings,
+    manifest: { terminal_state: "complete", input: { resolved_head: "ab".repeat(20) } },
+  };
+
+  const postedBody = (github) => {
+    if (github.updatedComments.length > 0) return github.updatedComments[github.updatedComments.length - 1].body;
+    return github.issueComments.length > 0 ? github.issueComments[github.issueComments.length - 1].body : null;
+  };
+
+  // New summary on a cold start.
+  {
+    const { github } = await run({ result: completed, opts: { stickySummary: true } });
+    assert.strictEqual(github.issueComments.length, 1, "a cold start creates the summary");
+    assert.strictEqual(github.updatedComments.length, 0, "a cold start does not update a comment");
+    assert.strictEqual(github.issueComments[0].body, completedBody, "new summary renders review_limit_reached");
+    assert.strictEqual(github.issueComments[0].body.includes("✅"), false);
+    assert.strictEqual(
+      github.issueComments[0].body.includes("`a.go` (`review_limit_reached`): reached the aggregate token budget before finishing; the grace round completed the task"),
+      true
+    );
+  }
+
+  // Sticky update of an existing summary.
+  {
+    const existing = [{ id: 7, body: `${SUMMARY_MARKER}\nold good`, user: { login: "github-actions[bot]" } }];
+    const { github } = await run({
+      result: completed,
+      githubOpts: { existingSummary: existing },
+      opts: { stickySummary: true },
+    });
+    assert.strictEqual(github.issueComments.length, 0, "sticky update does not create a second summary");
+    assert.strictEqual(github.updatedComments.length, 1, "sticky update rewrites the existing summary");
+    assert.strictEqual(github.updatedComments[0].body, completedBody, "sticky summary keeps the warnings");
+  }
+
+  // Non-sticky runs also create a fresh summary, and it carries the same warnings.
+  {
+    const { github } = await run({ result: completed, opts: { stickySummary: false } });
+    assert.strictEqual(github.issueComments.length, 1);
+    assert.strictEqual(github.updatedComments.length, 0);
+    assert.strictEqual(github.issueComments[0].body, completedBody);
+  }
+
+  // Missing message: neutral fallback, for both a plain string and a structured
+  // warning that is not review_limit_reached. Neither path may say the review
+  // looks good, and neither warning shape is special-cased.
+  const mixed = [
+    "skipped unscanned generated file",
+    { file: "internal/llm/resolver.go", type: "subtask_error", message: "context deadline exceeded" },
+  ];
+  {
+    const { github } = await run({ result: { comments: [], warnings: mixed } });
+    const body = postedBody(github);
+    assert.strictEqual(
+      body,
+      `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: No comments generated. See warnings below.${formatWarnings(mixed)}`
+    );
+    assert.strictEqual(body.includes("Looks good to me"), false);
+  }
+
+  // A supplied message is kept for a string warning too.
+  {
+    const warnings = ["review_limit_reached"];
+    const { github } = await run({ result: { comments: [], message: "Custom qualifier.", warnings } });
+    assert.strictEqual(
+      postedBody(github),
+      `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: Custom qualifier.${formatWarnings(warnings)}`
+    );
+  }
+
+  // A narrowed range note stays after the warning list, matching the
+  // with-comments summary (formatWarnings, then rangeNote).
+  {
+    const { github } = await run({
+      result: { comments: [], message: completedMessage, warnings: completedWarnings },
+      opts: ckRunOptions({ rangeMode: "checkpoint", rangeFrom: CK_OLD, rangeTo: CK_NEW }),
+    });
+    const rangeNote = `\n\n_Reviewed \`${CK_OLD.slice(0, 7)}..${CK_NEW.slice(0, 7)}\` only; earlier commits in this PR were reviewed in a previous run._`;
+    const warningBlock = formatWarnings(completedWarnings);
+    const body = postedBody(github);
+    assert.strictEqual(
+      body,
+      `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: ${completedMessage}${warningBlock}${rangeNote}`
+    );
+    assert.ok(body.indexOf(warningBlock) < body.indexOf(rangeNote), "warnings appear before the range note");
+  }
+
+  // No warnings: byte-identical to the historical clean summary.
+  for (const warnings of [undefined, []]) {
+    const result = { comments: [] };
+    if (warnings) result.warnings = warnings;
+    const { github } = await run({ result });
+    assert.strictEqual(
+      postedBody(github),
+      `${SUMMARY_MARKER}\n✅ **OpenCodeReview**: No comments generated. Looks good to me.`,
+      `warnings=${JSON.stringify(warnings)} must keep the clean summary`
+    );
+  }
+  {
+    const { github } = await run({ result: { comments: [], message: "All clear." } });
+    assert.strictEqual(
+      postedBody(github),
+      `${SUMMARY_MARKER}\n✅ **OpenCodeReview**: All clear.`
+    );
+  }
+}
+
+async function testZeroFindingWarningsPreserveSummaryOwnership() {
+  const warnings = [{ file: "a.go", type: "review_limit_reached", message: "Review limit reached." }];
+  const result = { comments: [], warnings, message: "Review complete." };
+  const expectedBody = `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: Review complete.${formatWarnings(warnings)}`;
+  for (const scenario of [
+    {
+      name: "pinned GitHub App",
+      appSlug: "github-actions",
+      owner: { login: "github-actions[bot]", type: "Bot" },
+      other: { login: "other-app[bot]", type: "Bot" },
+    },
+    {
+      name: "personal access token",
+      appSlug: "",
+      authenticatedLogin: "maintainer",
+      owner: { login: "maintainer", type: "User" },
+      other: { login: "reviewer", type: "User" },
+    },
+  ]) {
+    const existingSummary = [
+      { id: 7, body: `${SUMMARY_MARKER}\nold summary`, user: scenario.owner },
+      { id: 8, body: `Quoted summary:\n${SUMMARY_MARKER}`, user: scenario.other },
+    ];
+    const { github } = await run({
+      result,
+      githubOpts: { existingSummary, authenticatedLogin: scenario.authenticatedLogin },
+      opts: { stickySummary: true, appSlug: scenario.appSlug },
+    });
+    assert.deepStrictEqual(github.updatedComments.map((comment) => comment.comment_id), [7], scenario.name);
+    assert.deepStrictEqual(github.issueComments, [], scenario.name);
+    assert.strictEqual(github.updatedComments[0].body, expectedBody, scenario.name);
+    assert.strictEqual(github.authCalls.length, scenario.appSlug ? 0 : 1, scenario.name);
+  }
+}
+
+// Warnings are presentation. They must not change which runs may advance the
+// checkpoint: a complete zero-finding result still advances, and partial or
+// failed results stay ineligible.
+async function testZeroFindingWarningsDoNotBlockCheckpoint() {
+  const warnings = [{
+    file: "a.go",
+    type: "review_limit_reached",
+    message: "reached the aggregate token budget before finishing; the grace round completed the task",
+  }];
+  const message = "Review complete: 0 finding(s) across 1 selected item(s).";
+  const summary = `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: ${message}${formatWarnings(warnings)}`;
+
+  for (const terminal of ["complete", "partial", "failed"]) {
+    const { github, outputs } = await run({
+      result: {
+        comments: [],
+        message,
+        warnings,
+        manifest: ckManifest({ terminal_state: terminal }),
+      },
+      opts: ckRunOptions({ checkpointCarry: CARRY }),
+    });
+    const body = lastSummaryBody(github);
+    if (terminal === "complete") {
+      assert.strictEqual(outputs.checkpoint_after, CK_RESOLVED, "warnings do not block a complete run");
+      assert.strictEqual(parseCheckpointMarker(body).head, CK_RESOLVED);
+      assert.strictEqual(body.includes(CARRY), false, "advancing replaces the carried marker");
+      assert.strictEqual(body.startsWith(`${summary}\n\n`), true, "the advanced summary still renders the warnings");
+    } else {
+      assert.strictEqual(outputs.checkpoint_after, "", `${terminal} stays ineligible`);
+      assert.strictEqual(body, `${summary}\n\n${CARRY}`, `${terminal} keeps the previous checkpoint and the warnings`);
+    }
+  }
 }
 
 async function testIncrementalSkipsOverlapping() {
@@ -2330,6 +2527,262 @@ async function testRoutedFindingsCarryNoIdempotencyId() {
   assert.doesNotMatch(body, /ocr-\d+-\d+-[a-f0-9]+/, "routed summary body carries no idempotency id");
 }
 
+// The sticky summary anchor used to be located by substring alone, so a HUMAN
+// comment that merely quoted the marker was returned as "the existing summary"
+// and its body was overwritten in place. Quoting a marker is a normal thing for
+// a human (or another tool) to do when discussing a prior review, and the
+// destroyed comment was the evidence artifact of a downstream merge gate —
+// silent data loss with no way to tell an overwrite from a comment that never
+// existed. The anchor must therefore be restricted to a comment GitHub
+// attributes to us.
+async function testSummaryAnchorSkipsHumanCommentQuotingTheMarker() {
+  // Bot summary posted first, then the human quotes it (the timeline order the
+  // bug needs: the human's is the NEWEST matching comment).
+  const botSummary = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const humanQuotingMarker = {
+    id: 77,
+    html_url: "http://ex/77",
+    user: { login: "human-reviewer", type: "User" },
+    body: `Review-feedback disposition: addressed.\n\nQuoting the earlier review for context:\n${SUMMARY_MARKER}`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [botSummary, humanQuotingMarker] },
+    opts: { stickySummary: true },
+  });
+
+  const updatedIds = github.updatedComments.map((c) => c.comment_id);
+  assert.deepStrictEqual(
+    updatedIds,
+    [42],
+    `only the bot's own summary may be rewritten; got ${JSON.stringify(updatedIds)}`
+  );
+  assert.doesNotMatch(github.updatedComments[0].body, /Review-feedback disposition/, "the human comment's text must survive");
+  assert.deepStrictEqual(github.issueComments, [], "no new summary is created");
+}
+
+async function testMalformedResultUpdatesExistingSummaryWithStderr() {
+  const existing = [{
+    id: 42,
+    body: `${SUMMARY_MARKER}\nold summary`,
+    user: { login: "maintainer", type: "User" },
+  }];
+  const { github } = await run({
+    result: "{not json",
+    stderr: "stderr error log",
+    githubOpts: { existingSummary: existing, authenticatedLogin: "maintainer" },
+  });
+  assert.deepStrictEqual(github.updatedComments.map((c) => c.comment_id), [42]);
+  assert.match(github.updatedComments[0].body, /stderr error log/);
+  assert.deepStrictEqual(github.issueComments, []);
+}
+
+async function testCustomAppSummaryWhenAuthenticatedUserIsUnavailable() {
+  const existing = [
+    { id: 43, body: `${SUMMARY_MARKER}\nold summary`, user: { login: "custom-app[bot]", type: "Bot" }, performed_via_github_app: { slug: "custom-app" } },
+    { id: 44, body: `${SUMMARY_MARKER}\nquoted summary`, user: { login: "other-user", type: "User" } },
+  ];
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: existing },
+  });
+  assert.strictEqual(github.authCalls.length, 1, "the authenticated user lookup fails for an app token");
+  assert.deepStrictEqual(github.updatedComments.map((c) => c.comment_id), [43]);
+  assert.deepStrictEqual(github.issueComments, []);
+}
+
+async function testCustomAppSummaryWithPinnedSlug() {
+  const existing = [{
+    id: 43,
+    body: `${SUMMARY_MARKER}\nold summary`,
+    user: { login: "custom-app[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "custom-app" },
+  }];
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: existing },
+    opts: { appSlug: "custom-app" },
+  });
+  assert.deepStrictEqual(github.updatedComments.map((c) => c.comment_id), [43]);
+  assert.deepStrictEqual(github.issueComments, []);
+  assert.strictEqual(github.authCalls.length, 0, "a pinned app slug needs no user lookup");
+}
+
+// The other half of the contract: tightening the anchor must not stop the bot
+// from finding its own summary, or every run would post a second summary and
+// the checkpoint marker would stop advancing.
+async function testSummaryAnchorStillFindsTheBotsOwnSummary() {
+  const botSummary = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [botSummary] },
+    opts: { stickySummary: true },
+  });
+
+  assert.strictEqual(github.updatedComments.length, 1, "the bot's own summary is still updated in place");
+  assert.strictEqual(github.updatedComments[0].comment_id, 42);
+  assert.deepStrictEqual(github.issueComments, [], "and no duplicate summary is posted");
+}
+
+// Review follow-up: restricting the anchor to "a writer GitHub attributes to a
+// bot" is still one notch too wide. isCheckpointAuthorOurs with an EMPTY
+// appSlug accepts ANY bot-typed writer, so a different bot or GitHub App that
+// quotes the marker is still selected and rewritten in place — the same data
+// loss, from a machine instead of a human. The summary finders must pin the
+// identity to the app that owns the OCR summary when that identity is known.
+async function testSummaryAnchorSkipsAnotherAppsComment() {
+  // Newest matching comment belongs to a DIFFERENT app; ours is older.
+  const ours = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const otherApp = {
+    id: 77,
+    html_url: "http://ex/77",
+    user: { login: "someone-elses-bot[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "some-other-app" },
+    body: `Cited for the record:\n${SUMMARY_MARKER}`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [ours, otherApp] },
+    opts: { stickySummary: true, appSlug: "github-actions" },
+  });
+
+  const updatedIds = github.updatedComments.map((c) => c.comment_id);
+  assert.deepStrictEqual(
+    updatedIds,
+    [42],
+    `only this action's own summary may be rewritten; got ${JSON.stringify(updatedIds)}`
+  );
+  assert.doesNotMatch(github.updatedComments[0].body, /Cited for the record/, "the other app's text must survive");
+}
+
+// The other half of the pinning contract, and the reason pinning cannot simply
+// be unconditional: an installation token cannot ask GitHub which app it is
+// (GET /app needs a JWT), so on a caller-supplied token the app identity is
+// genuinely unknown. There the old wider check still holds — but it must be
+// the WIDER check, not a pin that rejects every comment including our own, or
+// every run would post a duplicate summary and the checkpoint would stop
+// advancing.
+async function testSummaryAnchorStillFindsOurSummaryWhenAppIsUnknown() {
+  const botSummary = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [botSummary] },
+    // No appSlug: the caller supplied its own token, so no slug is known.
+    opts: { stickySummary: true },
+  });
+
+  assert.strictEqual(github.updatedComments.length, 1, "an unknown app identity keeps the wider bot check");
+  assert.strictEqual(github.updatedComments[0].comment_id, 42);
+  assert.deepStrictEqual(github.issueComments, [], "and still does not post a duplicate summary");
+}
+
+// A PAT is the one token whose summary GitHub attributes to a HUMAN account, so
+// the bot gate above rejects the run's own summary and every run posts another
+// copy. GET /user answers for that token, and the login it returns is the
+// identity the comment carries, so comparing the two is what recovers the
+// anchor — and only under the marker-leading body, because these finders
+// rewrite in place.
+async function testPatSummaryIsUpdatedInPlace() {
+  const patSummary = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "maintainer", type: "User" },
+    body: `${SUMMARY_MARKER}\nOpenCodeReview: 2 finding(s).`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [patSummary], authenticatedLogin: "maintainer" },
+    opts: { stickySummary: true },
+  });
+
+  assert.deepStrictEqual(
+    github.updatedComments.map((c) => c.comment_id),
+    [42],
+    "a PAT run updates its own summary in place"
+  );
+  assert.deepStrictEqual(github.issueComments, [], "and posts no duplicate");
+}
+
+// The same account discussing a review quotes the summary mid-body. The marker
+// does not lead that body, so it is not the anchor: posting a fresh summary is
+// correct, rewriting the quote is not.
+async function testPatCommentQuotingMarkerMidBodyIsNotTheAnchor() {
+  const quote = {
+    id: 77,
+    html_url: "http://ex/77",
+    user: { login: "maintainer", type: "User" },
+    body: `Following up on the last run:\n\n${SUMMARY_MARKER}\n`,
+  };
+  const { github } = await run({
+    result: { comments: [], message: "All clear." },
+    githubOpts: { existingSummary: [quote], authenticatedLogin: "maintainer" },
+    opts: { stickySummary: true },
+  });
+
+  assert.deepStrictEqual(github.updatedComments, [], "a mid-body quote is never rewritten");
+  assert.strictEqual(github.issueComments.length, 1, "a fresh summary is posted instead");
+}
+
+// The PAT branch must not widen the plant case it was carved out of. It only
+// ever admits the run's own account, and a pinned app slug (an App token, whose
+// comments are never User-typed) admits no User writer at all.
+async function testPatGateAdmitsOnlyTheRunsOwnAccount() {
+  const marker = `${SUMMARY_MARKER}\nsummary`;
+  const selfLogin = "maintainer";
+  const gate = (comment, extra = {}) =>
+    isSummaryAuthorOurs(comment, { resolveSelfLogin: async () => selfLogin, ...extra });
+
+  assert.strictEqual(
+    await gate({ user: { login: "Maintainer", type: "User" }, body: marker }),
+    true,
+    "logins compare case-insensitively, as GitHub compares them"
+  );
+  assert.strictEqual(
+    await gate({ user: { login: "fork-contributor", type: "User" }, body: marker }),
+    false,
+    "another account's leading marker is still a plant"
+  );
+  assert.strictEqual(
+    await gate({ user: { login: selfLogin, type: "User" }, body: `prose\n\n${marker}` }),
+    false,
+    "the marker must lead the body"
+  );
+  assert.strictEqual(
+    await gate({ user: { login: selfLogin, type: "User" }, body: marker }, { appSlug: "github-actions" }),
+    false,
+    "a pinned app identity never admits a User writer"
+  );
+  assert.strictEqual(
+    await gate({ user: { login: selfLogin, type: "User" }, body: marker }, { resolveSelfLogin: null }),
+    false,
+    "without a knowable login the User case stays rejected"
+  );
+}
+
 async function main() {
   await testFailedInlineCommentsAreSummarized();
   await testWarningsListedAfterSummaryComments();
@@ -2338,6 +2791,9 @@ async function main() {
   await testNonStickyCreatesNewCommentOnFallback();
   await testNonStickyFallbackAllSuccessStillPostsSummary();
   await testNoCommentsStickyUpdate();
+  await testZeroFindingSummaryRendersWarnings();
+  await testZeroFindingWarningsPreserveSummaryOwnership();
+  await testZeroFindingWarningsDoNotBlockCheckpoint();
   await testIncrementalSkipsOverlapping();
   await testIncrementalSkipsSameRunOverlapping();
   await testIncrementalSkipsSameRunIoUOverlapping();
@@ -2435,12 +2891,17 @@ async function main() {
   await testCheckpointTwelveReasonsAreDistinct();
   await testCheckpointSingleFieldMutationsFailClosed();
   await testCheckpointAuthorVerificationFailsClosed();
+  await testCheckpointReadsOurSummaryBelowAQuote();
+  await testCheckpointReportsUnverifiedWhenNoMarkerIsOurs();
+  await testCheckpointReadsPatSummary();
   await testCheckpointRejectsDifferentBotIdentity();
   await testCheckpointWidenOnly();
   await testCheckpointSameHeadRerun();
   await testCheckpointResolveShape();
   // Cross-push checkpoints (#476) — write path
   await testCheckpointAdvanceGateTable();
+  await testCheckpointAdvancesAcrossOutOfDiffBatches();
+  await testCheckpointMalformedRangesRemainBlocking();
   await testCheckpointAdvanceRequiresFullSha();
   await testManifestHeadPinsEveryReviewPost();
   await testLegacyPullRequestEventUsesSnapshotHead();
@@ -2509,6 +2970,16 @@ async function main() {
   await testResolveCleanupNeverBreaksOutputs();
   await testResolvePacingUsesSuccessDelay();
   testActionYmlDoesNotPromiseTheIoUThresholdToResolveOutdated();
+  await testSummaryAnchorSkipsHumanCommentQuotingTheMarker();
+  await testMalformedResultUpdatesExistingSummaryWithStderr();
+  await testCustomAppSummaryWhenAuthenticatedUserIsUnavailable();
+  await testCustomAppSummaryWithPinnedSlug();
+  await testSummaryAnchorStillFindsTheBotsOwnSummary();
+  await testSummaryAnchorSkipsAnotherAppsComment();
+  await testSummaryAnchorStillFindsOurSummaryWhenAppIsUnknown();
+  await testPatSummaryIsUpdatedInPlace();
+  await testPatCommentQuotingMarkerMidBodyIsNotTheAnchor();
+  await testPatGateAdmitsOnlyTheRunsOwnAccount();
   console.log("All post-review-comments tests passed.");
 }
 function testParseDiffHunkRanges() {
@@ -2565,21 +3036,28 @@ function testClassifyCommentAgainstDiff() {
   // Single line inside a hunk.
   assert.strictEqual(at({ path: "foo.js", line: 11 }), "valid");
   // Single line outside every hunk.
-  assert.strictEqual(at({ path: "foo.js", line: 30 }), "invalid");
+  assert.strictEqual(at({ path: "foo.js", line: 30 }), "outside_diff");
   // File not in the PR at all.
-  assert.strictEqual(at({ path: "bar.js", line: 10 }), "invalid");
+  assert.strictEqual(at({ path: "bar.js", line: 10 }), "outside_diff");
 
   // Multi-line span wholly inside ONE hunk.
   assert.strictEqual(at({ path: "foo.js", start_line: 10, line: 12 }), "valid");
   // Span straddling two hunks: both endpoints exist, but not in the same hunk.
   // A flat line-set would wrongly call this valid and 422 all over again.
-  assert.strictEqual(at({ path: "foo.js", start_line: 11, line: 51 }), "invalid");
+  assert.strictEqual(at({ path: "foo.js", start_line: 11, line: 51 }), "outside_diff");
   // Reversed span.
-  assert.strictEqual(at({ path: "foo.js", start_line: 52, line: 11 }), "invalid");
+  for (const path of ["foo.js", "bar.js", "binary.png"]) {
+    assert.strictEqual(at({ path, start_line: 52, line: 11 }), "malformed");
+  }
+  for (const line of [0, -1, 1.5, "11", NaN, Infinity]) {
+    assert.strictEqual(at({ path: "foo.js", line }), "malformed");
+    assert.strictEqual(at({ path: "foo.js", start_line: line, line: 11 }), "malformed");
+  }
+  assert.strictEqual(at({ path: "", line: 11 }), "malformed");
   // Span partially overhanging the end of a hunk.
-  assert.strictEqual(at({ path: "foo.js", start_line: 11, line: 13 }), "invalid");
+  assert.strictEqual(at({ path: "foo.js", start_line: 11, line: 13 }), "outside_diff");
 
-  // ---- "unknown" must never be reported as "invalid" ----
+  // ---- "unknown" must never be reported as "outside_diff" ----
   // File is in the PR but GitHub omitted its patch (binary / oversized diff).
   assert.strictEqual(at({ path: "binary.png", line: 3 }), "unknown");
   // No line information to check.
@@ -3711,6 +4189,65 @@ async function testCheckpointAuthorVerificationFailsClosed() {
   assert.strictEqual(read.payload, null);
 }
 
+// Anchoring on "the newest marker-bearing comment, whatever its author" made a
+// single quote disable the checkpoint permanently: the quote became the anchor,
+// the gate rejected it, and the run reported author_unverified even though the
+// valid summary it wrote was still below — a fail-closed verdict for a
+// condition that had already recovered. The reader has to keep looking for the
+// newest marker-bearing comment that IS ours.
+async function testCheckpointReadsOurSummaryBelowAQuote() {
+  const quote = {
+    id: 2,
+    html_url: "http://ex/2",
+    user: { login: "release-manager", type: "User" },
+    body: `Quoting the earlier review for context:\n${SUMMARY_MARKER}\n`,
+  };
+  const github = ckGithub({ comments: [ckComment({ payload: ckPayload() }), quote] });
+
+  const read = await readCheckpointComment({ github, owner: "owner", repo: "repo", prNumber: 123, log: () => {} });
+  assert.strictEqual(read.reason, "ok", "a quote above our summary must not hide it");
+  assert.strictEqual(read.payload.head, CK_OLD);
+
+  const gated = await resolveCheckpointRange(ckArgs({ github }));
+  assert.strictEqual(gated.mode, "checkpoint");
+  assert.strictEqual(gated.from, CK_OLD);
+}
+
+// The other half: with marker-bearing comments that are all somebody else's,
+// the reason stays author_unverified — the reader must not slide from "none of
+// these are ours" to "there is no summary" just because it skipped them.
+async function testCheckpointReportsUnverifiedWhenNoMarkerIsOurs() {
+  const github = ckGithub({
+    comments: [
+      { id: 2, html_url: "http://ex/2", user: { login: "release-manager", type: "User" }, body: `${SUMMARY_MARKER}\nquoted` },
+      { id: 3, html_url: "http://ex/3", user: { login: "fork-contributor", type: "User" }, body: `${SUMMARY_MARKER}\nplanted` },
+    ],
+  });
+  const read = await readCheckpointComment({ github, owner: "owner", repo: "repo", prNumber: 123, log: () => {} });
+  assert.strictEqual(read.reason, "author_unverified");
+  assert.strictEqual(read.payload, null);
+}
+
+// A PAT posts its summary as a User comment, so the read path needs the same
+// identity the write path now uses — otherwise a PAT run narrows nothing, ever:
+// every marker it reads is rejected and every run is a full review.
+async function testCheckpointReadsPatSummary() {
+  const patSummary = {
+    id: 1,
+    html_url: "http://ex/1",
+    user: { login: "maintainer", type: "User" },
+    body: `${SUMMARY_MARKER}\nSummary prose\n\n${buildCheckpointMarker(ckPayload())}`,
+  };
+  const github = ckGithub({ comments: [patSummary], login: "maintainer" });
+
+  const read = await readCheckpointComment({ github, owner: "owner", repo: "repo", prNumber: 123, log: () => {} });
+  assert.strictEqual(read.reason, "ok", "the run's own PAT summary is its checkpoint");
+
+  const gated = await resolveCheckpointRange(ckArgs({ github }));
+  assert.strictEqual(gated.mode, "checkpoint");
+  assert.strictEqual(gated.reason, "ok");
+}
+
 // C9 (continued): a caller that knows which app its token belongs to can pin
 // the identity exactly. With appSlug set to this run's app, a marker left by
 // the default GITHUB_TOKEN ("github-actions[bot]") is a different writer and
@@ -3870,33 +4407,35 @@ function lastSummaryBody(gh) {
 }
 
 // K2/C4: the advance is gated on publication completeness. Only a run that is
-// terminal-complete, failed nothing, and published a summary may move the
-// checkpoint forward.
+// terminal-complete, has no blocking publication failures, and published a
+// summary may move the checkpoint forward.
 async function testCheckpointAdvanceGateTable() {
   const terminals = ["complete", "partial", "failed", "skipped", null];
-  const failures = [0, 1];
+  const failures = ["none", "outside_diff", "api", "unknown_diff"];
   const published = [true, false];
   let advancing = 0;
   for (const terminal of terminals) {
     for (const failed of failures) {
       for (const isPublished of published) {
-        // failed=1 is produced the way production produces it: a finding whose
-        // line is provably outside the diff, so the 422 fallback can neither
-        // repost nor reconcile it.
+        // Only a proven out-of-diff location is non-blocking. API failures and
+        // unresolvable locations with unavailable diff data must still block.
         const result = {
           comments: [
-            failed === 1
+            failed !== "none"
               ? { path: "src/a.js", content: "c1", start_line: 90, end_line: 90 }
               : { path: "src/a.js", content: "c1", start_line: 1, end_line: 1 },
           ],
           manifest: terminal === null ? undefined : ckManifest({ terminal_state: terminal }),
         };
         const gh = makeGithub(
-          failed === 1
+          failed !== "none"
             ? {
                 headSha: terminal === null ? context.payload.pull_request.head.sha : CK_RESOLVED,
                 files: [{ filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" }],
-                batchErrorSpec: [{ message: "Line could not be resolved", status: 422 }],
+                listFilesThrow: failed === "unknown_diff",
+                batchErrorSpec: [{ message: "Line could not be resolved", status: failed === "api" ? 403 : 422 }],
+                individualError: "Line could not be resolved (outside PR diff hunks)",
+                individualErrorStatus: 422,
               }
             : { headSha: terminal === null ? context.payload.pull_request.head.sha : CK_RESOLVED }
         );
@@ -3922,9 +4461,9 @@ async function testCheckpointAdvanceGateTable() {
         const label = `terminal=${terminal} failed=${failed} published=${isPublished}`;
         // Pin the fixture itself: the "failed" axis must really have failed a
         // finding, otherwise the row proves nothing.
-        assert.strictEqual(outputs.comments_failed, String(failed), `${label}: fixture failure count`);
+        assert.strictEqual(outputs.comments_failed, failed === "none" ? "0" : "1", `${label}: fixture failure count`);
         assert.strictEqual(outputs.summary_comment_url === "", !isPublished, `${label}: fixture publication`);
-        const expectAdvance = terminal === "complete" && failed === 0 && isPublished;
+        const expectAdvance = terminal === "complete" && (failed === "none" || failed === "outside_diff") && isPublished;
         assert.strictEqual(advanced, expectAdvance, `${label}: marker written=${advanced}`);
         if (expectAdvance) {
           advancing++;
@@ -3943,7 +4482,102 @@ async function testCheckpointAdvanceGateTable() {
       }
     }
   }
-  assert.strictEqual(advancing, 1, "exactly one of the 20 cells may advance");
+  assert.strictEqual(advancing, 2, "only complete, published runs without blocking failures may advance");
+}
+
+// Malformed spans are never checkpoint-safe, even on absent paths or alongside
+// genuinely out-of-diff findings. Preserve the previous checkpoint if present.
+async function testCheckpointMalformedRangesRemainBlocking() {
+  for (const carry of ["", CARRY]) {
+    for (const path of ["src/a.js", "src/missing.js", "assets/logo.png"]) {
+      for (const mixed of [false, true]) {
+        const comments = [{ path, content: "Malformed finding", start_line: 2, end_line: 1 }];
+        if (mixed) {
+          comments.push({ path: "src/a.js", content: "Outside finding", start_line: 90, end_line: 90 });
+        }
+        const gh = makeGithub({
+          headSha: CK_RESOLVED,
+          files: [
+            { filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" },
+            { filename: "assets/logo.png" },
+          ],
+          batchErrorSpec: [{ message: "Line could not be resolved", status: 422 }],
+        });
+        const outputs = {};
+        await runPostReviewComments({
+          github: gh,
+          context,
+          core: { info() {}, setOutput: (k, v) => { outputs[k] = v; } },
+          fs: mockFs(JSON.stringify({ comments, manifest: ckManifest() }), ""),
+          ...ckRunOptions({ checkpointCarry: carry }),
+        });
+        const body = lastSummaryBody(gh);
+        assert.strictEqual(outputs.checkpoint_after, "", `${path}: malformed ranges must block advancement`);
+        assert.deepStrictEqual(parseCheckpointMarker(body), carry ? parseCheckpointMarker(carry) : null);
+        assert.strictEqual(outputs.comments_failed, String(comments.length));
+        assert.strictEqual(outputs.comments_inline, "0");
+        assert.strictEqual(gh.createReviewCalls.length, 1, "malformed ranges must not be retried");
+        assert.ok(body.includes("Malformed finding"));
+        assert.ok(body.includes("Lines 2-1 could not be resolved (malformed comment location)"));
+        assert.ok(!body.includes("Lines 2-1 could not be resolved (outside PR diff hunks)"));
+        if (mixed) assert.ok(body.includes("Line 90 could not be resolved (outside PR diff hunks)"));
+      }
+    }
+  }
+}
+
+// #1521: out-of-diff findings must not prevent either the first checkpoint or
+// later advances, even across multiple batches. A real failure still blocks.
+async function testCheckpointAdvancesAcrossOutOfDiffBatches() {
+  for (const carry of ["", CARRY]) {
+    for (const apiFailure of [false, true]) {
+      const gh = makeGithub({
+        headSha: CK_RESOLVED,
+        files: [{ filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" }],
+        batchErrorSpec: [
+          { message: "Line could not be resolved", status: 422 },
+          { message: "Line could not be resolved", status: 422 },
+          apiFailure ? { message: "Forbidden", status: 403 } : null,
+        ],
+        individualError: "Forbidden",
+        individualErrorStatus: 403,
+      });
+      const outputs = {};
+      const comments = [
+        { path: "src/a.js", content: "First outside finding", start_line: 90, end_line: 90 },
+        { path: "src/a.js", content: "Second outside finding", start_line: 91, end_line: 91 },
+        { path: "src/b.js", content: "Other finding", start_line: 1, end_line: 1 },
+      ];
+      await runPostReviewComments({
+        github: gh,
+        context,
+        core: { info() {}, setOutput: (k, v) => { outputs[k] = v; } },
+        fs: mockFs(JSON.stringify({ comments, manifest: ckManifest() }), ""),
+        reviewCommentBatchSize: 1,
+        ...ckRunOptions({ checkpointCarry: carry }),
+      });
+      const body = lastSummaryBody(gh);
+      assert.ok(body.includes("First outside finding"));
+      assert.ok(body.includes("Second outside finding"));
+      assert.ok(body.includes("outside PR diff hunks"));
+      assert.strictEqual(outputs.comments_failed, apiFailure ? "3" : "2");
+      assert.strictEqual(outputs.comments_inline, apiFailure ? "0" : "1");
+      assert.strictEqual(outputs.checkpoint_after, apiFailure ? "" : CK_RESOLVED);
+      const marker = parseCheckpointMarker(body);
+      if (apiFailure) {
+        assert.deepStrictEqual(marker, carry ? parseCheckpointMarker(carry) : null);
+      } else {
+        assert.strictEqual(marker.head, CK_RESOLVED);
+        const range = await resolveCheckpointRange(ckArgs({
+          github: ckGithub({ comments: [ckComment({ body })] }),
+          isAncestor: async (from, to) => from === CK_RESOLVED && to === CK_NEW ? 0 : 1,
+        }));
+        assert.strictEqual(range.mode, "checkpoint");
+        assert.strictEqual(range.from, CK_RESOLVED);
+        assert.strictEqual(range.to, CK_NEW);
+      }
+    }
+  }
 }
 
 // A manifest whose resolved_head is not a full sha cannot identify a range, so

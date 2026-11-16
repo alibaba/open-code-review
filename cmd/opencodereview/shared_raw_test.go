@@ -19,7 +19,7 @@ func TestLoadLLMRuntime_RawHolderFollowsSwitch(t *testing.T) {
 	t.Setenv("OCR_LLM_MODEL", "test-model")
 
 	tpl := loadTestTemplate(t)
-	rt, err := loadLLMRuntime(tpl, "", llm.ResolveOptions{})
+	rt, err := loadLLMRuntime(tpl, llm.ResolveOptions{})
 	if err != nil {
 		t.Fatalf("loadLLMRuntime error: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestLoadLLMRuntime_RawHolderFollowsSwitch(t *testing.T) {
 
 	t.Setenv("OCR_RAW_LOGGING", "1")
 	tpl = loadTestTemplate(t)
-	rt, err = loadLLMRuntime(tpl, "", llm.ResolveOptions{})
+	rt, err = loadLLMRuntime(tpl, llm.ResolveOptions{})
 	if err != nil {
 		t.Fatalf("loadLLMRuntime error: %v", err)
 	}

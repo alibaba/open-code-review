@@ -171,7 +171,7 @@ class ConfigService(
             val configFile = File(configDir, "config.json")
             configFile.writeText(draft.toPrettyJson())
             trySetPosixPermissions(configFile, "rw-------")
-            cli.testConnection(home = testHome, configPath = configFile)
+            cli.testConnection(home = testHome)
         } catch (e: Exception) {
             false to (e.message ?: e.javaClass.simpleName)
         } finally {

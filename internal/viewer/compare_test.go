@@ -37,6 +37,11 @@ func fullCoverage(paths ...string) string {
 	return `{"selected":[` + joined + `],"completed":[` + joined + `],"reused":[],"failed":[],"waived":[]}`
 }
 
+func renamedCoverage(oldPath, newPath string) string {
+	item := fmt.Sprintf(`{"item_id":"renamed","path":%q,"old_path":%q}`, newPath, oldPath)
+	return `{"selected":[` + item + `],"completed":[` + item + `],"reused":[],"failed":[],"waived":[]}`
+}
+
 // splitCoverage is fullCoverage's counterpart for a run that stopped early:
 // every path is selected, only some are completed. It is what separates
 // session.ReviewedPaths (completed+reused) from Coverage.Selected - a handler
@@ -174,6 +179,10 @@ func compareFixture(t *testing.T) string {
 	// session.ReviewedPaths return nil.
 	writeCompareSession(t, repoDir, "legacy", "commit", "")
 	writeCompareSession(t, repoDir, "s4", "workspace", fullCoverage("a.go", "b.go"), kept, added)
+	writeCompareSession(t, repoDir, "rename-before", "commit", fullCoverage("old/name.go"),
+		compareFinding("old/name.go", "still broken", "x := 1", "x := 2"))
+	writeCompareSession(t, repoDir, "rename-after", "commit", renamedCoverage("old/name.go", "new/name.go"),
+		compareFinding("new/name.go", "still broken", "x := 1", "x := 2"))
 	// An interrupted run: it meant to review a.go and b.go and reached only
 	// b.go, so a.go carries no verdict.
 	writeCompareSession(t, repoDir, "partial", "commit",
@@ -206,7 +215,8 @@ func TestHandleCompare(t *testing.T) {
 		{
 			name: "happy path", query: "before=s1&after=s2", status: http.StatusOK,
 			contains: []string{"New (1)", "Persisting (1)", "Resolved (1)", "Not reviewed (0)",
-				"newly broken", "still broken", "was broken", "none"},
+				"newly broken", "still broken", "was broken", "none", `data-pagination-source`,
+				`<div class="comment-card" data-pagination-item hidden>`, `id="compare-0-pagination"`},
 		},
 		{
 			name:   "back link returns to sessions",
@@ -244,6 +254,12 @@ func TestHandleCompare(t *testing.T) {
 		{
 			name: "self compare is all persisting", query: "before=s1&after=s1", status: http.StatusOK,
 			contains: []string{"New (0)", "Persisting (2)", "Resolved (0)", "Not reviewed (0)"},
+		},
+		{
+			name:  "renamed file finding persists under its new path",
+			query: "before=rename-before&after=rename-after", status: http.StatusOK,
+			contains: []string{"New (0)", "Persisting (1)", "Resolved (0)", "Not reviewed (0)", "new/name.go"},
+			absent:   []string{"old/name.go"},
 		},
 		{
 			name: "mode mismatch warns and still renders", query: "before=s1&after=s4", status: http.StatusOK,

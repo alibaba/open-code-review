@@ -79,7 +79,7 @@ export class ConfigService {
     mkdirSync(configDir, { recursive: true, mode: 0o700 });
     writeFileSync(configPath, JSON.stringify(draft, null, 2), { encoding: 'utf8', mode: 0o600 });
     try {
-      return await this.cli.testConnection({ home: testHome, configPath });
+      return await this.cli.testConnection({ home: testHome });
     } finally {
       if (existsSync(testHome)) rmSync(testHome, { recursive: true, force: true });
     }

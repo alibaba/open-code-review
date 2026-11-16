@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -29,6 +30,40 @@ const keyCmdMaxOutput = 64 << 10
 // errKeyCmdOutputTooLarge aborts the stdout copy once the cap is hit. It never
 // reaches the caller: cappedBuffer.overflow is what produces the error message.
 var errKeyCmdOutputTooLarge = errors.New("credential command output exceeds cap")
+
+// suspiciousPatterns matches shell constructs that never appear in a legitimate
+// credential-helper invocation (op, aws, pass, keychain, ...) and so signal
+// config tampering or an accidental compound command. This is defence-in-depth,
+// not a sandbox: api_key_cmd runs arbitrary user config by design, so the goal
+// is only to surface accidental misconfiguration. Command separators (; && || &)
+// and redirections (2>/dev/null) are intentionally omitted -- they appear in
+// documented, tested helper commands and would produce false positives.
+var suspiciousPatterns = []*regexp.Regexp{
+	regexp.MustCompile("`"),    // backtick command substitution
+	regexp.MustCompile(`\x00`), // embedded NUL byte
+}
+
+// validateKeyCmd returns an error when cmd contains patterns that are almost
+// certainly not part of a legitimate credential-helper invocation. It is called
+// before the shell runs so that tampered or malformed config produces a clear
+// diagnostic instead of silently executing destructive commands.
+func validateKeyCmd(cmd, label string) error {
+	for _, re := range suspiciousPatterns {
+		if loc := re.FindStringIndex(cmd); loc != nil {
+			end := loc[1] + 8
+			if end > len(cmd) {
+				end = len(cmd)
+			}
+			return fmt.Errorf(
+				"%s contains a suspicious shell pattern at offset %d (%q); "+
+					"api_key_cmd / auth_token_cmd must be a single credential-helper "+
+					"invocation (e.g. \"op read op://vault/item\"), not a compound shell expression",
+				label, loc[0], cmd[loc[0]:end],
+			)
+		}
+	}
+	return nil
+}
 
 // cappedBuffer collects at most max bytes and records whether more were offered.
 // Refusing the write makes os/exec's copier close the pipe, so a runaway command
@@ -57,6 +92,9 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 // fallback. The resolved credential is used in memory only and is never written
 // to config or logged.
 func resolveKeyCmd(cmd, label string) (string, error) {
+	if err := validateKeyCmd(cmd, label); err != nil {
+		return "", err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), keyCmdTimeout)
 	defer cancel()
 

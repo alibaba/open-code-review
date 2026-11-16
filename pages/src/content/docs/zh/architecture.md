@@ -23,11 +23,11 @@ flowchart TD
 ```
 
 编排逻辑位于
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 包，主要文件有：`agent.go`（分发与按组编排）、`grouping.go`（语义文件分组）、
 `selection.go`（文件过滤）、`preview.go`（`--preview` 报告）和 `util.go`（辅助）；
 工具调用循环与记忆压缩位于相邻的
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)。
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/)。
 两个入口点值得关注：`Agent.Run`（流水线顶部）和 `Agent.dispatchSubtasks`
 （per-group 扇出）。
 
@@ -79,6 +79,11 @@ default_path    — matched a built-in test-file exclude pattern
 列表——这些目录的 diff 被解析后即被剔除，永远不会到达 per-file 过滤器。
 Preview 将这些文件报告为 `provider_directory`；`include` 规则无法让它们变为可评审。
 
+该列表按路径前缀匹配，因此只覆盖**仓库根目录**下的目录。嵌套的同名目录会进入
+per-file 过滤，并由 `default_path` 排除：`vendor/pkg/x.go` 报告为
+`provider_directory`，而 `api/vendor/pkg/x.go` 报告为 `default_path`，只有后者能被
+`include` 规则重新纳入。
+
 运行 `ocr review --preview` 可不花 token 查看完整过滤结果。完整算法见
 [评审规则](../review-rules/#how-files-are-filtered)。
 
@@ -122,8 +127,8 @@ otherwise                                    { skip plan }
 
 对小 diff，plan 只会增加延迟、没有价值，因此被静默跳过，main 循环直接运行。对较大
 diff，OCR 做一次**单次** `PLAN_TASK` LLM 调用——不发送 `Tools` 字段，因此模型
-在 plan 期间不能调用工具。只读工具子集（`code_search`、`file_read_diff`、
-`file_find`——`tools.json` 中 `plan_task` 标志为 `true` 的那三个）作为纯文本
+在 plan 期间不能调用工具。只读工具子集（`code_search`、`file_read`、`file_read_diff`、
+`file_find`——由 `task_template.json` 中的 `PLAN_TASK.tool_references` 选择）作为纯文本
 通过 `{{plan_tools}}` 占位符（由 `formatToolDefs` 渲染）嵌入，
 让模型知道后续可用什么。模型返回一份清单，作为 main prompt 中的
 `{{plan_guidance}}`。
@@ -131,8 +136,8 @@ diff，OCR 做一次**单次** `PLAN_TASK` LLM 调用——不发送 `Tools` 字
 ### 阶段 2——main 循环（多轮）
 
 main 循环组装 `MAIN_TASK` prompt，与模型展开工具调用对话。完整工具集在
-plan 阶段工具基础上加 **`task_done`**、**`code_comment`** 和
-**`file_read`**——完整清单见[工具](../tools/)。
+plan 阶段工具引用基础上加 **`task_done`** 和 **`code_comment`**——
+完整清单见[工具](../tools/)。
 
 整个 main 循环最多重复 `MAX_REVIEW_ROUNDS` 次（由 `--effort` 控制：
 `low` = 1 轮，`medium` = 2 轮（默认），`high` = 3 轮）。第 2 轮起会剥离
@@ -293,8 +298,8 @@ if countMessagesTokens(messages) > tokenLimit {
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go)。
 模板本身不是 CLI 覆盖——要修改 prompt，你需要编辑
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)
-并重新构建。`--tools` 参数是*工具注册表*覆盖（它替换 `internal/config/toolsconfig`
-消费的 JSON），不是模板覆盖——见[工具](../tools/#customizing-tools)。
+并重新构建。内置工具定义同样内嵌，不支持运行时覆盖。项目指引使用评审规则和背景，
+外部业务上下文使用 MCP——见[工具](../tools/#customizing-tools)。
 
 > **占位符语法注意。** 以上所有占位符都使用双花括号
 > `{{…}}` 语法，*除了* `RE_LOCATION_TASK`，它替换单花括号
