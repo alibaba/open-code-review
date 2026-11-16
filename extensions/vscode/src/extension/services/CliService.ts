@@ -19,11 +19,15 @@ export class CliService {
 
   configPath(): string {
     if (this.resolvedConfigPath) return this.resolvedConfigPath;
-    const result = spawnSync(resolveBin(this.cliPath), ['config', 'path', '--json'], {
+    const bin = resolveBin(this.cliPath);
+    const windows = process.platform === 'win32';
+    // npm installs a .cmd launcher on Windows; quote paths with spaces for cmd.exe.
+    const result = spawnSync(windows ? `"${bin}"` : bin, ['config', 'path', '--json'], {
       cwd: process.cwd(),
       env: getShellEnv(),
       encoding: 'utf8',
       timeout: 10000,
+      shell: windows,
     });
     if (result.error) throw result.error;
     if (result.status !== 0) {

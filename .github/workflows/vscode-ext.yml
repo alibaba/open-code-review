@@ -9,6 +9,13 @@ on:
       # VS Code extension via build:webview, so frontend changes must also
       # trigger this workflow.
       - 'extensions/frontend/**'
+      - 'cmd/opencodereview/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'bin/ocr.js'
+      - 'scripts/platform.js'
+      - 'scripts/version.js'
       - '.github/workflows/vscode-ext.yml'
 
 permissions:
@@ -53,3 +60,33 @@ jobs:
 
       - name: Test
         run: yarn test
+
+  windows-config:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24'
+
+      - name: Install Yarn
+        run: npm install --global yarn@1.22.22 --ignore-scripts
+
+      - name: Install dependencies
+        working-directory: extensions/vscode
+        run: yarn install --frozen-lockfile
+
+      - name: Build CLI
+        run: go build -o "$env:RUNNER_TEMP/ocr.exe" ./cmd/opencodereview
+
+      - name: Test npm configuration lookup
+        working-directory: extensions/vscode
+        run: |
+          $env:OCR_TEST_CLI = "$env:RUNNER_TEMP/ocr.exe"
+          yarn test --runInBand --runTestsByPath src/extension/services/__tests__/ConfigService.npm.test.ts

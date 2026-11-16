@@ -96,6 +96,19 @@ describe('configuration storage', () => {
     expect(spawnSync).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['ocr', 'C:\\Program Files\\ocr\\ocr.cmd'])('supports the Windows launcher %s', (bin) => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      expect(new CliService(bin).configPath()).toBe(configPath);
+      expect(spawnSync).toHaveBeenCalledWith(`"${bin}"`, ['config', 'path', '--json'], expect.objectContaining({
+        shell: true,
+      }));
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+
   it('tests the draft in temporary OCR_HOME even after pinning saved storage', async () => {
     const saved = readFileSync(configPath, 'utf8');
     expect(config.read()?.customProviders.custom.model).toBe('saved-model');
