@@ -3,34 +3,39 @@
 
 import { t, resolveLocale } from '@shared/i18n';
 import * as vscode from 'vscode';
-import { spawn, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import { dirname, isAbsolute, join } from 'path';
 import { CliResult, CliRunOptions, EnvCheckResult, LogLine } from '@shared/types';
 import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from './cliParse';
-import { getShellEnv, resolveBin } from './shellEnv';
+import { getShellEnv, getShellEnvAsync, resolveBin } from './shellEnv';
+import { captureProcess } from './captureProcess';
 
 export class CliService {
   private current: ReturnType<typeof spawn> | null = null;
   private envCache: { env: EnvCheckResult; at: number } | null = null;
   private resolvedConfigPath: string | undefined;
+  private configPathPending: Promise<string> | undefined;
   private static readonly ENV_CACHE_TTL_MS = 5 * 60 * 1000;
 
-  constructor(private cliPath: string = 'ocr') {}
+  constructor(private cliPath: string = 'ocr', private configPathTimeoutMs = 10000) {}
 
-  configPath(): string {
-    if (this.resolvedConfigPath) return this.resolvedConfigPath;
-    const bin = resolveBin(this.cliPath);
+  configPath(): Promise<string> {
+    if (this.resolvedConfigPath) return Promise.resolve(this.resolvedConfigPath);
+    if (!this.configPathPending) {
+      this.configPathPending = this.queryConfigPath().finally(() => { this.configPathPending = undefined; });
+    }
+    return this.configPathPending;
+  }
+
+  private async queryConfigPath(): Promise<string> {
+    const deadline = Date.now() + this.configPathTimeoutMs;
+    const env = await getShellEnvAsync(Math.min(5000, this.configPathTimeoutMs));
+    const bin = this.cliPath;
     const windows = process.platform === 'win32';
     // npm installs a .cmd launcher on Windows; quote paths with spaces for cmd.exe.
-    const result = spawnSync(windows ? `"${bin}"` : bin, ['config', 'path', '--json'], {
-      cwd: process.cwd(),
-      env: getShellEnv(),
-      encoding: 'utf8',
-      timeout: 10000,
-      shell: windows,
-    });
-    if (result.error) throw result.error;
-    if (result.status !== 0) {
+    const result = await captureProcess(windows ? `"${bin}"` : bin, ['config', 'path', '--json'],
+      process.cwd(), env, deadline - Date.now(), windows);
+    if (result.code !== 0) {
       throw new Error(extractCliError(result.stderr || '') || 'Failed to resolve the OCR config path');
     }
     const { path } = JSON.parse(result.stdout);

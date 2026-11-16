@@ -81,7 +81,7 @@ export class ConfigPanelProvider implements vscode.Disposable {
       case 'readyConfigPanel': {
         const focus = this.pendingFocus;
         this.pendingFocus = undefined;
-        const config = this.config.read();
+        const config = await this.config.read();
         const cached = this.cli.getCachedEnvironment();
         const skipEnvCheck = focus?.step === 2 || isConfigReady(config);
         const locale = resolveLocale(vscode.env.language);
@@ -100,11 +100,11 @@ export class ConfigPanelProvider implements vscode.Disposable {
         break;
       case 'setConfig':
         await this.config.set(msg.key, msg.value);
-        this.notifyConfig(this.config.read());
+        this.notifyConfig(await this.config.read());
         break;
       case 'setConfigBatch':
         await this.config.setMany(msg.entries);
-        this.notifyConfig(this.config.read());
+        this.notifyConfig(await this.config.read());
         break;
       case 'testConnection': {
         const r = await this.config.testWithEntries(msg.entries);
@@ -119,12 +119,12 @@ export class ConfigPanelProvider implements vscode.Disposable {
           t(locale, 'ext.deleteProviderConfirmBtn'),
         );
         if (confirmed !== t(locale, 'ext.deleteProviderConfirmBtn')) break;
-        this.notifyConfig(this.config.deleteCustomProvider(msg.name));
+        this.notifyConfig(await this.config.deleteCustomProvider(msg.name));
         break;
       }
       case 'activateCustomProvider':
         await this.config.set('provider', msg.name);
-        this.notifyConfig(this.config.read());
+        this.notifyConfig(await this.config.read());
         break;
       case 'checkCli':
       case 'checkEnvironment': {

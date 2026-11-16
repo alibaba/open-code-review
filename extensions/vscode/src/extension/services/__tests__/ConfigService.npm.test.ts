@@ -63,12 +63,12 @@ integration('configuration through an npm-installed launcher', () => {
     if (root) rmSync(root, { recursive: true, force: true });
   });
 
-  it.each(['command', 'absolute launcher', 'native executable'])('reads existing config using %s', (mode) => {
+  it.each(['command', 'absolute launcher', 'native executable'])('reads existing config using %s', async (mode) => {
     const bin = mode === 'command' ? 'ocr'
       : mode === 'absolute launcher' ? join(prefix, windows ? 'ocr.cmd' : 'bin/ocr') : native;
     const cli = new CliService(bin);
-    expect(cli.configPath()).toBe(configPath);
-    const config = new ConfigService(cli).read();
+    expect(await cli.configPath()).toBe(configPath);
+    const config = await new ConfigService(cli).read();
     expect(config?.provider).toBe('openai');
     expect(config?.model).toBe('saved-model');
   });

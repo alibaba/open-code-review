@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { spawn, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -13,9 +13,10 @@ import { ConfigService } from '../ConfigService';
 let mockShellEnv: NodeJS.ProcessEnv;
 jest.mock('../shellEnv', () => ({
   getShellEnv: () => mockShellEnv,
+  getShellEnvAsync: async () => mockShellEnv,
   resolveBin: (bin: string) => bin,
 }));
-jest.mock('child_process', () => ({ spawn: jest.fn(), spawnSync: jest.fn() }));
+jest.mock('child_process', () => ({ spawn: jest.fn() }));
 
 describe('configuration storage', () => {
   let root: string;
@@ -38,9 +39,6 @@ describe('configuration storage', () => {
     mockShellEnv = { ...process.env, OCR_HOME: 'custom storage' };
     testedConfig = testedModel = undefined;
     jest.spyOn(process, 'cwd').mockImplementation(() => cwd);
-    jest.mocked(spawnSync).mockReturnValue({
-      status: 0, stdout: JSON.stringify({ path: configPath }), stderr: '',
-    } as ReturnType<typeof spawnSync>);
     jest.mocked(spawn).mockImplementation((_bin, args, options) => {
       const proc = Object.assign(new EventEmitter(), {
         stdout: new PassThrough(), stderr: new PassThrough(),
@@ -48,7 +46,9 @@ describe('configuration storage', () => {
       const env = (options as { env: NodeJS.ProcessEnv }).env;
       queueMicrotask(() => {
         const path = join(env.OCR_HOME!, 'config.json');
-        if (args?.[0] === 'config') {
+        if (args?.[0] === 'config' && args[1] === 'path') {
+          proc.stdout.end(JSON.stringify({ path: configPath }));
+        } else if (args?.[0] === 'config') {
           expect(env.OCR_HOME).toBe(dirname(configPath));
           const raw = JSON.parse(readFileSync(path, 'utf8'));
           raw.custom_providers.custom.model = args[3];
@@ -71,37 +71,36 @@ describe('configuration storage', () => {
   afterEach(() => {
     jest.restoreAllMocks();
     jest.mocked(spawn).mockReset();
-    jest.mocked(spawnSync).mockReset();
     rmSync(root, { recursive: true, force: true });
   });
 
   it.each(['absolute', 'relative'])('uses the CLI-resolved %s location for reads, writes and deletes', async (mode) => {
     mockShellEnv.OCR_HOME = mode === 'absolute' ? dirname(configPath) : 'custom storage';
-    expect(config.read()?.customProviders.custom.model).toBe('saved-model');
-    expect(spawnSync).toHaveBeenCalledWith('ocr', ['config', 'path', '--json'], expect.objectContaining({
+    expect((await config.read())?.customProviders.custom.model).toBe('saved-model');
+    expect(spawn).toHaveBeenCalledWith('ocr', ['config', 'path', '--json'], expect.objectContaining({
       cwd, env: mockShellEnv,
     }));
     cwd = root;
     expect((await config.set('model', 'updated-model'))?.customProviders.custom.model).toBe('updated-model');
     await cli.runRaw(['review'], cwd, () => {});
-    expect(config.deleteCustomProvider('custom')).toBeNull();
+    expect(await config.deleteCustomProvider('custom')).toBeNull();
     expect(existsSync(configPath)).toBe(false);
-    expect(spawnSync).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(spawn).mock.calls.filter(([, args]) => args?.[0] === 'config' && args[1] === 'path')).toHaveLength(1);
     expect(existsSync(join(root, '.opencodereview', 'config.json'))).toBe(false);
   });
 
   it('resolves storage before the first batch write', async () => {
     await config.setMany([{ key: 'model', value: 'batch-model' }]);
-    expect(config.read()?.customProviders.custom.model).toBe('batch-model');
-    expect(spawnSync).toHaveBeenCalledTimes(1);
+    expect((await config.read())?.customProviders.custom.model).toBe('batch-model');
+    expect(jest.mocked(spawn).mock.calls.filter(([, args]) => args?.[0] === 'config' && args[1] === 'path')).toHaveLength(1);
   });
 
-  it.each(['ocr', 'C:\\Program Files\\ocr\\ocr.cmd'])('supports the Windows launcher %s', (bin) => {
+  it.each(['ocr', 'C:\\Program Files\\ocr\\ocr.cmd'])('supports the Windows launcher %s', async (bin) => {
     const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
     Object.defineProperty(process, 'platform', { value: 'win32' });
     try {
-      expect(new CliService(bin).configPath()).toBe(configPath);
-      expect(spawnSync).toHaveBeenCalledWith(`"${bin}"`, ['config', 'path', '--json'], expect.objectContaining({
+      expect(await new CliService(bin).configPath()).toBe(configPath);
+      expect(spawn).toHaveBeenCalledWith(`"${bin}"`, ['config', 'path', '--json'], expect.objectContaining({
         shell: true,
       }));
     } finally {
@@ -111,7 +110,7 @@ describe('configuration storage', () => {
 
   it('tests the draft in temporary OCR_HOME even after pinning saved storage', async () => {
     const saved = readFileSync(configPath, 'utf8');
-    expect(config.read()?.customProviders.custom.model).toBe('saved-model');
+    expect((await config.read())?.customProviders.custom.model).toBe('saved-model');
     cwd = root;
     expect(await config.testWithEntries([{ key: 'model', value: 'draft-model' }])).toEqual({ ok: true });
     expect(testedModel).toBe('draft-model');
@@ -121,15 +120,23 @@ describe('configuration storage', () => {
     await cli.runRaw(['review'], cwd, () => {});
   });
 
-  it('allows setup UI to load when CLI path lookup fails, without writing a fallback config', async () => {
-    jest.mocked(spawnSync).mockReturnValue({ status: 1, stdout: '', stderr: 'Error: unavailable' } as ReturnType<typeof spawnSync>);
-    expect(config.read()).toBeNull();
+  it('allows setup UI to load when lookup fails, without writing a fallback config', async () => {
+    jest.mocked(spawn).mockImplementation(() => {
+      const proc = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() });
+      queueMicrotask(() => { proc.stderr.end('Error: unavailable'); proc.emit('close', 1); });
+      return proc as ReturnType<typeof spawn>;
+    });
+    expect(await config.read()).toBeNull();
     await expect(config.set('model', 'wrong-model')).rejects.toThrow('unavailable');
-    expect(spawn).not.toHaveBeenCalled();
+    expect(readFileSync(configPath, 'utf8')).toContain('saved-model');
   });
 
-  it('rejects relative paths returned by an incompatible CLI', () => {
-    jest.mocked(spawnSync).mockReturnValue({ status: 0, stdout: '{"path":"relative/config.json"}', stderr: '' } as ReturnType<typeof spawnSync>);
-    expect(() => cli.configPath()).toThrow('invalid config path');
+  it('rejects relative paths returned by an incompatible CLI', async () => {
+    jest.mocked(spawn).mockImplementationOnce(() => {
+      const proc = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() });
+      queueMicrotask(() => { proc.stdout.end('{"path":"relative/config.json"}'); proc.emit('close', 0); });
+      return proc as ReturnType<typeof spawn>;
+    });
+    await expect(cli.configPath()).rejects.toThrow('invalid config path');
   });
 });

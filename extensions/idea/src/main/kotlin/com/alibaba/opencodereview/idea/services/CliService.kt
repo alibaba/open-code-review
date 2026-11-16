@@ -19,6 +19,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicReference
 
 /** Thrown when the CLI exits non-zero. The message has already been refined by [extractCliError] and is safe to show to users. */
@@ -29,20 +33,47 @@ class CliException(message: String) : RuntimeException(message)
  * resolved to absolute paths by `resolveBin`. A bare command name plus the inherited environment cannot run in a
  * GUI-launched IDEA. All methods here are blocking; callers must run them on a background thread.
  */
-class CliService(private val cliPath: String = "ocr") {
+class CliService(private val cliPath: String = "ocr", private val configPathTimeoutMs: Long = 10_000) {
 
     @Volatile
     private var resolvedConfigPath: File? = null
 
-    @Synchronized
-    fun configPath(cwd: File): File {
-        resolvedConfigPath?.let { return it }
-        val result = runRaw(listOf("config", "path", "--json"), cwd, {})
-        val path = Json.parseToJsonElement(result).jsonObject["path"]?.jsonPrimitive?.content
-            ?.let(::File)
-        require(path != null && path.isAbsolute) { "The CLI returned an invalid config path" }
-        resolvedConfigPath = path
-        return path
+    private val configPathLock = Any()
+    private var configPathPending: CompletableFuture<File>? = null
+
+    fun configPathAsync(cwd: File): CompletableFuture<File> = synchronized(configPathLock) {
+        resolvedConfigPath?.let { return CompletableFuture.completedFuture(it) }
+        val pending = configPathPending ?: CompletableFuture.supplyAsync {
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(configPathTimeoutMs)
+            val env = ShellEnv.env()
+            val command = listOf(ShellEnv.resolveBin(cliPath), "config", "path", "--json")
+            val result = captureConfigPathQuery(command, cwd, env,
+                TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()))
+            val path = Json.parseToJsonElement(result).jsonObject["path"]?.jsonPrimitive?.content?.let(::File)
+            require(path != null && path.isAbsolute) { "The CLI returned an invalid config path" }
+            path
+        }.orTimeout(configPathTimeoutMs + 1500, TimeUnit.MILLISECONDS).also { future ->
+            configPathPending = future
+            future.whenComplete { path, error ->
+                synchronized(configPathLock) {
+                    if (error == null) resolvedConfigPath = path
+                    if (configPathPending === future) configPathPending = null
+                }
+            }
+        }
+        pending.thenApply { it }
+    }
+
+    fun configPath(cwd: File): File = try {
+        configPathAsync(cwd).get()
+    } catch (e: InterruptedException) {
+        Thread.currentThread().interrupt()
+        throw e
+    } catch (e: ExecutionException) {
+        var cause: Throwable = e
+        while (cause is ExecutionException || cause is CompletionException) cause = cause.cause ?: break
+        if (cause is TimeoutException) throw CliException("OCR config path query timed out")
+        throw cause
     }
 
     private companion object {
