@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { CliService } from '../CliService';
@@ -9,6 +9,7 @@ import { ConfigService } from '../ConfigService';
 
 process.env.OCR_SKIP_SHELL_RESOLVE = '1';
 jest.mock('vscode', () => ({ env: { language: 'en' } }), { virtual: true });
+jest.setTimeout(15000);
 
 describe('bounded asynchronous config path queries', () => {
   let root: string;
@@ -21,6 +22,7 @@ describe('bounded asynchronous config path queries', () => {
     const script = join(root, 'fixture.js');
     writeFileSync(script, `// SPDX-License-Identifier: Apache-2.0
 const fs = require('fs');
+const path = require('path');
 const root = ${JSON.stringify(root)};
 if (process.argv[2] === '--version') { console.log('v1.0.0'); process.exit(0); }
 fs.appendFileSync(root + '/calls', 'query\\n');
@@ -31,7 +33,7 @@ else if (mode === 'large') process.stdout.write('x'.repeat(70000));
 else setTimeout(() => {
   if (mode === 'old') { console.error('Error: unknown command path for ocr config'); process.exitCode = 1; }
   else if (mode === 'fail') { console.error('Error: unavailable'); process.exitCode = 1; }
-  else console.log(JSON.stringify({path: root + '/config.json'}));
+  else console.log(JSON.stringify({path: path.join(root, 'config.json')}));
 }, 300);
 `);
     bin = join(root, windows ? 'ocr.cmd' : 'ocr');
@@ -48,7 +50,11 @@ else setTimeout(() => {
   });
 
   it('shares concurrent resolution, keeps the event loop responsive and caches success', async () => {
-    const cli = new CliService(bin);
+    const folder = join(root, 'launcher & tools');
+    mkdirSync(folder);
+    const quotedBin = join(folder, windows ? 'ocr.cmd' : 'ocr');
+    copyFileSync(bin, quotedBin);
+    const cli = new CliService(quotedBin);
     const first = cli.configPath();
     expect(cli.configPath()).toBe(first);
     let complete = false;

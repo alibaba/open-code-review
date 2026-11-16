@@ -44,20 +44,22 @@ class CliService(private val cliPath: String = "ocr", private val configPathTime
 
     fun configPathAsync(cwd: File): CompletableFuture<File> = synchronized(configPathLock) {
         resolvedConfigPath?.let { return CompletableFuture.completedFuture(it) }
-        val pending = configPathPending ?: CompletableFuture.supplyAsync {
+        val pending = configPathPending?.takeUnless { it.isCompletedExceptionally } ?: CompletableFuture.supplyAsync {
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(configPathTimeoutMs)
             val env = ShellEnv.env()
-            val command = listOf(ShellEnv.resolveBin(cliPath), "config", "path", "--json")
-            val result = captureConfigPathQuery(command, cwd, env,
+            val invocation = configPathInvocation(cliPath, cwd, env)
+            val result = captureConfigPathQuery(invocation.command, cwd, invocation.env,
                 TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()))
             val path = Json.parseToJsonElement(result).jsonObject["path"]?.jsonPrimitive?.content?.let(::File)
             require(path != null && path.isAbsolute) { "The CLI returned an invalid config path" }
             path
-        }.orTimeout(configPathTimeoutMs + 1500, TimeUnit.MILLISECONDS).also { future ->
+        }.orTimeout(configPathTimeoutMs + 1500, TimeUnit.MILLISECONDS).thenApply { path ->
+            resolvedConfigPath = path
+            path
+        }.also { future ->
             configPathPending = future
-            future.whenComplete { path, error ->
+            future.whenComplete { _, _ ->
                 synchronized(configPathLock) {
-                    if (error == null) resolvedConfigPath = path
                     if (configPathPending === future) configPathPending = null
                 }
             }

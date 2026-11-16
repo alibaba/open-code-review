@@ -17,6 +17,30 @@ fun configPathFailure(error: Throwable): ConfigPathStatus = ConfigPathStatus(
     upgradeRequired = error is CliUpgradeRequiredException,
 )
 
+internal data class ConfigPathInvocation(val command: List<String>, val env: Map<String, String>)
+
+internal fun configPathInvocation(
+    bin: String, cwd: File, env: Map<String, String>,
+    windows: Boolean = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true),
+): ConfigPathInvocation {
+    require(bin.none { it == '"' || it == '\r' || it == '\n' }) { "Invalid OCR executable path" }
+    val names = if (windows && '.' !in bin) listOf("$bin.exe", "$bin.cmd", "$bin.bat", "$bin.com", bin) else listOf(bin)
+    val executable = if (File(bin).isAbsolute || '/' in bin || '\\' in bin) bin else {
+        env.entries.firstOrNull { it.key.equals("PATH", ignoreCase = windows) }?.value.orEmpty()
+            .split(if (windows) ';' else File.pathSeparatorChar)
+            .asSequence().flatMap { directory ->
+                val folder = File(directory).let { if (it.isAbsolute) it else File(cwd, directory) }
+                names.asSequence().map { File(folder, it) }
+            }.firstOrNull { it.isFile && (windows || it.canExecute()) }?.absolutePath ?: bin
+    }
+    if (!windows) return ConfigPathInvocation(listOf(executable, "config", "path", "--json"), env)
+    // Keep quotes in the environment value so strict JDK launchers see no embedded quotes in the command argument.
+    return ConfigPathInvocation(
+        listOf("cmd.exe", "/d", "/v:off", "/s", "/c", "\"%OCR_CONFIG_PATH_COMMAND% config path --json\""),
+        env.filterKeys { !it.equals("OCR_CONFIG_PATH_COMMAND", ignoreCase = true) } + ("OCR_CONFIG_PATH_COMMAND" to "\"$executable\""),
+    )
+}
+
 internal fun captureConfigPathQuery(
     command: List<String>, cwd: File, env: Map<String, String>, timeoutMs: Long,
 ): String {
@@ -55,14 +79,21 @@ internal fun captureConfigPathQuery(
     } finally {
         process?.let { child ->
             val descendants = runCatching { child.toHandle().descendants().toList() }.getOrDefault(emptyList())
-            child.destroyForcibly()
+            runCatching { child.destroyForcibly() }
             descendants.forEach { runCatching { it.destroyForcibly() } }
+            val cleanupDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
             runCatching { child.waitFor(1000, TimeUnit.MILLISECONDS) }
+            descendants.forEach { descendant ->
+                val remaining = cleanupDeadline - System.nanoTime()
+                if (remaining > 0) runCatching { descendant.onExit().get(remaining, TimeUnit.NANOSECONDS) }
+            }
             runCatching { child.inputStream.close() }
             runCatching { child.outputStream.close() }
             runCatching { child.errorStream.close() }
         }
-        Files.deleteIfExists(stdout)
-        Files.deleteIfExists(stderr)
+        // Windows can retain redirected handles briefly; cleanup must not replace the query result or error.
+        for (path in listOf(stdout, stderr)) {
+            runCatching { Files.deleteIfExists(path) }.onFailure { path.toFile().deleteOnExit() }
+        }
     }
 }

@@ -11,6 +11,8 @@ export function captureProcess(
   return new Promise((resolve, reject) => {
     const windows = process.platform === 'win32';
     const proc = spawn(bin, args, { cwd, env, shell, detached: !windows, windowsHide: true });
+    proc.stdout?.setEncoding('utf8');
+    proc.stderr?.setEncoding('utf8');
     let stdout = '';
     let stderr = '';
     let settled = false;

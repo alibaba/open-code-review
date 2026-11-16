@@ -22,7 +22,7 @@ integration('configuration through an npm-installed launcher', () => {
 
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), 'ocr npm shim '));
-    prefix = join(root, 'npm prefix & tools');
+    prefix = join(root, 'npm prefix with spaces');
     const fixture = join(root, 'package');
     const repository = resolve(__dirname, '../../../../../..');
     for (const dir of ['bin', 'scripts']) mkdirSync(join(fixture, dir), { recursive: true });

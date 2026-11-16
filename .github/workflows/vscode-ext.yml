@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'extensions/vscode/**'
+      - 'extensions/idea/**'
       # The webview source lives in extensions/frontend and is built into the
       # VS Code extension via build:webview, so frontend changes must also
       # trigger this workflow.
@@ -63,7 +64,7 @@ jobs:
 
   windows-config:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -78,6 +79,11 @@ jobs:
       - name: Install Yarn
         run: npm install --global yarn@1.22.22 --ignore-scripts
 
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: Install dependencies
         working-directory: extensions/vscode
         run: yarn install --frozen-lockfile
@@ -89,4 +95,10 @@ jobs:
         working-directory: extensions/vscode
         run: |
           $env:OCR_TEST_CLI = "$env:RUNNER_TEMP/ocr.exe"
-          yarn test --runInBand --runTestsByPath src/extension/services/__tests__/ConfigService.npm.test.ts
+          yarn test --runInBand --runTestsByPath src/extension/services/__tests__/ConfigService.npm.test.ts src/extension/services/__tests__/CliService.configPath.test.ts
+
+      - name: Test IDEA npm configuration lookup
+        working-directory: extensions/idea
+        run: |
+          $env:OCR_TEST_CLI = "$env:RUNNER_TEMP/ocr.exe"
+          .\gradlew.bat test -PskipFrontend=true --tests "*ConfigServiceNpmTest" --tests "*ConfigPathQueryTest"

@@ -30,10 +30,11 @@ class ConfigPathQueryTest {
                 check(setExecutable(true))
             }
             val cli = CliService(fixture.path)
-            val env = cli.checkEnvironment()
-            assertTrue(env.ocr.ok)
-            assertTrue(env.configPath?.upgradeRequired == true)
-            assertTrue(env.configPath?.message.orEmpty().contains("npm install -g"))
+            assertEquals("v1.0.0", captureConfigPathQuery(listOf(fixture.path, "--version"), root, System.getenv(), 3000).trim())
+            val failure = assertFailsWith<CliUpgradeRequiredException> { cli.configPath(root) }
+            val status = configPathFailure(failure)
+            assertTrue(status.upgradeRequired)
+            assertTrue(status.message.orEmpty().contains("npm install -g"))
             val config = ConfigService(cli, root)
             assertFailsWith<CliUpgradeRequiredException> { config.read() }
             assertFailsWith<CliUpgradeRequiredException> { config.set("model", "wrong-model") }
