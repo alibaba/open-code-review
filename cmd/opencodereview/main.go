@@ -19,8 +19,16 @@ func main() {
 }
 
 func run() int {
+	return runArgs(os.Args[1:])
+}
+
+func runArgs(args []string) int {
+	rootCmd.SetArgs(args)
 	ctx := context.Background()
-	if telemetry.Init(ctx) {
+	cmd, _, err := rootCmd.Find(args)
+	// IDEs consume this query as a protocol, so even console telemetry must stay silent.
+	pathQuery := err == nil && cmd.Parent() == configCmd && cmd.Name() == "path"
+	if !pathQuery && telemetry.Init(ctx) {
 		defer telemetry.ShutdownWithTimeout(ctx, 5*time.Second)
 	}
 
