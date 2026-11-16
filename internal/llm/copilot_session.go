@@ -437,19 +437,10 @@ func (conversation *copilotConversation) closeLocked() {
 		conversation.unsubscribe()
 		conversation.unsubscribe = nil
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if conversation.session != nil {
-		_ = conversation.session.Abort(cleanupCtx)
-		_ = conversation.session.Disconnect()
-		if conversation.client != nil {
-			_ = conversation.client.DeleteSession(cleanupCtx, conversation.session.SessionID)
-		}
-		conversation.session = nil
-	}
 	if conversation.client != nil {
-		_ = conversation.client.Stop()
+		stopCopilotRuntime(conversation.client, conversation.session)
 		conversation.client = nil
+		conversation.session = nil
 	}
 	if conversation.stateDir != "" {
 		_ = os.RemoveAll(conversation.stateDir)
@@ -462,4 +453,34 @@ func (conversation *copilotConversation) closeLocked() {
 	conversation.partialMu.Lock()
 	conversation.partial.Reset()
 	conversation.partialMu.Unlock()
+}
+
+func stopCopilotRuntime(client *copilot.Client, session *copilot.Session) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// ForceStop clears client.RPC. Keep the connection-bound handles so cleanup
+	// can finish after the child exits without reconnecting or racing ForceStop.
+	server := client.RPC
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if session != nil {
+			_ = session.Abort(ctx)
+			_ = session.Disconnect()
+			if server != nil && ctx.Err() == nil {
+				_, _ = server.Sessions.BulkDelete(ctx, &rpc.SessionsBulkDeleteRequest{SessionIDs: []string{session.SessionID}})
+			}
+		}
+		if server != nil && ctx.Err() == nil {
+			_, _ = server.Runtime.Shutdown(ctx)
+		}
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+	// The owned stdio runtime stays alive after acknowledging shutdown. Killing
+	// it also releases Disconnect's unbounded detach RPC if the deadline won.
+	client.ForceStop()
+	<-done
 }

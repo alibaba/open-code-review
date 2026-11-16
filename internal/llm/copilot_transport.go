@@ -68,8 +68,9 @@ func (t *copilotTransport) prepare(data []byte, path string) ([]byte, context.Co
 	if body == nil {
 		return nil, nil, false, errors.New("Copilot inference request is not an object")
 	}
-	// Preserve a smaller upstream cap, including any reasoning budget it sets.
 	limit := t.limit
+	var upstreamMax int
+	_ = json.Unmarshal(body[key], &upstreamMax)
 	for _, field := range []string{"max_tokens", "max_completion_tokens", "max_output_tokens"} {
 		var existing int
 		if json.Unmarshal(body[field], &existing) == nil && existing > 0 && existing < limit {
@@ -78,8 +79,31 @@ func (t *copilotTransport) prepare(data []byte, path string) ([]byte, context.Co
 		delete(body, field)
 	}
 	body[key], _ = json.Marshal(limit)
+	if key == "max_tokens" && (upstreamMax == 0 || limit < upstreamMax) {
+		capCopilotThinking(body, limit)
+	}
 	encoded, err := json.Marshal(body)
 	return encoded, t.ctx, true, err
+}
+
+func capCopilotThinking(body map[string]json.RawMessage, limit int) {
+	var thinking map[string]json.RawMessage
+	if json.Unmarshal(body["thinking"], &thinking) != nil {
+		return
+	}
+	var mode string
+	var budget int
+	if json.Unmarshal(thinking["type"], &mode) != nil || mode != "enabled" ||
+		json.Unmarshal(thinking["budget_tokens"], &budget) != nil || budget < limit {
+		return
+	}
+	// Manual thinking requires at least 1024 tokens plus room for the answer.
+	if limit <= 1024 {
+		delete(body, "thinking")
+		return
+	}
+	thinking["budget_tokens"], _ = json.Marshal(limit - 1)
+	body["thinking"], _ = json.Marshal(thinking)
 }
 
 func (t *copilotTransport) markResponse() {
