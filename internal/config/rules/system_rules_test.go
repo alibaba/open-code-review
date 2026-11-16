@@ -1125,6 +1125,54 @@ func TestResolveDetail_SystemMoveTomlPatternPrecedesMove(t *testing.T) {
 	}
 }
 
+func TestResolveDetail_SystemMoveRulesDialectAndEnvironmentScope(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	manifest := dr.ResolveDetail("Move.toml").Rule
+	source := dr.ResolveDetail("sources/pool.move").Rule
+
+	tests := []struct {
+		name    string
+		rule    string
+		want    []string
+		notWant []string
+	}{
+		{
+			name: "manifest does not flag valid per-environment overrides",
+			rule: manifest,
+			want: []string{
+				"Do not flag a replacement `rev`, `published-at` or `original-id` for differing from the default dependency or from another environment",
+				"Flag only a mismatch inside one environment",
+			},
+			notWant: []string{"whose `rev` does not match the corresponding `[dependencies]` entry"},
+		},
+		{
+			name: "source rule scopes dialect advice",
+			rule: source,
+			want: []string{"(Sui, Move 2024)", "(Aptos and legacy editions)", "Sui: "},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, w := range tt.want {
+				if !strings.Contains(tt.rule, w) {
+					t.Errorf("rule missing %q", w)
+				}
+			}
+			for _, nw := range tt.notWant {
+				if strings.Contains(tt.rule, nw) {
+					t.Errorf("rule still contains %q", nw)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveDetail_SystemComposerPatternPrecedesJSON(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
