@@ -69,6 +69,7 @@ func TestRun_PromptOverflowRecordsFailure(t *testing.T) {
 				}
 			}
 			a := NewAgent(Args{
+				MainToolDefs:   []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 				RepoDir:        repo,
 				Template:       tpl,
 				LLMClient:      client,

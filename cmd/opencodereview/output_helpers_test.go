@@ -15,6 +15,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 )
 
 func TestHasSubtaskErrors(t *testing.T) {
@@ -50,8 +51,8 @@ func TestHasReviewLimitWarning(t *testing.T) {
 		{"empty", []agent.AgentWarning{}, false},
 		{"unrelated warning", []agent.AgentWarning{{Type: "token_budget_reached"}}, false},
 		{"subtask error only", []agent.AgentWarning{{Type: "subtask_error"}}, false},
-		{"limit reached", []agent.AgentWarning{{Type: llmloop.WarningReviewLimitReached}}, true},
-		{"mixed", []agent.AgentWarning{{Type: "other"}, {Type: llmloop.WarningReviewLimitReached}}, true},
+		{"limit reached", []agent.AgentWarning{{Type: reviewtask.WarningReviewLimitReached}}, true},
+		{"mixed", []agent.AgentWarning{{Type: "other"}, {Type: reviewtask.WarningReviewLimitReached}}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -396,7 +397,7 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 
 func TestOutputJSONWithWarnings_NoCommentsWithReviewLimitReached(t *testing.T) {
 	warnings := []agent.AgentWarning{{
-		Type:    llmloop.WarningReviewLimitReached,
+		Type:    reviewtask.WarningReviewLimitReached,
 		File:    "a.go",
 		Message: "reached the aggregate token budget before finishing; the grace round completed the task",
 	}}
@@ -420,7 +421,7 @@ func TestOutputJSONWithWarnings_NoCommentsWithReviewLimitReached(t *testing.T) {
 	if out.Status != "completed_with_warnings" {
 		t.Errorf("status = %q, want completed_with_warnings", out.Status)
 	}
-	if len(out.Warnings) != 1 || out.Warnings[0].Type != llmloop.WarningReviewLimitReached {
+	if len(out.Warnings) != 1 || out.Warnings[0].Type != reviewtask.WarningReviewLimitReached {
 		t.Errorf("warnings = %+v, want the structured limit warning", out.Warnings)
 	}
 }
@@ -582,7 +583,7 @@ func TestOutputTextWithWarnings_NoCommentsWithSubtaskError(t *testing.T) {
 // zero-finding output must not read as an unqualified approval.
 func TestOutputTextWithWarnings_NoCommentsWithReviewLimitReached(t *testing.T) {
 	warnings := []agent.AgentWarning{{
-		Type:    llmloop.WarningReviewLimitReached,
+		Type:    reviewtask.WarningReviewLimitReached,
 		File:    "a.go",
 		Message: "reached the maximum tool-request rounds without finishing; the grace round completed the task",
 	}}
@@ -598,7 +599,7 @@ func TestOutputTextWithWarnings_NoCommentsWithReviewLimitReached(t *testing.T) {
 	if !strings.Contains(got, "A review limit was reached") {
 		t.Errorf("expected the limit message, got %q", got)
 	}
-	if !strings.Contains(stderr, "["+llmloop.WarningReviewLimitReached+"]") {
+	if !strings.Contains(stderr, "["+reviewtask.WarningReviewLimitReached+"]") {
 		t.Errorf("expected the structured warning on stderr, got %q", stderr)
 	}
 }

@@ -77,6 +77,27 @@ func TestRunConfigSetProviderNames(t *testing.T) {
 	}
 }
 
+func TestTestMainPreservesIsolatedHomeForSubprocess(t *testing.T) {
+	home := os.Getenv("HOME")
+	if home == "" || home != os.Getenv("USERPROFILE") {
+		t.Fatalf("test home is not isolated: HOME=%q USERPROFILE=%q", home, os.Getenv("USERPROFILE"))
+	}
+	if os.Getenv("OCR_TEST_HOME_SUBPROCESS") == "1" {
+		want := os.Getenv("OCR_TEST_HOME_PARENT")
+		if home != want || os.Getenv("USERPROFILE") != want {
+			t.Fatalf("subprocess home = HOME:%q USERPROFILE:%q, want %q", home, os.Getenv("USERPROFILE"), want)
+		}
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestTestMainPreservesIsolatedHomeForSubprocess$")
+	cmd.Env = append(os.Environ(), "OCR_TEST_HOME_SUBPROCESS=1", "OCR_TEST_HOME_PARENT="+home)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("subprocess failed: %v\n%s", err, output)
+	}
+}
+
 func TestRunFlushesTelemetryOnError(t *testing.T) {
 	if os.Getenv("OCR_TEST_RUN_ERROR") == "1" {
 		rootCmd.SetArgs([]string{"--invalid-flag"})

@@ -76,6 +76,20 @@ restrictions on `--model`. An override absent from both the built-in list and
 the model when the request is sent. Custom providers retain their existing
 `--model` validation rules.
 
+For `minimax` and `minimax-cn`, new model selections suggest
+`MiniMax-M3.1-Flash` first, followed by `MiniMax-M3`. Existing saved models and
+explicit legacy or custom model IDs remain accepted by OCR. Gateway presets keep their
+own model IDs; a direct MiniMax model ID does not imply gateway availability.
+
+The default MiniMax request omits `thinking` and `reasoning_effort`, allowing
+[MiniMax's API defaults](https://platform.minimax.io/docs/api-reference/text-openai-api)
+to apply. Flash requires adaptive thinking and defaults to `max` effort; explicit
+`extra_body` settings can use `thinking: {"type":"adaptive"}` with
+`reasoning_effort` set to `low`, `medium`, `high`, `xhigh`, or `max`. M3 also
+supports `thinking: {"type":"disabled"}`. Saved `extra_body` settings are
+preserved, so remove any `thinking: {"type":"disabled"}` override when switching
+to Flash.
+
 ## Sign in with ChatGPT preview
 
 This preview adds the `chatgpt` built-in provider for the public Responses API. It has no API-key environment variable. See the [ChatGPT preview guide](../chatgpt-preview/) for sign-in, consent and usage restrictions.

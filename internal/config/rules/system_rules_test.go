@@ -82,6 +82,18 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"templates/email.J2", "Jinja Escaping Boundaries"},
 		{"templates/account.pug", "Pug Escaping and Output Contexts"},
 		{"templates/account.PUG", "Pug Escaping and Output Contexts"},
+		{"index.ejs", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"app/views/users/show.html.EJS", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"index.liquid", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"app/views/users/show.html.LIQUID", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"index.njk", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"app/views/users/show.html.NJK", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"index.haml", "HAML and Slim Escaping and Output Contexts"},
+		{"app/views/users/show.html.HAML", "HAML and Slim Escaping and Output Contexts"},
+		{"index.slim", "HAML and Slim Escaping and Output Contexts"},
+		{"app/views/users/show.html.SLIM", "HAML and Slim Escaping and Output Contexts"},
+		{"index.erb", "ERB Escaping and Output Contexts"},
+		{"app/views/users/show.html.ERB", "ERB Escaping and Output Contexts"},
 		{"src/main/resources/mapper/usermapper.xml", "SQL Logic Error Detection"},
 		{"src/main/resources/dao/userdao.xml", "SQL Logic Error Detection"},
 		{"pom.xml", "snapshot"},
@@ -99,9 +111,12 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"server/bootstrap.cjs", "TypeScript"},
 		{"app.kt", "Null Safety"},
 		{"scripts/setup.kts", "Null Safety"},
+		{"src/main/scala/com/example/Service.scala", "Scala Review Principles"},
 		{"src/domain/Order.fs", "Discriminated Unions and Pattern Matching"},
 		{"src/domain/Order.fsi", "Discriminated Unions and Pattern Matching"},
 		{"scripts/migrate.fsx", "Discriminated Unions and Pattern Matching"},
+		{"src/Api/Controllers/UserController.cs", "Nullability and Reference Types"},
+		{"tests/Domain/OrderTests.cs", "Nullability and Reference Types"},
 		{"src/main/handler.cpp", "Smart Pointer"},
 		{"src/main/handler.cxx", "Smart Pointer"},
 		{"include/handler.hxx", "Smart Pointer"},
@@ -110,6 +125,7 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"components/Button.ets", "State Decorator"},
 		{"entry/src/main/module.json5", "json-key"},
 		{"entry/oh-package.json5", "json-key"},
+		{"config/profile.jsonc", "json-key"},
 		{"src/lib.rs", "Ownership and Lifetime Correctness"},
 		{"crates/service/src/main.rs", "Unsafe Code Boundaries"},
 		{"crates/service/Cargo.toml", "Cargo Manifest Hygiene"},
@@ -157,6 +173,15 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"build.zig", "Illegal Behavior"},
 		{"idl/service.thrift", "Field IDs and Wire Compatibility"},
 		{"if/common.thrift", "Field IDs and Wire Compatibility"},
+		{"rules/library.bzl", "Starlark Code Review Guide"},
+		{"config.star", "Starlark Code Review Guide"},
+		{"MODULE.bazel", "Starlark Code Review Guide"},
+		{"BUILD", "Starlark Code Review Guide"},
+		{"src/library/BUILD", "Starlark Code Review Guide"},
+		{"WORKSPACE", "Starlark Code Review Guide"},
+		{"legacy/WORKSPACE", "Starlark Code Review Guide"},
+		{"src/library/BUILD.bazel", "Starlark Code Review Guide"},
+		{"legacy/WORKSPACE.bazel", "Starlark Code Review Guide"},
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
 		{"shaders/fragment.glsl", "Texture and Buffer Access Safety"},
@@ -184,6 +209,14 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"scripts/deploy.ps1", "PowerShell Review Principles"},
 		{"modules/Build/Build.psm1", "PowerShell Review Principles"},
 		{"modules/Build/Build.psd1", "PowerShell Review Principles"},
+		{"src/myapp/core.clj", "Laziness, Sequences, and Resource Scope"},
+		{"src/myapp/views.cljs", "Laziness, Sequences, and Resource Scope"},
+		{"src/myapp/shared.cljc", "Laziness, Sequences, and Resource Scope"},
+		{"deps.edn", "EDN Data, Configuration, and Untrusted Input"},
+		{"sources/pool.move", "Ability Grants"},
+		{"contracts/amm/sources/router.move", "Ability Grants"},
+		{"Move.toml", "Move Package Manifest"},
+		{"contracts/amm/Move.toml", "Move Package Manifest"},
 	}
 
 	for _, tt := range tests {
@@ -1057,6 +1090,83 @@ func TestResolveDetail_SystemPHPPatternMatch(t *testing.T) {
 			} {
 				if !strings.Contains(detail.Rule, required) {
 					t.Errorf("expected PHP rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemMoveTomlPatternPrecedesMove(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"Move.toml", "packages/library/Move.toml", "PACKAGES/APP/MOVE.TOML"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/Move.toml" {
+				t.Errorf("expected pattern '**/Move.toml', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Move Package Manifest Hygiene",
+				"`Move.lock`",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected rule to contain %q for %s", required, path)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemMoveRulesDialectAndEnvironmentScope(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	manifest := dr.ResolveDetail("Move.toml").Rule
+	source := dr.ResolveDetail("sources/pool.move").Rule
+
+	tests := []struct {
+		name    string
+		rule    string
+		want    []string
+		notWant []string
+	}{
+		{
+			name: "manifest does not flag valid per-environment overrides",
+			rule: manifest,
+			want: []string{
+				"Do not flag a replacement `rev`, `published-at` or `original-id` for differing from the default dependency or from another environment",
+				"Flag only a mismatch inside one environment",
+			},
+			notWant: []string{"whose `rev` does not match the corresponding `[dependencies]` entry"},
+		},
+		{
+			name: "source rule scopes dialect advice",
+			rule: source,
+			want: []string{"(Sui, Move 2024)", "(Aptos and legacy editions)", "Sui: "},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, w := range tt.want {
+				if !strings.Contains(tt.rule, w) {
+					t.Errorf("rule missing %q", w)
+				}
+			}
+			for _, nw := range tt.notWant {
+				if strings.Contains(tt.rule, nw) {
+					t.Errorf("rule still contains %q", nw)
 				}
 			}
 		})
