@@ -140,3 +140,63 @@ func TestScanLines(t *testing.T) {
 		})
 	}
 }
+
+func TestCleanRepoPath(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{".", ""},
+		{"/", ""},
+		{"./", ""},
+		{"\\", "\\"},
+		{"pkg\\util.go", "pkg\\util.go"},
+		{"./pkg\\util.go", "pkg\\util.go"},
+		{"/pkg\\util.go", "pkg\\util.go"},
+		{".\\pkg\\util.go", ".\\pkg\\util.go"},
+		{"./pkg/util.go", "pkg/util.go"},
+		{"pkg//sub/../util.go", "pkg/util.go"},
+		{"../outside.go", "../outside.go"},
+	}
+
+	for _, tt := range tests {
+		got := cleanRepoPath(tt.input)
+		if got != tt.want {
+			t.Errorf("cleanRepoPath(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestNormalizePath(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{".", ""},
+		{"/", ""},
+		{"\\", ""},
+		{"./", ""},
+		{".\\", ""},
+		{"foo", "foo"},
+		{"foo/bar", "foo/bar"},
+		{"foo\\bar", "foo/bar"},
+		{"foo\\bar\\baz.go", "foo/bar/baz.go"},
+		{"./foo/bar.go", "foo/bar.go"},
+		{".\\foo\\bar.go", "foo/bar.go"},
+		{"/foo/bar.go", "foo/bar.go"},
+		{"\\foo\\bar.go", "foo/bar.go"},
+		{"foo/./bar/../bar/baz.go", "foo/bar/baz.go"},
+		{"foo/bar/", "foo/bar"},
+		{"foo\\bar\\", "foo/bar"},
+		{"../outside.go", "../outside.go"},
+	}
+
+	for _, tt := range tests {
+		got := normalizePath(tt.input)
+		if got != tt.want {
+			t.Errorf("normalizePath(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

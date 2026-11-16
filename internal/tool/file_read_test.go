@@ -470,3 +470,92 @@ func TestExecute_WithEndLine(t *testing.T) {
 		t.Error("line 5 should not appear")
 	}
 }
+
+func TestExecute_WindowsBackslashAndRelativePath(t *testing.T) {
+	dir := setupTestRepo(t)
+	commit := getHeadCommit(t, dir)
+
+	// Test Workspace mode
+	frWorkspace := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	pWorkspace := NewFileRead(frWorkspace)
+
+	got, err := pWorkspace.Execute(context.Background(), map[string]any{
+		"file_path": `pkg\util.go`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "File: pkg/util.go") {
+		t.Errorf("expected header File: pkg/util.go, got: %s", got)
+	}
+	if !strings.Contains(got, "package pkg") {
+		t.Errorf("expected content, got: %s", got)
+	}
+
+	// Test Commit mode with .\pkg\util.go
+	frCommit := &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit}
+	pCommit := NewFileRead(frCommit)
+
+	gotCommit, err := pCommit.Execute(context.Background(), map[string]any{
+		"file_path": `.\pkg\util.go`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(gotCommit, "File: pkg/util.go") {
+		t.Errorf("expected header File: pkg/util.go, got: %s", gotCommit)
+	}
+	if !strings.Contains(gotCommit, "package pkg") {
+		t.Errorf("expected content, got: %s", gotCommit)
+	}
+}
+
+func TestExecute_POSIXDualBackslashAndSlashFiles(t *testing.T) {
+	dir, commit := setupDualBackslashRepo(t)
+
+	modes := []struct {
+		name string
+		p    *FileReadProvider
+	}{
+		{name: "workspace", p: NewFileRead(&FileReader{RepoDir: dir, Mode: ModeWorkspace})},
+		{name: "commit", p: NewFileRead(&FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit})},
+	}
+
+	for _, m := range modes {
+		t.Run(m.name, func(t *testing.T) {
+			for _, q := range []string{`pkg\util.go`, `./pkg\util.go`} {
+				got, err := m.p.Execute(context.Background(), map[string]any{"file_path": q})
+				if err != nil {
+					t.Fatalf("Execute(%q) error: %v", q, err)
+				}
+				if !strings.Contains(got, `File: pkg\util.go (`) {
+					t.Errorf("Execute(%q) header mismatch: %s", q, got)
+				}
+				if !strings.Contains(got, "package backslashfile") {
+					t.Errorf("Execute(%q) content mismatch: %s", q, got)
+				}
+			}
+
+			for _, q := range []string{"pkg/util.go", "./pkg/util.go"} {
+				got, err := m.p.Execute(context.Background(), map[string]any{"file_path": q})
+				if err != nil {
+					t.Fatalf("Execute(%q) error: %v", q, err)
+				}
+				if !strings.Contains(got, "File: pkg/util.go (") {
+					t.Errorf("Execute(%q) header mismatch: %s", q, got)
+				}
+				if !strings.Contains(got, "package slashpkg") {
+					t.Errorf("Execute(%q) content mismatch: %s", q, got)
+				}
+			}
+
+			_, err := m.p.Execute(context.Background(), map[string]any{"file_path": `.\pkg\util.go`})
+			if err == nil {
+				t.Fatal(`Execute(".\pkg\util.go") succeeded, want ambiguity error`)
+			}
+			if !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "pkg/util.go") || !strings.Contains(err.Error(), `pkg\util.go`) {
+				t.Errorf(`Execute(".\pkg\util.go") error = %v, want ambiguity error naming both files`, err)
+			}
+		})
+	}
+}
