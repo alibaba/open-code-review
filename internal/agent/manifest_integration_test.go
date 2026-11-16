@@ -108,6 +108,8 @@ func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *se
 		}},
 	})
 	a.diffs = diffs
+	a.inputResolution.ResolvedBase = "base-parent"
+	a.inputResolution.ResolvedHead = "head-parent"
 	a.currentDate = "2026-07-26 12:00"
 	return a
 }
@@ -170,6 +172,9 @@ func TestManifestFlowCompleteAndPartial(t *testing.T) {
 		if manifest.TerminalState != session.StateComplete || len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Failed) != 0 {
 			t.Fatalf("manifest = %+v", manifest)
 		}
+		if manifest.Execution.MaxToolRequestTimes != 5 {
+			t.Fatalf("max_tool_request_times = %d, want 5", manifest.Execution.MaxToolRequestTimes)
+		}
 	})
 
 	t.Run("mixed provider result is partial", func(t *testing.T) {
@@ -191,6 +196,38 @@ func TestManifestFlowCompleteAndPartial(t *testing.T) {
 			t.Fatalf("manifest exposed raw provider error: %+v", manifest.Coverage.Failed[0])
 		}
 	})
+}
+
+// Two paths that differ only in separator normalize to one item_id. When
+// selection excludes one and selects the other, the excluded record must give
+// way: the run keeps its full denominator and still ends complete. An unrelated
+// exclusion is kept.
+func TestManifestFlowExcludedItemIDCollisionKeepsSelected(t *testing.T) {
+	a := newManifestFlowAgent(t, nil, nil)
+	decisions := a.selectFiles([]model.Diff{
+		{OldPath: `src\a.go`, NewPath: `src\a.go`, IsBinary: true},
+		{OldPath: "src/a.go", NewPath: "src/a.go", Diff: "+ok", Insertions: 1},
+		{OldPath: "good.go", NewPath: "good.go", Diff: "+ok", Insertions: 1},
+		{OldPath: "blob.go", NewPath: "blob.go", IsBinary: true},
+	})
+	if err := a.registerExclusions(decisions); err != nil {
+		t.Fatalf("registerExclusions: %v", err)
+	}
+	a.diffs, _ = summarizeSelection(decisions)
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	manifest := finishManifestFlow(t, a)
+	if manifest.TerminalState != session.StateComplete || manifest.RunFailure != nil {
+		t.Fatalf("terminal = %q, run_failure = %+v", manifest.TerminalState, manifest.RunFailure)
+	}
+	if len(manifest.Coverage.Selected) != 2 || len(manifest.Coverage.Completed) != 2 {
+		t.Fatalf("coverage = %+v", manifest.Coverage)
+	}
+	ex := manifest.Coverage.Excluded
+	if len(ex) != 1 || ex[0].Path != "blob.go" || ex[0].ExcludeReason != model.ExcludeBinary {
+		t.Fatalf("excluded = %+v, want only blob.go: the colliding record is dropped", ex)
+	}
 }
 
 func TestManifestFlowCancellationPersistsResumableSession(t *testing.T) {
@@ -238,6 +275,8 @@ func TestManifestFlowCancellationPersistsResumableSession(t *testing.T) {
 	}
 	identity := session.RunIdentity{
 		Mode:                 manifest.Input.Mode,
+		ResolvedBase:         manifest.Input.ResolvedBase,
+		ResolvedHead:         manifest.Input.ResolvedHead,
 		SourceArtifactSHA256: manifest.Input.SourceArtifactSHA256,
 		RuleConfigSHA256:     manifest.Execution.RuleConfigSHA256,
 		RepositorySHA256:     manifest.Repository.IdentitySHA256,
@@ -458,6 +497,10 @@ func TestManifestFlowBudgetAndSkipped(t *testing.T) {
 		if manifest == nil || manifest.TerminalState != session.StateSkipped || len(manifest.Coverage.Selected) != 0 {
 			t.Fatalf("manifest = %+v", manifest)
 		}
+		excluded := manifest.Coverage.Excluded
+		if len(excluded) != 1 || excluded[0].Path != "large.go" || excluded[0].ExcludeReason != model.ExcludeTooLarge {
+			t.Fatalf("excluded = %+v, want large.go as too_large", excluded)
+		}
 	})
 }
 
@@ -542,7 +585,7 @@ func TestManifestFlowGroupBudgetStopIsPartialWhenSomeFilesHaveComments(t *testin
 	reg := tool.NewRegistry()
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
 	// MaxToolRequestTimes and GroupingTask must be set before New(), since
-	// llmloop.Runner snapshots Template by value at construction time — mutating
+	// reviewtask.Runner snapshots Template by value at construction time — mutating
 	// a.args.Template afterward (as other tests in this file do for MaxTokens,
 	// which executeGroupSubtask re-reads from a.args.Template directly) would
 	// not reach the runner's copy that RunMainTask actually consumes.

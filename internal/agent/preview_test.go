@@ -541,6 +541,22 @@ func TestSelectFilesDeletionGate(t *testing.T) {
 	}
 }
 
+func TestSelectFiles_Starlark(t *testing.T) {
+	agent := New(Args{})
+	for _, path := range []string{
+		"BUILD", "src/library/BUILD", "WORKSPACE", "legacy/WORKSPACE",
+		"src/library/BUILD.bazel", "legacy/WORKSPACE.bazel", "MODULE.bazel",
+		"rules/library.bzl", "config.star",
+	} {
+		t.Run(path, func(t *testing.T) {
+			decisions := agent.selectFiles([]model.Diff{{NewPath: path}})
+			if !decisions[0].selected() {
+				t.Errorf("selectFiles(%q) excluded file: %s", path, decisions[0].Reason)
+			}
+		})
+	}
+}
+
 func TestEffectivePath(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -21,7 +21,7 @@ flowchart TD
     A --> B --> C --> D --> D2 --> E --> F
 ```
 
-オーケストレーションのロジックは [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/) パッケージにあり、主要なファイルは `agent.go`（ディスパッチとグループごとのオーケストレーション）、`grouping.go`（セマンティックなファイルグルーピング）、`selection.go`（ファイルフィルタリング）、`preview.go`（`--preview` のレポート）、`util.go`（ヘルパー）です。ツール呼び出しループとメモリ圧縮は、その隣にある [`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/) にあります。注目すべきエントリポイントは 2 つです: `Agent.Run`（パイプラインの最上部）と `Agent.dispatchSubtasks`（グループごとのファンアウト）。
+オーケストレーションのロジックは [`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/) パッケージにあり、主要なファイルは `agent.go`（ディスパッチとグループごとのオーケストレーション）、`grouping.go`（セマンティックなファイルグルーピング）、`selection.go`（ファイルフィルタリング）、`preview.go`（`--preview` のレポート）、`util.go`（ヘルパー）です。ツール呼び出しループとメモリ圧縮は、その隣にある [`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/) にあります。注目すべきエントリポイントは 2 つです: `Agent.Run`（パイプラインの最上部）と `Agent.dispatchSubtasks`（グループごとのファンアウト）。
 
 ## diff provider
 
@@ -92,11 +92,11 @@ otherwise                                    { skip plan }
 
 2 つのしきい値は連携して働きます。`PLAN_MODE_LINE_THRESHOLD` はグループ内で最も大きいファイルを見て、`PLAN_MODE_GROUP_LINE_THRESHOLD` はグループ全体の合計変更量を見ます。後者を意図的に大きめの値にしているのは、plan 段階が無条件に実行されてしまうのを避けるためです。
 
-小さな diff に対しては、plan はレイテンシを増やすだけで価値がないため、静かにスキップされ、main ループが直接実行されます。より大きな diff に対しては、OCR は**1 回だけ** `PLAN_TASK` の LLM 呼び出しを行います。`Tools` フィールドを送らないため、plan の間モデルはツールを呼び出せません。読み取り専用ツールのサブセット（`code_search`、`file_read_diff`、`file_find`。`tools.json` で `plan_task` フラグが `true` の 3 つ）が、`{{plan_tools}}` プレースホルダー（`formatToolDefs` でレンダリング）を通じてプレーンテキストとして埋め込まれ、あとで何が使えるかをモデルに知らせます。モデルはチェックリストを返し、それが main prompt 内の `{{plan_guidance}}` になります。
+小さな diff に対しては、plan はレイテンシを増やすだけで価値がないため、静かにスキップされ、main ループが直接実行されます。より大きな diff に対しては、OCR は**1 回だけ** `PLAN_TASK` の LLM 呼び出しを行います。`Tools` フィールドを送らないため、plan の間モデルはツールを呼び出せません。読み取り専用ツールのサブセット（`code_search`、`file_read`、`file_read_diff`、`file_find`。`task_template.json` の `PLAN_TASK.tool_references` で選択）が、`{{plan_tools}}` プレースホルダー（`formatToolDefs` でレンダリング）を通じてプレーンテキストとして埋め込まれ、あとで何が使えるかをモデルに知らせます。モデルはチェックリストを返し、それが main prompt 内の `{{plan_guidance}}` になります。
 
 ### 段階 2: main ループ（複数ラウンド）
 
-main ループは `MAIN_TASK` prompt を組み立て、モデルとツール呼び出しの対話を展開します。完全なツールセットは、plan 段階のツールに **`task_done`**、**`code_comment`**、**`file_read`** を加えたものです。完全な一覧は[ツール](../tools/)を参照してください。
+main ループは `MAIN_TASK` prompt を組み立て、モデルとツール呼び出しの対話を展開します。完全なツールセットは、plan 段階のツール参照に **`task_done`** と **`code_comment`** を加えたものです。完全な一覧は[ツール](../tools/)を参照してください。
 
 main ループ全体は最大 `MAX_REVIEW_ROUNDS` 回繰り返されます（`--effort` で制御: `low` = 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド）。2 ラウンド目以降は plan の結果を取り除き（それが recall の上限になってしまうのを避けるため）、前のラウンドで確定したコメントを「すでに見つかった指摘」のコンテキストとして渡し、モデルに**新しい**問題を探させます。あるラウンドで新しい指摘が出なかった場合、または確定コメント数が上限に達した場合は、早期に停止します。
 
@@ -225,7 +225,7 @@ if countMessagesTokens(messages) > tokenLimit {
 | `{{path}}` | グループのキー（グループ内のファイルパスをカンマ区切りで連結）。`REVIEW_FILTER_TASK` に使用されます。 |
 | `{{comments}}` | 蓄積されたコメント（JSON）。`REVIEW_FILTER_TASK` に使用されます。 |
 
-プレースホルダーの置換は [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go) にあります。テンプレート自体は CLI では上書きできません。prompt を変更するには、[`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json) を編集して再ビルドする必要があります。`--tools` 引数は*ツールレジストリ*の上書きです（`internal/config/toolsconfig` が消費する JSON を置き換えます）。テンプレートの上書きではありません。[ツール](../tools/#customizing-tools)を参照してください。
+プレースホルダーの置換は [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go) にあります。テンプレート自体は CLI では上書きできません。prompt を変更するには、[`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json) を編集して再ビルドする必要があります。組み込みツール定義も実行時には上書きできません。プロジェクトの指針にはレビュールールと背景情報、外部業務コンテキストには MCP を使用してください。[ツール](../tools/#customizing-tools)を参照してください。
 
 > **プレースホルダー構文についての注意。** 上記のプレースホルダーはすべて二重波括弧 `{{…}}` 構文を使用します。*ただし* `RE_LOCATION_TASK` は例外で、単一波括弧の `{diff}`、`{existing_code}`、`{suggestion_content}` を置換します（`internal/diff/relocation.go` を参照）。
 
