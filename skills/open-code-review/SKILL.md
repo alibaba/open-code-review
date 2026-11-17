@@ -8,6 +8,9 @@ description: >
   comments and can automatically apply fixes when requested. With appropriate
   review rules, can detect various types of issues including bugs, security
   vulnerabilities, performance problems, and code quality concerns.
+  This is native mode: OCR calls its own configured model provider. For
+  reviews using the host agent's model without separate OCR credentials,
+  use open-code-review-delegate instead.
 license: Apache-2.0
 compatibility: >
   Requires the `ocr` CLI installed (via `npm install -g
@@ -23,6 +26,14 @@ metadata:
 # Open Code Review
 
 A skill for invoking [open-code-review](https://github.com/alibaba/open-code-review) (`ocr`) — an open-source AI code review CLI that reads Git diffs and generates structured, line-level review comments.
+
+## Choosing a Mode
+
+This skill runs **native mode**: the host agent invokes OCR's specialized review pipeline and interprets its results. OCR uses its own provider configuration, not the host agent's subscription or login.
+
+- Use this skill when the user wants native mode or already has an OCR provider configured. Keep the existing setup and run the workflow below.
+- If the user has no separate API key or wants to use the current agent's model, use the installed `open-code-review-delegate` skill instead. If it is unavailable, offer to install it with `npx skills add alibaba/open-code-review --skill open-code-review-delegate`.
+- Missing OCR credentials need not block a review: offer delegation rather than requiring the user to obtain a key. Respect an explicit choice of native mode; do not silently switch modes after a provider or network error.
 
 ## Workflow
 
@@ -232,7 +243,7 @@ The CLI is older than v1.10.0. Do not continue the review with plain stdout. Ask
 
 **`ocr review` fails with LLM connection error**
 
-Prompt the user to configure an LLM provider.
+Offer delegation as described in **Choosing a Mode**, or help configure an LLM provider if the user wants to continue in native mode.
 
 Interactive setup (recommended):
 
@@ -249,7 +260,7 @@ ocr config set llm.model claude-opus-4-6
 ocr config set llm.use_anthropic true
 ```
 
-Verify connectivity with `ocr llm test`. Stop here and ask the user to provide credentials — never invent or hardcode API keys.
+Verify connectivity with `ocr llm test`. If credentials are needed for native mode, ask the user to configure them locally rather than paste secrets into the conversation. Never invent or hardcode API keys.
 
 ## References
 

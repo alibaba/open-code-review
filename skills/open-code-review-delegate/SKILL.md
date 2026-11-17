@@ -6,6 +6,8 @@ description: >
   itself, using OCR only for deterministic engineering: file selection and
   rule resolution. Use when the host agent should drive the review with its
   own LLM capabilities.
+  Choose this mode when the user has no separate API key for OCR or wants
+  to review with their existing coding-agent subscription or model setup.
 license: Apache-2.0
 compatibility: >
   Requires the `ocr` CLI installed (via `npm install -g
@@ -21,6 +23,14 @@ metadata:
 # Open Code Review — Delegation Mode
 
 A skill for performing AI code review where OCR provides deterministic engineering (file filtering, rule resolution) and the host agent performs the actual review using its own intelligence and tools.
+
+## Choosing a Mode
+
+This skill runs **delegation mode**: OCR's CLI and skill together provide the review pipeline and guardrails; you, the host agent, execute that workflow with your existing model and tools. The CLI provides deterministic file selection and rule resolution, while this skill defines the review steps, coverage requirements, and output contract. No OCR provider setup or `ocr llm test` is needed. Your host environment's authentication, usage limits, and costs still apply.
+
+- Use this skill when the user has no separate API key or wants the current agent to perform the review. The `ocr` CLI is still required, but it makes no LLM calls in this mode.
+- If the user explicitly wants OCR's native review pipeline, use the installed `open-code-review` skill instead. If it is unavailable, offer to install it with `npx skills add alibaba/open-code-review --skill open-code-review`.
+- Delegation does not run OCR's native review agent, positioning, or reflection modules. Identify the mode in your report; do not claim native-pipeline results for a host-agent review.
 
 ## Workflow
 
@@ -192,6 +202,8 @@ condition aborts the command. When the command reports either limit:
    read the original material directly during the review.
 
 ### Troubleshooting CLI Version Compatibility
+
+If an OCR command fails with `command not found`, install the CLI with `npm install -g @alibaba-group/open-code-review` if your environment permits, then retry the same command. If installation is not permitted, explain the prerequisite and stop; do not substitute `ocr review` or ask for an API key.
 
 The `--format` flag is available in `ocr` v1.9.0 and later. The Skill and the
 installed CLI can be updated independently. If a requested `preview` or `rule`
