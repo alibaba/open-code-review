@@ -5,8 +5,10 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"testing"
@@ -132,6 +134,43 @@ func TestIsBinaryFile(t *testing.T) {
 			t.Error("expected error for missing file")
 		}
 	})
+}
+
+func TestProvider_Enumerate_SymlinkedNonGitRoot(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "main.go", []byte("package main\n"))
+	writeFile(t, root, "pkg/helper.go", []byte("package helper\n"))
+	link := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Symlink(root, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if err := os.Symlink(root, filepath.Join(root, "nested-link")); err != nil {
+		t.Fatal(err)
+	}
+	for _, selectors := range [][]string{nil, {"pkg"}} {
+		got, err := NewProvider(link, selectors, nil, 0).Enumerate(context.Background())
+		if err != nil {
+			t.Fatalf("Enumerate(%q): %v", selectors, err)
+		}
+		want := []string{"main.go", "pkg/helper.go"}
+		if selectors != nil {
+			want = []string{"pkg/helper.go"}
+		}
+		if paths := itemPaths(got); !reflect.DeepEqual(paths, want) {
+			t.Fatalf("Enumerate(%q) paths = %q, want %q", selectors, paths, want)
+		}
+	}
+}
+
+func TestProvider_Enumerate_BrokenRootSymlink(t *testing.T) {
+	root := t.TempDir()
+	link := filepath.Join(root, "workspace")
+	if err := os.Symlink(filepath.Join(root, "missing"), link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if _, err := NewProvider(link, nil, nil, 0).Enumerate(context.Background()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Enumerate() error = %v, want a missing root error", err)
+	}
 }
 
 func itemPaths(items []model.ScanItem) []string {

@@ -170,6 +170,10 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 // fails because the directory is not a git repository.
 func (p *FileFindProvider) listWalkFiles(ctx context.Context) ([]string, error) {
 	root := p.FileReader.RepoDir
+	// WalkDir skips a symbolic link even when it is the explicitly selected root.
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
 	gitignorePatterns := diff.LoadGitignorePatterns(root)
 	var files []string
 
