@@ -156,15 +156,28 @@ func TestUntrackedFilesListPropagatesGitFailure(t *testing.T) {
 }
 
 // shimGit puts a fake `git` at the front of PATH for the duration of the test.
-func shimGit(t *testing.T, body string) {
+//
+// The shim is the tiny Go helper under testdata/gitshim, compiled into the
+// package's temp directory and named `git` (git.exe on Windows), so the tests
+// run on Windows too, where a #!/bin/sh shebang script cannot be executed
+// directly. The helper reads its behavior from GITSHIM_MODE and its content
+// from GITSHIM_SECRET so one binary serves every scenario.
+func shimGit(t *testing.T, mode, secret string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("PATH shim relies on a shebang script")
-	}
+
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\n"+body), 0o755); err != nil {
-		t.Fatalf("write git shim: %v", err)
+	shimName := "git"
+	if runtime.GOOS == "windows" {
+		shimName = "git.exe"
 	}
+	build := exec.Command("go", "build", "-o", filepath.Join(dir, shimName), "./testdata/gitshim")
+	build.Dir, build.Stderr = ".", os.Stderr
+	if err := build.Run(); err != nil {
+		t.Fatalf("build git shim: %v", err)
+	}
+
+	t.Setenv("GITSHIM_MODE", mode)
+	t.Setenv("GITSHIM_SECRET", secret)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
@@ -180,7 +193,7 @@ func TestGetDiff_FailureQuotesStderrNotStdout(t *testing.T) {
 	const secret = "API_KEY=sk-not-a-real-key-do-not-log"
 
 	// Writes plausible diff to stdout, a diagnosis to stderr, and fails.
-	shimGit(t, "echo '+"+secret+"'\necho 'fatal: shim refused' >&2\nexit 128\n")
+	shimGit(t, "refuse", secret)
 
 	repo := t.TempDir()
 	_, err := NewCommitProvider(repo, "HEAD", nil).GetDiff(context.Background())
@@ -205,7 +218,7 @@ func TestGetDiff_CancelledMidWriteReportsCancellation(t *testing.T) {
 
 	// Streams diff to stdout and never exits, so cancellation always lands
 	// inside the write window rather than depending on timing.
-	shimGit(t, "while :; do echo '+"+secret+"'; done\n")
+	shimGit(t, "stream", secret)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()

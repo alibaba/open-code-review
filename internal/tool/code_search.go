@@ -142,7 +142,12 @@ func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []str
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
-	if ctx.Err() != nil && err != nil && cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == -1 {
+	// Cancellation dominates the exit code: exec.CommandContext reports -1
+	// on Unix (killed by signal) but exit 1 on Windows, and either way the
+	// reason the caller needs is the cancellation, not the mechanism. Without
+	// this, a timed-out grep on Windows reaches the exitCode == 1 branch below
+	// and reports "No matches found" instead of the timeout (#1946).
+	if ctx.Err() != nil && err != nil {
 		return "", "", ctx.Err()
 	}
 	return stdout.String(), stderr.String(), err

@@ -774,7 +774,10 @@ func (p *Provider) runGitSplit(ctx context.Context, args ...string) (string, str
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
-	if ctx.Err() != nil && err != nil && cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == -1 {
+	// Cancellation dominates the exit code: exec.CommandContext reports -1
+	// on Unix (killed by signal) but exit 1 on Windows, and either way the
+	// reason the caller needs is the cancellation, not the mechanism.
+	if ctx.Err() != nil && err != nil {
 		return "", "", ctx.Err()
 	}
 	return stdout.String(), stderr.String(), err
