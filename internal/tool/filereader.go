@@ -115,6 +115,14 @@ func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
 	if !pathutil.WithinBase(repoRoot, resolvedPath) {
 		return "", fmt.Errorf("file path %q is outside repository", path)
 	}
+	info, err := os.Stat(resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("stat file %q: %w", path, err)
+	}
+	// Opening a FIFO can block before a reader is available to observe cancellation.
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("file %q is not a regular file", path)
+	}
 	return resolvedPath, nil
 }
 
