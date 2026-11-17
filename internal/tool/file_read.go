@@ -6,10 +6,43 @@ package tool
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 )
 
 const fileReadMaxLines = 500
+
+// numericToolArg reads an optional numeric tool argument. JSON decodes numbers
+// as float64, but a model (or a gateway forwarding its raw completion text)
+// can also send the digits as a string. Treating that string as "absent" would
+// silently answer a different question than the one asked, so it is parsed,
+// and a non-numeric value is an explicit error the model can act on.
+func numericToolArg(args map[string]any, name string) (float64, bool, error) {
+	value, present := args[name]
+	if !present || value == nil {
+		return 0, false, nil
+	}
+	switch v := value.(type) {
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, false, fmt.Errorf("%s must be a finite number, got %v", name, v)
+		}
+		return v, true, nil
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return 0, false, nil
+		}
+		parsed, parseErr := strconv.ParseFloat(trimmed, 64)
+		if parseErr != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+			return 0, false, fmt.Errorf("%s must be a finite number, got %q", name, v)
+		}
+		return parsed, true, nil
+	default:
+		return 0, false, fmt.Errorf("%s must be a number, got %T", name, value)
+	}
+}
 
 // FileReadProvider reads file content at a given path and optional line range.
 type FileReadProvider struct {
@@ -35,8 +68,14 @@ func (p *FileReadProvider) execute(ctx context.Context, args map[string]any) (st
 		return "Error: file_path is required", nil
 	}
 
-	startLine, hasStart := args["start_line"].(float64)
-	endLine, hasEnd := args["end_line"].(float64)
+	startLine, hasStart, err := numericToolArg(args, "start_line")
+	if err != nil {
+		return "", err
+	}
+	endLine, hasEnd, err := numericToolArg(args, "end_line")
+	if err != nil {
+		return "", err
+	}
 	if !hasStart || startLine <= 0 {
 		startLine = 1
 	}
