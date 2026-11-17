@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/model"
 )
@@ -163,6 +165,100 @@ func TestOutputPreviewText_ColumnsAlign(t *testing.T) {
 	}
 	if widths[0] != widths[1] {
 		t.Errorf("count columns misaligned at %v:\n%s", widths, plain)
+	}
+}
+
+// TestOutputPreviewText_UnicodeColumnsAlign verifies that Unicode paths keep
+// the preview columns aligned by terminal display width.
+func TestOutputPreviewText_UnicodeColumnsAlign(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		paths      [2]string
+		wantColumn int
+	}{
+		{name: "ascii", paths: [2]string{"a.go", "b.go"}, wantColumn: 28},
+		{name: "cjk_below_minimum", paths: [2]string{"a.go", "\u4f60\u597d.go"}, wantColumn: 28},
+		{name: "combining_mark", paths: [2]string{"a.go", "x\u0301.go"}, wantColumn: 28},
+		{name: "cjk_above_minimum", paths: [2]string{"a.go", strings.Repeat("\u754c", 12) + ".go"}, wantColumn: 35},
+	} {
+		for _, section := range []struct {
+			name     string
+			excluded bool
+		}{
+			{name: "reviewable"},
+			{name: "excluded", excluded: true},
+		} {
+			for _, color := range []struct {
+				name    string
+				enabled bool
+			}{
+				{name: "plain"},
+				{name: "color", enabled: true},
+			} {
+				t.Run(tc.name+"/"+section.name+"/"+color.name, func(t *testing.T) {
+					setColor(t, color.enabled)
+					entries := make([]agent.DiffPreviewEntry, len(tc.paths))
+					for i, path := range tc.paths {
+						entries[i] = agent.DiffPreviewEntry{
+							Path: path, Status: []string{"added", "modified"}[i],
+							Insertions: []int64{1, 1000}[i], Deletions: []int64{2, 2000}[i],
+							WillReview: !section.excluded,
+						}
+						if section.excluded {
+							entries[i].ExcludeReason = model.ExcludeUserRule
+						}
+					}
+					p := &agent.DiffPreview{
+						Entries: entries, TotalFiles: len(entries),
+						TotalInsertions: 1001, TotalDeletions: 2002,
+						ReviewableCount: len(entries),
+					}
+					if section.excluded {
+						p.ReviewableCount = 0
+						p.ExcludedCount = len(entries)
+					}
+
+					var output strings.Builder
+					outputPreviewText(p, &output)
+					plain := ansi.Strip(output.String())
+					var rows []string
+					for line := range strings.SplitSeq(plain, "\n") {
+						if strings.HasPrefix(line, "  [") {
+							rows = append(rows, line)
+						}
+					}
+					if len(rows) != len(tc.paths) {
+						t.Fatalf("expected %d entry lines, got %d in:\n%s", len(tc.paths), len(rows), plain)
+					}
+					for _, path := range tc.paths {
+						found := false
+						for _, row := range rows {
+							if strings.Contains(row, path) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							t.Errorf("preview omitted path %q:\n%s", path, plain)
+						}
+					}
+
+					marker := "+"
+					if section.excluded {
+						marker = "(user_exclude)"
+					}
+					for _, line := range rows {
+						prefix, _, found := strings.Cut(line, marker)
+						if !found {
+							t.Fatalf("missing %q in %q", marker, line)
+						}
+						if got := ansi.StringWidth(prefix); got != tc.wantColumn {
+							t.Errorf("column = %d, want %d: %q", got, tc.wantColumn, line)
+						}
+					}
+				})
+			}
+		}
 	}
 }
 
