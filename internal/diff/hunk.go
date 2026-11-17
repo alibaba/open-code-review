@@ -42,7 +42,7 @@ func ParseHunks(rawDiffText string) []Hunk {
 	var hunks []Hunk
 	var current *Hunk
 
-	for _, line := range lines {
+	for line := range lines {
 		if m := hunkHeaderRe.FindStringSubmatch(line); m != nil {
 			// Flush previous hunk
 			if current != nil {
