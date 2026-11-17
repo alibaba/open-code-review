@@ -42,7 +42,9 @@ function commandCandidates(command: string, env: NodeJS.ProcessEnv): string[] {
   const cleaned = stripQuotes(command);
   if (!cleaned) return [];
   if (win32.extname(cleaned)) return [cleaned];
-  return [cleaned, ...pathExtensions(env).map((extension) => `${cleaned}${extension}`)];
+  // npm installs `ocr`, `ocr.cmd`, and `ocr.ps1` side by side on Windows. Prefer the
+  // PATHEXT launch targets so the extensionless POSIX shell script never wins.
+  return [...pathExtensions(env).map((extension) => `${cleaned}${extension}`), cleaned];
 }
 
 function resolveCommandPath(command: string, env: NodeJS.ProcessEnv): string | null {

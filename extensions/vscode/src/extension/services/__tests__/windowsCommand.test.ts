@@ -59,11 +59,15 @@ describe('resolveWindowsCommand', () => {
   });
 
   it('resolves a bare command through PATH and PATHEXT', () => {
+    const bareScript = 'C:\\Tools\\ocr';
+    const ps1Shim = 'C:\\Tools\\ocr.ps1';
     const shim = 'C:\\Tools\\ocr.cmd';
     const node = 'C:\\Tools\\node.exe';
     const jsEntry = 'C:\\Tools\\lib\\ocr.js';
 
     mockFiles({
+      [bareScript]: '#!/bin/sh\nexec node "$basedir/lib/ocr.js" "$@"\n',
+      [ps1Shim]: '#!/usr/bin/env pwsh\n& "node$exe" "$basedir/lib/ocr.js" $args\n',
       [shim]: [
         'SET "CLI_JS=%~dp0\\lib\\ocr.js"',
         'SET "NODE_EXE=%~dp0\\node.exe"',
