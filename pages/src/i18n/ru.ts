@@ -120,6 +120,7 @@ export const ru: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': 'Связаться с нами',
   'footer.copyright': '© 2026. Все права защищены.',
 
   // Docs Page

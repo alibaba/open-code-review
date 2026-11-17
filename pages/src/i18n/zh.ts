@@ -122,6 +122,7 @@ export const zh: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': '联系我们',
   'footer.copyright': '© 2026 版权所有。保留所有权利。',
 
   // Docs Page
