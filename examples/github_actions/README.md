@@ -215,7 +215,7 @@ The task and request timeouts are independent:
 |-------|---------|-------------|
 | `effort` | `''` | Review effort preset passed to `ocr review --effort`: `low`, `medium`, or `high` (case-insensitive). Higher effort runs more review rounds. Empty keeps the CLI default (the configured value, or medium). |
 | `max_tokens_budget` | `''` | Total token cap (input+output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Checked before every LLM round: a group already over the cap gets one final round to submit findings, no further groups are dispatched, over-budget and skipped files are reported as failed(budget), partial results are still published, and the review exits 0. |
-| `max_tools` | `''` | Maximum tool-call rounds per review subtask, passed to `ocr review --max-tools`. Empty or `'0'` keeps the template default (100); the CLI raises values from 1 through 49 to its minimum of 50. Lower values bound review time on slow or local models at the cost of less exploration per file. Values below the template default take effect from OCR v1.13.5; earlier releases ignore them. |
+| `max_tools` | `''` | Maximum tool-call rounds per review subtask, passed to `ocr review --max-tools`. Empty or `'0'` keeps the template default (100); the CLI raises values from 1 through 49 to its minimum of 50. Lower values bound review time on slow or local models at the cost of less exploration per file. |
 
 ```yaml
 - uses: alibaba/open-code-review@main
