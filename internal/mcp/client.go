@@ -5,6 +5,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -196,11 +197,19 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 		return "", fmt.Errorf("call MCP tool %q: %w", name, err)
 	}
 
+	text := contentToText(result.Content)
+	if len(result.Content) == 0 && result.StructuredContent != nil {
+		encoded, err := json.Marshal(result.StructuredContent)
+		if err != nil {
+			return "", fmt.Errorf("encode MCP tool %q structured result: %w", name, err)
+		}
+		text = string(encoded)
+	}
 	if result.IsError {
-		return fmt.Sprintf("MCP tool %q returned an error: %s", name, contentToText(result.Content)), nil
+		return fmt.Sprintf("MCP tool %q returned an error: %s", name, text), nil
 	}
 
-	return contentToText(result.Content), nil
+	return text, nil
 }
 
 func (c *Client) Close() error {
