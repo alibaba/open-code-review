@@ -68,6 +68,21 @@ func TestGitcmdPipeHelper(t *testing.T) {
 		}
 		_, _ = os.Stdout.WriteString("ready")
 		return
+	case "orphan-stdout":
+		// Only stdout is inherited. stderr stays on the null device, so this is a
+		// genuine stdout-only orphan: the case the original Stream regression
+		// reported (stderr may already be at EOF while a descendant holds stdout).
+		child := exec.Command(os.Args[0], "-test.run=^TestGitcmdPipeHelper$")
+		child.Env = append(os.Environ(),
+			helperModeEnv+"=sleep",
+			helperSleepEnv+"="+helperGrandchildSecs(),
+		)
+		child.Stdout = os.Stdout
+		if err := child.Start(); err != nil {
+			os.Exit(3)
+		}
+		_, _ = os.Stdout.WriteString("ready")
+		return
 	case "stderr-orphan":
 		// Same idea but the grandchild retains only stderr, so stdout reaches EOF
 		// promptly while the stderr pipe stays held.
@@ -141,7 +156,7 @@ func requireGitSh(t *testing.T) {
 func TestWindows_RunSplitCancelledWithOrphanHoldingStdout(t *testing.T) {
 	requireGitSh(t)
 	dir := initRepo(t)
-	helperAlias(t, dir, "leak", "orphan")
+	helperAlias(t, dir, "leak", "orphan-stdout")
 
 	orig := cancelGracePeriod
 	cancelGracePeriod = 100 * time.Millisecond
@@ -168,7 +183,7 @@ func TestWindows_RunSplitCancelledWithOrphanHoldingStdout(t *testing.T) {
 func TestWindows_StreamCancelledWithOrphanHoldingStdout(t *testing.T) {
 	requireGitSh(t)
 	dir := initRepo(t)
-	helperAlias(t, dir, "leak", "orphan")
+	helperAlias(t, dir, "leak", "orphan-stdout")
 
 	orig := cancelGracePeriod
 	cancelGracePeriod = 100 * time.Millisecond
@@ -220,12 +235,13 @@ func TestWindows_OutputCancelledWithOrphanHoldingStderr(t *testing.T) {
 	}
 }
 
-// The one-slot semaphore must be released after a cancelled call, so a request
-// already queued behind it can proceed.
-func TestWindows_CancelledCallReleasesSemaphore(t *testing.T) {
+// A request already queued on a one-slot Runner must proceed once a cancelled
+// call releases its slot. The first call is held open until the second one is
+// provably waiting in acquire, so this exercises queueing rather than reuse.
+func TestWindows_QueuedRequestProceedsAfterCancellation(t *testing.T) {
 	requireGitSh(t)
 	dir := initRepo(t)
-	helperAlias(t, dir, "leak", "orphan")
+	helperAlias(t, dir, "leak", "orphan-stdout")
 
 	orig := cancelGracePeriod
 	cancelGracePeriod = 100 * time.Millisecond
@@ -233,19 +249,53 @@ func TestWindows_CancelledCallReleasesSemaphore(t *testing.T) {
 
 	r := New(1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	_, _, _ = r.RunSplit(ctx, dir, "leak")
+	// Hold the only slot without a deadline; cancel explicitly below.
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	firstDone := make(chan error, 1)
+	go func() {
+		_, _, err := r.RunSplit(ctx1, dir, "leak")
+		firstDone <- err
+	}()
 
-	next, nextCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer nextCancel()
-	start := time.Now()
-	if _, _, err := r.RunSplit(next, dir, "status", "--short"); err != nil {
-		t.Fatalf("queued call failed after %s: %v", time.Since(start), err)
+	// Let the first call acquire the slot and start its git process.
+	time.Sleep(400 * time.Millisecond)
+
+	// Queue a second request while the first is still active. It blocks in
+	// acquire until the slot is released.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+	secondDone := make(chan error, 1)
+	go func() {
+		_, _, err := r.RunSplit(ctx2, dir, "status", "--short")
+		secondDone <- err
+	}()
+
+	// Confirm it is actually waiting rather than finished.
+	time.Sleep(150 * time.Millisecond)
+	select {
+	case err := <-secondDone:
+		t.Fatalf("queued request finished before the first was cancelled (err=%v); it was not queued", err)
+	default:
 	}
-	t.Logf("queued call after cancelled one: elapsed=%s", time.Since(start))
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Errorf("queued call waited %s on a one-slot Runner", elapsed)
+
+	// Cancelling the first call must release the slot and let the queued
+	// request complete within the cleanup grace period plus scheduling slack.
+	cancelledAt := time.Now()
+	cancel1()
+	if err := <-firstDone; !errors.Is(err, context.Canceled) {
+		t.Errorf("first call error = %v, want context.Canceled", err)
+	}
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("queued call failed after %s: %v", time.Since(cancelledAt), err)
+		}
+		t.Logf("queued request completed %s after the cancellation", time.Since(cancelledAt))
+		if elapsed := time.Since(cancelledAt); elapsed > 2*time.Second {
+			t.Errorf("queued request waited %s after cancellation, want within the grace bound", elapsed)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("queued request did not proceed after the cancelled call released the slot")
 	}
 }
 
