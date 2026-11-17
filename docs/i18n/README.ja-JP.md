@@ -161,7 +161,7 @@ ocr config provider          # ビルトインプロバイダーを選択また�
 ocr config model             # アクティブなプロバイダーのモデルを選択
 ```
 
-![Provider setup](../../imgs/providers.jpg)
+![Model providers](../../imgs/providers-ja.jpg)
 
 対話的UIがプロバイダーの選択、APIキーの入力、モデル設定をガイドし、完了後に自動的に接続テストを行います。
 

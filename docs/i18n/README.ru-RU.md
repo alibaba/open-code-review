@@ -161,7 +161,7 @@ ocr config provider          # Выбрать встроенного прова�
 ocr config model             # Выбрать модель для активного провайдера
 ```
 
-![Provider setup](../../imgs/providers.jpg)
+![Model providers](../../imgs/providers-ru.jpg)
 
 Интерактивный UI проведёт вас через выбор провайдера, ввод API-ключа и настройку модели, после чего автоматически проверит подключение.
 

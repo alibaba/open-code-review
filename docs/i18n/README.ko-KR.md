@@ -161,7 +161,7 @@ ocr config provider          # built-in provider 선택 또는 custom provider �
 ocr config model             # 활성 provider의 model 선택
 ```
 
-![Provider setup](../../imgs/providers.jpg)
+![Model providers](../../imgs/providers-ko.jpg)
 
 대화형 UI가 provider 선택, API key 입력, model 설정을 안내하며, 완료 후 자동으로 연결 테스트를 수행합니다.
 

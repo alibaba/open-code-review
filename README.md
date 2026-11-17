@@ -161,7 +161,7 @@ ocr config provider          # Select a built-in provider or add a custom one
 ocr config model             # Pick a model for the active provider
 ```
 
-![Provider setup](imgs/providers.jpg)
+![Model providers](imgs/providers.jpg)
 
 The interactive UI guides you through provider selection, API key entry, and model configuration, then automatically tests connectivity.
 

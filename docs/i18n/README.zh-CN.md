@@ -161,7 +161,7 @@ ocr config provider          # 选择内置供应商或添加自定义供应商
 ocr config model             # 为当前供应商选择模型
 ```
 
-![Provider setup](../../imgs/providers.jpg)
+![Model providers](../../imgs/providers-zh.jpg)
 
 交互式界面会引导你完成供应商选择、API Key 输入和模型配置，完成后自动测试连通性。
 
