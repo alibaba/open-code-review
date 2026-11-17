@@ -1,13 +1,12 @@
 ---
 name: open-code-review
 description: >
-  Performs AI-powered code review on Git changes using the `ocr` CLI from
-  alibaba/open-code-review. Use when the user asks to review code, review
-  a pull request, review staged/unstaged changes, review a commit, or
-  compare branches for code quality issues. Produces line-level review
-  comments and can automatically apply fixes when requested. With appropriate
-  review rules, can detect various types of issues including bugs, security
-  vulnerabilities, performance problems, and code quality concerns.
+  Review workspace changes, PRs, commits, or branch comparisons with OCR's
+  native review pipeline and independently configured model provider.
+  Produces line-level findings; fixes code only when requested. Use when
+  the user wants native mode or has an OCR provider configured. To use the
+  host agent's model without separate OCR credentials, choose
+  open-code-review-delegate instead.
 license: Apache-2.0
 compatibility: >
   Requires the `ocr` CLI installed (via `npm install -g
@@ -21,8 +20,6 @@ metadata:
 ---
 
 # Open Code Review
-
-A skill for invoking [open-code-review](https://github.com/alibaba/open-code-review) (`ocr`) — an open-source AI code review CLI that reads Git diffs and generates structured, line-level review comments.
 
 ## Workflow
 
@@ -232,7 +229,7 @@ The CLI is older than v1.10.0. Do not continue the review with plain stdout. Ask
 
 **`ocr review` fails with LLM connection error**
 
-Prompt the user to configure an LLM provider.
+If OCR credentials are unavailable, offer `open-code-review-delegate` rather than requiring a new key. If that skill is missing, offer `npx skills add alibaba/open-code-review --skill open-code-review-delegate`. Do not switch modes without user agreement. To continue in native mode, diagnose the provider connection or configure it below; a host-agent login is not an OCR credential.
 
 Interactive setup (recommended):
 
@@ -249,7 +246,7 @@ ocr config set llm.model claude-opus-4-6
 ocr config set llm.use_anthropic true
 ```
 
-Verify connectivity with `ocr llm test`. Stop here and ask the user to provide credentials — never invent or hardcode API keys.
+Verify connectivity with `ocr llm test`. If credentials are needed for native mode, ask the user to configure them locally rather than paste secrets into the conversation. Never invent or hardcode API keys.
 
 ## References
 

@@ -49,7 +49,7 @@ export const zh: TranslationKeys = {
   'highlights.stat2Value': '150K+',
   'highlights.stat2Label': 'NPM 下载量',
   'highlights.stat2Caption': 'npm 近 30 天真实下载',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': '真实任务',
   'highlights.stat3Caption': '已执行的代码审查任务',
   'highlights.stat4Value': '1/9',
