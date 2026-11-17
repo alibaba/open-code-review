@@ -22,26 +22,45 @@ type DiffLine struct {
 	Content string
 }
 
+type diffStep uint8
+
+const (
+	stepMatch diffStep = iota
+	stepAdd
+	stepDelete
+)
+
 // ComputeLineDiff returns a line-level diff between oldLines and newLines.
-// Uses Myers-style LCS to find common subsequences, then emits context/added/deleted lines.
+// Uses LCS alignment to find common subsequences, then emits context/added/deleted lines.
 func ComputeLineDiff(oldLines, newLines []string) []DiffLine {
 	m, n := len(oldLines), len(newLines)
 	if m == 0 && n == 0 {
 		return nil
 	}
 
-	// LCS DP table
-	lcs := make([][]int, m+1)
-	for i := range lcs {
-		lcs[i] = make([]int, n+1)
+	// Backtracking needs only the chosen direction, not every LCS score.
+	steps := make([][]diffStep, m)
+	lcs := make([]int, n+1)
+	trimmedNew := make([]string, n)
+	for j, line := range newLines {
+		trimmedNew[j] = strings.TrimSpace(line)
 	}
-	for i := 1; i <= m; i++ {
-		for j := 1; j <= n; j++ {
-			if strings.EqualFold(strings.TrimSpace(oldLines[i-1]), strings.TrimSpace(newLines[j-1])) {
-				lcs[i][j] = lcs[i-1][j-1] + 1
+	for i, line := range oldLines {
+		steps[i] = make([]diffStep, n)
+		trimmedOld := strings.TrimSpace(line)
+		diagonal := 0
+		for j, newLine := range trimmedNew {
+			above := lcs[j+1]
+			if strings.EqualFold(trimmedOld, newLine) {
+				lcs[j+1] = diagonal + 1
+				steps[i][j] = stepMatch
+			} else if lcs[j] >= above {
+				lcs[j+1] = lcs[j]
+				steps[i][j] = stepAdd
 			} else {
-				lcs[i][j] = max(lcs[i-1][j], lcs[i][j-1])
+				steps[i][j] = stepDelete
 			}
+			diagonal = above
 		}
 	}
 
@@ -50,7 +69,7 @@ func ComputeLineDiff(oldLines, newLines []string) []DiffLine {
 	i, j := m, n
 	back := make([]DiffLine, 0, max(m, n)*2)
 	for i > 0 || j > 0 {
-		if i > 0 && j > 0 && strings.EqualFold(strings.TrimSpace(oldLines[i-1]), strings.TrimSpace(newLines[j-1])) {
+		if i > 0 && j > 0 && steps[i-1][j-1] == stepMatch {
 			if oldLines[i-1] == newLines[j-1] {
 				back = append(back, DiffLine{Type: DiffContext, Content: oldLines[i-1]})
 			} else {
@@ -60,7 +79,7 @@ func ComputeLineDiff(oldLines, newLines []string) []DiffLine {
 			}
 			i--
 			j--
-		} else if j > 0 && (i == 0 || lcs[i][j-1] >= lcs[i-1][j]) {
+		} else if j > 0 && (i == 0 || steps[i-1][j-1] == stepAdd) {
 			back = append(back, DiffLine{Type: DiffAdded, Content: newLines[j-1]})
 			j--
 		} else {
