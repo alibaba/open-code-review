@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-package llmloop
+package reviewtask
 
 // Some OpenAI-compatible gateways forward a model's raw completion text
 // verbatim as tool-call arguments. A model whose response format leaks control

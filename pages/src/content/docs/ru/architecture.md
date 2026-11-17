@@ -25,7 +25,7 @@ flowchart TD
 ```
 
 Оркестрация реализована в пакете
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/).
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/).
 Основные файлы:
 
 - `agent.go` — диспетчеризация и оркестрация по группам;
@@ -35,7 +35,7 @@ flowchart TD
 - `util.go` — вспомогательные функции.
 
 Цикл вызова инструментов и сжатие памяти находятся рядом, в пакете
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/).
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/).
 
 Основные точки входа:
 
@@ -161,8 +161,8 @@ otherwise                                    { skip plan }
 более крупных diff OCR выполняет **один** вызов LLM с `PLAN_TASK`: поле `Tools`
 не передаётся, поэтому во время планирования модель не может вызывать
 инструменты. Доступное только для чтения подмножество инструментов
-(`code_search`, `file_read_diff`, `file_find` — три инструмента, у которых в
-`tools.json` флаг `plan_task` имеет значение `true`) встраивается как обычный
+(`code_search`, `file_read`, `file_read_diff`, `file_find` — выбираются через
+`PLAN_TASK.tool_references` в `task_template.json`) встраивается как обычный
 текст через плейсхолдер `{{plan_tools}}` (формируется функцией
 `formatToolDefs`), чтобы модель знала, что будет доступно позднее. Модель
 возвращает контрольный список, который становится значением
@@ -172,7 +172,7 @@ otherwise                                    { skip plan }
 
 Основной цикл формирует промпт `MAIN_TASK` и ведёт с моделью диалог с
 использованием инструментов. Полный набор добавляет к инструментам этапа
-планирования **`task_done`**, **`code_comment`** и **`file_read`**. Полный
+планирования **`task_done`** и **`code_comment`**. Полный
 перечень приведён в разделе [Инструменты](../tools/).
 
 Весь основной цикл повторяется не более `MAX_REVIEW_ROUNDS` раз (задаётся
@@ -363,9 +363,10 @@ if countMessagesTokens(messages) > tokenLimit {
 Сам шаблон нельзя переопределить через CLI: чтобы изменить промпты,
 отредактируйте
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)
-и заново соберите проект. Флаг `--tools` переопределяет *реестр инструментов*
-(заменяет JSON, используемый `internal/config/toolsconfig`), а не шаблон. См.
-раздел [Инструменты](../tools/#customizing-tools).
+и заново соберите проект. Встроенные определения инструментов также нельзя
+переопределить во время выполнения. Для рекомендаций по проекту используйте
+правила ревью и фоновый контекст, а для внешнего бизнес-контекста — MCP.
+См. раздел [Инструменты](../tools/#customizing-tools).
 
 > **Особенность синтаксиса плейсхолдеров.** Все перечисленные выше плейсхолдеры
 > используют двойные фигурные скобки `{{…}}`, **кроме** `RE_LOCATION_TASK`,

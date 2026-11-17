@@ -53,7 +53,7 @@ cp -R /path/to/open-code-review/skills/open-code-review-delegate ~/.claude/skill
 ### 第 1 步：Preview — 确定审查范围
 
 ```bash
-ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <patterns>]
+ocr delegate preview [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <patterns>]
 ```
 
 输出内容：
@@ -69,12 +69,13 @@ ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <pat
 |------|------|
 | 工作区变更 | `ocr delegate preview` |
 | 分支对比 | `ocr delegate preview --from main --to feature` |
+| 当前分支相对 main | `ocr delegate preview --from main` |
 | 单次提交 | `ocr delegate preview -c abc123` |
 
 ### 第 2 步：获取文件规则
 
 ```bash
-ocr delegate rule <path1> <path2> ...
+ocr delegate rule [--from <ref> [--to <ref>]] [--commit <hash>] <path1> <path2> ...
 ```
 
 传入第 1 步中的可审查文件路径。输出按规则内容分组 — 共享相同规则的文件归为一组，避免重复。
@@ -144,10 +145,12 @@ Git 以退出码 0 结束后，分块读取并审查整个文件，再删除临�
 
 ## 通用标志
 
+两个子命令都支持将 `--from main` 作为 `--from main --to HEAD` 的简写。范围审查比较 `merge-base(from, to)..to`，不包含暂存、未暂存和未跟踪改动；省略范围及提交标志则使用工作区模式。向 `preview` 和 `rule` 传入相同的范围或提交标志，以使用相同目标。范围标志与提交标志互斥。
+
 | 标志 | 描述 |
 |------|------|
 | `--from <ref>` | Range 模式的源引用 |
-| `--to <ref>` | Range 模式的目标引用 |
+| `--to <ref>` | Range 模式的目标引用；指定 `--from` 时默认取 `HEAD` |
 | `-c, --commit <hash>` | 单次提交模式 |
 | `--repo <path>` | 仓库根目录（默认：cwd） |
 | `--rule <path>` | 自定义 rule.json 路径 |

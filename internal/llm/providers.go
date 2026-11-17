@@ -185,7 +185,6 @@ var registry = []Provider{
 			"deepseek-v4-flash",
 			"kimi-k2.7-code",
 			"glm-5.2",
-			"MiniMax-M2.5",
 		},
 	},
 	{
@@ -208,7 +207,6 @@ var registry = []Provider{
 			"glm-5.2",
 			"glm-5.1",
 			"glm-5",
-			"MiniMax-M2.5",
 		},
 	},
 	{
@@ -254,7 +252,6 @@ var registry = []Provider{
 			"kimi-k2.7-code-highspeed",
 			"kimi-k2.6",
 			"minimax-m3",
-			"minimax-m2.7",
 		},
 	},
 	{
@@ -357,11 +354,8 @@ var registry = []Provider{
 		BaseURL:     "https://api.minimax.io/v1",
 		EnvVar:      "MINIMAX_GLOBAL_API_KEY",
 		Models: []string{
+			"MiniMax-M3.1-Flash",
 			"MiniMax-M3",
-			"MiniMax-M2.7",
-			"MiniMax-M2.7-highspeed",
-			"MiniMax-M2.5",
-			"MiniMax-M2.5-highspeed",
 		},
 	},
 	{
@@ -371,11 +365,8 @@ var registry = []Provider{
 		BaseURL:     "https://api.minimaxi.com/v1",
 		EnvVar:      "MINIMAX_API_KEY",
 		Models: []string{
+			"MiniMax-M3.1-Flash",
 			"MiniMax-M3",
-			"MiniMax-M2.7",
-			"MiniMax-M2.7-highspeed",
-			"MiniMax-M2.5",
-			"MiniMax-M2.5-highspeed",
 		},
 	},
 	{
@@ -414,8 +405,6 @@ var registry = []Provider{
 			"kimi-k2.5",
 			"kimi-k2.6",
 			"kimi-k2.7-code",
-			"minimax-m2.5",
-			"minimax-m2.7",
 			"minimax-m3",
 			"mistral-large-3:675b",
 			"nemotron-3-nano:30b",

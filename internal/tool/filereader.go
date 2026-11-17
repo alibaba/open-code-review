@@ -29,6 +29,7 @@ const (
 	ModeRange
 	// ModeCommit reads files as they exist at a specific commit hash.
 	ModeCommit
+	ModeEmpty
 )
 
 // ParseReviewMode returns the correct ReviewMode based on provided flag values.
@@ -72,6 +73,8 @@ type FileReader struct {
 func (fr *FileReader) Read(ctx context.Context, path string) (string, error) {
 	path = decodePathRecord(path)
 	switch fr.Mode {
+	case ModeEmpty:
+		return "", fmt.Errorf("file %q does not exist in the empty tree", path)
 	case ModeWorkspace:
 		return fr.readFromDisk(path)
 	case ModeRange, ModeCommit:
@@ -159,6 +162,8 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 func (fr *FileReader) ReadLines(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
 	path = decodePathRecord(path)
 	switch fr.Mode {
+	case ModeEmpty:
+		return nil, 0, fmt.Errorf("file %q does not exist in the empty tree", path)
 	case ModeWorkspace:
 		return fr.readLinesFromDisk(path, startLine, maxLines)
 	case ModeRange, ModeCommit:
