@@ -504,6 +504,43 @@ func TestExecute_SingleOversizeLineIsCapped(t *testing.T) {
 	}
 }
 
+func TestExecute_UnrenderedOversizeLineDoesNotReportLineTruncation(test *testing.T) {
+	dir := test.TempDir()
+	content := strings.Repeat(strings.Repeat("b", fileReadMaxLineBytes)+"\n", 127) +
+		strings.Repeat("b", fileReadMaxLineBytes+1)
+	writeTestFile(test, dir, "bundle.txt", content)
+	provider := NewFileRead(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	result, err := provider.Execute(context.Background(), map[string]any{
+		"file_path": "bundle.txt",
+	})
+	if err != nil {
+		test.Fatal(err)
+	}
+
+	if !strings.Contains(result, "IS_TRUNCATED: true\n") {
+		test.Error("expected IS_TRUNCATED: true when the result budget excludes a line")
+	}
+	if !strings.Contains(result, "LINE_RANGE: 1-127\n") {
+		test.Error("expected LINE_RANGE to contain only the 127 rendered lines")
+	}
+	if !strings.Contains(result, "\n127|"+strings.Repeat("b", fileReadMaxLineBytes)+"\n") {
+		test.Error("expected the last rendered line to be complete")
+	}
+	if strings.Contains(result, "\n128|") {
+		test.Error("the oversized line must be excluded by the result budget")
+	}
+	if !strings.Contains(result, "Note: Output truncated at") {
+		test.Error("expected a result-budget truncation note")
+	}
+	if strings.Contains(result, "[line truncated,") {
+		test.Error("expected no line-truncation markers in the complete rendered lines")
+	}
+	if strings.Contains(result, "Note: Lines longer than") {
+		test.Error("an unrendered oversized line must not trigger the line-truncation note")
+	}
+}
+
 // The per-line cap alone is not enough: 500 capped lines can still render
 // far more bytes than one request should carry, so the total rendered body
 // needs its own budget with a truthful range and note.

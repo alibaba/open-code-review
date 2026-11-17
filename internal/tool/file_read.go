@@ -93,9 +93,6 @@ func (p *FileReadProvider) execute(ctx context.Context, args map[string]any) (st
 	lineTruncated, outputTruncated := false, false
 	for i, line := range lines {
 		text, cut := capFileReadLine(line)
-		if cut {
-			lineTruncated = true
-		}
 		// Budget the fully formatted line: the line-number prefix and the
 		// trailing newline are body bytes too, so counting only len(text)
 		// would let the rendered body drift past the cap.
@@ -103,6 +100,9 @@ func (p *FileReadProvider) execute(ctx context.Context, args map[string]any) (st
 		if renderedBytes > 0 && renderedBytes+len(entry) > fileReadMaxResultBytes {
 			outputTruncated = true
 			break
+		}
+		if cut {
+			lineTruncated = true
 		}
 		renderedBytes += len(entry)
 		shown = i + 1
