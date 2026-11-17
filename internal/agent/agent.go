@@ -2007,8 +2007,7 @@ func parseFilterToolCalls(calls []llm.ToolCall, total int) map[int]struct{} {
 				indices = make(map[int]struct{})
 			}
 			for _, id := range args.CommentIDs {
-				var idx int
-				if _, err := fmt.Sscanf(id, "c-%d", &idx); err == nil && idx >= 0 && idx < total {
+				if idx, ok := filterCommentIndex(id, total); ok {
 					indices[idx] = struct{}{}
 				}
 			}
@@ -2032,12 +2031,20 @@ func parseFilterResponse(raw string, total int) map[int]struct{} {
 	}
 	indices := make(map[int]struct{})
 	for _, id := range ids {
-		var idx int
-		if _, err := fmt.Sscanf(id, "c-%d", &idx); err == nil && idx >= 0 && idx < total {
+		if idx, ok := filterCommentIndex(id, total); ok {
 			indices[idx] = struct{}{}
 		}
 	}
 	return indices
+}
+
+func filterCommentIndex(id string, total int) (int, bool) {
+	suffix, ok := strings.CutPrefix(id, "c-")
+	if !ok {
+		return 0, false
+	}
+	idx, err := strconv.Atoi(suffix)
+	return idx, err == nil && idx >= 0 && idx < total && strconv.Itoa(idx) == suffix
 }
 
 // logExclusions reports the files the selection dropped: the static gates
