@@ -555,7 +555,8 @@ func countTokensWithEncoding(text string, encName string) int {
 	if err != nil {
 		return len([]byte(text)) / 4
 	}
-	return len(tke.Encode(text, nil, nil))
+	// Reviewed text never enables model control tokens, so skip scanning for them.
+	return len(tke.EncodeOrdinary(text))
 }
 
 func CountTokens(text string) int {
