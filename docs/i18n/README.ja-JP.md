@@ -114,10 +114,10 @@ Claude Code、Codex、Cursor、Kimi Codeなど、Agent Skillsに対応しロー�
 
 #### 1. スキルをインストール
 
-レビュー対象のプロジェクト内で実行し、インストーラーでエージェントを選択します。
+レビュー対象のプロジェクト内で実行し、インストーラーで必要なスキルとエージェントを選択します。
 
 ```bash
-npx skills add alibaba/open-code-review --skill open-code-review --skill open-code-review-delegate
+npx skills add alibaba/open-code-review
 ```
 
 `ocr` がなければ、スキルは環境の権限に従ってエージェントにインストールを案内します。事前に `npm install -g @alibaba-group/open-code-review` を実行しても構いません。プラグインや手動インストールについては[エージェント別ガイド](../../plugins/open-code-review/README.md)を参照するか、[`skills/`](../../skills/) 内の必要なフォルダーをエージェントのスキルディレクトリにコピーしてください。

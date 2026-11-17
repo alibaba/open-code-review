@@ -114,10 +114,10 @@ Open Code Review 的核心设计理念是将确定性工程与 Agent 结合，�
 
 #### 1. 安装 Skills
 
-在待审查项目中运行，并在安装器中选择你的 Agent：
+在待审查项目中运行，并在安装器中选择所需的 skills 和你的 Agent：
 
 ```bash
-npx skills add alibaba/open-code-review --skill open-code-review --skill open-code-review-delegate
+npx skills add alibaba/open-code-review
 ```
 
 如果缺少 `ocr`，skills 会引导 Agent 在环境权限允许的情况下安装它。也可以提前运行 `npm install -g @alibaba-group/open-code-review`。偏好插件或手动安装？参见[各 Agent 的安装指南](../../plugins/open-code-review/README.md)，或将 [`skills/`](../../skills/) 中所需的文件夹复制到 Agent 的 skill 目录。

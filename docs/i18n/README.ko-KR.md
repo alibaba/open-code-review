@@ -114,10 +114,10 @@ Claude Code, Codex, Cursor, Kimi Code 등 Agent Skills를 지원하고 로컬 �
 
 #### 1. 스킬 설치
 
-리뷰할 프로젝트에서 실행한 다음 설치 프로그램에서 에이전트를 선택하세요.
+리뷰할 프로젝트에서 실행한 다음 설치 프로그램에서 필요한 스킬과 에이전트를 선택하세요.
 
 ```bash
-npx skills add alibaba/open-code-review --skill open-code-review --skill open-code-review-delegate
+npx skills add alibaba/open-code-review
 ```
 
 `ocr`가 없으면 스킬이 환경 권한에 따라 에이전트의 설치를 안내합니다. `npm install -g @alibaba-group/open-code-review`로 미리 설치할 수도 있습니다. 플러그인이나 수동 설치는 [에이전트별 설정 가이드](../../plugins/open-code-review/README.md)를 참고하거나, [`skills/`](../../skills/)에서 필요한 폴더를 에이전트의 스킬 디렉터리에 복사하세요.

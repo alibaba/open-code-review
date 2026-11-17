@@ -114,10 +114,10 @@ Use the skills in Claude Code, Codex, Cursor, Kimi Code, or another agent that s
 
 #### 1. Install the Skills
 
-Run in the project you want to review, then select your agent in the installer:
+Run in the project you want to review, then select the skills you need and your agent in the installer:
 
 ```bash
-npx skills add alibaba/open-code-review --skill open-code-review --skill open-code-review-delegate
+npx skills add alibaba/open-code-review
 ```
 
 The skills guide your agent to install `ocr` if it is missing, subject to your environment's permissions. You can also install it ahead of time with `npm install -g @alibaba-group/open-code-review`. Prefer a plugin or manual installation? See the [agent-specific setup guide](plugins/open-code-review/README.md), or copy the desired folders from [`skills/`](skills/) into your agent's skill directory.

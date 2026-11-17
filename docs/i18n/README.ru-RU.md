@@ -114,10 +114,10 @@ Open Code Review — это CLI-инструмент для код-ревью н
 
 #### 1. Установите навыки
 
-Выполните команду в проверяемом проекте и выберите своего агента в установщике:
+Выполните команду в проверяемом проекте и выберите нужные навыки и своего агента в установщике:
 
 ```bash
-npx skills add alibaba/open-code-review --skill open-code-review --skill open-code-review-delegate
+npx skills add alibaba/open-code-review
 ```
 
 Если `ocr` отсутствует, навыки подскажут агенту установить его с учётом разрешений среды. Можно установить заранее: `npm install -g @alibaba-group/open-code-review`. Для плагинов и ручной установки см. [инструкции по агентам](../../plugins/open-code-review/README.md) или скопируйте нужные папки из [`skills/`](../../skills/) в каталог навыков своего агента.
