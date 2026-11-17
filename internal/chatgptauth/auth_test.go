@@ -189,7 +189,8 @@ func TestVerifyIDToken(t *testing.T) {
 	for _, tc := range []struct {
 		field string
 		value any
-	}{{"iss", "other"}, {"aud", "wrong"}, {"exp", int64(1)}, {"nonce", "wrong"}, {"sub", ""}, {"iat", nil}, {"nbf", time.Now().Add(time.Hour).Unix()}, {"aud", []string{"oaiapp_one", "other"}}, {"azp", "other"}} {
+		want  string
+	}{{"iss", "other", "issuer did not match"}, {"aud", "wrong", "audience did not contain"}, {"exp", int64(1), "has expired"}, {"nonce", "wrong", "nonce did not match"}, {"sub", "", "subject is empty"}, {"iat", nil, "issued-at is missing"}, {"iat", time.Now().Add(time.Hour).Unix(), "issued-at is in the future"}, {"nbf", time.Now().Add(time.Hour).Unix(), "not-before is in the future"}, {"aud", []string{"oaiapp_one", "other"}, "no matching authorized party"}, {"azp", "other", "authorized party did not match"}} {
 		t.Run(tc.field+fmt.Sprint(tc.value), func(t *testing.T) {
 			old, ok := f.claims[tc.field]
 			f.claims[tc.field] = tc.value
@@ -200,8 +201,12 @@ func TestVerifyIDToken(t *testing.T) {
 					delete(f.claims, tc.field)
 				}
 			}()
-			if _, err := f.client.verify(context.Background(), f.jwt(), "oaiapp_one", "nonce"); err == nil {
+			_, err := f.client.verify(context.Background(), f.jwt(), "oaiapp_one", "nonce")
+			if err == nil {
 				t.Fatal("invalid claim accepted")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not name the failing check %q", err.Error(), tc.want)
 			}
 		})
 	}
