@@ -122,6 +122,7 @@ export const ko: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': '문의하기',
   'footer.copyright': '© Copyright 2026. All rights reserved.',
 
   // Docs Page

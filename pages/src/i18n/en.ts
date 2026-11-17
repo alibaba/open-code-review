@@ -118,6 +118,7 @@ export const en = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': 'Contact us',
   'footer.copyright': '© Copyright 2026. All rights reserved.',
 
   // Docs Page (keep existing)
