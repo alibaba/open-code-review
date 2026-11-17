@@ -1,16 +1,12 @@
 ---
 name: open-code-review
 description: >
-  Performs AI-powered code review on Git changes using the `ocr` CLI from
-  alibaba/open-code-review. Use when the user asks to review code, review
-  a pull request, review staged/unstaged changes, review a commit, or
-  compare branches for code quality issues. Produces line-level review
-  comments and can automatically apply fixes when requested. With appropriate
-  review rules, can detect various types of issues including bugs, security
-  vulnerabilities, performance problems, and code quality concerns.
-  This is native mode: OCR calls its own configured model provider. For
-  reviews using the host agent's model without separate OCR credentials,
-  use open-code-review-delegate instead.
+  Review workspace changes, PRs, commits, or branch comparisons with OCR's
+  native review pipeline and independently configured model provider.
+  Produces line-level findings; fixes code only when requested. Use when
+  the user wants native mode or has an OCR provider configured. To use the
+  host agent's model without separate OCR credentials, choose
+  open-code-review-delegate instead.
 license: Apache-2.0
 compatibility: >
   Requires the `ocr` CLI installed (via `npm install -g
@@ -24,16 +20,6 @@ metadata:
 ---
 
 # Open Code Review
-
-A skill for invoking [open-code-review](https://github.com/alibaba/open-code-review) (`ocr`) — an open-source AI code review CLI that reads Git diffs and generates structured, line-level review comments.
-
-## Choosing a Mode
-
-This skill runs **native mode**: the host agent invokes OCR's specialized review pipeline and interprets its results. OCR uses its own provider configuration, not the host agent's subscription or login.
-
-- Use this skill when the user wants native mode or already has an OCR provider configured. Keep the existing setup and run the workflow below.
-- If the user has no separate API key or wants to use the current agent's model, use the installed `open-code-review-delegate` skill instead. If it is unavailable, offer to install it with `npx skills add alibaba/open-code-review --skill open-code-review-delegate`.
-- Missing OCR credentials need not block a review: offer delegation rather than requiring the user to obtain a key. Respect an explicit choice of native mode; do not silently switch modes after a provider or network error.
 
 ## Workflow
 
@@ -243,7 +229,7 @@ The CLI is older than v1.10.0. Do not continue the review with plain stdout. Ask
 
 **`ocr review` fails with LLM connection error**
 
-Offer delegation as described in **Choosing a Mode**, or help configure an LLM provider if the user wants to continue in native mode.
+If OCR credentials are unavailable, offer `open-code-review-delegate` rather than requiring a new key. If that skill is missing, offer `npx skills add alibaba/open-code-review --skill open-code-review-delegate`. Do not switch modes without user agreement. To continue in native mode, diagnose the provider connection or configure it below; a host-agent login is not an OCR credential.
 
 Interactive setup (recommended):
 
