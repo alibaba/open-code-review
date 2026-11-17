@@ -350,21 +350,31 @@ Find files in the repo by repository-relative path or filename keyword (substrin
 | `query_name`     | yes      | —       | Substring matched against each file's **repository-relative path** (accepting both `/` and `\` path separators). |
 | `case_sensitive` | no       | `false` | Set to `true` for exact-case matching.                                                                           |
 
-The candidate set comes from `git ls-files --cached --others
---exclude-standard` in workspace mode, or `git ls-tree -r --name-only
+The candidate set comes from `git ls-files -z --cached --others
+--exclude-standard` in workspace mode, or `git ls-tree -r --name-only -z
 <ref>` in range / commit mode. Extensionless files are skipped except
 for `Makefile`, `Dockerfile`, `LICENSE`, `Vagrantfile`, `Containerfile`,
 `BUILD`, and `WORKSPACE`.
 
 ### Output
 
-A newline-separated list of paths:
+A JSON array of repository-relative paths:
 
+```json
+[
+  "src/main/java/com/example/UserService.java",
+  "src/test/java/com/example/UserServiceTest.java",
+  "src/main/java/com/example/internal/UserServiceImpl.java"
+]
 ```
-src/main/java/com/example/UserService.java
-src/test/java/com/example/UserServiceTest.java
-src/main/java/com/example/internal/UserServiceImpl.java
-```
+
+Use each decoded array element as `file_read.file_path`. JSON quoting and
+escaping are serialization, not part of the path. For example,
+`["line\nbreak.go", "\"line\\nbreak.go\""]` contains two distinct paths:
+one with a real newline, and one with literal surrounding quotes and `\n`.
+`file_read` accepts raw paths and does not interpret quotes or backslash escapes
+inside the decoded `file_path` value. Consumers of the previous plain-text
+listing must parse the JSON array instead of splitting the result into lines.
 
 When no file matches (or `query_name` is blank), the tool returns the
 literal string `// The file was not found`.

@@ -390,7 +390,7 @@
                   "type": "integer"
                 },
                 "file_path": {
-                  "description": "The relative path of the file to open.",
+                  "description": "The raw relative path of the file to open. For file_find results, use a decoded JSON array element, not its quoted JSON representation. Literal quotes and backslashes in a pathname are preserved.",
                   "type": "string"
                 },
                 "start_line": {
@@ -431,7 +431,7 @@
           "type": "function",
           "function": {
             "name": "file_find",
-            "description": "Search for matching files in the current project based on filename keywords. When the query contains a path separator ('/' or '\\'), also matches against the full repository-relative path, enabling directory-scoped queries. Use this tool when you cannot find the files you need to view in the current change file list.\n\nThis tool searches for filenames containing specified keywords in the project directory and returns a list of matching file paths. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\nsrc/main/java/UserService.java\nsrc/test/java/UserServiceTest.java\n\nInput:\nquery_name: pkg/util\nOutput:\npkg/util.go\npkg/util_test.go",
+            "description": "Search for matching files in the current project based on filename keywords. When the query contains a path separator ('/' or '\\'), also matches against the full repository-relative path, enabling directory-scoped queries. Use this tool when you cannot find the files you need to view in the current change file list.\n\nReturns a JSON array of matching repository-relative paths. Use each decoded string as file_read.file_path; JSON quotes and escapes are serialization, not part of the path. Names containing literal quotes, backslashes, or line breaks remain distinct. No matches returns // The file was not found. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\n[\"src/main/java/UserService.java\",\"src/test/java/UserServiceTest.java\"]\n\nInput:\nquery_name: pkg/util\nOutput:\n[\"pkg/util.go\",\"pkg/util_test.go\"]",
             "parameters": {
               "properties": {
                 "case_sensitive": {
@@ -625,7 +625,7 @@
                   "type": "integer"
                 },
                 "file_path": {
-                  "description": "The relative path of the file to open.",
+                  "description": "The raw relative path of the file to open. For file_find results, use a decoded JSON array element, not its quoted JSON representation. Literal quotes and backslashes in a pathname are preserved.",
                   "type": "string"
                 },
                 "start_line": {
@@ -666,7 +666,7 @@
           "type": "function",
           "function": {
             "name": "file_find",
-            "description": "Search for matching files in the current project based on filename keywords. When the query contains a path separator ('/' or '\\'), also matches against the full repository-relative path, enabling directory-scoped queries. Use this tool when you cannot find the files you need to view in the current change file list.\n\nThis tool searches for filenames containing specified keywords in the project directory and returns a list of matching file paths. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\nsrc/main/java/UserService.java\nsrc/test/java/UserServiceTest.java\n\nInput:\nquery_name: pkg/util\nOutput:\npkg/util.go\npkg/util_test.go",
+            "description": "Search for matching files in the current project based on filename keywords. When the query contains a path separator ('/' or '\\'), also matches against the full repository-relative path, enabling directory-scoped queries. Use this tool when you cannot find the files you need to view in the current change file list.\n\nReturns a JSON array of matching repository-relative paths. Use each decoded string as file_read.file_path; JSON quotes and escapes are serialization, not part of the path. Names containing literal quotes, backslashes, or line breaks remain distinct. No matches returns // The file was not found. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\n[\"src/main/java/UserService.java\",\"src/test/java/UserServiceTest.java\"]\n\nInput:\nquery_name: pkg/util\nOutput:\n[\"pkg/util.go\",\"pkg/util_test.go\"]",
             "parameters": {
               "properties": {
                 "case_sensitive": {
@@ -879,7 +879,7 @@
                   "type": "integer"
                 },
                 "file_path": {
-                  "description": "The relative path of the file to open.",
+                  "description": "The raw relative path of the file to open. For file_find results, use a decoded JSON array element, not its quoted JSON representation. Literal quotes and backslashes in a pathname are preserved.",
                   "type": "string"
                 },
                 "start_line": {
@@ -920,7 +920,7 @@
           "type": "function",
           "function": {
             "name": "file_find",
-            "description": "Search for matching files in the current project based on filename keywords. When the query contains a path separator ('/' or '\\'), also matches against the full repository-relative path, enabling directory-scoped queries. Use this tool when you cannot find the files you need to view in the current change file list.\n\nThis tool searches for filenames containing specified keywords in the project directory and returns a list of matching file paths. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\nsrc/main/java/UserService.java\nsrc/test/java/UserServiceTest.java\n\nInput:\nquery_name: pkg/util\nOutput:\npkg/util.go\npkg/util_test.go",
+            "description": "Search for matching files in the current project based on filename keywords. When the query contains a path separator ('/' or '\\'), also matches against the full repository-relative path, enabling directory-scoped queries. Use this tool when you cannot find the files you need to view in the current change file list.\n\nReturns a JSON array of matching repository-relative paths. Use each decoded string as file_read.file_path; JSON quotes and escapes are serialization, not part of the path. Names containing literal quotes, backslashes, or line breaks remain distinct. No matches returns // The file was not found. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\n[\"src/main/java/UserService.java\",\"src/test/java/UserServiceTest.java\"]\n\nInput:\nquery_name: pkg/util\nOutput:\n[\"pkg/util.go\",\"pkg/util_test.go\"]",
             "parameters": {
               "properties": {
                 "case_sensitive": {
