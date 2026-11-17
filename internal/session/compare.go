@@ -36,7 +36,7 @@ func Compare(before, after []model.LlmComment, afterManifest *RunManifest) Compa
 	reviewed := ReviewedPaths(afterManifest)
 	renamed := renamedPaths(afterManifest)
 
-	pool := make(map[string][]model.LlmComment, len(after))
+	pool := make(map[findingIdentity][]model.LlmComment, len(after))
 	for _, c := range after {
 		k := findingKey(c, c.Path)
 		pool[k] = append(pool[k], c)
@@ -84,7 +84,7 @@ func Compare(before, after []model.LlmComment, afterManifest *RunManifest) Compa
 // the identity of a published GitHub Code Scanning alert - changing how it
 // normalizes would re-open every alert downstream - so the two stay apart even
 // though they read the same fields.
-func findingKey(c model.LlmComment, path string) string {
+func findingKey(c model.LlmComment, path string) findingIdentity {
 	body := normalizeSnippet(c.ExistingCode)
 	if body == "" {
 		// ponytail: no snippet recorded, so the prose is all the identity there
@@ -93,7 +93,13 @@ func findingKey(c model.LlmComment, path string) string {
 		// to survive.
 		body = normalizeSnippet(c.Content)
 	}
-	return normalizePath(path) + "|" + strings.ToLower(strings.TrimSpace(c.Category)) + "|" + body
+	return findingIdentity{normalizePath(path), strings.ToLower(strings.TrimSpace(c.Category)), body}
+}
+
+type findingIdentity struct {
+	path     string
+	category string
+	body     string
 }
 
 // normalizeSnippet collapses every whitespace run to a single space so that
