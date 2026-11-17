@@ -230,7 +230,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 3. 宣言順に `~/.opencodereview/rule.json` を試します。
 4. 埋め込みのシステムルール層にフォールバックします。
 
-埋め込みの `system_rules.json` から主なパターンを相対的なマッチ順で示します:
+埋め込みの `system_rules.json` のすべてのパターンを相対的なマッチ順で示します:
 
 | パターン                                        | ルールドキュメント                                                                              |
 | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -240,6 +240,8 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/build.gradle`                               | `build_gradle.md`: Gradle 依存関係。                                                            |
 | `**/package.json`                               | `package_json.md`: NPM 依存関係 / スクリプト。                                                  |
 | `**/Cargo.toml`                                 | `cargo_toml.md`: Rust manifest。                                                                |
+| `**/Move.toml` | `move_toml.md`: Move package manifest。 |
+| `**/*.move` | `move.md`: Move ソースコード。 |
 | `**/composer.json`                              | `composer_json.md`: Composer の依存関係、自動読み込み、スクリプト、プラグイン、パッケージ設定。 |
 | `**/*.{json,json5,jsonc}`                       | `json.md`: 汎用 JSON（`.json5` と `.jsonc` にも一致）。 |
 | `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md`: GitHub Actions ワークフロー YAML。                                       |
@@ -250,6 +252,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md`: FreeMarker テンプレート（SSTI / XSS / null 処理）。                            |
 | `**/*.{hbs,mustache}`                           | `handlebars_mustache.md`: Handlebars / Mustache テンプレート。                                  |
 | `**/*.{jinja2,j2}`                              | `jinja.md`: Jinja テンプレート                                                                  |
+| `**/*.pug`                          | `pug.md`: Pug テンプレート。                                                                    |
 | `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md`: EJS / Liquid / Nunjucks テンプレート（SSTI / XSS / エスケープ）。 |
 | `**/*.{haml,slim}`                              | `haml_slim.md`: HAML / Slim テンプレート（SSTI / XSS / エスケープ / インデント意味論）。 |
 | `**/*.erb`                                      | `erb.md`: ERB テンプレート（SSTI / XSS / エスケープ / 空白と出力構造）。 |
@@ -261,7 +264,6 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md`: F# の実装、シグネチャ、スクリプトファイル。                                        |
 | `**/*.cs`                                       | `csharp.md`: C# のソースファイル。 |
 | `**/*.rs`                                       | `rust.md`                                                                                       |
-| `**/*.R`                                        | `r.md`                                                                                          |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                        |
 | `**/*.c`                                        | `c.md`                                                                                          |
 | `**/*.{py,pyi,ipynb}`                           | `python.md`: Python ソースコード。                                                              |
@@ -272,15 +274,22 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{graphql,gql}`                            | `graphql.md`: GraphQL スキーマと操作。                                                          |
 | `**/*.prisma`                                   | `prisma.md`: Prisma スキーマ。                                                                  |
 | `**/*.jl`                                       | `julia.md`: Julia ソースコード。                                                                |
+| `**/*.R`                                        | `r.md`                                                                                          |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md`: Terraform / HCL。                                                               |
 | `**/*.bicep`                                    | `bicep.md`: Bicep（Azure）テンプレート。                                                        |
+| `**/*.nix`                          | `nix.md`: Nix 式と flake。                                                                  |
+| `**/*.{hs,lhs}`                     | `haskell.md`: Haskell ソースコード。                                                            |
+| `**/*.{nim,nims,nimble}`            | `nim.md`: Nim ソースコードとパッケージマニフェスト。                                                        |
+| `**/*.swift`                        | `swift.md`: Swift ソースコード。                                                                |
 | `**/*.nu`                                       | `nushell.md`: Nushell スクリプト。                                                              |
 | `**/*.elm`                                      | `elm.md` - Elm ソースコード。                                                                   |
 | `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。                                          |
+| `**/*.zig`                          | `zig.md`: Zig ソースコード。                                                                    |
 | `**/*.thrift`                                   | `thrift.md`: Apache Thrift IDL のワイヤ互換性。                                                 |
 | `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md`: Starlark と Bazel のビルド、マクロ、ルールの設計。                               |
 | `**/*.capnp`                                    | `capnp.md`: Cap'n Proto スキーマのワイヤ互換性。                                                |
-| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - GLSL、HLSL、WGSL、Metal シェーダー。                                              |
+| `**/*.{ml,mli}`                     | `ocaml.md`: OCaml ソースコード。                                                                |
+| `**/*.{re,rei}`                     | `ocaml.md`: ReasonML ソースコード。                                                             |
 | `**/*.{v,sv,vh}`                                | `verilog.md`: Verilog および SystemVerilog の RTL。                                             |
 | `**/*.{vhd,vhdl}`                               | `vhdl.md`: VHDL の RTL。                                                                        |
 | `**/*.m`                                        | `matlab.md`（または[コンテンツスニッフィング](#content-sniffing-for-m-files)により `objc.md`）  |
@@ -288,7 +297,9 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.sol`                                      | `solidity.md`: Solidity スマートコントラクト。                                                  |
 | `**/*.vy`                                       | `vyper.md`: Vyper スマートコントラクト。                                                        |
 | `**/*.rego`                                     | `rego.md`: Rego ポリシー（OPA）。                                                               |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - GLSL、HLSL、WGSL、Metal シェーダー。                                              |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md`: PowerShell スクリプト、モジュール、データ／マニフェストファイル。              |
+| `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md`: Clojure / ClojureScript ソースコードと EDN データ。 |
 | _(fallback)_                                    | `default.md`                                                                                    |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。

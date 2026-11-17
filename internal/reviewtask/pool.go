@@ -1,17 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-// Package llmloop carries the per-subtask MAIN_TASK tool-use loop shared by
-// `ocr review` (diff-based) and `ocr scan` (full-file). It owns the chat
-// completion conversation state, three-zone memory compression, tool-call
-// dispatch (including async comment post-processing), and aggregate token /
-// warning bookkeeping. Callers above this package render the initial
-// messages (review uses MAIN_TASK, scan uses FULL_SCAN_TASK) and hand them
-// in via Runner.RunMainTask.
-//
-// A subtask is one file in scan and one file group in review, so nothing in
-// this package may assume its unit of work is a single file.
-package llmloop
+package reviewtask
 
 import (
 	"fmt"
@@ -21,15 +11,6 @@ import (
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/stdout"
 )
-
-// AgentWarning describes a non-fatal warning recorded during one subtask's
-// review/scan. The name is kept for backwards compatibility with the
-// previous internal/agent package.
-type AgentWarning struct {
-	File    string `json:"file"`
-	Message string `json:"message"`
-	Type    string `json:"type"`
-}
 
 // CommentWorkerPool manages a fixed-size pool of workers dedicated to
 // processing code-review comment post-steps (line-range tracking,

@@ -106,6 +106,35 @@ Open Code Review 的核心设计理念是将确定性工程与 Agent 结合，�
 
 - **Git >= 2.41** — Open Code Review 依赖 Git 进行 diff 生成、代码搜索和仓库操作。
 
+<a id="supported-agents"></a>
+
+### Agent Skills
+
+可用于 Claude Code、Codex、Cursor、Kimi Code，以及其他支持 Agent Skills 且能执行本地命令的 Agent。两种模式都需要 **Git >= 2.41** 和 **`ocr` CLI**；只有原生模式需要配置 OCR 的模型供应商。
+
+#### 1. 安装 Skills
+
+在待审查项目中运行，并在安装器中选择所需的 skills 和你的 Agent：
+
+```bash
+npx skills add alibaba/open-code-review
+```
+
+如果缺少 `ocr`，skills 会引导 Agent 在环境权限允许的情况下安装它。也可以提前运行 `npm install -g @alibaba-group/open-code-review`。偏好插件或手动安装？参见[各 Agent 的安装指南](../../plugins/open-code-review/README.md)，或将 [`skills/`](../../skills/) 中所需的文件夹复制到 Agent 的 skill 目录。
+
+#### 2. 选择审查模式
+
+| | 原生模式 | 委托模式 |
+|---|---|---|
+| Skill | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
+| 谁执行审查？ | OCR 专用审查 Agent 和流水线 | 当前编程 Agent，在 OCR 提供的审查流水线和围栏下执行 |
+| 模型与认证 | OCR 自身的供应商配置 | 宿主 Agent 已有的模型与认证 |
+| 适用场景 | 有可供 OCR 使用的模型端点，希望使用完整审查流水线 | 没有单独的 API key，或希望复用已有 Agent 订阅与配置 |
+
+**没有单独的 key？从委托模式开始。** 它省去的是 OCR 的供应商配置，不是宿主 Agent 自身的认证、用量限制或费用。Agent 订阅不会自动成为原生模式可用的 API 凭证。委托模式下，OCR 的 CLI 和 skill 共同提供审查流水线和围栏，包括文件选择、规则解析、覆盖要求和结构化报告。宿主 Agent 在这一流程下完成分析、定位和报告，并不运行 OCR 完整的原生流水线。
+
+使用原生模式时，通过 `ocr config provider` 和 `ocr config model` 完成一次性配置。认证要求取决于供应商，参见[配置说明](https://open-codereview.ai/docs/configuration)。
+
 ### CLI
 
 #### 安装
@@ -124,12 +153,15 @@ npm install -g @alibaba-group/open-code-review
 
 在审查代码之前，必须先配置 LLM。除非你使用[委托模式](https://open-codereview.ai/docs/delegate)。
 
+- **由 OCR 调用模型：** `ocr review`、`/open-code-review:review` 命令和 `open-code-review` skill 使用 OCR 自身的供应商配置，而非你的 Claude Code Team/Pro 订阅登录。认证要求取决于供应商；参见[配置说明](https://open-codereview.ai/docs/configuration)。
+- **由宿主 agent 调用模型：** `/open-code-review:delegate-review` 命令和 `open-code-review-delegate` skill 使用宿主 agent 配置的模型和认证方式，无需在 OCR 中单独配置 LLM 或凭证。参见 [Claude Code 安装步骤](../../plugins/open-code-review/README.md#claude-code)。
+
 ```bash
 ocr config provider          # 选择内置供应商或添加自定义供应商
 ocr config model             # 为当前供应商选择模型
 ```
 
-![Provider setup](../../imgs/providers.jpg)
+![Model providers](../../imgs/providers-zh.jpg)
 
 交互式界面会引导你完成供应商选择、API Key 输入和模型配置，完成后自动测试连通性。
 
