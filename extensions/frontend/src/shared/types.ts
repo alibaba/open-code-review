@@ -38,7 +38,9 @@ export interface AgentWarning {
 }
 
 export interface CliResult {
-  status: 'success' | 'completed_with_errors' | 'completed_with_warnings' | 'skipped';
+  // Every status `ocr review` / `ocr scan` emits (cmd/opencodereview/output.go). With a session
+  // manifest it is the terminal state: complete | partial | failed | skipped.
+  status: 'success' | 'complete' | 'completed_with_warnings' | 'completed_with_errors' | 'partial' | 'failed' | 'skipped';
   comments: ReviewComment[];
   warnings: AgentWarning[];
   summary?: ReviewSummary;

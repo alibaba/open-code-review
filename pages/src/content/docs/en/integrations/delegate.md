@@ -65,7 +65,7 @@ cp -R /path/to/open-code-review/skills/open-code-review-delegate ~/.claude/skill
 ### Step 1: Preview — determine what to review
 
 ```bash
-ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <patterns>]
+ocr delegate preview [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <patterns>]
 ```
 
 Outputs:
@@ -81,12 +81,13 @@ Common invocations:
 |----------|---------|
 | Workspace changes | `ocr delegate preview` |
 | Branch comparison | `ocr delegate preview --from main --to feature` |
+| Current branch against main | `ocr delegate preview --from main` |
 | Single commit | `ocr delegate preview -c abc123` |
 
 ### Step 2: Get rules for files
 
 ```bash
-ocr delegate rule <path1> <path2> ...
+ocr delegate rule [--from <ref> [--to <ref>]] [--commit <hash>] <path1> <path2> ...
 ```
 
 Pass the reviewable paths from Step 1. Output is grouped by rule
@@ -158,10 +159,12 @@ Classify each finding by severity:
 
 ## Shared flags
 
+Both subcommands accept `--from main` as shorthand for `--from main --to HEAD`. Range review compares `merge-base(from, to)..to` and excludes staged, unstaged, and untracked changes; omit range/commit flags for workspace mode. Pass the same range or commit flags to `preview` and `rule` so they use the same target. Range and commit flags are mutually exclusive.
+
 | Flag | Description |
 |------|-------------|
 | `--from <ref>` | Source ref for range mode |
-| `--to <ref>` | Target ref for range mode |
+| `--to <ref>` | Target ref for range mode; defaults to `HEAD` when `--from` is supplied |
 | `-c, --commit <hash>` | Single commit mode |
 | `--repo <path>` | Repository root (default: cwd) |
 | `--rule <path>` | Custom rule.json path |

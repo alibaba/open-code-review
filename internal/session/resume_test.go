@@ -143,11 +143,19 @@ func TestValidateOptions_NilState(t *testing.T) {
 	}
 }
 
-func TestValidateOptions_RejectsWorkspaceMode(t *testing.T) {
+func TestValidateOptions_WorkspaceMatches(t *testing.T) {
+	s := &ResumeState{ReviewMode: ReviewModeWorkspace}
+	err := s.ValidateOptions(SessionOptions{ReviewMode: ReviewModeWorkspace})
+	if err != nil {
+		t.Errorf("expected nil error, got: %v", err)
+	}
+}
+
+func TestValidateOptions_RejectsWorkspaceMismatch(t *testing.T) {
 	s := &ResumeState{ReviewMode: ReviewModeRange}
 	err := s.ValidateOptions(SessionOptions{ReviewMode: ReviewModeWorkspace})
 	if err == nil {
-		t.Fatal("expected error for workspace mode")
+		t.Fatal("expected error for workspace/range mode mismatch")
 	}
 }
 

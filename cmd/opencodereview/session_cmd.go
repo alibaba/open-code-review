@@ -35,6 +35,7 @@ var sessionCmd = &cobra.Command{
 var sessionListRepoDir string
 var sessionListJSON bool
 var sessionListLimit int
+var sessionListBranch string
 
 var sessionListCmd = &cobra.Command{
 	Use:     "list [flags]",
@@ -51,10 +52,12 @@ var sessionShowRepoDir string
 var sessionShowJSON bool
 
 var sessionShowCmd = &cobra.Command{
-	Use:               "show [flags] <session-id>",
-	Short:             "Show one session's metadata and per-file items",
+	Use:   "show [flags] <session-id>",
+	Short: "Show one session's metadata and per-file items",
+	Long: "Find a saved session by id across repositories and show its metadata and per-file items.\n" +
+		"Use --repo to restrict the lookup to one repository. Ambiguous ids are listed, not guessed at.",
 	Args:              exactArgs(1),
-	ValidArgsFunction: completeSessionIDs,
+	ValidArgsFunction: completeSessionIDsAnywhere,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSessionShow(args[0])
 	},
@@ -199,8 +202,9 @@ func init() {
 	sessionListCmd.Flags().StringVar(&sessionListRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
 	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "emit JSON instead of a table")
 	sessionListCmd.Flags().IntVar(&sessionListLimit, "limit", 20, "cap the number of listed sessions (0 = unlimited)")
+	sessionListCmd.Flags().StringVar(&sessionListBranch, "branch", "", "only list sessions recorded on this branch")
 
-	sessionShowCmd.Flags().StringVar(&sessionShowRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
+	sessionShowCmd.Flags().StringVar(&sessionShowRepoDir, "repo", "", "only look for the session under this repository (default: every repository)")
 	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "emit JSON instead of a table")
 
 	sessionCommentsCmd.Flags().StringVar(&sessionCommentsRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
@@ -276,6 +280,15 @@ func runSessionList() error {
 	if err != nil {
 		return fmt.Errorf("list sessions: %w", err)
 	}
+	if sessionListBranch != "" {
+		filtered := make([]session.Summary, 0, len(summaries))
+		for _, summary := range summaries {
+			if summary.GitBranch == sessionListBranch {
+				filtered = append(filtered, summary)
+			}
+		}
+		summaries = filtered
+	}
 	if sessionListLimit > 0 && len(summaries) > sessionListLimit {
 		summaries = summaries[:sessionListLimit]
 	}
@@ -287,6 +300,10 @@ func runSessionList() error {
 	}
 
 	if len(summaries) == 0 {
+		if sessionListBranch != "" {
+			fmt.Printf("No sessions found for %s on branch %s\n", resolvedRepo, sessionListBranch)
+			return nil
+		}
 		fmt.Printf("No sessions found for %s\n", resolvedRepo)
 		return nil
 	}
@@ -295,16 +312,15 @@ func runSessionList() error {
 }
 
 func runSessionShow(sessionID string) error {
-	resolvedRepo, err := resolveWorkingDirForSession(sessionShowRepoDir)
-	if err != nil {
-		return err
-	}
-	summary, items, err := session.LoadDetail(resolvedRepo, sessionID)
+	summary, items, err := loadSessionShowDetail(sessionID)
 	if err != nil {
 		return fmt.Errorf("load session %q: %w", sessionID, err)
 	}
 
 	if sessionShowJSON {
+		if items == nil {
+			items = []session.ItemDetail{}
+		}
 		payload := struct {
 			Summary *session.Summary     `json:"summary"`
 			Items   []session.ItemDetail `json:"items"`
@@ -316,6 +332,42 @@ func runSessionShow(sessionID string) error {
 
 	printSessionDetail(os.Stdout, summary, items)
 	return nil
+}
+
+func loadSessionShowDetail(sessionID string) (*session.Summary, []session.ItemDetail, error) {
+	if err := session.ValidateSessionID(sessionID); err != nil {
+		return nil, nil, err
+	}
+	if strings.TrimSpace(sessionShowRepoDir) != "" {
+		repoDir, err := resolveWorkingDirForSession(sessionShowRepoDir)
+		if err != nil {
+			return nil, nil, err
+		}
+		return session.LoadDetail(repoDir, sessionID)
+	}
+	found, err := session.FindSessionsByID(sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch len(found) {
+	case 0:
+		return nil, nil, fmt.Errorf("%w: %q is not saved for any repository", session.ErrSessionNotFound, sessionID)
+	case 1:
+		loc := found[0]
+		return session.LoadDetailAt(loc.Path, sessionID, loc.RepoDir)
+	default:
+		var b strings.Builder
+		fmt.Fprintf(&b, "session %q is saved for more than one repository:\n", sessionID)
+		for _, loc := range found {
+			repo := loc.RepoDir
+			if repo == "" {
+				repo = "(repository not recorded): " + loc.Path
+			}
+			fmt.Fprintf(&b, "  %s\n", repo)
+		}
+		b.WriteString("\nRe-run with --repo to select a repository.")
+		return nil, nil, errors.New(b.String())
+	}
 }
 
 func runSessionComments(sessionID string) error {
@@ -365,7 +417,11 @@ func runSessionCompare(beforeID, afterID string) error {
 	if err != nil {
 		return fmt.Errorf("load session %q: %w", afterID, err)
 	}
-	if beforeSummary.RepoDir != afterSummary.RepoDir {
+	// Not an exact string compare: the two sessions may have been recorded from
+	// different spellings of this one directory (`C:\repo` from a resolved path,
+	// `C:/repo` from --repo), and splitting a repository across its own spellings
+	// is what made compare refuse the pair it was asked about.
+	if !session.SameRepoPath(beforeSummary.RepoDir, afterSummary.RepoDir) {
 		return fmt.Errorf("sessions belong to different repositories: %s was recorded in %s, %s in %s",
 			beforeID, beforeSummary.RepoDir, afterID, afterSummary.RepoDir)
 	}

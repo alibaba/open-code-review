@@ -29,7 +29,7 @@ OCR распространяется с открытым исходным код
 
 ### Предварительные требования
 
-- [Go ≥ 1.26.9](https://go.dev/dl/)
+- [Go ≥ 1.26.10](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -107,7 +107,7 @@ git checkout -b feat/anthropic-streaming
 Примеры:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(readme): clarify endpoint resolution priority
 refactor(viewer): extract task-card rendering into helper
@@ -116,39 +116,57 @@ refactor(viewer): extract task-card rendering into helper
 Тот же формат используется для **заголовков PR**, чтобы они аккуратно
 отображались в автоматически созданном журнале изменений.
 
+`PR Commit Policy` проверяет заголовок PR и полное сообщение каждого коммита,
+включая тело, без учёта регистра. Не добавляйте `[skip ci]`, `[ci skip]`, `[no ci]`,
+`[skip actions]`, `[actions skip]` или отдельную строку
+`skip-checks: true` / `skip-checks:true`.
+
+Если проверка не пройдена, измените заголовок PR или перепишите сообщения
+соответствующих коммитов в своей рабочей ветке. Новый коммит без этих инструкций
+не устраняет нарушения в предыдущих коммитах. Описание PR может содержать
+обсуждение этих инструкций и не проверяется.
+
 ## Структура проекта
 
 ```
 open-code-review/
-├── cmd/opencodereview/        # CLI entry point — flag parsing, dispatch
+├── acp/                       # Независимый адаптер ACP (Agent Client Protocol) для CLI
+├── cmd/opencodereview/        # Точка входа CLI — разбор флагов и диспетчеризация
+├── docs/                      # Локализованные README и руководства для участников
+├── imgs/                      # Изображения и логотипы для README
 ├── internal/
-│   ├── agent/                 # Review agent logic, sub-agent dispatch
-│   ├── config/                # Template, rules, allowlist, embedded JSON
-│   ├── diff/                  # Git diff parsing, three modes
-│   ├── gitcmd/                # Git subprocess runner
-│   ├── llm/                   # LLM client (Anthropic & OpenAI), endpoint resolver
-│   ├── model/                 # Data structs (LlmComment, Diff, …)
-│   ├── pathutil/              # Path utilities
-│   ├── release/               # Release-notes generation
-│   ├── session/               # JSONL session writer
-│   ├── stdout/                # Quiet-able stdout writer
-│   ├── suggestdiff/           # Suggestion diff rendering
-│   ├── telemetry/             # OpenTelemetry config + helpers
-│   ├── tool/                  # Tool registry + provider impls
-│   └── viewer/                # Embedded HTTP UI
-├── pages/                     # WebUI marketing page (separate React app)
-├── plugins/                   # Claude Code slash command
-├── extensions/                # Editor extensions (VS Code)
-├── examples/                  # CI recipes (GitHub Actions, GitLab CI)
-├── skills/                    # Agent SDK skill manifest
-├── scripts/                   # NPM postinstall + cross-build scripts
-├── npm/                       # Per-platform optional dependency packages
-└── bin/                       # NPM wrapper (Node)
+│   ├── agent/                 # Логика агента ревью и запуск подагентов
+│   ├── chatgptauth/           # ChatGPT OAuth и управление учётными данными
+│   ├── config/                # Шаблоны, правила, список разрешений, встроенный JSON
+│   ├── delegate/              # Генерация спецификаций ревью без вызовов LLM
+│   ├── diff/                  # Разбор Git diff
+│   ├── gitcmd/                # Запуск Git в дочерних процессах
+│   ├── llm/                   # Клиенты LLM и определение конечных точек API
+│   ├── llmloop/               # Общий цикл вызова инструментов LLM для review и scan
+│   ├── mcp/                   # Клиенты MCP и адаптеры инструментов
+│   ├── model/                 # Структуры данных (LlmComment, Diff, …)
+│   ├── pathutil/              # Утилиты для работы с путями
+│   ├── release/               # Проверки согласованности имён артефактов релиза
+│   ├── scan/                  # Ревью кода полных файлов
+│   ├── session/               # Запись сеансов в JSONL
+│   ├── stdout/                # Вывод в stdout с возможностью отключения
+│   ├── suggestdiff/           # Отображение diff предлагаемых изменений
+│   ├── telemetry/             # Настройка OpenTelemetry и вспомогательные функции
+│   ├── tool/                  # Реестр инструментов и реализации провайдеров
+│   └── viewer/                # Встроенный HTTP UI для просмотра сеансов ревью
+├── pages/                     # Главная страница сайта и документация (отдельное приложение React)
+├── plugins/                   # Интеграции с агентами для программирования (Claude Code, Codex, OpenCode, …)
+├── extensions/                # Расширения VS Code и IntelliJ IDEA, общий фронтенд
+├── examples/                  # Примеры CI (GitHub Actions, GitLab CI)
+├── skills/                    # Определения навыков для ревью и делегирования
+├── scripts/                   # Скрипты установки, публикации и проверки репозитория
+├── npm/                       # Необязательные пакеты зависимостей для каждой платформы
+└── bin/                       # Обёртка NPM (Node)
 ```
 
 Большинство изменений затрагивает `internal/agent/`, `internal/tool/` или
 `internal/llm/`. Интерфейс CLI в `cmd/opencodereview/` намеренно сделан
-тонким: он разбирает флаги, а затем передаёт управление пакету агента.
+тонким: он разбирает флаги и выполняет диспетчеризацию команд.
 
 ## Разработка с помощью ИИ
 
@@ -194,6 +212,10 @@ CI запускает тот же набор при каждой отправк�
 
 ## Добавление новых инструментов
 
+Этот раздел описывает изменение исходников встроенного агента, а не настройку
+во время выполнения. Проверяйте изменения основных инструментов тестами и
+бенчмарками. Для внешнего бизнес-контекста используйте [MCP-серверы](../mcp/).
+
 Инструмент состоит из двух частей:
 
 1. **Определение JSON** в
@@ -205,6 +227,17 @@ CI запускает тот же набор при каждой отправк�
 Чтобы новое имя инструмента работало, необходимы обе части. Существующие шесть
 инструментов описаны в разделе [Инструменты](../tools/); используйте их как
 шаблоны.
+
+Выберите инструмент в массиве `MAIN_TASK.tools` каждого подходящего шаблона. У review и scan
+отдельные списки; сохраняйте порядок, поскольку он влияет на запрос модели. Чтобы передать описание
+инструмента при планировании review без разрешения вызовов, добавьте его в `PLAN_TASK.tool_references`.
+Определения не должны содержать флаги принадлежности к задачам, а имя определения должно совпадать
+с именем записи каталога.
+
+Эти списки выбирают определения для запросов модели и не являются песочницей исполнения.
+Обнаружение MCP и специфичные для review протоколы завершения и фильтрации остаются в существующих
+адаптерах задач. Другие вспомогательные задачи не используют эти привязки каталога; неподдерживаемые
+поля `tools` и `tool_references` отклоняются, а не игнорируются.
 
 ## Добавление новых шаблонов правил
 
