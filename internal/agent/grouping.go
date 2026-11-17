@@ -104,6 +104,7 @@ func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, m
 	}
 
 	groups = enforceGroupTokenBudget(groups, tokenLimit)
+	groups = separateCollidingGroups(groups, diffs)
 	return groupDiffsResult{groups: groups, usage: usage}
 }
 
@@ -130,6 +131,7 @@ func groupWithoutLLM(ctx context.Context, diffs []model.Diff, strategy template.
 		groups = enforceMaxFilesPerGroup([]FileGroup{{Label: smallChangeSetLabel, Diffs: diffs}})
 		groups = enforceGroupTokenBudget(groups, tokenLimit)
 	}
+	groups = separateCollidingGroups(groups, diffs)
 
 	// The log describes the partition that came out, not the one GroupingPlan
 	// asked for: a bundle that trips a size valve above ends up as several
@@ -149,6 +151,23 @@ func groupWithoutLLM(ctx context.Context, diffs []model.Diff, strategy template.
 		len(diffs), totalChanged, shape)
 	emitGroupingSkipped(ctx, strategy, len(diffs), totalChanged, tpl)
 
+	return groups
+}
+
+// Commas in valid file names can make different groups share a task key. Check
+// after every size split, which can introduce a new collision. Fall back for the
+// whole partition: splitting only a colliding group can collide with another
+// group's key, while individual file paths retain their existing identities.
+func separateCollidingGroups(groups []FileGroup, diffs []model.Diff) []FileGroup {
+	seen := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		key := fileGroupKey(group.Diffs)
+		if _, exists := seen[key]; exists {
+			fmt.Fprintln(stdout.Writer(), "[ocr] File group keys collide, falling back to per-file dispatch")
+			return toSingleFileGroups(diffs)
+		}
+		seen[key] = struct{}{}
+	}
 	return groups
 }
 
