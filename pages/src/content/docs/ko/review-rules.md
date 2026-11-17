@@ -140,6 +140,9 @@ Security review: flag hardcoded secrets, unvalidated redirects, and missing auth
 경로처럼 보이는 토큰이 여러 개 있으면 기존과 같이 인라인으로 처리되고 배열 형
 식을 권하는 경고가 출력됩니다.
 
+`null` 또는 빈 문자열 요소는 설정 오류(`rule[i] must not be empty`)로
+처리되며 조합된 규칙에 빈 섹션이 생기지 않습니다. 해당 요소를 삭제하세요.
+
 ### glob 기능 {#glob-features}
 
 OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)로

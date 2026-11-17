@@ -152,6 +152,10 @@ Security review: flag hardcoded secrets, unvalidated redirects, and missing auth
 похожих на пути токенов, по-прежнему считается встроенным текстом, а
 предупреждение предложит массив.
 
+Пустой элемент или `null` считается ошибкой конфигурации
+(`rule[i] must not be empty`) и не создаёт пустой раздел в итоговом
+правиле — просто уберите этот элемент.
+
 ### Возможности glob
 
 OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)

@@ -118,6 +118,9 @@ first-match と `merge_system_rule` の意味は変わりません。
 切り詰められます。1 つの文字列にパスらしいトークンが複数含まれる場合は従来ど
 おりインライン扱いとなり、配列形式を勧める警告が出ます。
 
+`null` や空文字列の要素は設定エラー（`rule[i] must not be empty`）として
+扱われ、空のセクションが混入することはありません。要素自体を削除してください。
+
 ### glob の機能
 
 OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4) でマッチングを行います:

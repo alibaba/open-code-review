@@ -246,6 +246,9 @@ func (e *ProjectRuleEntry) UnmarshalJSON(data []byte) error {
 		if err := json.Unmarshal(raw.Rule, &parts); err != nil {
 			return fmt.Errorf("rule must be a string or an array of strings: %w", err)
 		}
+		if i := firstBlankPart(parts); i >= 0 {
+			return fmt.Errorf("rule[%d] must not be empty: a null or blank part would compose an empty section, so leave the element out instead", i)
+		}
 		e.ruleParts = parts
 		// Provisional composition for callers that inspect Rule before
 		// resolveRuleEntries runs; inline-only arrays keep this text.
@@ -254,6 +257,19 @@ func (e *ProjectRuleEntry) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("rule must be a string or an array of strings")
 	}
 	return nil
+}
+
+// firstBlankPart reports the index of the first rule part that is empty or
+// whitespace-only, or -1 when every part carries text. json.Unmarshal decodes a
+// null element as "", so without this check `["a.md", null]` would compose a
+// blank section into the prompt.
+func firstBlankPart(parts []string) int {
+	for i, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			return i
+		}
+	}
+	return -1
 }
 
 // ProjectRule holds rules loaded from <repoDir>/.opencodereview/rule.json.
@@ -648,11 +664,16 @@ func resolveRuleEntries(entries []ProjectRuleEntry, repoDir string, confineRoot 
 
 // resolveRuleParts resolves each array part like a string `rule`: inline text is
 // kept as-is, a path-looking part is replaced by its file content, and a part
-// that cannot be read is skipped (tryReadRuleFile already warned). Parts are
-// joined with a blank line; an all-empty result ignores the entry.
+// that cannot be read is skipped (tryReadRuleFile already warned). Blank parts
+// are skipped too, so an entry assembled without going through UnmarshalJSON
+// cannot compose an empty section. Parts are joined with a blank line; an
+// all-empty result ignores the entry.
 func resolveRuleParts(parts []string, repoDir string, confineRoot string) string {
 	resolved := make([]string, 0, len(parts))
 	for _, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
 		if looksLikeFilePath(part) {
 			if content := tryReadRuleFile(part, repoDir, confineRoot); content != nil {
 				resolved = append(resolved, *content)

@@ -131,6 +131,9 @@ Security review: flag hardcoded secrets, unvalidated redirects, and missing auth
 并打印警告。如果单个字符串里包含多个看起来像路径的 token，它仍按行内文本处理，
 并会打印警告建议改用数组形式。
 
+`null` 或空字符串元素会被当作配置错误（`rule[i] must not be empty`），不会在
+组合规则里留下空段——请直接删掉该元素。
+
 ### glob 能力
 
 OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)

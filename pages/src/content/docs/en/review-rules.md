@@ -148,6 +148,9 @@ Composed text is capped at 1 MiB and truncated with a warning beyond that. A
 single string that contains several path-looking tokens is still treated as
 inline text, with a warning suggesting the array form.
 
+An empty or `null` element is a configuration error (`rule[i] must not be empty`)
+rather than a silent blank section — omit the element instead.
+
 ### Glob features
 
 OCR uses [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)

@@ -43,6 +43,11 @@ func TestProjectRuleEntry_UnmarshalRuleForms(t *testing.T) {
 			input:    `{"path":"**/*.go","rule":null}`,
 			wantRule: "",
 		},
+		{
+			name:     "empty array",
+			input:    `{"path":"**/*.go","rule":[]}`,
+			wantRule: "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -70,6 +75,62 @@ func TestProjectRuleEntry_UnmarshalRejectsOtherRuleTypes(t *testing.T) {
 		if err := json.Unmarshal([]byte(input), &entry); err == nil {
 			t.Errorf("expected error for %s", input)
 		}
+	}
+}
+
+// A null (or blank) element used to compose a spurious empty section into the
+// prompt, because encoding/json decodes null as "". Reject it with the index so
+// the config error points at the element to remove.
+func TestProjectRuleEntry_UnmarshalRejectsBlankArrayPart(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "null element",
+			input: `{"path":"**/*.go","rule":["rules.md",null]}`,
+			want:  "rule[1] must not be empty",
+		},
+		{
+			name:  "empty string element",
+			input: `{"path":"**/*.go","rule":["","rules.md"]}`,
+			want:  "rule[0] must not be empty",
+		},
+		{
+			name:  "whitespace element",
+			input: `{"path":"**/*.go","rule":["rules.md","   "]}`,
+			want:  "rule[1] must not be empty",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var entry ProjectRuleEntry
+			err := json.Unmarshal([]byte(tt.input), &entry)
+			if err == nil {
+				t.Fatalf("expected an error for %s", tt.input)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, want it to contain %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// Entries built in Go skip UnmarshalJSON, so resolveRuleParts filters blank
+// parts itself instead of composing an empty section.
+func TestResolveRuleEntries_ArraySkipsBlankParts(t *testing.T) {
+	dir := t.TempDir()
+	writeRuleFile(t, filepath.Join(dir, "present.md"), "PRESENT")
+
+	entries := []ProjectRuleEntry{{
+		Path:      "**/*.go",
+		ruleParts: []string{"present.md", "", "   ", "INLINE"},
+	}}
+	resolveRuleEntries(entries, dir, "")
+
+	if got, want := entries[0].Rule, "PRESENT\n\nINLINE"; got != want {
+		t.Errorf("composed rule = %q, want %q", got, want)
 	}
 }
 
