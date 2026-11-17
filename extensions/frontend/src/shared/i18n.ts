@@ -54,6 +54,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'view.failed.checkConfig': 'Please check model configuration and retry.',
     'view.failed.checkApiKey': 'Please check API key and network connection.',
     'view.failed.retry': 'Retry',
+    'view.failed.processLog': 'Process log',
 
     // ── ConfigView ──
     'view.config.title': 'Model Configuration',
@@ -208,6 +209,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'view.failed.checkConfig': '请检查模型配置后重试。',
     'view.failed.checkApiKey': '请检查 API Key 和网络连接。',
     'view.failed.retry': '重试',
+    'view.failed.processLog': '过程日志',
 
     'view.config.title': '模型配置',
     'view.config.desc': '连接 LLM Provider 以开始代码审查',
@@ -359,6 +361,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'view.failed.checkConfig': 'モデル設定を確認して再試行してください。',
     'view.failed.checkApiKey': 'API キーとネットワーク接続を確認してください。',
     'view.failed.retry': '再試行',
+    'view.failed.processLog': '処理ログ',
 
     // ── ConfigView ──
     'view.config.title': 'モデル設定',
@@ -519,6 +522,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'view.failed.checkConfig': '모델 설정을 확인한 뒤 다시 시도하세요.',
     'view.failed.checkApiKey': 'API 키와 네트워크 연결을 확인하세요.',
     'view.failed.retry': '다시 시도',
+    'view.failed.processLog': '처리 로그',
 
     // ── ConfigView ──
     'view.config.title': '모델 설정',
@@ -679,6 +683,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'view.failed.checkConfig': 'Проверьте настройки модели и повторите попытку.',
     'view.failed.checkApiKey': 'Проверьте API-ключ и сетевое подключение.',
     'view.failed.retry': 'Повторить',
+    'view.failed.processLog': 'Журнал выполнения',
 
     // ── ConfigView ──
     'view.config.title': 'Настройка модели',

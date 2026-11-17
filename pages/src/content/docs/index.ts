@@ -22,6 +22,7 @@ import enClaudeCode from './en/integrations/claude-code.md';
 import enCicd from './en/integrations/ci.md';
 import enDelegate from './en/integrations/delegate.md';
 import enAcp from './en/integrations/acp.md';
+import enCopilotCli from './en/integrations/copilot-cli.md';
 import enContributing from './en/contributing.md';
 import enFaq from './en/faq.md';
 
@@ -42,6 +43,7 @@ import zhClaudeCode from './zh/integrations/claude-code.md';
 import zhCicd from './zh/integrations/ci.md';
 import zhDelegate from './zh/integrations/delegate.md';
 import zhAcp from './zh/integrations/acp.md';
+import zhCopilotCli from './zh/integrations/copilot-cli.md';
 import zhContributing from './zh/contributing.md';
 import zhFaq from './zh/faq.md';
 
@@ -62,6 +64,7 @@ import jaClaudeCode from './ja/integrations/claude-code.md';
 import jaCicd from './ja/integrations/ci.md';
 import jaDelegate from './ja/integrations/delegate.md';
 import jaAcp from './ja/integrations/acp.md';
+import jaCopilotCli from './ja/integrations/copilot-cli.md';
 import jaContributing from './ja/contributing.md';
 import jaFaq from './ja/faq.md';
 
@@ -82,6 +85,7 @@ import koClaudeCode from './ko/integrations/claude-code.md';
 import koCicd from './ko/integrations/ci.md';
 import koDelegate from './ko/integrations/delegate.md';
 import koAcp from './ko/integrations/acp.md';
+import koCopilotCli from './ko/integrations/copilot-cli.md';
 import koContributing from './ko/contributing.md';
 import koFaq from './ko/faq.md';
 
@@ -102,6 +106,7 @@ import ruClaudeCode from './ru/integrations/claude-code.md';
 import ruCicd from './ru/integrations/ci.md';
 import ruDelegate from './ru/integrations/delegate.md';
 import ruAcp from './ru/integrations/acp.md';
+import ruCopilotCli from './ru/integrations/copilot-cli.md';
 import ruContributing from './ru/contributing.md';
 import ruFaq from './ru/faq.md';
 
@@ -121,6 +126,7 @@ export type DocSlug =
   | 'cicd'
   | 'delegate'
   | 'acp'
+  | 'copilot-cli'
   | 'contributing'
   | 'faq'
   | 'chatgpt-preview';
@@ -144,6 +150,7 @@ const enDocs: Record<DocSlug, string> = {
   'cicd': enCicd,
   'delegate': enDelegate,
   'acp': enAcp,
+  'copilot-cli': enCopilotCli,
   'contributing': enContributing,
   'faq': enFaq,
 };
@@ -165,6 +172,7 @@ const zhDocs: Record<DocSlug, string> = {
   'cicd': zhCicd,
   'delegate': zhDelegate,
   'acp': zhAcp,
+  'copilot-cli': zhCopilotCli,
   'contributing': zhContributing,
   'faq': zhFaq,
 };
@@ -186,6 +194,7 @@ const jaDocs: Record<DocSlug, string> = {
   'cicd': jaCicd,
   'delegate': jaDelegate,
   'acp': jaAcp,
+  'copilot-cli': jaCopilotCli,
   'contributing': jaContributing,
   'faq': jaFaq,
 };
@@ -207,6 +216,7 @@ const koDocs: Record<DocSlug, string> = {
   'cicd': koCicd,
   'delegate': koDelegate,
   'acp': koAcp,
+  'copilot-cli': koCopilotCli,
   'contributing': koContributing,
   'faq': koFaq,
 };
@@ -228,6 +238,7 @@ const ruDocs: LocalizedDocs = {
   'cicd': ruCicd,
   'delegate': ruDelegate,
   'acp': ruAcp,
+  'copilot-cli': ruCopilotCli,
   'contributing': ruContributing,
   'faq': ruFaq,
 };

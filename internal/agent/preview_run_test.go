@@ -16,6 +16,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func initPreviewRepo(t *testing.T) string {
@@ -368,6 +369,24 @@ func TestPreviewMatchesRunSelectedCoverage(t *testing.T) {
 	slices.Sort(selected)
 	if !slices.Equal(previewed, selected) {
 		t.Errorf("preview will_review = %v but the run selected %v", previewed, selected)
+	}
+
+	// The files preview reported as excluded reach the manifest with the same
+	// reason, and they leave the selected-set outcome alone.
+	excluded := make(map[string]ExcludeReason, len(manifest.Coverage.Excluded))
+	for _, item := range manifest.Coverage.Excluded {
+		excluded[item.Path] = item.ExcludeReason
+	}
+	if len(excluded) != 3 {
+		t.Errorf("run excluded = %v, want notes.md, gone.go and huge.go", excluded)
+	}
+	for path, got := range excluded {
+		if want := byPath[path].ExcludeReason; got != want {
+			t.Errorf("%s: run exclude_reason = %q, preview = %q", path, got, want)
+		}
+	}
+	if manifest.TerminalState != session.StateComplete {
+		t.Errorf("terminal_state = %q, want complete with only excluded files left out", manifest.TerminalState)
 	}
 }
 

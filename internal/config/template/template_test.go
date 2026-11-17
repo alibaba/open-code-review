@@ -4,9 +4,87 @@
 package template
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestConversationToolBindings(test *testing.T) {
+	manifest := manifestConversation{
+		Messages:       []manifestMessage{{Role: "user", PromptFile: "main_task_user.md"}},
+		Tools:          []string{"file_find", "file_read"},
+		ToolReferences: []string{"code_search"},
+	}
+	conversation, err := resolveConversation(manifest)
+	if err != nil {
+		test.Fatal(err)
+	}
+	if !reflect.DeepEqual(conversation.Tools, manifest.Tools) || !reflect.DeepEqual(conversation.ToolReferences, manifest.ToolReferences) {
+		test.Fatalf("tool bindings lost while resolving prompts: %+v", conversation)
+	}
+}
+
+func TestValidateUnsupportedToolBindings(test *testing.T) {
+	for _, mode := range []string{"review", "scan"} {
+		test.Run(mode, func(test *testing.T) {
+			var main *LlmConversation
+			var tasks map[string]*LlmConversation
+			var validate func() error
+			if mode == "review" {
+				tpl, err := LoadDefault()
+				if err != nil {
+					test.Fatal(err)
+				}
+				main = &tpl.MainTask
+				tasks = map[string]*LlmConversation{
+					"PLAN_TASK":               tpl.PlanTask,
+					"MEMORY_COMPRESSION_TASK": &tpl.MemoryCompressionTask,
+					"RE_LOCATION_TASK":        tpl.ReLocationTask,
+					"REVIEW_FILTER_TASK":      tpl.ReviewFilterTask,
+					"GROUPING_TASK":           tpl.GroupingTask,
+				}
+				validate = tpl.Validate
+			} else {
+				tpl, err := LoadScanDefault()
+				if err != nil {
+					test.Fatal(err)
+				}
+				main = &tpl.MainTask
+				tasks = map[string]*LlmConversation{
+					"PLAN_TASK":               tpl.PlanTask,
+					"MEMORY_COMPRESSION_TASK": &tpl.MemoryCompressionTask,
+					"RE_LOCATION_TASK":        tpl.ReLocationTask,
+					"DEDUP_TASK":              tpl.DedupTask,
+					"PROJECT_SUMMARY_TASK":    tpl.ProjectSummaryTask,
+				}
+				validate = tpl.Validate
+			}
+			main.ToolReferences = []string{"file_read"}
+			if err := validate(); err == nil || !strings.Contains(err.Error(), "MAIN_TASK.tool_references") {
+				test.Fatalf("unexpected reference validation: %v", err)
+			}
+			main.ToolReferences = nil
+			for name, task := range tasks {
+				task.Tools = []string{"file_read"}
+				if err := validate(); err == nil || !strings.Contains(err.Error(), name+".tools") {
+					test.Fatalf("unexpected tool validation: %v", err)
+				}
+				task.Tools = nil
+				if name == "PLAN_TASK" && mode == "review" {
+					continue
+				}
+				task.ToolReferences = []string{"file_read"}
+				if err := validate(); err == nil || !strings.Contains(err.Error(), name+".tool_references") {
+					test.Fatalf("unexpected reference validation: %v", err)
+				}
+				task.ToolReferences = nil
+			}
+			if err := validate(); err != nil {
+				test.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestLoadScanDefault_BudgetParsed(t *testing.T) {
 	tpl, err := LoadScanDefault()
@@ -21,6 +99,19 @@ func TestLoadScanDefault_BudgetParsed(t *testing.T) {
 	}
 	if tpl.MaxFileSizeBytes <= 0 {
 		t.Errorf("scan MaxFileSizeBytes(%d) should be > 0 (defaults to 2 MiB in JSON)", tpl.MaxFileSizeBytes)
+	}
+}
+
+func TestLoadScanDefault_PlanThreshold(t *testing.T) {
+	tpl, err := LoadScanDefault()
+	if err != nil {
+		t.Fatalf("LoadScanDefault: %v", err)
+	}
+	if tpl.PlanModeLineThreshold != 200 {
+		t.Errorf("PlanModeLineThreshold = %d, want 200", tpl.PlanModeLineThreshold)
+	}
+	if tpl.PlanTask == nil || len(tpl.PlanTask.Messages) == 0 {
+		t.Fatal("default scan template must define PLAN_TASK messages")
 	}
 }
 

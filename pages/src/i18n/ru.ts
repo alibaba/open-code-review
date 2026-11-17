@@ -49,7 +49,7 @@ export const ru: TranslationKeys = {
   'highlights.stat2Value': '150K+',
   'highlights.stat2Label': 'ЗАГРУЗКИ NPM',
   'highlights.stat2Caption': 'реальные загрузки npm · 30 дней',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': 'РЕАЛЬНЫХ ЗАДАЧ',
   'highlights.stat3Caption': 'Выполненных задач код-ревью',
   'highlights.stat4Value': '1/9',
@@ -120,6 +120,7 @@ export const ru: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': 'Связаться с нами',
   'footer.copyright': '© 2026. Все права защищены.',
 
   // Docs Page
@@ -251,8 +252,6 @@ export const ru: TranslationKeys = {
   'docs.scanFlag14Default': 'Встроенное',
   'docs.scanFlag15Desc': 'Макс. параллельных git-подпроцессов',
   'docs.scanFlag16Desc': 'Путь к пользовательскому JSON с правилами ревью',
-  'docs.scanFlag17Desc': 'Путь к пользовательскому JSON-файлу настроек инструментов',
-  'docs.scanFlag17Default': 'Встроенный',
   'docs.scanFlag18Desc': 'Корень репозитория или каталога для скана',
   'docs.scanFlag18Default': 'Текущая директория',
   'docs.scanNote': 'Примечание: <code>--max-tools</code> только повышает бюджет вызовов инструментов на файл в шаблоне scan. Параметр не действует, если указанное значение меньше значения шаблона по умолчанию.',
@@ -301,6 +300,7 @@ export const ru: TranslationKeys = {
   'docs.sidebar.delegate': 'Режим делегирования',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': 'Участие в разработке',
   'docs.sidebar.faq': 'FAQ',
   'docs.sidebar.chatgptPreview': 'Вход через ChatGPT (предварительная версия)',

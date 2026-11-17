@@ -106,6 +106,35 @@ Open Code Reviewのコア哲学は、決定論的エンジニアリングとエ�
 
 - **Git >= 2.41** — Open Code Review は diff 生成、コード検索、リポジトリ操作に Git を利用します。
 
+<a id="supported-agents"></a>
+
+### Agent Skills
+
+Claude Code、Codex、Cursor、Kimi Codeなど、Agent Skillsに対応しローカルコマンドを実行できるエージェントで利用できます。両モードとも **Git >= 2.41** と **`ocr` CLI** が必要ですが、OCRのモデルプロバイダー設定が必要なのはネイティブモードだけです。
+
+#### 1. スキルをインストール
+
+レビュー対象のプロジェクト内で実行し、インストーラーで必要なスキルとエージェントを選択します。
+
+```bash
+npx skills add alibaba/open-code-review
+```
+
+`ocr` がなければ、スキルは環境の権限に従ってエージェントにインストールを案内します。事前に `npm install -g @alibaba-group/open-code-review` を実行しても構いません。プラグインや手動インストールについては[エージェント別ガイド](../../plugins/open-code-review/README.md)を参照するか、[`skills/`](../../skills/) 内の必要なフォルダーをエージェントのスキルディレクトリにコピーしてください。
+
+#### 2. レビューモードを選択
+
+| | ネイティブモード | デリゲートモード |
+|---|---|---|
+| スキル | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
+| レビュー担当 | OCR専用のレビューエージェントとパイプライン | OCRのレビューパイプラインとガードレールに従う現在のエージェント |
+| モデルと認証 | OCR独自のプロバイダー設定 | ホストエージェントの既存モデルと認証 |
+| 適した用途 | OCR用のモデルエンドポイントがあり、完全なレビューパイプラインを使いたい場合 | 別のAPIキーがない、または既存のエージェントの契約・設定を使いたい場合 |
+
+**別のキーがなければ、デリゲートモードから始めてください。** 不要になるのはOCRのプロバイダー設定だけで、ホストエージェントの認証、利用制限、料金は引き続き適用されます。エージェントのサブスクリプションは、ネイティブモード用のAPI認証情報にはなりません。デリゲートモードでは、OCRのCLIとスキルが共同でレビューパイプラインとガードレールを提供します。ファイル選択、ルール解決、カバレッジ要件、構造化された報告が含まれます。ホストエージェントがこの手順に沿って分析・位置特定・報告を行い、OCRの完全なネイティブパイプラインを実行するわけではありません。
+
+ネイティブモードでは `ocr config provider` と `ocr config model` で一度設定します。認証要件はプロバイダーによって異なります。[設定](https://open-codereview.ai/docs/configuration)を参照してください。
+
 ### CLI
 
 #### インストール
@@ -124,12 +153,15 @@ npm install -g @alibaba-group/open-code-review
 
 コードレビューの前にLLMの設定が必要です。[デリゲートモード](https://open-codereview.ai/docs/delegate)を使用する場合は不要です。
 
+- **OCR がモデルを呼び出す場合:** `ocr review`、`/open-code-review:review` コマンド、`open-code-review` スキルは、Claude Code Team/Pro サブスクリプションのログインではなく、OCR 側のプロバイダー設定を使用します。認証要件はプロバイダーによって異なります。[設定](https://open-codereview.ai/docs/configuration)を参照してください。
+- **ホストエージェントがモデルを呼び出す場合:** `/open-code-review:delegate-review` コマンドと `open-code-review-delegate` スキルは、ホストエージェントに設定されたモデルと認証方式を使用します。OCR 側で LLM や認証情報を別途設定する必要はありません。[Claude Code のインストール手順](../../plugins/open-code-review/README.md#claude-code)を参照してください。
+
 ```bash
 ocr config provider          # ビルトインプロバイダーを選択またはカスタムプロバイダーを追加
 ocr config model             # アクティブなプロバイダーのモデルを選択
 ```
 
-![Provider setup](../../imgs/providers.jpg)
+![Model providers](../../imgs/providers-ja.jpg)
 
 対話的UIがプロバイダーの選択、APIキーの入力、モデル設定をガイドし、完了後に自動的に接続テストを行います。
 

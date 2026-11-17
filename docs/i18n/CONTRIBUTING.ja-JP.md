@@ -85,7 +85,7 @@ git checkout -b feat/your-feature-name
 例：
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
@@ -234,7 +234,7 @@ AI を開発に使った場合は、下記のルールに従ってください�
 コミットメッセージと同じConventional Commits形式を使用してください：
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 ```
 
 ### レビュープロセス

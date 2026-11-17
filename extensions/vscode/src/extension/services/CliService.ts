@@ -8,6 +8,12 @@ import { CliResult, CliRunOptions, EnvCheckResult, LogLine } from '@shared/types
 import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from './cliParse';
 import { getShellEnv, resolveBin } from './shellEnv';
 
+class CliExitError extends Error {
+  constructor(readonly code: number | null, readonly stdout: string, message: string) {
+    super(message);
+  }
+}
+
 export class CliService {
   private current: ReturnType<typeof spawn> | null = null;
   private envCache: { env: EnvCheckResult; at: number } | null = null;
@@ -135,13 +141,26 @@ export class CliService {
       proc.on('close', (code) => {
         this.current = null;
         if (code === 0) { resolve(stdout); return; }
-        reject(new Error(extractCliError(stderr) || `CLI exited with code ${code}`));
+        reject(new CliExitError(code, stdout, extractCliError(stderr) || `CLI exited with code ${code}`));
       });
     });
   }
 
   async review(opts: CliRunOptions, cwd: string, onLog: (l: LogLine) => void): Promise<CliResult> {
-    const stdout = await this.runRaw(buildReviewArgs(opts), cwd, onLog);
+    let stdout: string;
+    try {
+      stdout = await this.runRaw(buildReviewArgs(opts), cwd, onLog);
+    } catch (error) {
+      if (!(error instanceof CliExitError) || error.code !== 1) throw error;
+      let result: CliResult;
+      try {
+        result = parseCliResult(error.stdout);
+      } catch {
+        throw error;
+      }
+      if (result.status !== 'partial') throw error;
+      return { ...result, executionError: error.message };
+    }
     return parseCliResult(stdout);
   }
 
