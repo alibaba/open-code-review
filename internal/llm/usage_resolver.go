@@ -72,7 +72,7 @@ var totalTokensPaths = []string{
 }
 
 // resolveUsage parses raw JSON bytes into a map and extracts token usage
-// by probing configured paths sequentially. Returns nil if no total_tokens found.
+// by probing configured paths sequentially. Returns nil if no usable token counts are found.
 func resolveUsage(raw []byte) *UsageInfo {
 	var rawBody map[string]any
 	if err := json.Unmarshal(raw, &rawBody); err != nil {
@@ -84,6 +84,16 @@ func resolveUsage(raw []byte) *UsageInfo {
 	completion, _ := probePath(rawBody, completionTokensPaths)
 	cacheRead, cacheReadIdx, _ := probePathIndex(rawBody, cacheReadTokensPaths)
 	cacheWrite, cacheWriteIdx, _ := probePathIndex(rawBody, cacheWriteTokensPaths)
+
+	// Anthropic cache counts are separate from input_tokens. Normalize prompt
+	// usage to include them, as the native Anthropic client does. OpenAI cache
+	// details are already included in prompt_tokens and must not be added again.
+	if cacheReadIdx >= 0 && cacheReadIdx < anthropicCacheReadPathCount {
+		prompt += cacheRead
+	}
+	if cacheWriteIdx >= 0 && cacheWriteIdx < anthropicCacheWritePathCount {
+		prompt += cacheWrite
+	}
 
 	if !hasAny && prompt == 0 && completion == 0 {
 		return nil
@@ -98,17 +108,8 @@ func resolveUsage(raw []byte) *UsageInfo {
 	}
 
 	// If TotalTokens wasn't explicitly available but we have prompt+completion, compute it.
-	// Anthropic reports cache tokens separately from input_tokens, so include them in the
-	// fallback total. OpenAI prompt_tokens already includes cached_tokens, so only add cache
-	// counts when they came from Anthropic-style top-level fields.
 	if total == 0 && (prompt > 0 || completion > 0) {
 		ui.TotalTokens = prompt + completion
-		if cacheReadIdx >= 0 && cacheReadIdx < anthropicCacheReadPathCount {
-			ui.TotalTokens += cacheRead
-		}
-		if cacheWriteIdx >= 0 && cacheWriteIdx < anthropicCacheWritePathCount {
-			ui.TotalTokens += cacheWrite
-		}
 	}
 
 	return ui
