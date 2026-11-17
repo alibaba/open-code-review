@@ -117,8 +117,7 @@ inputs:
       --max-tools`. Base-10 integer; empty or 0 keeps the template default
       (100). The CLI raises values from 1 through 49 to its minimum of 50.
       Lower values bound review time on slow or local models at the cost of
-      less exploration per file. Values below the template default take
-      effect from OpenCodeReview v1.13.5; earlier releases ignore them.
+      less exploration per file.
     required: false
     default: ''
   stream_progress:
