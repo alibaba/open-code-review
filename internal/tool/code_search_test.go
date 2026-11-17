@@ -821,3 +821,61 @@ func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	assertContains(t, args, "--exclude-standard")
 	assertNotContains(t, args, "--untracked")
 }
+
+func TestGitGrep_BoundsLongMatchLines(t *testing.T) {
+	dir := setupTestRepo(t)
+	longLine := "long_line_needle" + strings.Repeat("x", 2*1024*1024)
+	if err := os.WriteFile(filepath.Join(dir, "bundle.min.js"), []byte(longLine+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "short.go"), []byte("// long_line_needle short\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	got, err := p.gitGrep(context.Background(), "long_line_needle", false, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) > codeSearchMaxResultBytes {
+		t.Fatalf("result is %d bytes, want at most %d", len(got), codeSearchMaxResultBytes)
+	}
+	omitted := len(longLine) - codeSearchMaxLineBytes
+	if want := fmt.Sprintf("…[line truncated, %d more bytes omitted]\n", omitted); !strings.Contains(got, want) {
+		t.Errorf("expected marker %q in result:\n%.4096s", want, got)
+	}
+	if !strings.Contains(got, "File: short.go\nMatch lines: 1\n1|// long_line_needle short\n") {
+		t.Errorf("expected the short match unchanged, got:\n%.4096s", got)
+	}
+	if !strings.Contains(got, "were cut mid-line") {
+		t.Errorf("expected the line-truncation note, got:\n%.4096s", got)
+	}
+}
+
+func TestGitGrep_BoundsTotalResultBytes(t *testing.T) {
+	dir := setupTestRepo(t)
+	// 100 full-length matches exceed the result budget under the count cap.
+	line := "total_bytes_needle" + strings.Repeat("y", codeSearchMaxLineBytes) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "wide.txt"), []byte(strings.Repeat(line, gitGrepMaxCount)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	got, err := p.gitGrep(context.Background(), "total_bytes_needle", false, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) > codeSearchMaxResultBytes+1024 {
+		t.Fatalf("result is %d bytes, want about %d", len(got), codeSearchMaxResultBytes)
+	}
+	shown := strings.Count(got, "|total_bytes_needle")
+	if shown == 0 || shown >= gitGrepMaxCount {
+		t.Errorf("rendered %d matches, want some but fewer than %d", shown, gitGrepMaxCount)
+	}
+	if want := fmt.Sprintf("Match lines: %d\n", shown); !strings.Contains(got, want) {
+		t.Errorf("expected header %q to match rendered lines, got:\n%.512s", want, got)
+	}
+	if !strings.Contains(got, fmt.Sprintf("Output truncated at %d bytes", codeSearchMaxResultBytes)) {
+		t.Errorf("expected the byte-truncation note, got:\n%.512s", got[len(got)-512:])
+	}
+}

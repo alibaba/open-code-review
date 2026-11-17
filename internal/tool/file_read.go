@@ -92,7 +92,7 @@ func (p *FileReadProvider) execute(ctx context.Context, args map[string]any) (st
 	shown, renderedBytes := 0, 0
 	lineTruncated, outputTruncated := false, false
 	for i, line := range lines {
-		text, cut := capFileReadLine(line)
+		text, cut := capLineBytes(line, fileReadMaxLineBytes)
 		// Budget the fully formatted line: the line-number prefix and the
 		// trailing newline are body bytes too, so counting only len(text)
 		// would let the rendered body drift past the cap.
@@ -129,15 +129,15 @@ func (p *FileReadProvider) execute(ctx context.Context, args map[string]any) (st
 	return sb.String(), nil
 }
 
-// capFileReadLine caps one rendered line at fileReadMaxLineBytes. The cut
-// backs off to a UTF-8 rune boundary so a multibyte character is never split
-// mid-sequence, and the marker reports the omitted byte count so the model
-// knows the line was not shown in full.
-func capFileReadLine(s string) (string, bool) {
-	if len(s) <= fileReadMaxLineBytes {
+// capLineBytes caps one rendered line at maxBytes. The cut backs off to a
+// UTF-8 rune boundary so a multibyte character is never split mid-sequence,
+// and the marker reports the omitted byte count so the model knows the line
+// was not shown in full.
+func capLineBytes(s string, maxBytes int) (string, bool) {
+	if len(s) <= maxBytes {
 		return s, false
 	}
-	cut := fileReadMaxLineBytes
+	cut := maxBytes
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
