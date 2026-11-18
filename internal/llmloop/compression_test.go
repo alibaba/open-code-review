@@ -85,10 +85,7 @@ func TestCountMessagesTokens_IncludesToolCalls(t *testing.T) {
 	}
 }
 
-// TestComputeActiveZoneSize_AccountsForToolCalls verifies that rounds with
-// heavy tool-call arguments consume active-zone budget properly rather than
-// evaluating as 0 tokens.
-func TestComputeActiveZoneSize_AccountsForToolCalls(t *testing.T) {
+func TestPartitionMessages_AccountsForToolCalls(t *testing.T) {
 	largeArgs := strings.Repeat("argument data ", 200) // ~2800 bytes => ~700 tokens
 	msgs := []llm.Message{
 		msg("system", "sys"),
@@ -105,25 +102,15 @@ func TestComputeActiveZoneSize_AccountsForToolCalls(t *testing.T) {
 		msg("tool", "search result"),
 	}
 
-	rounds := groupIntoRounds(msgs, 2)
-	if len(rounds) != 1 {
-		t.Fatalf("expected 1 round, got %d", len(rounds))
+	if part := partitionMessages(msgs, 100, 0); part.activeCount != 0 || part.compressEnd != len(msgs) {
+		t.Errorf("large tool arguments exceed the budget: %+v", part)
 	}
-
-	smallBudgetMaxTokens := 100
-	count := computeActiveZoneSize(rounds, msgs, smallBudgetMaxTokens, 0)
-	if count != 0 {
-		t.Errorf("computeActiveZoneSize() = %d, want 0 because large tool arguments exceed budget", count)
-	}
-
-	generousMaxTokens := 10000
-	count = computeActiveZoneSize(rounds, msgs, generousMaxTokens, 0)
-	if count != 1 {
-		t.Errorf("computeActiveZoneSize() = %d, want 1 under generous budget", count)
+	if part := partitionMessages(msgs, 10000, 0); part.activeCount != 1 || part.compressEnd != 2 {
+		t.Errorf("round should fit under the larger budget: %+v", part)
 	}
 }
 
-func TestGroupIntoRounds(t *testing.T) {
+func TestPartitionMessages_CompleteRounds(t *testing.T) {
 	messages := []llm.Message{
 		msg("system", "sys"),
 		msg("user", "prompt"),
@@ -135,37 +122,23 @@ func TestGroupIntoRounds(t *testing.T) {
 		msg("assistant", "resp3"),
 	}
 
-	rounds := groupIntoRounds(messages, 2)
-	if len(rounds) != 3 {
-		t.Fatalf("expected 3 rounds, got %d", len(rounds))
-	}
-
-	if rounds[0].assistantIdx != 2 {
-		t.Errorf("round[0].assistantIdx = %d, want 2", rounds[0].assistantIdx)
-	}
-	if len(rounds[0].toolIdxs) != 2 {
-		t.Errorf("round[0] should have 2 tool messages, got %d", len(rounds[0].toolIdxs))
-	}
-	if rounds[1].assistantIdx != 5 {
-		t.Errorf("round[1].assistantIdx = %d, want 5", rounds[1].assistantIdx)
-	}
-	if rounds[2].assistantIdx != 7 {
-		t.Errorf("round[2].assistantIdx = %d, want 7", rounds[2].assistantIdx)
-	}
-	if len(rounds[2].toolIdxs) != 0 {
-		t.Errorf("round[2] should have 0 tool messages")
+	for offset, start := range []int{7, 5, 2} {
+		reserve := PromptTokenLimit(1000) - CountMessagesTokens(messages[:2]) - CountMessagesTokens(messages[start:]) - 1
+		part := partitionMessages(messages, 1000, reserve)
+		if part.compressEnd != start || part.activeCount != offset+1 {
+			t.Errorf("want %d complete rounds starting at %d: %+v", offset+1, start, part)
+		}
 	}
 }
 
-func TestGroupIntoRounds_NoAssistant(t *testing.T) {
+func TestPartitionMessages_NoAssistant(t *testing.T) {
 	messages := []llm.Message{
 		msg("system", "sys"),
 		msg("user", "prompt"),
 		msg("user", "another"),
 	}
-	rounds := groupIntoRounds(messages, 2)
-	if len(rounds) != 0 {
-		t.Errorf("expected 0 rounds, got %d", len(rounds))
+	if part := partitionMessages(messages, 1000, 0); part.activeCount != 0 || part.compressEnd != 2 {
+		t.Errorf("a fitting user-only tail needs no compression: %+v", part)
 	}
 }
 

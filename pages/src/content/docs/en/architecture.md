@@ -255,8 +255,11 @@ many as fit strictly below `(0.80 × MAX_TOKENS) - reservedTokens`.
 The reservation includes the first two messages (including earlier
 summaries), the new summary's output cap, and its wrapper. Everything
 older becomes the **compress zone**. An empty compress zone leaves the
-conversation unchanged; a background pass does not summarize the entire
-live tail when the original conversation is still below the warning limit.
+conversation unchanged. The budget includes retry instructions between
+rounds, not just assistant messages and tool results. A background pass
+does not summarize the entire live tail below the warning limit. At or
+above that limit, even the latest round may be summarized if it cannot
+fit alongside the reserved summary.
 
 The compress zone is rendered as XML and fed to the model with the
 `MEMORY_COMPRESSION_TASK` prompt; the returned summary is appended to
@@ -266,8 +269,10 @@ After compression: `messages = system + (original_user + summary) + active`.
 The rebuilt conversation is checked against the same local token estimate
 and must be smaller than the original. A missing compression template,
 empty summary, or non-shrinking result leaves the original history intact.
-An unusable summary template or an oversized rebuilt result returns an
-error without dropping any original messages.
+Only a visible summary is used; reasoning alone never replaces history.
+A response cut off by its output limit, an unusable summary template, or
+an oversized rebuilt result returns an error without dropping any original
+messages.
 
 ### Async vs sync
 

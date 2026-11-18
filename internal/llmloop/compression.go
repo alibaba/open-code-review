@@ -23,24 +23,16 @@ const (
 
 // PromptTokenLimit returns tokenWarningThreshold (80%) of maxTokens. It is
 // shared by the agent and scan pre-flight gates, their large-input filters, and
-// computeActiveZoneSize so the threshold has a single definition. Non-positive
+// partitionMessages so the threshold has a single definition. Non-positive
 // input is not special-cased — each caller decides what that means.
 func PromptTokenLimit(maxTokens int) int {
 	return int(float64(maxTokens) * tokenWarningThreshold)
-}
-
-// round groups consecutive messages starting with an assistant message
-// followed by zero or more tool result messages.
-type round struct {
-	assistantIdx int
-	toolIdxs     []int
 }
 
 // partitionResult describes how messages should be split for compression.
 type partitionResult struct {
 	frozenEnd   int
 	compressEnd int
-	rounds      []round
 	activeCount int
 }
 
@@ -79,83 +71,23 @@ func CountMessagesTokens(msgs []llm.Message) int {
 	return total
 }
 
-// groupIntoRounds parses messages[start:] into logical
-// (assistant + tool_results) pairs.
-func groupIntoRounds(messages []llm.Message, start int) []round {
-	var rounds []round
-	i := start
-	for i < len(messages) {
-		if messages[i].Role == "assistant" {
-			r := round{assistantIdx: i}
-			i++
-			for i < len(messages) && messages[i].Role == "tool" {
-				r.toolIdxs = append(r.toolIdxs, i)
-				i++
-			}
-			rounds = append(rounds, r)
-		} else {
-			i++
-		}
-	}
-	return rounds
-}
-
-// computeActiveZoneSize returns how many trailing rounds fit within the
-// remaining token budget after accounting for the frozen zone and the
-// compressed summary.
-func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int, reservedTokens int) int {
-	budget := PromptTokenLimit(maxTokens) - reservedTokens - 1
-	if budget <= 0 {
-		return 0
-	}
-
-	count := 0
-	tokensUsed := 0
-	for i := len(rounds) - 1; i >= 0; i-- {
-		roundTokens := messageTokens(messages[rounds[i].assistantIdx])
-		for _, ti := range rounds[i].toolIdxs {
-			roundTokens += messageTokens(messages[ti])
-		}
-		if tokensUsed+roundTokens > budget {
-			break
-		}
-		tokensUsed += roundTokens
-		count++
-	}
-	return count
-}
-
 // partitionMessages divides messages into frozen, compress, and active zones.
 // Frozen zone is always messages[0:2]. Active zone preserves the K most
 // recent complete rounds based on available token budget.
 func partitionMessages(messages []llm.Message, maxTokens int, summaryTokenReserve int) partitionResult {
-	result := partitionResult{frozenEnd: 2}
-	if len(messages) <= 2 {
-		result.compressEnd = len(messages)
-		return result
-	}
-
-	result.rounds = groupIntoRounds(messages, 2)
-	if len(result.rounds) == 0 {
-		result.compressEnd = len(messages)
-		return result
-	}
-
-	reservedTokens := CountMessagesTokens(messages[:result.frozenEnd]) + summaryTokenReserve
-	result.activeCount = computeActiveZoneSize(result.rounds, messages, maxTokens, reservedTokens)
-	if result.activeCount >= len(result.rounds) {
-		// Everything fits — no compression needed.
-		result.compressEnd = result.frozenEnd
-		return result
-	}
-
-	// compressEnd = index after the last round NOT in active zone.
-	activeStartIdx := len(result.rounds) - result.activeCount
-	lastCompressRound := result.rounds[activeStartIdx-1]
-	if len(lastCompressRound.toolIdxs) > 0 {
-		result.compressEnd = lastCompressRound.toolIdxs[len(lastCompressRound.toolIdxs)-1] + 1
-	} else {
-		result.compressEnd = lastCompressRound.assistantIdx + 1
+	result := partitionResult{frozenEnd: min(2, len(messages)), compressEnd: len(messages)}
+	remaining := PromptTokenLimit(maxTokens) - CountMessagesTokens(messages[:result.frozenEnd]) - summaryTokenReserve
+	for index := len(messages) - 1; index >= result.frozenEnd; index-- {
+		remaining -= messageTokens(messages[index])
+		if remaining <= 0 {
+			break
+		}
+		if messages[index].Role == "assistant" {
+			result.activeCount++
+			result.compressEnd = index
+		} else if index == result.frozenEnd {
+			result.compressEnd = result.frozenEnd
+		}
 	}
 
 	return result
@@ -286,7 +218,14 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 	rec.SetResponse(resp, duration)
 	r.RecordUsage(resp.Usage)
 
-	rawSummary := stripMarkdownFences(resp.Content())
+	if len(resp.Choices) > 0 {
+		switch reason := resp.Choices[0].FinishReason; reason {
+		case "", "stop", "end_turn", "stop_sequence":
+		default:
+			return msgs, fmt.Errorf("memory compression: unfinished summary (finish_reason=%q)", reason)
+		}
+	}
+	rawSummary := stripMarkdownFences(resp.VisibleContent())
 	if rawSummary == "" {
 		// Empty summary: keep the original conversation rather than dropping
 		// everything below the frozen zone.

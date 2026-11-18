@@ -6,6 +6,7 @@ package llmloop
 import (
 	"context"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -251,5 +252,118 @@ func TestCompressionBudgetIgnoresNonShrinkingSummary(test *testing.T) {
 	got, err := runner.runCompression(test.Context(), messages, "task")
 	if err != nil || !reflect.DeepEqual(got, messages) {
 		test.Fatalf("a summary that expands the conversation must not replace it: %v", err)
+	}
+}
+
+func TestCompressionBudgetRetryMessages(test *testing.T) {
+	prefix := []llm.Message{msg("system", "sys"), msg("user", "prompt")}
+	latest := []llm.Message{msg("assistant", "read"), msg("tool", "latest evidence")}
+	retry := msg("user", strings.Repeat("retry ", 100))
+	for _, fixture := range []struct {
+		name string
+		tail []llm.Message
+		kept int
+	}{
+		{"leading_retry", append([]llm.Message{retry}, latest...), 1},
+		{"interleaved_retry", append([]llm.Message{msg("assistant", "no tools"), retry}, latest...), 1},
+		{"trailing_retry", []llm.Message{msg("assistant", "no tools"), retry}, 0},
+	} {
+		test.Run(fixture.name, func(test *testing.T) {
+			messages := slices.Concat(prefix, fixture.tail)
+			reserve := PromptTokenLimit(1000) - CountMessagesTokens(prefix) - CountMessagesTokens(latest) - 10
+			part := partitionMessages(messages, 1000, reserve)
+			if part.activeCount != fixture.kept || CountMessagesTokens(prefix)+reserve+CountMessagesTokens(messages[part.compressEnd:]) >= PromptTokenLimit(1000) {
+				test.Fatalf("partition kept an unbudgeted suffix: %+v", part)
+			}
+			if fixture.kept == 1 && !reflect.DeepEqual(messages[part.compressEnd:], latest) {
+				test.Fatalf("lost the latest round or retained its preceding retry: %+v", part)
+			}
+		})
+	}
+}
+
+func TestCompressionBudgetRetryThenToolResult(test *testing.T) {
+	task := testTask()
+	task.MaxContextTokens = 1000
+	task.EmptyResponseMessage = strings.Repeat("retry ", 500)
+	latest := strings.Repeat("evidence ", 350)
+	execute := task.ExecuteTool
+	task.ExecuteTool = func(ctx context.Context, key string, call llm.ToolCall, record *session.TaskRecord, thinking string) ToolOutcome {
+		if call.Function.Name == "read_test_data" {
+			return ToolOutcome{Content: latest}
+		}
+		return execute(ctx, key, call, record, thinking)
+	}
+	mainRequests := 0
+	client := taskClient(func(_ context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
+		if len(request.Tools) == 0 {
+			input := request.Messages[0].ExtractText()
+			if !strings.Contains(input, task.EmptyResponseMessage) || strings.Contains(input, latest) {
+				test.Error("expected to summarize the retry, not the latest tool result")
+			}
+			summary := "requested another tool call"
+			return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summary}, FinishReason: "end_turn"}}}, nil
+		}
+		mainRequests++
+		switch mainRequests {
+		case 1:
+			return &llm.ChatResponse{}, nil
+		case 2:
+			return testTaskResponse("read_test_data", "{}"), nil
+		default:
+			if CountMessagesTokens(request.Messages) >= PromptTokenLimit(task.MaxContextTokens) || request.Messages[len(request.Messages)-1].ExtractText() != latest {
+				test.Error("expected a fitting main request with the original tool evidence")
+			}
+			return testTaskResponse("submit_test_result", `{"value":42}`), nil
+		}
+	})
+	runner := NewRunner(Deps{LLMClient: client, Session: session.New(test.TempDir(), "main", "fake", session.SessionOptions{})}, task)
+	result, err := runner.Run(test.Context(), []llm.Message{msg("system", "sys"), msg("user", "prompt")}, "task")
+	runner.WaitBackground()
+	if err != nil || !result.Completed || mainRequests != 3 {
+		test.Fatalf("retry interrupted the loop: result=%+v main=%d err=%v", result, mainRequests, err)
+	}
+}
+
+func TestCompressionBudgetRequiresFinishedVisibleSummary(test *testing.T) {
+	fragment := "partial evidence"
+	for _, fixture := range []struct {
+		name, reason string
+		visible      *string
+		wantError    bool
+	}{
+		{"openai_length", "length", &fragment, true},
+		{"anthropic_max_tokens", "max_tokens", &fragment, true},
+		{"reasoning_only", "stop", nil, false},
+	} {
+		test.Run(fixture.name, func(test *testing.T) {
+			client := &fakeLLMClient{response: &llm.ChatResponse{Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{Content: fixture.visible, ReasoningContent: "working notes"}, FinishReason: fixture.reason,
+			}}, Usage: &llm.UsageInfo{CompletionTokens: 5}}}
+			runner, messages := newCompressionRunner(test, client, nil)
+			got, err := runner.runCompression(test.Context(), messages, "task")
+			if (err != nil) != fixture.wantError || !reflect.DeepEqual(got, messages) || runner.TotalOutputTokens() != 5 {
+				test.Fatalf("incomplete summary handling: changed=%v usage=%d err=%v", !reflect.DeepEqual(got, messages), runner.TotalOutputTokens(), err)
+			}
+		})
+	}
+}
+
+func TestCompressionBudgetAtWarningLimit(test *testing.T) {
+	task := testTask()
+	messages := []llm.Message{msg("system", "sys"), msg("user", "prompt"), msg("assistant", "read"), msg("tool", strings.Repeat("old ", 200))}
+	calls := []llm.ToolCall{{ID: "call", Function: llm.FunctionCall{Name: "read_test_data", Arguments: "{}"}}}
+	latest := "latest evidence"
+	allowance := CountMessagesTokens(messages) + messageTokens(llm.NewToolCallMessage("", calls, llm.NativeTurn{}, "")) + messageTokens(llm.NewToolResultMessage("call", latest))
+	task.MaxContextTokens = (allowance*5 + 3) / 4
+	if PromptTokenLimit(task.MaxContextTokens) != allowance {
+		test.Fatal("fixture must reach the exact warning threshold")
+	}
+	summary := "old evidence"
+	client := &fakeLLMClient{response: &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summary}}}}}
+	runner := NewRunner(Deps{LLMClient: client, Session: session.New(test.TempDir(), "main", "fake", session.SessionOptions{})}, task)
+	continued := runner.addNextMessage(test.Context(), "", calls, llm.NativeTurn{}, "", []ToolCallResult{{ToolCallID: "call", Result: latest}}, &messages, "task", &compressionState{})
+	if !continued || CountMessagesTokens(messages) >= allowance || messages[len(messages)-1].ExtractText() != latest {
+		test.Fatal("the loop must try compression at equality and retain the latest result when it fits")
 	}
 }
