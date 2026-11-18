@@ -309,6 +309,9 @@ export const ru: TranslationKeys = {
   'docs.search.hint.select': 'Выбрать',
   'docs.search.hint.open': 'Открыть',
   'docs.search.hint.close': 'Закрыть',
+  'docs.content.loading': 'Загрузка документации...',
+  'docs.content.loadError': 'Не удалось загрузить содержимое документации.',
+  'docs.content.retry': 'Повторить',
 
   // Blog
   'blog.title': 'Блог',

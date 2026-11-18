@@ -307,6 +307,9 @@ export const en = {
   'docs.search.hint.select': 'Select',
   'docs.search.hint.open': 'Open',
   'docs.search.hint.close': 'Close',
+  'docs.content.loading': 'Loading documentation...',
+  'docs.content.loadError': 'Failed to load documentation content.',
+  'docs.content.retry': 'Retry',
 
   // Blog
   'blog.title': 'Blog',

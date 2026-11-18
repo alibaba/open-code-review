@@ -4,13 +4,23 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from '../i18n';
+import type { Language } from '../i18n/types';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { SearchTrigger } from '../components/SearchTrigger';
 import { useResponsive } from '../hooks/useResponsive';
 import { useCommandSearch, useSearchKeyboardNav } from '../hooks/useCommandSearch';
-import { getDocContent, getDocTitle, DocSlug, searchDocs } from '../content/docs';
+import {
+  getDocContent,
+  getDocTitle,
+  hasTranslation,
+  isPartialLocale,
+  loadLanguageContent,
+  searchDocs,
+  DocSlug,
+  LoadedDocContent,
+} from '../content/docs';
 import { extractHeadings } from '../utils/extractHeadings';
 import docContentsIcon from '../assets/icons/doc-contents.svg';
 import searchIcon from '../assets/icons/icon-search.svg';
@@ -153,20 +163,83 @@ const DocsPage: React.FC = () => {
   const cancelPendingScroll = useRef<(() => void) | null>(null);
   const { t, language } = useTranslation();
   const { isMobile } = useResponsive();
+
+  /* ─── Async docs content: load the selected language's bundle on demand ─── */
+  type DocsLoadState =
+    | { status: 'loading'; language: Language }
+    | { status: 'ready'; content: LoadedDocContent }
+    | { status: 'error'; language: Language };
+
+  const [docState, setDocState] = useState<DocsLoadState>(() => ({ status: 'loading', language }));
+  const [retryCount, setRetryCount] = useState(0);
+
+  const loadedContent = docState.status === 'ready' ? docState.content : null;
+
+  /* Search stays synchronous over whatever content is loaded; results appear
+   * once the load resolves and the page re-renders. */
+  const runDocsSearch = useCallback(
+    (query: string) => (loadedContent ? searchDocs(query, loadedContent) : []),
+    [loadedContent],
+  );
+
   const {
     searchOpen, setSearchOpen,
     searchQuery, setSearchQuery,
     searchSelectedIdx, setSearchSelectedIdx,
     searchInputRef,
     searchResults,
-  } = useCommandSearch(searchDocs, language);
+  } = useCommandSearch(runDocsSearch, language);
   const contentRef = React.useRef<HTMLDivElement>(null);
 
   const fontFamily = 'PingFang SC, -apple-system, BlinkMacSystemFont, sans-serif';
 
+  /* Load the selected language's content. Cleanup flips `cancelled` so a
+   * response landing after a language switch or retry is ignored. */
+  useEffect(() => {
+    let cancelled = false;
+    setDocState({ status: 'loading', language });
+    loadLanguageContent(language)
+      .then(docs => {
+        if (!cancelled) setDocState({ status: 'ready', content: { language, docs } });
+      })
+      .catch(() => {
+        if (!cancelled) setDocState({ status: 'error', language });
+      });
+    return () => { cancelled = true; };
+  }, [language, retryCount]);
+
+  /* Attach English fallback for partial locales, only when the active page or
+   * an active search actually needs the English entries — never speculatively. */
+  useEffect(() => {
+    if (docState.status !== 'ready' || docState.content.english || docState.content.language === 'en') return;
+    const content = docState.content;
+    const pageNeedsFallback = !hasTranslation(activeSlug, content.language);
+    const searchNeedsFallback = searchQuery.trim() !== '' && isPartialLocale(content.language);
+    if (!pageNeedsFallback && !searchNeedsFallback) return;
+    let cancelled = false;
+    loadLanguageContent('en')
+      .then(english => {
+        if (cancelled) return;
+        setDocState(prev => {
+          if (prev.status !== 'ready' || prev.content !== content) return prev;
+          return { status: 'ready', content: { ...content, english } };
+        });
+      })
+      .catch(() => {
+        /* Best-effort fallback: the load stays retryable via the next trigger. */
+      });
+    return () => { cancelled = true; };
+  }, [docState, activeSlug, searchQuery]);
+
   /* Get markdown content for current doc */
-  const docContent = useMemo(() => getDocContent(activeSlug, language), [activeSlug, language]);
-  const docTitle = useMemo(() => getDocTitle(activeSlug, language), [activeSlug, language]);
+  const docContent = useMemo(
+    () => (loadedContent ? getDocContent(activeSlug, loadedContent) : ''),
+    [activeSlug, loadedContent],
+  );
+  const docTitle = useMemo(
+    () => (loadedContent ? getDocTitle(activeSlug, loadedContent) : ''),
+    [activeSlug, loadedContent],
+  );
   const headings = useMemo(() => extractHeadings(docContent), [docContent]);
 
   /* Scroll direct links after their markdown heading has rendered */
@@ -421,12 +494,43 @@ const DocsPage: React.FC = () => {
 
         {/* ─── Main content area ─── */}
         <div ref={contentRef} onClick={handleContentClick} style={{ display: 'flex', flex: 1, flexDirection: 'column', minWidth: 0, padding: isMobile ? '32px 20px 80px' : '40px 48px 80px' }}>
-          {/* Doc title */}
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#FFFFFF', margin: '0 0 32px 0', lineHeight: '36px', fontFamily }}>
-            {docTitle}
-          </h1>
-          {/* Rendered markdown content */}
-          <MarkdownRenderer content={docContent} />
+          {docState.status === 'loading' && (
+            <div role="status" style={{ padding: '96px 0', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14, fontFamily }}>
+              {t('docs.content.loading')}
+            </div>
+          )}
+          {docState.status === 'error' && (
+            <div role="alert" style={{ padding: '96px 0', textAlign: 'center', fontSize: 14, fontFamily }}>
+              <div style={{ color: 'rgba(255,255,255,0.6)', marginBottom: 16 }}>
+                {t('docs.content.loadError')}
+              </div>
+              <button
+                onClick={() => setRetryCount(count => count + 1)}
+                style={{
+                  background: 'rgba(43, 222, 94, 0.12)',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: '#2BDE5E',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  fontFamily,
+                  padding: '8px 20px',
+                }}
+              >
+                {t('docs.content.retry')}
+              </button>
+            </div>
+          )}
+          {docState.status === 'ready' && (
+            <>
+              {/* Doc title */}
+              <h1 style={{ fontSize: 28, fontWeight: 700, color: '#FFFFFF', margin: '0 0 32px 0', lineHeight: '36px', fontFamily }}>
+                {docTitle}
+              </h1>
+              {/* Rendered markdown content */}
+              <MarkdownRenderer content={docContent} />
+            </>
+          )}
 
           {/* ─── Prev / Next pagination ─── */}
           <div style={{

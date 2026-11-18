@@ -311,6 +311,9 @@ export const zh: TranslationKeys = {
   'docs.search.hint.select': '选择',
   'docs.search.hint.open': '打开',
   'docs.search.hint.close': '关闭',
+  'docs.content.loading': '文档加载中...',
+  'docs.content.loadError': '文档内容加载失败。',
+  'docs.content.retry': '重试',
 
   // Blog
   'blog.title': '博客',
