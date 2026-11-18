@@ -179,6 +179,11 @@ loop up to MAX_TOOL_REQUEST_TIMES (default 100):
 | MAX_TOKENS 的 60 % | `tokenSoftThreshold` | 启动**异步**后台压缩；当前循环不中断继续。 |
 | MAX_TOKENS 的 80 % | `tokenWarningThreshold` | 在发送下一个请求前**同步**运行压缩。 |
 
+压缩请求可以使用更小的输出上限：不超过配置的输出上限、上下文窗口的 20% 余量，
+以及扣除固定提示词和摘要包装后剩余的空间。选择 active 区轮次前，会先预留这部分
+预算。这些单次会话限制独立于累计预算 `--max-tokens-budget`；将累计预算设为零
+并不会禁用上下文压缩。
+
 ### 三个区
 
 ```mermaid
@@ -193,34 +198,27 @@ flowchart LR
 ```
 
 一“轮”是一条 assistant 消息加上其后跟随的工具结果消息。`partitionMessages`
-从末尾向前遍历轮次，保留能装入 `(0.80 × MAX_TOKENS) - reservedTokens` 的尽可能
-多的轮。更早的内容成为 **compress 区**。
+从末尾向前遍历轮次，在 token 数严格小于 `(0.80 × MAX_TOKENS) - reservedTokens`
+的前提下保留尽可能多的轮。预留预算包括前两条消息（含已有摘要）、新摘要的输出
+上限及其包装开销。更早的内容成为 **compress 区**。compress 区为空时，会话保持
+不变；原会话仍低于警告阈值时，后台压缩不会把固定前缀之后的全部轮次都变成摘要。
 
 compress 区被渲染为 XML，用 `MEMORY_COMPRESSION_TASK` prompt 交给模型；返回的
 摘要被追加到原始 user 消息内，包在 `<previous_review_summary>` 标签里。
 
-压缩后：`messages = frozen[2] + compressed_user_msg + active`。
-
-```go
-// compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
-    contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
-    // … call MEMORY_COMPRESSION_TASK …
-    rebuilt[1] = llm.NewTextMessage(role, currentText+
-        "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
-    for i := part.compressEnd; i < len(msgs); i++ {
-        rebuilt = append(rebuilt, msgs[i])
-    }
-    return rebuilt, nil
-}
-```
+压缩后：`messages = system + (original_user + summary) + active`。
+重建的会话会使用同一套本地 token 估算进行检查，并且必须比原会话更小。缺少压缩
+模板、摘要为空或压缩后没有变小时，均保留原始历史。摘要模板不可用或重建结果
+超限时会返回错误，不会丢弃任何原始消息。
 
 ### 异步 vs 同步
 
 异步路径让 main 循环在后台压缩运行时继续产出工具调用；当下一次 token 检查发生
 时，已就绪的摘要会通过 `tryApplyPendingCompression` 应用。若比例在异步任务完成前越过
-警告阈值，循环会停顿并同步运行 `runCompression`——保证下一个请求总是装得下。
+警告阈值，循环会停顿并同步运行 `runCompression`。应用后台摘要时，会保留创建
+快照之后追加的消息。如果会话仍无法严格低于本地警告阈值，循环会以
+`StopCompression` 停止，而不是静默丢弃未压缩的历史。本地估算并不保证请求符合
+提供方实际的上下文窗口容量。
 
 ## 评论处理流水线
 
