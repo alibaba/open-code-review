@@ -43,6 +43,27 @@ func TestBehaviorTemplateIsolation(test *testing.T) {
 	}
 }
 
+func TestBehaviorMainTaskMessageStructure(test *testing.T) {
+	behavior, err := LoadBehaviorDefault()
+	if err != nil {
+		test.Fatal(err)
+	}
+	messages := behavior.MainTask.Messages
+	if len(messages) != 2 || messages[0].Role != "system" || messages[1].Role != "user" {
+		test.Fatal("behavior main task must provide a system/user prefix without message merging")
+	}
+	for _, heading := range []string{"# Role", "# Evidence and trust", "# Investigation protocol", "# Conditional investigation rules"} {
+		if !strings.Contains(messages[0].Content, heading) {
+			test.Errorf("system message is missing %q", heading)
+		}
+	}
+	for _, placeholder := range []string{"{{comparison_manifest}}", "{{background_context}}", "{{change_inventory}}", "{{context_index}}"} {
+		if !strings.Contains(messages[1].Content, placeholder) || strings.Contains(messages[0].Content, placeholder) {
+			test.Errorf("task input %q must remain in the user message", placeholder)
+		}
+	}
+}
+
 func TestBehaviorTemplateValidation(test *testing.T) {
 	for _, mutate := range []func(*BehaviorTemplate){
 		func(tpl *BehaviorTemplate) { tpl.Version = "" },
@@ -71,7 +92,7 @@ func TestBehaviorReportFocusSurvivesEveryPhase(test *testing.T) {
 	if err != nil {
 		test.Fatal(err)
 	}
-	if behavior.Version != "ocr.behavior-prompts/v3" {
+	if behavior.Version != "ocr.behavior-prompts/v6" {
 		test.Fatalf("unversioned report guidance: %s", behavior.Version)
 	}
 	for _, phase := range []struct {
@@ -79,10 +100,10 @@ func TestBehaviorReportFocusSurvivesEveryPhase(test *testing.T) {
 		content  string
 		required []string
 	}{
-		{"system", behavior.MainTask.Messages[0].Content, []string{"Report each material effect once", "one screen", "Preserve decisive details", "Omit empty categories", "Brevity must not narrow the investigation", "[[obs-000001]]"}},
-		{"task", behavior.MainTask.Messages[len(behavior.MainTask.Messages)-1].Content, []string{"conclusion first", "complete visible change inventory", "decisive conditions and evidence retained"}},
+		{"system", behavior.MainTask.Messages[0].Content, []string{"Report each material effect once", "practical conclusion", "before/after table", "not a fixed length or section quota", "Preserve decisive details", "Omit empty categories", "Brevity must not narrow the investigation", "captured execution results", "recommend an option", "overall approval to merge", "[[obs-000001]]"}},
+		{"task", behavior.MainTask.Messages[len(behavior.MainTask.Messages)-1].Content, []string{"conclusion first", "complete visible change inventory", "decisive conditions and evidence retained", "compatibility cost", "supported recommendations"}},
 		{"compression", behavior.MemoryCompressionTask.Messages[0].Content, []string{"each-effect-once", "working memory, not the final report", "Preserve evidence and unresolved questions", "[[obs-000001]]"}},
-		{"final round", behavior.FinalRound.Messages[0].Content, []string{"each material effect once", "not independent risks or evidence", "precise limitations", "[[obs-000001]]"}},
+		{"final round", behavior.FinalRound.Messages[0].Content, []string{"each material effect once", "not independent risks or evidence", "precise limitations", "test source from captured execution results", "not generic approval questions", "[[obs-000001]]"}},
 	} {
 		test.Run(phase.name, func(test *testing.T) {
 			for _, required := range phase.required {
@@ -91,6 +112,13 @@ func TestBehaviorReportFocusSurvivesEveryPhase(test *testing.T) {
 				}
 			}
 		})
+	}
+	for _, content := range []string{behavior.MainTask.Messages[0].Content, behavior.MainTask.Messages[1].Content, behavior.FinalRound.Messages[0].Content} {
+		for _, required := range []string{"## for sections and ### for subsections", "standalone bold text", "at least two concrete scenarios", "evidence-supported before/after behavior", "default to a compact before/after table", "Scenario | Before | After", "single change or unverified old behavior"} {
+			if !strings.Contains(content, required) {
+				test.Errorf("missing presentation guidance %q", required)
+			}
+		}
 	}
 	if behavior.MaxTokens != 200000 || behavior.MaxCompletionTokens != 16384 || behavior.MaxToolRequestTimes != 100 {
 		test.Fatal("concise reporting must not reduce investigation or output budgets")

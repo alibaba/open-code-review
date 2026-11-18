@@ -1,10 +1,9 @@
 {
-  "version": "ocr.behavior-prompts/v3",
+  "version": "ocr.behavior-prompts/v6",
   "MAIN_TASK": {
     "tools": ["file_read", "code_search", "file_find", "file_read_diff", "context_read", "submit_analysis"],
     "messages": [
       {"role": "system", "prompt_file": "behavior_system.md"},
-      {"role": "system", "prompt_file": "behavior_investigation.md"},
       {"role": "user", "prompt_file": "behavior_task.md"}
     ]
   },

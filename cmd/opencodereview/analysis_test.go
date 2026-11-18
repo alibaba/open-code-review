@@ -16,9 +16,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/behaviortask"
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/workflow"
@@ -90,7 +92,7 @@ func TestAnalysisPinning(test *testing.T) {
 func TestAnalysisWorkspaceComparisonLabel(test *testing.T) {
 	for _, empty := range []bool{false, true} {
 		comparison := behaviortask.Comparison{Mode: "workspace", Old: strings.Repeat("a", 40), BaseIsEmpty: empty}
-		oldSource := comparison.Old
+		oldSource := "aaaaaaaa"
 		if empty {
 			comparison.Old = ""
 			oldSource = "empty tree"
@@ -346,16 +348,20 @@ func TestAnalysisSkippedReviewStatus(test *testing.T) {
 			if manifest == nil || manifest.TerminalState != session.StateSkipped || len(manifest.Coverage.Selected) != 0 || len(comments) != 0 {
 				test.Fatalf("expected an empty skipped review: manifest=%+v comments=%+v", manifest, comments)
 			}
-			combined := &combinedResult{Agent: reviewer, reviewErr: reviewErr, report: &workflow.Report{Status: "completed"}}
+			combined := &combinedResult{Agent: reviewer, reviewErr: reviewErr, budget: workflow.NewBudget(0, 1), report: &workflow.Report{Status: "completed", Markdown: "Analysis result."}}
 			output := combined.AnalysisOutput()
 			if output.ReviewStatus != fixture.wantReview || output.status() != fixture.wantStatus {
 				test.Errorf("review=%s overall=%s, want review=%s overall=%s", output.ReviewStatus, output.status(), fixture.wantReview, fixture.wantStatus)
 			}
 			var human bytes.Buffer
-			outputAnalysisText(&human, output)
-			wantText := fmt.Sprintf("Overall execution: %s | Review: %s | Analysis execution: completed", fixture.wantStatus, fixture.wantReview)
-			if !strings.Contains(human.String(), wantText) {
+			if err := emitRunResult(test.Context(), combined, comments, time.Now(), "text", "human", nil, nil, &human, nil); err != nil {
+				test.Fatal(err)
+			}
+			if !strings.Contains(human.String(), "Analysis: completed") || strings.Contains(human.String(), "Review:") != fixture.failPersistence {
 				test.Errorf("text status mismatch: %s", human.String())
+			}
+			if fixture.failPersistence && (strings.Count(human.String(), "Review: partial") != 1 || strings.Index(human.String(), "Review: partial") > strings.Index(human.String(), "Analysis result.")) {
+				test.Errorf("Review delivery failure was hidden or buried: %s", human.String())
 			}
 			var machine bytes.Buffer
 			if err := outputJSONWithWarnings(comments, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, reviewer.SessionID(), manifest, false, nil, &machine, nil, nil, output); err != nil {
@@ -376,15 +382,46 @@ func TestAnalysisSkippedReviewStatus(test *testing.T) {
 }
 
 func TestAnalysisTextAndStatus(test *testing.T) {
-	for _, fixture := range []struct{ review, analysis, want string }{{"skipped", "completed", "completed"}, {"failed", "failed", "failed"}, {"partial", "completed", "partial"}, {"complete", "failed", "partial"}} {
-		output := &analysisOutput{ReviewStatus: fixture.review, Report: &workflow.Report{Status: fixture.analysis}}
+	for _, fixture := range []struct{ review, analysis, want string }{
+		{"complete", "completed", "completed"},
+		{"skipped", "completed", "completed"},
+		{"failed", "completed", "partial"},
+		{"failed", "failed", "failed"},
+		{"partial", "completed", "partial"},
+		{"partial", "partial", "partial"},
+		{"complete", "failed", "partial"},
+		{"complete", "partial", "partial"},
+	} {
+		output := &analysisOutput{ReviewStatus: fixture.review, Report: &workflow.Report{Status: fixture.analysis, DeclaredCompletion: "complete"}}
 		if output.status() != fixture.want {
 			test.Fatalf("status %+v", fixture)
 		}
 		var buffer bytes.Buffer
 		outputAnalysisText(&buffer, output)
+		wantText := "Analysis: " + fixture.analysis
+		if !strings.Contains(buffer.String(), wantText) || strings.Contains(buffer.String(), "Model-declared completeness:") {
+			test.Fatalf("unexpected display labels: %s", buffer.String())
+		}
+		if fixture.review == "partial" || fixture.review == "failed" {
+			if strings.Count(buffer.String(), "Review: "+fixture.review) != 1 {
+				test.Fatalf("Review failure status was hidden or repeated: %s", buffer.String())
+			}
+		} else if strings.Contains(buffer.String(), "Review:") {
+			test.Fatalf("normal Review status should remain hidden: %s", buffer.String())
+		}
 		if !strings.Contains(buffer.String(), "No analysis report was accepted.") {
 			test.Fatal(buffer.String())
+		}
+		var machine bytes.Buffer
+		if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", nil, false, nil, &machine, nil, nil, output); err != nil {
+			test.Fatal(err)
+		}
+		var payload jsonOutput
+		if err := json.Unmarshal(machine.Bytes(), &payload); err != nil {
+			test.Fatal(err)
+		}
+		if output.ReviewStatus != fixture.review || payload.ReviewStatus != fixture.review || payload.Status != fixture.want || payload.AnalysisMeta == nil || payload.AnalysisMeta.Status != fixture.analysis || payload.AnalysisMeta.DeclaredCompletion != "complete" {
+			test.Fatalf("text rendering changed machine-readable states: %s", machine.String())
 		}
 	}
 	analysis := analysisFixture([]behaviortask.Observation{{ID: "old", Locations: []behaviortask.Location{{Side: "old", Path: "a.go", StartLine: 1, EndLine: 3}}}, {ID: "new", Locations: []behaviortask.Location{{Side: "new", Path: "a.go", StartLine: 1, EndLine: 3}}}}, true)
@@ -392,7 +429,7 @@ func TestAnalysisTextAndStatus(test *testing.T) {
 	report := workflow.NewReport(behaviortask.Result{Analysis: &analysis, Errors: []string{"bad\x1b[31m"}, Warnings: []llmloop.AgentWarning{{Message: "warning\x1b[31m"}}}, nil, "artifacts")
 	var buffer bytes.Buffer
 	outputAnalysisText(&buffer, &analysisOutput{ReviewStatus: "complete", Report: report})
-	if strings.Contains(buffer.String(), "\x1b") || !strings.Contains(buffer.String(), "Unusual heading and quotes:") || !strings.Contains(buffer.String(), "Model-declared completeness: partial") {
+	if strings.Contains(buffer.String(), "\x1b") || !strings.Contains(buffer.String(), "Unusual heading and quotes:") || !strings.Contains(buffer.String(), "Investigation incomplete (model self-assessment)") {
 		test.Fatalf("text: %s", buffer.String())
 	}
 }
@@ -421,7 +458,7 @@ func TestAnalysisTextOmitsProcessWarnings(test *testing.T) {
 			if strings.Contains(human.String(), "Warning:") {
 				test.Fatalf("process diagnostics leaked into the report: %s", human.String())
 			}
-			if !strings.Contains(human.String(), "Analysis execution: "+status) || !strings.Contains(human.String(), "Model-declared completeness: partial") {
+			if !strings.Contains(human.String(), "Analysis: "+status) || strings.Contains(human.String(), "Investigation incomplete (model self-assessment)") != (markdown != "") {
 				test.Fatalf("execution or declared completeness was hidden: %s", human.String())
 			}
 			if status == "failed" {
@@ -467,5 +504,97 @@ func TestAnalysisTextKeepsDeliveryWarnings(test *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAnalysisTextBrief(test *testing.T) {
+	for _, completion := range []string{"complete", "unknown", ""} {
+		test.Run(completion, func(test *testing.T) {
+			const markdown = "## Behavior\n\nThe default changes [[obs-000001]].\n"
+			report := &workflow.Report{
+				Status: "completed", Completed: true, DeclaredCompletion: completion,
+				Comparison: behaviortask.Comparison{Mode: "range", Old: strings.Repeat("a", 40), Head: strings.Repeat("b", 40)},
+				StopReason: "none", SubmissionStatus: "accepted", ArtifactDir: "evidence/run",
+				Markdown: markdown,
+				Usage:    behaviortask.Usage{InputTokens: 1895278, OutputTokens: 15599},
+				RetryReport: &llm.RetryReport{TotalRequests: 27, CancelledRequests: 2, Requests: []llm.RequestReport{
+					{LogicalRequestID: "request-id", TaskType: "MEMORY_COMPRESSION_TASK", Outcome: llm.OutcomeCancelled},
+				}},
+			}
+			before, err := json.Marshal(report)
+			if err != nil {
+				test.Fatal(err)
+			}
+			combined := &analysisOutput{ReviewStatus: "complete", Report: report}
+			var human bytes.Buffer
+			outputAnalysisText(&human, combined)
+			want := "\n──────── Analysis Report ────────\nComparison: aaaaaaaa -> bbbbbbbb\n\n## Behavior\n\nThe default changes.\n\nAnalysis: completed\nEvidence: evidence/run\n"
+			if human.String() != want {
+				test.Fatalf("unexpected brief:\ngot: %q\nwant: %q", human.String(), want)
+			}
+			var machine bytes.Buffer
+			if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", nil, false, nil, &machine, nil, nil, combined); err != nil {
+				test.Fatal(err)
+			}
+			var payload jsonOutput
+			if err := json.Unmarshal(machine.Bytes(), &payload); err != nil {
+				test.Fatal(err)
+			}
+			after, err := json.Marshal(report)
+			if err != nil || !bytes.Equal(before, after) || report.Markdown != markdown || payload.Analysis == nil || *payload.Analysis != markdown || payload.AnalysisMeta == nil || !reflect.DeepEqual(payload.AnalysisMeta.RetryReport, report.RetryReport) || payload.AnalysisMeta.Usage != report.Usage || payload.AnalysisMeta.Comparison != report.Comparison {
+				test.Fatalf("text output changed raw report or JSON: %s, %v", machine.String(), err)
+			}
+		})
+	}
+}
+
+func TestAnalysisTextLimitPlacement(test *testing.T) {
+	for _, stop := range []llmloop.MainLoopStop{llmloop.StopMaxRounds, llmloop.StopEmptyRounds, llmloop.StopCompression, llmloop.StopTokenBudget} {
+		test.Run(stop.String(), func(test *testing.T) {
+			for _, markdown := range []string{"", "Supported result [[obs-000001]]."} {
+				report := &workflow.Report{
+					Status: "partial", StopReason: stop.String(), Markdown: markdown, DeclaredCompletion: "partial",
+					Errors: []string{"Artifact write failed."},
+					Warnings: []llmloop.AgentWarning{{Type: "behavior_limit_reached", Message: stop.Reason()},
+						{Type: "artifact_warning", Message: "Evidence is incomplete."}},
+				}
+				body := "Supported result."
+				if markdown == "" {
+					report.Status = "failed"
+					body = "No analysis report was accepted."
+				}
+				var human bytes.Buffer
+				outputAnalysisText(&human, &analysisOutput{Report: report})
+				text := human.String()
+				for _, message := range []string{"Analysis: " + report.Status, stop.Reason(), "Error: Artifact write failed.", "Warning: Evidence is incomplete."} {
+					if strings.Count(text, message) != 1 || strings.Index(text, message) > strings.Index(text, body) {
+						test.Fatalf("missing, repeated or buried diagnostic %q: %s", message, text)
+					}
+				}
+				if !strings.Contains(text, body) || strings.Contains(text, "Analysis: completed") || strings.Contains(text, "Evidence:") {
+					test.Fatalf("misleading status or artifact path: %s", text)
+				}
+			}
+		})
+	}
+	var human bytes.Buffer
+	outputAnalysisText(&human, &analysisOutput{Report: &workflow.Report{Status: "failed", StopReason: "future_stop\x1b[31m"}})
+	if !strings.Contains(human.String(), "Reason: future_stop") || strings.Contains(human.String(), "\x1b") {
+		test.Fatalf("unknown stop was hidden or unsafe: %s", human.String())
+	}
+}
+
+func TestShortAnalysisRevision(test *testing.T) {
+	for _, fixture := range []struct{ revision, want string }{
+		{strings.Repeat("a", 40), "aaaaaaaa"},
+		{strings.Repeat("B", 64), "BBBBBBBB"},
+		{"main", "main"},
+		{"", ""},
+		{"abcdef12", "abcdef12"},
+		{strings.Repeat("z", 40), strings.Repeat("z", 40)},
+	} {
+		if got := shortAnalysisRevision(fixture.revision); got != fixture.want {
+			test.Errorf("shortAnalysisRevision(%q) = %q, want %q", fixture.revision, got, fixture.want)
+		}
 	}
 }

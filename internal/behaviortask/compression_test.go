@@ -38,6 +38,9 @@ func TestCompressionKeepsObservationReplay(test *testing.T) {
 		case 1:
 			return response("file_read", `{"file_path":"large.go"}`), nil
 		case 2:
+			if len(request.Messages) < 2 || request.Messages[0].Role != "system" || request.Messages[1].Role != "user" || !strings.Contains(request.Messages[0].ExtractText(), "# Investigation protocol") {
+				test.Fatal("compression must preserve the system/user prefix and investigation guidance")
+			}
 			if !strings.Contains(request.Messages[1].ExtractText(), "<previous_behavior_summary>") {
 				test.Error("summary not preserved")
 			}

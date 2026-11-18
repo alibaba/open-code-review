@@ -13,11 +13,14 @@ and model-call cost. This is not a replacement for line-level review comments.
 With the flag, the terminal prints an **Analysis Report** alongside the comments.
 It covers the following when relevant, not as a mandatory list of sections:
 
-- **Behavior**: triggers, preconditions, before/after behavior and source evidence.
-- **Impact**: affected workflows, propagation, compatibility and attribution.
-- **Maintainer Decisions**: evidence-backed policy choices, options and tradeoffs.
-- **Verification**: source tests separately from captured execution evidence.
-- **Questions & Limitations**: missing facts, uncertainty and execution failures.
+- **Problem and Behavior Changes**: practical value, triggers, before/after behavior
+  and affected workflows; a comparison table when multiple scenarios benefit.
+- **Compatibility**: material compatibility costs and scope boundaries, alongside
+  the affected behavior rather than repeated under a separate heading.
+- **Verification and Limits**: inspected test source, captured execution evidence
+  and unresolved gaps that affect the conclusions.
+- **Maintainer Decisions**: genuine product, policy, compatibility or scope choices,
+  with supported recommendations and the consequences of each option.
 
 The model writes one Markdown report, without filling nested scenario/impact
 objects, relationship IDs or evidence arrays. These sections are prompt guidance,
@@ -33,16 +36,54 @@ On an interactive terminal, analysis headings, emphasis, inline code, lists and
 tables are rendered instead of displaying their Markdown delimiters. Prose wraps
 to the terminal width; no report-length limit or summarization is applied. Styling
 uses the terminal's default foreground/background and basic ANSI colors, without
-querying its background or loading external themes.
+querying its background or loading external themes. Section and subsection headings
+are blue and bold; inline code stays cyan. Ordinary prose uses the terminal's
+default color, and bold emphasis in prose is not promoted to a blue heading.
+The shared Markdown renderer applies this palette to project summaries as well.
 
 Rendering follows `--color`: `auto` renders only on terminal stdout (except
-`TERM=dumb`), `never` keeps raw Markdown, and `always` also styles redirected stdout
-(for example, `| less -R`). `--output <file>` always retains raw Markdown in text
-output, even with `--color=always`. JSON `analysis` and the saved `report.md` remain
-the original Markdown string. Text output sanitizes terminal controls; rendering
+`TERM=dumb`), `never` keeps Markdown syntax, and `always` also styles redirected stdout
+(for example, `| less -R`). `--output <file>` always retains Markdown syntax in text
+output, even with `--color=always`. All text destinations remove literal
+`[[obs-...]]` citation markers from a display copy before rendering, including
+reserved markers inside code blocks. Paragraphs, lists and tables are retained;
+nearby citation spacing is cleaned without summarizing the report. JSON `analysis`
+and the saved `report.md` remain the original Markdown string with citations.
+Text output sanitizes terminal controls; rendering
 allows only styling escape sequences, not model-provided terminal commands or
 active hyperlinks. Links and images are not fetched. If rendering fails, the CLI
 falls back to sanitized Markdown without failing the review.
+
+The normal analysis block puts the comparison and report first, then a single
+execution status and evidence directory:
+
+```text
+──────── Analysis Report ────────
+Comparison: 7e5ce06c -> 6d7c1c75
+
+The report's conclusion and supported behavior changes...
+
+Analysis: completed
+Evidence: /path/to/analysis/session
+```
+
+Revision hashes are abbreviated for display; full comparison identities remain in
+JSON and artifacts. Workspace comparisons still say `workspace (live)`, and an
+empty base still says `empty tree`. Execution limits or failures, their reasons,
+and delivery errors appear before any available report. If no report was accepted,
+the block says so explicitly. An evidence path is shown only when available.
+An abnormal Review status (`partial` or `failed`) is also shown before the report,
+even when Analysis succeeds, so text exports retain Review execution or delivery
+failures. Normal Review states are still omitted from the Analysis block.
+
+Normal stop/submission fields, successful or unknown model self-assessments,
+analysis token counts, and analysis retry/compaction details are not printed in
+this block. A partial model self-assessment gets a separate investigation-incomplete
+notice, without changing execution status or exit behavior. `Analysis: completed`
+means execution completed, not that the conclusions are correct or exhaustive.
+The evidence directory retains the raw report, observations and recorded run facts
+for auditing. Use `--format json` for the full analysis metadata, including retry
+details. Review's own diagnostic output is unchanged.
 
 Live progress uses a dim `[ocr]` prefix, cyan tool names, and colored status
 markers (cyan start, green success, red failure). Arguments and message text are
@@ -54,17 +95,29 @@ stay unstyled in `auto` mode, and `--audience agent` still suppresses progress.
 ### Report focus
 
 The report is a concise maintainer brief, not an investigation transcript. It leads
-with a takeaway and explains each material effect once: trigger, before/after,
+with the practical conclusion and explains each material effect once: trigger, before/after,
 consequence and nearby evidence. Behavior and impact can be combined rather than
-repeating a mechanism under two headings. A small change should normally fit on
-one screen; complex changes can expand to retain independent risks and decisive
-details. This is guidance, not a word limit or a truncation rule.
+repeating a mechanism under two headings. When at least two concrete scenarios have
+evidence-supported before/after behavior, the prompt defaults to a compact
+Scenario / Before / After table after the conclusion, with labels in the report's
+language. Following prose explains only mechanisms, compatibility costs or limits
+not already covered by the table. Single changes and unverified old behavior use
+prose instead; the model must not invent rows or old behavior to fill a table.
+
+Sections use `##` and subsections use `###`, not standalone bold text. Bold remains
+available for emphasis inside paragraphs and lists. Length and section selection
+follow the material effects; there is no fixed section quota, word limit or
+truncation rule. This is prompt guidance, not a submission-format requirement:
+the renderer styles existing headings and tables but does not invent them or
+rewrite prose into a comparison table. Existing saved reports are not rewritten.
 
 Exact flags/fields, defaults, branch conditions, compatibility boundaries, failures,
 and meaningful uncertainty remain when they affect the conclusion. Empty categories,
 generic advice, repeated background, file inventories, tool diaries and closing
 recaps are omitted. Verification and important gaps get one compact note instead
-of repeated disclaimers. Investigation scope and budgets are unchanged; complete
+of repeated disclaimers. Maintainer choices address actual tradeoffs, not generic
+questions about whether testing is sufficient or an overall approval to merge.
+Investigation scope and budgets are unchanged; complete
 observations and run metadata remain in their own artifacts, not repeated in prose.
 
 Text reports omit per-observation read errors, search truncation notices, and
@@ -135,6 +188,10 @@ For example, a successfully delivered report can admit incomplete investigation:
 ```
 
 `review_status` retains Review's own `complete`, `partial`, `failed`, or `skipped`.
+The Analysis text block shows its own execution status and any abnormal Review
+status; it does not repeat the overall state or normal Review states. Display
+changes do not alter JSON states or model-declared completeness.
+
 `analysis_meta.execution_status` is program-recorded: `completed` when a valid
 report was accepted without execution errors or budget stops; `partial` when an
 accepted report exists but execution was limited or delivery failed; `failed`

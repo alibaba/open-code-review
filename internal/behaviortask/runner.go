@@ -176,11 +176,7 @@ func (runner *Runner) messages() ([]llm.Message, error) {
 			return nil, fmt.Errorf("unresolved behavior template variable")
 		}
 		content := strings.NewReplacer(replacements...).Replace(message.Content)
-		if message.Role == "system" && len(messages) > 0 && messages[len(messages)-1].Role == "system" {
-			messages[len(messages)-1] = llm.NewTextMessage("system", messages[len(messages)-1].ExtractText()+"\n\n"+content)
-		} else {
-			messages = append(messages, llm.NewTextMessage(message.Role, content))
-		}
+		messages = append(messages, llm.NewTextMessage(message.Role, content))
 	}
 	return messages, nil
 }

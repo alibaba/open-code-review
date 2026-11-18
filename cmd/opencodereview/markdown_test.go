@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,30 @@ func TestRenderMarkdown(test *testing.T) {
 	}
 	if !strings.Contains(rendered, "\x1b[1m") || !strings.Contains(rendered, "\x1b[36m") {
 		test.Errorf("missing heading/emphasis or code styling: %q", rendered)
+	}
+}
+
+func TestRenderMarkdownHeadingPalette(test *testing.T) {
+	headingStyle := regexp.MustCompile(`\x1b\[(?:34;1|1;34)mHeading\x1b\[(?:0)?m`)
+	codeStyle := regexp.MustCompile(`\x1b\[36m--analysis\x1b\[(?:0)?m`)
+	strongStyle := regexp.MustCompile(`\x1b\[1mImportant\x1b\[(?:0)?m`)
+	for level := 1; level <= 6; level++ {
+		test.Run(fmt.Sprintf("H%d", level), func(test *testing.T) {
+			markdown := strings.Repeat("#", level) + " Heading\n\nPlain body.\n\n**Important**\n\nUse `--analysis`.\n"
+			rendered := renderMarkdown(markdown, 80)
+			if !headingStyle.MatchString(rendered) || !codeStyle.MatchString(rendered) || !strongStyle.MatchString(rendered) {
+				test.Fatalf("heading, code or emphasis has the wrong palette: %q", rendered)
+			}
+			for _, line := range strings.Split(rendered, "\n") {
+				if strings.Contains(line, "Plain body.") && line != ansi.Strip(line) {
+					test.Fatalf("heading style leaked into body text: %q", line)
+				}
+			}
+			want := "Heading Plain body. Important Use --analysis."
+			if got := strings.Join(strings.Fields(ansi.Strip(rendered)), " "); got != want {
+				test.Fatalf("Markdown meaning changed: got %q, want %q", got, want)
+			}
+		})
 	}
 }
 

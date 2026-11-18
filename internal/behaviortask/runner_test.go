@@ -132,8 +132,14 @@ func TestRunnerSubmissionRepairAndArtifacts(test *testing.T) {
 			test.Fatal("wrong tool set")
 		}
 		if requests == 1 {
-			if len(request.Messages) != 2 || !strings.Contains(request.Messages[1].ExtractText(), input.Resolution.ResolvedHead) || !strings.Contains(request.Messages[1].ExtractText(), "{{not_a_template}}") {
+			if len(request.Messages) != 2 || request.Messages[0].Role != "system" || request.Messages[1].Role != "user" {
+				test.Fatal("behavior request must begin with one system message and one user message")
+			}
+			if !strings.Contains(request.Messages[1].ExtractText(), input.Resolution.ResolvedHead) || !strings.Contains(request.Messages[1].ExtractText(), "{{not_a_template}}") {
 				test.Fatal("unresolved or missing input")
+			}
+			if strings.Count(request.Messages[0].ExtractText(), "Write prose in English") != 1 {
+				test.Fatal("system message must contain one language instruction")
 			}
 			return response("file_read", `{"file_path":"main.go","side":"old"}`), nil
 		}
