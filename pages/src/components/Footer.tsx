@@ -14,6 +14,7 @@ const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'zh', label: '中文' }, // allow-non-english: language options are labelled in their own language
   { value: 'ja', label: '日本語' }, // allow-non-english: language options are labelled in their own language
   { value: 'ko', label: '한국어' }, // allow-non-english: language options are labelled in their own language
+  { value: 'tr', label: 'Türkçe' }, // allow-non-english: language options are labelled in their own language
   { value: 'ru', label: 'Русский' }, // allow-non-english: language options are labelled in their own language
 ];
 
