@@ -44,7 +44,7 @@
 
 Open Code Review, yapay zekâ destekli bir kod inceleme komut satırı aracıdır. Alibaba Group'un kurum içi resmî yapay zekâ kod inceleme asistanı olarak doğdu; son iki yılda on binlerce geliştiriciye hizmet verip milyonlarca kod hatası tespit etti. Büyük ölçekte kapsamlı doğrulamadan sonra topluluk için açık kaynaklı bir projeye dönüştürdük. Başlamak için bir model uç noktası yapılandırmanız yeterlidir.
 
-Git farklarını okur, değişen dosyaları araç kullanabilen bir ajan aracılığıyla yapılandırılabilir bir büyük dil modeline (LLM) gönderir ve satır düzeyinde hassas, yapılandırılmış inceleme yorumları üretir. Ajan tüm dosya içeriğini okuyabilir, kod tabanında arama yapabilir ve bağlam için diğer değişen dosyaları inceleyebilir; böylece yalnızca yüzeysel fark yorumları değil, derinlemesine incelemeler sağlar. `ocr scan`, fark incelemesine ek olarak yabancı kod tabanlarını veya anlamlı fark içermeyen dizinleri denetlemek için dosyaların tamamını inceler.
+Git farklarını okur, değişen dosyaları araç kullanabilen bir ajan aracılığıyla yapılandırılabilir bir büyük dil modeline (LLM) gönderir ve satır düzeyinde hassas, yapılandırılmış inceleme yorumları üretir. Ajan tüm dosya içeriğini okuyabilir, kod tabanında arama yapabilir ve bağlam için diğer değişen dosyaları inceleyebilir; böylece yalnızca yüzeysel fark yorumları değil, derinlemesine incelemeler sağlar. `ocr scan`, fark incelemesine ek olarak tanıdık olmayan kod tabanlarını veya anlamlı fark içermeyen dizinleri denetlemek için dosyaların tamamını inceler.
 
 Ayrıntılar için [resmî web sitesini](https://open-codereview.ai) ziyaret edin.
 
@@ -52,7 +52,7 @@ Ayrıntılar için [resmî web sitesini](https://open-codereview.ai) ziyaret edi
 
 ## Karşılaştırmalı değerlendirme
 
-> Open Code Review, aynı temel modeli kullanan genel amaçlı ajanlara (Claude Code) kıyasla belirgin biçimde daha yüksek **kesinlik (Precision)** ve **F1** elde ederken tokenların yalnızca **yaklaşık 1/9'unu** tüketir ve incelemeleri daha hızlı tamamlar. Yakalama oranı (Recall) ise daha düşüktür; bu, gereksiz bildirimleri azaltıp kesinliğe öncelik veren bilinçli bir tercihtir.
+> Open Code Review, aynı temel modeli kullanan genel amaçlı ajanlara (Claude Code) kıyasla belirgin biçimde daha yüksek **kesinlik (Precision)** ve **F1** elde ederken tokenların yalnızca **yaklaşık 1/9'unu** tüketir ve incelemeleri daha hızlı tamamlar. Duyarlılık (Recall) ise daha düşüktür; bu, gereksiz bildirimleri azaltıp kesinliğe öncelik veren bilinçli bir tercihtir.
 
 **50** popüler açık kaynak deposu, **200** gerçek pull request ve **10** programlama dilinden oluşturulan gerçek dünya kod inceleme kıyaslaması; 80'den fazla kıdemli mühendis tarafından çapraz doğrulandı (**1.505** işaretlenmiş gerçek sorun).
 
@@ -60,9 +60,9 @@ Ayrıntılar için [resmî web sitesini](https://open-codereview.ai) ziyaret edi
 
 | Ölçüt | Neyi ölçer? | Neden önemli? |
 |--------|-----------------|----------------|
-| **F1** | Kesinlik ve yakalama oranının harmonik ortalaması | Genel inceleme kalitesini tek sayıyla ifade eder |
+| **F1** | Kesinlik ve duyarlılığın harmonik ortalaması | Genel inceleme kalitesini tek sayıyla ifade eder |
 | **Precision (kesinlik)** | Bildirilen sorunlar içinde gerçek hata olanların oranı | Yüksek olması, ele alınacak yanlış alarmın azalmasıdır |
-| **Recall (yakalama oranı)** | Gerçek hataların bulunan kısmı | Yüksek olması, incelemeden kaçan hataların azalmasıdır |
+| **Recall (duyarlılık)** | Gerçek hataların bulunan kısmı | Yüksek olması, incelemeden kaçan hataların azalmasıdır |
 | **Ortalama süre** | İnceleme başına geçen gerçek süre | CI işlem hattının gecikmesini etkiler |
 | **Ortalama token** | İnceleme başına toplam token tüketimi | API maliyetini doğrudan etkiler |
 
@@ -74,13 +74,13 @@ Ayrıntılar için [resmî web sitesini](https://open-codereview.ai) ziyaret edi
 
 Claude Code gibi genel amaçlı ajanları becerilerle kod incelemesinde kullandıysanız şu sorunlarla karşılaşmış olabilirsiniz:
 
-- **Eksik kapsam** — Büyük değişiklik kümelerinde ajanlar yalnızca bazı dosyaları seçerek inceler ve diğerlerini atlar.
-- **Konum kayması** — Bildirilen sorunlar gerçek kod konumuyla uyuşmaz; satır numaraları veya dosya başvuruları hedeften sapar.
-- **Tutarsız kalite** — Doğal dille yönlendirilen becerilerde hata ayıklamak zordur; küçük istem değişiklikleri inceleme kalitesini ciddi biçimde etkileyebilir.
+- **Eksik kapsam** — Büyük değişiklik kümelerinde ajanlar işin kolayına kaçıp yalnızca bazı dosyaları inceleme ve diğerlerini atlama eğilimindedir.
+- **Konum kayması** — Bildirilen sorunlar sıklıkla gerçek kod konumuyla uyuşmaz; satır numaraları veya dosya başvuruları hedeften sapar.
+- **Tutarsız kalite** — Doğal dille yönlendirilen becerilerde hata ayıklamak zordur; küçük istem değişiklikleriyle inceleme kalitesi belirgin biçimde dalgalanır.
 
 Temel neden, yalnızca dile dayanan bir mimaride inceleme sürecini sınırlayan kesin kuralların bulunmamasıdır.
 
-### Temel tasarım: Belirlenimci mühendislik × ajan
+### Temel tasarım: Belirlenimci mühendislik × ajan hibriti
 
 Open Code Review, belirlenimci mühendisliği ajanla birleştirir; her biri en iyi yaptığı işi üstlenir.
 
@@ -90,15 +90,15 @@ Open Code Review, belirlenimci mühendisliği ajanla birleştirir; her biri en i
 
 - **Hassas dosya seçimi** — İncelenecek ve filtrelenecek dosyaları kesin olarak belirleyerek önemli değişikliklerin atlanmasını önler.
 - **Akıllı dosya gruplama** — İlgili dosyaları tek inceleme biriminde toplar (ör. `message_en.properties` ve `message_zh.properties`). Her grup yalıtılmış bağlama sahip bir alt ajan olarak çalışır. Bu böl ve yönet yaklaşımı çok büyük değişikliklerde de kararlı kalır ve eşzamanlı incelemeyi doğal olarak destekler.
-- **Ayrıntılı kural eşleştirme** — İnceleme kurallarını dosyaların özellikleriyle eşleştirerek modelin dikkatini odaklar ve bilgi gürültüsünü kaynağında azaltır. Şablon motoruna dayalı eşleştirme, yalnızca dille yönlendirmeye göre daha kararlı ve öngörülebilirdir.
-- **Harici konumlandırma ve yeniden değerlendirme modülleri** — Bağımsız modüller, yapay zekâ yorumlarının hem konum hem içerik doğruluğunu sistematik olarak iyileştirir.
+- **Ayrıntılı kural eşleştirme** — İnceleme kurallarını dosyaların özellikleriyle eşleştirerek modelin dikkatini ilgili kurallara yoğunlaştırır ve bilgi gürültüsünü kaynağında azaltır. Şablon motoruna dayalı eşleştirme, yalnızca dille yönlendirmeye göre daha kararlı ve öngörülebilirdir.
+- **Harici konumlandırma ve yeniden değerlendirme modülleri** — Bağımsız yorum konumlandırma ve yorum yeniden değerlendirme modülleri, yapay zekâ yorumlarının hem konum hem içerik doğruluğunu sistematik olarak iyileştirir.
 
 **Ajan — Dinamik karar verme**
 
-Ajanın güçlü yanları, dinamik kararlar ve gerektiğinde bağlam getirme üzerinde yoğunlaşır:
+Ajanın güçlü yanları, dinamik kararlar ve dinamik bağlam getirme üzerinde yoğunlaşır:
 
-- **Senaryoya özel istemler** — Kod incelemesine göre ayrıntılı biçimde iyileştirilmiş şablonlar, etkinliği artırırken token tüketimini azaltır.
-- **Senaryoya özel araç kümesi** — Büyük ölçekli üretim verilerindeki araç çağrıları; sıklık dağılımları, araç başına tekrar oranları ve yeni araçların tüm çağrı zincirine etkisi dahil incelenerek oluşturulmuştur. Genel amaçlı araç kümelerine göre kod incelemesinde daha kararlı ve öngörülebilirdir.
+- **Senaryoya özel istemler** — Kod incelemesi için derinlemesine optimize edilmiş istem şablonları, etkinliği artırırken token tüketimini azaltır.
+- **Senaryoya özel araç kümesi** — Büyük ölçekli üretim verilerindeki araç çağrı kayıtlarının; çağrı sıklığı dağılımları, araç başına tekrar oranları ve yeni araçların tüm çağrı zincirine etkisi dahil ayrıntılı analizinden elde edilmiştir. Kod incelemesi için özel olarak geliştirilmiş bu araç kümesi, genel amaçlı ajan araç kümelerine göre daha kararlı ve öngörülebilirdir.
 
 ## Kullanım
 

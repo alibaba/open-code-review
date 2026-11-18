@@ -253,7 +253,7 @@ export const tr: TranslationKeys = {
   "docs.mcpFieldArgsDesc": "Sunucuya iletilen komut satırı argümanları",
   "docs.mcpFieldEnvDesc": "KEY=VALUE biçimindeki ortam değişkenleri",
   "docs.mcpFieldToolsDesc": "İzin verilen araç adları; boşsa sunucunun tüm araçları kullanılabilir",
-  "docs.mcpFieldSetupDesc": "Sunucuyu başlatmadan önce çalıştırılacak kabuk komutu; örneğin dizin oluşturma",
+  "docs.mcpFieldSetupDesc": "Sunucuyu başlatmadan önce çalıştırılacak kabuk komutu; örneğin indeks oluşturma",
   "docs.mcpNote": "Bir MCP araç adı yerleşik araçla çakışırsa uyarı verilerek atlanır. Kurulum komutunun zaman aşımı 5 dakikadır.",
   "docs.mcpExample": "Örnek: Kod yapısı analizi için CodeGraph ekleme",
   "docs.envTitle": "Claude Code entegrasyonu",
