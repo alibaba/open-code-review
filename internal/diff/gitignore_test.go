@@ -296,6 +296,78 @@ func TestIsPathExcluded_GlobstarAncestorRules(t *testing.T) {
 	}
 }
 
+func TestIsPathExcluded_AncestorPatternTargets(test *testing.T) {
+	cases := []struct {
+		name     string
+		relPath  string
+		patterns []string
+		want     bool
+	}{
+		{
+			name:     "slashless globstar negation matches nested basename",
+			relPath:  "src/cache/a.go",
+			patterns: []string{"cache", "!**cache"},
+			want:     false,
+		},
+		{
+			name:     "slashless globstar exclusion matches nested basename",
+			relPath:  "src/cache-data/a.go",
+			patterns: []string{"cache**"},
+			want:     true,
+		},
+		{
+			name:     "anchored globstar does not match nested basename",
+			relPath:  "src/cache/a.go",
+			patterns: []string{"cache", "!/**cache"},
+			want:     true,
+		},
+		{
+			name:     "anchored globstar negation matches root directory",
+			relPath:  "cache/a.go",
+			patterns: []string{"cache", "!/**cache"},
+			want:     false,
+		},
+		{
+			name:     "path globstar still matches full ancestor path",
+			relPath:  "src/cache/a.go",
+			patterns: []string{"**/cache"},
+			want:     true,
+		},
+		{
+			name:     "path wildcard does not cross directory separators",
+			relPath:  "src/ok/nested/a.go",
+			patterns: []string{"src/*", "!src/ok/", "!src/ok/nested/*.go"},
+			want:     false,
+		},
+		{
+			name:     "path wildcard still excludes sibling directory",
+			relPath:  "src/other/a.go",
+			patterns: []string{"src/*", "!src/ok/", "!src/ok/nested/*.go"},
+			want:     true,
+		},
+		{
+			name:     "anchored wildcard does not cross directory separators",
+			relPath:  "src/inner/a.go",
+			patterns: []string{"/*", "!/src/", "!*.go"},
+			want:     false,
+		},
+		{
+			name:     "question mark does not match a directory separator",
+			relPath:  "src/ok/a.go",
+			patterns: []string{"/src?ok"},
+			want:     false,
+		},
+	}
+	for _, testCase := range cases {
+		test.Run(testCase.name, func(test *testing.T) {
+			got := IsPathExcluded(".", testCase.relPath, testCase.patterns)
+			if got != testCase.want {
+				test.Errorf("IsPathExcluded(%q, %v) = %v, want %v", testCase.relPath, testCase.patterns, got, testCase.want)
+			}
+		})
+	}
+}
+
 // allowListGitignore is the "ignore everything, then re-include" idiom from
 // github/gitignore's Go.AllowList.gitignore. Repositories using it are the
 // reason negation patterns cannot be discarded: the leading `*` matches every

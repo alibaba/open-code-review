@@ -271,3 +271,49 @@ func TestProvider_Enumerate_GitignoreAncestorRules(t *testing.T) {
 		t.Errorf("paths = %v, want %v", paths, want)
 	}
 }
+
+func TestProvider_Enumerate_GitignoreAncestorExceptions(test *testing.T) {
+	cases := []struct {
+		name     string
+		patterns string
+		path     string
+	}{
+		{
+			name:     "slashless globstar negation",
+			patterns: "cache\n!**cache\n",
+			path:     "src/cache/a.go",
+		},
+		{
+			name:     "path wildcard with nested exception",
+			patterns: "src/*\n!src/ok/\n!src/ok/nested/*.go\n",
+			path:     "src/ok/nested/a.go",
+		},
+		{
+			name:     "anchored wildcard with nested exception",
+			patterns: "/*\n!/.gitignore\n!/src/\n!*.go\n",
+			path:     "src/inner/a.go",
+		},
+	}
+	for _, testCase := range cases {
+		test.Run(testCase.name, func(test *testing.T) {
+			repo := initTestRepo(test)
+			writeFile(test, repo, ".gitignore", []byte(testCase.patterns))
+			writeFile(test, repo, testCase.path, []byte("package fixture\n"))
+			gitCommit(test, repo, "init")
+
+			items, err := NewProvider(repo, nil, nil, 0).Enumerate(context.Background())
+			if err != nil {
+				test.Fatalf("Enumerate: %v", err)
+			}
+			paths := make([]string, 0, len(items))
+			for _, item := range items {
+				paths = append(paths, item.Path)
+			}
+			sort.Strings(paths)
+			want := []string{".gitignore", testCase.path}
+			if !reflect.DeepEqual(paths, want) {
+				test.Errorf("paths = %v, want %v", paths, want)
+			}
+		})
+	}
+}

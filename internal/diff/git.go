@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -456,24 +457,16 @@ func matchGitignoreAncestorBody(directoryPath, body string) bool {
 		body, anchored = trimmed, true
 	}
 
+	target := directoryPath
+	if !anchored && !strings.Contains(body, "/") {
+		target = path.Base(directoryPath)
+	}
+
 	if strings.Contains(body, "**") {
-		return matchGitignoreGlobstar(body, directoryPath)
+		return matchGitignoreGlobstar(body, target)
 	}
 
-	// Slashless patterns match a directory name at any depth — unless
-	// anchored, where the pattern addresses that name at the root only.
-	if !strings.Contains(body, "/") {
-		target := filepath.Base(directoryPath)
-		if anchored {
-			target = directoryPath
-		}
-		matched, _ := filepath.Match(body, target)
-		return matched
-	}
-
-	// Slash-containing patterns are relative to the .gitignore location and
-	// match the directory's full path only — no suffix fallback.
-	matched, _ := filepath.Match(body, directoryPath)
+	matched, _ := path.Match(body, target)
 	return matched
 }
 
