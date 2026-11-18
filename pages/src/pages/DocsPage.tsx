@@ -161,8 +161,6 @@ const DocsPage: React.FC = () => {
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({ 'sb-integrations': true });
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [hoveredHeadingId, setHoveredHeadingId] = useState<string>('');
-  /* Cancels an in-flight click-triggered scroll when a newer one starts */
-  const cancelPendingScroll = useRef<(() => void) | null>(null);
   const { t, language } = useTranslation();
   const { isMobile } = useResponsive();
 
@@ -184,6 +182,7 @@ const DocsPage: React.FC = () => {
   const [mainRetry, setMainRetry] = useState<{ language: Language; count: number }>({ language, count: 0 });
   const [englishFallback, setEnglishFallback] = useState<EnglishFallbackState>({ status: 'idle' });
   const [fallbackRetry, setFallbackRetry] = useState<{ requestKey: string; count: number }>({ requestKey: '', count: 0 });
+  const fallbackAttemptKey = useRef('');
 
   const loadedLanguage = docState.status === 'ready' ? docState.content.language : null;
 
@@ -222,7 +221,13 @@ const DocsPage: React.FC = () => {
     setDocState({ status: 'loading', language, attempt });
     loadLanguageContent(language)
       .then(docs => {
-        if (!cancelled) setDocState({ status: 'ready', content: { language, docs } });
+        if (!cancelled) {
+          setDocState({ status: 'ready', content: { language, docs } });
+          if (language === 'en') {
+            fallbackAttemptKey.current = '';
+            setEnglishFallback({ status: 'ready', docs });
+          }
+        }
       })
       .catch(error => {
         if (!cancelled) setDocState({ status: 'error', language, error, attempt });
@@ -236,9 +241,11 @@ const DocsPage: React.FC = () => {
    * the shared state no matter which trigger remains active; the attempt key
    * keeps a failed attempt from re-firing in a loop until the trigger changes
    * or the user retries. */
-  const fallbackAttemptKey = useRef('');
   useEffect(() => {
-    if (loadedLanguage === null || loadedLanguage === 'en') return;
+    if (loadedLanguage === null || loadedLanguage === 'en') {
+      fallbackAttemptKey.current = '';
+      return;
+    }
     const pageNeedsFallback = !hasTranslation(activeSlug, loadedLanguage);
     const searchNeedsFallback = searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
     if (!pageNeedsFallback && !searchNeedsFallback) {
@@ -359,10 +366,10 @@ const DocsPage: React.FC = () => {
     setExpandedItems(prev => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
-  const navigateToDoc = useCallback((slug: DocSlug) => {
-    navigate(`/docs/${slug}`);
-    // Scroll page to top
-    window.scrollTo(0, 0);
+  const navigateToDoc = useCallback((slug: DocSlug, fragment?: string) => {
+    navigate(`/docs/${slug}${fragment ? `#${fragment}` : ''}`);
+    // Scroll page to top when the destination has no requested heading.
+    if (!fragment) window.scrollTo(0, 0);
   }, [navigate]);
 
   /* Intercept clicks on internal doc links and convert to SPA navigation */
@@ -382,9 +389,11 @@ const DocsPage: React.FC = () => {
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
-    // Parse relative paths to extract slug
+    // Parse relative paths to extract slug and preserve any fragment.
     // Patterns: ../slug/, slug/, ../../slug/, ../slug/#anchor
-    const pathOnly = href.split('#')[0].replace(/\/+$/, ''); // remove trailing slash & anchor
+    const hashIndex = href.indexOf('#');
+    const pathOnly = (hashIndex === -1 ? href : href.slice(0, hashIndex)).replace(/\/+$/, '');
+    const rawFragment = hashIndex === -1 ? '' : href.slice(hashIndex + 1);
     const segments = pathOnly.split('/').filter(s => s !== '' && s !== '.' && s !== '..');
     const lastSegment = segments[segments.length - 1];
     if (!lastSegment) return;
@@ -394,14 +403,7 @@ const DocsPage: React.FC = () => {
     // Verify it's a valid doc slug
     if (validSlugs.has(slug)) {
       e.preventDefault();
-      navigateToDoc(slug);
-      // Handle anchor scroll after navigation with reliable retry
-      const anchor2raw = href.split('#')[1];
-      const anchor2 = anchor2raw ? decodeFragment(anchor2raw) : undefined;
-      if (anchor2) {
-        cancelPendingScroll.current?.();
-        cancelPendingScroll.current = scrollToFragmentWhenReady(anchor2);
-      }
+      navigateToDoc(slug, rawFragment || undefined);
     }
   }, [navigateToDoc]);
 

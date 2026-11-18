@@ -4,11 +4,10 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { LanguageProvider, useTranslation } from '../i18n';
 import { en } from '../i18n/en';
 import { zh } from '../i18n/zh';
-import { reloadAfterChunkError } from '../components/ErrorBoundary';
 import type { Language } from '../i18n/types';
 import DocsPage from './DocsPage';
 
@@ -67,20 +66,29 @@ vi.mock('../content/docs', () => ({
 
 vi.mock('../components/Navbar', () => ({ default: () => <nav data-testid="navbar" /> }));
 vi.mock('../components/Footer', () => ({ default: () => <footer data-testid="footer" /> }));
-/* Renders headings with ids matching generateHeadingId so fragment-scroll
- * and TOC tests exercise the real lookup paths. */
+/* Renders headings and links with the IDs and hrefs used by the real renderer so
+ * fragment navigation tests exercise the delegated click path. */
 vi.mock('../components/MarkdownRenderer', () => ({
-  default: ({ content }: { content: string }) => (
-    <div data-testid="markdown" data-content={content}>
-      {content
-        .split('\n')
-        .filter(line => line.startsWith('## '))
-        .map(line => {
-          const text = line.slice(3).trim();
-          return <h2 key={text} id={text.toLowerCase().replace(/[^a-z0-9]+/g, '-')}>{text}</h2>;
-        })}
-    </div>
-  ),
+  default: ({ content }: { content: string }) => {
+    const lines = content.split('\n');
+    return (
+      <div data-testid="markdown" data-content={content}>
+        {lines
+          .filter(line => line.startsWith('## '))
+          .map(line => {
+            const text = line.slice(3).trim();
+            return <h2 key={text} id={text.toLowerCase().replace(/[^a-z0-9]+/g, '-')}>{text}</h2>;
+          })}
+        {lines
+          .filter(line => line.startsWith('['))
+          .map(line => {
+            const match = line.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+            if (!match) return null;
+            return <a key={line} href={match[2]}>{match[1]}</a>;
+          })}
+      </div>
+    );
+  },
 }));
 vi.mock('../hooks/useResponsive', () => ({ useResponsive: () => ({ isMobile: false }) }));
 
@@ -110,6 +118,11 @@ function NavHistoryButtons() {
   );
 }
 
+function CurrentLocation() {
+  const { pathname, hash } = useLocation();
+  return <div data-testid="location">{pathname}{hash}</div>;
+}
+
 function renderDocsPage(initialLang: Language = 'en', initialEntry = '/docs/quickstart') {
   window.localStorage.setItem('ocr-lang', initialLang);
   return render(
@@ -119,6 +132,7 @@ function renderDocsPage(initialLang: Language = 'en', initialEntry = '/docs/quic
         <SwitchLangButton to="zh" />
         <SwitchLangButton to="ja" />
         <NavHistoryButtons />
+        <CurrentLocation />
         <Routes>
           <Route path="/docs/:slug" element={<DocsPage />} />
         </Routes>
@@ -461,6 +475,72 @@ describe('DocsPage', () => {
     expect(screen.getByRole('button', { name: zh['error.reload'] })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: zh['error.reload'] }));
     expect(reloadSpy).toHaveBeenCalledTimes(1);
+  });
+  it('uses cached English content after a failed fallback and language round trip', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/installation');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+    await act(async () => {
+      h.pending.en[0].reject(new Error('en fallback failed'));
+    });
+
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(1);
+
+    fireEvent.click(screen.getByTestId('switch-en'));
+    await act(async () => {
+      h.pending.en[1].resolve({ installation: 'en installation body' });
+    });
+
+    fireEvent.click(screen.getByTestId('switch-zh'));
+    await waitFor(() => {
+      expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('en installation body');
+    });
+
+    expect(screen.queryByRole('button', { name: zh['docs.content.retry'] })).toBeNull();
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(2);
+  });
+
+  it('preserves delayed internal fragments through fallback navigation and history', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/quickstart');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({
+        quickstart: '[Installation](../installation/#intro)',
+      });
+    });
+
+    fireEvent.click(screen.getByRole('link', { name: 'Installation' }));
+    expect(screen.getByTestId('location').textContent).toBe('/docs/installation#intro');
+    expect(h.loadCalls).toEqual(['zh', 'en']);
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    await act(async () => {
+      h.pending.en[0].resolve({ installation: '## Intro\n\ninstallation body' });
+    });
+
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByTestId('go-back'));
+    await waitFor(() => {
+      expect(screen.getByTestId('location').textContent).toBe('/docs/quickstart');
+    });
+
+    fireEvent.click(screen.getByTestId('go-forward'));
+    await waitFor(() => {
+      expect(screen.getByTestId('location').textContent).toBe('/docs/installation#intro');
+    });
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    });
   });
   it('search in a partial locale loads the English fallback and covers English entries', async () => {
     h.available.zh = ['quickstart'];
