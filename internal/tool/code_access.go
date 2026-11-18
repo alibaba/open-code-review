@@ -23,6 +23,16 @@ func NewComparisonCodeAccess(current, previous FileReader) (*CodeAccess, error) 
 	return &CodeAccess{newReader: current, oldReader: previous}, nil
 }
 
+func NewWorkspaceCodeAccess(current, previous FileReader) (*CodeAccess, error) {
+	if current.Mode != ModeWorkspace || current.Ref != "" {
+		return nil, fmt.Errorf("workspace code access requires a live working tree")
+	}
+	if (previous.Mode != ModeCommit || previous.Ref == "") && (previous.Mode != ModeEmpty || previous.Ref != "") {
+		return nil, fmt.Errorf("workspace code access requires a pinned base or an empty tree")
+	}
+	return &CodeAccess{newReader: current, oldReader: previous}, nil
+}
+
 func (access *CodeAccess) execute(ctx context.Context, args map[string]any, current *FileReader, run func(*FileReader) (string, error)) (string, error) {
 	rawSide, supplied := args["side"]
 	if access == nil {

@@ -6,6 +6,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -61,5 +62,28 @@ func TestGetMeter(t *testing.T) {
 	m := getMeter()
 	if m == nil {
 		t.Error("expected non-nil meter")
+	}
+}
+
+// The review fans out per-file goroutines (--concurrency, default 8) that record
+// LLM and tool metrics, so the first use of the metric handles is concurrent.
+// Run with -race (as CI does) to detect unsynchronised lazy initialisation.
+func TestRecordMetrics_ConcurrentFirstUse(t *testing.T) {
+	setupEnabledTelemetry(t)
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			RecordLLMRequest(ctx, "gpt-4", time.Millisecond, 10, "ok")
+			RecordToolCall(ctx, "file_read", time.Millisecond, true)
+		}()
+	}
+	wg.Wait()
+
+	if mLLMRequests == nil || mToolCalls == nil {
+		t.Fatal("expected metric handles to be initialised after concurrent first use")
 	}
 }

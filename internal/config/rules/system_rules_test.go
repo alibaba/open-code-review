@@ -213,6 +213,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/myapp/views.cljs", "Laziness, Sequences, and Resource Scope"},
 		{"src/myapp/shared.cljc", "Laziness, Sequences, and Resource Scope"},
 		{"deps.edn", "EDN Data, Configuration, and Untrusted Input"},
+		{"sources/pool.move", "Ability Grants"},
+		{"contracts/amm/sources/router.move", "Ability Grants"},
+		{"Move.toml", "Move Package Manifest"},
+		{"contracts/amm/Move.toml", "Move Package Manifest"},
 	}
 
 	for _, tt := range tests {
@@ -1086,6 +1090,83 @@ func TestResolveDetail_SystemPHPPatternMatch(t *testing.T) {
 			} {
 				if !strings.Contains(detail.Rule, required) {
 					t.Errorf("expected PHP rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemMoveTomlPatternPrecedesMove(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"Move.toml", "packages/library/Move.toml", "PACKAGES/APP/MOVE.TOML"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/Move.toml" {
+				t.Errorf("expected pattern '**/Move.toml', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Move Package Manifest Hygiene",
+				"`Move.lock`",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected rule to contain %q for %s", required, path)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemMoveRulesDialectAndEnvironmentScope(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	manifest := dr.ResolveDetail("Move.toml").Rule
+	source := dr.ResolveDetail("sources/pool.move").Rule
+
+	tests := []struct {
+		name    string
+		rule    string
+		want    []string
+		notWant []string
+	}{
+		{
+			name: "manifest does not flag valid per-environment overrides",
+			rule: manifest,
+			want: []string{
+				"Do not flag a replacement `rev`, `published-at` or `original-id` for differing from the default dependency or from another environment",
+				"Flag only a mismatch inside one environment",
+			},
+			notWant: []string{"whose `rev` does not match the corresponding `[dependencies]` entry"},
+		},
+		{
+			name: "source rule scopes dialect advice",
+			rule: source,
+			want: []string{"(Sui, Move 2024)", "(Aptos and legacy editions)", "Sui: "},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, w := range tt.want {
+				if !strings.Contains(tt.rule, w) {
+					t.Errorf("rule missing %q", w)
+				}
+			}
+			for _, nw := range tt.notWant {
+				if strings.Contains(tt.rule, nw) {
+					t.Errorf("rule still contains %q", nw)
 				}
 			}
 		})

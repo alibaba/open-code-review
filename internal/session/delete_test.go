@@ -208,11 +208,21 @@ func TestSameRepoPath_OneDirectorySpelledTwoWays(t *testing.T) {
 	}
 
 	t.Run("trailing separator and dot segments", func(t *testing.T) {
-		if !sameRepoPath(repo, repo+string(os.PathSeparator)) {
+		if !SameRepoPath(repo, repo+string(os.PathSeparator)) {
 			t.Error("a trailing separator must not read as a different repository")
 		}
-		if !sameRepoPath(repo, filepath.Join(repo, ".")) {
+		if !SameRepoPath(repo, filepath.Join(repo, ".")) {
 			t.Error("a dot segment must not read as a different repository")
+		}
+	})
+
+	t.Run("the other separator spelling", func(t *testing.T) {
+		// The reported case: one session records `C:\repo` because the path came
+		// from the OS, another records `C:/repo` because that is how --repo or
+		// Git spelled it. filepath.Clean settles both; an exact compare split one
+		// repository across its own spellings and compare refused to run.
+		if !SameRepoPath(repo, filepath.ToSlash(repo)) {
+			t.Error("a path and its other-separator spelling name one directory")
 		}
 	})
 
@@ -221,7 +231,7 @@ func TestSameRepoPath_OneDirectorySpelledTwoWays(t *testing.T) {
 		if err := os.Symlink(repo, link); err != nil {
 			t.Skipf("symlinks unavailable: %v", err)
 		}
-		if !sameRepoPath(repo, link) {
+		if !SameRepoPath(repo, link) {
 			t.Error("a symlink to the same directory must compare equal")
 		}
 	})
@@ -231,7 +241,7 @@ func TestSameRepoPath_OneDirectorySpelledTwoWays(t *testing.T) {
 		if _, err := os.Stat(upper); err != nil {
 			t.Skip("case-sensitive filesystem: A-B and a-b are different directories here")
 		}
-		if !sameRepoPath(repo, upper) {
+		if !SameRepoPath(repo, upper) {
 			t.Error("on a case-insensitive filesystem the two spellings are one directory")
 		}
 	})
@@ -241,17 +251,17 @@ func TestSameRepoPath_OneDirectorySpelledTwoWays(t *testing.T) {
 		if err := os.MkdirAll(other, 0o755); err != nil {
 			t.Fatalf("MkdirAll: %v", err)
 		}
-		if sameRepoPath(repo, other) {
+		if SameRepoPath(repo, other) {
 			t.Error("two different directories must not compare equal")
 		}
 	})
 
 	t.Run("a vanished directory falls back to exact spelling", func(t *testing.T) {
 		gone := filepath.Join(base, "removed")
-		if !sameRepoPath(gone, gone) {
+		if !SameRepoPath(gone, gone) {
 			t.Error("an identical path must match even when it no longer exists")
 		}
-		if sameRepoPath(gone, filepath.Join(base, "removed-other")) {
+		if SameRepoPath(gone, filepath.Join(base, "removed-other")) {
 			t.Error("without a filesystem to ask, differing paths must not match")
 		}
 	})

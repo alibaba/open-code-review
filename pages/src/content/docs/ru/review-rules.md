@@ -303,6 +303,8 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/build.gradle`                               | `build_gradle.md` — зависимости Gradle.                                                          |
 | `**/package.json`                               | `package_json.md` — зависимости / скрипты NPM.                                                   |
 | `**/Cargo.toml`                                 | `cargo_toml.md` — манифест Rust.                                                                 |
+| `**/Move.toml` | `move_toml.md` — манифест пакета Move. |
+| `**/*.move` | `move.md` — исходный код Move. |
 | `**/composer.json`                              | `composer_json.md` — зависимости Composer, автозагрузка, скрипты, плагины и конфигурация пакета. |
 | `**/*.{json,json5,jsonc}`                       | `json.md` — обычный JSON (также совпадает `.json5` и `.jsonc`). |
 | `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md` — YAML workflow GitHub Actions.                                            |
