@@ -13,6 +13,7 @@ const POLICY = require("../../.github/pr-admission.json");
 const AUTHOR = { id: 101, login: "contributor", type: "User" };
 const BOT = { id: 41898282, login: "github-actions[bot]", type: "Bot" };
 const REPO = { owner: "example", repo: "project" };
+const REOPENED_AT = "2026-01-02T00:00:00Z";
 const tests = [];
 
 function test(name, check) {
@@ -23,6 +24,7 @@ function pull(number, overrides = {}) {
   return {
     number, user: { ...AUTHOR }, state: "open", draft: false,
     created_at: new Date(Date.UTC(2026, 0, 1, 0, 0, number)).toISOString(),
+    updated_at: new Date(Date.UTC(2026, 0, 1, 0, 0, number)).toISOString(),
     ...overrides,
   };
 }
@@ -31,11 +33,17 @@ function pulls(count) {
   return Array.from({ length: count }, (_, index) => pull(index + 1));
 }
 
+function reopening(id = 1, created_at = REOPENED_AT) {
+  return { id, event: "reopened", created_at };
+}
+
 function fixture(options = {}) {
   const current = options.current || pull(11);
+  if (options.action === "reopened" && !options.events) current.updated_at = REOPENED_AT;
   const storedPulls = options.pulls || pulls(11);
   const comments = options.comments || [];
-  const events = options.events || [];
+  const events = options.events || (options.action === "reopened" ? [reopening()] : []);
+  const eventsByNumber = options.eventsByNumber || new Map([[current.number, events]]);
   const calls = [];
   const writes = [];
   const outputs = {};
@@ -49,7 +57,7 @@ function fixture(options = {}) {
   const read = (method, result) => async (params) => {
     calls.push({ method, params });
     if (options.fail === method) throw new Error(`API failed: ${method}`);
-    return { data: typeof result === "function" ? result() : result };
+    return { data: typeof result === "function" ? result(params) : result };
   };
   const write = (method, perform) => async (params) => {
     calls.push({ method, params });
@@ -75,7 +83,10 @@ function fixture(options = {}) {
     return storedPulls.filter((entry) => entry.state === "open");
   });
   github.rest.issues.listComments = read("listComments", comments);
-  github.rest.issues.listEvents = read("listEvents", events);
+  github.rest.issues.listEvents = read("listEvents", ({ issue_number }) => {
+    const history = eventsByNumber.get(issue_number) || [];
+    return typeof history === "function" ? history() : history;
+  });
   github.rest.issues.createComment = write("createComment", (params) => {
     assert.deepStrictEqual(params.request, { retries: 0 });
     comments.push({ id: comments.length + 1, user: BOT, body: params.body });
@@ -97,13 +108,23 @@ function fixture(options = {}) {
       assert.strictEqual(params.sort, "created");
       assert.strictEqual(params.direction, "asc");
       assert.ok(!("base" in params) && !("head" in params));
-    } else {
+    } else if (method !== github.rest.issues.listEvents) {
       assert.strictEqual(params.issue_number, current.number);
+    } else {
+      assert.ok(Number.isSafeInteger(params.issue_number) && params.issue_number > 0);
     }
     return (await method(params)).data;
   };
   const core = { setOutput: (key, value) => { outputs[key] = value; }, info: () => {} };
-  return { github, context, core, calls, writes, outputs, current, storedPulls, comments, events };
+  return { github, context, core, calls, writes, outputs, current, storedPulls, comments, events, eventsByNumber };
+}
+
+function reopen(subject, created_at = REOPENED_AT) {
+  subject.current.state = "open";
+  subject.current.updated_at = created_at;
+  Object.assign(subject.storedPulls.find((entry) => entry.number === subject.current.number), subject.current);
+  subject.events.push(reopening(subject.events.length + 1, created_at));
+  subject.context.payload = { action: "reopened", pull_request: { ...subject.current } };
 }
 
 async function expectAdmission(subject, allowed) {
@@ -230,12 +251,163 @@ for (const count of [10, 11]) {
     await expectAdmission(subject, true);
     if (count === 11) subject.storedPulls.push(pull(11));
     subject.context.payload.action = "opened";
-    subject.events.push({ event: "closed" }, { event: "reopened" });
     await expectAdmission(subject, false);
     assert.strictEqual(subject.current.state, "open");
     assert.deepStrictEqual(subject.writes, []);
   });
 }
+
+for (const reopenedAt of ["2026-01-01T00:00:10Z", "2026-01-01T00:00:11Z", "2026-01-01T00:00:12Z"]) {
+  for (const order of [[11, 1], [1, 11]]) {
+    test(`mixed openings preserve episode priority at ${reopenedAt} in order ${order}`, async () => {
+      const entries = pulls(11);
+      entries[0].updated_at = reopenedAt;
+      const histories = new Map([[1, [reopening(1, reopenedAt)]]]);
+      const winner = Date.parse(reopenedAt) < Date.parse(pull(11).created_at) ? 1 : 11;
+      const closed = [];
+      for (const number of order) {
+        const subject = fixture({
+          current: entries.find((entry) => entry.number === number), pulls: entries,
+          action: number === 1 ? "reopened" : "opened",
+          events: histories.get(number) || [], eventsByNumber: histories,
+        });
+        await expectAdmission(subject, number === winner);
+        closed.push(...subject.writes.filter((entry) => entry.method === "close").map((entry) => entry.params.pull_number));
+      }
+      assert.deepStrictEqual(closed, [winner === 1 ? 11 : 1]);
+      assert.strictEqual(entries.filter((entry) => entry.state === "open").length, 10);
+      assert.strictEqual(entries.find((entry) => entry.number === winner).state, "open");
+    });
+  }
+}
+
+for (const order of [[1, 2], [2, 1]]) {
+  test(`two reopened PRs use reopening time rather than creation time in order ${order}`, async () => {
+    const entries = pulls(11);
+    entries[0].updated_at = "2026-01-02T00:00:02Z";
+    entries[1].updated_at = "2026-01-02T00:00:01Z";
+    const histories = new Map(entries.slice(0, 2).map((entry) => [entry.number, [reopening(entry.number, entry.updated_at)]]));
+    for (const number of order) {
+      const subject = fixture({
+        current: entries[number - 1], pulls: entries, action: "reopened",
+        events: histories.get(number), eventsByNumber: histories,
+      });
+      await expectAdmission(subject, number === 2);
+    }
+    assert.strictEqual(entries[0].state, "closed");
+    assert.strictEqual(entries[1].state, "open");
+  });
+}
+
+for (const user of [AUTHOR, { ...POLICY.exemptBots[0], type: "Bot" }]) {
+  for (const staleFirst of [true, false]) {
+    test(`superseded reopen skips review for ${user.login}, stale first: ${staleFirst}`, async () => {
+      const subject = fixture({ current: pull(1, { user, head: { sha: "old-head" } }), pulls: [pull(1, { user })], action: "reopened" });
+      const stale = subject.context.payload;
+      subject.current.head = { sha: "new-head" };
+      reopen(subject, "2026-01-02T00:00:02Z");
+      const latest = subject.context.payload;
+      for (const payload of staleFirst ? [stale, latest] : [latest, stale]) {
+        subject.context.payload = payload;
+        await expectAdmission(subject, payload === latest);
+      }
+      assert.notStrictEqual(stale.pull_request.head.sha, latest.pull_request.head.sha);
+      assert.deepStrictEqual(subject.writes, []);
+    });
+  }
+}
+
+test("opening history must stabilize even when the open PR numbers do not change", async () => {
+  let reads = 0;
+  const histories = new Map([[1, () => ++reads === 1 ? [] : [reopening()]]]);
+  const subject = fixture({ eventsByNumber: histories });
+  await expectAdmission(subject, true);
+  assert.strictEqual(subject.calls.filter((entry) => entry.method === "list").length, 3);
+  assert.deepStrictEqual(subject.writes, []);
+});
+
+test("unstable opening cycles fail without moderation", async () => {
+  let reads = 0;
+  const histories = new Map([[1, () => [reopening(++reads, `2026-01-02T00:00:0${reads}Z`)]]]);
+  const subject = fixture({ eventsByNumber: histories });
+  await assert.rejects(run(subject), /did not stabilize/);
+  assert.strictEqual(subject.outputs.allowed, "false");
+  assert.deepStrictEqual(subject.writes, []);
+});
+
+for (const action of ["opened", "reopened"]) {
+  test(`skips an ${action} event superseded during the open PR scans`, async () => {
+    let reads = 0;
+    const previous = action === "opened" ? [] : [reopening()];
+    const histories = new Map([[1, () => ++reads === 1 ? previous : [...previous, reopening(2, "2026-01-02T00:00:02Z")]]]);
+    const subject = fixture({ current: pull(1), pulls: pulls(1), action, eventsByNumber: histories });
+    await expectAdmission(subject, false);
+    assert.strictEqual(subject.calls.filter((entry) => entry.method === "list").length, 2);
+    assert.deepStrictEqual(subject.writes, []);
+  });
+}
+
+test("rechecks the opening cycle before closing an excess PR", async () => {
+  let reads = 0;
+  const histories = new Map([[11, () => ++reads < 4 ? [reopening()] : [reopening(), reopening(2, "2026-01-02T00:00:02Z")]]]);
+  const subject = fixture({ action: "reopened", eventsByNumber: histories });
+  await expectAdmission(subject, false);
+  assert.strictEqual(reads, 4);
+  assert.deepStrictEqual(subject.writes, []);
+  assert.strictEqual(subject.current.state, "open");
+});
+
+test("uses the latest reopening even when history is returned out of order", async () => {
+  const subject = fixture({ current: pull(1, { updated_at: "2026-01-02T00:00:02Z" }), pulls: pulls(1), action: "reopened",
+    events: [reopening(2, "2026-01-02T00:00:02Z"), { event: "closed" }, reopening()] });
+  await expectAdmission(subject, true);
+});
+
+for (const updated_at of [undefined, null, "bad-date", 123]) {
+  test(`rejects a reopened payload with invalid updated_at: ${updated_at}`, async () => {
+    const subject = fixture({ action: "reopened" });
+    subject.context.payload.pull_request.updated_at = updated_at;
+    await assert.rejects(run(subject), /reopening metadata/);
+    assert.strictEqual(subject.outputs.allowed, "false");
+    assert.deepStrictEqual(subject.writes, []);
+  });
+}
+
+test("a missing or lagging reopening history cannot authorize review", async () => {
+  for (const events of [[], [reopening(1, "2026-01-01T00:01:00Z")]]) {
+    const subject = fixture({ current: pull(11, { updated_at: REOPENED_AT }), action: "reopened", events });
+    await assert.rejects(run(subject), /reopening metadata|opening cycle/);
+    assert.strictEqual(subject.outputs.allowed, "false");
+    assert.deepStrictEqual(subject.writes, []);
+  }
+});
+
+test("same-second reopenings fail closed instead of admitting indistinguishable events", async () => {
+  for (const events of [[reopening(1), reopening(2)], [reopening(2), reopening(1)]]) {
+    const subject = fixture({ current: pull(11, { updated_at: REOPENED_AT }), action: "reopened", events });
+    await assert.rejects(run(subject), /opening cycle/);
+    assert.strictEqual(subject.outputs.allowed, "false");
+    assert.deepStrictEqual(subject.writes, []);
+  }
+});
+
+for (const events of [
+  [reopening(0)], [reopening("1")], [reopening(1, "bad-date")],
+  [reopening(1, null)], [reopening(1, "2025-01-01T00:00:00Z")], [reopening(), reopening()],
+]) {
+  test(`invalid reopening history cannot cause moderation: ${JSON.stringify(events)}`, async () => {
+    const subject = fixture({ events });
+    await assert.rejects(run(subject), /reopening history/);
+    assert.strictEqual(subject.outputs.allowed, "false");
+    assert.deepStrictEqual(subject.writes, []);
+  });
+}
+
+test("does not scan unrelated authors' histories or non-target histories below the cap", async () => {
+  const subject = fixture({ current: pull(5), pulls: [...pulls(9), pull(10, { user: { ...AUTHOR, id: 202 } })] });
+  await expectAdmission(subject, true);
+  assert.ok(subject.calls.filter((entry) => entry.method === "listEvents").every((entry) => entry.params.issue_number === 5));
+});
 
 test("allows the explicitly configured bot without listing PRs", async () => {
   const subject = fixture({ current: pull(11, { user: { ...POLICY.exemptBots[0], type: "Bot" } }) });
@@ -246,7 +418,7 @@ test("allows the explicitly configured bot without listing PRs", async () => {
 test("stale opened events also skip review for an exempt bot", async () => {
   const subject = fixture({
     current: pull(11, { user: { ...POLICY.exemptBots[0], type: "Bot" } }),
-    events: [{ event: "reopened" }], fail: "list",
+    events: [reopening()], fail: "list",
   });
   await expectAdmission(subject, false);
   assert.deepStrictEqual(subject.writes, []);
@@ -288,9 +460,7 @@ test("retries reuse the bot's own comment, even beyond the first comments page",
   const subject = fixture({ comments: Array.from({ length: 105 }, (_, index) => ({ id: index + 1, user: AUTHOR, body: "Discussion" })) });
   await expectAdmission(subject, false);
   await expectAdmission(subject, false);
-  subject.current.state = "open";
-  subject.storedPulls[10].state = "open";
-  subject.context.payload.action = "reopened";
+  reopen(subject);
   await expectAdmission(subject, false);
   assert.strictEqual(subject.writes.filter((entry) => entry.method === "createComment").length, 1);
   assert.strictEqual(subject.writes.filter((entry) => entry.method === "updateComment").length, 0);
@@ -300,8 +470,7 @@ test("retries reuse the bot's own comment, even beyond the first comments page",
 test("updates the existing explanation when the count changes", async () => {
   const subject = fixture();
   await expectAdmission(subject, false);
-  subject.current.state = "open";
-  subject.storedPulls[10].state = "open";
+  reopen(subject);
   subject.storedPulls.push(pull(12));
   await expectAdmission(subject, false);
   assert.strictEqual(subject.comments.length, 1);

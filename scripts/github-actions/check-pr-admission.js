@@ -23,16 +23,61 @@ function validatePullRequest(pullRequest) {
   }
 }
 
-async function readOpenPullRequests(github, repo, current) {
+async function readOpening(github, repo, pullRequest) {
+  const events = await github.paginate(github.rest.issues.listEvents, {
+    ...repo, issue_number: pullRequest.number, per_page: 100,
+  });
+  const reopenings = events.filter((event) => event.event === "reopened");
+  const ids = new Set();
+  for (const event of reopenings) {
+    if (!Number.isSafeInteger(event.id) || event.id < 1 || ids.has(event.id) ||
+        typeof event.created_at !== "string" || !Number.isFinite(Date.parse(event.created_at)) ||
+        Date.parse(event.created_at) < Date.parse(pullRequest.created_at)) {
+      throw new Error("Invalid PR reopening history. Re-run PR admission.");
+    }
+    ids.add(event.id);
+  }
+  reopenings.sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at) || right.id - left.id);
+  const timestamp = Date.parse(reopenings[0]?.created_at || pullRequest.created_at);
+  return {
+    id: reopenings[0]?.id || 0,
+    timestamp,
+    ambiguous: reopenings.filter((event) => Date.parse(event.created_at) === timestamp).length > 1,
+  };
+}
+
+function isCurrentOpening(context, opening) {
+  if (context.payload.action === "opened") return opening.id === 0;
+  const updatedAt = context.payload.pull_request.updated_at;
+  if (typeof updatedAt !== "string" || !Number.isFinite(Date.parse(updatedAt)) || !opening.id) {
+    throw new Error("Missing PR reopening metadata. Re-run PR admission.");
+  }
+  if (Date.parse(updatedAt) < opening.timestamp) return false;
+  if (Date.parse(updatedAt) !== opening.timestamp || opening.ambiguous) {
+    throw new Error("Cannot identify the PR opening cycle. Retry, or close and reopen the PR in a later second.");
+  }
+  return true;
+}
+
+async function readOpenPullRequests(github, repo, current, limit) {
   let previous;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const pulls = await readOpenSnapshot(github, repo, current);
-    const signature = JSON.stringify(pulls.map((pullRequest) => [
-      pullRequest.number, pullRequest.user.id, pullRequest.created_at,
-    ]));
+    const authored = pulls.filter((pullRequest) => pullRequest.user.id === current.user.id)
+      .map((pullRequest) => ({ ...pullRequest }));
+    for (const pullRequest of authored) {
+      if (authored.length > limit || pullRequest.number === current.number) {
+        pullRequest.opening = await readOpening(github, repo, pullRequest);
+      }
+    }
+    const signature = JSON.stringify([
+      pulls.map((pullRequest) => [pullRequest.number, pullRequest.user.id, pullRequest.created_at]),
+      authored.map((pullRequest) => [pullRequest.number, pullRequest.opening]),
+    ]);
     if (signature === previous) {
-      return pulls.filter((pullRequest) => pullRequest.user.id === current.user.id)
-        .sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at) || left.number - right.number);
+      return authored.length <= limit ? authored : authored.sort((left, right) =>
+        left.opening.timestamp - right.opening.timestamp ||
+        Number(Boolean(left.opening.id)) - Number(Boolean(right.opening.id)) || left.number - right.number);
     }
     previous = signature;
   }
@@ -98,14 +143,9 @@ async function run({ github, context, core, policy = POLICY }) {
     core.info(`PR #${number} is no longer open; skipping admission and review.`);
     return false;
   }
-  if (context.payload.action === "opened") {
-    const events = await github.paginate(github.rest.issues.listEvents, {
-      ...repo, issue_number: number, per_page: 100,
-    });
-    if (events.some((event) => event.event === "reopened")) {
-      core.info(`PR #${number} has been reopened; skipping the stale opened event and review.`);
-      return false;
-    }
+  if (!isCurrentOpening(context, await readOpening(github, repo, current))) {
+    core.info(`PR #${number} has a newer opening cycle; skipping the stale event and review.`);
+    return false;
   }
   if (current.user.type === "Bot" && policy.exemptBots.some((bot) =>
     bot.id === current.user.id && bot.login === current.user.login)) {
@@ -113,9 +153,13 @@ async function run({ github, context, core, policy = POLICY }) {
     core.info(`PR #${number} belongs to an explicitly exempt automation account.`);
     return true;
   }
-  const pulls = await readOpenPullRequests(github, repo, current);
-  const exceedsLimit = pulls.length > policy.maxOpen && (context.payload.action === "reopened" ||
-    pulls.findIndex((pullRequest) => pullRequest.number === number) >= policy.maxOpen);
+  const pulls = await readOpenPullRequests(github, repo, current, policy.maxOpen);
+  if (!isCurrentOpening(context, pulls.find((pullRequest) => pullRequest.number === number).opening)) {
+    core.info(`PR #${number} was reopened during admission; skipping the stale event and review.`);
+    return false;
+  }
+  const exceedsLimit = pulls.length > policy.maxOpen &&
+    pulls.findIndex((pullRequest) => pullRequest.number === number) >= policy.maxOpen;
   if (!exceedsLimit) {
     core.setOutput("allowed", "true");
     core.info(`PR #${number} passes the open-PR limit (${pulls.length} currently open).`);
@@ -129,6 +173,10 @@ async function run({ github, context, core, policy = POLICY }) {
   }
   if (latest.state !== "open") {
     core.info(`PR #${number} is no longer open; skipping closure and review.`);
+    return false;
+  }
+  if (!isCurrentOpening(context, await readOpening(github, repo, latest))) {
+    core.info(`PR #${number} was reopened before moderation; skipping closure and review.`);
     return false;
   }
   await explainClosure(github, repo, number, pulls.length, policy.maxOpen);

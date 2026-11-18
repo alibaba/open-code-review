@@ -14,12 +14,17 @@ not assess patch quality, prohibit AI assistance, or target particular contribut
   subject to the same cap as people.
 - Admission runs on `opened` and `reopened` events. It can close only the PR that
   triggered that run. There is no rollout sweep or scheduled cleanup of old PRs.
-- New PRs are ordered by creation time, then PR number. A delayed check does not
-  reject an earlier new PR just because newer submissions pushed the count over
-  ten. Reopening consumes a slot: a reopened PR is closed again if the author's
-  total, including that PR, exceeds ten. If a PR has since been reopened, a delayed
-  or retried `opened` run skips both moderation and AI review; the `reopened` event
-  is responsible for its admission instead.
+- PRs are ordered by the start of their current open cycle: creation time for
+  never-reopened PRs, or the most recent reopening time. A reopening consumes a
+  new slot, not its original creation priority. Delayed checks preserve the first
+  ten cycles even when new and reopened events arrive out of order. For equal
+  timestamps, new PRs precede reopened PRs, then PR number breaks ties.
+- Both `opened` and `reopened` runs skip moderation and AI review when a newer
+  opening cycle has superseded their event. Reopened events are matched using
+  their payload's `pull_request.updated_at` and the latest reopening event's
+  timestamp, not the PR's current update time. If multiple reopenings occur in
+  the same second, admission fails closed because those event payloads cannot
+  reliably identify the current cycle; close and reopen in a later second.
 - Rejected PRs receive an explanatory comment and are closed, not locked.
   Accounts are never blocked. After other PRs are merged or closed, authors can
   reopen a rejected PR when a slot is available. The bot reuses its own policy
@@ -46,8 +51,12 @@ executes PR content, or installs dependencies. It uses only `contents: read` and
 `pull-requests: write` on the regular `GITHUB_TOKEN`; no extra PAT is needed.
 PRs and comments are read using paginated REST APIs, not the search index. Admission
 requires two consecutive matching open-PR snapshots within at most three scans;
-an unstable list fails without moderation or AI review. This catches page shifts
-caused by concurrent closures without retrying indefinitely.
+an unstable list fails without moderation or AI review. Snapshots include the
+triggering PR's opening cycle and, when over the cap, every open PR's cycle for
+that author. This catches page shifts and close/reopen cycles that leave the
+same PR numbers open. Other authors' event histories are not queried. Missing,
+inconsistent, or unreadable reopening metadata also fails closed. Before closing
+an excess PR, admission rechecks that the triggering cycle is still current.
 
 Admission jobs queue by author ID with cancellation disabled and `queue: max`.
 This serializes moderation and comment updates without keeping the author's
