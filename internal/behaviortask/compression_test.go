@@ -16,7 +16,8 @@ import (
 
 func TestCompressionKeepsObservationReplay(test *testing.T) {
 	input := fixture(test)
-	if err := os.WriteFile(filepath.Join(input.RepoDir, "large.go"), []byte(strings.Repeat("sample evidence ", 10000)), 0600); err != nil {
+	content := strings.Repeat(strings.Repeat("sample evidence ", 100)+"\n", 100)
+	if err := os.WriteFile(filepath.Join(input.RepoDir, "large.go"), []byte(content), 0600); err != nil {
 		test.Fatal(err)
 	}
 	git(test, input.RepoDir, "add", ".")
