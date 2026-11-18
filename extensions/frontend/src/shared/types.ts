@@ -41,6 +41,7 @@ export interface CliResult {
   // Every status `ocr review` / `ocr scan` emits (cmd/opencodereview/output.go). With a session
   // manifest it is the terminal state: complete | partial | failed | skipped.
   status: 'success' | 'complete' | 'completed_with_warnings' | 'completed_with_errors' | 'partial' | 'failed' | 'skipped';
+  executionError?: string;
   comments: ReviewComment[];
   warnings: AgentWarning[];
   summary?: ReviewSummary;

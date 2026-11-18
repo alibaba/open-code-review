@@ -49,7 +49,7 @@ export const ko: TranslationKeys = {
   'highlights.stat2Value': '150K+',
   'highlights.stat2Label': 'NPM 다운로드',
   'highlights.stat2Caption': '실제 npm 다운로드 수 · 최근 30일',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': '실제 작업',
   'highlights.stat3Caption': '지금까지 수행한 코드 리뷰 작업',
   'highlights.stat4Value': '1/9',
@@ -122,6 +122,7 @@ export const ko: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': '문의하기',
   'footer.copyright': '© Copyright 2026. All rights reserved.',
 
   // Docs Page
