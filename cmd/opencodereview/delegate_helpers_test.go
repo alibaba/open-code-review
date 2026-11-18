@@ -21,9 +21,9 @@ func TestValidateDelegateOptions(t *testing.T) {
 		{"empty format", delegateOptions{}, true},
 		{"invalid format", delegateOptions{format: "yaml"}, true},
 		{"sarif format not supported by delegate", delegateOptions{format: "sarif"}, true},
-		{"from without to", delegateOptions{from: "main"}, true},
-		{"to without from", delegateOptions{to: "dev"}, true},
-		{"commit and range mixed", delegateOptions{commit: "abc", from: "main", to: "dev"}, true},
+		{"from without to", delegateOptions{from: "main", format: "text"}, false},
+		{"to without from", delegateOptions{to: "dev", format: "text"}, true},
+		{"commit and range mixed", delegateOptions{commit: "abc", from: "main", to: "dev", format: "text"}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

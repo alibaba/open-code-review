@@ -80,6 +80,40 @@ func TestValidateResume(t *testing.T) {
 			name: "identical input, provider and model is accepted",
 		},
 		{
+			name: "workspace input with identical worktree identity is accepted",
+			parent: func(m *RunManifest) {
+				m.Input.Mode = InputModeWorkspace
+				m.Input.ResolvedHead = ""
+			},
+			req: func(r *ResumeRequest) {
+				r.Identity.Mode = InputModeWorkspace
+				r.Identity.ResolvedHead = ""
+			},
+		},
+		{
+			name: "changed workspace content is rejected",
+			parent: func(m *RunManifest) {
+				m.Input.Mode = InputModeWorkspace
+			},
+			req: func(r *ResumeRequest) {
+				r.Identity.Mode = InputModeWorkspace
+				r.Identity.SourceArtifactSHA256 = "artifact-other"
+			},
+			wantErr: "workspace changed",
+		},
+		{
+			name: "changed workspace base is rejected",
+			parent: func(m *RunManifest) {
+				m.Input.Mode = InputModeWorkspace
+				m.Input.ResolvedBase = "base-parent"
+			},
+			req: func(r *ResumeRequest) {
+				r.Identity.Mode = InputModeWorkspace
+				r.Identity.ResolvedBase = "base-other"
+			},
+			wantErr: "workspace base commit changed",
+		},
+		{
 			name: "parent that completed nothing is still resumable",
 			// The parent's own coverage is irrelevant here: admission depends on
 			// whether the input is verifiable, not on how much work got done. A

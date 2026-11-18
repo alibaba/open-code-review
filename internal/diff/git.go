@@ -60,7 +60,8 @@ type Provider struct {
 	// Commit mode parameter
 	commit string // single commit hash/ref
 
-	mergeBase string // cached common ancestor for range mode
+	mergeBase     string // cached common ancestor for range mode
+	workspaceBase *InputResolution
 }
 
 // DiffSet separates the diffs a review may process from files excluded by the
@@ -127,8 +128,8 @@ func NewWorkspaceProvider(repoDir string, runner *gitcmd.Runner) *Provider {
 
 // InputResolution carries this run's frozen, immutable commit endpoints, per the
 // run-manifest input-mode matrix. An empty field means "not applicable or not
-// resolvable" — a root commit and a merge commit have no single comparison base,
-// an unborn workspace has no HEAD, and a workspace has no immutable head — and a
+// resolvable" — a root commit and an unborn workspace have an empty old tree,
+// and a workspace has no immutable head — and a
 // caller must never treat an empty value as a real endpoint or fabricate one.
 // ExactRange is populated only when both a unique base and a head resolve.
 type InputResolution struct {
@@ -176,9 +177,8 @@ func (p *Provider) ResolveInput(ctx context.Context) InputResolution {
 		}
 		return r
 	case ModeWorkspace:
-		// base = current HEAD if the repository has one; an unborn repository has
-		// no HEAD, so this stays empty rather than fabricating a base.
-		return InputResolution{ResolvedBase: p.resolveCommit(ctx, "HEAD")}
+		resolution, _ := p.ResolveWorkspaceComparison(ctx)
+		return resolution
 	default:
 		return InputResolution{}
 	}
@@ -242,12 +242,6 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 		combined.WriteString(out)
 
 	case ModeWorkspace:
-		// The stderr returned here is the fallback's (`git diff --staged`), and
-		// that is the one worth surfacing. Reaching the fallback at all means
-		// `git diff HEAD` already failed, and in the case the fallback exists
-		// for — a repository with no commits — it failed with "bad revision
-		// 'HEAD'", which is expected rather than diagnostic. Only the second
-		// failure describes what actually blocked the review.
 		tracked, stderr, err := p.workspaceTrackedDiff(ctx)
 		if err != nil {
 			return DiffSet{}, gitFailure("workspace tracked diff", stderr, err)
@@ -626,19 +620,19 @@ func firstLine(out string) string {
 // failure if there was one. Stderr is returned separately so the caller can
 // quote it without risking diff content in the error; see runGitSplit.
 func (p *Provider) workspaceTrackedDiff(ctx context.Context) (string, string, error) {
-	out, _, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", "HEAD", "--")
-	if err == nil && out != "" {
-		return out, "", nil
+	resolution, err := p.ResolveWorkspaceComparison(ctx)
+	if err != nil {
+		return "", "", err
 	}
-	if ctx.Err() != nil {
-		return "", "", ctx.Err()
+	base := resolution.ResolvedBase
+	if resolution.BaseIsEmpty {
+		out, stderr, err := p.runGitSplit(ctx, "hash-object", "-t", "tree", "--stdin")
+		if err != nil {
+			return "", stderr, err
+		}
+		base = strings.TrimSpace(out)
 	}
-	// Fall back to the staged diff when `git diff HEAD` errored or was empty. This is
-	// not redundant with the call above: in a repository with no commits yet there is no
-	// HEAD, so `git diff HEAD` fails with "bad revision 'HEAD'", but `git diff --staged`
-	// still surfaces staged changes by diffing the index against the empty tree — the only
-	// way to review a workspace before its first commit.
-	return p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--staged", "--")
+	return p.runGitSplit(ctx, "--no-optional-locks", "-c", "core.quotepath=false", "-c", "diff.autoRefreshIndex=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, "--")
 }
 
 // binarySniffWindow is the number of leading bytes inspected when deciding

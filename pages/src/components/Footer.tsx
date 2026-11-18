@@ -8,6 +8,7 @@ import langIcon from '../assets/icons/icon-language.svg';
 import { useTranslation } from '../i18n/context';
 import { useResponsive } from '../hooks/useResponsive';
 import type { Language } from '../i18n/types';
+import './Footer.css';
 
 const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
@@ -47,9 +48,10 @@ const Footer: React.FC = () => {
           width: '100%',
           display: 'flex',
           flexDirection: isMobile ? 'column' : 'row',
+          flexWrap: 'wrap',
           justifyContent: 'space-between',
           alignItems: isMobile ? 'flex-start' : 'center',
-          gap: isMobile ? 16 : 0,
+          gap: isMobile ? 16 : 24,
           maxWidth: 1440,
           margin: '0 auto',
         }}
@@ -62,66 +64,67 @@ const Footer: React.FC = () => {
           {t('footer.copyright')}
         </span>
 
-        {/* Language Switcher */}
-        <div ref={ref} style={{ position: 'relative' }}>
-          <button
-            onClick={() => setOpen(v => !v)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              background: 'none',
-              border: '1px solid var(--line)',
-              borderRadius: 6,
-              padding: '6px 14px',
-              color: 'var(--text-muted)',
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
+        <div className="footer-actions">
+          <a
+            className="footer-action"
+            href="https://github.com/lizhengfeng101"
+            target="_blank"
+            rel="noopener noreferrer"
           >
-            <img src={langIcon} alt="" style={{ width: 14, height: 14 }} />
-            {currentLabel}
-            <svg width="10" height="6" viewBox="0 0 10 6" fill="none" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
-              <path d="M1 1L5 5L9 1" stroke="var(--text-faint)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
-          {open && (
-            <div
-              style={{
-                position: 'absolute',
-                bottom: '100%',
-                left: 0,
-                right: 0,
-                marginBottom: 6,
-                background: 'var(--surface-overlay)',
-                border: '1px solid var(--line)',
-                borderRadius: 8,
-                padding: 4,
-                zIndex: 10,
-              }}
+            <img src={githubIcon} alt="" style={{ width: 14, height: 14 }} />
+            {t('footer.contact')}
+          </a>
+
+          {/* Language Switcher */}
+          <div ref={ref} style={{ position: 'relative' }}>
+            <button
+              className="footer-action"
+              onClick={() => setOpen(v => !v)}
             >
-              {LANG_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => { setLanguage(opt.value); setOpen(false); }}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    padding: '8px 12px',
-                    background: opt.value === language ? 'var(--fill-hover)' : 'transparent',
-                    border: 'none',
-                    borderRadius: 6,
-                    color: opt.value === language ? 'var(--text-strong)' : 'var(--text-muted)',
-                    fontSize: 13,
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          )}
+              <img src={langIcon} alt="" style={{ width: 14, height: 14 }} />
+              {currentLabel}
+              <svg width="10" height="6" viewBox="0 0 10 6" fill="none" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+                <path d="M1 1L5 5L9 1" stroke="var(--text-faint)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+            {open && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: 0,
+                  right: 0,
+                  marginBottom: 6,
+                  background: 'var(--surface-overlay)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 8,
+                  padding: 4,
+                  zIndex: 10,
+                }}
+              >
+                {LANG_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => { setLanguage(opt.value); setOpen(false); }}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      padding: '8px 12px',
+                      background: opt.value === language ? 'var(--fill-hover)' : 'transparent',
+                      border: 'none',
+                      borderRadius: 6,
+                      color: opt.value === language ? 'var(--text-strong)' : 'var(--text-muted)',
+                      fontSize: 13,
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </footer>

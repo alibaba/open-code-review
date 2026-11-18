@@ -50,7 +50,7 @@ export const zh: TranslationKeys = {
   'highlights.stat2Value': '150K+',
   'highlights.stat2Label': 'NPM 下载量',
   'highlights.stat2Caption': 'npm 近 30 天真实下载',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': '真实任务',
   'highlights.stat3Caption': '已执行的代码审查任务',
   'highlights.stat4Value': '1/9',
@@ -123,6 +123,7 @@ export const zh: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': '联系我们',
   'footer.copyright': '© 2026 版权所有。保留所有权利。',
 
   // Docs Page
@@ -311,6 +312,11 @@ export const zh: TranslationKeys = {
   'docs.search.hint.select': '选择',
   'docs.search.hint.open': '打开',
   'docs.search.hint.close': '关闭',
+  'docs.content.loading': '文档加载中...',
+  'docs.content.loadError': '文档内容加载失败。',
+  'docs.content.retry': '重试',
+  'docs.search.loading': '搜索中...',
+  'docs.search.loadError': '搜索内容加载失败。',
 
   // Blog
   'blog.title': '博客',

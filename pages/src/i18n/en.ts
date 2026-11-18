@@ -48,7 +48,7 @@ export const en = {
   'highlights.stat2Value': '150K+',
   'highlights.stat2Label': 'NPM DOWNLOADS',
   'highlights.stat2Caption': 'Real npm downloads · last 30 days',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': 'REAL-WORLD TASKS',
   'highlights.stat3Caption': 'Code review tasks executed to date',
   'highlights.stat4Value': '1/9',
@@ -119,6 +119,7 @@ export const en = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': 'Contact us',
   'footer.copyright': '© Copyright 2026. All rights reserved.',
 
   // Docs Page (keep existing)
@@ -307,6 +308,11 @@ export const en = {
   'docs.search.hint.select': 'Select',
   'docs.search.hint.open': 'Open',
   'docs.search.hint.close': 'Close',
+  'docs.content.loading': 'Loading documentation...',
+  'docs.content.loadError': 'Failed to load documentation content.',
+  'docs.content.retry': 'Retry',
+  'docs.search.loading': 'Searching...',
+  'docs.search.loadError': 'Search content failed to load.',
 
   // Blog
   'blog.title': 'Blog',

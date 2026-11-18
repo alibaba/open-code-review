@@ -65,7 +65,7 @@ func TestPrepareReviewCodeTools(test *testing.T) {
 		}
 	}
 	workspace, err := prepareReviewCodeTools(context.Background(), repo, reviewOptions{}, runner, nil)
-	if err != nil || workspace.access != nil || workspace.reader.Mode != tool.ModeWorkspace || workspace.reader.Ref != "" {
+	if err != nil || workspace.access == nil || workspace.reader.Mode != tool.ModeWorkspace || workspace.reader.Ref != "" {
 		test.Fatalf("workspace changed: %+v %v", workspace, err)
 	}
 	root := revParse(test, repo, "HEAD~4")
@@ -84,6 +84,10 @@ func TestPrepareReviewCodeToolsErrors(test *testing.T) {
 		{opts: reviewOptions{commit: "missing"}},
 		{opts: reviewOptions{commit: "HEAD"}, resolution: &diff.InputResolution{}},
 		{opts: reviewOptions{commit: "HEAD"}, resolution: &diff.InputResolution{ResolvedHead: "HEAD"}},
+		{resolution: &diff.InputResolution{}},
+		{resolution: &diff.InputResolution{ResolvedBase: "HEAD", BaseIsEmpty: true}},
+		{resolution: &diff.InputResolution{ResolvedBase: "HEAD", ResolvedHead: "HEAD"}},
+		{resolution: &diff.InputResolution{ResolvedBase: "HEAD", ExactRange: "HEAD..HEAD"}},
 	} {
 		if _, err := prepareReviewCodeTools(context.Background(), repo, scenario.opts, nil, scenario.resolution); err == nil {
 			test.Fatalf("accepted invalid setup: %+v", scenario)

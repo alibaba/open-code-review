@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import ErrorBoundary from './ErrorBoundary';
+import ErrorBoundary, { isChunkLoadError, reloadAfterChunkError } from './ErrorBoundary';
 
 const Thrower: React.FC<{ msg: string }> = ({ msg }) => {
   throw new Error(msg);
@@ -22,6 +22,26 @@ describe('ErrorBoundary', () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.restoreAllMocks();
+  });
+
+  it('recognizes webpack and dynamic-import chunk errors only', () => {
+    expect(isChunkLoadError(new Error('Loading chunk 1 failed.'))).toBe(true);
+    expect(isChunkLoadError(new Error('Loading CSS chunk 1 failed.'))).toBe(true);
+    expect(isChunkLoadError(new Error('Failed to fetch dynamically imported module: /chunk.js'))).toBe(true);
+    const named = new Error('ordinary message');
+    named.name = 'ChunkLoadError';
+    expect(isChunkLoadError(named)).toBe(true);
+    expect(isChunkLoadError(new Error('ordinary bug'))).toBe(false);
+  });
+
+  it('reloadAfterChunkError clears the guard before reloading', () => {
+    const reloadSpy = mockReload();
+    sessionStorage.setItem('ocr-chunk-reload-attempted', 'true');
+
+    reloadAfterChunkError();
+
+    expect(sessionStorage.getItem('ocr-chunk-reload-attempted')).toBeNull();
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
   });
 
   it('reloads the page on a chunk load error', () => {

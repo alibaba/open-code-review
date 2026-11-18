@@ -8,6 +8,7 @@ import { useSectionTitleStyle } from '../hooks/useResponsiveStyle';
 import ocrSourceIcon from '../assets/images/icon-ocr-source.svg';
 import claudeCodeIcon from '../assets/images/icon-claude-code.svg';
 import codexIcon from '../assets/images/icon-codex.svg';
+import githubIcon from '../assets/icons/icon-github.svg';
 import sortIcon from '../assets/icons/icon-sort.svg';
 import trophyGold from '../assets/icons/trophy-gold.svg';
 import trophySilver from '../assets/icons/trophy-silver.svg';
@@ -103,10 +104,20 @@ const BenchmarkSection: React.FC = () => {
       <div style={{ width: '100%', maxWidth: 1200, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: isMobile ? 32 : 48 }}>
         {/* Header */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          <span style={{ color: 'var(--accent)', fontSize: 16, fontWeight: 500, letterSpacing: '0.48px' }}>
-            {t('benchmark.sectionLabel')}
-          </span>
+          <div className="text-center text-base font-medium tracking-[0.48px]" style={{ color: 'var(--accent)' }}>
+            <span>{t('benchmark.sectionLabel')}</span>
+            <span aria-hidden="true" className="mx-2 opacity-50">·</span>
+            <a
+              href="https://github.com/alibaba/aacr-bench"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 whitespace-nowrap underline-offset-4 hover:underline focus-visible:underline"
+            >
+              AACR-Bench <img src={githubIcon} alt="" width={16} height={16} />
+            </a>
+          </div>
           <h2 style={{ color: 'var(--text-strong)', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
+
             {t('benchmark.title')}
           </h2>
           <p style={{ color: 'var(--text-faint)', fontSize: 16, textAlign: 'center', lineHeight: '24px', margin: 0, maxWidth: 646 }}>

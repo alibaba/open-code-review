@@ -50,7 +50,7 @@ export const ru: TranslationKeys = {
   'highlights.stat2Value': '150K+',
   'highlights.stat2Label': 'ЗАГРУЗКИ NPM',
   'highlights.stat2Caption': 'реальные загрузки npm · 30 дней',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': 'РЕАЛЬНЫХ ЗАДАЧ',
   'highlights.stat3Caption': 'Выполненных задач код-ревью',
   'highlights.stat4Value': '1/9',
@@ -121,6 +121,7 @@ export const ru: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': 'Связаться с нами',
   'footer.copyright': '© 2026. Все права защищены.',
 
   // Docs Page
@@ -309,6 +310,11 @@ export const ru: TranslationKeys = {
   'docs.search.hint.select': 'Выбрать',
   'docs.search.hint.open': 'Открыть',
   'docs.search.hint.close': 'Закрыть',
+  'docs.content.loading': 'Загрузка документации...',
+  'docs.content.loadError': 'Не удалось загрузить содержимое документации.',
+  'docs.content.retry': 'Повторить',
+  'docs.search.loading': 'Поиск...',
+  'docs.search.loadError': 'Не удалось загрузить содержимое для поиска.',
 
   // Blog
   'blog.title': 'Блог',
