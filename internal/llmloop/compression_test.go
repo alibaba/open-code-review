@@ -172,6 +172,32 @@ func TestPartitionMessages_EverythingFits(t *testing.T) {
 	}
 }
 
+func TestCompressionSummary(t *testing.T) {
+	for _, fixture := range []struct{ text, want string }{
+		{"a<think>private</think>b", "ab"},
+		{"private</think>", ""},
+		{"private notes\n</think>\nfinal answer", "final answer"},
+		{"`malformed <think>private</think>", "`malformed"},
+		{"The `<think>` tag is literal.", "The `<think>` tag is literal."},
+		{"```text\n<think>notes</think>\n```", ""},
+		{"<think>notes</think>\nFinal answer with `</think>`.", "Final answer with `</think>`."},
+		{"<think>Quote `</think>` literally.</think>\nFinal answer", "Final answer"},
+		{"<think>Quote `</think>` literally.\nNo final answer", ""},
+		{"```go\nf()\n```\nFixed the caller.<think>notes</think>", "```go\nf()\n```\nFixed the caller."},
+		{"Use \\` here. <think>private</think> Escape \\` there.", "Use \\` here.  Escape \\` there."},
+		{`Keep \<think>literal\</think>.`, `Keep \<think>literal\</think>.`},
+		{"```go\nf()\n```\nFixed the caller.", "```go\nf()\n```\nFixed the caller."},
+		{"```xml\n<config><think>off</think></config>\n```", "```xml\n<config><think>off</think></config>\n```"},
+		{"```go\n// <think>\n````\nAnswer<think>notes</think>", "```go\n// <think>\n````\nAnswer"},
+		{"<think>\n~~~xml\n</think>\n~~~\nstill reasoning", ""},
+		{"Delimiter `.\n\n<think>private</think>\n\nAnother `.", "Delimiter `.\n\n\n\nAnother `."},
+	} {
+		if got := compressionSummary(fixture.text); got != fixture.want {
+			t.Errorf("compressionSummary(%q) = %q, want %q", fixture.text, got, fixture.want)
+		}
+	}
+}
+
 func TestStripMarkdownFences(t *testing.T) {
 	tests := []struct {
 		name  string

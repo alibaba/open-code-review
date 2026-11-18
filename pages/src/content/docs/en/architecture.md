@@ -229,10 +229,13 @@ on the prompt budget defined by `MAX_TOKENS = 200000`:
 > `MAX_COMPLETION_TOKENS` is unset, `MAX_TOKENS` is used as the output
 > cap for backwards compatibility.
 
-Compression requests can use a smaller output cap: at most the configured
-completion limit, the 20% context margin, and the space left beside the
-fixed prompt and summary wrapper. That cap is reserved before selecting
-active rounds. These per-conversation limits are independent of the
+Before selecting active rounds, OCR reserves space for the **visible summary**:
+at most the configured completion limit, the 20% context margin, and the room
+beside the fixed prompt and summary wrapper. Some providers count reasoning
+tokens as output too. When the compression request itself has room below the
+80% warning threshold, OCR can request a larger generation budget (up to the
+configured completion limit) and asks the model to keep its final summary within
+the reservation. The rebuilt history must still fit. These limits are independent of the
 aggregate `--max-tokens-budget`; setting that budget to zero does not
 disable context compression.
 
@@ -253,7 +256,7 @@ A "round" is one assistant message plus the tool result messages that
 followed it. `partitionMessages` walks rounds from the end, keeping as
 many as fit strictly below `(0.80 × MAX_TOKENS) - reservedTokens`.
 The reservation includes the first two messages (including earlier
-summaries), the new summary's output cap, and its wrapper. Everything
+summaries), the visible summary reservation, and its wrapper. Everything
 older becomes the **compress zone**. An empty compress zone leaves the
 conversation unchanged. The budget includes retry instructions between
 rounds, not just assistant messages and tool results. A background pass

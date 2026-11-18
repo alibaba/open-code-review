@@ -199,7 +199,7 @@ func TestCompressionBudgetMainLoopContinues(test *testing.T) {
 	}
 }
 
-func TestCompressionBudgetOutputLimit(test *testing.T) {
+func TestCompressionBudgetOutputLimitWithoutGenerationHeadroom(test *testing.T) {
 	for _, fixture := range []struct {
 		name                                      string
 		completionLimit, frozenWords, occurrences int
@@ -219,6 +219,9 @@ func TestCompressionBudgetOutputLimit(test *testing.T) {
 			calls := 0
 			client := taskClient(func(_ context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
 				calls++
+				if len(request.Messages) != len(task.Compression.Messages) || strings.Contains(request.Messages[0].ExtractText(), "Keep the visible summary") {
+					test.Error("do not spend context on a budget instruction when the generation cap cannot grow")
+				}
 				if request.MaxTokens <= 0 || request.MaxTokens > 200 || (fixture.completionLimit > 0 && request.MaxTokens > fixture.completionLimit) {
 					test.Errorf("invalid summary output limit: %d", request.MaxTokens)
 				}
@@ -252,6 +255,101 @@ func TestCompressionBudgetIgnoresNonShrinkingSummary(test *testing.T) {
 	got, err := runner.runCompression(test.Context(), messages, "task")
 	if err != nil || !reflect.DeepEqual(got, messages) {
 		test.Fatalf("a summary that expands the conversation must not replace it: %v", err)
+	}
+}
+
+func TestCompressionLeavesRoomForReasoning(t *testing.T) {
+	for _, limit := range []int{250, 750} {
+		t.Run(strconv.Itoa(limit), func(t *testing.T) {
+			task := testTask()
+			task.MaxContextTokens = 1000
+			task.MaxCompletionTokens = limit
+			messages := []llm.Message{msg("system", "sys"), msg("user", strings.Repeat("prompt ", 710)), msg("assistant", "read"), msg("tool", strings.Repeat("data ", 240))}
+			frame := llm.CountTokens(strings.ReplaceAll(task.Compression.SummaryTemplate, "{{summary}}", ""))
+			visibleBudget := PromptTokenLimit(1000) - CountMessagesTokens(messages[:2]) - frame - 1
+			answer := "Keep the validated finding."
+			client := taskClient(func(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+				if len(req.Messages) != len(task.Compression.Messages) || req.Messages[0].Role != task.Compression.Messages[0].Role {
+					t.Fatal("generation headroom must not change the template roles")
+				}
+				if req.MaxTokens != min(limit, PromptTokenLimit(1000)-CountMessagesTokens(req.Messages)) || req.MaxTokens <= visibleBudget || !strings.Contains(req.Messages[len(req.Messages)-1].ExtractText(), strconv.Itoa(visibleBudget)+" tokens") {
+					t.Errorf("generation cap=%d, visible budget=%d, input=%d", req.MaxTokens, visibleBudget, CountMessagesTokens(req.Messages))
+				}
+				reason := "stop"
+				if req.MaxTokens < 200+llm.CountTokens(answer) {
+					reason = "length"
+				}
+				return &llm.ChatResponse{Choices: []llm.Choice{{FinishReason: reason, Message: llm.ResponseMessage{Content: &answer, ReasoningContent: "private reasoning"}}}}, nil
+			})
+			runner := NewRunner(Deps{LLMClient: client, Session: session.New(t.TempDir(), "main", "fake", session.SessionOptions{})}, task)
+			got, err := runner.runCompression(t.Context(), messages, "task")
+			if err != nil || len(got) != 2 || !strings.Contains(got[1].ExtractText(), answer) || CountMessagesTokens(got) >= PromptTokenLimit(1000) {
+				t.Fatalf("completed visible summary did not fit: %v", err)
+			}
+		})
+	}
+}
+
+func TestCompressionInlineReasoning(t *testing.T) {
+	for _, fixture := range []struct{ text, want string }{
+		{"<think>private</think>", ""},
+		{"<think>unfinished", ""},
+		{"<think>private</think>\n```text\nactual summary\n```", "actual summary"},
+		{"<think>outer<think>inner</think>more</think><think>another</think>actual summary", "actual summary"},
+	} {
+		client := &fakeLLMClient{response: &llm.ChatResponse{Choices: []llm.Choice{{FinishReason: "stop", Message: llm.ResponseMessage{Content: &fixture.text}}}}}
+		runner, messages := newCompressionRunner(t, client, nil)
+		got, err := runner.runCompression(t.Context(), messages, "task")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fixture.want == "" {
+			if !reflect.DeepEqual(got, messages) {
+				t.Error("reasoning without a final answer replaced the history")
+			}
+		} else if want := messages[1].ExtractText() + strings.ReplaceAll(runner.task.Compression.SummaryTemplate, "{{summary}}", fixture.want); got[1].ExtractText() != want {
+			t.Errorf("rebuilt prompt = %q, want %q", got[1].ExtractText(), want)
+		}
+	}
+}
+
+func TestCompressionExtraGenerationCannotExpandHistory(t *testing.T) {
+	task := testTask()
+	task.MaxContextTokens, task.MaxCompletionTokens = 1000, 250
+	messages := []llm.Message{msg("system", "sys"), msg("user", strings.Repeat("prompt ", 710)), msg("assistant", "read"), msg("tool", strings.Repeat("data ", 240))}
+	client := taskClient(func(_ context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
+		summary := strings.Repeat("summary ", 150)
+		if llm.CountTokens(summary) >= request.MaxTokens {
+			t.Fatal("fixture must fit the wire budget but overflow the rebuilt context")
+		}
+		return &llm.ChatResponse{Choices: []llm.Choice{{FinishReason: "stop", Message: llm.ResponseMessage{Content: &summary}}}}, nil
+	})
+	runner := NewRunner(Deps{LLMClient: client, Session: session.New(t.TempDir(), "main", "fake", session.SessionOptions{})}, task)
+	original := copyMessages(messages)
+	got, err := runner.runCompression(t.Context(), messages, "task")
+	if err == nil || !reflect.DeepEqual(got, original) || !reflect.DeepEqual(messages, original) {
+		t.Fatal("extra generation headroom must not bypass the rebuilt-context check")
+	}
+}
+
+func TestCompressionEnforcesVisibleReservation(t *testing.T) {
+	task := testTask()
+	task.MaxContextTokens = 1000
+	messages := []llm.Message{msg("system", "sys"), msg("user", "prompt"), msg("assistant", "old"), msg("tool", strings.Repeat("data ", 460)), msg("assistant", "recent"), msg("tool", strings.Repeat("data ", 380))}
+	summary := strings.Repeat("summary ", 220)
+	for _, limit := range []int{200, 500} {
+		task.MaxCompletionTokens = limit
+		client := taskClient(func(_ context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
+			if tokens := llm.CountTokens(summary); tokens <= 200 || (limit == 500 && tokens >= request.MaxTokens) {
+				t.Fatal("fixture must exceed the visible reservation and fit the expanded generation budget")
+			}
+			return &llm.ChatResponse{Choices: []llm.Choice{{FinishReason: "stop", Message: llm.ResponseMessage{Content: &summary}}}}, nil
+		})
+		runner := NewRunner(Deps{LLMClient: client, Session: session.New(t.TempDir(), "main", "fake", session.SessionOptions{})}, task)
+		got, err := runner.runCompression(t.Context(), messages, "task")
+		if err == nil || !reflect.DeepEqual(got, messages) {
+			t.Fatalf("unused space between whole rounds enlarged the visible reservation at limit %d", limit)
+		}
 	}
 }
 
