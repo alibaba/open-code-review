@@ -1268,11 +1268,19 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     stats = {"total": len(comments), "inline": 0, "summary": 0,
              "routed": 0, "skipped": 0, "failed": 0, "summary_url": None}
 
-    # No comments: LGTM summary (sticky-aware).
+    # No comments: LGTM summary (sticky-aware). A failed review has zero
+    # comments too, but it must not post the success glyph: that is the one
+    # durable record a reviewer reads, and an all-clear on a failed review is
+    # worse than no note.
     if not comments:
-        message = result.get("message", "No comments generated. Looks good to me.")
-        body = wrap_summary_body("✅ **OpenCodeReview**: %s" % message,
-                                 config.get("run_tag", "0-0"))
+        if result.get("status") == "failed":
+            message = result.get("message") or "review did not complete (status=failed)"
+            body = wrap_summary_body("⚠️ **OpenCodeReview**: review did not complete: %s" % message,
+                                     config.get("run_tag", "0-0"))
+        else:
+            message = result.get("message", "No comments generated. Looks good to me.")
+            body = wrap_summary_body("✅ **OpenCodeReview**: %s" % message,
+                                     config.get("run_tag", "0-0"))
         stats["summary_url"] = upsert_summary(poster, body, sticky,
                                              tag=summary_tag_for(config.get("run_tag", "0-0")))
         return stats

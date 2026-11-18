@@ -496,6 +496,17 @@ class PublishTest(unittest.TestCase):
                          "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
                          "✅ **OpenCodeReview**: Looks good to me.")
 
+    def test_failed_review_not_lgtm(self):
+        # A failed review also has zero comments, but must not post the
+        # success glyph / LGTM message on the durable MR record.
+        stats, rec = run_publish({"status": "failed",
+                                  "message": "Review failed: 0 finding(s); 3 of 3 selected item(s) failed."})
+        self.assertEqual(stats["inline"], 0)
+        self.assertNotIn("✅", rec.final_summary_body)
+        self.assertNotIn("Looks good to me", rec.final_summary_body)
+        self.assertIn("review did not complete", rec.final_summary_body)
+        self.assertIn("3 of 3 selected item(s) failed", rec.final_summary_body)
+
     def test_warnings_in_summary(self):
         stats, rec = run_publish({"comments": [comment()], "warnings": [{"file": "a.py", "message": "skipped"}]})
         self.assertIn("1 warning(s)", rec.final_summary_body)
