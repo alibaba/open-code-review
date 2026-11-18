@@ -152,6 +152,9 @@ ocr scan                          # リポジトリ全体をスキャン
 ocr scan --path internal/agent    # ディレクトリまたは特定のファイルをスキャン
 ocr scan --resume <session-id>   # 中断したフルファイルスキャンを再開
 
+# 結果をファイルに出力（AI ホストエージェント推奨）
+ocr review --format json --output result.json
+
 # デリゲートモード — AI コーディングエージェントが自らレビューを実行
 # OCR はファイル選択とルール解決を担当。LLM 設定不要
 ocr delegate preview

@@ -200,6 +200,80 @@ func TestFileFind_CaseSensitive(t *testing.T) {
 	}
 }
 
+func TestFileFind_PathWithSubdirectory(t *testing.T) {
+	dir := setupFileFindRepo(t)
+	p := NewFileFind(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	// Directory-scoped subpath query (forward slashes) must resolve to the
+	// nested file, not just match against the base filename.
+	got, err := p.Execute(context.Background(), map[string]any{"query_name": "pkg/util"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "pkg/util.go") {
+		t.Fatalf("expected to find pkg/util.go when querying 'pkg/util', got: %s", got)
+	}
+
+	// Windows-style backslash separators in query_name must be normalized
+	// so cross-platform agents resolve the same file.
+	gotWin, errWin := p.Execute(context.Background(), map[string]any{"query_name": `pkg\util.go`})
+	if errWin != nil {
+		t.Fatal(errWin)
+	}
+	if !strings.Contains(gotWin, "pkg/util.go") {
+		t.Fatalf("expected to find pkg/util.go when querying 'pkg\\util.go', got: %s", gotWin)
+	}
+
+	// A directory-prefix query should match every file under that directory.
+	gotDir, errDir := p.Execute(context.Background(), map[string]any{"query_name": "pkg/"})
+	if errDir != nil {
+		t.Fatal(errDir)
+	}
+	if !strings.Contains(gotDir, "pkg/util.go") {
+		t.Fatalf("expected directory-scoped query 'pkg/' to match pkg/util.go, got: %s", gotDir)
+	}
+
+	// Case-insensitive subpath query still resolves after normalization.
+	gotCI, errCI := p.Execute(context.Background(), map[string]any{"query_name": "PKG/UTIL"})
+	if errCI != nil {
+		t.Fatal(errCI)
+	}
+	if !strings.Contains(gotCI, "pkg/util.go") {
+		t.Fatalf("expected case-insensitive 'PKG/UTIL' to match pkg/util.go, got: %s", gotCI)
+	}
+}
+
+func TestFileFind_BasenamePrecisionAndFallback(t *testing.T) {
+	dir := setupFileFindRepo(t)
+	// Write an extra file under pkg/ that does NOT have 'util' in its basename
+	if err := os.WriteFile(filepath.Join(dir, "pkg", "helper.go"), []byte("package pkg\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := NewFileFind(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	// 1. Pure filename query "util" matches basename "util.go", staying precise
+	// without including "pkg/helper.go".
+	gotUtil, err := p.Execute(context.Background(), map[string]any{"query_name": "util"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotUtil, "pkg/util.go") {
+		t.Errorf("expected 'util' to match pkg/util.go, got: %s", gotUtil)
+	}
+	if strings.Contains(gotUtil, "pkg/helper.go") {
+		t.Errorf("expected 'util' not to match pkg/helper.go via basename matching, got: %s", gotUtil)
+	}
+
+	// 2. Subpath query "pkg/helper" matches nothing in basename pass, falls back to full relative path match.
+	gotSubpath, err := p.Execute(context.Background(), map[string]any{"query_name": "pkg/helper"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotSubpath, "pkg/helper.go") {
+		t.Errorf("expected 'pkg/helper' to match pkg/helper.go via fallback, got: %s", gotSubpath)
+	}
+}
+
 func TestShouldSkipFile(t *testing.T) {
 	tests := []struct {
 		path string

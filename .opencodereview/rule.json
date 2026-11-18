@@ -1,0 +1,9 @@
+{
+  "rules": [
+    {
+      "path": "internal/llm/providers.go",
+      "rule": "This file defines the built-in provider registry. When reviewing changes to it, enforce ALL of the following:\n\n## Style Consistency\n- All field values in a Provider entry MUST be inline string literals. Do NOT introduce package-level constants for values used only once (e.g. env var names).\n- Field order within each entry MUST follow: Name → DisplayName → Protocol → BaseURL → AuthHeader (if needed) → EnvVar → AmbientAuth (if needed) → Models.\n- EnvVar naming convention: ALL_CAPS with underscores, ending in `_API_KEY` or `_KEY`.\n- Protocol MUST reference a defined constant (ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock), never a raw string literal.\n\n## Documentation Sync\n- Any addition or modification of a provider entry MUST be accompanied by corresponding updates to the built-in provider table in ALL of these docs:\n  - pages/src/content/docs/en/configuration.md\n  - pages/src/content/docs/zh/configuration.md\n  - pages/src/content/docs/ja/configuration.md\n  - pages/src/content/docs/ru/configuration.md\n- If docs are not updated in the same PR, flag this as a required change.\n\n## Test Coverage\n- Every new provider MUST have a corresponding TestLookupProvider_<Name>Details test in internal/llm/providers_test.go that verifies Protocol, BaseURL, EnvVar, and Models.\n- If a model requires a specific protocol (e.g. GPT-5.6 requires openai-responses), there MUST be a regression guard test that prevents future misrouting.",
+      "merge_system_rule": true
+    }
+  ]
+}

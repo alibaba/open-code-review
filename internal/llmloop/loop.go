@@ -50,6 +50,11 @@ type Deps struct {
 	// applies.
 	AllDiffs func() []model.Diff
 
+	// CommentReviewPath maps the main-loop path and resolved comment to the
+	// resumable review item that owns the finding. Diff review supplies this for
+	// semantic multi-file groups; scan leaves it nil and keeps the loop path.
+	CommentReviewPath func(runPath string, comment model.LlmComment) string
+
 	// NewRequestMeta builds the retry-report identity for one logical LLM
 	// request. Non-nil only for review: the retry report describes ocr review,
 	// and this Runner is shared with scan (internal/scan.Agent calls RunPerFile),
@@ -449,33 +454,47 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newP
 		return
 	}
 
-	resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	fs := r.deps.Session.GetOrCreateFileSession(newPath)
+	rec := fs.AppendTaskRecord(session.MainTask, messages)
+	startTime := time.Now()
+	reqCtx := r.requestCtx(ctx, newPath, session.MainTask, rec.RequestNo)
+
+	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  messages,
 		Tools:     graceDefs,
 		MaxTokens: r.deps.Template.CompletionTokenLimit(),
 		SessionID: sessionID,
 	})
+	duration := time.Since(startTime)
 	if err != nil {
+		rec.SetError(err, duration)
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", newPath, err)
 		return
 	}
 
+	rec.SetResponse(resp, duration)
+	totalTokens := int64(0)
 	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
 		atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
 		atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
 		atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
 		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
 	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
 		return
 	}
 
-	fs := r.deps.Session.GetOrCreateFileSession(newPath)
-	rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
-	rec.SetResponse(resp, 0)
 	thinking := resp.ReasoningContent()
 	for _, call := range calls {
 		r.executeToolCall(ctx, newPath, call, rec, thinking)
@@ -568,19 +587,13 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
 	}
 
-	// Always inject the current file path for code_comment.
-	// The model sometimes hallucinates a path, so we override it.
-	if t == tool.CodeComment && newPath != "" {
-		args["path"] = newPath
-	}
-
 	startTime := time.Now()
 
 	if t == tool.CodeComment {
 		telemetry.PrintToolCallStarted(t.Name(), args)
 		_, toolSpan := telemetry.StartToolSpan(ctx, t.Name())
 
-		comments, errMsg := tool.ParseComments(args)
+		comments, errMsg := tool.ParseCommentsWithPath(args, newPath)
 		if errMsg != "" {
 			dur := time.Since(startTime)
 			telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), fmt.Errorf("%s", errMsg))
@@ -663,7 +676,11 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 						}
 					}
 				}
-				r.deps.CommentCollector.AddForReviewItem(*cm, side, newPath)
+				reviewPath := newPath
+				if r.deps.CommentReviewPath != nil {
+					reviewPath = r.deps.CommentReviewPath(newPath, *cm)
+				}
+				r.deps.CommentCollector.AddForReviewItem(*cm, side, reviewPath)
 			}
 		}
 

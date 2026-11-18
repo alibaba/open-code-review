@@ -157,8 +157,8 @@ See [Review Rules](../../review-rules/) for the schema.
 
 #### Concurrency
 
-The default is 8 parallel per-file sub-agents. Lower it on large PRs
-to stay under your LLM provider's rate limits:
+The default is 8 parallel sub-agents, one per file group. Lower it on
+large PRs to stay under your LLM provider's rate limits:
 
 ```yaml
 - name: Run OCR review

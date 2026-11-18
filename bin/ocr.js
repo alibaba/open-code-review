@@ -14,6 +14,24 @@ const { resolveNativeBinary } = require("../scripts/platform");
 const { version: packageVersion } = require("../package.json");
 const { shouldShowUpdateHint } = require("../scripts/version");
 
+// Maps a child process result to the launcher exit code.
+// A child killed by a signal has status = null, which must not fall through
+// to a clean 0 — pipelines gating on the exit code would read an OOM kill
+// (or any signal death) as success. Conventional 128+signo is used instead.
+function launcherExitCode(result) {
+  if (result.signal) {
+    return 128 + (os.constants.signals[result.signal] ?? 1);
+  }
+  return result.status ?? (result.error ? 1 : 0);
+}
+
+module.exports = { launcherExitCode };
+
+if (require.main !== module) {
+  // Required as a module (tests); the launcher body below must not run.
+  return;
+}
+
 const resolved = resolveNativeBinary();
 if (!resolved) {
   console.error(
@@ -64,4 +82,4 @@ const result = spawnSync(binaryPath, process.argv.slice(2), {
   env: process.env,
 });
 
-process.exit(result.status ?? (result.error ? 1 : 0));
+process.exit(launcherExitCode(result));

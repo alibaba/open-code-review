@@ -75,48 +75,24 @@
                     "low"
                   ],
                   "description": "The severity of the issue."
+                },
+                "path": {
+                  "type": "string",
+                  "description": "The relative file path this comment applies to."
                 }
               },
               "required": [
                 "content",
                 "existing_code",
                 "category",
-                "severity"
+                "severity",
+                "path"
               ]
             }
           }
         },
         "required": [
           "comments"
-        ]
-      }
-    }
-  },
-  {
-    "name": "file_read",
-    "plan_task": false,
-    "main_task": true,
-    "definition": {
-      "name": "file_read",
-      "description": "Use this tool to read file content when you need to get context for git diff. You can specify start_line and end_line to view specific parts of the file.\n\n**Line Range Strategy:**\n- Git diff hunk header provides guidance on how to get more relevant context.\n- Git diff hunk header \"@@-x,y +m,n@@\" indicates that the old file has y lines starting from line x, and the new file has n lines starting from line m.\n- For example, when you need to read 50 lines above and below the current changed code block in the new file, set start_line = m - 50, end_line = m + n + 50.\n\n**Example output:**\nFile: path/to/example.go (Total lines: 50)\nIS_TRUNCATED: false\nLINE_RANGE: 10-12\n// The following is the original content of the file\nfunc main() {\n  fmt.Println(\"Hello, World!\")\n}\n\n**Limitations:**\n- If the specified range exceeds 500 lines, only 500 lines will be returned with a truncation notice.\n- This tool can only read file content from the modified version (after changes) in git diff.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "file_path": {
-            "type": "string",
-            "description": "The relative path of the file to open."
-          },
-          "start_line": {
-            "type": "integer",
-            "description": "The start line number to view. Defaults to 1."
-          },
-          "end_line": {
-            "type": "integer",
-            "description": "The end line number to view. Defaults to end line of file."
-          }
-        },
-        "required": [
-          "file_path"
         ]
       }
     }
@@ -158,6 +134,35 @@
     }
   },
   {
+    "name": "file_read",
+    "plan_task": false,
+    "main_task": true,
+    "definition": {
+      "name": "file_read",
+      "description": "Use this tool to read file content when you need to get context for git diff. You can specify start_line and end_line to view specific parts of the file.\n\n**Line Range Strategy:**\n- Git diff hunk header provides guidance on how to get more relevant context.\n- Git diff hunk header \"@@-x,y +m,n@@\" indicates that the old file has y lines starting from line x, and the new file has n lines starting from line m.\n- For example, when you need to read 50 lines above and below the current changed code block in the new file, set start_line = m - 50, end_line = m + n + 50.\n\n**Example output:**\nFile: path/to/example.go (Total lines: 50)\nIS_TRUNCATED: false\nLINE_RANGE: 10-12\n// The following is the original content of the file\nfunc main() {\n  fmt.Println(\"Hello, World!\")\n}\n\n**Limitations:**\n- If the specified range exceeds 500 lines, only 500 lines will be returned with a truncation notice.\n- This tool can only read file content from the modified version (after changes) in git diff.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "The relative path of the file to open."
+          },
+          "start_line": {
+            "type": "integer",
+            "description": "The start line number to view. Defaults to 1."
+          },
+          "end_line": {
+            "type": "integer",
+            "description": "The end line number to view. Defaults to end line of file."
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      }
+    }
+  },
+  {
     "name": "file_read_diff",
     "plan_task": true,
     "main_task": true,
@@ -187,13 +192,13 @@
     "main_task": true,
     "definition": {
       "name": "file_find",
-      "description": "Search for matching files in the current project based on filename keywords. Use this tool when you cannot find the files you need to view in the current change file list.\n\nThis tool searches for filenames containing specified keywords in the project directory and returns a list of matching file paths. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\nsrc/main/java/UserService.java\nsrc/test/java/UserServiceTest.java",
+      "description": "Search for matching files in the current project based on filename keywords. When the query contains a path separator ('/' or '\\'), also matches against the full repository-relative path, enabling directory-scoped queries. Use this tool when you cannot find the files you need to view in the current change file list.\n\nThis tool searches for filenames containing specified keywords in the project directory and returns a list of matching file paths. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\nsrc/main/java/UserService.java\nsrc/test/java/UserServiceTest.java\n\nInput:\nquery_name: pkg/util\nOutput:\npkg/util.go\npkg/util_test.go",
       "parameters": {
         "type": "object",
         "properties": {
           "query_name": {
             "type": "string",
-            "description": "Filename keyword to search for, supports partial matching."
+            "description": "Filename keyword to search for, supports partial matching. If the query contains '/' or '\\', falls back to matching against the full repository-relative path (e.g. 'pkg/util' or 'internal/diff/')."
           },
           "case_sensitive": {
             "type": "boolean",

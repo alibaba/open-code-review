@@ -210,7 +210,7 @@ func TestSessionFilePermissions(t *testing.T) {
 	}
 
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	repoDir := t.TempDir()
 	sessionID := generateUUID()
@@ -244,12 +244,7 @@ func TestSessionFilePermissions(t *testing.T) {
 
 func TestFinalizeSurfacesWriterCreationErrorWithoutStdout(t *testing.T) {
 	tmpHome := t.TempDir()
-	// The writer resolves the home dir with os.UserHomeDir, which reads
-	// USERPROFILE on Windows and never falls back to HOME. With HOME alone the
-	// blocking file below landed in the temp dir while the writer kept using the
-	// real profile, so creation succeeded and there was no failure to surface.
-	t.Setenv("HOME", tmpHome)
-	t.Setenv("USERPROFILE", tmpHome)
+	setTestHome(t, tmpHome)
 
 	// A regular file at this path makes creation of the sessions directory fail
 	// deterministically on every platform.
@@ -297,7 +292,7 @@ func TestFinalizeSurfacesWriterCreationErrorWithoutStdout(t *testing.T) {
 // force the failure by closing the underlying file out from under the buffered
 // writer; the Flush inside WriteSessionEnd then errors on the closed fd.
 func TestFinalizeSurfacesWriteError(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
 	if sh.persist == nil || sh.persist.file == nil {
@@ -315,7 +310,7 @@ func TestFinalizeSurfacesWriteError(t *testing.T) {
 // TestFinalizeReplaysWriteErrorOnEveryCall verifies that every call observes the
 // cached write error instead of a later call falsely reporting success.
 func TestFinalizeReplaysWriteErrorOnEveryCall(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
 	if sh.persist == nil || sh.persist.file == nil {
@@ -335,7 +330,7 @@ func TestFinalizeReplaysWriteErrorOnEveryCall(t *testing.T) {
 // TestFinalizeWritesSessionEndExactlyOnce verifies that repeated Finalize calls
 // do not append a second session_end record.
 func TestFinalizeWritesSessionEndExactlyOnce(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
 	if err := sh.Finalize(); err != nil {

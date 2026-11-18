@@ -54,13 +54,14 @@ JSONL 文件出现就会显示。
 详情页是最有用的那个。它显示：
 
 1. **头部**——diff 范围、模型、分支、总 token、运行时长。
-2. **文件分组**——每个被评审文件一个块。每个文件内，五条“任务类型”泳道：
+2. **文件分组**——每个被评审的**组**一个块。文件在评审前已按语义打包，因此一个块
+   可能覆盖多个相关文件，其标题是该组的文件路径。每个组内，五条“任务类型”泳道：
 
 | 任务类型 | 何时出现 |
 |---|---|
-| `plan_task` | 运行了 plan 阶段（文件 ≥ `PLAN_MODE_LINE_THRESHOLD`）。 |
-| `main_task` | 每个文件。主评审循环。 |
-| `review_filter_task` | 为该文件运行了评审后评论过滤流程。 |
+| `plan_task` | 运行了 plan 阶段（组内最大文件 ≥ `PLAN_MODE_LINE_THRESHOLD`，或 2 个以上文件合计 ≥ `PLAN_MODE_GROUP_LINE_THRESHOLD`）。 |
+| `main_task` | 每个组。主评审循环——每个评审轮一遍。 |
+| `review_filter_task` | 为该组运行了评审后评论过滤流程。 |
 | `memory_compression_task` | active+compress 区超过 60 % / 80 % 预算。 |
 | `re_location_task` | 某条 `code_comment` 无法锚定，回退重新定位运行。 |
 
@@ -85,7 +86,8 @@ JSONL 文件出现就会显示。
 
 ### “模型为什么这么说？”
 
-在终端输出中打开一条评论，在查看器中定位该文件，沿着它的 `main_task` 泳道向下查看。
+在终端输出中打开一条评论，在查看器中定位包含该文件的那个**组**，沿着它的
+`main_task` 泳道向下查看。
 **工具调用**中包含你关心的 `code_comment` 的那张卡片，就是产出它的那一轮。卡片的
 Response 显示模型推理；要确切知道发给模型的 prompt + 上下文，在 JSONL 转录中
 打开该请求号的 `llm_request` 记录（其 `messages` 字段）。
@@ -119,6 +121,9 @@ JSONL 文件每行是一个事件：
 {"type": "llm_response", "filePath": "src/foo.go", "taskType": "main_task", "model": "claude-sonnet-4-6", "content": "Found 2 issues…", "duration_ms": 8421, "usage": {"prompt_tokens": 12450, "completion_tokens": 320}}
 {"type": "tool_call", "filePath": "src/foo.go", "tool_name": "file_read", "arguments": "{\"file_path\":\"src/foo.go\",\"start_line\":1,\"end_line\":50}", "result": "File: src/foo.go (Total lines: 220)\nIS_TRUNCATED: false\nLINE_RANGE: 1-50\n1|package foo…", "ok": true, "duration_ms": 14}
 ```
+
+`filePath` 存放的是**组的 key**：单文件组就是那一个路径；多个文件一起被评审时，
+则是该组路径排序后用逗号连接的结果。
 
 行是 append-only——不完整的 JSONL 意味着会话在运行中被中断，查看器会渲染已写入的
 内容。

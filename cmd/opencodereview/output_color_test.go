@@ -4,6 +4,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -30,7 +31,7 @@ func sampleComment() model.LlmComment {
 // piping review output must not emit ANSI escape sequences.
 func TestRenderComment_NoColorIsPlain(t *testing.T) {
 	setColor(t, false)
-	out := captureStdout(t, func() { renderComment(sampleComment()) })
+	out := captureStdout(t, func() { renderComment(sampleComment(), os.Stdout) })
 
 	if strings.Contains(out, "\033") {
 		t.Errorf("output contains an ANSI escape with color disabled:\n%q", out)
@@ -53,7 +54,7 @@ func TestRenderComment_NoColorIsPlain(t *testing.T) {
 // terminal still gets the styled render.
 func TestRenderComment_ColorEmitsEscapes(t *testing.T) {
 	setColor(t, true)
-	out := captureStdout(t, func() { renderComment(sampleComment()) })
+	out := captureStdout(t, func() { renderComment(sampleComment(), os.Stdout) })
 
 	// The colorized badge itself is asserted by TestRenderComment_BadgeInline;
 	// what is new here is the file header.
@@ -70,7 +71,7 @@ func TestPrintDiffLine_NoColor(t *testing.T) {
 		{" ", "context line", "  context line\n"},
 	} {
 		got := captureStdout(t, func() {
-			printDiffLine(tc.prefix, tc.content, "\033[92m", "\033[48;2;0;60;0m")
+			printDiffLine(os.Stdout, tc.prefix, tc.content, "\033[92m", "\033[48;2;0;60;0m")
 		})
 		if got != tc.want {
 			t.Errorf("printDiffLine(%q) = %q, want %q", tc.prefix, got, tc.want)
@@ -120,7 +121,7 @@ func previewFixture() *agent.DiffPreview {
 // escapes: `ocr review --preview` piped to a file.
 func TestOutputPreviewText_NoColorIsPlain(t *testing.T) {
 	setColor(t, false)
-	out := captureStdout(t, func() { outputPreviewText(previewFixture()) })
+	out := captureStdout(t, func() { outputPreviewText(previewFixture(), os.Stdout) })
 
 	if strings.Contains(out, "\033") {
 		t.Errorf("preview contains an ANSI escape with color disabled:\n%q", out)
@@ -150,7 +151,7 @@ func TestOutputPreviewText_ColumnsAlign(t *testing.T) {
 	p.ExcludedCount = 0
 
 	setColor(t, false)
-	plain := captureStdout(t, func() { outputPreviewText(p) })
+	plain := captureStdout(t, func() { outputPreviewText(p, os.Stdout) })
 	var widths []int
 	for _, ln := range strings.Split(plain, "\n") {
 		if strings.Contains(ln, ".go") {
@@ -167,7 +168,7 @@ func TestOutputPreviewText_ColumnsAlign(t *testing.T) {
 
 func TestOutputPreviewText_ColorEmitsEscapes(t *testing.T) {
 	setColor(t, true)
-	out := captureStdout(t, func() { outputPreviewText(previewFixture()) })
+	out := captureStdout(t, func() { outputPreviewText(previewFixture(), os.Stdout) })
 	if !strings.Contains(out, "\033[32m+10\033[0m") {
 		t.Errorf("expected colorized insertion total:\n%q", out)
 	}

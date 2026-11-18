@@ -189,7 +189,9 @@ type Agent struct {
 	subtaskFailed   int64 // count of failed subtasks, accessed atomically
 	runner          *llmloop.Runner
 	resumeInfo      *ResumeInfo
-	budgetExceeded  bool // set when a token/tool-call budget gate stopped dispatch
+	budgetExceeded  atomic.Bool // set when a token/tool-call budget gate stopped dispatch
+
+	fileGroups []FileGroup // semantic grouping result, stored for JSON output
 
 	// inputResolution holds this run's frozen commit endpoints (resolved_base/
 	// head/exact_range), and repoRemoteIdentity the credential-free repository
@@ -244,6 +246,7 @@ func New(args Args) *Agent {
 		Session:           args.Session,
 		DiffLookup:        a.findDiff,
 		AllDiffs:          a.allDiffs,
+		CommentReviewPath: a.commentReviewPath,
 		// Non-nil only here: the same Runner serves scan, whose requests must
 		// stay out of the retry report. See newRequestMeta.
 		NewRequestMeta: a.newRequestMeta,
@@ -447,12 +450,51 @@ func (a *Agent) Diffs() []model.Diff {
 	return a.diffs
 }
 
+// FileGroups returns the semantic grouping result for JSON output.
+func (a *Agent) FileGroups() []FileGroupInfo {
+	if len(a.fileGroups) == 0 {
+		return nil
+	}
+	result := make([]FileGroupInfo, len(a.fileGroups))
+	for i, g := range a.fileGroups {
+		files := make([]string, len(g.Diffs))
+		for j, d := range g.Diffs {
+			files[j] = d.NewPath
+		}
+		result[i] = FileGroupInfo{Label: g.Label, Files: files}
+	}
+	return result
+}
+
 // CommentSides returns source-side provenance aligned with the comments from Run.
 func (a *Agent) CommentSides() []location.Side {
 	if a == nil || a.args.CommentCollector == nil {
 		return nil
 	}
 	return a.args.CommentCollector.Sides()
+}
+
+func (a *Agent) commentReviewPath(runPath string, comment model.LlmComment) string {
+	for _, group := range a.fileGroups {
+		if fileGroupKey(group.Diffs) != runPath || len(group.Diffs) == 0 {
+			continue
+		}
+		if len(group.Diffs) == 1 {
+			return group.Diffs[0].NewPath
+		}
+		for _, d := range group.Diffs {
+			if d.NewPath == comment.Path {
+				return d.NewPath
+			}
+		}
+		paths := make([]string, len(group.Diffs))
+		for i, d := range group.Diffs {
+			paths[i] = d.NewPath
+		}
+		sort.Strings(paths)
+		return paths[0]
+	}
+	return runPath
 }
 
 func locationSideAt(sides []location.Side, index int) location.Side {
@@ -500,7 +542,7 @@ func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 // and exit code: partial/0 whenever anything was covered, failed/non-zero only
 // when the cap left nothing covered. Per-file token/tool-round exhaustion
 // does NOT set this flag — it is an item-level failed(budget) outcome instead.
-func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded }
+func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded.Load() }
 
 // recordWarning adds a non-fatal warning to the agent's warning list.
 func (a *Agent) recordWarning(warningType, file, message string) {
@@ -613,6 +655,24 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 
 	toDispatch := a.applyResume(a.diffs)
 
+	// Filter out deleted files before grouping.
+	var nonDeleted []model.Diff
+	for _, d := range toDispatch {
+		if !d.IsDeleted {
+			nonDeleted = append(nonDeleted, d)
+		}
+	}
+
+	// Group files semantically via LLM.
+	groupResult := groupDiffs(ctx, nonDeleted, a.args.LLMClient, a.args.Model,
+		a.args.Template, llmloop.PromptTokenLimit(a.args.Template.MaxTokens),
+		&groupingSessionOpts{session: a.session, provider: a.args.Provider, model: a.args.Model})
+	groups := groupResult.groups
+	a.fileGroups = groups
+	if groupResult.usage != nil {
+		a.runner.RecordUsage(groupResult.usage)
+	}
+
 	var wg sync.WaitGroup
 	var resultMu sync.Mutex
 	filterReviewItems := make(map[string]struct{})
@@ -624,50 +684,39 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	sem := make(chan struct{}, concurrency)
-	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute
+	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute * time.Duration(a.args.Template.ReviewRounds())
 
 	var dispatched int64
 dispatchLoop:
-	for i := range toDispatch {
-		if toDispatch[i].IsDeleted {
-			continue
-		}
+	for gi := range groups {
+		group := groups[gi]
 
-		// Per-file budget look-ahead, checked BEFORE acquiring the semaphore
-		// (mirrors scan/agent.go:472-486): if the tokens already spent PLUS a
-		// look-ahead estimate of this file's cost would exceed the budget,
-		// stop scheduling further files. Any worker already in flight is
-		// allowed to finish — its tokens flow into the atomic counter; we do
-		// NOT cancel it (matches scan, avoids half-written session records).
-		// Overrun is therefore bounded by the in-flight worker count
-		// (≤ concurrency, default 8), never a whole batch.
+		// Per-group budget look-ahead, checked BEFORE acquiring the semaphore:
+		// if tokens already spent plus an estimate of this group's cost would
+		// exceed the budget, stop scheduling further groups. Any group already
+		// in flight is allowed to finish — overrun is bounded by in-flight
+		// count (≤ concurrency).
 		if a.args.MaxTokensBudget > 0 {
 			used := a.runner.TotalTokensUsed()
-			nextEst := estimateDiffFileTokens(toDispatch[i])
-			projected := used + nextEst
+			var groupEst int64
+			for _, d := range group.Diffs {
+				groupEst += estimateDiffFileTokens(d)
+			}
+			projected := used + groupEst
 			if projected > a.args.MaxTokensBudget {
-				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + next-file est %s = projected %s > budget %s) — skipping %s and remaining files\n",
-					humanTokens(used), humanTokens(nextEst), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), toDispatch[i].NewPath)
-				a.recordWarning("token_budget_reached", toDispatch[i].NewPath,
-					fmt.Sprintf("stopped dispatch: used %d tokens + next-file estimate %d = projected %d exceeds budget %d", used, nextEst, projected, a.args.MaxTokensBudget))
-				a.budgetExceeded = true
-				// Reaching a user-configured budget is a *controlled coverage
-				// truncation*, not a run-level failure: the run did exactly what it
-				// was told to do, and everything it finished before the cap is a
-				// valid result. So record a pending failure cause rather than a
-				// run_failure — Finalize then attributes every item that never got
-				// dispatched to failed(budget) while the terminal state stays
-				// coverage-derived (partial with any completed/reused item, failed
-				// only when the cap left nothing covered).
-				//
-				// Deliberately NOT SetRunFailure: that would force terminal_state to
-				// failed regardless of how much was covered, and it would claim the
-				// single first-wins run_failure slot, blocking a genuine run-level
-				// cause raised later, such as a global deadline or user cancellation,
-				// from being recorded at all.
-				// RunFailureBudget stays reserved for a real run-level budget
-				// anomaly, e.g. a corrupted budget counter that makes per-item
-				// coverage undeterminable.
+				firstPath := group.Diffs[0].NewPath
+				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + group est %s = projected %s > budget %s) — skipping group %q and remaining\n",
+					humanTokens(used), humanTokens(groupEst), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), group.Label)
+				a.recordWarning("token_budget_reached", firstPath,
+					fmt.Sprintf("stopped dispatch: used %d tokens + group estimate %d = projected %d exceeds budget %d", used, groupEst, projected, a.args.MaxTokensBudget))
+				a.budgetExceeded.Store(true)
+				// Deliberately NOT SetRunFailure: budget exhaustion is a controlled
+				// coverage truncation, not a run-level failure. SetRunFailure would
+				// force terminal_state=failed regardless of coverage, and claim the
+				// single first-wins slot blocking genuine run-level causes (deadline,
+				// cancellation). Record a pending failure cause instead — Finalize
+				// attributes undispatched items to failed(budget) while the terminal
+				// state stays coverage-derived.
 				if b := a.session.Manifest(); b != nil {
 					if err := b.SetPendingFailureCause(session.FailureBudget, "aggregate token budget reached before dispatch completed"); err != nil {
 						a.recordWarning("manifest_error", "", err.Error())
@@ -686,82 +735,110 @@ dispatchLoop:
 			<-sem // release the slot acquired concurrently with cancellation
 			break dispatchLoop
 		}
-		dispatched++
+		dispatched += int64(len(group.Diffs))
 		wg.Add(1)
 
-		go func(d model.Diff) {
-			fingerprint := reviewItemFingerprint(a.reviewMode(), d)
+		go func(g FileGroup) {
 			defer wg.Done()
 			defer func() { <-sem }() // release
-			// A panic while reviewing one file must be isolated exactly like an
-			// error return: counted in subtaskFailed and recorded as a
-			// subtask_error warning, so other files still complete and the
-			// all-failed rollup below stays correct. Registered before the
-			// timeout-cancel defer, so cancel() still runs first on unwind and
-			// fileCtx is already cancelled here — use the parent ctx for telemetry.
+			// A panic while reviewing one group must be isolated exactly like an
+			// error return: counted in subtaskFailed and recorded as a warning,
+			// so other groups still complete and the all-failed rollup stays correct.
 			defer func() {
 				if r := recover(); r != nil {
-					atomic.AddInt64(&a.subtaskFailed, 1)
-					// The recovered panic value can carry arbitrary text; record a
-					// fixed, safe reason in the manifest and keep the detailed value
-					// only in the local checkpoint / warning.
-					a.markFailed(d, session.FailurePanic, "subtask panicked during review")
-					a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, fmt.Sprintf("panic: %v", r))
-					fmt.Fprintf(stdout.Writer(), "[ocr] Subtask panic for %s: %v\n%s\n", d.NewPath, r, debug.Stack())
+					atomic.AddInt64(&a.subtaskFailed, int64(len(g.Diffs)))
+					for _, d := range g.Diffs {
+						fingerprint := reviewItemFingerprint(a.reviewMode(), d)
+						a.markFailed(d, session.FailurePanic, "subtask panicked during review")
+						a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, fmt.Sprintf("panic: %v", r))
+					}
+					fmt.Fprintf(stdout.Writer(), "[ocr] Subtask panic for group %q: %v\n%s\n", g.Label, r, debug.Stack())
 					telemetry.ErrorEvent(ctx, "subtask.panic", fmt.Errorf("panic: %v", r),
-						telemetry.AnyToAttr("file.path", d.NewPath))
-					a.recordWarning("subtask_error", d.NewPath, fmt.Sprintf("panic: %v", r))
+						telemetry.AnyToAttr("group.label", g.Label))
+					a.recordWarning("subtask_error", g.Label, fmt.Sprintf("panic: %v", r))
 				}
 			}()
 
-			var fileCtx context.Context
+			var groupCtx context.Context
 			var cancel context.CancelFunc
 			if timeout > 0 {
-				fileCtx, cancel = context.WithTimeout(ctx, timeout)
+				groupCtx, cancel = context.WithTimeout(ctx, timeout)
 				defer cancel()
 			} else {
-				fileCtx = ctx
+				groupCtx = ctx
 			}
 
-			completed, stop, err := a.executeSubtask(fileCtx, d)
+			completed, stop, err := a.executeGroupSubtask(groupCtx, g)
 			if err != nil {
-				atomic.AddInt64(&a.subtaskFailed, 1)
-				// Classify from the error's structured shape (deadline/cancel/
-				// config/provider); never write the raw err into the manifest.
+				atomic.AddInt64(&a.subtaskFailed, int64(len(g.Diffs)))
 				class, reason := classifyItemError(err)
-				a.markFailed(d, class, reason)
-				a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, err.Error())
-				fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for %s: %v\n", d.NewPath, err)
-				telemetry.ErrorEvent(fileCtx, "subtask.error", err,
-					telemetry.AnyToAttr("file.path", d.NewPath))
-				a.recordWarning("subtask_error", d.NewPath, err.Error())
+				for _, d := range g.Diffs {
+					fingerprint := reviewItemFingerprint(a.reviewMode(), d)
+					a.markFailed(d, class, reason)
+					a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, err.Error())
+				}
+				fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for group %q: %v\n", g.Label, err)
+				telemetry.ErrorEvent(groupCtx, "subtask.error", err,
+					telemetry.AnyToAttr("group.label", g.Label))
+				a.recordWarning("subtask_error", g.Label, err.Error())
 				return
 			}
 			resultMu.Lock()
-			filterReviewItems[d.NewPath] = struct{}{}
+			for _, d := range g.Diffs {
+				filterReviewItems[d.NewPath] = struct{}{}
+			}
 			resultMu.Unlock()
 			if !completed {
 				if stop != nil {
-					a.markFailed(d, stop.class, stop.reason)
-					if stop.checkpoint != "" {
-						a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, stop.checkpoint)
+					// A group that stopped short of task_done may still have produced
+					// usable output for some of its files before the round/token
+					// budget ran out. Classify per file rather than per group so a
+					// file that already has comments lands in Completed instead of
+					// Failed — otherwise a single stuck file drags its whole group
+					// (and, when nothing else was dispatched, the whole run) down to
+					// terminal_state=failed even though real coverage exists.
+					var failedCount int64
+					for _, d := range g.Diffs {
+						fingerprint := reviewItemFingerprint(a.reviewMode(), d)
+						if comments, _ := a.args.CommentCollector.CommentsAndSidesForReviewItem(d.NewPath); len(comments) > 0 {
+							a.markCompleted(d)
+							resultMu.Lock()
+							completedItems = append(completedItems, completedReviewItem{diff: d, fingerprint: fingerprint})
+							resultMu.Unlock()
+							continue
+						}
+						a.markFailed(d, stop.class, stop.reason)
+						if stop.checkpoint != "" {
+							a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, stop.checkpoint)
+						}
+						failedCount++
 					}
-					if stop.reportAsError {
-						atomic.AddInt64(&a.subtaskFailed, 1)
+					// subtaskFailed must count only the files actually marked failed
+					// above, not the whole group — a group can mix Completed and
+					// Failed files, and reportAsError itself is a group-level signal
+					// (any file with comments suppresses it) that must not be assumed
+					// to imply failedCount == len(g.Diffs).
+					if stop.reportAsError && failedCount > 0 {
+						atomic.AddInt64(&a.subtaskFailed, failedCount)
 						stopErr := errors.New(stop.checkpoint)
-						fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for %s: %v\n", d.NewPath, stopErr)
-						telemetry.ErrorEvent(fileCtx, "subtask.error", stopErr,
-							telemetry.AnyToAttr("file.path", d.NewPath))
-						a.recordWarning("subtask_error", d.NewPath, stopErr.Error())
+						fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for group %q: %v\n", g.Label, stopErr)
+						telemetry.ErrorEvent(groupCtx, "subtask.error", stopErr,
+							telemetry.AnyToAttr("group.label", g.Label))
+						a.recordWarning("subtask_error", g.Label, stopErr.Error())
 					}
 				}
 				return
 			}
-			a.markCompleted(d)
 			resultMu.Lock()
-			completedItems = append(completedItems, completedReviewItem{diff: d, fingerprint: fingerprint})
+			for _, d := range g.Diffs {
+				a.markCompleted(d)
+				completedItems = append(completedItems, completedReviewItem{
+					diff:        d,
+					fingerprint: reviewItemFingerprint(a.reviewMode(), d),
+				})
+			}
 			resultMu.Unlock()
-		}(toDispatch[i])
+		}(group)
 	}
 
 	wg.Wait()
@@ -800,6 +877,11 @@ dispatchLoop:
 	// subtask hard-fails. Preserve the legacy all-failed error only when there is
 	// no reused result; otherwise the manifest is partial and must exit 0.
 	if failed > 0 && failed == dispatched && reused == 0 {
+		// Even when all subtasks failed, some may have produced comments before
+		// hitting the error. Return those comments instead of discarding them.
+		if comments := a.args.CommentCollector.Comments(); len(comments) > 0 {
+			return comments, nil
+		}
 		return nil, fmt.Errorf("all %d file review(s) failed — check your LLM configuration and API key", dispatched)
 	}
 
@@ -1249,129 +1331,247 @@ func resumedFromSession(resume *session.ResumeState) string {
 	return resume.SessionID
 }
 
-// executeSubtask performs the Plan Phase + Main Loop for a single file. It
-// returns (completed, stop, err): a hard Go error (err) for provider/config/ctx
-// failures the caller classifies via classifyItemError, or a structured *stop
-// for a non-error early exit (token budget, main-loop stop) carrying the manifest
-// class recorded at its trigger point. A completed review returns (true, nil, nil).
-func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtaskStop, error) {
-	ctx, span := telemetry.StartSpan(ctx, "subtask.execute."+d.NewPath)
-	defer span.End()
-	telemetry.SetAttr(span, "file.path", d.NewPath)
-	telemetry.SetAttr(span, "lines.changed", d.Insertions+d.Deletions)
-	telemetry.SetAttr(span, "lines.inserted", d.Insertions)
-	telemetry.SetAttr(span, "lines.deleted", d.Deletions)
-
-	if ctx.Err() != nil {
-		return false, nil, ctx.Err()
-	}
-
-	newPath := d.NewPath
-
-	// Build change-files list excluding current file
-	changeFilesExcludingCurrent := a.buildChangeFilesExcept(newPath)
-
-	rule := a.resolveSystemRule(strings.ToLower(newPath))
-
-	threshold := a.args.Template.PlanModeLineThreshold
-	changeLines := d.Insertions + d.Deletions
-
-	// Phase 1: Plan (skip when changes are below threshold)
-	var planResult string
-	if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 && threshold > 0 && changeLines < int64(threshold) {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping plan phase for %s (%d lines < threshold %d)\n", newPath, changeLines, threshold)
-		telemetry.Event(ctx, "plan.skipped",
-			telemetry.AnyToAttr("file.path", newPath),
-			telemetry.AnyToAttr("lines.changed", changeLines),
-			telemetry.AnyToAttr("threshold", threshold))
-	} else if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 {
-		var err error
-		planResult, err = a.executePlanPhase(ctx, newPath, d.Diff, changeFilesExcludingCurrent, rule)
-		if err != nil {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Plan phase failed for %s: %v (continuing without plan)\n", newPath, err)
-			telemetry.Eventf(ctx, "plan.failed", err.Error(),
-				telemetry.AnyToAttr("file.path", newPath))
-			planResult = ""
-		}
-	}
-
-	// Phase 2: Main task loop
-	if len(a.args.Template.MainTask.Messages) == 0 {
-		return false, nil, errMainTaskEmpty
-	}
-
+// buildMainTaskMessages renders the MAIN_TASK messages for one review round.
+// planResult is "" for round 2+ (stripped via stripEmptyPlanBlock).
+// confirmed is "" on round 1 (stripped via stripEmptyConfirmedBlock).
+func (a *Agent) buildMainTaskMessages(rule, changeFiles, diffs, planResult, confirmed string) []llm.Message {
 	rawMsgs := a.args.Template.MainTask.Messages
 	messages := make([]llm.Message, 0, len(rawMsgs))
 	for _, m := range rawMsgs {
 		content := m.Content
 		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
-		content = strings.ReplaceAll(content, "{{current_file_path}}", newPath)
 		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
-		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingCurrent)
-		content = strings.ReplaceAll(content, "{{diff}}", d.Diff)
+		content = strings.ReplaceAll(content, "{{change_files}}", changeFiles)
+		content = strings.ReplaceAll(content, "{{diffs}}", diffs)
 		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
-		// Always substitute the {{plan_guidance}} token so the literal placeholder
-		// never leaks into the rendered prompt. When the plan phase produced no
-		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
-		// so the LLM does not see a dangling section header.
-		// Strip MUST run before ReplaceAll: the regex requires the literal
-		// {{plan_guidance}} token to be present; if we replace first, the token
-		// is gone and the wrapper can't be matched.
 		if planResult == "" {
 			content = stripEmptyPlanBlock(content)
 		}
 		content = strings.ReplaceAll(content, "{{plan_guidance}}", planResult)
+		if confirmed == "" {
+			content = stripEmptyConfirmedBlock(content)
+		}
+		content = strings.ReplaceAll(content, "{{confirmed_comments}}", confirmed)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
+	return messages
+}
 
+// checkPromptBudget validates that the rendered messages fit within the token
+// limit. Returns a *subtaskStop when they do not, nil otherwise.
+func (a *Agent) checkPromptBudget(ctx context.Context, messages []llm.Message, groupKey string, round int) *subtaskStop {
 	tokenCount := llmloop.CountMessagesTokens(messages)
 	maxAllowed := a.args.Template.MaxTokens
 	tokenLimit := llmloop.PromptTokenLimit(maxAllowed)
-	if tokenCount > tokenLimit {
-		msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d)", tokenCount, 80, maxAllowed)
-		fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: %s for %s\n", msg, newPath)
-		a.recordWarning("token_threshold_exceeded", newPath, msg)
-		telemetry.Event(ctx, "token.threshold.exceeded",
-			telemetry.AnyToAttr("file.path", newPath),
-			telemetry.AnyToAttr("tokens", tokenCount),
-			telemetry.AnyToAttr("max_tokens", maxAllowed))
-		// The prompt itself blows the configured token budget: an explicit,
-		// declared budget stop. Keep the detailed token message only in the
-		// checkpoint; the manifest reason stays generic.
-		return false, &subtaskStop{
-			class:      session.FailureBudget,
-			reason:     "prompt exceeded the configured token budget",
-			checkpoint: msg,
-		}, nil
+	if tokenCount <= tokenLimit {
+		return nil
+	}
+	msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d) [round %d]", tokenCount, 80, maxAllowed, round)
+	fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: %s for group %q\n", msg, groupKey)
+	a.recordWarning("token_threshold_exceeded", groupKey, msg)
+	telemetry.Event(ctx, "token.threshold.exceeded",
+		telemetry.AnyToAttr("group.label", groupKey),
+		telemetry.AnyToAttr("tokens", tokenCount),
+		telemetry.AnyToAttr("max_tokens", maxAllowed),
+		telemetry.AnyToAttr("round", round))
+	return &subtaskStop{
+		class:      session.FailureBudget,
+		reason:     "prompt exceeded the configured token budget",
+		checkpoint: msg,
+	}
+}
+
+// groupHasComments reports whether any file in the group has comments.
+func (a *Agent) groupHasComments(g FileGroup) bool {
+	for _, d := range g.Diffs {
+		if comments, _ := a.args.CommentCollector.CommentsAndSidesForReviewItem(d.NewPath); len(comments) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// groupChurn returns the group's aggregate churn and its largest single-file
+// churn. Both feed Template.PlanRequired.
+func groupChurn(g FileGroup) (total, maxFile int64) {
+	for _, d := range g.Diffs {
+		changed := d.Insertions + d.Deletions
+		total += changed
+		if changed > maxFile {
+			maxFile = changed
+		}
+	}
+	return total, maxFile
+}
+
+// executeGroupSubtask performs the Plan Phase + Main Loop for a file group. It
+// returns (completed, stop, err): a hard Go error (err) for provider/config/ctx
+// failures the caller classifies via classifyItemError, or a structured *stop
+// for a non-error early exit (token budget, main-loop stop) carrying the manifest
+// class recorded at its trigger point. A completed review returns (true, nil, nil).
+func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *subtaskStop, error) {
+	groupKey := fileGroupKey(g.Diffs)
+	ctx, span := telemetry.StartSpan(ctx, "subtask.execute.group."+groupKey)
+	defer span.End()
+
+	totalChanged, maxFileChanged := groupChurn(g)
+	telemetry.SetAttr(span, "group.label", groupKey)
+	telemetry.SetAttr(span, "group.file_count", len(g.Diffs))
+	telemetry.SetAttr(span, "lines.changed", totalChanged)
+	telemetry.SetAttr(span, "lines.changed.max_file", maxFileChanged)
+
+	if ctx.Err() != nil {
+		return false, nil, ctx.Err()
 	}
 
-	mainCompleted, mainStop, err := func() (bool, llmloop.MainLoopStop, error) {
-		ctx, mainSpan := telemetry.StartSpan(ctx, "main.loop")
-		defer mainSpan.End()
-		telemetry.SetAttr(mainSpan, "file.path", newPath)
-		completed, stop, err := a.runner.RunPerFile(ctx, messages, newPath)
+	// Build concatenated diffs as per-file XML elements
+	concatenatedDiffs := buildConcatenatedDiffs(g.Diffs)
+
+	// Build change-files list excluding all group members
+	changeFilesExcludingGroup := a.buildChangeFilesExceptGroup(g.Diffs)
+
+	// Merge system rules for all files in the group
+	rule := a.resolveGroupSystemRule(g.Diffs)
+
+	// Phase 1: Plan (skip when changes are below threshold)
+	planEnabled := a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0
+	planRequired := a.args.Template.PlanRequired(len(g.Diffs), totalChanged, maxFileChanged)
+
+	var planResult string
+	switch {
+	case !planEnabled:
+		// No plan task configured.
+	case planRequired:
+		var err error
+		planResult, err = a.executeGroupPlanPhase(ctx, g, concatenatedDiffs, changeFilesExcludingGroup, rule)
 		if err != nil {
-			mainSpan.SetStatus(codes.Error, err.Error())
-			mainSpan.RecordError(err)
-			return false, stop, err
+			fmt.Fprintf(stdout.Writer(), "[ocr] Plan phase failed for group %q: %v (continuing without plan)\n", groupKey, err)
+			telemetry.Eventf(ctx, "plan.failed", err.Error(),
+				telemetry.AnyToAttr("group.label", groupKey))
+			planResult = ""
 		}
-		return completed, stop, nil
-	}()
-	if err != nil {
-		return false, nil, err
+	default:
+		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping plan phase for group %q (%d file(s), max %d lines, total %d lines)\n",
+			groupKey, len(g.Diffs), maxFileChanged, totalChanged)
+		telemetry.Event(ctx, "plan.skipped",
+			telemetry.AnyToAttr("group.label", groupKey),
+			telemetry.AnyToAttr("group.file_count", len(g.Diffs)),
+			telemetry.AnyToAttr("lines.changed", totalChanged),
+			telemetry.AnyToAttr("lines.changed.max_file", maxFileChanged),
+			telemetry.AnyToAttr("threshold", a.args.Template.PlanModeLineThreshold),
+			telemetry.AnyToAttr("threshold.group", a.args.Template.PlanModeGroupLineThreshold))
 	}
-	if !mainCompleted {
-		// Distinguish the stop cause at its trigger point: max-rounds is budget,
-		// empty-round / compression are the honest unknown catch-all.
-		class, reason := classifyMainLoopStop(mainStop)
-		return false, &subtaskStop{
-			class:         class,
-			reason:        reason,
-			checkpoint:    "main_task did not complete before stopping",
-			reportAsError: true,
-		}, nil
+
+	// Phase 2: Main task loop (multi-round)
+	if len(a.args.Template.MainTask.Messages) == 0 {
+		return false, nil, errMainTaskEmpty
 	}
-	return true, nil, nil
+
+	maxRounds := a.args.Template.ReviewRounds()
+
+	// Per-path baselines for concurrency-safe round-delta computation.
+	baseline := make(map[string]int, len(g.Diffs))
+	for _, d := range g.Diffs {
+		baseline[d.NewPath] = len(a.args.CommentCollector.CommentsForPath(d.NewPath))
+	}
+
+	var (
+		confirmed []model.LlmComment
+		lastStop  *subtaskStop
+		completed bool
+	)
+
+	for round := 1; round <= maxRounds; round++ {
+		if ctx.Err() != nil {
+			return false, nil, ctx.Err()
+		}
+
+		if round > 1 && a.args.MaxTokensBudget > 0 && a.budgetExceeded.Load() {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Aggregate budget exceeded, skipping round %d for group %q\n", round, groupKey)
+			break
+		}
+
+		// Round 2+ strips the plan to avoid it acting as a coverage ceiling.
+		roundPlan := planResult
+		if round > 1 {
+			roundPlan = ""
+		}
+
+		confirmedText := buildConfirmedCommentsBlock(confirmed)
+		messages := a.buildMainTaskMessages(rule, changeFilesExcludingGroup, concatenatedDiffs, roundPlan, confirmedText)
+
+		if stop := a.checkPromptBudget(ctx, messages, groupKey, round); stop != nil {
+			if round == 1 {
+				return false, stop, nil
+			}
+			break
+		}
+
+		mainCompleted, mainStop, err := func() (bool, llmloop.MainLoopStop, error) {
+			ctx, mainSpan := telemetry.StartSpan(ctx, "main.loop")
+			defer mainSpan.End()
+			telemetry.SetAttr(mainSpan, "group.label", groupKey)
+			telemetry.SetAttr(mainSpan, "round", round)
+			completed, stop, err := a.runner.RunPerFile(ctx, messages, groupKey)
+			if err != nil {
+				mainSpan.SetStatus(codes.Error, err.Error())
+				mainSpan.RecordError(err)
+				return false, stop, err
+			}
+			return completed, stop, nil
+		}()
+
+		if err != nil {
+			if round == 1 {
+				return false, nil, err
+			}
+			a.recordWarning("review_round_failed", groupKey, fmt.Sprintf("round %d: %v", round, err))
+			fmt.Fprintf(stdout.Writer(), "[ocr] Round %d failed for group %q: %v (keeping earlier findings)\n", round, groupKey, err)
+			break
+		}
+
+		// Drain async comment workers before computing deltas.
+		if a.args.CommentWorkerPool != nil {
+			a.args.CommentWorkerPool.AwaitKey(groupKey)
+		}
+		// Compute newly confirmed comments from this round.
+		var newlyConfirmed []model.LlmComment
+		for _, d := range g.Diffs {
+			all := a.args.CommentCollector.CommentsForPath(d.NewPath)
+			if b := baseline[d.NewPath]; len(all) > b {
+				newlyConfirmed = append(newlyConfirmed, all[b:]...)
+			}
+			baseline[d.NewPath] = len(all)
+		}
+		confirmed = append(confirmed, newlyConfirmed...)
+
+		if !mainCompleted {
+			class, reason := classifyMainLoopStop(mainStop)
+			lastStop = &subtaskStop{
+				class:         class,
+				reason:        reason,
+				checkpoint:    fmt.Sprintf("main_task did not complete before stopping (round %d/%d)", round, maxRounds),
+				reportAsError: !a.groupHasComments(g),
+			}
+			break
+		}
+		completed = true
+
+		if len(newlyConfirmed) == 0 {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Round %d/%d added no new findings for group %q; stopping early\n", round, maxRounds, groupKey)
+			break
+		}
+
+		if len(confirmed) >= confirmedCap {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Group %q reached %d confirmed findings; skipping further rounds\n", groupKey, len(confirmed))
+			break
+		}
+	}
+
+	if lastStop != nil {
+		return false, lastStop, nil
+	}
+	return completed, nil, nil
 }
 
 // filterTools defines the two mutually exclusive tools for the review filter.
@@ -1428,8 +1628,339 @@ var filterTools = []llm.ToolDef{
 	},
 }
 
+// buildConcatenatedDiffs formats all diffs in the group as per-file XML elements.
+func buildConcatenatedDiffs(diffs []model.Diff) string {
+	var sb strings.Builder
+	for i, d := range diffs {
+		sb.WriteString("<file path=\"")
+		sb.WriteString(d.NewPath)
+		sb.WriteString("\">\n")
+		sb.WriteString(d.Diff)
+		sb.WriteString("\n</file>")
+		if i < len(diffs)-1 {
+			sb.WriteString("\n\n")
+		}
+	}
+	return sb.String()
+}
+
+// formatDiffEntry renders one changed file as STATUS   path (+N/-M). It is the
+// shared shape for both the grouping file list and the other-changed-files
+// block, so every prompt that enumerates files presents them identically.
+func formatDiffEntry(d model.Diff) string {
+	status := "MODIFIED"
+	switch {
+	case d.IsNew:
+		status = "ADDED"
+	case d.IsDeleted:
+		status = "DELETED"
+	case d.IsRenamed:
+		status = "RENAMED"
+	}
+	return fmt.Sprintf("%s   %s (+%d/-%d)", status, d.NewPath, d.Insertions, d.Deletions)
+}
+
+// buildChangeFilesExceptGroup returns a formatted list of changed files excluding all group members.
+func (a *Agent) buildChangeFilesExceptGroup(groupDiffs []model.Diff) string {
+	exclude := make(map[string]bool, len(groupDiffs))
+	for _, d := range groupDiffs {
+		exclude[d.NewPath] = true
+		exclude[d.OldPath] = true
+	}
+	var sb strings.Builder
+	for _, d := range a.diffs {
+		if d.IsBinary || exclude[d.NewPath] || exclude[d.OldPath] {
+			continue
+		}
+		// Separator before the entry, conditional on something already being
+		// written, rather than after it conditional on the a.diffs index: the loop
+		// skips binaries and group members, so an index-based test emits a trailing
+		// newline whenever the final diff is one of the skipped ones. Excluding a
+		// whole group makes that the common case rather than the rare one.
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(formatDiffEntry(d))
+	}
+	return sb.String()
+}
+
+// resolveGroupSystemRule merges the rules for every file in a group. Files that
+// resolve to identical rule text share one block.
+//
+// When the group spans more than one distinct rule set, each block is tagged with
+// the files it was resolved for. Bare concatenation cannot express that mapping:
+// the model would receive, say, the Go checklist immediately followed by the XML
+// one with nothing saying which file each governs — and a group holding exactly
+// that mix is what the grouping prompt asks for (interface plus implementation,
+// i18n/config variants of one resource). The <rules for="..."> framing matches
+// the <review_files>/<file path="..."> convention already used for the diffs.
+//
+// A group covered by a single rule set — every single-file group, and every group
+// whose files share a language — returns that rule text bare, so the rendered
+// prompt stays byte-identical to the untagged form.
+func (a *Agent) resolveGroupSystemRule(diffs []model.Diff) string {
+	if a.args.SystemRule == nil {
+		return ""
+	}
+
+	// Sorted by path so both block order and the paths inside a block are
+	// deterministic. diffs arrives in the grouping LLM's response order, which
+	// varies between runs and would otherwise churn the prompt prefix that
+	// provider caches reuse. Clone first: the caller's slice is shared state.
+	sorted := slices.Clone(diffs)
+	slices.SortStableFunc(sorted, func(x, y model.Diff) int {
+		return strings.Compare(x.NewPath, y.NewPath)
+	})
+
+	type ruleBlock struct {
+		rule  string
+		paths []string
+	}
+	var blocks []ruleBlock
+	index := make(map[string]int, len(sorted))
+	for _, d := range sorted {
+		r := a.args.SystemRule.Resolve(d.NewPath)
+		if r == "" {
+			continue
+		}
+		if i, ok := index[r]; ok {
+			blocks[i].paths = append(blocks[i].paths, d.NewPath)
+			continue
+		}
+		index[r] = len(blocks)
+		blocks = append(blocks, ruleBlock{rule: r, paths: []string{d.NewPath}})
+	}
+
+	if len(blocks) == 0 {
+		return ""
+	}
+	if len(blocks) == 1 {
+		return blocks[0].rule
+	}
+
+	var sb strings.Builder
+	for i, b := range blocks {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("<rules for=\"")
+		sb.WriteString(strings.Join(b.paths, ", "))
+		sb.WriteString("\">\n")
+		sb.WriteString(b.rule)
+		sb.WriteString("\n</rules>")
+	}
+	return sb.String()
+}
+
+// executeGroupPlanPhase runs the plan phase for a file group.
+func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concatenatedDiffs, changeFiles, rule string) (string, error) {
+	ctx, span := telemetry.StartSpan(ctx, "plan.execute")
+	defer span.End()
+	telemetry.SetAttr(span, "group.label", g.Label)
+
+	pt := a.args.Template.PlanTask
+	messages := make([]llm.Message, 0, len(pt.Messages))
+	for _, m := range pt.Messages {
+		content := m.Content
+		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
+		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
+		content = strings.ReplaceAll(content, "{{change_files}}", changeFiles)
+		content = strings.ReplaceAll(content, "{{diffs}}", concatenatedDiffs)
+		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
+		content = strings.ReplaceAll(content, "{{plan_tools}}", formatToolDefs(a.args.PlanToolDefs))
+		messages = append(messages, llm.NewTextMessage(m.Role, content))
+	}
+
+	gk := fileGroupKey(g.Diffs)
+	fs := a.session.GetOrCreateFileSession(gk)
+	rec := fs.AppendTaskRecord(session.PlanTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.PlanTask), gk))
+	startTime := time.Now()
+	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(gk, session.PlanTask, rec.RequestNo))
+
+	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
+	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
+		Model:     a.args.Model,
+		Messages:  messages,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
+	})
+	duration := time.Since(startTime)
+	if err != nil {
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		rec.SetError(err, duration)
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		return "", fmt.Errorf("plan request: %w", err)
+	}
+	var totalTokens int64
+	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
+	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	rec.SetResponse(resp, duration)
+	a.runner.RecordUsage(resp.Usage)
+	fmt.Fprintf(stdout.Writer(), "[ocr] Plan completed for group %q\n", gk)
+	return resp.Content(), nil
+}
+
+// executeGroupReviewFilter runs the REVIEW_FILTER_TASK for a file group.
+// When from is non-nil, only comments at indices >= from[path] for each path
+// are candidates for filtering (per-round isolation). When from is nil, all
+// comments for the group's paths are filtered (legacy full-group behavior).
+func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from map[string]int) {
+	groupKey := fileGroupKey(g.Diffs)
+	ctx, span := telemetry.StartSpan(ctx, "review_filter.execute")
+	defer span.End()
+	telemetry.SetAttr(span, "group.label", groupKey)
+
+	ft := a.args.Template.ReviewFilterTask
+	if ft == nil || len(ft.Messages) == 0 {
+		return
+	}
+
+	if a.args.SkipFilter {
+		telemetry.SetAttr(span, "skipped", true)
+		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for group %q (--no-filter)\n", groupKey)
+		return
+	}
+
+	// Collect candidate comments with their true per-path indices.
+	type filterCandidate struct {
+		cm      model.LlmComment
+		pathIdx int
+	}
+	var candidates []filterCandidate
+	for _, d := range g.Diffs {
+		all := a.args.CommentCollector.CommentsForPath(d.NewPath)
+		start := 0
+		if from != nil {
+			start = from[d.NewPath]
+			if start > len(all) {
+				start = len(all)
+			}
+		}
+		for i := start; i < len(all); i++ {
+			candidates = append(candidates, filterCandidate{cm: all[i], pathIdx: i})
+		}
+	}
+	if len(candidates) == 0 {
+		return
+	}
+	telemetry.SetAttr(span, "comments.before", len(candidates))
+
+	// Build the comment list for the filter prompt.
+	candidateComments := make([]model.LlmComment, len(candidates))
+	for i, c := range candidates {
+		candidateComments[i] = c.cm
+	}
+	commentsJSON := buildGroupFilterCommentsJSON(candidateComments)
+	concatenatedDiffs := buildConcatenatedDiffs(g.Diffs)
+
+	messages := make([]llm.Message, 0, len(ft.Messages))
+	for _, m := range ft.Messages {
+		content := m.Content
+		content = strings.ReplaceAll(content, "{{path}}", groupKey)
+		content = strings.ReplaceAll(content, "{{diff}}", concatenatedDiffs)
+		content = strings.ReplaceAll(content, "{{comments}}", commentsJSON)
+		messages = append(messages, llm.NewTextMessage(m.Role, content))
+	}
+
+	fs := a.session.GetOrCreateFileSession(groupKey)
+	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.ReviewFilterTask), groupKey))
+	startTime := time.Now()
+	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(groupKey, session.ReviewFilterTask, rec.RequestNo))
+
+	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
+	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
+		Model:     a.args.Model,
+		Messages:  messages,
+		Tools:     filterTools,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
+	})
+	duration := time.Since(startTime)
+	if err != nil {
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		rec.SetError(err, duration)
+		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter failed for group %q: %v\n", groupKey, err)
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		return
+	}
+	var totalTokens int64
+	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
+	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	rec.SetResponse(resp, duration)
+	a.runner.RecordUsage(resp.Usage)
+
+	indices := parseFilterToolCalls(resp.ToolCalls(), len(candidates))
+	if indices == nil {
+		indices = parseFilterResponse(resp.Content(), len(candidates))
+	}
+	telemetry.SetAttr(span, "comments.filtered", len(indices))
+	if len(indices) == 0 {
+		telemetry.Event(ctx, "review_filter.completed",
+			attribute.String("group.label", groupKey),
+			attribute.Int("total_comments", len(candidates)),
+			attribute.Int("removed", 0))
+		return
+	}
+
+	// Map candidate indices to per-path removals using the true pathIdx.
+	perPath := make(map[string]map[int]struct{})
+	for i, c := range candidates {
+		if _, remove := indices[i]; !remove {
+			continue
+		}
+		if perPath[c.cm.Path] == nil {
+			perPath[c.cm.Path] = make(map[int]struct{})
+		}
+		perPath[c.cm.Path][c.pathIdx] = struct{}{}
+	}
+	var totalRemoved int
+	for path, idxSet := range perPath {
+		a.args.CommentCollector.RemoveByPathAndIndices(path, idxSet)
+		totalRemoved += len(idxSet)
+	}
+	telemetry.Event(ctx, "review_filter.completed",
+		attribute.String("group.label", groupKey),
+		attribute.Int("total_comments", len(candidates)),
+		attribute.Int("removed", totalRemoved))
+	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for group %q\n", totalRemoved, groupKey)
+}
+
+// buildGroupFilterCommentsJSON serializes comments with path info for group-level filtering.
+func buildGroupFilterCommentsJSON(comments []model.LlmComment) string {
+	type filterComment struct {
+		ID           string `json:"id"`
+		Path         string `json:"path"`
+		Content      string `json:"content"`
+		ExistingCode string `json:"existing_code,omitempty"`
+	}
+	items := make([]filterComment, len(comments))
+	for i, cm := range comments {
+		items[i] = filterComment{
+			ID:           fmt.Sprintf("c-%d", i),
+			Path:         cm.Path,
+			Content:      cm.Content,
+			ExistingCode: cm.ExistingCode,
+		}
+	}
+	data, _ := json.Marshal(items)
+	return string(data)
+}
+
 // executeReviewFilter runs the REVIEW_FILTER_TASK to remove comments that are
-// provably incorrect based solely on the diff. Errors are logged and silently ignored.
+// provably incorrect based solely on the diff. Errors are logged and ignored.
 func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath string) {
 	a.executeReviewFilterForReviewItems(ctx, d, newPath, nil)
 }
@@ -1447,7 +1978,6 @@ func (a *Agent) executeReviewFilterForReviewItems(ctx context.Context, d model.D
 	if ft == nil || len(ft.Messages) == 0 {
 		return
 	}
-
 	if a.args.SkipFilter {
 		telemetry.SetAttr(span, "skipped", true)
 		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for %s (--no-filter)\n", newPath)
@@ -1461,7 +1991,6 @@ func (a *Agent) executeReviewFilterForReviewItems(ctx context.Context, d model.D
 	telemetry.SetAttr(span, "comments.before", len(comments))
 
 	commentsJSON := buildFilterCommentsJSON(comments)
-
 	messages := make([]llm.Message, 0, len(ft.Messages))
 	for _, m := range ft.Messages {
 		content := m.Content
@@ -1655,42 +2184,6 @@ func parseFilterResponse(raw string, total int) map[int]struct{} {
 	return indices
 }
 
-// buildChangeFilesExcept returns a formatted list of changed files except the given path.
-func (a *Agent) buildChangeFilesExcept(excludePath string) string {
-	var sb strings.Builder
-	for i, d := range a.diffs {
-		if d.IsBinary {
-			continue
-		}
-		if d.NewPath == excludePath || d.OldPath == excludePath {
-			continue
-		}
-		status := "MODIFIED"
-		switch {
-		case d.IsNew:
-			status = "ADDED"
-		case d.IsDeleted:
-			status = "DELETED"
-		case d.OldPath != d.NewPath:
-			status = "RENAMED"
-		}
-		sb.WriteString(status + "   " + d.NewPath)
-		if i < len(a.diffs)-1 {
-			sb.WriteString("\n")
-		}
-	}
-	return sb.String()
-}
-
-// resolveSystemRule returns the rule text for a given file path,
-// matching against PathRuleMap glob patterns, falling back to DefaultRule.
-func (a *Agent) resolveSystemRule(path string) string {
-	if a.args.SystemRule == nil {
-		return ""
-	}
-	return a.args.SystemRule.Resolve(path)
-}
-
 // filterLargeDiffs drops diffs whose diff content alone consumes more than 80% of MaxTokens.
 func (a *Agent) filterLargeDiffs(diffs []model.Diff) []model.Diff {
 	limit := llmloop.PromptTokenLimit(a.args.Template.MaxTokens)
@@ -1774,61 +2267,6 @@ func (a *Agent) extFromPath(path string) string {
 		return ""
 	}
 	return strings.ToLower(basename[dot:])
-}
-
-// executePlanPhase runs the plan task for a single file, sending template messages
-// with resolved placeholders and collecting the LLM response as plan guidance.
-func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFiles, rule string) (string, error) {
-	ctx, span := telemetry.StartSpan(ctx, "plan.execute")
-	defer span.End()
-	telemetry.SetAttr(span, "file.path", newPath)
-
-	pt := a.args.Template.PlanTask
-	messages := make([]llm.Message, 0, len(pt.Messages))
-	for _, m := range pt.Messages {
-		content := m.Content
-		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
-		content = strings.ReplaceAll(content, "{{current_file_path}}", newPath)
-		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
-		content = strings.ReplaceAll(content, "{{change_files}}", changeFiles)
-		content = strings.ReplaceAll(content, "{{diff}}", rawDiff)
-		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
-		content = strings.ReplaceAll(content, "{{plan_tools}}", formatToolDefs(a.args.PlanToolDefs))
-		messages = append(messages, llm.NewTextMessage(m.Role, content))
-	}
-
-	fs := a.session.GetOrCreateFileSession(newPath)
-	rec := fs.AppendTaskRecord(session.PlanTask, messages)
-	ctx = llm.ContextWithSessionKey(ctx,
-		llm.SessionTaskKey(a.session.SessionID, string(session.PlanTask), newPath))
-	startTime := time.Now()
-	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.PlanTask, rec.RequestNo))
-
-	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
-	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-		Model:     a.args.Model,
-		Messages:  messages,
-		MaxTokens: a.args.Template.CompletionTokenLimit(),
-	})
-	duration := time.Since(startTime)
-	if err != nil {
-		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
-		llmSpan.End()
-		rec.SetError(err, duration)
-		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
-		return "", fmt.Errorf("plan request: %w", err)
-	}
-	var totalTokens int64
-	if resp.Usage != nil {
-		totalTokens = resp.Usage.TotalTokens
-	}
-	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
-	llmSpan.End()
-	rec.SetResponse(resp, duration)
-	a.runner.RecordUsage(resp.Usage)
-	fmt.Fprintf(stdout.Writer(), "[ocr] Plan completed for %s\n", newPath)
-	return resp.Content(), nil
 }
 
 // formatToolDefs renders tool definitions as human-readable text for embedding in prompts.

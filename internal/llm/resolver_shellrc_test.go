@@ -9,19 +9,9 @@ import (
 	"testing"
 )
 
-// setShellRCHome points os.UserHomeDir at dir. shellRCFiles resolves the home
-// dir through os.UserHomeDir, which reads USERPROFILE on Windows and never
-// falls back to HOME, so redirecting HOME alone left these tests scanning the
-// real profile. Set both; the one that does not apply is harmless.
-func setShellRCHome(t *testing.T, dir string) {
-	t.Helper()
-	t.Setenv("HOME", dir)
-	t.Setenv("USERPROFILE", dir)
-}
-
 func TestShellRCFiles(t *testing.T) {
 	home := t.TempDir()
-	setShellRCHome(t, home)
+	setTestHome(t, home)
 
 	if got := shellRCFiles(); len(got) != 0 {
 		t.Errorf("shellRCFiles() with no rc files = %v, want empty", got)
@@ -39,7 +29,7 @@ func TestShellRCFiles(t *testing.T) {
 
 func TestTryShellRC(t *testing.T) {
 	home := t.TempDir()
-	setShellRCHome(t, home)
+	setTestHome(t, home)
 
 	// No rc files: not found, no error.
 	if _, ok, err := tryShellRC(""); ok || err != nil {

@@ -71,9 +71,33 @@ var sessionCommentsCmd = &cobra.Command{
 	},
 }
 
+var sessionCompareRepoDir string
+var sessionCompareJSON bool
+
+var sessionCompareCmd = &cobra.Command{
+	Use:     "compare [flags] <before-session-id> <after-session-id>",
+	Aliases: []string{"diff"},
+	Short:   "Compare the findings of two sessions",
+	Long:    "Group the findings of two review sessions into new, persisting, resolved and not-reviewed.\nFindings are matched on path, category and the offending snippet, so a finding that only moved down the file still counts as persisting.\nUse --json for machine-readable output.",
+	Args:    exactArgs(2),
+	// Both positionals are session ids, so the first one already typed must not
+	// stop completion of the second - hence the args reset rather than plain
+	// completeSessionIDs, which stops after one argument.
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) > 1 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return completeSessionIDs(cmd, nil, toComplete)
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSessionCompare(args[0], args[1])
+	},
+}
+
 // completeSessionIDs offers the persisted session ids for the current repo
 // (or --repo, when already typed) as shell completions, newest first, with a
-// short summary as the completion description.
+// short summary as the completion description. It completes one positional;
+// a command with two session ids (compare) resets args per positional.
 func completeSessionIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) != 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -113,9 +137,13 @@ func init() {
 	sessionCommentsCmd.RegisterFlagCompletionFunc("severity", completeEnum("critical", "high", "medium", "low"))
 	sessionCommentsCmd.RegisterFlagCompletionFunc("category", completeEnum("bug", "security", "performance", "maintainability", "test", "style", "documentation", "other"))
 
+	sessionCompareCmd.Flags().StringVar(&sessionCompareRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
+	sessionCompareCmd.Flags().BoolVar(&sessionCompareJSON, "json", false, "emit the comparison as JSON")
+
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
 	sessionCmd.AddCommand(sessionCommentsCmd)
+	sessionCmd.AddCommand(sessionCompareCmd)
 }
 
 func runSessionList() error {
@@ -198,9 +226,134 @@ func runSessionComments(sessionID string) error {
 		return nil
 	}
 	for _, c := range filtered {
-		renderComment(c)
+		renderComment(c, os.Stdout)
 	}
 	return nil
+}
+
+func runSessionCompare(beforeID, afterID string) error {
+	resolvedRepo, err := resolveWorkingDirForSession(sessionCompareRepoDir)
+	if err != nil {
+		return err
+	}
+	beforeSummary, err := session.LoadSummary(resolvedRepo, beforeID)
+	if err != nil {
+		return fmt.Errorf("load session %q: %w", beforeID, err)
+	}
+	afterSummary, err := session.LoadSummary(resolvedRepo, afterID)
+	if err != nil {
+		return fmt.Errorf("load session %q: %w", afterID, err)
+	}
+	// Comparing findings across repositories is meaningless, so it is an error
+	// rather than a warning. A different review mode or range still compares
+	// usefully (a full scan against a diff run, say), so that only warns.
+	if beforeSummary.RepoDir != afterSummary.RepoDir {
+		return fmt.Errorf("sessions belong to different repositories: %s was recorded in %s, %s in %s",
+			beforeID, beforeSummary.RepoDir, afterID, afterSummary.RepoDir)
+	}
+	if beforeSummary.ReviewMode != afterSummary.ReviewMode {
+		// stderr, never stdout: --json output is piped into other tools.
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING review modes differ (%s vs %s); the two runs may not have looked at the same files\n",
+			displayMode(beforeSummary.ReviewMode), displayMode(afterSummary.ReviewMode))
+	}
+
+	beforeComments, err := session.LoadComments(resolvedRepo, beforeID)
+	if err != nil {
+		return fmt.Errorf("load session %q: %w", beforeID, err)
+	}
+	afterComments, err := session.LoadComments(resolvedRepo, afterID)
+	if err != nil {
+		return fmt.Errorf("load session %q: %w", afterID, err)
+	}
+	result := session.Compare(beforeComments, afterComments, reviewedPaths(afterSummary))
+
+	if sessionCompareJSON {
+		payload := struct {
+			Before sessionCompareSide `json:"before"`
+			After  sessionCompareSide `json:"after"`
+			session.CompareResult
+		}{
+			Before:        describeCompareSide(beforeID, beforeSummary),
+			After:         describeCompareSide(afterID, afterSummary),
+			CompareResult: result,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(payload)
+	}
+
+	printSessionCompare(beforeID, afterID, beforeSummary, afterSummary, result)
+	return nil
+}
+
+// sessionCompareSide identifies one side of the comparison in JSON output, so a
+// consumer can tell which run produced which bucket.
+type sessionCompareSide struct {
+	SessionID  string `json:"session_id"`
+	ReviewMode string `json:"review_mode,omitempty"`
+	Range      string `json:"range,omitempty"`
+}
+
+func describeCompareSide(sessionID string, s *session.Summary) sessionCompareSide {
+	side := sessionCompareSide{SessionID: sessionID, ReviewMode: s.ReviewMode}
+	if r := describeRange(*s); r != "-" {
+		side.Range = r
+	}
+	return side
+}
+
+// reviewedPaths returns the paths the run actually reviewed, or nil for a
+// legacy session that recorded no manifest - nil tells Compare to fall back to
+// counting every unmatched finding as resolved.
+//
+// Completed and Reused are the only partitions that mean "the LLM's verdict on
+// this file is current": Reused carries a checkpoint forward from a resume
+// chain, which is still a verdict. Selected is deliberately not used - it is
+// the intended set, so an interrupted run would report every file it never got
+// to as clean. Failed and Waived items are selected but undecided for the same
+// reason.
+func reviewedPaths(s *session.Summary) map[string]bool {
+	if s.RunManifest == nil {
+		return nil
+	}
+	cov := s.RunManifest.Coverage
+	paths := make(map[string]bool, len(cov.Completed)+len(cov.Reused))
+	for _, items := range [][]session.CoverageItem{cov.Completed, cov.Reused} {
+		for _, item := range items {
+			paths[item.Path] = true
+		}
+	}
+	return paths
+}
+
+// printSessionCompare writes to stdout, matching the other `ocr session`
+// subcommands.
+func printSessionCompare(beforeID, afterID string, before, after *session.Summary, result session.CompareResult) {
+	fmt.Printf("Comparing %s -> %s\n", beforeID, afterID)
+	fmt.Printf("  before: %s %s\n", displayMode(before.ReviewMode), describeRange(*before))
+	fmt.Printf("  after:  %s %s\n", displayMode(after.ReviewMode), describeRange(*after))
+	fmt.Printf("%d new, %d persisting, %d resolved\n", len(result.New), len(result.Persisting), len(result.Resolved))
+	if n := len(result.NotReviewed); n > 0 {
+		fmt.Printf("%d finding(s) in files the after session did not review (not counted as resolved)\n", n)
+	}
+
+	for _, section := range []struct {
+		title    string
+		findings []model.LlmComment
+	}{
+		{"New", result.New},
+		{"Persisting", result.Persisting},
+		{"Resolved", result.Resolved},
+		{"Not reviewed", result.NotReviewed},
+	} {
+		if len(section.findings) == 0 {
+			continue
+		}
+		fmt.Printf("\n=== %s (%d) ===\n", section.title, len(section.findings))
+		for _, c := range section.findings {
+			renderComment(c, os.Stdout)
+		}
+	}
 }
 
 // filterComments keeps comments whose severity and category are in the given

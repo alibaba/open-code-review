@@ -18,8 +18,11 @@ inputs:
     description: Model name (mapped to env OCR_LLM_MODEL).
     required: true
   llm_use_anthropic:
-    description: "'true' for Anthropic Claude, 'false' for OpenAI-compatible APIs
-      (mapped to env OCR_USE_ANTHROPIC). Required to force an explicit choice."
+    description: >-
+      Selects the LLM protocol (mapped to env OCR_USE_ANTHROPIC). An explicitly supplied empty
+      string, true, 1, or yes selects Anthropic
+      case-insensitively; every other value selects the OpenAI-compatible
+      protocol, preserving the CLI environment contract.
     required: true
   llm_auth_header:
     description: Custom auth header name (mapped to env OCR_LLM_AUTH_HEADER).
@@ -42,12 +45,17 @@ inputs:
   llm_timeout:
     description: LLM request timeout in seconds (mapped to env OCR_LLM_TIMEOUT).
     required: false
+    default: '300'
+  review_task_timeout:
+    description: Per-file/concurrent-task timeout in integer minutes, from 1 through 120.
+    required: false
+    default: '15'
   github_token:
     description: GitHub token used to post review comments.
     required: false
     default: ${{ github.token }}
   ocr_version:
-    description: npm version spec for @alibaba-group/open-code-review.
+    description: npm version spec for @alibaba-group/open-code-review (v1.9.6 or newer required).
     required: false
     default: latest
   review_concurrency:
@@ -119,6 +127,25 @@ inputs:
       with route_severity_below to route on either condition.
     required: false
     default: ''
+  checkpoint_range:
+    description: >-
+      Cross-push checkpoints. true = a run that reviewed everything it selected
+      records the head it covered in its sticky summary comment, and the next
+      run reviews only <checkpoint>..<new head> instead of
+      <merge-base>..<new head>. Fail-closed: if anything is in doubt — the
+      summary is missing or was not posted by this token, the marker is
+      unreadable, the base moved, the configuration changed, or git cannot prove
+      the checkpoint is an ancestor of the new head — the full range is reviewed
+      exactly as it is today. Requires sticky_summary; ignored without it.
+    required: false
+    default: 'false'
+  full_review:
+    description: >-
+      Force one full review even when checkpoint_range is enabled (reason
+      'manual_full_review'). Use it to re-review a PR from the merge-base
+      without turning checkpointing off; the run still records a new checkpoint.
+    required: false
+    default: 'false'
   base_ref:
     description: >-
       Override the base ref. Provide this (and head_sha) when invoking from a
@@ -154,6 +181,51 @@ outputs:
   summary_comment_url:
     description: URL of the posted/updated summary comment, if any.
     value: ${{ steps.post.outputs.summary_comment_url }}
+  range_mode:
+    description: >-
+      'checkpoint' when this run reviewed only the range since the previous
+      checkpoint, 'full' when it reviewed from the merge-base. Empty when
+      checkpoint_range is not enabled.
+    value: ${{ steps.range.outputs.range_mode }}
+  range_summary:
+    description: >-
+      The reviewed range plus the reason it was chosen, e.g.
+      "full (base_changed)" or "checkpoint (ok): <from>..<to>". Empty when
+      checkpoint_range is not enabled.
+    value: ${{ steps.range.outputs.range_summary }}
+  range_reason:
+    description: >-
+      Why that mode was chosen: 'ok', 'same_head_noop', or one of the
+      fail-closed reasons ('base_changed', 'config_changed', 'not_ancestor', …).
+      Empty when checkpoint_range is not enabled.
+    value: ${{ steps.range.outputs.range_reason }}
+  range_from:
+    description: >-
+      The commit this run reviewed from, or empty when it reviewed from the
+      merge-base (every 'full' run, and every run with checkpoint_range off).
+    value: ${{ steps.range.outputs.range_from }}
+  range_to:
+    description: The head this run reviewed up to. Empty when checkpoint_range is not enabled.
+    value: ${{ steps.range.outputs.range_to }}
+  checkpoint_before:
+    description: >-
+      The head recorded by the checkpoint this run read, whether or not it was
+      used. Empty when no usable marker was read.
+    value: ${{ steps.range.outputs.checkpoint_before }}
+  ancestry:
+    description: >-
+      The ancestry verdict on the checkpoint that was read: 'ancestor',
+      'not_ancestor', 'unknown_object', 'error', or empty when it was not probed.
+    value: ${{ steps.range.outputs.ancestry }}
+  source_run:
+    description: The workflow run id that wrote the checkpoint this run read, if any.
+    value: ${{ steps.range.outputs.source_run }}
+  checkpoint_after:
+    description: >-
+      The head this run recorded as the new checkpoint, or empty when it did not
+      advance one (incomplete run, a finding failed to post, or the summary did
+      not publish).
+    value: ${{ steps.post.outputs.checkpoint_after }}
 
 runs:
   using: composite
@@ -244,6 +316,30 @@ runs:
         echo "MERGE_BASE=$MERGE_BASE" >> "$GITHUB_ENV"
         echo "Reviewing ${HEAD_SHA} from merge-base ${MERGE_BASE} (base origin/${BASE_REF})"
 
+    - name: Validate review_task_timeout
+      env:
+        REVIEW_TASK_TIMEOUT: ${{ inputs.review_task_timeout }}
+      shell: bash
+      run: |
+        if [[ ! "$REVIEW_TASK_TIMEOUT" =~ ^[0-9]+$ ]]; then
+          echo "::error::review_task_timeout must be a base-10 integer from 1 through 120 minutes"
+          exit 1
+        fi
+        NORMALIZED_REVIEW_TASK_TIMEOUT="$REVIEW_TASK_TIMEOUT"
+        while [[ "$NORMALIZED_REVIEW_TASK_TIMEOUT" == 0* && "$NORMALIZED_REVIEW_TASK_TIMEOUT" != "0" ]]; do
+          NORMALIZED_REVIEW_TASK_TIMEOUT="${NORMALIZED_REVIEW_TASK_TIMEOUT#0}"
+        done
+        if [[ "$NORMALIZED_REVIEW_TASK_TIMEOUT" == "0" || ${#NORMALIZED_REVIEW_TASK_TIMEOUT} -gt 3 ]]; then
+          echo "::error::review_task_timeout must be between 1 and 120 minutes"
+          exit 1
+        fi
+        REVIEW_TASK_TIMEOUT_NUMBER=$((10#$NORMALIZED_REVIEW_TASK_TIMEOUT))
+        if (( REVIEW_TASK_TIMEOUT_NUMBER < 1 || REVIEW_TASK_TIMEOUT_NUMBER > 120 )); then
+          echo "::error::review_task_timeout must be between 1 and 120 minutes"
+          exit 1
+        fi
+        echo "REVIEW_TASK_TIMEOUT=$REVIEW_TASK_TIMEOUT_NUMBER" >> "$GITHUB_ENV"
+
     - name: Install OpenCodeReview
       shell: bash
       env:
@@ -251,16 +347,300 @@ runs:
       run: |
         npm install -g "@alibaba-group/open-code-review@${OCR_VERSION}"
         echo "OpenCodeReview installed:"
-        ocr version || true
+        OCR_VERSION_OUTPUT="$(ocr version 2>/dev/null)" || {
+          echo "::error::Unable to read the installed OpenCodeReview version"
+          exit 1
+        }
+        printf '%s\n' "$OCR_VERSION_OUTPUT"
+        OCR_VERSION_LINE="${OCR_VERSION_OUTPUT%%$'\n'*}"
+        if [[ ! "$OCR_VERSION_LINE" =~ ^open-code-review[[:space:]]+v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?([[:space:]]|$) ]]; then
+          echo "::error::Unable to parse the installed OpenCodeReview version; a stable release v1.9.6 or newer is required (prerelease versions are not supported)"
+          exit 1
+        fi
+        OCR_VERSION_MAJOR=$((10#${BASH_REMATCH[1]}))
+        OCR_VERSION_MINOR=$((10#${BASH_REMATCH[2]}))
+        OCR_VERSION_PATCH=$((10#${BASH_REMATCH[3]}))
+        if (( OCR_VERSION_MAJOR < 1 )) ||
+          (( OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR < 9 )) ||
+          (( OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR == 9 && OCR_VERSION_PATCH < 6 )); then
+          echo "::error::Installed OpenCodeReview ${OCR_VERSION_LINE} is unsupported; v1.9.6 or newer is required"
+          exit 1
+        fi
+
+        # Resolved version (not the spec, which is usually "latest"). It feeds
+        # the checkpoint fingerprint so an OCR upgrade invalidates checkpoints
+        # taken by the previous version. The gate above already guarantees a
+        # parseable line here; the resolve step still treats an empty version
+        # as "fingerprint nothing" so a future gap can't silently narrow.
+        VERSION_ACTUAL="${OCR_VERSION_LINE//$'\r'/}"
+        echo "OCR_VERSION_ACTUAL=${VERSION_ACTUAL}" >> "$GITHUB_ENV"
 
     - name: Configure OCR
       env:
+        OCR_LLM_URL: ${{ inputs.llm_url }}
+        OCR_LLM_MODEL: ${{ inputs.llm_model }}
+        OCR_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
+        OCR_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
         OCR_EXTRA_BODY: ${{ inputs.llm_extra_body }}
         OCR_LANGUAGE: ${{ inputs.language }}
       shell: bash
       run: |
+        NORMALIZED_USE_ANTHROPIC="$(printf '%s' "$OCR_USE_ANTHROPIC" | tr '[:upper:]' '[:lower:]')"
+        case "$NORMALIZED_USE_ANTHROPIC" in
+          ""|true|1|yes)
+            OCR_USE_ANTHROPIC="true"
+            OCR_LLM_PROTOCOL="anthropic"
+            ;;
+          *)
+            OCR_USE_ANTHROPIC="false"
+            OCR_LLM_PROTOCOL="openai"
+            ;;
+        esac
+        ocr config unset provider
+        ocr config set llm.auth_token ""
+        ocr config set llm.extra_headers ""
+        ocr config set llm.retry_codes ""
+        ocr config set llm.url "$OCR_LLM_URL"
+        ocr config set llm.model "$OCR_LLM_MODEL"
+        ocr config set llm.use_anthropic "$OCR_USE_ANTHROPIC"
+        ocr config set llm.protocol "$OCR_LLM_PROTOCOL"
+        ocr config set llm.auth_header "$OCR_LLM_AUTH_HEADER"
+        ocr config set llm.auth_token_cmd 'printf "%s" "$OCR_LLM_TOKEN"'
         ocr config set llm.extra_body "$OCR_EXTRA_BODY"
         ocr config set language "$OCR_LANGUAGE"
+
+    - name: Resolve review range
+      if: inputs.checkpoint_range == 'true'
+      id: range
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        OCR_FULL_REVIEW: ${{ inputs.full_review }}
+        OCR_STICKY_SUMMARY: ${{ inputs.sticky_summary }}
+        # "reopened" / "ready_for_review" ask for a fresh look at the whole PR.
+        OCR_EVENT_ACTION: ${{ github.event.action }}
+        # Written to $GITHUB_ENV by the "Resolve PR refs" and "Compute
+        # merge-base" steps above. Declared here rather than read straight off
+        # the ambient job env so this step's inputs are all in one place and the
+        # dependency on those two steps is visible in the file. Same values
+        # either way — a skipped upstream step yields "", which the resolver
+        # already fails closed on: an empty baseRef/mergeBase cannot equal the
+        # non-empty ones validateCheckpointPayload requires, so it reports
+        # base_changed and reviews the full range.
+        OCR_HEAD_SHA: ${{ env.HEAD_SHA }}
+        OCR_BASE_REF: ${{ env.BASE_REF }}
+        OCR_MERGE_BASE: ${{ env.MERGE_BASE }}
+        # Everything that changes what a review would say. Any difference
+        # invalidates the checkpoint, because findings from the previous run are
+        # no longer comparable to what this configuration would produce.
+        #
+        # One variable per axis, joined in the script rather than here. A single
+        # pre-joined string would make the digest depend on two things it has no
+        # business depending on: how this YAML happens to be wrapped (a folded
+        # scalar re-wrapped by a reformat is a different string), and on no input
+        # value ever containing the separator — and a value that does contain it
+        # shifts the field boundaries, so two different configurations can hash
+        # alike and a checkpoint survives a change that should have killed it.
+        OCR_FP_LLM_URL: ${{ inputs.llm_url }}
+        OCR_FP_LLM_MODEL: ${{ inputs.llm_model }}
+        OCR_FP_LLM_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
+        OCR_FP_LANGUAGE: ${{ inputs.language }}
+        OCR_FP_LLM_EXTRA_BODY: ${{ inputs.llm_extra_body }}
+        OCR_FP_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
+        # A timeout change shifts which runs finish and which are cut short, so
+        # it shifts the partial/complete distribution the checkpoint gates on.
+        OCR_FP_LLM_TIMEOUT: ${{ inputs.llm_timeout }}
+        # Extra headers can point the same `llm_model` string at a different
+        # backend model or a different provider entirely, so they change what a
+        # review would say and must invalidate the checkpoint. Their VALUES can
+        # be credentials, so the script hashes this axis before it joins the
+        # others — the same treatment the rule file contents get. Only the
+        # digest reaches the fingerprint, and the fingerprint is all the stored
+        # checkpoint ever carries.
+        OCR_FP_LLM_EXTRA_HEADERS: ${{ inputs.llm_extra_headers }}
+        OCR_FP_RULE: ${{ inputs.rule }}
+        OCR_FP_ROUTE_SEVERITY_BELOW: ${{ inputs.route_severity_below }}
+        OCR_FP_ROUTE_CATEGORIES: ${{ inputs.route_categories }}
+        OCR_FP_BACKGROUND: ${{ inputs.background }}
+        OCR_RULE_PATH: ${{ inputs.rule }}
+        # `github.token` is always the "github-actions" app, so when the caller
+        # did not override the token we know exactly which app wrote our summary
+        # and can pin the author check to it instead of trusting any bot. A
+        # custom token may belong to any app and an installation token cannot
+        # ask GitHub which app it is (GET /app needs a JWT), so that case keeps
+        # the wider "any writer GitHub attributes to a bot" check.
+        OCR_CHECKPOINT_APP_SLUG: ${{ inputs.github_token == github.token && 'github-actions' || '' }}
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          const crypto = require('crypto');
+          const { spawnSync } = require('child_process');
+
+          // Everything this step publishes, in one place so the failure path
+          // below can publish the same shape. Empty range_from means "review the
+          // full range": the review step expands ${RANGE_FROM:-$MERGE_BASE}, so
+          // unset and empty behave alike. These are STEP outputs, not job env:
+          // a second use of this action in the same job must not inherit a
+          // narrowed range from the first one.
+          const emit = (range, fingerprint, carry) => {
+            const summary = range.mode === 'checkpoint'
+              ? `checkpoint (${range.reason}): ${range.from}..${range.to}`
+              : `full (${range.reason})`;
+            core.setOutput('range_from', range.mode === 'checkpoint' ? range.from : '');
+            core.setOutput('range_to', range.to || '');
+            core.setOutput('range_mode', range.mode);
+            core.setOutput('range_reason', range.reason);
+            core.setOutput('range_summary', summary);
+            core.setOutput('checkpoint_before', range.checkpointBefore || '');
+            core.setOutput('ancestry', range.ancestry || '');
+            core.setOutput('source_run', range.sourceRun || '');
+            core.setOutput('config_fingerprint', fingerprint);
+            core.setOutput('checkpoint_carry', carry);
+            core.info(`[checkpoint] reviewing ${summary}`);
+          };
+
+          // This step only chooses where the review starts, and every failure it
+          // can hit has the same safe answer: review the whole merge-base range.
+          // So nothing in here may fail the job — a missing helper or an API
+          // outage must not block a review the action can still perform.
+          try {
+            // Same helper lookup as the posting step below.
+            const REL = 'scripts/github-actions/post-review-comments.js';
+            const roots = [process.env.GITHUB_ACTION_PATH, process.env.GITHUB_WORKSPACE].filter(Boolean);
+            const helper = roots.map(r => path.resolve(r, REL)).find(p => fs.existsSync(p));
+            if (!helper) throw new Error(`Could not locate ${REL}; searched roots: ${roots.join(', ')}`);
+            const { resolveCheckpointRange, readCheckpointComment } = require(helper);
+
+            const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+            let ruleUnverified = false;
+
+            // `rule` names a JSON file that OCR reads off the workspace at review
+            // time (rules.NewResolver only touches disk when the path is non-empty;
+            // the default rule set is embedded in the binary and so already moves
+            // with OCR_VERSION_ACTUAL). Fingerprinting the *path* alone would let an
+            // edit to that file narrow the next range under rules the earlier
+            // commits were never reviewed against, so hash the contents too.
+            let ruleDigest = 'none';
+            const rulePath = process.env.OCR_RULE_PATH || '';
+            if (rulePath) {
+              try {
+                ruleDigest = sha256(fs.readFileSync(path.resolve(process.env.GITHUB_WORKSPACE || '.', rulePath)));
+              } catch (e) {
+                // Cannot prove the rules are unchanged -> do not narrow. OCR itself
+                // would normally have failed on an unreadable rule file before this
+                // step runs, so this is a belt-and-braces path.
+                ruleUnverified = true;
+                core.warning(`checkpoint: cannot read rule file ${rulePath} (${e.message}); forcing a full review.`);
+              }
+            }
+
+            // .opencodereview/rule.json is loaded from the repo whether or not
+            // `rule` is set (rules.NewResolver reads <repoDir>/.opencodereview/rule.json
+            // at high priority), so a commit that edits it changes what a review
+            // says and must invalidate the checkpoint the same way.
+            let localRuleDigest = 'none';
+            const localRulePath = path.resolve(process.env.GITHUB_WORKSPACE || '.', '.opencodereview/rule.json');
+            if (fs.existsSync(localRulePath)) {
+              try {
+                localRuleDigest = sha256(fs.readFileSync(localRulePath));
+              } catch (e) {
+                ruleUnverified = true;
+                core.warning(`checkpoint: cannot read .opencodereview/rule.json (${e.message}); forcing a full review.`);
+              }
+            }
+
+            // Header values can be credentials, so this axis goes in as a
+            // digest. Same shape as ruleDigest: 'none' when unset, so "no extra
+            // headers" and "extra headers that hash to nothing" stay distinct.
+            const extraHeaders = process.env.OCR_FP_LLM_EXTRA_HEADERS || '';
+            const extraHeadersDigest = extraHeaders ? sha256(extraHeaders) : 'none';
+
+            // `ocr version` printed nothing, so this run cannot say which OCR
+            // version it is about to use and no stored fingerprint can be
+            // trusted to mean "same version". An empty fingerprint is the
+            // honest answer: it matches no stored one (-> config_changed, full
+            // review) and the posting step refuses to record a checkpoint
+            // without it. Don't narrow, don't advance.
+            const versionActual = process.env.OCR_VERSION_ACTUAL || '';
+            if (!versionActual) {
+              core.warning('checkpoint: `ocr version` printed no version; reviewing the full range and not recording a checkpoint.');
+            }
+
+            // JSON, not a joined string: it is length-delimited, so no input
+            // value can shift a field boundary and make two different
+            // configurations hash alike.
+            const fingerprint = !versionActual ? '' : crypto.createHash('sha256')
+              .update(JSON.stringify([
+                process.env.OCR_FP_LLM_URL,
+                process.env.OCR_FP_LLM_MODEL,
+                process.env.OCR_FP_LLM_USE_ANTHROPIC,
+                process.env.OCR_FP_LANGUAGE,
+                process.env.OCR_FP_LLM_EXTRA_BODY,
+                process.env.OCR_FP_LLM_AUTH_HEADER,
+                process.env.OCR_FP_LLM_TIMEOUT,
+                extraHeadersDigest,
+                process.env.OCR_FP_RULE,
+                process.env.OCR_FP_ROUTE_SEVERITY_BELOW,
+                process.env.OCR_FP_ROUTE_CATEGORIES,
+                process.env.OCR_FP_BACKGROUND,
+                versionActual,
+                ruleDigest,
+                localRuleDigest,
+              ].map((v) => v || '')))
+              .digest('hex')
+              .slice(0, 16);
+
+            // git's own ancestry verdict: 0 = ancestor, 1 = not, 128 = the object
+            // is not in this clone (shallow fetch, force-push, head_sha override).
+            // Anything else (git missing, signal) is a resolver error. Never
+            // treated as "ancestor" except on a literal 0.
+            const isAncestor = (a, b) =>
+              spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: process.env.GITHUB_WORKSPACE }).status;
+
+            const common = {
+              github,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              prNumber: context.issue.number,
+              // Non-empty only when the token is the default one, whose app
+              // identity is known; empty keeps the wider bot check.
+              appSlug: process.env.OCR_CHECKPOINT_APP_SLUG || '',
+              log: (m) => core.info(m),
+            };
+            // One read serves both purposes: the range decision, and the verbatim
+            // marker the posting step re-emits on a run that does not advance the
+            // checkpoint (the summary body is rewritten wholesale, which would
+            // otherwise erase it). Passing it into the resolver as `read` is what
+            // keeps this to a single listComments pagination per run.
+            const existing = await readCheckpointComment(common);
+            const range = await resolveCheckpointRange(Object.assign({}, common, {
+              read: existing,
+              enabled: true,
+              sticky: process.env.OCR_STICKY_SUMMARY === 'true',
+              fullReview: process.env.OCR_FULL_REVIEW === 'true',
+              eventAction: process.env.OCR_EVENT_ACTION || '',
+              headSha: process.env.OCR_HEAD_SHA || '',
+              baseRef: process.env.OCR_BASE_REF || '',
+              mergeBase: process.env.OCR_MERGE_BASE || '',
+              fingerprint,
+              isAncestor,
+            }));
+
+            // Last gate, applied after the ordered ones in the resolver: the rules
+            // this run will apply could not be read, so no stored fingerprint can
+            // be trusted to mean "same rules". Widening is always safe; narrowing
+            // is not.
+            if (ruleUnverified && range.mode === 'checkpoint') {
+              range.mode = 'full';
+              range.reason = 'rule_unreadable';
+            }
+
+            emit(range, fingerprint, existing.raw || '');
+          } catch (e) {
+            core.warning(`checkpoint: could not resolve a range (${e.message}); reviewing the full range.`);
+            emit({ mode: 'full', reason: 'resolver_error', from: '', to: process.env.OCR_HEAD_SHA || '' }, '', '');
+          }
 
     - name: Run OpenCodeReview
       env:
@@ -274,9 +654,18 @@ runs:
         OCR_REVIEW_CONCURRENCY: ${{ inputs.review_concurrency }}
         OCR_BACKGROUND: ${{ inputs.background }}
         OCR_RULE: ${{ inputs.rule }}
+        # Step output, not job env: empty when the resolve step was skipped or
+        # chose the full range, and never inherited from an earlier use of this
+        # action in the same job.
+        RANGE_FROM: ${{ steps.range.outputs.range_from }}
       shell: bash
       run: |
-        ARGS=(--from "${MERGE_BASE}" --to "${HEAD_SHA}" --audience agent --format json)
+        export OCR_LLM_TIMEOUT="${OCR_LLM_TIMEOUT:-300}"
+        if [ -z "${REVIEW_TASK_TIMEOUT:-}" ]; then
+          echo "::error::Validated review_task_timeout is missing; the timeout validation step must complete first"
+          exit 1
+        fi
+        ARGS=(--from "${RANGE_FROM:-$MERGE_BASE}" --to "${HEAD_SHA}" --audience agent --format json --timeout "$REVIEW_TASK_TIMEOUT")
         [ -n "$OCR_REVIEW_CONCURRENCY" ] && ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY")
         [ -n "$OCR_BACKGROUND" ] && ARGS+=(--background "$OCR_BACKGROUND")
         [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")
@@ -316,6 +705,17 @@ runs:
         OCR_REVIEW_COMMENT_BATCH_SIZE: ${{ inputs.review_comment_batch_size }}
         OCR_ROUTE_SEVERITY_BELOW: ${{ inputs.route_severity_below }}
         OCR_ROUTE_CATEGORIES: ${{ inputs.route_categories }}
+        # Outputs of the Resolve review range step; all empty when that step was
+        # skipped (checkpointing off), which is what turns the checkpoint write
+        # path back into today's behavior.
+        OCR_CHECKPOINT_CARRY: ${{ steps.range.outputs.checkpoint_carry }}
+        OCR_CONFIG_FINGERPRINT: ${{ steps.range.outputs.config_fingerprint }}
+        OCR_RANGE_MODE: ${{ steps.range.outputs.range_mode }}
+        OCR_RANGE_FROM: ${{ steps.range.outputs.range_from }}
+        OCR_RANGE_TO: ${{ steps.range.outputs.range_to }}
+        OCR_RANGE_REASON: ${{ steps.range.outputs.range_reason }}
+        OCR_BASE_REF: ${{ env.BASE_REF }}
+        OCR_MERGE_BASE: ${{ env.MERGE_BASE }}
       with:
         github-token: ${{ inputs.github_token }}
         script: |
@@ -346,4 +746,15 @@ runs:
             reviewCommentBatchSize: parseInt(process.env.OCR_REVIEW_COMMENT_BATCH_SIZE, 10),
             routeSeverityBelow: process.env.OCR_ROUTE_SEVERITY_BELOW,
             routeCategories: process.env.OCR_ROUTE_CATEGORIES,
+            checkpointEnabled: ${{ inputs.checkpoint_range == 'true' }},
+            checkpointCarry: process.env.OCR_CHECKPOINT_CARRY || '',
+            checkpointBaseRef: process.env.OCR_BASE_REF || '',
+            checkpointMergeBase: process.env.OCR_MERGE_BASE || '',
+            checkpointFingerprint: process.env.OCR_CONFIG_FINGERPRINT || '',
+            // Nothing new was in range, so leave the previous run's summary alone
+            // instead of rewriting it into "No comments generated".
+            checkpointNoop: process.env.OCR_RANGE_REASON === 'same_head_noop',
+            rangeMode: process.env.OCR_RANGE_MODE || '',
+            rangeFrom: process.env.OCR_RANGE_FROM || '',
+            rangeTo: process.env.OCR_RANGE_TO || '',
           });

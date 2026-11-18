@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -368,7 +369,7 @@ func TestRetryReport_TerminalAndJSONReadSameFrozenResult(t *testing.T) {
 
 	ag := &mockResultProvider{filesReviewed: 2, manifest: mockManifest(session.StateComplete)}
 	jsonGot := captureStdout(t, func() {
-		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, rep); err != nil {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, rep); err != nil {
 			t.Fatalf("emitRunResult: %v", err)
 		}
 	})

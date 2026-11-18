@@ -79,6 +79,17 @@ func silenceStdout(t *testing.T, fn func()) {
 	fn()
 }
 
+// setTestHome redirects the user home resolved by os.UserHomeDir() to dir for
+// the duration of the test. Setting HOME alone is NOT enough on Windows:
+// os.UserHomeDir() prefers USERPROFILE there, so tests would still read and
+// write the developer's real ~/.opencodereview (and its config.json). Setting
+// USERPROFILE is a no-op on non-Windows platforms.
+func setTestHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
 // freshOCRHome points the OCR home at a temp dir so a test can assert on what a
 // command wrote there. It also neutralizes global git config: git resolves that
 // via XDG_CONFIG_HOME as well, so overriding HOME alone would still pick up the
@@ -86,7 +97,7 @@ func silenceStdout(t *testing.T, fn func()) {
 func freshOCRHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	return home

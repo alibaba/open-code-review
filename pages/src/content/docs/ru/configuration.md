@@ -50,6 +50,7 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
@@ -298,12 +299,12 @@ OCR игнорирует эти избыточные коды. Если зада
 
 ### Лимит запроса на файл
 
-По умолчанию OCR ограничивает промпт для каждого ревью файла 58 888 токенами.
-Чтобы увеличить лимит для модели с большим контекстным окном, сохраните
-`max_tokens`:
+По умолчанию OCR ограничивает промпт для каждого ревью файла 200 000 токенами
+(`ocr scan` использует меньшее значение — 58 888). Если контекстное окно вашей
+модели отличается, сохраните `max_tokens`:
 
 ```bash
-ocr config set max_tokens 200000
+ocr config set max_tokens 400000
 ```
 
 Эта настройка применяется как к `ocr review`, так и к `ocr scan`. Используйте
@@ -311,16 +312,34 @@ ocr config set max_tokens 200000
 конфигурации:
 
 ```bash
-ocr review --max-tokens 200000
-ocr scan --max-tokens 200000
+ocr review --max-tokens 400000
+ocr scan --max-tokens 120000
 ```
 
 Флаг для конкретного запуска имеет приоритет над `max_tokens`; если не задано
 ни то, ни другое, OCR использует встроенное значение по умолчанию из шаблона
-задачи. Этот лимит действует на файл и не зависит ни от предела выходных
-токенов модели, ни от `--max-tokens-budget`, который ограничивает общее
-использование токенов за запуск. Чтобы восстановить встроенное значение по
-умолчанию, используйте `ocr config unset max_tokens`.
+задачи. Этот лимит действует только на **промпт**: предел вывода модели задаётся
+отдельным параметром `MAX_COMPLETION_TOKENS` (по умолчанию `16384`), поэтому
+увеличение `max_tokens` не расширяет бюджет вывода. Он также не зависит от
+`--max-tokens-budget`, который ограничивает общее использование токенов за
+запуск. Чтобы восстановить встроенное значение по умолчанию, используйте
+`ocr config unset max_tokens`.
+
+### Предустановка усилий ревью (effort)
+
+Параметр `effort` определяет, сколько раундов основного цикла выполняется для
+каждой группы файлов: `low` — 1 раунд, `medium` — 2 раунда (по умолчанию),
+`high` — 3 раунда. Больше раундов — выше полнота находок, но больше времени и
+токенов.
+
+```bash
+ocr config set effort high     # сохранить в конфигурации
+ocr review --effort low        # только для этого запуска
+ocr config unset effort        # вернуться к значению medium
+```
+
+Приоритет: флаг `--effort` > сохранённое значение `effort` > значение по
+умолчанию `medium`.
 
 ### Проверка подключения
 

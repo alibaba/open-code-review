@@ -766,7 +766,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 
 	rule := ""
 	if a.args.SystemRule != nil {
-		rule = a.args.SystemRule.Resolve(strings.ToLower(it.Path))
+		rule = a.args.SystemRule.Resolve(it.Path)
 	}
 
 	planGuidance := a.maybeRunPlan(ctx, it, rule)
