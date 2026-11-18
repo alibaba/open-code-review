@@ -448,3 +448,67 @@ func TestFitCompressionInput_MarkupAloneTooLarge(t *testing.T) {
 		t.Fatalf("err = %v, want errCompressionInputTooLarge", err)
 	}
 }
+
+// A single compression round can collect many oversized tool results before
+// the synchronous pass runs. Each must be elided to fit the budget without
+// re-rendering the whole request on every cut (the O(n^2 * L) path).
+func TestFitCompressionInput_ManyLargeResults(t *testing.T) {
+	const (
+		numResults = 32
+		resultSize = 170 * 1024 // ~170 KiB each
+		budget     = 800000     // 800 KB, roughly the default context ceiling
+	)
+	msgs := make([]llm.Message, 0, numResults+1)
+	msgs = append(msgs, msg("assistant", "here are the tool results"))
+	for i := 0; i < numResults; i++ {
+		msgs = append(msgs, llm.NewToolResultMessage("call", strings.Repeat("x", resultSize)))
+	}
+
+	got, err := fitCompressionInput(msgs, plainTemplate, budget)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if size := renderedFor(got); size > budget {
+		t.Fatalf("rendered request = %d bytes, want <= %d", size, budget)
+	}
+	// The leading assistant message must stay intact. The largest results are
+	// elided first, so at least one result must be truncated while the tail of
+	// smaller results may survive untouched; every result is either untouched
+	// or carries the truncation marker.
+	if got[0].ExtractText() != "here are the tool results" {
+		t.Errorf("leading message altered: %q", got[0].ExtractText())
+	}
+	truncated := 0
+	for i := 1; i < len(got); i++ {
+		text := got[i].ExtractText()
+		if text == strings.Repeat("x", resultSize) {
+			continue // untouched
+		}
+		if !strings.HasSuffix(text, truncationSuffix) {
+			t.Errorf("result %d was altered without the truncation marker", i-1)
+		}
+		truncated++
+	}
+	if truncated == 0 {
+		t.Error("expected at least one result to be truncated")
+	}
+	// The input slice must not be mutated.
+	if msgs[1].ExtractText() == got[1].ExtractText() {
+		t.Error("input slice was mutated instead of copied")
+	}
+}
+
+// BenchmarkFitCompressionInput_ManyLargeResults guards the O(n^2 * L)
+// re-rendering regression: with many oversized fields, the incremental byte
+// accounting must dominate over repeated full-request rendering.
+func BenchmarkFitCompressionInput_ManyLargeResults(b *testing.B) {
+	msgs := make([]llm.Message, 0, 33)
+	msgs = append(msgs, msg("assistant", "here are the tool results"))
+	for i := 0; i < 32; i++ {
+		msgs = append(msgs, llm.NewToolResultMessage("call", strings.Repeat("x", 170*1024)))
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = fitCompressionInput(msgs, plainTemplate, 800000)
+	}
+}

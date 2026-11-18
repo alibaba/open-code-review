@@ -245,6 +245,17 @@ func renderedSize(templates []MessageTemplate, contextXML string) int {
 	return size
 }
 
+// contextOccurrences counts how many times a template list expands {{context}}.
+// It is used to translate a byte reduction in a single message field into the
+// corresponding reduction of the fully rendered request without re-rendering.
+func contextOccurrences(templates []MessageTemplate) int {
+	n := 0
+	for _, m := range templates {
+		n += strings.Count(m.Content, "{{context}}")
+	}
+	return n
+}
+
 // fitCompressionInput returns a copy of msgs whose rendered compression request
 // stays within budgetBytes. It repeatedly shortens the largest content or
 // reasoning field, so small messages keep their full text, and copies each
@@ -253,10 +264,17 @@ func renderedSize(templates []MessageTemplate, contextXML string) int {
 // tool results is slow, and the bound only needs a cheap, deterministic ceiling.
 // If markup and template text alone exceed the budget, it returns
 // errCompressionInputTooLarge so the caller can skip the request.
+//
+// The rendered size is measured once and then updated incrementally: a cut that
+// removes d bytes from a field shrinks the rendered request by d * ctxCount,
+// where ctxCount is the number of {{context}} expansions. This avoids re-rendering
+// every message and template on each pass (O(n^2 * L) worst case), so a round
+// with many oversized tool results stays linear in the total field bytes.
 func fitCompressionInput(msgs []llm.Message, templates []MessageTemplate, budgetBytes int) ([]llm.Message, error) {
 	if budgetBytes <= 0 {
 		return msgs, nil
 	}
+	ctxCount := contextOccurrences(templates)
 	excess := renderedSize(templates, buildMessageXML(msgs)) - budgetBytes
 	if excess <= 0 {
 		return msgs, nil
@@ -280,11 +298,14 @@ func fitCompressionInput(msgs []llm.Message, templates []MessageTemplate, budget
 
 		target := max(0, largest-excess)
 		if reasoning {
+			before := len(out[idx].ReasoningContent)
 			out[idx].ReasoningContent = truncateToByteBudget(out[idx].ReasoningContent, target)
+			excess -= (before - len(out[idx].ReasoningContent)) * ctxCount
 		} else {
+			before := len(out[idx].ExtractText())
 			out[idx].Content = truncateToByteBudget(out[idx].ExtractText(), target)
+			excess -= (before - len(out[idx].ExtractText())) * ctxCount
 		}
-		excess = renderedSize(templates, buildMessageXML(out)) - budgetBytes
 	}
 	return out, nil
 }
