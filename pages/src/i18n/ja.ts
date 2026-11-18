@@ -311,6 +311,11 @@ export const ja: TranslationKeys = {
   'docs.search.hint.select': '選択',
   'docs.search.hint.open': '開く',
   'docs.search.hint.close': '閉じる',
+  'docs.content.loading': 'ドキュメントを読み込み中...',
+  'docs.content.loadError': 'ドキュメントの読み込みに失敗しました。',
+  'docs.content.retry': '再試行',
+  'docs.search.loading': '検索中...',
+  'docs.search.loadError': '検索コンテンツの読み込みに失敗しました。',
 
   // Blog
   'blog.title': 'ブログ',

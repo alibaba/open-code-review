@@ -311,6 +311,11 @@ export const ko: TranslationKeys = {
   'docs.search.hint.select': '선택',
   'docs.search.hint.open': '열기',
   'docs.search.hint.close': '닫기',
+  'docs.content.loading': '문서를 불러오는 중...',
+  'docs.content.loadError': '문서 콘텐츠를 불러오지 못했습니다.',
+  'docs.content.retry': '다시 시도',
+  'docs.search.loading': '검색 중...',
+  'docs.search.loadError': '검색 콘텐츠를 불러오지 못했습니다.',
 
   // Blog
   'blog.title': '블로그',
