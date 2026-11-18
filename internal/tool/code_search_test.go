@@ -852,6 +852,38 @@ func TestGitGrep_BoundsLongMatchLines(t *testing.T) {
 	}
 }
 
+func TestGitGrep_ByteBoundKeepsTheMatchCensus(t *testing.T) {
+	dir := setupTestRepo(t)
+	// The byte budget binds before the count cap, so fewer than gitGrepMaxCount lines render. The census the model
+	// needs is still owed: how many matches there were, and how many files they are spread across.
+	line := "census_needle" + strings.Repeat("y", codeSearchMaxLineBytes) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "wide.txt"), []byte(strings.Repeat(line, gitGrepMaxCount)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "narrow.txt"), []byte("census_needle small\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	got, err := p.gitGrep(context.Background(), "census_needle", false, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := strings.Count(got, "|census_needle")
+	if shown == 0 || shown >= gitGrepMaxCount {
+		t.Fatalf("rendered %d matches, want some but fewer than %d", shown, gitGrepMaxCount)
+	}
+	if !strings.Contains(got, "Output truncated at") {
+		t.Fatalf("the fixture did not reach the byte bound, so this test proves nothing:\n%.512s", got)
+	}
+	if !strings.Contains(got, "across 2 matching files") {
+		t.Errorf("byte-bound result dropped the matched-file census, got:\n%.512s", got)
+	}
+	if want := fmt.Sprintf("Showing the first %d of", shown); !strings.Contains(got, want) {
+		t.Errorf("expected the note to report %d rendered matches of the total, got:\n%.512s", shown, got)
+	}
+}
+
 func TestGitGrep_BoundsTotalResultBytes(t *testing.T) {
 	dir := setupTestRepo(t)
 	// 100 full-length matches exceed the result budget under the count cap.

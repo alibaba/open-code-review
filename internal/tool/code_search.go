@@ -220,7 +220,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		offset = 1
 	}
 
-	matchCount, renderedBytes := 0, 0
+	matchCount, totalMatches, renderedBytes := 0, 0, 0
 	truncated, lineTruncated, outputTruncated := false, false, false
 	matchedFiles := make(map[string]bool)
 	for _, line := range lines {
@@ -240,6 +240,9 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		// Count every file with a text match, including those beyond the render
 		// budget, so the truncation note can report the true matched-file count.
 		matchedFiles[fname] = true
+		// Counted apart from matchCount, which only rises for lines that render: once the
+		// byte budget binds, matchCount stops short of the cap and the census would be lost.
+		totalMatches++
 		if matchCount >= gitGrepMaxCount {
 			// Keep scanning to finish counting matched files, but render no more.
 			truncated = true
@@ -266,8 +269,8 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	var sb strings.Builder
-	if truncated {
-		sb.WriteString(fmt.Sprintf("Note: Showing the first %d matches across %d matching files. Some files are partially shown or omitted entirely. Narrow file_patterns to see the rest.\n", gitGrepMaxCount, len(matchedFiles)))
+	if truncated || outputTruncated {
+		sb.WriteString(fmt.Sprintf("Note: Showing the first %d of %d matches across %d matching files. Some files are partially shown or omitted entirely. Narrow file_patterns to see the rest.\n", matchCount, totalMatches, len(matchedFiles)))
 	}
 
 	for _, path := range fileOrder {
