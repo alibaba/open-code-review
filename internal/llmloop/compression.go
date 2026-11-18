@@ -54,22 +54,28 @@ type compressionJob struct {
 }
 
 // compressionState is the async-compression bookkeeping for a single
-// conversation (one RunPerFile call). The Runner is shared by concurrent
-// per-file goroutines, so this state must not live on the Runner: a shared
-// slot lets one file apply, cancel, or replace another file's compression
-// job (#384).
+// conversation (one RunMainTask call). The Runner is shared by concurrent
+// per-subtask goroutines, so this state must not live on the Runner: a shared
+// slot lets one subtask apply, cancel, or replace another subtask's
+// compression job (#384).
 type compressionState struct {
 	mu         sync.Mutex
 	pendingJob *compressionJob
 }
 
+// messageTokens counts visible text plus the Native replay payload that
+// ExtractText() does not see.
+func messageTokens(m llm.Message) int {
+	return llm.CountTokens(m.ExtractText()) + m.Native.EstimatedTokens()
+}
+
 // CountMessagesTokens returns the rough token count of msgs by summing the
-// per-message text token count. Exported because both review and scan top
+// per-message token count. Exported because both review and scan top
 // layers may want it for pre-flight checks.
 func CountMessagesTokens(msgs []llm.Message) int {
 	var total int
 	for _, m := range msgs {
-		total += llm.CountTokens(m.ExtractText())
+		total += messageTokens(m)
 	}
 	return total
 }
@@ -107,9 +113,9 @@ func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int
 	count := 0
 	tokensUsed := 0
 	for i := len(rounds) - 1; i >= 0; i-- {
-		roundTokens := llm.CountTokens(messages[rounds[i].assistantIdx].ExtractText())
+		roundTokens := messageTokens(messages[rounds[i].assistantIdx])
 		for _, ti := range rounds[i].toolIdxs {
-			roundTokens += llm.CountTokens(messages[ti].ExtractText())
+			roundTokens += messageTokens(messages[ti])
 		}
 		if tokensUsed+roundTokens > budget {
 			break
@@ -190,6 +196,11 @@ func buildMessageXML(msgs []llm.Message) string {
 		sb.WriteString("    <content>\n")
 		sb.WriteString(fmt.Sprintf("      %s\n", m.ExtractText()))
 		sb.WriteString("    </content>\n")
+		if m.ReasoningContent != "" {
+			sb.WriteString("    <reasoning>\n")
+			sb.WriteString(fmt.Sprintf("      %s\n", m.ReasoningContent))
+			sb.WriteString("    </reasoning>\n")
+		}
 		sb.WriteString("</message>")
 		if i < len(msgs)-1 {
 			sb.WriteString("\n")
@@ -209,7 +220,7 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 // messages, summarizing the compress zone while preserving the active zone
 // intact. Returns rebuilt as [frozen] + [compressed_summary appended to
 // the user prompt] + [active].
-func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
+func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey string) ([]llm.Message, error) {
 	if len(r.deps.Template.MemoryCompressionTask.Messages) == 0 || len(msgs) <= 2 {
 		return msgs[:min(len(msgs), 2)], nil
 	}
@@ -233,14 +244,14 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 	// llm_request line reaches the session JSONL before the response: a run
 	// killed mid-request now leaves an llm_request with no response, which
 	// resume ignores (applyResumeLine has no case for it).
-	fs := r.deps.Session.GetOrCreateFileSession(filePath)
+	fs := r.deps.Session.GetOrCreateFileSession(taskKey)
 	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, compressionMsgs)
 
 	ctx = llm.ContextWithSessionKey(ctx,
-		llm.SessionTaskKey(r.deps.Session.SessionID, string(session.MemoryCompressionTask), filePath))
+		llm.SessionTaskKey(r.deps.Session.SessionID, string(session.MemoryCompressionTask), taskKey))
 
 	startTime := time.Now()
-	reqCtx := r.requestCtx(ctx, filePath, session.MemoryCompressionTask, rec.RequestNo)
+	reqCtx := r.requestCtx(ctx, taskKey, session.MemoryCompressionTask, rec.RequestNo)
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  compressionMsgs,
@@ -288,7 +299,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 // conversation owning st. A no-op when a job is already pending — the
 // check-and-set happens under st.mu so concurrent callers cannot replace
 // (and thereby leak) an in-flight job.
-func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionState, messages []llm.Message, filePath string) {
+func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionState, messages []llm.Message, taskKey string) {
 	st.mu.Lock()
 	if st.pendingJob != nil {
 		st.mu.Unlock()
@@ -306,7 +317,7 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 	go func() {
 		defer r.bg.Done()
 		defer cancel()
-		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, filePath)
+		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, taskKey)
 
 		st.mu.Lock()
 		defer st.mu.Unlock()

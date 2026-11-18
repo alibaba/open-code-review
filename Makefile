@@ -32,6 +32,12 @@ endef
 build:
 	$(GO) build -ldflags "$(LD_FLAGS)" -o $(DIST_DIR)/$(BINARY_NAME) ./cmd/opencodereview
 
+# No node_modules filter is needed for the docs site: pages/go.mod puts it in a
+# module of its own, so `go list ./...` skips that subtree entirely -- see that
+# file for why a module boundary is used instead of a per-command grep. Deleting
+# it brings pages/node_modules/flatted/golang back into this list.
+# The /extensions/ filter still earns its keep: extensions/vscode has no Go code
+# of ours, but its eslint dependency installs another copy of flatted's.
 PACKAGES := $(shell $(GO) list ./... | grep -v /extensions/)
 
 test:

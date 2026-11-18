@@ -164,8 +164,7 @@ func TestManualE2ERetryReport(t *testing.T) {
 
 	t.Run("all_files_fail", func(t *testing.T) {
 		srv := newFakeLLM()
-		srv.hardFail["a.go"] = true
-		srv.hardFail["b.go"] = true
+		srv.failAll()
 		res := runManualReview(t, srv)
 		if res.freezeErr != nil {
 			t.Fatalf("Freeze: %v", res.freezeErr)

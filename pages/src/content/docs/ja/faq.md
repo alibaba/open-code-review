@@ -90,17 +90,19 @@ LLM タイムアウトを引き上げてください——[タイムアウト](.
 
 ### ファイルがレビューされない
 
-`ocr review --preview` を実行してください（LLM コストなし）。出力には各候補ファイルと、それが
-保持されたか破棄されたかの**理由**が一覧されます。
+`ocr review --preview` を実行してください（LLM コストなし）。出力には、各候補ファイルが
+保持されたか破棄されたかの**理由**が示されます。`vendor/` や `node_modules/` などの
+provider ディレクトリ配下のファイルは端末では 1 行に集約されます。`ocr review --preview --format json`
+では引き続き全エントリが列挙されます。
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
-5 種類の除外理由は、[ファイルフィルタリング](../review-rules/#how-files-are-filtered)のゲートに対応します。
+これらの除外理由は、[ファイルフィルタリング](../review-rules/#how-files-are-filtered)のゲートに対応します。
 
 | 理由 | 修正方法 |
 |---|---|
@@ -108,7 +110,9 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | あなたの `exclude` リストからそのパターンを削除してください。 |
 | `unsupported_ext` | ホワイトリストゲートを回避するため、拡張子を `include` リストに追加してください。 |
 | `default_path` | ファイルを `include` に追加してください——組み込みのテストファイル除外パターンを上書きします。 |
+| `provider_directory` | 対応は不要です。`vendor/` や `node_modules/` などの provider ディレクトリは、`include` に一致してもレビュー対象にはなりません。 |
 | `deleted` | 対処不要——レビュー対象の新しい内容がありません。 |
+| `too_large` | diff だけで `max_tokens` の 80% を超えています。`--max-tokens`（または保存された `max_tokens`）を引き上げるか、変更をより小さな commit に分割してください。 |
 
 ### カスタムルールが発火しない
 
@@ -234,9 +238,25 @@ JSON モードでは `warnings` にも表示されます。
 
 ### JSON 出力が `{ "files_reviewed": 0, "comments": [] }`
 
-ワークスペースに対象ファイルがありません。これは意図的なものです——明示的な形により、呼び出し側は
-「レビュー対象がない」ことと「レビューしたファイルに指摘がない」ことを区別できます。コメントが
-ゼロの正常なレビューは、通常の空配列 `[]` を返します。
+レビュー対象のファイルがありません。`files_reviewed` はトップレベルのフィールドではなく `summary` の
+下にあり、この経路では `0` になります。トップレベルの `[]` は `comments` のほうです。同じオブジェクトは
+`"status": "skipped"` と `"message": "Review skipped: no items were selected."`、および
+`terminal_state` が `"skipped"` で `coverage` の各配列が空の `manifest` も含みます。
+
+ファイルをレビューして指摘がなかった場合も、**`comments: []` を持つ JSON オブジェクト**が返ります。
+`summary.files_reviewed` は実際にレビューしたファイル数になり、`status` は `"complete"`、
+`message` は `"Review complete: 0 finding(s) across N selected item(s)."` です。実行によって
+省略可能なトップレベルフィールドは異なり得るため、オブジェクト形状や特定の省略可能フィールドの有無で
+両者を判別しないでください。manifest を持つ review 出力では `summary.files_reviewed` または
+`manifest.terminal_state` を使ってください。ただし、呼び出し側は後述の manifest-less 経路で
+`summary` と `manifest` の両方が存在しない場合も扱う必要があります。`review --format json` は
+stdout に必ず JSON オブジェクトを 1 つだけ書き出し、裸の配列にはなりません。
+
+manifest-less の no-files 経路はより簡素で、`summary` と `manifest` の両方を省略しますが、
+`"status": "skipped"`、`"message": "No supported files changed."`、`"comments": []` は
+引き続き含まれ、`tool_calls` も常に含まれます。`ocr scan` は常に manifest-less で、no-files 条件を
+満たすとこの経路を使います。`ocr review` も manifest の構築に失敗し、no-files 条件を満たした場合は
+同じ経路に入ることがあります。`llm`、`trace_id` などの省略可能なメタデータが含まれる場合もあります。
 
 ### セッション JSONL はどこにある？
 
@@ -260,7 +280,7 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-LLM 呼び出しには独自の span がありません——metric として記録されます。`ocr.llm.tokens_used`
+メインレビュー ループの LLM 呼び出しは `llm.request` span を生成し、metric としても記録されます。`ocr.llm.tokens_used`
 （counter、`model` + `type` でラベル付け）、`ocr.llm.requests_total`（counter、`model`
 + `status` でラベル付け）、`ocr.llm.request_duration_seconds`（histogram、`model` でラベル付け）に
 注目してください。console exporter はこれらの集計をインラインで出力します。ダッシュボードが必要な場合は、
@@ -271,8 +291,12 @@ OTLP exporter に切り替えて metrics 基盤に送ってください——[�
 よくある要因:
 
 - ファイルが 50 行以上（または複数ファイルのグループで合計 100 行以上）のとき plan フェーズが
-  起動します。これはグループごとに LLM 呼び出しを 1 回追加します。閾値を下げるとコストを
-  削減でき、上げると小さな PR の速度を向上できます。
+  起動します。これはグループごとに LLM 呼び出しを 1 回追加するので、コストを下げられるのは閾値を
+  **上げた**ほうです。下げるとより多くのグループが plan を通り、かえって高くなります。2 つの閾値は
+  `0` で挙動が異なります。`PLAN_MODE_LINE_THRESHOLD` が `0` 以下なら*常に plan* となり、これが最も
+  高い設定です。一方 `PLAN_MODE_GROUP_LINE_THRESHOLD` が `0` だとグループ側のゲートが無効になります。
+  この設定で plan 呼び出しを省けるのは、そのグループ側ゲートだけが本来の発火条件だった場合です。
+  起動条件は上の「ファイルが小さいのに plan フェーズに時間がかかる」を参照してください。
 - main ループはデフォルトで 2 ラウンド実行されます（`medium` プリセット）。`--effort low` で
   1 ラウンドにすればレビューコストはおよそ半分になります。`--effort high`（3 ラウンド）は
   recall が上がりますがより高価です。

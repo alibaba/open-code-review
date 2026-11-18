@@ -12,31 +12,11 @@ import (
 	"testing"
 )
 
-// isolateLLMConnectionTest keeps the "Testing connection..." step that ends
-// every apply*Config call away from the developer's own machine. Without it
-// resolveConfigPath() falls back to ~/.opencodereview/config.json and `go test`
-// resolves a real endpoint: with providers.<name>.api_key_cmd configured that
-// runs the credential helper and blocks on a pinentry/Touch ID prompt for up to
-// the 60s credential timeout, and with a static key it fires a real request.
-//
-// The path points at a file that does not exist, so resolution fails fast the
-// way it already does on a machine with no config. HOME is redirected into an
-// empty temp dir as well, so the shell-rc strategy has nothing to read either.
 func isolateLLMConnectionTest(t *testing.T) {
 	t.Helper()
-	dir := t.TempDir()
-	t.Setenv("OCR_CONFIG_PATH", filepath.Join(dir, "no-such-config.json"))
-	// Both, because os.UserHomeDir reads USERPROFILE on Windows and never falls
-	// back to HOME -- setting HOME alone would leave the shell-rc strategy reading
-	// the real profile.
-	t.Setenv("HOME", dir)
-	t.Setenv("USERPROFILE", dir)
-	for _, k := range []string{
-		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL",
-		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
-	} {
-		t.Setenv(k, "")
-	}
+	original := runLLMTestPath
+	t.Cleanup(func() { runLLMTestPath = original })
+	runLLMTestPath = func(string) error { return nil }
 }
 
 func TestMaskKey(t *testing.T) {
@@ -99,6 +79,47 @@ func TestSaveConfig(t *testing.T) {
 	}
 	if loaded.Language != "English" {
 		t.Errorf("Language = %q", loaded.Language)
+	}
+}
+
+func TestSaveConfigEnforcesModeOnExistingFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not honor Unix file modes the same way")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"provider":"old"}`), 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("set seed permissions: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat seed: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o644 {
+		t.Fatalf("seed perm = %o, want 644", perm)
+	}
+
+	cfg := &Config{
+		Provider: "anthropic",
+		Model:    "claude-opus-4-6",
+		Providers: map[string]ProviderEntry{
+			"anthropic": {APIKey: "sk-secret"},
+		},
+	}
+	if err := saveConfig(path, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	info, err = os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat after save: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("perm after saveConfig = %o, want 600 (existing 0644 must be tightened)", perm)
 	}
 }
 
@@ -200,6 +221,48 @@ func TestRemoveModels(t *testing.T) {
 				if got[i] != tc.want[i] {
 					t.Errorf("[%d] = %q, want %q", i, got[i], tc.want[i])
 				}
+			}
+		})
+	}
+}
+
+func TestApplyProviderConfig_TestsWrittenConfigPath(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider string
+		apply    func(string, *Config, providerTUIResult) error
+	}{
+		{name: "manual", apply: applyManualConfig},
+		{name: "custom", provider: "test-provider", apply: applyCustomProviderConfig},
+		{name: "official", provider: "openai", apply: applyOfficialProviderConfig},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "wizard-config.json")
+			original := runLLMTestPath
+			t.Cleanup(func() { runLLMTestPath = original })
+			calls := 0
+			runLLMTestPath = func(path string) error {
+				calls++
+				if path != configPath {
+					t.Fatalf("connection test path = %q, want %q", path, configPath)
+				}
+				if _, err := os.Stat(path); err != nil {
+					t.Fatalf("config must be saved before connection test: %v", err)
+				}
+				return nil
+			}
+
+			if err := tc.apply(configPath, &Config{}, providerTUIResult{
+				provider: tc.provider,
+				url:      "https://example.com/v1",
+				protocol: "openai",
+				model:    "saved-model",
+				apiKey:   "saved-key",
+			}); err != nil {
+				t.Fatalf("apply config: %v", err)
+			}
+			if calls != 1 {
+				t.Fatalf("connection test calls = %d, want 1", calls)
 			}
 		})
 	}
@@ -452,6 +515,7 @@ func TestPrintWizardCancelled(t *testing.T) {
 // the URL configured through `ocr config set` survives a later provider wizard
 // confirmation, whose official flow no longer edits Base URL.
 func TestApplyOfficialProviderConfig_PreservesURLWhenWizardOmitsURL(t *testing.T) {
+	isolateLLMConnectionTest(t)
 	t.Setenv("LITELLM_API_KEY", "sk-litellm")
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
@@ -476,6 +540,7 @@ func TestApplyOfficialProviderConfig_PreservesURLWhenWizardOmitsURL(t *testing.T
 }
 
 func TestApplyOfficialProviderConfig_IgnoresURLFromResult(t *testing.T) {
+	isolateLLMConnectionTest(t)
 	t.Setenv("LITELLM_API_KEY", "sk-litellm")
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")

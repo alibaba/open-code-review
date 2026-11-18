@@ -4,11 +4,13 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +22,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
@@ -451,6 +454,33 @@ func TestParseFilterToolCalls(t *testing.T) {
 	}
 }
 
+// logExclusions switches on the exclusion reason with a `continue` default, so
+// a reason with no case arm is dropped from the log and the filtered count alike.
+func TestLogExclusions_SecretPath(t *testing.T) {
+	agent := New(Args{})
+	decisions := []fileDecision{
+		{Diff: model.Diff{NewPath: ".env"}, Reason: ExcludeSecret},
+	}
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	agent.logExclusions(decisions)
+	restore()
+
+	got := buf.String()
+	if !strings.Contains(got, ".env") {
+		t.Errorf("log = %q, want it to name the skipped secret path", got)
+	}
+	if !strings.Contains(got, "secret path") {
+		t.Errorf("log = %q, want secret-specific wording, not the path/extension wording", got)
+	}
+	// The rollup only prints when staticSkipped was incremented, so its presence
+	// proves the decision reached a real case arm rather than `default`.
+	if !strings.Contains(got, "Filtered 1 file(s)") {
+		t.Errorf("log = %q, want the secret exclusion counted in the rollup", got)
+	}
+}
+
 func TestExtFromPath(t *testing.T) {
 	a := New(Args{})
 
@@ -724,7 +754,17 @@ func TestBuildToolDefs(t *testing.T) {
 	})
 }
 
-func TestFilterLargeDiffs(t *testing.T) {
+// selectionReasons indexes a selection pass by path so the tests can assert on
+// the decision the run and `--preview` now share.
+func selectionReasons(decisions []fileDecision) map[string]ExcludeReason {
+	reasons := make(map[string]ExcludeReason, len(decisions))
+	for _, dec := range decisions {
+		reasons[effectivePath(dec.Diff)] = dec.Reason
+	}
+	return reasons
+}
+
+func TestSelectFilesTooLarge(t *testing.T) {
 	a := New(Args{
 		Template: template.Template{MaxTokens: 100},
 	})
@@ -734,32 +774,31 @@ func TestFilterLargeDiffs(t *testing.T) {
 		{NewPath: "large.go", Diff: strings.Repeat("word ", 500)},
 	}
 
-	kept := a.filterLargeDiffs(diffs)
-	if len(kept) != 1 {
-		t.Fatalf("expected 1 kept diff, got %d", len(kept))
+	reasons := selectionReasons(a.selectFiles(diffs))
+	if reasons["small.go"] != ExcludeNone {
+		t.Errorf("small.go reason = %q, want selected", reasons["small.go"])
 	}
-	if kept[0].NewPath != "small.go" {
-		t.Errorf("kept wrong file: %s", kept[0].NewPath)
+	if reasons["large.go"] != ExcludeTooLarge {
+		t.Errorf("large.go reason = %q, want %q", reasons["large.go"], ExcludeTooLarge)
 	}
 }
 
-// exactNTokens builds a string that llm.CountTokens reports as exactly n
-// tokens, failing loudly if the tokenizer disagrees so fixture drift cannot
-// silently weaken the boundary assertions below.
+// exactNTokens uses a four-byte fragment that is one cl100k_base token, so it
+// also stays exact under CountTokens' four-bytes-per-token fallback.
 func exactNTokens(t *testing.T, n int) string {
 	t.Helper()
-	s := strings.TrimSpace(strings.Repeat("a ", n))
+	s := strings.Repeat("test", n)
 	if got := llm.CountTokens(s); got != n {
 		t.Fatalf("fixture drift: llm.CountTokens(<%d-token string>) = %d, want %d", n, got, n)
 	}
 	return s
 }
 
-// TestFilterLargeDiffs_Boundary pins the 80% threshold exactly: with
+// TestSelectFilesTooLarge_Boundary pins the 80% threshold exactly: with
 // MaxTokens=100 the limit is 80, so an 80-token diff is kept and an 81-token
-// one is dropped. TestFilterLargeDiffs above uses margins wide enough to pass
-// at any threshold, so it does not pin the value.
-func TestFilterLargeDiffs_Boundary(t *testing.T) {
+// one is dropped. TestSelectFilesTooLarge above uses margins wide enough to
+// pass at any threshold, so it does not pin the value.
+func TestSelectFilesTooLarge_Boundary(t *testing.T) {
 	a := New(Args{
 		Template: template.Template{MaxTokens: 100},
 	})
@@ -769,24 +808,23 @@ func TestFilterLargeDiffs_Boundary(t *testing.T) {
 		{NewPath: "over-limit.go", Diff: exactNTokens(t, 81)},
 	}
 
-	kept := a.filterLargeDiffs(diffs)
-	if len(kept) != 1 {
-		t.Fatalf("expected 1 kept diff, got %d", len(kept))
+	reasons := selectionReasons(a.selectFiles(diffs))
+	if reasons["at-limit.go"] != ExcludeNone {
+		t.Errorf("at-limit.go reason = %q, want selected", reasons["at-limit.go"])
 	}
-	if kept[0].NewPath != "at-limit.go" {
-		t.Errorf("kept wrong file: got %s, want at-limit.go", kept[0].NewPath)
+	if reasons["over-limit.go"] != ExcludeTooLarge {
+		t.Errorf("over-limit.go reason = %q, want %q", reasons["over-limit.go"], ExcludeTooLarge)
 	}
 }
 
-func TestFilterLargeDiffs_ZeroMaxTokens(t *testing.T) {
+func TestSelectFilesTooLarge_ZeroMaxTokens(t *testing.T) {
 	a := New(Args{
 		Template: template.Template{MaxTokens: 0},
 	})
 
-	diffs := []model.Diff{{NewPath: "a.go", Diff: "some diff"}}
-	kept := a.filterLargeDiffs(diffs)
-	if len(kept) != 1 {
-		t.Errorf("expected all kept when MaxTokens=0, got %d", len(kept))
+	diffs := []model.Diff{{NewPath: "a.go", Diff: strings.Repeat("word ", 500)}}
+	if reason := a.selectFiles(diffs)[0].Reason; reason != ExcludeNone {
+		t.Errorf("reason = %q, want selected when MaxTokens=0 disables the size gate", reason)
 	}
 }
 
@@ -960,18 +998,33 @@ func TestAgentGettersNil(t *testing.T) {
 	}
 }
 
-func TestCountReviewable(t *testing.T) {
-	a := New(Args{})
+// TestSummarizeSelection pins what Run reports and keeps: only files that pass
+// every gate are counted as selected, while deletions stay in the working diff
+// set (they are never dispatched but still describe the change).
+func TestSummarizeSelection(t *testing.T) {
+	a := New(Args{Template: template.Template{MaxTokens: 100}})
 	diffs := []model.Diff{
 		{NewPath: "main.go", Insertions: 10, Deletions: 2},
 		{NewPath: "deleted.go", IsDeleted: true, Deletions: 20},
 		{NewPath: "binary.bin", IsBinary: true},
 		{NewPath: "helper.go", Insertions: 5},
+		{NewPath: "huge.go", Diff: strings.Repeat("word ", 500)},
 	}
 
-	count := a.countReviewable(diffs)
-	if count != 2 {
-		t.Errorf("countReviewable = %d, want 2", count)
+	kept, counts := summarizeSelection(a.selectFiles(diffs))
+	if counts.Selected != 2 {
+		t.Errorf("selected = %d, want 2 (main.go, helper.go)", counts.Selected)
+	}
+	if counts.TooLarge != 1 {
+		t.Errorf("tooLarge = %d, want 1 (huge.go)", counts.TooLarge)
+	}
+	var keptPaths []string
+	for _, d := range kept {
+		keptPaths = append(keptPaths, d.NewPath)
+	}
+	want := []string{"main.go", "deleted.go", "helper.go"}
+	if !slices.Equal(keptPaths, want) {
+		t.Errorf("kept = %v, want %v", keptPaths, want)
 	}
 }
 

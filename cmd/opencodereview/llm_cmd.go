@@ -50,18 +50,23 @@ func init() {
 	llmCmd.AddCommand(llmProvidersCmd)
 }
 
+var runLLMTestPath = runLLMTestWithConfigPath
+
 func runLLMTest() error {
-	cfgPath, err := resolveConfigPath()
+	cfgPath, err := defaultConfigPath()
 	if err != nil {
 		return err
 	}
+	return runLLMTestPath(cfgPath)
+}
 
-	appCfg, err := LoadAppConfig(cfgPath)
+func runLLMTestWithConfigPath(configPath string) error {
+	appCfg, err := LoadAppConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	ep, err := llm.ResolveEndpoint(cfgPath)
+	ep, err := llm.ResolveEndpoint(configPath)
 	if err != nil {
 		return fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
@@ -83,7 +88,7 @@ func runLLMTest() error {
 
 	// No retry collector: llm test is a connectivity probe, not a review, and the
 	// retry report only describes ocr review.
-	llmClient := llm.NewLLMClient(ep, nil)
+	llmClient := llm.NewLLMClient(ep, nil, nil)
 
 	messages := make([]llm.Message, 0, len(task.Messages))
 	for _, m := range task.Messages {

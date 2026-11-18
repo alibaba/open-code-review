@@ -13,7 +13,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -21,7 +21,7 @@ flowchart TD
     A --> B --> C --> D --> D2 --> E --> F
 ```
 
-オーケストレーションのロジックは [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/) パッケージにあり、主要なファイルは `agent.go`（ディスパッチとグループごとのオーケストレーション）、`grouping.go`（セマンティックなファイルグルーピング）、`preview.go`（ファイルフィルタリング）、`util.go`（ヘルパー）です。ツール呼び出しループとメモリ圧縮は、その隣にある [`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/) にあります。注目すべきエントリポイントは 2 つです: `Agent.Run`（パイプラインの最上部）と `Agent.dispatchSubtasks`（グループごとのファンアウト）。
+オーケストレーションのロジックは [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/) パッケージにあり、主要なファイルは `agent.go`（ディスパッチとグループごとのオーケストレーション）、`grouping.go`（セマンティックなファイルグルーピング）、`selection.go`（ファイルフィルタリング）、`preview.go`（`--preview` のレポート）、`util.go`（ヘルパー）です。ツール呼び出しループとメモリ圧縮は、その隣にある [`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/) にあります。注目すべきエントリポイントは 2 つです: `Agent.Run`（パイプラインの最上部）と `Agent.dispatchSubtasks`（グループごとのファンアウト）。
 
 ## diff provider
 
@@ -39,7 +39,7 @@ untracked ファイルはディスクから読み込まれ、ファイル全体�
 
 ## 5 段階ゲートのファイルフィルタリング
 
-diff の読み込み後、各ファイルは [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go) を通過します。この関数は次のいずれかを返します:
+diff の読み込み後、各ファイルは [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go) を通過します。この関数は次のいずれかを返します:
 
 ```
 binary          — file is binary
@@ -48,7 +48,7 @@ unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
 ```
 
-……またはファイルが保持される場合は空を返します。`deleted` は `whyExcluded` からは**返されません**。これは `Preview()` の中でそのあと計算されます。保持されたファイルの diff が `IsDeleted` を報告したときです。各ゲートは以下の順序で実行されます:
+……またはファイルが保持される場合は空を返します。`deleted` と `too_large` は `whyExcluded` からは**返されません**。これらはゲートのあとに `selectFiles` が適用します。`deleted` は保持されたファイルの diff が `IsDeleted` を報告したとき、`too_large` は diff だけで `max_tokens` の 80% を超えるときです。各ゲートは以下の順序で実行されます:
 
 1. `binary`: バイナリファイルが最初に破棄されます。
 2. `user_exclude`: あなたのプロジェクトの `exclude` が常に優先されます。
@@ -56,7 +56,9 @@ default_path    — matched a built-in test-file exclude pattern
 4. `unsupported_ext` は拡張子のホワイトリストでフィルタリングします。
 5. `default_path` は最後のゲートです: 組み込みの**テストファイル**除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、`**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）に一致します。各パターンはルートプレフィックスとして `**/` を付けます。
 
-ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、diff-provider 層で、`internal/diff/git.go` の `providerDirIgnoreDirs` リストを通じて発生します。これらのディレクトリの diff は解析されたあと `filterDiffs` によって除去され、ファイルごとのフィルターに到達することは決してありません。
+ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、diff-provider 層で、`internal/diff/git.go` の `providerDirIgnoreDirs` リストを通じて発生します。これらのディレクトリの diff は解析されたあと除去され、ファイルごとのフィルターに到達することは決してありません。Preview はこれらのファイルを `provider_directory` として報告します。`include` ルールでこれらをレビュー対象に戻すことはできません。
+
+このリストはパスの接頭辞で照合するため、対象は**リポジトリルート**のディレクトリだけです。ネストした同名ディレクトリはファイルごとのフィルターに到達し、`default_path` で除外されます。`vendor/pkg/x.go` は `provider_directory`、`api/vendor/pkg/x.go` は `default_path` として報告され、`include` ルールで戻せるのは後者だけです。
 
 `ocr review --preview` を実行すると、token を消費せずに完全なフィルタリング結果を確認できます。完全なアルゴリズムは[レビュールール](../review-rules/#how-files-are-filtered)を参照してください。
 
@@ -191,7 +193,7 @@ if countMessagesTokens(messages) > tokenLimit {
 
 これにより、巨大な diff（自動生成された lock ファイル、数千行に触れるリファクタリング）がリクエストを消費する前にそれらを食い止めます。スキップされたグループは致命的でない警告として stdout に報告され、JSON の `warnings` 配列に追加されます。
 
-2 つ目のチェックは `filterLargeDiffs` の中で実行されます: diff が単独で `MAX_TOKENS` の 80% を超える場合、グルーピングとディスパッチが行われる前にフィルタリングで除去されます。3 つ目のガードはグルーピングの内部で実行されます——上記の `enforceGroupTokenBudget` を参照してください。
+2 つ目のチェックは `selectFiles` の中で実行されます: diff が単独で `MAX_TOKENS` の 80% を超える場合、グルーピングとディスパッチが行われる前にフィルタリングで除去され、`too_large` として報告されます。3 つ目のガードはグルーピングの内部で実行されます——上記の `enforceGroupTokenBudget` を参照してください。
 
 ## テンプレートとプレースホルダー
 
@@ -241,7 +243,7 @@ if countMessagesTokens(messages) > tokenLimit {
 
 ## テレメトリ
 
-テレメトリを有効にすると、agent は 3 つのパイプラインレベルの span を発行します（`review.run` はジョブ全体を包み、`diff.parse` は diff の読み込みを包み、レビューされた各グループにつき 1 つの `subtask.execute.group.<group-key>`）。加えて、各決定ポイントで短命な `event.<name>` span を発行します（`plan.skipped`、`token.threshold.exceeded`、`subtask.error`……）。LLM の往復とツール呼び出しは metrics としてのみ記録され、span としては記録されません。prompt とレスポンスの内容がテレメトリに添付されることは**決してありません**。`OCR_CONTENT_LOGGING` フラグは配線済みですが、現在はデッドコードです。完全な schema は[テレメトリ](../telemetry/)を参照してください。
+テレメトリを有効にすると、agent は 3 つのパイプラインレベルの span を発行します（`review.run` はジョブ全体を包み、`diff.parse` は diff の読み込みを包み、レビューされた各グループにつき 1 つの `subtask.execute.group.<group-key>`）。加えて、各決定ポイントで短命な `event.<name>` span を発行します（`plan.skipped`、`token.threshold.exceeded`、`subtask.error`……）。メインレビュー ループでは、LLM リクエストとツール呼び出しが span を生成し、関連する測定値も metrics に記録されます。prompt とレスポンスの内容がテレメトリに添付されることは**決してありません**。`OCR_CONTENT_LOGGING` フラグは配線済みですが、現在はデッドコードです。完全な schema は[テレメトリ](../telemetry/)を参照してください。
 
 ## *自動化されない*もの
 
@@ -265,7 +267,7 @@ if countMessagesTokens(messages) > tokenLimit {
 | セマンティックなファイルグルーピング | `internal/agent/grouping.go` |
 | ツール呼び出しループとメモリ圧縮 | `internal/llmloop/`（loop.go、compression.go） |
 | effort プリセット | `internal/config/template/effort.go` |
-| ファイルフィルタリング / プレビュー | `internal/agent/preview.go` |
+| ファイルフィルタリング / プレビュー | `internal/agent/selection.go`、`internal/agent/preview.go` |
 | diff の読み込み（Git モード） | `internal/diff/git.go` |
 | ルール解決チェーン | `internal/config/rules/system_rules.go` |
 | ツールレジストリと実装 | `internal/tool/` |

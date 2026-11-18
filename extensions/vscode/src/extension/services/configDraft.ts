@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { ConfigEntry } from '../../shared/configUtils';
-import { isPresetProvider } from '../../shared/providers';
+import { ConfigEntry } from '@shared/configUtils';
+import { isPresetProvider } from '@shared/providers';
 
 type RawProviderEntry = Record<string, unknown>;
 
@@ -140,7 +140,7 @@ function setConfigValue(cfg: RawConfig, key: string, value: string): void {
   }
 }
 
-/** 在内存中将 config set 条目合并到原始 config JSON（不写磁盘）。 */
+/** Merge config set entries into the raw config JSON in memory without writing to disk. */
 export function applyConfigEntries(base: RawConfig, entries: ConfigEntry[]): RawConfig {
   const draft: RawConfig = JSON.parse(JSON.stringify(base));
   for (const entry of entries) {

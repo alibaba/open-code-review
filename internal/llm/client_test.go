@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -848,6 +849,139 @@ func TestOpenAIClient_StreamOnlyGateway(t *testing.T) {
 	}
 }
 
+// TestOpenAIClient_StreamingRequestsUsageByDefault verifies that streaming
+// requests ask for the final usage chunk via stream_options.include_usage
+// when the provider config does not set stream_options itself.
+// OpenAI-compatible servers omit usage from streams unless asked, silently
+// losing token accounting for every streamed request.
+func TestOpenAIClient_StreamingRequestsUsageByDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		streamOptions, ok := body["stream_options"].(map[string]any)
+		if !ok || streamOptions["include_usage"] != true {
+			t.Errorf("stream_options = %#v, want include_usage true", body["stream_options"])
+			http.Error(w, "usage request required", http.StatusBadRequest)
+			return
+		}
+
+		writeOpenAISSE(t, w,
+			`{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":null}]}`,
+			`{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:       server.URL + "/v1",
+		APIKey:    "test-key",
+		Model:     "gpt-stream",
+		ExtraBody: map[string]any{"stream": true},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if resp.Usage == nil {
+		t.Fatal("Usage = nil, want usage from the final stream chunk")
+	}
+	if resp.Usage.PromptTokens != 12 || resp.Usage.CompletionTokens != 3 || resp.Usage.TotalTokens != 15 {
+		t.Errorf("Usage = %+v, want prompt 12 / completion 3 / total 15", resp.Usage)
+	}
+}
+
+// TestOpenAIClient_StreamOptionsConfigOverrides verifies the
+// extra_body.stream_options states: an explicit include_usage value is
+// respected, an object configuring only unrelated options keeps the usage
+// default merged in, an explicit null suppresses the field entirely (for
+// gateways that reject stream_options), and non-streaming requests never
+// carry the field regardless of config.
+func TestOpenAIClient_StreamOptionsConfigOverrides(t *testing.T) {
+	tests := []struct {
+		name       string
+		extraBody  map[string]any
+		want       any
+		wantAbsent bool
+	}{
+		{
+			name:      "explicit include_usage false is respected",
+			extraBody: map[string]any{"stream": true, "stream_options": map[string]any{"include_usage": false}},
+			want:      map[string]any{"include_usage": false},
+		},
+		{
+			name:      "unrelated option keeps the usage default",
+			extraBody: map[string]any{"stream": true, "stream_options": map[string]any{"continuous_usage_stats": true}},
+			want:      map[string]any{"continuous_usage_stats": true, "include_usage": true},
+		},
+		{
+			name:       "explicit null suppresses field",
+			extraBody:  map[string]any{"stream": true, "stream_options": nil},
+			wantAbsent: true,
+		},
+		{
+			name:       "non-streaming never sends stream_options",
+			extraBody:  map[string]any{"stream_options": map[string]any{"include_usage": true}},
+			wantAbsent: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			streaming, _ := tt.extraBody["stream"].(bool)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode request body: %v", err)
+					http.Error(w, "invalid request body", http.StatusBadRequest)
+					return
+				}
+
+				value, present := body["stream_options"]
+				if tt.wantAbsent {
+					if present {
+						t.Errorf("stream_options = %#v, want absent", value)
+					}
+				} else if !reflect.DeepEqual(value, tt.want) {
+					t.Errorf("stream_options = %#v, want %#v", value, tt.want)
+				}
+
+				if streaming {
+					writeOpenAISSE(t, w,
+						`{"id":"chatcmpl-s","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}`,
+						`{"id":"chatcmpl-s","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+					)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"id":"chatcmpl-n","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+			}))
+			defer server.Close()
+
+			client := NewOpenAIClient(ClientConfig{
+				URL:       server.URL + "/v1",
+				APIKey:    "test-key",
+				Model:     "m",
+				ExtraBody: tt.extraBody,
+			})
+
+			if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages: []Message{{Role: "user", Content: "ping"}},
+			}); err != nil {
+				t.Fatalf("CompletionsWithCtx: %v", err)
+			}
+		})
+	}
+}
+
 // TestOpenAIClient_NonStreamingRequestDropsStreamField verifies that the
 // "stream" key in extra_body is NOT forwarded to the non-streaming Chat
 // Completions request. Forwarding it makes the API answer with
@@ -1332,6 +1466,128 @@ func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
 	}
 }
 
+// TestAnthropicClient_ExtraBodyThinkingDroppedWithForcedToolChoice verifies
+// that extra_body.thinking — the supported way to turn on extended thinking
+// today, see the CompletionsWithCtx comment — is dropped for a request whose
+// ToolChoice is "required". The Anthropic API rejects extended thinking
+// together with a forced tool_choice, and ExtraBody is a client-wide setting
+// forwarded to every request regardless of task, so a provider config that
+// enables thinking for the main review loop (ToolChoice "auto") must not
+// break ReviewFilterTask's forced single-shot tool call. Other requests
+// (ToolChoice "auto" or unset) must still get it forwarded.
+func TestAnthropicClient_ExtraBodyThinkingDroppedWithForcedToolChoice(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_thinking_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/v1/messages",
+		APIKey: "test-key",
+		Model:  "claude-test",
+		ExtraBody: map[string]any{
+			"thinking": map[string]any{"type": "enabled", "budget_tokens": 10000},
+		},
+	})
+
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:   []Message{{Role: "user", Content: "hi"}},
+		MaxTokens:  64,
+		ToolChoice: "required",
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if _, present := gotBody["thinking"]; present {
+		t.Errorf("thinking must be dropped for a forced tool_choice request, got %v", gotBody["thinking"])
+	}
+
+	gotBody = nil
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:   []Message{{Role: "user", Content: "hi"}},
+		MaxTokens:  20000, // > budget_tokens (10000), so only ToolChoice is under test here
+		ToolChoice: "auto",
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotBody["thinking"] == nil {
+		t.Error("thinking must still be forwarded for a non-forced tool_choice request")
+	}
+}
+
+// TestAnthropicClient_ExtraBodyThinkingDroppedWhenBudgetExceedsMaxTokens
+// guards the real failure this reproduces: a provider config's
+// extra_body.thinking.budget_tokens is a single client-wide value, but
+// MaxTokens varies per call (see internal/agent/grouping.go's grouping call,
+// which had a hardcoded MaxTokens: 4096 well under a typical thinking
+// budget). The API rejects the request outright when budget_tokens isn't
+// strictly less than max_tokens ("max_tokens must be greater than
+// thinking.budget_tokens") — dropping thinking for that one call is safer
+// than letting an unrelated small-output task fail.
+func TestAnthropicClient_ExtraBodyThinkingDroppedWhenBudgetExceedsMaxTokens(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_thinking_budget_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/v1/messages",
+		APIKey: "test-key",
+		Model:  "claude-test",
+		ExtraBody: map[string]any{
+			"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(10000)},
+		},
+	})
+
+	// budget_tokens (10000) >= MaxTokens (4096): must be dropped.
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "hi"}},
+		MaxTokens: 4096,
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if _, present := gotBody["thinking"]; present {
+		t.Errorf("thinking must be dropped when budget_tokens >= MaxTokens, got %v", gotBody["thinking"])
+	}
+
+	// budget_tokens (10000) < MaxTokens (32000): must be forwarded.
+	gotBody = nil
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "hi"}},
+		MaxTokens: 32000,
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotBody["thinking"] == nil {
+		t.Error("thinking must still be forwarded when budget_tokens < MaxTokens")
+	}
+}
+
 // newOpenAITestServer returns an httptest server that captures each request's headers
 // and JSON body and responds with a minimal valid chat completion.
 func newOpenAITestServer(gotHeaders *http.Header, gotBody *map[string]any) *httptest.Server {
@@ -1519,7 +1775,7 @@ func TestNewLLMClient_ExpandsSessionKeyInExtraBody(t *testing.T) {
 		Model:     "gpt-test",
 		Protocol:  "openai",
 		ExtraBody: map[string]any{"prompt_cache_key": "{ocr_session_key}"},
-	}, nil)
+	}, nil, nil)
 
 	ctx := ContextWithSessionKey(context.Background(), "sess-from-run")
 	_, err := client.CompletionsWithCtx(ctx, ChatRequest{
@@ -1711,7 +1967,7 @@ func TestNewLLMClient_Dispatch(t *testing.T) {
 				Model:    "test-model",
 				Protocol: tt.protocol,
 			}
-			client := NewLLMClient(ep, nil)
+			client := NewLLMClient(ep, nil, nil)
 			got := typeName(client)
 			if got != tt.want {
 				t.Errorf("NewLLMClient(protocol=%q) = %s, want %s", tt.protocol, got, tt.want)
@@ -1730,7 +1986,7 @@ func TestNewLLMClient_OpenAIAliasDispatchesToOpenAIClient(t *testing.T) {
 		Model:    "test-model",
 		Protocol: NormalizeProtocol("openai"),
 	}
-	client := NewLLMClient(ep, nil)
+	client := NewLLMClient(ep, nil, nil)
 	if got := typeName(client); got != "*llm.OpenAIClient" {
 		t.Errorf("NormalizeProtocol(\"openai\") dispatched to %s, want *llm.OpenAIClient", got)
 	}

@@ -188,8 +188,7 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
 - `OCR_LLM_TIMEOUT` 环境变量——整数秒；对每条解析路径都覆盖配置文件里
   的值。
 
-`ocr config set` 不支持 `timeout_sec` key——直接编辑
-`~/.opencodereview/config.json`：
+两个 `timeout_sec` key 都可以使用 `ocr config set` 设置：
 
 ```json
 {
@@ -260,10 +259,10 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 警告，并且不会把这些状态码保存到配置中。所有 5xx 响应也已由 SDK 默认重试，
 因此不能加入 `retry_codes`。
 
-### 每文件提示词上限
+### 提示词上限
 
-OCR 默认为 `ocr review` 的每次评审设置 200,000 token 的提示词上限
-（`ocr scan` 使用更小的 58,888）。如果模型上下文窗口不同，可以通过保存
+`max_tokens` 是单个子任务的**提示词**（输入）上限（一个文件或一组相关文件）。
+内置模板默认值为 `ocr review` 200,000 token、`ocr scan` 58,888。如果模型上下文窗口不同，可以通过保存
 `max_tokens` 来调整：
 
 ```bash
@@ -286,7 +285,7 @@ ocr scan --max-tokens 120000
 
 ### 评审投入档位（effort）
 
-`effort` 决定每个文件组要跑几轮 main 循环：`low` = 1 轮，`medium` = 2 轮（默认），
+`effort` 决定每个子任务要跑几轮 main 循环：`low` = 1 轮，`medium` = 2 轮（默认），
 `high` = 3 轮。轮数越多召回越高，耗时与 token 消耗也越多。
 
 ```bash

@@ -32,6 +32,29 @@ func TestCountMessagesTokens_Empty(t *testing.T) {
 	}
 }
 
+// TestCountMessagesTokens_IncludesNativePayload guards a gap found in review
+// of the #805 fix: once an assistant turn's Native payload (thinking blocks,
+// reasoning items, encrypted_content, reasoning_content) actually replays on
+// the wire, a token budget computed only from ExtractText() would
+// systematically under-count reasoning-heavy conversations and could let
+// compression's threshold checks fire too late.
+func TestCountMessagesTokens_IncludesNativePayload(t *testing.T) {
+	withoutNative := []llm.Message{msg("user", "hello world")}
+	withNative := []llm.Message{
+		msg("user", "hello world"),
+		llm.NewToolCallMessage("", nil, llm.NativeTurn{
+			Family:  "openai-chat-completions",
+			Payload: llm.ReasoningPayload(strings.Repeat("reasoning ", 200)),
+		}, ""),
+	}
+
+	base := CountMessagesTokens(withoutNative)
+	got := CountMessagesTokens(withNative)
+	if got <= base {
+		t.Errorf("CountMessagesTokens with a Native payload = %d, want more than the base count %d", got, base)
+	}
+}
+
 func TestGroupIntoRounds(t *testing.T) {
 	messages := []llm.Message{
 		msg("system", "sys"),

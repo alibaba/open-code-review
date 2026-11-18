@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { t, resolveLocale } from '../../shared/i18n';
+import { t, resolveLocale } from '@shared/i18n';
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
-import { CliResult, CliRunOptions, EnvCheckResult, LogLine } from '../../shared/types';
+import { CliResult, CliRunOptions, EnvCheckResult, LogLine } from '@shared/types';
 import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from './cliParse';
 import { getShellEnv, resolveBin } from './shellEnv';
 
@@ -67,7 +67,7 @@ export class CliService {
     return env;
   }
 
-  /** 全局安装 ocr CLI，流式回显 npm 日志，按 exit code 返回是否成功。 */
+  /** Install the ocr CLI globally, stream npm logs, and report success based on the exit code. */
   install(onLog: (l: LogLine) => void): Promise<boolean> {
     return new Promise((resolve) => {
       const args = [
@@ -76,11 +76,11 @@ export class CliService {
       ];
       onLog({ text: `$ npm ${args.join(' ')}`, level: 'info' });
       const proc = spawn(resolveBin('npm'), args, {
-        // 非 TTY 下 npm 默认静默进度条；强制关进度条并用行式输出
+        // Explicitly disable the npm progress bar and use line-based output for non-TTY execution.
         env: { ...getShellEnv(), npm_config_progress: 'false', npm_config_color: 'false' },
         shell: process.platform === 'win32',
       });
-      // npm 输出可能跨 chunk 断行，按 \r\n 归一并逐行 emit，尾部残行留到下次。
+      // Normalize npm line endings and emit complete lines, buffering partial lines across chunks.
       const emitLines = (() => {
         let buf = '';
         return (chunk: string, level: LogLine['level'], flush = false) => {
@@ -104,7 +104,7 @@ export class CliService {
     });
   }
 
-  /** 运行任意参数，流式回调日志，结束返回 stdout 全文。退出码非 0 时 reject，并带上 CLI 报错文本。 */
+  /** Run arbitrary arguments, stream logs via a callback, and return stdout on completion. Reject nonzero exits with the CLI error text. */
   runRaw(
     args: string[],
     cwd: string,
@@ -115,6 +115,9 @@ export class CliService {
       const proc = spawn(resolveBin(this.cliPath), args, {
         cwd,
         env: envExtra ? { ...getShellEnv(), ...envExtra } : getShellEnv(),
+        // A dedicated POSIX process group lets cancellation escalate without
+        // leaving the native CLI or any of its subprocesses behind.
+        detached: process.platform !== 'win32',
       });
       this.current = proc;
       let stdout = '';
@@ -142,13 +145,12 @@ export class CliService {
     return parseCliResult(stdout);
   }
 
-  async testConnection(options?: { configPath?: string; home?: string }): Promise<{ ok: boolean; message?: string }> {
+  async testConnection(options?: { home?: string }): Promise<{ ok: boolean; message?: string }> {
     const envExtra: Record<string, string> = {};
     if (options?.home) {
       envExtra.HOME = options.home;
       if (process.platform === 'win32') envExtra.USERPROFILE = options.home;
     }
-    if (options?.configPath) envExtra.OCR_CONFIG_PATH = options.configPath;
     const env = Object.keys(envExtra).length > 0 ? envExtra : undefined;
     try {
       await this.runRaw(['llm', 'test'], process.cwd(), () => {}, env);
@@ -160,10 +162,34 @@ export class CliService {
 
   cancel(): void {
     if (this.current && this.current.pid) {
-      this.current.kill('SIGTERM');
       const proc = this.current;
+
+      // Windows does not deliver POSIX signals to the launcher. Node maps
+      // kill('SIGTERM') to TerminateProcess, which kills only the launcher and
+      // can orphan its native child. taskkill /T terminates the complete tree.
+      if (process.platform === 'win32') {
+        const treeKill = spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'], {
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+        const fallback = () => {
+          if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+        };
+        treeKill.once('error', fallback);
+        treeKill.once('close', (code) => {
+          if (code !== 0) fallback();
+        });
+        return;
+      }
+
+      proc.kill('SIGTERM');
       const forceKillTimer = setTimeout(() => {
-        if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+        if (proc.exitCode !== null || proc.signalCode !== null) return;
+        try {
+          process.kill(-proc.pid!, 'SIGKILL');
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ESRCH') proc.kill('SIGKILL');
+        }
       }, 3000);
       proc.once('close', () => clearTimeout(forceKillTimer));
     }

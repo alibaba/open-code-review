@@ -4,9 +4,11 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -466,6 +468,9 @@ func TestSetConfigValueProviderExtraHeadersInvalid(t *testing.T) {
 func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 	cfg := &Config{}
 
+	if err := setConfigValue(cfg, "custom_providers.my-gateway.protocol", llm.ProtocolAnthropicBedrock); err != nil {
+		t.Fatalf("setConfigValue protocol: %v", err)
+	}
 	if err := setConfigValue(cfg, "custom_providers.my-gateway.extra_headers", "X-Gateway=secret"); err != nil {
 		t.Fatalf("setConfigValue: %v", err)
 	}
@@ -476,6 +481,73 @@ func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 	}
 	if v := entry.ExtraHeaders["X-Gateway"]; v != "secret" {
 		t.Errorf("ExtraHeaders[\"X-Gateway\"] = %q, want %q", v, "secret")
+	}
+	if entry.URL != "" {
+		t.Errorf("URL = %q, want empty for a custom Bedrock provider", entry.URL)
+	}
+}
+
+func TestSetConfigValueCustomProviderAuxiliaryFieldRequiresExistingProvider(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		key      string
+		value    string
+		coreKey  string
+	}{
+		{"extra_body", "nonexistent", "providers.nonexistent.extra_body", `{"temperature":0.2}`, "providers.nonexistent.protocol"},
+		{"extra_headers", "nonexistent", "providers.nonexistent.extra_headers", "X-Custom=value", "providers.nonexistent.protocol"},
+		{"retry_codes", "nonexistent", "providers.nonexistent.retry_codes", "400", "providers.nonexistent.protocol"},
+		{"timeout_sec", "brandnew", "providers.brandnew.timeout_sec", "900", "providers.brandnew.protocol"},
+		{"custom timeout_sec", "brandnew", "custom_providers.brandnew.timeout_sec", "900", "custom_providers.brandnew.protocol"},
+		{"custom provider namespace", "my-gateway", "custom_providers.my-gateway.extra_headers", "X-Custom=value", "custom_providers.my-gateway.protocol"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			err := setConfigValue(cfg, tt.key, tt.value)
+			if err == nil {
+				t.Fatalf("expected error for %s on a missing provider", tt.key)
+			}
+			want := "provider \"" + tt.provider + "\" is not configured; set a core field first (protocol is required for every custom provider):\n" +
+				"  ocr config set " + tt.coreKey + " <protocol>"
+			if err.Error() != want {
+				t.Errorf("error = %q, want %q", err, want)
+			}
+			if cfg.CustomProviders != nil {
+				t.Errorf("CustomProviders = %#v, want nil", cfg.CustomProviders)
+			}
+		})
+	}
+}
+
+func TestSetConfigValueCustomProviderRejectsPresetName(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value string
+	}{
+		{"openai", "url", "https://gateway.internal.com/v1"},
+		{"OpenAI", "extra_headers", "X-Custom=value"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+" "+tt.field, func(t *testing.T) {
+			cfg := &Config{}
+			err := setConfigValue(cfg, "custom_providers."+tt.name+"."+tt.field, tt.value)
+			if err == nil {
+				t.Fatalf("expected preset-name conflict for %s", tt.field)
+			}
+			want := "custom provider name \"" + tt.name + "\" conflicts with a preset provider; use providers.openai." + tt.field +
+				" to configure the preset or choose a different custom provider name"
+			if err.Error() != want {
+				t.Errorf("error = %q, want %q", err, want)
+			}
+			if cfg.CustomProviders != nil {
+				t.Errorf("CustomProviders = %#v, want nil", cfg.CustomProviders)
+			}
+		})
 	}
 }
 
@@ -1068,8 +1140,8 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
+		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.timeout_sec, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
 		"Protocol values: anthropic, anthropic-bedrock, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {
@@ -1318,28 +1390,6 @@ func TestParseModelListValue(t *testing.T) {
 	}
 }
 
-func TestResolveConfigPath_Default(t *testing.T) {
-	t.Setenv("OCR_CONFIG_PATH", "")
-	p, err := resolveConfigPath()
-	if err != nil {
-		t.Fatalf("resolveConfigPath: %v", err)
-	}
-	if p == "" {
-		t.Fatal("expected non-empty default config path")
-	}
-}
-
-func TestResolveConfigPath_Env(t *testing.T) {
-	t.Setenv("OCR_CONFIG_PATH", "/tmp/test-config.json")
-	p, err := resolveConfigPath()
-	if err != nil {
-		t.Fatalf("resolveConfigPath: %v", err)
-	}
-	if p != "/tmp/test-config.json" {
-		t.Errorf("path = %q, want /tmp/test-config.json", p)
-	}
-}
-
 func TestLoadOrCreateConfig_NewFile(t *testing.T) {
 	cfg, err := loadOrCreateConfig(t.TempDir() + "/nonexistent.json")
 	if err != nil {
@@ -1464,6 +1514,80 @@ func TestConfigRoundTripPreservesTimeoutSec(t *testing.T) {
 	}
 }
 
+func TestConfigRoundTripPreservesUnknownFields(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	original := `{
+    "provider": "anthropic",
+    "future_top_level": {"enabled": true},
+    "providers": {
+        "anthropic": {
+            "model": "claude-opus-4-6",
+            "future_provider": {"value": "preserve-me"}
+        }
+    },
+    "llm": {
+        "model": "claude-opus-4-6",
+        "future_llm": 7
+    },
+    "telemetry": {
+        "enabled": true,
+        "future_telemetry": "keep-me"
+    },
+    "mcp_servers": {
+        "docs": {
+            "command": "docs-server",
+            "future_mcp": {"version": 2}
+        }
+    }
+}`
+	if err := os.WriteFile(configPath, []byte(original), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("loadOrCreateConfig: %v", err)
+	}
+	if err := setConfigValue(cfg, "language", "English"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("parse saved config: %v", err)
+	}
+	assertJSONValue(t, got, []string{"future_top_level", "enabled"}, true)
+	assertJSONValue(t, got, []string{"providers", "anthropic", "future_provider", "value"}, "preserve-me")
+	assertJSONValue(t, got, []string{"llm", "future_llm"}, float64(7))
+	assertJSONValue(t, got, []string{"telemetry", "future_telemetry"}, "keep-me")
+	assertJSONValue(t, got, []string{"mcp_servers", "docs", "future_mcp", "version"}, float64(2))
+}
+
+func assertJSONValue(t *testing.T, root map[string]any, path []string, want any) {
+	t.Helper()
+	var current any = root
+	for _, part := range path {
+		object, ok := current.(map[string]any)
+		if !ok {
+			t.Fatalf("JSON path %q entered %T at %q", strings.Join(path, "."), current, part)
+		}
+		current, ok = object[part]
+		if !ok {
+			t.Fatalf("JSON path %q is missing", strings.Join(path, "."))
+		}
+	}
+	if !reflect.DeepEqual(current, want) {
+		t.Errorf("JSON path %q = %#v, want %#v", strings.Join(path, "."), current, want)
+	}
+}
+
 func TestSetMCPServerValue_Type(t *testing.T) {
 	cfg := &Config{}
 	if err := setMCPServerValue(cfg, "mcp_servers.gh.type", "remote"); err != nil {
@@ -1571,7 +1695,7 @@ func TestSetConfigValueLlmRetryCodesRedundantWarning(t *testing.T) {
 }
 
 func TestSetConfigValueProviderRetryCodesRedundantWarning(t *testing.T) {
-	cfg := &Config{}
+	cfg := &Config{CustomProviders: map[string]ProviderEntry{"test": {URL: "https://example.com"}}}
 	stderr := captureConfigStderr(t, func() {
 		if err := setConfigValue(cfg, "custom_providers.test.retry_codes", "408,400"); err != nil {
 			t.Fatalf("setConfigValue: %v", err)
@@ -1598,5 +1722,29 @@ func TestSetConfigValueLlmRetryCodesNoWarningForValidCodes(t *testing.T) {
 	}
 	if len(cfg.Llm.RetryCodes) != 2 {
 		t.Errorf("RetryCodes = %v, want [403 400]", cfg.Llm.RetryCodes)
+	}
+}
+
+func TestSetConfigValueTimeoutSeconds(t *testing.T) {
+	cfg := &Config{CustomProviders: map[string]ProviderEntry{"gateway": {}}}
+	if err := setConfigValue(cfg, "llm.timeout_sec", "120"); err != nil {
+		t.Fatalf("setConfigValue() llm timeout error = %v", err)
+	}
+	if cfg.Llm.TimeoutSec != 120 {
+		t.Fatalf("llm.timeout_sec = %d, want 120", cfg.Llm.TimeoutSec)
+	}
+	if err := setConfigValue(cfg, "custom_providers.gateway.timeout_sec", "45"); err != nil {
+		t.Fatalf("setConfigValue() provider timeout error = %v", err)
+	}
+	if got := cfg.CustomProviders["gateway"].TimeoutSec; got != 45 {
+		t.Fatalf("provider timeout_sec = %d, want 45", got)
+	}
+}
+
+func TestSetConfigValueTimeoutSecondsRejectsInvalidValues(t *testing.T) {
+	for _, value := range []string{"not-a-number", "-1", "9223372037"} {
+		if err := setConfigValue(&Config{}, "llm.timeout_sec", value); err == nil {
+			t.Fatalf("setConfigValue() accepted timeout_sec=%q", value)
+		}
 	}
 }

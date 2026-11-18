@@ -30,7 +30,7 @@ const binarySniffWindow = 8000
 
 // DefaultMaxFileSizeBytes is the default hard cap on how large a single
 // file may be before the scanner skips it. The real review-feasibility
-// limit is the per-file token budget (filterLargeScans, ~188 KB at
+// limit is the per-file token budget (selectScanItems, ~188 KB at
 // MaxTokens=58888) — this byte cap exists only to stop us from reading
 // multi-MB dumps into memory. Callers can override via NewProvider.
 const DefaultMaxFileSizeBytes int64 = 2 << 20 // 2 MiB
@@ -244,26 +244,29 @@ func (p *Provider) listFilesViaWalk(ctx context.Context) ([]string, error) {
 
 func (p *Provider) gitLs(ctx context.Context, args ...string) ([]string, error) {
 	cmdArgs := append([]string{"-c", "core.quotepath=false", "ls-files"}, args...)
-	var out string
+	// Both branches take stdout only, never stdout+stderr combined: with -z,
+	// git emits NUL-delimited paths on stdout, and a warning written to stderr
+	// would be spliced into the middle of a pathname by the parsing below.
+	var raw []byte
 	var err error
 	if p.runner != nil {
-		out, err = p.runner.Run(ctx, p.repoDir, cmdArgs...)
+		raw, err = p.runner.Output(ctx, p.repoDir, cmdArgs...)
 	} else {
 		cmd := exec.CommandContext(ctx, "git", cmdArgs...)
 		cmd.Dir = p.repoDir
-		// Use Output (stdout only), not CombinedOutput: with -z, git emits
-		// NUL-delimited paths on stdout, and merging stderr in would corrupt
-		// the filename parsing below.
-		raw, runErr := cmd.Output()
-		out, err = string(raw), runErr
+		raw, err = cmd.Output()
 	}
 	if err != nil {
 		return nil, err
 	}
-	raw := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
-	files := make([]string, 0, len(raw))
-	for _, f := range raw {
-		f = strings.TrimSpace(f)
+	// Do not trim the records. Leading and trailing whitespace are valid
+	// filename bytes, and -z exists precisely so that they need no escaping:
+	// trimming " normal.go" to "normal.go" points every later Lstat at a path
+	// that does not exist, and the tracked file drops out of the scan with no
+	// error. Only genuinely empty records are discarded.
+	records := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
+	files := make([]string, 0, len(records))
+	for _, f := range records {
 		if f != "" {
 			files = append(files, f)
 		}

@@ -250,9 +250,13 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 		{
 			name: "non-included file with valid extension still reviewed (additive semantics)",
 			diff: model.Diff{
-				NewPath: "vendor/baz.go",
+				// Was vendor/baz.go, chosen only as a path outside the include
+				// patterns that nothing else excluded. #1494 added **/vendor/**
+				// to the default list, so it needs a path that is still only
+				// non-included and not excluded on any other ground.
+				NewPath: "cmd/baz.go",
 			},
-			// .go is a supported extension and vendor/baz.go does not hit
+			// .go is a supported extension and cmd/baz.go does not hit
 			// IsExcludedPath, so it falls through to ExcludeNone.
 			expected: ExcludeNone,
 		},
@@ -407,52 +411,133 @@ func TestWhyExcluded_PriorityOrder(t *testing.T) {
 	}
 }
 
-func TestShouldReview(t *testing.T) {
-	agent := New(Args{})
-
+// Credential paths are excluded before either user rule is consulted, so
+// neither an include nor an exclude can change the outcome or the reason.
+func TestWhyExcluded_SecretPath(t *testing.T) {
 	tests := []struct {
 		name     string
-		diff     model.Diff
-		expected bool
+		filter   *rules.FileFilter
+		path     string
+		expected ExcludeReason
 	}{
 		{
-			name: "binary file should not be reviewed",
-			diff: model.Diff{
-				NewPath:  "image.png",
-				IsBinary: true,
-			},
-			expected: false,
+			name:     "secret path excluded with no user config",
+			path:     ".env",
+			expected: ExcludeSecret,
 		},
 		{
-			name: "regular go file should be reviewed",
-			diff: model.Diff{
-				NewPath: "main.go",
-			},
-			expected: true,
+			name:     "nested secret path excluded",
+			path:     "foo/bar/.env",
+			expected: ExcludeSecret,
 		},
 		{
-			name: "test file should not be reviewed",
-			diff: model.Diff{
-				NewPath: "main_test.go",
-			},
-			expected: false,
+			name:     "extensionless key excluded",
+			path:     "id_rsa",
+			expected: ExcludeSecret,
 		},
 		{
-			name: "unsupported extension should not be reviewed",
-			diff: model.Diff{
-				NewPath: "README.md",
-			},
-			expected: false,
+			name:     "ssh directory contents excluded",
+			path:     "foo/.ssh/id_ed25519",
+			expected: ExcludeSecret,
+		},
+		{
+			name:     "include cannot override a secret path",
+			filter:   &rules.FileFilter{Include: []string{"**/.env"}},
+			path:     ".env",
+			expected: ExcludeSecret,
+		},
+		{
+			name:     "user exclude does not change the reason",
+			filter:   &rules.FileFilter{Exclude: []string{"**/.env"}},
+			path:     ".env",
+			expected: ExcludeSecret,
+		},
+		{
+			name:     "env template with explicit include stays reviewable",
+			filter:   &rules.FileFilter{Include: []string{"**/.env.example"}},
+			path:     ".env.example",
+			expected: ExcludeNone,
+		},
+		{
+			// Still not reviewable, but for the pre-existing extension reason.
+			name:     "env template without include keeps unsupported_ext",
+			path:     ".env.example",
+			expected: ExcludeExtension,
+		},
+		{
+			name:     "public key is not a secret path",
+			path:     "id_rsa.pub",
+			expected: ExcludeExtension,
+		},
+		{
+			name:     "dockerfile unchanged",
+			path:     "Dockerfile",
+			expected: ExcludeNone,
+		},
+		{
+			name:     "makefile unchanged",
+			path:     "Makefile",
+			expected: ExcludeNone,
+		},
+		{
+			name:     "ordinary unsupported extension unchanged",
+			path:     "src/notes.txt",
+			expected: ExcludeExtension,
+		},
+		{
+			name:     "ordinary user exclude still reports user_exclude",
+			filter:   &rules.FileFilter{Exclude: []string{"vendor/**"}},
+			path:     "vendor/foo/bar.go",
+			expected: ExcludeUserRule,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := agent.shouldReview(tt.diff)
+			agent := New(Args{FileFilter: tt.filter})
+			got := agent.whyExcluded(model.Diff{NewPath: tt.path})
 			if got != tt.expected {
-				t.Errorf("shouldReview() = %v, want %v", got, tt.expected)
+				t.Errorf("whyExcluded(%q) = %q, want %q", tt.path, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestWhyExcluded_SecretRename(t *testing.T) {
+	agent := New(Args{
+		FileFilter: &rules.FileFilter{
+			Include: []string{"**/.env.example"},
+		},
+	})
+
+	diff := model.Diff{
+		OldPath: ".env",
+		NewPath: ".env.example",
+	}
+
+	if got := agent.whyExcluded(diff); got != ExcludeSecret {
+		t.Fatalf("whyExcluded() = %q, want %q", got, ExcludeSecret)
+	}
+}
+
+// TestSelectFilesDeletionGate covers the one gate selectFiles adds over the
+// static ones: a deletion is never selected, however reviewable its path looks.
+// The static gates themselves are covered by the whyExcluded tables above.
+func TestSelectFilesDeletionGate(t *testing.T) {
+	agent := New(Args{})
+
+	diffs := []model.Diff{
+		{OldPath: "main.go", NewPath: "main.go"},
+		{OldPath: "gone.go", NewPath: "/dev/null", IsDeleted: true},
+	}
+
+	decisions := agent.selectFiles(diffs)
+	if !decisions[0].selected() {
+		t.Errorf("main.go reason = %q, want selected", decisions[0].Reason)
+	}
+	if decisions[1].selected() || decisions[1].Reason != ExcludeDeleted {
+		t.Errorf("gone.go = (selected=%v, reason=%q), want (false, %q)",
+			decisions[1].selected(), decisions[1].Reason, ExcludeDeleted)
 	}
 }
 

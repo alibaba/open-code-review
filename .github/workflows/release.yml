@@ -30,7 +30,7 @@ jobs:
           - goos: windows
             goarch: arm64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
@@ -52,7 +52,7 @@ jobs:
           go build -ldflags "${LD_FLAGS}" -o "${BIN_NAME}" ./cmd/opencodereview
           echo "bin_name=${BIN_NAME}" >> $GITHUB_ENV
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ env.bin_name }}
@@ -71,7 +71,7 @@ jobs:
       - name: Install git
         run: apt-get update && apt-get install -y git
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -136,7 +136,7 @@ jobs:
             echo "RELEASE_NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: binary-*
           merge-multiple: true
@@ -145,7 +145,7 @@ jobs:
         run: sha256sum opencodereview-* | sort > sha256sum.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           body: ${{ steps.notes.outputs.body }}
           files: |
@@ -153,7 +153,7 @@ jobs:
             sha256sum.txt
 
       - name: Attest release artifacts
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             opencodereview-*
@@ -168,7 +168,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
@@ -176,7 +176,7 @@ jobs:
       - name: Install jq
         run: apt-get update && apt-get install -y jq
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: binary-*
           merge-multiple: true
