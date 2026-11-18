@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-/* Russian docs content bundle — loaded on demand via loadLanguageContent in index.ts.
- * Russian is an incremental locale: entries missing here fall back to English. */
+/* Russian docs content bundle — loaded on demand via loadLanguageContent in
+ * index.ts. Russian currently translates every slug; if a translation is
+ * removed, also drop its slug from availableTranslations.ru in index.ts so
+ * pages and search fall back to English. A test keeps the directory in sync
+ * with these keys. */
 
 import type { LocalizedDocs } from './types';
 

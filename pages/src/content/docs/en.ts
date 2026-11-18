@@ -3,7 +3,7 @@
 
 /* English docs content bundle — loaded on demand via loadLanguageContent in index.ts. */
 
-import type { LocalizedDocs } from './types';
+import type { CompleteLocalizedDocs } from './types';
 
 import enQuickstart from './en/quickstart.md';
 import enInstallation from './en/installation.md';
@@ -25,7 +25,7 @@ import enCopilotCli from './en/integrations/copilot-cli.md';
 import enContributing from './en/contributing.md';
 import enFaq from './en/faq.md';
 
-const enDocs: LocalizedDocs = {
+const enDocs: CompleteLocalizedDocs = {
   'quickstart': enQuickstart,
   'installation': enInstallation,
   'configuration': enConfiguration,

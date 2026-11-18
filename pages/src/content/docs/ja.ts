@@ -3,7 +3,7 @@
 
 /* Japanese docs content bundle — loaded on demand via loadLanguageContent in index.ts. */
 
-import type { LocalizedDocs } from './types';
+import type { CompleteLocalizedDocs } from './types';
 
 import jaQuickstart from './ja/quickstart.md';
 import jaInstallation from './ja/installation.md';
@@ -25,7 +25,7 @@ import jaCopilotCli from './ja/integrations/copilot-cli.md';
 import jaContributing from './ja/contributing.md';
 import jaFaq from './ja/faq.md';
 
-const jaDocs: LocalizedDocs = {
+const jaDocs: CompleteLocalizedDocs = {
   'quickstart': jaQuickstart,
   'installation': jaInstallation,
   'configuration': jaConfiguration,

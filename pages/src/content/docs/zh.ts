@@ -3,7 +3,7 @@
 
 /* Chinese docs content bundle — loaded on demand via loadLanguageContent in index.ts. */
 
-import type { LocalizedDocs } from './types';
+import type { CompleteLocalizedDocs } from './types';
 
 import zhQuickstart from './zh/quickstart.md';
 import zhInstallation from './zh/installation.md';
@@ -25,7 +25,7 @@ import zhCopilotCli from './zh/integrations/copilot-cli.md';
 import zhContributing from './zh/contributing.md';
 import zhFaq from './zh/faq.md';
 
-const zhDocs: LocalizedDocs = {
+const zhDocs: CompleteLocalizedDocs = {
   'quickstart': zhQuickstart,
   'installation': zhInstallation,
   'configuration': zhConfiguration,

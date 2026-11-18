@@ -3,7 +3,7 @@
 
 /* Korean docs content bundle — loaded on demand via loadLanguageContent in index.ts. */
 
-import type { LocalizedDocs } from './types';
+import type { CompleteLocalizedDocs } from './types';
 
 import koQuickstart from './ko/quickstart.md';
 import koInstallation from './ko/installation.md';
@@ -25,7 +25,7 @@ import koCopilotCli from './ko/integrations/copilot-cli.md';
 import koContributing from './ko/contributing.md';
 import koFaq from './ko/faq.md';
 
-const koDocs: LocalizedDocs = {
+const koDocs: CompleteLocalizedDocs = {
   'quickstart': koQuickstart,
   'installation': koInstallation,
   'configuration': koConfiguration,

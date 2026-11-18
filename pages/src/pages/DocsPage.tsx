@@ -209,27 +209,30 @@ const DocsPage: React.FC = () => {
   }, [language, retryCount]);
 
   /* Attach English fallback for partial locales, only when the active page or
-   * an active search actually needs the English entries — never speculatively. */
+   * an active search actually needs the English entries — never speculatively.
+   * Dependencies are scalars derived from docState so unrelated state
+   * transitions do not re-trigger the effect. */
+  const loadedLanguage = docState.status === 'ready' ? docState.content.language : null;
+  const englishAttached = docState.status === 'ready' && !!docState.content.english;
   useEffect(() => {
-    if (docState.status !== 'ready' || docState.content.english || docState.content.language === 'en') return;
-    const content = docState.content;
-    const pageNeedsFallback = !hasTranslation(activeSlug, content.language);
-    const searchNeedsFallback = searchQuery.trim() !== '' && isPartialLocale(content.language);
+    if (loadedLanguage === null || englishAttached || loadedLanguage === 'en') return;
+    const pageNeedsFallback = !hasTranslation(activeSlug, loadedLanguage);
+    const searchNeedsFallback = searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
     if (!pageNeedsFallback && !searchNeedsFallback) return;
     let cancelled = false;
     loadLanguageContent('en')
       .then(english => {
         if (cancelled) return;
         setDocState(prev => {
-          if (prev.status !== 'ready' || prev.content !== content) return prev;
-          return { status: 'ready', content: { ...content, english } };
+          if (prev.status !== 'ready' || prev.content.language !== loadedLanguage || prev.content.english) return prev;
+          return { status: 'ready', content: { ...prev.content, english } };
         });
       })
       .catch(() => {
         /* Best-effort fallback: the load stays retryable via the next trigger. */
       });
     return () => { cancelled = true; };
-  }, [docState, activeSlug, searchQuery]);
+  }, [loadedLanguage, englishAttached, activeSlug, searchQuery]);
 
   /* Get markdown content for current doc */
   const docContent = useMemo(
@@ -529,11 +532,9 @@ const DocsPage: React.FC = () => {
               </h1>
               {/* Rendered markdown content */}
               <MarkdownRenderer content={docContent} />
-            </>
-          )}
 
-          {/* ─── Prev / Next pagination ─── */}
-          <div style={{
+              {/* ─── Prev / Next pagination ─── */}
+              <div style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -579,7 +580,9 @@ const DocsPage: React.FC = () => {
                 <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>›</span>
               </button>
             ) : <span />}
-          </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* ─── Right sidebar: page TOC ─── */}

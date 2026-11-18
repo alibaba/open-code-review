@@ -24,6 +24,11 @@ export type DocSlug =
   | 'faq'
   | 'chatgpt-preview';
 
+/* A bundle that translates every slug. Assigning to this type fails at
+ * compile time when a key is missing or misspelled. */
+export type CompleteLocalizedDocs = Record<DocSlug, string>;
+
+/* An incremental bundle: missing slugs fall back to English at runtime. */
 export type LocalizedDocs = Partial<Record<DocSlug, string>>;
 
 export interface DocSearchResult {
