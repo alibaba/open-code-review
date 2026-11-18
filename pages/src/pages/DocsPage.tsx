@@ -20,6 +20,7 @@ import {
   searchDocs,
   DocSlug,
   LoadedDocContent,
+  LocalizedDocs,
 } from '../content/docs';
 import { extractHeadings } from '../utils/extractHeadings';
 import docContentsIcon from '../assets/icons/doc-contents.svg';
@@ -170,10 +171,29 @@ const DocsPage: React.FC = () => {
     | { status: 'ready'; content: LoadedDocContent }
     | { status: 'error'; language: Language };
 
+  /* English fallback for partial locales, tracked separately from the main
+   * language so its own loading and failure can drive page and search UI. */
+  type EnglishFallbackState =
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'ready'; docs: LocalizedDocs }
+    | { status: 'error' };
+
   const [docState, setDocState] = useState<DocsLoadState>(() => ({ status: 'loading', language }));
   const [retryCount, setRetryCount] = useState(0);
+  const [englishFallback, setEnglishFallback] = useState<EnglishFallbackState>({ status: 'idle' });
+  const [fallbackRetryCount, setFallbackRetryCount] = useState(0);
 
-  const loadedContent = docState.status === 'ready' ? docState.content : null;
+  const loadedLanguage = docState.status === 'ready' ? docState.content.language : null;
+
+  const loadedContent = useMemo<LoadedDocContent | null>(() => {
+    if (docState.status !== 'ready') return null;
+    return {
+      language: docState.content.language,
+      docs: docState.content.docs,
+      english: englishFallback.status === 'ready' ? englishFallback.docs : undefined,
+    };
+  }, [docState, englishFallback]);
 
   /* Search stays synchronous over whatever content is loaded; results appear
    * once the load resolves and the page re-renders. */
@@ -208,31 +228,75 @@ const DocsPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [language, retryCount]);
 
-  /* Attach English fallback for partial locales, only when the active page or
-   * an active search actually needs the English entries — never speculatively.
-   * Dependencies are scalars derived from docState so unrelated state
-   * transitions do not re-trigger the effect. */
-  const loadedLanguage = docState.status === 'ready' ? docState.content.language : null;
-  const englishAttached = docState.status === 'ready' && !!docState.content.english;
+  /* English fallback for partial locales: loaded only when the active page or
+   * an active search needs the English entries — never speculatively. English
+   * content is language-independent, so a load started by any trigger settles
+   * the shared state no matter which trigger remains active; the attempt key
+   * keeps a failed attempt from re-firing in a loop until the trigger changes
+   * or the user retries. */
+  const fallbackAttemptKey = useRef('');
   useEffect(() => {
-    if (loadedLanguage === null || englishAttached || loadedLanguage === 'en') return;
+    if (loadedLanguage === null || loadedLanguage === 'en') return;
     const pageNeedsFallback = !hasTranslation(activeSlug, loadedLanguage);
     const searchNeedsFallback = searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
-    if (!pageNeedsFallback && !searchNeedsFallback) return;
-    let cancelled = false;
+    if (!pageNeedsFallback && !searchNeedsFallback) {
+      fallbackAttemptKey.current = '';
+      return;
+    }
+    if (englishFallback.status === 'ready' || englishFallback.status === 'loading') return;
+    const key = `${loadedLanguage}:${activeSlug}:${searchNeedsFallback}:${fallbackRetryCount}`;
+    if (fallbackAttemptKey.current === key) return;
+    fallbackAttemptKey.current = key;
+    setEnglishFallback({ status: 'loading' });
     loadLanguageContent('en')
-      .then(english => {
-        if (cancelled) return;
-        setDocState(prev => {
-          if (prev.status !== 'ready' || prev.content.language !== loadedLanguage || prev.content.english) return prev;
-          return { status: 'ready', content: { ...prev.content, english } };
-        });
+      .then(docs => {
+        setEnglishFallback({ status: 'ready', docs });
       })
       .catch(() => {
-        /* Best-effort fallback: the load stays retryable via the next trigger. */
+        setEnglishFallback({ status: 'error' });
       });
-    return () => { cancelled = true; };
-  }, [loadedLanguage, englishAttached, activeSlug, searchQuery]);
+  }, [loadedLanguage, activeSlug, searchQuery, englishFallback.status, fallbackRetryCount]);
+
+  /* ─── Effective states for the page body and the search modal ───
+   * Both read the same content: the main language bundle, plus English while
+   * a partial locale needs it. "No results" is only shown once every piece of
+   * content the search depends on has actually arrived. */
+  const pageNeedsFallback =
+    loadedLanguage !== null && loadedLanguage !== 'en' && !hasTranslation(activeSlug, loadedLanguage);
+  const pageStatus: 'loading' | 'error' | 'ready' =
+    docState.status !== 'ready'
+      ? docState.status
+      : pageNeedsFallback && englishFallback.status !== 'ready'
+        ? (englishFallback.status === 'error' ? 'error' : 'loading')
+        : 'ready';
+
+  const retryPageLoad = useCallback(() => {
+    if (docState.status === 'error') {
+      setRetryCount(count => count + 1);
+    } else if (pageNeedsFallback && englishFallback.status === 'error') {
+      setFallbackRetryCount(count => count + 1);
+    }
+  }, [docState.status, pageNeedsFallback, englishFallback.status]);
+
+  const searchNeedsEnglish =
+    loadedLanguage !== null && loadedLanguage !== 'en'
+    && searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
+  const searchContentStatus: 'loading' | 'error' | 'ready' =
+    docState.status === 'loading'
+      ? 'loading'
+      : docState.status === 'error'
+        ? 'error'
+        : searchNeedsEnglish && englishFallback.status !== 'ready'
+          ? (englishFallback.status === 'error' ? 'error' : 'loading')
+          : 'ready';
+
+  const retrySearchContent = useCallback(() => {
+    if (docState.status === 'error') {
+      setRetryCount(count => count + 1);
+    } else if (searchNeedsEnglish && englishFallback.status === 'error') {
+      setFallbackRetryCount(count => count + 1);
+    }
+  }, [docState.status, searchNeedsEnglish, englishFallback.status]);
 
   /* Get markdown content for current doc */
   const docContent = useMemo(
@@ -497,18 +561,18 @@ const DocsPage: React.FC = () => {
 
         {/* ─── Main content area ─── */}
         <div ref={contentRef} onClick={handleContentClick} style={{ display: 'flex', flex: 1, flexDirection: 'column', minWidth: 0, padding: isMobile ? '32px 20px 80px' : '40px 48px 80px' }}>
-          {docState.status === 'loading' && (
+          {pageStatus === 'loading' && (
             <div role="status" style={{ padding: '96px 0', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14, fontFamily }}>
               {t('docs.content.loading')}
             </div>
           )}
-          {docState.status === 'error' && (
+          {pageStatus === 'error' && (
             <div role="alert" style={{ padding: '96px 0', textAlign: 'center', fontSize: 14, fontFamily }}>
               <div style={{ color: 'rgba(255,255,255,0.6)', marginBottom: 16 }}>
                 {t('docs.content.loadError')}
               </div>
               <button
-                onClick={() => setRetryCount(count => count + 1)}
+                onClick={retryPageLoad}
                 style={{
                   background: 'rgba(43, 222, 94, 0.12)',
                   border: 'none',
@@ -524,7 +588,7 @@ const DocsPage: React.FC = () => {
               </button>
             </div>
           )}
-          {docState.status === 'ready' && (
+          {pageStatus === 'ready' && (
             <>
               {/* Doc title */}
               <h1 style={{ fontSize: 28, fontWeight: 700, color: '#FFFFFF', margin: '0 0 32px 0', lineHeight: '36px', fontFamily }}>
@@ -692,9 +756,36 @@ const DocsPage: React.FC = () => {
                 }}
               />
             </div>
-            {/* Results */}
+            {/* Results — pending or failed content shows its own state instead
+             * of a misleading "no results"; "no results" appears only once
+             * every content the search depends on has arrived. */}
             <div style={{ maxHeight: 400, overflowY: 'auto', padding: searchQuery ? '8px 0' : '0' }}>
-              {searchQuery && searchResults.length === 0 && (
+              {searchQuery && searchContentStatus === 'loading' && (
+                <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
+                  {t('docs.search.loading')}
+                </div>
+              )}
+              {searchQuery && searchContentStatus === 'error' && (
+                <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: 14 }}>
+                  <span style={{ color: 'rgba(255,255,255,0.6)' }}>{t('docs.search.loadError')}</span>{' '}
+                  <button
+                    onClick={retrySearchContent}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#2BDE5E',
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      fontFamily,
+                      padding: 0,
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    {t('docs.content.retry')}
+                  </button>
+                </div>
+              )}
+              {searchQuery && searchContentStatus === 'ready' && searchResults.length === 0 && (
                 <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
                   {t('docs.search.noResults')}
                 </div>

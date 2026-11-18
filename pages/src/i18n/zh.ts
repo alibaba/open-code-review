@@ -314,6 +314,8 @@ export const zh: TranslationKeys = {
   'docs.content.loading': '文档加载中...',
   'docs.content.loadError': '文档内容加载失败。',
   'docs.content.retry': '重试',
+  'docs.search.loading': '搜索中...',
+  'docs.search.loadError': '搜索内容加载失败。',
 
   // Blog
   'blog.title': '博客',

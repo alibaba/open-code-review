@@ -312,6 +312,8 @@ export const ru: TranslationKeys = {
   'docs.content.loading': 'Загрузка документации...',
   'docs.content.loadError': 'Не удалось загрузить содержимое документации.',
   'docs.content.retry': 'Повторить',
+  'docs.search.loading': 'Поиск...',
+  'docs.search.loadError': 'Не удалось загрузить содержимое для поиска.',
 
   // Blog
   'blog.title': 'Блог',

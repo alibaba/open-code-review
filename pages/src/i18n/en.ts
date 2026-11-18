@@ -310,6 +310,8 @@ export const en = {
   'docs.content.loading': 'Loading documentation...',
   'docs.content.loadError': 'Failed to load documentation content.',
   'docs.content.retry': 'Retry',
+  'docs.search.loading': 'Searching...',
+  'docs.search.loadError': 'Search content failed to load.',
 
   // Blog
   'blog.title': 'Blog',
