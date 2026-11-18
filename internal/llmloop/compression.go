@@ -104,7 +104,7 @@ func groupIntoRounds(messages []llm.Message, start int) []round {
 // remaining token budget after accounting for the frozen zone and the
 // compressed summary.
 func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int, reservedTokens int) int {
-	budget := PromptTokenLimit(maxTokens) - reservedTokens
+	budget := PromptTokenLimit(maxTokens) - reservedTokens - 1
 	if budget <= 0 {
 		return 0
 	}
@@ -128,7 +128,7 @@ func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int
 // partitionMessages divides messages into frozen, compress, and active zones.
 // Frozen zone is always messages[0:2]. Active zone preserves the K most
 // recent complete rounds based on available token budget.
-func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEstimate int) partitionResult {
+func partitionMessages(messages []llm.Message, maxTokens int, summaryTokenReserve int) partitionResult {
 	result := partitionResult{frozenEnd: 2}
 	if len(messages) <= 2 {
 		result.compressEnd = len(messages)
@@ -141,11 +141,11 @@ func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEs
 		return result
 	}
 
-	result.activeCount = computeActiveZoneSize(result.rounds, messages, maxTokens, prevSummaryTokenEstimate)
+	reservedTokens := CountMessagesTokens(messages[:result.frozenEnd]) + summaryTokenReserve
+	result.activeCount = computeActiveZoneSize(result.rounds, messages, maxTokens, reservedTokens)
 	if result.activeCount >= len(result.rounds) {
 		// Everything fits — no compression needed.
-		result.compressEnd = len(messages)
-		result.activeCount = 0
+		result.compressEnd = result.frozenEnd
 		return result
 	}
 
@@ -221,11 +221,29 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 // the user prompt] + [active].
 func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey string) ([]llm.Message, error) {
 	if len(r.task.Compression.Messages) == 0 || len(msgs) <= 2 {
-		return msgs[:min(len(msgs), 2)], nil
+		return msgs, nil
 	}
 
-	part := partitionMessages(msgs, r.task.MaxContextTokens, 0)
+	limit := PromptTokenLimit(r.task.MaxContextTokens)
+	summaryOccurrences := strings.Count(r.task.Compression.SummaryTemplate, "{{summary}}")
+	if summaryOccurrences == 0 {
+		return msgs, fmt.Errorf("memory compression: summary template has no summary placeholder")
+	}
+	frameTokens := llm.CountTokens(strings.ReplaceAll(r.task.Compression.SummaryTemplate, "{{summary}}", ""))
+	availableTokens := limit - CountMessagesTokens(msgs[:2]) - frameTokens - 1
+	summaryLimit := min(r.task.MaxContextTokens-limit, availableTokens/summaryOccurrences)
+	if r.task.MaxCompletionTokens > 0 {
+		summaryLimit = min(summaryLimit, r.task.MaxCompletionTokens)
+	}
+	if summaryLimit <= 0 {
+		return msgs, fmt.Errorf("memory compression: fixed prompt leaves no room for a summary")
+	}
+	part := partitionMessages(msgs, r.task.MaxContextTokens, frameTokens+summaryLimit*summaryOccurrences)
 	if part.compressEnd <= part.frozenEnd {
+		return msgs, nil
+	}
+	originalTokens := CountMessagesTokens(msgs)
+	if part.activeCount == 0 && originalTokens < limit {
 		return msgs, nil
 	}
 
@@ -254,7 +272,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  compressionMsgs,
-		MaxTokens: r.task.MaxCompletionTokens,
+		MaxTokens: summaryLimit,
 	})
 	duration := time.Since(startTime)
 
@@ -284,6 +302,13 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 
 	for i := part.compressEnd; i < len(msgs); i++ {
 		rebuilt = append(rebuilt, msgs[i])
+	}
+	rebuiltTokens := CountMessagesTokens(rebuilt)
+	if rebuiltTokens >= limit {
+		return msgs, fmt.Errorf("memory compression: rebuilt context exceeds its threshold")
+	}
+	if rebuiltTokens >= originalTokens {
+		return msgs, nil
 	}
 
 	return rebuilt, nil

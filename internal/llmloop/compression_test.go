@@ -191,11 +191,11 @@ func TestPartitionMessages_EverythingFits(t *testing.T) {
 		msg("tool", "ok"),
 	}
 	result := partitionMessages(messages, 100000, 0)
-	if result.activeCount != 0 {
-		t.Errorf("activeCount = %d, want 0 (everything fits)", result.activeCount)
+	if result.activeCount != 1 {
+		t.Errorf("activeCount = %d, want 1 (everything fits)", result.activeCount)
 	}
-	if result.compressEnd != len(messages) {
-		t.Errorf("compressEnd = %d, want %d", result.compressEnd, len(messages))
+	if result.compressEnd != result.frozenEnd {
+		t.Errorf("compressEnd = %d, want %d", result.compressEnd, result.frozenEnd)
 	}
 }
 
