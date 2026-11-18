@@ -1712,5 +1712,158 @@ class MainAuthHeaderTest(unittest.TestCase):
         self.assertEqual(rc, 1)
 
 
+class NoteSizeLimitTest(unittest.TestCase):
+    """#1401: note-size handling — no comment may exceed the server's cap."""
+
+    def test_within_limit_is_byte_identical(self):
+        c = comment(content="fix this", existing_code="x = 1", suggestion_code="x = 2")
+        self.assertEqual(
+            pr.format_comment(c, "c-1-2", 990_000),
+            pr.format_comment(c, "c-1-2"),
+        )
+
+    def test_oversize_drops_suggestion_first(self):
+        c = comment(content="fix this", existing_code="x = 1",
+                    suggestion_code="x = 2 # " + "y" * 5000)
+        body = pr.format_comment(c, "c-1-2", 500)
+        self.assertNotIn("```suggestion:", body)
+        self.assertIn(pr._SUGGESTION_OMITTED_MARK, body)
+        self.assertIn("fix this", body)
+        self.assertIn("<!-- c-1-2 -->", body)
+        self.assertLessEqual(len(body), 500)
+
+    def test_oversize_content_truncated_preserving_prefix(self):
+        c = comment(content="x" * 9000, existing_code="x = 1", suggestion_code="x = 2")
+        body = pr.format_comment(c, "c-9-9", 600)
+        self.assertTrue(body.startswith("<!-- c-9-9 -->\n"))
+        self.assertIn(pr._TRUNCATION_MARK, body)
+        self.assertNotIn("```suggestion:", body)
+        self.assertLessEqual(len(body), 600)
+
+    def test_truncated_body_still_fits_with_badge(self):
+        c = comment(content="x" * 9000, category="bug", severity="high")
+        body = pr.format_comment(c, "c-2-2", 400)
+        self.assertTrue(body.startswith("<!-- c-2-2 -->\n"))
+        self.assertIn("[bug · high]", body)
+        self.assertLessEqual(len(body), 400)
+
+    def test_fallback_oversize_drops_details_block(self):
+        c = comment(content="fix this", existing_code="x = 1",
+                    suggestion_code="x = 2 # " + "y" * 5000)
+        body = pr.format_comment_fallback(c, reason="no line", note_body_limit=500)
+        self.assertNotIn("<details>", body)
+        self.assertIn(pr._SUGGESTION_OMITTED_MARK, body)
+        self.assertIn("fix this", body)
+        self.assertLessEqual(len(body), 500)
+
+    def test_fallback_content_truncated(self):
+        c = comment(content="x" * 9000)
+        body = pr.format_comment_fallback(c, reason="no line", note_body_limit=400)
+        self.assertIn("### 📄 `main.py`", body)
+        self.assertIn(pr._TRUNCATION_MARK, body)
+        self.assertLessEqual(len(body), 400)
+
+    def test_format_summary_comments_caps_each_block(self):
+        items = [{"comment": comment(content="x" * 9000), "reason": "no line"}]
+        body = pr.format_summary_comments(items, 500)
+        self.assertLessEqual(len(body), 500 + len("\n\n---\n\n"))
+        self.assertIn(pr._TRUNCATION_MARK, body)
+
+    def test_cap_note_body_preserves_head(self):
+        body = "<!-- c-1-2 -->\n[bug · high]\n" + "y" * 9000
+        capped = pr.cap_note_body(body, 500)
+        self.assertTrue(capped.startswith("<!-- c-1-2 -->\n"))
+        self.assertIn(pr._TRUNCATION_MARK, capped)
+        self.assertLessEqual(len(capped), 500)
+
+    def test_cap_note_body_noop_under_limit(self):
+        self.assertEqual(pr.cap_note_body("short", 990_000), "short")
+        self.assertEqual(pr.cap_note_body("short", None), "short")
+
+    def test_small_limit_never_exceeds_the_limit(self):
+        """A limit below the marker must not leak the marker past the cap.
+
+        cap_note_body("x" * 100, 10) used to return the 56-char truncation
+        marker — over the very limit it exists to enforce — and
+        format_comment/format_comment_fallback had the same failure whenever
+        prefix + marker exceeded the limit. The fit invariant comes first; the
+        marker survives only when it fits. Real configs cannot reach this
+        (the parser floors tiny values at NOTE_BODY_LIMIT_MIN), so this pins
+        the safety net for hand-built configs.
+        """
+        for limit in (1, 10, len("\n\n" + pr._TRUNCATION_MARK) - 1):
+            capped = pr.cap_note_body("x" * 100, limit)
+            self.assertLessEqual(len(capped), limit,
+                                 "cap_note_body(%d) returned %d chars" % (limit, len(capped)))
+        c = comment(content="x" * 9000, existing_code="x = 1", suggestion_code="x = 2")
+        for limit in (10, 40):
+            body = pr.format_comment(c, "c-1-2", limit)
+            self.assertLessEqual(len(body), limit,
+                                 "format_comment(%d) returned %d chars" % (limit, len(body)))
+            fallback = pr.format_comment_fallback(c, reason="no line", note_body_limit=limit)
+            self.assertLessEqual(len(fallback), limit,
+                                 "format_comment_fallback(%d) returned %d chars" % (limit, len(fallback)))
+        # With headroom for the prefix (reconcile comment) but not the marker,
+        # the prefix is still kept intact: idempotent re-posting depends on it.
+        body = pr.format_comment(c, "c-1-2", 40)
+        self.assertTrue(body.startswith("<!-- c-1-2 -->\n"))
+        self.assertNotIn(pr._TRUNCATION_MARK, body)
+        # The floor itself: below NOTE_BODY_LIMIT_MIN is a misconfiguration the
+        # parser redirects to the default; the boundary value passes through.
+        self.assertEqual(pr._parse_note_body_limit({"OCR_NOTE_BODY_LIMIT": "199"}),
+                         pr.NOTE_BODY_LIMIT_DEFAULT)
+        self.assertEqual(pr._parse_note_body_limit({"OCR_NOTE_BODY_LIMIT": "10"}),
+                         pr.NOTE_BODY_LIMIT_DEFAULT)
+        self.assertEqual(pr._parse_note_body_limit(
+            {"OCR_NOTE_BODY_LIMIT": str(pr.NOTE_BODY_LIMIT_MIN)}),
+            pr.NOTE_BODY_LIMIT_MIN)
+
+    def test_parse_note_body_limit(self):
+        self.assertEqual(pr._parse_note_body_limit({}), pr.NOTE_BODY_LIMIT_DEFAULT)
+        self.assertEqual(pr._parse_note_body_limit({"OCR_NOTE_BODY_LIMIT": "5000"}), 5000)
+        self.assertEqual(pr._parse_note_body_limit({"OCR_NOTE_BODY_LIMIT": "nope"}),
+                         pr.NOTE_BODY_LIMIT_DEFAULT)
+        self.assertEqual(pr._parse_note_body_limit({"OCR_NOTE_BODY_LIMIT": "0"}),
+                         pr.NOTE_BODY_LIMIT_DEFAULT)
+        self.assertEqual(pr._parse_note_body_limit({"OCR_NOTE_BODY_LIMIT": "-5"}),
+                         pr.NOTE_BODY_LIMIT_DEFAULT)
+
+    def test_build_config_carries_note_body_limit(self):
+        cfg = pr.build_config({"OCR_NOTE_BODY_LIMIT": "12345"})
+        self.assertEqual(cfg["note_body_limit"], 12345)
+        cfg = pr.build_config({})
+        self.assertEqual(cfg["note_body_limit"], pr.NOTE_BODY_LIMIT_DEFAULT)
+
+
+class NoteSizePublishPlumbingTest(unittest.TestCase):
+    """Publish-level plumbing: the configured limit must reach every body
+    that reaches the API, not just the leaf formatters."""
+
+    def test_publish_bodies_respect_limit(self):
+        huge = comment(content="x" * 3000, existing_code="y = 1",
+                       suggestion_code="y = 2 # " + "z" * 3000)
+        result = {"comments": [huge, comment(content="small finding")]}
+        rec = Recorder()
+        cfg = dict(DEFAULT_CONFIG)
+        cfg["note_body_limit"] = 500
+        stats = pr.publish(result, DIFF_REFS, rec, cfg, sleep=NOOP_SLEEP)
+        for call in rec.disc_calls:
+            body = (call.get("body") or "")
+            self.assertLessEqual(len(body), 500, "discussion body over the limit")
+        for body in rec.note_calls:
+            self.assertLessEqual(len(body), 500, "note body over the limit")
+
+    def test_publish_anchor_body_respects_limit(self):
+        huge_no_line = {"comment": comment(content="x" * 3000, start_line=0, end_line=0),
+                        "reason": pr.NO_LINE_REASON}
+        result = {"comments": [huge_no_line["comment"]]}
+        rec = Recorder()
+        cfg = dict(DEFAULT_CONFIG)
+        cfg["note_body_limit"] = 600
+        stats = pr.publish(result, DIFF_REFS, rec, cfg, sleep=NOOP_SLEEP)
+        for body in rec.note_calls:
+            self.assertLessEqual(len(body), 600, "anchor/summary note over the limit")
+
+
 if __name__ == "__main__":
     unittest.main()
