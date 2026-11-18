@@ -25,6 +25,12 @@ func TestExcludedDirs(t *testing.T) {
 		t.Error("ExcludedDirs should include .git/")
 	}
 
+	for _, d := range dirs {
+		if d == "pkgs/" {
+			t.Error("ExcludedDirs must not include pkgs/")
+		}
+	}
+
 	dirs2 := ExcludedDirs()
 	dirs[0] = "MUTATED"
 	if dirs2[0] == "MUTATED" {
@@ -42,6 +48,8 @@ func TestProviderDirPrefix(t *testing.T) {
 		{"target/.pnpm/pkg/index.js", "target/"},
 		{"src/vendor/keep.go", ""},
 		{"main.go", ""},
+		{"pkgs/foo/default.nix", ""},
+		{"pkgs", ""},
 	}
 	for _, tc := range tests {
 		if got := ProviderDirPrefix(tc.path); got != tc.want {

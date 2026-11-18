@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -84,6 +86,160 @@ func TestRunSessionList_EmptyRepo(t *testing.T) {
 	})
 	if !strings.Contains(got, "No sessions found") {
 		t.Errorf("expected empty message, got %q", got)
+	}
+}
+
+func TestRunSessionList_BranchFilterBeforeLimit(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	directory, err := session.SessionsDir(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixtures := []struct {
+		id        string
+		branch    string
+		timestamp string
+	}{
+		{"feature-old", "feature", "2025-06-01T10:00:00Z"},
+		{"feature-new", "feature", "2025-06-01T11:00:00Z"},
+		{"missing-branch", "", "2025-06-01T12:00:00Z"},
+		{"different-case", "Feature", "2025-06-01T13:00:00Z"},
+		{"main-session", "main", "2025-06-01T14:00:00Z"},
+	}
+	for _, fixture := range fixtures {
+		record := map[string]string{
+			"type":      "session_start",
+			"sessionId": fixture.id,
+			"timestamp": fixture.timestamp,
+			"cwd":       repoDir,
+		}
+		if fixture.branch != "" {
+			record["gitBranch"] = fixture.branch
+		}
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, fixture.id+".jsonl"), append(data, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	unfiltered, err := session.ListSessions(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unfiltered) != len(fixtures) || unfiltered[0].SessionID != "main-session" {
+		t.Fatalf("expected the newest session to be non-matching, got %+v", unfiltered)
+	}
+	allIDs := []string{"main-session", "different-case", "missing-branch", "feature-new", "feature-old"}
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"filter before limit", []string{"--branch", "feature", "--limit", "1"}, []string{"feature-new"}},
+		{"matching order", []string{"--branch", "feature"}, []string{"feature-new", "feature-old"}},
+		{"unlimited", []string{"--branch", "feature", "--limit", "0"}, []string{"feature-new", "feature-old"}},
+		{"case sensitive", []string{"--branch", "Feature"}, []string{"different-case"}},
+		{"exact match", []string{"--branch", "feat"}, []string{}},
+		{"no match", []string{"--branch", "missing"}, []string{}},
+		{"omitted branch", nil, allIDs},
+		{"empty branch", []string{"--branch", ""}, allIDs},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string{"--repo", repoDir, "--json"}, test.args...)
+			got := captureStdout(t, func() {
+				if err := runSessionListCompat(args); err != nil {
+					t.Fatalf("runSessionList: %v", err)
+				}
+			})
+			var decoded []session.Summary
+			if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+				t.Fatalf("unmarshal: %v (out=%q)", err, got)
+			}
+			if decoded == nil {
+				t.Fatalf("expected a JSON array, got %q", got)
+			}
+			var ids []string
+			for _, summary := range decoded {
+				ids = append(ids, summary.SessionID)
+			}
+			if !slices.Equal(ids, test.want) {
+				t.Fatalf("session IDs = %v, want %v", ids, test.want)
+			}
+		})
+	}
+
+	t.Run("table", func(t *testing.T) {
+		got := captureStdout(t, func() {
+			if err := runSessionListCompat([]string{"--repo", repoDir, "--branch", "feature", "--limit", "1"}); err != nil {
+				t.Fatalf("runSessionList: %v", err)
+			}
+		})
+		if !strings.Contains(got, "SESSION ID") || !strings.Contains(got, "feature-new") {
+			t.Fatalf("expected a table containing the newest matching session, got %q", got)
+		}
+		for _, excluded := range []string{"feature-old", "main-session", "different-case", "missing-branch"} {
+			if strings.Contains(got, excluded) {
+				t.Errorf("table contains excluded session %q: %s", excluded, got)
+			}
+		}
+	})
+}
+
+func TestRunSessionList_BranchFilterEmptyMessage(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	got := captureStdout(t, func() {
+		if err := runSessionListCompat([]string{"--repo", repoDir, "--branch", "missing"}); err != nil {
+			t.Fatalf("runSessionList: %v", err)
+		}
+	})
+	if !strings.Contains(got, "on branch missing") {
+		t.Errorf("expected branch in empty message, got %q", got)
+	}
+}
+
+func TestRunSessionList_BranchFilterJSONMissingSessionsDir(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	got := captureStdout(t, func() {
+		if err := runSessionListCompat([]string{"--repo", repoDir, "--branch", "main", "--json"}); err != nil {
+			t.Fatalf("runSessionList: %v", err)
+		}
+	})
+	if strings.TrimSpace(got) != "[]" {
+		t.Fatalf("expected a non-nil empty JSON array, got %q", got)
+	}
+}
+
+func TestRunSessionList_JSONMissingDirPrintsEmptyArray(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	got := captureStdout(t, func() {
+		if err := runSessionListCompat([]string{"--repo", repoDir, "--json"}); err != nil {
+			t.Fatalf("runSessionList: %v", err)
+		}
+	})
+	// json.Unmarshal accepts null into a slice, so the wire text is the only
+	// thing that pins this: a repository with no sessions directory must read
+	// exactly the same as one whose directory is empty.
+	if strings.TrimSpace(got) != "[]" {
+		t.Errorf("expected [] for a repo with no sessions, got %q", got)
 	}
 }
 
@@ -233,6 +389,34 @@ func TestRunSessionComments_JSON(t *testing.T) {
 	}
 	if len(decoded) != 1 || decoded[0].Content != "note" || decoded[0].Severity != "medium" {
 		t.Fatalf("decoded = %+v", decoded)
+	}
+}
+
+func TestRunSessionShow_JSONNoItemsIsArray(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	// A run that ends before any file is reviewed records no items.
+	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
+		ReviewMode: session.ReviewModeCommit,
+		DiffCommit: "abc123",
+	})
+	sh.Finalize()
+
+	got := captureStdout(t, func() {
+		if err := runSessionShowCompat([]string{"--repo", repoDir, "--json", sh.SessionID}); err != nil {
+			t.Fatalf("runSessionShow: %v", err)
+		}
+	})
+
+	// json.Unmarshal accepts null into a slice, so only the raw text pins the wire shape.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(got), &raw); err != nil {
+		t.Fatalf("unmarshal: %v (out=%q)", err, got)
+	}
+	if string(raw["items"]) != "[]" {
+		t.Errorf("items = %s, want []", raw["items"])
 	}
 }
 
@@ -444,6 +628,56 @@ func TestRunSessionCompare_TextShowsCounts(t *testing.T) {
 	}
 	if strings.Contains(got, "did not review") {
 		t.Errorf("unexpected not-reviewed line for a legacy session pair: %q", got)
+	}
+}
+
+func TestRunSessionCompare_MixedRepoSpellings(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	opts := session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "abc123"}
+
+	before := newCompareSession(t, repoDir, opts, []model.LlmComment{
+		{Path: "a.go", StartLine: 40, EndLine: 40, Category: "bug", ExistingCode: "x := 1", Content: "one repository"},
+	})
+	before.Finalize()
+	after := newCompareSession(t, repoDir, opts, []model.LlmComment{
+		{Path: "a.go", StartLine: 40, EndLine: 40, Category: "bug", ExistingCode: "x := 1", Content: "one repository"},
+	})
+	after.Finalize()
+
+	// Re-record the second session the way another caller would have written it:
+	// the same directory, differently spelled. On Windows the split shows up as
+	// `C:\repo` versus `C:/repo`, depending on whether the OS resolved the path
+	// or --repo handed it over; a trailing separator is the portable stand-in for
+	// that class. An exact compare reads the two spellings as two repositories
+	// and refuses the only pair it can legitimately draw.
+	dir, err := session.SessionsDir(repoDir)
+	if err != nil {
+		t.Fatalf("SessionsDir: %v", err)
+	}
+	path := filepath.Join(dir, after.SessionID+".jsonl")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	from := `"cwd":` + strconv.Quote(repoDir)
+	to := `"cwd":` + strconv.Quote(repoDir+string(os.PathSeparator))
+	patched := strings.ReplaceAll(string(raw), from, to)
+	if patched == string(raw) {
+		t.Fatalf("the session recorded no cwd equal to %q; the test needs updating", repoDir)
+	}
+	if err := os.WriteFile(path, []byte(patched), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	useCompareRepo(t, repoDir, false)
+	got := captureStdout(t, func() {
+		if err := runSessionCompare(before.SessionID, after.SessionID); err != nil {
+			t.Fatalf("runSessionCompare across two spellings of one repository: %v", err)
+		}
+	})
+	if !strings.Contains(got, "1 persisting") {
+		t.Errorf("expected the pair to compare as one repository, got %q", got)
 	}
 }
 

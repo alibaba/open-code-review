@@ -12,7 +12,7 @@
 </p>
 <p align="center">
   <a href="https://trendshift.io/repositories/41087" target="_blank">
-    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
   </a>
   <a href="https://trendshift.io/repositories/41087" target="_blank">
     <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/monthly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
@@ -22,7 +22,7 @@
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
-  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://img.shields.io/badge/Ask-DeepWiki-blue?style=flat-square" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
@@ -106,6 +106,35 @@ Open Code Review — это CLI-инструмент для код-ревью н
 
 - **Git >= 2.41** — Open Code Review использует Git для генерации diff, поиска по коду и операций с репозиторием.
 
+<a id="supported-agents"></a>
+
+### Agent Skills
+
+Навыки работают в Claude Code, Codex, Cursor, Kimi Code и других агентах с поддержкой Agent Skills и выполнением локальных команд. Для обоих режимов нужны **Git >= 2.41** и **CLI `ocr`**; провайдер модели в OCR требуется только для нативного режима.
+
+#### 1. Установите навыки
+
+Выполните команду в проверяемом проекте и выберите нужные навыки и своего агента в установщике:
+
+```bash
+npx skills add alibaba/open-code-review
+```
+
+Если `ocr` отсутствует, навыки подскажут агенту установить его с учётом разрешений среды. Можно установить заранее: `npm install -g @alibaba-group/open-code-review`. Для плагинов и ручной установки см. [инструкции по агентам](../../plugins/open-code-review/README.md) или скопируйте нужные папки из [`skills/`](../../skills/) в каталог навыков своего агента.
+
+#### 2. Выберите режим ревью
+
+| | Нативный режим | Режим делегирования |
+|---|---|---|
+| Навык | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
+| Кто проверяет? | Специализированный агент и конвейер OCR | Текущий агент, следующий конвейеру ревью и защитным ограничениям OCR |
+| Модель и аутентификация | Собственные настройки провайдера OCR | Уже настроенные модель и аутентификация хост-агента |
+| Когда выбрать | Есть эндпоинт модели для OCR и нужен полный конвейер ревью | Нет отдельного API-ключа или хочется использовать существующую подписку и настройки агента |
+
+**Нет отдельного ключа? Начните с делегирования.** Оно не требует настройки провайдера OCR, но аутентификация, лимиты и стоимость хост-агента сохраняются. Подписка на агента не становится автоматически API-учётными данными для нативного режима. При делегировании CLI и навык OCR вместе предоставляют конвейер ревью и защитные ограничения: отбор файлов, разрешение правил, требования к охвату и структурированному отчёту. Хост-агент выполняет анализ, привязку к строкам и отчёт в рамках этого процесса; полный нативный конвейер OCR при этом не запускается.
+
+Для нативного режима один раз выполните `ocr config provider` и `ocr config model`. Требования к аутентификации зависят от провайдера; см. [настройку](https://open-codereview.ai/docs/configuration).
+
 ### CLI
 
 #### Установка
@@ -124,12 +153,15 @@ npm install -g @alibaba-group/open-code-review
 
 Перед запуском ревью необходимо настроить LLM, если только вы не используете [режим делегирования](https://open-codereview.ai/docs/delegate).
 
+- **Модель вызывает OCR:** `ocr review`, команда `/open-code-review:review` и навык `open-code-review` используют настройки провайдера в OCR, а не авторизацию по подписке Claude Code Team/Pro. Требования к аутентификации зависят от провайдера; см. [руководство по настройке](https://open-codereview.ai/docs/configuration).
+- **Модель вызывает хост-агент:** команда `/open-code-review:delegate-review` и навык `open-code-review-delegate` используют модель и способ аутентификации, настроенные в хост-агенте. Отдельная настройка LLM или учётных данных в OCR не требуется. См. [инструкции по установке для Claude Code](../../plugins/open-code-review/README.md#claude-code).
+
 ```bash
 ocr config provider          # Выбрать встроенного провайдера или добавить пользовательский
 ocr config model             # Выбрать модель для активного провайдера
 ```
 
-![Provider setup](../../imgs/providers.jpg)
+![Model providers](../../imgs/providers-ru.jpg)
 
 Интерактивный UI проведёт вас через выбор провайдера, ввод API-ключа и настройку модели, после чего автоматически проверит подключение.
 
@@ -142,6 +174,9 @@ cd your-project
 
 # Режим рабочей копии — ревью всех staged, unstaged и untracked изменений
 ocr review
+
+# Текущая ветка — ревью изменений с момента её отделения от main (--to по умолчанию HEAD)
+ocr review --from main
 
 # Диапазон веток — просматривает изменения feature-branch с момента её отделения от main (режим merge-base)
 ocr review --from main --to feature-branch

@@ -16,6 +16,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/spf13/cobra"
 )
 
 func TestGitHubFindingsMapsSidesAndFailsClosedWhenMissing(t *testing.T) {
@@ -59,6 +60,72 @@ func TestGitHubPostingErrorIsReturnedWithoutLogging(t *testing.T) {
 	}
 }
 
+func TestCommandsRejectToolsOverride(t *testing.T) {
+	for _, command := range []string{"review", "scan"} {
+		for _, args := range [][]string{
+			{"--tools", "custom-tools.json"},
+			{"--tools=custom-tools.json"},
+			{"--tools="},
+			{"--preview", "--tools", "custom-tools.json"},
+			{"--preview", "--tools=custom-tools.json"},
+		} {
+			t.Run(command+"/"+strings.Join(args, " "), func(t *testing.T) {
+				var err error
+				if command == "review" {
+					_, err = parseReviewFlags(args)
+				} else {
+					_, err = parseScanFlags(args)
+				}
+				if err == nil || !strings.Contains(err.Error(), "unknown flag: --tools") {
+					t.Fatalf("got %v, want unknown tools flag", err)
+				}
+			})
+		}
+	}
+}
+
+func TestCommandsToolFlags(t *testing.T) {
+	for _, command := range []string{"review", "scan"} {
+		t.Run(command, func(t *testing.T) {
+			cmd := &cobra.Command{Use: command}
+			if command == "review" {
+				registerReviewFlags(cmd, &reviewOptions{})
+			} else {
+				registerScanFlags(cmd, &scanOptions{})
+			}
+			if cmd.Flags().Lookup("tools") != nil || strings.Contains(cmd.Flags().FlagUsages(), "--tools") {
+				t.Fatal("removed tools override is still advertised")
+			}
+			if cmd.Flags().Lookup("max-tools") == nil {
+				t.Fatal("tool round budget flag must remain available")
+			}
+		})
+	}
+}
+
+func TestResolveReviewMaxTools(t *testing.T) {
+	tests := []struct {
+		name            string
+		templateDefault int
+		cliValue        int
+		want            int
+	}{
+		{name: "template default", templateDefault: 100, cliValue: 0, want: 100},
+		{name: "minimum override", templateDefault: 100, cliValue: 50, want: 50},
+		{name: "lower override", templateDefault: 100, cliValue: 75, want: 75},
+		{name: "equal override", templateDefault: 100, cliValue: 100, want: 100},
+		{name: "higher override", templateDefault: 100, cliValue: 125, want: 125},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveReviewMaxTools(tt.templateDefault, tt.cliValue); got != tt.want {
+				t.Errorf("resolveReviewMaxTools() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
 	err := validateReviewRefs(t.TempDir(), reviewOptions{commit: "-O./pwn.sh"})
 	if err == nil {
@@ -70,10 +137,27 @@ func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
 }
 
 func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
-	for _, state := range []session.TerminalState{session.StateComplete, session.StatePartial, session.StateSkipped} {
+	for _, state := range []session.TerminalState{session.StateComplete, session.StateSkipped} {
 		if err := reviewResultError(nil, &session.RunManifest{TerminalState: state}); err != nil {
 			t.Errorf("state %q returned error: %v", state, err)
 		}
+	}
+	timeoutPartial := &session.RunManifest{
+		TerminalState: session.StatePartial,
+		Coverage: session.Coverage{
+			Selected:  []session.CoverageItem{{ItemID: "a"}, {ItemID: "b"}},
+			Completed: []session.CoverageItem{{ItemID: "a"}},
+			Failed:    []session.CoverageItem{{ItemID: "b", Classification: session.FailureTimeout}},
+		},
+	}
+	if err := reviewResultError(nil, timeoutPartial); err == nil ||
+		!strings.Contains(err.Error(), "1 of 2 selected item(s) failed") {
+		t.Fatalf("partial timeout must produce a process error with item counts: %v", err)
+	}
+	providerPartial := *timeoutPartial
+	providerPartial.Coverage.Failed = []session.CoverageItem{{ItemID: "b", Classification: session.FailureProvider}}
+	if err := reviewResultError(nil, &providerPartial); err == nil {
+		t.Fatal("partial provider failure must produce a process error")
 	}
 	if err := reviewResultError(nil, &session.RunManifest{TerminalState: session.StateFailed}); err == nil {
 		t.Fatal("failed manifest must produce a process error")
@@ -95,8 +179,8 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "2 of 2 selected item(s) failed") {
 		t.Fatalf("failed item counts missing from error: %v", err)
 	}
-	// A controlled budget stop records no run_failure, so coverage alone decides.
-	// With anything covered the manifest is partial and must exit 0.
+	// A controlled budget stop records no run_failure. It is the one partial
+	// outcome that remains successful when anything was covered.
 	budgetPartial := &session.RunManifest{
 		TerminalState: session.StatePartial,
 		Coverage: session.Coverage{
@@ -107,6 +191,14 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 	}
 	if err := reviewResultError(nil, budgetPartial); err != nil {
 		t.Fatalf("budget stop with usable coverage must not produce a process error: %v", err)
+	}
+	mixedPartial := *budgetPartial
+	mixedPartial.Coverage.Failed = append(mixedPartial.Coverage.Failed,
+		session.CoverageItem{ItemID: "c", Classification: session.FailureTimeout})
+	mixedPartial.Coverage.Selected = append(mixedPartial.Coverage.Selected,
+		session.CoverageItem{ItemID: "c"})
+	if err := reviewResultError(nil, &mixedPartial); err == nil {
+		t.Fatal("a timeout must make mixed budget coverage exit non-zero")
 	}
 	// When the cap stopped the run before any file completed, every selected item
 	// is failed(budget): no usable coverage, so it must exit non-zero even though
@@ -179,13 +271,13 @@ func TestParseReviewFlagsRejectsToWithoutFrom(t *testing.T) {
 	}
 }
 
-func TestParseReviewFlagsRejectsFromWithoutTo(t *testing.T) {
-	_, err := parseReviewFlags([]string{"--from", "main"})
-	if err == nil {
-		t.Fatal("expected --from without --to to fail")
+func TestParseReviewFlagsFromWithoutToDefaultsToHead(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--from", "main"})
+	if err != nil {
+		t.Fatalf("--from without --to must be accepted: %v", err)
 	}
-	if !strings.Contains(err.Error(), "--to is required when --from is specified") {
-		t.Fatalf("unexpected error: %v", err)
+	if opts.from != "main" || opts.to != "HEAD" {
+		t.Fatalf("from = %q, to = %q, want from=main to=HEAD", opts.from, opts.to)
 	}
 }
 

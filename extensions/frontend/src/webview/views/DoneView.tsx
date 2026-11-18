@@ -22,10 +22,12 @@ export function DoneView({ result, commentStatus, commentJumpable, logs, onOpen,
   const s = result.summary;
   return (
     <div class="action-done" style="display:block">
-      <div class="done-summary">
-        <span class="ds-dot"></span>
-        <span>{result.comments.length} {t('view.done.comments')} · {s?.filesReviewed ?? 0} {t('view.done.files')} · {s?.elapsed ?? ''}</span>
-      </div>
+      {result.executionError ? result.message && <p>{result.message}</p> : (
+        <div class="done-summary">
+          <span class="ds-dot"></span>
+          <span>{result.comments.length} {t('view.done.comments')} · {s?.filesReviewed ?? 0} {t('view.done.files')} · {s?.elapsed ?? ''}</span>
+        </div>
+      )}
 
       {logs.length > 0 && (
         <div class="logs-disclosure">

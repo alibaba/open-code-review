@@ -65,7 +65,7 @@ cp -R /path/to/open-code-review/skills/open-code-review-delegate ~/.claude/skill
 ### Step 1: Preview — determine what to review
 
 ```bash
-ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <patterns>]
+ocr delegate preview [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <patterns>]
 ```
 
 Outputs:
@@ -81,12 +81,13 @@ Common invocations:
 |----------|---------|
 | Workspace changes | `ocr delegate preview` |
 | Branch comparison | `ocr delegate preview --from main --to feature` |
+| Current branch against main | `ocr delegate preview --from main` |
 | Single commit | `ocr delegate preview -c abc123` |
 
 ### Step 2: Get rules for files
 
 ```bash
-ocr delegate rule <path1> <path2> ...
+ocr delegate rule [--from <ref> [--to <ref>]] [--commit <hash>] <path1> <path2> ...
 ```
 
 Pass the reviewable paths from Step 1. Output is grouped by rule
@@ -95,23 +96,41 @@ repetition.
 
 ### Step 3: Get diffs
 
-Use git directly, based on the mode/ref info from Step 1:
+Choose the diff command using the mode and refs from Step 1. Use `git --no-pager` for every Git call during the review.
+
+The diff commands disable external diff programs, text conversion, and color to produce plain patches.
 
 **Range mode** (merge\_base provided):
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Commit mode**:
 ```bash
-git show <commit> -- <path>
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Workspace mode**:
 ```bash
-git diff HEAD -- <path>        # tracked files
-cat <path>                     # new untracked files
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # tracked files
+cat "<path>"                     # new untracked files
 ```
+
+To read context:
+
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
+For large diffs, add `--output="<absolute-diff-file>"` to the command for the selected mode. Choose a unique absolute path outside the repository and create its parent directory. Use the same path in file-reading tool calls:
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+After Git exits with code 0, read and review the entire file in chunks, then remove it. If Git fails or times out, retry or record `skipped` with the error. Check unexpectedly empty output against a fresh preview.
 
 ### Step 4: Review each file
 
@@ -120,6 +139,8 @@ For each reviewable file:
 1. Get its diff (Step 3)
 2. Consult the matching Rule Group (Step 2) as the review checklist
 3. Conduct a thorough review, using context exploration as needed
+
+Record each previewed `(path, status)` as `reviewed` or `skipped`. Give a reason for every skipped entry, and report `total_files`, `reviewed_files`, `skipped_files`, and `coverage_rate`.
 
 ### Step 5: Report
 
@@ -138,10 +159,12 @@ Classify each finding by severity:
 
 ## Shared flags
 
+Both subcommands accept `--from main` as shorthand for `--from main --to HEAD`. Range review compares `merge-base(from, to)..to` and excludes staged, unstaged, and untracked changes; omit range/commit flags for workspace mode. Pass the same range or commit flags to `preview` and `rule` so they use the same target. Range and commit flags are mutually exclusive.
+
 | Flag | Description |
 |------|-------------|
 | `--from <ref>` | Source ref for range mode |
-| `--to <ref>` | Target ref for range mode |
+| `--to <ref>` | Target ref for range mode; defaults to `HEAD` when `--from` is supplied |
 | `-c, --commit <hash>` | Single commit mode |
 | `--repo <path>` | Repository root (default: cwd) |
 | `--rule <path>` | Custom rule.json path |
