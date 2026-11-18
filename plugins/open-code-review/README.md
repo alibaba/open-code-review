@@ -1,7 +1,7 @@
 # Coding agent plugins
 
-Open Code Review ships platform-specific integrations for Claude Code, Codex,
-Cursor, Kimi Code, and QCA Forward. Choose your platform below instead of
+Open Code Review ships platform-specific integrations for Claude Code, Qwen Code,
+Codex, Cursor, Kimi Code, and QCA Forward. Choose your platform below instead of
 adapting installation instructions written for a different agent.
 
 All integrations require Git 2.41 or later. Install the `ocr` CLI first:
@@ -32,6 +32,21 @@ This installs the `/open-code-review:review` and
 `/open-code-review:delegate-review` slash commands. See the
 [Claude Code guide](https://open-codereview.ai/docs/claude-code) for manual
 installation, usage, and behavior.
+
+## Qwen Code
+
+Install the existing Claude Code plugin through Qwen Code's marketplace support:
+
+```bash
+qwen extensions install alibaba/open-code-review:open-code-review
+qwen extensions list
+```
+
+Start a new Qwen Code session after installation. On Qwen Code 0.27.2, use
+`/open-code-review.review` for OCR-managed reviews or `/delegate-review` to review
+with Qwen Code's own model. See the
+[Qwen Code guide](https://open-codereview.ai/docs/qwen-code) for setup, command
+conflicts, delegation, and version compatibility.
 
 ## Copilot CLI
 
