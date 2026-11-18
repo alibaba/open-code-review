@@ -6,6 +6,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { LanguageProvider, useTranslation } from '../i18n';
+import { en } from '../i18n/en';
+import { zh } from '../i18n/zh';
+import { reloadAfterChunkError } from '../components/ErrorBoundary';
 import type { Language } from '../i18n/types';
 import DocsPage from './DocsPage';
 
@@ -132,6 +135,15 @@ function typeQuery(value: string) {
   fireEvent.change(screen.getByRole('textbox'), { target: { value } });
 }
 
+function mockReload(): ReturnType<typeof vi.fn> {
+  const reloadSpy = vi.fn();
+  vi.spyOn(window, 'location', 'get').mockReturnValue({
+    reload: reloadSpy,
+    href: 'http://localhost/',
+  } as unknown as Location);
+  return reloadSpy;
+}
+
 const scrollIntoView = vi.fn();
 
 beforeEach(() => {
@@ -235,6 +247,44 @@ describe('DocsPage', () => {
     expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('recovered body');
   });
 
+  it('keeps transient main-language failures retryable in place', async () => {
+    renderDocsPage('en');
+
+    await act(async () => {
+      h.pending.en[0].reject(new Error('temporary network failure'));
+    });
+
+    expect(screen.getByRole('button', { name: en['docs.content.retry'] })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: en['error.reload'] })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: en['docs.content.retry'] }));
+    await act(async () => {
+      h.pending.en[1].resolve({ quickstart: 'recovered body' });
+    });
+
+    expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('recovered body');
+  });
+
+  it('offers guarded page reload after repeated stale main-language chunk failures', async () => {
+    const reloadSpy = mockReload();
+    renderDocsPage('en');
+
+    await act(async () => {
+      h.pending.en[0].reject(new Error('Loading chunk 7 failed.'));
+    });
+    expect(screen.queryByRole('button', { name: en['error.reload'] })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: en['docs.content.retry'] }));
+    await act(async () => {
+      h.pending.en[1].reject(new Error('Loading chunk 7 failed.'));
+    });
+
+    expect(screen.getByRole('button', { name: en['error.reload'] })).toBeTruthy();
+    sessionStorage.setItem('ocr-chunk-reload-attempted', 'true');
+    fireEvent.click(screen.getByRole('button', { name: en['error.reload'] }));
+    expect(sessionStorage.getItem('ocr-chunk-reload-attempted')).toBeNull();
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+  });
   it('navigating to another article in the same language reuses the loaded content', async () => {
     renderDocsPage('en');
 
@@ -332,7 +382,7 @@ describe('DocsPage', () => {
     fireEvent.click(screen.getByTestId('switch-zh'));
     // The pending language shows a loading state (in the new locale), not
     // stale results or a misleading "no results".
-    expect(screen.getByText('搜索中...')).toBeTruthy();
+    expect(screen.getByText(zh['docs.search.loading'])).toBeTruthy();
     expect(screen.queryByRole('button', { name: /quickstart/ })).toBeNull();
 
     await act(async () => {
@@ -340,7 +390,7 @@ describe('DocsPage', () => {
     });
 
     expect(screen.getByRole('button', { name: /quickstart/ })).toBeTruthy();
-    expect(screen.queryByText('搜索中...')).toBeNull();
+    expect(screen.queryByText(zh['docs.search.loading'])).toBeNull();
   });
 
   /* ─── English fallback for partial locales ─── */
@@ -355,7 +405,7 @@ describe('DocsPage', () => {
 
     // The article is missing in the partial locale, so the page waits on the
     // English fallback rather than rendering an empty body.
-    expect(screen.getByRole('status').textContent).toBe('文档加载中...');
+    expect(screen.getByRole('status').textContent).toBe(zh['docs.content.loading']);
     expect(h.loadCalls).toEqual(['zh', 'en']);
 
     await act(async () => {
@@ -376,10 +426,10 @@ describe('DocsPage', () => {
       h.pending.en[0].reject(new Error('en chunk load failed'));
     });
 
-    expect(screen.getByRole('alert').textContent).toContain('文档内容加载失败。');
+    expect(screen.getByRole('alert').textContent).toContain(zh['docs.content.loadError']);
     expect(screen.queryByTestId('markdown')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    fireEvent.click(screen.getByRole('button', { name: zh['docs.content.retry'] }));
     expect(h.loadCalls.filter(c => c === 'en').length).toBe(2);
 
     await act(async () => {
@@ -389,6 +439,29 @@ describe('DocsPage', () => {
     expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('en installation body');
   });
 
+  it('offers guarded page reload after repeated stale English fallback failures', async () => {
+    const reloadSpy = mockReload();
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/installation');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+    await act(async () => {
+      h.pending.en[0].reject(new Error('Failed to fetch dynamically imported module: /en.js'));
+    });
+
+    expect(screen.queryByRole('button', { name: zh['error.reload'] })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: zh['docs.content.retry'] }));
+
+    await act(async () => {
+      h.pending.en[1].reject(new Error('Failed to fetch dynamically imported module: /en.js'));
+    });
+
+    expect(screen.getByRole('button', { name: zh['error.reload'] })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: zh['error.reload'] }));
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+  });
   it('search in a partial locale loads the English fallback and covers English entries', async () => {
     h.available.zh = ['quickstart'];
     renderDocsPage('zh', '/docs/quickstart');
@@ -402,7 +475,7 @@ describe('DocsPage', () => {
 
     // The query needs English coverage for the partial locale, so the search
     // reports loading until the fallback arrives.
-    expect(screen.getByText('搜索中...')).toBeTruthy();
+    expect(screen.getByText(zh['docs.search.loading'])).toBeTruthy();
     expect(h.loadCalls).toEqual(['zh', 'en']);
 
     await act(async () => {
@@ -410,7 +483,7 @@ describe('DocsPage', () => {
     });
 
     expect(screen.getByRole('button', { name: /installation/ })).toBeTruthy();
-    expect(screen.queryByText('搜索中...')).toBeNull();
+    expect(screen.queryByText(zh['docs.search.loading'])).toBeNull();
   });
 
   it('does not request English for fully translated pages without a query', async () => {
