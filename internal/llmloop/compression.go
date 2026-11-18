@@ -4,6 +4,7 @@
 package llmloop
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"regexp"
@@ -150,33 +151,35 @@ func summaryControlText(source string) []byte {
 }
 
 func unwrapSummaryFence(text string) string {
-	text = strings.TrimSpace(text)
-	if !strings.HasPrefix(text, "```") {
-		return text
+	trimmed := strings.TrimSpace(text)
+	backticks := strings.HasPrefix(trimmed, "```")
+	if !backticks && !strings.HasPrefix(trimmed, "~~~") {
+		return trimmed
 	}
-	header, body, found := strings.Cut(text, "\n")
-	info := strings.TrimLeft(header, "`")
-	if !found {
-		return stripMarkdownFences(text)
-	}
-	switch strings.TrimSpace(info) {
-	case "", "text", "plaintext", "markdown", "md":
-	default:
-		return text
-	}
-	width := len(header) - len(info)
-	for remaining := body; remaining != ""; {
-		line, rest, _ := strings.Cut(remaining, "\n")
-		marker := strings.TrimSpace(line)
-		if len(marker) >= width && strings.Trim(marker, "`") == "" {
-			if rest == "" {
-				return strings.TrimSpace(strings.TrimSuffix(body, remaining))
-			}
-			break
+	source := []byte(text)
+	doc := summaryMarkdown.Parse(markdowntext.NewReader(source))
+	for node := doc.FirstChild(); node != nil; node = node.NextSibling() {
+		if node.Kind() != ast.KindFencedCodeBlock {
+			return trimmed
 		}
-		remaining = rest
+		lines := node.Lines()
+		content := bytes.TrimSpace(lines.Value(source))
+		if len(content) == 0 {
+			continue
+		}
+		if backticks && node == doc.FirstChild() && node.NextSibling() == nil {
+			last := lines.At(lines.Len() - 1)
+			if len(bytes.TrimSpace(source[last.Stop:])) != 0 {
+				header, _, _ := strings.Cut(trimmed, "\n")
+				switch strings.TrimSpace(strings.TrimLeft(header, "`")) {
+				case "", "text", "plaintext", "markdown", "md":
+					return string(content)
+				}
+			}
+		}
+		return trimmed
 	}
-	return text
+	return ""
 }
 
 func compressionSummary(text string) string {

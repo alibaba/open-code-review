@@ -425,6 +425,7 @@ func TestCompressionBudgetRetryThenToolResult(test *testing.T) {
 
 func TestCompressionBudgetRequiresFinishedVisibleSummary(test *testing.T) {
 	fragment := "partial evidence"
+	emptyFence := "```json\n```"
 	for _, fixture := range []struct {
 		name, reason string
 		visible      *string
@@ -433,15 +434,17 @@ func TestCompressionBudgetRequiresFinishedVisibleSummary(test *testing.T) {
 		{"openai_length", "length", &fragment, true},
 		{"anthropic_max_tokens", "max_tokens", &fragment, true},
 		{"reasoning_only", "stop", nil, false},
+		{"empty_fenced_summary", "stop", &emptyFence, false},
 	} {
 		test.Run(fixture.name, func(test *testing.T) {
 			client := &fakeLLMClient{response: &llm.ChatResponse{Choices: []llm.Choice{{
 				Message: llm.ResponseMessage{Content: fixture.visible, ReasoningContent: "working notes"}, FinishReason: fixture.reason,
 			}}, Usage: &llm.UsageInfo{CompletionTokens: 5}}}
 			runner, messages := newCompressionRunner(test, client, nil)
+			original := slices.Clone(messages)
 			got, err := runner.runCompression(test.Context(), messages, "task")
-			if (err != nil) != fixture.wantError || !reflect.DeepEqual(got, messages) || runner.TotalOutputTokens() != 5 {
-				test.Fatalf("incomplete summary handling: changed=%v usage=%d err=%v", !reflect.DeepEqual(got, messages), runner.TotalOutputTokens(), err)
+			if (err != nil) != fixture.wantError || !reflect.DeepEqual(got, original) || runner.TotalOutputTokens() != 5 {
+				test.Fatalf("incomplete summary handling: changed=%v usage=%d err=%v", !reflect.DeepEqual(got, original), runner.TotalOutputTokens(), err)
 			}
 		})
 	}
