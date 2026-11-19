@@ -507,6 +507,21 @@ class PublishTest(unittest.TestCase):
         self.assertIn("review did not complete", rec.final_summary_body)
         self.assertIn("3 of 3 selected item(s) failed", rec.final_summary_body)
 
+    def test_partial_review_not_lgtm(self):
+        # Partial means some selected items were never reviewed, so zero
+        # comments is not an all-clear either.
+        stats, rec = run_publish({"status": "partial",
+                                  "message": "Review partially complete: 0 finding(s); 2 of 3 selected item(s) failed."})
+        self.assertEqual(stats["inline"], 0)
+        self.assertNotIn("✅", rec.final_summary_body)
+        self.assertIn("review did not complete", rec.final_summary_body)
+        self.assertIn("2 of 3 selected item(s) failed", rec.final_summary_body)
+
+    def test_incomplete_review_without_message_names_status(self):
+        stats, rec = run_publish({"status": "partial"})
+        self.assertNotIn("✅", rec.final_summary_body)
+        self.assertIn("status=partial", rec.final_summary_body)
+
     def test_warnings_in_summary(self):
         stats, rec = run_publish({"comments": [comment()], "warnings": [{"file": "a.py", "message": "skipped"}]})
         self.assertIn("1 warning(s)", rec.final_summary_body)
