@@ -103,6 +103,9 @@ func initOTLPGRPCProviders(ctx context.Context, res *resource.Resource, cfg Conf
 	if insecure {
 		traceOpts = append(traceOpts, otlptracegrpc.WithInsecure())
 	}
+	if len(cfg.OTLPHeaders) > 0 {
+		traceOpts = append(traceOpts, otlptracegrpc.WithHeaders(cfg.OTLPHeaders))
+	}
 	traceExp, err := otlptracegrpc.New(ctx, traceOpts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to create OTLP trace exporter: %v\n", err)
@@ -119,6 +122,9 @@ func initOTLPGRPCProviders(ctx context.Context, res *resource.Resource, cfg Conf
 	metricOpts := []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpoint(addr)}
 	if insecure {
 		metricOpts = append(metricOpts, otlpmetricgrpc.WithInsecure())
+	}
+	if len(cfg.OTLPHeaders) > 0 {
+		metricOpts = append(metricOpts, otlpmetricgrpc.WithHeaders(cfg.OTLPHeaders))
 	}
 	metricExp, err := otlpmetricgrpc.New(ctx, metricOpts...)
 	if err != nil {
@@ -151,8 +157,11 @@ func initOTLPGRPCProviders(ctx context.Context, res *resource.Resource, cfg Conf
 // OTEL_EXPORTER_OTLP_ENDPOINT is specified as a base. It also derives TLS from the
 // scheme, which is what the separate WithInsecure call was doing by hand.
 func initOTLPHTTPProviders(ctx context.Context, res *resource.Resource, cfg Config) {
-	traceExp, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpointURL(otlpSignalURL(cfg.OTLPEndpoint, "/v1/traces")))
+	traceOpts := []otlptracehttp.Option{otlptracehttp.WithEndpointURL(otlpSignalURL(cfg.OTLPEndpoint, "/v1/traces"))}
+	if len(cfg.OTLPHeaders) > 0 {
+		traceOpts = append(traceOpts, otlptracehttp.WithHeaders(cfg.OTLPHeaders))
+	}
+	traceExp, err := otlptracehttp.New(ctx, traceOpts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to create OTLP HTTP trace exporter: %v\n", err)
 		return
@@ -165,8 +174,11 @@ func initOTLPHTTPProviders(ctx context.Context, res *resource.Resource, cfg Conf
 	tracerProvider = tp
 	shutdownFuncs = append(shutdownFuncs, func(ctx context.Context) error { return tp.Shutdown(ctx) })
 
-	metricExp, err := otlpmetrichttp.New(ctx,
-		otlpmetrichttp.WithEndpointURL(otlpSignalURL(cfg.OTLPEndpoint, "/v1/metrics")))
+	metricOpts := []otlpmetrichttp.Option{otlpmetrichttp.WithEndpointURL(otlpSignalURL(cfg.OTLPEndpoint, "/v1/metrics"))}
+	if len(cfg.OTLPHeaders) > 0 {
+		metricOpts = append(metricOpts, otlpmetrichttp.WithHeaders(cfg.OTLPHeaders))
+	}
+	metricExp, err := otlpmetrichttp.New(ctx, metricOpts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to create OTLP HTTP metric exporter: %v\n", err)
 		return
