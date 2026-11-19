@@ -322,7 +322,7 @@ matching order:
 | `**/*.erb`                                      | `erb.md` — ERB templates (SSTI / XSS / escaping / whitespace and output structure). |
 | `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                                       |
 | `**/*.astro`                                    | `astro.md` — Astro components and islands.                                                            |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                                    |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                                                    |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                           |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# implementation, signature, and script files.                                         |

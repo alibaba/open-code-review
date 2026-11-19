@@ -25,7 +25,7 @@
     "**/*.erb": "erb.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
-    "**/*.{ts,js,tsx,jsx,mjs,cjs}": "ts_js_tsx_jsx.md",
+    "**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}": "ts_js_tsx_jsx.md",
     "**/*.{kt,kts}": "kotlin.md",
     "**/*.scala": "scala.md",
     "**/*.{fs,fsi,fsx}": "fsharp.md",
