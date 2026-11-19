@@ -150,6 +150,8 @@ The pipeline exposes the following to downstream jobs:
 - **dotenv report** (`.ocr/ocr-stats.env`): `OCR_COMMENTS_TOTAL`, `OCR_COMMENTS_INLINE`, `OCR_COMMENTS_SUMMARY`, `OCR_COMMENTS_ROUTED`, `OCR_COMMENTS_SKIPPED`, `OCR_COMMENTS_FAILED`, and `OCR_SUMMARY_URL`. Consume them in later stages via the `dotenv` artifact.
 - **Artifacts** (`when: always`, 1 week retention): `.ocr/ocr-result.json` (raw review JSON) and `.ocr/ocr-stderr.log` (OCR stderr), so you can inspect a failed review even when the job fails. Paths are project-relative (under `.ocr/`) because GitLab Runner refuses to upload artifacts outside the build directory.
 
+The posting script exits non-zero when the OCR JSON cannot be parsed, an inline discussion cannot be posted, or the summary note cannot be created or updated. Failed inline findings are still rendered into the summary before the error is returned. Findings that intentionally have no line information or are routed to the summary by policy do not trigger this failure.
+
 ### Limit concurrency
 
 Set the `OCR_REVIEW_CONCURRENCY` CI/CD variable (passed to `ocr review --concurrency`). For large MRs, lowering this caps concurrent LLM requests:
