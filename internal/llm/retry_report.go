@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -129,13 +130,22 @@ type RequestReport struct {
 	// Provider is required but may be empty: an empty string stably denotes an
 	// unnamed endpoint, so it is not omitempty. This is a deliberate difference
 	// from the display-only jsonLLMIdentity.Provider, which is omitempty.
-	Provider  string          `json:"provider"`
-	Model     string          `json:"model"`
-	FilePath  string          `json:"file_path"`
-	TaskType  string          `json:"task_type"`
-	RequestNo int             `json:"request_no"`
-	Outcome   Outcome         `json:"outcome"`
-	Attempts  []AttemptRecord `json:"attempts"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	FilePath string `json:"file_path"`
+	TaskType string `json:"task_type"`
+	// TotalElapsedMS is the wall clock from the first attempt to the last
+	// observed attempt end, backoff included. It answers what the per-attempt
+	// timings cannot: the parent deadline that bounds a run is charged for the
+	// whole request, so a request whose every attempt fits the per-attempt
+	// budget can still consume it, and nothing else in the report measures that.
+	//
+	// A pointer for the same reason the run total is one: a sub-millisecond
+	// request is a measurement, not an absence.
+	TotalElapsedMS *int64          `json:"total_elapsed_ms,omitempty"`
+	RequestNo      int             `json:"request_no"`
+	Outcome        Outcome         `json:"outcome"`
+	Attempts       []AttemptRecord `json:"attempts"`
 }
 
 // RetryReport is the frozen, immutable result both the terminal summary and the
@@ -145,13 +155,25 @@ type RetryReport struct {
 	// TotalRequests counts RequestMeta that produced at least one real HTTP
 	// attempt. A logical request that failed before entering the observer has no
 	// observed fact to report and is excluded.
-	TotalRequests     int             `json:"total_requests"`
-	RetriedRequests   int             `json:"retried_requests"`
-	TotalRetries      int             `json:"total_retries"`
-	RecoveredRequests int             `json:"recovered_requests"`
-	FailedRequests    int             `json:"failed_requests"`
-	CancelledRequests int             `json:"cancelled_requests"`
-	Requests          []RequestReport `json:"requests"`
+	TotalRequests     int `json:"total_requests"`
+	RetriedRequests   int `json:"retried_requests"`
+	TotalRetries      int `json:"total_retries"`
+	RecoveredRequests int `json:"recovered_requests"`
+	FailedRequests    int `json:"failed_requests"`
+	CancelledRequests int `json:"cancelled_requests"`
+	// TotalElapsedMS is the wall clock the listed requests held in total. The
+	// per-attempt budget does not bound a run; the sum across attempts, backoff
+	// included, is the number the group deadline is actually charged.
+	//
+	// A pointer so a streamed-only run reports an explicit 0 instead of omitting
+	// the field: the number the run waited is not less interesting when it is
+	// small, and a missing field would read as "not measured".
+	TotalElapsedMS *int64 `json:"total_elapsed_ms,omitempty"`
+	// AttemptTimeoutMS is the per-attempt budget those requests were each
+	// supposed to fit inside, so total_elapsed_ms has a reference point, or 0
+	// when the collector was not built with one.
+	AttemptTimeoutMS int64           `json:"attempt_timeout_ms,omitempty"`
+	Requests         []RequestReport `json:"requests"`
 }
 
 // attemptObservation is the provider-agnostic classifier input.
@@ -236,6 +258,20 @@ type requestEntry struct {
 	// It stays zero until an attempt is actually appended, so a dropped attempt
 	// never becomes the baseline for the next gap.
 	lastAttemptEnd time.Time
+	// requestStart is when the request's wall clock started: the start of the
+	// first attempt. It is a separate field from the attempts because the EOF
+	// recovery restarts attempt numbering yet stays inside one logical request,
+	// whose wall clock must not restart with it.
+	requestStart time.Time
+}
+
+// elapsed returns how long the request has been running, as of the last attempt
+// boundary. An entry with no attempt has been running for no time.
+func (e *requestEntry) elapsed() time.Duration {
+	if e.requestStart.IsZero() {
+		return 0
+	}
+	return nonNegativeDuration(e.lastAttemptEnd.Sub(e.requestStart))
 }
 
 func (e *requestEntry) hasErrorAttempt() bool {
@@ -261,11 +297,32 @@ func (e *requestEntry) hasErrorAttempt() bool {
 type RetryCollector struct {
 	mu      sync.Mutex
 	entries map[RequestMeta]*requestEntry
+	// attemptTimeout is the per-attempt budget the clients were built with, or 0
+	// when the collector was not told one. Only the report reads it, and only to
+	// make the wall clock comparable: a total is only alarming next to the budget
+	// it was supposed to fit inside.
+	attemptTimeout time.Duration
 }
 
 // NewRetryCollector returns an empty collector.
 func NewRetryCollector() *RetryCollector {
 	return &RetryCollector{entries: make(map[RequestMeta]*requestEntry)}
+}
+
+// NewRetryCollectorWithAttemptTimeout returns a collector that also reports each
+// request's total wall clock next to the per-attempt budget the clients were
+// built with.
+//
+// The budget lives on the collector rather than on the clients because only the
+// report reads it and the clients' config is gone by Freeze time. A
+// non-positive timeout keeps the collector timing-only, which is what
+// NewRetryCollector builds.
+func NewRetryCollectorWithAttemptTimeout(timeout time.Duration) *RetryCollector {
+	c := NewRetryCollector()
+	if timeout > 0 {
+		c.attemptTimeout = timeout
+	}
+	return c
 }
 
 // RecordAttempt appends one observed HTTP attempt for m.
@@ -351,6 +408,9 @@ func (c *RetryCollector) RecordAttempt(m RequestMeta, a AttemptRecord, startedAt
 	a.Number = len(e.attempts) + 1
 	e.attempts = append(e.attempts, a)
 	e.lastAttemptEnd = endedAt
+	if e.requestStart.IsZero() {
+		e.requestStart = startedAt
+	}
 }
 
 // nonNegativeMillis converts d to milliseconds, flooring at zero.
@@ -366,6 +426,34 @@ func nonNegativeMillis(d time.Duration) int64 {
 	return d.Milliseconds()
 }
 
+// nonNegativeDuration floors d at zero for the same reason nonNegativeMillis
+// does: hand-built timestamps carry no monotonic reading and can invert.
+func nonNegativeDuration(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	return d
+}
+
+// addMillis adds a non-negative per-request duration to a running total.
+//
+// It saturates instead of wrapping. A run cannot realistically wait 292 million
+// years, but an overflow here would turn a long wait into a tiny one, and the
+// whole point of the total is to be believable next to the per-attempt budget.
+func addMillis(total *int64, delta int64) *int64 {
+	if total == nil {
+		sum := delta
+		return &sum
+	}
+	const maxMillis = int64(math.MaxInt64)
+	if delta > 0 && *total > maxMillis-delta {
+		*total = maxMillis
+		return total
+	}
+	*total += delta
+	return total
+}
+
 // ReviseLastAttempt rewrites the last attempt of m as an error.
 //
 // It is the client-boundary correction for what the observer cannot see: an
@@ -379,6 +467,17 @@ func nonNegativeMillis(d time.Duration) int64 {
 // status code is the stronger fact, and a corrupt body only costs diagnostic
 // richness.
 func (c *RetryCollector) ReviseLastAttempt(m RequestMeta, class ErrorClass, phase FailurePhase) {
+	c.ReviseLastAttemptAt(m, class, phase, time.Time{})
+}
+
+// ReviseLastAttemptAt is ReviseLastAttempt that also reports when the attempt
+// really ended, for a caller that kept reading the body after the headers
+// arrived.
+//
+// A zero endedAt leaves the recorded end untouched, which is what a correction
+// carrying no clock has to do. A non-zero one moves it forward so the request's
+// wall clock covers the body it actually waited for.
+func (c *RetryCollector) ReviseLastAttemptAt(m RequestMeta, class ErrorClass, phase FailurePhase, endedAt time.Time) {
 	if c == nil || !m.valid() || !class.valid() || !phase.valid() {
 		return
 	}
@@ -395,6 +494,9 @@ func (c *RetryCollector) ReviseLastAttempt(m RequestMeta, class ErrorClass, phas
 		}
 		return
 	}
+	if endedAt.After(e.lastAttemptEnd) {
+		e.lastAttemptEnd = endedAt
+	}
 	last := &e.attempts[len(e.attempts)-1]
 	if last.Outcome != AttemptSuccess {
 		return
@@ -402,6 +504,25 @@ func (c *RetryCollector) ReviseLastAttempt(m RequestMeta, class ErrorClass, phas
 	last.Outcome = AttemptError
 	last.ErrorClass = class
 	last.FailurePhase = phase
+}
+
+// extendLastAttempt moves the request's end forward to endedAt without touching
+// any attempt's classification.
+//
+// A zero or earlier endedAt, a request with no attempt and a finalized request
+// are all no-ops: there is no clock to extend in the first case and nothing left
+// to measure in the others.
+func (c *RetryCollector) extendLastAttempt(m RequestMeta, endedAt time.Time) {
+	if c == nil || !m.valid() || endedAt.IsZero() {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e := c.entries[m]
+	if e == nil || e.finalized || !endedAt.After(e.lastAttemptEnd) {
+		return
+	}
+	e.lastAttemptEnd = endedAt
 }
 
 // Finalize decides the request-level outcome for m exactly once.
@@ -485,9 +606,13 @@ func (c *RetryCollector) Freeze(runID string) (*RetryReport, error) {
 	defer c.mu.Unlock()
 
 	rep := &RetryReport{
-		SchemaVersion: RetryReportSchemaVersion,
-		TotalRequests: len(c.entries),
+		SchemaVersion:    RetryReportSchemaVersion,
+		TotalRequests:    len(c.entries),
+		AttemptTimeoutMS: nonNegativeMillis(c.attemptTimeout),
 	}
+	// Assigned before the walk so a report with nothing listed still publishes a
+	// 0 rather than omitting the field.
+	rep.TotalElapsedMS = new(int64)
 
 	// Walk in logical_request_id order instead of map order. Both outputs depend
 	// on it: the listed requests need the order anyway, and a construction error
@@ -540,12 +665,15 @@ func (c *RetryCollector) Freeze(runID string) (*RetryReport, error) {
 		if len(e.attempts) == 1 && !e.hasErrorAttempt() && e.outcome == OutcomeSucceeded {
 			continue
 		}
+		elapsed := nonNegativeMillis(e.elapsed())
+		rep.TotalElapsedMS = addMillis(rep.TotalElapsedMS, elapsed)
 		rep.Requests = append(rep.Requests, RequestReport{
 			LogicalRequestID: ref.id,
 			Provider:         meta.Provider,
 			Model:            meta.Model,
 			FilePath:         meta.FilePath,
 			TaskType:         meta.TaskType,
+			TotalElapsedMS:   &elapsed,
 			RequestNo:        meta.RequestNo,
 			Outcome:          e.outcome,
 			Attempts:         append([]AttemptRecord(nil), e.attempts...),
