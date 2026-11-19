@@ -3,27 +3,33 @@
 
 package behaviortask
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "fmt"
 
 func (runner *Runner) readContext(args map[string]any) (Observation, error) {
 	kind, _ := args["kind"].(string)
 	id, _ := args["id"].(string)
 	observation := Observation{ToolName: "context_read", Arguments: args, SourceKind: kind, Locations: []Location{}}
 	var content string
+	cursor, _ := args["cursor"].(float64)
+	maxBytes := 16384
+	if specified, ok := args["max_bytes"].(float64); ok {
+		maxBytes = int(specified)
+	}
+	var page, next string
+	var err error
 	if kind == "observation" {
-		previous, exists := runner.store.get(id)
+		position, exists := runner.store.positions[id]
 		if !exists {
 			observation.ErrorClass = "unavailable"
 			return observation, fmt.Errorf("observation ID is unavailable")
 		}
-		data, err := json.Marshal(previous)
-		if err != nil {
-			return observation, err
+		page, next, err = runner.store.page(position, int(cursor), maxBytes)
+	} else if kind == "inventory" {
+		var ok bool
+		content, ok = runner.indexes[id]
+		if !ok {
+			return observation, fmt.Errorf("inventory ID is unavailable")
 		}
-		content = string(data)
 	} else {
 		for _, captured := range runner.contexts {
 			if captured.Kind == kind && captured.ID == id {
@@ -38,12 +44,9 @@ func (runner *Runner) readContext(args map[string]any) (Observation, error) {
 			return observation, fmt.Errorf("context kind and ID are unavailable; no external fetch is permitted")
 		}
 	}
-	cursor, _ := args["cursor"].(float64)
-	maxBytes := 16384
-	if specified, ok := args["max_bytes"].(float64); ok {
-		maxBytes = int(specified)
+	if kind != "observation" {
+		page, next, err = readPage(content, int(cursor), maxBytes)
 	}
-	page, next, err := readPage(content, int(cursor), maxBytes)
 	if err != nil {
 		return observation, err
 	}

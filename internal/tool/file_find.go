@@ -45,15 +45,23 @@ func (p *FileFindProvider) execute(ctx context.Context, args map[string]any) (st
 	}
 
 	caseSensitive, _ := args["case_sensitive"].(bool)
-	// Normalize Windows-style backslash separators so subpath queries
-	// (e.g. `pkg\util.go`) resolve identically on every platform.
-	query := strings.ReplaceAll(queryName, "\\", "/")
-
 	files, err := p.listGitFiles(ctx)
 	if err != nil {
 		return "", err
 	}
 
+	matched := MatchFileNames(files, queryName, caseSensitive, fileFindMaxCount)
+	if len(matched) == 0 {
+		return "// The file was not found", nil
+	}
+	return strings.Join(matched, "\n"), nil
+}
+
+func MatchFileNames(files []string, queryName string, caseSensitive bool, limit int) []string {
+	if strings.TrimSpace(queryName) == "" {
+		return nil
+	}
+	query := strings.ReplaceAll(queryName, "\\", "/")
 	// Precompute the query comparison form once; the file list can be
 	// large, so avoid recomputing strings.ToLower(query) on every iter.
 	var queryCmp string
@@ -77,7 +85,7 @@ func (p *FileFindProvider) execute(ctx context.Context, args map[string]any) (st
 		if strings.Contains(baseCmp, queryCmp) {
 			matched = append(matched, f)
 		}
-		if len(matched) >= fileFindMaxCount {
+		if len(matched) >= limit {
 			break
 		}
 	}
@@ -93,16 +101,13 @@ func (p *FileFindProvider) execute(ctx context.Context, args map[string]any) (st
 			if strings.Contains(pathCmp, queryCmp) {
 				matched = append(matched, f)
 			}
-			if len(matched) >= fileFindMaxCount {
+			if len(matched) >= limit {
 				break
 			}
 		}
 	}
 
-	if len(matched) == 0 {
-		return "// The file was not found", nil
-	}
-	return strings.Join(matched, "\n"), nil
+	return matched
 }
 
 // listGitFiles returns tracked and untracked files (respecting .gitignore) via git ls-files.

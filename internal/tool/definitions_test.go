@@ -92,14 +92,14 @@ func TestRegistry_GetAfterFreeze(t *testing.T) {
 }
 
 func TestIsReserved(t *testing.T) {
-	reserved := []string{"unknown", "task_done", "code_comment", "file_read", "file_find", "file_read_diff", "code_search", "context_read", "submit_analysis"}
+	reserved := []string{"unknown", "task_done", "code_comment", "file_read", "file_find", "file_read_diff", "code_search"}
 	for _, name := range reserved {
 		if !IsReserved(name) {
 			t.Errorf("IsReserved(%q) = false, want true", name)
 		}
 	}
 
-	nonReserved := []string{"custom_tool", "my_tool", "search", ""}
+	nonReserved := []string{"custom_tool", "my_tool", "search", "", "context_read", "submit_analysis"}
 	for _, name := range nonReserved {
 		if IsReserved(name) {
 			t.Errorf("IsReserved(%q) = true, want false", name)

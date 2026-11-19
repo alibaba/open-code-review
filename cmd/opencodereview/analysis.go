@@ -38,32 +38,22 @@ func validateAnalysisOptions(opts reviewOptions) error {
 	return nil
 }
 
-func pinAnalysisOptions(ctx context.Context, opts reviewOptions) (reviewOptions, error) {
+func pinAnalysisInput(ctx context.Context, opts reviewOptions) (string, *diff.InputResolution, error) {
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
-		return opts, err
+		return "", nil, err
 	}
 	repo, err := resolveRepoDir(opts.repoDir)
 	if err != nil {
-		return opts, err
+		return "", nil, err
 	}
-	if err := validateReviewRefs(repo, opts); err != nil {
-		return opts, err
+	runner := gitcmd.New(opts.maxGitProcs).LocalOnly()
+	if err := validateReviewRefsUsing(opts, func(ref string) ([]byte, error) {
+		return runner.Output(ctx, repo, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	}); err != nil {
+		return "", nil, err
 	}
-	opts.repoDir = repo
-	if opts.from == "" && opts.to == "" && opts.commit == "" {
-		return opts, nil
-	}
-	resolution, err := agent.ResolveComparisonInput(ctx, agent.Args{RepoDir: repo, From: opts.from, To: opts.to, Commit: opts.commit, GitRunner: gitcmd.New(opts.maxGitProcs)})
-	if err != nil {
-		return opts, err
-	}
-	if opts.commit != "" {
-		opts.commit = resolution.ResolvedHead
-	} else {
-		opts.from = resolution.ResolvedBase
-		opts.to = resolution.ResolvedHead
-	}
-	return opts, nil
+	resolution, err := agent.ResolveComparisonInput(ctx, agent.Args{RepoDir: repo, From: opts.from, To: opts.to, Commit: opts.commit, GitRunner: runner})
+	return repo, resolution, err
 }
 
 type analysisExecution struct {
@@ -90,7 +80,7 @@ func (execution *analysisExecution) prepare(ctx context.Context, cc *commonConte
 		return fmt.Errorf("analysis requires resolved comparison endpoints")
 	}
 	execution.fallback.Comparison = behaviortask.Comparison{Repository: cc.RepoDir, Mode: reviewModeFromOptions(opts), Old: resolution.ResolvedBase, Head: resolution.ResolvedHead, BaseIsEmpty: resolution.BaseIsEmpty}
-	input := behaviortask.Input{RepoDir: cc.RepoDir, Mode: reviewModeFromOptions(opts), Resolution: *resolution}
+	input := behaviortask.Input{GitRunner: cc.GitRunner, RepoDir: cc.RepoDir, Mode: reviewModeFromOptions(opts), Resolution: *resolution}
 	if cc.FileFilter != nil {
 		input.ExcludePatterns = append([]string(nil), cc.FileFilter.Exclude...)
 	}
@@ -109,7 +99,7 @@ func (execution *analysisExecution) prepare(ctx context.Context, cc *commonConte
 	if err := os.MkdirAll(parent, 0700); err != nil {
 		return err
 	}
-	execution.directory = filepath.Join(parent, reviewID)
+	directory := filepath.Join(parent, reviewID)
 	tpl, err := template.LoadBehaviorDefault()
 	if err != nil {
 		return err
@@ -123,7 +113,7 @@ func (execution *analysisExecution) prepare(ctx context.Context, cc *commonConte
 	}
 	client := budget.Wrap(llm.NewLLMClient(runtime.Endpoint, execution.collector, raw))
 	execution.runner, err = behaviortask.NewRunner(ctx, behaviortask.Deps{LLMClient: client, Model: runtime.Model, Language: runtime.RuntimeConfig.Language,
-		Template: tpl, ArtifactDir: execution.directory, MaxTokensBudget: int64(opts.maxTokensBudget),
+		Template: tpl, ArtifactDir: directory, MaxTokensBudget: int64(opts.maxTokensBudget),
 		NewRequestMeta: func(key string, taskType session.TaskType, requestNo int) llm.RequestMeta {
 			return llm.RequestMeta{Provider: runtime.Provider, Model: runtime.Model, FilePath: key, TaskType: string(taskType), RequestNo: requestNo}
 		},
@@ -131,6 +121,7 @@ func (execution *analysisExecution) prepare(ctx context.Context, cc *commonConte
 	if err != nil {
 		return err
 	}
+	execution.directory = directory
 	execution.closeRaw = bindRawWriter(raw, cc.RepoDir, execution.runner.Session())
 	return nil
 }
@@ -176,8 +167,7 @@ func (result *combinedResult) TotalOutputTokens() int64 {
 	return usage.OutputTokens
 }
 func (result *combinedResult) TotalTokensUsed() int64 {
-	usage, _ := result.budget.Snapshot()
-	return usage.InputTokens + usage.OutputTokens
+	return result.budget.Total()
 }
 func (result *combinedResult) TotalCacheReadTokens() int64 {
 	usage, _ := result.budget.Snapshot()

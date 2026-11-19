@@ -57,8 +57,9 @@ func (m ReviewMode) RefValue(toRef, commit string) (string, bool) {
 
 // FileReader resolves file contents according to the active review mode.
 type FileReader struct {
-	RepoDir string
-	Mode    ReviewMode
+	RegularWorkspaceOnly bool
+	RepoDir              string
+	Mode                 ReviewMode
 	// Ref is the git ref to use for ModeRange (--to) or ModeCommit (--commit).
 	// Empty for ModeWorkspace.
 	Ref    string
@@ -83,6 +84,15 @@ func (fr *FileReader) Read(ctx context.Context, path string) (string, error) {
 }
 
 func (fr *FileReader) readFromDisk(path string) (string, error) {
+	if fr.RegularWorkspaceOnly {
+		file, err := OpenRegularWorkspaceFile(fr.RepoDir, path)
+		if err != nil {
+			return "", err
+		}
+		defer file.Close()
+		data, err := io.ReadAll(file)
+		return string(data), err
+	}
 	fullPath, err := fr.resolveWorkspacePath(path)
 	if err != nil {
 		return "", err
@@ -196,6 +206,14 @@ func scanLines(r io.Reader, startLine, maxLines int) ([]string, int, error) {
 }
 
 func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([]string, int, error) {
+	if fr.RegularWorkspaceOnly {
+		file, err := OpenRegularWorkspaceFile(fr.RepoDir, path)
+		if err != nil {
+			return nil, 0, err
+		}
+		defer file.Close()
+		return scanLines(file, startLine, maxLines)
+	}
 	fullPath, err := fr.resolveWorkspacePath(path)
 	if err != nil {
 		return nil, 0, err

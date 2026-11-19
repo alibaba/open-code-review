@@ -37,11 +37,11 @@ type Report struct {
 func NewReport(result behaviortask.Result, runErr error, directory string) *Report {
 	report := &Report{SchemaVersion: "ocr.review-analysis/v2", Status: "failed", DeclaredCompletion: "unknown",
 		Comparison: result.Comparison, Scope: result.Scope, Completed: result.Completed, StopReason: result.StopReason, SubmissionStatus: result.SubmissionStatus,
-		Errors: append([]string{}, result.Errors...), Warnings: result.Warnings, ToolFailures: result.ToolFailures, Usage: result.Usage, Model: result.Model,
+		Errors: []string{}, Warnings: result.Warnings, ToolFailures: result.ToolFailures, Usage: result.Usage, Model: result.Model,
 		TemplateVersion: result.TemplateVersion, ToolsVersion: result.ToolsVersion, SessionID: result.SessionID, ArtifactDir: directory, ObservationIDs: result.ObservationIDs,
 		CitedObservationIDs: append([]string{}, result.CitedObservationIDs...), ContextIndex: result.ContextIndex}
-	if runErr != nil && len(report.Errors) == 0 {
-		report.Errors = append(report.Errors, runErr.Error())
+	if runErr != nil || len(result.Errors) != 0 {
+		report.Errors = append(report.Errors, behaviortask.FailureSummary(runErr))
 	}
 	if result.Analysis != nil {
 		report.Markdown = result.Analysis.Markdown

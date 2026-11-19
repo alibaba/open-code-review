@@ -6,12 +6,15 @@ package behaviortask
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/alibaba/open-code-review/internal/config/allowlist"
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
@@ -23,6 +26,7 @@ var revisionPattern = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 var numberedLine = regexp.MustCompile(`^(\d+)\|`)
 
 type codeTools struct {
+	runner     *gitcmd.Runner
 	registry   *tool.Registry
 	comparison Comparison
 	allowed    map[string]map[string]bool
@@ -40,7 +44,7 @@ func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 		(resolution.BaseIsEmpty && ((!workspace && input.Mode != "commit") || resolution.ResolvedBase != "")) {
 		return nil, fmt.Errorf("behavior requires a resolved range, commit, or workspace comparison")
 	}
-	gitRunner := gitcmd.New(1)
+	gitRunner := input.GitRunner.LocalOnly()
 	if input.Mode == "commit" {
 		actual, err := diff.NewCommitProvider(input.RepoDir, resolution.ResolvedHead, gitRunner).ResolveCommitComparison(ctx)
 		if err != nil {
@@ -63,6 +67,7 @@ func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 	var err error
 	if workspace {
 		current.Mode = tool.ModeWorkspace
+		current.RegularWorkspaceOnly = true
 		access, err = tool.NewWorkspaceCodeAccess(current, previous)
 	} else {
 		access, err = tool.NewComparisonCodeAccess(current, previous)
@@ -70,7 +75,7 @@ func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := &codeTools{registry: tool.NewRegistry(), comparison: comparison,
+	result := &codeTools{runner: gitRunner, registry: tool.NewRegistry(), comparison: comparison,
 		allowed: map[string]map[string]bool{}, diffs: map[string]model.Diff{}, scope: []Change{}}
 	for side, reader := range map[string]tool.FileReader{"old": previous, "new": current} {
 		result.allowed[side] = map[string]bool{}
@@ -129,13 +134,15 @@ func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 	}
 	result.registry.Register(&tool.FileReadProvider{Access: access})
 	result.registry.Register(&tool.CodeSearchProvider{Access: access})
-	result.registry.Register(&tool.FileFindProvider{Access: access})
 	result.registry.Register(tool.NewFileReadDiff(tool.NewDiffMap(diffMap)))
 	result.registry.Freeze()
 	return result, nil
 }
 
 func safePath(filePath string) bool {
+	if allowedext.IsSecretPath(filePath) {
+		return false
+	}
 	if filePath == "" || path.IsAbs(filePath) || path.Clean(filePath) != filePath || strings.ContainsAny(filePath, "\\\x00\r\n\t:") {
 		return false
 	}
@@ -170,6 +177,23 @@ func (code *codeTools) execute(ctx context.Context, name string, args map[string
 			return observation, fmt.Errorf("file is unavailable in the authorized %s scope", side)
 		}
 	}
+	if name == "file_find" {
+		paths := slices.Sorted(maps.Keys(code.allowed[side]))
+		paths = slices.DeleteFunc(paths, func(filePath string) bool { return !code.fileAllowed(side, filePath) })
+		query, _ := args["query_name"].(string)
+		sensitive, _ := args["case_sensitive"].(bool)
+		matches := tool.MatchFileNames(paths, query, sensitive, 101)
+		if len(matches) > 100 {
+			observation.Truncated = true
+			observation.Continuation = "Narrow query_name to see more authorized files."
+			matches = matches[:100]
+		}
+		observation.ReturnedContent = strings.Join(matches, "\n")
+		if len(matches) == 0 {
+			observation.ReturnedContent = "No authorized files returned."
+		}
+		return observation, nil
+	}
 	provider, ok := code.registry.Get(name)
 	if !ok {
 		return observation, fmt.Errorf("tool is unavailable")
@@ -191,25 +215,6 @@ func (code *codeTools) execute(ctx context.Context, name string, args map[string
 	}
 	if strings.HasPrefix(content, "Error:") || strings.Contains(content, "\nError:") || strings.Contains(content, "\nWarning:") {
 		observation.ErrorClass = "tool_error"
-	}
-	if name == "file_find" {
-		body := stripSide(content)
-		lines := strings.Split(body, "\n")
-		observation.Truncated = len(lines) >= 100
-		visible := []string{}
-		for _, filePath := range lines {
-			if code.fileAllowed(side, filePath) {
-				visible = append(visible, filePath)
-			}
-		}
-		observation.ReturnedContent = strings.Join(visible, "\n")
-		if len(visible) == 0 {
-			observation.ReturnedContent = "No authorized files returned."
-		}
-		if observation.Truncated {
-			observation.Continuation = "Narrow query_name; the underlying enumeration returned its 100-file limit before scope filtering."
-		}
-		return observation, nil
 	}
 	if name == "file_read" {
 		headers := strings.SplitN(stripSide(content), "\n", 4)
@@ -242,17 +247,12 @@ func (code *codeTools) execute(ctx context.Context, name string, args map[string
 			if !exists {
 				continue
 			}
-			for _, hunk := range diff.ParseHunks(changed.Diff) {
-				oldLine, newLine := hunk.OldStart, hunk.NewStart
-				for _, line := range hunk.Lines {
-					if line.Type != diff.HunkAdded && oldLine < hunk.OldStart+hunk.OldCount {
-						observation.Locations = append(observation.Locations, Location{"old", code.comparison.Old, changed.OldPath, oldLine, oldLine})
-						oldLine++
-					}
-					if line.Type != diff.HunkDeleted && newLine < hunk.NewStart+hunk.NewCount {
-						observation.Locations = append(observation.Locations, Location{"new", code.comparison.Head, changed.NewPath, newLine, newLine})
-						newLine++
-					}
+			for _, hunk := range diff.HunkRanges(changed.Diff) {
+				if hunk.OldCount > 0 {
+					observation.Locations = append(observation.Locations, Location{"old", code.comparison.Old, changed.OldPath, hunk.OldStart, hunk.OldStart + hunk.OldCount - 1})
+				}
+				if hunk.NewCount > 0 {
+					observation.Locations = append(observation.Locations, Location{"new", code.comparison.Head, changed.NewPath, hunk.NewStart, hunk.NewStart + hunk.NewCount - 1})
 				}
 			}
 		}

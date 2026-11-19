@@ -239,6 +239,22 @@ func TestBudgetsCancellationAndProviderFailure(test *testing.T) {
 	}
 }
 
+func TestObservationFailuresPublishOnlyReference(test *testing.T) {
+	runner := newTestRunner(test, fixture(test), nil, nil)
+	call := response("file_read", `{"file_path":"missing.go"}`).ToolCalls()[0]
+	outcome := runner.executeTool(test.Context(), "fixture", call, nil, "")
+	failures := runner.loop.ToolFailures()
+	if len(failures) != 1 || failures[0].Error != "obs-000001: unavailable" || failures[0].Arguments != "" || !strings.Contains(outcome.Content, "missing.go") {
+		test.Fatalf("unexpected failure diagnostics: %+v", failures)
+	}
+	call = response("file_read_diff", `{"path_array":["main.go","missing.go"]}`).ToolCalls()[0]
+	outcome = runner.executeTool(test.Context(), "fixture", call, nil, "")
+	failures = runner.loop.ToolFailures()
+	if len(failures) != 2 || failures[1].Error != "obs-000002: tool_error" || failures[1].Arguments != "" || !strings.Contains(outcome.Content, "+new value") {
+		test.Fatalf("mixed diff diagnostics: %+v", failures)
+	}
+}
+
 func TestLegacyToolsCannotCompleteBehavior(test *testing.T) {
 	input := fixture(test)
 	requests := 0

@@ -86,6 +86,43 @@ func TestSharedBudgetAfterCommentPreservesCoverage(test *testing.T) {
 	}
 }
 
+func TestSharedBudgetStopsUndispatchedGroups(test *testing.T) {
+	setTestHome(test, test.TempDir())
+	diffs := makeBudgetDiffs(8)
+	estimate := estimateDiffFileTokens(diffs[0])
+	budget := workflow.NewBudget(2*estimate, 1)
+	peer := budget.Wrap(&fakeBudgetAgentClient{perCallTokens: estimate})
+	if _, err := peer.CompletionsWithCtx(test.Context(), llm.ChatRequest{}); err != nil {
+		test.Fatal(err)
+	}
+	inner := &fakeBudgetAgentClient{perCallTokens: 100}
+	agent := New(Args{
+		RepoDir: test.TempDir(), LLMClient: budget.Wrap(inner), Model: "fake",
+		CommentCollector: tool.NewCommentCollector(), Tools: tool.NewRegistry(), MaxConcurrency: 1,
+		MaxTokensBudget: 2 * estimate, SharedTokensUsed: budget.Total, Template: budgetAgentTestTemplate(),
+		MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
+	})
+	agent.diffs = diffs
+	agent.args.Tools.Freeze()
+	if _, err := agent.dispatchSubtasks(test.Context()); err != nil {
+		test.Fatal(err)
+	}
+	manifest := finishManifestFlow(test, agent)
+	if inner.calls != 1 || budget.Total() != estimate+100 || len(manifest.Coverage.Failed) != 7 || !agent.BudgetExceeded() {
+		test.Fatalf("calls=%d coverage=%+v", inner.calls, manifest.Coverage)
+	}
+	for _, item := range manifest.Coverage.Failed {
+		if item.Classification != session.FailureBudget {
+			test.Fatalf("incorrect failure: %+v", item)
+		}
+	}
+	before := agent.runtimeConfigSHA256()
+	agent.args.MaxTokensBudget = 0
+	if before == agent.runtimeConfigSHA256() {
+		test.Fatal("shared budget omitted from configuration identity")
+	}
+}
+
 func TestSharedBudgetPreservesCompletedRoundWithoutCommentsOnEveryFile(test *testing.T) {
 	agent, budget := newSharedBudgetAgent(test, true)
 	comments, err := agent.dispatchSubtasks(test.Context())

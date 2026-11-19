@@ -4,16 +4,22 @@
 package behaviortask
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/tool"
 )
 
 func (code *codeTools) loadWorkspaceScope(ctx context.Context, input Input, runner *gitcmd.Runner) error {
@@ -62,107 +68,192 @@ func (code *codeTools) fileAllowed(side, filePath string) bool {
 	return code.comparison.Mode != "workspace" || side != "new" || regularWorkspaceFile(code.comparison.Repository, filePath)
 }
 
-func prepareWorkspaceInput(ctx context.Context, input Input, code *codeTools) (Input, error) {
-	runner := gitcmd.New(1)
-	provider := diff.NewWorkspaceProviderWithBase(input.RepoDir, input.Resolution, runner)
-	changes, err := provider.GetDiffSet(ctx)
+func workspaceInventory(ctx context.Context, input Input, code *codeTools, tracked []model.Diff, endpoints []string) ([]model.Diff, map[string]bool, error) {
+	staged, err := code.runner.Output(ctx, input.RepoDir, append([]string{"diff", "--cached", "--name-status", "-z", "--no-ext-diff", "--no-textconv", "--find-renames=100%"}, endpoints...)...)
 	if err != nil {
-		return input, err
+		return nil, nil, err
 	}
-	type workspaceChange struct {
-		diff     model.Diff
-		excluded bool
+	renames, err := parseInventory(string(staged))
+	if err != nil {
+		return nil, nil, err
 	}
-	groups := map[string][]workspaceChange{}
-	var paths []string
-	changes.ForEachInOrder(func(changed model.Diff, providerExcluded bool) {
-		if changed.IsDeleted {
-			changed.NewPath = changed.OldPath
+	byPath := map[string]model.Diff{}
+	for _, changed := range tracked {
+		byPath[changed.NewPath] = changed
+	}
+	for _, rename := range renames {
+		if rename.IsRenamed && byPath[rename.NewPath].IsNew && byPath[rename.OldPath].IsDeleted && (!code.allowed["old"][rename.OldPath] || !code.allowed["new"][rename.NewPath]) {
+			byPath[rename.NewPath] = rename
+			delete(byPath, rename.OldPath)
 		}
-		if len(groups[changed.NewPath]) == 0 {
-			paths = append(paths, changed.NewPath)
+	}
+	var candidates [][]string
+	var additions, deletions bool
+	for _, changed := range tracked {
+		if current, ok := byPath[changed.NewPath]; !ok || current.IsRenamed {
+			continue
 		}
-		groups[changed.NewPath] = append(groups[changed.NewPath], workspaceChange{changed, providerExcluded})
-	})
-	input.Diffs = []model.Diff{}
-	for _, filePath := range paths {
-		group := groups[filePath]
-		changed, excluded := group[0].diff, group[0].excluded
-		if len(group) > 1 {
-			if len(group) != 2 || !(group[0].diff.IsDeleted && group[1].diff.IsNew || group[1].diff.IsDeleted && group[0].diff.IsNew) {
-				return input, fmt.Errorf("ambiguous workspace changes for %q", filePath)
+		if changed.IsNew && code.fileAllowed("new", changed.NewPath) {
+			additions = true
+		} else if changed.IsDeleted && code.allowed["old"][changed.OldPath] {
+			deletions = true
+		} else {
+			continue
+		}
+		candidates = append(candidates, []string{changed.NewPath})
+	}
+	if additions && deletions {
+		batches, err := literalPathBatches(candidates)
+		if err != nil {
+			return nil, nil, err
+		}
+		children := changeChildren(tracked)
+		for _, batch := range batches {
+			args := append([]string{"diff", "--no-ext-diff", "--no-textconv", "--name-status", "-z", "--find-renames"}, endpoints...)
+			data, err := code.runner.Output(ctx, input.RepoDir, append(args, exactPatchPaths(batch, children)...)...)
+			if err != nil {
+				return nil, nil, err
 			}
-			deleted, added := group[0].diff, group[1].diff
-			if added.IsDeleted {
-				deleted, added = added, deleted
+			pairs, err := parseInventory(string(data))
+			if err != nil {
+				return nil, nil, err
 			}
-			changed = model.Diff{OldPath: filePath, NewPath: filePath, IsBinary: deleted.IsBinary || added.IsBinary}
-			excluded = excluded || group[1].excluded
-			if !excluded && !changed.IsBinary && code.allowed["old"][filePath] && code.fileAllowed("new", filePath) {
-				var present bool
-				changed, present, err = workspaceNetDiff(ctx, input, deleted, runner)
-				if err != nil {
-					return input, err
+			for _, pair := range pairs {
+				if pair.IsRenamed {
+					byPath[pair.NewPath] = pair
+					delete(byPath, pair.OldPath)
 				}
-				if !present {
-					continue
-				}
 			}
 		}
-		if excluded || changed.IsBinary || (!changed.IsNew && !code.allowed["old"][changed.OldPath]) || (!changed.IsDeleted && !code.fileAllowed("new", changed.NewPath)) {
-			changed.Diff = ""
-			changed.NewFileContent = ""
-		}
-		input.Diffs = append(input.Diffs, changed)
 	}
-	return input, nil
+	raw, err := code.runner.Output(ctx, input.RepoDir, "ls-files", "-z", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, nil, err
+	}
+	untracked := map[string]bool{}
+	for _, filePath := range strings.Split(string(raw), "\x00") {
+		if filePath == "" {
+			continue
+		}
+		untracked[filePath] = true
+		prior, exists := byPath[filePath]
+		if exists && !prior.IsDeleted {
+			return nil, nil, fmt.Errorf("ambiguous workspace change for %q", filePath)
+		}
+		byPath[filePath] = model.Diff{OldPath: filePath, NewPath: filePath, IsNew: !exists}
+	}
+	changes := make([]model.Diff, 0, len(byPath))
+	for _, filePath := range slices.Sorted(maps.Keys(byPath)) {
+		changes = append(changes, byPath[filePath])
+	}
+	return changes, untracked, nil
 }
 
-func workspaceNetDiff(ctx context.Context, input Input, deleted model.Diff, runner *gitcmd.Runner) (model.Diff, bool, error) {
-	filePath := deleted.OldPath
-	info, err := os.Lstat(filepath.Join(input.RepoDir, filePath))
+func workspaceUntrackedPatch(ctx context.Context, input Input, changed model.Diff, runner *gitcmd.Runner) (model.Diff, bool, error) {
+	filePath := changed.NewPath
+	file, err := tool.OpenRegularWorkspaceFile(input.RepoDir, filePath)
 	if err != nil {
-		return model.Diff{}, false, err
+		return changed, false, err
 	}
-	if !info.Mode().IsRegular() {
-		return model.Diff{}, false, fmt.Errorf("net workspace diff requires a regular file: %q", filePath)
-	}
-	patch, err := runner.Output(ctx, input.RepoDir, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--unified=3", "--end-of-options", input.Resolution.ResolvedBase+":"+filePath, "--", filePath)
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
-		return model.Diff{}, false, fmt.Errorf("read net workspace diff for %q: %w", filePath, err)
+		return changed, false, err
 	}
-	mode := func(patch, prefix string) string {
-		for _, line := range strings.Split(patch, "\n") {
-			if value, ok := strings.CutPrefix(line, prefix); ok {
-				return value
+	const limit = 64 << 20
+	if info.Size() > limit {
+		changed.IsBinary = true
+		return changed, true, nil
+	}
+	mode := "100644"
+	if info.Mode()&0111 != 0 {
+		mode = "100755"
+	}
+	header := fmt.Sprintf("diff --git %q %q\n", "a/"+filePath, "b/"+filePath)
+	if changed.IsNew {
+		data, err := io.ReadAll(io.LimitReader(file, limit+1))
+		if err != nil {
+			return changed, false, err
+		}
+		if len(data) > limit || bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0 {
+			changed.IsBinary = true
+			return changed, true, nil
+		}
+		var patch strings.Builder
+		patch.WriteString(header + "new file mode " + mode + "\n")
+		if len(data) > 0 {
+			text := bytes.TrimSuffix(data, []byte("\n"))
+			changed.Insertions = int64(bytes.Count(text, []byte("\n"))) + 1
+			fmt.Fprintf(&patch, "--- /dev/null\n+++ %q\n@@ -0,0 +1,%d @@\n", "b/"+filePath, changed.Insertions)
+			for line := range bytes.SplitSeq(text, []byte("\n")) {
+				patch.WriteByte('+')
+				patch.Write(line)
+				patch.WriteByte('\n')
+			}
+			if data[len(data)-1] != '\n' {
+				patch.WriteString("\\ No newline at end of file\n")
 			}
 		}
-		return ""
+		changed.Diff = strings.TrimSuffix(patch.String(), "\n")
+		return changed, true, nil
 	}
-	oldMode, newMode := mode(deleted.Diff, "deleted file mode "), "100644"
-	if info.Mode()&0111 != 0 {
-		newMode = "100755"
+	oldEntry, err := runner.Output(ctx, input.RepoDir, "ls-tree", "-z", input.Resolution.ResolvedBase, "--", ":(literal)"+filePath)
+	if err != nil {
+		return changed, false, err
 	}
+	oldMode, _, ok := strings.Cut(string(oldEntry), " ")
+	if !ok {
+		return changed, false, fmt.Errorf("missing base mode for %q", filePath)
+	}
+	gitDir, err := runner.Output(ctx, input.RepoDir, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return changed, false, err
+	}
+	snapshot, err := os.MkdirTemp("", "ocr-net-diff-*")
+	if err != nil {
+		return changed, false, err
+	}
+	defer os.RemoveAll(snapshot)
+	target := filepath.Join(snapshot, filepath.FromSlash(filePath))
+	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		return changed, false, err
+	}
+	captured, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return changed, false, err
+	}
+	written, copyErr := io.Copy(captured, io.LimitReader(file, limit+1))
+	closeErr := captured.Close()
+	if copyErr != nil || closeErr != nil {
+		return changed, false, errors.Join(copyErr, closeErr)
+	}
+	if written > limit {
+		changed.IsBinary = true
+		return changed, true, nil
+	}
+	patch, err := runner.Output(ctx, snapshot, "--git-dir="+strings.TrimSuffix(string(gitDir), "\n"), "--work-tree=.", "-c", "core.quotepath=false", "diff", "--no-textconv", "--no-ext-diff", "--no-color", "--end-of-options", input.Resolution.ResolvedBase+":"+filePath, "--", filePath)
+	if err != nil {
+		return changed, false, err
+	}
+	_, rest, _ := strings.Cut(string(patch), "\n")
 	var body strings.Builder
-	_, remainder, _ := strings.Cut(string(patch), "\n")
-	for _, line := range strings.Split(remainder, "\n") {
-		if line != "" && !strings.HasPrefix(line, "old mode ") && !strings.HasPrefix(line, "new mode ") {
+	for _, line := range strings.Split(rest, "\n") {
+		if line != "" && !strings.HasPrefix(line, "index ") && !strings.HasPrefix(line, "old mode ") && !strings.HasPrefix(line, "new mode ") {
 			body.WriteString(line + "\n")
 		}
 	}
-	if body.Len() == 0 && oldMode == newMode {
-		return model.Diff{}, false, nil
+	if oldMode == mode && body.Len() == 0 {
+		return changed, false, nil
 	}
-	header := fmt.Sprintf("diff --git %q %q\n", "a/"+filePath, "b/"+filePath)
-	if oldMode != newMode && oldMode != "" && newMode != "" {
-		header += fmt.Sprintf("old mode %s\nnew mode %s\n", oldMode, newMode)
+	if oldMode != mode {
+		header += fmt.Sprintf("old mode %s\nnew mode %s\n", oldMode, mode)
 	}
-	parsed, err := diff.ParseDiffText(ctx, header+body.String(), input.RepoDir, "", runner)
-	if err != nil {
-		return model.Diff{}, false, err
-	}
+	parsed := diff.ParsePatch(header + body.String())
 	if len(parsed) != 1 {
-		return model.Diff{}, false, fmt.Errorf("invalid net workspace diff for %q", filePath)
+		return changed, false, fmt.Errorf("invalid net workspace diff for %q", filePath)
+	}
+	if parsed[0].IsBinary {
+		parsed[0].Diff = ""
 	}
 	return parsed[0], true, nil
 }

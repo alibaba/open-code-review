@@ -80,6 +80,9 @@ func TestResolveUsageWrappedAnthropicCompatibleCacheTokens(t *testing.T) {
 	if usage.CacheWriteTokens != 15 {
 		t.Errorf("CacheWriteTokens = %d, want 15", usage.CacheWriteTokens)
 	}
+	if usage.PromptTokens != 155 {
+		t.Fatalf("prompt tokens including cache = %d", usage.PromptTokens)
+	}
 	if usage.TotalTokens != 175 {
 		t.Errorf("TotalTokens = %d, want 175", usage.TotalTokens)
 	}

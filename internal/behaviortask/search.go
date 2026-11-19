@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
@@ -78,7 +77,7 @@ func (code *codeTools) searchPaths(ctx context.Context, args map[string]any, sid
 	if patternBytes > scopedPathBytes {
 		return nil, fmt.Errorf("file_patterns exceed the safe Git argument limit; narrow the search")
 	}
-	data, err := gitcmd.New(1).Output(ctx, code.comparison.Repository, command...)
+	data, err := code.runner.Output(ctx, code.comparison.Repository, command...)
 	if err != nil {
 		return nil, fmt.Errorf("list search scope: %w", err)
 	}

@@ -42,6 +42,24 @@ func initRepo(t *testing.T) string {
 	return dir
 }
 
+func TestLocalOnlySharesSlotsAndDisablesFetching(test *testing.T) {
+	runner := New(1)
+	local := runner.LocalOnly()
+	if err := runner.acquire(test.Context()); err != nil {
+		test.Fatal(err)
+	}
+	defer runner.release()
+	ctx, cancel := context.WithCancel(test.Context())
+	cancel()
+	if local.acquire(ctx) == nil {
+		test.Fatal("independent Git semaphore")
+	}
+	env := strings.Join(local.command(test.Context(), ".", "status").Env, "\n")
+	if !strings.Contains(env, "GIT_NO_LAZY_FETCH=1") || !strings.Contains(env, "GIT_ALLOW_PROTOCOL=") {
+		test.Fatal("local-only Git command permits network access")
+	}
+}
+
 func TestRunner_New(t *testing.T) {
 	r := New(0)
 	if r == nil {

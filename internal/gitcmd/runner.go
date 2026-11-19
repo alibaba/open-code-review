@@ -36,7 +36,24 @@ var cancelGracePeriod = 5 * time.Second
 // semaphore. All git command invocations should go through a shared Runner
 // instance so that the total system-wide subprocess count stays bounded.
 type Runner struct {
-	sem chan struct{}
+	sem       chan struct{}
+	localOnly bool
+}
+
+func (r *Runner) LocalOnly() *Runner {
+	if r == nil {
+		r = New(1)
+	}
+	return &Runner{sem: r.sem, localOnly: true}
+}
+
+func (r *Runner) command(ctx context.Context, repoDir string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoDir
+	if r.localOnly {
+		cmd.Env = append(cmd.Environ(), "GIT_NO_LAZY_FETCH=1", "GIT_ALLOW_PROTOCOL=")
+	}
+	return cmd
 }
 
 // New creates a Runner that allows at most maxConcurrent simultaneous git
@@ -219,8 +236,7 @@ func (r *Runner) capture(ctx context.Context, repoDir string, combined bool, std
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = repoDir
+	cmd := r.command(ctx, repoDir, args...)
 	cmd.Stdout = outPipe.w
 	if combined {
 		cmd.Stderr = outPipe.w
@@ -345,8 +361,7 @@ func (r *Runner) Stream(ctx context.Context, repoDir string, consume func(stdout
 		errPipe.closeRead()
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = repoDir
+	cmd := r.command(ctx, repoDir, args...)
 	cmd.Stdout = outPipe.w
 	cmd.Stderr = errPipe.w
 

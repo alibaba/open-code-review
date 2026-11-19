@@ -17,6 +17,7 @@ type Budget struct {
 	mu        sync.Mutex
 	maximum   int64
 	usage     behaviortask.Usage
+	total     int64
 	exhausted bool
 	slots     chan struct{}
 }
@@ -43,6 +44,12 @@ type budgetClient struct {
 	client llm.LLMClient
 }
 
+func (budget *Budget) Total() int64 {
+	budget.mu.Lock()
+	defer budget.mu.Unlock()
+	return budget.total
+}
+
 func (client *budgetClient) CompletionsWithCtx(ctx context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
 	budget := client.budget
 	select {
@@ -55,7 +62,7 @@ func (client *budgetClient) CompletionsWithCtx(ctx context.Context, request llm.
 		return nil, err
 	}
 	budget.mu.Lock()
-	if budget.maximum > 0 && budget.usage.InputTokens+budget.usage.OutputTokens >= budget.maximum {
+	if budget.maximum > 0 && budget.total >= budget.maximum {
 		budget.exhausted = true
 		budget.mu.Unlock()
 		return nil, llm.ErrTokenBudget
@@ -72,20 +79,25 @@ func (client *budgetClient) CompletionsWithCtx(ctx context.Context, request llm.
 				}
 			}
 			var output int64
-			if len(response.Choices) > 0 {
-				message := response.Choices[0].Message
+			for _, choice := range response.Choices {
+				message := choice.Message
 				if message.Content != nil {
 					output += int64(llm.CountTokens(*message.Content))
 				}
 				output += int64(llm.CountTokens(message.ReasoningContent))
-			}
-			for _, call := range response.ToolCalls() {
-				output += int64(llm.CountTokens(call.Function.Arguments))
+				for _, call := range message.ToolCalls {
+					output += int64(llm.CountTokens(call.Function.Arguments))
+				}
 			}
 			usage = &llm.UsageInfo{PromptTokens: input, CompletionTokens: output, TotalTokens: input + output}
 			response.Usage = usage
 		}
 		budget.mu.Lock()
+		charged := usage.PromptTokens + usage.CompletionTokens
+		if charged == 0 {
+			charged = usage.TotalTokens
+		}
+		budget.total += charged
 		budget.usage.InputTokens += usage.PromptTokens
 		budget.usage.OutputTokens += usage.CompletionTokens
 		budget.usage.CacheReadTokens += usage.CacheReadTokens

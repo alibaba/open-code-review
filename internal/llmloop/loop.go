@@ -25,6 +25,7 @@ type Deps struct {
 	Model           string
 	Session         *session.SessionHistory
 	NewRequestMeta  func(taskKey string, taskType session.TaskType, requestNo int) llm.RequestMeta
+	ProgressError   func(error) string
 	MaxTokensBudget int64
 }
 
@@ -77,6 +78,9 @@ type ToolFailureDetail struct {
 
 // NewRunner returns a Runner bound to the given dependencies.
 func NewRunner(deps Deps, task Task) *Runner {
+	if deps.ProgressError == nil {
+		deps.ProgressError = error.Error
+	}
 	return &Runner{deps: deps, task: task}
 }
 
@@ -353,10 +357,10 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 			rec.SetError(err, duration)
 			telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 			llmSpan.End()
-			telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
 			if errors.Is(err, llm.ErrTokenBudget) {
 				return false, StopTokenBudget, nil
 			}
+			telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
 			return false, StopNone, fmt.Errorf("LLM completion error: %w", err)
 		}
 		rec.SetResponse(resp, duration)
@@ -516,11 +520,11 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 		rec.SetError(err, duration)
 		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 		llmSpan.End()
-		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
-		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", taskKey, err)
 		if errors.Is(err, llm.ErrTokenBudget) {
 			return false, StopTokenBudget
 		}
+		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %s\n", taskKey, r.deps.ProgressError(err))
+		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
 		return false, StopNone
 	}
 
@@ -575,7 +579,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 		if *messages, err = r.runCompression(ctx, *messages, taskKey); err != nil {
 			// Compression failed; continue with over-limit messages — the
 			// post-append check below will retry.
-			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
+			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %s\n", r.deps.ProgressError(err))
 		}
 	}
 
@@ -594,7 +598,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 		r.cancelPendingCompression(st)
 		var err error
 		if *messages, err = r.runCompression(ctx, *messages, taskKey); err != nil {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
+			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %s\n", r.deps.ProgressError(err))
 		}
 		finalCount = CountMessagesTokens(*messages)
 	}

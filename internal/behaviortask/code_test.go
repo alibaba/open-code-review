@@ -74,7 +74,7 @@ func TestCodeScopeAndObservationLocations(test *testing.T) {
 	if runner.code.scope[len(runner.code.scope)-1].ExcludedReason == "" {
 		test.Fatal("exclusion missing from scope")
 	}
-	for _, filePath := range []string{".env", ".env.production", "nested/.ssh/config", "secret.pem", "key.key", ".netrc", "id_ed25519", "..", "../x", "a/../b", "/etc/passwd", "x\ny", "a:b", "a\\b", ".git/config"} {
+	for _, filePath := range []string{".env", ".env.production", "nested/.ssh/config", "secret.pem", "key.key", ".netrc", "id_ed25519", ".dockercfg", "nested/_netrc", "id_ecdsa", ".git-credentials", "..", "../x", "a/../b", "/etc/passwd", "x\ny", "a:b", "a\\b", ".git/config"} {
 		if safePath(filePath) {
 			test.Errorf("unsafe path accepted: %q", filePath)
 		}

@@ -20,6 +20,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/behaviortask"
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -58,34 +59,50 @@ func TestAnalysisFlags(test *testing.T) {
 func TestAnalysisPinning(test *testing.T) {
 	repo := retryTestRepo(test)
 	opts := reviewOptions{repoDir: repo, from: "HEAD~1", to: "HEAD"}
-	pinned, err := pinAnalysisOptions(test.Context(), opts)
-	if err != nil || len(pinned.from) != 40 || len(pinned.to) != 40 {
+	_, pinned, err := pinAnalysisInput(test.Context(), opts)
+	if err != nil || len(pinned.ResolvedBase) != 40 || len(pinned.ResolvedHead) != 40 {
 		test.Fatalf("pinning: %+v %v", pinned, err)
 	}
 	opts.from, opts.to, opts.commit = "", "", "HEAD"
-	pinned, err = pinAnalysisOptions(test.Context(), opts)
-	if err != nil || len(pinned.commit) != 40 {
+	_, pinned, err = pinAnalysisInput(test.Context(), opts)
+	if err != nil || len(pinned.ResolvedHead) != 40 {
 		test.Fatalf("commit: %+v %v", pinned, err)
 	}
-	pinned, err = pinAnalysisOptions(test.Context(), reviewOptions{repoDir: repo})
-	if err != nil || pinned.from != "" || pinned.to != "" || pinned.commit != "" {
+	pinnedRepo, pinned, err := pinAnalysisInput(test.Context(), reviewOptions{repoDir: repo})
+	if err != nil || pinned.ResolvedHead != "" || len(pinned.ResolvedBase) != 40 {
 		test.Fatalf("workspace must keep its mode: %+v %v", pinned, err)
 	}
 	repoInfo, err := os.Stat(repo)
 	if err != nil {
 		test.Fatal(err)
 	}
-	pinnedInfo, err := os.Stat(pinned.repoDir)
+	pinnedInfo, err := os.Stat(pinnedRepo)
 	if err != nil {
 		test.Fatal(err)
 	}
 	if !os.SameFile(repoInfo, pinnedInfo) {
-		test.Fatalf("workspace repository changed: got %q, want %q", pinned.repoDir, repo)
+		test.Fatalf("workspace repository changed: got %q, want %q", pinnedRepo, repo)
 	}
 	for _, invalid := range []reviewOptions{{repoDir: repo, from: "HEAD", commit: "HEAD"}, {repoDir: test.TempDir(), commit: "HEAD"}, {repoDir: repo, commit: "--help"}, {repoDir: repo, commit: "missing"}} {
-		if _, err := pinAnalysisOptions(test.Context(), invalid); err == nil {
+		if _, _, err := pinAnalysisInput(test.Context(), invalid); err == nil {
 			test.Fatalf("accepted %+v", invalid)
 		}
+	}
+}
+
+func TestRejectedArtifactDirectoryIsNotPublished(test *testing.T) {
+	repo := retryTestRepo(test)
+	test.Setenv("HOME", repo)
+	test.Setenv("USERPROFILE", repo)
+	opts := reviewOptions{repoDir: repo, commit: "HEAD"}
+	_, resolution, err := pinAnalysisInput(test.Context(), opts)
+	if err != nil {
+		test.Fatal(err)
+	}
+	execution := newAnalysisExecution(&commonContext{RepoDir: repo, Template: &template.Template{MaxTokens: 10000, MaxToolRequestTimes: 10}}, opts, &llmRuntime{Model: "fake"}, workflow.NewBudget(0, 1), "never-created", resolution)
+	result, err := execution.run(test.Context())
+	if err == nil || execution.report(result, err).ArtifactDir != "" {
+		test.Fatalf("preparation: directory=%q err=%v", execution.directory, err)
 	}
 }
 
@@ -265,6 +282,12 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 				test.Fatalf("missing peer report: %s", data)
 			}
 			report := payload.AnalysisMeta
+			if fixture.failAnalysis && (strings.Contains(string(data), "analysis unavailable") || len(report.Errors) != 1 || report.Errors[0] != "analysis provider returned HTTP 402") {
+				test.Fatalf("unexpected public provider diagnostics: %v", report.Errors)
+			}
+			if !fixture.workspace && (payload.Manifest.Input.RequestedFrom != "HEAD~1" || payload.Manifest.Input.RequestedHead != "HEAD") {
+				test.Fatalf("requested refs changed: %+v", payload.Manifest.Input)
+			}
 			if report.SessionID == payload.SessionID || report.Comparison.Head == report.Comparison.Old {
 				test.Fatalf("identity: %s", data)
 			}

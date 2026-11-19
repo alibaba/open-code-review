@@ -146,7 +146,8 @@ type Args struct {
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
 	// whole run; dispatch stops once the running total + a per-group look-ahead
 	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
-	MaxTokensBudget int64
+	MaxTokensBudget  int64
+	SharedTokensUsed func() int64
 
 	// SkipFilter disables the REVIEW_FILTER_TASK even when the template
 	// defines one. Set via the --no-filter CLI flag.
@@ -233,6 +234,10 @@ func New(args Args) *Agent {
 	// DiffLookup closure captures a so the runner can resolve per-file
 	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
 	// after New returns).
+	localBudget := args.MaxTokensBudget
+	if args.SharedTokensUsed != nil {
+		localBudget = 0
+	}
 	a.runner = reviewtask.NewRunner(reviewtask.Deps{
 		LLMClient:         args.LLMClient,
 		Model:             args.Model,
@@ -247,7 +252,7 @@ func New(args Args) *Agent {
 		// Non-nil only here: the same Runner serves scan, whose requests must
 		// stay out of the retry report. See newRequestMeta.
 		NewRequestMeta:  a.newRequestMeta,
-		MaxTokensBudget: args.MaxTokensBudget,
+		MaxTokensBudget: localBudget,
 	})
 	return a
 }
@@ -684,41 +689,6 @@ dispatchLoop:
 	for gi := range groups {
 		group := groups[gi]
 
-		// Per-group budget look-ahead, checked BEFORE acquiring the semaphore:
-		// if tokens already spent plus an estimate of this group's cost would
-		// exceed the budget, stop scheduling further groups. Any group already
-		// in flight is allowed to finish — overrun is bounded by in-flight
-		// count (≤ concurrency).
-		if a.args.MaxTokensBudget > 0 {
-			used := a.runner.TotalTokensUsed()
-			var groupEst int64
-			for _, d := range group.Diffs {
-				groupEst += estimateDiffFileTokens(d)
-			}
-			projected := used + groupEst
-			if projected > a.args.MaxTokensBudget {
-				firstPath := group.Diffs[0].NewPath
-				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + group est %s = projected %s > budget %s) — skipping group %q and remaining\n",
-					humanTokens(used), humanTokens(groupEst), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), group.Label)
-				a.recordWarning("token_budget_reached", firstPath,
-					fmt.Sprintf("stopped dispatch: used %d tokens + group estimate %d = projected %d exceeds budget %d", used, groupEst, projected, a.args.MaxTokensBudget))
-				a.budgetExceeded.Store(true)
-				// Deliberately NOT SetRunFailure: budget exhaustion is a controlled
-				// coverage truncation, not a run-level failure. SetRunFailure would
-				// force terminal_state=failed regardless of coverage, and claim the
-				// single first-wins slot blocking genuine run-level causes (deadline,
-				// cancellation). Record a pending failure cause instead — Finalize
-				// attributes undispatched items to failed(budget) while the terminal
-				// state stays coverage-derived.
-				if b := a.session.Manifest(); b != nil {
-					if err := b.SetPendingFailureCause(session.FailureBudget, "aggregate token budget reached before dispatch completed"); err != nil {
-						a.recordWarning("manifest_error", "", err.Error())
-					}
-				}
-				break
-			}
-		}
-
 		select {
 		case sem <- struct{}{}: // acquire semaphore
 		case <-ctx.Done():
@@ -727,6 +697,19 @@ dispatchLoop:
 		if ctx.Err() != nil {
 			<-sem // release the slot acquired concurrently with cancellation
 			break dispatchLoop
+		}
+		if reason := a.dispatchBudgetStop(group); reason != "" {
+			<-sem
+			if a.budgetExceeded.CompareAndSwap(false, true) {
+				fmt.Fprintf(stdout.Writer(), "[ocr] %s; skipping group %q and remaining\n", reason, group.Label)
+				a.recordWarning("token_budget_reached", group.Diffs[0].NewPath, reason)
+			}
+			if builder := a.session.Manifest(); builder != nil {
+				if err := builder.SetPendingFailureCause(session.FailureBudget, reason); err != nil {
+					a.recordWarning("manifest_error", "", err.Error())
+				}
+			}
+			break
 		}
 		dispatched += int64(len(group.Diffs))
 		wg.Add(1)
@@ -1498,7 +1481,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 			return false, nil, ctx.Err()
 		}
 
-		if round > 1 && a.args.MaxTokensBudget > 0 && (a.budgetExceeded.Load() || a.runner.TotalTokensUsed() > a.args.MaxTokensBudget) {
+		if round > 1 && a.args.SharedTokensUsed == nil && a.args.MaxTokensBudget > 0 && (a.budgetExceeded.Load() || a.runner.TotalTokensUsed() > a.args.MaxTokensBudget) {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Aggregate budget exceeded, skipping round %d for group %q\n", round, groupKey)
 			// A group can finish a round over budget with no other gate noticing,
 			// so record it here too or the run would report the budget as intact.
@@ -1572,7 +1555,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 				// warning list agree with the item's failed(budget) classification.
 				if a.budgetExceeded.CompareAndSwap(false, true) {
 					message := fmt.Sprintf("stopped group %q mid-review: aggregate LLM token budget exhausted", groupKey)
-					if a.args.MaxTokensBudget > 0 {
+					if a.args.SharedTokensUsed == nil && a.args.MaxTokensBudget > 0 {
 						message = fmt.Sprintf("stopped group %q mid-review: used %d tokens exceeds budget %d", groupKey, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget)
 					}
 					a.recordWarning("token_budget_reached", g.Diffs[0].NewPath,

@@ -162,6 +162,9 @@ call Review's MCP tools. This is not a sandbox against hostile local Git config.
 Diff preparation and code search use bounded batches of authorized paths instead
 of passing every excluded file to Git. Search patterns narrow that scope; returned
 matches are checked against the authorized side before observation persistence.
+For commit comparisons, exact renames are identified by object ID. If similarity
+detection would require an excluded blob, unmatched additions and deletions stay
+separate. Workspace renames are matched within each authorized path batch.
 
 ## JSON and status contract
 
@@ -251,10 +254,19 @@ including Review grouping/planning/filtering/relocation and memory compression.
 already admitted calls can finish and overshoot it, but no new model request is
 admitted after the accumulated input plus output usage reaches the limit. Budget
 rejection is not a provider error and is not retried by HTTP transport.
+Before dispatching a Review group, the scheduler also checks that its estimated
+cost fits the shared balance, including usage already incurred by Analysis.
+Unlike standalone Review, a shared budget does not admit a final submission
+round after exhaustion. Both roles also share the `--max-git-procs` limit.
 
 The top-level token summary counts both roles once. Analysis usage is separately
 available in `analysis_meta`. Provider usage takes precedence; absent usage is estimated
 from request messages, tool definitions, response text, reasoning, and tool arguments.
+When a provider reports only a total, that total counts toward the cap and the
+top-level summary without inventing an input/output split. Large change lists
+and background inputs are paged through `context_read` if they would overflow the
+initial prompt. If even the instructions and tool schemas do not fit, analysis
+stops before sending a request.
 `--timeout` bounds analysis preparation and execution together. Preparation runs in
 the analysis branch, so slow or failed preparation does not block the Review branch.
 `--max-tools` bounds the single investigation loop.

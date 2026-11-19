@@ -91,6 +91,29 @@ func TestUTF8PageAndContextValidation(test *testing.T) {
 	}
 }
 
+func TestLargeInventoryIsPagedBeforeFirstRequest(test *testing.T) {
+	runner := newTestRunner(test, fixture(test), nil, nil)
+	runner.deps.Template.MaxTokens = 16000
+	for index := 0; index < 2000; index++ {
+		runner.code.scope = append(runner.code.scope, Change{NewPath: "package/component.go"})
+	}
+	messages, err := runner.messages()
+	if err != nil {
+		test.Fatal(err)
+	}
+	if llmloop.CountMessagesTokens(messages)+runner.toolTokens >= llmloop.PromptTokenLimit(16000) {
+		test.Fatal("oversized first request")
+	}
+	result, err := runner.dispatch(test.Context(), "context_read", `{"kind":"inventory","id":"changes","max_bytes":64}`)
+	if err != nil || !strings.Contains(result.Content, `"continuation":"64"`) {
+		test.Fatalf("inventory page: %s %v", result.Content, err)
+	}
+	runner.deps.Template.MaxTokens = 1
+	if _, err := runner.messages(); err != ErrInitialPromptTooLarge {
+		test.Fatalf("expected local prompt limit, got %v", err)
+	}
+}
+
 func TestPreparationAndArtifactFailures(test *testing.T) {
 	input := fixture(test)
 	client := fakeClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {

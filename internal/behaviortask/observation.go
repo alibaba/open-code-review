@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -49,6 +50,13 @@ type observationStore struct {
 	path         string
 	comparisonID string
 	items        []Observation
+	positions    map[string]section
+	size         int64
+}
+
+type section struct {
+	offset int64
+	length int
 }
 
 func newObservationStore(directory, comparisonID string) (*observationStore, error) {
@@ -60,7 +68,7 @@ func newObservationStore(directory, comparisonID string) (*observationStore, err
 	if err := handle.Close(); err != nil {
 		return nil, err
 	}
-	return &observationStore{path: file, comparisonID: comparisonID}, nil
+	return &observationStore{path: file, comparisonID: comparisonID, positions: map[string]section{}}, nil
 }
 
 func contentHash(content string) string {
@@ -89,8 +97,36 @@ func (store *observationStore) append(observation Observation) (string, error) {
 	if closeErr != nil {
 		return "", closeErr
 	}
+	store.positions[observation.ID] = section{store.size, len(data)}
+	store.size += int64(len(data)) + 1
+	observation.ReturnedContent = ""
 	store.items = append(store.items, observation)
 	return string(data), nil
+}
+
+func (store *observationStore) page(position section, cursor, maxBytes int) (string, string, error) {
+	if cursor < 0 || cursor > position.length || maxBytes < 4 || maxBytes > 65536 {
+		return "", "", fmt.Errorf("invalid observation page bounds")
+	}
+	file, err := os.Open(store.path)
+	if err != nil {
+		return "", "", err
+	}
+	defer file.Close()
+	data := make([]byte, min(maxBytes+utf8.UTFMax, position.length-cursor))
+	_, err = io.ReadFull(io.NewSectionReader(file, position.offset+int64(cursor), int64(len(data))), data)
+	if err != nil {
+		return "", "", err
+	}
+	page, _, err := readPage(string(data), 0, maxBytes)
+	if err != nil {
+		return "", "", err
+	}
+	next := ""
+	if cursor+len(page) < position.length {
+		next = fmt.Sprint(cursor + len(page))
+	}
+	return page, next, nil
 }
 
 func compactLocations(locations []Location) []Location {

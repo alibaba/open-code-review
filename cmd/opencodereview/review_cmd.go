@@ -122,12 +122,13 @@ func init() {
 }
 
 func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error) {
+	var sealedInput *diff.InputResolution
 	if opts.analysis {
 		if err := validateAnalysisOptions(opts); err != nil {
 			return err
 		}
 		var err error
-		opts, err = pinAnalysisOptions(ctx, opts)
+		opts.repoDir, sealedInput, err = pinAnalysisInput(ctx, opts)
 		if err != nil {
 			return err
 		}
@@ -154,6 +155,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}()
 
 	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
+	backgroundCommit := opts.commit
+	if sealedInput != nil {
+		contentRef = sealedInput.ResolvedHead
+		if backgroundCommit != "" {
+			backgroundCommit = sealedInput.ResolvedHead
+		}
+	}
 	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true)
 	if err != nil {
 		return err
@@ -162,11 +170,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security (#112): reject ref-option injection before any git invocation.
-	if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
-		return err
+	if sealedInput == nil {
+		if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
+			return err
+		}
 	}
 
-	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
+	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, backgroundCommit)
 	if err != nil {
 		return err
 	}
@@ -230,7 +240,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Model:    rt.Model,
 	}
 
-	var sealedInput *diff.InputResolution
 	if sealed != nil {
 		sealedInput = &sealed.Resolution
 	}
@@ -262,9 +271,9 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	planToolDefs = append(planToolDefs, mcpToolDefs...)
 	mainToolDefs = append(mainToolDefs, mcpToolDefs...)
 
-	reviewBudget := int64(opts.maxTokensBudget)
-	if opts.analysis {
-		reviewBudget = 0
+	var sharedTokensUsed func() int64
+	if sharedBudget != nil {
+		sharedTokensUsed = sharedBudget.Total
 	}
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
@@ -290,7 +299,8 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
 		SealedInput:           codeTools.resolution,
-		MaxTokensBudget:       reviewBudget,
+		MaxTokensBudget:       int64(opts.maxTokensBudget),
+		SharedTokensUsed:      sharedTokensUsed,
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
@@ -576,6 +586,12 @@ func requireGitRepo(dir string) error {
 // validateReviewRefs rejects ref-option injection (#112): any --from/--to/
 // --commit value must be a real commit ref and must not start with '-'.
 func validateReviewRefs(repoDir string, opts reviewOptions) error {
+	return validateReviewRefsUsing(opts, func(ref string) ([]byte, error) {
+		return runGitCmd(repoDir, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	})
+}
+
+func validateReviewRefsUsing(opts reviewOptions, verify func(string) ([]byte, error)) error {
 	refs := []struct {
 		flag string
 		ref  string
@@ -591,7 +607,7 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 		if strings.HasPrefix(item.ref, "-") {
 			return fmt.Errorf("%s value %q is not a valid git ref: refs must not start with '-'", item.flag, item.ref)
 		}
-		if out, err := runGitCmd(repoDir, "rev-parse", "--verify", "--end-of-options", item.ref+"^{commit}"); err != nil {
+		if out, err := verify(item.ref); err != nil {
 			msg := strings.TrimSpace(string(out))
 			if msg != "" {
 				return fmt.Errorf("%s value %q is not a valid commit ref: %s", item.flag, item.ref, msg)

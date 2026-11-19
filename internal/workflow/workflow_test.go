@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,6 +20,42 @@ import (
 )
 
 type testClient func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error)
+
+func TestTotalOnlyAndMultipleChoices(test *testing.T) {
+	budget := NewBudget(150, 1)
+	calls := 0
+	client := budget.Wrap(testClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
+		calls++
+		return &llm.ChatResponse{Usage: &llm.UsageInfo{TotalTokens: 175}}, nil
+	}))
+	if _, err := client.CompletionsWithCtx(test.Context(), llm.ChatRequest{}); err != nil {
+		test.Fatal(err)
+	}
+	usage, _ := budget.Snapshot()
+	if _, err := client.CompletionsWithCtx(test.Context(), llm.ChatRequest{}); !errors.Is(err, llm.ErrTokenBudget) || calls != 1 || budget.Total() != 175 || usage.InputTokens+usage.OutputTokens != 0 {
+		test.Fatalf("calls=%d total=%d usage=%+v err=%v", calls, budget.Total(), usage, err)
+	}
+	budget = NewBudget(0, 1)
+	first, second, reason, args := "alpha", "beta", "reason", "arguments"
+	client = budget.Wrap(testClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
+		return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &first}}, {Message: llm.ResponseMessage{Content: &second, ReasoningContent: reason, ToolCalls: []llm.ToolCall{{Function: llm.FunctionCall{Arguments: args}}}}}}}, nil
+	}))
+	if _, err := client.CompletionsWithCtx(test.Context(), llm.ChatRequest{}); err != nil {
+		test.Fatal(err)
+	}
+	usage, _ = budget.Snapshot()
+	if usage.OutputTokens != int64(llm.CountTokens(first)+llm.CountTokens(second)+llm.CountTokens(reason)+llm.CountTokens(args)) {
+		test.Fatalf("incomplete candidate usage: %+v", usage)
+	}
+}
+
+func TestPublicReportOmitsRawErrors(test *testing.T) {
+	const raw = "untrusted provider response"
+	report := NewReport(behaviortask.Result{Errors: []string{raw}}, errors.New(raw), "")
+	if len(report.Errors) != 1 || strings.Contains(report.Errors[0], raw) {
+		test.Fatal(report.Errors)
+	}
+}
 
 func (client testClient) CompletionsWithCtx(ctx context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
 	return client(ctx, request)

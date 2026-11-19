@@ -5,6 +5,7 @@ package behaviortask
 
 import (
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 )
@@ -13,6 +14,7 @@ const SchemaVersion = "ocr.behavior-impact/v2"
 const ToolsVersion = "ocr.behavior-tools/v2"
 
 type Input struct {
+	GitRunner       *gitcmd.Runner
 	RepoDir         string
 	Mode            string
 	Resolution      diff.InputResolution

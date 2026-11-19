@@ -22,12 +22,13 @@ func workspaceInput(test *testing.T) Input {
 	input.Resolution = diff.InputResolution{ResolvedBase: input.Resolution.ResolvedBase}
 	input.Diffs = nil
 	for name, content := range map[string]string{
-		"main.go":      "workspace value\nunchanged\n",
-		"untracked.go": "workspace value from untracked\n",
-		".env":         "SECRET workspace value\n",
-		"excluded.go":  "EXCLUDED workspace value\n",
-		".gitignore":   "ignored.go\n",
-		"ignored.go":   "IGNORED workspace value\n",
+		"main.go":          "workspace value\nunchanged\n",
+		"untracked.go":     "workspace value from untracked\n",
+		".env":             "SECRET workspace value\n",
+		".git-credentials": "SECRET workspace value\n",
+		"excluded.go":      "EXCLUDED workspace value\n",
+		".gitignore":       "ignored.go\n",
+		"ignored.go":       "IGNORED workspace value\n",
 	} {
 		if err := os.WriteFile(filepath.Join(input.RepoDir, name), []byte(content), 0600); err != nil {
 			test.Fatal(err)
@@ -56,7 +57,7 @@ func TestPrepareWorkspaceInput(test *testing.T) {
 		if changed.NewPath == "ignored.go" {
 			test.Fatal("ignored untracked file was included")
 		}
-		if changed.NewPath == ".env" || changed.NewPath == "excluded.go" {
+		if changed.NewPath == ".env" || changed.NewPath == ".git-credentials" || changed.NewPath == "excluded.go" {
 			if changed.Diff != "" || changed.NewFileContent != "" {
 				test.Fatalf("excluded content retained: %+v", changed)
 			}
@@ -89,7 +90,7 @@ func TestWorkspaceToolExclusions(test *testing.T) {
 			test.Fatal(err)
 		}
 	}
-	for _, name := range []string{".env", "excluded.go", "ignored.go", "late.key", "late.go"} {
+	for _, name := range []string{".env", ".git-credentials", "excluded.go", "ignored.go", "late.key", "late.go"} {
 		if _, err := code.execute(test.Context(), "file_read", map[string]any{"file_path": name}); err == nil {
 			test.Fatalf("read excluded file %q", name)
 		}

@@ -35,6 +35,8 @@ type Deps struct {
 }
 
 type Runner struct {
+	indexes          map[string]string
+	toolTokens       int
 	loop             *llmloop.Runner
 	code             *codeTools
 	store            *observationStore
@@ -104,6 +106,11 @@ func NewRunner(ctx context.Context, deps Deps, input Input) (*Runner, error) {
 		return nil, err
 	}
 	runner := &Runner{code: code, deps: deps, contexts: slices.Clone(input.Contexts), schemas: map[string]*jsonschema.Resolved{}, submissionStatus: "not_submitted"}
+	toolJSON, err := json.Marshal(definitions)
+	if err != nil {
+		return nil, err
+	}
+	runner.toolTokens = llm.CountTokens(string(toolJSON))
 	var submit llm.ToolDef
 	for _, definition := range definitions {
 		data, err := json.Marshal(definition.Function.Parameters)
@@ -139,7 +146,7 @@ func NewRunner(ctx context.Context, deps Deps, input Input) (*Runner, error) {
 	for _, message := range deps.Template.FinalRound.Messages {
 		grace = append(grace, llm.NewTextMessage(message.Role, message.Content))
 	}
-	runner.loop = llmloop.NewRunner(llmloop.Deps{LLMClient: deps.LLMClient, Model: deps.Model, Session: runner.history, NewRequestMeta: deps.NewRequestMeta, MaxTokensBudget: deps.MaxTokensBudget}, llmloop.Task{
+	runner.loop = llmloop.NewRunner(llmloop.Deps{LLMClient: deps.LLMClient, Model: deps.Model, Session: runner.history, NewRequestMeta: deps.NewRequestMeta, MaxTokensBudget: deps.MaxTokensBudget, ProgressError: FailureSummary}, llmloop.Task{
 		ToolDefs: definitions, ExecuteTool: runner.executeTool, MaxRounds: deps.Template.MaxToolRequestTimes,
 		MaxContextTokens: deps.Template.MaxTokens, MaxCompletionTokens: deps.Template.MaxCompletionTokens,
 		EmptyResponseMessage: "Use an available evidence tool or submit_analysis; prose alone does not complete the analysis.",
@@ -158,6 +165,37 @@ func (runner *Runner) messages() ([]llm.Message, error) {
 		}
 	}
 	values["background_context"] = background
+	messages, err := runner.renderMessages(values)
+	if err != nil {
+		return nil, err
+	}
+	limit := llmloop.PromptTokenLimit(runner.deps.Template.MaxTokens)
+	fits := func(messages []llm.Message) bool {
+		return runner.deps.Template.MaxTokens <= 0 || llmloop.CountMessagesTokens(messages)+runner.toolTokens < limit
+	}
+	if fits(messages) {
+		return messages, nil
+	}
+	runner.indexes = map[string]string{}
+	for key, id := range map[string]string{"change_inventory": "changes", "context_index": "contexts"} {
+		data, err := json.Marshal(values[key])
+		if err != nil {
+			return nil, err
+		}
+		runner.indexes[id] = string(data)
+		values[key] = map[string]any{"kind": "inventory", "id": id, "bytes": len(data), "read_with": "context_read; follow the continuation cursor"}
+	}
+	values["background_context"] = "Read background entries by kind and ID from the paginated context index."
+	messages, err = runner.renderMessages(values)
+	if err == nil && !fits(messages) {
+		return nil, ErrInitialPromptTooLarge
+	}
+	return messages, err
+}
+
+var ErrInitialPromptTooLarge = errors.New("analysis instructions and tool definitions exceed the configured context limit")
+
+func (runner *Runner) renderMessages(values map[string]any) ([]llm.Message, error) {
 	replacements := []string{}
 	for name, value := range values {
 		data, err := json.Marshal(value)
@@ -221,7 +259,7 @@ func (runner *Runner) Run(ctx context.Context) (Result, error) {
 		err = errors.Join(err, runner.writeArtifact("report.md", []byte(runner.analysis.Markdown)))
 	}
 	if err != nil {
-		result.Errors = append(result.Errors, err.Error())
+		result.Errors = append(result.Errors, FailureSummary(err))
 	}
 	data, marshalErr := json.MarshalIndent(result, "", "  ")
 	if marshalErr != nil {
@@ -229,9 +267,26 @@ func (runner *Runner) Run(ctx context.Context) (Result, error) {
 	}
 	writeErr := runner.writeArtifact("result.json", append(data, '\n'))
 	if writeErr != nil {
-		result.Errors = append(result.Errors, writeErr.Error())
+		result.Errors = append(result.Errors, "could not write analysis result")
 	}
 	return result, errors.Join(err, writeErr)
+}
+
+func FailureSummary(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "analysis timed out"
+	case errors.Is(err, context.Canceled):
+		return "analysis was canceled"
+	case errors.Is(err, ErrInitialPromptTooLarge):
+		return ErrInitialPromptTooLarge.Error()
+	case errors.Is(err, llm.ErrTokenBudget):
+		return "analysis token budget exhausted"
+	}
+	if status := llm.ProviderHTTPStatus(err); status >= 400 && status <= 599 {
+		return fmt.Sprintf("analysis provider returned HTTP %d", status)
+	}
+	return "analysis failed; inspect the local session for diagnostics"
 }
 
 func (runner *Runner) Session() *session.SessionHistory { return runner.history }
@@ -249,18 +304,20 @@ func (runner *Runner) executeTool(ctx context.Context, taskKey string, call llm.
 	started := time.Now()
 	name := call.Function.Name
 	number := runner.loop.RecordToolCall(name)
+	before := len(runner.store.items)
 	outcome, err := runner.dispatch(ctx, name, call.Function.Arguments)
 	if err != nil {
 		outcome.Content = "Error: " + err.Error()
-		runner.loop.RecordToolFailure(number, name, taskKey, outcome.Content, record, call.Function.Arguments, time.Since(started))
-	} else {
-		var observation Observation
-		_ = json.Unmarshal([]byte(outcome.Content), &observation)
+		runner.loop.RecordToolFailure(number, name, taskKey, "analysis tool request failed", record, "", time.Since(started))
+	} else if len(runner.store.items) > before {
+		observation := runner.store.items[before]
 		if observation.ErrorClass != "" {
-			runner.loop.RecordToolFailure(number, name, taskKey, outcome.Content, record, call.Function.Arguments, time.Since(started))
-		} else if record != nil {
-			record.AddToolResult(name, call.Function.Arguments, outcome.Content)
+			runner.loop.RecordToolFailure(number, name, taskKey, observation.ID+": "+observation.ErrorClass, record, "", time.Since(started))
+			return outcome
 		}
+	}
+	if err == nil && record != nil {
+		record.AddToolResult(name, call.Function.Arguments, outcome.Content)
 	}
 	return outcome
 }

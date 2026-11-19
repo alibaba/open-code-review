@@ -41,10 +41,10 @@ Every executed code/context read returns and persists an observation with its
 comparison identity, normalized arguments, returned text hash, exact observed
 locations, truncation, and error classification. Adjacent observed lines share
 one range; gaps in search results remain gaps. The adapter does not invent total
-search counts. File enumeration conservatively reports a possible truncation at
-the existing provider's 100-file cap, including when scope filtering removes hits.
+search counts. File enumeration matches only authorized paths and reports truncation
+when more than 100 authorized paths match.
 
-`context_read` can only read injected material or replay an existing observation.
+`context_read` reads injected material, paginated inventory indexes, or an existing observation.
 Its cursor is a UTF-8 byte offset and its default page size is 16 KiB (maximum
 64 KiB). Replaying an observation does not create another evidence identity.
 Context indexes preserve provenance and content hashes. Missing metadata cannot

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 func TestPrepareFixedInput(test *testing.T) {
@@ -36,6 +37,9 @@ func TestPrepareFixedInput(test *testing.T) {
 		test.Fatalf("changes=%+v visible=%d", prepared.Diffs, len(code.diffs))
 	}
 	for _, changed := range prepared.Diffs {
+		if changed.NewFileContent != "" {
+			test.Fatalf("retained full contents of %s", changed.NewPath)
+		}
 		if changed.NewPath == ".env" && changed.Diff != "" {
 			test.Fatal("secret diff was loaded")
 		}
@@ -54,6 +58,40 @@ func TestPrepareFixedInput(test *testing.T) {
 	cancel()
 	if _, err := PrepareInput(ctx, prepared); err == nil {
 		test.Fatal("canceled prepare succeeded")
+	}
+}
+
+func TestPatchPathSelectionIsExactAcrossTreeShapes(test *testing.T) {
+	repo := test.TempDir()
+	git(test, repo, "init", "-q")
+	if err := os.WriteFile(filepath.Join(repo, "item"), []byte("before\n"), 0600); err != nil {
+		test.Fatal(err)
+	}
+	git(test, repo, "add", ".")
+	git(test, repo, "commit", "-qm", "Flat item")
+	git(test, repo, "rm", "item")
+	if err := os.Mkdir(filepath.Join(repo, "item"), 0700); err != nil {
+		test.Fatal(err)
+	}
+	for _, name := range []string{"first", "second"} {
+		if err := os.WriteFile(filepath.Join(repo, "item", name), []byte(name), 0600); err != nil {
+			test.Fatal(err)
+		}
+	}
+	git(test, repo, "add", ".")
+	git(test, repo, "commit", "-qm", "Nested items")
+	files := []model.Diff{{OldPath: "item", NewPath: "item"}, {OldPath: "item/first", NewPath: "item/first"}, {OldPath: "item/second", NewPath: "item/second"}}
+	tree := changeChildren(files)
+	for _, paths := range [][]string{{"item"}, {"item", "item/first"}} {
+		var batch []string
+		for _, name := range paths {
+			batch = append(batch, ":(top,literal)"+name)
+		}
+		args := []string{"diff", "--name-only", "--no-renames", "HEAD~1", "HEAD", "--"}
+		got := git(test, repo, append(args, exactPatchPaths(batch, tree)...)...)
+		if got != strings.Join(paths, "\n") {
+			test.Fatalf("selected %v, got %q", paths, got)
+		}
 	}
 }
 
@@ -92,6 +130,37 @@ func TestPrepareRenameExclusion(test *testing.T) {
 	for _, changed := range code.scope {
 		if changed.Renamed && changed.ExcludedReason == "" {
 			test.Fatalf("rename bypassed old exclusion: %+v", changed)
+		}
+	}
+}
+
+func TestTrackedCredentialScopes(test *testing.T) {
+	input := fixture(test)
+	const name = ".git-credentials"
+	const marker = "scope-fixture-marker"
+	if err := os.WriteFile(filepath.Join(input.RepoDir, name), []byte(marker), 0600); err != nil {
+		test.Fatal(err)
+	}
+	git(test, input.RepoDir, "add", "-f", name)
+	git(test, input.RepoDir, "commit", "-qm", "Add scope fixture")
+	input.Resolution.ResolvedBase = git(test, input.RepoDir, "rev-parse", "HEAD")
+	git(test, input.RepoDir, "commit", "--allow-empty", "-qm", "Keep fixture unchanged")
+	input.Resolution.ResolvedHead = git(test, input.RepoDir, "rev-parse", "HEAD")
+	prepared, err := PrepareInput(test.Context(), input)
+	if err != nil || len(prepared.Diffs) != 0 {
+		test.Fatalf("unchanged scope: %+v %v", prepared.Diffs, err)
+	}
+	code, err := prepareCodeTools(test.Context(), prepared)
+	if err != nil {
+		test.Fatal(err)
+	}
+	for _, side := range []string{"old", "new"} {
+		if _, err := code.execute(test.Context(), "file_read", map[string]any{"side": side, "file_path": name}); err == nil {
+			test.Fatalf("%s side allowed a credential path", side)
+		}
+		found, err := code.execute(test.Context(), "code_search", map[string]any{"side": side, "search_text": marker})
+		if err != nil || !strings.Contains(found.ReturnedContent, "No matches found") || strings.Contains(found.ReturnedContent, marker) {
+			test.Fatalf("%s search: %+v %v", side, found, err)
 		}
 	}
 }

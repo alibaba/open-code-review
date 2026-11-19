@@ -83,20 +83,22 @@ func TestFileFindPreservesWhitespacePaths(test *testing.T) {
 				test.Fatal(err)
 			}
 			arguments := map[string]any{"query_name": strings.TrimSpace(filePath)}
-			provider, _ := code.registry.Get("file_find")
-			raw, err := provider.Execute(test.Context(), arguments)
-			if err != nil {
-				test.Fatal(err)
-			}
 			observation, err := code.execute(test.Context(), "file_find", arguments)
 			if err != nil {
 				test.Fatal(err)
 			}
-			test.Logf("authorized=%v raw=%q observed=%q", code.fileAllowed("new", filePath), raw, observation.ReturnedContent)
 			if observation.ReturnedContent != filePath {
 				test.Fatalf("authorized path must preserve whitespace: got %q, want %q", observation.ReturnedContent, filePath)
 			}
 		})
+	}
+}
+
+func TestFileFindFallbackUsesAuthorizedNames(test *testing.T) {
+	code := &codeTools{allowed: map[string]map[string]bool{"new": {"service/main.go": true, "service.go": false}}}
+	observation, err := code.execute(test.Context(), "file_find", map[string]any{"query_name": "service"})
+	if err != nil || observation.ReturnedContent != "service/main.go" || observation.Truncated {
+		test.Fatalf("find: %+v %v", observation, err)
 	}
 }
 
@@ -177,7 +179,7 @@ func TestPrepareWorkspaceNetChanges(test *testing.T) {
 				}
 				return
 			}
-			if changed.NewFileContent != fixtureCase.content || len(code.diffs) != 1 {
+			if changed.NewFileContent != "" || len(code.diffs) != 1 {
 				test.Fatalf("net content: %+v", changed)
 			}
 			if fixtureCase.executable && (!strings.Contains(changed.Diff, "old mode 100644") || !strings.Contains(changed.Diff, "new mode 100755")) {
