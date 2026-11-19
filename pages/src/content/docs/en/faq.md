@@ -93,17 +93,19 @@ hardware, raise the LLM timeout instead — see
 
 ### My file isn't being reviewed
 
-Run `ocr review --preview` (no LLM cost). The output lists every
-candidate file with the **reason** it was kept or dropped:
+Run `ocr review --preview` (no LLM cost). The output shows the **reason**
+each candidate file was kept or dropped. Files under provider directories
+such as `vendor/` and `node_modules/` collapse into one summary line in the
+terminal; `ocr review --preview --format json` still lists every entry:
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
-The five exclusion reasons map to gates in the
+The exclusion reasons map to gates in the
 [file filter](../review-rules/#how-files-are-filtered):
 
 | Reason | Fix |
@@ -112,7 +114,9 @@ The five exclusion reasons map to gates in the
 | `user_exclude` | Remove the pattern from your `exclude` list. |
 | `unsupported_ext` | Add the extension to your `include` list to bypass the allowlist gate. |
 | `default_path` | Add the file to `include` — that overrides built-in test-file exclude patterns. |
+| `provider_directory` | Nothing to do — provider directories such as `vendor/` and `node_modules/` are never reviewable, even when included. |
 | `deleted` | Nothing to do — there's no new content to review. |
+| `too_large` | The diff alone exceeds 80% of `max_tokens`. Raise `--max-tokens` (or the saved `max_tokens`), or split the change into smaller commits. |
 
 ### My custom rule isn't firing
 
@@ -199,9 +203,9 @@ threshold is crossed:
 
 So a small file can still get a plan pass if it was grouped with other
 changes that add up. That's by design — large or wide diffs benefit
-from a planning pass. To skip it for a single review, run with a
-smaller diff, or temporarily edit the embedded template (advanced;
-you'll need to override `--tools`).
+from a planning pass. A smaller diff may fall below both thresholds.
+Review planning is controlled by the embedded template, not a tool override;
+changing that core behavior requires a source change and rebuild.
 
 ### "Max tool requests reached"
 
@@ -220,20 +224,21 @@ is usually one of:
   session JSONL — if the same tool result repeats, that's why.
 - The group is genuinely large or context-heavy and 100 rounds isn't
   enough. Raise the cap with `--max-tools <n>` (e.g., `--max-tools
-  150`). The flag only ever *raises* the limit — a value below the
-  template default of `100` is ignored, values 1–49 are clamped up to
-  `50`, and `0` keeps the template default.
+  150`). A resolved positive value sets the limit exactly; values 1–49
+  are clamped up to `50`, and `0` keeps the template default of `100`.
 - The model does not support native tool calling at all (common with
   local models) — see
   ["No tool calls parsed" (local models / Ollama)](#no-tool-calls-parsed-local-models-ollama).
 
-### Some sub-agents fail; the run still exits 0
+### Some sub-agents fail; why is the exit code non-zero?
 
-By design. OCR isolates per-group failures so one bad group doesn't kill
-a 20-file review. The aggregate exit code is `0` if *anything*
-succeeded; only a fully-failed run (zero successful sub-agents) exits
-non-zero. Check the `warnings` array in JSON mode or stderr in text
-mode to see which groups failed.
+OCR isolates per-group failures and still publishes findings from completed
+groups. Operational failures such as timeouts, provider errors, and bad
+configuration nevertheless make the command exit non-zero, even when sibling
+groups succeeded, so CI can detect incomplete coverage. A partial review caused
+only by configured budget limits remains a successful exit. Check
+`manifest.coverage.failed` and `warnings` in JSON mode, or the text summary, to
+see which groups failed and whether the run can be resumed.
 
 ### CI run is much slower than local
 
@@ -262,7 +267,8 @@ field — it sits under `summary`, where it reads `0` on this path, while
 `comments` is the top-level `[]`. The same object carries
 `"status": "skipped"`, `"message": "Review skipped: no items were
 selected."`, and a `manifest` whose `terminal_state` is `"skipped"` with
-every `coverage` array empty.
+an empty `coverage.selected`. The files the selection step left out are
+listed in `coverage.excluded`, each with its `exclude_reason`.
 
 A review that examined files and found nothing also returns **a JSON
 object with `comments: []`**: `summary.files_reviewed` counts the files
@@ -275,6 +281,18 @@ manifest-backed review output, use `summary.files_reviewed` or
 `summary` and `manifest` being absent on the manifest-less path described
 below. `review --format json` always writes exactly one JSON object to
 stdout, never a bare array.
+
+`terminal_state: "complete"` means complete over the selected set, not
+that every changed file was reviewed. A file the selection step left out
+(unsupported extension, path rules, built-in secret paths, binary,
+deleted, or over the per-file size limit) is recorded in
+`manifest.coverage.excluded` with the same `exclude_reason` that
+`--preview` reports, and never turns a run `partial`. The list covers
+only files that reached selection. What the diff provider drops earlier
+is not in it: changes under directories it always skips, such as
+`vendor/` or `node_modules/`, untracked files that `.gitignore` ignores,
+and, when reviewing a commit or a range, any change matching
+`.gitignore`.
 
 The manifest-less no-files path is leaner: it omits both `summary` and
 `manifest`, while still reporting `"status": "skipped"`, `"message": "No
@@ -307,8 +325,8 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-LLM calls don't get their own spans — they're recorded as metrics
-instead. Watch `ocr.llm.tokens_used` (counter, labelled `model` +
+In the main review loop, LLM calls produce `llm.request` spans and are
+also recorded as metrics. Watch `ocr.llm.tokens_used` (counter, labelled `model` +
 `type`), `ocr.llm.requests_total` (counter, labelled `model` +
 `status`), and `ocr.llm.request_duration_seconds` (histogram, labelled
 `model`). The console exporter prints these aggregates inline. For
@@ -396,7 +414,8 @@ need new providers; an issue for Hg support is open
 
 The static binary published in releases is named after the project
 (`opencodereview`); the NPM wrapper installs it as `ocr` for
-ergonomics. If you build from source you get `dist/opencodereview` —
+ergonomics. If you build from source you get `dist/opencodereview`
+(`dist/opencodereview.exe` on Windows) —
 copy it to `ocr` on your `$PATH`.
 
 ### How do I uninstall?

@@ -143,11 +143,19 @@ func TestValidateOptions_NilState(t *testing.T) {
 	}
 }
 
-func TestValidateOptions_RejectsWorkspaceMode(t *testing.T) {
+func TestValidateOptions_WorkspaceMatches(t *testing.T) {
+	s := &ResumeState{ReviewMode: ReviewModeWorkspace}
+	err := s.ValidateOptions(SessionOptions{ReviewMode: ReviewModeWorkspace})
+	if err != nil {
+		t.Errorf("expected nil error, got: %v", err)
+	}
+}
+
+func TestValidateOptions_RejectsWorkspaceMismatch(t *testing.T) {
 	s := &ResumeState{ReviewMode: ReviewModeRange}
 	err := s.ValidateOptions(SessionOptions{ReviewMode: ReviewModeWorkspace})
 	if err == nil {
-		t.Fatal("expected error for workspace mode")
+		t.Fatal("expected error for workspace/range mode mismatch")
 	}
 }
 
@@ -728,6 +736,113 @@ func TestLoadResumeState_FailThenRedone(t *testing.T) {
 	}
 	if len(item.Comments) != 1 || item.Comments[0].Content != "second" {
 		t.Errorf("expected latest comments, got: %+v", item.Comments)
+	}
+}
+
+func TestLoadResumeState_TruncatedFinalRecord_Ignored(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	repoDir := "/test/torn-write"
+	sessionID := "torn-session"
+	path, err := SessionFilePath(repoDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two complete records followed by a truncated llm_response with no trailing newline.
+	buf := append(mustJSON(t, resumeRecord{
+		Type:       "session_start",
+		SessionID:  sessionID,
+		ReviewMode: ReviewModeCommit,
+		DiffCommit: "abc123",
+	}), '\n')
+	buf = append(buf, append(mustJSON(t, resumeRecord{
+		Type:        "review_item_done",
+		FilePath:    "main.go",
+		Fingerprint: "fp-main",
+	}), '\n')...)
+	buf = append(buf, []byte(`{"type":"llm_response","sessionId":"torn-session","filePath":"main.go"`)...)
+
+	if err := os.WriteFile(path, buf, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := LoadResumeState(repoDir, sessionID)
+	if err != nil {
+		t.Fatalf("torn final record must not fail the load: %v", err)
+	}
+	if _, ok := state.Item("fp-main"); !ok {
+		t.Error("completed checkpoint before the torn record must be recovered")
+	}
+	if state.CompletedCount() != 1 {
+		t.Errorf("CompletedCount = %d, want 1", state.CompletedCount())
+	}
+}
+
+func TestLoadResumeState_TruncatedOnlyRecord_Ignored(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	repoDir := t.TempDir()
+	sessionID := "truncated-only"
+
+	sessionPath, err := SessionFilePath(repoDir, sessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	if err := os.WriteFile(
+		sessionPath,
+		[]byte(`{"type":"review_item_done","fingerprint":"truncated"`),
+		0o600,
+	); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	state, err := LoadResumeState(repoDir, sessionID)
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if state.SessionID != sessionID {
+		t.Fatalf("SessionID = %q, want %q", state.SessionID, sessionID)
+	}
+	if len(state.Items) != 0 {
+		t.Fatalf("Items = %d, want empty state", len(state.Items))
+	}
+}
+
+func TestLoadResumeState_MalformedTerminatedFinalRecord_Fails(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	repoDir := "/test/malformed-terminated"
+	sessionID := "malformed-session"
+	path, err := SessionFilePath(repoDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// A malformed newline-terminated record must still fail strict resume loading.
+	buf := append(mustJSON(t, resumeRecord{
+		Type:        "review_item_done",
+		FilePath:    "main.go",
+		Fingerprint: "fp-main",
+	}), '\n')
+	buf = append(buf, []byte("{bad json}\n")...)
+
+	if err := os.WriteFile(path, buf, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadResumeState(repoDir, sessionID); err == nil {
+		t.Fatal("a malformed newline-terminated record must still be fatal")
 	}
 }
 

@@ -748,6 +748,109 @@ func TestResolveFromHunk_NewSideAcrossDeletedLines(t *testing.T) {
 	}
 }
 
+func TestResolveFromHunk_BlankLineRetry(t *testing.T) {
+	tests := []struct {
+		name           string
+		diff           string
+		newFileContent string
+		existingCode   string
+		wantStart      int
+		wantEnd        int
+	}{
+		{
+			name: "added block across blank line",
+			diff: `diff --git a/m.go b/m.go
+--- a/m.go
++++ b/m.go
+@@ -5,1 +5,7 @@
+ }
++
++func b() {
++	x := 1
++
++	return x
++}`,
+			newFileContent: "func a() {\n\tx := 1\n\n\treturn x\n}\n\nfunc b() {\n\tx := 1\n\n\treturn x\n}\n",
+			existingCode:   "\tx := 1\n\n\treturn x\n}",
+			wantStart:      8,
+			wantEnd:        11,
+		},
+		{
+			name: "new side before old side",
+			diff: `diff --git a/m.go b/m.go
+--- a/m.go
++++ b/m.go
+@@ -1,4 +1,2 @@
+ func p() {
+-	X := New()
+-	return X
+ }
+@@ -9,1 +7,6 @@
+ }
++func q() {
++	X := New()
++
++	return X
++}`,
+			existingCode: "\tX := New()\n\n\treturn X",
+			wantStart:    9,
+			wantEnd:      11,
+		},
+		{
+			name: "old side not retried",
+			diff: `diff --git a/m.go b/m.go
+--- a/m.go
++++ b/m.go
+@@ -1,5 +1,2 @@
+ func f() {
+-	a := 1
+-
+-	b := 2
+ }`,
+			newFileContent: "func f() {\n}\n",
+			existingCode:   "\ta := 1\n\n\tb := 2",
+			wantStart:      0,
+			wantEnd:        0,
+		},
+		{
+			name: "exact match before retry",
+			diff: `diff --git a/m.go b/m.go
+--- a/m.go
++++ b/m.go
+@@ -1,1 +1,4 @@
+ func a() {
++	x := 1
++
++	y := 2
+@@ -5,1 +8,3 @@
+ func b() {
++	x := 1
++	y := 2`,
+			newFileContent: "func a() {\n\tx := 1\n\n\ty := 2\n}\n\n// mid\nfunc b() {\n\tx := 1\n\ty := 2\n}\n",
+			existingCode:   "\tx := 1\n\ty := 2",
+			wantStart:      9,
+			wantEnd:        10,
+		},
+		{
+			name:         "snippet without blank lines across context and repeated blank lines",
+			diff:         "@@ -1,2 +1,7 @@\n func a() {\n+\tx := 1\n \n+\t// y\n+\n+\n+\tz := 3",
+			existingCode: "\tx := 1\n\t// y\n\tz := 3",
+			wantStart:    2,
+			wantEnd:      7,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diffs := []model.Diff{{NewPath: "m.go", Diff: tt.diff, NewFileContent: tt.newFileContent}}
+			cm := ResolveLineNumbers([]model.LlmComment{{Path: "m.go", ExistingCode: tt.existingCode}}, diffs)[0]
+			if cm.StartLine != tt.wantStart || cm.EndLine != tt.wantEnd {
+				t.Errorf("expected %d..%d, got %d..%d", tt.wantStart, tt.wantEnd, cm.StartLine, cm.EndLine)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ResolveLineNumbers integration tests (additional scenarios)
 // ---------------------------------------------------------------------------

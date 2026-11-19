@@ -9,7 +9,6 @@ import { useResponsive } from '../hooks/useResponsive';
 import ErrorBoundary from './ErrorBoundary';
 import npmIcon from '../assets/icons/npm.svg';
 import brewIcon from '../assets/icons/brew.svg';
-import macportsIcon from '../assets/icons/macports.svg';
 import appleIcon from '../assets/icons/apple.svg';
 import linuxIcon from '../assets/icons/linux.svg';
 import windowsIcon from '../assets/icons/windows.svg';
@@ -141,7 +140,6 @@ const INSTALL_CHANNELS: InstallChannel[] = [
   { key: 'macos', labelKey: 'hero.installMacOS', cmd: 'curl -fsSL https://open-codereview.ai/install.sh | sh', icons: [appleIcon], primary: false },
   { key: 'linux', labelKey: 'hero.installLinux', cmd: 'curl -fsSL https://open-codereview.ai/install.sh | sh', icons: [linuxIcon], primary: false },
   { key: 'windows', labelKey: 'hero.installWindows', cmd: 'irm https://open-codereview.ai/install.ps1 | iex', icons: [windowsIcon], primary: false },
-  { key: 'macports', labelKey: 'hero.installMacPorts', cmd: 'sudo port install open-code-review', icons: [macportsIcon], primary: false },
 ];
 
 const PRIMARY_CHANNELS = INSTALL_CHANNELS.filter((ch) => ch.primary);

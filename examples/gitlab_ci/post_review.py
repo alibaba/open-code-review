@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 alibaba/open-code-review Contributors
+
 """Post an OpenCodeReview result onto a GitLab merge request.
 
 This is the CI-layer "glue" for GitLab, mirroring examples/gerrit_ci and
@@ -36,6 +40,7 @@ Standard library only (json, urllib) so it runs on any stock python3 image.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -257,8 +262,9 @@ def format_comment(comment, comment_id=None):
     The per-comment id tag (when provided) is prepended as an HTML comment so
     :func:`reconcile_posted_id` can match it back on retry. The category/severity
     badge is then prepended on its own line. The suggestion uses GitLab's
-    ``suggestion:-0+0`` info string (kept at the fixed triple-backtick form so
-    the "Apply suggestion" button keeps working).
+    ``suggestion:-N+0`` info string, where ``N`` is the number of extra lines
+    above the anchor covered by a multiline span (``0`` for a single line), so
+    the "Apply suggestion" button rewrites the whole existing block.
     """
     body = ""
     if comment_id:
@@ -270,8 +276,10 @@ def format_comment(comment, comment_id=None):
     suggestion = comment.get("suggestion_code", "")
     existing = comment.get("existing_code", "")
     if suggestion and existing:
+        span = comment_span(comment)
+        suggestion_offset = span["end"] - span["start"] if span is not None and span["multiline"] else 0
         body += "\n\n**Suggestion:**\n"
-        body += "```suggestion:-0+0\n%s\n```" % suggestion
+        body += "```suggestion:-%d+0\n%s\n```" % (suggestion_offset, suggestion)
     return body
 
 
@@ -529,6 +537,88 @@ def parse_diff_hunk_inventory(patch):
             current["observed"] += 1
     flush()
     return ranges, (saw_hunk and complete)
+
+
+def build_new_line_positions(patch):
+    """Map each new-file line number to its diff position within a patch.
+
+    Returns ``{new_line: {"type": "new"|"context", "old_line": int|None}}``.
+    Added lines are ``"new"`` (no old-file counterpart, so ``old_line`` is
+    ``None``); unchanged context lines carry their real ``old_line``. Removed
+    lines have no new-file position and are omitted. Empty/blank patches yield
+    an empty map. Line classification mirrors :func:`parse_diff_hunk_inventory`
+    (only ``+`` and space-prefixed lines advance the new-file counter).
+    """
+    positions = {}
+    if not patch:
+        return positions
+    hunk_header_re = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+    old_ln = new_ln = 0
+    in_hunk = False
+    for line in str(patch).split("\n"):
+        match = hunk_header_re.match(line)
+        if match:
+            old_ln = int(match.group(1))
+            new_ln = int(match.group(2))
+            in_hunk = True
+            continue
+        if not in_hunk or line.startswith("\\"):
+            continue
+        if line.startswith("+"):
+            positions[new_ln] = {"type": "new", "old_line": None}
+            new_ln += 1
+        elif line.startswith("-"):
+            old_ln += 1
+        elif line.startswith(" "):
+            positions[new_ln] = {"type": "context", "old_line": old_ln}
+            old_ln += 1
+            new_ln += 1
+    return positions
+
+
+def resolve_line_range_boundary(path_sha1, new_line, positions):
+    """Build a GitLab ``line_range`` boundary for ``new_line``.
+
+    Returns ``None`` when the line is not a resolvable new-file position, so the
+    caller can decline to attach ``line_range`` rather than emit a code GitLab
+    would reject. Added lines use ``<sha>_0_<new>`` with ``type: "new"``;
+    unchanged context lines use ``<sha>_<old>_<new>`` with their real old line.
+    """
+    entry = positions.get(new_line)
+    if entry is None:
+        return None
+    if entry["type"] == "new":
+        return {
+            "line_code": "%s_0_%d" % (path_sha1, new_line),
+            "type": "new",
+            "old_line": None,
+            "new_line": new_line,
+        }
+    old_line = entry["old_line"]
+    return {
+        "line_code": "%s_%d_%d" % (path_sha1, old_line, new_line),
+        "type": None,
+        "old_line": old_line,
+        "new_line": new_line,
+    }
+
+
+def build_line_range(diff, path, span):
+    """Resolve a multiline ``span`` into a GitLab ``line_range`` from ``diff``.
+
+    Returns ``None`` when the inventory lacks per-line positions for ``path`` or
+    either boundary cannot be resolved, letting the caller fall back to a
+    single-line position instead of posting a code GitLab cannot anchor.
+    """
+    positions = ((diff or {}).get("positions") or {}).get(path)
+    if not positions:
+        return None
+    path_sha1 = hashlib.sha1(path.encode("utf-8")).hexdigest()
+    start = resolve_line_range_boundary(path_sha1, span["start"], positions)
+    end = resolve_line_range_boundary(path_sha1, span["end"], positions)
+    if start is None or end is None:
+        return None
+    return {"start": start, "end": end}
 
 
 def classify_comment_against_diff(comment, diff):
@@ -976,6 +1066,7 @@ class GitLabPoster:
         """Build a diff inventory from ``GET /merge_requests/:iid/diffs``."""
         known = set()
         files = {}
+        positions = {}
         complete = True
         per_page = 100
         max_pages = 30
@@ -996,6 +1087,7 @@ class GitLabPoster:
                     ranges, ok = parse_diff_hunk_inventory(patch)
                     if ok:
                         files[new_path] = ranges
+                    positions[new_path] = build_new_line_positions(patch)
             if len(data) < per_page:
                 break
             page += 1
@@ -1005,7 +1097,8 @@ class GitLabPoster:
         if not known:
             complete = False
             log("[400-fallback] MR diff list came back empty; treating inventory as incomplete.")
-        return {"files": files, "known": known, "complete": complete}
+        return {"files": files, "known": known, "positions": positions,
+                "complete": complete}
 
 
 def make_poster(api_base, token, auth_header, config):
@@ -1046,7 +1139,7 @@ class DryRunPoster:
                 "is_rate_limit_exhausted": False}
 
     def get_mr_diffs(self):
-        return {"files": {}, "known": set(), "complete": False}
+        return {"files": {}, "known": set(), "positions": {}, "complete": False}
 
     def mr_url(self):
         return None
@@ -1250,6 +1343,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         comment = it["comment"]
         path = comment.get("path", "")
         end_line = comment.get("end_line", 0)
+        span = comment_span(comment)
         if not path or not end_line:
             failed_comments.append({"comment": comment, "reason": NO_LINE_REASON})
             continue
@@ -1268,6 +1362,16 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
                 "head_sha": diff_refs["head_sha"],
             },
         }
+        if span is not None and span["multiline"]:
+            # Resolve the range from the real MR diff: a boundary's line_code
+            # needs the true old-file line unless the line is a pure addition.
+            # If the diff is unavailable or a boundary cannot be resolved, we
+            # omit line_range and let GitLab anchor the single end_line rather
+            # than reject a bogus code.
+            diff = get_diff_inventory(poster, diff_cache)
+            line_range = build_line_range(diff, path, span)
+            if line_range is not None:
+                discussion["position"]["line_range"] = line_range
         resp = poster.post_discussion(discussion, comment_id=it["id"])
         if resp.get("success"):
             stats["inline"] += 1

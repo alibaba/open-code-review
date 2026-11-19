@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
@@ -27,7 +28,6 @@ import (
 )
 
 type reviewOptions struct {
-	toolConfigPath        string
 	rulePath              string
 	repoDir               string
 	from                  string
@@ -66,6 +66,9 @@ var reviewCmd = &cobra.Command{
 
   # Review a branch against its base (merge-base mode)
   ocr review --from master --to dev-ref
+
+  # Review the current branch against main (--to defaults to HEAD)
+  ocr review --from main
 
   # Review a specific commit
   ocr review --commit abc123
@@ -134,10 +137,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}()
 
 	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, opts.maxTools, opts.maxGitProcs, true)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true)
 	if err != nil {
 		return err
 	}
+	cc.Template.MaxToolRequestTimes = resolveReviewMaxTools(cc.Template.MaxToolRequestTimes, opts.maxTools)
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security (#112): reject ref-option injection before any git invocation.
@@ -160,9 +164,21 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return err
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
+	mainToolDefs, err := loadToolDefs(cc.Template.MainTask.Tools)
+	if err != nil {
+		return fmt.Errorf("MAIN_TASK.tools: %w", err)
+	}
+	var planToolDefs []llm.ToolDef
+	if plan := cc.Template.PlanTask; plan != nil {
+		planToolDefs, err = loadToolDefs(plan.ToolReferences)
+		if err != nil {
+			return fmt.Errorf("PLAN_TASK.tool_references: %w", err)
+		}
+	}
+	rt, err := loadLLMRuntime(cc.Template, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
+		Context:  ctx,
 	})
 	if err != nil {
 		return err
@@ -197,21 +213,32 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		sealedInput = &sealed.Resolution
 	}
 
-	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
-	fileReader := &tool.FileReader{
-		RepoDir: cc.RepoDir,
-		Mode:    mode,
-		Ref:     fileReadRef(mode, opts, sealedInput),
-		Runner:  cc.GitRunner,
+	codeTools, err := prepareReviewCodeTools(ctx, cc.RepoDir, opts, cc.GitRunner, sealedInput)
+	if err != nil {
+		return fmt.Errorf("prepare code tools: %w", err)
 	}
-	tools := buildToolRegistry(rt.Collector, fileReader)
+	if codeTools.access != nil {
+		withSides := toolsconfig.WithComparisonSides
+		if codeTools.reader.Mode == tool.ModeWorkspace {
+			withSides = toolsconfig.WithWorkspaceSides
+		}
+		mainToolDefs, err = withSides(mainToolDefs)
+		if err != nil {
+			return err
+		}
+		planToolDefs, err = withSides(planToolDefs)
+		if err != nil {
+			return err
+		}
+	}
+	tools := buildToolRegistryWithCodeAccess(rt.Collector, codeTools.reader, codeTools.access)
 
 	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
 	defer closeReviewMCPClients(mcpClients)
 
 	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
-	rt.PlanToolDefs = append(rt.PlanToolDefs, mcpToolDefs...)
-	rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
+	planToolDefs = append(planToolDefs, mcpToolDefs...)
+	mainToolDefs = append(mainToolDefs, mcpToolDefs...)
 
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
@@ -224,18 +251,19 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		FileFilter:            cc.FileFilter,
 		LLMClient:             rt.Client,
 		Tools:                 tools,
-		PlanToolDefs:          rt.PlanToolDefs,
-		MainToolDefs:          rt.MainToolDefs,
+		PlanToolDefs:          planToolDefs,
+		MainToolDefs:          mainToolDefs,
 		CommentCollector:      rt.Collector,
 		CommentWorkerPool:     agent.NewCommentWorkerPool(opts.concurrency),
 		MaxConcurrency:        opts.concurrency,
 		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
 		Provider:              rt.Provider,
+		EndpointSource:        rt.Source,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
-		SealedInput:           sealedInput,
+		SealedInput:           codeTools.resolution,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
@@ -322,19 +350,24 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	return emitErr
 }
 
+func resolveReviewMaxTools(templateDefault, cliValue int) int {
+	if cliValue > 0 {
+		return cliValue
+	}
+	return templateDefault
+}
+
 func reviewResultError(runErr error, manifest *session.RunManifest) error {
 	if runErr != nil {
 		return fmt.Errorf("review failed: %w", runErr)
 	}
-	if manifest != nil && manifest.TerminalState == session.StateFailed {
-		// The exit contract is: non-zero only for a run-level failure, or when
-		// every selected item failed. Any usable coverage — even incomplete — exits
-		// 0, so complete/partial/skipped all succeed and only failed lands here.
-		// That makes a budget stop exit 0 whenever anything was covered (it is a
-		// controlled truncation recording no run_failure) and non-zero only when
-		// the cap left nothing covered at all. Partial results are published
-		// regardless: runReview emits the frozen manifest before this error decides
-		// the exit status.
+	if reviewManifestRequiresNonZeroExit(manifest) {
+		// Operational item failures make a partial review fail the process so CI
+		// cannot mistake incomplete coverage for success. A controlled budget stop
+		// remains the sole partial-success case; when every item failed, StateFailed
+		// still exits non-zero regardless of classification. Partial and failed
+		// results remain publishable because runReview emits the frozen manifest
+		// before this error decides the process status.
 		//
 		// Reasons stored in the manifest already went through sanitizeReason, so
 		// they are safe to echo on stderr.
@@ -344,10 +377,37 @@ func reviewResultError(runErr error, manifest *session.RunManifest) error {
 			}
 			return fmt.Errorf("review failed (%s)", rf.Classification)
 		}
-		return fmt.Errorf("review failed: %d of %d selected item(s) failed",
+		prefix := "review failed"
+		if manifest.TerminalState == session.StatePartial {
+			prefix = "review incomplete"
+		}
+		return fmt.Errorf("%s: %d of %d selected item(s) failed", prefix,
 			len(manifest.Coverage.Failed), len(manifest.Coverage.Selected))
 	}
 	return nil
+}
+
+// reviewManifestRequiresNonZeroExit is the shared CLI/SARIF success policy.
+// A partial review caused exclusively by declared budget limits keeps its
+// historical successful exit, but timeout, provider, configuration, panic and
+// unknown item failures are operational failures even when sibling items
+// completed. A fully failed manifest always fails the process.
+func reviewManifestRequiresNonZeroExit(manifest *session.RunManifest) bool {
+	if manifest == nil {
+		return false
+	}
+	if manifest.TerminalState == session.StateFailed {
+		return true
+	}
+	if manifest.TerminalState != session.StatePartial {
+		return false
+	}
+	for _, item := range manifest.Coverage.Failed {
+		if item.Classification != session.FailureBudget {
+			return true
+		}
+	}
+	return false
 }
 
 func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeState, error) {
@@ -359,9 +419,6 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 		DiffFrom:   opts.from,
 		DiffTo:     opts.to,
 		DiffCommit: opts.commit,
-	}
-	if current.ReviewMode == session.ReviewModeWorkspace {
-		return nil, fmt.Errorf("resume requires --from/--to or --commit; workspace resume is not supported")
 	}
 	state, err := session.LoadReviewResumeState(repoDir, opts.resume)
 	if err != nil {
@@ -383,9 +440,9 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 // It must run before agent.New: agent.New creates the session, and session.New
 // writes session_start immediately, so validating any later would leave an orphan
 // session on disk behind every rejection. It must also run after max-tokens is
-// resolved, because agent.filterLargeDiffs measures each file's diff against
-// that ceiling on its own — grouping never enters this decision — and what it
-// drops is what the input identity stops covering.
+// resolved, because the selection's size gate measures each file's diff
+// against that ceiling on its own — grouping never enters this decision — and
+// what it drops is what the input identity stops covering.
 //
 // provider and model are explicit exactly when their flag was passed on this
 // command line: both default to the empty string and nothing else can set them,
@@ -501,11 +558,21 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 }
 
 func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer) error {
+	maxTokens, err := previewMaxTokens(cc.Template.MaxTokens, opts.maxTokens)
+	if err != nil {
+		return err
+	}
+	// A copy, so resolving the preview's limit cannot leak into the caller's
+	// template. Selection reads MaxTokens and nothing else.
+	tpl := *cc.Template
+	tpl.MaxTokens = maxTokens
+
 	preview, err := agent.Preview(ctx, agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,
 		To:         opts.to,
 		Commit:     opts.commit,
+		Template:   tpl,
 		FileFilter: cc.FileFilter,
 		GitRunner:  cc.GitRunner,
 	})
@@ -599,11 +666,21 @@ var closeReviewMCPClients = func(clients []*mcp.Client) {
 }
 
 func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *tool.Registry {
+	return buildToolRegistryWithCodeAccess(collector, fr, nil)
+}
+
+func buildToolRegistryWithCodeAccess(collector *tool.CommentCollector, fr *tool.FileReader, access *tool.CodeAccess) *tool.Registry {
 	reg := tool.NewRegistry()
-	reg.Register(tool.NewFileRead(fr))
-	reg.Register(tool.NewFileFind(fr))
+	reader := tool.NewFileRead(fr)
+	reader.Access = access
+	finder := tool.NewFileFind(fr)
+	finder.Access = access
+	search := tool.NewCodeSearch(fr)
+	search.Access = access
+	reg.Register(reader)
+	reg.Register(finder)
 	reg.Register(tool.NewFileReadDiff(tool.DiffMap{}))
-	reg.Register(tool.NewCodeSearch(fr))
+	reg.Register(search)
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
 	return reg
 }

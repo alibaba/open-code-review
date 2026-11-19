@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 alibaba/open-code-review Contributors
+
 """Post an OpenCodeReview result onto a Gerrit change.
 
 This is the CI-layer "glue" for Gerrit, mirroring examples/gitflic_ci: it keeps

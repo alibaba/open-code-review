@@ -4,11 +4,14 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/tool"
 )
 
 func initTestGitRepo(t *testing.T) string {
@@ -75,6 +78,22 @@ func TestGetCommitMessage_InvalidCommit(t *testing.T) {
 	_, err := getCommitMessage(dir, "nonexistent-ref-xyz")
 	if err == nil {
 		t.Fatal("expected error for invalid commit")
+	}
+}
+
+// TestGetCommitMessage_IgnoresGitStderr covers ocr review --commit, which
+// uses the commit message as review background. getCommitMessage used
+// CombinedOutput, so GIT_TRACE / git warnings were prepended to the message
+// and sent to the LLM. runGitCmdStdout already exists for this class of bug.
+func TestGetCommitMessage_IgnoresGitStderr(t *testing.T) {
+	dir := initTestGitRepo(t)
+	t.Setenv("GIT_TRACE", "1")
+	msg, err := getCommitMessage(dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg != "initial commit" {
+		t.Errorf("msg = %q, want %q (git stderr mixed into commit message?)", msg, "initial commit")
 	}
 }
 
@@ -165,7 +184,26 @@ func TestValidateReviewRefs_EmptySkipped(t *testing.T) {
 
 func TestBuildToolRegistry(t *testing.T) {
 	reg := buildToolRegistry(nil, nil)
-	if reg == nil {
-		t.Fatal("expected non-nil registry")
+	for _, name := range []string{"file_read", "file_find", "code_search", "code_comment"} {
+		if _, ok := reg.Get(name); !ok {
+			t.Errorf("review tools must include %s", name)
+		}
+	}
+	p, ok := reg.Get(tool.FileReadDiff.Name())
+	if !ok {
+		t.Fatal("review tools must include file_read_diff")
+	}
+	frd, ok := p.(*tool.FileReadDiffProvider)
+	if !ok {
+		t.Fatalf("unexpected diff provider type: %T", p)
+	}
+	const diff = "@@ -1 +1 @@\n-old\n+new\n"
+	frd.SetDiffMap(tool.NewDiffMap(map[string]string{"main.go": diff}))
+	got, err := p.Execute(context.Background(), map[string]any{"path_array": []any{"main.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, diff) {
+		t.Fatalf("review diff = %q, want %q", got, diff)
 	}
 }

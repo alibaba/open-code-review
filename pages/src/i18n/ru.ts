@@ -12,6 +12,11 @@ export const ru: TranslationKeys = {
   'navbar.blog': 'Блог',
   'navbar.getStarted': 'Начать работу',
 
+  'providers.title': 'Встроенная поддержка ведущих провайдеров моделей',
+  'providers.description': 'Укажите API-ключ, чтобы начать ревью, или подключите приватный сервис моделей, совместимый с основными протоколами.',
+  'providers.listLabel': 'Поддерживаемые бренды моделей',
+  'providers.explore': 'Поддерживаемые провайдеры',
+
   // Hero
   'hero.title': 'Код-ревью с ИИ,\nпроверенное на миллионах реальных задач',
   'hero.description': 'Open Code Review разработали в Alibaba и проверили на реальных проектах компании. Он встраивается в привычный процесс разработки и работает с выбранной вами LLM. Вы сами решаете, куда передаются данные. Замечания агента разработчики действительно учитывают.',
@@ -22,7 +27,6 @@ export const ru: TranslationKeys = {
   'hero.copyFailed': 'Не удалось скопировать',
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
-  'hero.installMacPorts': 'MacPorts',
   'hero.installMacOS': 'MacOS',
   'hero.installLinux': 'Linux',
   'hero.installWindows': 'Windows',
@@ -43,9 +47,9 @@ export const ru: TranslationKeys = {
   'highlights.stat1Label': 'ВНУТРЕННИЕ АКТИВНЫЕ ПОЛЬЗОВАТЕЛИ',
   'highlights.stat1Caption': 'в Alibaba Group',
   'highlights.stat2Value': '150K+',
-  'highlights.stat2Label': 'ЗАГРУЗКИ СООБЩЕСТВА NPM',
+  'highlights.stat2Label': 'ЗАГРУЗКИ NPM',
   'highlights.stat2Caption': 'реальные загрузки npm · 30 дней',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': 'РЕАЛЬНЫХ ЗАДАЧ',
   'highlights.stat3Caption': 'Выполненных задач код-ревью',
   'highlights.stat4Value': '1/9',
@@ -116,6 +120,7 @@ export const ru: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': 'Связаться с нами',
   'footer.copyright': '© 2026. Все права защищены.',
 
   // Docs Page
@@ -247,8 +252,6 @@ export const ru: TranslationKeys = {
   'docs.scanFlag14Default': 'Встроенное',
   'docs.scanFlag15Desc': 'Макс. параллельных git-подпроцессов',
   'docs.scanFlag16Desc': 'Путь к пользовательскому JSON с правилами ревью',
-  'docs.scanFlag17Desc': 'Путь к пользовательскому JSON-файлу настроек инструментов',
-  'docs.scanFlag17Default': 'Встроенный',
   'docs.scanFlag18Desc': 'Корень репозитория или каталога для скана',
   'docs.scanFlag18Default': 'Текущая директория',
   'docs.scanNote': 'Примечание: <code>--max-tools</code> только повышает бюджет вызовов инструментов на файл в шаблоне scan. Параметр не действует, если указанное значение меньше значения шаблона по умолчанию.',
@@ -296,13 +299,21 @@ export const ru: TranslationKeys = {
   'docs.sidebar.claudeCode': 'Command (Claude Code)',
   'docs.sidebar.delegate': 'Режим делегирования',
   'docs.sidebar.cicd': 'CI/CD',
+  'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': 'Участие в разработке',
   'docs.sidebar.faq': 'FAQ',
+  'docs.sidebar.chatgptPreview': 'Вход через ChatGPT (предварительная версия)',
   'docs.search.placeholder': 'Поиск...',
   'docs.search.noResults': 'Ничего не найдено',
   'docs.search.hint.select': 'Выбрать',
   'docs.search.hint.open': 'Открыть',
   'docs.search.hint.close': 'Закрыть',
+  'docs.content.loading': 'Загрузка документации...',
+  'docs.content.loadError': 'Не удалось загрузить содержимое документации.',
+  'docs.content.retry': 'Повторить',
+  'docs.search.loading': 'Поиск...',
+  'docs.search.loadError': 'Не удалось загрузить содержимое для поиска.',
 
   // Blog
   'blog.title': 'Блог',

@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -106,6 +108,8 @@ func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *se
 		}},
 	})
 	a.diffs = diffs
+	a.inputResolution.ResolvedBase = "base-parent"
+	a.inputResolution.ResolvedHead = "head-parent"
 	a.currentDate = "2026-07-26 12:00"
 	return a
 }
@@ -168,6 +172,9 @@ func TestManifestFlowCompleteAndPartial(t *testing.T) {
 		if manifest.TerminalState != session.StateComplete || len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Failed) != 0 {
 			t.Fatalf("manifest = %+v", manifest)
 		}
+		if manifest.Execution.MaxToolRequestTimes != 5 {
+			t.Fatalf("max_tool_request_times = %d, want 5", manifest.Execution.MaxToolRequestTimes)
+		}
 	})
 
 	t.Run("mixed provider result is partial", func(t *testing.T) {
@@ -189,6 +196,38 @@ func TestManifestFlowCompleteAndPartial(t *testing.T) {
 			t.Fatalf("manifest exposed raw provider error: %+v", manifest.Coverage.Failed[0])
 		}
 	})
+}
+
+// Two paths that differ only in separator normalize to one item_id. When
+// selection excludes one and selects the other, the excluded record must give
+// way: the run keeps its full denominator and still ends complete. An unrelated
+// exclusion is kept.
+func TestManifestFlowExcludedItemIDCollisionKeepsSelected(t *testing.T) {
+	a := newManifestFlowAgent(t, nil, nil)
+	decisions := a.selectFiles([]model.Diff{
+		{OldPath: `src\a.go`, NewPath: `src\a.go`, IsBinary: true},
+		{OldPath: "src/a.go", NewPath: "src/a.go", Diff: "+ok", Insertions: 1},
+		{OldPath: "good.go", NewPath: "good.go", Diff: "+ok", Insertions: 1},
+		{OldPath: "blob.go", NewPath: "blob.go", IsBinary: true},
+	})
+	if err := a.registerExclusions(decisions); err != nil {
+		t.Fatalf("registerExclusions: %v", err)
+	}
+	a.diffs, _ = summarizeSelection(decisions)
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	manifest := finishManifestFlow(t, a)
+	if manifest.TerminalState != session.StateComplete || manifest.RunFailure != nil {
+		t.Fatalf("terminal = %q, run_failure = %+v", manifest.TerminalState, manifest.RunFailure)
+	}
+	if len(manifest.Coverage.Selected) != 2 || len(manifest.Coverage.Completed) != 2 {
+		t.Fatalf("coverage = %+v", manifest.Coverage)
+	}
+	ex := manifest.Coverage.Excluded
+	if len(ex) != 1 || ex[0].Path != "blob.go" || ex[0].ExcludeReason != model.ExcludeBinary {
+		t.Fatalf("excluded = %+v, want only blob.go: the colliding record is dropped", ex)
+	}
 }
 
 func TestManifestFlowCancellationPersistsResumableSession(t *testing.T) {
@@ -236,6 +275,8 @@ func TestManifestFlowCancellationPersistsResumableSession(t *testing.T) {
 	}
 	identity := session.RunIdentity{
 		Mode:                 manifest.Input.Mode,
+		ResolvedBase:         manifest.Input.ResolvedBase,
+		ResolvedHead:         manifest.Input.ResolvedHead,
 		SourceArtifactSHA256: manifest.Input.SourceArtifactSHA256,
 		RuleConfigSHA256:     manifest.Execution.RuleConfigSHA256,
 		RepositorySHA256:     manifest.Repository.IdentitySHA256,
@@ -431,15 +472,34 @@ func TestManifestFlowBudgetAndSkipped(t *testing.T) {
 		}
 	})
 
+	// Driven through Run, not dispatchSubtasks: Run is where the size gate is
+	// applied, so only this path shows that an all-oversized changeset really
+	// reaches a skipped manifest rather than being dispatched.
 	t.Run("all oversized is skipped", func(t *testing.T) {
-		a := newManifestFlowAgent(t, []model.Diff{{OldPath: "large.go", NewPath: "large.go", Diff: strings.Repeat("word ", 500), Insertions: 1}}, nil)
-		a.args.Template.MaxTokens = 10
-		if _, err := a.dispatchSubtasks(context.Background()); err != nil {
-			t.Fatalf("dispatch: %v", err)
+		dir := initPreviewRepo(t)
+		if err := os.WriteFile(filepath.Join(dir, "large.go"), []byte(strings.Repeat("word ", 500)), 0o644); err != nil {
+			t.Fatalf("write large.go: %v", err)
 		}
-		manifest := finishManifestFlow(t, a)
-		if manifest.TerminalState != session.StateSkipped || len(manifest.Coverage.Selected) != 0 {
+		a := New(Args{
+			RepoDir:   dir,
+			LLMClient: manifestFlowClient{},
+			Model:     "fake",
+			Template:  template.Template{MaxTokens: 10},
+		})
+		comments, err := a.Run(context.Background())
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if len(comments) != 0 {
+			t.Fatalf("comments = %d, want 0", len(comments))
+		}
+		manifest := a.RunManifest()
+		if manifest == nil || manifest.TerminalState != session.StateSkipped || len(manifest.Coverage.Selected) != 0 {
 			t.Fatalf("manifest = %+v", manifest)
+		}
+		excluded := manifest.Coverage.Excluded
+		if len(excluded) != 1 || excluded[0].Path != "large.go" || excluded[0].ExcludeReason != model.ExcludeTooLarge {
+			t.Fatalf("excluded = %+v, want large.go as too_large", excluded)
 		}
 	})
 }
@@ -456,7 +516,7 @@ type groupedBudgetPartialClient struct {
 
 func (c *groupedBudgetPartialClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	if len(req.Tools) == 0 {
-		content := `[{"label":"pair","files":["a.go","b.go"]}]`
+		content := `[{"label":"pair","files":[0,1]}]`
 		return &llm.ChatResponse{
 			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
 			Model:   "fake",
@@ -525,7 +585,7 @@ func TestManifestFlowGroupBudgetStopIsPartialWhenSomeFilesHaveComments(t *testin
 	reg := tool.NewRegistry()
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
 	// MaxToolRequestTimes and GroupingTask must be set before New(), since
-	// llmloop.Runner snapshots Template by value at construction time — mutating
+	// reviewtask.Runner snapshots Template by value at construction time — mutating
 	// a.args.Template afterward (as other tests in this file do for MaxTokens,
 	// which executeGroupSubtask re-reads from a.args.Template directly) would
 	// not reach the runner's copy that RunMainTask actually consumes.
