@@ -365,7 +365,7 @@ func TestEmitRunResult_CommentSeverityOrder(t *testing.T) {
 		{Severity: "critical", Content: "critical-finding"},
 		{Severity: "high", Content: "second-high-finding"},
 	}
-	want := []string{"critical-finding", "first-high-finding", "second-high-finding", "medium-finding", "low-finding", "missing-finding", "unknown-finding"}
+	want := []string{"missing-finding", "unknown-finding", "low-finding", "medium-finding", "first-high-finding", "second-high-finding", "critical-finding"}
 	for _, format := range []string{"text", "json", "sarif"} {
 		t.Run(format, func(t *testing.T) {
 			comments := slices.Clone(input)

@@ -28,13 +28,10 @@ func inCommentSeverityOrder[T any](comments []model.LlmComment, findings []T) []
 	if len(findings) < 2 {
 		return findings
 	}
-	levels := [...]string{"critical", "high", "medium", "low"}
+	levels := [...]string{"low", "medium", "high", "critical"}
 	var buckets [len(levels) + 1][]T
 	for index, comment := range comments {
-		rank := slices.Index(levels[:], comment.Severity)
-		if rank < 0 {
-			rank = len(levels)
-		}
+		rank := 1 + slices.Index(levels[:], comment.Severity)
 		buckets[rank] = append(buckets[rank], findings[index])
 	}
 	return slices.Concat(buckets[:]...)

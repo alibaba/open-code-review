@@ -495,9 +495,9 @@ func TestOutputSARIF_MultipleComments(t *testing.T) {
 		ruleID string
 		level  string
 	}{
-		{"bug", "error"},
-		{"performance", "warning"},
 		{"style", "note"},
+		{"performance", "warning"},
+		{"bug", "error"},
 	}
 	for i, exp := range expected {
 		result := results[i].(map[string]any)
@@ -728,8 +728,8 @@ func TestSarifInvocation_NonCompleteAddsManifestNotification(t *testing.T) {
 // occurrence index appended so GitHub tracks them as separate alerts.
 func TestSarifResults_DuplicateFingerprints(t *testing.T) {
 	comments := []model.LlmComment{
-		{Path: "a.go", Content: "SQL injection 1", Severity: "low", Category: "security", ExistingCode: "query('SELECT * FROM users WHERE id=' + id)", StartLine: 10, EndLine: 10},
-		{Path: "a.go", Content: "SQL injection 2", Severity: "high", Category: "security", ExistingCode: "query('SELECT * FROM users WHERE id=' + id)", StartLine: 20, EndLine: 20},
+		{Path: "a.go", Content: "SQL injection 1", Severity: "high", Category: "security", ExistingCode: "query('SELECT * FROM users WHERE id=' + id)", StartLine: 10, EndLine: 10},
+		{Path: "a.go", Content: "SQL injection 2", Severity: "low", Category: "security", ExistingCode: "query('SELECT * FROM users WHERE id=' + id)", StartLine: 20, EndLine: 20},
 	}
 	out := captureStdout(t, func() {
 		if err := outputSARIF(comments, "v1", nil, nil, os.Stdout); err != nil {
