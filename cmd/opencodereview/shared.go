@@ -862,6 +862,10 @@ func emitRunResult(
 		})
 	}
 
+	if outputFormat == "sarif" {
+		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
+	}
+	comments = inCommentSeverityOrder(comments, comments)
 	if outputFormat == "json" {
 		var resumeInfo *agent.ResumeInfo
 		if p, ok := ag.(resumeInfoProvider); ok {
@@ -875,9 +879,6 @@ func emitRunResult(
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
 			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
-	}
-	if outputFormat == "sarif" {
-		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
 	// Between the comments/warnings block and the project summary: the report is
