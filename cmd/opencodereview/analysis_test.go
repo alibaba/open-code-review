@@ -361,12 +361,12 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 				test.Fatalf("output: %s", data)
 			}
 			if !fixture.analysis {
-				if payload.Analysis != nil || payload.AnalysisMeta != nil || payload.ReviewStatus != "" || payload.SchemaVersion != "" || analysisCalls.Load() != 0 {
+				if bytes.Contains(data, []byte(`"analysis_raw":`)) || payload.Analysis != nil || payload.AnalysisMeta != nil || payload.ReviewStatus != "" || payload.SchemaVersion != "" || analysisCalls.Load() != 0 {
 					test.Fatalf("default review changed: %s", data)
 				}
 				return
 			}
-			if payload.SchemaVersion != "ocr.review-with-analysis/v2" || payload.Analysis == nil || payload.AnalysisMeta == nil || payload.Manifest == nil || payload.ReviewStatus != string(payload.Manifest.TerminalState) {
+			if payload.SchemaVersion != "ocr.review-with-analysis/v2" || payload.Analysis == nil || payload.AnalysisRaw == nil || payload.AnalysisMeta == nil || payload.Manifest == nil || payload.ReviewStatus != string(payload.Manifest.TerminalState) {
 				test.Fatalf("missing peer report: %s", data)
 			}
 			report := payload.AnalysisMeta
@@ -374,7 +374,7 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			if (report.Status == "completed" && strings.Contains(stderr, warning)) || (report.Status != "completed" && !strings.Contains(stderr, warning+report.Status)) {
 				test.Fatalf("unexpected warning for %s analysis: %s", report.Status, stderr)
 			}
-			if fixture.failAnalysis && (report.Status != "failed" || *payload.Analysis != "" || strings.Contains(string(data), "analysis unavailable") || len(report.Errors) != 1 || report.Errors[0] != "analysis provider returned HTTP 402") {
+			if fixture.failAnalysis && (report.Status != "failed" || *payload.Analysis != "" || *payload.AnalysisRaw != "" || strings.Contains(string(data), "analysis unavailable") || len(report.Errors) != 1 || report.Errors[0] != "analysis provider returned HTTP 402") {
 				test.Fatalf("unexpected public provider diagnostics: %v", report.Errors)
 			}
 			if !fixture.workspace && (payload.Manifest.Input.RequestedFrom != "HEAD~1" || payload.Manifest.Input.RequestedHead != "HEAD") {
@@ -421,8 +421,8 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 					}
 				}
 				markdown, err := os.ReadFile(filepath.Join(report.ArtifactDir, "report.md"))
-				if err != nil || string(markdown) != *payload.Analysis {
-					test.Fatalf("Markdown changed: %q %v", markdown, err)
+				if err != nil || string(markdown) != *payload.AnalysisRaw {
+					test.Fatalf("report.md does not match analysis_raw: %q %v", markdown, err)
 				}
 			}
 			if fixture.failAnalysis && report.RetryReport == nil {
@@ -674,6 +674,7 @@ func TestAnalysisTextBrief(test *testing.T) {
 	for _, completion := range []string{"complete", "unknown", ""} {
 		test.Run(completion, func(test *testing.T) {
 			const markdown = "## Behavior\n\nThe default changes [[obs-000001]].\n"
+			const display = "## Behavior\n\nThe default changes.\n"
 			report := &workflow.Report{
 				Status: "completed", Completed: true, DeclaredCompletion: completion,
 				Comparison: behaviortask.Comparison{Mode: "range", Old: strings.Repeat("a", 40), Head: strings.Repeat("b", 40)},
@@ -691,7 +692,7 @@ func TestAnalysisTextBrief(test *testing.T) {
 			combined := &analysisOutput{ReviewStatus: "complete", Report: report}
 			var human bytes.Buffer
 			outputAnalysisText(&human, combined)
-			want := "\n──────── Analysis Report ────────\nComparison: aaaaaaaa -> bbbbbbbb\n\n## Behavior\n\nThe default changes.\n\nAnalysis: completed\nEvidence: evidence/run\n"
+			want := "\n──────── Analysis Report ────────\nComparison: aaaaaaaa -> bbbbbbbb\n\n" + display + "\nAnalysis: completed\nEvidence: evidence/run\n"
 			if human.String() != want {
 				test.Fatalf("unexpected brief:\ngot: %q\nwant: %q", human.String(), want)
 			}
@@ -704,7 +705,10 @@ func TestAnalysisTextBrief(test *testing.T) {
 				test.Fatal(err)
 			}
 			after, err := json.Marshal(report)
-			if err != nil || !bytes.Equal(before, after) || report.Markdown != markdown || payload.Analysis == nil || *payload.Analysis != markdown || payload.AnalysisMeta == nil || !reflect.DeepEqual(payload.AnalysisMeta.RetryReport, report.RetryReport) || payload.AnalysisMeta.Usage != report.Usage || payload.AnalysisMeta.Comparison != report.Comparison {
+			if payload.Analysis == nil || *payload.Analysis != display || payload.AnalysisRaw == nil || *payload.AnalysisRaw != markdown {
+				test.Fatalf("unexpected display or raw Markdown in JSON: %s", machine.String())
+			}
+			if err != nil || !bytes.Equal(before, after) || report.Markdown != markdown || payload.AnalysisMeta == nil || !reflect.DeepEqual(payload.AnalysisMeta.RetryReport, report.RetryReport) || payload.AnalysisMeta.Usage != report.Usage || payload.AnalysisMeta.Comparison != report.Comparison {
 				test.Fatalf("text output changed raw report or JSON: %s, %v", machine.String(), err)
 			}
 		})

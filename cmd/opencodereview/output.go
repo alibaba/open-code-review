@@ -353,6 +353,7 @@ type jsonOutput struct {
 	SchemaVersion  string                `json:"schema_version,omitempty"`
 	ReviewStatus   string                `json:"review_status,omitempty"`
 	Analysis       *string               `json:"analysis,omitempty"`
+	AnalysisRaw    *string               `json:"analysis_raw,omitempty"`
 	AnalysisMeta   *workflow.Report      `json:"analysis_meta,omitempty"`
 	Status         string                `json:"status"`
 	LLM            *jsonLLMIdentity      `json:"llm,omitempty"`
@@ -450,8 +451,10 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	// coverage.failed[].classification == "budget".
 	if len(analysis) > 0 && analysis[0] != nil {
 		combined := analysis[0]
+		display := analysisMarkdownForDisplay(combined.Report.Markdown)
 		payload.SchemaVersion = "ocr.review-with-analysis/v2"
-		payload.Analysis = &combined.Report.Markdown
+		payload.Analysis = &display
+		payload.AnalysisRaw = &combined.Report.Markdown
 		payload.AnalysisMeta = combined.Report
 		payload.ReviewStatus = combined.ReviewStatus
 		if manifest == nil && combined.ReviewStatus == string(session.StateFailed) {

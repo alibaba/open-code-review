@@ -5,7 +5,7 @@ It does not change `ocr review` or `ocr scan`, start MCP, construct a comment
 collector, execute repository code, or make a report-summarization model call.
 `ocr review --analysis` combines the full Review pipeline with this independent
 task through `internal/workflow`. The opt-in flag does not change default review
-or scan costs. See [the CLI contract](../../docs/review-analysis.md).
+or scan costs.
 
 ## Preparation boundary
 
