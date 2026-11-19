@@ -433,12 +433,19 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 }
 
 func TestReviewWithAnalysisCancellationAfterReview(test *testing.T) {
-	repo := retryTestRepo(test)
+	reviewDir := filepath.Join(retryTestRepo(test), "nested")
+	if err := os.Mkdir(reviewDir, 0o700); err != nil {
+		test.Fatal(err)
+	}
+	sessionRepo, err := resolveRepoDir(reviewDir)
+	if err != nil {
+		test.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(test.Context(), 10*time.Second)
 	defer cancel()
 	startFakeLLM(test, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		for ctx.Err() == nil {
-			summaries, err := session.ListSessions(repo)
+			summaries, err := session.ListSessions(sessionRepo)
 			if err != nil {
 				test.Error(err)
 				break
@@ -452,7 +459,7 @@ func TestReviewWithAnalysisCancellationAfterReview(test *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}))
-	opts, err := parseReviewFlags([]string{"--repo", repo, "--analysis", "--format", "json", "--audience", "agent"})
+	opts, err := parseReviewFlags([]string{"--repo", reviewDir, "--analysis", "--format", "json", "--audience", "agent"})
 	if err != nil {
 		test.Fatal(err)
 	}
