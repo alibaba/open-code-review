@@ -1445,15 +1445,18 @@ const sandbox = {
     querySelectorAll: (sel) => (sel === ".response-text" ? elements : []),
   },
 };
-vm.runInNewContext(script, sandbox);
+vm.runInNewContext(script, sandbox, { timeout: 15_000 });
 process.stdout.write(JSON.stringify(elements.map((el) => el.innerHTML)));
 `
-		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, node, "-e", runner)
 		cmd.Stdin = bytes.NewReader(payload)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
+			if ctx.Err() != nil {
+				t.Fatalf("execute session.js in node: %v\n%s", ctx.Err(), out)
+			}
 			t.Fatalf("execute session.js in node: %v\n%s", err, out)
 		}
 
