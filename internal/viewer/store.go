@@ -160,7 +160,7 @@ func peekSession(path string) (SessionSummary, error) {
 	summary := SessionSummary{Aborted: true}
 	var lastLine []byte
 	readErr := readJSONLLines(f, func(line []byte) {
-		lastLine = append([]byte(nil), line...)
+		lastLine = line
 
 		if summary.Timestamp.IsZero() {
 			var rec map[string]any
@@ -219,6 +219,7 @@ func peekSession(path string) (SessionSummary, error) {
 // readJSONLLines visits each physical JSONL record without bufio.Scanner's
 // fixed token ceiling. session_end embeds the complete run manifest and can
 // legitimately exceed the former 10 MiB scanner limit on very large reviews.
+// Each record owns its buffer, so visit may retain it after returning.
 func readJSONLLines(r io.Reader, visit func([]byte)) error {
 	reader := bufio.NewReaderSize(r, 64*1024)
 	for {
