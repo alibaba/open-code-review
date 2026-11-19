@@ -227,6 +227,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"contracts/amm/sources/router.move", "Ability Grants"},
 		{"Move.toml", "Move Package Manifest"},
 		{"contracts/amm/Move.toml", "Move Package Manifest"},
+		{"config/prod.dhall", "Integrity Hashes"},
+		{"schemas/package.dhall", "Integrity Hashes"},
 	}
 
 	for _, tt := range tests {

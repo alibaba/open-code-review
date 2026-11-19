@@ -325,6 +325,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.R`                                        | `r.md`                                                                           |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                |
 | `**/*.bicep`                                    | `bicep.md` — Bicep(Azure) 템플릿.                                                |
+| `**/*.dhall` | `dhall.md` — Dhall 설정 언어. |
 | `**/*.nix`                          | `nix.md` — Nix 식과 flake.                                                         |
 | `**/*.{hs,lhs}`                     | `haskell.md` — Haskell 소스.                                                       |
 | `**/*.{nim,nims,nimble}`            | `nim.md` — Nim 소스와 패키지 매니페스트.                                                    |

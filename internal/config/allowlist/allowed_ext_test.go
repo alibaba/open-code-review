@@ -185,6 +185,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".EDN", true},
 		{".move", true},
 		{".MOVE", true},
+		{".dhall", true},
+		{".DHALL", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},

@@ -344,6 +344,7 @@ matching order:
 | `**/*.R`                                        | `r.md`                                                                                                |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                     |
 | `**/*.bicep`                                    | `bicep.md` — Bicep (Azure) templates.                                                                 |
+| `**/*.dhall` | `dhall.md` — Dhall configuration language. |
 | `**/*.nix`                          | `nix.md` — Nix expressions and flakes.                                                                |
 | `**/*.{hs,lhs}`                     | `haskell.md` — Haskell source.                                                                        |
 | `**/*.{nim,nims,nimble}`            | `nim.md` — Nim source and package manifests.                                                          |

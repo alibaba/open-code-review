@@ -313,6 +313,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.R`                                        | `r.md`                                                                |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md`——Terraform / HCL。                                     |
 | `**/*.bicep`                                    | `bicep.md`——Bicep（Azure）模板。                                      |
+| `**/*.dhall` | `dhall.md`——Dhall 配置语言。 |
 | `**/*.nix`                          | `nix.md`——Nix 表达式与 flake。                                         |
 | `**/*.{hs,lhs}`                     | `haskell.md`——Haskell 源代码。                                        |
 | `**/*.{nim,nims,nimble}`            | `nim.md`——Nim 源代码与包清单。                                            |

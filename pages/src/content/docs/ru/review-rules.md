@@ -343,6 +343,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.R`                                        | `r.md`                                                                                           |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                |
 | `**/*.bicep`                                    | `bicep.md` — шаблоны Bicep (Azure).                                                              |
+| `**/*.dhall` | `dhall.md` — язык конфигурации Dhall. |
 | `**/*.nix`                          | `nix.md` — выражения Nix и flake.                                                                |
 | `**/*.{hs,lhs}`                     | `haskell.md` — исходный код Haskell.                                                             |
 | `**/*.{nim,nims,nimble}`            | `nim.md` — исходный код Nim и манифесты пакетов.                                                 |

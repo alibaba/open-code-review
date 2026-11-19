@@ -280,6 +280,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.R`                                        | `r.md`                                                                                          |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md`: Terraform / HCL。                                                               |
 | `**/*.bicep`                                    | `bicep.md`: Bicep（Azure）テンプレート。                                                        |
+| `**/*.dhall` | `dhall.md`: Dhall 設定言語。 |
 | `**/*.nix`                          | `nix.md`: Nix 式と flake。                                                                  |
 | `**/*.{hs,lhs}`                     | `haskell.md`: Haskell ソースコード。                                                            |
 | `**/*.{nim,nims,nimble}`            | `nim.md`: Nim ソースコードとパッケージマニフェスト。                                                        |
