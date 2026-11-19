@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/model"
+
+	"github.com/alibaba/open-code-review/internal/pathutil"
 )
 
 var sessionSubDir = "sessions"
@@ -103,12 +105,12 @@ func encodeRepoPath(p string) string {
 }
 
 func (jw *jsonlWriter) open() error {
-	home, err := os.UserHomeDir()
+	home, err := pathutil.OCRHome()
 	if err != nil {
 		return fmt.Errorf("resolve home dir: %w", err)
 	}
 
-	sessionDir := filepath.Join(home, ".opencodereview", sessionSubDir, encodeRepoPath(jw.repoDir))
+	sessionDir := filepath.Join(home, sessionSubDir, encodeRepoPath(jw.repoDir))
 	if err := os.MkdirAll(sessionDir, 0700); err != nil {
 		return fmt.Errorf("create session dir: %w", err)
 	}
