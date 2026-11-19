@@ -111,6 +111,31 @@ func executeScan(opts scanOptions) error {
 	return executeScanContext(context.Background(), opts)
 }
 
+// loadScanTemplate builds the template scan runs against.
+//
+// scan owns scan_template.json, independent of the diff-review template that
+// loadCommonContext loads, so the CLI overrides have to be applied here too.
+// --max-tools is a cap on the per-file budget, the same as it is for review
+// (#935): it used to only ever raise the template default, so a smaller value
+// was accepted on the command line and then quietly ignored, which is the one
+// outcome a cost guard must not have.
+func loadScanTemplate(maxTools int, batch string) (*template.ScanTemplate, error) {
+	tpl, err := template.LoadScanDefault()
+	if err != nil {
+		return nil, fmt.Errorf("load scan template: %w", err)
+	}
+	if err := tpl.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid scan template: %w", err)
+	}
+	tpl.MaxToolRequestTimes = resolveMaxTools(tpl.MaxToolRequestTimes, maxTools)
+	if batch != "" {
+		// CLI override of BATCH_STRATEGY; validated downstream by parseBatchStrategy
+		// (unknown values silently fall back to "none").
+		tpl.BatchStrategy = batch
+	}
+	return tpl, nil
+}
+
 func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
 	if err != nil {
@@ -128,23 +153,9 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	}
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
-	// scan owns its own template (scan_template.json) independent from the
-	// diff-review template loaded by loadCommonContext above. Apply --max-tools
-	// as an "only raise" override to the scan template's per-file budget.
-	scanTpl, err := template.LoadScanDefault()
+	scanTpl, err := loadScanTemplate(opts.maxTools, opts.batch)
 	if err != nil {
-		return fmt.Errorf("load scan template: %w", err)
-	}
-	if err := scanTpl.Validate(); err != nil {
-		return fmt.Errorf("invalid scan template: %w", err)
-	}
-	if opts.maxTools > scanTpl.MaxToolRequestTimes {
-		scanTpl.MaxToolRequestTimes = opts.maxTools
-	}
-	if opts.batch != "" {
-		// CLI override of BATCH_STRATEGY; validated downstream by parseBatchStrategy
-		// (unknown values silently fall back to "none").
-		scanTpl.BatchStrategy = opts.batch
+		return err
 	}
 	// Token budget: --max-tokens-budget overrides the template value when set.
 	budget := scanTpl.MaxTokensBudget
