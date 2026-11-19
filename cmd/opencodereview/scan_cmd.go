@@ -142,8 +142,9 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 		scanTpl.MaxToolRequestTimes = opts.maxTools
 	}
 	if opts.batch != "" {
-		// CLI override of BATCH_STRATEGY; validated downstream by parseBatchStrategy
-		// (unknown values silently fall back to "none").
+		// CLI override of BATCH_STRATEGY. validateScanOptions has already rejected
+		// values outside the documented set, so this is a known strategy; the
+		// template-level value keeps its lenient fallback in parseBatchStrategy.
 		scanTpl.BatchStrategy = opts.batch
 	}
 	// Token budget: --max-tokens-budget overrides the template value when set.
