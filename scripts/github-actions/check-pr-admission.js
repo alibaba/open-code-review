@@ -124,6 +124,24 @@ async function explainClosure(github, repo, number, count, limit) {
   }
 }
 
+async function canClosePullRequest({ github, context, core, current }) {
+  const number = current.number;
+  const { data: latest } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
+  validatePullRequest(latest);
+  if (latest.number !== number || latest.user.id !== current.user.id) {
+    throw new Error("PR changed before moderation. Re-run PR admission.");
+  }
+  if (latest.state !== "open") {
+    core.info(`PR #${number} is no longer open; skipping closure and review.`);
+    return false;
+  }
+  if (!isCurrentOpening(context, await readOpening(github, context.repo, latest))) {
+    core.info(`PR #${number} was reopened before moderation; skipping closure and review.`);
+    return false;
+  }
+  return true;
+}
+
 async function run({ github, context, core, policy = POLICY }) {
   core.setOutput("allowed", "false");
   validatePolicy(policy);
@@ -166,21 +184,10 @@ async function run({ github, context, core, policy = POLICY }) {
     return true;
   }
 
-  const { data: latest } = await github.rest.pulls.get({ ...repo, pull_number: number });
-  validatePullRequest(latest);
-  if (latest.number !== number || latest.user.id !== current.user.id) {
-    throw new Error("PR changed before moderation. Re-run PR admission.");
-  }
-  if (latest.state !== "open") {
-    core.info(`PR #${number} is no longer open; skipping closure and review.`);
-    return false;
-  }
-  if (!isCurrentOpening(context, await readOpening(github, repo, latest))) {
-    core.info(`PR #${number} was reopened before moderation; skipping closure and review.`);
-    return false;
-  }
+  if (!(await canClosePullRequest({ github, context, core, current }))) return false;
   await explainClosure(github, repo, number, pulls.length, policy.maxOpen);
-  await github.rest.pulls.update({ ...repo, pull_number: number, state: "closed" });
+  if (!(await canClosePullRequest({ github, context, core, current }))) return false;
+  await github.rest.pulls.update({ ...repo, pull_number: number, state: "closed", request: { retries: 0 } });
   core.info(`Closed PR #${number}: ${pulls.length} open PRs exceeds the limit of ${policy.maxOpen}.`);
   return false;
 }

@@ -28,9 +28,9 @@ not assess patch quality, prohibit AI assistance, or target particular contribut
 - Rejected PRs receive an explanatory comment and are closed, not locked.
   Accounts are never blocked. After other PRs are merged or closed, authors can
   reopen a rejected PR when a slot is available. The bot reuses its own policy
-  comment rather than posting another on every attempt. Comment creation does
-  not retry automatically after an ambiguous API failure; a workflow rerun first
-  checks whether the comment was already published.
+  comment rather than posting another on every attempt. Comment creation and PR
+  closure do not retry automatically after an ambiguous API failure; a workflow
+  rerun revalidates the PR and checks whether the comment was already published.
 
 Thresholds and the automation allowlist live in
 [`pr-admission.json`](pr-admission.json). Do not exempt an account merely because
@@ -55,8 +55,10 @@ an unstable list fails without moderation or AI review. Snapshots include the
 triggering PR's opening cycle and, when over the cap, every open PR's cycle for
 that author. This catches page shifts and close/reopen cycles that leave the
 same PR numbers open. Other authors' event histories are not queried. Missing,
-inconsistent, or unreadable reopening metadata also fails closed. Before closing
-an excess PR, admission rechecks that the triggering cycle is still current.
+inconsistent, or unreadable reopening metadata also fails closed. Admission
+rechecks the triggering PR's state and opening cycle both before explaining the
+closure and after comment requests finish, immediately before closing it. An API
+failure in either check prevents closure and AI review.
 
 Admission jobs queue by author ID with cancellation disabled and `queue: max`.
 This serializes moderation and comment updates without keeping the author's
@@ -64,7 +66,8 @@ queue occupied during a potentially long AI review. GitHub allows at most 100
 pending jobs per concurrency group; excess jobs may be canceled and need a
 manual rerun. Canceled or failed admission never starts its dependent AI review.
 The GitHub API is not transactional: counts reflect the snapshot read by the
-job, and a contributor can retry after concurrent merges or closures free slots.
+job, and the final cycle check and close request are not atomic. A contributor
+can retry after concurrent merges or closures free slots.
 
 Other workflows are independent. This gate does **not** prevent ordinary CI from
 starting, stop an AI review already in progress, or prevent someone from opening

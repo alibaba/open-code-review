@@ -456,6 +456,66 @@ test("does not comment or close a PR that was closed while admission was running
   assert.deepStrictEqual(subject.writes, []);
 });
 
+for (const method of ["listComments", "createComment", "updateComment"]) {
+  for (const action of ["opened", "reopened"]) {
+    test(`an ${action} run cannot close a new opening cycle started during ${method}`, async () => {
+      const subject = fixture({
+        action,
+        comments: method === "updateComment" ? [{ id: 1, user: BOT, body: "<!-- ocr-pr-open-cap -->\nOld explanation" }] : [],
+      });
+      const original = subject.github.rest.issues[method];
+      const stalePayload = subject.context.payload;
+      let latestPayload;
+      subject.github.rest.issues[method] = async (params) => {
+        const result = await original(params);
+        subject.storedPulls[0].state = "closed";
+        reopen(subject, "2026-01-02T00:00:02Z");
+        latestPayload = subject.context.payload;
+        subject.context.payload = stalePayload;
+        return result;
+      };
+      await expectAdmission(subject, false);
+      assert.strictEqual(subject.current.state, "open");
+      assert.strictEqual(subject.storedPulls.filter((entry) => entry.state === "open").length, 10);
+      assert.ok(!subject.writes.some((entry) => entry.method === "close"));
+      subject.github.rest.issues[method] = original;
+      subject.context.payload = latestPayload;
+      await expectAdmission(subject, true);
+    });
+  }
+
+  test(`does not close a PR already closed during ${method}`, async () => {
+    const subject = fixture({
+      comments: method === "updateComment" ? [{ id: 1, user: BOT, body: "<!-- ocr-pr-open-cap -->\nOld explanation" }] : [],
+    });
+    const original = subject.github.rest.issues[method];
+    subject.github.rest.issues[method] = async (params) => {
+      const result = await original(params);
+      subject.current.state = "closed";
+      return result;
+    };
+    await expectAdmission(subject, false);
+    assert.ok(!subject.writes.some((entry) => entry.method === "close"));
+  });
+}
+
+for (const method of ["get", "listEvents"]) {
+  test(`failure in the final ${method} check after commenting cannot close a PR`, async () => {
+    const subject = fixture();
+    const original = subject.github.rest.issues.createComment;
+    subject.github.rest.issues.createComment = async (params) => {
+      const result = await original(params);
+      const endpoint = method === "get" ? subject.github.rest.pulls : subject.github.rest.issues;
+      endpoint[method] = async () => { throw new Error(`Final check failed: ${method}`); };
+      return result;
+    };
+    await assert.rejects(run(subject), new RegExp(`Final check failed: ${method}`));
+    assert.strictEqual(subject.outputs.allowed, "false");
+    assert.strictEqual(subject.current.state, "open");
+    assert.deepStrictEqual(subject.writes.map((entry) => entry.method), ["createComment"]);
+  });
+}
+
 test("retries reuse the bot's own comment, even beyond the first comments page", async () => {
   const subject = fixture({ comments: Array.from({ length: 105 }, (_, index) => ({ id: index + 1, user: AUTHOR, body: "Discussion" })) });
   await expectAdmission(subject, false);
@@ -488,6 +548,40 @@ test("a lost creation response fails closed and a job rerun reuses the published
   assert.strictEqual(subject.comments.length, 1);
   assert.strictEqual(subject.writes.filter((entry) => entry.method === "createComment").length, 1);
 });
+
+for (const reopened of [false, true]) {
+  test(`a lost closure response is not retried and a rerun validates the PR, reopened: ${reopened}`, async () => {
+    const subject = fixture({ failAfterWrite: "close" });
+    const original = subject.github.rest.pulls.update;
+    const stalePayload = subject.context.payload;
+    let latestPayload;
+    subject.github.rest.pulls.update = async (params) => {
+      assert.deepStrictEqual(params.request, { retries: 0 });
+      try {
+        return await original(params);
+      } catch (error) {
+        if (reopened) {
+          subject.storedPulls[0].state = "closed";
+          reopen(subject);
+          latestPayload = subject.context.payload;
+          subject.context.payload = stalePayload;
+        }
+        throw error;
+      }
+    };
+    await assert.rejects(run(subject), /Response lost: close/);
+    assert.strictEqual(subject.outputs.allowed, "false");
+    assert.strictEqual(subject.current.state, reopened ? "open" : "closed");
+    await expectAdmission(subject, false);
+    if (reopened) {
+      subject.context.payload = latestPayload;
+      await expectAdmission(subject, true);
+      assert.strictEqual(subject.current.state, "open");
+    }
+    assert.strictEqual(subject.comments.length, 1);
+    assert.strictEqual(subject.writes.filter((entry) => entry.method === "close").length, 1);
+  });
+}
 
 test("spoofed policy comments from humans or other bots cannot suppress the explanation", async () => {
   const comments = [AUTHOR, { ...BOT, type: "User" }, { ...BOT, login: "other[bot]" }, null]
