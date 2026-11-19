@@ -49,7 +49,7 @@ export const ja: TranslationKeys = {
   'highlights.stat2Value': '150K+',
   'highlights.stat2Label': 'NPM ダウンロード',
   'highlights.stat2Caption': 'npm 過去30日の実ダウンロード数',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': '実タスク',
   'highlights.stat3Caption': '実行済みのコードレビュータスク',
   'highlights.stat4Value': '1/9',
@@ -122,6 +122,7 @@ export const ja: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': 'お問い合わせ',
   'footer.copyright': '© Copyright 2026. All rights reserved.',
 
   // Docs Page
@@ -310,6 +311,11 @@ export const ja: TranslationKeys = {
   'docs.search.hint.select': '選択',
   'docs.search.hint.open': '開く',
   'docs.search.hint.close': '閉じる',
+  'docs.content.loading': 'ドキュメントを読み込み中...',
+  'docs.content.loadError': 'ドキュメントの読み込みに失敗しました。',
+  'docs.content.retry': '再試行',
+  'docs.search.loading': '検索中...',
+  'docs.search.loadError': '検索コンテンツの読み込みに失敗しました。',
 
   // Blog
   'blog.title': 'ブログ',

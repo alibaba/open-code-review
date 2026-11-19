@@ -329,7 +329,10 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.rs`                                       | `rust.md`                                                                                        |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                         |
 | `**/*.c`                                        | `c.md`                                                                                           |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md` — ядра и заголовки CUDA.                                                           |
+| `**/*.hip`                                      | `cuda_hip.md` — ядра HIP (AMD ROCm).                                                             |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — исходный код Python.                                                               |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md` — исходный код Ruby, задачи Rake, gemspec, Gemfile и Rakefile. |
 | `**/*.{php,phtml}`                              | `php.md` — исходный код PHP и шаблоны PHP.                                                       |
 | `**/*.proto`                                    | `protobuf.md` — совместимость Protocol Buffers на уровне wire.                                   |
 | `**/*.po`                                       | `po.md` — исходные каталоги переводов gettext.                                                   |

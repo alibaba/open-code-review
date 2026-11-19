@@ -80,6 +80,14 @@ const {
   getPlatformPackageName,
 } = require("../scripts/platform");
 
+// Windows keeps an executable's image mapped for a short while after the
+// process that ran it has exited, so removing it straight away fails with
+// EBUSY. `fs.rm` retries exactly that class of error -- but only when
+// `recursive` is set, which is why it is passed here even for a single file.
+function removeWithRetries(target) {
+  fs.rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+
 function createLauncherFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-launcher-test-"));
   const packageName = getPlatformPackageName();
@@ -227,7 +235,10 @@ async function testSignalDeathExitCode(fixture) {
 }
 
 async function testSpawnFailure(fixture) {
-  fs.unlinkSync(fixture.binaryPath);
+  // On Windows the fixture binary is a copy of this node executable, and the
+  // cases above have just run it, so this is the removal most likely to meet
+  // an image the OS has not finished unmapping.
+  removeWithRetries(fixture.binaryPath);
   fs.mkdirSync(fixture.binaryPath);
   const result = await runLauncher(fixture, []);
 
@@ -238,22 +249,101 @@ async function testSpawnFailure(fixture) {
   );
 }
 
-(async () => {
-  const fixture = createLauncherFixture();
-  try {
-    await testExitCodePropagation(fixture);
-    if (process.platform === "win32") {
-      console.log("skipping POSIX signal relay cases on win32");
-    } else {
-      await testGracefulSignalRelay(fixture, "SIGINT");
-      await testGracefulSignalRelay(fixture, "SIGTERM");
-      await testSignalDeathExitCode(fixture);
-    }
-    await testSpawnFailure(fixture);
-    console.log("ocr launcher integration tests passed");
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
+async function runLauncherIntegrationTests(fixture) {
+  await testExitCodePropagation(fixture);
+  if (process.platform === "win32") {
+    console.log("skipping POSIX signal relay cases on win32");
+  } else {
+    await testGracefulSignalRelay(fixture, "SIGINT");
+    await testGracefulSignalRelay(fixture, "SIGTERM");
+    await testSignalDeathExitCode(fixture);
   }
+  await testSpawnFailure(fixture);
+}
+
+// Runs `body`, then removes the fixture, and returns the error that should
+// decide the exit code -- or undefined when the run passed.
+//
+// Teardown cannot turn a passing run into a failing one: removing a temporary
+// directory is housekeeping, not an assertion about the launcher, and a
+// directory left in the OS temp space is not a reason to fail a build. Nor can
+// it hide a real failure, which is the half that actually bit: when the body
+// has already thrown, a teardown error is printed next to it and the body's
+// error is still the one returned.
+//
+// `remove` is a parameter so the two outcomes can be tested without having to
+// arrange a locked file.
+async function runWithTeardown(fixture, body, remove = removeWithRetries) {
+  let failure;
+  try {
+    await body(fixture);
+  } catch (error) {
+    failure = error;
+  }
+  try {
+    remove(fixture.root);
+  } catch (error) {
+    console.error(`could not remove the test fixture at ${fixture.root}: ${error.message}`);
+  }
+  return failure;
+}
+
+(async () => {
+  const unremovable = () => {
+    throw new Error("EBUSY: resource busy or locked");
+  };
+
+  // Captures what teardown reports, so the assertions below can check it
+  // instead of printing it over a passing run.
+  const reported = [];
+  async function teardownSaying(body) {
+    const realError = console.error;
+    console.error = (line) => reported.push(line);
+    try {
+      return await runWithTeardown({ root: "/fixture" }, body, unremovable);
+    } finally {
+      console.error = realError;
+    }
+  }
+
+  // A run whose assertions all pass stays passing when the fixture cannot be
+  // removed. This is the regression: on Windows CI the suite printed every
+  // "passed" line and then exited 1 from the teardown.
+  assert.strictEqual(await teardownSaying(async () => {}), undefined);
+
+  // A teardown that fails on the way out does not replace the error that
+  // failed the run.
+  const real = new Error("launcher did not relay the signal");
+  assert.strictEqual(
+    await teardownSaying(async () => {
+      throw real;
+    }),
+    real
+  );
+
+  // Both of those reported the teardown failure rather than swallowing it.
+  assert.strictEqual(reported.length, 2);
+  for (const line of reported) {
+    assert.ok(
+      line.includes("/fixture") && line.includes("EBUSY"),
+      `teardown must name the directory and the cause; got: ${line}`
+    );
+  }
+
+  // The fixture is still removed when the run passes.
+  const removed = [];
+  await runWithTeardown({ root: "/fixture" }, async () => {}, (target) => removed.push(target));
+  assert.deepStrictEqual(removed, ["/fixture"]);
+
+  console.log("ocr launcher teardown policy tests passed");
+
+  const failure = await runWithTeardown(createLauncherFixture(), runLauncherIntegrationTests);
+  if (failure) {
+    console.error(failure.stack || failure.message);
+    process.exitCode = 1;
+    return;
+  }
+  console.log("ocr launcher integration tests passed");
 })().catch((err) => {
   console.error(err.stack || err.message);
   process.exitCode = 1;

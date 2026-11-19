@@ -18,6 +18,7 @@ internal val supportedReviewStatuses = setOf(
 
 /** Only recognized, non-failing terminal results can report an empty review. */
 fun resultToState(result: CliResult): ReviewState = when {
+    result.executionError != null -> ReviewState.FAILED
     result.status !in supportedReviewStatuses -> ReviewState.FAILED
     result.comments.isNotEmpty() -> ReviewState.DONE
     result.status in setOf("completed_with_errors", "partial", "failed") -> ReviewState.FAILED
@@ -60,7 +61,7 @@ class ReviewSession(private val cli: CliService, private val cwd: File) {
             }
             val state = resultToState(result)
             val incomplete = result.status in setOf("completed_with_errors", "partial", "failed")
-            val error = if (state == ReviewState.FAILED || incomplete) {
+            val error = result.executionError ?: if (state == ReviewState.FAILED || incomplete) {
                 result.message?.takeIf(String::isNotBlank) ?: "Review did not complete successfully (${result.status})"
             } else null
             if (error != null) cb.onLog(LogLine("[ocr] $error", LogLevel.ERROR))
