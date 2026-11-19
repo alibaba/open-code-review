@@ -12,7 +12,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/llmloop"
-	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -21,16 +20,6 @@ import (
 )
 
 var analysisCitationPattern = regexp.MustCompile(`[ \t]*\[\[obs-[0-9]+\]\](?:[ \t]*\[\[obs-[0-9]+\]\])*`)
-
-func (output *analysisOutput) status() string {
-	if (output.ReviewStatus == string(session.StateComplete) || output.ReviewStatus == string(session.StateSkipped)) && output.Report.Status == "completed" {
-		return "completed"
-	}
-	if output.ReviewStatus == "failed" && output.Report.Status == "failed" {
-		return "failed"
-	}
-	return "partial"
-}
 
 func outputAnalysisText(writer io.Writer, output *analysisOutput) {
 	report := output.Report

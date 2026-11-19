@@ -31,8 +31,8 @@ import (
 )
 
 func TestAnalysisFlags(test *testing.T) {
-	if !strings.Contains(reviewCmd.Flags().Lookup("max-tokens-budget").Usage, "only if Analysis, when requested, also completes") {
-		test.Fatal("budget help does not describe combined exit status")
+	if !strings.Contains(reviewCmd.Flags().Lookup("analysis").Usage, "without changing the Review exit status") {
+		test.Fatal("analysis help does not describe the Review exit policy")
 	}
 	for _, fixture := range []struct {
 		args   []string
@@ -234,22 +234,28 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 		name         string
 		analysis     bool
 		workspace    bool
+		clean        bool
 		failReview   bool
 		failAnalysis bool
 		partial      bool
 		budget       string
+		mainTokens   int
+		blockOutput  bool
 		status       string
 		wantError    bool
 	}{
 		{name: "default", status: "complete"},
-		{name: "complete", analysis: true, status: "completed"},
-		{name: "workspace", analysis: true, workspace: true, status: "completed"},
-		{name: "analysis partial", analysis: true, partial: true, status: "completed"},
-		{name: "analysis failure", analysis: true, failAnalysis: true, status: "partial", wantError: true},
-		{name: "review failure", analysis: true, failReview: true, status: "partial", wantError: true},
+		{name: "complete", analysis: true, status: "complete"},
+		{name: "workspace", analysis: true, workspace: true, status: "complete"},
+		{name: "analysis partial self-assessment", analysis: true, partial: true, status: "complete"},
+		{name: "analysis failure", analysis: true, failAnalysis: true, status: "complete"},
+		{name: "output failure", analysis: true, failAnalysis: true, blockOutput: true, wantError: true},
+		{name: "review failure", analysis: true, failReview: true, status: "failed", wantError: true},
 		{name: "both fail", analysis: true, failReview: true, failAnalysis: true, status: "failed", wantError: true},
 		{name: "shared budget", analysis: true, budget: "1", status: "failed", wantError: true},
-		{name: "final analysis submission", analysis: true, workspace: true, budget: "15", status: "partial", wantError: true},
+		{name: "budget-only partial review with analysis failure", analysis: true, failAnalysis: true, budget: "100000", mainTokens: 95000, status: "partial"},
+		{name: "final analysis submission", analysis: true, workspace: true, budget: "15", status: "failed", wantError: true},
+		{name: "skipped review with limited analysis", analysis: true, workspace: true, clean: true, budget: "15", status: "skipped"},
 	} {
 		test.Run(fixture.name, func(test *testing.T) {
 			home := test.TempDir()
@@ -257,7 +263,7 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			test.Setenv("USERPROFILE", home)
 			test.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 			repo := retryTestRepo(test)
-			if fixture.workspace {
+			if fixture.workspace && !fixture.clean {
 				file := filepath.Join(repo, "a.go")
 				data, err := os.ReadFile(file)
 				if err != nil {
@@ -268,10 +274,14 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 				}
 			}
 			reviewer := newFakeLLM()
+			if fixture.mainTokens > 0 {
+				reviewer.mainInputTokens = fixture.mainTokens
+			}
 			if fixture.failReview {
 				reviewer.failAll()
 			}
 			var analysisCalls atomic.Int64
+			output := filepath.Join(test.TempDir(), "output.json")
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				body, _ := io.ReadAll(request.Body)
 				if !bytes.Contains(body, []byte("submit_analysis")) {
@@ -282,6 +292,11 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 				analysisCalls.Add(1)
 				writer.Header().Set("Content-Type", "application/json")
 				if fixture.failAnalysis {
+					if fixture.blockOutput {
+						if err := os.Mkdir(output, 0700); err != nil {
+							test.Error(err)
+						}
+					}
 					writer.WriteHeader(http.StatusPaymentRequired)
 					_, _ = writer.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"analysis unavailable"}}`))
 					return
@@ -310,7 +325,6 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			for key, value := range map[string]string{"OCR_LLM_URL": server.URL + "/v1/messages", "OCR_LLM_TOKEN": "test-token", "OCR_LLM_MODEL": "claude-test", "OCR_LLM_PROTOCOL": "anthropic", "OCR_LLM_AUTH_HEADER": "x-api-key", "OCR_LLM_TIMEOUT": "30"} {
 				test.Setenv(key, value)
 			}
-			output := filepath.Join(test.TempDir(), "output.json")
 			args := []string{"--repo", repo, "--format", "json", "--output", output, "--effort", "low", "--no-filter", "--background", "Synthetic engineering verification"}
 			if !fixture.workspace {
 				args = append(args, "--from", "HEAD~1", "--to", "HEAD")
@@ -325,9 +339,15 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			if err != nil {
 				test.Fatal(err)
 			}
-			err = executeReviewContext(test.Context(), opts)
+			stderr := captureStderr(test, func() { err = executeReviewContext(test.Context(), opts) })
 			if (err != nil) != fixture.wantError {
 				test.Fatalf("execution: %v", err)
+			}
+			if fixture.blockOutput {
+				if !strings.Contains(err.Error(), "close output file") {
+					test.Fatalf("missing output delivery error: %v", err)
+				}
+				return
 			}
 			data, err := os.ReadFile(output)
 			if err != nil {
@@ -337,11 +357,11 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			if err := json.Unmarshal(data, &payload); err != nil {
 				test.Fatalf("output %s: %v", data, err)
 			}
-			if payload.Status != fixture.status {
+			if payload.Status != fixture.status || payload.Message != manifestMessage(payload.Manifest, len(payload.Comments)) {
 				test.Fatalf("output: %s", data)
 			}
 			if !fixture.analysis {
-				if payload.Analysis != nil || payload.AnalysisMeta != nil || payload.SchemaVersion != "" || analysisCalls.Load() != 0 {
+				if payload.Analysis != nil || payload.AnalysisMeta != nil || payload.ReviewStatus != "" || payload.SchemaVersion != "" || analysisCalls.Load() != 0 {
 					test.Fatalf("default review changed: %s", data)
 				}
 				return
@@ -350,7 +370,11 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 				test.Fatalf("missing peer report: %s", data)
 			}
 			report := payload.AnalysisMeta
-			if fixture.failAnalysis && (strings.Contains(string(data), "analysis unavailable") || len(report.Errors) != 1 || report.Errors[0] != "analysis provider returned HTTP 402") {
+			const warning = "[ocr] warning: analysis execution "
+			if (report.Status == "completed" && strings.Contains(stderr, warning)) || (report.Status != "completed" && !strings.Contains(stderr, warning+report.Status)) {
+				test.Fatalf("unexpected warning for %s analysis: %s", report.Status, stderr)
+			}
+			if fixture.failAnalysis && (report.Status != "failed" || *payload.Analysis != "" || strings.Contains(string(data), "analysis unavailable") || len(report.Errors) != 1 || report.Errors[0] != "analysis provider returned HTTP 402") {
 				test.Fatalf("unexpected public provider diagnostics: %v", report.Errors)
 			}
 			if !fixture.workspace && (payload.Manifest.Input.RequestedFrom != "HEAD~1" || payload.Manifest.Input.RequestedHead != "HEAD") {
@@ -371,6 +395,9 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			}
 			if fixture.budget != "" && !payload.Summary.BudgetExceeded {
 				test.Fatalf("budget unreported: %s", data)
+			}
+			if fixture.status == "partial" && len(payload.Manifest.Coverage.Completed) == 0 {
+				test.Fatalf("budget-only partial review lost usable coverage: %s", data)
 			}
 			if fixture.workspace && fixture.budget != "" {
 				if analysisCalls.Load() != 2 || payload.Summary.TotalTokens != 30 || !report.Completed || report.StopReason != "token_budget" || report.Status != "partial" || len(report.CitedObservationIDs) != 1 {
@@ -405,15 +432,48 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 	}
 }
 
+func TestReviewWithAnalysisCancellationAfterReview(test *testing.T) {
+	repo := retryTestRepo(test)
+	ctx, cancel := context.WithTimeout(test.Context(), 10*time.Second)
+	defer cancel()
+	startFakeLLM(test, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		for ctx.Err() == nil {
+			summaries, err := session.ListSessions(repo)
+			if err != nil {
+				test.Error(err)
+				break
+			}
+			for _, summary := range summaries {
+				if summary.RunManifest != nil && summary.RunManifest.TerminalState == session.StateSkipped {
+					cancel()
+					return
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}))
+	opts, err := parseReviewFlags([]string{"--repo", repo, "--analysis", "--format", "json", "--audience", "agent"})
+	if err != nil {
+		test.Fatal(err)
+	}
+	stdout := captureStdout(test, func() { err = executeReviewContext(ctx, opts) })
+	if !errors.Is(err, context.Canceled) {
+		test.Fatalf("command cancellation after Review finished: %v", err)
+	}
+	var payload jsonOutput
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil || payload.Status != "skipped" || payload.AnalysisMeta == nil || payload.AnalysisMeta.Status != "failed" {
+		test.Fatalf("expected skipped Review and interrupted Analysis on stdout: %s (%v)", stdout, err)
+	}
+}
+
 func TestAnalysisSkippedReviewStatus(test *testing.T) {
 	for _, fixture := range []struct {
 		name            string
 		failPersistence bool
 		wantReview      string
-		wantStatus      string
 	}{
-		{name: "session_persistence_failure", failPersistence: true, wantReview: "partial", wantStatus: "partial"},
-		{name: "successful_skip", wantReview: "skipped", wantStatus: "completed"},
+		{name: "session_persistence_failure", failPersistence: true, wantReview: "partial"},
+		{name: "successful_skip", wantReview: "skipped"},
 	} {
 		test.Run(fixture.name, func(test *testing.T) {
 			freshOCRHome(test)
@@ -446,9 +506,6 @@ func TestAnalysisSkippedReviewStatus(test *testing.T) {
 			}
 			combined := &combinedResult{Agent: reviewer, reviewErr: reviewErr, budget: workflow.NewBudget(0, 1), report: &workflow.Report{Status: "completed", Markdown: "Analysis result."}}
 			output := combined.AnalysisOutput()
-			if output.ReviewStatus != fixture.wantReview || output.status() != fixture.wantStatus {
-				test.Errorf("review=%s overall=%s, want review=%s overall=%s", output.ReviewStatus, output.status(), fixture.wantReview, fixture.wantStatus)
-			}
 			var human bytes.Buffer
 			if err := emitRunResult(test.Context(), combined, comments, time.Now(), "text", "human", nil, nil, &human, nil); err != nil {
 				test.Fatal(err)
@@ -467,7 +524,7 @@ func TestAnalysisSkippedReviewStatus(test *testing.T) {
 			if err := json.Unmarshal(machine.Bytes(), &payload); err != nil {
 				test.Fatal(err)
 			}
-			if payload.Status != fixture.wantStatus || payload.ReviewStatus != fixture.wantReview {
+			if payload.Status != "skipped" || payload.ReviewStatus != fixture.wantReview {
 				test.Errorf("JSON status mismatch: %s", machine.String())
 			}
 			if payload.Manifest == nil || payload.Manifest.TerminalState != session.StateSkipped || reviewer.RunManifest().TerminalState != session.StateSkipped {
@@ -478,20 +535,17 @@ func TestAnalysisSkippedReviewStatus(test *testing.T) {
 }
 
 func TestAnalysisTextAndStatus(test *testing.T) {
-	for _, fixture := range []struct{ review, analysis, want string }{
-		{"complete", "completed", "completed"},
-		{"skipped", "completed", "completed"},
-		{"failed", "completed", "partial"},
-		{"failed", "failed", "failed"},
-		{"partial", "completed", "partial"},
-		{"partial", "partial", "partial"},
-		{"complete", "failed", "partial"},
-		{"complete", "partial", "partial"},
+	for _, fixture := range []struct{ review, analysis string }{
+		{"complete", "completed"},
+		{"skipped", "failed"},
+		{"failed", "completed"},
+		{"failed", "failed"},
+		{"partial", "completed"},
+		{"partial", "partial"},
+		{"complete", "failed"},
+		{"complete", "partial"},
 	} {
 		output := &analysisOutput{ReviewStatus: fixture.review, Report: &workflow.Report{Status: fixture.analysis, DeclaredCompletion: "complete"}}
-		if output.status() != fixture.want {
-			test.Fatalf("status %+v", fixture)
-		}
 		var buffer bytes.Buffer
 		outputAnalysisText(&buffer, output)
 		wantText := "Analysis: " + fixture.analysis
@@ -509,14 +563,15 @@ func TestAnalysisTextAndStatus(test *testing.T) {
 			test.Fatal(buffer.String())
 		}
 		var machine bytes.Buffer
-		if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", nil, false, nil, &machine, nil, nil, output); err != nil {
+		manifest := &session.RunManifest{TerminalState: session.TerminalState(fixture.review)}
+		if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", manifest, false, nil, &machine, nil, nil, output); err != nil {
 			test.Fatal(err)
 		}
 		var payload jsonOutput
 		if err := json.Unmarshal(machine.Bytes(), &payload); err != nil {
 			test.Fatal(err)
 		}
-		if output.ReviewStatus != fixture.review || payload.ReviewStatus != fixture.review || payload.Status != fixture.want || payload.AnalysisMeta == nil || payload.AnalysisMeta.Status != fixture.analysis || payload.AnalysisMeta.DeclaredCompletion != "complete" {
+		if payload.ReviewStatus != fixture.review || payload.Status != fixture.review || payload.AnalysisMeta == nil || payload.AnalysisMeta.Status != fixture.analysis || payload.AnalysisMeta.DeclaredCompletion != "complete" {
 			test.Fatalf("text rendering changed machine-readable states: %s", machine.String())
 		}
 	}
@@ -527,6 +582,18 @@ func TestAnalysisTextAndStatus(test *testing.T) {
 	outputAnalysisText(&buffer, &analysisOutput{ReviewStatus: "complete", Report: report})
 	if strings.Contains(buffer.String(), "\x1b") || !strings.Contains(buffer.String(), "Unusual heading and quotes:") || !strings.Contains(buffer.String(), "Investigation incomplete (model self-assessment)") {
 		test.Fatalf("text: %s", buffer.String())
+	}
+}
+
+func TestAnalysisWithoutReviewManifest(test *testing.T) {
+	output := &analysisOutput{ReviewStatus: "failed", Report: &workflow.Report{Status: "completed", Markdown: "Analysis result."}}
+	var machine bytes.Buffer
+	if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", nil, false, nil, &machine, nil, nil, output); err != nil {
+		test.Fatal(err)
+	}
+	var payload jsonOutput
+	if err := json.Unmarshal(machine.Bytes(), &payload); err != nil || payload.Status != "failed" || payload.Analysis == nil || *payload.Analysis != output.Report.Markdown {
+		test.Fatalf("expected failed Review and available Analysis: %s (%v)", machine.String(), err)
 	}
 }
 

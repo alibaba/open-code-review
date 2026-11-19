@@ -344,7 +344,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	var resultProvider ResultProvider = ag
 	var comments []model.LlmComment
 	var runErr error
-	var analysisErr error
 	if opts.analysis {
 		execution := newAnalysisExecution(cc, opts, rt, sharedBudget, ag.Session().SessionID, codeTools.resolution)
 		outcome := workflow.Run(runCtx, ag.Run, execution.run)
@@ -352,7 +351,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		report := execution.report(outcome.Analysis, outcome.AnalysisError)
 		resultProvider = &combinedResult{Agent: ag, report: report, budget: sharedBudget, reviewErr: runErr}
 		if report.Status != "completed" {
-			analysisErr = fmt.Errorf("analysis execution %s; see the analysis report and metadata for details", report.Status)
+			fmt.Fprintf(os.Stderr, "[ocr] warning: analysis execution %s; see the Analysis diagnostics in the result\n", report.Status)
 		}
 	} else {
 		comments, runErr = ag.Run(runCtx)
@@ -374,7 +373,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		fmt.Fprintf(os.Stderr, "[ocr] warning: freeze retry report: %v (retry report suppressed)\n", freezeErr)
 	}
 
-	resultErr := errors.Join(reviewResultError(runErr, manifest), analysisErr)
+	resultErr := reviewResultError(runErr, manifest)
+	if opts.analysis && resultErr == nil {
+		resultErr = ctx.Err()
+	}
 	if resultErr != nil {
 		span.SetStatus(codes.Error, resultErr.Error())
 		span.RecordError(resultErr)

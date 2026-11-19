@@ -454,8 +454,10 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		payload.Analysis = &combined.Report.Markdown
 		payload.AnalysisMeta = combined.Report
 		payload.ReviewStatus = combined.ReviewStatus
-		payload.Status = combined.status()
-		payload.Message = fmt.Sprintf("Review: %s. Analysis execution: %s. Model-declared completeness: %s (not a quality guarantee).", combined.ReviewStatus, combined.Report.Status, combined.Report.DeclaredCompletion)
+		if manifest == nil && combined.ReviewStatus == string(session.StateFailed) {
+			payload.Status = combined.ReviewStatus
+			payload.Message = "Review failed before a manifest was available."
+		}
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")

@@ -155,7 +155,8 @@ Range mode uses the merge base; root commits use the empty old tree. No checkout
 fetch, build, or repository code execution is performed by the analysis task.
 
 Only `text` and `json` formats are supported. `--preview`, `--resume`, and SARIF
-are rejected rather than silently dropping part of the report.
+are rejected during argument validation: the CLI prints an error and exits with
+code 1 before either role starts.
 To rerun a combined investigation, start a fresh run. The Review session can still
 be inspected independently; do not resume it expecting analysis to be resumed.
 
@@ -201,7 +202,7 @@ For example, a successfully delivered report can admit incomplete investigation:
 ```json
 {
   "schema_version": "ocr.review-with-analysis/v2",
-  "status": "completed",
+  "status": "complete",
   "review_status": "complete",
   "comments": [],
   "analysis": "## Behavior\nSupported observations...\n\n## Limitations\nConsumer behavior remains unverified.",
@@ -215,10 +216,12 @@ For example, a successfully delivered report can admit incomplete investigation:
 }
 ```
 
-`review_status` retains Review's own `complete`, `partial`, `failed`, or `skipped`.
-The Analysis text block shows its own execution status and any abnormal Review
-status; it does not repeat the overall state or normal Review states. Display
-changes do not alter JSON states or model-declared completeness.
+The top-level `status` and `message` describe Review, not the combined run. When
+a manifest is available, `status` is its terminal state: `complete`, `partial`,
+`failed`, or `skipped`. `review_status` also reflects Review delivery errors: for
+example, it is `partial` if coverage was complete but the session could not be
+saved. The Analysis text block shows abnormal Review states and its own execution
+status.
 
 `analysis_meta.execution_status` is program-recorded: `completed` when a valid
 report was accepted without execution errors or budget stops; `partial` when an
@@ -231,13 +234,20 @@ acceptance. Neither field certifies analysis quality or completeness.
 status or process exit by itself. Consumers needing complete investigations must
 inspect this field and the report, not infer completeness from exit code zero.
 
-The top-level `status` combines execution outcomes: `completed` when Review
-completed (or selected no files) and analysis execution completed; `failed` when
-both failed; otherwise `partial`. Review run failures and analysis execution
-failures/limits return nonzero **after** publishing available output. Review-only
-controlled partial coverage retains its existing exit contract. A model's partial
-or unknown self-assessment alone does not cause a nonzero exit. Failed analysis
-emits `analysis: ""` and its diagnostics, not a fabricated report.
+Adding `--analysis` does not add a CI gate. If Analysis times out, fails or hits
+a limit, the CLI warns on stderr and emits the available results; `analysis` is
+an empty string when no report was accepted. A successful or skipped Review
+still exits 0, as does a budget-only partial Review with usable coverage.
+Operational Review failures, a Review that covered nothing because every item
+failed, command cancellation, and output delivery errors still exit nonzero.
+
+To require Analysis execution to complete in CI, check it **in addition to**
+the normal Review exit code:
+
+```sh
+ocr review --analysis --format json --output result.json &&
+  jq -e '.analysis_meta.execution_status == "completed"' result.json >/dev/null
+```
 
 ### Observation citations
 
@@ -281,9 +291,10 @@ share the same concurrency limit and count toward total usage. Both in-flight
 calls and final submissions can take usage over budget; this is not a billing cap.
 If the budget prevents context compression, the final submission keeps the
 uncompressed history, including the latest tool results. Budget rejection is not
-a provider error and is not retried by HTTP transport. If the final submission
-itself fails at the provider after the token limit is reached, the CLI exits
-non-zero rather than treating it as a budget-only stop.
+a provider error and is not retried by HTTP transport. A provider failure during
+Review's final submission is an operational Review failure, not a budget-only
+stop, and exits nonzero. A failure during Analysis's final submission changes
+only its execution status and diagnostics.
 Before dispatching a Review group, the scheduler also checks that its estimated
 cost fits the shared balance, including usage already incurred by Analysis.
 Both roles also share the `--max-git-procs` limit.

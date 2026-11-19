@@ -57,7 +57,7 @@ func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, max
 	cmd.Flags().IntVar(maxTools, "max-tools", 0, "max tool call rounds per subtask (0 = template default; min 50)")
 	cmd.Flags().IntVar(maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(maxTokens, "max-tokens", 0, "per-group prompt token ceiling (0 = configured or template default)")
-	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "limit total token usage (input+output); shared by both roles with --analysis. Once the budget is reached, no further groups are dispatched. Each active conversation gets one final submission-only round. In-flight calls and final submissions can exceed the limit. The CLI emits available results. Budget-only partial reviews with usable coverage exit 0 only if Analysis, when requested, also completes. Operational failures and fully failed reviews exit non-zero (0 = unlimited)")
+	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "limit total token usage (input+output); shared by both roles with --analysis. Once the budget is reached, no further groups are dispatched. Each active conversation gets one final submission-only round. In-flight calls and final submissions can exceed the limit. The CLI emits available results. Budget-only partial reviews with usable coverage exit 0. Operational Review failures and fully failed reviews exit non-zero (0 = unlimited)")
 }
 
 func addModelFlag(cmd *cobra.Command, target *string) {
@@ -225,7 +225,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	cmd.Flags().StringVar(&opts.effort, "effort", "", "review effort preset: low | medium | high (\"\" = configured or default medium)")
 	cmd.RegisterFlagCompletionFunc("effort", completeEnum(template.EffortNames()...))
 	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
-	cmd.Flags().BoolVar(&opts.analysis, "analysis", false, "include Behavior, Impact, and maintainer decisions (workspace/range/commit; text/json)")
+	cmd.Flags().BoolVar(&opts.analysis, "analysis", false, "include Behavior, Impact, and maintainer decisions (workspace/range/commit; text/json); incomplete Analysis warns without changing the Review exit status")
 	addPreviewFlag(cmd, &opts.preview)
 }
 
