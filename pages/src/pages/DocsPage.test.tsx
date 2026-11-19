@@ -485,6 +485,42 @@ describe('DocsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: zh['error.reload'] }));
     expect(reloadSpy).toHaveBeenCalledTimes(1);
   });
+  it('uses cached English content after a failed fallback and language round trip', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/installation');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+    expect(h.loadCalls).toEqual(['zh', 'en']);
+
+    await act(async () => {
+      h.pending.en[0].reject(new Error('en fallback failed'));
+    });
+    expect(screen.getByRole('alert').textContent).toContain(zh['docs.content.loadError']);
+    expect(screen.getByRole('button', { name: zh['docs.content.retry'] })).toBeTruthy();
+    expect(screen.queryByTestId('markdown')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('switch-en'));
+    expect(h.loadCalls).toEqual(['zh', 'en', 'en']);
+    await act(async () => {
+      h.pending.en[1].resolve({ installation: 'en installation body' });
+    });
+    expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('en installation body');
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('switch-zh'));
+    await waitFor(() => {
+      expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('en installation body');
+    });
+
+    expect(screen.getByTestId('location').textContent).toBe('/docs/installation');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('button', { name: zh['docs.content.retry'] })).toBeNull();
+    expect(h.loadCalls).toEqual(['zh', 'en', 'en']);
+  });
+
   it('reattaches the shared fallback response after navigating to another missing article', async () => {
     h.available.zh = [];
     renderDocsPage('zh', '/docs/installation');
