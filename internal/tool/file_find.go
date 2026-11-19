@@ -169,15 +169,15 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 // blocklist (.git, node_modules, vendor, ...). Used when `git ls-files`
 // fails because the directory is not a git repository.
 func (p *FileFindProvider) listWalkFiles(ctx context.Context) ([]string, error) {
-	root := p.FileReader.RepoDir
 	// WalkDir skips a symbolic link even when it is the explicitly selected root.
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
+	root, err := filepath.EvalSymlinks(p.FileReader.RepoDir)
+	if err != nil {
+		return nil, err
 	}
 	gitignorePatterns := diff.LoadGitignorePatterns(root)
 	var files []string
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if cerr := ctx.Err(); cerr != nil {
 			return cerr
 		}

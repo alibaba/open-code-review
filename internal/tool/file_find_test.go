@@ -84,6 +84,25 @@ func TestFileFind_NonGitSymlinkRoot(t *testing.T) {
 	}
 }
 
+func TestFileFind_NonGitInvalidSymlinkRoot(t *testing.T) {
+	for _, target := range []string{"missing", "alias"} {
+		t.Run(target, func(t *testing.T) {
+			alias := filepath.Join(t.TempDir(), "alias")
+			if err := os.Symlink(target, alias); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			p := NewFileFind(&FileReader{RepoDir: alias, Mode: ModeWorkspace})
+			got, err := p.Execute(context.Background(), map[string]any{"query_name": ".go"})
+			if err == nil || got != "" {
+				t.Fatalf("invalid root returned (%q, %v), want an error", got, err)
+			}
+			if target == "missing" && !os.IsNotExist(err) {
+				t.Fatalf("broken root error = %v, want a missing-target error", err)
+			}
+		})
+	}
+}
+
 // TestFileFind_NonGitDirectoryNoMatch verifies the not-found path in a
 // non-git dir returns the sentinel rather than an error.
 func TestFileFind_NonGitDirectoryNoMatch(t *testing.T) {
