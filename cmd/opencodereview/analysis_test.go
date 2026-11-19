@@ -5,7 +5,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +23,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/behaviortask"
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -28,6 +31,9 @@ import (
 )
 
 func TestAnalysisFlags(test *testing.T) {
+	if !strings.Contains(reviewCmd.Flags().Lookup("max-tokens-budget").Usage, "only if Analysis, when requested, also completes") {
+		test.Fatal("budget help does not describe combined exit status")
+	}
 	for _, fixture := range []struct {
 		args   []string
 		valid  bool
@@ -59,16 +65,16 @@ func TestAnalysisFlags(test *testing.T) {
 func TestAnalysisPinning(test *testing.T) {
 	repo := retryTestRepo(test)
 	opts := reviewOptions{repoDir: repo, from: "HEAD~1", to: "HEAD"}
-	_, pinned, err := pinAnalysisInput(test.Context(), opts)
+	_, pinned, _, err := pinAnalysisInput(test.Context(), opts)
 	if err != nil || len(pinned.ResolvedBase) != 40 || len(pinned.ResolvedHead) != 40 {
 		test.Fatalf("pinning: %+v %v", pinned, err)
 	}
 	opts.from, opts.to, opts.commit = "", "", "HEAD"
-	_, pinned, err = pinAnalysisInput(test.Context(), opts)
+	_, pinned, _, err = pinAnalysisInput(test.Context(), opts)
 	if err != nil || len(pinned.ResolvedHead) != 40 {
 		test.Fatalf("commit: %+v %v", pinned, err)
 	}
-	pinnedRepo, pinned, err := pinAnalysisInput(test.Context(), reviewOptions{repoDir: repo})
+	pinnedRepo, pinned, _, err := pinAnalysisInput(test.Context(), reviewOptions{repoDir: repo})
 	if err != nil || pinned.ResolvedHead != "" || len(pinned.ResolvedBase) != 40 {
 		test.Fatalf("workspace must keep its mode: %+v %v", pinned, err)
 	}
@@ -84,7 +90,7 @@ func TestAnalysisPinning(test *testing.T) {
 		test.Fatalf("workspace repository changed: got %q, want %q", pinnedRepo, repo)
 	}
 	for _, invalid := range []reviewOptions{{repoDir: repo, from: "HEAD", commit: "HEAD"}, {repoDir: test.TempDir(), commit: "HEAD"}, {repoDir: repo, commit: "--help"}, {repoDir: repo, commit: "missing"}} {
-		if _, _, err := pinAnalysisInput(test.Context(), invalid); err == nil {
+		if _, _, _, err := pinAnalysisInput(test.Context(), invalid); err == nil {
 			test.Fatalf("accepted %+v", invalid)
 		}
 	}
@@ -95,14 +101,67 @@ func TestRejectedArtifactDirectoryIsNotPublished(test *testing.T) {
 	test.Setenv("HOME", repo)
 	test.Setenv("USERPROFILE", repo)
 	opts := reviewOptions{repoDir: repo, commit: "HEAD"}
-	_, resolution, err := pinAnalysisInput(test.Context(), opts)
+	_, resolution, runner, err := pinAnalysisInput(test.Context(), opts)
 	if err != nil {
 		test.Fatal(err)
 	}
-	execution := newAnalysisExecution(&commonContext{RepoDir: repo, Template: &template.Template{MaxTokens: 10000, MaxToolRequestTimes: 10}}, opts, &llmRuntime{Model: "fake"}, workflow.NewBudget(0, 1), "never-created", resolution)
+	execution := newAnalysisExecution(&commonContext{RepoDir: repo, GitRunner: runner, Template: &template.Template{MaxTokens: 10000, MaxToolRequestTimes: 10}}, opts, &llmRuntime{Model: "fake"}, workflow.NewBudget(0, 1), "never-created", resolution)
 	result, err := execution.run(test.Context())
-	if err == nil || execution.report(result, err).ArtifactDir != "" {
+	report := execution.report(result, err)
+	if !errors.Is(err, behaviortask.ErrArtifactLocation) || report.ArtifactDir != "" || report.SessionID != "" || !reflect.DeepEqual(report.Errors, []string{behaviortask.ErrArtifactLocation.Error()}) {
 		test.Fatalf("preparation: directory=%q err=%v", execution.directory, err)
+	}
+}
+
+func TestRefValidationPreservesCancellation(test *testing.T) {
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		err := validateReviewRefsUsing(reviewOptions{commit: "HEAD"}, func(string) ([]byte, error) { return nil, fmt.Errorf("verify: %w", cause) })
+		if !errors.Is(err, cause) {
+			test.Fatal(err)
+		}
+	}
+}
+
+func TestCombinedPartialCloneDoesNotFetchMissingBlobs(test *testing.T) {
+	source := retryTestRepo(test)
+	retryTestGit(test, source, "config", "uploadpack.allowFilter", "true")
+	clone := filepath.Join(test.TempDir(), "partial")
+	retryTestGit(test, source, "clone", "--quiet", "--no-local", "--no-checkout", "--filter=blob:none", source, clone)
+	repo, resolution, runner, err := pinAnalysisInput(test.Context(), reviewOptions{repoDir: clone, commit: "HEAD"})
+	if err != nil {
+		test.Fatal(err)
+	}
+	missing := func() string {
+		output, err := runner.Output(test.Context(), repo, "rev-list", "--objects", "--missing=print", "HEAD")
+		if err != nil {
+			test.Fatal(err)
+		}
+		return string(output)
+	}
+	before := missing()
+	if !strings.Contains(before, "\n?") {
+		test.Fatal("partial clone fixture has no missing objects")
+	}
+	cc, err := commonContextForRepo(repo, true, "", resolution.ResolvedHead, 0, runner)
+	if err != nil {
+		test.Fatal(err)
+	}
+	if _, err := diff.NewCommitProvider(repo, resolution.ResolvedHead, cc.GitRunner).GetDiff(test.Context()); err == nil {
+		test.Fatal("review obtained missing blobs")
+	}
+	if _, err := behaviortask.PrepareInput(test.Context(), behaviortask.Input{RepoDir: repo, Mode: "commit", Resolution: *resolution, GitRunner: cc.GitRunner}); err == nil {
+		test.Fatal("analysis obtained missing blobs")
+	}
+	startFakeLLM(test, newFakeLLM())
+	opts, err := parseReviewFlags([]string{"--repo", clone, "--analysis", "--commit", "HEAD", "--format", "json", "--output", filepath.Join(test.TempDir(), "out.json")})
+	if err != nil {
+		test.Fatal(err)
+	}
+	if err := executeReviewContext(test.Context(), opts); err == nil {
+		test.Fatal("combined command did not report unavailable input")
+	}
+	if missing() != before {
+		test.Fatal("local operations materialized promisor objects")
 	}
 }
 

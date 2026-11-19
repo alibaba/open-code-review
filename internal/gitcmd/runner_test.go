@@ -75,6 +75,56 @@ func TestRunner_New(t *testing.T) {
 	}
 }
 
+func TestLocalRepositoryIgnoresRedirectsAndDisablesFilters(t *testing.T) {
+	repo, other := initRepo(t), initRepo(t)
+	runner := New(1)
+	if _, err := runner.Run(t.Context(), repo, "config", "filter.fixture.clean", "unavailable-fixture-executable"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".gitattributes"), []byte("hello.txt filter=fixture\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_WORK_TREE", other)
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(other, "unused-index"))
+	local, err := runner.LocalForRepository(t.Context(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitDir, err := local.Output(t.Context(), repo, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := os.Stat(strings.TrimSpace(string(gitDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.Stat(filepath.Join(repo, ".git"))
+	if err != nil || !os.SameFile(actual, want) {
+		t.Fatalf("wrong Git directory: %q", gitDir)
+	}
+	for _, check := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"ls-files", "hello.txt"}, "hello.txt"},
+		{[]string{"config", "--get", "filter.fixture.clean"}, ""},
+		{[]string{"config", "--get", "filter.fixture.required"}, "true"},
+	} {
+		output, err := local.Output(t.Context(), repo, check.args...)
+		if err != nil || strings.TrimSpace(string(output)) != check.want {
+			t.Fatalf("%v: %q %v", check.args, output, err)
+		}
+	}
+	if _, err := local.Output(t.Context(), repo, "hash-object", "hello.txt"); err == nil {
+		t.Fatal("configured content filter silently skipped")
+	}
+	reused, err := local.LocalForRepository(t.Context(), repo)
+	if err != nil || reused != local || reused.sem != runner.sem {
+		t.Fatal("local runner was not shared")
+	}
+}
+
 func TestRunner_Run(t *testing.T) {
 	dir := initRepo(t)
 	r := New(2)

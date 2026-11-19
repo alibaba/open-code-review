@@ -28,7 +28,10 @@ func (code *codeTools) loadWorkspaceScope(ctx context.Context, input Input, runn
 		return fmt.Errorf("list workspace files: %w", err)
 	}
 	filter := &rules.FileFilter{Exclude: input.ExcludePatterns}
-	for _, filePath := range strings.Split(string(data), "\x00") {
+	for filePath := range strings.SplitSeq(string(data), "\x00") {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if filePath == "" {
 			continue
 		}
@@ -68,8 +71,95 @@ func (code *codeTools) fileAllowed(side, filePath string) bool {
 	return code.comparison.Mode != "workspace" || side != "new" || regularWorkspaceFile(code.comparison.Repository, filePath)
 }
 
+type workspaceReader struct {
+	ctx  context.Context
+	file *os.File
+}
+
+func (reader workspaceReader) Read(buf []byte) (int, error) {
+	if err := reader.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return reader.file.Read(buf)
+}
+
+func captureWorkspaceChanges(ctx context.Context, input Input, code *codeTools, changes []model.Diff, untracked map[string]bool, snapshot string) error {
+	var groups [][]string
+	byPath := map[string]int{}
+	for index, change := range changes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if (!change.IsNew && !code.allowed["old"][change.OldPath]) || (!change.IsDeleted && !code.allowed["new"][change.NewPath]) {
+			continue
+		}
+		name := change.NewPath
+		byPath[name] = index
+		groups = append(groups, []string{name})
+	}
+	batches, err := pathBatches(groups, func(name string) string { return name })
+	if err != nil {
+		return err
+	}
+	for _, batch := range batches {
+		args := append([]string{"check-attr", "-z", "diff", "--"}, batch...)
+		data, err := code.runner.Output(ctx, input.RepoDir, args...)
+		if err != nil {
+			return err
+		}
+		fields := strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00")
+		if len(fields) != 3*len(batch) {
+			return fmt.Errorf("invalid workspace attributes")
+		}
+		for pos := 0; pos < len(fields); pos += 3 {
+			index, ok := byPath[fields[pos]]
+			if !ok || fields[pos+1] != "diff" {
+				return fmt.Errorf("unexpected workspace attribute")
+			}
+			change := &changes[index]
+			change.IsBinary = fields[pos+2] == "unset"
+			if change.IsBinary || change.IsDeleted || untracked[change.NewPath] {
+				continue
+			}
+			if err := captureWorkspaceFile(ctx, input.RepoDir, change.NewPath, snapshot); err != nil {
+				return err
+			}
+		}
+	}
+	return ctx.Err()
+}
+
+func captureWorkspaceFile(ctx context.Context, repo, name, snapshot string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	source, err := tool.OpenRegularWorkspaceFile(repo, name)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	info, err := source.Stat()
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(snapshot, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		return err
+	}
+	mode := os.FileMode(0600)
+	if info.Mode()&0111 != 0 {
+		mode = 0700
+	}
+	dest, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(dest, workspaceReader{ctx, source})
+	return errors.Join(err, dest.Close())
+}
+
 func workspaceInventory(ctx context.Context, input Input, code *codeTools, tracked []model.Diff, endpoints []string) ([]model.Diff, map[string]bool, error) {
-	staged, err := code.runner.Output(ctx, input.RepoDir, append([]string{"diff", "--cached", "--name-status", "-z", "--no-ext-diff", "--no-textconv", "--find-renames=100%"}, endpoints...)...)
+	staged, err := code.runner.Output(ctx, input.RepoDir, append([]string{"diff", "--cached", "--diff-filter=R", "--name-status", "-z", "--no-ext-diff", "--no-textconv", "--find-renames=100%"}, endpoints...)...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -81,6 +171,22 @@ func workspaceInventory(ctx context.Context, input Input, code *codeTools, track
 	for _, changed := range tracked {
 		byPath[changed.NewPath] = changed
 	}
+	raw, err := code.runner.Output(ctx, input.RepoDir, "ls-files", "-z", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, nil, err
+	}
+	untracked := map[string]bool{}
+	for filePath := range strings.SplitSeq(string(raw), "\x00") {
+		if filePath == "" {
+			continue
+		}
+		untracked[filePath] = true
+		prior, exists := byPath[filePath]
+		if exists && !prior.IsDeleted {
+			return nil, nil, fmt.Errorf("ambiguous workspace change for %q", filePath)
+		}
+		byPath[filePath] = model.Diff{OldPath: filePath, NewPath: filePath, IsNew: !exists}
+	}
 	for _, rename := range renames {
 		if rename.IsRenamed && byPath[rename.NewPath].IsNew && byPath[rename.OldPath].IsDeleted && (!code.allowed["old"][rename.OldPath] || !code.allowed["new"][rename.NewPath]) {
 			byPath[rename.NewPath] = rename
@@ -90,7 +196,7 @@ func workspaceInventory(ctx context.Context, input Input, code *codeTools, track
 	var candidates [][]string
 	var additions, deletions bool
 	for _, changed := range tracked {
-		if current, ok := byPath[changed.NewPath]; !ok || current.IsRenamed {
+		if current, ok := byPath[changed.NewPath]; !ok || current.IsRenamed || untracked[changed.NewPath] {
 			continue
 		}
 		if changed.IsNew && code.fileAllowed("new", changed.NewPath) {
@@ -103,14 +209,13 @@ func workspaceInventory(ctx context.Context, input Input, code *codeTools, track
 		candidates = append(candidates, []string{changed.NewPath})
 	}
 	if additions && deletions {
-		batches, err := literalPathBatches(candidates)
+		batches, err := pathBatches(candidates, exactFilePathspec)
 		if err != nil {
 			return nil, nil, err
 		}
-		children := changeChildren(tracked)
 		for _, batch := range batches {
 			args := append([]string{"diff", "--no-ext-diff", "--no-textconv", "--name-status", "-z", "--find-renames"}, endpoints...)
-			data, err := code.runner.Output(ctx, input.RepoDir, append(args, exactPatchPaths(batch, children)...)...)
+			data, err := code.runner.Output(ctx, input.RepoDir, append(args, batch...)...)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -126,22 +231,6 @@ func workspaceInventory(ctx context.Context, input Input, code *codeTools, track
 			}
 		}
 	}
-	raw, err := code.runner.Output(ctx, input.RepoDir, "ls-files", "-z", "--others", "--exclude-standard")
-	if err != nil {
-		return nil, nil, err
-	}
-	untracked := map[string]bool{}
-	for _, filePath := range strings.Split(string(raw), "\x00") {
-		if filePath == "" {
-			continue
-		}
-		untracked[filePath] = true
-		prior, exists := byPath[filePath]
-		if exists && !prior.IsDeleted {
-			return nil, nil, fmt.Errorf("ambiguous workspace change for %q", filePath)
-		}
-		byPath[filePath] = model.Diff{OldPath: filePath, NewPath: filePath, IsNew: !exists}
-	}
 	changes := make([]model.Diff, 0, len(byPath))
 	for _, filePath := range slices.Sorted(maps.Keys(byPath)) {
 		changes = append(changes, byPath[filePath])
@@ -150,6 +239,9 @@ func workspaceInventory(ctx context.Context, input Input, code *codeTools, track
 }
 
 func workspaceUntrackedPatch(ctx context.Context, input Input, changed model.Diff, runner *gitcmd.Runner) (model.Diff, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return changed, false, err
+	}
 	filePath := changed.NewPath
 	file, err := tool.OpenRegularWorkspaceFile(input.RepoDir, filePath)
 	if err != nil {
@@ -171,7 +263,10 @@ func workspaceUntrackedPatch(ctx context.Context, input Input, changed model.Dif
 	}
 	header := fmt.Sprintf("diff --git %q %q\n", "a/"+filePath, "b/"+filePath)
 	if changed.IsNew {
-		data, err := io.ReadAll(io.LimitReader(file, limit+1))
+		if changed.IsBinary {
+			return changed, true, nil
+		}
+		data, err := io.ReadAll(io.LimitReader(workspaceReader{ctx, file}, limit+1))
 		if err != nil {
 			return changed, false, err
 		}
@@ -186,6 +281,9 @@ func workspaceUntrackedPatch(ctx context.Context, input Input, changed model.Dif
 			changed.Insertions = int64(bytes.Count(text, []byte("\n"))) + 1
 			fmt.Fprintf(&patch, "--- /dev/null\n+++ %q\n@@ -0,0 +1,%d @@\n", "b/"+filePath, changed.Insertions)
 			for line := range bytes.SplitSeq(text, []byte("\n")) {
+				if err := ctx.Err(); err != nil {
+					return changed, false, err
+				}
 				patch.WriteByte('+')
 				patch.Write(line)
 				patch.WriteByte('\n')
@@ -222,7 +320,7 @@ func workspaceUntrackedPatch(ctx context.Context, input Input, changed model.Dif
 	if err != nil {
 		return changed, false, err
 	}
-	written, copyErr := io.Copy(captured, io.LimitReader(file, limit+1))
+	written, copyErr := io.Copy(captured, io.LimitReader(workspaceReader{ctx, file}, limit+1))
 	closeErr := captured.Close()
 	if copyErr != nil || closeErr != nil {
 		return changed, false, errors.Join(copyErr, closeErr)
@@ -231,9 +329,16 @@ func workspaceUntrackedPatch(ctx context.Context, input Input, changed model.Dif
 		changed.IsBinary = true
 		return changed, true, nil
 	}
-	patch, err := runner.Output(ctx, snapshot, "--git-dir="+strings.TrimSuffix(string(gitDir), "\n"), "--work-tree=.", "-c", "core.quotepath=false", "diff", "--no-textconv", "--no-ext-diff", "--no-color", "--end-of-options", input.Resolution.ResolvedBase+":"+filePath, "--", filePath)
+	args := []string{"--git-dir=" + strings.TrimSuffix(string(gitDir), "\n"), "--work-tree=.", "-c", "core.quotepath=false", "diff", "--no-textconv", "--no-ext-diff", "--no-color"}
+	if changed.IsBinary {
+		args = append(args, "--numstat")
+	}
+	patch, err := runner.Output(ctx, snapshot, append(args, "--end-of-options", input.Resolution.ResolvedBase+":"+filePath, "--", filePath)...)
 	if err != nil {
 		return changed, false, err
+	}
+	if changed.IsBinary {
+		return changed, len(patch) > 0 || oldMode != mode, nil
 	}
 	_, rest, _ := strings.Cut(string(patch), "\n")
 	var body strings.Builder

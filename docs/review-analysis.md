@@ -157,10 +157,22 @@ to analysis tools. Excluded and binary changes remain visible as scope metadata,
 not silently claimed as analyzed source. If either side of a rename is excluded,
 its diff is excluded. `--background` and `--background-file` are captured with
 provenance; analysis cannot fetch arbitrary external material, run commands or
-call Review's MCP tools. This is not a sandbox against hostile local Git config.
+call Review's MCP tools. In combined mode both roles ignore Git environment
+overrides for the repository, index, work tree and object store. They disable
+lazy fetching and external clean, smudge and process filters; operations that
+require a configured filter fail instead of invoking it. This is not an OS
+sandbox against hostile local Git config.
+
+Workspace patches use snapshots of authorized regular files and respect the
+working tree's `-diff` attributes. Each file is captured separately; the working
+tree as a whole is not frozen. Names that cannot be addressed as UTF-8 evidence
+paths are represented only as excluded metadata.
 
 Diff preparation and code search use bounded batches of authorized paths instead
-of passing every excluded file to Git. Search patterns narrow that scope; returned
+of passing every excluded file to Git. Patch selection uses escaped, anchored Git
+globs: escaping even an ordinary last character prevents Git treating a file name
+as a recursive directory prefix on the other side of the comparison.
+Search patterns narrow that scope; returned
 matches are checked against the authorized side before observation persistence.
 For commit comparisons, exact renames are identified by object ID. If similarity
 detection would require an excluded blob, unmatched additions and deletions stay
@@ -262,8 +274,10 @@ round after exhaustion. Both roles also share the `--max-git-procs` limit.
 The top-level token summary counts both roles once. Analysis usage is separately
 available in `analysis_meta`. Provider usage takes precedence; absent usage is estimated
 from request messages, tool definitions, response text, reasoning, and tool arguments.
-When a provider reports only a total, that total counts toward the cap and the
-top-level summary without inventing an input/output split. Large change lists
+When a provider reports a total but only a partial breakdown, the cap and
+top-level summary count at least the reported total, without inventing missing
+input or output counts. Cache details alone do not replace a usage estimate.
+Large change lists
 and background inputs are paged through `context_read` if they would overflow the
 initial prompt. If even the instructions and tool schemas do not fit, analysis
 stops before sending a request.

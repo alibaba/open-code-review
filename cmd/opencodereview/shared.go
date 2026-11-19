@@ -109,6 +109,14 @@ func previewMaxTokens(templateDefault, cliOverride int) (int, error) {
 // tool.ParseReviewMode(from, to, commit).RefValue(to, commit). Pass "" to
 // read the working tree, which is what scan wants.
 func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxGitProcs int, requireGit bool) (*commonContext, error) {
+	repoDir, isGit, err := resolveWorkingDir(repoDirInput, requireGit)
+	if err != nil {
+		return nil, err
+	}
+	return commonContextForRepo(repoDir, isGit, rulePath, contentRef, maxTools, gitcmd.New(maxGitProcs))
+}
+
+func commonContextForRepo(repoDir string, isGit bool, rulePath, contentRef string, maxTools int, gitRunner *gitcmd.Runner) (*commonContext, error) {
 	tpl, err := template.LoadDefault()
 	if err != nil {
 		return nil, fmt.Errorf("load default template: %w", err)
@@ -119,15 +127,6 @@ func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxG
 	if err := tpl.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
-
-	repoDir, isGit, err := resolveWorkingDir(repoDirInput, requireGit)
-	if err != nil {
-		return nil, err
-	}
-
-	// Built before the resolver: the sniffer reads file content at contentRef
-	// through this limiter.
-	gitRunner := gitcmd.New(maxGitProcs)
 
 	resolver, fileFilter, err := rules.NewResolver(repoDir, rulePath, rules.ResolverOptions{
 		Ref:    contentRef,

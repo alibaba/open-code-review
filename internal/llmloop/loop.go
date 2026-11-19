@@ -355,7 +355,7 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		duration := time.Since(startTime)
 		if err != nil {
 			rec.SetError(err, duration)
-			telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+			telemetry.RecordLLMResult(llmSpan, duration, 0, errors.New(r.deps.ProgressError(err)))
 			llmSpan.End()
 			if errors.Is(err, llm.ErrTokenBudget) {
 				return false, StopTokenBudget, nil
@@ -518,7 +518,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	duration := time.Since(startTime)
 	if err != nil {
 		rec.SetError(err, duration)
-		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		telemetry.RecordLLMResult(llmSpan, duration, 0, errors.New(r.deps.ProgressError(err)))
 		llmSpan.End()
 		if errors.Is(err, llm.ErrTokenBudget) {
 			return false, StopTokenBudget

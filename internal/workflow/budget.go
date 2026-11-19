@@ -93,11 +93,7 @@ func (client *budgetClient) CompletionsWithCtx(ctx context.Context, request llm.
 			response.Usage = usage
 		}
 		budget.mu.Lock()
-		charged := usage.PromptTokens + usage.CompletionTokens
-		if charged == 0 {
-			charged = usage.TotalTokens
-		}
-		budget.total += charged
+		budget.total += max(usage.TotalTokens, usage.PromptTokens+usage.CompletionTokens)
 		budget.usage.InputTokens += usage.PromptTokens
 		budget.usage.OutputTokens += usage.CompletionTokens
 		budget.usage.CacheReadTokens += usage.CacheReadTokens

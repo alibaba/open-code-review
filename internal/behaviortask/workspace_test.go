@@ -4,14 +4,122 @@
 package behaviortask
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/model"
 )
+
+func TestWorkspaceRestoredRenameSource(test *testing.T) {
+	input := workspaceInput(test)
+	content, err := os.ReadFile(filepath.Join(input.RepoDir, "renamed.go"))
+	if err != nil {
+		test.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(input.RepoDir, "consumer.go"), content, 0600); err != nil {
+		test.Fatal(err)
+	}
+	prepared, err := PrepareInput(test.Context(), input)
+	if err != nil {
+		test.Fatal(err)
+	}
+	var added bool
+	for _, change := range prepared.Diffs {
+		if change.OldPath == "consumer.go" || change.NewPath == "consumer.go" {
+			test.Fatalf("unchanged source in inventory: %+v", change)
+		}
+		if change.NewPath == "renamed.go" {
+			added = change.IsNew && !change.IsRenamed && strings.Contains(change.Diff, "+consumer")
+		}
+	}
+	if !added {
+		test.Fatal("missing net addition")
+	}
+}
+
+func TestWorkspaceUsesEffectiveBinaryAttribute(test *testing.T) {
+	input := workspaceInput(test)
+	git(test, input.RepoDir, "rm", "--cached", "-f", "main.go")
+	if err := os.WriteFile(filepath.Join(input.RepoDir, ".gitattributes"), []byte("main.go -diff\nuntracked.go -diff\n"), 0600); err != nil {
+		test.Fatal(err)
+	}
+	prepared, err := PrepareInput(test.Context(), input)
+	if err != nil {
+		test.Fatal(err)
+	}
+	var seen int
+	for _, change := range prepared.Diffs {
+		if change.NewPath == "main.go" || change.NewPath == "untracked.go" {
+			if !change.IsBinary || change.Diff != "" {
+				test.Fatal("binary attribute did not withhold patch")
+			}
+			seen++
+		}
+	}
+	if seen != 2 {
+		test.Fatalf("expected both binary entries, got %d", seen)
+	}
+}
+
+func TestWorkspaceSnapshotAndCancellation(test *testing.T) {
+	repo, snapshot := test.TempDir(), test.TempDir()
+	name := "example.txt"
+	if err := os.WriteFile(filepath.Join(repo, name), []byte("original"), 0600); err != nil {
+		test.Fatal(err)
+	}
+	if err := captureWorkspaceFile(test.Context(), repo, name, snapshot); err != nil {
+		test.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, name), []byte("updated"), 0600); err != nil {
+		test.Fatal(err)
+	}
+	captured, err := os.ReadFile(filepath.Join(snapshot, name))
+	if err != nil || string(captured) != "original" {
+		test.Fatalf("snapshot: %q %v", captured, err)
+	}
+	ctx, cancel := context.WithCancel(test.Context())
+	cancel()
+	if _, err := (workspaceReader{ctx: ctx}).Read(make([]byte, 1)); !errors.Is(err, context.Canceled) {
+		test.Fatal(err)
+	}
+	if _, _, err := workspaceUntrackedPatch(ctx, Input{RepoDir: repo}, model.Diff{NewPath: name, IsNew: true}, nil); !errors.Is(err, context.Canceled) {
+		test.Fatal(err)
+	}
+}
+
+func TestWorkspaceExcludedUnmergedIndexEntry(test *testing.T) {
+	input := workspaceInput(test)
+	base := git(test, input.RepoDir, "rev-parse", "HEAD:excluded.go")
+	other := git(test, input.RepoDir, "rev-parse", "HEAD:main.go")
+	git(test, input.RepoDir, "update-index", "--force-remove", "excluded.go")
+	command := exec.Command("git", "update-index", "--index-info")
+	command.Dir = input.RepoDir
+	command.Stdin = strings.NewReader(fmt.Sprintf("100644 %s 2\texcluded.go\n100644 %s 3\texcluded.go\n", base, other))
+	if data, err := command.CombinedOutput(); err != nil {
+		test.Fatalf("index: %s: %v", data, err)
+	}
+	if git(test, input.RepoDir, "diff", "--cached", "--diff-filter=U", "--name-only") != "excluded.go" {
+		test.Fatal("fixture missing unmerged entry")
+	}
+	prepared, err := PrepareInput(test.Context(), input)
+	if err != nil {
+		test.Fatal(err)
+	}
+	for _, change := range prepared.Diffs {
+		if change.NewPath == "main.go" && strings.Contains(change.Diff, "+workspace value") {
+			return
+		}
+	}
+	test.Fatal("unrelated change missing")
+}
 
 func workspaceInput(test *testing.T) Input {
 	test.Helper()

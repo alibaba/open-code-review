@@ -5,14 +5,30 @@ package behaviortask
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/diff"
-	"github.com/alibaba/open-code-review/internal/model"
 )
+
+func TestExactPathspecsRespectArgumentBudget(test *testing.T) {
+	groups := [][]string{{"parent", "parent/keep"}}
+	for index := range 1000 {
+		groups = append(groups, []string{fmt.Sprintf("parent/sibling-[%d]", index)})
+	}
+	batches, err := pathBatches(groups, exactFilePathspec)
+	if err != nil || len(batches) < 2 {
+		test.Fatalf("batches=%d err=%v", len(batches), err)
+	}
+	for _, args := range batches {
+		if len(strings.Join(args, "\x00"))+1 > scopedPathBytes {
+			test.Fatal("oversized Git argument list")
+		}
+	}
+}
 
 func TestPrepareFixedInput(test *testing.T) {
 	input := fixture(test)
@@ -73,22 +89,20 @@ func TestPatchPathSelectionIsExactAcrossTreeShapes(test *testing.T) {
 	if err := os.Mkdir(filepath.Join(repo, "item"), 0700); err != nil {
 		test.Fatal(err)
 	}
-	for _, name := range []string{"first", "second"} {
+	for _, name := range []string{"first", "second", "[ab]", "a"} {
 		if err := os.WriteFile(filepath.Join(repo, "item", name), []byte(name), 0600); err != nil {
 			test.Fatal(err)
 		}
 	}
 	git(test, repo, "add", ".")
 	git(test, repo, "commit", "-qm", "Nested items")
-	files := []model.Diff{{OldPath: "item", NewPath: "item"}, {OldPath: "item/first", NewPath: "item/first"}, {OldPath: "item/second", NewPath: "item/second"}}
-	tree := changeChildren(files)
-	for _, paths := range [][]string{{"item"}, {"item", "item/first"}} {
+	for _, paths := range [][]string{{"item"}, {"item", "item/first"}, {"item/[ab]"}} {
 		var batch []string
 		for _, name := range paths {
-			batch = append(batch, ":(top,literal)"+name)
+			batch = append(batch, exactFilePathspec(name))
 		}
 		args := []string{"diff", "--name-only", "--no-renames", "HEAD~1", "HEAD", "--"}
-		got := git(test, repo, append(args, exactPatchPaths(batch, tree)...)...)
+		got := git(test, repo, append(args, batch...)...)
 		if got != strings.Join(paths, "\n") {
 			test.Fatalf("selected %v, got %q", paths, got)
 		}

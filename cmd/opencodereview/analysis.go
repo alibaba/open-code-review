@@ -38,22 +38,27 @@ func validateAnalysisOptions(opts reviewOptions) error {
 	return nil
 }
 
-func pinAnalysisInput(ctx context.Context, opts reviewOptions) (string, *diff.InputResolution, error) {
+func pinAnalysisInput(ctx context.Context, opts reviewOptions) (string, *diff.InputResolution, *gitcmd.Runner, error) {
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
-		return "", nil, err
-	}
-	repo, err := resolveRepoDir(opts.repoDir)
-	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	runner := gitcmd.New(opts.maxGitProcs).LocalOnly()
+	top, err := runner.Output(ctx, opts.repoDir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", nil, nil, err
+	}
+	repo := strings.TrimSuffix(string(top), "\n")
+	runner, err = runner.LocalForRepository(ctx, repo)
+	if err != nil {
+		return "", nil, nil, err
+	}
 	if err := validateReviewRefsUsing(opts, func(ref string) ([]byte, error) {
 		return runner.Output(ctx, repo, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
 	}); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	resolution, err := agent.ResolveComparisonInput(ctx, agent.Args{RepoDir: repo, From: opts.from, To: opts.to, Commit: opts.commit, GitRunner: runner})
-	return repo, resolution, err
+	return repo, resolution, runner, err
 }
 
 type analysisExecution struct {

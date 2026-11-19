@@ -72,7 +72,7 @@ func NewRunner(ctx context.Context, deps Deps, input Input) (*Runner, error) {
 	}
 	deps.ArtifactDir = filepath.Join(artifactParent, filepath.Base(deps.ArtifactDir))
 	if pathutil.WithinBase(input.RepoDir, deps.ArtifactDir) {
-		return nil, fmt.Errorf("behavior artifacts must be outside the analyzed repository")
+		return nil, ErrArtifactLocation
 	}
 	if deps.Template == nil {
 		deps.Template, err = template.LoadBehaviorDefault()
@@ -267,10 +267,14 @@ func (runner *Runner) Run(ctx context.Context) (Result, error) {
 	}
 	writeErr := runner.writeArtifact("result.json", append(data, '\n'))
 	if writeErr != nil {
-		result.Errors = append(result.Errors, "could not write analysis result")
+		result.Errors = append(result.Errors, ErrResultWrite.Error())
+		writeErr = errors.Join(ErrResultWrite, writeErr)
 	}
 	return result, errors.Join(err, writeErr)
 }
+
+var ErrResultWrite = errors.New("could not write analysis result")
+var ErrArtifactLocation = errors.New("behavior artifacts must be outside the analyzed repository")
 
 func FailureSummary(err error) string {
 	switch {
@@ -280,13 +284,18 @@ func FailureSummary(err error) string {
 		return "analysis was canceled"
 	case errors.Is(err, ErrInitialPromptTooLarge):
 		return ErrInitialPromptTooLarge.Error()
+	case errors.Is(err, ErrArtifactLocation):
+		return ErrArtifactLocation.Error()
 	case errors.Is(err, llm.ErrTokenBudget):
 		return "analysis token budget exhausted"
 	}
 	if status := llm.ProviderHTTPStatus(err); status >= 400 && status <= 599 {
 		return fmt.Sprintf("analysis provider returned HTTP %d", status)
 	}
-	return "analysis failed; inspect the local session for diagnostics"
+	if errors.Is(err, ErrResultWrite) {
+		return ErrResultWrite.Error()
+	}
+	return "analysis failed"
 }
 
 func (runner *Runner) Session() *session.SessionHistory { return runner.history }

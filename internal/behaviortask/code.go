@@ -44,7 +44,10 @@ func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 		(resolution.BaseIsEmpty && ((!workspace && input.Mode != "commit") || resolution.ResolvedBase != "")) {
 		return nil, fmt.Errorf("behavior requires a resolved range, commit, or workspace comparison")
 	}
-	gitRunner := input.GitRunner.LocalOnly()
+	gitRunner, err := input.GitRunner.LocalForRepository(ctx, input.RepoDir)
+	if err != nil {
+		return nil, err
+	}
 	if input.Mode == "commit" {
 		actual, err := diff.NewCommitProvider(input.RepoDir, resolution.ResolvedHead, gitRunner).ResolveCommitComparison(ctx)
 		if err != nil {
@@ -64,7 +67,6 @@ func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 		previous.Mode = tool.ModeEmpty
 	}
 	var access *tool.CodeAccess
-	var err error
 	if workspace {
 		current.Mode = tool.ModeWorkspace
 		current.RegularWorkspaceOnly = true
@@ -143,7 +145,7 @@ func safePath(filePath string) bool {
 	if allowedext.IsSecretPath(filePath) {
 		return false
 	}
-	if filePath == "" || path.IsAbs(filePath) || path.Clean(filePath) != filePath || strings.ContainsAny(filePath, "\\\x00\r\n\t:") {
+	if !tool.ValidWorkspacePath(filePath) || strings.ContainsAny(filePath, "\x00\r\n\t") {
 		return false
 	}
 	for _, component := range strings.Split(strings.ToLower(filePath), "/") {
@@ -178,11 +180,16 @@ func (code *codeTools) execute(ctx context.Context, name string, args map[string
 		}
 	}
 	if name == "file_find" {
+		if err := ctx.Err(); err != nil {
+			return observation, err
+		}
 		paths := slices.Sorted(maps.Keys(code.allowed[side]))
-		paths = slices.DeleteFunc(paths, func(filePath string) bool { return !code.fileAllowed(side, filePath) })
 		query, _ := args["query_name"].(string)
 		sensitive, _ := args["case_sensitive"].(bool)
-		matches := tool.MatchFileNames(paths, query, sensitive, 101)
+		matches, err := tool.MatchFileNames(ctx, paths, query, sensitive, 101, func(filePath string) bool { return code.fileAllowed(side, filePath) })
+		if err != nil {
+			return observation, err
+		}
 		if len(matches) > 100 {
 			observation.Truncated = true
 			observation.Continuation = "Narrow query_name to see more authorized files."

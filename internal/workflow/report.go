@@ -4,6 +4,8 @@
 package workflow
 
 import (
+	"errors"
+
 	"github.com/alibaba/open-code-review/internal/behaviortask"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
@@ -41,7 +43,18 @@ func NewReport(result behaviortask.Result, runErr error, directory string) *Repo
 		TemplateVersion: result.TemplateVersion, ToolsVersion: result.ToolsVersion, SessionID: result.SessionID, ArtifactDir: directory, ObservationIDs: result.ObservationIDs,
 		CitedObservationIDs: append([]string{}, result.CitedObservationIDs...), ContextIndex: result.ContextIndex}
 	if runErr != nil || len(result.Errors) != 0 {
-		report.Errors = append(report.Errors, behaviortask.FailureSummary(runErr))
+		summary := behaviortask.FailureSummary(runErr)
+		if summary == "analysis failed" {
+			if result.SessionID != "" {
+				summary += "; inspect the local session for diagnostics"
+			} else if result.StopReason == "preparation" {
+				summary = "analysis input or artifact preparation failed"
+			}
+		}
+		report.Errors = append(report.Errors, summary)
+		if errors.Is(runErr, behaviortask.ErrResultWrite) && summary != behaviortask.ErrResultWrite.Error() {
+			report.Errors = append(report.Errors, behaviortask.ErrResultWrite.Error())
+		}
 	}
 	if result.Analysis != nil {
 		report.Markdown = result.Analysis.Markdown

@@ -17,6 +17,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -123,12 +124,13 @@ func init() {
 
 func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error) {
 	var sealedInput *diff.InputResolution
+	var localGit *gitcmd.Runner
 	if opts.analysis {
 		if err := validateAnalysisOptions(opts); err != nil {
 			return err
 		}
 		var err error
-		opts.repoDir, sealedInput, err = pinAnalysisInput(ctx, opts)
+		opts.repoDir, sealedInput, localGit, err = pinAnalysisInput(ctx, opts)
 		if err != nil {
 			return err
 		}
@@ -162,7 +164,12 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 			backgroundCommit = sealedInput.ResolvedHead
 		}
 	}
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true)
+	var cc *commonContext
+	if localGit != nil {
+		cc, err = commonContextForRepo(opts.repoDir, true, opts.rulePath, contentRef, 0, localGit)
+	} else {
+		cc, err = loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true)
+	}
 	if err != nil {
 		return err
 	}
@@ -176,7 +183,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		}
 	}
 
-	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, backgroundCommit)
+	bg, err := resolveBackgroundWith(cc.RepoDir, opts.background, opts.backgroundFile, backgroundCommit, func(repo, ref string) (string, error) {
+		if localGit == nil {
+			return getCommitMessage(repo, ref)
+		}
+		msg, err := localGit.Output(ctx, repo, "log", "-1", "--format=%B", "--end-of-options", ref)
+		return strings.TrimSpace(string(msg)), err
+	})
 	if err != nil {
 		return err
 	}
@@ -608,6 +621,9 @@ func validateReviewRefsUsing(opts reviewOptions, verify func(string) ([]byte, er
 			return fmt.Errorf("%s value %q is not a valid git ref: refs must not start with '-'", item.flag, item.ref)
 		}
 		if out, err := verify(item.ref); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
 			msg := strings.TrimSpace(string(out))
 			if msg != "" {
 				return fmt.Errorf("%s value %q is not a valid commit ref: %s", item.flag, item.ref, msg)

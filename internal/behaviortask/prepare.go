@@ -6,8 +6,10 @@ package behaviortask
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -68,6 +70,23 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 		return input, err
 	}
 	excluded := make([]bool, len(changes))
+	patchRepo := input.RepoDir
+	if workspace {
+		dir, err := os.MkdirTemp("", "ocr-worktree-*")
+		if err != nil {
+			return input, err
+		}
+		defer os.RemoveAll(dir)
+		gitDir, err := runner.Output(ctx, input.RepoDir, "rev-parse", "--absolute-git-dir")
+		if err != nil {
+			return input, err
+		}
+		if err := captureWorkspaceChanges(ctx, input, code, changes, untracked, dir); err != nil {
+			return input, err
+		}
+		baseArgs = append([]string{"--git-dir=" + strings.TrimSuffix(string(gitDir), "\n"), "--work-tree=."}, baseArgs...)
+		patchRepo = dir
+	}
 	var pathGroups [][]string
 	var renameGroups [][]string
 	for index, changed := range changes {
@@ -75,7 +94,7 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 			excluded[index] = true
 			continue
 		}
-		if untracked[changed.NewPath] {
+		if untracked[changed.NewPath] || changed.IsBinary {
 			continue
 		}
 		if changed.IsRenamed {
@@ -84,20 +103,18 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 			pathGroups = append(pathGroups, []string{changed.OldPath})
 		}
 	}
-	batches, err := literalPathBatches(pathGroups)
+	batches, err := pathBatches(pathGroups, exactFilePathspec)
 	if err != nil {
 		return input, err
 	}
 	byPath := map[string]model.Diff{}
-	descendants := changeChildren(changes)
 	readPatch := func(batch []string, renamed bool) error {
 		patchArgs := append(slices.Clone(baseArgs), "--src-prefix=a/", "--dst-prefix=b/", "--unified=3", "--no-renames")
 		if renamed {
 			patchArgs = append(patchArgs, "--find-renames", "-l0")
 		}
 		patchArgs = append(patchArgs, endpoints...)
-		batch = exactPatchPaths(batch, descendants)
-		patch, err := runner.Output(ctx, input.RepoDir, append(slices.Clone(patchArgs), batch...)...)
+		patch, err := runner.Output(ctx, patchRepo, append(slices.Clone(patchArgs), batch...)...)
 		if err != nil {
 			return fmt.Errorf("read scoped analysis diff: %w", err)
 		}
@@ -116,7 +133,7 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 		}
 	}
 	for _, paths := range renameGroups {
-		batches, err := literalPathBatches([][]string{paths})
+		batches, err := pathBatches([][]string{paths}, exactFilePathspec)
 		if err != nil {
 			return input, err
 		}
@@ -126,7 +143,10 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 	}
 	input.Diffs = nil
 	for index, changed := range changes {
-		if excluded[index] {
+		if err := ctx.Err(); err != nil {
+			return input, err
+		}
+		if excluded[index] || (changed.IsBinary && !untracked[changed.NewPath]) {
 			input.Diffs = append(input.Diffs, changed)
 			continue
 		}
@@ -149,7 +169,7 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 		}
 		input.Diffs = append(input.Diffs, actual)
 	}
-	return input, nil
+	return input, ctx.Err()
 }
 
 func (code *codeTools) allowSimilarityCheck(changes []model.Diff) bool {
@@ -171,66 +191,17 @@ func (code *codeTools) allowSimilarityCheck(changes []model.Diff) bool {
 	return additions && deletions
 }
 
-func changeChildren(changes []model.Diff) map[string]map[string]bool {
-	children := map[string]map[string]bool{}
-	for _, change := range changes {
-		for _, filePath := range []string{change.OldPath, change.NewPath} {
-			for {
-				index := strings.LastIndexByte(filePath, '/')
-				if index < 0 {
-					break
-				}
-				parent := filePath[:index]
-				if children[parent] == nil {
-					children[parent] = map[string]bool{}
-				}
-				if children[parent][filePath] {
-					break
-				}
-				children[parent][filePath] = true
-				filePath = parent
-			}
+func exactFilePathspec(name string) string {
+	_, lastSize := utf8.DecodeLastRuneInString(name)
+	var spec strings.Builder
+	spec.WriteString(":(top,glob)")
+	for index, char := range name {
+		if index == len(name)-lastSize || strings.ContainsRune(`\*?[`, char) {
+			spec.WriteByte('\\')
 		}
+		spec.WriteRune(char)
 	}
-	return children
-}
-
-func exactPatchPaths(batch []string, children map[string]map[string]bool) []string {
-	selected := map[string]bool{}
-	ancestors := map[string]bool{}
-	for _, spec := range batch {
-		filePath := strings.TrimPrefix(spec, ":(top,literal)")
-		selected[filePath] = true
-		for {
-			index := strings.LastIndexByte(filePath, '/')
-			if index < 0 {
-				break
-			}
-			filePath = filePath[:index]
-			ancestors[filePath] = true
-		}
-	}
-	var restrict func(string)
-	restrict = func(filePath string) {
-		if len(children[filePath]) == 0 {
-			return
-		}
-		if !ancestors[filePath] {
-			batch = append(batch, ":(top,exclude,literal)"+filePath+"/")
-			return
-		}
-		for child := range children[filePath] {
-			if !selected[child] && !ancestors[child] {
-				batch = append(batch, ":(top,exclude,literal)"+child)
-			} else if !selected[child] {
-				restrict(child)
-			}
-		}
-	}
-	for filePath := range selected {
-		restrict(filePath)
-	}
-	return batch
+	return spec.String()
 }
 
 func parseInventory(raw string) ([]model.Diff, error) {

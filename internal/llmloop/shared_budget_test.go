@@ -5,12 +5,44 @@ package llmloop
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/session"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
+
+func TestProviderErrorSpansUseSafeSummary(test *testing.T) {
+	for _, grace := range []bool{false, true} {
+		test.Run(fmt.Sprintf("grace=%t", grace), func(test *testing.T) {
+			const detail = "provider response fixture"
+			const safe = "provider unavailable"
+			recorder := tracetest.NewSpanRecorder()
+			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+			ctx, span := provider.Tracer("fixture").Start(test.Context(), "request")
+			history := session.New(test.TempDir(), "main", "fake", session.SessionOptions{})
+			test.Cleanup(func() { _ = history.Finalize() })
+			runner := NewRunner(Deps{LLMClient: taskClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) { return nil, errors.New(detail) }), Session: history, ProgressError: func(error) string { return safe }}, testTask())
+			if grace {
+				runner.runGraceRound(ctx, taskMessages(), "fixture", "session")
+			} else {
+				_, _ = runner.Run(ctx, taskMessages(), "fixture")
+			}
+			span.End()
+			ended := recorder.Ended()
+			if len(ended) != 1 || ended[0].Status().Description != safe || len(ended[0].Events()) == 0 {
+				test.Fatal("expected sanitized error span")
+			}
+			if strings.Contains(fmt.Sprint(ended[0].Attributes(), ended[0].Events()), detail) {
+				test.Fatal("provider detail leaked into telemetry")
+			}
+		})
+	}
+}
 
 func TestSharedBudgetErrorStopsWithoutGraceRequest(test *testing.T) {
 	for _, wrapped := range []bool{false, true} {

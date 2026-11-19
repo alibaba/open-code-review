@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-//go:build !darwin && !linux
+//go:build !(aix || darwin || dragonfly || freebsd || linux || netbsd || openbsd || solaris)
 
 package tool
 

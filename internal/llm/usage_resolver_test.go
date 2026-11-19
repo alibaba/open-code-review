@@ -108,6 +108,25 @@ func TestResolveUsageCacheReadPathPriority(t *testing.T) {
 	}
 }
 
+func TestResolveUsageCacheBreakdown(t *testing.T) {
+	for _, fixture := range []struct {
+		body string
+		want *UsageInfo
+	}{
+		{`{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"cache_read_input_tokens":40,"cache_creation_input_tokens":15}`, &UsageInfo{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120, CacheReadTokens: 40, CacheWriteTokens: 15}},
+		{`{"prompt_tokens":100,"completion_tokens":20,"total_tokens":175,"cache_read_input_tokens":40,"cache_creation_input_tokens":15}`, &UsageInfo{PromptTokens: 155, CompletionTokens: 20, TotalTokens: 175, CacheReadTokens: 40, CacheWriteTokens: 15}},
+		{`{"prompt_tokens":100,"total_tokens":175}`, &UsageInfo{PromptTokens: 100, TotalTokens: 175}},
+		{`{"cache_read_input_tokens":40}`, nil},
+		{`{"cache_creation_input_tokens":15}`, nil},
+		{`{"completion_tokens":0}`, &UsageInfo{}},
+	} {
+		got := resolveUsage([]byte(fixture.body))
+		if (got == nil) != (fixture.want == nil) || (got != nil && *got != *fixture.want) {
+			t.Fatalf("%s: got %+v, want %+v", fixture.body, got, fixture.want)
+		}
+	}
+}
+
 func TestResolveUsageCacheCreationTokensPriority(t *testing.T) {
 	usage := resolveUsage([]byte(`{
 		"usage": {

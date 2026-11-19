@@ -72,28 +72,32 @@ var totalTokensPaths = []string{
 }
 
 // resolveUsage parses raw JSON bytes into a map and extracts token usage
-// by probing configured paths sequentially. Returns nil if no total_tokens found.
+// by probing configured paths sequentially. Cache details alone are not usage totals.
 func resolveUsage(raw []byte) *UsageInfo {
 	var rawBody map[string]any
 	if err := json.Unmarshal(raw, &rawBody); err != nil {
 		return nil
 	}
 
-	total, hasAny := probePath(rawBody, totalTokensPaths)
-	prompt, _ := probePath(rawBody, promptTokensPaths)
-	completion, _ := probePath(rawBody, completionTokensPaths)
+	total, hasTotal := probePath(rawBody, totalTokensPaths)
+	prompt, hasPrompt := probePath(rawBody, promptTokensPaths)
+	completion, hasCompletion := probePath(rawBody, completionTokensPaths)
+	if !hasTotal && !hasPrompt && !hasCompletion {
+		return nil
+	}
 	cacheRead, cacheReadIdx, _ := probePathIndex(rawBody, cacheReadTokensPaths)
 	cacheWrite, cacheWriteIdx, _ := probePathIndex(rawBody, cacheWriteTokensPaths)
 
 	// Anthropic reports cached input separately; OpenAI already includes it in prompt_tokens.
+	var separateCache int64
 	if cacheReadIdx >= 0 && cacheReadIdx < anthropicCacheReadPathCount {
-		prompt += cacheRead
+		separateCache += cacheRead
 	}
 	if cacheWriteIdx >= 0 && cacheWriteIdx < anthropicCacheWritePathCount {
-		prompt += cacheWrite
+		separateCache += cacheWrite
 	}
-	if !hasAny && prompt == 0 && completion == 0 {
-		return nil
+	if hasPrompt && (total <= 0 || (hasCompletion && prompt+completion+separateCache == total)) {
+		prompt += separateCache
 	}
 
 	ui := &UsageInfo{

@@ -17,6 +17,10 @@ const scopedPathBytes = 16 * 1024
 const searchMatchLimit = 100
 
 func literalPathBatches(groups [][]string) ([][]string, error) {
+	return pathBatches(groups, func(name string) string { return ":(top,literal)" + name })
+}
+
+func pathBatches(groups [][]string, pathspec func(string) string) ([][]string, error) {
 	var batches [][]string
 	var batch []string
 	batchBytes := 0
@@ -24,7 +28,7 @@ func literalPathBatches(groups [][]string) ([][]string, error) {
 		var patterns []string
 		groupBytes := 0
 		for _, filePath := range group {
-			pattern := ":(top,literal)" + filePath
+			pattern := pathspec(filePath)
 			patterns = append(patterns, pattern)
 			groupBytes += len(pattern) + 1
 		}

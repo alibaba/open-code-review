@@ -102,6 +102,40 @@ func TestFileFindFallbackUsesAuthorizedNames(test *testing.T) {
 	}
 }
 
+func TestInvalidUTF8PathIsMetadataOnly(test *testing.T) {
+	name := "source-" + string([]byte{0xff}) + ".go"
+	if safePath(name) {
+		test.Fatal("invalid UTF-8 is not an addressable evidence path")
+	}
+	input := fixture(test)
+	blob := git(test, input.RepoDir, "rev-parse", "HEAD:main.go")
+	command := exec.Command("git", "mktree", "-z")
+	command.Dir = input.RepoDir
+	command.Stdin = strings.NewReader("100644 blob " + blob + "\t" + name + "\x00")
+	tree, err := command.Output()
+	if err != nil {
+		test.Fatal(err)
+	}
+	input.Resolution.ResolvedHead = git(test, input.RepoDir, "commit-tree", strings.TrimSpace(string(tree)), "-p", input.Resolution.ResolvedHead, "-m", "Unaddressable file name")
+	prepared, err := PrepareInput(test.Context(), input)
+	if err != nil {
+		test.Fatal(err)
+	}
+	code, err := prepareCodeTools(test.Context(), prepared)
+	if err != nil {
+		test.Fatal(err)
+	}
+	if code.allowed["new"][name] {
+		test.Fatal("invalid name is in tool scope")
+	}
+	for _, change := range code.scope {
+		if change.NewPath == name && change.ExcludedReason != "" {
+			return
+		}
+	}
+	test.Fatal("missing excluded metadata")
+}
+
 func TestPrepareWorkspaceStagedDeletionWithExistingFile(test *testing.T) {
 	input := fixture(test)
 	input.Mode = "workspace"

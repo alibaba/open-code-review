@@ -57,6 +57,13 @@ func TestPublicReportOmitsRawErrors(test *testing.T) {
 	}
 }
 
+func TestReportPreservesBothTimeoutAndArtifactFailure(test *testing.T) {
+	report := NewReport(behaviortask.Result{}, errors.Join(context.DeadlineExceeded, behaviortask.ErrResultWrite), "")
+	if len(report.Errors) != 2 || report.Errors[0] != "analysis timed out" || report.Errors[1] != "could not write analysis result" {
+		test.Fatal(report.Errors)
+	}
+}
+
 func (client testClient) CompletionsWithCtx(ctx context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
 	return client(ctx, request)
 }
@@ -228,10 +235,14 @@ func TestBudgetToolDefinitionEstimation(test *testing.T) {
 
 func TestBudgetServerUsageWithTools(test *testing.T) {
 	for _, fixture := range []struct {
-		name  string
-		usage llm.UsageInfo
+		name    string
+		usage   llm.UsageInfo
+		charged int64
 	}{
-		{name: "reported usage", usage: llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 99, CacheReadTokens: 4, CacheWriteTokens: 2}},
+		{name: "reported usage", charged: 99, usage: llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 99, CacheReadTokens: 4, CacheWriteTokens: 2}},
+		{name: "partial breakdown", charged: 175, usage: llm.UsageInfo{PromptTokens: 100, TotalTokens: 175}},
+		{name: "missing total", charged: 15, usage: llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5}},
+		{name: "inconsistent small total", charged: 15, usage: llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 8}},
 		{name: "zero usage"},
 	} {
 		test.Run(fixture.name, func(test *testing.T) {
@@ -242,22 +253,20 @@ func TestBudgetServerUsageWithTools(test *testing.T) {
 				}}},
 			}
 			reported := fixture.usage
-			total := reported.PromptTokens + reported.CompletionTokens
-			budget := NewBudget(max(1, 2*total), 1)
+			total := fixture.charged
+			budget := NewBudget(max(1, total), 1)
 			var calls int
 			client := budget.Wrap(testClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
 				calls++
 				content := "The behavior is unchanged."
 				return &llm.ChatResponse{Usage: &reported, Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}}}, nil
 			}))
-			for round := 0; round < 2; round++ {
-				response, err := client.CompletionsWithCtx(test.Context(), request)
-				if err != nil {
-					test.Fatal(err)
-				}
-				if response.Usage != &reported || *response.Usage != fixture.usage {
-					test.Fatalf("server usage changed: %+v, want %+v", response.Usage, fixture.usage)
-				}
+			response, err := client.CompletionsWithCtx(test.Context(), request)
+			if err != nil {
+				test.Fatal(err)
+			}
+			if response.Usage != &reported || *response.Usage != fixture.usage {
+				test.Fatalf("server usage changed: %+v, want %+v", response.Usage, fixture.usage)
 			}
 			if total > 0 {
 				if _, err := client.CompletionsWithCtx(test.Context(), request); !errors.Is(err, llm.ErrTokenBudget) {
@@ -266,10 +275,10 @@ func TestBudgetServerUsageWithTools(test *testing.T) {
 			}
 			usage, exhausted := budget.Snapshot()
 			expected := behaviortask.Usage{
-				InputTokens: 2 * fixture.usage.PromptTokens, OutputTokens: 2 * fixture.usage.CompletionTokens,
-				CacheReadTokens: 2 * fixture.usage.CacheReadTokens, CacheWriteTokens: 2 * fixture.usage.CacheWriteTokens,
+				InputTokens: fixture.usage.PromptTokens, OutputTokens: fixture.usage.CompletionTokens,
+				CacheReadTokens: fixture.usage.CacheReadTokens, CacheWriteTokens: fixture.usage.CacheWriteTokens,
 			}
-			if calls != 2 || exhausted != (total > 0) || usage != expected {
+			if calls != 1 || budget.Total() != total || exhausted != (total > 0) || usage != expected {
 				test.Fatalf("usage: %+v exhausted: %t calls: %d", usage, exhausted, calls)
 			}
 		})

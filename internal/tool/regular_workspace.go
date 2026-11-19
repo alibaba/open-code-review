@@ -11,8 +11,12 @@ import (
 	"strings"
 )
 
+func ValidWorkspacePath(filePath string) bool {
+	return fs.ValidPath(filePath) && filepath.IsLocal(filePath) && !strings.ContainsAny(filePath, "\\:") && filePath != "."
+}
+
 func OpenRegularWorkspaceFile(repoDir, filePath string) (*os.File, error) {
-	if !fs.ValidPath(filePath) || !filepath.IsLocal(filePath) || strings.ContainsAny(filePath, "\\:") || filePath == "." {
+	if !ValidWorkspacePath(filePath) {
 		return nil, fmt.Errorf("invalid workspace path")
 	}
 	return openRegularComponents(repoDir, strings.Split(filePath, "/"))

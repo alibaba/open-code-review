@@ -57,7 +57,7 @@ func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, max
 	cmd.Flags().IntVar(maxTools, "max-tools", 0, "max tool call rounds per subtask (0 = template default; min 50)")
 	cmd.Flags().IntVar(maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(maxTokens, "max-tokens", 0, "per-group prompt token ceiling (0 = configured or template default)")
-	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; checked before every LLM round. In ordinary review an over-budget group gets one final round to submit findings. With --analysis both roles share an admission limit: no new request, including a final round, starts after recorded usage reaches the cap. No further groups are dispatched. The CLI emits available results. Budget-only partial reviews with usable coverage exit 0. Operational failures and fully failed reviews exit non-zero (0 = unlimited)")
+	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; checked before every LLM round. In ordinary review an over-budget group gets one final round to submit findings. With --analysis both roles share an admission limit: no new request, including a final round, starts after recorded usage reaches the cap. No further groups are dispatched. The CLI emits available results. Budget-only partial reviews with usable coverage exit 0 only if Analysis, when requested, also completes. Operational failures and fully failed reviews exit non-zero (0 = unlimited)")
 }
 
 func addModelFlag(cmd *cobra.Command, target *string) {

@@ -10,7 +10,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -36,22 +38,79 @@ var cancelGracePeriod = 5 * time.Second
 // semaphore. All git command invocations should go through a shared Runner
 // instance so that the total system-wide subprocess count stays bounded.
 type Runner struct {
-	sem       chan struct{}
-	localOnly bool
+	sem            chan struct{}
+	localOnly      bool
+	configArgs     []string
+	configuredRepo string
 }
 
 func (r *Runner) LocalOnly() *Runner {
 	if r == nil {
 		r = New(1)
 	}
+	if r.localOnly {
+		return r
+	}
 	return &Runner{sem: r.sem, localOnly: true}
 }
 
+func (r *Runner) LocalForRepository(ctx context.Context, repo string) (*Runner, error) {
+	absolute, err := filepath.Abs(repo)
+	if err != nil {
+		return nil, err
+	}
+	if r != nil && r.configuredRepo == absolute {
+		return r, nil
+	}
+	local := &Runner{sem: r.LocalOnly().sem, localOnly: true, configuredRepo: absolute}
+	keys, err := local.Output(ctx, repo, "config", "--null", "--name-only", "--list")
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for key := range strings.SplitSeq(string(keys), "\x00") {
+		index := strings.LastIndexByte(key, '.')
+		if !strings.HasPrefix(key, "filter.") || index <= len("filter.") {
+			continue
+		}
+		driver := key[:index]
+		switch key[index+1:] {
+		case "process", "clean", "smudge":
+		default:
+			continue
+		}
+		if strings.ContainsAny(driver, "=\r\n") {
+			return nil, fmt.Errorf("unsupported Git filter configuration")
+		}
+		if !seen[driver] {
+			seen[driver] = true
+			for _, setting := range []string{".process=", ".clean=", ".smudge=", ".required=true"} {
+				local.configArgs = append(local.configArgs, "-c", driver+setting)
+			}
+		}
+	}
+	return local, nil
+}
+
 func (r *Runner) command(ctx context.Context, repoDir string, args ...string) *exec.Cmd {
+	if len(r.configArgs) > 0 {
+		args = append(append([]string{}, r.configArgs...), args...)
+	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoDir
 	if r.localOnly {
-		cmd.Env = append(cmd.Environ(), "GIT_NO_LAZY_FETCH=1", "GIT_ALLOW_PROTOCOL=")
+		for _, entry := range cmd.Environ() {
+			key, _, _ := strings.Cut(entry, "=")
+			switch strings.ToUpper(key) {
+			case "GIT_CEILING_DIRECTORIES", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM":
+			default:
+				if strings.HasPrefix(strings.ToUpper(key), "GIT_") {
+					continue
+				}
+			}
+			cmd.Env = append(cmd.Env, entry)
+		}
+		cmd.Env = append(cmd.Env, "GIT_NO_LAZY_FETCH=1", "GIT_ALLOW_PROTOCOL=", "GIT_OPTIONAL_LOCKS=0")
 	}
 	return cmd
 }

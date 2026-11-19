@@ -211,7 +211,7 @@ func New(args Args) *Agent {
 		args.CommentCollector = tool.NewCommentCollector()
 	}
 	if args.Session == nil {
-		gitBranch := detectGitBranch(context.Background(), args.RepoDir)
+		gitBranch := detectGitBranch(context.Background(), args.RepoDir, args.GitRunner)
 		mode := args.ReviewMode
 		if mode == "" {
 			mode = reviewModeString(args.From, args.To, args.Commit)

@@ -6,11 +6,11 @@ package agent
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -155,11 +155,13 @@ func reviewModeString(from, to, commit string) string {
 }
 
 // detectGitBranch returns the current git branch name for the given repo, or empty string on failure.
-func detectGitBranch(ctx context.Context, repoDir string) string {
+func detectGitBranch(ctx context.Context, repoDir string, runner *gitcmd.Runner) string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
-	out, err := cmd.Output()
+	if runner == nil {
+		runner = gitcmd.New(1)
+	}
+	out, err := runner.Output(ctx, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil || len(out) == 0 {
 		return ""
 	}
