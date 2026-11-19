@@ -4,13 +4,25 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from '../i18n';
+import type { Language } from '../i18n/types';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { SearchTrigger } from '../components/SearchTrigger';
 import { useResponsive } from '../hooks/useResponsive';
 import { useCommandSearch, useSearchKeyboardNav } from '../hooks/useCommandSearch';
-import { getDocContent, getDocTitle, DocSlug, searchDocs } from '../content/docs';
+import { isChunkLoadError, reloadAfterChunkError } from '../components/ErrorBoundary';
+import {
+  getDocContent,
+  getDocTitle,
+  hasTranslation,
+  isPartialLocale,
+  loadLanguageContent,
+  searchDocs,
+  DocSlug,
+  LoadedDocContent,
+  LocalizedDocs,
+} from '../content/docs';
 import { extractHeadings } from '../utils/extractHeadings';
 import docContentsIcon from '../assets/icons/doc-contents.svg';
 import searchIcon from '../assets/icons/icon-search.svg';
@@ -153,20 +165,160 @@ const DocsPage: React.FC = () => {
   const cancelPendingScroll = useRef<(() => void) | null>(null);
   const { t, language } = useTranslation();
   const { isMobile } = useResponsive();
+
+  /* ─── Async docs content: load the selected language's bundle on demand ─── */
+  type DocsLoadState =
+    | { status: 'loading'; language: Language; attempt: number }
+    | { status: 'ready'; content: LoadedDocContent }
+    | { status: 'error'; language: Language; error: Error; attempt: number };
+
+  /* English fallback for partial locales, tracked separately from the main
+   * language so its own loading and failure can drive page and search UI. */
+  type EnglishFallbackState =
+    | { status: 'idle' }
+    | { status: 'loading'; requestKey: string }
+    | { status: 'ready'; docs: LocalizedDocs }
+    | { status: 'error'; requestKey: string; error: Error; attempt: number };
+
+  const [docState, setDocState] = useState<DocsLoadState>(() => ({ status: 'loading', language, attempt: 0 }));
+  const [mainRetry, setMainRetry] = useState<{ language: Language; count: number }>({ language, count: 0 });
+  const [englishFallback, setEnglishFallback] = useState<EnglishFallbackState>({ status: 'idle' });
+  const [fallbackRetry, setFallbackRetry] = useState<{ requestKey: string; count: number }>({ requestKey: '', count: 0 });
+
+  const loadedLanguage = docState.status === 'ready' ? docState.content.language : null;
+
+  const loadedContent = useMemo<LoadedDocContent | null>(() => {
+    if (docState.status !== 'ready') return null;
+    return {
+      language: docState.content.language,
+      docs: docState.content.docs,
+      english: englishFallback.status === 'ready' ? englishFallback.docs : undefined,
+    };
+  }, [docState, englishFallback]);
+
+  /* Search stays synchronous over whatever content is loaded; results appear
+   * once the load resolves and the page re-renders. */
+  const runDocsSearch = useCallback(
+    (query: string) => (loadedContent ? searchDocs(query, loadedContent) : []),
+    [loadedContent],
+  );
+
   const {
     searchOpen, setSearchOpen,
     searchQuery, setSearchQuery,
     searchSelectedIdx, setSearchSelectedIdx,
     searchInputRef,
     searchResults,
-  } = useCommandSearch(searchDocs, language);
+  } = useCommandSearch(runDocsSearch, language);
   const contentRef = React.useRef<HTMLDivElement>(null);
 
   const fontFamily = 'PingFang SC, -apple-system, BlinkMacSystemFont, sans-serif';
 
+  /* Load the selected language's content. Cleanup flips `cancelled` so a
+   * response landing after a language switch or retry is ignored. */
+  useEffect(() => {
+    let cancelled = false;
+    const attempt = mainRetry.language === language ? mainRetry.count : 0;
+    setDocState({ status: 'loading', language, attempt });
+    loadLanguageContent(language)
+      .then(docs => {
+        if (!cancelled) setDocState({ status: 'ready', content: { language, docs } });
+      })
+      .catch(error => {
+        if (!cancelled) setDocState({ status: 'error', language, error, attempt });
+      });
+    return () => { cancelled = true; };
+  }, [language, mainRetry.language, mainRetry.count]);
+
+  /* English fallback for partial locales: loaded only when the active page or
+   * an active search needs the English entries — never speculatively. English
+   * content is language-independent, so a load started by any trigger settles
+   * the shared state no matter which trigger remains active; the attempt key
+   * keeps a failed attempt from re-firing in a loop until the trigger changes
+   * or the user retries. */
+  const fallbackAttemptKey = useRef('');
+  useEffect(() => {
+    if (loadedLanguage === null || loadedLanguage === 'en') return;
+    const pageNeedsFallback = !hasTranslation(activeSlug, loadedLanguage);
+    const searchNeedsFallback = searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
+    if (!pageNeedsFallback && !searchNeedsFallback) {
+      fallbackAttemptKey.current = '';
+      return;
+    }
+    if (englishFallback.status === 'ready' || englishFallback.status === 'loading') return;
+    const key = `${loadedLanguage}:${activeSlug}:${searchNeedsFallback}`;
+    const attempt = fallbackRetry.requestKey === key ? fallbackRetry.count : 0;
+    if (fallbackAttemptKey.current === `${key}:${attempt}`) return;
+    fallbackAttemptKey.current = `${key}:${attempt}`;
+    setEnglishFallback({ status: 'loading', requestKey: key });
+    loadLanguageContent('en')
+      .then(docs => {
+        setEnglishFallback({ status: 'ready', docs });
+      })
+      .catch(error => {
+        setEnglishFallback({ status: 'error', requestKey: key, error, attempt });
+      });
+  }, [loadedLanguage, activeSlug, searchQuery, englishFallback.status, fallbackRetry.requestKey, fallbackRetry.count]);
+
+  /* ─── Effective states for the page body and the search modal ───
+   * Both read the same content: the main language bundle, plus English while
+   * a partial locale needs it. "No results" is only shown once every piece of
+   * content the search depends on has actually arrived. */
+  const pageNeedsFallback =
+    loadedLanguage !== null && loadedLanguage !== 'en' && !hasTranslation(activeSlug, loadedLanguage);
+  const pageStatus: 'loading' | 'error' | 'ready' =
+    docState.status !== 'ready'
+      ? docState.status
+      : pageNeedsFallback && englishFallback.status !== 'ready'
+        ? (englishFallback.status === 'error' ? 'error' : 'loading')
+        : 'ready';
+
+  const mainChunkError = docState.status === 'error' && isChunkLoadError(docState.error);
+  const fallbackChunkError = englishFallback.status === 'error' && isChunkLoadError(englishFallback.error);
+  const canReloadMainChunk = mainChunkError && docState.attempt > 0;
+  const canReloadFallbackChunk = fallbackChunkError && englishFallback.attempt > 0;
+
+  const retryPageLoad = useCallback(() => {
+    if (docState.status === 'error') {
+      setMainRetry({ language: docState.language, count: docState.attempt + 1 });
+    } else if (pageNeedsFallback && englishFallback.status === 'error') {
+      setFallbackRetry({ requestKey: englishFallback.requestKey, count: englishFallback.attempt + 1 });
+    }
+  }, [docState, pageNeedsFallback, englishFallback]);
+
+  const reloadPageAfterChunkError = useCallback(() => {
+    reloadAfterChunkError();
+  }, []);
+
+  const searchNeedsEnglish =
+    loadedLanguage !== null && loadedLanguage !== 'en'
+    && searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
+  const searchContentStatus: 'loading' | 'error' | 'ready' =
+    docState.status === 'loading'
+      ? 'loading'
+      : docState.status === 'error'
+        ? 'error'
+        : searchNeedsEnglish && englishFallback.status !== 'ready'
+          ? (englishFallback.status === 'error' ? 'error' : 'loading')
+          : 'ready';
+
+  const retrySearchContent = useCallback(() => {
+    if (docState.status === 'error') {
+      setMainRetry({ language: docState.language, count: docState.attempt + 1 });
+    } else if (searchNeedsEnglish && englishFallback.status === 'error') {
+      setFallbackRetry({ requestKey: englishFallback.requestKey, count: englishFallback.attempt + 1 });
+    }
+  }, [docState, searchNeedsEnglish, englishFallback]);
+
   /* Get markdown content for current doc */
-  const docContent = useMemo(() => getDocContent(activeSlug, language), [activeSlug, language]);
-  const docTitle = useMemo(() => getDocTitle(activeSlug, language), [activeSlug, language]);
+  const docContent = useMemo(
+    () => (loadedContent ? getDocContent(activeSlug, loadedContent) : ''),
+    [activeSlug, loadedContent],
+  );
+  const docTitle = useMemo(
+    () => (loadedContent ? getDocTitle(activeSlug, loadedContent) : ''),
+    [activeSlug, loadedContent],
+  );
   const headings = useMemo(() => extractHeadings(docContent), [docContent]);
 
   /* Scroll direct links after their markdown heading has rendered */
@@ -421,15 +573,63 @@ const DocsPage: React.FC = () => {
 
         {/* ─── Main content area ─── */}
         <div ref={contentRef} onClick={handleContentClick} style={{ display: 'flex', flex: 1, flexDirection: 'column', minWidth: 0, padding: isMobile ? '32px 20px 80px' : '40px 48px 80px' }}>
-          {/* Doc title */}
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#FFFFFF', margin: '0 0 32px 0', lineHeight: '36px', fontFamily }}>
-            {docTitle}
-          </h1>
-          {/* Rendered markdown content */}
-          <MarkdownRenderer content={docContent} />
+          {pageStatus === 'loading' && (
+            <div role="status" style={{ padding: '96px 0', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14, fontFamily }}>
+              {t('docs.content.loading')}
+            </div>
+          )}
+          {pageStatus === 'error' && (
+            <div role="alert" style={{ padding: '96px 0', textAlign: 'center', fontSize: 14, fontFamily }}>
+              <div style={{ color: 'rgba(255,255,255,0.6)', marginBottom: 16 }}>
+                {t('docs.content.loadError')}
+              </div>
+              <button
+                onClick={retryPageLoad}
+                style={{
+                  background: 'rgba(43, 222, 94, 0.12)',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: '#2BDE5E',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  fontFamily,
+                  padding: '8px 20px',
+                }}
+              >
+                {t('docs.content.retry')}
+              </button>
+              {(canReloadMainChunk || canReloadFallbackChunk) && (
+                <button
+                  onClick={reloadPageAfterChunkError}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#2BDE5E',
+                    cursor: 'pointer',
+                    display: 'block',
+                    fontSize: 14,
+                    fontFamily,
+                    margin: '16px auto 0',
+                    padding: 0,
+                    textDecoration: 'underline',
+                  }}
+                >
+                  {t('error.reload')}
+                </button>
+              )}
+            </div>
+          )}
+          {pageStatus === 'ready' && (
+            <>
+              {/* Doc title */}
+              <h1 style={{ fontSize: 28, fontWeight: 700, color: '#FFFFFF', margin: '0 0 32px 0', lineHeight: '36px', fontFamily }}>
+                {docTitle}
+              </h1>
+              {/* Rendered markdown content */}
+              <MarkdownRenderer content={docContent} />
 
-          {/* ─── Prev / Next pagination ─── */}
-          <div style={{
+              {/* ─── Prev / Next pagination ─── */}
+              <div style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -475,7 +675,9 @@ const DocsPage: React.FC = () => {
                 <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>›</span>
               </button>
             ) : <span />}
-          </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* ─── Right sidebar: page TOC ─── */}
@@ -585,9 +787,55 @@ const DocsPage: React.FC = () => {
                 }}
               />
             </div>
-            {/* Results */}
+            {/* Results — pending or failed content shows its own state instead
+             * of a misleading "no results"; "no results" appears only once
+             * every content the search depends on has arrived. */}
             <div style={{ maxHeight: 400, overflowY: 'auto', padding: searchQuery ? '8px 0' : '0' }}>
-              {searchQuery && searchResults.length === 0 && (
+              {searchQuery && searchContentStatus === 'loading' && (
+                <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
+                  {t('docs.search.loading')}
+                </div>
+              )}
+              {searchQuery && searchContentStatus === 'error' && (
+                <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: 14 }}>
+                  <span style={{ color: 'rgba(255,255,255,0.6)' }}>{t('docs.search.loadError')}</span>{' '}
+                  <button
+                    onClick={retrySearchContent}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#2BDE5E',
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      fontFamily,
+                      padding: 0,
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    {t('docs.content.retry')}
+                  </button>
+                  {((docState.status === 'error' && isChunkLoadError(docState.error) && docState.attempt > 0)
+                    || (searchNeedsEnglish && fallbackChunkError && englishFallback.attempt > 0)) && (
+                    <button
+                      onClick={reloadPageAfterChunkError}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#2BDE5E',
+                        cursor: 'pointer',
+                        fontSize: 14,
+                        fontFamily,
+                        marginLeft: 12,
+                        padding: 0,
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      {t('error.reload')}
+                    </button>
+                  )}
+                </div>
+              )}
+              {searchQuery && searchContentStatus === 'ready' && searchResults.length === 0 && (
                 <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
                   {t('docs.search.noResults')}
                 </div>

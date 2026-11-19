@@ -38,6 +38,10 @@ func NewClient() *Client {
 
 var openBrowser = openBrowserURL
 
+func newCallbackServer(handler http.Handler) *http.Server {
+	return &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+}
+
 type discovery struct {
 	Issuer     string `json:"issuer"`
 	JWKS       string `json:"jwks_uri"`
@@ -293,7 +297,7 @@ func (c *Client) Login(ctx context.Context, s Store, account string, newAccount,
 	var auth *Auth
 	for n := 0; n < 2; n++ {
 		var issued string
-		auth, err = c.loginAttempt(ctx, host, registration, old, noBrowser, consent, out, &issued)
+		auth, err = c.loginAttempt(ctx, host, registration, old, noBrowser, consent, out, &issued, newCallbackServer)
 		var oauth *OAuthError
 		if n == 0 && issued != "" && errors.As(err, &oauth) && oauth.Code == "invalid_grant" {
 			// Keep the issued client only within this pending authorization, never as an active identity.
@@ -352,7 +356,7 @@ func (c *Client) Login(ctx context.Context, s Store, account string, newAccount,
 	return auth, nil
 }
 
-func (c *Client) loginAttempt(ctx context.Context, host string, registration, old *Auth, noBrowser, consent bool, out io.Writer, issued *string) (*Auth, error) {
+func (c *Client) loginAttempt(ctx context.Context, host string, registration, old *Auth, noBrowser, consent bool, out io.Writer, issued *string, newServer func(http.Handler) *http.Server) (*Auth, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
@@ -419,10 +423,16 @@ func (c *Client) loginAttempt(ctx context.Context, host string, registration, ol
 			fmt.Fprintln(w, "Authorization received. Return to OpenCodeReview to confirm sign-in.")
 		}
 	})
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	server := newServer(mux)
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
-	defer server.Close()
+	defer func() {
+		drainCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if server.Shutdown(drainCtx) != nil {
+			server.Close()
+		}
+	}()
 	localURL := "http://" + listener.Addr().String() + "/auth/start/" + a.state
 	if _, err := fmt.Fprintln(out, "Continue with ChatGPT. Eligible requests use your ChatGPT plan."); err != nil {
 		return nil, err

@@ -33,6 +33,16 @@ func ids(comments []model.LlmComment) []string {
 	return out
 }
 
+func TestCompareKeepsIdentityFieldsSeparate(t *testing.T) {
+	before := cmt("a.go", 1, "bug", "x.go|bug|value", "before")
+	after := cmt("a.go|bug|x.go", 2, "bug", "value", "after")
+
+	got := Compare([]model.LlmComment{before}, []model.LlmComment{after}, nil)
+	if len(got.Persisting) != 0 || !reflect.DeepEqual(got.New, []model.LlmComment{after}) || !reflect.DeepEqual(got.Resolved, []model.LlmComment{before}) {
+		t.Fatalf("distinct findings sharing a delimiter-joined key were conflated: %+v", got)
+	}
+}
+
 func TestCompare(t *testing.T) {
 	tests := []struct {
 		name            string

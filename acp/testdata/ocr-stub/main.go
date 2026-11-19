@@ -219,8 +219,9 @@ func runCommand(command, mode string, cfg config) int {
 }
 
 func runBlock(cfg config, cleanup bool) int {
-	fmt.Fprintln(os.Stderr, "READY")
-	waitForInterrupt()
+	waitForInterrupt(func() {
+		fmt.Fprintln(os.Stderr, "READY")
+	})
 	if cleanup || cfg.CleanupFile != "" {
 		path := cfg.CleanupFile
 		if path == "" {

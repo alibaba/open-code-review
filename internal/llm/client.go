@@ -324,11 +324,22 @@ type ResponseMessage struct {
 
 // ChatResponse is the parsed result of a completion request.
 type ChatResponse struct {
-	ID       string          `json:"-"`
-	Model    string          `json:"-"`
-	Choices  []Choice        `json:"-"`
-	Usage    *UsageInfo      `json:"-"` // Token usage extracted from API response
-	RawUsage json.RawMessage `json:"-"`
+	ID            string          `json:"-"`
+	Model         string          `json:"-"`
+	Choices       []Choice        `json:"-"`
+	Usage         *UsageInfo      `json:"-"` // Token usage extracted from API response
+	RawUsage      json.RawMessage `json:"-"`
+	rawOutputText string
+}
+
+func (r *ChatResponse) RawOutputText() string {
+	if r.rawOutputText != "" {
+		return r.rawOutputText
+	}
+	if len(r.Choices) == 0 || r.Choices[0].Message.Content == nil {
+		return ""
+	}
+	return *r.Choices[0].Message.Content
 }
 
 // Content extracts the text content from the first choice, falling back to reasoning content.

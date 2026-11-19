@@ -138,5 +138,6 @@
   ".clj",
   ".cljs",
   ".cljc",
-  ".edn"
+  ".edn",
+  ".move"
 ]

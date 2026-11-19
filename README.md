@@ -106,6 +106,35 @@ The agent's strengths are concentrated where they matter most — dynamic decisi
 
 - **Git >= 2.41** — Open Code Review relies on Git for diff generation, code search, and repository operations.
 
+<a id="supported-agents"></a>
+
+### Agent Skills
+
+Use the skills in Claude Code, Codex, Cursor, Kimi Code, or another agent that supports Agent Skills and can run local commands. Both modes require **Git >= 2.41** and the **`ocr` CLI**; only native mode requires an OCR model provider.
+
+#### 1. Install the Skills
+
+Run in the project you want to review, then select the skills you need and your agent in the installer:
+
+```bash
+npx skills add alibaba/open-code-review
+```
+
+The skills guide your agent to install `ocr` if it is missing, subject to your environment's permissions. You can also install it ahead of time with `npm install -g @alibaba-group/open-code-review`. Prefer a plugin or manual installation? See the [agent-specific setup guide](plugins/open-code-review/README.md), or copy the desired folders from [`skills/`](skills/) into your agent's skill directory.
+
+#### 2. Choose a Review Mode
+
+| | Native mode | Delegation mode |
+|---|---|---|
+| Skill | [`open-code-review`](skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](skills/open-code-review-delegate/SKILL.md) |
+| Who reviews? | OCR's specialized review agent and pipeline | Your current coding agent, following OCR's review pipeline and guardrails |
+| Model and authentication | OCR's own provider configuration | Your host agent's existing model and authentication |
+| Choose it when | You have a model endpoint for OCR and want its full review pipeline | You have no separate API key, or want to use your existing agent subscription/setup |
+
+**No separate key? Start with delegation mode.** It skips OCR provider setup, not the host agent's own authentication, usage limits, or costs. A host-agent subscription is not automatically an API credential for native mode. In delegation mode, OCR's CLI and skill together provide the review pipeline and guardrails: file selection, rule resolution, coverage requirements, and structured reporting. The host agent performs analysis, positioning, and reporting within that workflow; it does not run OCR's full native pipeline.
+
+For native mode, configure a provider once with `ocr config provider` and `ocr config model`. Authentication depends on the provider; see [Configuration](https://open-codereview.ai/docs/configuration).
+
 ### CLI
 
 #### Install
@@ -132,7 +161,7 @@ ocr config provider          # Select a built-in provider or add a custom one
 ocr config model             # Pick a model for the active provider
 ```
 
-![Provider setup](imgs/providers.jpg)
+![Model providers](imgs/providers.jpg)
 
 The interactive UI guides you through provider selection, API key entry, and model configuration, then automatically tests connectivity.
 
@@ -145,6 +174,9 @@ cd your-project
 
 # Workspace mode — review all staged, unstaged, and untracked changes
 ocr review
+
+# Current branch — review changes since it diverged from main (--to defaults to HEAD)
+ocr review --from main
 
 # Branch range — reviews feature-branch's changes since it diverged from main (merge-base mode)
 ocr review --from main --to feature-branch

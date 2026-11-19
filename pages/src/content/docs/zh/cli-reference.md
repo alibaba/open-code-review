@@ -106,11 +106,11 @@ unstaged + untracked 变更。
 |---|---|---|---|
 | `--repo <path>` | — | 当前目录 | Git 仓库根。 |
 | `--from <ref>` | — | — | diff 起始 ref（如 `main`）。 |
-| `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
+| `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。只传 `--from` 而省略 `--to` 时默认取 `HEAD`（仅评审已提交改动，等价于 `git diff <from>...HEAD`）。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个子任务的 `REVIEW_FILTER_TASK` LLM 后处理调用。子任务评审单个文件或一组相关文件。 |
-| `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
+| `--resume <session-id>` | — | — | 从之前兼容的区间、单 commit 或工作区评审会话恢复。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
 | `--output <path>` | `-o` | 标准输出 | 将评审结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
 | `--audience <who>` | — | `human` | `human` 流式输出进度行（`--format` 为 `json`/`sarif` 时输出到 stderr，使 stdout 保持为单个可解析文档）；`agent` 完全抑制进度行，只打印最终摘要 / JSON。 |
@@ -122,7 +122,7 @@ unstaged + untracked 变更。
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
 | `--max-tools <n>` | — | 模板默认 | 每个子任务的最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的正值会精确设置上限。 |
 | `--max-tokens <n>` | — | 配置或模板默认 | 每个子任务的**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。 |
-| `--max-tokens-budget <n>` | — | `0`（无限制） | 限制本次评审的输入 + 输出 token 总量。每次 LLM 轮次前都会检查：已超出预算的子任务会获得最后一轮来提交发现，并记为 `failed(budget)`；不再分发新的子任务，部分结果仍会发布。 |
+| `--max-tokens-budget <n>` | — | `0`（无限制） | 限制本次评审的输入 + 输出 token 总量。每次 LLM 轮次前都会检查：已超出预算的子任务会获得最后一轮来提交发现，并记为 `failed(budget)`；不再分发新的子任务，CLI 会输出已有结果。 |
 | `--effort <level>` | — | 配置或 `medium` | 评审投入档位：`low` = 1 轮 main 循环，`medium` = 2 轮（默认），`high` = 3 轮。轮数越多召回越高、耗时与 token 也越多。可用 `ocr config set effort <level>` 持久化。 |
 | `--provider <name>` | — | — | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。 |
 | `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
@@ -130,7 +130,7 @@ unstaged + untracked 变更。
 
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
-> `--resume` 仅支持区间或单 commit 评审，不能与 `--preview` 同时使用。
+> `--resume` 支持区间、单 commit 与工作区评审，不能与 `--preview` 同时使用。
 
 ### 单次运行的 LLM 选择
 
@@ -192,7 +192,7 @@ ocr review -c abc123
 每次 `ocr review` 都会在 `~/.opencodereview/sessions/` 下保存本地会话日志。
 正常完成的文本输出只展示评审结果，不打印 session ID；可使用
 `ocr session list/show` 查找已保存会话，或用 `--format json` 在机器可读输出中获取
-`session_id`。如果区间或单 commit 评审被中断，先列出已保存会话，再从与当前评审目标一致的会话恢复：
+`session_id`。如果评审被中断，先列出已保存会话，再从与当前评审目标一致的会话恢复：
 
 ```bash
 ocr session list
@@ -200,11 +200,16 @@ ocr session show <session-id>
 ocr session comments <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
+ocr review --resume <session-id>   # 工作区（不传模式参数）
 ```
 
 恢复逻辑是严格的。只有当本次运行评审的对象与父运行完全一致时，checkpoint 才会被复用：
 
-- 工作区评审不能恢复
+- 工作区评审仅在评审对象未变时才能恢复：基准 commit 与未提交变更都必须一致。
+  与区间或单 commit 评审不同，工作区没有可固定的 commit，因此恢复运行期间的编辑
+  不受保护。身份比较的是选中并解析后的 diff，而不是工作区的逐字节快照：未跟踪文件
+  增加或删除末尾换行、或仅 LF/CRLF 行尾变化，都会归一化为同一 diff，仍可恢复；
+  实质内容修改会改变 diff，恢复会被拒绝
 - 评审模式必须一致：区间会话不能以单 commit 模式恢复
 - 解析后的输入必须一致。ref 的*写法*不参与比较（`abc1234` 与 `abc1234def`
   指向同一个 commit），但如果相同的 ref 现在解析到不同的 diff，或规则、过滤器
@@ -308,7 +313,7 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
 | `summary` | 可选。运行聚合：`files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` 运行时省略。 |
 | `comments` | 总是存在，可能为空。每条评论的字段如上例。 |
 | `warnings` | 可选。当一个或多个子 agent 失败时存在；每条描述受影响文件与错误。 |
-| `session_id` | 可选。持久化的评审运行会包含该字段；重试兼容的区间或单 commit 评审时可传给 `ocr review --resume <session-id>`。 |
+| `session_id` | 可选。持久化的评审运行会包含该字段；重试兼容的评审时可传给 `ocr review --resume <session-id>`。 |
 | `resume` | 可选。恢复运行时存在，包含 `resumed_from`、`reused_files`、`rerun_files`、`previous_model` 和 `current_model`。 |
 
 当没有文件可评审时，JSON 模式会发一个 `skipped` 外壳，以便调用方区分“无变更”
@@ -330,11 +335,11 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
 
 | 码 | 含义 |
 |---|---|
-| `0` | 评审完成（可能零评论，可能有非致命警告）。 |
-| `1` | 致命错误——参数错误、无法解析 LLM 端点、所有 per-file 子 agent 失败等。错误文本打印到 stderr。 |
+| `0` | 评审完成或跳过（可能零评论或有非致命警告）。仅由已配置预算限制导致的部分评审也以 `0` 退出。 |
+| `1` | 致命错误，或 timeout、provider 错误、配置错误等 per-group 操作性失败。CLI 会在返回错误前输出已有结果。 |
 
-非致命警告（单个子 agent 失败、某文件超过 token 阈值等）内联打印；JSON 模式下
-会加入 `warnings` 数组。
+警告会内联打印；JSON 模式下会加入 `warnings` 数组。可查看
+`manifest.coverage.failed` 了解受影响文件及其失败分类。
 
 ## `ocr scan`
 
