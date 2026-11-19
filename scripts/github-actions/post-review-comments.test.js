@@ -16,7 +16,7 @@
 
 const assert = require("assert");
 const path = require("path");
-const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, isSummaryAuthorOurs, preserveCheckpointMarker, tailForComment, MAX_COMMENT_STDERR_CHARS } = require(path.join(__dirname, "post-review-comments.js"));
+const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, isSummaryAuthorOurs, preserveCheckpointMarker, tailForComment, MAX_COMMENT_STDERR_CHARS, buildIdentity, DEFAULT_IDENTITY } = require(path.join(__dirname, "post-review-comments.js"));
 
 // REVIEW_TAG as the production code builds it for this test's hardcoded run
 // identity (context.runId=undefined -> 0, runAttempt=undefined -> 1). Used as
@@ -847,6 +847,53 @@ async function testIncrementalSkipsOverlapping() {
   assert.strictEqual(outputs.comments_inline, "1");
 }
 
+async function testIncrementalHistoryIsNamespaceScoped() {
+  // Two reviewers share the PR. A bot comment on the same lines counts as
+  // history only when it carries THIS reviewer's id (or no id at all, for
+  // comments that predate the markers). Another reviewer's comment must not
+  // suppress this reviewer's finding — the dedupe half of #1671.
+  const foreign = {
+    path: "src/a.js",
+    line: 10,
+    start_line: 10,
+    side: "RIGHT",
+    user: { login: "github-actions[bot]" },
+    body: "finding\n<!-- ocr-0-1-aaaa0000bbbb1111 -->",
+  };
+  const own = {
+    path: "src/b.js",
+    line: 20,
+    start_line: 20,
+    side: "RIGHT",
+    user: { login: "github-actions[bot]" },
+    body: "finding\n<!-- secscan-0-1-cccc2222dddd3333 -->",
+  };
+  const legacy = { path: "src/c.js", line: 30, start_line: 30, side: "RIGHT", user: { login: "github-actions[bot]" } };
+  const result = {
+    comments: [
+      { path: "src/a.js", content: "same lines as another reviewer", start_line: 10, end_line: 10 },
+      { path: "src/b.js", content: "already covered by us", start_line: 20, end_line: 20 },
+      { path: "src/c.js", content: "covered by a pre-marker comment", start_line: 30, end_line: 30 },
+    ],
+    warnings: [],
+  };
+
+  const { github, outputs } = await run({
+    result,
+    githubOpts: { history: [foreign, own, legacy] },
+    opts: { stickySummary: true, incremental: true, namespace: "secscan" },
+  });
+
+  const sent = github.createReviewCalls[0].comments;
+  assert.deepStrictEqual(
+    sent.map((c) => c.path),
+    ["src/a.js"],
+    "only the finding another reviewer covered is posted; ours and the legacy comment still dedupe"
+  );
+  assert.strictEqual(outputs.comments_skipped, "2");
+  assert.strictEqual(outputs.comments_inline, "1");
+}
+
 async function testIncrementalSkipsSameRunIoUOverlapping() {
   const result = {
     comments: [
@@ -1186,6 +1233,231 @@ async function testGetPostedCommentIdsExtractsEmbeddedIds() {
   assert.ok(ids.has("ocr-0-1-cccc2222dddd3333"));
   assert.ok(!ids.has("ocr-0-1-zzzz0000"), "non-hex tokens do not match");
 }
+
+// ---- Poster identity / namespace (#1671) ----
+//
+// More than one automated reviewer can post through this module on one pull
+// request. The namespace must parameterize every marker the module writes AND
+// matches — summary marker, per-run tags, inline-comment IDs, checkpoint
+// marker, display name — or two reviewers adopt each other's threads, dedupe
+// history and sticky summary. The defaults must stay byte-identical to the
+// historical OCR identity, because markers already live on real PRs.
+
+function testBuildIdentityDefaultsAreByteIdentical() {
+  const identity = buildIdentity();
+  assert.strictEqual(identity.namespace, "ocr");
+  assert.strictEqual(identity.displayName, "OpenCodeReview");
+  assert.strictEqual(identity.summaryMarker, "<!-- ocr-summary -->");
+  assert.strictEqual(identity.reviewTagPrefix, "ocr-review-run");
+  assert.strictEqual(identity.summaryTagPrefix, "ocr-summary-run");
+  // Exact historical literals: a change here silently orphans every marker
+  // already posted on a pull request.
+  assert.strictEqual(identity.commentIdSource, String.raw`<!--\s*(ocr-\d+-\d+-[a-f0-9]+)\s*-->`);
+  assert.strictEqual(
+    identity.checkpointMarkerSource,
+    "<!-- ocr-checkpoint:v1 ([A-Za-z0-9+/]+={0,2}) -->"
+  );
+  assert.strictEqual(SUMMARY_MARKER, identity.summaryMarker, "the exported marker is the default identity's");
+  assert.strictEqual(DEFAULT_IDENTITY.summaryMarker, SUMMARY_MARKER);
+  assert.ok(Object.isFrozen(identity), "identity is immutable so one caller cannot mutate shared markers");
+}
+
+function testBuildIdentityNamespacedMarkers() {
+  const identity = buildIdentity({ namespace: "sec-scan", displayName: "Security Scan" });
+  assert.strictEqual(identity.summaryMarker, "<!-- sec-scan-summary -->");
+  assert.strictEqual(identity.reviewTagPrefix, "sec-scan-review-run");
+  assert.strictEqual(identity.summaryTagPrefix, "sec-scan-summary-run");
+  assert.strictEqual(
+    identity.checkpointMarkerSource,
+    "<!-- sec-scan-checkpoint:v1 ([A-Za-z0-9+/]+={0,2}) -->"
+  );
+  assert.ok(identity.commentIdRegex.test("<!-- sec-scan-12-3-aaaa0000bbbb1111 -->"));
+  assert.ok(
+    !identity.commentIdRegex.test("<!-- ocr-12-3-aaaa0000bbbb1111 -->"),
+    "a namespaced reviewer must not adopt OCR's ids"
+  );
+}
+
+function testBuildIdentityRejectsUnsafeNamespaces() {
+  // Every rejected value would either break the derived RegExp or let one
+  // reviewer's marker pattern match another's.
+  for (const bad of ["", "OCR", "sec scan", "sec_scan", "-sec", "sec-", "sec--scan", "sec\n", "sec\nscan"]) {
+    assert.throws(
+      () => buildIdentity({ namespace: bad }),
+      /invalid poster namespace/,
+      `must reject ${JSON.stringify(bad)}`
+    );
+  }
+  assert.throws(
+    () => buildIdentity({ namespace: "a".repeat(33) }),
+    /invalid poster namespace/,
+    "an unbounded namespace would bloat every inline-comment id"
+  );
+  for (const bad of ["", "   ", 42, null]) {
+    assert.throws(
+      () => buildIdentity({ displayName: bad }),
+      /invalid poster displayName/,
+      `must reject displayName ${JSON.stringify(bad)}`
+    );
+  }
+  assert.strictEqual(buildIdentity({ namespace: "security-scan" }).namespace, "security-scan");
+  assert.strictEqual(buildIdentity({ namespace: "ocr2" }).namespace, "ocr2");
+  assert.strictEqual(buildIdentity({ namespace: "a".repeat(32) }).namespace.length, 32, "32 is allowed");
+}
+
+function testNamespacedRunTagsAndCommentIds() {
+  const identity = buildIdentity({ namespace: "secscan" });
+  const tags = buildRunTags(12, 3, identity);
+  assert.strictEqual(tags.RUN_TAG, "12-3", "the run identity itself is not namespaced");
+  assert.strictEqual(tags.REVIEW_TAG, "<!-- secscan-review-run:12-3 -->");
+  assert.strictEqual(tags.SUMMARY_TAG, "<!-- secscan-summary-run:12-3 -->");
+  assert.match(newCommentId("12-3", identity), /^secscan-12-3-[a-f0-9]{16}$/);
+  // The default path is unchanged.
+  assert.match(newCommentId("12-3"), /^ocr-12-3-[a-f0-9]{16}$/);
+  assert.strictEqual(buildRunTags(12, 3).REVIEW_TAG, "<!-- ocr-review-run:12-3 -->");
+}
+
+async function testGetPostedCommentIdsIsNamespaceScoped() {
+  const github = {
+    rest: {
+      pulls: {
+        listReviewComments: async () => ({
+          data: [
+            { body: "<!-- secscan-0-1-aaaa0000bbbb1111 -->\nours" },
+            { body: "<!-- ocr-0-1-cccc2222dddd3333 -->\ntheirs" },
+          ],
+          headers: {},
+        }),
+      },
+    },
+  };
+  const ids = await getPostedCommentIds({
+    github,
+    owner: "o",
+    repo: "r",
+    prNumber: 1,
+    log: () => {},
+    identity: buildIdentity({ namespace: "secscan" }),
+  });
+  assert.deepStrictEqual(
+    [...ids],
+    ["secscan-0-1-aaaa0000bbbb1111"],
+    "another reviewer's ids must not count as already posted for this one"
+  );
+}
+
+function testCheckpointMarkersAreNamespaceScoped() {
+  const identity = buildIdentity({ namespace: "secscan" });
+  const payload = { v: 1, head: "a".repeat(40) };
+  const marker = buildCheckpointMarker(payload, identity);
+  assert.ok(marker.startsWith("<!-- secscan-checkpoint:v1 "), "namespaced marker");
+  assert.deepStrictEqual(parseCheckpointMarker(marker, identity), payload, "round trip");
+  assert.strictEqual(
+    parseCheckpointMarker(marker),
+    null,
+    "the default identity must not read another reviewer's checkpoint"
+  );
+  // Preservation is namespace-scoped too: a namespaced summary rewrite keeps
+  // its own marker and never inherits OCR's.
+  assert.strictEqual(preserveCheckpointMarker("fresh", `old\n\n${marker}`, identity), `fresh\n\n${marker}`);
+  assert.strictEqual(
+    preserveCheckpointMarker("fresh", `old\n\n${buildCheckpointMarker(payload)}`, identity),
+    "fresh",
+    "OCR's marker is not this reviewer's to preserve"
+  );
+}
+
+function testResolveOwnershipIsNamespaceScoped() {
+  const identity = buildIdentity({ namespace: "secscan" });
+  const thread = (body) => ({
+    isOutdated: true,
+    isResolved: false,
+    path: "src/a.js",
+    originalLine: 10,
+    comments: {
+      totalCount: 1,
+      nodes: [{ body, author: { login: "github-actions", __typename: "Bot" } }],
+    },
+    root: { nodes: [{ body, author: { login: "github-actions", __typename: "Bot" } }] },
+  });
+  const ours = thread("<!-- secscan-1-1-aaaa0000bbbb1111 -->\nfinding");
+  const theirs = thread("<!-- ocr-1-1-cccc2222dddd3333 -->\nfinding");
+  assert.strictEqual(
+    shouldResolveThread(ours, { botLogin: null, identity }),
+    "resolve",
+    "a thread carrying this reviewer's id is ours to resolve"
+  );
+  assert.strictEqual(
+    shouldResolveThread(theirs, { botLogin: null, identity }),
+    "not_ours",
+    "a thread carrying OCR's id is not ours"
+  );
+  assert.strictEqual(
+    shouldResolveThread(theirs, { botLogin: null }),
+    "resolve",
+    "the default identity keeps the historical behaviour"
+  );
+}
+
+async function testNamespacedRunOwnsItsOwnSummaryAndMarkers() {
+  // An OCR summary already exists on the PR. A namespaced reviewer must not
+  // rewrite it in place — that would destroy the other reviewer's summary.
+  const ocrSummary = {
+    id: 42,
+    html_url: "http://ex/42",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: `${SUMMARY_MARKER}\n🔍 **OpenCodeReview** found **1** issue(s) in this PR.`,
+  };
+  const result = {
+    comments: [{ path: "src/a.js", content: "x", start_line: 1, end_line: 1 }],
+    warnings: [],
+  };
+  const { github } = await run({
+    result,
+    githubOpts: { existingSummary: [ocrSummary] },
+    opts: { stickySummary: true, namespace: "secscan", displayName: "Security Scan" },
+  });
+
+  assert.deepStrictEqual(
+    github.updatedComments.map((c) => c.comment_id),
+    [1001],
+    "only its own freshly created anchor is updated; OCR's summary (42) is never touched"
+  );
+  assert.strictEqual(github.issueComments.length, 1, "a namespaced reviewer creates its own summary");
+  const createdBody = github.issueComments[0].body;
+  assert.match(createdBody, /<!-- secscan-summary -->/);
+  assert.match(createdBody, /\*\*Security Scan\*\*/);
+  assert.doesNotMatch(createdBody, /ocr-summary/, "no OCR marker in its own summary");
+
+  // Inline comment ids and the per-run tags carry the namespace too.
+  const inlineBody = github.createReviewCalls[0].comments[0].body;
+  assert.match(inlineBody, /<!-- secscan-0-1-[a-f0-9]{16} -->/);
+  assert.doesNotMatch(inlineBody, /<!-- ocr-/, "no OCR id on a namespaced inline comment");
+  assert.strictEqual(github.createReviewCalls[0].body, "<!-- secscan-review-run:0-1 -->");
+}
+
+async function testNamespacedRunReusesItsOwnSummary() {
+  // Same reviewer on a later run: its own sticky summary is updated in place.
+  const ownSummary = {
+    id: 77,
+    html_url: "http://ex/77",
+    user: { login: "github-actions[bot]", type: "Bot" },
+    performed_via_github_app: { slug: "github-actions" },
+    body: "<!-- secscan-summary -->\nold",
+  };
+  const result = { comments: [], message: "All clear." };
+  const { github } = await run({
+    result,
+    githubOpts: { existingSummary: [ownSummary] },
+    opts: { stickySummary: true, namespace: "secscan", displayName: "Security Scan" },
+  });
+  assert.deepStrictEqual(github.issueComments, [], "no duplicate summary");
+  assert.deepStrictEqual(github.updatedComments.map((c) => c.comment_id), [77]);
+  assert.match(github.updatedComments[0].body, /<!-- secscan-summary -->/);
+  assert.match(github.updatedComments[0].body, /\*\*Security Scan\*\*/);
+}
+
 
 // ---- computeRetryDelayMs unit tests ----
 //
@@ -2808,6 +3080,17 @@ async function main() {
   await testSummaryAnchorCreatedBeforeReviewColdStart();
   await testSummaryAnchorCreatedBeforeReviewNonSticky();
   await testGetPostedCommentIdsExtractsEmbeddedIds();
+  // Poster identity / namespace (#1671)
+  testBuildIdentityDefaultsAreByteIdentical();
+  testBuildIdentityNamespacedMarkers();
+  testBuildIdentityRejectsUnsafeNamespaces();
+  testNamespacedRunTagsAndCommentIds();
+  await testGetPostedCommentIdsIsNamespaceScoped();
+  testCheckpointMarkersAreNamespaceScoped();
+  testResolveOwnershipIsNamespaceScoped();
+  await testNamespacedRunOwnsItsOwnSummaryAndMarkers();
+  await testNamespacedRunReusesItsOwnSummary();
+  await testIncrementalHistoryIsNamespaceScoped();
   // Rate-limit strategy (pure function)
   testComputeRetryDelayMs();
   // Cross-scenario: rate-limit x partial-invalid x landed

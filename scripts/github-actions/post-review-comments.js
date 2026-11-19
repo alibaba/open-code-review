@@ -17,7 +17,93 @@
 
 const crypto = require("crypto");
 
-const SUMMARY_MARKER = "<!-- ocr-summary -->";
+// ---- Poster identity (#1671) ----
+//
+// More than one automated reviewer can post through this module on the same
+// pull request. The namespace parameterizes every marker the poster writes and
+// matches — the sticky summary marker, the per-run idempotency tags, the
+// inline-comment ID format (and the ownership pattern derived from it), the
+// checkpoint marker — and the display name replaces the wording in the summary
+// bodies. Each reviewer therefore owns its own threads, dedupe history and
+// summary instead of adopting another reviewer's output as its own. The
+// defaults reproduce the historical OCR identity byte for byte, so a caller
+// that passes nothing posts exactly what it posted before.
+const DEFAULT_NAMESPACE = "ocr";
+const DEFAULT_DISPLAY_NAME = "OpenCodeReview";
+// The namespace is embedded in RegExp sources (the inline-comment ownership
+// check and the checkpoint pattern), so it is restricted to what needs no
+// escaping and still reads as a slug. Anchored at both ends: an unanchored
+// pattern would accept a namespace with a trailing newline, and `$` alone
+// would too.
+const NAMESPACE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// The namespace prefixes every inline-comment ID and marker, so an unbounded
+// one would bloat every comment on the pull request. 32 characters leaves room
+// for descriptive names ("security-scan", "dependency-audit") without letting a
+// typo turn into kilobytes.
+const NAMESPACE_MAX_LENGTH = 32;
+
+function buildIdentity({ namespace = DEFAULT_NAMESPACE, displayName = DEFAULT_DISPLAY_NAME } = {}) {
+  if (typeof namespace !== "string" || !NAMESPACE_PATTERN.test(namespace)) {
+    throw new Error(
+      `invalid poster namespace ${JSON.stringify(namespace)}: ` +
+        "expected lowercase alphanumerics separated by single hyphens"
+    );
+  }
+  if (namespace.length > NAMESPACE_MAX_LENGTH) {
+    throw new Error(
+      `invalid poster namespace ${JSON.stringify(namespace)}: ` +
+        `expected at most ${NAMESPACE_MAX_LENGTH} characters`
+    );
+  }
+  if (typeof displayName !== "string" || displayName.trim() === "") {
+    throw new Error(`invalid poster displayName ${JSON.stringify(displayName)}: expected a non-empty string`);
+  }
+  const summaryMarker = `<!-- ${namespace}-summary -->`;
+  // The one description of the inline-comment marker. Two call sites depend on
+  // it — the retry idempotency check (getPostedCommentIds) and the resolve
+  // ownership check (threadIsOurs) — and a drift between them would be silent
+  // in both directions, so they are built from this single source. Anchored to
+  // the HTML comment wrapper so user content or a quoted suggestion cannot
+  // forge it.
+  const commentIdSource = String.raw`<!--\s*(${namespace}-\d+-\d+-[a-f0-9]+)\s*-->`;
+  // Checkpoint marker shape: an HTML comment carrying a base64 JSON payload.
+  // The source string (rather than one RegExp) exists because two uses need
+  // the `g` flag and build their own instance every time, deliberately: a
+  // shared global RegExp carries a mutable lastIndex between calls, which is
+  // an intermittent bug waiting for the first `.exec` loop that returns early.
+  const checkpointMarkerSource = `<!-- ${namespace}-checkpoint:v1 ([A-Za-z0-9+/]+={0,2}) -->`;
+  return Object.freeze({
+    namespace,
+    displayName,
+    summaryMarker,
+    reviewTagPrefix: `${namespace}-review-run`,
+    summaryTagPrefix: `${namespace}-summary-run`,
+    commentIdSource,
+    // Shared, non-global instance for the presence check. No /g means no
+    // lastIndex, so .test() carries no state between the threads it is called
+    // on. getPostedCommentIds builds its own /g copy instead, for exactly the
+    // reason this one can be shared.
+    commentIdRegex: new RegExp(commentIdSource),
+    // Any inline-comment id, whichever namespace wrote it. Used to tell "an id
+    // exists and it is not this reviewer's" (another reviewer's comment, which
+    // must not count as this reviewer's dedupe history) from "no id at all" (a
+    // comment posted before ids existed, or by a tool that does not use this
+    // module — still history, exactly as before). The namespace is matched
+    // non-greedily against the `-<run>-<attempt>-<hex>` tail so a hyphenated
+    // namespace is captured whole.
+    commentIdNamespaceRegex: /<!--\s*([a-z0-9-]+?)-\d+-\d+-[a-f0-9]+\s*-->/,
+    checkpointMarkerSource,
+    // Same reasoning: the flagless uses have no state, so they share one
+    // instance.
+    checkpointMarkerRegex: new RegExp(checkpointMarkerSource),
+  });
+}
+
+const DEFAULT_IDENTITY = buildIdentity();
+
+// Retained for callers and tests that import the default marker directly; it
+// is the default identity's marker, not a second definition.
+const SUMMARY_MARKER = DEFAULT_IDENTITY.summaryMarker;
 
 // Reason attached to comments that have no valid line range and therefore can
 // never be posted as inline comments. Surfaced in the summary via the same
@@ -129,6 +215,16 @@ async function runPostReviewComments({
   // the wider "any bot" check rather than pinning to a slug that would reject
   // our own summary too.
   appSlug = "",
+  // Poster identity (#1671). `namespace` parameterizes every marker this module
+  // writes and matches — summary marker, per-run tags, inline-comment IDs,
+  // checkpoint marker — so several automated reviewers can share one pull
+  // request without adopting each other's threads, dedupe history or summary.
+  // `displayName` replaces the "OpenCodeReview" wording in the summary bodies.
+  // The defaults reproduce OCR's own output byte for byte. A namespace that is
+  // not lowercase alphanumerics joined by single hyphens throws before any
+  // GitHub call is made (it flows into RegExp sources).
+  namespace = DEFAULT_NAMESPACE,
+  displayName = DEFAULT_DISPLAY_NAME,
 }) {
   const log = (msg) => {
     if (core && typeof core.info === "function") core.info(msg);
@@ -137,6 +233,7 @@ async function runPostReviewComments({
   const out = (name, value) => {
     if (core && typeof core.setOutput === "function") core.setOutput(name, value);
   };
+  const identity = buildIdentity({ namespace, displayName });
 
   // One identity lookup shared by every caller that may need it: the summary
   // author gate (which needs it for a PAT), incremental dedupe, and the resolve
@@ -167,7 +264,7 @@ async function runPostReviewComments({
   // HTML comments so the idempotency check can detect whether a batch
   // createReview actually landed on the server before retrying, which prevents
   // duplicate review posts on retry.
-  const { RUN_TAG, REVIEW_TAG, SUMMARY_TAG } = buildRunTags(context.runId, context.runAttempt);
+  const { RUN_TAG, REVIEW_TAG, SUMMARY_TAG } = buildRunTags(context.runId, context.runAttempt, identity);
 
   const stats = {
     total: 0,
@@ -297,7 +394,7 @@ async function runPostReviewComments({
       // No manifest exists on this path (the output could not be parsed), so it
       // can only ever carry the previous checkpoint forward — never advance it.
       const body = appendCheckpoint(
-        `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview** encountered an error:\n${fencedBlock(stderr)}`,
+        `${identity.summaryMarker}\n⚠️ **${identity.displayName}** encountered an error:\n${fencedBlock(stderr)}`,
         null
       );
       const posted = await postSummary({
@@ -310,6 +407,7 @@ async function runPostReviewComments({
         preserveMarker,
         appSlug,
         resolveSelfLogin: authenticatedLogin,
+        identity,
         log,
       });
       stats.summaryUrl = posted.url;
@@ -341,7 +439,7 @@ async function runPostReviewComments({
     // A clean run is still a complete run: this path advances the checkpoint.
     // Warnings are not an input to that decision.
     const body = appendCheckpoint(
-      `${SUMMARY_MARKER}\n${icon} **OpenCodeReview**: ${message}${warningBlock}${rangeNote}`,
+      `${identity.summaryMarker}\n${icon} **${identity.displayName}**: ${message}${warningBlock}${rangeNote}`,
       result.manifest
     );
     const posted = await postSummary({
@@ -354,6 +452,7 @@ async function runPostReviewComments({
       preserveMarker,
       appSlug,
       resolveSelfLogin: authenticatedLogin,
+      identity,
       log,
     });
     stats.summaryUrl = posted.url;
@@ -412,7 +511,7 @@ async function runPostReviewComments({
       commentsRouted.push({ comment, body: formatComment(comment), reason: route.reason });
       continue;
     }
-    const id = newCommentId(RUN_TAG);
+    const id = newCommentId(RUN_TAG, identity);
     const reviewComment = { path: comment.path, body: formatComment(comment, id) };
     if (comment.start_line >= 1 && comment.end_line >= 1 && comment.start_line !== comment.end_line) {
       reviewComment.start_line = comment.start_line;
@@ -432,11 +531,21 @@ async function runPostReviewComments({
   // Incremental filtering (non-destructive): drop current inline comments
   // whose (path, line range) overlaps an existing bot review comment, so we
   // only append comments on lines not yet covered. History is never deleted.
+  //
+  // "Existing bot review comment" means one WE posted: every comment this
+  // module posts carries its inline-comment id, and another reviewer's id is
+  // not this reviewer's history. Without that distinction two reviewers sharing
+  // a PR suppress each other's findings on the same lines — the dedupe half of
+  // #1671. A comment carrying no id at all stays history, as before: those
+  // predate the id markers (or come from a tool that does not use this module),
+  // and dropping them would re-post every overlapping finding once.
   let toSend = reviewComments;
   if (incremental && reviewComments.length > 0) {
     const existing = await listExistingReviewComments(github, owner, repo, prNumber, log);
     const botLogin = await authenticatedLogin();
-    const hist = existing.filter((c) => isBotComment(c, botLogin));
+    const hist = existing.filter(
+      (c) => isBotComment(c, botLogin) && !hasForeignCommentId(c.body, identity)
+    );
     toSend = reviewComments.filter(
       ({ reviewComment }) => !overlapsHistory(reviewComment, hist, incrementalOverlapThreshold)
     );
@@ -468,7 +577,7 @@ async function runPostReviewComments({
   // The anchor carries a pre-review body (issue count, warnings, and comments
   // without line info — all known upfront); final posting statistics are
   // written in the finalize phase below, once the review has landed.
-  const wrapSummary = (content) => `${SUMMARY_MARKER}\n${SUMMARY_TAG}\n${content}`;
+  const wrapSummary = (content) => `${identity.summaryMarker}\n${SUMMARY_TAG}\n${content}`;
   const anchor = await ensureSummaryAnchor({
     github,
     owner,
@@ -478,8 +587,15 @@ async function runPostReviewComments({
     tag: SUMMARY_TAG,
     appSlug,
     resolveSelfLogin: authenticatedLogin,
+    identity,
     body: wrapSummary(
-      buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings)
+      buildPreReviewSummaryBody(
+        stats.total,
+        commentsWithoutLine,
+        commentsRouted,
+        warnings,
+        identity.displayName
+      )
     ),
     log,
   });
@@ -520,6 +636,7 @@ async function runPostReviewComments({
         REVIEW_TAG,
         log,
         diffCache,
+        identity,
       });
       successCount += r.succeeded;
       failedCount += r.failed;
@@ -555,6 +672,7 @@ async function runPostReviewComments({
     routed: commentsRouted.length,
     failed: failedCount,
     warnings,
+    displayName: identity.displayName,
   });
   summaryBody += formatSummaryComments(commentsWithoutLine);
   summaryBody += formatSummaryComments(commentsRouted);
@@ -583,6 +701,7 @@ async function runPostReviewComments({
     tag: SUMMARY_TAG,
     appSlug,
     resolveSelfLogin: authenticatedLogin,
+    identity,
     body: wrapSummary(appendCheckpoint(summaryBody, result.manifest)),
     preserveMarker,
     log,
@@ -622,6 +741,7 @@ async function runPostReviewComments({
         botLogin: await authenticatedLogin(),
         currentSpans,
         dryRun: resolveMode === "report",
+        identity,
       });
       stats.resolved = r.resolved;
       // The full candidate count, not `attempted`: report mode exists to show
@@ -663,6 +783,7 @@ async function publishBatch({
   REVIEW_TAG,
   log,
   diffCache,
+  identity = DEFAULT_IDENTITY,
 }) {
   let succeeded = 0;
   let failed = 0;
@@ -720,6 +841,7 @@ async function publishBatch({
       tag: REVIEW_TAG,
       label: "Batch",
       labelLower: "batch",
+      identity,
     });
     let toRetry = primary.toRetry;
     succeeded += primary.alreadyPosted;
@@ -842,6 +964,7 @@ async function publishBatch({
             tag: REVIEW_TAG,
             label: "Secondary filtered batch",
             labelLower: "secondary filtered batch",
+            identity,
           });
           succeeded += secondary.alreadyPosted;
           if (secondary.reconciled) reconciled = true;
@@ -934,7 +1057,7 @@ async function publishBatch({
               );
               await sleep(coolDownMs);
             }
-            const alreadyPosted = await isCommentAlreadyPosted({ github, owner, repo, prNumber, id, log });
+            const alreadyPosted = await isCommentAlreadyPosted({ github, owner, repo, prNumber, id, log, identity });
             if (alreadyPosted === true) {
               succeeded++;
               posted = true;
@@ -1000,15 +1123,17 @@ async function publishBatch({
 // missing, falling back to safe defaults. REVIEW_TAG is the body marker the
 // batch createReview carries so findExistingBatchReview can locate a batch that
 // landed despite a 5xx; SUMMARY_TAG is the analogous marker for the summary
-// issue comment. Pure so it can be tested and reused.
-function buildRunTags(runId, runAttempt) {
+// issue comment. Both are prefixed with the poster namespace, so two reviewers
+// running in the same workflow run never match each other's tags. Pure so it
+// can be tested and reused.
+function buildRunTags(runId, runAttempt, identity = DEFAULT_IDENTITY) {
   const id = Number.isFinite(runId) ? runId : 0;
   const attempt = Number.isFinite(runAttempt) ? runAttempt : 1;
   const RUN_TAG = `${id}-${attempt}`;
   return {
     RUN_TAG,
-    REVIEW_TAG: `<!-- ocr-review-run:${RUN_TAG} -->`,
-    SUMMARY_TAG: `<!-- ocr-summary-run:${RUN_TAG} -->`,
+    REVIEW_TAG: `<!-- ${identity.reviewTagPrefix}:${RUN_TAG} -->`,
+    SUMMARY_TAG: `<!-- ${identity.summaryTagPrefix}:${RUN_TAG} -->`,
   };
 }
 
@@ -1112,6 +1237,7 @@ async function postSummary({
   preserveMarker = false,
   appSlug = "",
   resolveSelfLogin = null,
+  identity = DEFAULT_IDENTITY,
   log,
 }) {
   const fullBody = body;
@@ -1123,6 +1249,7 @@ async function postSummary({
       prNumber,
       appSlug,
       resolveSelfLogin,
+      identity,
       log,
     });
     if (existing) {
@@ -1130,7 +1257,7 @@ async function postSummary({
         owner,
         repo,
         comment_id: existing.id,
-        body: preserveMarker ? preserveCheckpointMarker(fullBody, existing.body) : fullBody,
+        body: preserveMarker ? preserveCheckpointMarker(fullBody, existing.body, identity) : fullBody,
       });
       return { id: updated.id, url: updated.html_url, updated: true };
     }
@@ -1144,14 +1271,23 @@ async function postSummary({
   return { id: created.id, url: created.html_url, updated: false };
 }
 
-async function findExistingSummaryComment({ github, owner, repo, prNumber, appSlug = "", resolveSelfLogin = null, log }) {
+async function findExistingSummaryComment({
+  github,
+  owner,
+  repo,
+  prNumber,
+  appSlug = "",
+  resolveSelfLogin = null,
+  identity = DEFAULT_IDENTITY,
+  log,
+}) {
   const comments = await readAllPages("listIssueComments", (page, per_page) =>
     github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page, page }), log
   );
   // Issue comments are returned oldest-first; pick the newest matching.
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body;
-    if (typeof body === "string" && body.includes(SUMMARY_MARKER)) {
+    if (typeof body === "string" && body.includes(identity.summaryMarker)) {
       // The marker is plain Markdown, so anyone can quote it verbatim — a human
       // dispositioning a review, another tool citing one, or a DIFFERENT bot
       // echoing one. postSummary rewrites whatever this returns IN PLACE, so
@@ -1181,9 +1317,10 @@ async function findExistingSummaryComment({ github, owner, repo, prNumber, appSl
 // being sandwiched between review blocks on subsequent sticky runs.
 
 // Find the issue comment that should carry the summary, or null if none.
-// Sticky matches the persistent cross-run marker (SUMMARY_MARKER); non-sticky
-// matches this run's tag (SUMMARY_TAG) so each run gets its own comment while
-// retries within a run reuse it. Throws on read failure so callers can degrade.
+// Sticky matches the persistent cross-run marker (identity.summaryMarker);
+// non-sticky matches this run's tag (SUMMARY_TAG) so each run gets its own
+// comment while retries within a run reuse it. Throws on read failure so
+// callers can degrade.
 //
 // The marker match alone is NOT enough to claim a comment: the body is plain
 // Markdown, so any human (or another tool) can quote a prior review's marker
@@ -1204,6 +1341,7 @@ async function findSummaryIssueComment({
   tag,
   appSlug = "",
   resolveSelfLogin = null,
+  identity = DEFAULT_IDENTITY,
   log,
 }) {
   const comments = await readAllPages("listIssueComments", (page, per_page) =>
@@ -1211,8 +1349,8 @@ async function findSummaryIssueComment({
   );
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body || "";
-    if (sticky ? body.includes(SUMMARY_MARKER) : body.includes(tag)) {
-      if (!(await isSummaryAuthorOurs(comments[i], { appSlug, resolveSelfLogin }))) continue;
+    if (sticky ? body.includes(identity.summaryMarker) : body.includes(tag)) {
+      if (!(await isSummaryAuthorOurs(comments[i], { appSlug, resolveSelfLogin, identity }))) continue;
       return comments[i];
     }
   }
@@ -1233,6 +1371,7 @@ async function ensureSummaryAnchor({
   tag,
   appSlug = "",
   resolveSelfLogin = null,
+  identity = DEFAULT_IDENTITY,
   log,
 }) {
   let existing = null;
@@ -1246,6 +1385,7 @@ async function ensureSummaryAnchor({
       tag,
       appSlug,
       resolveSelfLogin,
+      identity,
       log,
     });
   } catch (e) {
@@ -1282,9 +1422,11 @@ async function finalizeSummary({
   preserveMarker = false,
   appSlug = "",
   resolveSelfLogin = null,
+  identity = DEFAULT_IDENTITY,
   log,
 }) {
-  const keep = (newBody, oldBody) => (preserveMarker ? preserveCheckpointMarker(newBody, oldBody) : newBody);
+  const keep = (newBody, oldBody) =>
+    preserveMarker ? preserveCheckpointMarker(newBody, oldBody, identity) : newBody;
   if (anchor && anchor.id != null) {
     const { data: updated } = await github.rest.issues.updateComment({
       owner,
@@ -1305,6 +1447,7 @@ async function finalizeSummary({
       tag,
       appSlug,
       resolveSelfLogin,
+      identity,
       log,
     });
   } catch (e) {
@@ -1385,6 +1528,17 @@ function isBotComment(comment, botLogin) {
   return /github-actions\[bot\]$/i.test(login) || (botLogin != null && login === botLogin);
 }
 
+// True when the body carries an inline-comment id written by a DIFFERENT poster
+// namespace. A comment with no id at all is not foreign — it predates the id
+// markers or came from a tool that does not use this module — so it stays in
+// the incremental history exactly as before. Used only for that history: the
+// destructive paths (thread resolution, summary rewrite) gate on our own marker
+// directly and fail closed on anything else.
+function hasForeignCommentId(body, identity) {
+  const m = identity.commentIdNamespaceRegex.exec(String(body || ""));
+  return m != null && m[1] !== identity.namespace;
+}
+
 // Incremental overlap test. The current comment is considered a duplicate of
 // an existing bot comment (and thus skipped) when they target the same path
 // and RIGHT side AND one of these holds:
@@ -1459,18 +1613,10 @@ function num(v) {
   return Number.isFinite(n) && n >= 1 ? n : null;
 }
 
-// The one description of OCR's inline-comment marker. Two call sites depend on
-// it — the retry idempotency check (getPostedCommentIds) and the resolve
-// ownership check (threadIsOurs) — and a drift between them would be silent in
-// both directions, so they are built from this single source. Anchored to the
-// HTML comment wrapper so user content or a quoted suggestion cannot forge it.
-const OCR_COMMENT_ID_SOURCE = String.raw`<!--\s*(ocr-\d+-\d+-[a-f0-9]+)\s*-->`;
-
-// Shared, non-global instance for the presence check. No /g means no lastIndex,
-// so .test() carries no state between the threads it is called on.
-// getPostedCommentIds builds its own /g copy instead, for exactly the reason
-// this one can be shared.
-const OCR_COMMENT_ID_RE = new RegExp(OCR_COMMENT_ID_SOURCE);
+// The inline-comment marker pattern now lives on the poster identity
+// (buildIdentity): its namespace prefix is part of the pattern, and the retry
+// idempotency check (getPostedCommentIds) and the resolve ownership check
+// (threadIsOurs) must both read that one description.
 
 // ---- Outdated thread resolution (#567) ----
 //
@@ -1592,9 +1738,9 @@ function rootComment(thread) {
   return (thread && thread.root && thread.root.nodes && thread.root.nodes[0]) || null;
 }
 
-function threadIsOurs(thread) {
+function threadIsOurs(thread, identity = DEFAULT_IDENTITY) {
   const root = rootComment(thread);
-  return OCR_COMMENT_ID_RE.test((root && root.body) || "");
+  return identity.commentIdRegex.test((root && root.body) || "");
 }
 
 // GraphQL's reviewThreads returns a bot's SLUG ("github-actions") where REST —
@@ -1622,7 +1768,7 @@ function graphqlAuthorLogin(author) {
 // the feature. The mutation is attempted and its failure is caught instead.
 function shouldResolveThread(
   thread,
-  { botLogin, currentSpans = [], unlocatablePaths = new Set() } = {}
+  { botLogin, currentSpans = [], unlocatablePaths = new Set(), identity = DEFAULT_IDENTITY } = {}
 ) {
   if (!thread || thread.isOutdated !== true) return "not_outdated";
   if (thread.isResolved === true) return "already_resolved";
@@ -1648,7 +1794,7 @@ function shouldResolveThread(
   // is what the destructive path gates on. Checked before the human-reply loop
   // because "not ours" is the more fundamental answer: a thread we did not
   // create is not ours to classify, let alone resolve.
-  if (!threadIsOurs(thread)) return "not_ours";
+  if (!threadIsOurs(thread, identity)) return "not_ours";
   // Identity comes from the ROOT comment's author, not from
   // getAuthenticatedLogin(): that call is a user-token endpoint, so under the
   // Actions token (and under a GitHub App installation token) it 403s and
@@ -1790,6 +1936,7 @@ async function resolveOutdatedThreads({
   botLogin,
   currentSpans = [],
   dryRun = false,
+  identity = DEFAULT_IDENTITY,
 }) {
   const warn = (msg) => {
     if (core && typeof core.warning === "function") core.warning(msg);
@@ -1827,7 +1974,7 @@ async function resolveOutdatedThreads({
   const candidates = [];
   const previewLines = [];
   for (const thread of threads) {
-    const reason = shouldResolveThread(thread, { botLogin, currentSpans, unlocatablePaths });
+    const reason = shouldResolveThread(thread, { botLogin, currentSpans, unlocatablePaths, identity });
     reasons[reason] = (reasons[reason] || 0) + 1;
     if (reason === "resolve") candidates.push(thread);
     if (dryRun) {
@@ -2125,17 +2272,17 @@ async function findExistingBatchReview({ github, owner, repo, prNumber, tag, log
 // reviews). Uses listReviewComments (PR-level, cross-review) so a single
 // paginated walk covers everything, avoiding the O(missing) amplification of
 // per-comment lookups.
-async function getPostedCommentIds({ github, owner, repo, prNumber, log }) {
+async function getPostedCommentIds({ github, owner, repo, prNumber, log, identity = DEFAULT_IDENTITY }) {
   const comments = await readAllPages("listReviewComments", (page, per_page) =>
     github.rest.pulls.listReviewComments({ owner, repo, pull_number: prNumber, per_page, page }), log
   );
   const ids = new Set();
-  // The ID format is `ocr-<RUN_TAG>-<random>` where RUN_TAG is
+  // The ID format is `<namespace>-<RUN_TAG>-<random>` where RUN_TAG is
   // `<runId>-<runAttempt>` and <random> is a per-comment random hex token.
   // Capture group 1 holds the bare ID, so we can add it directly without
   // stripping comment markers. Built with /g (own instance — /g carries
   // lastIndex, so it must never be shared) to walk every ID in one body.
-  const ID_RE = new RegExp(OCR_COMMENT_ID_SOURCE, "g");
+  const ID_RE = new RegExp(identity.commentIdSource, "g");
   for (const c of comments) {
     const body = c.body || "";
     let m;
@@ -2162,9 +2309,9 @@ async function getPostedCommentIds({ github, owner, repo, prNumber, log }) {
 // duplicate. Read calls are paced via readAllPages/readWithPacing and degrade
 // to null (skip retry) if the read API itself fails, so the extra walks cannot
 // produce duplicates.
-async function isCommentAlreadyPosted({ github, owner, repo, prNumber, id, log }) {
+async function isCommentAlreadyPosted({ github, owner, repo, prNumber, id, log, identity = DEFAULT_IDENTITY }) {
   try {
-    const posted = await getPostedCommentIds({ github, owner, repo, prNumber, log });
+    const posted = await getPostedCommentIds({ github, owner, repo, prNumber, log, identity });
     return posted.has(id);
   } catch (e) {
     log(`[isCommentAlreadyPosted] check failed for ${id} (${e.message}); treating as unknown to avoid duplicates.`);
@@ -2178,8 +2325,8 @@ async function isCommentAlreadyPosted({ github, owner, repo, prNumber, id, log }
 // IDs and the idempotency check never mistakes one for the other (which would
 // silently drop the second). Embedded in the comment body as an HTML comment
 // so getPostedCommentIds can match it back on retry.
-function newCommentId(runTag) {
-  return `ocr-${runTag}-${crypto.randomBytes(8).toString("hex")}`;
+function newCommentId(runTag, identity = DEFAULT_IDENTITY) {
+  return `${identity.namespace}-${runTag}-${crypto.randomBytes(8).toString("hex")}`;
 }
 
 // ---- Badge + publication policy helpers (#478) ----
@@ -2429,8 +2576,17 @@ function formatCommentMarkdown(comment, error) {
 //   skipped — comments suppressed by incremental overlap filtering
 //   failed  — comments that had line info but could not be posted (also
 //             rendered in the body below, each tagged with its failure reason)
-function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed, warnings }) {
-  let body = `🔍 **OpenCodeReview** found **${total}** issue(s) in this PR.`;
+function buildSummaryBody({
+  total,
+  inline,
+  summary,
+  skipped,
+  routed = 0,
+  failed,
+  warnings,
+  displayName = DEFAULT_DISPLAY_NAME,
+}) {
+  let body = `🔍 **${displayName}** found **${total}** issue(s) in this PR.`;
   if (total > 0) {
     body += `\n- ✅ Successfully posted inline: ${inline} comment(s)`;
     if (summary > 0) {
@@ -2460,8 +2616,8 @@ function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed,
 // finalize. Routed findings are known before the review (the policy decision is
 // made in the partition loop) so they are rendered here too, keeping the
 // pre-review anchor accurate.
-function buildPreReviewSummaryBody(totalCount, summaryComments, routedComments, warnings) {
-  let body = `🔍 **OpenCodeReview** found **${totalCount}** issue(s) in this PR.`;
+function buildPreReviewSummaryBody(totalCount, summaryComments, routedComments, warnings, displayName = DEFAULT_DISPLAY_NAME) {
+  let body = `🔍 **${displayName}** found **${totalCount}** issue(s) in this PR.`;
   if (totalCount > 0) {
     body += `\n- ⏳ _Posting review comments…_`;
     if (routedComments && routedComments.length > 0) {
@@ -2574,7 +2730,19 @@ function safeRead(fs, p) {
 //
 // Returns { toRetry, alreadyPosted, reconciled, status, maybeReachedServer,
 //           unverified }.
-async function cooldownAndReconcile({ github, owner, repo, prNumber, log, error, items, tag, label, labelLower }) {
+async function cooldownAndReconcile({
+  github,
+  owner,
+  repo,
+  prNumber,
+  log,
+  error,
+  items,
+  tag,
+  label,
+  labelLower,
+  identity = DEFAULT_IDENTITY,
+}) {
   const retry = computeRetryDelayMs(error, 0);
   if (retry != null) {
     const secs = (retry.delayMs / 1000).toFixed(1);
@@ -2633,7 +2801,7 @@ async function cooldownAndReconcile({ github, owner, repo, prNumber, log, error,
     // uncertainty as summary failures instead—visible, final, and duplicate-free.
     let postedIds;
     try {
-      postedIds = await getPostedCommentIds({ github, owner, repo, prNumber, log });
+      postedIds = await getPostedCommentIds({ github, owner, repo, prNumber, log, identity });
     } catch (readErr) {
       const reason =
         `Could not verify whether the failed ${labelLower} review posted this comment ` +
@@ -3008,23 +3176,23 @@ const CHECKPOINT_VERSION = 1;
 // base64 JSON payload, so payload text can contain "-->" or newlines without
 // breaking out of the comment.
 //
-// The pattern stays a source string because two of its uses need the `g` flag
-// and those two build their own RegExp every time, deliberately: a shared
-// global RegExp carries a mutable lastIndex between calls, which is an
-// intermittent bug waiting for the first `.exec` loop that returns early.
-// The flagless uses have no such state — `test` and `exec` on a RegExp without
-// `g` never touch lastIndex — so they share one instance.
-const CHECKPOINT_MARKER_PATTERN = "<!-- ocr-checkpoint:v1 ([A-Za-z0-9+/]+={0,2}) -->";
-const CHECKPOINT_MARKER_RE = new RegExp(CHECKPOINT_MARKER_PATTERN);
+// The pattern itself lives on the poster identity (buildIdentity), because its
+// namespace prefix is part of it. It stays a SOURCE STRING rather than one
+// RegExp because two of its uses need the `g` flag and those two build their
+// own RegExp every time, deliberately: a shared global RegExp carries a
+// mutable lastIndex between calls, which is an intermittent bug waiting for
+// the first `.exec` loop that returns early. The flagless uses have no such
+// state — `test` and `exec` on a RegExp without `g` never touch lastIndex — so
+// they share one instance (identity.checkpointMarkerRegex).
 const CHECKPOINT_SHA_RE = /^[0-9a-f]{40}$/;
 // Event actions that mean "look at this PR again from scratch": a reopen or a
 // draft going ready is a request for a fresh opinion on the whole diff, not for
 // the delta since the last push.
 const EVENT_FULL_SCOPE = new Set(["reopened", "ready_for_review"]);
 
-function buildCheckpointMarker(payload) {
+function buildCheckpointMarker(payload, identity = DEFAULT_IDENTITY) {
   const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
-  return `<!-- ocr-checkpoint:v1 ${encoded} -->`;
+  return `<!-- ${identity.namespace}-checkpoint:v1 ${encoded} -->`;
 }
 
 // Never erase a checkpoint we cannot re-derive. The sticky summary is rewritten
@@ -3042,10 +3210,10 @@ function buildCheckpointMarker(payload) {
 // would resolve that ambiguity by picking the first, and the next run would
 // then read a single well-formed marker and narrow to it. Rescuing nothing
 // leaves the ambiguity intact, which keeps failing closed.
-function preserveCheckpointMarker(newBody, oldBody) {
+function preserveCheckpointMarker(newBody, oldBody, identity = DEFAULT_IDENTITY) {
   if (typeof oldBody !== "string" || oldBody === "") return newBody;
-  if (CHECKPOINT_MARKER_RE.test(newBody || "")) return newBody;
-  const found = oldBody.match(new RegExp(CHECKPOINT_MARKER_PATTERN, "g")) || [];
+  if (identity.checkpointMarkerRegex.test(newBody || "")) return newBody;
+  const found = oldBody.match(new RegExp(identity.checkpointMarkerSource, "g")) || [];
   return found.length === 1 ? `${newBody}\n\n${found[0]}` : newBody;
 }
 
@@ -3054,9 +3222,9 @@ function preserveCheckpointMarker(newBody, oldBody) {
 // normal first run on a PR) and "marker present but unusable"; the caller maps
 // both to the same fail-closed reason because neither yields a usable range.
 // Two markers in one body are ambiguous and therefore also null.
-function parseCheckpointMarker(body) {
+function parseCheckpointMarker(body, identity = DEFAULT_IDENTITY) {
   if (typeof body !== "string" || body === "") return null;
-  const re = new RegExp(CHECKPOINT_MARKER_PATTERN, "g");
+  const re = new RegExp(identity.checkpointMarkerSource, "g");
   const found = [];
   let m;
   while ((m = re.exec(body)) !== null) found.push(m[1]);
@@ -3141,7 +3309,7 @@ function checkpointAuthorSlug(comment) {
 // GitHub compares them. The marker must also LEAD the body: our summary opens
 // with it, while an account discussing a review quotes it mid-body, and the
 // destructive callers rewrite whatever passes this gate.
-function isCheckpointAuthorOurs(comment, appSlug = "", selfLogin = "") {
+function isCheckpointAuthorOurs(comment, appSlug = "", selfLogin = "", identity = DEFAULT_IDENTITY) {
   const user = (comment && comment.user) || null;
   if (!user) return false;
   if (user.type === "User") {
@@ -3154,7 +3322,7 @@ function isCheckpointAuthorOurs(comment, appSlug = "", selfLogin = "") {
     // PAT branch cannot apply.
     if (appSlug || !selfLogin) return false;
     if (typeof user.login !== "string" || user.login.toLowerCase() !== selfLogin.toLowerCase()) return false;
-    return typeof comment.body === "string" && comment.body.trimStart().startsWith(SUMMARY_MARKER);
+    return typeof comment.body === "string" && comment.body.trimStart().startsWith(identity.summaryMarker);
   }
   const slug = checkpointAuthorSlug(comment);
   if (slug === "" && user.type !== "Bot") return false;
@@ -3179,12 +3347,12 @@ function makeSelfLoginResolver(github, log) {
 // comments are decided entirely by isCheckpointAuthorOurs; only a User-typed
 // writer with no pinned app is worth a GET /user, which is why the lookup is
 // resolved here and not before the scan.
-async function isSummaryAuthorOurs(comment, { appSlug = "", resolveSelfLogin = null } = {}) {
-  if (isCheckpointAuthorOurs(comment, appSlug)) return true;
+async function isSummaryAuthorOurs(comment, { appSlug = "", resolveSelfLogin = null, identity = DEFAULT_IDENTITY } = {}) {
+  if (isCheckpointAuthorOurs(comment, appSlug, "", identity)) return true;
   const user = (comment && comment.user) || null;
   if (appSlug || !resolveSelfLogin || !user || user.type !== "User") return false;
   const selfLogin = await resolveSelfLogin();
-  return selfLogin ? isCheckpointAuthorOurs(comment, appSlug, selfLogin) : false;
+  return selfLogin ? isCheckpointAuthorOurs(comment, appSlug, selfLogin, identity) : false;
 }
 
 // Read the checkpoint payload out of this PR's sticky summary comment, with the
@@ -3201,7 +3369,16 @@ async function isSummaryAuthorOurs(comment, { appSlug = "", resolveSelfLogin = n
 // appSlug optionally tightens the author check to one specific app (see
 // isCheckpointAuthorOurs); empty means "any writer GitHub attributes to a bot",
 // plus the run's own account when a user-to-server token makes one knowable.
-async function readCheckpointComment({ github, owner, repo, prNumber, appSlug = "", resolveSelfLogin = null, log }) {
+async function readCheckpointComment({
+  github,
+  owner,
+  repo,
+  prNumber,
+  appSlug = "",
+  resolveSelfLogin = null,
+  identity = DEFAULT_IDENTITY,
+  log,
+}) {
   let comments;
   try {
     comments = await readAllPages("listIssueComments", (page, per_page) =>
@@ -3226,17 +3403,17 @@ async function readCheckpointComment({ github, owner, repo, prNumber, appSlug = 
   const selfLogin = resolveSelfLogin || makeSelfLoginResolver(github, log);
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body || "";
-    if (!body.includes(SUMMARY_MARKER)) continue;
+    if (!body.includes(identity.summaryMarker)) continue;
     sawMarker = true;
-    if (!(await isSummaryAuthorOurs(comments[i], { appSlug, resolveSelfLogin: selfLogin }))) continue;
+    if (!(await isSummaryAuthorOurs(comments[i], { appSlug, resolveSelfLogin: selfLogin, identity }))) continue;
 
-    const payload = parseCheckpointMarker(body);
+    const payload = parseCheckpointMarker(body, identity);
     if (!payload) return { reason: "corrupt_checkpoint", payload: null, raw: "" };
     // parseCheckpointMarker just proved the body holds exactly one marker, so the
     // exec cannot miss and the fallback is unreachable today. It stays so that a
     // future edit to that guard degrades into an empty carry — a wider next range
     // — instead of a TypeError on a null match.
-    const raw = (CHECKPOINT_MARKER_RE.exec(body) || [""])[0];
+    const raw = (identity.checkpointMarkerRegex.exec(body) || [""])[0];
     return { reason: "ok", payload, raw };
   }
 
@@ -3296,6 +3473,7 @@ async function resolveCheckpointRange({
   // Passing it in keeps the whole feature at one read per run and makes the
   // range decision and the carried marker come from the same observation.
   read = null,
+  identity = DEFAULT_IDENTITY,
   log = () => {},
 }) {
   const full = (reason, seen) =>
@@ -3319,7 +3497,7 @@ async function resolveCheckpointRange({
   if (EVENT_FULL_SCOPE.has(eventAction)) return full("event_full_scope");
 
   const seenComment =
-    read || (await readCheckpointComment({ github, owner, repo, prNumber, appSlug, log }));
+    read || (await readCheckpointComment({ github, owner, repo, prNumber, appSlug, identity, log }));
   if (seenComment.reason !== "ok") return full(seenComment.reason);
 
   const p = seenComment.payload;
@@ -3410,6 +3588,12 @@ module.exports = {
   tailForComment,
   MAX_COMMENT_STDERR_CHARS,
   SUMMARY_MARKER,
+  DEFAULT_IDENTITY,
+  DEFAULT_NAMESPACE,
+  DEFAULT_DISPLAY_NAME,
+  NAMESPACE_PATTERN,
+  NAMESPACE_MAX_LENGTH,
+  buildIdentity,
   NO_LINE_REASON,
   resolveBatchSize,
   sortToSendDeterministically,
