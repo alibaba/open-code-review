@@ -8,8 +8,10 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -347,8 +349,17 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 }
 
 // buildFileFilter picks the highest-priority layer that has any include/exclude
-// configured. Priority order: custom (--rule) > project > global.
+// configured. Priority order: custom (--rule) > project > global. Patterns in
+// the selected layer that use Windows backslash separators are warned about
+// on Windows (#1463); matching behavior is unchanged.
 func buildFileFilter(layers ...*ProjectRule) *FileFilter {
+	return buildFileFilterFor(os.Stderr, runtime.GOOS, layers...)
+}
+
+// buildFileFilterFor is buildFileFilter with the warning destination and GOOS
+// injectable so tests can assert the Windows separator warnings from #1463
+// on any platform.
+func buildFileFilterFor(w io.Writer, goos string, layers ...*ProjectRule) *FileFilter {
 	for _, pr := range layers {
 		if pr == nil {
 			continue
@@ -356,6 +367,8 @@ func buildFileFilter(layers ...*ProjectRule) *FileFilter {
 		if len(pr.Include) == 0 && len(pr.Exclude) == 0 {
 			continue
 		}
+		pathutil.WarnPatternBackslashes(w, goos, `rule.json "include"`, pr.Include)
+		pathutil.WarnPatternBackslashes(w, goos, `rule.json "exclude"`, pr.Exclude)
 		f := &FileFilter{}
 		for _, p := range pr.Include {
 			f.Include = append(f.Include, strings.ToLower(p))
