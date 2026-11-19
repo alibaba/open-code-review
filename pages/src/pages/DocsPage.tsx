@@ -235,6 +235,11 @@ const DocsPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [language, mainRetry.language, mainRetry.count]);
 
+  const englishFallbackRef = useRef<EnglishFallbackState>(englishFallback);
+  useEffect(() => {
+    englishFallbackRef.current = englishFallback;
+  }, [englishFallback]);
+
   /* English fallback for partial locales: loaded only when the active page or
    * an active search needs the English entries — never speculatively. English
    * content is language-independent, so a load started by any trigger settles
@@ -252,20 +257,24 @@ const DocsPage: React.FC = () => {
       fallbackAttemptKey.current = '';
       return;
     }
-    if (englishFallback.status === 'ready' || englishFallback.status === 'loading') return;
     const key = `${loadedLanguage}:${activeSlug}:${searchNeedsFallback}`;
     const attempt = fallbackRetry.requestKey === key ? fallbackRetry.count : 0;
+    const currentFallback = englishFallbackRef.current;
+    if (currentFallback.status === 'ready') return;
+    if (currentFallback.status === 'loading' && currentFallback.requestKey === key) return;
     if (fallbackAttemptKey.current === `${key}:${attempt}`) return;
     fallbackAttemptKey.current = `${key}:${attempt}`;
+    let cancelled = false;
     setEnglishFallback({ status: 'loading', requestKey: key });
     loadLanguageContent('en')
       .then(docs => {
-        setEnglishFallback({ status: 'ready', docs });
+        if (!cancelled) setEnglishFallback({ status: 'ready', docs });
       })
       .catch(error => {
-        setEnglishFallback({ status: 'error', requestKey: key, error, attempt });
+        if (!cancelled) setEnglishFallback({ status: 'error', requestKey: key, error, attempt });
       });
-  }, [loadedLanguage, activeSlug, searchQuery, englishFallback.status, fallbackRetry.requestKey, fallbackRetry.count]);
+    return () => { cancelled = true; };
+  }, [loadedLanguage, activeSlug, searchQuery, fallbackRetry.requestKey, fallbackRetry.count]);
 
   /* ─── Effective states for the page body and the search modal ───
    * Both read the same content: the main language bundle, plus English while
@@ -273,12 +282,14 @@ const DocsPage: React.FC = () => {
    * content the search depends on has actually arrived. */
   const pageNeedsFallback =
     loadedLanguage !== null && loadedLanguage !== 'en' && !hasTranslation(activeSlug, loadedLanguage);
-  const pageStatus: 'loading' | 'error' | 'ready' =
-    docState.status !== 'ready'
-      ? docState.status
-      : pageNeedsFallback && englishFallback.status !== 'ready'
-        ? (englishFallback.status === 'error' ? 'error' : 'loading')
-        : 'ready';
+  let pageStatus: 'loading' | 'error' | 'ready';
+  if (docState.status !== 'ready') {
+    pageStatus = docState.status;
+  } else if (pageNeedsFallback && englishFallback.status !== 'ready') {
+    pageStatus = englishFallback.status === 'error' ? 'error' : 'loading';
+  } else {
+    pageStatus = 'ready';
+  }
 
   const mainChunkError = docState.status === 'error' && isChunkLoadError(docState.error);
   const fallbackChunkError = englishFallback.status === 'error' && isChunkLoadError(englishFallback.error);
@@ -300,14 +311,16 @@ const DocsPage: React.FC = () => {
   const searchNeedsEnglish =
     loadedLanguage !== null && loadedLanguage !== 'en'
     && searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
-  const searchContentStatus: 'loading' | 'error' | 'ready' =
-    docState.status === 'loading'
-      ? 'loading'
-      : docState.status === 'error'
-        ? 'error'
-        : searchNeedsEnglish && englishFallback.status !== 'ready'
-          ? (englishFallback.status === 'error' ? 'error' : 'loading')
-          : 'ready';
+  let searchContentStatus: 'loading' | 'error' | 'ready';
+  if (docState.status === 'loading') {
+    searchContentStatus = 'loading';
+  } else if (docState.status === 'error') {
+    searchContentStatus = 'error';
+  } else if (searchNeedsEnglish && englishFallback.status !== 'ready') {
+    searchContentStatus = englishFallback.status === 'error' ? 'error' : 'loading';
+  } else {
+    searchContentStatus = 'ready';
+  }
 
   const retrySearchContent = useCallback(() => {
     if (docState.status === 'error') {

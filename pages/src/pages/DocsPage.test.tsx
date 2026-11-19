@@ -476,6 +476,30 @@ describe('DocsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: zh['error.reload'] }));
     expect(reloadSpy).toHaveBeenCalledTimes(1);
   });
+  it('ignores a stale fallback response after navigating to another missing article', async () => {
+    h.available.zh = [];
+    renderDocsPage('zh', '/docs/installation');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({});
+    });
+    expect(h.loadCalls).toEqual(['zh', 'en']);
+
+    fireEvent.click(screen.getAllByText(zh['docs.sidebar.configuration'])[0]);
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(2);
+
+    await act(async () => {
+      h.pending.en[0].resolve({ installation: 'stale installation body' });
+    });
+    expect(screen.queryByText('stale installation body')).toBeNull();
+
+    await act(async () => {
+      h.pending.en[1].resolve({ configuration: 'current configuration body' });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('current configuration body');
+    });
+  });
   it('uses cached English content after a failed fallback and language round trip', async () => {
     h.available.zh = ['quickstart'];
     renderDocsPage('zh', '/docs/installation');
