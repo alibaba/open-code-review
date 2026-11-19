@@ -440,6 +440,8 @@ without checking out that branch. The repository directory selected by `--repo`
 must still exist, but it need not remain a Git checkout. Filtering does not change
 the checks required to resume a session.
 
+The `Status` column reports `aborted` for a session whose `session_end` record was never written, so the process was killed before it could finish — and with no such record there is nothing left to say why. A run cancelled by Ctrl-C, SIGTERM, or a caller deadline does write `session_end`: it keeps its real terminal state, and the reason is appended to that state, e.g. `partial (interrupted: cancelled)`. `--json` exposes the same value as `interrupted_by`, omitted when the run finished on its own.
+
 ### `ocr session show`
 
 Finds the session by id across saved repositories by default. Pass `--repo .`
