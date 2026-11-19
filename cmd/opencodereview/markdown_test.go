@@ -193,6 +193,71 @@ func TestRenderMarkdownTableLinkRetention(test *testing.T) {
 	}
 }
 
+func TestRenderMarkdownCompactTables(test *testing.T) {
+	markdown := "| Case | Before | After |\n| --- | :---: | ---: |\n| \u4e2d\u6587 | `off` | on |\n| CI | same | ready |\n"
+	for _, width := range []int{30, 120} {
+		rendered := renderMarkdown(markdown, width)
+		var lines []string
+		for _, line := range strings.Split(ansi.Strip(rendered), "\n") {
+			if trimmed := strings.TrimRight(line, " "); trimmed != "" {
+				lines = append(lines, trimmed)
+			}
+		}
+		want := "Case  Before  After\n────  ──────  ─────\n\u4e2d\u6587   off       on\n────  ──────  ─────\nCI     same   ready"
+		if got := strings.Join(lines, "\n"); got != want {
+			test.Errorf("at width %d:\n%s\nwant:\n%s", width, got, want)
+		}
+		for _, style := range []string{"\x1b[1mCase", "\x1b[2m─", "\x1b[36moff"} {
+			if !strings.Contains(rendered, style) {
+				test.Errorf("at width %d: missing %q in %q", width, style, rendered)
+			}
+		}
+	}
+}
+
+func TestRenderMarkdownNarrowTables(test *testing.T) {
+	markdown := "| A | B | C |\n| --- | --- | --- |\n| \u4e2d\u6587 | `abcde0123456789` | tail |\n| next | | end |"
+	for _, width := range []int{8, 18} {
+		plain := ansi.Strip(renderMarkdown(markdown, width))
+		for _, line := range strings.Split(plain, "\n") {
+			if ansi.StringWidth(line) > width {
+				test.Errorf("width %d overflow: %q", width, line)
+			}
+		}
+		var middleCell strings.Builder
+		var rowIndex int
+		for _, line := range strings.Split(plain, "\n") {
+			if strings.HasPrefix(line, "─") {
+				rowIndex++
+			} else if rowIndex == 1 {
+				if width == 18 {
+					line = ansi.Cut(line, 6, 12)
+				}
+				middleCell.WriteString(strings.TrimSpace(line))
+			}
+		}
+		want := "abcde0123456789"
+		if width == 8 {
+			want = "\u4e2d\u6587" + want + "tail"
+		}
+		if got := middleCell.String(); got != want || rowIndex != 2 {
+			test.Errorf("width %d: rows lost content or alignment: %q", width, plain)
+		}
+	}
+}
+
+func TestRenderMarkdownTableInContext(test *testing.T) {
+	markdown := "Introduction.\n\n> | First |\n> | --- |\n> | `&lt;\\.\\\\foo` |\n\nMiddle.\n\n| Second |\n| --- |\n| prose \\| pipe |\n\nConclusion."
+	plain := ansi.Strip(renderMarkdown(markdown, 40))
+	for _, want := range []string{"Introduction.", "| First", `| &lt;\.\\foo`, "Middle.", "Second", "prose | pipe", "Conclusion."} {
+		_, after, found := strings.Cut(plain, want)
+		if !found {
+			test.Fatalf("missing or out-of-order %q in %q", want, plain)
+		}
+		plain = after
+	}
+}
+
 func TestRenderMarkdownTerminalSafety(test *testing.T) {
 	markdown := "**Safe**\x1b[2J\x1b]52;c;c2VjcmV0\a\n\n[Reference](https://example.invalid/evidence)\n\n![Diagram](https://example.invalid/image.png)\n\n&#27;]52;c;c2VjcmV0&#7;\n"
 	rendered := renderMarkdown(markdown, 100)

@@ -39,7 +39,9 @@ uses the terminal's default foreground/background and basic ANSI colors, without
 querying its background or loading external themes. Section and subsection headings
 are blue and bold; inline code stays cyan. Ordinary prose uses the terminal's
 default color, and bold emphasis in prose is not promoted to a blue heading.
-The shared Markdown renderer applies this palette to project summaries as well.
+Tables use content-sized columns with whitespace between them and faint horizontal
+rules between rows. Long cells wrap rather than stretching short columns to fill
+the terminal. The shared Markdown renderer applies these styles to project summaries as well.
 
 Rendering follows `--color`: `auto` renders only on terminal stdout (except
 `TERM=dumb`), `never` keeps Markdown syntax, and `always` also styles redirected stdout
