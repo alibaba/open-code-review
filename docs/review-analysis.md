@@ -35,7 +35,12 @@ missing test logs alone do not make a change a merge blocker.
 
 On an interactive terminal, analysis headings, emphasis, inline code, lists and
 tables are rendered instead of displaying their Markdown delimiters. Prose wraps
-to the terminal width; no report-length limit or summarization is applied. Styling
+at the terminal width using the displayed text, so a character written as an
+HTML entity wraps like its literal equivalent. Explicit Markdown line breaks
+and separate paragraphs in a list item are retained. Inline code keeps its
+literal spaces; a token wider than the available line breaks between grapheme
+clusters, with continuation lines aligned under the list text. No report-length
+limit or summarization is applied. Styling
 uses the terminal's default foreground/background and basic ANSI colors, without
 querying its background or loading external themes. Section and subsection headings
 are blue and bold; inline code stays cyan. Ordinary prose uses the terminal's

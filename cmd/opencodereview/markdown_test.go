@@ -262,10 +262,88 @@ func TestWrapCJKPunctuationAndStyles(test *testing.T) {
 		{label + " " + joinedEmoji + ideograph + stop, label + " " + joinedEmoji + "\n" + ideograph + stop},
 		{label + " " + ideograph + "\ne\u0301", label + " " + ideograph + "\ne\u0301"},
 	} {
-		if got := wrapCJK(fixture.text, 8); got != fixture.want {
-			test.Errorf("wrapCJK(%q) = %q, want %q", fixture.text, got, fixture.want)
+		if got := (markdownInline{styled: fixture.text}).wrap(8); got != fixture.want {
+			test.Errorf("wrap(%q) = %q, want %q", fixture.text, got, fixture.want)
 		}
 	}
+}
+
+func TestMarkdownWrapBoundaries(test *testing.T) {
+	const han = "\u4e2d"
+	long := strings.Repeat(han, 20)
+	lines := func(markdown string, width int) []string {
+		result := strings.Split(ansi.Strip(renderMarkdown(markdown, width)), "\n")
+		for index := range result {
+			result[index] = strings.TrimRight(result[index], " ")
+		}
+		return result
+	}
+	test.Run("hard versus soft breaks", func(test *testing.T) {
+		for _, width := range []int{20, 80} {
+			for _, separator := range []string{"  \n", "\\\n"} {
+				if got := lines("Result:"+separator+long, width); got[0] != "Result:" || !strings.HasPrefix(got[1], han) {
+					test.Errorf("lost hard break at %d: %q", width, got)
+				}
+			}
+			if got := lines("Result:\n"+long, width); !strings.HasPrefix(got[0], "Result: "+han) {
+				test.Errorf("unexpected soft break: %q", got)
+			}
+		}
+	})
+	test.Run("loose list paragraphs", func(test *testing.T) {
+		for _, width := range []int{20, 80} {
+			markdown := "- " + long + "A\n\n  B" + long
+			got := strings.Join(lines(markdown, width), "\n")
+			if !strings.Contains(got, "A\n\n  B") {
+				test.Errorf("paragraphs in a list item must be separated and aligned: %q", got)
+			}
+		}
+	})
+	test.Run("long list token", func(test *testing.T) {
+		const identifier = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn"
+		const cluster = "\U0001f469\u200d\U0001f4bb"
+		for _, token := range []string{identifier, strings.Repeat("a\u0301", 39) + cluster} {
+			got := lines("- "+han+" `"+token+"` "+han, 20)
+			body := strings.Split(strings.Trim(strings.Join(got, "\n"), "\n"), "\n")
+			for _, line := range body[1:] {
+				if !strings.HasPrefix(line, "  ") || ansi.StringWidth(line) > 20 || strings.HasPrefix(strings.TrimSpace(line), "\u0301") {
+					test.Errorf("invalid list continuation: %q in %q", line, body)
+				}
+			}
+			if !strings.Contains(strings.Join(strings.Fields(strings.Join(body, "")), ""), token) {
+				test.Errorf("changed token: %q", body)
+			}
+		}
+	})
+	test.Run("code argument spaces", func(test *testing.T) {
+		for _, format := range []string{"Result: %s `%s`", "Result: %s **`%s`**", "| Value |\n| --- |\n| Result: %s `%s` |"} {
+			for _, spaces := range []string{" ", "    "} {
+				command := `cmd "a` + spaces + `b"`
+				output := ansi.Strip(renderMarkdown(fmt.Sprintf(format, long+long, command), 32))
+				if !strings.Contains(output, command) {
+					test.Errorf("lost code boundaries for %q: %q", command, output)
+				}
+			}
+		}
+		command := `cmd "alpha    beta"`
+		codeStyle := regexp.MustCompile(`\x1b\[36m([^\x1b]*)\x1b\[(?:0)?m`)
+		for width := 8; width <= 20; width++ {
+			var recovered strings.Builder
+			for _, match := range codeStyle.FindAllStringSubmatch(renderMarkdown(han+" `"+command+"`", width), -1) {
+				recovered.WriteString(match[1])
+			}
+			if recovered.String() != command {
+				test.Errorf("width %d: styled code lost literal content: %q", width, recovered.String())
+			}
+		}
+	})
+	test.Run("decoded CJK", func(test *testing.T) {
+		const prefix = "`ocr review --analysis` "
+		want := renderMarkdown(prefix+long, 32)
+		if got := renderMarkdown(prefix+strings.Repeat("&#x4E2D;", 20), 32); got != want {
+			test.Errorf("equivalent visible text wrapped differently: %q versus %q", got, want)
+		}
+	})
 }
 
 func TestRenderMarkdownNarrowTables(test *testing.T) {

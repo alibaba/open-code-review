@@ -16,20 +16,15 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
-func layoutMarkdownBlocks(document ast.Node, source []byte, terminal *glamouransi.ANSIRenderer, options glamouransi.Options) ([]byte, error) {
+func layoutMarkdownBlocks(document ast.Node, source []byte, options glamouransi.Options) ([]byte, error) {
 	var blocks []ast.Node
 	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
 			return ast.WalkContinue, nil
 		}
 		switch node.Kind() {
-		case extensionast.KindTable:
+		case extensionast.KindTable, ast.KindParagraph, ast.KindTextBlock:
 			blocks = append(blocks, node)
-			return ast.WalkSkipChildren, nil
-		case ast.KindParagraph, ast.KindTextBlock:
-			if hasCJK(string(node.Lines().Value(source))) {
-				blocks = append(blocks, node)
-			}
 			return ast.WalkSkipChildren, nil
 		}
 		return ast.WalkContinue, nil
@@ -37,6 +32,9 @@ func layoutMarkdownBlocks(document ast.Node, source []byte, terminal *glamourans
 	if len(blocks) == 0 {
 		return source, nil
 	}
+	options.Styles.Code.Prefix = codeSpanBoundary + options.Styles.Code.Prefix
+	options.Styles.Code.Suffix += codeSpanBoundary
+	terminal := glamouransi.NewRenderer(options)
 	context := glamouransi.NewRenderContext(options)
 	for _, node := range blocks {
 		width := markdownBlockWidth(node, options)
@@ -69,28 +67,32 @@ func layoutMarkdownBlocks(document ast.Node, source []byte, terminal *glamourans
 	return source, nil
 }
 
-func renderMarkdownInlines(node ast.Node, source []byte, terminal *glamouransi.ANSIRenderer, context glamouransi.RenderContext) (string, error) {
+func renderMarkdownInlines(node ast.Node, source []byte, terminal *glamouransi.ANSIRenderer, context glamouransi.RenderContext) (markdownInline, error) {
 	var content strings.Builder
 	for inline := node.FirstChild(); inline != nil; inline = inline.NextSibling() {
 		if element := terminal.NewElement(inline, source).Renderer; element != nil {
 			if err := element.Render(&content, context); err != nil {
-				return "", err
+				return markdownInline{}, err
 			}
 		}
 	}
-	return content.String(), nil
+	marked := content.String()
+	if node.Kind() == extensionast.KindTableCell {
+		marked = strings.ReplaceAll(marked, "\t", "    ")
+	}
+	return parseMarkdownInline(marked), nil
 }
 
-func markdownTableRows(table *extensionast.Table, source []byte, terminal *glamouransi.ANSIRenderer, context glamouransi.RenderContext) ([][]string, error) {
-	var rows [][]string
+func markdownTableRows(table *extensionast.Table, source []byte, terminal *glamouransi.ANSIRenderer, context glamouransi.RenderContext) ([][]markdownInline, error) {
+	var rows [][]markdownInline
 	for row := table.FirstChild(); row != nil; row = row.NextSibling() {
-		var cells []string
+		var cells []markdownInline
 		for cell := row.FirstChild(); cell != nil; cell = cell.NextSibling() {
 			content, err := renderMarkdownInlines(cell, source, terminal, context)
 			if err != nil {
 				return nil, err
 			}
-			cells = append(cells, strings.ReplaceAll(content, "\t", "    "))
+			cells = append(cells, content)
 		}
 		rows = append(rows, cells)
 	}
@@ -117,11 +119,11 @@ func markdownBlockWidth(node ast.Node, options glamouransi.Options) int {
 
 const tableGutter = "  "
 
-func tableColumnWidths(rows [][]string, width int) []int {
+func tableColumnWidths(rows [][]markdownInline, width int) []int {
 	widths := make([]int, len(rows[0]))
 	for _, row := range rows {
 		for column, cell := range row {
-			widths[column] = max(widths[column], lipgloss.Width(cell), 1)
+			widths[column] = max(widths[column], lipgloss.Width(cell.styled), 1)
 		}
 	}
 	available := width - (len(widths)-1)*len(tableGutter)
@@ -141,7 +143,7 @@ func tableColumnWidths(rows [][]string, width int) []int {
 	return widths
 }
 
-func layoutMarkdownTable(rows [][]string, alignments []extensionast.Alignment, width int) string {
+func layoutMarkdownTable(rows [][]markdownInline, alignments []extensionast.Alignment, width int) string {
 	widths := tableColumnWidths(rows, width)
 	var rule string
 	if widths == nil {
@@ -170,7 +172,7 @@ func layoutMarkdownTable(rows [][]string, alignments []extensionast.Alignment, w
 					cells = append(cells, tableGutter)
 				}
 			}
-			cells = append(cells, style.Render(wrapCJK(cell, style.GetWidth())))
+			cells = append(cells, style.Render(cell.wrap(style.GetWidth())))
 		}
 		if widths == nil {
 			lines = append(lines, strings.Join(cells, "\n"))

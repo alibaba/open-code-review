@@ -61,7 +61,7 @@ func renderMarkdown(markdown string, width int) string {
 		goldmark.WithExtensions(extension.GFM, extension.DefinitionList),
 		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 	)
-	options := glamouransi.Options{Styles: style, WordWrap: width, InlineTableLinks: true}
+	options := glamouransi.Options{Styles: style, WordWrap: width, InlineTableLinks: true, PreserveNewLines: true}
 	terminal := glamouransi.NewRenderer(options)
 	markdownRenderer := renderer.NewRenderer(renderer.WithNodeRenderers(util.Prioritized(terminal, 1000)))
 	source := []byte(markdown)
@@ -69,7 +69,8 @@ func renderMarkdown(markdown string, width int) string {
 	escapeCodeSpanEntities(document, source)
 	source = escapeCodeBlockBackslashes(document, source)
 	source = sanitizeMarkdownText(document, source)
-	source, err := layoutMarkdownBlocks(document, source, terminal, options)
+	source = normalizeMarkdownLineBreaks(document, source)
+	source, err := layoutMarkdownBlocks(document, source, options)
 	if err != nil {
 		return markdown
 	}
@@ -78,6 +79,27 @@ func renderMarkdown(markdown string, width int) string {
 		return markdown
 	}
 	return strings.TrimRight(sanitizeRenderedMarkdown(rendered.String()), "\n")
+}
+
+func normalizeMarkdownLineBreaks(document ast.Node, source []byte) []byte {
+	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		inline, ok := node.(*ast.Text)
+		if !entering || !ok || (!inline.SoftLineBreak() && !inline.HardLineBreak()) {
+			return ast.WalkContinue, nil
+		}
+		start := len(source)
+		source = append(source, inline.Value(source)...)
+		if inline.HardLineBreak() {
+			source = append(source, '\n')
+		} else {
+			source = append(source, ' ')
+		}
+		inline.Segment = text.NewSegment(start, len(source))
+		inline.SetSoftLineBreak(false)
+		inline.SetHardLineBreak(false)
+		return ast.WalkContinue, nil
+	})
+	return source
 }
 
 func sanitizeMarkdownText(document ast.Node, source []byte) []byte {
@@ -155,6 +177,7 @@ func escapeCodeSpanEntities(document ast.Node, source []byte) {
 			next := child.NextSibling()
 			literal := child.(*ast.Text).Value(source)
 			escaped := bytes.ReplaceAll(literal, []byte("&"), []byte("&amp;"))
+			escaped = bytes.ReplaceAll(escaped, []byte("\n"), []byte(" "))
 			node.ReplaceChild(node, child, ast.NewString(escaped))
 			child = next
 		}

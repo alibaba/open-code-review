@@ -5,7 +5,6 @@ package main
 
 import (
 	"strings"
-	"unicode"
 
 	glamouransi "charm.land/glamour/v2/ansi"
 	"github.com/charmbracelet/x/ansi"
@@ -19,23 +18,24 @@ func layoutMarkdownProse(node ast.Node, source []byte, terminal *glamouransi.ANS
 		return "", err
 	}
 	listItem := node.Parent().Kind() == ast.KindListItem
-	if !listItem {
-		inline = strings.ReplaceAll(inline, "\n", " ")
-	}
 	var indent string
-	if listItem && node.PreviousSibling() == nil {
+	if listItem {
 		var marker strings.Builder
 		if err := terminal.NewElement(node.Parent(), source).Renderer.Render(&marker, context); err != nil {
 			return "", err
 		}
 		indent = strings.Repeat(" ", ansi.StringWidth(marker.String()))
 	}
-	layout := wrapCJK(inline, max(1, width-len(indent)))
-	if layout == inline {
-		return "", nil
-	}
+	layout := inline.wrap(max(1, width-len(indent)))
 	if listItem {
-		return strings.ReplaceAll(layout, "\n", "\n"+indent), nil
+		layout = strings.ReplaceAll(layout, "\n", "\n"+indent)
+		if node.Kind() == ast.KindParagraph && node.PreviousSibling() != nil {
+			layout = "\n\n" + indent + layout
+		}
+		return layout, nil
+	}
+	if layout == inline.styled {
+		return "", nil
 	}
 	if node.PreviousSibling() != nil {
 		layout = "\n" + layout
@@ -43,54 +43,110 @@ func layoutMarkdownProse(node ast.Node, source []byte, terminal *glamouransi.ANS
 	return layout + "\n", nil
 }
 
-func hasCJK(value string) bool {
-	return strings.ContainsFunc(value, func(char rune) bool {
-		return char >= 0x1100 && unicode.In(char, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul)
-	})
+const codeSpanBoundary = "\x00"
+
+type byteRange struct{ start, end int }
+
+type markdownInline struct {
+	styled string
+	code   []byteRange
 }
 
-func wrapCJK(styled string, width int) string {
-	if !hasCJK(styled) || ansi.StringWidth(styled) <= width {
-		return styled
+func parseMarkdownInline(marked string) markdownInline {
+	if !strings.Contains(marked, codeSpanBoundary) {
+		return markdownInline{styled: marked}
 	}
-	plain := ansi.Strip(styled)
-	var wrapped strings.Builder
-	var start, cursor, column, segmentStart int
+	var inline markdownInline
+	var styled strings.Builder
+	var offset int
+	var literal bool
+	for part := range strings.SplitSeq(marked, codeSpanBoundary) {
+		end := offset + len(ansi.Strip(part))
+		if literal {
+			inline.code = append(inline.code, byteRange{offset, end})
+		}
+		styled.WriteString(part)
+		offset, literal = end, !literal
+	}
+	inline.styled = styled.String()
+	return inline
+}
+
+func (inline markdownInline) wrap(width int) string {
+	if ansi.StringWidth(inline.styled) <= width {
+		return inline.styled
+	}
+	plain := ansi.Strip(inline.styled)
+	var breaks []byteRange
+	var column, segmentStart, pendingSpaces, protectedEnd int
+	code := inline.code
 	clusters := uniseg.NewGraphemes(plain)
 	for clusters.Next() {
-		if clusters.LineBreak() == uniseg.LineDontBreak {
+		_, end := clusters.Positions()
+		for len(code) > 0 && code[0].end <= end {
+			protectedEnd, code = code[0].end, code[1:]
+		}
+		if clusters.LineBreak() == uniseg.LineDontBreak || (len(code) > 0 && code[0].start < end) {
 			continue
 		}
-		_, end := clusters.Positions()
-		segment := plain[segmentStart:end]
-		segmentStart = end
-		visible := ansi.StringWidth(segment)
-		spaces := len(segment) - len(strings.TrimRight(segment, " "))
-		if column > 0 && column+visible-spaces > width {
-			wrapped.WriteString(strings.TrimRight(styled[start:cursor], " "))
-			wrapped.WriteByte('\n')
-			start, column = cursor, 0
+		segment := strings.TrimSuffix(plain[segmentStart:end], "\n")
+		wordEnd := max(min(protectedEnd-segmentStart, len(segment)), len(strings.TrimRight(segment, " ")))
+		word := segment[:wordEnd]
+		visible := ansi.StringWidth(word)
+		if column > 0 && column+pendingSpaces+visible > width {
+			breaks = append(breaks, byteRange{segmentStart - pendingSpaces, segmentStart})
+			column, pendingSpaces = 0, 0
 		}
-		for remaining := len(segment); remaining > 0; {
-			if cursor >= len(styled) {
-				return styled
+		column += pendingSpaces
+		if visible > width {
+			letters := uniseg.NewGraphemes(word)
+			for letters.Next() {
+				size := ansi.StringWidth(letters.Str())
+				if column > 0 && column+size > width {
+					start, _ := letters.Positions()
+					offset := segmentStart + start
+					breaks = append(breaks, byteRange{offset, offset})
+					column = 0
+				}
+				column += size
 			}
-			if styled[cursor] == '\x1b' {
-				_, _, length, _ := ansi.DecodeSequence(styled[cursor:], 0, nil)
-				cursor += length
-			} else {
-				cursor++
-				remaining--
-			}
+		} else {
+			column += visible
 		}
-		column += visible
+		pendingSpaces, segmentStart = len(segment)-wordEnd, end
 		if clusters.LineBreak() == uniseg.LineMustBreak {
-			column = 0
+			column, pendingSpaces = 0, 0
 		}
 	}
-	if start == 0 {
+	return applyMarkdownBreaks(inline.styled, breaks)
+}
+
+func applyMarkdownBreaks(styled string, breaks []byteRange) string {
+	if len(breaks) == 0 {
 		return styled
 	}
-	wrapped.WriteString(styled[start:])
+	var wrapped strings.Builder
+	var offset int
+	remaining := styled
+	for _, gap := range breaks {
+		for offset < gap.end {
+			if len(remaining) == 0 {
+				return styled
+			}
+			if remaining[0] == '\x1b' {
+				seq, _, size, _ := ansi.DecodeSequence(remaining, 0, nil)
+				wrapped.WriteString(seq)
+				remaining = remaining[size:]
+				continue
+			}
+			if offset < gap.start {
+				wrapped.WriteByte(remaining[0])
+			}
+			remaining = remaining[1:]
+			offset++
+		}
+		wrapped.WriteByte('\n')
+	}
+	wrapped.WriteString(remaining)
 	return wrapped.String()
 }
