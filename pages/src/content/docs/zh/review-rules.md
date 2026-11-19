@@ -121,6 +121,71 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 > 模式匹配**不区分大小写**（匹配前文件路径会被小写化）。不确定时用
 > `ocr rules check <path>` 确认。
 
+## 结合规格与需求进行评审
+
+把相关验收标准提供给 OCR，让它在检查代码缺陷的同时核对业务行为。针对单次变更，
+可以先保存一份精简的本地 Markdown 文件，例如 `docs/requirements/checkout.md`：
+
+```markdown
+# Checkout requirements
+
+Scope: src/checkout/**
+Review changes against these criteria and cite the requirement ID in findings.
+
+- PAY-1: Reject checkout when the cart is empty.
+- PAY-2: Calculate the total on the server; never trust a client-supplied total.
+- PAY-3: A repeated idempotency key must not create a second charge.
+
+Out of scope: refunds and subscription billing.
+```
+
+配置好 OCR 并确保本地存在 `main` 分支后，在仓库根目录运行：
+
+```bash
+ocr review --from main --to HEAD --background-file docs/requirements/checkout.md
+```
+
+`--background-file` 为整个评审提供上下文。相对路径以**仓库根目录**为基准，
+即使你在子目录中运行 OCR 也是如此；也可以使用绝对路径。如果同时传入 `--background`，
+文件内容优先，内联文本会被忽略。请保持内容精简：清理后的内容超过 2,000 个字符时
+会收到警告，超过 8,000 个字符则会被拒绝。输入文件不能超过 1 MiB，且清理后不能为空。
+
+若某项需求应在每次评审某个目录时生效，可以在仓库的 `.opencodereview/rule.json`
+中添加针对该路径的条目：
+
+```json
+{
+  "rules": [
+    {
+      "path": "src/checkout/**",
+      "rule": "docs/requirements/checkout.md",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+这里的 `rule` 是文件引用：OCR 会读取 Markdown 内容，将其作为匹配文件的规则文本。
+项目规则中的引用以**仓库根目录**为基准，且必须位于仓库内；自定义 `--rule` 文件和
+全局 `rule.json` 中的引用则以 **JSON 文件所在目录**为基准。引用值应是一个不含空格、
+以 `.md`、`.txt` 或 `.markdown` 结尾的独立路径；被引用的规则文件不能超过 512 KiB。
+`merge_system_rule: true` 会在加入需求的同时保留内置语言规则。请把具体条目放在
+更宽泛的模式之前：按层优先级和声明顺序找到的第一个匹配条目生效，用户条目之间不会合并。
+
+评审前先检查实际生效的规则：
+
+```bash
+ocr rules check src/checkout/handler.go
+```
+
+确认输出包含项目模式、需求文本和内置规则。此命令检查的是规则解析结果，
+并不验证实现是否满足验收标准。单次变更的上下文适合用 background 提供，
+长期约束适合用路径规则提供；无需通过两种方式重复传入同一份文档。
+
+对于内部知识库，请将相关需求、约束和验收标准导出为精简的本地 Markdown 文件，
+再通过上述任一方式提供。仅在 background 或规则正文中提到文件名或附上远程链接，
+不会自动加载该文档或继续读取其中的链接。请提供实际标准，并结合规格与测试核实评审发现。
+
 ## 文件如何被过滤
 
 过滤是一个六重门算法，位于

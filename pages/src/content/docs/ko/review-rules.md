@@ -129,6 +129,74 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 > 패턴은 **대소문자를 가리지 않고** 대조합니다(파일 경로를 소문자로 바꾼 뒤
 > 맞춥니다). 헷갈리면 `ocr rules check <path>`로 확인하세요.
 
+## 명세와 요구사항에 따른 리뷰
+
+관련 인수 기준을 OCR에 전달하면 코드 결함과 함께 비즈니스 동작도 검토할 수 있습니다.
+특정 변경을 리뷰하려면 `docs/requirements/checkout.md`처럼 간결한 로컬 Markdown 파일을 작성하세요.
+
+```markdown
+# Checkout requirements
+
+Scope: src/checkout/**
+Review changes against these criteria and cite the requirement ID in findings.
+
+- PAY-1: Reject checkout when the cart is empty.
+- PAY-2: Calculate the total on the server; never trust a client-supplied total.
+- PAY-3: A repeated idempotency key must not create a second charge.
+
+Out of scope: refunds and subscription billing.
+```
+
+OCR 설정을 마치고 로컬에 `main`이 있는 상태에서 저장소 루트에서 실행합니다.
+
+```bash
+ocr review --from main --to HEAD --background-file docs/requirements/checkout.md
+```
+
+`--background-file`은 리뷰 전체에 맥락을 제공합니다. 상대 경로는 **저장소 루트**를 기준으로
+해석하며, 하위 디렉터리에서 OCR을 실행해도 같습니다. 절대 경로도 사용할 수 있습니다.
+`--background`도 지정하면 파일 내용이 우선하고 인라인 텍스트는 무시됩니다. 내용은 간결하게
+유지하세요. 정리한 뒤의 내용이 2,000자를 넘으면 경고하고, 8,000자를 넘으면 거부합니다.
+입력 파일은 1 MiB 이하여야 하며 정리 후에도 비어 있으면 안 됩니다.
+
+특정 디렉터리를 리뷰할 때마다 적용할 요구사항은 저장소의 `.opencodereview/rule.json`에
+경로별 항목으로 추가합니다.
+
+```json
+{
+  "rules": [
+    {
+      "path": "src/checkout/**",
+      "rule": "docs/requirements/checkout.md",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+여기서 `rule`은 파일 참조입니다. OCR은 Markdown 내용을 읽어 일치하는 파일의 규칙 본문으로
+사용합니다. 프로젝트 규칙의 참조는 **저장소 루트**를 기준으로 해석하며 저장소 안에 있어야
+합니다. 사용자 지정 `--rule` 파일과 전역 `rule.json`의 참조는 **JSON 파일이 있는 디렉터리**를
+기준으로 합니다. 참조 값에는 공백 없이 `.md`, `.txt`, `.markdown` 중 하나로 끝나는 경로만
+지정하세요. 참조하는 규칙 파일의 크기는 512 KiB 이하여야 합니다. `merge_system_rule: true`는
+요구사항과 함께 내장 언어 규칙도 유지합니다. 구체적인 항목을 더 넓은 패턴보다 앞에 두세요.
+우선순위가 높은 계층부터 선언 순서대로 확인해 처음 일치한 항목을 적용하며, 사용자 항목끼리는 합치지 않습니다.
+
+리뷰하기 전에 실제 적용되는 규칙을 확인합니다.
+
+```bash
+ocr rules check src/checkout/handler.go
+```
+
+프로젝트 패턴, 요구사항 본문, 내장 규칙이 출력되는지 확인하세요. 이 명령은 규칙 해석 결과를
+확인하며, 구현이 인수 기준을 만족하는지 검증하지는 않습니다. 변경별 맥락에는 background를,
+지속적인 제약에는 경로별 규칙을 사용하세요. 같은 문서를 두 방식으로 중복 전달할 필요는 없습니다.
+
+내부 지식 베이스를 활용하려면 관련 요구사항, 제약, 인수 기준을 간결한 로컬 Markdown 파일로
+내보내고 위 방법 중 하나로 전달하세요. background나 규칙 본문에 파일 이름이나 원격 링크만
+적는다고 문서나 그 안의 링크를 자동으로 불러오지는 않습니다. 실제 기준을 포함하고,
+리뷰에서 발견한 문제를 명세와 테스트에 대조해 확인하세요.
+
 ## 파일을 걸러내는 방식 {#how-files-are-filtered}
 
 필터는
