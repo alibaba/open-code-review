@@ -69,6 +69,13 @@ main() {
   got="$(sha256 "$tmp/$asset" | awk '{print tolower($1)}')"
   [ "$got" = "$want" ] || err "checksum mismatch for $asset (got $got, want $want)"
 
+  if [ "$os" = "darwin" ]; then
+    printf 'note: release binaries are not signed with an Apple Developer ID\n' >&2
+    if xattr -p com.apple.quarantine "$tmp/$asset" >/dev/null 2>&1; then
+      xattr -d com.apple.quarantine "$tmp/$asset" || err "failed to clear quarantine on $asset"
+    fi
+  fi
+
   install_binary "$tmp/$asset" "$INSTALL_DIR" "$BIN"
 
   printf 'installed %s %s -> %s\n' "$BIN" "$VERSION" "$INSTALL_DIR/$BIN"
