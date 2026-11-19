@@ -273,6 +273,8 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/build.gradle`                               | `build_gradle.md`——Gradle 依赖。                                      |
 | `**/package.json`                               | `package_json.md`——NPM 依赖 / 脚本。                                  |
 | `**/Cargo.toml`                                 | `cargo_toml.md`——Rust manifest。                                      |
+| `**/Move.toml` | `move_toml.md`——Move package manifest。 |
+| `**/*.move` | `move.md`——Move 源代码。 |
 | `**/composer.json`                              | `composer_json.md`——Composer 依赖、自动加载、脚本、插件和包配置。     |
 | `**/*.{json,json5,jsonc}`                       | `json.md`——通用 JSON（也匹配 `.json5` 和 `.jsonc`）。 |
 | `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md`——GitHub Actions 工作流 YAML。                   |
@@ -295,10 +297,12 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md`——F# 实现、签名和脚本文件。                                |
 | `**/*.cs`                                       | `csharp.md`——C# 源文件。 |
 | `**/*.rs`                                       | `rust.md`                                                             |
-| `**/*.R`                                        | `r.md`                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                              |
 | `**/*.c`                                        | `c.md`                                                                |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md`——CUDA 内核与头文件。                                    |
+| `**/*.hip`                                      | `cuda_hip.md`——HIP（AMD ROCm）内核。                                  |
 | `**/*.{py,pyi,ipynb}`                           | `python.md`——Python 源代码。                                          |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md`——Ruby 源文件、Rake 任务、gemspec、Gemfile 和 Rakefile。 |
 | `**/*.{php,phtml}`                              | `php.md`——PHP 源代码和 PHP 模板。                                     |
 | `**/*.proto`                                    | `protobuf.md`——Protocol Buffers 线协议兼容性。                        |
 | `**/*.po`                                       | `po.md`——gettext 翻译源目录。                                         |
@@ -306,8 +310,10 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{graphql,gql}`                            | `graphql.md`——GraphQL schema 与操作。                                 |
 | `**/*.prisma`                                   | `prisma.md`——Prisma schema。                                          |
 | `**/*.jl`                                       | `julia.md`——Julia 源代码。                                            |
+| `**/*.R`                                        | `r.md`                                                                |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md`——Terraform / HCL。                                     |
 | `**/*.bicep`                                    | `bicep.md`——Bicep（Azure）模板。                                      |
+| `**/*.dhall` | `dhall.md`——Dhall 配置语言。 |
 | `**/*.nix`                          | `nix.md`——Nix 表达式与 flake。                                         |
 | `**/*.{hs,lhs}`                     | `haskell.md`——Haskell 源代码。                                        |
 | `**/*.{nim,nims,nimble}`            | `nim.md`——Nim 源代码与包清单。                                            |
@@ -321,7 +327,6 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.capnp`                                    | `capnp.md`——Cap'n Proto schema 线协议兼容性。                         |
 | `**/*.{ml,mli}`                     | `ocaml.md`——OCaml 源代码。                                            |
 | `**/*.{re,rei}`                     | `ocaml.md`——ReasonML 源代码。                                         |
-| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - GLSL、HLSL、WGSL、Metal 着色器。                        |
 | `**/*.{v,sv,vh}`                                | `verilog.md`——Verilog 与 SystemVerilog RTL。                          |
 | `**/*.{vhd,vhdl}`                               | `vhdl.md`——VHDL RTL。                                                 |
 | `**/*.m`                                        | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
@@ -329,8 +334,10 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.sol`                                      | `solidity.md`——Solidity 智能合约。                                    |
 | `**/*.vy`                                       | `vyper.md`——Vyper 智能合约。                                          |
 | `**/*.rego`                                     | `rego.md`——Rego 策略（OPA）。                                         |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - GLSL、HLSL、WGSL、Metal 着色器。                        |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md`——PowerShell 脚本、模块和数据/清单文件。               |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md`——Clojure / ClojureScript 源代码和 EDN 数据。 |
+| `**/*.sql`                                      | `sql.md`——SQL 迁移与查询。 |
 | _(fallback)_                                    | `default.md`                                                          |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。

@@ -476,10 +476,11 @@ func dictKV(keysAndValues ...any) (map[string]any, error) {
 }
 
 func truncateText(n int, s string) string {
-	if len(s) <= n {
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return string(runes[:n]) + "…"
 }
 
 func renderTemplate(w http.ResponseWriter, name string, data any) {

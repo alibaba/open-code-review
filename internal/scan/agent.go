@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
 	"github.com/alibaba/open-code-review/internal/config/rules"
@@ -363,7 +364,6 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	scanSpan.End()
 
 	a.items = items
-	a.injectScanContentMap()
 	a.args.Tools.Freeze()
 
 	totalDiscovered := len(a.items)
@@ -446,25 +446,6 @@ func (a *Agent) lookupDiff(path string) *model.Diff {
 		}
 	}
 	return nil
-}
-
-// injectScanContentMap fills the file_read_diff tool's DiffMap with full
-// file content keyed by path, so if the model calls it the tool returns
-// the whole file rather than failing.
-func (a *Agent) injectScanContentMap() {
-	m := make(map[string]string, len(a.items))
-	for i := range a.items {
-		it := &a.items[i]
-		if it.Path != "" {
-			m[it.Path] = it.Content
-		}
-	}
-	dm := tool.NewDiffMap(m)
-	if p, ok := a.args.Tools.Get(tool.FileReadDiff.Name()); ok {
-		if frd, ok := p.(*tool.FileReadDiffProvider); ok {
-			frd.SetDiffMap(dm)
-		}
-	}
 }
 
 type scanSelection struct {
@@ -1025,7 +1006,13 @@ func buildSummaryCommentsList(comments []model.LlmComment) string {
 		sb.WriteString("`: ")
 		oneLine := strings.ReplaceAll(c.Content, "\n", " ")
 		if len(oneLine) > maxLine {
-			oneLine = oneLine[:maxLine] + "..."
+			// Back up to a rune start so a multi-byte character (CJK review
+			// comments are common) is not split into invalid UTF-8.
+			cut := maxLine
+			for cut > 0 && !utf8.RuneStart(oneLine[cut]) {
+				cut--
+			}
+			oneLine = oneLine[:cut] + "..."
 		}
 		sb.WriteString(oneLine)
 		sb.WriteString("\n")

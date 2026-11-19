@@ -331,8 +331,8 @@ func TestRunCompression_EmptyTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 2 {
-		t.Errorf("expected 2 (frozen only), got %d", len(got))
+	if len(got) != len(msgs) {
+		t.Errorf("expected unchanged history, got %d messages", len(got))
 	}
 }
 

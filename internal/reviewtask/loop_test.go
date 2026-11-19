@@ -98,10 +98,14 @@ func newTestDeps(client llm.LLMClient) Deps {
 	reg := tool.NewRegistry()
 	reg.Register(&fakeFileReadProvider{result: "package main\n"})
 	return Deps{
-		LLMClient:        client,
-		Model:            "fake",
-		Template:         template.Template{MaxTokens: 100000, MaxToolRequestTimes: 10},
-		Tools:            reg,
+		LLMClient: client,
+		Model:     "fake",
+		Template:  template.Template{MaxTokens: 100000, MaxToolRequestTimes: 10},
+		Tools:     reg,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
 		CommentCollector: tool.NewCommentCollector(),
 		Session:          session.New("/tmp/test-repo", "main", "fake", session.SessionOptions{}),
 	}
@@ -428,8 +432,8 @@ func TestRunMainTask_UncompressibleContextStopsWithCompression(t *testing.T) {
 	if stop != StopCompression {
 		t.Fatalf("stop = %v, want StopCompression", stop)
 	}
-	if client.calls != 2 {
-		t.Fatalf("LLM calls = %d, want one main call and one compression call", client.calls)
+	if client.calls != 1 {
+		t.Fatalf("LLM calls = %d, want one main call without an unusable compression request", client.calls)
 	}
 }
 
@@ -1033,6 +1037,7 @@ func TestRunMainTask_GraceRoundNotTriggeredOnEmptyRoundsStop(t *testing.T) {
 		Tools:            reg,
 		CommentCollector: tool.NewCommentCollector(),
 		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
 			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
 			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
 		},

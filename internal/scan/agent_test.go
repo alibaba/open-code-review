@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -165,6 +166,22 @@ func TestBuildSummaryCommentsList_TruncatesAndOneLines(t *testing.T) {
 		if len(line) > 320 { // 280 content + small path/prefix overhead
 			t.Errorf("line not capped: len=%d %q", len(line), line)
 		}
+	}
+}
+
+func TestBuildSummaryCommentsList_TruncatesOnRuneBoundary(t *testing.T) {
+	// U+7A7A is three bytes in UTF-8, so 280 bytes ends one byte into the
+	// 94th rune.
+	const wide = "\u7a7a"
+	cs := []model.LlmComment{{Path: "a.go", Content: strings.Repeat(wide, 200)}}
+	got := buildSummaryCommentsList(cs)
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("summary list is not valid UTF-8: %q", got)
+	}
+	want := "- `a.go`: " + strings.Repeat(wide, 93) + "...\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
@@ -351,33 +368,6 @@ func selectScanItemsForTest(t *testing.T, a *Agent, items []model.ScanItem) []mo
 	return selectedScanItems(a.selectScanItems(items))
 }
 
-func TestInjectScanContentMap(t *testing.T) {
-	tpl := makeTemplateWithFullScan()
-	a := newAgentForTest(t, tpl)
-	a.args.Tools.Register(tool.NewFileReadDiff(tool.DiffMap{}))
-
-	a.items = []model.ScanItem{
-		{Path: "x.go", Content: "package x"},
-		{Path: "y.go", Content: "package y"},
-	}
-	a.injectScanContentMap()
-
-	p, ok := a.args.Tools.Get(tool.FileReadDiff.Name())
-	if !ok {
-		t.Fatal("file_read_diff not registered")
-	}
-	frd := p.(*tool.FileReadDiffProvider)
-	res, err := frd.Execute(t.Context(), map[string]any{
-		"path_array": []any{"x.go", "y.go", "missing.go"},
-	})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if !strings.Contains(res, "package x") || !strings.Contains(res, "package y") {
-		t.Errorf("missing scan content:\n%s", res)
-	}
-}
-
 func TestNewAgent_SetsSessionMode(t *testing.T) {
 	a := NewAgent(Args{Template: makeTemplateWithFullScan()})
 	if a.session.ReviewMode != session.ReviewModeFullScan {
@@ -439,8 +429,8 @@ func (c *blockingScanCompressionClient) CompletionsWithCtx(ctx context.Context, 
 	r := c.round
 	c.mu.Unlock()
 
-	if r == 1 {
-		content := strings.Repeat("word ", 650)
+	if r <= 2 {
+		content := strings.Repeat("word ", 325)
 		return &llm.ChatResponse{
 			Choices: []llm.Choice{{
 				Message: llm.ResponseMessage{
@@ -459,7 +449,7 @@ func (c *blockingScanCompressionClient) CompletionsWithCtx(ctx context.Context, 
 		}, nil
 	}
 
-	// Round 2+: wait until the background compression goroutine has reached
+	// Round 3+: wait until the background compression goroutine has reached
 	// the mock (closed c.started) before returning task_done. This eliminates
 	// the race where the main loop finishes before compression starts,
 	// ensuring WaitBackground is the only thing holding Run open.

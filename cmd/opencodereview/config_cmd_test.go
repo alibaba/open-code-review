@@ -952,6 +952,59 @@ func TestSetMCPServerValue_ExistingServer(t *testing.T) {
 	}
 }
 
+func TestSetMCPServerValue_DottedServerName(t *testing.T) {
+	cfg := &Config{}
+	// The last dot separates the field, so a dotted server name is
+	// addressable the way dotted provider names are (#1661), and stays
+	// deletable through `config unset mcp_servers.<name>`.
+	if err := setMCPServerValue(cfg, "mcp_servers.github.v2.type", "stdio"); err != nil {
+		t.Fatalf("setMCPServerValue dotted name: %v", err)
+	}
+	if err := setMCPServerValue(cfg, "mcp_servers.github.v2.command", "npx"); err != nil {
+		t.Fatalf("setMCPServerValue dotted name field: %v", err)
+	}
+	entry, exists := cfg.MCPServers["github.v2"]
+	if !exists {
+		t.Fatalf("dotted server name not stored: %+v", cfg.MCPServers)
+	}
+	if entry.Type != "stdio" || entry.Command != "npx" {
+		t.Errorf("entry = %+v, want type stdio and command npx", entry)
+	}
+
+	// Dot-free names keep their previous meaning.
+	if err := setMCPServerValue(cfg, "mcp_servers.docs.command", "npx"); err != nil {
+		t.Fatalf("setMCPServerValue dot-free name: %v", err)
+	}
+	if _, exists := cfg.MCPServers["docs"]; !exists {
+		t.Fatalf("dot-free server name not stored: %+v", cfg.MCPServers)
+	}
+	if _, exists := cfg.MCPServers["github"]; exists {
+		t.Errorf("dotted name leaked a prefix entry: %+v", cfg.MCPServers)
+	}
+}
+
+func TestSetMCPServerValue_DottedServerNameRejectsEmptySegments(t *testing.T) {
+	cfg := &Config{
+		MCPServers: map[string]MCPServerConfig{
+			"keep": {Command: "cmd"},
+		},
+	}
+	for _, key := range []string{
+		"mcp_servers..command",
+		"mcp_servers.github..command",
+		"mcp_servers. .command",
+		"mcp_servers.type",
+		"mcp_servers.docs.",
+	} {
+		if err := setMCPServerValue(cfg, key, "val"); err == nil {
+			t.Errorf("key %q: expected error", key)
+		}
+	}
+	if len(cfg.MCPServers) != 1 || cfg.MCPServers["keep"].Command != "cmd" {
+		t.Fatalf("rejected writes mutated config: %+v", cfg.MCPServers)
+	}
+}
+
 func TestUnsetMCPServer(t *testing.T) {
 	dir := t.TempDir()
 	configPath := dir + "/config.json"
