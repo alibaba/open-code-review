@@ -1409,6 +1409,9 @@ func TestResolveEndpointWithModelOverride_AllBuiltInProvidersAcceptUnlistedModel
 	for _, provider := range ListProviders() {
 		t.Run(provider.Name, func(t *testing.T) {
 			entry := providerEntryConfig{APIKey: "test-key", AWSRegion: "us-west-2"}
+			if IsOAuthProtocol(provider.Protocol) {
+				entry = providerEntryConfig{}
+			}
 			var credentialCalls int
 			if provider.Name == "chatgpt" {
 				entry = providerEntryConfig{}
