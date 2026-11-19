@@ -615,6 +615,7 @@ func TestRunSessionCompare_TextShowsCounts(t *testing.T) {
 
 	for _, want := range []string{
 		"1 new, 1 persisting, 1 resolved",
+		"resolved on re-review: 1 of 2 (50%)",
 		"=== New (1) ===",
 		"=== Persisting (1) ===",
 		"=== Resolved (1) ===",
@@ -705,15 +706,19 @@ func TestRunSessionCompare_JSONShape(t *testing.T) {
 	})
 
 	var decoded struct {
-		Before      sessionCompareSide `json:"before"`
-		After       sessionCompareSide `json:"after"`
-		New         []model.LlmComment `json:"new"`
-		Persisting  []model.LlmComment `json:"persisting"`
-		Resolved    []model.LlmComment `json:"resolved"`
-		NotReviewed []model.LlmComment `json:"not_reviewed"`
+		Before       sessionCompareSide `json:"before"`
+		After        sessionCompareSide `json:"after"`
+		New          []model.LlmComment `json:"new"`
+		Persisting   []model.LlmComment `json:"persisting"`
+		Resolved     []model.LlmComment `json:"resolved"`
+		NotReviewed  []model.LlmComment `json:"not_reviewed"`
+		ResolvedRate *float64           `json:"resolved_rate"`
 	}
 	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
 		t.Fatalf("unmarshal: %v (out=%q)", err, out)
+	}
+	if decoded.ResolvedRate == nil || *decoded.ResolvedRate != 0.5 {
+		t.Fatalf("resolved_rate = %v, want 0.5", decoded.ResolvedRate)
 	}
 	if decoded.Before.SessionID != before.SessionID || decoded.After.SessionID != after.SessionID {
 		t.Fatalf("sides = %+v / %+v", decoded.Before, decoded.After)
@@ -807,6 +812,10 @@ func TestRunSessionCompare_JSONEmptyBucketsAreArrays(t *testing.T) {
 		if string(got) != "[]" {
 			t.Errorf("%s = %s, want []", bucket, got)
 		}
+	}
+	// Nothing was re-checked, so there is no rate rather than a misleading 0%.
+	if got := string(raw["resolved_rate"]); got != "null" {
+		t.Errorf("resolved_rate = %s, want null", got)
 	}
 }
 
@@ -924,6 +933,9 @@ func TestRunSessionCompare_SameSessionTwice(t *testing.T) {
 	if !strings.Contains(got, "0 new, 2 persisting, 0 resolved") {
 		t.Errorf("comparing a session with itself should be all persisting, got %q", got)
 	}
+	if !strings.Contains(got, "resolved on re-review: 0 of 2 (0%)") {
+		t.Errorf("expected a 0%% resolved rate, got %q", got)
+	}
 }
 
 func TestRunSessionCompare_UnreviewedFilesAreNotResolved(t *testing.T) {
@@ -959,6 +971,7 @@ func TestRunSessionCompare_UnreviewedFilesAreNotResolved(t *testing.T) {
 
 	for _, want := range []string{
 		"0 new, 0 persisting, 1 resolved",
+		"resolved on re-review: 1 of 1 (100%)",
 		"1 finding(s) in files the after session did not review (not counted as resolved)",
 		"=== Not reviewed (1) ===",
 		"untouched.go",

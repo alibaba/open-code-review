@@ -486,7 +486,7 @@ ocr session compare --json <before-session-id> <after-session-id>
 | Флаг | По умолчанию | Описание |
 |---|---|---|
 | `--repo <path>` | текущий каталог | Репозиторий, сессии которого сравниваются. |
-| `--json` | `false` | Выводит результат сравнения в JSON (`new`, `persisting`, `resolved`, `not_reviewed`). |
+| `--json` | `false` | Выводит результат сравнения в JSON (`new`, `persisting`, `resolved`, `not_reviewed`, `resolved_rate`). |
 
 ### `ocr session export`
 

@@ -471,7 +471,7 @@ ocr session compare --json <before-session-id> <after-session-id>
 | フラグ | デフォルト | 説明 |
 |---|---|---|
 | `--repo <path>` | カレントディレクトリ | 比較するセッションが属するリポジトリ。 |
-| `--json` | `false` | 比較結果を JSON で出力します（`new`、`persisting`、`resolved`、`not_reviewed`）。 |
+| `--json` | `false` | 比較結果を JSON で出力します（`new`、`persisting`、`resolved`、`not_reviewed`、`resolved_rate`）。 |
 
 ### `ocr session export`
 

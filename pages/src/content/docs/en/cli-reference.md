@@ -498,6 +498,13 @@ numbers, so a finding that only moved down the file still counts as
 persisting. When the after session's manifest records a file rename, the old
 path is mapped to the new path before matching.
 
+The text output also prints `resolved on re-review: R of N (P%)`: resolved
+findings over resolved plus persisting ones. Not-reviewed findings are left
+out, and the line is omitted when the after session re-checked none of the
+before findings. It approximates how many findings were fixed, but a finding
+the model missed or reworded on the rerun also counts as resolved. `--json`
+carries the same ratio as `resolved_rate`, a number from 0 to 1, or `null`.
+
 ```bash
 ocr session compare <before-session-id> <after-session-id>
 ocr session diff <before-session-id> <after-session-id>
@@ -511,7 +518,7 @@ output stays pipeable.
 | Flag | Default | Description |
 |---|---|---|
 | `--repo <path>` | current dir | Repository whose sessions should be compared. |
-| `--json` | `false` | Emit the comparison as JSON (`new`, `persisting`, `resolved`, `not_reviewed`). |
+| `--json` | `false` | Emit the comparison as JSON (`new`, `persisting`, `resolved`, `not_reviewed`, `resolved_rate`). |
 
 ### `ocr session export`
 

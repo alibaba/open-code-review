@@ -19,6 +19,7 @@
         <span><strong>Before:</strong> <a href="/r/{{.EncodedRepo}}/{{.Before.SessionID}}"><code>{{truncate 12 .Before.SessionID}}</code></a></span>
         <span><strong>After:</strong> <a href="/r/{{.EncodedRepo}}/{{.After.SessionID}}"><code>{{truncate 12 .After.SessionID}}</code></a></span>
         <span><strong>Mode:</strong> {{if .Before.ReviewMode}}{{.Before.ReviewMode}}{{else}}-{{end}} to {{if .After.ReviewMode}}{{.After.ReviewMode}}{{else}}-{{end}}</span>
+        {{if .ResolvedRate}}<span title="Earlier findings the after run re-checked and no longer reports. A finding the model missed or reworded also counts."><strong>Resolved on re-review:</strong> {{.ResolvedRate}}</span>{{end}}
     </div>
     {{if .Warning}}
     <div class="meta"><span><span class="badge badge-error">warning</span> {{.Warning}}</span></div>

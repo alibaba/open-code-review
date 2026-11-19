@@ -139,6 +139,10 @@ Findings are sorted into four buckets:
 | Resolved | Only the earlier run reported it, and the later run did review that file. |
 | Not reviewed | Only the earlier run reported it, and the later run never looked at that file. Nobody re-checked it, so it is not resolved. |
 
+The header also shows **Resolved on re-review**, the same ratio
+`ocr session compare` prints. It is hidden when the later run re-checked none
+of the earlier findings.
+
 One thing the page does differently: the CLI omits a bucket that came
 out empty, the page always prints all four. `Resolved (0)` is an
 answer, and a section that silently vanished would read as a broken
