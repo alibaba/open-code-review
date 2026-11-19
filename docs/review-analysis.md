@@ -273,14 +273,16 @@ writers and retry collectors. A role returning an error does not cancel its peer
 parent cancellation reaches both and background work is joined before reports
 are frozen. `--concurrency` caps all concurrent logical model calls across roles,
 including Review grouping/planning/filtering/relocation and memory compression.
-`--max-tokens-budget` is shared across those calls. It is an admission limit:
-already admitted calls can finish and overshoot it, but no new model request is
-admitted after the accumulated input plus output usage reaches the limit. Budget
-rejection is not a provider error and is not retried by HTTP transport.
+`--max-tokens-budget` is shared across those calls. Once recorded input plus
+output reaches the limit, no new conversation or investigation request starts.
+Each unfinished Review or Analysis conversation that has received a model reply
+can still make one final submission using only its submission tools. These calls
+share the same concurrency limit and count toward total usage. Both in-flight
+calls and final submissions can take usage over budget; this is not a billing cap.
+Budget rejection is not a provider error and is not retried by HTTP transport.
 Before dispatching a Review group, the scheduler also checks that its estimated
 cost fits the shared balance, including usage already incurred by Analysis.
-Unlike standalone Review, a shared budget does not admit a final submission
-round after exhaustion. Both roles also share the `--max-git-procs` limit.
+Both roles also share the `--max-git-procs` limit.
 
 The top-level token summary counts both roles once. Analysis usage is separately
 available in `analysis_meta`. Provider usage takes precedence; absent usage is estimated

@@ -28,7 +28,7 @@ func TestProviderErrorSpansUseSafeSummary(test *testing.T) {
 			test.Cleanup(func() { _ = history.Finalize() })
 			runner := NewRunner(Deps{LLMClient: taskClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) { return nil, errors.New(detail) }), Session: history, ProgressError: func(error) string { return safe }}, testTask())
 			if grace {
-				runner.runGraceRound(ctx, taskMessages(), "fixture", "session")
+				runner.runGraceRound(ctx, taskMessages(), "fixture", "session", true)
 			} else {
 				_, _ = runner.Run(ctx, taskMessages(), "fixture")
 			}

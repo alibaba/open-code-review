@@ -51,23 +51,34 @@ func (budget *Budget) Total() int64 {
 }
 
 func (client *budgetClient) CompletionsWithCtx(ctx context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
+	response, _, err := client.complete(ctx, request, false)
+	return response, err
+}
+
+func (client *budgetClient) FinalSubmission(ctx context.Context, request llm.ChatRequest) (*llm.ChatResponse, bool, error) {
+	return client.complete(ctx, request, true)
+}
+
+func (client *budgetClient) complete(ctx context.Context, request llm.ChatRequest, finalSubmission bool) (*llm.ChatResponse, bool, error) {
 	budget := client.budget
 	select {
 	case budget.slots <- struct{}{}:
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, false, ctx.Err()
 	}
 	defer func() { <-budget.slots }()
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	budget.mu.Lock()
-	if budget.maximum > 0 && budget.total >= budget.maximum {
+	budgetReached := budget.maximum > 0 && budget.total >= budget.maximum
+	if budgetReached {
 		budget.exhausted = true
-		budget.mu.Unlock()
-		return nil, llm.ErrTokenBudget
 	}
 	budget.mu.Unlock()
+	if budgetReached && !finalSubmission {
+		return nil, true, llm.ErrTokenBudget
+	}
 	response, err := client.client.CompletionsWithCtx(ctx, request)
 	if response != nil {
 		usage := response.Usage
@@ -100,5 +111,5 @@ func (client *budgetClient) CompletionsWithCtx(ctx context.Context, request llm.
 		budget.usage.CacheWriteTokens += usage.CacheWriteTokens
 		budget.mu.Unlock()
 	}
-	return response, err
+	return response, budgetReached, err
 }

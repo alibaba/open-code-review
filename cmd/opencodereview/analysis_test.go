@@ -249,6 +249,7 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 		{name: "review failure", analysis: true, failReview: true, status: "partial", wantError: true},
 		{name: "both fail", analysis: true, failReview: true, failAnalysis: true, status: "failed", wantError: true},
 		{name: "shared budget", analysis: true, budget: "1", status: "failed", wantError: true},
+		{name: "final analysis submission", analysis: true, workspace: true, budget: "15", status: "partial", wantError: true},
 	} {
 		test.Run(fixture.name, func(test *testing.T) {
 			home := test.TempDir()
@@ -290,6 +291,14 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 				var arguments any = map[string]any{"side": "old", "file_path": "a.go", "start_line": 1, "end_line": 3}
 				if len(observations) == 1 {
 					arguments = map[string]any{"side": "new", "file_path": "a.go", "start_line": 1, "end_line": 3}
+					if fixture.workspace && fixture.budget != "" {
+						var final struct{ Tools []struct{ Name string } }
+						if err := json.Unmarshal(body, &final); err != nil || len(final.Tools) != 1 || final.Tools[0].Name != "submit_analysis" {
+							test.Error("expected a submission-only request at the shared limit")
+						}
+						name = "submit_analysis"
+						arguments = behaviortask.Analysis{Markdown: "Read the old version [[" + observations[0].ID + "]]; the new version remains unverified.", DeclaredCompletion: "partial"}
+					}
 				}
 				if len(observations) >= 2 {
 					name = "submit_analysis"
@@ -362,6 +371,11 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			}
 			if fixture.budget != "" && !payload.Summary.BudgetExceeded {
 				test.Fatalf("budget unreported: %s", data)
+			}
+			if fixture.workspace && fixture.budget != "" {
+				if analysisCalls.Load() != 2 || payload.Summary.TotalTokens != 30 || !report.Completed || report.StopReason != "token_budget" || report.Status != "partial" || len(report.CitedObservationIDs) != 1 {
+					test.Fatalf("expected one accepted, metered final submission: %s", data)
+				}
 			}
 			if !fixture.failAnalysis && fixture.budget == "" {
 				completion := "complete"

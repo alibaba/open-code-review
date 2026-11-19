@@ -304,6 +304,11 @@ func TestBudgetConcurrencyAndWaitingCancellation(test *testing.T) {
 	if _, err := client.CompletionsWithCtx(ctx, llm.ChatRequest{}); !errors.Is(err, context.DeadlineExceeded) {
 		test.Fatalf("queued call: %v", err)
 	}
+	finalCtx, cancelFinal := context.WithTimeout(test.Context(), 20*time.Millisecond)
+	defer cancelFinal()
+	if _, _, err := client.(llm.FinalSubmissionClient).FinalSubmission(finalCtx, llm.ChatRequest{}); !errors.Is(err, context.DeadlineExceeded) {
+		test.Fatalf("queued final submission: %v", err)
+	}
 	close(release)
 	<-done
 	if calls.Load() != 1 {

@@ -78,8 +78,8 @@ func TestSharedBudgetAfterCommentPreservesCoverage(test *testing.T) {
 	}
 	test.Logf("comments=%d error=%v state=%s completed=%d failed=%d shared_exhausted=%v usage=%+v agent_budget_exceeded=%v budget_warning=%v",
 		len(comments), runErr, manifest.TerminalState, len(manifest.Coverage.Completed), len(manifest.Coverage.Failed), exhausted, usage, agent.BudgetExceeded(), hasBudgetWarning)
-	if len(comments) != 1 || !exhausted {
-		test.Fatal("fixture did not reach shared budget after producing a comment")
+	if len(comments) != 1 || !exhausted || usage.InputTokens != 150 {
+		test.Fatal("expected a grouping call, a comment, and one final round after reaching the shared budget")
 	}
 	if manifest.TerminalState != session.StatePartial || len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Failed) != 1 || !hasBudgetWarning {
 		test.Fatal("shared budget must preserve partial coverage and surface a controlled budget stop")
@@ -127,8 +127,8 @@ func TestSharedBudgetPreservesCompletedRoundWithoutCommentsOnEveryFile(test *tes
 	agent, budget := newSharedBudgetAgent(test, true)
 	comments, err := agent.dispatchSubtasks(test.Context())
 	manifest := finishManifestFlow(test, agent)
-	_, exhausted := budget.Snapshot()
-	if err != nil || len(comments) != 1 || !exhausted || !agent.BudgetExceeded() {
+	usage, exhausted := budget.Snapshot()
+	if err != nil || len(comments) != 1 || !exhausted || !agent.BudgetExceeded() || usage.InputTokens != 100 {
 		test.Fatalf("comments=%d error=%v exhausted=%v budget_exceeded=%v", len(comments), err, exhausted, agent.BudgetExceeded())
 	}
 	if manifest.TerminalState != session.StateComplete || len(manifest.Coverage.Completed) != 2 || len(manifest.Coverage.Failed) != 0 {

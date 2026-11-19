@@ -3,6 +3,13 @@
 
 package llm
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 var ErrTokenBudget = errors.New("aggregate LLM token budget exhausted")
+
+type FinalSubmissionClient interface {
+	FinalSubmission(ctx context.Context, request ChatRequest) (response *ChatResponse, budgetReached bool, err error)
+}
