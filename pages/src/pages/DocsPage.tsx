@@ -257,11 +257,11 @@ const DocsPage: React.FC = () => {
       fallbackAttemptKey.current = '';
       return;
     }
-    const key = `${loadedLanguage}:${activeSlug}:${searchNeedsFallback}`;
+    const key = `${loadedLanguage}:${activeSlug}:${searchNeedsFallback}:${searchQuery.trim()}`;
     const attempt = fallbackRetry.requestKey === key ? fallbackRetry.count : 0;
     const currentFallback = englishFallbackRef.current;
     if (currentFallback.status === 'ready') return;
-    if (currentFallback.status === 'loading' && currentFallback.requestKey === key) return;
+    if (currentFallback.status === 'error' && fallbackAttemptKey.current === `${key}:${attempt}`) return;
     if (fallbackAttemptKey.current === `${key}:${attempt}`) return;
     fallbackAttemptKey.current = `${key}:${attempt}`;
     let cancelled = false;

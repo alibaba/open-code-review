@@ -20,22 +20,30 @@ const h = vi.hoisted(() => ({
   pending: {} as Record<string, { resolve: (docs: Record<string, string>) => void; reject: (err: unknown) => void }[]>,
   loadCalls: [] as string[],
   cache: {} as Record<string, Record<string, string>>,
+  inFlight: {} as Record<string, Promise<Record<string, string>> | undefined>,
   available: {} as Record<string, string[]>,
 }));
 
 vi.mock('../content/docs', () => ({
   loadLanguageContent: (lang: string) => {
     if (h.cache[lang]) return Promise.resolve(h.cache[lang]);
+    if (h.inFlight[lang]) return h.inFlight[lang];
     h.loadCalls.push(lang);
-    return new Promise((resolve, reject) => {
+    const promise = new Promise<Record<string, string>>((resolve, reject) => {
       (h.pending[lang] ??= []).push({
         resolve: (docs: Record<string, string>) => {
           h.cache[lang] = docs;
+          h.inFlight[lang] = undefined;
           resolve(docs);
         },
-        reject,
+        reject: (error: unknown) => {
+          h.inFlight[lang] = undefined;
+          reject(error);
+        },
       });
     });
+    h.inFlight[lang] = promise;
+    return promise;
   },
   hasTranslation: (slug: string, lang: string) => (h.available[lang] ?? []).includes(slug),
   isPartialLocale: (lang: string) => (h.available[lang] ?? []).length < (h.available.en ?? []).length,
@@ -102,6 +110,7 @@ const ALL_TEST_SLUGS = ['quickstart', 'installation'];
 function resetFixtures() {
   h.loadCalls.length = 0;
   h.cache = {};
+  h.inFlight = {};
   h.available = { en: [...ALL_TEST_SLUGS], zh: [...ALL_TEST_SLUGS], ja: [...ALL_TEST_SLUGS] };
   for (const key of Object.keys(h.pending)) delete h.pending[key];
 }
@@ -476,7 +485,7 @@ describe('DocsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: zh['error.reload'] }));
     expect(reloadSpy).toHaveBeenCalledTimes(1);
   });
-  it('ignores a stale fallback response after navigating to another missing article', async () => {
+  it('reattaches the shared fallback response after navigating to another missing article', async () => {
     h.available.zh = [];
     renderDocsPage('zh', '/docs/installation');
 
@@ -486,48 +495,113 @@ describe('DocsPage', () => {
     expect(h.loadCalls).toEqual(['zh', 'en']);
 
     fireEvent.click(screen.getAllByText(zh['docs.sidebar.configuration'])[0]);
-    expect(h.loadCalls.filter(c => c === 'en').length).toBe(2);
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(1);
 
     await act(async () => {
-      h.pending.en[0].resolve({ installation: 'stale installation body' });
-    });
-    expect(screen.queryByText('stale installation body')).toBeNull();
-
-    await act(async () => {
-      h.pending.en[1].resolve({ configuration: 'current configuration body' });
+      h.pending.en[0].resolve({ configuration: 'current configuration body' });
     });
     await waitFor(() => {
       expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('current configuration body');
     });
   });
-  it('uses cached English content after a failed fallback and language round trip', async () => {
+  it('reattaches one delayed English bundle after rapid search changes', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/quickstart');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+
+    openSearch();
+    typeQuery('installation');
+    typeQuery('configuration');
+    expect(h.loadCalls).toEqual(['zh', 'en']);
+
+    await act(async () => {
+      h.pending.en[0].resolve({
+        installation: 'installation result',
+        configuration: 'configuration result',
+      });
+    });
+
+    expect(screen.getByRole('button', { name: /configuration/ })).toBeTruthy();
+    expect(screen.queryByText(zh['docs.search.loading'])).toBeNull();
+  });
+
+  it('reattaches a delayed English bundle after leaving and returning to an article', async () => {
     h.available.zh = ['quickstart'];
     renderDocsPage('zh', '/docs/installation');
 
     await act(async () => {
       h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
     });
+    expect(h.loadCalls).toEqual(['zh', 'en']);
+
+    fireEvent.click(screen.getAllByText(zh['docs.sidebar.quickstart'])[0]);
+    fireEvent.click(screen.getAllByText(zh['docs.sidebar.installation'])[0]);
+
     await act(async () => {
-      h.pending.en[0].reject(new Error('en fallback failed'));
+      h.pending.en[0].resolve({ installation: 'en installation body' });
     });
 
-    expect(screen.getByRole('alert')).toBeTruthy();
-    expect(h.loadCalls.filter(c => c === 'en').length).toBe(1);
-
-    fireEvent.click(screen.getByTestId('switch-en'));
-    await act(async () => {
-      h.pending.en[1].resolve({ installation: 'en installation body' });
-    });
-
-    fireEvent.click(screen.getByTestId('switch-zh'));
     await waitFor(() => {
       expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('en installation body');
     });
-
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(1);
     expect(screen.queryByRole('button', { name: zh['docs.content.retry'] })).toBeNull();
-    expect(h.loadCalls.filter(c => c === 'en').length).toBe(2);
   });
 
+  it('shows the current fallback error and retries after changing articles', async () => {
+    h.available.zh = [];
+    renderDocsPage('zh', '/docs/installation');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({});
+    });
+    fireEvent.click(screen.getAllByText(zh['docs.sidebar.configuration'])[0]);
+
+    await act(async () => {
+      h.pending.en[0].reject(new Error('en fallback failed'));
+    });
+    expect(screen.getByRole('alert')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: zh['docs.content.retry'] }));
+    await act(async () => {
+      h.pending.en[1].resolve({ configuration: 'current configuration body' });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('current configuration body');
+    });
+  });
+
+  it('keeps the fragment and scrolls after a fallback Retry succeeds', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/quickstart');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({
+        quickstart: '[Installation](../installation/#intro)',
+      });
+    });
+
+    fireEvent.click(screen.getByRole('link', { name: 'Installation' }));
+    expect(screen.getByTestId('location').textContent).toBe('/docs/installation#intro');
+
+    await act(async () => {
+      h.pending.en[0].reject(new Error('en fallback failed'));
+    });
+    fireEvent.click(screen.getByRole('button', { name: zh['docs.content.retry'] }));
+
+    await act(async () => {
+      h.pending.en[1].resolve({ installation: '## Intro\n\ninstallation body' });
+    });
+
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByTestId('location').textContent).toBe('/docs/installation#intro');
+  });
   it('preserves delayed internal fragments through fallback navigation and history', async () => {
     h.available.zh = ['quickstart'];
     renderDocsPage('zh', '/docs/quickstart');
