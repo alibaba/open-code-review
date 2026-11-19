@@ -273,6 +273,8 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/build.gradle`                               | `build_gradle.md`——Gradle 依赖。                                      |
 | `**/package.json`                               | `package_json.md`——NPM 依赖 / 脚本。                                  |
 | `**/Cargo.toml`                                 | `cargo_toml.md`——Rust manifest。                                      |
+| `**/Move.toml` | `move_toml.md`——Move package manifest。 |
+| `**/*.move` | `move.md`——Move 源代码。 |
 | `**/composer.json`                              | `composer_json.md`——Composer 依赖、自动加载、脚本、插件和包配置。     |
 | `**/*.{json,json5,jsonc}`                       | `json.md`——通用 JSON（也匹配 `.json5` 和 `.jsonc`）。 |
 | `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md`——GitHub Actions 工作流 YAML。                   |
@@ -297,6 +299,8 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.rs`                                       | `rust.md`                                                             |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                              |
 | `**/*.c`                                        | `c.md`                                                                |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md`——CUDA 内核与头文件。                                    |
+| `**/*.hip`                                      | `cuda_hip.md`——HIP（AMD ROCm）内核。                                  |
 | `**/*.{py,pyi,ipynb}`                           | `python.md`——Python 源代码。                                          |
 | `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md`——Ruby 源文件、Rake 任务、gemspec、Gemfile 和 Rakefile。 |
 | `**/*.{php,phtml}`                              | `php.md`——PHP 源代码和 PHP 模板。                                     |

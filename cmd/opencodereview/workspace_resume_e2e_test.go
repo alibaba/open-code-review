@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
@@ -116,8 +117,15 @@ func newWorkspaceResumeFixtureWithUntracked(t *testing.T, deleteTracked bool, un
 	startFakeLLM(t, srv)
 
 	out, errOut, err := runWorkspaceResumeReview(t, dir, "")
-	if err != nil {
-		t.Fatalf("partially failed review must exit 0: %v\nstdout: %s\nstderr: %s", err, out, errOut)
+	if err == nil || !strings.HasPrefix(err.Error(), "review incomplete: 1 of ") {
+		t.Fatalf("expected partial provider failure, got %v\nstdout: %s\nstderr: %s", err, out, errOut)
+	}
+	var result jsonOutput
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode partial review result: %v\nstdout: %s", err, out)
+	}
+	if result.Status != string(session.StatePartial) || result.SessionID == "" {
+		t.Fatalf("expected a partial result with a session ID, got status %q, session_id %q", result.Status, result.SessionID)
 	}
 	sessions, err := session.ListSessions(dir)
 	if err != nil {
@@ -127,6 +135,9 @@ func newWorkspaceResumeFixtureWithUntracked(t *testing.T, deleteTracked bool, un
 		t.Fatalf("partial review persisted no session\nstdout: %s\nstderr: %s", out, errOut)
 	}
 	parent := sessions[0]
+	if parent.SessionID != result.SessionID {
+		t.Fatalf("persisted session ID = %q, want emitted ID %q", parent.SessionID, result.SessionID)
+	}
 	if parent.FailedFiles != 1 {
 		t.Fatalf("parent failed_files = %d, want 1 (summary: %+v)", parent.FailedFiles, parent)
 	}

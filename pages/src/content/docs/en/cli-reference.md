@@ -111,7 +111,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 |---|---|---|---|
 | `--repo <path>` | — | current dir | Git repository root. |
 | `--from <ref>` | — | — | Source ref to start the diff from (e.g., `main`). |
-| `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
+| `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. When `--from` is set and `--to` is omitted, it defaults to `HEAD` (committed changes only, like `git diff <from>...HEAD`). |
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
 | `--no-filter` | — | `false` | Keep all review comments and skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files. |
@@ -128,7 +128,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per subtask. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. A resolved positive value sets the cap exactly. |
 | `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per subtask; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
-| `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Checked before every LLM round: a subtask already over budget gets one final round to submit findings and is reported as `failed(budget)`, no further subtasks are dispatched, and partial results are still published. |
+| `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Checked before every LLM round: a subtask already over budget gets one final round to submit findings and is reported as `failed(budget)`, no further subtasks are dispatched, and the CLI emits available results. |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
@@ -359,12 +359,12 @@ envelope instead so callers can distinguish "no changes" from "no findings":
 
 | Code | Meaning |
 |---|---|
-| `0` | Review completed (possibly with zero comments, possibly with non-fatal warnings). |
-| `1` | Fatal error — bad flags, can't resolve LLM endpoint, all per-group sub-agents failed, etc. The error text is printed to stderr. |
+| `0` | Review completed or was skipped (possibly with zero comments or non-fatal warnings). A partial review caused only by configured budget limits also exits `0`. |
+| `1` | Fatal error, or an operational per-group failure such as a timeout, provider error, or bad configuration. The CLI emits available results before returning the error. |
 
-Non-fatal warnings (a single sub-agent failed, a file exceeded the token
-threshold, etc.) are printed inline; in JSON mode they're added to the
-`warnings` array.
+Warnings are printed inline; in JSON mode they're added to the `warnings`
+array. Inspect `manifest.coverage.failed` for the affected files and their
+failure classifications.
 
 ## `ocr scan`
 
@@ -419,6 +419,8 @@ Sub-commands:
 ocr session list
 ocr session list --limit 50
 ocr session list --json
+ocr session list --branch feat/my-feature --limit 5
+ocr sessions ls --repo /path/to/repo --branch main --json
 ```
 
 | Flag | Default | Description |
@@ -426,6 +428,17 @@ ocr session list --json
 | `--repo <path>` | current dir | Repository whose sessions should be listed. |
 | `--json` | `false` | Emit session summaries as JSON. |
 | `--limit <n>` | `20` | Cap the number of listed sessions. Use `0` for unlimited. |
+| `--branch <name>` | empty | Only list sessions whose saved branch name matches exactly, including case. |
+
+Branch filtering runs before `--limit` and preserves newest-first ordering.
+Omitting `--branch` or passing an empty value keeps the unfiltered behavior.
+When filtering, sessions without a recorded branch are excluded; no matches
+produce a branch-specific message in text mode or `[]` in JSON mode.
+
+The filter uses saved session metadata, so a deleted branch remains searchable
+without checking out that branch. The repository directory selected by `--repo`
+must still exist, but it need not remain a Git checkout. Filtering does not change
+the checks required to resume a session.
 
 ### `ocr session show`
 

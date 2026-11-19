@@ -63,7 +63,7 @@ cp -R /path/to/open-code-review/skills/open-code-review-delegate ~/.claude/skill
 ### Шаг 1. Предварительный просмотр — определить, что проверять
 
 ```bash
-ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <patterns>]
+ocr delegate preview [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <patterns>]
 ```
 
 Вывод содержит:
@@ -79,12 +79,13 @@ ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <pat
 |----------|---------|
 | Изменения рабочей области | `ocr delegate preview` |
 | Сравнение веток | `ocr delegate preview --from main --to feature` |
+| Текущая ветка относительно main | `ocr delegate preview --from main` |
 | Один коммит | `ocr delegate preview -c abc123` |
 
 ### Шаг 2. Получить правила для файлов
 
 ```bash
-ocr delegate rule <path1> <path2> ...
+ocr delegate rule [--from <ref> [--to <ref>]] [--commit <hash>] <path1> <path2> ...
 ```
 
 Передайте проверяемые пути из шага 1. Вывод группируется по содержимому правил:
@@ -156,10 +157,12 @@ git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-d
 
 ## Общие флаги
 
+В обеих подкомандах `--from main` сокращает `--from main --to HEAD`. Ревью диапазона сравнивает `merge-base(from, to)..to` и не включает изменения в индексе, неиндексированные изменения и неотслеживаемые файлы. Без флагов диапазона или коммита используется режим рабочей области. Передавайте одинаковые флаги диапазона или коммита в `preview` и `rule`, чтобы использовать одну цель. Флаги диапазона и коммита взаимоисключающие.
+
 | Флаг | Описание |
 |------|-------------|
 | `--from <ref>` | Исходная ссылка для режима диапазона. |
-| `--to <ref>` | Целевая ссылка для режима диапазона. |
+| `--to <ref>` | Целевая ссылка для режима диапазона; при указании `--from` по умолчанию используется `HEAD`. |
 | `-c, --commit <hash>` | Режим одного коммита. |
 | `--repo <path>` | Корень репозитория (по умолчанию текущий рабочий каталог). |
 | `--rule <path>` | Путь к пользовательскому rule.json. |

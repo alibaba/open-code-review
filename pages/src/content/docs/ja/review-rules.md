@@ -240,6 +240,8 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/build.gradle`                               | `build_gradle.md`: Gradle 依存関係。                                                            |
 | `**/package.json`                               | `package_json.md`: NPM 依存関係 / スクリプト。                                                  |
 | `**/Cargo.toml`                                 | `cargo_toml.md`: Rust manifest。                                                                |
+| `**/Move.toml` | `move_toml.md`: Move package manifest。 |
+| `**/*.move` | `move.md`: Move ソースコード。 |
 | `**/composer.json`                              | `composer_json.md`: Composer の依存関係、自動読み込み、スクリプト、プラグイン、パッケージ設定。 |
 | `**/*.{json,json5,jsonc}`                       | `json.md`: 汎用 JSON（`.json5` と `.jsonc` にも一致）。 |
 | `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md`: GitHub Actions ワークフロー YAML。                                       |
@@ -264,6 +266,8 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.rs`                                       | `rust.md`                                                                                       |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                        |
 | `**/*.c`                                        | `c.md`                                                                                          |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md`：CUDA カーネルとヘッダー。                                                        |
+| `**/*.hip`                                      | `cuda_hip.md`：HIP（AMD ROCm）カーネル。                                                        |
 | `**/*.{py,pyi,ipynb}`                           | `python.md`: Python ソースコード。                                                              |
 | `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md`: Ruby のソース、Rake タスク、gemspec、Gemfile、Rakefile。 |
 | `**/*.{php,phtml}`                              | `php.md`: PHP ソースと PHP テンプレート。                                                       |
