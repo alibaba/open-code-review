@@ -15,7 +15,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (selection.go) — drop binaries, secret paths,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -51,7 +51,7 @@ diff마다 옛/새 경로, 옛/새 hunk, 추가·삭제 줄 수, 바이너리 �
 추적되지 않는 파일은 디스크에서 읽어 파일 전체가 추가된 것으로 다룹니다.
 그래서 커밋 전에도 리뷰됩니다.
 
-## 다섯 관문 파일 필터 {#the-five-gate-file-filter}
+## 여섯 관문 파일 필터 {#the-six-gate-file-filter}
 
 diff를 다 읽고 나면 모든 파일이
 [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go)를
@@ -59,6 +59,7 @@ diff를 다 읽고 나면 모든 파일이
 
 ```
 binary          — file is binary
+secret_exclude  — path matches a built-in secret pattern (.env, id_rsa, …)
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
@@ -70,12 +71,15 @@ default_path    — matched a built-in test-file exclude pattern
 `max_tokens`의 80%를 넘으면 `too_large`입니다. 관문은 이 순서로 돕니다.
 
 1. `binary` — 바이너리 파일을 가장 먼저 버립니다.
-2. `user_exclude` — 프로젝트의 `exclude`가 언제나 이깁니다.
-3. `user_include` — 필터에 include 패턴이 있고 **그중 하나에** 파일이 걸리면
+2. `secret_exclude` — 두 경로 중 하나라도 내장 **자격 증명 경로** 보호
+   (`.env`, `id_rsa`, `.netrc` 등)에 걸립니다. `provider_directory`처럼
+   `include` 규칙으로 되돌릴 수 없습니다.
+3. `user_exclude` — 프로젝트의 `exclude`가 언제나 이깁니다.
+4. `user_include` — 필터에 include 패턴이 있고 **그중 하나에** 파일이 걸리면
    그 자리에서 남기고(빈 문자열 반환) 아래의 `unsupported_ext`와
    `default_path` 관문을 건너뜁니다.
-4. `unsupported_ext`는 확장자 허용 목록으로 거릅니다.
-5. `default_path`가 마지막 관문입니다. 내장 **테스트 파일** 제외 패턴
+5. `unsupported_ext`는 확장자 허용 목록으로 거릅니다.
+6. `default_path`가 마지막 관문입니다. 내장 **테스트 파일** 제외 패턴
    (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/__tests__/**`,
    `**/*_test.py`, `**/*_spec.rb`, `**/*.test.ets` 등)에 걸리는지 봅니다.
    모든 패턴 앞에는 `**/` 접두사가 붙습니다.
