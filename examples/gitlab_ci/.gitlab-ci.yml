@@ -111,7 +111,8 @@ code-review:
       # key exists for it); GitLab CI/CD variables are already exported into the
       # job env, so leaving it unset/empty = use OCR's default.
 
-    # Run OCR review (use CI_COMMIT_SHA for --to to support both same-repo and forked MRs)
+    # Use GitLab's MR diff base rather than origin/<target>, which may not be the merge-base.
+    # CI_COMMIT_SHA supports both same-repo and forked MRs.
     # Optional review knobs (only passed when the CI var is non-empty):
     #   OCR_REVIEW_CONCURRENCY -> --concurrency
     #   OCR_BACKGROUND         -> --background
@@ -119,7 +120,7 @@ code-review:
     - |
       mkdir -p .ocr
       echo "Reviewing MR: ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME} against ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
-      ARGS=(--from "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" --to "${CI_COMMIT_SHA}" --format json --audience agent)
+      ARGS=(--from "${CI_MERGE_REQUEST_DIFF_BASE_SHA}" --to "${CI_COMMIT_SHA}" --format json --audience agent)
       if [ -n "$OCR_REVIEW_CONCURRENCY" ]; then ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY"); fi
       if [ -n "$OCR_BACKGROUND" ]; then ARGS+=(--background "$OCR_BACKGROUND"); fi
       if [ -n "$OCR_RULE" ]; then ARGS+=(--rule "$OCR_RULE"); fi
