@@ -251,7 +251,7 @@
           "markdown": {
             "type": "string",
             "minLength": 1,
-            "description": "A concise maintainer brief as Markdown (at most 256 KiB UTF-8). Lead with the conclusion; report each material effect once, keeping decisive conditions, consequences, and [[obs-000001]] citations. Omit empty sections and investigation narration. Brevity must not hide independent risks or meaningful uncertainty."
+            "description": "A concise maintainer brief as Markdown (at most 256 KiB UTF-8). Lead with the conclusion; report each material effect once, keeping decisive conditions, consequences, and [[obs-000001]] citations. End with pre-merge maintainer decisions when evidence supports a required fix, an acceptance check or a genuine choice. Omit empty sections and investigation narration. Brevity must not hide independent risks or meaningful uncertainty."
           },
           "declared_completion": {
             "type": "string",

@@ -92,7 +92,7 @@ func TestBehaviorReportFocusSurvivesEveryPhase(test *testing.T) {
 	if err != nil {
 		test.Fatal(err)
 	}
-	if behavior.Version != "ocr.behavior-prompts/v6" {
+	if behavior.Version != "ocr.behavior-prompts/v7" {
 		test.Fatalf("unversioned report guidance: %s", behavior.Version)
 	}
 	for _, phase := range []struct {
@@ -100,12 +100,17 @@ func TestBehaviorReportFocusSurvivesEveryPhase(test *testing.T) {
 		content  string
 		required []string
 	}{
-		{"system", behavior.MainTask.Messages[0].Content, []string{"Report each material effect once", "practical conclusion", "before/after table", "not a fixed length or section quota", "Preserve decisive details", "Omit empty categories", "Brevity must not narrow the investigation", "captured execution results", "recommend an option", "overall approval to merge", "[[obs-000001]]"}},
+		{"system", behavior.MainTask.Messages[0].Content, []string{"Report each material effect once", "practical conclusion", "before/after table", "not a fixed length or section quota", "Preserve decisive details", "Omit empty categories", "Brevity must not narrow the investigation", "captured execution results", "recommend an option", "overall approval to merge", "If that evidence settles the contract", "omit the section when none is supported", "[[obs-000001]]"}},
 		{"task", behavior.MainTask.Messages[len(behavior.MainTask.Messages)-1].Content, []string{"conclusion first", "complete visible change inventory", "decisive conditions and evidence retained", "compatibility cost", "supported recommendations"}},
 		{"compression", behavior.MemoryCompressionTask.Messages[0].Content, []string{"each-effect-once", "working memory, not the final report", "Preserve evidence and unresolved questions", "[[obs-000001]]"}},
 		{"final round", behavior.FinalRound.Messages[0].Content, []string{"each material effect once", "not independent risks or evidence", "precise limitations", "test source from captured execution results", "not generic approval questions", "[[obs-000001]]"}},
 	} {
 		test.Run(phase.name, func(test *testing.T) {
+			for _, action := range []string{"pre-merge maintainer decisions", "required fix", "acceptance check", "observable pass condition", "choice"} {
+				if !strings.Contains(strings.ToLower(phase.content), action) {
+					test.Errorf("missing pre-merge guidance %q", action)
+				}
+			}
 			for _, required := range phase.required {
 				if !strings.Contains(phase.content, required) {
 					test.Errorf("missing report guidance %q", required)
@@ -138,7 +143,7 @@ func TestBehaviorReportFocusSurvivesEveryPhase(test *testing.T) {
 	}
 	properties := parameters["properties"].(map[string]any)
 	markdown := properties["markdown"].(map[string]any)
-	if !strings.Contains(markdown["description"].(string), "report each material effect once") {
+	if description := markdown["description"].(string); !strings.Contains(description, "report each material effect once") || !strings.Contains(description, "when evidence supports a required fix, an acceptance check or a genuine choice") {
 		test.Fatal("submission tool lost the concise-report guidance")
 	}
 }

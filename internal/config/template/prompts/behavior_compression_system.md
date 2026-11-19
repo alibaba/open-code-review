@@ -9,7 +9,7 @@ Preserve:
 5. Open questions, bounded searches, unavailable context, exclusions, and truncated observations that still require reading.
 6. What verification was only read in source, what was actually observed executing, and the revision attached to each result.
 7. The next highest-value unresolved question.
-8. Genuine maintainer decisions, their alternatives, tradeoffs, and evidence; distinguish these from missing information.
+8. Evidence for pre-merge maintainer decisions: a required fix and the contract it must preserve, an acceptance check with its triggering sequence and observable pass condition, or a genuine choice with alternatives and tradeoffs. Keep proposed checks distinct from executed results and unsupported hypotheses.
 9. The evolving Markdown report and its unresolved limits; it is prose, not a nested submission schema. Keep its conclusion-first, each-effect-once style, without duplicating a mechanism under separate Behavior and Impact headings. The optional declared_completion is only a self-assessment.
 
 Do not invent evidence IDs, upgrade a hypothesis to fact, claim tests passed, or turn a limited search into proof of absence. Retain short code details needed for distinctions such as missing versus false; use observation IDs to retrieve longer source rather than copying it all.

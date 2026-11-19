@@ -58,8 +58,10 @@ parsed into a semantic schema. The prompt requests a concise maintainer brief:
 conclusion first, each material effect once, with decisive conditions, consequences
 and evidence retained. Behavior and impact may be combined; empty sections, repeated
 background and investigation narration are omitted. Brevity does not narrow the
-investigation, impose a hard length cap or remove independent risks. Decisions
-describe genuine policy choices and tradeoffs rather than code-answerable questions.
+investigation, impose a hard length cap or remove independent risks. When the
+evidence warrants action, the brief ends with a fix for a demonstrated contract
+violation, a concrete acceptance check, or a genuine maintainer choice. An
+unverified hypothesis is not a blocker and a proposed check is not a test result.
 
 Use literal `[[obs-000001]]` markers to cite tool observations. Validation only
 checks marker syntax and that each referenced ID exists in this run and has no

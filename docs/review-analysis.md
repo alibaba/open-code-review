@@ -19,16 +19,17 @@ It covers the following when relevant, not as a mandatory list of sections:
   the affected behavior rather than repeated under a separate heading.
 - **Verification and Limits**: inspected test source, captured execution evidence
   and unresolved gaps that affect the conclusions.
-- **Maintainer Decisions**: genuine product, policy, compatibility or scope choices,
-  with supported recommendations and the consequences of each option.
+- **Pre-merge maintainer decisions**: actions the comparison supports. These can
+  be a fix for a demonstrated contract violation, an acceptance check with a
+  specific setup and observable pass condition, or a choice with a real tradeoff.
 
 The model writes one Markdown report, without filling nested scenario/impact
 objects, relationship IDs or evidence arrays. These sections are prompt guidance,
 not a parser-enforced template; headings and order can vary. Interactive text output
 renders the report as terminal Markdown. No third summarization
-model call is made. Decisions are not defects and do not become review comments.
-Missing factual evidence is an open question, not a policy decision. Empty sections,
-including a decision section when there is no genuine choice, should be omitted.
+model call is made. Decisions do not become line-level review comments or change
+the exit status. The report omits this section when no action is supported;
+missing test logs alone do not make a change a merge blocker.
 
 ### Terminal rendering
 
@@ -117,8 +118,12 @@ Exact flags/fields, defaults, branch conditions, compatibility boundaries, failu
 and meaningful uncertainty remain when they affect the conclusion. Empty categories,
 generic advice, repeated background, file inventories, tool diaries and closing
 recaps are omitted. Verification and important gaps get one compact note instead
-of repeated disclaimers. Maintainer choices address actual tradeoffs, not generic
-questions about whether testing is sufficient or an overall approval to merge.
+of repeated disclaimers. Where action is needed, the report ends with a localized
+pre-merge decision heading and short action-led bullets. For example, if a failed
+delivery can be marked complete, the fix must preserve retryability; an acceptance
+check can fail the first delivery, retry the same item and require exactly one
+successful delivery. That is a proposed check, not a claim that it ran. This
+section is not an overall approval to merge.
 Investigation scope and budgets are unchanged; complete
 observations and run metadata remain in their own artifacts, not repeated in prose.
 

@@ -21,7 +21,13 @@ Analyze behavior and impact for one supplied code comparison. Reconstruct concre
 
 # Completion
 
-Discuss maintainer decisions only for genuine product, policy, compatibility, or scope choices that code investigation cannot decide. For each choice, recommend an option when the evidence supports it and explain the consequence of accepting or rejecting it. Do not turn missing evidence into a decision, ask generically whether testing is sufficient, repeat every impact as a decision, or invent a choice to fill a section. Omit the decision section when there is no genuine choice. An unresolved policy choice does not itself make an investigation partial. Do not assume access to a separate review's results or give an overall approval to merge; recommendations here concern only the demonstrated tradeoffs.
+Before submitting, ask what a maintainer needs to fix, verify or decide before merging this comparison. When the investigation supports such an action, end with `## Pre-merge maintainer decisions` in the report language. Use short bullets led by a specific action, with the observation supporting it nearby. Distinguish:
+
+- Required fix: identify the established contract, the sequence that breaks it and the behavior a fix must preserve. Reserve "must fix" for a demonstrated violation, not a possible risk or an intentional change.
+- Acceptance check: when a material behavior hinges on a condition the existing evidence does not settle, give the setup, sequence and observable pass condition. Inspect whether existing tests actually exercise that sequence. Label a proposed check as such; missing run logs alone are not a reason to demand a new test.
+- Maintainer choice: for a real product, compatibility or scope tradeoff, recommend an option when supported and state the cost of the alternative. Say what can be deferred separately when relevant. An unresolved policy choice does not itself make an investigation partial.
+
+Include only applicable actions; omit the section when none is supported. A factual unknown without a concrete acceptance check belongs in the verification limits. Do not assume access to the separate review's findings or give an overall approval to merge.
 
 Submit through submit_analysis with the entire report in its markdown string. A standalone conversational answer does not complete the task. Use readable Markdown; Problem and Behavior Changes, Compatibility, Verification and Limits, and Maintainer Decisions are optional organizing labels, not a section checklist. Behavior and impact belong together when they describe the same effect. Do not output nested scenario objects, relationship IDs or evidence arrays.
 
@@ -38,7 +44,7 @@ Investigate thoroughly; write a concise maintainer brief, not an investigation t
 - Preserve decisive details: exact flags or fields, relevant defaults and branches, old/new differences, compatibility boundaries, failure or fallback behavior, and what remains uncertain. Do not replace these with vague statements such as "behavior changes" or "may affect users." Include the shortest causal explanation needed, not a call-by-call trace.
 - Omit empty categories, "no issue/impact/decision" filler, generic advice, background restatements, file inventories, tool-call diaries, and closing recaps. Quote code only when the exact condition matters, and only the relevant lines.
 - Put verification evidence and meaningful gaps in one compact note. Distinguish assertions inspected in test source, captured execution results for the compared revision, and behavior not verified. State missing execution evidence once, not once per point; retain any uncertainty that could change the conclusion. A recovered read error is not a report limitation; an unresolved evidence gap matters only when it limits a conclusion.
-- End with genuine maintainer choices only when needed, referring to already explained effects instead of repeating them. Give actionable alternatives, a supported recommendation, and its tradeoff rather than a generic checklist.
+- Use the final decision bullets for what to do about the evidence, not to recap the behavior table or repeat the verification note.
 - Before submitting, remove sentences that add no new condition, mechanism, consequence, evidence, decision, or meaningful limitation. Cut repetition, not independent risks, scope boundaries, or evidence. Brevity must not narrow the investigation or imply stronger confidence.
 
 # Investigation protocol
@@ -48,7 +54,7 @@ Use one ongoing investigation, not a fixed number of agents or model calls. Revi
 1. Identify the actual changes, stated goal, and a small set of behavior questions. Look for changes outside the stated goal.
 2. For each material question, identify a trigger and preconditions, then inspect old and new execution/data paths. Distinguish presence, absence, false, null, errors, and empty values when relevant.
 3. Trace the change to its consumers and existing user workflows. Stop expanding a path when the consequence is supported, the path is unaffected for a stated reason, or further evidence is unavailable.
-4. Challenge the conclusion: check unchanged conditions, alternative consumers, pre-existing behavior, scope limits, and relevant test assertions. Do not infer execution from test names.
+4. Challenge the conclusion: check unchanged conditions, alternative consumers, pre-existing behavior, scope limits, and relevant test assertions. Before treating a changed guarantee as a choice, look for its contract in the README or API docs, captured requirements, tests, or unchanged callers. If that evidence settles the contract, do not offer violating it as an equally valid option. Do not infer execution from test names.
 5. Submit supported scenarios and impacts with evidence. Mark remaining uncertainty instead of converting it into a confirmed defect.
 
 # Conditional investigation rules
