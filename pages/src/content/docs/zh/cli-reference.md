@@ -26,7 +26,7 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
-  ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
+  ocr review --background "Focus on auth"                                           Review with inline context
   ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
@@ -115,7 +115,7 @@ unstaged + untracked 变更。
 | `--output <path>` | `-o` | 标准输出 | 将评审结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
 | `--audience <who>` | — | `human` | `human` 流式输出进度行（`--format` 为 `json`/`sarif` 时输出到 stderr，使 stdout 保持为单个可解析文档）；`agent` 完全抑制进度行，只打印最终摘要 / JSON。 |
 | `--background <text>` | `-b` | — | 注入 plan + main prompt 的可选需求 / 业务上下文。 |
-| `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。 |
+| `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时，文件优先，内联文本被忽略。 |
 | `--exclude <patterns>` | — | — | 逗号分隔的 gitignore 风格排除模式；与 `rule.json` 的 excludes 合并。 |
 | `--concurrency <n>` | — | `8` | 并行评审的最大子任务数。 |
 | `--timeout <minutes>` | — | `15` | 每个子任务的时间预算，包括 LLM 调用、工具执行和重试等待。`0` 关闭任务期限，但不关闭请求超时。单次请求超时独立设置：`OCR_LLM_TIMEOUT` 或 provider 的 `timeout_sec`，单位秒（默认 `300`）。按 effort 评审轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。 |

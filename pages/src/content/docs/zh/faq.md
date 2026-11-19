@@ -128,6 +128,47 @@ Rule: …
 
 ## 评审
 
+### 可以结合需求或设计文档审查代码吗？
+
+用 `--background-file` 将本地 Markdown 文件作为共享评审背景传入：
+
+```bash
+ocr review --repo /path/to/repo --background-file docs/requirements.md
+```
+
+相对路径以选定的仓库根目录为基准。内容会注入 plan 和 main 评审提示词。
+简短需求也可以用 `--background "Reject requests with an expired token"` 传入。
+两个参数同时设置时，文件优先，内联文本被忽略。
+
+文档应聚焦本次变更的业务行为和验收条件。原始文件上限为 **1 MiB**；
+清理后的内容超过 **2,000 个字符**时会警告，超过 **8,000 个字符**时会拒绝
+（按字符计数）。公司内部知识库中的相关内容可先导出为本地
+Markdown 文件；该参数不会抓取文档 URL。
+
+若要将需求关联到特定文件，可以使用现有的[项目评审规则](../review-rules/)。
+例如，将以下内容保存为 `<repo>/.opencodereview/rule.json`：
+
+```json
+{
+  "rules": [
+    {
+      "path": "src/auth/**/*.go",
+      "rule": "docs/requirements/auth.md",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+OCR 会读取 `<repo>/docs/requirements/auth.md`，将其作为匹配路径的规则文本，
+与内置规则一起使用。规则文件引用支持以 `.md`、`.txt` 或 `.markdown` 结尾、
+不含空格的单行路径，文件上限为 **512 KiB**；项目规则引用的文件必须位于仓库内。
+首条匹配的规则生效。在仓库根目录运行 `ocr rules check src/auth/login.go`
+可查看实际解析出的规则文本，无需调用 LLM。
+
+这种映射需要显式配置：OCR 不会自动加载 `AGENTS.md`，也不会自动发现各文件
+对应的需求文档。提供上下文有助于模型检查需求，但不能保证完整的需求一致性验证。
+
 ### 某文件显示零评论——它真的被评审了吗？
 
 打开[会话查看器](../viewer/)（`ocr viewer`），找到会话，看该文件的
