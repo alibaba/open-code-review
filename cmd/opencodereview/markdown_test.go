@@ -139,11 +139,14 @@ func TestRenderMarkdownCodeBlockBackslashesMixedContent(test *testing.T) {
 	}
 }
 
+var wrappedHanBoundary = regexp.MustCompile(`(\p{Han}) *\n(\p{Han})`)
+
 func TestRenderMarkdownWrapAndRetention(test *testing.T) {
 	for _, width := range []int{24, 80, 0} {
 		markdown := strings.Repeat("Before \u884c\u4e3a\u53d8\u66f4 after compatibility e\u0301 \U0001f600. ", 160)
 		rendered := ansi.Strip(renderMarkdown(markdown, width))
-		if strings.Join(strings.Fields(rendered), " ") != strings.Join(strings.Fields(markdown), " ") {
+		rejoined := wrappedHanBoundary.ReplaceAllString(rendered, "$1$2")
+		if strings.Join(strings.Fields(rejoined), " ") != strings.Join(strings.Fields(markdown), " ") {
 			test.Fatalf("report content changed at width %d", width)
 		}
 		expectedWidth := width
@@ -211,6 +214,56 @@ func TestRenderMarkdownCompactTables(test *testing.T) {
 			if !strings.Contains(rendered, style) {
 				test.Errorf("at width %d: missing %q in %q", width, style, rendered)
 			}
+		}
+	}
+}
+
+func TestRenderMarkdownMixedScriptLineBreaks(test *testing.T) {
+	phrase := strings.Repeat("\u4e2d\u6587", 12) + "\u3002"
+	for _, fixture := range []struct {
+		name, markdown string
+	}{
+		{"paragraph", "`ocr review --analysis` " + phrase},
+		{"list item", "- [x] `ocr review --analysis` " + phrase},
+		{"blockquote", "> `ocr review --analysis` " + phrase},
+		{"table cell", "| Case | After |\n| --- | --- |\n| CI | `ocr review --analysis` " + phrase + " |"},
+	} {
+		test.Run(fixture.name, func(test *testing.T) {
+			rendered := renderMarkdown(fixture.markdown, 36)
+			if !strings.Contains(rendered, "\x1b[36mocr review --analysis") {
+				test.Fatalf("lost code style: %q", rendered)
+			}
+			plain := ansi.Strip(rendered)
+			if fixture.name == "list item" && !strings.Contains(plain, "[x] ocr review") {
+				test.Fatalf("lost task marker:\n%s", plain)
+			}
+			if !strings.Contains(plain, "ocr review --analysis \u4e2d\u6587") {
+				test.Fatalf("the prose must start on the command line:\n%s", plain)
+			}
+			for _, line := range strings.Split(plain, "\n") {
+				if ansi.StringWidth(line) > 36 || strings.HasPrefix(strings.TrimSpace(line), "\u3002") {
+					test.Fatalf("bad line break: %q", line)
+				}
+			}
+			if strings.Count(plain, "\u4e2d") != 12 || strings.Count(plain, "\u6587") != 12 {
+				test.Fatal("wrapping changed the prose")
+			}
+		})
+	}
+}
+
+func TestWrapCJKPunctuationAndStyles(test *testing.T) {
+	const label = "\x1b[36mCLI\x1b[m"
+	const ideograph = "\u5b57"
+	const stop = "\u3002"
+	const joinedEmoji = "\U0001f469\u200d\U0001f4bb"
+	for _, fixture := range []struct{ text, want string }{
+		{label + " " + ideograph + ideograph + stop, label + " " + ideograph + "\n" + ideograph + stop},
+		{label + " " + joinedEmoji + ideograph + stop, label + " " + joinedEmoji + "\n" + ideograph + stop},
+		{label + " " + ideograph + "\ne\u0301", label + " " + ideograph + "\ne\u0301"},
+	} {
+		if got := wrapCJK(fixture.text, 8); got != fixture.want {
+			test.Errorf("wrapCJK(%q) = %q, want %q", fixture.text, got, fixture.want)
 		}
 	}
 }

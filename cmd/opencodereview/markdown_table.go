@@ -16,34 +16,69 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
-func formatMarkdownTables(document ast.Node, source []byte, terminal *glamouransi.ANSIRenderer, options glamouransi.Options) ([]byte, error) {
-	var tables []*extensionast.Table
+func layoutMarkdownBlocks(document ast.Node, source []byte, terminal *glamouransi.ANSIRenderer, options glamouransi.Options) ([]byte, error) {
+	var blocks []ast.Node
 	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
-		if table, ok := node.(*extensionast.Table); ok && entering {
-			tables = append(tables, table)
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch node.Kind() {
+		case extensionast.KindTable:
+			blocks = append(blocks, node)
+			return ast.WalkSkipChildren, nil
+		case ast.KindParagraph, ast.KindTextBlock:
+			if hasCJK(string(node.Lines().Value(source))) {
+				blocks = append(blocks, node)
+			}
 			return ast.WalkSkipChildren, nil
 		}
 		return ast.WalkContinue, nil
 	})
-	if len(tables) == 0 {
+	if len(blocks) == 0 {
 		return source, nil
 	}
 	context := glamouransi.NewRenderContext(options)
-	for _, table := range tables {
-		rows, err := markdownTableRows(table, source, terminal, context)
-		if err != nil {
-			return nil, err
+	for _, node := range blocks {
+		width := markdownBlockWidth(node, options)
+		var layout string
+		if table, ok := node.(*extensionast.Table); ok {
+			rows, err := markdownTableRows(table, source, terminal, context)
+			if err != nil {
+				return nil, err
+			}
+			layout = "\n" + layoutMarkdownTable(rows, table.Alignments, width) + "\n"
+		} else {
+			wrapped, err := layoutMarkdownProse(node, source, terminal, context, width)
+			if err != nil {
+				return nil, err
+			}
+			if wrapped == "" {
+				continue
+			}
+			layout = wrapped
 		}
-		layout := layoutMarkdownTable(rows, table.Alignments, markdownTableWidth(table, options))
 		start := len(source)
-		source = append(source, '\n')
 		source = append(source, html.EscapeString(strings.ReplaceAll(layout, `\`, `\\`))...)
-		source = append(source, '\n')
 		block := ast.NewTextBlock()
+		if first := node.FirstChild(); first != nil && first.Kind() == extensionast.KindTaskCheckBox {
+			block.AppendChild(block, first)
+		}
 		block.AppendChild(block, ast.NewTextSegment(text.NewSegment(start, len(source))))
-		table.Parent().ReplaceChild(table.Parent(), table, block)
+		node.Parent().ReplaceChild(node.Parent(), node, block)
 	}
 	return source, nil
+}
+
+func renderMarkdownInlines(node ast.Node, source []byte, terminal *glamouransi.ANSIRenderer, context glamouransi.RenderContext) (string, error) {
+	var content strings.Builder
+	for inline := node.FirstChild(); inline != nil; inline = inline.NextSibling() {
+		if element := terminal.NewElement(inline, source).Renderer; element != nil {
+			if err := element.Render(&content, context); err != nil {
+				return "", err
+			}
+		}
+	}
+	return content.String(), nil
 }
 
 func markdownTableRows(table *extensionast.Table, source []byte, terminal *glamouransi.ANSIRenderer, context glamouransi.RenderContext) ([][]string, error) {
@@ -51,25 +86,21 @@ func markdownTableRows(table *extensionast.Table, source []byte, terminal *glamo
 	for row := table.FirstChild(); row != nil; row = row.NextSibling() {
 		var cells []string
 		for cell := row.FirstChild(); cell != nil; cell = cell.NextSibling() {
-			var content strings.Builder
-			for inline := cell.FirstChild(); inline != nil; inline = inline.NextSibling() {
-				if element := terminal.NewElement(inline, source).Renderer; element != nil {
-					if err := element.Render(&content, context); err != nil {
-						return nil, err
-					}
-				}
+			content, err := renderMarkdownInlines(cell, source, terminal, context)
+			if err != nil {
+				return nil, err
 			}
-			cells = append(cells, strings.ReplaceAll(content.String(), "\t", "    "))
+			cells = append(cells, strings.ReplaceAll(content, "\t", "    "))
 		}
 		rows = append(rows, cells)
 	}
 	return rows, nil
 }
 
-func markdownTableWidth(table *extensionast.Table, options glamouransi.Options) int {
+func markdownBlockWidth(node ast.Node, options glamouransi.Options) int {
 	width := options.WordWrap
 	inList := false
-	for parent := table.Parent(); parent != nil; parent = parent.Parent() {
+	for parent := node.Parent(); parent != nil; parent = parent.Parent() {
 		switch parent.Kind() {
 		case ast.KindBlockquote:
 			quote := options.Styles.BlockQuote
@@ -139,7 +170,7 @@ func layoutMarkdownTable(rows [][]string, alignments []extensionast.Alignment, w
 					cells = append(cells, tableGutter)
 				}
 			}
-			cells = append(cells, style.Render(cell))
+			cells = append(cells, style.Render(wrapCJK(cell, style.GetWidth())))
 		}
 		if widths == nil {
 			lines = append(lines, strings.Join(cells, "\n"))

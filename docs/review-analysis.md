@@ -98,7 +98,8 @@ stay unstyled in `auto` mode, and `--audience agent` still suppresses progress.
 ### Report focus
 
 The report is a concise maintainer brief, not an investigation transcript. It leads
-with the practical conclusion and explains each material effect once: trigger, before/after,
+with the practical conclusion, not a command invocation or a second report title.
+Exact commands belong where they explain usage. The report explains each material effect once: trigger, before/after,
 consequence and nearby evidence. Behavior and impact can be combined rather than
 repeating a mechanism under two headings. When at least two concrete scenarios have
 evidence-supported before/after behavior, the prompt defaults to a compact

@@ -69,7 +69,7 @@ func renderMarkdown(markdown string, width int) string {
 	escapeCodeSpanEntities(document, source)
 	source = escapeCodeBlockBackslashes(document, source)
 	source = sanitizeMarkdownText(document, source)
-	source, err := formatMarkdownTables(document, source, terminal, options)
+	source, err := layoutMarkdownBlocks(document, source, terminal, options)
 	if err != nil {
 		return markdown
 	}

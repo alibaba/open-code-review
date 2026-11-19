@@ -1,5 +1,5 @@
 {
-  "version": "ocr.behavior-prompts/v7",
+  "version": "ocr.behavior-prompts/v8",
   "MAIN_TASK": {
     "tools": ["file_read", "code_search", "file_find", "file_read_diff", "context_read", "submit_analysis"],
     "messages": [

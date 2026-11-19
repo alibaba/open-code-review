@@ -37,7 +37,8 @@ func TestRenderAnalysisMarkdownWrapAndRetention(test *testing.T) {
 	for _, width := range []int{24, 80, 0} {
 		markdown := strings.Repeat("Before \u884c\u4e3a\u53d8\u66f4 after compatibility e\u0301 \U0001f600. ", 160)
 		rendered := ansi.Strip(renderMarkdown(markdown, width))
-		if strings.Join(strings.Fields(rendered), " ") != strings.Join(strings.Fields(markdown), " ") {
+		rejoined := wrappedHanBoundary.ReplaceAllString(rendered, "$1$2")
+		if strings.Join(strings.Fields(rejoined), " ") != strings.Join(strings.Fields(markdown), " ") {
 			test.Fatalf("report content changed at width %d", width)
 		}
 		expectedWidth := width
