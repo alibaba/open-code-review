@@ -1275,8 +1275,8 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     if not comments:
         status = result.get("status")
         if status in ("failed", "partial"):
-            message = result.get("message") or "status=%s" % status
-            body = wrap_summary_body("⚠️ **OpenCodeReview**: review did not complete: %s" % message,
+            message = result.get("message") or "review did not complete (status=%s)" % status
+            body = wrap_summary_body("⚠️ **OpenCodeReview**: %s" % message,
                                      config.get("run_tag", "0-0"))
         else:
             message = result.get("message", "No comments generated. Looks good to me.")
