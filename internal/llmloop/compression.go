@@ -4,8 +4,10 @@
 package llmloop
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +15,9 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	markdowntext "github.com/yuin/goldmark/text"
 )
 
 // Compression thresholds, as fractions of MaxTokens.
@@ -23,24 +28,16 @@ const (
 
 // PromptTokenLimit returns tokenWarningThreshold (80%) of maxTokens. It is
 // shared by the agent and scan pre-flight gates, their large-input filters, and
-// computeActiveZoneSize so the threshold has a single definition. Non-positive
+// partitionMessages so the threshold has a single definition. Non-positive
 // input is not special-cased — each caller decides what that means.
 func PromptTokenLimit(maxTokens int) int {
 	return int(float64(maxTokens) * tokenWarningThreshold)
-}
-
-// round groups consecutive messages starting with an assistant message
-// followed by zero or more tool result messages.
-type round struct {
-	assistantIdx int
-	toolIdxs     []int
 }
 
 // partitionResult describes how messages should be split for compression.
 type partitionResult struct {
 	frozenEnd   int
 	compressEnd int
-	rounds      []round
 	activeCount int
 }
 
@@ -79,83 +76,23 @@ func CountMessagesTokens(msgs []llm.Message) int {
 	return total
 }
 
-// groupIntoRounds parses messages[start:] into logical
-// (assistant + tool_results) pairs.
-func groupIntoRounds(messages []llm.Message, start int) []round {
-	var rounds []round
-	i := start
-	for i < len(messages) {
-		if messages[i].Role == "assistant" {
-			r := round{assistantIdx: i}
-			i++
-			for i < len(messages) && messages[i].Role == "tool" {
-				r.toolIdxs = append(r.toolIdxs, i)
-				i++
-			}
-			rounds = append(rounds, r)
-		} else {
-			i++
-		}
-	}
-	return rounds
-}
-
-// computeActiveZoneSize returns how many trailing rounds fit within the
-// remaining token budget after accounting for the frozen zone and the
-// compressed summary.
-func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int, reservedTokens int) int {
-	budget := PromptTokenLimit(maxTokens) - reservedTokens
-	if budget <= 0 {
-		return 0
-	}
-
-	count := 0
-	tokensUsed := 0
-	for i := len(rounds) - 1; i >= 0; i-- {
-		roundTokens := messageTokens(messages[rounds[i].assistantIdx])
-		for _, ti := range rounds[i].toolIdxs {
-			roundTokens += messageTokens(messages[ti])
-		}
-		if tokensUsed+roundTokens > budget {
-			break
-		}
-		tokensUsed += roundTokens
-		count++
-	}
-	return count
-}
-
 // partitionMessages divides messages into frozen, compress, and active zones.
 // Frozen zone is always messages[0:2]. Active zone preserves the K most
 // recent complete rounds based on available token budget.
-func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEstimate int) partitionResult {
-	result := partitionResult{frozenEnd: 2}
-	if len(messages) <= 2 {
-		result.compressEnd = len(messages)
-		return result
-	}
-
-	result.rounds = groupIntoRounds(messages, 2)
-	if len(result.rounds) == 0 {
-		result.compressEnd = len(messages)
-		return result
-	}
-
-	result.activeCount = computeActiveZoneSize(result.rounds, messages, maxTokens, prevSummaryTokenEstimate)
-	if result.activeCount >= len(result.rounds) {
-		// Everything fits — no compression needed.
-		result.compressEnd = len(messages)
-		result.activeCount = 0
-		return result
-	}
-
-	// compressEnd = index after the last round NOT in active zone.
-	activeStartIdx := len(result.rounds) - result.activeCount
-	lastCompressRound := result.rounds[activeStartIdx-1]
-	if len(lastCompressRound.toolIdxs) > 0 {
-		result.compressEnd = lastCompressRound.toolIdxs[len(lastCompressRound.toolIdxs)-1] + 1
-	} else {
-		result.compressEnd = lastCompressRound.assistantIdx + 1
+func partitionMessages(messages []llm.Message, maxTokens int, summaryTokenReserve int) partitionResult {
+	result := partitionResult{frozenEnd: min(2, len(messages)), compressEnd: len(messages)}
+	remaining := PromptTokenLimit(maxTokens) - CountMessagesTokens(messages[:result.frozenEnd]) - summaryTokenReserve
+	for index := len(messages) - 1; index >= result.frozenEnd; index-- {
+		remaining -= messageTokens(messages[index])
+		if remaining <= 0 {
+			break
+		}
+		if messages[index].Role == "assistant" {
+			result.activeCount++
+			result.compressEnd = index
+		} else if index == result.frozenEnd {
+			result.compressEnd = result.frozenEnd
+		}
 	}
 
 	return result
@@ -184,6 +121,103 @@ func stripMarkdownFences(s string) string {
 		s = strings.TrimSpace(s)
 	}
 	return s
+}
+
+var summaryMarkers = regexp.MustCompile("</?think>")
+var summaryMarkdown = goldmark.DefaultParser()
+
+func summaryControlText(source string) []byte {
+	controls := []byte(source)
+	markdown := []byte(strings.ReplaceAll(source, "<", "x"))
+	doc := summaryMarkdown.Parse(markdowntext.NewReader(markdown))
+	_ = ast.Walk(doc, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if entering {
+			switch node := node.(type) {
+			case *ast.Text:
+				if node.Parent().Kind() == ast.KindCodeSpan {
+					clear(controls[node.Segment.Start:node.Segment.Stop])
+				}
+			case *ast.FencedCodeBlock, *ast.CodeBlock:
+				lines := node.Lines()
+				for index := 0; index < lines.Len(); index++ {
+					line := lines.At(index)
+					clear(controls[line.Start:line.Stop])
+				}
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+	return controls
+}
+
+func unwrapSummaryFence(text string) string {
+	trimmed := strings.TrimSpace(text)
+	backticks := strings.HasPrefix(trimmed, "```")
+	if !backticks && !strings.HasPrefix(trimmed, "~~~") {
+		return trimmed
+	}
+	source := []byte(text)
+	doc := summaryMarkdown.Parse(markdowntext.NewReader(source))
+	for node := doc.FirstChild(); node != nil; node = node.NextSibling() {
+		if node.Kind() != ast.KindFencedCodeBlock {
+			return trimmed
+		}
+		lines := node.Lines()
+		content := bytes.TrimSpace(lines.Value(source))
+		if len(content) == 0 {
+			continue
+		}
+		if backticks && node == doc.FirstChild() && node.NextSibling() == nil {
+			last := lines.At(lines.Len() - 1)
+			if len(bytes.TrimSpace(source[last.Stop:])) != 0 {
+				header, _, _ := strings.Cut(trimmed, "\n")
+				switch strings.TrimSpace(strings.TrimLeft(header, "`")) {
+				case "", "text", "plaintext", "markdown", "md":
+					return string(content)
+				}
+			}
+		}
+		return trimmed
+	}
+	return ""
+}
+
+func compressionSummary(text string) string {
+	text = unwrapSummaryFence(text)
+	if !strings.Contains(text, "<think>") && !strings.Contains(text, "</think>") {
+		return text
+	}
+	var visible strings.Builder
+	var start, depth int
+	for _, match := range summaryMarkers.FindAllIndex(summaryControlText(text), -1) {
+		prefix := match[0]
+		for prefix > 0 && text[prefix-1] == '\\' {
+			prefix--
+		}
+		if (match[0]-prefix)%2 != 0 {
+			continue
+		}
+		if text[match[0]:match[1]] == "<think>" {
+			if depth == 0 {
+				visible.WriteString(text[start:match[0]])
+			}
+			depth++
+		} else {
+			if depth == 0 {
+				if start != 0 || !strings.HasPrefix(strings.TrimLeft(text[match[1]:], " \t\r"), "\n") {
+					return ""
+				}
+			} else {
+				depth--
+			}
+			start = match[1]
+		}
+	}
+	if depth != 0 {
+		return ""
+	}
+	visible.WriteString(text[start:])
+	return unwrapSummaryFence(visible.String())
 }
 
 // buildMessageXML serializes msgs into the <message><content> form expected
@@ -221,11 +255,29 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 // the user prompt] + [active].
 func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey string) ([]llm.Message, error) {
 	if len(r.task.Compression.Messages) == 0 || len(msgs) <= 2 {
-		return msgs[:min(len(msgs), 2)], nil
+		return msgs, nil
 	}
 
-	part := partitionMessages(msgs, r.task.MaxContextTokens, 0)
+	limit := PromptTokenLimit(r.task.MaxContextTokens)
+	summaryOccurrences := strings.Count(r.task.Compression.SummaryTemplate, "{{summary}}")
+	if summaryOccurrences == 0 {
+		return msgs, fmt.Errorf("memory compression: summary template has no summary placeholder")
+	}
+	frameTokens := llm.CountTokens(strings.ReplaceAll(r.task.Compression.SummaryTemplate, "{{summary}}", ""))
+	availableTokens := limit - CountMessagesTokens(msgs[:2]) - frameTokens - 1
+	summaryLimit := min(r.task.MaxContextTokens-limit, availableTokens/summaryOccurrences)
+	if r.task.MaxCompletionTokens > 0 {
+		summaryLimit = min(summaryLimit, r.task.MaxCompletionTokens)
+	}
+	if summaryLimit <= 0 {
+		return msgs, fmt.Errorf("memory compression: fixed prompt leaves no room for a summary")
+	}
+	part := partitionMessages(msgs, r.task.MaxContextTokens, frameTokens+summaryLimit*summaryOccurrences)
 	if part.compressEnd <= part.frozenEnd {
+		return msgs, nil
+	}
+	originalTokens := CountMessagesTokens(msgs)
+	if part.activeCount == 0 && originalTokens < limit {
 		return msgs, nil
 	}
 
@@ -235,6 +287,23 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 	for _, m := range r.task.Compression.Messages {
 		content := strings.ReplaceAll(m.Content, "{{context}}", contextXML)
 		compressionMsgs = append(compressionMsgs, llm.NewTextMessage(m.Role, content))
+	}
+	generationLimit := summaryLimit
+	if r.task.MaxCompletionTokens > summaryLimit {
+		for index := len(compressionMsgs) - 1; index >= 0; index-- {
+			original := compressionMsgs[index]
+			if original.Role != "user" && original.Role != "system" {
+				continue
+			}
+			instruction := fmt.Sprintf("\n\nKeep the visible summary within %d tokens.", summaryLimit)
+			compressionMsgs[index] = llm.NewTextMessage(original.Role, original.ExtractText()+instruction)
+			if expanded := min(r.task.MaxCompletionTokens, limit-CountMessagesTokens(compressionMsgs)); expanded > summaryLimit {
+				generationLimit = expanded
+			} else {
+				compressionMsgs[index] = original
+			}
+			break
+		}
 	}
 
 	// The task record is created before the request, not after it, because the
@@ -254,7 +323,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  compressionMsgs,
-		MaxTokens: r.task.MaxCompletionTokens,
+		MaxTokens: generationLimit,
 	})
 	duration := time.Since(startTime)
 
@@ -268,7 +337,14 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 	rec.SetResponse(resp, duration)
 	r.RecordUsage(resp.Usage)
 
-	rawSummary := stripMarkdownFences(resp.Content())
+	if len(resp.Choices) > 0 {
+		switch reason := resp.Choices[0].FinishReason; reason {
+		case "", "stop", "end_turn", "stop_sequence":
+		default:
+			return msgs, fmt.Errorf("memory compression: unfinished summary (finish_reason=%q)", reason)
+		}
+	}
+	rawSummary := compressionSummary(resp.RawOutputText())
 	if rawSummary == "" {
 		// Empty summary: keep the original conversation rather than dropping
 		// everything below the frozen zone.
@@ -284,6 +360,16 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 
 	for i := part.compressEnd; i < len(msgs); i++ {
 		rebuilt = append(rebuilt, msgs[i])
+	}
+	rebuiltTokens := CountMessagesTokens(rebuilt)
+	if rebuiltTokens >= limit {
+		return msgs, fmt.Errorf("memory compression: rebuilt context exceeds its threshold")
+	}
+	if rebuiltTokens >= originalTokens {
+		return msgs, nil
+	}
+	if llm.CountTokens(rawSummary) > summaryLimit {
+		return msgs, fmt.Errorf("memory compression: visible summary exceeds its reservation")
 	}
 
 	return rebuilt, nil

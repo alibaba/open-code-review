@@ -578,7 +578,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	}
 
 	finalCount := CountMessagesTokens(*messages)
-	if finalCount > warnLimit {
+	if finalCount >= warnLimit {
 		r.cancelPendingCompression(st)
 		var err error
 		if *messages, err = r.runCompression(ctx, *messages, taskKey); err != nil {
