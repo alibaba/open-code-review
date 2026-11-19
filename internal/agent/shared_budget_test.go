@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -18,9 +19,15 @@ import (
 type sharedBudgetUsageClient struct {
 	inner              groupedBudgetPartialClient
 	completeFirstRound bool
+	failAtCall         int
+	calls              int
 }
 
 func (client *sharedBudgetUsageClient) CompletionsWithCtx(ctx context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
+	client.calls++
+	if client.calls == client.failAtCall {
+		return nil, errors.New("provider unavailable")
+	}
 	response, err := client.inner.CompletionsWithCtx(ctx, request)
 	if response != nil {
 		response.Usage = &llm.UsageInfo{PromptTokens: 50, TotalTokens: 50}
@@ -32,20 +39,20 @@ func (client *sharedBudgetUsageClient) CompletionsWithCtx(ctx context.Context, r
 	return response, err
 }
 
-func newSharedBudgetAgent(test *testing.T, completeFirstRound bool) (*Agent, *workflow.Budget) {
+func newSharedBudgetAgent(test *testing.T, limit int64, client *sharedBudgetUsageClient) (*Agent, *workflow.Budget) {
 	test.Helper()
 	test.Setenv("HOME", test.TempDir())
 	repo := test.TempDir()
 	collector := tool.NewCommentCollector()
 	registry := tool.NewRegistry()
 	registry.Register(&tool.CodeCommentProvider{Collector: collector})
-	budget := workflow.NewBudget(100, 1)
+	budget := workflow.NewBudget(limit, 1)
 	history := session.New(repo, "feature", "fake", session.SessionOptions{
 		ReviewMode: session.ReviewModeRange, DiffFrom: "main", DiffTo: "feature", Operation: session.OperationReview,
 	})
 	agent := New(Args{
 		RepoDir: repo, From: "main", To: "feature", ReviewMode: session.ReviewModeRange,
-		LLMClient: budget.Wrap(&sharedBudgetUsageClient{completeFirstRound: completeFirstRound}), Model: "fake", Session: history,
+		LLMClient: budget.Wrap(client), Model: "fake", Session: history,
 		CommentCollector: collector, Tools: registry, MaxConcurrency: 1, MaxTokensBudget: 0,
 		Template: template.Template{
 			MaxTokens: 100000, MaxToolRequestTimes: 5, MaxReviewRounds: 2,
@@ -66,7 +73,7 @@ func newSharedBudgetAgent(test *testing.T, completeFirstRound bool) (*Agent, *wo
 }
 
 func TestSharedBudgetAfterCommentPreservesCoverage(test *testing.T) {
-	agent, budget := newSharedBudgetAgent(test, false)
+	agent, budget := newSharedBudgetAgent(test, 100, &sharedBudgetUsageClient{})
 	comments, runErr := agent.dispatchSubtasks(test.Context())
 	manifest := finishManifestFlow(test, agent)
 	usage, exhausted := budget.Snapshot()
@@ -124,7 +131,7 @@ func TestSharedBudgetStopsUndispatchedGroups(test *testing.T) {
 }
 
 func TestSharedBudgetPreservesCompletedRoundWithoutCommentsOnEveryFile(test *testing.T) {
-	agent, budget := newSharedBudgetAgent(test, true)
+	agent, budget := newSharedBudgetAgent(test, 100, &sharedBudgetUsageClient{completeFirstRound: true})
 	comments, err := agent.dispatchSubtasks(test.Context())
 	manifest := finishManifestFlow(test, agent)
 	usage, exhausted := budget.Snapshot()
@@ -140,4 +147,30 @@ func TestSharedBudgetPreservesCompletedRoundWithoutCommentsOnEveryFile(test *tes
 		}
 	}
 	test.Fatal("missing budget warning")
+}
+
+func TestSharedBudgetFinalSubmissionProviderFailure(t *testing.T) {
+	for _, fixture := range []struct {
+		name   string
+		limit  int64
+		client sharedBudgetUsageClient
+	}{
+		{"first review round", 100, sharedBudgetUsageClient{failAtCall: 3}},
+		{"follow-up review round", 150, sharedBudgetUsageClient{completeFirstRound: true, failAtCall: 4}},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			agent, budget := newSharedBudgetAgent(t, fixture.limit, &fixture.client)
+			comments, _ := agent.dispatchSubtasks(t.Context())
+			manifest := finishManifestFlow(t, agent)
+			_, exhausted := budget.Snapshot()
+			if !exhausted || !agent.BudgetExceeded() || budget.Total() != fixture.limit || fixture.client.calls != fixture.client.failAtCall || len(comments) != 1 || len(manifest.Coverage.Failed) != 2 {
+				t.Fatalf("exhausted=%t total=%d calls=%d comments=%d coverage=%+v", exhausted, budget.Total(), fixture.client.calls, len(comments), manifest.Coverage)
+			}
+			for _, item := range manifest.Coverage.Failed {
+				if item.Classification != session.FailureProvider {
+					t.Fatalf("final submission failure classified as %s", item.Classification)
+				}
+			}
+		})
+	}
 }

@@ -279,7 +279,11 @@ Each unfinished Review or Analysis conversation that has received a model reply
 can still make one final submission using only its submission tools. These calls
 share the same concurrency limit and count toward total usage. Both in-flight
 calls and final submissions can take usage over budget; this is not a billing cap.
-Budget rejection is not a provider error and is not retried by HTTP transport.
+If the budget prevents context compression, the final submission keeps the
+uncompressed history, including the latest tool results. Budget rejection is not
+a provider error and is not retried by HTTP transport. If the final submission
+itself fails at the provider after the token limit is reached, the CLI exits
+non-zero rather than treating it as a budget-only stop.
 Before dispatching a Review group, the scheduler also checks that its estimated
 cost fits the shared balance, including usage already incurred by Analysis.
 Both roles also share the `--max-git-procs` limit.

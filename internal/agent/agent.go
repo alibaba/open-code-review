@@ -1522,8 +1522,15 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 			return completed, stop, nil
 		}()
 
+		if !mainCompleted && mainStop == llmloop.StopTokenBudget && a.budgetExceeded.CompareAndSwap(false, true) {
+			message := fmt.Sprintf("stopped group %q mid-review: aggregate LLM token budget exhausted", groupKey)
+			if a.args.SharedTokensUsed == nil && a.args.MaxTokensBudget > 0 {
+				message = fmt.Sprintf("stopped group %q mid-review: used %d tokens exceeds budget %d", groupKey, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget)
+			}
+			a.recordWarning("token_budget_reached", g.Diffs[0].NewPath, message)
+		}
 		if err != nil {
-			if round == 1 {
+			if round == 1 || mainStop == llmloop.StopTokenBudget {
 				return false, nil, err
 			}
 			a.recordWarning("review_round_failed", groupKey, fmt.Sprintf("round %d: %v", round, err))
@@ -1549,21 +1556,8 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		confirmed = append(confirmed, newlyConfirmed...)
 
 		if !mainCompleted {
-			if mainStop == llmloop.StopTokenBudget {
-				// The runner stopped this conversation on the aggregate budget. Surface
-				// it the same way the dispatch gate does, so BudgetExceeded() and the
-				// warning list agree with the item's failed(budget) classification.
-				if a.budgetExceeded.CompareAndSwap(false, true) {
-					message := fmt.Sprintf("stopped group %q mid-review: aggregate LLM token budget exhausted", groupKey)
-					if a.args.SharedTokensUsed == nil && a.args.MaxTokensBudget > 0 {
-						message = fmt.Sprintf("stopped group %q mid-review: used %d tokens exceeds budget %d", groupKey, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget)
-					}
-					a.recordWarning("token_budget_reached", g.Diffs[0].NewPath,
-						message)
-				}
-				if completed {
-					break
-				}
+			if mainStop == llmloop.StopTokenBudget && completed {
+				break
 			}
 			class, reason := classifyMainLoopStop(mainStop)
 			lastStop = &subtaskStop{

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -28,7 +29,7 @@ func TestProviderErrorSpansUseSafeSummary(test *testing.T) {
 			test.Cleanup(func() { _ = history.Finalize() })
 			runner := NewRunner(Deps{LLMClient: taskClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) { return nil, errors.New(detail) }), Session: history, ProgressError: func(error) string { return safe }}, testTask())
 			if grace {
-				runner.runGraceRound(ctx, taskMessages(), "fixture", "session", true)
+				runner.runGraceRound(ctx, taskMessages(), "fixture", "session", true, StopMaxRounds)
 			} else {
 				_, _ = runner.Run(ctx, taskMessages(), "fixture")
 			}
@@ -83,5 +84,59 @@ func TestGraceRoundSharedBudgetOverridesRoundLimit(test *testing.T) {
 	result, err := runner.Run(test.Context(), taskMessages(), "data")
 	if err != nil || result.Completed || result.StopReason != StopTokenBudget || calls != 2 {
 		test.Fatalf("result=%+v error=%v calls=%d", result, err, calls)
+	}
+}
+
+func TestCompressionBudgetRejectionPreservesFinalSubmission(t *testing.T) {
+	for _, phase := range []string{"before append", "after append"} {
+		t.Run(phase, func(t *testing.T) {
+			task := testTask()
+			task.MaxContextTokens = 1000
+			messages := taskMessages()
+			evidence := strings.Repeat("fact ", 820)
+			if phase == "before append" {
+				messages = append(messages, llm.NewTextMessage("assistant", evidence))
+				evidence = "latest observation"
+			}
+			execute := task.ExecuteTool
+			task.ExecuteTool = func(ctx context.Context, key string, call llm.ToolCall, record *session.TaskRecord, thinking string) ToolOutcome {
+				if call.Function.Name == "read_test_data" {
+					return ToolOutcome{Content: evidence}
+				}
+				return execute(ctx, key, call, record, thinking)
+			}
+			calls := 0
+			client := taskClient(func(_ context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
+				calls++
+				switch calls {
+				case 1:
+					return testTaskResponse("read_test_data", "{}"), nil
+				case 2:
+					if len(request.Tools) != 0 {
+						t.Fatal("expected a synchronous compression request")
+					}
+					return nil, fmt.Errorf("admission: %w", llm.ErrTokenBudget)
+				case 3:
+					if !reflect.DeepEqual(request.Tools, task.Grace.Tools) || len(request.Messages) != len(messages)+3 || !reflect.DeepEqual(request.Messages[:len(messages)], messages) {
+						t.Fatal("expected the original conversation and submission-only tools")
+					}
+					result := request.Messages[len(messages)+1]
+					if result.ToolCallID != "read_test_data" || result.ExtractText() != evidence {
+						t.Fatal("final submission lost the latest tool result")
+					}
+					return testTaskResponse("submit_test_result", `{"value":42}`), nil
+				default:
+					t.Fatal("unexpected call after final submission")
+					return nil, nil
+				}
+			})
+			history := session.New(t.TempDir(), "main", "fake", session.SessionOptions{})
+			t.Cleanup(func() { _ = history.Finalize() })
+			runner := NewRunner(Deps{LLMClient: client, Session: history}, task)
+			result, err := runner.Run(t.Context(), messages, "data")
+			if err != nil || !result.Completed || result.StopReason != StopTokenBudget || calls != 3 {
+				t.Fatalf("result=%+v error=%v calls=%d", result, err, calls)
+			}
+		})
 	}
 }
