@@ -96,6 +96,12 @@ func splitSamePathHeader(rest string) (oldPath string, newPath string, ok bool) 
 // runner, if non-nil, is used to execute git subprocesses through a
 // shared concurrency limiter.
 func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref string, runner *gitcmd.Runner) ([]model.Diff, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	lines := splitDiffLines(diffText)
 	var diffs []model.Diff
 	var current *model.Diff
@@ -108,15 +114,18 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	// like "++i" renders as "+++i" and still counts as an insertion.
 	inHunk := false
 
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-
 	for _, line := range lines {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if oldPath, newPath, ok := parseDiffHeaderLine(line); ok {
 			// Flush previous diff
 			if current != nil {
 				current.Diff = strings.TrimSuffix(buf.String(), "\n")
 				finalizeDiff(ctx, current, repoDir, ref, runner)
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				diffs = append(diffs, *current)
 				buf.Reset()
 			}
@@ -178,6 +187,9 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	if current != nil {
 		current.Diff = strings.TrimSuffix(buf.String(), "\n")
 		finalizeDiff(ctx, current, repoDir, ref, runner)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		diffs = append(diffs, *current)
 	}
 
