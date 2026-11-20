@@ -8,11 +8,76 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/model"
 )
+
+func TestChangeSelectionUsesHeadGitignore(test *testing.T) {
+	repo := test.TempDir()
+	git(test, repo, "init", "-q")
+	write := func(name, content string) {
+		test.Helper()
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0600); err != nil {
+			test.Fatal(err)
+		}
+	}
+	for _, name := range []string{"modified.tmp", "deleted.tmp", "keep.tmp", "from.tmp", "into.go", "visible.go"} {
+		write(name, name+" before\n")
+	}
+	write(".gitignore", "visible.go\n")
+	git(test, repo, "add", "-f", ".")
+	git(test, repo, "commit", "-qm", "Before")
+	base := git(test, repo, "rev-parse", "HEAD")
+	git(test, repo, "mv", "from.tmp", "moved.go")
+	git(test, repo, "mv", "into.go", "moved.tmp")
+	git(test, repo, "rm", "deleted.tmp")
+	for _, name := range []string{"added.tmp", "modified.tmp", "keep.tmp", "visible.go"} {
+		write(name, name+" after\n")
+	}
+	write(".gitignore", "*.tmp\n!keep.tmp\n")
+	git(test, repo, "add", "-f", ".")
+	git(test, repo, "commit", "-qm", "After")
+	head := git(test, repo, "rev-parse", "HEAD")
+	git(test, repo, "checkout", "-q", "--detach", base)
+	write(".gitignore", "*.go\n")
+
+	paths := func(changes []model.Diff) []string {
+		var result []string
+		for _, change := range changes {
+			result = append(result, change.NewPath)
+		}
+		slices.Sort(result)
+		return result
+	}
+	for mode, provider := range map[string]*diff.Provider{"commit": diff.NewCommitProvider(repo, head, nil), "range": diff.NewProvider(repo, base, head, nil)} {
+		test.Run(mode, func(test *testing.T) {
+			review, err := provider.GetDiff(test.Context())
+			if err != nil {
+				test.Fatal(err)
+			}
+			input, err := PrepareInput(test.Context(), Input{RepoDir: repo, Mode: mode, Resolution: diff.InputResolution{ResolvedBase: base, ResolvedHead: head}})
+			if err != nil {
+				test.Fatal(err)
+			}
+			want := []string{".gitignore", "keep.tmp", "moved.go", "visible.go"}
+			if !slices.Equal(paths(review), want) || !slices.Equal(paths(input.Diffs), want) {
+				test.Fatalf("review=%q analysis=%q want=%q", paths(review), paths(input.Diffs), want)
+			}
+			code, err := prepareCodeTools(test.Context(), input)
+			if err != nil {
+				test.Fatal(err)
+			}
+			observation, err := code.execute(test.Context(), "file_read", map[string]any{"file_path": "modified.tmp"})
+			if err != nil || !strings.Contains(observation.ReturnedContent, "modified.tmp after") {
+				test.Fatalf("ignored change unavailable as context: %+v, %v", observation, err)
+			}
+		})
+	}
+}
 
 func TestExactPathspecsRespectArgumentBudget(test *testing.T) {
 	groups := [][]string{{"parent", "parent/keep"}}

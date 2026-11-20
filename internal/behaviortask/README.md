@@ -23,7 +23,9 @@ endpoints once in the Review preparation path, then pass the resulting SHA value
 to `PrepareInput` to obtain
 the comparison's full authorized diff inventory, including deletions and
 renames. It ignores caller-supplied diffs and does not use Review's selected-file
-list. Supply captured context with provenance and user exclusions. Direct library
+list. Both roles filter changed paths using the root `.gitignore` from the head
+commit. This filters diffs, not reads or searches for supporting context.
+Supply captured context with provenance and user exclusions. Direct library
 callers bypassing `PrepareInput` remain responsible for binding their diffs to
 those endpoints. Commit and range patches use the head revision's versioned
 attributes. If the active Git environment overrides the repository, index or

@@ -51,6 +51,13 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 			return input, err
 		}
 	}
+	if len(changes) > 0 {
+		patterns, err := diff.LoadGitignoreAtRef(ctx, input.RepoDir, input.Resolution.ResolvedHead, runner)
+		if err != nil {
+			return input, err
+		}
+		changes = slices.DeleteFunc(changes, func(change model.Diff) bool { return patterns.Matches(change.NewPath) })
+	}
 	excluded := make([]bool, len(changes))
 	var pathGroups [][]string
 	var renameGroups [][]string

@@ -206,6 +206,11 @@ ocr review -c abc123
 Reviews the diff produced by `git show abc123` (i.e., the changes that
 single commit introduced).
 
+Commit and range reviews omit changed paths matched by the root `.gitignore`
+in the target commit (`--commit` or the resolved `--to`), not the working tree.
+Analysis uses the same rule for its change list. An ignored file can still be
+read as context; use `--exclude` to prevent Analysis from reading it.
+
 ### Resuming interrupted reviews
 
 Every `ocr review` run persists a local session log under
