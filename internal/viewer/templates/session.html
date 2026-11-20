@@ -112,7 +112,10 @@
 
 {{if .Session.Comments}}
 <div class="comments-section">
+    <div class="comments-heading">
     <h3>Review Comments <span class="findings-count">({{len .Session.Comments}} findings)</span></h3>
+    <button type="button" class="collapse-all-btn" data-collapse-all>Collapse all</button>
+    </div>
     <div class="comments-toolbar">
     <div class="toolbar-filters">
     {{with severityCounts .Session.Comments}}
@@ -189,6 +192,8 @@
                     <button type="button" class="mark-btn" data-set-mark="fixed">Fixed</button>
                     <button type="button" class="mark-btn" data-set-mark="ignored">Ignored</button>
                     <button type="button" class="mark-btn mark-clear" data-set-mark="">Clear</button>
+                    {{/* $ is the page data, not the comment: the range rebinds dot. */}}
+                    {{template "agent-actions" dict "Comment" . "Repo" $.Session.Summary.CWD "Branch" $.Session.Summary.GitBranch}}
                 </div>
             </div>
         {{end}}
@@ -255,7 +260,7 @@
 </details>
 {{end}}
 
-{{if $.Static}}<script>{{$.InlineJS}}</script>{{else}}<script src="/static/a11y.js"></script><script src="/static/pager.js"></script><script src="/static/session.js"></script>{{end}}
+{{if $.Static}}<script>{{$.InlineJS}}</script>{{else}}<script src="/static/a11y.js"></script><script src="/static/pager.js"></script><script src="/static/agent.js"></script><script src="/static/session.js"></script>{{end}}
 </main>
 </body>
 </html>
@@ -264,6 +269,59 @@
 
 {{/* Terminal-state rendering for the meta bar: classed by outcome, unclassed
      for unrecognized states. Invoked with .Session.Summary as dot. */}}
+{{/* Per-finding handoff into a coding agent. The prompt is built in
+     agent.js rather than here, because every vendor uses a different
+     parameter name for it (q / prompt / text) and each truncates at a
+     different length; that mapping belongs in one place.
+
+     The finding's text is read from the rendered card instead of being
+     repeated here, so a session with hundreds of findings does not carry
+     every code block twice.
+
+     The menu is ordered app -> CLI -> extension per vendor. No vendor
+     documents a prefilled-prompt scheme for its CLI, so "Copy prompt for
+     agent" is the CLI path and the menu says so instead of offering a dead
+     link. */}}
+{{define "agent-actions"}}
+<div class="agent-actions" data-agent-actions
+     data-repo="{{.Repo}}"
+     data-branch="{{.Branch}}"
+     data-file="{{.Comment.FilePath}}"
+     data-start="{{.Comment.StartLine}}"
+     data-end="{{.Comment.EndLine}}"
+     data-category="{{.Comment.Category}}"
+     data-severity="{{.Comment.Severity}}">
+    <button type="button" class="agent-btn" data-agent-menu-toggle aria-expanded="false">
+        <span class="agent-btn-label">Fix with agent</span>
+        <span class="chevron-sm" aria-hidden="true">{{icon "chevron-down"}}</span>
+    </button>
+    {{/* A plain disclosure list, not an ARIA menu: the menu-button pattern
+         promises arrow-key navigation and focus movement that this does not
+         implement, so the roles are dropped and the button's aria-expanded
+         carries the open state. */}}
+    <div class="agent-menu" hidden>
+        <div class="agent-menu-label">App</div>
+        {{/* href is a placeholder that agent.js overwrites with the real deep
+             link when the menu opens. An anchor without href is not focusable,
+             so the attribute stays - the value just must never be followed as
+             shipped, hence the inert scheme rather than "#", which would scroll
+             the page if it ever were. */}}
+        <a class="agent-menu-item" data-agent-open="claude-app" href="about:blank">Claude Code</a>
+        <a class="agent-menu-item" data-agent-open="codex" href="about:blank">Codex</a>
+        <a class="agent-menu-item" data-agent-open="cursor" href="about:blank">Cursor</a>
+        <div class="agent-menu-sep" aria-hidden="true"></div>
+        <div class="agent-menu-label">Editor extension</div>
+        <a class="agent-menu-item" data-agent-open="claude-vscode" href="about:blank">Claude Code (VS Code)</a>
+        <a class="agent-menu-item" data-agent-open="vscode-agents" href="about:blank">VS Code agent</a>
+        <div class="agent-menu-sep" aria-hidden="true"></div>
+        <button type="button" class="agent-menu-item" data-agent-copy>Copy prompt for agent</button>
+    </div>
+    {{/* The live region stays in the accessibility tree and only its text
+         changes, so a copy is announced. */}}
+    <span class="agent-copied" data-agent-copied role="status"></span>
+</div>
+{{end}}
+
 {{define "meta-status"}}{{if .Aborted}}<span class="meta-status status-aborted">aborted</span>{{else if .Legacy}}<span class="meta-status status-legacy">legacy</span>{{else if eq .TerminalState "complete"}}<span class="meta-status status-complete">complete</span>{{else if eq .TerminalState "partial"}}<span class="meta-status status-partial">partial</span>{{else if eq .TerminalState "failed"}}<span class="meta-status status-failed">failed</span>{{else if eq .TerminalState "skipped"}}<span class="meta-status status-legacy">skipped</span>{{else}}<span class="meta-status">{{.TerminalState}}</span>{{end}}{{end}}
 
 {{define "task-cards"}}
