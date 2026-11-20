@@ -168,6 +168,75 @@ func TestRenderMarkdownTableLinkRetention(test *testing.T) {
 	}
 }
 
+func TestRenderMarkdownTableRulesAndAlignment(test *testing.T) {
+	markdown := "| Key | Mode | Cost |\n| :-- | :--: | --: |\n| `alpha` | **on** | 20 |\n| b | off | 1 |"
+	rendered := renderMarkdown(markdown, 40)
+	var lines []string
+	for line := range strings.SplitSeq(ansi.Strip(rendered), "\n") {
+		if trimmed := strings.TrimRight(line, " "); trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	want := " Key      Mode    Cost\n━━━━━━━  ━━━━━━  ━━━━━━\n alpha     on       20\n───────  ──────  ──────\n b        off        1"
+	if got := strings.Join(lines, "\n"); got != want {
+		test.Fatalf("unexpected table layout:\n%s\nwant:\n%s", got, want)
+	}
+	for _, styled := range []string{"\x1b[1;93mKey", "\x1b[92malpha", "\x1b[95;1mon", "\x1b[90m━"} {
+		if !strings.Contains(rendered, styled) {
+			test.Errorf("missing table style %q: %q", styled, rendered)
+		}
+	}
+}
+
+func TestRenderMarkdownTableWrapsByDisplayWidth(test *testing.T) {
+	if got := wrapMarkdownCell("ab\u89c4\u5219\u3002", 6); got != "ab\u89c4\n\u5219\u3002" {
+		test.Errorf("closing punctuation separated from its word: %q", got)
+	}
+	path := "pages/src/content/docs/en/cli-reference.md:134"
+	prose := strings.Repeat("\u5de5\u4f5c\u6d41", 30)
+	markdown := "| Location | Details |\n| --- | --- |\n| `" + path + "` | " + prose + " **END** |"
+	for _, width := range []int{38, 72, 120} {
+		plain := ansi.Strip(renderMarkdown(markdown, width))
+		lines := strings.Split(strings.TrimSpace(plain), "\n")
+		rules := strings.Fields(lines[1])
+		if len(rules) != 2 || ansi.StringWidth(rules[0]) >= ansi.StringWidth(rules[1]) {
+			test.Fatalf("long description did not receive more space at width %d:\n%s", width, plain)
+		}
+		var left, right strings.Builder
+		for _, line := range lines[2:] {
+			if ansi.StringWidth(line) > width {
+				test.Fatalf("line exceeds %d columns: %q", width, line)
+			}
+			boundary := ansi.StringWidth(rules[0])
+			left.WriteString(strings.TrimSpace(ansi.Cut(line, 0, boundary)))
+			right.WriteString(strings.TrimSpace(ansi.Cut(line, boundary+2, width)))
+		}
+		if left.String() != path || strings.ReplaceAll(right.String(), " ", "") != prose+"END" {
+			test.Fatalf("wrapped cell content changed at width %d:\n%s", width, plain)
+		}
+	}
+}
+
+func TestRenderMarkdownTableBoundaries(test *testing.T) {
+	markdown := "Before\n\n> | Value |\n> | --- |\n> | `&lt; \\. \\|` |\n\n| Next |\n| --- |\n| &#27;[8mvisible&#27;[0m |\n\nAfter"
+	rendered := renderMarkdown(markdown, 32)
+	plain := ansi.Strip(rendered)
+	for _, fragment := range []string{"Before", "|  Value", `|  &lt; \. |`, "Next", "visible", "After"} {
+		if !strings.Contains(plain, fragment) {
+			test.Errorf("missing %q in %q", fragment, plain)
+		}
+	}
+	if strings.Contains(rendered, "\x1b[8m") || strings.Count(plain, "━") < 2 {
+		test.Fatalf("unsafe or unrendered table: %q", rendered)
+	}
+	for _, fixture := range []struct{ body, want string }{{"", "ABC"}, {"\n| 1 | 2 | 3 |", "A:1B:2C:3"}} {
+		plain := ansi.Strip(renderMarkdown("| A | B | C |\n| --- | --- | --- |"+fixture.body, 6))
+		if strings.Join(strings.Fields(plain), "") != fixture.want {
+			test.Errorf("lost narrow table: %q", plain)
+		}
+	}
+}
+
 func TestRenderMarkdownTerminalSafety(test *testing.T) {
 	markdown := "**Safe**\x1b[2J\x1b]52;c;c2VjcmV0\a\n\n[Reference](https://example.invalid/evidence)\n\n![Diagram](https://example.invalid/image.png)\n\n&#27;]52;c;c2VjcmV0&#7;\n"
 	rendered := renderMarkdown(markdown, 100)
