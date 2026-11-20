@@ -37,6 +37,7 @@ type jsonlWriter struct {
 	scanPaths   []string
 	resumedFrom string
 	file        *os.File
+	lockFile    *os.File
 	writer      *bufio.Writer
 	lastUUID    string // tracks chain of records via parentUuid
 }
@@ -119,9 +120,32 @@ func (jw *jsonlWriter) open() error {
 		return fmt.Errorf("open session file: %w", err)
 	}
 
+	lockPath := sessionLockPath(filename)
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		f.Close()
+		os.Remove(filename)
+		return fmt.Errorf("open session lock: %w", err)
+	}
+	if err := lockExclusive(lf); err != nil {
+		lf.Close()
+		f.Close()
+		os.Remove(lockPath)
+		os.Remove(filename)
+		return fmt.Errorf("lock session: %w", err)
+	}
+
 	jw.file = f
+	jw.lockFile = lf
 	jw.writer = bufio.NewWriter(f)
 	return nil
+}
+
+func (jw *jsonlWriter) closeLockLocked() {
+	if jw.lockFile != nil {
+		_ = jw.lockFile.Close()
+		jw.lockFile = nil
+	}
 }
 
 func (jw *jsonlWriter) writeRecordLocked(rec map[string]any) {
@@ -172,6 +196,12 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
 	jw.writeRecordLocked(rec)
+	// Flush now so a reader can see the run, and its metadata, before the
+	// first checkpoint. The buffer would otherwise hold this record through
+	// a long model request.
+	if jw.writer != nil {
+		jw.writer.Flush()
+	}
 	jw.lastUUID = uuid
 	return uuid
 }
@@ -379,6 +409,10 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
+	// Drop the liveness lock when this function returns. On success
+	// session_end is flushed first, so a reader sees the terminal record.
+	// On failure the session file is already closed and the run is not live.
+	defer jw.closeLockLocked()
 	rec := map[string]any{
 		"uuid":             uuid,
 		"parentUuid":       jw.lastUUID,
@@ -434,4 +468,5 @@ func (jw *jsonlWriter) flushAndClose() {
 	if jw.file != nil {
 		jw.file.Close()
 	}
+	jw.closeLockLocked()
 }
