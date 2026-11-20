@@ -86,11 +86,36 @@ func TestResolveEnv(t *testing.T) {
 			},
 		},
 		{
+			name: "trace content enabled",
+			envs: map[string]string{"OCR_TRACE_CONTENT": "1"},
+			check: func(t *testing.T, cfg Config) {
+				if !cfg.SpanContent {
+					t.Error("expected SpanContent=true")
+				}
+			},
+		},
+		{
+			name: "trace attrs passthrough",
+			envs: map[string]string{
+				"OCR_TRACE_NAME": "my-trace", "OCR_TRACE_ENV": "ci",
+				"OCR_TRACE_SESSION": "s1", "OCR_TRACE_RELEASE": "abc", "OCR_TRACE_TAGS": "a,b",
+			},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.TraceName != "my-trace" || cfg.TraceEnv != "ci" ||
+					cfg.TraceSession != "s1" || cfg.TraceRelease != "abc" || cfg.TraceTags != "a,b" {
+					t.Errorf("trace attrs not resolved: %+v", cfg)
+				}
+			},
+		},
+		{
 			name: "no env vars leaves defaults",
 			envs: map[string]string{},
 			check: func(t *testing.T, cfg Config) {
 				if cfg.Enabled {
 					t.Error("expected Enabled=false")
+				}
+				if cfg.SpanContent {
+					t.Error("expected SpanContent=false")
 				}
 			},
 		},
@@ -103,6 +128,8 @@ func TestResolveEnv(t *testing.T) {
 				"OCR_ENABLE_TELEMETRY", "OTEL_SERVICE_NAME",
 				"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_PROTOCOL",
 				"OCR_CONTENT_LOGGING",
+				"OCR_TRACE_CONTENT", "OCR_TRACE_NAME", "OCR_TRACE_ENV",
+				"OCR_TRACE_SESSION", "OCR_TRACE_RELEASE", "OCR_TRACE_TAGS",
 			}
 			for _, k := range envKeys {
 				t.Setenv(k, "")

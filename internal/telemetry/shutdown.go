@@ -25,6 +25,7 @@ func Shutdown(ctx context.Context) error {
 	}
 
 	shutdownFuncs = nil
+	activeCfg.Store(nil)
 	// Reinitialization must rebuild both providers and their metric instruments.
 	initialized = false
 	initMetricsOnce = false

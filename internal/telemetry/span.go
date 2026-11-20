@@ -26,7 +26,9 @@ func StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) 
 	if !IsEnabled() {
 		return ctx, trace.SpanFromContext(ctx)
 	}
-	return getTracer().Start(ctx, name, opts...)
+	ctx, span := getTracer().Start(ctx, name, opts...)
+	applyTraceAttrs(ctx, span)
+	return ctx, span
 }
 
 // ContextWithTraceParentFromEnv extracts W3C traceparent from the TRACEPARENT
@@ -78,6 +80,8 @@ func SetAttr(span trace.Span, key string, value interface{}) {
 		span.SetAttributes(attribute.Bool(key, v))
 	case float64:
 		span.SetAttributes(attribute.Float64(key, v))
+	case []string:
+		span.SetAttributes(attribute.StringSlice(key, v))
 	default:
 		span.SetAttributes(attribute.String(key, ""))
 	}

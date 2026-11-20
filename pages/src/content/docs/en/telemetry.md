@@ -191,11 +191,20 @@ notices.
 
 ## Content logging
 
-Telemetry exports the **shape** of LLM traffic (counts, durations,
-statuses) but **never** the actual prompts or responses. OCR makes no
-attempt to attach LLM message content to spans or events — the data
-that leaves the process is the metric / event schema documented above
-and nothing else.
+By default, telemetry exports the **shape** of LLM traffic (counts,
+durations, statuses) but **never** the actual prompts or responses —
+the data that leaves the process is the metric / event schema
+documented above and nothing else.
+
+Setting `OCR_TRACE_CONTENT=1` opts in to span-level content capture:
+prompts, completions, reasoning content, tool call arguments and
+results, and usage details are attached to `llm.request` and
+`tool.execute.*` spans as `langfuse.observation.*` / `gen_ai.*`
+attributes and **exported to the configured collector**. Captured
+content can include source code, diffs and anything else present in
+the review context — potentially secrets — so enable it only with a
+collector you trust, such as a self-hosted Langfuse, and treat the
+resulting traces as sensitive data.
 
 The `content_logging` config key (and `OCR_CONTENT_LOGGING=1` env
 override) is plumbed through the config layer but currently does **not**
@@ -328,7 +337,7 @@ and continues; the review still produces its normal output.
 | OTLP works locally, fails in prod | Check that the protocol matches the collector. The default is gRPC, and many managed backends accept OTLP over HTTP only — set `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` and use the HTTP port (`4318`, not `4317`). |
 | Nothing arrives, no error | The exporter is created lazily, so a wrong endpoint fails silently at export time rather than at startup. Check the collector's access log for the path being requested: for the HTTP protocols the endpoint is a base URL and the signal path is appended, so `http://host:4318` posts to `http://host:4318/v1/traces`. |
 | Spans show but no metrics | Some collectors only enable the traces pipeline by default; add a `metrics` pipeline in the config. |
-| Prompts missing from spans | OCR never attaches prompt content to telemetry — see [Content logging](#content-logging). Inspect transcripts via [Session Viewer](../viewer/) instead. |
+| Prompts missing from spans | Prompt content is opt-in via `OCR_TRACE_CONTENT=1` — see [Content logging](#content-logging). Inspect transcripts via [Session Viewer](../viewer/) instead. |
 
 ## See Also
 

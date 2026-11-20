@@ -50,6 +50,7 @@ func setupEnabledTelemetry(t *testing.T) {
 		func(ctx context.Context) error { return tp.Shutdown(ctx) },
 		func(ctx context.Context) error { return mp.Shutdown(ctx) },
 	}
+	activeCfg.Store(nil)
 	initMetricsOnce = false
 	t.Cleanup(func() {
 		_ = tp.Shutdown(context.Background())

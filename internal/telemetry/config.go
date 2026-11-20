@@ -26,6 +26,12 @@ type Config struct {
 	OTLPEndpoint string // OTLP collector address (grpc/http)
 	OTLPProtocol string // "grpc", "http/protobuf", "http/json"
 	ContentLog   bool   // Include prompt/response content in log events
+	SpanContent  bool   // Include prompt/response content as span attributes
+	TraceName    string // langfuse.trace.name applied to every span
+	TraceEnv     string // langfuse.environment applied to every span
+	TraceSession string // langfuse.session.id applied to every span
+	TraceRelease string // langfuse.release applied to every span
+	TraceTags    string // langfuse.tags applied to every span
 }
 
 // DefaultConfig returns a disabled default configuration.
@@ -59,6 +65,14 @@ func resolveEnv(cfg *Config) {
 	if os.Getenv("OCR_CONTENT_LOGGING") == "1" {
 		cfg.ContentLog = true
 	}
+	if os.Getenv("OCR_TRACE_CONTENT") == "1" {
+		cfg.SpanContent = true
+	}
+	cfg.TraceName = os.Getenv("OCR_TRACE_NAME")
+	cfg.TraceEnv = os.Getenv("OCR_TRACE_ENV")
+	cfg.TraceSession = os.Getenv("OCR_TRACE_SESSION")
+	cfg.TraceRelease = os.Getenv("OCR_TRACE_RELEASE")
+	cfg.TraceTags = os.Getenv("OCR_TRACE_TAGS")
 }
 
 // telemetrySection matches the telemetry key in ~/.opencodereview/config.json.

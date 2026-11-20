@@ -151,9 +151,14 @@ OCR 通过 OTel meter 记录数值 metric——计数与直方图，由 collecto
 
 ## 内容日志
 
-遥测导出 LLM 流量的**形状**（计数、时长、状态），但**绝不**导出实际 prompt 或
-响应。OCR 不尝试把 LLM 消息内容附加到 span 或 event——离开进程的数据仅限于上面
-记录的 metric / event schema，别无其他。
+默认情况下，遥测导出 LLM 流量的**形状**（计数、时长、状态），但**绝不**导出实际 prompt 或
+响应——离开进程的数据仅限于上面记录的 metric / event schema，别无其他。
+
+设置 `OCR_TRACE_CONTENT=1` 可选择开启 span 级内容抓取：prompt、补全、推理内容、
+工具调用的参数与结果，以及用量明细会作为 `langfuse.observation.*` / `gen_ai.*`
+属性附加到 `llm.request` 和 `tool.execute.*` span，并**导出到配置的 collector**。
+被抓取的内容可能包含源代码、diff 以及评审上下文中的任何其他内容——可能含敏感信息——
+因此请只在你信任的 collector（例如自托管 Langfuse）下启用，并把生成的 trace 视为敏感数据。
 
 `content_logging` config key（和 `OCR_CONTENT_LOGGING=1` 环境覆盖）已接入配置层，
 但目前**不**控制任何发出 prompt 内容的代码路径。请将该标志视为保留位。
@@ -272,7 +277,7 @@ OCR 导出**一切**。没有采样配置；OTel 的采样是 collector 的责�
 | 什么都没导出 | `OCR_ENABLE_TELEMETRY` / `telemetry.enabled` 未设置。默认**关闭**。 |
 | OTLP 本地可用，生产失败 | OCR 当前仅实现 OTLP/gRPC——`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`（或 `http/json`）被接受但未接入，切换也无济于事。请验证 endpoint 以及 collector 是否在监听 gRPC。 |
 | span 显示但无 metric | 一些 collector 默认只启用 traces pipeline；在配置中加 `metrics` pipeline。 |
-| span 中缺 prompt | OCR 绝不把 prompt 内容附加到遥测——见[内容日志](#content-logging)。改用[会话查看器](../viewer/)检查转录。 |
+| span 中缺 prompt | prompt 内容需通过 `OCR_TRACE_CONTENT=1` 选择开启——见[内容日志](#content-logging)。改用[会话查看器](../viewer/)检查转录。 |
 
 ## 另见
 

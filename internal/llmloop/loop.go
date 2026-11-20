@@ -301,7 +301,17 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 	toolReqCount := r.task.MaxRounds
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
-	sessionID := uuid.NewString()
+	conversationID := uuid.NewString()
+	// langfuse.session.id is trace-level identity in Langfuse: inherit the run
+	// session the caller placed on the context so every span in this trace —
+	// LLM rounds, grace round, tool calls — filters under one ID. Callers
+	// without a run identity get an explicit fallback scoped to this
+	// conversation.
+	sessionID := telemetry.SessionIDFromContext(ctx)
+	if sessionID == "" {
+		sessionID = conversationID
+		ctx = telemetry.WithSessionID(ctx, sessionID)
+	}
 
 	// Async compression is owned by this conversation alone; the deferred
 	// cancel aborts any job still in flight when the conversation ends.
@@ -339,12 +349,14 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		reqCtx := r.RequestContext(ctx, taskKey, session.MainTask, rec.RequestNo)
 
 		_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+		telemetry.SetAttr(llmSpan, "gen_ai.conversation.id", conversationID)
+		telemetry.RecordLLMInput(llmSpan, sessionID, r.deps.Model, messages)
 		request := llm.ChatRequest{
 			Model:     r.deps.Model,
 			Messages:  messages,
 			Tools:     r.task.ToolDefs,
 			MaxTokens: r.task.MaxCompletionTokens,
-			SessionID: sessionID,
+			SessionID: conversationID,
 		}
 		resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, request)
 		duration := time.Since(startTime)
@@ -365,6 +377,7 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 			atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
 		}
 		telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+		telemetry.RecordLLMOutput(llmSpan, resp.VisibleContent(), resp.ToolCalls(), resp.ReasoningContent(), resp.Usage)
 		llmSpan.End()
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
@@ -448,11 +461,11 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 	switch stop {
 	case StopMaxRounds:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", taskKey)
-		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
+		completed = r.runGraceRound(ctx, messages, taskKey, sessionID, conversationID)
 	case StopTokenBudget:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Token budget exceeded (used %d > budget %d) for %s.\n",
 			r.TotalTokensUsed(), r.deps.MaxTokensBudget, taskKey)
-		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
+		completed = r.runGraceRound(ctx, messages, taskKey, sessionID, conversationID)
 	}
 	return completed, stop, nil
 }
@@ -475,7 +488,10 @@ func (r *Runner) tokenBudgetExceeded() bool {
 	return budget > 0 && r.TotalTokensUsed() > budget
 }
 
-func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID string) bool {
+// runGraceRound performs one final LLM call after the tool-request budget is
+// exhausted, giving the model a chance to submit any findings it identified
+// but did not yet report via code_comment.
+func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID, conversationID string) bool {
 	graceDefs := r.task.Grace.Tools
 	if len(graceDefs) == 0 {
 		return false
@@ -494,12 +510,14 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	reqCtx := r.RequestContext(ctx, taskKey, session.MainTask, rec.RequestNo)
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+	telemetry.SetAttr(llmSpan, "gen_ai.conversation.id", conversationID)
+	telemetry.RecordLLMInput(llmSpan, sessionID, r.deps.Model, messages)
 	request := llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  messages,
 		Tools:     graceDefs,
 		MaxTokens: r.task.MaxCompletionTokens,
-		SessionID: sessionID,
+		SessionID: conversationID,
 	}
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, request)
 	duration := time.Since(startTime)
@@ -522,6 +540,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
 	}
 	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	telemetry.RecordLLMOutput(llmSpan, resp.VisibleContent(), resp.ToolCalls(), resp.ReasoningContent(), resp.Usage)
 	llmSpan.End()
 	telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
