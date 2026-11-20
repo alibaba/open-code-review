@@ -111,7 +111,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "chatgpt", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "chatgpt", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "runcrate", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -233,6 +233,25 @@ func TestLookupProvider_OpenRouterDetails(t *testing.T) {
 	}
 	if p.EnvVar != "OPENROUTER_API_KEY" {
 		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "OPENROUTER_API_KEY")
+	}
+}
+
+func TestLookupProvider_RuncrateDetails(t *testing.T) {
+	p, ok := LookupProvider("runcrate")
+	if !ok {
+		t.Fatal("runcrate not found")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://api.runcrate.ai/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://api.runcrate.ai/v1")
+	}
+	if p.EnvVar != "RUNCRATE_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "RUNCRATE_API_KEY")
+	}
+	if len(p.Models) == 0 || p.Models[0] != "deepseek-ai/DeepSeek-V4-Flash" {
+		t.Errorf("Models = %v, want deepseek-ai/DeepSeek-V4-Flash first", p.Models)
 	}
 }
 
