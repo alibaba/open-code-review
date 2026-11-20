@@ -45,7 +45,9 @@ func renderMarkdown(markdown string, width int) string {
 	style.Document.BlockPrefix = ""
 	style.Document.BlockSuffix = ""
 	emphasis := true
+	headingColor := "12"
 	style.Heading.Bold = &emphasis
+	style.Heading.Color = &headingColor
 	for _, heading := range []*glamouransi.StyleBlock{&style.H1, &style.H2, &style.H3, &style.H4, &style.H5, &style.H6} {
 		heading.Prefix = ""
 	}

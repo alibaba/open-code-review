@@ -36,6 +36,15 @@ func TestRenderMarkdown(test *testing.T) {
 	}
 }
 
+func TestRenderMarkdownHeadingColor(test *testing.T) {
+	for level := 1; level <= 6; level++ {
+		rendered := renderMarkdown(strings.Repeat("#", level)+" Heading", 80)
+		if !strings.Contains(rendered, "\x1b[94;1mHeading") {
+			test.Errorf("level %d heading is not bold blue: %q", level, rendered)
+		}
+	}
+}
+
 func TestRenderMarkdownCodeSpanEntities(test *testing.T) {
 	for _, fixture := range []struct {
 		name, markdown, want string
