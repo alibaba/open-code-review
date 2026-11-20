@@ -426,6 +426,20 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:        "llmtr",
+		DisplayName: "LLMTR",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://llmtr.com/v1",
+		EnvVar:      "LLMTR_API_KEY",
+		Models: []string{
+			"llmtr/qwen3-8-27b",
+			"llmtr/qwen3-6-35b",
+			"anthropic/claude-sonnet-5",
+			"deepseek/deepseek-v4-pro",
+			"qwen/qwen3.8-max",
+		},
+	},
+	{
 		Name:        "xai",
 		DisplayName: "xAI Grok API",
 		Protocol:    ProtocolOpenAIChatCompletions,

@@ -111,7 +111,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "chatgpt", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "chatgpt", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "llmtr", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -233,6 +233,25 @@ func TestLookupProvider_OpenRouterDetails(t *testing.T) {
 	}
 	if p.EnvVar != "OPENROUTER_API_KEY" {
 		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "OPENROUTER_API_KEY")
+	}
+}
+
+func TestLookupProvider_LLMTRDetails(t *testing.T) {
+	p, ok := LookupProvider("llmtr")
+	if !ok {
+		t.Fatal("llmtr not found")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://llmtr.com/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://llmtr.com/v1")
+	}
+	if p.EnvVar != "LLMTR_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "LLMTR_API_KEY")
+	}
+	if !ModelListContains(p.Models, "llmtr/qwen3-8-27b") {
+		t.Error(`llmtr models do not contain "llmtr/qwen3-8-27b"`)
 	}
 }
 

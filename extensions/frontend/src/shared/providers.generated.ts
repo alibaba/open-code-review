@@ -228,6 +228,20 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     ]
   },
   {
+    "name": "llmtr",
+    "displayName": "LLMTR",
+    "protocol": "openai",
+    "baseUrl": "https://llmtr.com/v1",
+    "envVar": "LLMTR_API_KEY",
+    "models": [
+      "llmtr/qwen3-8-27b",
+      "llmtr/qwen3-6-35b",
+      "anthropic/claude-sonnet-5",
+      "deepseek/deepseek-v4-pro",
+      "qwen/qwen3.8-max"
+    ]
+  },
+  {
     "name": "mimo",
     "displayName": "Xiaomi MiMo API",
     "protocol": "openai",

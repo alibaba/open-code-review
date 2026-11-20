@@ -21,6 +21,7 @@ internal fun generatedPresetProviderNames(): Set<String> = setOf(
     "kimi",
     "kimi-global",
     "litellm",
+    "llmtr",
     "mimo",
     "minimax",
     "minimax-cn",
