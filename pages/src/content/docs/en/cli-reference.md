@@ -93,7 +93,11 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 The main command. Resolves a Git diff, groups the changed files
 semantically, dispatches one sub-agent per group, collects review
-comments, and prints them.
+comments, and prints them. Final `review` and `scan` reports list findings
+from least to most severe in text, JSON, and SARIF: `low`, `medium`, `high`,
+then `critical`. Findings whose reported severity is missing or unrecognized
+come before `low`. Ties keep their collection order, which can vary between
+parallel runs.
 
 ### Synopsis
 
