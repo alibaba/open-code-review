@@ -424,7 +424,11 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			if report.SessionID == "" || report.SessionID != payload.SessionID || report.Comparison.Head == report.Comparison.Old {
 				test.Fatalf("identity: %s", data)
 			}
-			summaries, err := session.ListSessions(repo)
+			sessionRepo, err := resolveRepoDir(repo)
+			if err != nil {
+				test.Fatal(err)
+			}
+			summaries, err := session.ListSessions(sessionRepo)
 			if err != nil || len(summaries) != 1 || summaries[0].Analysis == nil || !summaries[0].Analysis.Enabled || summaries[0].SessionID != report.SessionID || report.ArtifactDir != filepath.Join(strings.TrimSuffix(summaries[0].FilePath, ".jsonl"), "analysis") {
 				test.Fatalf("single report: %+v, %v; artifacts=%s", summaries, err, report.ArtifactDir)
 			}
