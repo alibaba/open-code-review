@@ -92,6 +92,10 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 핵심 명령입니다. Git diff를 해석하고, 변경된 파일을 의미 단위로 묶고, 그룹마다 서브
 Agent를 하나씩 붙여 리뷰 코멘트를 모아 출력합니다.
+`review`와 `scan`의 최종 보고서는 텍스트, JSON, SARIF 형식 모두에서 지적 사항을
+심각도가 낮은 순서(`low`, `medium`, `high`, `critical`)로 나열합니다. 심각도가 없거나
+그 값을 인식할 수 없는 지적 사항은 `low`보다 앞에 표시됩니다. 심각도가 같으면 수집된
+순서를 유지하지만, 병렬 처리로 인해 이 순서는 실행할 때마다 달라질 수 있습니다.
 
 ### 명령 형식 {#synopsis}
 

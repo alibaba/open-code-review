@@ -89,6 +89,8 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 ## `ocr review`
 
 主命令。解析 Git diff，把语义相关的文件分组，为每组分发一个子 agent，收集评审评论并打印。
+`review` 和 `scan` 的最终报告在文本、JSON 和 SARIF 三种格式中都按严重程度从低到高列出问题：`low`、`medium`、`high`、`critical`。
+未指定严重程度或严重程度无法识别的问题排在 `low` 之前。同一级别的问题保留本次运行的收集顺序；由于是并行执行，多次运行的顺序可能不同。
 
 ### 概要
 
