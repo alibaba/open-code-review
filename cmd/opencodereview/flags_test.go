@@ -386,6 +386,40 @@ func TestParseScanFlags_NormalizedFormat(t *testing.T) {
 	}
 }
 
+func TestParseScanFlags_InvalidBatch(t *testing.T) {
+	for _, value := range []string{"bogus", "by-languag", "language", "directory"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := parseScanFlags([]string{"--batch", value})
+			if err == nil {
+				t.Fatalf("expected error for invalid batch %q", value)
+			}
+			if !strings.Contains(err.Error(), "invalid --batch value") {
+				t.Errorf("error = %v, want it to name the --batch flag", err)
+			}
+		})
+	}
+}
+
+func TestParseScanFlags_NormalizedBatch(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"none", "none"},
+		{"by-language", "by-language"},
+		{"by-directory", "by-directory"},
+		{" By-Language ", "by-language"},
+		{"", ""},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			opts, err := parseScanFlags([]string{"--batch", tc.in})
+			if err != nil {
+				t.Fatalf("parseScanFlags: %v", err)
+			}
+			if opts.batch != tc.want {
+				t.Errorf("batch = %q, want %q", opts.batch, tc.want)
+			}
+		})
+	}
+}
+
 func TestConcurrencyFlagUsageUsesSubtask(t *testing.T) {
 	var reviewOpts reviewOptions
 	reviewCmd := &cobra.Command{Use: "review"}

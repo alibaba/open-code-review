@@ -119,6 +119,20 @@ func validateOutputFormat(format string) (string, error) {
 	}
 }
 
+// validateBatchStrategy normalizes the --batch value and rejects anything that
+// is not one of the documented strategies. The template-level BATCH_STRATEGY
+// keeps its lenient fallback to "none" (see internal/scan.parseBatchStrategy),
+// but a CLI typo should fail fast instead of silently disabling batching.
+func validateBatchStrategy(strategy string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(strategy))
+	switch normalized {
+	case "", "none", "by-language", "by-directory":
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("invalid --batch value %q: must be 'none', 'by-language', or 'by-directory'", strategy)
+	}
+}
+
 func normalizeDiffTarget(from, to, commit string) string {
 	if from != "" && to == "" && commit == "" {
 		return "HEAD"
@@ -176,6 +190,11 @@ func validateScanOptions(opts *scanOptions) error {
 		return err
 	}
 	opts.outputFormat = normalizedFormat
+	normalizedBatch, err := validateBatchStrategy(opts.batch)
+	if err != nil {
+		return err
+	}
+	opts.batch = normalizedBatch
 	if opts.maxTools < 0 {
 		return fmt.Errorf("--max-tools must be a non-negative integer (0 means use template default)")
 	}
