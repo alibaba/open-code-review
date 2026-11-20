@@ -370,18 +370,47 @@ func TestGitGrep_InvalidRef_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestGitGrep_PerlRegexp_InvalidPattern_ReturnsError(t *testing.T) {
-	dir := setupTestRepo(t)
-	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
-	result, err := p.gitGrep(context.Background(), "(unclosed", false, true, nil)
-	if err == nil {
-		t.Fatal("expected invalid perl regexp to return an error")
+func TestGitGrep_PerlRegexp_InvalidPattern_FallsBackToLiteral(t *testing.T) {
+	const note = "searched as literal"
+	tests := []struct {
+		name      string
+		commit    bool
+		runner    bool
+		pattern   string
+		wantMatch bool
+	}{
+		{name: "workspace match", pattern: "Hello(", wantMatch: true},
+		{name: "workspace no match", pattern: `Set("gorm:`},
+		{name: "commit match", commit: true, pattern: "Hello(", wantMatch: true},
+		{name: "commit no match", commit: true, pattern: "(unclosed"},
+		{name: "runner match", runner: true, pattern: "Hello(", wantMatch: true},
+		{name: "runner no match", runner: true, pattern: "(unclosed"},
 	}
-	if result != "" {
-		t.Errorf("expected empty result for invalid perl regexp, got: %s", result)
-	}
-	if !strings.Contains(err.Error(), "git grep failed") {
-		t.Errorf("expected git grep failure, got: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := setupTestRepo(t)
+			fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+			if tt.commit {
+				fr.Ref = getHeadCommit(t, dir)
+				fr.Mode = ModeCommit
+			}
+			if tt.runner {
+				fr.Runner = gitcmd.New(4)
+			}
+			result, err := NewCodeSearch(fr).gitGrep(context.Background(), tt.pattern, false, true, nil)
+			if err != nil {
+				t.Fatalf("expected literal fallback, got error: %v", err)
+			}
+			if !strings.Contains(result, note) {
+				t.Errorf("expected fallback note %q, got: %s", note, result)
+			}
+			if got := strings.Contains(result, "hello.go"); got != tt.wantMatch {
+				t.Errorf("hello.go present = %v, want %v; result: %s", got, tt.wantMatch, result)
+			}
+			if !tt.wantMatch && !strings.Contains(result, "No matches found") {
+				t.Errorf("expected 'No matches found', got: %s", result)
+			}
+		})
 	}
 }
 
@@ -820,4 +849,19 @@ func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	assertContains(t, args, "--no-index")
 	assertContains(t, args, "--exclude-standard")
 	assertNotContains(t, args, "--untracked")
+}
+
+func TestGitGrep_PerlRegexp_InvalidPattern_NoIndexFallback(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("call(x)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	result, err := NewCodeSearch(fr).gitGrep(context.Background(), "call(", false, true, nil)
+	if err != nil {
+		t.Fatalf("expected literal fallback, got error: %v", err)
+	}
+	if !strings.Contains(result, "searched as literal text instead.") || !strings.Contains(result, "a.txt") {
+		t.Errorf("unexpected result: %s", result)
+	}
 }
