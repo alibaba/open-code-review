@@ -27,6 +27,7 @@ const (
 	ExcludeDefaultPath       = model.ExcludeDefaultPath
 	ExcludeSecret            = model.ExcludeSecret
 	ExcludeProviderDirectory = model.ExcludeProviderDirectory
+	ExcludeGitignore         = model.ExcludeGitignore
 	ExcludeDeleted           = model.ExcludeDeleted
 	ExcludeBinary            = model.ExcludeBinary
 	ExcludeTooLarge          = model.ExcludeTooLarge
@@ -66,15 +67,16 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 		Entries: make([]DiffPreviewEntry, 0, len(a.diffs)+len(set.Excluded)),
 	}
 
-	// Provider directory exclusions happen before the per-file gates, so
-	// selectFiles cannot report them. Preview lists them as well, so its file
-	// and line totals match the tracked Git changeset without implying that
-	// include rules can make them reviewable. ForEachInOrder keeps them in
-	// changeset order instead of listing them first.
+	// Provider directory and .gitignore exclusions happen before the per-file
+	// gates, so selectFiles cannot report them. Preview lists them as well, so
+	// its file and line totals match the tracked Git changeset without implying
+	// that include rules can make them reviewable. ForEachInOrder keeps them in
+	// changeset order instead of listing them first, and names which of the two
+	// removed each one rather than reporting both as the directory rule.
 	decisions := a.selectFiles(a.diffs)
 	next := 0
-	set.ForEachInOrder(func(d model.Diff, providerExcluded bool) {
-		if providerExcluded {
+	set.ForEachInOrder(func(d model.Diff, providerReason model.ExcludeReason) {
+		if providerReason != model.ExcludeNone {
 			result.TotalInsertions += d.Insertions
 			result.TotalDeletions += d.Deletions
 			result.ExcludedCount++
@@ -83,7 +85,7 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 				Insertions:    d.Insertions,
 				Deletions:     d.Deletions,
 				Status:        diffStatus(d),
-				ExcludeReason: ExcludeProviderDirectory,
+				ExcludeReason: providerReason,
 			})
 			return
 		}

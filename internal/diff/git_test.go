@@ -169,9 +169,9 @@ func TestGetDiffSetWalksChangesetOrder(t *testing.T) {
 
 	var got []string
 	var flags []bool
-	set.ForEachInOrder(func(d model.Diff, providerExcluded bool) {
+	set.ForEachInOrder(func(d model.Diff, providerReason model.ExcludeReason) {
 		got = append(got, d.NewPath)
-		flags = append(flags, providerExcluded)
+		flags = append(flags, providerReason != model.ExcludeNone)
 	})
 	if !slices.Equal(got, paths) {
 		t.Errorf("ForEachInOrder paths = %v, want %v", got, paths)
@@ -188,10 +188,12 @@ func TestGetDiffSetWalksChangesetOrderAcrossGitignoreDrop(t *testing.T) {
 	runGitTest(t, repo, "config", "user.name", "Test User")
 	runGitTest(t, repo, "config", "commit.gpgsign", "false")
 
-	// skip.log is tracked, so the commit diff still emits it. Commit mode
-	// then drops the .gitignore match, and excludedAt must not count that drop.
+	// skip.log is tracked so git diff still emits it, and .gitignore covers it.
+	// It used to be dropped from both slices; it is now reported as excluded,
+	// so the walk has two adjacent exclusions of different kinds and excludedAt
+	// has to stay right across both.
 	all := []string{"a.go", "skip.log", "target/mid.go", "z.go"}
-	want := []string{"a.go", "target/mid.go", "z.go"}
+	want := []string{"a.go", "skip.log", "target/mid.go", "z.go"}
 	write := func(content string) {
 		t.Helper()
 		for _, p := range all {
@@ -212,8 +214,9 @@ func TestGetDiffSetWalksChangesetOrderAcrossGitignoreDrop(t *testing.T) {
 	runGitTest(t, repo, "add", ".gitignore")
 	runGitTest(t, repo, "commit", "-q", "-m", "add files")
 	write("package p\n\nconst V = 2\n")
-	// Commit the edits so this exercises commit mode, where a .gitignore
-	// match is still omitted. Workspace mode reviews that file instead.
+	// Commit the edits so this exercises commit mode, which is where
+	// .gitignore is consulted at all. Workspace mode reviews that file
+	// instead of excluding it.
 	runGitTest(t, repo, "add", "-u")
 	runGitTest(t, repo, "commit", "-q", "-m", "edit files")
 
@@ -223,16 +226,22 @@ func TestGetDiffSetWalksChangesetOrderAcrossGitignoreDrop(t *testing.T) {
 	}
 
 	var got []string
-	var flags []bool
-	set.ForEachInOrder(func(d model.Diff, providerExcluded bool) {
+	var reasons []model.ExcludeReason
+	set.ForEachInOrder(func(d model.Diff, providerReason model.ExcludeReason) {
 		got = append(got, d.NewPath)
-		flags = append(flags, providerExcluded)
+		reasons = append(reasons, providerReason)
 	})
 	if !slices.Equal(got, want) {
 		t.Errorf("ForEachInOrder paths = %v, want %v", got, want)
 	}
-	if len(flags) != 3 || flags[0] || !flags[1] || flags[2] {
-		t.Errorf("providerExcluded flags = %v, want [false true false]", flags)
+	wantReasons := []model.ExcludeReason{
+		model.ExcludeNone,
+		model.ExcludeGitignore,
+		model.ExcludeProviderDirectory,
+		model.ExcludeNone,
+	}
+	if !slices.Equal(reasons, wantReasons) {
+		t.Errorf("ForEachInOrder reasons = %v, want %v", reasons, wantReasons)
 	}
 }
 
