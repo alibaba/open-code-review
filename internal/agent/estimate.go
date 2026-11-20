@@ -67,32 +67,6 @@ func estimateDiffFileTokens(d model.Diff) int64 {
 	return total
 }
 
-func (a *Agent) dispatchBudgetStop(group FileGroup) string {
-	if a.budgetExceeded.Load() {
-		return "aggregate token budget reached before dispatch completed"
-	}
-	limit := a.args.MaxTokensBudget
-	if limit <= 0 {
-		return ""
-	}
-	usage := a.args.SharedTokensUsed
-	if usage == nil {
-		usage = a.runner.TotalTokensUsed
-	}
-	used := usage()
-	if used >= limit {
-		return fmt.Sprintf("token budget reached: used %d of %d tokens", used, limit)
-	}
-	var estimated int64
-	for _, changed := range group.Diffs {
-		estimated += estimateDiffFileTokens(changed)
-	}
-	if estimated > limit-used {
-		return fmt.Sprintf("stopped dispatch: group estimate %d exceeds remaining budget %d (%d of %d tokens used)", estimated, limit-used, used, limit)
-	}
-	return ""
-}
-
 // estimateDiffCost projects token usage for reviewing the given diffs. It is
 // the diff-path analogue of scan.estimateCost and is used for the pre-review
 // scale warning.

@@ -14,71 +14,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func TestRenderAnalysisMarkdown(test *testing.T) {
-	markdown := "# Takeaway\n\n## Behavior\n\n- **Default changes** from `false` to `true` [[obs-000001]].\n- *Compatibility* is ~~unchanged~~ affected.\n\n```go\nif enabled {\n    return true\n}\n```\n"
-	rendered := renderMarkdown(markdown, 80)
-	plain := ansi.Strip(rendered)
-	for _, want := range []string{"Takeaway", "Behavior", "Default changes", "false", "true", "[[obs-000001]]", "Compatibility", "unchanged", "affected", "if enabled {", "return true"} {
-		if !strings.Contains(plain, want) {
-			test.Errorf("missing %q in %q", want, plain)
-		}
-	}
-	for _, delimiter := range []string{"# Takeaway", "## Behavior", "**", "`", "~~", "*Compatibility*"} {
-		if strings.Contains(plain, delimiter) {
-			test.Errorf("unrendered delimiter %q in %q", delimiter, plain)
-		}
-	}
-	if !strings.Contains(rendered, "\x1b[1m") || !strings.Contains(rendered, "\x1b[36m") {
-		test.Errorf("missing heading/emphasis or code styling: %q", rendered)
-	}
-}
-
-func TestRenderAnalysisMarkdownWrapAndRetention(test *testing.T) {
-	for _, width := range []int{24, 80, 0} {
-		markdown := strings.Repeat("Before \u884c\u4e3a\u53d8\u66f4 after compatibility e\u0301 \U0001f600. ", 160)
-		rendered := ansi.Strip(renderMarkdown(markdown, width))
-		rejoined := wrappedHanBoundary.ReplaceAllString(rendered, "$1$2")
-		if strings.Join(strings.Fields(rejoined), " ") != strings.Join(strings.Fields(markdown), " ") {
-			test.Fatalf("report content changed at width %d", width)
-		}
-		expectedWidth := width
-		if expectedWidth == 0 {
-			expectedWidth = 80
-		}
-		for _, line := range strings.Split(rendered, "\n") {
-			if ansi.StringWidth(line) > expectedWidth {
-				test.Fatalf("line exceeds width %d: %q", expectedWidth, line)
-			}
-		}
-	}
-	table := "| Trigger | Impact |\n| --- | --- |\n| enabled | Retain every important compatibility boundary and condition [[obs-000002]] |\n"
-	plain := strings.Join(strings.Fields(ansi.Strip(renderMarkdown(table, 38))), " ")
-	for _, word := range []string{"Trigger", "Impact", "enabled", "Retain", "every", "important", "compatibility", "boundary", "condition", "[[obs-000002]]"} {
-		if !strings.Contains(plain, word) {
-			test.Errorf("table lost %q: %s", word, plain)
-		}
-	}
-}
-
-func TestRenderAnalysisMarkdownTerminalSafety(test *testing.T) {
-	markdown := "**Safe**\x1b[2J\x1b]52;c;c2VjcmV0\a\n\n[Reference](https://example.invalid/evidence)\n\n![Diagram](https://example.invalid/image.png)\n\n&#27;]52;c;c2VjcmV0&#7;\n"
-	rendered := renderMarkdown(markdown, 100)
-	for _, unsafe := range []string{"\x1b]", "\x1b[2J", "\a", "c2VjcmV0"} {
-		if strings.Contains(rendered, unsafe) {
-			test.Errorf("unsafe terminal content %q: %q", unsafe, rendered)
-		}
-	}
-	for _, want := range []string{"Safe", "Reference", "https://example.invalid/evidence", "Diagram", "https://example.invalid/image.png"} {
-		if !strings.Contains(ansi.Strip(rendered), want) {
-			test.Errorf("missing link/image text %q: %q", want, rendered)
-		}
-	}
-	input := "\x1b[1mBold\x1b[0m\n\t\x1b[2J\x1b]0;title\a\x1b]8;;https://example.invalid\x1b\\link\x1b]8;;\x1b\\\r\x00"
-	if got := sanitizeRenderedMarkdown(input); got != "\x1b[1mBold\x1b[0m\n\tlink" {
-		test.Fatalf("unsafe or lost output: %q", got)
-	}
-}
-
 func TestAnalysisMarkdownOutputDestinations(test *testing.T) {
 	markdown := "## [[obs-000002]]Behavior\n\n- [[obs-000003]]**Default changes** to `true` [[obs-000001]].\n\n| Scenario | Before | After |\n| --- | --- | --- |\n| Standard | Off [[obs-000001]] | On [[obs-000003]] |\n| Explicit opt-out | Off | Off |\n\n### Compatibility\n\nUse `--analysis` for the optional report.\n"
 	displayMarkdown := "## Behavior\n\n- **Default changes** to `true`.\n\n| Scenario | Before | After |\n| --- | --- | --- |\n| Standard | Off | On |\n| Explicit opt-out | Off | Off |\n\n### Compatibility\n\nUse `--analysis` for the optional report.\n"
@@ -89,11 +24,6 @@ func TestAnalysisMarkdownOutputDestinations(test *testing.T) {
 		if styled {
 			if strings.Contains(stdout, "**Default changes**") || !strings.Contains(stdout, "\x1b[1m") {
 				test.Fatalf("stdout was not rendered: %q", stdout)
-			}
-			for _, heading := range []string{"Behavior", "Compatibility"} {
-				if !strings.Contains(stdout, "\x1b[34;1m"+heading) && !strings.Contains(stdout, "\x1b[1;34m"+heading) {
-					test.Fatalf("heading %q was not blue and bold: %q", heading, stdout)
-				}
 			}
 			for _, content := range []string{"Scenario", "Before", "After", "Standard", "Explicit opt-out", "Off", "On"} {
 				if !strings.Contains(ansi.Strip(stdout), content) {

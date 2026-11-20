@@ -24,6 +24,9 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 	runner := code.runner
 	workspace := input.Mode == "workspace"
 	baseArgs := []string{"--no-optional-locks", "-c", "core.quotepath=false"}
+	if !workspace {
+		baseArgs = append(baseArgs, "--attr-source="+input.Resolution.ResolvedHead)
+	}
 	if input.Resolution.BaseIsEmpty && !workspace {
 		baseArgs = append(baseArgs, "show", "--format=", "--root", "--diff-merges=first-parent")
 	} else {

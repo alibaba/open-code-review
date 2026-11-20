@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,7 +55,32 @@ func (r *Runner) LocalOnly() *Runner {
 	return &Runner{sem: r.sem, localOnly: true}
 }
 
+type UnsupportedViewError struct{ variable string }
+
+func (err *UnsupportedViewError) Error() string {
+	return fmt.Sprintf("analysis cannot reproduce the active Git view: %s is set", err.variable)
+}
+
+func (r *Runner) WithAttributeSource(revision string) *Runner {
+	view := *r
+	view.configArgs = append(slices.Clone(r.configArgs), "--attr-source="+revision)
+	return &view
+}
+
 func (r *Runner) LocalForRepository(ctx context.Context, repo string) (*Runner, error) {
+	for _, key := range []string{
+		"GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_INDEX_FILE",
+		"GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS",
+		"GIT_ATTR_SOURCE", "GIT_ATTR_NOSYSTEM", "GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS",
+		"GIT_REPLACE_REF_BASE", "GIT_NO_REPLACE_OBJECTS", "GIT_GRAFT_FILE", "GIT_SHALLOW_FILE",
+	} {
+		if _, set := os.LookupEnv(key); set {
+			return nil, &UnsupportedViewError{key}
+		}
+	}
+	if count := os.Getenv("GIT_CONFIG_COUNT"); count != "" && count != "0" {
+		return nil, &UnsupportedViewError{"GIT_CONFIG_COUNT"}
+	}
 	absolute, err := filepath.Abs(repo)
 	if err != nil {
 		return nil, err
@@ -62,7 +88,7 @@ func (r *Runner) LocalForRepository(ctx context.Context, repo string) (*Runner, 
 	if r != nil && r.configuredRepo == absolute {
 		return r, nil
 	}
-	local := &Runner{sem: r.LocalOnly().sem, localOnly: true, configuredRepo: absolute}
+	local := &Runner{sem: r.LocalOnly().sem, localOnly: true, configuredRepo: absolute, configArgs: []string{"-c", "core.fsmonitor=false", "-c", "log.showSignature=false"}}
 	keys, err := local.Output(ctx, repo, "config", "--null", "--name-only", "--list")
 	if err != nil {
 		return nil, err

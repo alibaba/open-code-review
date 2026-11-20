@@ -109,14 +109,6 @@ func previewMaxTokens(templateDefault, cliOverride int) (int, error) {
 // tool.ParseReviewMode(from, to, commit).RefValue(to, commit). Pass "" to
 // read the working tree, which is what scan wants.
 func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxGitProcs int, requireGit bool) (*commonContext, error) {
-	repoDir, isGit, err := resolveWorkingDir(repoDirInput, requireGit)
-	if err != nil {
-		return nil, err
-	}
-	return commonContextForRepo(repoDir, isGit, rulePath, contentRef, maxTools, gitcmd.New(maxGitProcs))
-}
-
-func commonContextForRepo(repoDir string, isGit bool, rulePath, contentRef string, maxTools int, gitRunner *gitcmd.Runner) (*commonContext, error) {
 	tpl, err := template.LoadDefault()
 	if err != nil {
 		return nil, fmt.Errorf("load default template: %w", err)
@@ -127,6 +119,15 @@ func commonContextForRepo(repoDir string, isGit bool, rulePath, contentRef strin
 	if err := tpl.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
+
+	repoDir, isGit, err := resolveWorkingDir(repoDirInput, requireGit)
+	if err != nil {
+		return nil, err
+	}
+
+	// Built before the resolver: the sniffer reads file content at contentRef
+	// through this limiter.
+	gitRunner := gitcmd.New(maxGitProcs)
 
 	resolver, fileFilter, err := rules.NewResolver(repoDir, rulePath, rules.ResolverOptions{
 		Ref:    contentRef,
@@ -823,7 +824,7 @@ func emitRunResult(
 	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
-	duration := time.Since(startTime)
+	duration := reviewDuration(ag, startTime)
 	telemetry.RecordReviewDuration(ctx, duration)
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
@@ -883,15 +884,15 @@ func emitRunResult(
 			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, analysis)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
-	if analysis != nil {
-		outputAnalysisText(out, analysis)
-	}
 	// Between the comments/warnings block and the project summary: the report is
 	// run-level diagnostics about how the comments were obtained, so it reads
 	// after them but must not separate the summary from the end of output.
 	outputRetryReportText(out, retryReport)
 	if summary := ag.ProjectSummary(); summary != "" {
 		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", markdownForOutput(out, summary))
+	}
+	if analysis != nil {
+		outputAnalysisText(out, analysis)
 	}
 	// Text rendering ignores fmt.Fprintf write errors; surface them here so a
 	// failed --output write (permission, disk full) fails the command non-zero

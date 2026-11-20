@@ -45,14 +45,14 @@ func TestProviderErrorSpansUseSafeSummary(test *testing.T) {
 	}
 }
 
-func TestSharedBudgetErrorStopsWithoutGraceRequest(test *testing.T) {
+func TestRequestBudgetErrorStopsWithoutGraceRequest(test *testing.T) {
 	for _, wrapped := range []bool{false, true} {
 		test.Run(fmt.Sprint(wrapped), func(test *testing.T) {
 			calls := 0
 			client := taskClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
 				calls++
 				if wrapped {
-					return nil, fmt.Errorf("shared client: %w", llm.ErrTokenBudget)
+					return nil, fmt.Errorf("request budget: %w", llm.ErrTokenBudget)
 				}
 				return nil, llm.ErrTokenBudget
 			})
@@ -67,14 +67,14 @@ func TestSharedBudgetErrorStopsWithoutGraceRequest(test *testing.T) {
 	}
 }
 
-func TestGraceRoundSharedBudgetOverridesRoundLimit(test *testing.T) {
+func TestGraceRoundRequestBudgetOverridesRoundLimit(test *testing.T) {
 	calls := 0
 	client := taskClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
 		calls++
 		if calls == 1 {
 			return testTaskResponse("read_test_data", "{}"), nil
 		}
-		return nil, fmt.Errorf("shared client: %w", llm.ErrTokenBudget)
+		return nil, fmt.Errorf("request budget: %w", llm.ErrTokenBudget)
 	})
 	history := session.New(test.TempDir(), "main", "fake", session.SessionOptions{})
 	test.Cleanup(func() { _ = history.Finalize() })

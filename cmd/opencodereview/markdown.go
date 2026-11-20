@@ -46,8 +46,6 @@ func renderMarkdown(markdown string, width int) string {
 	style.Document.BlockSuffix = ""
 	emphasis := true
 	style.Heading.Bold = &emphasis
-	headingColor := "4"
-	style.Heading.Color = &headingColor
 	for _, heading := range []*glamouransi.StyleBlock{&style.H1, &style.H2, &style.H3, &style.H4, &style.H5, &style.H6} {
 		heading.Prefix = ""
 	}
@@ -57,49 +55,29 @@ func renderMarkdown(markdown string, width int) string {
 	codeColor := "6"
 	style.Code.StylePrimitive = glamouransi.StylePrimitive{Color: &codeColor}
 	style.Link.Underline = &emphasis
+	wrapTables := true
 	markdownParser := goldmark.New(
 		goldmark.WithExtensions(extension.GFM, extension.DefinitionList),
 		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 	)
-	options := glamouransi.Options{Styles: style, WordWrap: width, InlineTableLinks: true, PreserveNewLines: true}
-	terminal := glamouransi.NewRenderer(options)
-	markdownRenderer := renderer.NewRenderer(renderer.WithNodeRenderers(util.Prioritized(terminal, 1000)))
+	markdownRenderer := renderer.NewRenderer(renderer.WithNodeRenderers(util.Prioritized(
+		glamouransi.NewRenderer(glamouransi.Options{
+			Styles:           style,
+			WordWrap:         width,
+			TableWrap:        &wrapTables,
+			InlineTableLinks: true,
+		}), 1000,
+	)))
 	source := []byte(markdown)
 	document := markdownParser.Parser().Parse(text.NewReader(source))
 	escapeCodeSpanEntities(document, source)
 	source = escapeCodeBlockBackslashes(document, source)
 	source = sanitizeMarkdownText(document, source)
-	source = normalizeMarkdownLineBreaks(document, source)
-	source, err := layoutMarkdownBlocks(document, source, options)
-	if err != nil {
-		return markdown
-	}
 	var rendered bytes.Buffer
 	if err := markdownRenderer.Render(&rendered, source, document); err != nil {
 		return markdown
 	}
 	return strings.TrimRight(sanitizeRenderedMarkdown(rendered.String()), "\n")
-}
-
-func normalizeMarkdownLineBreaks(document ast.Node, source []byte) []byte {
-	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
-		inline, ok := node.(*ast.Text)
-		if !entering || !ok || (!inline.SoftLineBreak() && !inline.HardLineBreak()) {
-			return ast.WalkContinue, nil
-		}
-		start := len(source)
-		source = append(source, inline.Value(source)...)
-		if inline.HardLineBreak() {
-			source = append(source, '\n')
-		} else {
-			source = append(source, ' ')
-		}
-		inline.Segment = text.NewSegment(start, len(source))
-		inline.SetSoftLineBreak(false)
-		inline.SetHardLineBreak(false)
-		return ast.WalkContinue, nil
-	})
-	return source
 }
 
 func sanitizeMarkdownText(document ast.Node, source []byte) []byte {
@@ -177,7 +155,6 @@ func escapeCodeSpanEntities(document ast.Node, source []byte) {
 			next := child.NextSibling()
 			literal := child.(*ast.Text).Value(source)
 			escaped := bytes.ReplaceAll(literal, []byte("&"), []byte("&amp;"))
-			escaped = bytes.ReplaceAll(escaped, []byte("\n"), []byte(" "))
 			node.ReplaceChild(node, child, ast.NewString(escaped))
 			child = next
 		}

@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,20 +14,19 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/behaviortask"
-	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/diff"
-	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/pathutil"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/workflow"
 )
 
 func validateAnalysisOptions(opts reviewOptions) error {
+	if opts.analysisMaxTokensBudget < 0 {
+		return fmt.Errorf("--analysis-max-tokens-budget must be a non-negative integer (0 means unlimited)")
+	}
 	if !opts.analysis {
 		return nil
-	}
-	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
-		return err
 	}
 	if opts.resume != "" || opts.preview {
 		return fmt.Errorf("--analysis cannot be combined with --resume or --preview")
@@ -38,27 +38,27 @@ func validateAnalysisOptions(opts reviewOptions) error {
 	return nil
 }
 
-func pinAnalysisInput(ctx context.Context, opts reviewOptions) (string, *diff.InputResolution, *gitcmd.Runner, error) {
-	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
-		return "", nil, nil, err
+type analysisRequest struct {
+	input                               behaviortask.Input
+	endpoint                            llm.ResolvedEndpoint
+	model, provider, language, reviewID string
+	budget                              int64
+	timeout                             time.Duration
+}
+
+func analysisInputForReview(cc *commonContext, opts reviewOptions, runtime *llmRuntime, reviewID string, resolution diff.InputResolution) analysisRequest {
+	input := behaviortask.Input{RepoDir: cc.RepoDir, Mode: reviewModeFromOptions(opts), Resolution: resolution}
+	if cc.FileFilter != nil {
+		input.ExcludePatterns = append([]string(nil), cc.FileFilter.Exclude...)
 	}
-	runner := gitcmd.New(opts.maxGitProcs).LocalOnly()
-	top, err := runner.Output(ctx, opts.repoDir, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return "", nil, nil, err
+	if opts.background != "" {
+		input.Contexts = []behaviortask.Context{{ID: "background", Kind: "background", Source: "review background input", Version: "v1", CollectedAt: time.Now().UTC().Format(time.RFC3339), Content: opts.background}}
 	}
-	repo := strings.TrimSuffix(string(top), "\n")
-	runner, err = runner.LocalForRepository(ctx, repo)
-	if err != nil {
-		return "", nil, nil, err
+	return analysisRequest{
+		input: input, endpoint: runtime.Endpoint,
+		model: runtime.Model, provider: runtime.Provider, language: runtime.RuntimeConfig.Language,
+		reviewID: reviewID, budget: int64(opts.analysisMaxTokensBudget), timeout: time.Duration(opts.concurrentTaskTimeout) * time.Minute,
 	}
-	if err := validateReviewRefsUsing(opts, func(ref string) ([]byte, error) {
-		return runner.Output(ctx, repo, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
-	}); err != nil {
-		return "", nil, nil, err
-	}
-	resolution, err := agent.ResolveComparisonInput(ctx, agent.Args{RepoDir: repo, From: opts.from, To: opts.to, Commit: opts.commit, GitRunner: runner})
-	return repo, resolution, runner, err
 }
 
 type analysisExecution struct {
@@ -71,28 +71,23 @@ type analysisExecution struct {
 	fallback   behaviortask.Result
 }
 
-func newAnalysisExecution(cc *commonContext, opts reviewOptions, runtime *llmRuntime, budget *workflow.Budget, reviewID string, resolution *diff.InputResolution) *analysisExecution {
-	execution := &analysisExecution{closeRaw: func() {}, timeout: time.Duration(opts.concurrentTaskTimeout) * time.Minute,
-		fallback: behaviortask.Result{SchemaVersion: behaviortask.SchemaVersion, SubmissionStatus: "not_submitted", StopReason: "preparation", Model: runtime.Model}}
+func newAnalysisExecution(request analysisRequest) *analysisExecution {
+	input := request.input
+	execution := &analysisExecution{closeRaw: func() {}, timeout: request.timeout,
+		fallback: behaviortask.Result{
+			SchemaVersion: behaviortask.SchemaVersion, SubmissionStatus: "not_submitted", StopReason: "preparation", Model: request.model,
+			Comparison: behaviortask.Comparison{Repository: input.RepoDir, Mode: input.Mode,
+				Old: input.Resolution.ResolvedBase, Head: input.Resolution.ResolvedHead, BaseIsEmpty: input.Resolution.BaseIsEmpty},
+		},
+	}
 	execution.initialize = func(ctx context.Context) error {
-		return execution.prepare(ctx, cc, opts, runtime, budget, reviewID, resolution)
+		return execution.prepare(ctx, request)
 	}
 	return execution
 }
 
-func (execution *analysisExecution) prepare(ctx context.Context, cc *commonContext, opts reviewOptions, runtime *llmRuntime, budget *workflow.Budget, reviewID string, resolution *diff.InputResolution) error {
-	if resolution == nil {
-		return fmt.Errorf("analysis requires resolved comparison endpoints")
-	}
-	execution.fallback.Comparison = behaviortask.Comparison{Repository: cc.RepoDir, Mode: reviewModeFromOptions(opts), Old: resolution.ResolvedBase, Head: resolution.ResolvedHead, BaseIsEmpty: resolution.BaseIsEmpty}
-	input := behaviortask.Input{GitRunner: cc.GitRunner, RepoDir: cc.RepoDir, Mode: reviewModeFromOptions(opts), Resolution: *resolution}
-	if cc.FileFilter != nil {
-		input.ExcludePatterns = append([]string(nil), cc.FileFilter.Exclude...)
-	}
-	if opts.background != "" {
-		input.Contexts = []behaviortask.Context{{ID: "background", Kind: "background", Source: "review background input", Version: "v1", CollectedAt: time.Now().UTC().Format(time.RFC3339), Content: opts.background}}
-	}
-	input, err := behaviortask.PrepareInput(ctx, input)
+func (execution *analysisExecution) prepare(ctx context.Context, request analysisRequest) error {
+	input, err := behaviortask.PrepareInput(ctx, request.input)
 	if err != nil {
 		return err
 	}
@@ -101,33 +96,40 @@ func (execution *analysisExecution) prepare(ctx context.Context, cc *commonConte
 		return err
 	}
 	parent := filepath.Join(filepath.Dir(configPath), "analysis")
+	for ancestor := parent; ; ancestor = filepath.Dir(ancestor) {
+		resolved, err := pathutil.CanonicalPath(ancestor)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if pathutil.WithinBase(input.RepoDir, resolved) {
+			return behaviortask.ErrArtifactLocation
+		}
+		break
+	}
 	if err := os.MkdirAll(parent, 0700); err != nil {
 		return err
 	}
-	directory := filepath.Join(parent, reviewID)
-	tpl, err := template.LoadBehaviorDefault()
-	if err != nil {
-		return err
-	}
-	tpl.MaxTokens = cc.Template.MaxTokens
-	tpl.MaxToolRequestTimes = cc.Template.MaxToolRequestTimes
+	directory := filepath.Join(parent, request.reviewID)
 	execution.collector = llm.NewRetryCollector()
 	var raw *llm.RawHolder
 	if llm.RawLoggingEnabled() {
 		raw = llm.NewRawHolder()
 	}
-	client := budget.Wrap(llm.NewLLMClient(runtime.Endpoint, execution.collector, raw))
-	execution.runner, err = behaviortask.NewRunner(ctx, behaviortask.Deps{LLMClient: client, Model: runtime.Model, Language: runtime.RuntimeConfig.Language,
-		Template: tpl, ArtifactDir: directory, MaxTokensBudget: int64(opts.maxTokensBudget),
+	client := llm.NewLLMClient(request.endpoint, execution.collector, raw)
+	execution.runner, err = behaviortask.NewRunner(ctx, behaviortask.Deps{LLMClient: client, Model: request.model, Language: request.language,
+		ArtifactDir: directory, MaxTokensBudget: request.budget,
 		NewRequestMeta: func(key string, taskType session.TaskType, requestNo int) llm.RequestMeta {
-			return llm.RequestMeta{Provider: runtime.Provider, Model: runtime.Model, FilePath: key, TaskType: string(taskType), RequestNo: requestNo}
+			return llm.RequestMeta{Provider: request.provider, Model: request.model, FilePath: key, TaskType: string(taskType), RequestNo: requestNo}
 		},
 	}, input)
 	if err != nil {
 		return err
 	}
 	execution.directory = directory
-	execution.closeRaw = bindRawWriter(raw, cc.RepoDir, execution.runner.Session())
+	execution.closeRaw = bindRawWriter(raw, input.RepoDir, execution.runner.Session())
 	return nil
 }
 
@@ -158,33 +160,16 @@ func (execution *analysisExecution) report(result behaviortask.Result, runErr er
 
 type combinedResult struct {
 	*agent.Agent
-	report    *workflow.Report
-	budget    *workflow.Budget
-	reviewErr error
+	report        *workflow.Report
+	reviewErr     error
+	reviewElapsed time.Duration
 }
 
-func (result *combinedResult) TotalInputTokens() int64 {
-	usage, _ := result.budget.Snapshot()
-	return usage.InputTokens
-}
-func (result *combinedResult) TotalOutputTokens() int64 {
-	usage, _ := result.budget.Snapshot()
-	return usage.OutputTokens
-}
-func (result *combinedResult) TotalTokensUsed() int64 {
-	return result.budget.Total()
-}
-func (result *combinedResult) TotalCacheReadTokens() int64 {
-	usage, _ := result.budget.Snapshot()
-	return usage.CacheReadTokens
-}
-func (result *combinedResult) TotalCacheWriteTokens() int64 {
-	usage, _ := result.budget.Snapshot()
-	return usage.CacheWriteTokens
-}
-func (result *combinedResult) BudgetExceeded() bool {
-	_, exhausted := result.budget.Snapshot()
-	return exhausted || result.Agent.BudgetExceeded()
+func reviewDuration(provider ResultProvider, start time.Time) time.Duration {
+	if combined, ok := provider.(*combinedResult); ok {
+		return combined.reviewElapsed
+	}
+	return time.Since(start)
 }
 
 type analysisOutput struct {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-package workflow
+package behaviortask
 
 import (
 	"context"
@@ -23,19 +23,19 @@ func TestBudgetEstimatesContentAndReasoningOnce(test *testing.T) {
 		{name: "embedded reasoning", content: "<think>Investigate the paths.</think>Answer."},
 	} {
 		test.Run(fixture.name, func(test *testing.T) {
-			budget := NewBudget(1, 1)
+			budget := newBudget(1)
 			content := fixture.content
 			arguments := `{"file_path":"main.go"}`
 			response := &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{
 				Content: &content, ReasoningContent: fixture.reasoning,
 				ToolCalls: []llm.ToolCall{{Function: llm.FunctionCall{Name: "file_read", Arguments: arguments}}},
 			}}}}
-			client := budget.Wrap(testClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) { return response, nil }))
+			client := budget.wrap(fakeClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) { return response, nil }))
 			if _, err := client.CompletionsWithCtx(test.Context(), llm.ChatRequest{}); err != nil {
 				test.Fatal(err)
 			}
 			expected := int64(llm.CountTokens(content) + llm.CountTokens(fixture.reasoning) + llm.CountTokens(arguments))
-			usage, _ := budget.Snapshot()
+			usage := budget.snapshot()
 			if usage.OutputTokens != expected || response.Usage.CompletionTokens != expected {
 				test.Fatalf("usage=%+v response=%+v expected_output=%d", usage, response.Usage, expected)
 			}

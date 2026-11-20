@@ -187,16 +187,25 @@ func workspaceInventory(ctx context.Context, input Input, code *codeTools, track
 		}
 		byPath[filePath] = model.Diff{OldPath: filePath, NewPath: filePath, IsNew: !exists}
 	}
+	var candidates [][]string
+	paired := map[string]bool{}
 	for _, rename := range renames {
-		if rename.IsRenamed && byPath[rename.NewPath].IsNew && byPath[rename.OldPath].IsDeleted && (!code.allowed["old"][rename.OldPath] || !code.allowed["new"][rename.NewPath]) {
+		if !rename.IsRenamed || !byPath[rename.NewPath].IsNew || !byPath[rename.OldPath].IsDeleted {
+			continue
+		}
+		if !code.allowed["old"][rename.OldPath] || !code.fileAllowed("new", rename.NewPath) {
 			byPath[rename.NewPath] = rename
 			delete(byPath, rename.OldPath)
+			continue
 		}
+		paired[rename.OldPath], paired[rename.NewPath] = true, true
+		candidates = append(candidates, []string{rename.OldPath, rename.NewPath})
 	}
-	var candidates [][]string
 	var additions, deletions bool
+	allCandidates := true
 	for _, changed := range tracked {
 		if current, ok := byPath[changed.NewPath]; !ok || current.IsRenamed || untracked[changed.NewPath] {
+			allCandidates = false
 			continue
 		}
 		if changed.IsNew && code.fileAllowed("new", changed.NewPath) {
@@ -204,14 +213,20 @@ func workspaceInventory(ctx context.Context, input Input, code *codeTools, track
 		} else if changed.IsDeleted && code.allowed["old"][changed.OldPath] {
 			deletions = true
 		} else {
+			allCandidates = false
 			continue
 		}
-		candidates = append(candidates, []string{changed.NewPath})
+		if !paired[changed.NewPath] {
+			candidates = append(candidates, []string{changed.NewPath})
+		}
 	}
 	if additions && deletions {
 		batches, err := pathBatches(candidates, exactFilePathspec)
 		if err != nil {
 			return nil, nil, err
+		}
+		if len(batches) > 1 && allCandidates {
+			batches = [][]string{nil}
 		}
 		for _, batch := range batches {
 			args := append([]string{"diff", "--no-ext-diff", "--no-textconv", "--name-status", "-z", "--find-renames"}, endpoints...)
@@ -224,7 +239,7 @@ func workspaceInventory(ctx context.Context, input Input, code *codeTools, track
 				return nil, nil, err
 			}
 			for _, pair := range pairs {
-				if pair.IsRenamed {
+				if pair.IsRenamed && byPath[pair.OldPath].IsDeleted && byPath[pair.NewPath].IsNew {
 					byPath[pair.NewPath] = pair
 					delete(byPath, pair.OldPath)
 				}

@@ -5,6 +5,7 @@ package gitcmd
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -75,7 +76,7 @@ func TestRunner_New(t *testing.T) {
 	}
 }
 
-func TestLocalRepositoryIgnoresRedirectsAndDisablesFilters(t *testing.T) {
+func TestLocalRepositoryRejectsRedirectsAndDisablesFilters(t *testing.T) {
 	repo, other := initRepo(t), initRepo(t)
 	runner := New(1)
 	if _, err := runner.Run(t.Context(), repo, "config", "filter.fixture.clean", "unavailable-fixture-executable"); err != nil {
@@ -84,9 +85,15 @@ func TestLocalRepositoryIgnoresRedirectsAndDisablesFilters(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, ".gitattributes"), []byte("hello.txt filter=fixture\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
-	t.Setenv("GIT_WORK_TREE", other)
-	t.Setenv("GIT_INDEX_FILE", filepath.Join(other, "unused-index"))
+	for _, key := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, other)
+			var view *UnsupportedViewError
+			if _, err := runner.LocalForRepository(t.Context(), repo); !errors.As(err, &view) || view.variable != key {
+				t.Fatal(err)
+			}
+		})
+	}
 	local, err := runner.LocalForRepository(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)

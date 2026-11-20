@@ -125,7 +125,7 @@ func TestBehaviorReportFocusSurvivesEveryPhase(test *testing.T) {
 			}
 		}
 	}
-	if behavior.MaxTokens != 200000 || behavior.MaxCompletionTokens != 16384 || behavior.MaxToolRequestTimes != 100 {
+	if behavior.MaxTokens != 200000 || behavior.MaxCompletionTokens != 16384 || behavior.MaxToolRequestTimes != 300 {
 		test.Fatal("concise reporting must not reduce investigation or output budgets")
 	}
 	catalog, err := toolsconfig.LoadDefault()

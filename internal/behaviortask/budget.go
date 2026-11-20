@@ -1,53 +1,41 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-package workflow
+package behaviortask
 
 import (
 	"context"
 	"encoding/json"
 	"sync"
 
-	"github.com/alibaba/open-code-review/internal/behaviortask"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 )
 
-type Budget struct {
-	mu        sync.Mutex
-	maximum   int64
-	usage     behaviortask.Usage
-	total     int64
-	exhausted bool
-	slots     chan struct{}
+type requestBudget struct {
+	mu      sync.Mutex
+	maximum int64
+	usage   Usage
+	slots   chan struct{}
 }
 
-func NewBudget(maximum int64, concurrency int) *Budget {
-	if concurrency <= 0 {
-		concurrency = 8
-	}
-	return &Budget{maximum: maximum, slots: make(chan struct{}, concurrency)}
+func newBudget(maximum int64) *requestBudget {
+	return &requestBudget{maximum: maximum, slots: make(chan struct{}, 1)}
 }
 
-func (budget *Budget) Wrap(client llm.LLMClient) llm.LLMClient {
+func (budget *requestBudget) wrap(client llm.LLMClient) llm.LLMClient {
 	return &budgetClient{budget: budget, client: client}
 }
 
-func (budget *Budget) Snapshot() (behaviortask.Usage, bool) {
+func (budget *requestBudget) snapshot() Usage {
 	budget.mu.Lock()
 	defer budget.mu.Unlock()
-	return budget.usage, budget.exhausted
+	return budget.usage
 }
 
 type budgetClient struct {
-	budget *Budget
+	budget *requestBudget
 	client llm.LLMClient
-}
-
-func (budget *Budget) Total() int64 {
-	budget.mu.Lock()
-	defer budget.mu.Unlock()
-	return budget.total
 }
 
 func (client *budgetClient) CompletionsWithCtx(ctx context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
@@ -71,10 +59,7 @@ func (client *budgetClient) complete(ctx context.Context, request llm.ChatReques
 		return nil, false, err
 	}
 	budget.mu.Lock()
-	budgetReached := budget.maximum > 0 && budget.total >= budget.maximum
-	if budgetReached {
-		budget.exhausted = true
-	}
+	budgetReached := budget.maximum > 0 && budget.usage.TotalTokens >= budget.maximum
 	budget.mu.Unlock()
 	if budgetReached && !finalSubmission {
 		return nil, true, llm.ErrTokenBudget
@@ -104,7 +89,7 @@ func (client *budgetClient) complete(ctx context.Context, request llm.ChatReques
 			response.Usage = usage
 		}
 		budget.mu.Lock()
-		budget.total += max(usage.TotalTokens, usage.PromptTokens+usage.CompletionTokens)
+		budget.usage.TotalTokens += max(usage.TotalTokens, usage.PromptTokens+usage.CompletionTokens)
 		budget.usage.InputTokens += usage.PromptTokens
 		budget.usage.OutputTokens += usage.CompletionTokens
 		budget.usage.CacheReadTokens += usage.CacheReadTokens

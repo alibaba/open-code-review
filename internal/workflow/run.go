@@ -6,6 +6,7 @@ package workflow
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/behaviortask"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -14,6 +15,7 @@ import (
 type Outcome struct {
 	Comments      []model.LlmComment
 	ReviewError   error
+	ReviewElapsed time.Duration
 	Analysis      behaviortask.Result
 	AnalysisError error
 }
@@ -24,7 +26,9 @@ func Run(ctx context.Context, review func(context.Context) ([]model.LlmComment, 
 	workers.Add(2)
 	go func() {
 		defer workers.Done()
+		started := time.Now()
 		result.Comments, result.ReviewError = review(ctx)
+		result.ReviewElapsed = time.Since(started)
 	}()
 	go func() {
 		defer workers.Done()

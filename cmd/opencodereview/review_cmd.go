@@ -17,7 +17,6 @@ import (
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
-	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -31,30 +30,31 @@ import (
 )
 
 type reviewOptions struct {
-	rulePath              string
-	repoDir               string
-	from                  string
-	to                    string
-	commit                string
-	resume                string
-	excludes              string
-	outputFormat          string
-	audience              string
-	outputPath            string
-	background            string
-	backgroundFile        string
-	provider              string
-	model                 string
-	concurrency           int
-	concurrentTaskTimeout int
-	maxTools              int
-	maxGitProcs           int
-	maxTokens             int
-	maxTokensBudget       int
-	effort                string
-	noFilter              bool
-	preview               bool
-	analysis              bool
+	rulePath                string
+	repoDir                 string
+	from                    string
+	to                      string
+	commit                  string
+	resume                  string
+	excludes                string
+	outputFormat            string
+	audience                string
+	outputPath              string
+	background              string
+	backgroundFile          string
+	provider                string
+	model                   string
+	concurrency             int
+	concurrentTaskTimeout   int
+	maxTools                int
+	maxGitProcs             int
+	maxTokens               int
+	maxTokensBudget         int
+	effort                  string
+	noFilter                bool
+	preview                 bool
+	analysis                bool
+	analysisMaxTokensBudget int
 }
 
 var reviewOpts reviewOptions
@@ -123,18 +123,6 @@ func init() {
 }
 
 func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error) {
-	var sealedInput *diff.InputResolution
-	var localGit *gitcmd.Runner
-	if opts.analysis {
-		if err := validateAnalysisOptions(opts); err != nil {
-			return err
-		}
-		var err error
-		opts.repoDir, sealedInput, localGit, err = pinAnalysisInput(ctx, opts)
-		if err != nil {
-			return err
-		}
-	}
 	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
 	if err != nil {
 		return err
@@ -157,19 +145,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}()
 
 	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
-	backgroundCommit := opts.commit
-	if sealedInput != nil {
-		contentRef = sealedInput.ResolvedHead
-		if backgroundCommit != "" {
-			backgroundCommit = sealedInput.ResolvedHead
-		}
-	}
-	var cc *commonContext
-	if localGit != nil {
-		cc, err = commonContextForRepo(opts.repoDir, true, opts.rulePath, contentRef, 0, localGit)
-	} else {
-		cc, err = loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true)
-	}
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true)
 	if err != nil {
 		return err
 	}
@@ -177,19 +153,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security (#112): reject ref-option injection before any git invocation.
-	if sealedInput == nil {
-		if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
-			return err
-		}
+	if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
+		return err
 	}
 
-	bg, err := resolveBackgroundWith(cc.RepoDir, opts.background, opts.backgroundFile, backgroundCommit, func(repo, ref string) (string, error) {
-		if localGit == nil {
-			return getCommitMessage(repo, ref)
-		}
-		msg, err := localGit.Output(ctx, repo, "log", "-1", "--format=%B", "--end-of-options", ref)
-		return strings.TrimSpace(string(msg)), err
-	})
+	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
 	if err != nil {
 		return err
 	}
@@ -223,11 +191,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err != nil {
 		return err
 	}
-	var sharedBudget *workflow.Budget
-	if opts.analysis {
-		sharedBudget = workflow.NewBudget(int64(opts.maxTokensBudget), opts.concurrency)
-		rt.Client = sharedBudget.Wrap(rt.Client)
-	}
 	maxTokens, err := resolveMaxTokens(cc.Template.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
@@ -253,6 +216,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Model:    rt.Model,
 	}
 
+	var sealedInput *diff.InputResolution
 	if sealed != nil {
 		sealedInput = &sealed.Resolution
 	}
@@ -284,10 +248,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	planToolDefs = append(planToolDefs, mcpToolDefs...)
 	mainToolDefs = append(mainToolDefs, mcpToolDefs...)
 
-	var sharedTokensUsed func() int64
-	if sharedBudget != nil {
-		sharedTokensUsed = sharedBudget.Total
-	}
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
 		From:                  opts.from,
@@ -313,7 +273,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Resume:                resumeState,
 		SealedInput:           codeTools.resolution,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
-		SharedTokensUsed:      sharedTokensUsed,
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
@@ -345,11 +304,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	var comments []model.LlmComment
 	var runErr error
 	if opts.analysis {
-		execution := newAnalysisExecution(cc, opts, rt, sharedBudget, ag.Session().SessionID, codeTools.resolution)
+		execution := newAnalysisExecution(analysisInputForReview(cc, opts, rt, ag.Session().SessionID, *codeTools.resolution))
 		outcome := workflow.Run(runCtx, ag.Run, execution.run)
 		comments, runErr = outcome.Comments, outcome.ReviewError
 		report := execution.report(outcome.Analysis, outcome.AnalysisError)
-		resultProvider = &combinedResult{Agent: ag, report: report, budget: sharedBudget, reviewErr: runErr}
+		resultProvider = &combinedResult{Agent: ag, report: report, reviewErr: runErr, reviewElapsed: outcome.ReviewElapsed}
 		if report.Status != "completed" {
 			fmt.Fprintf(os.Stderr, "[ocr] warning: analysis execution %s; see the Analysis diagnostics in the result\n", report.Status)
 		}
@@ -407,7 +366,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		if emitted {
 			failureReport = nil
 		}
-		emitFailureUsage(resultProvider, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
+		emitFailureUsage(resultProvider, reviewDuration(resultProvider, startTime), opts.outputFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
 			if opts.analysis {
 				fmt.Fprintf(os.Stderr, "[ocr] Review session: %s (--analysis requires a fresh run)\n", id)
@@ -601,12 +560,6 @@ func requireGitRepo(dir string) error {
 // validateReviewRefs rejects ref-option injection (#112): any --from/--to/
 // --commit value must be a real commit ref and must not start with '-'.
 func validateReviewRefs(repoDir string, opts reviewOptions) error {
-	return validateReviewRefsUsing(opts, func(ref string) ([]byte, error) {
-		return runGitCmd(repoDir, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
-	})
-}
-
-func validateReviewRefsUsing(opts reviewOptions, verify func(string) ([]byte, error)) error {
 	refs := []struct {
 		flag string
 		ref  string
@@ -622,10 +575,7 @@ func validateReviewRefsUsing(opts reviewOptions, verify func(string) ([]byte, er
 		if strings.HasPrefix(item.ref, "-") {
 			return fmt.Errorf("%s value %q is not a valid git ref: refs must not start with '-'", item.flag, item.ref)
 		}
-		if out, err := verify(item.ref); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return err
-			}
+		if out, err := runGitCmd(repoDir, "rev-parse", "--verify", "--end-of-options", item.ref+"^{commit}"); err != nil {
 			msg := strings.TrimSpace(string(out))
 			if msg != "" {
 				return fmt.Errorf("%s value %q is not a valid commit ref: %s", item.flag, item.ref, msg)

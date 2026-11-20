@@ -17,6 +17,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/pathutil"
@@ -37,6 +38,7 @@ type Deps struct {
 type Runner struct {
 	indexes          map[string]string
 	toolTokens       int
+	budget           *requestBudget
 	loop             *llmloop.Runner
 	code             *codeTools
 	store            *observationStore
@@ -146,12 +148,13 @@ func NewRunner(ctx context.Context, deps Deps, input Input) (*Runner, error) {
 	for _, message := range deps.Template.FinalRound.Messages {
 		grace = append(grace, llm.NewTextMessage(message.Role, message.Content))
 	}
-	runner.loop = llmloop.NewRunner(llmloop.Deps{LLMClient: deps.LLMClient, Model: deps.Model, Session: runner.history, NewRequestMeta: deps.NewRequestMeta, MaxTokensBudget: deps.MaxTokensBudget, ProgressError: FailureSummary}, llmloop.Task{
+	runner.budget = newBudget(deps.MaxTokensBudget)
+	runner.loop = llmloop.NewRunner(llmloop.Deps{LLMClient: runner.budget.wrap(deps.LLMClient), Model: deps.Model, Session: runner.history, NewRequestMeta: deps.NewRequestMeta, MaxTokensBudget: deps.MaxTokensBudget, ProgressError: FailureSummary}, llmloop.Task{
 		ToolDefs: definitions, ExecuteTool: runner.executeTool, MaxRounds: deps.Template.MaxToolRequestTimes,
 		MaxContextTokens: deps.Template.MaxTokens, MaxCompletionTokens: deps.Template.MaxCompletionTokens,
 		EmptyResponseMessage: "Use an available evidence tool or submit_analysis; prose alone does not complete the analysis.",
 		Compression:          llmloop.CompressionPolicy{Messages: compression, SummaryTemplate: "\n\n<previous_behavior_summary>\n{{summary}}\n</previous_behavior_summary>"},
-		Grace:                llmloop.GracePolicy{Tools: []llm.ToolDef{submit}, Messages: grace},
+		Grace:                llmloop.GracePolicy{ReportErrors: true, Tools: []llm.ToolDef{submit}, Messages: grace},
 	})
 	return runner, nil
 }
@@ -252,7 +255,7 @@ func (runner *Runner) Run(ctx context.Context) (Result, error) {
 		Warnings: runner.loop.Warnings(), ToolFailures: runner.loop.ToolFailures(), Model: runner.deps.Model,
 		TemplateVersion: runner.deps.Template.Version, ToolsVersion: ToolsVersion, SessionID: runner.history.SessionID, ObservationIDs: ids,
 		ContextIndex: contextIndex(runner.contexts), MaxRounds: runner.deps.Template.MaxToolRequestTimes, MaxTokensBudget: runner.deps.MaxTokensBudget,
-		Usage: Usage{runner.loop.TotalInputTokens(), runner.loop.TotalOutputTokens(), runner.loop.TotalCacheReadTokens(), runner.loop.TotalCacheWriteTokens()}}
+		Usage: runner.budget.snapshot()}
 	result.CitedObservationIDs = []string{}
 	if runner.analysis != nil {
 		result.CitedObservationIDs = citedObservations(runner.analysis.Markdown)
@@ -277,6 +280,7 @@ var ErrResultWrite = errors.New("could not write analysis result")
 var ErrArtifactLocation = errors.New("behavior artifacts must be outside the analyzed repository")
 
 func FailureSummary(err error) string {
+	var view *gitcmd.UnsupportedViewError
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		return "analysis timed out"
@@ -284,6 +288,8 @@ func FailureSummary(err error) string {
 		return "analysis was canceled"
 	case errors.Is(err, ErrInitialPromptTooLarge):
 		return ErrInitialPromptTooLarge.Error()
+	case errors.As(err, &view):
+		return view.Error()
 	case errors.Is(err, ErrArtifactLocation):
 		return ErrArtifactLocation.Error()
 	case errors.Is(err, llm.ErrTokenBudget):

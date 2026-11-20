@@ -13,8 +13,8 @@ import (
 	"github.com/alibaba/open-code-review/internal/workflow"
 )
 
-func TestAnalysisPreparationSharesDeadlineWithoutBlockingReview(test *testing.T) {
-	execution := newAnalysisExecution(nil, reviewOptions{}, &llmRuntime{Model: "fake"}, nil, "review", nil)
+func TestAnalysisPreparationDeadlineDoesNotBlockReview(test *testing.T) {
+	execution := newAnalysisExecution(analysisRequest{model: "fake", reviewID: "review"})
 	execution.timeout = 100 * time.Millisecond
 	preparationStarted := make(chan struct{})
 	reviewStarted := make(chan struct{})
@@ -45,7 +45,7 @@ func TestAnalysisPreparationSharesDeadlineWithoutBlockingReview(test *testing.T)
 }
 
 func TestAnalysisPreparationFailureClosesInitializedResources(test *testing.T) {
-	execution := newAnalysisExecution(nil, reviewOptions{}, &llmRuntime{Model: "fake"}, nil, "review", nil)
+	execution := newAnalysisExecution(analysisRequest{model: "fake", reviewID: "review"})
 	closed := false
 	failure := errors.New("preparation failed")
 	execution.initialize = func(context.Context) error {

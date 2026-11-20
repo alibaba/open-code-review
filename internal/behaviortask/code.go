@@ -62,7 +62,13 @@ func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 	comparison.ID = contentHash(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%t", comparison.Repository, comparison.Mode, comparison.Old, comparison.Head, comparison.BaseIsEmpty))
 	current := tool.FileReader{RepoDir: input.RepoDir, Mode: tool.ModeCommit, Ref: comparison.Head, Runner: gitRunner}
 	previous := current
+	if !workspace {
+		current.Runner = gitRunner.WithAttributeSource(comparison.Head)
+	}
 	previous.Ref = comparison.Old
+	if !comparison.BaseIsEmpty {
+		previous.Runner = gitRunner.WithAttributeSource(comparison.Old)
+	}
 	if comparison.BaseIsEmpty {
 		previous.Mode = tool.ModeEmpty
 	}
@@ -142,18 +148,19 @@ func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 }
 
 func safePath(filePath string) bool {
-	if allowedext.IsSecretPath(filePath) {
+	lower := strings.ToLower(filePath)
+	if allowedext.IsSecretPath(filePath) || path.Base(lower) == ".git-credentials" || strings.HasSuffix("/"+lower, "/.docker/config.json") {
 		return false
 	}
 	if !tool.ValidWorkspacePath(filePath) || strings.ContainsAny(filePath, "\x00\r\n\t") {
 		return false
 	}
-	for _, component := range strings.Split(strings.ToLower(filePath), "/") {
+	for _, component := range strings.Split(lower, "/") {
 		if component == ".." || component == ".git" || component == ".ssh" || component == ".aws" || component == ".gnupg" {
 			return false
 		}
 	}
-	base := strings.ToLower(path.Base(filePath))
+	base := path.Base(lower)
 	return base != ".env" && !strings.HasPrefix(base, ".env.") && base != ".netrc" && base != ".npmrc" &&
 		base != ".pypirc" && base != "credentials" && !strings.HasPrefix(base, "id_rsa") && !strings.HasPrefix(base, "id_ed25519") &&
 		!strings.HasSuffix(base, ".pem") && !strings.HasSuffix(base, ".key") && !strings.HasSuffix(base, ".p12") && !strings.HasSuffix(base, ".pfx")

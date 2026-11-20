@@ -78,10 +78,14 @@ type ToolFailureDetail struct {
 
 // NewRunner returns a Runner bound to the given dependencies.
 func NewRunner(deps Deps, task Task) *Runner {
-	if deps.ProgressError == nil {
-		deps.ProgressError = error.Error
-	}
 	return &Runner{deps: deps, task: task}
+}
+
+func (r *Runner) progressError(err error) error {
+	if r.deps.ProgressError != nil {
+		return errors.New(r.deps.ProgressError(err))
+	}
+	return err
 }
 
 // WaitBackground blocks until every background job started by this Runner has
@@ -349,7 +353,7 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		duration := time.Since(startTime)
 		if err != nil {
 			rec.SetError(err, duration)
-			telemetry.RecordLLMResult(llmSpan, duration, 0, errors.New(r.deps.ProgressError(err)))
+			telemetry.RecordLLMResult(llmSpan, duration, 0, r.progressError(err))
 			llmSpan.End()
 			if errors.Is(err, llm.ErrTokenBudget) {
 				if !started {
@@ -455,11 +459,15 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 	case StopMaxRounds:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", taskKey)
 	case StopTokenBudget:
-		fmt.Fprintf(stdout.Writer(), "[ocr] Aggregate token budget reached for %s.\n", taskKey)
+		if _, limited := r.deps.LLMClient.(llm.FinalSubmissionClient); limited {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Token budget reached for %s.\n", taskKey)
+		} else {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Token budget exceeded (used %d > budget %d) for %s.\n", r.TotalTokensUsed(), r.deps.MaxTokensBudget, taskKey)
+		}
 	}
 	if stop == StopMaxRounds || stop == StopTokenBudget {
 		completed, finalStop, err := r.runGraceRound(ctx, messages, taskKey, sessionID, started, stop)
-		if finalStop == StopMaxRounds {
+		if !r.task.Grace.ReportErrors {
 			return completed, finalStop, nil
 		}
 		return completed, finalStop, err
@@ -525,16 +533,13 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	duration := time.Since(startTime)
 	if err != nil {
 		rec.SetError(err, duration)
-		telemetry.RecordLLMResult(llmSpan, duration, 0, errors.New(r.deps.ProgressError(err)))
+		telemetry.RecordLLMResult(llmSpan, duration, 0, r.progressError(err))
 		llmSpan.End()
 		if errors.Is(err, llm.ErrTokenBudget) {
 			return false, StopTokenBudget, nil
 		}
-		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %s\n", taskKey, r.deps.ProgressError(err))
+		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", taskKey, r.progressError(err))
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
-		if stop == StopTokenBudget && r.task.Grace.BestEffortOnTokenBudget && ctx.Err() == nil {
-			return false, stop, nil
-		}
 		return false, stop, fmt.Errorf("final submission: %w", err)
 	}
 
@@ -584,7 +589,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 		var err error
 		*messages, err = r.runCompression(ctx, *messages, taskKey)
 		if err != nil && !errors.Is(err, llm.ErrTokenBudget) {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %s\n", r.deps.ProgressError(err))
+			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", r.progressError(err))
 		}
 		return err
 	}

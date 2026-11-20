@@ -72,32 +72,21 @@ var totalTokensPaths = []string{
 }
 
 // resolveUsage parses raw JSON bytes into a map and extracts token usage
-// by probing configured paths sequentially. Cache details alone are not usage totals.
+// by probing configured paths sequentially. Returns nil if no total_tokens found.
 func resolveUsage(raw []byte) *UsageInfo {
 	var rawBody map[string]any
 	if err := json.Unmarshal(raw, &rawBody); err != nil {
 		return nil
 	}
 
-	total, hasTotal := probePath(rawBody, totalTokensPaths)
-	prompt, hasPrompt := probePath(rawBody, promptTokensPaths)
-	completion, hasCompletion := probePath(rawBody, completionTokensPaths)
-	if !hasTotal && !hasPrompt && !hasCompletion {
-		return nil
-	}
+	total, hasAny := probePath(rawBody, totalTokensPaths)
+	prompt, _ := probePath(rawBody, promptTokensPaths)
+	completion, _ := probePath(rawBody, completionTokensPaths)
 	cacheRead, cacheReadIdx, _ := probePathIndex(rawBody, cacheReadTokensPaths)
 	cacheWrite, cacheWriteIdx, _ := probePathIndex(rawBody, cacheWriteTokensPaths)
 
-	// Anthropic reports cached input separately; OpenAI already includes it in prompt_tokens.
-	var separateCache int64
-	if cacheReadIdx >= 0 && cacheReadIdx < anthropicCacheReadPathCount {
-		separateCache += cacheRead
-	}
-	if cacheWriteIdx >= 0 && cacheWriteIdx < anthropicCacheWritePathCount {
-		separateCache += cacheWrite
-	}
-	if hasPrompt && (total <= 0 || (hasCompletion && prompt+completion+separateCache == total)) {
-		prompt += separateCache
+	if !hasAny && prompt == 0 && completion == 0 {
+		return nil
 	}
 
 	ui := &UsageInfo{
@@ -108,8 +97,18 @@ func resolveUsage(raw []byte) *UsageInfo {
 		CacheWriteTokens: cacheWrite,
 	}
 
+	// If TotalTokens wasn't explicitly available but we have prompt+completion, compute it.
+	// Anthropic reports cache tokens separately from input_tokens, so include them in the
+	// fallback total. OpenAI prompt_tokens already includes cached_tokens, so only add cache
+	// counts when they came from Anthropic-style top-level fields.
 	if total == 0 && (prompt > 0 || completion > 0) {
 		ui.TotalTokens = prompt + completion
+		if cacheReadIdx >= 0 && cacheReadIdx < anthropicCacheReadPathCount {
+			ui.TotalTokens += cacheRead
+		}
+		if cacheWriteIdx >= 0 && cacheWriteIdx < anthropicCacheWritePathCount {
+			ui.TotalTokens += cacheWrite
+		}
 	}
 
 	return ui

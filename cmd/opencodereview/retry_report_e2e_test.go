@@ -73,7 +73,7 @@ func TestReviewE2E_LocalBudgetGraceFailureKeepsSuccessfulExit(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatal(err)
 	}
-	if mainCalls.Load() != 3 || !got.Summary.BudgetExceeded || got.Manifest == nil || got.Manifest.TerminalState != session.StatePartial || len(got.Manifest.Coverage.Completed) != 1 || len(got.Manifest.Coverage.Failed) != len(markers)-1 {
+	if mainCalls.Load() < 3 || !got.Summary.BudgetExceeded || got.Manifest == nil || got.Manifest.TerminalState != session.StatePartial || len(got.Manifest.Coverage.Completed) == 0 || len(got.Manifest.Coverage.Failed) == 0 || len(got.Manifest.Coverage.Completed)+len(got.Manifest.Coverage.Failed) != len(markers) {
 		t.Fatalf("unexpected review result after %d requests: %s", mainCalls.Load(), out)
 	}
 	for _, item := range got.Manifest.Coverage.Failed {

@@ -22,8 +22,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/behaviortask"
-	"github.com/alibaba/open-code-review/internal/config/template"
-	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -41,6 +40,10 @@ func TestAnalysisFlags(test *testing.T) {
 	}{
 		{[]string{}, true, ""},
 		{[]string{"--analysis"}, true, ""},
+		{[]string{"--analysis", "--analysis-max-tokens-budget", "0"}, true, ""},
+		{[]string{"--analysis-max-tokens-budget", "0"}, true, ""},
+		{[]string{"--analysis", "--analysis-max-tokens-budget", "-1"}, false, ""},
+		{[]string{"--analysis-max-tokens-budget", "-1"}, false, ""},
 		{[]string{"--analysis", "--from", "main"}, true, "HEAD"},
 		{[]string{"--analysis", "--to", "HEAD"}, false, ""},
 		{[]string{"--analysis", "--commit", "HEAD"}, true, ""},
@@ -59,39 +62,24 @@ func TestAnalysisFlags(test *testing.T) {
 		if err == nil && opts.to != fixture.wantTo {
 			test.Fatalf("args %v: target = %q, want %q", fixture.args, opts.to, fixture.wantTo)
 		}
+		if len(fixture.args) == 0 && opts.analysisMaxTokensBudget != 0 {
+			test.Fatalf("expected unlimited analysis budget by default, got %d", opts.analysisMaxTokensBudget)
+		}
 	}
 }
 
-func TestAnalysisPinning(test *testing.T) {
+func TestAnalysisUsesResolvedReviewInput(test *testing.T) {
 	repo := retryTestRepo(test)
-	opts := reviewOptions{repoDir: repo, from: "HEAD~1", to: "HEAD"}
-	_, pinned, _, err := pinAnalysisInput(test.Context(), opts)
-	if err != nil || len(pinned.ResolvedBase) != 40 || len(pinned.ResolvedHead) != 40 {
-		test.Fatalf("pinning: %+v %v", pinned, err)
-	}
-	opts.from, opts.to, opts.commit = "", "", "HEAD"
-	_, pinned, _, err = pinAnalysisInput(test.Context(), opts)
-	if err != nil || len(pinned.ResolvedHead) != 40 {
-		test.Fatalf("commit: %+v %v", pinned, err)
-	}
-	pinnedRepo, pinned, _, err := pinAnalysisInput(test.Context(), reviewOptions{repoDir: repo})
-	if err != nil || pinned.ResolvedHead != "" || len(pinned.ResolvedBase) != 40 {
-		test.Fatalf("workspace must keep its mode: %+v %v", pinned, err)
-	}
-	repoInfo, err := os.Stat(repo)
-	if err != nil {
-		test.Fatal(err)
-	}
-	pinnedInfo, err := os.Stat(pinnedRepo)
-	if err != nil {
-		test.Fatal(err)
-	}
-	if !os.SameFile(repoInfo, pinnedInfo) {
-		test.Fatalf("workspace repository changed: got %q, want %q", pinnedRepo, repo)
-	}
-	for _, invalid := range []reviewOptions{{repoDir: repo, from: "HEAD", commit: "HEAD"}, {repoDir: test.TempDir(), commit: "HEAD"}, {repoDir: repo, commit: "--help"}, {repoDir: repo, commit: "missing"}} {
-		if _, _, _, err := pinAnalysisInput(test.Context(), invalid); err == nil {
-			test.Fatalf("accepted %+v", invalid)
+	for _, opts := range []reviewOptions{{repoDir: repo, from: "HEAD~1", to: "HEAD"}, {repoDir: repo, commit: "HEAD"}, {repoDir: repo}} {
+		setup, err := prepareReviewCodeTools(test.Context(), repo, opts, nil, nil)
+		if err != nil {
+			test.Fatal(err)
+		}
+		request := analysisInputForReview(&commonContext{RepoDir: repo}, opts, &llmRuntime{}, "review", *setup.resolution)
+		retryTestGit(test, repo, "commit", "--allow-empty", "-qm", "Advance branch")
+		prepared, err := behaviortask.PrepareInput(test.Context(), request.input)
+		if err != nil || prepared.Resolution != *setup.resolution {
+			test.Fatalf("comparison changed: %+v, %v", prepared.Resolution, err)
 		}
 	}
 }
@@ -101,38 +89,29 @@ func TestRejectedArtifactDirectoryIsNotPublished(test *testing.T) {
 	test.Setenv("HOME", repo)
 	test.Setenv("USERPROFILE", repo)
 	opts := reviewOptions{repoDir: repo, commit: "HEAD"}
-	_, resolution, runner, err := pinAnalysisInput(test.Context(), opts)
+	setup, err := prepareReviewCodeTools(test.Context(), repo, opts, nil, nil)
 	if err != nil {
 		test.Fatal(err)
 	}
-	execution := newAnalysisExecution(&commonContext{RepoDir: repo, GitRunner: runner, Template: &template.Template{MaxTokens: 10000, MaxToolRequestTimes: 10}}, opts, &llmRuntime{Model: "fake"}, workflow.NewBudget(0, 1), "never-created", resolution)
+	execution := newAnalysisExecution(analysisInputForReview(&commonContext{RepoDir: repo}, opts, &llmRuntime{}, "never-created", *setup.resolution))
 	result, err := execution.run(test.Context())
 	report := execution.report(result, err)
 	if !errors.Is(err, behaviortask.ErrArtifactLocation) || report.ArtifactDir != "" || report.SessionID != "" || !reflect.DeepEqual(report.Errors, []string{behaviortask.ErrArtifactLocation.Error()}) {
 		test.Fatalf("preparation: directory=%q err=%v", execution.directory, err)
 	}
-}
-
-func TestRefValidationPreservesCancellation(test *testing.T) {
-	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
-		err := validateReviewRefsUsing(reviewOptions{commit: "HEAD"}, func(string) ([]byte, error) { return nil, fmt.Errorf("verify: %w", cause) })
-		if !errors.Is(err, cause) {
-			test.Fatal(err)
-		}
+	if _, err := os.Stat(filepath.Join(repo, ".opencodereview", "analysis")); !errors.Is(err, os.ErrNotExist) {
+		test.Fatalf("analysis directory: %v", err)
 	}
 }
 
-func TestCombinedPartialCloneDoesNotFetchMissingBlobs(test *testing.T) {
+func TestAnalysisPartialCloneDoesNotFetchMissingBlobs(test *testing.T) {
 	source := retryTestRepo(test)
 	retryTestGit(test, source, "config", "uploadpack.allowFilter", "true")
 	clone := filepath.Join(test.TempDir(), "partial")
 	retryTestGit(test, source, "clone", "--quiet", "--no-local", "--no-checkout", "--filter=blob:none", source, clone)
-	repo, resolution, runner, err := pinAnalysisInput(test.Context(), reviewOptions{repoDir: clone, commit: "HEAD"})
-	if err != nil {
-		test.Fatal(err)
-	}
+	runner := gitcmd.New(1)
 	missing := func() string {
-		output, err := runner.Output(test.Context(), repo, "rev-list", "--objects", "--missing=print", "HEAD")
+		output, err := runner.Output(test.Context(), clone, "rev-list", "--objects", "--missing=print", "HEAD")
 		if err != nil {
 			test.Fatal(err)
 		}
@@ -142,23 +121,14 @@ func TestCombinedPartialCloneDoesNotFetchMissingBlobs(test *testing.T) {
 	if !strings.Contains(before, "\n?") {
 		test.Fatal("partial clone fixture has no missing objects")
 	}
-	cc, err := commonContextForRepo(repo, true, "", resolution.ResolvedHead, 0, runner)
-	if err != nil {
-		test.Fatal(err)
-	}
-	if _, err := diff.NewCommitProvider(repo, resolution.ResolvedHead, cc.GitRunner).GetDiff(test.Context()); err == nil {
-		test.Fatal("review obtained missing blobs")
-	}
-	if _, err := behaviortask.PrepareInput(test.Context(), behaviortask.Input{RepoDir: repo, Mode: "commit", Resolution: *resolution, GitRunner: cc.GitRunner}); err == nil {
-		test.Fatal("analysis obtained missing blobs")
-	}
-	startFakeLLM(test, newFakeLLM())
-	opts, err := parseReviewFlags([]string{"--repo", clone, "--analysis", "--commit", "HEAD", "--format", "json", "--output", filepath.Join(test.TempDir(), "out.json")})
-	if err != nil {
-		test.Fatal(err)
-	}
-	if err := executeReviewContext(test.Context(), opts); err == nil {
-		test.Fatal("combined command did not report unavailable input")
+	for _, opts := range []reviewOptions{{commit: "HEAD"}, {from: "HEAD~1", to: "HEAD"}} {
+		setup, err := prepareReviewCodeTools(test.Context(), clone, opts, runner, nil)
+		if err != nil {
+			test.Fatal(err)
+		}
+		if _, err := behaviortask.PrepareInput(test.Context(), behaviortask.Input{RepoDir: clone, Mode: reviewModeFromOptions(opts), Resolution: *setup.resolution}); err == nil {
+			test.Fatal("analysis obtained missing blobs")
+		}
 	}
 	if missing() != before {
 		test.Fatal("local operations materialized promisor objects")
@@ -231,31 +201,33 @@ func analysisObservations(body []byte) []behaviortask.Observation {
 
 func TestReviewWithAnalysisHTTP(test *testing.T) {
 	for _, fixture := range []struct {
-		name         string
-		analysis     bool
-		workspace    bool
-		clean        bool
-		failReview   bool
-		failAnalysis bool
-		partial      bool
-		budget       string
-		mainTokens   int
-		blockOutput  bool
-		status       string
-		wantError    bool
+		name           string
+		analysis       bool
+		workspace      bool
+		clean          bool
+		failReview     bool
+		failAnalysis   bool
+		partial        bool
+		budget         string
+		analysisBudget string
+		analysisTokens int
+		mainTokens     int
+		blockOutput    bool
+		status         string
+		wantError      bool
 	}{
 		{name: "default", status: "complete"},
-		{name: "complete", analysis: true, status: "complete"},
+		{name: "unlimited analysis", analysis: true, analysisTokens: 100_001, status: "complete"},
 		{name: "workspace", analysis: true, workspace: true, status: "complete"},
 		{name: "analysis partial self-assessment", analysis: true, partial: true, status: "complete"},
 		{name: "analysis failure", analysis: true, failAnalysis: true, status: "complete"},
 		{name: "output failure", analysis: true, failAnalysis: true, blockOutput: true, wantError: true},
 		{name: "review failure", analysis: true, failReview: true, status: "failed", wantError: true},
 		{name: "both fail", analysis: true, failReview: true, failAnalysis: true, status: "failed", wantError: true},
-		{name: "shared budget", analysis: true, budget: "1", status: "failed", wantError: true},
+		{name: "review dispatch budget", analysis: true, budget: "1", status: "failed", wantError: true},
 		{name: "budget-only partial review with analysis failure", analysis: true, failAnalysis: true, budget: "100000", mainTokens: 95000, status: "partial"},
-		{name: "final analysis submission", analysis: true, workspace: true, budget: "15", status: "failed", wantError: true},
-		{name: "skipped review with limited analysis", analysis: true, workspace: true, clean: true, budget: "15", status: "skipped"},
+		{name: "final analysis submission", analysis: true, workspace: true, analysisBudget: "15", status: "complete"},
+		{name: "skipped review with limited analysis", analysis: true, workspace: true, clean: true, analysisBudget: "15", status: "skipped"},
 	} {
 		test.Run(fixture.name, func(test *testing.T) {
 			home := test.TempDir()
@@ -306,10 +278,10 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 				var arguments any = map[string]any{"side": "old", "file_path": "a.go", "start_line": 1, "end_line": 3}
 				if len(observations) == 1 {
 					arguments = map[string]any{"side": "new", "file_path": "a.go", "start_line": 1, "end_line": 3}
-					if fixture.workspace && fixture.budget != "" {
+					if fixture.analysisBudget != "" {
 						var final struct{ Tools []struct{ Name string } }
 						if err := json.Unmarshal(body, &final); err != nil || len(final.Tools) != 1 || final.Tools[0].Name != "submit_analysis" {
-							test.Error("expected a submission-only request at the shared limit")
+							test.Error("expected a submission-only request at the analysis limit")
 						}
 						name = "submit_analysis"
 						arguments = behaviortask.Analysis{Markdown: "Read the old version [[" + observations[0].ID + "]]; the new version remains unverified.", DeclaredCompletion: "partial"}
@@ -319,7 +291,7 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 					name = "submit_analysis"
 					arguments = analysisFixture(observations, fixture.partial)
 				}
-				_ = json.NewEncoder(writer).Encode(map[string]any{"id": "analysis-message", "type": "message", "role": "assistant", "model": "claude-test", "content": []any{map[string]any{"type": "tool_use", "id": fmt.Sprintf("analysis-%d", analysisCalls.Load()), "name": name, "input": arguments}}, "stop_reason": "tool_use", "usage": map[string]int{"input_tokens": 10, "output_tokens": 5}})
+				_ = json.NewEncoder(writer).Encode(map[string]any{"id": "analysis-message", "type": "message", "role": "assistant", "model": "claude-test", "content": []any{map[string]any{"type": "tool_use", "id": fmt.Sprintf("analysis-%d", analysisCalls.Load()), "name": name, "input": arguments}}, "stop_reason": "tool_use", "usage": map[string]int{"input_tokens": max(10, fixture.analysisTokens), "output_tokens": 5}})
 			}))
 			defer server.Close()
 			for key, value := range map[string]string{"OCR_LLM_URL": server.URL + "/v1/messages", "OCR_LLM_TOKEN": "test-token", "OCR_LLM_MODEL": "claude-test", "OCR_LLM_PROTOCOL": "anthropic", "OCR_LLM_AUTH_HEADER": "x-api-key", "OCR_LLM_TIMEOUT": "30"} {
@@ -331,6 +303,9 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			}
 			if fixture.analysis {
 				args = append(args, "--analysis")
+			}
+			if fixture.analysisBudget != "" {
+				args = append(args, "--analysis-max-tokens-budget", fixture.analysisBudget)
 			}
 			if fixture.budget != "" {
 				args = append(args, "--max-tokens-budget", fixture.budget, "--concurrency", "1")
@@ -390,7 +365,7 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			} else if len(report.Comparison.Head) != 40 {
 				test.Fatalf("immutable identity: %s", data)
 			}
-			if payload.Summary.TotalTokens != payload.Summary.InputTokens+payload.Summary.OutputTokens || payload.Summary.TotalTokens < report.Usage.InputTokens+report.Usage.OutputTokens {
+			if payload.Summary.TotalTokens != payload.Summary.InputTokens+payload.Summary.OutputTokens {
 				test.Fatalf("usage: %s", data)
 			}
 			if fixture.budget != "" && !payload.Summary.BudgetExceeded {
@@ -399,12 +374,12 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			if fixture.status == "partial" && len(payload.Manifest.Coverage.Completed) == 0 {
 				test.Fatalf("budget-only partial review lost usable coverage: %s", data)
 			}
-			if fixture.workspace && fixture.budget != "" {
-				if analysisCalls.Load() != 2 || payload.Summary.TotalTokens != 30 || !report.Completed || report.StopReason != "token_budget" || report.Status != "partial" || len(report.CitedObservationIDs) != 1 {
+			if fixture.analysisBudget != "" {
+				if analysisCalls.Load() != 2 || report.Usage.InputTokens+report.Usage.OutputTokens != 30 || payload.Summary.BudgetExceeded || !report.Completed || report.StopReason != "token_budget" || report.Status != "partial" || len(report.CitedObservationIDs) != 1 {
 					test.Fatalf("expected one accepted, metered final submission: %s", data)
 				}
 			}
-			if !fixture.failAnalysis && fixture.budget == "" {
+			if !fixture.failAnalysis && fixture.analysisBudget == "" {
 				completion := "complete"
 				if fixture.partial {
 					completion = "partial"
@@ -427,6 +402,143 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			}
 			if fixture.failAnalysis && report.RetryReport == nil {
 				test.Fatalf("analysis transport failure report missing: %s", data)
+			}
+		})
+	}
+}
+
+func TestAnalysisPreservesWorkspaceReview(test *testing.T) {
+	for _, scenario := range []string{"completed", "budget", "provider failure", "git config", "alternate index"} {
+		test.Run(scenario, func(test *testing.T) {
+			repo := retryTestRepo(test)
+			if err := os.WriteFile(filepath.Join(repo, "a.go"), []byte("package p\nfunc a() int { return 3 }\n"), 0600); err != nil {
+				test.Fatal(err)
+			}
+			if scenario == "git config" {
+				ignore := filepath.Join(test.TempDir(), "excludes")
+				if err := os.WriteFile(ignore, []byte("private.go\n"), 0600); err != nil {
+					test.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(repo, "private.go"), []byte("package p\n"), 0600); err != nil {
+					test.Fatal(err)
+				}
+				test.Setenv("GIT_CONFIG_COUNT", "1")
+				test.Setenv("GIT_CONFIG_KEY_0", "core.excludesFile")
+				test.Setenv("GIT_CONFIG_VALUE_0", ignore)
+			}
+			if scenario == "alternate index" {
+				index, err := os.ReadFile(filepath.Join(repo, ".git", "index"))
+				if err != nil {
+					test.Fatal(err)
+				}
+				alternate := filepath.Join(test.TempDir(), "index")
+				if err := os.WriteFile(alternate, index, 0600); err != nil {
+					test.Fatal(err)
+				}
+				test.Setenv("GIT_INDEX_FILE", alternate)
+			}
+			reviewer := newFakeLLM()
+			var calls atomic.Int32
+			var waitForAnalysis atomic.Bool
+			reviewStarted, analysisStarted := make(chan struct{}), make(chan struct{})
+			waitFor := func(peer <-chan struct{}) {
+				select {
+				case <-peer:
+				case <-time.After(5 * time.Second):
+					test.Error("model requests did not overlap at review concurrency one")
+				}
+			}
+			startFakeLLM(test, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				body, err := io.ReadAll(request.Body)
+				if err != nil {
+					test.Error(err)
+					return
+				}
+				if !bytes.Contains(body, []byte("submit_analysis")) {
+					if waitForAnalysis.CompareAndSwap(true, false) {
+						close(reviewStarted)
+						waitFor(analysisStarted)
+					}
+					request.Body = io.NopCloser(bytes.NewReader(body))
+					reviewer.ServeHTTP(writer, request)
+					return
+				}
+				count := calls.Add(1)
+				if scenario == "completed" && count == 1 {
+					close(analysisStarted)
+					waitFor(reviewStarted)
+				}
+				writer.Header().Set("Content-Type", "application/json")
+				if scenario == "provider failure" {
+					writer.WriteHeader(http.StatusPaymentRequired)
+					_, _ = io.WriteString(writer, `{"type":"error","error":{"type":"invalid_request_error","message":"fixture"}}`)
+					return
+				}
+				name, args := "submit_analysis", `{"markdown":"The workspace changes a.go."}`
+				if scenario == "budget" && count == 1 {
+					name, args = "file_read", `{"file_path":"a.go"}`
+				}
+				fmt.Fprintf(writer, `{"id":"msg_a","type":"message","role":"assistant","model":"claude-test","content":[{"type":"tool_use","id":"call","name":%q,"input":%s}],"stop_reason":"tool_use","usage":{"input_tokens":10,"output_tokens":5}}`, name, args)
+			}))
+			run := func(enabled bool) jsonOutput {
+				output := filepath.Join(test.TempDir(), "review.json")
+				args := []string{"--repo", repo, "--output", output, "--format", "json", "--effort", "low", "--concurrency", "1", "--no-filter"}
+				if enabled {
+					args = append(args, "--analysis")
+					if scenario == "budget" {
+						args = append(args, "--analysis-max-tokens-budget", "15")
+					}
+				}
+				if err := runReview(args); err != nil {
+					test.Fatal(err)
+				}
+				data, err := os.ReadFile(output)
+				if err != nil {
+					test.Fatal(err)
+				}
+				var result jsonOutput
+				if err := json.Unmarshal(data, &result); err != nil {
+					test.Fatal(err)
+				}
+				return result
+			}
+			plain := run(false)
+			if plain.AnalysisMeta != nil || calls.Load() != 0 || plain.Manifest == nil || len(plain.Manifest.Coverage.Selected) != 1 || plain.Manifest.Coverage.Selected[0].Path != "a.go" {
+				test.Fatalf("plain review: %+v", plain)
+			}
+			if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".opencodereview", "analysis")); !errors.Is(err, os.ErrNotExist) {
+				test.Fatalf("unexpected analysis artifacts: %v", err)
+			}
+			waitForAnalysis.Store(scenario == "completed")
+			combined := run(true)
+			report := combined.AnalysisMeta
+			if report == nil || report.Comparison.Old != plain.Manifest.Input.ResolvedBase {
+				test.Fatalf("analysis comparison: %+v", report)
+			}
+			want, cost := "completed", int64(15)
+			switch scenario {
+			case "provider failure":
+				want, cost = "failed", 0
+			case "budget":
+				want, cost = "partial", 30
+			case "git config", "alternate index":
+				want, cost = "skipped", 0
+				if calls.Load() != 0 || len(report.Errors) != 1 || report.SessionID != "" || report.ArtifactDir != "" {
+					test.Fatalf("unsupported view: %+v", report)
+				}
+			}
+			if report.Status != want || report.Usage.TotalTokens != cost {
+				test.Fatalf("analysis status or usage: %+v", report)
+			}
+			for _, result := range []*jsonOutput{&plain, &combined} {
+				result.SchemaVersion, result.ReviewStatus, result.SessionID, result.TraceID = "", "", "", ""
+				result.Analysis, result.AnalysisRaw, result.AnalysisMeta = nil, nil, nil
+				result.Manifest.RunID = ""
+				result.Manifest.ElapsedMS = 0
+				result.Summary.Elapsed = ""
+			}
+			if !reflect.DeepEqual(plain, combined) {
+				test.Fatalf("Review changed with Analysis:\nplain=%+v\ncombined=%+v", plain, combined)
 			}
 		})
 	}
@@ -511,7 +623,7 @@ func TestAnalysisSkippedReviewStatus(test *testing.T) {
 			if manifest == nil || manifest.TerminalState != session.StateSkipped || len(manifest.Coverage.Selected) != 0 || len(comments) != 0 {
 				test.Fatalf("expected an empty skipped review: manifest=%+v comments=%+v", manifest, comments)
 			}
-			combined := &combinedResult{Agent: reviewer, reviewErr: reviewErr, budget: workflow.NewBudget(0, 1), report: &workflow.Report{Status: "completed", Markdown: "Analysis result."}}
+			combined := &combinedResult{Agent: reviewer, reviewErr: reviewErr, report: &workflow.Report{Status: "completed", Markdown: "Analysis result."}}
 			output := combined.AnalysisOutput()
 			var human bytes.Buffer
 			if err := emitRunResult(test.Context(), combined, comments, time.Now(), "text", "human", nil, nil, &human, nil); err != nil {

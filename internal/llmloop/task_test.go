@@ -219,17 +219,18 @@ func TestTaskOwnCompressionAndEmptyResponse(t *testing.T) {
 func TestTaskModelErrors(t *testing.T) {
 	unavailable := errors.New("model unavailable")
 	for _, fixture := range []struct {
-		name        string
-		maxRounds   int
-		tokenBudget int64
-		bestEffort  bool
-		stop        MainLoopStop
-		wantErr     error
+		name         string
+		maxRounds    int
+		tokenBudget  int64
+		reportErrors bool
+		stop         MainLoopStop
+		wantErr      error
 	}{
 		{"main request", 1, 1, true, StopNone, unavailable},
 		{"round limit", 1, 0, false, StopMaxRounds, nil},
-		{"token limit", 5, 1, false, StopTokenBudget, unavailable},
-		{"best effort final submission", 5, 1, true, StopTokenBudget, nil},
+		{"round limit error", 1, 0, true, StopMaxRounds, unavailable},
+		{"token limit", 5, 1, true, StopTokenBudget, unavailable},
+		{"best effort final submission", 5, 1, false, StopTokenBudget, nil},
 		{"cancelled final submission", 5, 1, true, StopTokenBudget, context.Canceled},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
@@ -237,7 +238,7 @@ func TestTaskModelErrors(t *testing.T) {
 			defer cancel()
 			task := testTask()
 			task.MaxRounds = fixture.maxRounds
-			task.Grace.BestEffortOnTokenBudget = fixture.bestEffort
+			task.Grace.ReportErrors = fixture.reportErrors
 			requestErr := unavailable
 			requests := 0
 			client := taskClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {

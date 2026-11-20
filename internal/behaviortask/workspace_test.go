@@ -45,6 +45,55 @@ func TestWorkspaceRestoredRenameSource(test *testing.T) {
 	}
 }
 
+func TestWorkspaceRenameInventoryAcrossBatches(test *testing.T) {
+	repo := test.TempDir()
+	git(test, repo, "init", "-q")
+	if err := os.Mkdir(filepath.Join(repo, "before"), 0700); err != nil {
+		test.Fatal(err)
+	}
+	const moves = 84
+	for index := range moves {
+		name := fmt.Sprintf("%s-%03d.txt", strings.Repeat("a", 110), index)
+		if err := os.WriteFile(filepath.Join(repo, "before", name), []byte(name), 0600); err != nil {
+			test.Fatal(err)
+		}
+	}
+	git(test, repo, "add", ".")
+	git(test, repo, "commit", "-qm", "Before move")
+	git(test, repo, "mv", "before", "after")
+	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte("fixture"), 0600); err != nil {
+		test.Fatal(err)
+	}
+	git(test, repo, "add", "-f", ".env")
+	input := Input{RepoDir: repo, Mode: "workspace", Resolution: diff.InputResolution{ResolvedBase: git(test, repo, "rev-parse", "HEAD")}}
+	code, err := prepareCodeTools(test.Context(), input)
+	if err != nil {
+		test.Fatal(err)
+	}
+	endpoints := []string{input.Resolution.ResolvedBase, "--"}
+	data, err := code.runner.Output(test.Context(), repo, "diff", "--name-status", "-z", "--no-renames", input.Resolution.ResolvedBase, "--")
+	if err != nil {
+		test.Fatal(err)
+	}
+	tracked, err := parseInventory(string(data))
+	if err != nil {
+		test.Fatal(err)
+	}
+	changes, _, err := workspaceInventory(test.Context(), input, code, tracked, endpoints)
+	if err != nil {
+		test.Fatal(err)
+	}
+	count := 0
+	for _, change := range changes {
+		if change.IsRenamed && change.OldPath == "before/"+filepath.Base(change.NewPath) {
+			count++
+		}
+	}
+	if count != moves || len(changes) != moves+1 {
+		test.Fatalf("renames: %d/%d, changes: %d", count, moves, len(changes))
+	}
+}
+
 func TestWorkspaceUsesEffectiveBinaryAttribute(test *testing.T) {
 	input := workspaceInput(test)
 	git(test, input.RepoDir, "rm", "--cached", "-f", "main.go")

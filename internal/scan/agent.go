@@ -819,14 +819,19 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 	}
 
 	completed, stop, err := a.runner.RunMainTask(ctx, messages, it.Path)
-	if !completed && stop == llmloop.StopTokenBudget && a.budgetExceeded.CompareAndSwap(false, true) {
-		a.recordWarning("token_budget_reached", it.Path,
-			fmt.Sprintf("stopped mid-task: used %d tokens exceeds budget %d", a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
-	}
 	if err != nil {
 		return false, "", err
 	}
 	if !completed {
+		// Mirror the review path: an in-flight token-budget stop must surface
+		// on the run-level BudgetExceeded() / token_budget_reached warning,
+		// not only on the per-item failure record. Without this, --format json
+		// reports budget_exceeded: false after llmloop's StopTokenBudget fired
+		// and the stderr "budget_exceeded=..." line lies too.
+		if stop == llmloop.StopTokenBudget && a.budgetExceeded.CompareAndSwap(false, true) {
+			a.recordWarning("token_budget_reached", it.Path,
+				fmt.Sprintf("stopped mid-task: used %d tokens exceeds budget %d", a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
+		}
 		// Scan sessions opt out of the run manifest, so this one string is the
 		// whole diagnostic: it feeds both RecordReviewItemFailed and the
 		// scan_subtask_error warning, and under --format json the [ocr] progress

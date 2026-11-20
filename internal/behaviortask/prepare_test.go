@@ -41,6 +41,9 @@ func TestPrepareFixedInput(test *testing.T) {
 	git(test, input.RepoDir, "add", ".")
 	git(test, input.RepoDir, "commit", "-qm", "Add source and secret")
 	input.Resolution.ResolvedHead = git(test, input.RepoDir, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(input.RepoDir, ".gitattributes"), []byte("added.go -diff\n"), 0600); err != nil {
+		test.Fatal(err)
+	}
 	prepared, err := PrepareInput(test.Context(), input)
 	if err != nil {
 		test.Fatal(err)
@@ -150,12 +153,17 @@ func TestPrepareRenameExclusion(test *testing.T) {
 
 func TestTrackedCredentialScopes(test *testing.T) {
 	input := fixture(test)
-	const name = ".git-credentials"
+	names := []string{".git-credentials", "home/.Docker/config.json"}
 	const marker = "scope-fixture-marker"
-	if err := os.WriteFile(filepath.Join(input.RepoDir, name), []byte(marker), 0600); err != nil {
-		test.Fatal(err)
+	for _, name := range names {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(input.RepoDir, name)), 0700); err != nil {
+			test.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(input.RepoDir, name), []byte(marker), 0600); err != nil {
+			test.Fatal(err)
+		}
+		git(test, input.RepoDir, "add", "-f", name)
 	}
-	git(test, input.RepoDir, "add", "-f", name)
 	git(test, input.RepoDir, "commit", "-qm", "Add scope fixture")
 	input.Resolution.ResolvedBase = git(test, input.RepoDir, "rev-parse", "HEAD")
 	git(test, input.RepoDir, "commit", "--allow-empty", "-qm", "Keep fixture unchanged")
@@ -169,8 +177,14 @@ func TestTrackedCredentialScopes(test *testing.T) {
 		test.Fatal(err)
 	}
 	for _, side := range []string{"old", "new"} {
-		if _, err := code.execute(test.Context(), "file_read", map[string]any{"side": side, "file_path": name}); err == nil {
-			test.Fatalf("%s side allowed a credential path", side)
+		for _, name := range names {
+			found, err := code.execute(test.Context(), "file_find", map[string]any{"side": side, "query_name": filepath.Base(name)})
+			if err != nil || strings.Contains(found.ReturnedContent, name) {
+				test.Fatalf("credential enumeration: %+v %v", found, err)
+			}
+			if _, err := code.execute(test.Context(), "file_read", map[string]any{"side": side, "file_path": name}); err == nil {
+				test.Fatalf("%s side allowed a credential path", side)
+			}
 		}
 		found, err := code.execute(test.Context(), "code_search", map[string]any{"side": side, "search_text": marker})
 		if err != nil || !strings.Contains(found.ReturnedContent, "No matches found") || strings.Contains(found.ReturnedContent, marker) {

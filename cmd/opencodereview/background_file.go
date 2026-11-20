@@ -48,10 +48,6 @@ func selectBackground(inline, fromFile string) string {
 // combination. --background-file wins over --background; the commit-message
 // fallback fires only when neither entry point was used.
 func resolveBackground(repoDir, inline, backgroundFile, commit string) (string, error) {
-	return resolveBackgroundWith(repoDir, inline, backgroundFile, commit, getCommitMessage)
-}
-
-func resolveBackgroundWith(repoDir, inline, backgroundFile, commit string, message func(string, string) (string, error)) (string, error) {
 	if backgroundFile != "" {
 		fileBg, err := loadBackgroundFile(resolveBackgroundFilePath(repoDir, backgroundFile))
 		if err != nil {
@@ -60,7 +56,7 @@ func resolveBackgroundWith(repoDir, inline, backgroundFile, commit string, messa
 		return selectBackground(inline, fileBg), nil
 	}
 	if inline == "" && commit != "" {
-		if msg, err := message(repoDir, commit); err == nil && msg != "" {
+		if msg, err := getCommitMessage(repoDir, commit); err == nil && msg != "" {
 			return msg, nil
 		}
 	}

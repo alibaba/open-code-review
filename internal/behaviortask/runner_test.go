@@ -188,7 +188,7 @@ func TestRunnerSubmissionRepairAndArtifacts(test *testing.T) {
 
 func TestBudgetsCancellationAndProviderFailure(test *testing.T) {
 	input := fixture(test)
-	for _, mode := range []string{"rounds", "tokens", "invalid_grace", "canceled", "provider"} {
+	for _, mode := range []string{"rounds", "tokens", "round_error", "token_error", "invalid_grace", "canceled", "provider"} {
 		test.Run(mode, func(test *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -208,6 +208,9 @@ func TestBudgetsCancellationAndProviderFailure(test *testing.T) {
 				if len(request.Tools) != 1 || request.Tools[0].Function.Name != "submit_analysis" {
 					test.Fatal("grace advertised investigation tools")
 				}
+				if mode == "round_error" || mode == "token_error" {
+					return nil, errors.New("final request failed")
+				}
 				if mode == "invalid_grace" {
 					return response("submit_analysis", `{}`), nil
 				}
@@ -216,7 +219,7 @@ func TestBudgetsCancellationAndProviderFailure(test *testing.T) {
 			})
 			runner := newTestRunner(test, input, client, func(deps *Deps) {
 				deps.Template.MaxToolRequestTimes = 1
-				if mode == "tokens" {
+				if mode == "tokens" || mode == "token_error" {
 					deps.Template.MaxToolRequestTimes = 10
 					deps.MaxTokensBudget = 1
 				}
@@ -229,8 +232,14 @@ func TestBudgetsCancellationAndProviderFailure(test *testing.T) {
 				return
 			}
 			wantStop := "max_rounds"
-			if mode == "tokens" {
+			if mode == "tokens" || mode == "token_error" {
 				wantStop = "token_budget"
+			}
+			if mode == "round_error" || mode == "token_error" {
+				if err == nil || !strings.Contains(err.Error(), "final request failed") || result.StopReason != wantStop || len(result.Errors) == 0 || requests != 2 {
+					test.Fatalf("final request diagnosis: %+v %v", result, err)
+				}
+				return
 			}
 			if err != nil || result.StopReason != wantStop || result.Completed != (mode != "invalid_grace") || requests != 2 || len(result.Warnings) == 0 {
 				test.Fatalf("budget result: %+v, %v", result, err)

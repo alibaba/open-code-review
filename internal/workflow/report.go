@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	"github.com/alibaba/open-code-review/internal/behaviortask"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 )
@@ -55,6 +56,10 @@ func NewReport(result behaviortask.Result, runErr error, directory string) *Repo
 		if errors.Is(runErr, behaviortask.ErrResultWrite) && summary != behaviortask.ErrResultWrite.Error() {
 			report.Errors = append(report.Errors, behaviortask.ErrResultWrite.Error())
 		}
+	}
+	var view *gitcmd.UnsupportedViewError
+	if errors.As(runErr, &view) {
+		report.Status = "skipped"
 	}
 	if result.Analysis != nil {
 		report.Markdown = result.Analysis.Markdown

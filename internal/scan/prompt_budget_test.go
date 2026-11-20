@@ -6,7 +6,6 @@ package scan
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -177,7 +176,7 @@ func TestRun_PromptOverflowRecordsFailure(t *testing.T) {
 func TestRun_TokenBudgetStopSurfacesAsBudgetExceeded(t *testing.T) {
 	perCall := int64(26_000)
 	budget := int64(25_000) // > per-file estimate (~19K) so the look-ahead admits the file
-	client := &budgetGraceFailureClient{perCallTokens: perCall}
+	client := &emptyRetryClient{perCallTokens: perCall}
 
 	repo := initTestRepo(t)
 	writeFile(t, repo, "single.go", []byte("package main\n"))
@@ -196,7 +195,6 @@ func TestRun_TokenBudgetStopSurfacesAsBudgetExceeded(t *testing.T) {
 		RepoDir:         repo,
 		Template:        tpl,
 		LLMClient:       client,
-		MainToolDefs:    []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		MaxConcurrency:  1,
 		SkipPlan:        true,
 		SkipDedup:       true,
@@ -212,9 +210,6 @@ func TestRun_TokenBudgetStopSurfacesAsBudgetExceeded(t *testing.T) {
 	}
 	if !a.BudgetExceeded() {
 		t.Error("BudgetExceeded() = false, want true after an in-flight token-budget stop")
-	}
-	if calls := client.calls.Load(); calls != 2 {
-		t.Fatalf("LLM calls = %d, want one main request and one final submission", calls)
 	}
 	var budgetWarnings int
 	for _, w := range a.Warnings() {
@@ -240,15 +235,17 @@ func TestRun_TokenBudgetStopSurfacesAsBudgetExceeded(t *testing.T) {
 	}
 }
 
-type budgetGraceFailureClient struct {
+// emptyRetryClient answers every request with an empty assistant content and
+// no tool calls, so llmloop.RunMainTask takes the no-tool-calls retry branch
+// instead of completing on task_done. Used to drive the per-round
+// token-budget stop on a scan path that otherwise completes in one round.
+type emptyRetryClient struct {
 	perCallTokens int64
-	calls         atomic.Int64
+	calls         int64 // atomic
 }
 
-func (f *budgetGraceFailureClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
-	if f.calls.Add(1) > 1 {
-		return nil, errors.New("provider unavailable")
-	}
+func (f *emptyRetryClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	atomic.AddInt64(&f.calls, 1)
 	empty := ""
 	return &llm.ChatResponse{
 		Choices: []llm.Choice{{

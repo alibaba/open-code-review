@@ -5,17 +5,26 @@ It does not change `ocr review` or `ocr scan`, start MCP, construct a comment
 collector, execute repository code, or make a report-summarization model call.
 `ocr review --analysis` combines the full Review pipeline with this independent
 task through `internal/workflow`. The opt-in flag does not change default review
-or scan costs.
+or scan costs. Both roles use the configured model and private sessions. Analysis
+uses at most one additional concurrent model request. Analysis has no total token
+limit by default (`--analysis-max-tokens-budget 0`). A positive limit counts tokens
+from investigation, compression and final submission. A request in progress and
+one submission-only final round can take the total above the limit. The Review summary and Analysis metadata
+report their respective usage. An Analysis failure does not change Review's exit
+status; command cancellation applies to both roles.
 
 ## Preparation boundary
 
 The caller is a trusted preparation layer, not model output. Resolve comparison
-endpoints with `agent.ResolveComparisonInput`, then call `PrepareInput` to obtain
+endpoints once in the Review preparation path, then pass the resulting SHA values
+to `PrepareInput` to obtain
 the comparison's full authorized diff inventory, including deletions and
 renames. It ignores caller-supplied diffs and does not use Review's selected-file
 list. Supply captured context with provenance and user exclusions. Direct library
 callers bypassing `PrepareInput` remain responsible for binding their diffs to
-those endpoints. Neither API rediscovers a PR or fetches missing objects.
+those endpoints. Commit and range patches use the head revision's versioned
+attributes. If the active Git environment overrides the repository, index or
+command configuration in a way Analysis cannot reproduce, it is skipped. Neither API rediscovers a PR or fetches missing objects.
 
 `NewRunner` accepts full-SHA range/commit comparisons and workspace comparisons
 with a pinned old commit or empty tree. It constructs the existing old/new
@@ -73,8 +82,9 @@ Exact observed locations and verification provenance remain in the observation
 log for human inspection. Finding a source test still does not prove it ran.
 
 Invalid submissions are repairable within the existing conversation budget.
-The first valid report is frozen. A final budget round advertises only
-`submit_analysis`; no additional recovery loop is created. `Result.Completed`
+The first valid report is frozen. Analysis defaults to 300 investigation rounds.
+If it exhausts its round or token budget, it can make at most one additional
+round with only `submit_analysis`; an invalid final submission is not retried. `Result.Completed`
 means the loop accepted a submission, not that the investigation is complete or
 correct. `workflow.Report.Status` describes execution, separately from the
 model-declared completeness. A self-declared partial report can be delivered

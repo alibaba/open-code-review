@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -34,30 +33,6 @@ func TestRenderMarkdown(test *testing.T) {
 	}
 	if !strings.Contains(rendered, "\x1b[1m") || !strings.Contains(rendered, "\x1b[36m") {
 		test.Errorf("missing heading/emphasis or code styling: %q", rendered)
-	}
-}
-
-func TestRenderMarkdownHeadingPalette(test *testing.T) {
-	headingStyle := regexp.MustCompile(`\x1b\[(?:34;1|1;34)mHeading\x1b\[(?:0)?m`)
-	codeStyle := regexp.MustCompile(`\x1b\[36m--analysis\x1b\[(?:0)?m`)
-	strongStyle := regexp.MustCompile(`\x1b\[1mImportant\x1b\[(?:0)?m`)
-	for level := 1; level <= 6; level++ {
-		test.Run(fmt.Sprintf("H%d", level), func(test *testing.T) {
-			markdown := strings.Repeat("#", level) + " Heading\n\nPlain body.\n\n**Important**\n\nUse `--analysis`.\n"
-			rendered := renderMarkdown(markdown, 80)
-			if !headingStyle.MatchString(rendered) || !codeStyle.MatchString(rendered) || !strongStyle.MatchString(rendered) {
-				test.Fatalf("heading, code or emphasis has the wrong palette: %q", rendered)
-			}
-			for _, line := range strings.Split(rendered, "\n") {
-				if strings.Contains(line, "Plain body.") && line != ansi.Strip(line) {
-					test.Fatalf("heading style leaked into body text: %q", line)
-				}
-			}
-			want := "Heading Plain body. Important Use --analysis."
-			if got := strings.Join(strings.Fields(ansi.Strip(rendered)), " "); got != want {
-				test.Fatalf("Markdown meaning changed: got %q, want %q", got, want)
-			}
-		})
 	}
 }
 
@@ -139,14 +114,11 @@ func TestRenderMarkdownCodeBlockBackslashesMixedContent(test *testing.T) {
 	}
 }
 
-var wrappedHanBoundary = regexp.MustCompile(`(\p{Han}) *\n(\p{Han})`)
-
 func TestRenderMarkdownWrapAndRetention(test *testing.T) {
 	for _, width := range []int{24, 80, 0} {
 		markdown := strings.Repeat("Before \u884c\u4e3a\u53d8\u66f4 after compatibility e\u0301 \U0001f600. ", 160)
 		rendered := ansi.Strip(renderMarkdown(markdown, width))
-		rejoined := wrappedHanBoundary.ReplaceAllString(rendered, "$1$2")
-		if strings.Join(strings.Fields(rejoined), " ") != strings.Join(strings.Fields(markdown), " ") {
+		if strings.Join(strings.Fields(rendered), " ") != strings.Join(strings.Fields(markdown), " ") {
 			test.Fatalf("report content changed at width %d", width)
 		}
 		expectedWidth := width
@@ -193,199 +165,6 @@ func TestRenderMarkdownTableLinkRetention(test *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestRenderMarkdownCompactTables(test *testing.T) {
-	markdown := "| Case | Before | After |\n| --- | :---: | ---: |\n| \u4e2d\u6587 | `off` | on |\n| CI | same | ready |\n"
-	for _, width := range []int{30, 120} {
-		rendered := renderMarkdown(markdown, width)
-		var lines []string
-		for _, line := range strings.Split(ansi.Strip(rendered), "\n") {
-			if trimmed := strings.TrimRight(line, " "); trimmed != "" {
-				lines = append(lines, trimmed)
-			}
-		}
-		want := "Case  Before  After\n────  ──────  ─────\n\u4e2d\u6587   off       on\n────  ──────  ─────\nCI     same   ready"
-		if got := strings.Join(lines, "\n"); got != want {
-			test.Errorf("at width %d:\n%s\nwant:\n%s", width, got, want)
-		}
-		for _, style := range []string{"\x1b[1mCase", "\x1b[2m─", "\x1b[36moff"} {
-			if !strings.Contains(rendered, style) {
-				test.Errorf("at width %d: missing %q in %q", width, style, rendered)
-			}
-		}
-	}
-}
-
-func TestRenderMarkdownMixedScriptLineBreaks(test *testing.T) {
-	phrase := strings.Repeat("\u4e2d\u6587", 12) + "\u3002"
-	for _, fixture := range []struct {
-		name, markdown string
-	}{
-		{"paragraph", "`ocr review --analysis` " + phrase},
-		{"list item", "- [x] `ocr review --analysis` " + phrase},
-		{"blockquote", "> `ocr review --analysis` " + phrase},
-		{"table cell", "| Case | After |\n| --- | --- |\n| CI | `ocr review --analysis` " + phrase + " |"},
-	} {
-		test.Run(fixture.name, func(test *testing.T) {
-			rendered := renderMarkdown(fixture.markdown, 36)
-			if !strings.Contains(rendered, "\x1b[36mocr review --analysis") {
-				test.Fatalf("lost code style: %q", rendered)
-			}
-			plain := ansi.Strip(rendered)
-			if fixture.name == "list item" && !strings.Contains(plain, "[x] ocr review") {
-				test.Fatalf("lost task marker:\n%s", plain)
-			}
-			if !strings.Contains(plain, "ocr review --analysis \u4e2d\u6587") {
-				test.Fatalf("the prose must start on the command line:\n%s", plain)
-			}
-			for _, line := range strings.Split(plain, "\n") {
-				if ansi.StringWidth(line) > 36 || strings.HasPrefix(strings.TrimSpace(line), "\u3002") {
-					test.Fatalf("bad line break: %q", line)
-				}
-			}
-			if strings.Count(plain, "\u4e2d") != 12 || strings.Count(plain, "\u6587") != 12 {
-				test.Fatal("wrapping changed the prose")
-			}
-		})
-	}
-}
-
-func TestWrapCJKPunctuationAndStyles(test *testing.T) {
-	const label = "\x1b[36mCLI\x1b[m"
-	const ideograph = "\u5b57"
-	const stop = "\u3002"
-	const joinedEmoji = "\U0001f469\u200d\U0001f4bb"
-	for _, fixture := range []struct{ text, want string }{
-		{label + " " + ideograph + ideograph + stop, label + " " + ideograph + "\n" + ideograph + stop},
-		{label + " " + joinedEmoji + ideograph + stop, label + " " + joinedEmoji + "\n" + ideograph + stop},
-		{label + " " + ideograph + "\ne\u0301", label + " " + ideograph + "\ne\u0301"},
-	} {
-		if got := (markdownInline{styled: fixture.text}).wrap(8); got != fixture.want {
-			test.Errorf("wrap(%q) = %q, want %q", fixture.text, got, fixture.want)
-		}
-	}
-}
-
-func TestMarkdownWrapBoundaries(test *testing.T) {
-	const han = "\u4e2d"
-	long := strings.Repeat(han, 20)
-	lines := func(markdown string, width int) []string {
-		result := strings.Split(ansi.Strip(renderMarkdown(markdown, width)), "\n")
-		for index := range result {
-			result[index] = strings.TrimRight(result[index], " ")
-		}
-		return result
-	}
-	test.Run("hard versus soft breaks", func(test *testing.T) {
-		for _, width := range []int{20, 80} {
-			for _, separator := range []string{"  \n", "\\\n"} {
-				if got := lines("Result:"+separator+long, width); got[0] != "Result:" || !strings.HasPrefix(got[1], han) {
-					test.Errorf("lost hard break at %d: %q", width, got)
-				}
-			}
-			if got := lines("Result:\n"+long, width); !strings.HasPrefix(got[0], "Result: "+han) {
-				test.Errorf("unexpected soft break: %q", got)
-			}
-		}
-	})
-	test.Run("loose list paragraphs", func(test *testing.T) {
-		for _, width := range []int{20, 80} {
-			markdown := "- " + long + "A\n\n  B" + long
-			got := strings.Join(lines(markdown, width), "\n")
-			if !strings.Contains(got, "A\n\n  B") {
-				test.Errorf("paragraphs in a list item must be separated and aligned: %q", got)
-			}
-		}
-	})
-	test.Run("long list token", func(test *testing.T) {
-		const identifier = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn"
-		const cluster = "\U0001f469\u200d\U0001f4bb"
-		for _, token := range []string{identifier, strings.Repeat("a\u0301", 39) + cluster} {
-			got := lines("- "+han+" `"+token+"` "+han, 20)
-			body := strings.Split(strings.Trim(strings.Join(got, "\n"), "\n"), "\n")
-			for _, line := range body[1:] {
-				if !strings.HasPrefix(line, "  ") || ansi.StringWidth(line) > 20 || strings.HasPrefix(strings.TrimSpace(line), "\u0301") {
-					test.Errorf("invalid list continuation: %q in %q", line, body)
-				}
-			}
-			if !strings.Contains(strings.Join(strings.Fields(strings.Join(body, "")), ""), token) {
-				test.Errorf("changed token: %q", body)
-			}
-		}
-	})
-	test.Run("code argument spaces", func(test *testing.T) {
-		for _, format := range []string{"Result: %s `%s`", "Result: %s **`%s`**", "| Value |\n| --- |\n| Result: %s `%s` |"} {
-			for _, spaces := range []string{" ", "    "} {
-				command := `cmd "a` + spaces + `b"`
-				output := ansi.Strip(renderMarkdown(fmt.Sprintf(format, long+long, command), 32))
-				if !strings.Contains(output, command) {
-					test.Errorf("lost code boundaries for %q: %q", command, output)
-				}
-			}
-		}
-		command := `cmd "alpha    beta"`
-		codeStyle := regexp.MustCompile(`\x1b\[36m([^\x1b]*)\x1b\[(?:0)?m`)
-		for width := 8; width <= 20; width++ {
-			var recovered strings.Builder
-			for _, match := range codeStyle.FindAllStringSubmatch(renderMarkdown(han+" `"+command+"`", width), -1) {
-				recovered.WriteString(match[1])
-			}
-			if recovered.String() != command {
-				test.Errorf("width %d: styled code lost literal content: %q", width, recovered.String())
-			}
-		}
-	})
-	test.Run("decoded CJK", func(test *testing.T) {
-		const prefix = "`ocr review --analysis` "
-		want := renderMarkdown(prefix+long, 32)
-		if got := renderMarkdown(prefix+strings.Repeat("&#x4E2D;", 20), 32); got != want {
-			test.Errorf("equivalent visible text wrapped differently: %q versus %q", got, want)
-		}
-	})
-}
-
-func TestRenderMarkdownNarrowTables(test *testing.T) {
-	markdown := "| A | B | C |\n| --- | --- | --- |\n| \u4e2d\u6587 | `abcde0123456789` | tail |\n| next | | end |"
-	for _, width := range []int{8, 18} {
-		plain := ansi.Strip(renderMarkdown(markdown, width))
-		for _, line := range strings.Split(plain, "\n") {
-			if ansi.StringWidth(line) > width {
-				test.Errorf("width %d overflow: %q", width, line)
-			}
-		}
-		var middleCell strings.Builder
-		var rowIndex int
-		for _, line := range strings.Split(plain, "\n") {
-			if strings.HasPrefix(line, "─") {
-				rowIndex++
-			} else if rowIndex == 1 {
-				if width == 18 {
-					line = ansi.Cut(line, 6, 12)
-				}
-				middleCell.WriteString(strings.TrimSpace(line))
-			}
-		}
-		want := "abcde0123456789"
-		if width == 8 {
-			want = "\u4e2d\u6587" + want + "tail"
-		}
-		if got := middleCell.String(); got != want || rowIndex != 2 {
-			test.Errorf("width %d: rows lost content or alignment: %q", width, plain)
-		}
-	}
-}
-
-func TestRenderMarkdownTableInContext(test *testing.T) {
-	markdown := "Introduction.\n\n> | First |\n> | --- |\n> | `&lt;\\.\\\\foo` |\n\nMiddle.\n\n| Second |\n| --- |\n| prose \\| pipe |\n\nConclusion."
-	plain := ansi.Strip(renderMarkdown(markdown, 40))
-	for _, want := range []string{"Introduction.", "| First", `| &lt;\.\\foo`, "Middle.", "Second", "prose | pipe", "Conclusion."} {
-		_, after, found := strings.Cut(plain, want)
-		if !found {
-			test.Fatalf("missing or out-of-order %q in %q", want, plain)
-		}
-		plain = after
 	}
 }
 

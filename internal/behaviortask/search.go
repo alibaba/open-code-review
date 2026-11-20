@@ -60,6 +60,7 @@ func (code *codeTools) searchPaths(ctx context.Context, args map[string]any, sid
 			}
 			revision = code.comparison.Old
 		}
+		command = append([]string{"--attr-source=" + revision}, command...)
 		command = append(command, "--with-tree="+revision)
 	}
 	command = append(command, "--")
