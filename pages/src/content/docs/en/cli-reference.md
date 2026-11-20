@@ -131,13 +131,13 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per subtask. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. A resolved positive value sets the cap exactly. |
-| `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per subtask; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
+| `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per subtask in both Review and Analysis; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
 | `--analysis` | — | off | Run a separate Behavior/Impact analysis alongside a commit or range review (`--commit` or `--from`, text or JSON only). Omit this flag for workspace reviews of uncommitted changes. Not compatible with preview or resume. Analysis has 300 investigation rounds, independent of `--max-tools`, plus at most one submission-only round if the budget is exhausted. A failed or skipped analysis does not change the Review exit status. |
 | `--analysis-max-tokens-budget <n>` | — | `0` (unlimited) | Set a soft limit on total input and output tokens for Analysis only. One additional model request can run concurrently with Review. Inspect `analysis_meta.usage` and `analysis_meta.execution_status` in JSON. |
 | `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Checked before every LLM round: a subtask already over budget gets one final round to submit findings and is reported as `failed(budget)`, no further subtasks are dispatched, and the CLI emits available results. |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
-| `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
+| `--max-git-procs <n>` | — | `16` | Maximum number of concurrent Git subprocesses across Review and Analysis combined. |
 
 > Mode flags are mutually exclusive: pass either `--from`/`--to`, or
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.

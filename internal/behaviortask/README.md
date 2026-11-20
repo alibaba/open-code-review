@@ -7,7 +7,9 @@ collector, execute repository code, or make a report-summarization model call.
 combine the full Review pipeline with this independent task through `internal/workflow`.
 For uncommitted changes use ordinary `ocr review` without `--analysis`. The opt-in flag does not change default review
 or scan costs. Both roles use the configured model and private sessions. Analysis
-uses at most one additional concurrent model request. Analysis has no total token
+uses at most one additional concurrent model request. Both roles use the resolved
+`--max-tokens` limit for each prompt and share one `--max-git-procs` pool.
+Analysis has no total token
 limit by default (`--analysis-max-tokens-budget 0`). A positive limit counts tokens
 from investigation, compression and final submission. A request in progress and
 one submission-only final round can take the total above the limit. The Review summary and Analysis metadata

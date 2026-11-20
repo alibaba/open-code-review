@@ -84,14 +84,52 @@ func TestWorkspaceAnalysisRejectedBeforeReview(test *testing.T) {
 	}
 }
 
+func analysisTestContext(test *testing.T, repo string) *commonContext {
+	test.Helper()
+	cc, err := loadCommonContext(repo, "", "HEAD", 0, 1, true)
+	if err != nil {
+		test.Fatal(err)
+	}
+	return cc
+}
+
+func TestAnalysisSharesReviewGitLimit(test *testing.T) {
+	repo := retryTestRepo(test)
+	cc := analysisTestContext(test, repo)
+	opts := reviewOptions{commit: "HEAD"}
+	setup, err := prepareReviewCodeTools(test.Context(), repo, opts, cc.GitRunner, nil)
+	if err != nil {
+		test.Fatal(err)
+	}
+	input := analysisInputForReview(cc, opts, &llmRuntime{}, "review", *setup.resolution).input
+	err = cc.GitRunner.Stream(test.Context(), repo, func(stdout io.Reader) error {
+		if _, err := io.Copy(io.Discard, stdout); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(test.Context(), 250*time.Millisecond)
+		defer cancel()
+		if _, err := behaviortask.PrepareInput(ctx, input); !errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("analysis did not wait for the occupied Git slot: %v", err)
+		}
+		return nil
+	}, "rev-parse", "HEAD")
+	if err != nil {
+		test.Fatal(err)
+	}
+	if _, err := behaviortask.PrepareInput(test.Context(), input); err != nil {
+		test.Fatalf("analysis after releasing the Git slot: %v", err)
+	}
+}
+
 func TestAnalysisUsesResolvedReviewInput(test *testing.T) {
 	repo := retryTestRepo(test)
+	cc := analysisTestContext(test, repo)
 	for _, opts := range []reviewOptions{{repoDir: repo, from: "HEAD~1", to: "HEAD"}, {repoDir: repo, commit: "HEAD"}} {
 		setup, err := prepareReviewCodeTools(test.Context(), repo, opts, nil, nil)
 		if err != nil {
 			test.Fatal(err)
 		}
-		request := analysisInputForReview(&commonContext{RepoDir: repo}, opts, &llmRuntime{}, "review", *setup.resolution)
+		request := analysisInputForReview(cc, opts, &llmRuntime{}, "review", *setup.resolution)
 		retryTestGit(test, repo, "commit", "--allow-empty", "-qm", "Advance branch")
 		prepared, err := behaviortask.PrepareInput(test.Context(), request.input)
 		if err != nil || prepared.Resolution != *setup.resolution {
@@ -109,7 +147,7 @@ func TestRejectedArtifactDirectoryIsNotPublished(test *testing.T) {
 	if err != nil {
 		test.Fatal(err)
 	}
-	execution := newAnalysisExecution(analysisInputForReview(&commonContext{RepoDir: repo}, opts, &llmRuntime{}, "never-created", *setup.resolution))
+	execution := newAnalysisExecution(analysisInputForReview(analysisTestContext(test, repo), opts, &llmRuntime{}, "never-created", *setup.resolution))
 	result, err := execution.run(test.Context())
 	report := execution.report(result, err)
 	if !errors.Is(err, behaviortask.ErrArtifactLocation) || report.ArtifactDir != "" || report.SessionID != "" || !reflect.DeepEqual(report.Errors, []string{behaviortask.ErrArtifactLocation.Error()}) {
@@ -217,21 +255,25 @@ func analysisObservations(body []byte) []behaviortask.Observation {
 
 func TestReviewWithAnalysisHTTP(test *testing.T) {
 	for _, fixture := range []struct {
-		name           string
-		analysis       bool
-		emptyCommit    bool
-		failReview     bool
-		failAnalysis   bool
-		partial        bool
-		budget         string
-		analysisBudget string
-		analysisTokens int
-		mainTokens     int
-		blockOutput    bool
-		status         string
-		wantError      bool
+		name            string
+		analysis        bool
+		emptyCommit     bool
+		failReview      bool
+		failAnalysis    bool
+		partial         bool
+		budget          string
+		analysisBudget  string
+		analysisTokens  int
+		largeBackground bool
+		maxTokensFlag   string
+		mainTokens      int
+		blockOutput     bool
+		status          string
+		wantError       bool
 	}{
 		{name: "default", status: "complete"},
+		{name: "saved context limit pages analysis", analysis: true, emptyCommit: true, largeBackground: true, status: "skipped"},
+		{name: "CLI context limit overrides saved limit", analysis: true, emptyCommit: true, largeBackground: true, maxTokensFlag: "160000", status: "skipped"},
 		{name: "unlimited analysis", analysis: true, analysisTokens: 100_001, status: "complete"},
 		{name: "analysis partial self-assessment", analysis: true, partial: true, status: "complete"},
 		{name: "analysis failure", analysis: true, failAnalysis: true, status: "complete"},
@@ -268,7 +310,13 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 					reviewer.ServeHTTP(writer, request)
 					return
 				}
-				analysisCalls.Add(1)
+				if analysisCalls.Add(1) == 1 && fixture.largeBackground {
+					paged := bytes.Contains(body, []byte("follow the continuation cursor"))
+					inline := bytes.Contains(body, []byte("long-background-marker"))
+					if paged != (fixture.maxTokensFlag == "") || inline == paged {
+						test.Errorf("first analysis prompt: paged=%t inline=%t with --max-tokens=%q", paged, inline, fixture.maxTokensFlag)
+					}
+				}
 				writer.Header().Set("Content-Type", "application/json")
 				if fixture.failAnalysis {
 					if fixture.blockOutput {
@@ -304,7 +352,17 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			for key, value := range map[string]string{"OCR_LLM_URL": server.URL + "/v1/messages", "OCR_LLM_TOKEN": "test-token", "OCR_LLM_MODEL": "claude-test", "OCR_LLM_PROTOCOL": "anthropic", "OCR_LLM_AUTH_HEADER": "x-api-key", "OCR_LLM_TIMEOUT": "30"} {
 				test.Setenv(key, value)
 			}
-			args := []string{"--repo", repo, "--from", "HEAD~1", "--to", "HEAD", "--format", "json", "--output", output, "--effort", "low", "--no-filter", "--background", "Synthetic engineering verification"}
+			background := "Synthetic engineering verification"
+			if fixture.largeBackground {
+				if err := runConfigSet("max_tokens", "16000"); err != nil {
+					test.Fatal(err)
+				}
+				background = "long-background-marker" + strings.Repeat(" background", 18_000)
+			}
+			args := []string{"--repo", repo, "--from", "HEAD~1", "--to", "HEAD", "--format", "json", "--output", output, "--effort", "low", "--no-filter", "--background", background}
+			if fixture.maxTokensFlag != "" {
+				args = append(args, "--max-tokens", fixture.maxTokensFlag)
+			}
 			if fixture.analysis {
 				args = append(args, "--analysis")
 			}

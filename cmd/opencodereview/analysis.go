@@ -14,6 +14,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/behaviortask"
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/pathutil"
@@ -45,12 +46,13 @@ type analysisRequest struct {
 	input                               behaviortask.Input
 	endpoint                            llm.ResolvedEndpoint
 	model, provider, language, reviewID string
+	maxTokens                           int
 	budget                              int64
 	timeout                             time.Duration
 }
 
 func analysisInputForReview(cc *commonContext, opts reviewOptions, runtime *llmRuntime, reviewID string, resolution diff.InputResolution) analysisRequest {
-	input := behaviortask.Input{RepoDir: cc.RepoDir, Mode: reviewModeFromOptions(opts), Resolution: resolution}
+	input := behaviortask.Input{RepoDir: cc.RepoDir, Mode: reviewModeFromOptions(opts), Resolution: resolution, GitRunner: cc.GitRunner}
 	if cc.FileFilter != nil {
 		input.ExcludePatterns = append([]string(nil), cc.FileFilter.Exclude...)
 	}
@@ -58,7 +60,7 @@ func analysisInputForReview(cc *commonContext, opts reviewOptions, runtime *llmR
 		input.Contexts = []behaviortask.Context{{ID: "background", Kind: "background", Source: "review background input", Version: "v1", CollectedAt: time.Now().UTC().Format(time.RFC3339), Content: opts.background}}
 	}
 	return analysisRequest{
-		input: input, endpoint: runtime.Endpoint,
+		input: input, endpoint: runtime.Endpoint, maxTokens: cc.Template.MaxTokens,
 		model: runtime.Model, provider: runtime.Provider, language: runtime.RuntimeConfig.Language,
 		reviewID: reviewID, budget: int64(opts.analysisMaxTokensBudget), timeout: time.Duration(opts.concurrentTaskTimeout) * time.Minute,
 	}
@@ -116,6 +118,11 @@ func (execution *analysisExecution) prepare(ctx context.Context, request analysi
 		return err
 	}
 	directory := filepath.Join(parent, request.reviewID)
+	tpl, err := template.LoadBehaviorDefault()
+	if err != nil {
+		return err
+	}
+	tpl.MaxTokens = request.maxTokens
 	execution.collector = llm.NewRetryCollector()
 	var raw *llm.RawHolder
 	if llm.RawLoggingEnabled() {
@@ -123,7 +130,7 @@ func (execution *analysisExecution) prepare(ctx context.Context, request analysi
 	}
 	client := llm.NewLLMClient(request.endpoint, execution.collector, raw)
 	execution.runner, err = behaviortask.NewRunner(ctx, behaviortask.Deps{LLMClient: client, Model: request.model, Language: request.language,
-		ArtifactDir: directory, MaxTokensBudget: request.budget,
+		Template: tpl, ArtifactDir: directory, MaxTokensBudget: request.budget,
 		NewRequestMeta: func(key string, taskType session.TaskType, requestNo int) llm.RequestMeta {
 			return llm.RequestMeta{Provider: request.provider, Model: request.model, FilePath: key, TaskType: string(taskType), RequestNo: requestNo}
 		},
