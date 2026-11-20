@@ -237,3 +237,83 @@ func TestProvider_Enumerate_PathFilter(t *testing.T) {
 		t.Errorf("paths = %v, want %v", paths, want)
 	}
 }
+
+// Regression for PR #1794: the .gitignore matcher must not let a trailing
+// /** or a root-relative slash-containing rule exclude unrelated subtrees
+// through ancestor directories. Expectations follow git check-ignore.
+func TestProvider_Enumerate_GitignoreAncestorRules(t *testing.T) {
+	repo := initTestRepo(t)
+	writeFile(t, repo, ".gitignore", []byte("src/**\n!src/*.go\ndocs/generated\n"))
+	writeFile(t, repo, "src/a.go", []byte("package src\n"))
+	writeFile(t, repo, "src/sub/b.go", []byte("package sub\n"))
+	writeFile(t, repo, "docs/generated/c.go", []byte("package generated\n"))
+	writeFile(t, repo, "nested/docs/generated/d.go", []byte("package generated\n"))
+	gitCommit(t, repo, "init")
+
+	got, err := NewProvider(repo, nil, nil, 0).Enumerate(context.Background())
+	if err != nil {
+		t.Fatalf("Enumerate: %v", err)
+	}
+	paths := make([]string, 0, len(got))
+	for _, it := range got {
+		paths = append(paths, it.Path)
+	}
+	sort.Strings(paths)
+	// src/a.go: src/** ignores the contents, but the directory itself stays
+	// unignored so !src/*.go re-includes it.
+	// src/sub/b.go: excluded — the negation only reaches direct children.
+	// docs/generated/c.go: excluded — the root-relative rule matches its own
+	// subtree (the control).
+	// nested/docs/generated/d.go: included — an internal slash keeps the rule
+	// relative to the .gitignore location, so the unrelated subtree survives.
+	want := []string{".gitignore", "nested/docs/generated/d.go", "src/a.go"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Errorf("paths = %v, want %v", paths, want)
+	}
+}
+
+func TestProvider_Enumerate_GitignoreAncestorExceptions(test *testing.T) {
+	cases := []struct {
+		name     string
+		patterns string
+		path     string
+	}{
+		{
+			name:     "slashless globstar negation",
+			patterns: "cache\n!**cache\n",
+			path:     "src/cache/a.go",
+		},
+		{
+			name:     "path wildcard with nested exception",
+			patterns: "src/*\n!src/ok/\n!src/ok/nested/*.go\n",
+			path:     "src/ok/nested/a.go",
+		},
+		{
+			name:     "anchored wildcard with nested exception",
+			patterns: "/*\n!/.gitignore\n!/src/\n!*.go\n",
+			path:     "src/inner/a.go",
+		},
+	}
+	for _, testCase := range cases {
+		test.Run(testCase.name, func(test *testing.T) {
+			repo := initTestRepo(test)
+			writeFile(test, repo, ".gitignore", []byte(testCase.patterns))
+			writeFile(test, repo, testCase.path, []byte("package fixture\n"))
+			gitCommit(test, repo, "init")
+
+			items, err := NewProvider(repo, nil, nil, 0).Enumerate(context.Background())
+			if err != nil {
+				test.Fatalf("Enumerate: %v", err)
+			}
+			paths := make([]string, 0, len(items))
+			for _, item := range items {
+				paths = append(paths, item.Path)
+			}
+			sort.Strings(paths)
+			want := []string{".gitignore", testCase.path}
+			if !reflect.DeepEqual(paths, want) {
+				test.Errorf("paths = %v, want %v", paths, want)
+			}
+		})
+	}
+}
