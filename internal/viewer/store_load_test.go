@@ -21,6 +21,46 @@ type dataErrorReader struct {
 	err  error
 }
 
+func TestCheckpointSnapshotsReplaceViewerComments(t *testing.T) {
+	for _, finalized := range []bool{false, true} {
+		t.Run(fmt.Sprintf("finalized=%v", finalized), func(t *testing.T) {
+			root := t.TempDir()
+			repoDir := filepath.Join(root, "repo")
+			if err := os.MkdirAll(repoDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			lines := []string{
+				`{"type":"session_start","timestamp":"2026-10-12T00:00:00Z"}`,
+				`{"type":"review_item_done","fingerprint":"a","filePath":"a.go","comments":[{"content":"early"}]}`,
+				`{"type":"review_item_reused","fingerprint":"b","filePath":"b.go","comments":[{"content":"stale"}]}`,
+				`{"type":"review_item_done","fingerprint":"a","filePath":"a.go","uuid":"final","comments":[{"content":"final"},{"content":"late"}]}`,
+				`{"type":"review_item_failed","fingerprint":"b","filePath":"b.go"}`,
+				`{"type":"review_item_done","fingerprint":"c","filePath":"c.go","comments":[{"content":"filtered"}]}`,
+				`{"type":"review_item_done","fingerprint":"c","filePath":"c.go"}`,
+			}
+			if finalized {
+				lines = append(lines, `{"type":"session_end","files_reviewed":["a.go","b.go","c.go"]}`)
+			}
+			path := filepath.Join(repoDir, "snapshots.jsonl")
+			writeJSONL(t, path, lines...)
+			peek, err := peekSession(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			view, err := LoadSession(root, "repo", "snapshots")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if peek.CommentCount != 2 || view.Summary.CommentCount != 2 || len(view.Comments) != 2 || peek.Aborted == finalized {
+				t.Fatalf("viewer double-counted checkpoints: peek=%+v view=%+v", peek, view.Summary)
+			}
+			if view.Comments[0].Content != "final" || view.Comments[1].Content != "late" || view.Comments[0].MarkID != "final#0" {
+				t.Fatalf("viewer retained superseded comments: %+v", view.Comments)
+			}
+		})
+	}
+}
+
 func (r *dataErrorReader) Read(p []byte) (int, error) {
 	if len(r.data) == 0 {
 		return 0, r.err
