@@ -821,3 +821,60 @@ func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	assertContains(t, args, "--exclude-standard")
 	assertNotContains(t, args, "--untracked")
 }
+
+
+func TestGitGrep_LongLineTruncated(t *testing.T) {
+	// Committed minified bundles contain megabyte-long single lines; the
+	// 100-match cap counts lines, not bytes, so without a per-line cap one
+	// match can blow the model context window.
+	dir := setupTestRepo(t)
+	minified := strings.Repeat("x", 5*1024*1024)
+	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dist", "bundle.min.js"), []byte("NEEDLE_PREFIX "+minified+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "normal.go"), []byte("NEEDLE_PREFIX short normal line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+	result, err := p.Execute(context.Background(), map[string]any{"search_text": "NEEDLE_PREFIX"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "File: dist/bundle.min.js") {
+		t.Errorf("expected the minified file to be reported, got: %s", result)
+	}
+	if !strings.Contains(result, "[line truncated,") {
+		t.Errorf("expected a line-truncation marker, got: %s", result[:200])
+	}
+	if len(result) >= 64*1024 {
+		t.Errorf("expected a bounded result, got %d bytes", len(result))
+	}
+	// Normal short lines keep byte-identical rendering.
+	if want := "1|NEEDLE_PREFIX short normal line"; !strings.Contains(result, want) {
+		t.Errorf("expected normal match to render unchanged, want %q, got: %s", want, result[:300])
+	}
+}
+
+func TestTruncateMatchLine(t *testing.T) {
+	short := "func main() {}"
+	if got := truncateMatchLine(short); got != short {
+		t.Errorf("short line must pass through unchanged, got %q", got)
+	}
+	long := strings.Repeat("a", gitGrepMaxLineBytes+10)
+	got := truncateMatchLine(long)
+	if len(got) > gitGrepMaxLineBytes+64 {
+		t.Errorf("truncated line still too long: %d bytes", len(got))
+	}
+	if !strings.Contains(got, "[line truncated, 10 more bytes omitted]") {
+		t.Errorf("expected omission marker, got %q", got)
+	}
+	// Multi-byte runes: the cut must back off to a valid UTF-8 boundary.
+	multibyte := strings.Repeat("界", gitGrepMaxLineBytes) // 3 bytes per rune
+	if !utf8.ValidString(truncateMatchLine(multibyte)) {
+		t.Errorf("truncated multi-byte line is not valid UTF-8")
+	}
+}
