@@ -22,14 +22,25 @@ import (
 type Deps struct {
 	LLMClient       llm.LLMClient
 	Model           string
+	TaskModels      llm.TaskModels // per-task model overrides from the config file; nil when unset
 	Session         *session.SessionHistory
 	NewRequestMeta  func(taskKey string, taskType session.TaskType, requestNo int) llm.RequestMeta
 	MaxTokensBudget int64
 }
 
+// ModelForTask returns the model override configured for task, or Model when
+// task_models has no entry for it. MAIN rounds pass main_task and compression
+// passes memory_compression_task; scan shares this Runner and its dedup/summary
+// calls also pass memory_compression_task, mirroring how they are recorded in
+// the session history.
+func (d Deps) ModelForTask(task session.TaskType) string {
+	return d.TaskModels.ModelFor(string(task), d.Model)
+}
+
 // RequestContext must be called after AppendTaskRecord: request identity joins
 // the retry report to the existing session record by its RequestNo.
 func (r *Runner) RequestContext(ctx context.Context, taskKey string, taskType session.TaskType, requestNo int) context.Context {
+
 	if r.deps.NewRequestMeta == nil {
 		return ctx
 	}
@@ -337,10 +348,11 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		// Scoped to this round: ctx itself must stay identity-free so each
 		// iteration's meta replaces the previous one instead of nesting.
 		reqCtx := r.RequestContext(ctx, taskKey, session.MainTask, rec.RequestNo)
+		taskModel := r.deps.ModelForTask(session.MainTask)
 
-		_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+		_, llmSpan := telemetry.StartLLMSpan(ctx, taskModel)
 		request := llm.ChatRequest{
-			Model:     r.deps.Model,
+			Model:     taskModel,
 			Messages:  messages,
 			Tools:     r.task.ToolDefs,
 			MaxTokens: r.task.MaxCompletionTokens,
@@ -352,7 +364,7 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 			rec.SetError(err, duration)
 			telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 			llmSpan.End()
-			telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
+			telemetry.RecordLLMRequest(ctx, taskModel, duration, 0, "error")
 			return false, StopNone, fmt.Errorf("LLM completion error: %w", err)
 		}
 		rec.SetResponse(resp, duration)
@@ -366,7 +378,7 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		}
 		telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
 		llmSpan.End()
-		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
+		telemetry.RecordLLMRequest(ctx, taskModel, duration, totalTokens, "ok")
 
 		content := resp.VisibleContent()
 		calls := resp.ToolCalls()
@@ -493,9 +505,10 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	startTime := time.Now()
 	reqCtx := r.RequestContext(ctx, taskKey, session.MainTask, rec.RequestNo)
 
-	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+	taskModel := r.deps.ModelForTask(session.MainTask)
+	_, llmSpan := telemetry.StartLLMSpan(ctx, taskModel)
 	request := llm.ChatRequest{
-		Model:     r.deps.Model,
+		Model:     taskModel,
 		Messages:  messages,
 		Tools:     graceDefs,
 		MaxTokens: r.task.MaxCompletionTokens,
@@ -507,7 +520,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 		rec.SetError(err, duration)
 		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 		llmSpan.End()
-		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
+		telemetry.RecordLLMRequest(ctx, taskModel, duration, 0, "error")
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", taskKey, err)
 		return false
 	}
@@ -523,7 +536,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	}
 	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
 	llmSpan.End()
-	telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
+	telemetry.RecordLLMRequest(ctx, taskModel, duration, totalTokens, "ok")
 
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {

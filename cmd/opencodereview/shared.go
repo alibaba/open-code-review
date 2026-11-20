@@ -197,11 +197,12 @@ func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 // adjusted template (mutated in place via ApplyLanguage), the LLM client,
 // the resolved model name, and a fresh comment collector.
 type llmRuntime struct {
-	Client    llm.LLMClient
-	Model     string
-	Provider  string // resolved provider name (non-secret label; empty for non-provider endpoints)
-	Source    string // resolved configuration source (non-secret label)
-	Collector *tool.CommentCollector
+	Client     llm.LLMClient
+	Model      string
+	Provider   string // resolved provider name (non-secret label; empty for non-provider endpoints)
+	Source     string // resolved configuration source (non-secret label)
+	TaskModels llm.TaskModels // per-task model overrides from the config file; nil when unset
+	Collector  *tool.CommentCollector
 	// RetryCollector observes every LLM HTTP attempt this run makes. It is
 	// created here rather than on the session or the agent because the client is
 	// built before either exists, and it is per-run rather than package-level so
@@ -267,6 +268,7 @@ func loadLLMRuntime(tpl *template.Template, resolveOpts llm.ResolveOptions) (*ll
 		Model:          ep.Model,
 		Provider:       ep.Provider,
 		Source:         ep.Source,
+		TaskModels:     ep.TaskModels,
 		Collector:      tool.NewCommentCollector(),
 		RetryCollector: retryCollector,
 		RawHolder:      rawHolder,

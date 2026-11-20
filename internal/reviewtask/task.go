@@ -16,6 +16,7 @@ import (
 type Deps struct {
 	LLMClient         llm.LLMClient
 	Model             string
+	TaskModels        llm.TaskModels // per-task model overrides from the config file; nil when unset
 	Template          template.Template
 	Tools             *tool.Registry
 	MainToolDefs      []llm.ToolDef
@@ -76,6 +77,7 @@ func NewRunner(deps Deps) *Runner {
 	runner.Runner = llmloop.NewRunner(llmloop.Deps{
 		LLMClient:       deps.LLMClient,
 		Model:           deps.Model,
+		TaskModels:      deps.TaskModels,
 		Session:         deps.Session,
 		NewRequestMeta:  deps.NewRequestMeta,
 		MaxTokensBudget: deps.MaxTokensBudget,
