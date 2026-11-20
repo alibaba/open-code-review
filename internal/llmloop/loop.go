@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -301,6 +302,8 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 	toolReqCount := r.task.MaxRounds
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
+	hasSubmission := false
+	nudgedUnfiledCompletion := false
 	sessionID := uuid.NewString()
 
 	// Async compression is owned by this conversation alone; the deferred
@@ -392,6 +395,9 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		thinking := resp.ReasoningContent()
 		for _, call := range calls {
 			cp := r.executeTool(ctx, request.Tools, taskKey, call, rec, thinking)
+			if cp.RecordedSubmission {
+				hasSubmission = true
+			}
 			if cp.Action == Fail {
 				return false, StopNone, fmt.Errorf("task failed: %s", cp.Content)
 			} else if cp.Action == Complete {
@@ -418,6 +424,26 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		}
 
 		if taskCompleted {
+			hasUnfiledText := (r.task.UnfiledCompletionMessage != "" || r.task.UnfiledCompletionWarning != "") &&
+				!hasSubmission && strings.TrimSpace(content) != ""
+			if hasUnfiledText {
+				if r.task.UnfiledCompletionMessage != "" && !nudgedUnfiledCompletion && (toolReqCount > 0 || len(r.task.Grace.Tools) > 0) {
+					nudgedUnfiledCompletion = true
+					consecutiveEmptyRounds = 0
+					if !r.addNextMessage(ctx, content, calls, resp.Native(), thinking, results, &messages, taskKey, st) {
+						fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", taskKey)
+						stop = StopCompression
+						break
+					}
+					if toolReqCount > 0 {
+						messages = append(messages, llm.NewTextMessage("user", r.task.UnfiledCompletionMessage))
+					}
+					continue
+				}
+				if r.task.UnfiledCompletionWarning != "" {
+					r.RecordWarning(r.task.UnfiledCompletionWarning, taskKey, "task completed with visible text and no findings submitted")
+				}
+			}
 			return true, StopNone, nil
 		}
 		if !hasValidResult {
@@ -448,11 +474,11 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 	switch stop {
 	case StopMaxRounds:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", taskKey)
-		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
+		completed = r.runGraceRound(ctx, messages, taskKey, sessionID, hasSubmission)
 	case StopTokenBudget:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Token budget exceeded (used %d > budget %d) for %s.\n",
 			r.TotalTokensUsed(), r.deps.MaxTokensBudget, taskKey)
-		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
+		completed = r.runGraceRound(ctx, messages, taskKey, sessionID, hasSubmission)
 	}
 	return completed, stop, nil
 }
@@ -475,7 +501,7 @@ func (r *Runner) tokenBudgetExceeded() bool {
 	return budget > 0 && r.TotalTokensUsed() > budget
 }
 
-func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID string) bool {
+func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID string, hasSubmission bool) bool {
 	graceDefs := r.task.Grace.Tools
 	if len(graceDefs) == 0 {
 		return false
@@ -537,10 +563,17 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	thinking := resp.ReasoningContent()
 	for _, call := range calls {
 		checkpoint := r.executeTool(ctx, request.Tools, taskKey, call, rec, thinking)
+		if checkpoint.RecordedSubmission {
+			hasSubmission = true
+		}
 		completed = completed || checkpoint.Action == Complete
 		failed = failed || checkpoint.Action == Fail
 	}
-	return completed && !failed
+	done := completed && !failed
+	if done && !hasSubmission && r.task.UnfiledCompletionWarning != "" && strings.TrimSpace(resp.VisibleContent()) != "" {
+		r.RecordWarning(r.task.UnfiledCompletionWarning, taskKey, "task completed with visible text and no findings submitted")
+	}
+	return done
 }
 
 // addNextMessage extends the conversation with the assistant message and
