@@ -26,6 +26,7 @@ const DOC_SLUG_ORDER: readonly DocSlug[] = [
   'chatgpt-preview',
   'cli-reference',
   'review-rules',
+  'reviewing-requirements',
   'architecture',
   'tools',
   'mcp',

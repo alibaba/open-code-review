@@ -11,6 +11,7 @@ import enConfiguration from './en/configuration.md';
 import enChatGPTPreview from './en/chatgpt-preview.md';
 import enCliReference from './en/cli-reference.md';
 import enReviewRules from './en/review-rules.md';
+import enReviewingRequirements from './en/reviewing-requirements.md';
 import enArchitecture from './en/architecture.md';
 import enTools from './en/tools.md';
 import enMcp from './en/mcp.md';
@@ -32,6 +33,7 @@ const enDocs: CompleteLocalizedDocs = {
   'chatgpt-preview': enChatGPTPreview,
   'cli-reference': enCliReference,
   'review-rules': enReviewRules,
+  'reviewing-requirements': enReviewingRequirements,
   'architecture': enArchitecture,
   'tools': enTools,
   'mcp': enMcp,

@@ -15,6 +15,7 @@ import ruConfiguration from './ru/configuration.md';
 import ruChatGPTPreview from './ru/chatgpt-preview.md';
 import ruCliReference from './ru/cli-reference.md';
 import ruReviewRules from './ru/review-rules.md';
+import ruReviewingRequirements from './ru/reviewing-requirements.md';
 import ruArchitecture from './ru/architecture.md';
 import ruTools from './ru/tools.md';
 import ruMcp from './ru/mcp.md';
@@ -36,6 +37,7 @@ const ruDocs: LocalizedDocs = {
   'chatgpt-preview': ruChatGPTPreview,
   'cli-reference': ruCliReference,
   'review-rules': ruReviewRules,
+  'reviewing-requirements': ruReviewingRequirements,
   'architecture': ruArchitecture,
   'tools': ruTools,
   'mcp': ruMcp,
