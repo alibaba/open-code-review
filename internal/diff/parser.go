@@ -7,6 +7,7 @@ package diff
 import (
 	"context"
 	"fmt"
+	"iter"
 	"os"
 	"os/exec"
 	"regexp"
@@ -25,8 +26,9 @@ var (
 	binaryRe = regexp.MustCompile(`^Binary files `)
 )
 
-// splitDiffLines splits unified diff text on "\n" and drops the carriage
+// splitDiffLines iterates unified diff text on "\n" and drops the carriage
 // return that CRLF-terminated diff text leaves at the end of every line.
+// Iteration avoids retaining a second, full-diff slice of line headers.
 //
 // Git writes its own structural lines with "\n", but the diff text can reach
 // us already converted: a .patch checked out under core.autocrlf=true, or
@@ -39,12 +41,14 @@ var (
 // Stripping it matches how the rest of the package already treats a trailing
 // carriage return: resolver.go trims it before matching lines, and filereader
 // and viewer do the same when reading file content.
-func splitDiffLines(text string) []string {
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		lines[i] = strings.TrimSuffix(line, "\r")
+func splitDiffLines(text string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for line := range strings.SplitSeq(text, "\n") {
+			if !yield(strings.TrimSuffix(line, "\r")) {
+				return
+			}
+		}
 	}
-	return lines
 }
 
 // parseDiffHeaderLine extracts the two pathnames from a "diff --git" line,
@@ -111,7 +115,7 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	for _, line := range lines {
+	for line := range lines {
 		if oldPath, newPath, ok := parseDiffHeaderLine(line); ok {
 			// Flush previous diff
 			if current != nil {
