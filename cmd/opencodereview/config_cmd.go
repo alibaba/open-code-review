@@ -350,6 +350,7 @@ type Config struct {
 	Provider        string                     `json:"provider,omitempty"`
 	Model           string                     `json:"model,omitempty"`
 	MaxTokens       int                        `json:"max_tokens,omitempty"`
+	MaxCostBudget   float64                    `json:"max_cost_budget,omitempty"`
 	Effort          string                     `json:"effort,omitempty"`
 	Providers       map[string]ProviderEntry   `json:"providers,omitempty"`
 	CustomProviders map[string]ProviderEntry   `json:"custom_providers,omitempty"`
@@ -605,6 +606,7 @@ var supportedConfigKeys = []string{
 	"provider",
 	"model",
 	"max_tokens",
+	"max_cost_budget",
 	"effort",
 	"providers.<name>.<field>",
 	"custom_providers.<name>.<field>",
@@ -691,6 +693,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid max_tokens %q: must be a positive integer", value)
 		}
 		cfg.MaxTokens = maxTokens
+	case "max_cost_budget":
+		budget, err := strconv.ParseFloat(value, 64)
+		if err != nil || validateCostBudget(budget) != nil {
+			return fmt.Errorf("invalid max_cost_budget %q: must be a non-negative number in USD (0 clears it)", value)
+		}
+		cfg.MaxCostBudget = budget
 	case "effort":
 		e, err := template.ParseEffort(value)
 		if err != nil {

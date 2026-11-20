@@ -50,6 +50,10 @@ type ResolvedEndpoint struct {
 	// providers. Empty means "let the AWS SDK decide".
 	AWSProfile string
 	AWSRegion  string
+
+	// Price is the resolved model's entry in its provider's price table, or nil
+	// when the table has none.
+	Price *Price
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -364,6 +368,10 @@ type providerEntryConfig struct {
 	// makes a review run reproducible without exporting AWS_PROFILE first.
 	AWSProfile string `json:"aws_profile,omitempty"`
 	AWSRegion  string `json:"aws_region,omitempty"`
+
+	// Prices maps a model id to its price in USD per million tokens, keyed by
+	// input, cache_read, cache_write and output (see PriceFromMap).
+	Prices map[string]map[string]float64 `json:"prices,omitempty"`
 }
 
 type configFile struct {
@@ -597,6 +605,15 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 		url = ensureMessagesSuffix(url)
 	}
 
+	var price *Price
+	if m, ok := entry.Prices[model]; ok {
+		p, err := PriceFromMap(m)
+		if err != nil {
+			return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: prices for model %q: %w", cfg.Provider, model, err)
+		}
+		price = &p
+	}
+
 	// Single api_key_cmd resolution site for both preset and custom providers,
 	// as late as possible: everything above can fail without running the
 	// command. An ambient-auth provider skips it entirely — the request is
@@ -626,6 +643,7 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 		AmbientAuth:  ambientAuth,
 		AWSProfile:   entry.AWSProfile,
 		AWSRegion:    entry.AWSRegion,
+		Price:        price,
 	}, true, nil
 }
 

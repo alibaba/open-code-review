@@ -25,6 +25,13 @@ type Deps struct {
 	Session         *session.SessionHistory
 	NewRequestMeta  func(taskKey string, taskType session.TaskType, requestNo int) llm.RequestMeta
 	MaxTokensBudget int64
+
+	// MaxCostBudget, when > 0, is the run's aggregate spend cap in USD at
+	// Price, checked wherever MaxTokensBudget is. Token counts alone do not
+	// track spend: cache reads and writes are billed far below and above the
+	// input price. Callers must set Price whenever MaxCostBudget is set.
+	MaxCostBudget float64
+	Price         *llm.Price
 }
 
 // RequestContext must be called after AppendTaskRecord: request identity joins
@@ -47,12 +54,16 @@ type Runner struct {
 	totalOutputTokens     int64
 	totalCacheReadTokens  int64
 	totalCacheWriteTokens int64
-	warningsMu            sync.Mutex
-	warnings              []AgentWarning
-	toolCallsMu           sync.Mutex
-	toolCalls             map[string]int64
-	toolCallSequence      int64
-	toolFailures          []ToolFailureDetail
+	// usageMu makes the four counters one record: RecordUsage adds a
+	// response's tokens under it and usageSnapshot reads them under it, so a
+	// cost gate never prices a response whose cache split is not yet counted.
+	usageMu          sync.Mutex
+	warningsMu       sync.Mutex
+	warnings         []AgentWarning
+	toolCallsMu      sync.Mutex
+	toolCalls        map[string]int64
+	toolCallSequence int64
+	toolFailures     []ToolFailureDetail
 	// bg tracks every background goroutine that can still issue an LLM
 	// request after Run returned. WaitBackground joins them so a
 	// retry-report Freeze at the run boundary cannot observe an
@@ -111,6 +122,23 @@ func (r *Runner) TotalCacheReadTokens() int64 { return atomic.LoadInt64(&r.total
 
 // TotalCacheWriteTokens returns the accumulated cache write tokens.
 func (r *Runner) TotalCacheWriteTokens() int64 { return atomic.LoadInt64(&r.totalCacheWriteTokens) }
+
+// usageSnapshot returns the four token counters as of a whole number of
+// recorded responses.
+func (r *Runner) usageSnapshot() (input, output, cacheRead, cacheWrite int64) {
+	r.usageMu.Lock()
+	defer r.usageMu.Unlock()
+	return r.TotalInputTokens(), r.TotalOutputTokens(), r.TotalCacheReadTokens(), r.TotalCacheWriteTokens()
+}
+
+// TotalCost returns the USD spent so far at Deps.Price, and false when no
+// price is known.
+func (r *Runner) TotalCost() (float64, bool) {
+	if r.deps.Price == nil {
+		return 0, false
+	}
+	return r.deps.Price.Cost(r.usageSnapshot()), true
+}
 
 // TotalTokensUsed returns input + output.
 func (r *Runner) TotalTokensUsed() int64 {
@@ -198,6 +226,8 @@ func (r *Runner) RecordUsage(u *llm.UsageInfo) {
 	if u == nil {
 		return
 	}
+	r.usageMu.Lock()
+	defer r.usageMu.Unlock()
 	atomic.AddInt64(&r.totalInputTokens, u.PromptTokens)
 	atomic.AddInt64(&r.totalOutputTokens, u.CompletionTokens)
 	atomic.AddInt64(&r.totalCacheReadTokens, u.CacheReadTokens)
@@ -232,6 +262,10 @@ const (
 	// was already exceeded when the next round was about to start. This is a
 	// declared budget limit, like StopMaxRounds.
 	StopTokenBudget
+	// StopCostBudget — the run's aggregate cost budget (Deps.MaxCostBudget)
+	// was already exceeded when the next round was about to start. This is a
+	// declared budget limit, like StopTokenBudget.
+	StopCostBudget
 )
 
 // String names the stop for diagnostics — telemetry attributes, log lines and
@@ -249,6 +283,8 @@ func (s MainLoopStop) String() string {
 		return "compression"
 	case StopTokenBudget:
 		return "token_budget"
+	case StopCostBudget:
+		return "cost_budget"
 	default:
 		return fmt.Sprintf("MainLoopStop(%d)", int(s))
 	}
@@ -280,6 +316,8 @@ func (s MainLoopStop) Reason() string {
 		return "stopped because context compression exceeded its threshold"
 	case StopTokenBudget:
 		return "reached the aggregate token budget before finishing"
+	case StopCostBudget:
+		return "reached the aggregate cost budget before finishing"
 	default:
 		return fmt.Sprintf("main task stopped for an unrecognized reason (stop=%d)", int(s))
 	}
@@ -310,7 +348,7 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 
 	// stop defaults to StopMaxRounds: if the for-loop exits because toolReqCount
 	// reached zero, the run stopped on the round budget. The empty-round,
-	// compression and token-budget breaks overwrite it at their trigger points.
+	// compression and token- and cost-budget breaks overwrite it at their trigger points.
 	stop := StopMaxRounds
 	for toolReqCount > 0 {
 		select {
@@ -325,6 +363,10 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		// long group is exactly the spender a between-subtasks gate never sees.
 		if r.tokenBudgetExceeded() {
 			stop = StopTokenBudget
+			break
+		}
+		if r.CostBudgetExceeded() {
+			stop = StopCostBudget
 			break
 		}
 
@@ -359,10 +401,7 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		totalTokens := int64(0)
 		if resp.Usage != nil {
 			totalTokens = resp.Usage.TotalTokens
-			atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
-			atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
-			atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-			atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
+			r.RecordUsage(resp.Usage)
 		}
 		telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
 		llmSpan.End()
@@ -453,6 +492,11 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		fmt.Fprintf(stdout.Writer(), "[ocr] Token budget exceeded (used %d > budget %d) for %s.\n",
 			r.TotalTokensUsed(), r.deps.MaxTokensBudget, taskKey)
 		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
+	case StopCostBudget:
+		spent, _ := r.TotalCost()
+		fmt.Fprintf(stdout.Writer(), "[ocr] Cost budget exceeded (spent $%.4f > budget $%.2f) for %s.\n",
+			spent, r.deps.MaxCostBudget, taskKey)
+		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
 	}
 	return completed, stop, nil
 }
@@ -473,6 +517,13 @@ func (r *Runner) executeTool(ctx context.Context, definitions []llm.ToolDef, tas
 func (r *Runner) tokenBudgetExceeded() bool {
 	budget := r.deps.MaxTokensBudget
 	return budget > 0 && r.TotalTokensUsed() > budget
+}
+
+// CostBudgetExceeded reports whether the run's spend is past
+// Deps.MaxCostBudget. A zero budget or an unknown price never trips.
+func (r *Runner) CostBudgetExceeded() bool {
+	spent, ok := r.TotalCost()
+	return ok && r.deps.MaxCostBudget > 0 && spent > r.deps.MaxCostBudget
 }
 
 func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID string) bool {
@@ -516,10 +567,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	totalTokens := int64(0)
 	if resp.Usage != nil {
 		totalTokens = resp.Usage.TotalTokens
-		atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
-		atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
-		atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
+		r.RecordUsage(resp.Usage)
 	}
 	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
 	llmSpan.End()

@@ -59,6 +59,11 @@ type Deps struct {
 	// unlimited, which is also what scan and every existing caller get by
 	// default.
 	MaxTokensBudget int64
+
+	// MaxCostBudget and Price: the run's aggregate spend cap in USD at Price,
+	// checked wherever MaxTokensBudget is (see llmloop.Deps).
+	MaxCostBudget float64
+	Price         *llm.Price
 }
 
 type Runner struct {
@@ -79,6 +84,8 @@ func NewRunner(deps Deps) *Runner {
 		Session:         deps.Session,
 		NewRequestMeta:  deps.NewRequestMeta,
 		MaxTokensBudget: deps.MaxTokensBudget,
+		MaxCostBudget:   deps.MaxCostBudget,
+		Price:           deps.Price,
 	}, llmloop.Task{
 		ToolDefs: deps.MainToolDefs,
 		ExecuteTool: func(ctx context.Context, key string, call llm.ToolCall, record *session.TaskRecord, thinking string) llmloop.ToolOutcome {
@@ -117,7 +124,7 @@ func NewRunner(deps Deps) *Runner {
 
 func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKey string) (bool, llmloop.MainLoopStop, error) {
 	result, err := r.Run(ctx, messages, taskKey)
-	if result.StopReason == llmloop.StopMaxRounds || result.StopReason == llmloop.StopTokenBudget {
+	if result.StopReason == llmloop.StopMaxRounds || result.StopReason == llmloop.StopTokenBudget || result.StopReason == llmloop.StopCostBudget {
 		r.recordGraceRoundLimit(taskKey, result.StopReason, result.Completed)
 	}
 	return result.Completed, result.StopReason, err
@@ -134,9 +141,10 @@ func (r *Runner) CollectPendingComments() []model.LlmComment {
 }
 
 // WarningReviewLimitReached is the warning type RunMainTask records when a
-// declared budget — the tool-request rounds (StopMaxRounds) or the aggregate
-// token budget (StopTokenBudget) — spends the main loop's last round and sends
-// the task into its grace round. Callers publish warnings in their JSON and
+// declared budget (the tool-request rounds, StopMaxRounds, or the aggregate
+// token or cost budget, StopTokenBudget or StopCostBudget) spends the main
+// loop's last round and sends the task into its grace round. Callers publish
+// warnings in their JSON and
 // terminal output, and the warning keeps a spent limit visible even when the
 // grace round completes the task: by design the completion alone would look
 // like an untruncated review.

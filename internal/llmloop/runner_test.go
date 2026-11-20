@@ -727,3 +727,52 @@ func TestStripMarkdownFences_AdditionalCases(t *testing.T) {
 		})
 	}
 }
+
+// A response's prompt and cache tokens are one record: while another goroutine
+// records a fully cached response, a cost gate must never see its prompt tokens
+// priced as uncached. At input=3 and cache_read=0.3 per million, each 100k
+// cached response costs $0.03 once recorded but $0.30 if only its prompt half
+// is visible.
+func TestTotalCostIsASnapshotOfWholeResponses(t *testing.T) {
+	r := newTestRunner(&fakeLLMClient{}, Task{})
+	r.deps.Price = &llm.Price{Input: 3, CacheRead: 0.3}
+	const responses, readers, perResponse = 20000, 4, 0.03
+
+	var started atomic.Int64
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	bad := make(chan string, readers)
+	for i := 0; i < readers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				cost, _ := r.TotalCost()
+				upper := float64(started.Load()) * perResponse // read after the cost, so it can only have grown
+				if cost > upper+1e-9 {
+					select {
+					case bad <- fmt.Sprintf("TotalCost = %.4f, above the %.4f that %d whole responses cost: a response was priced without its cache split", cost, upper, int(upper/perResponse)):
+					default:
+					}
+					return
+				}
+			}
+		}()
+	}
+	for i := 0; i < responses; i++ {
+		started.Add(1)
+		r.RecordUsage(&llm.UsageInfo{PromptTokens: 100000, CacheReadTokens: 100000})
+	}
+	close(stop)
+	wg.Wait()
+	select {
+	case msg := <-bad:
+		t.Fatal(msg)
+	default:
+	}
+}
