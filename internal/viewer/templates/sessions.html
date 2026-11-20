@@ -23,7 +23,7 @@
         <tr>
             <td class="col-session"><a class="session-id" href="/r/{{$.EncodedRepo}}/{{$s.SessionID}}" title="{{$s.SessionID}}">{{truncate 8 $s.SessionID}}</a></td>
             <td class="col-branch">{{$s.GitBranch}}</td>
-            <td class="col-mode">{{if $s.ReviewMode}}{{$s.ReviewMode}}{{else}}-{{end}}{{if $s.AnalysisEnabled}} <a class="badge" href="/r/{{$.EncodedRepo}}/{{$s.SessionID}}?tab=analysis">Review + Analysis</a>{{end}}</td>
+            <td class="col-mode">{{if $s.ReviewMode}}{{$s.ReviewMode}}{{else}}-{{end}}</td>
             <td class="col-model">{{$s.Model}}</td>
             <td class="col-files">{{$s.FileCount}}</td>
             <td>{{if $s.Aborted}}aborted{{else if $s.Legacy}}legacy{{else}}{{$s.TerminalState}}{{end}}</td>

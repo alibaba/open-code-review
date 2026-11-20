@@ -237,6 +237,7 @@ type ReviewComment struct {
 type ViewSession struct {
 	Summary      SessionSummary
 	TokenUsage   TokenUsageSummary
+	requests     []*TaskCard
 	Files        []*FileGroup     // ordered by file path
 	SessionTasks []*FileGroup     // session-level tasks (grouping, etc.) separated from file-level
 	Comments     []*ReviewComment // review findings from review_item_done/reused records
@@ -288,6 +289,7 @@ func isSessionLevelPath(fp string) bool {
 
 // TaskCard links an LLM request with its response and tool calls.
 type TaskCard struct {
+	TaskType         TaskType
 	RequestMessages  any // preserved for display
 	RequestNo        int
 	ResponseContent  string
@@ -479,40 +481,50 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	}
 	defer f.Close()
 
+	return readSession(f, sessionID)
+}
+
+func readSession(reader io.Reader, sessionID string) (*ViewSession, error) {
 	vs := &ViewSession{Files: make([]*FileGroup, 0)}
 	vs.Summary.Aborted = true
 	fileIndex := make(map[string]*FileGroup)
 	markOccurrences := make(map[string]int)
 
-	readErr := readJSONLLines(f, func(line []byte) {
+	readErr := readJSONLLines(reader, func(line []byte) {
+		var header struct {
+			Type      string
+			FilePath  string
+			TaskType  TaskType
+			RequestNo int `json:"request_no"`
+		}
+		if json.Unmarshal(line, &header) != nil {
+			return
+		}
+		if header.Type == "llm_request" {
+			card := &TaskCard{TaskType: header.TaskType, RequestNo: header.RequestNo}
+			if header.TaskType == GroupingTask {
+				var request struct{ Messages any }
+				if json.Unmarshal(line, &request) == nil {
+					card.RequestMessages = request.Messages
+				}
+			}
+			group := fileIndex[header.FilePath]
+			if group == nil {
+				group = &FileGroup{FilePath: header.FilePath, Tasks: make(map[TaskType][]*TaskCard)}
+				fileIndex[header.FilePath] = group
+				vs.Files = append(vs.Files, group)
+			}
+			group.Tasks[header.TaskType] = append(group.Tasks[header.TaskType], card)
+			vs.requests = append(vs.requests, card)
+			return
+		}
 		var rec map[string]any
 		if err := json.Unmarshal(line, &rec); err != nil {
 			return // skip malformed lines
 		}
-		typ, _ := rec["type"].(string)
-
-		switch typ {
+		switch header.Type {
 		case "session_start":
 			applySessionStart(&vs.Summary, rec)
-
-		case "llm_request":
-			fp, _ := rec["filePath"].(string)
-			tt, _ := rec["taskType"].(string)
-			reqNo := 0
-			if n, ok := rec["request_no"].(float64); ok {
-				reqNo = int(n)
-			}
-			msgs := rec["messages"]
-
-			tc := &TaskCard{RequestMessages: msgs, RequestNo: reqNo}
-
-			fg := fileIndex[fp]
-			if fg == nil {
-				fg = &FileGroup{FilePath: fp, Tasks: make(map[TaskType][]*TaskCard)}
-				fileIndex[fp] = fg
-				vs.Files = append(vs.Files, fg)
-			}
-			fg.Tasks[TaskType(tt)] = append(fg.Tasks[TaskType(tt)], tc)
 
 		case "llm_response":
 			fp, _ := rec["filePath"].(string)

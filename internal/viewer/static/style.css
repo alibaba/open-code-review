@@ -829,6 +829,7 @@ h3 {
 .analysis-prose :is(pre, blockquote) { margin: 1em 0; padding: .8rem 1rem; background: var(--surface-inset); }
 .analysis-prose :is(th, td) { padding: .4rem .8rem; border: 1px solid var(--border); }
 .analysis-report pre { white-space: pre-wrap; }
+.analysis-report .file-accordion-header { flex-wrap: wrap; }
 .badge-tokens { background: var(--badge-tokens-bg); color: var(--badge-tokens-fg); }
 .badge-duration { background: var(--badge-duration-bg); color: var(--badge-duration-fg); }
 .badge-error { background: var(--badge-error-bg); color: var(--badge-error-fg); }

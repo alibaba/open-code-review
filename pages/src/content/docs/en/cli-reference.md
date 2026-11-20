@@ -214,6 +214,8 @@ read as context; use `--exclude` to prevent Analysis from reading it.
 With `--analysis`, one session ID opens a single report with Review and Analysis
 tabs in `ocr viewer`. The Analysis tab shows the investigation's execution status,
 changed files in scope (not files read), model assessment, and cited evidence.
+Expand **Conversations** to inspect each recorded Analysis request, its model
+response, and tool calls and results. This trace stays out of HTML exports.
 Its Markdown, result metadata, evidence, and execution trace live under
 `~/.opencodereview/sessions/<encoded-repo>/<session-id>/analysis/`. Evidence and
 logs can contain source text. An unfinished run may have no final status.

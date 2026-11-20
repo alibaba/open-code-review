@@ -282,7 +282,31 @@
     {{if .CitedObservationIDs}}<nav class="evidence-links" aria-label="Cited evidence"><strong>Cited evidence</strong>{{range .CitedObservationIDs}} <a href="?tab=analysis&amp;evidence={{.}}#evidence">{{.}}</a>{{end}}</nav>{{end}}
     {{with .Observation}}<section id="evidence"><h3>Evidence: {{.ID}}</h3><p>{{.ToolName}}{{range .Locations}} &middot; {{.Side}}: {{.Path}}:{{.StartLine}}{{end}}</p><pre>{{.ReturnedContent}}</pre></section>{{end}}
     {{if .ObservationIDs}}<details><summary>All observations ({{len .ObservationIDs}})</summary><div class="evidence-links">{{range .ObservationIDs}}<a href="?tab=analysis&amp;evidence={{.}}#evidence">{{.}}</a>{{end}}</div></details>{{end}}
-    {{if .Comparison.ID}}<p><a href="?tab=analysis&amp;log=trace">Open execution log</a></p>{{end}}
+    {{with .Requests}}
+    <details class="file-accordion section-accordion" id="analysis-conversations">
+        <summary class="file-accordion-header">
+            <span class="chevron" aria-hidden="true">{{icon "chevron-right"}}</span>
+            <span class="section-title">Conversations</span>
+            <span class="file-count-badge">{{countLabel (len .) "request" "requests"}}</span>
+        </summary>
+        <div class="file-accordion-body">
+            <div class="conversations" data-pagination-source data-pagination-page-size="20">
+            {{range .}}
+                <details class="file-accordion" data-pagination-item>
+                    <summary class="file-accordion-header">
+                        <span class="chevron" aria-hidden="true">{{icon "chevron-right"}}</span>
+                        {{template "request-header" .}}
+                        {{if eq .TaskType "memory_compression_task"}}<span class="badge">Memory compression</span>{{end}}
+                    </summary>
+                    <div class="file-accordion-body">{{template "request-body" (dict "card" . "type" .TaskType)}}</div>
+                </details>
+            {{end}}
+            </div>
+            {{template "pager" (dict "prefix" "analysis-conversations" "label" "Analysis request pages")}}
+        </div>
+    </details>
+    {{end}}
+    {{if .HasTrace}}<p><a href="?tab=analysis&amp;log=trace">Open execution log</a></p>{{end}}
     {{end}}
 </article>
 {{end}}
@@ -312,106 +336,113 @@
                 {{$tg.Type}}
             </h4>
             {{range $tg.Cards}}
-            {{$card := .}}
             <div class="card">
-                <div class="card-header">
-                    <span class="request-label">Request #{{.RequestNo}}</span>
-                    {{if .Model}}<span class="badge badge-model">{{.Model}}</span>{{end}}
-                    {{if or .PromptTokens .CompletionTokens}}<span class="badge badge-tokens">P:<span title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</span> C:<span title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</span>{{if or .CacheReadTokens .CacheWriteTokens}} CR:<span title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</span> CW:<span title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</span>{{end}}</span>{{end}}
-                    {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
-                    {{if .Error}}<span class="badge badge-error">Error</span>{{end}}
-                </div>
-                {{if .Error}}
-                <details class="error-detail">
-                    <summary class="error-detail-toggle">
-                        <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
-                        <span>Error Detail</span>
-                    </summary>
-                    <div class="error-detail-body">
-                        <pre class="error-content">{{.Error}}</pre>
-                    </div>
-                </details>
-                {{end}}
-                {{with .ReasoningContent}}
-                <details class="tool-detail">
-                    <summary class="tool-detail-toggle">
-                        <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
-                        <span>Reasoning</span>
-                    </summary>
-                    <div class="tool-detail-body">
-                        <div class="response-text">{{.}}</div>
-                    </div>
-                </details>
-                {{end}}
-                {{if isGrouping $tg.Type}}
-                    {{with groupingView $card}}
-                    <div class="card-body grouping-view">
-                        {{range .}}
-                        <div class="grouping-group">
-                            <span class="grouping-label">{{.Label}}</span>
-                            <ul class="grouping-files">
-                                {{range .Files}}
-                                {{if .Resolved}}<li>{{.Path}}</li>{{else}}<li class="grouping-unresolved">#{{.Index}}</li>{{end}}
-                                {{end}}
-                            </ul>
-                        </div>
-                        {{end}}
-                    </div>
-                    {{with $card.ResponseContent}}
-                    <details class="tool-detail">
-                        <summary class="tool-detail-toggle">
-                            <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
-                            <span>Raw LLM response</span>
-                        </summary>
-                        <div class="tool-detail-body">
-                            <div class="response-text">{{.}}</div>
-                        </div>
-                    </details>
-                    {{end}}
-                    {{else}}
-                    {{template "responseBody" $card.ResponseContent}}
-                    {{end}}
-                {{else}}
-                {{template "responseBody" .ResponseContent}}
-                {{end}}
-                {{if .ToolCalls}}
-                <div class="tool-calls-section">
-                    <div class="tool-calls-label"><span class="tool-calls-icon" aria-hidden="true">{{icon "settings"}}</span>Tool Calls ({{len .ToolCalls}})</div>
-                    {{range .ToolCalls}}
-                    <div class="tool-call-item {{if not .Ok}}tool-call-error{{end}}">
-                        <div class="tool-call-header">
-                            <strong class="tool-name">{{.Name}}</strong>
-                            {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
-                            {{if not .Ok}}<span class="badge badge-error">Failed</span>{{end}}
-                        </div>
-                        <details class="tool-detail">
-                            <summary class="tool-detail-toggle">
-                                <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
-                                <span>Show Details</span>
-                            </summary>
-                            <div class="tool-detail-body">
-                                <div class="tool-section">
-                                    <div class="tool-section-label">Arguments</div>
-                                    <pre>{{.Arguments}}</pre>
-                                </div>
-                                {{if .Result}}
-                                <div class="tool-section">
-                                    <div class="tool-section-label">Result</div>
-                                    <pre>{{.Result}}</pre>
-                                </div>
-                                {{end}}
-                            </div>
-                        </details>
-                    </div>
-                    {{end}}
-                </div>
-                {{end}}
+                <div class="card-header">{{template "request-header" .}}</div>
+                {{template "request-body" (dict "card" . "type" $tg.Type)}}
             </div>
             {{end}}
         </div>
         {{end}}
     </div>
 </details>
+{{end}}
+
+{{define "request-header"}}
+    <span class="request-label">Request #{{.RequestNo}}</span>
+    {{if .Model}}<span class="badge badge-model">{{.Model}}</span>{{end}}
+    {{if or .PromptTokens .CompletionTokens}}<span class="badge badge-tokens">P:<span title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</span> C:<span title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</span>{{if or .CacheReadTokens .CacheWriteTokens}} CR:<span title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</span> CW:<span title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</span>{{end}}</span>{{end}}
+    {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
+    {{if .Error}}<span class="badge badge-error">Error</span>{{end}}
+{{end}}
+
+{{define "request-body"}}
+{{$type := .type}}{{with $card := .card}}
+{{if .Error}}
+<details class="error-detail">
+    <summary class="error-detail-toggle">
+        <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
+        <span>Error Detail</span>
+    </summary>
+    <div class="error-detail-body">
+        <pre class="error-content">{{.Error}}</pre>
+    </div>
+</details>
+{{end}}
+{{with .ReasoningContent}}
+<details class="tool-detail">
+    <summary class="tool-detail-toggle">
+        <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
+        <span>Reasoning</span>
+    </summary>
+    <div class="tool-detail-body">
+        <div class="response-text">{{.}}</div>
+    </div>
+</details>
+{{end}}
+{{if isGrouping $type}}
+    {{with groupingView $card}}
+    <div class="card-body grouping-view">
+        {{range .}}
+        <div class="grouping-group">
+            <span class="grouping-label">{{.Label}}</span>
+            <ul class="grouping-files">
+                {{range .Files}}
+                {{if .Resolved}}<li>{{.Path}}</li>{{else}}<li class="grouping-unresolved">#{{.Index}}</li>{{end}}
+                {{end}}
+            </ul>
+        </div>
+        {{end}}
+    </div>
+    {{with $card.ResponseContent}}
+    <details class="tool-detail">
+        <summary class="tool-detail-toggle">
+            <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
+            <span>Raw LLM response</span>
+        </summary>
+        <div class="tool-detail-body">
+            <div class="response-text">{{.}}</div>
+        </div>
+    </details>
+    {{end}}
+    {{else}}
+    {{template "responseBody" $card.ResponseContent}}
+    {{end}}
+{{else}}
+{{template "responseBody" .ResponseContent}}
+{{end}}
+{{if .ToolCalls}}
+<div class="tool-calls-section">
+    <div class="tool-calls-label"><span class="tool-calls-icon" aria-hidden="true">{{icon "settings"}}</span>Tool Calls ({{len .ToolCalls}})</div>
+    {{range .ToolCalls}}
+    <div class="tool-call-item {{if not .Ok}}tool-call-error{{end}}">
+        <div class="tool-call-header">
+            <strong class="tool-name">{{.Name}}</strong>
+            {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
+            {{if not .Ok}}<span class="badge badge-error">Failed</span>{{end}}
+        </div>
+        <details class="tool-detail">
+            <summary class="tool-detail-toggle">
+                <span class="chevron-sm" aria-hidden="true">{{icon "chevron-right"}}</span>
+                <span>Show Details</span>
+            </summary>
+            <div class="tool-detail-body">
+                <div class="tool-section">
+                    <div class="tool-section-label">Arguments</div>
+                    <pre>{{.Arguments}}</pre>
+                </div>
+                {{if .Result}}
+                <div class="tool-section">
+                    <div class="tool-section-label">Result</div>
+                    <pre>{{.Result}}</pre>
+                </div>
+                {{end}}
+            </div>
+        </details>
+    </div>
+    {{end}}
+</div>
+{{end}}
+{{end}}
 {{end}}
 
 {{define "responseBody"}}

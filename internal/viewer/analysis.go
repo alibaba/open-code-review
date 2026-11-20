@@ -28,6 +28,8 @@ type analysisPage struct {
 	Excluded    int
 	InScope     int
 	Observation *behaviortask.Observation
+	Requests    []*TaskCard
+	HasTrace    bool
 }
 
 var reportMarkdown = goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough))
@@ -129,6 +131,15 @@ func handleAnalysis(w http.ResponseWriter, r *http.Request, root, repo, id strin
 		return
 	}
 	page := readAnalysis(directory, id)
+	if directory != nil {
+		if trace, err := directory.Open("trace.jsonl"); err == nil {
+			defer trace.Close()
+			if conversation, err := readSession(trace, id); err == nil {
+				page.HasTrace = true
+				page.Requests = conversation.requests
+			}
+		}
+	}
 	if observation := r.URL.Query().Get("evidence"); observation != "" {
 		if !slices.Contains(page.ObservationIDs, observation) {
 			http.NotFound(w, r)
