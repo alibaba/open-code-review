@@ -10,6 +10,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -73,6 +74,31 @@ func TestResolveComment_TextMatchSuccess(t *testing.T) {
 	}
 }
 
+func TestResolveCommentSidePreservesNewAndOldProvenance(t *testing.T) {
+	tests := []struct {
+		name         string
+		existingCode string
+		want         location.Side
+	}{
+		{name: "added line", existingCode: "x := 1", want: location.SideNew},
+		{name: "deleted line", existingCode: "removed := true", want: location.SideOld},
+	}
+	d := &model.Diff{
+		NewPath: "main.go",
+		OldPath: "main.go",
+		Diff:    "@@ -10,2 +10,2 @@\n-removed := true\n+x := 1\n fmt.Println()",
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			comment := model.LlmComment{Path: "main.go", ExistingCode: tc.existingCode}
+			got, ok := ResolveCommentSide(&comment, d)
+			if !ok || got != tc.want {
+				t.Fatalf("ResolveCommentSide = %q, %v; want %q, true", got, ok, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveComment_AlreadyResolved(t *testing.T) {
 	cm := model.LlmComment{
 		Path:         "main.go",
@@ -117,9 +143,9 @@ func TestReLocateComment_LLMReturnsValidCode(t *testing.T) {
 		t.Fatal("expected non-empty messages")
 	}
 
-	ok, resp := ReLocateComment(context.Background(), &cm, d, client, msgs, "test-model", 1000)
-	if !ok {
-		t.Fatal("expected re-location to succeed")
+	side, resp := ReLocateCommentSide(context.Background(), &cm, d, client, msgs, "test-model", 1000)
+	if side != location.SideNew {
+		t.Fatalf("re-location side = %q, want NEW", side)
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")

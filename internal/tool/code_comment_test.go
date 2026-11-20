@@ -287,6 +287,7 @@ func TestLlmComment_JSONCategorySeverity(t *testing.T) {
 			t.Errorf("expected severity in output, got %s", out)
 		}
 	})
+
 }
 
 func TestCodeCommentProvider_Execute(t *testing.T) {
