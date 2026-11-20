@@ -94,6 +94,19 @@ func TestRunner_Output(t *testing.T) {
 	}
 }
 
+func TestRunner_OutputWithInput(t *testing.T) {
+	dir := initRepo(t)
+	r := New(2)
+
+	out, err := r.OutputWithInput(context.Background(), dir, strings.NewReader("HEAD:hello.txt\n"), "cat-file", "--batch")
+	if err != nil {
+		t.Fatalf("OutputWithInput error: %v", err)
+	}
+	if !strings.HasSuffix(string(out), " blob 6\nhello\n\n") {
+		t.Errorf("unexpected cat-file output %q", out)
+	}
+}
+
 func TestRunner_RunSplit(t *testing.T) {
 	dir := initRepo(t)
 	r := New(2)
