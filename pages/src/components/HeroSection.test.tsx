@@ -6,14 +6,17 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { LanguageProvider } from '../i18n';
+import { ThemeProvider } from '../theme/ThemeProvider';
 import HeroSection from './HeroSection';
 
 function renderHero() {
   render(
     <MemoryRouter>
+      <ThemeProvider>
       <LanguageProvider>
         <HeroSection />
       </LanguageProvider>
+    </ThemeProvider>
     </MemoryRouter>,
   );
 }

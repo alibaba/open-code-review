@@ -6,6 +6,7 @@ import ReactDOM from 'react-dom';
 import { Marked, Renderer } from 'marked';
 import DOMPurify from 'dompurify';
 import { useTranslation } from '../i18n';
+import { useTheme } from '../theme/ThemeProvider';
 import { useCopyToast } from '../hooks/useCopyToast';
 import copyIcon from '../assets/icons/icon-copy.svg';
 import { extractHeadingInfo, generateHeadingId, parseExplicitHeadingId } from '../utils/headingId';
@@ -14,38 +15,66 @@ type Mermaid = typeof import('mermaid')['default'];
 
 let mermaidPromise: Promise<Mermaid> | null = null;
 
+const mermaidThemes: Record<'dark' | 'light', Parameters<Mermaid['initialize']>[0]> = {
+  dark: {
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#1a1a2e',
+      primaryTextColor: 'rgba(255,255,255,0.85)',
+      primaryBorderColor: 'rgba(255,255,255,0.2)',
+      lineColor: 'rgba(255,255,255,0.4)',
+      secondaryColor: '#16213e',
+      tertiaryColor: '#0f3460',
+      background: 'var(--bg-page)',
+      mainBkg: 'rgba(255,255,255,0.04)',
+      nodeBorder: 'rgba(255,255,255,0.16)',
+      clusterBkg: 'rgba(255,255,255,0.02)',
+      titleColor: '#FFFFFF',
+      edgeLabelBackground: '#000000',
+    },
+  },
+  light: {
+    theme: 'default',
+    themeVariables: {
+      primaryColor: '#eef2f7',
+      primaryTextColor: 'rgba(10,15,30,0.85)',
+      primaryBorderColor: 'rgba(10,15,30,0.2)',
+      lineColor: 'rgba(10,15,30,0.4)',
+      secondaryColor: '#f6f7f9',
+      tertiaryColor: '#e2e8f0',
+      background: 'var(--bg-page)',
+      mainBkg: 'rgba(10,15,30,0.04)',
+      nodeBorder: 'rgba(10,15,30,0.16)',
+      clusterBkg: 'rgba(10,15,30,0.02)',
+      titleColor: '#0a0f1e',
+      edgeLabelBackground: '#ffffff',
+    },
+  },
+};
+
+let mermaidTheme: 'dark' | 'light' | null = null;
+
+function configureMermaid(mermaid: Mermaid, theme: 'dark' | 'light') {
+  if (mermaidTheme === theme) return;
+  mermaidTheme = theme;
+  mermaid.initialize({
+    startOnLoad: false,
+    // 'strict' makes mermaid sanitize its own SVG output (DOMPurify internally):
+    // safe label HTML like <b>/<span> is kept, scripts/handlers are stripped.
+    // This is why we can inject the returned SVG directly below without re-sanitizing.
+    securityLevel: 'strict',
+    ...mermaidThemes[theme],
+    flowchart: {
+      htmlLabels: true,
+      curve: 'basis',
+    },
+  });
+}
+
 function loadMermaid(): Promise<Mermaid> {
   if (!mermaidPromise) {
     mermaidPromise = import('mermaid')
-      .then(({ default: mermaid }) => {
-        mermaid.initialize({
-          startOnLoad: false,
-          // 'strict' makes mermaid sanitize its own SVG output (DOMPurify internally):
-          // safe label HTML like <b>/<span> is kept, scripts/handlers are stripped.
-          // This is why we can inject the returned SVG directly below without re-sanitizing.
-          securityLevel: 'strict',
-          theme: 'dark',
-          themeVariables: {
-            primaryColor: '#1a1a2e',
-            primaryTextColor: 'rgba(255,255,255,0.85)',
-            primaryBorderColor: 'rgba(255,255,255,0.2)',
-            lineColor: 'rgba(255,255,255,0.4)',
-            secondaryColor: '#16213e',
-            tertiaryColor: '#0f3460',
-            background: '#000000',
-            mainBkg: 'rgba(255,255,255,0.04)',
-            nodeBorder: 'rgba(255,255,255,0.16)',
-            clusterBkg: 'rgba(255,255,255,0.02)',
-            titleColor: '#FFFFFF',
-            edgeLabelBackground: '#000000',
-          },
-          flowchart: {
-            htmlLabels: true,
-            curve: 'basis',
-          },
-        });
-        return mermaid;
-      })
+      .then(({ default: mermaid }) => mermaid)
       .catch((error) => {
         // Allow a later navigation to retry after a transient chunk-load failure.
         mermaidPromise = null;
@@ -67,6 +96,7 @@ interface MarkdownRendererProps {
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
+  const { theme } = useTheme();
   const { toastVisible, handleCopy } = useCopyToast();
 
   const html = useMemo(() => {
@@ -120,45 +150,61 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
       pre.appendChild(btn);
     });
 
-    // Render mermaid diagrams
-    const mermaidBlocks = containerRef.current.querySelectorAll('code.language-mermaid');
-    if (mermaidBlocks.length === 0) return;
+    // Render mermaid diagrams. Two target shapes: code.language-mermaid on a
+    // first render of this html, and .mermaid-rendered wrappers carrying their
+    // source in data-mermaid-source after a theme change — by then the
+    // original <pre><code> elements no longer exist, and React will not reset
+    // dangerouslySetInnerHTML whose html is unchanged, so without the wrappers
+    // the diagrams could never re-render with the other palette.
+    const mermaidTargets: Array<{ code: string; mount: Element; fresh: boolean }> = [];
+    containerRef.current.querySelectorAll('code.language-mermaid').forEach((block) => {
+      const pre = block.parentElement;
+      if (pre) mermaidTargets.push({ code: block.textContent || '', mount: pre, fresh: true });
+    });
+    containerRef.current.querySelectorAll('.mermaid-rendered[data-mermaid-source]').forEach((wrapper) => {
+      mermaidTargets.push({ code: wrapper.getAttribute('data-mermaid-source') || '', mount: wrapper, fresh: false });
+    });
+    if (mermaidTargets.length === 0) return;
 
     const renderMermaidBlocks = async () => {
       try {
         const mermaid = await loadMermaid();
+        configureMermaid(mermaid, theme);
         if (cancelled) return;
 
-        for (const block of Array.from(mermaidBlocks)) {
-          const pre = block.parentElement;
-          if (!pre) continue;
-          const code = block.textContent || '';
+        for (const { code, mount, fresh } of mermaidTargets) {
+          if (!mount.isConnected || !code) continue;
           try {
             const id = `mermaid-diagram-${crypto.randomUUID()}`;
             const { svg } = await mermaid.render(id, code);
             if (cancelled) return;
-            // Replace the <pre> with rendered SVG. The SVG is produced by mermaid with
-            // securityLevel:'strict' (configured in loadMermaid), which already sanitizes
-            // its output. Re-running DOMPurify over the whole SVG breaks it (namespaces,
-            // inline <style>, foreignObject labels), so we inject mermaid's trusted output.
+            // Replace the mount (the <pre>, or the previous wrapper on a
+            // re-render) with the rendered SVG. The SVG is produced by mermaid
+            // with securityLevel:'strict' (configured in loadMermaid), which
+            // already sanitizes its output. Re-running DOMPurify over the
+            // whole SVG breaks it (namespaces, inline <style>, foreignObject
+            // labels), so we inject mermaid's trusted output.
             const wrapper = document.createElement('div');
             wrapper.className = 'mermaid-rendered';
+            wrapper.setAttribute('data-mermaid-source', code);
             // codeql[js/xss-through-dom] -- svg is derived from user-controlled mermaid code, but mermaid
             // renders it with securityLevel:'strict' (see loadMermaid), which sanitizes the output via
             // DOMPurify (scripts/handlers stripped). The trust boundary relies on that setting staying 'strict'.
             wrapper.innerHTML = svg;
-            pre.replaceWith(wrapper);
+            mount.replaceWith(wrapper);
           } catch (e) {
             if (cancelled) return;
-            // If rendering fails, show the code block normally
-            (block as HTMLElement).style.display = 'block';
+            // A fresh block that fails falls back to showing the code. A
+            // wrapper that fails to re-render keeps the previous diagram —
+            // the old palette beats a blank spot.
+            if (fresh) (mount.querySelector('code') as HTMLElement | null)?.style.setProperty('display', 'block');
             console.warn('[Mermaid] render failed:', e);
           }
         }
       } catch (e) {
         if (cancelled) return;
-        for (const block of Array.from(mermaidBlocks)) {
-          (block as HTMLElement).style.display = 'block';
+        for (const { mount, fresh } of mermaidTargets) {
+          if (fresh) (mount.querySelector('code') as HTMLElement | null)?.style.setProperty('display', 'block');
         }
         console.warn('[Mermaid] failed to load:', e);
       }
@@ -167,7 +213,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
     void renderMermaidBlocks();
 
     return () => { cancelled = true; };
-  }, [html]);
+    // theme: re-render diagrams with the other palette when it changes
+  }, [html, theme]);
 
   return (
     <>
@@ -184,9 +231,9 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
             top: 88,
             left: '50%',
             transform: 'translateX(-50%)',
-            background: 'rgba(255,255,255,0.1)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            color: 'rgba(255,255,255,0.85)',
+            background: 'var(--fill-hover)',
+            border: '1px solid var(--line)',
+            color: 'var(--text-body)',
             padding: '5px 8px 5px 10px',
             borderRadius: 6,
             fontSize: 12,

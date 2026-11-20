@@ -9,6 +9,7 @@ export const en = {
   'navbar.docs': 'Docs',
   'navbar.blog': 'Blog',
   'navbar.getStarted': 'Get Started',
+  'navbar.themeToggle': 'Toggle light and dark theme',
 
   'providers.title': 'Built-in support for leading model providers',
   'providers.description': 'Add your API key to start reviewing, or connect a private model service compatible with standard protocols.',

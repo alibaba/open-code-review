@@ -11,6 +11,7 @@ export const ru: TranslationKeys = {
   'navbar.docs': 'Документация',
   'navbar.blog': 'Блог',
   'navbar.getStarted': 'Начать работу',
+  'navbar.themeToggle': 'Переключить светлую и тёмную тему',
 
   'providers.title': 'Встроенная поддержка ведущих провайдеров моделей',
   'providers.description': 'Укажите API-ключ, чтобы начать ревью, или подключите приватный сервис моделей, совместимый с основными протоколами.',
