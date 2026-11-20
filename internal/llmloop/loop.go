@@ -532,6 +532,9 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 		}
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %s\n", taskKey, r.deps.ProgressError(err))
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
+		if stop == StopTokenBudget && r.task.Grace.BestEffortOnTokenBudget && ctx.Err() == nil {
+			return false, stop, nil
+		}
 		return false, stop, fmt.Errorf("final submission: %w", err)
 	}
 

@@ -42,8 +42,9 @@ type CompressionPolicy struct {
 }
 
 type GracePolicy struct {
-	Messages []llm.Message
-	Tools    []llm.ToolDef
+	Messages                []llm.Message
+	Tools                   []llm.ToolDef
+	BestEffortOnTokenBudget bool
 }
 
 type Task struct {

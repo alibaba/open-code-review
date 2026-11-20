@@ -104,7 +104,8 @@ func NewRunner(deps Deps) *Runner {
 			SummaryTemplate: "\n\n<previous_review_summary>\n{{summary}}\n</previous_review_summary>",
 		},
 		Grace: llmloop.GracePolicy{
-			Tools: graceRoundToolDefs(deps.MainToolDefs),
+			BestEffortOnTokenBudget: deps.MaxTokensBudget > 0,
+			Tools:                   graceRoundToolDefs(deps.MainToolDefs),
 			Messages: []llm.Message{llm.NewTextMessage("user",
 				"Your review budget is exhausted. This is your FINAL round. You may ONLY:\n"+
 					"- Call code_comment to submit any findings you have identified but not yet reported.\n"+
