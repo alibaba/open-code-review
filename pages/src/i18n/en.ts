@@ -287,6 +287,7 @@ export const en = {
   'docs.sidebar.configuration': 'Configuration',
   'docs.sidebar.cliReference': 'CLI Reference',
   'docs.sidebar.reviewRules': 'Review Rules',
+  'docs.sidebar.reviewingRequirements': 'Reviewing against requirements',
   'docs.sidebar.architecture': 'Architecture',
   'docs.sidebar.tools': 'Tools',
   'docs.sidebar.mcp': 'MCP Servers',

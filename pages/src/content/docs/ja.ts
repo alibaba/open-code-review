@@ -11,6 +11,7 @@ import jaConfiguration from './ja/configuration.md';
 import jaChatGPTPreview from './ja/chatgpt-preview.md';
 import jaCliReference from './ja/cli-reference.md';
 import jaReviewRules from './ja/review-rules.md';
+import jaReviewingRequirements from './ja/reviewing-requirements.md';
 import jaArchitecture from './ja/architecture.md';
 import jaTools from './ja/tools.md';
 import jaMcp from './ja/mcp.md';
@@ -32,6 +33,7 @@ const jaDocs: CompleteLocalizedDocs = {
   'chatgpt-preview': jaChatGPTPreview,
   'cli-reference': jaCliReference,
   'review-rules': jaReviewRules,
+  'reviewing-requirements': jaReviewingRequirements,
   'architecture': jaArchitecture,
   'tools': jaTools,
   'mcp': jaMcp,
