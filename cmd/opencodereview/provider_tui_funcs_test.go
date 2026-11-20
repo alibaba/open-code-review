@@ -295,6 +295,7 @@ func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
 		ExtraHeaders: map[string]string{"X-Trace": "on"},
 		AWSRegion:    "us-west-2",
 		AWSProfile:   "example-profile",
+		MaxInFlight:  4,
 		unknownJSONFields: map[string]json.RawMessage{
 			"future_provider": json.RawMessage(`{"value":"preserve-me"}`),
 		},
