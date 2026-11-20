@@ -367,3 +367,30 @@ func TestFileFind_NonASCIIPath(t *testing.T) {
 		})
 	}
 }
+
+func TestFileFind_StringTypedCaseSensitive(t *testing.T) {
+	dir := setupFileFindRepo(t)
+	p := NewFileFind(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	got, err := p.Execute(context.Background(), map[string]any{
+		"query_name":     "Makefile",
+		"case_sensitive": "true",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Makefile") {
+		t.Errorf(`case_sensitive "true" must find exact Makefile, got: %s`, got)
+	}
+
+	got, err = p.Execute(context.Background(), map[string]any{
+		"query_name":     "makefile",
+		"case_sensitive": "true",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "Makefile") {
+		t.Errorf(`case_sensitive "true" must not match makefile against Makefile, got: %s`, got)
+	}
+}
