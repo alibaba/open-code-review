@@ -220,10 +220,16 @@ func (p *Provider) listFilesViaGit(ctx context.Context) ([]string, error) {
 //
 // Skips entire subtrees via filepath.SkipDir for performance.
 func (p *Provider) listFilesViaWalk(ctx context.Context) ([]string, error) {
+	// WalkDir does not follow a symlink passed as its root. Resolve the selected
+	// directory while continuing to skip symlinks discovered inside it.
+	root, err := filepath.EvalSymlinks(p.repoDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve scan directory %s: %w", p.repoDir, err)
+	}
 	gitignorePatterns := diff.LoadGitignorePatterns(p.repoDir)
 	var files []string
 
-	err := filepath.WalkDir(p.repoDir, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if cerr := ctx.Err(); cerr != nil {
 			// Abort the walk; filepath.WalkDir propagates this back as the
 			// returned error so the caller sees ctx.Err().
@@ -233,10 +239,10 @@ func (p *Provider) listFilesViaWalk(ctx context.Context) ([]string, error) {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: walk error at %s: %v\n", path, err)
 			return nil // continue walking; skip this entry
 		}
-		if path == p.repoDir {
+		if path == root {
 			return nil
 		}
-		rel, relErr := filepath.Rel(p.repoDir, path)
+		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			return nil
 		}
