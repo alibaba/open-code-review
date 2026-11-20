@@ -122,7 +122,7 @@ func TestRunCompression_Identity(t *testing.T) {
 	}}
 	r, msgs := newCompressionRunner(t, client, metaFactory("openai", "fake"))
 
-	if _, err := r.runCompression(context.Background(), msgs, "test.go"); err != nil {
+	if _, err := r.runCompression(context.Background(), msgs, "test.go", &compressionState{}); err != nil {
 		t.Fatalf("runCompression: %v", err)
 	}
 
@@ -146,7 +146,7 @@ func TestRunCompression_NoIdentityWhenFactoryNil(t *testing.T) {
 	}}
 	r, msgs := newCompressionRunner(t, client, nil)
 
-	if _, err := r.runCompression(context.Background(), msgs, "test.go"); err != nil {
+	if _, err := r.runCompression(context.Background(), msgs, "test.go", &compressionState{}); err != nil {
 		t.Fatalf("runCompression: %v", err)
 	}
 
