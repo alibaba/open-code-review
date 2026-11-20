@@ -269,6 +269,14 @@ func contentToText(contents []mcp.Content) string {
 		switch v := item.(type) {
 		case *mcp.TextContent:
 			parts = append(parts, v.Text)
+		case *mcp.EmbeddedResource:
+			// Servers such as file fetchers return the payload as an embedded
+			// text resource beside a short status line.
+			if v.Resource != nil && v.Resource.Blob == nil {
+				parts = append(parts, v.Resource.Text)
+			} else {
+				parts = append(parts, fmt.Sprintf("[unsupported content type: %T]", item))
+			}
 		default:
 			parts = append(parts, fmt.Sprintf("[unsupported content type: %T]", item))
 		}
