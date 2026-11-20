@@ -44,7 +44,7 @@ async function withFakeOcr(source, callback) {
       } catch {
         await copyFile(process.execPath, executable)
       }
-      for (const command of ["review", "version", "llm"]) {
+      for (const command of ["review", "version", "llm", "delegate"]) {
         await writeFile(
           join(directory, command),
           `process.argv.splice(2, 0, ${JSON.stringify(command)})\n${source}\n`,
@@ -139,7 +139,12 @@ test("default export serves both plugin APIs", async () => {
 test("plugin registers tools and preserves existing user commands", async () => {
   const { hooks, logs } = await loadPlugin("/tmp/project")
 
-  assert.deepEqual(Object.keys(hooks.tool).sort(), ["ocr_health", "ocr_review"])
+  assert.deepEqual(Object.keys(hooks.tool).sort(), [
+    "ocr_delegate_preview",
+    "ocr_delegate_rule",
+    "ocr_health",
+    "ocr_review",
+  ])
   assert.equal(logs.length, 1)
 
   const config = {
@@ -152,6 +157,8 @@ test("plugin registers tools and preserves existing user commands", async () => 
   await hooks.config(config)
   assert.equal(config.command["ocr-review"].template, "Keep my custom review command.")
   assert.match(config.command["ocr-health"].template, /ocr_health/)
+  assert.match(config.command["ocr-delegate-review"].template, /ocr_delegate_preview/)
+  assert.match(config.command["ocr-delegate"].template, /ocr_delegate_preview/)
 })
 
 test("plugin still registers tools when the telemetry log call fails", async () => {
@@ -165,7 +172,12 @@ test("plugin still registers tools when the telemetry log call fails", async () 
     },
     worktree: "/tmp/project",
   })
-  assert.deepEqual(Object.keys(hooks.tool).sort(), ["ocr_health", "ocr_review"])
+  assert.deepEqual(Object.keys(hooks.tool).sort(), [
+    "ocr_delegate_preview",
+    "ocr_delegate_rule",
+    "ocr_health",
+    "ocr_review",
+  ])
 })
 
 test("fake OCR helper removes its temporary directory", async () => {
@@ -754,8 +766,18 @@ test("v2 setup registers both tools and both commands", async () => {
   const module = await import("../dist/open-code-review.js")
   const { ctx, tools, addedCommands } = stubV2Context({ directory: "/tmp/project" })
   await module.default.setup(ctx)
-  assert.deepEqual(tools.map((definition) => definition.name).sort(), ["ocr_health", "ocr_review"])
-  assert.deepEqual(addedCommands.map((definition) => definition.name).sort(), ["ocr-health", "ocr-review"])
+  assert.deepEqual(tools.map((definition) => definition.name).sort(), [
+    "ocr_delegate_preview",
+    "ocr_delegate_rule",
+    "ocr_health",
+    "ocr_review",
+  ])
+  assert.deepEqual(addedCommands.map((definition) => definition.name).sort(), [
+    "ocr-delegate",
+    "ocr-delegate-review",
+    "ocr-health",
+    "ocr-review",
+  ])
 })
 
 test("v2 numeric inputs require positive integers", async () => {
@@ -769,13 +791,31 @@ test("v2 numeric inputs require positive integers", async () => {
       { type: "integer", minimum: 1 },
     )
   }
+  const preview = tools.find((definition) => definition.name === "ocr_delegate_preview")
+  for (const field of ["maxGitProcesses", "timeoutSeconds"]) {
+    assert.deepEqual(
+      { type: preview.input.properties[field].type, minimum: preview.input.properties[field].minimum },
+      { type: "integer", minimum: 1 },
+    )
+  }
+  const rule = tools.find((definition) => definition.name === "ocr_delegate_rule")
+  for (const field of ["maxGitProcesses", "timeoutSeconds"]) {
+    assert.deepEqual(
+      { type: rule.input.properties[field].type, minimum: rule.input.properties[field].minimum },
+      { type: "integer", minimum: 1 },
+    )
+  }
 })
 
 test("v2 preserves user-defined commands", async () => {
   const module = await import("../dist/open-code-review.js")
   const { ctx, addedCommands } = stubV2Context({ directory: "/tmp/project", commands: ["ocr-review"] })
   await module.default.setup(ctx)
-  assert.deepEqual(addedCommands.map((definition) => definition.name), ["ocr-health"])
+  assert.deepEqual(addedCommands.map((definition) => definition.name).sort(), [
+    "ocr-delegate",
+    "ocr-delegate-review",
+    "ocr-health",
+  ])
 })
 
 test("v2 ocr_review preview resolves cwd from the session location", async () => {
@@ -892,4 +932,358 @@ test("v2 exposes backgroundFile in the tool input schema", async () => {
   // even though buildReviewArgs would forward it.
   assert.equal(review.input.additionalProperties, false)
   assert.equal(review.input.properties.backgroundFile?.type, "string")
+})
+
+test("ocr_delegate_preview executes ocr delegate preview with json format and returns parsed output", async () => {
+  await withFakeOcr(
+    [
+      "console.log(JSON.stringify({",
+      "  schema_version: '1',",
+      "  mode: 'workspace',",
+      "  reviewable_files: [{ path: 'main.go', status: 'modified' }],",
+      "  excluded_files: [],",
+      "  argv: process.argv.slice(2)",
+      "}))",
+    ].join("\n"),
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_delegate_preview.execute(
+        {
+          exclude: "*.md",
+          rule: ".rules.json",
+          maxGitProcesses: 4,
+          timeoutSeconds: 30,
+        },
+        toolContext(worktree),
+      )
+      const parsed = JSON.parse(output)
+      assert.equal(parsed.schema_version, "1")
+      assert.equal(parsed.mode, "workspace")
+      assert.equal(parsed.reviewable_files[0].path, "main.go")
+      assert.deepEqual(parsed.argv, [
+        "delegate",
+        "preview",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--exclude",
+        "*.md",
+        "--rule",
+        ".rules.json",
+        "--max-git-procs",
+        "4",
+      ])
+    },
+  )
+})
+
+test("ocr_delegate_preview forwards commit and range options", async () => {
+  await withFakeOcr(
+    "console.log(JSON.stringify({ status: 'ok', argv: process.argv.slice(2) }))",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const commitOutput = await hooks.tool.ocr_delegate_preview.execute(
+        { commit: "abc1234" },
+        toolContext(worktree),
+      )
+      assert.deepEqual(JSON.parse(commitOutput).argv, [
+        "delegate",
+        "preview",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--commit",
+        "abc1234",
+      ])
+
+      const rangeOutput = await hooks.tool.ocr_delegate_preview.execute(
+        { from: "main", to: "feature" },
+        toolContext(worktree),
+      )
+      assert.deepEqual(JSON.parse(rangeOutput).argv, [
+        "delegate",
+        "preview",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--from",
+        "main",
+        "--to",
+        "feature",
+      ])
+    },
+  )
+})
+
+test("ocr_delegate_preview rejects invalid target combinations", async () => {
+  await withTemporaryDirectory(async (worktree) => {
+    const { hooks } = await loadPlugin(worktree)
+    await assert.rejects(
+      hooks.tool.ocr_delegate_preview.execute({ from: "main" }, toolContext(worktree)),
+      /Both 'from' and 'to' are required/,
+    )
+    await assert.rejects(
+      hooks.tool.ocr_delegate_preview.execute({ to: "feature" }, toolContext(worktree)),
+      /Both 'from' and 'to' are required/,
+    )
+    await assert.rejects(
+      hooks.tool.ocr_delegate_preview.execute({ commit: "abc", from: "main", to: "feature" }, toolContext(worktree)),
+      /Use either 'commit' or a 'from'\/'to' range/,
+    )
+    await assert.rejects(
+      hooks.tool.ocr_delegate_preview.execute(
+        { background: "context", backgroundFile: "doc.md" },
+        toolContext(worktree),
+      ),
+      /Use either 'background' or 'backgroundFile'/,
+    )
+  })
+})
+
+test("ocr_delegate_preview trims and passes background through a private temporary file", async () => {
+  await withFakeOcr(
+    [
+      "import('node:fs/promises').then(async (fs) => {",
+      "  const fileIndex = process.argv.indexOf('--background-file')",
+      "  const content = await fs.readFile(process.argv[fileIndex + 1], 'utf8')",
+      "  console.log(JSON.stringify({ content, argv: process.argv.slice(2) }))",
+      "})",
+    ].join("\n"),
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_delegate_preview.execute(
+        { background: "  Review requirement context  " },
+        toolContext(worktree),
+      )
+      const parsed = JSON.parse(output)
+      assert.equal(parsed.content, "Review requirement context")
+      assert.ok(parsed.argv.includes("--background-file"))
+      assert.ok(!parsed.argv.includes("--background"))
+    },
+  )
+})
+
+test("ocr_delegate_preview forwards backgroundFile as --background-file", async () => {
+  await withFakeOcr(
+    "console.log(JSON.stringify({ argv: process.argv.slice(2) }))",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_delegate_preview.execute(
+        { backgroundFile: "requirements.md" },
+        toolContext(worktree),
+      )
+      assert.deepEqual(JSON.parse(output).argv, [
+        "delegate",
+        "preview",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--background-file",
+        "requirements.md",
+      ])
+    },
+  )
+})
+
+test("ocr_delegate_rule executes ocr delegate rule with json format and path arguments", async () => {
+  await withFakeOcr(
+    [
+      "console.log(JSON.stringify({",
+      "  schema_version: '1',",
+      "  groups: [{ group_id: 1, files: ['src/a.ts', 'src/b.ts'], rule: 'Check error handling' }],",
+      "  argv: process.argv.slice(2)",
+      "}))",
+    ].join("\n"),
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_delegate_rule.execute(
+        {
+          paths: ["src/a.ts", "src/b.ts"],
+          from: "main",
+          to: "feature",
+          rule: "custom-rule.json",
+          maxGitProcesses: 2,
+        },
+        toolContext(worktree),
+      )
+      const parsed = JSON.parse(output)
+      assert.equal(parsed.schema_version, "1")
+      assert.equal(parsed.groups[0].group_id, 1)
+      assert.deepEqual(parsed.argv, [
+        "delegate",
+        "rule",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--from",
+        "main",
+        "--to",
+        "feature",
+        "--rule",
+        "custom-rule.json",
+        "--max-git-procs",
+        "2",
+        "--",
+        "src/a.ts",
+        "src/b.ts",
+      ])
+    },
+  )
+})
+
+test("ocr_delegate_rule supports comma or space separated string for paths", async () => {
+  await withFakeOcr(
+    "console.log(JSON.stringify({ argv: process.argv.slice(2) }))",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_delegate_rule.execute(
+        { paths: "file1.ts, file2.ts   file3.ts" },
+        toolContext(worktree),
+      )
+      const parsed = JSON.parse(output)
+      const sepIndex = parsed.argv.indexOf("--")
+      assert.deepEqual(parsed.argv.slice(sepIndex + 1), ["file1.ts", "file2.ts", "file3.ts"])
+    },
+  )
+})
+
+test("ocr_delegate_rule rejects empty paths and invalid target combinations", async () => {
+  await withTemporaryDirectory(async (worktree) => {
+    const { hooks } = await loadPlugin(worktree)
+    await assert.rejects(
+      hooks.tool.ocr_delegate_rule.execute({ paths: [] }, toolContext(worktree)),
+      /At least one file path is required/,
+    )
+    await assert.rejects(
+      hooks.tool.ocr_delegate_rule.execute({ paths: "" }, toolContext(worktree)),
+      /At least one file path is required/,
+    )
+    await assert.rejects(
+      hooks.tool.ocr_delegate_rule.execute({ paths: ["a.ts"], from: "main" }, toolContext(worktree)),
+      /Both 'from' and 'to' are required/,
+    )
+    await assert.rejects(
+      hooks.tool.ocr_delegate_rule.execute({ paths: ["a.ts"], commit: "abc", from: "main", to: "feat" }, toolContext(worktree)),
+      /Use either 'commit' or a 'from'\/'to' range/,
+    )
+  })
+})
+
+test("delegate tools reject invalid JSON output", async () => {
+  await withFakeOcr(
+    "console.log('not valid json')",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      await assert.rejects(
+        hooks.tool.ocr_delegate_preview.execute({}, toolContext(worktree)),
+        /OpenCodeReview returned invalid JSON/,
+      )
+      await assert.rejects(
+        hooks.tool.ocr_delegate_rule.execute({ paths: ["a.ts"] }, toolContext(worktree)),
+        /OpenCodeReview returned invalid JSON/,
+      )
+    },
+  )
+})
+
+test("v2 exposes delegate tools with complete schemas and disallows additional properties", async () => {
+  const module = await import("../dist/open-code-review.js")
+  const { ctx, tools } = stubV2Context({ directory: "/tmp/project" })
+  await module.default.setup(ctx)
+
+  const preview = tools.find((definition) => definition.name === "ocr_delegate_preview")
+  assert.equal(preview.input.additionalProperties, false)
+  assert.match(
+    preview.input.properties.backgroundFile?.description ?? "",
+    /A relative path resolves against the repository root/,
+  )
+  assert.deepEqual(
+    Object.keys(preview.input.properties).sort(),
+    ["background", "backgroundFile", "commit", "exclude", "from", "maxGitProcesses", "rule", "timeoutSeconds", "to"].sort(),
+  )
+
+  const rule = tools.find((definition) => definition.name === "ocr_delegate_rule")
+  assert.equal(rule.input.additionalProperties, false)
+  assert.deepEqual(rule.input.required, ["paths"])
+  assert.deepEqual(rule.input.properties.paths.oneOf, [
+    { type: "array", items: { type: "string" } },
+    { type: "string" },
+  ])
+  assert.deepEqual(
+    Object.keys(rule.input.properties).sort(),
+    ["commit", "from", "maxGitProcesses", "paths", "rule", "timeoutSeconds", "to"].sort(),
+  )
+})
+
+test("v2 executes ocr_delegate_preview and ocr_delegate_rule resolving cwd from session", async () => {
+  await withFakeOcr(
+    "console.log(JSON.stringify({ argv: process.argv.slice(2) }))",
+    async (worktree) => {
+      const module = await import("../dist/open-code-review.js")
+      const { ctx, tools } = stubV2Context({ directory: worktree })
+      await module.default.setup(ctx)
+
+      const previewTool = tools.find((definition) => definition.name === "ocr_delegate_preview")
+      const previewRes = await previewTool.execute({ commit: "head1" }, v2ToolContext())
+      assert.deepEqual(JSON.parse(previewRes.content).argv, [
+        "delegate",
+        "preview",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--commit",
+        "head1",
+      ])
+
+      const ruleTool = tools.find((definition) => definition.name === "ocr_delegate_rule")
+      const ruleRes = await ruleTool.execute({ paths: ["file.go"] }, v2ToolContext())
+      assert.deepEqual(JSON.parse(ruleRes.content).argv, [
+        "delegate",
+        "rule",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--",
+        "file.go",
+      ])
+
+      const ruleStringRes = await ruleTool.execute({ paths: "file1.go, file2.go" }, v2ToolContext())
+      assert.deepEqual(JSON.parse(ruleStringRes.content).argv, [
+        "delegate",
+        "rule",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--",
+        "file1.go",
+        "file2.go",
+      ])
+    },
+  )
+})
+
+test("v2 ocr-delegate-review and ocr-delegate commands render review intent with clean sentence boundaries", async () => {
+  const module = await import("../dist/open-code-review.js")
+  const { ctx, addedCommands, prompts } = stubV2Context({ directory: "/tmp/project" })
+  await module.default.setup(ctx)
+
+  const delegateReviewCmd = addedCommands.find((definition) => definition.name === "ocr-delegate-review")
+  await delegateReviewCmd.execute({ sessionID: "session-test", prompt: { text: "my branch changes" }, delivery: "steer" })
+  assert.match(prompts[0].text, /business context: my branch changes\./)
+  assert.match(prompts[0].text, /ocr_delegate_preview/)
+  assert.match(prompts[0].text, /ocr_delegate_rule/)
+
+  const delegateCmd = addedCommands.find((definition) => definition.name === "ocr-delegate")
+  await delegateCmd.execute({ sessionID: "session-test", prompt: {}, delivery: "steer" })
+  assert.doesNotMatch(prompts[1].text, /:\./)
+  assert.doesNotMatch(prompts[1].text, /business context/)
+  assert.match(prompts[1].text, /reasoning\. If no target is specified/)
 })

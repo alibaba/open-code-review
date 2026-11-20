@@ -9,9 +9,15 @@ It registers:
   return structured JSON findings.
 - `ocr_health` — show the installed OCR version and test its configured LLM
   connection.
+- `ocr_delegate_preview` — determine reviewable files, mode, and ref metadata for
+  delegated review without calling an LLM.
+- `ocr_delegate_rule` — retrieve resolved review rules grouped by content for
+  specified file paths without calling an LLM.
 - `/ocr-review` and `/ocr-health` — convenient prompts that invoke the tools.
+- `/ocr-delegate-review` and `/ocr-delegate` — prompts that drive the 4-step
+  delegated review workflow using OpenCode's current model.
 
-Existing user commands with either name are preserved.
+Existing user commands with any registered name are preserved.
 
 ## Prerequisites
 
@@ -91,6 +97,28 @@ an LLM request.
 When the review context is too long to pass inline, write it to a Markdown file
 and set `backgroundFile` to its path; a relative path resolves against the
 repository root. It cannot be combined with `background`.
+
+### Delegated Review (using OpenCode's model)
+
+When you want OpenCode's current model to perform the review reasoning using your
+existing OpenCode subscription quota without configuring an OCR model endpoint:
+
+```text
+/ocr-delegate-review
+/ocr-delegate-review compare main to feature/auth-refresh
+```
+
+Or ask OpenCode naturally:
+
+```text
+Use ocr_delegate_preview and ocr_delegate_rule to review my changes with your own model.
+```
+
+The delegated workflow separates into four distinct steps:
+1. **File selection** (`ocr_delegate_preview`) — OCR discovers changed files and ref metadata.
+2. **Rule review** (`ocr_delegate_rule`) — OCR fetches checklist rules for those files.
+3. **LLM review** — OpenCode's current model inspects diffs and evaluates the code.
+4. **Result summarization** — OpenCode reports structured findings by severity with line references.
 
 ## Behavior and safety
 
