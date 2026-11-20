@@ -564,6 +564,103 @@ describe('DocsPage', () => {
     expect(screen.queryByText(zh['docs.search.loading'])).toBeNull();
   });
 
+  it('completes the search after a trailing-space edit while the fallback is in flight', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/quickstart');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+
+    openSearch();
+    typeQuery('english-only');
+    typeQuery('english-only ');
+    expect(screen.getByText(zh['docs.search.loading'])).toBeTruthy();
+
+    await act(async () => {
+      h.pending.en[0].resolve({ installation: 'english-only body' });
+    });
+
+    expect(screen.getByRole('button', { name: /installation/ })).toBeTruthy();
+    expect(screen.queryByText(zh['docs.search.loading'])).toBeNull();
+    expect(h.loadCalls).toEqual(['zh', 'en']);
+  });
+
+  it('keeps the retry attempt through query edits and still offers reload after a second failure', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/quickstart');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+
+    openSearch();
+    typeQuery('english-only');
+    await act(async () => {
+      h.pending.en[0].reject(new Error('Failed to fetch dynamically imported module: /en.js'));
+    });
+    expect(screen.getByText(zh['docs.search.loadError'])).toBeTruthy();
+    expect(screen.queryByRole('button', { name: zh['error.reload'] })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: zh['docs.content.retry'] }));
+    typeQuery('english-only extra');
+
+    await act(async () => {
+      h.pending.en[1].reject(new Error('Failed to fetch dynamically imported module: /en.js'));
+    });
+
+    expect(screen.getByText(zh['docs.search.loadError'])).toBeTruthy();
+    expect(screen.getByRole('button', { name: zh['error.reload'] })).toBeTruthy();
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(2);
+  });
+
+  it('reattaches the in-flight fallback after the query is cleared and re-entered', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/quickstart');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+
+    openSearch();
+    typeQuery('english-only');
+    typeQuery('');
+    typeQuery('english');
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(1);
+
+    await act(async () => {
+      h.pending.en[0].resolve({ installation: 'english body' });
+    });
+
+    expect(screen.getByRole('button', { name: /installation/ })).toBeTruthy();
+    expect(screen.queryByText(zh['docs.search.loading'])).toBeNull();
+  });
+
+  it('keeps the retry attempt through article changes and still offers reload after a second failure', async () => {
+    h.available.zh = [];
+    renderDocsPage('zh', '/docs/installation');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({});
+    });
+    await act(async () => {
+      h.pending.en[0].reject(new Error('Failed to fetch dynamically imported module: /en.js'));
+    });
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: zh['error.reload'] })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: zh['docs.content.retry'] }));
+    fireEvent.click(screen.getAllByText(zh['docs.sidebar.configuration'])[0]);
+
+    await act(async () => {
+      h.pending.en[1].reject(new Error('Failed to fetch dynamically imported module: /en.js'));
+    });
+
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.getByRole('button', { name: zh['error.reload'] })).toBeTruthy();
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(2);
+  });
+
   it('reattaches a delayed English bundle after leaving and returning to an article', async () => {
     h.available.zh = ['quickstart'];
     renderDocsPage('zh', '/docs/installation');

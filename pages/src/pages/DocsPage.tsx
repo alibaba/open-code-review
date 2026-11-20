@@ -171,18 +171,19 @@ const DocsPage: React.FC = () => {
     | { status: 'error'; language: Language; error: Error; attempt: number };
 
   /* English fallback for partial locales, tracked separately from the main
-   * language so its own loading and failure can drive page and search UI. */
+   * language so its own loading and failure can drive page and search UI.
+   * The attempt counter is bundle-scoped: it counts load attempts of the
+   * English bundle itself, regardless of which page or query needed it. */
   type EnglishFallbackState =
     | { status: 'idle' }
-    | { status: 'loading'; requestKey: string }
+    | { status: 'loading'; attempt: number }
     | { status: 'ready'; docs: LocalizedDocs }
-    | { status: 'error'; requestKey: string; error: Error; attempt: number };
+    | { status: 'error'; error: Error; attempt: number };
 
   const [docState, setDocState] = useState<DocsLoadState>(() => ({ status: 'loading', language, attempt: 0 }));
   const [mainRetry, setMainRetry] = useState<{ language: Language; count: number }>({ language, count: 0 });
   const [englishFallback, setEnglishFallback] = useState<EnglishFallbackState>({ status: 'idle' });
-  const [fallbackRetry, setFallbackRetry] = useState<{ requestKey: string; count: number }>({ requestKey: '', count: 0 });
-  const fallbackAttemptKey = useRef('');
+  const [fallbackRetry, setFallbackRetry] = useState(0);
 
   const loadedLanguage = docState.status === 'ready' ? docState.content.language : null;
 
@@ -224,7 +225,6 @@ const DocsPage: React.FC = () => {
         if (!cancelled) {
           setDocState({ status: 'ready', content: { language, docs } });
           if (language === 'en') {
-            fallbackAttemptKey.current = '';
             setEnglishFallback({ status: 'ready', docs });
           }
         }
@@ -240,48 +240,46 @@ const DocsPage: React.FC = () => {
     englishFallbackRef.current = englishFallback;
   }, [englishFallback]);
 
-  /* English fallback for partial locales: loaded only when the active page or
-   * an active search needs the English entries — never speculatively. English
-   * content is language-independent, so a load started by any trigger settles
-   * the shared state no matter which trigger remains active; the attempt key
-   * keeps a failed attempt from re-firing in a loop until the trigger changes
-   * or the user retries. */
+  /* Whether anything currently needs the English entries: an untranslated
+   * active page, or an active search in a partial locale. This boolean — not
+   * the query text — is what drives the fallback subscription below. */
+  const pageNeedsFallback =
+    loadedLanguage !== null && loadedLanguage !== 'en' && !hasTranslation(activeSlug, loadedLanguage);
+  const searchNeedsEnglish =
+    loadedLanguage !== null && loadedLanguage !== 'en'
+    && searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
+  const fallbackDemanded = pageNeedsFallback || searchNeedsEnglish;
+
+  /* English fallback, loaded only when needed — never speculatively. The
+   * English bundle is one language-independent resource, so the subscription
+   * is keyed by a retry counter alone: editing the search query or navigating
+   * between pages neither re-keys nor cancels it, and a settled failure
+   * persists until the user retries. Dep changes still cancel the pending
+   * callbacks, so a response landing after English stopped being needed
+   * cannot overwrite the state a main 'en' load has seeded; re-firing
+   * reattaches through the loader's in-flight cache rather than issuing a
+   * second request. */
   useEffect(() => {
-    if (loadedLanguage === null || loadedLanguage === 'en') {
-      fallbackAttemptKey.current = '';
-      return;
-    }
-    const pageNeedsFallback = !hasTranslation(activeSlug, loadedLanguage);
-    const searchNeedsFallback = searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
-    if (!pageNeedsFallback && !searchNeedsFallback) {
-      fallbackAttemptKey.current = '';
-      return;
-    }
-    const key = `${loadedLanguage}:${activeSlug}:${searchNeedsFallback}:${searchQuery.trim()}`;
-    const attempt = fallbackRetry.requestKey === key ? fallbackRetry.count : 0;
+    if (!fallbackDemanded) return;
     const currentFallback = englishFallbackRef.current;
     if (currentFallback.status === 'ready') return;
-    if (currentFallback.status === 'error' && fallbackAttemptKey.current === `${key}:${attempt}`) return;
-    if (fallbackAttemptKey.current === `${key}:${attempt}`) return;
-    fallbackAttemptKey.current = `${key}:${attempt}`;
+    if (currentFallback.status === 'error' && currentFallback.attempt >= fallbackRetry) return;
+    setEnglishFallback({ status: 'loading', attempt: fallbackRetry });
     let cancelled = false;
-    setEnglishFallback({ status: 'loading', requestKey: key });
     loadLanguageContent('en')
       .then(docs => {
         if (!cancelled) setEnglishFallback({ status: 'ready', docs });
       })
       .catch(error => {
-        if (!cancelled) setEnglishFallback({ status: 'error', requestKey: key, error, attempt });
+        if (!cancelled) setEnglishFallback({ status: 'error', error, attempt: fallbackRetry });
       });
     return () => { cancelled = true; };
-  }, [loadedLanguage, activeSlug, searchQuery, fallbackRetry.requestKey, fallbackRetry.count]);
+  }, [fallbackDemanded, fallbackRetry]);
 
   /* ─── Effective states for the page body and the search modal ───
    * Both read the same content: the main language bundle, plus English while
-   * a partial locale needs it. "No results" is only shown once every piece of
-   * content the search depends on has actually arrived. */
-  const pageNeedsFallback =
-    loadedLanguage !== null && loadedLanguage !== 'en' && !hasTranslation(activeSlug, loadedLanguage);
+   * a partial locale needs it. "No results" is only shown once every piece
+   * of content the search depends on has actually arrived. */
   let pageStatus: 'loading' | 'error' | 'ready';
   if (docState.status !== 'ready') {
     pageStatus = docState.status;
@@ -300,7 +298,7 @@ const DocsPage: React.FC = () => {
     if (docState.status === 'error') {
       setMainRetry({ language: docState.language, count: docState.attempt + 1 });
     } else if (pageNeedsFallback && englishFallback.status === 'error') {
-      setFallbackRetry({ requestKey: englishFallback.requestKey, count: englishFallback.attempt + 1 });
+      setFallbackRetry(englishFallback.attempt + 1);
     }
   }, [docState, pageNeedsFallback, englishFallback]);
 
@@ -308,9 +306,6 @@ const DocsPage: React.FC = () => {
     reloadAfterChunkError();
   }, []);
 
-  const searchNeedsEnglish =
-    loadedLanguage !== null && loadedLanguage !== 'en'
-    && searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
   let searchContentStatus: 'loading' | 'error' | 'ready';
   if (docState.status === 'loading') {
     searchContentStatus = 'loading';
@@ -326,7 +321,7 @@ const DocsPage: React.FC = () => {
     if (docState.status === 'error') {
       setMainRetry({ language: docState.language, count: docState.attempt + 1 });
     } else if (searchNeedsEnglish && englishFallback.status === 'error') {
-      setFallbackRetry({ requestKey: englishFallback.requestKey, count: englishFallback.attempt + 1 });
+      setFallbackRetry(englishFallback.attempt + 1);
     }
   }, [docState, searchNeedsEnglish, englishFallback]);
 
