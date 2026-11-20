@@ -19,6 +19,16 @@ const (
 	gitGrepTimeout  = 10 * time.Second
 )
 
+// Byte bounds for the rendered result. The match-count cap alone cannot bound
+// it: minified or generated files pack megabytes into one matching line.
+const (
+	// codeSearchMaxLineBytes caps one rendered match line.
+	codeSearchMaxLineBytes = 2048
+	// codeSearchMaxResultBytes caps the total bytes of rendered match lines. It
+	// sits below gitGrepMaxCount full-length lines so it can bind.
+	codeSearchMaxResultBytes = 128 * 1024
+)
+
 // CodeSearchProvider performs text search across the repository using git grep.
 type CodeSearchProvider struct {
 	FileReader *FileReader
@@ -210,8 +220,8 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		offset = 1
 	}
 
-	matchCount := 0
-	truncated := false
+	matchCount, totalMatches, renderedBytes := 0, 0, 0
+	truncated, lineTruncated, outputTruncated := false, false, false
 	matchedFiles := make(map[string]bool)
 	for _, line := range lines {
 		if line == "" {
@@ -230,12 +240,26 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		// Count every file with a text match, including those beyond the render
 		// budget, so the truncation note can report the true matched-file count.
 		matchedFiles[fname] = true
+		// Counted apart from matchCount, which only rises for lines that render: once the
+		// byte budget binds, matchCount stops short of the cap and the census would be lost.
+		totalMatches++
 		if matchCount >= gitGrepMaxCount {
 			// Keep scanning to finish counting matched files, but render no more.
 			truncated = true
 			continue
 		}
-		m := match{lineNum: ln, content: parts[offset+2]}
+		if outputTruncated {
+			continue
+		}
+		content, cut := capLineBytes(parts[offset+2], codeSearchMaxLineBytes)
+		entryBytes := len(fmt.Sprintf("%d|%s\n", ln, content))
+		if renderedBytes > 0 && renderedBytes+entryBytes > codeSearchMaxResultBytes {
+			outputTruncated = true
+			continue
+		}
+		lineTruncated = lineTruncated || cut
+		renderedBytes += entryBytes
+		m := match{lineNum: ln, content: content}
 		if !seen[fname] {
 			seen[fname] = true
 			fileOrder = append(fileOrder, fname)
@@ -245,8 +269,8 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	var sb strings.Builder
-	if truncated {
-		sb.WriteString(fmt.Sprintf("Note: Showing the first %d matches across %d matching files. Some files are partially shown or omitted entirely. Narrow file_patterns to see the rest.\n", gitGrepMaxCount, len(matchedFiles)))
+	if truncated || outputTruncated {
+		sb.WriteString(fmt.Sprintf("Note: Showing the first %d of %d matches across %d matching files. Some files are partially shown or omitted entirely. Narrow file_patterns to see the rest.\n", matchCount, totalMatches, len(matchedFiles)))
 	}
 
 	for _, path := range fileOrder {
@@ -256,6 +280,13 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			sb.WriteString(fmt.Sprintf("%d|%s\n", m.lineNum, m.content))
 		}
 		sb.WriteString("\n")
+	}
+
+	if lineTruncated {
+		sb.WriteString(fmt.Sprintf("Note: Match lines longer than %d bytes were cut mid-line and the omitted bytes are not part of this result. Use file_read to see more of the line.\n", codeSearchMaxLineBytes))
+	}
+	if outputTruncated {
+		sb.WriteString(fmt.Sprintf("Note: Output truncated at %d bytes of match lines. Narrow file_patterns or search_text to see the rest.\n", codeSearchMaxResultBytes))
 	}
 
 	if err != nil && errStr != "" {
