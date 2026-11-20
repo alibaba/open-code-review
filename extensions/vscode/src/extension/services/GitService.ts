@@ -8,10 +8,30 @@ import { execFile } from 'child_process';
 import { GitState, FileChange, ReviewMode, ReviewContext } from '@shared/types';
 import { buildWorkspaceFiles, branchRefCandidates, parseNameStatus, pickRepoRoot } from './gitMap';
 
+import { emptySideUri } from '../providers/EmptySideProvider';
+
 const WORKSPACE_REFRESH_DEBOUNCE_MS = 300;
+
+/**
+ * Git's empty tree, the base a root commit is diffed against.
+ *
+ * Computed rather than hardcoded: `4b825dc...` is the SHA-1 value, and a
+ * repository created with `--object-format=sha256` has a different one, where
+ * a literal would simply fail to resolve. `--stdin` with no input rather than
+ * `/dev/null`, which is not a path on Windows -- and an unreadable Windows
+ * path is the bug this is here to fix.
+ */
+async function emptyTreeRef(root: string, cache: Map<string, string>): Promise<string> {
+  const hit = cache.get(root);
+  if (hit) return hit;
+  const sha = (await runGit(root, ['hash-object', '-t', 'tree', '--stdin'], '')).trim();
+  cache.set(root, sha);
+  return sha;
+}
 
 export class GitService {
   private api: any | null = null;
+  private readonly emptyTreeCache = new Map<string, string>();
   private cache: GitState = { branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] };
   private reviewFileStatus = new Map<string, FileChange['status']>();
 
@@ -226,6 +246,38 @@ export class GitService {
     }
   }
 
+  /**
+   * The ref to diff a commit against: its first parent, or the empty tree when
+   * it has none.
+   *
+   * `<sha>^` does not resolve for a repository's initial commit, so building it
+   * unconditionally leaves the left side of the diff — and the `git diff` range
+   * used as a fallback — pointing at a revision that does not exist. The empty
+   * tree is present in every repository and makes a root commit read as what it
+   * is: every file added.
+   */
+  private async commitBaseRef(root: string, commit: string): Promise<string> {
+    try {
+      const out = await runGit(root, ['rev-parse', '--verify', '--quiet', `${commit}^`]);
+      if (out.trim()) return `${commit}^`;
+    } catch { /* no parent: fall through to the empty tree */ }
+    return emptyTreeRef(root, this.emptyTreeCache);
+  }
+
+  /**
+   * The diff title for one commit, naming the base it is actually diffed
+   * against.
+   *
+   * `commitBaseRef` falls back to the empty tree for a root commit, so a title
+   * built as `<sha>^ ↔ <sha>` names a revision that does not resolve and is
+   * not what is on screen. Putting the empty tree SHA there would be accurate
+   * and unreadable, so the root case says what it is in words.
+   */
+  private commitDiffLabel(parent: string, commit: string): string {
+    if (parent === `${commit}^`) return `${commit}^ ↔ ${commit}`;
+    return `${t(resolveLocale(vscode.env.language), 'ext.git.rootCommit')} ↔ ${commit}`;
+  }
+
   private async resolveGitRef(root: string, ref: string): Promise<string | null> {
     for (const candidate of branchRefCandidates(ref)) {
       try {
@@ -285,17 +337,20 @@ export class GitService {
     }
 
     if (opts.mode === ReviewMode.Workspace) {
-      const emptyRef = '';
-      const left = api.toGitUri(fileUri, opts.status === 'added' ? emptyRef : 'HEAD');
-      const right = opts.status === 'deleted' ? api.toGitUri(fileUri, emptyRef) : fileUri;
+      // The empty ref this used to pass has the same meaning here as anywhere
+      // else -- the index, not nothing -- so a staged new file showed its
+      // staged contents as the "before", and an untracked one failed to open
+      // rather than rendering blank. Same provider as every other empty side.
+      const left = opts.status === 'added' ? this.emptySideUri(opts.path) : api.toGitUri(fileUri, 'HEAD');
+      const right = opts.status === 'deleted' ? this.emptySideUri(opts.path) : fileUri;
       const label = t(resolveLocale(vscode.env.language), 'ext.git.workspaceVsHead');
       await this.presentDiff(left, right, `${opts.path} (${label})`);
       return;
     }
 
     if (opts.mode === ReviewMode.Commit && opts.commit) {
-      const parent = `${opts.commit}^`;
-      const label = `${opts.commit}^ ↔ ${opts.commit}`;
+      const parent = await this.commitBaseRef(root, opts.commit);
+      const label = this.commitDiffLabel(parent, opts.commit);
       const leftRef = opts.status === 'added' ? null : parent;
       const rightRef = opts.status === 'deleted' ? null : opts.commit;
       await this.presentRefDiff(api, root, opts.path, opts.status, leftRef, rightRef, `${opts.path} (${label})`, {
@@ -345,15 +400,20 @@ export class GitService {
     status: FileChange['status'],
     side: 'left' | 'right',
   ): Promise<vscode.Uri> {
-    if (side === 'left' && (status === 'added' || !ref)) return this.emptySideUri();
-    if (side === 'right' && (status === 'deleted' || !ref)) return this.emptySideUri();
-    if (!ref || !(await this.pathExistsAtRef(root, ref, relPath))) return this.emptySideUri();
+    if (side === 'left' && (status === 'added' || !ref)) return this.emptySideUri(relPath);
+    if (side === 'right' && (status === 'deleted' || !ref)) return this.emptySideUri(relPath);
+    if (!ref || !(await this.pathExistsAtRef(root, ref, relPath))) return this.emptySideUri(relPath);
     return api.toGitUri(vscode.Uri.file(`${root}/${relPath}`), ref);
   }
 
-  /** Provide an empty side (equivalent to /dev/null) for diffs of added or deleted files. */
-  private emptySideUri(): vscode.Uri {
-    return vscode.Uri.file(process.platform === 'win32' ? '\\\\.\\NUL' : '/dev/null');
+  /**
+   * Provide an empty side for diffs of added or deleted files.
+   *
+   * See EmptySideProvider for why this is neither the null device nor a git
+   * URI with an empty ref.
+   */
+  private emptySideUri(relPath: string): vscode.Uri {
+    return emptySideUri(relPath);
   }
 
   private async presentDiff(
@@ -463,8 +523,8 @@ export class GitService {
     if (!api || !root) return null;
 
     if (ctx.mode === ReviewMode.Commit && ctx.commit) {
-      const parent = `${ctx.commit}^`;
-      const label = `${ctx.commit}^ ↔ ${ctx.commit}`;
+      const parent = await this.commitBaseRef(root, ctx.commit);
+      const label = this.commitDiffLabel(parent, ctx.commit);
       const leftRef = status === 'added' ? null : parent;
       const rightRef = status === 'deleted' ? null : ctx.commit;
       const mountRef = status === 'deleted' ? parent : ctx.commit;
@@ -500,12 +560,13 @@ export class GitService {
   }
 }
 
-function runGit(cwd: string, args: string[]): Promise<string> {
+function runGit(cwd: string, args: string[], stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('git', ['-c', 'core.quotepath=false', ...args], { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+    const child = execFile('git', ['-c', 'core.quotepath=false', ...args], { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
       if (err) reject(err);
       else resolve(stdout);
     });
+    if (stdin !== undefined) child.stdin?.end(stdin);
   });
 }
 
