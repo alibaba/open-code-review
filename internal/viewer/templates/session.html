@@ -13,7 +13,7 @@
 <div class="session-header">
     <div class="page-heading">
         {{if not $.Static}}<a class="back-link" href="/r/{{.EncodedRepo}}" aria-label="Back to sessions">{{icon "chevron-left"}}</a>{{end}}
-        <h2>Session: {{.Session.Summary.SessionID}}</h2>
+        <h2>{{if .Session.Summary.AnalysisEnabled}}Report{{else}}Session{{end}}: {{.Session.Summary.SessionID}}</h2>
     </div>
     <div class="meta">
         <span class="meta-truncate" title="{{.Session.Summary.CWD}}"><strong>CWD:</strong> {{.Session.Summary.CWD}}</span>
@@ -27,12 +27,20 @@
         <span><strong>Commit:</strong> <code>{{.Session.Summary.DiffCommit}}</code></span>
         {{end}}
         <span><strong>Model:</strong> <code>{{.Session.Summary.Model}}</code></span>
-        <span><strong>Duration:</strong> {{formatDuration .Session.Summary.DurationSec}}</span>
+        {{if or (not .Analysis) .Static}}<span><strong>Duration:</strong> {{formatDuration .Session.Summary.DurationSec}}</span>
         <span><strong>Files:</strong> {{.Session.Summary.FileCount}}</span>
-        <span><strong>Status:</strong> {{template "meta-status" .Session.Summary}}</span>
+        <span><strong>Status:</strong> {{template "meta-status" .Session.Summary}}</span>{{end}}
     </div>
 </div>
 
+{{if .Session.Summary.AnalysisEnabled}}
+<nav class="report-tabs" aria-label="Report sections">
+    <a href="{{if .Static}}#review{{else}}?tab=review{{end}}" {{if not .Analysis}}aria-current="page"{{end}}>Review</a>
+    <a href="{{if .Static}}#analysis{{else}}?tab=analysis{{end}}" {{if and .Analysis (not .Static)}}aria-current="page"{{end}}>Analysis</a>
+</nav>
+{{end}}
+{{if or (not .Analysis) .Static}}
+<div id="review">
 {{if .Session.Summary.RunManifest}}
 <div class="token-summary">
     <h3>Coverage</h3>
@@ -255,6 +263,29 @@
 </details>
 {{end}}
 
+</div>
+{{end}}
+{{with .Analysis}}
+<article id="analysis" class="analysis-report">
+    <h2>Behavior and impact analysis</h2>
+    <dl class="analysis-facts">
+        {{if .Status}}<div><dt>Analysis status</dt><dd>{{if eq .Status "started"}}No final status{{else}}{{.Status}}{{end}}</dd></div>{{end}}
+        {{if .Comparison.ID}}<div><dt>Changed files in scope</dt><dd>{{.InScope}}</dd></div><div><dt>Excluded changes</dt><dd>{{.Excluded}}</dd></div>{{end}}
+        {{if .DeclaredCompletion}}<div><dt>Model assessment</dt><dd>{{.DeclaredCompletion}}</dd></div>{{end}}
+        {{if .Usage.TotalTokens}}<div><dt>Total tokens</dt><dd>{{.Usage.TotalTokens}}</dd></div>{{end}}
+    </dl>
+    {{if .Notice}}<p>{{.Notice}}</p>{{end}}
+    {{range .Errors}}<p>{{.}}</p>{{end}}
+    {{if and .StopReason (ne .StopReason "none")}}<p>Stop reason: {{.StopReason}}</p>{{end}}
+    {{if .Markdown}}<div class="analysis-prose">{{.Markdown}}</div>{{end}}
+    {{if not $.Static}}
+    {{if .CitedObservationIDs}}<nav class="evidence-links" aria-label="Cited evidence"><strong>Cited evidence</strong>{{range .CitedObservationIDs}} <a href="?tab=analysis&amp;evidence={{.}}#evidence">{{.}}</a>{{end}}</nav>{{end}}
+    {{with .Observation}}<section id="evidence"><h3>Evidence: {{.ID}}</h3><p>{{.ToolName}}{{range .Locations}} &middot; {{.Side}}: {{.Path}}:{{.StartLine}}{{end}}</p><pre>{{.ReturnedContent}}</pre></section>{{end}}
+    {{if .ObservationIDs}}<details><summary>All observations ({{len .ObservationIDs}})</summary><div class="evidence-links">{{range .ObservationIDs}}<a href="?tab=analysis&amp;evidence={{.}}#evidence">{{.}}</a>{{end}}</div></details>{{end}}
+    {{if .Comparison.ID}}<p><a href="?tab=analysis&amp;log=trace">Open execution log</a></p>{{end}}
+    {{end}}
+</article>
+{{end}}
 {{if $.Static}}<script>{{$.InlineJS}}</script>{{else}}<script src="/static/a11y.js"></script><script src="/static/pager.js"></script><script src="/static/session.js"></script>{{end}}
 </main>
 </body>

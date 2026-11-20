@@ -6,7 +6,7 @@ collector, execute repository code, or make a report-summarization model call.
 `ocr review --commit <sha> --analysis` and `ocr review --from <base> [--to <head>] --analysis`
 combine the full Review pipeline with this independent task through `internal/workflow`.
 For uncommitted changes use ordinary `ocr review` without `--analysis`. The opt-in flag does not change default review
-or scan costs. Both roles use the configured model and private sessions. Analysis
+or scan costs. Both roles use the configured model and share one public report ID. Analysis
 uses at most one additional concurrent model request. Both roles use the resolved
 `--max-tokens` limit for each prompt and share one `--max-git-procs` pool.
 Analysis has no total token
@@ -33,7 +33,7 @@ command configuration in a way Analysis cannot reproduce, it is skipped. Neither
 
 `NewRunner` accepts full-SHA range and commit comparisons; the old side of a
 root commit is the empty tree. It constructs the existing old/new `CodeAccess`
-and creates its own session. File contents come from the selected revisions,
+and records its own trace inside the report. File contents come from the selected revisions,
 not the live working tree. Explicit exclusions, built-in
 excluded directories, credential-like paths, symlinks, and unsupported paths are
 unavailable through reads, searches, enumeration, and diffs. Unchanged authorized
@@ -97,12 +97,14 @@ provider error or artifact persistence failure.
 
 ## Artifacts and validation
 
-- `result.json`: `ocr.behavior-impact/v2`, separating model analysis from program
-  comparison, scope, submission state, stop reason, usage, session, and versions.
+- `result.json`: `ocr.behavior-impact/v2` metadata, including execution status,
+  model assessment, comparison, scope, stop reason and usage. The CLI records
+  `started` before preparing the input and atomically replaces it at completion.
 - `report.md`: the accepted Markdown exactly as submitted, without generated headings.
 - `observations.jsonl`: append-only, run-local evidence. Persistence failures stop
   the task rather than accepting evidence that cannot be recovered.
-- The normal session history captures model calls, compression, and tool results.
+- `trace.jsonl` captures model calls, compression, and tool results. With
+  `OCR_RAW_LOGGING=1`, `raw.jsonl` also captures raw Analysis HTTP attempts.
   Background work is joined before session and result finalization.
 
 Run unit tests through `make test PACKAGES='./internal/behaviortask'`.

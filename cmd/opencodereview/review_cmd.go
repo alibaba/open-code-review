@@ -249,6 +249,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	mainToolDefs = append(mainToolDefs, mcpToolDefs...)
 
 	ag := agent.New(agent.Args{
+		AnalysisEnabled:       opts.analysis,
 		RepoDir:               cc.RepoDir,
 		From:                  opts.from,
 		To:                    opts.to,

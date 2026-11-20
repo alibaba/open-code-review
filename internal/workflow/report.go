@@ -7,7 +7,6 @@ import (
 	"errors"
 
 	"github.com/alibaba/open-code-review/internal/behaviortask"
-	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 )
@@ -38,7 +37,7 @@ type Report struct {
 }
 
 func NewReport(result behaviortask.Result, runErr error, directory string) *Report {
-	report := &Report{SchemaVersion: "ocr.review-analysis/v2", Status: "failed", DeclaredCompletion: "unknown",
+	report := &Report{SchemaVersion: "ocr.review-analysis/v2", Status: result.ExecutionStatus(runErr), DeclaredCompletion: "unknown",
 		Comparison: result.Comparison, Scope: result.Scope, Completed: result.Completed, StopReason: result.StopReason, SubmissionStatus: result.SubmissionStatus,
 		Errors: []string{}, Warnings: result.Warnings, ToolFailures: result.ToolFailures, Usage: result.Usage, Model: result.Model,
 		TemplateVersion: result.TemplateVersion, ToolsVersion: result.ToolsVersion, SessionID: result.SessionID, ArtifactDir: directory, ObservationIDs: result.ObservationIDs,
@@ -57,18 +56,10 @@ func NewReport(result behaviortask.Result, runErr error, directory string) *Repo
 			report.Errors = append(report.Errors, behaviortask.ErrResultWrite.Error())
 		}
 	}
-	var view *gitcmd.UnsupportedViewError
-	if errors.As(runErr, &view) {
-		report.Status = "skipped"
-	}
 	if result.Analysis != nil {
 		report.Markdown = result.Analysis.Markdown
 		if result.Analysis.DeclaredCompletion != "" {
 			report.DeclaredCompletion = result.Analysis.DeclaredCompletion
-		}
-		report.Status = "partial"
-		if result.Completed && len(report.Errors) == 0 && result.StopReason == "none" {
-			report.Status = "completed"
 		}
 	}
 	return report

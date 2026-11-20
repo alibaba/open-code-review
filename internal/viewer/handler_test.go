@@ -35,6 +35,56 @@ func TestHandleRepos_Success(t *testing.T) {
 	}
 }
 
+func TestCombinedReportViews(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	directory := filepath.Join(repo, "review-id", "analysis")
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, filepath.Join(repo, "review-id.jsonl"), `{"type":"session_start","timestamp":"2026-01-01T00:00:00Z","cwd":"/repo","analysis":{"enabled":true}}`)
+	writeJSONL(t, filepath.Join(repo, "plain.jsonl"), `{"type":"session_start","cwd":"/repo"}`)
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	get := func(path string, status int, want, absent string) {
+		t.Helper()
+		out := httptest.NewRecorder()
+		newMux(root).ServeHTTP(out, httptest.NewRequest("GET", path, nil))
+		if out.Code != status || !strings.Contains(out.Body.String(), want) || (absent != "" && strings.Contains(out.Body.String(), absent)) {
+			t.Fatalf("%s: status=%d want=%q absent=%q body=%s", path, out.Code, want, absent, out.Body.String())
+		}
+	}
+	const page = "/r/repo/review-id"
+	const tab = page + "?tab=analysis"
+	get("/r/repo", 200, "Review + Analysis", "trace.jsonl")
+	get("/r/repo/plain?tab=analysis", 404, "", "analysis-prose")
+	get(tab, 200, "missing or unreadable", "legacy")
+	write("result.json", `{"execution_status":"started","session_id":"review-id"}`)
+	get(tab, 200, "No final Analysis status", "legacy")
+	write("result.json", `{"execution_status":"skipped","errors":["Unsupported comparison"],"session_id":"review-id"}`)
+	get(tab, 200, "Unsupported comparison", "Changed files in scope")
+	write("result.json", `{"comparison":{"id":"comparison"},"session_id":"review-id","execution_status":"completed","submission_status":"accepted","scope":[{}, {}, {"excluded_reason":"binary"}],"usage":{"total_tokens":100},"observation_ids":["obs-000001"],"cited_observation_ids":["obs-000001"]}`)
+	get(tab, 200, "accepted report file is missing", "panic")
+	write("report.md", "## Report body\n\nSee [[obs-000001]].\n\n![external image](https://assets.example.org/unrequested.png)")
+	write("observations.jsonl", `{"observation_id":"obs-000001","returned_content":"evidence text"}`)
+	write("trace.jsonl", "private trace")
+	get(page, 200, "?tab=analysis", "Report body")
+	get(tab, 200, "Report body", "private trace")
+	get(tab, 200, "<h2>Report body</h2>", "unrequested.png")
+	get(tab, 200, "Changed files in scope</dt><dd>2", "evidence text")
+	get(tab+"&evidence=obs-000001", 200, "evidence text", "private trace")
+	get(tab+"&evidence=no-such-id", 404, "", "evidence text")
+	get(tab+"&log=trace", 200, "private trace", "Report body")
+	var exported strings.Builder
+	if err := ExportSession(&exported, root, "repo", "review-id"); err != nil || !strings.Contains(exported.String(), "Report body") || strings.Contains(exported.String(), "private trace") || strings.Contains(exported.String(), "evidence text") {
+		t.Fatalf("unexpected report export: %v", err)
+	}
+}
+
 func TestHandleRepos_EmptyRoot(t *testing.T) {
 	root := t.TempDir()
 	req := httptest.NewRequest("GET", "/", nil)

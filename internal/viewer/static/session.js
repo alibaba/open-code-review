@@ -34,6 +34,27 @@ document.querySelectorAll('.response-text').forEach(function(el) {
     el.innerHTML = html;
 });
 
+const analysisProse = document.querySelector('.analysis-prose');
+const citations = new Map(Array.from(document.querySelectorAll('.evidence-links a'), link => [link.textContent, link.href]));
+if (analysisProse && citations.size) {
+    const walker = document.createTreeWalker(analysisProse, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(node => {
+        if (node.parentElement.closest('a, pre, code')) return;
+        const pieces = node.textContent.split(/(\[\[obs-\d+\]\])/g);
+        if (pieces.length < 2) return;
+        node.replaceWith(...pieces.map(piece => {
+            const url = citations.get(piece.slice(2, -2));
+            if (!piece.startsWith('[[') || !url) return piece;
+            const link = document.createElement('a');
+            link.href = url;
+            link.textContent = piece;
+            return link;
+        }));
+    });
+}
+
 (function() {
     const filters = Array.from(document.querySelectorAll('.comment-filter-chip[data-filter-kind]'));
     const groups = Array.from(document.querySelectorAll('.comment-file-group'));

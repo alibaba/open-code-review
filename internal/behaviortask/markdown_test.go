@@ -69,8 +69,8 @@ func TestMarkdownOnlySubmissionAndArtifacts(test *testing.T) {
 	if err != nil {
 		test.Fatal(err)
 	}
-	var persisted Result
-	if err := json.Unmarshal(data, &persisted); err != nil || persisted.Analysis.Markdown != markdown || persisted.SchemaVersion != "ocr.behavior-impact/v2" {
+	var persisted SavedResult
+	if err := json.Unmarshal(data, &persisted); err != nil || strings.Contains(string(data), `"markdown"`) || persisted.Status != "completed" || persisted.DeclaredCompletion != "unknown" || persisted.SchemaVersion != "ocr.behavior-impact/v2" {
 		test.Fatalf("persisted: %+v, %v", persisted, err)
 	}
 }

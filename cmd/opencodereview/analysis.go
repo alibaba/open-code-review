@@ -70,6 +70,7 @@ type analysisExecution struct {
 	runner     *behaviortask.Runner
 	initialize func(context.Context) error
 	directory  string
+	artifacts  *behaviortask.Artifacts
 	collector  *llm.RetryCollector
 	closeRaw   func()
 	timeout    time.Duration
@@ -92,15 +93,14 @@ func newAnalysisExecution(request analysisRequest) *analysisExecution {
 }
 
 func (execution *analysisExecution) prepare(ctx context.Context, request analysisRequest) error {
-	input, err := behaviortask.PrepareInput(ctx, request.input)
+	if err := session.ValidateSessionID(request.reviewID); err != nil {
+		return err
+	}
+	input := request.input
+	parent, err := session.SessionsDir(input.RepoDir)
 	if err != nil {
 		return err
 	}
-	configPath, err := defaultConfigPath()
-	if err != nil {
-		return err
-	}
-	parent := filepath.Join(filepath.Dir(configPath), "analysis")
 	for ancestor := parent; ; ancestor = filepath.Dir(ancestor) {
 		resolved, err := pathutil.CanonicalPath(ancestor)
 		if errors.Is(err, os.ErrNotExist) {
@@ -114,10 +114,27 @@ func (execution *analysisExecution) prepare(ctx context.Context, request analysi
 		}
 		break
 	}
-	if err := os.MkdirAll(parent, 0700); err != nil {
+	reportDir := filepath.Join(parent, request.reviewID)
+	if _, err := os.Stat(reportDir + ".jsonl"); err != nil {
 		return err
 	}
-	directory := filepath.Join(parent, request.reviewID)
+	if err := os.Mkdir(reportDir, 0700); err != nil {
+		return err
+	}
+	directory := filepath.Join(reportDir, "analysis")
+	execution.artifacts, err = behaviortask.CreateArtifacts(input.RepoDir, directory)
+	if err != nil {
+		return err
+	}
+	execution.directory = directory
+	execution.fallback.SessionID = request.reviewID
+	if err := execution.artifacts.Save(execution.fallback, "started"); err != nil {
+		return err
+	}
+	input, err = behaviortask.PrepareInput(ctx, input)
+	if err != nil {
+		return err
+	}
 	tpl, err := template.LoadBehaviorDefault()
 	if err != nil {
 		return err
@@ -130,7 +147,7 @@ func (execution *analysisExecution) prepare(ctx context.Context, request analysi
 	}
 	client := llm.NewLLMClient(request.endpoint, execution.collector, raw)
 	execution.runner, err = behaviortask.NewRunner(ctx, behaviortask.Deps{LLMClient: client, Model: request.model, Language: request.language,
-		Template: tpl, ArtifactDir: directory, MaxTokensBudget: request.budget,
+		Template: tpl, Artifacts: execution.artifacts, ReportID: request.reviewID, MaxTokensBudget: request.budget,
 		NewRequestMeta: func(key string, taskType session.TaskType, requestNo int) llm.RequestMeta {
 			return llm.RequestMeta{Provider: request.provider, Model: request.model, FilePath: key, TaskType: string(taskType), RequestNo: requestNo}
 		},
@@ -138,8 +155,10 @@ func (execution *analysisExecution) prepare(ctx context.Context, request analysi
 	if err != nil {
 		return err
 	}
-	execution.directory = directory
-	execution.closeRaw = bindRawWriter(raw, input.RepoDir, execution.runner.Session())
+	if raw != nil {
+		writer, err := session.NewAnalysisRawWriter(directory, request.reviewID)
+		execution.closeRaw = attachRawWriter(raw, writer, err)
+	}
 	return nil
 }
 
@@ -151,6 +170,12 @@ func (execution *analysisExecution) run(ctx context.Context) (behaviortask.Resul
 		defer cancel()
 	}
 	if err := execution.initialize(ctx); err != nil {
+		if execution.artifacts != nil {
+			execution.fallback.Errors = []string{behaviortask.FailureSummary(err)}
+			if writeErr := execution.artifacts.Save(execution.fallback, execution.fallback.ExecutionStatus(err)); writeErr != nil {
+				err = errors.Join(err, behaviortask.ErrResultWrite, writeErr)
+			}
+		}
 		return execution.fallback, err
 	}
 	return execution.runner.Run(ctx)

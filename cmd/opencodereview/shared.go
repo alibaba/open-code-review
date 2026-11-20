@@ -287,14 +287,17 @@ func loadLLMRuntime(tpl *template.Template, resolveOpts llm.ResolveOptions) (*ll
 // or an open failure returns a no-op closer: raw capture must never fail a
 // review.
 func bindRawWriter(holder *llm.RawHolder, repoDir string, sess *session.SessionHistory) func() {
-	noop := func() {}
 	if holder == nil {
-		return noop
+		return func() {}
 	}
 	w, err := session.NewRawFileWriter(repoDir, sess.SessionID)
+	return attachRawWriter(holder, w, err)
+}
+
+func attachRawWriter(holder *llm.RawHolder, w *session.RawFileWriter, err error) func() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: raw logging disabled for this run: %v\n", err)
-		return noop
+		return func() {}
 	}
 	holder.Set(w)
 	return func() {

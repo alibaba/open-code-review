@@ -257,6 +257,7 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 	for _, fixture := range []struct {
 		name            string
 		analysis        bool
+		rawLogging      bool
 		emptyCommit     bool
 		failReview      bool
 		failAnalysis    bool
@@ -274,7 +275,7 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 		{name: "default", status: "complete"},
 		{name: "saved context limit pages analysis", analysis: true, emptyCommit: true, largeBackground: true, status: "skipped"},
 		{name: "CLI context limit overrides saved limit", analysis: true, emptyCommit: true, largeBackground: true, maxTokensFlag: "160000", status: "skipped"},
-		{name: "unlimited analysis", analysis: true, analysisTokens: 100_001, status: "complete"},
+		{name: "unlimited analysis", analysis: true, analysisTokens: 100_001, rawLogging: true, status: "complete"},
 		{name: "analysis partial self-assessment", analysis: true, partial: true, status: "complete"},
 		{name: "analysis failure", analysis: true, failAnalysis: true, status: "complete"},
 		{name: "output failure", analysis: true, failAnalysis: true, blockOutput: true, wantError: true},
@@ -287,6 +288,9 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 	} {
 		test.Run(fixture.name, func(test *testing.T) {
 			home := test.TempDir()
+			if fixture.rawLogging {
+				test.Setenv("OCR_RAW_LOGGING", "1")
+			}
 			test.Setenv("HOME", home)
 			test.Setenv("USERPROFILE", home)
 			test.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
@@ -417,11 +421,21 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			if payload.Manifest.Input.RequestedFrom != "HEAD~1" || payload.Manifest.Input.RequestedHead != "HEAD" {
 				test.Fatalf("requested refs changed: %+v", payload.Manifest.Input)
 			}
-			if report.SessionID == payload.SessionID || report.Comparison.Head == report.Comparison.Old {
+			if report.SessionID == "" || report.SessionID != payload.SessionID || report.Comparison.Head == report.Comparison.Old {
 				test.Fatalf("identity: %s", data)
+			}
+			summaries, err := session.ListSessions(repo)
+			if err != nil || len(summaries) != 1 || summaries[0].Analysis == nil || !summaries[0].Analysis.Enabled || summaries[0].SessionID != report.SessionID || report.ArtifactDir != filepath.Join(strings.TrimSuffix(summaries[0].FilePath, ".jsonl"), "analysis") {
+				test.Fatalf("single report: %+v, %v; artifacts=%s", summaries, err, report.ArtifactDir)
 			}
 			if report.Comparison.Mode != "range" || len(report.Comparison.Head) != 40 {
 				test.Fatalf("immutable identity: %s", data)
+			}
+			if fixture.rawLogging {
+				raw, err := os.ReadFile(filepath.Join(report.ArtifactDir, "raw.jsonl"))
+				if err != nil || !bytes.Contains(raw, []byte(report.SessionID)) {
+					test.Fatalf("missing Analysis raw capture: %v", err)
+				}
 			}
 			if payload.Summary.TotalTokens != payload.Summary.InputTokens+payload.Summary.OutputTokens {
 				test.Fatalf("usage: %s", data)
@@ -448,7 +462,7 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 				if len(report.CitedObservationIDs) != 2 || !strings.Contains(*payload.Analysis, "## Maintainer Decisions") || analysisCalls.Load() != 3 {
 					test.Fatalf("analysis: %s", data)
 				}
-				for _, name := range []string{"result.json", "report.md", "observations.jsonl"} {
+				for _, name := range []string{"result.json", "report.md", "observations.jsonl", "trace.jsonl"} {
 					if _, err := os.Stat(filepath.Join(report.ArtifactDir, name)); err != nil {
 						test.Fatal(err)
 					}
@@ -558,7 +572,11 @@ func TestAnalysisPreservesCommitReview(test *testing.T) {
 			if plain.AnalysisMeta != nil || calls.Load() != 0 || plain.Manifest == nil || len(plain.Manifest.Coverage.Selected) != 1 || plain.Manifest.Coverage.Selected[0].Path != "a.go" {
 				test.Fatalf("plain review: %+v", plain)
 			}
-			if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".opencodereview", "analysis")); !errors.Is(err, os.ErrNotExist) {
+			sessions, err := session.SessionsDir(repo)
+			if err != nil {
+				test.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(sessions, plain.SessionID)); !errors.Is(err, os.ErrNotExist) {
 				test.Fatalf("unexpected analysis artifacts: %v", err)
 			}
 			waitForAnalysis.Store(scenario == "completed")
@@ -575,12 +593,17 @@ func TestAnalysisPreservesCommitReview(test *testing.T) {
 				want, cost = "partial", 30
 			case "git config", "alternate index":
 				want, cost = "skipped", 0
-				if calls.Load() != 0 || len(report.Errors) != 1 || report.SessionID != "" || report.ArtifactDir != "" {
+				if calls.Load() != 0 || len(report.Errors) != 1 || report.SessionID != combined.SessionID || report.ArtifactDir == "" {
 					test.Fatalf("unsupported view: %+v", report)
 				}
 			}
 			if report.Status != want || report.Usage.TotalTokens != cost {
 				test.Fatalf("analysis status or usage: %+v", report)
+			}
+			var stored behaviortask.SavedResult
+			data, err := os.ReadFile(filepath.Join(report.ArtifactDir, "result.json"))
+			if err != nil || json.Unmarshal(data, &stored) != nil || stored.Status != want || stored.SessionID != combined.SessionID {
+				test.Fatalf("persisted result: %s, %v", data, err)
 			}
 			for _, result := range []*jsonOutput{&plain, &combined} {
 				result.SchemaVersion, result.ReviewStatus, result.SessionID, result.TraceID = "", "", "", ""

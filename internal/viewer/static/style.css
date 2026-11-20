@@ -817,6 +817,18 @@ h3 {
     letter-spacing: 0.01em;
 }
 .badge-model { background: var(--badge-model-bg); color: var(--badge-model-fg); }
+.report-tabs { display: flex; gap: 1.5rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; }
+.report-tabs a { padding: .65rem .2rem; color: var(--text-secondary); border-bottom: 3px solid transparent; text-decoration: none; }
+.report-tabs a[aria-current="page"] { border-color: var(--accent); color: var(--text-strong); font-weight: 600; }
+.analysis-report { max-width: 80ch; margin: 1.5rem auto; overflow-wrap: anywhere; }
+.analysis-facts, .evidence-links { display: flex; flex-wrap: wrap; gap: .65rem 1.5rem; margin: 1rem 0; }
+.analysis-facts dt { color: var(--text-muted); font-size: .85rem; }
+.analysis-facts dd { margin: .2rem 0 0; font-weight: 600; }
+.analysis-prose { line-height: 1.65; overflow-x: auto; }
+.analysis-prose :is(h2, h3) { margin-top: 1.4em; }
+.analysis-prose :is(pre, blockquote) { margin: 1em 0; padding: .8rem 1rem; background: var(--surface-inset); }
+.analysis-prose :is(th, td) { padding: .4rem .8rem; border: 1px solid var(--border); }
+.analysis-report pre { white-space: pre-wrap; }
 .badge-tokens { background: var(--badge-tokens-bg); color: var(--badge-tokens-fg); }
 .badge-duration { background: var(--badge-duration-bg); color: var(--badge-duration-fg); }
 .badge-error { background: var(--badge-error-bg); color: var(--badge-error-fg); }

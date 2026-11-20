@@ -4,10 +4,16 @@
 package behaviortask
 
 import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/pathutil"
 )
 
 const SchemaVersion = "ocr.behavior-impact/v2"
@@ -66,7 +72,7 @@ type Result struct {
 	SchemaVersion       string                      `json:"schema_version"`
 	Comparison          Comparison                  `json:"comparison"`
 	Scope               []Change                    `json:"scope"`
-	Analysis            *Analysis                   `json:"analysis"`
+	Analysis            *Analysis                   `json:"-"`
 	SubmissionStatus    string                      `json:"submission_status"`
 	Completed           bool                        `json:"completed"`
 	StopReason          string                      `json:"stop_reason"`
@@ -83,4 +89,68 @@ type Result struct {
 	ContextIndex        []Context                   `json:"context_index"`
 	MaxRounds           int                         `json:"max_rounds"`
 	MaxTokensBudget     int64                       `json:"max_tokens_budget"`
+}
+
+type Artifacts struct {
+	directory string
+}
+
+func CreateArtifacts(repo, directory string) (*Artifacts, error) {
+	parent, err := pathutil.CanonicalPath(filepath.Dir(directory))
+	if err != nil {
+		return nil, err
+	}
+	repo, err = pathutil.CanonicalPath(repo)
+	if err != nil {
+		return nil, err
+	}
+	directory = filepath.Join(parent, filepath.Base(directory))
+	if pathutil.WithinBase(repo, directory) {
+		return nil, ErrArtifactLocation
+	}
+	if err := os.Mkdir(directory, 0700); err != nil {
+		return nil, err
+	}
+	return &Artifacts{directory: directory}, nil
+}
+
+type SavedResult struct {
+	Result
+	Status             string `json:"execution_status"`
+	DeclaredCompletion string `json:"declared_completion,omitempty"`
+}
+
+func (result Result) ExecutionStatus(runErr error) string {
+	if result.Analysis != nil {
+		if result.Completed && runErr == nil && len(result.Errors) == 0 && result.StopReason == "none" {
+			return "completed"
+		}
+		return "partial"
+	}
+	var view *gitcmd.UnsupportedViewError
+	if errors.As(runErr, &view) {
+		return "skipped"
+	}
+	return "failed"
+}
+
+func (artifacts *Artifacts) Save(result Result, status string) error {
+	saved := SavedResult{Result: result, Status: status}
+	if result.Analysis != nil {
+		saved.DeclaredCompletion = result.Analysis.DeclaredCompletion
+	}
+	data, err := json.MarshalIndent(saved, "", "  ")
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(artifacts.directory, ".result-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	_, err = file.Write(append(data, '\n'))
+	if err := errors.Join(err, file.Close()); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), filepath.Join(artifacts.directory, "result.json"))
 }

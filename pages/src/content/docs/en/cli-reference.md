@@ -211,6 +211,13 @@ in the target commit (`--commit` or the resolved `--to`), not the working tree.
 Analysis uses the same rule for its change list. An ignored file can still be
 read as context; use `--exclude` to prevent Analysis from reading it.
 
+With `--analysis`, one session ID opens a single report with Review and Analysis
+tabs in `ocr viewer`. The Analysis tab shows the investigation's execution status,
+changed files in scope (not files read), model assessment, and cited evidence.
+Its Markdown, result metadata, evidence, and execution trace live under
+`~/.opencodereview/sessions/<encoded-repo>/<session-id>/analysis/`. Evidence and
+logs can contain source text. An unfinished run may have no final status.
+
 ### Resuming interrupted reviews
 
 Every `ocr review` run persists a local session log under
@@ -549,7 +556,8 @@ treat the file with the same care as the repository itself before publishing it.
 
 ### `ocr session rm`
 
-Deletes one persisted session from `~/.opencodereview/sessions/`.
+Deletes one persisted session from `~/.opencodereview/sessions/`, including its
+attached Analysis report, evidence and logs if present.
 
 ```bash
 ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b

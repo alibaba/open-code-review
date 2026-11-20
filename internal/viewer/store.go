@@ -86,29 +86,30 @@ func DiscoverRepos(root string) ([]RepoInfo, error) {
 
 // SessionSummary is built from session_start and session_end records.
 type SessionSummary struct {
-	SessionID      string
-	Timestamp      time.Time
-	CWD            string
-	GitBranch      string
-	Model          string
-	ReviewMode     string
-	DiffFrom       string
-	DiffTo         string
-	DiffCommit     string
-	FilesReviewed  []string
-	DurationSec    float64
-	FileCount      int
-	LLMFailures    int
-	CommentCount   int
-	Aborted        bool
-	Legacy         bool
-	TerminalState  string
-	SelectedCount  int
-	CompletedCount int
-	ReusedCount    int
-	FailedCount    int
-	WaivedCount    int
-	RunManifest    *session.RunManifest
+	AnalysisEnabled bool
+	SessionID       string
+	Timestamp       time.Time
+	CWD             string
+	GitBranch       string
+	Model           string
+	ReviewMode      string
+	DiffFrom        string
+	DiffTo          string
+	DiffCommit      string
+	FilesReviewed   []string
+	DurationSec     float64
+	FileCount       int
+	LLMFailures     int
+	CommentCount    int
+	Aborted         bool
+	Legacy          bool
+	TerminalState   string
+	SelectedCount   int
+	CompletedCount  int
+	ReusedCount     int
+	FailedCount     int
+	WaivedCount     int
+	RunManifest     *session.RunManifest
 }
 
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
@@ -167,30 +168,7 @@ func peekSession(path string) (SessionSummary, error) {
 			if err := json.Unmarshal(line, &rec); err != nil {
 				return
 			}
-			if ts, ok := rec["timestamp"].(string); ok {
-				summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
-			}
-			if cwd, ok := rec["cwd"].(string); ok {
-				summary.CWD = cwd
-			}
-			if branch, ok := rec["gitBranch"].(string); ok {
-				summary.GitBranch = branch
-			}
-			if model, ok := rec["model"].(string); ok {
-				summary.Model = model
-			}
-			if rm, ok := rec["reviewMode"].(string); ok {
-				summary.ReviewMode = rm
-			}
-			if v, ok := rec["diffFrom"].(string); ok {
-				summary.DiffFrom = v
-			}
-			if v, ok := rec["diffTo"].(string); ok {
-				summary.DiffTo = v
-			}
-			if v, ok := rec["diffCommit"].(string); ok {
-				summary.DiffCommit = v
-			}
+			applySessionStart(&summary, rec)
 			return
 		}
 
@@ -515,30 +493,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 		switch typ {
 		case "session_start":
-			if ts, ok := rec["timestamp"].(string); ok {
-				vs.Summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
-			}
-			if cwd, ok := rec["cwd"].(string); ok {
-				vs.Summary.CWD = cwd
-			}
-			if branch, ok := rec["gitBranch"].(string); ok {
-				vs.Summary.GitBranch = branch
-			}
-			if model, ok := rec["model"].(string); ok {
-				vs.Summary.Model = model
-			}
-			if rm, ok := rec["reviewMode"].(string); ok {
-				vs.Summary.ReviewMode = rm
-			}
-			if v, ok := rec["diffFrom"].(string); ok {
-				vs.Summary.DiffFrom = v
-			}
-			if v, ok := rec["diffTo"].(string); ok {
-				vs.Summary.DiffTo = v
-			}
-			if v, ok := rec["diffCommit"].(string); ok {
-				vs.Summary.DiffCommit = v
-			}
+			applySessionStart(&vs.Summary, rec)
 
 		case "llm_request":
 			fp, _ := rec["filePath"].(string)
@@ -787,6 +742,20 @@ func commentMarkID(recordUUID string, commentIndex int, rc *ReviewComment, occur
 	n := occurrences[key]
 	occurrences[key] = n + 1
 	return fmt.Sprintf("%s#%d", key, n)
+}
+
+func applySessionStart(summary *SessionSummary, rec map[string]any) {
+	ts, _ := rec["timestamp"].(string)
+	summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
+	summary.CWD, _ = rec["cwd"].(string)
+	summary.GitBranch, _ = rec["gitBranch"].(string)
+	summary.Model, _ = rec["model"].(string)
+	summary.ReviewMode, _ = rec["reviewMode"].(string)
+	summary.DiffFrom, _ = rec["diffFrom"].(string)
+	summary.DiffTo, _ = rec["diffTo"].(string)
+	summary.DiffCommit, _ = rec["diffCommit"].(string)
+	options, _ := rec["analysis"].(map[string]any)
+	summary.AnalysisEnabled, _ = options["enabled"].(bool)
 }
 
 func applySessionEnd(summary *SessionSummary, rec map[string]any) {

@@ -31,6 +31,8 @@ type Deps struct {
 	Language        string
 	Template        *template.BehaviorTemplate
 	ArtifactDir     string
+	Artifacts       *Artifacts
+	ReportID        string
 	MaxTokensBudget int64
 	NewRequestMeta  func(taskKey string, taskType session.TaskType, requestNo int) llm.RequestMeta
 }
@@ -53,7 +55,7 @@ type Runner struct {
 }
 
 func NewRunner(ctx context.Context, deps Deps, input Input) (*Runner, error) {
-	if deps.LLMClient == nil || deps.Model == "" || deps.ArtifactDir == "" || deps.MaxTokensBudget < 0 {
+	if deps.LLMClient == nil || deps.Model == "" || (deps.Artifacts == nil && deps.ArtifactDir == "") || deps.MaxTokensBudget < 0 {
 		return nil, fmt.Errorf("behavior requires a client, model, fresh artifact directory, and nonnegative token budget")
 	}
 	if err := validateContexts(input.Contexts); err != nil {
@@ -68,13 +70,11 @@ func NewRunner(ctx context.Context, deps Deps, input Input) (*Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	artifactParent, err := pathutil.CanonicalPath(filepath.Dir(deps.ArtifactDir))
-	if err != nil {
-		return nil, err
-	}
-	deps.ArtifactDir = filepath.Join(artifactParent, filepath.Base(deps.ArtifactDir))
-	if pathutil.WithinBase(input.RepoDir, deps.ArtifactDir) {
-		return nil, ErrArtifactLocation
+	if deps.Artifacts != nil {
+		deps.ArtifactDir = deps.Artifacts.directory
+		if deps.ArtifactDir == "" || pathutil.WithinBase(input.RepoDir, deps.ArtifactDir) {
+			return nil, ErrArtifactLocation
+		}
 	}
 	if deps.Template == nil {
 		deps.Template, err = template.LoadBehaviorDefault()
@@ -132,14 +132,19 @@ func NewRunner(ctx context.Context, deps Deps, input Input) (*Runner, error) {
 			submit = definition
 		}
 	}
-	if err := os.Mkdir(deps.ArtifactDir, 0700); err != nil {
-		return nil, err
+	if deps.Artifacts == nil {
+		deps.Artifacts, err = CreateArtifacts(input.RepoDir, deps.ArtifactDir)
+		if err != nil {
+			return nil, err
+		}
 	}
+	deps.ArtifactDir = deps.Artifacts.directory
+	runner.deps = deps
 	runner.store, err = newObservationStore(deps.ArtifactDir, code.comparison.ID)
 	if err != nil {
 		return nil, err
 	}
-	runner.history = session.New(input.RepoDir, "", deps.Model, session.SessionOptions{ReviewMode: "behavior", DiffFrom: code.comparison.Old, DiffTo: code.comparison.Head})
+	runner.history = session.NewAnalysisTrace(deps.ReportID, deps.ArtifactDir, input.RepoDir, deps.Model, session.SessionOptions{ReviewMode: "behavior", DiffFrom: code.comparison.Old, DiffTo: code.comparison.Head})
 	compression := []llmloop.MessageTemplate{}
 	for _, message := range deps.Template.MemoryCompressionTask.Messages {
 		compression = append(compression, llmloop.MessageTemplate{Role: message.Role, Content: message.Content})
@@ -264,11 +269,7 @@ func (runner *Runner) Run(ctx context.Context) (Result, error) {
 	if err != nil {
 		result.Errors = append(result.Errors, FailureSummary(err))
 	}
-	data, marshalErr := json.MarshalIndent(result, "", "  ")
-	if marshalErr != nil {
-		return result, errors.Join(err, marshalErr)
-	}
-	writeErr := runner.writeArtifact("result.json", append(data, '\n'))
+	writeErr := runner.deps.Artifacts.Save(result, result.ExecutionStatus(err))
 	if writeErr != nil {
 		result.Errors = append(result.Errors, ErrResultWrite.Error())
 		writeErr = errors.Join(ErrResultWrite, writeErr)
