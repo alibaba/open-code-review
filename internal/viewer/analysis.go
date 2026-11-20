@@ -32,6 +32,20 @@ type analysisPage struct {
 	HasTrace    bool
 }
 
+func (page *analysisPage) UncitedObservationIDs() []string {
+	cited := make(map[string]bool, len(page.CitedObservationIDs))
+	for _, id := range page.CitedObservationIDs {
+		cited[id] = true
+	}
+	var other []string
+	for _, id := range page.ObservationIDs {
+		if !cited[id] {
+			other = append(other, id)
+		}
+	}
+	return other
+}
+
 var reportMarkdown = goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough))
 
 var reportHTML = func() *bluemonday.Policy {

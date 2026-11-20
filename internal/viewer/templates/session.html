@@ -279,9 +279,30 @@
     {{if and .StopReason (ne .StopReason "none")}}<p>Stop reason: {{.StopReason}}</p>{{end}}
     {{if .Markdown}}<div class="analysis-prose">{{.Markdown}}</div>{{end}}
     {{if not $.Static}}
-    {{if .CitedObservationIDs}}<nav class="evidence-links" aria-label="Cited evidence"><strong>Cited evidence</strong>{{range .CitedObservationIDs}} <a href="?tab=analysis&amp;evidence={{.}}#evidence">{{.}}</a>{{end}}</nav>{{end}}
-    {{with .Observation}}<section id="evidence"><h3>Evidence: {{.ID}}</h3><p>{{.ToolName}}{{range .Locations}} &middot; {{.Side}}: {{.Path}}:{{.StartLine}}{{end}}</p><pre>{{.ReturnedContent}}</pre></section>{{end}}
-    {{if .ObservationIDs}}<details><summary>All observations ({{len .ObservationIDs}})</summary><div class="evidence-links">{{range .ObservationIDs}}<a href="?tab=analysis&amp;evidence={{.}}#evidence">{{.}}</a>{{end}}</div></details>{{end}}
+    {{if .ObservationIDs}}
+    <details class="file-accordion section-accordion" id="evidence-index">
+        <summary class="file-accordion-header">
+            <span class="chevron" aria-hidden="true">{{icon "chevron-right"}}</span>
+            <span class="section-title">Evidence</span>
+            <span class="file-count-badge">{{len .CitedObservationIDs}} cited &middot; {{len .ObservationIDs}} total</span>
+        </summary>
+        <div class="file-accordion-body">
+            {{with .CitedObservationIDs}}{{template "evidence-group" (dict "title" "Cited in the report" "ids" . "selected" $.Analysis.Observation)}}{{end}}
+            {{with .UncitedObservationIDs}}{{template "evidence-group" (dict "title" "Not cited in the report" "ids" . "selected" $.Analysis.Observation)}}{{end}}
+        </div>
+    </details>
+    {{end}}
+    {{with .Observation}}
+    <section id="evidence" class="file-accordion evidence-detail" aria-labelledby="evidence-heading" tabindex="-1">
+        <header class="evidence-heading">
+            <h3 id="evidence-heading">Evidence <code>{{.ID}}</code></h3>
+            {{if .ToolName}}<span class="file-count-badge">{{.ToolName}}</span>{{end}}
+        </header>
+        {{if .Locations}}<ul class="evidence-locations">{{range .Locations}}<li>{{.Side}} &middot; <code>{{.Path}}{{if .StartLine}}:{{.StartLine}}{{if gt .EndLine .StartLine}}–{{.EndLine}}{{end}}{{end}}</code></li>{{end}}</ul>{{end}}
+        <pre class="evidence-excerpt">{{.ReturnedContent}}</pre>
+        {{if .Truncated}}<p class="evidence-note">Truncated result. {{.Continuation}}</p>{{end}}
+    </section>
+    {{end}}
     {{with .Requests}}
     <details class="file-accordion section-accordion" id="analysis-conversations">
         <summary class="file-accordion-header">
@@ -316,6 +337,13 @@
 </html>
 
 {{define "breadcrumbs"}}<span class="sep">/</span>{{if $.Static}}<span class="crumb">{{.RepoName}}</span>{{else}}<a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a>{{end}}<span class="sep">/</span><span class="current">{{.Session.Summary.SessionID | truncate 12}}</span>{{end}}
+
+{{define "evidence-group"}}
+<div class="evidence-group">
+    <h3>{{.title}}</h3>
+    <ul>{{range .ids}}<li><a class="evidence-chip" data-observation-id="{{.}}" href="?tab=analysis&amp;evidence={{.}}#evidence"{{if and $.selected (eq $.selected.ID .)}} aria-current="true"{{end}}>{{.}}</a></li>{{end}}</ul>
+</div>
+{{end}}
 
 {{/* Terminal-state rendering for the meta bar: classed by outcome, unclassed
      for unrecognized states. Invoked with .Session.Summary as dot. */}}

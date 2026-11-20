@@ -88,17 +88,35 @@ func TestCombinedReportViews(t *testing.T) {
 		}
 	}
 	write("result.json", `{"execution_status":"skipped","errors":["Unsupported comparison"],"session_id":"review-id"}`)
-	get(tab, 200, "Unsupported comparison", "Changed files in scope")
-	write("result.json", `{"comparison":{"id":"comparison"},"session_id":"review-id","execution_status":"completed","submission_status":"accepted","scope":[{}, {}, {"excluded_reason":"binary"}],"usage":{"total_tokens":100},"observation_ids":["obs-000001"],"cited_observation_ids":["obs-000001"]}`)
+	get(tab, 200, "Unsupported comparison", `id="evidence-index"`)
+	write("result.json", `{"comparison":{"id":"comparison"},"session_id":"review-id","execution_status":"completed","submission_status":"accepted","scope":[{}, {}, {"excluded_reason":"binary"}],"usage":{"total_tokens":100},"observation_ids":["obs-000001","obs-000002","obs-000003"],"cited_observation_ids":["obs-000003","obs-000001"]}`)
 	get(tab, 200, "accepted report file is missing", "panic")
-	write("report.md", "## Report body\n\nSee [[obs-000001]].\n\n![external image](https://assets.example.org/unrequested.png)")
-	write("observations.jsonl", `{"observation_id":"obs-000001","returned_content":"evidence text"}`)
+	write("report.md", "## Report body\n\nSee [[obs-000003]] and [[obs-000001]].\n\n![external image](https://assets.example.org/unrequested.png)")
+	write("observations.jsonl", `{"observation_id":"obs-000001","tool_name":"file_read","locations":[{"side":"head","path":"main.go","start_line":2,"end_line":8}],"truncated":true,"returned_content":"evidence text"}`)
 	get(page, 200, "review-only turn", "first analysis turn")
 	get(page, 200, "?tab=analysis", "Report body")
 	get(tab, 200, "Report body", `"type":"llm_request"`)
 	get(tab, 200, "<h2>Report body</h2>", "unrequested.png")
 	get(tab, 200, "Changed files in scope</dt><dd>2", "evidence text")
-	get(tab+"&evidence=obs-000001", 200, "evidence text", "review-only turn")
+	index := get(tab, 200, `<details class="file-accordion section-accordion" id="evidence-index">`, "evidence text")
+	for _, id := range []string{"obs-000001", "obs-000002", "obs-000003"} {
+		if strings.Count(index, `data-observation-id="`+id+`"`) != 1 {
+			t.Fatalf("expected exactly one evidence index link for %s", id)
+		}
+	}
+	for _, want := range []string{"2 cited &middot; 3 total", "Cited in the report", `data-observation-id="obs-000003"`, `data-observation-id="obs-000001"`, "Not cited in the report", `data-observation-id="obs-000002"`} {
+		var found bool
+		_, index, found = strings.Cut(index, want)
+		if !found {
+			t.Fatalf("missing or misplaced evidence index entry: %s", want)
+		}
+	}
+	detail := get(tab+"&evidence=obs-000001", 200, "evidence text", "review-only turn")
+	for _, want := range []string{`#evidence" aria-current="true">obs-000001`, "main.go:2–8", "Truncated result."} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("missing selected evidence detail: %s", want)
+		}
+	}
 	get(tab+"&evidence=no-such-id", 404, "", "evidence text")
 	get(tab+"&log=trace", 200, "private tool result", "Report body")
 	var exported strings.Builder
