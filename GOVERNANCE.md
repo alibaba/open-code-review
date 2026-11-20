@@ -60,7 +60,7 @@ Contributors are expected to follow:
 
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
-- [SECURITY.md](SECURITY.md) for vulnerability reporting
+- [SECURITY.md](.github/SECURITY.md) for vulnerability reporting
 
 ### Maintainers
 
@@ -160,7 +160,7 @@ The project's public collaboration channels are:
 - pull requests for concrete code and documentation review
 
 Security issues should follow the private reporting guidance in
-[SECURITY.md](SECURITY.md).
+[SECURITY.md](.github/SECURITY.md).
 
 ## Continuity
 

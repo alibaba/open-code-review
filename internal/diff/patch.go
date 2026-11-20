@@ -185,6 +185,16 @@ func MaterializePatchCommit(ctx context.Context, repoDir, diffDir, base string, 
 	return strings.TrimSpace(string(commitOut)), nil
 }
 
+// GetDiffSet wraps GetDiff for DiffSet-based callers: a patch directory has no
+// provider-level directory exclusions, so every parsed diff is included.
+func (p *PatchProvider) GetDiffSet(ctx context.Context) (DiffSet, error) {
+	diffs, err := p.GetDiff(ctx)
+	if err != nil {
+		return DiffSet{}, err
+	}
+	return DiffSet{Included: diffs}, nil
+}
+
 // GetDiff reads .patch and .diff files in lexical order and parses their
 // contents using the same unified-diff parser as git-backed review modes.
 func (p *PatchProvider) GetDiff(ctx context.Context) ([]model.Diff, error) {

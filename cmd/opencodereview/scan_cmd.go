@@ -14,7 +14,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
-	"github.com/alibaba/open-code-review/internal/llmloop"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/scan"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -25,29 +25,28 @@ import (
 )
 
 type scanOptions struct {
-	toolConfigPath  string
-	rulePath        string
-	repoDir         string
-	paths           string
-	excludes        string
-	outputFormat    string
-	audience        string
-	outputPath      string
-	background      string
-	concurrency     int
-	perFileTimeout  int
-	maxTools        int
-	maxGitProcs     int
-	preview         bool
-	noPlan          bool
-	noDedup         bool
-	noSummary       bool
-	batch           string
-	maxTokens       int
-	maxTokensBudget int
-	provider        string
-	model           string
-	resume          string
+	rulePath              string
+	repoDir               string
+	paths                 string
+	excludes              string
+	outputFormat          string
+	audience              string
+	outputPath            string
+	background            string
+	concurrency           int
+	concurrentTaskTimeout int
+	maxTools              int
+	maxGitProcs           int
+	preview               bool
+	noPlan                bool
+	noDedup               bool
+	noSummary             bool
+	batch                 string
+	maxTokens             int
+	maxTokensBudget       int
+	provider              string
+	model                 string
+	resume                string
 }
 
 var scanOpts scanOptions
@@ -85,7 +84,7 @@ var scanCmd = &cobra.Command{
 		if err := validateScanOptions(&scanOpts); err != nil {
 			return err
 		}
-		return executeScan(scanOpts)
+		return executeScanContext(cmd.Context(), scanOpts)
 	},
 }
 
@@ -108,7 +107,11 @@ func splitPaths(raw string) []string {
 	return out
 }
 
-func executeScan(opts scanOptions) (retErr error) {
+func executeScan(opts scanOptions) error {
+	return executeScanContext(context.Background(), opts)
+}
+
+func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
 	if err != nil {
 		return err
@@ -152,7 +155,13 @@ func executeScan(opts scanOptions) (retErr error) {
 	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
+		maxTokens, err := previewMaxTokens(scanTpl.MaxTokens, opts.maxTokens)
+		if err != nil {
+			return err
+		}
+		scanTpl.MaxTokens = maxTokens
 		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat, out)
+
 	}
 
 	resumeState, err := loadScanResumeState(cc.RepoDir, opts, scanPaths)
@@ -160,9 +169,14 @@ func executeScan(opts scanOptions) (retErr error) {
 		return err
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
+	scanToolDefs, err := loadToolDefs(scanTpl.MainTask.Tools)
+	if err != nil {
+		return fmt.Errorf("scan MAIN_TASK.tools: %w", err)
+	}
+	rt, err := loadLLMRuntime(cc.Template, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
+		Context:  ctx,
 	})
 	if err != nil {
 		return err
@@ -182,11 +196,6 @@ func executeScan(opts scanOptions) (retErr error) {
 		scanTpl.ApplyLanguage(rt.AppCfg.Language)
 	}
 
-	// file_read_diff is meaningless in scan mode (no diff exists). Hiding it
-	// from MainToolDefs stops the LLM from burning tool-call rounds probing
-	// for diff content that does not exist.
-	scanToolDefs := excludeToolDef(rt.MainToolDefs, "file_read_diff")
-
 	// Scan mode always reads file contents from the working tree.
 	fileReader := &tool.FileReader{
 		RepoDir: cc.RepoDir,
@@ -205,10 +214,11 @@ func executeScan(opts scanOptions) (retErr error) {
 		Tools:                 tools,
 		MainToolDefs:          scanToolDefs,
 		CommentCollector:      rt.Collector,
-		CommentWorkerPool:     llmloop.NewCommentWorkerPool(opts.concurrency),
+		CommentWorkerPool:     reviewtask.NewCommentWorkerPool(opts.concurrency),
 		MaxConcurrency:        opts.concurrency,
-		ConcurrentTaskTimeout: opts.perFileTimeout,
+		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
+		EndpointSource:        rt.Source,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		MaxFileSizeBytes:      scanTpl.MaxFileSizeBytes,
@@ -219,10 +229,13 @@ func executeScan(opts scanOptions) (retErr error) {
 		Resume:                resumeState,
 	})
 
+	closeRaw := bindRawWriter(rt.RawHolder, cc.RepoDir, ag.Session())
+	defer closeRaw()
+
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
 
-	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(context.Background()), "scan.run")
+	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(ctx), "scan.run")
 	defer span.End()
 	var traceID string
 	if telemetry.IsEnabled() {

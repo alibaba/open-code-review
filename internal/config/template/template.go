@@ -8,24 +8,28 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 )
 
 // Template holds the native agent task template configuration.
 // Scan-mode fields live in ScanTemplate, not here.
 type Template struct {
-	MainTask                   LlmConversation  `json:"MAIN_TASK"`
-	PlanTask                   *LlmConversation `json:"PLAN_TASK,omitempty"`
-	MemoryCompressionTask      LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
-	MaxTokens                  int              `json:"MAX_TOKENS"`
-	MaxCompletionTokens        int              `json:"MAX_COMPLETION_TOKENS"`
-	MaxToolRequestTimes        int              `json:"MAX_TOOL_REQUEST_TIMES"`
-	PlanModeLineThreshold      int              `json:"PLAN_MODE_LINE_THRESHOLD"`
-	PlanModeGroupLineThreshold int              `json:"PLAN_MODE_GROUP_LINE_THRESHOLD"`
-	MaxReviewRounds            int              `json:"MAX_REVIEW_ROUNDS"`
-	ReLocationTask             *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
-	ReviewFilterTask           *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
-	GroupingTask               *LlmConversation `json:"GROUPING_TASK,omitempty"`
+	MainTask                    LlmConversation  `json:"MAIN_TASK"`
+	PlanTask                    *LlmConversation `json:"PLAN_TASK,omitempty"`
+	MemoryCompressionTask       LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
+	MaxTokens                   int              `json:"MAX_TOKENS"`
+	MaxCompletionTokens         int              `json:"MAX_COMPLETION_TOKENS"`
+	MaxToolRequestTimes         int              `json:"MAX_TOOL_REQUEST_TIMES"`
+	PlanModeLineThreshold       int              `json:"PLAN_MODE_LINE_THRESHOLD"`
+	PlanModeGroupLineThreshold  int              `json:"PLAN_MODE_GROUP_LINE_THRESHOLD"`
+	GroupingMinFiles            int              `json:"GROUPING_MIN_FILES"`
+	GroupingBundleLineThreshold int              `json:"GROUPING_BUNDLE_LINE_THRESHOLD"`
+	MaxReviewRounds             int              `json:"MAX_REVIEW_ROUNDS"`
+	ReLocationTask              *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
+	ReviewFilterTask            *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	GroupingTask                *LlmConversation `json:"GROUPING_TASK,omitempty"`
 }
 
 // ScanTemplate holds the full-file scan task template configuration loaded
@@ -38,10 +42,9 @@ type ScanTemplate struct {
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	MaxTokens             int              `json:"MAX_TOKENS"`
 	MaxCompletionTokens   int              `json:"MAX_COMPLETION_TOKENS,omitempty"`
-	ToolRequestWaitTimeMs int              `json:"TOOL_REQUEST_WAIT_TIME_MS"`
 	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
-	MaxSubtaskExecMinutes int              `json:"MAX_SUBTASK_EXECUTION_TIME_MINUTES"`
 	MaxFileSizeBytes      int64            `json:"MAX_FILE_SIZE_BYTES,omitempty"`
+	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD,omitempty"`
 	MaxTokensBudget       int64            `json:"MAX_TOKENS_BUDGET,omitempty"`
 	BatchStrategy         string           `json:"BATCH_STRATEGY,omitempty"`
 	BatchSize             int              `json:"BATCH_SIZE,omitempty"`
@@ -78,6 +81,62 @@ func (t Template) PlanRequired(fileCount int, totalChanged, maxFileChanged int64
 	return false
 }
 
+// GroupingStrategy is how a change set gets partitioned into review groups.
+type GroupingStrategy int
+
+const (
+	// GroupingViaLLM runs the GROUPING_TASK call to partition files semantically.
+	GroupingViaLLM GroupingStrategy = iota
+	// GroupingBundleAll puts every file in one group, with no LLM call.
+	GroupingBundleAll
+	// GroupingPerFile gives every file its own group, with no LLM call.
+	GroupingPerFile
+)
+
+// String names the strategy for logs and telemetry attributes. An unhandled
+// value reads as "unknown" rather than falling through to a real strategy name,
+// so a future addition that forgets its case shows up as an anomaly in
+// telemetry instead of silently inflating one of the existing buckets.
+func (s GroupingStrategy) String() string {
+	switch s {
+	case GroupingBundleAll:
+		return "bundle_all"
+	case GroupingPerFile:
+		return "per_file"
+	case GroupingViaLLM:
+		return "llm"
+	default:
+		return "unknown"
+	}
+}
+
+// GroupingPlan picks how to partition a change set. Two thresholds cooperate,
+// and they answer different questions. GroupingMinFiles asks whether the
+// partition is worth computing at all: below it the space of sensible
+// partitions is tiny, so the LLM call buys no information. Only then does
+// GroupingBundleLineThreshold ask whether the files can share one review —
+// every one of a bundled group's MAX_REVIEW_ROUNDS rounds has to cover the
+// whole set's churn, so past a ceiling a single round's attention is spread too
+// thin and each file is better off in a subtask of its own. File count is
+// deliberately not re-examined at the second step: once the count is low, churn
+// alone decides.
+//
+// Only totalChanged gates the bundle, with no companion per-file threshold:
+// the largest single file's churn never exceeds the total, so a same-valued
+// per-file gate could not reject anything the total already admits.
+//
+// Either threshold at or below 0 disables its own step: GroupingMinFiles keeps
+// grouping unconditional, GroupingBundleLineThreshold never bundles.
+func (t Template) GroupingPlan(fileCount int, totalChanged int64) GroupingStrategy {
+	if t.GroupingMinFiles <= 0 || fileCount >= t.GroupingMinFiles {
+		return GroupingViaLLM
+	}
+	if t.GroupingBundleLineThreshold > 0 && totalChanged < int64(t.GroupingBundleLineThreshold) {
+		return GroupingBundleAll
+	}
+	return GroupingPerFile
+}
+
 // CompletionTokenLimit returns the output cap for LLM requests. Runtime
 // prompt-limit overrides must not silently expand the model's output budget.
 func (t Template) CompletionTokenLimit() int {
@@ -107,26 +166,30 @@ type manifestMessage struct {
 }
 
 type manifestConversation struct {
-	Messages []manifestMessage `json:"messages"`
+	Messages       []manifestMessage `json:"messages"`
+	Tools          []string          `json:"tools,omitempty"`
+	ToolReferences []string          `json:"tool_references,omitempty"`
 }
 
 type templateManifest struct {
-	MainTask                   manifestConversation  `json:"MAIN_TASK"`
-	PlanTask                   *manifestConversation `json:"PLAN_TASK,omitempty"`
-	MemoryCompressionTask      manifestConversation  `json:"MEMORY_COMPRESSION_TASK"`
-	MaxTokens                  int                   `json:"MAX_TOKENS"`
-	MaxCompletionTokens        int                   `json:"MAX_COMPLETION_TOKENS"`
-	MaxToolRequestTimes        int                   `json:"MAX_TOOL_REQUEST_TIMES"`
-	PlanModeLineThreshold      int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
-	PlanModeGroupLineThreshold int                   `json:"PLAN_MODE_GROUP_LINE_THRESHOLD"`
-	MaxReviewRounds            int                   `json:"MAX_REVIEW_ROUNDS"`
-	ReLocationTask             *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
-	ReviewFilterTask           *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
-	GroupingTask               *manifestConversation `json:"GROUPING_TASK,omitempty"`
+	MainTask                    manifestConversation  `json:"MAIN_TASK"`
+	PlanTask                    *manifestConversation `json:"PLAN_TASK,omitempty"`
+	MemoryCompressionTask       manifestConversation  `json:"MEMORY_COMPRESSION_TASK"`
+	MaxTokens                   int                   `json:"MAX_TOKENS"`
+	MaxCompletionTokens         int                   `json:"MAX_COMPLETION_TOKENS"`
+	MaxToolRequestTimes         int                   `json:"MAX_TOOL_REQUEST_TIMES"`
+	PlanModeLineThreshold       int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
+	PlanModeGroupLineThreshold  int                   `json:"PLAN_MODE_GROUP_LINE_THRESHOLD"`
+	GroupingMinFiles            int                   `json:"GROUPING_MIN_FILES"`
+	GroupingBundleLineThreshold int                   `json:"GROUPING_BUNDLE_LINE_THRESHOLD"`
+	MaxReviewRounds             int                   `json:"MAX_REVIEW_ROUNDS"`
+	ReLocationTask              *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
+	ReviewFilterTask            *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	GroupingTask                *manifestConversation `json:"GROUPING_TASK,omitempty"`
 }
 
 func resolveConversation(m manifestConversation) (LlmConversation, error) {
-	var conv LlmConversation
+	conv := LlmConversation{Tools: m.Tools, ToolReferences: m.ToolReferences}
 	conv.Messages = make([]ChatMessage, len(m.Messages))
 	for i, mm := range m.Messages {
 		data, err := templateFS.ReadFile("prompts/" + mm.PromptFile)
@@ -169,6 +232,8 @@ func LoadDefault() (*Template, error) {
 	tpl.MaxToolRequestTimes = m.MaxToolRequestTimes
 	tpl.PlanModeLineThreshold = m.PlanModeLineThreshold
 	tpl.PlanModeGroupLineThreshold = m.PlanModeGroupLineThreshold
+	tpl.GroupingMinFiles = m.GroupingMinFiles
+	tpl.GroupingBundleLineThreshold = m.GroupingBundleLineThreshold
 	tpl.MaxReviewRounds = m.MaxReviewRounds
 
 	if tpl.MainTask, err = resolveConversation(m.MainTask); err != nil {
@@ -260,7 +325,14 @@ func (t *Template) Validate() error {
 	if len(t.MainTask.Messages) == 0 {
 		return fmt.Errorf("main_task.messages must not be empty")
 	}
-	return nil
+	return validateToolBindings(map[string]*LlmConversation{
+		"MAIN_TASK":               &t.MainTask,
+		"PLAN_TASK":               t.PlanTask,
+		"MEMORY_COMPRESSION_TASK": &t.MemoryCompressionTask,
+		"RE_LOCATION_TASK":        t.ReLocationTask,
+		"REVIEW_FILTER_TASK":      t.ReviewFilterTask,
+		"GROUPING_TASK":           t.GroupingTask,
+	}, "PLAN_TASK")
 }
 
 // Validate checks that a ScanTemplate has the minimum fields populated.
@@ -274,12 +346,40 @@ func (t *ScanTemplate) Validate() error {
 	if len(t.MainTask.Messages) == 0 {
 		return fmt.Errorf("scan: main_task.messages must not be empty")
 	}
+	if err := validateToolBindings(map[string]*LlmConversation{
+		"MAIN_TASK":               &t.MainTask,
+		"PLAN_TASK":               t.PlanTask,
+		"MEMORY_COMPRESSION_TASK": &t.MemoryCompressionTask,
+		"RE_LOCATION_TASK":        t.ReLocationTask,
+		"DEDUP_TASK":              t.DedupTask,
+		"PROJECT_SUMMARY_TASK":    t.ProjectSummaryTask,
+	}, ""); err != nil {
+		return fmt.Errorf("scan: %w", err)
+	}
+	return nil
+}
+
+func validateToolBindings(conversations map[string]*LlmConversation, referenceTask string) error {
+	for _, name := range slices.Sorted(maps.Keys(conversations)) {
+		conversation := conversations[name]
+		if conversation == nil {
+			continue
+		}
+		if name != "MAIN_TASK" && len(conversation.Tools) > 0 {
+			return fmt.Errorf("%s.tools is not supported by this task", name)
+		}
+		if name != referenceTask && len(conversation.ToolReferences) > 0 {
+			return fmt.Errorf("%s.tool_references is not supported by this task", name)
+		}
+	}
 	return nil
 }
 
 // LlmConversation is a preset prompt with settings.
 type LlmConversation struct {
-	Messages []ChatMessage `json:"messages"`
+	Messages       []ChatMessage `json:"messages"`
+	Tools          []string      `json:"tools,omitempty"`
+	ToolReferences []string      `json:"tool_references,omitempty"`
 }
 
 // ChatMessage represents a single message in a conversation.

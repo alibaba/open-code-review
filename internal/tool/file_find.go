@@ -23,6 +23,7 @@ const (
 // FileFindProvider finds files by name or pattern in the repository using git ls-files.
 type FileFindProvider struct {
 	FileReader *FileReader
+	Access     *CodeAccess
 }
 
 func NewFileFind(fr *FileReader) *FileFindProvider { return &FileFindProvider{FileReader: fr} }
@@ -30,6 +31,14 @@ func NewFileFind(fr *FileReader) *FileFindProvider { return &FileFindProvider{Fi
 func (p *FileFindProvider) Tool() Tool { return FileFind }
 
 func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (string, error) {
+	return p.Access.execute(ctx, args, p.FileReader, func(reader *FileReader) (string, error) {
+		selected := *p
+		selected.FileReader = reader
+		return selected.execute(ctx, args)
+	})
+}
+
+func (p *FileFindProvider) execute(ctx context.Context, args map[string]any) (string, error) {
 	queryName, _ := args["query_name"].(string)
 	if strings.TrimSpace(queryName) == "" {
 		return "// The file was not found", nil
@@ -99,17 +108,22 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 // listGitFiles returns tracked and untracked files (respecting .gitignore) via git ls-files.
 // In range/commit mode it uses git ls-tree to list files at the reviewed ref.
 func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, error) {
+	if p.FileReader.Mode == ModeEmpty {
+		return nil, nil
+	}
 	ctx, cancel := context.WithTimeout(parentCtx, fileFindTimeout)
 	defer cancel()
 
 	var output []byte
 	var err error
 
+	// core.quotepath=false reports non-ASCII paths literally instead of as
+	// quoted octal escapes, which file_find cannot match and file_read cannot open.
 	var args []string
 	if ref := p.FileReader.Ref; ref != "" {
-		args = []string{"ls-tree", "-r", "--name-only", "--end-of-options", ref}
+		args = []string{"-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "--end-of-options", ref}
 	} else {
-		args = []string{"ls-files", "--cached", "--others", "--exclude-standard"}
+		args = []string{"-c", "core.quotepath=false", "ls-files", "--cached", "--others", "--exclude-standard"}
 	}
 
 	if p.FileReader.Runner != nil {
@@ -211,7 +225,7 @@ func shouldSkipFile(path string) bool {
 	if !hasExt {
 		// Allow well-known extensionless files
 		switch base {
-		case "Makefile", "Dockerfile", "LICENSE", "Vagrantfile", "Containerfile":
+		case "Makefile", "Dockerfile", "LICENSE", "Vagrantfile", "Containerfile", "BUILD", "WORKSPACE":
 			return false
 		}
 		return true // skip other extensionless files

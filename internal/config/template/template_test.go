@@ -4,9 +4,87 @@
 package template
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestConversationToolBindings(test *testing.T) {
+	manifest := manifestConversation{
+		Messages:       []manifestMessage{{Role: "user", PromptFile: "main_task_user.md"}},
+		Tools:          []string{"file_find", "file_read"},
+		ToolReferences: []string{"code_search"},
+	}
+	conversation, err := resolveConversation(manifest)
+	if err != nil {
+		test.Fatal(err)
+	}
+	if !reflect.DeepEqual(conversation.Tools, manifest.Tools) || !reflect.DeepEqual(conversation.ToolReferences, manifest.ToolReferences) {
+		test.Fatalf("tool bindings lost while resolving prompts: %+v", conversation)
+	}
+}
+
+func TestValidateUnsupportedToolBindings(test *testing.T) {
+	for _, mode := range []string{"review", "scan"} {
+		test.Run(mode, func(test *testing.T) {
+			var main *LlmConversation
+			var tasks map[string]*LlmConversation
+			var validate func() error
+			if mode == "review" {
+				tpl, err := LoadDefault()
+				if err != nil {
+					test.Fatal(err)
+				}
+				main = &tpl.MainTask
+				tasks = map[string]*LlmConversation{
+					"PLAN_TASK":               tpl.PlanTask,
+					"MEMORY_COMPRESSION_TASK": &tpl.MemoryCompressionTask,
+					"RE_LOCATION_TASK":        tpl.ReLocationTask,
+					"REVIEW_FILTER_TASK":      tpl.ReviewFilterTask,
+					"GROUPING_TASK":           tpl.GroupingTask,
+				}
+				validate = tpl.Validate
+			} else {
+				tpl, err := LoadScanDefault()
+				if err != nil {
+					test.Fatal(err)
+				}
+				main = &tpl.MainTask
+				tasks = map[string]*LlmConversation{
+					"PLAN_TASK":               tpl.PlanTask,
+					"MEMORY_COMPRESSION_TASK": &tpl.MemoryCompressionTask,
+					"RE_LOCATION_TASK":        tpl.ReLocationTask,
+					"DEDUP_TASK":              tpl.DedupTask,
+					"PROJECT_SUMMARY_TASK":    tpl.ProjectSummaryTask,
+				}
+				validate = tpl.Validate
+			}
+			main.ToolReferences = []string{"file_read"}
+			if err := validate(); err == nil || !strings.Contains(err.Error(), "MAIN_TASK.tool_references") {
+				test.Fatalf("unexpected reference validation: %v", err)
+			}
+			main.ToolReferences = nil
+			for name, task := range tasks {
+				task.Tools = []string{"file_read"}
+				if err := validate(); err == nil || !strings.Contains(err.Error(), name+".tools") {
+					test.Fatalf("unexpected tool validation: %v", err)
+				}
+				task.Tools = nil
+				if name == "PLAN_TASK" && mode == "review" {
+					continue
+				}
+				task.ToolReferences = []string{"file_read"}
+				if err := validate(); err == nil || !strings.Contains(err.Error(), name+".tool_references") {
+					test.Fatalf("unexpected reference validation: %v", err)
+				}
+				task.ToolReferences = nil
+			}
+			if err := validate(); err != nil {
+				test.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestLoadScanDefault_BudgetParsed(t *testing.T) {
 	tpl, err := LoadScanDefault()
@@ -21,6 +99,19 @@ func TestLoadScanDefault_BudgetParsed(t *testing.T) {
 	}
 	if tpl.MaxFileSizeBytes <= 0 {
 		t.Errorf("scan MaxFileSizeBytes(%d) should be > 0 (defaults to 2 MiB in JSON)", tpl.MaxFileSizeBytes)
+	}
+}
+
+func TestLoadScanDefault_PlanThreshold(t *testing.T) {
+	tpl, err := LoadScanDefault()
+	if err != nil {
+		t.Fatalf("LoadScanDefault: %v", err)
+	}
+	if tpl.PlanModeLineThreshold != 200 {
+		t.Errorf("PlanModeLineThreshold = %d, want 200", tpl.PlanModeLineThreshold)
+	}
+	if tpl.PlanTask == nil || len(tpl.PlanTask.Messages) == 0 {
+		t.Fatal("default scan template must define PLAN_TASK messages")
 	}
 }
 
@@ -51,6 +142,59 @@ func TestLoadDefault_HasNoScanFields(t *testing.T) {
 	}
 	if tpl.MaxToolRequestTimes <= 0 {
 		t.Errorf("review MaxToolRequestTimes invalid: %d", tpl.MaxToolRequestTimes)
+	}
+}
+
+func TestGroupingPlan(t *testing.T) {
+	tests := []struct {
+		name         string
+		fileCount    int
+		totalChanged int64
+		minFiles     int
+		bundleLines  int
+		want         GroupingStrategy
+	}{
+		{"at file threshold defers to the LLM", 4, 10, 4, 200, GroupingViaLLM},
+		{"above file threshold defers to the LLM", 9, 10, 4, 200, GroupingViaLLM},
+		{"high churn does not override the file threshold", 4, 9999, 4, 200, GroupingViaLLM},
+		{"few files, low churn bundles", 3, 10, 4, 200, GroupingBundleAll},
+		{"one line below the churn threshold bundles", 3, 199, 4, 200, GroupingBundleAll},
+		{"at the churn threshold goes per file", 3, 200, 4, 200, GroupingPerFile},
+		{"above the churn threshold goes per file", 2, 5000, 4, 200, GroupingPerFile},
+		{"zero min files keeps grouping unconditional", 3, 10, 0, 200, GroupingViaLLM},
+		{"negative min files keeps grouping unconditional", 3, 10, -1, 200, GroupingViaLLM},
+		{"zero bundle threshold never bundles", 3, 10, 4, 0, GroupingPerFile},
+		{"negative bundle threshold never bundles", 3, 10, 4, -1, GroupingPerFile},
+		{"zero churn bundles", 2, 0, 4, 200, GroupingBundleAll},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tpl := Template{
+				GroupingMinFiles:            tt.minFiles,
+				GroupingBundleLineThreshold: tt.bundleLines,
+			}
+			if got := tpl.GroupingPlan(tt.fileCount, tt.totalChanged); got != tt.want {
+				t.Errorf("GroupingPlan(%d, %d) = %v, want %v",
+					tt.fileCount, tt.totalChanged, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGroupingStrategyString(t *testing.T) {
+	tests := []struct {
+		strategy GroupingStrategy
+		want     string
+	}{
+		{GroupingViaLLM, "llm"},
+		{GroupingBundleAll, "bundle_all"},
+		{GroupingPerFile, "per_file"},
+		{GroupingStrategy(99), "unknown"},
+	}
+	for _, tt := range tests {
+		if got := tt.strategy.String(); got != tt.want {
+			t.Errorf("GroupingStrategy(%d).String() = %q, want %q", int(tt.strategy), got, tt.want)
+		}
 	}
 }
 
@@ -107,6 +251,12 @@ func TestLoadDefault_FieldsPopulated(t *testing.T) {
 	}
 	if tpl.PlanModeLineThreshold != 50 {
 		t.Errorf("PlanModeLineThreshold = %d, want 50", tpl.PlanModeLineThreshold)
+	}
+	if tpl.GroupingMinFiles != 4 {
+		t.Errorf("GroupingMinFiles = %d, want 4", tpl.GroupingMinFiles)
+	}
+	if tpl.GroupingBundleLineThreshold != 200 {
+		t.Errorf("GroupingBundleLineThreshold = %d, want 200", tpl.GroupingBundleLineThreshold)
 	}
 	if tpl.PlanModeGroupLineThreshold != 100 {
 		t.Errorf("PlanModeGroupLineThreshold = %d, want 100", tpl.PlanModeGroupLineThreshold)

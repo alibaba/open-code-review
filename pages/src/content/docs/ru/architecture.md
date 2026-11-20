@@ -16,7 +16,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -25,16 +25,17 @@ flowchart TD
 ```
 
 Оркестрация реализована в пакете
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/).
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/).
 Основные файлы:
 
 - `agent.go` — диспетчеризация и оркестрация по группам;
 - `grouping.go` — семантическая группировка файлов;
-- `preview.go` — фильтр файлов;
+- `selection.go` — фильтр файлов;
+- `preview.go` — отчёт `--preview`;
 - `util.go` — вспомогательные функции.
 
 Цикл вызова инструментов и сжатие памяти находятся рядом, в пакете
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/).
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/).
 
 Основные точки входа:
 
@@ -64,7 +65,7 @@ flowchart TD
 ## Пятиступенчатый фильтр файлов
 
 После загрузки diff каждый файл проходит через функцию
-[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go).
+[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
 Она возвращает одно из следующих значений:
 
 ```
@@ -76,8 +77,10 @@ default_path    — совпадение со встроенным шаблон�
 
 Если файл не исключён, функция возвращает пустое значение.
 
-`deleted` **не** возвращается функцией `whyExcluded`: оно вычисляется позже в
-`Preview()`, когда diff оставленного файла сообщает `IsDeleted`.
+`deleted` и `too_large` **не** возвращаются функцией `whyExcluded`: их применяет
+`selectFiles` уже после проверок — `deleted`, когда diff оставленного файла
+сообщает `IsDeleted`, и `too_large`, когда один только diff превышает 80% от
+`max_tokens`.
 
 Проверки выполняются в таком порядке:
 
@@ -94,8 +97,15 @@ default_path    — совпадение со встроенным шаблон�
 
 Отсев нерелевантных каталогов (`vendor/`, `node_modules/`, `target/` и т. д.)
 происходит раньше, на уровне провайдера diff. Список
-`providerDirIgnoreDirs` в `internal/diff/git.go` определяет такие каталоги, а
-функция `filterDiffs` удаляет их diff до фильтрации отдельных файлов.
+`providerDirIgnoreDirs` в `internal/diff/git.go` определяет такие каталоги, и их
+diff удаляются до фильтрации отдельных файлов. Preview сообщает об этих файлах как
+о `provider_directory`; правило `include` не может вернуть их для проверки.
+
+Список сопоставляется по префиксу пути, поэтому охватывает только каталоги в
+**корне репозитория**. Вложенные каталоги с теми же именами доходят до файлового
+фильтра и исключаются как `default_path`: `vendor/pkg/x.go` отмечается как
+`provider_directory`, а `api/vendor/pkg/x.go` — как `default_path`, и вернуть
+правилом `include` можно только второй.
 
 Чтобы увидеть полный результат фильтрации, не потратив ни одного токена,
 запустите `ocr review --preview`. Полный алгоритм описан в разделе
@@ -151,8 +161,8 @@ otherwise                                    { skip plan }
 более крупных diff OCR выполняет **один** вызов LLM с `PLAN_TASK`: поле `Tools`
 не передаётся, поэтому во время планирования модель не может вызывать
 инструменты. Доступное только для чтения подмножество инструментов
-(`code_search`, `file_read_diff`, `file_find` — три инструмента, у которых в
-`tools.json` флаг `plan_task` имеет значение `true`) встраивается как обычный
+(`code_search`, `file_read`, `file_read_diff`, `file_find` — выбираются через
+`PLAN_TASK.tool_references` в `task_template.json`) встраивается как обычный
 текст через плейсхолдер `{{plan_tools}}` (формируется функцией
 `formatToolDefs`), чтобы модель знала, что будет доступно позднее. Модель
 возвращает контрольный список, который становится значением
@@ -162,7 +172,7 @@ otherwise                                    { skip plan }
 
 Основной цикл формирует промпт `MAIN_TASK` и ведёт с моделью диалог с
 использованием инструментов. Полный набор добавляет к инструментам этапа
-планирования **`task_done`**, **`code_comment`** и **`file_read`**. Полный
+планирования **`task_done`** и **`code_comment`**. Полный
 перечень приведён в разделе [Инструменты](../tools/).
 
 Весь основной цикл повторяется не более `MAX_REVIEW_ROUNDS` раз (задаётся
@@ -214,6 +224,16 @@ loop up to MAX_TOOL_REQUEST_TIMES (default 100):
 | 60 % от MAX_TOKENS | `tokenSoftThreshold` | Запускает **асинхронное** фоновое сжатие; текущий цикл продолжает выполняться. |
 | 80 % от MAX_TOKENS | `tokenWarningThreshold` | Выполняет сжатие **синхронно** перед отправкой следующего запроса. |
 
+До выбора активных раундов OCR резервирует место для текста сводки: не больше
+настроенного лимита вывода, 20% контекстного окна и остатка после учёта
+фиксированного промпта и обрамления. Некоторые провайдеры включают токены
+рассуждений в лимит вывода. Если в самом запросе на сжатие остаётся место до
+порога 80%, OCR может увеличить бюджет генерации в пределах настроенного лимита,
+попросив модель уложить текст сводки в резерв. Размер пересобранного диалога
+по-прежнему проверяется. Ограничения отдельного диалога не
+зависят от совокупного бюджета `--max-tokens-budget`; установка этого бюджета
+в ноль не отключает сжатие контекста.
+
 ### Три зоны
 
 ```mermaid
@@ -229,30 +249,24 @@ flowchart LR
 
 «Раунд» — это одно сообщение ассистента и следующие за ним сообщения с
 результатами инструментов. `partitionMessages` обходит раунды с конца,
-сохраняя столько, сколько помещается в
-`(0.80 × MAX_TOKENS) - reservedTokens`. Всё более старое содержимое образует
-**зону сжатия**.
+сохраняя как можно больше раундов, пока их число токенов строго меньше
+`(0.80 × MAX_TOKENS) - reservedTokens`. Резерв включает первые два сообщения
+(в том числе предыдущие сводки), резерв для текста новой сводки и её обрамление.
+Всё более старое содержимое образует **зону сжатия**. Если зона сжатия пуста,
+диалог остаётся без изменений; пока исходный диалог ниже порога
+предупреждения, фоновое сжатие не сворачивает в сводку все раунды после
+фиксированного префикса.
 
 Зона сжатия преобразуется в XML и передаётся модели с промптом
 `MEMORY_COMPRESSION_TASK`; возвращённая сводка добавляется к исходному
 сообщению пользователя внутри тегов `<previous_review_summary>`.
 
-После сжатия: `messages = frozen[2] + compressed_user_msg + active`.
-
-```go
-// compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
-    contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
-    // … call MEMORY_COMPRESSION_TASK …
-    rebuilt[1] = llm.NewTextMessage(role, currentText+
-        "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
-    for i := part.compressEnd; i < len(msgs); i++ {
-        rebuilt = append(rebuilt, msgs[i])
-    }
-    return rebuilt, nil
-}
-```
+После сжатия: `messages = system + (original_user + summary) + active`.
+Пересобранный диалог проверяется по той же локальной оценке токенов и должен
+быть меньше исходного. Отсутствие шаблона сжатия, пустая сводка или результат,
+который не уменьшает объём, оставляют исходную историю без изменений.
+Непригодный шаблон сводки или превышение лимита после пересборки приводят к
+ошибке, при этом ни одно исходное сообщение не удаляется.
 
 ### Асинхронное и синхронное сжатие
 
@@ -261,7 +275,11 @@ func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath
 токенов готовая сводка подставляется функцией `tryApplyPendingCompression`.
 Если до завершения асинхронной задачи доля токенов пересекает порог
 предупреждения, цикл приостанавливается и запускает `runCompression`
-синхронно, гарантируя, что следующий запрос поместится в контекст.
+синхронно. Сообщения, добавленные после создания фонового снимка, сохраняются
+при применении сводки. Если диалог по-прежнему не удаётся уменьшить строго
+ниже локального порога предупреждения, цикл останавливается с
+`StopCompression`, а не молча отбрасывает несжатую историю. Эта оценка не
+гарантирует соответствия фактической ёмкости контекстного окна провайдера.
 
 ## Конвейер обработки комментариев
 
@@ -309,10 +327,10 @@ if countMessagesTokens(messages) > tokenLimit {
 группа отмечается как некритическое предупреждение в stdout и добавляется в
 массив JSON `warnings`.
 
-Вторая проверка выполняется в `filterLargeDiffs`: если один diff превышает
+Вторая проверка выполняется в `selectFiles`: если один diff превышает
 80 % от `MAX_TOKENS`, он отбрасывается ещё до того, как выполняются группировка
-и диспетчеризация. Третья защита работает внутри группировки — см.
-`enforceGroupTokenBudget` выше.
+и диспетчеризация, и отмечается как `too_large`. Третья защита работает
+внутри группировки — см. `enforceGroupTokenBudget` выше.
 
 ## Шаблон и плейсхолдеры
 
@@ -353,9 +371,10 @@ if countMessagesTokens(messages) > tokenLimit {
 Сам шаблон нельзя переопределить через CLI: чтобы изменить промпты,
 отредактируйте
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)
-и заново соберите проект. Флаг `--tools` переопределяет *реестр инструментов*
-(заменяет JSON, используемый `internal/config/toolsconfig`), а не шаблон. См.
-раздел [Инструменты](../tools/#customizing-tools).
+и заново соберите проект. Встроенные определения инструментов также нельзя
+переопределить во время выполнения. Для рекомендаций по проекту используйте
+правила ревью и фоновый контекст, а для внешнего бизнес-контекста — MCP.
+См. раздел [Инструменты](../tools/#customizing-tools).
 
 > **Особенность синтаксиса плейсхолдеров.** Все перечисленные выше плейсхолдеры
 > используют двойные фигурные скобки `{{…}}`, **кроме** `RE_LOCATION_TASK`,
@@ -386,8 +405,9 @@ if countMessagesTokens(messages) > tokenLimit {
 `review.run` охватывает всю задачу, `diff.parse` — загрузку diff, а для каждой
 проверяемой группы создаётся `subtask.execute.group.<group-key>`. Кроме того, в каждой
 точке принятия решения создаётся кратковременный span `event.<name>`
-(`plan.skipped`, `token.threshold.exceeded`, `subtask.error` и т. д.). Обращения
-к LLM и вызовы инструментов записываются только как метрики, а не как span.
+(`plan.skipped`, `token.threshold.exceeded`, `subtask.error` и т. д.). В основном цикле ревью
+обращения к LLM и вызовы инструментов создают спаны, а связанные с ними измерения
+также записываются в метрики.
 Содержимое промптов и ответов **никогда** не прикрепляется к телеметрии; флаг
 `OCR_CONTENT_LOGGING` подключён, но сейчас не действует. Полная схема приведена
 в разделе [Телеметрия](../telemetry/).
@@ -425,7 +445,7 @@ if countMessagesTokens(messages) > tokenLimit {
 | Семантическая группировка файлов | `internal/agent/grouping.go` |
 | Цикл вызова инструментов и сжатие памяти | `internal/llmloop/` (loop.go, compression.go) |
 | Пресеты effort | `internal/config/template/effort.go` |
-| Фильтр файлов / предварительный просмотр | `internal/agent/preview.go` |
+| Фильтр файлов / предварительный просмотр | `internal/agent/selection.go`, `internal/agent/preview.go` |
 | Загрузка diff (режимы Git) | `internal/diff/git.go` |
 | Цепочка разрешения правил | `internal/config/rules/system_rules.go` |
 | Реестр и реализации инструментов | `internal/tool/` |

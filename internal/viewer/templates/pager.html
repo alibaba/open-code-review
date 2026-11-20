@@ -1,0 +1,11 @@
+{{/*
+SPDX-License-Identifier: Apache-2.0
+Copyright 2026 alibaba/open-code-review Contributors
+*/}}
+{{define "pager"}}
+<nav id="{{.prefix}}-pagination" class="pagination" aria-label="{{.label}}" hidden>
+    <button type="button" class="page-step" data-page-step="-1" aria-label="Previous page">{{icon "chevron-left"}}</button>
+    <span id="{{.prefix}}-page-numbers" class="page-numbers"></span>
+    <button type="button" class="page-step" data-page-step="1" aria-label="Next page">{{icon "chevron-right"}}</button>
+</nav>
+{{end}}

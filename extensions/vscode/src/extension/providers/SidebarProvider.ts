@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { resolveLocale, toHtmlLang } from '../../shared/i18n';
+import { resolveLocale, toHtmlLang } from '@shared/i18n';
 import * as vscode from 'vscode';
-import { ConfigPanelFocus } from '../../shared/configUtils';
-import { HostToWebview, WebviewToHost } from '../../shared/messages';
-import { FileChange, ReviewMode } from '../../shared/types';
+import { ConfigPanelFocus } from '@shared/configUtils';
+import { HostToWebview, WebviewToHost } from '@shared/messages';
+import { FileChange, ReviewMode } from '@shared/types';
 import { CliService } from '../services/CliService';
 import { ConfigService } from '../services/ConfigService';
 import { GitService } from '../services/GitService';

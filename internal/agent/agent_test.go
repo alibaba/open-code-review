@@ -4,10 +4,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,9 +18,34 @@ import (
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
+
+func TestComparisonPlanningReferences(test *testing.T) {
+	entries, err := toolsconfig.LoadDefault()
+	if err != nil {
+		test.Fatal(err)
+	}
+	base, err := toolsconfig.Resolve(entries, []string{"code_search", "file_read", "file_read_diff", "file_find"})
+	if err != nil {
+		test.Fatal(err)
+	}
+	before := formatToolDefs(base)
+	derived, err := toolsconfig.WithComparisonSides(base)
+	if err != nil {
+		test.Fatal(err)
+	}
+	text := formatToolDefs(derived)
+	if strings.Count(text, "  - side:") != 3 || strings.Contains(text, "side: The side of the current comparison to access. Defaults to new. Paths and line numbers belong to the selected side. (required)") {
+		test.Fatalf("incorrect planning parameters: %s", text)
+	}
+	if strings.Contains(before, "  - side:") || formatToolDefs(base) != before {
+		test.Fatal("comparison planning contaminated current-only references")
+	}
+}
 
 type fakeAgentClient struct {
 	responses []*llm.ChatResponse
@@ -322,6 +349,33 @@ func TestParseFilterToolCalls(t *testing.T) {
 	}
 }
 
+// logExclusions switches on the exclusion reason with a `continue` default, so
+// a reason with no case arm is dropped from the log and the filtered count alike.
+func TestLogExclusions_SecretPath(t *testing.T) {
+	agent := New(Args{})
+	decisions := []fileDecision{
+		{Diff: model.Diff{NewPath: ".env"}, Reason: ExcludeSecret},
+	}
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	agent.logExclusions(decisions)
+	restore()
+
+	got := buf.String()
+	if !strings.Contains(got, ".env") {
+		t.Errorf("log = %q, want it to name the skipped secret path", got)
+	}
+	if !strings.Contains(got, "secret path") {
+		t.Errorf("log = %q, want secret-specific wording, not the path/extension wording", got)
+	}
+	// The rollup only prints when staticSkipped was incremented, so its presence
+	// proves the decision reached a real case arm rather than `default`.
+	if !strings.Contains(got, "Filtered 1 file(s)") {
+		t.Errorf("log = %q, want the secret exclusion counted in the rollup", got)
+	}
+}
+
 func TestExtFromPath(t *testing.T) {
 	a := New(Args{})
 
@@ -545,57 +599,17 @@ func TestFormatToolDefs(t *testing.T) {
 	})
 }
 
-func TestBuildToolDefs(t *testing.T) {
-	funcDef := json.RawMessage(`{"name":"test_tool","description":"a tool","parameters":{}}`)
-
-	entries := []toolsconfig.ToolConfigEntry{
-		{Name: "plan_only", PlanTask: true, MainTask: false, Definition: funcDef},
-		{Name: "main_only", PlanTask: false, MainTask: true, Definition: funcDef},
-		{Name: "both", PlanTask: true, MainTask: true, Definition: funcDef},
-		{Name: "neither", PlanTask: false, MainTask: false, Definition: funcDef},
+// selectionReasons indexes a selection pass by path so the tests can assert on
+// the decision the run and `--preview` now share.
+func selectionReasons(decisions []fileDecision) map[string]ExcludeReason {
+	reasons := make(map[string]ExcludeReason, len(decisions))
+	for _, dec := range decisions {
+		reasons[effectivePath(dec.Diff)] = dec.Reason
 	}
-
-	t.Run("planOnly=true returns plan_task tools", func(t *testing.T) {
-		defs := BuildToolDefs(entries, true)
-		if len(defs) != 2 {
-			t.Fatalf("expected 2 defs, got %d", len(defs))
-		}
-		names := make(map[string]bool)
-		for _, d := range defs {
-			names[d.Function.Name] = true
-		}
-		if !names["test_tool"] {
-			t.Error("expected test_tool in plan defs")
-		}
-	})
-
-	t.Run("planOnly=false returns main_task tools", func(t *testing.T) {
-		defs := BuildToolDefs(entries, false)
-		if len(defs) != 2 {
-			t.Fatalf("expected 2 defs, got %d", len(defs))
-		}
-	})
-
-	t.Run("invalid definition JSON is skipped", func(t *testing.T) {
-		bad := []toolsconfig.ToolConfigEntry{
-			{Name: "bad", PlanTask: true, MainTask: true, Definition: json.RawMessage(`{invalid}`)},
-			{Name: "good", PlanTask: true, MainTask: true, Definition: funcDef},
-		}
-		defs := BuildToolDefs(bad, true)
-		if len(defs) != 1 {
-			t.Fatalf("expected 1 def (bad skipped), got %d", len(defs))
-		}
-	})
-
-	t.Run("empty entries returns nil", func(t *testing.T) {
-		defs := BuildToolDefs(nil, true)
-		if defs != nil {
-			t.Errorf("expected nil, got %v", defs)
-		}
-	})
+	return reasons
 }
 
-func TestFilterLargeDiffs(t *testing.T) {
+func TestSelectFilesTooLarge(t *testing.T) {
 	a := New(Args{
 		Template: template.Template{MaxTokens: 100},
 	})
@@ -605,32 +619,31 @@ func TestFilterLargeDiffs(t *testing.T) {
 		{NewPath: "large.go", Diff: strings.Repeat("word ", 500)},
 	}
 
-	kept := a.filterLargeDiffs(diffs)
-	if len(kept) != 1 {
-		t.Fatalf("expected 1 kept diff, got %d", len(kept))
+	reasons := selectionReasons(a.selectFiles(diffs))
+	if reasons["small.go"] != ExcludeNone {
+		t.Errorf("small.go reason = %q, want selected", reasons["small.go"])
 	}
-	if kept[0].NewPath != "small.go" {
-		t.Errorf("kept wrong file: %s", kept[0].NewPath)
+	if reasons["large.go"] != ExcludeTooLarge {
+		t.Errorf("large.go reason = %q, want %q", reasons["large.go"], ExcludeTooLarge)
 	}
 }
 
-// exactNTokens builds a string that llm.CountTokens reports as exactly n
-// tokens, failing loudly if the tokenizer disagrees so fixture drift cannot
-// silently weaken the boundary assertions below.
+// exactNTokens uses a four-byte fragment that is one cl100k_base token, so it
+// also stays exact under CountTokens' four-bytes-per-token fallback.
 func exactNTokens(t *testing.T, n int) string {
 	t.Helper()
-	s := strings.TrimSpace(strings.Repeat("a ", n))
+	s := strings.Repeat("test", n)
 	if got := llm.CountTokens(s); got != n {
 		t.Fatalf("fixture drift: llm.CountTokens(<%d-token string>) = %d, want %d", n, got, n)
 	}
 	return s
 }
 
-// TestFilterLargeDiffs_Boundary pins the 80% threshold exactly: with
+// TestSelectFilesTooLarge_Boundary pins the 80% threshold exactly: with
 // MaxTokens=100 the limit is 80, so an 80-token diff is kept and an 81-token
-// one is dropped. TestFilterLargeDiffs above uses margins wide enough to pass
-// at any threshold, so it does not pin the value.
-func TestFilterLargeDiffs_Boundary(t *testing.T) {
+// one is dropped. TestSelectFilesTooLarge above uses margins wide enough to
+// pass at any threshold, so it does not pin the value.
+func TestSelectFilesTooLarge_Boundary(t *testing.T) {
 	a := New(Args{
 		Template: template.Template{MaxTokens: 100},
 	})
@@ -640,24 +653,23 @@ func TestFilterLargeDiffs_Boundary(t *testing.T) {
 		{NewPath: "over-limit.go", Diff: exactNTokens(t, 81)},
 	}
 
-	kept := a.filterLargeDiffs(diffs)
-	if len(kept) != 1 {
-		t.Fatalf("expected 1 kept diff, got %d", len(kept))
+	reasons := selectionReasons(a.selectFiles(diffs))
+	if reasons["at-limit.go"] != ExcludeNone {
+		t.Errorf("at-limit.go reason = %q, want selected", reasons["at-limit.go"])
 	}
-	if kept[0].NewPath != "at-limit.go" {
-		t.Errorf("kept wrong file: got %s, want at-limit.go", kept[0].NewPath)
+	if reasons["over-limit.go"] != ExcludeTooLarge {
+		t.Errorf("over-limit.go reason = %q, want %q", reasons["over-limit.go"], ExcludeTooLarge)
 	}
 }
 
-func TestFilterLargeDiffs_ZeroMaxTokens(t *testing.T) {
+func TestSelectFilesTooLarge_ZeroMaxTokens(t *testing.T) {
 	a := New(Args{
 		Template: template.Template{MaxTokens: 0},
 	})
 
-	diffs := []model.Diff{{NewPath: "a.go", Diff: "some diff"}}
-	kept := a.filterLargeDiffs(diffs)
-	if len(kept) != 1 {
-		t.Errorf("expected all kept when MaxTokens=0, got %d", len(kept))
+	diffs := []model.Diff{{NewPath: "a.go", Diff: strings.Repeat("word ", 500)}}
+	if reason := a.selectFiles(diffs)[0].Reason; reason != ExcludeNone {
+		t.Errorf("reason = %q, want selected when MaxTokens=0 disables the size gate", reason)
 	}
 }
 
@@ -806,6 +818,55 @@ func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
 	}
 }
 
+func TestApplyResumeWorkspaceReusesCompletedItems(t *testing.T) {
+	diffs := []model.Diff{
+		{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
+		{OldPath: "b.go", NewPath: "b.go", Diff: "+b", Insertions: 1},
+	}
+	fp := reviewItemFingerprint(session.ReviewModeWorkspace, diffs[0])
+	resume := &session.ResumeState{
+		SessionID:  "old-workspace-session",
+		Model:      "openai-model",
+		ReviewMode: session.ReviewModeWorkspace,
+		Items: map[string]session.ResumeItem{
+			fp: {
+				FilePath:    "a.go",
+				OldPath:     "a.go",
+				NewPath:     "a.go",
+				Fingerprint: fp,
+				Comments: []model.LlmComment{{
+					Path:    "a.go",
+					Content: "cached workspace comment",
+				}},
+			},
+		},
+		Manifest: &session.RunManifest{
+			Coverage: session.Coverage{Completed: []session.CoverageItem{{ItemID: fp, Fingerprint: fp}}},
+		},
+	}
+	collector := tool.NewCommentCollector()
+	sess := session.New(t.TempDir(), "feature", "openai-model", session.SessionOptions{
+		ReviewMode:  session.ReviewModeWorkspace,
+		ResumedFrom: "old-workspace-session",
+	})
+	defer sess.Finalize()
+	a := New(Args{
+		ReviewMode:       session.ReviewModeWorkspace,
+		Model:            "openai-model",
+		CommentCollector: collector,
+		Resume:           resume,
+		Session:          sess,
+	})
+
+	toDispatch := a.applyResume(diffs)
+	if len(toDispatch) != 1 || toDispatch[0].NewPath != "b.go" {
+		t.Fatalf("toDispatch = %+v, want only b.go", toDispatch)
+	}
+	if comments := collector.Comments(); len(comments) != 1 || comments[0].Content != "cached workspace comment" {
+		t.Fatalf("comments = %+v", comments)
+	}
+}
+
 // TestAgentGettersNil covers the defensive early returns in the accessor
 // methods when the agent (or its session) was never fully constructed, so
 // callers never advertise a resume target that does not exist.
@@ -831,18 +892,33 @@ func TestAgentGettersNil(t *testing.T) {
 	}
 }
 
-func TestCountReviewable(t *testing.T) {
-	a := New(Args{})
+// TestSummarizeSelection pins what Run reports and keeps: only files that pass
+// every gate are counted as selected, while deletions stay in the working diff
+// set (they are never dispatched but still describe the change).
+func TestSummarizeSelection(t *testing.T) {
+	a := New(Args{Template: template.Template{MaxTokens: 100}})
 	diffs := []model.Diff{
 		{NewPath: "main.go", Insertions: 10, Deletions: 2},
 		{NewPath: "deleted.go", IsDeleted: true, Deletions: 20},
 		{NewPath: "binary.bin", IsBinary: true},
 		{NewPath: "helper.go", Insertions: 5},
+		{NewPath: "huge.go", Diff: strings.Repeat("word ", 500)},
 	}
 
-	count := a.countReviewable(diffs)
-	if count != 2 {
-		t.Errorf("countReviewable = %d, want 2", count)
+	kept, counts := summarizeSelection(a.selectFiles(diffs))
+	if counts.Selected != 2 {
+		t.Errorf("selected = %d, want 2 (main.go, helper.go)", counts.Selected)
+	}
+	if counts.TooLarge != 1 {
+		t.Errorf("tooLarge = %d, want 1 (huge.go)", counts.TooLarge)
+	}
+	var keptPaths []string
+	for _, d := range kept {
+		keptPaths = append(keptPaths, d.NewPath)
+	}
+	want := []string{"main.go", "deleted.go", "helper.go"}
+	if !slices.Equal(keptPaths, want) {
+		t.Errorf("kept = %v, want %v", keptPaths, want)
 	}
 }
 
@@ -852,7 +928,9 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 		{NewPath: "main.go", OldPath: "main.go", Insertions: 4, Deletions: 2},
 		{NewPath: "moved_new.go", OldPath: "moved_old.go", IsRenamed: true},
 		{NewPath: "helper.go", OldPath: "helper.go", IsNew: true, Insertions: 12},
-		{NewPath: "removed.go", OldPath: "removed.go", IsDeleted: true, Deletions: 30},
+		// A deletion as ParseDiffText produces it: NewPath is the sentinel and
+		// the name is in OldPath.
+		{NewPath: "/dev/null", OldPath: "removed.go", IsDeleted: true, Deletions: 30},
 		{NewPath: "renamed.go", OldPath: "old_name.go", IsRenamed: true, Insertions: 5, Deletions: 5},
 		{NewPath: "bin.dat", OldPath: "bin.dat", IsBinary: true},
 	}
@@ -899,6 +977,9 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 	}
 	if strings.Contains(got, "bin.dat") {
 		t.Error("binary files should be skipped")
+	}
+	if strings.Contains(got, "/dev/null") {
+		t.Errorf("a deletion must be listed under its own path, not the /dev/null sentinel; got:\n%s", got)
 	}
 
 	// The separator is emitted before each entry, so a skipped final diff cannot
@@ -1104,9 +1185,22 @@ func TestDispatchSubtasks_MainTaskWithoutTaskDoneIsNotReusableCheckpoint(t *test
 	if client.calls != 1 {
 		t.Fatalf("LLM calls = %d, want 1", client.calls)
 	}
-	warnings := a.Warnings()
-	if len(warnings) != 1 || warnings[0].Type != "subtask_error" || warnings[0].File != diff.NewPath {
-		t.Fatalf("warnings = %+v, want one subtask_error for %s", warnings, diff.NewPath)
+	// The runner also records the spent round budget, with its incomplete
+	// verdict; the subtask_error is the failure diagnostic this test is about.
+	var limitWarnings, subtaskErrors []AgentWarning
+	for _, w := range a.Warnings() {
+		switch w.Type {
+		case reviewtask.WarningReviewLimitReached:
+			limitWarnings = append(limitWarnings, w)
+		case "subtask_error":
+			subtaskErrors = append(subtaskErrors, w)
+		}
+	}
+	if len(limitWarnings) != 1 || !strings.Contains(limitWarnings[0].Message, "did not complete the task") {
+		t.Fatalf("limit warnings = %+v, want one incomplete verdict", limitWarnings)
+	}
+	if len(subtaskErrors) != 1 || subtaskErrors[0].File != diff.NewPath {
+		t.Fatalf("subtask errors = %+v, want one for %s", subtaskErrors, diff.NewPath)
 	}
 	sess.Finalize()
 
@@ -1144,6 +1238,7 @@ func TestDispatchSubtasks_IncompleteMainTaskMarksPartialFailure(t *testing.T) {
 		},
 	}}
 	a := New(Args{
+		MainToolDefs:   []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		From:           "main",
 		To:             "feature",
 		LLMClient:      client,
@@ -1167,9 +1262,14 @@ func TestDispatchSubtasks_IncompleteMainTaskMarksPartialFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("one completed file should keep the review partial, got %v", err)
 	}
-	warnings := a.Warnings()
-	if len(warnings) != 1 || warnings[0].Type != "subtask_error" || warnings[0].File != "incomplete.go" {
-		t.Fatalf("warnings = %+v, want one subtask_error for incomplete.go", warnings)
+	var subtaskErrors []AgentWarning
+	for _, w := range a.Warnings() {
+		if w.Type == "subtask_error" {
+			subtaskErrors = append(subtaskErrors, w)
+		}
+	}
+	if len(subtaskErrors) != 1 || subtaskErrors[0].File != "incomplete.go" {
+		t.Fatalf("subtask errors = %+v, want one for incomplete.go", subtaskErrors)
 	}
 }
 
@@ -1212,8 +1312,9 @@ func TestAgent_TokenAccumulation(t *testing.T) {
 	}}
 
 	a := New(Args{
-		LLMClient: client,
-		Model:     "fake",
+		MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
+		LLMClient:    client,
+		Model:        "fake",
 		Template: template.Template{
 			MaxTokens:           100000,
 			MaxToolRequestTimes: 10,

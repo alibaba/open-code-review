@@ -93,16 +93,18 @@ curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/js
 ### 제 파일이 리뷰되지 않습니다 {#my-file-isn-t-being-reviewed}
 
 `ocr review --preview`를 돌려 보세요(LLM 비용이 들지 않습니다). 후보 파일마다
-남긴 **이유** 또는 버린 **이유**가 함께 나옵니다.
+남긴 **이유** 또는 버린 **이유**가 함께 나옵니다. `vendor/`, `node_modules/` 같은
+provider 디렉터리의 파일은 터미널에서는 한 줄로 묶입니다. `ocr review --preview --format json`은
+여전히 모든 항목을 나열합니다.
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
-제외 사유 다섯 가지는
+제외 사유는
 [파일 필터](../review-rules/#how-files-are-filtered)의 관문과 짝을 이룹니다.
 
 | 사유 | 해결 |
@@ -111,7 +113,9 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | `exclude` 목록에서 해당 패턴을 빼세요. |
 | `unsupported_ext` | 확장자를 `include` 목록에 넣어 허용 목록 관문을 건너뛰세요. |
 | `default_path` | 파일을 `include`에 넣으세요. 내장 테스트 파일 제외 패턴을 덮어씁니다. |
+| `provider_directory` | 조치할 필요가 없습니다. `vendor/`, `node_modules/` 같은 provider 디렉터리는 `include`와 일치해도 검토 대상이 될 수 없습니다. |
 | `deleted` | 할 일이 없습니다. 리뷰할 새 내용이 없습니다. |
+| `too_large` | diff만으로 `max_tokens`의 80%를 넘습니다. `--max-tokens`(또는 저장된 `max_tokens`)를 올리거나 변경을 더 작은 커밋으로 나누세요. |
 
 ### 제가 만든 규칙이 안 걸립니다 {#my-custom-rule-isn-t-firing}
 
@@ -194,8 +198,9 @@ OCR이 코멘트를 diff의 정확한 줄에 붙이지 못했다는 뜻입니다
 
 그래서 작은 파일이라도 합치면 양이 되는 다른 변경과 함께 묶였다면 plan 패스를
 거칠 수 있습니다. 의도한 동작입니다. 크거나 넓게 퍼진 diff는 계획 단계에서
-이득을 봅니다. 한 번만 건너뛰고 싶다면 diff를 더 작게 만들어 돌리거나, 내장
-템플릿을 잠시 고치세요(고급 사용자용이며 `--tools`를 덮어써야 합니다).
+이득을 봅니다. diff를 줄이면 두 임계값보다 작아질 수 있습니다.
+리뷰 계획은 도구 덮어쓰기가 아닌 내장 템플릿으로 제어되므로,
+이 핵심 동작을 바꾸려면 소스 수정과 재빌드가 필요합니다.
 
 ### "Max tool requests reached" {#max-tool-requests-reached}
 
@@ -213,20 +218,21 @@ OCR이 코멘트를 diff의 정확한 줄에 붙이지 못했다는 뜻입니다
 - 어떤 도구가 계속 오류를 내고 모델이 계속 재시도합니다. 세션 JSONL을 보세요.
   같은 도구 결과가 반복된다면 그것이 원인입니다.
 - 그룹이 정말로 크거나 맥락이 많아 100라운드로는 모자랍니다.
-  `--max-tools <n>`으로 상한을 올리세요(예: `--max-tools 150`). 이 플래그는
-  상한을 *올리기만* 합니다. 템플릿 기본값 `100`보다 낮은 값은 무시되고,
-  1~49는 `50`으로 올려 맞추며, `0`은 템플릿 기본값을 그대로 씁니다.
+  `--max-tools <n>`으로 상한을 올리세요(예: `--max-tools 150`). 검증된 양수 값은
+  상한으로 정확히 적용됩니다. 1~49는 `50`으로 올려 맞추며, `0`은 템플릿 기본값
+  `100`을 그대로 씁니다.
 - 모델이 네이티브 도구 호출을 아예 지원하지 않습니다(로컬 모델에서 흔합니다).
   ["No tool calls parsed"(로컬 모델 / Ollama)](#no-tool-calls-parsed-local-models-ollama)를
   참고하세요.
 
-### 서브 Agent 일부가 실패했는데 종료 코드가 0입니다 {#some-sub-agents-fail-the-run-still-exits-0}
+### 일부 서브 Agent 실패 시 종료 코드가 0이 아닌 이유 {#some-sub-agents-fail-why-is-the-exit-code-non-zero}
 
-의도한 동작입니다. OCR은 그룹별 실패를 격리해 그룹 하나가 잘못됐다고 파일
-20개짜리 리뷰가 통째로 죽지 않게 합니다. *하나라도* 성공했다면 전체 종료 코드는
-`0`입니다. 완전히 실패한 실행(성공한 서브 Agent가 0개)만 0이 아닌 코드로
-끝납니다. 어느 그룹이 실패했는지는 JSON 모드의 `warnings` 배열이나 텍스트 모드의
-stderr에서 확인하세요.
+OCR은 그룹별 실패를 격리하고 완료된 그룹의 발견 사항을 출력합니다.
+시간 초과, 프로바이더 오류, 잘못된 설정 등으로 일부 그룹이 실패하면 명령은
+0이 아닌 코드로 종료됩니다. CI에서 미완료된 리뷰를 감지할 수 있습니다.
+설정된 예산 한도만으로 중단된 부분 리뷰는 종료 코드 `0`을 유지합니다.
+JSON 모드의 `manifest.coverage.failed`와 `warnings`, 또는 텍스트 요약에서
+실패한 그룹과 재개 가능 여부를 확인하세요.
 
 ### CI 실행이 로컬보다 훨씬 느립니다 {#ci-run-is-much-slower-than-local}
 
@@ -248,9 +254,34 @@ stderr로 나갑니다(경고, 오류). `--audience agent`가 보장하는 깨�
 
 ### JSON 출력이 `{ "files_reviewed": 0, "comments": [] }`입니다 {#json-output-is-filesreviewed-0-comments}
 
-워크스페이스에 대상 파일이 없었다는 뜻입니다. 의도한 모양입니다. 이렇게 명시해야
-호출하는 쪽이 "리뷰할 것이 없었다"와 "리뷰한 파일에서 지적을 찾지 못했다"를
-구분할 수 있습니다. 코멘트가 0건인 평범한 리뷰라면 대신 빈 배열 `[]`이 나옵니다.
+리뷰할 대상 파일이 없었다는 뜻입니다. `files_reviewed`는 최상위 필드가 아니라 `summary` 아래에
+있으며, 이 경로에서는 `0`입니다. 최상위 `[]`은 `comments` 쪽입니다. 같은 객체에는
+`"status": "skipped"`와 `"message": "Review skipped: no items were selected."`, 그리고
+`terminal_state`가 `"skipped"`이고 `coverage.selected`가 비어 있는 `manifest`도 함께 실립니다.
+선택 단계에서 제외된 파일은 `coverage.excluded`에 나열되며, 각 항목에는 `exclude_reason`이 있습니다.
+
+파일을 리뷰했는데 지적이 없는 경우에도 **`comments: []`을 담은 JSON 객체**가 반환됩니다.
+`summary.files_reviewed`는 실제로 리뷰한 파일 수가 되고, `status`는 `"complete"`, `message`는
+`"Review complete: 0 finding(s) across N selected item(s)."`입니다. 실행마다 선택적 최상위
+필드가 달라질 수 있으므로 객체 모양이나 선택적 키의 유무로 두 상태를 구분하지 마세요. manifest가 있는
+review 출력에서는 `summary.files_reviewed`나 `manifest.terminal_state`를 사용하세요. 다만 호출자는
+아래의 manifest-less 경로에서 `summary`와 `manifest`가 둘 다 없을 수 있다는 점도 처리해야 합니다.
+`review --format json`은 stdout에 항상 JSON 객체 하나만 기록하며, 맨 배열을 내보내는 일은 없습니다.
+
+`terminal_state: "complete"`는 선택된 파일 집합의 리뷰가 완료되었다는 뜻이지, 변경된 모든 파일을
+리뷰했다는 뜻은 아닙니다. 선택 단계에서 제외된 파일(지원하지 않는 확장자, 경로 규칙, 내장된 민감 정보
+경로, 바이너리, 삭제된 파일 또는 파일별 크기 제한 초과)은 `--preview`와 같은 `exclude_reason`과
+함께 `manifest.coverage.excluded`에 기록되며, 이로 인해 실행 상태가 `partial`이 되지는 않습니다.
+이 목록은 선택 단계까지 도달한 파일만 포함합니다. diff provider가 그보다 먼저 제외한 파일은
+포함하지 않습니다. 여기에는 `vendor/`나 `node_modules/`처럼 항상 건너뛰는 디렉터리의 변경,
+`.gitignore`가 무시하는 추적되지 않은 파일, 그리고 단일 커밋이나 커밋 범위를 리뷰할 때
+`.gitignore`에 일치하는 모든 변경이 해당합니다.
+
+manifest-less no-files 경로는 더 간소해서 `summary`와 `manifest`를 모두 생략하지만
+`"status": "skipped"`, `"message": "No supported files changed."`, `"comments": []`는
+계속 포함하며 `tool_calls`도 항상 포함합니다. `ocr scan`은 항상 manifest-less이고 no-files 조건을
+만족하면 이 경로를 사용합니다. `ocr review`도 manifest 생성에 실패하고 no-files 조건을 만족하면
+같은 경로에 들어갈 수 있습니다. `llm`, `trace_id` 같은 선택적 메타데이터는 함께 나올 수 있습니다.
 
 ### 세션 JSONL은 어디에 있나요? {#where-do-session-jsonls-live}
 
@@ -275,7 +306,8 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-LLM 호출에는 별도 스팬이 생기지 않고 메트릭으로 기록됩니다.
+메인 리뷰 루프에서는 LLM 호출이 `llm.request` 스팬으로 기록되며 메트릭도 함께
+기록됩니다.
 `ocr.llm.tokens_used`(카운터, 레이블 `model` + `type`),
 `ocr.llm.requests_total`(카운터, 레이블 `model` + `status`),
 `ocr.llm.request_duration_seconds`(히스토그램, 레이블 `model`)를 보세요. console
@@ -291,8 +323,12 @@ LLM 호출에는 별도 스팬이 생기지 않고 메트릭으로 기록됩니�
   싸게 돌리고 싶다면 `--effort low`가 가장 큰 수단이고 `--effort high`가 가장
   비쌉니다.
 - plan 단계는 가장 큰 파일이 50줄 이상인 그룹, 또는 파일 2개 이상의 합이 100줄
-  이상인 그룹에서 켜집니다. 그룹마다 LLM 호출이 한 번 더 듭니다. 임계값을
-  낮추면 비용이 줄고, 올리면 작은 PR이 빨라집니다.
+  이상인 그룹에서 켜집니다. 그룹마다 LLM 호출이 한 번 더 들므로, 비용을 줄이는 쪽은
+  임계값을 **올리는** 것입니다. 낮추면 더 많은 그룹이 plan 단계를 지나 오히려 비싸집니다.
+  두 임계값은 `0`에서 다르게 동작합니다. `PLAN_MODE_LINE_THRESHOLD`가 `0` 이하이면
+  *항상 plan*이며, 이게 가장 비싼 설정입니다. 반면 `PLAN_MODE_GROUP_LINE_THRESHOLD`가
+  `0`이면 그룹 쪽 게이트가 꺼집니다. 그 게이트가 원래 유일한 발동 조건이었을 때에만
+  plan 호출을 하나 아낄 수 있습니다. 발동 조건은 위의 "파일은 작은데 plan 단계가 한참 걸립니다"를 참고하세요.
 - `MAX_TOOL_REQUEST_TIMES = 100`은 넉넉한 값입니다. 라운드를 다 쓰는 모델은 3
   라운드에 끝내는 모델보다 대화가 길어져(토큰이 늘어) 비쌉니다. 강한 모델일수록
   대체로 빨리 끝냅니다. 반대로 "max tool requests reached"를 피하려고
@@ -354,7 +390,7 @@ JSONL과 규칙 파일은 로컬에만 있습니다.
 
 릴리스에 올라가는 정적 바이너리는 프로젝트 이름을 따 `opencodereview`이고, NPM
 래퍼는 쓰기 편하도록 `ocr`이라는 이름으로 설치합니다. 소스에서 빌드하면
-`dist/opencodereview`가 나옵니다. `$PATH`에 `ocr`로 복사해 두세요.
+`dist/opencodereview`(Windows에서는 `dist/opencodereview.exe`)가 나옵니다. `$PATH`에 `ocr`로 복사해 두세요.
 
 ### 어떻게 제거하나요? {#how-do-i-uninstall}
 

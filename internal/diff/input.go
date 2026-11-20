@@ -12,6 +12,7 @@ import (
 // InputProvider is the common diff input contract used by the review agent.
 type InputProvider interface {
 	GetDiff(context.Context) ([]model.Diff, error)
+	GetDiffSet(context.Context) (DiffSet, error)
 	ResolveInput(context.Context) InputResolution
 	RemoteIdentity(context.Context) string
 }
