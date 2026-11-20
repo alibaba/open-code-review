@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/chatgptauth"
@@ -157,5 +158,57 @@ func TestChatGPTResolveEndpoint(t *testing.T) {
 	chatGPTCredentials = func(context.Context, string) (*chatgptauth.Auth, error) { return nil, errors.New("signed out") }
 	if _, err := ResolveEndpoint(path); err == nil {
 		t.Fatal("missing creds accepted")
+	}
+}
+
+// Plan mode hands newOpenAISDK its own retry count and redirect policy; the
+// other tests here swap c.sdk out, so only this one sees what the constructor
+// actually built.
+func TestNewOpenAIResponsesClientPlanModeSDKSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		plan          bool
+		wantAttempts  int32
+		wantRedirects int32
+	}{
+		{name: "api key", plan: false, wantAttempts: 6, wantRedirects: 1},
+		{name: "chatgpt plan", plan: true, wantAttempts: 1, wantRedirects: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var redirect atomic.Bool
+			var attempts, followed atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/elsewhere" {
+					followed.Add(1)
+					w.WriteHeader(http.StatusTeapot)
+					return
+				}
+				if redirect.Load() {
+					http.Redirect(w, r, "/elsewhere", http.StatusFound)
+					return
+				}
+				attempts.Add(1)
+				w.Header().Set("Retry-After-Ms", "0")
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			t.Cleanup(server.Close)
+
+			c := NewOpenAIResponsesClient(ClientConfig{URL: server.URL, APIKey: "k", Model: "m", ChatGPTPlan: tc.plan})
+			params := responses.ResponseNewParams{
+				Model: "m",
+				Input: responses.ResponseNewParamsInputUnion{OfString: openai.String("hi")},
+			}
+
+			_, _ = c.sdk.Responses.New(context.Background(), params)
+			if got := attempts.Load(); got != tc.wantAttempts {
+				t.Errorf("attempts on HTTP 500 = %d, want %d", got, tc.wantAttempts)
+			}
+
+			redirect.Store(true)
+			_, _ = c.sdk.Responses.New(context.Background(), params)
+			if got := followed.Load(); got != tc.wantRedirects {
+				t.Errorf("redirects followed = %d, want %d", got, tc.wantRedirects)
+			}
+		})
 	}
 }
