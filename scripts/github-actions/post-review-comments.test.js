@@ -1367,6 +1367,74 @@ function testCheckpointMarkersAreNamespaceScoped() {
   );
 }
 
+// A namespace may end in a digit segment ("test-1"). The id namespace pattern
+// must capture the WHOLE namespace, not stop at the first numeric-looking
+// segment: a mis-captured namespace makes a reviewer treat its own comments as
+// foreign and re-post every overlapping finding on the next incremental run.
+function testCommentIdNamespaceHandlesDigitSuffixedNamespace() {
+  const identity = buildIdentity({ namespace: "test-1" });
+  const own = "<!-- test-1-123-1-abcd1234abcd1234 -->";
+  assert.strictEqual(identity.commentIdNamespaceRegex.exec(own)[1], "test-1");
+  assert.ok(identity.commentIdRegex.test(own), "the id itself is still ours");
+  const other = buildIdentity({ namespace: "test" });
+  assert.strictEqual(
+    other.commentIdNamespaceRegex.exec(own)[1],
+    "test-1",
+    "another identity reads the same namespace out of the id"
+  );
+}
+
+// The advance marker must carry the caller's namespace. Writing the default
+// marker under a custom namespace means the next run looks for a marker that
+// does not exist and silently falls back to a full review every time.
+async function testCheckpointAdvanceUsesCallerNamespace() {
+  const result = {
+    comments: [{ path: "src/a.js", content: "c1", start_line: 1, end_line: 1 }],
+    manifest: ckManifest(),
+  };
+  const { github } = await run({
+    result,
+    opts: {
+      stickySummary: true,
+      namespace: "secscan",
+      displayName: "Security Scan",
+      ...ckRunOptions(),
+    },
+  });
+  const body = lastSummaryBody(github);
+  assert.ok(body.includes("<!-- secscan-checkpoint:v1 "), "advance marker carries the namespace");
+  assert.ok(!body.includes("<!-- ocr-checkpoint"), "no default-identity marker under a custom namespace");
+  const identity = buildIdentity({ namespace: "secscan" });
+  assert.ok(parseCheckpointMarker(body, identity), "the next run can read the marker back");
+  assert.strictEqual(parseCheckpointMarker(body), null, "the default identity cannot");
+}
+
+// End-to-end for the digit-suffixed namespace: a history entry carrying this
+// reviewer's own id must still dedupe on an incremental run.
+async function testDigitSuffixedNamespaceKeepsOwnHistory() {
+  const history = [
+    {
+      path: "src/a.js",
+      line: 10,
+      start_line: 10,
+      side: "RIGHT",
+      user: { login: "github-actions[bot]" },
+      body: "finding\n<!-- test-1-0-1-aaaa0000bbbb1111 -->",
+    },
+  ];
+  const result = {
+    comments: [{ path: "src/a.js", content: "overlap", start_line: 10, end_line: 10 }],
+    warnings: [],
+  };
+  const { github, outputs } = await run({
+    result,
+    githubOpts: { history },
+    opts: { stickySummary: true, incremental: true, namespace: "test-1" },
+  });
+  assert.strictEqual(outputs.comments_skipped, "1", "own history still suppresses the overlap");
+  assert.strictEqual(github.createReviewCalls.length, 0, "nothing re-posted");
+}
+
 function testResolveOwnershipIsNamespaceScoped() {
   const identity = buildIdentity({ namespace: "secscan" });
   const thread = (body) => ({
@@ -3087,6 +3155,9 @@ async function main() {
   testNamespacedRunTagsAndCommentIds();
   await testGetPostedCommentIdsIsNamespaceScoped();
   testCheckpointMarkersAreNamespaceScoped();
+  testCommentIdNamespaceHandlesDigitSuffixedNamespace();
+  await testCheckpointAdvanceUsesCallerNamespace();
+  await testDigitSuffixedNamespaceKeepsOwnHistory();
   testResolveOwnershipIsNamespaceScoped();
   await testNamespacedRunOwnsItsOwnSummaryAndMarkers();
   await testNamespacedRunReusesItsOwnSummary();

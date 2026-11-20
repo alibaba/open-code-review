@@ -88,10 +88,11 @@ function buildIdentity({ namespace = DEFAULT_NAMESPACE, displayName = DEFAULT_DI
     // exists and it is not this reviewer's" (another reviewer's comment, which
     // must not count as this reviewer's dedupe history) from "no id at all" (a
     // comment posted before ids existed, or by a tool that does not use this
-    // module — still history, exactly as before). The namespace is matched
-    // non-greedily against the `-<run>-<attempt>-<hex>` tail so a hyphenated
-    // namespace is captured whole.
-    commentIdNamespaceRegex: /<!--\s*([a-z0-9-]+?)-\d+-\d+-[a-f0-9]+\s*-->/,
+    // module — still history, exactly as before). Greedy, not lazy: a namespace
+    // may end in digit segments ("test-1"), and a lazy `+?` would stop at the
+    // first segment that lets the numeric tail match, reading "test" out of
+    // "test-1-123-1-…" and treating the reviewer's own comment as foreign.
+    commentIdNamespaceRegex: /<!--\s*([a-z0-9-]+)-\d+-\d+-[a-f0-9]+\s*-->/,
     checkpointMarkerSource,
     // Same reasoning: the flagless uses have no state, so they share one
     // instance.
@@ -329,16 +330,19 @@ async function runPostReviewComments({
     const head = (manifest.input && manifest.input.resolved_head) || "";
     if (!/^[0-9a-f]{40}$/.test(head)) return null;
     stats.checkpointAfter = head;
-    return buildCheckpointMarker({
-      v: CHECKPOINT_VERSION,
-      pr: prNumber,
-      head,
-      base_ref: checkpointBaseRef,
-      merge_base: checkpointMergeBase,
-      terminal_state: "complete",
-      fingerprint: checkpointFingerprint,
-      run: String(context.runId != null ? context.runId : ""),
-    });
+    return buildCheckpointMarker(
+      {
+        v: CHECKPOINT_VERSION,
+        pr: prNumber,
+        head,
+        base_ref: checkpointBaseRef,
+        merge_base: checkpointMergeBase,
+        terminal_state: "complete",
+        fingerprint: checkpointFingerprint,
+        run: String(context.runId != null ? context.runId : ""),
+      },
+      identity
+    );
   };
   // Applied at every site that composes a summary body. Advancing supersedes the
   // carry (a body must carry at most one marker); with neither, the body is
