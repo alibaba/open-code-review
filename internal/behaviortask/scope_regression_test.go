@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -134,94 +133,4 @@ func TestInvalidUTF8PathIsMetadataOnly(test *testing.T) {
 		}
 	}
 	test.Fatal("missing excluded metadata")
-}
-
-func TestPrepareWorkspaceStagedDeletionWithExistingFile(test *testing.T) {
-	input := fixture(test)
-	input.Mode = "workspace"
-	input.Resolution = diff.InputResolution{ResolvedBase: input.Resolution.ResolvedHead}
-	input.Diffs = nil
-	git(test, input.RepoDir, "rm", "--cached", "main.go")
-	prepared, err := PrepareInput(test.Context(), input)
-	if err != nil {
-		test.Fatal(err)
-	}
-	if len(prepared.Diffs) != 0 {
-		test.Fatalf("unchanged workspace has a net diff: %+v", prepared.Diffs)
-	}
-	for _, change := range prepared.Diffs {
-		test.Logf("old=%q new=%q added=%v deleted=%v", change.OldPath, change.NewPath, change.IsNew, change.IsDeleted)
-	}
-	client := fakeClient(nil)
-	runner, err := NewRunner(test.Context(), Deps{LLMClient: client, Model: "fake", ArtifactDir: filepath.Join(test.TempDir(), "artifacts")}, prepared)
-	if err != nil {
-		test.Fatalf("valid workspace must remain analyzable: %v", err)
-	}
-	test.Cleanup(func() { _ = runner.history.Finalize() })
-}
-
-func TestPrepareWorkspaceNetChanges(test *testing.T) {
-	for _, fixtureCase := range []struct {
-		name       string
-		content    string
-		executable bool
-		excluded   bool
-		binary     bool
-	}{
-		{name: "modified", content: "net value\nunchanged\n"},
-		{name: "mode only", content: "new value\nunchanged\n", executable: true},
-		{name: "modified executable", content: "net value\nunchanged\n", executable: true},
-		{name: "excluded", content: "net value\n", excluded: true},
-		{name: "binary", content: "net\x00value\n", binary: true},
-	} {
-		test.Run(fixtureCase.name, func(test *testing.T) {
-			if fixtureCase.executable && runtime.GOOS == "windows" {
-				test.Skip("executable mode changes require POSIX file modes")
-			}
-			input := fixture(test)
-			input.Mode = "workspace"
-			input.Resolution = diff.InputResolution{ResolvedBase: input.Resolution.ResolvedHead}
-			input.Diffs = nil
-			if fixtureCase.excluded {
-				input.ExcludePatterns = append(input.ExcludePatterns, "main.go")
-			}
-			git(test, input.RepoDir, "rm", "--cached", "main.go")
-			git(test, input.RepoDir, "commit", "-qm", "Advance HEAD after fixing the comparison base")
-			if err := os.WriteFile(filepath.Join(input.RepoDir, "main.go"), []byte(fixtureCase.content), 0600); err != nil {
-				test.Fatal(err)
-			}
-			if fixtureCase.executable {
-				if err := os.Chmod(filepath.Join(input.RepoDir, "main.go"), 0700); err != nil {
-					test.Fatal(err)
-				}
-			}
-			prepared, err := PrepareInput(test.Context(), input)
-			if err != nil || len(prepared.Diffs) != 1 {
-				test.Fatalf("net diff: %+v %v", prepared.Diffs, err)
-			}
-			changed := prepared.Diffs[0]
-			if changed.IsNew || changed.IsDeleted || changed.NewPath != "main.go" || changed.IsBinary != fixtureCase.binary {
-				test.Fatalf("net status: %+v", changed)
-			}
-			code, err := prepareCodeTools(test.Context(), prepared)
-			if err != nil {
-				test.Fatal(err)
-			}
-			if fixtureCase.excluded || fixtureCase.binary {
-				if changed.Diff != "" || changed.NewFileContent != "" || len(code.diffs) != 0 {
-					test.Fatalf("excluded source retained: %+v", changed)
-				}
-				return
-			}
-			if changed.NewFileContent != "" || len(code.diffs) != 1 {
-				test.Fatalf("net content: %+v", changed)
-			}
-			if fixtureCase.executable && (!strings.Contains(changed.Diff, "old mode 100644") || !strings.Contains(changed.Diff, "new mode 100755")) {
-				test.Fatalf("mode change missing: %s", changed.Diff)
-			}
-			if strings.Contains(fixtureCase.content, "net value") && (!strings.Contains(changed.Diff, "-new value") || !strings.Contains(changed.Diff, "+net value")) {
-				test.Fatalf("fixed-base content change missing: %s", changed.Diff)
-			}
-		})
-	}
 }

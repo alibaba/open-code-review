@@ -79,7 +79,7 @@ var reviewCmd = &cobra.Command{
   ocr review -c abc123
 
   # Review with peer Behavior/Impact and maintainer decision reports
-  ocr review --analysis
+  ocr review --commit HEAD --analysis
   ocr review --from master --to dev-ref --analysis --format json
 
   # Resume a previous range review

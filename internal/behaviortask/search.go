@@ -49,21 +49,14 @@ func pathBatches(groups [][]string, pathspec func(string) string) ([][]string, e
 }
 
 func (code *codeTools) searchPaths(ctx context.Context, args map[string]any, side string) ([][]string, error) {
-	command := []string{"ls-files", "-z", "--cached"}
-	if code.comparison.Mode == "workspace" && side == "new" {
-		command = append(command, "--others", "--exclude-standard")
-	} else {
-		revision := code.comparison.Head
-		if side == "old" {
-			if code.comparison.BaseIsEmpty {
-				return nil, nil
-			}
-			revision = code.comparison.Old
+	revision := code.comparison.Head
+	if side == "old" {
+		if code.comparison.BaseIsEmpty {
+			return nil, nil
 		}
-		command = append([]string{"--attr-source=" + revision}, command...)
-		command = append(command, "--with-tree="+revision)
+		revision = code.comparison.Old
 	}
-	command = append(command, "--")
+	command := []string{"--attr-source=" + revision, "ls-files", "-z", "--cached", "--with-tree=" + revision, "--"}
 	patterns, _ := args["file_patterns"].([]any)
 	patternBytes := 0
 	for _, raw := range patterns {
@@ -89,7 +82,7 @@ func (code *codeTools) searchPaths(ctx context.Context, args map[string]any, sid
 	seen := map[string]bool{}
 	var paths []string
 	for _, filePath := range strings.Split(string(data), "\x00") {
-		if !seen[filePath] && code.fileAllowed(side, filePath) {
+		if !seen[filePath] && code.allowed[side][filePath] {
 			seen[filePath] = true
 			paths = append(paths, filePath)
 		}
@@ -141,7 +134,7 @@ func (code *codeTools) search(ctx context.Context, provider tool.Provider, args 
 			case strings.HasPrefix(line, "File: "):
 				flush()
 				filePath = strings.TrimPrefix(line, "File: ")
-			case numberedLine.MatchString(line) && code.fileAllowed(side, filePath):
+			case numberedLine.MatchString(line) && code.allowed[side][filePath]:
 				if count < searchMatchLimit {
 					matches = append(matches, line)
 					count++

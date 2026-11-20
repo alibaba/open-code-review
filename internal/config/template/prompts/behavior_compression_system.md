@@ -2,7 +2,7 @@ Summarize this Behavior/Impact investigation so it can continue without losing e
 
 Preserve:
 
-1. The comparison identity and role scope, including whether the new side is an immutable revision or the live workspace.
+1. The comparison identity and role scope, including the pinned base (or empty tree) and head revision.
 2. Candidate and supported scenarios, their triggers, before/after behavior, and exact [[obs-000001]] citation markers with side/path/line context.
 3. Consumer/workflow paths already inspected and their supported consequences.
 4. Rejected hypotheses and why they were rejected, including distinctions between new and pre-existing behavior.

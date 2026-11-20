@@ -3,8 +3,9 @@
 This package implements a single, read-only investigation using `llmloop.Task`.
 It does not change `ocr review` or `ocr scan`, start MCP, construct a comment
 collector, execute repository code, or make a report-summarization model call.
-`ocr review --analysis` combines the full Review pipeline with this independent
-task through `internal/workflow`. The opt-in flag does not change default review
+`ocr review --commit <sha> --analysis` and `ocr review --from <base> [--to <head>] --analysis`
+combine the full Review pipeline with this independent task through `internal/workflow`.
+For uncommitted changes use ordinary `ocr review` without `--analysis`. The opt-in flag does not change default review
 or scan costs. Both roles use the configured model and private sessions. Analysis
 uses at most one additional concurrent model request. Analysis has no total token
 limit by default (`--analysis-max-tokens-budget 0`). A positive limit counts tokens
@@ -26,11 +27,10 @@ those endpoints. Commit and range patches use the head revision's versioned
 attributes. If the active Git environment overrides the repository, index or
 command configuration in a way Analysis cannot reproduce, it is skipped. Neither API rediscovers a PR or fetches missing objects.
 
-`NewRunner` accepts full-SHA range/commit comparisons and workspace comparisons
-with a pinned old commit or empty tree. It constructs the existing old/new
-`CodeAccess` and creates its own session. Only workspace mode reads the live
-working tree; its new side includes staged, unstaged, and untracked files and
-does not claim a commit revision or snapshot consistency. Explicit exclusions, built-in
+`NewRunner` accepts full-SHA range and commit comparisons; the old side of a
+root commit is the empty tree. It constructs the existing old/new `CodeAccess`
+and creates its own session. File contents come from the selected revisions,
+not the live working tree. Explicit exclusions, built-in
 excluded directories, credential-like paths, symlinks, and unsupported paths are
 unavailable through reads, searches, enumeration, and diffs. Unchanged authorized
 consumers remain readable. This is not a sandbox against a hostile local Git

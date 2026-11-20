@@ -28,9 +28,6 @@ func outputAnalysisText(writer io.Writer, output *analysisOutput) {
 	if report.Comparison.BaseIsEmpty {
 		oldSource = "empty tree"
 	}
-	if report.Comparison.Mode == "workspace" {
-		newSource = "workspace (live)"
-	}
 	fmt.Fprintf(writer, "Comparison: %s -> %s\n", sanitizeTerminal(oldSource), sanitizeTerminal(newSource))
 	if output.ReviewStatus == "partial" || output.ReviewStatus == "failed" {
 		fmt.Fprintf(writer, "Review: %s\n", output.ReviewStatus)

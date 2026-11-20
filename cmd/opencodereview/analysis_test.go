@@ -39,8 +39,8 @@ func TestAnalysisFlags(test *testing.T) {
 		wantTo string
 	}{
 		{[]string{}, true, ""},
-		{[]string{"--analysis"}, true, ""},
-		{[]string{"--analysis", "--analysis-max-tokens-budget", "0"}, true, ""},
+		{[]string{"--analysis"}, false, ""},
+		{[]string{"--analysis", "--analysis-max-tokens-budget", "0"}, false, ""},
 		{[]string{"--analysis-max-tokens-budget", "0"}, true, ""},
 		{[]string{"--analysis", "--analysis-max-tokens-budget", "-1"}, false, ""},
 		{[]string{"--analysis-max-tokens-budget", "-1"}, false, ""},
@@ -68,9 +68,25 @@ func TestAnalysisFlags(test *testing.T) {
 	}
 }
 
+func TestWorkspaceAnalysisRejectedBeforeReview(test *testing.T) {
+	output := filepath.Join(test.TempDir(), "review.json")
+	err := runReview([]string{"--analysis", "--repo", filepath.Join(test.TempDir(), "missing"), "--output", output})
+	if err == nil {
+		test.Fatal("workspace analysis unexpectedly succeeded")
+	}
+	for _, hint := range []string{"workspace mode", "omit --analysis", "--commit", "--from"} {
+		if !strings.Contains(err.Error(), hint) {
+			test.Fatalf("missing %q in %v", hint, err)
+		}
+	}
+	if _, err := os.Stat(output); !errors.Is(err, os.ErrNotExist) {
+		test.Fatalf("unexpected output: %v", err)
+	}
+}
+
 func TestAnalysisUsesResolvedReviewInput(test *testing.T) {
 	repo := retryTestRepo(test)
-	for _, opts := range []reviewOptions{{repoDir: repo, from: "HEAD~1", to: "HEAD"}, {repoDir: repo, commit: "HEAD"}, {repoDir: repo}} {
+	for _, opts := range []reviewOptions{{repoDir: repo, from: "HEAD~1", to: "HEAD"}, {repoDir: repo, commit: "HEAD"}} {
 		setup, err := prepareReviewCodeTools(test.Context(), repo, opts, nil, nil)
 		if err != nil {
 			test.Fatal(err)
@@ -135,19 +151,19 @@ func TestAnalysisPartialCloneDoesNotFetchMissingBlobs(test *testing.T) {
 	}
 }
 
-func TestAnalysisWorkspaceComparisonLabel(test *testing.T) {
+func TestAnalysisCommitComparisonLabel(test *testing.T) {
 	for _, empty := range []bool{false, true} {
-		comparison := behaviortask.Comparison{Mode: "workspace", Old: strings.Repeat("a", 40), BaseIsEmpty: empty}
+		comparison := behaviortask.Comparison{Mode: "commit", Old: strings.Repeat("a", 40), Head: strings.Repeat("b", 40), BaseIsEmpty: empty}
 		oldSource := "aaaaaaaa"
 		if empty {
 			comparison.Old = ""
 			oldSource = "empty tree"
 		}
-		report := &workflow.Report{Comparison: comparison, Status: "completed", DeclaredCompletion: "partial", Markdown: "Observed workspace source."}
+		report := &workflow.Report{Comparison: comparison, Status: "completed", DeclaredCompletion: "partial", Markdown: "Observed committed source."}
 		var output bytes.Buffer
 		outputAnalysisText(&output, &analysisOutput{Report: report, ReviewStatus: "complete"})
-		if !strings.Contains(output.String(), "Comparison: "+oldSource+" -> workspace (live)") || report.Comparison != comparison {
-			test.Fatalf("workspace label changed metadata or omitted source: %s", output.String())
+		if !strings.Contains(output.String(), "Comparison: "+oldSource+" -> bbbbbbbb") || report.Comparison != comparison {
+			test.Fatalf("commit label changed metadata or omitted source: %s", output.String())
 		}
 	}
 }
@@ -203,8 +219,7 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 	for _, fixture := range []struct {
 		name           string
 		analysis       bool
-		workspace      bool
-		clean          bool
+		emptyCommit    bool
 		failReview     bool
 		failAnalysis   bool
 		partial        bool
@@ -218,7 +233,6 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 	}{
 		{name: "default", status: "complete"},
 		{name: "unlimited analysis", analysis: true, analysisTokens: 100_001, status: "complete"},
-		{name: "workspace", analysis: true, workspace: true, status: "complete"},
 		{name: "analysis partial self-assessment", analysis: true, partial: true, status: "complete"},
 		{name: "analysis failure", analysis: true, failAnalysis: true, status: "complete"},
 		{name: "output failure", analysis: true, failAnalysis: true, blockOutput: true, wantError: true},
@@ -226,8 +240,8 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 		{name: "both fail", analysis: true, failReview: true, failAnalysis: true, status: "failed", wantError: true},
 		{name: "review dispatch budget", analysis: true, budget: "1", status: "failed", wantError: true},
 		{name: "budget-only partial review with analysis failure", analysis: true, failAnalysis: true, budget: "100000", mainTokens: 95000, status: "partial"},
-		{name: "final analysis submission", analysis: true, workspace: true, analysisBudget: "15", status: "complete"},
-		{name: "skipped review with limited analysis", analysis: true, workspace: true, clean: true, analysisBudget: "15", status: "skipped"},
+		{name: "final analysis submission", analysis: true, analysisBudget: "15", status: "complete"},
+		{name: "skipped review with limited analysis", analysis: true, emptyCommit: true, analysisBudget: "15", status: "skipped"},
 	} {
 		test.Run(fixture.name, func(test *testing.T) {
 			home := test.TempDir()
@@ -235,15 +249,8 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			test.Setenv("USERPROFILE", home)
 			test.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 			repo := retryTestRepo(test)
-			if fixture.workspace && !fixture.clean {
-				file := filepath.Join(repo, "a.go")
-				data, err := os.ReadFile(file)
-				if err != nil {
-					test.Fatal(err)
-				}
-				if err := os.WriteFile(file, bytes.ReplaceAll(data, []byte("return 2"), []byte("return 3")), 0600); err != nil {
-					test.Fatal(err)
-				}
+			if fixture.emptyCommit {
+				retryTestGit(test, repo, "commit", "--allow-empty", "-qm", "Empty change")
 			}
 			reviewer := newFakeLLM()
 			if fixture.mainTokens > 0 {
@@ -297,10 +304,7 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			for key, value := range map[string]string{"OCR_LLM_URL": server.URL + "/v1/messages", "OCR_LLM_TOKEN": "test-token", "OCR_LLM_MODEL": "claude-test", "OCR_LLM_PROTOCOL": "anthropic", "OCR_LLM_AUTH_HEADER": "x-api-key", "OCR_LLM_TIMEOUT": "30"} {
 				test.Setenv(key, value)
 			}
-			args := []string{"--repo", repo, "--format", "json", "--output", output, "--effort", "low", "--no-filter", "--background", "Synthetic engineering verification"}
-			if !fixture.workspace {
-				args = append(args, "--from", "HEAD~1", "--to", "HEAD")
-			}
+			args := []string{"--repo", repo, "--from", "HEAD~1", "--to", "HEAD", "--format", "json", "--output", output, "--effort", "low", "--no-filter", "--background", "Synthetic engineering verification"}
 			if fixture.analysis {
 				args = append(args, "--analysis")
 			}
@@ -352,17 +356,13 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 			if fixture.failAnalysis && (report.Status != "failed" || *payload.Analysis != "" || *payload.AnalysisRaw != "" || strings.Contains(string(data), "analysis unavailable") || len(report.Errors) != 1 || report.Errors[0] != "analysis provider returned HTTP 402") {
 				test.Fatalf("unexpected public provider diagnostics: %v", report.Errors)
 			}
-			if !fixture.workspace && (payload.Manifest.Input.RequestedFrom != "HEAD~1" || payload.Manifest.Input.RequestedHead != "HEAD") {
+			if payload.Manifest.Input.RequestedFrom != "HEAD~1" || payload.Manifest.Input.RequestedHead != "HEAD" {
 				test.Fatalf("requested refs changed: %+v", payload.Manifest.Input)
 			}
 			if report.SessionID == payload.SessionID || report.Comparison.Head == report.Comparison.Old {
 				test.Fatalf("identity: %s", data)
 			}
-			if fixture.workspace {
-				if report.Comparison.Mode != "workspace" || report.Comparison.Head != "" || len(report.Comparison.Old) != 40 {
-					test.Fatalf("workspace identity: %s", data)
-				}
-			} else if len(report.Comparison.Head) != 40 {
+			if report.Comparison.Mode != "range" || len(report.Comparison.Head) != 40 {
 				test.Fatalf("immutable identity: %s", data)
 			}
 			if payload.Summary.TotalTokens != payload.Summary.InputTokens+payload.Summary.OutputTokens {
@@ -407,24 +407,18 @@ func TestReviewWithAnalysisHTTP(test *testing.T) {
 	}
 }
 
-func TestAnalysisPreservesWorkspaceReview(test *testing.T) {
+func TestAnalysisPreservesCommitReview(test *testing.T) {
 	for _, scenario := range []string{"completed", "budget", "provider failure", "git config", "alternate index"} {
 		test.Run(scenario, func(test *testing.T) {
 			repo := retryTestRepo(test)
 			if err := os.WriteFile(filepath.Join(repo, "a.go"), []byte("package p\nfunc a() int { return 3 }\n"), 0600); err != nil {
 				test.Fatal(err)
 			}
+			retryTestGit(test, repo, "commit", "-qm", "Change a", "--", "a.go")
 			if scenario == "git config" {
-				ignore := filepath.Join(test.TempDir(), "excludes")
-				if err := os.WriteFile(ignore, []byte("private.go\n"), 0600); err != nil {
-					test.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(repo, "private.go"), []byte("package p\n"), 0600); err != nil {
-					test.Fatal(err)
-				}
 				test.Setenv("GIT_CONFIG_COUNT", "1")
-				test.Setenv("GIT_CONFIG_KEY_0", "core.excludesFile")
-				test.Setenv("GIT_CONFIG_VALUE_0", ignore)
+				test.Setenv("GIT_CONFIG_KEY_0", "core.quotepath")
+				test.Setenv("GIT_CONFIG_VALUE_0", "false")
 			}
 			if scenario == "alternate index" {
 				index, err := os.ReadFile(filepath.Join(repo, ".git", "index"))
@@ -474,7 +468,7 @@ func TestAnalysisPreservesWorkspaceReview(test *testing.T) {
 					_, _ = io.WriteString(writer, `{"type":"error","error":{"type":"invalid_request_error","message":"fixture"}}`)
 					return
 				}
-				name, args := "submit_analysis", `{"markdown":"The workspace changes a.go."}`
+				name, args := "submit_analysis", `{"markdown":"The commit changes a.go."}`
 				if scenario == "budget" && count == 1 {
 					name, args = "file_read", `{"file_path":"a.go"}`
 				}
@@ -482,7 +476,7 @@ func TestAnalysisPreservesWorkspaceReview(test *testing.T) {
 			}))
 			run := func(enabled bool) jsonOutput {
 				output := filepath.Join(test.TempDir(), "review.json")
-				args := []string{"--repo", repo, "--output", output, "--format", "json", "--effort", "low", "--concurrency", "1", "--no-filter"}
+				args := []string{"--repo", repo, "--commit", "HEAD", "--output", output, "--format", "json", "--effort", "low", "--concurrency", "1", "--no-filter"}
 				if enabled {
 					args = append(args, "--analysis")
 					if scenario == "budget" {
@@ -571,7 +565,7 @@ func TestReviewWithAnalysisCancellationAfterReview(test *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}))
-	opts, err := parseReviewFlags([]string{"--repo", reviewDir, "--analysis", "--format", "json", "--audience", "agent"})
+	opts, err := parseReviewFlags([]string{"--repo", reviewDir, "--from", "HEAD", "--analysis", "--format", "json", "--audience", "agent"})
 	if err != nil {
 		test.Fatal(err)
 	}
@@ -597,7 +591,7 @@ func TestAnalysisSkippedReviewStatus(test *testing.T) {
 		test.Run(fixture.name, func(test *testing.T) {
 			freshOCRHome(test)
 			repo := initTestGitRepo(test)
-			gitCommitFile(test, repo, "main.go", "package main\n", "Synthetic clean workspace")
+			gitCommitFile(test, repo, "main.go", "package main\n", "Seed empty comparison")
 			if fixture.failPersistence {
 				sessionsDirectory, err := session.SessionsDir(repo)
 				if err != nil {
@@ -611,7 +605,7 @@ func TestAnalysisSkippedReviewStatus(test *testing.T) {
 					test.Fatal(err)
 				}
 			}
-			reviewer := agent.New(agent.Args{RepoDir: repo})
+			reviewer := agent.New(agent.Args{RepoDir: repo, From: "HEAD", To: "HEAD"})
 			comments, reviewErr := reviewer.Run(test.Context())
 			if (reviewErr != nil) != fixture.failPersistence {
 				test.Fatalf("unexpected review error: %v", reviewErr)

@@ -92,7 +92,7 @@ func TestBehaviorReportFocusSurvivesEveryPhase(test *testing.T) {
 	if err != nil {
 		test.Fatal(err)
 	}
-	if behavior.Version != "ocr.behavior-prompts/v8" {
+	if behavior.Version != "ocr.behavior-prompts/v9" {
 		test.Fatalf("unversioned report guidance: %s", behavior.Version)
 	}
 	for _, phase := range []struct {

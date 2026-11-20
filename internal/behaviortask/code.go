@@ -6,8 +6,10 @@ package behaviortask
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"maps"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -36,13 +38,10 @@ type codeTools struct {
 
 func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 	resolution := input.Resolution
-	workspace := input.Mode == "workspace"
-	if (!workspace && input.Mode != "range" && input.Mode != "commit") ||
-		(!workspace && !revisionPattern.MatchString(resolution.ResolvedHead)) ||
-		(workspace && (resolution.ResolvedHead != "" || resolution.ExactRange != "")) ||
+	if (input.Mode != "range" && input.Mode != "commit") || !revisionPattern.MatchString(resolution.ResolvedHead) ||
 		(!resolution.BaseIsEmpty && !revisionPattern.MatchString(resolution.ResolvedBase)) ||
-		(resolution.BaseIsEmpty && ((!workspace && input.Mode != "commit") || resolution.ResolvedBase != "")) {
-		return nil, fmt.Errorf("behavior requires a resolved range, commit, or workspace comparison")
+		(resolution.BaseIsEmpty && (input.Mode != "commit" || resolution.ResolvedBase != "")) {
+		return nil, fmt.Errorf("behavior requires a resolved commit or range comparison")
 	}
 	gitRunner, err := input.GitRunner.LocalForRepository(ctx, input.RepoDir)
 	if err != nil {
@@ -60,26 +59,14 @@ func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 	comparison := Comparison{Repository: input.RepoDir, Mode: input.Mode, Old: resolution.ResolvedBase,
 		Head: resolution.ResolvedHead, BaseIsEmpty: resolution.BaseIsEmpty}
 	comparison.ID = contentHash(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%t", comparison.Repository, comparison.Mode, comparison.Old, comparison.Head, comparison.BaseIsEmpty))
-	current := tool.FileReader{RepoDir: input.RepoDir, Mode: tool.ModeCommit, Ref: comparison.Head, Runner: gitRunner}
-	previous := current
-	if !workspace {
-		current.Runner = gitRunner.WithAttributeSource(comparison.Head)
-	}
-	previous.Ref = comparison.Old
+	current := tool.FileReader{RepoDir: input.RepoDir, Mode: tool.ModeCommit, Ref: comparison.Head, Runner: gitRunner.WithAttributeSource(comparison.Head)}
+	previous := tool.FileReader{RepoDir: input.RepoDir, Mode: tool.ModeEmpty, Runner: gitRunner}
 	if !comparison.BaseIsEmpty {
+		previous.Mode = tool.ModeCommit
+		previous.Ref = comparison.Old
 		previous.Runner = gitRunner.WithAttributeSource(comparison.Old)
 	}
-	if comparison.BaseIsEmpty {
-		previous.Mode = tool.ModeEmpty
-	}
-	var access *tool.CodeAccess
-	if workspace {
-		current.Mode = tool.ModeWorkspace
-		current.RegularWorkspaceOnly = true
-		access, err = tool.NewWorkspaceCodeAccess(current, previous)
-	} else {
-		access, err = tool.NewComparisonCodeAccess(current, previous)
-	}
+	access, err := tool.NewComparisonCodeAccess(current, previous)
 	if err != nil {
 		return nil, err
 	}
@@ -88,12 +75,6 @@ func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 	for side, reader := range map[string]tool.FileReader{"old": previous, "new": current} {
 		result.allowed[side] = map[string]bool{}
 		if reader.Mode == tool.ModeEmpty {
-			continue
-		}
-		if reader.Mode == tool.ModeWorkspace {
-			if err := result.loadWorkspaceScope(ctx, input, gitRunner); err != nil {
-				return nil, err
-			}
 			continue
 		}
 		if _, err := gitRunner.Output(ctx, input.RepoDir, "cat-file", "-e", reader.Ref+"^{commit}"); err != nil {
@@ -152,7 +133,7 @@ func safePath(filePath string) bool {
 	if allowedext.IsSecretPath(filePath) || path.Base(lower) == ".git-credentials" || strings.HasSuffix("/"+lower, "/.docker/config.json") {
 		return false
 	}
-	if !tool.ValidWorkspacePath(filePath) || strings.ContainsAny(filePath, "\x00\r\n\t") {
+	if !fs.ValidPath(filePath) || !filepath.IsLocal(filePath) || filePath == "." || strings.ContainsAny(filePath, "\\:\x00\r\n\t") {
 		return false
 	}
 	for _, component := range strings.Split(lower, "/") {
@@ -181,7 +162,7 @@ func (code *codeTools) execute(ctx context.Context, name string, args map[string
 	}
 	if name == "file_read" {
 		filePath, _ := args["file_path"].(string)
-		if !code.fileAllowed(side, filePath) {
+		if !code.allowed[side][filePath] {
 			observation.ErrorClass = "unavailable"
 			return observation, fmt.Errorf("file is unavailable in the authorized %s scope", side)
 		}
@@ -193,7 +174,7 @@ func (code *codeTools) execute(ctx context.Context, name string, args map[string
 		paths := slices.Sorted(maps.Keys(code.allowed[side]))
 		query, _ := args["query_name"].(string)
 		sensitive, _ := args["case_sensitive"].(bool)
-		matches, err := tool.MatchFileNames(ctx, paths, query, sensitive, 101, func(filePath string) bool { return code.fileAllowed(side, filePath) })
+		matches, err := tool.MatchFileNames(ctx, paths, query, sensitive, 101, func(filePath string) bool { return code.allowed[side][filePath] })
 		if err != nil {
 			return observation, err
 		}

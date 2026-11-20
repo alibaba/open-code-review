@@ -31,6 +31,9 @@ func validateAnalysisOptions(opts reviewOptions) error {
 	if opts.resume != "" || opts.preview {
 		return fmt.Errorf("--analysis cannot be combined with --resume or --preview")
 	}
+	if reviewModeFromOptions(opts) == session.ReviewModeWorkspace {
+		return fmt.Errorf("--analysis is not available in workspace mode; omit --analysis to review uncommitted changes, or use --commit <sha> or --from <base> [--to <head>] to analyze committed changes")
+	}
 	format := strings.ToLower(strings.TrimSpace(opts.outputFormat))
 	if format != "text" && format != "json" {
 		return fmt.Errorf("--analysis supports only --format text or json")

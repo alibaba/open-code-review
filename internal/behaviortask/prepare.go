@@ -6,7 +6,6 @@ package behaviortask
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -22,12 +21,8 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 		return input, err
 	}
 	runner := code.runner
-	workspace := input.Mode == "workspace"
-	baseArgs := []string{"--no-optional-locks", "-c", "core.quotepath=false"}
-	if !workspace {
-		baseArgs = append(baseArgs, "--attr-source="+input.Resolution.ResolvedHead)
-	}
-	if input.Resolution.BaseIsEmpty && !workspace {
+	baseArgs := []string{"--no-optional-locks", "-c", "core.quotepath=false", "--attr-source=" + input.Resolution.ResolvedHead}
+	if input.Resolution.BaseIsEmpty {
 		baseArgs = append(baseArgs, "show", "--format=", "--root", "--diff-merges=first-parent")
 	} else {
 		baseArgs = append(baseArgs, "diff")
@@ -37,16 +32,7 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 	if !input.Resolution.BaseIsEmpty {
 		endpoints = append(endpoints, input.Resolution.ResolvedBase)
 	}
-	if !workspace {
-		endpoints = append(endpoints, input.Resolution.ResolvedHead)
-	} else if input.Resolution.BaseIsEmpty {
-		empty, err := runner.Output(ctx, input.RepoDir, "hash-object", "-t", "tree", "--stdin")
-		if err != nil {
-			return input, err
-		}
-		endpoints = append(endpoints, strings.TrimSpace(string(empty)))
-	}
-	endpoints = append(endpoints, "--")
+	endpoints = append(endpoints, input.Resolution.ResolvedHead, "--")
 	readInventory := func(renameMode string) ([]model.Diff, error) {
 		args := append(slices.Clone(baseArgs), "--name-status", "-z", renameMode)
 		names, err := runner.Output(ctx, input.RepoDir, append(args, endpoints...)...)
@@ -55,49 +41,22 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 		}
 		return parseInventory(string(names))
 	}
-	renameMode := "--find-renames=100%"
-	if workspace {
-		renameMode = "--no-renames"
-	}
-	changes, err := readInventory(renameMode)
+	changes, err := readInventory("--find-renames=100%")
 	if err != nil {
 		return input, err
 	}
-	var untracked map[string]bool
-	if workspace {
-		changes, untracked, err = workspaceInventory(ctx, input, code, changes, endpoints)
-	} else if code.allowSimilarityCheck(changes) {
+	if code.allowSimilarityCheck(changes) {
 		changes, err = readInventory("--find-renames")
-	}
-	if err != nil {
-		return input, err
+		if err != nil {
+			return input, err
+		}
 	}
 	excluded := make([]bool, len(changes))
-	patchRepo := input.RepoDir
-	if workspace {
-		dir, err := os.MkdirTemp("", "ocr-worktree-*")
-		if err != nil {
-			return input, err
-		}
-		defer os.RemoveAll(dir)
-		gitDir, err := runner.Output(ctx, input.RepoDir, "rev-parse", "--absolute-git-dir")
-		if err != nil {
-			return input, err
-		}
-		if err := captureWorkspaceChanges(ctx, input, code, changes, untracked, dir); err != nil {
-			return input, err
-		}
-		baseArgs = append([]string{"--git-dir=" + strings.TrimSuffix(string(gitDir), "\n"), "--work-tree=."}, baseArgs...)
-		patchRepo = dir
-	}
 	var pathGroups [][]string
 	var renameGroups [][]string
 	for index, changed := range changes {
 		if (!changed.IsNew && !code.allowed["old"][changed.OldPath]) || (!changed.IsDeleted && !code.allowed["new"][changed.NewPath]) {
 			excluded[index] = true
-			continue
-		}
-		if untracked[changed.NewPath] || changed.IsBinary {
 			continue
 		}
 		if changed.IsRenamed {
@@ -117,7 +76,7 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 			patchArgs = append(patchArgs, "--find-renames", "-l0")
 		}
 		patchArgs = append(patchArgs, endpoints...)
-		patch, err := runner.Output(ctx, patchRepo, append(slices.Clone(patchArgs), batch...)...)
+		patch, err := runner.Output(ctx, input.RepoDir, append(slices.Clone(patchArgs), batch...)...)
 		if err != nil {
 			return fmt.Errorf("read scoped analysis diff: %w", err)
 		}
@@ -144,23 +103,12 @@ func PrepareInput(ctx context.Context, input Input) (Input, error) {
 			return input, err
 		}
 	}
-	input.Diffs = nil
 	for index, changed := range changes {
 		if err := ctx.Err(); err != nil {
 			return input, err
 		}
-		if excluded[index] || (changed.IsBinary && !untracked[changed.NewPath]) {
+		if excluded[index] {
 			input.Diffs = append(input.Diffs, changed)
-			continue
-		}
-		if untracked[changed.NewPath] {
-			actual, present, err := workspaceUntrackedPatch(ctx, input, changed, runner)
-			if err != nil {
-				return input, err
-			}
-			if present {
-				input.Diffs = append(input.Diffs, actual)
-			}
 			continue
 		}
 		actual, exists := byPath[changed.OldPath+"\x00"+changed.NewPath]

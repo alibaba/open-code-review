@@ -30,16 +30,13 @@ func TestSearchDeniedPathsNeverReturned(test *testing.T) {
 	git(test, input.RepoDir, "commit", "--allow-empty", "-qm", "Comparison head")
 	head := git(test, input.RepoDir, "rev-parse", "HEAD")
 	input.Diffs = nil
-	for _, mode := range []string{"range", "commit", "workspace"} {
+	for _, mode := range []string{"range", "commit"} {
 		for _, side := range []string{"old", "new"} {
 			test.Run(mode+"/"+side, func(test *testing.T) {
 				current := input
 				current.Mode = mode
 				current.Resolution.ResolvedBase = base
 				current.Resolution.ResolvedHead = head
-				if mode == "workspace" {
-					current.Resolution.ResolvedHead = ""
-				}
 				runner := newTestRunner(test, current, nil, nil)
 				result, err := runner.dispatch(test.Context(), "code_search", fmt.Sprintf(`{"search_text":"scope needle","side":%q}`, side))
 				if err != nil {

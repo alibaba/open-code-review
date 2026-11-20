@@ -26,14 +26,11 @@ func (provider searchBoundaryProvider) Execute(ctx context.Context, args map[str
 func TestSearchProviderBoundaryFiltering(test *testing.T) {
 	input := fixture(test)
 	input.Diffs = nil
-	for _, mode := range []string{"range", "commit", "workspace"} {
+	for _, mode := range []string{"range", "commit"} {
 		for _, side := range []string{"old", "new"} {
 			test.Run(mode+"/"+side, func(test *testing.T) {
 				current := input
 				current.Mode = mode
-				if mode == "workspace" {
-					current.Resolution.ResolvedHead = ""
-				}
 				code, err := prepareCodeTools(test.Context(), current)
 				if err != nil {
 					test.Fatal(err)
@@ -54,7 +51,7 @@ func TestSearchProviderBoundaryFiltering(test *testing.T) {
 					}
 					for _, raw := range patterns {
 						pattern, ok := raw.(string)
-						if !ok || !strings.HasPrefix(pattern, ":(top,literal)") || !code.fileAllowed(side, strings.TrimPrefix(pattern, ":(top,literal)")) {
+						if !ok || !strings.HasPrefix(pattern, ":(top,literal)") || !code.allowed[side][strings.TrimPrefix(pattern, ":(top,literal)")] {
 							test.Fatalf("unauthorized provider pattern: %v", raw)
 						}
 					}
@@ -214,38 +211,20 @@ func TestSearchPathsBoundaryIndexConflicts(test *testing.T) {
 	writeSearchBoundaryFile(test, input.RepoDir, "directory-to-file", "current needle\n")
 	writeSearchBoundaryFile(test, input.RepoDir, "index-only.go", "current needle\n")
 	git(test, input.RepoDir, "add", ".")
-	for _, mode := range []string{"range", "commit", "workspace"} {
+	for _, mode := range []string{"range", "commit"} {
 		for _, side := range []string{"old", "new"} {
 			test.Run(mode+"/"+side, func(test *testing.T) {
 				current := input
 				current.Mode = mode
-				if mode == "workspace" {
-					current.Resolution.ResolvedHead = ""
-				}
 				code, err := prepareCodeTools(test.Context(), current)
 				if err != nil {
 					test.Fatal(err)
 				}
-				live := mode == "workspace" && side == "new"
 				for _, name := range []string{"file-to-directory", "directory-to-file/child.go", "removed.go"} {
-					want := []string{name}
-					if live {
-						want = nil
-						if name == "file-to-directory" {
-							want = []string{"file-to-directory/current.go"}
-						}
-					}
-					assertSearchBoundaryPaths(test, code, side, []any{name}, want)
+					assertSearchBoundaryPaths(test, code, side, []any{name}, []string{name})
 				}
-				wantDirectory := []string{"directory-to-file/child.go"}
-				if live {
-					wantDirectory = nil
-				}
-				assertSearchBoundaryPaths(test, code, side, []any{"directory-to-file/"}, wantDirectory)
+				assertSearchBoundaryPaths(test, code, side, []any{"directory-to-file/"}, []string{"directory-to-file/child.go"})
 				wantAll := []string{"directory-to-file/child.go", "file-to-directory", "main.go", "removed.go", "renamed.go"}
-				if live {
-					wantAll = []string{"directory-to-file", "file-to-directory/current.go", "index-only.go", "main.go", "renamed.go"}
-				}
 				assertSearchBoundaryPaths(test, code, side, nil, wantAll)
 			})
 		}
@@ -268,14 +247,11 @@ func TestSearchPathsBoundaryWindowsAndLiteralPatterns(test *testing.T) {
 	git(test, input.RepoDir, "commit", "--allow-empty", "-qm", "Literal search comparison head")
 	input.Resolution.ResolvedHead = git(test, input.RepoDir, "rev-parse", "HEAD")
 	input.Diffs = nil
-	for _, mode := range []string{"range", "commit", "workspace"} {
+	for _, mode := range []string{"range", "commit"} {
 		for _, side := range []string{"old", "new"} {
 			test.Run(mode+"/"+side, func(test *testing.T) {
 				current := input
 				current.Mode = mode
-				if mode == "workspace" {
-					current.Resolution.ResolvedHead = ""
-				}
 				code, err := prepareCodeTools(test.Context(), current)
 				if err != nil {
 					test.Fatal(err)

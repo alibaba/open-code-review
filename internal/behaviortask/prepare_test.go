@@ -30,6 +30,13 @@ func TestExactPathspecsRespectArgumentBudget(test *testing.T) {
 	}
 }
 
+func TestPrepareRejectsWorkspace(test *testing.T) {
+	input := Input{Mode: "workspace", Resolution: diff.InputResolution{ResolvedBase: strings.Repeat("a", 40)}}
+	if _, err := PrepareInput(test.Context(), input); err == nil || !strings.Contains(err.Error(), "commit or range") {
+		test.Fatalf("expected unsupported comparison, got %v", err)
+	}
+}
+
 func TestPrepareFixedInput(test *testing.T) {
 	input := fixture(test)
 	if err := os.WriteFile(filepath.Join(input.RepoDir, "added.go"), []byte("new source\n"), 0600); err != nil {
