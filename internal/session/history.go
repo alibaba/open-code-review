@@ -316,6 +316,29 @@ func (sh *SessionHistory) RecordReviewItemFailed(filePath, oldPath, newPath, fin
 	}
 }
 
+// Close releases the session's file handles and liveness lock without writing
+// session_end, leaving the run readable as aborted. It is the counterpart to
+// Finalize for a run that is being abandoned rather than completed, and it is
+// idempotent so it is safe to defer alongside a Finalize on the normal path.
+//
+// A real crash needs none of this - the OS reclaims both - so the primary caller
+// for Close is a path that knows it is giving up: a cancelled review, or a
+// context the caller has already stopped caring about.
+func (sh *SessionHistory) Close() error {
+	if sh == nil {
+		return nil
+	}
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	if sh.persist == nil {
+		return nil
+	}
+	p := sh.persist
+	sh.persist = nil
+	p.flushAndClose()
+	return nil
+}
+
 // Finalize marks the session as complete, sets the end time, and persists the
 // final summary record. When a frozen manifest was stored via SetFinalManifest
 // it is embedded into session_end as run_manifest, which is the last physical
