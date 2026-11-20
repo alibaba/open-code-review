@@ -198,6 +198,21 @@ ocr config set custom_providers.ollama.api_key   ollama
 
 Ollama는 API 키를 무시하지만 커스텀 프로바이더에는 비어 있지 않은 `api_key`가 필요하므로(커스텀 프로바이더에는 환경 변수 대체가 없음) 아무 자리 표시자 값이나 설정하세요. 모델 자체는 네이티브 도구 호출을 지원해야 합니다. 모델을 고르기 전에 FAQ의 ["No tool calls parsed" (local models / Ollama)](../faq/#no-tool-calls-parsed-local-models-ollama)를 참고하세요.
 
+타사 OpenAI 호환 게이트웨이도 같은 방식으로 설정합니다. 예를 들어
+[DemonRoute](https://demonroute.com)는 `/v1` 엔드포인트를 가리키는 커스텀
+프로바이더로 사용할 수 있습니다:
+
+```bash
+ocr config set provider                                 demonroute
+ocr config set custom_providers.demonroute.url          https://api.demonroute.com/v1
+ocr config set custom_providers.demonroute.protocol     openai
+ocr config set custom_providers.demonroute.model        <model-id>
+ocr config set custom_providers.demonroute.api_key      "$DEMONROUTE_API_KEY"
+```
+
+`<model-id>`를 게이트웨이 카탈로그의 모델로 바꾼 뒤 `ocr llm test`로
+연결을 확인하세요.
+
 ### 타임아웃 {#timeouts}
 
 태스크 타임아웃과 개별 요청 타임아웃은 서로 독립적입니다:

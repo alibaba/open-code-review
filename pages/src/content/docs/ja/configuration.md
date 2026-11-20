@@ -235,6 +235,21 @@ Ollama は API key を無視しますが、カスタム provider は空でない
 ["No tool calls parsed"（ローカルモデル / Ollama）](../faq/#no-tool-calls-parsed-ollama)を
 参照してください。
 
+サードパーティの OpenAI 互換ゲートウェイも同じ手順です。たとえば
+[DemonRoute](https://demonroute.com) は `/v1` エンドポイントを指すカスタム
+provider として使えます：
+
+```bash
+ocr config set provider                                 demonroute
+ocr config set custom_providers.demonroute.url          https://api.demonroute.com/v1
+ocr config set custom_providers.demonroute.protocol     openai
+ocr config set custom_providers.demonroute.model        <model-id>
+ocr config set custom_providers.demonroute.api_key      "$DEMONROUTE_API_KEY"
+```
+
+`<model-id>` をゲートウェイのカタログにあるモデルに置き換え、`ocr llm test`
+で接続を確認してください。
+
 ### タイムアウト（Timeouts）
 
 タスクの制限時間とリクエスト単位のタイムアウトは独立しています。

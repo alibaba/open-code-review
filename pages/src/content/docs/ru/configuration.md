@@ -248,6 +248,21 @@ Ollama игнорирует API-ключ, однако для пользоват
 раздел [«Не удалось разобрать вызовы инструментов» (локальные модели / Ollama)](../faq/#no-tool-calls-parsed-local-models-ollama)
 в FAQ.
 
+Сторонние OpenAI-совместимые шлюзы настраиваются так же. Например,
+[DemonRoute](https://demonroute.com) можно добавить как пользовательский
+провайдер с эндпоинтом `/v1`:
+
+```bash
+ocr config set provider                                 demonroute
+ocr config set custom_providers.demonroute.url          https://api.demonroute.com/v1
+ocr config set custom_providers.demonroute.protocol     openai
+ocr config set custom_providers.demonroute.model        <model-id>
+ocr config set custom_providers.demonroute.api_key      "$DEMONROUTE_API_KEY"
+```
+
+Замените `<model-id>` на модель из каталога шлюза и проверьте соединение
+командой `ocr llm test`.
+
 ### Тайм-ауты
 
 Тайм-аут задачи и тайм-аут отдельного запроса независимы:
