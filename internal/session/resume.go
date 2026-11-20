@@ -322,10 +322,18 @@ func normalizeScanPaths(paths []string) []string {
 	seen := make(map[string]struct{}, len(paths))
 	for _, p := range paths {
 		p = strings.TrimSpace(p)
-		p = strings.TrimPrefix(p, "./")
-		p = strings.TrimSuffix(filepath.ToSlash(p), "/")
 		if p == "" {
 			continue
+		}
+		// Match scan.NewProvider's selector semantics: a root selector covers
+		// the whole repository even when narrower paths accompany it.
+		p = filepath.ToSlash(p)
+		for strings.HasPrefix(p, "./") {
+			p = strings.TrimPrefix(p, "./")
+		}
+		p = strings.TrimSuffix(p, "/")
+		if p == "" || p == "." {
+			return nil
 		}
 		if _, ok := seen[p]; ok {
 			continue
