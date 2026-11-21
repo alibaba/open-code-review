@@ -5,6 +5,7 @@ package agent
 
 import (
 	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -63,10 +64,11 @@ func (a *Agent) selectFiles(diffs []model.Diff) []fileDecision {
 }
 
 // whyExcluded applies the static gates — binary, the built-in secret paths,
-// user exclude/include, then the extension allowlist and default-path patterns
-// — and returns the specific reason a file is excluded, or ExcludeNone when it
-// survives all of them. It answers only what the path and the diff header say;
-// the size gate lives in selectFiles because it needs the resolved token limit.
+// user exclude/include, the extension allowlist, default-path patterns, then
+// the generated-code header — and returns the specific reason a file is
+// excluded, or ExcludeNone when it survives all of them. It answers only what
+// the path, the diff header and the already-loaded new file content say; the
+// size gate lives in selectFiles because it needs the resolved token limit.
 func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 	if d.IsBinary {
 		return ExcludeBinary
@@ -98,7 +100,29 @@ func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 		return ExcludeDefaultPath
 	}
 
+	if isGenerated(d) {
+		return ExcludeGenerated
+	}
+
 	return ExcludeNone
+}
+
+// isGenerated reports whether a changed file opens with a generated-code
+// header both before and after the change. The header is content the change
+// author controls, so it only counts when the earlier version vouches for it:
+// that version is rebuilt from the diff, which keeps a change from hiding a
+// hand-written file by prepending a marker or by moving its code below an
+// existing one. A new or renamed file is always reviewed: it has no earlier
+// version at this path to vouch for it, and a Go file's init() runs without
+// any reviewed file calling it. So is a file whose diff does not fit its new
+// content.
+func isGenerated(d model.Diff) bool {
+	path := effectivePath(d)
+	if d.IsNew || d.IsRenamed || !allowedext.IsGeneratedFile(path, d.NewFileContent) {
+		return false
+	}
+	old, ok := diff.OldContent(d.NewFileContent, d.Diff)
+	return ok && allowedext.IsGeneratedFile(path, old)
 }
 
 // selectionCounts is the run-level rollup of one selection pass.
