@@ -68,11 +68,21 @@ func ExportSession(out io.Writer, root, encodedRepo, sessionID string) error {
 		name = encodedRepo
 	}
 
+	var analysis *analysisPage
+	if vs.Summary.AnalysisEnabled {
+		directory, err := openAnalysis(root, encodedRepo, sessionID)
+		if err == nil {
+			defer directory.Close()
+		}
+		page := readAnalysis(directory, sessionID)
+		analysis = &page
+	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, sessionPageData{
 		EncodedRepo: encodedRepo,
 		RepoName:    name,
 		Session:     vs,
+		Analysis:    analysis,
 		Static:      true,
 		InlineCSS:   template.CSS(css),
 		InlineJS:    template.JS(js),

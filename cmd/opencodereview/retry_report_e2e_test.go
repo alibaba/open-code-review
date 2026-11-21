@@ -4,10 +4,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -22,16 +26,64 @@ import (
 // runReviewCapturingBoth runs a review and returns (stdout, stderr, error).
 // Both streams are needed because the report has two possible exits and the
 // contract is that exactly one of them carries it.
-func runReviewCapturingBoth(t *testing.T, repoDir, format string) (string, string, error) {
+func runReviewCapturingBoth(t *testing.T, repoDir, format string, extraArgs ...string) (string, string, error) {
 	t.Helper()
 	var err error
 	var out string
 	errOut := captureStderr(t, func() {
 		out = captureStdout(t, func() {
-			err = runReview([]string{"--repo", repoDir, "--from", "HEAD~1", "--to", "HEAD", "--format", format})
+			args := []string{"--repo", repoDir, "--from", "HEAD~1", "--to", "HEAD", "--format", format}
+			err = runReview(append(args, extraArgs...))
 		})
 	})
 	return out, errOut, err
+}
+
+func TestReviewE2E_LocalBudgetGraceFailureKeepsSuccessfulExit(t *testing.T) {
+	repo := retryTestRepo(t)
+	server := newFakeLLM()
+	var mainCalls atomic.Int32
+	startFakeLLM(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if bytes.Contains(body, []byte(`"tools"`)) {
+			switch mainCalls.Add(1) {
+			case 2:
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(writer, `{"id":"over_budget","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"Not finished"}],"stop_reason":"end_turn","usage":{"input_tokens":100001,"output_tokens":5}}`)
+				return
+			case 3:
+				writer.Header().Set("Content-Type", "application/json")
+				writer.WriteHeader(http.StatusPaymentRequired)
+				_, _ = io.WriteString(writer, `{"type":"error","error":{"type":"invalid_request_error","message":"payment required"}}`)
+				return
+			}
+		}
+		request.Body = io.NopCloser(bytes.NewReader(body))
+		server.ServeHTTP(writer, request)
+	}))
+	out, stderr, err := runReviewCapturingBoth(t, repo, "json", "--effort", "low", "--no-filter", "--concurrency", "1", "--max-tokens-budget", "100000")
+	if err != nil {
+		t.Fatalf("budget-only partial review must exit successfully: %v\n%s", err, stderr)
+	}
+	var got jsonOutput
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if mainCalls.Load() < 3 || !got.Summary.BudgetExceeded || got.Manifest == nil || got.Manifest.TerminalState != session.StatePartial || len(got.Manifest.Coverage.Completed) == 0 || len(got.Manifest.Coverage.Failed) == 0 || len(got.Manifest.Coverage.Completed)+len(got.Manifest.Coverage.Failed) != len(markers) {
+		t.Fatalf("unexpected review result after %d requests: %s", mainCalls.Load(), out)
+	}
+	for _, item := range got.Manifest.Coverage.Failed {
+		if item.Classification != session.FailureBudget {
+			t.Errorf("%s: got %s, want budget", item.Path, item.Classification)
+		}
+	}
+	if got.RetryReport == nil || got.RetryReport.FailedRequests != 1 {
+		t.Errorf("final request failure missing from retry report: %+v", got.RetryReport)
+	}
 }
 
 func TestReviewE2E_CleanRunEmitsNoRetryReport(t *testing.T) {

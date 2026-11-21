@@ -463,8 +463,8 @@ func TestCompressionBudgetAtWarningLimit(test *testing.T) {
 	summary := "old evidence"
 	client := &fakeLLMClient{response: &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summary}}}}}
 	runner := NewRunner(Deps{LLMClient: client, Session: session.New(test.TempDir(), "main", "fake", session.SessionOptions{})}, task)
-	continued := runner.addNextMessage(test.Context(), "", calls, llm.NativeTurn{}, "", []ToolCallResult{{ToolCallID: "call", Result: latest}}, &messages, "task", &compressionState{})
-	if !continued || CountMessagesTokens(messages) >= allowance || messages[len(messages)-1].ExtractText() != latest {
+	stop := runner.addNextMessage(test.Context(), "", calls, llm.NativeTurn{}, "", []ToolCallResult{{ToolCallID: "call", Result: latest}}, &messages, "task", &compressionState{})
+	if stop != StopNone || CountMessagesTokens(messages) >= allowance || messages[len(messages)-1].ExtractText() != latest {
 		test.Fatal("the loop must try compression at equality and retain the latest result when it fits")
 	}
 }

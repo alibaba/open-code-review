@@ -45,15 +45,26 @@ func (p *FileFindProvider) execute(ctx context.Context, args map[string]any) (st
 	}
 
 	caseSensitive, _ := args["case_sensitive"].(bool)
-	// Normalize Windows-style backslash separators so subpath queries
-	// (e.g. `pkg\util.go`) resolve identically on every platform.
-	query := strings.ReplaceAll(queryName, "\\", "/")
-
 	files, err := p.listGitFiles(ctx)
 	if err != nil {
 		return "", err
 	}
 
+	matched, err := MatchFileNames(ctx, files, queryName, caseSensitive, fileFindMaxCount, nil)
+	if err != nil {
+		return "", err
+	}
+	if len(matched) == 0 {
+		return "// The file was not found", nil
+	}
+	return strings.Join(matched, "\n"), nil
+}
+
+func MatchFileNames(ctx context.Context, files []string, queryName string, caseSensitive bool, limit int, allowed func(string) bool) ([]string, error) {
+	if strings.TrimSpace(queryName) == "" {
+		return nil, nil
+	}
+	query := strings.ReplaceAll(queryName, "\\", "/")
 	// Precompute the query comparison form once; the file list can be
 	// large, so avoid recomputing strings.ToLower(query) on every iter.
 	var queryCmp string
@@ -66,6 +77,9 @@ func (p *FileFindProvider) execute(ctx context.Context, args map[string]any) (st
 	// 1. First pass: match against base filename (maintains precision for pure filename queries).
 	var matched []string
 	for _, f := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		base := f
 		if idx := strings.LastIndex(f, "/"); idx != -1 {
 			base = f[idx+1:]
@@ -74,10 +88,10 @@ func (p *FileFindProvider) execute(ctx context.Context, args map[string]any) (st
 		if !caseSensitive {
 			baseCmp = strings.ToLower(base)
 		}
-		if strings.Contains(baseCmp, queryCmp) {
+		if strings.Contains(baseCmp, queryCmp) && (allowed == nil || allowed(f)) {
 			matched = append(matched, f)
 		}
-		if len(matched) >= fileFindMaxCount {
+		if len(matched) >= limit {
 			break
 		}
 	}
@@ -86,23 +100,23 @@ func (p *FileFindProvider) execute(ctx context.Context, args map[string]any) (st
 	// (enables directory-scoped queries such as `pkg/util` or `internal/diff`).
 	if len(matched) == 0 {
 		for _, f := range files {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			pathCmp := f
 			if !caseSensitive {
 				pathCmp = strings.ToLower(f)
 			}
-			if strings.Contains(pathCmp, queryCmp) {
+			if strings.Contains(pathCmp, queryCmp) && (allowed == nil || allowed(f)) {
 				matched = append(matched, f)
 			}
-			if len(matched) >= fileFindMaxCount {
+			if len(matched) >= limit {
 				break
 			}
 		}
 	}
 
-	if len(matched) == 0 {
-		return "// The file was not found", nil
-	}
-	return strings.Join(matched, "\n"), nil
+	return matched, nil
 }
 
 // listGitFiles returns tracked and untracked files (respecting .gitignore) via git ls-files.

@@ -15,7 +15,7 @@ func TestLoadDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load default tools: %v", err)
 	}
-	expected := []string{"task_done", "code_comment", "code_search", "file_read", "file_read_diff", "file_find"}
+	expected := []string{"task_done", "code_comment", "code_search", "file_read", "file_read_diff", "file_find", "context_read", "submit_analysis"}
 	if len(tools) != len(expected) {
 		t.Fatalf("got %d tools, want %d", len(tools), len(expected))
 	}
