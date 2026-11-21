@@ -64,7 +64,17 @@ func outputAnalysisText(writer io.Writer, output *analysisOutput) {
 	if report.Status == "completed" {
 		fmt.Fprintln(writer, "\nAnalysis: completed")
 	}
-	if report.ArtifactDir != "" {
+	if usage := report.Usage; usage.TotalTokens > 0 {
+		fmt.Fprintf(writer, "Analysis tokens: ~%d", usage.TotalTokens)
+		if usage.InputTokens > 0 || usage.OutputTokens > 0 {
+			fmt.Fprintf(writer, " (input: ~%d, output: ~%d)", usage.InputTokens, usage.OutputTokens)
+		}
+		if usage.CacheReadTokens > 0 || usage.CacheWriteTokens > 0 {
+			fmt.Fprintf(writer, ", cache(read: ~%d, write: ~%d)", usage.CacheReadTokens, usage.CacheWriteTokens)
+		}
+		fmt.Fprintln(writer)
+	}
+	if report.ArtifactDir != "" && (report.Status == "failed" || report.Status == "partial" || report.DeclaredCompletion == "partial") {
 		fmt.Fprintf(writer, "Evidence: %s\n", sanitizeTerminal(report.ArtifactDir))
 	}
 }
