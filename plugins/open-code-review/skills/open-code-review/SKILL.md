@@ -3,7 +3,8 @@ name: open-code-review
 description: >
   Review workspace changes, PRs, commits, or branch comparisons with OCR's
   native review pipeline and independently configured model provider.
-  Produces line-level findings; fixes code only when requested. Use when
+  Produces line-level findings and explains the behavior and impact of
+  committed changes by default. Fixes code only when requested. Use when
   the user wants native mode or has an OCR provider configured. To use the
   host agent's model without separate OCR credentials, choose
   open-code-review-delegate instead.
@@ -36,10 +37,10 @@ Analyze the review target (commits, branch, or changes) to extract concise busin
 
 **Do not pre-check whether `ocr` is installed** — skip probes like `command -v ocr` or `ocr --version`. Assume the CLI is available and run the review directly; that saves a tool call on the common path. Only if the review fails with `command not found` should you install it per Troubleshooting.
 
-Run the OCR command with appropriate flags. **Always pass business context via `--background`** when available:
+For a workspace review, omit revision flags and `--analysis`. **Pass business context via `--background`** when available:
 
 ```bash
-ocr review --audience agent --background "business context here" [user-args]
+ocr review --audience agent --background "business context here"
 ```
 
 **Argument handling:**
@@ -60,10 +61,22 @@ ocr review --audience agent --background "business context here" [user-args]
 | User says | Command to run |
 |-----------|---------------|
 | "review my changes" / "review the working copy" | `ocr review --audience agent -b "context"` |
-| "review this PR" / "review feature branch" | `ocr review --audience agent -b "context" --from main --to <branch>` |
-| "review the current branch against main" | `ocr review --audience agent -b "context" --from main` |
-| "review commit abc123" | `ocr review --audience agent -b "context" --commit abc123` |
+| "review this PR" / "review feature branch" | `ocr review --audience agent -b "context" --from <base> --to <branch> --analysis --format json` |
+| "review the current branch against main" | `ocr review --audience agent -b "context" --from main --analysis --format json` |
+| "review commit abc123" | `ocr review --audience agent -b "context" --commit abc123 --analysis --format json` |
 | "what would be reviewed?" (dry-run) | `ocr review --preview` |
+
+**Default behavior and impact analysis (OCR v1.14.0+):**
+
+For a fresh commit or range review (`--commit` or `--from`), include `--analysis` in the review command without waiting for the user to ask. OCR runs both tasks in one invocation. Use JSON for agent consumption unless the caller specifies another format. Preserve the caller's repository, revisions, background, and output path. For example, given a pinned range:
+
+```bash
+ocr review --repo "$WORKTREE" --from "$MERGE_BASE" --to "$HEAD_OID" \
+  --background "$BACKGROUND" --audience agent --analysis --format json \
+  --output "$RUN_DIR/result.json"
+```
+
+Omit `--analysis` for workspace reviews, `--preview`, `--resume`, or `--format sarif`, and when the user explicitly asks to skip analysis. If the user explicitly requests analysis in an unsupported mode, explain the conflict rather than changing the target or format. If the CLI rejects `--analysis` as unknown, ask before upgrading to v1.14.0 or later; do not silently retry without it.
 
 **Output mode:**
 
@@ -75,6 +88,11 @@ ocr review --audience agent --background "business context here" [user-args]
 ### Step 3: Report
 
 OCR output includes structured `severity` (critical / high / medium / low) and `category` (bug / security / performance / maintainability / test / style / documentation / other) on each comment. Present results grouped by severity, discarding `low` severity items that are likely false positives or nitpicks.
+
+For combined runs, report Review and Analysis separately. Use these fields in `ocr.review-with-analysis/v2` JSON; if the caller requested text, use the Review summary and appended Analysis Report instead:
+
+- **Review:** report findings from `comments` and coverage from `review_status` and `manifest.coverage` when available. A zero exit code or empty `comments` does not prove all selected files were reviewed.
+- **Analysis:** summarize the before/after behavior, affected workflows, and any decisions supported by `analysis`. Distinguish `analysis_meta.execution_status` from `analysis_meta.declared_completion` (the model's assessment). For example, `completed` with declared `partial` means the investigation ran but left questions open. If analysis was skipped or failed, say why when known and retain the Review findings; do not infer that behavior is unchanged. If the combined schema or analysis metadata is missing, report analysis as unverified.
 
 ### Step 4: Fix
 
@@ -127,7 +145,7 @@ Present results grouped by severity using this template:
   > Recommendation: How to fix (if applicable)
 ```
 
-If no critical, high, or medium severity issues remain after filtering, state: "Review complete — no critical, high, or medium issues found in N files."
+Only use "Review complete — no critical, high, or medium issues found in N files" when Review coverage supports it. Otherwise state the known coverage and gaps. For combined runs, also report the Analysis outcome separately.
 
 **Handling mispositioned comments:**
 
@@ -193,7 +211,8 @@ Beyond the common flags above, `ocr review` exposes a few groups of controls. Ru
 **Budget**
 
 - `--max-tokens <n>` — per-group prompt ceiling; defaults to the configured value or the template default (`200000`).
-- `--max-tokens-budget <n>` — cap total input + output tokens for the run. Checked before every LLM round: a group already over budget gets one final round to submit findings, no further groups are dispatched, partial results are still published, and skipped files are reported as `failed(budget)`.
+- `--max-tokens-budget <n>` — cap total input + output tokens for Review. Checked before every LLM round: a group already over budget gets one final round to submit findings, no further groups are dispatched, partial results are still published, and skipped files are reported as `failed(budget)`.
+- `--analysis-max-tokens-budget <n>` — separate soft token limit for Analysis only (default `0`, unlimited). Its usage is reported in `analysis_meta.usage`, not the Review summary.
 - `--no-filter` — keep all review comments and skip the LLM post-filtering call.
 
 ## Gotchas
@@ -210,13 +229,7 @@ Beyond the common flags above, `ocr review` exposes a few groups of controls. Ru
 
 ## Validation
 
-After the review completes, verify success by checking:
-
-1. The command exited with code 0
-2. Comments were generated (or "No comments generated" message appears)
-3. Warnings (if any) are displayed in stderr
-
-If errors occurred, check the stderr warnings for details about which files failed and why.
+Check the exit code, output, and stderr for failures or coverage gaps. The exit code reflects Review, not Analysis: use the separate outcomes in Step 3 for combined runs.
 
 ## Troubleshooting
 
