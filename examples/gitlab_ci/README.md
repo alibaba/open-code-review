@@ -241,13 +241,16 @@ script:
         f.write(result.stderr)
 
     print("OCR review completed.")
-    WRAPPER_SCRIPT
 
-  # Post review comments to MR
-  - python3 post_review.py .ocr/ocr-result.json
+    # Post only after a review: a skipped run writes no result, and
+    # post_review.py fails when the result is missing.
+    sys.exit(subprocess.run([sys.executable, "post_review.py", ".ocr/ocr-result.json"]).returncode)
+    WRAPPER_SCRIPT
 ```
 
 The key logic: the Python wrapper checks for existing OCR comments before running `ocr review`. If found, it exits early with `sys.exit(0)` before consuming any LLM tokens. To re-trigger a review, users can manually delete the previous OCR comments.
+
+The wrapper also runs `post_review.py` itself, only after a review, and exits with its status, so a failed post still fails the job. Do not add a separate posting step after the wrapper: `post_review.py` exits non-zero when the review result is missing, so that step would fail every push to an already-reviewed MR.
 
 ### Self-hosted GitLab
 
