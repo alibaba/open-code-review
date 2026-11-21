@@ -1576,6 +1576,9 @@ class BuildConfigTest(unittest.TestCase):
 
 
 class StatsGatingTest(unittest.TestCase):
+    def test_zero_stats_marks_summary_unpublished(self):
+        self.assertTrue(pr.ZERO_STATS["summary_failed"])
+
     def test_write_stats_file(self):
         stats = {"total": 5, "inline": 3, "summary": 1, "routed": 0, "skipped": 1,
                  "failed": 0, "summary_url": "https://x/1"}
@@ -1649,7 +1652,7 @@ class MainAuthHeaderTest(unittest.TestCase):
         "CI_MERGE_REQUEST_IID": "2",
     }
 
-    def run_main_with_captured_poster(self, env_overrides, result=None):
+    def run_main_with_captured_poster(self, env_overrides, result=None, poster=None, raw_input=None):
         env = dict(self.BASE_ENV)
         env.update(env_overrides)
         captured = {}
@@ -1662,13 +1665,19 @@ class MainAuthHeaderTest(unittest.TestCase):
 
         import tempfile as tf
         f = tf.NamedTemporaryFile("w", suffix=".json", delete=False)
-        json.dump(result or {"comments": [comment()]}, f)
+        if raw_input is None:
+            json.dump(result or {"comments": [comment()]}, f)
+        else:
+            f.write(raw_input)
         f.close()
         self.addCleanup(os.unlink, f.name)
 
         stats_path = tf.NamedTemporaryFile("w", suffix=".env", delete=False)
         stats_path.close()
         self.addCleanup(os.unlink, stats_path.name)
+        stderr_path = tf.NamedTemporaryFile("w", suffix=".log", delete=False)
+        stderr_path.close()
+        self.addCleanup(os.unlink, stderr_path.name)
 
         # Canned urlopen so the real GitLabPoster never hits the network (the
         # host "gitlab.example" has no DNS and would stall on every read/write).
@@ -1680,12 +1689,14 @@ class MainAuthHeaderTest(unittest.TestCase):
                 return FakeResponse(b"[]")
             return FakeResponse(b'{"id": 1, "web_url": "https://gitlab.example/note/1"}')
 
+        poster_factory = CapturingPoster if poster is None else lambda *a, **kw: poster
         with mock.patch.dict(os.environ, env, clear=True), \
-                mock.patch.object(pr, "make_poster", CapturingPoster), \
+                mock.patch.object(pr, "make_poster", poster_factory), \
                 mock.patch.object(pr, "fetch_diff_refs", lambda *a, **kw: DIFF_REFS), \
                 mock.patch.object(pr.urllib.request, "urlopen", fake_urlopen), \
                 mock.patch.object(pr, "_sleep", lambda _s: None):
-            rc = pr.main([f.name, "--stats-file", stats_path.name])
+            rc = pr.main([f.name, "--stats-file", stats_path.name,
+                          "--stderr-log", stderr_path.name])
         return rc, captured
 
     def test_private_token_when_gitlab_api_token_set(self):
@@ -1736,6 +1747,53 @@ class MainAuthHeaderTest(unittest.TestCase):
             {"GITLAB_API_TOKEN": "glpat-xxxx", "OCR_FAIL_ON_SEVERITY": "critical"},
             result={"comments": [comment(severity="critical")]},
         )
+        self.assertEqual(rc, 1)
+
+    def test_inline_posting_failure_returns_nonzero(self):
+        rec = Recorder(disc_outcomes=[{
+            "success": False, "rate_limit_remaining": None,
+            "is_rate_limit_exhausted": False, "failed_reason": "boom",
+            "http_status": 500, "error_body": "server error",
+        }])
+        rc, captured = self.run_main_with_captured_poster(
+            {"GITLAB_API_TOKEN": "glpat-xxxx"}, poster=rec)
+        self.assertEqual(rc, 1)
+        self.assertIn("Failed to post inline: 1 comment(s)", rec.final_summary_body)
+
+    def test_summary_failure_returns_nonzero(self):
+        rec = Recorder(notes_read_failure=True)
+        rc, captured = self.run_main_with_captured_poster(
+            {"GITLAB_API_TOKEN": "glpat-xxxx"},
+            result={"comments": []}, poster=rec)
+        self.assertEqual(rc, 1)
+
+    def test_summary_update_failure_returns_nonzero_with_stale_url(self):
+        existing = [{"id": 42, "body": "%s\nold" % pr.SUMMARY_MARKER,
+                     "web_url": "https://gitlab.example/note/42"}]
+        rec = Recorder(notes=existing,
+                       update_outcomes=[{"success": False, "url": None}])
+        rc, captured = self.run_main_with_captured_poster(
+            {"GITLAB_API_TOKEN": "glpat-xxxx"},
+            result={"comments": []}, poster=rec)
+        self.assertEqual(rc, 1)
+
+    def test_summary_only_finding_returns_zero(self):
+        rc, captured = self.run_main_with_captured_poster(
+            {"GITLAB_API_TOKEN": "glpat-xxxx"},
+            result={"comments": [comment(end_line=0)]}, poster=Recorder())
+        self.assertEqual(rc, 0)
+
+    def test_summary_success_without_url_returns_zero(self):
+        rec = Recorder(note_outcomes=[{"success": True, "url": None, "id": 1001}])
+        rc, captured = self.run_main_with_captured_poster(
+            {"GITLAB_API_TOKEN": "glpat-xxxx"},
+            result={"comments": []}, poster=rec)
+        self.assertEqual(rc, 0)
+
+    def test_malformed_json_returns_nonzero(self):
+        rc, captured = self.run_main_with_captured_poster(
+            {"GITLAB_API_TOKEN": "glpat-xxxx"},
+            raw_input="{not json", poster=Recorder())
         self.assertEqual(rc, 1)
 
 

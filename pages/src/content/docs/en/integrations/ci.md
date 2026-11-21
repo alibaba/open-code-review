@@ -468,9 +468,14 @@ if any("OpenCodeReview" in n.get("body", "") for n in notes):
     print("OCR already reviewed this MR. Skipping to save tokens.")
     sys.exit(0)
 
-# ...otherwise call `ocr review ...` as usual and write the JSON to
-# the file the posting step expects.
+# ...otherwise call `ocr review ...` as usual, write the JSON, then run
+# post_review.py here and exit with its status.
 ```
+
+Run `post_review.py` from the wrapper, after the review, and remove the
+template's separate posting step. A skipped run writes no result, and
+`post_review.py` exits non-zero when the result is missing, so a
+separate posting step would fail every push to an already-reviewed MR.
 
 To force a re-review after this, delete the previous OCR notes from
 the MR — the next pipeline run will see no OCR notes and proceed.

@@ -422,9 +422,13 @@ if any("OpenCodeReview" in n.get("body", "") for n in notes):
     print("OCR already reviewed this MR. Skipping to save tokens.")
     sys.exit(0)
 
-# ...otherwise call `ocr review ...` as usual and write the JSON to
-# the file the posting step expects.
+# ...otherwise call `ocr review ...` as usual, write the JSON, then run
+# post_review.py here and exit with its status.
 ```
+
+在 wrapper 中完成评审后再运行 `post_review.py`，并删除模板中单独的张贴步骤。
+跳过评审的运行不会写出结果，而 `post_review.py` 在结果缺失时以非零状态退出，
+单独的张贴步骤会让已评审 MR 的每次推送都失败。
 
 要在此之后强制复审，从 MR 删除之前的 OCR note——下次流水线运行会看不到 OCR
 note，便会继续。

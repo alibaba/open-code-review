@@ -466,9 +466,15 @@ if any("OpenCodeReview" in n.get("body", "") for n in notes):
     print("OCR already reviewed this MR. Skipping to save tokens.")
     sys.exit(0)
 
-# ...otherwise call `ocr review ...` as usual and write the JSON to
-# the file the posting step expects.
+# ...otherwise call `ocr review ...` as usual, write the JSON, then run
+# post_review.py here and exit with its status.
 ```
+
+Запускайте `post_review.py` из обёртки, после ревью, и удалите из шаблона
+отдельный этап публикации. Пропущенный запуск не записывает результат, а
+`post_review.py` завершается с ненулевым кодом, если результата нет, поэтому
+отдельный этап публикации будет приводить к сбою задачи при каждой отправке в
+MR, который уже прошёл ревью.
 
 Чтобы принудительно выполнить повторное ревью, удалите предыдущие заметки OCR
 из MR. При следующем запуске конвейер не найдёт заметок OCR и продолжит работу.
