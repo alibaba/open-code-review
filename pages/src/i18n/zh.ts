@@ -291,6 +291,7 @@ export const zh: TranslationKeys = {
   'docs.sidebar.configuration': '配置',
   'docs.sidebar.cliReference': 'CLI 参考',
   'docs.sidebar.reviewRules': '评审规则',
+  'docs.sidebar.reviewingRequirements': '结合需求进行评审',
   'docs.sidebar.architecture': '架构',
   'docs.sidebar.tools': '工具',
   'docs.sidebar.mcp': 'MCP 服务器',

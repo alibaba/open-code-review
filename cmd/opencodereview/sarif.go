@@ -207,7 +207,7 @@ func sarifResults(comments []model.LlmComment) []sarifResult {
 		}
 		results = append(results, r)
 	}
-	return results
+	return inCommentSeverityOrder(comments, results)
 }
 
 // sarifResultFromComment maps a single LlmComment to a SARIF result. Field

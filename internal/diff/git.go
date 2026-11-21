@@ -270,7 +270,14 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 	if err != nil {
 		return DiffSet{}, err
 	}
-	return p.partitionDiffs(diffs), nil
+	var patterns GitignorePatterns
+	if p.mode != ModeWorkspace && len(diffs) > 0 {
+		patterns, err = LoadGitignoreAtRef(ctx, p.repoDir, ref, p.runner)
+		if err != nil {
+			return DiffSet{}, err
+		}
+	}
+	return partitionDiffs(diffs, patterns), nil
 }
 
 // loadGitignorePatterns reads and parses .gitignore patterns from the repo root.
@@ -279,7 +286,11 @@ func (p *Provider) loadGitignorePatterns() []string {
 	if err != nil {
 		return nil
 	}
-	var patterns []string
+	return parseGitignorePatterns(data)
+}
+
+func parseGitignorePatterns(data []byte) GitignorePatterns {
+	var patterns GitignorePatterns
 	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -300,12 +311,12 @@ func (p *Provider) loadGitignorePatterns() []string {
 // correct under last-match-wins. Treating negations as unmatchable made every
 // file in such a repository look excluded, so a review silently covered nothing.
 func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bool {
-	if isProviderDirExcluded(relPath) {
-		return true
-	}
+	return isProviderDirExcluded(relPath) || GitignorePatterns(gitignorePatterns).Matches(relPath)
+}
 
+func (patterns GitignorePatterns) Matches(relPath string) bool {
 	excluded := false
-	for _, pat := range gitignorePatterns {
+	for _, pat := range patterns {
 		body, negated := strings.CutPrefix(pat, "!")
 		if body == "" {
 			continue
@@ -429,12 +440,7 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 //
 // In workspace mode, ignored untracked files are already filtered out.
 // Applying .gitignore here would incorrectly drop tracked changes.
-func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
-	var patterns []string
-	honorGitignore := p.mode != ModeWorkspace
-	if honorGitignore {
-		patterns = p.loadGitignorePatterns()
-	}
+func partitionDiffs(diffs []model.Diff, patterns GitignorePatterns) DiffSet {
 	result := DiffSet{
 		Included: make([]model.Diff, 0, len(diffs)),
 		Excluded: make([]model.Diff, 0),
@@ -447,7 +453,7 @@ func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 		if isProviderDirExcluded(path) {
 			result.excludedAt = append(result.excludedAt, len(result.Included)+len(result.Excluded))
 			result.Excluded = append(result.Excluded, d)
-		} else if !honorGitignore || !p.isPathExcluded(path, patterns) {
+		} else if !patterns.Matches(path) {
 			result.Included = append(result.Included, d)
 		}
 	}

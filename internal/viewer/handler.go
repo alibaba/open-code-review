@@ -60,6 +60,7 @@ func handleSessions(w http.ResponseWriter, r *http.Request, root, repo string) {
 }
 
 type sessionPageData struct {
+	Analysis    *analysisPage
 	EncodedRepo string
 	RepoName    string
 	Session     *ViewSession
@@ -75,6 +76,10 @@ type sessionPageData struct {
 }
 
 func handleSession(w http.ResponseWriter, r *http.Request, root, repo, sessionID string) {
+	if r.URL.Query().Get("tab") == "analysis" {
+		handleAnalysis(w, r, root, repo, sessionID)
+		return
+	}
 	vs, err := LoadSession(root, repo, sessionID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusNotFound)

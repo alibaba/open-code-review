@@ -139,8 +139,9 @@ inputs:
   incremental:
     description: >-
       Incremental dimension. true = only append inline comments whose (path,
-      line range) does not overlap an existing bot review comment. History is
-      never deleted (non-destructive).
+      line range) does not overlap an existing bot review comment. Among new
+      inline candidates, more severe findings take precedence when ranges
+      overlap; ties keep report order. History is never deleted.
     required: false
     default: 'false'
   incremental_overlap_threshold:

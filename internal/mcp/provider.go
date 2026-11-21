@@ -104,7 +104,12 @@ func CollectToolDefs(clients []*Client, reg *tool.Registry) []llm.ToolDef {
 			if tool.IsReserved(t.Name) {
 				continue
 			}
-			if _, exists := reg.Get(t.Name); !exists {
+			registered, exists := reg.Get(t.Name)
+			if !exists {
+				continue
+			}
+			provider, ok := registered.(*Provider)
+			if !ok || provider.client != c {
 				continue
 			}
 			if _, dup := seen[t.Name]; dup {

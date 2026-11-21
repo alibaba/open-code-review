@@ -9,6 +9,7 @@ export type DocSlug =
   | 'configuration'
   | 'cli-reference'
   | 'review-rules'
+  | 'reviewing-requirements'
   | 'architecture'
   | 'tools'
   | 'mcp'

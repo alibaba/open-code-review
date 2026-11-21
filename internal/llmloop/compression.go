@@ -411,7 +411,7 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 			// pendingJob under the lock, so cancelled jobs fail the ownership
 			// check above and die silently). Abandon the job rather than
 			// applying a truncated/unmodified snapshot over live messages.
-			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
+			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", r.progressError(err))
 			st.pendingJob = nil
 			close(job.done)
 			return

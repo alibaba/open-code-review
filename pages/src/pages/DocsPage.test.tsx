@@ -4,11 +4,10 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { LanguageProvider, useTranslation } from '../i18n';
 import { en } from '../i18n/en';
 import { zh } from '../i18n/zh';
-import { reloadAfterChunkError } from '../components/ErrorBoundary';
 import type { Language } from '../i18n/types';
 import DocsPage from './DocsPage';
 
@@ -21,22 +20,30 @@ const h = vi.hoisted(() => ({
   pending: {} as Record<string, { resolve: (docs: Record<string, string>) => void; reject: (err: unknown) => void }[]>,
   loadCalls: [] as string[],
   cache: {} as Record<string, Record<string, string>>,
+  inFlight: {} as Record<string, Promise<Record<string, string>> | undefined>,
   available: {} as Record<string, string[]>,
 }));
 
 vi.mock('../content/docs', () => ({
   loadLanguageContent: (lang: string) => {
     if (h.cache[lang]) return Promise.resolve(h.cache[lang]);
+    if (h.inFlight[lang]) return h.inFlight[lang];
     h.loadCalls.push(lang);
-    return new Promise((resolve, reject) => {
+    const promise = new Promise<Record<string, string>>((resolve, reject) => {
       (h.pending[lang] ??= []).push({
         resolve: (docs: Record<string, string>) => {
           h.cache[lang] = docs;
+          h.inFlight[lang] = undefined;
           resolve(docs);
         },
-        reject,
+        reject: (error: unknown) => {
+          h.inFlight[lang] = undefined;
+          reject(error);
+        },
       });
     });
+    h.inFlight[lang] = promise;
+    return promise;
   },
   hasTranslation: (slug: string, lang: string) => (h.available[lang] ?? []).includes(slug),
   isPartialLocale: (lang: string) => (h.available[lang] ?? []).length < (h.available.en ?? []).length,
@@ -67,20 +74,29 @@ vi.mock('../content/docs', () => ({
 
 vi.mock('../components/Navbar', () => ({ default: () => <nav data-testid="navbar" /> }));
 vi.mock('../components/Footer', () => ({ default: () => <footer data-testid="footer" /> }));
-/* Renders headings with ids matching generateHeadingId so fragment-scroll
- * and TOC tests exercise the real lookup paths. */
+/* Renders headings and links with the IDs and hrefs used by the real renderer so
+ * fragment navigation tests exercise the delegated click path. */
 vi.mock('../components/MarkdownRenderer', () => ({
-  default: ({ content }: { content: string }) => (
-    <div data-testid="markdown" data-content={content}>
-      {content
-        .split('\n')
-        .filter(line => line.startsWith('## '))
-        .map(line => {
-          const text = line.slice(3).trim();
-          return <h2 key={text} id={text.toLowerCase().replace(/[^a-z0-9]+/g, '-')}>{text}</h2>;
-        })}
-    </div>
-  ),
+  default: ({ content }: { content: string }) => {
+    const lines = content.split('\n');
+    return (
+      <div data-testid="markdown" data-content={content}>
+        {lines
+          .filter(line => line.startsWith('## '))
+          .map(line => {
+            const text = line.slice(3).trim();
+            return <h2 key={text} id={text.toLowerCase().replace(/[^a-z0-9]+/g, '-')}>{text}</h2>;
+          })}
+        {lines
+          .filter(line => line.startsWith('['))
+          .map(line => {
+            const match = line.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+            if (!match) return null;
+            return <a key={line} href={match[2]}>{match[1]}</a>;
+          })}
+      </div>
+    );
+  },
 }));
 vi.mock('../hooks/useResponsive', () => ({ useResponsive: () => ({ isMobile: false }) }));
 
@@ -94,6 +110,7 @@ const ALL_TEST_SLUGS = ['quickstart', 'installation'];
 function resetFixtures() {
   h.loadCalls.length = 0;
   h.cache = {};
+  h.inFlight = {};
   h.available = { en: [...ALL_TEST_SLUGS], zh: [...ALL_TEST_SLUGS], ja: [...ALL_TEST_SLUGS] };
   for (const key of Object.keys(h.pending)) delete h.pending[key];
 }
@@ -110,6 +127,11 @@ function NavHistoryButtons() {
   );
 }
 
+function CurrentLocation() {
+  const { pathname, hash } = useLocation();
+  return <div data-testid="location">{pathname}{hash}</div>;
+}
+
 function renderDocsPage(initialLang: Language = 'en', initialEntry = '/docs/quickstart') {
   window.localStorage.setItem('ocr-lang', initialLang);
   return render(
@@ -119,6 +141,7 @@ function renderDocsPage(initialLang: Language = 'en', initialEntry = '/docs/quic
         <SwitchLangButton to="zh" />
         <SwitchLangButton to="ja" />
         <NavHistoryButtons />
+        <CurrentLocation />
         <Routes>
           <Route path="/docs/:slug" element={<DocsPage />} />
         </Routes>
@@ -461,6 +484,294 @@ describe('DocsPage', () => {
     expect(screen.getByRole('button', { name: zh['error.reload'] })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: zh['error.reload'] }));
     expect(reloadSpy).toHaveBeenCalledTimes(1);
+  });
+  it('uses cached English content after a failed fallback and language round trip', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/installation');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+    expect(h.loadCalls).toEqual(['zh', 'en']);
+
+    await act(async () => {
+      h.pending.en[0].reject(new Error('en fallback failed'));
+    });
+    expect(screen.getByRole('alert').textContent).toContain(zh['docs.content.loadError']);
+    expect(screen.getByRole('button', { name: zh['docs.content.retry'] })).toBeTruthy();
+    expect(screen.queryByTestId('markdown')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('switch-en'));
+    expect(h.loadCalls).toEqual(['zh', 'en', 'en']);
+    await act(async () => {
+      h.pending.en[1].resolve({ installation: 'en installation body' });
+    });
+    expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('en installation body');
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('switch-zh'));
+    await waitFor(() => {
+      expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('en installation body');
+    });
+
+    expect(screen.getByTestId('location').textContent).toBe('/docs/installation');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('button', { name: zh['docs.content.retry'] })).toBeNull();
+    expect(h.loadCalls).toEqual(['zh', 'en', 'en']);
+  });
+
+  it('reattaches the shared fallback response after navigating to another missing article', async () => {
+    h.available.zh = [];
+    renderDocsPage('zh', '/docs/installation');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({});
+    });
+    expect(h.loadCalls).toEqual(['zh', 'en']);
+
+    fireEvent.click(screen.getAllByText(zh['docs.sidebar.configuration'])[0]);
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(1);
+
+    await act(async () => {
+      h.pending.en[0].resolve({ configuration: 'current configuration body' });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('current configuration body');
+    });
+  });
+  it('reattaches one delayed English bundle after rapid search changes', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/quickstart');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+
+    openSearch();
+    typeQuery('installation');
+    typeQuery('configuration');
+    expect(h.loadCalls).toEqual(['zh', 'en']);
+
+    await act(async () => {
+      h.pending.en[0].resolve({
+        installation: 'installation result',
+        configuration: 'configuration result',
+      });
+    });
+
+    expect(screen.getByRole('button', { name: /configuration/ })).toBeTruthy();
+    expect(screen.queryByText(zh['docs.search.loading'])).toBeNull();
+  });
+
+  it('completes the search after a trailing-space edit while the fallback is in flight', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/quickstart');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+
+    openSearch();
+    typeQuery('english-only');
+    typeQuery('english-only ');
+    expect(screen.getByText(zh['docs.search.loading'])).toBeTruthy();
+
+    await act(async () => {
+      h.pending.en[0].resolve({ installation: 'english-only body' });
+    });
+
+    expect(screen.getByRole('button', { name: /installation/ })).toBeTruthy();
+    expect(screen.queryByText(zh['docs.search.loading'])).toBeNull();
+    expect(h.loadCalls).toEqual(['zh', 'en']);
+  });
+
+  it('keeps the retry attempt through query edits and still offers reload after a second failure', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/quickstart');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+
+    openSearch();
+    typeQuery('english-only');
+    await act(async () => {
+      h.pending.en[0].reject(new Error('Failed to fetch dynamically imported module: /en.js'));
+    });
+    expect(screen.getByText(zh['docs.search.loadError'])).toBeTruthy();
+    expect(screen.queryByRole('button', { name: zh['error.reload'] })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: zh['docs.content.retry'] }));
+    typeQuery('english-only extra');
+
+    await act(async () => {
+      h.pending.en[1].reject(new Error('Failed to fetch dynamically imported module: /en.js'));
+    });
+
+    expect(screen.getByText(zh['docs.search.loadError'])).toBeTruthy();
+    expect(screen.getByRole('button', { name: zh['error.reload'] })).toBeTruthy();
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(2);
+  });
+
+  it('reattaches the in-flight fallback after the query is cleared and re-entered', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/quickstart');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+
+    openSearch();
+    typeQuery('english-only');
+    typeQuery('');
+    typeQuery('english');
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(1);
+
+    await act(async () => {
+      h.pending.en[0].resolve({ installation: 'english body' });
+    });
+
+    expect(screen.getByRole('button', { name: /installation/ })).toBeTruthy();
+    expect(screen.queryByText(zh['docs.search.loading'])).toBeNull();
+  });
+
+  it('keeps the retry attempt through article changes and still offers reload after a second failure', async () => {
+    h.available.zh = [];
+    renderDocsPage('zh', '/docs/installation');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({});
+    });
+    await act(async () => {
+      h.pending.en[0].reject(new Error('Failed to fetch dynamically imported module: /en.js'));
+    });
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: zh['error.reload'] })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: zh['docs.content.retry'] }));
+    fireEvent.click(screen.getAllByText(zh['docs.sidebar.configuration'])[0]);
+
+    await act(async () => {
+      h.pending.en[1].reject(new Error('Failed to fetch dynamically imported module: /en.js'));
+    });
+
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.getByRole('button', { name: zh['error.reload'] })).toBeTruthy();
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(2);
+  });
+
+  it('reattaches a delayed English bundle after leaving and returning to an article', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/installation');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({ quickstart: 'zh quickstart' });
+    });
+    expect(h.loadCalls).toEqual(['zh', 'en']);
+
+    fireEvent.click(screen.getAllByText(zh['docs.sidebar.quickstart'])[0]);
+    fireEvent.click(screen.getAllByText(zh['docs.sidebar.installation'])[0]);
+
+    await act(async () => {
+      h.pending.en[0].resolve({ installation: 'en installation body' });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('en installation body');
+    });
+    expect(h.loadCalls.filter(c => c === 'en').length).toBe(1);
+    expect(screen.queryByRole('button', { name: zh['docs.content.retry'] })).toBeNull();
+  });
+
+  it('shows the current fallback error and retries after changing articles', async () => {
+    h.available.zh = [];
+    renderDocsPage('zh', '/docs/installation');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({});
+    });
+    fireEvent.click(screen.getAllByText(zh['docs.sidebar.configuration'])[0]);
+
+    await act(async () => {
+      h.pending.en[0].reject(new Error('en fallback failed'));
+    });
+    expect(screen.getByRole('alert')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: zh['docs.content.retry'] }));
+    await act(async () => {
+      h.pending.en[1].resolve({ configuration: 'current configuration body' });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('current configuration body');
+    });
+  });
+
+  it('keeps the fragment and scrolls after a fallback Retry succeeds', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/quickstart');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({
+        quickstart: '[Installation](../installation/#intro)',
+      });
+    });
+
+    fireEvent.click(screen.getByRole('link', { name: 'Installation' }));
+    expect(screen.getByTestId('location').textContent).toBe('/docs/installation#intro');
+
+    await act(async () => {
+      h.pending.en[0].reject(new Error('en fallback failed'));
+    });
+    fireEvent.click(screen.getByRole('button', { name: zh['docs.content.retry'] }));
+
+    await act(async () => {
+      h.pending.en[1].resolve({ installation: '## Intro\n\ninstallation body' });
+    });
+
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByTestId('location').textContent).toBe('/docs/installation#intro');
+  });
+  it('preserves delayed internal fragments through fallback navigation and history', async () => {
+    h.available.zh = ['quickstart'];
+    renderDocsPage('zh', '/docs/quickstart');
+
+    await act(async () => {
+      h.pending.zh[0].resolve({
+        quickstart: '[Installation](../installation/#intro)',
+      });
+    });
+
+    fireEvent.click(screen.getByRole('link', { name: 'Installation' }));
+    expect(screen.getByTestId('location').textContent).toBe('/docs/installation#intro');
+    expect(h.loadCalls).toEqual(['zh', 'en']);
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    await act(async () => {
+      h.pending.en[0].resolve({ installation: '## Intro\n\ninstallation body' });
+    });
+
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByTestId('go-back'));
+    await waitFor(() => {
+      expect(screen.getByTestId('location').textContent).toBe('/docs/quickstart');
+    });
+
+    fireEvent.click(screen.getByTestId('go-forward'));
+    await waitFor(() => {
+      expect(screen.getByTestId('location').textContent).toBe('/docs/installation#intro');
+    });
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    });
   });
   it('search in a partial locale loads the English fallback and covers English entries', async () => {
     h.available.zh = ['quickstart'];
