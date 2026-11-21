@@ -52,6 +52,11 @@ func TestNewOpenAIClient_URLNormalization(t *testing.T) {
 			inputURL: "https://api.example.com",
 			wantURL:  "https://api.example.com/chat/completions",
 		},
+		{
+			name:     "gateway URL with query keeps suffix before query",
+			inputURL: "https://api.example.com/gateway?tenant=acme",
+			wantURL:  "https://api.example.com/gateway/chat/completions?tenant=acme",
+		},
 	}
 
 	for _, tt := range tests {
@@ -94,6 +99,11 @@ func TestNewAnthropicClient_URLNormalization(t *testing.T) {
 			name:     "custom proxy base URL",
 			inputURL: "https://proxy.example.com/anthropic",
 			wantURL:  "https://proxy.example.com/anthropic/v1/messages",
+		},
+		{
+			name:     "gateway URL with query keeps suffix before query",
+			inputURL: "https://proxy.example.com/gateway?tenant=acme",
+			wantURL:  "https://proxy.example.com/gateway/v1/messages?tenant=acme",
 		},
 	}
 
@@ -2456,4 +2466,96 @@ func TestMessage_EstimatedTokens(t *testing.T) {
 			t.Errorf("EstimatedTokens() = %d, want %d (should not double-count)", got, expected)
 		}
 	})
+}
+
+// TestOpenAIClient_PreservesURLQuery verifies that query parameters on a
+// configured chat-completions URL reach the final request, mirroring the
+// Responses-client coverage. It pins the wire behavior (path + query), not just
+// the cfg.URL normalization, so this path cannot regress silently.
+func TestOpenAIClient_PreservesURLQuery(t *testing.T) {
+	var gotPath, gotQuery string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-test",
+			"object":"chat.completion",
+			"model":"gpt-test",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/gateway?tenant=acme&x=1&x=2",
+		APIKey: "test-key",
+		Model:  "gpt-test",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	if gotPath != "/gateway/chat/completions" {
+		t.Errorf("request path = %q, want /gateway/chat/completions", gotPath)
+	}
+	if gotQuery != "tenant=acme&x=1&x=2" {
+		t.Errorf("request query = %q, want tenant=acme&x=1&x=2", gotQuery)
+	}
+}
+
+// TestAnthropicClient_PreservesURLQuery verifies that query parameters on a
+// configured messages URL reach the final request. Anthropic messages go through
+// the same normalizeEndpointURL bookkeeping as the other clients, so it needs
+// the same wire-level pinning to avoid silent regressions.
+func TestAnthropicClient_PreservesURLQuery(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	var gotPath, gotQuery string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"msg_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/gateway?tenant=acme",
+		APIKey: "sk-ant-api03-test",
+		Model:  "claude-test",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	if gotPath != "/gateway/v1/messages" {
+		t.Errorf("request path = %q, want /gateway/v1/messages", gotPath)
+	}
+	if gotQuery != "tenant=acme" {
+		t.Errorf("request query = %q, want tenant=acme", gotQuery)
+	}
 }
