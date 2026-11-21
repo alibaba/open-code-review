@@ -156,13 +156,57 @@ func TestAddNextMessage_StopsOnBlockedCompression(t *testing.T) {
 		failedRetries:    maxCompressionAttempts,
 		blocked:          true,
 	}
+	before := len(msgs)
+	calls := []llm.ToolCall{{
+		ID: "call_1", Type: "function",
+		Function: llm.FunctionCall{Name: "read", Arguments: "{}"},
+	}}
+	results := []ToolCallResult{{ToolCallID: "call_1", Result: "ok"}}
 
-	stop := r.addNextMessage(context.Background(), "", nil, llm.NativeTurn{}, "", nil, &msgs, "test.go", st)
+	stop := r.addNextMessage(context.Background(), "assistant", calls, llm.NativeTurn{}, "", results, &msgs, "test.go", st)
 	if stop != StopCompression {
 		t.Fatalf("stop = %v, want StopCompression", stop)
 	}
 	if got := len(client.requests()); got != 0 {
 		t.Fatalf("requests = %d, want 0", got)
+	}
+	if len(msgs) != before+2 {
+		t.Fatalf("appended %d messages, want 2", len(msgs)-before)
+	}
+	if got := msgs[before].ToolCalls[0].ID; got != "call_1" {
+		t.Fatalf("assistant tool call = %q, want call_1", got)
+	}
+	if got := msgs[before+1].ToolCallID; got != "call_1" {
+		t.Fatalf("tool result call = %q, want call_1", got)
+	}
+}
+
+func TestSyncCompressionFailureBlocksSnapshot(t *testing.T) {
+	client := &metaCaptureClient{respondErr: func(int) (*llm.ChatResponse, error) {
+		return nil, statusError{http.StatusBadRequest}
+	}}
+	r, msgs := newCompressionRunner(t, client, nil)
+	st := &compressionState{}
+	snapshot := compressionSnapshotID(msgs)
+
+	if stop := r.addNextMessage(context.Background(), "", nil, llm.NativeTurn{}, "", nil, &msgs, "test.go", st); stop != StopCompression {
+		t.Fatalf("first stop = %v, want StopCompression", stop)
+	}
+	st.mu.Lock()
+	blocked, failedID := st.blocked, st.failedSnapshotID
+	st.mu.Unlock()
+	if !blocked || failedID != snapshot {
+		t.Fatalf("state blocked=%v snapshot=%q, want true and %q", blocked, failedID, snapshot)
+	}
+	if got := len(client.requests()); got != 1 {
+		t.Fatalf("first turn requests = %d, want 1", got)
+	}
+
+	if stop := r.addNextMessage(context.Background(), "", nil, llm.NativeTurn{}, "", nil, &msgs, "test.go", st); stop != StopCompression {
+		t.Fatalf("second stop = %v, want StopCompression", stop)
+	}
+	if got := len(client.requests()); got != 1 {
+		t.Fatalf("requests after blocked snapshot = %d, want 1", got)
 	}
 }
 

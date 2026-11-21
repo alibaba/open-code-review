@@ -129,10 +129,49 @@ func permanentCompressionFailure(err error) bool {
 // compressionBlocked reports whether this exact snapshot has exhausted its
 // compression attempts. Callers must stop the turn instead of resubmitting it.
 func (st *compressionState) compressionBlocked(messages []llm.Message) bool {
-	snapshotID := compressionSnapshotID(messages)
+	st.mu.Lock()
+	if !st.blocked {
+		st.mu.Unlock()
+		return false
+	}
+	failedID := st.failedSnapshotID
+	st.mu.Unlock()
+	return failedID == compressionSnapshotID(messages)
+}
+
+// recordCompressionFailure records a failed attempt for snapshotID. Callers
+// must hold st.mu.
+func (st *compressionState) recordCompressionFailureLocked(snapshotID string, err error) {
+	if st.failedSnapshotID != snapshotID {
+		st.failedSnapshotID = snapshotID
+		st.failedRetries = 0
+	}
+	st.failedRetries++
+	st.blocked = permanentCompressionFailure(err) || st.failedRetries >= maxCompressionAttempts
+}
+
+// recordCompressionFailure is the locking form used by synchronous
+// compression.
+func (st *compressionState) recordCompressionFailure(snapshotID string, err error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	return st.blocked && st.failedSnapshotID == snapshotID
+	st.recordCompressionFailureLocked(snapshotID, err)
+}
+
+// recordCompressionSuccessLocked clears the failure state. Callers must hold
+// st.mu.
+func (st *compressionState) recordCompressionSuccessLocked() {
+	st.failedSnapshotID = ""
+	st.failedRetries = 0
+	st.blocked = false
+}
+
+// recordCompressionSuccess is the locking form used by synchronous
+// compression.
+func (st *compressionState) recordCompressionSuccess() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.recordCompressionSuccessLocked()
 }
 
 // messageTokens counts visible text plus the Native replay payload and
@@ -503,16 +542,12 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 			// Record the failure against this exact snapshot so the next
 			// round does not resubmit an unchanged input. Deterministic
 			// rejections block immediately; transient errors get one retry.
-			st.failedSnapshotID = snapshotID
-			st.failedRetries++
-			st.blocked = permanentCompressionFailure(err) || st.failedRetries >= maxCompressionAttempts
+			st.recordCompressionFailureLocked(snapshotID, err)
 			st.pendingJob = nil
 			close(job.done)
 			return
 		}
-		st.failedSnapshotID = ""
-		st.failedRetries = 0
-		st.blocked = false
+		st.recordCompressionSuccessLocked()
 		job.rebuilt = rebuilt
 		close(job.done)
 	}()
