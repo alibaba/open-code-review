@@ -108,8 +108,7 @@ func TestReviewFromWithoutToUsesHEADRangeE2E(t *testing.T) {
 
 func TestDelegateFromWithoutToUsesHEADRangeE2E(t *testing.T) {
 	if os.Getenv("OCR_TEST_DELEGATE_DEFAULT_HEAD") == "1" {
-		rootCmd.SetArgs(os.Args[3:])
-		os.Exit(run())
+		os.Exit(runArgs(os.Args[3:]))
 	}
 	freshOCRHome(t)
 	repo := newDivergedBranchRepo(t)

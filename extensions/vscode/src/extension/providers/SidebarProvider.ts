@@ -5,9 +5,10 @@ import { resolveLocale, toHtmlLang } from '@shared/i18n';
 import * as vscode from 'vscode';
 import { ConfigPanelFocus } from '@shared/configUtils';
 import { HostToWebview, WebviewToHost } from '@shared/messages';
-import { FileChange, ReviewMode } from '@shared/types';
+import { FileChange, OcrConfig, ReviewMode } from '@shared/types';
 import { CliService } from '../services/CliService';
 import { ConfigService } from '../services/ConfigService';
+import { configPathFailure } from '../services/configPathError';
 import { GitService } from '../services/GitService';
 import { ReviewSession } from '../services/ReviewSession';
 import { CommentProvider } from './CommentProvider';
@@ -32,7 +33,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.openConfigPanel = open;
   }
 
-  pushConfig(config: ReturnType<ConfigService['read']>): void {
+  pushConfig(config: OcrConfig | null): void {
     this.post({ type: 'config', config });
   }
 
@@ -61,10 +62,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const cwd = vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? process.cwd();
     switch (msg.type) {
       case 'ready': {
-        const config = this.config.read();
+        const result = await this.readConfig();
         const gitState = await this.git.getState(ReviewMode.Workspace);
         const locale = resolveLocale(vscode.env.language);
-        this.post({ type: 'init', config, gitState, locale });
+        this.post({ type: 'init', ...result, gitState, locale });
         break;
       }
       case 'getGitState': {
@@ -115,7 +116,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.openConfigPanel?.(msg.focus);
         break;
       case 'getConfig':
-        this.post({ type: 'config', config: this.config.read() });
+        this.post({ type: 'config', ...await this.readConfig() });
         break;
       case 'jumpToComment':
         await this.comments.jumpTo(msg.index);
@@ -126,6 +127,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         else this.comments.falsePositive(msg.index);
         break;
     }
+  }
+
+  private async readConfig() {
+    try { return { config: await this.config.read() }; }
+    catch (error) { return { config: null, configPathStatus: configPathFailure(error) }; }
   }
 
   private html(webview: vscode.Webview): string {

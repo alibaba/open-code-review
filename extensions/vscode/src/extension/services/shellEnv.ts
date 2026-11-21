@@ -2,6 +2,7 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import { spawnSync } from 'child_process';
+import { captureProcess } from './captureProcess';
 
 const DELIM = '_OCR_ENV_DELIM_';
 
@@ -20,6 +21,20 @@ export function parseEnvBlock(stdout: string): Record<string, string> {
 }
 
 let cached: NodeJS.ProcessEnv | null = null;
+let pending: Promise<NodeJS.ProcessEnv> | undefined;
+
+export async function getShellEnvAsync(timeoutMs = 5000): Promise<NodeJS.ProcessEnv> {
+  if (cached) return cached;
+  if (process.platform === 'win32' || process.env.OCR_SKIP_SHELL_RESOLVE) return (cached = process.env);
+  if (!pending) {
+    pending = captureProcess(process.env.SHELL || '/bin/zsh', ['-ilc', `echo ${DELIM}; env; echo ${DELIM}`],
+      process.cwd(), process.env, timeoutMs).then((result) => {
+      const parsed = parseEnvBlock(result.stdout);
+      return (cached = Object.keys(parsed).length ? { ...process.env, ...parsed } : process.env);
+    }).finally(() => { pending = undefined; });
+  }
+  return pending;
+}
 
 /**
  * VS Code launched from the GUI inherits a minimal PATH without nvm, Homebrew, or global npm binaries.

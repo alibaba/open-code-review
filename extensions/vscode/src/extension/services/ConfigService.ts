@@ -2,7 +2,7 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs';
-import { homedir, tmpdir } from 'os';
+import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { ConfigEntry } from '@shared/configUtils';
 import { OcrConfig } from '@shared/types';
@@ -13,22 +13,22 @@ import { parseConfig, toConfigSetArgs } from './configParse';
 export class ConfigService {
   constructor(private cli: CliService) {}
 
-  private configPath(): string {
-    return join(homedir(), '.opencodereview', 'config.json');
+  private configPath(): Promise<string> {
+    return this.cli.configPath();
   }
 
-  read(): OcrConfig | null {
-    const p = this.configPath();
-    if (!existsSync(p)) return null;
+  async read(): Promise<OcrConfig | null> {
+    const p = await this.configPath();
     try {
+      if (!existsSync(p)) return null;
       return parseConfig(readFileSync(p, 'utf8'));
     } catch {
       return null;
     }
   }
 
-  private readRaw(): RawConfig {
-    const p = this.configPath();
+  private async readRaw(): Promise<RawConfig> {
+    const p = await this.configPath();
     if (!existsSync(p)) return {};
     try {
       return JSON.parse(readFileSync(p, 'utf8')) as RawConfig;
@@ -37,8 +37,8 @@ export class ConfigService {
     }
   }
 
-  private writeRaw(raw: RawConfig): OcrConfig | null {
-    const p = this.configPath();
+  private async writeRaw(raw: RawConfig): Promise<OcrConfig | null> {
+    const p = await this.configPath();
     const hasContent = Boolean(
       raw.provider
       || raw.model
@@ -56,8 +56,8 @@ export class ConfigService {
     return this.read();
   }
 
-  deleteCustomProvider(name: string): OcrConfig | null {
-    const raw = this.readRaw();
+  async deleteCustomProvider(name: string): Promise<OcrConfig | null> {
+    const raw = await this.readRaw();
     if (!raw.custom_providers?.[name]) return this.read();
     delete raw.custom_providers[name];
     if (Object.keys(raw.custom_providers).length === 0) {
@@ -72,7 +72,7 @@ export class ConfigService {
 
   /** Run ocr llm test with an isolated temporary HOME without modifying ~/.opencodereview/config.json. */
   async testWithEntries(entries: ConfigEntry[]): Promise<{ ok: boolean; message?: string }> {
-    const draft = applyConfigEntries(this.readRaw(), entries);
+    const draft = applyConfigEntries(await this.readRaw(), entries);
     const testHome = mkdtempSync(join(tmpdir(), 'ocr-test-home-'));
     const configDir = join(testHome, '.opencodereview');
     const configPath = join(configDir, 'config.json');
@@ -86,11 +86,13 @@ export class ConfigService {
   }
 
   async set(key: string, value: string): Promise<OcrConfig | null> {
+    await this.configPath();
     await this.cli.runRaw(toConfigSetArgs(key, value), process.cwd(), () => {});
     return this.read();
   }
 
   async setMany(entries: { key: string; value: string }[]): Promise<OcrConfig | null> {
+    await this.configPath();
     for (const entry of entries) {
       await this.cli.runRaw(toConfigSetArgs(entry.key, entry.value), process.cwd(), () => {});
     }

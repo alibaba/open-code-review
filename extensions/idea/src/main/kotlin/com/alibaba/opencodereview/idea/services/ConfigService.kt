@@ -29,7 +29,7 @@ class ConfigService(
 ) {
 
     private fun configPath(): File =
-        File(File(System.getProperty("user.home"), ".opencodereview"), "config.json")
+        cli.configPath(cwd)
 
     /** Reads the file and converts it to the plugin's internal camelCase config; returns null when the file is missing or invalid. */
     fun read(): OcrConfig? {
@@ -182,6 +182,7 @@ class ConfigService(
     /** Writes a single config entry and returns the config after the write. [CliService.runRaw] throws [CliException] when the CLI exits non-zero. */
     @Synchronized
     fun set(key: String, value: String): OcrConfig? {
+        configPath()
         cli.runRaw(toConfigSetArgs(key, value), cwd, {})
         return read()
     }

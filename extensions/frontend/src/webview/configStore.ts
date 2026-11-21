@@ -46,7 +46,7 @@ export type ConfigPanelLocalAction =
   | { type: 'clearErrorHint' };
 
 function envToCliStatus(env: EnvCheckResult): CliStatus {
-  return env.node.ok && env.npm.ok && env.ocr.ok ? 'installed' : 'missing';
+  return env.node.ok && env.npm.ok && env.ocr.ok && env.configPath?.ok !== false ? 'installed' : 'missing';
 }
 
 export function configPanelReducer(

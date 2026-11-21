@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/ocrhome"
 	"github.com/google/uuid"
 )
 
@@ -83,11 +84,11 @@ func (d *Database) selected(id string) (*Auth, error) {
 type Store struct{ Dir string }
 
 func DefaultStore() (Store, error) {
-	home, err := os.UserHomeDir()
+	home, err := ocrhome.Dir()
 	if err != nil {
 		return Store{}, err
 	}
-	return Store{Dir: filepath.Join(home, ".opencodereview", "auth", "chatgpt")}, nil
+	return Store{Dir: filepath.Join(home, "auth", "chatgpt")}, nil
 }
 func (s Store) secure() error {
 	if s.Dir == "" {

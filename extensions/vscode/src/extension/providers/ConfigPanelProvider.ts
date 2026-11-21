@@ -81,14 +81,15 @@ export class ConfigPanelProvider implements vscode.Disposable {
       case 'readyConfigPanel': {
         const focus = this.pendingFocus;
         this.pendingFocus = undefined;
-        const config = this.config.read();
-        const cached = this.cli.getCachedEnvironment();
-        const skipEnvCheck = focus?.step === 2 || isConfigReady(config);
+        let failed = false;
+        const config = await this.config.read().catch(() => { failed = true; return null; });
+        const cached = failed ? null : this.cli.getCachedEnvironment();
+        const skipEnvCheck = !failed && (focus?.step === 2 || isConfigReady(config));
         const locale = resolveLocale(vscode.env.language);
         this.post({
           type: 'configPanelInit',
           config,
-          focus: focus ?? null,
+          focus: failed ? { step: 1 } : focus ?? null,
           env: cached,
           skipEnvCheck,
           locale,
@@ -100,11 +101,11 @@ export class ConfigPanelProvider implements vscode.Disposable {
         break;
       case 'setConfig':
         await this.config.set(msg.key, msg.value);
-        this.notifyConfig(this.config.read());
+        this.notifyConfig(await this.config.read());
         break;
       case 'setConfigBatch':
         await this.config.setMany(msg.entries);
-        this.notifyConfig(this.config.read());
+        this.notifyConfig(await this.config.read());
         break;
       case 'testConnection': {
         const r = await this.config.testWithEntries(msg.entries);
@@ -119,12 +120,12 @@ export class ConfigPanelProvider implements vscode.Disposable {
           t(locale, 'ext.deleteProviderConfirmBtn'),
         );
         if (confirmed !== t(locale, 'ext.deleteProviderConfirmBtn')) break;
-        this.notifyConfig(this.config.deleteCustomProvider(msg.name));
+        this.notifyConfig(await this.config.deleteCustomProvider(msg.name));
         break;
       }
       case 'activateCustomProvider':
         await this.config.set('provider', msg.name);
-        this.notifyConfig(this.config.read());
+        this.notifyConfig(await this.config.read());
         break;
       case 'checkCli':
       case 'checkEnvironment': {
@@ -141,6 +142,7 @@ export class ConfigPanelProvider implements vscode.Disposable {
         this.post({ type: 'installDone', ok });
         const env = await this.cli.checkEnvironment();
         this.post({ type: 'environmentResult', env });
+        if (ok && env.configPath?.ok) this.notifyConfig(await this.config.read());
         break;
       }
       default:

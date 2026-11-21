@@ -6,6 +6,7 @@ package com.alibaba.opencodereview.idea.services
 import com.alibaba.opencodereview.idea.model.CliResult
 import com.alibaba.opencodereview.idea.model.CliRunOptions
 import com.alibaba.opencodereview.idea.model.EnvCheckResult
+import com.alibaba.opencodereview.idea.model.ConfigPathStatus
 import com.alibaba.opencodereview.idea.model.EnvToolStatus
 import com.alibaba.opencodereview.idea.model.HostStrings
 import com.alibaba.opencodereview.idea.model.LogLevel
@@ -13,20 +14,70 @@ import com.alibaba.opencodereview.idea.model.LogLine
 import com.alibaba.opencodereview.idea.model.currentIdeLocale
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.util.concurrency.AppExecutorUtil
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicReference
 
 /** Thrown when the CLI exits non-zero. The message has already been refined by [extractCliError] and is safe to show to users. */
-class CliException(message: String, val exitCode: Int, val stdout: String) : RuntimeException(message)
+open class CliException(message: String, val exitCode: Int = -1, val stdout: String = "") : RuntimeException(message)
 
 /**
  * Every subprocess goes through [ShellEnv]: the environment comes from the login shell, and command names are
  * resolved to absolute paths by `resolveBin`. A bare command name plus the inherited environment cannot run in a
  * GUI-launched IDEA. All methods here are blocking; callers must run them on a background thread.
  */
-class CliService(private val cliPath: String = "ocr") {
+class CliService(private val cliPath: String = "ocr", private val configPathTimeoutMs: Long = 10_000) {
+
+    @Volatile
+    private var resolvedConfigPath: File? = null
+
+    private val configPathLock = Any()
+    private var configPathPending: CompletableFuture<File>? = null
+
+    fun configPathAsync(cwd: File): CompletableFuture<File> = synchronized(configPathLock) {
+        resolvedConfigPath?.let { return CompletableFuture.completedFuture(it) }
+        val pending = configPathPending?.takeUnless { it.isCompletedExceptionally } ?: CompletableFuture.supplyAsync {
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(configPathTimeoutMs)
+            val env = ShellEnv.env()
+            val invocation = configPathInvocation(cliPath, cwd, env)
+            val result = captureConfigPathQuery(invocation.command, cwd, invocation.env,
+                TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()))
+            val path = Json.parseToJsonElement(result).jsonObject["path"]?.jsonPrimitive?.content?.let(::File)
+            require(path != null && path.isAbsolute) { "The CLI returned an invalid config path" }
+            path
+        }.orTimeout(configPathTimeoutMs + 1500, TimeUnit.MILLISECONDS).thenApply { path ->
+            resolvedConfigPath = path
+            path
+        }.also { future ->
+            configPathPending = future
+            future.whenComplete { _, _ ->
+                synchronized(configPathLock) {
+                    if (configPathPending === future) configPathPending = null
+                }
+            }
+        }
+        pending.thenApply { it }
+    }
+
+    fun configPath(cwd: File): File = try {
+        configPathAsync(cwd).get()
+    } catch (e: InterruptedException) {
+        Thread.currentThread().interrupt()
+        throw e
+    } catch (e: ExecutionException) {
+        var cause: Throwable = e
+        while (cause is ExecutionException || cause is CompletionException) cause = cause.cause ?: break
+        if (cause is TimeoutException) throw CliException("OCR config path query timed out")
+        throw cause
+    }
 
     private companion object {
         const val ENV_CACHE_TTL_MS = 5 * 60 * 1000L
@@ -54,7 +105,7 @@ class CliService(private val cliPath: String = "ocr") {
         return env
     }
 
-    fun isAvailable(): Boolean = checkEnvironment().ocr.ok
+    fun isAvailable(): Boolean = checkEnvironment().let { it.ocr.ok && it.configPath?.ok == true }
 
     /** Probes node -> npm -> ocr in order with short-circuiting: once one is unavailable the rest fail immediately, avoiding pointless waits. */
     fun checkEnvironment(force: Boolean = false): EnvCheckResult {
@@ -62,7 +113,11 @@ class CliService(private val cliPath: String = "ocr") {
         val node = probeCommand("node")
         val npm = if (node.ok) probeCommand("npm") else EnvToolStatus()
         val ocr = if (node.ok && npm.ok) probeCommand(cliPath) else EnvToolStatus()
-        val env = EnvCheckResult(node, npm, ocr)
+        val pathStatus = if (ocr.ok) runCatching {
+            configPath(File(System.getProperty("user.dir")))
+            ConfigPathStatus(ok = true)
+        }.getOrElse(::configPathFailure) else null
+        val env = EnvCheckResult(node, npm, ocr, pathStatus)
         envCache = env to System.currentTimeMillis()
         return env
     }
@@ -172,9 +227,13 @@ class CliService(private val cliPath: String = "ocr") {
         cancellation: CliCancellation? = null,
     ): String {
         cancellation?.checkCancelled()
+        val env = buildMap {
+            resolvedConfigPath?.let { put("OCR_HOME", it.parent) }
+            putAll(envExtra)
+        }
         val process = ProcessBuilder(listOf(ShellEnv.resolveBin(cliPath)) + args)
             .directory(cwd)
-            .withShellEnv(*envExtra.toList().toTypedArray())
+            .withShellEnv(*env.toList().toTypedArray())
             .start()
         val stderr = StringBuilder()
         var stderrThread: Thread? = null
@@ -241,6 +300,7 @@ class CliService(private val cliPath: String = "ocr") {
             home?.let {
                 put("HOME", it.absolutePath)
                 put("USERPROFILE", it.absolutePath)
+                put("OCR_HOME", File(it, ".opencodereview").absolutePath)
             }
         }
         val cwd = File(System.getProperty("user.dir"))

@@ -104,6 +104,13 @@ export interface EnvCheckResult {
   node: EnvToolStatus;
   npm: EnvToolStatus;
   ocr: EnvToolStatus;
+  configPath?: ConfigPathStatus | null;
+}
+
+export interface ConfigPathStatus {
+  ok: boolean;
+  message?: string | null;
+  upgradeRequired?: boolean;
 }
 
 export interface CliRunOptions {

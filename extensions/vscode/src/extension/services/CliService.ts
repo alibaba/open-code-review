@@ -4,9 +4,12 @@
 import { t, resolveLocale } from '@shared/i18n';
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
+import { dirname, isAbsolute, join } from 'path';
 import { CliResult, CliRunOptions, EnvCheckResult, LogLine } from '@shared/types';
 import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from './cliParse';
-import { getShellEnv, resolveBin } from './shellEnv';
+import { getShellEnv, getShellEnvAsync, resolveBin } from './shellEnv';
+import { captureProcess } from './captureProcess';
+import { CliUpgradeRequiredError, configPathFailure } from './configPathError';
 
 class CliExitError extends Error {
   constructor(readonly code: number | null, readonly stdout: string, message: string) {
@@ -17,9 +20,39 @@ class CliExitError extends Error {
 export class CliService {
   private current: ReturnType<typeof spawn> | null = null;
   private envCache: { env: EnvCheckResult; at: number } | null = null;
+  private resolvedConfigPath: string | undefined;
+  private configPathPending: Promise<string> | undefined;
   private static readonly ENV_CACHE_TTL_MS = 5 * 60 * 1000;
 
-  constructor(private cliPath: string = 'ocr') {}
+  constructor(private cliPath: string = 'ocr', private configPathTimeoutMs = 10000) {}
+
+  configPath(): Promise<string> {
+    if (this.resolvedConfigPath) return Promise.resolve(this.resolvedConfigPath);
+    if (!this.configPathPending) {
+      this.configPathPending = this.queryConfigPath().finally(() => { this.configPathPending = undefined; });
+    }
+    return this.configPathPending;
+  }
+
+  private async queryConfigPath(): Promise<string> {
+    const deadline = Date.now() + this.configPathTimeoutMs;
+    const env = await getShellEnvAsync(Math.min(5000, this.configPathTimeoutMs));
+    const bin = this.cliPath;
+    const windows = process.platform === 'win32';
+    // npm installs a .cmd launcher on Windows; quote paths with spaces for cmd.exe.
+    const result = await captureProcess(windows ? `"${bin}"` : bin, ['config', 'path', '--json'],
+      process.cwd(), env, deadline - Date.now(), windows);
+    if (result.code !== 0) {
+      if (/unknown (command|flag)|flag provided but not defined/i.test(result.stderr)) throw new CliUpgradeRequiredError();
+      throw new Error(extractCliError(result.stderr || '') || 'Failed to resolve the OCR config path');
+    }
+    const { path } = JSON.parse(result.stdout);
+    if (typeof path !== 'string' || !isAbsolute(path)) {
+      throw new Error('The CLI returned an invalid config path');
+    }
+    this.resolvedConfigPath = path;
+    return path;
+  }
 
   invalidateEnvironmentCache(): void {
     this.envCache = null;
@@ -36,7 +69,7 @@ export class CliService {
 
   async isAvailable(): Promise<boolean> {
     const env = await this.checkEnvironment();
-    return env.ocr.ok;
+    return env.ocr.ok && env.configPath?.ok === true;
   }
 
   private probeCommand(bin: string): Promise<{ ok: boolean; version?: string }> {
@@ -69,8 +102,10 @@ export class CliService {
       ? await this.probeCommand(this.cliPath)
       : { ok: false };
     const env = { node, npm, ocr };
-    this.envCache = { env, at: Date.now() };
-    return env;
+    const configPath = ocr.ok ? await this.configPath().then(() => ({ ok: true }), configPathFailure) : undefined;
+    const checked = { ...env, configPath };
+    this.envCache = { env: checked, at: Date.now() };
+    return checked;
   }
 
   /** Install the ocr CLI globally, stream npm logs, and report success based on the exit code. */
@@ -120,7 +155,11 @@ export class CliService {
     return new Promise((resolve, reject) => {
       const proc = spawn(resolveBin(this.cliPath), args, {
         cwd,
-        env: envExtra ? { ...getShellEnv(), ...envExtra } : getShellEnv(),
+        env: {
+          ...getShellEnv(),
+          ...(this.resolvedConfigPath ? { OCR_HOME: dirname(this.resolvedConfigPath) } : {}),
+          ...envExtra,
+        },
         // A dedicated POSIX process group lets cancellation escalate without
         // leaving the native CLI or any of its subprocesses behind.
         detached: process.platform !== 'win32',
@@ -168,6 +207,7 @@ export class CliService {
     const envExtra: Record<string, string> = {};
     if (options?.home) {
       envExtra.HOME = options.home;
+      envExtra.OCR_HOME = join(options.home, '.opencodereview');
       if (process.platform === 'win32') envExtra.USERPROFILE = options.home;
     }
     const env = Object.keys(envExtra).length > 0 ? envExtra : undefined;

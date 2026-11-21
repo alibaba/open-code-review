@@ -2,7 +2,7 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import {
-  CliResult, CliRunOptions, CommentSyncState, EnvCheckResult, FileChange, GitState, LogLine,
+  CliResult, CliRunOptions, CommentSyncState, ConfigPathStatus, EnvCheckResult, FileChange, GitState, LogLine,
   OcrConfig, ReviewMode, ReviewState,
 } from './types';
 import { ConfigPanelFocus } from './configUtils';
@@ -32,13 +32,13 @@ export type WebviewToHost =
   | { type: 'commentAction'; index: number; action: 'apply' | 'discard' | 'falsePositive' };
 
 export type HostToWebview =
-  | { type: 'init'; config: OcrConfig | null; gitState: GitState; locale: SupportedLocale }
+  | { type: 'init'; config: OcrConfig | null; gitState: GitState; locale: SupportedLocale; configPathStatus?: ConfigPathStatus | null }
   | { type: 'gitState'; gitState: GitState }
   | { type: 'modeFiles'; mode: ReviewMode; files: FileChange[] }
   | { type: 'logLine'; line: LogLine }
   | { type: 'stateChange'; state: ReviewState; error?: string }
   | { type: 'reviewDone'; result: CliResult }
-  | { type: 'config'; config: OcrConfig | null }
+  | { type: 'config'; config: OcrConfig | null; configPathStatus?: ConfigPathStatus | null }
   | { type: 'commentSync'; comments: CommentSyncState[] };
 
 export type ConfigPanelHostToWebview =
