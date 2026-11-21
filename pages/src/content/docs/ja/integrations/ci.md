@@ -387,9 +387,11 @@ if any("OpenCodeReview" in n.get("body", "") for n in notes):
     print("OCR already reviewed this MR. Skipping to save tokens.")
     sys.exit(0)
 
-# ...otherwise call `ocr review ...` as usual and write the JSON to
-# the file the posting step expects.
+# ...otherwise call `ocr review ...` as usual, write the JSON, then run
+# post_review.py here and exit with its status.
 ```
+
+`post_review.py` は wrapper の中でレビューの後に実行し、テンプレートの独立した投稿ステップは削除してください。スキップした実行は結果を書き出さず、`post_review.py` は結果がないと 0 以外の終了コードで終了するため、独立した投稿ステップを残すとレビュー済みの MR へのプッシュのたびにジョブが失敗します。
 
 この後に再レビューを強制するには、MR から以前の OCR note を削除してください——次のパイプライン実行では OCR note が見当たらなくなり、処理を続行します。
 
