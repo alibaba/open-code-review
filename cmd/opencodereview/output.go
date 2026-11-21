@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -801,15 +803,15 @@ func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 
 	if p.ReviewableCount > 0 {
 		fmt.Fprintf(out, "\n%s\n", colorf("\033[1m", "Will review (%d):", p.ReviewableCount))
-		pathFmt := previewPathFmt(p.Entries, func(e agent.DiffPreviewEntry) bool { return e.WillReview })
+		pathWidth := previewPathWidth(p.Entries, func(e agent.DiffPreviewEntry) bool { return e.WillReview })
 		for _, e := range p.Entries {
 			if !e.WillReview {
 				continue
 			}
 			// The counts are padded before colorizing so the columns stay aligned
 			// whether or not the escape sequences are present.
-			fmt.Fprintf(out, "  %s  "+pathFmt+" %s %s\n",
-				statusBadge(e.Status), sanitizeTerminal(e.Path),
+			fmt.Fprintf(out, "  %s  %s %s %s\n",
+				statusBadge(e.Status), padPreviewPath(e.Path, pathWidth),
 				colorf("\033[32m", "+%-4d", e.Insertions),
 				colorf("\033[31m", "-%-4d", e.Deletions))
 		}
@@ -822,7 +824,7 @@ func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 		perRow := func(e agent.DiffPreviewEntry) bool {
 			return !e.WillReview && e.ExcludeReason != agent.ExcludeProviderDirectory
 		}
-		pathFmt := previewPathFmt(p.Entries, perRow)
+		pathWidth := previewPathWidth(p.Entries, perRow)
 		var providerDirs []string
 		providerCount := 0
 		for _, e := range p.Entries {
@@ -836,8 +838,8 @@ func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 			if e.WillReview {
 				continue
 			}
-			fmt.Fprintf(out, "  %s  "+pathFmt+" %s\n",
-				statusBadge(e.Status), sanitizeTerminal(e.Path),
+			fmt.Fprintf(out, "  %s  %s %s\n",
+				statusBadge(e.Status), padPreviewPath(e.Path, pathWidth),
 				colorf("\033[2m", "(%s)", sanitizeTerminal(string(e.ExcludeReason))))
 		}
 		if providerCount > 0 {
@@ -850,16 +852,22 @@ func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 	fmt.Fprintln(out)
 }
 
-// previewPathFmt pads paths to the widest one among the rows a section prints,
-// so a long path in one section cannot push another section's columns out.
-func previewPathFmt(entries []agent.DiffPreviewEntry, printed func(agent.DiffPreviewEntry) bool) string {
+// previewPathWidth returns the display-cell width required by the rows a
+// section prints, so paths in one section cannot shift another section's columns.
+func previewPathWidth(entries []agent.DiffPreviewEntry, printed func(agent.DiffPreviewEntry) bool) int {
 	width := 20
 	for _, e := range entries {
 		if printed(e) {
-			width = max(width, len(sanitizeTerminal(e.Path)))
+			width = max(width, ansi.StringWidth(sanitizeTerminal(e.Path)))
 		}
 	}
-	return fmt.Sprintf("%%-%ds", width)
+	return width
+}
+
+func padPreviewPath(path string, width int) string {
+	path = sanitizeTerminal(path)
+	padding := max(0, width-ansi.StringWidth(path))
+	return path + strings.Repeat(" ", padding)
 }
 
 // statusBadge renders the per-file status tag. The letter carries the meaning,
