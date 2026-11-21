@@ -33,8 +33,8 @@ func TestWorkspaceFIFORead(t *testing.T) {
 		default:
 			t.Fatalf("unknown child read kind: %s", kind)
 		}
-		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
-			t.Fatalf("expected a non-regular-file error, got %v", err)
+		if err == nil || !strings.Contains(err.Error(), "is a named pipe") {
+			t.Fatalf("expected a named-pipe error, got %v", err)
 		}
 		return
 	}
