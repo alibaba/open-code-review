@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -21,6 +22,7 @@ import (
 const (
 	SubprocessTerminateDuration = 800 * time.Millisecond
 	CloseAllTimeout             = 2800 * time.Millisecond
+	maxStructuredResultBytes    = 10 * 1024
 )
 
 // Client wraps a single MCP server connection.
@@ -198,7 +200,8 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 	}
 
 	text := contentToText(result.Content)
-	if len(result.Content) == 0 && result.StructuredContent != nil {
+	structuredOnly := len(result.Content) == 0 && result.StructuredContent != nil
+	if structuredOnly {
 		encoded, err := json.Marshal(result.StructuredContent)
 		if err != nil {
 			return "", fmt.Errorf("encode MCP tool %q structured result: %w", name, err)
@@ -206,7 +209,15 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 		text = string(encoded)
 	}
 	if result.IsError {
-		return fmt.Sprintf("MCP tool %q returned an error: %s", name, text), nil
+		text = fmt.Sprintf("MCP tool %q returned an error: %s", name, text)
+	}
+	if structuredOnly && len(text) > maxStructuredResultBytes {
+		const notice = "\n[Structured result truncated at 10 KiB]"
+		end := maxStructuredResultBytes - len(notice)
+		for end > 0 && !utf8.RuneStart(text[end]) {
+			end--
+		}
+		text = text[:end] + notice
 	}
 
 	return text, nil
