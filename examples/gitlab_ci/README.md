@@ -10,7 +10,7 @@ MR Created/Updated → GitLab Pipeline Triggered → OCR Reviews Diff → Discus
 
 1. When a Merge Request is opened or updated, the pipeline triggers
 2. It installs OCR via npm in a `node:20` Docker image
-3. Runs `ocr review --from origin/<target> --to <commit_sha> --format json --audience agent` to analyze the diff (uses commit SHA to support fork MRs)
+3. Runs `ocr review --from "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --to "$CI_COMMIT_SHA" --format json --audience agent` to analyze the diff (uses GitLab's MR diff base and commit SHA to support fork MRs)
 4. Parses the JSON output and posts inline discussions on the MR using GitLab's Discussions API
 
 ## Setup
@@ -206,7 +206,7 @@ script:
     MR_IID = os.environ["CI_MERGE_REQUEST_IID"]
     API_TOKEN = os.environ["GITLAB_API_TOKEN"]
     SOURCE_BRANCH = os.environ["CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"]
-    TARGET_BRANCH = os.environ["CI_MERGE_REQUEST_TARGET_BRANCH_NAME"]
+    DIFF_BASE_SHA = os.environ["CI_MERGE_REQUEST_DIFF_BASE_SHA"]
 
     # Check for existing OCR reviews
     url = f"{GITLAB_URL}/api/v4/projects/{PROJECT_ID}/merge_requests/{MR_IID}/notes?per_page=100"
@@ -225,7 +225,7 @@ script:
     COMMIT_SHA = os.environ["CI_COMMIT_SHA"]
     result = subprocess.run([
         "ocr", "review",
-        "--from", f"origin/{TARGET_BRANCH}",
+        "--from", DIFF_BASE_SHA,
         "--to", COMMIT_SHA,
         "--format", "json",
         "--audience", "agent"
