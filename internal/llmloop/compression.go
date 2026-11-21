@@ -6,7 +6,11 @@ package llmloop
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -57,6 +61,117 @@ type compressionJob struct {
 type compressionState struct {
 	mu         sync.Mutex
 	pendingJob *compressionJob
+
+	// failedSnapshotID fingerprints the snapshot whose last background
+	// compression failed. A retry is allowed only after the visible history
+	// changes (a new fingerprint), or once more for a transient failure.
+	failedSnapshotID string
+	failedRetries    int
+	blocked          bool
+}
+
+// maxCompressionAttempts bounds failures for one unchanged snapshot. A
+// transient failure gets one retry; a deterministic provider rejection blocks
+// immediately.
+const maxCompressionAttempts = 2
+
+// compressionSnapshotID fingerprints the content compression sends to the
+// model. Native replay state is deliberately excluded: compression builds its
+// prompt from ExtractText and tool calls, so a Native-only change cannot affect
+// the request that failed.
+func compressionSnapshotID(messages []llm.Message) string {
+	h := sha256.New()
+	write := func(s string) { _, _ = h.Write([]byte(s)) }
+	for _, m := range messages {
+		write(m.Role)
+		write("\x00")
+		write(m.ExtractText())
+		write("\x00")
+		write(m.ToolCallID)
+		write("\x00")
+		for _, tc := range m.ToolCalls {
+			write(tc.ID)
+			write("\x00")
+			write(tc.Type)
+			write("\x00")
+			write(tc.Function.Name)
+			write("\x00")
+			write(tc.Function.Arguments)
+			write("\x00")
+		}
+		write("\x01")
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16])
+}
+
+// permanentCompressionFailure reports whether resubmitting the same snapshot
+// cannot succeed. It classifies by error type and HTTP status only, matching
+// the llm package's rule that classification never reads message text.
+func permanentCompressionFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, llm.ErrTokenBudget) {
+		return true
+	}
+	switch llm.ProviderHTTPStatus(err) {
+	case http.StatusBadRequest,
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusRequestEntityTooLarge,
+		http.StatusUnprocessableEntity:
+		return true
+	}
+	return false
+}
+
+// compressionBlocked reports whether this exact snapshot has exhausted its
+// compression attempts. Callers must stop the turn instead of resubmitting it.
+func (st *compressionState) compressionBlocked(messages []llm.Message) bool {
+	st.mu.Lock()
+	if !st.blocked {
+		st.mu.Unlock()
+		return false
+	}
+	failedID := st.failedSnapshotID
+	st.mu.Unlock()
+	return failedID == compressionSnapshotID(messages)
+}
+
+// recordCompressionFailure records a failed attempt for snapshotID. Callers
+// must hold st.mu.
+func (st *compressionState) recordCompressionFailureLocked(snapshotID string, err error) {
+	if st.failedSnapshotID != snapshotID {
+		st.failedSnapshotID = snapshotID
+		st.failedRetries = 0
+	}
+	st.failedRetries++
+	st.blocked = permanentCompressionFailure(err) || st.failedRetries >= maxCompressionAttempts
+}
+
+// recordCompressionFailure is the locking form used by synchronous
+// compression.
+func (st *compressionState) recordCompressionFailure(snapshotID string, err error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.recordCompressionFailureLocked(snapshotID, err)
+}
+
+// recordCompressionSuccessLocked clears the failure state. Callers must hold
+// st.mu.
+func (st *compressionState) recordCompressionSuccessLocked() {
+	st.failedSnapshotID = ""
+	st.failedRetries = 0
+	st.blocked = false
+}
+
+// recordCompressionSuccess is the locking form used by synchronous
+// compression.
+func (st *compressionState) recordCompressionSuccess() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.recordCompressionSuccessLocked()
 }
 
 // messageTokens counts visible text plus the Native replay payload and
@@ -380,10 +495,22 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 // check-and-set happens under st.mu so concurrent callers cannot replace
 // (and thereby leak) an in-flight job.
 func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionState, messages []llm.Message, taskKey string) {
+	snapshotID := compressionSnapshotID(messages)
 	st.mu.Lock()
 	if st.pendingJob != nil {
 		st.mu.Unlock()
 		return
+	}
+	if st.failedSnapshotID == snapshotID && st.blocked {
+		st.mu.Unlock()
+		return
+	}
+	if st.failedSnapshotID != snapshotID {
+		// The history changed since the failure, so the old failure no
+		// longer describes the request we are about to send.
+		st.failedSnapshotID = ""
+		st.failedRetries = 0
+		st.blocked = false
 	}
 	msgSnapshot := copyMessages(messages)
 	asyncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
@@ -412,10 +539,15 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 			// check above and die silently). Abandon the job rather than
 			// applying a truncated/unmodified snapshot over live messages.
 			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", r.progressError(err))
+			// Record the failure against this exact snapshot so the next
+			// round does not resubmit an unchanged input. Deterministic
+			// rejections block immediately; transient errors get one retry.
+			st.recordCompressionFailureLocked(snapshotID, err)
 			st.pendingJob = nil
 			close(job.done)
 			return
 		}
+		st.recordCompressionSuccessLocked()
 		job.rebuilt = rebuilt
 		close(job.done)
 	}()
