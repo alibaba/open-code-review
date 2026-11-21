@@ -860,11 +860,11 @@ func TestDispatchSubtasks_ResumeSkipsCompletedFiles(t *testing.T) {
 		Model:      "old-model",
 		ReviewMode: session.ReviewModeFullScan,
 		Items: map[string]session.ResumeItem{
-			scanItemFingerprint(cachedItem): {
+			scanItemFingerprint(cachedItem, ""): {
 				FilePath:    cachedItem.Path,
 				OldPath:     cachedItem.Path,
 				NewPath:     cachedItem.Path,
-				Fingerprint: scanItemFingerprint(cachedItem),
+				Fingerprint: scanItemFingerprint(cachedItem, ""),
 				Comments:    []model.LlmComment{cachedComment},
 			},
 		},
@@ -1068,7 +1068,7 @@ func TestDispatchSubtasks_GraceRoundTaskDoneCheckpointed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadResumeState: %v", err)
 	}
-	if _, ok := state.Item(scanItemFingerprint(items[0])); !ok {
+	if _, ok := state.Item(scanItemFingerprint(items[0], "")); !ok {
 		t.Fatal("a grace-round completion must persist a checkpoint that resume can reuse")
 	}
 }
@@ -1190,7 +1190,7 @@ func TestDispatchSubtasks_GraceRoundLimitVisibleWithZeroFindings(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadResumeState: %v", err)
 			}
-			if _, ok := state.Item(scanItemFingerprint(items[0])); !ok {
+			if _, ok := state.Item(scanItemFingerprint(items[0], "")); !ok {
 				t.Fatal("the completed checkpoint must stay reusable for resume")
 			}
 		})
@@ -1287,7 +1287,7 @@ func TestDispatchSubtasks_GraceRoundMixedTaskDoneNotCheckpointed(t *testing.T) {
 				if err != nil {
 					t.Fatalf("LoadResumeState: %v", err)
 				}
-				if _, ok := resumeState.Item(scanItemFingerprint(item)); ok {
+				if _, ok := resumeState.Item(scanItemFingerprint(item, "")); ok {
 					t.Error("a failed grace round must not leave a reusable completion checkpoint")
 				}
 			})
@@ -1462,7 +1462,7 @@ func TestDispatchSubtasks_PersistsDedupedCommentsForResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadResumeState: %v", err)
 	}
-	firstItem, ok := state.Item(scanItemFingerprint(items[0]))
+	firstItem, ok := state.Item(scanItemFingerprint(items[0], ""))
 	if !ok || len(firstItem.Comments) != 1 || firstItem.Comments[0].Content != "combined finding" {
 		t.Fatalf("checkpoint for a.go = %+v, want deduped comment", firstItem)
 	}
@@ -1512,7 +1512,7 @@ func TestDispatchSubtasks_PersistsDedupedCommentsForResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadResumeState chained: %v", err)
 	}
-	chainedItem, ok := chainedState.Item(scanItemFingerprint(items[0]))
+	chainedItem, ok := chainedState.Item(scanItemFingerprint(items[0], ""))
 	if !ok || len(chainedItem.Comments) != 1 || chainedItem.Comments[0].Content != "combined finding" {
 		t.Fatalf("chained checkpoint for a.go = %+v, want deduped comment", chainedItem)
 	}
@@ -1533,11 +1533,11 @@ func TestDispatchSubtasks_PreservesReusedCheckpointAfterDedup(t *testing.T) {
 		Model:      "test-model",
 		ReviewMode: session.ReviewModeFullScan,
 		Items: map[string]session.ResumeItem{
-			scanItemFingerprint(item): {
+			scanItemFingerprint(item, ""): {
 				FilePath:    item.Path,
 				OldPath:     item.Path,
 				NewPath:     item.Path,
-				Fingerprint: scanItemFingerprint(item),
+				Fingerprint: scanItemFingerprint(item, ""),
 				Comments:    originalComments,
 			},
 		},
@@ -1588,7 +1588,7 @@ func TestDispatchSubtasks_PreservesReusedCheckpointAfterDedup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadResumeState: %v", err)
 	}
-	checkpoint, ok := state.Item(scanItemFingerprint(item))
+	checkpoint, ok := state.Item(scanItemFingerprint(item, ""))
 	if !ok || len(checkpoint.Comments) != 2 ||
 		checkpoint.Comments[0].Content != originalComments[0].Content ||
 		checkpoint.Comments[1].Content != originalComments[1].Content {
@@ -1664,13 +1664,13 @@ func TestDispatchSubtasks_PreservesMixedDedupCheckpointProvenance(t *testing.T) 
 	if err != nil {
 		t.Fatalf("LoadResumeState: %v", err)
 	}
-	aCheckpoint, ok := state.Item(scanItemFingerprint(items[0]))
+	aCheckpoint, ok := state.Item(scanItemFingerprint(items[0], ""))
 	if !ok || len(aCheckpoint.Comments) != 2 ||
 		aCheckpoint.Comments[0].Content != "same-file finding" ||
 		aCheckpoint.Comments[1].Content != "cross-file finding from a.go" {
 		t.Fatalf("checkpoint for a.go = %+v, want canonical same-file and raw cross-file comments", aCheckpoint)
 	}
-	bCheckpoint, ok := state.Item(scanItemFingerprint(items[1]))
+	bCheckpoint, ok := state.Item(scanItemFingerprint(items[1], ""))
 	if !ok || len(bCheckpoint.Comments) != 1 || bCheckpoint.Comments[0].Content != "cross-file finding from b.go" {
 		t.Fatalf("checkpoint for b.go = %+v, want raw cross-file comment", bCheckpoint)
 	}
@@ -1684,11 +1684,11 @@ func TestDispatchSubtasks_ResumeRerunsChangedContent(t *testing.T) {
 		Model:      "old-model",
 		ReviewMode: session.ReviewModeFullScan,
 		Items: map[string]session.ResumeItem{
-			scanItemFingerprint(oldItem): {
+			scanItemFingerprint(oldItem, ""): {
 				FilePath:    oldItem.Path,
 				OldPath:     oldItem.Path,
 				NewPath:     oldItem.Path,
-				Fingerprint: scanItemFingerprint(oldItem),
+				Fingerprint: scanItemFingerprint(oldItem, ""),
 				Comments:    []model.LlmComment{{Path: oldItem.Path, Content: "old finding"}},
 			},
 		},
@@ -1738,7 +1738,7 @@ func TestDispatchSubtasks_ResumeMultiBatchAndChained(t *testing.T) {
 	resumeItems := make(map[string]session.ResumeItem)
 	for _, idx := range []int{0, 1, 3} {
 		it := items[idx]
-		fingerprint := scanItemFingerprint(it)
+		fingerprint := scanItemFingerprint(it, "")
 		resumeItems[fingerprint] = session.ResumeItem{
 			FilePath:    it.Path,
 			OldPath:     it.Path,

@@ -44,7 +44,7 @@ func TestScanAgent_ResumeInfo(t *testing.T) {
 	}
 }
 
-// TestScanAgent_Fingerprints covers initScanFingerprints (map build) and
+// TestScanAgent_Fingerprints covers initScanInputs (map build) and
 // scanItemFingerprint's cached-hit branch versus the fallback compute.
 func TestScanAgent_Fingerprints(t *testing.T) {
 	a := &Agent{}
@@ -52,25 +52,25 @@ func TestScanAgent_Fingerprints(t *testing.T) {
 		{Path: "a.go", Content: "package a\n"},
 		{Path: "b.go", Content: "package b\n"},
 	}
-	a.initScanFingerprints(items)
-	if len(a.scanFingerprints) != 2 {
-		t.Fatalf("scanFingerprints size = %d, want 2", len(a.scanFingerprints))
+	a.initScanInputs(items)
+	if len(a.scanInputs) != 2 {
+		t.Fatalf("scanInputs size = %d, want 2", len(a.scanInputs))
 	}
 	// Cached hit: matches the map value for a known path.
-	if got, want := a.scanItemFingerprint(items[0]), a.scanFingerprints["a.go"]; got != want {
+	if got, want := a.scanItemFingerprint(items[0]), a.scanInputs["a.go"].fingerprint; got != want {
 		t.Errorf("cached fingerprint = %q, want %q", got, want)
 	}
 	// Fallback compute: an item not in the map still gets a stable fingerprint.
 	other := model.ScanItem{Path: "c.go", Content: "package c\n"}
-	if got := a.scanItemFingerprint(other); got == "" || got != scanItemFingerprint(other) {
+	if got := a.scanItemFingerprint(other); got == "" || got != scanItemFingerprint(other, "") {
 		t.Errorf("fallback fingerprint = %q, want computed value", got)
 	}
 
-	// initScanFingerprints with no items is a no-op (leaves map nil).
+	// initScanInputs with no items is a no-op (leaves map nil).
 	empty := &Agent{}
-	empty.initScanFingerprints(nil)
-	if empty.scanFingerprints != nil {
-		t.Errorf("scanFingerprints = %v, want nil for empty items", empty.scanFingerprints)
+	empty.initScanInputs(nil)
+	if empty.scanInputs != nil {
+		t.Errorf("scanInputs = %v, want nil for empty items", empty.scanInputs)
 	}
 }
 
