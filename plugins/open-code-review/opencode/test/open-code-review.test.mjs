@@ -2,8 +2,10 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import assert from "node:assert/strict"
+import childProcess from "node:child_process"
 import { access, chmod, copyFile, link, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
+import { syncBuiltinESMExports } from "node:module"
 import { delimiter, dirname, join } from "node:path"
 import test from "node:test"
 import { OpenCodeReviewPlugin } from "../dist/open-code-review.js"
@@ -19,6 +21,21 @@ async function loadPlugin(worktree) {
     worktree,
   })
   return { hooks, logs }
+}
+
+async function withSpawnSpy(onSpawn, callback) {
+  const originalSpawn = childProcess.spawn
+  childProcess.spawn = function (...args) {
+    onSpawn(...args)
+    return originalSpawn.apply(childProcess, args)
+  }
+  syncBuiltinESMExports()
+  try {
+    return await callback()
+  } finally {
+    childProcess.spawn = originalSpawn
+    syncBuiltinESMExports()
+  }
 }
 
 async function withTemporaryDirectory(callback) {
@@ -106,11 +123,11 @@ async function waitForProcessExit(pid, timeoutMs = 5_000) {
   throw new Error(`Process ${pid} did not exit within ${timeoutMs}ms`)
 }
 
-async function withShortOverallTimeout(timeoutMs, callback) {
+async function withShortOverallTimeout(timeoutMs, callback, minimumDelayMs = 60 * 1000) {
   const originalSetTimeout = globalThis.setTimeout
   const overallTimeouts = []
   globalThis.setTimeout = (handler, delay, ...args) => {
-    if (delay >= 60 * 1000) {
+    if (delay >= minimumDelayMs) {
       overallTimeouts.push(delay)
       return originalSetTimeout(handler, timeoutMs, ...args)
     }
@@ -174,6 +191,24 @@ test("fake OCR helper removes its temporary directory", async () => {
     temporaryDirectory = directory
   })
   await assert.rejects(access(temporaryDirectory), { code: "ENOENT" })
+})
+
+test("OCR subprocesses hide Windows consoles and only detach on POSIX", async () => {
+  let ocrOptions
+  await withFakeOcr(
+    "console.log('{\"status\":\"success\"}')",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      await withSpawnSpy((command, _args, options) => {
+        if (command === "ocr") ocrOptions = options
+      }, async () => {
+        await hooks.tool.ocr_review.execute({}, toolContext(worktree))
+      })
+    },
+  )
+  assert.ok(ocrOptions)
+  assert.equal(ocrOptions.detached, process.platform !== "win32")
+  assert.equal(ocrOptions.windowsHide, true)
 })
 
 test("ocr_review trims and passes multi-paragraph background through a private temporary file", async () => {
@@ -460,11 +495,19 @@ test("ocr_review terminates when OpenCode cancels the tool", async () => {
       const pidRecord = join(worktree, "ocr-child.pid")
       await waitForFile(pidRecord)
       const pid = Number(await readFile(pidRecord, "utf8"))
-      controller.abort()
-      await assert.rejects(
-        execution,
-        /cancelled by OpenCode/,
-      )
+      let taskkillOptions
+      await withSpawnSpy((command, _args, options) => {
+        if (command === "taskkill") taskkillOptions = options
+      }, async () => {
+        controller.abort()
+        await assert.rejects(
+          execution,
+          /cancelled by OpenCode/,
+        )
+      })
+      if (process.platform === "win32") {
+        assert.equal(taskkillOptions?.windowsHide, true)
+      }
       await assert.rejects(access(backgroundPath), { code: "ENOENT" })
       await assert.rejects(access(dirname(backgroundPath)), { code: "ENOENT" })
       try {
@@ -795,6 +838,82 @@ test("v2 ocr_review preview resolves cwd from the session location", async () =>
         worktree,
         "--preview",
       ])
+    },
+  )
+})
+
+test("v2 ocr_review terminates when OpenCode cancels the tool", async () => {
+  await withFakeOcr(
+    [
+      "require('node:fs').writeFileSync('ocr-child.pid', String(process.pid))",
+      "setInterval(() => {}, 1000)",
+    ].join("\n"),
+    async (worktree) => {
+      const module = await import("../dist/open-code-review.js")
+      const { ctx, tools } = stubV2Context({ directory: worktree })
+      await module.default.setup(ctx)
+      const review = tools.find((definition) => definition.name === "ocr_review")
+      const controller = new AbortController()
+      const pidPath = join(worktree, "ocr-child.pid")
+      let pid
+      try {
+        const overallTimeouts = await withShortOverallTimeout(250, async () => {
+          const execution = review.execute(
+            {},
+            { ...v2ToolContext(), signal: controller.signal },
+          )
+          await waitForFile(pidPath)
+          pid = Number(await readFile(pidPath, "utf8"))
+          controller.abort()
+          await assert.rejects(execution, /cancelled by OpenCode/)
+        })
+        assert.deepEqual(overallTimeouts, [30 * 60 * 1000])
+        await waitForProcessExit(pid)
+      } finally {
+        if (pid !== undefined && isProcessRunning(pid)) {
+          process.kill(pid, "SIGKILL")
+        }
+      }
+    },
+  )
+})
+
+test("v2 ocr_health terminates both checks when OpenCode cancels the tool", async () => {
+  await withFakeOcr(
+    [
+      "const command = process.argv[2]",
+      "require('node:fs').writeFileSync(`${command}.pid`, String(process.pid))",
+      "setInterval(() => {}, 1000)",
+    ].join("\n"),
+    async (worktree) => {
+      const module = await import("../dist/open-code-review.js")
+      const { ctx, tools } = stubV2Context({ directory: worktree })
+      await module.default.setup(ctx)
+      const health = tools.find((definition) => definition.name === "ocr_health")
+      const controller = new AbortController()
+      const pids = []
+      try {
+        const timeouts = await withShortOverallTimeout(250, async () => {
+          const execution = health.execute(
+            {},
+            { ...v2ToolContext(), signal: controller.signal },
+          )
+          await Promise.all(["version", "llm"].map((command) =>
+            waitForFile(join(worktree, `${command}.pid`)),
+          ))
+          for (const command of ["version", "llm"]) {
+            pids.push(Number(await readFile(join(worktree, `${command}.pid`), "utf8")))
+          }
+          controller.abort()
+          await assert.rejects(execution, /cancelled by OpenCode/)
+        }, 30 * 1000)
+        assert.deepEqual(timeouts, [30 * 1000, 60 * 1000])
+        await Promise.all(pids.map((pid) => waitForProcessExit(pid)))
+      } finally {
+        for (const pid of pids) {
+          if (isProcessRunning(pid)) process.kill(pid, "SIGKILL")
+        }
+      }
     },
   )
 })
