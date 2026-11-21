@@ -878,7 +878,7 @@ func TestAnalysisTextBrief(test *testing.T) {
 				Comparison: behaviortask.Comparison{Mode: "range", Old: strings.Repeat("a", 40), Head: strings.Repeat("b", 40)},
 				StopReason: "none", SubmissionStatus: "accepted", ArtifactDir: "evidence/run",
 				Markdown: markdown,
-				Usage:    behaviortask.Usage{InputTokens: 1895278, OutputTokens: 15599},
+				Usage:    behaviortask.Usage{TotalTokens: 1910877, InputTokens: 1895278, OutputTokens: 15599, CacheReadTokens: 987654},
 				RetryReport: &llm.RetryReport{TotalRequests: 27, CancelledRequests: 2, Requests: []llm.RequestReport{
 					{LogicalRequestID: "request-id", TaskType: "MEMORY_COMPRESSION_TASK", Outcome: llm.OutcomeCancelled},
 				}},
@@ -890,7 +890,7 @@ func TestAnalysisTextBrief(test *testing.T) {
 			combined := &analysisOutput{ReviewStatus: "complete", Report: report}
 			var human bytes.Buffer
 			outputAnalysisText(&human, combined)
-			want := "\n──────── Analysis Report ────────\nComparison: aaaaaaaa -> bbbbbbbb\n\n" + display + "\nAnalysis: completed\nEvidence: evidence/run\n"
+			want := "\n──────── Analysis Report ────────\nComparison: aaaaaaaa -> bbbbbbbb\n\n" + display + "\nAnalysis: completed\nAnalysis tokens: ~1910877 (input: ~1895278, output: ~15599), cache(read: ~987654, write: ~0)\n"
 			if human.String() != want {
 				test.Fatalf("unexpected brief:\ngot: %q\nwant: %q", human.String(), want)
 			}
@@ -906,8 +906,59 @@ func TestAnalysisTextBrief(test *testing.T) {
 			if payload.Analysis == nil || *payload.Analysis != display || payload.AnalysisRaw == nil || *payload.AnalysisRaw != markdown {
 				test.Fatalf("unexpected display or raw Markdown in JSON: %s", machine.String())
 			}
-			if err != nil || !bytes.Equal(before, after) || report.Markdown != markdown || payload.AnalysisMeta == nil || !reflect.DeepEqual(payload.AnalysisMeta.RetryReport, report.RetryReport) || payload.AnalysisMeta.Usage != report.Usage || payload.AnalysisMeta.Comparison != report.Comparison {
+			if payload.AnalysisMeta == nil || payload.AnalysisMeta.ArtifactDir != report.ArtifactDir {
+				test.Fatalf("missing evidence directory in JSON: %s", machine.String())
+			}
+			if err != nil || !bytes.Equal(before, after) || report.Markdown != markdown || !reflect.DeepEqual(payload.AnalysisMeta.RetryReport, report.RetryReport) || payload.AnalysisMeta.Usage != report.Usage || payload.AnalysisMeta.Comparison != report.Comparison {
 				test.Fatalf("text output changed raw report or JSON: %s, %v", machine.String(), err)
+			}
+		})
+	}
+}
+
+func TestAnalysisTextEvidence(test *testing.T) {
+	for _, fixture := range []struct {
+		status, completion string
+		wantEvidence       bool
+	}{
+		{"completed", "partial", true},
+		{"partial", "complete", true},
+		{"failed", "unknown", true},
+		{"skipped", "unknown", false},
+	} {
+		test.Run(fixture.status, func(test *testing.T) {
+			report := &workflow.Report{Status: fixture.status, DeclaredCompletion: fixture.completion, ArtifactDir: "evidence/run"}
+			var human bytes.Buffer
+			outputAnalysisText(&human, &analysisOutput{Report: report})
+			if strings.Contains(human.String(), "\nEvidence: evidence/run\n") != fixture.wantEvidence {
+				test.Fatalf("unexpected evidence path visibility: %s", human.String())
+			}
+		})
+	}
+}
+
+func TestAnalysisTextUsage(test *testing.T) {
+	for _, fixture := range []struct {
+		status string
+		usage  behaviortask.Usage
+		want   string
+	}{
+		{"partial", behaviortask.Usage{TotalTokens: 110, InputTokens: 80, OutputTokens: 25}, "Analysis tokens: ~110 (input: ~80, output: ~25)"},
+		{"failed", behaviortask.Usage{TotalTokens: 19}, "Analysis tokens: ~19"},
+		{"skipped", behaviortask.Usage{}, ""},
+	} {
+		test.Run(fixture.status, func(test *testing.T) {
+			var human bytes.Buffer
+			outputAnalysisText(&human, &analysisOutput{Report: &workflow.Report{Status: fixture.status, Usage: fixture.usage}})
+			var got string
+			for line := range strings.SplitSeq(human.String(), "\n") {
+				if strings.HasPrefix(line, "Analysis tokens:") {
+					got = line
+					break
+				}
+			}
+			if got != fixture.want {
+				test.Fatalf("got %q, want %q", got, fixture.want)
 			}
 		})
 	}
