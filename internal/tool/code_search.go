@@ -75,7 +75,11 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 		// honoring .gitignore and skipping .git (via --exclude-standard).
 		cmdArgs = append(cmdArgs, "--no-index", "--exclude-standard")
 	} else if p.FileReader.Ref == "" {
-		cmdArgs = append(cmdArgs, "--untracked")
+		// git refuses --untracked together with --recurse-submodules, and a
+		// global submodule.recurse=true adds the latter implicitly. Turn it off
+		// explicitly in workspace mode, where recursing was never possible.
+		// Ref mode keeps the setting so submodule contents stay searchable.
+		cmdArgs = append(cmdArgs, "--untracked", "--no-recurse-submodules")
 	}
 
 	if !caseSensitive {
