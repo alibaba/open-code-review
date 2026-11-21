@@ -441,6 +441,17 @@ func TestTextTokens_MeetWCAGAAOnPageBackground(t *testing.T) {
 	}
 }
 
+func TestReportTabsCSS_ForcedColorsMarksCurrentPage(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := regexp.MustCompile(`@media\s*\(forced-colors:\s*active\)\s*\{\s*\.report-tabs a\[aria-current="page"\]\s*\{[^}]*text-decoration:\s*underline;`)
+	if !current.Match(css) {
+		t.Error("the current report tab needs a visible underline in forced colors")
+	}
+}
+
 // TestFocusCSS_CoversCollapsiblesAndTableLinks holds the focus-visible rules for the
 // collapsible headers, in-table links and scrollable table regions: these
 // elements have no other visible focus indicator, so losing the rule would

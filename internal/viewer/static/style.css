@@ -844,6 +844,11 @@ h3 {
     color: var(--text-strong);
     border-color: var(--accent);
 }
+@media (forced-colors: active) {
+    .report-tabs a[aria-current="page"] {
+        text-decoration: underline;
+    }
+}
 .report-tabs a:focus-visible {
     outline: 2px solid var(--link);
     outline-offset: -2px;
