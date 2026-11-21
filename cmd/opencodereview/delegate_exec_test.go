@@ -220,6 +220,32 @@ func TestExecuteDelegateRuleJSON(t *testing.T) {
 	}
 }
 
+func TestExecuteDelegateRuleAcceptsPathSpellings(t *testing.T) {
+	dir := initTestGitRepo(t)
+	writeProjectRule(t, dir)
+	var paths []string
+	for _, p := range filePathSpellings(t, dir) {
+		paths = append(paths, p)
+	}
+	out := captureDelegateStdout(t, func() {
+		if err := executeDelegateRule(delegateOptions{repoDir: dir, format: "json"}, paths); err != nil {
+			t.Fatalf("executeDelegateRule(json) error: %v", err)
+		}
+	})
+	var got delegateRulesJSON
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("decode rules JSON: %v\n%s", err, out)
+	}
+	if len(got.Groups) != 1 || got.Groups[0].Source != "project" || got.Groups[0].Pattern != "src/app/**" {
+		t.Fatalf("every spelling of %v should share the project rule group, got %#v", paths, got.Groups)
+	}
+	for _, f := range got.Groups[0].Files {
+		if f != "src/app/main.go" {
+			t.Errorf("file listed as %q, want the repository-relative src/app/main.go", f)
+		}
+	}
+}
+
 func TestRuleGroupsJSONEmptyFiles(t *testing.T) {
 	groups := ruleGroupsJSON([]delegate.RuleGroup{{ID: 1}})
 	if len(groups) != 1 {
