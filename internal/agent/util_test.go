@@ -192,3 +192,56 @@ func TestReviewModeString(t *testing.T) {
 		}
 	}
 }
+
+func TestFlattenOneLine(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "crlf becomes one space",
+			input: "a\r\nb",
+			want:  "a b",
+		},
+		{
+			name:  "lf becomes one space",
+			input: "a\nb",
+			want:  "a b",
+		},
+		{
+			name:  "cr becomes one space",
+			input: "a\rb",
+			want:  "a b",
+		},
+		{
+			name:  "consecutive newlines become consecutive spaces",
+			input: "a\n\nb",
+			want:  "a  b",
+		},
+		{
+			name:  "leading and trailing whitespace is trimmed",
+			input: "  a  ",
+			want:  "a",
+		},
+		{
+			name:  "empty string stays empty",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "single line without newlines is unchanged",
+			input: "already one line",
+			want:  "already one line",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := flattenOneLine(tt.input)
+			if got != tt.want {
+				t.Errorf("flattenOneLine(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
