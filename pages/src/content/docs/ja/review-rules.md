@@ -258,7 +258,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.erb`                                      | `erb.md`: ERB テンプレート（SSTI / XSS / エスケープ / 空白と出力構造）。 |
 | `**/*.ets`                                      | `arkts.md`: ArkTS / HarmonyOS。                                                                 |
 | `**/*.astro`                                    | `astro.md`: Astro コンポーネントと islands。                                                    |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                              |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                                              |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                     |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md`: F# の実装、シグネチャ、スクリプトファイル。                                        |
