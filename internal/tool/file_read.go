@@ -49,6 +49,9 @@ func (p *FileReadProvider) execute(ctx context.Context, args map[string]any) (st
 	if filePath == "" {
 		return "Error: file_path is required", nil
 	}
+	if isCredentialPath(filePath) {
+		return fmt.Sprintf("Error: %s is a credential path and is excluded from review", filePath), nil
+	}
 
 	startLine, hasStart := args["start_line"].(float64)
 	endLine, hasEnd := args["end_line"].(float64)

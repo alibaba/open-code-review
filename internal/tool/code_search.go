@@ -211,6 +211,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	matchCount := 0
+	credentialMatches := 0
 	truncated := false
 	matchedFiles := make(map[string]bool)
 	for _, line := range lines {
@@ -222,6 +223,12 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			continue
 		}
 		fname := parts[offset]
+		// A credential file never enters the review scope, so its matching
+		// lines must not reach the model through search either.
+		if isCredentialPath(fname) {
+			credentialMatches++
+			continue
+		}
 		ln, parseErr := strconv.Atoi(parts[offset+1])
 		if parseErr != nil {
 			// Skip lines whose line-number field is not numeric.
@@ -256,6 +263,14 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			sb.WriteString(fmt.Sprintf("%d|%s\n", m.lineNum, m.content))
 		}
 		sb.WriteString("\n")
+	}
+
+	if credentialMatches > 0 {
+		sb.WriteString(fmt.Sprintf("Note: %d match(es) in credential paths were omitted.\n", credentialMatches))
+	}
+
+	if sb.Len() == 0 {
+		return "No matches found", nil
 	}
 
 	if err != nil && errStr != "" {

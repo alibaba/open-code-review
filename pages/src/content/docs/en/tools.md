@@ -465,6 +465,14 @@ If a tool name isn't in the registry, OCR returns the constant
 `tool.NotAvailableMsg` rather than crashing, so an unknown tool call is
 reported back to the model as an unavailable tool.
 
+Credential paths stay outside the tools as well. A path the review gate
+treats as a credential file (`.env` and its variants, `id_rsa`, `.npmrc`,
+`.netrc`, …) never enters the selected set, so the tools refuse to
+surface it by another route: `file_read` returns an error naming the
+path, `code_search` drops its matching lines and reports how many it
+omitted, and `file_find` does not list it. Template files such as
+`.env.example` are not credential paths.
+
 ## Tool customization limits and migration {#customizing-tools}
 
 OCR uses a dedicated review agent whose core workflow and built-in tools are

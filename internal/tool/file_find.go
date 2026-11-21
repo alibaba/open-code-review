@@ -155,7 +155,7 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 			s := string(line)
 			// Skip binary-like files that lack meaningful extensions patterns
 			// and filter out paths in common generated/artifact directories.
-			if shouldSkipFile(s) {
+			if shouldSkipFile(s) || isCredentialPath(s) {
 				continue
 			}
 			files = append(files, s)
@@ -201,7 +201,7 @@ func (p *FileFindProvider) listWalkFiles(ctx context.Context) ([]string, error) 
 		if diff.IsPathExcluded(root, rel, gitignorePatterns) {
 			return nil
 		}
-		if shouldSkipFile(rel) {
+		if shouldSkipFile(rel) || isCredentialPath(rel) {
 			return nil
 		}
 		files = append(files, rel)
