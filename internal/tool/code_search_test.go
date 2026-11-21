@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
@@ -820,4 +821,119 @@ func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	assertContains(t, args, "--no-index")
 	assertContains(t, args, "--exclude-standard")
 	assertNotContains(t, args, "--untracked")
+}
+
+func TestGitGrep_ResultSize(t *testing.T) {
+	long := "size_needle " + strings.Repeat("x", 450_000)
+	files := func(width int) map[string]string {
+		m := map[string]string{}
+		for i := 0; i < gitGrepMaxCount; i++ {
+			m[fmt.Sprintf("f%03d.json", i)] = "size_needle " + strings.Repeat("y", width) + "\n"
+		}
+		return m
+	}
+	// exactFit is one file whose rendered block ends exactly at the result limit.
+	exactFit := func() map[string]string {
+		const n = 40
+		line := "size_needle " + strings.Repeat("z", 1650)
+		used := len(fmt.Sprintf("File: edge.json\nMatch lines: %d\n", n))
+		var content strings.Builder
+		for i := 1; i < n; i++ {
+			content.WriteString(line + "\n")
+			used += len(fmt.Sprintf("%d|%s\n", i, line))
+		}
+		last := gitGrepMaxResultBytes - used - len(fmt.Sprintf("%d|\n", n))
+		if last < len("size_needle ") || last > gitGrepMaxLineBytes {
+			t.Fatalf("exactFit needs a last line of %d bytes, outside 12..%d", last, gitGrepMaxLineBytes)
+		}
+		content.WriteString("size_needle " + strings.Repeat("z", last-len("size_needle ")) + "\n")
+		return map[string]string{"edge.json": content.String()}
+	}
+	for _, mode := range []string{"workspace", "commit", "plain_directory"} {
+		for _, tc := range []struct {
+			name     string
+			files    map[string]string
+			wantCut  bool
+			wantFull bool
+		}{
+			{name: "short_lines", files: map[string]string{"a.go": "size_needle\n"}},
+			{name: "one_long_line", files: map[string]string{"data.json": long + "\n", "a.go": "size_needle\n"}, wantCut: true},
+			{name: "many_lines_under_line_limit", files: files(1500), wantFull: true},
+			{name: "many_lines_over_line_limit", files: files(3000), wantCut: true, wantFull: true},
+			{name: "file_block_ends_at_limit", files: exactFit(), wantFull: true},
+		} {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				dir := t.TempDir()
+				if mode != "plain_directory" {
+					dir = setupTestRepo(t)
+				}
+				for path, content := range tc.files {
+					if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+				if mode == "commit" {
+					for _, args := range [][]string{{"add", "."}, {"commit", "-m", "add search fixtures"}} {
+						cmd := exec.Command("git", args...)
+						cmd.Dir = dir
+						if out, err := cmd.CombinedOutput(); err != nil {
+							t.Fatalf("git %v: %v\n%s", args, err, out)
+						}
+					}
+					fr.Mode, fr.Ref = ModeCommit, getHeadCommit(t, dir)
+				}
+
+				got, err := NewCodeSearch(fr).Execute(context.Background(), map[string]any{"search_text": "size_needle"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if body := got[strings.Index(got, "File: "):]; len(body) > gitGrepMaxResultBytes {
+					t.Errorf("matches take %d bytes, want at most %d", len(body), gitGrepMaxResultBytes)
+				}
+				shownCuts := strings.Count(got, " [cut: line is ")
+				if cut := strings.Contains(got, fmt.Sprintf("Note: Results truncated: %d match lines are cut", shownCuts)); cut != tc.wantCut {
+					t.Errorf("cut-line note for the %d cut lines shown = %v, want %v", shownCuts, cut, tc.wantCut)
+				}
+				if full := strings.Contains(got, fmt.Sprintf("Note: Results truncated to %d bytes.", gitGrepMaxResultBytes)); full != tc.wantFull {
+					t.Errorf("result-size note = %v, want %v", full, tc.wantFull)
+				}
+				if !tc.wantCut && !tc.wantFull && strings.Contains(got, "Note:") {
+					t.Errorf("expected no note, got:\n%s", got)
+				}
+				if !strings.Contains(got, "File: a.go\nMatch lines: 1\n1|size_needle\n") && tc.files["a.go"] != "" {
+					t.Errorf("expected the short line unchanged, got:\n%.500s", got)
+				}
+				if tc.name == "one_long_line" && !strings.Contains(got, fmt.Sprintf(" [cut: line is %d bytes]\n", len(long))) {
+					t.Errorf("expected the cut marker with the full line length, got:\n%.500s", got)
+				}
+			})
+		}
+	}
+}
+
+func TestCutLine(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		line     string
+		wantKept int
+	}{
+		{name: "ascii", line: strings.Repeat("a", gitGrepMaxLineBytes+1), wantKept: gitGrepMaxLineBytes},
+		{name: "rune_across_limit", line: strings.Repeat("a", gitGrepMaxLineBytes-1) + "\xe7\x95\x8c", wantKept: gitGrepMaxLineBytes - 1},
+		{name: "invalid_utf8_backs_off_at_most_three_bytes", line: strings.Repeat("\x80", gitGrepMaxLineBytes+1), wantKept: gitGrepMaxLineBytes - 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cutLine(tc.line)
+			kept, marker, ok := strings.Cut(got, " [cut: ")
+			if !ok || marker != fmt.Sprintf("line is %d bytes]", len(tc.line)) {
+				t.Fatalf("expected the cut marker, got %q", got[len(got)-40:])
+			}
+			if len(kept) != tc.wantKept {
+				t.Errorf("kept %d bytes, want %d", len(kept), tc.wantKept)
+			}
+			if tc.name == "rune_across_limit" && !utf8.ValidString(got) {
+				t.Errorf("cut split a UTF-8 character")
+			}
+		})
+	}
 }
