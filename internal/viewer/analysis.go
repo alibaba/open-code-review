@@ -164,7 +164,7 @@ func handleAnalysis(w http.ResponseWriter, r *http.Request, root, repo, id strin
 			page.Notice = "The selected evidence is missing or unreadable."
 		}
 	}
-	renderTemplate(w, "session.html", sessionPageData{EncodedRepo: repo, RepoName: filepath.Base(summary.CWD), Session: &ViewSession{Summary: summary}, Analysis: &page})
+	renderTemplate(w, "session.html", sessionPageData{EncodedRepo: repo, RepoName: sessionRepoName(summary.CWD, repo), Session: &ViewSession{Summary: summary}, Analysis: &page})
 }
 
 func readObservation(directory *os.Root, id string) (*behaviortask.Observation, error) {
