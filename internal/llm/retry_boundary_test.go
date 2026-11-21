@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -800,6 +802,136 @@ func TestConstructorsInstallHeaderTimeoutClient(t *testing.T) {
 			tc.make()
 			if len(got) != 1 || got[0] != timeout {
 				t.Fatalf("httpClientWithHeaderTimeout calls = %v, want exactly [%v]", got, timeout)
+			}
+		})
+	}
+}
+
+// resetAfterHeaders answers with 200 headers announcing a body, then resets the
+// connection without sending one. That is the shape a provider-side reset takes
+// on a connection already in use: the status line is already on the wire, so
+// openai-go has a response and leaves its retry loop, and the failure surfaces
+// from the io.ReadAll that follows.
+//
+// SetLinger(0) is what makes Close send an RST rather than a FIN, so the client
+// observes ECONNRESET rather than the unexpected EOF that the truncated-body
+// path already covered.
+func resetAfterHeaders(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+	conn, buf, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		t.Errorf("hijack: %v", err)
+		return
+	}
+	_, _ = fmt.Fprint(buf, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4096\r\n\r\n")
+	_ = buf.Flush()
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		_ = tcp.SetLinger(0)
+	}
+	_ = conn.Close()
+}
+
+// The fifth blind spot, same shape as the four above: the observer saw HTTP 200,
+// the connection died while the body was being read, and the attempt kept its
+// 200 and its success outcome inside a request reported as failed.
+func TestBoundaryCorrectsResetDuringBodyRead(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			resetAfterHeaders(t, w)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, openAIOKBody)
+	}))
+	defer server.Close()
+
+	c := NewRetryCollector()
+	m := testMeta()
+	if _, err := ping(metaCtx(m), openAIClient(server.URL, c, nil)); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	got := attemptsFor(t, c, m)
+	if len(got) != 2 {
+		t.Fatalf("got %d attempts, want 2 (the reset 200, then the re-call)", len(got))
+	}
+	if got[0].Outcome != AttemptError || got[0].ErrorClass != ErrorClassNetwork || got[0].FailurePhase != FailurePhaseResponseDecode {
+		t.Errorf("attempt 1 = %s %s/%s, want error network/response_decode",
+			got[0].Outcome, got[0].ErrorClass, got[0].FailurePhase)
+	}
+	if got[0].StatusCode != http.StatusOK {
+		t.Errorf("attempt 1 status_code = %d, want the observed 200 kept", got[0].StatusCode)
+	}
+	if got[1].Outcome != AttemptSuccess {
+		t.Errorf("attempt 2 = %+v, want success", got[1])
+	}
+	if req := freezeOne(t, c); req.Outcome != OutcomeRecovered {
+		t.Errorf("outcome = %s, want recovered", req.Outcome)
+	}
+}
+
+// The Responses client has no re-send of its own, so classifyBoundaryError in
+// the shared boundary defer is the only thing that can correct the attempt. If
+// it does not recognize the error, the attempt keeps the 200 it was observed as
+// and the report shows a failed request whose single attempt succeeded.
+func TestBoundaryCorrectsResetDuringBodyReadOnResponses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resetAfterHeaders(t, w)
+	}))
+	defer server.Close()
+
+	c := NewRetryCollector()
+	m := testMeta()
+	if _, err := ping(metaCtx(m), responsesClient(server.URL, c)); err == nil {
+		t.Fatal("CompletionsWithCtx succeeded, want the reset to surface")
+	}
+
+	got := attemptsFor(t, c, m)
+	if len(got) != 1 {
+		t.Fatalf("got %d attempts, want 1", len(got))
+	}
+	if got[0].Outcome != AttemptError || got[0].ErrorClass != ErrorClassNetwork || got[0].FailurePhase != FailurePhaseResponseDecode {
+		t.Errorf("attempt 1 = %s %s/%s, want error network/response_decode",
+			got[0].Outcome, got[0].ErrorClass, got[0].FailurePhase)
+	}
+	if got[0].StatusCode != http.StatusOK {
+		t.Errorf("attempt 1 status_code = %d, want the observed 200 kept", got[0].StatusCode)
+	}
+
+	if req := freezeOne(t, c); req.Outcome != OutcomeFailed {
+		t.Errorf("outcome = %s, want failed", req.Outcome)
+	}
+}
+
+// The predicate decides whether a failure happened after the headers, where
+// openai-go will not re-send it, or during the round trip, where it already
+// has. Message text is deliberately not consulted, so the table is about error
+// types and wrapping, and the OpError below carries a plain inner error rather
+// than a platform errno for the same reason.
+func TestIsResponseBodyNetworkError(t *testing.T) {
+	opErr := &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset by peer")}
+
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"unrelated error", errors.New("boom"), false},
+		// What io.ReadAll returns, wrapped the way requestconfig wraps it.
+		{"reset reading the body", fmt.Errorf("error reading response body: %w", opErr), true},
+		{"bare OpError", opErr, true},
+		// net/http wraps every round-trip failure in *url.Error. openai-go
+		// retries those itself, so re-sending here would stack another attempt
+		// on top of the SDK's.
+		{"reset during the round trip", &url.Error{Op: "Post", URL: "http://example.invalid", Err: opErr}, false},
+		// Unchanged from the truncated-body recovery.
+		{"truncated body", fmt.Errorf("error reading response body: %w", io.ErrUnexpectedEOF), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isResponseBodyNetworkError(tc.err); got != tc.want {
+				t.Errorf("isResponseBodyNetworkError(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}
