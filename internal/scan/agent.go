@@ -859,14 +859,15 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 	pt := a.args.Template.PlanTask
 
 	// Render plan messages.
+	replacer := strings.NewReplacer(
+		"{{current_system_date_time}}", a.currentDate,
+		"{{current_file_path}}", it.Path,
+		"{{system_rule}}", rule,
+		"{{file_content}}", it.Content,
+	)
 	messages := make([]llm.Message, 0, len(pt.Messages))
 	for _, m := range pt.Messages {
-		content := m.Content
-		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
-		content = strings.ReplaceAll(content, "{{current_file_path}}", it.Path)
-		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
-		content = strings.ReplaceAll(content, "{{file_content}}", it.Content)
-		messages = append(messages, llm.NewTextMessage(m.Role, content))
+		messages = append(messages, llm.NewTextMessage(m.Role, replacer.Replace(m.Content)))
 	}
 
 	fs := a.session.GetOrCreateFileSession(it.Path)
@@ -1202,17 +1203,18 @@ func formatPlanGuidance(raw string) string {
 // the prompt template doesn't dangle.
 func (a *Agent) renderMessages(it model.ScanItem, rule, planGuidance string) []llm.Message {
 	rawMsgs := a.args.Template.MainTask.Messages
+	replacer := strings.NewReplacer(
+		"{{plan_guidance}}", planGuidance,
+		"{{current_system_date_time}}", a.currentDate,
+		"{{current_file_path}}", it.Path,
+		"{{system_rule}}", rule,
+		"{{change_files}}", changeFilesScanLiteral,
+		"{{file_content}}", it.Content,
+		"{{requirement_background}}", a.args.Background,
+	)
 	messages := make([]llm.Message, 0, len(rawMsgs))
 	for _, m := range rawMsgs {
-		content := m.Content
-		content = strings.ReplaceAll(content, "{{plan_guidance}}", planGuidance)
-		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
-		content = strings.ReplaceAll(content, "{{current_file_path}}", it.Path)
-		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
-		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesScanLiteral)
-		content = strings.ReplaceAll(content, "{{file_content}}", it.Content)
-		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
-		messages = append(messages, llm.NewTextMessage(m.Role, content))
+		messages = append(messages, llm.NewTextMessage(m.Role, replacer.Replace(m.Content)))
 	}
 	return messages
 }
