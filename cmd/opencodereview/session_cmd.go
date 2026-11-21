@@ -445,10 +445,15 @@ func runSessionCompare(beforeID, afterID string) error {
 			Before sessionCompareSide `json:"before"`
 			After  sessionCompareSide `json:"after"`
 			session.CompareResult
+			// ResolvedRate is null when nothing was re-checked, not 0.
+			ResolvedRate *float64 `json:"resolved_rate"`
 		}{
 			Before:        describeCompareSide(beforeID, beforeSummary),
 			After:         describeCompareSide(afterID, afterSummary),
 			CompareResult: result,
+		}
+		if rate, ok := result.ResolvedRate(); ok {
+			payload.ResolvedRate = &rate
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -482,6 +487,9 @@ func printSessionCompare(beforeID, afterID string, before, after *session.Summar
 	fmt.Printf("  before: %s %s\n", displayMode(before.ReviewMode), describeRange(*before))
 	fmt.Printf("  after:  %s %s\n", displayMode(after.ReviewMode), describeRange(*after))
 	fmt.Printf("%d new, %d persisting, %d resolved\n", len(result.New), len(result.Persisting), len(result.Resolved))
+	if rate := result.ResolvedRateText(); rate != "" {
+		fmt.Printf("resolved on re-review: %s\n", rate)
+	}
 	if n := len(result.NotReviewed); n > 0 {
 		fmt.Printf("%d finding(s) in files the after session did not review (not counted as resolved)\n", n)
 	}

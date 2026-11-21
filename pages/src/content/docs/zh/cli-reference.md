@@ -475,7 +475,7 @@ ocr session compare --json <before-session-id> <after-session-id>
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `--repo <path>` | 当前目录 | 要对比会话的仓库。 |
-| `--json` | `false` | 以 JSON 输出对比结果（`new`、`persisting`、`resolved`、`not_reviewed`）。 |
+| `--json` | `false` | 以 JSON 输出对比结果（`new`、`persisting`、`resolved`、`not_reviewed`、`resolved_rate`）。 |
 
 ### `ocr session export`
 

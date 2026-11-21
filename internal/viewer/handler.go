@@ -111,6 +111,9 @@ type comparePageData struct {
 	After       SessionSummary
 	// Warning is empty unless the two runs used different review modes.
 	Warning string
+	// ResolvedRate is session.CompareResult.ResolvedRateText: empty when the
+	// after run re-checked none of the before findings.
+	ResolvedRate string
 	// Buckets holds session.Compare's four buckets in the order the CLI
 	// prints them. Unlike the CLI, an empty bucket still renders (as "none"):
 	// a section vanishing from a web page is indistinguishable from a broken
@@ -219,11 +222,12 @@ func handleCompare(w http.ResponseWriter, r *http.Request, root, repo string) {
 	}
 
 	renderTemplate(w, "compare.html", comparePageData{
-		EncodedRepo: repo,
-		RepoName:    name,
-		Before:      bv.Summary,
-		After:       av.Summary,
-		Warning:     modeWarning(bv.Summary, av.Summary),
+		EncodedRepo:  repo,
+		RepoName:     name,
+		Before:       bv.Summary,
+		After:        av.Summary,
+		Warning:      modeWarning(bv.Summary, av.Summary),
+		ResolvedRate: result.ResolvedRateText(),
 		Buckets: []compareBucket{
 			{Title: "New", Findings: result.New},
 			{Title: "Persisting", Findings: result.Persisting},

@@ -221,6 +221,7 @@ func TestHandleCompare(t *testing.T) {
 		{
 			name: "happy path", query: "before=s1&after=s2", status: http.StatusOK,
 			contains: []string{"New (1)", "Persisting (1)", "Resolved (1)", "Not reviewed (0)",
+				"Resolved on re-review", "1 of 2 (50%)",
 				"newly broken", "still broken", "was broken", "none", `data-pagination-source`,
 				`<div class="comment-card" data-pagination-item hidden>`, `id="compare-0-pagination"`},
 		},
@@ -251,6 +252,7 @@ func TestHandleCompare(t *testing.T) {
 			// the unmatched before-finding is undecided, not fixed.
 			query: "before=s1&after=s3", status: http.StatusOK,
 			contains: []string{"New (0)", "Persisting (0)", "Resolved (0)", "Not reviewed (2)"},
+			absent:   []string{"Resolved on re-review"},
 		},
 		{
 			name:  "legacy after run reports unmatched findings as resolved",

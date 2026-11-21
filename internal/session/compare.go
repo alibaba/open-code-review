@@ -4,6 +4,7 @@
 package session
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -20,6 +21,29 @@ type CompareResult struct {
 	// NotReviewed holds before-findings whose file the after run never looked
 	// at. They are not resolved: nobody re-checked them.
 	NotReviewed []model.LlmComment `json:"not_reviewed"`
+}
+
+// ResolvedRate is resolved / (resolved + persisting): the share of earlier
+// findings that the later run re-checked and no longer reports. NotReviewed is
+// left out because nobody re-checked those findings. ok is false when nothing
+// was re-checked. It approximates how many findings were fixed, but a finding
+// the model missed or reworded on the rerun also counts as resolved.
+func (r CompareResult) ResolvedRate() (rate float64, ok bool) {
+	settled := len(r.Resolved) + len(r.Persisting)
+	if settled == 0 {
+		return 0, false
+	}
+	return float64(len(r.Resolved)) / float64(settled), true
+}
+
+// ResolvedRateText renders ResolvedRate as "R of N (P%)", or "" when there is
+// no rate, so the CLI and the viewer print the same text.
+func (r CompareResult) ResolvedRateText() string {
+	rate, ok := r.ResolvedRate()
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%d of %d (%.0f%%)", len(r.Resolved), len(r.Resolved)+len(r.Persisting), rate*100)
 }
 
 // Compare buckets the findings of an earlier run (before) against a later one

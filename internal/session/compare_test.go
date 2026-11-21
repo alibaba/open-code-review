@@ -411,3 +411,30 @@ func TestReviewedPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestCompareResult_ResolvedRate(t *testing.T) {
+	n := func(k int) []model.LlmComment { return make([]model.LlmComment, k) }
+	tests := []struct {
+		name   string
+		result CompareResult
+		rate   float64
+		ok     bool
+		text   string
+	}{
+		{"half of the re-checked findings resolved", CompareResult{Resolved: n(2), Persisting: n(2), New: n(5)}, 0.5, true, "2 of 4 (50%)"},
+		{"not-reviewed findings are left out", CompareResult{Resolved: n(1), NotReviewed: n(3)}, 1, true, "1 of 1 (100%)"},
+		{"nothing re-checked has no rate", CompareResult{New: n(2), NotReviewed: n(1)}, 0, false, ""},
+		{"rounds to a whole percent", CompareResult{Resolved: n(1), Persisting: n(2)}, 1.0 / 3, true, "1 of 3 (33%)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rate, ok := tt.result.ResolvedRate()
+			if rate != tt.rate || ok != tt.ok {
+				t.Errorf("ResolvedRate() = %v, %v; want %v, %v", rate, ok, tt.rate, tt.ok)
+			}
+			if got := tt.result.ResolvedRateText(); got != tt.text {
+				t.Errorf("ResolvedRateText() = %q; want %q", got, tt.text)
+			}
+		})
+	}
+}
