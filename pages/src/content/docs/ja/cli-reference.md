@@ -89,6 +89,8 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 ## `ocr review`
 
 メインコマンドです。Git diff を解析し、意味的に関連するファイルをグループにまとめ、グループごとにサブエージェントをディスパッチし、レビューコメントを収集して出力します。
+`review` と `scan` の最終レポートでは、テキスト、JSON、SARIF のいずれの形式でも、指摘は重大度の低い順（`low`、`medium`、`high`、`critical`）に並びます。
+重大度が未指定の指摘や、重大度の値を認識できない指摘は `low` より前に表示されます。同じ重大度の指摘は収集順に並びますが、並列処理のため、この順序は実行ごとに変わることがあります。
 
 ### 概要
 
@@ -105,11 +107,11 @@ ocr r      [flags]   (alias)
 |---|---|---|---|
 | `--repo <path>` | — | カレントディレクトリ | Git リポジトリのルート。 |
 | `--from <ref>` | — | — | diff の開始 ref（例: `main`）。 |
-| `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
+| `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。`--from` のみ指定して `--to` を省略した場合は `HEAD` が既定値になります（コミット済みの変更のみをレビュー、`git diff <from>...HEAD` 相当）。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、サブタスクごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。サブタスクは単一ファイル、または関連ファイルのまとまりをレビューします。 |
-| `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
+| `--resume <session-id>` | — | — | 以前の互換性のある範囲、単一 commit、またはワークスペースレビューセッションから再開します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |
 | `--output <path>` | `-o` | 標準出力 | レビュー結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
 | `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します（`--format` が `json`/`sarif` の場合は stderr に出力し、stdout は解析可能な単一ドキュメントのままになります）。`agent` は進捗行を完全に抑制し、最終サマリー / JSON のみを出力します。 |
@@ -120,16 +122,18 @@ ocr r      [flags]   (alias)
 | `--timeout <minutes>` | — | `15` | LLM 呼び出し、ツール実行、再試行の待機を含むサブタスクごとの制限時間。`0` でタスクの期限を無効化しますが、リクエストのタイムアウトは無効化しません。リクエスト単位のタイムアウトは `OCR_LLM_TIMEOUT` または provider の `timeout_sec` で独立して設定し、秒単位です（デフォルト `300`）。effort のレビューラウンド数に応じて線形にスケールします（例: low/medium/high で 15/30/45 分）。 |
 | `--rule <path>` | — | — | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。 |
 | `--max-tools <n>` | — | テンプレートのデフォルト | サブタスクごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`100`）を使用します。1〜49 は `50` に引き上げられます。解決後の正の値が上限としてそのまま適用されます。 |
-| `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | サブタスクごとの**プロンプト**トークン上限（review のデフォルトは `200000`）。この実行で保存済みの `max_tokens` 設定を上書きします。出力の上限には影響しません。そちらは `MAX_COMPLETION_TOKENS`（`16384`）が個別に制御します。 |
-| `--max-tokens-budget <n>` | — | `0`（無制限） | レビュー全体の入力 + 出力トークン使用量を制限します。LLM の各ラウンドの前に確認されます: すでに予算を超えたサブタスクには発見を提出するための最終ラウンドが 1 回与えられ、`failed(budget)` として報告されます。以降のサブタスクは割り当てられず、部分的な結果は引き続き公開されます。 |
+| `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | Review と Analysis の両方に適用する、サブタスクごとのプロンプト（入力）のトークン数上限。テンプレートのデフォルトは `200000` です。今回の実行に限り、保存済みの `max_tokens` 設定を上書きします。出力の上限は変わりません（`MAX_COMPLETION_TOKENS` を参照）。 |
+| `--analysis` | — | オフ | 単一コミットまたはコミット範囲のレビュー（`--commit` または `--from`）と並行して、振る舞いの変化とその影響を分析します。出力形式は `text` と `json` のみです。ワークスペースの未コミットの変更には使えず、`--preview` や `--resume` とも併用できません。Analysis の調査は最大 300 ラウンドで、`--max-tools` の影響を受けません。予算を使い切った場合は、報告の提出に限り最大 1 ラウンド追加されます。Analysis が失敗またはスキップされても、Review の終了ステータスは変わりません。 |
+| `--analysis-max-tokens-budget <n>` | — | `0`（無制限） | Analysis の入出力トークン数の合計にのみソフト上限を設定します。Review と並行して、Analysis は追加のモデルリクエストを 1 件実行できます。使用量と実行状態は JSON 出力の `analysis_meta.usage` と `analysis_meta.execution_status` で確認できます。 |
+| `--max-tokens-budget <n>` | — | `0`（無制限） | レビュー全体の入力 + 出力トークン使用量を制限します。LLM の各ラウンドの前に確認されます: すでに予算を超えたサブタスクには発見を提出するための最終ラウンドが 1 回与えられ、`failed(budget)` として報告されます。以降のサブタスクは割り当てられず、CLI は得られた結果を出力します。 |
 | `--effort <level>` | — | 設定または `medium` | レビューの労力プリセット: `low` = main ループ 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド。ラウンドが多いほど recall は上がりますが、時間とトークンも増えます。`ocr config set effort <level>` で永続化できます。 |
 | `--provider <name>` | — | — | 今回の実行で設定済み provider を選択します。`providers` と `custom_providers` の両方の名前を使用できます。 |
 | `--model <name>` | — | — | 今回の実行で解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
-| `--max-git-procs <n>` | — | `16` | 並行 git サブプロセスの最大数。 |
+| `--max-git-procs <n>` | — | `16` | Review と Analysis を合わせて同時に実行できる Git サブプロセス数の上限。 |
 
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
-> `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
+> `--resume` は範囲、単一 commit、ワークスペースレビューに対応し、`--preview` とは併用できません。
 
 ### 実行単位の LLM 選択
 
@@ -185,6 +189,12 @@ ocr review -c abc123
 
 `git show abc123` が生成する diff（すなわちその commit が導入した変更）をレビューします。
 
+単一コミットまたはコミット範囲のレビューでは、Review と Analysis のどちらも、対象コミット（`--commit` で指定したコミット、または `--to` の解決先）のルートにある `.gitignore` に従って変更一覧を絞り込みます。現在の作業ツリーのルールは使いません。Analysis は一覧から除外したファイルでも調査の参考に読み取ることがあります。読み取りも禁止するには `--exclude` を使ってください。
+
+`--analysis` を指定すると、`ocr viewer` では 1 つのセッション ID で 1 つのレポートが開き、**Review** と **Analysis** のタブを切り替えられます。**Analysis** タブには、実行状態、対象となった変更ファイルの数（読み取ったファイル数ではありません）、モデルの自己評価、引用した根拠が表示されます。本文の引用番号を選ぶとその根拠を確認できます。**Evidence** を開くと、引用の有無にかかわらずすべての調査記録を参照できます。
+
+**Conversations** を開くと、記録された Analysis の各リクエストについて、モデルの応答、ツール呼び出しとその結果を確認できます。この対話記録は HTML エクスポートには含まれません。レポートの Markdown、結果のメタデータ、根拠、実行ログは `~/.opencodereview/sessions/<encoded-repo>/<session-id>/analysis/` に保存されます。根拠やログにはソースコードが含まれることがあります。分析が完了していない場合、最終状態が記録されていないことがあります。
+
 ### 中断したレビューの再開
 
 すべての `ocr review` 実行は、`~/.opencodereview/sessions/` 配下にローカル
@@ -199,12 +209,19 @@ ocr session show <session-id>
 ocr session comments <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
+ocr review --resume <session-id>   # ワークスペース（モード引数なし）
 ```
 
 再開は意図的に厳密です。今回の実行が親と同じ対象をレビューする場合にのみ、
 チェックポイントが再利用されます:
 
-- ワークスペースレビューは再開できません
+- ワークスペースレビューは、レビュー対象のワークツリーが変わっていない場合にのみ
+  再開できます。ベース commit と未コミットの変更の両方が一致する必要があります。
+  範囲や単一 commit レビューと違い固定できる commit がないため、再開実行中の
+  編集は保護されません。同一性は選択・解析後の diff で判定され、作業ツリーの
+  バイト単位のスナップショットではありません。未追跡ファイルの末尾改行の追加・
+  削除や LF/CRLF の行末変更だけなら同じ diff に正規化されるため再開でき、
+  実質的な内容変更は diff が変わるため拒否されます
 - レビューモードが一致する必要があります: 範囲セッションを単一 commit として
   再開することはできません
 - 解決後の入力が一致する必要があります。ref の*表記*は比較しません
@@ -310,7 +327,7 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
 | `summary` | 任意。実行の集計: `files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` の実行時は省略されます。 |
 | `comments` | 常に存在しますが、空の場合があります。各コメントのフィールドは上記の例のとおりです。 |
 | `warnings` | 任意。1 つ以上のサブエージェントが失敗した場合に存在します。各項目は影響を受けたファイルとエラーを記述します。 |
-| `session_id` | 任意。永続化されたレビュー実行に含まれます。互換性のある範囲または単一 commit レビューを再試行する際に `ocr review --resume <session-id>` へ渡せます。 |
+| `session_id` | 任意。永続化されたレビュー実行に含まれます。互換性のあるレビューを再試行する際に `ocr review --resume <session-id>` へ渡せます。 |
 | `resume` | 任意。再開した実行で存在し、`resumed_from`、`reused_files`、`rerun_files`、`previous_model`、`current_model` を含みます。 |
 
 レビュー対象のファイルがない場合、JSON モードは `skipped` の外殻を発行し、呼び出し側が「変更なし」と「発見なし」を区別できるようにします:
@@ -331,10 +348,10 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
 
 | コード | 意味 |
 |---|---|
-| `0` | レビューが完了しました（コメントがゼロの場合や、致命的でない警告がある場合もあります）。 |
-| `1` | 致命的エラー。引数の誤り、LLM エンドポイントを解決できない、すべてのファイルごとのサブエージェントが失敗した、などです。エラーテキストは stderr に出力されます。 |
+| `0` | レビューが完了またはスキップされました（コメントがゼロの場合や、致命的でない警告がある場合もあります）。設定済みの予算制限だけが原因の部分レビューも `0` で終了します。 |
+| `1` | 致命的エラー、または timeout、provider エラー、設定不備などのグループ単位の運用上の失敗です。CLI はエラーを返す前に得られた結果を出力します。 |
 
-致命的でない警告（個々のサブエージェントの失敗、あるファイルが token しきい値を超過、など）はインラインで出力されます。JSON モードでは `warnings` 配列に追加されます。
+警告はインラインで出力され、JSON モードでは `warnings` 配列に追加されます。影響を受けたファイルと失敗分類は `manifest.coverage.failed` で確認できます。
 
 ## `ocr scan`
 
@@ -492,7 +509,7 @@ ocr session export 20250601-100000-abc123 -o review.html
 
 ### `ocr session rm`
 
-`~/.opencodereview/sessions/` から保存済みのセッションを1つ削除します。
+`~/.opencodereview/sessions/` から保存済みのセッションを 1 つ削除します。Analysis レポートが付属している場合は、そのレポートと根拠、ログも削除されます。
 
 ```bash
 ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b

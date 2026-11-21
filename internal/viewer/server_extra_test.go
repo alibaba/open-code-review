@@ -441,6 +441,17 @@ func TestTextTokens_MeetWCAGAAOnPageBackground(t *testing.T) {
 	}
 }
 
+func TestReportTabsCSS_ForcedColorsMarksCurrentPage(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := regexp.MustCompile(`@media\s*\(forced-colors:\s*active\)\s*\{\s*\.report-tabs a\[aria-current="page"\]\s*\{[^}]*text-decoration:\s*underline;`)
+	if !current.Match(css) {
+		t.Error("the current report tab needs a visible underline in forced colors")
+	}
+}
+
 // TestFocusCSS_CoversCollapsiblesAndTableLinks holds the focus-visible rules for the
 // collapsible headers, in-table links and scrollable table regions: these
 // elements have no other visible focus indicator, so losing the rule would
@@ -464,6 +475,26 @@ func TestFocusCSS_CoversCollapsiblesAndTableLinks(t *testing.T) {
 		if !strings.Contains(string(css), selector) {
 			t.Errorf("style.css is missing the %q focus-visible rule: "+
 				"these elements have no other visible focus indicator for keyboard users", selector)
+		}
+	}
+
+	// A rule that exists but keeps a positive offset is the bug this guards:
+	// .table-scroll computes overflow-y to auto, so a ring drawn outside the
+	// element is clipped away and keyboard users see nothing. Assert the
+	// effective offset, not merely that the selector is present.
+	for _, selector := range []string{
+		".sessions-page .session-id:focus-visible",
+		".repos-page .col-repository a:focus-visible",
+		".repos-page .repo-check:focus-visible",
+	} {
+		block := regexp.MustCompile(regexp.QuoteMeta(selector) + `\s*\{([^}]*)\}`).FindStringSubmatch(string(css))
+		if block == nil {
+			t.Errorf("style.css is missing the %q rule block", selector)
+			continue
+		}
+		if !strings.Contains(block[1], "outline-offset: -2px") {
+			t.Errorf("%s does not use outline-offset: -2px: the ring is drawn "+
+				"outside the element and .table-scroll clips it", selector)
 		}
 	}
 }
@@ -1425,15 +1456,18 @@ const sandbox = {
     querySelectorAll: (sel) => (sel === ".response-text" ? elements : []),
   },
 };
-vm.runInNewContext(script, sandbox);
+vm.runInNewContext(script, sandbox, { timeout: 15_000 });
 process.stdout.write(JSON.stringify(elements.map((el) => el.innerHTML)));
 `
-		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, node, "-e", runner)
 		cmd.Stdin = bytes.NewReader(payload)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
+			if ctx.Err() != nil {
+				t.Fatalf("execute session.js in node: %v\n%s", ctx.Err(), out)
+			}
 			t.Fatalf("execute session.js in node: %v\n%s", err, out)
 		}
 
@@ -1511,6 +1545,7 @@ func TestHandleSession_ServedPageKeepsStaticRefs(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`href="/static/style.css"`,
+		`src="/static/a11y.js"`,
 		`src="/static/pager.js"`,
 		`src="/static/session.js"`,
 		`<a href="/" class="nav-brand"`,
@@ -1567,8 +1602,8 @@ func TestResponsiveCSS_MetaOverrideComesAfterBase(t *testing.T) {
 	}
 	text := string(css)
 	base := strings.Index(text, ".session-page .meta span {\n    white-space: nowrap;\n}")
-	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;")
-	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;")
+	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;\n        flex-wrap: wrap;\n        overflow-wrap: anywhere;\n    }")
+	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;\n        overflow: visible;\n        text-overflow: clip;\n    }")
 	if base == -1 || normal == -1 || truncate == -1 {
 		t.Fatal("style.css is missing the session meta rules or their 768px overrides")
 	}

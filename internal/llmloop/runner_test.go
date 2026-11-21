@@ -331,8 +331,8 @@ func TestRunCompression_EmptyTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 2 {
-		t.Errorf("expected 2 (frozen only), got %d", len(got))
+	if len(got) != len(msgs) {
+		t.Errorf("expected unchanged history, got %d messages", len(got))
 	}
 }
 
@@ -643,10 +643,10 @@ func TestAddNextMessage_NoStartThenCancelSameCall(t *testing.T) {
 	}}
 
 	st := &compressionState{}
-	ok := r.addNextMessage(context.Background(), strings.Repeat("word ", 200), calls, llm.NativeTurn{}, "", results, &msgs, "f.go", st)
+	stop := r.addNextMessage(context.Background(), strings.Repeat("word ", 200), calls, llm.NativeTurn{}, "", results, &msgs, "f.go", st)
 
-	if !ok {
-		t.Error("expected true: sync compression should bring the count under the warning threshold")
+	if stop != StopNone {
+		t.Errorf("sync compression should bring the count under the warning threshold, got %v", stop)
 	}
 	if got := gated.canceled.Load(); got != 0 {
 		t.Errorf("compression requests canceled mid-flight = %d, want 0", got)

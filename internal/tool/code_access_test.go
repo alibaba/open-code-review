@@ -219,3 +219,114 @@ func TestCodeAccessEmptyAndMissingTrees(test *testing.T) {
 		test.Fatalf("pinned read depended on worktree: %v", err)
 	}
 }
+
+func TestWorkspaceCodeAccess(test *testing.T) {
+	current, previous := comparisonReaders(test)
+	current.Mode, current.Ref = ModeWorkspace, ""
+	access, err := NewWorkspaceCodeAccess(current, previous)
+	if err != nil {
+		test.Fatal(err)
+	}
+	providers := comparisonProviders(&current, access)
+	baseline := comparisonProviders(&current, nil)
+	var workers sync.WaitGroup
+	for index, provider := range providers {
+		args := comparisonArgs(provider.Tool().Name())
+		want, err := baseline[index].Execute(context.Background(), args)
+		if err != nil {
+			test.Fatal(err)
+		}
+		for _, explicit := range []bool{false, true} {
+			if explicit {
+				args["side"] = "new"
+			}
+			got, err := provider.Execute(context.Background(), args)
+			if err != nil || got != want {
+				test.Fatalf("workspace default output changed: %q %v", got, err)
+			}
+		}
+		for _, invalid := range []any{nil, "", "staged", "HEAD", true} {
+			args["side"] = invalid
+			if _, err := provider.Execute(context.Background(), args); err == nil {
+				test.Fatalf("accepted invalid workspace side: %v", invalid)
+			}
+		}
+		for _, side := range []string{"old", "new"} {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				args := comparisonArgs(provider.Tool().Name())
+				args["side"] = side
+				got, err := provider.Execute(context.Background(), args)
+				want := "workspace-marker"
+				if side == "old" {
+					want = "old-marker"
+					if !strings.HasPrefix(got, "SIDE: old\nREVISION: "+previous.Ref+"\n") {
+						test.Errorf("old source missing: %q", got)
+					}
+				}
+				if provider.Tool() == FileFind {
+					want = "after.txt"
+					if side == "old" {
+						want = "before.txt"
+					}
+				}
+				if err != nil || !strings.Contains(got, want) {
+					test.Errorf("%s/%s: %q %v", provider.Tool().Name(), side, got, err)
+				}
+			}()
+		}
+	}
+	workers.Wait()
+	writeTestFile(test, current.RepoDir, "version.txt", "later-marker\n")
+	got, err := providers[0].Execute(context.Background(), map[string]any{"file_path": "version.txt"})
+	if err != nil || !strings.Contains(got, "later-marker") {
+		test.Fatalf("new side stopped reading live content: %q %v", got, err)
+	}
+	writeTestFile(test, current.RepoDir, "untracked.txt", "untracked-marker\n")
+	for _, provider := range providers {
+		args := map[string]any{"file_path": "untracked.txt", "search_text": "untracked-marker", "query_name": "untracked.txt"}
+		got, err := provider.Execute(context.Background(), args)
+		if err != nil || !strings.Contains(got, "untracked") {
+			test.Fatalf("new side lost untracked content: %q %v", got, err)
+		}
+		args["side"] = "old"
+		got, err = provider.Execute(context.Background(), args)
+		if provider.Tool() == FileRead {
+			if err == nil {
+				test.Fatal("old side read an untracked file")
+			}
+		} else if err != nil || strings.Contains(got, "untracked") {
+			test.Fatalf("untracked file leaked into old side: %q %v", got, err)
+		}
+	}
+	for _, name := range []string{"removed.txt", "before.txt"} {
+		if _, err := providers[0].Execute(context.Background(), map[string]any{"file_path": name, "side": "old"}); err != nil {
+			test.Fatal(err)
+		}
+		if _, err := providers[0].Execute(context.Background(), map[string]any{"file_path": name, "side": "new"}); err == nil {
+			test.Fatal("new side fell back to the old path")
+		}
+	}
+	empty, err := NewWorkspaceCodeAccess(current, FileReader{Mode: ModeEmpty})
+	if err != nil {
+		test.Fatal(err)
+	}
+	for _, provider := range comparisonProviders(&current, empty) {
+		args := comparisonArgs(provider.Tool().Name())
+		args["side"] = "old"
+		got, err := provider.Execute(context.Background(), args)
+		if provider.Tool() == FileRead {
+			if err == nil || !strings.Contains(err.Error(), "SOURCE: empty-tree") {
+				test.Fatalf("empty old tree was readable: %q %v", got, err)
+			}
+		} else if err != nil || !strings.HasPrefix(got, "SIDE: old\nSOURCE: empty-tree\n") {
+			test.Fatalf("empty old tree source lost: %q %v", got, err)
+		}
+	}
+	for _, pair := range [][2]FileReader{{{Mode: ModeCommit, Ref: "HEAD"}, previous}, {{Mode: ModeWorkspace, Ref: "HEAD"}, previous}, {current, {}}, {current, {Mode: ModeEmpty, Ref: "HEAD"}}, {current, {Mode: ModeCommit}}} {
+		if _, err := NewWorkspaceCodeAccess(pair[0], pair[1]); err == nil {
+			test.Fatalf("invalid workspace readers accepted: %+v", pair)
+		}
+	}
+}

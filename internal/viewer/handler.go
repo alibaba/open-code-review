@@ -60,6 +60,7 @@ func handleSessions(w http.ResponseWriter, r *http.Request, root, repo string) {
 }
 
 type sessionPageData struct {
+	Analysis    *analysisPage
 	EncodedRepo string
 	RepoName    string
 	Session     *ViewSession
@@ -74,22 +75,27 @@ type sessionPageData struct {
 	InlineJS  template.JS
 }
 
+func sessionRepoName(cwd, encodedRepo string) string {
+	if name := filepath.Base(cwd); name != "." && name != "" {
+		return name
+	}
+	return encodedRepo
+}
+
 func handleSession(w http.ResponseWriter, r *http.Request, root, repo, sessionID string) {
+	if r.URL.Query().Get("tab") == "analysis" {
+		handleAnalysis(w, r, root, repo, sessionID)
+		return
+	}
 	vs, err := LoadSession(root, repo, sessionID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusNotFound)
 		return
 	}
 
-	// Derive a display name
-	name := filepath.Base(vs.Summary.CWD)
-	if name == "." || name == "" {
-		name = repo
-	}
-
 	renderTemplate(w, "session.html", sessionPageData{
 		EncodedRepo: repo,
-		RepoName:    name,
+		RepoName:    sessionRepoName(vs.Summary.CWD, repo),
 		Session:     vs,
 	})
 }
@@ -192,7 +198,10 @@ func handleCompare(w http.ResponseWriter, r *http.Request, root, repo string) {
 	// repositories is meaningless, so it is an error here exactly as it is in
 	// the CLI (cmd/opencodereview/session_cmd.go, runSessionCompare) - unlike a
 	// differing review mode, which only warns.
-	if bv.Summary.CWD != av.Summary.CWD {
+	// Same helper as the CLI, for the same reason: the recorded spellings may
+	// differ (`C:\repo` and `C:/repo` are one directory) even though the pair is
+	// comparable.
+	if !session.SameRepoPath(bv.Summary.CWD, av.Summary.CWD) {
 		http.Error(w, "sessions belong to different repositories", http.StatusBadRequest)
 		return
 	}

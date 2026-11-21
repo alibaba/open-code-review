@@ -324,11 +324,22 @@ type ResponseMessage struct {
 
 // ChatResponse is the parsed result of a completion request.
 type ChatResponse struct {
-	ID       string          `json:"-"`
-	Model    string          `json:"-"`
-	Choices  []Choice        `json:"-"`
-	Usage    *UsageInfo      `json:"-"` // Token usage extracted from API response
-	RawUsage json.RawMessage `json:"-"`
+	ID            string          `json:"-"`
+	Model         string          `json:"-"`
+	Choices       []Choice        `json:"-"`
+	Usage         *UsageInfo      `json:"-"` // Token usage extracted from API response
+	RawUsage      json.RawMessage `json:"-"`
+	rawOutputText string
+}
+
+func (r *ChatResponse) RawOutputText() string {
+	if r.rawOutputText != "" {
+		return r.rawOutputText
+	}
+	if len(r.Choices) == 0 || r.Choices[0].Message.Content == nil {
+		return ""
+	}
+	return *r.Choices[0].Message.Content
 }
 
 // Content extracts the text content from the first choice, falling back to reasoning content.
@@ -962,6 +973,22 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 
 // maxErrorBodyBytes bounds the provider payload quoted in an error message.
 const maxErrorBodyBytes = 64 << 10
+
+func ProviderHTTPStatus(err error) int {
+	var openAI *openai.Error
+	if errors.As(err, &openAI) {
+		return openAI.StatusCode
+	}
+	var anthropicErr *anthropic.Error
+	if errors.As(err, &anthropicErr) {
+		return anthropicErr.StatusCode
+	}
+	var httpErr interface{ HTTPStatusCode() int }
+	if errors.As(err, &httpErr) {
+		return httpErr.HTTPStatusCode()
+	}
+	return 0
+}
 
 // withProviderErrorBody appends the provider's response body to an API error the
 // SDK left without one. It extracts the payload with the gjson path "error",

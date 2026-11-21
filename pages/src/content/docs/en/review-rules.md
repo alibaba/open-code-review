@@ -211,6 +211,10 @@ snapshots, and generated code:
 - `**/*Test.java`
 - `**/*Tests.java`
 - `**/*_test.rs`
+- `**/*_tests.rs`
+- `**/tests.rs`
+- `**/tests/**/*.rs`
+- `**/benches/**/*.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`
@@ -304,6 +308,8 @@ matching order:
 | `**/build.gradle`                               | `build_gradle.md` — Gradle dependencies.                                                              |
 | `**/package.json`                               | `package_json.md` — NPM dependencies / scripts.                                                       |
 | `**/Cargo.toml`                                 | `cargo_toml.md` — Rust manifest.                                                                      |
+| `**/Move.toml` | `move_toml.md` — Move package manifest. |
+| `**/*.move` | `move.md` — Move source. |
 | `**/composer.json`                              | `composer_json.md` — Composer dependencies, autoloading, scripts, plugins, and package configuration. |
 | `**/*.{json,json5,jsonc}`                       | `json.md` — generic JSON (also matches `.json5` and `.jsonc`). |
 | `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md` — GitHub Actions workflow YAML.                                                 |
@@ -320,7 +326,7 @@ matching order:
 | `**/*.erb`                                      | `erb.md` — ERB templates (SSTI / XSS / escaping / whitespace and output structure). |
 | `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                                       |
 | `**/*.astro`                                    | `astro.md` — Astro components and islands.                                                            |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                                    |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                                                    |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                           |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# implementation, signature, and script files.                                         |
@@ -328,7 +334,10 @@ matching order:
 | `**/*.rs`                                       | `rust.md`                                                                                             |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                              |
 | `**/*.c`                                        | `c.md`                                                                                                |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md` — CUDA kernels and headers.                                                             |
+| `**/*.hip`                                      | `cuda_hip.md` — HIP (AMD ROCm) kernels.                                                               |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — Python source.                                                                          |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md` — Ruby source, Rake tasks, gemspecs, Gemfile, and Rakefile. |
 | `**/*.{php,phtml}`                              | `php.md` — PHP source and PHP templates.                                                              |
 | `**/*.proto`                                    | `protobuf.md` — Protocol Buffers wire compatibility.                                                  |
 | `**/*.po`                                       | `po.md` — gettext translation source catalogs.                                                        |
@@ -339,6 +348,7 @@ matching order:
 | `**/*.R`                                        | `r.md`                                                                                                |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                     |
 | `**/*.bicep`                                    | `bicep.md` — Bicep (Azure) templates.                                                                 |
+| `**/*.dhall` | `dhall.md` — Dhall configuration language. |
 | `**/*.nix`                          | `nix.md` — Nix expressions and flakes.                                                                |
 | `**/*.{hs,lhs}`                     | `haskell.md` — Haskell source.                                                                        |
 | `**/*.{nim,nims,nimble}`            | `nim.md` — Nim source and package manifests.                                                          |
@@ -362,6 +372,7 @@ matching order:
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL, and Metal shaders.                                                    |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell scripts, modules, and data/manifest files.                               |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — Clojure / ClojureScript source and EDN data. |
+| `**/*.sql`                                      | `sql.md` — SQL migrations and queries. |
 | _(fallback)_                                    | `default.md`                                                                                          |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
