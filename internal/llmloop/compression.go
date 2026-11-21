@@ -6,11 +6,13 @@ package llmloop
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -242,6 +244,106 @@ func buildMessageXML(msgs []llm.Message) string {
 	return sb.String()
 }
 
+// errCompressionInputTooLarge reports that the compression request could not
+// be brought under its input budget, so it was not sent.
+var errCompressionInputTooLarge = errors.New("compression input exceeds budget")
+
+const truncationSuffix = "... (truncated)"
+
+// truncateToByteBudget shortens text to at most maxBytes, backing off to a
+// rune boundary so the result stays valid UTF-8. The explicit suffix lets the
+// summarizer see that content was elided rather than assume it saw everything.
+func truncateToByteBudget(text string, maxBytes int) string {
+	if len(text) <= maxBytes {
+		return text
+	}
+	keep := maxBytes - len(truncationSuffix)
+	if keep <= 0 {
+		return truncationSuffix
+	}
+	for keep > 0 && !utf8.RuneStart(text[keep]) {
+		keep--
+	}
+	return text[:keep] + truncationSuffix
+}
+
+// renderedSize is the byte length of the compression request built from
+// templates once {{context}} expands to contextXML. Measuring the rendered
+// request rather than ExtractText() accounts for reasoning, XML markup and the
+// template's own text.
+func renderedSize(templates []MessageTemplate, contextXML string) int {
+	size := 0
+	for _, m := range templates {
+		size += len(strings.ReplaceAll(m.Content, "{{context}}", contextXML))
+	}
+	return size
+}
+
+// contextOccurrences counts how many times a template list expands {{context}}.
+// It is used to translate a byte reduction in a single message field into the
+// corresponding reduction of the fully rendered request without re-rendering.
+func contextOccurrences(templates []MessageTemplate) int {
+	n := 0
+	for _, m := range templates {
+		n += strings.Count(m.Content, "{{context}}")
+	}
+	return n
+}
+
+// fitCompressionInput returns a copy of msgs whose rendered compression request
+// stays within budgetBytes. It repeatedly shortens the largest content or
+// reasoning field, so small messages keep their full text, and copies each
+// message so ToolCalls, Native and the untouched field survive. Byte length is
+// used instead of a token count because tokenizing multi-hundred-KB single-line
+// tool results is slow, and the bound only needs a cheap, deterministic ceiling.
+// If markup and template text alone exceed the budget, it returns
+// errCompressionInputTooLarge so the caller can skip the request.
+//
+// The rendered size is measured once and then updated incrementally: a cut that
+// removes d bytes from a field shrinks the rendered request by d * ctxCount,
+// where ctxCount is the number of {{context}} expansions. This avoids re-rendering
+// every message and template on each pass (O(n^2 * L) worst case), so a round
+// with many oversized tool results stays linear in the total field bytes.
+func fitCompressionInput(msgs []llm.Message, templates []MessageTemplate, budgetBytes int) ([]llm.Message, error) {
+	if budgetBytes <= 0 {
+		return msgs, nil
+	}
+	ctxCount := contextOccurrences(templates)
+	excess := renderedSize(templates, buildMessageXML(msgs)) - budgetBytes
+	if excess <= 0 {
+		return msgs, nil
+	}
+
+	out := copyMessages(msgs)
+	for excess > 0 {
+		idx, reasoning, largest := -1, false, 0
+		for i := range out {
+			if n := len(out[i].ExtractText()); n > largest {
+				idx, reasoning, largest = i, false, n
+			}
+			if n := len(out[i].ReasoningContent); n > largest {
+				idx, reasoning, largest = i, true, n
+			}
+		}
+		if largest <= len(truncationSuffix) {
+			return nil, fmt.Errorf("%w: %d bytes over a %d-byte budget",
+				errCompressionInputTooLarge, excess, budgetBytes)
+		}
+
+		target := max(0, largest-excess)
+		if reasoning {
+			before := len(out[idx].ReasoningContent)
+			out[idx].ReasoningContent = truncateToByteBudget(out[idx].ReasoningContent, target)
+			excess -= (before - len(out[idx].ReasoningContent)) * ctxCount
+		} else {
+			before := len(out[idx].ExtractText())
+			out[idx].Content = truncateToByteBudget(out[idx].ExtractText(), target)
+			excess -= (before - len(out[idx].ExtractText())) * ctxCount
+		}
+	}
+	return out, nil
+}
+
 // copyMessages creates a shallow copy of a message slice.
 func copyMessages(msgs []llm.Message) []llm.Message {
 	out := make([]llm.Message, len(msgs))
@@ -281,7 +383,14 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 		return msgs, nil
 	}
 
-	contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
+	// MaxContextTokens × ~4 bytes/token: the request that summarizes the history
+	// must itself fit the context window it is meant to relieve.
+	compressZone, err := fitCompressionInput(msgs[part.frozenEnd:part.compressEnd],
+		r.task.Compression.Messages, r.task.MaxContextTokens*4)
+	if err != nil {
+		return msgs, fmt.Errorf("memory compression: %w", err)
+	}
+	contextXML := buildMessageXML(compressZone)
 
 	compressionMsgs := make([]llm.Message, 0, len(r.task.Compression.Messages))
 	for _, m := range r.task.Compression.Messages {

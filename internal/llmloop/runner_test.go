@@ -5,6 +5,7 @@ package llmloop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -371,7 +372,7 @@ func TestRunCompression_Success(t *testing.T) {
 		Compression: CompressionPolicy{
 			Messages: []MessageTemplate{{Role: "user", Content: "Summarize: {{context}}"}},
 		},
-		MaxContextTokens: 50,
+		MaxContextTokens: 1000,
 	}
 	r := newTestRunner(client, tpl)
 
@@ -408,7 +409,7 @@ func TestRunCompression_LLMError(t *testing.T) {
 		Compression: CompressionPolicy{
 			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxContextTokens: 50,
+		MaxContextTokens: 1000,
 	}
 	r := newTestRunner(client, tpl)
 
@@ -444,7 +445,7 @@ func TestRunCompression_EmptySummary(t *testing.T) {
 		Compression: CompressionPolicy{
 			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxContextTokens: 50,
+		MaxContextTokens: 1000,
 	}
 	r := newTestRunner(client, tpl)
 
@@ -481,7 +482,7 @@ func TestTriggerAsyncCompression(t *testing.T) {
 		Compression: CompressionPolicy{
 			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxContextTokens: 50,
+		MaxContextTokens: 1000,
 	}
 	r := newTestRunner(client, tpl)
 
@@ -525,7 +526,7 @@ func TestCompression_CrossFileIsolation(t *testing.T) {
 		Compression: CompressionPolicy{
 			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxContextTokens: 50,
+		MaxContextTokens: 1000,
 	}
 	r := newTestRunner(gated, tpl)
 
@@ -725,5 +726,82 @@ func TestStripMarkdownFences_AdditionalCases(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+type recordingLLMClient struct {
+	calls    int
+	requests []llm.ChatRequest
+}
+
+func (c *recordingLLMClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.calls++
+	c.requests = append(c.requests, req)
+	summary := "compressed summary"
+	return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summary}}}}, nil
+}
+
+func requestBytes(req llm.ChatRequest) int {
+	n := 0
+	for _, m := range req.Messages {
+		n += len(m.ExtractText())
+	}
+	return n
+}
+
+func TestRunCompression_RequestStaysWithinBudget(t *testing.T) {
+	t_tempDir = t.TempDir()
+	client := &recordingLLMClient{}
+	const maxContextTokens = 1000
+	r := newTestRunner(client, Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: "Summarize the history below.\n{{context}}"}},
+		},
+		MaxContextTokens: maxContextTokens,
+	})
+
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		llm.NewToolCallMessage("reading", nil, llm.NativeTurn{}, strings.Repeat("r", 40*1024)),
+		llm.NewToolResultMessage("call_1", strings.Repeat("x", 40*1024)),
+		msg("assistant", "done"),
+	}
+	if _, err := r.runCompression(context.Background(), msgs, "test.go"); err != nil {
+		t.Fatalf("runCompression: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("compression requests = %d, want 1", client.calls)
+	}
+	if got, budget := requestBytes(client.requests[0]), maxContextTokens*4; got > budget {
+		t.Errorf("compression request = %d bytes, want <= %d", got, budget)
+	}
+}
+
+func TestRunCompression_OversizedTemplateSkipsRequest(t *testing.T) {
+	t_tempDir = t.TempDir()
+	client := &recordingLLMClient{}
+	r := newTestRunner(client, Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: strings.Repeat("t", 500) + "{{context}}"}},
+		},
+		MaxContextTokens: 100,
+	})
+
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		msg("assistant", strings.Repeat("word ", 200)),
+		msg("tool", strings.Repeat("data ", 200)),
+	}
+	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	if !errors.Is(err, errCompressionInputTooLarge) {
+		t.Fatalf("err = %v, want errCompressionInputTooLarge", err)
+	}
+	if client.calls != 0 {
+		t.Errorf("compression requests = %d, want none sent", client.calls)
+	}
+	if len(got) != len(msgs) {
+		t.Errorf("messages = %d, want the original %d kept", len(got), len(msgs))
 	}
 }
